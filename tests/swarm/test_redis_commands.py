@@ -777,7 +777,7 @@ def test_a_pipeline_watch_is_published_as_watch(tmp_path):
     assert program.commands(program.reach(("scripts.guard:hold",))) == {"WATCH": {"scripts.guard:hold"}}
 
 
-@pytest.mark.parametrize("consumer", ["controller", "tick", "hub", "ledger server"])
+@pytest.mark.parametrize("consumer", ["controller", "tick", "hub"])
 def test_the_hive_credentials_store_keys_and_commands_are_published_for_each_service(
     published: dict, consumer: str
 ) -> None:
@@ -798,7 +798,7 @@ def test_the_hive_credentials_store_keys_and_commands_are_published_for_each_ser
 
 def test_the_hive_registry_store_keys_are_published_where_hive_records_are_opened(published: dict) -> None:
     base = f"{ROOT}:swarm:state:hive-probe"
-    for consumer in ("controller", "tick", "hub", "ledger server", "hooks"):
+    for consumer in ("controller", "tick", "hub", "hooks"):
         store = published[consumer]["stores"]["hive registry"]
         assert store["keys"] == [
             f"{base}:current",

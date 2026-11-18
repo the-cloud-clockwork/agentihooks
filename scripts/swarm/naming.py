@@ -24,7 +24,7 @@ TYPES = {"master": "master", "eng": "engineer", "ci": "ci", "plan": "planner", "
 LANES = {kind: lane for lane, kind in TYPES.items()}
 OPERATOR = "operator"
 _KINDS = "|".join(TYPES.values())
-NAME_RE = re.compile(rf"({_KINDS})@([0-9a-f]{{6}})-(\d{{4}})")
+NAME_RE = re.compile(rf"({_KINDS})@([0-9a-f]{{6}})-(\d{{4,}})")
 LEGACY_RE = re.compile(r"(.+)-(eng|ci|master)-\d+")
 CODE_RE = re.compile(r"[0-9a-f]{6}")
 SWARM_RE = re.compile(r"swarm@([0-9a-f]{6})")
@@ -33,12 +33,12 @@ NAMES_PAGE = 500
 SPAWN_FIELDS = ("type", "number", "code", "swarm", "session_id", "spawned_at", "retired_at")
 UNBOUND_SESSION = ""
 NOT_RETIRED = 0
-_BASE = rf"(?:(?:{_KINDS})-[0-9a-f]{{6}}-\d{{4}}|session-[0-9a-f]{{8}})"
+_BASE = rf"(?:(?:{_KINDS})-[0-9a-f]{{6}}-\d{{4,}}|session-[0-9a-f]{{8}})"
 _REPO = r"[a-z0-9][a-z0-9._-]*"
 PROOF_RE = re.compile(r"proof-[0-9a-f]{6}-[a-z0-9]+-\d+")
 PATTERNS = {
     "agent": NAME_RE,
-    "pane": re.compile(rf"(?:{_KINDS})-[0-9a-f]{{6}}-\d{{4}}"),
+    "pane": re.compile(rf"(?:{_KINDS})-[0-9a-f]{{6}}-\d{{4,}}"),
     "space": re.compile(rf"{_REPO}-[0-9a-f]{{6}}|{PROOF_RE.pattern}"),
     "worktree": re.compile(rf"{_BASE}(?:-\d+)?"),
     "tmp": re.compile(rf"{_BASE}-tmp-\d+"),
@@ -76,8 +76,8 @@ class AgentName:
         return build(self.kind, self.code, self.number)
 
 
-def build(kind, code, number):
-    if kind not in LANES or not CODE_RE.fullmatch(code) or not 0 < number < 10_000:
+def build(kind: str, code: str, number: int) -> str:
+    if kind not in LANES or not CODE_RE.fullmatch(code) or number < 1:
         raise NamingError(f"no agent name for type {kind!r}, code {code!r}, number {number!r}")
     return f"{kind}@{code}-{number:04d}"
 
@@ -117,7 +117,7 @@ def space(repo, code, slug=""):
     return slug if PROOF_RE.fullmatch(slug) else f"{repo_name(repo)}-{code}"
 
 
-def plain(name):
+def plain(name: str) -> str:
     """The name for places that refuse an at sign: git branches, worktree folders and herdr agent names."""
     return name.replace("@", "-")
 

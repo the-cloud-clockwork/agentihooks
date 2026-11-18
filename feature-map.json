@@ -1,6 +1,249 @@
 {
   "features": [
     {
+      "id": "compose-master-drill",
+      "origin": "regression",
+      "ordered_at": "2026-11-17",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-drill-promotion",
+      "behaviour": "deployed shape: the promotion swarm smoke runs the compose master drill in the built swarm image on its own ports: a scratch proof swarm with a live front door master, retired by the master drill, with a stand-in claude that reports the claude ai login route; the smoke fails unless the tick's night watch forced up a successor that held the front door seat on the claude ai login within thirty minutes.",
+      "seam": "scripts/packaging/compose-master-drill.sh through the swarm smoke workflow and scripts.swarm.master_drill.run",
+      "tests": [
+        "tests/test_compose_master_drill.py::test_the_swarm_image_job_runs_the_master_drill_on_the_built_image",
+        "tests/test_compose_master_drill.py::test_the_master_drill_binds_ports_apart_from_every_other_compose_scenario",
+        "tests/test_compose_master_drill.py::test_the_master_drill_retires_a_live_front_door_master_through_the_tick_night_watch_with_a_login_stand_in",
+        "tests/test_compose_master_drill.py::test_the_master_drill_fails_unless_a_login_successor_held_the_seat_within_thirty_minutes"
+      ]
+    },
+    {
+      "id": "master-drill",
+      "origin": "regression",
+      "ordered_at": "2026-11-17",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-drill-promotion",
+      "behaviour": "deployed shape: agentihooks swarm SLUG master-drill retires the front door master of a running or paused scratch proof swarm through its runtime, leaving the seat empty, sets the night watch gate to enforce and steps the tick's own night watch pass once a minute on a drill clock from thirty minutes back; it stores and prints the minute a successor from the tick's own master launch holds the front door seat and that successor's route, recovered only for a claude ai login successor inside the thirty minutes. A live or stopped swarm, or a master the runtime cannot retire, is refused; a paused swarm stays paused.",
+      "seam": "scripts.swarm.master_drill.run and scripts.swarm.master_drill.command through the swarm command parser and scripts.tick.steps.masters._night_watch",
+      "tests": [
+        "tests/swarm/test_master_drill.py::test_the_drill_retires_the_front_door_master_and_records_a_login_successor_forced_up_at_ten_minutes",
+        "tests/swarm/test_master_drill.py::test_a_successor_on_the_token_fallback_is_recorded_without_a_recovery",
+        "tests/swarm/test_master_drill.py::test_a_working_codex_successor_on_the_login_route_kind_is_recorded_without_a_recovery",
+        "tests/swarm/test_master_drill.py::test_a_successor_forced_up_at_the_thirtieth_minute_still_recovers",
+        "tests/swarm/test_master_drill.py::test_a_seat_left_empty_for_thirty_minutes_records_no_successor",
+        "tests/swarm/test_master_drill.py::test_the_drill_starts_the_night_watch_seat_episode_over",
+        "tests/swarm/test_master_drill.py::test_the_drill_drives_a_paused_scratch_swarm_and_leaves_it_paused",
+        "tests/swarm/test_master_drill.py::test_only_unfinished_front_door_masters_are_retired_and_only_a_front_door_master_succeeds",
+        "tests/swarm/test_master_drill.py::test_a_swarm_whose_master_retired_with_no_new_tasks_sleeps_through_the_drill",
+        "tests/swarm/test_master_drill.py::test_a_task_added_since_the_master_retired_wakes_the_swarm_for_the_drill",
+        "tests/swarm/test_master_drill.py::test_a_starting_successor_that_wrote_the_ledger_seats_without_a_login_recovery",
+        "tests/swarm/test_master_drill.py::test_a_front_door_master_its_hive_reports_gone_is_dropped_without_a_runtime_retire",
+        "tests/swarm/test_master_drill.py::test_a_front_door_master_the_runtime_cannot_retire_refuses_the_drill",
+        "tests/swarm/test_master_drill.py::test_the_drill_refuses_a_swarm_that_is_not_a_scratch_proof_swarm_and_leaves_it_untouched",
+        "tests/swarm/test_master_drill.py::test_the_drill_refuses_a_scratch_swarm_that_is_not_running_or_paused",
+        "tests/swarm/test_master_drill.py::test_the_master_drill_command_prints_the_record_of_a_drill_through_the_routed_runtime"
+      ]
+    },
+    {
+      "id": "master-route-placement-fallback",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/crew-1116073743-fix-5",
+      "behaviour": "A front door master whose launch decided the claude ai login, master-login or interactive, but recorded the placement fallback reads token fallback in balance and on the master card, and a hive launch record keeps the placement the hive acknowledged so a hive master-login token fallback is recorded at all.",
+      "seam": "front_door.master_route, agents_quota.balance_table and HiveRuntime.record",
+      "tests": [
+        "tests/test_swarm_v2_front_door.py::test_a_login_route_that_landed_on_a_token_reads_token_fallback",
+        "tests/test_agents_quota.py::test_balance_names_a_login_launch_that_fell_back_to_a_token",
+        "tests/hive/test_master_fallback_launch.py::test_a_native_master_token_fallback_records_its_fallback_placement"
+      ]
+    },
+    {
+      "id": "master-route-writers-keep-the-route",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/crew-1116073743-fix-5",
+      "behaviour": "The tick recover master path keeps the route kind, account and placement of the execution record it adopts, and take master records the route kind its process environment variable names: interactive for the claude ai login, api for the API marker, subscription for a token or none.",
+      "seam": "tick masters recover master and take_master.master_record",
+      "rules": [
+        "master-recover-drops-the-route"
+      ],
+      "tests": [
+        "tests/tick/steps/test_master_placement_ops.py::test_recover_master_keeps_the_route_account_and_placement_of_the_record_it_adopts",
+        "tests/tick/steps/test_master_placement_ops.py::test_recover_master_keeps_what_the_runtime_recovered_when_no_record_holds_the_seat",
+        "tests/swarm/test_take_master.py::test_take_master_records_the_route_its_process_environment_names",
+        "tests/context/test_account_sessions.py::test_the_process_route_comes_from_its_variable_names"
+      ]
+    },
+    {
+      "id": "master-route-live-masters-only",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/crew-1116073743-fix-5",
+      "behaviour": "Balance names a route only for a front door master the swarm status liveness rule keeps, so a working record whose process is gone shows no route, while the front door seat is still decided over every record as the tick decides it.",
+      "seam": "front_door.master_routes and agents_quota.balance_table",
+      "tests": [
+        "tests/test_swarm_v2_front_door.py::test_the_master_routes_skip_a_front_door_master_the_live_rule_drops",
+        "tests/test_agents_quota.py::test_balance_names_no_route_for_a_front_door_master_that_is_not_live"
+      ]
+    },
+    {
+      "id": "master-route-acting-front-door",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/crew-1116073743-fix-5",
+      "behaviour": "The master route belongs to the seat the tick lead rule names over the held master seats: the lead seat while it is held, else the lowest numbered held master seat, so a second master seat acting as the front door shows its route in balance and the swarm status payload and a seat that is not acting shows none.",
+      "seam": "front_door.master_route, the swarm status report agent entries and agents_quota.balance_table",
+      "tests": [
+        "tests/test_swarm_v2_front_door.py::test_the_master_route_follows_the_seat_the_tick_lead_rule_names",
+        "tests/test_swarm_v2_front_door.py::test_the_master_routes_name_the_lead_seat_when_no_master_seat_is_held",
+        "tests/swarm/test_status_capabilities.py::test_status_report_carries_the_route_of_a_second_master_seat_acting_as_the_front_door",
+        "tests/swarm/test_status_capabilities.py::test_status_report_names_the_lead_seat_route_when_no_master_seat_is_held",
+        "tests/test_agents_quota.py::test_balance_names_the_route_of_a_second_master_seat_acting_as_the_front_door"
+      ]
+    },
+    {
+      "id": "master-route-fallback-only-from-login",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/crew-1116073743-fix-5",
+      "behaviour": "The master route says token fallback only when the claude ai login was the desired route, a login route kind that fell back or a desired route kind of interactive that landed on a token; a token or API route kind with no login desire, including the default route kind of a record no launch wrote, shows no route.",
+      "seam": "front_door.master_route and agents_quota.balance_table",
+      "tests": [
+        "tests/test_swarm_v2_front_door.py::test_the_master_route_says_fallback_only_when_the_claude_ai_login_was_wanted",
+        "tests/test_agents_quota.py::test_balance_says_token_fallback_only_when_the_claude_ai_login_was_wanted"
+      ]
+    },
+    {
+      "id": "service-commands-run-through-interpreter",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/crew-1116073743-fix-9",
+      "behaviour": "The hive bundle refresh, the hive linked profiles install, the claim watch and the quota prober's Claude provider check start agentihooks through their own interpreter with -P -m scripts.install, so each command resolves and runs under the default systemd PATH with no folder holding the agentihooks executable, from a folder outside the repository; the Claude provider check also puts the user bin folder and the interpreter's folder ahead of the service PATH so the claude command it starts resolves; a bare agentihooks command list in a service entry point is a Semgrep incident.",
+      "seam": "bundle_refresh.refresh on a manifest change, linked_profiles.install and claim_watch.check on a lost claim, each command run with --help under the systemd default PATH, and provider_probe.check for a Claude account run end to end under that PATH",
+      "rules": [
+        "service-bare-agentihooks-command"
+      ],
+      "tests": [
+        "tests/hive/test_bundle_refresh.py::test_the_deps_ensure_a_manifest_change_starts_resolves_under_the_systemd_default_path",
+        "tests/hive/test_linked_profiles.py::test_the_profile_link_command_resolves_under_the_systemd_default_path",
+        "tests/test_claim_watch.py::test_the_exit_a_lost_claim_starts_resolves_under_the_systemd_default_path",
+        "tests/swarm/test_provider_probe_contract.py::test_a_claude_check_runs_the_agentihooks_claude_command_under_the_systemd_default_path"
+      ]
+    },
+    {
+      "id": "balance-master-route",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-balance-master-route",
+      "behaviour": "The balance row for the account a live front door master runs on carries the master mark followed by its route, the claude ai login or the token fallback, read from the master execution record whatever the account spelling, one route per account so a second front door master on the same account is not shown, and shows no route while the swarm Redis is unreachable; the swarm status payload carries the same route on the front door master only, and the swarm panel master row shows it on its own line under its account, unclipped at 1920.",
+      "seam": "agents_quota.balance_table, the swarm status report agent entries and the swarm panel agentRows and agentRow master name cell",
+      "tests": [
+        "tests/test_agents_quota.py::test_balance_names_the_route_the_live_front_door_master_runs_on",
+        "tests/test_agents_quota.py::test_balance_names_a_token_fallback_on_another_account_in_either_spelling",
+        "tests/test_agents_quota.py::test_balance_shows_no_route_while_the_swarm_redis_is_unreachable",
+        "tests/test_swarm_v2_front_door.py::test_the_master_route_names_only_a_working_claude_front_door_masters_route",
+        "tests/test_swarm_v2_front_door.py::test_the_master_routes_name_every_swarms_front_door_route_by_its_account",
+        "tests/swarm/test_status_capabilities.py::test_status_report_carries_the_route_only_on_the_front_door_master",
+        "tests/swarm_ledger/test_master_account_cell.py::test_the_master_row_carries_the_route_its_status_names",
+        "tests/swarm_ledger/test_master_account_cell.py::test_the_master_row_shows_its_route_on_its_own_line_at_1920",
+        "tests/swarm_ledger/test_master_account_cell.py::test_the_master_name_cell_names_its_account_and_route"
+      ]
+    },
+    {
+      "id": "serena-router-start-stops-waiting-on-an-exited-router",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-worker-hive-proof-no-live-hive",
+      "behaviour": "Starting the Serena router without a systemd user session stops waiting the moment the router process it started exits before opening its port, and reports the router down with its exit status, while a router that still runs is waited on until its port opens. A hive pod with no serena binary therefore leaves the router start within seconds instead of ninety, writes its first heartbeat and registers as a live hive inside the worker hive pod proof's sixty second window.",
+      "seam": "serena_router_daemon.start on the pidfile path, which hive run reaches through serena_router_daemon.ensure",
+      "rules": [
+        "serena-router-start-waits-on-an-exited-router"
+      ],
+      "tests": [
+        "tests/test_serena_router_daemon.py::test_start_reports_the_router_down_as_soon_as_its_process_exits_before_opening_its_port",
+        "tests/test_serena_router_daemon.py::test_start_keeps_waiting_for_a_running_router_until_its_port_opens"
+      ]
+    },
+    {
+      "id": "hive-service-start-ensures-serena-router",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-serena-before-launch",
+      "behaviour": "The hive service starts or waits for the Serena router once, after it loads the operator env and before it starts the lane spokes and the beat loop that takes launch and resume orders, and it still starts when the router does not come up. An agent the hive resumes right after a pod start therefore finds the router serving when its session connects to Serena at startup.",
+      "seam": "hive run in the hive service, through serena_router_daemon.ensure",
+      "rules": [
+        "hive-service-start-before-serena-router"
+      ],
+      "tests": [
+        "tests/hive/test_lanes.py::test_hive_run_ensures_the_serena_router_before_the_lane_spokes_and_starts_even_when_it_is_down"
+      ]
+    },
+    {
+      "id": "hive-spoke-launch-waits-for-serena-router",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-serena-before-launch",
+      "behaviour": "A hive lane spoke starts or waits for the Serena router after the hub admits an offer and before it spawns the agent, and spawns none while the router does not come up: its claim returns to ready, no launch failure is reported and the offer is given back. A worker agent a hive launches therefore finds the router serving when its session connects to Serena at startup. The workstation master spoke does not wait for the router.",
+      "seam": "LaneTasks.request on the hive, through serena_router_daemon.ensure",
+      "rules": [
+        "hive-spawn-before-serena-router"
+      ],
+      "tests": [
+        "tests/hive/test_lanes.py::test_a_lane_spoke_launches_no_agent_while_the_serena_router_does_not_come_up",
+        "tests/hive/test_lanes.py::test_a_lane_spoke_ensures_the_serena_router_before_it_spawns_the_admitted_agent"
+      ]
+    },
+    {
+      "id": "hub-serving-readiness",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2540",
+      "behaviour": "A hub process given AGENTIHOOKS_HUB_SERVING_FILE removes that file when it starts and creates it only after its slots and exits responders have subscribed on the bus, so a readiness probe that reads the file passes only once the hub answers slots requests.",
+      "seam": "runner.main, after slots.serve and exits.serve",
+      "tests": [
+        "tests/hub/test_runner.py::test_the_hub_marks_itself_serving_only_after_its_slots_and_exits_responders_subscribe"
+      ]
+    },
+    {
+      "id": "hub-ready-only-when-serving",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2600",
+      "behaviour": "The swarm chart sets AGENTIHOOKS_HUB_SERVING_FILE on the hub container and gives it a readiness probe that passes only while that file exists, so the one pod at a time hub rollout terminates the last old hub pod only after a new hub pod has subscribed to slots.",
+      "seam": "hub container env and readinessProbe in the swarm chart hub Deployment",
+      "tests": [
+        "tests/test_swarm_chart_hub_readiness.py::test_the_hub_turns_ready_only_once_its_serving_file_exists"
+      ]
+    },
+    {
+      "id": "controller-waits-ride-out-redis-outage",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-kind-controller-redis-grace",
+      "behaviour": "The controller's tick waits (between passes, on the pass loop's Redis grace path and in the startup retry) finish on the local clock when Redis refuses the scheduler timer. A Redis outage inside the grace window therefore never ends the controller from one of its waits.",
+      "seam": "controller._tick_wait, which _cadence_wait, _passes and _reached wait through",
+      "tests": [
+        "tests/test_swarm_redis_grace.py::test_the_pass_loop_rides_out_redis_refusing_its_waits_between_passes",
+        "tests/test_swarm_redis_grace.py::test_startup_rides_out_redis_refusing_its_retry_wait"
+      ]
+    },
+    {
+      "id": "compose-ledger-start-pulls-image",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2576",
+      "behaviour": "Starting the compose ledger service pulls its image before compose up, for the adopted stack swarm service and the legacy ledger service, so up recreates the container on a newer image instead of rerunning mounted code on a stale local one; a failed pull still runs up on the local image.",
+      "seam": "server_compose.start, the docker compose commands it runs",
+      "tests": [
+        "tests/swarm_ledger/test_server_compose.py::test_adoption_sends_start_and_stop_to_the_bundle_swarm_service",
+        "tests/swarm_ledger/test_server_compose.py::test_a_failed_pull_still_starts_the_service_on_its_local_image"
+      ]
+    },
+    {
+      "id": "compose-api-health-and-front-proxy",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/promo-43992907244-10",
+      "behaviour": "The ledger API service admits the Host its own health check sends, its loopback names on its own port, so the Compose API service turns healthy and the front starts. The Compose front resolves the swarm and api names through the Compose DNS at request time, so it reaches them and finds a recreated container. Every front config forwards each request with the Host the client sent, port included, so a client on the public URL's host and port passes the ledger server and API host checks.",
+      "seam": "scripts.swarm_ledger.api_service.serve, and the front nginx configs of the Compose stack, the swarm init stack and the local ledger Compose file",
+      "tests": [
+        "tests/test_swarm_v2_ledger_writer.py::test_the_api_service_answers_a_health_probe_sent_to_its_own_loopback_port",
+        "tests/test_compose_stack.py::test_the_front_forwards_the_host_the_client_sent_with_its_port",
+        "tests/test_compose_stack.py::test_the_front_resolves_the_swarm_and_api_names_through_the_compose_dns_at_request_time"
+      ]
+    },
+    {
+      "id": "reload-successor-imports-hub-before-ready",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2576",
+      "behaviour": "A ledger server imports the hub projector chain before a reload successor reports ready, so a successor whose mounted code needs a dependency the image lacks exits before ready and the old server keeps serving.",
+      "seam": "ledger_server.serve, the hub projector import against server_handoff.announce",
+      "tests": [
+        "tests/swarm_ledger/test_server_compose.py::test_a_successor_that_cannot_import_the_hub_never_reports_ready"
+      ]
+    },
+    {
       "id": "grader-gates-fail-closed-on-stale-base",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-gates-drop-head-fallback",
@@ -81,6 +324,33 @@
       ]
     },
     {
+      "id": "hub-slot-requests-answered-concurrently",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-slot-serve-concurrent",
+      "behaviour": "A hub pod answers every account slot request on its own task, so a hive heartbeat that reaches a pod while a slow lane admission holds its handler is answered at once instead of waiting behind the admission past the hive's ten second request timeout.",
+      "seam": "NatsBus.serve for the hub slots.serve subscription on slots.*.* in queue group hub-slots",
+      "rules": ["nats-serve-awaits-handler"],
+      "tests": [
+        "tests/events/test_scoped_nats.py::test_a_slow_admission_does_not_delay_a_heartbeat_answer_on_the_same_hub"
+      ]
+    },
+    {
+      "id": "hub-slot-serve-drops-abandoned-requests",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-serve-bounded",
+      "behaviour": "A hub pod serves account slot requests on the bus's own bounded thread pool and drops, unanswered and unrun, a request that waited in that pool's queue as long as the hive waits for its answer, timed from when the hub received it, so a slot take or lane admission the hive already gave up on never claims an account slot or a task, and lane admission times its answer budget from that receipt.",
+      "seam": "NatsBus.serve with wait_ms for the hub slots.serve subscription on slots.*.* in queue group hub-slots",
+      "rules": [
+        "nats-serve-default-executor"
+      ],
+      "tests": [
+        "tests/events/test_scoped_nats.py::test_a_slot_take_the_hive_stopped_waiting_for_never_claims_the_slot",
+        "tests/events/test_scoped_nats.py::test_a_bus_serves_eight_requests_at_once_and_closing_it_never_starts_the_queued_ones",
+        "tests/events/test_nats_payload_safety.py::test_serve_drops_a_request_that_waited_its_requesters_wait_and_answers_one_that_did_not",
+        "tests/hub/test_admission.py::test_a_late_admission_counts_the_time_its_request_waited_in_the_hub_serve_queue"
+      ]
+    },
+    {
       "id": "hub-admission-relaunch-assignment",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-relaunch-assignment",
@@ -90,6 +360,33 @@
         "tests/hub/test_admission.py::test_a_reclaimed_task_returns_to_the_seat_its_saved_launch_assignment_names",
         "tests/hub/test_admission.py::test_a_reported_launch_clears_the_saved_launch_assignment_so_the_next_life_takes_its_handoff_seat",
         "tests/hub/test_admission.py::test_a_refused_launch_report_keeps_the_saved_launch_assignment"
+      ]
+    },
+    {
+      "id": "hub-shared-ledger-copy",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-shared-ledger-copy",
+      "behaviour": "One hub process keeps one ledger copy for its events admission, readiness pass and preemption pass, read once per ledger revision however many threads ask for it, and the claim cap reads only the launch rows of the task it judges.",
+      "seam": "readiness.Source.state across threads, the hub runner main handing one Source to the slots admitter and to registry.configured, and the claim cap's store.launches read",
+      "tests": [
+        "tests/swarm/test_readiness.py::test_threads_asking_for_one_new_revision_fetch_the_export_once",
+        "tests/swarm/test_readiness.py::test_one_swarms_fetch_never_waits_for_another_swarms_fetch",
+        "tests/hub/test_runner.py::test_one_hub_process_hands_one_ledger_copy_to_admission_readiness_and_preemption",
+        "tests/hub/test_preemption.py::test_a_handed_ledger_copy_preempts_with_the_store_the_pass_connects",
+        "tests/hub/test_admission_claim_cap.py::test_the_claim_cap_reads_only_the_launch_rows_of_its_task"
+      ]
+    },
+    {
+      "id": "hub-shared-ledger-copy-revision",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-shared-copy-revision",
+      "behaviour": "The hub's shared ledger copy reads the ledger revision while it holds the swarm's lock and fetches the export again only for a newer revision, so a reader holding an older revision never relabels the copy backwards or forces another fetch, and every reader gets task rows of its own, so a field a reader sets on a row, as the claim cap does when it blocks a task during admission, never reaches the copy the other readers share.",
+      "seam": "readiness.Source.state: the revision read inside the per swarm lock, the newer revision check and the per caller task rows; the claim cap's row update inside hub admission",
+      "tests": [
+        "tests/swarm/test_readiness.py::test_a_reader_handed_an_older_revision_keeps_the_newer_copy_and_fetches_nothing",
+        "tests/swarm/test_readiness.py::test_a_reader_waiting_behind_a_fetch_reads_the_revision_current_at_its_turn",
+        "tests/swarm/test_readiness.py::test_a_readers_change_to_its_task_rows_never_reaches_the_shared_copy",
+        "tests/hub/test_admission_claim_cap.py::test_a_claim_cap_block_leaves_the_shared_ledger_copy_as_the_ledger_exported_it"
       ]
     },
     {
@@ -114,6 +411,25 @@
         "tests/hub/test_admission.py::test_a_plan_task_steering_carries_its_phase_evidence",
         "tests/hub/test_admission.py::test_the_seeds_are_built_from_the_ledger_document_the_offer_was_read_against",
         "tests/hive/test_lanes.py::test_a_lane_spoke_writes_the_carried_work_folder_on_its_own_hive_before_the_spawn"
+      ]
+    },
+    {
+      "id": "work-folder-follows-the-task-across-hives",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-work-folder-sync-across-hives",
+      "behaviour": "A task's progress and proof lines follow it to a successor on any hive: each hive syncs the work folder of every worker execution it runs, named by its host target, else by the hive on its record, so hub admissions and sessions the hive started itself are included, and keeps one copy per task under its own key for the files TTL after it stops hosting the task; the hub records the hive of each launched execution and seeds a successor from that hive's task copy, else from the hive of the task's previous agent, so after a hive roll and the predecessor's retirement the successor's folder on another hive holds every line synced before its admission, which is every line written up to one hive beat earlier.",
+      "seam": "Consumer.sync_workspaces, ledger_workspace.sync and task_files_key, Admission.launched and Admission._seeds",
+      "semgrep_rule": "feature-work-folder-follows-the-task",
+      "tests": [
+        "tests/hive/test_prompt_transport.py::test_a_hive_syncs_the_work_folder_of_an_agent_the_hub_admitted_to_it",
+        "tests/hive/test_prompt_transport.py::test_a_hive_syncs_the_work_folder_of_a_session_it_started_that_names_only_its_process",
+        "tests/hive/test_prompt_transport.py::test_a_task_copy_outlives_the_hive_hosting_it",
+        "tests/hive/test_prompt_transport.py::test_a_hive_holding_no_files_for_a_task_leaves_its_copy_alone",
+        "tests/hub/test_admission.py::test_a_launched_report_records_the_hive_holding_the_task_work_folder",
+        "tests/hub/test_admission.py::test_the_seeds_follow_the_hive_that_last_launched_the_task_after_its_agent_retired",
+        "tests/hub/test_admission.py::test_the_hive_that_last_launched_the_task_wins_over_an_earlier_agents_hive",
+        "tests/hub/test_admission.py::test_the_seeds_fall_back_to_the_previous_agents_hive_when_the_launch_hive_holds_no_copy",
+        "tests/hub/test_admission.py::test_a_successor_on_another_hive_after_a_roll_receives_every_line"
       ]
     },
     {
@@ -146,6 +462,33 @@
       ],
       "rules": [
         "controller-done-keeps-awaiting"
+      ]
+    },
+    {
+      "id": "controller-standby-wakes-at-lock-lapse",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/promo-43913675090-0",
+      "behaviour": "A standby controller replica waits no longer than the held replica lock has left to live before it tries the lock again, so a standby behind a lock its dead leader left takes the lead as that lock lapses instead of up to one stand by poll later, while the liveness probe already counts the lapsed lock as no leader.",
+      "seam": "replica.ReplicaLock.lead",
+      "tests": [
+        "tests/swarm/test_controller_replica.py::test_the_standby_waits_no_longer_than_the_held_lock_has_left"
+      ]
+    },
+    {
+      "id": "controller-standby-rides-out-redis-outage",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-critic-standby-redis-outage",
+      "behaviour": "A standby controller replica stands by through a Redis outage for as long as it lasts, since a standby holds no lock and runs no passes and the pass loop's Redis grace window therefore does not end it: a Redis error while it takes the replica lock, names the leader or waits behind the held lock is logged and tried again after one stand by poll, waiting on the local clock when Redis refuses the scheduler timer, so the standby never exits into restart back off and takes the lead once Redis answers and the leader's lock is gone. A controller whose replica lock release Redis refuses at shutdown logs it, leaves the lock to lapse, and still closes its bus and restores its signal handlers. At controller start the hive controller command retries the controller credential one tick apart while Redis refuses inside the controller's Redis grace window, so a short Redis or DNS outage no longer ends a restarted replica before the controller runs.",
+      "seam": "controller._lead and the stand by attempt it repeats, waiting through controller._tick_wait, the replica lock release in controller.main, and the credential issue of the hive controller command the controller container runs before the controller",
+      "tests": [
+        "tests/swarm/test_controller_replica.py::test_a_standby_stands_by_through_a_redis_outage_and_takes_the_lead_after_it",
+        "tests/swarm/test_controller_replica.py::test_a_standby_started_inside_a_redis_outage_waits_on_the_local_clock",
+        "tests/swarm/test_controller_replica.py::test_controller_run_finishes_its_shutdown_when_redis_refuses_the_lock_release",
+        "tests/swarm_ledger/test_controller_credential.py::test_the_hive_controller_command_rides_out_redis_refusing_at_controller_start",
+        "tests/swarm_ledger/test_controller_credential.py::test_the_hive_controller_command_fails_once_redis_refuses_past_the_grace_window"
+      ],
+      "rules": [
+        "controller-standby-unguarded-redis-call"
       ]
     },
     {
@@ -303,6 +646,20 @@
       "tests": [
         "tests/hive/test_reports.py::test_a_member_of_a_removed_hive_is_dropped_and_its_task_reopened",
         "tests/hive/test_reports.py::test_an_agent_that_names_no_hive_never_reads_as_vanished"
+      ]
+    },
+    {
+      "id": "swarm-reap-reads-hub-admitted-panes-from-their-hive",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-reap-reads-hive-panes",
+      "behaviour": "A worker the hub admitted to another hive, which carries no host target, is judged by the pane its hive reports for its execution and generation instead of the controller's own herdr, so a finished worker reads idle or done and reaches the idle retire; each hive reports the pane of every hub admitted execution it runs, a pane reported for another generation reads unknown, and a worker admitted to this hive is still read from its own herdr.",
+      "seam": "scripts.hive.daemon.execution_report writes the admitted panes, read through scripts.hive.reports.Reports.admitted_pane by scripts.swarm.runtime.HerdrRuntime.observe for scripts.tick.steps.agents._watch_idle",
+      "tests": [
+        "tests/hive/test_reports.py::test_the_controller_reads_a_hub_admitted_workers_pane_from_the_hive_that_runs_it",
+        "tests/hive/test_reports.py::test_a_hub_admitted_pane_its_hive_reports_for_another_generation_reads_unknown",
+        "tests/hive/test_reports.py::test_a_hub_admitted_worker_its_hive_reports_no_pane_for_reads_unknown",
+        "tests/hive/test_reports.py::test_a_hub_admitted_worker_on_this_hive_is_read_from_its_own_herdr",
+        "tests/tick/steps/test_idle_claim_retire.py::test_a_finished_hub_admitted_worker_on_another_hive_reaches_the_idle_retire"
       ]
     },
     {
@@ -554,7 +911,7 @@
       "id": "swarm-tick-idle-claim-retire",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-idle-claim-retire",
-      "behaviour": "A checked wait holds a claim holder's idle count only while the waits end step, which ends checked waits whose target resolved, has run within the idle retirement window; when that step is starved, an agent idle at its prompt counts idle ticks, raises the idle with claim finding and is retired with its task reopened within 25 ticks, workstation and hive agents alike.",
+      "behaviour": "A checked wait holds a claim holder's idle count only while the last completed waits end pass, which ends checked waits whose target resolved, ran within the idle retirement window, or within that window of its declaration while no pass ever completed; when that pass is starved or failing, an agent idle at its prompt counts idle ticks, raises the idle with claim finding and is retired with its task reopened within 25 ticks, workstation and hive agents alike.",
       "seam": "scripts.tick.steps.agents._watch_idle and _hive_lost, through _holding_wait",
       "tests": [
         "tests/tick/steps/test_idle_claim_retire.py::test_workstation_engineers_idle_under_an_unended_checked_wait_are_retired_within_25_ticks",
@@ -562,6 +919,28 @@
         "tests/tick/steps/test_idle_claim_retire.py::test_the_idle_with_claim_finding_fires_on_the_counted_idle_ticks",
         "tests/tick/steps/test_idle_claim_retire.py::test_a_checked_wait_still_holds_the_idle_count_while_waits_end_runs",
         "tests/tick/steps/test_idle_claim_retire.py::test_a_silent_hive_owner_under_an_unended_checked_wait_is_lost"
+      ]
+    },
+    {
+      "id": "tick-waits-end-records-its-end-every-run",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-waits-end-records-time",
+      "behaviour": "The tick engine records the end of every ok or failed step run while the pass records, whatever the step's interval or lane, and each completed waits end pass records the time it ran, so while that pass keeps completing a checked wait keeps holding its holder's idle count instead of being dropped by an end frozen at an earlier run.",
+      "seam": "scripts.tick.engine._journal through scripts.swarm.timing.step_ended, and scripts.swarm.waits.end_pass through mark_ended, read by scripts.tick.steps.agents._holding_wait",
+      "tests": [
+        "tests/tick/steps/test_waits_end.py::test_waits_end_records_its_end_on_every_run_so_a_checked_wait_holds"
+      ]
+    },
+    {
+      "id": "tick-failing-waits-end-lets-checked-waits-lapse",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2564",
+      "behaviour": "The idle count trusts only a completed waits end pass. The registered waits end step reports ok even when its end pass raises, is skipped after an earlier step held an exception, finds no tick view or is refused, so the end a checked wait holds on is the time the last completed end pass ran; while the pass fails after a completion, a checked wait holds only within the idle retirement window after that time, with no completion ever recorded only within that window of its declaration, and engineers idle at their prompts under checked waits are retired within 25 ticks.",
+      "seam": "scripts.swarm.waits.end_pass recording its completion, read by scripts.tick.steps.agents._holding_wait in _watch_idle",
+      "tests": [
+        "tests/tick/steps/test_waits_end.py::test_a_failing_waits_end_pass_leaves_the_end_checked_waits_read",
+        "tests/tick/steps/test_idle_claim_retire.py::test_engineers_idle_under_a_checked_wait_are_retired_while_waits_end_fails_every_pass",
+        "tests/tick/steps/test_idle_claim_retire.py::test_a_checked_wait_holds_one_window_after_it_was_declared_when_waits_end_never_completed"
       ]
     },
     {
@@ -653,6 +1032,22 @@
       ]
     },
     {
+      "id": "hive-root-bus-re-mint",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2531-reoffer",
+      "behaviour": "hive run, after the operator env fills and before the lane spokes start, compares the publish and subscribe grant of the stored root hive bus credential with what nats_grant.member_claims mints now for the swarms the hub signer lists for root; when they differ, such as a credential minted before the per member stop consumer grants, or the stored credential does not decode, it re-mints through root_bus.write and loads the rewritten bus env into the hive run process before the spokes open the bus; a matching credential is kept unchanged, no signer is read without a stored credential, and a signer that cannot mint keeps the stored credential and logs why.",
+      "seam": "root_bus.refresh and hive run",
+      "tests": [
+        "tests/hive/test_root_bus.py::test_hive_run_re_mints_a_stale_root_credential_before_the_lane_spokes_read_its_env",
+        "tests/hive/test_root_bus.py::test_hive_run_re_mints_a_root_credential_whose_subscribe_grant_alone_differs",
+        "tests/hive/test_root_bus.py::test_hive_run_re_mints_a_root_credential_that_does_not_decode",
+        "tests/hive/test_root_bus.py::test_hive_run_keeps_the_stored_root_credential_when_the_signer_cannot_mint",
+        "tests/hive/test_root_bus.py::test_hive_run_keeps_a_root_credential_whose_grant_matches_a_fresh_mint",
+        "tests/hive/test_root_bus.py::test_hive_run_reads_no_signer_without_a_stored_root_credential",
+        "tests/hive/test_root_bus.py::test_hive_run_keeps_the_stored_root_credential_when_no_signer_is_named"
+      ]
+    },
+    {
       "id": "hive-mint-refuses-unscoped-signer",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-mint-refuse-unscoped",
@@ -695,6 +1090,33 @@
       "tests": [
         "tests/test_master_claude_login.py::test_a_refused_master_token_hive_slot_reports_only_the_refusal",
         "tests/test_master_claude_login.py::test_the_master_token_route_reports_routed_only_inside_the_admitted_callback"
+      ]
+    },
+    {
+      "id": "forced-master-start",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/crew-1116073743-fix-6",
+      "behaviour": "A forced master start, agentihooks swarm SLUG master up --forced or the night watch front door respawn, is never refused by a quota floor: the master task carries forced, the tick master launch skips the session slot wait and asks placement with the forced task, hive master selection closes no Claude account at a floor, herdr spawn never refuses all full and hands the claude ai route --agentihooks-forced, the claude ai launch takes the token fallback on any login refusal, reported as route token fallback and placement fallback, and the token fallback takes the probed account with the most room when every account is under its floor. An unforced launch keeps every floor.",
+      "seam": "master_launch.up forced choice, masters._master forced and the night watch respawn, HiveLaunch master selection, HerdrRuntime.spawn, routing.claude_ai.launch_claude, master_claude_login.launch_token and claude_quota_balancer.forced_credential",
+      "tests": [
+        "tests/test_claude_ai_route.py::test_a_forced_front_door_launch_at_the_master_floor_starts_on_the_token_fallback",
+        "tests/test_claude_ai_route.py::test_a_forced_launch_hands_the_token_fallback_a_forced_start_without_the_flag",
+        "tests/test_claude_ai_route.py::test_a_forced_launch_outside_the_front_door_also_takes_the_token_fallback",
+        "tests/test_claude_ai_route.py::test_an_unforced_front_door_launch_at_the_master_floor_still_fails_the_route",
+        "tests/test_claude_quota_balancer.py::test_a_forced_master_takes_the_account_with_most_room_under_every_floor",
+        "tests/test_claude_quota_balancer.py::test_a_forced_master_with_every_account_excluded_still_fails",
+        "tests/test_master_claude_login.py::test_a_forced_token_launch_asks_the_forced_credential_after_a_refusal",
+        "tests/swarm/test_front_door_login_route.py::test_a_forced_front_door_spawn_hands_the_claude_ai_route_the_forced_flag",
+        "tests/swarm/test_front_door_login_route.py::test_a_forced_master_off_the_interactive_route_is_never_refused_all_full",
+        "tests/swarm/test_front_door_login_route.py::test_an_interactive_route_spawn_is_never_refused_all_full",
+        "tests/swarm/test_master_launch.py::test_a_forced_master_replaces_the_live_front_door_and_launches_forced",
+        "tests/swarm/test_master_launch.py::test_a_replacing_new_or_offered_master_launches_unforced",
+        "tests/tick/steps/test_master_placement_ops.py::test_a_forced_master_skips_the_slot_wait_and_places_and_launches_forced",
+        "tests/tick/steps/test_master_placement_ops.py::test_an_unforced_master_asks_placement_without_forced_and_waits_on_the_slot",
+        "tests/tick/steps/test_master_placement_ops.py::test_an_unforced_tick_replays_a_forced_pending_start_forced",
+        "tests/hive/test_master_fallback_launch.py::test_a_forced_master_takes_a_native_login_whose_claude_account_is_closed",
+        "tests/hive/test_master_fallback_launch.py::test_a_forced_master_order_hands_forced_to_the_hive_runtime",
+        "tests/swarm/test_master_launch.py::test_forced_and_last_flags_exclude_each_other"
       ]
     },
     {
@@ -855,14 +1277,14 @@
       "id": "hub-admission-claim-continuity",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-claim-continuity",
-      "behaviour": "An events admission attaches the open transfer its predecessor left, from a handoff or a stopping hive's recovery handoff, to the admitted successor and its seat and carries it as the admitted task's transfer, so the successor's transfer binds and the hive resumes the predecessor conversation; only the legacy place prepare did this. A reopened or late admission detaches the transfer for the next successor without a second row, and a refused attach releases the claim, the agent and the ledger row.",
+      "behaviour": "An events admission attaches the open transfer its predecessor left, from a handoff or a stopping hive's recovery handoff, to the admitted successor and its seat and carries it as the admitted task's transfer, so the successor's transfer binds and the hive resumes the predecessor conversation; only the legacy place prepare did this. A reopened admission detaches the transfer for the next successor without a second row, a late admission keeps it with its admitted successor, and a refused attach releases the claim, the agent and the ledger row.",
       "seam": "Admission.admit and Admission.reopen against the stored handoff transfers",
       "tests": [
         "tests/hub/test_admission.py::test_an_events_successor_attaches_the_transfer_its_predecessor_left",
         "tests/hub/test_admission.py::test_an_events_successor_with_no_transfer_left_carries_none",
         "tests/hub/test_admission.py::test_a_reopened_events_launch_hands_its_transfer_to_the_next_successor",
         "tests/hub/test_admission.py::test_a_repeated_reopen_leaves_the_detached_transfer_as_it_was",
-        "tests/hub/test_admission.py::test_a_late_events_admission_hands_its_transfer_back",
+        "tests/hub/test_admission.py::test_a_late_events_admission_keeps_its_transfer_with_the_admitted_successor",
         "tests/hub/test_admission.py::test_a_refused_transfer_attach_releases_the_claim_the_agent_and_the_ledger_row"
       ]
     },
@@ -896,14 +1318,72 @@
       "id": "events-failed-launch-releases-admission",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-lost-claims",
-      "behaviour": "A hive whose launch fails after the hub admitted its offer releases that admission through the hub reopen, and the hub releases an admission that finished after the hive stopped waiting, so no claimed agent waits for the controller retire.",
-      "seam": "Spoke failure and own launching recovery paths, and Admission.admit answer window",
+      "behaviour": "A hive whose launch fails after the hub admitted its offer releases that admission through the hub reopen, so no claimed agent waits for the controller retire.",
+      "seam": "Spoke failure and own launching recovery paths",
       "tests": [
         "tests/hive/test_spoke.py::test_failed_work_is_nacked_with_backoff_and_can_be_claimed_on_retry",
         "tests/hive/test_spoke.py::test_a_launch_failed_on_a_harness_steers_its_task_off_that_harness",
-        "tests/hive/test_spoke.py::test_own_launching_recovery_releases_the_claim_and_takes_new_work",
-        "tests/hub/test_admission.py::test_an_admission_finished_after_the_hive_stopped_waiting_is_released_and_refused",
-        "tests/hub/test_admission.py::test_an_admission_finished_just_inside_the_hive_wait_is_kept"
+        "tests/hive/test_spoke.py::test_own_launching_recovery_releases_the_claim_and_takes_new_work"
+      ]
+    },
+    {
+      "id": "hub-admission-late-answer-keeps-claim",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2543",
+      "behaviour": "A hub admission that finishes past its answer budget keeps the claim it wrote and answers with the admission instead of releasing it, so an admission whose ledger claim write takes eight seconds still yields a live claimant, a hive still inside its wait receives it, and the offer's claim generation is not raised; a hive whose admit ask the hub did not answer inside its wait asks again for the same offer on its next poll instead of asking the hub to reopen it, and receives the held admission, while every other failure still reopens.",
+      "seam": "Admission.admit and Admission._answered on the hub, and LaneTasks.request and Spoke._apply on the hive",
+      "rules": [
+        "hub-admission-late-answer-releases-claim"
+      ],
+      "tests": [
+        "tests/hub/test_admission.py::test_an_admission_finished_after_the_hive_stopped_waiting_keeps_its_claim_for_the_hive",
+        "tests/hub/test_admission.py::test_an_admission_whose_ledger_write_takes_eight_seconds_still_yields_a_live_claimant",
+        "tests/hub/test_admission.py::test_an_admission_finished_just_inside_the_hive_wait_is_kept",
+        "tests/hive/test_spoke.py::test_an_admit_ask_that_times_out_asks_again_without_reopening_the_offer",
+        "tests/hive/test_lanes.py::test_an_admit_ask_the_hub_never_answers_raises_unanswered_and_spawns_nothing"
+      ]
+    },
+    {
+      "id": "hub-admission-hive-asks-again",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2542",
+      "behaviour": "A hive whose admit ask the hub leaves unanswered keeps the offer as its own pending admission, its claim asked by that hive, and asks the hub again on its next poll with no wait for a redelivery, so an admission the hub kept past the hive's wait launches even after the hub readiness pass withdrew the offer, without the hub launch check freeing it and raising the claim generation by two. It asks on every poll for as long as the hub leaves the ask unanswered, with no delivery cap, because a restarting hub answers no responders at once and a cap would dead letter offers still open, and the launch needs no second room reading because its take already passed one; a held answer to the repeat ask returns the offer, a refusal withdraws it, and a pending admission another hive now asks for is dropped. The hub answers a repeat ask from the same hive with that hive's own admission of the offer once the admission leaves the hive's turn, holds the answer while the admission outlasts the turn wait, and gives another hive none. An asked claim keeps other hives off the offer until its hive is lost.",
+      "seam": "Spoke.poll and LaneTasks.request on the hive, and Admission.admit on the hub",
+      "rules": [
+        "hive-unanswered-admit-waits-for-redelivery"
+      ],
+      "tests": [
+        "tests/hive/test_spoke.py::test_a_late_kept_admission_launches_on_the_next_poll_after_the_hub_withdrew_its_offer",
+        "tests/hive/test_spoke.py::test_an_admission_asked_again_keeps_asking_returns_a_held_offer_and_drops_a_refused_one",
+        "tests/hive/test_spoke.py::test_an_admission_asked_again_whose_launch_fails_settles_like_a_first_launch",
+        "tests/hive/test_spoke.py::test_a_spoke_asking_again_logs_each_unanswered_ask_and_takes_no_new_offer",
+        "tests/hive/test_spoke.py::test_a_pending_admission_another_hive_now_asks_for_is_dropped",
+        "tests/hive/test_spoke.py::test_an_admission_the_hub_leaves_unanswered_keeps_asking_past_the_delivery_cap",
+        "tests/hive/test_spoke.py::test_an_admission_asked_again_launches_without_measuring_room_again",
+        "tests/hive/test_spoke.py::test_lost_hive_work_redelivers_and_changes_the_old_claim_fence",
+        "tests/hive/test_spoke.py::test_a_fresh_hive_keeps_its_claim_until_presence_expires",
+        "tests/hive/test_lanes.py::test_a_held_answer_naming_the_hives_own_admission_in_progress_raises_unanswered",
+        "tests/hub/test_admission.py::test_a_repeat_ask_while_the_hives_own_admission_holds_its_turn_is_held_and_another_hive_gets_none",
+        "tests/hub/test_admission.py::test_a_repeat_ask_whose_own_ask_was_kept_before_its_turn_answers_that_admission",
+        "tests/hub/test_admission.py::test_a_repeat_ask_waiting_on_the_hives_turn_answers_its_own_admission_once_it_leaves_the_turn",
+        "tests/hub/test_admission.py::test_a_repeat_ask_that_read_the_offer_claimed_by_its_own_finished_admission_answers_that_admission",
+        "tests/hub/test_admission.py::test_a_late_kept_admission_launches_on_the_hives_next_ask_after_readiness_withdrew_its_offer"
+      ]
+    },
+    {
+      "id": "hive-spoke-own-claimed-leftover-asked-again",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2583",
+      "behaviour": "A hive spoke whose pending admission points at a claim its own hive still holds as claimed answers busy while that claim may still be inside an admission wait, and once the claim has kept the same pending reservation for a whole admit ask timeout since the spoke first saw it, the wait that wrote it has ended without settling it and the spoke asks the hub again as it does for an asked claim, instead of answering busy on every poll: the hub's kept admission launches with no wait for a redelivery of the offer, a held answer frees the claim to ready and a refusal withdraws it, and either clears the pending admission so the spoke takes offers again, while a repeat ask left unanswered turns it into an asked claim asked again on the next poll. A claimed claim another hive holds still keeps the spoke busy past the timeout.",
+      "seam": "Spoke._recover and Spoke._first_seen on the hive, through Spoke._ask_again",
+      "rules": [
+        "hive-spoke-recovery-keeps-own-claimed-busy"
+      ],
+      "tests": [
+        "tests/hive/test_spoke.py::test_a_claim_its_own_ended_admission_wait_left_asks_the_hub_again_one_ask_timeout_later",
+        "tests/hive/test_spoke.py::test_a_new_pending_reservation_under_a_claimed_claim_restarts_the_admit_ask_timeout",
+        "tests/hive/test_spoke.py::test_a_claim_its_own_ended_admission_wait_left_settles_like_an_asked_claim_on_the_repeat_ask",
+        "tests/hive/test_spoke.py::test_a_claimed_claim_another_hive_holds_keeps_the_spoke_busy_past_the_admit_ask_timeout"
       ]
     },
     {
@@ -1647,6 +2127,29 @@
       ]
     },
     {
+      "id": "night-watch-gate-defaults-to-deny",
+      "origin": "regression",
+      "ordered_at": "2026-11-17",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-launch-proven-tests",
+      "behaviour": "deployed shape of the swarm config: a swarm stored with no night watch mode in its gates, as swarm init stores it, reads the night watch gate as deny, so its night watch respawns an empty front door master seat at ten minutes and raises the seat alert instead of only logging a would-be respawn.",
+      "seam": "scripts.gates.enforcement.NIGHT_WATCH default mode through scripts.swarm.health.night_watch.run",
+      "tests": [
+        "tests/swarm/test_night_watch.py::test_the_night_watch_gate_defaults_to_deny",
+        "tests/swarm/test_night_watch.py::test_a_swarm_with_no_night_watch_gate_respawns_its_empty_front_door_seat_at_ten_minutes"
+      ]
+    },
+    {
+      "id": "night-watch-respawns-by-default",
+      "origin": "regression",
+      "ordered_at": "2026-11-17",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-launch-proven-tests",
+      "behaviour": "deployed shape: after a recycle handoff in a controller pod, the night watch at its default mode respawns the empty front door master seat at ten minutes through the tick's own master launch, the pod controller's fenced runtime, the controller's fleet account rows and a launch order root consumes, on root's claude ai login, also with that login at seven percent of its week as on 17 November.",
+      "seam": "scripts.tick.steps.masters._night_watch through scripts.swarm.controller.FencedRuntime, scripts.swarm_v2.kubernetes.approved.FleetAccounts and scripts.hive.orders.Consumer",
+      "tests": [
+        "tests/hive/test_master_refill_deployed_shape.py::test_the_default_night_watch_refills_a_recycled_front_door_seat_at_ten_minutes_through_the_pod_controller"
+      ]
+    },
+    {
       "id": "swarm-night-watch-drill",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-nightwatch-fixture",
@@ -1876,6 +2379,18 @@
       ]
     },
     {
+      "id": "swarm-tick-intent-failure-held",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-intent-check-held-to-pass-end",
+      "behaviour": "An intent check that raises in a tick pass holds its exception for the pass end: the wrapper relay hook answers without raising and leaves the verdict view and checked actions it never got unset, so the tick view step builds the view itself as it does after an intent check that overran its budget, every step that never needed the verdict still runs in that pass, at the relay site and after it, and the pass still ends failed on the intent failure.",
+      "seam": "the wrapper relay hook scripts.swarm.cli._Wrapper._judged and the end of scripts.swarm.cli.run_tick, with the intent check step of scripts.tick.steps.host",
+      "rules": ["tick-site-hook-raises-held-step"],
+      "tests": [
+        "tests/tick/test_intent_failure.py::test_a_raising_intent_check_still_runs_the_steps_that_never_needed_it",
+        "tests/tick/test_intent_failure.py::test_the_relay_hook_leaves_a_raised_intent_check_to_the_pass_end"
+      ]
+    },
+    {
       "id": "swarm-tick-view-lane-fit",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-fu-tick-view-critical-lane-fit",
@@ -1963,6 +2478,19 @@
       "seam": "The binding canary report the launch check confirms, the session heartbeat and the swarm handoff command",
       "tests": [
         "tests/features/test_harness.py::test_a_scripted_agent_reports_its_canary_beats_and_hands_off_through_the_ledger_server"
+      ]
+    },
+    {
+      "id": "feature-suite-pull-request-tier",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-feature-suite-in-queue",
+      "behaviour": "Every pull request touching the ledger store, the tick, the scheduler, the controller, any module the feature suite imports directly, the agentihooks command line and handoff code its scripted agents run, the feature tests or the feature and writer lock workflows runs the feature suite on real Redis and Postgres through the writer lock workflow, which feeds Gate Required, so a change that breaks the suite cannot merge green and fail only at promotion.",
+      "seam": "writer-lock.yml features selection and caller, feature-suite.yml features job",
+      "tests": [
+        "tests/test_ci_feature_suite_pr.py::test_feature_suite_selection",
+        "tests/test_ci_feature_suite_pr.py::test_each_ledger_and_swarm_module_the_ledger_write_cutover_changed_selects_the_feature_suite",
+        "tests/test_ci_feature_suite_pr.py::test_every_module_the_feature_suite_imports_directly_selects_it",
+        "tests/test_ci_feature_suite_pr.py::test_the_feature_suite_feeds_the_required_gate_on_selected_pull_requests"
       ]
     },
     {
@@ -2136,6 +2664,24 @@
       "tests": [
         "tests/swarm/test_tick_master.py::test_a_master_down_five_minutes_is_launched_first_and_no_engineer_is_promoted",
         "tests/swarm/test_tick_master.py::test_a_failed_forced_launch_promotes_one_live_engineer"
+      ]
+    },
+    {
+      "id": "swarm-master-placement-refusals-kept",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/crew-1116073743-fix-2",
+      "behaviour": "Every placement refusal a master seat meets in the tick, from the front door master step and from the master fill of later seats, is kept in swarm Redis per seat with its reason, first and latest time and pass count for a day. This covers the controller placement refusal, the session slot wait and a hive room refusal. A repeat of the seat's latest reason extends its row, and each seat keeps its newest hundred rows. The record survives the pass, the status prune and the outage hand back. The status prune keeps every master seat's placement wait row while the tick still sees it refused. The master down notice and the empty master seat finding name the front door seat's latest refusal with its age and time, and swarm status names each seat's latest refusal. On 17 November the front door master seat stayed empty four and a half hours, and its refusal lived only in controller output.",
+      "seam": "the tick master step and master fill through the fenced runtime, scripts.swarm.master_refusals, placement_waits.prune through status.findings, the master down step, tick_master._launch_refusal and swarm status",
+      "tests": [
+        "tests/swarm/test_master_refusals.py::test_master_placement_refusals_stay_readable_after_the_pass_and_after_hand_back",
+        "tests/swarm/test_master_refusals.py::test_a_fenced_master_refusal_is_kept_through_the_master_step_status_findings_and_prune",
+        "tests/swarm/test_master_refusals.py::test_a_master_refused_room_on_every_hive_is_kept_with_its_reason",
+        "tests/swarm/test_master_refusals.py::test_a_master_with_no_session_slot_is_kept_with_its_reason_and_its_wait_time",
+        "tests/swarm/test_master_refusals.py::test_every_master_seat_keeps_its_own_refusals",
+        "tests/swarm/test_master_refusals.py::test_the_master_down_notice_names_the_latest_refusal_with_its_age",
+        "tests/swarm/test_master_refusals.py::test_swarm_status_names_each_seat_latest_refusal_with_its_time",
+        "tests/swarm/test_master_refusals.py::test_status_text_names_the_latest_master_placement_refusal",
+        "tests/swarm/test_night_watch.py::test_a_kept_master_placement_refusal_names_why_the_seat_stays_empty"
       ]
     },
     {
@@ -3325,29 +3871,28 @@
     {
       "id": "ledger-join-past-talk",
       "origin": "inventory",
-      "behaviour": "A ledger join lands past pending talk while pending talk still holds other writes.",
+      "behaviour": "A ledger join lands in process past records waiting in the outbox and leaves them for the outbox replay.",
       "seam": "agentihooks ledger join",
       "tests": [
-        "tests/swarm_ledger/test_ledger.py::test_join_lands_past_pending_talk",
-        "tests/swarm_ledger/test_ledger.py::test_pending_talk_still_holds_other_writes"
+        "tests/swarm_ledger/test_ledger.py::test_join_lands_past_pending_talk"
       ]
     },
     {
       "id": "ledger-outbox",
       "origin": "inventory",
-      "behaviour": "Talk sent while the ledger server is stopped queues and lands once, in order, when it returns; reads and other writes fail and never overtake queued talk.",
+      "behaviour": "A ledger write a pass queues while the ledger database does not answer is held once and replays once, in the order it was queued, through the ledger API route code when it answers again; a write the route refuses on replay is set aside and reported.",
       "seam": "The ledger client outbox",
       "tests": [
-        "tests/swarm_ledger/test_ledger_outbox.py::test_talk_sent_while_the_server_is_stopped_queues_and_lands_once_in_order_when_it_returns",
         "tests/swarm_ledger/test_ledger_outbox.py::test_a_replayed_record_lands_once_even_when_it_is_replayed_again",
-        "tests/swarm_ledger/test_ledger_outbox.py::test_reads_and_untalkative_writes_still_fail_while_the_server_is_stopped",
-        "tests/swarm_ledger/test_ledger_outbox.py::test_an_untalkative_write_is_refused_while_queued_talk_still_waits_so_it_never_overtakes_it"
+        "tests/swarm_ledger/test_ledger_outbox.py::test_records_queued_while_the_database_is_not_answering_land_once_in_order_when_it_answers",
+        "tests/swarm_ledger/test_ledger_outbox.py::test_a_record_the_server_refuses_on_replay_is_set_aside_and_reported",
+        "tests/swarm_ledger/test_ledger_outbox.py::test_a_post_retried_while_the_server_is_down_waits_in_the_outbox_once"
       ]
     },
     {
       "id": "ledger-outbox-expiry",
       "origin": "inventory",
-      "behaviour": "A queued ledger record past the age limit is set aside as it was written; a stopped server never expires held talk.",
+      "behaviour": "A queued ledger record past the age limit is set aside as it was written; a ledger database outage never expires held talk.",
       "seam": "The ledger client outbox age limit",
       "tests": [
         "tests/swarm_ledger/test_ledger_outbox.py::test_an_expired_record_is_set_aside_as_it_was_written",
@@ -3476,6 +4021,28 @@
       ]
     },
     {
+      "id": "gate-protected-waits-out-a-held-tests-run",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-gate-protected-waits-jobs",
+      "behaviour": "Gate Protected keeps polling a pull request head's Tests run that exists but lists no jobs, such as a run held behind the cancelled run of the previous head in the pull request's Tests concurrency group, for 120 polls five seconds apart inside a 25 minute grade job. A head whose Tests run lists its first job five and a half minutes after that run was created therefore passes the gate instead of turning red.",
+      "seam": "Gate Protected grade job timeout and the --waits it passes to ci_tests_start.main and verify",
+      "tests": [
+        "tests/test_ci_tests_start.py::test_the_grade_job_waits_out_a_tests_run_held_behind_a_cancelled_run"
+      ]
+    },
+    {
+      "id": "gate-protected-finds-the-tests-run-through-check-runs",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-gate-protected-find-run-by-checks",
+      "behaviour": "Gate Protected finds a pull request head's newest Tests run through the head commit's check runs while the GitHub run listing still omits that run, reading each other workflow run those check runs name once, so a clean head whose Tests run already runs with jobs passes the gate instead of failing with the Tests run missing.",
+      "seam": "ci_tests_start.verify and the check runs lookup it falls back to",
+      "tests": [
+        "tests/test_ci_tests_start.py::test_finds_the_tests_run_through_the_head_check_runs_while_the_listing_omits_it",
+        "tests/test_ci_tests_start.py::test_check_runs_of_other_runs_are_read_once_and_never_pass",
+        "tests/test_ci_tests_start.py::test_the_newest_tests_run_named_by_check_runs_is_read_first"
+      ]
+    },
+    {
       "id": "trace-plan-per-repository-size",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t447",
@@ -3579,6 +4146,33 @@
       ]
     },
     {
+      "id": "uv-tool-install-nats-extra",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tool-install-nats-extra",
+      "behaviour": "Every uv tool install of the agentihooks CLI carries the nats extra, so a reinstall of the global tool venv keeps nats-py and launches with the NATS bus on still import the bus client: agentihooks init in a source checkout installs the editable tree as .[nats], the updater upgrades a uv tool install as agentihooks[nats], the nats extra in pyproject carries nats-py, and a uv tool install command list without the extra is a Semgrep incident.",
+      "seam": "install._install_cli_tool in a source checkout and updater.upgrade_command for a uv tool install, each read as the uv command it runs",
+      "rules": [
+        "uv-tool-install-without-nats-extra"
+      ],
+      "tests": [
+        "tests/test_cli_link.py::test_a_source_checkout_installs_the_editable_tree_with_the_nats_extra",
+        "tests/test_updater.py::test_a_uv_tool_upgrade_installs_the_package_with_the_nats_extra",
+        "tests/test_updater.py::test_the_nats_extra_the_tool_installs_carries_the_nats_client"
+      ]
+    },
+    {
+      "id": "pypi-retry-attempt-timeout",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-index-retry-attempt-timeout",
+      "behaviour": "The package index retry wrapper stops an install attempt still running at its time limit, PYPI_RETRY_ATTEMPT_SECONDS (default 60 s), with TERM and then KILL five seconds later, even when the attempt ignores TERM, and retries it with the usual backoff; each timed out attempt doubles the limit up to four times the first, so a slow download that still progresses finishes on a later attempt, and the retry warning and the final error name the timeout.",
+      "seam": "the package index retry wrapper, the time limit around each attempt",
+      "tests": [
+        "tests/test_ci_pypi_retry.py::test_a_hung_attempt_is_stopped_at_its_time_limit_and_retried",
+        "tests/test_ci_pypi_retry.py::test_an_attempt_that_keeps_hanging_doubles_its_limit_up_to_four_times_the_first_then_names_the_timeout",
+        "tests/test_ci_pypi_retry.py::test_a_real_uv_install_against_an_index_that_never_answers_is_stopped_and_retried"
+      ]
+    },
+    {
       "id": "ledger-plain-words-skip-links",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-plain-words-skip-links",
@@ -3587,6 +4181,33 @@
       "tests": [
         "tests/test_ledger_comments.py::test_parentheses_and_semicolons_inside_a_web_link_are_not_counted",
         "tests/test_ledger_comments.py::test_parentheses_and_semicolons_in_prose_beside_a_link_are_still_counted"
+      ]
+    },
+    {
+      "id": "launch-model-suits-harness",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2562",
+      "behaviour": "Every launch path that takes a model from lane config or a filled saved launch chooses it through model_pick.suited, so a Codex launch never asks for a Claude model and a Claude launch never asks for a Codex model: the hive orders launch assignment, the successor fill at hub admission, and the runtime lane default for spawns outside eng and ci and for the resume fallback; HerdrRuntime.spawn passes every final model, saved or picked, and resume every recorded model through the same choice.",
+      "seam": "model_pick.suited through Consumer.launch, successor_fill.filled, runtime._lane_default, and the final model of HerdrRuntime.spawn and HerdrRuntime.resume",
+      "rules": [
+        "launch-model-skips-harness-choice"
+      ],
+      "tests": [
+        "tests/swarm/test_model_pick.py::test_suited_keeps_a_model_its_harness_runs_and_replaces_the_other_harness_model",
+        "tests/swarm/test_model_pick.py::test_every_default_model_suits_its_own_harness_and_not_the_other",
+        "tests/hive/test_orders.py::test_a_hive_order_never_launches_the_other_harness_lane_model",
+        "tests/hive/test_orders.py::test_a_hive_order_keeps_a_lane_model_its_harness_runs",
+        "tests/tick/steps/test_successor_fill.py::test_a_successor_with_no_saved_model_never_takes_the_other_harness_lane_model",
+        "tests/tick/steps/test_successor_fill.py::test_hub_admission_fills_a_codex_successor_with_the_codex_model_on_a_claude_pinned_lane",
+        "tests/swarm/test_runtime.py::test_a_resume_with_no_recorded_model_never_takes_the_other_harness_pinned_model",
+        "tests/swarm/test_runtime.py::test_a_resume_never_relaunches_a_recorded_model_of_the_other_harness",
+        "tests/swarm/test_runtime.py::test_a_lane_outside_eng_and_ci_never_launches_the_other_harness_pinned_model",
+        "tests/swarm/test_runtime.py::test_a_claude_first_life_on_a_codex_pinned_engineer_lane_launches_the_claude_model",
+        "tests/swarm/test_runtime.py::test_a_successor_never_launches_a_saved_model_of_the_other_harness",
+        "tests/swarm/test_default_models.py::test_a_lane_default_never_gives_one_harness_the_other_harness_pinned_model",
+        "tests/swarm/test_harness_model_fallback.py::test_a_successor_saved_model_of_the_other_harness_falls_back_to_the_swarm_harness_model",
+        "tests/swarm/test_harness_model_fallback.py::test_a_claude_first_life_on_a_codex_pinned_engineer_lane_takes_the_swarm_claude_model",
+        "tests/swarm/test_harness_model_fallback.py::test_a_resumed_model_of_the_other_harness_falls_back_to_the_swarm_harness_model"
       ]
     },
     {
@@ -3697,6 +4318,21 @@
         "tests/swarm_ledger/test_ledger_bin.py::test_a_closed_ledger_goes_to_the_bin_at_the_given_time",
         "tests/swarm_ledger/test_ledger_bin.py::test_a_restore_at_or_after_the_close_keeps_the_ledger_out",
         "tests/swarm_ledger/test_ledger_bin.py::test_closing_again_after_a_restore_bins_it_again"
+      ]
+    },
+    {
+      "id": "ledger-bin-tidy-lock",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2592",
+      "behaviour": "A bin tidy pass with nothing to bin or purge takes no exclusive writer lock, so it never stalls ledger writers; a pass with work still bins or purges under the writer lock.",
+      "seam": "The ledger bin tidy and its writer lock",
+      "tests": [
+        "tests/swarm_ledger/test_bin_storage.py::test_an_idle_tidy_pass_takes_no_exclusive_writer_lock",
+        "tests/swarm_ledger/test_bin_storage.py::test_a_bin_entry_at_exactly_the_kept_days_is_kept_without_the_writer_lock",
+        "tests/swarm_ledger/test_bin_storage.py::test_an_expired_bin_entry_is_purged_under_the_writer_lock",
+        "tests/swarm_ledger/test_bin_storage.py::test_a_ledger_due_for_the_bin_is_binned_under_the_writer_lock",
+        "tests/swarm_ledger/test_bin_storage.py::test_a_recent_restore_keeps_an_old_ledger_out_without_the_writer_lock",
+        "tests/swarm_ledger/test_bin_storage.py::test_a_bin_entry_without_a_time_is_never_purged"
       ]
     },
     {
@@ -4083,7 +4719,7 @@
       "origin": "regression",
       "ordered_at": "2026-11-06",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2401",
-      "behaviour": "The master fallback service starts exactly one master for a watched swarm left without a live master past its window, resets the wait while a master lives, skips stopped swarms without ending the pass, runs each pass in its own process bounded by a timeout, writes its systemd unit with every systemctl call bounded, and launches master up in a detached session.",
+      "behaviour": "The master fallback service starts exactly one master for a watched swarm left without a live master past its window, resets the wait while a master lives, skips stopped swarms without ending the pass, runs each pass in its own process bounded by a timeout, writes its systemd unit with every systemctl call bounded, and launches master up in a detached session through the interpreter's absolute path with the user's bin folder on PATH, so the start command runs under the systemd default PATH.",
       "seam": "python -m scripts.swarm.master_fallback run, pass and install",
       "tests": [
         "tests/swarm/test_master_fallback.py::test_no_master_for_the_window_starts_exactly_one_master",
@@ -4094,7 +4730,58 @@
         "tests/swarm/test_master_fallback.py::test_run_logs_a_timed_out_pass_and_goes_on",
         "tests/swarm/test_master_fallback.py::test_the_service_runs_the_loop_with_the_watched_swarms_and_minutes",
         "tests/swarm/test_master_fallback.py::test_install_writes_and_restarts_the_service_and_retires_the_timer",
-        "tests/swarm/test_master_fallback.py::test_start_launches_master_up_new_in_its_own_session"
+        "tests/swarm/test_master_fallback.py::test_start_launches_master_up_new_in_its_own_session",
+        "tests/swarm/test_master_fallback.py::test_the_installed_unit_starts_master_up_under_the_systemd_default_path"
+      ]
+    },
+    {
+      "id": "swarm-master-critical",
+      "origin": "regression",
+      "ordered_at": "2026-11-17",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-no-master-critical",
+      "behaviour": "Thirty minutes (AGENTIHOOKS_MASTER_CRITICAL_MINUTES) with no master bound on a running swarm's front door seat, a live master that is working or still starting with its hooks beating since launch, puts the swarm in critical mode, measured by the master fallback pass outside the tick, first in each pass and in its own try per swarm: the swarm's master-critical record holds the outage start and critical time, swarm status shows a master critical finding and a master_critical key, a critical broadcast is raised and the ledger's front door seat alert is raised. While critical the pass forces agentihooks swarm SLUG master up --replace in a detached runner through the interpreter's absolute path, once per retry window while no master start is in flight, a start path the controller master placement refusal never reaches, and the twenty minute fallback start leaves the swarm alone. The runner records each forced start's outcome with its time, exit status and reason under the swarm's record lock, never over an outcome already recorded; a runner that cannot start fails its start in the same pass, and a refused or failed start raises the critical broadcast again and, from the next pass, replaces an open seat alert of other text with one naming its reason, which a repeat of that reason leaves in place; a raise the ledger refuses after the replaced alert closed is named after that close and tried again the next pass. No ledger call runs while the record lock is held: the ledger is read before the lock and the seat alerts, read from the ledger's alerts alone, are written after it; a runner whose record Redis or the lock refuses prints the refusal and the pass fails that start at its retry. A master binding the front door seat clears the record, the finding, the broadcasts and the open seat alerts; a swarm that is not running, or sleeps with no work by its ledger tasks, leaves critical mode and is never forced. Every pass stamps the swarm's watch beat and drops the beat of every swarm it no longer watches, and a failed or five minute old beat is a master watch status finding.",
+      "seam": "python -m scripts.swarm.master_fallback pass and force, read through agentihooks swarm SLUG status",
+      "tests": [
+        "tests/swarm/test_master_critical.py::test_a_master_placement_refusal_for_thirty_minutes_puts_the_swarm_critical_and_forces_master_up",
+        "tests/swarm/test_master_critical.py::test_the_forced_master_up_starts_a_master_the_placement_refusal_cannot_block_and_its_bind_clears_critical",
+        "tests/swarm/test_master_critical.py::test_a_refused_forced_start_is_recorded_with_its_reason_and_time_and_raises_the_alert_again",
+        "tests/swarm/test_master_critical.py::test_the_swarm_turns_critical_at_its_threshold_and_forces_master_up",
+        "tests/swarm/test_master_critical.py::test_the_critical_alert_counts_the_minutes_since_the_outage_began",
+        "tests/swarm/test_master_critical.py::test_a_failed_forced_start_is_retried_once_per_retry_window",
+        "tests/swarm/test_master_critical.py::test_a_forced_start_with_no_bound_master_by_the_retry_counts_as_failed",
+        "tests/swarm/test_master_critical.py::test_each_failed_forced_start_raises_the_ledger_seat_alert_again",
+        "tests/swarm/test_master_critical.py::test_a_ledger_that_refuses_the_seat_alert_is_named_and_the_watch_goes_on",
+        "tests/swarm/test_master_critical.py::test_a_runner_that_cannot_start_fails_its_forced_start_in_the_same_pass",
+        "tests/swarm/test_master_critical.py::test_a_forced_start_is_recorded_before_its_runner_starts",
+        "tests/swarm/test_master_critical.py::test_a_front_door_master_still_starting_holds_the_forced_start_until_its_deadline",
+        "tests/swarm/test_master_critical.py::test_only_a_front_door_master_that_is_not_finished_holds_the_forced_start",
+        "tests/swarm/test_master_critical.py::test_only_a_live_working_master_on_the_front_door_seat_ends_critical_mode",
+        "tests/swarm/test_master_critical.py::test_a_starting_front_door_master_whose_hooks_beat_since_its_launch_holds_the_seat",
+        "tests/swarm/test_master_critical.py::test_a_live_working_front_door_master_ends_critical_mode",
+        "tests/swarm/test_master_critical.py::test_a_ledger_that_cannot_close_the_seat_alert_is_named_and_critical_mode_still_ends",
+        "tests/swarm/test_master_critical.py::test_a_master_binding_before_the_threshold_ends_the_outage_without_an_alert",
+        "tests/swarm/test_master_critical.py::test_a_swarm_that_is_not_running_leaves_critical_mode_and_is_never_forced",
+        "tests/swarm/test_master_critical.py::test_a_sleeping_swarm_never_turns_critical",
+        "tests/swarm/test_master_critical.py::test_a_retired_swarm_with_new_work_counts_its_outage_and_keeps_its_retired_record",
+        "tests/swarm/test_master_critical.py::test_a_retired_swarm_whose_ledger_cannot_be_read_stays_awake",
+        "tests/swarm/test_master_critical.py::test_the_record_keeps_the_last_ten_forced_starts",
+        "tests/swarm/test_master_critical.py::test_the_pass_and_the_runner_each_hold_the_record_lock",
+        "tests/swarm/test_master_critical.py::test_a_held_record_lock_keeps_the_pass_from_writing",
+        "tests/swarm/test_master_critical.py::test_a_forced_start_ending_records_its_outcome",
+        "tests/swarm/test_master_critical.py::test_a_late_runner_never_overwrites_a_recorded_outcome",
+        "tests/swarm/test_master_critical.py::test_the_critical_finding_names_the_outage_and_the_last_forced_start",
+        "tests/swarm/test_master_critical.py::test_a_watch_that_failed_or_stopped_is_a_status_finding",
+        "tests/swarm/test_master_critical.py::test_the_forced_runner_runs_master_up_replace_bounded_with_the_launch_env",
+        "tests/swarm/test_master_critical.py::test_the_forced_runner_records_a_launch_that_could_not_run",
+        "tests/swarm/test_master_critical.py::test_a_failed_start_replaces_the_open_seat_alert_with_one_naming_its_reason",
+        "tests/swarm/test_master_critical.py::test_a_repeated_failure_reason_keeps_its_seat_alert_and_a_new_reason_replaces_it",
+        "tests/swarm/test_master_critical.py::test_a_refused_raise_after_a_replaced_seat_alert_names_the_close_and_the_next_pass_raises_it",
+        "tests/swarm/test_master_critical.py::test_no_ledger_call_runs_while_the_record_lock_is_held",
+        "tests/swarm/test_master_critical.py::test_a_forced_runner_refused_the_record_lock_prints_the_refusal_and_leaves_the_start_to_the_retry",
+        "tests/swarm/test_master_critical.py::test_a_pass_drops_the_watch_beat_of_a_swarm_the_fallback_no_longer_watches",
+        "tests/swarm/test_master_fallback.py::test_a_forced_master_up_runs_its_own_runner_in_its_own_session",
+        "tests/swarm/test_master_fallback.py::test_the_twenty_minute_start_leaves_a_critical_swarm_to_the_forced_start",
+        "tests/swarm/test_master_fallback.py::test_each_watched_swarm_gets_its_own_critical_watch_and_watch_beat"
       ]
     },
     {
@@ -4151,6 +4838,120 @@
       ]
     },
     {
+      "id": "panic-publish-holds",
+      "origin": "regression",
+      "ordered_at": "2026-11-17",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-publish-honours-panic",
+      "behaviour": "While fleet panic is on, swarm publish refuses with the panic message and pushes nothing unless the branch it pushes is a registered fix of its repository, the same rule the panic guard applies to a plain git push.",
+      "seam": "swarm publish before it grades and pushes, and the panic guard's push check it asks",
+      "tests": [
+        "tests/swarm/test_publish.py::test_publish_under_panic_refuses_an_unregistered_branch_and_pushes_nothing",
+        "tests/swarm/test_publish.py::test_publish_asks_the_panic_push_check_for_its_worktree_and_pushed_branch",
+        "tests/swarm/test_panic.py::test_the_push_check_passes_any_branch_without_panic",
+        "tests/swarm/test_panic.py::test_the_push_check_spares_a_registered_fix_from_a_checkout_on_another_branch",
+        "tests/swarm/test_panic.py::test_the_push_check_refuses_a_branch_no_fix_names",
+        "tests/swarm/test_panic.py::test_the_push_check_refuses_a_fix_whose_config_routes_the_push",
+        "tests/swarm/test_panic.py::test_the_push_check_passes_when_the_store_cannot_be_reached"
+      ]
+    },
+    {
+      "id": "panic-holds-only-its-swarm",
+      "origin": "regression",
+      "ordered_at": "2026-11-17",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-swarm-scoped",
+      "behaviour": "Panic belongs to the swarm that pressed it: its push, rerun, dispatch and deploy freeze holds only sessions bound to that swarm, sessions bound to another swarm and unbound sessions keep every command, the sweep cancels only runs on worktree branches of that swarm's agents and the runs those branches triggered, and a legacy fleet panic holds only the swarm its reason names.",
+      "seam": "the blocker window PreToolUse hook, swarm panic on and the tick pass panic sweep",
+      "tests": [
+        "tests/swarm/test_panic_scope.py::test_panic_on_one_swarm_leaves_other_swarms_and_unbound_sessions_free",
+        "tests/swarm/test_panic_scope.py::test_the_panic_button_cancels_only_the_runs_of_its_swarms_agents",
+        "tests/swarm/test_panic_scope.py::test_a_legacy_fleet_panic_holds_only_the_swarm_its_reason_names",
+        "tests/swarm/test_panic_scope.py::test_the_tick_sweep_cancels_only_the_runs_of_the_held_swarms_agents",
+        "tests/swarm/test_panic_scope.py::test_the_owner_names_only_branches_of_the_swarms_agents",
+        "tests/swarm/test_panic_scope.py::test_a_swarm_without_a_code_owns_no_branch",
+        "tests/swarm/test_panic_scope.py::test_one_swarms_errors_and_failed_passes_reach_only_its_own_panic",
+        "tests/swarm/test_panic_scope.py::test_each_swarm_keeps_its_own_cancel_minute",
+        "tests/swarm/test_panic_scope.py::test_panic_off_clears_the_legacy_fleet_record_only_for_the_swarm_it_names",
+        "tests/swarm/test_panic_scope.py::test_panic_off_clears_only_its_own_swarms_kept_fixes",
+        "tests/swarm/test_panic_scope.py::test_a_legacy_fleet_record_naming_no_swarm_holds_none",
+        "tests/swarm/test_panic_scope.py::test_an_unbound_session_never_reads_panic",
+        "tests/swarm/test_panic_scope.py::test_swarm_publish_holds_only_the_panicking_swarms_push",
+        "tests/swarm/test_panic_scope.py::test_another_swarms_panic_opens_no_window_for_this_master",
+        "tests/swarm/test_panic_scope.py::test_the_panic_messages_name_the_held_swarm",
+        "tests/gates/test_push_stop.py::test_another_swarms_panic_leaves_the_stop_hook_pushing"
+      ]
+    },
+    {
+      "id": "panic-fix-branch-first-push",
+      "origin": "regression",
+      "ordered_at": "2026-11-16",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2558",
+      "behaviour": "While fleet panic is on, a fix registered as a branch link of a named repository lets a session on that branch in that repository make its first push, rerun or dispatch before any pull request exists, the panic cancel sweep spares that branch's runs in that repository without reading it as a pull request, and a push from any other branch or from the same branch name in another repository stays frozen.",
+      "seam": "The panic fix list branch link read by the blocker window hook and the panic cancel sweep",
+      "tests": [
+        "tests/swarm/test_panic.py::test_a_branch_link_names_its_repository_and_branch",
+        "tests/swarm/test_panic.py::test_tick_pass_spares_a_registered_fix_branch_only_in_its_repository",
+        "tests/swarm/test_panic.py::test_panic_spares_the_first_push_of_a_registered_fix_branch",
+        "tests/swarm/test_panic.py::test_panic_refuses_a_push_from_a_branch_no_fix_registers"
+      ]
+    },
+    {
+      "id": "panic-fix-registration-checked",
+      "origin": "regression",
+      "ordered_at": "2026-11-16",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-fix-registration-hardening",
+      "behaviour": "Only the swarm's master or the operator presses panic on, and every fix link is checked before panic stores it: a link that is not a pull request or branch link of agentihooks, agentihooks-bundle or antoncore, a branch link whose branch is not a plain branch name of ASCII letters, digits, underscores and hyphens in parts joined by single dots or slashes, or that starts with refs/, a branch link to dev or main, and a pull request that cannot be read or whose head branch is dev or main are refused with nothing stored and nothing cancelled, so no fix spares every dev run and no malformed fix fails every cancel sweep.",
+      "seam": "cmd_panic for the on action and panic.check_fix, both before panic.engage stores the fixes",
+      "rules": [
+        "panic-on-unchecked-registration"
+      ],
+      "tests": [
+        "tests/swarm/test_panic.py::test_panic_on_refuses_a_seat_that_is_neither_the_master_nor_the_operator",
+        "tests/swarm/test_panic.py::test_a_seat_cannot_press_panic_on_as_the_master",
+        "tests/swarm/test_panic.py::test_the_swarm_master_presses_panic_on_with_a_checked_fix",
+        "tests/swarm/test_panic.py::test_panic_on_refuses_a_fix_link_before_it_stores_or_cancels_anything",
+        "tests/swarm/test_panic.py::test_panic_on_refuses_a_fix_pull_request_whose_head_is_dev_or_main",
+        "tests/swarm/test_panic.py::test_panic_on_refuses_a_fix_pull_request_it_cannot_read",
+        "tests/swarm/test_panic.py::test_a_branch_link_of_a_panic_repository_passes_the_check_unread",
+        "tests/swarm/test_panic.py::test_a_fix_pull_request_passes_the_check_after_one_read_of_its_head"
+      ]
+    },
+    {
+      "id": "panic-fix-spare-reads-target",
+      "origin": "regression",
+      "ordered_at": "2026-11-16",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-fix-registration-hardening",
+      "behaviour": "While fleet panic is on, a session on a registered fix branch keeps a rerun in its own repository, a dispatch only when its ref names that branch, and a push only when it pushes to origin, every refspec writes that checked out branch and no git config may route it elsewhere; git -C moves the checkout the branch is read in. A push to any other ref, remote or set of refs, a push git config may route to another remote or ref (a push refspec, push url or mirror on origin, a url pushInsteadOf rewrite of the push url, push tag following, a push or tracking remote other than origin, or a push default other than simple or current), a dispatch without a ref or on another ref, a gh command aimed at another repository, a git global option other than -C, a command that sets a git repository or config environment variable, and a push or dispatch behind git or gh global options or a redirection stay frozen.",
+      "seam": "The PreToolUse panic freeze in the blocker window hook: the frozen command parse and the fix branch spare",
+      "rules": [
+        "panic-spare-ignores-command-target"
+      ],
+      "tests": [
+        "tests/swarm/test_panic.py::test_a_fix_branch_session_stays_frozen_for_a_command_that_writes_another_ref",
+        "tests/swarm/test_panic.py::test_a_fix_branch_session_keeps_a_command_that_writes_only_its_branch",
+        "tests/swarm/test_panic.py::test_git_c_decides_the_checkout_a_push_is_spared_in",
+        "tests/swarm/test_panic.py::test_a_push_git_config_may_route_elsewhere_stays_frozen",
+        "tests/swarm/test_panic.py::test_a_git_config_that_cannot_be_read_counts_as_routed",
+        "tests/swarm/test_panic.py::test_panic_freezes_a_push_behind_git_global_options_or_a_redirection",
+        "tests/swarm/test_panic.py::test_a_command_reads_without_its_redirections_and_git_global_options",
+        "tests/swarm/test_panic.py::test_a_spared_command_names_the_refs_it_writes",
+        "tests/swarm/test_panic.py::test_a_dispatch_without_a_ref_names_an_empty_ref"
+      ]
+    },
+    {
+      "id": "panic-fix-pull-request-head-in-its-repository",
+      "origin": "regression",
+      "ordered_at": "2026-11-16",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-fix-registration-hardening",
+      "behaviour": "While fleet panic is on, the CI cancel sweep spares the head branch of a registered fix pull request only in that pull request's own repository, as it spares a fix branch link only in the repository the link names; a run on the same branch name in another panic repository is cancelled.",
+      "seam": "The panic CI cancel sweep over the fleet repositories' latest runs: the branches it keeps for each repository",
+      "rules": [
+        "panic-sweep-keeps-fix-heads-everywhere"
+      ],
+      "tests": [
+        "tests/swarm/test_panic.py::test_cancel_runs_spares_a_fix_pull_request_head_only_in_its_repository"
+      ]
+    },
+    {
       "id": "panic-merged-fix-dev-run",
       "origin": "regression",
       "ordered_at": "2026-11-07",
@@ -4174,6 +4975,55 @@
         "tests/swarm/test_panic.py::test_cancel_runs_spares_the_integration_head_of_a_merged_fix",
         "tests/swarm/test_panic.py::test_cancel_runs_spares_the_integration_head_of_each_merged_fix_base",
         "tests/swarm/test_panic.py::test_cancel_runs_spares_the_queue_merge_of_a_fix_before_it_reads_merged"
+      ]
+    },
+    {
+      "id": "panic-fix-triggered-workflow-run",
+      "origin": "regression",
+      "ordered_at": "2026-11-16",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2582",
+      "behaviour": "While fleet panic is on, the CI cancel sweep leaves running a workflow run event run, such as the Gate Required status run that posts a pull request's required status, whose run name names the head branch of a registered fix in its repository, and still cancels every other workflow run event run, including one whose run name names no branch.",
+      "seam": "The Gate Required status run name and the panic CI cancel sweep over the fleet repositories' latest runs",
+      "tests": [
+        "tests/swarm/test_panic.py::test_cancel_runs_keeps_the_workflow_run_runs_a_fix_run_triggered",
+        "tests/swarm/test_panic.py::test_the_gate_required_run_name_names_the_branch_the_sweep_keeps"
+      ]
+    },
+    {
+      "id": "panic-sweep-off-pass-thread",
+      "origin": "regression",
+      "ordered_at": "2026-11-17",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-sweep-off-pass",
+      "behaviour": "While fleet panic is on, a controller pass starts the CI cancel sweep on its own daemon thread at most once a minute and never while an earlier sweep of the same process still runs, and ends without waiting for it; the sweep then reports each run it cancelled, or why it failed, as a swarm panic event of that pass's swarm, a sweep thread that cannot start is reported as a failed cancel and leaves the next pass free to sweep, and a swarm command process waits for a running sweep before it returns, whether its command succeeded or was refused.",
+      "seam": "The panic tick pass the spawn stall watch runs when a controller pass ends, and the swarm command entry point",
+      "rules": [
+        "panic-sweep-on-pass-thread"
+      ],
+      "tests": [
+        "tests/swarm/test_panic.py::test_the_pass_ends_before_the_panic_cancel_sweep_it_starts",
+        "tests/swarm/test_panic.py::test_a_due_pass_starts_no_sweep_while_an_earlier_one_runs",
+        "tests/swarm/test_panic.py::test_a_sweep_thread_that_cannot_start_frees_the_sweep",
+        "tests/swarm/test_panic.py::test_settle_returns_once_the_running_sweep_reported",
+        "tests/swarm/test_panic.py::test_a_swarm_command_waits_for_the_running_panic_sweep_before_it_returns"
+      ]
+    },
+    {
+      "id": "panic-spares-fixer-branches",
+      "origin": "regression",
+      "ordered_at": "2026-11-17",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-spares-fix-prs",
+      "behaviour": "While fleet panic is on, the CI cancel sweep, run by the tick once a minute and by panic on, spares without any master registration every open promotion fixer task (promo-RUN-N) and troubleshooting crew fixer task (crew-STAMP-fix-N) of every swarm: in every panic repository it keeps the branch the task records, its repository branches and the worktree branch of the agent claiming it, which each swarm's tick pass records when it reads its pass document, drops when it finds no open fixer and lets lapse fifteen minutes after the last pass that wrote it.",
+      "seam": "The tick pass read of the pass document, the fixer branch record of each swarm, and the panic CI cancel sweep in the tick pass and the panic button",
+      "rules": [
+        "panic-sweep-spares-only-registered-fixes"
+      ],
+      "tests": [
+        "tests/swarm/test_panic.py::test_tick_pass_spares_every_swarms_recorded_fixer_branches_without_a_registration",
+        "tests/swarm/test_panic.py::test_the_panic_button_spares_the_recorded_fixer_branches",
+        "tests/swarm/test_panic.py::test_the_pass_read_records_the_open_fixer_branches_of_its_document",
+        "tests/swarm/test_panic.py::test_the_pass_read_drops_the_record_once_no_fixer_is_open",
+        "tests/swarm/test_panic.py::test_the_fixer_task_pattern_names_the_ids_the_promotion_watch_and_the_crew_file",
+        "tests/swarm/test_panic.py::test_the_pass_read_writes_the_fixer_record_to_expire_after_fixers_ms"
       ]
     },
     {
@@ -4273,8 +5123,8 @@
       "operator_words": "Isnt the tick or controller to be reading the db instead of the ledger? We had work for decoupling this, it is the main reason why we did the tick rework the ledger should be a presentation layer only no more.",
       "ordered_at": "2026-11-07",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-db-ledger",
-      "behaviour": "While the database URL setting names the shared ledger database, a tick pass serves its ledger export, resource reads and operations in process through the ledger server's own route code over the shared ledger repository, every write keeping the controller epoch stamp and every refusal surfacing as the same HTTP error, so passes complete with the ledger server down; without the setting the tick calls the ledger server.",
-      "seam": "scripts.tick.adapters.database_ledger.client, chosen by scripts.swarm_ledger.ledger_route.tick for the tick ledger port adapter and the pass LedgerClient",
+      "behaviour": "A tick pass serves its ledger export, resource reads and operations in process through the ledger API route code over the shared ledger store, judged as the swarm's own service, every write keeping the controller epoch stamp and every refusal surfacing as the same HTTP error, so passes complete with the ledger server down; no setting or fallback sends a tick read or write to the ledger server.",
+      "seam": "scripts.tick.adapters.database_ledger.client, the only client scripts.swarm_ledger.ledger.client returns, used by the tick ledger port adapter and the pass LedgerClient inside scripts.swarm_ledger.ledger_route.tick",
       "semgrep_rule": "feature-tick-database-ledger",
       "live_check": [
         "python",
@@ -4285,12 +5135,10 @@
         "tick-report"
       ],
       "tests": [
-        "tests/tick/test_database_ledger.py::test_a_tick_routed_call_serves_in_process_only_while_the_database_url_is_set",
         "tests/tick/test_database_ledger.py::test_the_port_exports_the_ledger_with_the_ledger_server_down",
         "tests/tick/test_database_ledger.py::test_the_port_writes_with_the_controller_epoch_with_the_ledger_server_down",
         "tests/tick/test_database_ledger.py::test_a_stale_controller_write_is_refused_as_the_server_refuses_it",
         "tests/tick/test_database_ledger.py::test_the_pass_ledger_reads_and_writes_with_the_ledger_server_down",
-        "tests/tick/test_database_ledger.py::test_outside_a_database_pass_the_port_still_calls_the_ledger_server",
         "tests/tick/test_database_ledger_routes.py::test_a_missing_ledger_answers_the_server_404_body",
         "tests/tick/test_database_ledger_routes.py::test_a_storage_failure_answers_the_server_500_body_and_logs_it",
         "tests/tick/test_database_ledger_routes.py::test_a_read_is_bounded_and_encoded_as_ascii_json",
@@ -4304,10 +5152,31 @@
         "tests/tick/test_database_ledger_routes.py::test_a_refused_request_raises_the_server_http_error",
         "tests/tick/test_database_ledger_routes.py::test_a_reply_below_400_is_returned",
         "tests/tick/test_database_ledger_routes.py::test_the_database_client_carries_the_base_timeout_and_in_process_transport",
-        "tests/tick/test_database_ledger_routes.py::test_the_ledger_client_is_the_database_client_inside_a_database_pass",
-        "tests/tick/test_database_ledger_routes.py::test_a_database_call_sends_its_service_flag_and_exits_as_the_server_refusal",
-        "tests/tick/test_database_ledger_routes.py::test_a_tick_routed_call_keeps_its_own_ledger_route",
-        "tests/tick/test_database_ledger_routes.py::test_the_port_builds_the_database_client_with_its_base_and_bounded_timeout"
+        "tests/tick/test_database_ledger_routes.py::test_the_port_bounds_each_built_clients_timeout_by_the_deadline_left"
+      ]
+    },
+    {
+      "id": "swarm-ledger-api-writes",
+      "origin": "operator",
+      "operator_words": "finish the API to database path so it works, shift every swarm write onto it, and remove the old ledger write path completely. No fallback, no switch, no dual mode, no allowlist, no workaround left behind.",
+      "ordered_at": "2026-11-16",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-write-cutover",
+      "behaviour": "Every swarm ledger read and write, the hub admission claim and its release included, runs the ledger API route code in process over the shared ledger store, judged as the acting name, a pinned agent or the swarm's own service, with no request to the ledger server; page writes reach the ledger API service, which migrates the shared schema and runs the write upkeep, while the ledger server answers every write method as unsupported; a hosted hub without the shared database setting refuses to start.",
+      "seam": "scripts.tick.adapters.database_ledger.client and request for every swarm client, scripts.swarm_ledger.api_service.WriteHandler for HTTP writes, and scripts.hub.runner.main for the hosted hub database check",
+      "semgrep_rule": "feature-ledger-api-writes",
+      "live_check": [
+        "python",
+        "-m",
+        "scripts.install",
+        "swarm",
+        "rig-grade-swarm",
+        "tick-report"
+      ],
+      "tests": [
+        "tests/swarm_ledger/test_ledger_write_cutover.py::test_the_hub_admission_claim_lands_in_the_ledger_store_with_no_ledger_server_request",
+        "tests/swarm_ledger/test_ledger_write_cutover.py::test_a_stale_hub_claim_is_refused_by_the_route_with_no_ledger_server_request",
+        "tests/swarm_ledger/test_ledger_write_cutover.py::test_the_ledger_server_answers_every_write_method_as_unsupported",
+        "tests/swarm_ledger/test_ledger_write_cutover.py::test_a_hosted_hub_without_the_shared_database_refuses_to_start"
       ]
     },
     {
@@ -4687,6 +5556,18 @@
       ]
     },
     {
+      "id": "protected-lint-grades-the-pull-request-head",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2550",
+      "behaviour": "The Tests lint step that runs the protected gate grades the pull request head against its merge base with the trusted event base, and the run revision outside a pull request, so frozen registry and grader changes that landed on dev after the event base are never blamed on a pull request behind dev, while a pull request that edits a frozen file still fails.",
+      "seam": "The Tests lint step run text that invokes scripts.gate_protected, executed over a planted repository with a grader worktree at the event base",
+      "tests": [
+        "tests/test_gate_protected.py::test_the_protected_lint_step_passes_a_pull_request_behind_landed_frozen_changes",
+        "tests/test_gate_protected.py::test_the_protected_lint_step_still_refuses_a_frozen_edit_behind_dev",
+        "tests/test_gate_protected.py::test_the_protected_lint_step_grades_the_run_revision_outside_a_pull_request"
+      ]
+    },
+    {
       "id": "hive-rollout-lease-failed-sync",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2209",
@@ -4728,6 +5609,26 @@
       "tests": [
         "tests/inbox/test_scoped_publish.py::test_scoped_member_send_selects_swarm_before_state_and_only_falls_back_on_failure",
         "tests/inbox/test_scoped_publish.py::test_scoped_nats_member_sends_without_root_state_or_redis_fallback"
+      ]
+    },
+    {
+      "id": "bus-request-error-text",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-bus-timeout-text",
+      "behaviour": "A bus request that no subscriber serves fails with no responders for its subject, and a request whose answer does not arrive within its timeout fails with a timeout naming its subject and wait, so a late answer never reads as a missing responder.",
+      "seam": "NatsBus.request mapping the nats client's NoRespondersError and request TimeoutError",
+      "tests": [
+        "tests/events/test_scoped_nats.py::test_a_nats_request_passes_its_timeout_and_tells_a_late_answer_from_a_missing_responder"
+      ]
+    },
+    {
+      "id": "bus-connect-timeout-text",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-bus-timeout-text",
+      "behaviour": "A bus open whose server accepts the connection but does not finish the connect handshake within the first connect bound fails with a timeout naming the server and the wait, never a bare timeout with no text.",
+      "seam": "The first connect of NatsBus mapping the nats client's handshake timeout",
+      "tests": [
+        "tests/events/test_nats.py::test_a_first_connect_that_never_finishes_its_handshake_names_the_server_and_its_wait"
       ]
     },
     {
@@ -4775,6 +5676,17 @@
       "seam": "hooks.context.hive_join.run",
       "tests": [
         "tests/test_hive_join_hook.py::test_root_hive_session_writes_its_join_report_without_a_member_id"
+      ]
+    },
+    {
+      "id": "hive-join-report-tool-repair",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2451",
+      "behaviour": "A swarm session whose hive join report write failed at session start, such as on a Redis connection error, writes the report on its next tool call when its execution has none, so the launch check grades the report instead of failing the launch on a missing one; a tool call leaves a report another session of the execution wrote in place and only retries its ledger checks, while a session start still replaces it.",
+      "seam": "hooks.context.hive_join.run",
+      "tests": [
+        "tests/test_hive_join_hook.py::test_a_tool_call_writes_the_join_report_a_failed_start_left_missing",
+        "tests/test_hive_join_hook.py::test_only_a_session_start_replaces_the_join_report_of_another_session"
       ]
     },
     {
@@ -4868,13 +5780,25 @@
       ]
     },
     {
+      "id": "type-gate-repeatable-counts",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-strict-type-gate-flake",
+      "behaviour": "The strict type gate checks its sorted sources in contiguous runs of at most a thousand files, one basedpyright process each, and refuses a measurement whose checker reached the memory line where basedpyright empties its type cache, so one commit counts the same type errors on every run.",
+      "seam": "scripts.type_gate.measure through its basedpyright subprocess runs and the peak resident memory of its child processes",
+      "tests": [
+        "tests/test_type_gate.py::test_measure_checks_at_most_a_thousand_sources_per_checker_process_and_sums_their_counts",
+        "tests/test_type_gate.py::test_a_checker_peak_at_the_line_where_basedpyright_empties_its_type_cache_is_refused",
+        "tests/test_type_gate.py::test_a_checker_peak_under_the_line_where_basedpyright_empties_its_type_cache_is_kept"
+      ]
+    },
+    {
       "id": "hive-master-refused-account-retry",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-scale-cpu",
       "behaviour": "A hive master launch refused by a full account reservation retries on another account, never on the refused native interactive login, so the launch ends after one retry instead of looping until the tick lock goes stale.",
       "seam": "HiveLaunch spawn account retry through master selection",
       "tests": [
-        "tests/hive/test_master_fallback_launch.py::test_a_secondary_master_retry_leaves_a_full_native_login_for_a_subscription_slot"
+        "tests/hive/test_master_fallback_launch.py::test_a_front_door_master_retry_leaves_a_full_native_login_for_a_subscription_slot"
       ]
     },
     {
@@ -4889,6 +5813,66 @@
         "tests/hive/test_master_placement.py::test_a_closed_slot_is_skipped_and_the_next_open_slot_on_the_same_hive_is_chosen",
         "tests/hive/test_master_fallback_launch.py::test_the_front_door_master_skips_a_master_login_its_capacity_rows_mark_closed",
         "tests/hive/test_master_fallback_launch.py::test_a_master_skips_a_native_login_whose_claude_account_is_closed"
+      ]
+    },
+    {
+      "id": "forced-master-drained-slots",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-forced-master-drained-accounts",
+      "behaviour": "A forced front door master on a hive with no Claude master login and no native login is placed on a subscription slot even when no Claude account has a free seat in the capacity rows, drained at a quota floor or full, and an account drained at the worker week floor gets its launch order at the slot cap its hive advertises; an account with a free seat is still taken first, a row of another harness never opens a claude slot, and an unforced master still waits with no claude slot.",
+      "seam": "HiveLaunch master selection account set over the fleet capacity rows, through send_order",
+      "rules": [
+        "master-slots-from-free-seats-alone"
+      ],
+      "tests": [
+        "tests/hive/test_master_fallback_launch.py::test_a_forced_front_door_master_takes_a_slot_without_a_free_seat_on_a_hive_without_a_login",
+        "tests/hive/test_master_fallback_launch.py::test_a_forced_front_door_master_takes_an_account_with_a_free_seat_before_a_drained_one",
+        "tests/hive/test_master_fallback_launch.py::test_a_forced_front_door_master_never_takes_a_claude_slot_on_another_harness_row",
+        "tests/hive/test_master_fallback_launch.py::test_a_forced_front_door_master_on_a_drained_account_gets_its_launch_order"
+      ]
+    },
+    {
+      "id": "hive-front-door-master-floor",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/crew-1116073743-fix-1",
+      "behaviour": "The controller's master selection refuses a Claude login only at the master floor, its week at or under the primary login reserve or its five hour window at or under the hard five hour handoff, or for a closure the worker drain floor does not explain; a login the fleet capacity rows close at the worker drain floor alone still takes the front door master on its hive master login, a missing claude slot wait names each hosting hive master login at the master floor in whole percent, a master seat two and up is checked against its own seat, and a front door master is warned to hand off only at its master floor.",
+      "seam": "HiveLaunch master selection closed set over the fleet AccountRoute capacity rows",
+      "rules": ["master-closed-at-worker-drain-floor"],
+      "tests": [
+        "tests/hive/test_master_fallback_launch.py::test_the_front_door_master_places_on_its_master_login_closed_only_by_the_worker_drain_floor",
+        "tests/hive/test_master_fallback_launch.py::test_the_front_door_master_is_refused_at_the_master_floor_with_that_reason",
+        "tests/hive/test_master_fallback_launch.py::test_the_front_door_master_keeps_a_login_closed_for_a_reason_the_drain_floor_does_not_explain",
+        "tests/hive/test_master_fallback_launch.py::test_a_master_off_the_front_door_never_takes_a_slot_on_a_login_the_worker_drain_floor_closed",
+        "tests/hive/test_master_fallback_launch.py::test_a_master_reads_the_worker_drain_rule_of_the_row_harness",
+        "tests/hive/test_master_fallback_launch.py::test_a_master_wait_other_than_a_missing_claude_slot_names_no_master_floor",
+        "tests/hive/test_master_fallback_launch.py::test_master_fill_checks_a_seat_two_master_against_its_own_seat_not_the_front_door",
+        "tests/hive/test_master_fallback_launch.py::test_the_distributed_controller_admits_the_front_door_master_on_a_login_its_fleet_rows_drain",
+        "tests/swarm/test_quota_handoff.py::test_a_front_door_master_is_warned_only_at_its_master_floor"
+      ]
+    },
+    {
+      "id": "dead-offer-generation",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-dead-offer-generation",
+      "behaviour": "An offer that dead letters while the hub holds no admission for it advances its open, unclaimed task's claim generation by one, and a delivery that meets a dead claim marker asks the hub for that advance before it is terminated, so the task's next offer carries a fresh claim key and is placed on a later pass instead of being terminated forever.",
+      "seam": "Spoke._finish_dead and Spoke._ended through LaneTasks.dead_lettered against Admission.reopen and the ledger task_update claim generation advance",
+      "rules": ["dead-letter-reopen-keeps-generation"],
+      "tests": [
+        "tests/swarm/test_events_placement.py::test_a_task_whose_offer_dead_lettered_at_its_current_generation_is_placed_on_a_later_pass",
+        "tests/hub/test_admission.py::test_a_dead_lettered_reopen_with_no_admission_held_advances_the_claim_generation",
+        "tests/hive/test_spoke.py::test_an_offer_meeting_a_dead_claim_asks_the_hub_to_advance_its_generation_before_term"
+      ]
+    },
+    {
+      "id": "forced-master-slot-reservation",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-forced-master-slot-reservation",
+      "behaviour": "A forced front door master's hive launch order goes out on a token slot the hive caps at zero or whose seats are all held, and its acknowledgement writes the slot's live row so the master counts against the account; an unforced master on that slot is still refused as account reservation is full.",
+      "seam": "HiveLaunch.send_order against LaunchSlots.reserve_reading and LaunchSlots.acknowledge",
+      "rules": ["forced-master-slot-reservation-refused"],
+      "tests": [
+        "tests/hive/test_master_fallback_launch.py::test_a_forced_front_door_master_passes_a_refused_launch_slot_reservation",
+        "tests/hive/test_master_fallback_launch.py::test_an_unforced_front_door_master_is_still_refused_at_a_full_launch_slot_reservation"
       ]
     },
     {
@@ -5589,6 +6573,16 @@
       ]
     },
     {
+      "id": "promotion-red-graded-job-fails-at-once",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2598",
+      "behaviour": "The promotion step fails on its first poll and names each red job when the Tests run it grades, its own or a newer green run it picked, already holds a job that ended red outside the launch hotfix route, so it never holds the release group through the thirty minute wait.",
+      "seam": "snapshotGradeComplete in .github/scripts/promote.cjs, driven by the promotion API contract harness tests/contracts/promotion/promote.cjs",
+      "tests": [
+        "tests/contracts/promotion/test_promote.py::test_promotion_api_contracts"
+      ]
+    },
+    {
       "id": "ledger-write-substep-timing",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2479",
@@ -5812,15 +6806,24 @@
     {
       "id": "scratch-ledger-folder-skips-shared-database",
       "origin": "inventory",
-      "behaviour": "A ledger folder under ~/scratchpad ignores an inherited shared database URL and writes only to its own sqlite file unless AGENTIHOOKS_SCRATCH_SHARED_DATABASE is set to 1, and the swarm lease's ledger address follows the same url() check so a scratch ledger's lease never routes through the shared server; a ledger folder outside the scratchpad, including one that resolves outside it through .. or a tilde home, keeps the shared database.",
-      "seam": "scripts.swarm_ledger.repository.postgres.url and scratch against scripts.swarm.lease._address and scripts.swarm_ledger.storage.build",
+      "behaviour": "A ledger folder under ~/scratchpad ignores an inherited shared database URL and writes only to its own sqlite file unless AGENTIHOOKS_SCRATCH_SHARED_DATABASE is set to 1; a ledger folder outside the scratchpad, including one that resolves outside it through .. or a tilde home, keeps the shared database.",
+      "seam": "scripts.swarm_ledger.repository.postgres.url and scratch against scripts.swarm_ledger.storage.build",
       "tests": [
         "tests/swarm_ledger/test_scratch_store.py::test_a_scratch_launch_with_inherited_database_settings_writes_only_to_its_folder",
         "tests/swarm_ledger/test_scratch_store.py::test_a_scratch_folder_ignores_the_shared_database_url",
         "tests/swarm_ledger/test_scratch_store.py::test_a_scratch_folder_uses_the_shared_database_only_when_asked",
         "tests/swarm_ledger/test_scratch_store.py::test_a_ledger_folder_outside_the_scratchpad_keeps_the_shared_database",
-        "tests/swarm_ledger/test_scratch_store.py::test_a_scratch_folder_given_with_a_home_tilde_is_a_scratch_folder",
-        "tests/swarm/test_lease.py::test_the_lease_keeps_a_scratch_ledger_route_when_the_shared_database_is_inherited"
+        "tests/swarm_ledger/test_scratch_store.py::test_a_scratch_folder_given_with_a_home_tilde_is_a_scratch_folder"
+      ]
+    },
+    {
+      "id": "folder-ledger-server-follows-other-writers",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-load-streams-lost-patch",
+      "behaviour": "A read only ledger server on a ledger folder runs the stored ledger follow loop, so a write another process stores there, the ledger API service or an agent running the route code in process, reaches every open page stream within one follow pass instead of waiting for the server's next read of that ledger.",
+      "seam": "scripts.swarm_ledger.ledger_server.serve and follow_shared over scripts.swarm_ledger.events.publishing.Publishing",
+      "tests": [
+        "tests/swarm_ledger/test_folder_store.py::test_the_folder_ledger_server_publishes_a_write_another_process_stored_without_a_read"
       ]
     },
     {
@@ -5848,6 +6851,28 @@
         "tests/swarm_ledger/test_master_remote_control.py::test_only_a_master_with_a_recorded_decision_gets_the_remote_control_cell",
         "tests/swarm_ledger/test_master_remote_control.py::test_an_off_master_without_transport_shows_phone_access_unavailable_with_the_reason",
         "tests/swarm_ledger/test_master_remote_control.py::test_a_master_on_the_token_fallback_card_says_phone_access_unavailable"
+      ]
+    },
+    {
+      "id": "front-door-launch-chain",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-launch-proven-tests",
+      "behaviour": "deployed shape: the front door master launch the swarm runtime hands to init-agent reaches claude through the launcher script, the agentihooks claude entry and the claude ai login route with Remote Control on and no token variable in its environment, and the runtime records Remote Control on; a primary login at its week reserve hands the launch to the next stored login on the same route; an expired login reaches claude on the subscription token fallback without Remote Control, and the runtime records and reports that fallback.",
+      "seam": "scripts.swarm.runtime.HerdrRuntime.spawn through scripts.init_agent.main, scripts.install.cmd_claude and scripts.routing.claude_ai.launch_claude",
+      "tests": [
+        "tests/swarm/test_front_door_launch_chain.py::test_the_front_door_launch_execs_claude_on_the_login_slot_with_remote_control_and_no_token",
+        "tests/swarm/test_front_door_launch_chain.py::test_a_primary_login_at_its_week_reserve_hands_the_front_door_launch_to_the_next_login",
+        "tests/swarm/test_front_door_launch_chain.py::test_an_expired_front_door_login_execs_the_token_fallback_and_reports_it"
+      ]
+    },
+    {
+      "id": "front-door-master-refill-deployed-shape",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-launch-proven-tests",
+      "behaviour": "deployed shape: after the front door master hands its seat off for a recycle, the tick master step places its successor through the pod controller's fenced runtime, the controller's fleet account rows, the hive launch selection and a launch order the root hive consumes, on root's master claude ai login slot, with no placement refusal and before the forcing window ends, also with that login at seven percent of its week as on 17 November.",
+      "seam": "scripts.tick.steps.masters._tick_master through scripts.swarm.controller.FencedRuntime, scripts.swarm_v2.kubernetes.approved.FleetAccounts, scripts.hive.launch.HiveLaunch and scripts.hive.orders.Consumer",
+      "tests": [
+        "tests/hive/test_master_refill_deployed_shape.py::test_a_recycled_front_door_master_is_refilled_on_the_root_login_slot_before_the_forcing_window"
       ]
     },
     {
@@ -5982,6 +7007,21 @@
       ]
     },
     {
+      "id": "controller-gh-token-in-process",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-gh-token-in-process",
+      "behaviour": "A process that holds the GitHub App key in App mode, as the swarm controller does, runs every gh call of github_reads.rest on the real gh client with the installation token its own process minted and cached, keeping the read reserve check in process, so no Python token wrapper starts and no token is minted per call; a token it cannot mint or a read below the reserve is left to the gh wrapper unchanged, and a process without the key runs gh exactly as before.",
+      "seam": "scripts.swarm.github_reads.rest through scripts.swarm.github_reads._signed and scripts.github_app_cli.signed",
+      "tests": [
+        "tests/swarm/test_github_reads.py::test_a_process_holding_the_app_key_runs_gh_on_its_own_cached_app_token",
+        "tests/swarm/test_github_reads.py::test_a_process_that_cannot_mint_the_app_token_leaves_gh_to_its_wrapper",
+        "tests/swarm/test_github_reads.py::test_a_call_the_process_cannot_sign_runs_through_the_wrapper_unchanged",
+        "tests/test_github_app_cli.py::test_signed_runs_the_wrapped_client_on_the_process_token_over_the_caller_environment",
+        "tests/test_github_app_cli.py::test_signed_leaves_a_read_below_the_reserve_to_the_wrapper",
+        "tests/test_github_app_cli.py::test_signed_leaves_a_token_the_process_cannot_mint_to_the_wrapper"
+      ]
+    },
+    {
       "id": "hive-registry-unique-name-suffix",
       "origin": "inventory",
       "behaviour": "A hive registry update that sets a name or ui setting derives a unique name with the first free numeric suffix when the settled name collides with another registered hive's name, so a second headed hive reads as swarm-master-2 instead of also reading as swarm-master, a derived name survives a restart or a later setting that does not rename it, and a headless hive renamed to a held name takes the next free suffix.",
@@ -6000,6 +7040,30 @@
       "seam": "scripts.swarm.automated_gc.run against scripts.inbox.store.InboxStore",
       "tests": [
         "tests/swarm/test_automated_gc.py::test_a_first_import_under_a_patched_inbox_store_sweeps_with_the_real_store"
+      ]
+    },
+    {
+      "id": "automated-activity-question-own-ref",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-activity-question-own-ref",
+      "behaviour": "Automated agent collection sends each activity question with its own inbox ref, automated-activity followed by the probe time, instead of one fixed ref for every question, so the recipient's seen marks never close a later question as already shown through the ledger on delivery: every question reaches the agent through the seen claim, its reply is recorded, and three nothing to do answers collect the agent.",
+      "seam": "scripts.swarm.automated_gc.run asking an automated agent, each question delivered by scripts.inbox.seen.claim and answered with InboxStore.reply",
+      "tests": [
+        "tests/swarm/test_automated_gc.py::test_each_question_passes_the_seen_claim_and_three_idle_answers_collect_the_agent"
+      ]
+    },
+    {
+      "id": "inbox-notices-pass-the-seen-claim",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2563",
+      "behaviour": "Automated swarm notices keep reaching their recipient through the seen claim: an automated agent's activity question closed without a reply, by the agent, through the ledger, blocked or cancelled, is cleared and asked again on the next probe, every master backstop and every master retire handoff ask carries its own ref followed by its send time, and every step starvation alarm carries its own ref followed by the first miss of its starvation, so the recipient's seen marks never close a later backstop, ask or alarm as already shown through the ledger.",
+      "seam": "scripts.swarm.automated_gc.run over a question closed with InboxStore.close, scripts.swarm.master_wake.run sending repeated backstops, scripts.swarm.master_retire.hold sending repeated asks and scripts.swarm.health.step_starvation.step alarming a step that starves again, each delivered by scripts.inbox.seen.claim",
+      "tests": [
+        "tests/swarm/test_automated_gc.py::test_a_question_closed_without_a_reply_is_asked_again_on_the_next_probe",
+        "tests/swarm/test_automated_gc.py::test_only_a_question_closed_without_a_reply_leaves_an_empty_request",
+        "tests/swarm/test_master_wake.py::test_each_backstop_passes_the_seen_claim",
+        "tests/swarm/test_master_retire.py::test_each_retire_ask_passes_the_seen_claim",
+        "tests/tick/steps/test_step_starvation.py::test_each_starvation_of_a_step_passes_the_seen_claim"
       ]
     },
     {
@@ -6095,6 +7159,22 @@
       "tests": [
         "tests/swarm/test_events_placement.py::test_a_workstation_task_under_events_is_offered_admitted_and_launched_on_the_root_hive",
         "tests/swarm/test_events_placement.py::test_under_events_the_tick_launches_no_workstation_task"
+      ]
+    },
+    {
+      "id": "unfit-refusal-spends-no-delivery",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2584",
+      "behaviour": "An offer a hive may not take, because it is pinned to another hive, is a workstation task off the root hive or needs a capability the hive lacks, goes back to its lane queue after five seconds without spending one of its five deliveries, so offers pinned to one hive no longer die in the dead letters while other hives refuse them and reach their own hive at the attempt they had. On the memory bus the released message keeps its attempt; on NATS the original stays in flight for the delay and a copy carrying the delivery base header takes its place. The hub readiness pass offers no event still on its queue, so an offer that waits past the dedupe window stays a single copy.",
+      "seam": "WorkQueue.release on the memory bus, the NATS bus and the scoped queue, called by scripts.swarm.readiness.take, and scripts.swarm.readiness.publish skipping offers its withdraw sweep keeps",
+      "rules": [
+        "unfit-refusal-spends-a-delivery"
+      ],
+      "tests": [
+        "tests/events/test_bus_contract.py::test_a_released_delivery_comes_back_after_its_delay_at_its_own_attempt_and_never_dies",
+        "tests/swarm/test_events_placement.py::test_refusals_by_hives_outside_its_pin_spend_none_of_an_offers_deliveries",
+        "tests/swarm/test_events_placement.py::test_a_skipped_offer_is_released_for_another_hive_not_terminated",
+        "tests/swarm/test_readiness.py::test_an_offer_still_queued_past_the_dedupe_window_is_not_offered_again"
       ]
     },
     {
@@ -6252,6 +7332,19 @@
       "tests": [
         "tests/test_proof_master_redis.py::test_a_proof_swarm_master_pane_reads_the_scratch_redis",
         "tests/test_proof_master_redis.py::test_a_live_swarm_pane_keeps_the_operator_redis"
+      ]
+    },
+    {
+      "id": "proof-master-claude-launch-scratch-redis",
+      "origin": "regression",
+      "ordered_at": "2026-11-17",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-proof-master-keeps-proof-redis",
+      "behaviour": "agentihooks claude keeps a scratch proof swarm's AGENTIHOOKS_SWARM_REDIS_URL from its launcher over the env files it loads, so a master forced up on the proof swarm, its hooks and its commands read and bind on the proof Redis; every other env file value still overrides the shell, and a live swarm session takes the env file Redis.",
+      "seam": "scripts.install._load_claude_runtime_env as scripts.install.cmd_claude runs it before routing the session",
+      "tests": [
+        "tests/test_proof_master_redis.py::test_agentihooks_claude_starts_a_proof_master_on_the_scratch_redis",
+        "tests/test_proof_master_redis.py::test_agentihooks_claude_starts_a_live_swarm_session_on_the_env_file_redis",
+        "tests/test_proof_master_redis.py::test_only_a_proof_swarm_that_exported_its_redis_keeps_it_over_the_env_files"
       ]
     },
     {
@@ -6464,6 +7557,35 @@
       ]
     },
     {
+      "id": "review-state-on-ledger",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-review-state-on-ledger",
+      "behaviour": "Review rounds and reader launches live on the ledger task, so a successor on another hive spends the rounds its predecessor left and is refused a fourth on the same pull request, and may open or mark ready the pull request whose standards and spec readers its predecessor ran; each round adds its own stamp under a guard on the rounds it read, so two rounds started at once both count; a reader launch lands on the task beside this machine's counter even when two readers race, and one the ledger cannot take is reported and stays counted on this machine; swarm status counts each task's rounds from its ledger row.",
+      "seam": "scripts.swarm.review_rounds start and record_reader over the ledger task fields review_rounds and review_readers that scripts.swarm_ledger.ledger_tasks accepts, validates and guards, read by scripts.gates.one_push.OnePush.opening, written by scripts.gates.subagents.SubagentBudget.decide and scripts.swarm.cli review, and counted by scripts.swarm.status findings",
+      "tests": [
+        "tests/swarm/test_review_rounds.py::test_a_successor_on_a_fresh_home_spends_the_rounds_its_predecessor_left_on_the_ledger",
+        "tests/swarm/test_review_rounds.py::test_a_round_is_written_on_the_ledger_task_by_the_agent_and_nothing_counts_on_this_machine",
+        "tests/swarm/test_review_rounds.py::test_rounds_before_a_pull_request_and_on_each_pull_request_count_apart",
+        "tests/swarm/test_review_rounds.py::test_a_reader_is_recorded_once_on_the_ledger_task_under_a_guard_on_the_readers_read",
+        "tests/swarm/test_review_rounds.py::test_two_readers_racing_on_the_same_task_both_land",
+        "tests/swarm/test_review_rounds.py::test_a_round_racing_another_on_the_same_counter_counts_after_it",
+        "tests/swarm/test_review_rounds.py::test_a_round_that_loses_the_third_round_to_a_race_is_refused",
+        "tests/swarm_ledger/test_task_review_fields.py::test_a_task_update_records_the_review_round_counts_and_readers",
+        "tests/swarm_ledger/test_task_review_fields.py::test_review_rounds_that_are_not_counter_names_to_round_stamps_are_refused",
+        "tests/swarm_ledger/test_task_review_fields.py::test_review_readers_that_are_not_a_list_of_names_are_refused",
+        "tests/swarm_ledger/test_task_review_fields.py::test_a_reader_write_lands_only_while_the_readers_it_read_still_hold",
+        "tests/swarm_ledger/test_task_review_fields.py::test_a_round_write_lands_only_while_the_rounds_it_read_still_hold",
+        "tests/gates/test_subagents.py::test_a_reader_launch_is_recorded_on_the_ledger_task_beside_its_local_counter",
+        "tests/gates/test_subagents.py::test_a_reader_launch_the_ledger_cannot_take_is_counted_here_reported_and_allowed",
+        "tests/gates/test_subagents.py::test_one_launch_naming_both_readers_records_the_second_when_the_first_fails",
+        "tests/gates/test_one_push.py::test_a_successor_opens_the_pull_request_its_predecessor_reviewed_on_another_hive",
+        "tests/gates/test_one_push.py::test_a_reader_neither_this_machine_nor_the_ledger_task_records_still_refuses_the_open",
+        "tests/swarm/test_status.py::test_proof_loop_reads_each_pull_requests_review_rounds_from_the_task_row",
+        "tests/swarm/test_cli.py::test_review_closes_on_the_third_round_and_refuses_a_fourth",
+        "tests/swarm/test_cli.py::test_review_spends_the_rounds_the_ledger_task_holds_for_each_pull_request"
+      ]
+    },
+    {
       "id": "ledger-task-update-takes-confirmed-pull-request",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-swarm-pr-confirmed-fields",
@@ -6489,6 +7611,43 @@
         "tests/test_ci_test_plan.py::test_a_failed_record_download_names_the_github_error_and_runs_every_test",
         "tests/test_ci_test_plan.py::test_a_failed_download_of_every_run_counts_as_no_record",
         "tests/test_ci_test_plan.py::test_a_failed_download_of_a_newer_run_moves_on_to_an_older_record"
+      ]
+    },
+    {
+      "id": "artifact-downloads-retry-a-stalled-blob",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-download-artifact-retry",
+      "behaviour": "Every artifact download in the workflows, composite actions and reviewed test summary steps uses actions/download-artifact@v8.0.2, which fetches a blob again when its stream stalls for thirty seconds, so a stalled download never passes with a partial file the way v4.3.0 did.",
+      "seam": "The download-artifact uses lines in .github workflows and actions and in scripts/ci_gate_summary_steps.yml",
+      "tests": [
+        "tests/test_ci_artifact_download_retry.py::test_every_download_step_uses_the_release_that_retries_a_stalled_blob"
+      ]
+    },
+    {
+      "id": "coverage-check-reads-each-database-in-order",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-dep-manifest-coverage-slow",
+      "behaviour": "The coverage database check reads each database file fully before SQLite opens it, so a downloaded shard database that has left the page cache is read in one pass instead of page by page from a busy node disk.",
+      "seam": "tests.coverage_check.problem, run by the dep-manifest and unit jobs of the Tests workflow, scripts.ci_branch_coverage and tests.reused_coverage",
+      "tests": [
+        "tests/test_reused_coverage.py::test_the_check_reads_each_database_through_before_sqlite_opens_it"
+      ]
+    },
+    {
+      "id": "pattern-downloads-keep-a-lone-artifact-where-its-reader-looks",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2560",
+      "behaviour": "actions/download-artifact@v8.0.2 extracts a pattern download that matches exactly one artifact into the bare download path instead of a folder named after the artifact. The Tests mutation merge still finds every shard report, and the retained mutation replay still verifies every grade, whether one shard ran or several. When the shards output is [0], the download path names the lone shard's own folder. The test summary still counts the tests of a lone leg whose durations and flakes land at the folder root, and Sonar takes the coverage of a lone selected leg that lands at the coverage folder root as that leg's shard. Every other pattern download without merge-multiple is classified, so a new one cannot be added unexamined.",
+      "seam": "The mutation job's Download every mutation shard report path and the Merge the shard reports step in the Tests workflow, the grade download in the retained mutation replay's verify job, scripts.ci_gate_summary.counts over the test summary downloads, and every pattern download under .github",
+      "tests": [
+        "tests/test_ci_lone_artifact_download.py::test_every_pattern_download_without_merge_multiple_says_where_a_lone_match_lands",
+        "tests/test_ci_lone_artifact_download.py::test_a_lone_shard_download_lands_in_a_folder_its_pattern_names",
+        "tests/test_ci_lone_artifact_download.py::test_the_mutation_merge_finds_every_shard_report_however_many_shards_ran",
+        "tests/test_ci_lone_artifact_download.py::test_the_mutation_replay_verify_finds_every_grade_however_many_shards_ran",
+        "tests/test_ci_lone_artifact_download.py::test_the_gate_summary_counts_every_leg_however_many_legs_ran",
+        "tests/test_ci_branch_reuse_workflow.py::test_sonar_takes_a_lone_selected_legs_coverage_from_the_bare_download_folder",
+        "tests/test_ci_branch_reuse_workflow.py::test_sonar_leaves_a_bare_download_at_the_folder_root_when_two_legs_were_selected",
+        "tests/test_ci_branch_reuse_workflow.py::test_sonar_takes_a_lone_legs_newest_attempt_when_its_attempts_land_in_their_own_folders"
       ]
     },
     {
@@ -6554,13 +7713,14 @@
       "id": "ledger-stats-lab",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/swarm-ledger-stats-lab",
-      "behaviour": "The tick sends the swarm lab block on the time left write once it has read one; the ledger keeps it in the time left inputs; the stats calculation and the stats refresh carry a lab block with the read time, the last read error and per scheduling class the pending units and predicted wait; the Stats panel shows one Lab row before the top bottleneck.",
+      "behaviour": "The tick sends the swarm lab block on the time left write once it has read one; the ledger keeps it in the time left inputs; the stats calculation and the stats refresh carry a lab block with the read time, the last read error and per scheduling class the pending units, predicted wait and verdict cache hit ratio; the Stats panel shows one Lab row before the top bottleneck, each class line ending with its cache hits as a whole percent or no cache lookups.",
       "seam": "scripts.swarm.time_left.refresh, LedgerClient.time_left, ledger_time_left.check and apply, ledger_stats.calculate, renderStats Lab row",
       "tests": [
         "tests/swarm/test_time_left.py::test_refresh_sends_the_lab_reading_once_the_tick_has_read_one",
         "tests/swarm_ledger/test_time_left.py::TestTimeLeftOp::test_the_op_takes_the_lab_reading_and_the_calculation_carries_its_block",
         "tests/swarm_ledger/test_time_left.py::TestTimeLeftOp::test_check_accepts_every_optional_key_at_once",
         "tests/swarm_ledger/test_ledger_stats.py::test_the_lab_block_keeps_pending_units_and_predicted_wait_per_class_in_the_lab_order",
+        "tests/swarm_ledger/test_ledger_stats.py::test_the_lab_block_keeps_each_class_verdict_cache_hit_ratio_and_none_where_the_document_has_none",
         "tests/swarm_ledger/test_ledger_stats.py::test_the_stats_refresh_carries_the_lab_block_of_the_last_tick_inputs",
         "tests/swarm_ledger/test_stats_drawer.py::test_the_lab_row_lists_pending_units_and_predicted_wait_per_class_before_the_top_bottleneck"
       ]
@@ -6576,6 +7736,32 @@
         "tests/ci_lab/test_capacity.py::test_hit_ratio_is_hits_over_lookups",
         "tests/ci_lab/test_capacity.py::test_capacity_document_reports_the_verdict_cache_hit_ratio_per_class",
         "tests/ci_lab/test_capacity.py::test_load_defaults_to_no_verdict_cache_lookups"
+      ]
+    },
+    {
+      "id": "lab-worker-pod-loop",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/lab-worker",
+      "behaviour": "The CI lab worker leases units into its free slots over the scheduler's HTTP lease API with the capabilities net and browser, runs each on the executor its kind names side by side, heartbeats each lease while its executor runs, uploads the report and log through the presigned URLs and completes the lease; a unit whose executor raises stops heartbeating and is left for the scheduler to reap, a refused token ends a unit's heartbeats and delivery, a heartbeat that cannot reach the scheduler is skipped, stop lets running units finish within the termination grace and abandons the rest to reap, slots come from the CPU quota capped by CI_LAB_SLOTS, and the worker environment refuses every GitHub App or Redis variable.",
+      "seam": "scripts.ci_lab.worker Worker.run_once, run, stop, drain and free, Client, environment, slots and build, against scripts.ci_lab.lease_api.serve",
+      "tests": [
+        "tests/ci_lab/test_worker.py::test_units_from_two_heads_run_concurrently_on_one_pod",
+        "tests/ci_lab/test_worker.py::test_every_slot_runs_a_unit_at_once",
+        "tests/ci_lab/test_worker.py::test_a_full_pod_waits_for_its_first_unit_to_end_while_the_second_still_runs",
+        "tests/ci_lab/test_worker.py::test_a_crash_stops_the_heartbeat_and_the_lease_reaps",
+        "tests/ci_lab/test_worker.py::test_a_refused_heartbeat_ends_the_units_heartbeats_and_its_delivery",
+        "tests/ci_lab/test_worker.py::test_a_heartbeat_that_cannot_reach_the_scheduler_is_skipped_and_the_unit_delivered",
+        "tests/ci_lab/test_worker.py::test_a_refused_upload_url_ends_the_units_delivery",
+        "tests/ci_lab/test_worker.py::test_stop_lets_running_units_finish_within_the_termination_grace",
+        "tests/ci_lab/test_worker.py::test_a_unit_past_the_termination_grace_is_left_to_reap",
+        "tests/ci_lab/test_worker.py::test_run_leases_again_as_a_unit_frees_its_slot",
+        "tests/ci_lab/test_worker.py::test_the_pod_leases_only_units_its_net_and_browser_capabilities_and_free_slots_fit",
+        "tests/ci_lab/test_worker.py::test_the_client_speaks_the_lease_api_and_reads_a_refused_token_as_none",
+        "tests/ci_lab/test_worker.py::test_the_client_gives_up_on_a_scheduler_or_upload_that_does_not_answer",
+        "tests/ci_lab/test_worker.py::test_the_worker_environment_refuses_github_app_and_redis_variables",
+        "tests/ci_lab/test_worker.py::test_the_worker_environment_keeps_only_the_service_contract_variables",
+        "tests/ci_lab/test_worker.py::test_slots_come_from_the_cpu_quota_capped_by_ci_lab_slots",
+        "tests/ci_lab/test_worker.py::test_build_makes_the_pod_worker_from_a_clean_environment_and_refuses_redis"
       ]
     },
     {
@@ -7214,6 +8400,175 @@
         "tests/events/test_nats_lab_stream.py::test_the_lab_head_stream_takes_the_bus_dedupe_window",
         "tests/events/test_nats_lab_stream.py::test_the_memory_bus_keeps_lab_heads_on_their_own_log_with_its_dead_letters",
         "tests/hub/test_github_webhooks.py::test_main_wires_the_lab_intake_only_when_its_notice_secret_is_set"
+      ]
+    },
+    {
+      "id": "master-interactive-login-without-front-gate",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-backend-master-unrouted-account",
+      "behaviour": "place_master offers a hive's native/interactive Claude login as a placement candidate only to the front-door master seat; a secondary master seat (master-2, master-3, ...) never selects it and falls through to a subscription or api slot instead, so it never races the front door for the single cap-1 unrouted account and fails hive admission with \"account reservation is full\".",
+      "seam": "scripts.hive.placement.place_master, the native-login candidate branch gated by front; semgrep incident rule master-interactive-login-without-front-gate",
+      "tests": [
+        "tests/hive/test_master_placement.py::test_a_secondary_master_ignores_a_hive_interactive_login",
+        "tests/hive/test_master_fallback_launch.py::test_a_secondary_master_on_a_native_login_hive_is_ordered_on_a_subscription_slot"
+      ]
+    },
+    {
+      "id": "agent-number-past-four-digits",
+      "origin": "inventory",
+      "behaviour": "scripts.swarm.naming.build accepts any engineer, ci or master counter of 1 or more with no upper bound instead of refusing at 10000 with a NamingError, and every agent-name matcher built from _BASE (NAME_RE, the pane, worktree, tmp, scratch and small_slug patterns) matches four or more digits with no maximum instead of exactly four, so a swarm whose engineer counter passes 10000 still spawns, its name still parses, and NameRegistry.names still lists it instead of raising.",
+      "seam": "scripts.swarm.naming.build and scripts.swarm.naming.parse for an agent number of 10000 or more, naming.PATTERNS[\"pane\"] over that name, and scripts.swarm.naming.NameRegistry.names once its counter has passed 9999",
+      "tests": [
+        "tests/swarm/test_naming.py::test_an_agent_number_past_four_digits_builds_and_parses",
+        "tests/swarm/test_naming.py::test_names_lists_an_agent_above_ten_thousand_once_build_is_uncapped"
+      ]
+    },
+    {
+      "id": "lane-model-harness-compatibility",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2537",
+      "behaviour": "A Claude only lane model on a Codex launch resolves to the configured Codex model, or the Codex launch default when none is configured, before an explicit effort returns or an automatic effort picks; Claude and compatible Codex choices retain their model and effort.",
+      "seam": "model_pick.pick for Codex and Claude lanes with an explicit or automatic effort",
+      "rules": ["lane-model-before-harness"],
+      "tests": [
+        "tests/swarm/test_model_pick.py::test_lane_model_matches_harness_before_explicit_effort_returns",
+        "tests/swarm/test_model_pick.py::test_a_claude_lane_model_with_no_configured_codex_model_takes_the_codex_launch_model",
+        "tests/swarm/test_model_pick.py::test_only_the_claude_default_model_carries_a_claude_prefix"
+      ]
+    },
+    {
+      "id": "hub-admission-earlier-lives-launched-only",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-admission-branch-heads-after-answer",
+      "behaviour": "Hub admission reads branch heads only for the earlier lives of a reclaimed task that launched: an agent retired while still starting with no pane, such as one the hub freed because no hive started it, ran nothing and pushed no branch, so it adds no branch to the GitHub query and a task whose earlier lives all never launched reads no branch heads; those lives never count toward the claim cap either.",
+      "seam": "RedisStore.earlier_lives over the swarm history, Admission.admit through its branch heads read, and the claim cap after Admission.free",
+      "tests": [
+        "tests/swarm/test_store.py::test_earlier_lives_leave_out_an_agent_retired_while_starting_with_no_pane",
+        "tests/hub/test_admission.py::test_the_branch_heads_query_asks_only_for_earlier_lives_that_launched",
+        "tests/hub/test_admission.py::test_a_life_the_hub_freed_before_any_hive_started_it_reads_no_branch_heads_on_the_next_admission",
+        "tests/hub/test_admission_claim_cap.py::test_lives_the_hub_freed_before_any_hive_started_them_never_reach_the_claim_cap"
+      ]
+    },
+    {
+      "id": "swarm-tick-step-failure-isolated",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-step-failure-isolated",
+      "behaviour": "A tick step that raises holds its exception for the pass to end on and shuts only the steps that need it, directly or through another, while every other step of the pass runs; an inbox exits sweep that raises in every pass still lets reap retire finished agents and the master step spawn the front door successor, and the pass still ends failed on the first exception a step raised.",
+      "seam": "scripts.tick.steps.hold and fell, the held step wrappers of the observe, masters, tasks and host steps, and scripts.tick.sites.TickSites.shut, replayed through scripts.swarm.tick.tick and scripts.swarm.cli.run_tick",
+      "rules": ["tick-held-exception-shuts-every-step"],
+      "tests": [
+        "tests/tick/test_step_failure.py::test_a_raising_exits_sweep_still_runs_reap_and_the_master_step",
+        "tests/tick/test_step_failure.py::test_a_fenced_pass_with_a_raising_exits_sweep_runs_reap_and_the_master_step_and_ends_failed",
+        "tests/tick/test_step_failure.py::test_a_raised_step_shuts_only_the_steps_that_need_it_directly_or_through_another",
+        "tests/tick/test_step_failure.py::test_a_pass_without_a_raise_shuts_no_step_for_its_needs",
+        "tests/tick/test_step_failure.py::test_the_first_held_exception_stays_the_one_the_pass_ends_on",
+        "tests/tick/test_step_failure.py::test_each_step_wrapper_holds_what_its_step_raises_and_names_the_step",
+        "tests/tick/test_step_failure.py::test_the_wrapper_asks_the_tick_sites_first_so_a_stopped_step_needing_a_raised_step_falls_too"
+      ]
+    },
+    {
+      "id": "swarm-streams-hold-the-bus-replica-count",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-nats-replicas-spread-nodes",
+      "behaviour": "A provisioning bus creates every JetStream stream and key value bucket at the replica count of AGENTIHOOKS_BUS_REPLICAS, default one, and raises each existing stream holding fewer replicas in place with its messages, buckets outside the state limits included; a bus at a lower count keeps a stream's higher count, and any other configuration difference still fails the create.",
+      "seam": "scripts.events.config.BusConfig.replicas, scripts.events.nats_replicas.create and raise_all, observed through scripts.events.nats.open_bus with scoped views, queues and state buckets on a three server JetStream cluster",
+      "rules": ["bus-stream-created-without-replicas"],
+      "tests": [
+        "tests/events/test_nats_replicas.py::test_a_replicated_bus_creates_every_stream_and_bucket_at_its_replica_count",
+        "tests/events/test_nats_replicas.py::test_existing_single_replica_streams_and_buckets_are_raised_in_place_keeping_their_messages",
+        "tests/events/test_nats_replicas.py::test_a_bus_at_the_default_count_keeps_replicated_streams_at_their_count",
+        "tests/events/test_nats_replicas.py::test_the_replica_count_defaults_to_one_and_comes_from_the_environment"
+      ]
+    },
+    {
+      "id": "panic-sweep-keeps-merged-fixes",
+      "origin": "regression",
+      "ordered_at": "2026-11-17",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-steps-abandoned",
+      "behaviour": "While fleet panic is on, the CI cancel sweep of each tick pass reads a merged fix pull request once, keeps its state under the fleet panic keys until panic releases and spares that fix's runs from the kept state, and reads every open fix pull request on every sweep; a kept row whose fields no longer match the change state is read again, and a sweep run without the swarm store, as the panic button runs it, reads every fix.",
+      "seam": "scripts.swarm.panic.fix_state, read by scripts.swarm.panic.cancel_runs with the swarm store scripts.swarm.panic.tick_pass passes, and cleared by scripts.swarm.panic.release",
+      "rules": ["panic-sweep-rereads-merged-fixes"],
+      "tests": [
+        "tests/swarm/test_panic.py::test_tick_pass_reads_a_merged_fix_once_and_an_open_fix_every_sweep",
+        "tests/swarm/test_panic.py::test_cancel_runs_without_a_store_reads_every_fix_every_sweep",
+        "tests/swarm/test_panic.py::test_a_merged_fix_is_read_again_after_panic_releases",
+        "tests/swarm/test_panic.py::test_a_kept_fix_row_of_another_shape_is_read_again"
+      ]
+    },
+    {
+      "id": "master-launch-lock",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/crew-1116073743-fix-7",
+      "behaviour": "Every starter of a new front door master takes the swarm's one master launch lock, a Redis set if absent key with a five minute lease, before it reads who holds the master seats and keeps it through the launch: the tick master step, which the night watch respawn and the respawn and place master commands also run, and master up --new and --replace, which the master fallback and the critical watchdog run in their detached processes. A fallback starter racing the tick master step in one pass launches exactly one master; a starter that finds the lock held launches nothing and names the holder, or says its lease just ended; the lock is released after a launch and after a failed one and never by a holder that lost it, even when it changes hands during the release. Under the lock master up --replace retires a front door master that is still starting before it starts another, and master up never takes the front door seat from a live occupant.",
+      "seam": "scripts.swarm.master_lock.held, taken by scripts.tick.steps.masters._master and scripts.swarm.master_launch._fresh",
+      "tests": [
+        "tests/swarm/test_master_starters_race.py::test_a_fallback_starter_racing_the_tick_master_step_launches_exactly_one_master",
+        "tests/swarm/test_master_starters_race.py::test_the_tick_master_step_waits_while_master_up_launches",
+        "tests/swarm/test_master_lock.py::test_the_lock_is_the_swarm_key_set_if_absent_with_its_lease_and_holder",
+        "tests/swarm/test_master_lock.py::test_the_lock_is_released_when_its_launch_raises",
+        "tests/swarm/test_master_lock.py::test_a_lock_that_changed_hands_is_never_released_by_its_old_holder",
+        "tests/swarm/test_master_lock.py::test_a_lock_taken_over_during_its_release_is_left_to_its_new_holder",
+        "tests/swarm/test_master_lock.py::test_a_refusal_whose_holder_just_expired_says_so",
+        "tests/swarm/test_master_lock.py::test_a_held_lock_refuses_the_tick_master_step",
+        "tests/swarm/test_master_lock.py::test_a_held_lock_refuses_master_up",
+        "tests/swarm/test_master_lock.py::test_the_tick_master_step_and_master_up_release_the_lock_after_their_launch",
+        "tests/swarm/test_master_replace.py::test_master_up_replace_retires_a_starting_front_door_master_before_it_starts_one",
+        "tests/swarm/test_master_replace.py::test_master_up_never_takes_the_front_door_seat_from_a_live_occupant"
+      ]
+    },
+    {
+      "id": "semgrep-rule-exceptions-shrink",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-semgrep-exceptions-shrink",
+      "behaviour": "The Semgrep scan step Rule exceptions only shrink counts, per rule id, the pattern-not, pattern-not-inside and pattern-not-regex entries at any depth and the paths.exclude entries of every rule file in each .semgrep folder at the merge base and on the head, fails naming each count of a rule the merge base holds that grew, lets a rule id the merge base lacks start its counts, skips fixtures and is red when the head holds no rule, so an exception added inside an existing rule turns the step red.",
+      "seam": "The Semgrep scan step Rule exceptions only shrink run text, executed over a planted repository whose head changes one rule's exceptions",
+      "tests": [
+        "tests/test_ci_semgrep.py::test_the_exceptions_step_counts_each_own_rule_pattern_not_entry_and_path_exclude"
+      ]
+    },
+    {
+      "id": "quick-seat-binding",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-quick-master-relaunch-unbound",
+      "behaviour": "A quick seat stays bound to its live session: the agent a relaunch starts records its herdr pane and session id in the seat at its first hook while the seat is launching, so it stays a member, receives room notices and HANDOFF PREPARATION and hands off even without its seat variables; a relaunch whose agent never records its session leaves the seat pending and fails the command loudly instead of reading ready; quick relaunch <seat> --adopt records the calling live session and its pane as the seat's ready occupant, and never takes a launching seat, a seat whose recorded pane herdr shows running an agent, or a pane another seat holds.",
+      "seam": "scripts.quick.registry bind and adopt, scripts.quick.member bind, hooks.context.quick_swarm refocus, scripts.quick.launch relaunch, bound and adopt, and agentihooks quick relaunch --adopt",
+      "tests": [
+        "tests/quick/test_seat_binding.py::test_a_relaunched_master_in_a_new_pane_records_it_and_stays_a_member_without_its_variables",
+        "tests/quick/test_seat_binding.py::test_a_relaunched_seat_whose_session_lacks_its_variables_is_told_to_hand_off",
+        "tests/quick/test_seat_binding.py::test_only_a_launching_seat_named_by_the_session_variables_records_its_pane_and_session",
+        "tests/quick/test_seat_binding.py::test_a_relaunch_whose_agent_never_records_its_session_leaves_the_seat_pending",
+        "tests/quick/test_seat_binding.py::test_an_unbound_relaunch_fails_the_command_loudly",
+        "tests/quick/test_seat_binding.py::test_adopt_seats_a_live_session_started_outside_the_swarm",
+        "tests/quick/test_seat_binding.py::test_adopt_never_takes_a_launching_seat_a_seat_whose_agent_runs_or_another_seats_pane",
+        "tests/quick/test_seat_binding.py::test_bind_needs_the_seat_variables_a_pane_and_a_session_and_returns_the_recorded_seat",
+        "tests/quick/test_seat_binding.py::test_the_bind_wait_polls_each_interval_and_needs_a_session_other_than_the_predecessors",
+        "tests/quick/test_seat_binding.py::test_a_relaunch_whose_agent_exits_never_waits_for_its_session",
+        "tests/quick/test_seat_binding.py::test_a_live_session_in_the_seats_own_pane_adopts_it_to_record_its_session",
+        "tests/quick/test_seat_binding.py::test_adopt_of_a_seat_the_swarm_lacks_is_refused",
+        "tests/quick/test_seat_binding.py::test_adopt_with_no_session_id_seats_the_pane_alone"
+      ]
+    },
+    {
+      "id": "ci-stats-seed-download-retry",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2597",
+      "behaviour": "When a mutation stats artifact download fails during the dev push stats seed harvest, the harvest waits 5, 10 and then 20 seconds, each wait cut short at the seed's deadline, between up to four downloads of that artifact and copies its records once one succeeds; only when every download failed does it fail with an error naming the artifact, its id and the last download error. A download that times out and a failed pull request, run or artifact listing call are not retried, so the seed still skips a pull request past its budget.",
+      "seam": "scripts.ci_stats_seed.download through scripts.ci_stats_seed.harvest",
+      "tests": [
+        "tests/test_ci_stats_seed.py::test_harvest_downloads_a_failed_artifact_again_after_a_wait",
+        "tests/test_ci_stats_seed.py::test_harvest_fails_naming_the_artifact_once_every_download_failed",
+        "tests/test_ci_stats_seed.py::test_harvest_retries_neither_a_timed_out_download_nor_a_failed_listing"
+      ]
+    },
+    {
+      "id": "compose-stack-own-bus",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-compose-controller-bus-auth",
+      "behaviour": "The Compose swarm stack reads its bus backend and address only from the stack settings SWARM_BUS and SWARM_BUS_URL, defaulting to the stack's own NATS service. An agent shell that runs compose with its own Anton bus settings and credential leaves every stack service, the controller included, on the stack NATS, never on the Anton bus without its credential.",
+      "seam": "the shared x-swarm-env block of the Compose stack file and its swarm init copy",
+      "tests": [
+        "tests/test_compose_stack.py::test_the_stack_never_reads_the_bus_settings_of_the_shell_that_runs_compose",
+        "tests/test_compose_stack.py::test_an_agent_shell_on_the_anton_bus_leaves_the_controller_on_the_stack_nats"
       ]
     }
   ],

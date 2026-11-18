@@ -15,6 +15,10 @@ from scripts.quick.guard import QuickError
 from scripts.swarm import safety_nudge
 
 NOT_MEMBER = "this session is not a member of a quick swarm: run it from a quick swarm pane"
+UNBOUND = (
+    "agentihooks quick: {seat} started but its agent never recorded its session in the seat, so the seat stays "
+    "pending; from the pane it runs in, run agentihooks quick relaunch {seat} --folder {folder} --adopt"
+)
 
 
 def parser() -> argparse.ArgumentParser:
@@ -31,8 +35,12 @@ def parser() -> argparse.ArgumentParser:
     again = sub.add_parser("relaunch", help="Start the successor of a seat that handed off")
     again.add_argument("seat")
     again.add_argument("--folder", required=True)
-    again.add_argument(
+    kind = again.add_mutually_exclusive_group()
+    kind.add_argument(
         "--force", action="store_true", help="End the seat's live agent with its pane kept, then start again"
+    )
+    kind.add_argument(
+        "--adopt", action="store_true", help="Record this live session and its herdr pane as the seat's occupant"
     )
     send = sub.add_parser("send", help="Post a message to another seat through the room")
     send.add_argument("to")
@@ -126,7 +134,16 @@ def _relaunch(seat: str, folder: str, environ: dict[str, str], forced: bool) -> 
     start = launch.force if forced else launch.relaunch
     outcome = start(Path(folder), seat, environ, bare=live.bare)
     print(outcome)
+    if outcome == "unbound":
+        print(UNBOUND.format(seat=seat, folder=folder), file=sys.stderr)
     return 0 if outcome == "started" else 1
+
+
+def _adopt(seat: str, folder: str, environ: dict[str, str]) -> int:
+    pane, session = guard.require(environ), environ.get("CLAUDE_CODE_SESSION_ID", "")
+    outcome = launch.adopt(Path(folder), seat, pane, session, bare=tick.LiveHerdr(environ).bare)
+    print(outcome)
+    return 0 if outcome == "adopted" else 1
 
 
 def _send(to: str, text: str, environ: Mapping[str, str]) -> int:
@@ -161,6 +178,8 @@ def _run(args: argparse.Namespace, environ: dict[str, str]) -> int:
         return _up(args, environ)
     if args.command == "handoff":
         return _handoff(args.document, environ)
+    if args.command == "relaunch" and args.adopt:
+        return _adopt(args.seat, args.folder, environ)
     if args.command == "relaunch":
         return _relaunch(args.seat, args.folder, environ, args.force)
     if args.command == "send":

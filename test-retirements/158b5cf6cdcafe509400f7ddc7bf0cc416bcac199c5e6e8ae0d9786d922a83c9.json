@@ -1,0 +1,6 @@
+{
+  "tests/swarm_ledger/test_controller_hosted_ledger.py::test_an_unreachable_hosted_server_on_write_is_a_dependency_failure": {
+    "reader": "standards-reader",
+    "reason": "The HTTP ledger client transport is deleted: uploads, proof ledger calls, proof controls, launch tokens, replays and the controller and chat clients run the ledger API route code in process, so no credential, access header, plain http refusal, HTTP timeout or stall retry of these calls remains, and ledger.resource and ledger.export always retry, so the run once read is gone."
+  }
+}

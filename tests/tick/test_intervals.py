@@ -91,7 +91,10 @@ def test_a_wide_step_runs_every_other_pass_and_a_critical_step_every_pass(record
         [engine.SKIPPED, engine.OK],
     ]
     assert (len(wide.runs), len(critical.runs)) == (2, 4)
-    assert store.redis.hgetall(store.key("sw", timing.STEP_RAN)) == {"wide": repr(BASE_S + 125.0)}
+    assert store.redis.hgetall(store.key("sw", timing.STEP_RAN)) == {
+        "wide": repr(BASE_S + 125.0),
+        "critical": repr(BASE_S + 185.0),
+    }
     skipped = [row for row in rows if row["step"] == "wide" and row["outcome"] == engine.SKIPPED]
     assert [
         (row["skipped"], row["rested"], row["abandoned"], row["wall_s"], row["budget_s"], row["start_s"])

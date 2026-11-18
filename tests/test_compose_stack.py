@@ -1,5 +1,7 @@
+import re
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).parents[1]
@@ -28,7 +30,7 @@ def test_the_controller_and_hive_keep_scheduler_state_in_the_nats_bucket():
     for name in ("controller", "hive"):
         environment = SERVICES[name]["environment"]
         assert environment["AGENTIHOOKS_SCHEDULER_STATE_BACKEND"] == "${AGENTIHOOKS_SCHEDULER_STATE_BACKEND:-bus}"
-        assert environment["AGENTIHOOKS_BUS_URL"] == "${AGENTIHOOKS_BUS_URL:-nats://nats:4222}"
+        assert environment["AGENTIHOOKS_BUS_URL"] == "${SWARM_BUS_URL:-nats://nats:4222}"
         assert SERVICES[name]["depends_on"]["nats"]["condition"] == "service_healthy"
     assert "--jetstream" in SERVICES["nats"]["command"]
 
@@ -42,7 +44,7 @@ def test_redis_starts_from_an_acl_file_with_optional_tls():
 
 
 def test_published_ports_bind_to_the_swarm_bind_address():
-    for name in ("swarm", "redis", "hive"):
+    for name in ("front", "redis", "hive"):
         for port in SERVICES[name]["ports"]:
             assert port.startswith("${SWARM_BIND:-127.0.0.1}:"), (name, port)
 
@@ -84,6 +86,7 @@ def test_swarm_init_ships_the_repository_stack_byte_for_byte():
     assert shipped == [
         "compose.yaml",
         "deploy/compose/adopt.yaml",
+        "deploy/compose/ledger-front.conf",
         "deploy/compose/ledger-tailnet.conf.template",
         "deploy/compose/redis/healthcheck.sh",
         "deploy/compose/redis/start.sh",
@@ -95,7 +98,7 @@ def test_swarm_init_ships_the_repository_stack_byte_for_byte():
         assert (bundled / name).read_bytes() == (ROOT / name).read_bytes(), name
     check = (ROOT / "deploy/compose/redis/healthcheck.sh").read_text()
     assert 'REDISCLI_AUTH="$SWARM_REDIS_PASSWORD" redis-cli' in check and "--pass" not in check
-    for service in ("swarm", "controller", "hive"):
+    for service in ("swarm", "api", "controller", "hive"):
         assert SERVICES[service]["image"] == "ghcr.io/the-cloud-clockwork/agentihooks-swarm:${SWARM_IMAGE_TAG:-dev}"
 
 
@@ -122,13 +125,48 @@ def test_nats_service_runs_the_pinned_server_with_jetstream_on_a_volume():
 
 def test_swarm_services_reach_nats_through_the_bus_setting():
     shared = COMPOSE["x-swarm-env"]
-    assert shared["AGENTIHOOKS_BUS"] == "${AGENTIHOOKS_BUS:-nats}"
-    assert shared["AGENTIHOOKS_BUS_URL"] == "${AGENTIHOOKS_BUS_URL:-nats://nats:4222}"
+    assert shared["AGENTIHOOKS_BUS"] == "${SWARM_BUS:-nats}"
+    assert shared["AGENTIHOOKS_BUS_URL"] == "${SWARM_BUS_URL:-nats://nats:4222}"
     for name in ("swarm", "controller", "hive"):
         service = SERVICES[name]
-        assert service["environment"]["AGENTIHOOKS_BUS"] == "${AGENTIHOOKS_BUS:-nats}", name
-        assert service["environment"]["AGENTIHOOKS_BUS_URL"] == "${AGENTIHOOKS_BUS_URL:-nats://nats:4222}", name
+        assert service["environment"]["AGENTIHOOKS_BUS"] == "${SWARM_BUS:-nats}", name
+        assert service["environment"]["AGENTIHOOKS_BUS_URL"] == "${SWARM_BUS_URL:-nats://nats:4222}", name
         assert service["depends_on"]["nats"]["condition"] == "service_healthy", name
+
+
+@pytest.mark.feature("compose-stack-own-bus")
+@pytest.mark.parametrize(
+    "compose_file",
+    sorted(
+        str(path.relative_to(ROOT))
+        for path in [ROOT / "compose.yaml", *(ROOT / "scripts/swarm/stack").rglob("*.yaml")]
+        if path.is_file()
+    ),
+)
+def test_the_stack_never_reads_the_bus_settings_of_the_shell_that_runs_compose(compose_file: str) -> None:
+    text = (ROOT / compose_file).read_text()
+    assert "${AGENTIHOOKS_BUS" not in text, compose_file
+
+
+@pytest.mark.feature("compose-stack-own-bus")
+def test_an_agent_shell_on_the_anton_bus_leaves_the_controller_on_the_stack_nats() -> None:
+    shell = {
+        "AGENTIHOOKS_BUS": "memory",
+        "AGENTIHOOKS_BUS_URL": "tls://swarm-internal.homeofanton.com:4222",
+        "AGENTIHOOKS_BUS_CREDENTIALS": "/home/agent/.agentihooks/hive/bus.creds",
+    }
+    environment = SERVICES["controller"]["environment"]
+    resolved = {key: _interpolate(str(environment[key]), shell) for key in ("AGENTIHOOKS_BUS", "AGENTIHOOKS_BUS_URL")}
+    assert resolved == {"AGENTIHOOKS_BUS": "nats", "AGENTIHOOKS_BUS_URL": "nats://nats:4222"}
+    assert "AGENTIHOOKS_BUS_CREDENTIALS" not in environment
+
+
+def _interpolate(value: str, shell: dict[str, str]) -> str:
+    """Resolve a Compose ${NAME:-default} value the way Compose does against the calling shell."""
+    match = re.fullmatch(r"\$\{(\w+):-([^}]*)\}", value)
+    if not match:
+        return value
+    return shell.get(match.group(1)) or match.group(2)
 
 
 def test_swarm_init_smoke_pulls_nats_and_reads_the_four_service_ready_line():
@@ -137,3 +175,65 @@ def test_swarm_init_smoke_pulls_nats_and_reads_the_four_service_ready_line():
     assert pull in smoke
     assert smoke.index(pull) < smoke.index('"$work/venv/bin/agentihooks" swarm init')
     assert "grep -qx 'Swarm stack ready: redis, nats, swarm and controller are healthy.'" in smoke
+
+
+def test_the_api_service_runs_the_write_process_against_the_shared_database() -> None:
+    api = SERVICES["api"]
+    assert api["command"] == ["python", "-m", "scripts.swarm_ledger.api_service", "--serve"]
+    assert api["environment"]["LEDGER_API_HOST"] == "0.0.0.0"
+    assert api["environment"]["LEDGER_API_PORT"] == "8766"
+    assert api["environment"]["AGENTIHOOKS_SWARM_DATABASE_URL"] == "${AGENTIHOOKS_SWARM_DATABASE_URL:-}"
+    assert "ports" not in api
+    assert api["depends_on"]["redis"]["condition"] == "service_healthy"
+
+
+def test_the_front_routes_reads_to_the_ledger_and_writes_to_the_api() -> None:
+    front = SERVICES["front"]
+    assert front["ports"] == ["${SWARM_BIND:-127.0.0.1}:${SWARM_PORT:-8765}:8765"]
+    assert "ports" not in SERVICES["swarm"]
+    assert front["depends_on"]["swarm"]["condition"] == "service_healthy"
+    assert front["depends_on"]["api"]["condition"] == "service_healthy"
+    conf = (ROOT / "deploy/compose/ledger-front.conf").read_text()
+    assert "${SWARM_LEDGER_SCHEME}://swarm:8765" in conf
+    assert "http://api:8766" in conf
+    assert "GET|HEAD" in conf
+
+
+def test_the_front_proxies_reads_with_the_scheme_the_swarm_serves() -> None:
+    front = SERVICES["front"]
+    assert front["environment"] == {"SWARM_LEDGER_SCHEME": "${SWARM_LEDGER_SCHEME:-http}"}
+    assert front["volumes"] == ["./deploy/compose/ledger-front.conf:/etc/nginx/templates/default.conf.template:ro"]
+    smoke = (ROOT / "scripts/packaging/stability-smoke.sh").read_text()
+    override = yaml.safe_load(smoke.split("<<'YAML'\n", 1)[1].split("\nYAML\n", 1)[0])["services"]
+    assert override["swarm"]["environment"]["LEDGER_TLS_CERT"] == "/tls/cert.pem"
+    assert override["front"]["environment"] == {"SWARM_LEDGER_SCHEME": "https"}
+    read = smoke.split("if ! python3 - \"$slug\" <<'PY'\n", 1)[1].split("\nPY\n", 1)[0]
+    assert "http://127.0.0.1:{os.environ['SWARM_PORT']}" in read
+    assert 'for route in ("/healthz", "/api/v1/ledgers", f"/{slug}"):' in read
+    assert smoke.index(read) < smoke.index('docker run -d --name "$run-member"')
+
+
+@pytest.mark.feature("compose-api-health-and-front-proxy")
+@pytest.mark.parametrize(
+    "conf",
+    [
+        "deploy/compose/ledger-front.conf",
+        "scripts/swarm/stack/deploy/compose/ledger-front.conf",
+        "deploy/compose/ledger-local-front.conf.template",
+    ],
+)
+def test_the_front_forwards_the_host_the_client_sent_with_its_port(conf: str) -> None:
+    text = (ROOT / conf).read_text()
+    assert "proxy_set_header Host $http_host;" in text
+    assert "$host;" not in text
+
+
+@pytest.mark.feature("compose-api-health-and-front-proxy")
+@pytest.mark.parametrize(
+    "conf", ["deploy/compose/ledger-front.conf", "scripts/swarm/stack/deploy/compose/ledger-front.conf"]
+)
+def test_the_front_resolves_the_swarm_and_api_names_through_the_compose_dns_at_request_time(conf: str) -> None:
+    text = (ROOT / conf).read_text()
+    assert "set $upstream ${SWARM_LEDGER_SCHEME}://swarm:8765;" in text
+    assert "set $upstream http://api:8766;" in text
+    assert "resolver 127.0.0.11 valid=1s;" in text

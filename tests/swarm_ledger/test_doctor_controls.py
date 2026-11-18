@@ -1,24 +1,19 @@
 import json
 import subprocess
-import sys
 import threading
 import unittest
 import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
-from pathlib import Path
 from unittest.mock import patch
 
+from scripts.swarm_ledger import api_service, new_ledger
+from scripts.swarm_ledger import ledger_core as core
+from scripts.swarm_ledger import ledger_server as server
+from tests.swarm_ledger import legacy_page
+from tests.swarm_ledger.ledger_front import Front
 from tests.swarm_ledger.ledger_page import page_source
-
-SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
-sys.path.insert(0, str(SCRIPTS))
-import ledger_core as core  # noqa: E402
-import ledger_server as server  # noqa: E402
-import new_ledger  # noqa: E402
-
-from tests.swarm_ledger import legacy_page  # noqa: E402
-from tests.swarm_ledger.test_swarm_panel import STATUS, function_source  # noqa: E402
+from tests.swarm_ledger.test_swarm_panel import STATUS, function_source
 
 SLUG = "doctor-controls"
 
@@ -34,7 +29,7 @@ class DoctorControls(unittest.TestCase):
         content = {"title": "Demo", "overview": "o", "phases": [{"title": "One", "description": "d"}]}
         new_ledger.create(SLUG, content)
         cls.token = legacy_page.stored_token(legacy_page.paths(SLUG, core)[0])
-        cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), Front)
         cls.port = cls.httpd.server_address[1]
         threading.Thread(target=cls.httpd.serve_forever, args=(0.01,), daemon=True).start()
 
@@ -75,7 +70,7 @@ class DoctorControls(unittest.TestCase):
             status.assert_called_with(SLUG)
 
     def test_the_operator_phrase_in_chat_stops_the_doctor(self):
-        with patch.object(server, "swarm_control", return_value=(STATUS, "")) as queued:
+        with patch.object(api_service, "swarm_control", return_value=(STATUS, "")) as queued:
             self.put(f"/api/{SLUG}", {"ops": [{"op": "add", "id": "c1", "thread": "chat", "text": "Rig doctor stop"}]})
             self.put(f"/api/{SLUG}", {"ops": [{"op": "add", "id": "c2", "thread": "chat", "text": "how is it going"}]})
         queued.assert_called_once_with(SLUG, ["stop"], "doctor")

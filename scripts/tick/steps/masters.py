@@ -13,7 +13,9 @@ from scripts.swarm import (
     dispatch_seat,
     lifetime,
     master_alarm,
+    master_lock,
     master_prompt_stall,
+    master_refusals,
     master_stall,
     master_wake,
     tick_master,
@@ -27,7 +29,7 @@ from scripts.tick.engine import SLOW
 from scripts.tick.ports.contracts import Coordination
 from scripts.tick.ports.tools import Tools
 from scripts.tick.step import Domain
-from scripts.tick.steps import CallStep, Left, budgets, pass_domains, tasks
+from scripts.tick.steps import CallStep, Left, budgets, hold, pass_domains, tasks
 
 __all__ = [
     "DISPATCH",
@@ -45,6 +47,7 @@ DISPATCH = "dispatch seat"
 WATCH = "master watch"
 RAISED = "raised"
 BOX = "box"
+STARTER = "tick master"
 QUIET_STATES = frozenset({"stopped", "stopping"})
 SEAT: Any = SimpleNamespace(
     dispatch_seat=dispatch_seat,
@@ -60,18 +63,16 @@ SEAT: Any = SimpleNamespace(
 
 
 def _held(call: Callable[[Any, Get], Any]) -> Callable[[Any, Get], Any]:
-    """Wrap ``call`` to skip once a step held an exception and to hold the exception it raises."""
+    """Wrap ``call`` to hold the exception it raises, so only the steps that need it stay shut."""
 
     def run(tick: Any, get: Get) -> Any:
         box = get(BOX)
-        if RAISED in box:
-            return []
         try:
             return call(tick, get)
         except (Left, LedgerOffline):
             return []
         except (Exception, SystemExit) as exc:
-            box[RAISED] = exc
+            hold(box, exc)
             return []
 
     return run
@@ -153,7 +154,7 @@ def _seat_alarm(tick: Any, get: Get) -> Any:
 
 
 def _dispatch_seat(tick: Any, get: Get) -> Any:
-    if tick.panic.state(get("store")) is not None:
+    if tick.panic.state(get("store"), get("slug")) is not None:
         return []
     return tick.skip_refused(
         SEAT.dispatch_seat.run,
@@ -209,11 +210,12 @@ def _master_down(slug: Any, config: Any, store: Any, ledger: Any, runtime: Any, 
         if item.state != "pending":
             inbox.redirect(item.id, "swarm", seat, tick.REDELIVERED)
     told = [item for item in waiting if tick.DOWN_TOLD not in (e.get("event") for e in inbox.history(item.id))]
-    for item in told:
-        inbox.note(item.id, tick.DOWN_TOLD, "swarm", tick.MASTER_DOWN, now_ms)
     if not told:
         return []
-    ledger.notify(slug, tick.MASTER_DOWN)
+    text = master_refusals.notice(store, slug, tick.MASTER_DOWN, now_ms)
+    for item in told:
+        inbox.note(item.id, tick.DOWN_TOLD, "swarm", text, now_ms)
+    ledger.notify(slug, text)
     return [f"master down, told the operator about {len(told)} waiting lines"]
 
 
@@ -224,7 +226,7 @@ def _night_watch(slug: Any, store: Any, ledger: Any, runtime: Any, doc: Any, now
         if tick.master_start.read(store, slug).get("alerted"):
             store.redis.delete(store.key(slug, "master-start"))
         with tick.PLACING:
-            return tick._master(slug, store.config(slug), store, runtime, now_ms)
+            return tick._master(slug, store.config(slug), store, runtime, now_ms, forced=True)
 
     return night_watch.run(night_watch.Watch(store, slug, ledger, runtime, doc, now_ms, sleeping, respawn))
 
@@ -297,7 +299,13 @@ STEPS = (
     CallStep("prompt stall", MASTERS, _held(_prompt_stall), RESUMED, CONFIG, lane=SLOW),
     CallStep("master down", SEATS, _held(tasks.placing(_master_down_step)), RESUMED, CONFIG, kept=True),
     CallStep(
-        "tick master", SEATS, _held(tasks.placing(_tick_master)), RESUMED, pass_domains("config", "doc"), kept=True
+        "tick master",
+        SEATS,
+        _held(tasks.placing(_tick_master)),
+        RESUMED,
+        pass_domains("config", "doc"),
+        kept=True,
+        feature="master-launch-lock",
     ),
     CallStep("master scale", SEATS, _held(tasks.placing(_master_scale)), RESUMED, pass_domains("config", "doc")),
     CallStep("seat alarm", SEATS, _held(tasks.placing(_seat_alarm)), LISTED, pass_domains("doc")),
@@ -343,9 +351,17 @@ def _recover_master(slug: Any, config: Any, store: Any, runtime: Any, now_ms: An
         return []
     name = occupant if occupant in candidates else candidates[0]  # pyright: ignore[reportUnknownVariableType]
     record = store.execution_occupants(slug).get(seat)
-    if not record or record.name != name:
-        record = AgentRecord(name, tick.MASTER, tick.MASTER, started_at=now_ms, seat=seat)  # pyright: ignore[reportUnknownArgumentType]
-    store.put_agent(slug, tick.placed_record(record, runtime.recover(name)))
+    if record and record.name == name:
+        adopted = replace(
+            tick.placed_record(record, runtime.recover(name)),
+            account=record.account,
+            placement=record.placement,
+            route_kind=record.route_kind,
+        )
+    else:
+        fresh = AgentRecord(name, tick.MASTER, tick.MASTER, started_at=now_ms, seat=seat)  # pyright: ignore[reportUnknownArgumentType]
+        adopted = tick.placed_record(fresh, runtime.recover(name))
+    store.put_agent(slug, adopted)
     for agent in agents:
         if agent.name not in live and agent.state != "finished":
             store.drop_agent(slug, agent.name)
@@ -354,7 +370,13 @@ def _recover_master(slug: Any, config: Any, store: Any, runtime: Any, now_ms: An
     return [f"adopted live master {name}"]
 
 
-def _master(slug: Any, config: Any, store: Any, runtime: Any, now_ms: Any) -> Any:
+def _master(slug: Any, config: Any, store: Any, runtime: Any, now_ms: Any, forced: bool = False) -> Any:
+    """Start the front door master under the swarm's master launch lock, so no other starter launches one at once."""
+    with master_lock.held(store, slug, STARTER) as refused:
+        return [refused] if refused else _launch_master(slug, config, store, runtime, now_ms, forced)
+
+
+def _launch_master(slug: Any, config: Any, store: Any, runtime: Any, now_ms: Any, forced: bool) -> Any:
     store.redis.hdel(tick.MASTER_WAITING, slug)
     agents = store.agents(slug)
     masters = [a for a in agents if a.lane == tick.MASTER]
@@ -365,15 +387,16 @@ def _master(slug: Any, config: Any, store: Any, runtime: Any, now_ms: Any) -> An
     retired = store.key(slug, "retired-process")
     masters = [m for m in masters if tick.master_seats.is_lead(slug, m) and not store.redis.hexists(retired, m.name)]
     pending = tick.master_start.read(store, slug)
+    forced = forced or bool(pending.get("task", {}).get("forced"))
     if any(m.state != "finished" for m in masters) or tick.master_start.blocked(pending, now_ms):
         return []
     if any(m.name in runtime.live_names() for m in masters):
         return ["the old master is still running, waiting for it to end before starting the next"]
-    if refused := tick.seat_spawn.placed_elsewhere(runtime, tick.MASTER, {}):
-        return [refused]
-    if refused := tick.seat_spawn.no_slot(config, runtime, tick.MASTER):
+    if refused := tick.seat_spawn.placed_elsewhere(runtime, tick.MASTER, {"forced": True} if forced else {}):
+        return master_refusals.record(store, slug, tick.MASTER, refused, now_ms)
+    if not forced and (refused := tick.seat_spawn.no_slot(config, runtime, tick.MASTER)):
         store.redis.hset(tick.MASTER_WAITING, slug, now_ms)
-        return [refused]
+        return master_refusals.record(store, slug, tick.MASTER, refused, now_ms)
 
     launched = {}
 
@@ -397,6 +420,7 @@ def _master(slug: Any, config: Any, store: Any, runtime: Any, now_ms: Any) -> An
         from scripts.swarm import master_launch
 
         task = master_launch._filled(tick.master_move.pinned(store, slug, task, transfer), config)  # pyright: ignore[reportPrivateUsage, reportUnknownMemberType, reportUnknownVariableType]
+        task = {**task, "forced": True} if forced else task  # pyright: ignore[reportUnknownVariableType]
         tick.master_start.begin(store, slug, record.name, task, now_ms)
         tick.affinity.handed_off(store, slug)
         launched.update(task)  # pyright: ignore[reportUnknownMemberType]
@@ -410,7 +434,7 @@ def _master(slug: Any, config: Any, store: Any, runtime: Any, now_ms: Any) -> An
         if tick.seat_spawn.room_refused(exc):
             tick.transfers.detach(store, slug, record)
             tick.master_start.withdraw(store, slug, pending)
-            return [f"the master waits: {exc}"]
+            return master_refusals.record(store, slug, tick.MASTER, f"the master waits: {exc}", now_ms)
         tick.transfers.failed(store, slug, record)
         tick.affinity.failed(store, slug, str(exc))
         return tick.master_start.failed(store, slug, f"master spawn failed: {exc}", now_ms)

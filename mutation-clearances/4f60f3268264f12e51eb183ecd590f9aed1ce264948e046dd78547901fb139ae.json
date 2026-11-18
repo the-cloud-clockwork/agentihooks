@@ -1,0 +1,6 @@
+{
+  "scripts/tick/adapters/database_ledger.py:scripts.tick.adapters.database_ledger.x_exchanged:26aef34727867901339cafe7fbeb2033713716f6fbfcbfa4152a08ee4c6755f1": {
+    "reader": "standards-reader",
+    "reason": "On the exchanged path Content-Type is read only by admin.py get_content_type (which lowercases) and by the migration check that refuses both values with 415; no startswith check on it is reached."
+  }
+}

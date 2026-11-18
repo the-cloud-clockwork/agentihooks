@@ -68,6 +68,8 @@ jobs:
           enable-cache: false
       - name: Install shared dependencies
         working-directory: head
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
         run: uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
       - name: Observe base receipt request times
         working-directory: base
@@ -111,6 +113,8 @@ jobs:
           enable-cache: false
       - name: Install dependencies shared by both revisions
         working-directory: head
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
         run: uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
       - name: Replay base on the shared runner
         working-directory: base
@@ -224,12 +228,6 @@ jobs:
       TCC_CI_CLIENT_ID: ${{ secrets.TCC_CI_CLIENT_ID }}
       TCC_CI_APP_PRIVATE_KEY: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
 
-  mutation:
-    if: inputs.proof == 'mutation'
-    uses: ./.github/workflows/mutation-preflight.yml
-    with:
-      base: ${{ inputs.base }}
-
   semgrep:
     if: inputs.proof == 'semgrep'
     uses: ./.github/workflows/semgrep.yml
@@ -303,6 +301,7 @@ jobs:
 
       - name: Install dependencies
         env:
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
           BAKED_VENV: /opt/agentihooks-venv
           WHEELHOUSE: /opt/wheelhouse
         run: |

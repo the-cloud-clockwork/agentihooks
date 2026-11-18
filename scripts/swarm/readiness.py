@@ -3,6 +3,7 @@
 An offer's id carries the task's claim generation, so the bus drops a repeat only inside its dedupe window.
 """
 
+import threading
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -41,23 +42,34 @@ def _on_events(store: RedisStore, slug: str) -> bool:
 
 
 class Source:
-    def __init__(self, store: RedisStore | None = None, ledger: LedgerClient | None = None):
+    def __init__(self, store: RedisStore | None = None, ledger: LedgerClient | None = None) -> None:
         self._store = store
         self._ledger = ledger or LedgerClient(service=True)
-        self._exported: dict[str, tuple[int, dict]] = {}
+        self._exported: dict[str, tuple[int, dict[str, Any]]] = {}
+        self._fetching: dict[str, threading.Lock] = {}
+        self._guard = threading.Lock()
 
     def slugs(self) -> list[str]:
         self._store = self._store or connect()
         found = [slug for slug in self._store.slugs() if _on_events(self._store, slug)]
-        self._exported = {slug: kept for slug, kept in self._exported.items() if slug in found}
+        with self._guard:
+            self._exported = {slug: kept for slug, kept in self._exported.items() if slug in found}
         return found
 
-    def state(self, slug: str) -> dict:
-        rev = self._ledger.metadata(slug)["_meta"]["rev"]
-        kept = self._exported.get(slug)
-        if kept is None or kept[0] != rev:
-            kept = self._exported[slug] = (rev, self._ledger.state(slug))
-        return kept[1]
+    def state(self, slug: str) -> dict[str, Any]:
+        """The export of ``slug`` at the revision read while holding the swarm's lock, fetched again only when that
+        revision is newer than the kept one, with task rows of the caller's own so a field a reader sets on a row never
+        reaches the kept copy; values nested inside a row and the other export keys stay shared and are read only."""
+        with self._guard:
+            fetching = self._fetching.setdefault(slug, threading.Lock())
+        with fetching:
+            rev = self._ledger.metadata(slug)["_meta"]["rev"]
+            kept = self._exported.get(slug)
+            if kept is None or kept[0] < rev:
+                kept = (rev, self._ledger.state(slug))
+                with self._guard:
+                    self._exported[slug] = kept
+        return {**kept[1], "tasks": [dict(row) for row in kept[1]["tasks"]]}
 
     def snapshot(self, slug: str) -> Snapshot:
         self._store = self._store or connect()
@@ -188,15 +200,24 @@ def offers(view: Snapshot, now_ms: int) -> list[Envelope]:
 
 def publish(bus: Bus, view: Snapshot, now_ms: int, policy: QueuePolicy = QueuePolicy()) -> list[str]:
     """Opens every lane queue first, so a hive polling a lane with no offer yet finds its stream provisioned, and
-    withdraws the stale offers there before the fresh ones join them."""
+    withdraws the stale offers there before the fresh ones join them; an offer still queued is not offered again, so
+    one that waits past the dedupe window stays a single copy."""
     events = offers(view, now_ms)
     lanes = dict.fromkeys([*LANES, *(event.data["lane"] for event in events)])
     queues = {lane: bus.queue(queue_name(view.slug, lane), policy) for lane in lanes}
+    queued: set[str] = set()
+
+    def swept(event: Envelope) -> bool:
+        if stale(event, view):
+            return True
+        queued.add(event.id)
+        return False
+
     for queue in queues.values():
-        queue.withdraw(lambda event: stale(event, view))
+        queue.withdraw(swept)
     placed = []
     for event in events:
-        if queues[event.data["lane"]].offer(event):
+        if event.id not in queued and queues[event.data["lane"]].offer(event):
             placed.append(event.id)
     return placed
 
@@ -231,10 +252,10 @@ def take(
     fit: Callable[[Envelope], bool] = anywhere,
 ) -> Delivery | None:
     """A view that yields no snapshot leaves the recheck to the hub, which admits the offer; an offer this hive may
-    not take goes back to the queue for another hive."""
+    not take goes back to the queue for another hive without spending one of its deliveries."""
     while (delivery := queue.take(timeout_ms)) is not None:
         if not fit(delivery.event):
-            delivery.nak(UNFIT_NAK_MS)
+            queue.release(delivery, UNFIT_NAK_MS)
             continue
         current = view() if callable(view) else view
         if current is None or not withdrawal(delivery.event, current):

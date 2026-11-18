@@ -270,7 +270,9 @@ def test_the_observe_group_runs_its_calls_with_the_pass_state(monkeypatch: pytes
     assert store.redis.keys["sw:spawn-due"] == 1
 
 
-def test_a_step_that_raises_holds_its_exception_and_stops_the_later_steps(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_step_that_raises_holds_its_exception_and_the_later_steps_not_needing_its_values_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     store = _Store("running")
     seen = _observe_fakes(monkeypatch, store)
     state, box = _state(store)
@@ -280,8 +282,16 @@ def test_a_step_that_raises_holds_its_exception_and_stops_the_later_steps(monkey
         raise ConnectionError(slug)
 
     monkeypatch.setattr(state["ledger"], "state", broken)
-    assert actions(engine.run_group("observe", _ctx(state))) == ["pane", "reconciled", "moved", "recovered"]
-    assert [name for name, _ in seen] == ["panes", "reconcile", "fail over", "recover"]
+    assert actions(engine.run_group("observe", _ctx(state))) == [
+        "pane",
+        "reconciled",
+        "moved",
+        "recovered",
+        "exited",
+        "watched",
+    ]
+    assert [name for name, _ in seen] == ["panes", "reconcile", "fail over", "recover", "exits", "start watch"]
+    assert box["fallen"] == {"ledger state"}
     with pytest.raises(ConnectionError, match="^sw$"):
         observe.raise_held(box)
 
@@ -295,6 +305,6 @@ def test_a_failed_config_load_skips_the_stopped_branch() -> None:
     state, box = _state(_Store("stopped"))
     state["store"] = SimpleNamespace(ensure_code=lambda slug: (_ for _ in ()).throw(SystemExit(3)))
     assert actions(engine.run_group("start", _ctx(state))) == []
-    assert list(box) == [observe.RAISED]
+    assert list(box) == [observe.RAISED, "fallen"]
     with pytest.raises(SystemExit):
         observe.raise_held(box)

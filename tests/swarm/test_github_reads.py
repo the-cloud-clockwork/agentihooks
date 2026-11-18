@@ -1,10 +1,16 @@
 import importlib
 import json
 import os
+import subprocess
 import time
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+from unittest.mock import Mock
 
 import pytest
 
+from scripts import github_app, github_app_cli
 from scripts.swarm import github_reads, run_wait
 from tests.swarm.test_run_wait import ENDPOINT, JOBS, RUN, actions  # noqa: F401
 
@@ -548,3 +554,111 @@ def test_location_runs_a_checkout_path_in_place_and_a_repository_name_through_gh
     named = github_reads.location("o/r")
     assert named == {"env": {**os.environ, "GH_REPO": "o/r"}}
     assert named["env"]["AGENTIHOOKS_LOCATION_PROBE"] == "kept"
+
+
+APP_KEY = {
+    "HIVE_GITHUB_AUTH_MODE": "app",
+    "GITHUB_APP_PRIVATE_KEY": "pem",
+    "GITHUB_APP_ID": "1",
+    "GITHUB_APP_INSTALLATION_ID": "2",
+}
+
+
+def _recorder(calls: list[tuple[list[str], dict[str, Any]]]) -> Callable[..., subprocess.CompletedProcess[str]]:
+    """A gh runner that records each command and its options and answers an empty JSON object."""
+
+    def run(command: list[str], **options: Any) -> subprocess.CompletedProcess[str]:
+        calls.append((command, options))
+        return subprocess.CompletedProcess(command, 0, stdout="{}")
+
+    return run
+
+
+@pytest.fixture
+def app_key(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[Mock, Mock]:
+    """A process holding the App key whose installation token mint and rate limit read are answered offline."""
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    for name, value in APP_KEY.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(github_app_cli, "_AUTH", None)
+    monkeypatch.setattr(github_app.jwt, "encode", Mock(return_value="signed"))
+    minted = Mock(status_code=201)
+    minted.json.return_value = {
+        "token": "minted",
+        "expires_at": "2999-01-01T00:00:00+00:00",
+        "permissions": {},
+        "repositories": [],
+    }
+    post = Mock(return_value=minted)
+    monkeypatch.setattr(github_app.requests, "post", post)
+    reply = Mock(headers={"X-RateLimit-Remaining": "5000", "X-RateLimit-Limit": "5000", "X-RateLimit-Reset": "1"})
+    get = Mock(return_value=reply)
+    monkeypatch.setattr(github_app_cli.requests, "get", get)
+    return post, get
+
+
+@pytest.mark.feature("controller-gh-token-in-process")
+def test_a_process_holding_the_app_key_runs_gh_on_its_own_cached_app_token(app_key: tuple[Mock, Mock]) -> None:
+    post, get = app_key
+    calls: list[tuple[list[str], dict[str, Any]]] = []
+    run = _recorder(calls)
+    github_reads.rest("tick", ["api", "repos/o/r/pulls/1"], run, env={**os.environ, "GH_REPO": "o/r"}, text=True)
+    github_reads.rest("tick", ["api", "rate_limit"], run)
+    assert [command for command, _ in calls] == [
+        ["/usr/bin/gh", "api", "repos/o/r/pulls/1"],
+        ["/usr/bin/gh", "api", "rate_limit"],
+    ]
+    first, second = (options for _, options in calls)
+    assert first["env"]["GH_TOKEN"] == second["env"]["GH_TOKEN"] == "minted"
+    assert first["env"]["GH_REPO"] == "o/r"
+    assert "GH_REPO" not in second["env"]
+    assert first["text"] is True
+    assert post.call_count == 1
+    assert get.call_count == 1
+
+
+@pytest.mark.feature("controller-gh-token-in-process")
+@pytest.mark.parametrize(
+    "mode, key",
+    [("app", None), ("token", "pem"), (None, "pem")],
+    ids=["app-mode-without-the-key", "token-mode-with-the-key", "no-mode-with-the-key"],
+)
+def test_a_process_that_cannot_mint_the_app_token_leaves_gh_to_its_wrapper(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mode: str | None, key: str | None
+) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    for name, value in (("HIVE_GITHUB_AUTH_MODE", mode), ("GITHUB_APP_PRIVATE_KEY", key)):
+        if value is None:
+            monkeypatch.delenv(name, raising=False)
+        else:
+            monkeypatch.setenv(name, value)
+    monkeypatch.setattr(github_app_cli, "signed", Mock(side_effect=AssertionError("signed without the App key")))
+    calls: list[tuple[list[str], dict[str, Any]]] = []
+    github_reads.rest("tick", ["api", "repos/o/r/pulls/1"], _recorder(calls), text=True)
+    github_reads.rest("tick", ["api", "rate_limit"], _recorder(calls))
+    assert calls == [(["gh", "api", "repos/o/r/pulls/1"], {"text": True}), (["gh", "api", "rate_limit"], {})]
+
+
+@pytest.mark.feature("controller-gh-token-in-process")
+def test_a_call_the_process_cannot_sign_runs_through_the_wrapper_unchanged(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    for name, value in APP_KEY.items():
+        monkeypatch.setenv(name, value)
+    signed = Mock(return_value=None)
+    monkeypatch.setattr(github_app_cli, "signed", signed)
+    calls: list[tuple[list[str], dict[str, Any]]] = []
+    github_reads.rest("tick", ["api", "repos/o/r/pulls/1"], _recorder(calls), text=True)
+    github_reads.rest("tick", ["api", "rate_limit"], _recorder(calls))
+    github_reads.rest("tick", ["api", "rate_limit"], _recorder(calls), env={})
+    assert calls == [
+        (["gh", "api", "repos/o/r/pulls/1"], {"text": True}),
+        (["gh", "api", "rate_limit"], {}),
+        (["gh", "api", "rate_limit"], {"env": {}}),
+    ]
+    assert [call.args for call in signed.call_args_list] == [
+        (["gh", "api", "repos/o/r/pulls/1"], os.environ),
+        (["gh", "api", "rate_limit"], os.environ),
+        (["gh", "api", "rate_limit"], {}),
+    ]

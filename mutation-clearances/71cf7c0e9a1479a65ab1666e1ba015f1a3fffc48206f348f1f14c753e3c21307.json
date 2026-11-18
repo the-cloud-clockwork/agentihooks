@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api_service.py:scripts.swarm_ledger.api_service.x_overlay_pairs:573668ae235476b29e3c96f7f0e1e89de3035a125246164f459c57ed46ea8a52": {
+    "reader": "standards-reader",
+    "reason": "typing.cast returns its value argument unchanged at run time; the mutant replaces only the unused type argument."
+  }
+}

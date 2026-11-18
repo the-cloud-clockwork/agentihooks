@@ -102,6 +102,78 @@ def test_root_hive_session_writes_its_join_report_without_a_member_id(
     assert client.redis.hexists(join_report.key("root"), agent.execution_id)
 
 
+def _root_session(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[Any, Any, dict[str, str]]:
+    from fakeredis import FakeRedis
+
+    from scripts.swarm import commands, store
+
+    monkeypatch.delenv("AGENTIHOOKS_HIVE_ID", raising=False)
+    monkeypatch.setenv("SWARM_HIVE_ID", "root")
+    client = store.RedisStore(FakeRedis(decode_responses=True))
+    client.create(store.SwarmConfig("sw", "/repo", max_eng=1, max_ci=0))
+    name = client.next_name("sw", "eng")
+    agent = store.AgentRecord(name, "eng", "task", hive=commands.hive_id(), harness="claude", seat="eng-1@sw")
+    agent = client.start_execution("sw", agent)
+    client.put_agent("sw", agent)
+    for key, value in {
+        "AGENTIHOOKS_SWARM": "sw",
+        "AGENTIHOOKS_AGENT_NAME": name,
+        "CLAUDE_CONFIG_DIR": str(tmp_path),
+        "HERDR_PANE_ID": "pane",
+    }.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(store, "connect", lambda: client)
+    return client, agent, {"session_id": "session", "transcript_path": str(tmp_path / "s.jsonl")}
+
+
+@pytest.mark.feature("hive-join-report-tool-repair")
+def test_a_tool_call_writes_the_join_report_a_failed_start_left_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from unittest.mock import Mock
+
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    from hooks.context import hive_join
+    from scripts.hive import join_checks, join_report
+    from scripts.swarm import launch_check
+
+    client, agent, payload = _root_session(monkeypatch, tmp_path)
+    checks = dict.fromkeys((*join_report.REQUIRED, *join_report.OPTIONAL), True)
+    startup = Mock(side_effect=[RedisConnectionError("Connection closed by server."), checks])
+    monkeypatch.setattr(join_checks, "startup", startup)
+    with pytest.raises(RedisConnectionError):
+        hive_join.run(payload, "start")
+    assert join_report.read(client.redis, agent) == {}
+    hive_join.run(payload, "tool")
+    report = join_report.read(client.redis, agent)
+    assert (report.get("session_id"), report.get("grade"), report.get("status")) == ("session", "complete", "running")
+    assert client.redis.hexists(join_report.key("root"), agent.execution_id)
+    assert launch_check.hive_misses(client, agent) == {}
+    assert startup.call_count == 2
+
+
+@pytest.mark.feature("hive-join-report-tool-repair")
+def test_only_a_session_start_replaces_the_join_report_of_another_session(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from unittest.mock import Mock
+
+    from hooks.context import hive_join
+    from scripts.hive import join_checks, join_report
+
+    client, agent, payload = _root_session(monkeypatch, tmp_path)
+    startup = Mock(return_value=dict.fromkeys((*join_report.REQUIRED, *join_report.OPTIONAL), True))
+    monkeypatch.setattr(join_checks, "startup", startup)
+    hive_join.run(payload, "start")
+    hive_join.run({**payload, "session_id": "other"}, "tool")
+    assert join_report.read(client.redis, agent)["session_id"] == "session"
+    assert startup.call_count == 1
+    hive_join.run({**payload, "session_id": "other"}, "start")
+    assert join_report.read(client.redis, agent)["session_id"] == "other"
+    assert startup.call_count == 2
+
+
 def test_hive_reports_are_dispatched_at_start_and_end(
     quiet_session_start: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

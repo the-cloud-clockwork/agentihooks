@@ -150,11 +150,13 @@ def preserves_effort(recorded: bool, lane: str) -> bool:
     return recorded and lane != MASTER
 
 
-def _lane_default(lane, agent, chosen, config=None):
+def _lane_default(lane: str, agent: str, chosen: dict[str, Any], config: Any = None) -> model_pick.ModelPick:
     model = default_models.model(config, agent)
     if lane == MASTER:
         return model_pick.frontier(agent, model)
-    return model_pick.ModelPick(_set(chosen.get("model")) or model, chosen.get("effort"))
+    return model_pick.ModelPick(
+        model_pick.suited(agent, _set(chosen.get("model")) or model, model), chosen.get("effort")
+    )
 
 
 def herdr_call(args: list[str]) -> dict[str, Any]:
@@ -803,7 +805,8 @@ class HerdrRuntime:
             agent, reason = self.choose(want, environ)
         else:
             agent, reason = self._fallback_choice(saved, profile, quota_transfer, environ, requested, avoid)
-        if reason == agent_choice.ALL_FULL and not hasattr(self, "_quota_accounts") and route_kind != "interactive":
+        full = reason == agent_choice.ALL_FULL and not task.get("forced")
+        if full and not hasattr(self, "_quota_accounts") and route_kind != "interactive":
             raise SpawnError(reason, "unavailable")
         planned = getattr(self, "_quota_tasks", {}).get(task["id"])
         if planned and planned != avoid and not (requested or saved or want):
@@ -858,7 +861,8 @@ class HerdrRuntime:
             )
         else:
             picked = _lane_default(lane, agent, {} if quota_transfer else chosen, config)
-        picked = replace(picked, model=_set(picked.model) or default_models.model(config, agent))
+        harness_model = default_models.model(config, agent)
+        picked = replace(picked, model=model_pick.suited(agent, _set(picked.model) or harness_model, harness_model))
         picked = replace(picked, effort=saved["effort"]) if saved.get("effort") else picked
         mode = [] if lane != "plan" else PLAN_MODE if agent == "claude" else codex_plan_mode(environ)
         front = front_door.holds(config.slug, task.get("seat", ""))
@@ -884,6 +888,7 @@ class HerdrRuntime:
                     *argv,
                     "--",
                     *route,
+                    *([front_door_route.FORCED] if forced and task.get("forced") else []),
                     *remote_control.arguments(rc),
                     *_model_args(
                         agent,
@@ -921,7 +926,7 @@ class HerdrRuntime:
         )
         return placed
 
-    def resume(self, config, agent, text):
+    def resume(self, config: Any, agent: AgentRecord, text: str) -> Placed:
         """Reopen the agent's own conversation in a new pane of the same name; SpawnError unless herdr shows it there."""
         if live_binding.managed(agent):
             raise SpawnError(MANAGED_RESUME, "unsupported")
@@ -950,7 +955,7 @@ class HerdrRuntime:
         argv += title
         defaults = _lane_default(agent.lane, agent.harness, config.lanes.get(agent.lane, {}), config)
         picked = model_pick.ModelPick(
-            agent.model or defaults.model,
+            model_pick.suited(agent.harness, agent.model or defaults.model, defaults.model),
             agent.effort or defaults.effort,
             source=agent.model_source or ("recorded" if agent.model else defaults.source),
         )
@@ -1474,11 +1479,16 @@ class HerdrRuntime:
         return self.observe(agent).state
 
     def observe(self, agent: AgentRecord) -> PaneObservation:
+        from scripts.hive import reports
+
         if self.remote(agent):
             if self.hive is not None and self.hive.gone(agent):
                 return PaneObservation("exited")
             pane = self._hosted(agent).get("pane")
             return PaneObservation(**pane) if pane else PaneObservation("unknown")
+        if reports.admitted(agent):
+            reported: dict[str, Any] = self.hive.admitted_pane(agent) if self.hive is not None else {}
+            return PaneObservation(**reported) if reported else PaneObservation("unknown")
         if live_binding.managed(agent):
             return live_binding.observe_managed(self._managed_record(agent))
         if agent.runtime_backend != "local":

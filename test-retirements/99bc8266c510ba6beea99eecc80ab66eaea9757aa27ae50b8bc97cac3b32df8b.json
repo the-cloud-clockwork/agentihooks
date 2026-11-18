@@ -1,0 +1,6 @@
+{
+  "tests/test_ci_mutation_preflight.py::test_pull_request_reuse_does_not_grade_the_skipped_empty_plan": {
+    "reader": "Standards reader",
+    "reason": "The head removes the mutation preflight and the pull request reuse of its report and kill memory; the Tests run is the only mutation source, so no preflight lookup, reuse or seed step remains to test."
+  }
+}

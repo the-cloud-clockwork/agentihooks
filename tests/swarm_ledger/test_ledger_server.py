@@ -1,9 +1,12 @@
+import http.client
 import inspect
 import os
 import re
 import sys
+import threading
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -11,14 +14,15 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"))
 import ledger_bin  # noqa: E402
 import ledger_core as core  # noqa: E402
-import ledger_server as server  # noqa: E402
 import new_ledger  # noqa: E402
 
 from scripts.swarm.store import SwarmError  # noqa: E402
+from scripts.swarm_ledger import api_service, ledger_server  # noqa: E402
 from scripts.swarm_ledger.storage import default as default_repository  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
 from tests.swarm_ledger.ledger_page import chromium, rendered_home  # noqa: E402
 
+server: Any = ledger_server
 storage = default_repository()
 
 MINUTE = 60 * 1000
@@ -281,6 +285,32 @@ def test_home_cells_escape_an_unknown_state(browser):
     assert re.search(r'<span class="state s-(&lt;|<)b(&gt;|>)" role="cell">&lt;b&gt;</span>', page)
 
 
+def test_a_file_page_preflight_gets_the_read_only_origin_and_private_network_headers() -> None:
+    httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+    thread = threading.Thread(target=httpd.serve_forever, args=(0.01,), daemon=True)
+    thread.start()
+    conn = http.client.HTTPConnection("127.0.0.1", httpd.server_port, timeout=5)
+    try:
+        conn.request(
+            "OPTIONS",
+            f"/api/v1/ledgers/{SLUG}/chat",
+            headers={"Origin": "null", "Access-Control-Request-Private-Network": "true"},
+        )
+        response = conn.getresponse()
+        assert response.status == 204
+        assert [row for row in response.getheaders() if row[0].lower().startswith("access-control")] == [
+            ("Access-Control-Allow-Origin", "null"),
+            ("Access-Control-Allow-Methods", "GET"),
+            ("Access-Control-Allow-Headers", "Content-Type, X-Ledger-Token, X-Ledger-Agent, X-Ledger-Slug"),
+            ("Access-Control-Allow-Private-Network", "true"),
+        ]
+    finally:
+        conn.close()
+        httpd.shutdown()
+        httpd.server_close()
+        thread.join(timeout=5)
+
+
 class Swarms:
     def __init__(self, known=(), error=None):
         self.known, self.error = set(known), error
@@ -303,7 +333,7 @@ def test_a_closed_ledger_without_a_swarm_goes_to_the_bin():
     closed_at = closed("orphan-closed")
     make("open-one")
     with patch.object(server, "swarm_store", return_value=Swarms()):
-        server.bin_closed_without_swarm(now=closed_at + 5)
+        api_service.bin_closed_without_swarm(now=closed_at + 5)
     assert ledger_bin.entries()["orphan-closed"] == closed_at + 5
     assert "open-one" not in ledger_bin.entries()
 
@@ -311,7 +341,7 @@ def test_a_closed_ledger_without_a_swarm_goes_to_the_bin():
 def test_a_closed_ledger_whose_swarm_is_still_stopping_stays_for_the_tick():
     closed("still-stopping")
     with patch.object(server, "swarm_store", return_value=Swarms({"still-stopping"})):
-        server.bin_closed_without_swarm()
+        api_service.bin_closed_without_swarm()
     assert "still-stopping" not in ledger_bin.entries()
 
 
@@ -321,19 +351,19 @@ def test_a_ledger_restored_then_closed_again_goes_back_to_the_bin():
     ledger_bin.restore("closed-twice", now=2)
     closed_at = closed("closed-twice")
     with patch.object(server, "swarm_store", return_value=Swarms()):
-        server.bin_closed_without_swarm(now=closed_at + 1)
+        api_service.bin_closed_without_swarm(now=closed_at + 1)
     assert ledger_bin.entries()["closed-twice"] == closed_at + 1
 
 
 def test_an_unreachable_swarm_store_bins_nothing():
     closed("unreachable")
     with patch.object(server, "swarm_store", side_effect=SwarmError("Redis is unreachable")):
-        server.bin_closed_without_swarm()
+        api_service.bin_closed_without_swarm()
     with (
         patch.object(server, "swarm_store", return_value=Swarms(error=ConnectionError("refused"))),
         patch.object(server.sys, "stderr") as err,
     ):
-        server.bin_closed_without_swarm()
+        api_service.bin_closed_without_swarm()
     err.write.assert_called_once_with("bin closed ledgers: refused\n")
     assert "unreachable" not in ledger_bin.entries()
 
@@ -349,16 +379,18 @@ def test_the_home_shell_bins_nothing_and_the_watch_loop_bins_closed_ledgers_with
     assert sent[0][0] == 200
     assert "served-closed" not in ledger_bin.entries()
 
+    import threading
+
     def finish(interval):
         raise RuntimeError("watch ended")
 
+    stopping = threading.Event()
     with (
         patch.object(server, "swarm_store", return_value=Swarms()),
-        patch.object(server, "sample_streams"),
         patch.object(server, "scheduled_wait", finish),
         pytest.raises(RuntimeError, match="watch ended"),
     ):
-        server.watch_ledgers()
+        api_service.upkeep(stopping)
     assert "served-closed" in ledger_bin.entries()
 
 
@@ -691,10 +723,8 @@ def test_the_watch_loop_ends_once_its_server_stops(monkeypatch):
 def test_a_watch_pass_holds_the_pass_lock_but_its_wait_does_not(monkeypatch):
     held = []
     monkeypatch.setattr(server, "reloading", lambda: False)
-    monkeypatch.setattr(server.ledger_bin, "tidy", lambda: held.append(server.WATCH_PASS.locked()))
-    monkeypatch.setattr(server, "bin_closed_without_swarm", lambda: None)
-    monkeypatch.setattr(server, "unrelayed", lambda: False)
-    monkeypatch.setattr(server, "sample_streams", lambda: None)
+    monkeypatch.setattr(server, "refresh_loaded_code", lambda: None)
+    monkeypatch.setattr(server, "sample_streams", lambda: held.append(server.WATCH_PASS.locked()))
     monkeypatch.setattr(server, "metrics_journal", lambda *args: None)
 
     def wait(interval):

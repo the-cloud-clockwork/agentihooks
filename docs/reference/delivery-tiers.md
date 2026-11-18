@@ -1264,6 +1264,14 @@ jq -c 'select(.action == "priority") | {at, token_actor, agent, pull, steps, err
   ~/.agentihooks/merge-queue-events.jsonl | tail -1
 ```
 
+List the queues the master seat made through a route, with the task each one served (see
+[How the master queues a pull request](../pillars/swarm.md#how-the-master-queues-a-pull-request)):
+
+```bash
+jq -c 'select(.action == "queue" and .route != null) | {at, agent, pull, route, task}' \
+  ~/.agentihooks/merge-queue-events.jsonl
+```
+
 List every swarm mutation inside a cancelled run's window, taking `<started>` and `<at>` from the run's start and completion times:
 
 ```bash

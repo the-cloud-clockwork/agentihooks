@@ -104,13 +104,6 @@ def test_a_hive_agent_falls_back_to_its_swarm_address_when_the_hosted_ledger_doe
     assert ledger_link.base(environ) == "https://workstation.example"
 
 
-def test_a_routed_swarm_address_still_wins_over_the_hosted_ledger(answering):
-    environ = workstation(**TOKEN, **{hosted_probe.HOSTED_ENV: answering})
-
-    with ledger_link.ledger_route.scoped("demo", "https://routed.example"):
-        assert ledger_link.base(environ, slug="demo") == "https://routed.example"
-
-
 def test_the_workstation_tick_binds_the_hosted_secret_so_launches_carry_hosted_tokens(monkeypatch):
     class Store:
         def slugs(self):

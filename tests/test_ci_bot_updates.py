@@ -140,7 +140,7 @@ def test_mutation_jobs_adopt_dev_durations_before_the_sandbox_copies_the_record(
     assert restore["uses"] == "actions/cache/restore@v4"
     assert restore["with"]["path"] == "~/dev-durations"
     assert restore["with"]["key"] == "durations-merged-${{ github.event.pull_request.base.sha }}"
-    assert restore["if"].startswith("github.event_name == 'pull_request' && ")
+    assert restore["if"].split(" && ")[0] == "github.event_name == 'pull_request'"
     assert restore["with"]["restore-keys"] == "durations-merged-"
     assert "from tests.dev_durations import adopt" in adopt["run"]
     assert 'Path(".test_durations").write_text' in adopt["run"]

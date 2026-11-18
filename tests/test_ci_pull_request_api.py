@@ -20,7 +20,6 @@ WORKSPACE = re.compile(r"\$\{?GITHUB_WORKSPACE\}?")
 LOCAL_ONLY = {
     ROOT / "scripts/ci_budget/rate_limit.py": {"reset_wait", "budget"},
     ROOT / "scripts/ci_launch_hotfix.py": {"pulls_of", "timeline_of", "head_green"},
-    ROOT / "scripts/ci_mutation/reuse.py": {"api"},
     ROOT / "scripts/ci_stats_seed.py": {"api"},
     ROOT / "tests/refresh_durations.py": {"_gh", "ci_run_ids", "ci_download"},
 }
@@ -195,7 +194,6 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "scripts/ci_mutation/probe.py",
         "scripts/ci_mutation/probed.py",
         "scripts/ci_mutation/regrade.py",
-        "scripts/ci_mutation/reuse.py",
         "scripts/ci_release.sh",
         "scripts/ci_semgrep_floors.py",
         "scripts/ci_stats_seed.py",
@@ -208,6 +206,7 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "scripts/hive/nats_grant.py",
         "scripts/hive/rollout.py",
         "scripts/packaging/compose-hive-smoke.sh",
+        "scripts/packaging/compose-master-drill.sh",
         "scripts/packaging/compose-recovery-drill.sh",
         "scripts/packaging/compose-task-smoke.sh",
         "scripts/packaging/hive-join-smoke.sh",
@@ -355,13 +354,6 @@ def test_the_reuse_factory_exemption_contains_only_command_replacements():
 def test_the_budget_reader_runs_only_on_the_app_token():
     reader = ROOT / "scripts/ci_budget/jobs.py"
     steps = [step for _, step, here in _all_steps() if reader in _called(step.get("run", ""), here)]
-    assert steps
-    assert all(step.get("env", {}).get("GH_TOKEN") == APP_TOKEN and not _holds_token(step) for step in steps)
-
-
-def test_the_preflight_reuse_lookup_runs_only_on_the_app_token():
-    lookup = ROOT / "scripts/ci_mutation/reuse.py"
-    steps = [step for _, step, here in _all_steps() if lookup in _called(step.get("run", ""), here)]
     assert steps
     assert all(step.get("env", {}).get("GH_TOKEN") == APP_TOKEN and not _holds_token(step) for step in steps)
 
@@ -572,24 +564,26 @@ def test_a_value_without_the_workflow_token_holds_none(value):
     assert not _holds_token({"env": {"VALUE": value}, "run": f"echo '{value}'"})
 
 
-def test_sonar_downloads_this_runs_coverage_after_the_shards():
+def test_sonar_takes_this_runs_coverage_through_the_runtime_token_as_the_shards_upload_it() -> None:
     sonar = _jobs()["sonar"]
-    assert sonar["needs"] == ["unit", "unit-selected", "select", "reuse", "admission", "lab-verdict"]
+    assert sonar["needs"] == ["select", "reuse", "admission", "lab-verdict"]
     steps = sonar["steps"]
-    download = next(step for step in steps if step.get("name") == "Download shard coverage")
+    arrivals = next(step for step in steps if step.get("name") == "Take each shard's coverage as it lands")
     merge = next(step for step in steps if step.get("name") == "Merge shard coverage")
-    assert download["if"] == merge["if"] == "needs.select.outputs.scope != 'none'"
-    assert download["uses"].startswith("actions/download-artifact@")
-    assert download["with"] == {
-        "pattern": "${{ needs.select.outputs.scope == 'selected' && '{coverage,branch-coverage}-3.12-*' || 'coverage-3.12-*' }}",
-        "path": ".coverage-shards",
-    }
-    assert steps.index(download) < steps.index(merge)
-    assert merge["env"] == {
+    assert merge["if"] == "needs.select.outputs.scope != 'none'"
+    assert arrivals["if"] == f"{merge['if']} && steps.source.outputs.test_only != 'true'"
+    assert arrivals["uses"].startswith("actions/github-script@")
+    assert arrivals["with"]["github-token"] == NO_TOKEN
+    assert not _holds_token(arrivals)
+    assert steps.index(arrivals) < steps.index(merge)
+    shards = {
         "SHARDS": "${{ needs.select.outputs.scope == 'selected' && needs.select.outputs.count || 20 }}",
         "SCOPE": "${{ needs.select.outputs.scope }}",
     }
+    assert merge["env"] == shards
+    assert arrivals["env"] == {**shards, "ARRIVALS": "${{ github.workspace }}/.github/coverage/arrivals.py"}
     assert 'bash .github/coverage/combine.sh --downloaded "$SHARDS" ||' in merge["run"]
+    assert not API_CALL.search((ROOT / ".github/coverage/arrivals.py").read_text())
 
 
 def test_every_reader_of_the_unit_shard_count_matches_the_matrix():

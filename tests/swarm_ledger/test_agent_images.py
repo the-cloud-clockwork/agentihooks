@@ -3,6 +3,7 @@ import urllib.request
 from unittest.mock import patch
 
 from scripts.swarm_ledger import ledger
+from scripts.tick.adapters import database_ledger
 from tests.swarm_ledger.test_media import Endpoint, core, media, png, server
 
 
@@ -98,17 +99,12 @@ def test_upload_helper_sends_bytes_token_and_joined_agent(tmp_path):
     image = tmp_path / "slide.png"
     image.write_bytes(png())
     attachment = {"id": "a" * 64 + ".png"}
-    with (
-        patch.object(ledger.repository, "token", return_value="test-token"),
-        patch.object(ledger.urllib.request, "urlopen") as opened,
-    ):
-        opened.return_value.__enter__.return_value.read.return_value = json.dumps(attachment).encode()
+    with patch.object(database_ledger, "upload", return_value=attachment) as uploaded:
         assert ledger.upload_image("shots", "image-engineer", str(image)) == attachment
-    req = opened.call_args.args[0]
-    assert req.full_url.endswith("/api/v1/ledgers/shots/uploads/media")
-    assert req.data == image.read_bytes()
-    assert req.get_header("X-ledger-agent") == "image-engineer"
-    assert req.get_header("X-ledger-token") == "test-token"
+    slug, route, data, headers = uploaded.call_args.args
+    assert (slug, route) == ("shots", "media")
+    assert data == image.read_bytes()
+    assert headers["X-Ledger-Agent"] == "image-engineer"
 
 
 def test_unjoined_author_cannot_attach_images():

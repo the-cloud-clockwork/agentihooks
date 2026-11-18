@@ -6,7 +6,7 @@ import pytest
 from scripts.swarm import cli, prompt, templates
 from scripts.swarm.health.findings import _is_worker
 from scripts.swarm.store import RedisStore, SwarmConfig
-from scripts.swarm_ledger import ledger_server, ledger_tasks
+from scripts.swarm_ledger import api_service, ledger_server, ledger_tasks
 from tests.swarm.test_tick import FakeLedger
 
 
@@ -56,13 +56,13 @@ def test_ledger_accepts_planner_lane_and_prompt_names_role():
 
 @pytest.mark.parametrize("cap", [0, 2, 50])
 def test_page_control_sets_planner_cap(cap):
-    assert ledger_server.control_argv({"action": "set", "max_plan": cap}) == ["set", f"max-plan-agents={cap}"]
+    assert api_service.control_argv({"action": "set", "max_plan": cap}) == ["set", f"max-plan-agents={cap}"]
 
 
 @pytest.mark.parametrize("cap", [-1, 51, True, "2"])
 def test_page_refuses_invalid_planner_cap(cap):
     with pytest.raises(ValueError, match="max_plan"):
-        ledger_server.control_argv({"action": "set", "max_plan": cap})
+        api_service.control_argv({"action": "set", "max_plan": cap})
 
 
 def test_templates_keep_planner_profile_and_cap():
@@ -74,7 +74,7 @@ def test_templates_keep_planner_profile_and_cap():
 
 def test_empty_page_set_names_all_cap_fields():
     with pytest.raises(ValueError) as caught:
-        ledger_server.control_argv({"action": "set"})
+        api_service.control_argv({"action": "set"})
     assert (
         str(caught.value)
         == "set needs max_eng, max_ci, max_plan, masters_step, compact_limit, effort_min, effort_max, autonomy, "
@@ -85,36 +85,36 @@ def test_empty_page_set_names_all_cap_fields():
 def test_page_set_maps_catalog_models_and_refuses_unknown(monkeypatch):
     models = {"claude": [{"model": "sonnet"}], "codex": [{"model": "gpt-6-sol"}]}
     monkeypatch.setattr(ledger_server, "swarm_models", lambda: models)
-    assert ledger_server.control_argv({"action": "set", "claude_model": "sonnet", "codex_model": "gpt-6-sol"}) == [
+    assert api_service.control_argv({"action": "set", "claude_model": "sonnet", "codex_model": "gpt-6-sol"}) == [
         "set",
         "claude-model=sonnet",
         "codex-model=gpt-6-sol",
     ]
     for field in ("claude_model", "codex_model"):
         with pytest.raises(ValueError, match="catalog"):
-            ledger_server.control_argv({"action": "set", field: "unknown"})
+            api_service.control_argv({"action": "set", field: "unknown"})
 
 
 @pytest.mark.parametrize("limit", [100, 650, 1000])
 def test_page_control_sets_the_compact_limit(limit):
-    assert ledger_server.control_argv({"action": "set", "compact_limit": limit}) == ["set", f"compact-limit={limit}"]
+    assert api_service.control_argv({"action": "set", "compact_limit": limit}) == ["set", f"compact-limit={limit}"]
 
 
 @pytest.mark.parametrize("limit", [0, 99, 1001])
 def test_page_refuses_a_compact_limit_outside_100_to_1000(limit):
     with pytest.raises(ValueError) as caught:
-        ledger_server.control_argv({"action": "set", "compact_limit": limit})
+        api_service.control_argv({"action": "set", "compact_limit": limit})
     assert str(caught.value) == "compact_limit must be a whole number from 100 to 1000"
 
 
 @pytest.mark.parametrize("mode", ["manual", "assist", "delegate", "full"])
 def test_page_control_sets_each_autonomy_mode(mode):
-    assert ledger_server.control_argv({"action": "set", "autonomy": mode}) == ["set", f"autonomy={mode}"]
+    assert api_service.control_argv({"action": "set", "autonomy": mode}) == ["set", f"autonomy={mode}"]
 
 
 def test_page_refuses_an_unknown_autonomy_mode():
     with pytest.raises(ValueError) as caught:
-        ledger_server.control_argv({"action": "set", "autonomy": "auto"})
+        api_service.control_argv({"action": "set", "autonomy": "auto"})
     assert str(caught.value) == "autonomy must be one of manual, assist, delegate, full"
 
 

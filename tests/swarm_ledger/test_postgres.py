@@ -458,6 +458,7 @@ def test_the_repository_sets_its_schema_up_once_under_the_writer_lock(opened):
     repository = postgres.PostgresLedgerRepository(ADDRESS, domain="domain")
     assert repository.adopts is False and repository.address == ADDRESS
     assert repository._key("s") == (ADDRESS, "s")
+    repository.migrate()
     with repository.connect() as connection:
         assert isinstance(connection, postgres.Connection)
     raw = opened.raws[0]
@@ -480,8 +481,7 @@ def test_the_repository_sets_its_schema_up_once_under_the_writer_lock(opened):
     assert raw.log[-3][1] == (postgres.REQUIRED,)
     assert raw.commits == 1
     assert repository._ready == {ADDRESS}
-    with repository.connect():
-        pass
+    repository.migrate()
     assert len(raw.log) == len(statements) and raw.commits == 1
     assert postgres.pool(ADDRESS).idle == [raw]
 

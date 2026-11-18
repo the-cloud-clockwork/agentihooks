@@ -29,7 +29,7 @@ def test_the_host_tick_excludes_retired_ledgers_before_any_tick_pass(monkeypatch
     ledger = SimpleNamespace(binned=binned, closed=closed)
     store = SimpleNamespace(
         slugs=lambda: ["retired", "active"],
-        config=lambda slug: SimpleNamespace(api_url="", pending_api_url=""),
+        config=lambda slug: SimpleNamespace(api_url=""),
         redis=SimpleNamespace(hget=lambda *_: None),
         key=lambda slug, tail: f"{slug}:{tail}",
     )

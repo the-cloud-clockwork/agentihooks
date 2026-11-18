@@ -1,0 +1,27 @@
+rules:
+  - id: dead-letter-reopen-keeps-generation
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A dead lettered offer must reach the hub as a dead letter, and the hub reopen must advance the task's claim
+      generation when it holds no admission for the offer, because the spoke claim key is built from that generation
+      and a dead marker at it terms every later offer of the task, which then stays open and is never placed. Ask
+      through tasks.dead_lettered and advance the generation in the reopen of an unheld admission.
+    paths:
+      include:
+        - /scripts/hive/
+        - /scripts/hub/
+        - dead-letter-reopen-keeps-generation.py
+    pattern-either:
+      - patterns:
+          - pattern-inside: |
+              def _finish_dead(...):
+                  ...
+          - pattern: $SELF.tasks.reopen(...)
+      - patterns:
+          - pattern-inside: |
+              def reopen(...):
+                  ...
+          - pattern: |
+              if not $HELD or $OTHER:
+                  return False

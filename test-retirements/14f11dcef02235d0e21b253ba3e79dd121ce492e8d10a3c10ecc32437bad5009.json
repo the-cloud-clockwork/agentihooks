@@ -1,0 +1,6 @@
+{
+  "tests/test_ci_queue_seed.py::test_no_job_waits_on_the_retired_queue_baseline[proofs.yml-mutation]": {
+    "reader": "Standards reader",
+    "reason": "The head removes the Proofs mutation job, so no such job remains to wait on the retired queue baseline."
+  }
+}

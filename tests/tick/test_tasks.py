@@ -196,13 +196,20 @@ def test_settle_then_close_space_close_the_pass(monkeypatch: pytest.MonkeyPatch)
     ]
 
 
-def test_a_raising_step_skips_the_rest_and_raises_at_the_site(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_raising_step_is_held_and_the_rest_of_its_site_runs(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[Any, ...]] = []
     box: dict[str, Any] = {}
     found = _run(tasks.TASK_PASSES, _tick(calls, raises=tasks.size_writes), _pass(box), monkeypatch)
-    assert found == ["ran 1", "ran 2"]
-    assert [call[0] for call in calls] == ["run window", claim_hold.verification_notices, tasks.size_writes]
-    assert list(box) == [tasks.RAISED]
+    assert found == ["ran 1", "ran 2", "ran 4", "ran 5"]
+    assert [call[0] for call in calls] == [
+        "run window",
+        claim_hold.verification_notices,
+        tasks.size_writes,
+        tasks.release_writes,
+        "dispatcher group",
+    ]
+    assert list(box) == [tasks.RAISED, "fallen"]
+    assert box["fallen"] == {"size pass"}
     with pytest.raises(RuntimeError, match="^boom$"):
         tasks.raise_held(box)
 

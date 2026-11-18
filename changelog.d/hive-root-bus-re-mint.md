@@ -1,0 +1,1 @@
+`hive run` re-mints the workstation root hive bus credential at start when its publish or subscribe grant differs from a fresh mint, such as a credential written before the per member stop consumer grants, so a root hive restart clears the permissions violation without a hand run of `hive root-bus`.

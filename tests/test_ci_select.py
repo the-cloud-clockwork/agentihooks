@@ -1141,3 +1141,29 @@ def test_main_reads_the_recorded_reads_for_a_change_without_python_source(repo, 
     output = run_main(repo, monkeypatch, tmp_path, "pull_request")
     assert "scope=selected" in output
     assert "files_1=tests/test_workflows.py" in output
+
+
+@pytest.mark.parametrize("name", ["snapshot.js", "new_contract.js"])
+def test_selection_takes_every_python_wrapper_of_a_changed_javascript_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    source = f"scripts/static/{name}"
+    files = {
+        source: "export const value = 2;\n",
+        "tests/test_direct.py": f"PAGE = '{source}'\n",
+        "tests/nested/test_basename.py": f"PAGE = '{name}'\n",
+        "tests/js_loader.py": f"PAGE = '{name}'\n",
+        "tests/second_loader.py": "from tests import js_loader\n",
+        "tests/test_indirect.py": "from tests import second_loader\n",
+        "tests/test_unrelated.py": "def test_other(): pass\n",
+    }
+    for path, text in files.items():
+        target = tmp_path / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text)
+    monkeypatch.chdir(tmp_path)
+    assert ci_select.selected_tests(tmp_path, [source], False) == {
+        "tests/test_direct.py",
+        "tests/nested/test_basename.py",
+        "tests/test_indirect.py",
+    }

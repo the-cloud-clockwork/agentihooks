@@ -35,6 +35,13 @@ def primary_reserve_pct(environ: Mapping[str, str]) -> float:
         return PRIMARY_RESERVE_DEFAULT
 
 
+def master_five_floor() -> float:
+    """The five hour percent left at which a master hands off: one hundred minus the hard five hour handoff."""
+    from hooks import config
+
+    return 100.0 - config.QUOTA_HANDOFF_5H_PCT
+
+
 def primary_reserved(slug: str, week_left: float | None, environ: Mapping[str, str]) -> bool:
     """Whether `slug` is the primary claude ai login with its week at or under the reserve: nothing new places there."""
     primary = primary_login()

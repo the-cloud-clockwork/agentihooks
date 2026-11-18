@@ -79,6 +79,8 @@ def _legacy(action: list[str], folder: Path, environ: dict) -> tuple[list[str], 
 
 
 def start(folder: Path, environ: dict = os.environ, run: Run = subprocess.run) -> str:
+    """Pull the service image, then bring the service up; a failed pull still starts the local image."""
+    _compose(["pull"], folder, environ, run)
     return _compose(["up", "-d"], folder, environ, run)
 
 

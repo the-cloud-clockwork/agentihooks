@@ -71,18 +71,16 @@ tick-step skill first and follows it for the step's artefacts and checks.
 
 ## CI proofs
 
-Where the repository has a Proofs workflow, send focused tests and mutation
-there. Tests still runs every required check on pull requests, merge groups
-and dev pushes.
+Where the repository has a Proofs workflow, send focused tests there. The
+pull request's own Tests run is the only mutation source. Tests still runs
+every required check on pull requests, merge groups and dev pushes.
 
 ```bash
 gh workflow run proofs.yml --ref <branch> -f proof=tests -f tests='<test paths>'
-gh workflow run proofs.yml --ref <branch> -f proof=mutation -f base=origin/dev
 ```
 
 Give focused tests explicit paths under `tests/`; add `-f browser=true` for
-tests that drive Chromium. Use the dependency branch as `base` for a stacked
-mutation proof.
+tests that drive Chromium.
 
 Full Tests dispatch is for gate plant proofs. Declare that intent explicitly:
 

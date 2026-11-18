@@ -568,11 +568,33 @@ def _registry(args: argparse.Namespace) -> None:
         _list()
 
 
+def _refresh_root_bus() -> None:
+    """Re-mint the stored root hive bus credential when its grant is stale and load the rewritten bus env."""
+    from dotenv import dotenv_values
+
+    from scripts.hive import root_bus
+    from scripts.swarm.probe import ROOT
+
+    try:
+        path = root_bus.refresh(registry.home(), _signer, ROOT)
+    except auth.HiveError as exc:
+        print(f"hive kept the stored root bus credential ({exc})", file=sys.stderr)
+        return
+    if path is not None:
+        os.environ.update({key: value for key, value in dotenv_values(path).items() if value is not None})
+        print(
+            f"hive re-minted the root bus credential in {path}: its grant differed from a fresh mint", file=sys.stderr
+        )
+
+
 def _daemon(command: str) -> int:
+    from scripts import serena_router_daemon
     from scripts.hive import daemon, lanes
 
     def run() -> object:
         daemon.fill_operator_env()
+        _refresh_root_bus()
+        serena_router_daemon.ensure()
         lanes.serve(os.environ)
         return daemon.run(lambda: daemon.clients(redis_client()))
 
@@ -653,7 +675,7 @@ def _run(args: argparse.Namespace) -> int:
         elif args.command == "compare":
             return _compare(args.base)
         elif args.command == "controller":
-            path = auth.write_controller_env(registry.home(), auth.issue_controller(redis_client(), args.holder))
+            path = auth.write_controller_env(registry.home(), _issued_controller(args.holder))
             print(f"issued a controller credential; it is in {path}")
         elif args.command in ("set", "show", "list"):
             _registry(args)
@@ -667,3 +689,24 @@ def _run(args: argparse.Namespace) -> int:
         print(f"hive {args.command} refused: {exc}", file=sys.stderr)
         return 1
     return 0
+
+
+def _issued_controller(holder: str) -> str:
+    """Issue the controller credential, retrying one tick apart while Redis refuses inside the controller's Redis grace
+    window, so a Redis outage at controller start ends the container no sooner than it would end the controller."""
+    from scripts.swarm import lease, redis_grace
+    from scripts.swarm.store import store_errors
+
+    deadline = time.monotonic() + redis_grace.grace_seconds(os.environ)
+    while True:
+        try:
+            return auth.issue_controller(redis_client(), holder)
+        except store_errors() as exc:
+            refused = exc
+        if time.monotonic() >= deadline:
+            raise refused
+        print(
+            f"hive controller: Redis refused, retrying after one tick inside the Redis grace window: {refused}",
+            file=sys.stderr,
+        )
+        time.sleep(lease.tick_ms() / 1000)

@@ -1,9 +1,12 @@
 from collections.abc import Callable, Iterator
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 from .config import QueuePolicy
 from .envelope import Envelope
+
+SERVE_WAITED_MS: ContextVar[int] = ContextVar("serve_waited_ms", default=0)
 
 
 class StateConflict(Exception):
@@ -58,6 +61,11 @@ class WorkQueue(Protocol):
     def withdraw(self, stale: Callable[[Envelope], bool]) -> int:
         """Removes every offer still on the queue, taken but unsettled or not, that ``stale`` names and returns how
         many it removed."""
+        ...
+
+    def release(self, delivery: Delivery, delay_ms: int) -> None:
+        """Returns ``delivery`` to the queue after ``delay_ms`` without spending one of its deliveries, so its next
+        delivery comes at the attempt this one had."""
         ...
 
 
