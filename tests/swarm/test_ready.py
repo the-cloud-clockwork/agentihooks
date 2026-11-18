@@ -790,6 +790,78 @@ def test_an_outage_or_a_hold_while_queueing_never_counts_toward_the_reopen(mergi
     assert merging.rows["t1"]["state"] == "pr"
 
 
+def timed_out(action: str, url: str, journal: Any = None) -> dict[str, Any]:
+    raise SwarmError("GitHub API: timed out")
+
+
+STALLED = f"task t1 reopened, {URL} stayed green and unqueued for 20 minutes while the merge pass could not queue it"
+
+
+@pytest.mark.feature("merge-pass-released-green-hold-reopens")
+@pytest.mark.parametrize("stuck", ["checks wait", "queue hold"])
+def test_a_released_pull_request_the_merge_pass_cannot_queue_reopens_after_twenty_green_minutes(
+    merging: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, stuck: str
+) -> None:
+    merging.pulls[URL] = GREEN
+    if stuck == "checks wait":
+        monkeypatch.setattr(waits, "required_green", lambda target, head: False)
+    held = [] if stuck == "checks wait" else [f"could not queue {URL} for task t1: GitHub API: timed out"]
+    assert merging.run(NOW, timed_out) == held
+    assert merging.run(NOW + 19 * 60_000, timed_out) == held
+    assert merging.rows["t1"]["state"] == "pr" and merging.ledger.comments == []
+    assert merging.run(NOW + 20 * 60_000, timed_out) == [STALLED]
+    row = merging.rows["t1"]
+    assert (row["state"], row["claimed_by"], row["awaiting"]) == ("open", "", "fix")
+    assert merging.ledger.comments == [
+        (
+            "t1",
+            f"Reopened by the swarm: its pull request {URL} stayed green and unqueued for 20 minutes while the merge "
+            "pass could not queue it. The next engineer continues it from the handoff its engineer left.",
+            "swarm",
+        ),
+    ]
+    assert merging.store.handoff("sw", "t1") == "the handoff"
+    assert ready.record(merging.store, "sw", "t1") is None
+
+
+@pytest.mark.feature("merge-pass-released-green-hold-reopens")
+@pytest.mark.parametrize("interrupted", [RUNNING, QUEUED])
+def test_a_released_pull_request_that_stops_reading_green_and_unqueued_restarts_its_hold(
+    merging: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, interrupted: PullRequest
+) -> None:
+    monkeypatch.setattr(waits, "required_green", lambda target, head: False)
+    merging.pulls[URL] = GREEN
+    assert merging.run(NOW, timed_out) == []
+    merging.pulls[URL] = interrupted
+    merging.run(NOW + 10 * 60_000, timed_out)
+    merging.pulls[URL] = GREEN
+    assert merging.run(NOW + 15 * 60_000, timed_out) == []
+    assert merging.run(NOW + 34 * 60_000, timed_out) == []
+    assert merging.rows["t1"]["state"] == "pr"
+    assert merging.run(NOW + 35 * 60_000, timed_out) == [STALLED]
+
+
+@pytest.mark.feature("merge-pass-released-green-hold-reopens")
+def test_outage_time_never_counts_toward_a_released_pull_request_green_hold(
+    merging: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import outage
+
+    paused: list[tuple[str, int, int]] = []
+
+    def pause(slug: str, since_ms: int, now_ms: int) -> int:
+        paused.append((slug, since_ms, now_ms))
+        return 5 * 60_000
+
+    monkeypatch.setattr(outage, "paused_ms", pause)
+    monkeypatch.setattr(waits, "required_green", lambda target, head: False)
+    merging.pulls[URL] = GREEN
+    assert merging.run(NOW, timed_out) == []
+    assert merging.run(NOW + 24 * 60_000, timed_out) == []
+    assert paused[-1] == ("sw", NOW, NOW + 24 * 60_000)
+    assert merging.run(NOW + 25 * 60_000, timed_out) == [STALLED]
+
+
 def test_a_pull_request_into_another_base_counts_as_a_refusal(merging):
     merging.pulls[URL] = GREEN
 

@@ -1011,6 +1011,18 @@
       ]
     },
     {
+      "id": "merge-pass-released-green-hold-reopens",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-released-pr-claim-reopen",
+      "behaviour": "A released task whose pull request reads green and unqueued for twenty minutes, outage time left out, while the merge pass cannot queue it reopens for the next engineer under the fix wait with its handoff, and its ready record is removed; a pull request that runs checks again or queues restarts the twenty minutes.",
+      "seam": "ready merge pass advancing a released record whose checks wait never resolves or whose queue call keeps holding",
+      "tests": [
+        "tests/swarm/test_ready.py::test_a_released_pull_request_the_merge_pass_cannot_queue_reopens_after_twenty_green_minutes",
+        "tests/swarm/test_ready.py::test_a_released_pull_request_that_stops_reading_green_and_unqueued_restarts_its_hold",
+        "tests/swarm/test_ready.py::test_outage_time_never_counts_toward_a_released_pull_request_green_hold"
+      ]
+    },
+    {
       "id": "hive-workstation-release",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2154",
