@@ -322,7 +322,7 @@ class RedisStore:
             raw.get("lab_url", ""),
         )
 
-    def update(self, slug, **changes):
+    def update(self, slug: str, **changes: Any) -> SwarmConfig:
         from scripts.swarm import model_catalog
 
         if changes.get("state", STATES[0]) not in STATES:
@@ -335,6 +335,11 @@ class RedisStore:
             if refused := default_models.refusal(changes, model_catalog.catalog(os.environ, self.redis, time.time())):
                 raise SwarmError(refused)
         previous = self.config(slug)
+        if models := default_models.lane_models(changes.get("lanes", {}), previous.lanes):
+            if refused := default_models.lane_refusal(
+                models, model_catalog.catalog(os.environ, self.redis, time.time())
+            ):
+                raise SwarmError(refused)
         config = replace(previous, **changes)
         if {"lanes", "effort_min", "effort_max"} & set(changes):
             refused = effort_range.refusal((config.effort_min, config.effort_max), config.lanes)

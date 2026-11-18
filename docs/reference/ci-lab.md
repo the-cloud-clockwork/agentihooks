@@ -53,6 +53,7 @@ built CI lab image.
 | `GITHUB_APP_*` | yes | never | GitHub App identity used to post check runs and read dev push manifest artifacts; the App needs checks write and actions read |
 | `CI_LAB_REDIS_URL` | yes | no | Queue, lease and verdict index store |
 | `CI_LAB_RUNTIME_CONFIG` | yes | no | Path of the mounted runtime config the scheduler reads at start, before it connects anywhere; its budget sets the budget fraction and shed classes of `/capacity` and `/metrics`; `python -m scripts.ci_lab runtime <path>` validates it |
+| `CI_LAB_URL` | yes | no | The lab scheduler address the relay builds each relayed check run's and draft pull request's grade link from, `<CI_LAB_URL>/grades/<sha>` |
 | `CI_LAB_SCHEDULER_URL` | no | yes | Base address of the scheduler lease API |
 | `CI_LAB_SLOTS` | no | yes | Number of units the worker runs at once |
 | `CI_LAB_GIT_MIRROR` | yes | yes | Path of the shared git mirror the worker cuts worktrees from and the scheduler borrows objects from |
@@ -66,6 +67,7 @@ built CI lab image.
 | `CI_LAB_MINIO_ENDPOINT`, `CI_LAB_MINIO_BUCKET`, `CI_LAB_MINIO_ACCESS_KEY`, `CI_LAB_MINIO_SECRET_KEY` | yes | no | The object store names the scheduler reads |
 | `CI_LAB_MIRROR_STORE` | yes | no | Folder of the scheduler's private git stores, one per repository, that borrow the mirror's objects |
 | `CI_LAB_REPOSITORY` | yes | no | Repository URL whose dev runner trust list admits head actors |
+| `AGENTIHOOKS_LAB_REMOTE`, `AGENTIHOOKS_LAB_REMOTE_TOKEN` | yes | no | The lab remote URL a mirror fetches a sha GitHub lacks from, and its token, passed by reference; unset, the mirrors fetch from GitHub only |
 | `CI_LAB_IMAGE` | yes | no | Worker image name keyed into static unit keys; empty when unset |
 | `CI_LAB_CONTROL_TOKEN` | yes | no | Bearer token the [control routes](#control-routes) require, passed by reference; unset, they refuse every request. The swarm host that presses panic or merge priority holds the same variable |
 | `UV_CACHE_DIR` | no | yes | Shared uv cache for virtual environments |
@@ -942,6 +944,16 @@ after git writes the refs, so it cannot turn a push away. The remote's pre recei
 outside `refs/grade/*`. A deleted grade ref, or a root commit pushed without `-o base`, prints
 `lab remote: <ref> is not graded` and publishes nothing.
 
+GitHub does not hold a head pushed only to the lab remote, so the scheduler and the relay fetch it
+from there. Their mirrors fetch a sha from the GitHub repository first and, when that fetch fails,
+from the lab remote `AGENTIHOOKS_LAB_REMOTE` names, but only when that URL names the same
+repository. Git gets `AGENTIHOOKS_LAB_REMOTE_TOKEN` as the basic password of the user `lab` for
+that URL alone, through its environment config, and no store or log keeps it. A grade of a head pushed
+to a `refs/grade/*` ref keeps the ref and records each check's status and conclusion. It posts no
+GitHub check run; the relay posts them once it has pushed the head. The relay's push token asks
+for contents write and workflows write, so a relayed branch that changes workflow files is
+accepted.
+
 | Name | Meaning |
 |---|---|
 | `CI_LAB_REPOSITORY` | The repository URL the head belongs to, in the `https://github.com/<owner>/<repo>` form GitHub deliveries use |
@@ -1203,7 +1215,9 @@ key; the builders are pure and read no file, clock or network.
    `completed` on the last, one per gate with units and `required` for the whole grade. A completed
    check run never moves again. The grade state keeps each check run's id, and the scheduler seeds
    its poster with that id and the last status it posted before the next move, so a restarted
-   scheduler advances the same check run instead of opening a second one.
+   scheduler advances the same check run instead of opening a second one. A grade of a head pushed
+   to a `refs/grade/*` ref records the same moves and posts none, leaving its check runs to the
+   relay.
 
 Expansion frames a head by its class (`scripts.ci_lab.scheduler.frame`): a pull request or hotfix grade
 keeps the lab gates the pull request rules require and names every other required job as a gate without
@@ -1218,6 +1232,13 @@ the gates as the needs of a run of the grade's class: pull request and hotfix gr
 `workflow_dispatch`. `tests/fixtures/ci_lab/gate_required.json` records the step's verdict on cases
 built from the needs of real runs; one test holds `fold` to every case and another holds the cases
 to today's step.
+
+The scheduler service (`scripts.ci_lab.scheduler.serve`) ticks the lab relay after each pass and
+prints the relay's actions after the pass's own. `main` builds the relay once at start on its own
+lab heads consumer, the `ci-lab-relay` durable filtered to `ci.lab.head.notice`, which bus
+provisioning creates beside the scheduler's `ci-lab-scheduler` durable. A green grade of a pushed
+`refs/grade/<task>` head with a `branch` option then reaches that branch, its check runs and its
+draft pull request.
 
 A grade's state is one JSON document at `agentihooks-ci:grade:<run>`, where `<run>` is the grade
 key of the repository, head, base, class and grader revision. Live grades sit in
@@ -1256,8 +1277,11 @@ the lab's GitHub App scopes to actions read (`manifests.Actions`, one per reposi
 `manifests.Fetcher`). Its `packed.json` is written once at that commit's key, so a stored commit is
 never fetched again. A commit without such a run or artifact, an expired artifact, an archive
 GitHub answers is gone (410) and a manifest recorded for another commit fetch nothing; a refused
-or unanswered request or an archive without a readable `packed.json` raises `manifests.FetchRefused`
-and drops the head with its reason. The dev push artifact is kept 7 days, so a commit older
+or unanswered request or an archive without a readable `packed.json` raises `manifests.FetchRefused`.
+A request GitHub never answered, a token mint without an answer included, or answered with a server
+error raises its subclass `manifests.FetchUnanswered`, and the scheduler puts the head back in its
+lane with the quiet window restarted, so the first pass after that window fetches again; any other
+refusal drops the head with its reason. The dev push artifact is kept 7 days, so a commit older
 than that is answered only from the store. A head that needs test units and finds none fails with
 `no dependency manifest at or before <base>` and is dropped with that reason, so a merge group
 never folds green on an empty unit job.
@@ -2288,17 +2312,11 @@ ls -A "$probe"
 
 The `bwrap` command prints `Read-only file system` and exits 1, and `ls` prints nothing.
 
-The pull request tier proves the sandbox under real bubblewrap. The writer lock workflow's
-`lab-sandbox` job runs on every pull request that changes `scripts/ci_lab/sandbox.py`,
-`scripts/ci_lab/run_static.py`, `scripts/ci_lab/run_tests.py`, `tests/ci_lab/test_sandbox.py`,
-`tests/ci_lab/test_run_static.py`, `tests/ci_lab/test_run_tests.py` or
-`.github/workflows/writer-lock.yml`, and on every manual dispatch of the writer lock workflow.
-It runs on a GitHub hosted `ubuntu-latest` runner, installs bubblewrap when the runner lacks it,
-and sets `kernel.apparmor_restrict_unprivileged_userns=0`. It then runs those three test files
-and fails when any of their tests fails or skips.
-
-The Tests workflow calls the writer lock workflow from its `writer-lock` job, which
-`Gate — Required` needs.
+The pull request tier proves the sandbox under real bubblewrap in the writer lock workflow's
+`lab-sandbox` job. It runs on every pull request that changes `scripts/ci_lab/sandbox.py`,
+`scripts/ci_lab/run_static.py`, `scripts/ci_lab/run_tests.py`, one of their three test files or
+`.github/workflows/writer-lock.yml`, and fails when any of those tests fails or skips. See
+[Pull request job under real bubblewrap](#pull-request-job-under-real-bubblewrap).
 These tests prove the read only trees:
 
 | Test | Proves |
@@ -2310,7 +2328,247 @@ These tests prove the read only trees:
 In `feature-map.json`, `lab-static-read-only-trees` maps the bubblewrap arguments test of
 `test_run_static.py`. `lab-sandbox-read-only-trees` maps the `test_sandbox.py` tests that check
 the `--ro-bind` arguments and the `CannotRun` refusal without `bwrap`. The two write refusal tests
-above carry no feature entry.
+above carry no feature entry; the job that runs them unskipped is mapped as
+`lab-sandbox-bwrap-pull-request-tier`, below.
+
+### Pull request job under real bubblewrap
+
+The four tests that need real bubblewrap skip in the unit shards of the Tests workflow, which run
+on self hosted runners where bubblewrap cannot isolate. Each one first probes
+`bwrap --dev-bind / / --unshare-net true` and skips when `bwrap` is missing or the probe fails.
+The `lab-sandbox` job of the `Writer lock` workflow (`.github/workflows/writer-lock.yml`) runs
+them on a GitHub hosted runner, where a skip turns the job red:
+
+| Test | Skip reason when bubblewrap cannot isolate |
+|---|---|
+| `test_sandbox.py::test_loopback_works_and_egress_is_refused_without_network` | `bubblewrap cannot create a network namespace on this runner` |
+| `test_sandbox.py::test_a_unit_cannot_restore_write_bits_or_write_into_a_read_only_tree[False]` | `bubblewrap cannot create namespaces on this runner` |
+| `test_sandbox.py::test_a_unit_cannot_restore_write_bits_or_write_into_a_read_only_tree[True]` | `bubblewrap cannot create namespaces on this runner` |
+| `test_run_static.py::test_a_step_cannot_write_into_the_grader_or_base_tree` | `bubblewrap cannot create namespaces on this runner` |
+
+The job runs every test of the three files, so the argument and refusal tests that need no real
+bubblewrap run there too.
+
+#### When the job runs
+
+| Run | `lab-sandbox` |
+|---|---|
+| A pull request whose diff names a path in `LAB_SANDBOX_INPUTS` | Runs, called from the Tests workflow's `writer-lock` job |
+| A pull request that changes none of those paths | Skipped |
+| A direct dispatch of the `Writer lock` workflow, on any branch | Runs, whatever the branch changed |
+| The Tests workflow on a push to `dev`, or on its own manual dispatch | Skipped |
+| A merge group | Not reached: the Tests `writer-lock` job runs only on `push`, `pull_request` and `workflow_dispatch` |
+
+The job's condition:
+
+```yaml
+if: (github.event_name == 'pull_request' && needs.inputs.outputs.lab_sandbox == 'true') || github.workflow == 'Writer lock'
+```
+
+GitHub gives a called workflow its caller's `github` context, so under the Tests workflow
+`github.workflow` is `Tests` and the second clause holds only when the `Writer lock` workflow
+itself is dispatched. A Tests run on a pull request that changes no input shows
+`writer-lock / lab-sandbox` as skipped.
+
+The `inputs` job's `Select lab sandbox inputs` step (id `lab-sandbox`) runs only on
+`pull_request`. It diffs the merge base of `origin/<base branch>` and the pull request head with
+`git diff --no-renames --name-only -z`, compares each changed path with every entry of
+`LAB_SANDBOX_INPUTS` for exact equality, and writes `due=true` or `due=false` to the job's
+`lab_sandbox` output:
+
+```yaml
+LAB_SANDBOX_INPUTS: >-
+  scripts/ci_lab/sandbox.py scripts/ci_lab/run_static.py scripts/ci_lab/run_tests.py
+  tests/ci_lab/test_sandbox.py tests/ci_lab/test_run_static.py tests/ci_lab/test_run_tests.py
+  .github/workflows/writer-lock.yml
+```
+
+Paths match whole. A change to `scripts/ci_lab/worker.py`, or to any other module under
+`scripts/ci_lab`, does not select the job. With renames off, a file moved away from an input path
+shows as deleted under its old name, and that selects it.
+
+#### What the job does
+
+The job runs on `ubuntu-latest` with a 10 minute timeout. It finished in under 40 seconds in the
+green delivery run.
+
+| Step | Does | Fails the job when |
+|---|---|---|
+| Checkout | Checks out `github.sha` without persisted credentials | |
+| Python and uv | Python 3.12, and uv `0.12.23` pinned by checksum with no cache | |
+| `Let bubblewrap create user and network namespaces` | Installs `bubblewrap` with apt only when `bwrap` is not on `PATH`, runs `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`, then probes `bwrap --dev-bind / / --unshare-net true` | The install, the sysctl or the probe exits non zero |
+| `Install dependencies` | `uv pip install --system` with `.github/test-requirements.lock` and `.github/test-excludes.txt`, through `.github/scripts/pypi-retry.sh`, which retries a package index outage until 150 seconds of backoff are spent, not counting the attempts | The install still fails after its retries |
+| `Run the lab sandbox tests under real bubblewrap` | `python -m pytest` over `tests/ci_lab/test_sandbox.py`, `tests/ci_lab/test_run_static.py` and `tests/ci_lab/test_run_tests.py` with `-n 0 -v -rs --tb=short`, its output copied to `$RUNNER_TEMP/lab-sandbox.log` | A test fails (exit 1), no test is collected (exit 5), or the log contains `SKIPPED` (exit 1) |
+
+The apt install reads only the Ubuntu archive source list, `/etc/apt/sources.list.d/ubuntu.sources`,
+or `/etc/apt/sources.list` when that file is absent. It passes `Dir::Etc::sourceparts=-`, so no
+other source list on the image is read, and `Acquire::Retries=5`. A failed index refresh does not
+stop the step: it prints the warning below and installs from the indexes that loaded. In the green
+delivery run the hosted image already carried `bwrap`, so the install did not run.
+
+```text
+::warning::apt archive index refresh incomplete; installing bubblewrap from the indexes that loaded
+```
+
+`-n 0` runs the tests in one process without xdist workers, and `-rs` prints each skip with its
+reason in the short summary. GitHub runs a `shell: bash` step as
+`bash --noprofile --norc -eo pipefail`, so the pytest exit code survives the `tee`. A skip ends the
+step with:
+
+```text
+::error::A lab sandbox test skipped, so bubblewrap did not isolate it on this runner.
+```
+
+#### How it gates a pull request
+
+The Tests workflow's `writer-lock` job calls `writer-lock.yml`, and `Gate — Required` needs
+`writer-lock`. A failed `lab-sandbox` job fails `writer-lock`, so `Gate — Required` is red and the
+pull request cannot enter the merge queue. The check shows on the pull request as
+`writer-lock / lab-sandbox`. A skipped `lab-sandbox` job leaves `writer-lock` green.
+
+The Tests workflow skips its `writer-lock` job when `lab.authoritative` in `delivery.yaml` names
+`writer-lock`, and `Gate — Required` then reads the `lab/writer-lock` check run in its place
+(`.github/gate-wiring.json`). The list is empty on `dev`, so Actions runs the job.
+
+#### Runner class
+
+`.github/runner-classes.json` lists `writer-lock.yml/lab-sandbox` as `hosted`, and the runner
+routing tests keep the job in their `CLASSED` set of jobs that stay on GitHub hosted runners. The runner class check refuses any other `runs-on` for it:
+
+```bash
+python -m scripts.ci_runner_classes
+```
+
+It prints `Runner classes: <n> workflows, <m> jobs, 0 problems` when every job matches its class.
+A `lab-sandbox` job routed to a self hosted runner label prints
+`::error::writer-lock.yml/lab-sandbox: runs-on must be ubuntu-latest for a hosted job` and exits 1.
+
+#### The workflow is frozen
+
+The job runs from the pull request head, like every `Writer lock` and Tests job, so a head could
+otherwise edit or drop it on itself. `tests/registry/FROZEN_GATES.json` holds
+`.github/workflows/writer-lock.yml` with the blobs the base accepts (pull request
+[#11870](https://github.com/the-cloud-clockwork/agentihooks/pull/11870), feature
+`frozen-writer-lock-workflow`). The protected grader refuses a head that changes the workflow to
+any other content:
+
+```text
+The head changes the frozen gate file .github/workflows/writer-lock.yml to content tests/registry/FROZEN_GATES.json on the base does not accept; announce its blob there by its own pull request first.
+```
+
+#### Change the job
+
+Adding an input path or a test file, or changing a step, takes two pull requests:
+
+1. Edit `.github/workflows/writer-lock.yml` on a branch, commit it and read its blob with
+   `git rev-parse HEAD:.github/workflows/writer-lock.yml`.
+2. Open a first pull request that only adds that blob to the `.github/workflows/writer-lock.yml`
+   list in `tests/registry/FROZEN_GATES.json`, and merge it. A head that changes the registry and
+   the workflow together is refused with
+   `The head changes tests/registry/FROZEN_GATES.json and the frozen gate file .github/workflows/writer-lock.yml together; land the registry by its own pull request first.`
+3. Open the second pull request with the workflow change and its guard tests. A new input path
+   goes into `LAB_SANDBOX_INPUTS` and the cases of `test_lab_sandbox_selection`. A new test file
+   goes into the run step, `LAB_SANDBOX_INPUTS`, the argument check of
+   `test_the_lab_sandbox_run_fails_on_a_skipped_or_failed_test`, and the expected list of files a
+   step reaches in `tests/test_ci_pull_request_api.py::test_no_script_a_step_runs_calls_the_api`.
+   The second pull request changes `writer-lock.yml`, so the job selects itself and runs the new
+   version.
+
+#### Run it by hand
+
+Dispatch the workflow on a branch and read the job:
+
+```bash
+gh workflow run writer-lock.yml --ref <branch>
+gh run list --workflow writer-lock.yml --branch <branch> --limit 1 --json databaseId,status,conclusion
+gh run view <run id> --json jobs --jq '.jobs[] | select(.name == "lab-sandbox") | {databaseId, conclusion}'
+gh run view <run id> --job <job id> --log | grep -E 'PASSED|FAILED|SKIPPED|::error::|::warning::'
+```
+
+A dispatch also runs the `scenario` job, the Postgres writer lock scenarios described in
+[Shared ledger database sessions](shared-ledger-database.md#verification-in-ci). The `events`,
+`tick`, `hive-join` and `features` jobs run only on a pull request, so they stay skipped. A green
+`lab-sandbox` job lists every test of the three files as `PASSED`; the delivery head ran 40 with
+none skipped.
+
+To show the job catches a weakened sandbox without opening a pull request, commit the plant on a
+`diffcheck/` branch and dispatch on it. With `--ro-bind` changed to `--bind` in
+`scripts.ci_lab.sandbox.argv_for`:
+
+```bash
+git switch -c diffcheck/<name>
+git commit -am "Plant a writable grader tree"
+git push origin diffcheck/<name>
+gh workflow run writer-lock.yml --ref diffcheck/<name>
+```
+
+The job is red. `test_a_unit_cannot_restore_write_bits_or_write_into_a_read_only_tree` fails on
+both parameters because `chmod`, the rewrite and the new file land in both trees where `EROFS` was
+expected, and `test_a_unit_with_read_only_trees_runs_inside_bwrap_with_each_tree_bound_read_only`
+fails on both parameters because the arguments no longer carry `--ro-bind`. `run_static.run`
+builds its unit through the same `argv_for`, so the job's `test_run_static.py` bind tests,
+`test_the_step_runs_with_the_grader_and_base_trees_bound_read_only` and
+`test_a_step_cannot_write_into_the_grader_or_base_tree`, see the writable binds as well. Delete the
+branch after reading the run with `git push origin --delete diffcheck/<name>`.
+
+#### Guard tests
+
+`tests/test_ci_lab_sandbox_pr.py` holds the job's wiring; every test there maps to the
+`lab-sandbox-bwrap-pull-request-tier` entry of `feature-map.json`:
+
+| Test | Proves |
+|---|---|
+| `test_lab_sandbox_selection` | Runs the selection step's shell with a fake `git`: each of the seven inputs writes `due=true`, `scripts/ci_lab/worker.py` and `README.md` write `due=false`, and the step runs only on `pull_request` |
+| `test_the_lab_sandbox_job_feeds_the_required_gate_on_selected_pull_requests` | `Gate — Required` needs `writer-lock`, the Tests workflow calls `writer-lock.yml` on pull requests, and the job's `needs`, `if`, `runs-on` and output wiring hold; the `scenario` job does not need it |
+| `test_the_job_fails_unless_bubblewrap_isolates_after_the_userns_restriction_is_lifted` | The prepare step comes before the run step, runs the sysctl and then the probe, and exits with the probe's code |
+| `test_the_job_installs_bubblewrap_from_the_ubuntu_archive_when_the_runner_lacks_it` | Without `bwrap` on `PATH`, apt updates and installs from the archive source list only, with retries, before the sysctl |
+| `test_the_lab_sandbox_run_fails_on_a_skipped_or_failed_test` | A pass exits 0, a skip and a failure exit 1, an empty collection exits 5, the three files run in order and the log lands in `$RUNNER_TEMP/lab-sandbox.log` |
+
+The prepare step tests run its shell with fake `sudo` and `bwrap` on `PATH`, so they need neither
+root nor bubblewrap and run in every unit shard. `tests/test_ci_writer_lock.py` expects the
+`lab_sandbox` output of the `inputs` job.
+
+#### Limitations
+
+- Only the three test files in the run step run. A new real bubblewrap test elsewhere is not
+  covered until the run step names its file.
+- The unit shards still skip the four real bubblewrap tests. This job is the only place they run
+  in CI.
+- A pull request runs the job only when its diff names a path in `LAB_SANDBOX_INPUTS`. A change to
+  a module the sandbox or its two runners import does not select it: for example
+  `scripts.ci_mutation.runner`, which `Sandbox` runs units through, or `scripts.ci_lab.static_gates`.
+- The job never runs in the merge queue or on a push to `dev`, so a merge group is not retested
+  under real bubblewrap.
+
+#### Delivery evidence
+
+Pull request [#11849](https://github.com/the-cloud-clockwork/agentihooks/pull/11849) delivered the
+job:
+
+- Skipped before:
+  [Tests run 43726066026](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/43726066026),
+  job `unit-selected (3.12, 1)` on a self hosted runner, skipped all three real bubblewrap cases that
+  existed then.
+- Red first:
+  [Tests run 44211389907](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/44211389907)
+  on `25a402b959` failed the 14 guard test cases before the job existed.
+- Planted fault, writable trees:
+  [Writer lock run 44213673884](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/44213673884)
+  on a `diffcheck/` branch binding the trees with `--bind` was red. The job then ran
+  `tests/ci_lab/test_sandbox.py` alone: 4 failed and 15 passed, and `chmod`, the rewrite and the
+  new file landed in both trees.
+- Planted fault, no namespaces:
+  [Writer lock run 44213944663](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/44213944663),
+  with `user.max_user_namespaces=0` and no probe, skipped the real cases, and the run step failed
+  on the skip.
+- Required on pull requests:
+  [Tests run 44216326032](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/44216326032)
+  on `65b1dbed5a` carried a plant only the hosted job could catch. `Gate — Required` was red, and
+  the only other failing check was `writer-lock / lab-sandbox`.
+- Green:
+  [Tests run 44217954418](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/44217954418)
+  on `d74089e45d`. `writer-lock / lab-sandbox` passed 40 tests with none skipped in under 40
+  seconds, and `Gate — Required` passed.
 
 ### Troubleshooting
 
@@ -2322,3 +2580,10 @@ above carry no feature entry.
 | A test unit wrote into the grader tree | Test units get no read only trees | See [Which units get read only trees](#which-units-get-read-only-trees) |
 | `CannotRun: no free port range` | Every range of the allocator is in use | The allocator holds `(last - first + 1) // width` ranges; run fewer units at once or widen the span |
 | The `lab-sandbox` job fails with `A lab sandbox test skipped, so bubblewrap did not isolate it on this runner.` | A real bubblewrap test skipped because the runner could not create namespaces | The skip reason in the job's `-rs` summary, such as `bubblewrap cannot create namespaces on this runner` |
+| `lab-sandbox` fails in `Let bubblewrap create user and network namespaces` on the probe, after the sysctl ran | The runner cannot create user or network namespaces even with the AppArmor restriction lifted | The `bwrap` error in the step log; `runs-on` must be `ubuntu-latest` and the job's class `hosted` |
+| `lab-sandbox` fails in that step on the `sysctl` line | The runner kernel has no `kernel.apparmor_restrict_unprivileged_userns` setting, or `sudo` is refused | The `sysctl` error in the step log; the job needs a GitHub hosted Ubuntu runner |
+| The apt archive warning appears and the `bubblewrap` install fails | The Ubuntu archive index did not load, and no loaded index carries `bubblewrap` | The apt lines above the failure name the source that did not load |
+| `lab-sandbox` fails with pytest exit code 5 and `no tests ran` | A file in the run step's list was renamed, moved or emptied | Update the run step and the guard tests as in [Change the job](#change-the-job) |
+| A pull request changed sandbox code and no `writer-lock / lab-sandbox` check ran | The changed path is not one of `LAB_SANDBOX_INPUTS`, which match whole, or the Tests workflow skipped its `writer-lock` job | The `Select lab sandbox inputs` step log in the `writer-lock / inputs` job; or dispatch `Writer lock` on the branch as in [Run it by hand](#run-it-by-hand) |
+| The protected grader refuses the pull request with `The head changes the frozen gate file .github/workflows/writer-lock.yml ...` | The head changes the workflow to a blob the base registry does not accept | Announce the blob first, as in [Change the job](#change-the-job) |
+| `writer-lock.yml/lab-sandbox: runs-on must be ubuntu-latest for a hosted job` | The job's `runs-on` was routed to a self hosted runner label | Restore `runs-on: ubuntu-latest`; the self hosted runners have no bubblewrap, so every real case would skip |
