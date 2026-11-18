@@ -88,7 +88,229 @@ With a remote ledger, `agentihooks hub run` first issues the replica its own ser
 A hive gets these settings from its invite. The hub operator runs `agentihooks hive invite <label> --bus-url <url>`.
 On the hive, `agentihooks hive join <invite>` writes `AGENTIHOOKS_BUS=nats` and the URL into `hive.env`. When the
 join returns NATS credentials, it saves them privately and adds `AGENTIHOOKS_BUS_CREDENTIALS` and
-`AGENTIHOOKS_BUS_BIND=1`. Each member's NATS user is limited to the subjects its hive needs.
+`AGENTIHOOKS_BUS_BIND=1`. Each member's NATS user is limited to the subjects its hive needs. The workstation root
+hive has no invite; it gets the same settings from `agentihooks hive root-bus`, described next.
+
+### Root hive bus settings
+
+The workstation is the root hive, hive id `root`. It never joins through an invite, so no `hive.env` carries its
+bus settings, and a join cannot supply them: joining makes the host a hive member whose id replaces `root`, so the
+offers the tick pins to the root hive would find no taker. Without bus settings `hive run` stays on the memory bus,
+starts no lane spoke and logs:
+
+```text
+hive lane spokes refused: the memory bus never sees the hub's ready offers; a hive needs AGENTIHOOKS_BUS=nats and AGENTIHOOKS_BUS_URL
+```
+
+`agentihooks hive root-bus` mints the root hive's NATS member credential with the hub signer, writes the bus
+settings that only the hive user service loads, proves the hub accepts the credential and restarts the service.
+No credential value is printed; the settings name the credential file by its path.
+
+#### Settings it reads
+
+The command loads the operator env files first, so these can live in `~/.agentihooks/.env`:
+
+| Setting | Use |
+|---|---|
+| `AGENTIHOOKS_NATS_SIGNER` | Required. The hub signer record: an OpenBao path under `agentihooks/hub/`, or `file:<folder>` for a signer folder. The record's `url` field becomes the bus URL. |
+| `AGENTIHOOKS_NATS_TRUSTED_OPERATOR` | Required. The operator public key the NATS server trusts. |
+| `OPENBAO_URL`, `OPENBAO_TOKEN` | Required for an OpenBao signer. They also let the command add `root` to the record's `member_swarms` listing. |
+| `AGENTIHOOKS_NATS_SIGNER_SYNC` | Optional, `<namespace>/<name>` of the ExternalSecret that copies the signer record into the cluster; default `agentihooks-swarm/agentihooks-swarm-nats-signer`. An empty value skips the sync. Only an OpenBao signer is synced. |
+
+The host must also meet three conditions:
+
+- It is not a joined hive member: `AGENTIHOOKS_HIVE_ID` is unset, or the Redis URL in use differs from
+  `AGENTIHOOKS_HIVE_REDIS_URL`.
+- Its hive id is `root`. The id is `SWARM_HIVE_ID`, then the seeded hive id, then the host name.
+- Its agentihooks home is `~/.agentihooks`. The hive user unit reads env files only from there, so a run with
+  `AGENTIHOOKS_HOME` set to another folder is refused.
+
+The signer record needs a `member_swarms` field; `agentihooks hive scope` on the hub adds it. See
+[Swarm scoped bus credentials](swarm-bus-scope.md#when-a-credential-is-scoped).
+
+#### Run it
+
+```bash
+# List root for every swarm in the swarm store
+agentihooks hive root-bus
+
+# List root only for the named swarms; repeat --swarm for each one
+agentihooks hive root-bus --swarm rig-grade-swarm --swarm demo
+```
+
+The command runs these steps in order and stops at the first refusal:
+
+1. Loads the operator env files and checks the three host conditions above.
+2. Reads the hub signer. The wanted swarms are the `--swarm` names, or every swarm in the swarm store when none is
+   named.
+3. When the record's `member_swarms` entry for `root` already holds every wanted swarm, leaves the record as it is.
+   Otherwise it appends the missing swarms to that entry, creating the entry if needed and keeping every other
+   member, then asks the cluster to resync the ExternalSecret with
+   `kubectl annotate externalsecret <name> --namespace <namespace> force-sync=<time> --overwrite` and reads the
+   signer again.
+4. Mints the root member credential, a user JWT named `hive-root` signed by the swarm account. It grants only the
+   subjects of the swarms the record lists for `root`; see
+   [What a scoped member is granted](swarm-bus-scope.md#what-a-scoped-member-is-granted). The credential
+   may take at most 61,440 bytes, the 65,536 byte NATS control line less 4,096 bytes of headroom; a larger one is
+   refused before any file is written.
+5. Writes the credential to `~/.agentihooks/root-bus/bus.creds` and the settings to
+   `~/.agentihooks/root-bus/bus.env`, both mode 0600, in a folder created with mode 0700. A rerun overwrites both.
+6. Connects to the hub's NATS once with the written settings, then closes the connection.
+7. Rewrites the hive user unit when its text differs, runs `systemctl --user enable --now agentihooks-hive.service`,
+   then restarts the service so it loads the new settings.
+
+A run that changed the listing prints:
+
+```text
+listed hive root for demo in the hub signer record
+requested a sync of the signer record agentihooks-swarm/agentihooks-swarm-nats-signer
+wrote the NATS bus settings of hive root to /home/<user>/.agentihooks/root-bus/bus.env and restarted the hive service
+```
+
+When `kubectl` fails, the second line reads
+`could not force the sync of <target> (<reason>), so hive join sees it at the next refresh`, and the command goes
+on. A run where `root` already held every wanted swarm prints only the last line.
+
+#### What it writes
+
+`bus.env` holds the bus URL from the signer record and the swarms the record lists for `root`, which can be more
+than the `--swarm` names of this run:
+
+```bash
+AGENTIHOOKS_BUS=nats
+AGENTIHOOKS_BUS_URL=nats://nats.example.com:4222
+AGENTIHOOKS_BUS_CREDENTIALS=/home/<user>/.agentihooks/root-bus/bus.creds
+AGENTIHOOKS_BUS_BIND=1
+AGENTIHOOKS_BUS_SCOPED=1
+AGENTIHOOKS_BUS_SWARMS=rig-grade-swarm,demo
+```
+
+The `root-bus` folder sits below the agentihooks home, so the operator env loading, which reads
+`~/.agentihooks/.env`, the other `~/.agentihooks/*.env` files and `~/.env`, never reads it. The hooks, swarm
+commands and other agentihooks processes on the workstation keep their own bus settings. Only the hive user unit
+loads it, after the other two env files, so its lines override the same names set there:
+
+```ini
+EnvironmentFile=-%h/.agentihooks/.env
+EnvironmentFile=-%h/.agentihooks/hive.env
+EnvironmentFile=-%h/.agentihooks/root-bus/bus.env
+```
+
+The `-` prefix makes each file optional, so a hive without root bus settings still starts.
+
+#### Check it
+
+After the restart the hive runs a lane spoke for each `events` swarm and each lane not named in `HIVE_EXCLUDED`,
+and each spoke logs its start in the hive journal:
+
+```bash
+journalctl --user -u agentihooks-hive --since "5 minutes ago" | grep 'hive spoke for swarm'
+# hive spoke for swarm rig-grade-swarm lane eng takes swarm.rig-grade-swarm.ready.eng
+```
+
+The spokes also beat the root hive's presence entry, key `root` in each `events` swarm's `hive-presence` bucket.
+Each spoke renews it when its poll starts and again every 15 seconds while the poll runs. When no spoke takes work in a pass, the
+hive waits 5 seconds before the next pass. The entry holds `heartbeat_ms` and `expires_ms` and lapses 45 seconds after the last beat. With the
+root credential its state subject can be read directly; the state stream name follows
+[Subjects and streams per swarm](swarm-bus-scope.md#subjects-and-streams-per-swarm):
+
+```bash
+nats --server nats://nats.example.com:4222 --creds ~/.agentihooks/root-bus/bus.creds \
+  stream get <state stream of hive-presence> --last-for swarm.rig-grade-swarm.state.hive-presence.root
+```
+
+#### Agents on the root hive
+
+The root spokes launch agents through the launcher script `agentihooks init-agent` writes. For a swarm agent that
+script exports `AGENTIHOOKS_BUS`, `AGENTIHOOKS_BUS_URL`, `AGENTIHOOKS_BUS_BIND`, `AGENTIHOOKS_BUS_SCOPED` and
+`AGENTIHOOKS_BUS_SWARMS` from the hive's environment. It exports `AGENTIHOOKS_BUS_CREDENTIALS` only while it is a
+reference, a file path or `openbao:<path>`. Inline credential text, which starts with
+`-----BEGIN NATS USER JWT-----`, never reaches the launcher script. Every agent on the root hive therefore uses
+the same bus and the same root credential file as its spokes.
+
+#### Re-mint at hive start
+
+Each time `hive run` starts, before its spokes read their settings, it checks a stored root credential:
+
+1. When `root-bus/bus.creds` is missing under the agentihooks home it does nothing, so a hive that never ran
+   `hive root-bus` reads no signer.
+2. Otherwise it reads the signer and compares the stored credential's publish and subscribe grant with a fresh mint
+   for `root` from the record's current listing. A stored credential that does not decode counts as different.
+3. When they differ it writes both files again, loads the new settings into its own environment and logs
+   `hive re-minted the root bus credential in <path>: its grant differed from a fresh mint`.
+
+A changed `member_swarms` entry for `root` or a release that changes the member grants makes them differ. The
+re-mint runs no connect check and never extends the listing. When it cannot mint, for example with
+`AGENTIHOOKS_NATS_SIGNER names no hub NATS signer`, the hive logs
+`hive kept the stored root bus credential (<reason>)` and runs on the stored credential.
+
+#### Revoke
+
+`agentihooks hive revoke root` runs three steps in order:
+
+1. When `AGENTIHOOKS_NATS_SIGNER` names an OpenBao record under `agentihooks/hub/`, it removes `root` from the
+   record's `member_swarms` field and requests the ExternalSecret sync, as `hive root-bus` does.
+2. With a signer, it records the root NATS user as revoked and pushes the updated account to the NATS server.
+3. It deletes `bus.env` and `bus.creds`.
+
+```text
+unlisted root from the hub signer record agentihooks/hub/nats
+requested a sync of the signer record agentihooks-swarm/agentihooks-swarm-nats-signer
+revoked the NATS credential of root
+revoked root
+```
+
+The first line reads `the hub signer record <path> lists no member swarms for root` when the record had no entry
+for `root`. A signer that is not an OpenBao hub record prints no unlist line.
+
+A refusal prints `hive revoke refused: <message>` and exits 1. `no OpenBao client to unlist root from <path>`
+means `OPENBAO_URL` or `OPENBAO_TOKEN` is unset, and nothing has changed yet. Step 2 records the revocation in
+Redis before it pushes the account, so a failed push leaves `root` unlisted, the revocation recorded and both files
+in place. The push fails with `hive revoke refused: NATS refused the account update (<description>)`, or with a
+`TimeoutError` traceback when NATS does not answer within 10 seconds. Run `agentihooks hive revoke root` again once
+NATS answers.
+
+The command does not restart the hive service. After the next restart the hive reads its bus settings from its
+other env files only; when they set none, it runs on the memory bus and its lane spokes refuse, as above. Run
+`agentihooks hive root-bus` again to give the root hive a new credential; its connect check proves the hub
+accepts it.
+
+#### Limits
+
+- `--swarm` only adds swarms. The credential covers every swarm the record lists for `root`, including those an
+  earlier run listed. To narrow it, run `agentihooks hive revoke root`, then `agentihooks hive root-bus` with
+  `--swarm` for each swarm the workstation serves.
+- A swarm created after the last run is outside the credential, and the re-mint at hive start does not add it. Run
+  `agentihooks hive root-bus` again.
+- A `file:` signer folder is never updated. Its `member_swarms` file must already list `root` for every wanted swarm.
+- The hive service is a systemd user unit, written to `~/.config/systemd/user/agentihooks-hive.service`. The
+  command needs Linux with a systemd user session; without one it writes the files and then refuses at the restart.
+
+#### Refusals
+
+Each refusal prints `hive root-bus refused: <message>` and exits 1:
+
+| Message | Cause | Fix |
+|---|---|---|
+| `this host joined as hive member <id>, whose hive env carries its bus settings` | The host talks Redis as a joined member | A member gets its bus settings from `hive join` and `agentihooks hive refresh` |
+| `hive root-bus serves the root hive only, and this host is hive <id>` | The host's hive id is not `root` | Run it on the workstation root hive; other hives get their settings from their invite |
+| `the hive user service loads its env from ~/.agentihooks, not <path>` | `AGENTIHOOKS_HOME` names another folder | Unset `AGENTIHOOKS_HOME` for the command |
+| `AGENTIHOOKS_NATS_SIGNER must name the hub NATS signer to mint the root hive credential` | No signer setting | Set `AGENTIHOOKS_NATS_SIGNER` |
+| `AGENTIHOOKS_NATS_SIGNER is set, so AGENTIHOOKS_NATS_TRUSTED_OPERATOR must name the operator public key the NATS server trusts` | No trusted operator setting | Set `AGENTIHOOKS_NATS_TRUSTED_OPERATOR` |
+| `AGENTIHOOKS_NATS_SIGNER names an OpenBao record, so OPENBAO_URL and OPENBAO_TOKEN must be set` | OpenBao signer without OpenBao settings | Set both |
+| `the NATS signer record <path> holds the system account credential, so it must live under the OpenBao path agentihooks/hub/ that only the hub role reads` | The signer path is outside `agentihooks/hub/` | Point `AGENTIHOOKS_NATS_SIGNER` at the hub record |
+| `the NATS signer record <path> cannot be used (<error>)` or `the NATS signer file <path> cannot be used (<error>)` | The record cannot be read or lacks a field | Fix the record the error names |
+| `the hub signer record has no member_swarms field, so it scopes no member; it mints no unscoped bus credential` | The hub mints no unscoped credential | Run `agentihooks hive scope` on the hub, then retry |
+| `no swarm to list: pass --swarm or create a swarm first` | No `--swarm` and the swarm store holds no swarm | Name a swarm or create one |
+| `the hub signer record does not list root for every swarm and this host cannot update it` | A wanted swarm is missing for `root`, and the signer is a `file:` folder or OpenBao settings are missing | Set `OPENBAO_URL` and `OPENBAO_TOKEN` with an OpenBao signer, or add the swarms to the folder's `member_swarms` file |
+| `member_swarms contains an invalid swarm name (<reason>)` | A `--swarm` name, or a swarm name in the record, is not one subject token | Use the swarm's slug, or fix the record |
+| `member_swarms must map member ids to lists of swarm names` | The record's `member_swarms` field has the wrong shape | Fix the field; see [Swarm scoped bus credentials](swarm-bus-scope.md#when-a-credential-is-scoped) |
+| An OpenBao error, shown as is | Reading or updating the record's listing failed in OpenBao | Fix the OpenBao access the error names, then rerun |
+| `listed hive root in the hub signer record, but a fresh read does not list it` | The record read back after the update still lacks a wanted swarm | Run the command again; if it repeats, read the record's `member_swarms` entry for `root` |
+| `the root credential is <n> bytes for <k> swarms, past the 65536 byte NATS control line; name fewer swarms with --swarm` | `root` is listed for too many swarms | Narrow the listing as in Limits |
+| `the hub refused the root hive credential in <path> (<error type>: <error>)` | The connect check failed: NATS is unreachable at the record's `url`, or the server rejects the credential | Fix the address or the server's operator trust and rerun. The files stay written and the service is not restarted |
+| `agentihooks executable not found` | The hive unit needs the `agentihooks` command on `PATH` | Install agentihooks for the user, then rerun. The files stay written and the service is not restarted |
+| `wrote <path>, but the hive user service did not restart`, with or without `(<error>)` | `systemctl --user` failed or is missing | Read `systemctl --user status agentihooks-hive`, fix it, then `systemctl --user restart agentihooks-hive` |
 
 ## Ticks started by swarm commands
 
