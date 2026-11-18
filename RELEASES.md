@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.1013 · 2026-11-18
+
+### 2026-11-18 · 1aa8d666aa78 · #11992 · @nestorcolt
+
+**Controller merge pass queues released green pull requests and logs every hold**
+
+This fixes a bug where the controller's merge pass silently stalled every pull request released with `swarm ready`, because `merge_queue._port` dropped the `env` option carrying the signed GitHub App token, leaving every `gh` call unauthenticated and its errors swallowed without a trace. Now `_port` forwards `env` properly, each hold writes a clear stderr line with the task id, url, and reason, and `required_green` logs the actual GitHub error, plus a new Semgrep rule guards against this class of bug recurring.
+
 ## v2.17.1009 · 2026-11-18
 
 ### 2026-11-18 · 2a0087b300eb · #11896 · @agenticore-app
