@@ -467,6 +467,8 @@ GET_NON_SECRET_DIAGNOSTICS = [
     "kubectl get priorityclass \"$PC\" -o jsonpath='{.value}'",
     'kubectl get pods "$POD" -n ns -o custom-columns=NAME:.metadata.name,STATUS:.status.phase',
     "kubectl get --unknown-value v pod $POD -o yaml",
+    "kubectl get -n ns pod \"$POD\" -o jsonpath='{.status.phase}'",
+    "kubectl get --chunk-size=50 pod \"$POD\" -o jsonpath='{.status.phase}'",
     'kubectl get priorityclass -o jsonpath=\'{range .items[*]}{.metadata.name}{";"}{.value}{"\\n"}{end}\'',
     'kubectl get pods -A -o jsonpath=\'{range .items[*]}{.metadata.name}{"|"}{.status.phase}{"\\n"}{end}\'',
     "kubectl get pods -o jsonpath=\"{.items[?(@.status.phase=='Running')].metadata.name}{'&'}\"",
@@ -480,6 +482,8 @@ GET_SECRET_TYPE_FORMS = [
     "kubectl get -n ns $R db -o jsonpath='{.data}'",
     "kubectl get deploy/app $X -o yaml",
     "kubectl get -w pod $R -o yaml",
+    "kubectl get --show-labels $R -o jsonpath='{.data}'",
+    "kubectl get secret db \\' -o yaml",
     "kubectl get --unknown-value v $R db -o jsonpath='{.data}{\";\"}'",
 ]
 

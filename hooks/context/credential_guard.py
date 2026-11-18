@@ -586,7 +586,7 @@ def renderer_verdict(command: str) -> str | None:
     return None
 
 
-KUBECTL_WORDS = re.compile(r"\bkubectl\b([^|<>;&]*)")
+KUBECTL_WORDS = re.compile(r"""\bkubectl\b((?:'[^']*'|"(?:[^"\\]|\\.)*"|\\.|[^|<>;&])*)""")
 SHELL_GROUPING = re.compile(r"[()`]")
 VALUE_FLAGS = {"--output": "output", "--template": "template", "--raw": "raw"}
 SHORT_OUTPUT = re.compile(r"-[arwh]*o=?(.*)")
@@ -670,21 +670,32 @@ def prints_field_values(outputs: list[str], templates: list[str]) -> bool:
     )
 
 
-def get_operands(words: list[str]) -> list[str]:
-    """Positional words of a kubectl get; only a flag known to take a value, written without =, consumes the next."""
-    operands: list[str] = []
+def get_operands(words: list[str]) -> list[tuple[str, bool]]:
+    """Positional words of a kubectl get, each with whether an unlisted flag right before it may take it as a value."""
+    operands: list[tuple[str, bool]] = []
+    claimable = False
     remaining = iter(words)
     for word in remaining:
         if not word.startswith("-"):
-            operands.append(word)
+            operands.append((word, claimable))
         elif word in GET_VALUE_FLAGS:
             next(remaining, None)
+        claimable = word.startswith("-") and word not in GET_VALUE_FLAGS and "=" not in word
     return operands
 
 
-def leaves_type_to_shell(operands: list[str]) -> bool:
-    """True when a kubectl get names no operand, or leaves the type part of any operand to the shell."""
-    return not operands or any(UNSHOWN_TYPE.search(word.split("/")[0]) for word in operands)
+def type_operands(operands: list[tuple[str, bool]]) -> list[str]:
+    """Operands that may hold the resource type: all in TYPE/NAME form, else each up to the first no flag can take."""
+    words = [word for word, _ in operands]
+    if any("/" in word for word in words):
+        return words
+    count = next((index + 1 for index, (_, claimable) in enumerate(operands) if not claimable), len(words))
+    return words[:count]
+
+
+def leaves_type_to_shell(operands: list[tuple[str, bool]]) -> bool:
+    """True when a kubectl get names no operand, or leaves the type part of an operand that may hold it to the shell."""
+    return not operands or any(UNSHOWN_TYPE.search(word.split("/")[0]) for word in type_operands(operands))
 
 
 def prints_secret_values(words: list[str]) -> bool:
