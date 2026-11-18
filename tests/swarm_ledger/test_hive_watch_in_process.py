@@ -3,6 +3,7 @@ other non browser read does, so it fetches no agent token and sends the hive mem
 refuses."""
 
 import sys
+import types
 import uuid
 from collections.abc import Callable, Iterator
 from typing import Any
@@ -109,7 +110,7 @@ def watched(
             raise Stopped
         between()
 
-    monkeypatch.setattr(watch_ledger.time, "sleep", pause)
+    monkeypatch.setattr(watch_ledger, "time", types.SimpleNamespace(sleep=pause))
     monkeypatch.setattr(
         sys, "argv", ["watch_ledger.py", slug, "--as", NAME, "--all", "--since-rev", "0", "--interval", "7"]
     )
@@ -184,3 +185,38 @@ def test_a_remote_watch_takes_no_credentials_and_a_local_watch_follows_the_ledge
     assert list(watch_ledger.follow("near", "c2", {"X-Ledger-Token": "kept"}, 7.0, kept)) == []
     assert streamed == [("near", "c2", {"X-Ledger-Token": "kept"})]
     assert len(polls) == 1
+
+
+@pytest.mark.feature("hive-watch-in-process")
+def test_a_remote_poll_reads_the_ledger_in_process_with_its_kept_export_every_interval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.tick.adapters import database_ledger
+
+    built: list[tuple[str, float]] = []
+    reads: list[tuple[str, dict[Any, Any]]] = []
+    pauses: list[float] = []
+
+    class Client:
+        def export(self, slug: str, kept: dict[Any, Any]) -> dict[str, Any]:
+            reads.append((slug, kept))
+            return {"read": len(reads)}
+
+    def client(base: str, timeout: float) -> Client:
+        built.append((base, timeout))
+        return Client()
+
+    monkeypatch.setattr(database_ledger, "client", client)
+    monkeypatch.setattr(watch_ledger, "time", types.SimpleNamespace(sleep=pauses.append))
+    kept: dict[Any, Any] = {}
+
+    frames = watch_ledger.polled("far", 7.0, kept)
+
+    assert [next(frames), next(frames)] == [
+        ("snapshot", {"ledger": {"read": 1}}, None),
+        ("snapshot", {"ledger": {"read": 2}}, None),
+    ]
+    assert built == [(watch_ledger.IN_PROCESS, watch_ledger.STREAM_TIMEOUT_S)]
+    assert reads == [("far", kept), ("far", kept)]
+    assert all(held is kept for _, held in reads)
+    assert pauses == [7.0]

@@ -5,7 +5,8 @@ Usage: watch_ledger.py <slug> [--as NAME] [--since-rev N] [--interval 3] [--all]
 
 Follows the ledger server's event stream, one snapshot then only changes, and prints each event logged after
 rev N (default: the rev at start; --as NAME: only those the owner rule gives NAME; --all: every event, agents'
-too). A dropped stream reconnects after --interval seconds and replays from its cursor:
+too). A dropped stream reconnects after --interval seconds and replays from its cursor. On a remote host, such
+as a hive worker, it reads the ledger in process every --interval seconds instead:
 
   OPERATOR rev=12 comment added on phases/p1 [c-1a2b]: "text"
   OPERATOR rev=13 comment edited on phases/p1 [c-1a2b] diff: "-old line\\n+new line"
@@ -85,10 +86,15 @@ def polled(slug: str, interval: float, kept: dict[Any, Any]) -> Iterator[tuple[s
         time.sleep(interval)
 
 
+def remote(slug: str) -> bool:
+    """Whether this host reaches the ledger as a remote client, such as a hive worker."""
+    return ledger_link.remote(slug=slug)
+
+
 def held(slug: str, headers: dict[str, str] | None) -> dict[str, str] | None:
     """The credential headers a watcher reads with: none on a remote host, such as a hive worker, which polls the
     ledger in process and so never fetches an agent token; else the headers it holds, or fresh ones."""
-    if ledger_link.remote(slug=slug):
+    if remote(slug):
         return None
     return headers or credentials(slug)
 
@@ -96,9 +102,9 @@ def held(slug: str, headers: dict[str, str] | None) -> dict[str, str] | None:
 def follow(
     slug: str, cursor: str | None, headers: dict[str, str] | None, interval: float, kept: dict[Any, Any]
 ) -> Iterator[tuple[str, Any, str | None]]:
-    """The events a watcher takes: the ledger polled in process when it reads with no credential headers, else the
-    ledger server's event stream read with them."""
-    if headers is None:
+    """The events a watcher takes: on a remote host the ledger polled in process, else the ledger server's event
+    stream read with the credential headers."""
+    if remote(slug):
         return polled(slug, interval, kept)
     return stream(slug, cursor, headers)
 
@@ -183,7 +189,7 @@ def alive(beat):
         beat.touch()
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("slug")
     parser.add_argument("--interval", type=float, default=3.0)
