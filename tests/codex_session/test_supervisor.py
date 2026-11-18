@@ -1056,25 +1056,20 @@ STREAM_LOST = "stream disconnected before completion"
 
 @pytest.mark.feature("codex-opening-provider-failure")
 @pytest.mark.parametrize(
-    ("message", "info"),
-    [(MODEL_NOT_FOUND, {"httpConnectionFailed": {"httpStatusCode": 404}}), (STREAM_LOST, None)],
+    "error",
+    [
+        {"message": MODEL_NOT_FOUND, "codexErrorInfo": {"httpConnectionFailed": {"httpStatusCode": 404}}},
+        {"message": STREAM_LOST},
+    ],
 )
 @pytest.mark.parametrize("reported", [True, False])
 def test_a_failed_opening_turn_fails_the_canary_at_once_naming_the_provider_error(
-    store: RedisStore,
-    server: Server,
-    clock: Clock,
-    root: Path,
-    tmp_path: Path,
-    message: str,
-    info: dict | None,
-    reported: bool,
+    store: RedisStore, server: Server, clock: Clock, root: Path, tmp_path: Path, error: dict, reported: bool
 ) -> None:
     from scripts.profiles import binding
 
-    event = completed("failed", message)
-    if info:
-        event["params"]["turn"]["error"]["codexErrorInfo"] = info
+    event = completed("failed", error["message"])
+    event["params"]["turn"]["error"] = error
     server.turn_events = [[event], [completed("failed", CAPACITY)]]
     spec, report = reported_spec(store, server, tmp_path)
     if not reported:
@@ -1082,7 +1077,7 @@ def test_a_failed_opening_turn_fails_the_canary_at_once_naming_the_provider_erro
 
     failure = failed(store, server, clock, root, spec, "opening_failed")
 
-    reason = f"the opening Codex turn failed on a provider error: {message}"
+    reason = f"the opening Codex turn failed on a provider error: {error['message']}"
     assert str(failure) == reason
     assert len(server.params("turn/start")) == 1
     record = only_record(store)
