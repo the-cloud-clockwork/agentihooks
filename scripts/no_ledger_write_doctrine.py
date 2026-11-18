@@ -6,11 +6,11 @@ compatibility, `agentihooks ledger`. A skill, rule, role doc, doc page or spawn 
 a ledger write command teaches the wrong mental model: it is graded here, never by a code comment.
 """
 
-import argparse
-import json
 import re
 from pathlib import Path
 
+from scripts.shrink_only_gate import load_allowlist
+from scripts.shrink_only_gate import main as shrink_only_main
 from scripts.size_limits import GradeError
 
 SCOPE = ("profiles/", "docs/")
@@ -93,13 +93,7 @@ def measure(tree: Path) -> dict[str, int]:
 
 def load(tree: Path) -> dict[str, int] | None:
     """The allowlist recorded in tree, or nothing when it has none."""
-    path = tree / ALLOWLIST
-    return json.loads(path.read_text()) if path.is_file() else None
-
-
-def write(tree: Path) -> None:
-    """Record the measurement of tree as its allowlist."""
-    (tree / ALLOWLIST).write_text(json.dumps(measure(tree), indent=1) + "\n")
+    return load_allowlist(tree, ALLOWLIST)
 
 
 def grade(base: dict[str, int] | None, head: dict[str, int], recorded: dict[str, int] | None) -> list[str]:
@@ -119,27 +113,7 @@ def grade(base: dict[str, int] | None, head: dict[str, int], recorded: dict[str,
 
 def main(argv: list[str] | None = None) -> int:
     """Grade the head against the base, or record the head's allowlist with --write."""
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--base")
-    parser.add_argument("--head", default=".")
-    parser.add_argument("--write", action="store_true")
-    args = parser.parse_args(argv)
-    if not (args.write or args.base):
-        parser.error("grading needs --base")
-    tree = Path(args.head)
-    try:
-        if args.write:
-            write(tree)
-            return 0
-        head, recorded, base = measure(tree), load(tree), load(Path(args.base))
-    except (GradeError, ValueError, OSError) as exc:
-        print(f"::error::{exc}")
-        return 1
-    errors = grade(base, head, recorded)
-    print(f"{len(head)} files teach a ledger write, {len(base or {})} on the base allowlist, {len(errors)} errors")
-    for error in errors:
-        print(f"::error::{error}")
-    return 1 if errors else 0
+    return shrink_only_main(argv, ALLOWLIST, measure, grade, "teach a ledger write")
 
 
 if __name__ == "__main__":

@@ -375,7 +375,7 @@ def test_a_stacked_claim_starts_from_the_dependency_branch_builds_pushes_and_par
     assert "Refs #<n>" in push and "git push -u origin HEAD" in push and "agentihooks swarm sw branch" in push
     park = _step(lines, 5)
     assert "handoff skill" in park and "agentihooks swarm sw park <doc>" in park
-    assert park.index("ledger --slug sw --as engineer@a1b2c3-0003 leave") < park.index("park <doc>")
+    assert park.index("api --slug sw --as engineer@a1b2c3-0003 leave") < park.index("park <doc>")
     assert "pr <pr url>" not in text and "done --pr" not in text
 
 

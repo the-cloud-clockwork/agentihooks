@@ -1780,7 +1780,7 @@ def test_agent_prompt_joins_the_ledger_reads_its_inbox_and_leaves_before_done():
     from scripts.swarm import prompt
 
     text = prompt.build("sw", "/repo", "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x", "phase": "p1"})
-    led = "agentihooks ledger --slug sw --as engineer@a1b2c3-0001"
+    led = "agentihooks api --slug sw --as engineer@a1b2c3-0001"
     assert f"{led} join" in text
     assert "ledger watch" not in text and "keep a Monitor" not in text
     assert "inbox" in text
@@ -2192,7 +2192,7 @@ def test_master_prompt_runs_the_swarm_and_never_codes():
     from scripts.swarm import prompt
 
     text = prompt.build("sw", "/repo", "master", "master@a1b2c3-0002", {"id": "master", "handoff": "caps go to four"})
-    led = "agentihooks ledger --slug sw --as master@a1b2c3-0002"
+    led = "agentihooks api --slug sw --as master@a1b2c3-0002"
     for needle in (
         f"{led} join --role orchestrator",
         f"{led} ack",
