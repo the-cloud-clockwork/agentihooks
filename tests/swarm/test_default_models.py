@@ -168,3 +168,53 @@ def test_model_validation_uses_the_store_cache_and_current_context(store, operat
     context_matches = environ is os.environ
     cache_matches = cache is store.redis
     assert (context_matches, cache_matches, now) == (True, True, 123456.0)
+
+
+@pytest.mark.feature("lane-model-listed-in-a-harness-catalog")
+def test_set_refuses_a_lane_model_no_harness_catalog_lists_without_writing(store: RedisStore) -> None:
+    before = store.config("sw")
+    with pytest.raises(SwarmError) as refused:
+        cli.cmd_set(store, argparse.Namespace(slug="sw", pairs=["eng-effort=high", "ci-model=opus-4"]))
+    assert str(refused.value) == "ci-model must be auto or a model listed in a harness catalog, not opus-4"
+    assert store.config("sw") == before
+
+
+@pytest.mark.feature("lane-model-listed-in-a-harness-catalog")
+def test_set_accepts_a_lane_model_any_harness_catalog_lists(store: RedisStore) -> None:
+    cli.cmd_set(store, argparse.Namespace(slug="sw", pairs=["eng-model=sonnet", "ci-model=gpt-6-sol"]))
+    lanes = store.config("sw").lanes
+    assert (lanes["eng"]["model"], lanes["ci"]["model"]) == ("sonnet", "gpt-6-sol")
+
+
+@pytest.mark.feature("lane-model-listed-in-a-harness-catalog")
+@pytest.mark.parametrize(
+    "pairs, model",
+    [
+        (["eng-effort=high"], ("eng", "retired")),
+        (["plan-model=auto"], ("plan", "auto")),
+        (["master-model="], ("master", "")),
+    ],
+)
+def test_a_set_that_fixes_no_new_lane_model_reads_no_catalog(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, pairs: list[str], model: tuple[str, str]
+) -> None:
+    store.redis.hset(store.key("sw", "config"), "lanes", json.dumps({"eng": {"model": "retired"}}))
+    monkeypatch.setattr(model_catalog, "catalog", Mock(side_effect=AssertionError("the catalog was read")))
+    cli.cmd_set(store, argparse.Namespace(slug="sw", pairs=pairs))
+    lane, expected = model
+    assert store.config("sw").lanes[lane]["model"] == expected
+
+
+def test_a_lane_update_without_a_model_reads_no_catalog(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(model_catalog, "catalog", Mock(side_effect=AssertionError("the catalog was read")))
+    assert store.update("sw", lanes={"eng": {"agent": "codex"}}).lanes == {"eng": {"agent": "codex"}}
+
+
+def test_lane_model_validation_uses_the_store_cache_and_current_context(store: RedisStore) -> None:
+    with (
+        patch.object(model_catalog, "catalog", return_value=CATALOG) as load,
+        patch.object(runtime.time, "time", return_value=123456.0),
+    ):
+        store.update("sw", lanes={"eng": {"model": "sonnet"}})
+    environ, cache, now = load.call_args.args
+    assert (environ is os.environ, cache is store.redis, now) == (True, True, 123456.0)

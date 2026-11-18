@@ -1,15 +1,21 @@
 import json
 from pathlib import Path
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 
-from scripts.swarm import cli
+from scripts.swarm import cli, model_catalog
 from scripts.swarm.store import RedisStore
 from tests.helpers.seat import seat_owner
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_close import closing  # noqa: F401
 from tests.swarm.test_tick import FakeRuntime
+
+
+@pytest.fixture(autouse=True)
+def catalog(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(model_catalog, "catalog", Mock(return_value={"claude": [{"model": "opus"}], "codex": []}))
 
 
 @pytest.fixture

@@ -1,11 +1,12 @@
 import json
 from dataclasses import replace
+from unittest.mock import Mock
 
 import pytest
 
 from scripts.gates import log as gate_log
 from scripts.inbox.store import InboxStore
-from scripts.swarm import bottleneck, bottleneck_remedy, bottleneck_status, dispatcher, metrics
+from scripts.swarm import bottleneck, bottleneck_remedy, bottleneck_status, dispatcher, metrics, model_catalog
 from scripts.swarm.health import standing
 from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm.ledger_events import Mail
@@ -30,6 +31,11 @@ REVIEW = "review at 5 task hours in the window, over its 2 threshold"
 FAILED = "launch failure at 0.5 task hours, over its 0.25 threshold"
 HELD = "quota hold at 3 task hours, over its 2 threshold"
 REVIEW_FIX = "Bottleneck fix for the review stage"
+
+
+@pytest.fixture(autouse=True)
+def catalog(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(model_catalog, "catalog", Mock(return_value={"claude": [{"model": "opus"}], "codex": []}))
 
 
 @pytest.fixture
