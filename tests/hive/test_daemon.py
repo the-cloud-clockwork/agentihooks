@@ -1432,8 +1432,6 @@ def _stall_run(
 def test_a_stalled_beat_socket_reconnects_and_beats_within_one_beat_interval(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], stalled: Callable[[], Any]
 ) -> None:
-    import time
-
     import fakeredis
 
     healthy = fakeredis.FakeRedis(decode_responses=True)
