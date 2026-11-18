@@ -13,9 +13,9 @@ import fakeredis
 import pytest
 from redis import RedisError
 
+import hooks.context.serena_binding as serena_binding
 import hooks.hook_manager as hm
 from hooks._redis import redis_key
-from hooks.context import serena_binding
 from hooks.serena_router.binding import ROOT_ARG
 from hooks.targets import emitter
 
@@ -120,7 +120,9 @@ def test_calls_carry_nothing_without_an_activation_or_outside_serena(
     assert serena_binding.rewrite({**_payload("find_symbol", {}), "tool_name": "Read"}) is None
     assert serena_binding.rewrite({**_payload("find_symbol", {}), "session_id": "another-session"}) is None
     assert serena_binding.rewrite({**_payload("find_symbol", {}), "session_id": ""}) is None
-    assert serena_binding.rewrite({**_payload("activate_project", {}), "session_id": ""}) is None
+    unkeyed = {**_payload("activate_project", {"project": str(repo["b"])}), "session_id": ""}
+    assert serena_binding.rewrite(unkeyed) is None
+    assert serena_binding.rewrite({**unkeyed, "session_id": SESSION, "tool_name": "activate_project"}) is None
     assert store.keys("*") == [redis_key("serena_root", SESSION)]
 
 

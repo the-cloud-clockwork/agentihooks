@@ -187,6 +187,40 @@
       ]
     },
     {
+      "id": "serena-router-routes-each-call-by-its-carried-root",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2661",
+      "behaviour": "A Serena call that carries a worktree root reaches that root's backend, is held to that root's primary checkout refusal and names that root in its applied in line, whatever the MCP session last activated, and the router strips the root before forwarding the call. The parent and sub agents of one Claude session share one MCP session, so a sub agent's activation no longer moves the parent's or a sibling's edits into its own worktree. A call without a root keeps the session binding, and a carried root outside a git checkout is refused.",
+      "seam": "hooks.serena_router.server.dispatch through carried_binding, reached over one in process MCP session",
+      "rules": [
+        "serena-router-routes-by-the-session-binding-alone"
+      ],
+      "tests": [
+        "tests/test_serena_router.py::test_one_session_routes_each_call_by_the_root_it_carries",
+        "tests/test_serena_router.py::test_a_carried_primary_root_refuses_edits_on_a_worktree_session",
+        "tests/test_serena_router.py::test_a_carried_root_outside_a_checkout_is_refused"
+      ]
+    },
+    {
+      "id": "serena-hook-carries-each-agent-activated-root",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2661",
+      "behaviour": "PreToolUse records the checkout root each agent of a Claude session activates on Serena, keyed by session id and agent id with the parent under an empty id, and on Claude under bypass permissions puts the calling agent's root on its later Serena calls, falling back to the parent's root for a sub agent that never activated. A sub agent's activation leaves the parent's root unchanged, a failed activation keeps the previous root, and without Redis nothing is recorded or carried.",
+      "seam": "hooks.context.serena_binding.rewrite, reached through hook_manager.on_pre_tool_use",
+      "tests": [
+        "tests/test_serena_binding.py::test_a_sub_agent_activation_leaves_the_parent_root_unchanged",
+        "tests/test_serena_binding.py::test_a_sub_agent_without_its_own_activation_carries_the_parent_root",
+        "tests/test_serena_binding.py::test_an_activated_subfolder_records_its_checkout_root",
+        "tests/test_serena_binding.py::test_a_failed_activation_keeps_the_previous_root",
+        "tests/test_serena_binding.py::test_calls_carry_nothing_without_an_activation_or_outside_serena",
+        "tests/test_serena_binding.py::test_roots_live_in_one_session_hash_that_expires",
+        "tests/test_serena_binding.py::test_without_redis_nothing_is_recorded_or_carried",
+        "tests/test_serena_binding.py::test_a_redis_error_records_and_carries_nothing",
+        "tests/test_serena_binding.py::test_pre_tool_use_injects_the_calling_agent_root_under_bypass",
+        "tests/test_serena_binding.py::test_pre_tool_use_never_injects_outside_bypass_or_on_other_targets"
+      ]
+    },
+    {
       "id": "hive-service-start-ensures-serena-router",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-serena-before-launch",

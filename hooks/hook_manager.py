@@ -1308,6 +1308,23 @@ def _credential_guard(payload: dict, tool_name: str) -> tuple[dict, str] | None:
     return _credential_rewrite
 
 
+def _input_rewrite(payload: dict, tool_name: str) -> tuple[dict, str] | None:
+    """The credential guard's rewrite, else the calling agent's own Serena root where Claude applies a rewrite.
+
+    The patch rides an allow decision, so it is emitted only under bypass permissions, where no prompt is skipped.
+    """
+    rewrite = _credential_guard(payload, tool_name)
+    if rewrite is not None or not tool_name.startswith("mcp__serena__"):
+        return rewrite
+    from hooks.context.serena_binding import rewrite as serena_rewrite
+    from hooks.targets.capabilities import applies_input_rewrite
+
+    patch = serena_rewrite(payload)
+    if patch is None or not applies_input_rewrite() or payload.get("permission_mode") != "bypassPermissions":
+        return None
+    return patch, ""
+
+
 def _plan_read_guard(payload: dict, tool_name: str) -> None:
     try:
         from hooks.context.plan_read_guard import check as _plan_read_check
@@ -1643,7 +1660,7 @@ def on_pre_tool_use(payload: dict) -> None:
 
         log_new_entries(session_id, transcript_path)
 
-    _credential_rewrite = _credential_guard(payload, tool_name)
+    _input_patch = _input_rewrite(payload, tool_name)
     _plan_read_guard(payload, tool_name)
 
     if tool_name == "Read":
@@ -1813,9 +1830,9 @@ def on_pre_tool_use(payload: dict) -> None:
     _pretool_context = _fit_pretool(_pretool_blocks)
 
     _cond_decision = _conditions.decision if _conditions is not None else None
-    if _credential_rewrite or _cond_decision in ("allow", "ask"):
-        _updated, _note = _credential_rewrite or ({}, "")
-        _rewritten = bool(_credential_rewrite) or (_conditions is not None and _conditions.rewrite is not None)
+    if _input_patch or _cond_decision in ("allow", "ask"):
+        _updated, _note = _input_patch or ({}, "")
+        _rewritten = bool(_input_patch) or (_conditions is not None and _conditions.rewrite is not None)
         emit_permission_decision(
             "PreToolUse",
             "ask" if _cond_decision == "ask" else "allow",
