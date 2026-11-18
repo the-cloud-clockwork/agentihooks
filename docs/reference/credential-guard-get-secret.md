@@ -247,7 +247,8 @@ in the transcript are a hard floor.
   [Listing key names](#listing-key-names): two different variables, a range
   over `.data`, only `{{$KEY}}` and quoted strings inside, nothing outside
   `{{range …}}` and `{{end}}`. Copy the template from the refusal message.
-- **A get in a namespace or of a resource named `secret`.** Only the type
+- **A namespace or resource named `secret` does not make a get a Secret
+  get.** Only the type
   operand is judged, so `kubectl get pods -n secret -o yaml` and
   `kubectl get pod secret -o yaml` pass. When such a get is refused, its type
   operand is not a literal non Secret type.
