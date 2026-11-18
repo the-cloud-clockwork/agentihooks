@@ -13,7 +13,7 @@ from scripts.ci_lab import intake
 from scripts.ci_lab.remote import post_receive
 from scripts.ci_lab.scheduler import DURABLE, SUBJECT, BusInbox
 from scripts.ci_lab.units import Priority
-from scripts.events.bus import Consumer
+from scripts.events.bus import Bus, Consumer
 from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
 from scripts.events.memory import open_bus
@@ -89,9 +89,10 @@ def test_a_push_without_options_grades_against_the_first_parent_with_no_branch()
     assert (entries[0][1].data["base"], entries[0][1].data["branch"]) == (PARENT, "")
 
 
-def test_the_grade_url_joins_a_lab_address_with_a_trailing_slash_once() -> None:
-    _, printed = receive([f"{ZERO} {HEAD} refs/grade/t1"], {**ENVIRON, post_receive.LAB_URL: f"{LAB}/"})
-    assert printed == [f"lab grade: {LAB}/grades/{HEAD}"]
+@pytest.mark.parametrize("lab", [LAB, "http://lab.example/X"])
+def test_the_grade_url_joins_a_lab_address_with_a_trailing_slash_once(lab: str) -> None:
+    _, printed = receive([f"{ZERO} {HEAD} refs/grade/t1"], {**ENVIRON, post_receive.LAB_URL: f"{lab}/"})
+    assert printed == [f"lab grade: {lab}/grades/{HEAD}"]
 
 
 @pytest.mark.parametrize(
@@ -156,10 +157,18 @@ def test_the_scheduler_inbox_reads_a_graded_push_as_a_trusted_pull_request_head_
 def test_main_reads_the_ref_lines_from_stdin_and_prints_the_grade_url(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    opened: list[BusConfig] = []
+
+    def open_unprovisioned(config: BusConfig) -> Bus:
+        opened.append(config)
+        return cast(Bus, open_bus(config))
+
     monkeypatch.setattr(sys, "stdin", StringIO(f"{ZERO} {HEAD} refs/grade/t1\n"))
     monkeypatch.setattr(post_receive, "first_parent", parent)
+    monkeypatch.setattr(post_receive, "open_bus", open_unprovisioned)
     assert post_receive.main(ENVIRON) == 0
     assert capsys.readouterr().out == f"lab grade: {LAB}/grades/{HEAD}\n"
+    assert [config.provision for config in opened] == [False]
 
 
 def _git(cwd: Path, *argv: str, extra: dict[str, str] | None = None) -> str:

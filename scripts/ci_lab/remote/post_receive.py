@@ -41,8 +41,7 @@ def push_options(environ: Mapping[str, str]) -> dict[str, str]:
 
 def first_parent(sha: str) -> str:
     """Return the first parent of a commit in the repository git runs the hook in, or empty text for a root commit."""
-    argv = ["git", "rev-parse", "--verify", "--quiet", f"{sha}^"]
-    return subprocess.run(argv, capture_output=True, text=True, check=False).stdout.strip()
+    return subprocess.run(["git", "rev-parse", "--verify", f"{sha}^"], capture_output=True, text=True).stdout.strip()
 
 
 def grade(event: HeadEvent, ref: str, branch: str) -> Envelope:
@@ -71,15 +70,15 @@ def run(
         if not line.strip():
             continue
         _, new, ref = line.split()
-        graded = ref.startswith(GRADE_REFS) and new.strip("0")
+        graded = ref.startswith(GRADE_REFS) and new != "0" * len(new)
         base = (options.get(BASE) or parent(new)) if graded else ""
         if not base:
-            print(f"lab remote: {ref} is not graded, only a pushed refs/grade/* head with a base is", file=out)
+            out.write(f"lab remote: {ref} is not graded, only a pushed refs/grade/* head with a base is\n")
             continue
         event = HeadEvent(NOTICE, environ[REPOSITORY], new, base, environ[ACTOR], PUSHED)
         head = grade(event, ref, options.get(BRANCH, ""))
         events.publish(head.type, head)
-        print(f"lab grade: {lab}/grades/{new}", file=out)
+        out.write(f"lab grade: {lab}/grades/{new}\n")
     return 0
 
 
