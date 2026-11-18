@@ -213,19 +213,19 @@ def test_the_hub_stops_a_seated_execution_and_its_hive_reaps_it_and_publishes_th
 
 @dataclass
 class Seated:
-    """An agent the hub admitted for t1 on hive-a, the hive spoke running it, its start and the tick's view of it."""
+    """An agent the hub admitted for t1 on hive-a, the hive spoke running it, its start and the tick's runtime."""
 
     hive: SimpleNamespace
     agent: AgentRecord
     event: Envelope
-    ledger: FakeLedger
     runtime: FakeRuntime
 
 
 def seated(smoke: Smoke, monkeypatch: pytest.MonkeyPatch) -> Seated:
     """Admits t1 through the hub for a hive-a spoke, runs the hub claim lives reactor over the start the spoke
-    published, passes the agent's launch check and points the tick's bus at the smoke's nats-server with the hub's
-    scoped provisioning settings; the tick's runtime sees the agent's pane live."""
+    published, clears the pending launch check as the hub's launch checks do once one passes, and points the tick's
+    bus at the smoke's nats-server with the hub's scoped provisioning settings; the tick's runtime sees the agent's
+    pane live."""
     monkeypatch.delenv(BIND_ENV, raising=False)
     for name, value in ((BACKEND_ENV, "nats"), (URL_ENV, smoke.url), (SCOPED_ENV, "1")):
         monkeypatch.setenv(name, value)
@@ -242,19 +242,18 @@ def seated(smoke: Smoke, monkeypatch: pytest.MonkeyPatch) -> Seated:
     assert reconciler.legacy_agents(smoke.store, SLUG) == []
     runtime = FakeRuntime()
     runtime.live.add(agent.name)
-    ledger = FakeLedger([dict(row) for row in smoke.ledger.rows.values()])
-    return Seated(hive, agent, started(smoke), ledger, runtime)
+    return Seated(hive, agent, started(smoke), runtime)
 
 
-def ledger_rows(seat: Seated) -> dict[str, dict[str, Any]]:
-    """The tick's ledger rows by task id."""
-    return {row["id"]: row for row in seat.ledger.tasks(SLUG)}
+def ledger_rows(smoke: Smoke) -> dict[str, dict[str, Any]]:
+    """The rows of the ledger the hub claimed through, by task id, as a tick pass reads them."""
+    return {row["id"]: row for row in smoke.ledger.tasks(SLUG)}
 
 
-def retired(smoke: Smoke, seat: Seated, reason: str) -> None:
+def assert_retired(smoke: Smoke, seat: Seated, reason: str) -> None:
     """Asserts the tick retired the seated agent for ``reason``: its runtime reaped it, the store dropped it and gave
-    back its claim life, the task reopened, and the hub's stop reached its hive, which reaped it and published its
-    exit naming ``reason``."""
+    back its claim life, the task reopened on the ledger the hub claimed it through, and the hub's stop reached its
+    hive, which reaped it and published its exit naming ``reason``."""
     stopper = execution_stop.Stopper(seat.hive.spoke.bus, SLUG, "hive-a", seat.hive.runtime)
 
     assert stopper.poll(TAKE_MS) == [execution_stop.STOPPED]
@@ -266,7 +265,7 @@ def retired(smoke: Smoke, seat: Seated, reason: str) -> None:
     assert smoke.store.agents(SLUG) == []
     assert smoke.store.claimant(SLUG, "t1") is None
     assert smoke.store.claims(SLUG, "t1") == 0
-    assert (seat.ledger.rows["t1"]["state"], seat.ledger.rows["t1"]["claimed_by"]) == ("open", "")
+    assert (smoke.ledger.rows["t1"]["state"], smoke.ledger.rows["t1"]["claimed_by"]) == ("open", "")
 
 
 @pytest.mark.feature("events-smoke-mismatch-retire")
@@ -281,10 +280,10 @@ def test_a_hub_admitted_agent_bound_to_another_account_is_retired_stopped_on_its
         lambda agents: {name: {**facts, "account": "home"} for name, facts in bound(agents).items()},
     )
 
-    actions = observe._verify(SLUG, smoke.store, seat.ledger, seat.runtime, ledger_rows(seat), presence.now_ms())
+    actions = observe._verify(SLUG, smoke.store, smoke.ledger, seat.runtime, ledger_rows(smoke), presence.now_ms())
 
-    assert f"retired {seat.agent.name} after mismatched account, task t1 reopened" in actions
-    retired(smoke, seat, "mismatch")
+    assert actions == [f"retired {seat.agent.name} after mismatched account, task t1 reopened"]
+    assert_retired(smoke, seat, "mismatch")
 
 
 @pytest.mark.feature("events-smoke-idle-retire")
@@ -294,12 +293,12 @@ def test_a_hub_admitted_agent_idle_for_the_kill_time_is_retired_stopped_on_its_h
     seat = seated(smoke, monkeypatch)
     seat.runtime.statuses[seat.agent.name] = "idle"
     began = presence.now_ms()
-    first = agent_steps._reap(SLUG, smoke.store, seat.ledger, seat.runtime, ledger_rows(seat), began)
-    assert not [action for action in first if action.startswith("stalled")]
+    first = agent_steps._reap(SLUG, smoke.store, smoke.ledger, seat.runtime, ledger_rows(smoke), began)
+    assert first == []
     assert [agent.name for agent in smoke.store.agents(SLUG)] == [seat.agent.name]
     assert smoke.store.claims(SLUG, "t1") == 1
 
-    actions = agent_steps._reap(SLUG, smoke.store, seat.ledger, seat.runtime, ledger_rows(seat), began + IDLE_KILL_MS)
+    actions = agent_steps._reap(SLUG, smoke.store, smoke.ledger, seat.runtime, ledger_rows(smoke), began + IDLE_KILL_MS)
 
-    assert f"stalled {seat.agent.name}, task t1 reopened" in actions
-    retired(smoke, seat, "idle")
+    assert actions == [f"stalled {seat.agent.name}, task t1 reopened"]
+    assert_retired(smoke, seat, "idle")
