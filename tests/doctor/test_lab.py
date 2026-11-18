@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -268,4 +269,6 @@ def test_doctor_findings_prints_a_faked_lab_reading_as_json(
     assert capsys.readouterr().out.splitlines() == [f"{f.id} {f.summary}" for f in (behind_finding(), ratio_finding())]
     assert watched == [store]
     assert calls == [(store, "ledger", SLUG, NOW, {"telemetry": False})]
-    assert "run the detectors once and print their findings" in doctor.build_parser().format_help()
+    [commands] = [a for a in doctor.build_parser()._actions if isinstance(a, argparse._SubParsersAction)]
+    helps = {choice.dest: choice.help for choice in commands._choices_actions}
+    assert helps["findings"] == "run the detectors once and print their findings"
