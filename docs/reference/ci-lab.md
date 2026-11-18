@@ -1431,8 +1431,10 @@ The pull request tier proves the sandbox under real bubblewrap. The writer lock 
 `.github/workflows/writer-lock.yml`, and on every manual dispatch of the writer lock workflow.
 It runs on a GitHub hosted `ubuntu-latest` runner, installs bubblewrap when the runner lacks it,
 and sets `kernel.apparmor_restrict_unprivileged_userns=0`. It then runs those three test files
-and fails when any of their tests fails or skips. The Tests
-workflow calls the writer lock workflow from its `writer-lock` job, which `Gate — Required` needs.
+and fails when any of their tests fails or skips.
+
+The Tests workflow calls the writer lock workflow from its `writer-lock` job, which
+`Gate — Required` needs.
 These tests prove the read only trees:
 
 | Test | Proves |
