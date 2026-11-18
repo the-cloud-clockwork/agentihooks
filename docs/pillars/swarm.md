@@ -8300,8 +8300,8 @@ A master's artifact is stored with an empty task, so it lists under the ledger's
 
 ### Where artifact bytes live
 
-Every ledger server reads and writes one ledger database, SQLite or Postgres, chosen by its environment settings,
-but each server has its own disk. Artifact bytes therefore live in the database, in the `artifact_files` table: one
+The ledger server, the ledger API service and every swarm client use one ledger database, SQLite or Postgres,
+chosen by their environment settings, but each process has its own disk. Artifact bytes therefore live in the database, in the `artifact_files` table: one
 row per ledger and artifact id (the content hash and extension), the bytes held as base64 text. The same schema
 creates the table on SQLite and on Postgres.
 
