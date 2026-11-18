@@ -7,6 +7,7 @@ import pytest
 
 from scripts.swarm_ledger.api import resources, routes
 from scripts.swarm_ledger.api.errors import APIError
+from scripts.swarm_ledger.api.services import Services
 from scripts.swarm_ledger.repository import sqlite as store
 from tests.swarm_ledger.api_fakes import as_services
 
@@ -34,7 +35,7 @@ def whole_load_refused(*_: object) -> object:
     raise AssertionError("a single record read loaded the whole ledger")
 
 
-def server(repo: store.SQLiteLedgerRepository) -> object:
+def server(repo: store.SQLiteLedgerRepository) -> Services:
     """The ledger API services over repo."""
     return as_services(SimpleNamespace(repository=repo))
 
