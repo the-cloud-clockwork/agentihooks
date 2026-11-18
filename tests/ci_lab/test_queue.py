@@ -218,9 +218,10 @@ def test_leased_lists_each_leased_job_and_offers_keep_each_workers_latest_free_s
     assert jobs.leased() == [] and jobs.offers(0) == {}
     assert jobs.claim(found(jobs, ids[2]), "w1", "t1", 900)
     assert jobs.claim(found(jobs, ids[0]), "w1", "t2", 500)
-    assert jobs.leased() == [ids[0], ids[2]]
+    assert jobs.claim(found(jobs, ids[1]), "w2", "t3", 700)
+    assert jobs.leased() == [ids[0], ids[1], ids[2]]
     assert jobs.finish(found(jobs, ids[0]), "t2", "passed")
-    assert jobs.leased() == [ids[2]]
+    assert jobs.leased() == [ids[1], ids[2]]
     jobs.offer("w1", 3, 1000)
     jobs.offer("w2", 0, 1100)
     jobs.offer("w1", 1, 1200)

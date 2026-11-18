@@ -716,27 +716,29 @@ def test_a_live_run_without_a_grade_is_forgotten(lab: Callable[..., Run]) -> Non
 def test_the_load_counts_each_job_once_in_the_most_urgent_class_of_the_live_grades_holding_it(
     lab: Callable[..., Run],
 ) -> None:
-    cached, shared, solo, pulled, lost = unit(1), unit(2), unit(3), unit(4), unit(5)
-    run = lab({HEAD_A: plan({"lint": (cached, shared, solo)}), HEAD_B: plan({"lint": (pulled, lost)})})
+    cached, stored, shared, joined, solo, pulled, lost = (unit(number) for number in range(1, 8))
+    run = lab({HEAD_A: plan({"lint": (cached, stored, shared, joined, solo)}), HEAD_B: plan({"lint": (pulled, lost)})})
     run.cache(cached)
+    run.cache(stored)
     run.push(HEAD_A)
     run.tick(1000)
-    run.lab.expander.plans[HEAD_A] = plan({"lint": (shared,)})
+    run.lab.expander.plans[HEAD_A] = plan({"lint": (shared, joined)})
     run.push(HEAD_A, lane="gh-readonly-queue/dev/pr-1", event="merge_group", action="checks_requested")
     run.push(HEAD_B, lane="pr-2", event="pull_request", action="synchronize")
     run.tick(1100)
-    assert [grant.unit for grant in run.lease()] == [shared]
+    assert [grant.unit for grant in run.lease(slots=2)] == [shared, joined]
+    run.lab.client.hset(f"{queue.PREFIX}job:{scheduler.job_id(HEAD_A, solo)}", "slots", 2)
     run.lab.client.delete(f"{queue.PREFIX}job:{scheduler.job_id(HEAD_B, lost)}")
     run.lab.client.sadd(scheduler.LIVE, "grade-v1-gone")
     estimate = scheduler.UNIT_ESTIMATE_S
     assert run.engine.load(1100) == Load(
-        pending={"promotion": [estimate], "pull_request": [estimate]},
-        running={"queue": 1},
-        slots_total=1,
-        slots_busy=1,
-        cache_hits={"promotion": 1},
-        cache_misses={"promotion": 2, "queue": 1, "pull_request": 2},
-        frees_in=(estimate,),
+        pending={"promotion": [2 * estimate], "pull_request": [estimate]},
+        running={"queue": 2},
+        slots_total=2,
+        slots_busy=2,
+        cache_hits={"promotion": 2},
+        cache_misses={"promotion": 3, "queue": 2, "pull_request": 2},
+        frees_in=(estimate, estimate),
     )
 
 
@@ -841,6 +843,9 @@ def test_listen_serves_leases_capacity_grades_and_metrics_from_one_budgeted_load
         body = json.dumps({"worker": "w", "free_slots": 1, "capabilities": [], "wait_ms": 0}).encode()
         leased = json.loads(_read(f"{api}/lease", body))["leases"]
         assert [grant["job"] for grant in leased] == [scheduler.job_id(HEAD_A, item)]
+        job, token = leased[0]["job"], leased[0]["token"]
+        signed = json.loads(_read(f"{api}/upload-url?job={job}&token={token}&name=report"))
+        assert signed == {"url": run.lab.objects.upload_url(upload_path(job, "report"), 0)}
         resume = urllib.request.Request(f"{api}/resume", data=b"", headers={"Authorization": "Bearer tok"})
         with urllib.request.urlopen(resume, timeout=5) as reply:
             assert json.loads(reply.read()) == {"resumed": []}
