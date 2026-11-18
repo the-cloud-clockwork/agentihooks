@@ -1,3 +1,5 @@
+import ast
+import inspect
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -1116,6 +1118,109 @@ def test_dedicated_chart_group_without_a_trusted_jobs_mapping_does_not_crash() -
     job = {"runs-on": "ubuntu-latest"}
     block = {"group": "chart-release", "queue": "max", "cancel-in-progress": False}
     assert lanes.dedicated_chart_group("package", block, job, trusted) is False
+
+
+DEDICATED_GROUPS = {
+    "dedicated_chart_group": ("chart-release.yml", ("package", "kind", "publish"), "chart-release", True),
+    "flake_history_group": ("test.yml", ("flake-budget",), "flake-history", False),
+    "hive_release_group": ("swarm-node-image.yml", ("hive",), "hive-worker-release", False),
+}
+JOB_KEYS = (
+    "name",
+    "permissions",
+    "needs",
+    "if",
+    "runs-on",
+    "environment",
+    "outputs",
+    "env",
+    "defaults",
+    "steps",
+    "timeout-minutes",
+    "strategy",
+    "continue-on-error",
+    "container",
+    "services",
+    "uses",
+    "with",
+    "secrets",
+)
+
+
+def _dedicated_group_admissions() -> set[str]:
+    module = ast.parse(inspect.getsource(lanes))
+    grader = next(node for node in module.body if isinstance(node, ast.FunctionDef) and node.name == "problems")
+    called = {
+        node.func.id
+        for node in ast.walk(grader)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and {"name", "block"} <= {ast.unparse(value) for value in [*node.args, *(item.value for item in node.keywords)]}
+    }
+    grouped = {
+        function.name
+        for function in module.body
+        if isinstance(function, ast.FunctionDef)
+        and any(
+            isinstance(node, ast.Dict)
+            and any(
+                isinstance(key, ast.Constant) and key.value == "group" and isinstance(value, ast.Constant)
+                for key, value in zip(node.keys, node.values)
+            )
+            for node in ast.walk(function)
+        )
+    }
+    return called | grouped
+
+
+def _dedicated_fixture(admission: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    path, jobs, group, workflow_level = DEDICATED_GROUPS[admission]
+    block = {"group": group, "queue": "max", "cancel-in-progress": False}
+    trusted = yaml.safe_load((ROOT / lanes.WORKFLOWS / path).read_text())
+    for name in jobs:
+        trusted["jobs"][name].pop("concurrency", None)
+    if workflow_level:
+        trusted["concurrency"] = LANED
+        return trusted, {**trusted, "concurrency": block}, block
+    moved = {name: {**trusted["jobs"][name], "concurrency": block} for name in jobs}
+    return trusted, {**trusted, "jobs": {**trusted["jobs"], **moved}}, block
+
+
+def _outside_edits(job: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    kept = [key for key in job if key != "concurrency"]
+    return {
+        **{f"change {key}": {**job, key: f"{job[key]} edited"} for key in kept},
+        **{f"drop {key}": {other: value for other, value in job.items() if other != key} for key in kept},
+        **{f"add {key}": {**job, key: "added"} for key in JOB_KEYS if key not in job},
+    }
+
+
+def test_the_fixtures_cover_every_dedicated_group_admission_in_the_grader() -> None:
+    assert _dedicated_group_admissions() == set(DEDICATED_GROUPS)
+
+
+@pytest.mark.parametrize("admission", sorted(DEDICATED_GROUPS))
+def test_every_dedicated_group_admission_refuses_a_job_edited_outside_its_concurrency_block(admission: str) -> None:
+    trusted, head, block = _dedicated_fixture(admission)
+    admit = getattr(lanes, admission)
+    let_through = [
+        f"{name}: {edit}"
+        for name in DEDICATED_GROUPS[admission][1]
+        for edit, job in _outside_edits(head["jobs"][name]).items()
+        if admit(name, block, job, trusted)
+        or lanes.problems({**head, "jobs": {**head["jobs"], name: job}}, trusted)
+        != [f"job {name} has no shared hosted lane concurrency group"]
+    ]
+    assert let_through == []
+
+
+@pytest.mark.parametrize("admission", sorted(DEDICATED_GROUPS))
+def test_every_dedicated_group_admission_admits_a_job_moved_only_inside_its_concurrency_block(admission: str) -> None:
+    trusted, head, block = _dedicated_fixture(admission)
+    admit = getattr(lanes, admission)
+    jobs = DEDICATED_GROUPS[admission][1]
+    assert [name for name in jobs if not admit(name, block, head["jobs"][name], trusted)] == []
+    assert lanes.problems(head, trusted) == []
 
 
 def test_refused_asks_git_for_inherited_workflows_with_the_path_separator(monkeypatch: pytest.MonkeyPatch) -> None:
