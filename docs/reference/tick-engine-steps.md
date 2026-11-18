@@ -897,7 +897,8 @@ views, records which step stored and read each key, and names every gap:
 - `<step> writes pass <key> without declaring it`
 
 A read counts as needing its writer when the writer is the reader itself or is
-on the reader's `needs` path in `registry.waves()`. Reads and writes made by
+on the reader's `needs` path in `registry.waves()`; when the recorder saw no
+writer, any step that declares the key in its `writes` counts. Reads and writes made by
 the `scripts.swarm.cli` wrapper's site hooks are left out; they belong to no
 step.
 
@@ -909,7 +910,7 @@ replay stays far below the per test time limit of the CI unit jobs:
 | `test_every_pass_box_read_is_declared_with_a_need_on_its_writer[<scenario>]` | One scenario of `SCENARIOS` through both entry points, with its own recorder | No gap in that scenario's reads and writes |
 | `test_the_covering_scenarios_run_every_step_and_write_and_read_every_pass_value` | Every scenario in `COVERING` through both entry points, into one recorder | Every registered step ran; every value in `WRITTEN` was stored, and every one but `judged` was read |
 | `test_a_planted_undeclared_read_is_named` | `running` through `tick`, with `pass:rows` removed from the reads of `verify` | The step's pass box view raises `UndeclaredRead: step verify reads pass value rows it does not declare` |
-| `test_a_planted_missing_need_is_named` | None; one recorded read of `found` by `bottleneck status` | Both the undeclared read and the missing need on `health findings` are named |
+| `test_a_planted_missing_need_is_named` | No scenario; one recorded read of `found` by `bottleneck status` | Both the undeclared read and the missing need on `health findings` are named |
 
 `SCENARIOS` comes from `tests/swarm/tick_scenarios/test_characterisation.py`,
 the same tuple the golden replay uses: `running`, `second-pass`, `paused`,
@@ -935,13 +936,14 @@ grades:
 | --- | --- | --- |
 | `COVERING` | `("running",)` | A new step runs in no `COVERING` scenario: add a scenario that runs it. Each scenario added here adds its replay time to this one test |
 | `WRITTEN` | `config`, `doc`, `rows`, `sleeping`, `agents`, `view`, `judged`, `live`, `found` | A step stores a new pass value that a covering scenario stores: add it so the test fails when no covering scenario stores or reads it |
-| `KEYS` | `WRITTEN` plus `finished` and `stop` | A step reads a new pass value through its pass view: add it, because a pass view read is recorded only for a key listed here. A read straight from the box is recorded for any key a step stored |
+| `KEYS` | `WRITTEN` plus `finished` and `stop` | A step reads a new pass value through its pass view: add it, because a pass view read is recorded only for a key listed here. A read through the pass box itself, not a pass view, is recorded for any key a step stored earlier in the replay |
 
 A scenario added to `SCENARIOS` gets its own case with no change to this test.
 A per scenario case does not check that every step ran; only the covering test
 does, and only over `COVERING`. In
-[probe run 43785100130](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/43785100130)
-of the delivered change, every scenario on its own had no gap, and `running`
+[probe run 43785100130](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/43785100130),
+a dispatch on a throwaway branch whose probe cases fail on purpose to print
+what they recorded, every scenario on its own had no gap, and `running`
 alone ran every registered step, stored all nine `WRITTEN` values and read all
 of them but `judged`.
 
@@ -964,7 +966,7 @@ points, thirty replays. It took 15.4 seconds on a quiet runner, but on
 [Tests run 43724674267](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/43724674267)
 (job `unit (3.12, 11)`) lost workers `gw4` and `gw2` to the 60 second limit
 while each was still finishing steps, and a third attempt of the same code
-passed in 40.6 seconds. After the split, in
+passed in 40.6 seconds. After the split, in the `unit-selected` jobs of
 [Tests run 43785461519](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/43785461519),
 the slowest case, `interval-slow`, took 6.49 seconds, then `hive-roll`
 5.46 seconds and `second-pass` 3.38 seconds; every other case took under
