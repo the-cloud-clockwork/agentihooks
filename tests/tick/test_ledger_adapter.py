@@ -104,20 +104,18 @@ def test_resource_client_bounds_each_request_by_the_ledger_timeout_and_the_deadl
     from types import SimpleNamespace
 
     from scripts.swarm import ledger_client
+    from scripts.swarm_ledger.api.client import ResourceClient
 
-    seen: list[tuple[str, bool]] = []
+    seen: list[tuple[str, float]] = []
 
-    def credentials(slug: str, service: bool) -> dict[str, str]:
-        seen.append((slug, service))
-        return {"X-Ledger-Agent": "swarm"}
+    def client(slug: str, timeout: float) -> ResourceClient:
+        seen.append((slug, timeout))
+        return ResourceClient(f"http://ledger/{slug}", {}, timeout)
 
-    fake = SimpleNamespace(base=lambda slug: f"http://ledger/{slug}", credentials=credentials, REQUEST_TIMEOUT=10)
+    fake = SimpleNamespace(client=client, REQUEST_TIMEOUT=10)
     monkeypatch.setattr(ledger_client, "_ledger", lambda: fake)
-    build = ledger_adapter.resource_client("sw", service=True)
+    build = ledger_adapter.resource_client("sw")
     short, long = build(2.5), build(30.0)
     assert (short.base, short.timeout) == ("http://ledger/sw", 2.5)
-    assert short.credentials == {"X-Ledger-Agent": "swarm"}
     assert (long.base, long.timeout) == ("http://ledger/sw", 10)
-    assert seen == [("sw", True), ("sw", True)]
-    assert ledger_adapter.resource_client("sw")(1.0).timeout == 1.0
-    assert seen[-1] == ("sw", False)
+    assert seen == [("sw", 2.5), ("sw", 10)]

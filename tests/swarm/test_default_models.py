@@ -118,6 +118,15 @@ def test_launch_defaults_keep_explicit_choices(store):
     assert runtime._lane_default("plan", "claude", {"model": "opus"}, config).model == "opus"
 
 
+@pytest.mark.feature("launch-model-suits-harness")
+def test_a_lane_default_never_gives_one_harness_the_other_harness_pinned_model(store: RedisStore) -> None:
+    config = replace(store.config("sw"), claude_model="sonnet", codex_model="gpt-6-sol")
+    assert runtime._lane_default("plan", "codex", {"model": "opus"}, config).model == "gpt-6-sol"
+    assert runtime._lane_default("eng", "claude", {"model": "gpt-6.1-sol"}, config).model == "sonnet"
+    assert runtime._lane_default("plan", "codex", {"model": "gpt-6-luna"}, config).model == "gpt-6-luna"
+    assert runtime._lane_default("plan", "codex", {"model": "auto"}, config).model == "gpt-6-sol"
+
+
 @pytest.mark.parametrize("harness, expected", [("claude", "opus"), ("codex", "gpt-6.1-sol")])
 def test_missing_config_fields_use_harness_defaults(harness, expected):
     assert default_models.model(None, harness) == expected

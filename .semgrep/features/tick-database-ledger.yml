@@ -3,9 +3,11 @@ rules:
     languages: [python]
     severity: ERROR
     message: >-
-      Ordered 2026-11-07, the tick reads and writes the shared database instead of the ledger server: the tick route
-      must run its pass inside database_ledger.scoped(), and the tick ledger port must build the database client
-      while database_ledger.serving().
+      Ordered 2026-11-07 and 2026-11-16, the tick and every swarm client read and write the shared database through
+      the ledger API route code run in process and never through the ledger server: the tick route runs its pass
+      inside database_ledger.acting(""), the swarm's own service, the tick ledger port builds its client with
+      ledger.client and builds no ResourceClient of its own, and ledger.client returns the in process database
+      client with no other path.
     patterns:
       - pattern-either:
           - patterns:
@@ -15,7 +17,7 @@ rules:
               - pattern-not: |
                   def routed(store, slug, *args, **kwargs):
                     ...
-                    with $ROUTE, database_ledger.scoped():
+                    with database_ledger.acting(""):
                       ...
           - patterns:
               - pattern: |
@@ -24,11 +26,26 @@ rules:
               - pattern-not: |
                   def build(remaining: float) -> ResourceClient:
                     ...
-                    if database_ledger.serving():
-                      return database_ledger.client(...)
+                    $BUILT: ResourceClient = ledger.client(...)
+                    return $BUILT
+          - patterns:
+              - pattern-inside: |
+                  def build(remaining: float) -> ResourceClient:
                     ...
+              - pattern: ResourceClient(...)
+          - patterns:
+              - pattern: |
+                  def client(...):
+                    ...
+              - pattern-not: |
+                  def client(...):
+                    "..."
+                    from scripts.tick.adapters import database_ledger
+
+                    return database_ledger.client(...)
     paths:
       include:
         - /scripts/swarm_ledger/ledger_route.py
+        - /scripts/swarm_ledger/ledger.py
         - /scripts/tick/adapters/ledger.py
         - '*.test.py'

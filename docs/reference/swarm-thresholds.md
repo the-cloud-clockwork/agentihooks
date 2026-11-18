@@ -129,8 +129,15 @@ new claims wait. Ci, plan and fix phase tasks are never held.
 | Stage report | Claim wait of a held task during a behind sample is `lab_wait` rather than seat or queue wait; the detector raises its own `lab_wait` finding past 1.0 task hours |
 | Remedy | The bottleneck hunter proposes one ci task titled Lab capacity, or raises an open one to urgent |
 
-An older, failed or missing reading never holds a claim, and a lab whose
-reading predicts no wait, such as one with no free slot, does not hold either.
+A missing reading, or one taken more than ten minutes ago, never holds a claim;
+a failed read keeps the last good reading and its time, so it holds only until
+that reading ages past ten minutes. A lab with every slot busy predicts its
+pull request wait from when its running units free their slots, so a full lab
+holds claims once that wait passes the threshold: 2250 seconds predicted is 37
+whole minutes, and the urgent hold reads "the lab is 37 minutes behind on pull
+request grading". Only a `null` wait, a full pool whose snapshot carries no
+free times, never holds. [Capacity document](ci-lab.md#capacity-document)
+gives the rule and examples.
 Set the threshold on the controller, the events hub and the status command
 alike; raising it to silence the finding hides a lab that cannot keep up.
 

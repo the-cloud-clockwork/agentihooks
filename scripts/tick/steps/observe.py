@@ -16,7 +16,7 @@ from scripts.swarm.store import MASTER, SwarmConfig
 from scripts.tick import registry
 from scripts.tick.engine import SLOW
 from scripts.tick.step import Lane
-from scripts.tick.steps import CallStep, Left, budgets, pass_domains
+from scripts.tick.steps import CallStep, Left, budgets, hold, pass_domains
 
 reports: Any = import_module("scripts.hive.reports")
 dead_resume: Any = import_module("scripts.swarm.dead_resume")
@@ -37,18 +37,16 @@ PASS_KEYS = ("slug", "store", "ledger", "runtime", "now_ms", "box")
 
 
 def _run(call: Callable[..., Any], _module: Any, get: Callable[[str], Any]) -> Any:
-    """Run the tick step function ``call`` with the pass state and the box values it declares, skipping once a step
-    held an exception."""
+    """Run the tick step function ``call`` with the pass state and the box values it declares, holding the exception
+    it raises."""
     box = get("box")
-    if RAISED in box:
-        return []
     try:
         values = {key: get(key) for key in PASS_KEYS}
         return call(**{name: values[name] if name in values else box[name] for name in signature(call).parameters})
     except (Left, LedgerOffline):
         return []
     except (Exception, SystemExit) as exc:
-        box[RAISED] = exc
+        hold(box, exc)
         return []
 
 

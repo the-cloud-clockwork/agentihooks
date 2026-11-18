@@ -57,7 +57,7 @@ def test_stalled_master_is_asked_for_a_handoff_then_recycled_in_its_seat(store: 
     asked = run(store, runtime, START + 10 * MINUTE)
     assert asked == [f"asked {agent.name} for a handoff before retiring it: busy with no tool call for 10 minutes"]
     items = InboxStore(store.redis).pending_items(agent.seat)
-    assert [i.ref for i in items] == [master_retire.REF]
+    assert [i.ref for i in items] == [f"{master_retire.REF}:{START + 10 * MINUTE}"]
     assert run(store, runtime, START + 14 * MINUTE) == [
         f"waiting on {agent.name}'s handoff before retiring it: busy with no tool call for 10 minutes"
     ]

@@ -5,7 +5,7 @@ import pytest
 
 from scripts.inbox.store import InboxError, InboxStore, replied
 from scripts.swarm import affinity, automated_gc, doc_report, master_move
-from scripts.swarm.store import RedisStore
+from scripts.swarm.store import AgentRecord, RedisStore
 
 
 @pytest.fixture
@@ -40,13 +40,16 @@ def test_a_master_order_whose_item_is_gone_is_skipped(store, capsys, module, key
     assert capsys.readouterr().err.splitlines() == [gone_line(by, "gone1")]
 
 
-def test_a_gc_probe_whose_request_or_answer_is_gone_counts_no_answer(store, capsys):
+def test_a_gc_probe_whose_request_or_answer_is_gone_counts_no_answer(
+    store: RedisStore, capsys: pytest.CaptureFixture[str]
+) -> None:
     inbox = InboxStore(store.redis)
-    assert automated_gc._answer(inbox, None, {"request": "gone1", "answers": []}, 1) is False
+    agent = AgentRecord("bob", "master", "")
+    assert automated_gc._answer(inbox, agent, {"request": "gone1", "answers": []}, 1) is False
     request = inbox.send("swarm", "bob", "still there?")
     inbox.close(request.id, "bob", "done", "replied with message gone2")
     record = {"request": request.id, "answers": []}
-    assert automated_gc._answer(inbox, None, record, 1) is False
+    assert automated_gc._answer(inbox, agent, record, 1) is False
     assert record["answers"] == []
     assert capsys.readouterr().err.splitlines() == [
         gone_line("automated-gc", "gone1"),

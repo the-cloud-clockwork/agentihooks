@@ -1,0 +1,16 @@
+rules:
+  - id: ledger-write-switch
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Incident 16 November: a switch chose between the in process ledger path and the ledger server, so writes
+      outside a tick pass still reached the ledger server. The in process ledger API path is the only one; judge a
+      call with database_ledger.acting and never bring back database_ledger.serving or database_ledger.scoped.
+    paths:
+      include:
+        - /scripts/
+        - /hooks/
+        - ledger-server-write.py
+    pattern-either:
+      - pattern: database_ledger.serving()
+      - pattern: database_ledger.scoped(...)

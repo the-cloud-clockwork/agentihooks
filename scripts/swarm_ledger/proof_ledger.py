@@ -3,26 +3,25 @@ import json
 import os
 import sys
 import urllib.error
-import urllib.request
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 from scripts.swarm_ledger import ledger_link
 
-TIMEOUT = 10
 
+def call(path: str, payload: dict[str, Any] | None, environ: Mapping[str, str]) -> Any:
+    """One proof ledger request through the ledger API route code in process, as the controller."""
+    from scripts.tick.adapters import database_ledger
 
-def call(path: str, payload: dict | None, environ) -> dict | None:
     credential = environ.get("AGENTIHOOKS_CONTROLLER_CREDENTIAL")
     if not credential:
         sys.exit("AGENTIHOOKS_CONTROLLER_CREDENTIAL is not set")
-    request = urllib.request.Request(
-        f"{ledger_link.base(environ)}/api/v1/{path}",
-        data=None if payload is None else json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json", "X-Controller-Credential": credential},
-    )
+    command = "GET" if payload is None else "POST"
     try:
-        with ledger_link.urlopen(request, TIMEOUT, environ) as response:
-            return json.loads(response.read())["data"]
+        return database_ledger.exchanged(command, f"/api/v1/{path}", payload, {"X-Controller-Credential": credential})[
+            "data"
+        ]
     except urllib.error.HTTPError as exc:
         if exc.code == 404 and payload is None:
             return None
@@ -53,15 +52,12 @@ def controller_control(slug: str, owner: dict, request: dict, environ=os.environ
     return call(f"proof-ledgers/{slug}/controller-controls", {"owner": owner, "request": request}, environ)
 
 
-def _control_call(slug: str, route: str, payload: dict, headers: dict, environ) -> dict:
-    request = urllib.request.Request(
-        f"{ledger_link.base(environ)}/api/v1/proof-ledgers/{slug}/{route}",
-        data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json", **headers},
-    )
+def _control_call(slug: str, route: str, payload: dict[str, Any], headers: dict[str, str]) -> Any:
+    """One proof control request through the ledger API route code in process, judged by ``headers``."""
+    from scripts.tick.adapters import database_ledger
+
     try:
-        with ledger_link.urlopen(request, TIMEOUT, environ) as response:
-            return json.loads(response.read())["data"]
+        return database_ledger.exchanged("POST", f"/api/v1/proof-ledgers/{slug}/{route}", payload, headers)["data"]
     except urllib.error.HTTPError as exc:
         message = json.loads(exc.read())["error"]["message"]
         sys.exit(f"proof control refused: {exc.code} {message}")
@@ -78,8 +74,8 @@ def control(slug: str, payload: dict, environ=os.environ) -> dict:
         headers = {"X-Ledger-Agent": name, "X-Ledger-Token": token}
     else:
         headers = ledger.local_credentials(parent, name, False)
-    issued = _control_call(slug, "credential", {}, headers, environ)
-    return _control_call(slug, "controls", payload, {"X-Proof-Credential": issued["credential"]}, environ)
+    issued = _control_call(slug, "credential", {}, headers)
+    return _control_call(slug, "controls", payload, {"X-Proof-Credential": issued["credential"]})
 
 
 def main(argv: list[str] | None = None) -> None:

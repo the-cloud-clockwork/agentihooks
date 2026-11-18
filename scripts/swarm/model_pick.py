@@ -1,4 +1,5 @@
 from dataclasses import dataclass, replace
+from typing import Any
 
 from hooks.classifier import ClassifierUnavailable, decide, definitions, runner
 from scripts.swarm.effort_range import DEFAULT as DEFAULT_RANGE
@@ -11,6 +12,9 @@ BAND = "band"
 SONNET = "sonnet"
 SONNET_EFFORT = "xhigh"
 FRONTIER_EFFORT = "high"
+CLAUDE_PREFIXES = ("claude", "opus", SONNET, "haiku", "fable")
+CODEX_PREFIXES = ("gpt", "codex", "o1", "o3", "o4")
+FOREIGN = {"claude": CODEX_PREFIXES, "codex": CLAUDE_PREFIXES}
 KEYS = ("lower", "higher")
 STEPS = ((SONNET, SONNET_EFFORT), ("", "medium"), ("", "high"), ("", "xhigh"))
 STARTS = {"S": 0, "M": 1, "L": 2}
@@ -57,12 +61,29 @@ def described(option: ModelPick) -> str:
     return f"{LABELS.get(option.model, option.model)} at {EFFORT_WORDS[option.effort]}: {fit}"
 
 
+def foreign(harness: str, model: str) -> bool:
+    """Whether the model belongs to the other harness: a Claude model on Codex or a Codex model on Claude."""
+    return model.startswith(FOREIGN.get(harness, ()))
+
+
+def suited(harness: str, model: str, fallback: str) -> str:
+    """The model when the harness runs it, else the fallback, so a launch never asks for the other harness's model."""
+    return fallback if foreign(harness, model) else model
+
+
 def pick(
-    harness: str, lane: dict, task: dict, environ: dict, bounds: tuple = DEFAULT_RANGE, default_model: str = ""
+    harness: str,
+    lane: dict[str, str],
+    task: dict[str, Any],
+    environ: dict[str, str],
+    bounds: tuple[str, str] = DEFAULT_RANGE,
+    default_model: str = "",
 ) -> ModelPick:
     from scripts.init_agent import model_effort
 
     default = ModelPick(lane.get("model", ""), lane.get("effort", ""))
+    if harness == "codex" and default.model.startswith(CLAUDE_PREFIXES):
+        default = replace(default, model=default_model or model_effort(harness, [], environ)[0])
     if default.effort != AUTO or harness not in EFFORTS:
         return default
     difficulty = task.get("difficulty") if task.get("difficulty") in STARTS else "M"

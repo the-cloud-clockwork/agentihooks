@@ -8,6 +8,7 @@ import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.metadata import distribution
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -162,6 +163,51 @@ def test_a_command_without_the_separator_is_never_run(tmp_path):
     assert not (tmp_path / "calls").exists()
 
 
+def _hang(
+    tmp_path: Path, hangs: int, trap: str = "", **env: str
+) -> tuple[subprocess.CompletedProcess[str], list[str], list[int], str]:
+    bin_dir = _bin(tmp_path)
+    command = bin_dir / "install"
+    command.write_text(
+        "#!/usr/bin/env bash\n"
+        f'echo "$*" >> "{tmp_path}/calls"\n'
+        f'(($(wc -l < "{tmp_path}/calls") > {hangs})) || {{ {trap}exec {shutil.which("sleep")} 600; }}\n'
+        'echo "Installed 90 packages" >&2\n'
+    )
+    command.chmod(0o755)
+    result, sleeps, summary = _run(tmp_path, bin_dir, ["install", "-e", ".[dev,all]"], **env)
+    return result, (tmp_path / "calls").read_text().splitlines(), sleeps, summary
+
+
+@pytest.mark.feature("pypi-retry-attempt-timeout")
+@pytest.mark.parametrize("trap", ["", "trap '' TERM; "], ids=["ends-on-term", "ignores-term"])
+def test_a_hung_attempt_is_stopped_at_its_time_limit_and_retried(tmp_path: Path, trap: str) -> None:
+    result, calls, sleeps, summary = _hang(tmp_path, 1, trap, PYPI_RETRY_ATTEMPT_SECONDS="1")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert calls == ["-e .[dev,all]"] * 2
+    assert sleeps == [5]
+    assert "Install dependencies attempt 1: did not finish within 1s; retrying in 5s" in result.stderr
+    assert "Installed 90 packages" in result.stderr
+    assert LABEL not in result.stderr
+    assert summary == ""
+
+
+@pytest.mark.feature("pypi-retry-attempt-timeout")
+def test_an_attempt_that_keeps_hanging_doubles_its_limit_up_to_four_times_the_first_then_names_the_timeout(
+    tmp_path: Path,
+) -> None:
+    result, calls, sleeps, summary = _hang(tmp_path, 9, PYPI_RETRY_ATTEMPT_SECONDS="1", PYPI_RETRY_SECONDS="35")
+    assert result.returncode == 124, result.stdout + result.stderr
+    assert len(calls) == 4
+    assert sleeps == [5, 10, 20]
+    for attempt, limit in ((1, 1), (2, 2), (3, 4)):
+        assert f"Install dependencies attempt {attempt}: did not finish within {limit}s;" in result.stderr
+    message = result.stderr.split(LABEL)[1]
+    assert "Install dependencies failed after 4 attempts and 35s of backoff: did not finish within 4s" in message
+    assert "not a code verdict" in message
+    assert "Python package index unavailable" in summary
+
+
 class _BadGateway(BaseHTTPRequestHandler):
     hits = 0
 
@@ -215,16 +261,44 @@ def test_a_real_uv_install_against_an_unreachable_index_retries_then_names_the_o
         assert _BadGateway.hits >= 8
 
 
-def _install_steps():
-    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+@pytest.mark.feature("pypi-retry-attempt-timeout")
+def test_a_real_uv_install_against_an_index_that_never_answers_is_stopped_and_retried(tmp_path: Path) -> None:
+    (tmp_path / "requirements.in").write_text("setuptools\n")
+    with socket.socket() as index:
+        index.bind(("127.0.0.1", 0))
+        index.listen()
+        url = f"http://127.0.0.1:{index.getsockname()[1]}/simple"
+        result, sleeps, summary = _run(
+            tmp_path,
+            _bin(tmp_path),
+            [_uv(), "pip", "compile", "requirements.in", "--no-cache", "--default-index", url, "-q"],
+            UV_HTTP_RETRIES="0",
+            PYPI_RETRY_ATTEMPT_SECONDS="2",
+            PYPI_RETRY_SECONDS="5",
+        )
+        index.settimeout(1)
+        connection, _ = index.accept()
+        with connection:
+            assert b"GET /simple/setuptools/" in connection.recv(4096)
+    assert result.returncode == 124, result.stdout + result.stderr
+    assert sleeps == [5]
+    assert "Install dependencies failed after 2 attempts and 5s of backoff: did not finish within 4s" in result.stderr
+    assert "Python package index unavailable" in summary
+
+
+def _install_steps() -> dict[str, dict[str, Any]]:
+    workflows = ROOT / ".github/workflows"
+    jobs = yaml.safe_load((workflows / "test.yml").read_text())["jobs"]
+    steps = {name: jobs[name]["steps"] for name in ("unit", "unit-selected", "test-count", "split")}
+    steps["events-smoke"] = yaml.safe_load((workflows / "events-smoke.yml").read_text())["jobs"]["smoke"]["steps"]
     return {
-        name: next(step for step in jobs[name]["steps"] if step.get("name") == "Install dependencies")
-        for name in ("unit", "unit-selected", "test-count", "split")
+        name: next(step for step in job_steps if step.get("name") == "Install dependencies")
+        for name, job_steps in steps.items()
     }
 
 
-@pytest.mark.parametrize("job", ["unit", "unit-selected", "test-count", "split"])
-def test_every_unit_dependency_install_runs_uv_through_the_retry(job):
+@pytest.mark.parametrize("job", ["unit", "unit-selected", "test-count", "split", "events-smoke"])
+def test_every_unit_dependency_install_runs_uv_through_the_retry(job: str) -> None:
     run = _install_steps()[job]["run"]
     online = [line.strip() for line in run.splitlines() if "uv pip install" in line and "--offline" not in line]
     assert online
@@ -232,8 +306,8 @@ def test_every_unit_dependency_install_runs_uv_through_the_retry(job):
         assert install.startswith('bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install')
 
 
-@pytest.mark.parametrize("job", ["unit", "unit-selected", "test-count", "split"])
-def test_every_unit_install_tries_the_runner_wheelhouse_offline_before_pypi(job):
+@pytest.mark.parametrize("job", ["unit", "unit-selected", "test-count", "split", "events-smoke"])
+def test_every_unit_install_tries_the_runner_wheelhouse_offline_before_pypi(job: str) -> None:
     lines = [line.strip() for line in _install_steps()[job]["run"].splitlines()]
     offline = next(i for i, line in enumerate(lines) if "--offline" in line)
     retry = next(i for i, line in enumerate(lines) if line.startswith("bash .github/scripts/pypi-retry.sh"))
@@ -256,7 +330,6 @@ def _mutation_installs():
                 "mutation-shard",
             ),
         ),
-        ("mutation-preflight.yml", None),
     ):
         jobs = yaml.safe_load((ROOT / ".github/workflows" / workflow).read_text())["jobs"]
         for name in names or jobs:
@@ -276,16 +349,8 @@ def test_every_mutation_dependency_install_runs_uv_through_the_retry():
         ("test.yml", "mutation-probe"),
         ("test.yml", "mutation-replan"),
         ("test.yml", "mutation-shard"),
-        ("mutation-preflight.yml", "plan"),
-        ("mutation-preflight.yml", "touched-tests"),
-        ("mutation-preflight.yml", "stats"),
-        ("mutation-preflight.yml", "refine"),
-        ("mutation-preflight.yml", "mutation-shard"),
     }
-    helper = {
-        "test.yml": 'bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh"',
-        "mutation-preflight.yml": "bash .github/scripts/pypi-retry.sh",
-    }
+    helper = {"test.yml": 'bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh"'}
     for (workflow, job, _), lines in installs.items():
         for line in lines:
             assert line.startswith(f'{helper[workflow]} "Install dependencies" -- uv pip install --system '), (
@@ -298,15 +363,16 @@ def test_every_mutation_dependency_install_runs_uv_through_the_retry():
 @pytest.mark.parametrize(
     "job", ["mutation-plan", "mutation-stats", "mutation-refine", "mutation-probe", "mutation-replan", "mutation-shard"]
 )
-def test_mutation_jobs_take_the_retry_helper_from_the_workflow_revision(job):
+def test_mutation_jobs_take_the_retry_helper_from_the_workflow_revision(job: str) -> None:
     steps = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"][job]["steps"]
     names = [step.get("name") for step in steps]
     take = steps[names.index("Take the helper scripts from the workflow revision")]
     install = steps[names.index("Install dependencies")]
+    fetch = "git fetch --no-tags --depth=1" if job == "mutation-replan" else "git fetch --no-tags"
     assert names.index("Take the helper scripts from the workflow revision") < names.index("Install dependencies")
     assert take.get("if") == install.get("if")
     assert take["run"].splitlines() == [
-        'git fetch --no-tags origin "$GITHUB_SHA"',
+        f'{fetch} origin "$GITHUB_SHA"',
         'mkdir -p "$RUNNER_TEMP/workflow"',
         'git archive "$GITHUB_SHA" .github/scripts .github/test-requirements.lock | tar -x -C "$RUNNER_TEMP/workflow"',
     ]

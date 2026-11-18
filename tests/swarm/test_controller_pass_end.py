@@ -186,8 +186,8 @@ def test_an_unreachable_remote_lifecycle_read_raises_ledger_unreachable(monkeypa
         assert (slug, path, payload) == ("proof", "lifecycle/actions", {"action": "binned"})
         raise urllib.error.URLError("connection refused")
 
-    def client(slug: str, service: bool) -> SimpleNamespace:
-        assert (slug, service) == ("proof", False)
+    def client(slug: str) -> SimpleNamespace:
+        assert slug == "proof"
         return SimpleNamespace(request=request)
 
     monkeypatch.setattr(ledger_client, "_ledger", lambda: SimpleNamespace(client=client))

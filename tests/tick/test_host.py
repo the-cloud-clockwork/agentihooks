@@ -305,7 +305,6 @@ def test_the_intent_check_holds_what_it_raises_in_its_judging_box(monkeypatch: p
 
     monkeypatch.setattr(host, "import_module", lambda name: "cli")
     assert host.held(boom, host.JUDGING)(None, {"box": box, host.JUDGING: judging}.get) == []
-    assert host.held(boom, host.JUDGING)(None, {"box": box, host.JUDGING: judging}.get) == []
     assert calls == [("boom", "cli")]
     assert box == {}
     assert isinstance(judging["raised"], RuntimeError)
@@ -317,13 +316,20 @@ def test_the_reboot_pass_boots_with_the_fenced_pass_state(monkeypatch: pytest.Mo
     assert calls == [("skip", reboot.boot_pass, "sw", STORE, "ledger", "runtime", 7)]
 
 
-def test_a_raising_step_skips_the_rest_and_raises_at_the_site(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_raising_step_is_held_and_the_rest_of_its_site_runs(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[Any, ...]] = []
     box: dict[str, Any] = {}
     state = _pass(box, raises=incidents.host_pressure)
-    assert _run("wrapper health", calls, state, monkeypatch) == []
-    assert calls == [("skip", incidents.host_pressure, STORE, "sw")]
-    assert list(box) == ["raised"]
+    assert _run("wrapper health", calls, state, monkeypatch) == ["ran 2", "ran 3", "ran 5"]
+    assert calls == [
+        ("skip", incidents.host_pressure, STORE, "sw"),
+        ("call", ledger_watchdog.watch, STORE, "sw", "ledger", "runtime"),
+        ("call", ledger_probe.observe, STORE, "sw", "ledger", "runtime", 7),
+        ("call", prompt_backlog.observe, STORE, "sw", 0),
+        ("call", sweep.sweep, STORE, 7),
+    ]
+    assert list(box) == ["raised", "fallen"]
+    assert box["fallen"] == {"host pressure"}
     with pytest.raises(RuntimeError, match="^boom$"):
         host.raise_held(box)
 
@@ -348,12 +354,12 @@ def test_a_held_call_gets_the_swarm_command_module_not_the_tick(monkeypatch: pyt
     assert seen == [("module scripts.swarm.cli", "sw")]
 
 
-def test_a_held_call_after_a_held_exception_does_not_run(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_held_call_after_another_steps_held_exception_still_runs(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[object] = []
     monkeypatch.setattr(host, "import_module", lambda name: "cli")
     box: dict[str, Any] = {"raised": RuntimeError("earlier")}
-    assert host.held(lambda cli, get: seen.append(cli) or ["done"])("tick", {"box": box}.get) == []
-    assert seen == []
+    assert host.held(lambda cli, get: seen.append(cli) or ["done"])("tick", {"box": box}.get) == ["done"]
+    assert seen == ["cli"]
 
 
 def test_an_empty_box_raises_nothing() -> None:

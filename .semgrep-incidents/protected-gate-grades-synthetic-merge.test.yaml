@@ -1,0 +1,37 @@
+name: fixture
+on: pull_request
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Grade the synthetic merge from the grader worktree
+        run: |
+          if [[ -f "$RUNNER_TEMP/grader/scripts/ci_runner_trust.py" ]]; then
+            cd "$RUNNER_TEMP/grader"
+            # ruleid: protected-gate-grades-synthetic-merge
+            python -m scripts.gate_protected --head "$GITHUB_SHA"
+          fi
+
+      - name: Grade the synthetic merge through the expression
+        # ruleid: protected-gate-grades-synthetic-merge
+        run: python -m scripts.gate_protected --head "${{ github.sha }}"
+
+      - name: Grade the braced synthetic merge
+        # ruleid: protected-gate-grades-synthetic-merge
+        run: python -m scripts.gate_protected --base HEAD --head=${GITHUB_SHA}
+
+      - name: Grade a prefix of the synthetic merge
+        # ruleid: protected-gate-grades-synthetic-merge
+        run: python -m scripts.gate_protected --head "${GITHUB_SHA:0:40}"
+
+      - name: Grade the pull request head from the grader worktree
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          cd "$RUNNER_TEMP/grader"
+          # ok: protected-gate-grades-synthetic-merge
+          python -m scripts.gate_protected --head "$HEAD_SHA"
+
+      - name: Fetch the run revision for another gate
+        # ok: protected-gate-grades-synthetic-merge
+        run: git fetch --no-tags origin "$GITHUB_SHA"

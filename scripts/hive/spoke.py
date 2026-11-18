@@ -15,6 +15,8 @@ from scripts.hive import account_slots, admission, execution_events, headroom, p
 from scripts.swarm import launch_check, readiness
 from scripts.swarm_v2.runtime.base import NamedRuntime, SpawnRequest, Status
 
+ASKED = "asked"
+
 
 class Tasks(Protocol):
     def request(self, event: Envelope) -> SpawnRequest | None:
@@ -22,6 +24,11 @@ class Tasks(Protocol):
         ...
 
     def reopen(self, event: Envelope) -> None: ...
+
+    def dead_lettered(self, event: Envelope) -> None:
+        """Asks the hub to reopen a dead lettered offer, which advances its task's claim generation when no
+        admission is held, so the next offer carries a fresh claim key."""
+        ...
 
     def failed(self, event: Envelope, harness: str, reason: str) -> None: ...
 
@@ -51,9 +58,10 @@ class Spoke:
         measure: Callable[[], dict | None] | None = None,
         clock: Callable[[], int] | None = None,
         view: Callable[[], readiness.Snapshot] | None = None,
-    ):
+    ) -> None:
         self.config, self.bus, self.runtime, self.tasks = config, bus.for_swarm(config.swarm.slug), runtime, tasks
         self._previous = None
+        self._claimed_seen: tuple[int, int] | None = None
         self.measure = measure or self._measure
         self.clock = clock or presence.now_ms
         source = readiness.Source()
@@ -82,8 +90,8 @@ class Spoke:
         return "retry"
 
     def _poll(self, timeout_ms: int, heartbeat: presence.Heartbeat) -> str:
-        recovered = self._recover()
-        if recovered in ("busy", "uncertain"):
+        recovered = self._recover(heartbeat)
+        if recovered in ("busy", "uncertain", ASKED):
             return recovered
         heartbeat.check()
         if admission.room(self.measure()).room < 1:
@@ -129,7 +137,7 @@ class Spoke:
 
     def _waiting(self, prior: dict) -> str | None:
         state = prior.get("state")
-        if state not in ("claimed", "launching"):
+        if state not in ("claimed", "launching", ASKED):
             return None
         if presence.lost(self.bus, prior.get("owner"), self.clock()):
             return None
@@ -139,7 +147,15 @@ class Spoke:
         found = self.runtime.find(name)
         return found.ok and (found.value is None or self.runtime.reap(name).ok)
 
-    def _recover(self) -> str | None:
+    def _first_seen(self, revision: int) -> int:
+        """Records the clock time this spoke first sees its own claimed claim under a pending reservation and returns
+        it for every later sight of that reservation, so recovery can wait out one admit ask timeout, the bound on the
+        ask that wrote the claim, before it asks the hub again."""
+        if self._claimed_seen is None or self._claimed_seen[0] != revision:
+            self._claimed_seen = (revision, self.clock())
+        return self._claimed_seen[1]
+
+    def _recover(self, heartbeat: presence.Heartbeat) -> str | None:
         pending = self.bus.state("spoke-pending").get(self._pending_key)
         if pending is None or not (record := json.loads(pending.value)):
             return None
@@ -147,6 +163,13 @@ class Spoke:
         entry = self.bus.state("spoke-work").get(claim_key(event))
         state = json.loads(entry.value)
         status = state["state"]
+        if status in (ASKED, "claimed") and state.get("owner") == self.config.hive:
+            if (
+                status == "claimed"
+                and self.clock() - self._first_seen(pending.revision) < account_slots.REQUEST_TIMEOUT_MS
+            ):
+                return "busy"
+            return self._ask_again(event, record["attempt"], entry.revision, pending.revision, heartbeat)  # pyright: ignore[reportOptionalMemberAccess]
         if status == "launching" and state.get("owner") == self.config.hive:
             if not self._end_leftover(state["name"]):
                 return "uncertain"
@@ -167,7 +190,7 @@ class Spoke:
         elif status == "claimed":
             return "busy"
         self._clear_pending(pending.revision)
-        return None if status == "ready" else status
+        return None if status in ("ready", ASKED) else status
 
     def _apply(self, delivery: Delivery, heartbeat: presence.Heartbeat) -> str:
         event = delivery.event
@@ -185,11 +208,10 @@ class Spoke:
             delivery.nak(self.config.policy.ack_wait_ms)
             return waiting
         if prior.get("state") in ("dead", "withdrawn"):
-            delivery.term()
-            return prior["state"]
+            return self._ended(delivery, prior["state"])
         if prior.get("state") == "dead_pending":
             return self._exhaust(delivery)
-        if entry and prior["state"] not in ("ready", "claimed", "launching"):
+        if entry and prior["state"] not in ("ready", "claimed", "launching", ASKED):
             delivery.nak(self.config.policy.ack_wait_ms)
             return "busy"
         value = json.dumps({"owner": self.config.hive, "state": "claimed"}).encode()
@@ -205,15 +227,11 @@ class Spoke:
             raise
         try:
             spawned = self._spawn(event, key, revision, heartbeat)
-        except admission.Held:
-            self._clear_pending(pending_revision)
+        except (admission.Unanswered, admission.Held) as unsettled:
             delivery.nak(self.config.policy.ack_wait_ms)
-            return admission.HELD
+            return self._unsettled(unsettled, pending_revision)
         except Exception:
-            current = json.loads(claims.get(key).value)
-            if current["state"] == "ready" and delivery.attempt < self.config.policy.max_deliver:
-                self._clear_pending(pending_revision)
-                self.tasks.reopen(event)
+            self._give_back(event, key, pending_revision, delivery.attempt)
             raise
         if spawned is None:
             self._clear_pending(pending_revision)
@@ -225,6 +243,56 @@ class Spoke:
         delivery.ack()
         self._report_launch(event, launch)
         return "started"
+
+    def _ended(self, delivery: Delivery, state: str) -> str:
+        """Terms an offer whose claim at this generation is dead or withdrawn; a dead claim first asks the hub to
+        advance the task's claim generation, so a task whose offer dead lettered unadmitted is offered again under a
+        fresh claim key."""
+        if state == "dead":
+            self.tasks.dead_lettered(delivery.event)
+        delivery.term()
+        return state
+
+    def _ask_again(
+        self, event: Envelope, attempt: int, revision: int, pending_revision: int, heartbeat: presence.Heartbeat
+    ) -> str:
+        """Asks the hub again for the admission an unanswered admit ask left pending, or an admission wait that ended
+        with its claim still claimed, and launches it, with no wait for a redelivery of the offer the hub readiness
+        pass withdraws once that admission claims the task; an ask still unanswered keeps the offer pending for the
+        next poll, a held answer returns it and a refusal withdraws it."""
+        key = claim_key(event)
+        try:
+            spawned = self._spawn(event, key, revision, heartbeat)
+        except (admission.Unanswered, admission.Held) as unsettled:
+            return self._unsettled(unsettled, pending_revision)
+        except Exception:
+            self._give_back(event, key, pending_revision, attempt)
+            raise
+        if spawned is None:
+            self._clear_pending(pending_revision)
+            return "withdrawn"
+        started, launch = spawned
+        self._publish(started)
+        self._clear_pending(pending_revision)
+        self._report_launch(event, launch)
+        return "started"
+
+    def _unsettled(self, unsettled: admission.Unanswered | admission.Held, pending_revision: int) -> str:
+        """An admit ask the hub left unanswered keeps the offer as this hive's pending admission, asked again on the
+        next poll; a held answer drops it so another hive may take the offer."""
+        if isinstance(unsettled, admission.Held):
+            self._clear_pending(pending_revision)
+            return admission.HELD
+        self._failed()
+        return ASKED
+
+    def _give_back(self, event: Envelope, key: str, pending_revision: int, attempt: int) -> None:
+        """Asks the hub to reopen an offer whose launch failed and left its claim ready while the offer has deliveries
+        left; the final delivery is dead lettered instead."""
+        current = json.loads(self.bus.state("spoke-work").get(key).value)
+        if current["state"] == "ready" and attempt < self.config.policy.max_deliver:
+            self._clear_pending(pending_revision)
+            self.tasks.reopen(event)
 
     def _report_launch(self, event: Envelope, launch: dict[str, Any] | None) -> None:
         """Reports the stored launch decision to the hub once the started event is out; a refused or slow report is
@@ -251,8 +319,10 @@ class Spoke:
                 generation = request.task["execution_generation"]
                 task_generation = request.task["claim_generation"]
             heartbeat.check()
-        except Exception:
-            claims.update(key, json.dumps({"state": "ready"}).encode(), revision)
+        except Exception as error:
+            asked = isinstance(error, admission.Unanswered)
+            unsettled = {"state": ASKED, "owner": self.config.hive} if asked else {"state": "ready"}
+            claims.update(key, json.dumps(unsettled).encode(), revision)
             raise
         if request is None:
             claims.update(key, json.dumps({"state": "withdrawn"}).encode(), revision)
@@ -341,7 +411,7 @@ class Spoke:
         else:
             raise StateConflict
         self.bus.dead.publish(f"dead.{event.swarm}", letter)
-        self.tasks.reopen(event)
+        self.tasks.dead_lettered(event)
         claims.update(key, json.dumps({"state": "dead"}).encode(), revision)
 
     def _exhaust(self, delivery: Delivery) -> str:

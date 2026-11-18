@@ -309,7 +309,7 @@ def test_the_alarm_item_carries_its_id_ref_and_every_evidence_line(store: RedisS
     replay(store, 4)
     [item] = items(store)
     digest = hashlib.sha256(f"step-starvation:{SLUG}:{WAITS}:{START + MINUTE}".encode()).hexdigest()[:12]
-    assert (item.id, item.ref) == (digest, f"step-starvation:{SLUG}:{WAITS}")
+    assert (item.id, item.ref) == (digest, f"step-starvation:{SLUG}:{WAITS}:{START + MINUTE}")
     assert item.text == (
         "URGENT: Tick step waits end has not completed for 3 minutes on swarm sw. Evidence: "
         "Last completed run: never since the watch began; "
@@ -328,9 +328,29 @@ def test_a_step_already_alarmed_never_hides_the_next_starved_step(store: RedisSt
         journal(store, at + 1, WAITS, engine.OK if index < 5 else engine.FAILED)
         step_starvation.step(store, SLUG, at + 1_000, WINDOWS)
     assert sorted(item.ref for item in items(store)) == [
-        f"step-starvation:{SLUG}:spawn",
-        f"step-starvation:{SLUG}:{WAITS}",
+        f"step-starvation:{SLUG}:spawn:{START + MINUTE}",
+        f"step-starvation:{SLUG}:{WAITS}:{START + 5 * MINUTE + 1}",
     ]
+
+
+@pytest.mark.feature("inbox-notices-pass-the-seen-claim")
+def test_each_starvation_of_a_step_passes_the_seen_claim(store: RedisStore) -> None:
+    """A step that starves, completes and starves again alarms the master twice, each alarm passing the seen claim."""
+    from scripts.inbox import seen
+
+    inbox = InboxStore(store.redis)
+    replay(store, 4)
+    (first,) = seen.claim(inbox, MASTER)
+    at = START + 5 * MINUTE
+    journal(store, at, WAITS, engine.OK)
+    for index in range(1, 5):
+        journal(store, at + index * MINUTE, WAITS, engine.LATE, abandoned=True)
+    assert step_starvation.step(store, SLUG, at + 4 * MINUTE + 1_000, WINDOWS) == [
+        f"step starvation: alarmed {MASTER}: Tick step waits end has not completed for 4 minutes"
+    ]
+    (second,) = seen.claim(inbox, MASTER)
+    assert second.id != first.id
+    assert second.text.startswith("URGENT: Tick step waits end has not completed for 4 minutes on swarm sw.")
 
 
 @pytest.mark.feature("tick-step-starvation")

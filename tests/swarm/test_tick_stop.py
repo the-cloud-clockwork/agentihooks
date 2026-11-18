@@ -306,7 +306,7 @@ def test_a_stopped_tick_skips_the_herdr_sweep(monkeypatch):
     monkeypatch.setattr(cli, "_tickable", lambda slug: True)
     store = types.SimpleNamespace(
         slugs=lambda: ["sw"],
-        config=lambda slug: types.SimpleNamespace(api_url="", pending_api_url=""),
+        config=lambda slug: types.SimpleNamespace(api_url=""),
         redis=types.SimpleNamespace(hget=lambda *_: None),
         key=lambda slug, tail: f"{slug}:{tail}",
     )

@@ -1,0 +1,1 @@
+The branch mutation preflight workflow is removed. A branch push runs no mutation; the pull request Tests run is the only mutation source, and its plan job no longer waits for or reuses a preflight report.

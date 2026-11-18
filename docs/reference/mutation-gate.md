@@ -8,16 +8,7 @@ nav_order: 13
 
 The Mutation workflow runs beside Tests for pull requests into dev. It discovers changed Python files in `hooks` and `scripts` from the pull request merge base. Each file runs in an isolated copy with pinned mutmut 3.6.0. Pytest runs serially; matching, importing and recorded covering tests provide mutmut's function coverage stats and per mutant test selection.
 
-Run a focused mutation proof in CI from a pushed branch:
-
-```bash
-gh workflow run proofs.yml \
-  --ref YOUR_BRANCH \
-  -f proof=mutation \
-  -f base=origin/dev
-```
-
-For a stacked branch, set `base` to its dependency branch. Open the draft pull request at the first push; never wait for Mutation preflight before opening it. A branch push with no open pull request still runs the preflight. Once a branch has an open pull request into `dev`, the push preflight skips it and the pull request checks own mutation. Tests and mutation runs execute in CI only.
+Open the draft pull request into `dev` at the first push; for a stacked branch, open it into its dependency branch. The branch mutation preflight is removed: a branch push runs no mutation, and the pull request Tests run is the only mutation source. Sections below that describe the preflight are history until the preflight documentation pass rewrites them. Tests and mutation runs execute in CI only.
 
 ## Required gate proof
 
@@ -1280,9 +1271,15 @@ still install `.[dev,all]`.
   [Reused and empty pull request runs](#reused-and-empty-pull-request-runs).
 - `pypi-retry.sh` comes from the workflow revision through **Take the helper
   scripts from the workflow revision**. It retries the install only when the
-  output names a package index or network outage, waiting 5 s and doubling to
-  at most 30 s, until `PYPI_RETRY_SECONDS` (default 150) of backoff has passed.
-  Any other failure fails the step at once.
+  output names a package index or network outage, or when an attempt is still
+  running at its time limit, `PYPI_RETRY_ATTEMPT_SECONDS` (default 60 s). Such
+  an attempt gets TERM, then KILL 5 s later, and each one doubles the limit for
+  the next attempt up to four times the first, so a slow download that keeps
+  progressing still finishes. It waits 5 s between attempts, doubling to at
+  most 30 s, and stops retrying once `PYPI_RETRY_SECONDS` (default 150) of that
+  waiting has passed. Time spent inside attempts does not count toward it, so
+  the job time limit bounds the whole step. Any other failure fails the step at
+  once.
 
 ### Adding a planner dependency
 
@@ -2011,8 +2008,6 @@ Open the run page to read the job summary, or download the evidence. Every artif
 |---|---|---|
 | Tests, on a pull request | `mutation-stats` part | `mutation-evidence-stats-<part>` |
 | Tests, on a pull request | `mutation` shard, or the inline step of a single shard `mutation-stats` job | `mutation-report-<shard>` |
-| Mutation preflight, on a branch push | statistics part | `mutation-evidence-stats-<part>` |
-| Mutation preflight, on a branch push | `mutation-shard` | `mutation-preflight-shard-<shard>` |
 
 For example, for a failed statistics part:
 

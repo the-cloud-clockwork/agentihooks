@@ -616,6 +616,20 @@ def test_earlier_lives_are_the_tasks_worker_lives_newest_first(store):
     assert store.earlier_lives("smoke", "t3") == []
 
 
+@pytest.mark.feature("hub-admission-earlier-lives-launched-only")
+def test_earlier_lives_leave_out_an_agent_retired_while_starting_with_no_pane(store: RedisStore) -> None:
+    history = store.key("smoke", "history")
+    for row in (
+        {"name": "launched", "task": "t1", "lane": "eng", "state": "finished", "pane_id": "w1:p1", "ended_at": 3},
+        {"name": "never", "task": "t1", "lane": "eng", "state": "starting", "pane_id": "", "ended_at": 5},
+        {"name": "placed", "task": "t1", "lane": "eng", "state": "starting", "pane_id": "w1:p2", "ended_at": 4},
+        {"name": "suspect", "task": "t1", "lane": "eng", "state": "suspect", "pane_id": "", "ended_at": 2},
+        {"name": "unrecorded", "task": "t1", "lane": "eng", "ended_at": 1},
+    ):
+        store.redis.rpush(history, json.dumps(row))
+    assert store.earlier_lives("smoke", "t1") == ["placed", "launched", "suspect", "unrecorded"]
+
+
 def test_a_reclaim_verdict_is_kept_per_claimant(store):
     store.put_reclaim("smoke", "eng-2", {"continue_from": "fresh"})
     store.put_reclaim("smoke", "eng-3", {"continue_from": "origin/b"})

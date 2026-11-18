@@ -505,8 +505,8 @@ LAB = {
     "at": NOW - 2 * MINUTE,
     "capacity": {
         "classes": {
-            "pull_request": {"pending": 3, "running": 1, "predicted_wait_s": 240.0},
-            "queue": {"pending": 0, "running": 0, "predicted_wait_s": 0.0},
+            "pull_request": {"pending": 3, "running": 1, "predicted_wait_s": 240.0, "verdict_cache_hit_ratio": 0.75},
+            "queue": {"pending": 0, "running": 0, "predicted_wait_s": 0.0, "verdict_cache_hit_ratio": None},
             "backfill": {"pending": 2, "running": 0, "predicted_wait_s": None},
         },
         "slots": {"total": 4, "busy": 4, "free": 0},
@@ -518,9 +518,9 @@ LAB = {
     "error_at": 0,
 }
 LAB_CLASSES = [
-    {"class": "pull_request", "pending": 3, "predicted_wait_s": 240.0},
-    {"class": "queue", "pending": 0, "predicted_wait_s": 0.0},
-    {"class": "backfill", "pending": 2, "predicted_wait_s": None},
+    {"class": "pull_request", "pending": 3, "predicted_wait_s": 240.0, "verdict_cache_hit_ratio": 0.75},
+    {"class": "queue", "pending": 0, "predicted_wait_s": 0.0, "verdict_cache_hit_ratio": None},
+    {"class": "backfill", "pending": 2, "predicted_wait_s": None, "verdict_cache_hit_ratio": None},
 ]
 
 
@@ -537,6 +537,14 @@ def test_without_a_lab_reading_the_lab_block_is_none() -> None:
 @pytest.mark.feature("ledger-stats-lab")
 def test_the_lab_block_keeps_pending_units_and_predicted_wait_per_class_in_the_lab_order() -> None:
     assert lab_of(LAB) == {"at": NOW - 2 * MINUTE, "error": "", "error_at": 0, "classes": LAB_CLASSES}
+
+
+@pytest.mark.feature("ledger-stats-lab")
+def test_the_lab_block_keeps_each_class_verdict_cache_hit_ratio_and_none_where_the_document_has_none() -> None:
+    block = lab_of(LAB)
+    assert block is not None
+    ratios = [(entry["class"], entry["verdict_cache_hit_ratio"]) for entry in block["classes"]]
+    assert ratios == [("pull_request", 0.75), ("queue", None), ("backfill", None)]
 
 
 def test_a_failed_lab_read_keeps_the_last_capacity_beside_its_error() -> None:

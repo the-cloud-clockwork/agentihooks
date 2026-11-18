@@ -74,6 +74,32 @@ ledger:
       memory: 2Gi
       ephemeral-storage: 256Mi
 
+api:
+  enabled: false
+  replicas: 1
+  affinity: {}
+  tolerations: []
+  port: 8766
+  env: {}
+  secretEnv: []
+  podDisruptionBudget:
+    enabled: false
+    maxUnavailable: 1
+  publicRoute:
+    host: ""
+    priority: 1000
+    entryPoints: []
+    serversTransportName: ""
+    tls: {}
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
+      ephemeral-storage: 64Mi
+    limits:
+      memory: 1Gi
+      ephemeral-storage: 256Mi
+
 redis:
   enabled: true
   url: ""
@@ -233,6 +259,7 @@ hub:
                 operator: DoesNotExist
   tolerations: []
   terminationGracePeriodSeconds: 30
+  servingFile: /tmp/hub.serving
   env: {}
   # Secret keys as hub env, such as AGENTIHOOKS_BUS_CREDENTIALS for a NATS that signs its users:
   # [{name, secretName, key, optional}].
@@ -400,6 +427,7 @@ worker:
   replicas: 0
   command: []
   env: {}
+  secretEnv: []
   resources:
     requests:
       cpu: 50m

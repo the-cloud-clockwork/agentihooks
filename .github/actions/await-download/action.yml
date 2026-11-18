@@ -10,7 +10,7 @@ runs:
     - name: Download attempt 1
       id: a1
       continue-on-error: true
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8.0.2
       with:
         name: ${{ inputs.name }}
         path: ${{ github.workspace }}
@@ -22,7 +22,7 @@ runs:
       id: a2
       if: steps.a1.outcome == 'failure'
       continue-on-error: true
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8.0.2
       with:
         name: ${{ inputs.name }}
         path: ${{ github.workspace }}
@@ -34,7 +34,7 @@ runs:
       id: a3
       if: steps.a2.outcome == 'failure'
       continue-on-error: true
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8.0.2
       with:
         name: ${{ inputs.name }}
         path: ${{ github.workspace }}
@@ -46,7 +46,7 @@ runs:
       id: a4
       if: steps.a3.outcome == 'failure'
       continue-on-error: true
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8.0.2
       with:
         name: ${{ inputs.name }}
         path: ${{ github.workspace }}
@@ -58,7 +58,7 @@ runs:
       id: a5
       if: steps.a4.outcome == 'failure'
       continue-on-error: true
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8.0.2
       with:
         name: ${{ inputs.name }}
         path: ${{ github.workspace }}
@@ -70,7 +70,7 @@ runs:
       id: a6
       if: steps.a5.outcome == 'failure'
       continue-on-error: true
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8.0.2
       with:
         name: ${{ inputs.name }}
         path: ${{ github.workspace }}
@@ -82,7 +82,7 @@ runs:
       id: a7
       if: steps.a6.outcome == 'failure'
       continue-on-error: true
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8.0.2
       with:
         name: ${{ inputs.name }}
         path: ${{ github.workspace }}
@@ -94,7 +94,7 @@ runs:
       id: a8
       if: steps.a7.outcome == 'failure'
       continue-on-error: true
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8.0.2
       with:
         name: ${{ inputs.name }}
         path: ${{ github.workspace }}
@@ -106,7 +106,7 @@ runs:
       id: a9
       if: steps.a8.outcome == 'failure'
       continue-on-error: true
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8.0.2
       with:
         name: ${{ inputs.name }}
         path: ${{ github.workspace }}
@@ -118,7 +118,7 @@ runs:
       id: a10
       if: steps.a9.outcome == 'failure'
       continue-on-error: true
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8.0.2
       with:
         name: ${{ inputs.name }}
         path: ${{ github.workspace }}
@@ -130,7 +130,7 @@ runs:
       id: a11
       if: steps.a10.outcome == 'failure'
       continue-on-error: true
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8.0.2
       with:
         name: ${{ inputs.name }}
         path: ${{ github.workspace }}
@@ -142,7 +142,7 @@ runs:
       id: a12
       if: steps.a11.outcome == 'failure'
       continue-on-error: true
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8.0.2
       with:
         name: ${{ inputs.name }}
         path: ${{ github.workspace }}
@@ -154,7 +154,7 @@ runs:
       id: a13
       if: steps.a12.outcome == 'failure'
       continue-on-error: true
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8.0.2
       with:
         name: ${{ inputs.name }}
         path: ${{ github.workspace }}
@@ -166,7 +166,7 @@ runs:
       id: a14
       if: steps.a13.outcome == 'failure'
       continue-on-error: true
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8.0.2
       with:
         name: ${{ inputs.name }}
         path: ${{ github.workspace }}

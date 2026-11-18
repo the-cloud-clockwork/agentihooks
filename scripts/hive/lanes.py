@@ -9,6 +9,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import replace
 from typing import Any
 
+from scripts import serena_router_daemon
 from scripts.events.config import BACKEND_ENV, DEFAULT_BACKEND, URL_ENV
 from scripts.events.envelope import Envelope
 from scripts.hive import account_slots, admission, execution_stop, presence, registry, workstation
@@ -28,7 +29,7 @@ class LaneTasks:
     def __init__(self, bus, hive: str, configs: Callable[[str], object]):
         self.bus, self.hive, self.configs = bus, hive, configs
 
-    def _ask(self, op: str, event: Envelope, **fields):
+    def _ask(self, op: str, event: Envelope, **fields: Any) -> Any:
         ask = account_slots.asker(self.bus.for_swarm(event.swarm), event.swarm, self.hive)
         request = {
             "op": op,
@@ -41,18 +42,29 @@ class LaneTasks:
         return ask(request)
 
     def request(self, event: Envelope) -> SpawnRequest | None:
-        admitted = self._ask("admit", event)
+        try:
+            admitted = self._ask("admit", event)
+        except TimeoutError as error:
+            raise admission.Unanswered(str(error)) from error
         if admitted is None:
             return None
+        if admitted.get(admission.HELD) == admission.ADMITTING:
+            raise admission.Unanswered(admission.ADMITTING)
         if admission.HELD in admitted:
             raise admission.Held(admitted[admission.HELD])
         config = self.configs(event.swarm)
         if config.repo_origin:
             config = replace(config, repo=config.repo_origin)
-        return SpawnRequest(config, event.data["lane"], admitted["name"], placed(event.swarm, admitted["task"]))
+        task = placed(event.swarm, admitted["task"])
+        if not serena_router_daemon.ensure():
+            raise RuntimeError("spawn unavailable: serena")
+        return SpawnRequest(config, event.data["lane"], admitted["name"], task)
 
     def reopen(self, event: Envelope) -> None:
         self._ask("reopen", event)
+
+    def dead_lettered(self, event: Envelope) -> None:
+        self._ask("reopen", event, dead=True)
 
     def failed(self, event: Envelope, harness: str, reason: str) -> None:
         self._ask("failed", event, harness=harness, reason=reason)

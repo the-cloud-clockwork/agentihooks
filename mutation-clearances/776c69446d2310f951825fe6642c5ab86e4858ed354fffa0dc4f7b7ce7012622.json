@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api_service.py:scripts.swarm_ledger.api_service.x_adopt_unrelayed:43ea56db7ae31c2e19cf5f4b795ae4113b46630ddc2ee25d3d3a83f9812e6aa3": {
+    "reader": "standards-reader",
+    "reason": "typing.cast returns slugs unchanged at run time; the isinstance guard is unchanged."
+  }
+}

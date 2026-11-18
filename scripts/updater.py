@@ -88,7 +88,7 @@ def install_mode(source_checkout: bool = False) -> str:
 
 def upgrade_command(mode: str, index_url: str | None = None) -> list[str]:
     if mode == "uv-tool":
-        cmd = ["uv", "tool", "install", "--force", PACKAGE]
+        cmd = ["uv", "tool", "install", "--force", f"{PACKAGE}[nats]"]
         if index_url:
             cmd += ["--index-url", index_url]
         return cmd

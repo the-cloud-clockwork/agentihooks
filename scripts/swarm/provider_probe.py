@@ -3,6 +3,7 @@ import os
 import shutil
 import signal
 import subprocess
+import sys
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -13,6 +14,7 @@ MIN_MS = 60_000
 MAX_MS = 600_000
 TIMEOUT_S = 30
 PROMPT = "Reply with exactly OK."
+AGENTIHOOKS = [sys.executable, "-P", "-m", "scripts.install"]
 
 
 @dataclass(frozen=True)
@@ -61,7 +63,7 @@ def _arguments(target: Target) -> list[str]:
     model = ["--model", target.model] if target.model else []
     if target.harness == "claude":
         return [
-            "agentihooks",
+            *AGENTIHOOKS,
             "claude",
             "--route",
             target.account,
@@ -82,7 +84,7 @@ def _arguments(target: Target) -> list[str]:
         ]
     if target.harness == "codex":
         return [
-            "agentihooks",
+            *AGENTIHOOKS,
             "codex",
             "--route",
             target.account,
@@ -186,8 +188,15 @@ def _codex_launch(target: Target, args: list[str], env: dict[str, str]) -> tuple
         account = codex_router.credential(account, env)
     except codex_router.RoutingError:
         return [], env
-    native = codex_router.command(account, shutil.which("codex") or "codex", args[4:])
+    native = codex_router.command(account, shutil.which("codex") or "codex", args[len(AGENTIHOOKS) + 3 :])
     return native, codex_router.child_environment(account, env)
+
+
+def _service_path(environ: dict[str, str]) -> str:
+    """The user bin folder and this interpreter's folder ahead of the service PATH, so the claude command that
+    agentihooks claude starts resolves under systemd; an unset service PATH adds no empty entry."""
+    folders = (str(Path.home() / ".local" / "bin"), str(Path(sys.executable).parent), environ.get("PATH"))
+    return os.pathsep.join(filter(None, folders))
 
 
 def check(target: Target, directory: Path, run: Callable = _run) -> Result:
@@ -202,6 +211,8 @@ def check(target: Target, directory: Path, run: Callable = _run) -> Result:
         if not name.startswith(("AGENTIHOOKS_SWARM", "AGENTIHOOKS_AGENT_", "AGENTIHOOKS_PROFILE_"))
         and name not in ("CLAUDECODE", "AGENTIHOOKS_SESSION_ID")
     }
+    if target.harness == "claude":
+        env["PATH"] = _service_path(env)
     if target.harness == "codex":
         args, env = _codex_launch(target, args, env)
         if not args:
