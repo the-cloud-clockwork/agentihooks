@@ -73,10 +73,47 @@ def priority(monkeypatch, tmp_path):
     return SimpleNamespace(store=store, tasks=tasks, queue=queue, groups=groups, run=observed, reads=reads)
 
 
-def test_deferred_priority_runs_after_original_tests_complete(priority, capsys):
+def deferred(p: SimpleNamespace, url: str = URL, run_id: int | None = 42) -> dict[str, object]:
+    """Store a deferred priority record for the refresh to replay or drop."""
+    record: dict[str, object] = {
+        "repo": "o/r",
+        "group_head": "group-head",
+        "run_id": run_id,
+        "sender": "engineer@a1b2c3-0001",
+        "order": p.store.redis.incr(p.store.key("sw", queue_priority.ORDER)),
+    }
+    p.store.redis.hset(p.store.key("sw", queue_priority.PENDING), url, json.dumps(record))
+    return record
+
+
+@pytest.mark.feature("merge-priority-moves-waiting-entries-at-once")
+def test_priority_moves_waiting_entries_at_once_while_the_head_group_tests(
+    priority: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+) -> None:
     p = priority
+    p.queue.entries += [p.queue.entry(9), p.queue.entry(4)]
     assert cli.main(["sw", "merge", "priority", URL]) == 0
-    assert json.loads(capsys.readouterr().out)["run_id"] == 42
+    assert json.loads(capsys.readouterr().out) == {
+        "url": URL,
+        "displaced": [URL[:-1] + str(n) for n in (2, 3, 4)],
+        "errors": [],
+    }
+    assert p.queue.mutations == [("dequeue", n) for n in (4, 3, 2)] + [("queue", n) for n in (2, 3, 4)]
+    assert [(entry["pullRequest"]["id"], entry["state"]) for entry in p.queue.entries] == [
+        ("P1", "AWAITING_CHECKS"),
+        ("P9", "QUEUED"),
+        ("P2", "QUEUED"),
+        ("P3", "QUEUED"),
+        ("P4", "QUEUED"),
+    ]
+    assert p.run["status"] == "in_progress"
+    assert p.reads == []
+    assert not p.store.redis.hgetall(p.store.key("sw", queue_priority.PENDING))
+
+
+def test_deferred_priority_runs_after_original_tests_complete(priority: SimpleNamespace) -> None:
+    p = priority
+    deferred(p)
     assert queue_priority.refresh(p.store, "sw", p.tasks) == []
     assert p.queue.mutations == []
     p.run["status"] = "completed"
@@ -88,15 +125,16 @@ def test_deferred_priority_runs_after_original_tests_complete(priority, capsys):
     assert queue_priority.refresh(p.store, "sw", p.tasks) == []
 
 
-def test_operator_lift_applies_immediately_and_clears_pending(priority, monkeypatch, capsys):
+def test_operator_lift_applies_immediately_and_clears_pending(
+    priority: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     p = priority
-    assert cli.main(["sw", "merge", "priority", URL]) == 0
-    capsys.readouterr()
+    deferred(p)
     monkeypatch.setattr(cli.clearance, "is_operator", lambda store, who: True)
     assert cli.main(["sw", "merge", "priority", URL, "--lift"]) == 0
     assert json.loads(capsys.readouterr().out)["errors"] == []
     assert p.queue.mutations
-    assert len(p.reads) == 1
+    assert p.reads == []
     assert not p.store.redis.hgetall(p.store.key("sw", queue_priority.PENDING))
 
 
@@ -129,17 +167,18 @@ def test_completed_head_group_prioritizes_immediately(priority, capsys):
     assert priority.queue.mutations
 
 
-def test_unreadable_queue_never_mutates(priority, monkeypatch, capsys):
+def test_unreadable_queue_never_mutates(priority: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    deferred(priority, run_id=None)
     monkeypatch.setattr(queue_record.Journal, "groups", lambda self: None)
-    assert cli.main(["sw", "merge", "priority", URL]) == 1
-    assert capsys.readouterr().err == "swarm: queue priority waits until the head group can be read\n"
+    assert queue_priority.refresh(priority.store, "sw", priority.tasks) == [
+        f"merge queue priority for {URL} waits: queue priority waits until the head group can be read"
+    ]
     assert priority.queue.mutations == []
 
 
-def test_github_outage_retains_deferred_request(priority, monkeypatch, capsys):
+def test_github_outage_retains_deferred_request(priority: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     p = priority
-    assert cli.main(["sw", "merge", "priority", URL]) == 0
-    capsys.readouterr()
+    deferred(p)
 
     def fail(path, run):
         raise SwarmError("GitHub unavailable")
@@ -202,9 +241,11 @@ def test_refresh_applies_priority_after_blocking_tests_complete(env, monkeypatch
         assert alerts == []
 
 
-def test_missing_run_resolves_original_group_after_queue_advances(priority, monkeypatch, capsys):
+def test_missing_run_resolves_original_group_after_queue_advances(
+    priority: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
     p = priority
-    responses = [[], [{"id": 42, "status": "completed"}]]
+    responses = [[{"id": 42, "status": "completed"}]]
     reads = []
 
     def rest(path, run):
@@ -213,8 +254,7 @@ def test_missing_run_resolves_original_group_after_queue_advances(priority, monk
         return {"workflow_runs": responses.pop(0)}
 
     monkeypatch.setattr(merge_queue, "rest", rest)
-    assert cli.main(["sw", "merge", "priority", URL]) == 0
-    assert json.loads(capsys.readouterr().out)["run_id"] is None
+    deferred(p, run_id=None)
     p.groups[0]["head"] = "new-group"
 
     def reorder(url, journal, **kwargs):
@@ -222,14 +262,16 @@ def test_missing_run_resolves_original_group_after_queue_advances(priority, monk
 
     monkeypatch.setattr(merge_queue, "prioritize", reorder)
     assert queue_priority.refresh(p.store, "sw", p.tasks) == [f"applied deferred merge queue priority for {URL}"]
-    assert len(reads) == 2
+    assert len(reads) == 1
     assert not responses
     assert not p.store.redis.hgetall(p.store.key("sw", queue_priority.PENDING))
 
 
-def test_missing_tests_run_waits_for_discovery_then_completion(priority, monkeypatch, capsys):
+def test_missing_tests_run_waits_for_discovery_then_completion(
+    priority: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
     p = priority
-    responses = [[], [], [{"id": 42, "status": "queued"}]]
+    responses = [[], [{"id": 42, "status": "queued"}]]
     original_rest = merge_queue.rest
 
     def rest(path, run):
@@ -241,16 +283,7 @@ def test_missing_tests_run_waits_for_discovery_then_completion(priority, monkeyp
         return original_rest(path, run)
 
     monkeypatch.setattr(merge_queue, "rest", rest)
-    assert cli.main(["sw", "merge", "priority", URL]) == 0
-    assert json.loads(capsys.readouterr().out) == {
-        "url": URL,
-        "deferred": True,
-        "displaced": [],
-        "errors": [],
-        "repo": "o/r",
-        "group_head": "group-head",
-        "run_id": None,
-    }
+    deferred(p, run_id=None)
     assert queue_priority.refresh(p.store, "sw", p.tasks) == []
     assert queue_priority.refresh(p.store, "sw", p.tasks) == []
     saved = json.loads(p.store.redis.hget(p.store.key("sw", queue_priority.PENDING), URL))
@@ -266,11 +299,12 @@ def test_missing_tests_run_waits_for_discovery_then_completion(priority, monkeyp
     assert queue_priority.refresh(p.store, "sw", p.tasks) == [f"applied deferred merge queue priority for {URL}"]
 
 
-def test_missing_run_for_a_departed_group_does_not_hold_forever(priority, monkeypatch, capsys):
+def test_missing_run_for_a_departed_group_does_not_hold_forever(
+    priority: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
     p = priority
     monkeypatch.setattr(merge_queue, "rest", lambda path, run: {"workflow_runs": []})
-    assert cli.main(["sw", "merge", "priority", URL]) == 0
-    capsys.readouterr()
+    deferred(p, run_id=None)
     p.groups.clear()
     applied = []
     monkeypatch.setattr(
@@ -282,10 +316,11 @@ def test_missing_run_for_a_departed_group_does_not_hold_forever(priority, monkey
     assert applied == [URL]
 
 
-def test_refused_reorder_keeps_pending_request_for_retry(priority, monkeypatch, capsys):
+def test_refused_reorder_keeps_pending_request_for_retry(
+    priority: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
     p = priority
-    assert cli.main(["sw", "merge", "priority", URL]) == 0
-    capsys.readouterr()
+    deferred(p)
     p.run["status"] = "completed"
     monkeypatch.setattr(
         merge_queue, "prioritize", lambda url, journal, **kwargs: {"displaced": [], "errors": ["queue refused"]}
@@ -303,11 +338,17 @@ def test_refused_reorder_keeps_pending_request_for_retry(priority, monkeypatch, 
     ],
 )
 @pytest.mark.parametrize("run_status", ["in_progress", "completed", None])
-def test_refresh_drops_ineligible_priorities(priority, monkeypatch, state, base, reason, run_status):
+def test_refresh_drops_ineligible_priorities(
+    priority: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    state: str,
+    base: str,
+    reason: str,
+    run_status: str | None,
+) -> None:
     p = priority
-    assert cli.main(["sw", "merge", "priority", URL]) == 0
+    record = deferred(p)
     key = p.store.key("sw", queue_priority.PENDING)
-    record = json.loads(p.store.redis.hget(key, URL))
     p.run["status"] = run_status
     if run_status is None:
         record["run_id"] = None
@@ -338,9 +379,11 @@ def test_refresh_drops_ineligible_priorities(priority, monkeypatch, state, base,
 
 
 @pytest.mark.parametrize("unreadable", [False, True])
-def test_refresh_keeps_priority_when_pull_request_cannot_be_read(priority, monkeypatch, unreadable):
+def test_refresh_keeps_priority_when_pull_request_cannot_be_read(
+    priority: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, unreadable: bool
+) -> None:
     p = priority
-    assert cli.main(["sw", "merge", "priority", URL]) == 0
+    deferred(p)
     key = p.store.key("sw", queue_priority.PENDING)
     before = p.store.redis.hgetall(key)
 
@@ -359,7 +402,9 @@ def test_refresh_keeps_priority_when_pull_request_cannot_be_read(priority, monke
     assert p.queue.mutations == []
 
 
-def test_replay_records_application_and_notifies_the_displaced_owner(priority, monkeypatch, capsys):
+def test_replay_records_application_and_notifies_the_displaced_owner(
+    priority: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
     p = priority
     records, sent = [], []
     monkeypatch.setattr(queue_record.Journal, "write", lambda self, *args, **kwargs: records.append((args, kwargs)))
@@ -368,20 +413,7 @@ def test_replay_records_application_and_notifies_the_displaced_owner(priority, m
         "InboxStore",
         lambda redis: SimpleNamespace(send=lambda *args, **flags: sent.append((*args, flags))),
     )
-    assert cli.main(["sw", "merge", "priority", URL]) == 0
-    capsys.readouterr()
-    assert records == [
-        (
-            ("priority-deferred", URL, "", None, None),
-            {
-                "repo": "o/r",
-                "group_head": "group-head",
-                "run_id": 42,
-                "sender": "engineer@a1b2c3-0001",
-                "order": 1,
-            },
-        )
-    ]
+    deferred(p)
     p.run["status"] = "completed"
     queue_priority.refresh(p.store, "sw", p.tasks)
     assert sent == [
@@ -452,7 +484,9 @@ def test_one_held_request_does_not_block_a_completed_request(priority, monkeypat
 
 @pytest.mark.parametrize("reverse_hash", [False, True])
 @pytest.mark.parametrize("retry", [False, True])
-def test_deferred_priorities_keep_request_order_and_admit_unqueued_pull(priority, monkeypatch, reverse_hash, retry):
+def test_deferred_priorities_keep_request_order_and_admit_unqueued_pull(
+    priority: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, reverse_hash: bool, retry: bool
+) -> None:
     p = priority
     original_run = p.queue.run
 
@@ -463,9 +497,8 @@ def test_deferred_priorities_keep_request_order_and_admit_unqueued_pull(priority
 
     monkeypatch.setattr(p.queue, "run", run)
     monkeypatch.setattr(merge_queue, "require_green", lambda *args: None)
-    assert cli.main(["sw", "merge", "priority", URL]) == 0
-    assert cli.main(["sw", "merge", "priority", URL + "0"]) == 0
-    assert p.queue.mutations == []
+    deferred(p)
+    deferred(p, URL + "0")
     p.run["status"] = "completed"
     if reverse_hash:
         original_read = p.store.redis.hgetall
@@ -485,9 +518,7 @@ def test_deferred_priorities_keep_request_order_and_admit_unqueued_pull(priority
             f"applied deferred merge queue priority for {URL}",
             f"merge queue priority for {URL}0 waits: admission refused",
         ]
-        p.run["status"] = "in_progress"
-        assert cli.main(["sw", "merge", "priority", URL + "00"]) == 0
-        p.run["status"] = "completed"
+        deferred(p, URL + "00")
         monkeypatch.setattr(merge_queue, "prioritize", reorder)
         actions = queue_priority.refresh(p.store, "sw", p.tasks)
         assert actions == [
@@ -505,7 +536,9 @@ def test_deferred_priorities_keep_request_order_and_admit_unqueued_pull(priority
 
 
 @pytest.mark.parametrize("legacy", [False, True])
-def test_deferred_priority_keeps_sequence_after_a_process_restart(priority, monkeypatch, legacy):
+def test_deferred_priority_keeps_sequence_after_a_process_restart(
+    priority: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, legacy: bool
+) -> None:
     p = priority
     record = {"repo": "o/r", "group_head": "group-head", "run_id": 42, "sender": "master"}
     if not legacy:
@@ -514,7 +547,7 @@ def test_deferred_priority_keeps_sequence_after_a_process_restart(priority, monk
     p.store.redis.hset(p.store.key("sw", queue_priority.PENDING), URL + "0", json.dumps(record))
     read = p.store.redis.hgetall
     monkeypatch.setattr(p.store.redis, "hgetall", lambda key: dict(reversed(read(key).items())))
-    assert cli.main(["sw", "merge", "priority", URL]) == 0
+    deferred(p)
     p.run["status"] = "completed"
     applied = []
 
@@ -530,7 +563,9 @@ def test_deferred_priority_keeps_sequence_after_a_process_restart(priority, monk
     assert applied == [URL + "0", URL]
 
 
-def test_deferred_priority_preserves_a_later_records_earlier_success(priority, monkeypatch):
+def test_deferred_priority_preserves_a_later_records_earlier_success(
+    priority: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
     p = priority
     original_run = p.queue.run
 
@@ -542,7 +577,7 @@ def test_deferred_priority_preserves_a_later_records_earlier_success(priority, m
     monkeypatch.setattr(p.queue, "run", run)
     monkeypatch.setattr(merge_queue, "require_green", lambda *args: None)
     for url in (URL, URL + "0", URL + "00"):
-        assert cli.main(["sw", "merge", "priority", url]) == 0
+        deferred(p, url)
     key = p.store.key("sw", queue_priority.PENDING)
     for url, run_id in ((URL + "0", 43), (URL + "00", 44)):
         record = json.loads(p.store.redis.hget(key, url))
@@ -584,10 +619,11 @@ def draft_target(run, pull="P9"):
     return read
 
 
-def test_refresh_drops_a_deferred_priority_for_a_draft(priority, monkeypatch, capsys):
+def test_refresh_drops_a_deferred_priority_for_a_draft(
+    priority: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
     p = priority
-    assert cli.main(["sw", "merge", "priority", URL]) == 0
-    capsys.readouterr()
+    deferred(p)
     monkeypatch.setattr(p.queue, "run", draft_target(p.queue.run))
     p.run["status"] = "completed"
     assert queue_priority.refresh(p.store, "sw", p.tasks) == [

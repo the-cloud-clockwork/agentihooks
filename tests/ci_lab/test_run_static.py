@@ -1,6 +1,8 @@
 import dataclasses
 import json
 import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -27,6 +29,13 @@ LAYOUT = (
 )
 CHANGED = "${{ !cancelled() && steps.self-plant.outputs.changed == 'true' }}"
 ECHOES = 'echo "$BASE"\necho "$RULES"\necho "$CI_LAB_TEST"\necho "$GITHUB_WORKSPACE"\necho "$RUNNER_TEMP"\n'
+WRITES = (
+    "for tree in grader base; do\n"
+    '  if { echo planted > "$RUNNER_TEMP/$tree/planted.txt"; } 2>/dev/null; then echo "$tree written"\n'
+    '  else echo "$tree refused"; fi\n'
+    "done\n"
+    'echo unit > "$GITHUB_WORKSPACE/unit.txt"\n'
+)
 
 
 @pytest.fixture
@@ -141,6 +150,33 @@ def test_a_step_past_its_time_limit_is_red_with_no_code(tmp_path: Path, settings
 def test_the_step_runs_inside_bubblewrap_without_network(tmp_path: Path, settings: run_static.Settings) -> None:
     assert run_static.run(_step("true\n"), *_folders(tmp_path), settings).green
     assert "--unshare-net" in (tmp_path / "bwrap.args").read_text().splitlines()
+
+
+@pytest.mark.feature("lab-static-read-only-trees")
+def test_the_step_runs_with_the_grader_and_base_trees_bound_read_only(
+    tmp_path: Path, settings: run_static.Settings
+) -> None:
+    head, base, grader = _folders(tmp_path)
+    assert run_static.run(_step("true\n"), head, base, grader, settings).green
+    args = (tmp_path / "bwrap.args").read_text().splitlines()
+    binds = ["--ro-bind", str(grader), str(grader), "--ro-bind", str(base), str(base)]
+    assert args[: args.index("--")] == ["--dev-bind", "/", "/", *binds, "--unshare-net", "--die-with-parent"]
+
+
+def test_a_step_cannot_write_into_the_grader_or_base_tree(
+    tmp_path: Path, settings: run_static.Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folders = os.environ["PATH"].split(os.pathsep)
+    monkeypatch.setenv("PATH", os.pathsep.join(folder for folder in folders if folder != str(tmp_path / "bin")))
+    bwrap = shutil.which("bwrap")
+    probe = [str(bwrap), "--dev-bind", "/", "/", "--unshare-net", "true"]
+    if bwrap is None or subprocess.run(probe, capture_output=True, check=False).returncode != 0:
+        pytest.skip("bubblewrap cannot create namespaces on this runner")
+    head, base, grader = _folders(tmp_path)
+    result = run_static.run(_step(WRITES), head, base, grader, settings)
+    assert (result.code, result.log.read_text().splitlines()) == (0, ["grader refused", "base refused"])
+    assert [*grader.iterdir(), *base.iterdir()] == []
+    assert (head / "unit.txt").read_text() == "unit\n"
 
 
 @pytest.mark.feature("lab-static-step-env")

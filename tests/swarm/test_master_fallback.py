@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 from scripts.swarm import ledger_client, master_critical, master_fallback
+from tests.swarm.client_class import client_class
 
 pytestmark = pytest.mark.unit
 MINUTE = 60_000
@@ -399,7 +400,7 @@ def test_a_pass_starts_a_master_and_saves_its_state(
     held, ledger, seen = Store({"sw": []}), object(), []
     monkeypatch.setattr(runtime, "HerdrRuntime", Herdr)
     monkeypatch.setattr(store, "connect", lambda: held)
-    monkeypatch.setattr(ledger_client, "LedgerClient", lambda: ledger)
+    monkeypatch.setattr(ledger_client, "LedgerClient", client_class(ledger))
     monkeypatch.setattr(master_fallback, "start", lambda slug: 77)
     monkeypatch.setattr(master_fallback.time, "time", lambda: 1200.0)
     monkeypatch.setattr(
