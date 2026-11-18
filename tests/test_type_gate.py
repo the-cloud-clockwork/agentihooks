@@ -1,8 +1,10 @@
 import json
 import os
+import resource
 import subprocess
 import tomllib
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -556,6 +558,60 @@ def test_measure_checks_the_sorted_sources(tmp_path: Path, monkeypatch: pytest.M
             "scripts/b.py",
         ]
     ]
+
+
+@pytest.mark.feature("type-gate-repeatable-counts")
+@pytest.mark.parametrize(("count", "sizes"), [(1000, [1000]), (1001, [501, 500]), (2001, [667, 667, 667])])
+def test_measure_checks_at_most_a_thousand_sources_per_checker_process_and_sums_their_counts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, count: int, sizes: list[int]
+) -> None:
+    files = [f"tests/test_{index:04}.py" for index in range(count)]
+    runs: list[list[str]] = []
+
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        checked = [part for part in command if part.startswith("tests/")]
+        runs.append(checked)
+        diagnostics = [{"file": str(tmp_path / path), "severity": "error"} for path in checked]
+        report = {"generalDiagnostics": diagnostics, "summary": {"filesAnalyzed": len(checked)}}
+        return subprocess.CompletedProcess(command, 1, json.dumps(report), "")
+
+    monkeypatch.setattr(type_gate.subprocess, "run", run)
+    assert type_gate.measure(tmp_path, files[::-1]) == dict.fromkeys(files, 1)
+    assert [len(checked) for checked in runs] == sizes
+    assert [path for checked in runs for path in checked] == files
+
+
+def _peak(monkeypatch: pytest.MonkeyPatch, kib: int) -> None:
+    def getrusage(who: int) -> SimpleNamespace:
+        assert who == resource.RUSAGE_CHILDREN
+        return SimpleNamespace(ru_maxrss=kib)
+
+    monkeypatch.setattr(resource, "getrusage", getrusage)
+
+
+@pytest.mark.feature("type-gate-repeatable-counts")
+def test_a_checker_peak_at_the_line_where_basedpyright_empties_its_type_cache_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    head = _tree(tmp_path, {})
+    _fake_checker(monkeypatch, [])
+    _peak(monkeypatch, 4493897)
+    with pytest.raises(type_gate.GradeError) as refused:
+        type_gate.measure(head)
+    assert str(refused.value) == (
+        "basedpyright peaked at 4388 MB of resident memory, at or past the 4388 MB where it empties its type cache "
+        "and can count other errors on another runner; lower the type gate's sources per run"
+    )
+
+
+@pytest.mark.feature("type-gate-repeatable-counts")
+def test_a_checker_peak_under_the_line_where_basedpyright_empties_its_type_cache_is_kept(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    head = _tree(tmp_path, {})
+    _fake_checker(monkeypatch, [{"file": str(head / "hooks/__init__.py"), "severity": "error"}])
+    _peak(monkeypatch, 4493896)
+    assert type_gate.measure(head) == {"hooks/__init__.py": 1}
 
 
 @pytest.mark.parametrize(

@@ -929,12 +929,201 @@ of lost objects runs on `LocalObjects` only.
 | A unit folder holds `report.json` without `log.txt` | The writer stopped between the two writes; later puts never add a log | To run the unit again, delete its folder and its index entry; the next put stores a fresh verdict |
 | A worker gets `403` from `/upload-url` | The lease expired or the token belongs to another lease | Heartbeat before the lease expires; once it has expired, lease the job again |
 
+## Retry policy
+
+`scripts.ci_lab.retry` decides whether a unit runs again after a result. Under the default counts a
+unit whose worker was lost gets one more run, and a test failure, a static gate failure or a
+survived mutant is final at once. The one rerun of a failed test is the
+[flake rule](#the-flake-rule) in the run tests engine. `decide` returns `retry` or `final`, and
+`red` says whether a final result makes its unit's grade red. `retry.policy` reads the counts from `lab.retry` in
+`delivery.yaml`.
+
+The module is a library: no scheduler or worker code calls it yet.
+[What reaches the policy today](#what-reaches-the-policy-today) covers the lease and crash paths
+that run now.
+
+### Outcomes
+
+`retry.UnitResult` is a frozen dataclass:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `outcome` | `str` | How the run ended, one of the outcomes below |
+| `attempts` | `int` | How many times the unit already ran again: `0` on its first run, `1` on its first rerun |
+
+`decide` compares the outcome text exactly, case included, and sorts it into one of three kinds:
+
+| Outcome | What happened | Kind | Count it spends |
+|---|---|---|---|
+| `passed` | The unit passed | pass | none; always final and green |
+| `lost` | The unit's lease expired | loss | `lost` |
+| `crash` | The worker running the unit crashed | loss | `lost` |
+| `failed` | A test failed | failure | `failed` |
+| `gate_failed` | A static gate failed | failure | `failed` |
+| `survived` | A mutant survived | failure | `failed` |
+| Any other text, such as `Passed` or `timeout` | Unknown to the policy | failure | `failed` |
+
+An outcome the policy does not know is a failure, so a misspelled outcome never earns a retry
+under the default counts.
+
+### Decide
+
+`decide(result, rules=retry.DEFAULT)`:
+
+1. `passed` is `final`.
+2. A loss may run again `rules.lost` times; any other outcome `rules.failed` times.
+3. It returns `retry` while `result.attempts` is below that number, else `final`.
+
+Under the default counts, `lost: 1` and `failed: 0`:
+
+| Outcome | `attempts` 0 | `attempts` 1 | `attempts` 2 |
+|---|---|---|---|
+| `passed` | `final` | `final` | `final` |
+| `lost`, `crash` | `retry` | `final` | `final` |
+| `failed`, `gate_failed`, `survived`, any other | `final` | `final` | `final` |
+
+`red(result)` is `True` for every outcome except `passed`. It does not check that the result is
+final, so call it only after `decide` returned `final`. A unit lost on its first run and lost again
+on its rerun is `final` and red:
+
+```python
+>>> from scripts.ci_lab import retry
+>>> first = retry.UnitResult(outcome="lost", attempts=0)
+>>> second = retry.UnitResult(outcome="lost", attempts=1)
+>>> retry.decide(first)
+'retry'
+>>> retry.decide(second)
+'final'
+>>> retry.red(second)
+True
+```
+
+With `retry.Policy(lost=2, failed=1)` a lost unit runs again twice and a failed one once:
+
+| Result | `decide` |
+|---|---|
+| `UnitResult("lost", 1)` | `retry` |
+| `UnitResult("lost", 2)` | `final` |
+| `UnitResult("failed", 0)` | `retry` |
+| `UnitResult("survived", 0)` | `retry` |
+| `UnitResult("failed", 1)` | `final` |
+
+### Configure the counts
+
+`lab.retry` in the repository's `delivery.yaml` sets the two counts. The block is optional, and so
+is each key; a missing count keeps its default.
+
+```yaml
+lab:
+  authoritative: []
+  mutation:
+    run_on: every_push
+    mutants_per_changed_line: all
+    arid: []
+  check_prefix: lab
+  retry:
+    lost: 1
+    failed: 0
+```
+
+| Key | Default | Allowed | Effect |
+|---|---|---|---|
+| `lost` | `1` | An integer, `0` or more | Reruns `decide` allows after an expired lease or a crashed worker; `0` makes the first loss final and red |
+| `failed` | `0` | An integer, `0` or more | Reruns `decide` allows after a test failure, a static gate failure, a survived mutant or an unknown outcome; above `0` it reruns graded failures |
+
+The counts reach a decision only through `retry.policy` and `decide`, which no service calls yet.
+Lease reaping keeps its own count; see [What reaches the policy today](#what-reaches-the-policy-today).
+
+`scripts.ci_lab.delivery.lab(root)` validates the block with the rest of `lab` and raises
+`delivery.DeliveryError` naming the path:
+
+| `retry` value | Error |
+|---|---|
+| `{lost: -1}` | `delivery.yaml lab.retry.lost: -1 is less than the minimum of 0` |
+| `{lost: 1.5}` | `delivery.yaml lab.retry.lost: 1.5 is not of type 'integer'` |
+| `{lost: one}` | `delivery.yaml lab.retry.lost: 'one' is not of type 'integer'` |
+| `{lost: true}` | `delivery.yaml lab.retry.lost: True is not of type 'integer'` |
+| `{extra: 1}` | `delivery.yaml lab.retry: Additional properties are not allowed ('extra' was unexpected)` |
+| `[]` | `delivery.yaml lab.retry: [] is not of type 'object'` |
+
+`policy(lab)` turns a validated block into a `retry.Policy`:
+
+```python
+from pathlib import Path
+
+from scripts.ci_lab import delivery, retry
+
+rules = retry.policy(delivery.lab(Path(".")))
+result = retry.UnitResult(outcome="crash", attempts=0)
+
+if retry.decide(result, rules) == "retry":
+    print("run the unit again with attempts", result.attempts + 1)
+elif retry.red(result):
+    print("grade the unit red")
+```
+
+Pass `policy` only a block `delivery.lab` returned. It does not validate: an unknown key raises
+`TypeError: Policy.__init__() got an unexpected keyword argument`, and a negative count passes
+through.
+
+### The flake rule
+
+The one rerun of a failed test lives in the run tests engine, not in this policy.
+`scripts.ci_lab.run_tests.run` runs a failed batch a second time on identical inputs inside the same
+unit run:
+
+- A pass on the second attempt is `passed` with `flaky` set, and writes one flake ledger row per
+  test the first attempt's `flakes.jsonl` names. When that file names none, it writes one row per
+  test in the batch with the error `pytest exited with code <code>`.
+- A second failure is `failed` and final, so the store keeps the negative verdict.
+
+`lab.retry.failed` does not control that rerun. `run_tests.Verdict.attempts` counts attempts inside
+the run, `1` or `2`, while `UnitResult.attempts` counts reruns of the unit; with the default
+`failed: 0` every failure is final whichever number is passed.
+
+### What reaches the policy today
+
+No scheduler loop calls `leases.Leases.reap` yet, so an expired lease stays leased until a caller
+reaps it; `tests/ci_lab/test_leases.py` drives it directly. The table shows what each piece does
+now and what reaping does once a caller runs it:
+
+| Event | What runs now | What `Leases.reap(now_ms)` does when called |
+|---|---|---|
+| A lease expires once | Nothing; the job stays leased | Moves the job back to pending and adds one to its `attempts` |
+| A lease expires again | Nothing; the job stays leased | Sets the job's state and outcome to `lost` |
+| A unit's executor raises | The unit stops heartbeating and its lease is never completed. On the worker's next lease cycle it prints `ci-lab worker: unit <job> crashed: <repr of the error>` to standard error, such as `RuntimeError('boom')` | Handles it as an expired lease: pending with one more `attempts` after the first expiry, `lost` after a second |
+| A worker completes a lease | `Leases.complete` records the outcome the worker sent | Nothing; the lease is no longer leased |
+
+Lease reaping allows one requeue from its own constant, `leases.REQUEUES = 1`, not from
+`lab.retry`, so changing `lab.retry.lost` does not change it yet. No code reports the outcome
+`crash` yet; a crashed worker's unit can reach the scheduler only as an expired lease.
+
+The tests in `tests/ci_lab/test_retry.py` cover the decision table under the default and
+configured counts, the second loss that is final and red, `red` for each outcome, and the valid and
+refused `lab.retry` blocks.
+
+### Troubleshooting
+
+| Symptom | Cause | Check |
+|---|---|---|
+| A failed test, gate or mutant is never rerun | `failed` defaults to `0`: a graded failure is final | Read `lab.retry.failed` in `delivery.yaml`; the flake rule reruns a failed test batch once on its own |
+| A lost unit goes red after one rerun | `lost` defaults to `1`, so the second loss is final | Read `lab.retry.lost`; search the worker's standard error for `crashed` |
+| An expired lease stays leased and is never rerun | No scheduler loop calls `Leases.reap` yet | See [What reaches the policy today](#what-reaches-the-policy-today) |
+| An outcome that should retry is final | The outcome text is not exactly `lost` or `crash`, so it counts as a failure | Compare the outcome the worker sent with the strings `lost` and `crash` |
+| `DeliveryError` naming `lab.retry` | A count is negative, not an integer, a boolean, or the block holds another key or is not a mapping | Match the message to the error table in [Configure the counts](#configure-the-counts) |
+| `TypeError` from `retry.policy` | The block was not validated and holds an unknown key | Read the block with `delivery.lab(root)` first |
+| Changing `lab.retry.lost` leaves lease requeues unchanged | Lease reaping reads `leases.REQUEUES`, not `lab.retry` | See [What reaches the policy today](#what-reaches-the-policy-today) |
+
 ## Shadow comparison
 
 `scripts.ci_lab.shadow` compares the lab's shadow verdicts with GitHub Actions, one row per gate
 and head. `Shadow.observe(payload)` takes each `check_run.completed` delivery: a check run from the
 `github-actions` app gives the Actions verdict of the gate its job name maps to, and a
-`lab-shadow/<gate>` check run gives the lab verdict and the grader revision its summary names.
+`lab-shadow/<gate>` check run from the lab's own GitHub App gives the lab verdict and the grader
+revision its summary names. `Sources(static, lab_app)` names that App's slug; a `lab-shadow/` run
+from any other app, a workflow token included, is ignored. Its caller observes deliveries one at a
+time, from one scheduler once a scheduler feeds it. Until then the recorder is a library with no
+live caller.
 
 ### Gates
 
@@ -948,9 +1137,12 @@ and head. `Shadow.observe(payload)` takes each `check_run.completed` delivery: a
 
 The matrix suffix in parentheses and the ` / ` of a reusable workflow job drop before the match;
 `static_jobs(root)` returns the static gate ids discovered from the workflow tree. A success is a
-pass, a failure or a timeout is a fail, and every other conclusion carries no verdict. Each side
-folds its check runs: a gate fails on a head when any of its check runs failed, and a rerun
-replaces the run it repeats.
+pass, a failure or a timeout is a fail, and every other conclusion carries no verdict, so a
+cancelled or skipped rerun leaves the earlier verdict of its check run in place. Each side folds
+its check runs: a gate fails on a head when any of its check runs failed, and a rerun with a
+verdict replaces the run it repeats. A row is recorded on every delivery once both sides hold a
+verdict, so a head whose shards land one by one can turn into a mismatch and back; the counter
+counts each turn into a mismatch, and the report reads the row as it stands.
 
 ### Rows
 
@@ -971,8 +1163,8 @@ python -m scripts.ci_lab shadow report --since "$GRADER_REVISION" --repo . --red
 ```
 
 `--redis` defaults to `CI_LAB_REDIS_URL` and `--repo` to the current directory, a git checkout
-that holds the grader revisions. The report counts the rows whose grader revision is the given one
-or descends from it:
+that holds the grader revisions. A `--since` revision that names no commit in `--repo` exits 2.
+The report counts the rows whose grader revision is the given one or descends from it:
 
 ```text
 since 5c6db6a99a1b
@@ -990,3 +1182,5 @@ unmapped docs
 | A job you expect to compare is listed unmapped | Its name matches no gate rule, or the static job is not in the workflow tree the recorder read | `python -m scripts.ci_lab.static_gates` lists the static jobs |
 | A row is left out of a report since a revision | Its grader revision does not descend from that revision in `--repo`, or is not fetched there | `git merge-base --is-ancestor <since> <grader>` in that checkout |
 | `error: --redis or CI_LAB_REDIS_URL names the lab Redis` | Neither the flag nor the variable is set | Pass `--redis` or export `CI_LAB_REDIS_URL` |
+| `error: --since <revision> names no commit in <repo>` | The revision is mistyped or not fetched into `--repo`, or `--repo` is no git checkout | `git -C <repo> rev-parse --git-dir` succeeds; `git -C <repo> fetch origin dev`, then `git -C <repo> cat-file -t <revision>` prints `commit` |
+| Lab verdicts never land although `lab-shadow/` check runs exist | The runs come from an app other than `Sources.lab_app` | The check run's `app.slug` in the delivery |
