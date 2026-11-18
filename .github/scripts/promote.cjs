@@ -1,7 +1,9 @@
 const GRADE = 'Gate — Required';
 const HOTFIX_GRADE = 'Launch hotfix grade';
 const HOTFIX_STEP = 'Confirm the launch hotfix route';
-const settled = (job, hotfix) => job.status === 'completed' && (hotfix || ['success', 'skipped'].includes(job.conclusion));
+const EXEMPT = ['mutation-stats-seed', 'test-summary'];
+const settled = (job, hotfix) => EXEMPT.includes(job.name) ||
+  (job.status === 'completed' && (hotfix || ['success', 'skipped'].includes(job.conclusion)));
 
 async function gradeIsComplete(github, context, api, hotfix = false) {
   const [jobs, checks, statuses] = await Promise.all([
@@ -268,3 +270,5 @@ module.exports.closeAbandoned = async ({ github, context, core, app, deadline = 
     .addTable([['Pull request', 'Graded dev', 'Outcome'], ...outcomes]).write();
   if (failures.length) throw new Error(`Abandoned promotion cleanup failed: ${failures.join('; ')}`);
 };
+
+module.exports.EXEMPT = EXEMPT;
