@@ -25,6 +25,7 @@ import os
 import re
 import shlex
 import sys
+from collections.abc import Mapping
 from typing import NamedTuple
 
 SAFE_SUFFIXES = (".example", ".sample", ".template", ".dist", ".tpl")
@@ -479,7 +480,56 @@ def echo_secret_verdict(command):
     return None
 
 
-def renderer_verdict(command):
+KUBECTL_DESCRIBE = re.compile(r"\bkubectl\b[^|]*?(?<!\S)describe(?!\S)([^|<>]*)")
+DESCRIBE_BOOLEAN_FLAGS = {"-a", "--all-namespaces"}
+UNSHOWN_TYPE = re.compile(r"[$`{}*?\[]")
+SECRET_RESOURCES = {"secret", "secrets"}
+SECRET_KEY_LISTING = (
+    "\nkubectl get secret <name> --template='{{range $k,$v:=.data}}{{$k}} {{end}}' "
+    "lists the key names without the values."
+)
+
+
+def describe_words(rest: str) -> list[str]:
+    """Words of a kubectl describe argument list as the shell passes them, quotes, escapes and parentheses removed."""
+    return re.sub(r"[\"'\\()]", "", rest).split()
+
+
+def describe_operands(words: list[str]) -> list[str]:
+    """Positional words of a kubectl describe; a flag without =, unless a known boolean, consumes the next word."""
+    taken = {
+        index + 1
+        for index, word in enumerate(words)
+        if word.startswith("-") and "=" not in word and word not in DESCRIBE_BOOLEAN_FLAGS
+    }
+    return [word for index, word in enumerate(words) if index not in taken and not word.startswith("-")]
+
+
+def hidden_type(operands: list[str]) -> bool:
+    """True when a describe names no resource type, or leaves one for the shell to expand."""
+    if not operands:
+        return True
+    typed = operands if any("/" in word for word in operands) else operands[:1]
+    return any(UNSHOWN_TYPE.search(word.split("/")[0]) for word in typed)
+
+
+def names_secret(word: str) -> bool:
+    """True when a describe word names the Secret type: plain, plural, group qualified, in a list or as TYPE/NAME."""
+    return any(part.split("/")[0].split(".")[0] in SECRET_RESOURCES for part in word.split(","))
+
+
+def describe_may_show_secret(words: list[str]) -> bool:
+    """True when a describe names Secrets or no literal resource type, as with a file flag or a shell expansion."""
+    return any(names_secret(word) for word in words) or hidden_type(describe_operands(words))
+
+
+def describes_secrets(low: str) -> bool:
+    """True when any kubectl describe in the lowercased segment, line continuations joined, may print a Secret."""
+    joined = low.replace("\\\n", "")
+    return any(describe_may_show_secret(describe_words(found.group(1))) for found in KUBECTL_DESCRIBE.finditer(joined))
+
+
+def renderer_verdict(command: str) -> str | None:
     low = command.lower()
     if re.search(r"\bdocker[- ]compose\b.*\bconfig\b", low) and "--no-interpolate" not in low:
         return (
@@ -503,7 +553,16 @@ def renderer_verdict(command):
                 "printing Secret data (kubectl get secret -o yaml/json)",
                 KIND_ENVIRONMENT,
             )
-            + "\nkubectl describe secret <name> shows the keys and byte sizes without the values."
+            + SECRET_KEY_LISTING
+        )
+    if describes_secrets(low):
+        return (
+            block(
+                "describing a Secret or a resource the command does not name "
+                "(kubectl describe prints the token of a service account token Secret)",
+                KIND_ENVIRONMENT,
+            )
+            + SECRET_KEY_LISTING
         )
     if len(re.findall(ACCESS_ENV, low)) > len(re.findall(rf'\beval\s+"\$\([^()]*{ACCESS_ENV}\s*\)"', low)):
         return (
@@ -884,7 +943,7 @@ DISPATCH = {
 }
 
 
-def evaluate(payload, *, recursive=True, allow_rewrite=False):
+def evaluate(payload: Mapping[str, object], *, recursive: bool = True, allow_rewrite: bool = False) -> Verdict:
     handler = DISPATCH.get(payload.get("tool_name"))
     if handler is None:
         return ALLOW

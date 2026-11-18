@@ -144,7 +144,7 @@ CASES = [
     ),
     ("kubectl secret yaml", {"tool_name": "Bash", "tool_input": {"command": "kubectl get secret db -o yaml"}}, True),
     ("kubectl secret list", {"tool_name": "Bash", "tool_input": {"command": "kubectl get secrets -n prod"}}, False),
-    ("kubectl describe secret", {"tool_name": "Bash", "tool_input": {"command": "kubectl describe secret db"}}, False),
+    ("kubectl describe secret", {"tool_name": "Bash", "tool_input": {"command": "kubectl describe secret db"}}, True),
     ("access env printed", {"tool_name": "Bash", "tool_input": {"command": "agentihooks access env"}}, True),
     (
         "access env module printed",
@@ -396,6 +396,97 @@ def test_gh_commands_that_print_a_token_are_refused(command):
 @pytest.mark.parametrize("command", GH_LEAK_FREE)
 def test_gh_commands_that_print_no_token_pass(command):
     assert decide({"tool_name": "Bash", "tool_input": {"command": command}}) is None
+
+
+SECRET_KEY_LISTING = (
+    "\nkubectl get secret <name> --template='{{range $k,$v:=.data}}{{$k}} {{end}}' "
+    "lists the key names without the values."
+)
+
+DESCRIBE_SECRET_COMMANDS = [
+    "kubectl describe secret db",
+    "kubectl describe secrets",
+    "kubectl describe Secret/db",
+    "kubectl -n prod describe secret db",
+    "kubectl describe -n prod secret db",
+    "kubectl describe --namespace=prod secrets db",
+    "kubectl describe --context prod secret db",
+    "kubectl describe configmaps,secrets",
+    "kubectl describe secrets.v1. db",
+    "kubectl describe pod/web secret/db",
+    "kubectl describe \\\n  secret db",
+    "kubectl \\\n  describe secret db",
+    'kubectl describe "sec"ret db',
+    "kubectl describe secret db 2>&1",
+    'ssh host "kubectl describe secret db"',
+    "sudo kubectl describe secret db | head",
+    "kubectl describe pod web | kubectl describe secret db",
+    'echo "$(kubectl describe secrets)"',
+    "kubectl get secrets -o name | xargs kubectl describe",
+    'for s in $(kubectl get secrets -o name); do kubectl describe "$s"; done',
+    "kubectl describe $RES db",
+    "kubectl describe pod/web $NAME",
+    "kubectl describe -f deploy.yaml",
+    "kubectl describe --filename=deploy.yaml",
+    "kubectl describe -k overlays/prod",
+    "kubectl describe --kustomize dir",
+    "kubectl describe\\\n  secret db",
+    "kubectl describe sec\\ret db",
+    "kubectl describe --kubeconfig x $RES",
+    "kubectl describe -s x $RES",
+]
+
+DESCRIBE_ALLOWED_COMMANDS = [
+    "kubectl describe pod secret-store-0",
+    "kubectl describe externalsecret db",
+    "kubectl describe sa default",
+    "kubectl describe pod web | grep -i secret",
+    "kubectl describe pod web > secret",
+    "kubectl -n secret describe pod web",
+    "kubectl describe pod $POD",
+    "kubectl describe pod/$NAME",
+    "kubectl describe -n $NS pod web",
+    "kubectl describe --namespace $NS pod web",
+    "kubectl describe -l $SEL pods",
+    "kubectl describe --selector $SEL pods",
+    "kubectl describe --selector=$SEL pods",
+    "kubectl describe --context $CTX pod web",
+    "kubectl describe -A pods",
+    "kubectl describe --all-namespaces pods",
+    "kubectl get pods | grep describe",
+    "kubectl logs web-describe-0",
+    "kubectl get secret db --template='{{range $k,$v:=.data}}{{$k}} {{end}}'",
+]
+
+
+@pytest.mark.feature("credential-guard-refuses-describe-secret")
+@pytest.mark.parametrize("command", DESCRIBE_SECRET_COMMANDS)
+def test_kubectl_describe_of_a_secret_is_refused(command: str) -> None:
+    reason = decide({"tool_name": "Bash", "tool_input": {"command": command}})
+
+    assert reason == (
+        block(
+            "describing a Secret or a resource the command does not name "
+            "(kubectl describe prints the token of a service account token Secret)",
+            KIND_ENVIRONMENT,
+        )
+        + SECRET_KEY_LISTING
+    )
+
+
+@pytest.mark.feature("credential-guard-refuses-describe-secret")
+@pytest.mark.parametrize("command", DESCRIBE_ALLOWED_COMMANDS)
+def test_kubectl_commands_that_name_no_secret_type_pass(command: str) -> None:
+    assert decide({"tool_name": "Bash", "tool_input": {"command": command}}) is None
+
+
+@pytest.mark.feature("credential-guard-refuses-describe-secret")
+def test_get_secret_refusal_offers_the_key_listing_and_not_describe() -> None:
+    reason = decide({"tool_name": "Bash", "tool_input": {"command": "kubectl get secret db -o yaml"}})
+
+    assert reason == (
+        block("printing Secret data (kubectl get secret -o yaml/json)", KIND_ENVIRONMENT) + SECRET_KEY_LISTING
+    )
 
 
 def _bash(command, cwd=""):
