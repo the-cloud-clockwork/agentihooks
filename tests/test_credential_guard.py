@@ -499,6 +499,66 @@ def test_kubectl_get_secret_forms_that_print_no_value_pass(command: str) -> None
     assert decide({"tool_name": "Bash", "tool_input": {"command": command}}) is None
 
 
+GET_NON_SECRET_DIAGNOSTICS = [
+    "kubectl get pod mypod -n ns -o jsonpath='{.status.phase}'",
+    "kubectl get pods -n ns -o custom-columns=NAME:.metadata.name,STATUS:.status.phase",
+    "kubectl get priorityclass -o jsonpath='{.items[*].metadata.name}'",
+    "kubectl get pod \"$POD\" -n ns -o jsonpath='{.status.phase}'",
+    "kubectl get pod $POD -o jsonpath='{.status.phase}'",
+    "kubectl -n ns get pod \"$POD\" -o jsonpath='{.status.phase}'",
+    "kubectl get pods --namespace=$NS \"$POD\" -o jsonpath='{.status.phase}'",
+    "kubectl get priorityclass \"$PC\" -o jsonpath='{.value}'",
+    'kubectl get pods "$POD" -n ns -o custom-columns=NAME:.metadata.name,STATUS:.status.phase',
+    "kubectl get --unknown-value v pod $POD -o yaml",
+    "kubectl get -n ns pod \"$POD\" -o jsonpath='{.status.phase}'",
+    "kubectl get --chunk-size=50 pod \"$POD\" -o jsonpath='{.status.phase}'",
+    "kubectl get pod secret -o jsonpath='{.status.phase}'",
+    "kubectl get pods -n secret -o custom-columns=NAME:.metadata.name,STATUS:.status.phase",
+    "kubectl get pods --namespace=secrets -o jsonpath='{.items[*].metadata.name}'",
+    "kubectl get -A pods -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name",
+    "kubectl get pods -n get -o jsonpath='{.items[*].metadata.name}'",
+    "kubectl get pod get -o jsonpath='{.status.phase}'",
+    "kubectl get secrets -o name | grep -o yaml",
+    'kubectl get priorityclass -o jsonpath=\'{range .items[*]}{.metadata.name}{";"}{.value}{"\\n"}{end}\'',
+    'kubectl get pods -A -o jsonpath=\'{range .items[*]}{.metadata.name}{"|"}{.status.phase}{"\\n"}{end}\'',
+    "kubectl get pods -o jsonpath=\"{.items[?(@.status.phase=='Running')].metadata.name}{'&'}\"",
+    'ssh hive-002 \'kubectl get pod "$POD" -o jsonpath="{.status.phase}"\'',
+]
+
+GET_SECRET_TYPE_FORMS = [
+    "kubectl get secret \"$NAME\" -o jsonpath='{.data}'",
+    "kubectl get secrets -o jsonpath='{range .items[*]}{.data}{\";\"}{end}'",
+    "kubectl get pods,secrets -A -o jsonpath='{.items[*].data}'",
+    "kubectl get -n ns $R db -o jsonpath='{.data}'",
+    "kubectl get deploy/app $X -o yaml",
+    "kubectl get --unknown-flag secret db -o yaml",
+    "kubectl -n get get secret db -o jsonpath='{.data}'",
+    "kubectl -n get get $R db -o yaml",
+    "kubectl exec mypod -- kubectl get secret db -o yaml",
+    'kubectl exec mypod -- sh -c "kubectl get pods; kubectl get secret db -o yaml"',
+    "kubectl exec mypod -- sh -c 'kubectl get secret db -o yaml'",
+    "kubectl get --show-labels $R -o jsonpath='{.data}'",
+    "kubectl get secret db \\' -o yaml",
+    "kubectl get --unknown-value v $R db -o jsonpath='{.data}{\";\"}'",
+]
+
+
+@pytest.mark.feature("credential-guard-get-reads-the-type-operand")
+@pytest.mark.parametrize("command", GET_NON_SECRET_DIAGNOSTICS)
+def test_kubectl_get_of_a_named_non_secret_type_passes_with_any_output(command: str) -> None:
+    assert decide({"tool_name": "Bash", "tool_input": {"command": command}}) is None
+
+
+@pytest.mark.feature("credential-guard-get-reads-the-type-operand")
+@pytest.mark.parametrize("command", GET_SECRET_TYPE_FORMS)
+def test_kubectl_get_whose_type_operand_may_be_a_secret_is_refused(command: str) -> None:
+    reason = decide({"tool_name": "Bash", "tool_input": {"command": command}})
+
+    assert reason is not None and reason.startswith(
+        block("printing Secret data (kubectl get secret -o yaml/json)", KIND_ENVIRONMENT)
+    )
+
+
 GH_TOKEN_RENDERERS = [
     "gh auth status",
     "gh auth status --show-token",

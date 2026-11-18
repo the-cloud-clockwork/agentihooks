@@ -2335,6 +2335,21 @@
       ]
     },
     {
+      "id": "credential-guard-get-reads-the-type-operand",
+      "origin": "regression",
+      "ordered_at": "2026-11-18",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2662",
+      "behaviour": "The credential guard's kubectl get Secret check judges only the operands that may hold the resource type, after the first get word that no listed value flag takes, in every kubectl invocation on the line including one nested in another's quoted argument: it refuses when one names Secret by kind or alias, plain, plural, group qualified, as TYPE/NAME or in a resource list, or leaves its type to the shell, or when the get has no operand. Every operand in TYPE/NAME form may hold the type. Otherwise the type is the first operand that no flag before it could take as its value, together with the operands before it that such a flag could take. A resource name after a literal type, such as a pod or priority class name in a shell variable or a pod named secret, and a namespace value, such as a namespace named secret, never make the get a possible Secret. The kubectl words run to the first pipe, redirect, semicolon or ampersand outside quotes, so a quoted jsonpath, template or custom columns value holding one stays a single word. Get of a named non Secret type with any jsonpath or custom columns output passes. A Secret type, a resource list holding one, and a type left to the shell stay refused.",
+      "seam": "hooks.context.credential_guard.gets_secret_values through hooks.context.credential_guard.prints_secret_values, read by hooks.context.credential_guard.decide",
+      "rules": [
+        "credential-guard-get-secret-output-regex"
+      ],
+      "tests": [
+        "tests/test_credential_guard.py::test_kubectl_get_of_a_named_non_secret_type_passes_with_any_output",
+        "tests/test_credential_guard.py::test_kubectl_get_whose_type_operand_may_be_a_secret_is_refused"
+      ]
+    },
+    {
       "id": "swarm-tick-successor-fill",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1793",
@@ -8159,7 +8174,7 @@
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-dep-manifest-coverage-slow",
       "behaviour": "The coverage database check reads each database file fully before SQLite opens it, so a downloaded shard database that has left the page cache is read in one pass instead of page by page from a busy node disk.",
-      "seam": "tests.coverage_check.problem, run by the dep-manifest and unit jobs of the Tests workflow, scripts.ci_branch_coverage and tests.reused_coverage",
+      "seam": "scripts.coverage_check.problem, run by the dep-manifest and unit jobs of the Tests workflow, scripts.ci_branch_coverage and scripts.reused_coverage",
       "tests": [
         "tests/test_reused_coverage.py::test_the_check_reads_each_database_through_before_sqlite_opens_it"
       ]
@@ -8479,6 +8494,7 @@
         "tests/swarm/test_claim_hold.py::test_a_stale_failed_missing_or_unpredicted_lab_reading_never_holds",
         "tests/swarm/test_claim_hold.py::test_the_lab_threshold_reads_its_environment_variable",
         "tests/swarm/test_claim_hold.py::test_the_tick_claims_no_eng_task_while_the_lab_is_behind_and_resumes_below_the_threshold",
+        "tests/swarm/test_claim_hold.py::test_a_full_lab_pool_the_swarm_reads_holds_eng_claims_and_the_same_queue_on_an_idle_pool_does_not",
         "tests/hub/test_readiness.py::test_the_events_snapshot_holds_eng_offers_while_the_lab_is_behind",
         "tests/swarm/test_urgent_hold.py::test_an_urgent_eng_task_the_lab_holds_names_the_lab_and_raises_no_finding",
         "tests/swarm/test_stages.py::test_claim_wait_of_an_eng_task_while_the_lab_is_behind_is_lab_wait",
@@ -9073,6 +9089,20 @@
       ]
     },
     {
+      "id": "troubleshooting-crew-task-titles",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2549",
+      "behaviour": "Every troubleshooting crew task id and title carries the crew's UTC launch second as two six digit groups, the date and the time of day, so no crew task title holds the eight digit run the ledger refuses as a run or job id. Every crew task title is checked with the ledger's own title rule while the stage builds its commands, so a title the ledger would refuse stops the scout, fix or harden stage, dry run or real, with no crew state saved, no eng lane change and no task added, and names every reason; a scout dry run followed by a real run adds every scout task the dry run printed. Crew fixer ids keep the shape the panic cancel sweep spares; the feature panic-spares-fixer-branches checks it with fixer ids built by crew_id.",
+      "seam": "scripts.swarm.troubleshooting_crew main and add_task with an injected fake ledger that runs the ledger's own task add title check, scripts.swarm_ledger.ledger_comments check with the item kind, on every task add it receives",
+      "tests": [
+        "tests/test_launch_troubleshooting_crew_skill.py::test_a_scout_dry_run_then_a_real_run_adds_every_scout_task",
+        "tests/test_launch_troubleshooting_crew_skill.py::test_a_scout_title_the_ledger_refuses_stops_the_stage_before_any_write",
+        "tests/test_launch_troubleshooting_crew_skill.py::test_fix_and_harden_stop_before_any_write_on_a_title_the_ledger_refuses",
+        "tests/test_launch_troubleshooting_crew_skill.py::test_every_crew_task_title_passes_the_ledger_rule",
+        "tests/test_launch_troubleshooting_crew_skill.py::test_a_crew_task_title_the_ledger_refuses_names_every_reason"
+      ]
+    },
+    {
       "id": "worker-profile-detached-lifecycle-gc",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-worker-proof-gc-child",
@@ -9469,6 +9499,18 @@
       ]
     },
     {
+      "id": "tick-view-read-counts",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2521",
+      "behaviour": "A tick view inside a tick pass that reads at least one pull request writes one swarm_pull_views line to the controller log naming its swarm, its pass, how many distinct pull requests it had no earlier view of, how many of those the swarm Redis served as kept merged and how many it read from GitHub, so a controller rollout shows whether its first passes read only the open pull requests. Every other pull request read, a tick view with nothing to read and a tick view outside a pass write nothing.",
+      "seam": "tick_view in scripts.swarm.ledger_events, run inside timing.tick with an empty metrics spool, as on a fresh controller pod, and the swarm Redis as its cache",
+      "tests": [
+        "tests/swarm/test_pull_views.py::test_a_fresh_tick_view_logs_that_redis_kept_the_merged_pull_request_and_github_read_the_open_one",
+        "tests/swarm/test_pull_views.py::test_a_pull_request_read_that_is_no_tick_view_logs_no_counts",
+        "tests/swarm/test_pull_views.py::test_a_tick_view_read_that_raises_leaves_later_reads_uncounted"
+      ]
+    },
+    {
       "id": "lab-wheel-imports",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2646",
@@ -9499,6 +9541,16 @@
         "tests/ci_lab/test_scheduler.py::test_build_gives_each_expander_mirror_the_lab_remote_the_environment_names",
         "tests/ci_lab/test_relay.py::test_the_push_token_asks_contents_and_workflows_write",
         "tests/ci_lab/test_relay.py::test_build_gives_the_pusher_mirror_the_lab_remote_the_environment_names"
+      ]
+    },
+    {
+      "id": "branch-coverage-wheel-imports",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2659",
+      "behaviour": "The branch coverage script and the coverage check and reused coverage modules it runs import from the hooks, scripts and profiles packages the wheel ships, never from the tests package. The coverage check lives in scripts.coverage_check and the reused coverage filter in scripts.reused_coverage.",
+      "seam": "a fresh interpreter whose import system cannot find the tests package imports scripts.ci_branch_coverage, scripts.coverage_check and scripts.reused_coverage",
+      "tests": [
+        "tests/ci_lab/test_wheel_imports.py::test_the_branch_coverage_script_imports_without_the_tests_package"
       ]
     },
     {
