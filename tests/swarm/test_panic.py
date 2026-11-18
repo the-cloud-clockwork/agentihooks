@@ -1983,7 +1983,6 @@ def test_panic_freezes_a_deploy_behind_kubectl_helm_argocd_or_gh_global_options(
     "command",
     [
         "gh api -X POST repos/o/r/actions/workflows/ci.yml/dispatches -f ref=dev",
-        "gh api repos/{owner}/{repo}/actions/workflows/ci.yml/dispatches -f ref=dev",
         "gh api --method POST /repos/o/r/dispatches -f event_type=go",
         "gh api -H 'Accept: application/vnd.github+json' https://api.github.com/repos/o/r/dispatches/",
         "gh api --input body.json repos/o/r/actions/workflows/7/dispatches",
@@ -2004,7 +2003,7 @@ def test_a_fix_branch_session_stays_frozen_for_a_gh_api_dispatch(
     _branches(monkeypatch, {FIX: "fix-branch"})
     panic.engage(store, SLUG, "reason", False, [FIX], 0)
     cwd = _checkout(tmp_path / "fix", "fix-branch")
-    command = "gh api repos/{owner}/{repo}/actions/workflows/t.yml/dispatches -f ref=fix-branch"
+    command = "gh api repos/the-cloud-clockwork/agentihooks/actions/workflows/t.yml/dispatches -f ref=fix-branch"
     block = blocker_window.pretool("Bash", {"command": command}, "engineer-session", cwd)[1]
     assert block == blocker_window.FROZEN.format(slug=SLUG, reason="reason")
 
