@@ -30,7 +30,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -61,7 +61,7 @@ def credentials(slug: str) -> dict[str, str]:
 
 def stream(
     slug: str, cursor: str | None = None, headers: dict[str, str] | None = None
-) -> Iterator[tuple[str, Any, str | None]]:
+) -> Generator[tuple[str, Any, str | None]]:
     """Yield (event, data, cursor) from the ledger: one snapshot read in process on a remote host, such as a hive
     worker, else the ledger server's event stream; Expired when the cursor is gone."""
     if remote(slug):
