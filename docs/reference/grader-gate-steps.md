@@ -266,20 +266,20 @@ The head changes tests/registry/FROZEN_GATES.json and the frozen gate file scrip
 ```
 
 The head `e4900bc2ed` and the event base held the same `scripts/gate_protected.py`
-blob. The changed blob came from `dev`. Merging `dev` into a pull request
-cleared it with the old step: pull request 11335, opened before both merges,
-had refreshed `dev`, and its lint job
-[132997128606](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/43774359032/job/132997128606)
-graded `0 protected gate problems`.
+blob. The changed blob came from `dev`. Pull request 11335, also opened before
+both merges, had merged a newer `dev` into its head. Its lint job
+[132997128606](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/43774359032/job/132997128606),
+on 15 November with the step text from before pull request 11515, graded the
+merge commit `670672445e66` and found `0 protected gate problems`.
 
 ### Pull requests behind dev
 
 The regression tests plant a repository whose `dev` landed a registry
 announcement and the frozen file change it announces after the event base.
 The current column comes from those tests, which run the real step text. The
-column before pull request 11515 follows from `_frozen_problems` on the same
-planted commits, and Tests run 43830625093 confirmed its red cases on the old
-step text:
+column before pull request 11515 is derived from `_frozen_problems` on the
+same planted commits. Tests run 43830625093, which ran the tests on the old
+step text, is its observed evidence:
 
 | The head changes | Step before pull request 11515 | Current step |
 | --- | --- | --- |
@@ -294,9 +294,8 @@ workflow.
 
 ### Grade a pull request the way the lint step does
 
-The event base is the `GRADER:` value in the env block that the lint job log
-prints under `Run git fetch --no-tags origin "$GRADER"`, the
-`Check out the protected grader` step. `gh pr view <number> --json baseRefOid`
+In the lint job log, the `Check out the protected grader` step prints its env
+block, and its `GRADER:` value is the event base. `gh pr view <number> --json baseRefOid`
 returns the current base instead, which differs from the event base once
 `dev` moves. Then, from a clone of this repository:
 
@@ -315,11 +314,13 @@ To see what the step graded before pull request 11515, fetch
 rebuilds that ref when `dev` moves, so it can differ from the run's
 `GITHUB_SHA`.
 
-On 18 November 2026 the `scripts` tree of `5868238ae4e0` was run locally, as
-the grader, over planted commits that repeat pull request 11341. One head adds
-a registry blob on top of `5868238ae4e0`, and one merge commit merges that
-head into `c133027b0a`. The planted commits exist only in that local run, so
-their shas differ on every rerun:
+On 18 November 2026 the grader code at `5868238ae4e0` was run locally over
+planted commits that repeat pull request 11341. One head adds a registry blob
+on top of `5868238ae4e0`, and one merge commit, built with
+`git merge-tree --write-tree` and `git commit-tree`, merges that head into
+`c133027b0a`. The planted commits exist only in that local run, so their shas
+differ on every rerun. For a real pull request, the snippet above is the
+reproduction:
 
 ```text
 $ python -m scripts.gate_protected --head <synthetic merge>
