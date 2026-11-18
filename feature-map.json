@@ -5580,6 +5580,16 @@
       ]
     },
     {
+      "id": "frozen-writer-lock-workflow",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-freeze-writer-lock-workflow",
+      "behaviour": "The frozen gate registry holds the writer lock workflow, so the protected grader refuses a pull request head that drops any of its jobs or otherwise changes it to content the base has not announced, while a head that leaves the workflow unchanged passes.",
+      "seam": "Frozen gate registry and the protected grader's frozen file check",
+      "tests": [
+        "tests/test_gate_protected.py::test_the_repository_registry_refuses_a_head_dropping_any_writer_lock_job"
+      ]
+    },
+    {
       "id": "gate-declarations-never-expire",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-gate-never-deadlock",
