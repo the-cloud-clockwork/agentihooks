@@ -44,7 +44,7 @@ class Lab:
 
 def lab(environ: Mapping[str, str]) -> Lab | None:
     """Return the lab remote AGENTIHOOKS_LAB_REMOTE names, holding AGENTIHOOKS_LAB_REMOTE_TOKEN, or None without one."""
-    url = environ.get(checkout.URL_ENV, "")
+    url = environ.get(checkout.URL_ENV)
     return Lab(url, environ.get(checkout.TOKEN_ENV, "")) if url else None
 
 
