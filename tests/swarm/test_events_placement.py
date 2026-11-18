@@ -261,6 +261,80 @@ def test_the_hub_admits_a_needs_task_only_from_a_hive_declaring_every_need(rig: 
     assert rig.admitter.admit(SLUG, ask("gpu", "hive-c"))["hive"] == "hive-c"
 
 
+KEPT = "0 of 1 agents on the hive with 1 kept for tasks only the root hive takes"
+
+
+@pytest.mark.feature("root-keeps-slots-for-pinned-tasks")
+@pytest.mark.parametrize(
+    "row, expected",
+    [
+        (task("plain"), False),
+        (task("desk", workstation=True), True),
+        (task("blank", workstation=True, hive=""), True),
+        (task("root", hive=ROOT), True),
+        (task("desk", workstation=True, hive="hive-b"), False),
+        (task("pinned", hive="hive-b"), False),
+    ],
+)
+def test_rooted_names_the_tasks_only_the_root_hive_takes(row: dict[str, object], expected: bool) -> None:
+    assert readiness.rooted(row) is expected
+
+
+@pytest.mark.feature("root-keeps-slots-for-pinned-tasks")
+def test_root_waiting_counts_only_claimable_tasks_the_root_hive_alone_takes() -> None:
+    rows = [
+        task("plain"),
+        task("desk", workstation=True),
+        task("root", hive=ROOT, lane="ci"),
+        task("claimed", workstation=True),
+        task("blocked", workstation=True, state="blocked"),
+        task("laneless", workstation=True, lane=""),
+        task("elsewhere", workstation=True, hive="hive-b"),
+    ]
+    assert readiness.root_waiting(snapshot(doc(rows), claimed=["claimed"])) == 2
+
+
+def _capped(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, caps: dict[str, int]) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_STATE_BACKEND", "redis")
+    for hive, cap in caps.items():
+        registry.beat(rig.redis, hive, {"heartbeat_at": 6_000})
+        registry.update(rig.redis, hive, [f"max-agents={cap}"])
+
+
+@pytest.mark.feature("root-keeps-slots-for-pinned-tasks")
+def test_root_with_one_free_slot_holds_the_unpinned_task_for_another_hive_and_admits_the_workstation_task(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _capped(rig, monkeypatch, {ROOT: 1, "hive-a": 1})
+
+    assert rig.admitter.admit(SLUG, ask("plain", ROOT)) == {"held": KEPT}
+    assert rig.store.claimant(SLUG, "plain") is None
+    elsewhere = rig.admitter.admit(SLUG, ask("plain", "hive-a"))
+    assert elsewhere["hive"] == "hive-a"
+    admitted = rig.admitter.admit(SLUG, ask("desk", ROOT))
+    assert admitted["hive"] == ROOT
+    assert rig.store.claimant(SLUG, "desk") == admitted["name"]
+    assert capsys.readouterr().err.splitlines() == [
+        f"hub: events admission swarm={SLUG} task=plain hive={ROOT} refused: {KEPT}"
+    ]
+
+
+@pytest.mark.feature("root-keeps-slots-for-pinned-tasks")
+def test_root_admits_unpinned_work_into_slots_beyond_the_waiting_workstation_tasks(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _capped(rig, monkeypatch, {ROOT: 2})
+    registry.update(rig.redis, ROOT, ["capabilities=gpu"])
+
+    admitted = rig.admitter.admit(SLUG, ask("plain", ROOT))
+
+    assert admitted["hive"] == ROOT
+    assert rig.store.claimant(SLUG, "plain") == admitted["name"]
+    assert rig.admitter.admit(SLUG, ask("gpu", ROOT)) == {
+        "held": "1 of 2 agents on the hive with 1 kept for tasks only the root hive takes"
+    }
+
+
 def test_hub_admission_keeps_shared_placement_rows_open(rig: SimpleNamespace) -> None:
     registry.update(rig.redis, "hive-c", ["capabilities=gpu"])
     assert rig.admitter.admit(SLUG, ask("pinned", "hive-b")) is not None
