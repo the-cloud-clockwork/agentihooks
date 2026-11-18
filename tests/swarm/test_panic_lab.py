@@ -12,6 +12,7 @@ import pytest
 from hooks.observability import otel
 from scripts.swarm import cli, lab_control, panic
 from scripts.swarm.store import PREFIX, RedisStore, SwarmConfig, SwarmError
+from scripts.tick.ports.source_control import ChangeRef, ChangeState
 
 SLUG = "sw"
 CODE = "a1b2c3"
@@ -77,11 +78,11 @@ def heads(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """Read every fix pull request's head branch as pr-branch, and record each read."""
     read: list[str] = []
 
-    def fix_branch(url: str) -> str:
+    def fix_change(url: str) -> ChangeState:
         read.append(url)
-        return "pr-branch"
+        return ChangeState(ChangeRef("o/r", 1), "open", "a" * 40, "dev", False, url, "pr-branch")
 
-    monkeypatch.setattr(panic, "fix_branch", fix_branch)
+    monkeypatch.setattr(panic, "fix_change", fix_change)
     monkeypatch.setattr(panic, "cancel_runs", lambda *args, **kwargs: [])
     return read
 
@@ -199,10 +200,10 @@ def test_panic_on_names_a_stored_fix_it_cannot_read(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    def unreadable(url: str) -> str:
+    def unreadable(url: str) -> ChangeState:
         raise SwarmError(f"cannot read pull request {url}")
 
-    monkeypatch.setattr(panic, "fix_branch", unreadable)
+    monkeypatch.setattr(panic, "fix_change", unreadable)
     monkeypatch.setattr(panic, "cancel_runs", lambda *args, **kwargs: [])
     panic.engage(store, SLUG, "pressed", False, [PULL], 0)
     assert _press(store, capsys, "on")["lab"] == f"lab not told: cannot read pull request {PULL}"

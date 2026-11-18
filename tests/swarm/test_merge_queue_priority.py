@@ -479,7 +479,7 @@ def test_master_priority_moves_waiting_entries_without_cancelling_running_head(
     from tests.swarm.test_merge_queue import swarm_of
 
     store = swarm_of("master")
-    store.config = lambda slug: None
+    store.config = lambda slug: SimpleNamespace(lab_url="")
     monkeypatch.setattr(cli, "connect", lambda: store)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     monkeypatch.setattr(cli, "LedgerClient", lambda: SimpleNamespace(tasks=lambda slug: []))

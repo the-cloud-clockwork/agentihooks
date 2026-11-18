@@ -312,10 +312,10 @@ def fixers(store: RedisStore) -> set[str]:
     return found
 
 
-def lab_heads(fixes: Iterable[str]) -> list[str]:
+def lab_heads(fixes: Iterable[str], kept: tuple[RedisStore, str]) -> list[str]:
     """Return, sorted, the branch each fix grades on in the lab: a branch link's branch, else the fix pull request's
-    head branch."""
-    return sorted({branch_fix(fix)[1] or fix_branch(fix) for fix in fixes})
+    head branch, read through fix_state so a merged fix the swarm ``kept`` names already holds is not read again."""
+    return sorted({branch_fix(fix)[1] or fix_state(kept, fix).head_branch for fix in fixes})
 
 
 def lab_engage(store: RedisStore, slug: str, fixes: Iterable[str]) -> str:
@@ -324,7 +324,7 @@ def lab_engage(store: RedisStore, slug: str, fixes: Iterable[str]) -> str:
     the lab took both orders. Return the action line; a lab that cannot be told is a line, never a raise."""
     try:
         target = lab_control.lab(store.config(slug).lab_url, os.environ)
-        heads = lab_heads((*fixes, *fixers(store)))
+        heads = lab_heads((*fixes, *fixers(store)), (store, slug))
         lab_control.priority(target, heads)
         lab_control.pause(target, heads)
     except (lab_control.LabError, subprocess.SubprocessError, OSError, ValueError, KeyError, SwarmError) as error:
