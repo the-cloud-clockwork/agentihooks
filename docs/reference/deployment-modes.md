@@ -224,7 +224,7 @@ and a checkout of this repository.
    EOF
    ```
 
-   Output from the same 15 November read, one line per agent:
+   Two of the seven lines from the same 15 November read, one line per agent:
 
    ```text
    engineer@<code>-<n> <hive id> 1794704229546 1794704268058 2147 ready:<slug>:<task>:12
