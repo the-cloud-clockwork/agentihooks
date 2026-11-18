@@ -88,6 +88,7 @@ def test_event_relay_sends_hive_items_once_to_the_owner(world, kind):
     received = [item for item in inbox.mailbox(world.second_name) if item.ref == ref]
     assert len(received) == 1
     assert received[0].address == cases.SECOND
+    assert received[0].ref == ref
     assert inbox.deliver(received[0].id, world.lead_name) is None
     assert inbox.deliver(received[0].id, world.second_name).state == "delivered"
     assert inbox.deliver(received[0].id, world.second_name) is None
