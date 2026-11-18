@@ -336,7 +336,14 @@ TOOLCHAIN = Toolchain("3.12", {"ruff": "1"}, "lock", "project", "image", {"TZ": 
 
 
 def _unlisted(root: Path) -> tuple[Unit, ...]:
-    listed = ["tests/test_alpha.py", "tests/helpers.py", "tests/test_gone.py", "scripts/alpha.py", "docs/guide.md"]
+    listed = [
+        "tests/test_alpha.py",
+        "tests/test_group.py",
+        "tests/helpers.py",
+        "tests/test_gone.py",
+        "scripts/alpha.py",
+        "docs/guide.md",
+    ]
     return expand_tests.unlisted_units(MANIFEST, _tree(root), [*reversed(UNLISTED), NEW, *listed], TOOLCHAIN)
 
 
