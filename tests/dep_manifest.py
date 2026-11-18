@@ -139,10 +139,16 @@ def build(coverage_file: Path, inputs: list[Path], root: Path, commit: str, envi
 
 
 def pack(manifest: dict) -> dict:
+    """Return the manifest with each test as units, files index, escapes and, when it has one, its outside index."""
     files, spans = {}, {}
     packed = {key: value for key, value in manifest.items() if key not in ("tests", "lines")}
     packed["tests"] = {
-        test: [found["units"], files.setdefault(tuple(found["files"]), len(files)), found["escapes"]]
+        test: [
+            found["units"],
+            files.setdefault(tuple(found["files"]), len(files)),
+            found["escapes"],
+            *([files.setdefault(tuple(found["outside"]), len(files))] if "outside" in found else []),
+        ]
         for test, found in manifest["tests"].items()
     }
     if "lines" in manifest:
@@ -156,10 +162,11 @@ def pack(manifest: dict) -> dict:
 
 
 def unpack(packed: dict) -> dict:
+    """Return the manifest a packed one holds, restoring a test's outside list only where it was packed."""
     files, spans = packed.pop("files"), packed.pop("spans")
     packed["tests"] = {
-        test: {"units": units, "files": files[index], "escapes": escapes}
-        for test, (units, index, escapes) in packed["tests"].items()
+        test: {"units": units, "files": files[index], "escapes": escapes, **{"outside": files[at] for at in outside}}
+        for test, (units, index, escapes, *outside) in packed["tests"].items()
     }
     if "lines" in packed:
         packed["lines"] = {test: dict(spans[index] for index in found) for test, found in packed["lines"].items()}
