@@ -130,7 +130,7 @@ def test_outage_rules_for_tests_scan_every_test_file_with_the_head_and_the_grade
     assert _run_test_rules(tmp_path, graded=True) == (
         0,
         [
-            "scan --error --strict --metrics off --x-ignore-semgrepignore-files "
+            "scan --error --strict --timeout 30 --metrics off --x-ignore-semgrepignore-files "
             f"--config {rule} --config {tmp_path}/grader/{rule} tests"
         ],
     )
@@ -140,12 +140,16 @@ def test_outage_rules_for_tests_grade_with_the_head_copy_on_a_base_without_the_r
     rule = _test_rules_step()["env"]["RULES"]
     assert _run_test_rules(tmp_path, graded=False) == (
         0,
-        [f"scan --error --strict --metrics off --x-ignore-semgrepignore-files --config {rule} tests"],
+        [f"scan --error --strict --timeout 30 --metrics off --x-ignore-semgrepignore-files --config {rule} tests"],
     )
 
 
 def test_outage_rules_for_tests_fail_the_step_on_a_finding(tmp_path: Path) -> None:
     assert _run_test_rules(tmp_path, graded=True, scan_exit=1)[0] == 1
+
+
+def test_outage_rules_for_tests_give_each_rule_thirty_seconds_on_a_file() -> None:
+    assert "semgrep scan --error --strict --timeout 30 --metrics off" in _test_rules_step()["run"]
 
 
 def test_each_outage_rule_for_tests_reaches_the_tests_and_its_fixture() -> None:
