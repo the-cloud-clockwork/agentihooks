@@ -1005,11 +1005,11 @@ def serve() -> None:
     stopped = server_lifetime.watch(server, core.LEDGER_DIR, PORT)
     LOADED_CODE.capture()
     server_code.record(PIDFILE.parent, os.getpid(), LOADED_STAMP, digest=LOADED_DIGEST, files=LOADED_CODE.files)
-    PIDFILE.write_text(str(os.getpid()))
     print(f"ledger server on {BASE}, dir {core.LEDGER_DIR}", flush=True)
     drained = True
     try:
         with projector.running(repository, HUB):
+            PIDFILE.write_text(str(os.getpid()))
             try:
                 server.serve_forever(POLL_S)
             finally:
