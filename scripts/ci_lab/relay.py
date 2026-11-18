@@ -1,7 +1,8 @@
 """The CI lab relay: a green grade of a `refs/grade/<task>` head pushed with a branch reaches GitHub.
 
-`Relay.tick` reads the lab remote's head notices from its own consumer and keeps each pushed `refs/grade/*` head that
-names a `branch=<name>` push option pending in Redis until a grade of that head closes. A green grade pushes the sha
+`Relay.tick` reads the lab remote's head notices from its own consumer and keeps each trusted actor's pushed
+`refs/grade/*` head that names a `branch=<name>` push option outside the protected branches pending in Redis, per
+head and branch, until a grade of that head closes. A green grade pushes the sha
 to `origin refs/heads/<branch>` with an App token holding contents write, never forced, posts the `lab/<gate>` check
 run of every gate and the required check, completed, with the grade's run and verdicts, and opens the branch's draft
 pull request into dev with a token holding pull requests write, or names the open one the push updated. A red grade
@@ -13,7 +14,7 @@ import base64
 import json
 import os
 import subprocess
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import asdict, dataclass
 from functools import partial
 from pathlib import Path
@@ -27,7 +28,7 @@ from scripts.ci_lab.checks import API, HEADERS, Checks, Output, PostRefused, Tok
 from scripts.ci_lab.delivery import CLASSES
 from scripts.ci_lab.outcomes import PASSED
 from scripts.ci_lab.remote.post_receive import BRANCH, GRADE_REFS, LAB_URL
-from scripts.ci_lab.scheduler import MIRROR_STORE, REQUIRED, Poster, Scheduler, State
+from scripts.ci_lab.scheduler import BATCH, FETCH_MS, MIRROR_STORE, REQUIRED, Poster, Scheduler, State
 from scripts.ci_lab.store import PREFIX
 from scripts.ci_lab.units import Unit
 from scripts.ci_lab.webhooks import HEAD_SUBJECT, NOTICE
@@ -39,6 +40,7 @@ __all__ = [
     "CONTENTS",
     "DURABLE",
     "PENDING",
+    "PROTECTED",
     "PULLS",
     "SUBJECT",
     "BusNotices",
@@ -63,11 +65,10 @@ CONTENTS = {"contents": "write"}
 PULLS = {"pull_requests": "write"}
 GITHUB = "https://github.com/"
 DEV = "dev"
+PROTECTED = frozenset({DEV, "main", "master", "v1"})
 SUCCESS = "success"
 TIMEOUT = 30
 ACCEPTED = (200, 201)
-BATCH = 50
-FETCH_MS = 100
 
 
 class RelayRefused(RuntimeError):
@@ -123,9 +124,10 @@ def _slug(repo: str) -> str:
 
 
 def pending(data: Mapping[str, Any]) -> Pending | None:
-    """Return the relay a head notice's data names: a pushed refs/grade/* head with a branch, else None."""
+    """Return the relay a head notice's data names: a pushed refs/grade/* head with a branch outside the protected
+    branches, else None."""
     ref, branch = data.get("ref"), data.get(BRANCH)
-    if not isinstance(ref, str) or not ref.startswith(GRADE_REFS) or not branch:
+    if not isinstance(ref, str) or not ref.startswith(GRADE_REFS) or not branch or branch in PROTECTED:
         return None
     return Pending(str(data["repo"]), str(data["head"]), ref, str(branch))
 
@@ -175,16 +177,18 @@ class Relay:
         self.lab = lab
 
     def tick(self) -> list[str]:
-        """Record the new notices' relays, then relay each pending head a closed grade answers and forget it."""
+        """Record the new notices' relays per head and branch, then relay each pending one a closed grade answers and
+        forget it once relayed; a relay that raises stays pending for the next tick."""
         actions: list[str] = []
         for item in self.notices.pending():
-            self.client.hset(PENDING, item.head, json.dumps(asdict(item)))
+            self.client.hset(PENDING, f"{item.head} {item.branch}", json.dumps(asdict(item)))
             actions.append(f"pending {item.head} for {item.branch}")
-        for head, raw in sorted(self.client.hgetall(PENDING).items()):
-            states = self.grades(head)
+        for key, raw in sorted(self.client.hgetall(PENDING).items()):
+            item = Pending(**json.loads(raw))
+            states = self.grades(item.head)
             if states:
-                self.client.hdel(PENDING, head)
-                actions.extend(self._relay(Pending(**json.loads(raw)), states))
+                actions.extend(self._relay(item, states))
+                self.client.hdel(PENDING, key)
         return actions
 
     def _relay(self, item: Pending, states: list[State]) -> list[str]:
@@ -200,17 +204,20 @@ class Relay:
 
 
 class BusNotices:
-    """Relays read from the bus consumer of lab head notices, each envelope acknowledged once read."""
+    """Relays read from the bus consumer of lab head notices, kept only for a trusted actor's push, each envelope
+    acknowledged once read."""
 
-    def __init__(self, consumer: Consumer) -> None:
+    def __init__(self, consumer: Consumer, trusted: Collection[str]) -> None:
         self.consumer = consumer
+        self.trusted = trusted
 
     def pending(self) -> list[Pending]:
-        """Return the relays of the next batch of notices."""
+        """Return the relays of the next batch of notices whose actor is trusted."""
         found: list[Pending] = []
         for delivery in self.consumer.fetch(BATCH, FETCH_MS):
-            item = pending(cast(Mapping[str, Any], delivery.event.data))
-            if item is not None:
+            data = cast(Mapping[str, Any], delivery.event.data)
+            item = pending(data)
+            if item is not None and data.get("actor") in self.trusted:
                 found.append(item)
             delivery.ack()
         return found
@@ -292,4 +299,5 @@ def build(environ: Mapping[str, str], scheduler: Scheduler, consumer: Consumer) 
 
     ports = Ports(pusher, Checks, PullRequests)
     lab = environ[LAB_URL].rstrip("/")
-    return Relay(scheduler.client, BusNotices(consumer), partial(closed, scheduler), ports, lab)
+    notices = BusNotices(consumer, scheduler.settings.trusted)
+    return Relay(scheduler.client, notices, partial(closed, scheduler), ports, lab)

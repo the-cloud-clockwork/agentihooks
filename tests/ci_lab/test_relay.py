@@ -15,6 +15,7 @@ import requests
 
 from scripts import github_app
 from scripts.ci_lab import relay
+from scripts.ci_lab import scheduler as scheduler_module
 from scripts.ci_lab.checks import Output
 from scripts.ci_lab.evidence import head_prefix
 from scripts.ci_lab.objects import LocalObjects
@@ -172,9 +173,21 @@ def test_a_grade_ref_notice_with_a_branch_is_pending() -> None:
 
 
 @pytest.mark.parametrize(
-    ("ref", "branch"), [(REF, ""), ("refs/heads/engineer-1", BRANCH), ("refs/gradex/t1", BRANCH), ("", BRANCH)]
+    ("ref", "branch"),
+    [
+        (REF, ""),
+        ("refs/heads/engineer-1", BRANCH),
+        ("refs/gradex/t1", BRANCH),
+        ("", BRANCH),
+        (REF, "dev"),
+        (REF, "main"),
+        (REF, "master"),
+        (REF, "v1"),
+    ],
 )
-def test_a_notice_of_another_ref_or_without_a_branch_is_not_pending(ref: str, branch: str) -> None:
+def test_a_notice_of_another_ref_without_a_branch_or_to_a_protected_branch_is_not_pending(
+    ref: str, branch: str
+) -> None:
     assert relay.pending(notice(ref, branch)) is None
 
 
@@ -226,6 +239,26 @@ def test_relayed_check_runs_carry_the_grade_run_its_units_and_the_lab_grade_page
     assert required.summary == f"2 units of required on {HEAD} against {BASE}, relayed from the lab grade"
 
 
+def test_a_relayed_green_grade_updates_the_open_pull_request_head_with_its_check_runs_in_the_same_grade(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = Calls()
+    request = Mock(return_value=answer(200, [{"html_url": PULL, "number": 9}]))
+    monkeypatch.setattr(requests, "request", request)
+    ports = relay.Ports(calls.pusher, calls.checks, lambda slug: relay.PullRequests(slug, Token()))
+    actions = relay.relay(grade("success"), BRANCH, ports, LAB)
+    assert [call for call in calls.log if call[0] in ("push", "post")] == [
+        ("push", HEAD, BRANCH),
+        ("post", HEAD, "lint", "completed", "success", False),
+        ("post", HEAD, "unit", "completed", "success", False),
+        ("post", HEAD, "required", "completed", "success", False),
+    ]
+    assert {output.run for output in calls.outputs} == {"run-7"}
+    assert actions[-1] == f"updated {PULL}"
+    request.assert_called_once()
+    assert request.call_args.args == ("GET", f"https://api.github.com/repos/{SLUG}/pulls")
+
+
 def test_a_red_grade_relays_nothing_and_names_its_failed_units() -> None:
     calls = Calls()
     actions = relay.relay(grade("failure", outcome=FAILED), BRANCH, calls.ports(), LAB)
@@ -255,7 +288,7 @@ def test_a_tick_holds_a_pending_head_until_a_grade_of_it_closes_then_relays_it_o
     grades[HEAD] = []
     assert engine.tick() == [f"pending {HEAD} for {BRANCH}"]
     assert calls.log == []
-    assert client.hget(relay.PENDING, HEAD) is not None
+    assert client.hget(relay.PENDING, f"{HEAD} {BRANCH}") is not None
     grades[HEAD] = [grade("success")]
     actions = engine.tick()
     assert actions[0] == f"pushed {HEAD} to {BRANCH}"
@@ -322,10 +355,44 @@ def test_a_tick_keeps_each_pending_head_apart() -> None:
     first, second = relay.Pending(REPO, HEAD, REF, BRANCH), relay.Pending(REPO, OTHER, "refs/grade/t2", "engineer-2")
     engine = relay.Relay(client, Notices([first, second]), found.__getitem__, calls.ports(), LAB)
     assert engine.tick() == [f"pending {HEAD} for {BRANCH}", f"pending {OTHER} for engineer-2"]
-    assert relay.Pending(**json.loads(client.hget(relay.PENDING, OTHER))) == second
+    assert relay.Pending(**json.loads(client.hget(relay.PENDING, f"{OTHER} engineer-2"))) == second
 
 
-def test_bus_notices_keep_grade_ref_heads_with_a_branch_and_acknowledge_every_envelope() -> None:
+def test_a_tick_keeps_one_head_pushed_to_two_branches_apart_and_relays_both() -> None:
+    client, calls = fake_redis(), Calls()
+    found: dict[str, list[State]] = {HEAD: []}
+    first, second = relay.Pending(REPO, HEAD, REF, BRANCH), relay.Pending(REPO, HEAD, "refs/grade/t2", "engineer-2")
+    engine = relay.Relay(client, Notices([first, second]), found.__getitem__, calls.ports(), LAB)
+    assert engine.tick() == [f"pending {HEAD} for {BRANCH}", f"pending {HEAD} for engineer-2"]
+    assert len(client.hgetall(relay.PENDING)) == 2
+    found[HEAD] = [grade("success")]
+    engine.tick()
+    assert [call for call in calls.log if call[0] == "push"] == [("push", HEAD, BRANCH), ("push", HEAD, "engineer-2")]
+    assert client.hgetall(relay.PENDING) == {}
+
+
+class Failing(Calls):
+    """Fake relay ports whose push fails before GitHub answers."""
+
+    def push(self, sha: str, branch: str) -> None:
+        """Fail the push."""
+        raise OSError("mirror fetch failed")
+
+
+def test_a_relay_that_raises_keeps_its_head_pending_for_the_next_tick() -> None:
+    client, calls = fake_redis(), Failing()
+    found = {HEAD: [grade("success")]}
+    engine = relay.Relay(
+        client, Notices([relay.Pending(REPO, HEAD, REF, BRANCH)]), found.__getitem__, calls.ports(), LAB
+    )
+    with pytest.raises(OSError, match="mirror fetch failed"):
+        engine.tick()
+    assert relay.Pending(**json.loads(client.hget(relay.PENDING, f"{HEAD} {BRANCH}"))) == relay.Pending(
+        REPO, HEAD, REF, BRANCH
+    )
+
+
+def test_bus_notices_keep_trusted_grade_ref_heads_with_a_branch_and_acknowledge_every_envelope() -> None:
     bus = open_bus(BusConfig())
     consumer = bus.lab_heads.consumer(relay.DURABLE, relay.SUBJECT)
     environ = {
@@ -339,16 +406,18 @@ def test_bus_notices_keep_grade_ref_heads_with_a_branch_and_acknowledge_every_en
     post_receive.run(lines, environ, bus.lab_heads, lambda sha: BASE, StringIO())
     bare = {key: value for key, value in environ.items() if not key.startswith("GIT_PUSH")}
     post_receive.run([f"{'0' * 40} {OTHER} refs/grade/t2\n"], bare, bus.lab_heads, lambda sha: BASE, StringIO())
-    notices = relay.BusNotices(cast(Consumer, consumer))
+    stranger = {**environ, post_receive.ACTOR: "stranger"}
+    post_receive.run([f"{'0' * 40} {OTHER} refs/grade/t3\n"], stranger, bus.lab_heads, lambda sha: BASE, StringIO())
+    notices = relay.BusNotices(cast(Consumer, consumer), frozenset({"agenticore-app[bot]"}))
     assert notices.pending() == [relay.Pending(REPO, HEAD, REF, BRANCH)]
     assert notices.pending() == []
     assert relay.SUBJECT == "ci.lab.head.notice"
 
 
-def test_bus_notices_fetch_one_batch_of_fifty_within_a_hundred_milliseconds() -> None:
+def test_bus_notices_fetch_one_batch_in_the_scheduler_s_batch_shape() -> None:
     consumer = Mock(fetch=Mock(return_value=[]))
-    assert relay.BusNotices(consumer).pending() == []
-    consumer.fetch.assert_called_once_with(50, 100)
+    assert relay.BusNotices(consumer, frozenset()).pending() == []
+    consumer.fetch.assert_called_once_with(scheduler_module.BATCH, scheduler_module.FETCH_MS)
 
 
 def test_closed_grades_of_a_head_are_the_runs_its_evidence_markers_name(tmp_path: Path) -> None:
@@ -419,7 +488,6 @@ def test_the_pull_requests_token_asks_only_pull_requests_write(monkeypatch: pyte
     minted = mint(monkeypatch, relay.PULLS)
     monkeypatch.setattr(requests, "request", Mock(return_value=answer(200, [{"html_url": PULL}])))
     relay.PullRequests("example/repo").open(BRANCH, "title", "body")
-    assert relay.PULLS == {"pull_requests": "write"}
     assert minted.call_args.kwargs["json"] == {"repositories": ["repo"], "permissions": {"pull_requests": "write"}}
 
 
@@ -466,7 +534,6 @@ def test_the_push_token_asks_only_contents_write(monkeypatch: pytest.MonkeyPatch
     minted = mint(monkeypatch, relay.CONTENTS)
     monkeypatch.setattr(relay.subprocess, "run", Mock(return_value=subprocess.CompletedProcess([], 0, "", "")))
     relay.GitPusher(cast(Mirror, Mock(spec=Mirror, store=tmp_path)), "example/repo").push(HEAD, BRANCH)
-    assert relay.CONTENTS == {"contents": "write"}
     assert minted.call_args.kwargs["json"] == {"repositories": ["repo"], "permissions": {"contents": "write"}}
 
 
@@ -482,13 +549,15 @@ def test_build_wires_the_relay_to_the_scheduler_grades_the_mirror_and_the_lab_ur
         post_receive.LAB_URL: f"{LAB}/",
     }
     client = fake_redis()
-    scheduler = cast(Scheduler, Mock(client=client, objects=LocalObjects(tmp_path / "objects")))
+    trusted = frozenset({"agenticore-app[bot]"})
+    settings = Mock(trusted=trusted)
+    scheduler = cast(Scheduler, Mock(client=client, objects=LocalObjects(tmp_path / "objects"), settings=settings))
     consumer = cast(Consumer, open_bus(BusConfig()).lab_heads.consumer(relay.DURABLE, relay.SUBJECT))
-    relay.build(environ, scheduler, consumer)
     engine = relay.build(environ, scheduler, consumer)
     assert engine.client is client
     assert engine.lab == LAB
     assert cast(relay.BusNotices, engine.notices).consumer is consumer
+    assert cast(relay.BusNotices, engine.notices).trusted is trusted
     pusher = cast(relay.GitPusher, engine.ports.pusher(REPO))
     assert pusher.slug == SLUG
     assert pusher.mirror == Mirror(tmp_path / "node", tmp_path / "deep" / "stores" / "acme--widgets", REPO)
