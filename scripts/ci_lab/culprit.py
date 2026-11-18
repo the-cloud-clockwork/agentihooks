@@ -130,7 +130,7 @@ class Culprits:
 
     def comment(self, url: str, text: str) -> str:
         """Post a comment on the pull request at url; return the comment's html url."""
-        number = url.rsplit("/", 1)[-1]
+        number = url.rpartition("/")[2]
         posted = self._send(f"repos/{self.repo}/issues/{number}/comments", {"body": text}, CREATED)
         return str(posted["html_url"])
 

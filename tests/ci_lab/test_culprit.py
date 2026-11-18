@@ -21,7 +21,6 @@ from scripts.hub.pulls import Observation, Pulls
 
 pytestmark = pytest.mark.unit
 
-FEATURE = "lab-red-group-culprit"
 GROUP = "c" * 40
 FIRST = "https://github.com/example/repo/pull/7"
 SECOND = "https://github.com/example/repo/pull/8"
@@ -86,7 +85,7 @@ def queued(url: str) -> tuple[Pulls, Consumer]:
     return hub, watch
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-red-group-culprit")
 def test_the_first_entry_red_alone_is_the_culprit() -> None:
     cache = Cache({"one": True, "two": False, "three": False})
     entries = (entry(FIRST, "one"), entry(SECOND, "two"), entry(THIRD, "three"))
@@ -97,14 +96,14 @@ def test_the_first_entry_red_alone_is_the_culprit() -> None:
     assert cache.asked == [("tests", "one"), ("tests", "two")]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-red-group-culprit")
 def test_an_entry_is_red_alone_when_any_unit_fails_while_another_misses_the_cache() -> None:
     cache = Cache({"two": False, "three": True})
     found = culprit.name(cache, GROUP, (entry(FIRST, "one", "two", "three"),))
     assert found == Finding(CULPRIT, GROUP, (FIRST,))
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-red-group-culprit")
 def test_a_red_group_green_entry_by_entry_is_an_interaction_naming_both() -> None:
     cache = Cache({"one": True, "two": True, "three": True})
     found = culprit.name(cache, GROUP, (entry(FIRST, "one"), entry(SECOND, "two", "three")))
@@ -113,31 +112,31 @@ def test_a_red_group_green_entry_by_entry_is_an_interaction_naming_both() -> Non
     assert found.removed == SECOND
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-red-group-culprit")
 def test_an_entry_with_no_units_to_grade_is_green_alone() -> None:
     found = culprit.name(Cache({"two": True}), GROUP, (entry(FIRST), entry(SECOND, "two")))
     assert found == Finding(INTERACTION, GROUP, (FIRST, SECOND))
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-red-group-culprit")
 def test_a_miss_ahead_of_the_first_red_entry_leaves_the_group_undecided() -> None:
     assert culprit.name(Cache({"two": False}), GROUP, (entry(FIRST, "one"), entry(SECOND, "two"))) is None
     assert culprit.name(Cache({"one": True}), GROUP, (entry(FIRST, "one"), entry(SECOND, "two"))) is None
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-red-group-culprit")
 def test_a_miss_behind_the_culprit_does_not_hold_the_finding() -> None:
     found = culprit.name(Cache({"one": False}), GROUP, (entry(FIRST, "one"), entry(SECOND, "two")))
     assert found == Finding(CULPRIT, GROUP, (FIRST,))
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-red-group-culprit")
 def test_a_group_of_fewer_than_two_entries_green_alone_names_nothing() -> None:
     assert culprit.name(Cache({}), GROUP, ()) is None
     assert culprit.name(Cache({"one": True}), GROUP, (entry(FIRST, "one"),)) is None
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-red-group-culprit")
 def test_the_culprit_comment_names_the_group_and_that_it_leaves_the_queue() -> None:
     assert culprit.body(Finding(CULPRIT, GROUP, (SECOND,)), DETAILS) == (
         f"The lab graded the merge group at {GROUP} red. Graded alone against dev from the lab's cache, "
@@ -146,7 +145,7 @@ def test_the_culprit_comment_names_the_group_and_that_it_leaves_the_queue() -> N
     )
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-red-group-culprit")
 def test_the_interaction_comment_names_every_entry_and_the_one_that_leaves() -> None:
     assert culprit.body(Finding(INTERACTION, GROUP, (FIRST, SECOND, THIRD)), DETAILS) == (
         f"The lab graded the merge group at {GROUP} red. Every entry is green alone against dev from the lab's "
@@ -155,7 +154,7 @@ def test_the_interaction_comment_names_every_entry_and_the_one_that_leaves() -> 
     )
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-red-group-culprit")
 def test_the_culprit_token_carries_only_pull_requests_and_contents_write(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GITHUB_APP_ID", "123")
     monkeypatch.setenv("GITHUB_APP_INSTALLATION_ID", "456")
@@ -177,7 +176,7 @@ def test_the_culprit_token_carries_only_pull_requests_and_contents_write(monkeyp
     assert request.call_args.kwargs["headers"]["Authorization"] == "Bearer lab-token"
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-red-group-culprit")
 def test_comment_posts_the_body_on_the_pull_request_and_returns_its_url(monkeypatch: pytest.MonkeyPatch) -> None:
     lab, request = poster(monkeypatch, answer(201, {"html_url": COMMENT}))
     assert lab.comment(SECOND, "text") == COMMENT
@@ -192,14 +191,14 @@ def test_comment_posts_the_body_on_the_pull_request_and_returns_its_url(monkeypa
     ]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-red-group-culprit")
 def test_a_refused_comment_raises_naming_the_request(monkeypatch: pytest.MonkeyPatch) -> None:
     lab, _ = poster(monkeypatch, answer(200, {"html_url": COMMENT}))
     with pytest.raises(PostRefused, match="^POST repos/example/repo/issues/8/comments answered 200$"):
         lab.comment(SECOND, "text")
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-red-group-culprit")
 def test_dequeue_removes_the_pull_request_by_its_node_id(monkeypatch: pytest.MonkeyPatch) -> None:
     node = answer(200, {"data": {"resource": {"id": "PR_node"}}})
     removed = answer(200, {"data": {"dequeuePullRequest": {"mergeQueueEntry": {"id": "MQE_entry"}}}})
@@ -214,15 +213,16 @@ def test_dequeue_removes_the_pull_request_by_its_node_id(monkeypatch: pytest.Mon
     assert culprit.DEQUEUE == "mutation($id: ID!) { dequeuePullRequest(input: {id: $id}) { mergeQueueEntry { id } } }"
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-red-group-culprit")
 def test_a_graphql_error_refuses_the_dequeue(monkeypatch: pytest.MonkeyPatch) -> None:
     node = answer(200, {"data": {"resource": {"id": "PR_node"}}})
-    lab, _ = poster(monkeypatch, node, answer(200, {"errors": [{"message": "not queued"}], "data": None}))
-    with pytest.raises(PostRefused, match="^POST graphql answered errors: not queued$"):
+    errors = [{"message": "not queued"}, {"message": "stale head"}]
+    lab, _ = poster(monkeypatch, node, answer(200, {"errors": errors, "data": None}))
+    with pytest.raises(PostRefused, match="^POST graphql answered errors: not queued; stale head$"):
         lab.dequeue(SECOND)
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-red-group-culprit")
 @pytest.mark.parametrize("resource", [None, {}], ids=["no-resource", "not-a-pull-request"])
 def test_a_url_that_names_no_pull_request_refuses_the_dequeue(
     monkeypatch: pytest.MonkeyPatch, resource: dict[str, str] | None
@@ -233,14 +233,14 @@ def test_a_url_that_names_no_pull_request_refuses_the_dequeue(
     assert request.call_count == 1
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-red-group-culprit")
 def test_a_refused_graphql_answer_raises_naming_its_status(monkeypatch: pytest.MonkeyPatch) -> None:
     lab, _ = poster(monkeypatch, answer(502))
     with pytest.raises(PostRefused, match="^POST graphql answered 502$"):
         lab.dequeue(SECOND)
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-red-group-culprit")
 def test_the_dequeue_event_of_the_removed_entry_carries_its_culprit() -> None:
     hub, watch = queued(SECOND)
     found = Finding(INTERACTION, GROUP, (FIRST, SECOND))
@@ -252,7 +252,7 @@ def test_the_dequeue_event_of_the_removed_entry_carries_its_culprit() -> None:
     assert events[-1].data == {"url": SECOND, "state": "open", "head": "a1", "queued": False, "culprit": named}
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-red-group-culprit")
 def test_a_dequeue_seen_on_github_carries_no_culprit() -> None:
     hub, watch = queued(SECOND)
     hub.observe(Observation(SECOND, None, None, False))
@@ -261,7 +261,7 @@ def test_a_dequeue_seen_on_github_carries_no_culprit() -> None:
     assert events[-1].data == {"url": SECOND, "state": "open", "head": "a1", "queued": False}
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-red-group-culprit")
 def test_remove_comments_on_each_named_entry_then_announces_and_dequeues_the_removed_one(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -289,7 +289,7 @@ def test_remove_comments_on_each_named_entry_then_announces_and_dequeues_the_rem
     assert events[-1].data["culprit"] == named
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-red-group-culprit")
 def test_remove_announces_the_culprit_before_the_dequeue_is_sent(monkeypatch: pytest.MonkeyPatch) -> None:
     hub, watch = queued(SECOND)
     lab, _ = poster(monkeypatch, answer(201, {"html_url": COMMENT}), answer(502))
