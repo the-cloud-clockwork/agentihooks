@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from hooks.serena_router.binding import ROOT_ARG
+
 # The MCP SDK loads inside the tests: every worker of a shard collects this file, one worker runs every file that loads it.
 pytestmark = pytest.mark.xdist_group("mcp-sdk")
 
@@ -82,8 +84,6 @@ async def test_each_session_edits_only_its_own_worktree(router, repo):
 
 @pytest.mark.feature("serena-router-routes-each-call-by-its-carried-root")
 async def test_one_session_routes_each_call_by_the_root_it_carries(router, repo):
-    from hooks.serena_router.binding import ROOT_ARG
-
     async with connect(router) as session:
         await session.call_tool("activate_project", {"project": str(repo["a"])})
         await session.call_tool("activate_project", {"project": str(repo["b"])})
@@ -102,8 +102,6 @@ async def test_one_session_routes_each_call_by_the_root_it_carries(router, repo)
 
 @pytest.mark.feature("serena-router-routes-each-call-by-its-carried-root")
 async def test_a_carried_primary_root_refuses_edits_on_a_worktree_session(router, repo):
-    from hooks.serena_router.binding import ROOT_ARG
-
     async with connect(router) as session:
         await session.call_tool("activate_project", {"project": str(repo["a"])})
         edit = await session.call_tool(
@@ -119,16 +117,23 @@ async def test_a_carried_primary_root_refuses_edits_on_a_worktree_session(router
 
 
 @pytest.mark.feature("serena-router-routes-each-call-by-its-carried-root")
-async def test_a_carried_root_outside_a_checkout_is_refused(router, repo, tmp_path):
-    from hooks.serena_router.binding import ROOT_ARG
+async def test_a_carried_root_that_is_no_checkout_is_refused_with_the_activation_hint(router, repo, tmp_path):
+    from hooks.serena_router.server import UNBOUND
 
     outside = tmp_path / "outside"
     outside.mkdir()
     async with connect(router) as session:
         await session.call_tool("activate_project", {"project": str(repo["a"])})
-        result = await session.call_tool("find_symbol", {ROOT_ARG: str(outside)})
-    assert result.isError
-    assert _text(result) == f"{outside} is not inside a git checkout"
+        await session.call_tool("activate_project", {"project": str(repo["b"])})
+        _git(repo["primary"], "worktree", "remove", "--force", str(repo["b"]))
+        stray = await session.call_tool("find_symbol", {ROOT_ARG: str(outside)})
+        removed = await session.call_tool("find_symbol", {ROOT_ARG: str(repo["b"])})
+        carried = await session.call_tool("find_symbol", {ROOT_ARG: str(repo["a"])})
+    assert stray.isError
+    assert _text(stray) == f"{outside} is not inside a git checkout. {UNBOUND}"
+    assert removed.isError
+    assert _text(removed) == f"{repo['b']} does not exist. {UNBOUND}"
+    assert _text(carried) == f"root={repo['a']}"
 
 
 async def test_child_read_inherits_parent_worktree_without_activation(router, repo):

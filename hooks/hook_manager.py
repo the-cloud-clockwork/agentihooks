@@ -1313,8 +1313,10 @@ def _input_rewrite(payload: dict[str, Any], tool_name: str) -> tuple[dict[str, A
 
     The patch rides an allow decision, so it is emitted only under bypass permissions, where no prompt is skipped.
     """
+    from hooks.config import SERENA_EDIT_GUARD_ENABLED
+
     rewrite: tuple[dict[str, Any], str] | None = _credential_guard(payload, tool_name)
-    if rewrite is not None or not tool_name.startswith("mcp__serena__"):
+    if rewrite is not None or not SERENA_EDIT_GUARD_ENABLED or not tool_name.startswith("mcp__serena__"):
         return rewrite
     from hooks.context.serena_binding import rewrite as serena_rewrite
     from hooks.targets.capabilities import applies_input_rewrite

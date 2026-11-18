@@ -186,3 +186,18 @@ def test_pre_tool_use_never_injects_outside_bypass_or_on_other_targets(
     hm.on_pre_tool_use(_payload("find_symbol", {}))
     assert ROOT_ARG not in capsys.readouterr().out
     assert store.hgetall(redis_key("serena_root", SESSION)) == {"": str(repo["a"])}
+
+
+@pytest.mark.feature(FEATURE)
+def test_the_serena_off_switch_records_and_carries_nothing(
+    store: fakeredis.FakeRedis,
+    repo: dict[str, Path],
+    forced_claude: None,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr("hooks.config.SERENA_EDIT_GUARD_ENABLED", False)
+    hm.on_pre_tool_use(_payload("activate_project", {"project": str(repo["a"])}))
+    hm.on_pre_tool_use(_payload("find_symbol", {}))
+    assert ROOT_ARG not in capsys.readouterr().out
+    assert store.hgetall(redis_key("serena_root", SESSION)) == {}

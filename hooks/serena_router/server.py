@@ -72,7 +72,7 @@ async def dispatch(
     try:
         binding = await carried_binding(binding, arguments)
     except BindingError as exc:
-        return _text(str(exc), error=True)
+        return _text(f"{exc}. {UNBOUND}", error=True)
     arguments = {key: value for key, value in arguments.items() if key != ROOT_ARG}
     if binding.root is None:
         return _text(UNBOUND, error=True)
