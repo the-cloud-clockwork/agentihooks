@@ -1,0 +1,6 @@
+{
+  "scripts/reused_coverage.py:scripts.reused_coverage.x__moved:a96201d9aabd7422c301e5929a90add260d9442187f031a1506f8d2d1bc70d45": {
+    "reader": "standards-reader",
+    "reason": "line_map keys start at 1, so lines.get(0) is None and _moved returns None before the sign test, making number >= 0 and number > 0 identical."
+  }
+}

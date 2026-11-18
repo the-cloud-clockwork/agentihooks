@@ -539,6 +539,24 @@ def test_a_capture_names_its_test_before_the_last_parenthesised_phase(tmp_path: 
     assert sorted(path.name for path in out.glob("capture-*.json")) == ["capture-1.json", "capture-2.json"]
 
 
+def test_captures_are_decoded_as_utf8_whatever_the_locale(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source, out = tmp_path / "dev", tmp_path / "head"
+    (source / "sources").mkdir(parents=True)
+    (source / "sources" / "page.js").write_text("page")
+    capture = {"result": [{"source": "page"}], "test": "tests/test_a.py::kept (call)"}
+    (source / "capture-1.json").write_text(json.dumps(capture))
+    read = Path.read_text
+    encodings: list[object] = []
+
+    def recorded(self: Path, *args: Any, **kwargs: Any) -> str:
+        encodings.append(kwargs.get("encoding", args[0] if args else None))
+        return read(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", recorded)
+    assert reused_coverage.keep_captures(source, out, {"tests/test_a.py::kept"}) == 1
+    assert encodings == ["utf-8"]
+
+
 def test_a_run_of_one_repeated_line_past_the_autojunk_size_still_maps_line_for_line() -> None:
     run = "\n".join(["pass"] * 250)
     lines = reused_coverage.line_map(f"old = 1\n{run}\nend = 1\n", f"new = 1\n{run}\nstop = 1\n")

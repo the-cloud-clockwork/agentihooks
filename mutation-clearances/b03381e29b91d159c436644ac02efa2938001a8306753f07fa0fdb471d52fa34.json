@@ -1,0 +1,6 @@
+{
+  "scripts/reused_coverage.py:scripts.reused_coverage.x_keep_captures:773b0d02fe3ed1eb1522eb60deacbfcb68f17fb7dd55a9d284669bc75be5e90a": {
+    "reader": "standards-reader",
+    "reason": "Python normalizes codec names case-insensitively, so read_text(encoding=\"UTF-8\") and read_text(encoding=\"utf-8\") use the same codec."
+  }
+}
