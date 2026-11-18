@@ -1969,6 +1969,166 @@ whose work ended.
 | The hive logs `hive execution stops for swarm <slug> failed (<error>)` | The error type and message it prints | Fix the cause the error names. A NATS permission error means the hive's bus credential lacks the stop grants: on the workstation root hive, restart the hive service: `hive run` compares the stored root credential's publish and subscribe grant with a fresh mint at start and re-mints it when they differ, logging `hive re-minted the root bus credential in <path>`; a `hive kept the stored root bus credential (<reason>)` line names why it could not, and `agentihooks hive root-bus` mints it by hand. On a member hive, run `agentihooks hive refresh`. |
 | The tick prints `could not send the stop for <agent>, retrying next tick: failed (<error>)` | The error, NATS from the controller and the controller's bus credentials | Fix the bus; the next pass sends the stop again. |
 
+### Resuming a dead agent the hub started
+
+When the pane of a hub started agent dies before its work ends, its hive reopens the agent's own conversation in the
+same seat, under the same task claim. This is the dead resume the tick gives agents it launched itself (see
+[Outage holds and recovery](swarm.md#outage-holds-and-recovery)). The tick's reap step leaves hub admitted agents
+to the hub, so on the `events` engine the hub's `lifecycle` reactor decides the resume and sends the agent's hive a
+`resume` command order. When the resume cannot run, the agent is dropped and its task reopens for a fresh agent.
+
+Before [pull request #11246](https://github.com/the-cloud-clockwork/agentihooks/pull/11246) the reactor had no
+resume. It dropped every dead hub started agent and reopened its task, so the next agent started without the dead
+agent's conversation.
+
+#### Which exits are resumed
+
+An `execution.exited` for a dead pane reaches the reactor two ways:
+
+- the hive publishes it when its execution report shows the agent's pane `exited` or `dead`;
+- the hub's `reconciler` calls the reactor's handler directly on each five minute pass while the hive's latest report
+  shows the pane ended, no longer lists the agent's recorded pane or, for a hub admitted agent past its startup
+  window, no longer lists the agent at all.
+
+Other exits carry a `reason`: the hub's `hive-loss` reactor publishes `hive-lost` and the reconciler `lost` for an
+execution on a lost hive, and the hive publishes `stopped` after it honors an execution stop.
+
+The reactor first matches the exit to the spoke claim and the execution record. It holds the exit while an outage
+holds the agent or the tick's outage recovery of the agent is still pending (see
+[Outage holds and recovery](swarm.md#outage-holds-and-recovery)). For an execution whose spoke claim is still
+`started`, it then orders a resume only when every one of these holds:
+
+| Check | When it fails |
+|---|---|
+| The agent's hive is known: the agent record's hive, else the host its runtime target names. | No resume. |
+| The exit carries no `reason`. | No resume. |
+| No deliberate exit is recorded for the agent. `agentihooks terminate-agent` records one; the reactor consumes it here. | No resume. |
+| The execution has had fewer than three resumes (`RECOVERY_ATTEMPTS`), counted in `resumes` on its spoke claim. | No resume. |
+| The swarm is not `stopped` or `stopping`. | No resume. |
+| The task row's claim generation is the one the execution started under. | No resume. |
+| The tick's dead resume gate holds: no handoff was submitted for the task, the agent recorded a conversation id, its conversation is under the swarm's compact limit and has not ended after each of its last three tick resumes, and the agent still holds its record, its seat as occupant, its task row in `claimed` or `pr` naming it, and its task claim. | No resume. |
+
+The tick counts only its own resumes toward that gate; the hub's resumes count only in the spoke claim's
+`resumes`. An exit that orders no resume takes the normal exit path: the reactor removes the agent record,
+releases the launch slot and the claim, and returns a task the agent still holds to `open` with no claimant, as in
+[How the hive honors the stop](#how-the-hive-honors-the-stop). The next offer goes to a fresh agent.
+
+#### The resume order
+
+The reactor writes the order into the spoke claim, with the agent's launch time and pane as it judged them and the
+time of the exit, and raises the claim's `resumes` count. It then puts the order on the hive's command stream,
+`agentihooks:hive:<hive>:commands` under the default keyspace root. The order id is
+`resume:<execution>:<generation>:<attempt>`, so each attempt is a new order with its own receipt,
+`agentihooks:hive:<hive>:command:<order id>`. The order carries the swarm, the agent, the execution, its generation,
+the judged launch time and pane, and the prompt the tick's resume also types:
+
+```text
+Your pane ended unexpectedly. Continue your task in this conversation and seat. Read your task progress and proof and handle your inbox before continuing.
+```
+
+While the order is out the agent keeps its record, seat, task claim and task row, and the exit is held. Each later
+reading of the exit decides from the order's receipt:
+
+| What the reactor reads | Action |
+|---|---|
+| No answer, less than 30 minutes (`RESUME_DEADLINE_MS`) after the exit that ordered the resume | Holds the exit. |
+| Answer `done` | Holds the exit. The agent runs in its new pane. |
+| Answer `failed` | Posts a swarm notice and drops the agent; its task reopens. |
+| No answer 30 minutes after the exit that ordered the resume | Posts a swarm notice naming `its hive never answered` and drops the agent; its task reopens. |
+| An exit observed before the resumed pane's launch time | Holds it: the exit belongs to the old pane. |
+| An exit of the resumed pane | Judges it as a new death and orders the next attempt. |
+
+The notice appears in the ledger's notifications panel:
+
+```text
+Starting a fresh agent after engineer@<code>-<n> ended because resume failed: <failure>.
+```
+
+Each death gets one resume order, and the exit of a resumed pane is judged as a new death. After the third resume
+of the same execution, the next death drops the agent without a notice and its task reopens.
+
+#### How the hive runs the order
+
+The hive reads its command stream on every heartbeat, every fifteen seconds, including while it drains. Every other
+command order runs inside the heartbeat. A resume order runs in its own process,
+`python -m scripts.hive.resume_order <hive> <order>`, so a slow herdr resume never delays the heartbeat:
+
+1. The heartbeat sets the running marker `<receipt>:running` for 120 seconds, counts the start in the receipt's `runs`
+   field and starts the process. While the marker lives, no second process starts.
+2. The process renews the marker every 30 seconds while it works.
+3. A marker that expires with no answer, as after a crashed process, lets a later heartbeat start another process.
+   When a fourth start comes due, the heartbeat stores the answer `failed` with `resume never answered` instead.
+4. The order stays on the command stream until its receipt holds an answer; the next heartbeat then deletes it.
+5. The first answer stored is final: a late answer never overwrites it. An exception while the resume runs stores
+   `failed` with `error: <exception type>`. A process that fails before it opens its Redis client stores no
+   answer: its marker expires and a later heartbeat starts another process, as in step 3. A process that cannot be
+   started raises out of the heartbeat and ends `hive run`; the service starts it again five seconds later, and the
+   first heartbeat after the marker expires starts the order again.
+
+The hive keeps every resume order process it starts, so a restart on a moved checkout waits for a resume in flight
+(see [Adding a machine to a hive](#adding-a-machine-to-a-hive)).
+
+Inside the process the hive:
+
+1. Reads the execution record and checks that it names the agent, generation, launch time and pane the hub judged,
+   that it runs on this hive (the host its runtime target names, else its record's hive), and that the agent still
+   holds its task claim. Any difference answers `failed` with `identity`.
+2. Reaps any process still running under the agent's name. A failed reap answers `failed` with the runtime's detail,
+   such as `a process carrying <agent> still runs`.
+3. Reopens the agent's conversation in its seat through the runtime's native resume, the same herdr resume the tick
+   uses. The swarm's repository is passed as the origin the swarm recorded at its switch to `events`
+   (`repo_origin`), when it has one, instead of the workstation path. A refused resume answers `failed` with the
+   runtime's detail.
+4. Checks the record and the claim again. When a successor claimed the task during the resume, it closes the new pane
+   and answers `failed` with `identity`.
+5. Records the new pane and launch time on the agent record and resets its idle count to zero. A failed write closes
+   the new pane and answers `failed` with `error: <exception type>`.
+6. Answers `done`.
+
+The hub checks the ledger task row, its claim generation and the seat before it orders a resume. The hive checks the
+execution record and the task claim before and after the resume. A successor's work is therefore never resumed by
+the old agent: a successor's claim, or a newer launch that replaced the record, makes the hive answer `identity`.
+
+#### Upgrading for the hub resume
+
+The hub and every hive need a release carrying pull request #11246:
+
+- A hub on an older release orders no resume; every dead hub started agent is dropped and its task reopens.
+- A hive on an older release cannot parse a resume order and deletes it unanswered, so the hub waits the full 30
+  minutes before it hands the task to a fresh agent. An order leaves out a launch time or pane that is unset, and
+  other command orders never set them, so older hives still parse those.
+
+A hive process loads its code when it starts: restart `agentihooks-hive` with `systemctl --user restart
+agentihooks-hive` on a workstation or VM, or roll the hive pods on Kubernetes.
+
+#### Checking a resume on a live swarm
+
+```bash
+# The resume orders a hive received, with their running markers
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" --scan --pattern 'agentihooks:hive:<hive>:command:resume:*'
+
+# One order's receipt: sent, runs and, once answered, ack
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" HGETALL 'agentihooks:hive:<hive>:command:resume:<execution>:<generation>:<attempt>'
+# ack {"status": "done", "target": {"host_id": "<hive>"}, "failure": ""}
+
+# The agent keeps its seat and task
+agentihooks swarm <slug> status
+```
+
+A receipt expires a day after its last write. The feature map entry `hub-dead-resume` lists the regression tests for
+this path.
+
+#### Troubleshooting dead agent resumes
+
+| Symptom | Check | Fix |
+|---|---|---|
+| A hub started agent died and its task reopened with no notice | The exit's reason, the task's handoff, `agentihooks swarm <slug> status` and the swarm state | Expected for a lost hive, an execution stop, a deliberate `terminate-agent`, a submitted handoff, a conversation at its compact limit, a third resume already spent or a stopped swarm. With none of those, the hub predates pull request #11246: roll it onto a release that carries it. |
+| Notice `resume failed: its hive never answered` | The hive's release and its service | The hive predates pull request #11246, or its service is not running. Upgrade or restart it as in [Upgrading for the hub resume](#upgrading-for-the-hub-resume). |
+| Notice `resume failed: resume never answered` | The hive's service log | Three resume processes started and none stored an answer. Read the hive log for the process's error. |
+| Notice `resume failed: identity` | The task's claimant and the agent record | The record or claim changed between the hub's order and the hive's resume: a successor took the task or a newer launch replaced the record. Expected: the old agent is dropped, and the task stays with its successor or reopens for a fresh agent. |
+| Notice `resume failed: a process carrying <agent> still runs` | herdr on that hive | The old session could not be reaped. Close it on the hive; the next death of a later agent resumes normally. |
+| Notice `resume failed: <runtime detail>` or `resume failed: error: <exception type>` | The detail it names | Fix the cause it names: a missing conversation, the hive's checkout of the repository, or the error type in the hive log. |
+
 ### Running a spoke
 
 With `AGENTIHOOKS_DEPLOYMENT=distributed`, `agentihooks swarm spoke` runs the master lane spoke on the workstation,
@@ -2675,6 +2835,138 @@ redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" GET "$P:hive:<id>:executions" \
 
 An empty answer means the hive has not beaten for 45 seconds.
 
+### Join reports after a hive restart
+
+Every agent on a hive writes one join report when its session starts: the SessionStart join hook grades its checks
+and stores the report in the hash `<root>:hive:<id>:join-reports`, one field per execution id. When the session
+ends, the hook writes `ended_at`, `exit_reason` and `status` into the same report; a Codex session's supervisor
+writes the same end with `exit_reason` `codex transport exited` when its transport exits. A report without
+`ended_at` keeps the agent listed on its hive while its agent record runs, and counted by the hive's drain.
+
+An agent killed together with its pod never runs that end. The hive daemon's join report heartbeat, which runs on
+every 15 second beat, ends those reports itself once the restarted daemon is back.
+
+#### What a join report records about its member
+
+| Field | Value |
+|---|---|
+| `member` | The host name of the machine or pod that runs the agent, `registry.member_name()`: the pod name on a worker hive. |
+| `epoch` | `<boot id>/<start tick>`: the kernel boot id from `/proc/sys/kernel/random/boot_id`, and the start time of process 1 in clock ticks since boot, field 22 of `/proc/1/stat`. Empty when either cannot be read. |
+
+A container restart inside the same pod, such as after an OOM kill, keeps the pod name and starts a new process 1,
+so the epoch changes. A reboot changes the boot id. Restarting only the `agentihooks-hive` service on a machine
+whose process 1 is its init system keeps the epoch. The start tick counts from boot, so a step of the wall clock
+does not move it.
+
+The join hook runs in the agent's session and the heartbeat in the hive daemon, so the check relies on both reading
+the same host name and the same process 1. The hive daemon and the agents it starts run in the same pod or on the
+same machine, and the hive chart sets none of `hostPID`, `hostNetwork` or `shareProcessNamespace`. Pull
+request #11279 recorded the agent hook and the daemon reading one PID namespace on a worker pod and on the
+workstation root hive; compare them on a live hive with the commands in
+[Checking it on a live hive](#checking-it-on-a-live-hive).
+
+#### What the heartbeat does on each beat
+
+The heartbeat takes the hive's reports whose `status` is `running` and judges each in this order:
+
+1. **Restarted member.** It ends the report with `exit_reason` `agent ended with its member's restart` and `status`
+   `ended` when all of these hold: the daemon can read its own epoch, the report's `member` is the daemon's own host
+   name, and the report carries an epoch that differs from the daemon's.
+2. **Gone from the swarm.** It ends the report with `exit_reason` `agent gone from the swarm` and `status` `ended`
+   when the swarm holds no agent record for the report's swarm, execution id and generation in a state other than
+   `finished` or `ended`.
+3. **Refresh.** A report both checks keep, whose `heartbeat_at` is 180 seconds old or older, gets `heartbeat_at` set
+   to the beat time and its checks probed again. A check that passed at join stays passed.
+
+The first two checks run on every beat; only the refresh waits 180 seconds. A restarted hive therefore ends the
+reports it wrote before the restart on its first beat. An end is written only while the stored report still
+belongs to the same session. Ended reports stay in the hash.
+
+The restart check sorts the running reports this way:
+
+| Report | Restart check |
+|---|---|
+| Written by this member under the current epoch | Kept |
+| Written by this member under an earlier epoch | Ended with `agent ended with its member's restart` |
+| Written by another member of the same hive | Kept; only the member that wrote a report ends it for a restart |
+| No `member` or no `epoch`, written by a release before [pull request #11279](https://github.com/the-cloud-clockwork/agentihooks/pull/11279) | Kept |
+| Any report, while the daemon cannot read its own epoch | Kept |
+
+A kept report still goes through the gone check and the refresh.
+
+#### What reads the report
+
+| Reader | While the report runs | Once it has ended |
+|---|---|---|
+| `agentihooks hive list` | Lists the agent under its hive with its grade, misses and `heartbeat=<ms>`, the last heartbeat time in epoch milliseconds, while its execution still runs, and counts it in `workers=` unless it is a master. | Drops the agent from the hive's lines and from `workers=`. |
+| `agentihooks hive drain`: the pod's preStop, the release roll and `hive remove` | Counts the agent as running and waits for it to hand off. When one member of a shared hive drains, it counts only agents whose recorded process namespace is its own. | No longer counts the agent, so the drain stops waiting on it. |
+| The [stall watchdog](swarm.md#stall-watchdog) | Counts a task's hive owner as live while its report runs with a heartbeat no older than 360 seconds, twice the refresh interval. | Stops counting that owner as live, so the task can stall as `owner not live` after `AGENTIHOOKS_STALL_OWNER_MINUTES` (default 10). |
+| `agentihooks swarm <slug> status` | Prints a `hive join` line for the agent. | Adds `exit=<reason>` and `status=ended` to that line. |
+
+```bash
+agentihooks swarm <slug> status | grep 'hive join'
+# hive join  engineer@<code>-<n>  complete  misses=none  heartbeat=<ms>
+# hive join  engineer@<code>-<m>  complete  misses=none  heartbeat=<ms>  exit=agent ended with its member's restart  status=ended
+```
+
+The fields are separated by tabs, shown aligned here.
+
+The heartbeat changes only the join report. The agent record, its task claim and its inbox items stay until the
+controller tick retires the agent, as in [A hive worker whose pane is gone](#a-hive-worker-whose-pane-is-gone).
+
+Before [pull request #11279](https://github.com/the-cloud-clockwork/agentihooks/pull/11279) the heartbeat refreshed
+every running report whose agent record still ran. That pull request records the incident: on 14 November the
+worker container of `swarm-hive-001` was OOM killed and restarted at 17:09:58 UTC. At 21:48 UTC `ps` in the pod
+showed no process for two engineers, while their join reports still read `running` with heartbeats from 21:50 UTC,
+so `hive list` showed both as `complete` and `hive drain` counted them as running.
+
+#### Upgrade
+
+The join hook that records `member` and `epoch` and the daemon that compares them run from the same agentihooks
+install on the hive. Upgrade the hive to a release carrying
+[pull request #11279](https://github.com/the-cloud-clockwork/agentihooks/pull/11279) and restart its hive service or
+roll its pod. Agents that start after the upgrade write both fields; reports of agents that started earlier carry
+neither and are kept by the restart check.
+
+#### Limitations
+
+- A report without `member` or `epoch` ends only through the gone check, when its agent record ends.
+- A pod that is deleted and replaced, rather than restarted, comes back under a new host name. The replacement
+  reads the old reports as another member's and keeps refreshing them until their agent records end and the gone
+  check ends them.
+- The check needs each member to have its own host name and its own process 1. With `hostPID` set, process 1 is
+  the node's init, so a container restart leaves the epoch unchanged; with `hostNetwork` set, every pod on a node
+  takes the node's host name.
+
+#### Checking it on a live hive
+
+```bash
+# On the hive: its member name and current epoch
+hostname
+echo "$(cat /proc/sys/kernel/random/boot_id)/$(sed 's/.*) //' /proc/1/stat | cut -d' ' -f20)"
+# swarm-hive-001-agentihooks-swarm-worker-hive-68c5d5fb-wwszw
+# e8adb1a1-f80b-4d66-962f-26f39eacd37d/189301145
+
+# On the hive: the daemon and a Claude agent process read one PID namespace
+readlink /proc/"$(pgrep -f 'agentihooks hive run' | head -1)"/ns/pid /proc/"$(pgrep -x claude | head -1)"/ns/pid
+# pid:[4026532913]
+# pid:[4026532913]
+
+# From any joined machine: the running reports with the member and epoch each recorded
+P=${AGENTIHOOKS_SWARM_KEY_PREFIX:-agentihooks}
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" HVALS "$P:hive:<id>:join-reports" \
+  | jq -c 'select(.status == "running") | {agent, member, epoch, heartbeat_at}'
+
+# The reports the heartbeat ended for a restart
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" HVALS "$P:hive:<id>:join-reports" \
+  | jq -c --arg r "agent ended with its member's restart" 'select(.exit_reason == $r) | {agent, member, epoch, ended_at}'
+```
+
+A running report whose `member` is the hive's host name and whose `epoch` differs from the hive's current one is
+ended on the hive's next beat. If it is still running a beat later, either the hive daemon runs a release older than
+pull request #11279, or the daemon cannot read its own epoch because `/proc/sys/kernel/random/boot_id` or
+`/proc/1/stat` is unreadable in its pod, which keeps every report.
+
 ### Troubleshooting
 
 | Symptom | Check | Fix |
@@ -2685,6 +2977,8 @@ An empty answer means the hive has not beaten for 45 seconds.
 | A spawn failed with `the hive launch order ended before its acknowledgement` | `agentihooks hive list` for the order's hive | The order's receipt holds no acknowledgement, so the hive never answered it. Check that the hive beats and its `agentihooks-hive` service runs. |
 | A hive worker whose pane closed stays `suspect` and holds its seat | The hive's report, as in [A hive worker whose pane is gone](#a-hive-worker-whose-pane-is-gone) | `pane_ids` `null` or missing: herdr refused the listing, or the hive daemon predates pull request #5387; fix herdr on the hive or upgrade it. `observed_at` older than the launch: the hive's snapshot is stale; check that it beats. A fresh heartbeat from the worker keeps the claim until it ages past ten minutes. |
 | The tick printed `retired <agent>: its hive pane is gone` for a worker that was running | The report's `process_namespace` and `started_at` against the worker's launch | The hive pod restarted after the launch, which ends every process it ran. The task reopens for a successor. |
+| After a hive pod restart, `hive list` still shows agents with fresh heartbeats whose processes are gone, and `hive drain` waits on them | Each running join report's `member` and `epoch` against the hive's own, with the commands in [Join reports after a hive restart](#join-reports-after-a-hive-restart) | No `member` or `epoch`: the report predates pull request #11279 and ends when its agent record ends. A `member` naming another pod: the pod was replaced, not restarted, so the report ends only when its agent record ends. The same member with an earlier epoch: the hive daemon runs an older release, so upgrade the hive; or the daemon cannot read its own epoch, so check that the two `/proc` files the epoch comes from are readable in the pod. The same member and epoch: the agent should still run, so look for its process in the pod. |
+| `swarm status` shows `exit=agent ended with its member's restart` for an agent | The hive pod's restart time against the agent's launch | Expected: the agent's process ended with the restart, so `hive list` and the drain no longer count it. The agent record, its claim and its inbox items stay until the controller tick retires the agent, as in [A hive worker whose pane is gone](#a-hive-worker-whose-pane-is-gone). |
 
 ## Hive placement for one swarm on a local machine
 
@@ -2910,10 +3204,12 @@ The `agentihooks-swarm` chart runs worker pods from the hive worker image. Each 
 When the pod stops, for an image update, a rollout or a node drain, its preStop runs `agentihooks hive drain --wait
 <workers.drainSeconds>` (default 3600): the hive sets `draining=yes`, so placement sends it no new agent, sends
 each agent it hosts one inbox order to hand off, so the agent's successor starts on another hive, and waits until no
-agent it hosts is running. The drain writes its result to the pod log. The grace period is `workers.drainSeconds` plus
-30 seconds, so a Recreate rollout starts the new pod as soon as the old hive's agents hand off, or when the wait runs
-out. With `workers.rollout.enabled` the drain is bounded by `workers.rollout.drainSeconds` and the hives roll one at a
-time; see [Release roll one hive at a time](#release-roll-one-hive-at-a-time).
+agent it hosts is running. An agent counts as running while its join report has not ended; see
+[Join reports after a hive restart](#join-reports-after-a-hive-restart). The drain writes its result to the pod log.
+The grace period is `workers.drainSeconds` plus 30 seconds, so a Recreate rollout starts the new pod as soon as the
+old hive's agents hand off, or when the wait runs out. With `workers.rollout.enabled` the drain is bounded by
+`workers.rollout.drainSeconds` and the hives roll one at a time; see
+[Release roll one hive at a time](#release-roll-one-hive-at-a-time).
 
 The bundle origin and the token come from the hive settings record through `workers.envFromSecrets`. Write the
 whole record from the workstation with one command:
