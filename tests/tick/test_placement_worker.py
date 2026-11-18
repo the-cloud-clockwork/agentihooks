@@ -107,6 +107,7 @@ def test_a_step_ready_beside_more_lock_takers_than_workers_starts_while_they_wai
     assert {record.name: record.outcome for record in rows} == {step.name: engine.OK for step in steps}
 
 
+@pytest.mark.feature("placement-lock-steps-on-one-placement-worker")
 def test_lock_taking_steps_of_a_pass_run_one_at_a_time_on_its_one_placement_worker() -> None:
     guard = Lock()
     running: list[int] = [0]
@@ -129,6 +130,7 @@ def test_lock_taking_steps_of_a_pass_run_one_at_a_time_on_its_one_placement_work
     assert [record.outcome for record in rows] == [engine.OK] * 3
 
 
+@pytest.mark.feature("placement-lock-steps-on-one-placement-worker")
 def test_a_lock_taking_step_on_the_slow_lane_runs_on_the_placement_worker() -> None:
     order: list[str] = []
     gate, started, critical = Event(), Event(), Event()
