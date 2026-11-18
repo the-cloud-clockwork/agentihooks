@@ -8,9 +8,9 @@ nav_order: 92
 
 `python -m scripts.ci_metrics` measures one hour of agentihooks CI and writes the
 result to the ClickHouse tables `swarm.ci_cost` and `swarm.ci_lead_time` through
-the metrics outbox. [An hourly CronJob](#the-hourly-cronjob) in the
-`agentihooks-swarm` namespace runs it from the swarm image, so every later CI task reads its before and after
-numbers from the same rows.
+the metrics outbox. The [hourly CronJob](#the-hourly-cronjob) in the
+`agentihooks-swarm` namespace runs it from the swarm image, so every later CI
+task reads its before and after numbers from the same rows.
 
 ## Running it
 
@@ -53,8 +53,9 @@ the end of that hour. Rows of a window measured twice replace each other.
 The CronJob `agentihooks-swarm-ci-metrics` in the `agentihooks-swarm` namespace
 runs the module once an hour. Its manifest is
 `k8s/manifests/agentihooks-swarm/ci-metrics-cronjob.yaml` in the deployment
-repository, and `tests/unit/agentihooks_swarm/test_ci_metrics_cronjob.py` there pins its
-schedule, image, command, Secret references and security settings.
+repository, and `tests/unit/agentihooks_swarm/test_ci_metrics_cronjob.py`
+there pins its schedule, image, command, Secret references and security
+settings.
 
 ### Schedule and limits
 
@@ -65,8 +66,8 @@ schedule, image, command, Secret references and security settings.
 | `startingDeadlineSeconds` | 1800 | A run that cannot start within 30 minutes of its time is skipped |
 | `backoffLimit`, `restartPolicy` | 0, `Never` | A failed run is not retried |
 | `activeDeadlineSeconds` | 1500 | A run still going after 25 minutes is stopped and fails with `DeadlineExceeded` |
-| `ttlSecondsAfterFinished` | 86400 | A finished Job and its pod are deleted a day after the run ends |
-| `successfulJobsHistoryLimit`, `failedJobsHistoryLimit` | 3, 3 | Only the last three succeeded and the last three failed Jobs are kept, so their logs go well before the day is up |
+| `ttlSecondsAfterFinished` | 86400 | A finished Job and its pod are deleted a day after the run ends at the latest; the history limits below usually remove them sooner |
+| `successfulJobsHistoryLimit`, `failedJobsHistoryLimit` | 3, 3 | Only the last three succeeded and the last three failed Jobs are kept, so at hourly runs a succeeded run's log is gone about three hours later |
 
 The CronJob passes neither `--lag-hours` nor `--until`, so every run measures
 the hour that ended two hours before the hour it starts in. The run at 10:17 UTC
@@ -79,10 +80,10 @@ run leaves its hour without rows until it is measured again as described under
 
 The container runs `ghcr.io/the-cloud-clockwork/agentihooks-swarm:release` with
 `imagePullPolicy: Always`. The Swarm image workflow moves the `release` tag to
-each new release, and every run pulls the image the tag points at, so a release
-reaches the next run with no manifest change. A run needs a release that
-carries `scripts.ci_metrics`; an older image fails with
-`No module named scripts.ci_metrics`.
+each new release that is the newest version tag, and every run pulls the image
+the tag points at, so a release reaches the next run with no manifest change. A
+run needs a release that carries `scripts.ci_metrics`; an older image fails
+with `No module named scripts.ci_metrics`.
 
 The container command is:
 
@@ -96,11 +97,12 @@ python -m scripts.github_app_cli exec python -m scripts.ci_metrics \
 `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID` and `GITHUB_APP_PRIVATE_KEY`, puts
 it in `GH_TOKEN` and `GITHUB_TOKEN`, and replaces itself with the module. Every
 GitHub call of the run is a `gh api` read with that token: the image's `gh`
-wrapper calls the GitHub CLI directly when `HIVE_GITHUB_AUTH_MODE` is unset and
-`$HOME/.agentihooks/github-token` does not exist, and the pod sets neither. An
-installation token is valid for one hour, and the 25 minute deadline ends every
-run before it expires. The wrapper's own read reserve check applies only to a
-command it runs as `gh`, so the module's budget check is the one that refuses a
+wrapper calls the GitHub CLI directly when `HIVE_GITHUB_AUTH_MODE` is empty and
+`${AGENTIHOOKS_HOME:-$HOME/.agentihooks}/github-token` is missing or empty, and
+the pod sets neither. An installation token is valid for one hour, and the 25
+minute deadline ends every run before it expires. No wrapper read reserve check
+runs on the module's reads: `exec` checks only a command it runs as `gh`, and
+here it runs `python`. The module's budget check is the only one that refuses a
 run when the shared limit is low.
 
 ### Settings and Secrets
@@ -135,10 +137,11 @@ refresh. The module refuses to start when `AGENTIHOOKS_METRICS_URL` or
 
 The `agentihooks-swarm` ArgoCD Application syncs the deployment repository's
 `k8s/manifests/agentihooks-swarm` folder from `main`, with automated prune and
-self heal. A change to the CronJob is a pull request into that repository's `dev`, and it
-reaches the cluster when the repository promotes `dev` to `main`. Self heal reverts a
-hand edit of the live CronJob, so `kubectl edit` or `kubectl patch` does not
-change the schedule; change the manifest and its test together instead.
+self heal. A change to the CronJob is a pull request into that repository's
+`dev`, and it reaches the cluster when the repository promotes `dev` to `main`.
+Self heal reverts a hand edit of the live CronJob, so `kubectl edit` or
+`kubectl patch` does not change the schedule; change the manifest and its test
+together instead.
 
 ### Checking runs
 
@@ -184,16 +187,16 @@ WHERE ts > now() - INTERVAL 1 DAY;
 
 | Log line or state | Cause | What to do |
 |-------------------|-------|------------|
-| No Job at the scheduled minute, `get cronjob` finds nothing | The manifest is not on the deployment repository's `main` yet, or the ArgoCD sync is stuck | Check the `agentihooks-swarm` Application's sync state |
+| No Job at the scheduled minute, `get cronjob` finds nothing | The manifest is not on the deployment repository's `main` yet, or the ArgoCD sync is stuck | Check the Application's sync state with `kubectl -n argocd get application agentihooks-swarm` |
 | `No module named scripts.ci_metrics` | The `release` image predates the module | The next run after a release that carries it succeeds |
 | `GitHub App cannot supply scoped contents write credentials` | The wrapper could not mint the token: an App key is missing from `agentihooks-swarm-hub` or GitHub refused the App | List the Secret's key names (never its values) and check the ExternalSecret's sync status |
 | `ci metrics refused: the metrics sink settings are not set` | `AGENTIHOOKS_METRICS_URL` or `AGENTIHOOKS_METRICS_USER` is empty | Check the `agentihooks-swarm-metrics` ExternalSecret's sync status |
 | `<n> job reads would leave fewer than 1000 of <m> API calls; refusing to start` | The shared GitHub limit is low | Rerun after the reset, before the next hour starts |
 | `ci metrics refused: 10 pages of closed pull requests did not reach <time>` | More than a thousand closed pull requests into dev were updated after the window began | An hour this far back cannot be measured with `--until`; the page cap is in code |
 | `ci metrics failed: shipped <n> of <m> rows to the metrics sink` | ClickHouse refused a statement, a request ran past its 3 seconds, or the 5 second flush ran out | Check the sink, then rerun before the next hour starts |
-| `RuntimeError: <hour> listed 1000 runs, the most GitHub returns` | One hour had more runs than one GitHub run listing returns | The hour cannot be measured by this module; raise the case as a follow up |
-| A `CalledProcessError` or `TimeoutExpired` traceback from `gh` | A GitHub read failed, after three attempts for listed reads | Rerun before the next hour starts |
-| A `URLError` traceback from the Prometheus query | Prometheus refused the query or did not answer within 60 seconds | Rerun before the next hour starts |
+| `RuntimeError: <start>..<end> listed <n> runs, the most GitHub returns` | The hour listed 1000 runs or more, the most one GitHub run listing returns | The hour cannot be measured by this module; raise the case as a follow up |
+| A `CalledProcessError` or `TimeoutExpired` traceback from `gh` | A GitHub read failed: listed reads give up after three attempts, the closed pull request pages and the rate limit read on the first error | Rerun before the next hour starts |
+| A `URLError` or `TimeoutError` traceback from the Prometheus query | Prometheus refused the query or did not answer within 60 seconds | Rerun before the next hour starts |
 | `DeadlineExceeded` | The run took longer than 25 minutes | Read the log for the slow step; the hour has no rows |
 | `OOMKilled` | The run used more than 1 GiB | Raise the limit in the manifest by pull request |
 
