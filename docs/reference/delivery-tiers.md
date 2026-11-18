@@ -891,7 +891,7 @@ The workflow key remains `queue-fail-fast`, but its merge group Actions name is 
 
 This job now owns the required status. A lost or cancelled early gate cannot authorize a merge even if every unit passed. The later `Queue gate summary` still permits a failed or cancelled watcher with an empty `failed` output when its graded dependencies passed; that summary does not replace a successful `Gate — Required` check.
 
-A pull request cannot rewrite either job's name or the summary's needs: `Gate — Protected` pins both names and checks the needs against the reviewed inventory, as [Protected grading of the early gate pair](#protected-grading-of-the-early-gate-pair) describes.
+A pull request cannot rewrite either job's name or the summary's needs: `Gate — Protected` pins both names and checks the needs against the reviewed inventory, which also admits the announced needs, as [Protected grading of the early gate pair](#protected-grading-of-the-early-gate-pair) describes.
 
 ### What the watcher reports
 
@@ -1055,7 +1055,7 @@ Issue 5456 also records two diagnostic gaps: the rebuild cause reader reported `
 
 ## Protected grading of the early gate pair
 
-`Gate — Protected` (`.github/workflows/gate-protected.yml`) grades every pull request into `dev` with the base branch's own `scripts.gate_protected`. It checks out the base branch, fetches the head only as git data, runs `python -m scripts.gate_protected --head "$HEAD_SHA"` and posts the outcome as the `Gate — Required` commit status on the head, so a refused head cannot merge. Part of that grade covers the early queue gate pair described in [Lost unit shard rerun](#lost-unit-shard-rerun) and [Lost fail fast watcher](#lost-fail-fast-watcher). The grader pins the names of both jobs, then checks the required gate's needs against the reviewed inventory. A head therefore cannot change what the required gate depends on by rewriting the job names. [Pull request 11446](https://github.com/the-cloud-clockwork/agentihooks/pull/11446) delivered the name pin.
+`Gate — Protected` (`.github/workflows/gate-protected.yml`) grades every pull request into `dev` with the base branch's own `scripts.gate_protected`. It checks out the base branch, fetches the head only as git data, and runs `python -m scripts.gate_protected --head "$HEAD_SHA"` followed by `python -m scripts.ci_tests_start` in one step. It posts that step's outcome as the `Gate — Required` commit status on the head. The `dev` ruleset requires the `Gate — Required` context (see `.github/rulesets/README.md`), so a refused head cannot merge. Part of that grade covers the early queue gate pair described in [Lost unit shard rerun](#lost-unit-shard-rerun) and [Lost fail fast watcher](#lost-fail-fast-watcher). The grader pins the names of both jobs, then checks the required gate's needs against the reviewed inventory. A head therefore cannot change what the required gate depends on by rewriting the job names. [Pull request 11446](https://github.com/the-cloud-clockwork/agentihooks/pull/11446) delivered the name pin.
 
 ### The pinned names
 
@@ -1096,13 +1096,13 @@ The reviewed inventory joins `REQUIRED`, `SKIPPED` and four unit and watcher job
 | `ANNOUNCED` | `install-smoke`, `dep-manifest`, `type-gate` |
 | `LAB_VERDICT` | `lab-verdict`, ignored in the comparison |
 
-The comparison is between sets, so need order does not matter, and a missing need is refused like an added one. `install-smoke` and `dep-manifest` already belong to the inventory, so `type-gate` is the one need a head may add before the pull request that adds it to the inventory lands.
+The comparison is between sets, so need order does not matter, and a missing need is refused like an added one. `install-smoke` and `dep-manifest` already belong to the inventory, so `type-gate` is the one need that `ANNOUNCED` adds. `dev`'s `gate-required` already lists `type-gate` and grades green only because `ANNOUNCED` admits it.
 
 When every check passes, `normalize` renames the pair to plain `Gate — Required` and `queue-fail-fast` in its copy, so the rest of the grade sees one job named `Gate — Required`. A refusal from `normalize` ends the grade: the result is the pin problems followed by that refusal.
 
 ### Why the names are pinned
 
-Before pull request 11446, `grade` started with `normalize`. If a head wrote both names as plain text, its workflow had no expression-named job, so `normalize` skipped it and never compared `gate-required`'s needs with the reviewed inventory. The normalized base carried the same plain names, and the rest of the grade did not compare the needs list. A head could therefore add any job to the required gate's needs and still grade green. The pull request's red test showed the grader accepting such a head. The pin now refuses plain names, so a head passes only with the expression names, and with them `normalize` always runs the inventory check.
+Before pull request 11446, `grade` started with `normalize`. If a head wrote both names as plain text, its workflow had no expression-named job, so `normalize` skipped it and never compared `gate-required`'s needs with the reviewed inventory. The normalized base carried the same plain names, and the rest of the grade did not compare the needs list. A head could therefore add any job to the required gate's needs and still grade green. The red [Tests run 43792558997](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/43792558997) on the pull request's tests only commit showed the old grader accepting such a head. The pin now refuses plain names, so a head passes only with the expression names, and with them `normalize` always runs the inventory check.
 
 ### Examples
 
@@ -1116,7 +1116,7 @@ These results come from calling `gate_protected.grade` against the `dev` workflo
 | Both names written as plain text, `needs` unchanged | The same two pin problems |
 | Only `gate-required` written as plain text | The pin problem for `test.yml/gate-required`, then `The early queue gate must use the exact reviewed context pair and verifier` |
 
-Pin problems follow the base's job order, and `queue-fail-fast` comes before `gate-required` in `test.yml`. Without the pin, the third head would return no problems.
+Pin problems follow the base's job order, and `queue-fail-fast` comes before `gate-required` in `test.yml`. The third head returns only the two pin problems: the pin alone refuses it.
 
 The accepted form, as `dev` writes it:
 
@@ -1178,7 +1178,7 @@ python -m scripts.gate_protected --base origin/dev --head FETCH_HEAD
 | Option | Default | Meaning |
 |---|---|---|
 | `--head` | required | The revision to grade |
-| `--base` | `HEAD` | The protected branch revision. The base workflows come from the merge base of `--base` and `--head`. The `not_gates` and `outside_gate` entries of `.github/gate-wiring.json` merge from that merge base and from `--base`, the `--base` entries winning. The runner trust policy comes from `--base`'s `.github/workflows/trusted-actors.json` |
+| `--base` | `HEAD` | The protected branch revision. The base workflows come from the merge base of `--base` and `--head`. The `not_gates` and `outside_gate` entries of `.github/gate-wiring.json` merge from that merge base and from `--base`, the `--base` entries winning. The runner trust policy comes from `--base`'s `.github/workflows/trusted-actors.json`; when that file is absent at `--base`, the runner trust check is skipped |
 | `--root` | `.` | The git checkout to read revisions from |
 
 The first output line is `graded <first 12 characters of --head> against merge base <first 12 characters>: <n> protected gate problems`, followed by one `::error::<problem>` line per problem. The exit code is 1 when there are problems and 0 otherwise. The command adds the workflow preflight, equivalence, frozen file, branch lane and runner trust checks to the `grade` result, so its count can exceed what `grade` returns. On the unchanged head:
@@ -1191,6 +1191,8 @@ graded HEAD against merge base fad7e9be3aac: 0 protected gate problems
 ### Changing the pinned names or the inventory
 
 There is no setting or environment variable. The pinned names are whatever the base writes for the jobs whose names equal `GATE_NAME` and `SUMMARY_NAME`. The inventory is `REQUIRED`, `SKIPPED`, `ANNOUNCED` and `LAB_VERDICT` in `scripts.ci_gate_queue`. Because `Gate — Protected` runs the base branch's grader, a need the base does not know is refused in the pull request that adds it. `ANNOUNCED` lists promotion gates that the base accepts before the pull request that adds them lands. To add a need, first land a grader pull request that adds the job to `ANNOUNCED`, then add the need to `gate-required` in a later pull request.
+
+The grader code comes from the base branch checkout, so a change to `scripts.gate_protected` or `scripts.ci_gate_queue` grades pull requests as soon as it merges into `dev`. The workflow file is different: GitHub runs `pull_request_target` from the default branch's copy of `gate-protected.yml`, so a change to that file acts only once a release carries it to `main`.
 
 ### Troubleshooting the protected gate pair
 
