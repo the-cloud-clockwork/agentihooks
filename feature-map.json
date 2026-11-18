@@ -8264,6 +8264,17 @@
       ]
     },
     {
+      "id": "lab-scheduler-check-run-restart",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2511",
+      "behaviour": "The CI lab scheduler keeps the id of each check run it posted on the grade's state in Redis, and before it posts a check whose state holds an id it seeds the repository's poster with that id and the status it last posted, so a scheduler restarted mid grade advances the existing check run in place instead of opening a duplicate; a seeded check run keeps the forward only guard of its seeded status.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis with a real scripts.ci_lab.checks.Checks on mocked requests, restarted mid grade, and scripts.ci_lab.checks.Checks.seed over mocked requests",
+      "tests": [
+        "tests/ci_lab/test_scheduler.py::test_a_restarted_scheduler_advances_the_stored_check_runs_with_no_new_create",
+        "tests/ci_lab/test_checks.py::test_a_seeded_check_run_is_advanced_in_place_from_its_seeded_status"
+      ]
+    },
+    {
       "id": "lab-dev-manifest-fetch",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-dev-push-publishes-dep-manifest",

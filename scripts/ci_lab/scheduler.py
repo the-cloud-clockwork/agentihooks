@@ -393,6 +393,7 @@ class State:
     superseded: bool = False
     conclusion: str = ""
     posted: dict[str, list[str | None]] = field(default_factory=dict[str, list[str | None]])
+    runs: dict[str, int] = field(default_factory=dict[str, int])
 
 
 def _parse(raw: str | bytes) -> State:

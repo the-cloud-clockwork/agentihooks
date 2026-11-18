@@ -10,15 +10,18 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
+from unittest.mock import Mock
 
 import jsonschema
 import pytest
+import requests
 import yaml
 
 from scripts import ci_wiring
 from scripts.ci_lab import __main__ as cli
 from scripts.ci_lab import (
     budget,
+    checks,
     control,
     delivery,
     evidence,
@@ -375,6 +378,64 @@ def test_a_lost_worker_requeues_once_then_its_unit_makes_the_grade_red(lab: Call
     assert run.grade(HEAD_A).conclusion == "failure"
     assert run.lab.poster.moves(HEAD_A, "lint")[-1] == ("completed", "failure")
     assert run.store.get(item.kind, item.key) is None
+
+
+CHECK_RUNS = f"{checks.API}/repos/{SLUG}/check-runs"
+
+
+class FixtureToken:
+    def get_token(self) -> str:
+        return "fixture"
+
+
+def github(calls: list[tuple[str, str]]) -> Callable[..., Mock]:
+    def request(method: str, url: str, **_: Any) -> Mock:
+        calls.append((method, url))
+        created = sum(1 for sent, _ in calls if sent == "POST")
+        run = created if method == "POST" else int(url.rsplit("/", 1)[1])
+        return Mock(status_code=201 if method == "POST" else 200, json=Mock(return_value={"id": run}), text="")
+
+    return request
+
+
+def restarted(run: Run, poster: checks.Checks) -> Run:
+    ports = scheduler.Ports(run.lab.inbox, run.lab.expander, lambda _repo: poster, run.lab.hotfixes, run.lab.kube)
+    settings = scheduler.Settings(frozenset({ACTOR}), 0, Policy())
+    return Run(run.lab, scheduler.Scheduler(run.lab.client, run.lab.objects, ports, settings))
+
+
+@pytest.mark.feature("lab-scheduler-check-run-restart")
+def test_a_restarted_scheduler_advances_the_stored_check_runs_with_no_new_create(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[str, str]] = []
+    seeds: list[tuple[Any, ...]] = []
+    seed = checks.Checks.seed
+
+    def spy(self: checks.Checks, *args: Any) -> None:
+        seeds.append(args)
+        seed(self, *args)
+
+    monkeypatch.setattr(requests, "request", github(calls))
+    monkeypatch.setattr(checks.Checks, "seed", spy)
+    first = restarted(lab({HEAD_A: plan({"lint": (unit(1),)})}), checks.Checks(SLUG, FixtureToken()))
+    first.push(HEAD_A)
+    first.tick(1000)
+    grade = first.grade(HEAD_A)
+    again = restarted(first, checks.Checks(SLUG, FixtureToken()))
+    again.lease()
+    assert again.tick(1100) == [f"posted lint in_progress on {HEAD_A}", f"posted required in_progress on {HEAD_A}"]
+    assert calls == [
+        ("POST", CHECK_RUNS),
+        ("POST", CHECK_RUNS),
+        ("PATCH", f"{CHECK_RUNS}/1"),
+        ("PATCH", f"{CHECK_RUNS}/2"),
+    ]
+    assert seeds == [
+        (HEAD_A, "lint", grade.run, 1, "queued", True),
+        (HEAD_A, scheduler.REQUIRED, grade.run, 2, "queued", True),
+    ]
+    assert grade.runs == again.grade(HEAD_A).runs == {"lint": 1, scheduler.REQUIRED: 2}
 
 
 @pytest.mark.feature("lab-worker-executors")
