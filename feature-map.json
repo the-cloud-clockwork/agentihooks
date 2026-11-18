@@ -4091,6 +4091,17 @@
       ]
     },
     {
+      "id": "packed-manifest-outside-files",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-packed-manifest-opened-files",
+      "behaviour": "The packed dependency manifest keeps each test record's outside list, the repository files the test opened that its manifest record leaves out, so the unpacked manifest the CI lab reads still names them and a record with outside files stays keyed on the measured tree. A record without the list unpacks without it, and a packed manifest in the three field layout still unpacks.",
+      "seam": "tests.dep_manifest.pack and tests.dep_manifest.unpack round trip, and scripts.ci_lab.expand_tests.fingerprints over a packed then unpacked manifest",
+      "tests": [
+        "tests/ci_lab/test_expand_tests.py::test_a_packed_then_unpacked_record_with_outside_files_stays_keyed_on_the_measured_tree",
+        "tests/test_dep_manifest.py::test_a_packed_manifest_keeps_each_test_outside_list_and_unpacks_the_three_field_layout"
+      ]
+    },
+    {
       "id": "gate-required-waits-for-aggregator",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2504",

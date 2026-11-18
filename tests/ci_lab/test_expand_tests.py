@@ -174,6 +174,15 @@ def test_a_test_that_opened_files_outside_the_manifest_is_keyed_on_the_measured_
     }
 
 
+@pytest.mark.feature("packed-manifest-outside-files")
+def test_a_packed_then_unpacked_record_with_outside_files_stays_keyed_on_the_measured_tree(repository: Path) -> None:
+    manifest = copy.deepcopy(MANIFEST)
+    manifest["tests"][SECOND]["outside"] = ["docs/guide.md"]
+    unpacked = dep_manifest.unpack(dep_manifest.pack(copy.deepcopy(manifest)))
+    assert unpacked == manifest
+    assert _plant(repository, "scripts/data.json", b"[]\n", unpacked) == {SECOND, RUN, SPAWN}
+
+
 @pytest.mark.parametrize(
     ("record", "expected"),
     [
