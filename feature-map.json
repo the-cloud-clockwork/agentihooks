@@ -6250,6 +6250,16 @@
       ]
     },
     {
+      "id": "hive-member-reads-every-hive-pending-admission",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2555",
+      "behaviour": "A hive member reads the pending admission count of every hive, its own included, with plain read commands that its read only grant on the admission keys allows, so swarm status on a hive worker shows each hive's admission room instead of failing on a Redis key permission refusal.",
+      "seam": "admission.pending under the hive member Redis grant from auth._acl_keys",
+      "tests": [
+        "tests/hive/test_admission.py::test_a_hive_member_reads_every_hives_pending_admission_through_its_read_only_grant"
+      ]
+    },
+    {
       "id": "hive-run-order-receipt-outlives-order",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-run-order-receipt-expiry",
