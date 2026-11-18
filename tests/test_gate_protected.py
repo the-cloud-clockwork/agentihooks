@@ -2680,6 +2680,7 @@ def test_the_repository_registry_refuses_a_head_dropping_any_writer_lock_job(rep
         "accept; announce its blob there by its own pull request first."
     )
     workflow = yaml.safe_load(text)
+    assert workflow["jobs"]
     for job in workflow["jobs"]:
         _git(repo, "checkout", "-q", "--detach", base)
         jobs = {name: body for name, body in workflow["jobs"].items() if name != job}
