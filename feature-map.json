@@ -5496,6 +5496,16 @@
       ]
     },
     {
+      "id": "hive-release-jobs-run-one-at-a-time",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-worker-release-tag-stuck",
+      "behaviour": "The hive job of every release waits in one queued concurrency group, hive-worker-release with queue max and no cancelling, so two releases never check and move the hive worker release tag at the same time and an older release finishing last cannot move the tag back; a waiting hive job is never replaced, so every release still publishes its hive version image.",
+      "seam": "Swarm worker image hive job concurrency group",
+      "tests": [
+        "tests/deployment/test_worker_hive_image.py::test_every_release_hive_job_queues_behind_the_last_one_in_one_group"
+      ]
+    },
+    {
       "id": "hive-pods-not-rolled-by-release-image-digest",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-roll-every-release",
