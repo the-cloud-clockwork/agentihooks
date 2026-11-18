@@ -1034,9 +1034,13 @@ SUITE_MANIFEST: dict[str, Any] = {
     "tests": {
         FIRST_TEST: {"units": [0], "files": [], "escapes": False},
         OTHER_TEST: {"units": [0], "files": [], "escapes": False},
-        SECOND_TEST: {"units": [1], "files": [], "escapes": False},
+        SECOND_TEST: {"units": [1], "files": [], "escapes": False, "outside": ["docs/c.md"]},
     },
     "lines": {},
+}
+STORED_MANIFEST: dict[str, Any] = {
+    **SUITE_MANIFEST,
+    "tests": {FIRST_TEST: {"units": [0], "files": [], "escapes": False}},
 }
 SUITE_DURATIONS = {FIRST_TEST: 40.0, OTHER_TEST: 40.0, SECOND_TEST: 1.0}
 
@@ -1095,10 +1099,19 @@ def _suite(tmp_path: Path, lab: dict[str, Any]) -> Suite:
             "tests/test_beta.py": "def test_second():\n    pass\n",
         },
     )
-    base = _commit(repo, {"docs/c.md": "c\n"})
-    _commit(repo, {"scripts/alpha.py": ALPHA.replace("return 2", "return 3")})
+    base = _merged(repo, "side", {"docs/c.md": "c\n"})
+    _merged(repo, "entry", {"scripts/alpha.py": ALPHA.replace("return 2", "return 3")}, {"docs/p.md": "p\n"})
     head = _commit(repo, {"docs/c.md": "d\n"})
     return Suite(repo, seed, base, head)
+
+
+def _merged(repo: Path, branch: str, *changes: dict[str, str]) -> str:
+    _git(repo, "switch", "-q", "-c", branch)
+    for files in changes:
+        _commit(repo, files)
+    _git(repo, "switch", "-q", "dev")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "merge", "-q", "--no-ff", "-m", branch, branch)
+    return _git(repo, "rev-parse", "HEAD").strip()
 
 
 def _suite_units(suite: Suite, head: str, durations: dict[str, float]) -> tuple[Unit, ...]:
@@ -1205,12 +1218,12 @@ def test_a_merge_group_head_refuses_an_entry_limit_the_delivery_schema_refuses(t
 def test_stored_manifests_read_the_packed_manifest_of_the_nearest_stored_ancestor(tmp_path: Path) -> None:
     objects = LocalObjects(tmp_path / "objects")
     for commit in ("older", "newer"):
-        packed = dep_manifest.pack({**SUITE_MANIFEST, "commit": commit})
+        packed = dep_manifest.pack({**STORED_MANIFEST, "commit": commit})
         objects.write_once(f"{manifest_folder(SLUG)}{commit}.json", json.dumps(packed).encode())
     objects.write_once(f"{manifest_folder('other/repo')}head.json", b"{}")
     stored = scheduler.StoredManifests(objects)
-    assert stored(REPO, ["head", "newer", "older"]) == {**SUITE_MANIFEST, "commit": "newer"}
-    assert stored(REPO, ["head", "older"]) == {**SUITE_MANIFEST, "commit": "older"}
+    assert stored(REPO, ["head", "newer", "older"]) == {**STORED_MANIFEST, "commit": "newer"}
+    assert stored(REPO, ["head", "older"]) == {**STORED_MANIFEST, "commit": "older"}
     assert stored(REPO, ["head"]) is None
     assert manifest_folder(SLUG) == "lab/manifests/the-cloud-clockwork--agentihooks/"
 

@@ -14,6 +14,7 @@ port and one pass every interval.
 """
 
 import argparse
+import io
 import json
 import subprocess
 import sys
@@ -618,14 +619,15 @@ class Scheduler:
         job = self.queue.job(slot.job)
         if job is None:
             slot.outcome = DROPPED
-        elif job.state in FINISHED and not self._retried(job):
+        elif job.state in FINISHED and not self._rerun(job):
             slot.outcome = job.outcome
             self._remember(job)
         else:
             slot.started = slot.started or job.state == "leased"
 
-    def _retried(self, job: Job) -> bool:
-        """Return whether a finished job went back to pending because the retry policy allows its outcome a rerun."""
+    def _rerun(self, job: Job) -> bool:
+        """Move a finished job back to pending when the retry policy allows its outcome a rerun; return whether it
+        moved."""
         result = UnitResult(job.outcome, job.attempts)
         return decide(result, self.settings.retries) == "retry" and self.queue.retry(job)
 
@@ -799,7 +801,7 @@ class MirrorExpander:
             )
             gates.setdefault(gate.job, []).append(Unit(STATIC, static_key(inputs), (gate.name,)))
         if request.tier >= Priority.QUEUE:
-            gates[UNIT_JOBS[0]] = list(self._tests(mirror, request, grader, head, toolchain))
+            gates.setdefault(UNIT_JOBS[0], []).extend(self._tests(mirror, request, grader, head, toolchain))
         tree = self._git(mirror, "rev-parse", f"{request.head}^{{tree}}").strip()
         return frame(request.tier, tree, grader, {job: tuple(units) for job, units in gates.items()})
 
@@ -836,18 +838,16 @@ class MirrorExpander:
         return interaction.Group(changes, entries, pyproject)
 
     def _contents(self, mirror: Mirror, files: Mapping[str, str]) -> dict[str, bytes]:
-        """Return each file's bytes by path, read in one git cat-file batch."""
+        """Return each file's bytes by path, read in one git cat-file batch keyed by the object ids it prints."""
         blobs = list(dict.fromkeys(files.values()))
         listing = "".join(f"{blob}\n" for blob in blobs).encode()
         argv = ["git", "-C", str(mirror.store), "cat-file", "--batch"]
-        output = subprocess.run(argv, input=listing, capture_output=True, check=True).stdout
+        stream = io.BytesIO(subprocess.check_output(argv, input=listing))
         found: dict[str, bytes] = {}
-        at = 0
-        for blob in blobs:
-            start = output.index(b"\n", at) + 1
-            end = start + int(output[at:start].split()[-1])
-            found[blob] = output[start:end]
-            at = end + 1
+        for _ in blobs:
+            name, _kind, size = stream.readline().split()
+            found[name.decode()] = stream.read(int(size))
+            stream.read(1)
         return {path: found[blob] for path, blob in files.items()}
 
 
