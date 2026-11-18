@@ -144,8 +144,8 @@ def _table_row(row: Row, ts_ms: int) -> dict[str, object]:
 class Shadow:
     """The shadow recorder: folds check_run.completed deliveries into one row per gate and head.
 
-    Its caller observes deliveries one at a time, as the scheduler tick does, so a turn into a mismatch is read and
-    written by one observe at a time and counted once by the process registry."""
+    Its caller observes deliveries one at a time, as one scheduler will once it feeds the recorder, so a turn into a
+    mismatch is read and written by one observe at a time and counted once by the process registry."""
 
     def __init__(
         self,

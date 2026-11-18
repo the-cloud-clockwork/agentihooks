@@ -1121,9 +1121,9 @@ and head. `Shadow.observe(payload)` takes each `check_run.completed` delivery: a
 `github-actions` app gives the Actions verdict of the gate its job name maps to, and a
 `lab-shadow/<gate>` check run from the lab's own GitHub App gives the lab verdict and the grader
 revision its summary names. `Sources(static, lab_app)` names that App's slug; a `lab-shadow/` run
-from any other app, a workflow token included, is ignored. The caller observes deliveries one at a
-time, as the scheduler tick does. Until the scheduler service feeds it, the recorder is a library
-with no live caller.
+from any other app, a workflow token included, is ignored. Its caller observes deliveries one at a
+time, from one scheduler once a scheduler feeds it. Until then the recorder is a library with no
+live caller.
 
 ### Gates
 
@@ -1182,5 +1182,5 @@ unmapped docs
 | A job you expect to compare is listed unmapped | Its name matches no gate rule, or the static job is not in the workflow tree the recorder read | `python -m scripts.ci_lab.static_gates` lists the static jobs |
 | A row is left out of a report since a revision | Its grader revision does not descend from that revision in `--repo`, or is not fetched there | `git merge-base --is-ancestor <since> <grader>` in that checkout |
 | `error: --redis or CI_LAB_REDIS_URL names the lab Redis` | Neither the flag nor the variable is set | Pass `--redis` or export `CI_LAB_REDIS_URL` |
-| `error: --since <revision> names no commit in <repo>` | The revision is mistyped or not fetched into `--repo` | `git -C <repo> fetch origin dev`, then `git -C <repo> cat-file -t <revision>` prints `commit` |
+| `error: --since <revision> names no commit in <repo>` | The revision is mistyped or not fetched into `--repo`, or `--repo` is no git checkout | `git -C <repo> rev-parse --git-dir` succeeds; `git -C <repo> fetch origin dev`, then `git -C <repo> cat-file -t <revision>` prints `commit` |
 | Lab verdicts never land although `lab-shadow/` check runs exist | The runs come from an app other than `Sources.lab_app` | The check run's `app.slug` in the delivery |
