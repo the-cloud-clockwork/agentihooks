@@ -1,5 +1,6 @@
 """Pod git for the lab worker: a private store over the node mirror and read only worktrees per head."""
 
+import base64
 import os
 import shutil
 import stat
@@ -29,12 +30,14 @@ class Lab:
     token: str = field(repr=False)
 
     def environ(self) -> dict[str, str]:
-        """Return git's environment for a call to the lab remote, with the token as a bearer header for its URL only."""
+        """Return git's environment for a call to the lab remote, with the token as the basic password of the user
+        `lab` for its URL only."""
+        secret = base64.b64encode(f"lab:{self.token}".encode()).decode()
         return {
             **os.environ,
             "GIT_CONFIG_COUNT": "1",
             "GIT_CONFIG_KEY_0": f"http.{self.url}.extraheader",
-            "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: Bearer {self.token}",
+            "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {secret}",
             "GIT_TERMINAL_PROMPT": "0",
         }
 

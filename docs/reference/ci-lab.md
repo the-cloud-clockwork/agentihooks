@@ -934,8 +934,8 @@ outside `refs/grade/*`. A deleted grade ref, or a root commit pushed without `-o
 GitHub does not hold a head pushed only to the lab remote, so the scheduler and the relay fetch it
 from there. Their mirrors fetch a sha from the GitHub repository first and, when that fetch fails,
 from the lab remote `AGENTIHOOKS_LAB_REMOTE` names, but only when that URL names the same
-repository. Git gets `AGENTIHOOKS_LAB_REMOTE_TOKEN` as an `Authorization: Bearer` header for that
-URL alone, through its environment config, and no store or log keeps it. A grade of a head pushed
+repository. Git gets `AGENTIHOOKS_LAB_REMOTE_TOKEN` as the basic password of the user `lab` for
+that URL alone, through its environment config, and no store or log keeps it. A grade of a head pushed
 to a `refs/grade/*` ref keeps the ref and records each check's status and conclusion. It posts no
 GitHub check run; the relay posts them once it has pushed the head. The relay's push token asks
 for contents write and workflows write, so a relayed branch that changes workflow files is

@@ -1,3 +1,4 @@
+import base64
 import os
 import stat
 import subprocess
@@ -112,7 +113,7 @@ def test_fetch_never_asks_a_lab_remote_of_another_repository(tmp_path: Path, ori
 
 
 @pytest.mark.feature("lab-remote-heads")
-def test_a_lab_fetch_sends_the_token_as_a_bearer_header_for_the_lab_url_only(
+def test_a_lab_fetch_sends_the_token_as_the_lab_user_s_basic_password_for_the_lab_url_only(
     tmp_path: Path, origin: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     base = _commit(origin, "a", "a")
@@ -140,7 +141,7 @@ def test_a_lab_fetch_sends_the_token_as_a_bearer_header_for_the_lab_url_only(
         **os.environ,
         "GIT_CONFIG_COUNT": "1",
         "GIT_CONFIG_KEY_0": "http.https://lab.example/git/origin.git.extraheader",
-        "GIT_CONFIG_VALUE_0": "AUTHORIZATION: Bearer lab-token",
+        "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {base64.b64encode(b'lab:lab-token').decode()}",
         "GIT_TERMINAL_PROMPT": "0",
     }
 

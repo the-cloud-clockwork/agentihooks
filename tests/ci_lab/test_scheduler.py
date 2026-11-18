@@ -308,6 +308,35 @@ def test_a_grade_ref_head_held_in_its_quiet_window_keeps_its_ref(lab: Callable[.
     assert run.lab.poster.posts == []
 
 
+@pytest.mark.feature("lab-remote-heads")
+def test_a_held_head_takes_the_grade_ref_it_arrives_again_with_and_keeps_one_it_holds(lab: Callable[..., Run]) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)}), HEAD_B: plan({"lint": (unit(1),)})}, quiet_ms=500)
+    run.cache(unit(1))
+    run.push(HEAD_A, lane="engineer-1")
+    run.push(HEAD_B, lane="engineer-2", ref="refs/grade/t2")
+    run.tick(1000)
+    run.push(HEAD_A, lane="engineer-1", ref="refs/grade/t1")
+    run.push(HEAD_B, lane="engineer-2")
+    assert run.tick(1200) == [f"holding {HEAD_A}", f"holding {HEAD_B}"]
+    run.tick(1600)
+    assert (run.grade(HEAD_A).ref, run.grade(HEAD_B).ref) == ("refs/grade/t1", "refs/grade/t2")
+    assert run.lab.poster.posts == []
+
+
+@pytest.mark.feature("lab-remote-heads")
+def test_a_head_held_before_grade_refs_were_kept_starts_with_no_ref_and_posts(lab: Callable[..., Run]) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)})}, quiet_ms=500)
+    run.cache(unit(1))
+    run.push(HEAD_A, lane="engineer-1")
+    run.tick(1000)
+    for name, raw in run.lab.client.hgetall(scheduler.WAITING).items():
+        older = {key: value for key, value in json.loads(raw).items() if key != "ref"}
+        run.lab.client.hset(scheduler.WAITING, name, json.dumps(older))
+    run.tick(1600)
+    assert run.grade(HEAD_A).ref == ""
+    assert run.lab.poster.moves(HEAD_A, scheduler.REQUIRED) == [("completed", "success")]
+
+
 @pytest.mark.feature("lab-scheduler-evidence")
 def test_a_folded_grade_is_recorded_so_show_finds_it_by_run_and_head(lab: Callable[..., Run]) -> None:
     units = (unit(1), unit(2))

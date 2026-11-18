@@ -5,9 +5,9 @@
 head and branch, until a grade of that head closes. A green grade pushes the sha, fetched from the lab remote when
 GitHub lacks it, to `origin refs/heads/<branch>` with an App token holding contents and workflows write, never forced,
 posts the `lab/<gate>` check run of every gate and the required check, completed, with the grade's run and verdicts,
-and opens the branch's draft pull request into dev with a token holding pull requests write, or names the open one the push updated. A red grade
-relays nothing and names its failed units. A head whose grades were all superseded is dropped, and a relay GitHub
-refuses is named and dropped.
+and opens the branch's draft pull request into dev with a token holding pull requests write, or names the open one the
+push updated. A red grade relays nothing and names its failed units. A head whose grades were all superseded is
+dropped, and a relay GitHub refuses is named and dropped.
 """
 
 import base64

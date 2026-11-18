@@ -623,10 +623,14 @@ class Scheduler:
         return actions
 
     def _hold(self, request: GradeRequest, lane: str, ref: str, now_ms: int) -> str:
-        """Hold a head and its grade ref in its lane's quiet window; a new head of the lane restarts the window."""
+        """Hold a head and its grade ref in its lane's quiet window; a new head of the lane restarts the window, and the
+        held head arriving again with a grade ref keeps its window and takes that ref."""
         name = f"{request.repo}|{lane}|{int(request.tier)}"
         held = self.client.hget(WAITING, name)
-        if held is not None and json.loads(held)["request"]["head"] == request.head:
+        waiting = None if held is None else json.loads(held)
+        if waiting is not None and waiting["request"]["head"] == request.head:
+            if ref:
+                self.client.hset(WAITING, name, json.dumps({**waiting, "ref": ref}))
             return f"holding {request.head}"
         waiting = {"request": asdict(request), "lane": lane, "ref": ref, "since": now_ms}
         self.client.hset(WAITING, name, json.dumps(waiting))
