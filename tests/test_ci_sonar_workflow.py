@@ -229,6 +229,18 @@ def test_secret_detection_includes_all_tracked_text_and_hidden_configuration():
     assert ".git/**" in properties["sonar.exclusions"].split(",")
 
 
+def test_sonar_skips_the_coverage_files_its_job_writes_into_the_checkout() -> None:
+    properties = dict(
+        line.split("=", 1)
+        for line in (_ROOT / "sonar-project.properties").read_text().splitlines()
+        if line and not line.startswith("#")
+    )
+    excluded = set(properties["sonar.exclusions"].split(","))
+    assert {"coverage.xml", "lcov.info", "sonar-scope.txt", ".coverage-shards/**"} <= excluded
+    assert properties["sonar.python.coverage.reportPaths"] == "coverage.xml"
+    assert properties["sonar.javascript.lcov.reportPaths"] == "lcov.info"
+
+
 @pytest.mark.parametrize(
     ("paths", "mark"),
     [
