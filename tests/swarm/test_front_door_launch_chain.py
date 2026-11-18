@@ -8,7 +8,7 @@ import os
 import shlex
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any
 
 import pytest
 
@@ -96,9 +96,7 @@ def _pane(tmp_path: Path, executed: list[Exec], argv: list[str]) -> SimpleNamesp
     environ = {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "runtime")}
     out, err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-        code = cast(Any, init_agent.main)(
-            args, environ, start=_terminal, canary=lambda report, _: _canary(report, executed)
-        )
+        code = init_agent.main(args, environ, start=_terminal, canary=lambda report, _: _canary(report, executed))
     return SimpleNamespace(returncode=code, stdout=out.getvalue(), stderr=err.getvalue())
 
 
