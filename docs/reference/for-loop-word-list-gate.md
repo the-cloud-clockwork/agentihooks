@@ -182,9 +182,9 @@ pushing a shell or workflow change.
 
 ## Run it locally
 
-From the repository root, with a Python environment where the package is
-installed, so it holds `tree-sitter-bash` and `pyyaml`, both base dependencies
-in `pyproject.toml`:
+From the repository root, with a Python environment that has the package
+installed and its base dependencies `tree-sitter-bash` and `pyyaml` from
+`pyproject.toml`:
 
 ```bash
 python -m scripts.ci_for_substitution --root .
