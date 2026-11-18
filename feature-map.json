@@ -2312,6 +2312,18 @@
       ]
     },
     {
+      "id": "credential-guard-get-reads-the-type-operand",
+      "origin": "regression",
+      "ordered_at": "2026-11-18",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2662",
+      "behaviour": "The credential guard's kubectl get Secret check judges only the resource type. A word naming Secret by kind or alias anywhere after get, or a type the shell fills in, is a possible Secret. Every operand in TYPE/NAME form is a type. Otherwise the type is the first operand that no flag before it could take as its value, together with the operands before it that such a flag could take. A resource name after a literal type, such as a pod or priority class name in a shell variable, never makes the get a possible Secret in any namespace form. The kubectl words run to the first pipe, redirect, semicolon or ampersand outside quotes, so a quoted jsonpath, template or custom columns value holding one stays a single word. Get of a named non Secret type with any jsonpath or custom columns output passes. A Secret type, a resource list holding one, and a type left to the shell stay refused.",
+      "seam": "hooks.context.credential_guard.gets_secret_values through hooks.context.credential_guard.prints_secret_values, read by hooks.context.credential_guard.decide",
+      "tests": [
+        "tests/test_credential_guard.py::test_kubectl_get_of_a_named_non_secret_type_passes_with_any_output",
+        "tests/test_credential_guard.py::test_kubectl_get_whose_type_operand_may_be_a_secret_is_refused"
+      ]
+    },
+    {
       "id": "swarm-tick-successor-fill",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1793",
