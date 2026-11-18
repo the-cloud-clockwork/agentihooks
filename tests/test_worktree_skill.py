@@ -791,6 +791,51 @@ class BaseBranch(WtBase):
         self.assertTrue((Path(result.stdout.strip()) / "trunk.txt").is_file())
 
 
+class TestLabRemote(WtBase):
+    LAB = "http://lab.invalid/origin.git"
+
+    def remotes(self, path: Path) -> str:
+        return subprocess.run(
+            ["git", "-C", str(path), "remote", "-v"], capture_output=True, text=True, env=self.gitenv, check=True
+        ).stdout
+
+    def config(self, key: str) -> str:
+        return subprocess.run(
+            ["git", "-C", str(self.primary), "config", "--get", key], capture_output=True, text=True, env=self.gitenv
+        ).stdout.strip()
+
+    @pytest.mark.feature("lab-remote-in-workspaces")
+    def test_new_and_tmp_give_the_repository_the_lab_remote_and_its_token_helper(self) -> None:
+        from scripts.ci_lab.remote import checkout
+
+        self.env["AGENTIHOOKS_LAB_REMOTE"] = self.LAB
+        for args in (("new", "feature-x"), ("tmp", "probe")):
+            with self.subTest(command=args[0]):
+                if self.config("remote.lab.url"):
+                    _git(self.primary, "remote", "remove", "lab", env=self.gitenv)
+                result = self.run_wt(*args, "--repo", str(self.primary))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(f"lab\t{self.LAB} (push)", self.remotes(Path(result.stdout.strip())))
+                self.assertEqual(self.config(f"credential.{self.LAB}.helper"), checkout.HELPER)
+
+    @pytest.mark.feature("lab-remote-in-workspaces")
+    def test_new_points_an_existing_lab_remote_at_the_lab_url(self) -> None:
+        _git(self.primary, "remote", "add", "lab", "http://old.invalid/origin.git", env=self.gitenv)
+        self.env["AGENTIHOOKS_LAB_REMOTE"] = self.LAB
+        result = self.run_wt("new", "feature-x", "--repo", str(self.primary))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.config("remote.lab.url"), self.LAB)
+
+    @pytest.mark.feature("lab-remote-in-workspaces")
+    def test_new_adds_no_lab_remote_when_unset_or_for_another_repository(self) -> None:
+        for lab in ("", "http://lab.invalid/agentihooks.git"):
+            with self.subTest(lab=lab):
+                self.env["AGENTIHOOKS_LAB_REMOTE"] = lab
+                result = self.run_wt("new", f"feature-{len(lab)}", "--repo", str(self.primary))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertNotIn("lab\t", self.remotes(Path(result.stdout.strip())))
+
+
 class FromRef(WtBase):
     def setUp(self):
         super().setUp()
