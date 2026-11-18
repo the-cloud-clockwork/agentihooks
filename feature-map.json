@@ -4947,7 +4947,7 @@
       "origin": "regression",
       "ordered_at": "2026-11-16",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-fix-registration-hardening",
-      "behaviour": "While fleet panic is on, a session on a registered fix branch keeps a rerun in its own repository, a dispatch only when its ref names that branch, and a push only when it pushes to origin, every refspec writes that checked out branch and no git config may route it elsewhere; git -C moves the checkout the branch is read in. A push to any other ref, remote or set of refs, a push git config may route to another remote or ref (a push refspec, push url or mirror on origin, a url pushInsteadOf rewrite of the push url, push tag following, a push or tracking remote other than origin, or a push default other than simple or current), a dispatch without a ref or on another ref, a gh command aimed at another repository, a git global option other than -C, a command that sets a git repository or config environment variable, and a push or dispatch behind git or gh global options or a redirection stay frozen.",
+      "behaviour": "While fleet panic is on, a session on a registered fix branch keeps a rerun in its own repository, a dispatch only when its ref names that branch, and a push only when it pushes to origin, every refspec writes a registered fix branch and no git config may route it elsewhere; git -C moves the checkout the branch is read in. A push to any other ref, remote or set of refs, a push git config may route to another remote or ref (a push refspec, push url or mirror on origin, a url pushInsteadOf rewrite of the push url, push tag following, a push or tracking remote other than origin, or a push default other than simple or current), a dispatch without a ref or on another ref, a gh command aimed at another repository, a git global option other than -C, a command that sets a git repository or config environment variable, and a push or dispatch behind git or gh global options or a redirection stay frozen.",
       "seam": "The PreToolUse panic freeze in the blocker window hook: the frozen command parse and the fix branch spare",
       "rules": [
         "panic-spare-ignores-command-target"
@@ -4962,6 +4962,21 @@
         "tests/swarm/test_panic.py::test_a_command_reads_without_its_redirections_and_git_global_options",
         "tests/swarm/test_panic.py::test_a_spared_command_names_the_refs_it_writes",
         "tests/swarm/test_panic.py::test_a_dispatch_without_a_ref_names_an_empty_ref"
+      ]
+    },
+    {
+      "id": "panic-spares-a-successor-of-a-fix",
+      "origin": "regression",
+      "ordered_at": "2026-11-18",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-spare-upstream-fix-branch",
+      "behaviour": "While panic holds a swarm, a successor seat whose worktree branch has its own name keeps the fix work it inherited: a push whose every refspec writes a registered fix branch of the checkout's origin repository and a dispatch on one are spared whatever branch is checked out, and a rerun is spared in a checkout whose checked out branch or whose upstream on origin is a registered fix branch. A push with no refspec or of HEAD writes the checked out branch's own name and stays frozen unless that branch is a fix, as do a push or dispatch naming any other ref and a rerun from a branch that tracks a fix on another remote.",
+      "seam": "The PreToolUse panic freeze in the blocker window hook: blocker_window.pretool for a session bound to the panicking swarm",
+      "tests": [
+        "tests/swarm/test_panic.py::test_a_successor_branch_tracking_a_registered_fix_keeps_its_fix_pushes_dispatches_and_reruns",
+        "tests/swarm/test_panic.py::test_a_successor_branch_tracking_a_registered_fix_stays_frozen_for_any_other_target",
+        "tests/swarm/test_panic.py::test_a_rerun_from_a_branch_tracking_a_fix_on_another_remote_stays_frozen",
+        "tests/swarm/test_panic.py::test_a_branch_tracks_only_a_branch_on_origin",
+        "tests/swarm/test_panic.py::test_a_rerun_without_a_directory_or_a_fix_reads_no_git"
       ]
     },
     {
