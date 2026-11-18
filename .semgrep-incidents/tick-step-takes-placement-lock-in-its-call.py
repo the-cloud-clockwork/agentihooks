@@ -37,3 +37,12 @@ def _night_watch(tick: Any, get: Get) -> Any:
             return tick._master(get("slug"), forced=True)
 
     return tick.night_watch(respawn)
+
+
+def _master_scale(tick: Any, get: Get) -> Any:
+    def respawn() -> Any:
+        # ruleid: tick-step-takes-placement-lock-in-its-call
+        with tick.PLACING:
+            return tick._master(get("slug"), forced=True)
+
+    return respawn()

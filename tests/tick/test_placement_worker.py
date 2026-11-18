@@ -155,10 +155,15 @@ def test_a_lock_taking_step_on_the_slow_lane_runs_on_the_placement_worker() -> N
     assert [record.outcome for row in later for record in row] == [engine.OK]
 
 
+def test_a_step_runs_on_the_placement_worker_only_when_it_declares_the_placement_lock() -> None:
+    assert engine._placing(Step("placing declared", _quick, GROUP, placing=True)) is True
+    assert engine._placing(Step("placing not declared", _quick, GROUP)) is False
+    assert engine._placing(object()) is False  # pyright: ignore[reportArgumentType]
+
+
 def test_a_pass_runs_an_ordinary_step_on_its_step_workers_and_shuts_its_placement_worker_down() -> None:
     with pool.running(workers=2) as found:
         assert found.executor("plain step", False) is found.steps
-        assert found.placer is not None
         assert found.executor("plain step", True) is found.placer
         assert found.placer.submit(lambda: 1).result() == 1
     with pytest.raises(RuntimeError):
@@ -175,7 +180,6 @@ def test_a_pass_cancels_lock_taking_steps_still_queued_on_its_placement_worker_w
 
     try:
         with pool.running(workers=1) as found:
-            assert found.placer is not None
             found.placer.submit(blocker)
             assert started.wait(5)
             queued = found.placer.submit(lambda: None)
