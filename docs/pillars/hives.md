@@ -2700,9 +2700,10 @@ does not move it.
 
 The join hook runs in the agent's session and the heartbeat in the hive daemon, so the check relies on both reading
 the same host name and the same process 1. The hive daemon and the agents it starts run in the same pod or on the
-same machine, and the hive chart sets none of `hostPID`, `hostNetwork` or `shareProcessNamespace`. Pull request #11279 recorded the agent hook
-and the daemon reading one PID namespace on a worker pod and on the workstation root hive; compare them on a live
-hive with the commands in [Checking it on a live hive](#checking-it-on-a-live-hive).
+same machine, and the hive chart sets none of `hostPID`, `hostNetwork` or `shareProcessNamespace`. Pull
+request #11279 recorded the agent hook and the daemon reading one PID namespace on a worker pod and on the
+workstation root hive; compare them on a live hive with the commands in
+[Checking it on a live hive](#checking-it-on-a-live-hive).
 
 #### What the heartbeat does on each beat
 
