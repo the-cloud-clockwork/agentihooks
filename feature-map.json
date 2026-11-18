@@ -311,6 +311,16 @@
       ]
     },
     {
+      "id": "ledger-new-file-setup-waits-out-another-write-lock",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2567",
+      "behaviour": "A ledger store that turns a new file to WAL while another connection holds the file's write lock waits for that lock within the busy timeout instead of failing at once, so a reload successor that sets up a new ledger file beside another process still reports ready.",
+      "seam": "SQLiteLedgerRepository._set_up reached through summaries, the WAL switch against another connection's write lock",
+      "tests": [
+        "tests/swarm_ledger/test_sqlite.py::test_a_new_store_waits_out_another_connections_write_lock_before_it_turns_on_wal"
+      ]
+    },
+    {
       "id": "grader-gates-fail-closed-on-stale-base",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-gates-drop-head-fallback",
