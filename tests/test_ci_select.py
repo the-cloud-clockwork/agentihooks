@@ -1124,6 +1124,20 @@ def test_a_recorded_method_unit_selects_its_test_by_the_file_before_the_first_se
     assert ci_select.recorded_tests(manifest, ["hooks/sample.py"]) == {"tests/test_box.py"}
 
 
+@pytest.mark.feature("selectors-read-outside-files")
+def test_a_change_to_a_file_a_test_opened_outside_its_record_selects_that_test_file():
+    manifest = {
+        "units": [],
+        "tests": {
+            "tests/test_a.py::test_one": {"units": [], "files": [], "outside": ["docs/a.md"]},
+            "tests/test_b.py::test_two": {"units": [], "files": ["docs/b.md"]},
+            "tests/test_c.py::test_three": {"units": []},
+        },
+    }
+    assert ci_select.recorded_tests(manifest, ["docs/a.md"]) == {"tests/test_a.py"}
+    assert ci_select.recorded_tests(manifest, ["docs/other.md"]) == set()
+
+
 def test_main_reads_the_recorded_reads_for_a_change_without_python_source(repo, monkeypatch, tmp_path):
     write(repo, {"tests/test_workflows.py": "import os\n", "deploy/values.yaml": "a: 1\n"})
     git(repo, "add", ".")

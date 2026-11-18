@@ -4216,6 +4216,17 @@
       ]
     },
     {
+      "id": "selectors-read-outside-files",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2636",
+      "behaviour": "Pull request touched test selection and mutation test selection read each dependency manifest test record's outside list, the repository files the test opened that its record leaves out, as well as its recorded files, so a change to one of those files selects that test while a change to a file no record lists selects nothing.",
+      "seam": "scripts.ci_select.recorded_tests, scripts.ci_mutation.plan.covering_tests and scripts.ci_mutation.plan.line_covering_tests",
+      "tests": [
+        "tests/test_ci_select.py::test_a_change_to_a_file_a_test_opened_outside_its_record_selects_that_test_file",
+        "tests/test_ci_mutation_plan.py::test_a_drifted_file_a_test_opened_outside_its_record_selects_that_test"
+      ]
+    },
+    {
       "id": "gate-required-waits-for-aggregator",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2504",
