@@ -1,6 +1,8 @@
 import json
+import sys
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
@@ -353,6 +355,19 @@ def _polling_revision(root: Path | str) -> str:
     """Return a fixed revision after the millisecond sleep the subprocess wait inside the real read makes."""
     time.sleep(0.001)
     return "loaded"
+
+
+def _daemon_sleeps(monkeypatch: pytest.MonkeyPatch, sleep: Callable[[float], object]) -> None:
+    """Hand each sleep the daemon module makes to sleep and let every other caller, in any thread, sleep for real."""
+    real = time.sleep
+
+    def route(seconds: float) -> None:
+        if sys._getframe(1).f_globals.get("__name__") == daemon.__name__:
+            sleep(seconds)
+        else:
+            real(seconds)
+
+    monkeypatch.setattr(daemon.time, "sleep", route)
 
 
 def test_run_beats_immediately_then_waits_a_beat_less_the_wake_slack(monkeypatch):
@@ -1234,7 +1249,7 @@ def test_an_overlong_beat_does_not_sleep_again(monkeypatch):
     sleep.assert_called_once_with(0, state=connection, timeout=0)
 
 
-def test_run_resumes_registration_after_a_dropped_and_restored_redis(monkeypatch):
+def test_run_resumes_registration_after_a_dropped_and_restored_redis(monkeypatch: pytest.MonkeyPatch) -> None:
     import fakeredis
 
     server = fakeredis.FakeServer()
@@ -1266,7 +1281,7 @@ def test_run_resumes_registration_after_a_dropped_and_restored_redis(monkeypatch
         daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
     )
     monkeypatch.setattr(daemon.time, "time", lambda: now[0])
-    monkeypatch.setattr(daemon.time, "sleep", backoff)
+    _daemon_sleeps(monkeypatch, backoff)
     monkeypatch.setattr(daemon, "scheduled_wait", wait)
     with pytest.raises(KeyboardInterrupt):
         daemon.run(connect)
@@ -1277,7 +1292,9 @@ def test_run_resumes_registration_after_a_dropped_and_restored_redis(monkeypatch
     assert "invalid_order" in clients[-1].hget(f"{stream}:acks", queued[0])
 
 
-def test_run_backoff_is_capped_and_restarts_after_a_good_beat_and_wait(monkeypatch, capsys):
+def test_run_backoff_is_capped_and_restarts_after_a_good_beat_and_wait(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     from redis.exceptions import ConnectionError, TimeoutError
 
     outcomes = iter([ConnectionError] * 6 + [None, None, TimeoutError, None])
@@ -1308,7 +1325,7 @@ def test_run_backoff_is_capped_and_restarts_after_a_good_beat_and_wait(monkeypat
     monkeypatch.setattr(daemon, "hive_id", lambda: "local")
     monkeypatch.setattr(daemon, "beat", beat)
     monkeypatch.setattr(daemon, "revision", _polling_revision)
-    monkeypatch.setattr(daemon.time, "sleep", sleeps.append)
+    _daemon_sleeps(monkeypatch, sleeps.append)
     monkeypatch.setattr(daemon, "scheduled_wait", wait)
     with pytest.raises(KeyboardInterrupt):
         daemon.run(connect)
@@ -1319,11 +1336,11 @@ def test_run_backoff_is_capped_and_restarts_after_a_good_beat_and_wait(monkeypat
     assert len(connections) == 10
 
 
-def test_run_lets_errors_other_than_a_lost_connection_escape(monkeypatch):
+def test_run_lets_errors_other_than_a_lost_connection_escape(monkeypatch: pytest.MonkeyPatch) -> None:
     _quiet_quota(monkeypatch)
     monkeypatch.setattr(daemon, "hive_id", lambda: "local")
     monkeypatch.setattr(daemon, "beat", Mock(side_effect=ValueError("bad report")))
-    monkeypatch.setattr(daemon.time, "sleep", Mock(side_effect=AssertionError("retried")))
+    _daemon_sleeps(monkeypatch, Mock(side_effect=AssertionError("retried")))
     with pytest.raises(ValueError, match="bad report"):
         daemon.run(_once(object()))
 
@@ -1359,11 +1376,13 @@ def test_clients_set_timeouts_keepalive_health_checks_and_no_retries(monkeypatch
     assert (daemon.CONNECT_TIMEOUT_S, daemon.READ_TIMEOUT_S, daemon.WAKE_SLACK_S) == (3, 5, 2)
 
 
-def test_back_off_logs_the_cause_and_sleeps_the_capped_delay(monkeypatch, capsys):
+def test_back_off_logs_the_cause_and_sleeps_the_capped_delay(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     from redis.exceptions import TimeoutError
 
     sleep = Mock()
-    monkeypatch.setattr(daemon.time, "sleep", sleep)
+    _daemon_sleeps(monkeypatch, sleep)
     daemon._back_off(TimeoutError("lost"), 2)
     daemon._back_off(TimeoutError("lost"), 99)
     captured = capsys.readouterr()
@@ -1392,24 +1411,27 @@ def test_clients_keep_the_source_connection_class():
         }
 
 
-def _stall_run(monkeypatch, connect, beat):
-    import time
-
+def _stall_run(
+    monkeypatch: pytest.MonkeyPatch, connect: Callable[[], tuple[Any, Any]], beat: Callable[[Any, str], None]
+) -> tuple[float, Mock]:
     monkeypatch.setattr(daemon, "BEAT_SECONDS", 0.5)
     monkeypatch.setattr(daemon, "READ_TIMEOUT_S", 0.1)
     monkeypatch.setattr(daemon, "WAKE_SLACK_S", 0.1)
     _quiet_quota(monkeypatch)
     monkeypatch.setattr(daemon, "hive_id", lambda: "local")
     monkeypatch.setattr(daemon, "beat", beat)
-    monkeypatch.setattr(daemon.time, "sleep", Mock())
+    sleep = Mock()
+    _daemon_sleeps(monkeypatch, sleep)
     started = time.monotonic()
     with pytest.raises(KeyboardInterrupt):
         daemon.run(connect)
-    return started
+    return started, sleep
 
 
 @pytest.mark.wall_clock
-def test_a_stalled_beat_socket_reconnects_and_beats_within_one_beat_interval(monkeypatch, capsys, stalled):
+def test_a_stalled_beat_socket_reconnects_and_beats_within_one_beat_interval(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], stalled: Callable[[], Any]
+) -> None:
     import time
 
     import fakeredis
@@ -1428,7 +1450,7 @@ def test_a_stalled_beat_socket_reconnects_and_beats_within_one_beat_interval(mon
         beaten_at.append(time.monotonic())
 
     monkeypatch.setattr(daemon, "scheduled_wait", Mock(side_effect=KeyboardInterrupt))
-    started = _stall_run(monkeypatch, connect, beat)
+    started, sleep = _stall_run(monkeypatch, connect, beat)
     assert clients[1] is healthy
     assert beaten_at[0] - started < daemon.BEAT_SECONDS
     assert healthy.get("beat") == "local"
@@ -1436,7 +1458,7 @@ def test_a_stalled_beat_socket_reconnects_and_beats_within_one_beat_interval(mon
     assert err.startswith("hive Redis connection lost (")
     assert "TimeoutError" in err
     assert err.endswith("); reconnecting in 1s\n")
-    daemon.time.sleep.assert_called_once_with(1)
+    sleep.assert_called_once_with(1)
 
 
 @pytest.mark.wall_clock
