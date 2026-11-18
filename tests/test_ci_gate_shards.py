@@ -77,6 +77,26 @@ def test_github_failure_is_never_replaced_with_empty_evidence(error):
     assert [call.args for call in sleep.call_args_list] == [(5,), (10,), (20,)]
 
 
+@pytest.mark.parametrize(
+    ("error", "logged"),
+    [
+        (
+            subprocess.CalledProcessError(1, ["gh"], stderr=b"HTTP 502: Bad Gateway \xff"),
+            "failed: HTTP 502: Bad Gateway",
+        ),
+        (subprocess.TimeoutExpired(["gh"], 60), "failed: Command '['gh']' timed out after 60 seconds"),
+    ],
+)
+def test_every_failed_github_read_logs_its_endpoint_and_gh_error(error, logged, capsys):
+    with (
+        patch.object(ci_gate_shards.subprocess, "run", side_effect=error),
+        patch.object(ci_gate_shards.time, "sleep"),
+        pytest.raises(type(error)),
+    ):
+        ci_gate_shards.api("repos/org/repo/actions")
+    assert capsys.readouterr().err.count(f"gh api repos/org/repo/actions {logged}") == 4
+
+
 @pytest.mark.parametrize("binary", [False, True])
 def test_a_transient_github_failure_is_retried_with_backoff(binary):
     payload = b"zip bytes" if binary else b'[{"artifacts": []}]'
