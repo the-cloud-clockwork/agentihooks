@@ -12,6 +12,7 @@ import subprocess
 import sys
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
 import libcst as cst
 from libcst.metadata import ParentNodeProvider, PositionProvider, WhitespaceInclusivePositionProvider
@@ -33,7 +34,7 @@ from scripts.ci_mutation.stats_cache import (
 )
 from scripts.ci_mutation.stats_dependencies import StoredStats, digest  # pyright: ignore[reportUnknownVariableType]
 
-__all__ = ["mutant_units", "stats_units"]
+__all__ = ["covering", "mutant_units", "stats_units"]
 
 RUNNER = "scripts/ci_mutation/"
 PIN = re.compile(r"""["']mutmut\s*==\s*([^"'\s]+)\s*["']""")
@@ -144,3 +145,11 @@ def mutant_units(
     return tuple(
         unit for path in sorted(changes) for unit in function_units(root, path, set(changes[path]), runner, covering)
     )
+
+
+def covering(
+    root: Path, manifest: Mapping[str, Any], keys: Mapping[str, str], changes: Iterable[str]
+) -> dict[str, dict[str, str]]:
+    """Map the mutmut name of each function of the changed files to the fingerprint of every dependency manifest test
+    that ran it or a function nested in it."""
+    raise NotImplementedError
