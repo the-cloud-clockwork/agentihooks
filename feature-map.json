@@ -5268,6 +5268,24 @@
       ]
     },
     {
+      "id": "panic-freeze-global-options",
+      "origin": "regression",
+      "ordered_at": "2026-11-18",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2573",
+      "behaviour": "While panic holds a swarm, a kubectl, helm or argocd deploy and a gh push, rerun or dispatch stay frozen when a global option of that program, with its value, stands before or between its subcommand words, the same as the plain form; a gh api call to a workflow or repository dispatch endpoint stays frozen, including an endpoint written with the owner and repo brace placeholders, and is never spared as a fix branch command, since it names its repository in the endpoint. The shell command split behind the guards treats a brace as a group only when it stands as its own word, so a brace inside a word keeps the word whole. A read whose option value happens to name a frozen subcommand stays unfrozen, and every program the freeze lists has a global option set.",
+      "seam": "The PreToolUse panic freeze in the blocker window hook: blocker_window.pretool for a session bound to the panicking swarm, the frozen command parse it reads, and the shell_commands split it runs on",
+      "tests": [
+        "tests/swarm/test_panic.py::test_panic_freezes_a_deploy_behind_kubectl_helm_argocd_or_gh_global_options",
+        "tests/swarm/test_panic.py::test_panic_freezes_a_workflow_dispatch_through_gh_api",
+        "tests/swarm/test_panic.py::test_a_fix_branch_session_stays_frozen_for_a_gh_api_dispatch",
+        "tests/swarm/test_panic.py::test_a_read_behind_global_options_stays_unfrozen",
+        "tests/swarm/test_panic.py::test_every_frozen_program_has_a_global_option_set",
+        "tests/swarm/test_panic.py::test_a_global_option_takes_its_value_before_a_frozen_subcommand",
+        "tests/swarm/test_panic.py::test_a_gh_api_option_takes_its_value_before_the_endpoint",
+        "tests/context/test_shell_commands.py::test_a_brace_splits_a_command_only_as_a_standalone_group_word"
+      ]
+    },
+    {
       "id": "panic-spares-a-successor-of-a-fix",
       "origin": "regression",
       "ordered_at": "2026-11-18",

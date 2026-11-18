@@ -335,3 +335,22 @@ def test_stdin_script_boundaries():
         "bash <<EOF | cat\npytest -q\nEOF",
     ):
         assert ["pytest", "-q"] in commands(command)
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        (
+            "gh api repos/{owner}/{repo}/actions/workflows/ci.yml/dispatches -f ref=dev",
+            [["gh", "api", "repos/{owner}/{repo}/actions/workflows/ci.yml/dispatches", "-f", "ref=dev"]],
+        ),
+        ("echo ${HOME}/x && find . -name {}", [["echo", "${HOME}/x"], ["find", ".", "-name", "{}"]]),
+        ("{ echo a; }", [["echo", "a"]]),
+        ("{ echo a;} && { echo b; }", [["echo", "a"], ["echo", "b"]]),
+    ],
+)
+@pytest.mark.feature("panic-freeze-global-options")
+def test_a_brace_splits_a_command_only_as_a_standalone_group_word(command: str, expected: list[list[str]]) -> None:
+    from hooks.context.shell_commands import commands
+
+    assert commands(command) == expected
