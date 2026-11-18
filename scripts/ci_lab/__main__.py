@@ -1,12 +1,12 @@
 """The CI lab command line: python -m scripts.ci_lab cutover --grader-root PATH, evidence --grade RUN,
-shadow report --since REVISION, scheduler [--interval S] [--passes N] to run the scheduler service, or
-scheduler|worker --self-test."""
+shadow report --since REVISION, shadow report --gate GATE [--heads N] [--event merge_group], scheduler
+[--interval S] [--passes N] to run the scheduler service, or scheduler|worker --self-test."""
 
 import os
 import sys
 from collections.abc import Mapping, Sequence
 
-from scripts.ci_lab import contract, delivery, evidence, shadow
+from scripts.ci_lab import contract, delivery, evidence, shadow, shadow_report
 
 SERVICES = {contract.SCHEDULER.name: contract.SCHEDULER, contract.WORKER.name: contract.WORKER}
 SELF_TEST = "--self-test"
@@ -22,6 +22,8 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
         return contract.run(SERVICES[argv[0]], argv[1:], environ)
     if argv and argv[0] == "evidence":
         return evidence.main(argv[1:])
+    if argv and argv[0] == "shadow" and shadow_report.claims(argv[1:]):
+        return shadow_report.main(argv[2:], environ)
     if argv and argv[0] == "shadow":
         return shadow.main(argv[1:], environ)
     return delivery.main(argv, environ)
