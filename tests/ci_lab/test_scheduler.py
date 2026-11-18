@@ -1,5 +1,6 @@
 import copy
 import json
+import logging
 import subprocess
 import sys
 import threading
@@ -988,6 +989,7 @@ class Delivery:
     event: Envelope
     attempt: int = 1
     acked: bool = False
+    termed: bool = False
 
     def ack(self) -> None:
         self.acked = True
@@ -996,7 +998,7 @@ class Delivery:
         raise AssertionError(delay_ms)
 
     def term(self) -> None:
-        raise AssertionError(self.event.id)
+        self.termed = True
 
 
 @dataclass
@@ -1019,7 +1021,32 @@ def test_the_bus_inbox_reads_each_head_with_its_branch_as_lane_and_acknowledges_
     inbox = scheduler.BusInbox(consumer)
     assert inbox.heads() == [scheduler.Head(branched, "dev"), scheduler.Head(bare, HEAD_B)]
     assert [delivery.acked for delivery in deliveries] == [True, True]
+    assert [delivery.termed for delivery in deliveries] == [False, False]
     assert consumer.asked == [(scheduler.BATCH, scheduler.FETCH_MS)]
+
+
+def _without(event: HeadEvent, *names: str) -> Envelope:
+    full = envelope(event)
+    return replace(full, data={name: value for name, value in full.data.items() if name not in names})
+
+
+@pytest.mark.feature("lab-head-missing-field-terminate")
+def test_the_bus_inbox_terminates_each_head_missing_a_field_with_a_logged_reason_and_reads_the_next_head(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    one = _without(HeadEvent("push", REPO, HEAD_A, BASE, ACTOR, "pushed"), "action")
+    two = _without(HeadEvent("push", REPO, HEAD_A, BASE, ACTOR, "forced"), "actor", "action")
+    bare = HeadEvent("pull_request", REPO, HEAD_B, BASE, ACTOR, "opened")
+    deliveries = [Delivery(one), Delivery(two), Delivery(envelope(bare))]
+    inbox = scheduler.BusInbox(Consumer([*deliveries]))
+    with caplog.at_level(logging.WARNING, logger=scheduler.__name__):
+        assert inbox.heads() == [scheduler.Head(bare, HEAD_B)]
+    assert [delivery.termed for delivery in deliveries] == [True, True, False]
+    assert [delivery.acked for delivery in deliveries] == [False, False, True]
+    assert caplog.record_tuples == [
+        (scheduler.__name__, logging.WARNING, f"terminated lab head {one.id} missing action"),
+        (scheduler.__name__, logging.WARNING, f"terminated lab head {two.id} missing actor, action"),
+    ]
 
 
 def _commit(repo: Path, files: dict[str, str]) -> str:
