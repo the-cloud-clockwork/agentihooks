@@ -2019,6 +2019,7 @@ def test_a_fix_branch_session_stays_frozen_for_a_gh_api_dispatch(
         "gh api repos/o/r/actions/workflows",
         "gh api -f q=dispatches graphql",
         "gh api repos/o/r/actions/runs -q .dispatches",
+        "gh api -X POST --paginate",
     ],
 )
 @pytest.mark.feature("panic-freeze-global-options")
@@ -2031,6 +2032,47 @@ def test_a_read_behind_global_options_stays_unfrozen(bound: None, store: RedisSt
 def test_every_frozen_program_has_a_global_option_set() -> None:
     programs = {prefix[0] for prefix in blocker_window._FROZEN_COMMANDS}
     assert programs <= set(blocker_window._GLOBAL_VALUES)
+
+
+_KUBECTL_VALUE_OPTIONS = (
+    "-n --namespace -s --server -v --v --as --as-group --as-uid --as-user-extra --cache-dir --certificate-authority "
+    "--client-certificate --client-key --cluster --context --kubeconfig --kuberc --log-flush-frequency --password "
+    "--profile --profile-output --request-timeout --tls-server-name --token --user --username --vmodule"
+)
+_HELM_VALUE_OPTIONS = (
+    "-n --namespace --burst-limit --color --colour --content-cache --kube-apiserver --kube-as-group --kube-as-user "
+    "--kube-ca-file --kube-context --kube-tls-server-name --kube-token --kubeconfig --qps --registry-config "
+    "--repository-cache --repository-config"
+)
+_ARGOCD_VALUE_OPTIONS = (
+    "-H --header --argocd-context --auth-token --client-crt --client-crt-key --config --controller-name "
+    "--grpc-web-root-path --http-retry-max --kube-context --logformat --loglevel --port-forward-namespace "
+    "--redis-compress --redis-haproxy-name --redis-name --repo-server-name --server --server-crt --server-name"
+)
+
+
+@pytest.mark.parametrize(
+    ("command", "option"),
+    [
+        *(("kubectl apply", option) for option in _KUBECTL_VALUE_OPTIONS.split()),
+        *(("helm upgrade", option) for option in _HELM_VALUE_OPTIONS.split()),
+        *(("argocd app sync", option) for option in _ARGOCD_VALUE_OPTIONS.split()),
+    ],
+)
+@pytest.mark.feature("panic-freeze-global-options")
+def test_a_global_option_takes_its_value_before_a_frozen_subcommand(command: str, option: str) -> None:
+    program, *subcommand = command.split()
+    assert blocker_window._freezes([program, option, "value", *subcommand]) is True
+
+
+@pytest.mark.parametrize(
+    "option",
+    "-F --field -f --raw-field -H --header -X --method -q --jq -t --template -p --preview --hostname "
+    "--input --cache".split(),
+)
+@pytest.mark.feature("panic-freeze-global-options")
+def test_a_gh_api_option_takes_its_value_before_the_endpoint(option: str) -> None:
+    assert blocker_window._freezes(["gh", "api", option, "value", "repos/o/r/dispatches"]) is True
 
 
 @pytest.mark.parametrize(

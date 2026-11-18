@@ -5226,7 +5226,9 @@
         "tests/swarm/test_panic.py::test_panic_freezes_a_workflow_dispatch_through_gh_api",
         "tests/swarm/test_panic.py::test_a_fix_branch_session_stays_frozen_for_a_gh_api_dispatch",
         "tests/swarm/test_panic.py::test_a_read_behind_global_options_stays_unfrozen",
-        "tests/swarm/test_panic.py::test_every_frozen_program_has_a_global_option_set"
+        "tests/swarm/test_panic.py::test_every_frozen_program_has_a_global_option_set",
+        "tests/swarm/test_panic.py::test_a_global_option_takes_its_value_before_a_frozen_subcommand",
+        "tests/swarm/test_panic.py::test_a_gh_api_option_takes_its_value_before_the_endpoint"
       ]
     },
     {
