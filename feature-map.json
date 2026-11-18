@@ -7302,10 +7302,13 @@
     },
     {
       "id": "merge-queue-signed-token",
-      "origin": "inventory",
+      "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2649",
       "behaviour": "Every merge queue GraphQL and REST call a process holding the GitHub App key makes, as the swarm controller's merge pass does when it reads required checks and queues a released pull request, runs gh with the signed installation token environment github_reads puts in its options, so the controller reads a released green pull request green and queues it instead of failing every read with gh auth login.",
       "seam": "scripts.swarm.merge_queue._port through scripts.swarm.merge_queue.graphql and scripts.swarm.merge_queue.rest",
+      "rules": [
+        "gh-runner-drops-signed-env"
+      ],
       "tests": [
         "tests/swarm/test_merge_queue.py::test_a_merge_queue_call_in_a_process_holding_the_app_key_runs_gh_with_its_signed_token"
       ]

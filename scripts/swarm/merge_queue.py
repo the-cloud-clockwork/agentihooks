@@ -42,11 +42,13 @@ READER = GitHubSourceControl("", Path(), "dev")
 
 
 def _port(run: Callable[..., Any]) -> GitHubSourceControl:
-    """The GitHub adapter calling one gh runner with text output and a whole second timeout."""
+    """The GitHub adapter calling one gh runner with text output, a whole second timeout and the caller's signed
+    environment when it sets one."""
 
     def gh(argv: list[str], **options: Any) -> subprocess.CompletedProcess[Any]:
         """Run one adapter gh call through the caller's runner and return its completed process."""
-        done = run(argv, capture_output=True, text=True, timeout=round(options["timeout"]))
+        signed = {"env": options["env"]} if "env" in options else {}
+        done = run(argv, capture_output=True, text=True, timeout=round(options["timeout"]), **signed)
         return subprocess.CompletedProcess(argv, done.returncode, done.stdout, done.stderr)
 
     return replace(READER, gh=gh)

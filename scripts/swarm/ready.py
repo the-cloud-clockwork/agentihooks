@@ -8,6 +8,7 @@ reopen the task for the next engineer, who continues from the stored handoff.
 
 import json
 import os
+import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from hashlib import sha256
@@ -69,6 +70,20 @@ PROOF = (
     "The swarm merged {url}. This {kind} task stays open for its proof; the next engineer continues it from the "
     "handoff its engineer left."
 )
+HELD = "{slug}: merge pass holds task {task} {url}: {reason}"
+UNREAD = "GitHub did not answer a read of its pull request"
+DEPENDS = "it waits on its dependency {target}"
+CHECKS_RUN = "its required checks have not all finished"
+GATE_HELD = "its {gate} never passed"
+HEAD_MOVED = "its head moved, so its checks are read again on the new head"
+NOT_GREEN = "GitHub does not read every required check green on its head"
+IN_QUEUE = "it waits in the merge queue"
+BACKOFF = "it queues again after its backoff"
+RESTACK = "its owner was told to restack it: {problem}"
+CLEARED = "its merge problem cleared on a fresh read"
+OWNED = "a live agent still owns it"
+UNRELEASED = "the ledger or its ready record changed before the swarm could release it"
+SPLIT = "the done gate refuses its split pull requests"
 
 
 def awaiting(task):
@@ -296,13 +311,13 @@ def _advance(
     url, held = found["url"], found["on"]
     pull = run.github(url)
     if pull is None:
-        return []
+        return _hold(run, row, url, UNREAD)
     if pull.state == "MERGED":
         return _finish(run, rows, row, found, closed)
     if pull.state != "OPEN":
         return _reopen(run, row, found, "was closed without merging")
     if waits.dependency(found.get("dependency", {}), row, rows, run.github):
-        return []
+        return _hold(run, row, url, DEPENDS.format(target=found["dependency"].get("target")))
     if pull.merge_problem:
         return _unmergeable(run, row, found, pull)
     if held["kind"] == RECOVER:
@@ -314,13 +329,19 @@ def _advance(
     outcome = waits.merge_resolution(held, run.github, run.reread, run.now_ms - found["queued_at"] < waits.FRESH_MS)
     if not outcome:
         save(run.store, run.slug, row["id"], found)
-        return []
+        return _hold(run, row, url, IN_QUEUE)
     if outcome == f"pull request {url}, now merged":
         return _finish(run, rows, row, found, closed)
     if outcome.startswith(f"pull request {url}, now green"):
         return _requeue(run, row, found)
     red = outcome.startswith(f"pull request {url}, now red")
     return _reopen(run, row, found, HEAD_RED if red else "left the merge queue without merging")
+
+
+def _hold(run: Pass, row: Mapping[str, Any], url: str, reason: str) -> list[str]:
+    """Log why the merge pass leaves task ``row`` as it is this pass, and return no action."""
+    print(HELD.format(slug=run.slug, task=row["id"], url=url, reason=reason), file=sys.stderr)
+    return []
 
 
 def _requeue(run, row, found):
@@ -344,15 +365,28 @@ def _requeue(run, row, found):
     return actions
 
 
-def _checks(run, row, found, pull):
+def _checks(run: Pass, row: dict[str, Any], found: dict[str, Any], pull: Any) -> list[str]:
+    before = found["on"].get("head")
     outcome = waits.checks_resolution(found["on"], run.github, run.reread)
     if not outcome.startswith(f"checks on {found['url']}"):
         save(run.store, run.slug, row["id"], found)
-        return []
+        return _hold(run, row, found["url"], _checks_held(before, found["on"], pull))
     if outcome.startswith(f"checks on {found['url']}, now red"):
         steps = ", ".join(pull.failed)
         return _reopen(run, row, found, f"has red checks: {steps}" if steps else "has red checks")
     return _queue(run, row, found)
+
+
+def _checks_held(before: str | None, held: Mapping[str, Any], pull: Any) -> str:
+    """Why a checks wait holds: a moved head, checks still running, a gate that never passed, or a head GitHub does
+    not read green."""
+    if held.get("head") != before:
+        return HEAD_MOVED
+    if not pull.resolved:
+        return CHECKS_RUN
+    if pull.unpassed_gate and not pull.failed:
+        return GATE_HELD.format(gate=pull.unpassed_gate)
+    return NOT_GREEN
 
 
 def _journal(run, task_id, url):
@@ -389,7 +423,7 @@ def _finish(
         run.ledger.comment(run.slug, task_id, PROOF.format(url=url, kind=kind), by="swarm")
         return [f"task {task_id} awaits its proof, {url} merged", *_remove(found)]
     if row.get("split") and done_gate.refusal(row, url, run.github):
-        return []
+        return _hold(run, row, url, SPLIT)
     fields = {"state": "done", "pr_url": url, "awaiting": ""}
     run.ledger.update_task(run.slug, task_id, fields)
     finished = [task_id]
@@ -432,13 +466,15 @@ def _working_owner(run, row, pull):
     return bool(owners)
 
 
-def _unmergeable(run, row, found, pull):
+def _unmergeable(run: Pass, row: dict[str, Any], found: dict[str, Any], pull: Any) -> list[str]:
     if _working_owner(run, row, pull):
-        return []
+        return _hold(run, row, found["url"], RESTACK.format(problem=pull.merge_problem))
     task_id, url = row["id"], found["url"]
     fresh = run.reread(url)
-    if fresh is None or not fresh.merge_problem:
-        return []
+    if fresh is None:
+        return _hold(run, row, url, UNREAD)
+    if not fresh.merge_problem:
+        return _hold(run, row, url, CLEARED)
     if fresh.queued:
         try:
             result = run.queue("dequeue", url, journal=_journal(run, task_id, url))
@@ -460,13 +496,13 @@ def _unmergeable(run, row, found, pull):
     return _reopen(run, row, found, fresh.merge_problem)
 
 
-def _recover(run, row, found):
+def _recover(run: Pass, row: dict[str, Any], found: dict[str, Any]) -> list[str]:
     task_id, url = row["id"], found["url"]
     if run.now_ms < found["retry_at"]:
-        return []
+        return _hold(run, row, url, BACKOFF)
     fresh = run.reread(url)
     if fresh is None:
-        return []
+        return _hold(run, row, url, UNREAD)
     if fresh.head and fresh.head != found["on"]["head"]:
         return _reopen(run, row, found, MOVED)
     if fresh.mergeable == "CONFLICTING":
@@ -505,12 +541,13 @@ def _reopen(run, row, found, what):
     return [f"task {task_id} reopened, {url} {what}"]
 
 
-def _release(run, row, found, wait):
+def _release(run: Pass, row: dict[str, Any], found: dict[str, Any], wait: str) -> bool:
     task_id = row["id"]
     owners = _owners(run, task_id)
     if owners:
         if wait == "verify":
             _proof_wait(run, row, owners)
+        _hold(run, row, found["url"], OWNED)
         return False
     lease_generation = run.store.claim_generation(run.slug, task_id)
     expected_ready = run.store.redis.hget(run.store.key(run.slug, RECORDS), task_id)
@@ -521,8 +558,12 @@ def _release(run, row, found, wait):
     )
     generation = expected["claim_generation"] + (row.get("claimed_by") != "")
     if live.get("state") != "open" or live.get("claimed_by") or live.get("claim_generation", 0) != generation:
+        _hold(run, row, found["url"], UNRELEASED)
         return False
-    return run.store.release_ready(run.slug, task_id, found["agent"], lease_generation, expected_ready)
+    if run.store.release_ready(run.slug, task_id, found["agent"], lease_generation, expected_ready):
+        return True
+    _hold(run, row, found["url"], UNRELEASED)
+    return False
 
 
 def _proof_wait(run, row, owners):
