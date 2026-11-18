@@ -257,7 +257,7 @@ def test_a_unit_cannot_restore_write_bits_or_write_into_a_read_only_tree(tmp_pat
     ports = sandbox.PortAllocator(first=20000, last=20099, width=100)
     unit = sandbox.Sandbox(root=root, cwd=worktree, ports=ports, whitelist={}, readonly=trees)
     outcome = unit.run([sys.executable, "-c", READ_ONLY, *map(str, trees)], timeout=30, net=net)
-    refused = [f"{name} {errno.EROFS}" for _ in trees for name in ("chmod", "rewrite", "plant")]
+    refused = [f"{name} {errno.EACCES}" for _ in trees for name in ("chmod", "rewrite", "plant")]
     assert (outcome.code, outcome.log.read_text().splitlines()) == (0, refused)
     for tree in trees:
         assert [path.name for path in tree.iterdir()] == ["gate.py"]
