@@ -422,7 +422,7 @@ test('still reads a queued rerun that keeps its finished readiness job', async (
   assert.equal(f.outputs.graded, newer);
 });
 
-test('verifies the running job separately from its selected newer grade during self wait', async () => {
+test('an unstable snapshot of a selected newer grade merges', async () => {
   const f = batchFixture({ unstable: true });
   await promote(f);
   assert.equal(f.outputs.main, 'rebased');
@@ -586,40 +586,39 @@ test('a repeated promotion does not open or merge another pull request', async (
   assert.equal(f.outputs.main, 'main');
 });
 
-const selfWaitFixture = () => fixture({ existing: true, mergeState: 'unstable' });
+const unstableFixture = () => fixture({ existing: true, mergeState: 'unstable' });
 
-test('admits only its running check after the current run grade passed', async () => {
-  const f = selfWaitFixture();
-  f.checks.push({ name: 'unit-selected', status: 'completed', conclusion: 'skipped' });
+for (const [name, alter] of [
+  ['a red check of a dispatched run', f => f.checks.push({ name: 'load', status: 'completed', conclusion: 'failure',
+    details_url: 'https://github.com/owner/repo/actions/runs/44/job/80' })],
+  ['a running check of another workflow', f => f.checks.push({ name: 'kind', status: 'in_progress', conclusion: null,
+    details_url: 'https://github.com/owner/repo/actions/runs/45/job/81' })],
+  ['a failed commit status', f => f.statuses.push({ context: 'policy', state: 'failure' })],
+]) {
+  test(`an unstable snapshot merges on its first poll despite ${name} on the triggering commit`, async () => {
+    const f = unstableFixture();
+    alter(f);
+    await promote(f);
+    assert.equal(f.now(), 0);
+    assert.equal(f.outputs.main, 'rebased');
+    assert.deepEqual(f.writes.map(([kind]) => kind), ['merge']);
+  });
+}
+
+test('an unstable snapshot merges without reading the checks or statuses of the triggering commit', async () => {
+  const f = unstableFixture();
   await promote(f);
   assert.equal(f.outputs.main, 'rebased');
   assert.equal(f.writes[0][1].sha, 'snapshot');
   assert.ok(f.pages.every(args => args.per_page === 100));
-  assert.equal(f.pages.filter(args => args.ref === 'graded').length, 2);
+  assert.equal(f.pages.filter(args => args.ref === 'graded').length, 0);
   assert.equal(f.pages.find(args => args.run_id === 42).filter, 'latest');
 });
-
-test('uses the latest successful status for each context', async () => {
-  const f = selfWaitFixture();
-  f.statuses.push({ context: 'policy', state: 'success' }, { context: 'policy', state: 'failure' });
-  await promote(f);
-  assert.equal(f.outputs.main, 'rebased');
-});
-
-for (const outcome of ['queued', 'in_progress', 'failure', 'cancelled', 'timed_out', 'neutral', 'action_required', 'stale']) {
-  test(`another nonpassing check blocks promotion: ${outcome}`, async () => {
-    const f = selfWaitFixture();
-    const pending = outcome === 'queued' || outcome === 'in_progress';
-    f.checks.push({ name: 'another check', status: pending ? outcome : 'completed', conclusion: pending ? null : outcome });
-    await assert.rejects(promote(f));
-    assert.deepEqual(f.writes, []);
-  });
-}
 
 for (const name of ['mutation-stats-seed', 'test-summary']) {
   for (const outcome of ['queued', 'in_progress', 'failure', 'cancelled']) {
     test(`an exempt side job never holds the release: ${name} ${outcome}`, async () => {
-      const f = selfWaitFixture();
+      const f = unstableFixture();
       const pending = outcome === 'queued' || outcome === 'in_progress';
       const job = { name, status: pending ? outcome : 'completed', conclusion: pending ? null : outcome };
       f.jobs.push({ id: 75, run_id: 42, ...job });
@@ -631,57 +630,22 @@ for (const name of ['mutation-stats-seed', 'test-summary']) {
   }
 }
 
-for (const state of ['pending', 'failure', 'error']) {
-  test(`a nonpassing effective commit status blocks promotion: ${state}`, async () => {
-    const f = selfWaitFixture();
-    f.statuses.push({ context: 'policy', state }, { context: 'policy', state: 'success' });
-    await assert.rejects(promote(f));
-    assert.deepEqual(f.writes, []);
-  });
-}
-
 for (const [name, alter] of [
-  ['missing grade', f => f.checks.shift()],
-  ['skipped grade', f => { f.checks[0].conclusion = 'skipped'; }],
-  ['failed grade', f => { f.checks[0].conclusion = 'failure'; }],
-  ['pending grade', f => { f.checks[0].status = 'queued'; }],
-  ['another run grade', f => { f.checks[0].details_url = 'https://github.com/owner/repo/actions/runs/41/job/72'; }],
   ['missing current job', f => { f.jobs.length = 0; }],
   ['duplicate current jobs', f => { f.jobs.push({ ...f.jobs[0], id: 73 }); }],
   ['another run job', f => { f.jobs[0].run_id = 41; }],
-  ['another job id', f => { f.jobs[0].id = 73; }],
-  ['another check url', f => { f.jobs[0].check_run_url += '/foreign'; }],
-  ['another check name', f => { f.checks[1].name = 'another job'; }],
-  ['another run details', f => { f.checks[1].details_url = 'https://github.com/owner/repo/actions/runs/41/job/71'; }],
   ['completed current job', f => { f.jobs[0].status = 'completed'; }],
-  ['failed current check', f => { f.checks[1].status = 'completed'; f.checks[1].conclusion = 'failure'; }],
 ]) {
   test(`an unverified current grade or job blocks promotion: ${name}`, async () => {
-    const f = selfWaitFixture();
+    const f = unstableFixture();
     alter(f);
     await assert.rejects(promote(f));
     assert.deepEqual(f.writes, []);
   });
 }
 
-test('reads a failing check beyond the first hundred results', async () => {
-  const f = selfWaitFixture();
-  f.checks.push(...Array.from({ length: 110 }, (_, id) => ({ id, name: `extra-${id}`, status: 'completed', conclusion: 'success' })),
-    { name: 'late failure', status: 'completed', conclusion: 'failure' });
-  await assert.rejects(promote(f));
-  assert.deepEqual(f.writes, []);
-});
-
-test('reads a failing status beyond the first hundred contexts', async () => {
-  const f = selfWaitFixture();
-  f.statuses.push(...Array.from({ length: 110 }, (_, id) => ({ context: `extra-${id}`, state: 'success' })),
-    { context: 'late failure', state: 'failure' });
-  await assert.rejects(promote(f));
-  assert.deepEqual(f.writes, []);
-});
-
 test('finds the exact current job beyond the first hundred jobs', async () => {
-  const f = selfWaitFixture();
+  const f = unstableFixture();
   f.jobs.unshift(...Array.from({ length: 110 }, (_, id) => ({ id, run_id: 42, name: `extra-${id}`, status: 'completed', conclusion: 'success' })));
   await promote(f);
   assert.equal(f.outputs.main, 'rebased');
