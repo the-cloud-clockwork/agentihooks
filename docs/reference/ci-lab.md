@@ -798,13 +798,13 @@ list, whatever its graded outcome, `StoredManifests.note` writes it as a note of
 `lab/manifests/<owner>--<name>/outside/<digest>.json`, holding the unit's tests and the sorted list,
 where `<digest>` is `digests.digest` of that note. The object store is write once, so the packed
 `<commit>.json` manifests are never rewritten, and the same tests and list write one note. A
-`StoredManifests` read that finds a packed manifest merges each note of the repository into the `outside` list of each test
-record the note names, sorted and without duplicates, and skips a test the manifest lacks; the
-next expansion keys those tests on the measured tree and the batch on the noted files' blob ids,
-and `tests.dep_manifest.invalidated` counts a change to a file in a record's `outside` list as a
-change to that test, as it does for a file in its `files` list.
-The list is per batch, so every test of the batch takes it, and notes are per repository rather
-than per manifest commit.
+`StoredManifests` read that finds a packed manifest merges each note of the repository into the
+`outside` list of each test record the note names, sorted and without duplicates, and skips a test
+the manifest lacks; the next expansion keys those tests on the measured tree and the batch on the
+noted files' blob ids, and `tests.dep_manifest.invalidated` counts a change to a file in a
+record's `outside` list as a change to that test, as it does for a file in its `files` list. The
+list is per batch, so every test of the batch takes it, and notes are per repository rather than
+per manifest commit.
 
 For a merge group head the expander builds `interaction.Group` from the mirror: the group's
 changes against the base, one entry per first parent commit between base and head with that
