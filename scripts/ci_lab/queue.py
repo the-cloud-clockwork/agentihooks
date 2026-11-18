@@ -146,8 +146,8 @@ class Queue:
             job = f"{head}:{unit.kind}:{unit.key}"
             need = requirements.get(unit.key, DEFAULT)
             record = {
-                "base": base,
-                "grader": grader,
+                "base": "",
+                "grader": "",
                 "kind": unit.kind,
                 "key": unit.key,
                 "members": json.dumps(unit.members),

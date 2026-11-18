@@ -19,10 +19,6 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
         from scripts.ci_lab import scheduler
 
         return scheduler.main(argv[1:], environ)
-    if argv[:1] == [contract.WORKER.name] and SELF_TEST not in argv:
-        from scripts.ci_lab import executors
-
-        return executors.main(argv[1:], environ)
     if argv and argv[0] in SERVICES:
         return contract.run(SERVICES[argv[0]], argv[1:], environ)
     if argv and argv[0] == "evidence":

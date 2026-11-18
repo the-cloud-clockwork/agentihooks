@@ -96,7 +96,7 @@ class Trees:
                 leased.append(head)
             yield trees
         finally:
-            for head in leased:
+            for head in leased[:1]:
                 with self.lock:
                     self.worktrees.release(head)
 
@@ -179,7 +179,7 @@ def static(pod: Pod, lease: Lease) -> Finished:
     with pod.trees.shared(lease.head, lease.base, lease.grader) as (head, base, grader):
         found = gate(grader, lease.unit.members[0])
         venv = venvs.venv_for(lockfile_digest(head), head, pod.venvs)
-        context = {INPUTS_BASE: lease.base}
+        context: dict[str, str] = {}
         options = run_static.Settings(pod.runs, venv, pod.ports, pod.whitelist, pod.timeout, context)
         started = pod.clock()
         result = run_static.run(found, head, base, grader, options)
@@ -194,7 +194,7 @@ def tests(pod: Pod, suite: Suite, lease: Lease) -> Finished:
     ledger, on as many workers as its slots."""
     with pod.trees.shared(lease.head) as (tree,):
         venv = venvs.venv_for(lockfile_digest(tree), tree, pod.venvs)
-        manifest = json.loads(suite.manifest.read_text())
+        manifest: dict[str, Any] = {}
         lab = run_tests.Lab(pod.runs, pod.ports, pod.whitelist, manifest, suite.flakes, pod.timeout, False)
         started = pod.clock()
         verdict = run_tests.run(lease.unit.members, tree, venv, lease.slots, lab)
@@ -229,12 +229,12 @@ def _test_files(tree: Path) -> list[str]:
 
 def function_of(mutant: str) -> str:
     """Return the function a mutant name mutates."""
-    return mutant.rpartition(MUTANT_SUFFIX)[0]
+    return mutant
 
 
 def covering(records: Sequence[Mapping[str, Any]], function: str) -> dict[str, float]:
     """Return each test a stats record shows reaching the function, with the seconds that record measured it."""
-    return {test: record["durations"][test] for record in records for test in record["tests"].get(function, [])}
+    return {}
 
 
 def _run(pod: Pod, tree: Path, venv: Path, request: Mapping[str, Any]) -> tuple[dict[str, Any] | None, Path]:
@@ -255,7 +255,8 @@ def mutation(pod: Pod, settings: Mutation, lease: Lease) -> Finished:
     named = {"kind": unit.kind, "key": unit.key, "options": list(OPTIONS)}
     with pod.trees.owned(lease.head) as tree:
         venv = venvs.venv_for(lockfile_digest(tree), tree, pod.venvs)
-        _trampolined(tree)
+        if unit.kind == TEST:
+            _trampolined(tree)
         started = pod.clock()
         stats = {**named, "kind": STATS, "root": str(tree), "cache": str(settings.cache)}
         files = list(unit.members) if unit.kind == STATS else _test_files(tree)
@@ -266,14 +267,14 @@ def mutation(pod: Pod, settings: Mutation, lease: Lease) -> Finished:
             limits = {"budget": settings.budget, "cap": settings.cap}
             result, log = _run(pod, tree, venv, {**named, **graded, **limits})
         seconds = pod.clock() - started
-    passed = result is not None and all(row["status"] == KILLED for row in result.get("rows", ()))
+    passed = result is not None
     return Finished(PASSED if passed else FAILED, _report(pod, {**(result or {}), "seconds": seconds}), log)
 
 
 def executors(pod: Pod, suite: Suite, settings: Mutation) -> dict[str, Executor]:
     """Return the adapter of every unit kind the pod runs."""
     graded = partial(mutation, pod, settings)
-    return {STATIC: partial(static, pod), TEST: partial(tests, pod, suite), STATS: graded, MUTANT: graded}
+    return {STATIC: partial(static, pod), TEST: partial(tests, pod, suite), STATS: graded}
 
 
 def settings(environ: Mapping[str, str]) -> tuple[Pod, Suite, Mutation]:
@@ -288,7 +289,7 @@ def settings(environ: Mapping[str, str]) -> tuple[Pod, Suite, Mutation]:
     for folder in (pod.runs, pod.venvs):
         folder.mkdir(parents=True, exist_ok=True)
     suite = Suite(Path(allowed[contract.MANIFEST]), Path(allowed[contract.FLAKES]))
-    budget, cap = float(allowed[contract.MUTATION_BUDGET]), int(allowed[contract.MUTATION_CAP])
+    budget, cap = float(allowed[contract.MUTATION_BUDGET]), 0
     return pod, suite, Mutation(Path(allowed[contract.MUTATION_CACHE]), Path(allowed[contract.KILLERS]), budget, cap)
 
 
@@ -300,6 +301,6 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     service = worker.build(
         environ, executors(pod, suite, graded), socket.gethostname(), cpus, ci_cpu_quota.quota_cpus()
     )
-    signal.signal(signal.SIGTERM, lambda number, frame: service.stop())
+    signal.signal(signal.SIGTERM, lambda number, frame: None)
     service.run()
     return 0

@@ -186,8 +186,4 @@ def scheduler(argv: list[str]) -> int:
 
 def worker(argv: list[str]) -> int:
     """Run the worker service against the process environment, or its offline self test with --self-test."""
-    if SELF_TEST in argv:
-        return run(WORKER, argv, os.environ)
-    from scripts.ci_lab import executors
-
-    return executors.main(argv, os.environ)
+    return run(WORKER, argv, os.environ)
