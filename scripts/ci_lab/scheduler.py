@@ -60,12 +60,13 @@ from scripts.ci_lab.objects import Objects, S3Objects, Uploads, manifest_folder,
 from scripts.ci_lab.outcomes import CANNOT_RUN, DROPPED, FAILED, LOSSES, PASSED
 from scripts.ci_lab.pods import Pods, unmanaged, worker_pods
 from scripts.ci_lab.queue import DEFAULT, Job, Queue
+from scripts.ci_lab.remote.post_receive import GRADE_REFS
 from scripts.ci_lab.retry import Policy, UnitResult, decide, policy
 from scripts.ci_lab.static_gates import REGISTRY, WORKFLOW, discover
 from scripts.ci_lab.store import PREFIX, Store, Verdict
 from scripts.ci_lab.units import Priority, Unit
 from scripts.ci_lab.webhooks import HEAD_SUBJECT, HeadEvent
-from scripts.ci_lab.worktrees import Mirror
+from scripts.ci_lab.worktrees import Lab, Mirror, lab
 from scripts.ci_mutation import scope
 from scripts.ci_runner_trust import ACTORS, validate_actors
 from scripts.events.bus import Consumer
@@ -295,10 +296,12 @@ def fold(event: str, needs: Needs, flags: Flags) -> bool:
 
 @dataclass(frozen=True)
 class Head:
-    """One head the inbox read: its event and its lane, the branch whose newer head supersedes it."""
+    """One head the inbox read: its event, its lane, the branch whose newer head supersedes it, and the grade ref a
+    lab remote push wrote it to, empty for a head GitHub delivered."""
 
     event: HeadEvent
     lane: str
+    ref: str = ""
 
 
 @dataclass(frozen=True)
@@ -380,8 +383,8 @@ class Slot:
 
 @dataclass
 class State:
-    """A grade's state: what it grades, its units by gate, whether a newer head superseded it, what it posted and the
-    id of each check run it posted."""
+    """A grade's state: what it grades, its units by gate, whether a newer head superseded it, what it posted, the
+    id of each check run it posted and the grade ref a lab remote push wrote its head to, if any."""
 
     run: str
     repo: str
@@ -400,6 +403,7 @@ class State:
     conclusion: str = ""
     posted: dict[str, list[str | None]] = field(default_factory=dict[str, list[str | None]])
     runs: dict[str, int] = field(default_factory=dict[str, int])
+    ref: str = ""
 
 
 def _parse(raw: str | bytes) -> State:
@@ -615,16 +619,21 @@ class Scheduler:
                 continue
             if head.lane in fixes or head.event.head in fixes:
                 request = replace(request, tier=Priority.HOTFIX)
-            actions.append(self._hold(request, head.lane, now_ms))
+            actions.append(self._hold(request, head.lane, head.ref, now_ms))
         return actions
 
-    def _hold(self, request: GradeRequest, lane: str, now_ms: int) -> str:
-        """Hold a head in its lane's quiet window; a new head of the lane restarts the window."""
+    def _hold(self, request: GradeRequest, lane: str, ref: str, now_ms: int) -> str:
+        """Hold a head and its grade ref in its lane's quiet window; a new head of the lane restarts the window, and the
+        held head arriving again with a grade ref keeps its window and takes that ref."""
         name = f"{request.repo}|{lane}|{int(request.tier)}"
         held = self.client.hget(WAITING, name)
-        if held is not None and json.loads(held)["request"]["head"] == request.head:
+        waiting = None if held is None else json.loads(held)
+        if waiting is not None and waiting["request"]["head"] == request.head:
+            if ref:
+                self.client.hset(WAITING, name, json.dumps({**waiting, "ref": ref}))
             return f"holding {request.head}"
-        self.client.hset(WAITING, name, json.dumps({"request": asdict(request), "lane": lane, "since": now_ms}))
+        waiting = {"request": asdict(request), "lane": lane, "ref": ref, "since": now_ms}
+        self.client.hset(WAITING, name, json.dumps(waiting))
         return f"received {request.head} on {lane}"
 
     def _release(self, now_ms: int) -> list[str]:
@@ -641,7 +650,7 @@ class Scheduler:
                 continue
             self.client.hdel(WAITING, name)
             try:
-                actions.append(self._start(request, held["lane"], now_ms))
+                actions.append(self._start(request, held["lane"], held.get("ref", ""), now_ms))
             except (
                 subprocess.CalledProcessError,
                 ValueError,
@@ -652,9 +661,10 @@ class Scheduler:
                 actions.append(f"cannot expand {request.head}: {error}")
         return actions
 
-    def _start(self, request: GradeRequest, lane: str, now_ms: int) -> str:
-        """Open a grade: supersede the lane's older head, place every unit and hold the store's misses for the budget;
-        a request that bypasses negative verdicts grades again under a run of its own."""
+    def _start(self, request: GradeRequest, lane: str, ref: str, now_ms: int) -> str:
+        """Open a grade of a head and the grade ref it was pushed to: supersede the lane's older head, place every unit
+        and hold the store's misses for the budget; a request that bypasses negative verdicts grades again under a run
+        of its own."""
         plan = self.ports.expander.expand(request)
         inputs = GradeInputs(request.repo, request.head, request.base, CLASSES[request.tier], plan.grader)
         run = grade_key(inputs)
@@ -675,6 +685,7 @@ class Scheduler:
             flags=plan.flags,
             outputs={job: dict(values) for job, values in plan.outputs.items()},
             skipped=sorted(plan.skipped),
+            ref=ref,
         )
         source = self._merge_group(request, plan.tree)
         misses: list[Unit] = []
@@ -850,7 +861,9 @@ class Scheduler:
 
     def _post(self, state: State) -> list[str]:
         """Post each check run whose target moved since its last post; a completed check run never moves again. A
-        check run the grade already holds seeds the poster first, so a restarted scheduler advances it in place."""
+        check run the grade already holds seeds the poster first, so a restarted scheduler advances it in place. A grade
+        of a head pushed to a grade ref records each move for the relay and posts nothing, since GitHub does not hold
+        the head before the relay pushes it."""
         moved = [
             (check, status, conclusion)
             for check, (status, conclusion) in _checks(state).items()
@@ -859,6 +872,10 @@ class Scheduler:
         ]
         if not moved:
             return []
+        if state.ref.startswith(GRADE_REFS):
+            for check, status, conclusion in moved:
+                state.posted[check] = [status, conclusion]
+            return [f"left {check} {status} on {state.head} to the relay" for check, status, _ in moved]
         poster = self.ports.checks(_slug(state.repo))
         shadow = self.settings.shadow
         for check, status, conclusion in moved:
@@ -887,8 +904,9 @@ class BusInbox:
         self.timeout_ms = timeout_ms
 
     def heads(self) -> list[Head]:
-        """Return the heads of the next batch of envelopes; a head's lane is its branch, else the head itself. An
-        envelope missing a head field is terminated with a logged warning, never redelivered to the dead letter cap.
+        """Return the heads of the next batch of envelopes; a head's lane is its branch, else the head itself, and its
+        ref the grade ref a lab remote notice names. An envelope missing a head field is terminated with a logged
+        warning, never redelivered to the dead letter cap.
         """
         heads: list[Head] = []
         for delivery in self.consumer.fetch(self.batch, self.timeout_ms):
@@ -901,7 +919,7 @@ class BusInbox:
                 delivery.term()
                 continue
             event = HeadEvent(*(str(data[name]) for name in HEAD_FIELDS))
-            heads.append(Head(event, str(data.get("branch") or event.head)))
+            heads.append(Head(event, str(data.get("branch") or event.head), str(data.get("ref") or "")))
             delivery.ack()
         return heads
 
@@ -983,19 +1001,29 @@ def note_outside(objects: Objects, repo: str, tests: Sequence[str], outside: Seq
 
 
 class MirrorExpander:
-    """Units of a head read from a git mirror with ls-tree and show. Only the mutation units use a temporary checkout
-    of the head, since their builders read files from disk."""
+    """Units of a head read from a git mirror with ls-tree and show, the mirror fetching a sha GitHub lacks from the
+    lab remote. Only the mutation units use a temporary checkout of the head, since their builders read files from
+    disk."""
 
-    def __init__(self, node: Path, root: Path, toolchain: Toolchain, manifests: Manifests, verdicts: Verdicts) -> None:
+    def __init__(
+        self,
+        node: Path,
+        root: Path,
+        toolchain: Toolchain,
+        manifests: Manifests,
+        verdicts: Verdicts,
+        lab: Lab | None = None,
+    ) -> None:
         self.node = node
         self.root = root
         self.toolchain = toolchain
         self.manifests = manifests
         self.verdicts = verdicts
+        self.lab = lab
 
     def _mirror(self, repo: str) -> Mirror:
         self.root.mkdir(parents=True, exist_ok=True)
-        return Mirror(self.node, self.root / _slug(repo).replace("/", "--"), repo)
+        return Mirror(self.node, self.root / _slug(repo).replace("/", "--"), repo, self.lab)
 
     def _git(self, mirror: Mirror, *argv: str) -> str:
         done = subprocess.run(["git", "-C", str(mirror.store), *argv], capture_output=True, text=True, check=True)
@@ -1151,10 +1179,10 @@ def build(
     environ: Mapping[str, str], client: Any, objects: Objects, consumer: Consumer, spending: budget.Budget
 ) -> Scheduler:
     """Return the service's scheduler over its clients and the day's budget, trusting the runner trust list of the
-    repository's dev."""
+    repository's dev, its mirrors falling back to the lab remote the environment names."""
     toolchain = Toolchain(sys.version.split()[0], {}, "", "", environ.get(IMAGE, ""), {})
     node, root = Path(environ[contract.GIT_MIRROR]), Path(environ[MIRROR_STORE])
-    expander = MirrorExpander(node, root, toolchain, StoredManifests(objects), Store(client, objects).get)
+    expander = MirrorExpander(node, root, toolchain, StoredManifests(objects), Store(client, objects).get, lab(environ))
     checks: dict[str, Poster] = {}
 
     def poster(repo: str) -> Poster:

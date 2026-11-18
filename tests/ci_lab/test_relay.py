@@ -24,7 +24,7 @@ from scripts.ci_lab.outcomes import FAILED, PASSED
 from scripts.ci_lab.remote import post_receive
 from scripts.ci_lab.scheduler import Flags, Scheduler, Slot, State
 from scripts.ci_lab.units import Unit
-from scripts.ci_lab.worktrees import Mirror
+from scripts.ci_lab.worktrees import Lab, Mirror
 from scripts.events.bus import Consumer
 from scripts.events.config import BusConfig
 from scripts.events.memory import open_bus
@@ -610,11 +610,34 @@ def test_a_refused_push_raises_relay_refused_with_git_s_reason(monkeypatch: pyte
         relay.GitPusher(cast(Mirror, mirror), "example/repo", Token()).push(HEAD, BRANCH)
 
 
-def test_the_push_token_asks_only_contents_write(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    minted = mint(monkeypatch, {"contents": "write"})
+@pytest.mark.feature("lab-remote-heads")
+def test_the_push_token_asks_contents_and_workflows_write(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    pushing = {"contents": "write", "workflows": "write"}
+    minted = mint(monkeypatch, pushing)
     monkeypatch.setattr(relay.subprocess, "run", Mock(return_value=subprocess.CompletedProcess([], 0, "", "")))
     relay.GitPusher(cast(Mirror, Mock(spec=Mirror, store=tmp_path)), "example/repo").push(HEAD, BRANCH)
-    assert minted.call_args.kwargs["json"] == {"repositories": ["repo"], "permissions": {"contents": "write"}}
+    assert minted.call_args.kwargs["json"] == {"repositories": ["repo"], "permissions": pushing}
+
+
+@pytest.mark.feature("lab-remote-heads")
+def test_build_gives_the_pusher_mirror_the_lab_remote_the_environment_names(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("GITHUB_APP_ID", "123")
+    monkeypatch.setenv("GITHUB_APP_INSTALLATION_ID", "456")
+    monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "fixture")
+    environ = {
+        relay.contract.GIT_MIRROR: str(tmp_path / "node"),
+        relay.MIRROR_STORE: str(tmp_path / "stores"),
+        post_receive.LAB_URL: LAB,
+        "AGENTIHOOKS_LAB_REMOTE": "http://ci-lab-remote.ci-lab:8080/widgets.git",
+        "AGENTIHOOKS_LAB_REMOTE_TOKEN": "lab-token",
+    }
+    scheduler = cast(Scheduler, Mock(client=fake_redis(), settings=Mock(trusted=frozenset[str]())))
+    consumer = cast(Consumer, open_bus(BusConfig()).lab_heads.consumer(relay.DURABLE, relay.SUBJECT))
+    pusher = cast(relay.GitPusher, relay.build(environ, scheduler, consumer).ports.pusher(REPO))
+    found = Lab("http://ci-lab-remote.ci-lab:8080/widgets.git", "lab-token")
+    assert pusher.mirror == Mirror(tmp_path / "node", tmp_path / "stores" / "acme--widgets", REPO, found)
 
 
 def test_build_wires_the_relay_to_the_scheduler_grades_the_mirror_and_the_lab_url(

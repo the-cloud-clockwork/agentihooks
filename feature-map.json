@@ -9581,6 +9581,27 @@
       ]
     },
     {
+      "id": "lab-remote-heads",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2645",
+      "behaviour": "A head pushed only to the lab remote grades and relays: the scheduler's expander mirrors and the relay's pusher mirror fetch a sha their GitHub remote lacks from the lab remote AGENTIHOOKS_LAB_REMOTE names when it serves the same repository, sending AGENTIHOOKS_LAB_REMOTE_TOKEN as the basic password of the user lab through git's environment config only. A grade of a head pushed to refs/grade/* keeps the notice's ref, also when the held head arrives again with it, records each check's status and conclusion for the relay and posts no GitHub check run. The relay push token asks contents write and workflows write, so a relayed branch that changes workflow files is accepted.",
+      "seam": "Mirror.fetch over a sha only the lab remote holds, scheduler.build and relay.build mirror wiring, BusInbox.heads over a lab remote notice, Scheduler.tick over a grade ref head, and the GitPusher token request",
+      "tests": [
+        "tests/ci_lab/test_worktrees.py::test_fetch_takes_a_sha_only_the_lab_remote_holds_from_the_lab_remote",
+        "tests/ci_lab/test_worktrees.py::test_fetch_never_asks_a_lab_remote_of_another_repository",
+        "tests/ci_lab/test_worktrees.py::test_a_lab_fetch_sends_the_token_as_the_lab_user_s_basic_password_for_the_lab_url_only",
+        "tests/ci_lab/test_worktrees.py::test_the_lab_remote_comes_from_the_environment_and_never_shows_its_token",
+        "tests/ci_lab/test_scheduler.py::test_a_grade_ref_head_posts_no_check_run_and_keeps_each_check_s_conclusion_for_the_relay",
+        "tests/ci_lab/test_scheduler.py::test_a_grade_ref_head_held_in_its_quiet_window_keeps_its_ref",
+        "tests/ci_lab/test_scheduler.py::test_a_held_head_takes_the_grade_ref_it_arrives_again_with_and_keeps_one_it_holds",
+        "tests/ci_lab/test_scheduler.py::test_a_head_held_before_grade_refs_were_kept_starts_with_no_ref_and_posts",
+        "tests/ci_lab/test_scheduler.py::test_the_bus_inbox_keeps_the_grade_ref_a_lab_remote_notice_names",
+        "tests/ci_lab/test_scheduler.py::test_build_gives_each_expander_mirror_the_lab_remote_the_environment_names",
+        "tests/ci_lab/test_relay.py::test_the_push_token_asks_contents_and_workflows_write",
+        "tests/ci_lab/test_relay.py::test_build_gives_the_pusher_mirror_the_lab_remote_the_environment_names"
+      ]
+    },
+    {
       "id": "branch-coverage-wheel-imports",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2659",
