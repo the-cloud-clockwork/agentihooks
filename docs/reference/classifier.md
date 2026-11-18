@@ -260,8 +260,8 @@ Three guards hold the fix: the parametrized
 in `tests/swarm/test_model_pick.py`, the `feature-map.json` entry
 `lane-model-harness-compatibility`, and the Semgrep incident rule
 `lane-model-before-harness`, which fails a `ModelPick` built from the lane in
-`scripts/swarm/model_pick.py` that returns on an explicit effort with no harness check
-before it.
+`scripts/swarm/model_pick.py` that returns on an explicit effort with no Codex harness
+or `foreign` model check replacing its model before it.
 
 Troubleshooting:
 
@@ -274,5 +274,5 @@ Troubleshooting:
 - **`swarm set codex-model=M` is refused** with `codex_model must be a model listed in
   the codex catalog`: name a model the Codex catalog lists. A lane model is refused
   only when no harness catalog lists it (`eng-model must be auto or a model listed in a
-  harness catalog`), so a Claude model on a lane that also launches Codex agents is
+  harness catalog, not <model>`), so a Claude model on a lane that also launches Codex agents is
   accepted.
