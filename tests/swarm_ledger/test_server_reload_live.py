@@ -1,3 +1,4 @@
+import http.client
 import os
 import signal
 import subprocess
@@ -142,3 +143,25 @@ def test_reload_waits_for_pid_publication_after_the_predecessor_exits(tmp_path, 
     monkeypatch.setitem(globals(), "pid_of", delayed_pid)
     test_a_reload_hands_over_without_a_failed_or_slow_request(tmp_path, ledger_port)
     assert stale == [processes[0].pid]
+
+
+@pytest.mark.wall_clock
+def test_a_malformed_answer_after_the_successor_is_named_fails_the_reload_test(
+    tmp_path: Path, ledger_port: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """urlopen raises BadStatusLine, which is no OSError, for a status line cut short such as HTTP/1.1 20."""
+    answer, caller = healthy, threading.current_thread()
+    named: list[int | None] = []
+    planted: list[int | None] = []
+
+    def malformed_once_the_successor_is_named(port: int, timeout: float = 30) -> int:
+        named.append(pid_of(tmp_path))
+        if planted or threading.current_thread() is caller or named[-1] in (None, named[0]):
+            return answer(port, timeout)
+        planted.append(named[-1])
+        raise http.client.BadStatusLine("HTTP/1.1 20")
+
+    monkeypatch.setitem(globals(), "healthy", malformed_once_the_successor_is_named)
+    with pytest.raises(AssertionError, match="BadStatusLine"):
+        test_a_reload_hands_over_without_a_failed_or_slow_request(tmp_path, ledger_port)
+    assert planted
