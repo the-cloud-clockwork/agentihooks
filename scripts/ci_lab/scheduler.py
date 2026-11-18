@@ -42,6 +42,7 @@ from scripts.ci_lab.intake import GradeRequest, admit
 from scripts.ci_lab.leases import Leases
 from scripts.ci_lab.objects import Objects, S3Objects, Uploads, manifest_folder, upload_path
 from scripts.ci_lab.outcomes import CANNOT_RUN, DROPPED, FAILED, LOSSES, PASSED
+from scripts.ci_lab.pods import Pods, Unmanaged
 from scripts.ci_lab.queue import Job, Queue
 from scripts.ci_lab.retry import Policy, UnitResult, decide, policy
 from scripts.ci_lab.static_gates import REGISTRY, WORKFLOW, discover
@@ -316,12 +317,14 @@ class Poster(Protocol):
 
 @dataclass(frozen=True)
 class Ports:
-    """The scheduler's outside world: heads in, plans, check runs out per repository, and the heads marked hotfix."""
+    """The scheduler's outside world: heads in, plans, check runs out per repository, the heads marked hotfix and the
+    worker pods whose deletion cost follows their leases."""
 
     inbox: Inbox
     expander: Expander
     checks: Callable[[str], Poster]
     hotfixes: Callable[[], frozenset[str]]
+    pods: Pods = field(default_factory=Unmanaged)
 
 
 @dataclass(frozen=True)
