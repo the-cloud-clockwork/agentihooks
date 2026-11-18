@@ -4,8 +4,8 @@ rules:
     severity: ERROR
     message: >-
       admission.pending is read by hive members whose Redis grant only reads the admission keys, and Redis declares
-      every key an EVAL or EVALSHA names written, so a script here refuses swarm status on every hive worker. Read
-      the count with plain read commands such as TIME and ZCOUNT.
+      every key an EVAL or EVALSHA names written, including the EVALSHA a register_script call sends, so a script
+      here refuses swarm status on every hive worker. Read the count with plain read commands such as TIME and ZCOUNT.
     paths:
       include:
         - /scripts/hive/admission.py

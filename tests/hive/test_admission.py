@@ -230,9 +230,11 @@ def test_a_hive_member_reads_every_hives_pending_admission_through_its_read_only
     redis: "fakeredis.FakeRedis",
 ) -> None:
     admission.reserve(redis, "hive-two", "s/one", 2)
+    admission.reserve(redis, "hive-one", "s/own", 2)
+    admission.reserve(redis, "hive-one", "s/next", 2)
     member = cast("Redis", _Granted(redis, auth._acl_keys("hive-one")))
     assert admission.pending(member, "hive-two") == 1
-    assert admission.pending(member, "hive-one") == 0
+    assert admission.pending(member, "hive-one") == 2
 
 
 def test_a_reservation_key_lives_in_the_swarm_keyspace():
