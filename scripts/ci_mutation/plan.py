@@ -24,7 +24,7 @@ from scripts.ci_mutation.browser import needs_browser
 from scripts.ci_mutation.scope import discover_changes, graded_green, module_facts, own_bases, select_tests, test_file
 from scripts.ci_mutation.selection import file_seconds, mutation_counts, partition, stats_shards
 from scripts.ci_test_plan import find_record
-from tests.dep_manifest import (
+from scripts.dep_manifest import (
     GLOBAL_FILES,
     MEASURED,
     _git,
@@ -34,7 +34,7 @@ from tests.dep_manifest import (
     line_units,
     node,
 )
-from tests.dep_manifest import changes as recorded_changes
+from scripts.dep_manifest import changes as recorded_changes
 
 # Upper quartile of measured worker seconds per mutant; stored test timings did not predict the cost.
 MUTANT_SECONDS = 5.6

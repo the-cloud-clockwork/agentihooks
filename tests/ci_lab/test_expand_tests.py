@@ -5,10 +5,10 @@ from typing import Any
 
 import pytest
 
+from scripts import dep_manifest
 from scripts.ci_lab import digests, expand_tests
 from scripts.ci_lab.digests import Toolchain
 from scripts.ci_lab.units import Unit
-from tests import dep_manifest
 
 ALPHA = "def first():\n    return 1\n\n\ndef second():\n    return 2\n"
 FILES = {

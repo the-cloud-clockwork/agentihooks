@@ -10,7 +10,7 @@ import pytest
 from scripts.ci_lab import digests
 from scripts.ci_mutation import stats_cache
 from scripts.ci_mutation.stats_dependencies import StoredStats
-from tests.dep_manifest import MODULE, unit_hashes
+from scripts.dep_manifest import MODULE, unit_hashes
 
 DOC = Path(__file__).resolve().parents[2] / "docs" / "reference" / "ci-lab.md"
 

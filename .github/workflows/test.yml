@@ -1156,7 +1156,9 @@ jobs:
           BRANCH_PLAN: ${{ steps.plan.outputs.branch != '' && steps.plan.outputs.branch != '0' && format('{0}/reused-branch.json', runner.temp) || '' }}
         run: |
           cd "$RUNNER_TEMP/planner"
-          "$PYTHON_PATH" -m tests.dep_manifest deselect ${DEV_PLAN:+--plan "$DEV_PLAN"} ${BRANCH_PLAN:+--plan "$BRANCH_PLAN"} \
+          package=scripts
+          if [[ ! -f scripts/dep_manifest.py ]]; then package=tests; fi
+          "$PYTHON_PATH" -m "$package.dep_manifest" deselect ${DEV_PLAN:+--plan "$DEV_PLAN"} ${BRANCH_PLAN:+--plan "$BRANCH_PLAN"} \
             --collected "$RUNNER_TEMP/collected.json" --out "$RUNNER_TEMP/reused.json"
 
       - name: Upload the deselected tests
@@ -2863,7 +2865,7 @@ jobs:
           shopt -s nullglob
           python -m coverage combine --rcfile=.github/coverage/coverage.ini --keep --data-file="$RUNNER_TEMP/dep-manifest/.coverage" \
             .coverage-shards/coverage-3.12-*/.coverage .coverage-shards/coverage-3.12-*/reused-coverage/.coverage
-          python -m tests.dep_manifest build --coverage "$RUNNER_TEMP/dep-manifest/.coverage" --inputs .coverage-shards --root . \
+          python -m scripts.dep_manifest build --coverage "$RUNNER_TEMP/dep-manifest/.coverage" --inputs .coverage-shards --root . \
             --commit "$GITHUB_SHA" --environment "$ENVIRONMENT" --out "$RUNNER_TEMP/dep-manifest/manifest.json" \
             --packed "$RUNNER_TEMP/dep-manifest/packed.json"
 

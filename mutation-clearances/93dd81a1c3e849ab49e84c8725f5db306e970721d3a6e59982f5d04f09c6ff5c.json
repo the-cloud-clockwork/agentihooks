@@ -1,0 +1,6 @@
+{
+  "scripts/dep_manifest.py:scripts.dep_manifest.x_line_units:f93e3da2cb0162a778aa2f9dc88136f714b042c37cffc2cb76cb4aa149f912d0": {
+    "reader": "standards_reader",
+    "reason": "key=None sorts the same tuples; the first element is unique per def, so the order is identical."
+  }
+}

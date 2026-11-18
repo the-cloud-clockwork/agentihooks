@@ -1,0 +1,6 @@
+{
+  "scripts/dep_manifest.py:scripts.dep_manifest.x_changes:42671a5d4bb1d0eea276e8f234e9fac4da7908950d2d0606a9e0a91af57e2900": {
+    "reader": "standards_reader",
+    "reason": "rename detection reads a subset of the blobs the original numstat reads, and both raise identically on every probed input."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/dep_manifest.py:scripts.dep_manifest.x__show:794e6f9d7af553ff4269f5247bf494d088459f0101f8c9be672feefd23f71cf9": {
+    "reader": "standards_reader",
+    "reason": "\"UTF-8\" and \"utf-8\" are the same codec and the \"replace\" handler is unchanged."
+  }
+}

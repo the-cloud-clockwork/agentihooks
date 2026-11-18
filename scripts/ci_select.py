@@ -13,7 +13,7 @@ from typing import Any, NotRequired, TypedDict, cast
 from scripts import locked_tests
 from scripts.ci_mutation.scope import select_tests
 from scripts.ci_test_plan import find_record
-from tests.shards import FIRST_SHARD_FILES, SECONDS_PER_SOURCE_BYTE, _assign_work, source_sizes
+from scripts.shard_sizing import FIRST_SHARD_FILES, SECONDS_PER_SOURCE_BYTE, assign_work, source_sizes
 
 PULL_REQUEST = "pull_request"
 FULL = "full"
@@ -33,6 +33,7 @@ HARNESS = frozenset(
         ".github/test-excludes.txt",
         "tests/__init__.py",
         "tests/shards.py",
+        "scripts/shard_sizing.py",
         "tests/flake_ledger.py",
         "tests/pass_record.py",
         "tests/dep_inputs.py",
@@ -279,7 +280,7 @@ def legs_for(root: Path, tests: set[str], durations: dict[str, float], limit: in
             sizes.update(dict.fromkeys(units, sizes.pop(path)))
     collection = {unit: sizes[unit] * SECONDS_PER_SOURCE_BYTE for unit in work}
     files_of = {unit: unit.partition("::")[0] for unit in work}
-    legs = _assign_work(work, work, collection, count, 1, None, files_of)
+    legs = assign_work(work, work, collection, count, 1, None, files_of)
     legs[0] = sorted(tests & FIRST_SHARD_FILES) + legs[0]
     return [sorted(leg) for leg in legs if leg]
 

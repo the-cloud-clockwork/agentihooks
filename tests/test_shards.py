@@ -13,14 +13,13 @@ import pytest
 from xdist.workermanage import NodeManager
 
 from hooks.secrets import scan
+from scripts.shard_sizing import FIRST_SHARD_FILES, source_sizes
 from tests import conftest
 from tests.shards import (
-    FIRST_SHARD_FILES,
     assign_files,
     discover_test_files,
     setup_nodes_in_parallel,
     slowest_first,
-    source_sizes,
     warm_imports,
 )
 

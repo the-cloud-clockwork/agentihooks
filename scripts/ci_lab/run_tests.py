@@ -14,11 +14,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from scripts import dep_manifest
 from scripts.ci_lab import open_capture
 from scripts.ci_lab.expand_tests import PYTEST_INVOCATION
 from scripts.ci_lab.outcomes import FAILED, PASSED
 from scripts.ci_lab.sandbox import PortAllocator, Sandbox
-from tests import dep_manifest
 
 __all__ = ["COVERAGE", "Attempt", "Lab", "Verdict", "flake_rows", "outside", "run"]
 
