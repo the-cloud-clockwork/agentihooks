@@ -7637,6 +7637,9 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2634",
       "behaviour": "Swarm park stacks a task on origin dev and records dev's merge base as its stacked base when an unclaimed dependency records a branch that origin answers it does not hold; a dependency branch origin holds keeps the merge base with origin's copy, and a missing branch on a claimed dependency or an unanswered origin probe still refuses the park.",
       "seam": "swarm park in scripts.swarm.stack",
+      "rules": [
+        "park-fetches-unpushed-dependency-branch"
+      ],
       "tests": [
         "tests/swarm/test_stack.py::test_park_stacks_on_dev_when_an_unclaimed_dependency_records_a_branch_origin_lacks",
         "tests/swarm/test_stack.py::test_park_keeps_the_dependency_base_when_origin_holds_an_unclaimed_dependency_branch",
