@@ -119,7 +119,8 @@ def target_problem(
     if kind == "merge":
         return "" if PULL_URL.fullmatch(target) else f"wait on merge needs a pull request url, not {target}"
     if kind == "lab":
-        return "" if lab_wait.CHECK_URL.fullmatch(target) else f"wait on lab needs a check run url, not {target}"
+        known = lab_wait.CHECK_URL.fullmatch(target) or lab_wait.GRADE_URL.fullmatch(target)
+        return "" if known else f"wait on lab needs a check run url or a lab grade url, not {target}"
     if kind == "intent":
         own = rows.get(mine, {}).get("pr_url")
         return (

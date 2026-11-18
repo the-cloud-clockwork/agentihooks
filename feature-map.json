@@ -3022,10 +3022,16 @@
     {
       "id": "swarm-lab-wait",
       "origin": "inventory",
-      "behaviour": "A lab wait on a check run url is recorded by the cli, holds while the check runs or GitHub cannot answer, ends green with the inbox notice when it succeeds, ends red naming the gate and its conclusion otherwise, ends as missing when GitHub has no such check run, and refuses any target that is not a check run url.",
+      "behaviour": "A lab wait on a check run url is recorded by the cli, holds while the check runs or GitHub cannot answer, ends green with the inbox notice when it succeeds, ends red naming the gate and its conclusion otherwise, ends as missing when GitHub has no such check run. A lab wait on a lab grade url holds while a live grade of the head is open, the lab holds none or cannot answer, ends green when every live grade succeeded, red naming the failed checks otherwise, and as superseded when a newer head replaced every grade. Any other target is refused.",
       "seam": "agentihooks swarm wait --on lab and the tick wait pass",
       "tests": [
         "tests/swarm/test_lab_wait.py::test_a_lab_wait_refuses_anything_but_a_check_run_url",
+        "tests/swarm/test_lab_wait.py::test_a_lab_wait_takes_a_lab_grade_url",
+        "tests/swarm/test_lab_wait.py::test_a_lab_grade_not_yet_closed_holds_the_wait",
+        "tests/swarm/test_lab_wait.py::test_an_unreachable_lab_holds_the_grade_wait",
+        "tests/swarm/test_lab_wait.py::test_the_tick_ends_a_green_lab_grade_wait_with_the_inbox_notice",
+        "tests/swarm/test_lab_wait.py::test_the_tick_ends_a_red_lab_grade_wait_naming_the_failed_checks",
+        "tests/swarm/test_lab_wait.py::test_a_lab_grade_whose_every_grade_a_newer_head_replaced_ends_the_wait",
         "tests/swarm/test_lab_wait.py::test_the_cli_records_a_lab_wait_on_a_check_run",
         "tests/swarm/test_lab_wait.py::test_a_lab_check_still_running_holds_the_wait",
         "tests/swarm/test_lab_wait.py::test_an_unreachable_github_holds_the_lab_wait",
@@ -3038,11 +3044,14 @@
     {
       "id": "swarm-push-wait",
       "origin": "inventory",
-      "behaviour": "A push by a task agent gets a checked wait on its pull request from the tick, and an agent that never declared a wait is woken on merge.",
+      "behaviour": "A push by a task agent gets a checked wait on its pull request from the tick, and an agent that never declared a wait is woken on merge. A push of one commit to a lab grade ref with no pull request gets a wait on the lab grade of its head once the swarm's lab holds one, and that agent is woken when the grade closes.",
       "seam": "The pull request wait hook and tick pass",
       "tests": [
         "tests/swarm/test_pr_wait.py::test_the_tick_sets_a_checked_wait_on_the_pushed_task_pull_request",
-        "tests/swarm/test_pr_wait.py::test_an_agent_that_never_runs_swarm_wait_is_woken_on_merge"
+        "tests/swarm/test_pr_wait.py::test_an_agent_that_never_runs_swarm_wait_is_woken_on_merge",
+        "tests/swarm/test_pr_wait.py::test_the_hook_marks_a_grade_push_with_its_head",
+        "tests/swarm/test_pr_wait.py::test_the_tick_sets_a_lab_wait_on_the_grade_of_a_grade_push",
+        "tests/swarm/test_pr_wait.py::test_an_agent_that_pushes_to_the_lab_is_woken_when_its_grade_closes"
       ]
     },
     {
