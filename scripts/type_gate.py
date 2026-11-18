@@ -3,12 +3,15 @@
 import argparse
 import ast
 import json
+import math
 import os
+import resource
 import subprocess
 import sys
 import tomllib
 from itertools import accumulate
 from pathlib import Path, PurePosixPath
+from typing import Any
 
 BASEDPYRIGHT_VERSION = "1.40.2"
 BASELINE = Path("tests/TYPE_BASELINE.json")
@@ -21,7 +24,10 @@ CONFIG = {
     "strict": ["hooks", "scripts"],
 }
 _BASEDPYRIGHT = (sys.executable, "-I", "-m", "basedpyright")
-_NODE_OPTIONS = "--max-old-space-size=5120"
+_HEAP_MB = 5120
+_NODE_OPTIONS = f"--max-old-space-size={_HEAP_MB}"
+_RUN = 1000
+_PEAK_KIB = int(_HEAP_MB * 1024 * 0.9 / 1.05)
 
 
 class GradeError(Exception):
@@ -61,11 +67,35 @@ def measure(head: Path, files: list[str] | None = None) -> dict[str, int]:
     """Run basedpyright over the given sources, every source when None, in sorted order and count its errors per file.
 
     An empty list measures nothing. The Node heap limit keeps the checker inside the 6 GiB memory limit of the anton-oss
-    runner container; past ninety percent of it the checker empties its type cache, which slows the check.
+    runner container. Once its heap use, plus the five percent it adds, passes ninety percent of that limit, 4388 MB,
+    basedpyright empties its whole type cache at points garbage collection decides and can count other errors on another
+    runner. So the sources are checked in contiguous runs of at most a thousand files, one process each, and a
+    measurement whose checker processes reached that line in resident memory, which bounds heap use from above, is
+    refused.
     """
     files = sources(head) if files is None else sorted(files)
     if not files:
         return {}
+    size = math.ceil(len(files) / math.ceil(len(files) / _RUN))
+    root = head.resolve()
+    counts: dict[str, int] = {}
+    for start in range(0, len(files), size):
+        for diagnostic in _check(head, files[start : start + size]):
+            if diagnostic["severity"] == "error":
+                path = Path(diagnostic["file"]).resolve().relative_to(root).as_posix()
+                counts[path] = counts.get(path, 0) + 1
+    peak = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
+    if peak >= _PEAK_KIB:
+        raise GradeError(
+            f"basedpyright peaked at {peak // 1024} MB of resident memory, at or past the {_PEAK_KIB // 1024} MB "
+            "where it empties its type cache and can count other errors on another runner; "
+            "lower the type gate's sources per run"
+        )
+    return dict(sorted(counts.items()))
+
+
+def _check(head: Path, files: list[str]) -> list[dict[str, Any]]:
+    """Run one basedpyright process over the given sources and return the diagnostics it reports."""
     result = subprocess.run(
         [
             *_BASEDPYRIGHT,
@@ -89,13 +119,7 @@ def measure(head: Path, files: list[str] | None = None) -> dict[str, int]:
         raise GradeError(f"basedpyright printed no report: {result.stderr.strip()}") from exc
     if not report["summary"]["filesAnalyzed"]:
         raise GradeError("basedpyright analysed no files")
-    root = head.resolve()
-    counts: dict[str, int] = {}
-    for diagnostic in report["generalDiagnostics"]:
-        if diagnostic["severity"] == "error":
-            path = Path(diagnostic["file"]).resolve().relative_to(root).as_posix()
-            counts[path] = counts.get(path, 0) + 1
-    return dict(sorted(counts.items()))
+    return report["generalDiagnostics"]
 
 
 def load(tree: Path) -> dict[str, int] | None:
