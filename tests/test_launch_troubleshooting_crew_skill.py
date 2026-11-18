@@ -15,7 +15,7 @@ pytestmark = pytest.mark.unit
 
 SKILL = Path(__file__).parents[1] / "profiles/package/skills/launch-troubleshooting-crew"
 NOW = 1794614400.0
-CID = "crew-1114000000"
+CID = "crew-3180000"
 ME = ["agentihooks", "ledger", "--slug", "demo", "--as", "master@demo"]
 QUOTE = troubleshooting_crew.LAUNCH_QUOTE
 ENTRY = '"${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/skills/launch-troubleshooting-crew/scripts/crew.py'
