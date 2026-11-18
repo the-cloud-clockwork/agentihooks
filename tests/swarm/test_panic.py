@@ -1907,6 +1907,27 @@ def test_a_git_config_that_cannot_be_read_counts_as_routed(monkeypatch: pytest.M
     assert asked == [("/work", ("config", "--list"))]
 
 
+@pytest.mark.parametrize(("added", "frozen"), [((), False), (("https://github.com/someone/else.git",), True)])
+@pytest.mark.feature("panic-fix-spare-one-push-url")
+def test_a_fix_push_from_a_checkout_whose_origin_lists_two_urls_stays_frozen(
+    store: RedisStore,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    added: tuple[str, ...],
+    frozen: bool,
+) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", SLUG)
+    _branches(monkeypatch, {})
+    panic.engage(store, SLUG, "reason", False, [BRANCH_FIX], 0)
+    cwd = _checkout(tmp_path / "fix", "fix-branch")
+    for url in added:
+        subprocess.run(["git", "-C", cwd, "remote", "set-url", "--add", "origin", url], check=True)
+    expected = blocker_window.FROZEN.format(slug=SLUG, reason="reason") if frozen else None
+    command = {"command": "git push origin fix-branch"}
+    assert blocker_window.pretool("Bash", command, "engineer-session", cwd)[1] == expected
+    assert blocker_window.held_push(cwd, "fix-branch", SLUG) == expected
+
+
 @pytest.mark.parametrize(
     "command",
     [
