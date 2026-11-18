@@ -34,7 +34,8 @@ def unnamed(url: str, body: str, tasks: list[dict[str, Any]]) -> list[str]:
 def refuse_unnamed(url: str, body: str, row: dict[str, Any], task: Callable[[str], dict[str, Any] | None]) -> None:
     """Refuse recording ``url`` when its body closes an issue that the task ``row`` and its group members, read
     through ``task``, never name, since settle closes it on merge."""
-    tasks = [row, *(task(member) or {} for member in row.get("group_members") or [])]
+    members: list[str] = row.get("group_members") or []
+    tasks = [row, *(task(member) or {} for member in members)]
     if issues := unnamed(url, body, tasks):
         raise SwarmError(
             f"pull request {url} closes {', '.join(issues)}, which this task neither records nor names in its "
