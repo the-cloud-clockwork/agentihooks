@@ -1066,10 +1066,12 @@ def test_main_serves_the_lease_api_and_runs_the_passes(tmp_path: Path, monkeypat
     }
     monkeypatch.setattr(redis.Redis, "from_url", from_url)
     monkeypatch.setattr(boto3, "client", s3)
+    provisioning = config.BusConfig(backend="nats", url="nats://lab")
+    bound = config.BusConfig(backend="nats", url="nats://lab", provision=False)
     monkeypatch.setattr(
-        config.BusConfig, "from_environ", classmethod(lambda cls, found: "config" if found is environ else None)
+        config.BusConfig, "from_environ", classmethod(lambda cls, found: provisioning if found is environ else None)
     )
-    monkeypatch.setattr(factory, "open_bus", lambda found: Bus() if found == "config" else None)
+    monkeypatch.setattr(factory, "open_bus", lambda found: Bus() if found == bound else None)
     monkeypatch.setattr(scheduler, "build", build)
     monkeypatch.setattr(scheduler.lease_api, "serve", serve_api)
     monkeypatch.setattr(scheduler, "Thread", Thread)
