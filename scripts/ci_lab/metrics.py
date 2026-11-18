@@ -10,7 +10,7 @@ from math import inf, isfinite, isnan
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
-from scripts.ci_lab import caches, contract
+from scripts.ci_lab import budget, caches, contract
 from scripts.ci_lab.capacity import Load, document, predicted_wait
 from scripts.ci_lab.delivery import CLASSES
 from scripts.swarm import metrics_outbox
@@ -198,7 +198,7 @@ def observe_load(registry: Registry, load: Load) -> None:
     registry.set("ci_lab_slots_total", load.slots_total)
     registry.set("ci_lab_slots_busy", load.slots_busy)
     registry.set("ci_lab_budget_fraction", load.budget_fraction)
-    registry.set(contract.SLOTS_WANTED, load.slots_wanted)
+    registry.set(contract.SLOTS_WANTED, budget.slots_wanted(load.running_slots, load.pending_slots, load.shed))
     registry.set(contract.WORKERS_READY, load.workers_ready)
     registry.set(contract.UNITS_OVERDUE, load.overdue)
 

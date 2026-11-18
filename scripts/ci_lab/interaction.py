@@ -4,8 +4,7 @@ from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final, Literal, cast
 
-from scripts import ci_select
-from tests import dep_manifest
+from scripts import ci_select, dep_manifest
 
 __all__ = [
     "FULL",

@@ -6,20 +6,13 @@ import re
 import sys
 from pathlib import Path
 
+from scripts.shard_sizing import FIRST_SHARD_FILES, SECONDS_PER_SOURCE_BYTE, SLOWDOWN, source_sizes
 from tests.shard_budget import step_seconds
-from tests.shards import (
-    FIRST_SHARD_FILES,
-    SECONDS_PER_SOURCE_BYTE,
-    assign_nodes,
-    discover_test_files,
-    grouped_files,
-    source_sizes,
-)
+from tests.shards import assign_nodes, discover_test_files, grouped_files
 
 WORKERS = 4
 STEP_SECONDS = step_seconds("unit")
 STARTUP_SECONDS = 30
-SLOWDOWN = 1.69
 TARGET_SECONDS = 195
 # Five merge groups share the 36 runner queue pool, so each shard's fixed setup costs queue wait for every group.
 MAX_SHARDS = 16

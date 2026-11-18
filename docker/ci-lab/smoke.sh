@@ -22,5 +22,5 @@ if [[ "$(cat /opt/agentihooks-venv/lockfile.sha256)" != "$LOCK_DIGEST" ]]; then
   echo "the baked lockfile digest is not the digest of the lock this image was built from" >&2
   exit 1
 fi
-/opt/agentihooks-venv/bin/python -c 'import scripts.ci_lab.contract, pytest, xdist, redis, nats, yaml, boto3'
+/opt/agentihooks-venv/bin/python -c 'import scripts.ci_lab.contract, scripts.ci_lab.executors, scripts.ci_lab.run_tests, scripts.ci_lab.pricing, pytest, xdist, redis, nats, yaml, boto3'
 CHECKS

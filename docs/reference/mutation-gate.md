@@ -481,7 +481,7 @@ alone do not establish equal mutant grading or a shorter job wall time.
 The line rule depends on the dev dependency manifest that the full-scope Tests
 run records. Python 3.12 unit shards run with `--cov-context=test`; the
 `Build the test dependency manifest` step combines their coverage and runs
-`python -m tests.dep_manifest build`. The `dep-manifest` artifact holds
+`python -m scripts.dep_manifest build`. The `dep-manifest` artifact holds
 `manifest.json`, which is also cached under `dep-manifest-<sha>` when Gate
 Required passes. Mutation planning reads that record through the
 `--repository` lookup described above.
@@ -552,7 +552,7 @@ The `Mutation line selection proof` workflow
 the narrower selection gives the same verdicts. It checks out the
 [pull request 4473](https://github.com/the-cloud-clockwork/agentihooks/pull/4473)
 merge commit `328ddd3` as the sample, copies the dispatched branch's
-`scripts/ci_mutation`, `tests/dep_manifest.py` and
+`scripts/ci_mutation`, `scripts/dep_manifest.py` and
 `tests/mutation_line_selection_proof.py` over it, and runs
 `python -m tests.mutation_line_selection_proof` in four modes:
 
@@ -1130,7 +1130,7 @@ still install `.[dev,all]`.
 |---|---|---|---|
 | `mutmut` | `==3.6.0` | `dev` extra | `scripts.ci_mutation.selection` |
 | `pytest` | `>=8.0` | `dev` extra | `scripts.ci_mutation.killers`, `tests.test_collection_imports` |
-| `pyyaml` | `>=6.0` | project dependencies | `tests.dep_manifest` (imported as `yaml`) |
+| `pyyaml` | `>=6.0` | project dependencies | `scripts.dep_manifest` (imported as `yaml`) |
 | `tomlkit` | `>=0.12` | project dependencies | `scripts.ci_mutation.runner` |
 
 - The packages go into the runner's system Python 3.12. The project itself is

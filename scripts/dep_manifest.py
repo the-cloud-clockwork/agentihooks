@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tokenize
 from pathlib import Path
+from typing import Any, cast
 
 import yaml
 
@@ -26,13 +27,13 @@ GLOBAL_PREFIXES = (".github/", ".test_durations")
 
 
 def _spans(tree: ast.AST) -> list[tuple[int, int, int, str]]:
-    spans = []
+    spans: list[tuple[int, int, int, str]] = []
 
-    def visit(node, prefix):
+    def visit(node: ast.AST, prefix: str) -> None:
         for child in ast.iter_child_nodes(node):
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 name = prefix + child.name
-                spans.append((child.lineno, child.body[0].lineno, child.end_lineno, name))
+                spans.append((child.lineno, child.body[0].lineno, cast(int, child.end_lineno), name))
                 visit(child, name + ".")
             elif isinstance(child, ast.ClassDef):
                 visit(child, prefix + child.name + ".")
@@ -44,7 +45,7 @@ def _spans(tree: ast.AST) -> list[tuple[int, int, int, str]]:
 
 
 def line_units(source: str) -> dict[int, str]:
-    units = {}
+    units: dict[int, str] = {}
     for _, body, end, name in sorted(_spans(ast.parse(source)), key=lambda span: span[0]):
         for line in range(body, end + 1):
             units[line] = name
@@ -52,7 +53,7 @@ def line_units(source: str) -> dict[int, str]:
 
 
 def _code_lines(source: str) -> set[int]:
-    lines = set()
+    lines: set[int] = set()
     skipped = {tokenize.COMMENT, tokenize.NL, tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT, tokenize.ENDMARKER}
     for token in tokenize.generate_tokens(io.StringIO(source).readline):
         if token.type not in skipped:
@@ -67,8 +68,8 @@ def unit_hashes(source: str) -> dict[str, str]:
         spans = _spans(ast.parse(source))
     except SyntaxError:
         return {MODULE: hashlib.sha256(source.encode()).hexdigest()}
-    parts = {}
-    inside = set()
+    parts: dict[str, list[str]] = {}
+    inside: set[int] = set()
     for start, _, end, name in spans:
         parts.setdefault(name, []).append("\n".join(lines[start - 1 : end]))
         inside.update(range(start, end + 1))
@@ -92,7 +93,8 @@ def _executed(coverage_file: Path, root: Path) -> tuple[dict[str, set[str]], dic
 
     data = CoverageData(basename=str(coverage_file))
     data.read()
-    executed, lines = {}, {}
+    executed: dict[str, set[str]] = {}
+    lines: dict[str, dict[str, list[int]]] = {}
     for measured in sorted(data.measured_files()):
         path = Path(measured)
         relative = path.relative_to(root).as_posix() if path.is_absolute() else path.as_posix()
@@ -114,11 +116,11 @@ def _executed(coverage_file: Path, root: Path) -> tuple[dict[str, set[str]], dic
     }
 
 
-def build(coverage_file: Path, inputs: list[Path], root: Path, commit: str, environment: str) -> dict:
+def build(coverage_file: Path, inputs: list[Path], root: Path, commit: str, environment: str) -> dict[str, Any]:
     executed, lines = _executed(coverage_file, root)
-    units = sorted(set().union(*executed.values()))
+    units = sorted(set[str]().union(*executed.values()))
     index = {name: number for number, name in enumerate(units)}
-    tests = {
+    tests: dict[str, dict[str, Any]] = {
         test: {"units": sorted(index[name] for name in found), "files": [], "escapes": False}
         for test, found in executed.items()
     }
@@ -138,7 +140,7 @@ def build(coverage_file: Path, inputs: list[Path], root: Path, commit: str, envi
     }
 
 
-def _entry(found: dict, files: dict) -> list:
+def _entry(found: dict[str, Any], files: dict[tuple[str, ...], int]) -> list[Any]:
     """Return a test record packed as units, files index, escapes and, when it has one, its outside list's index."""
     entry = [found["units"], files.setdefault(tuple(found["files"]), len(files)), found["escapes"]]
     if "outside" in found:
@@ -146,9 +148,10 @@ def _entry(found: dict, files: dict) -> list:
     return entry
 
 
-def pack(manifest: dict) -> dict:
+def pack(manifest: dict[str, Any]) -> dict[str, Any]:
     """Return the manifest with each test record packed by _entry and its file lists and line spans stored once."""
-    files, spans = {}, {}
+    files: dict[tuple[str, ...], int] = {}
+    spans: dict[tuple[str, tuple[int, ...]], int] = {}
     packed = {key: value for key, value in manifest.items() if key not in ("tests", "lines")}
     packed["tests"] = {test: _entry(found, files) for test, found in manifest["tests"].items()}
     if "lines" in manifest:
@@ -161,7 +164,7 @@ def pack(manifest: dict) -> dict:
     return packed
 
 
-def _record(entry: list, files: list) -> dict:
+def _record(entry: list[Any], files: list[Any]) -> dict[str, Any]:
     """Return the test record a packed entry holds, with its outside list only when the entry carries one."""
     units, index, escapes, *outside = entry
     record = {"units": units, "files": files[index], "escapes": escapes}
@@ -171,7 +174,7 @@ def _record(entry: list, files: list) -> dict:
     return record
 
 
-def unpack(packed: dict) -> dict:
+def unpack(packed: dict[str, Any]) -> dict[str, Any]:
     """Return the manifest a packed one holds, each test record restored by _record."""
     files, spans = packed.pop("files"), packed.pop("spans")
     packed["tests"] = {test: _record(entry, files) for test, entry in packed["tests"].items()}
@@ -191,9 +194,8 @@ def _show(repo: Path, revision: str, path: str) -> str | None:
 
 def changes(repo: Path, base: str, head: str) -> list[tuple[str, str | None, str | None]]:
     paths = _git(repo, "diff", "--no-renames", "--name-only", base, head).splitlines()
-    # A numstat diff fetches every missing blob of a blobless clone in one request; each show would fetch its own.
     _git(repo, "diff", "--no-renames", "--numstat", base, head, "--", "*.py")
-    found = []
+    found: list[tuple[str, str | None, str | None]] = []
     for path in paths:
         if path.endswith(".py"):
             found.append((path, _show(repo, base, path), _show(repo, head, path)))
@@ -210,13 +212,13 @@ def _global(path: str) -> bool:
 
 def workflow_execution_changed(old: str | None, new: str | None) -> bool:
     try:
-        before, after = (yaml.safe_load(text) for text in (old, new))
+        before, after = (yaml.safe_load(text) for text in (old, new))  # pyright: ignore[reportArgumentType]
         for workflow in (before, after):
             jobs = workflow["jobs"]
             if not isinstance(jobs, dict) or not all(isinstance(jobs[name], dict) for name in ("unit", "split")):
                 return True
         pending = ["unit", "unit-selected"]
-        producers = set()
+        producers: set[str] = set()
         while pending:
             name = pending.pop()
             if name in producers:
@@ -239,14 +241,16 @@ def global_input(path: str, old: str | None, new: str | None, version: int | Non
     return _global(path)
 
 
-def invalidated(manifest: dict, changed: list[tuple[str, str | None, str | None]]) -> tuple[set[str], str | None]:
+def invalidated(
+    manifest: dict[str, Any], changed: list[tuple[str, str | None, str | None]]
+) -> tuple[set[str], str | None]:
     tests = manifest["tests"]
     for path, old, new in changed:
         if global_input(path, old, new, manifest.get("version")):
             return set(tests), path
     index = {name: number for number, name in enumerate(manifest["units"])}
-    units = set()
-    hit = set()
+    units: set[int] = set()
+    hit: set[str] = set()
     source_changed = False
     for path, old, new in changed:
         hit.update(test for test, found in tests.items() if path in found["files"] or path in found.get("outside", ()))
@@ -270,10 +274,10 @@ def invalidated(manifest: dict, changed: list[tuple[str, str | None, str | None]
     return hit, None
 
 
-def share(manifest: dict, repo: Path, ref: str, merges: int) -> dict:
+def share(manifest: dict[str, Any], repo: Path, ref: str, merges: int) -> dict[str, Any]:
     commits = _git(repo, "rev-list", "--first-parent", f"-n{merges}", ref).split()
     total = len(manifest["tests"])
-    rows = []
+    rows: list[dict[str, Any]] = []
     for commit in commits:
         hit, cause = invalidated(manifest, changes(repo, f"{commit}^1", commit))
         rows.append({"commit": commit, "invalidated": len(hit), "reusable": 1 - len(hit) / total, "global": cause})
@@ -291,22 +295,22 @@ def node(test: str) -> str:
     return re.sub(r"@[^\[\]]*$", "", test)
 
 
-def plan(manifest: dict, changed: list[tuple[str, str | None, str | None]], run: str) -> dict:
+def plan(manifest: dict[str, Any], changed: list[tuple[str, str | None, str | None]], run: str) -> dict[str, Any]:
     hit, cause = invalidated(manifest, changed)
     reused = sorted({node(test) for test in manifest["tests"] if test not in hit})
     return {"run": run, "commit": manifest["commit"], "global": cause, "invalidated": len(hit), "tests": reused}
 
 
-def deselect(reused: list[str], collected: list[str]) -> dict:
+def deselect(reused: list[str], collected: list[str]) -> dict[str, list[str]]:
     tests = set(reused).intersection(collected)
-    files = {}
+    files: dict[str, bool] = {}
     for nodeid in collected:
         path = nodeid.split("::", 1)[0]
         files[path] = files.get(path, True) and nodeid in tests
     return {"tests": sorted(tests), "files": sorted(path for path, whole in files.items() if whole)}
 
 
-def branch_only(plans: list[dict], tests: list[str]) -> list[str]:
+def branch_only(plans: list[dict[str, Any]], tests: list[str]) -> list[str]:
     dev = {test for plan in plans if "runs" not in plan for test in plan["tests"]}
     return [test for test in tests if test not in dev]
 

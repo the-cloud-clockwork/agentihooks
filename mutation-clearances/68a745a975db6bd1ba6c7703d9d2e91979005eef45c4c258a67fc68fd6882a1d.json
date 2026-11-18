@@ -1,0 +1,6 @@
+{
+  "scripts/shard_sizing.py:scripts.shard_sizing.x_assign_work:d04d6496c7f91ca02922c6f3f4f69f4a405042b7d536ce7c606a97987c5e6864": {
+    "reader": "standards_reader",
+    "reason": "When serial_groups is None, group is one constant for every path (\"\" or \"XXXX\"); it is only a dict key and never reaches the output."
+  }
+}

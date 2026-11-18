@@ -16,8 +16,8 @@ from pathlib import Path
 from typing import Any, cast
 
 import scripts.ci_budget.jobs
+from scripts import dep_manifest
 from scripts.ci_budget import rate_limit
-from tests import dep_manifest
 
 read_jobs = cast("Callable[..., list[dict[str, Any]]]", scripts.ci_budget.jobs.read_jobs)
 gh_api = cast("Callable[..., subprocess.CompletedProcess[Any]]", rate_limit.gh_api)
