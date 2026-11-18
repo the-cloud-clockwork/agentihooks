@@ -8011,6 +8011,16 @@
       ]
     },
     {
+      "id": "lab-scheduler-reindex-on-start",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/ops-dr-rebuild",
+      "behaviour": "With CI_LAB_REINDEX_ON_START set to true the CI lab scheduler rebuilds its verdict index from the report objects in the bucket before it serves, so a scheduler restarted after a Redis loss answers its stored verdicts again, and it prints and flushes reindexed N verdicts with the number of index entries it added; unset or any other value starts the scheduler without a reindex and prints nothing.",
+      "seam": "scripts.ci_lab.scheduler.main over fakeredis and the local object store, with scripts.ci_lab.store.Store.reindex",
+      "tests": [
+        "tests/ci_lab/test_scheduler.py::test_main_rebuilds_the_verdict_index_before_serving_only_when_reindex_on_start_is_true"
+      ]
+    },
+    {
       "id": "lab-control-routes",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/swarm-panic-and-priority",
