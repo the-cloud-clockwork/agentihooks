@@ -51,6 +51,7 @@ class Step:
     effects: frozenset[str] = frozenset()
     feature: str = ""
     placing: bool = False
+    kept: bool = False
 
     def run(self, ctx: Context) -> Result:
         return self.action(ctx)
@@ -102,6 +103,25 @@ def test_a_step_ready_beside_more_lock_takers_than_workers_starts_while_they_wai
         Step("placing free", free, GROUP),
     )
     with pool.running(workers=2, critical_s=8.0, slow_s=8.0):
+        rows = engine.run_group(GROUP, _ctx(), steps)
+
+    assert {record.name: record.outcome for record in rows} == {step.name: engine.OK for step in steps}
+
+
+@pytest.mark.feature("placement-lock-steps-on-one-placement-worker")
+def test_a_kept_lock_taking_step_runs_on_the_placement_worker_and_leaves_the_step_worker_free() -> None:
+    gate = Event()
+
+    def holder(ctx: Context) -> Result:
+        assert gate.wait(3), "the ordinary step never got the pass's one step worker"
+        return Result()
+
+    def free(ctx: Context) -> Result:
+        gate.set()
+        return Result()
+
+    steps = (Step("placing kept", holder, GROUP, placing=True, kept=True), Step("placing free", free, GROUP))
+    with pool.running(workers=1, critical_s=8.0, slow_s=8.0):
         rows = engine.run_group(GROUP, _ctx(), steps)
 
     assert {record.name: record.outcome for record in rows} == {step.name: engine.OK for step in steps}
