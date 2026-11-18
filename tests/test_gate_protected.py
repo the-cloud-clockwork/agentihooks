@@ -2281,7 +2281,7 @@ _FORWARDED_STATS = """NEEDS=$(jq 'if ."mutation-plan".result == "success" and ."
 
 
 def _without_forwarded_stats(run):
-    return run.removeprefix(_SELECTION_DIAGNOSTIC).removeprefix(_FORWARDED_STATS)
+    return run.removeprefix(_SELECTION_DIAGNOSTIC).removeprefix(_FORWARDED_STATS).removeprefix(_COLLECTED_STATS)
 
 
 def _with_forwarded_stats(run):

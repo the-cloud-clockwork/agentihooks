@@ -293,7 +293,7 @@ def test_the_retired_queue_baseline_leaves_the_workflow_and_the_gate_takes_the_p
                 )
             )
         )
-        for forward in (list, ci_reuse.forwarded_stats)
+        for forward in (list, ci_reuse.forwarded_stats, ci_reuse.collected_stats)
         for summary in (False, True)
         for rerun in (list, ci_reuse.lost_rerun)
         for finish in (list, ci_reuse.pipefail_summary)

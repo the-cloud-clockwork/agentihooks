@@ -4340,6 +4340,8 @@ jobs:
 
       - name: Install the stats dependencies
         if: steps.collect.outputs.collected == 'true'
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
         run: |
           locked=.
           [[ -f .github/test-requirements.lock ]] || locked="$RUNNER_TEMP/workflow"
