@@ -127,6 +127,52 @@ def test_observe_load_sets_queue_slot_budget_and_shed_gauges() -> None:
     assert "\nci_lab_budget_fraction 0.25\n" in text
 
 
+@pytest.mark.feature("lab-scheduler-metrics")
+def test_observe_load_sets_the_slots_wanted_workers_ready_and_overdue_gauges() -> None:
+    registry = metrics.Registry()
+    load = Load(
+        pending={"pull_request": (180.0,), "backfill": (240.0,), "promotion": (300.0,)},
+        running={"queue": 1, "backfill": 1},
+        slots_total=6,
+        slots_busy=3,
+        shed=("backfill", "promotion"),
+        running_slots={"queue": 2, "backfill": 1},
+        pending_slots={"pull_request": 3, "backfill": 4, "promotion": 5},
+        workers_ready=2,
+        overdue=1,
+    )
+    metrics.observe_load(registry, load)
+    text = registry.render()
+    assert "\nci_lab_slots_wanted 5.0\n" in text
+    assert "\nci_lab_workers_ready 2.0\n" in text
+    assert "\nci_lab_units_overdue 1.0\n" in text
+    idle = metrics.Registry()
+    metrics.observe_load(idle, Load({}, {}, slots_total=0, slots_busy=0))
+    assert "\nci_lab_slots_wanted 0.0\n" in idle.render()
+    assert "\nci_lab_workers_ready 0.0\n" in idle.render()
+    assert "\nci_lab_units_overdue 0.0\n" in idle.render()
+
+
+@pytest.mark.feature("lab-scheduler-metrics")
+def test_observe_unit_counts_core_seconds_its_duration_and_the_cache_lookups_its_report_carries() -> None:
+    registry = metrics.Registry()
+    lookups = {"git": {"hits": 2, "misses": 1}, "uv": {"hits": 0, "misses": 1}}
+    metrics.observe_unit(registry, "queue", "test", 2, {"seconds": 30.0, "caches": lookups})
+    metrics.observe_unit(registry, "queue", "static", 1, {"seconds": 4.5})
+    metrics.observe_unit(registry, "hotfix", "test", 1, {"seconds": 10.0, "caches": {"git": {"hits": 1, "misses": 0}}})
+    metrics.observe_unit(registry, "hotfix", "static", 3, {"error": "bwrap is not installed"})
+    text = registry.render()
+    assert 'ci_lab_core_seconds_total{class="queue"} 64.5' in text
+    assert 'ci_lab_core_seconds_total{class="hotfix"} 10.0' in text
+    assert 'ci_lab_unit_duration_seconds{kind="test"} 10.0' in text
+    assert 'ci_lab_unit_duration_seconds{kind="static"} 4.5' in text
+    assert 'ci_lab_cache_hits_total{cache="git"} 3.0' in text
+    assert 'ci_lab_cache_misses_total{cache="git"} 1.0' in text
+    assert 'ci_lab_cache_hits_total{cache="uv"} 0.0' in text
+    assert 'ci_lab_cache_misses_total{cache="uv"} 1.0' in text
+    assert 'cache="verdict"' not in text
+
+
 @pytest.mark.feature("lab-full-pool-wait")
 def test_the_queue_wait_gauge_predicts_a_full_pool_from_when_running_units_free_their_slots() -> None:
     registry = metrics.Registry()

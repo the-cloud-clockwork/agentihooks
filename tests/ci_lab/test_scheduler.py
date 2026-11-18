@@ -6,7 +6,7 @@ import subprocess
 import sys
 import threading
 import urllib.request
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -24,6 +24,7 @@ from scripts.ci_lab.delivery import CLASSES
 from scripts.ci_lab.digests import GradeInputs, StaticInputs, Toolchain, grade_key, static_key
 from scripts.ci_lab.intake import GradeRequest
 from scripts.ci_lab.leases import Grant, Leases
+from scripts.ci_lab.manifests import Actions, Fetcher, FetchRefused
 from scripts.ci_lab.objects import LocalObjects, manifest_folder, unit_path, upload_path
 from scripts.ci_lab.outcomes import CRASH
 from scripts.ci_lab.retry import Policy
@@ -131,6 +132,15 @@ class Poster:
         return [(post[2], post[3]) for post in self.posts if post[0] == head and post[1] == gate]
 
 
+class FakeKube:
+    def __init__(self) -> None:
+        self.patches: list[tuple[str, bool]] = []
+
+    def __call__(self, pod: str, busy: bool) -> bool:
+        self.patches.append((pod, busy))
+        return True
+
+
 @dataclass
 class Lab:
     client: Any
@@ -141,6 +151,7 @@ class Lab:
     fixes: set[str] = field(default_factory=set[str])
     asked: list[int] = field(default_factory=list[int])
     repos: list[str] = field(default_factory=list[str])
+    kube: FakeKube = field(default_factory=FakeKube)
     now: int = 0
 
     def checks(self, repo: str) -> Poster:
@@ -152,7 +163,7 @@ class Lab:
         return frozenset(self.fixes)
 
     def build(self, quiet_ms: int, retries: Policy) -> scheduler.Scheduler:
-        ports = scheduler.Ports(self.inbox, self.expander, self.checks, self.hotfixes)
+        ports = scheduler.Ports(self.inbox, self.expander, self.checks, self.hotfixes, self.kube)
         settings = scheduler.Settings(frozenset({ACTOR}), quiet_ms, retries)
         return scheduler.Scheduler(self.client, self.objects, ports, settings)
 
@@ -176,7 +187,7 @@ class Run:
         return self.engine.tick(at)
 
     def leases(self, ttl_ms: int = 1000) -> Leases:
-        return Leases(self.engine.queue, ttl_ms, lambda: self.lab.now, lambda _: None, 1)
+        return Leases(self.engine.queue, ttl_ms, lambda: self.lab.now, lambda _: None, 1, self.lab.kube)
 
     def lease(self, slots: int = 1, ttl_ms: int = 1000) -> list[Grant]:
         return self.leases(ttl_ms).lease("worker", slots, frozenset(), 0)
@@ -371,6 +382,22 @@ def test_the_lost_retries_come_from_the_settings(lab: Callable[..., Run]) -> Non
     grant = run.lease(ttl_ms=100)[0]
     assert f"reaped {grant.job} lost" in run.tick(1100)
     assert run.grade(HEAD_A).conclusion == "failure"
+
+
+@pytest.mark.feature("lab-worker-deletion-cost")
+def test_the_reap_pass_clears_the_pod_cost_of_a_worker_only_once_its_last_lease_expired(
+    lab: Callable[..., Run],
+) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1), unit(2))})})
+    run.push(HEAD_A)
+    run.tick(1000)
+    first, second = run.lease(slots=2, ttl_ms=100)
+    assert run.lab.kube.patches == [("worker", True)]
+    assert run.leases(ttl_ms=500).heartbeat(second.job, second.token) == 1500
+    assert f"reaped {first.job} pending" in run.tick(1100)
+    assert run.lab.kube.patches == [("worker", True)]
+    assert f"reaped {second.job} pending" in run.tick(1500)
+    assert run.lab.kube.patches == [("worker", True), ("worker", False)]
 
 
 @pytest.mark.feature("lab-scheduler-grade")
@@ -783,6 +810,22 @@ def test_a_head_whose_grader_delivery_breaks_its_schema_is_dropped_with_its_reas
     assert run.grades() == []
 
 
+@pytest.mark.feature("lab-dev-manifest-fetch")
+def test_a_head_whose_manifest_fetch_github_refuses_is_dropped_with_its_reason(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = lab({})
+
+    def refused(request: GradeRequest) -> scheduler.Plan:
+        raise FetchRefused(f"GET actions/workflows/test.yml/runs answered 502 for {request.base}")
+
+    monkeypatch.setattr(run.lab.expander, "expand", refused)
+    run.push(HEAD_A)
+    assert run.tick(1000)[-1] == f"cannot expand {HEAD_A}: GET actions/workflows/test.yml/runs answered 502 for {BASE}"
+    assert run.lab.client.hgetall(scheduler.WAITING) == {}
+    assert run.grades() == []
+
+
 def test_a_live_run_without_a_grade_is_forgotten(lab: Callable[..., Run]) -> None:
     run = lab({})
     run.lab.client.sadd(scheduler.LIVE, "grade-v1-gone")
@@ -817,6 +860,9 @@ def test_the_load_counts_each_job_once_in_the_most_urgent_class_of_the_live_grad
         cache_hits={"promotion": 2},
         cache_misses={"promotion": 3, "queue": 2, "pull_request": 2},
         frees_in=(estimate, estimate),
+        running_slots={"queue": 2},
+        pending_slots={"promotion": 2, "pull_request": 1},
+        workers_ready=1,
     )
 
 
@@ -840,10 +886,12 @@ def test_the_load_counts_leased_slots_and_the_free_slots_workers_offered_within_
         cache_hits={},
         cache_misses={},
         frees_in=(scheduler.UNIT_ESTIMATE_S,) * 2,
+        workers_ready=2,
     )
     run.engine.queue.offer("busy", 1, 1000)
     assert run.engine.load(1000 + scheduler.READY_MS).slots_total == 2 + 1 + 4
     assert run.engine.load(1001 + scheduler.READY_MS).slots_total == 2 + 4
+    assert run.engine.load(1001 + scheduler.READY_MS).workers_ready == 1
 
 
 @pytest.mark.feature("lab-scheduler-service")
@@ -935,6 +983,194 @@ def test_listen_serves_leases_capacity_grades_and_metrics_from_one_budgeted_load
         for server in servers:
             server.shutdown()
             server.server_close()
+
+
+def scrape(run: Run, now: int) -> str:
+    spending = budget.Budget(run.lab.client, lambda: now, budget.Policy(100.0, {}))
+    routes = lease_api.ControlRoutes(run.lab.client, "tok", lambda: now)
+    servers = scheduler.listen(run.engine, run.leases(), routes, spending, lambda: now, (0, 0))
+    for server in servers:
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        return _read(f"http://127.0.0.1:{servers[1].server_address[1]}/metrics").decode()
+    finally:
+        for server in servers:
+            server.shutdown()
+            server.server_close()
+
+
+@pytest.mark.feature("lab-scheduler-metrics")
+def test_the_exposition_asks_for_the_running_and_waiting_slots_after_a_pass(lab: Callable[..., Run]) -> None:
+    held, waiting, big = unit(1), unit(2), unit(3)
+    run = lab({HEAD_A: plan({"lint": (held, waiting, big)})})
+    run.push(HEAD_A)
+    run.tick(1000)
+    run.lab.client.hset(f"{queue.PREFIX}job:{scheduler.job_id(HEAD_A, big)}", "slots", 3)
+    assert [grant.unit for grant in run.lease()] == [held]
+    run.tick(1100)
+    assert "\nci_lab_slots_wanted 5.0\n" in scrape(run, 1100)
+
+
+@pytest.mark.feature("lab-scheduler-metrics")
+def test_the_exposition_counts_the_workers_that_polled_within_the_ready_window_after_a_pass(
+    lab: Callable[..., Run],
+) -> None:
+    run = lab({})
+    run.lab.now = 1000
+    assert run.leases().lease("first", 2, frozenset(), 0) == []
+    run.lab.now = 1500
+    assert run.leases().lease("second", 1, frozenset(), 0) == []
+    run.tick(1000 + scheduler.READY_MS)
+    assert "\nci_lab_workers_ready 2.0\n" in scrape(run, 1000 + scheduler.READY_MS)
+    assert "\nci_lab_workers_ready 1.0\n" in scrape(run, 1001 + scheduler.READY_MS)
+
+
+@pytest.mark.feature("lab-scheduler-metrics")
+def test_the_exposition_counts_leased_units_past_their_estimate_after_a_pass(lab: Callable[..., Run]) -> None:
+    first, second = unit(1), unit(2)
+    run = lab({HEAD_A: plan({"lint": (first, second)})})
+    run.push(HEAD_A)
+    run.tick(1000)
+    assert [grant.unit for grant in run.lease(ttl_ms=10**6)] == [first]
+    run.lab.now = 2000
+    assert [grant.unit for grant in run.lease(ttl_ms=10**6)] == [second]
+    estimate_ms = int(scheduler.UNIT_ESTIMATE_S * 1000)
+    run.tick(1000 + estimate_ms)
+    assert "\nci_lab_units_overdue 0.0\n" in scrape(run, 1000 + estimate_ms)
+    assert "\nci_lab_units_overdue 1.0\n" in scrape(run, 1001 + estimate_ms)
+    assert "\nci_lab_units_overdue 2.0\n" in scrape(run, 2001 + estimate_ms)
+    run.lab.client.hdel(f"{queue.PREFIX}job:{scheduler.job_id(HEAD_A, first)}", "leased_ms")
+    assert "\nci_lab_units_overdue 1.0\n" in scrape(run, 2001 + estimate_ms)
+
+
+@pytest.mark.feature("lab-scheduler-metrics")
+def test_the_exposition_counts_each_finished_attempts_core_seconds_once_in_its_most_urgent_class_after_a_pass(
+    lab: Callable[..., Run],
+) -> None:
+    shared, solo = unit(1), unit(2)
+    run = lab({HEAD_A: plan({"lint": (shared, solo)})}, retries=Policy(failed=1))
+    run.push(HEAD_A)
+    run.tick(1000)
+    run.lab.expander.plans[HEAD_A] = plan({"lint": (shared,)})
+    run.push(HEAD_A, lane="gh-readonly-queue/dev/pr-1", event="merge_group", action="checks_requested")
+    run.tick(1100)
+    run.lab.client.hset(f"{queue.PREFIX}job:{scheduler.job_id(HEAD_A, shared)}", "slots", 2)
+    grants = {grant.unit: grant for grant in run.lease(slots=3)}
+    run.finish(grants[shared], scheduler.PASSED, {"seconds": 30.0})
+    run.finish(grants[solo], scheduler.FAILED, {"seconds": 5.0})
+    run.tick(1200)
+    text = scrape(run, 1200)
+    assert 'ci_lab_core_seconds_total{class="queue"} 60.0' in text
+    assert 'ci_lab_core_seconds_total{class="promotion"} 5.0' in text
+    [again] = run.lease()
+    run.finish(again, scheduler.PASSED, {"seconds": 5.0})
+    run.tick(1300)
+    run.tick(1400)
+    text = scrape(run, 1400)
+    assert 'ci_lab_core_seconds_total{class="queue"} 60.0' in text
+    assert 'ci_lab_core_seconds_total{class="promotion"} 10.0' in text
+    assert run.lab.client.smembers(scheduler.LIVE) == set()
+
+
+@pytest.mark.feature("lab-scheduler-metrics")
+def test_the_exposition_shows_the_last_finished_units_duration_per_kind_after_a_pass(lab: Callable[..., Run]) -> None:
+    first, second = unit(1), unit(2)
+    run = lab({HEAD_A: plan({"lint": (first, second)})})
+    run.push(HEAD_A)
+    run.tick(1000)
+    grants = {grant.unit: grant for grant in run.lease(slots=2)}
+    run.finish(grants[first], scheduler.PASSED, {"seconds": 4.0})
+    run.tick(1100)
+    assert 'ci_lab_unit_duration_seconds{kind="static"} 4.0' in scrape(run, 1100)
+    run.finish(grants[second], scheduler.PASSED, {"seconds": 9.5})
+    run.tick(1200)
+    assert 'ci_lab_unit_duration_seconds{kind="static"} 9.5' in scrape(run, 1200)
+
+
+@pytest.mark.feature("lab-scheduler-metrics")
+def test_the_exposition_counts_each_verdict_store_lookup_a_pass_makes(lab: Callable[..., Run]) -> None:
+    cached, fresh, other = unit(1), unit(2), unit(3)
+    run = lab({HEAD_A: plan({"lint": (cached, fresh, other)}), HEAD_B: plan({"lint": (cached, fresh)})})
+    run.cache(cached)
+    run.push(HEAD_A)
+    run.tick(1000)
+    text = scrape(run, 1000)
+    assert 'ci_lab_cache_hits_total{cache="verdict"} 1.0' in text
+    assert 'ci_lab_cache_misses_total{cache="verdict"} 2.0' in text
+    assert [grant.unit for grant in run.lease()] == [fresh]
+    run.push(HEAD_B)
+    run.tick(1100)
+    assert run.grade(HEAD_B).units[ref(fresh)].job == scheduler.job_id(HEAD_A, fresh)
+    text = scrape(run, 1100)
+    assert 'ci_lab_cache_hits_total{cache="verdict"} 2.0' in text
+    assert 'ci_lab_cache_misses_total{cache="verdict"} 3.0' in text
+
+
+@pytest.mark.feature("lab-scheduler-metrics")
+def test_the_exposition_counts_the_git_and_uv_lookups_a_finished_units_report_carries_after_a_pass(
+    lab: Callable[..., Run],
+) -> None:
+    first, second, silent = unit(1), unit(2), unit(3)
+    run = lab({HEAD_A: plan({"lint": (first, second, silent)})})
+    run.push(HEAD_A)
+    run.tick(1000)
+    grants = {grant.unit: grant for grant in run.lease(slots=3)}
+    cut = {"git": {"hits": 2, "misses": 1}, "uv": {"hits": 0, "misses": 1}}
+    reused = {"git": {"hits": 1, "misses": 0}, "uv": {"hits": 1, "misses": 0}}
+    run.finish(grants[first], scheduler.PASSED, {"seconds": 1.0, "caches": cut})
+    run.finish(grants[second], scheduler.PASSED, {"seconds": 1.0, "caches": reused})
+    run.finish(grants[silent], scheduler.PASSED, {"seconds": 1.0})
+    run.tick(1100)
+    run.tick(1200)
+    text = scrape(run, 1200)
+    assert 'ci_lab_cache_hits_total{cache="git"} 3.0' in text
+    assert 'ci_lab_cache_misses_total{cache="git"} 1.0' in text
+    assert 'ci_lab_cache_hits_total{cache="uv"} 1.0' in text
+    assert 'ci_lab_cache_misses_total{cache="uv"} 1.0' in text
+
+
+@pytest.mark.feature("lab-scheduler-metrics")
+def test_the_exposition_counts_each_grade_a_pass_closes_by_class_and_conclusion(lab: Callable[..., Run]) -> None:
+    passing, failing = unit(1), unit(2)
+    run = lab({HEAD_A: plan({"lint": (passing,)}), HEAD_B: plan({"lint": (failing,)})})
+    run.cache(passing)
+    run.cache(failing, passed=False)
+    run.push(HEAD_A)
+    run.push(HEAD_B, lane="gh-readonly-queue/dev/pr-1", event="merge_group", action="checks_requested")
+    run.tick(1000)
+    run.tick(1100)
+    text = scrape(run, 1100)
+    assert 'ci_lab_heads_graded_total{class="promotion",conclusion="success"} 1.0' in text
+    failed = run.grade(HEAD_B).conclusion
+    assert failed in ("failure", "success")
+    assert f'ci_lab_heads_graded_total{{class="queue",conclusion="{failed}"}} 1.0' in text
+    assert text.count("ci_lab_heads_graded_total{") == 2
+
+
+@pytest.mark.feature("lab-scheduler-metrics")
+def test_the_exposition_counts_each_expired_lease_a_pass_requeues(lab: Callable[..., Run]) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)})})
+    run.push(HEAD_A)
+    run.tick(1000)
+    run.lease(ttl_ms=100)
+    run.tick(1100)
+    text = scrape(run, 1100)
+    assert "\nci_lab_units_redelivered_total 1.0\n" in text
+    assert "\nci_lab_units_lost_total " not in text
+
+
+@pytest.mark.feature("lab-scheduler-metrics")
+def test_the_exposition_counts_each_expired_lease_a_pass_marks_lost(lab: Callable[..., Run]) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)})})
+    run.push(HEAD_A)
+    run.tick(1000)
+    run.lease(ttl_ms=100)
+    run.tick(1100)
+    run.lease(ttl_ms=100)
+    run.tick(1300)
+    text = scrape(run, 1300)
+    assert "\nci_lab_units_lost_total 1.0\n" in text
+    assert "\nci_lab_units_redelivered_total 1.0\n" in text
 
 
 FLUSHED = "<flushed>"
@@ -1449,6 +1685,25 @@ def test_a_merge_group_head_refuses_an_entry_limit_the_delivery_schema_refuses(t
         Port(SUITE_MANIFEST).expander(tmp_path).expand(suite.request(Priority.QUEUE))
 
 
+def unfetched(slug: str, commit: str) -> bytes | None:
+    return None
+
+
+def packed_file(manifest: dict[str, Any], commit: str) -> bytes:
+    found: dict[str, Any] = dep_manifest.pack({**manifest, "commit": commit})
+    return json.dumps(found, separators=(",", ":")).encode()
+
+
+@dataclass
+class Fetches:
+    found: dict[str, bytes]
+    asked: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
+
+    def __call__(self, slug: str, commit: str) -> bytes | None:
+        self.asked.append((slug, commit))
+        return self.found.get(commit)
+
+
 @pytest.mark.feature("lab-scheduler-test-units")
 def test_stored_manifests_read_the_packed_manifest_of_the_nearest_stored_ancestor(tmp_path: Path) -> None:
     objects = LocalObjects(tmp_path / "objects")
@@ -1456,11 +1711,60 @@ def test_stored_manifests_read_the_packed_manifest_of_the_nearest_stored_ancesto
         packed = dep_manifest.pack({**STORED_MANIFEST, "commit": commit})
         objects.write_once(f"{manifest_folder(SLUG)}{commit}.json", json.dumps(packed).encode())
     objects.write_once(f"{manifest_folder('other/repo')}head.json", b"{}")
-    stored = scheduler.StoredManifests(objects)
+    stored = scheduler.StoredManifests(objects, unfetched)
     assert stored(REPO, ["head", "newer", "older"]) == {**STORED_MANIFEST, "commit": "newer"}
     assert stored(REPO, ["head", "older"]) == {**STORED_MANIFEST, "commit": "older"}
     assert stored(REPO, ["head"]) is None
     assert manifest_folder(SLUG) == "lab/manifests/the-cloud-clockwork--agentihooks/"
+
+
+@pytest.mark.feature("lab-dev-manifest-fetch")
+def test_stored_manifests_fetch_a_newest_commit_stored_nowhere_and_keep_it_by_repository_and_commit(
+    tmp_path: Path,
+) -> None:
+    objects = LocalObjects(tmp_path / "objects")
+    objects.write_once(f"{manifest_folder(SLUG)}older.json", packed_file(STORED_MANIFEST, "older"))
+    fetches = Fetches({"newer": packed_file(STORED_MANIFEST, "newer")})
+    stored = scheduler.StoredManifests(objects, fetches)
+    assert stored(REPO, ["head", "newer", "older"]) == {**STORED_MANIFEST, "commit": "newer"}
+    assert fetches.asked == [(SLUG, "head"), (SLUG, "newer")]
+    folder = "lab/manifests/the-cloud-clockwork--agentihooks/"
+    assert objects.keys("lab/") == [f"{folder}newer.json", f"{folder}older.json"]
+    assert objects.read(f"{folder}newer.json") == packed_file(STORED_MANIFEST, "newer")
+    assert stored(REPO, ["newer", "older"]) == {**STORED_MANIFEST, "commit": "newer"}
+    assert stored(REPO, ["older"]) == {**STORED_MANIFEST, "commit": "older"}
+    assert fetches.asked == [(SLUG, "head"), (SLUG, "newer")]
+
+
+@pytest.mark.feature("lab-dev-manifest-fetch")
+def test_stored_manifests_fetch_only_the_newest_commits_of_the_chain(tmp_path: Path) -> None:
+    objects = LocalObjects(tmp_path / "objects")
+    commits = [f"commit-{index}" for index in range(scheduler.MANIFEST_DEPTH + 1)]
+    fetches = Fetches({commits[-1]: packed_file(STORED_MANIFEST, commits[-1])})
+    assert scheduler.StoredManifests(objects, fetches)(REPO, commits) is None
+    assert fetches.asked == [(SLUG, commit) for commit in commits[:-1]]
+    assert objects.keys("lab/") == []
+
+
+@pytest.mark.feature("lab-dev-manifest-fetch")
+@pytest.mark.usefixtures("staticless")
+def test_a_head_that_needs_test_units_expands_on_the_manifest_stored_from_its_base_dev_push_run(
+    tmp_path: Path,
+) -> None:
+    suite = _suite(tmp_path, DELIVERY["lab"])
+    objects = LocalObjects(tmp_path / "objects")
+    fetches = Fetches({suite.base: packed_file(STORED_MANIFEST, suite.base)})
+    node = tmp_path / "node"
+    _git(tmp_path, "init", "-q", "--bare", str(node))
+    toolchain = Toolchain("3.12", {}, "", "", "image", {})
+    port = Port()
+    stored = scheduler.StoredManifests(objects, fetches)
+    expander = scheduler.MirrorExpander(node, tmp_path / "stores", toolchain, stored, port.verdicts)
+    found = expander.expand(suite.request(Priority.PROMOTION))
+    assert [batch.members for batch in found.gates["unit"]] == [(FIRST_TEST,)]
+    slug = str(suite.repo).removeprefix("/")
+    assert fetches.asked == [(slug, suite.base)]
+    assert objects.read(f"{manifest_folder(slug)}{suite.base}.json") == packed_file(STORED_MANIFEST, suite.base)
 
 
 @pytest.mark.feature("lab-control-routes")
@@ -1480,10 +1784,19 @@ class FakeChecks:
     repo: str
 
 
+@pytest.mark.feature("lab-worker-deletion-cost")
 def test_build_wires_the_service_ports_from_the_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(scheduler.MirrorExpander, "trusted", lambda self, repo: frozenset({repo}))
     monkeypatch.setattr(scheduler.MirrorExpander, "retries", lambda self, repo: Policy(lost=len(repo)))
     monkeypatch.setattr(scheduler, "Checks", FakeChecks)
+    kube = FakeKube()
+    pods_of: list[Mapping[str, str]] = []
+
+    def worker_pods(found: Mapping[str, str]) -> FakeKube:
+        pods_of.append(found)
+        return kube
+
+    monkeypatch.setattr(scheduler, "worker_pods", worker_pods)
     environ = {
         scheduler.contract.GIT_MIRROR: str(tmp_path / "node"),
         scheduler.MIRROR_STORE: str(tmp_path / "stores"),
@@ -1494,6 +1807,7 @@ def test_build_wires_the_service_ports_from_the_environment(tmp_path: Path, monk
     consumer = Consumer([])
     objects = LocalObjects(tmp_path / "objects")
     built = scheduler.build(environ, client, objects, consumer)
+    assert built.ports.pods is kube and pods_of == [environ]
     assert built.objects is objects
     assert built.settings.trusted == frozenset({"repository"})
     assert built.settings.retries == Policy(lost=len("repository"))
@@ -1504,6 +1818,8 @@ def test_build_wires_the_service_ports_from_the_environment(tmp_path: Path, monk
     assert (expander.node, expander.root) == (tmp_path / "node", tmp_path / "stores")
     assert expander.toolchain == Toolchain(sys.version.split()[0], {}, "", "", "image", {})
     assert isinstance(expander.manifests, scheduler.StoredManifests) and expander.manifests.objects is objects
+    fetch = expander.manifests.fetch
+    assert isinstance(fetch, Fetcher) and fetch.reader is Actions and fetch.readers == {}
     stored = Verdict("static", key("static", 9), True, False, 1.0)
     Store(client, objects).put(stored, {}, b"")
     assert expander.verdicts("static", stored.key) == stored
@@ -1548,7 +1864,7 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
 
     def build(environ: Any, redis_client: Any, objects: Any, consumer: Any) -> scheduler.Scheduler:
         calls["build"] = (environ, redis_client, objects, consumer)
-        ports = scheduler.Ports(Inbox(), Expander({}), lambda repo: Poster(), frozenset[str])
+        ports = scheduler.Ports(Inbox(), Expander({}), lambda repo: Poster(), frozenset[str], FakeKube())
         return scheduler.Scheduler(redis_client, objects, ports, scheduler.Settings(frozenset()))
 
     class Server:
@@ -1631,6 +1947,7 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
     assert calls["consumer"] == (scheduler.DURABLE, "ci.lab.head.>")
     found, leases, routes, spending, clock, ports = calls["listen"]
     assert found.queue.client is client and leases.queue is found.queue
+    assert leases.pods is found.ports.pods
     assert routes == lease_api.ControlRoutes(client, "tok", scheduler._now_ms)
     assert (leases.ttl_ms, leases.poll_ms) == (scheduler.LEASE_TTL_MS, scheduler.LEASE_POLL_MS)
     assert leases.clock() == 1_000_250 and clock() == 1_000_250

@@ -84,9 +84,10 @@ def test_a_second_lease_of_the_same_head_reuses_the_tree(
 ) -> None:
     head = _commit(origin, "a", "a")
     trees = worktrees.Worktrees(mirror=_mirror(tmp_path, origin, head), root=tmp_path / "trees", capacity=2)
-    first = trees.lease(head)
-    second = trees.lease(head)
+    first, cut = trees.lease(head)
+    second, reused = trees.lease(head)
     assert first == second == tmp_path / "trees" / head
+    assert (cut, reused) == (False, False)
     assert trees.live == OrderedDict({head: 2})
     assert _registered(trees.mirror.store) == [str(first)]
     assert (first / "a").read_text() == "a"
@@ -108,7 +109,7 @@ def test_a_leased_tree_is_read_only_and_leaves_symlink_targets_alone(tmp_path: P
     trees = worktrees.Worktrees(mirror=_mirror(tmp_path, origin, head), root=tmp_path / "trees", capacity=1)
     umask = os.umask(0)
     try:
-        tree = trees.lease(head)
+        tree, _ = trees.lease(head)
     finally:
         os.umask(umask)
     assert _writable(tree) == ["dirlink", "sub/link"]
@@ -162,7 +163,7 @@ def test_a_tree_with_live_units_is_never_evicted(tmp_path: Path, origin: Path) -
     trees.release(first)
     assert trees.live == OrderedDict({second: 1})
     assert not (tmp_path / "trees" / first).exists()
-    assert trees.lease(first) == tmp_path / "trees" / first
+    assert trees.lease(first) == (tmp_path / "trees" / first, False)
     assert (tmp_path / "trees" / first / "a").read_text() == "a"
 
 
@@ -180,7 +181,7 @@ def test_a_restarted_worker_recuts_a_tree_its_predecessor_left(tmp_path: Path, o
     mirror = _mirror(tmp_path, origin, head)
     worktrees.Worktrees(mirror=mirror, root=tmp_path / "trees", capacity=1).lease(head)
     trees = worktrees.Worktrees(mirror=mirror, root=tmp_path / "trees", capacity=1)
-    tree = trees.lease(head)
+    tree, _ = trees.lease(head)
     assert trees.live == OrderedDict({head: 1})
     assert (tree / "a").read_text() == "a"
     assert _writable(tree) == []
@@ -193,7 +194,7 @@ def test_a_lease_replaces_an_unregistered_directory_at_the_head_path(tmp_path: P
     (tmp_path / "trees" / head / "deep").mkdir(parents=True)
     (tmp_path / "trees" / head / "deep" / "left").write_text("left")
     (tmp_path / "trees" / head / "deep").chmod(0o500)
-    tree = trees.lease(head)
+    tree, _ = trees.lease(head)
     assert sorted(path.name for path in tree.iterdir()) == [".git", "a"]
     assert _registered(trees.mirror.store) == [str(tree)]
 
@@ -203,9 +204,9 @@ def test_a_mutation_unit_gets_its_own_writable_copy(
 ) -> None:
     head = _commit(origin, "a", "a")
     trees = worktrees.Worktrees(mirror=_mirror(tmp_path, origin, head), root=tmp_path / "pod" / "trees", capacity=1)
-    own = trees.own(head)
-    shared = trees.lease(head)
-    other = trees.own(head)
+    own, _ = trees.own(head)
+    shared, _ = trees.lease(head)
+    other, _ = trees.own(head)
     assert len({shared, own, other}) == 3
     assert own.parent == tmp_path / "pod" / "trees"
     assert own.name.startswith(f"{head}.")
@@ -218,3 +219,18 @@ def test_a_mutation_unit_gets_its_own_writable_copy(
     assert not own.exists()
     assert _registered(trees.mirror.store) == sorted([str(shared), str(other)])
     assert capfd.readouterr() == ("", "")
+
+
+@pytest.mark.feature("lab-scheduler-metrics")
+def test_a_lease_and_an_own_copy_report_whether_the_store_fetched_their_head(tmp_path: Path, origin: Path) -> None:
+    base = _commit(origin, "a", "a")
+    head = _commit(origin, "b", "b")
+    trees = worktrees.Worktrees(mirror=_mirror(tmp_path, origin, base), root=tmp_path / "trees", capacity=2)
+    assert trees.lease(base) == (tmp_path / "trees" / base, False)
+    assert trees.lease(head) == (tmp_path / "trees" / head, True)
+    assert trees.lease(head) == (tmp_path / "trees" / head, False)
+    assert trees.own(head)[1] is False
+    later = _commit(origin, "c", "c")
+    owned, fetched = trees.own(later)
+    assert fetched is True
+    assert _git(owned, "rev-parse", "HEAD").strip() == later

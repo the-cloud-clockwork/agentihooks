@@ -7,6 +7,7 @@ through its inbox, which the wake ladder delivers. A bare minutes wait, checked 
 import json
 import re
 import subprocess
+import sys
 from collections.abc import Callable
 from typing import Any
 
@@ -78,10 +79,12 @@ def checks_resolution(held, github, reread=None):
     return f"{outcome}; {current.unpassed_gate} never passed" if current.unpassed_gate else outcome
 
 
-def required_green(target, head):
+def required_green(target: str, head: str) -> bool:
+    """Whether GitHub reads every required check of ``target`` passed on ``head``; logs the error a failed read holds on."""
     try:
         pull = merge_queue.required_view(target, subprocess.run)
-    except (SwarmError, KeyError, TypeError):
+    except (SwarmError, KeyError, TypeError) as exc:
+        print(f"required checks of {target} unread: {exc}", file=sys.stderr)
         return False
     return pull is not None and pull.head == head and pull.resolved and not pull.red
 
