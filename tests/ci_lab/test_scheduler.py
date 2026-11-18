@@ -992,8 +992,8 @@ def test_main_serves_the_lease_api_and_runs_the_passes(tmp_path: Path, monkeypat
     assert (found.queue.client, interval, passes, clock, sleep) == (client, 0.5, 3, Clock.time, Clock.sleep)
     assert scheduler.main([], environ) == 7
     assert calls["serve"][1:3] == (scheduler.INTERVAL_S, 0)
-    tokenless = {name: value for name, value in environ.items() if name != scheduler.contract.CONTROL_TOKEN}
-    assert scheduler.main([], tokenless) == 7
+    del environ[scheduler.contract.CONTROL_TOKEN]
+    assert scheduler.main([], environ) == 7
     assert calls["api"][4].token == ""
 
 

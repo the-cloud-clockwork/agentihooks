@@ -381,7 +381,12 @@ def test_priority_stops_restoring_at_the_first_refusal_so_the_rest_keep_their_or
         return queue.run(command, **kwargs)
 
     result = merge_queue.prioritize(URL, run=run)
-    assert result == {"url": URL, "displaced": [], "errors": [f"could not restore {URL[:-1]}2: restore refused"]}
+    assert result == {
+        "url": URL,
+        "displaced": [],
+        "errors": [f"could not restore {URL[:-1]}2: restore refused"],
+        "lab": None,
+    }
     assert [e["pullRequest"]["id"] for e in queue.entries] == ["P1", "P9"]
 
 
@@ -398,7 +403,7 @@ def test_priority_requeues_a_queued_target_ejected_before_a_dequeue_fails():
         return done
 
     result = merge_queue.prioritize(URL, run=run)
-    assert result == {"url": URL, "displaced": [URL[:-1] + "4"], "errors": ["dequeue refused"]}
+    assert result == {"url": URL, "displaced": [URL[:-1] + "4"], "errors": ["dequeue refused"], "lab": None}
     assert [e["pullRequest"]["id"] for e in queue.entries] == ["P1", "P2", "P3", "P9", "P4"]
 
 
@@ -430,7 +435,12 @@ def test_priority_preserves_order_across_queue_pages(queued, split):
 
     result = merge_queue.prioritize(URL, run=run)
     assert len(pages) == 2
-    assert result == {"url": URL, "displaced": [URL[:-1] + n for n in ("2", "3", "4", "5")], "errors": []}
+    assert result == {
+        "url": URL,
+        "displaced": [URL[:-1] + n for n in ("2", "3", "4", "5")],
+        "errors": [],
+        "lab": None,
+    }
     assert [e["pullRequest"]["id"] for e in queue.entries] == ["P1", "P9", "P2", "P3", "P4", "P5"]
 
 
@@ -445,7 +455,7 @@ def test_priority_does_not_remove_an_entry_that_started_running():
 
     displaced = Displaced(queue)
     result = merge_queue.prioritize(URL, run=run, displaced=displaced)
-    assert result == {"url": URL, "displaced": [URL[:-1] + "3"], "errors": []}
+    assert result == {"url": URL, "displaced": [URL[:-1] + "3"], "errors": [], "lab": None}
     assert queue.mutations == [("dequeue", 3), ("queue", 9), ("queue", 3)]
     assert [e["pullRequest"]["id"] for e in queue.entries] == ["P1", "P2", "P9", "P3"]
     assert displaced.pulls == {}
