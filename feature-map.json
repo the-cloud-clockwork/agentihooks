@@ -9164,6 +9164,17 @@
       ]
     },
     {
+      "id": "local-master-native-login-without-front-gate",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2529",
+      "behaviour": "The local runtime route choice gives the native claude.ai login only to the front door master seat, or to a master with no seat: a backend master seat (master-2, master-3, ...) with no ordered route kind launches on a subscription token route even while the native login works, and an ordered route kind keeps its meaning, as on the hive path.",
+      "seam": "scripts.swarm.runtime.HerdrRuntime._route_kind through HerdrRuntime.spawn, the native login fallthrough gated by scripts.swarm_v2.front_door.holds; semgrep incident rule local-master-native-login-without-front-gate",
+      "tests": [
+        "tests/swarm/test_interactive_routes.py::test_only_the_front_door_master_seat_takes_the_native_login_route",
+        "tests/swarm/test_master_auth.py::test_a_backend_master_takes_its_token_route_with_or_without_a_valid_login"
+      ]
+    },
+    {
       "id": "agent-number-past-four-digits",
       "origin": "inventory",
       "behaviour": "scripts.swarm.naming.build accepts any engineer, ci or master counter of 1 or more with no upper bound instead of refusing at 10000 with a NamingError, and every agent-name matcher built from _BASE (NAME_RE, the pane, worktree, tmp, scratch and small_slug patterns) matches four or more digits with no maximum instead of exactly four, so a swarm whose engineer counter passes 10000 still spawns, its name still parses, and NameRegistry.names still lists it instead of raising.",

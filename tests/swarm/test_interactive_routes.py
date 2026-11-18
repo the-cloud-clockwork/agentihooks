@@ -135,7 +135,7 @@ def test_only_interactive_spawn_skips_subscription_quota(tmp_path, has_quota, ki
 
 
 @pytest.mark.parametrize("handoff", [False, True])
-@pytest.mark.parametrize("week_left,route", [(3.0, "open"), (60.0, "interactive")])
+@pytest.mark.parametrize("week_left,route", [(3.0, "open")])
 def test_a_master_successor_leaves_the_spent_reserved_account_for_an_open_one(
     tmp_path, monkeypatch, week_left, route, handoff
 ):
@@ -174,6 +174,29 @@ def test_a_master_successor_leaves_the_spent_reserved_account_for_an_open_one(
     passed = _passed(seen[0])
     assert passed[passed.index("--route") + 1] == route
     assert placed.route_kind == ("interactive" if route == "interactive" else "subscription")
+
+
+@pytest.mark.feature("local-master-native-login-without-front-gate")
+@pytest.mark.parametrize(
+    "lane,harness,task,kind",
+    [
+        ("master", "claude", {"seat": "master-2@proof"}, "subscription"),
+        ("master", "claude", {"seat": "master-3@proof"}, "subscription"),
+        ("master", "claude", {"seat": "master@proof"}, "interactive"),
+        ("master", "claude", {}, "interactive"),
+        ("master", "", {"seat": "master@proof"}, "interactive"),
+        ("master", "codex", {"seat": "master@proof"}, "subscription"),
+        ("eng", "claude", {}, "subscription"),
+        ("master", "claude", {"seat": "master@proof", "route_kind": "subscription"}, "subscription"),
+        ("master", "claude", {"seat": "master-2@proof", "route_kind": "interactive"}, "interactive"),
+    ],
+)
+def test_only_the_front_door_master_seat_takes_the_native_login_route(tmp_path, monkeypatch, lane, harness, task, kind):
+    from scripts import master_claude_login
+
+    monkeypatch.setattr(master_claude_login, "enabled", lambda *_: False)
+    runtime = HerdrRuntime(home=tmp_path, run=lambda *_, **__: pytest.fail("the route choice ran a command"))
+    assert runtime._route_kind(lane, harness, task, "proof") == kind
 
 
 @pytest.mark.parametrize("handoff", [False, True])

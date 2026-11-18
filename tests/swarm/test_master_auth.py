@@ -61,9 +61,10 @@ def test_only_the_master_can_use_reserved_room(tmp_path, lane, five_left, week_l
     assert runtime._quota_accounts[0].cap == 0
 
 
+@pytest.mark.feature("local-master-native-login-without-front-gate")
 @pytest.mark.parametrize("login", [True, False])
 @pytest.mark.parametrize("handoff", [True, False])
-def test_master_prefers_a_valid_login_even_after_a_token_handoff(tmp_path, login, handoff):
+def test_a_backend_master_takes_its_token_route_with_or_without_a_valid_login(tmp_path, login, handoff):
     from scripts.routing import native_login
     from scripts.swarm.capacity import Account
     from scripts.swarm.runtime import HerdrRuntime
@@ -96,8 +97,8 @@ def test_master_prefers_a_valid_login_even_after_a_token_handoff(tmp_path, login
         }
     placed = runtime.spawn(config, "master", "agent", task)
     passed = seen[0][seen[0].index("--") + 1 :]
-    assert passed[:2] == ["--route", "interactive" if login else "token"]
-    assert placed.route_kind == ("interactive" if login else "subscription")
+    assert passed[:2] == ["--route", "token"]
+    assert placed.route_kind == "subscription"
 
 
 @pytest.mark.parametrize("kind", ["subscription", "api", "interactive"])
