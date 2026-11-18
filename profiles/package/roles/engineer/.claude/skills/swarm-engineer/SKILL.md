@@ -97,7 +97,7 @@ green result, before continuing.
 Name every wait so the swarm does not count you idle:
 
 - Checks on your pull request: `agentihooks swarm <slug> wait --on checks <url>`.
-- A lab check run on your pull request: `agentihooks swarm <slug> wait --on lab <check run url>`.
+- A lab check run on your pull request, by its check run url: `agentihooks swarm <slug> wait --on lab <url>`.
 - A queued pull request: `agentihooks swarm <slug> wait --on merge <url>`.
 - A reply to an inbox item: `agentihooks swarm <slug> wait --on reply <id>`.
 - Another task: `agentihooks swarm <slug> wait --on task <id>`.
