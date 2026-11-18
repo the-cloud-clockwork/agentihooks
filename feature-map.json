@@ -278,6 +278,16 @@
       ]
     },
     {
+      "id": "compose-front-ready-before-wait",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/promo-44298675305-0",
+      "behaviour": "The Compose front reads healthy only once nginx answers the ledger health route on its own port, so docker compose up --wait returns after the front serves and the first request through the published port is answered instead of reset while the nginx entrypoint still writes its config.",
+      "seam": "the front service healthcheck of the Compose stack file and its swarm init copy",
+      "tests": [
+        "tests/test_compose_stack.py::test_the_front_reads_healthy_only_once_nginx_serves_the_ledger_health_route"
+      ]
+    },
+    {
       "id": "reload-successor-imports-hub-before-ready",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2576",
