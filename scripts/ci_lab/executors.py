@@ -25,6 +25,7 @@ from collections.abc import Callable, Generator, Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
+from types import FrameType
 from typing import Any
 
 from scripts import ci_cpu_quota
@@ -301,6 +302,11 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     service = worker.build(
         environ, executors(pod, suite, graded), socket.gethostname(), cpus, ci_cpu_quota.quota_cpus()
     )
-    signal.signal(signal.SIGTERM, lambda number, frame: service.stop())
+
+    def stop(signum: int, frame: FrameType | None) -> None:
+        """Stop leasing once SIGTERM arrives."""
+        service.stop()
+
+    signal.signal(signal.SIGTERM, stop)
     service.run()
     return 0
