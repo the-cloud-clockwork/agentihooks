@@ -1849,8 +1849,9 @@ def cmd_blockers(store: RedisStore, args: argparse.Namespace) -> None:
 
 
 def cmd_panic(store: RedisStore, args: argparse.Namespace) -> None:
-    """The panic button: on, pressed by the master or the operator, stops agent starts and cancels CI runs but the
-    checked fixes and the fixer branches every swarm recorded, off clears it once stable."""
+    """The panic button: on, pressed by the master or the operator, stops agent starts, cancels CI runs and pauses the
+    lab's pull request grading but the checked fixes and the fixer branches every swarm recorded; off clears it once
+    stable and resumes the lab."""
     now = now_ms()
     if args.action == "on":
         _master_or_operator(store, args, "only the master or the operator presses panic on")
@@ -1859,7 +1860,8 @@ def cmd_panic(store: RedisStore, args: argparse.Namespace) -> None:
         found = panic.engage(store, args.slug, f"pressed on swarm {args.slug}", False, args.fix, now)
         owns = panic.owner(store, args.slug)
         cancelled = panic.cancel_runs((*found.fixes, *panic.fixers(store)), panic.REPOS, panic.port, owns)
-        print(json.dumps({"panic": "on", "fixes": list(found.fixes), "cancelled": cancelled}))
+        lab = panic.lab_engage(store, args.slug, found.fixes)
+        print(json.dumps({"panic": "on", "fixes": list(found.fixes), "cancelled": cancelled, "lab": lab}))
         return
     if args.action == "off":
         if not panic.release(store, args.slug, now):
@@ -1868,7 +1870,7 @@ def cmd_panic(store: RedisStore, args: argparse.Namespace) -> None:
                 f"{panic.errors_since(store, args.slug, now - panic.WINDOW_MS)} errors in the last 15 minutes; it "
                 f"clears at {panic.RELEASE_LEVEL:.2f} with fewer than {panic.RELEASE_ERRORS}"
             )
-        print(json.dumps({"panic": "off"}))
+        print(json.dumps({"panic": "off", "lab": panic.lab_release(store, args.slug)}))
         return
     current = panic.state(store, args.slug)
     print(

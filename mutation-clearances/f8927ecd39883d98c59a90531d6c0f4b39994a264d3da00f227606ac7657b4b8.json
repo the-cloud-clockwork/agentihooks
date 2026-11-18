@@ -1,0 +1,6 @@
+{
+  "scripts/gate_protected.py:scripts.gate_protected.x__reads_needs_freely:d5f996a724a5ba5d75bd7e882dee1c2e7cabf8baf40110dcb7cd0cd1dcfd9a89": {
+    "reader": "standards-reader",
+    "reason": "With re.IGNORECASE already set on both the original and the mutant pattern, the letter case written into the pattern is irrelevant: case insensitive matching accepts the same inputs either way, so no input can tell the two apart."
+  }
+}

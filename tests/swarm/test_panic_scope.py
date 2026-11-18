@@ -260,7 +260,8 @@ def test_the_panic_messages_name_the_held_swarm() -> None:
         "BLOCKER QUEUE on swarm held: panic for 0 minutes sustained for an hour or more. Fix this now: the master "
         "coding window is open; troubleshoot and fix before any other work, and clear each category with "
         "agentihooks swarm held blockers clear <category>. Stop everything unnecessary for the fix: agentihooks "
-        "swarm held panic on --fix <pr url> pauses the swarm's agent starts and cancels every CI run of its agents "
-        "but the fix and the merge queue, printing what it cancelled."
+        "swarm held panic on --fix <pr url> pauses the swarm's agent starts, cancels every CI run of its agents "
+        "but the fix and the merge queue, and pauses the lab's pull request grading but the fix, printing what it "
+        "cancelled and paused."
     )
     assert PANIC_HELD.format(path="/w") == "Swarm panic holds, so the stop hook pushes nothing and did not push /w."

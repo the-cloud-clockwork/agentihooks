@@ -1,11 +1,12 @@
 import argparse
 import json
+import re
 import subprocess
 from collections.abc import Mapping
 from copy import deepcopy
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 
@@ -39,6 +40,9 @@ UNUSED_SELECT_OUTPUTS = ("files_1", "files_2", "files_3")
 SONAR_SELECT_OUTPUT = {"sonar": "${{ steps.select.outputs.sonar }}"}
 LEDGER_SELECT_OUTPUT = {"ledger": "${{ steps.select.outputs.ledger }}"}
 FROZEN = "tests/registry/FROZEN_GATES.json"
+LAB_VERDICT_JOB = "lab-verdict"
+LAB_CLAUSE_PREFIX = f"fromJSON(needs.{LAB_VERDICT_JOB}.outputs.authoritative || '{{}}')"
+LAB_UPSTREAM = frozenset({"reuse", LAB_VERDICT_JOB})
 DOWNLOAD_ARTIFACT = "actions/download-artifact@"
 SUMMARY_DOWNLOADS = ("actions/download-artifact@v4", "actions/download-artifact@v8.0.2")
 SUMMARY_REPORTS = ("Download this run's test reports", "{durations,flakes}-3.*")
@@ -201,6 +205,51 @@ def _reuse_problems(base: dict, head: dict, policy: object = None) -> list[str]:
     return []
 
 
+def lab_clause(condition: str | None, gate: str) -> str:
+    """Return the gate condition with the clause that skips the gate in Actions while the lab grades it."""
+    clause = f"{LAB_CLAUSE_PREFIX}['{gate}'] != true"
+    if condition is None:
+        return f"${{{{ {clause} }}}}"
+    if condition.startswith("${{") and condition.endswith("}}"):
+        return f"{condition.removesuffix('}}').rstrip()} && {clause} }}}}"
+    return f"{condition} && {clause}"
+
+
+def _reads_needs_freely(condition: str) -> bool:
+    """Return whether a condition reads the needs context, in any letter case, other than by a literal job name."""
+    bare = re.sub(r"'(?:[^']|'')*'", "''", condition)
+    return re.search(r"(?<![\w.-])needs\b(?!\s*(?:\.\s*\w|\[\s*''\s*\]))", bare, flags=re.IGNORECASE) is not None
+
+
+def _lab_problems(base: dict[str, Any], head: dict[str, Any], gate: dict[str, Any]) -> list[str]:
+    """Refuse a lab verdict job or a gate condition off its reviewed form.
+
+    A gate whose base condition reads the lab verdict keeps that condition exactly. Any other gate reads the lab
+    verdict, or the needs context by a computed key or as a whole, only through its base condition plus its exact lab
+    clause.
+    """
+    problems: list[str] = []
+    if head.get(LAB_VERDICT_JOB) != base.get(LAB_VERDICT_JOB):
+        problems.append(
+            "The head's lab verdict job differs from the reviewed rendering; the protected branch grades with its own."
+        )
+
+    def off_base(need: str) -> bool:
+        condition: str | None = head[need].get("if")
+        reviewed: str | None = base[need].get("if")
+        if LAB_VERDICT_JOB in str(reviewed).lower():
+            return condition != reviewed
+        reads = LAB_VERDICT_JOB in str(condition).lower() or _reads_needs_freely(str(condition))
+        return reads and condition not in (reviewed, lab_clause(reviewed, need))
+
+    return problems + [
+        f"The head's {need} condition differs from its base condition plus its exact lab clause; "
+        "the protected branch grades with its own."
+        for need in sorted(ci_wiring.needs_of(gate) - LAB_UPSTREAM)
+        if need in base and need in head and off_base(need)
+    ]
+
+
 def _duration_problems(base: dict, head: dict) -> list[str]:
     if (
         head["jobs"].get("reuse", {}).get("if")
@@ -325,6 +374,11 @@ def grade(
         retired = retired | {"durations"}
     problems = _aggregator_problems(base_gates[0], head_gates[0], policy, retired)
     problems += _reuse_problems(base_workflows[file]["jobs"], head_jobs, policy)
+    problems += _lab_problems(
+        base_workflows[file]["jobs"],
+        cast("dict[str, Any]", head_jobs),  # pragma: no mutate
+        cast("dict[str, Any]", head_gates[0][2]),  # pragma: no mutate
+    )
     problems += duration_problems
     config = _protected_config(base_config, head_config)
     summary = head_jobs.get("test-summary")

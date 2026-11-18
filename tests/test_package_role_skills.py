@@ -232,9 +232,9 @@ def test_rendered_swarm_engineer_skill_reads_red_and_green_in_ci(world):
     text = " ".join((out / "skills" / "swarm-engineer" / "SKILL.md").read_text().split())
 
     assert "lint and tests green" not in text
+    assert "preflight" not in text
     steps = (
         "open a draft pull request into the base branch at that first push",
-        "never wait for the branch mutation preflight",
         "Read the test red in CI on the pull request",
         "read it green in CI",
         "AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN",
