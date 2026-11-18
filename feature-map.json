@@ -9115,6 +9115,17 @@
         "tests/swarm/test_pull_views.py::test_open_and_closed_pull_requests_are_read_again_by_a_new_process",
         "tests/swarm/test_pull_views.py::test_a_kept_entry_with_other_fields_is_read_again_and_replaced"
       ]
+    },
+    {
+      "id": "lab-wheel-imports",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2646",
+      "behaviour": "Every CI lab module and the CI test planner import from the hooks, scripts and profiles packages the wheel ships, never from the tests package, so the lab scheduler starts in the swarm image and the lab worker starts in the CI lab image. The dependency manifest lives in scripts.dep_manifest and the shard sizing the lab and the CI selector share lives in scripts.shard_sizing.",
+      "seam": "a fresh interpreter whose import system cannot find the tests package imports every module of scripts.ci_lab and scripts.ci_test_plan",
+      "tests": [
+        "tests/ci_lab/test_wheel_imports.py::test_every_lab_module_imports_without_the_tests_package",
+        "tests/ci_lab/test_wheel_imports.py::test_an_import_of_the_tests_package_fails_where_the_wheel_is_installed"
+      ]
     }
   ],
   "unmapped_rules": [
