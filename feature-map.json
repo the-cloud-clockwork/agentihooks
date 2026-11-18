@@ -5929,6 +5929,19 @@
       ]
     },
     {
+      "id": "withdrawn-offer-asked-again",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-pinned-offers-not-placed",
+      "behaviour": "A delivery that meets a withdrawn spoke claim at its task's current claim generation claims the key and asks the hub to admit it again, as a ready claim would, so a task the hub refused once while it stayed open at that generation is placed as soon as the hub admits it; a refusal writes the claim withdrawn again and terms the delivery, with no claim generation advance.",
+      "seam": "Spoke._apply routing a withdrawn claim through Spoke._spawn and LaneTasks.request against Admission.admit, observed through lanes.run_once on the root hive",
+      "rules": ["withdrawn-claim-ends-unasked"],
+      "tests": [
+        "tests/swarm/test_events_placement.py::test_a_workstation_task_whose_claim_was_withdrawn_at_its_current_generation_is_placed_on_the_root_hive",
+        "tests/hive/test_spoke.py::test_an_offer_meeting_a_withdrawn_claim_asks_the_hub_again_and_launches_once_admitted",
+        "tests/hive/test_spoke.py::test_withdrawn_work_asks_the_hub_again_for_a_later_offer_of_its_generation"
+      ]
+    },
+    {
       "id": "forced-master-slot-reservation",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-forced-master-slot-reservation",
