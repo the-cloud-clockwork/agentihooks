@@ -1,10 +1,10 @@
 """The culprit of a red merge group: each entry graded alone against dev from the lab's verdict cache.
 
-`name` reads each entry's alone verdict in queue order: the first entry red alone is the culprit, and a group whose
-entries are all green alone is red only together, an interaction that names every entry. `body` renders the comment
+`name` reads each entry's alone verdict in queue order: the first entry red alone is the culprit, and a group of two
+or more entries all green alone is red only together, an interaction that names every entry. `body` renders the comment
 the lab posts on each named pull request, `Culprits` posts it through the GitHub App and dequeues the entry the
 finding removes so GitHub re-forms the queue without it, and `observation` is the hub pulls observation whose
-`merge.dequeued` event carries `culprit`.
+`merge.dequeued` event carries `culprit`. `remove` runs the three in that order: comment, announce, dequeue.
 """
 
 from collections.abc import Mapping, Sequence
@@ -17,7 +17,7 @@ from scripts.ci_lab.checks import HEADERS, TIMEOUT, PostRefused, Token
 from scripts.ci_lab.store import Verdict
 from scripts.ci_lab.units import Unit
 from scripts.github_app import GitHubAppAuth
-from scripts.hub.pulls import Observation
+from scripts.hub.pulls import Observation, Pulls
 
 __all__ = [
     "CULPRIT",
@@ -33,6 +33,7 @@ __all__ = [
     "body",
     "name",
     "observation",
+    "remove",
 ]
 
 API = "https://api.github.com"
@@ -84,29 +85,29 @@ def alone(verdicts: Verdicts, entry: Entry) -> bool | None:
 
 
 def name(verdicts: Verdicts, group: str, entries: Sequence[Entry]) -> Finding | None:
-    """Return the first entry red alone as the culprit, else an interaction of every entry; None while undecided."""
+    """Return the first entry red alone as the culprit, else an interaction of two or more entries, else None."""
     for entry in entries:
         green = alone(verdicts, entry)
         if green is None:
             return None
         if not green:
             return Finding(CULPRIT, group, (entry.url,))
-    return Finding(INTERACTION, group, tuple(entry.url for entry in entries)) if entries else None
+    return Finding(INTERACTION, group, tuple(entry.url for entry in entries)) if len(entries) > 1 else None
 
 
 def body(finding: Finding, details: str) -> str:
     """Return the comment the lab posts on each pull request a finding names."""
     head = f"The lab graded the merge group at {finding.group} red."
-    leaves = "leaves the merge queue; the queue re-forms without it."
     if finding.kind == CULPRIT:
-        found = f"Graded alone against dev from the lab's cache, {finding.removed} is red, so it is the culprit and {leaves}"
+        found = f"Graded alone against dev from the lab's cache, {finding.removed} is red, so it is the culprit."
     else:
         named = ", ".join(finding.urls)
         found = (
             "Every entry is green alone against dev from the lab's cache, so the group is red only together: "
-            f"an interaction of {named}. {finding.removed} {leaves}"
+            f"an interaction of {named}."
         )
-    return f"{head} {found}\n\nDetails: {details}"
+    leaves = f"The lab removes {finding.removed} from the merge queue and the queue re-forms without it."
+    return f"{head} {found} {leaves}\n\nDetails: {details}"
 
 
 def observation(finding: Finding, comments: Sequence[str]) -> Observation:
@@ -136,7 +137,7 @@ class Culprits:
     def dequeue(self, url: str) -> None:
         """Remove the pull request at url from its merge queue, so GitHub re-forms the groups behind it."""
         pull = self._graphql(NODE, {"url": url})["resource"]
-        if pull is None:
+        if not pull:
             raise PostRefused(f"GitHub has no pull request at {url}")
         self._graphql(DEQUEUE, {"id": pull["id"]})
 
@@ -162,3 +163,16 @@ class Culprits:
             raise PostRefused(f"POST {path} answered {response.status_code}")
         data: dict[str, Any] = response.json()
         return data
+
+
+def remove(finding: Finding, details: str, culprits: Culprits, pulls: Pulls) -> tuple[str, ...]:
+    """Comment on each named pull request, publish the culprit on the removed entry's dequeue, then dequeue it.
+
+    The hub observes the dequeue before GitHub does, so its merge.dequeued event always carries the culprit; return
+    the comment urls.
+    """
+    text = body(finding, details)
+    comments = tuple(culprits.comment(url, text) for url in finding.urls)
+    pulls.observe(observation(finding, comments))
+    culprits.dequeue(finding.removed)
+    return comments
