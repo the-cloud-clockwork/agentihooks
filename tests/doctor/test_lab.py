@@ -1,0 +1,254 @@
+from __future__ import annotations
+
+import json
+import subprocess
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+
+import pytest
+
+from scripts.ci_lab import delivery, shadow, shadow_report
+from scripts.doctor import cli as doctor
+from scripts.doctor import detect, lab
+from scripts.swarm import cli as swarm_cli
+from scripts.swarm import lab_capacity
+from scripts.swarm.health.findings import Finding
+from scripts.swarm.store import RedisStore
+
+MINUTE = 60_000
+NOW = 1_794_960_000_000
+SLUG = "sw"
+URL = "http://lab.example:8080"
+REPOSITORY = "owner/repo"
+HEAD = "a" * 40
+OTHER = "b" * 40
+ROOT = Path(__file__).resolve().parents[2]
+LIMITS = lab.Limits(20, 0.6)
+
+
+def entry(wait_s: float | None = 60.0, ratio: float | None = 0.9) -> dict[str, Any]:
+    return {"pending": 3, "running": 2, "predicted_wait_s": wait_s, "verdict_cache_hit_ratio": ratio}
+
+
+def block(classes: dict[str, Any], at: int = NOW - MINUTE, error: str = "", **extra: Any) -> dict[str, Any]:
+    capacity = {
+        "classes": classes,
+        "slots": {"total": 8, "busy": 5, "free": 3},
+        "utilisation": 0.62,
+        "budget_fraction": 0.3,
+        "shed": [],
+    }
+    return {"url": URL, "at": at, "capacity": capacity, "error": error, "error_at": NOW if error else 0, **extra}
+
+
+def faked() -> dict[str, Any]:
+    return block(
+        {"pull_request": entry(1500.0, 0.45), "queue": entry(None, 0.6), "promotion": entry(30.0, None)},
+    )
+
+
+def behind_finding(minutes: int = 25) -> Finding:
+    return Finding(
+        "lab behind",
+        SLUG,
+        f"the lab is {minutes} minutes behind on pull request grading",
+        (f"pull request grading predicted wait {minutes} minutes", f"capacity read at {NOW - MINUTE}"),
+        "a predicted pull request grading wait above 20 minutes",
+        minutes,
+    )
+
+
+def ratio_finding() -> Finding:
+    return Finding(
+        "lab cache hit ratio",
+        "pull_request",
+        "the lab verdict cache answered 45 percent of pull_request lookups, under the floor of 60 percent",
+        ("class pull_request verdict cache hit ratio 0.45", f"capacity read at {NOW - MINUTE}"),
+        "a verdict cache hit ratio below 0.6 (AGENTIHOOKS_DOCTOR_LAB_HIT_FLOOR)",
+        45,
+    )
+
+
+@pytest.mark.feature("doctor-lab-health")
+def test_an_unreachable_lab_is_one_finding_measured_from_its_last_good_read() -> None:
+    stale = block({"pull_request": entry(3000.0, 0.1)}, at=NOW - 7 * MINUTE, error="timed out")
+    assert lab.findings(SLUG, stale, NOW, LIMITS) == [
+        Finding(
+            "lab unreachable",
+            SLUG,
+            f"the lab at {URL} has not answered a capacity read for 7 minutes: timed out",
+            (f"lab {URL}", f"error at {NOW}: timed out", f"last good read at {NOW - 7 * MINUTE}"),
+            "the last capacity read failed",
+            7,
+        )
+    ]
+    never = {"url": URL, "error": "connection refused", "error_at": NOW - 2 * MINUTE}
+    [found] = lab.findings(SLUG, never, NOW, LIMITS)
+    assert found.id == "lab-unreachable/sw"
+    assert found.measure == 2
+    assert found.evidence[2] == "last good read at never"
+    assert lab.findings(SLUG, None, NOW, LIMITS) == []
+
+
+@pytest.mark.feature("doctor-lab-health")
+def test_a_fresh_reading_behind_the_limit_is_a_finding_and_at_the_limit_is_not() -> None:
+    assert lab.findings(SLUG, block({"pull_request": entry(1500.0)}), NOW, LIMITS) == [behind_finding()]
+    assert lab.findings(SLUG, block({"pull_request": entry(1200.0)}), NOW, LIMITS) == []
+    assert lab.findings(SLUG, block({"pull_request": entry(1500.0)}, at=NOW - 11 * MINUTE), NOW, LIMITS) == []
+    assert lab.findings(SLUG, block({"queue": entry(9000.0)}), NOW, LIMITS) == []
+    assert lab.findings(SLUG, block({"pull_request": entry(1500.0)}), NOW, lab.Limits(25, 0.6)) == []
+
+
+@pytest.mark.feature("doctor-lab-health")
+def test_each_class_with_a_hit_ratio_under_the_floor_is_a_finding() -> None:
+    assert lab.findings(SLUG, faked(), NOW, LIMITS) == [behind_finding(), ratio_finding()]
+    assert lab.findings(SLUG, faked(), NOW, lab.Limits(30, 0.4)) == []
+    late = block({"pull_request": entry(60.0, 0.1)}, at=NOW - 11 * MINUTE)
+    assert lab.findings(SLUG, late, NOW, LIMITS) == []
+    assert lab.findings(SLUG, block({"pull_request": {"predicted_wait_s": None}}), NOW, LIMITS) == []
+
+
+@pytest.mark.feature("doctor-lab-health")
+def test_the_wait_limit_and_hit_floor_come_from_the_environment() -> None:
+    assert lab.Limits.from_env({}) == lab.Limits(20, 0.6)
+    environ = {"AGENTIHOOKS_HEALTH_CI_BEHIND_MINUTES": "30", "AGENTIHOOKS_DOCTOR_LAB_HIT_FLOOR": "0.8"}
+    assert lab.Limits.from_env(environ) == lab.Limits(30, 0.8)
+    assert lab.Limits.from_env({"AGENTIHOOKS_DOCTOR_LAB_HIT_FLOOR": "1"}).hit_floor == 1.0
+    assert lab.Limits.from_env({"AGENTIHOOKS_DOCTOR_LAB_HIT_FLOOR": ".5"}).hit_floor == 0.5
+    for malformed in ("", "x", "1.5", "-0.2", "nan", "0.5 "):
+        assert lab.Limits.from_env({"AGENTIHOOKS_DOCTOR_LAB_HIT_FLOOR": malformed}).hit_floor == 0.6
+
+
+@pytest.mark.feature("doctor-lab-health")
+def test_an_authoritative_gate_with_a_mismatch_is_a_finding() -> None:
+    assert lab.gate_findings({"lint": 2, "docs": 0}, 10) == [
+        Finding(
+            "lab gate mismatch",
+            "lint",
+            "the authoritative gate lint disagrees with GitHub Actions on 2 of the newest 10 pull request heads",
+            (
+                "gate lint is authoritative in delivery.yaml",
+                "python -m scripts.ci_lab shadow report --gate lint --heads 10",
+            ),
+            "any mismatch on an authoritative gate",
+            2,
+        )
+    ]
+    assert lab.gate_findings({}, 10) == []
+
+
+def check_run(name: str, conclusion: str, minute: int, slug: str) -> dict[str, Any]:
+    return {
+        "id": minute,
+        "name": name,
+        "status": "completed",
+        "conclusion": conclusion,
+        "completed_at": f"2026-11-18T00:{minute:02d}:00Z",
+        "app": {"slug": slug},
+    }
+
+
+def answers(gate: str) -> dict[str, dict[str, Any]]:
+    runs = f"repos/{REPOSITORY}/actions/workflows/test.yml/runs?event=pull_request&status=completed"
+    checks = "check-runs?filter=latest&per_page=100&page=1"
+    lab_run = f"lab-shadow/{gate}"
+    return {
+        f"{runs}&per_page=100&page=1": {"workflow_runs": [{"head_sha": HEAD}, {"head_sha": OTHER}]},
+        f"repos/{REPOSITORY}/commits/{HEAD}/{checks}": {
+            "check_runs": [
+                check_run(gate, "failure", 10, "github-actions"),
+                check_run(lab_run, "success", 5, "agentihooks-lab"),
+            ]
+        },
+        f"repos/{REPOSITORY}/commits/{OTHER}/{checks}": {
+            "check_runs": [
+                check_run(gate, "success", 10, "github-actions"),
+                check_run(lab_run, "success", 5, "agentihooks-lab"),
+            ]
+        },
+    }
+
+
+@pytest.mark.feature("doctor-lab-health")
+def test_mismatches_count_each_authoritative_gate_through_the_acceptance_rule_report() -> None:
+    asked: list[str] = []
+    found = answers("lint")
+
+    def fetch(path: str) -> dict[str, Any]:
+        asked.append(path)
+        return found[path]
+
+    assert lab.mismatches(fetch, REPOSITORY, ("lint",), frozenset({"lint"}), 2) == {"lint": 1}
+    assert asked == list(found)
+    assert lab.mismatches(fetch, REPOSITORY, (), frozenset({"lint"}), 2) == {}
+
+
+@pytest.mark.feature("doctor-lab-health")
+def test_the_gate_reader_asks_github_only_for_authoritative_gates(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = SimpleNamespace(repo=str(ROOT), repo_origin=f"github.com/{REPOSITORY}")
+    store = SimpleNamespace(config=lambda slug: config if slug == SLUG else None)
+
+    def refused(path: str) -> dict[str, Any]:
+        raise AssertionError(path)
+
+    monkeypatch.setattr(delivery, "authoritative", lambda root: ())
+    assert lab.read_gates(store, SLUG, refused) == []
+    seen: list[Path] = []
+    monkeypatch.setattr(delivery, "authoritative", lambda root: seen.append(root) or ("lint",))
+    monkeypatch.setattr(shadow, "static_jobs", lambda root: seen.append(root) or frozenset({"lint"}))
+    found = answers("lint")
+    [mismatch] = lab.read_gates(store, SLUG, lambda path: found[path])
+    assert mismatch.id == "lab-gate-mismatch/lint"
+    assert mismatch.measure == 1
+    assert seen == [ROOT, ROOT]
+
+
+@pytest.mark.feature("doctor-lab-health")
+def test_the_github_fetch_goes_through_the_rate_limit_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def gh_api(args: list[str], **options: object) -> subprocess.CompletedProcess[str]:
+        calls.append((args, options))
+        return subprocess.CompletedProcess(args, 0, json.dumps({"check_runs": []}), "")
+
+    monkeypatch.setattr(shadow_report, "gh_api", gh_api)
+    assert lab.gh_fetch("repos/owner/repo/commits/a/check-runs") == {"check_runs": []}
+    assert calls == [(["repos/owner/repo/commits/a/check-runs"], {"timeout": 30.0, "text": True})]
+
+
+@pytest.fixture
+def store() -> RedisStore:
+    import fakeredis
+
+    return RedisStore(fakeredis.FakeRedis(decode_responses=True))
+
+
+@pytest.mark.feature("doctor-lab-health")
+def test_the_doctor_reads_the_stored_lab_block_and_registers_both_readers(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store.redis.set(store.key(SLUG, lab_capacity.KEY), json.dumps(faked()))
+    assert lab.read(store, SLUG, NOW, {}) == [behind_finding(), ratio_finding()]
+    assert lab.read(store, SLUG, NOW, {"AGENTIHOOKS_DOCTOR_LAB_HIT_FLOOR": "0.4"}) == [behind_finding()]
+    readers = detect.readers(store, None, SLUG, NOW, environ={"AGENTIHOOKS_HEALTH_CI_BEHIND_MINUTES": "30"})
+    assert readers["lab"]() == [ratio_finding()]
+    monkeypatch.setattr(lab, "read_gates", lambda given, slug: [given, slug])
+    assert readers["lab gate"]() == [store, SLUG]
+
+
+@pytest.mark.feature("doctor-lab-health")
+def test_doctor_findings_prints_a_faked_lab_reading_as_json(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    store.redis.set(store.key(SLUG, lab_capacity.KEY), json.dumps(faked()))
+    monkeypatch.setattr(swarm_cli, "connect", lambda: store)
+    monkeypatch.setattr(swarm_cli, "now_ms", lambda: NOW)
+    monkeypatch.setattr(swarm_cli, "LedgerClient", lambda: None)
+    assert doctor.main([SLUG, "findings", "--detector", "lab", "--json"]) == 0
+    expected = [{**f.as_dict(), "id": f.id, "measure": f.measure} for f in (behind_finding(), ratio_finding())]
+    assert json.loads(capsys.readouterr().out) == json.loads(json.dumps(expected))
+    assert doctor.main([SLUG, "findings", "--detector", "lab"]) == 0
+    assert capsys.readouterr().out.splitlines() == [f"{f.id} {f.summary}" for f in (behind_finding(), ratio_finding())]
+    assert doctor.main([SLUG, "findings", "--detector", "lab", "--detector", "nothing"]) == 1
+    assert "no detector nothing" in capsys.readouterr().err
