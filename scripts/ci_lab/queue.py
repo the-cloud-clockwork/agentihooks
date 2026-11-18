@@ -5,6 +5,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from scripts.ci_lab.outcomes import LOST
 from scripts.ci_lab.units import Unit
 
 __all__ = ["PREFIX", "Job", "Queue", "Requirement"]
@@ -84,7 +85,7 @@ if attempts < tonumber(ARGV[3]) then
   redis.call('SMOVE', KEYS[6], KEYS[7], ARGV[1])
   return 'pending'
 end
-redis.call('HSET', KEYS[1], 'state', 'lost', 'outcome', 'lost', 'token', '')
+redis.call('HSET', KEYS[1], 'state', 'lost', 'outcome', ARGV[4], 'token', '')
 redis.call('SADD', KEYS[5], ARGV[1])
 redis.call('SMOVE', KEYS[6], KEYS[8], ARGV[1])
 return 'lost'
@@ -199,4 +200,4 @@ class Queue:
             _head(job.head, "pending"),
             _head(job.head, "done"),
         ]
-        return str(self._reap(keys=keys, args=[job.id, now_ms, requeues]))
+        return str(self._reap(keys=keys, args=[job.id, now_ms, requeues, LOST]))

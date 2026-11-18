@@ -560,3 +560,13 @@ def test_build_makes_the_pod_worker_from_a_clean_environment_and_refuses_redis()
     assert worker.build({"CI_LAB_SCHEDULER_URL": "http://scheduler:8800"}, executors, "pod-7", 8, 2.0).slots == 2
     with pytest.raises(worker.Refused):
         worker.build({**environ, "REDIS_URL": "redis://redis"}, executors, "pod-7", 8, 6.0)
+
+
+@pytest.mark.feature("lab-unit-outcomes")
+def test_an_executor_answer_with_an_unknown_outcome_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(ValueError) as refused:
+        worker.Finished(outcome="taken", report=tmp_path / "report.json", log=tmp_path / "log.txt")
+
+    assert str(refused.value) == "unknown lab unit outcome 'taken'"
+    kept = worker.Finished(outcome="gate_failed", report=tmp_path / "report.json", log=tmp_path / "log.txt")
+    assert kept.outcome == "gate_failed"
