@@ -66,7 +66,10 @@ def handle(method: str, params: dict) -> dict:
     if method == "tools/list":
         return {"tools": [_tool(name, props, ro) for name, (_, props, ro) in TOOLS.items()]}
     if method == "tools/call":
-        text = TOOLS[params["name"]][0](**params.get("arguments", {}))
+        try:
+            text = TOOLS[params["name"]][0](**params.get("arguments", {}))
+        except TypeError as exc:
+            return {"content": [{"type": "text", "text": f"rejected: {exc}"}], "isError": True}
         return {"content": [{"type": "text", "text": text}], "isError": False}
     return {}
 

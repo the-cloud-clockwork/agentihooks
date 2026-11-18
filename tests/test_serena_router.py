@@ -80,6 +80,57 @@ async def test_each_session_edits_only_its_own_worktree(router, repo):
         assert not (repo["primary"] / "f.txt").exists()
 
 
+@pytest.mark.feature("serena-router-routes-each-call-by-its-carried-root")
+async def test_one_session_routes_each_call_by_the_root_it_carries(router, repo):
+    from hooks.serena_router.binding import ROOT_ARG
+
+    async with connect(router) as session:
+        await session.call_tool("activate_project", {"project": str(repo["a"])})
+        await session.call_tool("activate_project", {"project": str(repo["b"])})
+        edit = await session.call_tool(
+            "replace_content", {"relative_path": "f.txt", "repl": "from-a", ROOT_ARG: str(repo["a"])}
+        )
+        carried_read = await session.call_tool("find_symbol", {ROOT_ARG: str(repo["a"])})
+        session_read = await session.call_tool("find_symbol", {})
+    assert not edit.isError
+    assert _text(edit) == f"OK\n(applied in {repo['a']})"
+    assert (repo["a"] / "f.txt").read_text() == "from-a"
+    assert not (repo["b"] / "f.txt").exists()
+    assert _text(carried_read) == f"root={repo['a']}"
+    assert _text(session_read) == f"root={repo['b']}"
+
+
+@pytest.mark.feature("serena-router-routes-each-call-by-its-carried-root")
+async def test_a_carried_primary_root_refuses_edits_on_a_worktree_session(router, repo):
+    from hooks.serena_router.binding import ROOT_ARG
+
+    async with connect(router) as session:
+        await session.call_tool("activate_project", {"project": str(repo["a"])})
+        edit = await session.call_tool(
+            "replace_content", {"relative_path": "f.txt", "repl": "refused", ROOT_ARG: str(repo["primary"])}
+        )
+    assert edit.isError
+    assert _text(edit) == (
+        f"Refused: replace_content edits files and this session is bound to the primary checkout "
+        f"{repo['primary']}. Activate the absolute path of your worktree first."
+    )
+    assert not (repo["primary"] / "f.txt").exists()
+    assert not (repo["a"] / "f.txt").exists()
+
+
+@pytest.mark.feature("serena-router-routes-each-call-by-its-carried-root")
+async def test_a_carried_root_outside_a_checkout_is_refused(router, repo, tmp_path):
+    from hooks.serena_router.binding import ROOT_ARG
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    async with connect(router) as session:
+        await session.call_tool("activate_project", {"project": str(repo["a"])})
+        result = await session.call_tool("find_symbol", {ROOT_ARG: str(outside)})
+    assert result.isError
+    assert _text(result) == f"{outside} is not inside a git checkout"
+
+
 async def test_child_read_inherits_parent_worktree_without_activation(router, repo):
     parent_meta = {"sessionId": "parent", "threadId": "parent"}
     child_meta = {"sessionId": "parent", "threadId": "child"}
