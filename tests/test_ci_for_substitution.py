@@ -30,6 +30,11 @@ def test_the_clean_fixture_reports_nothing() -> None:
     assert findings((ROOT / CLEAN_FIXTURE).read_bytes()) == []
 
 
+def test_loops_far_down_a_long_script_report_their_exact_lines() -> None:
+    source = b"\n" * 299 + b"for name in $(ls); do :; done\n" * 100
+    assert findings(source) == list(range(300, 400))
+
+
 def test_tracked_shell_files_with_a_substitution_word_list_are_red(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
