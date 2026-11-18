@@ -130,8 +130,8 @@ test('never reports a passing snapshot grade for a failed original grade', async
 for (const conclusion of ['failure', 'cancelled', 'timed_out', 'neutral', 'action_required', 'stale']) {
   test(`fails at once when a job of its own graded run ended ${conclusion}`, async () => {
     const f = fixture();
-    f.jobs.push({ id: 75, run_id: 42, name: 'mutation-stats-seed', status: 'completed', conclusion });
-    await assert.rejects(promote(f), new RegExp(`Graded run jobs did not pass: mutation-stats-seed ${conclusion}$`));
+    f.jobs.push({ id: 75, run_id: 42, name: 'lint', status: 'completed', conclusion });
+    await assert.rejects(promote(f), new RegExp(`Graded run jobs did not pass: lint ${conclusion}$`));
     assert.equal(f.now(), 0);
     assert.equal(f.outputs.main, undefined);
     assert.ok(f.grades.every(grade => grade.state !== 'success'));
@@ -445,7 +445,21 @@ test('never releases a selected grade whose readiness is revoked before merge', 
   assert.equal(f.outputs.main, undefined);
 });
 
-test('fails at once naming a side job already red in the picked newer grade', async () => {
+test('fails at once naming a job already red in the picked newer grade', async () => {
+  const f = batchFixture();
+  const paginate = f.github.paginate;
+  f.github.paginate = async (method, args) => {
+    const result = await paginate(method, args);
+    return method === f.github.rest.actions.listJobsForWorkflowRun && args.run_id === 43 ?
+      [...result, { name: 'lint', run_id: 43, status: 'completed', conclusion: 'cancelled' }] : result;
+  };
+  await assert.rejects(promote(f), /Graded run jobs did not pass: lint cancelled$/);
+  assert.equal(f.now(), 0);
+  assert.ok(f.writes.every(([kind]) => kind !== 'merge'));
+  assert.equal(f.outputs.main, undefined);
+});
+
+test('releases the picked newer grade past an exempt side job it holds red', async () => {
   const f = batchFixture();
   const paginate = f.github.paginate;
   f.github.paginate = async (method, args) => {
@@ -453,10 +467,10 @@ test('fails at once naming a side job already red in the picked newer grade', as
     return method === f.github.rest.actions.listJobsForWorkflowRun && args.run_id === 43 ?
       [...result, { name: 'test-summary', run_id: 43, status: 'completed', conclusion: 'cancelled' }] : result;
   };
-  await assert.rejects(promote(f), /Graded run jobs did not pass: test-summary cancelled$/);
+  await promote(f);
   assert.equal(f.now(), 0);
-  assert.ok(f.writes.every(([kind]) => kind !== 'merge'));
-  assert.equal(f.outputs.main, undefined);
+  assert.equal(f.outputs.graded, newer);
+  assert.equal(f.outputs.main, 'rebased');
 });
 
 test('closes its snapshot when a newer grade becomes ready before merge', async () => {
@@ -600,6 +614,21 @@ for (const outcome of ['queued', 'in_progress', 'failure', 'cancelled', 'timed_o
     await assert.rejects(promote(f));
     assert.deepEqual(f.writes, []);
   });
+}
+
+for (const name of ['mutation-stats-seed', 'test-summary']) {
+  for (const outcome of ['queued', 'in_progress', 'failure', 'cancelled']) {
+    test(`an exempt side job never holds the release: ${name} ${outcome}`, async () => {
+      const f = selfWaitFixture();
+      const pending = outcome === 'queued' || outcome === 'in_progress';
+      const job = { name, status: pending ? outcome : 'completed', conclusion: pending ? null : outcome };
+      f.jobs.push({ id: 75, run_id: 42, ...job });
+      f.checks.push(job);
+      await promote(f);
+      assert.equal(f.now(), 0);
+      assert.equal(f.outputs.main, 'rebased');
+    });
+  }
 }
 
 for (const state of ['pending', 'failure', 'error']) {
@@ -827,5 +856,14 @@ test('waits for every launch hotfix run job to finish before promoting', async (
   };
   await promote(f);
   assert.equal(f.now(), 15000);
+  assert.equal(f.outputs.main, 'rebased');
+});
+
+test('promotes a launch hotfix while an exempt side job still runs', async () => {
+  const f = fixture();
+  hotfixRun(f);
+  f.jobs.push({ id: 75, run_id: 42, name: 'test-summary', status: 'in_progress', conclusion: null });
+  await promote(f);
+  assert.equal(f.now(), 0);
   assert.equal(f.outputs.main, 'rebased');
 });

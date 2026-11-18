@@ -25,10 +25,14 @@ def test_tests_mutation_probes_split_mutants_before_sizing_shards_from_survivors
     assert refine["outputs"]["probe_shards"] == "${{ steps.refine.outputs.probe_shards }}"
     assert probe["needs"] == ["mutation-plan", "mutation-refine"]
     assert probe["if"] == (
-        "${{ !cancelled() && needs.mutation-refine.result == 'success' && "
-        "needs.mutation-refine.outputs.probe == 'true' && needs.mutation-refine.outputs.probe_shards != '' }}"
+        "${{ !cancelled() && (needs.mutation-refine.result == 'success' || (needs.mutation-plan.result == 'success' "
+        "&& needs.mutation-plan.outputs.collected == 'true')) && (needs.mutation-refine.outputs.probe || "
+        "needs.mutation-plan.outputs.probe) == 'true' && (needs.mutation-refine.outputs.probe_shards || "
+        "needs.mutation-plan.outputs.probe_shards) != '' }}"
     )
-    assert probe["strategy"]["matrix"] == {"shard": "${{ fromJSON(needs.mutation-refine.outputs.probe_shards) }}"}
+    assert probe["strategy"]["matrix"] == {
+        "shard": "${{ fromJSON(needs.mutation-refine.outputs.probe_shards || needs.mutation-plan.outputs.probe_shards) }}"
+    }
     probe_steps = {step.get("name"): step for step in probe["steps"]}
     early = probe_steps["Run each mutant's early tests once for every shard"]
     assert early["run"] == (

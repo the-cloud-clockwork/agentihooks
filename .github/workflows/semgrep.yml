@@ -60,6 +60,17 @@ jobs:
           (cd "$copy" && semgrep --metrics off --test --config rules rules)
           semgrep scan --error --strict --metrics off --config "$RUNNER_TEMP/grader/$RULES" --config "$RULES" .
 
+      - name: Outage rules for tests hold on every test file
+        env:
+          RULES: .semgrep-incidents/ledger-client-swapped-for-a-function.yml
+        run: |
+          args=()
+          for rule in $RULES; do
+            args+=(--config "$rule")
+            if [[ -e "$RUNNER_TEMP/grader/$rule" ]]; then args+=(--config "$RUNNER_TEMP/grader/$rule"); fi
+          done
+          semgrep scan --error --strict --metrics off --x-ignore-semgrepignore-files "${args[@]}" tests
+
       - name: Rule exceptions only shrink
         env:
           BASE: ${{ inputs.base }}

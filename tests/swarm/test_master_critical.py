@@ -20,6 +20,7 @@ from scripts.swarm import store as store_module
 from scripts.swarm.status import status_report
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import tick
+from tests.swarm.client_class import client_class
 from tests.swarm.test_tick import FakeRuntime, masters, store, tasks  # noqa: F401
 
 pytestmark = pytest.mark.unit
@@ -149,7 +150,7 @@ def watched(store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
     watched = Watched(store, tmp_path / "fallback.json")
     monkeypatch.setattr(runtime_module, "HerdrRuntime", lambda: watched.herdr)
     monkeypatch.setattr(store_module, "connect", lambda: store)
-    monkeypatch.setattr(ledger_client, "LedgerClient", lambda: watched.seats)
+    monkeypatch.setattr(ledger_client, "LedgerClient", client_class(watched.seats))
     monkeypatch.setattr(master_fallback, "start", watched.start)
     monkeypatch.setattr(master_fallback, "force", watched.force)
     monkeypatch.setattr(master_fallback.time, "time", lambda: watched.at / 1000)

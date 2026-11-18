@@ -214,10 +214,10 @@ An explicit `runpy.run_module("pkg.mod", run_name="__main__")` resolves calls in
 
 ### Parametrized ids that name a deleted file
 
-A lost parametrized case is admitted when its id, the text between the brackets, names a file the head deletes. The id may name the file by its repository path or by its file name when no head file has that name. The name must sit on id boundaries, so `mutation-preflight.yml-stats` names `mutation-preflight.yml` and `premutation-preflight.yml` does not. A name without an extension never matches. A file counts as deleted only when it is gone from its base path and no head file holds the same bytes, so a moved file keeps its cases counted. A deleted file also counts as renamed, and admits nothing, when the head adds any file with the same extension or the same name before its extension, so a file renamed with edits keeps the floor where it was wherever its case moves. In a git checkout only tracked files count, so files a job writes into the workspace neither keep nor rename anything.
+A lost parametrized case is admitted when its id, the text between the brackets, names a file the head deletes. The id may name the file by its repository path or by its file name when no head file has that name. The name must sit on id boundaries, so `nightly-report.yml-stats` names `nightly-report.yml` and `prenightly-report.yml` does not. A name without an extension never matches. A file counts as deleted only when it is gone from its base path and no head file holds the same bytes, so a moved file keeps its cases counted. A deleted file also counts as renamed, and admits nothing, when the head adds any file with the same extension or the same name before its extension, so a file renamed with edits keeps the floor where it was wherever its case moves. In a git checkout only tracked files count, so files a job writes into the workspace neither keep nor rename anything. For a head that deletes `.github/workflows/nightly-report.yml`, the log reads:
 
 ```text
-tests/test_ci_queue_seed.py::test_no_job_waits_on_the_retired_queue_baseline[mutation-preflight.yml-stats] is admitted: its id names .github/workflows/mutation-preflight.yml, which the head deletes
+tests/test_ci_queue_seed.py::test_no_job_waits_on_the_retired_queue_baseline[nightly-report.yml-stats] is admitted: its id names .github/workflows/nightly-report.yml, which the head deletes
 ```
 
 ### Signed retirements
@@ -226,9 +226,9 @@ A lost test of behaviour the pull request removes from a module that survives ha
 
 ```json
 {
-  "tests/test_ci_workflow.py::test_tests_mutation_seeds_the_first_plan_from_the_branch_preflight_kill_memory": {
+  "tests/test_ci_workflow.py::test_nightly_report_uploads_its_summary": {
     "reader": "Standards reader",
-    "reason": "The head removes the branch preflight kill memory seed this test held."
+    "reason": "The head removes the nightly report summary upload this test held."
   }
 }
 ```
@@ -249,7 +249,7 @@ Any other file under `test-retirements/`, a symbolic link included, is named in 
 
 ```text
 test-retirements/0000….json is not a new retirement signed by a Standards reader, so it admits nothing
-tests/test_ci_workflow.py::test_tests_mutation_seeds_the_first_plan_from_the_branch_preflight_kill_memory is admitted: the pull request retires it, signed by Standards reader
+tests/test_ci_workflow.py::test_nightly_report_uploads_its_summary is admitted: the pull request retires it, signed by Standards reader
 ```
 
 ### Deleted keyword branches
