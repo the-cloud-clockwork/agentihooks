@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.1007 · 2026-11-18
+
+### 2026-11-18 · 61ab4184a890 · #11913 · @agenticore-app
+
+**Evaluate post merge testing with automatic revert**
+
+This merge adds a research document, not a code change, answering whether switching to post-merge testing with automatic revert would help dev stability. Using two weeks of real queue data, it concludes no-go: dev is already red 33.4% of the time, and modeling shows post-merge testing would push that to 36–46% while introducing revert blast radius, conflict rates, and bisection overhead. It documents six measurable gates with thresholds and recommends a safe first step—shadow culprit attribution on dev reds—without changing the merge path, so the team can revisit the decision later with evidence instead of guesswork.
+
+### 2026-11-18 · 007dd51863f9 · #11907 · @nestorcolt
+
+**Root hive restarts itself when the primary checkout moves**
+
+The root hive now watches the revision of the primary checkout it loaded at startup, rechecking it between beats whenever no launch order worker is still running. If the checkout has moved on, it logs a message to stderr and exits between beats, letting the unit's Restart=always bring it back up on the new code; an unreadable or unchanged revision just keeps it running. This fixes the bug where a `git pull` into the primary checkout silently left the hive running stale code until someone noticed and restarted it by hand.
+
 ## v2.17.1004 · 2026-11-18
 
 ### 2026-11-18 · 4ac2a06bfdb6 · #11894 · @nestorcolt
