@@ -5,6 +5,7 @@ import secrets
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from scripts.ci_lab.outcomes import COMPLETED
 from scripts.ci_lab.queue import Queue
 from scripts.ci_lab.units import Unit
 
@@ -68,7 +69,9 @@ class Leases:
         return expires_ms if self.queue.extend(job, token, expires_ms) else None
 
     def complete(self, job: str, token: str, outcome: str) -> bool:
-        """Record the outcome of a job whose live lease the token holds."""
+        """Record the outcome of a job whose live lease the token holds, refusing an outcome no worker reports."""
+        if outcome not in COMPLETED:
+            return False
         record = self.queue.job(job)
         return record is not None and self.queue.finish(record, token, outcome)
 

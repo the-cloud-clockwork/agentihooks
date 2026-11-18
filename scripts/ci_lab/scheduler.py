@@ -34,8 +34,9 @@ from scripts.ci_lab.digests import GradeInputs, StaticInputs, Toolchain, grade_k
 from scripts.ci_lab.intake import GradeRequest, admit
 from scripts.ci_lab.leases import Leases
 from scripts.ci_lab.objects import Objects, S3Objects, Uploads, upload_path
+from scripts.ci_lab.outcomes import CANNOT_RUN, DROPPED, FAILED, LOSSES, PASSED
 from scripts.ci_lab.queue import Job, Queue
-from scripts.ci_lab.retry import LOST, Policy, policy
+from scripts.ci_lab.retry import Policy, policy
 from scripts.ci_lab.static_gates import REGISTRY, WORKFLOW, discover
 from scripts.ci_lab.store import PREFIX, Store, Verdict
 from scripts.ci_lab.units import Priority, Unit
@@ -67,11 +68,7 @@ LIVE = f"{PREFIX}grades"
 LANES = f"{PREFIX}lane:"
 WAITING = f"{PREFIX}waiting"
 TREES = f"{PREFIX}tree:"
-PASSED = "passed"
-FAILED = "failed"
-DROPPED = "dropped"
-CANNOT_RUN = "cannot_run"
-UNGRADED = frozenset({*LOST, CANNOT_RUN, DROPPED})
+UNGRADED = frozenset({*LOSSES, CANNOT_RUN, DROPPED})
 FINISHED = frozenset({"done", "lost"})
 REQUIRED = "required"
 EVENTS = ("pull_request", "pull_request", "merge_group", "push", "workflow_dispatch")

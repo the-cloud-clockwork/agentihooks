@@ -4,6 +4,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from scripts.ci_lab.outcomes import LOSSES, PASSED
+
 __all__ = ["Policy", "UnitResult", "decide", "policy", "red"]
 
 
@@ -28,15 +30,13 @@ class UnitResult:
 
 
 DEFAULT = Policy()
-PASSED = "passed"
-LOST = frozenset({"lost", "crash"})
 
 
 def decide(result: UnitResult, rules: Policy = DEFAULT) -> str:
     """Return retry while the result's kind has retries left under the rules, else final."""
     if result.outcome == PASSED:
         return "final"
-    allowed = rules.lost if result.outcome in LOST else rules.failed
+    allowed = rules.lost if result.outcome in LOSSES else rules.failed
     return "retry" if result.attempts < allowed else "final"
 
 

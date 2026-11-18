@@ -7762,6 +7762,7 @@
       "tests": [
         "tests/ci_lab/test_leases.py::test_complete_refuses_an_unknown_outcome_and_records_nothing",
         "tests/ci_lab/test_leases.py::test_complete_records_every_outcome_a_worker_reports",
+        "tests/ci_lab/test_outcomes.py::test_only_the_queue_and_the_scheduler_set_lost_and_dropped",
         "tests/ci_lab/test_scheduler.py::test_an_unknown_outcome_is_refused_on_completion_and_stores_no_verdict",
         "tests/ci_lab/test_worker.py::test_an_executor_answer_with_an_unknown_outcome_is_refused"
       ]

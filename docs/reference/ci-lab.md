@@ -713,7 +713,10 @@ key; the builders are pure and read no file, clock or network.
 5. Expired leases requeue while `lab.retry.lost` of the repository's dev `delivery.yaml` allows (once by
    default); the next loss is `lost`.
 6. Finished jobs are collected: a graded outcome with an uploaded report becomes a verdict in the
-   store; `lost`, `crash` and `cannot_run` stay out of it and make their grade red.
+   store; `lost`, `crash` and `cannot_run` stay out of it and make their grade red. A lease
+   completes only with an outcome `scripts/ci_lab/outcomes.py` lists in `COMPLETED`: `passed`,
+   `failed`, `gate_failed`, `survived`, `crash` or `cannot_run`. Any other outcome is refused
+   with `403`, records nothing and stores no verdict; the lease stays held until it expires.
 7. Check runs move `queued` on receipt, `in_progress` on the first unit a worker starts and
    `completed` on the last, one per gate with units and `required` for the whole grade. A completed
    check run never moves again.
