@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.1001 · 2026-11-18
+
+### 2026-11-18 · bcd43660b476 · #11839 · @nestorcolt
+
+**Add the CI lab reuse audit**
+
+This change adds `scripts/ci_lab/audit.py`, implementing the lab reuse audit behind ledger task `lab-audit`. It regrades the head's suite with no store reuse to catch promotion mismatches, and samples a share of each day's backfill hits to catch drift in cached verdicts. Any mismatch disables reuse for that kind, files a ledger task identifying the affected run, and raises `CILabVerdictMismatch`, while flaky passes and ungraded units are correctly excluded so a single known flake can't disable an entire kind. This protects CI from silently trusting stale cached verdicts.
+
 ## v2.17.999 · 2026-11-18
 
 ### 2026-11-18 · ee636df8f537 · #11875 · @nestorcolt
