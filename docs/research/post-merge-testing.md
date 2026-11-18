@@ -415,6 +415,8 @@ git grep -l -i -E 'git revert|auto[ _-]?revert|culprit' origin/dev -- scripts ho
 
 The commands under [Method](#method) carry this window's dates, sample sizes and derived numbers as literals. A recheck sets each literal in the order below, because every derived number comes from an earlier command's output.
 
+Since this page was written, `python -m scripts.ci_metrics` has landed as an hourly job that writes runner minutes, cancelled runs and lead time to ClickHouse ([CI cost and lead time metrics](../reference/ci-metrics.md)). It has no `report` subcommand and records no failed run count, merge group reject or revert conflict, so a recheck still runs C1 to C11.
+
 | Literal | Where | Set it to |
 |---|---|---|
 | `created=2026-11-04..2026-11-17` | `WINDOW` in the downloads, and again inside the C1 loop | the new first and last UTC day, both included |
