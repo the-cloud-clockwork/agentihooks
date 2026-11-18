@@ -42,7 +42,7 @@ from scripts.ci_lab.delivery import CLASSES
 from scripts.ci_lab.digests import GradeInputs, StaticInputs, Toolchain, digest, grade_key, static_key
 from scripts.ci_lab.intake import GradeRequest
 from scripts.ci_lab.leases import Grant, Leases
-from scripts.ci_lab.manifests import Actions, Fetcher, FetchRefused
+from scripts.ci_lab.manifests import Actions, Fetcher, FetchRefused, FetchUnanswered
 from scripts.ci_lab.objects import LocalObjects, manifest_folder, unit_path, upload_path
 from scripts.ci_lab.outcomes import CRASH
 from scripts.ci_lab.retry import Policy
@@ -965,12 +965,28 @@ def test_a_head_whose_grader_delivery_breaks_its_schema_is_dropped_with_its_reas
     assert run.grades() == []
 
 
-@pytest.mark.feature("lab-manifest-fetch-holds-head")
-def test_a_head_whose_manifest_fetch_github_refuses_waits_until_a_pass_finds_no_manifest(
+@pytest.mark.feature("lab-dev-manifest-fetch")
+def test_a_head_whose_manifest_fetch_github_refuses_is_dropped_with_its_reason(
     lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     run = lab({})
-    refusals = [FetchRefused(f"GET actions/workflows/test.yml/runs answered 502 for {BASE}")]
+
+    def refused(request: GradeRequest) -> scheduler.Plan:
+        raise FetchRefused(f"GET actions/workflows/test.yml/runs answered 404 for {request.base}")
+
+    monkeypatch.setattr(run.lab.expander, "expand", refused)
+    run.push(HEAD_A)
+    assert run.tick(1000)[-1] == f"cannot expand {HEAD_A}: GET actions/workflows/test.yml/runs answered 404 for {BASE}"
+    assert run.lab.client.hgetall(scheduler.WAITING) == {}
+    assert run.grades() == []
+
+
+@pytest.mark.feature("lab-manifest-fetch-holds-head")
+def test_a_head_whose_manifest_fetch_github_answers_with_a_server_error_waits_until_a_pass_finds_no_manifest(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = lab({})
+    refusals = [FetchUnanswered(f"GET actions/workflows/test.yml/runs answered 502 for {BASE}")]
 
     def expand(request: GradeRequest) -> scheduler.Plan:
         if refusals:

@@ -3,7 +3,8 @@
 `fetch` finds the dev push run of the Tests workflow for one commit, lists that run's `dep-manifest-packed` artifact
 and downloads its archive. A commit with no such run or artifact, an expired artifact, an archive GitHub answers is
 gone and a manifest recorded for another commit answer None; a refused or unanswered request or an archive without a
-readable `packed.json` raises `FetchRefused`. `Actions` reads one repository's Actions API with a token the lab's
+readable `packed.json` raises `FetchRefused`, and a request GitHub never answered or answered with a server error raises
+its subclass `FetchUnanswered`. `Actions` reads one repository's Actions API with a token the lab's
 GitHub App scopes to actions read, and `Fetcher` keeps one reader per repository the lab grades.
 """
 
@@ -18,7 +19,7 @@ import requests
 from scripts.ci_lab.checks import Token
 from scripts.github_app import GitHubAppAuth
 
-__all__ = ["ARTIFACT", "PERMISSIONS", "Actions", "FetchRefused", "Fetcher", "GitHub", "fetch"]
+__all__ = ["ARTIFACT", "PERMISSIONS", "Actions", "FetchRefused", "FetchUnanswered", "Fetcher", "GitHub", "fetch"]
 
 API = "https://api.github.com"
 HEADERS = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
@@ -26,6 +27,7 @@ PERMISSIONS = {"actions": "read"}
 TIMEOUT = 30
 OK = 200
 GONE = 410
+SERVER_ERROR = 500
 DEV_PUSH_RUNS_PATH = "actions/workflows/test.yml/runs?event=push&branch=dev&head_sha="
 ARTIFACT = "dep-manifest-packed"
 ARTIFACTS_BY_NAME_QUERY = f"artifacts?name={ARTIFACT}"
@@ -34,6 +36,10 @@ PACKED = "packed.json"
 
 class FetchRefused(ValueError):
     """GitHub refused or never answered a manifest request, or sent an archive without a readable packed manifest."""
+
+
+class FetchUnanswered(FetchRefused):
+    """GitHub never answered a manifest request or answered it with a server error, so a later request may succeed."""
 
 
 class GitHub(Protocol):
@@ -49,9 +55,11 @@ class GitHub(Protocol):
 
 
 def _accepted(response: requests.Response, path: str) -> requests.Response:
-    """Return an answer GitHub accepted, or raise FetchRefused naming the request and its status."""
+    """Return an answer GitHub accepted, or raise FetchRefused naming the request and its status, FetchUnanswered for a
+    server error."""
     if response.status_code != OK:
-        raise FetchRefused(f"GET {path} answered {response.status_code}")
+        refused = FetchUnanswered if response.status_code >= SERVER_ERROR else FetchRefused
+        raise refused(f"GET {path} answered {response.status_code}")
     return response
 
 
@@ -74,7 +82,7 @@ class Actions:
 
     def _get(self, path: str) -> requests.Response:
         """Send one GET under the repository with a fresh token; requests drops it on the archive's storage redirect.
-        A request that fails before GitHub answers it, its token mint included, raises FetchRefused naming it."""
+        A request that fails before GitHub answers it, its token mint included, raises FetchUnanswered naming it."""
         try:
             return requests.get(
                 f"{API}/repos/{self.repo}/{path}",
@@ -82,7 +90,7 @@ class Actions:
                 timeout=TIMEOUT,
             )
         except requests.RequestException as error:
-            raise FetchRefused(f"GET {path} failed: {error}") from error
+            raise FetchUnanswered(f"GET {path} failed: {error}") from error
 
 
 def _read_packed(data: bytes, path: str) -> tuple[bytes, Any]:

@@ -55,7 +55,7 @@ from scripts.ci_lab.delivery import CLASSES, DELIVERY, DELIVERY_SCHEMA, load_run
 from scripts.ci_lab.digests import GradeInputs, StaticInputs, Toolchain, digest, grade_key, static_key
 from scripts.ci_lab.intake import GradeRequest, admit
 from scripts.ci_lab.leases import Leases, release
-from scripts.ci_lab.manifests import Fetcher, FetchRefused
+from scripts.ci_lab.manifests import Fetcher, FetchUnanswered
 from scripts.ci_lab.objects import Objects, S3Objects, Uploads, manifest_folder, upload_path
 from scripts.ci_lab.outcomes import CANNOT_RUN, DROPPED, FAILED, LOSSES, PASSED
 from scripts.ci_lab.pods import Pods, unmanaged, worker_pods
@@ -638,7 +638,8 @@ class Scheduler:
 
     def _release(self, now_ms: int) -> list[str]:
         """Start each held head whose quiet window ended, except one a pause of its class holds. A head whose manifest
-        fetch GitHub refused or never answered waits out the window again; any other expansion failure drops it."""
+        fetch GitHub never answered or answered with a server error waits out the window again; any other expansion
+        failure drops it."""
         actions: list[str] = []
         pauses = control.paused(self.client)
         for name, raw in sorted(self.client.hgetall(WAITING).items()):
@@ -652,7 +653,7 @@ class Scheduler:
             self.client.hdel(WAITING, name)
             try:
                 actions.append(self._start(request, held["lane"], held.get("ref", ""), now_ms))
-            except FetchRefused as error:
+            except FetchUnanswered as error:
                 self.client.hset(WAITING, name, json.dumps({**held, "since": now_ms}))
                 actions.append(f"holding {request.head}: {error}")
             except (
