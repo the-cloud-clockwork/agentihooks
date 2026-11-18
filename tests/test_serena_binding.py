@@ -205,3 +205,22 @@ def test_the_serena_off_switch_records_and_carries_nothing(
     hm.on_pre_tool_use(_payload("find_symbol", {}))
     assert ROOT_ARG not in capsys.readouterr().out
     assert store.hgetall(redis_key("serena_root", SESSION)) == {}
+
+
+def test_a_condition_allow_without_an_input_patch_emits_no_reason_or_input(
+    store: fakeredis.FakeRedis,
+    forced_claude: None,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from hooks.context import conditions
+
+    def allow(_given: dict[str, Any]) -> conditions.PreEffect:
+        return conditions.PreEffect(contexts=[], decision="allow")
+
+    monkeypatch.setattr(conditions, "pre_effect", allow)
+    hm.on_pre_tool_use(_payload("find_symbol", {}))
+    out = json.loads(capsys.readouterr().out.strip())["hookSpecificOutput"]
+    assert out["permissionDecision"] == "allow"
+    assert out.get("permissionDecisionReason", "") == ""
+    assert "updatedInput" not in out
