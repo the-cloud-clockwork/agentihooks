@@ -5875,6 +5875,21 @@
       ]
     },
     {
+      "id": "worker-release-tag-moves-only-for-the-newest-published-release",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2631",
+      "behaviour": "Each release moves the worker image release tag at move time, inside the queued release only hive job, onto its own image unless a newer release has already published its worker version image, and pushes the release tag before the version tag, so an older release whose job finishes after a newer one leaves the tag on the newer; a newer release that is only tagged never holds the tag back, a registry error or a failed tag read fails before any tag moves, a prerelease never moves the tag, and the image job moves no tag from its checkout time newest flag.",
+      "seam": "docker/swarm-node/release.sh release tag move and the Swarm worker image hive job worker release step",
+      "tests": [
+        "tests/contracts/promotion/test_release_images.py::test_the_worker_release_tag_stays_on_the_newer_release_whichever_finishes_last",
+        "tests/contracts/promotion/test_release_images.py::test_a_worker_release_moves_the_release_tag_before_its_version_while_a_newer_release_is_only_tagged",
+        "tests/contracts/promotion/test_release_images.py::test_a_registry_error_on_a_newer_worker_release_fails_before_moving_any_tag",
+        "tests/contracts/promotion/test_release_images.py::test_a_failed_tag_read_fails_the_worker_release_before_moving_any_tag",
+        "tests/contracts/promotion/test_release_images.py::test_a_worker_prerelease_tags_only_its_version_without_reading_tags",
+        "tests/contracts/promotion/test_release_images.py::test_the_queued_hive_job_moves_the_worker_release_tag_and_the_image_job_moves_none"
+      ]
+    },
+    {
       "id": "hive-retire-absence",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1772",
@@ -9563,6 +9578,27 @@
         "tests/ci_lab/test_wheel_imports.py::test_every_lab_module_imports_without_the_tests_package",
         "tests/ci_lab/test_wheel_imports.py::test_an_import_of_the_tests_package_fails_where_the_wheel_is_installed",
         "tests/test_dep_manifest.py::test_the_split_deselects_with_a_grader_that_keeps_the_manifest_under_tests"
+      ]
+    },
+    {
+      "id": "lab-remote-heads",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2645",
+      "behaviour": "A head pushed only to the lab remote grades and relays: the scheduler's expander mirrors and the relay's pusher mirror fetch a sha their GitHub remote lacks from the lab remote AGENTIHOOKS_LAB_REMOTE names when it serves the same repository, sending AGENTIHOOKS_LAB_REMOTE_TOKEN as the basic password of the user lab through git's environment config only. A grade of a head pushed to refs/grade/* keeps the notice's ref, also when the held head arrives again with it, records each check's status and conclusion for the relay and posts no GitHub check run. The relay push token asks contents write and workflows write, so a relayed branch that changes workflow files is accepted.",
+      "seam": "Mirror.fetch over a sha only the lab remote holds, scheduler.build and relay.build mirror wiring, BusInbox.heads over a lab remote notice, Scheduler.tick over a grade ref head, and the GitPusher token request",
+      "tests": [
+        "tests/ci_lab/test_worktrees.py::test_fetch_takes_a_sha_only_the_lab_remote_holds_from_the_lab_remote",
+        "tests/ci_lab/test_worktrees.py::test_fetch_never_asks_a_lab_remote_of_another_repository",
+        "tests/ci_lab/test_worktrees.py::test_a_lab_fetch_sends_the_token_as_the_lab_user_s_basic_password_for_the_lab_url_only",
+        "tests/ci_lab/test_worktrees.py::test_the_lab_remote_comes_from_the_environment_and_never_shows_its_token",
+        "tests/ci_lab/test_scheduler.py::test_a_grade_ref_head_posts_no_check_run_and_keeps_each_check_s_conclusion_for_the_relay",
+        "tests/ci_lab/test_scheduler.py::test_a_grade_ref_head_held_in_its_quiet_window_keeps_its_ref",
+        "tests/ci_lab/test_scheduler.py::test_a_held_head_takes_the_grade_ref_it_arrives_again_with_and_keeps_one_it_holds",
+        "tests/ci_lab/test_scheduler.py::test_a_head_held_before_grade_refs_were_kept_starts_with_no_ref_and_posts",
+        "tests/ci_lab/test_scheduler.py::test_the_bus_inbox_keeps_the_grade_ref_a_lab_remote_notice_names",
+        "tests/ci_lab/test_scheduler.py::test_build_gives_each_expander_mirror_the_lab_remote_the_environment_names",
+        "tests/ci_lab/test_relay.py::test_the_push_token_asks_contents_and_workflows_write",
+        "tests/ci_lab/test_relay.py::test_build_gives_the_pusher_mirror_the_lab_remote_the_environment_names"
       ]
     },
     {
