@@ -1297,7 +1297,13 @@ commit's own changes, and the `pyproject.toml` flag from `ci_select.pyproject_re
 cached test units are the tests of every batch the verdict store answers, a negative verdict
 included, and the entry limit is `interaction.entry_limit` of the grader's `delivery.yaml` lab
 block. The clauses are in the
-[Lab merge group interaction rule](delivery-tiers.md#lab-merge-group-interaction-rule).
+[Lab merge group interaction rule](delivery-tiers.md#lab-merge-group-interaction-rule). Beside the
+batches the rule picks, or every batch on `FULL`, the expander adds one unit per test module in the
+entries' changes that the head holds and the manifest lists no test of, built by
+`expand_tests.unlisted_units`: its member is the module's path and its key is the module's broad
+fingerprint over the head tree, as
+[Test files the manifest does not know](delivery-tiers.md#test-files-the-manifest-does-not-know)
+describes.
 
 Since a push grade folds only the static gates,
 [Post merge testing with automatic revert](../research/post-merge-testing.md) measures the red

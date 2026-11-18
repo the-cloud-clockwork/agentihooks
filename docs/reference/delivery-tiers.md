@@ -377,7 +377,7 @@ For agentibrain-kernel, whose `dev` rules require `Gate — Required` reported b
 
 ## Lab merge group interaction rule
 
-For a `merge_group` head, the lab scheduler calls `scripts.ci_lab.interaction.decide` to choose between the test units the group's entries invalidate and the whole suite. A test unit is a test id of the manifest. The rule is pure. It reads the group's diff against `dev`, each entry's changes from `dev` to its graded tree, the dependency manifest of `scripts.dep_manifest`, the test units with a cached verdict, the entry limit and the `pyproject.toml` flag, which the caller computes with `scripts.ci_select.pyproject_reaches_tests`. It returns the unit set or `FULL`. `full_reason` names the clause that held, checked in this order:
+For a `merge_group` head, the lab scheduler calls `scripts.ci_lab.interaction.decide` to choose between the test units the group's entries invalidate and the whole suite. A test unit is a test id of the manifest. The rule is pure. It reads the group's diff against `dev`, each entry's changes, the dependency manifest of `scripts.dep_manifest`, the test units with a cached verdict, the entry limit and the `pyproject.toml` flag, which the caller computes with `scripts.ci_select.pyproject_reaches_tests`. It returns the unit set or `FULL`. `full_reason` names the clause that held, checked in this order:
 
 | Clause | `FULL` when | Read from |
 |---|---|---|
@@ -387,6 +387,14 @@ For a `merge_group` head, the lab scheduler calls `scripts.ci_lab.interaction.de
 | `cache` | more than half the manifest's test units have no cached verdict | the store lookups for the group head |
 
 When no clause holds, the result is the union of `scripts.dep_manifest.invalidated` over the entries. An entry that changes a global input of the manifest, such as `uv.lock`, invalidates every unit, so the set is then the whole manifest. `tests/ci_lab/test_interaction.py` holds the property cases for each clause and its boundary.
+
+### How the scheduler derives each entry's changes
+
+`scripts.ci_lab.scheduler.MirrorExpander` builds the group from its git mirror. The merge queue stacks each pull request of a group as one commit on the first parent chain from `dev` to the group head, so the scheduler runs `git rev-list --first-parent <base>..<head>` and takes each listed commit as one entry. An entry's changes are `scripts.dep_manifest.changes` between that commit's first parent and the commit itself, so they hold only what that pull request changed, never the entries stacked below it. The group's diff is `scripts.dep_manifest.changes` between the base and the head.
+
+### Test files the manifest does not know
+
+The manifest lists only the tests of the `dev` commit it was stored for, so `scripts.dep_manifest.invalidated` never names a test module an entry adds. For a `merge_group` head the scheduler therefore also adds one test unit per test module in the entries' changes that the head tree holds and the manifest lists no test of, whether the rule chose a unit set or `FULL`. Each such unit's member is the module's path, and `scripts.ci_lab.expand_tests.unlisted_units` keys it as a broad test: on every file under `hooks/`, `scripts/` and `tests/`, the inputs every test shares, the invocation and the toolchain. The test executor records no manifest files for such a member, so every unshared file it opens is listed as outside.
 
 ## Queue shard sizing
 

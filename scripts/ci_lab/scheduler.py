@@ -1088,25 +1088,38 @@ class MirrorExpander:
         if request.tier >= Priority.QUEUE:
             manifest, contents = self._manifest(mirror, request), self._contents(mirror, head)
             suite = expand_tests.units(manifest, contents, head, json.loads(contents.get(DURATIONS, b"{}")), toolchain)
-            gates.setdefault(UNIT_JOBS[0], []).extend(self._tests(mirror, request, grader, manifest, suite))
+            gates.setdefault(UNIT_JOBS[0], []).extend(
+                self._tests(mirror, request, grader, manifest, suite, contents, toolchain)
+            )
             if request.tier >= Priority.PROMOTION:
                 gates.update(self._mutation(mirror, request, manifest, contents))
         tree = self._git(mirror, "rev-parse", f"{request.head}^{{tree}}").strip()
         return frame(request.tier, tree, grader, {job: tuple(units) for job, units in gates.items()})
 
     def _tests(
-        self, mirror: Mirror, request: GradeRequest, grader: str, manifest: dict[str, Any], suite: tuple[Unit, ...]
+        self,
+        mirror: Mirror,
+        request: GradeRequest,
+        grader: str,
+        manifest: dict[str, Any],
+        suite: tuple[Unit, ...],
+        contents: Mapping[str, bytes],
+        toolchain: Toolchain,
     ) -> tuple[Unit, ...]:
         """Return every test batch of the head, or for a merge group head the batches that hold a test its entries
-        invalidate, unless the interaction rule sends the group to the whole suite."""
+        invalidate, unless the interaction rule sends the group to the whole suite, and one unit per test module its
+        entries change that the manifest lists no test of."""
         if request.tier != Priority.QUEUE:
             return suite
+        group = self._group(mirror, request)
         cached = {test for unit in suite if self.verdicts(unit.kind, unit.key) is not None for test in unit.members}
         limit = interaction.entry_limit(_lab_block(self._git(mirror, "show", f"{grader}:{DELIVERY}")))
-        chosen = interaction.decide(self._group(mirror, request), manifest, cached, limit)
+        chosen = interaction.decide(group, manifest, cached, limit)
+        changed = (path for entry in group.entries for path, _, _ in entry)
+        unlisted = expand_tests.unlisted_units(manifest, contents, changed, toolchain)
         if chosen == interaction.FULL:
-            return suite
-        return tuple(unit for unit in suite if chosen.intersection(unit.members))
+            return suite + unlisted
+        return tuple(unit for unit in suite if chosen.intersection(unit.members)) + unlisted
 
     def _manifest(self, mirror: Mirror, request: GradeRequest) -> dict[str, Any]:
         """Return the dependency manifest of the nearest commit on the base's first parent chain that has one stored."""
