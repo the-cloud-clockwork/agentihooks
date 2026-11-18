@@ -993,20 +993,20 @@
    "8701db235e2e771b"
   ]
  },
- "tests/test_credential_guard.py::test_a_boolean_describe_flag_before_a_named_type_passes": {
+ "tests/test_credential_guard.py::test_a_hidden_describe_type_after_any_flag_is_refused": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 11,
+  "texts": [
+   "23abbafacff91842"
+  ]
+ },
+ "tests/test_credential_guard.py::test_a_named_describe_type_after_any_flag_passes": {
   "assertions": 1,
   "calls": 1,
   "cases": 5,
   "texts": [
    "0c85cd31a58dff89"
-  ]
- },
- "tests/test_credential_guard.py::test_a_boolean_describe_flag_leaves_the_hidden_type_to_be_refused": {
-  "assertions": 1,
-  "calls": 2,
-  "cases": 10,
-  "texts": [
-   "23abbafacff91842"
   ]
  },
  "tests/test_credential_guard.py::test_access_env_block_names_the_token_and_the_eval_form": {

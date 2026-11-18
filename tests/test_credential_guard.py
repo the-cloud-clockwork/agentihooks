@@ -489,7 +489,7 @@ def test_get_secret_refusal_offers_the_key_listing_and_not_describe() -> None:
     )
 
 
-DESCRIBE_BOOLEAN_FLAG_COMMANDS = [
+DESCRIBE_FLAG_WORD_REFUSED_COMMANDS = [
     "kubectl describe --show-events $RES db",
     "kubectl describe --recursive $RES db",
     "kubectl describe -R $RES db",
@@ -497,6 +497,7 @@ DESCRIBE_BOOLEAN_FLAG_COMMANDS = [
     "kubectl describe --insecure-skip-tls-verify $RES db",
     "kubectl describe -nprod $RES db",
     "kubectl describe -An $NS $RES db",
+    "kubectl describe -Rn prod $RES db",
     "kubectl describe --as admin $RES db",
     "kubectl describe --chunk-size 500 $RES db",
     "kubectl describe -v 6 $RES db",
@@ -512,8 +513,8 @@ DESCRIBE_FLAG_WORD_ALLOWED_COMMANDS = [
 
 
 @pytest.mark.feature("credential-guard-describe-flag-words")
-@pytest.mark.parametrize("command", DESCRIBE_BOOLEAN_FLAG_COMMANDS)
-def test_a_boolean_describe_flag_leaves_the_hidden_type_to_be_refused(command: str) -> None:
+@pytest.mark.parametrize("command", DESCRIBE_FLAG_WORD_REFUSED_COMMANDS)
+def test_a_hidden_describe_type_after_any_flag_is_refused(command: str) -> None:
     reason = decide({"tool_name": "Bash", "tool_input": {"command": command}})
 
     assert reason == (
@@ -528,7 +529,7 @@ def test_a_boolean_describe_flag_leaves_the_hidden_type_to_be_refused(command: s
 
 @pytest.mark.feature("credential-guard-describe-flag-words")
 @pytest.mark.parametrize("command", DESCRIBE_FLAG_WORD_ALLOWED_COMMANDS)
-def test_a_boolean_describe_flag_before_a_named_type_passes(command: str) -> None:
+def test_a_named_describe_type_after_any_flag_passes(command: str) -> None:
     assert decide({"tool_name": "Bash", "tool_input": {"command": command}}) is None
 
 
