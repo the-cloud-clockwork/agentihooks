@@ -1,0 +1,15 @@
+rules:
+  - id: protected-gate-grades-synthetic-merge
+    languages: [generic]
+    severity: ERROR
+    message: >-
+      A workflow grades the protected gate at GITHUB_SHA. On a pull request that is the synthetic merge, which GitHub
+      can build against a newer dev than the event base the grader checks out. On 15 November protected lint graded
+      such a merge and blamed frozen registry and grader changes already on dev on a pull request behind dev. Grade
+      the pull request head, github.event.pull_request.head.sha, falling back to github.sha outside a pull request.
+    paths:
+      include:
+        - '**/.github/workflows/*.yml'
+        - '**/.github/workflows/*.yaml'
+        - '**/protected-gate-grades-synthetic-merge.test.yaml'
+    pattern-regex: 'scripts\.gate_protected\b[^\n]*--head[= ]+"?(\$GITHUB_SHA\b|\$\{GITHUB_SHA\b|\$\{\{ *github\.sha *\}\})'

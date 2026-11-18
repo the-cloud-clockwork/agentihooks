@@ -173,7 +173,6 @@
   "step seat alarm: no lane",
   "step seat alarm: no writes",
   "step tick master: no effects",
-  "step tick master: no feature",
   "step tick master: no lane",
   "step tick master: no writes"
  ],
@@ -334,7 +333,6 @@
   "step stall watch: no feature",
   "step stall watch: no lane",
   "step status publish: no effects",
-  "step status publish: no feature",
   "step status publish: no writes",
   "step waits end: no effects",
   "step waits end: no feature",

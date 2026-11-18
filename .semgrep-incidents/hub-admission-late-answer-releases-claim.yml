@@ -1,0 +1,21 @@
+rules:
+  - id: hub-admission-late-answer-releases-claim
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A hub admission that finished past its answer budget released the claim it had just written and refused the
+      hive, which withdrew the offer and raised its claim generation, as the ledger does on every change of claimant;
+      on 16 November no urgent ci task kept a live claimant. Keep the claim and answer with the admission; a hive that stopped waiting asks again for the
+      same offer and receives the held admission.
+    paths:
+      include:
+        - /scripts/hub/admission.py
+        - hub-admission-late-answer-releases-claim.py
+    patterns:
+      - pattern-inside: |
+          def _answered(...):
+              ...
+      - pattern-either:
+          - pattern: self.reopen(...)
+          - pattern: self._release(...)
+          - pattern: self._unclaim(...)

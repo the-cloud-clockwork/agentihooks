@@ -1,0 +1,21 @@
+rules:
+  - id: master-recover-drops-the-route
+    languages: [python]
+    severity: ERROR
+    message: >-
+      runtime.recover answers only the pane and harness, so the seat's execution record placed from it alone loses its
+      account and placement and takes the default subscription route kind, and balance and the master card then show an
+      adopted claude ai login master on the token fallback. Keep the record's account, placement and route kind on the
+      placed record.
+    paths:
+      include:
+        - /scripts/tick/steps/masters.py
+        - master-recover-drops-the-route.py
+    patterns:
+      - pattern-inside: |
+          $R = $STORE.execution_occupants(...).get(...)
+          ...
+      - pattern-either:
+          - pattern: $TICK.placed_record($R, $RT.recover(...))
+          - pattern: placed_record($R, $RT.recover(...))
+      - pattern-not-inside: replace($PLACED, ..., account=$R.account, placement=$R.placement, route_kind=$R.route_kind, ...)

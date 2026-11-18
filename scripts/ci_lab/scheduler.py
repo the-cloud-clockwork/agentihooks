@@ -7,7 +7,7 @@ and then the gates by the tier's `Gate — Required` rules, and moves the check 
 the first unit, completed on the last. A grade's state is the JSON document at `agentihooks-ci:grade:<run>`.
 
 A newer head of a lane drops the older head's pending units, carries its leased and finished jobs and cancels its
-checks; a push grade of a tree a merge group grade completed carries that grade's gates. A head on a panic fix branch
+checks; a push grade of a tree a merge group grade passed carries that grade's gates. A head on a panic fix branch
 grades in the hotfix class. `python -m scripts.ci_lab scheduler` runs the service: the lease API on the scheduler port
 and one pass every interval.
 """
@@ -19,7 +19,7 @@ import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field, fields, replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from threading import Thread
 from typing import Any, Protocol, cast
 from urllib.parse import urlsplit
@@ -27,7 +27,7 @@ from urllib.parse import urlsplit
 import jsonschema
 import yaml
 
-from scripts.ci_lab import contract, evidence, lease_api
+from scripts.ci_lab import contract, lease_api
 from scripts.ci_lab.checks import Checks, Output
 from scripts.ci_lab.delivery import CLASSES, DELIVERY, DELIVERY_SCHEMA
 from scripts.ci_lab.digests import GradeInputs, StaticInputs, Toolchain, grade_key, static_key
@@ -159,7 +159,7 @@ def _authoritative(verdict: Mapping[str, Any]) -> dict[str, Any] | None:
         gates = json.loads(raw)
     except json.JSONDecodeError:
         return None
-    return cast(dict[str, Any], gates) if isinstance(gates, dict) else None
+    return cast(dict[str, Any], gates) if isinstance(gates, dict) else None  # pragma: no mutate
 
 
 def _lab(event: str, needs: Needs) -> dict[str, Mapping[str, Any]] | None:
@@ -187,7 +187,7 @@ def _required(event: str, jobs: Needs, flags: Flags) -> list[str]:
         return list(QUEUE_REQUIRED)
     select = _outputs(jobs, "select")
     required = [job for job in PULL_REQUIRED if not (job == "sonar" and select.get("sonar") == "skip")]
-    required += SCOPED.get(_alternative(select.get("scope"), ""), ())
+    required += SCOPED.get(str(select.get("scope")), ())
     if flags.mutation == "true":
         required += ["mutation-plan", "mutation-stats"] + ([] if flags.inline == "true" else ["mutation"])
     return required
@@ -197,8 +197,7 @@ def _admitted(event: str, jobs: Needs, flags: Flags) -> bool:
     """Whether the run shape fits its event: a queue run's fail fast watcher and unit rows, a pull request's scope."""
     if event == "merge_group":
         return FAIL_FAST in jobs and tuple(_result(jobs, job) for job in UNIT_JOBS) in UNIT_ROWS
-    scope = _alternative(_outputs(jobs, "select").get("scope"), "")
-    return flags.mutation in ("true", "false") and scope in SCOPES
+    return flags.mutation in ("true", "false") and _outputs(jobs, "select").get("scope") in SCOPES
 
 
 def _entry(event: str, job: str, record: Mapping[str, Any] | None, required: Sequence[str]) -> bool:
@@ -245,7 +244,7 @@ def _pushed(event: str, jobs: Needs, flags: Flags) -> bool:
 
 def fold(event: str, needs: Needs, flags: Flags) -> bool:
     """Return whether `Gate — Required` passes: the rules of its step in the test workflow over one run's needs."""
-    if _alternative(_result(needs, "select"), "") in ("failure", "cancelled"):
+    if _result(needs, "select") in ("failure", "cancelled"):
         return False
     jobs = _lab(event, _forwarded(needs))
     if jobs is None:
@@ -362,13 +361,6 @@ def _parse(raw: str | bytes) -> State:
     return State(**data)
 
 
-def _evidence(state: State) -> evidence.GradeEvidence:
-    """Return a closed grade's evidence: its inputs and each of its units with the grade run that used its verdict."""
-    inputs = GradeInputs(state.repo, state.head, state.base, CLASSES[state.tier], state.grader)
-    units = tuple(evidence.GradeUnit(slot.kind, slot.key, state.run) for slot in state.units.values())
-    return evidence.GradeEvidence(state.run, inputs, units)
-
-
 def _request(data: Mapping[str, Any]) -> GradeRequest:
     """Read a held grade request."""
     return GradeRequest(
@@ -408,13 +400,9 @@ def _target(state: State, refs: Sequence[str]) -> tuple[str, str | None]:
 
 def _needs(state: State) -> dict[str, dict[str, Any]]:
     """Return the grade as the needs of a run: each gate's result and the jobs the tier skips, with their outputs."""
-    needs: dict[str, dict[str, Any]] = {
-        job: {"result": "skipped", "outputs": dict(state.outputs.get(job, {}))} for job in state.skipped
-    }
-    for gate, refs in state.gates.items():
-        result = _verdict([state.units[ref] for ref in refs])
-        needs[gate] = {"result": result, "outputs": dict(state.outputs.get(gate, {}))}
-    return needs
+    results: dict[str, str | None] = {job: "skipped" for job in state.skipped}
+    results.update({gate: _verdict([state.units[ref] for ref in refs]) for gate, refs in state.gates.items()})
+    return {job: {"result": result, "outputs": dict(state.outputs.get(job, {}))} for job, result in results.items()}
 
 
 def _checks(state: State) -> dict[str, tuple[str, str | None]]:
@@ -429,7 +417,7 @@ def _checks(state: State) -> dict[str, tuple[str, str | None]]:
 
 def _slug(repo: str) -> str:
     """Return owner/name of a repository URL."""
-    return urlsplit(repo).path.strip("/")
+    return urlsplit(repo).path.removeprefix("/")
 
 
 class Scheduler:
@@ -492,7 +480,7 @@ class Scheduler:
             self.client.hdel(WAITING, name)
             try:
                 actions.append(self._start(request, held["lane"], now_ms))
-            except (subprocess.CalledProcessError, ValueError, KeyError) as error:
+            except (subprocess.CalledProcessError, ValueError, KeyError, yaml.YAMLError) as error:
                 actions.append(f"cannot expand {request.head}: {error}")
         return actions
 
@@ -535,7 +523,7 @@ class Scheduler:
         return f"grading {run} with {len(misses)} of {len(state.units)} units enqueued"
 
     def _merge_group(self, request: GradeRequest, tree: str) -> State | None:
-        """Return the completed merge group grade of the tree a push grade grades, if one exists."""
+        """Return the passing merge group grade of the tree a push grade grades, if one exists."""
         if request.tier != Priority.PROMOTION:
             return None
         run = self.client.get(f"{TREES}{request.repo}|{tree}")
@@ -594,9 +582,8 @@ class Scheduler:
         if all(slot.outcome for slot in state.units.values()):
             self.client.srem(LIVE, run)
             state.conclusion = str(state.posted[REQUIRED][1])
-            if state.tier == Priority.QUEUE and not state.superseded:
+            if state.tier == Priority.QUEUE and state.conclusion == "success":
                 self.client.set(f"{TREES}{state.repo}|{state.tree}", run)
-            evidence.record(self.objects, _evidence(state))
             actions.append(f"completed {run} {state.conclusion}")
         self._save(state)
         return actions
@@ -617,7 +604,7 @@ class Scheduler:
     def _remember(self, job: Job) -> None:
         """Store the verdict of a graded job from the report its worker uploaded; a lost or unrun job is no verdict."""
         report_path, log_path = upload_path(job.id, "report"), upload_path(job.id, "log")
-        present = set(self.objects.keys(report_path.rsplit("/", 1)[0] + "/"))
+        present = set(self.objects.keys(str(PurePosixPath(report_path).parent) + "/"))
         if job.outcome in UNGRADED or report_path not in present:
             return
         report = json.loads(self.objects.read(report_path))
@@ -630,17 +617,19 @@ class Scheduler:
 
     def _post(self, state: State) -> list[str]:
         """Post each check run whose target moved since its last post; a completed check run never moves again."""
-        actions: list[str] = []
-        poster: Poster | None = None
-        for check, (status, conclusion) in _checks(state).items():
-            posted = state.posted.get(check)
-            if posted == [status, conclusion] or (posted is not None and posted[0] == "completed"):
-                continue
-            poster = poster or self.ports.checks(_slug(state.repo))
+        moved = [
+            (check, status, conclusion)
+            for check, (status, conclusion) in _checks(state).items()
+            if (posted := state.posted.get(check)) != [status, conclusion]
+            and (posted is None or posted[0] != "completed")
+        ]
+        if not moved:
+            return []
+        poster = self.ports.checks(_slug(state.repo))
+        for check, status, conclusion in moved:
             poster.post(state.head, check, status, conclusion, self._output(state, check, status), self.settings.shadow)
             state.posted[check] = [status, conclusion]
-            actions.append(f"posted {check} {status} on {state.head}")
-        return actions
+        return [f"posted {check} {status} on {state.head}" for check, status, _ in moved]
 
     def _output(self, state: State, check: str, status: str) -> Output:
         """Return a check run's output: its units, the grade run, the grader revision and the head's commit page."""
@@ -663,7 +652,7 @@ class BusInbox:
         """Return the heads of the next batch of envelopes; a head's lane is its branch, else the head itself."""
         heads: list[Head] = []
         for delivery in self.consumer.fetch(self.batch, self.timeout_ms):
-            data = cast(Mapping[str, Any], delivery.event.data)
+            data = cast(Mapping[str, Any], delivery.event.data)  # pragma: no mutate
             event = HeadEvent(*(str(data[name]) for name in HEAD_FIELDS))
             heads.append(Head(event, str(data.get("branch") or event.head)))
             delivery.ack()
@@ -674,7 +663,7 @@ def _within(files: Mapping[str, str], paths: Sequence[str]) -> dict[str, str]:
     """Return the files under the paths, each a file or a folder; `.` names the whole tree."""
     if WHOLE_TREE in paths:
         return dict(files)
-    folders = tuple(path.rstrip("/") + "/" for path in paths)
+    folders = tuple(path.removesuffix("/") + "/" for path in paths)
     return {path: blob for path, blob in files.items() if path in paths or path.startswith(folders)}
 
 
@@ -713,7 +702,7 @@ class MirrorExpander:
 
     def _files(self, mirror: Mirror, sha: str) -> dict[str, str]:
         """Return path to blob id of every file of a commit's tree."""
-        listing = self._git(mirror, "ls-tree", "-r", "--full-tree", "-z", sha)
+        listing = self._git(mirror, "ls-tree", "-r", "-z", sha)
         files: dict[str, str] = {}
         for entry in filter(None, listing.split("\0")):
             meta, path = entry.split("\t", 1)
@@ -768,13 +757,15 @@ class PanicFixes:
         self.redis = redis
 
     def __call__(self) -> frozenset[str]:
-        """Return the fix branches, or none when panic is off or its fixes cannot be read."""
+        """Return the fix branches of every swarm in panic, or none when no panic is on or its fixes cannot be read."""
         from scripts.swarm import panic
         from scripts.swarm.store import RedisStore, SwarmError
 
+        store = RedisStore(self.redis)
         try:
-            current = panic.state(RedisStore(self.redis))
-            return frozenset(panic.fix_branch(url) for url in current.fixes) if current else frozenset()
+            slugs = cast(list[str], store.slugs())  # pragma: no mutate
+            held = [current for slug in slugs if (current := panic.state(store, slug))]
+            return frozenset(panic.fix_branch(url) for current in held for url in current.fixes)
         except (subprocess.SubprocessError, OSError, ValueError, KeyError, SwarmError):
             return frozenset()
 

@@ -1,7 +1,9 @@
+import hashlib
 import json
 import multiprocessing
 import subprocess
 import sys
+import urllib.error
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
@@ -777,6 +779,11 @@ def test_a_tick_whose_ledger_health_probe_fails_releases_its_lock(env, monkeypat
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
     monkeypatch.setattr(cli.outage, "ledger_health", lambda slug, at, probe: False)
+
+    def unreachable(slug: str, timeout: float | None = None) -> None:
+        raise urllib.error.URLError("refused")
+
+    monkeypatch.setattr(cli.ledger_view, "start", unreachable)
     unprobed = cli.ledger_client.LedgerClient()
     assert cli.run_tick(store, "sw", unprobed, rt, FakeHerdr({})) == ["Ledger health probe failed"]
     assert store.redis.get(store.key("sw", "tick-lock")) is None
@@ -829,11 +836,21 @@ def test_as_equals_is_not_mistaken_for_set(env, seat, monkeypatch):
     assert run("sw", "--as=engineer@a1b2c3-0001", "issue", "https://github.com/o/r/issues/1") == 0
 
 
+@pytest.mark.feature("review-state-on-ledger")
 def test_review_closes_on_the_third_round_and_refuses_a_fourth(env, seat, monkeypatch, capsys, tmp_path):
+    _, ledger, _ = env
     monkeypatch.setattr(gate_log, "swarm_home", lambda: tmp_path)
     run("sw", "create", "--repo", "/repo")
     started(env, seat)
     capsys.readouterr()
+    writers, update = [], ledger.update_task
+
+    def recorded(slug, task, fields, *args, **kwargs):
+        if "review_rounds" in fields:
+            writers.append(kwargs["by"])
+        return update(slug, task, fields, *args, **kwargs)
+
+    monkeypatch.setattr(ledger, "update_task", recorded)
     for n in (1, 2):
         assert run("sw", "--as", "engineer@a1b2c3-0001", "review") == 0
         assert json.loads(capsys.readouterr().out) == {"task": "t1", "round": n}
@@ -841,39 +858,27 @@ def test_review_closes_on_the_third_round_and_refuses_a_fourth(env, seat, monkey
     assert json.loads(capsys.readouterr().out) == {"task": "t1", "round": 3, "notice": cli.review_rounds.CLOSED}
     assert run("sw", "--as", "engineer@a1b2c3-0001", "review") == 1
     assert capsys.readouterr().err == f"swarm: task t1 gets no fourth review round. {cli.review_rounds.CLOSED}\n"
+    counted = cli.review_rounds.counts(ledger.rows["t1"])
+    assert (counted, writers) == ({"rounds-before-pr": 3}, ["engineer@a1b2c3-0001"] * 3)
 
 
-@pytest.mark.parametrize("legacy,register_first", [(False, False), (True, False), (True, True)])
-def test_review_budget_keeps_each_pull_requests_rounds(
-    env, seat, monkeypatch, capsys, tmp_path, legacy, register_first
-):
+@pytest.mark.feature("review-state-on-ledger")
+def test_review_spends_the_rounds_the_ledger_task_holds_for_each_pull_request(env, seat, monkeypatch, capsys, tmp_path):
     _, ledger, _ = env
-    read_task = ledger.task
-    monkeypatch.setattr(ledger, "task", lambda slug, task: read_task(slug, task) if slug == "sw" else None)
     monkeypatch.setattr(gate_log, "swarm_home", lambda: tmp_path)
     run("sw", "create", "--repo", "/repo")
     started(env, seat)
     capsys.readouterr()
-    first = "https://github.com/o/r/pull/1"
-    second = "https://github.com/o/r/pull/2"
-    if legacy:
-        for _ in range(3):
-            cli.review_rounds.Budget("sw", "reviews").spend("t1", "rounds", 3)
-    else:
-        ledger.rows["t1"]["pr_url"] = first
-        for n in (1, 2, 3):
-            assert run("sw", "--as", "engineer@a1b2c3-0001", "review") == 0
-            assert json.loads(capsys.readouterr().out)["round"] == n
-    if legacy and register_first:
-        ledger.rows["t1"]["pr_url"] = first
-        assert run("sw", "--as", "engineer@a1b2c3-0001", "review") == 1
-        assert "no fourth review round" in capsys.readouterr().err
-    ledger.rows["t1"].update(pr_url=second, split_pulls=[first, second])
-    assert run("sw", "--as", "engineer@a1b2c3-0001", "review") == 0
-    assert json.loads(capsys.readouterr().out)["round"] == 1
-    ledger.rows["t1"]["pr_url"] = first
+    first, second = "https://github.com/o/r/pull/1", "https://github.com/o/r/pull/2"
+    spent = f"rounds-{hashlib.sha256(first.encode()).hexdigest()}"
+    ledger.rows["t1"].update(pr_url=first, review_rounds={spent: ["a", "b", "c"]})
     assert run("sw", "--as", "engineer@a1b2c3-0001", "review") == 1
     assert "no fourth review round" in capsys.readouterr().err
+    ledger.rows["t1"]["pr_url"] = second
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "review") == 0
+    assert json.loads(capsys.readouterr().out)["round"] == 1
+    later = f"rounds-{hashlib.sha256(second.encode()).hexdigest()}"
+    assert cli.review_rounds.counts(ledger.rows["t1"]) == {spent: 3, later: 1}
 
 
 def test_redis_down_is_a_clear_failure(monkeypatch, capsys):
@@ -2967,13 +2972,13 @@ def test_set_refuses_bad_scaling_settings(env, capsys, pair, reason):
         "https://[::1",
     ],
 )
-def test_set_refuses_an_api_address_that_is_not_a_plain_web_address(env, capsys, value):
+def test_set_refuses_a_lab_address_that_is_not_a_plain_web_address(env, capsys, value):
     store, _, _ = env
     run("sw", "create", "--repo", "/repo")
     before = store.config("sw")
-    assert run("sw", "set", f"api-url={value}") == 1
+    assert run("sw", "set", f"lab-url={value}") == 1
     assert capsys.readouterr().err.strip() == (
-        "swarm: api-url takes an http or https address with a host and no credentials"
+        "swarm: lab-url takes an http or https address with a host and no credentials"
     )
     assert store.config("sw") == before
 

@@ -95,14 +95,16 @@ def launch_claude(binary: str, args: list[str], environ: Mapping[str, str], repo
     from scripts.hive.account_slots import execute
     from scripts.install import _claude_command, _write_route_report
 
+    forced = front_door_route.FORCED in args
+    args = [arg for arg in args if arg != front_door_route.FORCED]
     try:
         title = next((args[index + 1] for index, flag in enumerate(args[:-1]) if flag == "--name"), "")
         front = front_door_route.check(environ.get("AGENTIHOOKS_PROFILE", ""), title, [])
         child, found, number = (_front if front else prepare)(environ, Path.cwd())
     except login.LoginRefused as exc:
-        if front and str(exc) == native_login.EXPIRED:
+        if forced or (front and str(exc) == native_login.EXPIRED):
             print(f"[agenti] claude ai login refused: {exc}", file=sys.stderr)
-            return login.launch_token(binary, args, environ, report)
+            return login.launch_token(binary, args, environ, report, forced=forced)
         raise RoutingError(str(exc)) from exc
     _write_route_report(report, status="routed", account=found, placement="forced")
     print(f"[agenti] account={found} route={ROUTE} slot={number}", flush=True)

@@ -1,0 +1,17 @@
+rules:
+  - id: panic-sweep-spares-only-registered-fixes
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The panic cancel sweep once spared only the fixes a master or the operator registered, so on 17 November the
+      feature suite promotion fixer lost its first CI round 29 seconds after it opened and the coverage ratchet
+      fixer lost two rounds while the master seat stood empty. Pass the registered fixes together with
+      panic.fixers(store), the open promotion and crew fixer branches every swarm's tick pass records.
+    paths:
+      include:
+        - /scripts/swarm/panic.py
+        - /scripts/swarm/cli.py
+        - panic-sweep-spares-only-registered-fixes.py
+    pattern-either:
+      - pattern: cancel_runs($STATE.fixes, ...)
+      - pattern: panic.cancel_runs($STATE.fixes, ...)

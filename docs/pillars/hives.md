@@ -633,7 +633,7 @@ granting each key Redis refused until all five passed gave the list.
 The rest of the list covers records the same commands write through the execution registry, fencing and gate code:
 `lease-cache`, `swarm:state:fencing:*`, `swarm:*:fence:*`, `execution-publishing`, the
 Codex `codex-transport`, `codex-endpoints`, `codex-openings` and `codex-viewers`,
-`stage-covers`, the task gate lifts `gate-lifts:tasks:*`, `gate-lift-drops` and `ledger-ready`.
+`stage-covers`, and the task gate lifts `gate-lifts:tasks:*` and `gate-lift-drops`.
 
 The list also keeps `swarm:*:identity-conflicts`, the key the identity conflict counter used before it moved into
 `swarm:state:counters:*`. Code only reads it, as a fallback when the counters record holds no entry.
@@ -1608,8 +1608,10 @@ A headless hive takes masters only when the operator opts it in, in one of two w
 An opted-in headless hive still comes after every UI hive that fits: placement sorts UI hives before headless ones,
 then within each kind uses two tiers, each tried in `prefer` order:
 
-1. A hive that holds the native interactive login for the master's harness.
-2. A hive with a subscription or api slot for that harness.
+1. A hive that holds the native interactive login for the master's harness. Only the front door seat,
+   `master@<id>` or a master with no seat, considers this tier; see [Backend master seats](#backend-master-seats).
+2. A hive with a subscription or api slot for that harness whose account has a free seat and is not closed. A forced
+   start may take any Claude account's slot when no account has a free seat.
 
 A hive names a subscription slot by its `AH_CC_TOKEN_<slug>` slug; a hosted controller names the same account by
 its Secret key. The two may differ only in `_` against `-`, and master placement treats them as one account. A
@@ -1618,6 +1620,68 @@ worker cap. The hive computes that cap from its own quota reading of the account
 [Claude account load balancing](load-balancing.md), and reports 0 while it has no fresh reading. When the
 reservations on the account already reach the cap, the launch is not started and reports "account reservation is
 full".
+
+#### Backend master seats
+
+A hive's native interactive login is the account a person signed in with `claude` on that machine. The hive reports
+it as the `unrouted` account, with a slot of kind `interactive`. It carries no routed quota token, a master placed
+on it reserves it with a cap of 1, and the front door master holds it. Backend master seats, `master-2@<id>` and up,
+never take it: master placement offers them only the hive's subscription and api slots, so they route on
+`AH_CC_TOKEN_<slug>` accounts like workers. The same seat rule already kept backend seats off a hive's [master
+claude ai login](../reference/account-login.md#master-claude-ai-login).
+
+The controller decides the front door from the launch task's seat alone. A master whose seat is `master@<id>`, or
+that has no seat, is the front door; every other master seat is a backend seat, whatever its hive or route.
+
+For example, the workstation `desk` is a UI hive where the operator ran `claude` once and also gave the daemon one
+`AH_CC_TOKEN_ops` token. An excerpt of `agentihooks hive show desk`:
+
+```json
+{
+  "id": "desk",
+  "ui": "yes",
+  "interactive": {"claude": "unrouted", "codex": ""},
+  "slots": [
+    {"harness": "claude", "account": "ops", "kind": "subscription", "cap": 4},
+    {"harness": "claude", "account": "unrouted", "kind": "interactive", "cap": 6}
+  ],
+  "sessions": {"claude:ops": 1, "claude:unrouted": 0}
+}
+```
+
+With `masters-step` asking for three masters (see [Several master seats](swarm.md#several-master-seats)), the
+seats place as:
+
+| Seat | Hive | Account | Route |
+|---|---|---|---|
+| `master@<id>` | `desk` | `unrouted` | `interactive` |
+| `master-2@<id>` | `desk` | `ops` | `subscription` |
+| `master-3@<id>` | `desk` | `ops` | `subscription` |
+
+`master-2` and `master-3` each reserve one of the four `ops` sessions, beside the worker already on that account.
+When the front door's own launch is refused because the native login's single reservation is still held, it moves to
+the next account with a free seat and never retries the refused login in that launch.
+
+Releases without pull request 11407 offer the native login to every master seat and rank it above the slots. There,
+each backend seat chooses the login the front door already holds, hive admission refuses it on every tick, and a
+swarm that scales to three masters keeps one. The tick's actions read, on every pass:
+
+```text
+master spawn failed in seat master-2@rig-grade-swarm: account reservation is full: account=claude:unrouted sessions=1 cap=1 five_left=None week_left=None
+```
+
+The regression tests `test_a_secondary_master_ignores_a_hive_interactive_login` and
+`test_a_secondary_master_on_a_native_login_hive_is_ordered_on_a_subscription_slot` hold the rule, under the feature
+map entry `master-interactive-login-without-front-gate`. The Semgrep incident rule of the same name flags a native
+login candidate in `place_master` that does not check `front`.
+
+This rule covers placement on hives. A master the controller leaves to the workstation's own herdr server follows
+[Auth fallback and move back](swarm.md#auth-fallback-and-move-back) instead.
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Every tick pass reports `master spawn failed in seat master-2@<id>: account reservation is full: account=claude:<login> sessions=1 cap=1 ...` in its actions, and `swarm status` shows one master while `masters-step` wants more | The controller runs a release from before the front door rule, so backend seats pick the native login the front door holds. | Roll the controller onto a release that carries pull request 11407. |
+| A backend seat waits with `no hive for master advertises a claude slot` while the front door runs | No live hive that takes `master` and lists the repo has a Claude subscription or api slot whose account has a free seat and is not closed. The native login does not count for a backend seat. | Give a UI hive an `AH_CC_TOKEN_<slug>` with quota left, then read `slots` and each `cap` in `agentihooks hive show <hive>`. |
 
 ### Who writes placement
 
@@ -1775,6 +1839,127 @@ The drill proves the path above on a live swarm by removing a hive without warni
 
 Put the commands, the hub line and the timestamps on the task proof.
 
+### Stopping an agent whose work ended
+
+An agent that finishes its task stays at its prompt with its session running, so its hive never sees it exit. The
+hub's `lifecycle` reactor acts only on `execution.exited`, which a hive publishes when the agent's pane dies or when
+the hive honors an execution stop. The tick's `reap` step therefore sends that stop. On every pass it judges each
+agent whose hive recorded its `execution.started`, and for an agent whose work ended it sends the execution stop
+with reason `ended` to that hive in the same pass. It sends the stop whether or not the controller can see the
+agent's pane, because the pane lives on the hive. A pass that reaches its deadline judges no further agent and
+names how many it left for the next pass.
+
+Before [pull request #11464](https://github.com/the-cloud-clockwork/agentihooks/pull/11464) nothing sent that
+stop, so a finished agent kept its seat, its launch slot and its place under its hive's max agents until its pane
+was closed by hand, and a hive full of finished agents admitted no new work. The controller cannot close such a
+pane itself: it runs in its own pod, where its pane lookups fail with `no herdr server is running`.
+
+#### What counts as ended
+
+The reap step sends nothing for an agent in any of these states:
+
+- `awaiting-decision` or `retiring`;
+- a master still `starting`;
+- an agent whose launch acknowledgement is still being collected.
+
+Otherwise the agent's work has ended when any of these holds:
+
+| Condition | Agents it covers |
+|---|---|
+| The agent record reads `finished`, as after the agent's own `swarm done` or `swarm ready` | Every lane, masters included |
+| The task row has `done` set, or its state is `done`, `blocked` or `handoff` | Every lane except the master |
+| The task awaits verify and has no claimant | Every lane except the master |
+| The task's claimant is no longer this agent, because it is empty or names another agent | Every lane except the master, for an agent run by another hive, by a runtime that is not local, or with a recorded host |
+
+An agent whose work has not ended and whose pane the controller lists as live goes through the same idle and revoked
+seat watch as an agent the tick launched. One whose pane the controller cannot list gets no action from the reap
+step; the hub reconciler and the lost hive rules above cover it.
+
+#### The stop and what the tick reports
+
+The stop is an `execution.stop` event published on the swarm's subject ending in `execution.stop.<hive>`, which
+only that hive reads. Its id is `stop:<started event id>`, and its data names the agent, the hive and the reason.
+The first stop sent for a hive creates that hive's durable stop consumer; until then the hive's stop reader finds
+nothing and tries again on its next pass.
+
+| Stop answer | Tick action | Next |
+|---|---|---|
+| `sent` | `sent the stop for <agent> to its hive: its work ended` | The hive reaps the agent. |
+| `pending` | None | The same stop went out less than 120 seconds ago, the bus dedupe window. A pass after the window sends it again while the agent is still seated. |
+| `ended` | None | The execution already ended: its exit is out, or its spoke claim is gone, has left the `started` state it launched under or carries another claim revision. Nothing is sent. |
+| `unknown` | None | No started event on the bus matches the agent's current execution. |
+| `failed (<error>)` | `could not send the stop for <agent>, retrying next tick: failed (<error>)` | The bus refused the stop. The next pass judges the agent again and sends a new stop. |
+
+Every stop the tick sends also prints one line on its stderr, which is the controller log in a cluster install:
+
+```text
+hub execution stop for engineer@<code>-<n> in swarm <slug> after ended: sent
+```
+
+#### How the hive honors the stop
+
+Every hive reads its stops at the start of each lane loop pass, for every `events` swarm, and keeps reading while
+it drains. That loop runs inside `agentihooks hive run` on a worker hive and in the lane spokes on the workstation.
+For each stop it reads, the hive:
+
+1. checks that the stop names an execution this hive started, and acknowledges and ignores any other stop;
+2. reaps the agent's session through its own runtime. A failed reap prints
+   `hive execution stop for <agent> in swarm <slug> could not reap it; retrying`, and the stop comes back after 30
+   seconds until the reap succeeds, up to 100,000 deliveries;
+3. publishes `execution.exited` with id `exited:<started event id>`, `reason` `stopped` and `stop_reason` `ended`.
+   When the execution already ended, because its exit is out or its spoke claim is gone, has left the `started`
+   state it launched under or carries another claim revision, the hive still reaps the agent and publishes nothing
+   more.
+
+The hub's `lifecycle` reactor then acts on that exit for the claim and generation the execution started:
+
+1. It moves the spoke claim to `exiting`.
+2. It removes the agent record, which frees the seat, and in the same Redis transaction releases the hive launch
+   slot and, unless the task's claim authority is held, the task claim.
+3. It settles a task the agent still holds in `claimed` or `pr`: `done` when the task row is done, otherwise `open`
+   with no claimant. It leaves alone a task that waits on a merge, one on a newer claim generation and one in any
+   other state.
+4. It marks the spoke claim `exited`.
+
+The agent leaves `agentihooks swarm <slug> status`, and its seat and launch slot are free for the next launch.
+
+#### Upgrade
+
+Both sides must run current code:
+
+- The controller, or the workstation tick in local mode, needs a release carrying pull request #11464 to send the
+  stop.
+- Each hive service needs a release carrying the execution stop reader. A hive process loads its code when it
+  starts, so a hive service started before its release carried the reader honors no stop until it restarts:
+  `systemctl --user restart agentihooks-hive` on a workstation or VM, a pod roll on Kubernetes.
+
+#### Checking it on a live swarm
+
+```bash
+# One line per stop the controller's reap step sent in the last hour
+kubectl -n <namespace> logs deploy/agentihooks-swarm-controller --since=1h | grep 'hub execution stop for'
+# hub execution stop for engineer@<code>-<n> in swarm <slug> after ended: sent
+
+# Once the hive honored it, the agent is gone from the swarm
+agentihooks swarm <slug> status
+
+# On the hive: reaps that failed and stop reads that failed
+journalctl --user -u agentihooks-hive --since "1 hour ago" | grep 'hive execution stop'
+```
+
+The feature map entry `events-ended-agent-stopped` lists the regression tests for this path. The Semgrep incident
+rule `admitted-ended-agent-unstopped` fails a reap judge for hub admitted agents that returns no action for an agent
+whose work ended.
+
+#### Troubleshooting ended agents
+
+| Symptom | Check | Fix |
+|---|---|---|
+| Finished agents keep their seats and fill a hive's max agents | The controller log for `hub execution stop for <agent>` | No line while finished hub admitted agents are seated: the controller predates pull request #11464; roll it onto a release that carries it. |
+| The controller logs `sent` for the agent after each dedupe window, and the agent stays seated | The hive's log for `hive execution stop` | No line at all: the hive is not reading its stops, because its service predates the stop reader or is not running; restart it as in [Upgrade](#upgrade). The hive logs nothing for a stop it honors, so a quiet log alone proves nothing. `could not reap it; retrying`: the hive's runtime cannot find or reap the session; check herdr on that hive. |
+| The hive logs `hive execution stops for swarm <slug> failed (<error>)` | The error type and message it prints | Fix the cause the error names. A NATS permission error means the hive's bus credential lacks the stop grants: on the workstation root hive, restart the hive service: `hive run` compares the stored root credential's publish and subscribe grant with a fresh mint at start and re-mints it when they differ, logging `hive re-minted the root bus credential in <path>`; a `hive kept the stored root bus credential (<reason>)` line names why it could not, and `agentihooks hive root-bus` mints it by hand. On a member hive, run `agentihooks hive refresh`. |
+| The tick prints `could not send the stop for <agent>, retrying next tick: failed (<error>)` | The error, NATS from the controller and the controller's bus credentials | Fix the bus; the next pass sends the stop again. |
+
 ### Running a spoke
 
 With `AGENTIHOOKS_DEPLOYMENT=distributed`, `agentihooks swarm spoke` runs the master lane spoke on the workstation,
@@ -1795,10 +1980,11 @@ invite; see [The hub and the bus](../reference/deployment-modes.md#the-hub-and-t
 ## Workstation fallback
 
 When no UI hive fits, because none is live, or the live ones lack the repo, or lack both a slot and the interactive
-login for the master's harness, the hive controller leaves the master to the workstation herdr server. It does the
-same when the hive runtime is disabled on the controller. When the controller's own herdr server answers, the
-controller spawns the master there. Otherwise it refuses the launch with "the workstation hive spawns master work"
-followed by the placement reason, and the tick reports that line in its actions.
+login for the master's harness (a slot alone for a [backend seat](#backend-master-seats)), the hive controller
+leaves the master to the workstation herdr server. It does the same when the hive runtime is disabled on the
+controller. When the controller's own herdr server answers, the controller spawns the master there. Otherwise it
+refuses the launch with "the workstation hive spawns master work" followed by the placement reason, and the tick
+reports that line in its actions.
 
 The refusal carries the master placement wait reason after the colon:
 
@@ -1806,7 +1992,7 @@ The refusal carries the master placement wait reason after the colon:
 |---|---|---|
 | `no live hive takes master` | No hive that takes `master` is live: the UI hive's heartbeat is over ninety seconds old, it is draining, or it excludes `master`, and every headless hive excludes it too. | Start or restart `agentihooks hive run` on the UI hive, end its drain, or remove `master` from its `excluded` list. |
 | `no hive for master lists the repo <repo>` | Hives take `master`, but none lists the swarm's repo, under any checkout path or the same remote origin. | Clone the repo on the UI hive; its next heartbeat lists it. See [Matching a repo across machines](#matching-a-repo-across-machines). |
-| `no hive for master advertises a claude slot` | A hive takes `master` and lists the repo, but holds neither the native Claude interactive login nor a Claude subscription or api slot whose account has a free seat and is not closed. | Log the UI hive in with `claude`, or give it a `AH_CC_TOKEN_<slug>` with quota left; `agentihooks hive show <hive>` lists `interactive` and `slots`. |
+| `no hive for master advertises a claude slot` | A hive takes `master` and lists the repo, but holds neither the native Claude interactive login nor a Claude subscription or api slot whose account has a free seat and is not closed. For a backend seat (`master-2@<id>` and up) the native login does not count, so only such a slot fits. | Log the UI hive in with `claude` (front door only), or give it a `AH_CC_TOKEN_<slug>` with quota left; `agentihooks hive show <hive>` lists `interactive` and `slots`. |
 
 For example, a swarm on the workstation `desk` and one Anton pod, where the operator cloned the repo only on the
 pod:
@@ -2404,6 +2590,14 @@ which expires after 45 seconds, so a hive that stopped beating has no report. Th
 | `names` | The agent names the hive's herdr lists. |
 | `process_namespace` | The hive's process namespace. Written only while the hive runs at least one execution. |
 | `pane_ids` | Every pane id herdr lists. Written only while the hive runs at least one execution; `null` when herdr refuses the pane listing or its answer cannot be read. |
+| `admitted` | One entry per execution the hub admitted to this hive that no host target names yet, keyed by execution id: its `generation` and the `pane` this hive's herdr reads for it. |
+
+A worker the hub admitted carries no host target, so the controller has no herdr that can read its pane. The tick
+reads that worker's pane from the `admitted` entry of the hive that admitted it, and counts it idle or working from
+that pane like any local worker; an entry for another generation, or none, reads `unknown`. A worker admitted to the
+hive the tick runs on is read from that hive's own herdr. Both the controller and the hive must run a release that
+carries this report field; until then the worker reads `unknown`, which counts as working and never reaches the idle
+retire.
 
 A worker's execution record names its hive in its runtime target (`host_id`). The tick counts the worker gone,
 and retires it with `its hive pane is gone`, when the report is no older than the worker's launch and one of these

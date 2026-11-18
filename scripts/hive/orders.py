@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 from scripts import serena_router_daemon
 from scripts.hive import placement, registry
 from scripts.scheduler.process_interval import Interval
-from scripts.swarm import launch_check, lease, overlays, prompt, reaper
+from scripts.swarm import launch_check, lease, model_pick, overlays, prompt, reaper
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_workspace
 from scripts.swarm_v2.runtime.base import Outcome, Recovery, SpawnRequest, Status
@@ -280,11 +280,15 @@ class Consumer:
         self.offbeat(order)
 
     def sync_workspaces(self, ttl: int) -> None:
+        """Publishes the work folder of each worker task whose latest execution runs here: the hive its host target
+        names, else the hive on its record, which a hub admission and a session the hive started itself both carry."""
         hosted = [
             (slug, task)
             for slug in self.store.slugs()
             for task, agent in ledger_workspace.latest(self.store.agents(slug)).items()
-            if agent.execution_id and agent.lane != MASTER and agent.runtime_target.get("host_id") == self.hive
+            if agent.execution_id
+            and agent.lane != MASTER
+            and (agent.runtime_target.get("host_id") or agent.hive) == self.hive
         ]
         ledger_workspace.sync(self.store.redis, self.hive, hosted, ttl)
 
@@ -506,11 +510,14 @@ class Consumer:
             worn = overlays.chosen(order.profile, task, config.overlays, ())
         except ValueError as exc:
             return Ack("failed", {}, f"overlays: {exc}")
+        fallback = getattr(config, f"{order.harness}_model")
         task["launch_assignment"] = {
             "profile": order.profile,
             "harness": order.harness,
             "account": self.slot_account(order),
-            "model": agent.model or config.lanes[order.lane].get("model") or getattr(config, f"{order.harness}_model"),
+            "model": model_pick.suited(
+                order.harness, agent.model or config.lanes[order.lane].get("model") or fallback, fallback
+            ),
             "effort": agent.effort or config.effort_min,
             "overlays": list(worn),
         }

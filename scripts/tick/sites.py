@@ -99,10 +99,10 @@ class TickSites:
         return hook_reads.guarded({site: found[site] for site in TICK_HOOK_KEYS}, TICK_HOOK_READS)
 
     def shut(self, step: Step) -> bool:
-        """Return whether ``step`` stays shut: every step once a step held an exception; a tick site past the start
-        once the stopped branch finished the pass, from the site whose hook found a value the tick reads left, and a
-        placement site while the swarm sleeps."""
-        if observe_steps.RAISED in self.box:
+        """Return whether ``step`` stays shut: a step needing a step that raised this pass, directly or through
+        another; a tick site past the start once the stopped branch finished the pass, from the site whose hook found
+        a value the tick reads left, and a placement site while the swarm sleeps."""
+        if steps.fell(self.box, step):
             return True
         if step.group not in TICK_SITES or step.group == START:
             return False

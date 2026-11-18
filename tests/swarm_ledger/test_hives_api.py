@@ -398,14 +398,14 @@ def test_a_redis_drop_after_the_store_opens_answers_storage_error(store, monkeyp
 
 @pytest.mark.parametrize("hive", ["desk", "pod-2.a_b"])
 def test_master_move_runs_the_swarm_master_move_command(hive):
-    from scripts.swarm_ledger.ledger_server import control_argv
+    from scripts.swarm_ledger.api_service import control_argv
 
     assert control_argv({"action": "master_move", "hive": hive}) == ["master", "move", "--to", hive]
 
 
 @pytest.mark.parametrize("body", [{}, {"hive": ""}, {"hive": "-x"}, {"hive": "a b"}, {"hive": 3}])
 def test_master_move_needs_a_hive_id(body):
-    from scripts.swarm_ledger.ledger_server import control_argv
+    from scripts.swarm_ledger.api_service import control_argv
 
     with pytest.raises(ValueError) as caught:
         control_argv({"action": "master_move", **body})

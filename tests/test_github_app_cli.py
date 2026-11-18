@@ -378,3 +378,62 @@ def test_an_unreadable_budget_lets_the_read_run(monkeypatch, failure):
     assert status == 0
     read.assert_called_once()
     execute.assert_called_once()
+
+
+def _budget(monkeypatch: pytest.MonkeyPatch, remaining: int) -> Mock:
+    """Answer the reserve's rate limit read with the remaining calls given."""
+    reply = Mock(
+        headers={"X-RateLimit-Remaining": str(remaining), "X-RateLimit-Limit": "5000", "X-RateLimit-Reset": "1"}
+    )
+    read = Mock(return_value=reply)
+    monkeypatch.setattr(github_app_cli.requests, "get", read)
+    return read
+
+
+@pytest.mark.feature("controller-gh-token-in-process")
+def test_signed_runs_the_wrapped_client_on_the_process_token_over_the_caller_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(github_app_cli, "token", Mock(return_value="fixture"))
+    monkeypatch.setenv("AGENTIHOOKS_SIGNED_PROBE", "outer")
+    read = _budget(monkeypatch, 5000)
+    found = github_app_cli.signed(["gh", "pr", "view", "8"], {"GH_REPO": "o/r"})
+    assert found is not None
+    command, env = found
+    assert command == ["/usr/bin/gh", "pr", "view", "8"]
+    assert env["GH_REPO"] == "o/r"
+    assert env["GH_TOKEN"] == env["GITHUB_TOKEN"] == "fixture"
+    assert env["AGENTIHOOKS_GITHUB_AUTH_READY"] == "1"
+    assert "AGENTIHOOKS_SIGNED_PROBE" not in env
+    assert read.call_args.kwargs["headers"]["Authorization"] == "Bearer fixture"
+
+
+@pytest.mark.feature("controller-gh-token-in-process")
+def test_signed_leaves_a_read_below_the_reserve_to_the_wrapper(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(github_app_cli, "token", Mock(return_value="fixture"))
+    _budget(monkeypatch, 10)
+    assert github_app_cli.signed(["gh", "pr", "view", "8"], {}) is None
+    write = github_app_cli.signed(["gh", "api", "-X", "POST", "repos/o/r/issues"], {})
+    assert write is not None
+    assert write[0] == ["/usr/bin/gh", "api", "-X", "POST", "repos/o/r/issues"]
+
+
+@pytest.mark.feature("controller-gh-token-in-process")
+@pytest.mark.parametrize(
+    "failure",
+    [
+        github_app_cli.GitAuthRefused(github_app_cli.REFUSED),
+        KeyError("GITHUB_APP_ID"),
+        OSError("unreadable"),
+        github_app_cli.jwt.InvalidKeyError("bad key"),
+        github_app_cli.requests.ConnectionError("down"),
+    ],
+    ids=["refused", "missing-setting", "os-error", "bad-key", "network"],
+)
+def test_signed_leaves_a_token_the_process_cannot_mint_to_the_wrapper(
+    monkeypatch: pytest.MonkeyPatch, failure: Exception
+) -> None:
+    monkeypatch.setattr(github_app_cli, "token", Mock(side_effect=failure))
+    read = _budget(monkeypatch, 5000)
+    assert github_app_cli.signed(["gh", "pr", "view", "8"], {}) is None
+    read.assert_not_called()

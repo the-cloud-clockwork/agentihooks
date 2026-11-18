@@ -29,9 +29,15 @@ agentihooks ledger --slug <slug> --as <name> <command> # the agent CLI
 A ledger `<slug>` is a record in the SQLite database `ledgers.sqlite3` in
 `~/development-ledger/` (`$LEDGER_DIR`); no per ledger JSON or HTML file is
 written. The local server (`$LEDGER_PORT`, default 8765) serves the page shell,
-stores every operator and agent edit in that record and streams changes to open
-pages. `agentihooks ledger storage export <slug>` writes the whole ledger as JSON
-on request, and `storage import <file> --slug <slug>` loads one back losslessly.
+its reads and its event stream; the operator's edit on the page is a write, and
+every write (POST, PUT, PATCH, DELETE) goes to a separate ledger API service
+that a front routes to by method, running the same ledger API route code
+against that record (docs/reference/deployment-modes.md,
+docs/reference/service-split.md). An agent's edit through the `agentihooks
+ledger` CLI runs that route code directly in process, with no server round
+trip. `agentihooks ledger storage export <slug>` writes the whole ledger as
+JSON on request, and `storage import <file> --slug <slug>` loads one back
+losslessly.
 
 Use it for a plan with several phases worked across sessions; a single-step task
 needs no ledger.
@@ -350,7 +356,8 @@ In agentihooks `scripts/swarm_ledger/`; `agentihooks ledger` dispatches to them 
 | Script | Purpose | Idempotent |
 |---|---|---|
 | `new_ledger.py` | Validate content and store the new ledger record with a fresh token | Yes (existing ledger untouched) |
-| `ledger_server.py` | `--ensure` / `--serve` / `--stop` the local server; applies page saves and streams changes | Yes |
+| `ledger_server.py` | `--ensure` / `--serve` / `--stop` the local server; serves the page, its reads and its stream of changes | Yes |
+| `api_service.py` | `--serve` the ledger API service; takes every page save (POST, PUT, PATCH, DELETE) and migrates the shared schema at start | Yes |
 | `storage_migration/` | `agentihooks ledger storage export`, `import` and `cutover`: lossless JSON interchange | Import refuses an existing slug without `--replace` |
 | `watch_ledger.py` | Monitor feed: operator changes, seed errors and word-limit warnings, replayable with `--since-rev` | Yes (read-only) |
 | `ledger.py` | Agent CLI: join, status, events, ack, say, comment, phase, followup, scope, retext, edit, delete, audit, time-left, claim, prompt | No (writes are attributed ops) |

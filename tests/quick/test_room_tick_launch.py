@@ -295,6 +295,7 @@ def test_relaunch_starts_the_successor_once_and_marks_the_seat_ready(tmp_path: P
 
     def start(argv: list[str], environ: dict[str, str]) -> int:
         started.append(argv)
+        registry.bind(tmp_path, "eng-1", "w1:p2", "successor")
         return 0
 
     naps: list[float] = []
@@ -377,6 +378,7 @@ def test_a_successor_that_keeps_running_is_watched_the_whole_settle_window_while
 
     def start(argv: list[str], environ: dict[str, str]) -> int:
         started.append("eng-1")
+        registry.bind(tmp_path, "eng-1", "w1:p2", "successor")
         return 0
 
     assert launch.relaunch(tmp_path, "eng-1", {}, bare=bare, start=start, wait_s=0.0, sleep=naps.append) == "started"
@@ -438,6 +440,7 @@ def _ended(folder: Path, eng_state: str) -> tuple[list[tuple[str, str]], list[li
 
     def start(argv: list[str], environ: dict[str, str]) -> int:
         started.append(argv)
+        registry.bind(folder, "eng-1", "w1:p2", "successor")
         return 0
 
     naps: list[float] = []

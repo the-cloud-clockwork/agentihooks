@@ -1,5 +1,6 @@
 import functools
 import http.server
+import importlib
 import inspect
 import json
 import os
@@ -9,13 +10,14 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
 from scripts.swarm import stack_init
+from scripts.swarm_ledger import api_service, server_compose
 from scripts.swarm_ledger import ledger_server as server
-from scripts.swarm_ledger import server_compose
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -80,6 +82,7 @@ def test_an_adopted_folder_uses_the_bundle_even_without_docker_or_the_legacy_fil
     assert not server_compose.adopted(folder, {"AGENTIHOOKS_HOME": str(elsewhere)})
 
 
+@pytest.mark.feature("compose-ledger-start-pulls-image")
 def test_adoption_sends_start_and_stop_to_the_bundle_swarm_service(tmp_path, monkeypatch):
     folder = shared(tmp_path, monkeypatch)
     stack = adopt(tmp_path, folder)
@@ -93,6 +96,7 @@ def test_adoption_sends_start_and_stop_to_the_bundle_swarm_service(tmp_path, mon
     assert server_compose.start(folder, environ, run) == ""
     assert server_compose.stop(folder, environ, run) == ""
     assert [argv for argv, _ in calls] == [
+        stack_init.compose(stack, "pull", "swarm"),
         stack_init.compose(stack, "up", "-d", "swarm"),
         stack_init.compose(stack, "stop", "swarm"),
     ]
@@ -129,7 +133,7 @@ def test_adoption_is_read_from_the_agentihooks_home_the_caller_names(tmp_path, m
         return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
 
     assert server_compose.start(folder, environ, run) == ""
-    assert calls == [stack_init.compose(stack, "up", "-d", "swarm")]
+    assert calls == [stack_init.compose(stack, "pull", "swarm"), stack_init.compose(stack, "up", "-d", "swarm")]
 
 
 def test_an_adoption_of_another_folder_refuses_rather_than_restoring_the_old_service(tmp_path, monkeypatch):
@@ -176,6 +180,7 @@ def test_an_adopted_ledger_restart_never_restores_the_old_service(tmp_path, monk
     spawn.assert_not_called()
     assert calls == [
         stack_init.compose(stack, "stop", "swarm"),
+        stack_init.compose(stack, "pull", "swarm"),
         stack_init.compose(stack, "up", "-d", "swarm"),
     ]
     assert not any(str(server_compose.COMPOSE_FILE) in argv or "ledger" in argv for argv in calls)
@@ -194,6 +199,7 @@ def test_compose_runs_with_the_folder_the_code_and_this_user(tmp_path, monkeypat
     assert server_compose.stop(tmp_path, {"HOME": "/h"}, run) == ""
     compose = ["docker", "compose", "-f", str(server_compose.COMPOSE_FILE)]
     assert [argv for argv, _ in calls] == [
+        [*compose, "pull", "ledger"],
         [*compose, "up", "-d", "ledger"],
         [*compose, "stop", "ledger"],
     ]
@@ -207,7 +213,8 @@ def test_compose_runs_with_the_folder_the_code_and_this_user(tmp_path, monkeypat
         "LEDGER_GID": "5678",
     }
     assert (first["capture_output"], first["text"], first["check"], first["timeout"]) == (True, True, False, 120)
-    assert calls[1][1]["env"]["LEDGER_DIR"] == str(tmp_path)
+    assert calls[1][1] == first
+    assert calls[2][1]["env"]["LEDGER_DIR"] == str(tmp_path)
 
 
 def test_a_failed_or_hung_compose_names_its_error(tmp_path):
@@ -227,6 +234,22 @@ def test_a_failed_or_hung_compose_names_its_error(tmp_path):
     assert server_compose.start(tmp_path, {}, silent) == "docker compose exit code 3"
     assert "timed out" in server_compose.start(tmp_path, {}, hung)
     assert server_compose.stop(tmp_path, {}, missing) == "docker"
+
+
+@pytest.mark.feature("compose-ledger-start-pulls-image")
+def test_a_failed_pull_still_starts_the_service_on_its_local_image(tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+
+    def run(argv: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        refused = "pull" in argv
+        return subprocess.CompletedProcess(
+            argv, int(refused), stdout="", stderr="registry unreachable" if refused else ""
+        )
+
+    assert server_compose.start(tmp_path, {}, run) == ""
+    compose = ["docker", "compose", "-f", str(server_compose.COMPOSE_FILE)]
+    assert calls == [[*compose, "pull", "ledger"], [*compose, "up", "-d", "ledger"]]
 
 
 def test_compose_defaults_reach_the_real_environment_docker_and_runner():
@@ -287,6 +310,26 @@ def test_a_compose_start_that_fails_ends_ensure_with_its_error(compose_server, m
         server.ensure()
 
 
+@pytest.mark.feature("reload-successor-imports-hub-before-ready")
+def test_a_successor_that_cannot_import_the_hub_never_reports_ready(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def announce(payload: bytes = b"") -> None:
+        pytest.fail(f"the successor reported ready before importing the hub: {payload!r}")
+
+    monkeypatch.setattr(server.core, "LEDGER_DIR", tmp_path)
+    monkeypatch.setattr(server.server_handoff, "inherited", lambda: object())
+    monkeypatch.setattr(server.server_handoff, "announce", announce)
+    monkeypatch.setattr(server, "warm_modules", lambda: None)
+    monkeypatch.setattr(server, "warm", lambda: None)
+    monkeypatch.setattr(server, "warm_streams", lambda: [])
+    monkeypatch.setattr(server, "stored", SimpleNamespace(generations=lambda: {}))
+    monkeypatch.delattr(importlib.import_module("scripts.hub"), "projector", raising=False)
+    monkeypatch.setitem(sys.modules, "scripts.hub.projector", None)
+    with pytest.raises(ModuleNotFoundError, match="scripts.hub.projector"):
+        server.serve()
+
+
 def test_a_bare_start_waits_while_the_port_or_the_old_server_is_still_there(tmp_path, monkeypatch):
     monkeypatch.setattr(server.core, "LEDGER_DIR", tmp_path)
     for held, alive in ((True, False), (False, True)):
@@ -337,7 +380,7 @@ def test_a_compose_stop_that_fails_names_its_error(compose_server, monkeypatch):
 
 
 def bare_handler(path, refused=False):
-    handler = server.Handler.__new__(server.Handler)
+    handler = api_service.WriteHandler.__new__(api_service.WriteHandler)
     handler.path = path
     sent = []
     handler.send = lambda code, body, ctype: sent.append((code, body, ctype))

@@ -92,11 +92,11 @@ def test_selection_upload_and_downloads_follow_the_contract():
     plan = jobs["mutation-plan"]
     names = [step.get("name") for step in plan["steps"]]
     contract = _contract()
-    assert contract["if"] == "steps.reuse.outputs.reused != 'true'"
+    assert "if" not in contract
     assert names.index("Size mutation shards from stored timings") < plan["steps"].index(contract)
     upload = plan["steps"][names.index("Upload planned mutation test selection")]
     assert plan["steps"].index(contract) < plan["steps"].index(upload)
-    assert upload["if"] == "steps.reuse.outputs.reused != 'true' && steps.contract.outputs.selection == 'true'"
+    assert upload["if"] == "steps.contract.outputs.selection == 'true'"
     assert upload["with"]["if-no-files-found"] == "error"
     assert plan["outputs"]["selection"] == "${{ steps.contract.outputs.selection || 'false' }}"
     for name in ("mutation-stats", "mutation-shard"):

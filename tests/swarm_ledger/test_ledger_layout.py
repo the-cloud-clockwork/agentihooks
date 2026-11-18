@@ -9,6 +9,7 @@ import pytest
 
 from scripts.swarm_ledger import ledger_layout as layout
 from scripts.swarm_ledger import ledger_server as server
+from tests.swarm_ledger.ledger_front import Front
 
 core = layout.core
 
@@ -31,7 +32,7 @@ def fresh():
 
 @pytest.fixture(scope="module")
 def port():
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), Front)
     threading.Thread(target=httpd.serve_forever, args=(0.01,), daemon=True).start()
     yield httpd.server_address[1]
     httpd.shutdown()

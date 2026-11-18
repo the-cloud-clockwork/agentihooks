@@ -9,7 +9,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import replace
 from functools import partial
 from pathlib import Path
-from time import monotonic, time
+from time import monotonic, sleep, time
 from types import ModuleType
 from typing import TYPE_CHECKING, Any, NoReturn
 
@@ -601,11 +601,21 @@ def _stopped(signum: int, frame: object) -> None:
     _halt()
 
 
+def _tick_wait(seconds: float) -> None:
+    """Wait ``seconds`` on the scheduler timer, or on the local clock when Redis refuses the timer, so the pass loop's
+    Redis grace window and not the wait decides whether a Redis outage ends the controller."""
+    try:
+        scheduled_wait(seconds)
+    except store_errors() as exc:
+        print(f"controller: the scheduled wait failed, waiting on the local clock: {exc}", file=sys.stderr)
+        sleep(seconds)
+
+
 def _cadence_wait(started: float) -> None:
     """Wait out the rest of one tick from the pass start, so passes start one tick apart."""
     left = lease.tick_ms() / 1000 - (monotonic() - started)
     if left > 0:
-        scheduled_wait(left)
+        _tick_wait(left)
 
 
 def _pass(store: RedisStore, service: "ControlService | None", proof_swarm: ModuleType) -> None:
@@ -650,7 +660,7 @@ def _reached(outage: redis_grace.Outage) -> RedisStore:
             if not outage.tolerated():
                 raise
             print(f"controller: {exc}; retrying after one tick inside the Redis grace window", file=sys.stderr)
-            scheduled_wait(lease.tick_ms() / 1000)
+            _tick_wait(lease.tick_ms() / 1000)
             continue
         outage.ended()
         return store
@@ -666,20 +676,38 @@ def _lead(
     store: RedisStore,
     environ: Mapping[str, str],
     lock: replica.ReplicaLock,
-    wait: Callable[[float], None] = scheduled_wait,
+    wait: Callable[[float], None] = _tick_wait,
 ) -> None:
-    """Stand by behind the replica leading this hive's passes, then take the lead and keep it renewed."""
+    """Stand by behind the replica leading this hive's passes, through any Redis outage, then take the lead and keep
+    it renewed."""
     from scripts.swarm_v2 import control_service
 
     servers = control_service.stand_by(environ, store)
     try:
-        if not lock.take():
-            print(f"controller: replica {lock.owner} stands by while {lock.holder()} leads", flush=True)
-            lock.lead(wait)
+        while not _took_the_lead(lock, wait):
+            pass
     finally:
         control_service.close(servers)
     print(f"controller: replica {lock.owner} leads the passes", flush=True)
     lock.beat(_lost, STOPPING)
+
+
+def _took_the_lead(lock: replica.ReplicaLock, wait: Callable[[float], None]) -> bool:
+    """Stand by until this replica takes the lock; on a Redis error wait one stand by poll and answer False, so a Redis
+    outage keeps the standby standing by instead of ending it into restart back off while no replica leads."""
+    try:
+        if not lock.take():
+            print(f"controller: replica {lock.owner} stands by while {lock.holder()} leads", flush=True)
+            lock.lead(wait)
+    except store_errors() as exc:
+        print(
+            f"controller: replica {lock.owner} stands by through a Redis error, "
+            f"trying again after {replica.POLL_S:.0f}s: {exc}",
+            file=sys.stderr,
+        )
+        wait(replica.POLL_S)
+        return False
+    return True
 
 
 def _lost(end: Callable[[int], None] = os._exit) -> None:
@@ -722,7 +750,7 @@ def _passes(
             _journal_pass(number, "ledger_unreachable")
             if once:
                 return 1
-            scheduled_wait(lease.tick_ms() / 1000)
+            _tick_wait(lease.tick_ms() / 1000)
             continue
         except store_errors() as exc:
             if not outage.tolerated():
@@ -734,7 +762,7 @@ def _passes(
             _journal_pass(number, "redis_grace")
             if once:
                 return 1
-            scheduled_wait(lease.tick_ms() / 1000)
+            _tick_wait(lease.tick_ms() / 1000)
             continue
         outage.ended()
         redis_grace.cleared(redis_grace.marker(os.environ))
@@ -801,7 +829,10 @@ def main(argv: list[str]) -> int:
         if service is not None:
             service.stop()
         if lock is not None:
-            lock.release()
+            try:
+                lock.release()
+            except store_errors() as exc:
+                print(f"controller: releasing the replica lock failed, it lapses on its own: {exc}", file=sys.stderr)
         if bus is not None:
             bus.close()
         for number, handler in previous.items():

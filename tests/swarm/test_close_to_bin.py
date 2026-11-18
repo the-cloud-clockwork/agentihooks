@@ -1,4 +1,4 @@
-from scripts.swarm.ledger_client import LedgerClient, _ledger
+from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.tick import tick
 from tests.swarm.test_lifetime import idle_master
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
@@ -42,13 +42,14 @@ def test_a_closed_ledger_waits_for_its_master_to_leave(store):
 
 
 def test_the_client_bins_a_closed_ledger_and_reopen_takes_it_out(monkeypatch):
-    _ledger()
-    import ledger_bin
+    from scripts.swarm_ledger import storage
+    from scripts.swarm_ledger.repository import bin_storage
 
+    storage.default().create("sw", {"title": "t", "overview": "o", "phases": [{"title": "p"}]})
     calls, client = [], LedgerClient()
     monkeypatch.setattr(client, "_call", lambda slug, ops=None: calls.append(ops[0]["op"]) or {})
-    monkeypatch.setattr(ledger_bin, "bin_closed", lambda slug, closed_at: calls.append(("bin", slug, closed_at)))
-    monkeypatch.setattr(ledger_bin, "restore", lambda slug: calls.append(("restore", slug)))
+    monkeypatch.setattr(bin_storage, "bin_closed", lambda slug, closed_at: calls.append(("bin", slug, closed_at)))
+    monkeypatch.setattr(bin_storage, "restore", lambda slug: calls.append(("restore", slug)))
     client.bin_closed("sw", 5)
     client.reopen("sw", "operator")
     assert calls == [("bin", "sw", 5), "reopen", ("restore", "sw")]

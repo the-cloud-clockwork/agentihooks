@@ -9,7 +9,7 @@ from scripts.swarm import ledger_client
 def sent(monkeypatch):
     ops = []
 
-    def call(slug, batch, service):
+    def call(slug, batch):
         ops.extend((slug, op) for op in batch)
         return {"rejected": []}
 
@@ -33,7 +33,7 @@ def test_clear_priority_sends_its_reason_as_the_swarm(sent):
 def test_clear_priorities_sends_every_clear_as_the_swarm_in_bounded_batches(monkeypatch: pytest.MonkeyPatch) -> None:
     batches: list[tuple[str, list[dict[str, object]]]] = []
 
-    def call(slug: str, batch: list[dict[str, object]], service: bool) -> dict[str, list[object]]:
+    def call(slug: str, batch: list[dict[str, object]]) -> dict[str, list[object]]:
         batches.append((slug, batch))
         return {"rejected": []}
 

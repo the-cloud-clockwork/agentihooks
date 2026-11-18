@@ -16,6 +16,7 @@ from scripts.swarm import (
     refresh_job,
 )
 from scripts.swarm.store import RedisStore, SwarmConfig
+from tests.swarm.client_class import client_class
 
 REFRESH_SPAWN = True
 
@@ -197,10 +198,12 @@ def test_now_ms_is_the_wall_clock_in_milliseconds(monkeypatch):
     assert refresh_job.now_ms() == 12345
 
 
-def test_main_runs_the_job_for_its_swarm_and_prints_each_action(store, monkeypatch, capsys):
+def test_main_runs_the_job_for_its_swarm_and_prints_each_action(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     ledger, seen = Ledger(), []
     monkeypatch.setattr(refresh_job, "connect", lambda: store)
-    monkeypatch.setattr(ledger_client, "LedgerClient", lambda: ledger)
+    monkeypatch.setattr(ledger_client, "LedgerClient", client_class(ledger))
     monkeypatch.setattr(refresh_job, "now_ms", lambda: 7)
     monkeypatch.setattr(refresh_job, "run", lambda *args: seen.append(args) or ["one", "two"])
     assert refresh_job.main(["sw"]) == 0
@@ -208,9 +211,11 @@ def test_main_runs_the_job_for_its_swarm_and_prints_each_action(store, monkeypat
     assert capsys.readouterr().out == "sw: one\nsw: two\n"
 
 
-def test_main_prints_nothing_when_another_job_holds_the_lock(store, monkeypatch, capsys):
+def test_main_prints_nothing_when_another_job_holds_the_lock(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     monkeypatch.setattr(refresh_job, "connect", lambda: store)
-    monkeypatch.setattr(ledger_client, "LedgerClient", lambda: Ledger())
+    monkeypatch.setattr(ledger_client, "LedgerClient", Ledger)
     monkeypatch.setattr(refresh_job, "run", lambda *args: None)
     assert refresh_job.main(["sw"]) == 0
     assert capsys.readouterr().out == ""

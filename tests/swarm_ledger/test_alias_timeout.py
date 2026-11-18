@@ -10,6 +10,7 @@ from redis.exceptions import TimeoutError
 from scripts.swarm_ledger import ledger_server as server
 from scripts.swarm_ledger import new_ledger
 from tests.swarm_ledger import legacy_page  # noqa: E402
+from tests.swarm_ledger.ledger_front import Front
 
 
 @pytest.fixture
@@ -27,7 +28,7 @@ def ledger_page(monkeypatch, tmp_path):
     redis.hget.side_effect = TimeoutError("Timeout reading from socket")
     redis.hmget.side_effect = TimeoutError("Timeout reading from socket")
     monkeypatch.setattr("hooks._redis.get_redis", lambda: redis)
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), Front)
     thread = threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.01})
     thread.start()
     try:

@@ -680,7 +680,7 @@ jobs:
         if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
         id: download-the-dev-durations
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &select-download-the-dev-durations
           name: durations-merged
           path: ~/dev-durations
@@ -697,14 +697,14 @@ jobs:
 
       - name: Download the dev durations, attempt 2
         if: steps.download-the-dev-durations.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *select-download-the-dev-durations
 
       - name: Download the dispatched base's coverage baseline
         if: github.event_name == 'workflow_dispatch'
         id: download-the-dispatched-bases-coverage-baseline
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &select-download-the-dispatched-bases-coverage-baseline
           name: coverage-baseline
           path: ~/coverage-baseline
@@ -721,7 +721,7 @@ jobs:
 
       - name: Download the dispatched base's coverage baseline, attempt 2
         if: steps.download-the-dispatched-bases-coverage-baseline.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *select-download-the-dispatched-bases-coverage-baseline
 
       - name: Check out the upload action for artifact republishing
@@ -822,17 +822,28 @@ jobs:
           QUIET: ${{ vars.AGENTIHOOKS_CI_QUIET_SECONDS }}
           PULL: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          UPDATED_AT: ${{ github.event.pull_request.updated_at }}
         run: |
           whole='^(0|[1-9][0-9]?)$'
           if [[ ! "$QUIET" =~ $whole ]] || [[ "$QUIET" -gt 60 ]]; then
             echo "::error::AGENTIHOOKS_CI_QUIET_SECONDS must be whole seconds from 0 to 60, not $QUIET"
             exit 1
           fi
-          deadline=$((SECONDS + QUIET))
-          while [[ "$SECONDS" -lt "$deadline" ]]; do
+          [[ "$QUIET" -gt 0 ]] || exit 0
+          stamp='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
+          if [[ ! "$UPDATED_AT" =~ $stamp ]] || ! changed="$(date -d "$UPDATED_AT" +%s)"; then
+            echo "::error::Cannot read when pull request $PULL last changed from '$UPDATED_AT'"
+            exit 1
+          fi
+          now="$(date +%s)"
+          age=$((now - changed))
+          [[ "$age" -ge 0 ]] || age=0
+          echo "Pull request $PULL last changed at $UPDATED_AT, $age seconds before the hold"
+          deadline=$((SECONDS + QUIET - age))
+          while true; do
             pause=$((deadline - SECONDS))
             [[ "$pause" -le 5 ]] || pause=5
-            sleep "$pause"
+            [[ "$pause" -le 0 ]] || sleep "$pause"
             if ! head="$(timeout 20 git -C "$GITHUB_WORKSPACE" ls-remote origin "refs/pull/$PULL/head")"; then
               echo "::error::Cannot read the head of pull request $PULL from origin"
               exit 1
@@ -842,6 +853,7 @@ jobs:
               echo "::error::The head moved to $head inside the quiet window; the run for that head grades it"
               exit 1
             fi
+            [[ "$SECONDS" -lt "$deadline" ]] || break
           done
 
       - name: Select the tests the change reaches
@@ -965,6 +977,7 @@ jobs:
         name: Install dependencies
         if: steps.venv.outputs.cache-hit != 'true'
         env:
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
           PYTHON_PATH: ${{ steps.python.outputs.python-path }}
         run: |
           uv venv --python "$PYTHON_PATH" "$HOME/venv"
@@ -1240,6 +1253,7 @@ jobs:
       - name: Install dependencies
         if: github.event_name == 'push' && env.UNIT_SOURCE == '' && steps.venv.outputs.cache-hit != 'true'
         env:
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
           PYTHON_PATH: ${{ steps.python.outputs.python-path }}
         run: |
           uv venv --python "$PYTHON_PATH" "$HOME/venv"
@@ -1377,7 +1391,7 @@ jobs:
         if: needs.select.outputs.source != ''
         id: restore-the-queue-split-inputs
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &split-restore-the-queue-split-inputs
           name: split-${{ matrix.python-version }}
           run-id: ${{ needs.select.outputs.source }}
@@ -1392,14 +1406,14 @@ jobs:
 
       - name: Restore the queue split inputs, attempt 2
         if: steps.restore-the-queue-split-inputs.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *split-restore-the-queue-split-inputs
 
       - name: Restore the queue collected tests
         if: needs.select.outputs.source != ''
         id: restore-the-queue-collected-tests
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &split-restore-the-queue-collected-tests
           name: collected-${{ matrix.python-version }}
           run-id: ${{ needs.select.outputs.source }}
@@ -1414,7 +1428,7 @@ jobs:
 
       - name: Restore the queue collected tests, attempt 2
         if: steps.restore-the-queue-collected-tests.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *split-restore-the-queue-collected-tests
 
       - name: Upload the chosen durations
@@ -1570,7 +1584,7 @@ jobs:
         if: *reused-coverage
         id: download-this-shards-dev-coverage
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &unit-download-this-shards-dev-coverage
           name: coverage-${{ matrix.python-version }}-${{ matrix.shard }}
           run-id: ${{ needs.split.outputs.run }}
@@ -1586,7 +1600,7 @@ jobs:
 
       - name: Download this shard's dev coverage, attempt 2
         if: steps.download-this-shards-dev-coverage.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *unit-download-this-shards-dev-coverage
 
       # Sonar and the ratchet grade the whole suite, so the reused tests carry their dev coverage and page captures.
@@ -1657,7 +1671,7 @@ jobs:
         if: needs.split.outputs.source != ''
         id: restore-queue-shard-durations
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &unit-restore-queue-shard-durations
           name: durations-${{ matrix.python-version }}-${{ fromJSON(needs.split.outputs.queue_legs)[format('{0}', matrix.shard)] }}
           run-id: ${{ needs.split.outputs.source }}
@@ -1672,14 +1686,46 @@ jobs:
 
       - name: Restore queue shard durations, attempt 2
         if: steps.restore-queue-shard-durations.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        id: restore-queue-shard-durations-attempt-2
+        uses: actions/download-artifact@v8.0.2
         with: *unit-restore-queue-shard-durations
+
+      - name: Restore torn queue shard durations again
+        if: &unfinished-queue-durations needs.split.outputs.source != '' && steps.restore-queue-shard-durations.outputs.download-path == '' && steps.restore-queue-shard-durations-attempt-2.outputs.download-path == ''
+        id: restore-torn-queue-shard-durations
+        continue-on-error: true
+        uses: actions/download-artifact@v8.0.2
+        with: *unit-restore-queue-shard-durations
+
+      - name: Restore torn queue shard durations again, wait before attempt 2
+        if: steps.restore-torn-queue-shard-durations.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Restore torn queue shard durations again failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Restore torn queue shard durations again, attempt 2
+        if: steps.restore-torn-queue-shard-durations.outcome == 'failure'
+        id: restore-torn-queue-shard-durations-attempt-2
+        uses: actions/download-artifact@v8.0.2
+        with: *unit-restore-queue-shard-durations
+
+      - name: Check the queue shard durations restored again
+        if: *unfinished-queue-durations
+        env:
+          RESTORED: ${{ steps.restore-torn-queue-shard-durations.outputs.download-path }}${{ steps.restore-torn-queue-shard-durations-attempt-2.outputs.download-path }}
+        run: |
+          if [[ -z "$RESTORED" ]]; then
+            echo "::error::Restoring the queue shard durations again also stopped before the download finished; the restored durations are incomplete."
+            exit 1
+          fi
+          echo "::warning::Restore queue shard durations stopped before the download finished, so its partial files were restored again in full."
 
       - name: Restore queue shard flakes
         if: needs.split.outputs.source != '' && fromJSON(needs.split.outputs.queue_legs || '{}')[format('{0}', matrix.shard)] == matrix.shard
         id: restore-queue-shard-flakes
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &unit-restore-queue-shard-flakes
           name: flakes-${{ matrix.python-version }}-${{ matrix.shard }}
           run-id: ${{ needs.split.outputs.source }}
@@ -1694,14 +1740,46 @@ jobs:
 
       - name: Restore queue shard flakes, attempt 2
         if: steps.restore-queue-shard-flakes.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        id: restore-queue-shard-flakes-attempt-2
+        uses: actions/download-artifact@v8.0.2
         with: *unit-restore-queue-shard-flakes
+
+      - name: Restore torn queue shard flakes again
+        if: &unfinished-queue-flakes needs.split.outputs.source != '' && fromJSON(needs.split.outputs.queue_legs || '{}')[format('{0}', matrix.shard)] == matrix.shard && steps.restore-queue-shard-flakes.outputs.download-path == '' && steps.restore-queue-shard-flakes-attempt-2.outputs.download-path == ''
+        id: restore-torn-queue-shard-flakes
+        continue-on-error: true
+        uses: actions/download-artifact@v8.0.2
+        with: *unit-restore-queue-shard-flakes
+
+      - name: Restore torn queue shard flakes again, wait before attempt 2
+        if: steps.restore-torn-queue-shard-flakes.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Restore torn queue shard flakes again failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Restore torn queue shard flakes again, attempt 2
+        if: steps.restore-torn-queue-shard-flakes.outcome == 'failure'
+        id: restore-torn-queue-shard-flakes-attempt-2
+        uses: actions/download-artifact@v8.0.2
+        with: *unit-restore-queue-shard-flakes
+
+      - name: Check the queue shard flakes restored again
+        if: *unfinished-queue-flakes
+        env:
+          RESTORED: ${{ steps.restore-torn-queue-shard-flakes.outputs.download-path }}${{ steps.restore-torn-queue-shard-flakes-attempt-2.outputs.download-path }}
+        run: |
+          if [[ -z "$RESTORED" ]]; then
+            echo "::error::Restoring the queue shard flakes again also stopped before the download finished; the restored flakes are incomplete."
+            exit 1
+          fi
+          echo "::warning::Restore queue shard flakes stopped before the download finished, so its partial files were restored again in full."
 
       - name: Restore queue shard coverage
         if: needs.split.outputs.source != '' && matrix.python-version == '3.12'
         id: restore-queue-shard-coverage
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &unit-restore-queue-shard-coverage
           name: coverage-${{ matrix.python-version }}-${{ fromJSON(needs.split.outputs.queue_legs)[format('{0}', matrix.shard)] }}
           run-id: ${{ needs.split.outputs.source }}
@@ -1716,8 +1794,40 @@ jobs:
 
       - name: Restore queue shard coverage, attempt 2
         if: steps.restore-queue-shard-coverage.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        id: restore-queue-shard-coverage-attempt-2
+        uses: actions/download-artifact@v8.0.2
         with: *unit-restore-queue-shard-coverage
+
+      - name: Restore torn queue shard coverage again
+        if: &unfinished-queue-coverage needs.split.outputs.source != '' && matrix.python-version == '3.12' && steps.restore-queue-shard-coverage.outputs.download-path == '' && steps.restore-queue-shard-coverage-attempt-2.outputs.download-path == ''
+        id: restore-torn-queue-shard-coverage
+        continue-on-error: true
+        uses: actions/download-artifact@v8.0.2
+        with: *unit-restore-queue-shard-coverage
+
+      - name: Restore torn queue shard coverage again, wait before attempt 2
+        if: steps.restore-torn-queue-shard-coverage.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Restore torn queue shard coverage again failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Restore torn queue shard coverage again, attempt 2
+        if: steps.restore-torn-queue-shard-coverage.outcome == 'failure'
+        id: restore-torn-queue-shard-coverage-attempt-2
+        uses: actions/download-artifact@v8.0.2
+        with: *unit-restore-queue-shard-coverage
+
+      - name: Check the queue shard coverage restored again
+        if: *unfinished-queue-coverage
+        env:
+          RESTORED: ${{ steps.restore-torn-queue-shard-coverage.outputs.download-path }}${{ steps.restore-torn-queue-shard-coverage-attempt-2.outputs.download-path }}
+        run: |
+          if [[ -z "$RESTORED" ]]; then
+            echo "::error::Restoring the queue shard coverage again also stopped before the download finished; the restored coverage is incomplete."
+            exit 1
+          fi
+          echo "::warning::Restore queue shard coverage stopped before the download finished, so its partial files were restored again in full."
 
       - name: Empty the test reports of a leg above the queue's shard count
         if: needs.split.outputs.source != '' && fromJSON(needs.split.outputs.queue_legs || '{}')[format('{0}', matrix.shard)] != matrix.shard
@@ -1776,25 +1886,6 @@ jobs:
           retention-days: 7
           after-cancel: true
 
-      - name: Record flaky tests
-        if: ${{ !cancelled() }}
-        shell: bash
-        run: |
-          touch flakes.jsonl
-          echo "Tests retried in place: $(wc -l < flakes.jsonl)" | tee -a "$GITHUB_STEP_SUMMARY"
-          jq -r '"\(.outcome) after \(.attempts) attempts: \(.test)"' flakes.jsonl | tee -a "$GITHUB_STEP_SUMMARY"
-          jq -r 'select(.outcome == "flaky") | "::warning title=Flaky test::\(.test) passed on attempt \(.attempts) in run \(.run)"' flakes.jsonl
-          jq -r 'select(.crashes) | "::warning title=Worker crash::\(.test) crashed its worker \(.crashes) time(s) in run \(.run)"' flakes.jsonl
-
-      - name: Upload the flake report
-        if: ${{ !cancelled() }}
-        uses: ./.github/actions/retry-upload
-        with:
-          name: flakes-${{ matrix.python-version }}-${{ matrix.shard }}
-          path: flakes.jsonl
-          if-no-files-found: error
-          retention-days: 14
-
       - name: Check the coverage database
         if: matrix.python-version == '3.12'
         run: |
@@ -1815,6 +1906,25 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
+
+      - name: Record flaky tests
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          touch flakes.jsonl
+          echo "Tests retried in place: $(wc -l < flakes.jsonl)" | tee -a "$GITHUB_STEP_SUMMARY"
+          jq -r '"\(.outcome) after \(.attempts) attempts: \(.test)"' flakes.jsonl | tee -a "$GITHUB_STEP_SUMMARY"
+          jq -r 'select(.outcome == "flaky") | "::warning title=Flaky test::\(.test) passed on attempt \(.attempts) in run \(.run)"' flakes.jsonl
+          jq -r 'select(.crashes) | "::warning title=Worker crash::\(.test) crashed its worker \(.crashes) time(s) in run \(.run)"' flakes.jsonl
+
+      - name: Upload the flake report
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/retry-upload
+        with:
+          name: flakes-${{ matrix.python-version }}-${{ matrix.shard }}
+          path: flakes.jsonl
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Summarize the executed lines
         if: matrix.python-version == '3.12'
@@ -1938,7 +2048,7 @@ jobs:
       - name: Download the selected legs
         id: download-the-selected-legs
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &unit-selected-download-the-selected-legs
           name: selection
           path: ${{ runner.temp }}/selection
@@ -1952,7 +2062,7 @@ jobs:
 
       - name: Download the selected legs, attempt 2
         if: steps.download-the-selected-legs.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *unit-selected-download-the-selected-legs
 
       - name: Read this leg's test paths
@@ -2188,35 +2298,25 @@ jobs:
       - *python
 
       - name: Download collected tests
-        id: shard-data
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with: &shard-check-download-collected-tests
-          pattern: "{collected,reused-tests}-${{ matrix.python-version }}"
-          path: shard-data
+        uses: ./.github/actions/retry-download
+        with:
+          name: collected-${{ matrix.python-version }}
+          path: collected-data
+          verify: >-
+            python3 -c 'import json, sys; from pathlib import Path; [json.loads(Path(path).read_text()) for path in sys.argv[1:]]' collected-data/collected.json
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
 
-      - name: Download collected tests, wait before attempt 2
-        if: steps.shard-data.outcome == 'failure'
-        shell: bash
-        run: |
-          echo "::warning::Download collected tests failed, as an artifact service outage does; retrying it once in 30 seconds."
-          sleep 30
-
-      - name: Download collected tests, attempt 2
-        if: steps.shard-data.outcome == 'failure'
-        uses: actions/download-artifact@v4
-        with: *shard-check-download-collected-tests
-
-      - name: Arrange shard verification data
-        shell: bash
-        env:
-          PYTHON_VERSION: ${{ matrix.python-version }}
-          REUSED: ${{ needs.split.outputs.reused }}
-        run: |
-          mv "shard-data/collected-$PYTHON_VERSION" collected-data
-          if [[ -n "$REUSED" && "$REUSED" != '0' ]]; then
-            mv "shard-data/reused-tests-$PYTHON_VERSION" reused-plan
-          fi
+      - name: Download the tests this run reuses
+        if: needs.split.outputs.reused != '' && needs.split.outputs.reused != '0'
+        uses: ./.github/actions/retry-download
+        with:
+          name: reused-tests-${{ matrix.python-version }}
+          path: reused-plan
+          verify: >-
+            python3 -c 'import json, sys; from pathlib import Path; [json.loads(Path(path).read_text()) for path in sys.argv[1:]]' reused-plan/reused-tests.json
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
 
       - name: Mint the tcc main ci App token
         id: app-token
@@ -2247,7 +2347,7 @@ jobs:
       - name: Download shard reports
         id: shard-reports
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &shard-check-download-shard-reports
           pattern: "{durations,flakes}-${{ matrix.python-version }}-*"
           path: shard-reports
@@ -2261,7 +2361,7 @@ jobs:
 
       - name: Download shard reports, attempt 2
         if: steps.shard-reports.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *shard-check-download-shard-reports
 
       - name: Require every planned shard report
@@ -2283,7 +2383,7 @@ jobs:
         id: branch-plan
         if: needs.split.outputs.branch != '' && needs.split.outputs.branch != '0'
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &shard-check-download-the-pull-request-runs-test-plan
           name: reused-branch-${{ matrix.python-version }}
           path: branch-plan
@@ -2297,7 +2397,7 @@ jobs:
 
       - name: Download the pull request runs' test plan, attempt 2
         if: steps.branch-plan.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *shard-check-download-the-pull-request-runs-test-plan
 
       - name: Check every collected test ran in exactly one shard
@@ -2324,10 +2424,9 @@ jobs:
 
   sonar:
     if: ${{ !cancelled() && needs.select.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' && needs.select.outputs.sonar != 'skip' && fromJSON(needs.lab-verdict.outputs.authoritative || '{}')['sonar'] != true }}
-    # Waits for the shards' coverage through needs; the API that could poll for it has an hourly quota every run shares.
-    needs: [unit, unit-selected, select, reuse, admission, lab-verdict]
+    needs: [select, reuse, admission, lab-verdict]
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
-    timeout-minutes: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && 30 || 15 }}
+    timeout-minutes: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && 75 || 60 }}
     outputs:
       analysis: ${{ steps.gate.outputs.analysis }}
     env:
@@ -2376,46 +2475,6 @@ jobs:
         if: steps.source.outputs.test_only != 'true'
         run: python -m pip install --constraint .github/test-requirements.lock "coverage>=7.4" PyYAML==6.0.3
 
-      - name: Download shard coverage
-        if: needs.select.outputs.scope != 'none'
-        id: download-shard-coverage
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with: &sonar-download-shard-coverage
-          pattern: ${{ needs.select.outputs.scope == 'selected' && '{coverage,branch-coverage}-3.12-*' || 'coverage-3.12-*' }}
-          path: .coverage-shards
-
-      - name: Download shard coverage, wait before attempt 2
-        if: steps.download-shard-coverage.outcome == 'failure'
-        shell: bash
-        run: |
-          echo "::warning::Download shard coverage failed, as an artifact service outage does; retrying it once in 30 seconds."
-          sleep 30
-
-      - name: Download shard coverage, attempt 2
-        if: steps.download-shard-coverage.outcome == 'failure'
-        uses: actions/download-artifact@v4
-        with: *sonar-download-shard-coverage
-
-      - name: Take each selected leg's latest branch coverage
-        if: needs.select.outputs.scope == 'selected'
-        run: |
-          shopt -s nullglob
-          declare -A latest
-          for folder in .coverage-shards/branch-coverage-3.12-*; do
-            [[ "$folder" =~ branch-coverage-3\.12-([0-9]+)-([0-9]+)$ && -f "$folder/.coverage" ]] || continue
-            if (( BASH_REMATCH[2] > ${latest[${BASH_REMATCH[1]}]:-0} )); then latest[${BASH_REMATCH[1]}]=${BASH_REMATCH[2]}; fi
-          done
-          for leg in "${!latest[@]}"; do
-            shard=".coverage-shards/coverage-3.12-$leg"
-            uploaded=$(cat "$shard/coverage-attempt" 2>/dev/null || echo 0)
-            if (( latest[$leg] > uploaded )); then
-              rm -rf "$shard"
-              mv ".coverage-shards/branch-coverage-3.12-$leg-${latest[$leg]}" "$shard"
-            fi
-          done
-          rm -rf .coverage-shards/branch-coverage-3.12-*
-
       - name: Mint the token that reads the pull request runs' coverage
         id: app-token
         if: &branch-carry github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.select.outputs.scope != 'none' && steps.source.outputs.test_only != 'true'
@@ -2430,7 +2489,7 @@ jobs:
         id: download-the-pull-request-runs-test-plan
         if: *branch-carry
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &sonar-download-the-pull-request-runs-test-plan
           pattern: "{reused-branch,reused}-3.12"
           path: ${{ runner.temp }}/branch-plan
@@ -2444,7 +2503,7 @@ jobs:
 
       - name: Download the pull request runs' test plan, attempt 2
         if: steps.download-the-pull-request-runs-test-plan.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *sonar-download-the-pull-request-runs-test-plan
 
       # The protected base's code filters the earlier runs' coverage, so a change cannot move it onto its own lines.
@@ -2464,6 +2523,46 @@ jobs:
             --plan "$RUNNER_TEMP/branch-plan/reused-branch-3.12/reused-branch.json" \
             --deselected "$RUNNER_TEMP/branch-plan/reused-3.12/reused.json" \
             --repo "$GITHUB_WORKSPACE" --out "$GITHUB_WORKSPACE/.coverage-shards"
+
+      - name: Take each shard's coverage as it lands
+        if: needs.select.outputs.scope != 'none' && steps.source.outputs.test_only != 'true'
+        continue-on-error: true
+        timeout-minutes: 45
+        uses: actions/github-script@v7
+        env:
+          SHARDS: ${{ needs.select.outputs.scope == 'selected' && needs.select.outputs.count || 20 }}
+          SCOPE: ${{ needs.select.outputs.scope }}
+          ARRIVALS: ${{ github.workspace }}/.github/coverage/arrivals.py
+        with:
+          github-token: none
+          script: |
+            require('child_process').execFileSync('python', [process.env.ARRIVALS], {stdio: 'inherit'})
+
+      - name: Take each selected leg's latest branch coverage
+        if: needs.select.outputs.scope == 'selected'
+        env:
+          COUNT: ${{ needs.select.outputs.count }}
+        run: |
+          shopt -s nullglob
+          if [[ "$COUNT" == 1 && -f .coverage-shards/.coverage ]]; then
+            mv .coverage-shards .coverage-lone
+            mkdir .coverage-shards
+            mv .coverage-lone .coverage-shards/coverage-3.12-1
+          fi
+          declare -A latest
+          for folder in .coverage-shards/branch-coverage-3.12-*; do
+            [[ "$folder" =~ branch-coverage-3\.12-([0-9]+)-([0-9]+)$ && -f "$folder/.coverage" ]] || continue
+            if (( BASH_REMATCH[2] > ${latest[${BASH_REMATCH[1]}]:-0} )); then latest[${BASH_REMATCH[1]}]=${BASH_REMATCH[2]}; fi
+          done
+          for leg in "${!latest[@]}"; do
+            shard=".coverage-shards/coverage-3.12-$leg"
+            uploaded=$(cat "$shard/coverage-attempt" 2>/dev/null || echo 0)
+            if (( latest[$leg] > uploaded )); then
+              rm -rf "$shard"
+              mv ".coverage-shards/branch-coverage-3.12-$leg-${latest[$leg]}" "$shard"
+            fi
+          done
+          rm -rf .coverage-shards/branch-coverage-3.12-*
 
       # The merge runs while the proxy starts; the scan waits for it below.
       - name: Merge shard coverage
@@ -2701,7 +2800,7 @@ jobs:
       - name: Download shard coverage
         id: download-shard-coverage
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &dep-manifest-download-shard-coverage
           pattern: coverage-3.12-*
           path: .coverage-shards
@@ -2715,7 +2814,7 @@ jobs:
 
       - name: Download shard coverage, attempt 2
         if: steps.download-shard-coverage.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *dep-manifest-download-shard-coverage
 
       - name: Check the shard coverage downloads
@@ -2731,7 +2830,7 @@ jobs:
         id: redownload-shard-coverage
         if: steps.check-shard-coverage.outcome == 'failure'
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *dep-manifest-download-shard-coverage
 
       - name: Download torn shard coverage again, wait before attempt 2
@@ -2743,7 +2842,7 @@ jobs:
 
       - name: Download torn shard coverage again, attempt 2
         if: steps.redownload-shard-coverage.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *dep-manifest-download-shard-coverage
 
       - name: Check the shard coverage downloaded again
@@ -2966,10 +3065,12 @@ jobs:
 
       - name: Require trusted actors before private runner admission
         if: ${{ !cancelled() }}
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           if [[ -f "$RUNNER_TEMP/grader/scripts/ci_runner_trust.py" ]]; then
             cd "$RUNNER_TEMP/grader"
-            python -m scripts.gate_protected --head "$GITHUB_SHA"
+            python -m scripts.gate_protected --head "$HEAD_SHA"
           else
             python -m scripts.ci_runner_trust
           fi
@@ -3216,13 +3317,12 @@ jobs:
       - name: Artifact sanity checks
         if: ${{ !cancelled() && steps.artifacts.outputs.browser == 'true' }}
         run: |
-          checker="$RUNNER_TEMP/grader/scripts/swarm_ledger/artifact_sanity.py"
-          if [[ -f "$checker" ]] && grep -q -- '"--pages"' "$checker"; then
-            cd "$RUNNER_TEMP/grader"
-            python -m scripts.swarm_ledger.artifact_sanity --pages "$GITHUB_WORKSPACE/scripts/swarm_ledger" "$GITHUB_WORKSPACE"/tests/fixtures/artifacts/*
-          else
-            python -m scripts.swarm_ledger.artifact_sanity tests/fixtures/artifacts/*
+          if ! grep -qs -- '"--pages"' "$RUNNER_TEMP/grader/scripts/swarm_ledger/artifact_sanity.py"; then
+            echo "::error::The protected grader carries no artifact sanity checker with the pages option, so nothing trusted can grade the head viewer page and assets."
+            exit 1
           fi
+          cd "$RUNNER_TEMP/grader"
+          python -m scripts.swarm_ledger.artifact_sanity --pages "$GITHUB_WORKSPACE/scripts/swarm_ledger" "$GITHUB_WORKSPACE"/tests/fixtures/artifacts/*
 
       - name: Plant only when the mutation gate or an input it reads changed
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
@@ -3241,6 +3341,8 @@ jobs:
 
       - name: Install the mutation gate for its self plant
         if: ${{ !cancelled() && steps.self-plant.outputs.changed == 'true' }}
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
         run: uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
 
       - name: Prove the mutation gate kills with the real test and fails with a weakened one
@@ -3439,7 +3541,7 @@ jobs:
         if: steps.base-run.outcome == 'success'
         id: download-the-base-baseline-its-run-published
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &coverage-ratchet-download-the-base-baseline-its-run-published
           name: coverage-baseline
           path: ~/coverage-baseline
@@ -3456,14 +3558,14 @@ jobs:
 
       - name: Download the base baseline its run published, attempt 2
         if: steps.download-the-base-baseline-its-run-published.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *coverage-ratchet-download-the-base-baseline-its-run-published
 
       - name: Download the queue base coverage baseline
         if: github.event_name == 'workflow_dispatch'
         id: download-the-queue-base-coverage-baseline
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &coverage-ratchet-download-the-queue-base-coverage-baseline
           name: queue-coverage-baseline
           path: ~/coverage-baseline
@@ -3477,7 +3579,7 @@ jobs:
 
       - name: Download the queue base coverage baseline, attempt 2
         if: steps.download-the-queue-base-coverage-baseline.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *coverage-ratchet-download-the-queue-base-coverage-baseline
 
       - name: Check out the base grader
@@ -3500,7 +3602,7 @@ jobs:
         if: steps.grader.outputs.input == '--head-summaries'
         id: download-the-executed-lines-summaries
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &coverage-ratchet-download-the-executed-lines-summaries
           pattern: executed-lines-3.12-*
           path: head-coverage
@@ -3514,14 +3616,14 @@ jobs:
 
       - name: Download the executed lines summaries, attempt 2
         if: steps.download-the-executed-lines-summaries.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *coverage-ratchet-download-the-executed-lines-summaries
 
       - name: Download shard coverage
         if: steps.grader.outputs.input == '--head-shards'
         id: download-shard-coverage
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &coverage-ratchet-download-shard-coverage
           pattern: coverage-3.12-*
           path: head-coverage
@@ -3535,7 +3637,7 @@ jobs:
 
       - name: Download shard coverage, attempt 2
         if: steps.download-shard-coverage.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *coverage-ratchet-download-shard-coverage
 
       - name: Hold every line the base ran
@@ -3652,7 +3754,7 @@ jobs:
             echo "::error::Test selection $selection; fix selection before downstream test and coverage checks."
             exit 1
           fi
-          NEEDS=$(jq 'if ."mutation-plan".result == "success" and ."mutation-plan".outputs.forwarded == "true" and ."mutation-stats".result == "skipped" then ."mutation-stats".result = "success" else . end' <<< "$NEEDS")
+          NEEDS=$(jq 'if ."mutation-plan".result == "success" and (."mutation-plan".outputs.forwarded == "true" or ."mutation-plan".outputs.collected == "true") and ."mutation-stats".result == "skipped" then ."mutation-stats".result = "success" else . end' <<< "$NEEDS")
           if ! NEEDS=$(jq -c --arg event "${EVENT:-}" '
             (."lab-verdict" // {"result": "success"}) as $verdict
             | ($verdict.outputs.authoritative // "" | if . == "" then {} else fromjson end) as $authoritative
@@ -3715,47 +3817,26 @@ jobs:
           sparse-checkout-cone-mode: false
           persist-credentials: false
 
-      - name: Download this run's test durations
+      - name: Download this run's test reports
         if: ${{ always() }}
-        id: download-this-runs-test-durations
+        id: download-this-runs-test-reports
         continue-on-error: true
-        uses: actions/download-artifact@v4
-        with: &test-summary-download-this-runs-test-durations
-          pattern: durations-3.*
+        uses: actions/download-artifact@v8.0.2
+        with: &test-summary-download-this-runs-test-reports
+          pattern: "{durations,flakes}-3.*"
           path: test-reports
 
-      - name: Download this run's test durations, wait before attempt 2
-        if: steps.download-this-runs-test-durations.outcome == 'failure'
+      - name: Download this run's test reports, wait before attempt 2
+        if: steps.download-this-runs-test-reports.outcome == 'failure'
         shell: bash
         run: |
-          echo "::warning::Download this run's test durations failed, as an artifact service outage does; retrying it once in 30 seconds."
+          echo "::warning::Download this run's test reports failed, as an artifact service outage does; retrying it once in 30 seconds."
           sleep 30
 
-      - name: Download this run's test durations, attempt 2
-        if: steps.download-this-runs-test-durations.outcome == 'failure'
-        uses: actions/download-artifact@v4
-        with: *test-summary-download-this-runs-test-durations
-
-      - name: Download this run's test flakes
-        if: ${{ always() }}
-        id: download-this-runs-test-flakes
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with: &test-summary-download-this-runs-test-flakes
-          pattern: flakes-3.*
-          path: test-reports
-
-      - name: Download this run's test flakes, wait before attempt 2
-        if: steps.download-this-runs-test-flakes.outcome == 'failure'
-        shell: bash
-        run: |
-          echo "::warning::Download this run's test flakes failed, as an artifact service outage does; retrying it once in 30 seconds."
-          sleep 30
-
-      - name: Download this run's test flakes, attempt 2
-        if: steps.download-this-runs-test-flakes.outcome == 'failure'
-        uses: actions/download-artifact@v4
-        with: *test-summary-download-this-runs-test-flakes
+      - name: Download this run's test reports, attempt 2
+        if: steps.download-this-runs-test-reports.outcome == 'failure'
+        uses: actions/download-artifact@v8.0.2
+        with: *test-summary-download-this-runs-test-reports
 
       - name: Summarize this run's tests
         if: ${{ always() }}
@@ -3784,6 +3865,8 @@ jobs:
           enable-cache: false
 
       - name: Install duration collection dependencies
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
         run: uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Restore recent shard durations
@@ -3798,7 +3881,7 @@ jobs:
       - name: Download this run's shard durations
         id: download-this-runs-shard-durations
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &refresh-durations-download-this-runs-shard-durations
           pattern: durations-3.*
           path: ~/durations-samples/${{ github.run_id }}
@@ -3812,7 +3895,7 @@ jobs:
 
       - name: Download this run's shard durations, attempt 2
         if: steps.download-this-runs-shard-durations.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *refresh-durations-download-this-runs-shard-durations
 
       - name: Refresh measured durations
@@ -3936,7 +4019,7 @@ jobs:
       - name: Download this run's flake reports
         id: download-this-runs-flake-reports
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &flake-budget-download-this-runs-flake-reports
           pattern: flakes-3.*
           path: ~/flake-reports
@@ -3950,7 +4033,7 @@ jobs:
 
       - name: Download this run's flake reports, attempt 2
         if: steps.download-this-runs-flake-reports.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *flake-budget-download-this-runs-flake-reports
 
       - name: Count flaky tests over seven days
@@ -4010,7 +4093,7 @@ jobs:
       - name: Download this run's measured coverage
         id: download-this-runs-measured-coverage
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &coverage-baseline-download-this-runs-measured-coverage
           pattern: coverage-3.12-*
           path: baseline-coverage
@@ -4024,7 +4107,7 @@ jobs:
 
       - name: Download this run's measured coverage, attempt 2
         if: steps.download-this-runs-measured-coverage.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *coverage-baseline-download-this-runs-measured-coverage
 
       - name: Compute the coverage baseline
@@ -4059,17 +4142,20 @@ jobs:
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}
     needs: [admission]
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
-    timeout-minutes: 5
+    timeout-minutes: 30
     outputs:
-      shards: ${{ steps.reuse.outputs.reused == 'true' && '[0]' || steps.plan.outputs.shards }}
-      stats_parts: ${{ steps.reuse.outputs.reused == 'true' && '[0]' || steps.plan.outputs.stats_parts }}
+      shards: ${{ steps.refine.outputs.shards || steps.plan.outputs.shards }}
+      stats_parts: ${{ steps.plan.outputs.stats_parts }}
       bases: ${{ steps.plan.outputs.bases }}
       browser: ${{ steps.plan.outputs.browser }}
-      reused: ${{ steps.reuse.outputs.reused || 'false' }}
-      forwarded: ${{ (steps.reuse.outputs.reused == 'true' || steps.plan.outputs.changed == '0') && 'true' || 'false' }}
+      forwarded: ${{ steps.plan.outputs.changed == '0' && 'true' || 'false' }}
       selection: ${{ steps.contract.outputs.selection || 'false' }}
       durations: ${{ steps.durations.outputs.cache-matched-key }}
+      collected: ${{ steps.collect.outputs.collected || 'false' }}
+      probe: ${{ steps.refine.outputs.probe }}
+      probe_shards: ${{ steps.refine.outputs.probe_shards }}
     env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
       GIT_CONFIG_COUNT: "1"
       GIT_CONFIG_KEY_0: maintenance.auto
       GIT_CONFIG_VALUE_0: "false"
@@ -4095,7 +4181,6 @@ jobs:
           checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
           enable-cache: false
 
-      # An earlier branch counts as a base only once its push preflight mutated it green; the lookup runs on the App's quota.
       - name: Mint the tcc main ci App token
         id: app-token
         uses: actions/create-github-app-token@v3.2.0
@@ -4105,7 +4190,6 @@ jobs:
           repositories: ${{ github.event.repository.name }}
           permission-actions: read
 
-      # The protected copy gives the reuse verdict and refuses a head whose preflight producer differs from the grader's.
       - name: Check out the protected grader
         if: github.event_name == 'pull_request'
         env:
@@ -4114,42 +4198,19 @@ jobs:
           git fetch --no-tags origin "$GRADER"
           git worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD
 
-      - name: Reuse the branch preflight report graded on this head and base
-        id: reuse
-        if: github.event_name == 'pull_request'
-        env:
-          BRANCH: ${{ github.head_ref }}
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          GRADER: ${{ github.event.pull_request.base.sha }}
-        run: |
-          base=$(git merge-base origin/dev "$HEAD_SHA")
-          PYTHONPATH="$RUNNER_TEMP/grader" python -P -m scripts.ci_mutation.reuse "$BRANCH" "$GITHUB_RUN_ID" \
-            --head "$HEAD_SHA" --base "$base" --grader "$GRADER"
-
-      - name: Share the branch preflight kill memory with the mutation shards
-        if: steps.reuse.outputs.reused != 'true' && hashFiles('.mutation-killers-restored/killers/*') != ''
-        uses: ./.workflow-revision/.github/actions/retry-upload
-        with:
-          name: mutation-stats-killers
-          path: .mutation-killers-restored/
-          include-hidden-files: true
-          retention-days: 1
-
       - name: Take the helper scripts from the workflow revision
-        if: steps.reuse.outputs.reused != 'true'
         run: |
           git fetch --no-tags origin "$GITHUB_SHA"
           mkdir -p "$RUNNER_TEMP/workflow"
           git archive "$GITHUB_SHA" .github/scripts .github/test-requirements.lock | tar -x -C "$RUNNER_TEMP/workflow"
 
-      - name: Install dependencies
-        if: steps.reuse.outputs.reused != 'true'
+      - &mutation-planning-install
+        name: Install dependencies
         run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system --constraint "$RUNNER_TEMP/workflow/.github/test-requirements.lock" "mutmut==3.6.0" "pytest>=8.0,<9.2" "pyyaml>=6.0" "tomlkit>=0.12"
 
       - name: Restore latest dev durations
         id: durations
-        if: github.event_name == 'pull_request' && steps.reuse.outputs.reused != 'true'
+        if: github.event_name == 'pull_request'
         uses: actions/cache/restore@v4
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
@@ -4159,7 +4220,6 @@ jobs:
           restore-keys: durations-merged-
 
       - name: Adopt latest dev durations
-        if: steps.reuse.outputs.reused != 'true'
         env:
           PYTHON_VERSION: "3.12"
         run: |
@@ -4167,7 +4227,6 @@ jobs:
           python -c 'import json, sys; from pathlib import Path; from tests.dev_durations import adopt; Path(".test_durations").write_text(json.dumps(adopt(Path(sys.argv[1]), sys.argv[2]), indent=4, sort_keys=True) + "\n")' ~/dev-durations "$PYTHON_VERSION"
 
       - name: Restore measured statistics timings
-        if: steps.reuse.outputs.reused != 'true'
         uses: actions/cache/restore@v4
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
@@ -4180,7 +4239,6 @@ jobs:
 
       - name: Size mutation shards from stored timings
         id: plan
-        if: steps.reuse.outputs.reused != 'true'
         env:
           BASE: ${{ inputs.base || 'origin/dev' }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -4189,7 +4247,7 @@ jobs:
         run: python -I "$RUNNER_TEMP/workflow/.github/scripts/peak_memory.py" mutation-plan -- python -m scripts.ci_mutation.plan --base "$BASE" --repository "$GITHUB_REPOSITORY"
 
       - name: Upload the mutation-plan step peak memory
-        if: always() && github.event_name == 'pull_request' && steps.reuse.outputs.reused != 'true'
+        if: always() && github.event_name == 'pull_request'
         uses: ./.workflow-revision/.github/actions/retry-upload
         with:
           after-cancel: true
@@ -4199,7 +4257,7 @@ jobs:
           retention-days: 7
 
       - name: Check out the protected mutation grader
-        if: github.event_name == 'workflow_dispatch' && steps.reuse.outputs.reused != 'true'
+        if: github.event_name == 'workflow_dispatch'
         env:
           GRADER: ${{ inputs.base == 'origin/dev' && 'dev' || inputs.base }}
         run: |
@@ -4208,7 +4266,6 @@ jobs:
 
       # The protected copy holds the planned bases, so a pull request cannot narrow the lines it is graded on.
       - name: Hold the planned mutation bases to the protected grader
-        if: steps.reuse.outputs.reused != 'true'
         env:
           BASE: ${{ inputs.base || 'origin/dev' }}
           BASES: ${{ steps.plan.outputs.bases }}
@@ -4222,7 +4279,6 @@ jobs:
       # The workflow comes from the merge ref, so a head whose planner predates the selection writes none.
       - name: Check the planned selection contract
         id: contract
-        if: steps.reuse.outputs.reused != 'true'
         run: |
           if [[ ! -e .mutation-selection.json ]]; then
             echo "This head's planner predates the planned test selection, so mutation selects matching and importing test modules as before." >> "$GITHUB_STEP_SUMMARY"
@@ -4234,7 +4290,7 @@ jobs:
           echo "selection=true" >> "$GITHUB_OUTPUT"
 
       - name: Upload planned mutation test selection
-        if: steps.reuse.outputs.reused != 'true' && steps.contract.outputs.selection == 'true'
+        if: steps.contract.outputs.selection == 'true'
         uses: ./.workflow-revision/.github/actions/retry-upload
         with:
           name: mutation-selection
@@ -4245,8 +4301,175 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+      - name: Collect the mutation stats in this job when four parts or fewer cover them
+        id: collect
+        if: steps.plan.outputs.changed != '0'
+        env:
+          PARTS: ${{ steps.plan.outputs.stats_parts }}
+        run: |
+          if (( $(jq length <<< "$PARTS") <= 4 )); then
+            echo "collected=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "The plan sized $(jq length <<< "$PARTS") stats parts, so the mutation stats matrix collects them."
+          fi
+
+      - name: Take the local actions from the workflow revision for the stats
+        if: steps.collect.outputs.collected == 'true'
+        run: git archive "$GITHUB_SHA" .github/actions | tar -x -C .workflow-revision
+
+      - name: Install the stats dependencies
+        if: steps.collect.outputs.collected == 'true'
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
+        run: |
+          locked=.
+          [[ -f .github/test-requirements.lock ]] || locked="$RUNNER_TEMP/workflow"
+          bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system --constraint "$locked/.github/test-requirements.lock" --excludes .github/test-excludes.txt -e ".[dev,all]"
+
+      - name: Install the pinned nats server for the bus backend tests
+        if: steps.collect.outputs.collected == 'true'
+        timeout-minutes: 3
+        uses: ./.workflow-revision/.github/actions/nats-server
+
+      - name: Install the browser that page tests drive
+        id: browser
+        if: steps.collect.outputs.collected == 'true' && steps.plan.outputs.browser == 'true'
+        timeout-minutes: 6
+        uses: ./.workflow-revision/.github/actions/browser-cache
+
+      - name: Report browser setup failure
+        if: failure() && steps.browser.outcome == 'failure'
+        run: |
+          echo "::error::Chromium setup failed or exceeded its six minute timeout; mutation tests cannot run."
+          exit 1
+
+      - name: Collect every stats part as a parallel process
+        id: stats
+        if: steps.collect.outputs.collected == 'true'
+        env:
+          BASES: ${{ steps.plan.outputs.bases }}
+          MUTATION_STATS_CACHE: ${{ github.workspace }}/.mutation-stats-cache
+          PARTS: ${{ steps.plan.outputs.stats_parts }}
+          PYTHONUNBUFFERED: "1"
+        run: |
+          total=$(jq length <<< "$PARTS")
+          mkdir -p .mutation-stats
+          for (( part = 0; part < total; part++ )); do touch ".mutation-stats/collected-$part"; done
+          pids=()
+          for (( part = 0; part < total; part++ )); do
+            python -m scripts.ci_mutation --bases "$BASES" --budget 1080 --output ".mutation-gate-stats/$part" --stats .mutation-stats --stats-part "$part" --stats-parts "$total" > "$RUNNER_TEMP/stats-$part.log" 2>&1 &
+            pids+=("$!")
+          done
+          failed=0
+          for part in "${!pids[@]}"; do
+            wait "${pids[$part]}" || { failed=1; echo "::error::Mutation stats part $part failed."; }
+            echo "::group::Mutation stats part $part"
+            cat "$RUNNER_TEMP/stats-$part.log"
+            echo "::endgroup::"
+          done
+          exit "$failed"
+
+      - name: Save the merged test stats
+        if: steps.collect.outputs.collected == 'true' && steps.plan.outputs.stats_parts == '[0]'
+        uses: actions/cache/save@v4
+        with:
+          path: .mutation-stats-cache
+          key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Upload the mutation stats parts
+        if: steps.collect.outputs.collected == 'true'
+        uses: ./.workflow-revision/.github/actions/retry-upload
+        with:
+          name: mutation-stats-0
+          path: .mutation-stats/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload stats evidence
+        if: failure() && steps.stats.outcome == 'failure'
+        uses: ./.workflow-revision/.github/actions/retry-upload
+        with:
+          name: mutation-evidence-stats-0
+          path: .mutation-gate-stats/
+          include-hidden-files: true
+          retention-days: 7
+
+      - name: Keep only the test stats the parts wrote
+        if: steps.collect.outputs.collected == 'true'
+        run: mkdir -p .mutation-stats-cache .mutation-stats-fresh && find .mutation-stats-cache -maxdepth 1 -type f -newer .mutation-stats/collected-0 -exec cp -p {} .mutation-stats-fresh/ \;
+
+      - name: Upload the parts' test stats cache
+        if: steps.collect.outputs.collected == 'true'
+        uses: ./.workflow-revision/.github/actions/retry-upload
+        with:
+          name: mutation-test-stats-cache-0
+          path: .mutation-stats-fresh/
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Restore the tests that killed this branch's earlier mutants
+        if: steps.collect.outputs.collected == 'true'
+        uses: actions/cache/restore@v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
+        with:
+          path: .mutation-stats/killers
+          key: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-
+
+      - name: Mutate the only shard in the plan job
+        id: mutate
+        if: steps.collect.outputs.collected == 'true' && steps.plan.outputs.shards == '[0]' && steps.plan.outputs.stats_parts == '[0]'
+        env:
+          BASES: ${{ steps.plan.outputs.bases }}
+          MUTATION_STATS_CACHE: ${{ github.workspace }}/.mutation-stats-cache
+          PYTHONUNBUFFERED: "1"
+        run: python -m scripts.ci_mutation --bases "$BASES" --budget 1080 --shard 0 --shards 1 --stats .mutation-stats
+
+      - name: Grade the shard report from the protected grader
+        if: always() && steps.mutate.outcome != 'skipped'
+        env:
+          BASES: ${{ steps.plan.outputs.bases }}
+        run: |
+          grader="$RUNNER_TEMP/grader"
+          [[ -d "$grader" ]] || { echo "::error::The protected mutation grader is not checked out."; exit 1; }
+          [[ -f "$grader/scripts/ci_mutation/regrade.py" ]] || grader="$GITHUB_WORKSPACE"
+          PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade report .mutation-gate/report.json . "$BASES"
+
+      - name: Upload complete inline mutation evidence
+        if: always() && steps.mutate.outcome != 'skipped'
+        uses: ./.workflow-revision/.github/actions/retry-upload
+        with:
+          after-cancel: true
+          name: mutation-report-0
+          path: ${{ job.status == 'success' && '.mutation-gate/report.json' || '.mutation-gate/' }}
+          include-hidden-files: true
+          retention-days: 7
+
+      - name: Refine mutation shards from measured statistics
+        id: refine
+        if: steps.collect.outputs.collected == 'true' && steps.plan.outputs.stats_parts != '[0]'
+        timeout-minutes: 5
+        env:
+          BASES: ${{ steps.plan.outputs.bases }}
+          MUTATION_SHARD_CPU_QUOTA: "3"
+          PYTHONUNBUFFERED: "1"
+        run: python -m scripts.ci_mutation.measured --bases "$BASES" --stats .mutation-stats
+
+      - name: Upload the measured mutation plan
+        if: steps.refine.outcome == 'success'
+        uses: ./.workflow-revision/.github/actions/retry-upload
+        with:
+          name: mutation-measured-plan
+          path: .mutation-stats/plan.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Grade the empty change set
-        if: steps.reuse.outputs.reused != 'true' && steps.plan.outputs.changed == '0'
+        if: steps.plan.outputs.changed == '0'
         env:
           BASES: ${{ steps.plan.outputs.bases }}
         run: |
@@ -4256,8 +4479,8 @@ jobs:
           [[ -f "$grader/scripts/ci_mutation/regrade.py" ]] || grader="$GITHUB_WORKSPACE"
           PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade report .mutation-gate/report.json . "$BASES"
 
-      - name: Forward the reused or empty mutation report
-        if: always() && (steps.reuse.outputs.reused == 'true' || steps.plan.outputs.changed == '0')
+      - name: Forward the empty mutation report
+        if: always() && steps.plan.outputs.changed == '0'
         uses: ./.workflow-revision/.github/actions/retry-upload
         with:
           after-cancel: true
@@ -4269,7 +4492,7 @@ jobs:
 
   mutation-stats:
     needs: [mutation-plan, admission]
-    if: ${{ !cancelled() && needs.mutation-plan.result == 'success' && needs.mutation-plan.outputs.forwarded != 'true' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}
+    if: ${{ !cancelled() && needs.mutation-plan.result == 'success' && needs.mutation-plan.outputs.forwarded != 'true' && needs.mutation-plan.outputs.collected != 'true' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-batch' || 'ubuntu-latest' }}
     timeout-minutes: 26
     strategy:
@@ -4316,6 +4539,8 @@ jobs:
 
       - name: Install dependencies
         if: needs.mutation-plan.outputs.forwarded != 'true'
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
         run: |
           locked=.
           [[ -f .github/test-requirements.lock ]] || locked="$RUNNER_TEMP/workflow"
@@ -4325,7 +4550,7 @@ jobs:
         if: needs.mutation-plan.outputs.forwarded != 'true' && needs.mutation-plan.outputs.selection == 'true'
         id: download-planned-mutation-test-selection
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &mutation-stats-download-planned-mutation-test-selection
           name: mutation-selection
 
@@ -4338,7 +4563,7 @@ jobs:
 
       - name: Download planned mutation test selection, attempt 2
         if: steps.download-planned-mutation-test-selection.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *mutation-stats-download-planned-mutation-test-selection
 
       - name: Install the pinned nats server for the bus backend tests
@@ -4446,27 +4671,15 @@ jobs:
           git fetch --no-tags origin "$GRADER"
           git worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD
 
-      - name: Download the branch preflight kill memory
+      - name: Restore the tests that killed this branch's earlier mutants
         if: needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]' && needs.mutation-plan.outputs.forwarded != 'true'
-        id: download-the-branch-preflight-kill-memory
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with: &mutation-download-the-branch-preflight-kill-memory
-          pattern: mutation-stats-killers
-          path: .mutation-stats
-          merge-multiple: true
-
-      - name: Download the branch preflight kill memory, wait before attempt 2
-        if: steps.download-the-branch-preflight-kill-memory.outcome == 'failure'
-        shell: bash
-        run: |
-          echo "::warning::Download the branch preflight kill memory failed, as an artifact service outage does; retrying it once in 30 seconds."
-          sleep 30
-
-      - name: Download the branch preflight kill memory, attempt 2
-        if: steps.download-the-branch-preflight-kill-memory.outcome == 'failure'
-        uses: actions/download-artifact@v4
-        with: *mutation-download-the-branch-preflight-kill-memory
+        uses: actions/cache/restore@v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
+        with:
+          path: .mutation-stats/killers
+          key: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-
 
       - name: Mutate the only shard in the statistics job
         id: mutate
@@ -4500,7 +4713,7 @@ jobs:
 
   mutation-refine:
     needs: [mutation-plan, mutation-stats, admission]
-    if: ${{ !cancelled() && needs.mutation-plan.result == 'success' && (needs.mutation-plan.outputs.shards != '[0]' || needs.mutation-plan.outputs.stats_parts != '[0]') && needs.mutation-stats.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') && needs.mutation-plan.outputs.forwarded != 'true' && needs.mutation-plan.outputs.stats_parts != '[0]' }}
+    if: ${{ !cancelled() && needs.mutation-plan.result == 'success' && (needs.mutation-plan.outputs.shards != '[0]' || needs.mutation-plan.outputs.stats_parts != '[0]') && needs.mutation-stats.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') && needs.mutation-plan.outputs.forwarded != 'true' && needs.mutation-plan.outputs.stats_parts != '[0]' && needs.mutation-plan.outputs.collected != 'true' }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 10
     outputs:
@@ -4534,17 +4747,13 @@ jobs:
           mkdir -p .workflow-revision
           git archive "$GITHUB_SHA" .github/actions/retry-upload | tar -x -C .workflow-revision
 
-      - name: Install dependencies
-        run: |
-          locked=.
-          [[ -f .github/test-requirements.lock ]] || locked="$RUNNER_TEMP/workflow"
-          bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system --constraint "$locked/.github/test-requirements.lock" --excludes .github/test-excludes.txt -e ".[dev,all]"
+      - *mutation-planning-install
 
       - name: Download planned mutation test selection
         if: needs.mutation-plan.outputs.selection == 'true'
         id: download-refine-planned-mutation-test-selection
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &mutation-refine-download-planned-mutation-test-selection
           name: mutation-selection
 
@@ -4557,14 +4766,14 @@ jobs:
 
       - name: Download planned mutation test selection, attempt 2
         if: steps.download-refine-planned-mutation-test-selection.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *mutation-refine-download-planned-mutation-test-selection
 
       - name: Download the shared mutation stats
         timeout-minutes: 1
         id: download-refine-shared-mutation-stats
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &mutation-refine-download-the-shared-mutation-stats
           pattern: mutation-stats-*
           path: .mutation-stats
@@ -4580,7 +4789,7 @@ jobs:
       - name: Download the shared mutation stats, attempt 2
         timeout-minutes: 1
         if: steps.download-refine-shared-mutation-stats.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *mutation-refine-download-the-shared-mutation-stats
 
       - name: Restore the tests that killed this branch's earlier mutants
@@ -4591,59 +4800,6 @@ jobs:
           path: .mutation-stats/killers
           key: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-
-
-      - name: Mint the token that reads the branch preflight kill memory
-        id: app-token
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && hashFiles('.mutation-stats/killers/*') == ''
-        continue-on-error: true
-        uses: actions/create-github-app-token@v3.2.0
-        with:
-          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
-          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
-          repositories: ${{ github.event.repository.name }}
-          permission-actions: read
-
-      - name: Seed the kill memory from the branch preflight
-        id: preflight
-        if: steps.app-token.outcome == 'success'
-        continue-on-error: true
-        timeout-minutes: 3
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          HEAD: ${{ github.event.pull_request.head.sha }}
-          BRANCH: ${{ github.head_ref }}
-        run: |
-          fetch() { gh run download "$1" --repo "$GITHUB_REPOSITORY" --pattern 'mutation-killers-*' --dir "$2"; }
-          runs="repos/$GITHUB_REPOSITORY/actions/workflows/mutation-preflight.yml/runs"
-          same=$(gh api "$runs?head_sha=$HEAD&event=push&per_page=20" --jq '.workflow_runs[] | select(.head_branch == env.BRANCH and .status == "completed") | .id') || same=""
-          newest=$(gh api "$runs?branch=$BRANCH&event=push&per_page=20" --jq '.workflow_runs[] | select(.status == "completed") | .id') || newest=""
-          while read -r run; do
-            [[ -n "$run" ]] || continue
-            kept=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?per_page=100" --jq '[.artifacts[] | select((.expired | not) and (.name | startswith("mutation-killers-")))] | length') || continue
-            if (( kept > 0 )); then
-              folder="$RUNNER_TEMP/preflight-killers/1"
-              if ! fetch "$run" "$folder"; then
-                echo "::warning::Download of the kill memory of Mutation preflight run $run failed, as an artifact service outage does; retrying it once in 30 seconds."
-                sleep 30
-                folder="$RUNNER_TEMP/preflight-killers/2"
-                fetch "$run" "$folder"
-              fi
-              mkdir -p .mutation-stats/killers
-              find "$folder" -type f -exec cp {} .mutation-stats/killers/ \;
-              echo "Seeded the first plan with $(find .mutation-stats/killers -type f | wc -l) kill memory files of Mutation preflight run $run"
-              echo "id=$run" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-          done < <(printf '%s\n%s\n' "$same" "$newest" | awk 'NF && !seen[$0]++')
-          echo "No Mutation preflight run of $BRANCH kept kill memory, so the first plan prices units without it."
-
-      - name: Keep the branch preflight kill memory for this run's shards
-        if: steps.preflight.outputs.id != '' && hashFiles('.mutation-stats/killers/*') != ''
-        continue-on-error: true
-        uses: actions/cache/save@v4
-        with:
-          path: .mutation-stats/killers
-          key: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}-preflight
 
       - name: Refine mutation shards from measured statistics
         id: refine
@@ -4664,13 +4820,13 @@ jobs:
 
   mutation-probe:
     needs: [mutation-plan, mutation-refine]
-    if: ${{ !cancelled() && needs.mutation-refine.result == 'success' && needs.mutation-refine.outputs.probe == 'true' && needs.mutation-refine.outputs.probe_shards != '' }}
+    if: ${{ !cancelled() && (needs.mutation-refine.result == 'success' || (needs.mutation-plan.result == 'success' && needs.mutation-plan.outputs.collected == 'true')) && (needs.mutation-refine.outputs.probe || needs.mutation-plan.outputs.probe) == 'true' && (needs.mutation-refine.outputs.probe_shards || needs.mutation-plan.outputs.probe_shards) != '' }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-batch' || 'ubuntu-latest' }}
     timeout-minutes: 26
     strategy:
       fail-fast: false
       matrix:
-        shard: ${{ fromJSON(needs.mutation-refine.outputs.probe_shards) }}
+        shard: ${{ fromJSON(needs.mutation-refine.outputs.probe_shards || needs.mutation-plan.outputs.probe_shards) }}
     env:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
       GIT_CONFIG_COUNT: "1"
@@ -4704,6 +4860,8 @@ jobs:
           git archive "$GITHUB_SHA" .github/actions | tar -x -C .workflow-revision
 
       - name: Install dependencies
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
         run: |
           locked=.
           [[ -f .github/test-requirements.lock ]] || locked="$RUNNER_TEMP/workflow"
@@ -4713,7 +4871,7 @@ jobs:
         if: needs.mutation-plan.outputs.selection == 'true'
         id: download-probe-planned-mutation-test-selection
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &mutation-probe-download-planned-mutation-test-selection
           name: mutation-selection
 
@@ -4726,7 +4884,7 @@ jobs:
 
       - name: Download planned mutation test selection, attempt 2
         if: steps.download-probe-planned-mutation-test-selection.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *mutation-probe-download-planned-mutation-test-selection
 
       - name: Install the pinned nats server for the bus backend tests
@@ -4749,7 +4907,7 @@ jobs:
         timeout-minutes: 1
         id: download-probe-shared-mutation-stats
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &mutation-probe-download-the-shared-mutation-stats
           pattern: mutation-stats-*
           path: .mutation-stats
@@ -4765,7 +4923,7 @@ jobs:
       - name: Download the shared mutation stats, attempt 2
         timeout-minutes: 1
         if: steps.download-probe-shared-mutation-stats.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *mutation-probe-download-the-shared-mutation-stats
 
       - name: Restore the tests that killed this branch's earlier mutants
@@ -4780,7 +4938,7 @@ jobs:
       - name: Download the measured mutation plan
         id: download-probe-measured-mutation-plan
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &mutation-probe-download-the-measured-mutation-plan
           name: mutation-measured-plan
           path: .mutation-stats
@@ -4794,7 +4952,7 @@ jobs:
 
       - name: Download the measured mutation plan, attempt 2
         if: steps.download-probe-measured-mutation-plan.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *mutation-probe-download-the-measured-mutation-plan
 
       - name: Run each mutant's early tests once for every shard
@@ -4824,7 +4982,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
           ref: ${{ github.event.pull_request.head.sha }}
 
       - uses: actions/setup-python@v5
@@ -4839,7 +4997,7 @@ jobs:
 
       - name: Take the helper scripts from the workflow revision
         run: |
-          git fetch --no-tags origin "$GITHUB_SHA"
+          git fetch --no-tags --depth=1 origin "$GITHUB_SHA"
           mkdir -p "$RUNNER_TEMP/workflow"
           git archive "$GITHUB_SHA" .github/scripts .github/test-requirements.lock | tar -x -C "$RUNNER_TEMP/workflow"
 
@@ -4848,11 +5006,7 @@ jobs:
           mkdir -p .workflow-revision
           git archive "$GITHUB_SHA" .github/actions/retry-upload | tar -x -C .workflow-revision
 
-      - name: Install dependencies
-        run: |
-          locked=.
-          [[ -f .github/test-requirements.lock ]] || locked="$RUNNER_TEMP/workflow"
-          bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system --constraint "$locked/.github/test-requirements.lock" --excludes .github/test-excludes.txt -e ".[dev,all]"
+      - *mutation-planning-install
 
       - name: Restore the tests that killed this branch's earlier mutants
         uses: actions/cache/restore@v4
@@ -4866,7 +5020,7 @@ jobs:
       - name: Download the measured mutation plan
         id: download-replan-measured-mutation-plan
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &mutation-replan-download-the-measured-mutation-plan
           name: mutation-measured-plan
           path: .mutation-stats
@@ -4880,13 +5034,13 @@ jobs:
 
       - name: Download the measured mutation plan, attempt 2
         if: steps.download-replan-measured-mutation-plan.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *mutation-replan-download-the-measured-mutation-plan
 
       - name: Download the early mutation results
         id: download-replan-early-mutation-results
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &mutation-replan-download-the-early-mutation-results
           pattern: mutation-probe-*
           path: .mutation-stats
@@ -4901,7 +5055,7 @@ jobs:
 
       - name: Download the early mutation results, attempt 2
         if: steps.download-replan-early-mutation-results.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *mutation-replan-download-the-early-mutation-results
 
       - name: Size the shards from the mutants the early tests left
@@ -4921,7 +5075,7 @@ jobs:
 
   mutation-shard:
     needs: [mutation-plan, mutation-stats, mutation-refine, mutation-probe, mutation-replan, admission]
-    if: ${{ !cancelled() && needs.mutation-plan.result == 'success' && (needs.mutation-plan.outputs.shards != '[0]' || needs.mutation-plan.outputs.stats_parts != '[0]') && needs.mutation-stats.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') && (needs.mutation-refine.result == 'success' || needs.mutation-refine.result == 'skipped' && needs.mutation-plan.outputs.stats_parts == '[0]') && (needs.mutation-replan.result == 'success' || needs.mutation-probe.result == 'skipped') }}
+    if: ${{ !cancelled() && needs.mutation-plan.result == 'success' && (needs.mutation-plan.outputs.shards != '[0]' || needs.mutation-plan.outputs.stats_parts != '[0]') && (needs.mutation-stats.result == 'success' || needs.mutation-plan.outputs.collected == 'true') && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') && (needs.mutation-refine.result == 'success' || needs.mutation-refine.result == 'skipped' && (needs.mutation-plan.outputs.stats_parts == '[0]' || needs.mutation-plan.outputs.collected == 'true')) && (needs.mutation-replan.result == 'success' || needs.mutation-probe.result == 'skipped') }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-batch' || 'ubuntu-latest' }}
     timeout-minutes: 26
     strategy:
@@ -4954,7 +5108,7 @@ jobs:
         if: strategy.job-index == 0 && needs.mutation-plan.outputs.stats_parts != '[0]' && needs.mutation-plan.outputs.forwarded != 'true'
         id: download-every-parts-test-stats-cache
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &mutation-download-every-parts-test-stats-cache
           pattern: mutation-test-stats-cache-*
           path: .mutation-stats-cache
@@ -4969,7 +5123,7 @@ jobs:
 
       - name: Download every part's test stats cache, attempt 2
         if: steps.download-every-parts-test-stats-cache.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *mutation-download-every-parts-test-stats-cache
 
       - uses: actions/setup-python@v5
@@ -5017,6 +5171,8 @@ jobs:
 
       - name: Install dependencies
         if: needs.mutation-plan.outputs.forwarded != 'true'
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
         run: |
           locked=.
           [[ -f .github/test-requirements.lock ]] || locked="$RUNNER_TEMP/workflow"
@@ -5026,7 +5182,7 @@ jobs:
         if: needs.mutation-plan.outputs.forwarded != 'true' && needs.mutation-plan.outputs.selection == 'true'
         id: download-planned-mutation-test-selection
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &mutation-download-planned-mutation-test-selection
           name: mutation-selection
 
@@ -5039,7 +5195,7 @@ jobs:
 
       - name: Download planned mutation test selection, attempt 2
         if: steps.download-planned-mutation-test-selection.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *mutation-download-planned-mutation-test-selection
 
       - name: Install the pinned nats server for the bus backend tests
@@ -5082,7 +5238,7 @@ jobs:
         if: needs.mutation-plan.outputs.forwarded != 'true'
         id: download-the-shared-mutation-stats
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &mutation-download-the-shared-mutation-stats
           pattern: mutation-stats-*
           path: .mutation-stats
@@ -5098,7 +5254,7 @@ jobs:
       - name: Download the shared mutation stats, attempt 2
         timeout-minutes: 1
         if: steps.download-the-shared-mutation-stats.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *mutation-download-the-shared-mutation-stats
 
       - name: Check every mutation stats producer's part arrived
@@ -5113,7 +5269,7 @@ jobs:
         if: steps.stats-arrival.outputs.missing != ''
         id: download-the-missing-mutation-stats-parts
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *mutation-download-the-shared-mutation-stats
 
       - name: Download the missing mutation stats parts, wait before attempt 2
@@ -5126,7 +5282,7 @@ jobs:
       - name: Download the missing mutation stats parts, attempt 2
         timeout-minutes: 1
         if: steps.download-the-missing-mutation-stats-parts.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *mutation-download-the-shared-mutation-stats
 
       - name: Fail on a mutation stats producer whose part never arrived
@@ -5146,10 +5302,10 @@ jobs:
           restore-keys: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-
 
       - name: Download the measured mutation plan
-        if: needs.mutation-refine.result == 'success'
+        if: needs.mutation-refine.result == 'success' || (needs.mutation-plan.outputs.collected == 'true' && needs.mutation-plan.outputs.stats_parts != '[0]')
         id: download-the-measured-mutation-plan
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &mutation-download-the-measured-mutation-plan
           name: mutation-measured-plan
           path: .mutation-stats
@@ -5163,14 +5319,14 @@ jobs:
 
       - name: Download the measured mutation plan, attempt 2
         if: steps.download-the-measured-mutation-plan.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *mutation-download-the-measured-mutation-plan
 
       - name: Download the probed mutation plan
         if: needs.mutation-replan.result == 'success'
         id: download-the-probed-mutation-plan
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &mutation-download-the-probed-mutation-plan
           name: mutation-plan-probed
           path: .mutation-stats
@@ -5184,7 +5340,7 @@ jobs:
 
       - name: Download the probed mutation plan, attempt 2
         if: steps.download-the-probed-mutation-plan.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *mutation-download-the-probed-mutation-plan
 
       # The protected copy grades the shard's rows, so a pull request cannot loosen how its own survivors grade.
@@ -5256,7 +5412,7 @@ jobs:
 
   mutation:
     needs: [mutation-plan, mutation-stats, mutation-refine, mutation-probe, mutation-replan, mutation-shard, admission, lab-verdict]
-    if: ${{ !cancelled() && needs.mutation-plan.result == 'success' && (needs.mutation-plan.outputs.shards != '[0]' || needs.mutation-plan.outputs.stats_parts != '[0]') && needs.mutation-stats.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') && fromJSON(needs.lab-verdict.outputs.authoritative || '{}')['mutation'] != true }}
+    if: ${{ !cancelled() && needs.mutation-plan.result == 'success' && (needs.mutation-plan.outputs.shards != '[0]' || needs.mutation-plan.outputs.stats_parts != '[0]') && (needs.mutation-stats.result == 'success' || needs.mutation-plan.outputs.collected == 'true') && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') && fromJSON(needs.lab-verdict.outputs.authoritative || '{}')['mutation'] != true }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
@@ -5282,10 +5438,10 @@ jobs:
         if: needs.mutation-plan.outputs.forwarded != 'true'
         id: download-every-mutation-shard-report
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &mutation-download-every-mutation-shard-report
           pattern: mutation-report-*
-          path: .mutation-shards
+          path: ${{ (needs.mutation-replan.outputs.shards || needs.mutation-refine.outputs.shards || needs.mutation-plan.outputs.shards) == '[0]' && '.mutation-shards/mutation-report-0' || '.mutation-shards' }}
 
       - name: Download every mutation shard report, wait before attempt 2
         if: steps.download-every-mutation-shard-report.outcome == 'failure'
@@ -5297,7 +5453,7 @@ jobs:
 
       - name: Download every mutation shard report, attempt 2
         if: steps.download-every-mutation-shard-report.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *mutation-download-every-mutation-shard-report
 
       - name: Restore the tests that killed this branch's earlier mutants
@@ -5314,7 +5470,7 @@ jobs:
         if: needs.mutation-plan.outputs.forwarded != 'true'
         id: download-the-tests-that-killed-mutants
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: &mutation-download-the-tests-that-killed-mutants
           pattern: mutation-killers-*
           path: .mutation-stats/killers
@@ -5329,7 +5485,7 @@ jobs:
 
       - name: Download the tests that killed mutants, attempt 2
         if: steps.download-the-tests-that-killed-mutants.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with: *mutation-download-the-tests-that-killed-mutants
 
       - name: Keep the tests that killed mutants for this branch's next plan

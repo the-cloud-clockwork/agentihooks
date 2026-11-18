@@ -91,6 +91,25 @@ def test_ready_master_with_work_wakes_at_twenty_minutes_and_retries(setup, sourc
     assert sent == []
 
 
+@pytest.mark.feature("inbox-notices-pass-the-seen-claim")
+def test_each_backstop_passes_the_seen_claim(
+    setup: tuple[RedisStore, AgentRecord, FakeRuntime, dict[str, list[dict[str, object]]], list[tuple[str, str]]],
+) -> None:
+    from scripts.inbox import seen
+
+    store, master, _, doc, _ = setup
+    doc["followups"] = [{"id": "f", "done": False}]
+    inbox = InboxStore(store.redis)
+    assert run(setup, START) == []
+    assert run(setup, START + WINDOW) == woke(master.name)
+    (first,) = seen.claim(inbox, SEAT)
+    assert run(setup, START + 2 * WINDOW) == woke(master.name)
+    (second,) = seen.claim(inbox, SEAT)
+    assert (first.text, second.text) == (PROMPT, PROMPT)
+    assert second.id != first.id
+    assert [item.id for item in open_backstops(store)] == [second.id]
+
+
 @pytest.mark.parametrize(
     "doc",
     [

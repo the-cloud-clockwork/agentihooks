@@ -1,0 +1,6 @@
+{
+  "scripts/tick/adapters/database_ledger.py:scripts.tick.adapters.database_ledger.x_principal:76cc66c3e8b055df3b5a99c0feea6a77e74321c3e43e37817fe7fdb267d03b10": {
+    "reader": "standards-reader",
+    "reason": "Line 13 imports typing.cast, whose runtime body returns its second argument and ignores the type argument, so cast(None, Who) yields the same Who class as cast(Any, Who) and the mutant changes only static typing."
+  }
+}

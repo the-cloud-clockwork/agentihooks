@@ -99,6 +99,37 @@ def test_a_restarted_agent_gets_a_new_warning_for_its_new_life():
     assert latest in {item.id for item in messages}
 
 
+@pytest.mark.feature("hive-front-door-master-floor")
+@pytest.mark.parametrize(
+    ("lane", "seat", "five", "week", "warned"),
+    [
+        ("master", "master", 10, 93, False),
+        ("master", "master", 97, 50, False),
+        ("master", "", 10, 93, False),
+        ("master", "master", 10, 98, True),
+        ("master", "master", 99, 50, True),
+        ("master", "master-2", 10, 93, True),
+        ("eng", "", 10, 93, True),
+    ],
+)
+def test_a_front_door_master_is_warned_only_at_its_master_floor(
+    monkeypatch: pytest.MonkeyPatch, lane: str, seat: str, five: int, week: int, warned: bool
+) -> None:
+    import fakeredis
+
+    from scripts.inbox.seats import seat_address
+    from scripts.routing.reservation import PRIMARY_RESERVE_ENV
+
+    monkeypatch.setenv(PRIMARY_RESERVE_ENV, "2")
+    storage = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    held = seat_address("sw", seat) if seat else ""
+    storage.put_agent("sw", AgentRecord("agent", lane, "task", harness="claude", account="login", seat=held))
+    rows = [account("login", five=five, week=week).__dict__]
+    storage.redis.set(storage.key("sw", "quota-capacity"), json.dumps({"accounts": rows}))
+    expected = ["early quota handoff warning sent to agent"] if warned else []
+    assert quota_handoff.warn("sw", storage, {}) == expected
+
+
 @pytest.mark.parametrize(
     "window,used,field",
     [("week", {"week": 91}, "week_resets_at"), ("five hour", {"five": 96, "week": 10}, "five_resets_at")],

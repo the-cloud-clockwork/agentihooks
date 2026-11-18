@@ -329,7 +329,14 @@ class GitHubSourceControl:
         deadline.live()
         rows = self._api([f"repos/{self.repository}/actions/runs?per_page={_PAGE}"], deadline)["workflow_runs"]
         return tuple(
-            RepositoryRun(row["id"], row["head_branch"], row["event"], row["status"], row.get("head_sha") or "")
+            RepositoryRun(
+                row["id"],
+                row["head_branch"],
+                row["event"],
+                row["status"],
+                row.get("head_sha") or "",
+                row.get("display_title") or "",
+            )
             for row in rows
         )
 

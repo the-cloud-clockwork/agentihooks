@@ -1,0 +1,17 @@
+rules:
+  - id: hive-unanswered-admit-waits-for-redelivery
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A hive spoke whose admit ask the hub left unanswered only skipped the reopen: it dropped its pending admission
+      and waited for a redelivery of the offer, which the hub readiness pass deletes once the late admission the hub
+      kept claims the task, so the kept agent waits for the hub launch check to free it and the task's claim
+      generation rises by two. Keep the offer as the hive's pending admission and ask the hub again on the next poll.
+    paths:
+      include:
+        - /scripts/hive/spoke.py
+        - hive-unanswered-admit-waits-for-redelivery.py
+    pattern: |
+      if not isinstance($ERROR, admission.Unanswered):
+          ...
+          self.tasks.reopen(...)

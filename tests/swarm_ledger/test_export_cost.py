@@ -223,6 +223,9 @@ def test_the_pass_view_sends_the_newest_held_revision_to_the_ledger(
     ledger = types.SimpleNamespace(
         base=lambda slug: "http://ledger", credentials=lambda slug, service: {}, REQUEST_TIMEOUT=4
     )
+    ledger.client = lambda slug, timeout: api.ResourceClient(
+        ledger.base(slug), ledger.credentials(slug, False), timeout
+    )
     write_export_file(view.view_file("http://ledger", "sw", tmp_path), 6, {"tasks": [], "_meta": {"events": EVENTS}})
     asked: list[int | None] = []
 

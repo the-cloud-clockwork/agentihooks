@@ -28,7 +28,7 @@ def test_the_ledger_answers_every_extra_host_the_values_list():
 
 def test_the_ledger_probes_hit_the_port_directly_instead_of_forking_a_python_client():
     helpers = (CHART / "templates" / "_helpers.tpl").read_text()
-    healthz = helpers.split('{{- define "swarm.healthz" -}}', 1)[1].split("{{- end -}}", 1)[0]
+    healthz = helpers.split('{{- define "swarm.healthzFor" -}}', 1)[1].split("{{- end -}}", 1)[0]
 
     assert "exec" not in healthz
     assert "httpGet" in healthz and "path: /healthz" in healthz and "port: http" in healthz
@@ -37,9 +37,25 @@ def test_the_ledger_probes_hit_the_port_directly_instead_of_forking_a_python_cli
 def test_the_ledger_probe_sends_a_host_header_the_server_allows():
     server = (ROOT / "scripts" / "swarm_ledger" / "ledger_link.py").read_text()
     helpers = (CHART / "templates" / "_helpers.tpl").read_text()
-    healthz = helpers.split('{{- define "swarm.healthz" -}}', 1)[1].split("{{- end -}}", 1)[0]
+    healthz = helpers.split('{{- define "swarm.healthzFor" -}}', 1)[1].split("{{- end -}}", 1)[0]
 
     assert '"127.0.0.1"' in server.split("LOOPBACK = ", 1)[1].split("\n", 1)[0]
     assert "httpHeaders" in healthz
     assert "name: Host" in healthz
     assert "127.0.0.1:" in healthz
+
+
+@pytest.mark.feature("ledger-rolls-before-deployments")
+def test_every_service_deployment_rolls_in_a_sync_wave_after_the_ledger() -> None:
+    texts = {path.name: path.read_text() for path in sorted((CHART / "templates").glob("*.yaml"))}
+    deployments = {name for name, text in texts.items() if "kind: Deployment" in text}
+    hive_workloads = {"worker.yaml", "worker-hive.yaml"}
+    metadata = {
+        name: texts[name].partition("kind: Deployment\nmetadata:\n")[2].partition("\nspec:\n")[0]
+        for name in deployments - hive_workloads
+    }
+
+    assert hive_workloads <= deployments
+    assert metadata
+    assert {name for name, block in metadata.items() if 'argocd.argoproj.io/sync-wave: "1"' not in block} == set()
+    assert "sync-wave" not in texts["ledger.yaml"]

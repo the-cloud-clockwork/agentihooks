@@ -25,10 +25,14 @@ def test_tests_mutation_probes_split_mutants_before_sizing_shards_from_survivors
     assert refine["outputs"]["probe_shards"] == "${{ steps.refine.outputs.probe_shards }}"
     assert probe["needs"] == ["mutation-plan", "mutation-refine"]
     assert probe["if"] == (
-        "${{ !cancelled() && needs.mutation-refine.result == 'success' && "
-        "needs.mutation-refine.outputs.probe == 'true' && needs.mutation-refine.outputs.probe_shards != '' }}"
+        "${{ !cancelled() && (needs.mutation-refine.result == 'success' || (needs.mutation-plan.result == 'success' "
+        "&& needs.mutation-plan.outputs.collected == 'true')) && (needs.mutation-refine.outputs.probe || "
+        "needs.mutation-plan.outputs.probe) == 'true' && (needs.mutation-refine.outputs.probe_shards || "
+        "needs.mutation-plan.outputs.probe_shards) != '' }}"
     )
-    assert probe["strategy"]["matrix"] == {"shard": "${{ fromJSON(needs.mutation-refine.outputs.probe_shards) }}"}
+    assert probe["strategy"]["matrix"] == {
+        "shard": "${{ fromJSON(needs.mutation-refine.outputs.probe_shards || needs.mutation-plan.outputs.probe_shards) }}"
+    }
     probe_steps = {step.get("name"): step for step in probe["steps"]}
     early = probe_steps["Run each mutant's early tests once for every shard"]
     assert early["run"] == (
@@ -71,3 +75,19 @@ def test_tests_mutation_probes_split_mutants_before_sizing_shards_from_survivors
         < names.index("Download the probed mutation plan")
         < names.index("Mutate changed Python files")
     )
+
+
+def test_tests_mutation_joins_plan_with_the_planning_install_and_replan_checks_out_one_commit() -> None:
+    jobs = _jobs()
+
+    def install(name: str) -> dict[str, Any]:
+        return next(step for step in jobs[name]["steps"] if step.get("name") == "Install dependencies")
+
+    for name in ("mutation-refine", "mutation-replan"):
+        assert install(name) == install("mutation-plan")
+        assert "-e" not in install(name)["run"].split()
+    assert jobs["mutation-refine"]["steps"][0]["with"]["fetch-depth"] == 0
+    assert jobs["mutation-replan"]["steps"][0]["with"] == {
+        "fetch-depth": 1,
+        "ref": "${{ github.event.pull_request.head.sha }}",
+    }

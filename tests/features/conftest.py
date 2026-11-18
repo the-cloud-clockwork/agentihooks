@@ -132,7 +132,9 @@ def _stop(process: subprocess.Popen) -> None:
 @pytest.fixture
 def ledger(tmp_path: Path) -> Iterator[Ledger]:
     """A seeded ledger in the Postgres service, served by a ledger server subprocess on a spare port."""
-    assert postgres.url(os.environ), f"{postgres.URL} must name the Postgres service"
+    address = postgres.url(os.environ)
+    assert address, f"{postgres.URL} must name the Postgres service"
+    postgres.PostgresLedgerRepository(address).migrate()
     slug = f"feature-{uuid.uuid4().hex[:10]}"
     folder = tmp_path / "ledger"
     folder.mkdir()

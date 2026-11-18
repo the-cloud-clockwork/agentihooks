@@ -12,6 +12,7 @@ from scripts.swarm.health import merge_stall, night_watch
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import MANUAL_SCALING, MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_v2 import front_door
+from tests.swarm.client_class import client_class
 
 pytestmark = pytest.mark.unit
 
@@ -72,7 +73,8 @@ def rig(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> dict[str, Any]:
 
     launch = {"seats": True}
 
-    def master(slug: str, config: SwarmConfig, held: RedisStore, live: Runtime, at: int) -> list[str]:
+    def master(slug: str, config: SwarmConfig, held: RedisStore, live: Runtime, at: int, forced: bool) -> list[str]:
+        assert forced
         started.append((slug, at))
         if launch["seats"]:
             name = f"master@{slug}"
@@ -85,7 +87,7 @@ def rig(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> dict[str, Any]:
     monkeypatch.setattr(merge_stall, "observe", lambda repo, at: {**QUIET, "at": at})
     monkeypatch.setattr(capacity, "ready_work", ready_work)
     monkeypatch.setattr(tick, "_master", master)
-    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient", lambda: ledger)
+    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient", client_class(ledger))
     monkeypatch.setattr("scripts.swarm_v2.runtime.routed.routed", routed)
     monkeypatch.setattr(cli, "now_ms", lambda: NOW)
     return {
@@ -368,7 +370,10 @@ def test_a_respawned_master_that_is_not_seated_on_the_front_door_leaves_the_dril
     name = "master@proof"
     held = front_door.seat(SCRATCH) if seat is None else f"{seat}@{SCRATCH}"
 
-    def master(slug: str, config: SwarmConfig, _store: RedisStore, _runtime: Runtime, at: int) -> list[str]:
+    def master(
+        slug: str, config: SwarmConfig, _store: RedisStore, _runtime: Runtime, at: int, forced: bool
+    ) -> list[str]:
+        assert forced
         store.put_agent(slug, AgentRecord(name, MASTER, MASTER, started_at=at, state=state, seat=held))
         if live:
             rig["runtime"].live.add(name)

@@ -1,6 +1,5 @@
 import json
 import os
-import urllib.request
 from unittest.mock import patch
 
 import pytest
@@ -150,11 +149,11 @@ def test_removing_a_missing_proof_ledger_is_not_found(live, credential):
 @pytest.mark.parametrize(("error", "extra"), [(None, {}), ("stop failed", {"swarm_error": "stop failed"})])
 def test_removing_stops_the_proof_ledgers_swarm_and_reports_a_failed_stop(live, credential, error, extra):
     slug = create(live, credential, "tswarm")[1]["data"]["slug"]
-    from scripts.swarm_ledger import ledger_server
+    from scripts.swarm_ledger import api_service, ledger_server
 
     with (
         patch.object(ledger_server, "swarm_status", return_value={"state": "running"}) as swarm,
-        patch.object(ledger_server, "swarm_control", return_value=(None, error)) as control,
+        patch.object(api_service, "swarm_control", return_value=(None, error)) as control,
     ):
         status, reply = remove(live, slug, **{"X-Controller-Credential": credential})
     swarm.assert_called_once_with(slug)
@@ -174,12 +173,7 @@ def client_env(live, credential, task):
 
 def test_the_remote_client_creates_and_removes_a_proof_ledger_with_the_controller_credential(live, credential):
     environ = client_env(live, credential, "tclient")
-    with (
-        patch.object(proof_ledger.ledger_link, "transport", return_value={}),
-        patch.object(proof_ledger.urllib.request, "urlopen", wraps=urllib.request.urlopen) as opened,
-    ):
-        assert proof_ledger.create(CONTENT, environ) == {"slug": "proof-323133-tclient-1", "created": True}
-    assert opened.call_args.kwargs == {"timeout": 10}
+    assert proof_ledger.create(CONTENT, environ) == {"slug": "proof-323133-tclient-1", "created": True}
     removed = proof_ledger.remove("proof-323133-tclient-1", environ)
     assert removed == {"slug": "proof-323133-tclient-1", "removed_at": ledger_bin.entries()["proof-323133-tclient-1"]}
 

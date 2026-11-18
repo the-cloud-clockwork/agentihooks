@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api_service.py:scripts.swarm_ledger.api_service.x_serve:e219f1416a8ec1135e617d41126fa88cdbb24e2646172d584351f44a6dc18a79": {
+    "reader": "standards-reader",
+    "reason": "typing.cast returns its value argument unchanged at run time; cast(None, legacy).adopt is the same call on the same object."
+  }
+}

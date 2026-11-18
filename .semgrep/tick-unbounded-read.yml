@@ -90,7 +90,6 @@ rules:
         - "/scripts/swarm/health/verdicts.py"
         - "/scripts/swarm/idle.py"
         - "/scripts/swarm/incidents.py"
-        - "/scripts/swarm/ledger_cutover.py"
         - "/scripts/swarm/ledger_events.py"
         - "/scripts/swarm/ledger_probe.py"
         - "/scripts/swarm/lifecycle.py"

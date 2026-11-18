@@ -68,6 +68,7 @@ edit its marker.
 | `AGENTIHOOKS_BUS_CREDENTIALS` | `hive join` | The minted credential, or an `openbao:` reference to it |
 | `AGENTIHOOKS_BUS_SCOPED=1` | `hive invite` and `hive join`, when the grant is scoped | Routes every queue, dead letter and event call to the swarm's own streams; state is reached through `for_swarm(<swarm>)`, and the root bus opens no state bucket |
 | `AGENTIHOOKS_BUS_BIND=1` | hive members | Binds existing streams and consumers instead of creating them; members hold no stream create grant |
+| `AGENTIHOOKS_BUS_REPLICAS` | the hub, on a NATS cluster | Creates every stream and bucket at this replica count (default 1) and raises existing streams below it in place at start, never lowering one |
 
 The hub reads the same variables. Set `AGENTIHOOKS_BUS_SCOPED=1` on the hub, without `AGENTIHOOKS_BUS_BIND`, once
 any member is scoped: it then creates each swarm's streams and reads the legacy ones beside them. Without it the hub
@@ -101,7 +102,8 @@ CI lab heads have their own global stream, `AGENTIHOOKS-CI-LAB-HEADS`, holding `
 provisioning bus open creates it after the events stream, so the events provisioning that resets the
 legacy stream's subjects never touches it, and a restart keeps its subjects and stored heads. The bus
 exposes it as `lab_heads`; the GitHub webhook receiver publishes lab heads there by stream name and
-never through the legacy events stream.
+never through the legacy events stream. [Lab head intake](ci-lab.md#lab-head-intake) covers what
+the receiver records there and the lab notice secret it needs.
 
 Each swarm has a state stream for `spoke-work`, `spoke-pending`, `hive-presence`, `hive-executions`,
 `execution-starts` and `inbox`.
@@ -383,7 +385,10 @@ missing hive user is accepted only in operator mode, where the values file has n
 | `the hive offered an unscoped bus credential; ask its hub to list this member's swarms` | The invite is marked scoped but the hub record has no `member_swarms` field | Run `agentihooks hive scope` on the hub, then join again |
 | `hive refresh`, `hive join` or `hive root-bus` refuses with `the hub signer record has no member_swarms field, so it scopes no member; it mints no unscoped bus credential`, or `hive invite` or `hive create` with `the hub signer record <path> has no member_swarms field` | The hub signer record has no `member_swarms` field, so the hub mints no member bus credential | Run `agentihooks hive scope` on the hub, then retry |
 | A launch fails with `slot request names hive '<a>' but the sending credential is bound to hive '<b>'`, and the hub log shows `hub: refused a <op> in swarm <swarm>: ...` | The request body names a hive other than the one in its subject: a caller built `asker` and `Remote` with different hives | Pass the member's own hive to both; the launch path does this from `AGENTIHOOKS_SLOT_HIVE` |
-| `TimeoutError: no responders for 'slots.<swarm>.<hive>'` on a member | The member's credential does not grant that subject, because the hive is not the one it was minted for or the swarm is not in its `member_swarms` entry; or no hub is serving | Ask as the member's own hive and swarm; check the hub is running and `agentihooks hive refresh` the member |
+| `TimeoutError: no responders for 'slots.<swarm>.<hive>'` on a member | No hub serves that subject | Check the hub is running and serving the swarm's account slots |
+| `TimeoutError: request to 'slots.<swarm>.<hive>' timed out after <n> ms` on a member that also logs `permissions violation for publish` | The member's credential does not grant that subject, because the hive is not the one it was minted for or the swarm is not in its `member_swarms` entry, so the server drops the request | Ask as the member's own hive and swarm; `agentihooks hive refresh` the member |
+| `TimeoutError: request to 'slots.<swarm>.<hive>' timed out after <n> ms` on a member with no permissions violation | The hub most likely answered after the timeout | Check the hub is running and not overloaded |
+| `TimeoutError: nats: the server at <url> did not finish the connect handshake within <n> s` on a member | The NATS server accepted the connection but did not finish the handshake within the first connect bound | Check the NATS server is running and not overloaded |
 | `no responders for 'swarm.<swarm>.slots'` | The member runs code from before the slot subject moved to `slots.<swarm>.<hive>` | Update the member to current code and run `agentihooks hive refresh` |
 | `Unavailable: hive '<name>' cannot ask for account slots (invalid event subject token '<name>')` | The hive name holds `.`, `*`, `>` or whitespace | Use a hive name that is one subject token |
 | `scoped queue migration is incomplete` | The hub has not finished `migrate_queue` for that lane | Finish the migration on the hub, then restart the member |

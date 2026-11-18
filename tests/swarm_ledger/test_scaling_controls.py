@@ -1,12 +1,12 @@
 import pytest
 
-from scripts.swarm_ledger import ledger_server
+from scripts.swarm_ledger import api_service
 from scripts.swarm_ledger.api import admin
 
 
 def test_page_sets_the_scaling_settings_in_one_change():
     body = {"action": "set", "scaling": "manual", "load_high": 2.5, "load_low": 0.5, "memory_per_agent_mb": 900}
-    assert ledger_server.control_argv(body) == [
+    assert api_service.control_argv(body) == [
         "set",
         "scaling=manual",
         "load-high=2.5",
@@ -25,7 +25,7 @@ def test_page_sets_the_scaling_settings_in_one_change():
     ],
 )
 def test_page_accepts_watermark_and_memory_boundaries(body, pairs):
-    assert ledger_server.control_argv({"action": "set", **body}) == ["set", *pairs]
+    assert api_service.control_argv({"action": "set", **body}) == ["set", *pairs]
 
 
 @pytest.mark.parametrize(
@@ -43,7 +43,7 @@ def test_page_accepts_watermark_and_memory_boundaries(body, pairs):
 )
 def test_page_refuses_bad_scaling_settings(body, reason):
     with pytest.raises(ValueError) as caught:
-        ledger_server.control_argv({"action": "set", **body})
+        api_service.control_argv({"action": "set", **body})
     assert str(caught.value) == reason
 
 

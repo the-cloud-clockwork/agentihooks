@@ -1,7 +1,7 @@
 import pytest
 
 from scripts.swarm import cli
-from scripts.swarm_ledger import ledger_server
+from scripts.swarm_ledger import api_service
 
 pytestmark = pytest.mark.unit
 
@@ -22,7 +22,7 @@ def test_the_command_line_refuses_any_other_choice(choice):
 
 @pytest.mark.parametrize("choice", CHOICES)
 def test_the_ledger_server_passes_every_recovery_choice_on(choice):
-    assert ledger_server.restore_decision_argv({"agent": "eng-7", "choice": choice}) == [
+    assert api_service.restore_decision_argv({"agent": "eng-7", "choice": choice}) == [
         "restore-decision",
         "eng-7",
         choice,
@@ -32,5 +32,5 @@ def test_the_ledger_server_passes_every_recovery_choice_on(choice):
 @pytest.mark.parametrize("choice", ["later", "NATIVE", "CONTEXT", None])
 def test_the_ledger_server_refuses_any_other_choice_by_name(choice):
     with pytest.raises(ValueError) as refused:
-        ledger_server.restore_decision_argv({"agent": "eng-7", "choice": choice})
+        api_service.restore_decision_argv({"agent": "eng-7", "choice": choice})
     assert str(refused.value) == "Choose native, context, fresh or resume"

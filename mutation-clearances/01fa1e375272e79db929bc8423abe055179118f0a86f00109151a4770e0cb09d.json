@@ -1,0 +1,6 @@
+{
+  "scripts/tick/adapters/database_ledger.py:scripts.tick.adapters.database_ledger.x_exchanged:f485aa908395b1fad09228052e18b1d0cbf1042d73d137184b55f3b77fad505e": {
+    "reader": "standards-reader",
+    "reason": "exchanged stores Host in an email Message whose get ignores name case; routes.dispatch reads Host through handler.headers.get, so HOST and Host are one header."
+  }
+}

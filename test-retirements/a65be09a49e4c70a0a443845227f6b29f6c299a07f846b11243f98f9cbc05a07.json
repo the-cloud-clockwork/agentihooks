@@ -1,0 +1,6 @@
+{
+  "tests/swarm_ledger/test_request_metrics_journal.py::test_a_stopping_server_persists_a_stop_before_it_releases_the_writer": {
+    "reader": "standards-reader",
+    "reason": "The ledger server holds no writer lease and runs no write upkeep; the ledger API service holds the folder lease, tested by behaviour in tests/test_swarm_v2_ledger_writer.py, and journals no request metrics."
+  }
+}

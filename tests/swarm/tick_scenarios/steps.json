@@ -21,7 +21,13 @@
   "reap": [
    "hive-roll"
   ],
+  "status publish": [
+   "running"
+  ],
   "step starvation": [
+   "running"
+  ],
+  "tick master": [
    "running"
   ],
   "workflow runner": [
@@ -109,10 +115,8 @@
   "snapshot job",
   "spawn hold clear",
   "stall watch",
-  "status publish",
   "stopped branch",
   "strays",
-  "tick master",
   "tick view",
   "time left",
   "track outages",

@@ -3,6 +3,7 @@ import inspect
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,7 @@ import pytest
 import yaml
 
 from scripts import ci_wiring, gate_protected
+from scripts.ci_lab import expressions
 
 _ROOT = Path(__file__).resolve().parents[1]
 pytestmark = pytest.mark.unit
@@ -669,6 +671,34 @@ def test_protected_select_outputs_admit_only_dropping_the_unused_file_outputs_or
     assert problems == (["The head changes the durations provenance context outputs."] if red else [])
 
 
+@pytest.mark.parametrize(
+    ("base_outputs", "head_outputs", "red"),
+    [
+        ({}, {"ledger": "${{ steps.select.outputs.ledger }}"}, False),
+        ({"sonar": "${{ steps.select.outputs.sonar }}"}, {"ledger": "${{ steps.select.outputs.ledger }}"}, False),
+        ({}, {"ledger": "run"}, True),
+        ({"ledger": "run"}, {"ledger": "${{ steps.select.outputs.ledger }}"}, True),
+        ({}, {"ledger": "${{ steps.select.outputs.ledger }}", "extra": "1"}, True),
+    ],
+)
+def test_protected_select_outputs_admit_adding_the_ledger_mark_only_while_the_base_has_none(
+    base_outputs: dict[str, str], head_outputs: dict[str, str], red: bool
+) -> None:
+    from scripts import ci_reuse
+
+    base = _workflow()
+    base["jobs"]["reuse"] = {"if": "github.event_name != 'merge_group' && github.event_name != 'pull_request'"}
+    base["jobs"]["select"] = {
+        "outputs": {"legs": "${{ steps.select.outputs.legs }}", **base_outputs},
+        "steps": ci_reuse.duration_provenance_steps(),
+    }
+    base["jobs"]["gate"]["needs"].append("select")
+    head = copy.deepcopy(base)
+    head["jobs"]["select"]["outputs"].update(head_outputs)
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {})
+    assert problems == (["The head changes the durations provenance context outputs."] if red else [])
+
+
 def test_protected_durations_outputs_may_not_drop_the_unused_select_file_outputs():
     from scripts import ci_reuse
 
@@ -1271,6 +1301,24 @@ def test_the_tests_gate_may_skip_sonar_when_selection_marks_the_pull_request_tes
     assert bool(problems) == weakened, problems
 
 
+@pytest.mark.parametrize("weakened", [False, True])
+def test_the_tests_gate_may_require_ledger_load_when_selection_marks_a_ledger_server_change(weakened: bool) -> None:
+    from scripts import ci_reuse
+
+    base = {path.name: yaml.safe_load(path.read_text()) for path in (_ROOT / ".github/workflows").glob("*.yml")}
+    head = copy.deepcopy(base)
+    head["test.yml"]["jobs"]["select"]["outputs"]["ledger"] = "${{ steps.select.outputs.ledger }}"
+    gate = head["test.yml"]["jobs"]["gate-required"]
+    gate["steps"] = ci_reuse.ledger_required(gate["steps"])
+    assert '+ (if .select.outputs.ledger == "run" then ["ledger-load"] else [] end)' in gate["steps"][0]["run"]
+    if weakened:
+        gate["steps"][0]["run"] = gate["steps"][0]["run"].replace('["ledger-load"] else []', "[] else []")
+    config = json.loads((_ROOT / ".github/gate-wiring.json").read_text())
+    policy = json.loads((_ROOT / ".github/workflows/trusted-actors.json").read_text())
+    problems = gate_protected.grade(base, config, head, config, policy)
+    assert bool(problems) == weakened, problems
+
+
 def test_a_base_skipping_sonar_on_test_only_changes_still_refuses_a_head_that_drops_the_writer_lock():
     from scripts import ci_reuse
 
@@ -1343,14 +1391,14 @@ _REVIEWED_SUMMARY = """
 
 - name: Download this run's test durations
   if: ${{ always() }}
-  uses: actions/download-artifact@v4
+  uses: actions/download-artifact@v8.0.2
   with:
     pattern: durations-3.*
     path: test-reports
 
 - name: Download this run's test flakes
   if: ${{ always() }}
-  uses: actions/download-artifact@v4
+  uses: actions/download-artifact@v8.0.2
   with:
     pattern: flakes-3.*
     path: test-reports
@@ -1640,6 +1688,111 @@ def test_the_separate_summary_may_retry_each_download_once(pipefail):
         steps = ci_reuse.pipefail_summary(steps)
     config = _separate_summary(head, steps)
     assert gate_protected.grade({"test.yml": base}, config, {"test.yml": head}, config, _POLICY) == []
+
+
+def _downloads_on(steps: list[dict[str, Any]], uses: list[str]) -> list[dict[str, Any]]:
+    releases = iter(uses)
+    return [
+        {**step, "uses": next(releases)} if str(step.get("name")).startswith("Download") else step for step in steps
+    ]
+
+
+@pytest.mark.parametrize("uses", ["actions/download-artifact@v4", "actions/download-artifact@v8.0.2"])
+@pytest.mark.parametrize("retried", [False, True])
+def test_the_separate_summary_accepts_each_reviewed_download_release(uses: str, retried: bool) -> None:
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    steps = _downloads_on(ci_reuse.summary_steps(), [uses, uses])
+    if retried:
+        steps = ci_reuse.retried_summary(steps)
+    config = _separate_summary(head, steps)
+    assert gate_protected.grade({"test.yml": base}, config, {"test.yml": head}, config, _POLICY) == []
+
+
+@pytest.mark.parametrize(
+    "uses",
+    [
+        ["actions/download-artifact@v8", "actions/download-artifact@v8"],
+        ["actions/download-artifact@main", "actions/download-artifact@main"],
+        ["actions/download-artifact@v4", "actions/download-artifact@v8.0.2"],
+        ["actions/upload-artifact@v4", "actions/upload-artifact@v4"],
+    ],
+)
+def test_the_separate_summary_refuses_an_unreviewed_download_release(uses: list[str]) -> None:
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    config = _separate_summary(head, _downloads_on(ci_reuse.summary_steps(), uses))
+    problems = gate_protected.grade({"test.yml": base}, config, {"test.yml": head}, config, _POLICY)
+    assert "The test summary must use the reviewed reporting job." in problems
+
+
+def test_the_summary_download_pins_only_the_artifact_downloads() -> None:
+    from scripts import ci_reuse
+
+    checkout, durations, flakes, summarize = ci_reuse.summary_steps()
+    pinned = gate_protected._summary_download([checkout, durations, flakes, summarize], "actions/download-artifact@v9")
+    assert pinned == [
+        checkout,
+        {**durations, "uses": "actions/download-artifact@v9"},
+        {**flakes, "uses": "actions/download-artifact@v9"},
+        summarize,
+    ]
+
+
+def _one_download_summary(uses: str, name: str, pattern: str) -> list[dict[str, Any]]:
+    from scripts import ci_reuse
+
+    checkout, durations, _flakes, summarize = ci_reuse.summary_steps()
+    reports = {**durations, "name": name, "uses": uses, "with": {"pattern": pattern, "path": "test-reports"}}
+    return [checkout, reports, summarize]
+
+
+@pytest.mark.feature("test-summary-downloads-every-report-in-one-step")
+@pytest.mark.parametrize("uses", ["actions/download-artifact@v4", "actions/download-artifact@v8.0.2"])
+@pytest.mark.parametrize("retried", [False, True])
+@pytest.mark.parametrize("pipefail", [False, True])
+def test_the_separate_summary_accepts_one_download_of_every_report(uses: str, retried: bool, pipefail: bool) -> None:
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    steps = _one_download_summary(uses, "Download this run's test reports", "{durations,flakes}-3.*")
+    if retried:
+        steps = ci_reuse.retried_summary(steps)
+    if pipefail:
+        steps = ci_reuse.pipefail_summary(steps)
+    config = _separate_summary(head, steps)
+    assert gate_protected.grade({"test.yml": base}, config, {"test.yml": head}, config, _POLICY) == []
+
+
+@pytest.mark.feature("test-summary-downloads-every-report-in-one-step")
+@pytest.mark.parametrize(
+    ("name", "pattern"),
+    [
+        ("Download this run's test reports", "*"),
+        ("Download this run's test reports", "durations-3.*"),
+        ("Download this run's test durations", "{durations,flakes}-3.*"),
+    ],
+)
+def test_the_separate_summary_refuses_one_download_of_other_reports(name: str, pattern: str) -> None:
+    base, head = _aggregators()
+    config = _separate_summary(head, _one_download_summary("actions/download-artifact@v8.0.2", name, pattern))
+    problems = gate_protected.grade({"test.yml": base}, config, {"test.yml": head}, config, _POLICY)
+    assert "The test summary must use the reviewed reporting job." in problems
+
+
+@pytest.mark.feature("test-summary-downloads-every-report-in-one-step")
+def test_the_one_download_puts_one_step_for_every_report_where_the_first_download_was() -> None:
+    from scripts import ci_reuse
+
+    checkout, durations, flakes, summarize = ci_reuse.summary_steps()
+    reports = {
+        **durations,
+        "name": "Download this run's test reports",
+        "with": {"pattern": "{durations,flakes}-3.*", "path": "test-reports"},
+    }
+    assert gate_protected._one_download([checkout, durations, flakes, summarize]) == [checkout, reports, summarize]
 
 
 def test_the_retried_summary_waits_and_downloads_each_report_once_more():
@@ -2182,7 +2335,7 @@ _FORWARDED_STATS = """NEEDS=$(jq 'if ."mutation-plan".result == "success" and ."
 
 
 def _without_forwarded_stats(run):
-    return run.removeprefix(_SELECTION_DIAGNOSTIC).removeprefix(_FORWARDED_STATS)
+    return run.removeprefix(_SELECTION_DIAGNOSTIC).removeprefix(_FORWARDED_STATS).removeprefix(_COLLECTED_STATS)
 
 
 def _with_forwarded_stats(run):
@@ -2214,6 +2367,44 @@ def test_a_weakened_forwarded_statistics_form_is_red(before, after):
     head = copy.deepcopy(base)
     step = head["jobs"]["gate-required"]["steps"][0]
     step["run"] = _with_forwarded_stats(step["run"]).replace(before, after, 1)
+    assert "The head's Gate — Required changes its steps; the protected branch grades with its own." in _grade(
+        {"test.yml": head}, base={"test.yml": base}
+    )
+
+
+_COLLECTED_STATS = """NEEDS=$(jq 'if ."mutation-plan".result == "success" and (."mutation-plan".outputs.forwarded == "true" or ."mutation-plan".outputs.collected == "true") and ."mutation-stats".result == "skipped" then ."mutation-stats".result = "success" else . end' <<< "$NEEDS")
+"""
+
+
+def _with_collected_stats(run: str) -> str:
+    assert run.startswith(_SELECTION_DIAGNOSTIC)
+    return _SELECTION_DIAGNOSTIC + _COLLECTED_STATS + _without_forwarded_stats(run).removeprefix(_COLLECTED_STATS)
+
+
+def test_the_required_gate_accepts_a_stats_skip_when_the_plan_collected() -> None:
+    base = ci_wiring.load(_ROOT)
+    head = copy.deepcopy(base)
+    step = head["test.yml"]["jobs"]["gate-required"]["steps"][0]
+    step["run"] = _with_collected_stats(step["run"])
+    config = json.loads((_ROOT / ci_wiring.CONFIG).read_text())
+    actors = json.loads((_ROOT / ".github/workflows/trusted-actors.json").read_text())
+    assert gate_protected.grade(base, config, head, config, actors) == []
+
+
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        (' or ."mutation-plan".outputs.collected == "true"', ' or ."mutation-plan".outputs.collected != "false"'),
+        ('."mutation-plan".outputs.collected == "true"', '."mutation-shard".result == "skipped"'),
+        ('."mutation-plan".result == "success" and ', ""),
+        ('."mutation-stats".result == "skipped"', '."mutation-stats".result != "success"'),
+    ],
+)
+def test_a_weakened_collected_statistics_form_is_red(before: str, after: str) -> None:
+    base = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
+    head = copy.deepcopy(base)
+    step = head["jobs"]["gate-required"]["steps"][0]
+    step["run"] = _with_collected_stats(step["run"]).replace(before, after, 1)
     assert "The head's Gate — Required changes its steps; the protected branch grades with its own." in _grade(
         {"test.yml": head}, base={"test.yml": base}
     )
@@ -2356,6 +2547,104 @@ def test_a_head_behind_a_landed_frozen_change_is_green(frozen, capsys):
     _put(frozen, {gate_protected.FROZEN: _registry(_hash("old\n"), _hash("new\n"))}, "announce")
     _put(frozen, {"scripts/gate.py": "new\n"}, "land")
     assert _frozen_grade(frozen, head, capsys)[0] == 0
+
+
+_LINT_PROTECTED = "Require trusted actors before private runner admission"
+
+
+def _accepting(one: tuple[str, ...], two: tuple[str, ...]) -> str:
+    """Render a registry freezing two gate files at the given contents, one line per accepted blob."""
+    accepted = {"gates/one.py": [_hash(text) for text in one], "gates/two.py": [_hash(text) for text in two]}
+    return json.dumps(accepted, indent=2) + "\n"
+
+
+def _behind_dev(repo: Path, change: dict[str, str]) -> dict[str, str]:
+    """Open a pull request on dev, land a frozen announcement and gate change on dev, return the event context."""
+    _commit(repo, {"test.yml": _workflow()}, {}, "base")
+    frozen = {
+        "gates/one.py": "old\n",
+        "gates/two.py": "two\n",
+        gate_protected.FROZEN: _accepting(("old\n",), ("two\n",)),
+    }
+    opened = _put(repo, frozen, "freeze")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    head = _put(repo, change, "change")
+    _git(repo, "checkout", "-q", "dev")
+    _put(repo, {gate_protected.FROZEN: _accepting(("old\n", "new\n"), ("two\n",))}, "announce")
+    _put(repo, {"gates/one.py": "new\n"}, "land")
+    _git(repo, "checkout", "-q", "--detach")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "merge", "-q", "--no-ff", "-m", "merge", head)
+    return {
+        "github.event.pull_request.base.sha": opened,
+        "github.event.pull_request.head.sha": head,
+        "github.sha": _git(repo, "rev-parse", "HEAD"),
+    }
+
+
+def _lint_protected(repo: Path, runner: Path, grader: str, context: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    """Run the Tests lint step that grades the protected gate, from a grader worktree at the given revision that
+    imports this checkout's gate code, with the step env read from the event context."""
+    steps = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["lint"]["steps"]
+    step = next(step for step in steps if step.get("name") == _LINT_PROTECTED)
+    _git(repo, "worktree", "add", "--detach", str(runner / "grader"), grader)
+    (runner / "grader/scripts").symlink_to(_ROOT / "scripts")
+    (runner / "bin").mkdir()
+    (runner / "bin/python").write_text(f'#!/usr/bin/env bash\nexec "{sys.executable}" "$@"\n')
+    (runner / "bin/python").chmod(0o755)
+    env = {
+        **os.environ,
+        "GITHUB_SHA": context["github.sha"],
+        "PATH": f"{runner / 'bin'}{os.pathsep}{os.environ['PATH']}",
+        "RUNNER_TEMP": str(runner),
+        **{name: expressions.interpolate(value, context) for name, value in step.get("env", {}).items()},
+    }
+    command = ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", step["run"]]
+    return subprocess.run(command, cwd=repo, env=env, capture_output=True, text=True, timeout=300)
+
+
+@pytest.mark.feature("protected-lint-grades-the-pull-request-head")
+@pytest.mark.parametrize("announces", [False, True], ids=["unrelated", "registry"])
+def test_the_protected_lint_step_passes_a_pull_request_behind_landed_frozen_changes(
+    repo: Path, tmp_path_factory: pytest.TempPathFactory, announces: bool
+) -> None:
+    announcement = {gate_protected.FROZEN: _accepting(("old\n",), ("two\n", "next\n"))}
+    event = _behind_dev(repo, announcement if announces else {"notes.txt": "unrelated\n"})
+    opened, head = event["github.event.pull_request.base.sha"], event["github.event.pull_request.head.sha"]
+    graded = _lint_protected(repo, tmp_path_factory.mktemp("runner"), opened, event)
+    assert (graded.returncode, graded.stdout) == (
+        0,
+        f"graded {head[:12]} against merge base {opened[:12]}: 0 protected gate problems\n",
+    ), graded.stderr
+
+
+@pytest.mark.feature("protected-lint-grades-the-pull-request-head")
+def test_the_protected_lint_step_still_refuses_a_frozen_edit_behind_dev(
+    repo: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    event = _behind_dev(repo, {"gates/two.py": "planted\n"})
+    graded = _lint_protected(
+        repo, tmp_path_factory.mktemp("runner"), event["github.event.pull_request.base.sha"], event
+    )
+    assert graded.returncode == 1, graded.stdout + graded.stderr
+    assert (
+        f"::error::The head changes the frozen gate file gates/two.py to content {gate_protected.FROZEN} "
+        "on the base does not accept; announce its blob there by its own pull request first.\n"
+    ) in graded.stdout
+    assert "gates/one.py" not in graded.stdout
+
+
+@pytest.mark.feature("protected-lint-grades-the-pull-request-head")
+def test_the_protected_lint_step_grades_the_run_revision_outside_a_pull_request(
+    repo: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    base = _commit(repo, {"test.yml": _workflow()}, {}, "base")
+    head = _put(repo, {"notes.txt": "unrelated\n"}, "change")
+    outside = {"github.event.pull_request.head.sha": "", "github.sha": head}
+    graded = _lint_protected(repo, tmp_path_factory.mktemp("runner"), base, outside)
+    assert (graded.returncode, graded.stdout) == (
+        0,
+        f"graded {head[:12]} against merge base {base[:12]}: 0 protected gate problems\n",
+    ), graded.stderr
 
 
 def test_a_base_without_a_registry_freezes_nothing(repo, capsys):

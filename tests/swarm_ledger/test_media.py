@@ -15,9 +15,10 @@ sys.path.insert(0, str(SCRIPTS))
 import ledger_bin  # noqa: E402
 import ledger_core as core  # noqa: E402
 import ledger_media as media  # noqa: E402
-import ledger_server as server  # noqa: E402
 
+from scripts.swarm_ledger import ledger_server as server  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
+from tests.swarm_ledger.ledger_front import Front  # noqa: E402
 from tests.swarm_ledger.test_bin import DAY_MS, make_ledger  # noqa: E402
 
 
@@ -106,7 +107,7 @@ class Endpoint(unittest.TestCase):
         core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
         html_path, _ = make_ledger("via-media")
         cls.token = legacy_page.stored_token(html_path)
-        cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), Front)
         cls.port = cls.httpd.server_address[1]
         threading.Thread(target=cls.httpd.serve_forever, args=(0.01,), daemon=True).start()
 

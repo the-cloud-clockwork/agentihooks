@@ -1,11 +1,15 @@
 import json
+from dataclasses import replace
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
 import scripts.swarm_ledger.repository  # noqa: F401  puts the ledger folder on sys.path before ledger_core loads
 from scripts.gates import log
+from scripts.swarm.store import AgentRecord
+from scripts.swarm_ledger import api_service
 from scripts.swarm_ledger import ledger_core as core
-from scripts.swarm_ledger import ledger_server
 from scripts.swarm_v2 import front_door
 from tests import sv2_mst04_cases as cases
 from tests.sv2_mst04_cases import ENGINEER, LEAD, LEAD_NAME, SECOND, SECOND_NAME, SLUG
@@ -52,6 +56,139 @@ def test_the_front_door_is_the_bare_master_seat():
         False,
         False,
     ]
+
+
+DOOR = AgentRecord(
+    "master@a1b2c3-0001",
+    "master",
+    "master",
+    harness="claude",
+    account="home",
+    seat="master@sw",
+    route_kind="master-login",
+)
+
+
+@pytest.mark.feature("balance-master-route")
+@pytest.mark.parametrize(
+    ("change", "route"),
+    [
+        ({}, "claude ai login"),
+        ({"route_kind": "interactive"}, "claude ai login"),
+        ({"route_kind": "api"}, ""),
+        ({"seat": ""}, "claude ai login"),
+        ({"seat": "master-2@sw"}, ""),
+        ({"lane": "eng"}, ""),
+        ({"state": "finished"}, ""),
+        ({"harness": "codex"}, ""),
+    ],
+)
+def test_the_master_route_names_only_a_working_claude_front_door_masters_route(
+    change: dict[str, str], route: str
+) -> None:
+    assert front_door.master_route("sw", replace(DOOR, **change), []) == route
+
+
+@pytest.mark.feature("master-route-placement-fallback")
+@pytest.mark.parametrize("route_kind", ["master-login", "interactive"])
+@pytest.mark.parametrize(
+    ("placement", "route"), [("fallback", "token fallback"), ("forced", "claude ai login"), ("", "claude ai login")]
+)
+def test_a_login_route_that_landed_on_a_token_reads_token_fallback(route_kind: str, placement: str, route: str) -> None:
+    assert front_door.master_route("sw", replace(DOOR, route_kind=route_kind, placement=placement), []) == route
+
+
+@pytest.mark.feature("master-route-fallback-only-from-login")
+@pytest.mark.parametrize(
+    ("change", "route"),
+    [
+        ({"route_kind": "subscription", "desired_route_kind": "interactive"}, "token fallback"),
+        ({"route_kind": "subscription"}, ""),
+        ({"route_kind": "subscription", "placement": "fallback"}, ""),
+        ({"route_kind": "api", "desired_route_kind": "interactive"}, ""),
+    ],
+)
+def test_the_master_route_says_fallback_only_when_the_claude_ai_login_was_wanted(
+    change: dict[str, str], route: str
+) -> None:
+    assert front_door.master_route("sw", replace(DOOR, **change), []) == route
+
+
+@pytest.mark.feature("master-route-acting-front-door")
+@pytest.mark.parametrize(
+    ("seat", "held", "route"),
+    [
+        ("master-2@sw", ["master-2@sw"], "claude ai login"),
+        ("master-2@sw", ["master@sw", "master-2@sw"], ""),
+        ("master@sw", ["master-2@sw"], ""),
+        ("master-3@sw", ["master-3@sw", "master-2@sw"], ""),
+        ("", ["master@a1b2c3-0001"], "claude ai login"),
+    ],
+)
+def test_the_master_route_follows_the_seat_the_tick_lead_rule_names(seat: str, held: list[str], route: str) -> None:
+    assert front_door.master_route("sw", replace(DOOR, seat=seat), held) == route
+
+
+@pytest.mark.feature("balance-master-route")
+def test_the_master_routes_name_every_swarms_front_door_route_by_its_account() -> None:
+    import fakeredis
+
+    agents = {
+        "sw": [
+            DOOR,
+            replace(DOOR, name="engineer@a1b2c3-0002", lane="eng", task="t1", seat="eng-1@sw", account="alpha"),
+        ],
+        "other": [
+            replace(
+                DOOR,
+                name="master@d4e5f6-0001",
+                seat="master@other",
+                account="beta",
+                route_kind="subscription",
+                desired_route_kind="interactive",
+            )
+        ],
+    }
+    store = SimpleNamespace(
+        redis=fakeredis.FakeRedis(decode_responses=True), slugs=lambda: list(agents), agents=lambda slug: agents[slug]
+    )
+
+    assert front_door.master_routes(cast(front_door.Swarms, store), lambda found: found) == {
+        "home": "claude ai login",
+        "beta": "token fallback",
+    }
+
+
+@pytest.mark.feature("master-route-live-masters-only")
+def test_the_master_routes_skip_a_front_door_master_the_live_rule_drops() -> None:
+    import fakeredis
+
+    agents = [DOOR, replace(DOOR, name="master@a1b2c3-0002", seat="master-2@sw", account="beta")]
+    store = SimpleNamespace(
+        redis=fakeredis.FakeRedis(decode_responses=True), slugs=lambda: ["sw"], agents=lambda slug: agents
+    )
+
+    routes = front_door.master_routes(cast(front_door.Swarms, store), lambda found: found[1:])
+
+    assert routes == {}
+
+
+@pytest.mark.feature("master-route-acting-front-door")
+def test_the_master_routes_name_the_lead_seat_when_no_master_seat_is_held() -> None:
+    import fakeredis
+
+    from scripts.inbox.seats import SeatRegistry
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    gone = replace(DOOR, name="master@a1b2c3-0009", state="finished")
+    SeatRegistry(redis).occupy("master@sw", gone.name, 1)
+    agents = [gone, DOOR]
+    store = cast(front_door.Swarms, SimpleNamespace(redis=redis, slugs=lambda: ["sw"], agents=lambda slug: agents))
+
+    assert (front_door.held_seats(store, "sw"), front_door.master_routes(store, lambda found: found)) == (
+        [],
+        {"home": "claude ai login"},
+    )
 
 
 def test_the_refusal_names_the_inbox_route_to_the_front_door():
@@ -281,7 +418,7 @@ def test_the_server_write_gate_refuses_a_backend_master_chat_write_naming_the_fr
     operator_says(world)
     ops = [chat(SECOND_NAME, n=1), chat(LEAD_NAME, n=2)]
 
-    state, rejected = core.sync(SLUG, ops=ops, gate=ledger_server.write_gate(SLUG))
+    state, rejected = core.sync(SLUG, ops=ops, gate=api_service.write_gate(SLUG))
 
     assert set(rejected) == {"m-1"}
     assert state["_meta"]["warnings"] == [front_door.refusal(SLUG, SECOND)]

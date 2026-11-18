@@ -90,7 +90,15 @@ TEST_ONLY_SONAR = (
     ),
 )
 
+LEDGER_REQUIRED = (
+    '\n      + (if $mutation == "true"',
+    '\n      + (if .select.outputs.ledger == "run" then ["ledger-load"] else [] end)\n      + (if $mutation == "true"',
+)
+
 FORWARDED_STATS = """NEEDS=$(jq 'if ."mutation-plan".result == "success" and ."mutation-plan".outputs.forwarded == "true" and ."mutation-stats".result == "skipped" then ."mutation-stats".result = "success" else . end' <<< "$NEEDS")
+"""
+
+COLLECTED_STATS = """NEEDS=$(jq 'if ."mutation-plan".result == "success" and (."mutation-plan".outputs.forwarded == "true" or ."mutation-plan".outputs.collected == "true") and ."mutation-stats".result == "skipped" then ."mutation-stats".result = "success" else . end' <<< "$NEEDS")
 """
 
 QUEUE_TIER = (
@@ -229,6 +237,11 @@ def test_only_sonar(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [{**aggregation, "run": run}, *rest]
 
 
+def ledger_required(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    [aggregation, *rest] = steps
+    return [{**aggregation, "run": aggregation["run"].replace(*LEDGER_REQUIRED)}, *rest]
+
+
 def summary_steps() -> list[dict[str, Any]]:
     return yaml.safe_load(Path(__file__).with_name("ci_gate_summary_steps.yml").read_text())
 
@@ -275,6 +288,12 @@ fi
 def forwarded_stats(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
     [aggregation, *rest] = steps
     return [{**aggregation, "run": FORWARDED_STATS + aggregation["run"]}, *rest]
+
+
+def collected_stats(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Accept a skipped stats job when the plan job forwarded the report or collected the stats itself."""
+    [aggregation, *rest] = steps
+    return [{**aggregation, "run": COLLECTED_STATS + aggregation["run"]}, *rest]
 
 
 def lab_verdict(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:

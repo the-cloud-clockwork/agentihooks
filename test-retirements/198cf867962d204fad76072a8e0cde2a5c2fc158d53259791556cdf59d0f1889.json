@@ -1,0 +1,6 @@
+{
+  "tests/tick/test_database_ledger.py::test_a_tick_routed_call_serves_in_process_only_while_the_database_url_is_set": {
+    "reader": "standards-reader",
+    "reason": "The cutover switch is deleted: no api-url setting, ledger-ready key, scoped or configured ledger route, hosted lease route or serving switch remains; the lab-url refusal keeps the same five addresses and the API service lease keeps its own tests."
+  }
+}
