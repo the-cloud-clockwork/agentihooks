@@ -6,6 +6,7 @@ import yaml
 pytestmark = pytest.mark.unit
 
 CHART = Path(__file__).resolve().parents[1] / "deploy/helm/agentihooks-swarm"
+SMOKE = CHART / "ci" / "kind-smoke.sh"
 
 
 def test_api_values_default_disabled_with_its_own_resources_and_public_route() -> None:
@@ -19,6 +20,13 @@ def test_api_values_default_disabled_with_its_own_resources_and_public_route() -
     assert api["publicRoute"]["host"] == ""
     assert "resources" in api
     assert "podDisruptionBudget" in api
+
+
+def test_the_kind_proof_renders_the_api_service_before_any_cluster_starts() -> None:
+    script = SMOKE.read_text()
+
+    assert 'python3 tests/chart_api.py "$chart"' in script
+    assert script.index("python3 tests/chart_api.py") < script.index("kind create cluster")
 
 
 def test_api_deployment_mirrors_the_ledgers_env_and_settings() -> None:
