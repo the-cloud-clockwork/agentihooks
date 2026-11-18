@@ -9009,6 +9009,42 @@
         "tests/swarm/test_pull_views.py::test_open_and_closed_pull_requests_are_read_again_by_a_new_process",
         "tests/swarm/test_pull_views.py::test_a_kept_entry_with_other_fields_is_read_again_and_replaced"
       ]
+    },
+    {
+      "id": "lab-remote-in-workspaces",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/loop-remote-in-workspaces",
+      "behaviour": "Every workspace carries the lab remote: wt.sh new and tmp, swarm v2 workspace mirrors and hive checkouts at daemon start give a repository the lab remote at AGENTIHOOKS_LAB_REMOTE with a credential helper reading AGENTIHOOKS_LAB_REMOTE_TOKEN when the lab URL names the repository origin names. swarm publish --via lab pushes HEAD to refs/grade/<task> with the branch push option before origin and pushes origin on a green grade or at once with --direct, leaving origin untouched on a red one. A git push lab is a push: the prepush guard needs the gate, the one push gate holds one relaying the task branch while its checks run, panic spares one only for a registered fix, and the stop gate still counts only origin.",
+      "seam": "wt.sh new and tmp, swarm publish, swarm v2 workspace prepare, the hive daemon start, and the one push, panic, prepush and stop guards",
+      "tests": [
+        "tests/ci_lab/test_remote_checkout.py::test_name_is_the_lowercase_repository_a_remote_ends_in",
+        "tests/ci_lab/test_remote_checkout.py::test_serves_only_the_repository_its_origin_names",
+        "tests/ci_lab/test_remote_checkout.py::test_carry_adds_the_lab_remote_and_a_token_helper_that_stores_no_token",
+        "tests/ci_lab/test_remote_checkout.py::test_carry_points_an_existing_lab_remote_at_the_lab_url",
+        "tests/ci_lab/test_remote_checkout.py::test_carry_leaves_a_repository_the_lab_does_not_serve_untouched",
+        "tests/ci_lab/test_remote_checkout.py::test_at_runs_git_in_the_checkout_with_its_timeout",
+        "tests/ci_lab/test_remote_checkout.py::test_relayed_reads_the_branch_push_options_of_a_lab_push",
+        "tests/test_worktree_skill.py::TestLabRemote::test_new_and_tmp_give_the_repository_the_lab_remote_and_its_token_helper",
+        "tests/test_worktree_skill.py::TestLabRemote::test_new_points_an_existing_lab_remote_at_the_lab_url",
+        "tests/test_worktree_skill.py::TestLabRemote::test_new_adds_no_lab_remote_when_unset_or_for_another_repository",
+        "tests/swarm/test_publish.py::test_a_lab_push_needs_the_prepush_gate_like_any_push",
+        "tests/swarm/test_publish.py::test_the_stop_gate_counts_a_head_pushed_only_to_the_lab_as_unpushed",
+        "tests/swarm/test_publish.py::test_publish_via_lab_grades_head_on_the_lab_before_origin_and_pushes_origin_on_green",
+        "tests/swarm/test_publish.py::test_publish_via_lab_leaves_origin_untouched_on_a_red_grade",
+        "tests/swarm/test_publish.py::test_publish_via_lab_direct_pushes_origin_after_the_lab_without_waiting",
+        "tests/swarm/test_publish.py::test_publish_via_lab_refuses_without_a_lab_remote_for_the_repository",
+        "tests/swarm/test_publish.py::test_publish_via_lab_refuses_a_lab_push_without_a_landed_grade",
+        "tests/swarm/test_publish.py::test_lab_conclusion_refuses_once_the_wait_runs_out",
+        "tests/swarm/test_publish.py::test_read_grade_reads_the_lab_answer_with_its_timeout",
+        "tests/swarm/test_publish.py::test_publish_command_hands_the_lab_route_to_publish",
+        "tests/test_swarm_v2_workspaces.py::test_prepare_gives_the_mirror_the_lab_remote_its_worktree_shows",
+        "tests/test_swarm_v2_workspaces.py::test_prepare_adds_no_lab_remote_for_another_repository",
+        "tests/hive/test_daemon.py::test_run_gives_hive_checkouts_the_lab_remote_once_the_operator_env_is_loaded",
+        "tests/hive/test_daemon.py::test_carry_lab_gives_each_checkout_the_lab_serves_the_lab_remote",
+        "tests/gates/test_one_push.py::test_a_lab_push_writes_the_branch_its_push_option_hands_the_relay",
+        "tests/gates/test_one_push.py::test_a_lab_push_relaying_the_task_branch_is_held_while_checks_run",
+        "tests/swarm/test_panic.py::test_panic_spares_a_lab_push_only_when_it_grades_or_relays_a_registered_fix"
+      ]
     }
   ],
   "unmapped_rules": [

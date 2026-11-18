@@ -1,4 +1,5 @@
 import json
+import subprocess
 import threading
 from pathlib import Path
 from typing import Any
@@ -414,6 +415,40 @@ def test_rollout_readiness_is_published_only_after_a_successful_beat(monkeypatch
     with pytest.raises(RuntimeError if fails else KeyboardInterrupt):
         daemon.run(lambda: (object(), object()))
     assert marker.exists() is not fails
+
+
+@pytest.mark.feature("lab-remote-in-workspaces")
+def test_run_gives_hive_checkouts_the_lab_remote_once_the_operator_env_is_loaded(monkeypatch):
+    events = []
+
+    def refresh(environ):
+        events.append("quota")
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(daemon, "fill_operator_env", lambda: events.append("env"))
+    monkeypatch.setattr(daemon, "carry_lab", lambda environ: events.append(("lab", environ)))
+    monkeypatch.setattr(daemon.quota_refresh, "refresh", refresh)
+    with pytest.raises(KeyboardInterrupt):
+        daemon.run(lambda: pytest.fail("connected before the lab remote"))
+    assert events == ["env", ("lab", daemon.os.environ), "quota"]
+
+
+@pytest.mark.feature("lab-remote-in-workspaces")
+def test_carry_lab_gives_each_checkout_the_lab_serves_the_lab_remote(monkeypatch, tmp_path):
+    lab = "http://10.10.30.208/agentihooks.git"
+    for name, origin in (
+        ("agentihooks", "git@github.com:o/agentihooks.git"),
+        ("antoncore", "git@github.com:o/antoncore"),
+    ):
+        subprocess.run(["git", "init", "-q", str(tmp_path / name)], check=True)
+        subprocess.run(["git", "-C", str(tmp_path / name), "remote", "add", "origin", origin], check=True)
+    monkeypatch.setenv("HIVE_REPO_ROOT", str(tmp_path))
+    assert daemon.carry_lab({"AGENTIHOOKS_LAB_REMOTE": lab}) == [tmp_path / "agentihooks"]
+    remotes = [
+        subprocess.run(["git", "-C", str(tmp_path / name), "remote"], capture_output=True, text=True).stdout.split()
+        for name in ("agentihooks", "antoncore")
+    ]
+    assert remotes == [["lab", "origin"], ["origin"]]
 
 
 def test_run_deducts_observation_time_from_the_beat_interval(monkeypatch):

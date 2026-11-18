@@ -1463,6 +1463,36 @@ def test_panic_still_refuses_a_push_from_any_other_branch(
     assert block == blocker_window.FROZEN.format(slug=SLUG, reason="60 errors in the last hour")
 
 
+@pytest.mark.parametrize(
+    ("branch", "command", "spared"),
+    [
+        ("fix-branch", "git push lab HEAD:refs/grade/t1", True),
+        ("other-branch", "git push -o branch=fix-branch lab HEAD:refs/grade/t1", True),
+        ("fix-branch", "git push -o branch=other lab HEAD:refs/grade/t1", False),
+        ("other-branch", "git push lab HEAD:refs/grade/t1", False),
+        ("other-branch", "git push -o branch=fix-branch origin HEAD:fix-branch", True),
+        ("other-branch", "git push --push-option branch=x origin HEAD:fix-branch", True),
+    ],
+)
+@pytest.mark.feature("lab-remote-in-workspaces")
+def test_panic_spares_a_lab_push_only_when_it_grades_or_relays_a_registered_fix(
+    bound: None,
+    store: RedisStore,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    branch: str,
+    command: str,
+    spared: bool,
+) -> None:
+    _branches(monkeypatch, {FIX: "fix-branch"})
+    panic.engage(store, SLUG, "60 errors in the last hour", False, [FIX], 0)
+    cwd = _checkout(tmp_path / "work", branch)
+    subprocess.run(["git", "-C", cwd, "remote", "add", "lab", "http://lab.invalid/agentihooks.git"], check=True)
+    block = blocker_window.pretool("Bash", {"command": command}, "engineer-session", cwd)[1]
+    frozen = blocker_window.FROZEN.format(slug=SLUG, reason="60 errors in the last hour")
+    assert block == (None if spared else frozen)
+
+
 @pytest.mark.feature("panic-fix-branch-pushes")
 def test_the_hook_payload_cwd_decides_the_fix_branch_push(
     bound: None, store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
