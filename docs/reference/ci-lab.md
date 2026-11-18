@@ -1119,7 +1119,11 @@ refused `lab.retry` blocks.
 `scripts.ci_lab.shadow` compares the lab's shadow verdicts with GitHub Actions, one row per gate
 and head. `Shadow.observe(payload)` takes each `check_run.completed` delivery: a check run from the
 `github-actions` app gives the Actions verdict of the gate its job name maps to, and a
-`lab-shadow/<gate>` check run gives the lab verdict and the grader revision its summary names.
+`lab-shadow/<gate>` check run from the lab's own GitHub App gives the lab verdict and the grader
+revision its summary names. `Sources(static, lab_app)` names that App's slug; a `lab-shadow/` run
+from any other app, a workflow token included, is ignored. The caller observes deliveries one at a
+time, as the scheduler tick does. Until the scheduler service feeds it, the recorder is a library
+with no live caller.
 
 ### Gates
 
@@ -1133,9 +1137,12 @@ and head. `Shadow.observe(payload)` takes each `check_run.completed` delivery: a
 
 The matrix suffix in parentheses and the ` / ` of a reusable workflow job drop before the match;
 `static_jobs(root)` returns the static gate ids discovered from the workflow tree. A success is a
-pass, a failure or a timeout is a fail, and every other conclusion carries no verdict. Each side
-folds its check runs: a gate fails on a head when any of its check runs failed, and a rerun
-replaces the run it repeats.
+pass, a failure or a timeout is a fail, and every other conclusion carries no verdict, so a
+cancelled or skipped rerun leaves the earlier verdict of its check run in place. Each side folds
+its check runs: a gate fails on a head when any of its check runs failed, and a rerun with a
+verdict replaces the run it repeats. A row is recorded on every delivery once both sides hold a
+verdict, so a head whose shards land one by one can turn into a mismatch and back; the counter
+counts each turn into a mismatch, and the report reads the row as it stands.
 
 ### Rows
 
@@ -1156,8 +1163,8 @@ python -m scripts.ci_lab shadow report --since "$GRADER_REVISION" --repo . --red
 ```
 
 `--redis` defaults to `CI_LAB_REDIS_URL` and `--repo` to the current directory, a git checkout
-that holds the grader revisions. The report counts the rows whose grader revision is the given one
-or descends from it:
+that holds the grader revisions. A `--since` revision that names no commit in `--repo` exits 2.
+The report counts the rows whose grader revision is the given one or descends from it:
 
 ```text
 since 5c6db6a99a1b
@@ -1175,3 +1182,5 @@ unmapped docs
 | A job you expect to compare is listed unmapped | Its name matches no gate rule, or the static job is not in the workflow tree the recorder read | `python -m scripts.ci_lab.static_gates` lists the static jobs |
 | A row is left out of a report since a revision | Its grader revision does not descend from that revision in `--repo`, or is not fetched there | `git merge-base --is-ancestor <since> <grader>` in that checkout |
 | `error: --redis or CI_LAB_REDIS_URL names the lab Redis` | Neither the flag nor the variable is set | Pass `--redis` or export `CI_LAB_REDIS_URL` |
+| `error: --since <revision> names no commit in <repo>` | The revision is mistyped or not fetched into `--repo` | `git -C <repo> fetch origin dev`, then `git -C <repo> cat-file -t <revision>` prints `commit` |
+| Lab verdicts never land although `lab-shadow/` check runs exist | The runs come from an app other than `Sources.lab_app` | The check run's `app.slug` in the delivery |

@@ -39,6 +39,7 @@ __all__ = [
     "UNMAPPED_KEY",
     "Row",
     "Shadow",
+    "Sources",
     "ancestor",
     "gate_of",
     "grader_revision",
@@ -87,6 +88,14 @@ class Row:
     lab_verdict: str
     actions_verdict: str
     mismatch: bool
+
+
+@dataclass(frozen=True)
+class Sources:
+    """Where each side's verdicts come from: the static gate ids Actions jobs map to and the lab's GitHub App slug."""
+
+    static: Collection[str]
+    lab_app: str
 
 
 def gate_of(name: str, static: Collection[str]) -> str:
@@ -144,24 +153,26 @@ class Shadow:
         objects: Objects,
         sink: metrics.Sink,
         registry: metrics.Registry,
-        static: Collection[str],
+        sources: Sources,
         now_ms: Callable[[], int] = _now_ms,
     ) -> None:
         self.client = client
         self.objects = objects
         self.sink = sink
         self.registry = registry
-        self.static = static
+        self.sources = sources
         self.now_ms = now_ms
 
     def observe(self, payload: Mapping[str, Any]) -> Row | None:
-        """Fold one check run delivery into its gate and head; return the row once both verdicts are known."""
+        """Fold one check run delivery into its gate and head; return the row once both verdicts are known.
+
+        A lab-shadow check run counts only from the lab's App and every other check run only from github-actions."""
         run = payload["check_run"]
         name = str(run["name"])
         lab = name.startswith(LAB_NAME)
-        if payload["action"] != COMPLETED or (not lab and run["app"]["slug"] != ACTIONS):
+        if payload["action"] != COMPLETED or run["app"]["slug"] != (self.sources.lab_app if lab else ACTIONS):
             return None
-        gate = gate_of(name.removeprefix(LAB_NAME), self.static)
+        gate = gate_of(name.removeprefix(LAB_NAME), self.sources.static)
         if gate == UNMAPPED:
             self.client.sadd(UNMAPPED_KEY, name)
             return None
@@ -233,10 +244,12 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     arguments = parser.parse_args(argv)
     if not arguments.redis:
         report_parser.error(f"--redis or {contract.REDIS_URL} names the lab Redis")
+    descends = functools.cache(functools.partial(ancestor, arguments.repo))
+    if not descends(arguments.since, arguments.since):
+        report_parser.error(f"--since {arguments.since} names no commit in {arguments.repo}")
     import redis
 
     factory: Any = redis.Redis
     client = factory.from_url(arguments.redis, decode_responses=True)
-    descends = functools.cache(functools.partial(ancestor, arguments.repo))
     sys.stdout.write(report(rows(client), client.smembers(UNMAPPED_KEY), arguments.since, descends))
     return 0

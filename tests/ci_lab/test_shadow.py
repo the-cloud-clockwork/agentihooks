@@ -22,6 +22,7 @@ HEAD = "a" * 40
 OTHER = "b" * 40
 URL = "redis://lab.example:6379/0"
 NOW_MS = 1_700_000_000_000
+LAB_APP = "agentihooks-lab"
 STATIC = frozenset({"lint", "type-gate", "semgrep/scan", "semgrep/charts", "semgrep/feature-tests"})
 CHECK_RUNS = {
     "promote": "unmapped",
@@ -123,7 +124,7 @@ def registry() -> metrics.Registry:
 def recorder(
     client: fakeredis.FakeRedis, blobs: LocalObjects, spool: Spool, registry: metrics.Registry
 ) -> shadow.Shadow:
-    return shadow.Shadow(client, blobs, spool, registry, STATIC, lambda: NOW_MS)
+    return shadow.Shadow(client, blobs, spool, registry, shadow.Sources(STATIC, LAB_APP), lambda: NOW_MS)
 
 
 def delivery(
@@ -150,7 +151,7 @@ def lab(
 ) -> dict[str, Any]:
     output = checks.Output("Shadow grade", "Shadow grade of the head", (), "run-1", grader, "https://lab.example/run-1")
     summary = checks.render(output)["summary"]
-    return delivery(f"lab-shadow/{gate}", conclusion, head=head, slug="agentihooks-lab", action=action, summary=summary)
+    return delivery(f"lab-shadow/{gate}", conclusion, head=head, slug=LAB_APP, action=action, summary=summary)
 
 
 def event(*parts: str) -> str:
@@ -213,7 +214,7 @@ def test_every_actions_check_run_of_a_pull_request_head_maps_to_a_gate_or_is_lis
     static = shadow.static_jobs(ROOT)
     assert {name: shadow.gate_of(name, static) for name in CHECK_RUNS} == CHECK_RUNS
     assert set(CHECK_RUNS.values()) - {shadow.UNMAPPED} <= {shadow.TESTS, shadow.MUTATION, *static}
-    recorder = shadow.Shadow(client, blobs, spool, registry, static, lambda: NOW_MS)
+    recorder = shadow.Shadow(client, blobs, spool, registry, shadow.Sources(static, LAB_APP), lambda: NOW_MS)
     for name in CHECK_RUNS:
         assert recorder.observe(delivery(name, "skipped")) is None
     unmapped = {name for name, gate in CHECK_RUNS.items() if gate == "unmapped"}
@@ -300,6 +301,9 @@ def test_deliveries_that_carry_no_verdict_record_nothing(recorder: shadow.Shadow
         lab("lint", action="created"),
         delivery("lint", slug="sonarqubecloud"),
         delivery("docs", slug="sonarqubecloud"),
+        delivery("lab-shadow/lint"),
+        delivery("lab-shadow/docs"),
+        delivery("lab-shadow/lint", slug="sonarqubecloud"),
         delivery("lint", "skipped"),
         delivery("lint", "cancelled"),
         delivery("lint", "neutral"),
@@ -324,7 +328,7 @@ def test_the_lab_check_run_summary_names_the_grader_revision() -> None:
 
 
 def test_a_lab_summary_without_a_grader_revision_records_an_empty_one(recorder: shadow.Shadow) -> None:
-    recorder.observe(delivery("lab-shadow/lint", slug="agentihooks-lab", summary="Shadow grade"))
+    recorder.observe(delivery("lab-shadow/lint", slug=LAB_APP, summary="Shadow grade"))
     assert recorder.observe(delivery("lint")) == shadow.Row(HEAD, "lint", "", "pass", "pass", False)
 
 
@@ -345,7 +349,8 @@ def test_the_default_clock_stamps_rows_in_milliseconds(
     monkeypatch: pytest.MonkeyPatch, client: fakeredis.FakeRedis, blobs: LocalObjects, spool: Spool
 ) -> None:
     monkeypatch.setattr(shadow.time, "time_ns", lambda: 1_700_000_000_123_456_789)
-    shadow.Shadow(client, blobs, spool, metrics.Registry(), STATIC).record(HEAD, "lint", "pass", "pass", "g1")
+    recorder = shadow.Shadow(client, blobs, spool, metrics.Registry(), shadow.Sources(STATIC, LAB_APP))
+    recorder.record(HEAD, "lint", "pass", "pass", "g1")
     assert spool.rows[0][1]["ts_ms"] == 1_700_000_000_123
 
 
@@ -431,6 +436,17 @@ def test_the_report_command_reads_the_lab_redis(
         "gate tests compared 2 mismatches 1\n"
         "unmapped docs\n"
     )
+
+
+def test_the_report_command_refuses_a_since_revision_the_repository_lacks(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo, _, _ = history(tmp_path)
+    unknown = "0" * 40
+    with pytest.raises(SystemExit) as refused:
+        cli.main(["shadow", "report", "--since", unknown, "--repo", str(repo), "--redis", URL], {})
+    assert refused.value.code == 2
+    assert capsys.readouterr().err.endswith(f"error: --since {unknown} names no commit in {repo}\n")
 
 
 def test_the_report_command_refuses_without_a_lab_redis(capsys: pytest.CaptureFixture[str]) -> None:
