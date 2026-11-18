@@ -141,7 +141,7 @@ def test_a_group_of_fewer_than_two_entries_green_alone_names_nothing() -> None:
 def test_the_culprit_comment_names_the_group_and_that_it_leaves_the_queue() -> None:
     assert culprit.body(Finding(CULPRIT, GROUP, (SECOND,)), DETAILS) == (
         f"The lab graded the merge group at {GROUP} red. Graded alone against dev from the lab's cache, "
-        f"{SECOND} is red, so it is the culprit. The lab removes {SECOND} from the merge queue and the queue "
+        f"{SECOND} is red, so it is the culprit. The lab is removing {SECOND} from the merge queue so the queue "
         f"re-forms without it.\n\nDetails: {DETAILS}"
     )
 
@@ -151,7 +151,7 @@ def test_the_interaction_comment_names_every_entry_and_the_one_that_leaves() -> 
     assert culprit.body(Finding(INTERACTION, GROUP, (FIRST, SECOND, THIRD)), DETAILS) == (
         f"The lab graded the merge group at {GROUP} red. Every entry is green alone against dev from the lab's "
         f"cache, so the group is red only together: an interaction of {FIRST}, {SECOND}, {THIRD}. "
-        f"The lab removes {THIRD} from the merge queue and the queue re-forms without it.\n\nDetails: {DETAILS}"
+        f"The lab is removing {THIRD} from the merge queue so the queue re-forms without it.\n\nDetails: {DETAILS}"
     )
 
 
@@ -280,6 +280,7 @@ def test_remove_comments_on_each_named_entry_then_announces_and_dequeues_the_rem
         GRAPHQL,
     ]
     assert [sent.kwargs["json"] for sent in request.call_args_list][:2] == [text, text]
+    assert request.call_args_list[2].kwargs["json"]["variables"] == {"url": SECOND}
     assert request.call_args_list[3].kwargs["json"]["variables"] == {"id": "PR_node"}
     hub.observe(Observation(SECOND, None, None, False))
     events = [delivery.event for delivery in watch.fetch(100, 0)]

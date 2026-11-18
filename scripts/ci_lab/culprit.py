@@ -106,7 +106,7 @@ def body(finding: Finding, details: str) -> str:
             "Every entry is green alone against dev from the lab's cache, so the group is red only together: "
             f"an interaction of {named}."
         )
-    leaves = f"The lab removes {finding.removed} from the merge queue and the queue re-forms without it."
+    leaves = f"The lab is removing {finding.removed} from the merge queue so the queue re-forms without it."
     return f"{head} {found} {leaves}\n\nDetails: {details}"
 
 
@@ -168,8 +168,9 @@ class Culprits:
 def remove(finding: Finding, details: str, culprits: Culprits, pulls: Pulls) -> tuple[str, ...]:
     """Comment on each named pull request, publish the culprit on the removed entry's dequeue, then dequeue it.
 
-    The hub observes the dequeue before GitHub does, so its merge.dequeued event always carries the culprit; return
-    the comment urls.
+    The hub observes the dequeue before GitHub does, so its merge.dequeued event carries the culprit; a refused dequeue
+    raises PostRefused and the next poll that sees the entry still queued publishes merge.queued. Return the comment
+    urls.
     """
     text = body(finding, details)
     comments = tuple(culprits.comment(url, text) for url in finding.urls)
