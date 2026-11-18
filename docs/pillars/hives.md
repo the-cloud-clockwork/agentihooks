@@ -1792,18 +1792,18 @@ A hive beats `hive-presence` every 15 seconds. A beat expires after 45 seconds.
 ### Handoff continuity on admission
 
 An eng, ci or plan successor the hub admits continues from what its predecessor left: the handoff text, its runtime
-envelope and the handoff transfer travel in the spawn task the hub returns to the hive. Nothing is configured; the
+envelope and the handoff transfer travel in the spawn task the hub returns to the hive. No setting changes this; the
 admission adds them on every claim.
 
 #### What the admission adds
 
-After it occupies the seat, the admission reads the task's stored handoff. The seat itself is the seat of a saved
-launch assignment, else the seat the handoff names, when that seat is free.
+The admission takes the seat of a saved launch assignment; without one, it takes the seat the handoff names, if that
+seat is free. After it occupies the seat, it reads the task's stored handoff.
 
 | Stored for the task | The spawn task carries |
 |---|---|
 | A handoff text: one written by `agentihooks swarm <slug> handoff`, `ready` or `park`, or the recovery handoff `agentihooks hive remove` stores for each agent that did not hand off within its wait | `handoff`, the text, and `handoff_envelope`, the stored envelope resolved on the claimed row so a cleared protected branch is never continued |
-| No handoff, but earlier lives or a recorded branch | `reclaim`, the branch the task continues from, also stored for the admitted agent |
+| No handoff, but earlier lives or a recorded branch | `reclaim`, the continuation verdict on the recorded branch (whether the successor continues from it or starts fresh, and why), also stored for the admitted agent |
 | Neither, on a first life | Nothing |
 
 The admission then attaches the transfer. It takes the latest row of the task in the swarm's transfers hash that has
@@ -1817,8 +1817,8 @@ no successor yet, whatever recorded it, and sets on it:
 | `attached_at` | The attach time, in milliseconds |
 
 The attached row is the spawn task's `transfer`. A task with no open transfer carries `"transfer": null`. The
-admission records no transfer row of its own, so every attempt at the same task attaches the one row its predecessor
-left.
+admission records no transfer row of its own. An attached row stays with its successor until a release detaches it
+(see [Handing the transfer back](#handing-the-transfer-back)), and the next admission then attaches that same row.
 
 #### What the successor reads
 
@@ -1827,8 +1827,8 @@ The hive launches the spawn task as it is:
 - The seat history in the opening prompt starts with the transfer: `Read this handoff before continuing. Confirm you
   read it and will take its first Next action by running agentihooks swarm <slug> confirm-handoff <transfer id> --next
   '<first Next action>'`, followed by the handoff text. Item 1 of the history then shows the handoff runtime envelope
-  and `Handoff document: continue from it:` with the text. A transfer with no handoff text adds no line, and a task with
-  no handoff reads `1. Handoff document: none was left for this task.`
+  and `Handoff document: continue from it:` with the text. A transfer with no handoff text adds no confirm
+  instruction, and a task with no handoff reads `1. Handoff document: none was left for this task.`
 - When a transfer is attached and the envelope names the predecessor's `conversation_id`, the launch sets
   `AGENTIHOOKS_PREDECESSOR_SESSION` to it, and traces record it as `predecessor.session.id` (see
   [Observability with Langfuse](../reference/observability-langfuse.md)). With no transfer the launch names no
@@ -1842,8 +1842,8 @@ Attach leaves `binding` at `pending` and `continuity` as the predecessor's hando
 `handoff transfers` step, in the `close` group of every pass (see
 [tick engine steps](../reference/tick-engine-steps.md)), skips a successor that is still `starting` or `launching`.
 Once the seat's occupant and generation still match the row, it marks binding `live` when the successor runs, either
-listed live by the runtime or reported with an execution by its hive, and `absent` otherwise. Continuity turns
-`confirmed` only when the successor runs the `confirm-handoff` command with the first Next action exactly as written.
+listed live by the runtime or reported with an execution by its hive, and `absent` otherwise. Continuity stays apart
+from binding: it waits on `confirm-handoff` (see [swarm commands](swarm.md#commands)).
 
 #### Handing the transfer back
 
@@ -1851,7 +1851,7 @@ Every path that returns an admitted task to `open` detaches its transfer before 
 
 | Path | When | What happens |
 |---|---|---|
-| `reopen` | The spoke gives the offer back after a failed launch while deliveries remain, or dead letters the final delivery | The admission cancels the pending life, detaches the transfer, drops the claim and the agent, and sets the ledger row back to `open` with `claimed_by` empty. The row keeps its id, handoff text and `pending` binding with an empty `successor`, so the next admission attaches the same row. A repeated `reopen` finds no admission, answers `false` and writes nothing. |
+| `reopen` | The spoke gives the offer back after a failed launch while deliveries remain, or dead letters the final delivery | The admission cancels the pending life, detaches the transfer, drops the claim and the agent, and sets the ledger row back to `open` with `claimed_by` empty. The row keeps its id, handoff text and `pending` binding with an empty `successor`, so the next admission attaches the same row. A repeated `reopen` finds no admission, answers `false` and leaves the transfer as it is; when the repeat is the dead letter of the final delivery, the hub may raise the task's claim generation instead. |
 | Launch check free | The hub launch check halts an admitted agent that no hive started | The same release, after the agent's hive slot is released. |
 | Refused attach | Another writer changed the transfers hash while the admission attached, so attach raised `The transfer changed; retry the command` | The same release, and the admission keeps nothing for the offer. The hive's admit ask is answered with that error; the task is `open` with no claimant, so the next ask for the offer starts clean. |
 
@@ -1884,14 +1884,15 @@ kubectl -n <namespace> logs deployment/agentihooks-swarm-hub | grep 'hub: events
 ```
 
 The keys start with `AGENTIHOOKS_SWARM_KEY_PREFIX`, default `agentihooks`. A row with a `successor` and binding
-`pending` belongs to a successor the tick has not yet seen running. A row with an empty `successor` waits for the task's next admission.
+`pending` belongs to a successor the tick has not yet seen running. A row with an empty `successor` waits for the
+task's next admission.
 
 #### Continuity guards
 
 - Feature `hub-admission-claim-continuity` in `feature-map.json`. Its tests in `tests/hub/test_admission.py` cover
-  the attach after a handoff and after a recovery handoff, a task with no transfer, a reopen that hands the transfer to
-  the next successor, a repeated reopen, a late admission that keeps its transfer, and a refused attach that releases
-  the claim, the agent and the ledger row.
+  the attach after a handoff and after a recovery handoff, a task with no transfer, a reopen that hands the transfer
+  to the next successor, a repeated reopen, a late admission that keeps its transfer, and a refused attach that
+  releases the claim, the agent and the ledger row.
 - Semgrep incident rule `admission-claim-skips-continuity`, scoped to `scripts/hub/`: a function that calls
   `tick.primed` with no `transfers.attach` in the same function is an error. The Semgrep workflow runs every rule in
   `.semgrep-incidents/`. Run it by hand with:
@@ -1915,7 +1916,7 @@ semgrep --test --config .semgrep-incidents/admission-claim-skips-continuity.yml 
 | An events successor's opening has no `confirm-handoff` line, and the task's transfer keeps an empty `successor` while the successor runs | The hub runs a release from before pull request [#11138](https://github.com/the-cloud-clockwork/agentihooks/pull/11138), whose admission attached no transfer | Roll the hub to the newest release. The running successor goes on without the transfer; the open row attaches to the task's next admission. |
 | An events successor reads `1. Handoff document: none was left for this task.` although its predecessor handed off | The hub runs a release from before pull request [#11139](https://github.com/the-cloud-clockwork/agentihooks/pull/11139), whose admission read no handoff, or no handoff text is stored for the task | Read the handoff key above. Roll the hub when the text is there. |
 | The hive's admit ask is answered `The transfer changed; retry the command` | Another writer changed the swarm's transfers while the admission attached | Nothing to fix: the admission released its claim, agent and ledger row, and the next ask for the offer admits again. |
-| A transfer names a successor that never launched | The admission is kept, because it finished late or the hive's launch is still running | The hive asks again and launches it. A failed launch gives the offer back with `reopen`, which detaches the transfer; a launch check that halts an agent no hive started frees it the same way. |
+| A transfer names a successor that never launched | The admission is kept, because it finished late or the hive's launch is still running | The hive asks again and launches it. Otherwise a release hands the transfer back; see [Handing the transfer back](#handing-the-transfer-back). |
 
 ### When a hive is lost
 
