@@ -111,7 +111,7 @@ def gate_of(name: str, static: Collection[str]) -> str:
 
 def grader_revision(summary: str | None) -> str:
     """Return the grader revision a lab check run summary names, or an empty string when it names none."""
-    match = GRADER.search(summary or "")
+    match = GRADER.search(str(summary))
     return "" if match is None else match.group(1)
 
 
@@ -231,7 +231,7 @@ def report(found: Iterable[Row], unmapped: Iterable[str], since: str, descends: 
 def ancestor(repo: Path, older: str, newer: str) -> bool:
     """Whether older is newer or one of its ancestors in the git repository at repo."""
     command = ["git", "-C", str(repo), "merge-base", "--is-ancestor", older, newer]
-    return subprocess.run(command, capture_output=True, check=False).returncode == 0
+    return subprocess.run(command, capture_output=True).returncode == 0
 
 
 def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
@@ -239,12 +239,12 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     parser = argparse.ArgumentParser(prog="python -m scripts.ci_lab shadow")
     report_parser = parser.add_subparsers(dest="command", required=True).add_parser("report")
     report_parser.add_argument("--since", required=True)
-    report_parser.add_argument("--repo", type=Path, default=Path())
-    report_parser.add_argument("--redis", default=environ.get(contract.REDIS_URL, ""))
+    report_parser.add_argument("--repo", default=".")
+    report_parser.add_argument("--redis", default=environ.get(contract.REDIS_URL))
     arguments = parser.parse_args(argv)
     if not arguments.redis:
         report_parser.error(f"--redis or {contract.REDIS_URL} names the lab Redis")
-    descends = functools.cache(functools.partial(ancestor, arguments.repo))
+    descends = functools.cache(functools.partial(ancestor, Path(arguments.repo)))
     if not descends(arguments.since, arguments.since):
         report_parser.error(f"--since {arguments.since} names no commit in {arguments.repo}")
     import redis
