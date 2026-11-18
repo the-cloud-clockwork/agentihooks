@@ -20,6 +20,8 @@ Each tier has a wall time budget. A check that does not fit the pull request or 
 
 How a green promotion run merges `dev` into `main` and creates the release is in [Promotion and releases](promotion.md).
 
+Removing the queue tier, so that a pull request merges on its pull request verdict and a red `dev` grade reverts its culprit, was evaluated with a no go verdict in [Post merge testing with automatic revert](../research/post-merge-testing.md).
+
 ## Lab authority and back pressure
 
 The CI lab grades pull request heads from content addressed units and a verdict cache ([CI lab service contract](ci-lab.md)). A gate moves to the lab only when the base branch's `delivery.yaml` names it under `lab.authoritative`. On a `pull_request` run the `lab-verdict` job reads that list, the Actions job of each named gate is skipped, and `lab-verdict` waits for the lab's check run for that gate instead. An empty list keeps every pull request gate on Actions. The queue and promotion tiers still run on Actions.

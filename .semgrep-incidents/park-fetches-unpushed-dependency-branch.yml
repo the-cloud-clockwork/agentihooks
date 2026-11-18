@@ -1,0 +1,21 @@
+rules:
+  - id: park-fetches-unpushed-dependency-branch
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A dependency's recorded branch is fetched from origin without first asking _abandoned whether origin holds it.
+      Swarm park refused with cannot fetch when an unclaimed dependency recorded a branch its released claimant never
+      pushed, so the parked task could not stack. Stack on the dev base when _abandoned answers true.
+    paths:
+      include:
+        - /scripts/swarm/
+        - park-fetches-unpushed-dependency-branch.py
+    patterns:
+      - pattern-inside: |
+          $BRANCH = str($DEP["branch"])
+          ...
+      - pattern: _fetch_origin($GIT, $BRANCH, ...)
+      - pattern-not-inside: |
+          if <... _abandoned($DEP, $BRANCH) ...>:
+              ...
+          ...
