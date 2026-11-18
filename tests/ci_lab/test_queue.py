@@ -50,6 +50,15 @@ def test_enqueue_records_pending_jobs_in_order_per_head(jobs: queue.Queue) -> No
     assert found(jobs, "h1:test:a").requirement == queue.Requirement(slots=1, capabilities=frozenset())
 
 
+@pytest.mark.feature("lab-worker-executors")
+def test_enqueue_stores_the_base_and_grader_revision_each_job_reads(jobs: queue.Queue) -> None:
+    jobs.enqueue([unit("a")], "h1", {}, "b1", "g1")
+    jobs.enqueue([unit("c")], "h2", {})
+
+    assert (found(jobs, "h1:test:a").base, found(jobs, "h1:test:a").grader) == ("b1", "g1")
+    assert (found(jobs, "h2:test:c").base, found(jobs, "h2:test:c").grader) == ("", "")
+
+
 def take(jobs: queue.Queue, job: str, worker: str = "w1", token: str = "tok", expires_ms: int = 100) -> bool:
     return jobs.claim(found(jobs, job), worker, token, expires_ms)
 

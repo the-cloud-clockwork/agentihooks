@@ -8168,6 +8168,33 @@
       ]
     },
     {
+      "id": "lab-worker-executors",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2533",
+      "behaviour": "The CI lab queue stores the base and grader revision of every job a grade enqueues and the lease reply carries both; agentihooks ci-lab-worker builds the worker from the worker contract environment and runs each leased unit through the adapter of its kind: a static unit runs the gate it names from the grader tree's workflow over the head with the base and grader trees and inputs.base, a test unit runs its batch on the venv of the head's lockfile digest with the manifest and flake ledger, and a stats or mutant unit runs the mutation runner in the sandbox from a private trampolined tree of the head with the stats cache, kill memory, budget, cap and the tests the tree's stats records show reaching the mutant's function; each adapter answers a JSON report with the unit's seconds and releases every tree it cut, and SIGTERM stops the worker.",
+      "seam": "scripts.ci_lab.queue Queue.enqueue and job, scripts.ci_lab.leases Leases.lease, scripts.ci_lab.lease_api POST /lease, scripts.ci_lab.worker Client.lease, scripts.ci_lab.executors static, tests, mutation, executors, settings and main, and scripts.ci_lab.contract worker",
+      "tests": [
+        "tests/ci_lab/test_queue.py::test_enqueue_stores_the_base_and_grader_revision_each_job_reads",
+        "tests/ci_lab/test_leases.py::test_a_grant_carries_the_base_and_grader_revision_of_its_job",
+        "tests/ci_lab/test_lease_api.py::test_lease_returns_the_grant_payload",
+        "tests/ci_lab/test_scheduler.py::test_each_enqueued_job_carries_the_grades_base_and_its_plans_grader",
+        "tests/ci_lab/test_contract.py::test_the_worker_command_runs_the_service_and_keeps_the_self_test",
+        "tests/ci_lab/test_executors.py::test_static_runs_the_gate_the_grader_tree_names_over_the_head_with_its_base_and_grader_trees",
+        "tests/ci_lab/test_executors.py::test_static_answers_the_gates_verdict",
+        "tests/ci_lab/test_executors.py::test_static_releases_every_tree_it_leased_when_a_lease_or_the_gate_raises",
+        "tests/ci_lab/test_executors.py::test_tests_runs_the_batch_on_the_lockfile_venv_with_the_manifest_and_flake_ledger",
+        "tests/ci_lab/test_executors.py::test_mutation_runs_a_stats_unit_with_its_tree_as_root_and_the_stats_cache",
+        "tests/ci_lab/test_executors.py::test_mutation_grades_a_mutant_unit_with_the_tests_its_trees_stats_show_reaching_its_function",
+        "tests/ci_lab/test_executors.py::test_mutation_fails_a_mutant_unit_whose_runner_fails_or_whose_mutant_lives",
+        "tests/ci_lab/test_executors.py::test_mutation_drops_its_private_tree_when_the_runner_raises",
+        "tests/ci_lab/test_executors.py::test_covering_takes_each_test_a_stats_record_shows_reaching_the_function_with_its_seconds",
+        "tests/ci_lab/test_executors.py::test_function_of_names_the_function_a_mutant_mutates",
+        "tests/ci_lab/test_executors.py::test_executors_name_the_adapter_of_every_unit_kind",
+        "tests/ci_lab/test_executors.py::test_settings_read_the_worker_contract_environment",
+        "tests/ci_lab/test_executors.py::test_main_runs_the_worker_over_the_adapters_until_sigterm_stops_it"
+      ]
+    },
+    {
       "id": "lab-warm-mutant-runner",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/lab-run-mutation",

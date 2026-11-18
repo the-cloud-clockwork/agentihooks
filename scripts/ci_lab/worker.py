@@ -53,7 +53,8 @@ REDIS = "REDIS"
 
 @dataclass(frozen=True)
 class Lease:
-    """One leased unit: its job, the lease token, the head it grades, the unit, its slots and the lease expiry."""
+    """One leased unit: its job, the lease token, the head it grades, the unit, its slots, the lease expiry and the base
+    and grader revision its grade reads."""
 
     job: str
     token: str
@@ -61,6 +62,8 @@ class Lease:
     unit: Unit
     slots: int
     expires_ms: int
+    base: str = ""
+    grader: str = ""
 
 
 @dataclass(frozen=True)
@@ -91,7 +94,16 @@ class Lost(RuntimeError):
 def _lease(grant: Mapping[str, Any]) -> Lease:
     """Read one grant of the lease API's POST /lease reply."""
     unit = Unit(kind=grant["kind"], key=grant["key"], members=tuple(grant["members"]))
-    return Lease(grant["job"], grant["token"], grant["head"], unit, grant["slots"], grant["expires_ms"])
+    return Lease(
+        grant["job"],
+        grant["token"],
+        grant["head"],
+        unit,
+        grant["slots"],
+        grant["expires_ms"],
+        grant["base"],
+        grant["grader"],
+    )
 
 
 @dataclass(frozen=True)

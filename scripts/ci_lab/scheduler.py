@@ -616,7 +616,7 @@ class Scheduler:
                 state.units.update({ref: replace(source.units[ref]) for ref in source.gates[gate]})
                 continue
             state.gates[gate] = [self._place(state, unit, request.bypass_negative, carried, misses) for unit in units]
-        self.queue.enqueue(misses, request.head, {})
+        self.queue.enqueue(misses, request.head, {}, request.base, plan.grader)
         self._save(state)
         self.client.sadd(LIVE, run)
         self.client.set(f"{LANES}{request.repo}|{lane}|{int(request.tier)}", run)

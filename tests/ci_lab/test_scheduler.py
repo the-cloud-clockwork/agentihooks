@@ -347,6 +347,18 @@ def test_a_lost_worker_requeues_once_then_its_unit_makes_the_grade_red(lab: Call
     assert run.store.get(item.kind, item.key) is None
 
 
+@pytest.mark.feature("lab-worker-executors")
+def test_each_enqueued_job_carries_the_grades_base_and_its_plans_grader(lab: Callable[..., Run]) -> None:
+    grader = "e" * 40
+    run = lab({HEAD_A: scheduler.Plan(TREE, grader, {"lint": (unit(1),)})})
+    run.push(HEAD_A)
+    run.tick(1000)
+
+    [grant] = run.lease()
+
+    assert (grant.head, grant.base, grant.grader) == (HEAD_A, BASE, grader)
+
+
 def test_the_lost_retries_come_from_the_settings(lab: Callable[..., Run]) -> None:
     run = lab({HEAD_A: plan({"lint": (unit(1),)})}, retries=Policy(lost=0))
     run.push(HEAD_A)
