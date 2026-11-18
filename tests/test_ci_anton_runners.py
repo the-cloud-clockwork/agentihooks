@@ -155,6 +155,7 @@ CLASSED = {
     ("queue-retry.yml", "retry"),
     ("gate-required.yml", "report"),
     ("lost-runner.yml", "watch"),
+    ("writer-lock.yml", "lab-sandbox"),
 }
 
 HOSTED = OIDC | PROTECTED | TARGET | CLASSED

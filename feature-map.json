@@ -8446,6 +8446,20 @@
       ]
     },
     {
+      "id": "lab-sandbox-bwrap-pull-request-tier",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-sandbox-bwrap-ci",
+      "behaviour": "Every pull request touching the lab sandbox module, the static gate and test unit runners that build it, their tests or the writer lock workflow runs those tests on a GitHub hosted runner where bubblewrap can create user and network namespaces, through the writer lock workflow, which feeds Gate Required; the job fails when bubblewrap cannot isolate there or when any of those tests fails or skips, so a unit that can write into the grader or base tree turns the pull request red.",
+      "seam": "writer-lock.yml lab-sandbox selection step and lab-sandbox job",
+      "tests": [
+        "tests/test_ci_lab_sandbox_pr.py::test_lab_sandbox_selection",
+        "tests/test_ci_lab_sandbox_pr.py::test_the_lab_sandbox_job_feeds_the_required_gate_on_selected_pull_requests",
+        "tests/test_ci_lab_sandbox_pr.py::test_the_job_fails_unless_bubblewrap_isolates_after_the_userns_restriction_is_lifted",
+        "tests/test_ci_lab_sandbox_pr.py::test_the_job_installs_bubblewrap_from_the_ubuntu_archive_when_the_runner_lacks_it",
+        "tests/test_ci_lab_sandbox_pr.py::test_the_lab_sandbox_run_fails_on_a_skipped_or_failed_test"
+      ]
+    },
+    {
       "id": "lab-static-read-only-trees",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-worker-readonly-trees",

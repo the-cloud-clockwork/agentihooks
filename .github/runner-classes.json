@@ -107,5 +107,6 @@
   "tick-scale.yml/tick-scale": "batch",
   "worker-resources.yml/measure": "batch",
   "writer-lock.yml/inputs": "light",
+  "writer-lock.yml/lab-sandbox": "hosted",
   "writer-lock.yml/scenario": "standard"
 }
