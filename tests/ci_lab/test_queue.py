@@ -215,7 +215,7 @@ def test_missing_job_reads_none(jobs: queue.Queue) -> None:
 @pytest.mark.feature("lab-scheduler-service")
 def test_leased_lists_each_leased_job_and_offers_keep_each_workers_latest_free_slots(jobs: queue.Queue) -> None:
     ids = jobs.enqueue([unit("a"), unit("b"), unit("c")], "h1", {})
-    assert jobs.leased() == [] and jobs.offers() == {}
+    assert jobs.leased() == [] and jobs.offers(0) == {}
     assert jobs.claim(found(jobs, ids[2]), "w1", "t1", 900)
     assert jobs.claim(found(jobs, ids[0]), "w1", "t2", 500)
     assert jobs.leased() == [ids[0], ids[2]]
@@ -224,4 +224,6 @@ def test_leased_lists_each_leased_job_and_offers_keep_each_workers_latest_free_s
     jobs.offer("w1", 3, 1000)
     jobs.offer("w2", 0, 1100)
     jobs.offer("w1", 1, 1200)
-    assert jobs.offers() == {"w1": (1, 1200), "w2": (0, 1100)}
+    assert jobs.offers(1100) == {"w1": (1, 1200), "w2": (0, 1100)}
+    assert jobs.offers(1101) == {"w1": (1, 1200)}
+    assert jobs.offers(0) == {"w1": (1, 1200)}

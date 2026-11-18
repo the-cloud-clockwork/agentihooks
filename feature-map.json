@@ -7906,6 +7906,8 @@
         "tests/ci_lab/test_scheduler.py::test_the_grades_of_a_commit_are_its_live_grades_and_the_closed_ones_its_evidence_names",
         "tests/ci_lab/test_service.py::test_the_scheduler_port_answers_capacity_from_the_load_snapshot",
         "tests/ci_lab/test_service.py::test_the_scheduler_port_answers_every_grade_of_a_commit",
+        "tests/ci_lab/test_service.py::test_a_grade_lookup_refuses_anything_but_one_full_commit_sha",
+        "tests/ci_lab/test_service.py::test_the_scheduler_port_keeps_every_lease_route",
         "tests/ci_lab/test_service.py::test_the_scheduler_port_serves_its_routes_over_http",
         "tests/ci_lab/test_queue.py::test_leased_lists_each_leased_job_and_offers_keep_each_workers_latest_free_slots",
         "tests/ci_lab/test_leases.py::test_a_lease_poll_offers_the_workers_free_slots_while_it_waits_and_what_its_grants_leave",

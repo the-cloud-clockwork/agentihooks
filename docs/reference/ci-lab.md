@@ -131,7 +131,8 @@ The scheduler service builds the snapshot on every request with
 | `budget_fraction`, `shed` | The day's core budget from the runtime config, through `scripts.ci_lab.budget.observe` |
 
 A worker's lease poll records its free slots when the poll starts and what its grants leave when
-it returns (`Queue.offers`). A queue job no live grade holds counts toward the busy slots only.
+it returns (`Queue.offer`); `Queue.offers` forgets an offer once it is older than the ready window.
+A queue job no live grade holds counts toward the busy slots only.
 Until the lab records measured unit durations, every estimate is the fixed `UNIT_ESTIMATE_S`.
 
 ### Load snapshot

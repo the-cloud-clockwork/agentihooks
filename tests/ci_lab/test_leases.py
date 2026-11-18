@@ -281,13 +281,13 @@ def test_a_lease_poll_offers_the_workers_free_slots_while_it_waits_and_what_its_
     seen: list[dict[str, tuple[int, int]]] = []
 
     def wait(ms: int) -> None:
-        seen.append(jobs.offers())
+        seen.append(jobs.offers(0))
         clock.sleep(ms)
 
     lab = leases.Leases(jobs, ttl_ms=500, clock=clock, sleep=wait, poll_ms=50)
     assert lab.lease("w1", 3, frozenset(), 60) == []
     assert seen == [{"w1": (3, 1000)}, {"w1": (3, 1000)}]
-    assert jobs.offers() == {"w1": (3, 1060)}
+    assert jobs.offers(0) == {"w1": (3, 1060)}
     jobs.enqueue([unit("a"), unit("b")], "h1", {"b": queue.Requirement(slots=2)})
     assert len(lab.lease("w1", 4, frozenset(), 0)) == 2
-    assert jobs.offers() == {"w1": (1, 1060)}
+    assert jobs.offers(0) == {"w1": (1, 1060)}

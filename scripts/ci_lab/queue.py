@@ -196,13 +196,20 @@ class Queue:
         """Record the free slots a worker offered on its latest lease poll and when."""
         self.client.hset(_key("offers"), worker, json.dumps([free_slots, at_ms]))
 
-    def offers(self) -> dict[str, tuple[int, int]]:
-        """Return each worker's latest offered free slots and the millisecond it offered them."""
-        offered: dict[str, tuple[int, int]] = {}
+    def offers(self, since_ms: int) -> dict[str, tuple[int, int]]:
+        """Return each worker's latest offered free slots and the millisecond it offered them, for offers made at or
+        after since_ms, and forget every older offer."""
+        fresh: dict[str, tuple[int, int]] = {}
+        stale: list[str] = []
         for worker, raw in self.client.hgetall(_key("offers")).items():
             free_slots, at_ms = json.loads(raw)
-            offered[worker] = (int(free_slots), int(at_ms))
-        return offered
+            if at_ms < since_ms:
+                stale.append(worker)
+                continue
+            fresh[worker] = (int(free_slots), int(at_ms))
+        if stale:
+            self.client.hdel(_key("offers"), *stale)
+        return fresh
 
     def reap(self, job: Job, now_ms: int, requeues: int) -> str:
         """Requeue an expired lease while attempts remain, else mark it lost; empty when it no longer expired."""

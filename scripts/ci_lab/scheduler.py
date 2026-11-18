@@ -484,17 +484,7 @@ class Scheduler:
         the live grades holding it, verdict cache use per class of those grades, the slots leased jobs take, and the
         free slots workers offered on a lease poll within the ready window; a leased job frees its slots in one
         estimate."""
-        classes: dict[str, int] = {}
-        hits: Counter[str] = Counter()
-        misses: Counter[str] = Counter()
-        for state in self._live():
-            name = CLASSES[state.tier]
-            for slot in state.units.values():
-                if not slot.job:
-                    hits[name] += 1
-                    continue
-                misses[name] += 1
-                classes[slot.job] = min(classes.get(slot.job, state.tier), state.tier)
+        classes, hits, misses = self._demand()
         pending: dict[str, list[float]] = {}
         for job in self._jobs(self.queue.pending()):
             if job.id in classes:
@@ -505,7 +495,7 @@ class Scheduler:
             busy += job.requirement.slots
             if job.id in classes:
                 running[CLASSES[classes[job.id]]] += 1
-        offered = sum(free for free, at_ms in self.queue.offers().values() if now_ms - at_ms <= READY_MS)
+        offered = sum(free for free, _ in self.queue.offers(now_ms - READY_MS).values())
         return Load(
             pending,
             dict(running),
@@ -515,6 +505,22 @@ class Scheduler:
             cache_misses=dict(misses),
             frees_in=(UNIT_ESTIMATE_S,) * busy,
         )
+
+    def _demand(self) -> tuple[dict[str, int], Counter[str], Counter[str]]:
+        """Return the most urgent tier of the live grades holding each queue job, and per class the live grades' units
+        the verdict store answered and those it sent to the queue."""
+        tiers: dict[str, int] = {}
+        hits: Counter[str] = Counter()
+        misses: Counter[str] = Counter()
+        for state in self._live():
+            name = CLASSES[state.tier]
+            for slot in state.units.values():
+                if not slot.job:
+                    hits[name] += 1
+                    continue
+                misses[name] += 1
+                tiers[slot.job] = min(tiers.get(slot.job, state.tier), state.tier)
+        return tiers, hits, misses
 
     def grades_of(self, head: str) -> list[dict[str, Any]]:
         """Return every grade of a commit by run: its live grades and the closed ones its evidence markers name."""

@@ -54,6 +54,7 @@ def test_the_scheduler_port_answers_every_grade_of_a_commit(routes: service.Rout
     assert routes.respond("GET", f"/grades/{LONG_HEAD}", b"", None) == (200, {"head": LONG_HEAD, "grades": []})
 
 
+@pytest.mark.feature("lab-scheduler-service")
 @pytest.mark.parametrize("head", ["", "a" * 39, "a" * 41, "A" * 40, "g" * 40, f"{HEAD}/x", "../" + "a" * 37])
 def test_a_grade_lookup_refuses_anything_but_one_full_commit_sha(routes: service.Routes, head: str) -> None:
     assert routes.respond("GET", f"/grades/{head}", b"", None) == (
@@ -62,6 +63,7 @@ def test_a_grade_lookup_refuses_anything_but_one_full_commit_sha(routes: service
     )
 
 
+@pytest.mark.feature("lab-scheduler-service")
 def test_the_scheduler_port_keeps_every_lease_route(routes: service.Routes, jobs: queue.Queue) -> None:
     [job] = jobs.enqueue([Unit("static", "k", ("lint",))], HEAD, {})
     body = json.dumps({"worker": "w", "free_slots": 1, "capabilities": [], "wait_ms": 0}).encode()
