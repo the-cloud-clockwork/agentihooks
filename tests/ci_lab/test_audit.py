@@ -76,13 +76,20 @@ class Lab:
         return audit.Regrade(AUDIT_RUN, verdicts)
 
 
+class LedgerDown(Exception):
+    """The ledger refused a write."""
+
+
 @dataclass
 class Ledger:
-    """A ledger that records every task it is asked to add."""
+    """A ledger that records every task it is asked to add, or refuses every write while down."""
 
     added: list[tuple[str, dict[str, Any], str]] = field(default_factory=list[tuple[str, dict[str, Any], str]])
+    down: bool = False
 
     def add_task(self, slug: str, fields: dict[str, Any], by: str) -> None:
+        if self.down:
+            raise LedgerDown(slug)
         self.added.append((slug, fields, by))
 
 
@@ -233,6 +240,21 @@ def test_each_differing_kind_is_disabled_and_gets_its_own_task(store: Store, cli
     ) in tests
     assert SAME not in tests
     assert ledger.added[0][1]["task"] != ledger.added[1][1]["task"]
+
+
+@pytest.mark.feature("lab-reuse-audit")
+def test_a_ledger_that_refuses_the_task_still_leaves_every_differing_kind_disabled(
+    store: Store, client: fakeredis.FakeRedis
+) -> None:
+    _cache(store, "static", LINT, True)
+    _cache(store, "test", ONE, True)
+    units = [_unit("static", LINT, "grade-v1-first"), _unit("test", ONE, "grade-v1-first")]
+    lab = Lab(units=units, fresh={LINT: False, ONE: False})
+
+    with pytest.raises(LedgerDown):
+        audit.promotion_audit(audit.Ports(store, lab, Ledger(down=True), SLUG), HEAD)
+
+    assert client.smembers(DISABLED) == {"static", "test"}
 
 
 @pytest.mark.feature("lab-reuse-audit")

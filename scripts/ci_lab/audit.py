@@ -165,11 +165,13 @@ def _file(ports: Ports, kind: str, found: Sequence[Mismatch], run: str) -> None:
 
 
 def _audit(ports: Ports, units: Sequence[Cached], tier: Priority) -> Regrade:
-    """Grade the units uncached; stop reuse of each kind whose verdicts differ, file its task, then raise."""
+    """Grade the units uncached; stop reuse of every kind whose verdicts differ, then file each kind's task, raise."""
     regrade = ports.lab.grade(units, tier)
     found = mismatches(ports.store, units, regrade)
-    for kind in sorted({mismatch.cached.kind for mismatch in found}):
+    kinds = sorted({mismatch.cached.kind for mismatch in found})
+    for kind in kinds:
         ports.store.disable(kind)
+    for kind in kinds:
         _file(ports, kind, [mismatch for mismatch in found if mismatch.cached.kind == kind], regrade.run)
     if found:
         raise CILabVerdictMismatch(found)
