@@ -328,3 +328,48 @@ def test_each_batch_is_one_test_unit_keyed_by_its_fingerprints_opened_files_and_
         batch((RUN, SPAWN), {"docs/guide.md": "blob of docs/guide.md"}),
         batch((ONE,), {}),
     )
+
+
+UNLISTED = {
+    "tests/test_new.py": "def test_new():\n    pass\n",
+    "tests/inner/test_deep.py": "def test_deep():\n    pass\n",
+}
+TOOLCHAIN = Toolchain("3.12", {"ruff": "1"}, "lock", "project", "image", {"TZ": "UTC"})
+
+
+def _unlisted(root: Path) -> tuple[Unit, ...]:
+    changed = ["tests/test_new.py", "tests/test_alpha.py", "tests/helpers.py", "tests/test_gone.py", "scripts/alpha.py"]
+    return expand_tests.unlisted_units(
+        MANIFEST, _tree(root), [*changed, "docs/guide.md", "tests/inner/test_deep.py"], TOOLCHAIN
+    )
+
+
+@pytest.mark.feature("lab-scheduler-test-units")
+def test_unlisted_units_key_each_changed_test_module_the_manifest_lacks_as_a_broad_test(repository: Path) -> None:
+    for path, text in UNLISTED.items():
+        (repository / path).parent.mkdir(parents=True, exist_ok=True)
+        (repository / path).write_text(text)
+    tree = _tree(repository)
+    keys = expand_tests.fingerprints({"units": [], "tests": {path: {"files": []} for path in UNLISTED}}, tree)
+
+    def unit(path: str) -> Unit:
+        inputs = digests.TestInputs({path: keys[path]}, {}, expand_tests.PYTEST_INVOCATION, TOOLCHAIN)
+        return Unit("test", digests.test_key(inputs), (path,))
+
+    assert _unlisted(repository) == (unit("tests/inner/test_deep.py"), unit("tests/test_new.py"))
+
+
+@pytest.mark.feature("lab-scheduler-test-units")
+@pytest.mark.parametrize(
+    ("path", "rekeyed"),
+    [("scripts/data.json", True), ("tests/fixtures/sample.txt", True), ("tool.py", True), ("docs/guide.md", False)],
+)
+def test_an_unlisted_test_module_unit_rekeys_on_every_measured_and_shared_file(
+    repository: Path, path: str, rekeyed: bool
+) -> None:
+    (repository / "tests/test_new.py").write_text(UNLISTED["tests/test_new.py"])
+    before = _unlisted(repository)
+    (repository / path).write_text("changed\n")
+    after = _unlisted(repository)
+    assert [unit.members for unit in after] == [("tests/test_new.py",)]
+    assert (before != after) is rekeyed
