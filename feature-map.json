@@ -662,6 +662,22 @@
       ]
     },
     {
+      "id": "ci-for-loop-word-list-workflow-run-blocks",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-shell-for-rule-workflow-blocks",
+      "behaviour": "The lint gate that refuses a for loop whose word list holds a command substitution grades the bash and sh run texts of every tracked workflow under .github/workflows and every action definition file, besides tracked shell files. A step whose shell, its own or the nearest default, is neither bash nor sh, by name or by path, is skipped; a shell given by a GitHub expression is graded, since it is known only at run time, and a blank shell runs the default. GitHub expressions in run texts read as plain words so they hide no loop. Each refusal names the workflow file and the line: the loop's own line in a literal or folded block, read from the file's lines, and the first line of a plain or quoted run text. A tree without a tracked workflow file is red.",
+      "seam": "the input set of the for loop word list gate",
+      "tests": [
+        "tests/test_ci_for_substitution.py::test_the_red_workflow_fixture_reports_every_refused_loop_at_its_file_line",
+        "tests/test_ci_for_substitution.py::test_the_clean_workflow_fixture_reports_nothing",
+        "tests/test_ci_for_substitution.py::test_a_run_block_ending_the_file_without_a_newline_keeps_its_last_line",
+        "tests/test_ci_for_substitution.py::test_github_expressions_become_underscores_that_keep_their_newlines",
+        "tests/test_ci_for_substitution.py::test_tracked_workflows_and_actions_with_a_substitution_word_list_are_red",
+        "tests/test_ci_for_substitution.py::test_a_tree_without_a_tracked_shell_or_workflow_file_grades_nothing_and_is_red",
+        "tests/test_ci_for_substitution.py::test_no_workflow_or_action_in_the_repository_holds_a_refused_word_list"
+      ]
+    },
+    {
       "id": "hive-launch-pane-off-controller-hold",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2481",
