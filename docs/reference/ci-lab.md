@@ -792,6 +792,18 @@ the first parent chain of the head's base that has one. A head that needs test u
 none fails with `no dependency manifest at or before <base>` and is dropped with that reason, so a
 merge group never folds green on an empty unit job.
 
+A batch verdict lists the files the batch opened outside its tests' manifest records. When the
+scheduler stores the verdict of a graded job whose uploaded report carries a non empty `outside`
+list, whatever its outcome, `StoredManifests.note` writes it as a note of the repository at
+`lab/manifests/<owner>--<name>/outside/<digest>.json`, holding the unit's tests and the sorted list,
+where `<digest>` is `digests.digest` of that note. The object store is write once, so the packed
+`<commit>.json` manifests are never rewritten, and the same tests and list write one note. Every
+`StoredManifests` read merges each note of the repository into the `outside` list of each test
+record the note names, sorted and without duplicates, and skips a test the manifest lacks; the
+next expansion keys those tests on the measured tree and the batch on the noted files' blob ids.
+The list is per batch, so every test of the batch takes it, and notes are per repository rather
+than per manifest commit.
+
 For a merge group head the expander builds `interaction.Group` from the mirror: the group's
 changes against the base, one entry per first parent commit between base and head with that
 commit's own changes, and the `pyproject.toml` flag from `ci_select.pyproject_reaches_tests`. The
