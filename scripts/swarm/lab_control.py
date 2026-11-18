@@ -14,6 +14,8 @@ TIMEOUT_S = 3
 HOTFIX = "hotfix"
 PULL_REQUEST = "pull_request"
 UNAUTHORIZED = 401
+AUTHORIZATION = "Authorization"
+JSON_BODY = {"Content-Type": "application/json"}
 
 
 class LabError(Exception):
@@ -45,8 +47,8 @@ def _is_map(value: object) -> TypeGuard[dict[str, Any]]:
 def post(target: Lab, path: str, body: Mapping[str, object]) -> dict[str, Any]:
     """POST ``body`` to the control route ``path`` and return the lab's JSON reply; refuse a lab that cannot be
     reached, refuses the token or answers anything but a JSON map."""
-    headers = {"Authorization": f"Bearer {target.token}", "Content-Type": "application/json"}
-    request = Request(f"{target.url.rstrip('/')}{path}", json.dumps(body).encode(), headers, method="POST")
+    headers = {AUTHORIZATION: f"Bearer {target.token}", **JSON_BODY}
+    request = Request(f"{target.url.rstrip('/')}{path}", json.dumps(body).encode(), headers)
     try:
         with urlopen(request, timeout=TIMEOUT_S) as reply:
             raw = reply.read()
@@ -55,12 +57,13 @@ def post(target: Lab, path: str, body: Mapping[str, object]) -> dict[str, Any]:
         raise LabError(f"the lab at {target.url} {answered}") from error
     except OSError as error:
         raise LabError(f"the lab at {target.url} is unreachable: {error}") from error
+    refused = LabError(f"the lab at {target.url} answered {path} with no JSON map")
     try:
         found: object = json.loads(raw)
-    except ValueError:
-        found = None
+    except ValueError as error:
+        raise refused from error
     if not _is_map(found):
-        raise LabError(f"the lab at {target.url} answered {path} with no JSON map")
+        raise refused
     return found
 
 

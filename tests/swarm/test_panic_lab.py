@@ -211,6 +211,24 @@ def test_panic_on_names_a_stored_fix_it_cannot_read(
 
 
 @pytest.mark.feature("panic-reaches-lab")
+def test_the_lab_reads_a_merged_fix_once(
+    store: RedisStore, lab: list[tuple[str, str, dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    read: list[str] = []
+
+    def fix_change(url: str) -> ChangeState:
+        read.append(url)
+        return ChangeState(
+            ChangeRef("o/r", 1), "closed", "a" * 40, "dev", True, url, "pr-branch", merge_commit="b" * 40
+        )
+
+    monkeypatch.setattr(panic, "fix_change", fix_change)
+    assert panic.lab_engage(store, SLUG, [PULL]) == "lab paused pull request grading except pr-branch"
+    assert panic.lab_engage(store, SLUG, [PULL]) == "lab paused pull request grading except pr-branch"
+    assert read == [PULL]
+
+
+@pytest.mark.feature("panic-reaches-lab")
 def test_panic_off_resumes_the_lab(
     store: RedisStore,
     lab: list[tuple[str, str, dict[str, Any]]],

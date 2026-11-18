@@ -18,6 +18,7 @@ __all__ = ["MAX_WAIT_MS", "ControlRoutes", "UploadSigner", "command", "respond",
 MAX_WAIT_MS = 30_000
 MAX_BODY_BYTES = 65_536
 LENGTH = "Content-Length"
+AUTHORIZATION = "Authorization"
 UPLOADS = frozenset({"report", "log"})
 
 Reply = tuple[int, dict[str, Any]]
@@ -154,10 +155,11 @@ def respond(leases: Leases, signer: UploadSigner, method: str, target: str, raw:
         return 400, {"error": "bad request"}
 
 
-def _authorised(routes: ControlRoutes, authorization: str) -> bool:
-    """Return whether the Authorization header carries the lab's bearer token; a lab without a token authorises none."""
+def _authorised(routes: ControlRoutes, authorization: str | None) -> bool:
+    """Return whether the Authorization header carries the lab's bearer token; a lab without a token and a request
+    without the header authorise none."""
     expected = f"Bearer {routes.token}".encode()
-    return bool(routes.token) and hmac.compare_digest(authorization.encode(), expected)
+    return bool(routes.token) and authorization is not None and hmac.compare_digest(authorization.encode(), expected)
 
 
 def _priority(routes: ControlRoutes, raw: bytes) -> Reply:
@@ -190,7 +192,7 @@ CONTROL: dict[str, Callable[[ControlRoutes, bytes], Reply]] = {
 }
 
 
-def command(routes: ControlRoutes, method: str, target: str, raw: bytes, authorization: str) -> Reply | None:
+def command(routes: ControlRoutes, method: str, target: str, raw: bytes, authorization: str | None) -> Reply | None:
     """Answer one control request with its status and JSON body, or None when the request is no control request."""
     route = CONTROL.get(urlsplit(target).path) if method == "POST" else None
     if route is None:
@@ -210,7 +212,7 @@ def serve(host: str, port: int, leases: Leases, signer: UploadSigner, routes: Co
         length = request.headers.get(LENGTH) or "0"
         if length.isascii() and length.isdigit() and int(length) <= MAX_BODY_BYTES:
             raw = request.rfile.read(int(length))
-            authorization = request.headers.get("Authorization") or ""
+            authorization = request.headers.get(AUTHORIZATION)
             status, payload = command(routes, request.command, request.path, raw, authorization) or respond(
                 leases, signer, request.command, request.path, raw
             )

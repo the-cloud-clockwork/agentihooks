@@ -5106,6 +5106,7 @@
         "tests/swarm/test_panic_lab.py::test_panic_on_with_no_token_is_an_action_line",
         "tests/swarm/test_panic_lab.py::test_panic_on_holds_when_the_lab_cannot_be_told",
         "tests/swarm/test_panic_lab.py::test_panic_on_names_a_stored_fix_it_cannot_read",
+        "tests/swarm/test_panic_lab.py::test_the_lab_reads_a_merged_fix_once",
         "tests/swarm/test_panic_lab.py::test_panic_off_resumes_the_lab",
         "tests/swarm/test_panic_lab.py::test_panic_off_keeps_the_lab_mark_when_the_lab_cannot_be_told",
         "tests/swarm/test_panic_lab.py::test_panic_off_leaves_a_lab_its_panic_never_paused",

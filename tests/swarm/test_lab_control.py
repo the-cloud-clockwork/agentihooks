@@ -78,11 +78,13 @@ def test_each_order_posts_its_body_with_the_bearer_token(monkeypatch: pytest.Mon
     assert lab_control.priority(lab_control.Lab(f"{URL}/", "tok"), ["b", "a", "b"]) == {"ok": True}
     assert lab_control.pause(LAB, ["fix"]) == {"ok": True}
     assert lab_control.resume(LAB) == {"ok": True}
+    assert lab_control.resume(lab_control.Lab("http://labX/", "tok")) == {"ok": True}
     headers = {"Authorization": "Bearer tok", "Content-type": "application/json"}
     assert asked == [
         ("POST", f"{URL}/priority", headers, {"heads": ["a", "b"], "class": "hotfix"}, lab_control.TIMEOUT_S),
         ("POST", f"{URL}/pause", headers, {"class": "pull_request", "except": ["fix"]}, lab_control.TIMEOUT_S),
         ("POST", f"{URL}/resume", headers, {}, lab_control.TIMEOUT_S),
+        ("POST", "http://labX/resume", headers, {}, lab_control.TIMEOUT_S),
     ]
     assert lab_control.TIMEOUT_S == 3
 

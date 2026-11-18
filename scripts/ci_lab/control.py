@@ -13,12 +13,14 @@ PRIORITY = f"{PREFIX}priority"
 PAUSED = f"{PREFIX}paused"
 PRIORITY_MS = 6 * 60 * 60 * 1000
 HOTFIX = "hotfix"
+LOWEST = "-inf"
+HIGHEST = "+inf"
 
 
 def prioritize(client: Any, heads: Iterable[str], now_ms: int) -> list[str]:
     """Mark the heads hotfix until PRIORITY_MS from now, dropping lapsed marks, and return them sorted."""
     named = sorted(set(heads))
-    client.zremrangebyscore(PRIORITY, "-inf", now_ms)
+    client.zremrangebyscore(PRIORITY, LOWEST, now_ms)
     if named:
         client.zadd(PRIORITY, dict.fromkeys(named, now_ms + PRIORITY_MS))
     return named
@@ -26,7 +28,7 @@ def prioritize(client: Any, heads: Iterable[str], now_ms: int) -> list[str]:
 
 def prioritized(client: Any, now_ms: int) -> frozenset[str]:
     """Return the heads whose hotfix mark has not lapsed at ``now_ms``."""
-    return frozenset(client.zrangebyscore(PRIORITY, f"({now_ms}", "+inf"))
+    return frozenset(client.zrangebyscore(PRIORITY, f"({now_ms}", HIGHEST))
 
 
 def pause(client: Any, name: str, excepted: Iterable[str]) -> list[str]:
