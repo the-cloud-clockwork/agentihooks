@@ -2,6 +2,44 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.1023 · 2026-11-18
+
+### 2026-11-18 · c1c1c0a5e706 · #12099 · @agenticore-app
+
+**Document bounded hub slot serving and the drop of abandoned requests**
+
+This change adds documentation for the hub's bounded request-serving behavior that was already shipped in PR #11574, explaining how the eight SERVE_WORKERS threads handle slot and exit requests, how a request waiting past the 10-second REQUEST_TIMEOUT_MS gets dropped with its log line, and how SERVE_WAITED_MS times admission from receipt rather than after queuing. It also adds Limits and Troubleshooting entries so operators can recognize the dropped-request log line and late timing symptoms, and links the new section from the hives pillar page, closing the gap where this behavior was implemented but never explained.
+
+### 2026-11-18 · 14b5a81428fb · #12096 · @agenticore-app
+
+**Document the per scenario tick pass edges test**
+
+This change replaces the outdated paragraph in docs/reference/tick-engine-steps.md describing the pass edges test as twelve scenarios with one union test, adding a detailed subsection that accurately documents the four tests in tests/tick/test_pass_edges.py, including per-scenario cases across all fifteen SCENARIOS, the covering test, relevant constants, per-test timeout limits, and before/after split timings with run links. It also updates the tests table, adds troubleshooting rows, links the new subsection from the reference index, and includes a changelog fragment, ensuring documentation matches the current test implementation after verification against the codebase.
+
+### 2026-11-18 · d3d66cd2bdb7 · #12071 · @agenticore-app
+
+**Pull request and mutation test selection select a test whose outside opened file changed**
+
+This change makes pull request test selection and mutation test selection consistent with the dependency manifest's invalidation logic: both now check a test record's "outside" file list in addition to its "files" list, so if a test opened a file outside its normal record and that file changes, the test is correctly selected. Previously such changes could be missed, risking untested code paths after relevant edits; a change to a file no record references still selects nothing. The fix is covered by new tests, type-checked, documented, and verified red-then-green against CI.
+
+### 2026-11-18 · 8be60c611b2a · #12072 · @agenticore-app
+
+**Lab mutant unit keys cover test modules the head adds**
+
+This change fixes a caching bug where mutant unit keys were built only from the base's stored test manifest, so test modules newly added on the head weren't counted, letting stale cached mutant verdicts persist even when a new test should have changed the result. `expand_tests.unlisted_test_hashes` now hashes those unlisted head test modules, their conftests, and imported tree modules, and `expand_mutation` folds these into every mutant unit key, forcing a one-time rekey of cached verdicts so results correctly reflect all tests the head actually runs against mutants.
+
+### 2026-11-18 · dfa1fc649074 · #12065 · @agenticore-app
+
+**Retire the deferred merge priority replay from the refresh**
+
+This change removes the deferred merge priority replay from the refresh job, since merge priority requests have applied immediately since #11818 and no code has written the `queue-priority` Redis hash since then. A live, read-only check against the shared swarm Redis confirmed zero stored deferred records remain, so the replay path only ever served pre-fix data. The refresh now only runs `requeue`; related fields, arguments, tests, the Semgrep fixture, and docs referencing the replay are cleaned up accordingly, reducing dead code and maintenance burden without affecting current behavior.
+
+### 2026-11-18 · aa9ea544e9a9 · #12084 · @nestorcolt
+
+**Document the root hive bus settings command**
+
+This change adds thorough documentation for the `agentihooks hive root-bus` command, explaining why the root hive needs it, the settings and host conditions it depends on, each execution step, success output, the `bus.env`/`bus.creds` files and their permissions, the hive unit's `EnvironmentFile`, spoke verification, stale-grant re-minting, credential inheritance, revocation, limits, and every refusal with its fix. It also updates cross-references in the hives and bus-scope docs and adds a changelog fragment, so operators have an accurate, verified reference for a previously undocumented but already-shipped command.
+
 ## v2.17.1022 · 2026-11-18
 
 ### 2026-11-18 · 635d25832f84 · #12085 · @agenticore-app
