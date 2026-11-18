@@ -8983,11 +8983,12 @@ revision range for the operator; the watcher and tick also report trimmed histor
 
 #### Queued ledger writes
 
-Ledger talk uses the same outbox when the ledger database does not answer: answers, relays, new list
-items and comments with an author and no attachments queue as `ledger` records in `inbox-outbox.jsonl`. Any
-other ledger write is refused while ledger records wait, with
-`ledger talk queued while the server was down still waits in <outbox>; retry once it lands`. A ledger linked
-to a remote server never queues here.
+The swarm tick queues its ledger writes in the same outbox while its pass runs from its last good view because
+the ledger database stopped answering. `LedgerClient` first refuses each write as the route would refuse it
+against that view, then queues the rest as `ledger` records in `inbox-outbox.jsonl` and prints
+`the ledger database is not answering: queued locally, it replays when it answers`. A full outbox ends the write
+as unreachable. Agent ledger commands never queue: they write in process and fail when the database does not
+answer.
 
 Every `agentihooks ledger` call replays the waiting ledger records before its own write; the swarm tick and
 each inbox connection replay them too. Each record is judged by what the ledger server answers:
