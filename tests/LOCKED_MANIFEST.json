@@ -1003,6 +1003,14 @@
    "ddd80769766b432d"
   ]
  },
+ "tests/test_credential_guard.py::test_get_secret_refusal_offers_the_key_listing_and_not_describe": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 1,
+  "texts": [
+   "76626a2cecc12649"
+  ]
+ },
  "tests/test_credential_guard.py::test_gh_commands_that_print_a_token_are_refused": {
   "assertions": 1,
   "calls": 2,
@@ -1033,10 +1041,26 @@
   "cases": 1,
   "texts": []
  },
+ "tests/test_credential_guard.py::test_kubectl_commands_that_name_no_secret_type_pass": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 19,
+  "texts": [
+   "0c85cd31a58dff89"
+  ]
+ },
+ "tests/test_credential_guard.py::test_kubectl_describe_of_a_secret_is_refused": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 30,
+  "texts": [
+   "23abbafacff91842"
+  ]
+ },
  "tests/test_credential_guard.py::test_kubectl_get_secret_forms_that_print_a_value_are_refused": {
   "assertions": 1,
   "calls": 3,
-  "cases": 36,
+  "cases": 37,
   "texts": [
    "6ca0fa9dca6fdbd0"
   ]
@@ -1044,7 +1068,7 @@
  "tests/test_credential_guard.py::test_kubectl_get_secret_forms_that_print_no_value_pass": {
   "assertions": 1,
   "calls": 1,
-  "cases": 11,
+  "cases": 15,
   "texts": [
    "0c85cd31a58dff89"
   ]
