@@ -135,10 +135,15 @@ def test_main_reads_mutation_report_shard_folders_unless_a_prefix_names_others(t
         _write(shards, shard, _measured(shard, 1, 1))
     stale = shards / "mutation-preflight-shard-0" / "report.json"
     stale.parent.mkdir(parents=True)
-    stale.write_text(json.dumps({**_measured(0, 1, 1), "failed": True}))
+    stale.write_text(json.dumps({**_measured(0, 1, 5), "failed": True}))
     out = tmp_path / "gate"
     assert merge.main([str(shards), "--shards", "2", "--output", str(out)]) == 0
-    assert json.loads((out / "report.json").read_text())["failed"] is False
+    assert json.loads((out / "report.json").read_text()) == {
+        "shards": [_measured(0, 1, 1)["shard"], _measured(1, 1, 1)["shard"]],
+        "files": [_file("scripts/a.py", {"killed": 2})],
+        "not_mutated": [],
+        "failed": False,
+    }
     assert "Merged 2 of 2 mutation shard reports" in capsys.readouterr().out
     argv = [str(shards), "--prefix", "mutation-preflight-shard-", "--shards", "1", "--output", str(out)]
     assert merge.main(argv) == 1
