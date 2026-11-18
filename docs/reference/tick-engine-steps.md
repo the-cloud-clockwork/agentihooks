@@ -909,7 +909,7 @@ may read `raised` without declaring it. The reader answers a key in this order:
 | `get("tools")`, `get("deadline")` | The pass tools and the step deadline, with no check |
 | `get("box")`, or a key whose value is a `PassBox`, such as the wrapper's `judging` box | A `DeclaredBox` view of that box |
 | A key in `BOX_KEYS` the step does not declare | Refused, whether or not a step stored it yet |
-| Any other key | The value the pass view holds under it, with no check: `slug`, `store`, `ledger`, `runtime`, `now_ms`, and a plain dictionary under any key |
+| Any other key | The value the pass view holds under it, with no check: `slug`, `store`, `ledger`, `runtime`, `now_ms`, and a plain dictionary under any key outside `BOX_KEYS` |
 
 `BOX_KEYS` holds the thirteen values steps and site hooks store: `agents`,
 `config`, `count`, `doc`, `finished`, `found`, `judged`, `live`,
@@ -934,9 +934,7 @@ domain `hook:<key>`, in its `reads`, as `urgent hold` and the other
 grades only `pass:<key>` declarations. Each site hook declares the domains it
 reads and writes for its site in `scripts.swarm.cli.WRAPPER_HOOK_KEYS` and
 `scripts.tick.sites.TICK_HOOK_KEYS`. A live site hook reads the box itself
-rather than a `DeclaredBox` view, so `UndeclaredRead` never names one; the
-separate `scripts.tick.hook_reads` guard, set by `AGENTIHOOKS_TICK_HOOK_READS`,
-checks those reads.
+rather than a `DeclaredBox` view, so `UndeclaredRead` never names one.
 
 To clear a refusal, declare the key the message names on the step it names:
 
