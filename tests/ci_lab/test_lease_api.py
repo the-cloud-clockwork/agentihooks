@@ -79,12 +79,13 @@ def post(lab: leases.Leases, signer: Signer, path: str, body: object) -> tuple[i
 
 
 def granted(lab: leases.Leases, signer: Signer, jobs: queue.Queue) -> dict[str, Any]:
-    jobs.enqueue([Unit(kind="test", key="a", members=("tests/a.py::t",))], "h1", {})
+    jobs.enqueue([Unit(kind="test", key="a", members=("tests/a.py::t",))], "h1", {}, "b1", "g1")
     status, body = post(lab, signer, "/lease", {"worker": "w1", "free_slots": 1, "capabilities": [], "wait_ms": 0})
     assert status == 200
     return body["leases"][0]
 
 
+@pytest.mark.feature("lab-worker-executors")
 def test_lease_returns_the_grant_payload(lab: leases.Leases, signer: Signer, jobs: queue.Queue) -> None:
     grant = granted(lab, signer, jobs)
 
@@ -93,6 +94,8 @@ def test_lease_returns_the_grant_payload(lab: leases.Leases, signer: Signer, job
     assert grant == {
         "job": "h1:test:a",
         "head": "h1",
+        "base": "b1",
+        "grader": "g1",
         "kind": "test",
         "key": "a",
         "members": ["tests/a.py::t"],
