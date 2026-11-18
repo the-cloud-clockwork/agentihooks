@@ -21,6 +21,7 @@ from scripts.swarm.tick import Placed
 from scripts.swarm_v2 import front_door
 from scripts.swarm_v2 import masters as master_seats
 from scripts.tick.steps import masters
+from tests.swarm.client_class import client_class
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
 pytestmark = pytest.mark.unit
@@ -336,7 +337,7 @@ def test_the_master_drill_command_prints_the_record_of_a_drill_through_the_route
     rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     routes: list[dict[str, Any]] = []
-    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient", lambda: rig.ledger)
+    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient", client_class(rig.ledger))
     monkeypatch.setattr("scripts.swarm_v2.runtime.routed.routed", lambda **kwargs: routes.append(kwargs) or rig.runtime)
     monkeypatch.setattr(cli, "now_ms", lambda: NOW)
     args = cli.build_parser().parse_args([SCRATCH, "master-drill"])

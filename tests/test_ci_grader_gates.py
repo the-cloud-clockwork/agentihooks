@@ -241,7 +241,14 @@ def test_a_stale_base_fails_a_chart_check_closed_and_a_planted_head_copy_never_r
 @pytest.mark.parametrize(
     "job,graded",
     [
-        ("scan", ["Own rules hold on their fixtures and the code", "Fail on findings new against the base"]),
+        (
+            "scan",
+            [
+                "Own rules hold on their fixtures and the code",
+                "Outage rules for tests hold on every test file",
+                "Fail on findings new against the base",
+            ],
+        ),
         ("charts", sorted(CHART_STEPS.values())),
     ],
 )

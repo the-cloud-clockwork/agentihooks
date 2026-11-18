@@ -1,0 +1,41 @@
+rules:
+  - id: ledger-client-swapped-for-a-function
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A test swaps the LedgerClient class of scripts.swarm.ledger_client for a lambda or a plain function. A module
+      first imported under the swap binds that function and fails on its LedgerClient | None annotation, because a
+      function does not support |, so merge groups went red by test order on 17 November. Swap in a class, such as
+      tests.swarm.client_class.client_class(fake).
+    paths:
+      include:
+        - /tests/
+        - ledger-client-swapped-for-a-function.py
+    pattern-either:
+      - patterns:
+          - pattern-either:
+              - pattern: $PATCH.setattr("scripts.swarm.ledger_client.LedgerClient", $VALUE, ...)
+              - pattern: $PATCH.setattr(scripts.swarm.ledger_client, "LedgerClient", $VALUE, ...)
+              - pattern: setattr(scripts.swarm.ledger_client, "LedgerClient", $VALUE)
+              - pattern: unittest.mock.patch("scripts.swarm.ledger_client.LedgerClient", $VALUE, ...)
+              - pattern: unittest.mock.patch("scripts.swarm.ledger_client.LedgerClient", ..., new=$VALUE, ...)
+              - pattern: unittest.mock.patch.object(scripts.swarm.ledger_client, "LedgerClient", $VALUE, ...)
+              - pattern: unittest.mock.patch.object(scripts.swarm.ledger_client, "LedgerClient", ..., new=$VALUE, ...)
+              - pattern: scripts.swarm.ledger_client.LedgerClient = $VALUE
+          - metavariable-pattern:
+              metavariable: $VALUE
+              pattern: "lambda $...ARGS: $BODY"
+      - patterns:
+          - pattern-inside: |
+              def $VALUE(...):
+                  ...
+              ...
+          - pattern-either:
+              - pattern: $PATCH.setattr("scripts.swarm.ledger_client.LedgerClient", $VALUE, ...)
+              - pattern: $PATCH.setattr(scripts.swarm.ledger_client, "LedgerClient", $VALUE, ...)
+              - pattern: setattr(scripts.swarm.ledger_client, "LedgerClient", $VALUE)
+              - pattern: unittest.mock.patch("scripts.swarm.ledger_client.LedgerClient", $VALUE, ...)
+              - pattern: unittest.mock.patch("scripts.swarm.ledger_client.LedgerClient", ..., new=$VALUE, ...)
+              - pattern: unittest.mock.patch.object(scripts.swarm.ledger_client, "LedgerClient", $VALUE, ...)
+              - pattern: unittest.mock.patch.object(scripts.swarm.ledger_client, "LedgerClient", ..., new=$VALUE, ...)
+              - pattern: scripts.swarm.ledger_client.LedgerClient = $VALUE

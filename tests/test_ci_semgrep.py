@@ -3,6 +3,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -47,6 +48,7 @@ def test_scan_keeps_the_reusable_workflow_steps() -> None:
         "Install PyYAML",
         "Check out the protected grader",
         "Own rules hold on their fixtures and the code",
+        "Outage rules for tests hold on every test file",
         "Rule exceptions only shrink",
         "Resolve the merge base of the head and the base",
         "Fail on findings new against the base",
@@ -89,6 +91,74 @@ def test_outage_rules_reach_the_base_graded_scan_and_the_fixture_step() -> None:
     assert ': > "$copy/.semgrepignore"' in fixture_run
     assert '(cd "$copy" && semgrep --metrics off --test --config rules rules)' in fixture_run
     assert ".semgrep-incidents/" in (_ROOT / ".semgrepignore").read_text().splitlines()
+
+
+TEST_RULES = "Outage rules for tests hold on every test file"
+SCAN_STUB = '#!/usr/bin/env bash\necho "$*" >> "$STUBS/calls"\nexit "$SCAN_EXIT"\n'
+
+
+def _test_rules_step() -> dict[str, Any]:
+    return next(step for step in _jobs()["scan"]["steps"] if step.get("name") == TEST_RULES)
+
+
+def _run_test_rules(tmp_path: Path, graded: bool, scan_exit: int = 0) -> tuple[int, list[str]]:
+    step = _test_rules_step()
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "semgrep").write_text(SCAN_STUB)
+    (bin_dir / "semgrep").chmod(0o755)
+    if graded:
+        for rule in step["env"]["RULES"].split():
+            (tmp_path / "grader" / rule).parent.mkdir(parents=True, exist_ok=True)
+            (tmp_path / "grader" / rule).write_text("rules: []\n")
+    env = {
+        **os.environ,
+        **step["env"],
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "RUNNER_TEMP": str(tmp_path),
+        "STUBS": str(tmp_path),
+        "SCAN_EXIT": str(scan_exit),
+    }
+    done = subprocess.run(["bash", "-euo", "pipefail", "-c", step["run"]], env=env, capture_output=True, text=True)
+    calls = tmp_path / "calls"
+    return done.returncode, calls.read_text().splitlines() if calls.exists() else []
+
+
+def test_outage_rules_for_tests_scan_every_test_file_with_the_head_and_the_grader_copy(tmp_path: Path) -> None:
+    rule = _test_rules_step()["env"]["RULES"]
+    assert rule == ".semgrep-incidents/ledger-client-swapped-for-a-function.yml"
+    assert _run_test_rules(tmp_path, graded=True) == (
+        0,
+        [
+            "scan --error --strict --metrics off --x-ignore-semgrepignore-files "
+            f"--config {rule} --config {tmp_path}/grader/{rule} tests"
+        ],
+    )
+
+
+def test_outage_rules_for_tests_grade_with_the_head_copy_on_a_base_without_the_rule(tmp_path: Path) -> None:
+    rule = _test_rules_step()["env"]["RULES"]
+    assert _run_test_rules(tmp_path, graded=False) == (
+        0,
+        [f"scan --error --strict --metrics off --x-ignore-semgrepignore-files --config {rule} tests"],
+    )
+
+
+def test_outage_rules_for_tests_fail_the_step_on_a_finding(tmp_path: Path) -> None:
+    assert _run_test_rules(tmp_path, graded=True, scan_exit=1)[0] == 1
+
+
+def test_each_outage_rule_for_tests_reaches_the_tests_and_its_fixture() -> None:
+    for name in _test_rules_step()["env"]["RULES"].split():
+        path = _ROOT / name
+        (rule,) = yaml.safe_load(path.read_text())["rules"]
+        fixture = path.with_suffix(".py")
+        assert rule["id"] == path.stem
+        assert rule["paths"]["include"] == ["/tests/", fixture.name]
+        text = fixture.read_text()
+        assert f"# ruleid: {rule['id']}" in text
+        assert f"# ok: {rule['id']}" in text
+    assert "tests/" in (_ROOT / ".semgrepignore").read_text().splitlines()
 
 
 @pytest.mark.feature("semgrep-feature-tests")
