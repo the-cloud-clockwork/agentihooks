@@ -274,5 +274,5 @@ Troubleshooting:
 - **`swarm set codex-model=M` is refused** with `codex_model must be a model listed in
   the codex catalog`: name a model the Codex catalog lists. A lane model is refused
   only when no harness catalog lists it (`eng-model must be auto or a model listed in a
-  harness catalog, not <model>`), so a Claude model on a lane that also launches Codex agents is
-  accepted.
+  harness catalog, not <model>`), so a Claude model on a lane that also launches
+  Codex agents is accepted.
