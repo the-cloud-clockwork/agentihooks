@@ -82,6 +82,15 @@ def test_lease_grants_fitting_jobs_in_order_with_distinct_tokens(jobs: queue.Que
     assert not lab.owns("h1:test:net", grants[1].token)
 
 
+@pytest.mark.feature("lab-worker-executors")
+def test_a_grant_carries_the_base_and_grader_revision_of_its_job(jobs: queue.Queue, lab: leases.Leases) -> None:
+    jobs.enqueue([unit("a")], "h1", {}, "b1", "g1")
+
+    [grant] = lab.lease("w1", 1, frozenset(), 0)
+
+    assert grant == leases.Grant("h1:test:a", grant.token, "h1", unit("a"), 1, 1500, "b1", "g1")
+
+
 def test_lease_stops_at_free_slots(jobs: queue.Queue, lab: leases.Leases) -> None:
     jobs.enqueue([unit("a"), unit("b"), unit("c")], "h1", {})
 
@@ -272,3 +281,22 @@ def test_reap_skips_vanished_and_live_leases(
 
 def test_complete_of_an_unknown_job_is_refused(lab: leases.Leases) -> None:
     assert lab.complete("h1:test:none", "tok", "passed") is False
+
+
+@pytest.mark.feature("lab-scheduler-service")
+def test_a_lease_poll_offers_the_workers_free_slots_while_it_waits_and_what_its_grants_leave(
+    jobs: queue.Queue, clock: Clock
+) -> None:
+    seen: list[dict[str, tuple[int, int]]] = []
+
+    def wait(ms: int) -> None:
+        seen.append(jobs.offers(0))
+        clock.sleep(ms)
+
+    lab = leases.Leases(jobs, ttl_ms=500, clock=clock, sleep=wait, poll_ms=50)
+    assert lab.lease("w1", 3, frozenset(), 60) == []
+    assert seen == [{"w1": (3, 1000)}, {"w1": (3, 1000)}]
+    assert jobs.offers(0) == {"w1": (3, 1060)}
+    jobs.enqueue([unit("a"), unit("b")], "h1", {"b": queue.Requirement(slots=2)})
+    assert len(lab.lease("w1", 4, frozenset(), 0)) == 2
+    assert jobs.offers(0) == {"w1": (1, 1060)}

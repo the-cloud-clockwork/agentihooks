@@ -105,6 +105,7 @@ keep_layers() {
     -f "$chart/ci/terminal-worker.Dockerfile" . >/dev/null &
   packages=$!
   trap 'status=$?; wait "$packages" || true; exit "$status"' EXIT
+  bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12.12-slim-bookworm >/dev/null
   mapfile -t swarm_layers < <(layers swarm)
   docker build -q -t "$image" "${swarm_layers[@]}" . >/dev/null
   printf 'main fixture image built\n'
@@ -193,7 +194,8 @@ if [[ $rendered != *":dev@$digest"* ]]; then
   printf 'the chart did not render the image updater tag dev@%s\n' "$digest" >&2
   exit 1
 fi
-for tag in "$digest" "@$digest" "$(printf 'b%.0s' $(seq 40))"; do
+sha_tag="$(printf 'b%.0s' $(seq 40))"
+for tag in "$digest" "@$digest" "$sha_tag"; do
   refusal="$(helm template "$release" "$chart" --set image.tag="$tag" 2>&1 >/dev/null || true)"
   if [[ $refusal != *"must be a floating tag"* ]]; then
     printf 'the chart did not refuse image.tag %s as a non floating tag: %s\n' "$tag" "$refusal" >&2
@@ -339,7 +341,7 @@ refuse_workers() {
     exit 1
   fi
 }
-for tag in "dev@$digest" "$digest" "$(printf 'b%.0s' $(seq 40))"; do
+for tag in "dev@$digest" "$digest" "$sha_tag"; do
   refuse_workers "controller.workers.imageTag must be a floating tag" --set controller.workers.imageTag="$tag"
 done
 for setting in profile brain; do
@@ -584,7 +586,7 @@ frozen_runtime_state() {
     | python3 -c 'import json, sys; found = json.load(sys.stdin).get("containers") or []; print(found[0]["state"] if found else "REMOVED")'
 }
 confirmed=""
-for _ in $(seq 60); do
+for _ in {1..60}; do
   terminated="$(kubectl get pod "$frozen_pod" -o jsonpath='{.status.containerStatuses[0].lastState.terminated.containerID}')"
   current="$(kubectl get pod "$frozen_pod" -o jsonpath='{.status.containerStatuses[0].containerID}')"
   if [[ $current != "$frozen_container" ]]; then
@@ -618,7 +620,7 @@ assert store.redis.get(store.key(slug, "tick-lock")) != token
 print("released only the captured tick lock after its frozen container terminated")
 RELEASE
 retaken=""
-for _ in $(seq 180); do
+for _ in {1..180}; do
   held="$(read_lease)" || held="{}"
   if [[ "$(owner_of "$held")" == "$hive" ]]; then
     retaken="$held"
@@ -644,7 +646,7 @@ helm upgrade "$release" "$chart" -f "$chart/ci/kind-values.yaml" "${database[@]}
   --wait --timeout 5m
 kubectl rollout status deployment "$release-controller" --timeout 2m
 built=""
-for _ in $(seq 60); do
+for _ in {1..60}; do
   built="$(kubectl logs "deployment/$release-controller" -c controller | grep -F "controller: built the Kubernetes runtime for $slug" || true)"
   [[ -n $built ]] && break
   sleep 1
@@ -981,7 +983,7 @@ while read -r line; do
   fi
   printf 'the %s launch record names the session exporter: %s\n' "$profile" "$recorded"
   phase=""
-  for _ in $(seq 120); do
+  for _ in {1..120}; do
     phase="$(kubectl get pod "$worker_pod" -o jsonpath='{.status.phase}')"
     [[ $phase == Succeeded || $phase == Failed ]] && break
     sleep 1
@@ -1009,7 +1011,7 @@ while read -r line; do
   printf 'the %s worker exporter exported the agent session and its supervisor reported the checkpoint complete\n' "$profile"
   kubectl delete pod "$worker_pod" --wait --timeout 1m
   collected=""
-  for _ in $(seq 60); do
+  for _ in {1..60}; do
     remaining="$(kubectl get configmap "$worker_pod-launch" --ignore-not-found -o name)"
     if [[ -z $remaining ]]; then
       collected=yes
@@ -1028,7 +1030,7 @@ node="$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')"
 kubectl label node "$node" anton.io/capacity-type=spot --overwrite
 kubectl rollout restart deployment "$release-controller"
 placement=""
-for _ in $(seq 60); do
+for _ in {1..60}; do
   placement="$(kubectl get events --field-selector reason=FailedScheduling -o jsonpath='{range .items[*]}{.involvedObject.name} {.message}{"\n"}{end}' | grep "$release-controller" || true)"
   [[ $placement == *"node affinity"* ]] && break
   sleep 1
@@ -1054,7 +1056,7 @@ if [[ $calm != "0" ]]; then
 fi
 kubectl exec "$ledger_pod" -- python -c "from scripts.swarm.incidents import PRESSURE_OFF_KEY; from scripts.swarm.store import connect; store = connect(); store.update('$slug', memory_per_agent_mb=10**9); store.redis.delete(store.key('$slug', PRESSURE_OFF_KEY)); print('simulated host pressure: one agent now needs more memory than the node has')"
 pressure=""
-for _ in $(seq 120); do
+for _ in {1..120}; do
   pressure="$(kubectl exec -i "$ledger_pod" -- env SLUG="$slug" HOST="$host" python - <<'EOF'
 import json
 import os
@@ -1103,7 +1105,7 @@ python3 -c 'import json, sys; print(json.dumps({"clients": {"namespace": "defaul
 kubectl rollout restart deployment "$release-controller"
 kubectl rollout status deployment "$release-controller" --timeout 2m
 kept=""
-for _ in $(seq 60); do
+for _ in {1..60}; do
   kept="$(kubectl logs "deployment/$release-controller" -c controller | grep -F "controller: kept saved herdr machines for $slug on start" || true)"
   [[ -n $kept ]] && break
   sleep 1

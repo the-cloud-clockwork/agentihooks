@@ -13,6 +13,8 @@ from collections.abc import Mapping, Sequence
 from pathlib import PurePosixPath
 from typing import Any
 
+from scripts.ci_lab.digests import TestInputs, Toolchain, test_key
+from scripts.ci_lab.units import Unit
 from scripts.ci_mutation import scope
 from tests import dep_manifest
 
@@ -27,6 +29,8 @@ PYTEST_INVOCATION = (
     "tests.flake_ledger",
 )
 BROAD_TREES = (*dep_manifest.MEASURED, "tests/")
+KIND = "test"
+BATCH_SECONDS = 60.0
 
 
 def _digest(record: object) -> str:
@@ -159,3 +163,22 @@ def batches(manifest: Mapping[str, Any], durations: Mapping[str, float], target:
         else:
             found.extend(_parts(tests, seconds, target))
     return found
+
+
+def units(
+    manifest: Mapping[str, Any],
+    tree: Mapping[str, bytes],
+    blobs: Mapping[str, str],
+    durations: Mapping[str, float],
+    toolchain: Toolchain,
+) -> tuple[Unit, ...]:
+    """Return one test unit per batch of the manifest's tests, keyed by its tests' fingerprints over the tree, the
+    blob ids of the files they opened outside the manifest, the pytest invocation and the toolchain."""
+    keys = fingerprints(manifest, tree)
+    found: list[Unit] = []
+    for batch in batches(manifest, durations, BATCH_SECONDS):
+        outside = {path for test in batch for path in manifest["tests"][test].get("outside", ())}
+        opened = {path: blobs[path] for path in outside if path in blobs}
+        inputs = TestInputs({test: keys[test] for test in batch}, opened, PYTEST_INVOCATION, toolchain)
+        found.append(Unit(KIND, test_key(inputs), batch))
+    return tuple(found)

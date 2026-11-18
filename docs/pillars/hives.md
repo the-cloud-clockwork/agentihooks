@@ -73,7 +73,16 @@ agentihooks hive install          # user service that runs agentihooks hive run
   records the execution as working, with the hive's process target, pane, model and effort.
   Credentials sit outside what a member can read.
 - `hive install` writes and enables the `agentihooks-hive` user service, which runs `hive run` and restarts five
-  seconds after any exit. `hive run` publishes sessions, quota, slots and repos every fifteen seconds.
+  seconds after any exit. `hive run` publishes sessions, quota, slots and repos every fifteen seconds. After each
+  beat with no order worker or resume order process still running, it reads the git revision of the checkout it
+  loaded its code from;
+  when that revision moved, as after a `dev` pull, it prints
+  `the hive <pid> restarts on the new code: the checkout moved from <old> to <new>` and exits, so the service starts it
+  again on the new code. Agents run in herdr panes outside the service's cgroup and keep running. A revision it cannot
+  read, as in an image with no git checkout, keeps it running. A revision it could not read at start and reads later
+  restarts it once, since the code it loaded is then unknown. The hive keeps every resume order process it starts, so
+  a resume in flight finishes on the old code before the restart. An order worker or resume order process that never
+  exits holds the restart until it exits.
 - `agentihooks hive refresh` mints a new Redis credential; `agentihooks hive revoke <id>` deletes a member's
   ledger credential and Redis user.
 - `agentihooks hive remove <name>` reverses `hive create` in one run; the name may also be the member id. It runs

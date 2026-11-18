@@ -22,6 +22,8 @@ class Grant:
     unit: Unit
     slots: int
     expires_ms: int
+    base: str = ""
+    grader: str = ""
 
 
 @dataclass
@@ -33,7 +35,14 @@ class Leases:
     poll_ms: int
 
     def lease(self, worker: str, free_slots: int, capabilities: frozenset[str], wait_ms: int) -> list[Grant]:
-        """Grant fitting pending jobs, polling until some are granted or the wait ends."""
+        """Grant fitting pending jobs, polling until some are granted or the wait ends; the worker's offer is its free
+        slots while it waits and what its grants leave once it returns."""
+        self.queue.offer(worker, free_slots, self.clock())
+        grants = self._poll(worker, free_slots, capabilities, wait_ms)
+        self.queue.offer(worker, free_slots - sum(grant.slots for grant in grants), self.clock())
+        return grants
+
+    def _poll(self, worker: str, free_slots: int, capabilities: frozenset[str], wait_ms: int) -> list[Grant]:
         deadline = self.clock() + wait_ms
         while not (grants := self._take(worker, free_slots, capabilities)):
             left = deadline - self.clock()
@@ -54,7 +63,9 @@ class Leases:
             expires_ms = self.clock() + self.ttl_ms
             if not job.requirement.capabilities <= capabilities or not self.queue.claim(job, worker, token, expires_ms):
                 continue
-            grants.append(Grant(job_id, token, job.head, job.unit, job.requirement.slots, expires_ms))
+            grants.append(
+                Grant(job_id, token, job.head, job.unit, job.requirement.slots, expires_ms, job.base, job.grader)
+            )
             free_slots -= job.requirement.slots
         return grants
 

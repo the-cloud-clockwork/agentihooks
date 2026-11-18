@@ -26,7 +26,8 @@ WORK="$(mktemp -d "${TMPDIR:-/tmp}/codex-smoke.XXXXXX")"
 LOG="${CLAUDE_HOOK_LOG_FILE:-$HOME/.agentihooks/logs/hooks.log}"
 REAL_CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
 PY="$(command -v python3)"
-for cand in "${AGENTIHOOKS_PYTHON:-}" "$(dirname "$0")/../.venv/bin/python" "$(dirname "$0")/../../.venv/bin/python"; do
+here="$(dirname "$0")"
+for cand in "${AGENTIHOOKS_PYTHON:-}" "$here/../.venv/bin/python" "$here/../../.venv/bin/python"; do
   [ -n "${cand:-}" ] && [ -x "$cand" ] && "$cand" -c "import hooks" 2>/dev/null && { PY="$cand"; break; }
 done 2>/dev/null
 PASS=0; FAIL=0; INFO=0

@@ -31,7 +31,7 @@ print(next(manifest["digest"] for manifest in index["manifests"]
            and manifest["platform"].get("architecture") == "amd64"))
 ' <<<"$manifest")" && timeout "$limit" docker --host "$docker_host" pull "$source@$digest"
 }
-for attempt in $(seq "$attempts"); do
+for ((attempt = 1; attempt <= attempts; attempt++)); do
   source="$image"
   if (( attempt % 2 == 0 )); then source="$fallback"; fi
   if acquire "$@"; then
