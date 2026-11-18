@@ -940,10 +940,10 @@ grades:
 
 A scenario added to `SCENARIOS` gets its own case with no change to this test.
 A per scenario case does not check that every step ran; only the covering test
-does, and only over `COVERING`. In
-[probe run 43785100130](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/43785100130),
-a dispatch on a throwaway branch whose probe cases fail on purpose to print
-what they recorded, every scenario on its own had no gap, and `running`
+does, and only over `COVERING`.
+[Probe run 43785100130](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/43785100130)
+was a dispatch on a throwaway branch whose probe cases fail on purpose to print
+what they recorded. In it, every scenario on its own had no gap, and `running`
 alone ran every registered step, stored all nine `WRITTEN` values and read all
 of them but `judged`.
 
