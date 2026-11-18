@@ -6,8 +6,9 @@ from pathlib import Path
 import pytest
 import yaml
 
+from scripts.shard_sizing import SLOWDOWN
 from tests import refresh_durations
-from tests.queue_shards import SLOWDOWN, STARTUP_SECONDS
+from tests.queue_shards import STARTUP_SECONDS
 
 _ROOT = Path(__file__).resolve().parents[1]
 

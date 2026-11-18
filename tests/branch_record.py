@@ -13,7 +13,7 @@ import tempfile
 from contextlib import closing
 from pathlib import Path
 
-from tests import dep_manifest
+from scripts import dep_manifest
 
 RANK = {"skipped": 0, "passed": 1, "flaky": 2, "failed": 3}
 OUTCOMES = {"started", *RANK}

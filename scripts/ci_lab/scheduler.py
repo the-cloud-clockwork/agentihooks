@@ -33,7 +33,7 @@ from urllib.parse import urlsplit
 import jsonschema
 import yaml
 
-from scripts import ci_select
+from scripts import ci_select, dep_manifest
 from scripts.ci_lab import budget, contract, control, evidence, expand_tests, interaction, lease_api, metrics, service
 from scripts.ci_lab.capacity import Load
 from scripts.ci_lab.checks import Checks, Output
@@ -52,7 +52,6 @@ from scripts.ci_lab.webhooks import HEAD_SUBJECT, HeadEvent
 from scripts.ci_lab.worktrees import Mirror
 from scripts.ci_runner_trust import ACTORS, validate_actors
 from scripts.events.bus import Consumer
-from tests import dep_manifest
 
 __all__ = [
     "GRADES",

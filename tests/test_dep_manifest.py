@@ -11,7 +11,7 @@ import pytest
 import yaml
 from coverage import CoverageData
 
-from tests import dep_manifest
+from scripts import dep_manifest
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "test.yml"
@@ -48,18 +48,18 @@ def _step(job, name):
     return next(step for step in _job(job)["steps"] if step.get("name") == name)
 
 
-def _deselect_in_test_count(tmp_path, head_manifest):
+def _deselect_in_test_count(tmp_path, head_manifest, package="scripts"):
     collected = ["tests/test_a.py::one", "tests/test_a.py::two", "tests/test_b.py::one", "tests/test_b.py::new"]
     reused = ["tests/test_a.py::one", "tests/test_a.py::two", "tests/test_b.py::one"]
     runner = tmp_path / "runner"
     workspace = tmp_path / "workspace"
     for checkout, manifest in (
-        (runner / "planner", (ROOT / "tests" / "dep_manifest.py").read_text()),
+        (runner / "planner", (ROOT / "scripts" / "dep_manifest.py").read_text()),
         (workspace, head_manifest),
     ):
-        (checkout / "tests").mkdir(parents=True)
-        (checkout / "tests" / "__init__.py").write_text("")
-        (checkout / "tests" / "dep_manifest.py").write_text(manifest)
+        (checkout / package).mkdir(parents=True)
+        (checkout / package / "__init__.py").write_text("")
+        (checkout / package / "dep_manifest.py").write_text(manifest)
     (workspace / "reused-tests.json").write_text(json.dumps({"tests": reused}))
     (runner / "collected.json").write_text(json.dumps(collected))
     env = {
@@ -322,12 +322,12 @@ def test_the_manifest_job_builds_and_uploads_it_beside_sonar_and_nothing_caches_
     )
     assert _step("dep-manifest", "Download shard coverage")["with"]["pattern"] == "coverage-3.12-*"
     build = _step("dep-manifest", "Build the test dependency manifest")
-    assert "python -m tests.dep_manifest build" in build["run"]
+    assert "python -m scripts.dep_manifest build" in build["run"]
     assert '--out "$RUNNER_TEMP/dep-manifest/manifest.json"' in build["run"]
     contexts = '--data-file="$RUNNER_TEMP/dep-manifest/.coverage"'
     assert f"python -m coverage combine --rcfile=.github/coverage/coverage.ini --keep {contexts}" in build["run"]
     assert '--coverage "$RUNNER_TEMP/dep-manifest/.coverage"' in build["run"]
-    assert build["run"].index(contexts) < build["run"].index("python -m tests.dep_manifest build")
+    assert build["run"].index(contexts) < build["run"].index("python -m scripts.dep_manifest build")
     upload = _step("dep-manifest", "Upload the test dependency manifest")
     assert upload["with"]["name"] == "dep-manifest"
     assert upload["with"]["path"] == "${{ runner.temp }}/dep-manifest/manifest.json"
@@ -601,7 +601,10 @@ def test_queue_shards_split_on_the_tests_the_planner_did_not_reuse():
     assert _step("test-count", "Wait for the test plan")["id"] == "plan"
     assert _step("split", "Adopt the test plan")["id"] == "plan"
     deselected = _step("test-count", "Deselect the reused tests")
-    assert deselected["run"].startswith('cd "$RUNNER_TEMP/planner"\n"$PYTHON_PATH" -m tests.dep_manifest deselect')
+    assert deselected["run"].startswith(
+        'cd "$RUNNER_TEMP/planner"\npackage=scripts\nif [[ ! -f scripts/dep_manifest.py ]]; then package=tests; fi\n'
+        '"$PYTHON_PATH" -m "$package.dep_manifest" deselect'
+    )
     assert deselected["env"]["PYTHON_PATH"] == plan["env"]["PYTHON_PATH"]
     assert _step("unit", "Run tests")["env"]["CI_REUSED"] == "${{ github.workspace }}/reused.json"
     check = _step("shard-check", "Check every collected test ran in exactly one shard")
@@ -624,7 +627,7 @@ def _imports(module):
 
 
 def test_the_manifest_code_needs_only_yaml_beyond_the_standard_library():
-    pending, seen = ["scripts", "tests", "scripts.ci_test_plan", "tests.dep_manifest"], set()
+    pending, seen = ["scripts", "tests", "scripts.ci_test_plan", "scripts.dep_manifest"], set()
     third_party = {"loaded": set(), "lazy": set()}
     while pending:
         module = pending.pop()
@@ -653,7 +656,7 @@ def test_every_bare_interpreter_call_into_the_manifest_code_installs_pyyaml_firs
         steps = job.get("steps", [])
         for index, step in enumerate(steps):
             run = step.get("run", "")
-            for call in ("-m scripts.ci_test_plan", "-m tests.dep_manifest"):
+            for call in ("-m scripts.ci_test_plan", "-m scripts.dep_manifest", '-m "$package.dep_manifest"'):
                 if call in run:
                     calls.add((name, step["name"]))
                     earlier = [s.get("run", "") for s in steps[:index]]
@@ -675,7 +678,7 @@ def test_every_bare_interpreter_call_into_the_manifest_code_installs_pyyaml_firs
 
 def test_the_split_deselects_with_the_grader_manifest_code_not_the_heads(tmp_path):
     planted = (
-        (ROOT / "tests" / "dep_manifest.py")
+        (ROOT / "scripts" / "dep_manifest.py")
         .read_text()
         .replace(
             "def deselect(",
@@ -690,7 +693,7 @@ def test_the_split_deselects_with_the_grader_manifest_code_not_the_heads(tmp_pat
 
 
 def test_the_split_deselects_the_same_tests_when_the_head_keeps_the_manifest_code(tmp_path):
-    chosen, expected = _deselect_in_test_count(tmp_path, (ROOT / "tests" / "dep_manifest.py").read_text())
+    chosen, expected = _deselect_in_test_count(tmp_path, (ROOT / "scripts" / "dep_manifest.py").read_text())
     assert (
         chosen
         == expected
@@ -699,6 +702,14 @@ def test_the_split_deselects_the_same_tests_when_the_head_keeps_the_manifest_cod
             "files": ["tests/test_a.py"],
         }
     )
+
+
+@pytest.mark.feature("lab-wheel-imports")
+def test_the_split_deselects_with_a_grader_that_keeps_the_manifest_under_tests(tmp_path):
+    manifest = (ROOT / "scripts" / "dep_manifest.py").read_text()
+    chosen, expected = _deselect_in_test_count(tmp_path, manifest, "tests")
+    assert chosen == expected
+    assert not (tmp_path / "runner" / "planner" / "scripts").exists()
 
 
 def test_the_reused_plan_reaches_workers_but_never_nested_pytest_runs(tmp_path, monkeypatch):

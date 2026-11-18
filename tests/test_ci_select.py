@@ -63,6 +63,7 @@ def decide(root, changed, durations=None, limit=3):
         [".github/test-excludes.txt"],
         ["tests/__init__.py"],
         ["tests/shards.py"],
+        ["scripts/shard_sizing.py"],
         ["tests/flake_ledger.py"],
         ["tests/browser_coverage.py"],
         ["tests/node_capture.cjs"],

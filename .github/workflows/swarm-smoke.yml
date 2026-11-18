@@ -103,6 +103,11 @@ jobs:
       - name: Run the pinned herdr and ssh clients inside the swarm image
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: bash scripts/packaging/swarm-image-clients.sh local/agentihooks-swarm:clients-check
+      - name: Import the lab scheduler's modules inside the swarm image
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          docker run --rm --network none --entrypoint python local/agentihooks-swarm:clients-check
+          -c 'import scripts.ci_lab.scheduler, scripts.ci_lab.interaction, scripts.ci_lab.expand_tests, scripts.ci_test_plan'
       - name: Keep the swarm smoke layers
         if: steps.layers.outputs.cache-hit != 'true'
         run: |

@@ -8,7 +8,7 @@ from typing import Protocol
 from scripts import ci_cpu_quota
 from scripts.ci_lab.units import Unit
 from scripts.ci_mutation.plan import MUTANT_SECONDS
-from tests.queue_shards import SLOWDOWN
+from scripts.shard_sizing import SLOWDOWN
 
 
 class DurationHistory(Protocol):

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from scripts.ci_lab import worktrees
-from tests.dep_manifest import _git
+from scripts.dep_manifest import _git
 
 WRITE = stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH
 
