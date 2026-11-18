@@ -74,7 +74,7 @@ class Actions:
 
     def _get(self, path: str) -> requests.Response:
         """Send one GET under the repository with a fresh token; requests drops it on the archive's storage redirect.
-        A request that gets no answer raises FetchRefused naming it."""
+        A request that fails before GitHub answers it, its token mint included, raises FetchRefused naming it."""
         try:
             return requests.get(
                 f"{API}/repos/{self.repo}/{path}",
@@ -82,10 +82,10 @@ class Actions:
                 timeout=TIMEOUT,
             )
         except requests.RequestException as error:
-            raise FetchRefused(f"GET {path} got no answer: {error}") from error
+            raise FetchRefused(f"GET {path} failed: {error}") from error
 
 
-def _packed(data: bytes, path: str) -> tuple[bytes, object]:
+def _read_packed(data: bytes, path: str) -> tuple[bytes, Any]:
     """Return the packed manifest file of an artifact archive and the commit it records, or raise FetchRefused naming
     the archive."""
     try:
@@ -104,7 +104,7 @@ def fetch(github: GitHub, commit: str) -> bytes | None:
             data = None if artifact["expired"] else github.archive(path)
             if data is None:
                 continue
-            packed, recorded = _packed(data, path)
+            packed, recorded = _read_packed(data, path)
             if recorded == commit:
                 return packed
     return None

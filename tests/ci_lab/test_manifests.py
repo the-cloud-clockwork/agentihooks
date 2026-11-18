@@ -100,6 +100,14 @@ class Token:
         return "fixture"
 
 
+class Unminted:
+    """A token source whose mint never gets an answer."""
+
+    def get_token(self) -> str:
+        """Raise the error requests raises for a token mint that gets no answer."""
+        raise requests.ConnectionError("mint reset")
+
+
 def answer(status: int, body: Mapping[str, Any] | None = None, content: bytes = b"") -> Mock:
     """Return a mocked HTTP response."""
     return Mock(status_code=status, json=Mock(return_value=dict(body or {})), content=content)
@@ -203,8 +211,10 @@ def test_actions_answers_none_for_a_gone_archive_and_names_any_other_refused_req
         actions.archive(zipped(9))
     with pytest.raises(FetchRefused, match=f"^GET actions/workflows/test.yml/runs\\?.*={COMMIT} answered 502$"):
         actions.json(COMMIT_RUNS_PATH)
-    with pytest.raises(FetchRefused, match="^GET actions/artifacts/9/zip got no answer: reset$"):
+    with pytest.raises(FetchRefused, match="^GET actions/artifacts/9/zip failed: reset$"):
         actions.archive(zipped(9))
+    with pytest.raises(FetchRefused, match="^GET actions/artifacts/9/zip failed: mint reset$"):
+        Actions("example/repo", Unminted()).archive(zipped(9))
     lists = call(f"{URL}{listed(7)}", headers=HEADERS, timeout=30)
     downloads = call(f"{URL}{zipped(9)}", headers=HEADERS, timeout=30)
     runs = call(f"{URL}{COMMIT_RUNS_PATH}", headers=HEADERS, timeout=30)
