@@ -241,6 +241,18 @@ def test_panic_off_keeps_the_lab_mark_when_the_lab_cannot_be_told(
 
 
 @pytest.mark.feature("panic-reaches-lab")
+def test_panic_off_leaves_a_lab_its_panic_never_paused(
+    store: RedisStore,
+    lab: list[tuple[str, str, dict[str, Any]]],
+    heads: list[str],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    panic.engage(store, SLUG, "pressed", False, [BRANCH], 0)
+    assert _press(store, capsys, "off") == {"panic": "off", "lab": ""}
+    assert lab == []
+
+
+@pytest.mark.feature("panic-reaches-lab")
 def test_the_alarm_resumes_the_lab_its_released_panic_paused(
     store: RedisStore, lab: list[tuple[str, str, dict[str, Any]]], heads: list[str]
 ) -> None:
