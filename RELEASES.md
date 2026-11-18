@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.1021 · 2026-11-18
+
+### 2026-11-18 · 8604dc4aa191 · #12078 · @agenticore-app
+
+**Document how a hive ends join reports of agents that died with its restart**
+
+This change documents the hive's existing fix for agents that kept showing fresh heartbeats after their pod restarted despite the process having died. It adds a new "Join reports after a hive restart" subsection to docs/pillars/hives.md explaining the member and epoch fields, the restart, gone and refresh heartbeat checks, what hive list, hive drain, stall watch and swarm status read from an ended report, plus two troubleshooting rows and live verification commands. No code changes; it closes the gap between the delivered behavior and the docs so operators can recognize and interpret the restart-ended state correctly going forward.
+
+### 2026-11-18 · 6547194777f3 · #12079 · @agenticore-app
+
+**Document dead agent resume for agents the hub started over the bus**
+
+This change adds documentation covering how a hub-started agent is resumed after its pane dies, closing out the write-up for behavior already shipped in #11246. It explains which exit paths trigger a resume, the reactor's checks and 30-minute deadline, the hive's resume order sequence with its running marker, renewal and retry caps, identity fencing before and after resume, and troubleshooting by notice text, with cross-links added in the swarm and deployment-modes docs. This matters because operators now have an authoritative reference for diagnosing and trusting dead-agent recovery as the events engine becomes the live path.
+
 ## v2.17.1020 · 2026-11-18
 
 ### 2026-11-18 · 4a629e1401c1 · #12063 · @nestorcolt
