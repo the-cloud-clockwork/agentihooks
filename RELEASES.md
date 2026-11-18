@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.985 · 2026-11-18
+
+### 2026-11-17 · 418621a14deb · #11820 · @nestorcolt
+
+**Check the type gate's sources in bounded runs so one commit counts the same errors**
+
+This change fixes nondeterministic type-gate error counts caused by basedpyright silently clearing its type cache mid-run when memory usage crossed a threshold, which could make identical commits report different error counts across grading attempts. Now `type_gate.measure` splits sources into balanced batches of at most 1000 files per checker process, sums diagnostics across all runs, and rejects any measurement where a checker process's peak memory reached the empirically determined cache-clearing threshold, ensuring grading and `--write` always see stable, repeatable counts.
+
 ## v2.17.983 · 2026-11-18
 
 ### 2026-11-17 · 5c6db6a990b0 · #11544 · @nestorcolt
