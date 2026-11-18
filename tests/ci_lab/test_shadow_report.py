@@ -170,6 +170,7 @@ def test_a_lab_verdict_completing_after_the_actions_jobs_is_late() -> None:
 @pytest.mark.feature("lab-shadow-acceptance-report")
 def test_a_lost_runners_unit_job_counts_by_its_rerun() -> None:
     assert shadow_report.rerun("unit (3.12, 1)") == "unit rerun (3.12, 1)"
+    assert shadow_report.rerun("unit (3.12, 1) (retry)") == "unit rerun (3.12, 1) (retry)"
     assert shadow_report.rerun("unit") is None
     assert shadow_report.rerun("unit-lost") is None
     assert shadow_report.rerun("mutation (1)") is None
@@ -292,6 +293,10 @@ def test_the_report_command_names_its_repository_and_refuses_an_empty_window(
     error = capsys.readouterr().err
     assert error.startswith("usage: python -m scripts.ci_lab shadow report")
     assert error.endswith("error: --heads must be at least 1\n")
+    with pytest.raises(SystemExit) as pushed:
+        shadow_report.main(["--gate", "tests", "--event", "push", "--app", APP], {}, fetch)
+    assert pushed.value.code == 2
+    assert "error: argument --event: invalid choice: 'push' (choose from " in capsys.readouterr().err
     with pytest.raises(SystemExit) as gateless:
         shadow_report.main(["--heads", "3", "--app", APP], {}, fetch)
     assert gateless.value.code == 2

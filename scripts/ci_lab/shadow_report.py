@@ -251,7 +251,7 @@ def main(argv: Sequence[str], environ: Mapping[str, str], fetch: Fetch = api) ->
     parser.add_argument("--gate", required=True)
     parser.add_argument("--heads", type=int, default=HEADS)
     parser.add_argument("--event", choices=(PULL_REQUEST, MERGE_GROUP), default=PULL_REQUEST)
-    parser.add_argument("--app", default=environ.get(LAB_APP, ""))
+    parser.add_argument("--app", default=environ.get(LAB_APP))
     arguments = parser.parse_args(argv)
     if arguments.heads < 1:
         parser.error("--heads must be at least 1")
