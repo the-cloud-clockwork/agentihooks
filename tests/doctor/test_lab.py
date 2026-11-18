@@ -106,6 +106,8 @@ def test_each_class_with_a_hit_ratio_under_the_floor_is_a_finding() -> None:
     assert lab.findings(SLUG, faked(), NOW, lab.Limits(30, 0.4)) == []
     late = block({"pull_request": entry(60.0, 0.1)}, at=NOW - 11 * MINUTE)
     assert lab.findings(SLUG, late, NOW, LIMITS) == []
+    edge = block({"queue": entry(None, 0.1)}, at=NOW - 10 * MINUTE)
+    assert [found.subject for found in lab.findings(SLUG, edge, NOW, LIMITS)] == ["queue"]
     assert lab.findings(SLUG, block({"pull_request": {"predicted_wait_s": None}}), NOW, LIMITS) == []
 
 

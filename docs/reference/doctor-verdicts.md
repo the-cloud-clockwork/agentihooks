@@ -198,6 +198,8 @@ every Doctor pass:
   answer, the same block `agentihooks swarm <slug> status --json` shows.
 - `lab gate` reads the shadow acceptance rule report for each gate that the
   watched swarm checkout's `delivery.yaml` lists under `lab.authoritative`.
+  That checkout is the swarm's primary `dev` checkout, which `wt.sh done`
+  fast forwards after every merge, so the list is dev's as last pulled.
   It makes no GitHub call while that list is empty.
 
 | Finding id | Raised when | Measure |

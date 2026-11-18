@@ -11,22 +11,6 @@ from scripts.ci_lab import delivery, shadow, shadow_report
 from scripts.swarm import claim_hold, lab_capacity, release_wait
 from scripts.swarm.health.findings import CI_BEHIND_MINUTES, MINUTE_MS, Finding, ci_behind_minutes
 
-__all__ = [
-    "BEHIND",
-    "HEADS",
-    "HIT_FLOOR",
-    "HIT_FLOOR_ENV",
-    "HIT_RATIO",
-    "MISMATCH",
-    "UNREACHABLE",
-    "Limits",
-    "findings",
-    "gate_findings",
-    "mismatches",
-    "read",
-    "read_gates",
-]
-
 HIT_FLOOR_ENV = "AGENTIHOOKS_DOCTOR_LAB_HIT_FLOOR"
 HIT_FLOOR = 0.6
 FRACTION = re.compile(r"0(\.\d*)?|1(\.0*)?|\.\d+")
