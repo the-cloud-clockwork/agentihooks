@@ -111,11 +111,9 @@ with one `coverage xml` process per part, as many parts as
 `scripts/ci_cpu_quota.py` allows. It splits the measured files by directory, so
 every package lands whole in one part, puts each directory on the part with
 the fewest source bytes so far, and joins the parts sorted by package with the
-root totals summed, so Sonar reads the same report a single process writes.
-Most of the XML's time is parsing each source file, which is why it divides by
-file; a per file report table would parse every file again, so the merge
-prints only the TOTAL line and the per file view stays in Sonar and in the
-uploaded `coverage.xml`.
+root totals summed. The joined report carries the same files, packages, lines
+and totals as one process's report. The merge prints no per file table; the
+per file view is in Sonar and in the uploaded `coverage.xml`.
 Python XML still covers `hooks` and `scripts`; JavaScript LCOV still includes
 node and browser captures. The optimization changes coverage preparation only:
 Sonar sensors, rules, scan inputs and Delivery L2 conditions remain enabled.
