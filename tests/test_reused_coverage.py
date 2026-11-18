@@ -3,6 +3,7 @@ import os
 import sqlite3
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -191,9 +192,10 @@ def test_the_check_reads_each_database_through_before_sqlite_opens_it(
     start = _read_so_far()
     read_before_open: list[int] = []
 
-    def opened(path: str, uri: bool = False) -> sqlite3.Connection:
-        read_before_open.append(_read_so_far() - start)
-        return connect(path, uri=uri)
+    def opened(path: str, *args: Any, **kwargs: Any) -> sqlite3.Connection:
+        if path.startswith(database.resolve().as_uri()):
+            read_before_open.append(_read_so_far() - start)
+        return connect(path, *args, **kwargs)
 
     monkeypatch.setattr(coverage_check.sqlite3, "connect", opened)
     assert coverage_check.problem(database) is None
