@@ -357,34 +357,21 @@ def test_a_master_after_a_codex_predecessor_keeps_codex(tmp_path, monkeypatch, o
     assert (placed.harness, placed.route_kind) == ("codex", ordered or "subscription")
 
 
-def test_the_login_probe_runs_as_the_native_interactive_account(tmp_path):
+def test_the_login_probe_runs_as_the_native_interactive_account(tmp_path, monkeypatch):
+    from scripts import master_claude_login
     from scripts.routing import envs, native_login
     from scripts.swarm.runtime import HerdrRuntime
-    from tests.swarm.profile_fixture import validated
 
     probes = []
 
     def run(argv, **kwargs):
-        if argv[1:] == list(native_login.COMMAND):
-            probes.append(kwargs["env"])
-            return SimpleNamespace(returncode=0, stdout=native_login.STATUS, stderr="")
-        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
+        assert argv[1:] == list(native_login.COMMAND)
+        probes.append(kwargs["env"])
+        return SimpleNamespace(returncode=0, stdout=native_login.STATUS, stderr="")
 
-    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "requested"))
-    config = SimpleNamespace(
-        slug="proof",
-        repo=str(tmp_path),
-        code="a1b2c3",
-        compact_limit=0,
-        lanes={"master": {"agent": "claude"}},
-        autonomy="delegate",
-    )
-    assert (
-        runtime.spawn(
-            config, "master", "agent", {"id": "master", "title": "proof", "seat": "master-2@proof"}
-        ).route_kind
-        == "interactive"
-    )
+    monkeypatch.setattr(master_claude_login, "enabled", lambda *_: False)
+    runtime = HerdrRuntime(home=tmp_path, run=run)
+    assert runtime._route_kind("master", "claude", {"id": "master", "seat": "master@proof"}, "proof") == "interactive"
     assert probes and probes[0].get(f"{envs.INTERACTIVE_PREFIX}native") == "1"
 
 
