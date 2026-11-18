@@ -804,6 +804,34 @@ def test_status_command_prints_the_capacity_reason(monkeypatch, capsys):
     assert "scaling auto, live of ceiling eng 0 of 2, ci 0 of 1, plan 0 of 1" in out
 
 
+def test_status_names_the_hive_admission_section_a_hive_redis_role_cannot_read(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from types import SimpleNamespace
+
+    from redis.exceptions import NoPermissionError
+
+    from scripts.hive import headroom, registry
+    from scripts.swarm import cli
+
+    store = _store()
+    store.create(SwarmConfig("sw", "/repo", max_eng=2, max_ci=1))
+    registry.register(store.redis, "other", "other", [])
+    monkeypatch.setattr(cli, "LedgerClient", lambda: FakeLedger([]))
+    allowed = store.redis.execute_command
+
+    def refused(*args: Any, **options: Any) -> Any:
+        if any(str(arg) == headroom.key("other") for arg in args[1:]):
+            raise NoPermissionError("No permissions to access a key")
+        return allowed(*args, **options)
+
+    monkeypatch.setattr(store.redis, "execute_command", refused)
+    cli.cmd_status(store, SimpleNamespace(slug="sw", json=False))
+    out = capsys.readouterr().out.splitlines()
+    assert "hive admission unreadable: No permissions to access a key" in out
+    assert any(line.startswith("Agent\tLane\tHarness\tProfile") for line in out)
+
+
 @pytest.mark.feature("status-names-each-hive-admission-count-a-member-may-not-read")
 def test_status_names_each_hive_admission_count_a_restricted_redis_user_may_not_read_and_prints_the_rest(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]

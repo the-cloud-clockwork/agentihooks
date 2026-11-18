@@ -115,8 +115,8 @@ def readable_hives(store: Any) -> tuple[list[dict[str, Any]], dict[str, str]]:
             return 0
 
     live = live_hives(store, count)
-    named = {hive["id"]: refused[hive["id"]] for hive in live if hive["id"] in refused}
-    return [hive for hive in live if hive["id"] not in named], named
+    unreadable = {hive["id"]: refused[hive["id"]] for hive in live if hive["id"] in refused}
+    return [hive for hive in live if hive["id"] not in unreadable], unreadable
 
 
 def auto_snapshot(config):

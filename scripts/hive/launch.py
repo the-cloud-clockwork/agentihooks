@@ -66,12 +66,14 @@ class _Placing:
 ROOM_DETAILS = {"reason": "", "detail": ""}
 
 
-def loaded_hives(store: RedisStore, reservations: Callable[[Any, str], int] | None = None) -> list[dict[str, Any]]:
+def loaded_hives(
+    store: RedisStore, reservations: Callable[[Any, str], int] = admission.pending
+) -> list[dict[str, Any]]:
     """Every registered hive with the worker agents it runs or is launching.
 
     A hive counts a running agent in its slot's processes even when it lists no execution for it, and never fewer
     agents than the live worker records any swarm places on it. ``reservations`` reads a hive's pending admission
-    count, admission.pending when none is given."""
+    count."""
     agents = [agent for slug in store.slugs() for agent in store.agents(slug)]
     hives, now = registry.hives(store.redis), lease.now_ms(store)
     for hive in hives:
@@ -103,7 +105,7 @@ def loaded_hives(store: RedisStore, reservations: Callable[[Any, str], int] | No
         from scripts.swarm import local_slots
         from scripts.swarm.commands import hive_id
 
-        held = (reservations or admission.pending)(store.redis, hive["id"])
+        held = reservations(store.redis, hive["id"])
         used = hive["agents"]
         if hive["id"] == hive_id():
             running, taken = local_slots.occupancy(store, hive["id"])
@@ -125,7 +127,7 @@ def loaded_hives(store: RedisStore, reservations: Callable[[Any, str], int] | No
     return hives
 
 
-def live_hives(store: RedisStore, reservations: Callable[[Any, str], int] | None = None) -> list[dict[str, Any]]:
+def live_hives(store: RedisStore, reservations: Callable[[Any, str], int] = admission.pending) -> list[dict[str, Any]]:
     """The loaded hives whose heartbeat is live."""
     loaded = loaded_hives(store, reservations)
     now = lease.now_ms(store)
