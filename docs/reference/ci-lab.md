@@ -1270,11 +1270,12 @@ root bind, and only the read only trees are protected.
 
 ### Read only trees
 
-`Sandbox(..., readonly=(tree, ...))` takes absolute tree paths. Inside bubblewrap,
+`Sandbox(..., readonly=(tree, ...))` takes the trees to protect. Pass absolute paths: `Sandbox`
+does not check them, and no test covers a relative tree. Inside bubblewrap,
 `scripts.ci_lab.sandbox.argv_for` binds each tree read only with `--ro-bind`, after the
 `--dev-bind / /` root bind, so the read only bind covers the writable root at that path. Under a
-read only tree a unit cannot create, rewrite or delete a file, and it cannot restore a write bit
-with `chmod`. Each attempt fails with `EROFS`, which the shell prints as `Read-only file system`.
+read only tree a unit cannot create a file or rewrite one, and it cannot restore a write bit with
+`chmod`. Each attempt fails with `EROFS`, which the shell prints as `Read-only file system`.
 Every other path stays writable, including the unit's working folder.
 
 For a static gate step with the grader tree at `/srv/ci-lab/grader` and the base tree at
@@ -1300,7 +1301,9 @@ bubblewrap whenever it needs network isolation or holds a read only tree:
 | `True` | one or more | required | the host network |
 
 When bubblewrap is required and `bwrap` is not on `PATH`, `Sandbox.run` raises `CannotRun`
-before starting anything, so the unit's verdict is red. A unit with read only trees gets
+before starting anything. `CannotRun` means the unit cannot run on this worker and its verdict is
+red; `run_static.run` and `run_tests.run` do not catch it, so their caller records that red
+verdict. A unit with read only trees gets
 `bwrap is not installed, so a unit with read only trees cannot run`, and a unit without network
 and without trees gets `bwrap is not installed, so a unit without network cannot run`.
 
@@ -1332,9 +1335,11 @@ Limitations:
   receives no grader or base tree.
 - `RUNNER_TEMP` is writable, so a step can delete or replace its own `grader` or `base` symlink.
   That changes only what its own run reads; the trees stay unchanged.
-- The worker loop does not register either runner as an executor yet (see
-  [Entry points](#entry-points)), so both run today only through code that calls them, such as
-  the tests.
+- No worker runs either runner yet. `scripts.ci_lab.worker.Worker` runs each unit through the
+  `executors` mapping its caller passes, and no code passes `run_static.run` or `run_tests.run` in
+  that mapping. The worker entry point still exits 2 without `--self-test` (see
+  [Entry points](#entry-points)). Both runners run today only through code that calls them
+  directly, such as the tests.
 
 ### Use it
 
@@ -1370,9 +1375,9 @@ print(result.green, result.code, result.log, result.report)
 
 `python -m scripts.ci_lab.static_gates --root /srv/ci-lab/grader` prints one JSON line per gate,
 and its `name` field is the key above. Discover gates from the grader tree, never from the head.
-Pass absolute paths for the trees, `settings.root` and `settings.venv`: `Sandbox` requires
-absolute read only trees, and the step resolves a relative path against the head tree. The worker
-needs bubblewrap for every static gate run.
+Pass absolute paths for the trees, `settings.root` and `settings.venv`. Nothing checks them, and
+the step runs from the head tree, so a relative `RUNNER_TEMP`, `GITHUB_WORKSPACE` or `PATH` entry
+resolves against the head. The worker needs bubblewrap for every static gate run.
 
 To run any other command with read only trees, build the sandbox directly:
 
@@ -1420,7 +1425,8 @@ The pull request tier proves the sandbox under real bubblewrap. The writer lock 
 `lab-sandbox` job runs on every pull request that changes `scripts/ci_lab/sandbox.py`,
 `scripts/ci_lab/run_static.py`, `scripts/ci_lab/run_tests.py`, `tests/ci_lab/test_sandbox.py`,
 `tests/ci_lab/test_run_static.py`, `tests/ci_lab/test_run_tests.py` or
-`.github/workflows/writer-lock.yml`. It runs on a GitHub hosted `ubuntu-latest` runner, installs
+`.github/workflows/writer-lock.yml`, and on every manual dispatch of the Writer lock workflow.
+It runs on a GitHub hosted `ubuntu-latest` runner, installs
 bubblewrap when the runner lacks it, and sets `kernel.apparmor_restrict_unprivileged_userns=0`.
 It then runs those three test files and fails when any of their tests fails or skips. The Tests
 workflow calls the writer lock workflow from its `writer-lock` job, which `Gate — Required` needs.
@@ -1432,8 +1438,10 @@ These tests prove the read only trees:
 | `test_run_static.py::test_a_step_cannot_write_into_the_grader_or_base_tree` | Under real bubblewrap, a step's writes through `$RUNNER_TEMP/grader` and `$RUNNER_TEMP/base` are refused, both trees stay empty and its write into `$GITHUB_WORKSPACE` lands |
 | `test_sandbox.py::test_a_unit_cannot_restore_write_bits_or_write_into_a_read_only_tree` | With and without network, `chmod`, a rewrite and a new file under each tree fail with `EROFS` |
 
-Feature map entries `lab-static-read-only-trees` and `lab-sandbox-read-only-trees` map the
-behaviour to these tests.
+In `feature-map.json`, `lab-static-read-only-trees` maps the bubblewrap arguments test of
+`test_run_static.py`. `lab-sandbox-read-only-trees` maps the `test_sandbox.py` tests that check
+the `--ro-bind` arguments and the `CannotRun` refusal without `bwrap`. The two write refusal tests
+above carry no feature entry.
 
 ### Troubleshooting
 
