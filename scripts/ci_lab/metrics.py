@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import threading
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -145,17 +146,21 @@ def _sample(name: str, labels: tuple[tuple[str, str], ...], value: float) -> str
 
 
 class Registry:
-    """Current values of the contract metrics, rendered as Prometheus text."""
+    """Current values of the contract metrics, rendered as Prometheus text; the scheduler's pass thread and the
+    metrics port's request threads share one, so every read and write holds its lock."""
 
     def __init__(self) -> None:
         self.values: dict[str, dict[tuple[tuple[str, str], ...], float]] = {m.name: {} for m in CONTRACT}
+        self.lock = threading.Lock()
 
     def set(self, name: str, value: float, labels: Mapping[str, str] | None = None) -> None:
         """Set a gauge sample."""
         metric = BY_NAME[name]
         if metric.kind != "gauge" or isnan(value):
             raise ValueError(f"{name} takes only a gauge value that is a number")
-        self.values[name][_labels(metric, labels or {})] = float(value)
+        key = _labels(metric, labels or {})
+        with self.lock:
+            self.values[name][key] = float(value)
 
     def inc(self, name: str, value: float = 1.0, labels: Mapping[str, str] | None = None) -> None:
         """Add a non negative amount to a counter sample."""
@@ -163,16 +168,18 @@ class Registry:
         if metric.kind != "counter" or not isfinite(value) or value < 0:
             raise ValueError(f"{name} takes only non negative counter increments")
         key = _labels(metric, labels or {})
-        self.values[name][key] = self.values[name].get(key, 0.0) + float(value)
+        with self.lock:
+            self.values[name][key] = self.values[name].get(key, 0.0) + float(value)
 
     def render(self) -> str:
         """Prometheus text exposition: HELP and TYPE for every contract metric, samples only once observed."""
         lines: list[str] = []
-        for metric in CONTRACT:
-            lines.append(f"# HELP {metric.name} {metric.help}")
-            lines.append(f"# TYPE {metric.name} {metric.kind}")
-            samples = self.values[metric.name]
-            lines.extend(_sample(metric.name, labels, value) for labels, value in sorted(samples.items()))
+        with self.lock:
+            for metric in CONTRACT:
+                lines.append(f"# HELP {metric.name} {metric.help}")
+                lines.append(f"# TYPE {metric.name} {metric.kind}")
+                samples = self.values[metric.name]
+                lines.extend(_sample(metric.name, labels, value) for labels, value in sorted(samples.items()))
         return "\n".join(lines) + "\n"
 
 

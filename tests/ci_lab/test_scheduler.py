@@ -1023,6 +1023,8 @@ def test_the_exposition_counts_leased_units_past_their_estimate_after_a_pass(lab
     assert "\nci_lab_units_overdue 0.0\n" in scrape(run, 1000 + estimate_ms)
     assert "\nci_lab_units_overdue 1.0\n" in scrape(run, 1001 + estimate_ms)
     assert "\nci_lab_units_overdue 2.0\n" in scrape(run, 2001 + estimate_ms)
+    run.lab.client.hdel(f"{queue.PREFIX}job:{scheduler.job_id(HEAD_A, first)}", "leased_ms")
+    assert "\nci_lab_units_overdue 1.0\n" in scrape(run, 2001 + estimate_ms)
 
 
 @pytest.mark.feature("lab-scheduler-metrics")

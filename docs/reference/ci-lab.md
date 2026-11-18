@@ -117,8 +117,8 @@ The scheduler sets every metric its queue, lease and worker state answers, on on
 |---|---|
 | `ci_lab_slots_wanted` | `Load.slots_wanted`: the slots running and pending units take in every class not shed |
 | `ci_lab_workers_ready` | The workers that offered free slots on a lease poll within `READY_MS` |
-| `ci_lab_units_overdue` | Leased units whose lease started, as `Queue.claim` stores it, more than `UNIT_ESTIMATE_S` ago |
-| `ci_lab_core_seconds_total` | Each finished attempt's slots times its report's `seconds`, counted once (`Queue.tally`) in the most urgent class of the live grades holding its job |
+| `ci_lab_units_overdue` | Leased units whose lease started, as `Queue.claim` stores it, more than `UNIT_ESTIMATE_S` ago; a lease claimed before the start was stored is not counted |
+| `ci_lab_core_seconds_total` | Each finished attempt's slots times its report's `seconds`, counted once (`Queue.tally`) in the most urgent class of the live grades holding its job; an attempt whose worker uploaded no report adds nothing |
 | `ci_lab_unit_duration_seconds` | The last finished attempt's report `seconds` per unit kind |
 | `ci_lab_cache_hits_total`, `ci_lab_cache_misses_total` | `cache="verdict"`: each verdict store lookup a grade's placement makes; `cache="git"` and `cache="uv"`: the lookups a finished attempt's report carries under `caches` |
 | `ci_lab_heads_graded_total` | Each grade a pass closes, by class and conclusion |
@@ -128,7 +128,9 @@ A worker unit's report carries `caches` from `scripts.ci_lab.caches.report`: per
 leased, a git hit when the pod store already held the commit and a miss when `Mirror.fetch`
 fetched it; per venv, a uv hit when it reused one and a miss when `venvs.venv_for` built it.
 `ci_lab_mirror_age_seconds`, `ci_lab_github_rate_remaining` and `ci_lab_verdict_mismatch_total`
-answer from no queue, lease or worker state and stay without samples.
+answer from no queue, lease or worker state and stay without samples. The counters live in the
+scheduler process and start from zero when it restarts, so KEDA triggers and alerts read them
+through `rate()` or `increase()`.
 
 `METRICS` maps each name to its label names. Environment names have constants too:
 `BUS_PREFIX`, `MINIO_PREFIX`, `GITHUB_APP_PREFIX`, `REDIS_URL`, `RUNTIME_CONFIG`,

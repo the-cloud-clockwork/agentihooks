@@ -510,8 +510,9 @@ class Scheduler:
     def load(self, now_ms: int) -> Load:
         """Return the queue and slots now: each pending job's estimate and slots and each leased job and its slots per
         the most urgent class of the live grades holding it, verdict cache use per class of those grades, the slots
-        leased jobs take, the leased jobs leased more than one estimate ago, and the workers that offered free slots on
-        a lease poll within the ready window with those slots; a leased job frees its slots in one estimate."""
+        leased jobs take, the leased jobs whose stored lease start is more than one estimate ago, and the workers that
+        offered free slots on a lease poll within the ready window with those slots; a leased job frees its slots in
+        one estimate."""
         classes, hits, misses = self._demand()
         pending: dict[str, list[float]] = {}
         pending_slots: Counter[str] = Counter()
@@ -526,7 +527,7 @@ class Scheduler:
         since = now_ms - int(UNIT_ESTIMATE_S * 1000)
         for job in self._jobs(self.queue.leased()):
             busy += job.requirement.slots
-            overdue += job.leased_ms < since
+            overdue += bool(job.leased_ms) and job.leased_ms < since
             if job.id in classes:
                 name = CLASSES[classes[job.id]]
                 running[name] += 1
