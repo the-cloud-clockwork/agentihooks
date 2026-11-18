@@ -1775,7 +1775,9 @@ for its answer, so an admission the hive gave up on never claims the task; see
 Unlike a tick launch, a hub admission scaffolds no task work folder on the hub. It resolves the task's continuation,
 stack base, overlaps and group on the claimed row and attaches the handoff transfer the predecessor left (see
 [Handoff continuity on admission](#handoff-continuity-on-admission)); the spawn task carries the seat's handoff,
-recaps and learned notes.
+recaps and learned notes. It also carries `hive_seeds`, the work folder files the hive writes before the spawn,
+taken from the copy a hive synced for the task (see
+[Work folder seeds on hub admission](#work-folder-seeds-on-hub-admission)).
 
 The hub creates the hive buckets; members are not allowed to create them:
 
@@ -1796,7 +1798,8 @@ A hive beats `hive-presence` every 15 seconds. A beat expires after 45 seconds.
 
 An eng, ci or plan successor the hub admits continues from what its predecessor left: the handoff text, its runtime
 envelope and the handoff transfer travel in the spawn task the hub returns to the hive. No setting changes this; the
-admission adds them on every claim.
+admission adds them on every claim. The predecessor's `progress.md`, `proof.md` and other work folder files travel
+next to them in `hive_seeds`; see [Work folder seeds on hub admission](#work-folder-seeds-on-hub-admission).
 
 #### What the admission adds
 
@@ -2384,20 +2387,37 @@ On every fifteen second heartbeat, each hive writes the work folder lines of the
 `<root>:hive:<hive id>:workspaces`, expiring after 45 seconds. Each entry holds `latest_progress` and
 `latest_proof`: the last three non-blank lines of `progress.md` and `proof.md`, read from the last 4,096 bytes of
 each. A key is left out when its file has no such line. The copy covers every swarm task whose latest execution,
-the live one or else the one started last, is a worker on that hive. Masters are left out.
+the live one or else the one started last, is a worker on that hive. Masters are left out. An execution runs on the
+hive its host target names. An execution whose target has no host id runs on the hive on its agent record. Two
+kinds of execution have no host id: one the hub admitted, which has no host target, and a session the hive started
+itself, whose target names only its process.
 
 When the controller publishes swarm status, each task with a work folder takes its lines from the hive that runs,
 or last ran, its latest execution. A task whose latest execution ran on the controller's own machine is read from
-the local folder. These lines are what the ledger page shows in the task's Contract and proof fold.
+the local folder. These lines are what the ledger page shows in the task's Contract and proof fold. The controller
+finds that hive from the host target alone. An execution with no host id in its target, such as a hub admission,
+counts as run on the controller's machine, so its lines are read from the controller's own folder.
 
 ### Work folder files on any host
 
 On the same heartbeat each hive writes the files of those folders to `<root>:hive:<hive id>:workspaces:files`,
-expiring after a day so a hive that died still hands its last copy over. The table below lists what travels. On each
-status publish the controller writes each task's copy, from the hive running its latest execution, into its own
-folder. A launch carries the controller's folder to the next hive, added files included, and a file the hive already
-holds is replaced unless it already contains what was sent, so a successor on any host reads what its predecessor
-wrote.
+expiring after a day so a hive that died still hands its last copy over. That key lists only the tasks the hive hosts
+at its latest beat. Next to it the hive writes one key per task, `<root>:hive:<hive id>:workspaces:files:<slug>:<task
+id>`, holding the same files with the same one day expiry. A task the hive stops hosting drops out of the first key on
+the next beat and keeps its own key until that key expires. A beat that finds no file that travels in a task's folder
+leaves the task's own key as it was. The table below lists what travels.
+
+Two paths carry these files to a successor:
+
+- On each status publish the controller writes each task's copy, from the first key of the hive its latest execution's
+  host target names, into its own folder. A task whose latest execution has no host id, such as a hub admission, is
+  not mirrored. A launch the controller orders carries the controller's folder to the next hive, added files included,
+  and a file the hive already holds is replaced unless it already contains what was sent.
+- A successor the hub admits never reads the controller's folder. The hub seeds it from the task's own key on the hive
+  that last launched the task, as [Work folder seeds on hub admission](#work-folder-seeds-on-hub-admission) describes.
+
+The first path carries the files of executions with a host target, and the second those of any predecessor whose hive
+synced its folder, hub admissions included.
 
 What travels from a task folder:
 
@@ -2437,6 +2457,90 @@ redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" TTL agentihooks:hive:lab-vm:workspac
 A task missing from that output has no execution on that hive as its latest one, or its folder holds none of the files
 that travel. Nothing is configured: the 32 file cap, the 65,536 limit and the one day lifetime are fixed in the code.
 
+### Work folder seeds on hub admission
+
+When the hub admits an eng, ci or plan agent, it builds the spawn task's `hive_seeds` itself. It never reads the
+controller's folder. A successor that the hub admits on another hive after a roll gets the `progress.md`,
+`proof.md` and other files its predecessor's hive last synced, even when the predecessor was retired before the
+admission.
+
+Three keys on the swarm Redis carry the files:
+
+| Key | Written by | Holds | Expires |
+|---|---|---|---|
+| `<root>:hive:<hive id>:workspaces:files` | Each hive, on every fifteen second beat | The files of every task the hive hosts at that beat, by swarm and task | One day after the hive's last beat |
+| `<root>:hive:<hive id>:workspaces:files:<slug>:<task id>` | Each hive, on every beat where the task's folder holds a file that travels | That task's files, under the hive's own key prefix | One day after the hive last wrote it |
+| `<root>:swarm:<slug>:work-folder:<task id>` | The hub, on each launch report for the task | The id of the hive that last reported a launch of the task | Never; removing the swarm deletes it with every other key of the swarm |
+
+The hub records the hive in the third key when the hive reports the launch and the hub writes the launch decision onto
+the agent's execution. Admission does not write it. So when an admission's launch fails, the key still names the hive
+that launched the task before and holds its lines. A report the hub refuses writes nothing: the hive holds no admission
+for the offer, another agent now occupies the admitted seat, or the launch decision could not be written.
+
+At admission the hub looks for a copy in this order and takes the first one it finds:
+
+1. The task's own key on the hive the work folder key names.
+2. The task's own key on the hive of the task's previous agent. That is the agent of the task started last, other
+   than the one being admitted, that the swarm still lists. An agent is retired when the swarm drops its record: its
+   executions end and it leaves the list. This covers a task last launched before the hub recorded launch hives.
+
+A missing hive id, because the work folder key is absent or no previous agent is listed, is skipped rather than read
+as an empty name. `steering.md` is always rebuilt from the ledger task and replaces any steering in the copy. It holds
+the task id and title, the description, the plan pointer or plan link, the proof contract and, for a plan task, its
+plan evidence. With no copy, the seeds hold steering alone. The hive's lane spoke writes the seeds into
+`~/.agentihooks/swarm/<slug>/tasks/<task id>` below its own home before it spawns the agent, under the same rules
+as a launch payload (see [What the hive does with it](#what-the-hive-does-with-it)).
+
+The sequence for a task whose hive rolls, with the default `agentihooks` root:
+
+1. The hub admits agent A for task `t945` onto hive `lab-vm`. When `lab-vm` reports the launch, the hub sets
+   `agentihooks:swarm:rig-grade-swarm:work-folder:t945` to `lab-vm`.
+2. Agent A appends to `progress.md` and `proof.md`. Every fifteen seconds `lab-vm` writes them to
+   `agentihooks:hive:lab-vm:workspaces:files:rig-grade-swarm:t945`.
+3. `lab-vm` rolls. A stops and is retired, and `lab-vm`'s next beats leave `t945` out of
+   `agentihooks:hive:lab-vm:workspaces:files`. The task's own key keeps its last copy for a day.
+4. The hub admits successor B onto hive `lab-vm-2`. The work folder key names `lab-vm`, so the seeds are that copy
+   plus fresh steering. `lab-vm-2` writes them before B starts, and B's folder holds what A wrote up to `lab-vm`'s last
+   beat before the admission, up to the last 65,536 characters of each of `progress.md` and `proof.md`.
+5. When `lab-vm-2` reports B's launch, the work folder key moves to `lab-vm-2`, and `lab-vm-2`'s beats start writing
+   its own copy of the task.
+
+Read which hive holds a task's folder, its copy and how long the copy has left:
+
+```bash
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" GET agentihooks:swarm:rig-grade-swarm:work-folder:t945
+# lab-vm
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" GET agentihooks:hive:lab-vm:workspaces:files:rig-grade-swarm:t945 \
+  | jq -r 'keys[]'
+# progress.md
+# proof.md
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" TTL agentihooks:hive:lab-vm:workspaces:files:rig-grade-swarm:t945
+# up to 86400
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" TTL agentihooks:swarm:rig-grade-swarm:work-folder:t945
+# -1
+```
+
+`<root>` is `AGENTIHOOKS_SWARM_KEY_PREFIX`. No other setting changes this path: the beat, the one day lifetime and
+the key names are fixed in the code.
+
+Limits:
+
+- The seeds are taken at admission. A line written in the last beat, fifteen seconds, before the admission can miss
+  them, and a line the predecessor writes after the admission never follows.
+- A successor starts from steering alone when neither the hive the work folder key names nor the previous agent's hive
+  wrote the task's copy in the last day.
+- `progress.md` and `proof.md` travel as their last 65,536 characters, so a longer file loses its oldest lines, as on
+  the controller path.
+- A launch the hub did not admit, such as a controller order or a session a hive started itself, never moves the work
+  folder key. Its successor reads the copy of the hive the key still names when that copy is under a day old, even
+  when it is older than the predecessor's lines. When the key names no hive, the successor reads the predecessor's
+  hive only while the swarm still lists the predecessor.
+
+The feature map entry `work-folder-follows-the-task-across-hives` lists the regression tests. The Semgrep rule
+`feature-work-folder-follows-the-task` keeps four code shapes in place: the hive picking the executions it syncs, the
+copy per task, the hub writing the work folder key on a launch report, and the seed read. See
+[feature map](../reference/feature-map.md) and [Semgrep feature tests](../reference/semgrep-features.md).
+
 ### Resume and recovery prompts
 
 The restore prompt after a reboot and the resume prompt after an outage tell the agent to re-read its task folder.
@@ -2448,6 +2552,15 @@ hive's home, instead of the controller's absolute path.
 A hive refuses a launch payload without `hive_opening` and its digest, so an older controller cannot launch on a
 newer hive. Deploy the controller first, then the hives.
 
+Hub admission seeds change with pull request [#11644](https://github.com/the-cloud-clockwork/agentihooks/pull/11644).
+A hub on that release reads only the copies per task, and only hives on that release write them. A hub before it read
+the first key of the previous agent's hive, which every hive writes. Roll the hives first: restart the pod hives onto
+the release and the `agentihooks-hive` service on a workstation hive once its checkout carries the change, then roll
+the hub. A hub rolled first gives steering alone to a successor whose predecessor still runs on an older hive, even a
+predecessor with a host target whose lines the older hub would have carried. To roll back, revert the change. Older
+code never reads the new keys. Removing a swarm deletes its `<root>:swarm:<slug>:work-folder:<task id>` keys, and the
+hive copies per task expire within a day.
+
 ### Troubleshooting
 
 | Symptom | Cause | Fix |
@@ -2456,7 +2569,10 @@ newer hive. Deploy the controller first, then the hives.
 | Launches on one hive end with `hive launch failed: expired` | The hive picked up the launch order more than 300 seconds after the controller sent it. | Check that the hive beats (`agentihooks hive list` shows `live`) and its `agentihooks-hive` service runs. |
 | A remote task's Contract and proof fold is empty | The hive stopped beating for more than 45 seconds, so its synced copy expired, or the agent has not written a line yet. | Check `agentihooks hive list`. The lines come back on the hive's next heartbeat. |
 | A successor on another host does not see a file its predecessor wrote | The file does not travel: it sits in a subfolder, is a symbolic link, has a hidden or unsupported name, is not UTF-8 text, is over 65,536 bytes, or comes after the first 32 files by name. | Move what the successor needs directly into the task folder as a plain text file under the limit. See [Work folder files on any host](#work-folder-files-on-any-host). |
-| A successor on another host does not see a file its predecessor wrote, and the file is one that travels | The predecessor's hive wrote no copy: it ran a version from before pull request [#7834](https://github.com/the-cloud-clockwork/agentihooks/pull/7834), or its copy expired a day after its last beat. Or the controller runs a version from before #7834 and never writes hive copies into its folders. | Read the key with `redis-cli GET <root>:hive:<id>:workspaces:files`. Upgrade the controller and the hives. A copy that expired is gone; recover the file from the predecessor hive's own folder while that host is up. |
+| A successor on another host does not see a file its predecessor wrote, and the file is one that travels | For a launch the controller ordered: the predecessor's hive wrote no copy, because it ran a version from before pull request [#7834](https://github.com/the-cloud-clockwork/agentihooks/pull/7834), or its copy expired a day after its last beat. Or the controller runs a version from before #7834 and never writes hive copies into its folders. A successor the hub admitted is covered by the next row. | Read the key with `redis-cli GET <root>:hive:<id>:workspaces:files`. Upgrade the controller and the hives. A copy that expired is gone; recover the file from the predecessor hive's own folder while that host is up. |
+| A successor the hub admitted on another hive finds only `steering.md` in its work folder | The hub found no copy for the task. Either the work folder key is absent and the swarm no longer lists the previous agent, or neither hive it names holds a copy. A hive holds no copy when it runs a release from before [#11644](https://github.com/the-cloud-clockwork/agentihooks/pull/11644), when its last write of the copy is more than a day old, or when the predecessor's folder never held a file that travels. | Read `GET <root>:swarm:<slug>:work-folder:<task id>`, then `GET <root>:hive:<hive id>:workspaces:files:<slug>:<task id>` for that hive. Roll the hives onto a release that carries #11644 (see [Upgrading](#upgrading)). A copy that expired is gone; recover the lines from the predecessor hive's own folder while that host is up and append them to the successor's `progress.md` and `proof.md`. See [Work folder seeds on hub admission](#work-folder-seeds-on-hub-admission). |
+| A successor the hub admitted lacks the predecessor's last lines | The seeds are taken at admission from the hive's last beat, so lines written in the fifteen seconds before the admission, or after it, are missing. | Read the predecessor hive's task copy or its own folder and append the missing lines. |
+| A successor the hub admitted reads older lines than its predecessor wrote | The predecessor was launched without the hub, as a controller order or a session its hive started itself, so the work folder key still names an earlier hive whose copy is under a day old. That copy is read first. | Read the predecessor's hive copy with `GET <root>:hive:<hive id>:workspaces:files:<slug>:<task id>` and append its lines to the successor's `progress.md` and `proof.md`. |
 | Lines a relaunched agent wrote on its hive are replaced by the controller's copy | The hive's file did not contain the text the controller sent, so the controller's copy won. This happens when the hive file was edited rather than appended to. | Append to `progress.md` and `proof.md` instead of rewriting them. |
 | A file deleted on the hive is still in the controller's folder | The mirror writes the files a hive sends and removes none. | Delete the file in the controller's folder too, or leave it: the next launch carries it again. |
 
