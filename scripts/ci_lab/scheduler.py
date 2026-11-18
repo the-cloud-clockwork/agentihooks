@@ -41,6 +41,7 @@ from scripts.ci_lab.delivery import CLASSES, DELIVERY, DELIVERY_SCHEMA, load_run
 from scripts.ci_lab.digests import GradeInputs, StaticInputs, Toolchain, grade_key, static_key
 from scripts.ci_lab.intake import GradeRequest, admit
 from scripts.ci_lab.leases import Leases, release
+from scripts.ci_lab.manifests import Fetcher
 from scripts.ci_lab.objects import Objects, S3Objects, Uploads, manifest_folder, upload_path
 from scripts.ci_lab.outcomes import CANNOT_RUN, DROPPED, FAILED, LOSSES, PASSED
 from scripts.ci_lab.pods import Pods, unmanaged, worker_pods
@@ -123,9 +124,11 @@ MIRROR_STORE = "CI_LAB_MIRROR_STORE"
 IMAGE = "CI_LAB_IMAGE"
 REPOSITORY = "CI_LAB_REPOSITORY"
 REINDEX_ON_START = "CI_LAB_REINDEX_ON_START"
+MANIFEST_DEPTH = 10
 
 Needs = Mapping[str, Mapping[str, Any]]
 Manifests = Callable[[str, Sequence[str]], dict[str, Any] | None]
+Fetch = Callable[[str, str], bytes | None]
 Verdicts = Callable[[str, str], Verdict | None]
 UNPACK = cast("Callable[[dict[str, Any]], dict[str, Any]]", dep_manifest.unpack)
 
@@ -831,18 +834,26 @@ def frame(tier: Priority, tree: str, grader: str, gates: Mapping[str, tuple[Unit
 
 @dataclass(frozen=True)
 class StoredManifests:
-    """Packed dependency manifests in the lab object store, one per dev commit under `objects.manifest_folder`."""
+    """Packed dependency manifests in the lab object store, one per dev commit under `objects.manifest_folder`; one of
+    the newest `MANIFEST_DEPTH` commits with none stored is fetched from its dev push Tests run and stored once."""
 
     objects: Objects
+    fetch: Fetch = field(default_factory=Fetcher)
 
     def __call__(self, repo: str, commits: Sequence[str]) -> dict[str, Any] | None:
-        """Return the manifest of the first commit that has one stored, None when none has."""
-        folder = manifest_folder(_slug(repo))
+        """Return the manifest of the first commit that has one stored or, among the newest, fetched; None when none
+        has."""
+        slug = _slug(repo)
+        folder = manifest_folder(slug)
         stored = frozenset(self.objects.keys(folder))
-        for commit in commits:
+        for index, commit in enumerate(commits):
             path = f"{folder}{commit}.json"
             if path in stored:
                 return UNPACK(json.loads(self.objects.read(path)))
+            packed = self.fetch(slug, commit) if index < MANIFEST_DEPTH else None
+            if packed is not None:
+                self.objects.write_once(path, packed)
+                return UNPACK(json.loads(packed))
         return None
 
 
