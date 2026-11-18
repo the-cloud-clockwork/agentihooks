@@ -783,6 +783,10 @@ head supersedes nothing until intake records the branch; expansion keys static g
 jobs the lab does not run yet pass by their frame and a push grade folds only the static gates; a
 rerequested grade reuses the finished jobs of its own head.
 
+Since a push grade folds only the static gates,
+[Post merge testing with automatic revert](../research/post-merge-testing.md) measures the red
+`dev` rate from the Tests workflow's runs on GitHub, not from lab push grades.
+
 ### Grades of a commit
 
 `GET /grades/<sha>` on port 8800 answers every grade of one commit, open or closed, ordered by
