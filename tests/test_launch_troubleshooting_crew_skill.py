@@ -1,6 +1,6 @@
 import json
 import re
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -8,14 +8,14 @@ from typing import Any
 import pytest
 import yaml
 
-from scripts.swarm import panic, troubleshooting_crew
+from scripts.swarm import troubleshooting_crew
 from scripts.swarm_ledger import ledger_comments
 
 pytestmark = pytest.mark.unit
 
 SKILL = Path(__file__).parents[1] / "profiles/package/skills/launch-troubleshooting-crew"
 NOW = 1794614400.0
-CID = "crew-3180000"
+CID = "crew-261114-000000"
 ME = ["agentihooks", "ledger", "--slug", "demo", "--as", "master@demo"]
 QUOTE = troubleshooting_crew.LAUNCH_QUOTE
 ENTRY = '"${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/skills/launch-troubleshooting-crew/scripts/crew.py'
@@ -61,19 +61,6 @@ class Ledger:
 
     def writes(self) -> list[list[str]]:
         return [c for c in self.calls if "get" not in c and "--json" not in c]
-
-
-class Server(Ledger):
-    def __call__(self, command: list[str]) -> str:
-        reply = super().__call__(command)
-        if command[6:8] == ["task", "add"]:
-            try:
-                ledger_comments.check(command[9], "item")
-            except ValueError as refused:
-                raise troubleshooting_crew.CommandFailed(
-                    f"agentihooks ledger --slug demo failed: {refused}"
-                ) from refused
-        return reply
 
 
 def run(crew: ModuleType, ledger: Ledger, *argv: str, capsys: pytest.CaptureFixture[str]) -> dict[str, Any]:
@@ -532,15 +519,17 @@ def test_run_returns_output_and_raises_on_a_failure(crew: ModuleType) -> None:
 def test_a_scout_dry_run_then_a_real_run_adds_every_scout_task(
     crew: ModuleType, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    dry = Server()
+    dry = Ledger()
     assert crew.main(["scout", "demo", "--problem", "p", "--dry-run"], runner=dry, now=NOW) == 0
     printed = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line.startswith("[")]
-    scouts = [command[8] for command in printed if command[6:8] == ["task", "add"]]
-    assert dry.calls == [] and len(scouts) == 5 and not crew.state_path("demo").exists()
-    ledger = Server()
+    assert dry.calls == [] and not crew.state_path("demo").exists()
+    ledger = Ledger()
     run(crew, ledger, "scout", "demo", "--problem", "p", capsys=capsys)
-    assert [command[8] for command in ledger.writes() if command[6:8] == ["task", "add"]] == scouts
-    assert json.loads(crew.state_path("demo").read_text())["scout_tasks"] == scouts
+    adds = [command for command in ledger.writes() if command[6:8] == ["task", "add"]]
+    assert adds == [command for command in printed if command[6:8] == ["task", "add"]]
+    assert [command[8] for command in adds] == [f"{CID}-scout-{n}" for n in range(1, 6)]
+    assert [ledger_comments.problems(command[9], "item") for command in adds] == [[]] * 5
+    assert json.loads(crew.state_path("demo").read_text())["scout_tasks"] == [command[8] for command in adds]
 
 
 @pytest.mark.feature("troubleshooting-crew-task-titles")
@@ -552,29 +541,43 @@ def test_a_scout_title_the_ledger_refuses_stops_the_stage_before_any_write(crew:
         "nothing was written$"
     )
     for argv in (["scout", "demo", "--problem", "p"], ["scout", "demo", "--problem", "p", "--dry-run"]):
-        ledger = Server()
+        ledger = Ledger()
         with pytest.raises(SystemExit, match=refused):
             crew.main(argv, runner=ledger, now=NOW)
         assert ledger.calls == [] and crew.state_path("demo").read_text() == saved
 
 
 @pytest.mark.feature("troubleshooting-crew-task-titles")
-def test_every_crew_task_title_passes_the_ledger_and_fixers_keep_the_panic_shape(
-    crew: ModuleType, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_fix_and_harden_stop_before_any_write_on_a_title_the_ledger_refuses(crew: ModuleType) -> None:
+    scouts = [f"crew-1116073743-scout-{n}" for n in range(1, 6)]
+    old = crew.State("crew-1116073743", "p", asdict(crew.Crew()), scout_tasks=scouts, launched=True)
+    for stage, task, fixers in (("fix", "fix-1", []), ("harden", "harden", ["crew-1116073743-fix-1"])):
+        crew.save_state("demo", replace(old, fixer_tasks=fixers))
+        saved = crew.state_path("demo").read_text()
+        refused = (
+            f"^the ledger would refuse the title of crew task crew-1116073743-{task}: run or job id '1116073743'; "
+            "nothing was written$"
+        )
+        for argv in ([stage, "demo", "--cause", "c1"], [stage, "demo", "--cause", "c1", "--dry-run"]):
+            ledger = Ledger(done=set(scouts))
+            with pytest.raises(SystemExit, match=refused):
+                crew.main(argv, runner=ledger, now=NOW)
+            assert ledger.writes() == [] and crew.state_path("demo").read_text() == saved
+
+
+@pytest.mark.feature("troubleshooting-crew-task-titles")
+def test_every_crew_task_title_passes_the_ledger_rule(crew: ModuleType, capsys: pytest.CaptureFixture[str]) -> None:
     scout, fix, _, harden = run(crew, Ledger(), "plan", "demo", "--problem", "p", capsys=capsys)["stages"]
     tasks = [*scout["tasks"], *fix["tasks"], harden["task"]]
     refused = [task for task in tasks if ledger_comments.problems(f"Troubleshooting crew {task}", "item")]
     assert len(tasks) == 11 and refused == []
-    assert all(panic.FIXER_TASK.fullmatch(task) for task in fix["tasks"])
 
 
-def test_check_titles_names_every_reason_the_ledger_refuses_a_task_title(crew: ModuleType) -> None:
-    lane = ["agentihooks", "swarm", "demo", "set", "eng-model=opus", "eng-effort=max", "effort-max=max"]
-    crew.check_titles([lane, [*ME, "task", "add", "t0", "Troubleshooting crew t0"]])
+@pytest.mark.feature("troubleshooting-crew-task-titles")
+def test_a_crew_task_title_the_ledger_refuses_names_every_reason(crew: ModuleType) -> None:
     refused = (
-        "^the ledger would refuse the title of crew task t1: date '2026-11-16'; run or job id '1116073743'; "
-        "nothing was written$"
+        "^the ledger would refuse the title of crew task crew-1116073743-2026-11-16: date '2026-11-16'; run or job id "
+        "'1116073743'; nothing was written$"
     )
-    with pytest.raises(crew.CommandFailed, match=refused):
-        crew.check_titles([lane, [*ME, "task", "add", "t1", "Troubleshooting crew t1 of 2026-11-16 run 1116073743"]])
+    with pytest.raises(SystemExit, match=refused):
+        crew.add_task("demo", "master@demo", "crew-1116073743-2026-11-16", "scout")
