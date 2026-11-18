@@ -6761,5 +6761,12 @@ notes:
         _cmd_refresh_rules(args)
 
 
+def _planted_sleep_loop() -> None:
+    import time
+
+    while True:
+        time.sleep(30)
+
+
 if __name__ == "__main__":
     main()
