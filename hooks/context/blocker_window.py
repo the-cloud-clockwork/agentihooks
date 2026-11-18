@@ -156,7 +156,6 @@ _API_VALUES = frozenset(
         "--cache",
     }
 )
-_DISPATCH = re.compile(r"(.*/)?dispatches/?(\?.*)?")
 _GH_REPO = re.compile(r"-R.*|--repo(=.*)?")
 _GIT_ENVIRONMENT = re.compile(r"\bGIT_(DIR|WORK_TREE|COMMON_DIR|NAMESPACE|CONFIG\w*)=")
 _ROUTED = re.compile(
@@ -361,7 +360,7 @@ def _dispatches(words: list[str]) -> bool:
         if word in _API_VALUES:
             next(rest, None)
         elif not word.startswith("-"):
-            return _DISPATCH.fullmatch(word) is not None
+            return word.partition("?")[0].rstrip("/").rpartition("/")[2] == "dispatches"
     return False
 
 

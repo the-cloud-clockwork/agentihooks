@@ -2021,6 +2021,7 @@ def test_a_fix_branch_session_stays_frozen_for_a_gh_api_dispatch(
         "gh api -f q=dispatches graphql",
         "gh api repos/o/r/actions/runs -q .dispatches",
         "gh api -X POST --paginate",
+        "gh api repos/o/r/dispatchesX",
     ],
 )
 @pytest.mark.feature("panic-freeze-global-options")
