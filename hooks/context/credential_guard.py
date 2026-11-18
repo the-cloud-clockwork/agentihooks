@@ -486,7 +486,7 @@ def echo_secret_verdict(command):
 def awk_environ_verdict(command: str) -> str | None:
     """Block reason when an awk stage of the command reads a value out of ENVIRON."""
     for stage in split_outside_quotes(STAGE_DELIM, command)[::2]:
-        if verb_of(tokens_of(stage)) in AWKS and ENVIRON_VALUE.search(stage):
+        if verb_of(unwrapped(tokens_of(stage))) in AWKS and ENVIRON_VALUE.search(stage):
             return block("printing environment values (awk ENVIRON[...])", KIND_ENVIRONMENT)
     return None
 
@@ -857,10 +857,16 @@ def inner_command(toks):
     return None
 
 
+def unwrapped(toks: list[str]) -> list[str]:
+    """The tokens of the command a container or remote wrapper runs, or the tokens themselves."""
+    if verb_of(toks) in WRAPPERS:
+        return inner_command(toks) or []
+    return toks
+
+
 def shell_scripts(toks: list[str]) -> list[str]:
     """The scripts a shell stage runs with -c, directly or as a wrapper's command; empty for any other stage."""
-    if verb_of(toks) in WRAPPERS:
-        toks = inner_command(toks) or []
+    toks = unwrapped(toks)
     if verb_of(toks) not in SHELLS:
         return []
     i = verb_index(toks)

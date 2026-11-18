@@ -322,8 +322,10 @@ CASES = [
         {
             "tool_name": "Bash",
             "tool_input": {
-                "command": 'kubectl exec -n swarm-hive-001 $H -- sh -c \'env | grep -iE "ledger|swarm_url" | '
-                'sed -E "s/(TOKEN|KEY)[^=]*=.*/x/"\' 2>&1 | head -10'
+                "command": "H=$(kubectl get pods -n swarm-hive-001 -o name | grep worker-hive | head -1); "
+                'kubectl exec -n swarm-hive-001 $H -- sh -c \'env | grep -iE "ledger|swarm_url|8765|8766" | '
+                'sed -E "s/(TOKEN|KEY|SECRET|PASS)[^=]*=.*/\\1=<redacted>/"\' 2>&1 | '
+                'grep -viE "token|key|secret|pass" | head -10'
             },
         },
         True,
@@ -334,7 +336,7 @@ CASES = [
             "tool_name": "Bash",
             "tool_input": {
                 "command": 'kubectl -n swarm-hive-001 exec "$P" -c worker-hive -- sh -c '
-                "'env | cut -d= -f1 | grep -i -E \"ca|cert|ssl\" | sort' 2>&1 | head -30"
+                "'env | cut -d= -f1 | grep -i -E \"ca|cert|ssl|ledger|swarm_url\" | sort' 2>&1 | head -30"
             },
         },
         True,
@@ -344,7 +346,9 @@ CASES = [
         {
             "tool_name": "Bash",
             "tool_input": {
-                "command": "awk 'BEGIN{for(k in ENVIRON) if(k ~ /^AGENTIHOOKS_(HIVE|SWARM)/) print k\"=\"ENVIRON[k]}'"
+                "command": 'agentihooks hive list 2>&1 | head -30; echo "---"; hostname; '
+                "awk 'BEGIN{for(k in ENVIRON) if(k ~ /^(AGENTIHOOKS_(HIVE|SWARM|AGENT_NAME|SWARM_TASK|COMPACT_LIMIT)"
+                '[A-Z_]*)$/) print k"="ENVIRON[k]}\''
             },
         },
         True,
@@ -694,6 +698,7 @@ SHELL_SCRIPT_DUMPS = [
     ("bash -lc 'printenv | grep REDIS'", "dumping the whole environment (printenv)"),
     ("zsh -c 'export -p'", "dumping the whole environment (export)"),
     ("dash -ec 'set'", "dumping the whole environment (set)"),
+    ("bash -ce 'env'", "dumping the whole environment (env)"),
     ("sudo bash -euo pipefail -c 'env | cut -d= -f1'", "dumping the whole environment (env)"),
     ("docker exec box bash -c 'printenv'", "dumping the whole environment (printenv)"),
     ("ssh host sh -c 'env'", "dumping the whole environment (env)"),
@@ -713,6 +718,7 @@ SHELL_SCRIPTS_THAT_PRINT_NO_VALUE = [
     "bash --rcfile env",
     "bash -c",
     "grep -c env notes.txt",
+    "python3 -c 'env'",
 ]
 
 
@@ -743,12 +749,14 @@ AWK_ENVIRON_VALUE_READS = [
     "mawk 'BEGIN { print ENVIRON [\"REDIS_URL\"] }'",
     "nawk 'BEGIN{print ENVIRON[\"X\"]}'",
     "compgen -e | /usr/bin/awk '{print $1\"=\"ENVIRON[$1]}'",
+    "kubectl exec pod -- awk 'BEGIN{print ENVIRON[\"DATABASE_URL\"]}'",
 ]
 
 AWK_ENVIRON_NAME_ONLY = [
     ENV_NAMES_SAFE,
     "awk 'BEGIN{for(k in ENVIRON) if(k ~ /LEDGER/) print k}'",
     "awk -F= '{print $1}' names.txt",
+    "awk '{print MYENVIRON[1]}' data.txt",
     "grep -n 'ENVIRON[' notes.txt",
 ]
 

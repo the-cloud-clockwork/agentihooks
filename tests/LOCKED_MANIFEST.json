@@ -1020,7 +1020,7 @@
  "tests/test_credential_guard.py::test_a_shell_script_that_prints_no_value_passes": {
   "assertions": 1,
   "calls": 2,
-  "cases": 8,
+  "cases": 9,
   "texts": [
    "a76f47343f702669"
   ]
@@ -1038,7 +1038,7 @@
  "tests/test_credential_guard.py::test_an_awk_listing_of_environment_names_passes": {
   "assertions": 1,
   "calls": 2,
-  "cases": 4,
+  "cases": 5,
   "texts": [
    "a76f47343f702669"
   ]
@@ -1046,7 +1046,7 @@
  "tests/test_credential_guard.py::test_an_awk_read_of_an_environment_value_is_refused": {
   "assertions": 1,
   "calls": 3,
-  "cases": 5,
+  "cases": 6,
   "texts": [
    "a4f6f90a6eb4c427"
   ]
@@ -1054,7 +1054,7 @@
  "tests/test_credential_guard.py::test_an_environment_dump_inside_a_shell_script_is_refused": {
   "assertions": 1,
   "calls": 3,
-  "cases": 9,
+  "cases": 10,
   "texts": [
    "c4b74481ca248577"
   ]

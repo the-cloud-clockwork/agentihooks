@@ -4893,7 +4893,7 @@
       "origin": "regression",
       "ordered_at": "2026-11-18",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-env-guard-gap",
-      "behaviour": "The credential guard refuses an awk, gawk, mawk or nawk stage whose program reads a value out of ENVIRON with a subscript, in any stage of a pipeline, while the name only listing that loops over ENVIRON and prints the names, an awk program that never reads ENVIRON and another tool naming ENVIRON pass.",
+      "behaviour": "The credential guard refuses an awk, gawk, mawk or nawk stage whose program reads a value out of ENVIRON with a subscript, in any stage of a pipeline and as the command a kubectl, docker or ssh wrapper runs, while the name only listing that loops over ENVIRON and prints the names, an awk program that never reads ENVIRON and another tool naming ENVIRON pass.",
       "seam": "hooks.context.credential_guard.awk_environ_verdict, read by hooks.context.credential_guard.decide",
       "tests": [
         "tests/test_credential_guard.py::test_an_awk_read_of_an_environment_value_is_refused",
