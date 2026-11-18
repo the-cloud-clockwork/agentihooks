@@ -134,7 +134,7 @@ def test_the_swarm_release_tags_the_version_and_release(tmp_path):
     ]
 
 
-def test_the_worker_release_publishes_and_moves_the_version_and_release_tags_but_never_dev() -> None:
+def test_the_worker_release_publishes_the_qualified_candidate_but_never_moves_dev() -> None:
     job = _job("swarm-node-image.yml")
     for name in ("Log in to the registry", "Publish the qualified candidate"):
         assert _step(job, name)["if"].startswith("github.event_name == 'release' || ")
