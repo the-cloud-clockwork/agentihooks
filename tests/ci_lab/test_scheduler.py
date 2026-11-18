@@ -1752,6 +1752,7 @@ SUITE_DURATIONS = {FIRST_TEST: 40.0, OTHER_TEST: 40.0, SECOND_TEST: 1.0}
 PINNED = '[project]\nname = "suite"\n\n[project.optional-dependencies]\ndev = ["mutmut==3.6.0"]\n'
 FIRST = "scripts.alpha.x_first"
 SECOND = "scripts.alpha.x_second"
+GAMMA = "tests/test_gamma.py"
 
 
 @dataclass(frozen=True)
@@ -1914,12 +1915,9 @@ def test_a_merge_group_head_runs_every_batch_when_an_interaction_clause_holds(
     assert found == scheduler.frame(Priority.QUEUE, _tree(suite, suite.head), suite.base, {"unit": every})
 
 
-GAMMA = "tests/test_gamma.py"
-
-
 @pytest.mark.feature("lab-scheduler-test-units")
 @pytest.mark.usefixtures("staticless")
-@pytest.mark.parametrize(("known", "picked"), [(True, slice(2, 3)), (False, slice(0, 3))], ids=["entries", "cache"])
+@pytest.mark.parametrize(("known", "picked"), [(True, slice(2, 3)), (False, slice(0, 3))], ids=["invalidated", "full"])
 def test_a_merge_group_entry_that_adds_a_test_file_the_manifest_lacks_runs_its_unit(
     tmp_path: Path, known: bool, picked: slice
 ) -> None:

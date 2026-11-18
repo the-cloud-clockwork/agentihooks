@@ -330,25 +330,21 @@ def test_each_batch_is_one_test_unit_keyed_by_its_fingerprints_opened_files_and_
     )
 
 
-UNLISTED = {
-    "tests/test_new.py": "def test_new():\n    pass\n",
-    "tests/inner/test_deep.py": "def test_deep():\n    pass\n",
-}
+NEW = "tests/test_new.py"
+UNLISTED = [NEW, *(f"tests/inner/test_{letter}.py" for letter in "hgfedcba")]
 TOOLCHAIN = Toolchain("3.12", {"ruff": "1"}, "lock", "project", "image", {"TZ": "UTC"})
 
 
 def _unlisted(root: Path) -> tuple[Unit, ...]:
-    changed = ["tests/test_new.py", "tests/test_alpha.py", "tests/helpers.py", "tests/test_gone.py", "scripts/alpha.py"]
-    return expand_tests.unlisted_units(
-        MANIFEST, _tree(root), [*changed, "docs/guide.md", "tests/inner/test_deep.py"], TOOLCHAIN
-    )
+    listed = ["tests/test_alpha.py", "tests/helpers.py", "tests/test_gone.py", "scripts/alpha.py", "docs/guide.md"]
+    return expand_tests.unlisted_units(MANIFEST, _tree(root), [*reversed(UNLISTED), NEW, *listed], TOOLCHAIN)
 
 
 @pytest.mark.feature("lab-scheduler-test-units")
 def test_unlisted_units_key_each_changed_test_module_the_manifest_lacks_as_a_broad_test(repository: Path) -> None:
-    for path, text in UNLISTED.items():
+    for path in UNLISTED:
         (repository / path).parent.mkdir(parents=True, exist_ok=True)
-        (repository / path).write_text(text)
+        (repository / path).write_text("def test_one():\n    pass\n")
     tree = _tree(repository)
     keys = expand_tests.fingerprints({"units": [], "tests": {path: {"files": []} for path in UNLISTED}}, tree)
 
@@ -356,7 +352,7 @@ def test_unlisted_units_key_each_changed_test_module_the_manifest_lacks_as_a_bro
         inputs = digests.TestInputs({path: keys[path]}, {}, expand_tests.PYTEST_INVOCATION, TOOLCHAIN)
         return Unit("test", digests.test_key(inputs), (path,))
 
-    assert _unlisted(repository) == (unit("tests/inner/test_deep.py"), unit("tests/test_new.py"))
+    assert _unlisted(repository) == tuple(unit(path) for path in sorted(UNLISTED))
 
 
 @pytest.mark.feature("lab-scheduler-test-units")
@@ -367,9 +363,9 @@ def test_unlisted_units_key_each_changed_test_module_the_manifest_lacks_as_a_bro
 def test_an_unlisted_test_module_unit_rekeys_on_every_measured_and_shared_file(
     repository: Path, path: str, rekeyed: bool
 ) -> None:
-    (repository / "tests/test_new.py").write_text(UNLISTED["tests/test_new.py"])
+    (repository / NEW).write_text("def test_new():\n    pass\n")
     before = _unlisted(repository)
     (repository / path).write_text("changed\n")
     after = _unlisted(repository)
-    assert [unit.members for unit in after] == [("tests/test_new.py",)]
+    assert [unit.members for unit in after] == [(NEW,)]
     assert (before != after) is rekeyed
