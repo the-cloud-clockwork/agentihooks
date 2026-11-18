@@ -21,13 +21,14 @@ worker's PriorityClass is a cluster object outside that module;
 | `agentihooks ci-lab-scheduler --self-test` | `python -m scripts.ci_lab scheduler --self-test` | Checks the scheduler contract offline and prints it as JSON |
 | `agentihooks ci-lab-scheduler [--interval S] [--passes N]` | `python -m scripts.ci_lab scheduler [--interval S] [--passes N]` | Runs the scheduler service: reads the runtime config, serves the lease API, `/capacity` and `/grades/<sha>` on port 8800 and `/metrics` on 9108, and runs one grading pass every interval (2 seconds), forever unless `--passes` is set |
 | `agentihooks ci-lab-worker --self-test` | `python -m scripts.ci_lab worker --self-test` | Refuses any GitHub App variable, checks the worker contract offline and prints it as JSON |
+| `agentihooks ci-lab-worker` | `python -m scripts.ci_lab worker` | Runs the worker service: builds the pod from the worker environment, leases units from the scheduler and runs each through the adapter of its kind (see [Worker executors](#worker-executors)) until SIGTERM, then lets running units drain |
 
 The self tests make no network, Redis, object store or GitHub calls. They exit 0 when the
 contract holds and 1 with the reason on standard error when it does not. A self test fails when
 a metric name is not a valid Prometheus name starting with `ci_lab_`, a port repeats or falls
 outside 1 to 65535, or the worker environment grants `GITHUB_APP_`. `-h` prints usage. The
-scheduler without `--self-test` runs its service (see [Scheduler loop](#scheduler-loop)); any other
-worker start without `--self-test` exits 2 until the worker loop lands.
+scheduler and the worker without `--self-test` run their services (see [Scheduler loop](#scheduler-loop)
+and [Worker executors](#worker-executors)).
 
 ## Environment
 
@@ -41,6 +42,13 @@ worker start without `--self-test` exits 2 until the worker loop lands.
 | `CI_LAB_SCHEDULER_URL` | no | yes | Base address of the scheduler lease API |
 | `CI_LAB_SLOTS` | no | yes | Number of units the worker runs at once |
 | `CI_LAB_GIT_MIRROR` | yes | yes | Path of the shared git mirror the worker cuts worktrees from and the scheduler borrows objects from |
+| `CI_LAB_WORK_ROOT` | no | yes | Folder of the worker's private git store, its trees, venvs and unit runs and reports |
+| `CI_LAB_MANIFEST` | no | yes | Path of the dependency manifest JSON a test unit's batch is checked against |
+| `CI_LAB_FLAKES` | no | yes | Path of the flake ledger a test unit appends to when its retry passes |
+| `CI_LAB_MUTATION_CACHE` | no | yes | Folder of the mutation stats cache, keyed by tree content |
+| `CI_LAB_KILLERS` | no | yes | Path of the kill memory that orders a mutant's tests, its remembered killer first |
+| `CI_LAB_MUTATION_BUDGET` | no | yes | Seconds a mutant unit may take before its mutants run side by side |
+| `CI_LAB_MUTATION_CAP` | no | yes | Most mutants a mutant unit grades at once |
 | `CI_LAB_MINIO_ENDPOINT`, `CI_LAB_MINIO_BUCKET`, `CI_LAB_MINIO_ACCESS_KEY`, `CI_LAB_MINIO_SECRET_KEY` | yes | no | The object store names the scheduler reads |
 | `CI_LAB_MIRROR_STORE` | yes | no | Folder of the scheduler's private git stores, one per repository, that borrow the mirror's objects |
 | `CI_LAB_REPOSITORY` | yes | no | Repository URL whose dev runner trust list admits head actors |
@@ -767,14 +775,17 @@ key; the builders are pure and read no file, clock or network.
    default; a newer head of the lane restarts it and a hotfix waits for none.
 3. Expansion reads the grader's test workflow and input key registry and the head and base trees
    from the git mirror with `git ls-tree` and `git show`, never a checkout, and keys one static
-   unit per gate step.
+   unit per gate step. A merge group, promotion or backfill head also gets the `unit` job's test
+   units, described in [Test units](#test-units).
 4. The verdict store answers what it can. A newer head of the lane drops the older head's pending
    units, carries its leased and finished jobs and cancels its check runs. A push grade of a tree a
    merge group grade passed carries that grade's units for every gate both grades hold: the unit
    suite, since the queue rules require lint, type-gate and semgrep to be skipped. The rest is enqueued.
 5. Expired leases requeue while `lab.retry.lost` of the repository's dev `delivery.yaml` allows (once by
    default); the next loss is `lost`.
-6. Finished jobs are collected: a graded outcome with an uploaded report becomes a verdict in the
+6. Finished jobs are collected. A job whose outcome `retry.decide` allows another run under
+   `lab.retry` goes back to pending with one more attempt, so a `crash` reruns once by default.
+   Otherwise a graded outcome with an uploaded report becomes a verdict in the
    store; `lost`, `crash` and `cannot_run` stay out of it and make their grade red. A lease
    completes only with an outcome `scripts/ci_lab/outcomes.py` lists in `COMPLETED`: `passed`,
    `failed`, `gate_failed`, `survived`, `crash` or `cannot_run`. Any other outcome is refused
@@ -805,9 +816,43 @@ key of the repository, head, base, class and grader revision. Live grades sit in
 `<run>-<now_ms>`, bypassing negative verdicts in the store.
 
 Known limits: a lab head event carries no branch yet, so a head's lane is its own sha and a newer
-head supersedes nothing until intake records the branch; expansion keys static gates only, so the
-jobs the lab does not run yet pass by their frame and a push grade folds only the static gates; a
-rerequested grade reuses the finished jobs of its own head.
+head supersedes nothing until intake records the branch; expansion keys static gates and test units
+only, so the other jobs the lab does not run yet pass by their frame; no job stores a dev manifest
+under `lab/manifests/` yet, so a merge group, promotion or backfill head cannot expand until one
+does; a rerequested grade reuses the finished jobs of its own head.
+
+### Test units
+
+`scripts.ci_lab.expand_tests.units` turns the dependency manifest into test units of kind `test`:
+one per `expand_tests.batches` batch, with batches cut at `BATCH_SECONDS` (60) from the head's
+`.test_durations`. Each unit's key is `digests.test_key` over its tests' fingerprints on the head
+tree, the blob ids of the files its tests opened outside the manifest (their records' `outside`
+list), the pytest invocation and the toolchain. The expander reads every head file in one
+`git cat-file --batch` for the fingerprints.
+
+| Head | Unit job |
+|---|---|
+| Pull request, hotfix | No test units; the manifest is not read |
+| Merge group | The batches that hold a test the group's entries invalidate, or every batch when `interaction.decide` returns `FULL` |
+| Promotion, backfill | Every batch; the verdict store is not consulted for the choice |
+
+The manifest comes from `scheduler.StoredManifests`: the packed manifest at
+`lab/manifests/<owner>--<name>/<commit>.json` (`objects.manifest_folder`) of the first commit on
+the first parent chain of the head's base that has one. A head that needs test units and finds
+none fails with `no dependency manifest at or before <base>` and is dropped with that reason, so a
+merge group never folds green on an empty unit job.
+
+For a merge group head the expander builds `interaction.Group` from the mirror: the group's
+changes against the base, one entry per first parent commit between base and head with that
+commit's own changes, and the `pyproject.toml` flag from `ci_select.pyproject_reaches_tests`. The
+cached test units are the tests of every batch the verdict store answers, a negative verdict
+included, and the entry limit is `interaction.entry_limit` of the grader's `delivery.yaml` lab
+block. The clauses are in the
+[Lab merge group interaction rule](delivery-tiers.md#lab-merge-group-interaction-rule).
+
+Since a push grade folds only the static gates,
+[Post merge testing with automatic revert](../research/post-merge-testing.md) measures the red
+`dev` rate from the Tests workflow's runs on GitHub, not from lab push grades.
 
 ### Grades of a commit
 
@@ -831,6 +876,33 @@ Each grade is `scripts.ci_lab.scheduler.summary` of its state:
 | `superseded` | Whether a newer head of its lane cancelled it |
 | `units` | `total` units and how many are `final` |
 | `checks` | Each check run's last posted `status` and `conclusion`, `required` included |
+
+## Worker executors
+
+`agentihooks ci-lab-worker` builds the pod from the [worker environment](#environment), leases units
+from the scheduler and runs each through `scripts.ci_lab.executors`, the adapter its unit kind
+names. Every grant of `POST /lease` carries the job's `head`, `base` and `grader` revisions: the
+scheduler enqueues a grade's misses with the grade's base and its plan's grader revision.
+
+| Kind | Trees | Executor inputs |
+|---|---|---|
+| `static` | head, base and grader, read only, shared by the pod's units | the gate the unit names from the grader tree's workflow and input registry, the venv of the head's `uv.lock` digest and `inputs.base` set to the base revision |
+| `test` | head, read only | the batch, the venv of the head's `uv.lock` digest, `CI_LAB_MANIFEST`, `CI_LAB_FLAKES` and one pytest worker per slot |
+| `stats` | a private copy of the head with every file under the `[tool.mutmut]` source paths behind its trampolines | the tree as root and `CI_LAB_MUTATION_CACHE` |
+| `mutant` | the same private trampolined copy | `CI_LAB_KILLERS`, `CI_LAB_MUTATION_BUDGET`, `CI_LAB_MUTATION_CAP` and the tests that the stats records of every test module in the tree show reaching the mutant's function, with their seconds |
+
+The mutation runner runs in the sandbox as `python -m scripts.ci_lab.run_mutation REQUEST OUTPUT`
+from the private tree. A mutant unit passes only when every mutant is killed; a runner that exits
+non zero fails its unit. Each adapter uploads a JSON report with the unit's `seconds` (and `flaky`
+for a test unit), which the scheduler stores with the verdict, and releases every tree it cut,
+also when the executor raises. SIGTERM stops leasing and lets running units drain within the
+termination grace.
+
+Check the wiring offline:
+
+```bash
+agentihooks ci-lab-worker --self-test | python -c 'import json,sys; print(json.load(sys.stdin)["environment"]["names"])'
+```
 
 ## Verdict store
 
@@ -1305,9 +1377,8 @@ survived mutant is final at once. The one rerun of a failed test is the
 `red` says whether a final result makes its unit's grade red. `retry.policy` reads the counts from `lab.retry` in
 `delivery.yaml`.
 
-The module is a library: no scheduler or worker code calls it yet.
-[What reaches the policy today](#what-reaches-the-policy-today) covers the lease and crash paths
-that run now.
+The scheduler calls it on every finished job; [What reaches the policy](#what-reaches-the-policy)
+covers the lease and crash paths.
 
 ### Outcomes
 
@@ -1398,8 +1469,8 @@ lab:
 | `lost` | `1` | An integer, `0` or more | Reruns `decide` allows after an expired lease or a crashed worker; `0` makes the first loss final and red |
 | `failed` | `0` | An integer, `0` or more | Reruns `decide` allows after a test failure, a static gate failure, a survived mutant or an unknown outcome; above `0` it reruns graded failures |
 
-The counts reach a decision only through `retry.policy` and `decide`, which no service calls yet.
-Lease reaping keeps its own count; see [What reaches the policy today](#what-reaches-the-policy-today).
+The scheduler reads the counts from the repository's dev `delivery.yaml` when it starts; see
+[What reaches the policy](#what-reaches-the-policy).
 
 `scripts.ci_lab.delivery.lab(root)` validates the block with the rest of `lab` and raises
 `delivery.DeliveryError` naming the path:
@@ -1448,26 +1519,19 @@ unit run:
 the run, `1` or `2`, while `UnitResult.attempts` counts reruns of the unit; with the default
 `failed: 0` every failure is final whichever number is passed.
 
-### What reaches the policy today
+### What reaches the policy
 
-No scheduler loop calls `leases.Leases.reap` yet, so an expired lease stays leased until a caller
-reaps it; `tests/ci_lab/test_leases.py` drives it directly. The table shows what each piece does
-now and what reaping does once a caller runs it:
+Each scheduler pass applies the counts on two paths:
 
-| Event | What runs now | What `Leases.reap(now_ms)` does when called |
-|---|---|---|
-| A lease expires once | Nothing; the job stays leased | Moves the job back to pending and adds one to its `attempts` |
-| A lease expires again | Nothing; the job stays leased | Sets the job's state and outcome to `lost` |
-| A unit's executor raises | The unit stops heartbeating and its lease is never completed. On the worker's next lease cycle it prints `ci-lab worker: unit <job> crashed: <repr of the error>` to standard error, such as `RuntimeError('boom')` | Handles it as an expired lease: pending with one more `attempts` after the first expiry, `lost` after a second |
-| A worker completes a lease | `Leases.complete` records the outcome the worker sent | Nothing; the lease is no longer leased |
+| Event | What the scheduler does |
+|---|---|
+| A lease expires | `queue.Queue.reap` moves the job back to pending with one more `attempts` while `attempts` is below `lab.retry.lost`, else sets its state and outcome to `lost` |
+| A worker completes a lease | `decide` reads the job's outcome and `attempts`; on `retry`, `queue.Queue.retry` moves the job back to pending with one more `attempts` and the unit stays open, else the outcome is final |
+| A unit's executor raises | The unit stops heartbeating and its lease is never completed, so it reaches the scheduler as an expired lease. The worker prints `ci-lab worker: unit <job> crashed: <repr of the error>` to standard error on its next lease cycle |
 
-Lease reaping allows one requeue from its own constant, `leases.REQUEUES = 1`, not from
-`lab.retry`, so changing `lab.retry.lost` does not change it yet. No code reports the outcome
-`crash` yet; a crashed worker's unit can reach the scheduler only as an expired lease.
-
-The tests in `tests/ci_lab/test_retry.py` cover the decision table under the default and
-configured counts, the second loss that is final and red, `red` for each outcome, and the valid and
-refused `lab.retry` blocks.
+A worker that completes a lease with `crash` therefore runs once more under the default
+`lost: 1`, and a second `crash` is final and red. `tests/ci_lab/test_retry.py` covers the decision
+table, and the `lab-scheduler-test-units` feature tests cover the scheduler's retry path.
 
 ### Troubleshooting
 
@@ -1475,11 +1539,11 @@ refused `lab.retry` blocks.
 |---|---|---|
 | A failed test, gate or mutant is never rerun | `failed` defaults to `0`: a graded failure is final | Read `lab.retry.failed` in `delivery.yaml`; the flake rule reruns a failed test batch once on its own |
 | A lost unit goes red after one rerun | `lost` defaults to `1`, so the second loss is final | Read `lab.retry.lost`; search the worker's standard error for `crashed` |
-| An expired lease stays leased and is never rerun | No scheduler loop calls `Leases.reap` yet | See [What reaches the policy today](#what-reaches-the-policy-today) |
+| An expired lease stays leased and is never rerun | No scheduler pass ran since it expired | Check the scheduler service is running; each pass reaps expired leases |
 | An outcome that should retry is final | The outcome text is not exactly `lost` or `crash`, so it counts as a failure | Compare the outcome the worker sent with the strings `lost` and `crash` |
 | `DeliveryError` naming `lab.retry` | A count is negative, not an integer, a boolean, or the block holds another key or is not a mapping | Match the message to the error table in [Configure the counts](#configure-the-counts) |
 | `TypeError` from `retry.policy` | The block was not validated and holds an unknown key | Read the block with `delivery.lab(root)` first |
-| Changing `lab.retry.lost` leaves lease requeues unchanged | Lease reaping reads `leases.REQUEUES`, not `lab.retry` | See [What reaches the policy today](#what-reaches-the-policy-today) |
+| Changing `lab.retry` leaves reruns unchanged | The scheduler reads the counts only when it starts | Restart the scheduler service after the change reaches dev |
 
 ## Shadow comparison
 
@@ -1654,11 +1718,8 @@ Limitations:
   receives no grader or base tree.
 - `RUNNER_TEMP` is writable, so a step can delete or replace its own `grader` or `base` symlink.
   That changes only what its own run reads; the trees stay unchanged.
-- No worker runs either runner yet. `scripts.ci_lab.worker.Worker` runs each unit through the
-  `executors` mapping its caller passes, and no code passes `run_static.run` or `run_tests.run` in
-  that mapping. The worker entry point still exits 2 without `--self-test` (see
-  [Entry points](#entry-points)). Both runners run today only through code that calls them
-  directly, such as the tests.
+- The worker service runs both runners through `scripts.ci_lab.executors` (see
+  [Worker executors](#worker-executors)).
 
 ### Use it
 
