@@ -1166,7 +1166,8 @@ key; the builders are pure and read no file, clock or network.
 3. Expansion reads the grader's test workflow and input key registry and the head and base trees
    from the git mirror with `git ls-tree` and `git show`, never a checkout, and keys one static
    unit per gate step. A merge group, promotion or backfill head also gets the `unit` job's test
-   units, described in [Test units](#test-units).
+   units, described in [Test units](#test-units), and a promotion or backfill head its mutation
+   units, described in [Mutation units](#mutation-units).
 4. The verdict store answers what it can. A newer head of the lane drops the older head's pending
    units, carries its leased and finished jobs and cancels its check runs. A push grade of a tree a
    merge group grade passed carries that grade's units for every gate both grades hold: the unit
@@ -1206,9 +1207,9 @@ key of the repository, head, base, class and grader revision. Live grades sit in
 `<run>-<now_ms>`, bypassing negative verdicts in the store.
 
 Known limits: a lab head event carries no branch yet, so a head's lane is its own sha and a newer
-head supersedes nothing until intake records the branch; expansion keys static gates and test units
-only, so the other jobs the lab does not run yet pass by their frame; a rerequested grade reuses
-the finished jobs of its own head.
+head supersedes nothing until intake records the branch; expansion keys static gates, test units
+and mutation units only, so the other jobs the lab does not run yet pass by their frame; a
+rerequested grade reuses the finished jobs of its own head.
 
 ### Test units
 
@@ -1241,6 +1242,20 @@ than that is answered only from the store. A head that needs test units and find
 `no dependency manifest at or before <base>` and is dropped with that reason, so a merge group
 never folds green on an empty unit job.
 
+A batch verdict lists the files the batch opened outside its tests' manifest records. When the
+scheduler stores the verdict of a graded job whose uploaded report carries a non empty `outside`
+list, whatever its graded outcome, `note_outside` writes it as a note of the repository at
+`lab/manifests/<owner>--<name>/outside/<digest>.json`, holding the unit's tests and the sorted list,
+where `<digest>` is `digests.digest` of that note. The object store is write once, so the packed
+`<commit>.json` manifests are never rewritten, and the same tests and list write one note. A
+`StoredManifests` read that finds or fetches a packed manifest merges each note of the repository
+into the `outside` list of each test record the note names, sorted and without duplicates, and skips
+a test the manifest lacks; the next expansion keys those tests on the measured tree and the batch on the
+noted files' blob ids, and `tests.dep_manifest.invalidated` counts a change to a file in a
+record's `outside` list as a change to that test, as it does for a file in its `files` list. The
+list is per batch, so every test of the batch takes it, and notes are per repository rather than
+per manifest commit.
+
 For a merge group head the expander builds `interaction.Group` from the mirror: the group's
 changes against the base, one entry per first parent commit between base and head with that
 commit's own changes, and the `pyproject.toml` flag from `ci_select.pyproject_reaches_tests`. The
@@ -1252,6 +1267,31 @@ block. The clauses are in the
 Since a push grade folds only the static gates,
 [Post merge testing with automatic revert](../research/post-merge-testing.md) measures the red
 `dev` rate from the Tests workflow's runs on GitHub, not from lab push grades.
+
+### Mutation units
+
+A promotion or backfill head gets two more jobs, built by `scripts.ci_lab.expand_mutation` in a
+temporary worktree of the head cut from the mirror store and removed after expansion:
+
+| Job | Units |
+|---|---|
+| `mutation` | One `mutant` unit per function the head changes against its base, naming every mutant of that function |
+| `mutation-stats` | One `stats` unit per test file present at the head that holds a test running such a function, with the worker's stats options |
+
+The changed lines are `scripts.ci_mutation.scope.changes_since` of the base and head, the lines the
+pull request mutation gate grades. `expand_mutation.covering` maps each function to the fingerprint
+of every dependency manifest test that ran it or a function nested in it, and those fingerprints
+enter the mutant key, so a changed covering test rekeys the unit. The stats units warm the stats
+cache the worker's mutant runner reads before it runs the mutants.
+
+| Head | Mutation jobs |
+|---|---|
+| Pull request, hotfix, merge group | None: their frames and `Gate — Required` rules hold no mutation job, and the test workflow runs none on `merge_group` |
+| Promotion, backfill | Both, unless the head changes no Python line under `hooks/` or `scripts/` |
+
+A mutant unit passes only when every mutant is killed, so a surviving mutant fails the `mutation`
+gate and the promotion grade folds red. A changed function no recorded test ran still gets its unit;
+the runner finds no test reaching it, grades its mutants `no tests` and fails the unit.
 
 ### Grades of a commit
 

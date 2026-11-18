@@ -3022,10 +3022,16 @@
     {
       "id": "swarm-lab-wait",
       "origin": "inventory",
-      "behaviour": "A lab wait on a check run url is recorded by the cli, holds while the check runs or GitHub cannot answer, ends green with the inbox notice when it succeeds, ends red naming the gate and its conclusion otherwise, ends as missing when GitHub has no such check run, and refuses any target that is not a check run url.",
+      "behaviour": "A lab wait on a check run url is recorded by the cli, holds while the check runs or GitHub cannot answer, ends green with the inbox notice when it succeeds, ends red naming the gate and its conclusion otherwise, ends as missing when GitHub has no such check run. A lab wait on a lab grade url holds while a live grade of the head is open, the lab holds none or cannot answer, ends green when every live grade succeeded, red naming the failed checks otherwise, and as superseded when a newer head replaced every grade. Any other target is refused.",
       "seam": "agentihooks swarm wait --on lab and the tick wait pass",
       "tests": [
         "tests/swarm/test_lab_wait.py::test_a_lab_wait_refuses_anything_but_a_check_run_url",
+        "tests/swarm/test_lab_wait.py::test_a_lab_wait_takes_a_lab_grade_url",
+        "tests/swarm/test_lab_wait.py::test_a_lab_grade_not_yet_closed_holds_the_wait",
+        "tests/swarm/test_lab_wait.py::test_an_unreachable_lab_holds_the_grade_wait",
+        "tests/swarm/test_lab_wait.py::test_the_tick_ends_a_green_lab_grade_wait_with_the_inbox_notice",
+        "tests/swarm/test_lab_wait.py::test_the_tick_ends_a_red_lab_grade_wait_naming_the_failed_checks",
+        "tests/swarm/test_lab_wait.py::test_a_lab_grade_whose_every_grade_a_newer_head_replaced_ends_the_wait",
         "tests/swarm/test_lab_wait.py::test_the_cli_records_a_lab_wait_on_a_check_run",
         "tests/swarm/test_lab_wait.py::test_a_lab_check_still_running_holds_the_wait",
         "tests/swarm/test_lab_wait.py::test_an_unreachable_github_holds_the_lab_wait",
@@ -3038,11 +3044,14 @@
     {
       "id": "swarm-push-wait",
       "origin": "inventory",
-      "behaviour": "A push by a task agent gets a checked wait on its pull request from the tick, and an agent that never declared a wait is woken on merge.",
+      "behaviour": "A push by a task agent gets a checked wait on its pull request from the tick, and an agent that never declared a wait is woken on merge. A push of one commit to a lab grade ref with no pull request gets a wait on the lab grade of its head once the swarm's lab holds one, and that agent is woken when the grade closes.",
       "seam": "The pull request wait hook and tick pass",
       "tests": [
         "tests/swarm/test_pr_wait.py::test_the_tick_sets_a_checked_wait_on_the_pushed_task_pull_request",
-        "tests/swarm/test_pr_wait.py::test_an_agent_that_never_runs_swarm_wait_is_woken_on_merge"
+        "tests/swarm/test_pr_wait.py::test_an_agent_that_never_runs_swarm_wait_is_woken_on_merge",
+        "tests/swarm/test_pr_wait.py::test_the_hook_marks_a_grade_push_with_its_head",
+        "tests/swarm/test_pr_wait.py::test_the_tick_sets_a_lab_wait_on_the_grade_of_a_grade_push",
+        "tests/swarm/test_pr_wait.py::test_an_agent_that_pushes_to_the_lab_is_woken_when_its_grade_closes"
       ]
     },
     {
@@ -4159,6 +4168,18 @@
       "tests": [
         "tests/ci_lab/test_expand_tests.py::test_a_packed_then_unpacked_record_with_outside_files_stays_keyed_on_the_measured_tree",
         "tests/test_dep_manifest.py::test_a_packed_manifest_keeps_each_test_outside_list_and_unpacks_the_three_field_layout"
+      ]
+    },
+    {
+      "id": "lab-verdict-outside-to-manifest",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-verdict-outside-to-manifest",
+      "behaviour": "A graded lab job whose uploaded report lists files its batch opened outside the manifest writes one note per batch tests and sorted list into its repository's manifest folder, whatever its graded outcome. The next stored manifest read that finds or fetches a packed manifest merges every note into the outside list of each test record it names, sorted and without duplicates, skipping tests the manifest lacks, so the following test unit key changes when one of those files changes, and a change to one of those files invalidates the tests whose records list it. A report without the list or with an empty list writes no note.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis and the local object store, scripts.ci_lab.scheduler.StoredManifests, scripts.ci_lab.expand_tests.units, scripts.ci_lab.interaction.invalidated and tests.dep_manifest.invalidated",
+      "tests": [
+        "tests/ci_lab/test_scheduler.py::test_a_test_verdict_outside_list_reaches_the_stored_records_and_the_following_key",
+        "tests/ci_lab/test_scheduler.py::test_a_note_joins_the_outside_list_a_stored_or_fetched_record_already_holds",
+        "tests/test_dep_manifest.py::test_a_change_to_a_file_a_test_opened_outside_its_record_invalidates_that_test"
       ]
     },
     {
@@ -8142,6 +8163,23 @@
         "tests/ci_lab/test_scheduler.py::test_a_merge_group_head_refuses_an_entry_limit_the_delivery_schema_refuses",
         "tests/ci_lab/test_scheduler.py::test_a_head_whose_grader_delivery_breaks_its_schema_is_dropped_with_its_reason",
         "tests/ci_lab/test_scheduler.py::test_stored_manifests_read_the_packed_manifest_of_the_nearest_stored_ancestor"
+      ]
+    },
+    {
+      "id": "lab-scheduler-mutation-units",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-mutation-expansion",
+      "behaviour": "The CI lab scheduler expands the mutation units of a promotion or backfill head beside its test units, so a surviving mutant can turn a lab grade red. In a temporary checkout of the head it finds the lines the head changes against its base in measured Python files, builds one mutant unit per changed function under the mutation job, keyed with the fingerprint of every dependency manifest test that ran the function or a function nested in it, and one stats unit per test file holding such a test, present at the head, under the mutation-stats job. It removes the checkout after expansion. A head that changes no measured Python line gets neither job, and a hotfix, pull request or merge group head never does, since its frame and Gate Required rules hold no mutation job.",
+      "seam": "scripts.ci_lab.scheduler.MirrorExpander.expand over a git origin fixture and scripts.ci_lab.expand_mutation.covering over a fixture repository",
+      "tests": [
+        "tests/ci_lab/test_expand_mutation.py::test_covering_maps_each_function_of_the_changed_files_to_the_tests_that_ran_it_or_a_function_nested_in_it",
+        "tests/ci_lab/test_scheduler.py::test_a_hotfix_pull_request_or_merge_group_head_expands_no_mutation_units",
+        "tests/ci_lab/test_scheduler.py::test_a_promotion_or_backfill_head_names_the_mutants_of_each_changed_function_in_a_checkout_it_removes",
+        "tests/ci_lab/test_scheduler.py::test_a_promotion_head_keys_a_mutant_unit_by_the_tests_that_ran_its_function",
+        "tests/ci_lab/test_scheduler.py::test_a_promotion_head_expands_no_stats_unit_for_a_covering_test_file_it_deletes",
+        "tests/ci_lab/test_scheduler.py::test_a_promotion_head_expands_the_stats_unit_of_a_covering_test_inside_a_class",
+        "tests/ci_lab/test_scheduler.py::test_a_promotion_head_expands_a_mutant_unit_for_a_changed_function_no_recorded_test_ran",
+        "tests/ci_lab/test_scheduler.py::test_a_promotion_head_that_changes_no_measured_python_expands_no_mutation_units"
       ]
     },
     {

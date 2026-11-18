@@ -17,11 +17,14 @@ import argparse
 import io
 import json
 import logging
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from collections import Counter
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Generator, Iterable, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field, fields, replace
 from functools import partial
 from http.server import ThreadingHTTPServer
@@ -49,7 +52,7 @@ from scripts.ci_lab import (
 from scripts.ci_lab.capacity import Load
 from scripts.ci_lab.checks import Checks, Output
 from scripts.ci_lab.delivery import CLASSES, DELIVERY, DELIVERY_SCHEMA, load_runtime
-from scripts.ci_lab.digests import GradeInputs, StaticInputs, Toolchain, grade_key, static_key
+from scripts.ci_lab.digests import GradeInputs, StaticInputs, Toolchain, digest, grade_key, static_key
 from scripts.ci_lab.intake import GradeRequest, admit
 from scripts.ci_lab.leases import Leases, release
 from scripts.ci_lab.manifests import Fetcher
@@ -63,6 +66,7 @@ from scripts.ci_lab.store import PREFIX, Store, Verdict
 from scripts.ci_lab.units import Priority, Unit
 from scripts.ci_lab.webhooks import HEAD_SUBJECT, HeadEvent
 from scripts.ci_lab.worktrees import Mirror
+from scripts.ci_mutation import scope
 from scripts.ci_runner_trust import ACTORS, validate_actors
 from scripts.events.bus import Consumer
 
@@ -110,12 +114,15 @@ UNIT_ROWS = frozenset(
 FAIL_FAST = "queue-fail-fast"
 FAIL_FAST_RESULTS = frozenset({"success", "failure", "cancelled"})
 MUTATION_JOBS = frozenset({"mutation", "mutation-plan", "mutation-stats"})
+STATS_JOB = "mutation-stats"
+MUTANT_JOB = "mutation"
 ALWAYS_SKIPPABLE = frozenset({"unit-lost", "unit-rerun", "queue-baseline", "unit-selected"})
 PUSH_SKIPPABLE = frozenset({"type-gate", "lint", "semgrep", "test-count"})
 HEAD_FIELDS = tuple(item.name for item in fields(HeadEvent))
 STATIC = "static"
 WHOLE_TREE = "."
 DURATIONS = ".test_durations"
+NOTES = "outside/"
 DEV = "dev"
 DURABLE = "ci-lab-scheduler"
 SUBJECT = f"{HEAD_SUBJECT}.>"
@@ -732,7 +739,7 @@ class Scheduler:
             self.client.srem(LIVE, run)
             return [f"forgot {run}"]
         for slot in state.units.values():
-            self._collect(slot, tiers)
+            self._collect(slot, tiers, state.repo)
         actions = self._post(state)
         if all(slot.outcome for slot in state.units.values()):
             self.client.srem(LIVE, run)
@@ -746,7 +753,7 @@ class Scheduler:
         self._save(state)
         return actions
 
-    def _collect(self, slot: Slot, tiers: Mapping[str, int]) -> None:
+    def _collect(self, slot: Slot, tiers: Mapping[str, int], repo: str) -> None:
         """Take a finished job into its slot in the class of its tier; a vanished job was dropped."""
         if slot.outcome or not slot.job:
             return
@@ -754,11 +761,11 @@ class Scheduler:
         if job is None:
             slot.outcome = DROPPED
         elif job.state in FINISHED:
-            self._finished(slot, job, tiers[job.id])
+            self._finished(slot, job, tiers[job.id], repo)
         else:
             slot.started = slot.started or job.state == "leased"
 
-    def _finished(self, slot: Slot, job: Job, tier: int) -> None:
+    def _finished(self, slot: Slot, job: Job, tier: int, repo: str) -> None:
         """Count the finished attempt once in the tier's class from its report, then take its outcome into the slot,
         storing its verdict, unless the retry policy runs it again."""
         uploaded = self._uploaded(job)
@@ -766,7 +773,7 @@ class Scheduler:
             metrics.observe_unit(self.registry, CLASSES[tier], job.unit.kind, job.requirement.slots, uploaded[0])
         if not self._rerun(job):
             slot.outcome = job.outcome
-            self._remember(job, uploaded)
+            self._remember(job, uploaded, repo)
 
     def _rerun(self, job: Job) -> bool:
         """Move a finished job back to pending when the retry policy allows its outcome a rerun; return whether it
@@ -774,9 +781,9 @@ class Scheduler:
         result = UnitResult(job.outcome, job.attempts)
         return decide(result, self.settings.retries) == "retry" and self.queue.retry(job)
 
-    def _remember(self, job: Job, uploaded: tuple[dict[str, Any], bytes] | None) -> None:
-        """Store the verdict of a graded job from the report and log its worker uploaded; a lost or unrun job is no
-        verdict."""
+    def _remember(self, job: Job, uploaded: tuple[dict[str, Any], bytes] | None, repo: str) -> None:
+        """Store the verdict of a graded job from the report and log its worker uploaded, and note the files its batch
+        opened outside the repository's manifest; a lost or unrun job is no verdict."""
         if job.outcome in UNGRADED or uploaded is None:
             return
         report, log = uploaded
@@ -785,6 +792,8 @@ class Scheduler:
             job.unit.kind, job.unit.key, passed, passed and bool(report.get("flaky")), float(report.get("seconds", 0.0))
         )
         self.store.put(verdict, report, log)
+        if report.get("outside"):
+            note_outside(self.objects, repo, job.unit.members, report["outside"])
 
     def _uploaded(self, job: Job) -> tuple[dict[str, Any], bytes] | None:
         """Return the report and log a finished job's worker uploaded, the log empty when it uploaded none; None
@@ -884,30 +893,50 @@ def frame(tier: Priority, tree: str, grader: str, gates: Mapping[str, tuple[Unit
 @dataclass(frozen=True)
 class StoredManifests:
     """Packed dependency manifests in the lab object store, one per dev commit under `objects.manifest_folder`; one of
-    the newest `MANIFEST_DEPTH` commits with none stored is fetched from its dev push Tests run and stored once."""
+    the newest `MANIFEST_DEPTH` commits with none stored is fetched from its dev push Tests run and stored once. The
+    notes of the files test batches opened outside them sit under its `outside/` folder."""
 
     objects: Objects
     fetch: Fetch = field(default_factory=Fetcher)
 
     def __call__(self, repo: str, commits: Sequence[str]) -> dict[str, Any] | None:
-        """Return the manifest of the first commit that has one stored or, among the newest, fetched; None when none
-        has."""
+        """Return the manifest of the first commit that has one stored or, among the newest, fetched, with every note of
+        the repository merged into its test records; None when none has."""
         slug = _slug(repo)
         folder = manifest_folder(slug)
         stored = frozenset(self.objects.keys(folder))
+        notes = (name for name in stored if name.startswith(folder + NOTES))
         for index, commit in enumerate(commits):
             path = f"{folder}{commit}.json"
             if path in stored:
-                return UNPACK(json.loads(self.objects.read(path)))
+                return self._merged(UNPACK(json.loads(self.objects.read(path))), notes)
             packed = self.fetch(slug, commit) if index < MANIFEST_DEPTH else None
             if packed is not None:
                 self.objects.write_once(path, packed)
-                return UNPACK(json.loads(packed))
+                return self._merged(UNPACK(json.loads(packed)), notes)
         return None
+
+    def _merged(self, manifest: dict[str, Any], notes: Iterable[str]) -> dict[str, Any]:
+        """Return the manifest with each note's files added to the outside list of every test record it names."""
+        records: dict[str, dict[str, Any]] = manifest["tests"]
+        for name in notes:
+            note = json.loads(self.objects.read(name))
+            for test in note["tests"]:
+                if test in records:
+                    records[test]["outside"] = sorted({*records[test].get("outside", ()), *note["outside"]})
+        return manifest
+
+
+def note_outside(objects: Objects, repo: str, tests: Sequence[str], outside: Sequence[str]) -> None:
+    """Write a batch's tests and the files it opened outside the manifest as one note of the repository, named by its
+    content so the same batch and files write it once."""
+    record: dict[str, object] = {"tests": tests, "outside": sorted(outside)}
+    objects.write_once(f"{manifest_folder(_slug(repo))}{NOTES}{digest(record)}.json", json.dumps(record).encode())
 
 
 class MirrorExpander:
-    """Static gate units of a head read from a git mirror with ls-tree and show, never a checkout."""
+    """Units of a head read from a git mirror with ls-tree and show. Only the mutation units use a temporary checkout
+    of the head, since their builders read files from disk."""
 
     def __init__(self, node: Path, root: Path, toolchain: Toolchain, manifests: Manifests, verdicts: Verdicts) -> None:
         self.node = node
@@ -964,7 +993,8 @@ class MirrorExpander:
 
     def expand(self, request: GradeRequest) -> Plan:
         """Return one unit per static gate the grader's workflow runs, keyed by the files it reads at head and base,
-        and the unit job's test units of a merge group, promotion or backfill head, framed by the request's tier."""
+        the unit job's test units of a merge group, promotion or backfill head and the mutation stats and mutant units
+        of a promotion or backfill head, framed by the request's tier."""
         mirror = self._mirror(request.repo)
         grader = request.head if request.tier >= Priority.PROMOTION else request.base
         for sha in dict.fromkeys((request.head, request.base, grader)):
@@ -980,21 +1010,19 @@ class MirrorExpander:
             )
             gates.setdefault(gate.job, []).append(Unit(STATIC, static_key(inputs), (gate.name,)))
         if request.tier >= Priority.QUEUE:
-            gates.setdefault(UNIT_JOBS[0], []).extend(self._tests(mirror, request, grader, head, toolchain))
+            manifest, contents = self._manifest(mirror, request), self._contents(mirror, head)
+            suite = expand_tests.units(manifest, contents, head, json.loads(contents.get(DURATIONS, b"{}")), toolchain)
+            gates.setdefault(UNIT_JOBS[0], []).extend(self._tests(mirror, request, grader, manifest, suite))
+            if request.tier >= Priority.PROMOTION:
+                gates.update(self._mutation(mirror, request, manifest, contents))
         tree = self._git(mirror, "rev-parse", f"{request.head}^{{tree}}").strip()
         return frame(request.tier, tree, grader, {job: tuple(units) for job, units in gates.items()})
 
     def _tests(
-        self, mirror: Mirror, request: GradeRequest, grader: str, files: Mapping[str, str], toolchain: Toolchain
+        self, mirror: Mirror, request: GradeRequest, grader: str, manifest: dict[str, Any], suite: tuple[Unit, ...]
     ) -> tuple[Unit, ...]:
         """Return every test batch of the head, or for a merge group head the batches that hold a test its entries
         invalidate, unless the interaction rule sends the group to the whole suite."""
-        ancestry = self._git(mirror, "rev-list", "--first-parent", request.base).split()
-        manifest = self.manifests(request.repo, ancestry)
-        if manifest is None:
-            raise ValueError(f"no dependency manifest at or before {request.base}")
-        tree = self._contents(mirror, files)
-        suite = expand_tests.units(manifest, tree, files, json.loads(tree.get(DURATIONS, b"{}")), toolchain)
         if request.tier != Priority.QUEUE:
             return suite
         cached = {test for unit in suite if self.verdicts(unit.kind, unit.key) is not None for test in unit.members}
@@ -1003,6 +1031,45 @@ class MirrorExpander:
         if chosen == interaction.FULL:
             return suite
         return tuple(unit for unit in suite if chosen.intersection(unit.members))
+
+    def _manifest(self, mirror: Mirror, request: GradeRequest) -> dict[str, Any]:
+        """Return the dependency manifest of the nearest commit on the base's first parent chain that has one stored."""
+        ancestry = self._git(mirror, "rev-list", "--first-parent", request.base).split()
+        manifest = self.manifests(request.repo, ancestry)
+        if manifest is None:
+            raise ValueError(f"no dependency manifest at or before {request.base}")
+        return manifest
+
+    def _mutation(
+        self, mirror: Mirror, request: GradeRequest, manifest: dict[str, Any], contents: Mapping[str, bytes]
+    ) -> dict[str, list[Unit]]:
+        """Return one mutant unit per function the head changes against its base and one stats unit per test file
+        present at the head that holds a test running such a function, built in a temporary checkout of the head;
+        none when the head changes no measured Python line."""
+        from scripts.ci_lab import executors, expand_mutation
+
+        with self._checkout(mirror, request.head) as root:
+            changes = scope.changes_since(root, request.base, request.head)
+            if not changes:
+                return {}
+            covering = expand_mutation.covering(root, manifest, expand_tests.fingerprints(manifest, contents), changes)
+            mutants = expand_mutation.mutant_units(root, changes, covering)
+            owners = {executors.function_of(unit.members[0]) for unit in mutants}
+            tests = {test.partition("::")[0] for name in owners for test in covering.get(name, {})}
+            files = sorted(path for path in tests if (root / path).is_file())
+            stats = expand_mutation.stats_units(root, files, executors.OPTIONS)
+        return {job: list(units) for job, units in ((STATS_JOB, stats), (MUTANT_JOB, mutants)) if units}
+
+    @contextmanager
+    def _checkout(self, mirror: Mirror, sha: str) -> Generator[Path]:
+        """Yield a temporary worktree of a commit cut from the mirror's store under the mirror root, removed on exit."""
+        folder = Path(tempfile.mkdtemp(dir=self.root))
+        try:
+            self._git(mirror, "worktree", "add", str(folder), sha)
+            yield folder
+        finally:
+            shutil.rmtree(folder)
+            self._git(mirror, "worktree", "prune")
 
     def _group(self, mirror: Mirror, request: GradeRequest) -> interaction.Group:
         """Return a merge group head: its changes against the base and those of each entry, one first parent commit

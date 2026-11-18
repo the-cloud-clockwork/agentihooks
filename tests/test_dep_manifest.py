@@ -187,6 +187,20 @@ def test_tests_files_and_global_inputs_invalidate_their_dependants(tmp_path):
     assert dep_manifest.invalidated(manifest, [("profiles/x.py", "", "y")])[1] == "profiles/x.py"
 
 
+@pytest.mark.feature("lab-verdict-outside-to-manifest")
+def test_a_change_to_a_file_a_test_opened_outside_its_record_invalidates_that_test() -> None:
+    manifest = {
+        "units": [],
+        "tests": {
+            "tests/test_a.py::test_one": {"units": [], "files": [], "escapes": False, "outside": ["docs/a.md"]},
+            "tests/test_b.py::test_two": {"units": [], "files": ["docs/a.md"], "escapes": False},
+            "tests/test_c.py::test_three": {"units": [], "files": [], "escapes": False},
+        },
+    }
+    hit = {"tests/test_a.py::test_one", "tests/test_b.py::test_two"}
+    assert dep_manifest.invalidated(manifest, [("docs/a.md", "a", "b")]) == (hit, None)
+
+
 def test_a_source_change_invalidates_the_tests_that_read_it_as_data():
     manifest = {
         "units": [],
