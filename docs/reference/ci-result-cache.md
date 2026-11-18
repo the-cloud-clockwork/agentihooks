@@ -328,7 +328,7 @@ The `split` job's plan step runs on `merge_group`, on `workflow_dispatch`, and o
 
 - the base branch is `dev` and the head branch lives in this repository; a fork pull request plans nothing;
 - the grader, a detached worktree of `origin/dev`, has `scripts/ci_test_plan.py`;
-- the grader also has `tests/reused_coverage.py`. A grader without it cannot carry reused coverage, so the step prints `The grader cannot carry reused tests' coverage into Sonar; every test runs.` and plans no reuse. Merge group runs skip this check. A dispatch's grader is its own head, so it runs the check and the coverage filter from the head.
+- the grader also has `scripts/reused_coverage.py`, or `tests/reused_coverage.py` when the grader predates the move into `scripts`. A grader without either cannot carry reused coverage, so the step prints `The grader cannot carry reused tests' coverage into Sonar; every test runs.` and plans no reuse. Merge group runs skip this check. A dispatch's grader is its own head, so it runs the check and the coverage filter from the head.
 
 The planner runs from the grader, never from the head, so a pull request cannot widen what it reuses. It mints the CI App token with `actions: read` to read dev's runs and artifacts.
 
@@ -344,9 +344,9 @@ On every 3.12 unit shard of a full scope run that reuses at least one test, outs
 
 1. **Token.** `Mint the token that reads the dev coverage` mints the CI App token with `actions: read`.
 2. **Download.** `Download this shard's dev coverage` downloads the same shard's `coverage-3.12-<shard>` artifact from the record run into the runner's temporary folder.
-3. **Filter and remap.** `Keep the reused tests' dev coverage` adds the grader as a worktree (`origin/dev` for a pull request, the head for a dispatch) and runs `python -m tests.reused_coverage` from it, so the filter that moves dev coverage is protected code.
+3. **Filter and remap.** `Keep the reused tests' dev coverage` adds the grader as a worktree (`origin/dev` for a pull request, the head for a dispatch) and runs `python -m scripts.reused_coverage` from it (`tests.reused_coverage` when the grader predates the move into `scripts`), so the filter that moves dev coverage is protected code.
 
-`tests.reused_coverage` writes `reused-coverage/.coverage` and adds page captures to the shard's `js-coverage/`:
+`scripts.reused_coverage` writes `reused-coverage/.coverage` and adds page captures to the shard's `js-coverage/`:
 
 - **Contexts.** It keeps the arcs of the per test contexts whose test is in the shard's `reused.json`, plus arcs with the empty context, which coverage records at import time. Contexts of tests this run executes are dropped, so their coverage comes from this run only.
 - **Changed sources.** For every Python file that differs between the record commit and the head, it maps old line numbers to new ones with a line diff and moves each kept arc onto the head line. An arc whose end lines no longer exist is dropped. A file deleted at the head is removed from the data. A reused test ran only code whose text did not change, so its arcs land on the same statements at their new lines.
@@ -358,7 +358,7 @@ The step prints `Kept the dev coverage of <n> reused tests and <m> page captures
 
 The remap runs against the unit job's own checkout (`--repo "$GITHUB_WORKSPACE"`), a partial clone with `filter: blob:none` (see [Unit checkout](../ci-timing.md#unit-checkout)). That checkout holds the file contents of the graded commit only. The old text of every changed file, at the record commit, is missing until git fetches it from the remote.
 
-`tests.reused_coverage.moved_lines` lists the changed files with:
+`scripts.reused_coverage.moved_lines` lists the changed files with:
 
 ```bash
 git -C "$GITHUB_WORKSPACE" diff --no-renames --numstat "<record commit>" HEAD -- '*.py'
@@ -373,7 +373,7 @@ Before [pull request 4828](https://github.com/the-cloud-clockwork/agentihooks/pu
 | Pull request run [39251854559](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39251854559), attempt 1, before | 408 on unit (3.12, 1) | 230 to 256 s on every 3.12 shard, 256 s on unit (3.12, 1) | 1205 s, over the 900 s Doctor threshold |
 | Pull request run [39304815170](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39304815170), attempt 1, after | 9 | at most 9 s | 717 s |
 
-The fix lives in the grader's copy of `tests/reused_coverage.py`: `origin/dev` for a pull request, the head for a dispatch. Every pull request run created after the merge, 2026-10-19 18:06 UTC, uses it, whatever its branch holds. A dispatch from a head older than the merge still fetches one file at a time.
+The fix lives in the grader's copy of `scripts/reused_coverage.py`: `origin/dev` for a pull request, the head for a dispatch. Every pull request run created after the merge, 2026-10-19 18:06 UTC, uses it, whatever its branch holds. A dispatch from a head older than the merge still fetches one file at a time.
 
 #### Proof
 
@@ -411,7 +411,7 @@ The first command prints each 3.12 shard's remap step time; the second prints ho
 
 ### Unusable coverage databases
 
-`tests/coverage_check.py` decides whether a coverage data file can be read. Two steps use it: the reuse step above, before it reads the downloaded dev database, and `Check the coverage database`, before each 3.12 unit shard uploads its own.
+`scripts/coverage_check.py` decides whether a coverage data file can be read. Two steps use it: the reuse step above, before it reads the downloaded dev database, and `Check the coverage database`, before each 3.12 unit shard uploads its own.
 
 `coverage_check.problem` opens the file read only and returns the first problem it finds, or nothing for a usable database:
 
@@ -422,7 +422,7 @@ The first command prints each 3.12 shard's remap step time; the second prints ho
 | The `pragma integrity_check` result | SQLite opens the file but the integrity check does not answer `ok`. |
 | `missing tables <names>` | One of `arc`, `context`, `file` or `line_bits` is absent. Reuse and `.github/coverage/combine.sh` read all four. |
 
-**Reuse step.** When the downloaded dev database has a problem, `python -m tests.reused_coverage` prints one error annotation and exits 1 before reading `reused.json` or the database:
+**Reuse step.** When the downloaded dev database has a problem, `python -m scripts.reused_coverage` prints one error annotation and exits 1 before reading `reused.json` or the database:
 
 ```text
 ::error::The dev coverage coverage-3.12-9 from <commit> is unusable (database disk image is malformed)
@@ -442,7 +442,7 @@ Run the check by hand on a downloaded artifact:
 
 ```bash
 gh run download "<dev run id>" --name coverage-3.12-9 --dir "<scratch dir>"
-python -m tests.coverage_check "<scratch dir>/.coverage" "<scratch dir>/reused-coverage/.coverage"
+python -m scripts.coverage_check "<scratch dir>/.coverage" "<scratch dir>/reused-coverage/.coverage"
 echo "exit $?"
 ```
 
@@ -610,7 +610,7 @@ It writes `$RUNNER_TEMP/reused-branch.json` and `branch=<n>` and `branch_runs=<i
 
 ### Coverage
 
-On a pull request run from this repository that is not test only, `sonar` mints the CI App token with `actions: read`, downloads `reused-branch-3.12` and `reused-3.12`, adds the pull request's base commit as the grader and runs `python -m scripts.ci_branch_coverage` before `Merge shard coverage`. For each run and attempt the plan names, it downloads only that attempt's `branch-coverage-3.12-*` artifacts, keeps the contexts of the reused tests the deselect output attributes to pull request runs, moves their arcs by line diff onto the head as `tests/reused_coverage.py` does for dev, and writes them under `.coverage-shards/branch-<run>/<leg>-<attempt>/`. `.github/coverage/combine.sh` adds every non-empty `.coverage-shards/branch-*/*/.coverage*`, and `tests/js_lcov.py` finds the carried page captures by its recursive search.
+On a pull request run from this repository that is not test only, `sonar` mints the CI App token with `actions: read`, downloads `reused-branch-3.12` and `reused-3.12`, adds the pull request's base commit as the grader and runs `python -m scripts.ci_branch_coverage` before `Merge shard coverage`. For each run and attempt the plan names, it downloads only that attempt's `branch-coverage-3.12-*` artifacts, keeps the contexts of the reused tests the deselect output attributes to pull request runs, moves their arcs by line diff onto the head as `scripts/reused_coverage.py` does for dev, and writes them under `.coverage-shards/branch-<run>/<leg>-<attempt>/`. `.github/coverage/combine.sh` adds every non-empty `.coverage-shards/branch-*/*/.coverage*`, and `tests/js_lcov.py` finds the carried page captures by its recursive search.
 
 ### Trust
 

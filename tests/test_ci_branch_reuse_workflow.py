@@ -205,7 +205,7 @@ def _planner_repo(tmp_path: Path, branch_planner: bool) -> Path:
             "import os\nopen(os.environ['GITHUB_OUTPUT'], 'a').write(f\"reused={os.environ['FAKE_REUSED']}\\n\")\n"
         ),
         "tests/__init__.py": "",
-        "tests/reused_coverage.py": "",
+        "scripts/reused_coverage.py": "",
     }
     if branch_planner:
         files["scripts/ci_branch_plan.py"] = (

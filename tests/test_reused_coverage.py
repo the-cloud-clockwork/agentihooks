@@ -9,7 +9,7 @@ import pytest
 import yaml
 from coverage import CoverageData
 
-from tests import coverage_check, reused_coverage
+from scripts import coverage_check, reused_coverage
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "test.yml"
@@ -220,7 +220,7 @@ def test_the_unit_job_checks_its_coverage_database_before_uploading_it():
     assert check["if"] == steps["Upload coverage"]["if"]
     assert "databases=(.coverage)" in check["run"]
     assert "databases+=(reused-coverage/.coverage)" in check["run"]
-    assert 'python -m tests.coverage_check "${databases[@]}"' in check["run"]
+    assert 'python -m scripts.coverage_check "${databases[@]}"' in check["run"]
     assert names.index("Run tests") < names.index("Check the coverage database") < names.index("Upload coverage")
     kept = steps["Keep the reused tests' dev coverage"]
     assert kept["env"]["ARTIFACT"] == "coverage-${{ matrix.python-version }}-${{ matrix.shard }}"
@@ -269,7 +269,7 @@ def test_coverage_shards_ship_the_reused_tests_dev_coverage_to_sonar_and_the_rat
     steps = _steps("unit")
     names = list(steps)
     kept = steps["Keep the reused tests' dev coverage"]
-    assert "python -m tests.reused_coverage" in kept["run"]
+    assert 'python -m "$package.reused_coverage"' in kept["run"]
     assert 'cd "$RUNNER_TEMP/grader"' in kept["run"]
     assert kept["env"]["GRADER"] == "${{ github.event_name == 'pull_request' && 'origin/dev' || github.sha }}"
     assert '--out "$GITHUB_WORKSPACE/reused-coverage/.coverage"' in kept["run"]

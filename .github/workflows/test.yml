@@ -1063,7 +1063,8 @@ jobs:
               echo "reused=0" >> "$GITHUB_OUTPUT"
               return 0
             fi
-            if [[ "$GITHUB_EVENT_NAME" != merge_group && ! -f "$RUNNER_TEMP/planner/tests/reused_coverage.py" ]]; then
+            if [[ "$GITHUB_EVENT_NAME" != merge_group && ! -f "$RUNNER_TEMP/planner/scripts/reused_coverage.py" \
+              && ! -f "$RUNNER_TEMP/planner/tests/reused_coverage.py" ]]; then
               echo "The grader cannot carry reused tests' coverage into Sonar; every test runs."
               echo "reused=0" >> "$GITHUB_OUTPUT"
               return 0
@@ -1621,7 +1622,9 @@ jobs:
         run: |
           git worktree add --detach "$RUNNER_TEMP/grader" "$GRADER"
           cd "$RUNNER_TEMP/grader"
-          python -m tests.reused_coverage --repo "$GITHUB_WORKSPACE" --head HEAD \
+          package=scripts
+          if [[ ! -f scripts/reused_coverage.py ]]; then package=tests; fi
+          python -m "$package.reused_coverage" --repo "$GITHUB_WORKSPACE" --head HEAD \
             --coverage "$RUNNER_TEMP/dev-coverage/.coverage" --commit "$COMMIT" \
             --reused "$GITHUB_WORKSPACE/reused.json" --out "$GITHUB_WORKSPACE/reused-coverage/.coverage" \
             --captures "$RUNNER_TEMP/dev-coverage/js-coverage" --captures-out "$GITHUB_WORKSPACE/js-coverage"
@@ -1898,7 +1901,7 @@ jobs:
         run: |
           databases=(.coverage)
           if [[ -f reused-coverage/.coverage ]]; then databases+=(reused-coverage/.coverage); fi
-          python -m tests.coverage_check "${databases[@]}"
+          python -m scripts.coverage_check "${databases[@]}"
 
       - name: Upload coverage
         if: matrix.python-version == '3.12'
@@ -2830,7 +2833,7 @@ jobs:
         shell: bash
         run: &dep-manifest-check-shard-coverage |
           shopt -s nullglob
-          python -m tests.coverage_check .coverage-shards/coverage-3.12-*/.coverage .coverage-shards/coverage-3.12-*/reused-coverage/.coverage
+          python -m scripts.coverage_check .coverage-shards/coverage-3.12-*/.coverage .coverage-shards/coverage-3.12-*/reused-coverage/.coverage
           python -c 'import json, pathlib; [json.loads(line) for path in pathlib.Path(".coverage-shards").rglob("*.jsonl") for line in path.read_text().splitlines() if line.strip()]'
 
       - name: Download torn shard coverage again
