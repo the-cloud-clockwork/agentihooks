@@ -2478,11 +2478,13 @@ git push origin diffcheck/<name>
 gh workflow run writer-lock.yml --ref diffcheck/<name>
 ```
 
-The job is red with 4 failed and 15 passed.
-`test_a_unit_cannot_restore_write_bits_or_write_into_a_read_only_tree` fails on both parameters
-because `chmod`, the rewrite and the new file land in both trees where `EROFS` was expected, and
-`test_a_unit_with_read_only_trees_runs_inside_bwrap_with_each_tree_bound_read_only` fails on both
-parameters because the arguments no longer carry `--ro-bind`. Delete the branch after reading the run with `git push origin --delete diffcheck/<name>`.
+The job is red. `test_a_unit_cannot_restore_write_bits_or_write_into_a_read_only_tree` fails on
+both parameters because `chmod`, the rewrite and the new file land in both trees where `EROFS` was
+expected, and `test_a_unit_with_read_only_trees_runs_inside_bwrap_with_each_tree_bound_read_only`
+fails on both parameters because the arguments no longer carry `--ro-bind`. `run_static.run`
+builds its unit through the same `argv_for`, so the job's `test_run_static.py` bind tests,
+`test_the_step_runs_with_the_grader_and_base_trees_bound_read_only` and
+`test_a_step_cannot_write_into_the_grader_or_base_tree`, see the writable binds as well. Delete the branch after reading the run with `git push origin --delete diffcheck/<name>`.
 
 #### Guard tests
 
@@ -2507,9 +2509,9 @@ root nor bubblewrap and run in every unit shard. `tests/test_ci_writer_lock.py` 
   covered until the run step names its file.
 - The unit shards still skip the four real bubblewrap tests. This job is the only place they run
   in CI.
-- A pull request runs the job only when its diff names a path in `LAB_SANDBOX_INPUTS`. A change to a
-  module they import, such as `scripts.ci_mutation.runner`, which `Sandbox` runs units through, or
-  `scripts.ci_lab.static_gates`, does not select it.
+- A pull request runs the job only when its diff names a path in `LAB_SANDBOX_INPUTS`. A change to
+  a module the sandbox or its two runners import does not select it: for example
+  `scripts.ci_mutation.runner`, which `Sandbox` runs units through, or `scripts.ci_lab.static_gates`.
 - The job never runs in the merge queue or on a push to `dev`, so a merge group is not retested
   under real bubblewrap.
 
@@ -2527,8 +2529,9 @@ job:
   on `25a402b959` failed the 14 guard test cases before the job existed.
 - Planted fault, writable trees:
   [Writer lock run 44213673884](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/44213673884)
-  on a `diffcheck/` branch binding the trees with `--bind` was red with 4 failed and 15 passed:
-  `chmod`, the rewrite and the new file landed in both trees.
+  on a `diffcheck/` branch binding the trees with `--bind` was red. The job then ran
+  `tests/ci_lab/test_sandbox.py` alone: 4 failed and 15 passed, and `chmod`, the rewrite and the
+  new file landed in both trees.
 - Planted fault, no namespaces:
   [Writer lock run 44213944663](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/44213944663),
   with `user.max_user_namespaces=0` and no probe, skipped the real cases, and the run step failed
