@@ -108,7 +108,7 @@ def test_the_swarm_image_lock_pins_the_nats_extra_with_hashes():
     assert all(line.startswith("    --hash=sha256:") for line in hashes)
 
 
-def test_the_swarm_image_installs_the_herdr_client_the_worker_lock_pins():
+def test_the_swarm_image_installs_the_herdr_client_the_worker_lock_pins() -> None:
     root = Path(__file__).parents[1]
     dockerfile = (root / "Dockerfile").read_text()
     ignored = (root / ".dockerignore").read_text().splitlines()
