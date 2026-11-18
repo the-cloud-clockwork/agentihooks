@@ -1,4 +1,4 @@
-"""Every CI lab module and the CI test planner import from the shipped packages alone, as in a wheel built image."""
+"""Every CI lab module, the CI test planner and the branch coverage script import from the shipped packages alone."""
 
 import pkgutil
 import subprocess
@@ -11,6 +11,7 @@ import scripts.ci_lab
 
 pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[2]
+BRANCH_COVERAGE = ["scripts.ci_branch_coverage", "scripts.coverage_check", "scripts.reused_coverage"]
 WITHOUT_TESTS = """
 import importlib
 import sys
@@ -46,6 +47,12 @@ def test_every_lab_module_imports_without_the_tests_package() -> None:
     modules = _lab_modules()
     assert "scripts.ci_lab.scheduler" in modules
     result = _import_without_tests(modules)
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.feature("branch-coverage-wheel-imports")
+def test_the_branch_coverage_script_imports_without_the_tests_package() -> None:
+    result = _import_without_tests(BRANCH_COVERAGE)
     assert result.returncode == 0, result.stderr
 
 

@@ -9346,6 +9346,16 @@
       ]
     },
     {
+      "id": "branch-coverage-wheel-imports",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2659",
+      "behaviour": "The branch coverage script and the coverage check and reused coverage modules it runs import from the hooks, scripts and profiles packages the wheel ships, never from the tests package. The coverage check lives in scripts.coverage_check and the reused coverage filter in scripts.reused_coverage.",
+      "seam": "a fresh interpreter whose import system cannot find the tests package imports scripts.ci_branch_coverage, scripts.coverage_check and scripts.reused_coverage",
+      "tests": [
+        "tests/ci_lab/test_wheel_imports.py::test_the_branch_coverage_script_imports_without_the_tests_package"
+      ]
+    },
+    {
       "id": "lab-remote-in-workspaces",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/loop-remote-in-workspaces",
