@@ -23,6 +23,7 @@ from scripts.swarm import (
     idle,
     linked_issues,
     merge_queue,
+    outage,
     queue_exit,
     queue_record,
     stack,
@@ -66,6 +67,8 @@ DEQUEUED = (
 RECOVERED = "The swarm queued {url} again: its unmergeable state cleared on the unchanged green head."
 REQUEUE_FAILED = "The swarm could not queue {url} again for task {task} after a transient unmergeable state: {why}"
 GAVE_UP = "The swarm gave up queueing {url} again for task {task}: it stayed unmergeable or not green; reopened."
+GREEN_HOLD_MS = 20 * 60_000
+STALLED = "stayed green and unqueued for {minutes} minutes while the merge pass could not queue it"
 PROOF = (
     "The swarm merged {url}. This {kind} task stays open for its proof; the next engineer continues it from the "
     "handoff its engineer left."
@@ -322,9 +325,10 @@ def _advance(
         return _unmergeable(run, row, found, pull)
     if held["kind"] == RECOVER:
         return _recover(run, row, found)
+    stalled = _green_hold(run, row, found, pull)
+    if stalled:
+        return stalled
     if held["kind"] == "checks":
-        if pull.mergeable == "CONFLICTING":
-            return _reopen(run, row, found, CONFLICT)
         return _checks(run, row, found, pull)
     outcome = waits.merge_resolution(held, run.github, run.reread, run.now_ms - found["queued_at"] < waits.FRESH_MS)
     if not outcome:
@@ -342,6 +346,20 @@ def _hold(run: Pass, row: Mapping[str, Any], url: str, reason: str) -> list[str]
     """Log why the merge pass leaves task ``row`` as it is this pass, and return no action."""
     print(HELD.format(slug=run.slug, task=row["id"], url=url, reason=reason), file=sys.stderr)
     return []
+
+
+def _green_hold(run: Pass, row: dict[str, Any], found: dict[str, Any], pull: Any) -> list[str]:
+    """Reopen a released task whose pull request read green and unqueued for ``GREEN_HOLD_MS``, outage time left out,
+    while the merge pass could not queue it; a pull request reading otherwise restarts the hold. No action when the
+    hold is short or the reopen is refused, so the pass carries on."""
+    if pull.queued or pull.red or not pull.resolved or pull.draft:
+        found.pop("green_since", None)
+        return []
+    since = found.setdefault("green_since", run.now_ms)
+    held = run.now_ms - since - outage.paused_ms(run.slug, since, run.now_ms)
+    if held < GREEN_HOLD_MS:
+        return []
+    return _reopen(run, row, found, STALLED.format(minutes=held // 60_000))
 
 
 def _requeue(run, row, found):
@@ -366,6 +384,8 @@ def _requeue(run, row, found):
 
 
 def _checks(run: Pass, row: dict[str, Any], found: dict[str, Any], pull: Any) -> list[str]:
+    if pull.mergeable == "CONFLICTING":
+        return _reopen(run, row, found, CONFLICT)
     before = found["on"].get("head")
     seen: list[Any] = []
 
