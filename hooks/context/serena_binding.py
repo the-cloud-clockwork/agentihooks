@@ -10,8 +10,6 @@ from __future__ import annotations
 import subprocess
 from typing import Any
 
-from redis import RedisError
-
 from hooks import _redis
 from hooks.serena_router.binding import ROOT_ARG, BindingError, resolve
 
@@ -33,6 +31,8 @@ def record(session_id: str, agent_id: str, project: str) -> None:
     client = _redis.get_redis()
     if client is None:
         return
+    from redis import RedisError
+
     try:
         client.hset(_key(session_id), agent_id, str(root))
         client.expire(_key(session_id), TTL_SECONDS)
@@ -45,6 +45,8 @@ def root_for(session_id: str, agent_id: str) -> str:
     client = _redis.get_redis()
     if client is None:
         return ""
+    from redis import RedisError
+
     try:
         roots = client.hgetall(_key(session_id))
     except RedisError:

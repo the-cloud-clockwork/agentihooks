@@ -6,18 +6,19 @@ import json
 import subprocess
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, patch
 
-import fakeredis
 import pytest
-from redis import RedisError
 
 import hooks.context.serena_binding as serena_binding
 import hooks.hook_manager as hm
 from hooks._redis import redis_key
 from hooks.serena_router.binding import ROOT_ARG
 from hooks.targets import emitter
+
+if TYPE_CHECKING:
+    import fakeredis
 
 pytestmark = pytest.mark.unit
 
@@ -41,6 +42,8 @@ def repo(tmp_path: Path) -> dict[str, Path]:
 
 @pytest.fixture
 def store() -> Iterator[fakeredis.FakeRedis]:
+    import fakeredis
+
     client = fakeredis.FakeRedis(decode_responses=True)
     with patch("hooks._redis.get_redis", return_value=client):
         yield client
@@ -144,6 +147,8 @@ def test_without_redis_nothing_is_recorded_or_carried(repo: dict[str, Path]) -> 
 
 @pytest.mark.feature("serena-hook-carries-each-agent-activated-root")
 def test_a_redis_error_records_and_carries_nothing(repo: dict[str, Path]) -> None:
+    from redis import RedisError
+
     broken = MagicMock()
     broken.hset.side_effect = RedisError("down")
     broken.hgetall.side_effect = RedisError("down")
