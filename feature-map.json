@@ -5863,6 +5863,21 @@
       ]
     },
     {
+      "id": "worker-release-tag-moves-only-for-the-newest-published-release",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2631",
+      "behaviour": "Each release moves the worker image release tag at move time, inside the queued release only hive job, onto its own image unless a newer release has already published its worker version image, and pushes the release tag before the version tag, so an older release whose job finishes after a newer one leaves the tag on the newer; a newer release that is only tagged never holds the tag back, a registry error or a failed tag read fails before any tag moves, a prerelease never moves the tag, and the image job moves no tag from its checkout time newest flag.",
+      "seam": "docker/swarm-node/release.sh release tag move and the Swarm worker image hive job worker release step",
+      "tests": [
+        "tests/contracts/promotion/test_release_images.py::test_the_worker_release_tag_stays_on_the_newer_release_whichever_finishes_last",
+        "tests/contracts/promotion/test_release_images.py::test_a_worker_release_moves_the_release_tag_before_its_version_while_a_newer_release_is_only_tagged",
+        "tests/contracts/promotion/test_release_images.py::test_a_registry_error_on_a_newer_worker_release_fails_before_moving_any_tag",
+        "tests/contracts/promotion/test_release_images.py::test_a_failed_tag_read_fails_the_worker_release_before_moving_any_tag",
+        "tests/contracts/promotion/test_release_images.py::test_a_worker_prerelease_tags_only_its_version_without_reading_tags",
+        "tests/contracts/promotion/test_release_images.py::test_the_queued_hive_job_moves_the_worker_release_tag_and_the_image_job_moves_none"
+      ]
+    },
+    {
       "id": "hive-retire-absence",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1772",
