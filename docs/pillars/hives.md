@@ -1769,8 +1769,8 @@ member's credential may publish only for its own hive; a request naming another 
 starts the execution on that hive, occupies a seat, marks the task claimed (or back in `pr`) and returns the primed
 spawn task. A repeat from the same hive returns the same admission, so a retried launch keeps its agent; any other
 hive gets none. After a failed admit ask or launch, the spoke sends `reopen`, which returns an admitted task to
-`open` (see [When a launch fails](#when-a-launch-fails)). The hub answers these requests on a pool of eight threads and
-drops one that waited there as long as the hive waits for its answer, so an admission the hive gave up on never
+`open` (see [When a launch fails](#when-a-launch-fails)). The hub answers these requests on a pool of eight threads
+and drops one that waited there as long as the hive waits for its answer, so an admission the hive gave up on never
 claims the task; see
 [How the hub serves requests](../reference/swarm-bus-scope.md#how-the-hub-serves-requests).
 Unlike a tick launch, a hub admission scaffolds no task work folder on the hub. It resolves the task's continuation,
@@ -1818,7 +1818,8 @@ The spoke reads its claim in `spoke-work` after the failure and acts on it. Whil
 |---|---|---|---|
 | The `admit` ask gets no answer inside the 10,000 millisecond request wait | `asked`, owned by this hive; the launch slot in `spoke-pending` stays reserved | Nothing on this poll. The next poll asks `admit` again and receives the admission the hub kept | Nacked for `ack_wait_ms` |
 | The hub answers held: the hive is at its max agents, or another admission for the hive held its turn past the wait (`another admission for the hive is in progress`) | `ready`; the launch slot is freed | Nothing: the hub wrote no admission | Nacked for `ack_wait_ms`, so another hive may take it |
-| The `admit` ask fails another way: the hub answers with an error, or the hive cannot start its Serena router | `ready`; the launch slot is freed | `reopen` | Nacked for the backoff step |
+| The hub answers the `admit` ask with an error | `ready`; the launch slot is freed | `reopen` | Nacked for the backoff step |
+| The hive cannot start its Serena router after the hub admitted the offer | `ready`; the launch slot is freed | `reopen` | Nacked for the backoff step |
 | The runtime refuses the launch with `refused`, `ambiguous` or `unsupported` | `ready`; the launch slot is freed | `failed` with the harness and the runtime's detail, then `reopen` | Nacked for the backoff step |
 | The runtime answers `unavailable` | `ready`; the launch slot is freed | `reopen` | Nacked for the backoff step |
 | An error after the spoke wrote the launch intent | `launching`, owned by this hive, with the agent's name | Nothing on this poll; the next poll's recovery ends the agent and sends `reopen` (see [Recovering a launch the spoke left](#recovering-a-launch-the-spoke-left)) | Nacked for the backoff step |
