@@ -309,6 +309,16 @@
       ]
     },
     {
+      "id": "chart-checks-refuse-a-grader-that-ignores-root",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2539",
+      "behaviour": "Each Semgrep chart step first runs the protected grader's copy of its script over an empty tree and refuses, red, unless that copy reports no chart found, so a grader copy that ignores --root never grades the base charts in place of the head and a head carrying a broken chart never passes on the base's verdict.",
+      "seam": "The Semgrep chart step run text, executed over a grader copy that ignores its arguments, prints a clean grading summary and exits 0",
+      "tests": [
+        "tests/test_ci_grader_gates.py::test_a_chart_check_refuses_a_grader_copy_that_ignores_the_root_instead_of_grading_the_base"
+      ]
+    },
+    {
       "id": "hub-started-clears-launch-assignment",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-seat-assignment-continuity",
