@@ -2481,9 +2481,8 @@ At admission the hub looks for a copy in this order and takes the first one it f
 
 1. The task's own key on the hive the work folder key names.
 2. The task's own key on the hive of the task's previous agent. That is the agent of the task started last, other
-   than the one being admitted, that the swarm still lists. An agent is retired when the swarm drops its record:
-   its executions end and it leaves the list. This covers a task last launched
-   before the hub recorded launch hives.
+   than the one being admitted, that the swarm still lists. An agent is retired when the swarm drops its record: its
+   executions end and it leaves the list. This covers a task last launched before the hub recorded launch hives.
 
 A missing hive id, because the work folder key is absent or no previous agent is listed, is skipped rather than read
 as an empty name. `steering.md` is always rebuilt from the ledger task and replaces any steering in the copy. It holds
