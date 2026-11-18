@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from scripts.inbox.store import InboxError, InboxStore
-from scripts.swarm import merge_queue, queue_record, ready, staged_compatibility
+from scripts.swarm import lab_control, merge_queue, queue_record, ready, staged_compatibility
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import RedisStore, SwarmError
 
@@ -171,10 +171,21 @@ def apply(
 
 
 def reorder(
-    store: RedisStore, slug: str, url: str, sender: str, tasks: list[dict], journal: queue_record.Journal, ahead=()
+    store: RedisStore,
+    slug: str,
+    url: str,
+    sender: str,
+    tasks: list[dict],
+    journal: queue_record.Journal,
+    ahead: Collection[str] = (),
 ) -> dict:
+    lab_url = store.config(slug).lab_url
     result = merge_queue.prioritize(
-        url, journal=journal, displaced=Displaced(store, slug), **({"ahead": ahead} if ahead else {})
+        url,
+        journal=journal,
+        displaced=Displaced(store, slug),
+        lab=lambda head: lab_control.acknowledge(lab_url, head, os.environ),
+        **({"ahead": ahead} if ahead else {}),
     )
     for task in owners(tasks, result["displaced"]):
         InboxStore(store.redis).send(
