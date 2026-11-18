@@ -1759,12 +1759,13 @@ def _contents(suite: Suite, head: str) -> dict[str, bytes]:
 def _mutation_gates(
     suite: Suite, head: str, changes: dict[str, list[int]], files: list[str], covering: dict[str, list[str]]
 ) -> dict[str, tuple[Unit, ...]]:
-    keys = expand_tests.fingerprints(SUITE_MANIFEST, _contents(suite, head))
+    contents = _contents(suite, head)
+    keys = expand_tests.fingerprints(SUITE_MANIFEST, contents)
     checkout = suite.repo.parent / f"expected-{head}"
     _git(suite.repo, "worktree", "add", "-q", "--detach", str(checkout), head)
     stats = expand_mutation.stats_units(checkout, files, executors.OPTIONS)
     covered = {name: {test: keys[test] for test in tests} for name, tests in covering.items()}
-    mutants = expand_mutation.mutant_units(checkout, changes, covered)
+    mutants = expand_mutation.mutant_units(checkout, changes, covered, expand_tests.unlisted(SUITE_MANIFEST, contents))
     _git(suite.repo, "worktree", "remove", "--force", str(checkout))
     return {name: units for name, units in {"mutation-stats": stats, "mutation": mutants}.items() if units}
 
@@ -1886,9 +1887,9 @@ def test_a_promotion_or_backfill_head_names_the_mutants_of_each_changed_function
     checkouts: list[tuple[Path, str]] = []
     build = expand_mutation.mutant_units
 
-    def spy(root: Path, changes: Any, covering: Any) -> tuple[Unit, ...]:
+    def spy(root: Path, changes: Any, covering: Any, unlisted: Any) -> tuple[Unit, ...]:
         checkouts.append((root.parent, (root / "scripts/alpha.py").read_text()))
-        return build(root, changes, covering)
+        return build(root, changes, covering, unlisted)
 
     monkeypatch.setattr(expand_mutation, "mutant_units", spy)
     found = Port(SUITE_MANIFEST).expander(tmp_path).expand(suite.request(tier, head))

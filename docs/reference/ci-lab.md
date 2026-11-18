@@ -1289,7 +1289,10 @@ temporary worktree of the head cut from the mirror store and removed after expan
 The changed lines are `scripts.ci_mutation.scope.changes_since` of the base and head, the lines the
 pull request mutation gate grades. `expand_mutation.covering` maps each function to the fingerprint
 of every dependency manifest test that ran it or a function nested in it, and those fingerprints
-enter the mutant key, so a changed covering test rekeys the unit. The stats units warm the stats
+enter the mutant key, so a changed covering test rekeys the unit. The manifest only names the tests
+of the base, while the mutant runner runs every test module of the head, so `expand_tests.unlisted`
+hashes each test module of the head that holds no manifest test and those hashes enter every mutant
+key too: a head that adds or edits such a module rekeys its units. The stats units warm the stats
 cache the worker's mutant runner reads before it runs the mutants.
 
 | Head | Mutation jobs |

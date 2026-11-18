@@ -1,4 +1,5 @@
 import copy
+import hashlib
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -215,6 +216,16 @@ def test_fingerprints_are_golden() -> None:
     assert expand_tests.fingerprints(manifest, tree) == {
         "tests/test_alpha.py::test_first": "50453d70f855a2c09ef48a172dee6f277fb53e9d727059b5eb3ff0ebfca4ea01",
         "tests/test_alpha.py::test_second": "9107747a4089126a323cbfc2a542aa9a339ad2254648c5c96fa651fb32e1a19f",
+    }
+
+
+@pytest.mark.feature("lab-mutant-unit-unlisted-tests")
+def test_unlisted_hashes_each_test_module_that_holds_no_manifest_test() -> None:
+    added = {"tests/test_new.py": b"def test_new():\n    pass\n", "tests/inner/test_deep.py": b""}
+    others = {"tests/test_data.json": b"{}\n", "scripts/test_tool.py": b"TOOL = 1\n"}
+    tree = {path: text.encode() for path, text in FILES.items()} | added | others
+    assert expand_tests.unlisted(MANIFEST, tree) == {
+        path: hashlib.sha256(text).hexdigest() for path, text in added.items()
     }
 
 

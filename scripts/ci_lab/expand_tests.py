@@ -132,6 +132,16 @@ def fingerprints(
     return keys
 
 
+def unlisted(manifest: Mapping[str, Any], tree: Mapping[str, bytes]) -> dict[str, str]:
+    """Return the sha256 of every test module of the tree that holds no manifest test."""
+    listed = {test.partition("::")[0] for test in manifest["tests"]}
+    return {
+        path: hashlib.sha256(content).hexdigest()
+        for path, content in tree.items()
+        if _test_module(path) and path not in listed
+    }
+
+
 def _parts(tests: list[str], seconds: Mapping[str, float], target: float) -> list[tuple[str, ...]]:
     """Return the fewest longest first balanced parts of one file's tests that each fit the target."""
     ordered = sorted(tests, key=lambda test: -seconds[test])

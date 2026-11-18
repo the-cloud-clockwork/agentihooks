@@ -1101,7 +1101,7 @@ class MirrorExpander:
             if not changes:
                 return {}
             covering = expand_mutation.covering(root, manifest, expand_tests.fingerprints(manifest, contents), changes)
-            mutants = expand_mutation.mutant_units(root, changes, covering)
+            mutants = expand_mutation.mutant_units(root, changes, covering, expand_tests.unlisted(manifest, contents))
             owners = {executors.function_of(unit.members[0]) for unit in mutants}
             tests = {test.partition("::")[0] for name in owners for test in covering.get(name, {})}
             files = sorted(path for path in tests if (root / path).is_file())
