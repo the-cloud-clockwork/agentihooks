@@ -66,12 +66,11 @@ def admit_legacy(
         previous = store.execution_occupants(slug).get(agent.seat)
         from scripts.swarm.commands import hive_id
 
-        hive = hive_id()
         started = store.start_execution(
-            slug, replace(agent, hive=hive, runtime_target=target), previous.execution_id if previous else ""
+            slug, replace(agent, hive=hive_id(), runtime_target=target), previous.execution_id if previous else ""
         )
-        ledger_workspace.launched_on(store, slug, started.task, hive)
-        return started
     except Exception as exc:
         runtime.retire(agent)
         raise SpawnError(str(exc), pane_id=agent.pane_id) from exc
+    ledger_workspace.launched_on(store, slug, started.task, started.hive)
+    return started

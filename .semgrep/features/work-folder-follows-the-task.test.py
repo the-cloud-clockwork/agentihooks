@@ -165,13 +165,12 @@ def admit_legacy(store, slug, agent, runtime, table=None):
 def admit_legacy(store, slug, agent, runtime, table=None):
     try:
         target = process.launch_target(pid, process.local_namespace(), (table or processes)())
-        hive = hive_id()
-        started = store.start_execution(slug, replace(agent, hive=hive, runtime_target=target), "")
-        ledger_workspace.launched_on(store, slug, started.task, hive)
-        return started
+        started = store.start_execution(slug, replace(agent, hive=hive_id(), runtime_target=target), "")
     except Exception as exc:
         runtime.retire(agent)
         raise SpawnError(str(exc), pane_id=agent.pane_id) from exc
+    ledger_workspace.launched_on(store, slug, started.task, started.hive)
+    return started
 
 
 # ruleid: feature-work-folder-follows-the-task

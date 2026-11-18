@@ -22,6 +22,7 @@ from scripts.swarm import readiness, run_window, successor_fill
 from scripts.swarm.execution import TERMINAL_STATES
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError, connect
+from scripts.swarm_ledger import ledger_workspace
 from scripts.swarm_ledger.ledger_workspace import WORK_FOLDER
 
 ADMITTED = "spoke-admission"
@@ -361,8 +362,6 @@ class Admission:
         """The files the hive writes into the task's work folder before the launch: steering from the task and the
         latest task copy synced by the hive that last launched the task, else the one synced by the hive of its
         previous agent, so a predecessor retired before this admission still hands over its lines."""
-        from scripts.swarm_ledger import ledger_workspace
-
         earlier = [agent for agent in self.store.agents(slug) if agent.task == task["id"] and agent.name != name]
         previous = max(earlier, key=lambda agent: agent.started_at, default=None)
         redis = cast(Any, self.store).redis
@@ -492,8 +491,6 @@ class Admission:
         placed = {field: launch[field] for field in account_slots.LAUNCH_PLACEMENT if field in launch}
         if not self.store.execution_registry.set_launch(slug, occupant.execution_id, {**decision, **placed}):
             return False
-        from scripts.swarm_ledger import ledger_workspace
-
         ledger_workspace.launched_on(self.store, slug, request["task"], request["hive"])
         cast(Any, self.store).redis.hdel(self.store.key(slug, "launch-assignments"), request["task"])
         return True

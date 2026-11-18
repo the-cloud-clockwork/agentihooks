@@ -105,6 +105,7 @@ def test_the_work_folder_host_is_the_host_target_else_the_hive_on_the_record(rem
     assert named(replace(remote.agent, runtime_target={}, hive="controller")) == ""
     assert named(replace(remote.agent, runtime_target={"host_id": "controller"}, hive="elsewhere")) == ""
     assert named(replace(remote.agent, runtime_target={}, hive="")) == ""
+    assert named(replace(remote.agent, runtime_backend="kubernetes")) == HIVE
 
 
 def test_a_remote_claude_worker_is_seen_live_from_its_hive_report(remote):
