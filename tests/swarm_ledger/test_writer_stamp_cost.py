@@ -155,6 +155,15 @@ def test_stamp_records_after_a_scalar_stamps_value_are_all_encoded_fresh() -> No
 
 
 @pytest.mark.feature("ledger-write-stamp-cost")
+def test_stamp_records_after_a_stamps_leaf_holding_a_mapping_are_all_encoded_fresh() -> None:
+    records = {"a": {"rev": 1}, "b": {"rev": 1}}
+    rebuilt = fragments.stamps(dict(records), Fragment(records))
+    assert mapped(rebuilt) == records and isinstance(rebuilt.parts, dict)
+    assert list(cast(dict[str, Fragment], rebuilt.parts)) == ["a", "b"]
+    assert child(rebuilt, "a").signature is not None
+
+
+@pytest.mark.feature("ledger-write-stamp-cost")
 def test_replaced_names_the_changed_and_added_keys_or_none_when_the_stored_order_moved() -> None:
     first, second = {"rev": 1}, {"rev": 1}
     old = {"a": first, "b": second}

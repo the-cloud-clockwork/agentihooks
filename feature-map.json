@@ -1702,6 +1702,7 @@
         "tests/swarm_ledger/test_writer_stamp_cost.py::test_reordered_stamp_records_store_the_new_order",
         "tests/swarm_ledger/test_writer_stamp_cost.py::test_added_and_dropped_stamp_records_build_a_new_stamps_fragment",
         "tests/swarm_ledger/test_writer_stamp_cost.py::test_stamp_records_after_a_scalar_stamps_value_are_all_encoded_fresh",
+        "tests/swarm_ledger/test_writer_stamp_cost.py::test_stamp_records_after_a_stamps_leaf_holding_a_mapping_are_all_encoded_fresh",
         "tests/swarm_ledger/test_writer_stamp_cost.py::test_replaced_names_the_changed_and_added_keys_or_none_when_the_stored_order_moved",
         "tests/swarm_ledger/test_writer_stamp_cost.py::test_a_write_leaves_the_stored_fragments_and_the_state_it_started_from_unchanged",
         "tests/swarm_ledger/test_writer_stamp_cost.py::test_a_write_that_reorders_the_ledger_and_its_stamp_records_stores_the_new_order_in_both_copies"
