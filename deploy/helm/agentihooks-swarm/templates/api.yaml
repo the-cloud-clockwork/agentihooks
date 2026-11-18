@@ -93,7 +93,7 @@ spec:
             - name: LEDGER_API_HOST
               value: "0.0.0.0"
             - name: LEDGER_API_PORT
-              value: {{ $port | quote }}
+              value: {{ .Values.ledger.port | quote }}
             - name: LEDGER_DIR
               value: /data
             {{- if $tls }}
