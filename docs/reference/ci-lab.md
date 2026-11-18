@@ -19,14 +19,15 @@ worker's PriorityClass is a cluster object outside that module;
 | Command | Module form | What it does today |
 |---|---|---|
 | `agentihooks ci-lab-scheduler --self-test` | `python -m scripts.ci_lab scheduler --self-test` | Checks the scheduler contract offline and prints it as JSON |
+| `python -m scripts.ci_lab scheduler [--interval S] [--passes N]` | same | Runs the scheduler service: the lease API on port 8800 and one grading pass every interval (2 seconds), forever unless `--passes` is set |
 | `agentihooks ci-lab-worker --self-test` | `python -m scripts.ci_lab worker --self-test` | Refuses any GitHub App variable, checks the worker contract offline and prints it as JSON |
 
 The self tests make no network, Redis, object store or GitHub calls. They exit 0 when the
 contract holds and 1 with the reason on standard error when it does not. A self test fails when
 a metric name is not a valid Prometheus name starting with `ci_lab_`, a port repeats or falls
-outside 1 to 65535, or the worker environment grants `GITHUB_APP_`. `-h` prints usage; any
-other start without `--self-test` exits 2, because the service loops come with the scheduler and
-worker tasks.
+outside 1 to 65535, or the worker environment grants `GITHUB_APP_`. `-h` prints usage. The
+scheduler without `--self-test` runs its service (see [Scheduler loop](#scheduler-loop)); any other
+worker start without `--self-test` exits 2 until the worker loop lands.
 
 ## Environment
 
@@ -39,7 +40,11 @@ worker tasks.
 | `CI_LAB_RUNTIME_CONFIG` | yes | no | Path of the mounted runtime config; `python -m scripts.ci_lab runtime <path>` validates it |
 | `CI_LAB_SCHEDULER_URL` | no | yes | Base address of the scheduler lease API |
 | `CI_LAB_SLOTS` | no | yes | Number of units the worker runs at once |
-| `CI_LAB_GIT_MIRROR` | no | yes | Path of the shared git mirror the worker cuts worktrees from |
+| `CI_LAB_GIT_MIRROR` | yes | yes | Path of the shared git mirror the worker cuts worktrees from and the scheduler borrows objects from |
+| `CI_LAB_MINIO_ENDPOINT`, `CI_LAB_MINIO_BUCKET`, `CI_LAB_MINIO_ACCESS_KEY`, `CI_LAB_MINIO_SECRET_KEY` | yes | no | The object store names the scheduler reads |
+| `CI_LAB_MIRROR_STORE` | yes | no | Folder of the scheduler's private git stores, one per repository, that borrow the mirror's objects |
+| `CI_LAB_REPOSITORY` | yes | no | Repository URL whose dev runner trust list admits head actors |
+| `CI_LAB_IMAGE` | yes | no | Worker image name keyed into static unit keys; empty when unset |
 | `UV_CACHE_DIR` | no | yes | Shared uv cache for virtual environments |
 
 A worker started with any `GITHUB_APP_*` variable in its environment refuses to start. It exits
@@ -689,6 +694,56 @@ key; the builders are pure and read no file, clock or network.
 - The expander marks a unit that reads the clock or the network nondeterministic, and the store
   never caches its verdict, so no builder keys one.
 
+## Scheduler loop
+
+`scripts.ci_lab.scheduler.Scheduler.tick(now_ms)` runs one grading pass:
+
+1. Intake reads new heads from the `ci.lab.head.>` lab heads stream and admits only actors on the
+   runner trust list of the repository's dev branch. A head on the fix branch of any swarm in
+   panic grades in the hotfix class.
+2. Each head waits in its lane (repository, branch and class) for the quiet window, 30 seconds by
+   default; a newer head of the lane restarts it and a hotfix waits for none.
+3. Expansion reads the grader's test workflow and input key registry and the head and base trees
+   from the git mirror with `git ls-tree` and `git show`, never a checkout, and keys one static
+   unit per gate step.
+4. The verdict store answers what it can. A newer head of the lane drops the older head's pending
+   units, carries its leased and finished jobs and cancels its check runs. A push grade of a tree a
+   merge group grade passed carries that grade's units for every gate both grades hold: the unit
+   suite, since the queue rules require lint, type-gate and semgrep to be skipped. The rest is enqueued.
+5. Expired leases requeue while `lab.retry.lost` of the repository's dev `delivery.yaml` allows (once by
+   default); the next loss is `lost`.
+6. Finished jobs are collected: a graded outcome with an uploaded report becomes a verdict in the
+   store; `lost`, `crash` and `cannot_run` stay out of it and make their grade red.
+7. Check runs move `queued` on receipt, `in_progress` on the first unit a worker starts and
+   `completed` on the last, one per gate with units and `required` for the whole grade. A completed
+   check run never moves again.
+
+Expansion frames a head by its class (`scripts.ci_lab.scheduler.frame`): a pull request or hotfix grade
+keeps the lab gates the pull request rules require and names every other required job as a gate without
+units, with no test scope and no mutation; a merge group grade does the same for the queue suite; a
+promotion or backfill grade keeps every lab gate. A gate without units passes, so a grade turns red only
+through what the lab grades.
+
+A gate passes when every unit passed. The `required` conclusion is
+`scripts.ci_lab.scheduler.fold`, the rules of the `Gate — Required` step of the test workflow over
+the gates as the needs of a run of the grade's class: pull request and hotfix grades fold as
+`pull_request`, queue grades as `merge_group`, promotion as `push` and backfill as
+`workflow_dispatch`. `tests/fixtures/ci_lab/gate_required.json` records the step's verdict on cases
+built from the needs of real runs; one test holds `fold` to every case and another holds the cases
+to today's step.
+
+A grade's state is one JSON document at `agentihooks-ci:grade:<run>`, where `<run>` is the grade
+key of the repository, head, base, class and grader revision. Live grades sit in
+`agentihooks-ci:grades`, held heads in `agentihooks-ci:waiting`, a lane's latest run at
+`agentihooks-ci:lane:<repository>|<lane>|<class>` and a passing merge group grade at
+`agentihooks-ci:tree:<repository>|<tree>`. A rerequested check run grades the head again under
+`<run>-<now_ms>`, bypassing negative verdicts in the store.
+
+Known limits: a lab head event carries no branch yet, so a head's lane is its own sha and a newer
+head supersedes nothing until intake records the branch; expansion keys static gates only, so the
+jobs the lab does not run yet pass by their frame and a push grade folds only the static gates; a
+rerequested grade reuses the finished jobs of its own head.
+
 ## Verdict store
 
 `scripts.ci_lab.store.Store` keeps one verdict per unit key, the key the
@@ -700,7 +755,7 @@ verdict lives in two places:
   objects with `reindex`.
 
 The scheduler environment names the Redis and object store the lab uses, `CI_LAB_REDIS_URL` and
-`CI_LAB_MINIO_*` (see [Environment](#environment)). No service builds a `Store` from them yet, so a
+`CI_LAB_MINIO_*` (see [Environment](#environment)). The scheduler service builds its `Store` from them; any other
 caller constructs the Redis client and the object backend and passes both in, as in
 [Use the store](#use-the-store).
 
@@ -1113,3 +1168,74 @@ refused `lab.retry` blocks.
 | `DeliveryError` naming `lab.retry` | A count is negative, not an integer, a boolean, or the block holds another key or is not a mapping | Match the message to the error table in [Configure the counts](#configure-the-counts) |
 | `TypeError` from `retry.policy` | The block was not validated and holds an unknown key | Read the block with `delivery.lab(root)` first |
 | Changing `lab.retry.lost` leaves lease requeues unchanged | Lease reaping reads `leases.REQUEUES`, not `lab.retry` | See [What reaches the policy today](#what-reaches-the-policy-today) |
+
+## Shadow comparison
+
+`scripts.ci_lab.shadow` compares the lab's shadow verdicts with GitHub Actions, one row per gate
+and head. `Shadow.observe(payload)` takes each `check_run.completed` delivery: a check run from the
+`github-actions` app gives the Actions verdict of the gate its job name maps to, and a
+`lab-shadow/<gate>` check run from the lab's own GitHub App gives the lab verdict and the grader
+revision its summary names. `Sources(static, lab_app)` names that App's slug; a `lab-shadow/` run
+from any other app, a workflow token included, is ignored. Its caller observes deliveries one at a
+time, from one scheduler once a scheduler feeds it. Until then the recorder is a library with no
+live caller.
+
+### Gates
+
+| Check run name | Gate |
+|---|---|
+| `unit*`, such as `unit-selected (3.12, 1)` | `tests` |
+| `mutation*`, such as `mutation-stats` | `mutation` |
+| A static job, such as `lint`, `type-gate (3.12)` or `semgrep / scan` | its gate id: `lint`, `type-gate`, `semgrep/scan` |
+| A static step on the lab side, such as `lab-shadow/lint/lint-check` | the gate id of its job, `lint` |
+| Anything else | listed in `agentihooks-ci:shadow-unmapped` |
+
+The matrix suffix in parentheses and the ` / ` of a reusable workflow job drop before the match;
+`static_jobs(root)` returns the static gate ids discovered from the workflow tree. A success is a
+pass, a failure or a timeout is a fail, and every other conclusion carries no verdict, so a
+cancelled or skipped rerun leaves the earlier verdict of its check run in place. Each side folds
+its check runs: a gate fails on a head when any of its check runs failed, and a rerun with a
+verdict replaces the run it repeats. A row is recorded on every delivery once both sides hold a
+verdict, so a head whose shards land one by one can turn into a mismatch and back; the counter
+counts each turn into a mismatch, and the report reads the row as it stands.
+
+### Rows
+
+Once a gate and head hold both verdicts, `Shadow.record(head, gate, lab_verdict, actions_verdict,
+grader)` writes:
+
+| Where | What |
+|---|---|
+| Redis `agentihooks-ci:shadow:<gate>:<head>` | A hash with one `lab:<check run>` or `github-actions:<check run>` field per check run, and `head`, `gate`, `grader`, `lab_verdict`, `actions_verdict`, `mismatch` (`0` or `1`) |
+| `lab/shadow/<gate>/<head>/<lab>-<actions>.json` | The row, written once per verdict pair |
+| ClickHouse `swarm.lab_shadow` | One row per gate, head and verdict pair through the metrics outbox |
+| `ci_lab_verdict_mismatch_total{gate}` | Plus one each time a gate and head turn into a mismatch |
+
+### Report
+
+```bash
+python -m scripts.ci_lab shadow report --since "$GRADER_REVISION" --repo . --redis "$CI_LAB_REDIS_URL"
+```
+
+`--redis` defaults to `CI_LAB_REDIS_URL` and `--repo` to the current directory, a git checkout
+that holds the grader revisions. A `--since` revision that names no commit in `--repo` exits 2.
+The report counts the rows whose grader revision is the given one or descends from it:
+
+```text
+since 5c6db6a99a1b
+heads compared 2
+gate lint compared 1 mismatches 1
+gate tests compared 2 mismatches 0
+unmapped docs
+```
+
+### Troubleshooting
+
+| Symptom | Cause | Check |
+|---|---|---|
+| A gate never appears in the report | Only one side has a verdict for it, or its check runs were skipped or cancelled | `HGETALL agentihooks-ci:shadow:<gate>:<head>` shows which side is missing |
+| A job you expect to compare is listed unmapped | Its name matches no gate rule, or the static job is not in the workflow tree the recorder read | `python -m scripts.ci_lab.static_gates` lists the static jobs |
+| A row is left out of a report since a revision | Its grader revision does not descend from that revision in `--repo`, or is not fetched there | `git merge-base --is-ancestor <since> <grader>` in that checkout |
+| `error: --redis or CI_LAB_REDIS_URL names the lab Redis` | Neither the flag nor the variable is set | Pass `--redis` or export `CI_LAB_REDIS_URL` |
+| `error: --since <revision> names no commit in <repo>` | The revision is mistyped or not fetched into `--repo`, or `--repo` is no git checkout | `git -C <repo> rev-parse --git-dir` succeeds; `git -C <repo> fetch origin dev`, then `git -C <repo> cat-file -t <revision>` prints `commit` |
+| Lab verdicts never land although `lab-shadow/` check runs exist | The runs come from an app other than `Sources.lab_app` | The check run's `app.slug` in the delivery |
