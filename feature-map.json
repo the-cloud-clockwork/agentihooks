@@ -7728,6 +7728,20 @@
       ]
     },
     {
+      "id": "repeated-subject-notices-pass-the-seen-claim",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2574",
+      "behaviour": "Stall watch alerts, overrun notices and preempt asks that repeat for one task keep reaching their recipient through the seen claim: a stall alert's ref names its task, case, stall start and action, so a new stall of the task and a reopen after an alert on the same stall reach the master while a repeat of a stall the master already answered is not shown again; an overrun notice's ref ends with the overrunning agent's start, so each agent that overruns the task reaches the master; and a preempt ask's ref ends with its ask time, so a holder asked again for the same waiting task reads the new ask.",
+      "seam": "scripts.swarm.stall_watch.stall_pass alerting on a task that stalls again or is reopened, scripts.swarm.overrun.overrun_pass reporting a successor that overruns the same task and scripts.swarm.preempt.step asking the same holder again for one waiting task, each delivered by scripts.inbox.seen.claim",
+      "tests": [
+        "tests/swarm/test_stall_watch.py::test_each_stall_of_a_task_passes_the_seen_claim",
+        "tests/swarm/test_stall_watch.py::test_a_reopen_after_an_alert_on_the_same_stall_passes_the_seen_claim",
+        "tests/swarm/test_stall_watch.py::test_the_same_stall_answered_once_is_not_shown_again",
+        "tests/swarm/test_overrun.py::test_each_agent_overrun_on_one_task_passes_the_seen_claim",
+        "tests/swarm/test_preempt.py::test_each_ask_for_one_waiting_task_passes_the_seen_claim"
+      ]
+    },
+    {
       "id": "hive-create-name-reservation",
       "origin": "inventory",
       "behaviour": "A real hive create run reserves its chosen name in Redis with SET NX and an expiry before the manifests pull request opens, skips or refuses a name another run reserved, an unnamed create skips it for the next free name and an explicit --name is refused, reclaims its own reservation on resume until its pull request exists, releases it by compare and delete on failure or completion while leaving a reservation another run took, and a dry run reserves nothing.",
