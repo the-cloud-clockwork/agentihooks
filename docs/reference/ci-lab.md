@@ -1242,3 +1242,222 @@ unmapped docs
 | `error: --redis or CI_LAB_REDIS_URL names the lab Redis` | Neither the flag nor the variable is set | Pass `--redis` or export `CI_LAB_REDIS_URL` |
 | `error: --since <revision> names no commit in <repo>` | The revision is mistyped or not fetched into `--repo`, or `--repo` is no git checkout | `git -C <repo> rev-parse --git-dir` succeeds; `git -C <repo> fetch origin dev`, then `git -C <repo> cat-file -t <revision>` prints `commit` |
 | Lab verdicts never land although `lab-shadow/` check runs exist | The runs come from an app other than `Sources.lab_app` | The check run's `app.slug` in the delivery |
+
+## Unit sandbox
+
+`scripts.ci_lab.sandbox.Sandbox` runs each lab unit. The static gate executor,
+`scripts.ci_lab.run_static.run`, runs one gate step in it, and the run tests engine,
+`scripts.ci_lab.run_tests.run`, runs each test batch in it. Every run gets:
+
+- A private run folder under the sandbox root, made with `tempfile.mkdtemp`. It holds `home`,
+  `tmp` and `runtime`, each mode `0700`, and the combined standard output and error in `log.txt`.
+  The sandbox does not delete the folder; the caller removes it.
+- An environment cleared with `env -i` and rebuilt from the caller's whitelist and the private
+  variables. A private variable replaces a whitelisted variable of the same name.
+- A port range from its `PortAllocator`, given back when the run ends.
+- No network unless the caller passes `net=True`.
+- Its own session. A timeout sends `SIGKILL` to the whole process group, and the outcome's code is
+  `None`.
+
+| Variable | Value |
+|---|---|
+| `HOME` | `<run folder>/home` |
+| `TMPDIR` | `<run folder>/tmp` |
+| `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME` | `.config`, `.cache`, `.local/share` and `.local/state` under `HOME` |
+| `XDG_RUNTIME_DIR` | `<run folder>/runtime` |
+| `TZ`, `LANG`, `CI`, `PYTHONDONTWRITEBYTECODE` | `UTC`, `C.UTF-8`, `true`, `1` |
+| `CI_LAB_PORT_FIRST`, `CI_LAB_PORT_LAST` | The first and last port of the unit's range |
+
+The private folders are environment variables only. The host filesystem stays shared through the
+root bind, and only the read only trees are protected.
+
+### Read only trees
+
+`Sandbox(..., readonly=(tree, ...))` takes the trees to protect. Pass absolute paths: `Sandbox`
+does not check them, and no test covers a relative tree. Inside bubblewrap,
+`scripts.ci_lab.sandbox.argv_for` binds each tree read only with `--ro-bind`, after the
+`--dev-bind / /` root bind, so the read only bind covers the writable root at that path. Under a
+read only tree a unit cannot create a file or rewrite one, and it cannot restore a write bit with
+`chmod`. Each attempt fails with `EROFS`, which the shell prints as `Read-only file system`.
+Every other path stays writable, including the unit's working folder.
+
+For a static gate step with the grader tree at `/srv/ci-lab/grader` and the base tree at
+`/srv/ci-lab/base`, the unit runs under:
+
+```text
+env -i <NAME=value ...> /usr/bin/bwrap --dev-bind / / \
+  --ro-bind /srv/ci-lab/grader /srv/ci-lab/grader \
+  --ro-bind /srv/ci-lab/base /srv/ci-lab/base \
+  --unshare-net --die-with-parent -- \
+  bash --noprofile --norc -eo pipefail -c '<the step run>'
+```
+
+The binds follow the order of `readonly`, and the static gate executor passes the grader tree
+first. `--unshare-net` follows the binds when the unit has no network. A unit runs inside
+bubblewrap whenever it needs network isolation or holds a read only tree:
+
+| `net` | Read only trees | bubblewrap | Network inside the unit |
+|---|---|---|---|
+| `False` | none | required | none: only loopback in a new namespace |
+| `False` | one or more | required | none |
+| `True` | none | not used; the unit runs under `env -i` only | the host network |
+| `True` | one or more | required | the host network |
+
+When bubblewrap is required and `bwrap` is not on `PATH`, `Sandbox.run` raises `CannotRun`
+before starting anything. `CannotRun` means the unit cannot run on this worker and its verdict is
+red; `run_static.run` and `run_tests.run` do not catch it, so their caller records that red
+verdict.
+
+| Unit | `CannotRun` message |
+|---|---|
+| With read only trees, with or without network | `bwrap is not installed, so a unit with read only trees cannot run` |
+| Without network and without read only trees | `bwrap is not installed, so a unit without network cannot run` |
+
+### Which units get read only trees
+
+| Runner | Runs from | Read only trees | Network |
+|---|---|---|---|
+| `run_static.run(gate, head_tree, base_tree, grader_tree, settings)` | The head tree | The grader tree and the base tree | Never |
+| `run_tests.run(batch, tree, venv, slots, lab)` | The tree the batch runs from | None | `lab.net` |
+
+`run_static.run` prepares the step the way the workflow runs it:
+
+- `RUNNER_TEMP` is a fresh folder under `settings.root`. Its `grader` and `base` entries are
+  symlinks to the real tree paths, and it holds the empty `GITHUB_STEP_SUMMARY` file.
+- `GITHUB_WORKSPACE` and the working folder are the head tree.
+- `PATH` is `settings.venv/bin` followed by `/bin:/usr/bin`. `settings.whitelist` and the step's
+  own `env` values, with their `${{ }}` expressions read from `settings.context`, come after it
+  and can replace it. Neither can replace `RUNNER_TEMP`, `GITHUB_WORKSPACE` or
+  `GITHUB_STEP_SUMMARY`.
+
+The bind applies to the real tree paths, so a write through `$RUNNER_TEMP/grader/...` or
+`$RUNNER_TEMP/base/...` is refused as well. A gate step can therefore read the grader's scripts
+and the base files but cannot rewrite the grader that grades it, or the base it compares against.
+It can still write into the head tree, its step summary and its private folders.
+
+Limitations:
+
+- Test units hold no read only trees: `run_tests` builds its `Sandbox` without `readonly` and
+  receives no grader or base tree.
+- `RUNNER_TEMP` is writable, so a step can delete or replace its own `grader` or `base` symlink.
+  That changes only what its own run reads; the trees stay unchanged.
+- No worker runs either runner yet. `scripts.ci_lab.worker.Worker` runs each unit through the
+  `executors` mapping its caller passes, and no code passes `run_static.run` or `run_tests.run` in
+  that mapping. The worker entry point still exits 2 without `--self-test` (see
+  [Entry points](#entry-points)). Both runners run today only through code that calls them
+  directly, such as the tests.
+
+### Use it
+
+Run one gate step of the grader's workflow over a head:
+
+```python
+import json
+from pathlib import Path
+
+from scripts import ci_wiring
+from scripts.ci_lab import run_static, static_gates
+from scripts.ci_lab.sandbox import PortAllocator
+
+grader = Path("/srv/ci-lab/grader")
+base = Path("/srv/ci-lab/base")
+head = Path("/srv/ci-lab/head")
+
+workflow = (grader / ".github/workflows/test.yml").read_text()
+registry = json.loads((grader / ".github/input-keys.json").read_text())
+gates = {gate.name: gate for gate in static_gates.discover(workflow, registry, ci_wiring.load(grader))}
+
+settings = run_static.Settings(
+    root=Path("/srv/ci-lab/runs"),
+    venv=Path("/srv/ci-lab/venv"),
+    ports=PortAllocator(first=20000, last=20999, width=100),
+    whitelist={},
+    timeout=600,
+    context={"inputs.base": "origin/dev"},
+)
+result = run_static.run(gates["lint/lint-check"], head, base, grader, settings)
+print(result.green, result.code, result.log, result.report)
+```
+
+`python -m scripts.ci_lab.static_gates --root /srv/ci-lab/grader` prints one JSON line per gate,
+and its `name` field is the key above. Discover gates from the grader tree, never from the head.
+Pass absolute paths for the trees, `settings.root` and `settings.venv`. Nothing checks them, and
+the step runs from the head tree, so a relative `RUNNER_TEMP`, `GITHUB_WORKSPACE` or `PATH` entry
+resolves against the head. The worker needs bubblewrap for every static gate run.
+
+To run any other command with read only trees, build the sandbox directly:
+
+```python
+from pathlib import Path
+
+from scripts.ci_lab.sandbox import PortAllocator, Sandbox
+
+trees = (Path("/srv/ci-lab/grader"), Path("/srv/ci-lab/base"))
+unit = Sandbox(
+    root=Path("/srv/ci-lab/runs"),
+    cwd=Path("/srv/ci-lab/head"),
+    ports=PortAllocator(first=20000, last=20999, width=100),
+    whitelist={"PATH": "/usr/bin:/bin"},
+    readonly=trees,
+)
+outcome = unit.run(["bash", "-c", 'touch "$1/planted.txt"', "probe", str(trees[0])], timeout=60)
+print(outcome.code, outcome.log.read_text())
+```
+
+That run exits non zero, and its log reads
+`touch: cannot touch '/srv/ci-lab/grader/planted.txt': Read-only file system`.
+
+### Verify
+
+Check that bubblewrap can create user and network namespaces on the worker host:
+
+```bash
+bwrap --dev-bind / / --unshare-net true && echo isolates
+```
+
+Check that a read only bind refuses a write on that host:
+
+```bash
+probe="$HOME/ro-probe"
+mkdir -p "$probe"
+bwrap --dev-bind / / --ro-bind "$probe" "$probe" --unshare-net --die-with-parent -- \
+  bash -c 'echo planted > "$1/planted.txt"' probe "$probe"
+ls -A "$probe"
+```
+
+The `bwrap` command prints `Read-only file system` and exits 1, and `ls` prints nothing.
+
+The pull request tier proves the sandbox under real bubblewrap. The writer lock workflow's
+`lab-sandbox` job runs on every pull request that changes `scripts/ci_lab/sandbox.py`,
+`scripts/ci_lab/run_static.py`, `scripts/ci_lab/run_tests.py`, `tests/ci_lab/test_sandbox.py`,
+`tests/ci_lab/test_run_static.py`, `tests/ci_lab/test_run_tests.py` or
+`.github/workflows/writer-lock.yml`, and on every manual dispatch of the writer lock workflow.
+It runs on a GitHub hosted `ubuntu-latest` runner, installs bubblewrap when the runner lacks it,
+and sets `kernel.apparmor_restrict_unprivileged_userns=0`. It then runs those three test files
+and fails when any of their tests fails or skips.
+
+The Tests workflow calls the writer lock workflow from its `writer-lock` job, which
+`Gate — Required` needs.
+These tests prove the read only trees:
+
+| Test | Proves |
+|---|---|
+| `test_run_static.py::test_the_step_runs_with_the_grader_and_base_trees_bound_read_only` | The exact bubblewrap arguments of a gate step: the root bind, the grader bind, the base bind, `--unshare-net`, `--die-with-parent` |
+| `test_run_static.py::test_a_step_cannot_write_into_the_grader_or_base_tree` | Under real bubblewrap, a step's writes through `$RUNNER_TEMP/grader` and `$RUNNER_TEMP/base` are refused, both trees stay empty and its write into `$GITHUB_WORKSPACE` lands |
+| `test_sandbox.py::test_a_unit_cannot_restore_write_bits_or_write_into_a_read_only_tree` | With and without network, `chmod`, a rewrite and a new file under each tree fail with `EROFS` |
+
+In `feature-map.json`, `lab-static-read-only-trees` maps the bubblewrap arguments test of
+`test_run_static.py`. `lab-sandbox-read-only-trees` maps the `test_sandbox.py` tests that check
+the `--ro-bind` arguments and the `CannotRun` refusal without `bwrap`. The two write refusal tests
+above carry no feature entry.
+
+### Troubleshooting
+
+| Symptom | Cause | Check |
+|---|---|---|
+| `CannotRun: bwrap is not installed, so a unit with read only trees cannot run` | The worker has no `bwrap` on `PATH`. Every static gate run needs it | `command -v bwrap` on the worker; install the `bubblewrap` package in the worker image |
+| The unit log reads `bwrap: No permissions to create a new namespace` and the gate is red | The host blocks unprivileged user namespaces, as Ubuntu's AppArmor restriction does | `sysctl -n kernel.apparmor_restrict_unprivileged_userns` prints `1`; `bwrap --dev-bind / / --unshare-net true` fails |
+| A gate step that passes in Actions fails in the lab with `Read-only file system` | The step writes under `$RUNNER_TEMP/grader`, `$RUNNER_TEMP/base` or a path inside either tree, such as a tool cache | Find the path in the unit's `log.txt`; write outputs to `$RUNNER_TEMP`, the head tree or the private `HOME` instead |
+| A test unit wrote into the grader tree | Test units get no read only trees | See [Which units get read only trees](#which-units-get-read-only-trees) |
+| `CannotRun: no free port range` | Every range of the allocator is in use | The allocator holds `(last - first + 1) // width` ranges; run fewer units at once or widen the span |
+| The `lab-sandbox` job fails with `A lab sandbox test skipped, so bubblewrap did not isolate it on this runner.` | A real bubblewrap test skipped because the runner could not create namespaces | The skip reason in the job's `-rs` summary, such as `bubblewrap cannot create namespaces on this runner` |

@@ -261,6 +261,100 @@ def test_the_hub_admits_a_needs_task_only_from_a_hive_declaring_every_need(rig: 
     assert rig.admitter.admit(SLUG, ask("gpu", "hive-c"))["hive"] == "hive-c"
 
 
+KEPT = "0 of 1 agents on the hive with 1 kept for tasks only the root hive takes"
+
+
+@pytest.mark.feature("root-keeps-slots-for-pinned-tasks")
+@pytest.mark.parametrize(
+    "row, expected",
+    [
+        (task("plain"), False),
+        (task("desk", workstation=True), True),
+        (task("blank", workstation=True, hive=""), True),
+        (task("root", hive=ROOT), True),
+        (task("desk", workstation=True, hive="hive-b"), False),
+        (task("pinned", hive="hive-b"), False),
+    ],
+)
+def test_root_only_names_the_tasks_only_the_root_hive_takes(row: dict[str, object], expected: bool) -> None:
+    assert readiness.root_only(row) is expected
+
+
+@pytest.mark.feature("root-keeps-slots-for-pinned-tasks")
+def test_root_waiting_counts_only_claimable_tasks_the_root_hive_alone_takes_and_can_place() -> None:
+    rows = [
+        task("plain"),
+        task("desk", workstation=True),
+        task("root", hive=ROOT, lane="ci"),
+        task("headed", workstation=True, needs=["headed"]),
+        task("gpu", workstation=True, needs=["gpu"]),
+        task("claimed", workstation=True),
+        task("blocked", workstation=True, state="blocked"),
+        task("laneless", workstation=True, lane=""),
+        task("elsewhere", workstation=True, hive="hive-b"),
+    ]
+    assert readiness.root_waiting(snapshot(doc(rows), claimed=["claimed"]), lambda: ["headed"]) == 3
+
+
+def _capped(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, caps: dict[str, int]) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_STATE_BACKEND", "redis")
+    for hive, cap in caps.items():
+        registry.beat(rig.redis, hive, {"heartbeat_at": 6_000})
+        registry.update(rig.redis, hive, [f"max-agents={cap}"])
+
+
+@pytest.mark.feature("root-keeps-slots-for-pinned-tasks")
+def test_root_with_one_free_slot_holds_the_unpinned_task_for_another_hive_and_admits_the_workstation_task(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _capped(rig, monkeypatch, {ROOT: 1, "hive-a": 1})
+
+    assert rig.admitter.admit(SLUG, ask("plain", ROOT)) == {"held": KEPT}
+    assert rig.store.claimant(SLUG, "plain") is None
+    elsewhere = rig.admitter.admit(SLUG, ask("plain", "hive-a"))
+    assert elsewhere["hive"] == "hive-a"
+    admitted = rig.admitter.admit(SLUG, ask("desk", ROOT))
+    assert admitted["hive"] == ROOT
+    assert rig.store.claimant(SLUG, "desk") == admitted["name"]
+    assert capsys.readouterr().err.splitlines() == [
+        f"hub: events admission swarm={SLUG} task=plain hive={ROOT} refused: {KEPT}"
+    ]
+
+
+@pytest.mark.feature("root-keeps-slots-for-pinned-tasks")
+@pytest.mark.parametrize("capabilities, held", [((), False), (("gpu",), True)])
+def test_root_keeps_a_slot_only_for_a_workstation_task_it_can_place(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capabilities: tuple[str, ...], held: bool
+) -> None:
+    _capped(rig, monkeypatch, {ROOT: 1})
+    if capabilities:
+        registry.update(rig.redis, ROOT, [f"capabilities={','.join(capabilities)}"])
+    found = doc([task("plain"), task("desk", workstation=True, needs=["gpu"])])
+    monkeypatch.setattr(rig.admitter, "source", SimpleNamespace(snapshot=lambda slug: snapshot(found)))
+
+    admitted = rig.admitter.admit(SLUG, ask("plain", ROOT))
+
+    assert admitted is not None
+    assert ("held" in admitted) is held
+    assert (rig.store.claimant(SLUG, "plain") is None) is held
+
+
+@pytest.mark.feature("root-keeps-slots-for-pinned-tasks")
+def test_root_admits_unpinned_work_only_into_slots_beyond_the_waiting_workstation_tasks(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _capped(rig, monkeypatch, {ROOT: 2})
+    registry.update(rig.redis, ROOT, ["capabilities=gpu"])
+
+    admitted = rig.admitter.admit(SLUG, ask("plain", ROOT))
+
+    assert admitted["hive"] == ROOT
+    assert rig.store.claimant(SLUG, "plain") == admitted["name"]
+    assert rig.admitter.admit(SLUG, ask("gpu", ROOT)) == {
+        "held": "1 of 2 agents on the hive with 1 kept for tasks only the root hive takes"
+    }
+
+
 def test_hub_admission_keeps_shared_placement_rows_open(rig: SimpleNamespace) -> None:
     registry.update(rig.redis, "hive-c", ["capabilities=gpu"])
     assert rig.admitter.admit(SLUG, ask("pinned", "hive-b")) is not None
@@ -320,7 +414,6 @@ def test_a_workstation_task_under_events_is_offered_admitted_and_launched_on_the
     rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from scripts import serena_router_daemon
-    from scripts.swarm_v2.runtime.base import Outcome, Status
 
     scoped = open_bus(BusConfig(scoped=True))
     slots.serve(cast(Bus, scoped), admitter=rig.admitter)
@@ -331,6 +424,19 @@ def test_a_workstation_task_under_events_is_offered_admitted_and_launched_on_the
     configs = SimpleNamespace(
         slugs=lambda: [SLUG], config=lambda slug: SwarmConfig(slug, "/repo", 1, 1, engine="events")
     )
+    runtime = _launching()
+
+    assert lanes.run_once(configs, scoped, runtime, ROOT, ("eng",), 0, {}) == ["started"]
+
+    [request] = [call.args[0] for call in runtime.spawn.call_args_list]
+    assert request.task["id"] == "desk"
+    assert rig.store.claimant(SLUG, "desk") == request.name
+    scoped.close()
+
+
+def _launching() -> Mock:
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
     runtime = Mock()
     runtime.spawn.return_value = Outcome(
         "spawn",
@@ -346,12 +452,34 @@ def test_a_workstation_task_under_events_is_offered_admitted_and_launched_on_the
             launched_at=0,
         ),
     )
+    return runtime
 
+
+@pytest.mark.feature("root-keeps-slots-for-pinned-tasks")
+def test_root_with_one_free_slot_launches_the_workstation_task_on_the_poll_after_holding_the_unpinned_one(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts import serena_router_daemon
+
+    _capped(rig, monkeypatch, {ROOT: 1})
+    scoped = open_bus(BusConfig(scoped=True))
+    slots.serve(cast(Bus, scoped), admitter=rig.admitter)
+    monkeypatch.setattr(spoke.Spoke, "_measure", lambda self: {"cpus": 32, "load5": 0})
+    monkeypatch.setattr(serena_router_daemon, "ensure", lambda: True)
+    found = doc([task("plain"), task("desk", workstation=True)])
+    readiness.publish(scoped.for_swarm(SLUG), snapshot(found), NOW)
+    configs = SimpleNamespace(
+        slugs=lambda: [SLUG], config=lambda slug: SwarmConfig(slug, "/repo", 1, 1, engine="events")
+    )
+    runtime = _launching()
+
+    assert lanes.run_once(configs, scoped, runtime, ROOT, ("eng",), 0, {}) == ["held"]
     assert lanes.run_once(configs, scoped, runtime, ROOT, ("eng",), 0, {}) == ["started"]
 
     [request] = [call.args[0] for call in runtime.spawn.call_args_list]
     assert request.task["id"] == "desk"
     assert rig.store.claimant(SLUG, "desk") == request.name
+    assert rig.store.claimant(SLUG, "plain") is None
     scoped.close()
 
 
