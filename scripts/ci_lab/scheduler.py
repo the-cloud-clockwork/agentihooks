@@ -1216,7 +1216,9 @@ def serve(
     action of both; return 0."""
     done = 0
     while passes == 0 or done < passes:
-        for action in (*scheduler.tick(int(clock() * 1000)), *relaying.tick()):
+        for action in scheduler.tick(int(clock() * 1000)):
+            print(action, flush=True)
+        for action in relaying.tick():
             print(action, flush=True)
         for action in relaying.tick():
             print(action, flush=True)
