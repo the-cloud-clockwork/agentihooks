@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 from typing import Any
-from unittest.mock import Mock
+from unittest.mock import patch
 
 import pytest
 
@@ -13,17 +13,16 @@ from tests.swarm.test_close import closing  # noqa: F401
 from tests.swarm.test_tick import FakeRuntime
 
 
-@pytest.fixture(autouse=True)
-def catalog(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(model_catalog, "catalog", Mock(return_value={"claude": [{"model": "opus"}], "codex": []}))
-
-
 @pytest.fixture
-def closed(closing, monkeypatch):  # noqa: F811
+def closed(
+    closing: tuple[RedisStore, Any, FakeRuntime, Path],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[RedisStore, Any, FakeRuntime, Path]:
     store, ledger, rt, root = closing
     ledger.reopen = lambda slug, by: ledger.calls.append(("reopened", by))
     monkeypatch.setattr(cli.snapshot, "newest", lambda slug: root / slug / "snapshot.json")
-    store.update("sw", lanes={"eng": {"model": "opus"}}, autonomy="full", max_eng=2)
+    with patch.object(model_catalog, "catalog", return_value={"claude": [{"model": "opus"}], "codex": []}):
+        store.update("sw", lanes={"eng": {"model": "opus"}}, autonomy="full", max_eng=2)
     store.culture.set("sw", "Keep the record")
     store.memory.learn("master@sw", "master@a1b2c3-0001", "Carry the summary", 1)
     run("sw", "close", "--now")

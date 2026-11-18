@@ -1,6 +1,6 @@
 import json
 from dataclasses import replace
-from unittest.mock import Mock
+from unittest.mock import patch
 
 import pytest
 
@@ -31,11 +31,6 @@ REVIEW = "review at 5 task hours in the window, over its 2 threshold"
 FAILED = "launch failure at 0.5 task hours, over its 0.25 threshold"
 HELD = "quota hold at 3 task hours, over its 2 threshold"
 REVIEW_FIX = "Bottleneck fix for the review stage"
-
-
-@pytest.fixture(autouse=True)
-def catalog(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(model_catalog, "catalog", Mock(return_value={"claude": [{"model": "opus"}], "codex": []}))
 
 
 @pytest.fixture
@@ -129,10 +124,11 @@ def caps(store):
     return config.max_eng, config.max_ci
 
 
-def pin(store, lane, agent, model="opus"):
+def pin(store: RedisStore, lane: str, agent: str, model: str = "opus") -> None:
     lanes = {key: dict(value) for key, value in store.config(SLUG).lanes.items()}
     lanes.setdefault(lane, {}).update(agent=agent, model=model)
-    store.update(SLUG, lanes=lanes)
+    with patch.object(model_catalog, "catalog", return_value={"claude": [{"model": model}], "codex": []}):
+        store.update(SLUG, lanes=lanes)
 
 
 def lane_of(store, lane):

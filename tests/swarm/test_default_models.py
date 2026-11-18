@@ -188,28 +188,26 @@ def test_set_accepts_a_lane_model_any_harness_catalog_lists(store: RedisStore) -
 
 @pytest.mark.feature("lane-model-listed-in-a-harness-catalog")
 @pytest.mark.parametrize(
-    "pairs, model",
-    [
-        (["eng-effort=high"], ("eng", "retired")),
-        (["plan-model=auto"], ("plan", "auto")),
-        (["master-model="], ("master", "")),
-    ],
+    "pairs, lane, expected",
+    [(["eng-effort=high"], "eng", "retired"), (["plan-model=auto"], "plan", "auto"), (["master-model="], "master", "")],
 )
 def test_a_set_that_fixes_no_new_lane_model_reads_no_catalog(
-    store: RedisStore, monkeypatch: pytest.MonkeyPatch, pairs: list[str], model: tuple[str, str]
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, pairs: list[str], lane: str, expected: str
 ) -> None:
     store.redis.hset(store.key("sw", "config"), "lanes", json.dumps({"eng": {"model": "retired"}}))
     monkeypatch.setattr(model_catalog, "catalog", Mock(side_effect=AssertionError("the catalog was read")))
     cli.cmd_set(store, argparse.Namespace(slug="sw", pairs=pairs))
-    lane, expected = model
     assert store.config("sw").lanes[lane]["model"] == expected
 
 
+@pytest.mark.feature("lane-model-listed-in-a-harness-catalog")
 def test_a_lane_update_without_a_model_reads_no_catalog(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    store.redis.hset(store.key("sw", "config"), "lanes", json.dumps({"eng": {"model": "sonnet"}}))
     monkeypatch.setattr(model_catalog, "catalog", Mock(side_effect=AssertionError("the catalog was read")))
     assert store.update("sw", lanes={"eng": {"agent": "codex"}}).lanes == {"eng": {"agent": "codex"}}
 
 
+@pytest.mark.feature("lane-model-listed-in-a-harness-catalog")
 def test_lane_model_validation_uses_the_store_cache_and_current_context(store: RedisStore) -> None:
     with (
         patch.object(model_catalog, "catalog", return_value=CATALOG) as load,
