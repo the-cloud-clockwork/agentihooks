@@ -13,7 +13,7 @@ gate from live GitHub data, prints it, and exits 0 only when the acceptance rule
 pull request carries the pasted report.
 
 The report reads GitHub, not the lab. The shadow recorder that keeps verdict rows in the lab
-Redis, its gate mapping and its own `--since` report are on
+Redis, its gate mapping and its own `--since` report are documented in
 [CI lab service contract, Shadow comparison](ci-lab.md#shadow-comparison).
 
 ## Command
@@ -24,7 +24,7 @@ python -m scripts.ci_lab shadow report --gate <gate> [--heads 50] [--event merge
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--gate` | required | The gate id: `tests`, `mutation`, or a static gate such as `lint` or `type-gate` |
+| `--gate` | required | The gate id: `tests`, `mutation`, or a static gate id. On dev the static ids are `lint`, `type-gate`, `semgrep/scan`, `semgrep/feature-tests` and `semgrep/charts` |
 | `--heads` | `50` | How many heads the window holds; at least 1 |
 | `--event` | `pull_request` | Read pull request heads, or merge group heads with `merge_group` |
 | `--app` | `AGENTIHOOKS_LAB_APP` | The slug of the lab's GitHub App; the command exits 2 when neither names one |
@@ -42,13 +42,18 @@ rows in the lab Redis. It is a separate command, `scripts.ci_lab.shadow.main`. A
 
 | Setting | Where it is read | Meaning |
 |---|---|---|
-| `--app` or `AGENTIHOOKS_LAB_APP` | The flag, else the environment | The slug of the lab App whose `lab-shadow/<gate>` check runs count. Use the value of the repository Actions variable `AGENTIHOOKS_LAB_APP`, the slug the Tests workflow passes to `scripts.ci_lab_verdict` when it waits for lab verdicts, so the report and the workflow trust the same App |
+| `--app` or `AGENTIHOOKS_LAB_APP` | The flag, else the environment | The slug of the lab App whose `lab-shadow/<gate>` check runs count |
 | `GITHUB_REPOSITORY` | The environment | The `owner/name` repository whose runs and check runs the report reads; unset or empty reads `the-cloud-clockwork/agentihooks` |
-| GitHub token | The `gh` login, or `GH_TOKEN` | Read access to Actions runs and commit check runs. `gh api` makes every call. On a hive the session token expires after an hour, so wrap the command in `python -m scripts.github_app_cli exec --`, which sets a fresh token for the process |
+| GitHub token | The `gh` login, or `GH_TOKEN` | Read access to Actions runs and commit check runs. `gh api` makes every call. On a hive, wrap the command in `python -m scripts.github_app_cli exec --`, which refreshes the GitHub App credentials and runs the command with them in `GH_TOKEN` |
 | Workflow tree | The checkout that holds the `scripts` package | `scripts.ci_lab.shadow.static_jobs` reads `.github/workflows/test.yml` and its reusable workflows there to learn the static gate ids. Run the report from a checkout of current dev, so a static gate added on dev maps its Actions jobs |
 
-`python -m scripts.ci_lab.static_gates`, run in the same checkout, prints one JSON line per static
-step; its `job` field is the gate id that `--gate` takes.
+Set the lab App slug to the value of the repository Actions variable `AGENTIHOOKS_LAB_APP`. The
+Tests workflow passes that variable to `scripts.ci_lab_verdict` when it waits for lab verdicts, so
+the report and the workflow trust the same App.
+
+`python -m scripts.ci_lab.static_gates [--root <checkout>]` prints one JSON line per static step of
+the checkout's workflow tree, the current directory unless `--root` names one; its `job` field is
+the gate id that `--gate` takes. It also reads the checkout's `.github/input-keys.json`.
 
 ## Examples
 
@@ -81,10 +86,12 @@ python -m scripts.ci_lab shadow report --gate type-gate --heads 3
 A small window is strict: see [Windows other than 50](#windows-other-than-50).
 
 Branch on the result in a script. Exit 1 means `rule fails` only when the report printed its
-table; an exit 1 without a table is a GitHub error (see [Troubleshooting](#troubleshooting)):
+table; an exit 1 without a table is a GitHub error (see [Troubleshooting](#troubleshooting)).
+`tee` keeps the table on the terminal and in `lint-report.txt` in the current directory:
 
 ```bash
-if python -m scripts.ci_lab shadow report --gate lint > lint-report.txt; then
+set -o pipefail
+if python -m scripts.ci_lab shadow report --gate lint | tee lint-report.txt; then
   echo "lint holds the acceptance rule"
 elif [[ "$(tail -n 1 lint-report.txt)" == "rule fails" ]]; then
   echo "lint stays on GitHub Actions"
@@ -110,14 +117,17 @@ and takes each distinct head once. For each head it reads every check run on the
   the shadow recorder applies; a check run of that name from any other App, a workflow token
   included, is ignored.
   `success` is `pass`, `failure` and `timed_out` are `fail`. Any other conclusion, a run still in
-  progress or no run at all leaves the lab verdict missing.
+  progress or no run at all leaves the lab verdict missing. The report reads only the newest run
+  by id: when it was cancelled or is still running, an earlier verdict of the same name does not
+  count, where the shadow recorder keeps that earlier verdict.
 
 A head leaves the window, and the next older head takes its place, when any Actions job of the
 gate was cancelled, is still running, or none of them graded. A unit job that the workflow reran
 after a lost runner (`unit (3.12, 1)` beside `unit rerun (3.12, 1)`) counts only by its rerun, so a
 lost runner retry is never a mismatch. The Tests workflow creates `unit rerun` jobs only on merge
 group runs, and only for the shards its `unit-lost` job names through `scripts.ci_unit_rerun` as
-having lost their runner, so a rerun never hides a shard that failed on a live runner.
+having lost their runner. When any unit shard failed without a lost runner signature,
+`scripts.ci_unit_rerun` reruns none, so a rerun never hides a shard that failed on a live runner.
 
 The report reads at most 10 pages of 100 Tests runs, the newest 1000, and at most 10 pages of 100
 check runs per head. It stops listing once the window is full, so a 50 head report makes at least
@@ -135,7 +145,9 @@ Over the window of the newest `--heads` heads that hold an Actions verdict:
 | Lab verdict present | at least 48 of every 50 heads |
 | Lab verdict first | at least 45 of every 50 heads have a lab verdict that completed before the Actions verdict |
 
-The plan words the window as heads "with both verdicts"; the report reads it as heads with an
+The [Phase 4 plan](https://github.com/the-cloud-clockwork/agentihooks/issues/10375) sets this rule
+for every gate flip, printed with `--heads 50` and pasted in the flip pull request. It words the
+window as heads "with both verdicts"; the report reads it as heads with an
 Actions verdict, because a window of heads that all carry a lab verdict would make the presence
 count meaningless. A head without a lab verdict stays in the window and counts against presence.
 
@@ -156,11 +168,13 @@ For a window other than 50 the two thresholds scale and round up, `scripts.ci_la
 | 3 | 3 | 3 |
 
 Below 25 heads every head needs a lab verdict, and below 10 every lab verdict must also come
-first. A flip uses the default 50.
+first. The plan's flip rule uses the default 50.
 
 ## Output
 
-A live run on merge group heads of dev, which carried no `lab-shadow/tests` check runs:
+A live run on 18 November 2026, at dev `3be36adff`, of
+`python -m scripts.ci_lab shadow report --gate tests --heads 3 --event merge_group --app <lab App slug>`.
+The merge group heads carried no `lab-shadow/tests` check runs, so it exits 1:
 
 ```text
 gate tests event merge_group
@@ -182,7 +196,7 @@ with exit code 1. An argument error exits 2.
 
 ### Reading a table with lab verdicts
 
-Four example heads rendered by `scripts.ci_lab.shadow_report.render`:
+Four illustrative heads with made up shas, rendered by `scripts.ci_lab.shadow_report.render`:
 
 ```text
 gate tests event pull_request
@@ -215,7 +229,7 @@ against 0, and 2 first verdicts against 4.
 | Every row shows `missing` | The lab is not posting `lab-shadow/<gate>` check runs on these heads | Check the lab scheduler and worker are live and grading in shadow |
 | One head shows `missing` although it has a `lab-shadow/<gate>` check run | The run came from another App or a workflow token, or the newest run of that name is still in progress or concluded `cancelled`, `skipped` or `neutral` | `gh api 'repos/<repo>/commits/<sha>/check-runs?check_name=lab-shadow/<gate>'` shows each run's `app.slug`, `status` and `conclusion` |
 | `heads N of 50` below 50 | Too few completed Tests runs with a graded job of the gate in the newest 1000 runs | Use a smaller `--heads`, or wait for more heads |
-| A gate never shows rows | `gate_of` maps no Actions job to that gate id | Compare the id with the `job` field of `python -m scripts.ci_lab.static_gates` and with `scripts.ci_lab.shadow.gate_of`; run from a checkout of current dev |
+| `heads 0 of 50` and `rule fails`, exit 1 | An unknown or mistyped gate id: `gate_of` maps no Actions job to it, so every head leaves the window. A wrong id is no argument error, and the report reads every distinct head of the newest 1000 runs, at least one API call each, before it prints | Check the id against the `job` field of `python -m scripts.ci_lab.static_gates` and `scripts.ci_lab.shadow.gate_of` before running; run from a checkout of current dev |
 | `error: --app or AGENTIHOOKS_LAB_APP names the lab App`, exit 2 | Neither the flag nor the variable names the lab App | Pass `--app <lab App slug>` or export `AGENTIHOOKS_LAB_APP` |
 | `error: --heads must be at least 1`, exit 2 | `--heads` is 0 or negative | Pass a window of at least 1 |
 | `error: argument --event: invalid choice`, exit 2 | The event is neither `pull_request` nor `merge_group` | Pass one of the two |
