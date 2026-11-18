@@ -6954,6 +6954,16 @@
       ]
     },
     {
+      "id": "promotion-unstable-snapshot-ignores-dev-commit",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-promotion-wait-settled-run",
+      "behaviour": "The promotion step merges a snapshot pull request that GitHub reports unstable on the same poll as a clean one, once every required snapshot context passed and the snapshot grade is reported, and never reads the checks or commit statuses of the triggering dev commit, so a red or running check of a dispatched run or another workflow on dev never holds the release group through the thirty minute wait.",
+      "seam": "the mergeability wait in .github/scripts/promote.cjs, driven by the promotion API contract harness tests/contracts/promotion/promote.cjs",
+      "tests": [
+        "tests/contracts/promotion/test_promote.py::test_unstable_snapshot_merges_without_reading_the_dev_commit"
+      ]
+    },
+    {
       "id": "ledger-write-substep-timing",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2479",
