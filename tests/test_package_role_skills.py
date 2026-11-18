@@ -212,6 +212,21 @@ def test_ci_and_master_guidance_queues_instead_of_merging(guidance):
     assert "merge on green" not in text.lower()
 
 
+@pytest.mark.parametrize("role", sorted(p.name for p in ROLES.iterdir() if (p / "CLAUDE.md").is_file()))
+def test_role_rules_repeat_no_line_of_the_role_persona(role: str) -> None:
+    """A package role's rule files carry no bullet line its CLAUDE.md already states."""
+    persona = (ROLES / role / "CLAUDE.md").read_text().splitlines()
+    stated = {" ".join(line.split()) for line in persona if line.lstrip().startswith("- ")}
+    repeated = [
+        f"{rule.name}: {line.strip()}"
+        for rule in sorted((ROLES / role / ".claude" / "rules").glob("*.md"))
+        for line in rule.read_text().splitlines()
+        if line.lstrip().startswith("- ") and " ".join(line.split()) in stated
+    ]
+
+    assert repeated == []
+
+
 def test_rendered_qa_persona_reads_tests_from_ci_only(world):
     from scripts.profiles import render
 
