@@ -124,8 +124,8 @@ creates the schema; only this service's `migrate()` does, at start.
 ## Route map
 
 The route groups below were mapped while one process, `ledger_server.Handler` on port 8765, served them all behind
-the single ingress. Since the write path change the ledger server answers only the read, stream and `OPTIONS` rows;
-every write row is served by `api_service.WriteHandler` on port 8766, behind a method route on the same host.
+the single ingress. The write rows are now served by `api_service.WriteHandler` on port 8766, behind a method route
+on the same host; the ledger server answers only the read, stream and `OPTIONS` rows.
 
 | Route group (today) | Handler today | Kind | Target |
 |---|---|---|---|

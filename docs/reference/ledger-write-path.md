@@ -13,8 +13,7 @@ and the public host routes them to the ledger API service. The ledger server onl
 read API and the live event stream, and answers every write method as unsupported.
 
 There is one write path. No setting switches a client back to the ledger server, and no client falls back to it when
-the database is slow. The operator ordered this on 16 November 2026 ("finish the API to database path so it works,
-shift every swarm write onto it, and remove the old ledger write path completely"); pull request 11561 delivered it.
+the database is slow. Pull request 11561 delivered it on the operator's order of 16 November 2026.
 
 1. TOC
 {:toc}
@@ -62,8 +61,9 @@ holding the database URL can write any ledger on it.
 
 Two refusals protect this:
 
-- A request that names another agent in `X-Ledger-Agent` than the one the process acts as is refused with
-  `403 forbidden` and `this process acts as <principal>, not <claimed>`.
+- When the process acts as a named principal, a pinned agent or an `acting` name, a request that names another
+  agent in `X-Ledger-Agent` is refused with `403 forbidden` and `this process acts as <principal>, not <claimed>`.
+  A process acting as the swarm's own service admits any `X-Ledger-Agent`.
 - A pinned agent on a remote host that asks for a service write without the tick's credential is refused with
   `a remote ledger client cannot make service writes; the operator credential stays on its host`
   (`authority_context.service_refused`). `LedgerClient` raises it as a `SwarmError`, the ledger command exits with it
@@ -92,7 +92,7 @@ with database_ledger.acting(""):
     state = api.snapshot("my-swarm")
 ```
 
-Never build a `ResourceClient` without `transport=`: the `ledger-http-client` incident rule refuses it (see
+Never build a `ResourceClient` without `transport=`: the `ledger-client-in-process` rule refuses it (see
 [Guards](#guards)).
 
 ## The ledger API service
@@ -165,11 +165,12 @@ ledger API service on http://0.0.0.0:8766 answering GET, POST, PUT, PATCH, OPTIO
 The ledger server (`scripts.swarm_ledger.ledger_server`) keeps every read: the page, `GET /api/v1`, the event
 stream, media files and exports. Its HTTP handler defines only `GET` and `OPTIONS`:
 
-- `POST`, `PUT`, `PATCH` and `DELETE` get `501 Unsupported method` from the HTTP server.
+- `POST`, `PUT`, `PATCH` and `DELETE` get `501 Unsupported method` from the HTTP server. So does `HEAD`, which the
+  fronts route to it with `GET`.
 - Its CORS preflight allows only `GET`.
 - Its ledger services carry no write hooks: each hook (bin, layout, write gate, inbox relay, alert delivery, swarm
-  control, lifecycle, quota refresh) raises `405 method_not_allowed` with
-  `The ledger server only reads; the ledger API service takes writes`.
+  control and its arguments, lifecycle, quota refresh, the doctor stop phrase) raises `405 method_not_allowed` with
+  `The ledger server only reads; the ledger API service takes writes`, and it holds no doctor controls.
 
 The ledger server and the API service build their services through the same factory, `ledger_server.api_services`;
 the API service passes every write hook and the ledger server passes none.
@@ -245,12 +246,12 @@ The chart's `api` block deploys the API service. It renders only when `api.enabl
 | `api.env`, `api.secretEnv` | `{}`, `[]` | Settings for the API container only, added after `ledger.env` and `ledger.secretEnv` |
 | `api.podDisruptionBudget.enabled`, `.maxUnavailable` | `false`, `1` | A PodDisruptionBudget, rendered only with more than one replica |
 | `api.publicRoute.host` | `""` | The public host; when set, the chart adds the Traefik `IngressRoute` for write methods |
-| `api.publicRoute.priority` | `1000` | Route priority, above the ledger's read route on the same host |
+| `api.publicRoute.priority` | `1000` | Traefik route priority among IngressRoutes on the host; the route matches only write methods and `OPTIONS`, so reads keep the ledger's Ingress |
 | `api.publicRoute.entryPoints` | `[]` | Traefik entry points |
 | `api.publicRoute.serversTransportName` | `""` | A Traefik `ServersTransport`, for example one that trusts the ledger certificate |
 | `api.publicRoute.tls` | `{}` | The route's `tls` block |
 | `api.affinity`, `api.tolerations` | `{}`, `[]` | Pod scheduling |
-| `api.resources` | requests `50m`, `256Mi`; limit `1Gi` | Container resources, with ephemeral storage requests and limits |
+| `api.resources` | requests cpu `50m`, memory `256Mi`, ephemeral storage `64Mi`; limits memory `1Gi`, ephemeral storage `256Mi` | Container resources |
 
 The API container runs `python -m scripts.swarm_ledger.api_service --serve` with `LEDGER_API_HOST=0.0.0.0`,
 `LEDGER_DIR=/data` on an `emptyDir` volume, `SWARM_PUBLIC_URL` and `SWARM_ALLOWED_HOSTS` built from the release, and
@@ -308,8 +309,8 @@ no shared database is set. It prints this line and exits 2:
 hub: a hosted hub writes task claims in process over the shared database and needs AGENTIHOOKS_SWARM_DATABASE_URL
 ```
 
-A remote ledger means `SWARM_URL` is set, `AGENTIHOOKS_DEPLOYMENT` is not `local`, or
-`AGENTIHOOKS_HOSTED_LEDGER_URL` is set with an agent or hive ledger credential ([Client mode
+The ledger is remote when `ledger_link.remote()` says so: outside local client mode, with `SWARM_URL` set, or with a
+hosted ledger that answers at `AGENTIHOOKS_HOSTED_LEDGER_URL` for an agent or hive ledger credential ([Client mode
 resolution](deployment-modes.md#client-mode-resolution)).
 
 ## Guards
@@ -319,11 +320,14 @@ resolution](deployment-modes.md#client-mode-resolution)).
 | `tests/swarm_ledger/test_ledger_write_cutover.py` | The hub claim and release land in the store with no ledger server request; a stale hub claim is refused by the route; the ledger server answers `POST`, `PUT`, `PATCH` and `DELETE` with `501`; every write hook of the read only ledger server refuses with `405`; a hosted hub without the shared database refuses to start |
 | Feature map entry `swarm-ledger-api-writes` | The behaviour, its operator words and its tests; its Semgrep rule `feature-ledger-api-writes` holds the in-process `client` and the hub's database check |
 | Feature rule `feature-tick-database-ledger` | The tick route acts as `database_ledger.acting("")`, the tick ledger port builds its client with `ledger.client`, and `ledger.client` returns the in-process client with no other path |
-| Incident rule `ledger-server-write-route` | No `do_POST`, `do_PUT`, `do_PATCH` or `do_DELETE` on the ledger server's `Handler` |
-| Incident rule `ledger-http-client` | No `ResourceClient` under `scripts/` or `hooks/` without an in-process `transport=` |
-| Incident rule `ledger-write-switch` | No `database_ledger.serving()` or `database_ledger.scoped(...)`: no switch between paths |
+| Rule `ledger-server-reads-only` | No `do_POST`, `do_PUT`, `do_PATCH` or `do_DELETE` in the ledger server module, whether defined, assigned or set with `setattr`, and no `setattr` under a computed name there |
+| Rule `ledger-client-in-process` | No `ResourceClient` anywhere in the tree without an in-process transport, by keyword or position, and none with `transport=None` |
+| Incident rule `ledger-write-switch` | No `database_ledger.serving()` or `database_ledger.scoped(...)` under `scripts/` or `hooks/`: no switch between paths |
 
-The incident rules live in `.semgrep-incidents/ledger-server-write.yml` with red and clean fixtures beside them.
+`ledger-server-reads-only` and `ledger-client-in-process` run in the whole tree scan from
+`.semgrep/ledger-server-writes.yml`, with red and clean fixtures in `.semgrep/ledger-server-writes.test.py`.
+`ledger-write-switch` is in `.semgrep-incidents/ledger-server-write.yml` with its fixtures in
+`.semgrep-incidents/ledger-server-write.py`.
 
 ## What was removed
 
@@ -341,13 +345,13 @@ These no longer exist; an older page or note that names them describes the previ
 
 | Symptom | Cause and fix |
 |---|---|
-| A write gets `501 Unsupported method` from the ledger server | The writer runs code from before the write path change and still posts to the ledger server; on 17 November hive Pods on an older release did this. Check the release with `agentihooks hive list` and roll the hives onto the current release. A browser seeing it means the front sends writes to the ledger server: check the method routing above |
+| A write gets `501 Unsupported method` from the ledger server | The writer runs a release from before the write path change and still posts to the ledger server, as hive Pods on an older image do. Check the release with `agentihooks hive list` and roll the hives onto the current release. A browser seeing it means the front sends writes to the ledger server: check the method routing above |
 | The page reads fail with `404` and `the ledger API service takes writes; read from the ledger server` | The front sends `GET` to the API service. Route `GET` and `HEAD` to the ledger server |
 | `this process acts as <principal>, not <claimed>` | The request names another agent in `X-Ledger-Agent` than the pinned agent or the `acting` name. Write as the process's own agent |
 | `a remote ledger client cannot make service writes; the operator credential stays on its host` | A pinned agent on a remote host asked for a service write. Write as the agent; service writes belong to the tick, hub and controller |
 | `agentihooks hub run` exits 2 naming `AGENTIHOOKS_SWARM_DATABASE_URL` | A hosted hub has no shared database. Set the URL on the hub; the chart copies it from `ledger.secretEnv` |
 | The API service exits at start with `already has an active writer` | Another process holds the SQLite folder's writer lease. Stop that writer by its process id, or move both onto the shared database |
-| A controller exits on `ledger_missing` | Its process has no database URL and reads an empty SQLite folder of its own, or the shared schema was never migrated. Give it the shared URL and start the API service against that database first, since only the API service creates the schema |
+| A controller, hub or worker gets `404 ledger_missing` (`No such ledger`) for a ledger the page shows | Its process writes a different store: it has no database URL and opens an empty SQLite folder of its own, or the shared schema was never migrated. Give it the shared URL and start the API service against that database first, since only the API service creates the schema |
 | `server refused: 500` with `storage_error` and `Resource could not be read or written` | The route code could not read or write the store. Check that the process's database URL or `LEDGER_DIR` names the shared store and that the database answers |
 | Compose `swarm init` stops with `api is <state>` | Read `docker compose --project-name agentihooks-swarm logs api`; the API service starts once Redis and NATS are healthy |
 
