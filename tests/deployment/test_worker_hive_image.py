@@ -509,12 +509,11 @@ def test_the_kind_job_keeps_the_runner_kind_and_downloads_only_without_one(tmp_p
 
 
 @pytest.mark.feature("hive-worker-release-tag-moves-on-every-release")
-def test_a_release_builds_the_hive_worker_on_its_released_worker_and_moves_release_only_when_newest() -> None:
+def test_a_release_builds_the_hive_worker_on_its_released_worker_and_lets_the_script_decide_the_release_tag() -> None:
     jobs = yaml.safe_load((ROOT / ".github/workflows/swarm-node-image.yml").read_text())["jobs"]
     hive = jobs["hive"]
     assert hive["if"] == "github.event_name == 'release'"
     assert hive["needs"] == "image"
-    assert hive["concurrency"] == {"group": "hive-worker-release", "queue": "max", "cancel-in-progress": False}
     assert "latest" not in jobs["image"].get("outputs", {})
     assert hive["env"]["IMAGE"] == "ghcr.io/the-cloud-clockwork/agentihooks-hive-worker"
     steps = {step.get("name", step.get("uses")): step for step in hive["steps"]}
@@ -532,6 +531,7 @@ def release_hive(
     candidate: str = "not found",
     newest: str = "v2.1.7",
     newer: str = "not found",
+    published: tuple[str, ...] = (),
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     tools = tmp_path / "bin"
     tools.mkdir()
@@ -542,7 +542,7 @@ def release_hive(
         '  case "$4" in\n'
         '    *:2.1.7) answer="$FAKE_VERSION" ;;\n'
         '    *:abc123) answer="$FAKE_CANDIDATE" ;;\n'
-        '    *) answer="$FAKE_NEWER" ;;\n'
+        '    *) answer="$FAKE_NEWER"; [[ " $FAKE_PUBLISHED " != *" ${4##*:} "* ]] || answer=published ;;\n'
         "  esac\n"
         '  [[ "$answer" == published ]] && exit 0\n'
         '  echo "ERROR: $4: $answer" >&2; exit 1\nfi\n'
@@ -552,7 +552,7 @@ def release_hive(
         '#!/usr/bin/env bash\nprintf "git %s\\n" "$*" >> "$GIT_LOG"\n'
         '[[ "$1 $2 $3 $4" == "ls-remote --tags --refs origin" ]] || exit 2\n'
         '[[ "$FAKE_NEWEST" == unreachable ]] && { echo "fatal: unable to access origin" >&2; exit 128; }\n'
-        'for tag in v2.1.6 v2.1.7 v2.1.7rc1 "$FAKE_NEWEST" v2.1.10-beta; do printf "%040d\\trefs/tags/%s\\n" 0 "$tag"; done\n'
+        'for tag in v2.1.6 v2.1.7 v2.1.7rc1 $FAKE_NEWEST v2.1.10-beta; do printf "%040d\\trefs/tags/%s\\n" 0 "$tag"; done\n'
     )
     (tools / "git").chmod(0o755)
     env = {
@@ -564,6 +564,7 @@ def release_hive(
         "FAKE_CANDIDATE": candidate,
         "FAKE_NEWEST": newest,
         "FAKE_NEWER": newer,
+        "FAKE_PUBLISHED": " ".join(published),
     }
     result = subprocess.run(
         ["bash", str(ROOT / "deploy/worker/release-hive.sh"), "registry/hive", "v2.1.7", "abc123"],
@@ -593,11 +594,11 @@ def test_a_rerun_after_a_partial_hive_release_retags_the_built_digest_without_bu
     ]
 
 
-@pytest.mark.parametrize("latest", ["true", "false"])
+@pytest.mark.parametrize("newest", ["v2.1.7", "v2.1.8"])
 def test_an_unpublished_hive_release_builds_proves_and_pushes_release_before_its_version(
-    tmp_path: Path, latest: str
+    tmp_path: Path, newest: str
 ) -> None:
-    result, commands = release_hive(tmp_path, version="not found", newest="v2.1.7" if latest == "true" else "v2.1.8")
+    result, commands = release_hive(tmp_path, version="not found", newest=newest)
     assert result.returncode == 0, result.stderr
     assert commands[:2] == [
         "docker buildx imagetools inspect registry/hive:2.1.7",
@@ -610,7 +611,7 @@ def test_an_unpublished_hive_release_builds_proves_and_pushes_release_before_its
     assert "--build-arg AGENTIHOOKS_VERSION=2.1.7" in build
     assert build.endswith("--tag registry/hive:abc123 .")
     assert proof.startswith("docker run --rm ") and "agentihooks init --profile engineer" in proof
-    newer = [] if latest == "true" else ["docker buildx imagetools inspect registry/hive:2.1.8"]
+    newer = [] if newest == "v2.1.7" else ["docker buildx imagetools inspect registry/hive:2.1.8"]
     assert commands[4:] == [
         "docker push registry/hive:abc123",
         *newer,
@@ -650,6 +651,7 @@ def test_a_release_moves_the_release_tag_while_newer_releases_have_no_hive_image
     ]
 
 
+@pytest.mark.feature("hive-worker-release-tag-moves-on-every-release")
 def test_a_registry_error_on_a_newer_release_image_fails_before_moving_any_tag(tmp_path: Path) -> None:
     result, commands = release_hive(
         tmp_path, version="not found", candidate="published", newest="v2.1.8", newer="unauthorized"
@@ -657,6 +659,20 @@ def test_a_registry_error_on_a_newer_release_image_fails_before_moving_any_tag(t
     assert result.returncode != 0
     assert "unauthorized" in result.stderr
     assert all("imagetools create" not in command for command in commands)
+
+
+@pytest.mark.feature("hive-worker-release-tag-moves-on-every-release")
+def test_a_release_stops_at_the_newest_published_release_past_newer_unpublished_ones(tmp_path: Path) -> None:
+    result, commands = release_hive(
+        tmp_path, version="not found", candidate="published", newest="v2.1.8 v2.1.9", published=("2.1.8",)
+    )
+    assert result.returncode == 0, result.stderr
+    assert commands[-3:] == [
+        "docker buildx imagetools inspect registry/hive:2.1.9",
+        "docker buildx imagetools inspect registry/hive:2.1.8",
+        "docker buildx imagetools create --tag registry/hive:2.1.7 registry/hive:abc123",
+    ]
+    assert "the newest published release is v2.1.8, not v2.1.7; leaving the release tag where it is" in result.stdout
 
 
 def test_a_failed_newest_release_read_fails_before_moving_any_tag(tmp_path: Path) -> None:
