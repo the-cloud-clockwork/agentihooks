@@ -35,7 +35,7 @@ def test_bus_provisions_only_when_requested(monkeypatch: pytest.MonkeyPatch, pro
         wanted = [call("AGENTIHOOKS-CI-LAB-HEADS", config=lab_consumer)] if provision else []
         assert js.add_consumer.await_args_list == wanted
         configs = [found.kwargs["config"] for found in js.add_consumer.await_args_list]
-        made = [(found.durable_name, found.filter_subject) for found in configs]
+        made = [(config.durable_name, config.filter_subject) for config in configs]
         assert made == ([("ci-lab-scheduler", "ci.lab.head.>")] if provision else [])
         state = bus.state("hub-github")
         assert bus.state("hub-github") is state
