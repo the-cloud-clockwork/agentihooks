@@ -757,7 +757,7 @@ def event_pass(inbox, store, slug, doc, ledger, now_ms, github=view):
         + stall_blockers.observe(store, slug, doc, tasks.values(), github, now_ms, held)  # pyright: ignore[reportUnknownArgumentType]
         + _settle_red_notices(mail, github)
         + _move_task_notices(mail, ledger, tasks)
-        + _priorities(mail, doc, raised)
+        + _priorities(mail, doc, raised, now_ms)
     )
 
 
@@ -885,7 +885,7 @@ def _events(mail, events, tasks, raised):
                 f"event:{event['rev']}:{event['kind']}:{event['target']}",
                 mail.owner(event["target"]),
                 text,
-                ref=f"{mail.slug}:event:{event['target']}",
+                ref=f"{mail.slug}:event:{event['target']}:{event['rev']}",
                 fyi=event["kind"] == "task done",
             )
     return sent
@@ -930,7 +930,7 @@ def _followups(mail, doc, events, ledger, now_ms):
                 "Decide it now, or it goes to the operator's Priorities.\n"
                 f"Close it: agentihooks ledger --slug {mail.slug} followup done {followup['id']}"
             )
-            sent += mail.send(f"{target}:raised", mail.owner(target), text, ref=f"{mail.slug}:event:{target}")
+            sent += mail.send(f"{target}:raised", mail.owner(target), text, ref=f"{mail.slug}:event:{target}:{now_ms}")
         if age >= FOLLOWUP_OPERATOR_MS:
             ask = "Open half an hour without a decision: " + " ".join(followup["text"].split()[:ASK_WORDS])
             if mail.once(f"{target}:operator", lambda: ledger.priority(mail.slug, target, ask)):
@@ -938,7 +938,7 @@ def _followups(mail, doc, events, ledger, now_ms):
     return sent
 
 
-def _priorities(mail, doc, raised):
+def _priorities(mail: Mail, doc: dict[str, Any], raised: set[str], now_ms: int) -> list[str]:
     key = mail.store.key(mail.slug, "priorities-sent")
     rows = {p["item"]: p for p in doc.get("priorities", [])}
     seen = mail.store.redis.smembers(key)
@@ -959,7 +959,7 @@ def _priorities(mail, doc, raised):
             step = ledger_blockers.notice(mail.slug, mail.store.config(mail.slug).autonomy, item, rec)
             text = f"New priority on ledger {mail.slug} for {item}: {row['text']}\n{step}"
             owner = mail.owner(item)
-            mail.inbox.send(SENDER, owner, text, ref=f"{mail.slug}:priority:{item}")
+            mail.inbox.send(SENDER, owner, text, ref=f"{mail.slug}:priority:{item}:{now_ms}")
             sent.append(f"told {owner}: priority {item}")
         mail.store.redis.sadd(key, item)
     mail.store.redis.set(marker, 1)

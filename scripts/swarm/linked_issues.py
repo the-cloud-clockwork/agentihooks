@@ -1,6 +1,8 @@
 """Close the issues a merged ready pull request settles: GitHub closes them only on a merge into the default branch."""
 
 import re
+from collections.abc import Callable
+from typing import Any
 
 from scripts.swarm import stack
 from scripts.swarm.store import SwarmError
@@ -18,6 +20,27 @@ def named(url: str) -> tuple[list[str], list[str]]:
         return [], [str(exc)]
     repo = url.split("/pull/")[0]
     return [f"{repo}/issues/{number}" for number in KEYWORD.findall(body)], []
+
+
+def unnamed(url: str, body: str, tasks: list[dict[str, Any]]) -> list[str]:
+    """Return the issue urls ``body`` closes that no task in ``tasks`` records as its issue or names in its
+    description, as ``#n`` or as the issue url."""
+    repo = url.split("/pull/")[0]
+    mention = re.compile(rf"(?:#|{re.escape(repo)}/issues/)(\d+)")
+    named = {n for task in tasks for key in ("issue_url", "description") for n in mention.findall(str(task.get(key)))}
+    return [f"{repo}/issues/{number}" for number in dict.fromkeys(KEYWORD.findall(body)) if number not in named]
+
+
+def refuse_unnamed(url: str, body: str, row: dict[str, Any], task: Callable[[str], dict[str, Any] | None]) -> None:
+    """Refuse recording ``url`` when its body closes an issue that the task ``row`` and its group members, read
+    through ``task``, never name, since settle closes it on merge."""
+    members: list[str] = row.get("group_members") or []
+    tasks = [row, *(task(member) or {} for member in members)]
+    if issues := unnamed(url, body, tasks):
+        raise SwarmError(
+            f"pull request {url} closes {', '.join(issues)}, which this task neither records nor names in its "
+            "description: drop the closing keyword from the body, or record the task's own issue with swarm issue"
+        )
 
 
 def settle(url, finished, rows):
