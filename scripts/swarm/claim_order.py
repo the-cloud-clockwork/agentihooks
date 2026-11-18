@@ -1,20 +1,23 @@
-"""Claim order of ready tasks: rank, then a task resuming earlier work, then a small task that clears work fast,
-then critical path depth.
+"""Claim order of ready tasks: a task of the swarm's fix phase, then rank, then a task resuming earlier work, then a
+small task that clears work fast, then critical path depth.
 
-Phase order is never used; ledger order breaks the remaining ties.
+No other phase order is used; ledger order breaks the remaining ties.
 """
+
+from collections.abc import Callable
 
 from scripts.swarm_ledger import ledger_rank
 
 FIX = "fix"
 
 
-def key(rows: dict):
+def key(rows: dict, fix_phase: str) -> Callable[[dict], tuple]:
     waiting = _waiting(rows)
     depth = depths(rows)
 
-    def task_key(task):
+    def task_key(task: dict) -> tuple:
         return (
+            not (bool(fix_phase) and task.get("phase") == fix_phase),
             ledger_rank.order(task),
             not resumed(task),
             not _fast_clear(task, rows, waiting),

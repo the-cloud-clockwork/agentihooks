@@ -836,6 +836,7 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     consumer = open_bus(BusConfig.from_environ(environ)).lab_heads.consumer(DURABLE, SUBJECT)
     scheduler = build(environ, client, objects, consumer, get_redis())
     leases = Leases(scheduler.queue, LEASE_TTL_MS, _now_ms, _sleep_ms, LEASE_POLL_MS)
-    server = lease_api.serve("", contract.SCHEDULER_PORT, leases, Uploads(objects))
+    routes = lease_api.ControlRoutes(client, environ.get(contract.CONTROL_TOKEN, ""), _now_ms)
+    server = lease_api.serve("", contract.SCHEDULER_PORT, leases, Uploads(objects), routes)
     Thread(target=server.serve_forever, daemon=True).start()
     return serve(scheduler, arguments.interval, arguments.passes, time.time, time.sleep)
