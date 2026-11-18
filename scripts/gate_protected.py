@@ -1,5 +1,6 @@
 import argparse
 import json
+import re
 import subprocess
 from collections.abc import Mapping
 from copy import deepcopy
@@ -214,11 +215,19 @@ def lab_clause(condition: str | None, gate: str) -> str:
     return f"{condition} && {clause}"
 
 
+def _reads_needs_freely(condition: str) -> bool:
+    """Return whether a condition reads the needs context other than by a literal job name."""
+    literal = re.sub(r"needs\s*\[\s*'[^']*'\s*\]", "needs.job", condition)
+    bare = re.sub(r"'(?:[^']|'')*'", "''", literal)
+    return re.search(r"(?<![\w.-])needs\b(?!\s*\.\s*[A-Za-z_])", bare) is not None
+
+
 def _lab_problems(base: dict[str, Any], head: dict[str, Any], gate: dict[str, Any]) -> list[str]:
     """Refuse a lab verdict job or a gate condition off its reviewed form while the lab form is in play.
 
     A gate whose base condition reads the lab verdict keeps that condition exactly. Any other gate reads the lab
-    verdict only through its base condition plus its exact lab clause.
+    verdict, or the needs context by a computed key or as a whole, only through its base condition plus its exact lab
+    clause.
     """
     steps: list[dict[str, Any]] = gate.get("steps") or []
     problems: list[str] = []
@@ -234,7 +243,8 @@ def _lab_problems(base: dict[str, Any], head: dict[str, Any], gate: dict[str, An
         reviewed: str | None = base[need].get("if")
         if LAB_VERDICT_JOB in str(reviewed):
             return condition != reviewed
-        return LAB_VERDICT_JOB in str(condition) and condition != lab_clause(reviewed, need)
+        reads = LAB_VERDICT_JOB in str(condition) or _reads_needs_freely(str(condition))
+        return reads and condition not in (reviewed, lab_clause(reviewed, need))
 
     return problems + [
         f"The head's {need} condition differs from its base condition plus its exact lab clause; "

@@ -1182,6 +1182,14 @@ def test_a_head_dropping_the_lab_verdict_job_is_red() -> None:
             lambda condition: gate_protected.lab_clause(condition.replace("!cancelled()", "always()"), "select"),
         ),
         ("select", lambda condition: condition.removesuffix(" }}") + " && needs['lab-verdict'].result == 'success' }}"),
+        (
+            "select",
+            lambda condition: (
+                condition.removesuffix(" }}")
+                + " && fromJSON(needs[format('lab-{0}', 'verdict')].outputs.authoritative || '{}')['select'] != true }}"
+            ),
+        ),
+        ("select", lambda condition: condition.removesuffix(" }}") + " && !contains(toJSON(needs), 'lint') }}"),
     ],
 )
 def test_a_gate_condition_off_its_base_plus_its_exact_lab_clause_is_red(gate: str, edit: Callable[[str], str]) -> None:
@@ -1228,6 +1236,27 @@ def test_a_gate_without_a_base_lab_clause_grades_green_with_its_exact_clause_or_
 )
 def test_the_lab_clause_extends_the_base_condition(condition: str | None, rendered: str) -> None:
     assert gate_protected.lab_clause(condition, "lint") == rendered
+
+
+@pytest.mark.parametrize(
+    ("condition", "free"),
+    [
+        ("${{ needs.select.result == 'success' }}", False),
+        ("${{ needs['select'].result == 'success' }}", False),
+        ("${{ needs [ 'select' ] .result == 'success' }}", False),
+        ("${{ needs . select.result == 'success' }}", False),
+        ("${{ contains(github.event.head_commit.message, 'needs') }}", False),
+        ("${{ contains(github.event.head_commit.message, 'it''s needs') }}", False),
+        ("${{ github.event.needs == 'x' && x-needs.y }}", False),
+        ("${{ fromJSON(needs[format('lab-{0}', 'verdict')].outputs.authoritative || '{}')['select'] != true }}", True),
+        ("${{ needs[ 'select' ] && needs[vars.job].result }}", True),
+        ("${{ !contains(toJSON(needs), 'lint') }}", True),
+        ("${{ contains(needs.*.result, 'failure') }}", True),
+        ("${{ 'it''s' == needs }}", True),
+    ],
+)
+def test_a_condition_reads_the_needs_context_freely_only_without_a_literal_job_name(condition: str, free: bool) -> None:
+    assert gate_protected._reads_needs_freely(condition) is free
 
 
 @pytest.mark.parametrize("docs", [False, True])
