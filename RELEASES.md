@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.1038 · 2026-11-18
+
+### 2026-11-18 · 0d35163edcd2 · #12175 · @agenticore-app
+
+**Sonar skips the coverage files its job writes into the checkout**
+
+This change adds coverage.xml, lcov.info, sonar-scope.txt, and the .coverage-shards directory to sonar.exclusions, since these are generated artifacts the sonar job itself writes into the checkout during dev push scans, not repository content. Previously Sonar indexed and analyzed them as source (notably the 7 MB coverage.xml), inflating the analysis report and scan time, and exposing them to secret detection unnecessarily. Excluding them trims roughly 10 to 25 seconds off the scan, though the Python sensor remains the dominant cost.
+
 ## v2.17.1036 · 2026-11-18
 
 ### 2026-11-18 · 34c3546f8ce7 · #12165 · @agenticore-app
