@@ -1050,7 +1050,20 @@ def test_only_the_trusted_tests_flake_budget_may_queue_on_the_flake_history_grou
 
 @pytest.mark.parametrize(
     "change",
-    [None, "steps", "group", "queue", "cancel", "other-job", "if", "untrusted", "trusted-name", "name", "events"],
+    [
+        None,
+        "steps",
+        "group",
+        "queue",
+        "cancel",
+        "other-job",
+        "if",
+        "new-hive",
+        "untrusted",
+        "trusted-name",
+        "name",
+        "events",
+    ],
 )
 def test_only_the_trusted_swarm_worker_image_hive_job_may_queue_on_the_hive_release_group(change: str | None) -> None:
     import copy
@@ -1070,6 +1083,8 @@ def test_only_the_trusted_swarm_worker_image_hive_job_may_queue_on_the_hive_rele
         updated["jobs"][name]["concurrency"]["cancel-in-progress"] = True
     elif change == "if":
         updated["jobs"][name]["if"] = "github.event_name != 'pull_request'"
+    elif change == "new-hive":
+        baseline["jobs"].pop("hive")
     elif change == "untrusted":
         baseline = None
     elif change == "trusted-name":
