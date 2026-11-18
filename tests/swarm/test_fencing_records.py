@@ -93,7 +93,7 @@ def test_migration_copies_the_document_into_records_and_reads_it_back(store: Any
     written = fencing.migrate_records(store, "sw", writers_upgraded=True)
 
     after = fencing.read(store, "sw")
-    assert written == 10
+    assert written == 11
     assert after[fencing.RECORDS_SLUG] == "sw"
     indexed = fencing.records(store, "sw").record("sw", fencing.ARCHIVED_NAMES, "old")
     assert indexed is not None and indexed.value == "z"
@@ -942,11 +942,13 @@ def test_a_change_that_adds_or_drops_sections_writes_their_records_and_name_head
         RecordWrite("delete", "executions", "a", BLIND),
         RecordWrite("delete", "grants", "g", 7),
         RecordWrite("delete", "by-name", "eng", BLIND),
+        RecordWrite("delete", "by-seat", "eng-1", BLIND),
     ]
     assert fencing._changes({}, {"executions": {"a": _row("a", "eng", 1)}, "grants": {"g": 1}}, {}) == [
         RecordWrite("put", "executions", "a", BLIND, _row("a", "eng", 1)),
         RecordWrite("put", "grants", "g", BLIND, 1),
         RecordWrite("put", "by-name", "eng", BLIND, "a"),
+        RecordWrite("put", "by-seat", "eng-1", BLIND, "a"),
     ]
 
 
