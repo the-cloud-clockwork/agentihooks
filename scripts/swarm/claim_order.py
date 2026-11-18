@@ -5,17 +5,20 @@ No other phase order is used; ledger order breaks the remaining ties.
 """
 
 from collections.abc import Callable
+from typing import Any
 
 from scripts.swarm_ledger import ledger_rank
 
 FIX = "fix"
 
 
-def key(rows: dict, fix_phase: str) -> Callable[[dict], tuple]:
+def key(
+    rows: dict[str, dict[str, Any]], fix_phase: str
+) -> Callable[[dict[str, Any]], tuple[bool, int, bool, bool, int]]:
     waiting = _waiting(rows)
     depth = depths(rows)
 
-    def task_key(task: dict) -> tuple:
+    def task_key(task: dict[str, Any]) -> tuple[bool, int, bool, bool, int]:
         return (
             not (bool(fix_phase) and task.get("phase") == fix_phase),
             ledger_rank.order(task),

@@ -197,8 +197,13 @@ def test_a_failed_queue_move_tells_the_lab_nothing():
         return queue.run(command, **kwargs)
 
     told = []
+
+    def lab(head):
+        told.append(head)
+        return {}
+
     journal = Journal()
-    result = merge_queue.prioritize(URL, run=run, journal=journal, lab=told.append)
+    result = merge_queue.prioritize(URL, run=run, journal=journal, lab=lab)
     assert (told, result["errors"], result["lab"]) == ([], ["insertion refused"], None)
     assert journal.records[0][1]["lab"] is None
 

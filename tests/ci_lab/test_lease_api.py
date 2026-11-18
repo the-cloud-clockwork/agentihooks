@@ -351,7 +351,10 @@ def test_priority_marks_the_heads_hotfix_until_they_expire(routes: lease_api.Con
     assert control.prioritized(routes.client, expires - 1) == frozenset({"c0ffee", "fix-branch"})
     assert control.prioritized(routes.client, expires) == frozenset()
     clock.now = expires
-    assert order(routes, "/priority", {"heads": ["next"], "class": "hotfix"})[0] == 200
+    assert order(routes, "/priority", {"heads": ["next"], "class": "hotfix"}) == (
+        200,
+        {"priority": ["next"], "class": "hotfix", "expires_ms": expires + control.PRIORITY_MS},
+    )
     assert routes.client.zrange(control.PRIORITY, 0, -1) == ["next"]
 
 

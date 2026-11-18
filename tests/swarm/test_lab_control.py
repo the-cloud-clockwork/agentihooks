@@ -2,6 +2,7 @@
 
 import io
 import json
+from email.message import Message
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request
@@ -90,8 +91,8 @@ def test_each_order_posts_its_body_with_the_bearer_token(monkeypatch: pytest.Mon
 @pytest.mark.parametrize(
     ("error", "why"),
     [
-        (HTTPError(URL, 401, "Unauthorized", {}, io.BytesIO()), f"the lab at {URL} refused the control token"),
-        (HTTPError(URL, 503, "Unavailable", {}, io.BytesIO()), f"the lab at {URL} answered 503 on /resume"),
+        (HTTPError(URL, 401, "Unauthorized", Message(), io.BytesIO()), f"the lab at {URL} refused the control token"),
+        (HTTPError(URL, 503, "Unavailable", Message(), io.BytesIO()), f"the lab at {URL} answered 503 on /resume"),
         (URLError("connection refused"), f"the lab at {URL} is unreachable: <urlopen error connection refused>"),
         (TimeoutError("timed out"), f"the lab at {URL} is unreachable: timed out"),
     ],

@@ -2,6 +2,7 @@
 hold the rest of pull request grading and resume it."""
 
 import json
+from email.message import Message
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request
@@ -167,7 +168,7 @@ def test_panic_on_with_no_token_is_an_action_line(
     ("error", "why"),
     [
         (URLError("down"), f"the lab at {URL} is unreachable: <urlopen error down>"),
-        (HTTPError(URL, 401, "Unauthorized", {}, None), f"the lab at {URL} refused the control token"),
+        (HTTPError(URL, 401, "Unauthorized", Message(), None), f"the lab at {URL} refused the control token"),
     ],
     ids=["unreachable", "refused"],
 )
