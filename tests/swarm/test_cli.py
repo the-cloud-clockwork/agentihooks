@@ -2048,7 +2048,7 @@ def test_the_pull_request_head_branch_and_repository_are_read_through_the_port()
     ports, provider, reference = _pull_port("fork-owner/bundle", seen)
 
     head = cli.pull_branch("https://github.com/o/r/pull/3", ports)
-    assert head == ("engineer-a1b2c3-0001", "https://github.com/fork-owner/bundle", 3, "h")
+    assert head == ("engineer-a1b2c3-0001", "https://github.com/fork-owner/bundle", 3, "h", "")
     assert seen == ["https://github.com/o/r/pull/3"]
     [call] = provider.calls
     assert (call.operation, call.args) == ("change", (reference,))
@@ -2058,7 +2058,7 @@ def test_the_pull_request_head_branch_and_repository_are_read_through_the_port()
 def test_a_pull_request_without_a_head_repository_gives_the_branch_alone() -> None:
     ports, _, _ = _pull_port("")
 
-    assert cli.pull_branch("https://github.com/o/r/pull/3", ports) == ("engineer-a1b2c3-0001", "", 3, "h")
+    assert cli.pull_branch("https://github.com/o/r/pull/3", ports) == ("engineer-a1b2c3-0001", "", 3, "h", "")
 
 
 @pytest.mark.parametrize(
