@@ -182,7 +182,8 @@ def test_the_unit_command_uses_the_computed_queue_partition(tmp_path):
     args = json.loads((tmp_path / "args.json").read_text())
     assert args[args.index("--shard") + 1] == "7/48"
     assert workflow["jobs"]["unit"]["strategy"]["matrix"]["include"] == (
-        "${{ fromJSON(github.event_name == 'merge_group' && format('[{0}]', needs.split.outputs.queue_312) || '[]') }}"
+        "${{ fromJSON(github.event_name == 'merge_group' && format('[{0}]', needs.split.outputs.queue_312)"
+        ' || needs.split.outputs.source != \'\' && \'[{"python-version":"3.12","shard":"copy"}]\' || \'[]\') }}'
     )
 
 
@@ -457,8 +458,12 @@ def test_merge_group_runs_unit_shards_on_python_312_only():
     legs = workflow["jobs"]["unit"]["strategy"]["matrix"]
     assert legs["python-version"] == ["3.12"]
     queue_only = "${{ github.event_name == 'merge_group' && '3.12' || '' }}"
-    assert {entry["python-version"] for entry in legs["exclude"]} == {queue_only}
-    assert [entry["shard"] for entry in legs["exclude"]] == legs["shard"][12:]
+    floor = [entry for entry in legs["exclude"] if "shard" in entry]
+    assert {entry["python-version"] for entry in floor} == {queue_only}
+    assert [entry["shard"] for entry in floor] == legs["shard"][12:]
+    assert [entry for entry in legs["exclude"] if "shard" not in entry] == [
+        {"python-version": "${{ needs.split.outputs.source != '' && '3.12' || '' }}"}
+    ]
     shard_check = workflow["jobs"]["shard-check"]["strategy"]["matrix"]["python-version"]
     assert shard_check == ["3.12"]
 

@@ -4640,6 +4640,27 @@
       ]
     },
     {
+      "id": "dev-push-copies-reused-unit-results-in-one-job",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-dev-push-reuse-one-job",
+      "behaviour": "A dev push that reuses the passed queue run of its commit runs one unit job, unit (3.12, copy), that restores every queue leg once and uploads the twenty legs of durations, coverage, flakes and executed lines in the unit job's order, while every other run still runs all twenty unit legs and every reader of a dev push's unit jobs accepts the copy job as a complete unit result.",
+      "seam": "The Tests workflow unit job matrix and steps, the shard check wait, the dispatch and coverage ratchet base lookups, the pull request test plan's dev record search and the scripts.ci_unit_copy layout and upload commands",
+      "tests": [
+        "tests/test_ci_dev_reuse.py::test_workflow_preserves_downstream_artifacts",
+        "tests/test_ci_dev_reuse.py::test_the_copy_job_sets_up_the_python_its_layout_runs_and_skips_every_leg_upload",
+        "tests/test_ci_dev_reuse.py::test_a_reusing_dev_push_runs_one_copy_job_and_every_other_run_runs_every_leg",
+        "tests/test_ci_dev_reuse.py::test_shard_check_takes_the_one_copy_job_for_every_leg_of_a_reusing_push",
+        "tests/test_ci_baseline_lookup.py::test_lookup_accepts_a_dev_push_run_that_copied_its_queue_units_in_one_job",
+        "tests/test_ci_test_plan.py::test_a_dev_run_that_copied_its_queue_units_in_one_job_is_a_record_only_when_the_copy_passed",
+        "tests/test_ci_unit_copy.py::test_every_push_leg_is_laid_out_from_the_queue_leg_it_maps_onto",
+        "tests/test_ci_unit_copy.py::test_each_push_leg_checks_and_summarizes_its_coverage_inside_its_coverage_folder",
+        "tests/test_ci_unit_copy.py::test_an_upload_replaces_the_name_puts_the_zip_and_finalizes_it_with_its_digest",
+        "tests/test_ci_unit_copy.py::test_every_leg_uploads_its_artifacts_in_the_unit_job_order_with_their_retention",
+        "tests/test_ci_unit_copy.py::test_the_layout_command_reads_the_queue_leg_map",
+        "tests/test_ci_unit_copy.py::test_the_upload_command_reaches_the_results_service_with_the_runtime_token"
+      ]
+    },
+    {
       "id": "ledger-artifacts-panel",
       "origin": "inventory",
       "behaviour": "The artifacts panel lists every artifact newest first, renders Markdown, JSON and SVG without running scripts, and offers delete and trash restore.",

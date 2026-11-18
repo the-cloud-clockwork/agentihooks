@@ -107,6 +107,9 @@ def lookup(tmp_path):
             jobs.pop(0)
         elif fault == "missing-publisher":
             jobs.pop(-2)
+        elif fault in {"copy", "copy-failed"}:
+            copied = {"name": "unit (3.12, copy)", "conclusion": "failure" if fault == "copy-failed" else "success"}
+            jobs[:] = [copied, *jobs[-2:]]
         elif fault in {"reuse", "reuse-failed", "reuse-decision-failed"}:
             jobs[:] = [
                 jobs[-2],
@@ -173,6 +176,14 @@ def test_lookup_accepts_the_twenty_shard_plan_of_a_dev_push_run(lookup, selector
     assert "id=222\n" in output
 
 
+@pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
+@pytest.mark.parametrize("selector", _SELECTORS)
+def test_lookup_accepts_a_dev_push_run_that_copied_its_queue_units_in_one_job(lookup, selector):
+    result, output, _ = lookup(selector, fault="copy")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "id=222\n" in output
+
+
 @pytest.mark.parametrize("selector", _SELECTORS[:1])
 @pytest.mark.parametrize("fault", ["reuse", "publisher-job"])
 def test_lookup_accepts_queue_publication_before_unrelated_jobs_pass(lookup, selector, fault):
@@ -197,6 +208,7 @@ def test_lookup_rejects_unverified_queue_reuse(lookup, selector, fault):
         "missing-unit",
         "shard-gap",
         "no-units",
+        "copy-failed",
         "measure",
         "publish",
         "missing-publisher",

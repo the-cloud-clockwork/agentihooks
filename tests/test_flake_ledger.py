@@ -439,7 +439,7 @@ def test_unit_shards_retry_on_the_command_line_and_upload_the_ledger():
     assert run["env"]["CI_FLAKES"] == "${{ github.workspace }}/flakes.jsonl"
     record = steps[names.index("Record flaky tests")]
     upload = steps[names.index("Upload the flake report")]
-    assert record["if"] == upload["if"] == "${{ !cancelled() }}"
+    assert record["if"] == upload["if"] == "${{ !cancelled() && needs.split.outputs.source == '' }}"
     assert names.index("Run tests") < names.index("Record flaky tests") < names.index("Upload the flake report")
     assert upload["with"]["name"] == "flakes-${{ matrix.python-version }}-${{ matrix.shard }}"
     assert upload["with"]["path"] == "flakes.jsonl"

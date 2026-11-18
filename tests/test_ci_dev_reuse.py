@@ -1,15 +1,16 @@
 import hashlib
 import json
+import os
 import re
 import subprocess
 import zipfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
-from scripts import ci_dev_reuse
+from scripts import ci_dev_reuse, ci_test_plan
 
 HEAD = "a" * 40
 TREE = "b" * 40
@@ -274,6 +275,7 @@ def test_source_from_other_repository_falls_back(tmp_path):
     assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) is None
 
 
+@pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
 def test_workflow_preserves_downstream_artifacts() -> None:
     import yaml
 
@@ -281,14 +283,23 @@ def test_workflow_preserves_downstream_artifacts() -> None:
     unit = jobs["unit"]
     steps = {step.get("name"): step for step in unit["steps"]}
     assert steps["Run tests"]["if"] == "needs.split.outputs.source == ''"
-    mapped = "${{ fromJSON(needs.split.outputs.queue_legs)[format('{0}', matrix.shard)] }}"
-    for kind in ("durations", "flakes", "coverage"):
-        restored = steps[f"Restore queue shard {kind}"]
-        assert restored["with"]["run-id"] == "${{ needs.split.outputs.source }}"
-        leg = "${{ matrix.shard }}" if kind == "flakes" else mapped
-        assert restored["with"]["name"] == f"{kind}-${{{{ matrix.python-version }}}}-{leg}"
-    emptied = steps["Empty the test reports of a leg above the queue's shard count"]
-    assert emptied["run"].split("\n")[:2] == ["echo '{}' > durations.json", "rm -f elapsed.json"]
+    restored = steps["Restore every queue leg"]
+    assert restored["with"]["run-id"] == "${{ needs.split.outputs.source }}"
+    assert restored["with"]["pattern"] == "{durations,flakes,coverage}-${{ matrix.python-version }}-*"
+    assert restored["with"]["path"] == "${{ runner.temp }}/queue-legs"
+    laid = steps["Lay out every push leg from its queue leg"]
+    assert laid["if"] == "needs.split.outputs.source != ''"
+    assert laid["env"] == {"QUEUE_LEGS": "${{ needs.split.outputs.queue_legs }}"}
+    assert laid["run"] == (
+        'python -m scripts.ci_unit_copy layout --queue "$RUNNER_TEMP/queue-legs" --legs "$QUEUE_LEGS"'
+        ' --out "$RUNNER_TEMP/push-legs"'
+    )
+    sent = steps["Upload every push leg"]
+    assert sent["if"] == "needs.split.outputs.source != ''"
+    assert sent["uses"] == "actions/github-script@v7"
+    assert sent["env"] == {"PUSH_LEGS": "${{ runner.temp }}/push-legs"}
+    assert sent["with"]["github-token"] == "none"
+    assert "'-m', 'scripts.ci_unit_copy', 'upload', '--out', process.env.PUSH_LEGS" in sent["with"]["script"]
     assert "queue_legs" not in jobs["select"]["outputs"]
     producer = "durations" if "durations" in jobs else "select"
     assert jobs["split"]["outputs"]["source"] == "${{ needs." + producer + ".outputs.source }}"
@@ -298,21 +309,140 @@ def test_workflow_preserves_downstream_artifacts() -> None:
     assert any(step.get("name") == "Take each shard's coverage as it lands" for step in jobs["sonar"]["steps"])
 
 
-def test_a_reusing_leg_sets_up_the_python_its_coverage_steps_run() -> None:
+@pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
+def test_the_copy_job_sets_up_the_python_its_layout_runs_and_skips_every_leg_upload() -> None:
     import yaml
 
     jobs = yaml.safe_load((Path(__file__).parents[1] / ".github/workflows/test.yml").read_text())["jobs"]
     steps = {step.get("name"): step for step in jobs["unit"]["steps"]}
+    names = list(steps)
     setup = [
         "Set up Python ${{ matrix.python-version }}",
         "Stamp the day",
         "Restore the test environment",
         "Set up uv",
         "Install dependencies",
+        "Use the test environment",
     ]
-    for name in [*setup, "Use the test environment", "Check the coverage database", "Summarize the executed lines"]:
+    for name in setup:
         assert "UNIT_SOURCE" not in steps[name].get("if", "")
         assert "outputs.source" not in steps[name].get("if", "")
+    assert names.index("Use the test environment") < names.index("Lay out every push leg from its queue leg")
+    assert names.index("Lay out every push leg from its queue leg") < names.index("Upload every push leg")
+    for name in (
+        "Check the coverage database",
+        "Upload coverage",
+        "Summarize the executed lines",
+        "Upload the executed lines summary",
+    ):
+        assert steps[name]["if"] == "needs.split.outputs.source == '' && matrix.python-version == '3.12'"
+    for name in ("Record flaky tests", "Upload the flake report"):
+        assert steps[name]["if"] == "${{ !cancelled() && needs.split.outputs.source == '' }}"
+    assert steps["Upload durations"]["if"] == "${{ !cancelled() && hashFiles('durations.json') != '' }}"
+
+
+class _Context(dict):
+    """A workflow expression context whose keys read as attributes."""
+
+    def __getattr__(self, key: str) -> object:
+        value = self[key]
+        return _Context(value) if isinstance(value, dict) else value
+
+
+def _evaluated(value: object, context: dict[str, object]) -> object:
+    """Evaluate a workflow expression with the operators and functions the unit matrix uses."""
+    if not isinstance(value, str) or not value.startswith("${{"):
+        return value
+    body = value.removeprefix("${{").removesuffix("}}").replace("&&", " and ").replace("||", " or ")
+    names = {**context, "fromJSON": json.loads, "format": lambda template, *args: template.format(*args)}
+    return eval(body.strip(), {"__builtins__": {}}, names)
+
+
+def _legs(event: str, source: str, queue: str = "") -> list[dict[str, object]]:
+    """Expand the unit matrix as GitHub does for one run: the product, then every exclude, then every include."""
+    import yaml
+
+    workflow = yaml.safe_load((Path(__file__).parents[1] / ".github/workflows/test.yml").read_text())
+    matrix = workflow["jobs"]["unit"]["strategy"]["matrix"]
+    context: dict[str, object] = {
+        "github": _Context(event_name=event),
+        "needs": _Context(split={"outputs": {"source": source, "queue_312": queue}}),
+    }
+    legs = [
+        {"python-version": version, "shard": shard} for version in matrix["python-version"] for shard in matrix["shard"]
+    ]
+    for row in matrix["exclude"]:
+        dropped = {key: _evaluated(value, context) for key, value in row.items()}
+        legs = [leg for leg in legs if any(leg[key] != value for key, value in dropped.items())]
+    for entry in cast(list[dict[str, object]], _evaluated(matrix["include"], context)):
+        extended = [
+            leg for leg in legs if all(leg[key] == entry[key] for key in ("python-version", "shard") if key in entry)
+        ]
+        for leg in extended:
+            leg.update(entry)
+        if not extended:
+            legs.append(dict(entry))
+    return legs
+
+
+@pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
+def test_a_reusing_dev_push_runs_one_copy_job_and_every_other_run_runs_every_leg() -> None:
+    import yaml
+
+    every = [{"python-version": "3.12", "shard": shard} for shard in range(1, 21)]
+    assert _legs("push", "44301321341") == [{"python-version": "3.12", "shard": "copy"}]
+    for event in ("push", "pull_request", "workflow_dispatch"):
+        assert _legs(event, "") == every
+    plan = ",".join(json.dumps({"python-version": "3.12", "shard": shard, "total": 14}) for shard in range(1, 15))
+    assert [leg["shard"] for leg in _legs("merge_group", "", plan)] == list(range(1, 15))
+    unit = yaml.safe_load((Path(__file__).parents[1] / ".github/workflows/test.yml").read_text())["jobs"]["unit"]
+    named = unit["name"].replace("${{ matrix.python-version }}", "3.12").replace("${{ matrix.shard }}", "copy")
+    assert named == ci_test_plan.COPY_JOB
+
+
+@pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
+@pytest.mark.parametrize(
+    ("copied", "unit", "code", "said"),
+    [
+        ("44301321341", "success", 0, ""),
+        (
+            "44301321341",
+            "failure",
+            1,
+            "::error::The unit job that copies queue run 44301321341 into every leg ended failure.\n",
+        ),
+        ("", "success", 0, ""),
+    ],
+    ids=["copied", "copy-failed", "legs"],
+)
+def test_shard_check_takes_the_one_copy_job_for_every_leg_of_a_reusing_push(
+    tmp_path: Path, copied: str, unit: str, code: int, said: str
+) -> None:
+    import yaml
+
+    jobs = yaml.safe_load((Path(__file__).parents[1] / ".github/workflows/test.yml").read_text())["jobs"]
+    step = next(step for step in jobs["shard-check"]["steps"] if step.get("name") == "Wait for every planned shard")
+    assert step["env"]["COPIED"] == "${{ needs.split.outputs.source }}"
+    assert step["env"]["UNIT"] == "${{ needs.unit.result }}"
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    (tools / "python").write_text('#!/usr/bin/env bash\necho "$@" >> "$CALLS"\n')
+    (tools / "python").chmod(0o755)
+    calls, exported = tmp_path / "calls", tmp_path / "env"
+    env = {
+        **os.environ,
+        "PATH": f"{tools}:{os.environ['PATH']}",
+        "CALLS": str(calls),
+        "GITHUB_ENV": str(exported),
+        "QUEUE_PLAN": "",
+        "COPIED": copied,
+        "UNIT": unit,
+    }
+    result = subprocess.run(["bash", "-e", "-c", step["run"]], env=env, capture_output=True, text=True, check=False)
+    assert result.returncode == code
+    assert result.stdout == said
+    assert exported.read_text() == "SHARDS=[" + ",".join(str(shard) for shard in range(1, 21)) + "]\n"
+    assert (calls.read_text() if calls.exists() else "") == ("" if copied else "-m scripts.ci_gate_shards\n")
 
 
 def test_artifact_contract_matches_the_eighteen_shards():
