@@ -1741,6 +1741,60 @@ def test_the_summary_download_pins_only_the_artifact_downloads() -> None:
     ]
 
 
+def _one_download_summary(uses: str, name: str, pattern: str) -> list[dict[str, Any]]:
+    from scripts import ci_reuse
+
+    checkout, durations, _flakes, summarize = ci_reuse.summary_steps()
+    reports = {**durations, "name": name, "uses": uses, "with": {"pattern": pattern, "path": "test-reports"}}
+    return [checkout, reports, summarize]
+
+
+@pytest.mark.feature("test-summary-downloads-every-report-in-one-step")
+@pytest.mark.parametrize("uses", ["actions/download-artifact@v4", "actions/download-artifact@v8.0.2"])
+@pytest.mark.parametrize("retried", [False, True])
+@pytest.mark.parametrize("pipefail", [False, True])
+def test_the_separate_summary_accepts_one_download_of_every_report(uses: str, retried: bool, pipefail: bool) -> None:
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    steps = _one_download_summary(uses, "Download this run's test reports", "{durations,flakes}-3.*")
+    if retried:
+        steps = ci_reuse.retried_summary(steps)
+    if pipefail:
+        steps = ci_reuse.pipefail_summary(steps)
+    config = _separate_summary(head, steps)
+    assert gate_protected.grade({"test.yml": base}, config, {"test.yml": head}, config, _POLICY) == []
+
+
+@pytest.mark.feature("test-summary-downloads-every-report-in-one-step")
+@pytest.mark.parametrize(
+    ("name", "pattern"),
+    [
+        ("Download this run's test reports", "*"),
+        ("Download this run's test reports", "durations-3.*"),
+        ("Download this run's test durations", "{durations,flakes}-3.*"),
+    ],
+)
+def test_the_separate_summary_refuses_one_download_of_other_reports(name: str, pattern: str) -> None:
+    base, head = _aggregators()
+    config = _separate_summary(head, _one_download_summary("actions/download-artifact@v8.0.2", name, pattern))
+    problems = gate_protected.grade({"test.yml": base}, config, {"test.yml": head}, config, _POLICY)
+    assert "The test summary must use the reviewed reporting job." in problems
+
+
+@pytest.mark.feature("test-summary-downloads-every-report-in-one-step")
+def test_the_one_download_puts_one_step_for_every_report_where_the_first_download_was() -> None:
+    from scripts import ci_reuse
+
+    checkout, durations, flakes, summarize = ci_reuse.summary_steps()
+    reports = {
+        **durations,
+        "name": "Download this run's test reports",
+        "with": {"pattern": "{durations,flakes}-3.*", "path": "test-reports"},
+    }
+    assert gate_protected._one_download([checkout, durations, flakes, summarize]) == [checkout, reports, summarize]
+
+
 def test_the_retried_summary_waits_and_downloads_each_report_once_more():
     from scripts import ci_reuse
 
