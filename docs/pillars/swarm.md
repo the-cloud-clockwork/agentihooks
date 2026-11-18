@@ -132,7 +132,9 @@ Swarms created before the setting existed read as `legacy`. Any other value is r
    generation it started, it releases the slot and the claim, then settles the task: `done`, or back to `open` with no
    claimant. A finished agent stays at its prompt and never exits on its own, so the tick's reap step sends its hive
    an execution stop with reason `ended`, and the hive reaps the agent and publishes the exit; see
-   [Stopping an agent whose work ended](hives.md#stopping-an-agent-whose-work-ended).
+   [Stopping an agent whose work ended](hives.md#stopping-an-agent-whose-work-ended). An agent whose pane died with
+   its work unfinished is first reopened in its own seat and conversation by its hive, up to three times, before its
+   task reopens; see [Resuming a dead agent the hub started](hives.md#resuming-a-dead-agent-the-hub-started).
 8. **Reopen.** A reopen clears the claimant, which raises the claim generation. The next offer and claim therefore
    carry new ids, and nothing from the old generation can block them.
 
@@ -9051,11 +9053,13 @@ task. The prompt tells it to read its task folder and inbox and continue the sam
 input and permission prompts are left alone. A pane still showing the provider error gets at most three
 resume attempts on separate ticks before normal idle rules apply. An agent whose process
 died reopens its own conversation in the same seat; if that cannot resume, the handoff supplies its
-successor's context. An agent stopped on purpose with `agentihooks terminate-agent` is never reopened:
-the command records a deliberate exit for its swarm agent, and the tick drops that agent, refunds its
-claim and returns its task to open for the next claim under the lane cap. Recovery preserves the
-existing task claim. A changed claim owner or execution generation, expired claim lease or changed seat
-occupant fences out the old agent, so recovery cannot resume work already taken by a successor.
+successor's context. On the `events` engine the hub orders that resume from the agent's hive; see
+[Resuming a dead agent the hub started](hives.md#resuming-a-dead-agent-the-hub-started). An agent stopped
+on purpose with `agentihooks terminate-agent` is never reopened: the command records a deliberate exit for its
+swarm agent, and the tick drops that agent, refunds its claim and returns its task to open for the next claim
+under the lane cap. Recovery preserves the existing task claim. A changed claim owner or execution generation,
+expired claim lease or changed seat occupant fences out the old agent, so recovery cannot resume work already
+taken by a successor.
 
 ### Staged compatibility before admission
 
