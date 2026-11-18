@@ -4120,6 +4120,7 @@
       "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis and the local object store, scripts.ci_lab.scheduler.StoredManifests, scripts.ci_lab.expand_tests.units, scripts.ci_lab.interaction.invalidated and tests.dep_manifest.invalidated",
       "tests": [
         "tests/ci_lab/test_scheduler.py::test_a_test_verdict_outside_list_reaches_the_stored_records_and_the_following_key",
+        "tests/ci_lab/test_scheduler.py::test_a_note_joins_the_outside_list_a_stored_record_already_holds",
         "tests/test_dep_manifest.py::test_a_change_to_a_file_a_test_opened_outside_its_record_invalidates_that_test"
       ]
     },

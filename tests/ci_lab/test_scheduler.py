@@ -1431,6 +1431,18 @@ def test_stored_manifests_read_the_packed_manifest_of_the_nearest_stored_ancesto
     assert manifest_folder(SLUG) == "lab/manifests/the-cloud-clockwork--agentihooks/"
 
 
+@pytest.mark.feature("lab-verdict-outside-to-manifest")
+def test_a_note_joins_the_outside_list_a_stored_record_already_holds(tmp_path: Path) -> None:
+    objects = LocalObjects(tmp_path / "objects")
+    packed = dep_manifest.pack(copy.deepcopy(SUITE_MANIFEST))
+    objects.write_once(f"{manifest_folder(SLUG)}dev.json", json.dumps(packed).encode())
+    stored = scheduler.StoredManifests(objects)
+    stored.note(REPO, (SECOND_TEST, "tests/test_gone.py::test_gone"), ["docs/p.md", "docs/a.md"])
+    records = SUITE_MANIFEST["tests"]
+    second = {**records[SECOND_TEST], "outside": ["docs/a.md", "docs/c.md", "docs/p.md"]}
+    assert stored(REPO, ["dev"]) == {**SUITE_MANIFEST, "tests": {**records, SECOND_TEST: second}}
+
+
 def _batch_keys(manifest: dict[str, Any] | None, note: bytes) -> dict[tuple[str, ...], str]:
     assert manifest is not None
     tree = {"scripts/alpha.py": ALPHA.encode(), "docs/p.md": note}
