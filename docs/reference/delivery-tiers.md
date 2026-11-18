@@ -20,7 +20,7 @@ Each tier has a wall time budget. A check that does not fit the pull request or 
 
 How a green promotion run merges `dev` into `main` and creates the release is in [Promotion and releases](promotion.md).
 
-Removing the queue tier, so that a pull request merges on its pull request verdict and a red `dev` grade reverts its culprit, was evaluated on 18 November 2026 with a no go verdict. [Post merge testing with automatic revert](../research/post-merge-testing.md) gives the red `dev` rate it measured, what the queue catches, the predicted rate without it and the gates that would make the change safe.
+Removing the queue tier, so that a pull request merges on its pull request verdict and a red `dev` grade reverts its culprit, was evaluated with a no go verdict in [Post merge testing with automatic revert](../research/post-merge-testing.md).
 
 ## Lab authority and back pressure
 

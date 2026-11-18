@@ -420,10 +420,10 @@ The commands under [Method](#method) carry this window's dates, sample sizes and
 | `created=2026-11-04..2026-11-17` | `WINDOW` in the downloads, and again inside the C1 loop | the new first and last UTC day, both included |
 | `--since=2026-11-04T00:00:00Z --until=2026-11-18T00:00:00Z` | C3 | midnight UTC at the start of the first day, and after the last day |
 | `336` | C4, merges per hour | hours in the window, 24 × days |
-| `25` | C5 | the red dev push sample, no larger than the C1 `push&branch=dev failure` count |
-| `36` | C7 | the cancelled merge group sample, no larger than the C2 `merge_group cancelled` count |
+| `25` | C5, twice | the red dev push sample, no larger than the C1 `push&branch=dev failure` count |
+| `36` | C7, twice | the cancelled merge group sample, no larger than the C2 `merge_group cancelled` count |
 | `66` | C9, twice | 2 × the C4 `verdict minutes p50` |
-| `114` | C9, three times | C2 `merge_group failure` + C2 `merge_group cancelled` × the C7 runs with a failed job other than the summary / the C7 sample |
+| `114` | C9, three times | `4 + 265 × 15 / 36` in this window: the C2 `merge_group failure` count, plus the C2 `merge_group cancelled` count times the C7 runs with a failed job other than the summary, divided by the C7 sample size |
 | `13 / 19` | C9 | the C8 rejects followed by at least one new commit / all C8 rejects |
 | `0.334` | C9 | the C1 red share: `push&branch=dev failure` / (`success` + `failure`) |
 | `943` | C9 | the C3 merge count |
@@ -451,8 +451,8 @@ wc -l dev-push.jsonl mg-success.jsonl mg-cancelled.jsonl mg-failure.jsonl
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| A download is shorter than its count | GitHub lists at most 1,000 runs for a filtered [workflow runs](https://docs.github.com/en/rest/actions/workflow-runs) search; this window reached 942 green merge groups | Split `created` into two ranges, download each, and concatenate the files |
-| `mg-failure.jsonl` holds exactly 100 lines | Its download has no `--paginate`, because this window had 4 failed merge groups | Add `--paginate` to that download |
+| A download is shorter than its count | The list reached the cap of 1,000 results for each filtered search that the [workflow runs API](https://docs.github.com/en/rest/actions/workflow-runs) documents. The dev push and green merge group downloads held 903 and 942 runs in this window, so a longer or busier window passes it first | Split `created` into two ranges, download each, and concatenate the files |
+| `mg-failure.jsonl` holds exactly 100 lines | The download has no `--paginate`, so it returns one page of 100 runs | Add `--paginate` to that download |
 | C4 or C10 stops with a `KeyError` on a head sha | A run created inside the window graded a commit made before `--since`, so the sha is missing from `pos` | Keep only those runs before sorting `graded`: `runs = [r for r in runs if r["head_sha"] in pos]` |
 
-A recheck changes the verdict only through [Gates that would make it safe](#gates-that-would-make-it-safe): compare each new value with its "Go when" column. [Reversible first step](#reversible-first-step) sets the rule for taking the question up again: shadow culprit attribution at least 95 % precise over 14 days, with the green dev baseline and the detection gates holding. C11 still finds no revert or culprit code on `dev`, so a recheck can move the baseline and detection rows, but nothing reopens the question until the shadow attribution runs.
+A recheck changes the verdict only through [Gates that would make it safe](#gates-that-would-make-it-safe): compare each new value with its "Go when" column. [Reversible first step](#reversible-first-step) sets the rule for taking the question up again: the shadow culprit attribution's would be reverts at least 95 % precise after 14 days, with the green dev baseline and the detection gates holding. C11 still finds no revert or culprit code on `dev`.
