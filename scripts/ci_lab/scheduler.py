@@ -16,6 +16,7 @@ commit's grades on the scheduler port, metrics on the metrics port, both from on
 import argparse
 import io
 import json
+import logging
 import subprocess
 import sys
 import time
@@ -120,6 +121,7 @@ MINIO_SECRET_KEY = f"{contract.MINIO_PREFIX}SECRET_KEY"
 MIRROR_STORE = "CI_LAB_MIRROR_STORE"
 IMAGE = "CI_LAB_IMAGE"
 REPOSITORY = "CI_LAB_REPOSITORY"
+REINDEX_ON_START = "CI_LAB_REINDEX_ON_START"
 
 Needs = Mapping[str, Mapping[str, Any]]
 Manifests = Callable[[str, Sequence[str]], dict[str, Any] | None]
@@ -630,7 +632,7 @@ class Scheduler:
                 state.units.update({ref: replace(source.units[ref]) for ref in source.gates[gate]})
                 continue
             state.gates[gate] = [self._place(state, unit, request.bypass_negative, carried, misses) for unit in units]
-        self.queue.enqueue(misses, request.head, {})
+        self.queue.enqueue(misses, request.head, {}, request.base, plan.grader)
         self._save(state)
         self.client.sadd(LIVE, run)
         self.client.set(f"{LANES}{request.repo}|{lane}|{int(request.tier)}", run)
@@ -763,7 +765,7 @@ class Scheduler:
 
 
 class BusInbox:
-    """Lab head events read from the bus consumer of `ci.lab.head.>`, each acknowledged once read."""
+    """Lab head events read from the bus consumer of `ci.lab.head.>`, each acknowledged once read, or terminated."""
 
     def __init__(self, consumer: Consumer, batch: int = BATCH, timeout_ms: int = FETCH_MS) -> None:
         self.consumer = consumer
@@ -771,10 +773,19 @@ class BusInbox:
         self.timeout_ms = timeout_ms
 
     def heads(self) -> list[Head]:
-        """Return the heads of the next batch of envelopes; a head's lane is its branch, else the head itself."""
+        """Return the heads of the next batch of envelopes; a head's lane is its branch, else the head itself. An
+        envelope missing a head field is terminated with a logged warning, never redelivered to the dead letter cap.
+        """
         heads: list[Head] = []
         for delivery in self.consumer.fetch(self.batch, self.timeout_ms):
             data = cast(Mapping[str, Any], delivery.event.data)  # pragma: no mutate
+            missing = [name for name in HEAD_FIELDS if name not in data]
+            if missing:
+                logging.getLogger(__name__).warning(
+                    "terminated lab head %s missing %s", delivery.event.id, ", ".join(missing)
+                )
+                delivery.term()
+                continue
             event = HeadEvent(*(str(data[name]) for name in HEAD_FIELDS))
             heads.append(Head(event, str(data.get("branch") or event.head)))
             delivery.ack()
@@ -857,6 +868,17 @@ class MirrorExpander:
             files[path] = meta.split()[2]
         return files
 
+    def _workflows(self, mirror: Mirror, sha: str) -> dict[str, Any]:
+        """Return each workflow file directly in a commit's workflow folder, parsed and keyed by file name the way
+        scripts.ci_wiring.load reads a tree, for the reusable workflows a static job calls."""
+        folder = WORKFLOW.parent.as_posix()
+        files = {
+            PurePosixPath(path).name: blob
+            for path, blob in self._files(mirror, sha).items()
+            if PurePosixPath(path).parent.as_posix() == folder and path.endswith((".yml", ".yaml"))
+        }
+        return {name: yaml.safe_load(text) or {} for name, text in self._contents(mirror, files).items()}
+
     def _on_dev(self, repo: str, path: str) -> str:
         """Return one file of the repository's dev branch head."""
         mirror = self._mirror(repo)
@@ -887,7 +909,7 @@ class MirrorExpander:
         registry = json.loads(self._git(mirror, "show", f"{grader}:{REGISTRY.as_posix()}"))
         toolchain = replace(self.toolchain, lockfile=head.get("uv.lock", ""), pyproject=head.get("pyproject.toml", ""))
         gates: dict[str, list[Unit]] = {}
-        for gate in discover(workflow, registry):
+        for gate in discover(workflow, registry, self._workflows(mirror, grader)):
             inputs = StaticInputs(
                 gate.name, _within(head, gate.paths), _within(base, gate.base_paths), grader, toolchain
             )
@@ -1028,6 +1050,8 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     objects = S3Objects(s3, environ[MINIO_BUCKET], "")
     consumer = open_bus(replace(BusConfig.from_environ(environ), provision=False)).lab_heads.consumer(DURABLE, SUBJECT)
     scheduler = build(environ, client, objects, consumer)
+    if environ.get(REINDEX_ON_START) == "true":
+        print(f"reindexed {scheduler.store.reindex()} verdicts", flush=True)
     leases = Leases(scheduler.queue, LEASE_TTL_MS, _now_ms, _sleep_ms, LEASE_POLL_MS)
     routes = lease_api.ControlRoutes(client, environ.get(contract.CONTROL_TOKEN, ""), _now_ms)
     spending = budget.Budget(client, _now_ms, budget.policy(runtime))
