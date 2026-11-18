@@ -150,8 +150,9 @@ The command runs these steps in order and stops at the first refusal:
    signer again.
 4. Mints the root member credential, a user JWT named `hive-root` signed by the swarm account. It grants only the
    subjects of the swarms the record lists for `root`; see
-   [What a scoped member is granted](swarm-bus-scope.md#what-a-scoped-member-is-granted). The NATS server caps a
-   connect message at 65,536 bytes, so a credential over 61,440 bytes is refused before any file is written.
+   [What a scoped member is granted](swarm-bus-scope.md#what-a-scoped-member-is-granted). The command holds the
+   credential to a 65,536 byte NATS control line less 4,096 bytes kept for the rest of the connect message, so a
+   credential over 61,440 bytes is refused before any file is written.
 5. Writes the credential to `~/.agentihooks/root-bus/bus.creds` and the settings to
    `~/.agentihooks/root-bus/bus.env`, both mode 0600, in a folder created with mode 0700. A rerun overwrites both.
 6. Connects to the hub's NATS once with the written settings, then closes the connection.
@@ -199,16 +200,17 @@ The `-` prefix makes each file optional, so a hive without root bus settings sti
 
 #### Check it
 
-After the restart the hive runs a lane spoke for each `events` swarm and lane, and each spoke logs its start in
-the hive journal:
+After the restart the hive runs a lane spoke for each `events` swarm and each lane not named in `HIVE_EXCLUDED`,
+and each spoke logs its start in the hive journal:
 
 ```bash
 journalctl --user -u agentihooks-hive --since "5 minutes ago" | grep 'hive spoke for swarm'
 # hive spoke for swarm rig-grade-swarm lane eng takes swarm.rig-grade-swarm.ready.eng
 ```
 
-The spokes also beat the root hive's presence entry, key `root` in each `events` swarm's `hive-presence` bucket,
-every 15 seconds. The entry holds `heartbeat_ms` and `expires_ms` and lapses 45 seconds after the last beat. With the
+The spokes also beat the root hive's presence entry, key `root` in each `events` swarm's `hive-presence` bucket.
+Each spoke poll renews it when it starts and every 15 seconds while it runs, and an idle spoke polls again after 5
+seconds. The entry holds `heartbeat_ms` and `expires_ms` and lapses 45 seconds after the last beat. With the
 root credential its state subject can be read directly; the state stream name follows
 [Subjects and streams per swarm](swarm-bus-scope.md#subjects-and-streams-per-swarm):
 
@@ -244,12 +246,34 @@ re-mint runs no connect check and never extends the listing. When it cannot mint
 
 #### Revoke
 
-`agentihooks hive revoke root` removes `root` from the signer record's `member_swarms` field when
-`AGENTIHOOKS_NATS_SIGNER` names an OpenBao record. With a signer it then revokes the root NATS user. Last, it deletes
-`bus.env` and `bus.creds`, and prints `revoked root`. It does not restart the hive service. After the next restart
-the hive reads its bus settings from its other env files only; when they set none, it runs on the memory bus and its
-lane spokes refuse, as above. Run `agentihooks hive root-bus` again to give the root hive a new credential; its
-connect check proves the hub accepts it.
+`agentihooks hive revoke root` runs three steps in order:
+
+1. When `AGENTIHOOKS_NATS_SIGNER` names an OpenBao record under `agentihooks/hub/`, it removes `root` from the
+   record's `member_swarms` field and requests the ExternalSecret sync, as `hive root-bus` does.
+2. With a signer, it records the root NATS user as revoked and pushes the updated account to the NATS server.
+3. It deletes `bus.env` and `bus.creds`.
+
+```text
+unlisted root from the hub signer record agentihooks/hub/nats
+requested a sync of the signer record agentihooks-swarm/agentihooks-swarm-nats-signer
+revoked the NATS credential of root
+revoked root
+```
+
+The first line reads `the hub signer record <path> lists no member swarms for root` when the record had no entry
+for `root`, and `AGENTIHOOKS_NATS_SIGNER names no hub signer record, so no member swarms entry to unlist` when the
+signer is not an OpenBao hub record.
+
+A refusal prints `hive revoke refused: <message>` and exits 1. `no OpenBao client to unlist root from <path>`
+means `OPENBAO_URL` or `OPENBAO_TOKEN` is unset, and nothing has changed yet.
+`NATS refused the account update (<description>)`, or a push that times out after 10 seconds, stops the command
+after `root` is unlisted and before the files are deleted. Run `agentihooks hive revoke root` again once NATS
+answers.
+
+The command does not restart the hive service. After the next restart the hive reads its bus settings from its
+other env files only; when they set none, it runs on the memory bus and its lane spokes refuse, as above. Run
+`agentihooks hive root-bus` again to give the root hive a new credential; its connect check proves the hub
+accepts it.
 
 #### Limits
 
@@ -259,6 +283,8 @@ connect check proves the hub accepts it.
 - A swarm created after the last run is outside the credential, and the re-mint at hive start does not add it. Run
   `agentihooks hive root-bus` again.
 - A `file:` signer folder is never updated. Its `member_swarms` file must already list `root` for every wanted swarm.
+- The hive service is a systemd user unit, written to `~/.config/systemd/user/agentihooks-hive.service`. The
+  command needs Linux with a systemd user session; without one it writes the files and then refuses at the restart.
 
 #### Refusals
 
@@ -277,11 +303,13 @@ Each refusal prints `hive root-bus refused: <message>` and exits 1:
 | `the hub signer record has no member_swarms field, so it scopes no member; it mints no unscoped bus credential` | The hub mints no unscoped credential | Run `agentihooks hive scope` on the hub, then retry |
 | `no swarm to list: pass --swarm or create a swarm first` | No `--swarm` and the swarm store holds no swarm | Name a swarm or create one |
 | `the hub signer record does not list root for every swarm and this host cannot update it` | A wanted swarm is missing for `root`, and the signer is a `file:` folder or OpenBao settings are missing | Set `OPENBAO_URL` and `OPENBAO_TOKEN` with an OpenBao signer, or add the swarms to the folder's `member_swarms` file |
-| `member_swarms contains an invalid swarm name (<reason>)` | A `--swarm` name is not one subject token | Use the swarm's slug |
+| `member_swarms contains an invalid swarm name (<reason>)` | A `--swarm` name, or a swarm name in the record, is not one subject token | Use the swarm's slug, or fix the record |
+| `member_swarms must map member ids to lists of swarm names` | The record's `member_swarms` field has the wrong shape | Fix the field; see [Swarm scoped bus credentials](swarm-bus-scope.md#when-a-credential-is-scoped) |
+| The OpenBao error text | Reading or updating the record's listing failed in OpenBao | Fix the OpenBao access the error names, then rerun |
 | `listed hive root in the hub signer record, but a fresh read does not list it` | The record read back after the update still lacks a wanted swarm | Run the command again; if it repeats, read the record's `member_swarms` entry for `root` |
 | `the root credential is <n> bytes for <k> swarms, past the 65536 byte NATS control line; name fewer swarms with --swarm` | `root` is listed for too many swarms | Narrow the listing as in Limits |
 | `the hub refused the root hive credential in <path> (<error type>: <error>)` | The connect check failed: NATS is unreachable at the record's `url`, or the server rejects the credential | Fix the address or the server's operator trust and rerun. The files stay written and the service is not restarted |
-| `agentihooks executable not found` | The hive unit needs the `agentihooks` command on `PATH` | Install agentihooks for the user, then rerun |
+| `agentihooks executable not found` | The hive unit needs the `agentihooks` command on `PATH` | Install agentihooks for the user, then rerun. The files stay written and the service is not restarted |
 | `wrote <path>, but the hive user service did not restart`, with or without `(<error>)` | `systemctl --user` failed or is missing | Read `systemctl --user status agentihooks-hive`, fix it, then `systemctl --user restart agentihooks-hive` |
 
 ## Ticks started by swarm commands
