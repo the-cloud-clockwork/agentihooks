@@ -1,3 +1,4 @@
+import os
 import re
 import threading
 from collections.abc import Iterator
@@ -300,6 +301,46 @@ def test_the_ledger_server_gives_the_projector_its_store_and_stops_it_before_clo
         "projector stopped",
         "server closed",
     ]
+
+
+@pytest.mark.feature("ledger-server-pid-file-after-projector")
+def test_the_ledger_server_writes_its_pid_file_only_once_the_projector_runs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from contextlib import contextmanager
+
+    from scripts.swarm_ledger import ledger_server
+
+    pidfile = tmp_path / "server.pid"
+    seen: list[tuple[str, str | None]] = []
+
+    def written() -> str | None:
+        return pidfile.read_text() if pidfile.exists() else None
+
+    @contextmanager
+    def projecting(repository: object, hub: object) -> Iterator[None]:
+        seen.append(("projector started", written()))
+        yield
+
+    def serving(poll_interval: float) -> None:
+        seen.append(("serving", written()))
+        raise ValueError("serving failed")
+
+    monkeypatch.setattr(projector, "running", projecting)
+    monkeypatch.setattr(ledger_server, "PIDFILE", pidfile)
+    monkeypatch.setattr(ledger_server.core, "LEDGER_DIR", tmp_path)
+    monkeypatch.setattr(ledger_server.storage, "shared", lambda: None)
+    monkeypatch.setattr(ledger_server.threading, "Thread", Mock())
+    monkeypatch.setattr(ledger_server, "metrics_journal", Mock())
+    monkeypatch.setattr(ledger_server.server_code, "record", Mock())
+    monkeypatch.setattr(ledger_server.server_lifetime, "watch", Mock())
+    server = Mock()
+    server.serve_forever.side_effect = serving
+    server.drained.return_value = True
+    monkeypatch.setattr(ledger_server, "ThreadingHTTPServer", Mock(return_value=server))
+    with pytest.raises(ValueError, match="serving failed"):
+        ledger_server.serve()
+    assert seen == [("projector started", None), ("serving", str(os.getpid()))]
 
 
 def test_a_relay_that_fails_to_start_releases_the_lease_without_serving(

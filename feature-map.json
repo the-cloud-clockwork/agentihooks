@@ -366,6 +366,16 @@
       ]
     },
     {
+      "id": "ledger-server-pid-file-after-projector",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2689",
+      "behaviour": "A ledger server writes its process id file only once its hub projector is running, just before it serves requests, so the pid file never names a server whose projector has not started.",
+      "seam": "ledger_server.serve, the pid file write against projector.running and server.serve_forever",
+      "tests": [
+        "tests/swarm_ledger/test_outbox_host.py::test_the_ledger_server_writes_its_pid_file_only_once_the_projector_runs"
+      ]
+    },
+    {
       "id": "grader-gates-fail-closed-on-stale-base",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-gates-drop-head-fallback",
