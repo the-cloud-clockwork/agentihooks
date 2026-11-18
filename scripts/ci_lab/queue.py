@@ -201,3 +201,7 @@ class Queue:
             _head(job.head, "done"),
         ]
         return str(self._reap(keys=keys, args=[job.id, now_ms, requeues, LOST]))
+
+    def retry(self, job: Job) -> bool:
+        """Move a finished job back to pending with one more attempt; False when it is not finished."""
+        return False

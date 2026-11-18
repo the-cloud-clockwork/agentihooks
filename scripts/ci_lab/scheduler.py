@@ -56,6 +56,7 @@ __all__ = [
     "Ports",
     "Scheduler",
     "Settings",
+    "StoredManifests",
     "build",
     "fold",
     "frame",
@@ -107,6 +108,8 @@ IMAGE = "CI_LAB_IMAGE"
 REPOSITORY = "CI_LAB_REPOSITORY"
 
 Needs = Mapping[str, Mapping[str, Any]]
+Manifests = Callable[[str, Sequence[str]], dict[str, Any] | None]
+Verdicts = Callable[[str, str], Verdict | None]
 
 
 @dataclass(frozen=True)
@@ -693,13 +696,26 @@ def frame(tier: Priority, tree: str, grader: str, gates: Mapping[str, tuple[Unit
     return Plan(tree, grader, framed, outputs={"select": {"scope": "none"}})
 
 
+@dataclass(frozen=True)
+class StoredManifests:
+    """Packed dependency manifests in the lab object store, one per dev commit under `objects.manifest_folder`."""
+
+    objects: Objects
+
+    def __call__(self, repo: str, commits: Sequence[str]) -> dict[str, Any] | None:
+        """Return the manifest of the first commit that has one stored, None when none has."""
+        return None
+
+
 class MirrorExpander:
     """Static gate units of a head read from a git mirror with ls-tree and show, never a checkout."""
 
-    def __init__(self, node: Path, root: Path, toolchain: Toolchain) -> None:
+    def __init__(self, node: Path, root: Path, toolchain: Toolchain, manifests: Manifests, verdicts: Verdicts) -> None:
         self.node = node
         self.root = root
         self.toolchain = toolchain
+        self.manifests = manifests
+        self.verdicts = verdicts
 
     def _mirror(self, repo: str) -> Mirror:
         self.root.mkdir(parents=True, exist_ok=True)
@@ -762,7 +778,8 @@ class MirrorExpander:
 def build(environ: Mapping[str, str], client: Any, objects: Objects, consumer: Consumer) -> Scheduler:
     """Return the service's scheduler over its clients, trusting the runner trust list of the repository's dev."""
     toolchain = Toolchain(sys.version.split()[0], {}, "", "", environ.get(IMAGE, ""), {})
-    expander = MirrorExpander(Path(environ[contract.GIT_MIRROR]), Path(environ[MIRROR_STORE]), toolchain)
+    node, root = Path(environ[contract.GIT_MIRROR]), Path(environ[MIRROR_STORE])
+    expander = MirrorExpander(node, root, toolchain, StoredManifests(objects), Store(client, objects).get)
     checks: dict[str, Poster] = {}
 
     def poster(repo: str) -> Poster:

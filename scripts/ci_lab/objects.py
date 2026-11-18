@@ -18,6 +18,7 @@ __all__ = [
     "Uploads",
     "grade_prefix",
     "is_report",
+    "manifest_folder",
     "unit_path",
     "upload_path",
 ]
@@ -55,6 +56,11 @@ def grade_prefix(run: str) -> str:
 def upload_path(job: str, name: str) -> str:
     """Return where a worker uploads a leased job's report or log."""
     return f"{ROOT}uploads/{job}/{FILES[name]}"
+
+
+def manifest_folder(slug: str) -> str:
+    """Return the folder of a repository's packed dependency manifests, one <commit>.json per dev commit."""
+    return f"{ROOT}manifests/{slug.replace('/', '--')}/"
 
 
 def is_report(path: str) -> bool:

@@ -1,7 +1,8 @@
+import copy
 import json
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -11,13 +12,14 @@ import pytest
 import yaml
 
 from scripts.ci_lab import __main__ as cli
-from scripts.ci_lab import control, evidence, lease_api, queue, scheduler
+from scripts.ci_lab import control, evidence, expand_tests, lease_api, queue, scheduler
 from scripts.ci_lab.checks import Output
 from scripts.ci_lab.delivery import CLASSES
 from scripts.ci_lab.digests import GradeInputs, StaticInputs, Toolchain, grade_key, static_key
 from scripts.ci_lab.intake import GradeRequest
 from scripts.ci_lab.leases import Grant, Leases
-from scripts.ci_lab.objects import LocalObjects, unit_path, upload_path
+from scripts.ci_lab.objects import LocalObjects, manifest_folder, unit_path, upload_path
+from scripts.ci_lab.outcomes import CRASH
 from scripts.ci_lab.retry import Policy
 from scripts.ci_lab.static_gates import StaticGate
 from scripts.ci_lab.store import Store, Verdict
@@ -25,6 +27,7 @@ from scripts.ci_lab.units import Priority, Unit
 from scripts.ci_lab.webhooks import HeadEvent, envelope
 from scripts.events import bus
 from scripts.events.envelope import Envelope
+from tests import dep_manifest
 from tests.ci_lab.gate_required_cases import load, materialize
 from tests.dep_manifest import _git
 
@@ -364,6 +367,51 @@ def test_a_unit_that_cannot_run_makes_the_grade_red_and_stores_no_verdict(lab: C
     assert run.grade(HEAD_A).conclusion == "failure"
     assert run.lab.poster.moves(HEAD_A, scheduler.REQUIRED)[-1] == ("completed", "failure")
     assert run.store.get(item.kind, item.key) is None
+
+
+@pytest.mark.feature("lab-scheduler-test-units")
+@pytest.mark.parametrize(("retries", "runs"), [(Policy(), 2), (Policy(lost=0), 1), (Policy(lost=2), 3)])
+def test_a_crashed_unit_reruns_while_the_lost_retries_allow_then_makes_the_grade_red(
+    lab: Callable[..., Run], retries: Policy, runs: int
+) -> None:
+    item = unit(1)
+    run = lab({HEAD_A: plan({"lint": (item,)})}, retries=retries)
+    run.push(HEAD_A)
+    run.tick(1000)
+    job = scheduler.job_id(HEAD_A, item)
+    for attempt in range(runs):
+        grants = run.lease()
+        assert [grant.job for grant in grants] == [job]
+        run.finish(grants[0], CRASH)
+        run.tick(1100 + attempt)
+        record = run.engine.queue.job(job)
+        assert record is not None
+        final = attempt == runs - 1
+        assert (record.state, record.attempts) == ("done" if final else "pending", attempt if final else attempt + 1)
+        assert run.grade(HEAD_A).units[ref(item)].outcome == (CRASH if final else "")
+    assert run.lease() == []
+    assert run.grade(HEAD_A).conclusion == "failure"
+    assert run.lab.poster.moves(HEAD_A, scheduler.REQUIRED)[-1] == ("completed", "failure")
+    assert run.store.get(item.kind, item.key) is None
+
+
+@pytest.mark.feature("lab-scheduler-test-units")
+def test_a_failed_unit_reruns_while_the_failed_retries_allow_and_its_pass_is_stored(lab: Callable[..., Run]) -> None:
+    item = unit(1)
+    run = lab({HEAD_A: plan({"lint": (item,)})}, retries=Policy(failed=1))
+    run.push(HEAD_A)
+    run.tick(1000)
+    first = run.lease()[0]
+    run.finish(first, scheduler.FAILED, {"seconds": 3.0})
+    run.tick(1100)
+    assert run.store.get(item.kind, item.key) is None
+    assert run.grade(HEAD_A).units[ref(item)].outcome == ""
+    second = run.lease()[0]
+    assert second.job == first.job
+    run.finish(second, scheduler.PASSED, {"seconds": 3.0})
+    run.tick(1200)
+    assert run.grade(HEAD_A).conclusion == "success"
+    assert run.store.get(item.kind, item.key) == Verdict(item.kind, item.key, True, False, 3.0)
 
 
 @pytest.mark.feature("lab-unit-outcomes")
@@ -840,6 +888,14 @@ def _gate(name: str, job: str, paths: tuple[str, ...], base_paths: tuple[str, ..
     return StaticGate(name, job, name, (), (), "", paths, base_paths)
 
 
+def _no_tests(repo: str, commits: Sequence[str]) -> dict[str, Any]:
+    return {"units": [], "tests": {}}
+
+
+def _unknown(kind: str, key: str) -> Verdict | None:
+    return None
+
+
 def test_the_mirror_expander_keys_static_gates_from_git_objects_without_a_checkout(
     tmp_path: Path, origin: tuple[Path, str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -860,7 +916,7 @@ def test_the_mirror_expander_keys_static_gates_from_git_objects_without_a_checko
     _git(tmp_path, "init", "-q", "--bare", str(node))
     toolchain = Toolchain("3.12", {}, "", "", "image", {})
     root = tmp_path / "mirrors" / "stores"
-    expander = scheduler.MirrorExpander(node, root, toolchain)
+    expander = scheduler.MirrorExpander(node, root, toolchain, _no_tests, _unknown)
     remote = f"file://{repo}"
     request = GradeRequest(remote, head, base, Priority.PULL_REQUEST, ACTOR, False)
     found = expander.expand(request)
@@ -893,7 +949,7 @@ def test_the_mirror_expander_keys_static_gates_from_git_objects_without_a_checko
     assert (promoted.tree, promoted.grader, set(promoted.gates), promoted.skipped) == (
         tree,
         head,
-        {"lint", "semgrep"},
+        {"lint", "semgrep", "unit"},
         frozenset(),
     )
 
@@ -902,7 +958,9 @@ def test_the_mirror_expander_trusts_the_runner_trust_list_on_dev(tmp_path: Path,
     repo, _, _ = origin
     node = tmp_path / "node"
     _git(tmp_path, "init", "-q", "--bare", str(node))
-    expander = scheduler.MirrorExpander(node, tmp_path / "stores", Toolchain("3.12", {}, "", "", "", {}))
+    expander = scheduler.MirrorExpander(
+        node, tmp_path / "stores", Toolchain("3.12", {}, "", "", "", {}), _no_tests, _unknown
+    )
     assert expander.trusted(f"file://{repo}") == frozenset([*ACTORS["actors"], ACTORS["queue_actor"]])
     assert expander.retries(f"file://{repo}") == Policy(lost=2, failed=0)
     _commit(repo, {"delivery.yaml": json.dumps({"lab": {**DELIVERY["lab"], "retry": {"lost": -1}}})})
@@ -924,12 +982,14 @@ def test_a_head_without_a_lockfile_or_pyproject_keys_its_units_with_neither(
     monkeypatch.setattr(scheduler, "discover", lambda workflow, registry: [_gate("format", "lint", ("src/",), ())])
     node = tmp_path / "node"
     _git(tmp_path, "init", "-q", "--bare", str(node))
-    expander = scheduler.MirrorExpander(node, tmp_path / "stores", Toolchain("3.12", {}, "old", "old", "image", {}))
+    expander = scheduler.MirrorExpander(
+        node, tmp_path / "stores", Toolchain("3.12", {}, "old", "old", "image", {}), _no_tests, _unknown
+    )
     found = expander.expand(GradeRequest(f"file://{repo}", bare, base, Priority.PROMOTION, ACTOR, False))
     inputs = StaticInputs(
         "format", {"src/a.py": _blob(repo, bare, "src/a.py")}, {}, bare, Toolchain("3.12", {}, "", "", "image", {})
     )
-    assert found.gates == {"lint": (Unit("static", static_key(inputs), ("format",)),)}
+    assert found.gates == {"lint": (Unit("static", static_key(inputs), ("format",)),), "unit": ()}
 
 
 def test_the_mirror_expander_fails_on_a_git_read_that_fails(tmp_path: Path, origin: tuple[Path, str, str]) -> None:
@@ -937,11 +997,198 @@ def test_the_mirror_expander_fails_on_a_git_read_that_fails(tmp_path: Path, orig
     unregistered = _drop(repo, ".github/input-keys.json")
     node = tmp_path / "node"
     _git(tmp_path, "init", "-q", "--bare", str(node))
-    expander = scheduler.MirrorExpander(node, tmp_path / "stores", Toolchain("3.12", {}, "", "", "", {}))
+    expander = scheduler.MirrorExpander(
+        node, tmp_path / "stores", Toolchain("3.12", {}, "", "", "", {}), _no_tests, _unknown
+    )
     with pytest.raises(subprocess.CalledProcessError):
         expander.expand(GradeRequest(f"file://{repo}", unregistered, base, Priority.PROMOTION, ACTOR, False))
     with pytest.raises(subprocess.CalledProcessError):
         expander.trusted(f"file://{tmp_path / 'missing'}")
+
+
+ALPHA = "def first():\n    return 1\n\n\ndef second():\n    return 2\n"
+FIRST_TEST = "tests/test_alpha.py::test_first"
+OTHER_TEST = "tests/test_alpha.py::test_other"
+SECOND_TEST = "tests/test_beta.py::test_second"
+SUITE_MANIFEST: dict[str, Any] = {
+    "version": 2,
+    "commit": "dev",
+    "environment": "py312",
+    "units": ["scripts/alpha.py::first", "scripts/alpha.py::second"],
+    "tests": {
+        FIRST_TEST: {"units": [0], "files": [], "escapes": False},
+        OTHER_TEST: {"units": [0], "files": [], "escapes": False},
+        SECOND_TEST: {"units": [1], "files": [], "escapes": False},
+    },
+    "lines": {},
+}
+SUITE_DURATIONS = {FIRST_TEST: 40.0, OTHER_TEST: 40.0, SECOND_TEST: 1.0}
+
+
+@dataclass(frozen=True)
+class Suite:
+    repo: Path
+    seed: str
+    base: str
+    head: str
+
+    @property
+    def remote(self) -> str:
+        return f"file://{self.repo}"
+
+    def request(self, tier: Priority, head: str = "") -> GradeRequest:
+        return GradeRequest(self.remote, head or self.head, self.base, tier, ACTOR, False)
+
+
+@dataclass
+class Port:
+    manifest: dict[str, Any] | None = None
+    known: bool = True
+    asked: list[tuple[str, list[str]]] = field(default_factory=list[tuple[str, list[str]]])
+    looked: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
+
+    def manifests(self, repo: str, commits: Sequence[str]) -> dict[str, Any] | None:
+        self.asked.append((repo, list(commits)))
+        return copy.deepcopy(self.manifest)
+
+    def verdicts(self, kind: str, key: str) -> Verdict | None:
+        self.looked.append((kind, key))
+        return Verdict(kind, key, False, False, 1.0) if self.known else None
+
+    def expander(self, tmp_path: Path) -> scheduler.MirrorExpander:
+        node = tmp_path / "node"
+        _git(tmp_path, "init", "-q", "--bare", str(node))
+        toolchain = Toolchain("3.12", {}, "", "", "image", {})
+        return scheduler.MirrorExpander(node, tmp_path / "stores", toolchain, self.manifests, self.verdicts)
+
+
+def _suite(tmp_path: Path, lab: dict[str, Any]) -> Suite:
+    repo = tmp_path / "suite"
+    _git(tmp_path, "init", "-q", "-b", "dev", str(repo))
+    seed = _commit(
+        repo,
+        {
+            ".github/workflows/test.yml": "jobs: {}\n",
+            ".github/input-keys.json": '{"gates": {}}',
+            "delivery.yaml": json.dumps({"lab": lab}),
+            "uv.lock": "lock",
+            "pyproject.toml": "[project]\n",
+            ".test_durations": json.dumps(SUITE_DURATIONS),
+            "scripts/alpha.py": ALPHA,
+            "tests/test_alpha.py": "def test_first():\n    pass\n\n\ndef test_other():\n    pass\n",
+            "tests/test_beta.py": "def test_second():\n    pass\n",
+        },
+    )
+    base = _commit(repo, {"docs/c.md": "c\n"})
+    _commit(repo, {"scripts/alpha.py": ALPHA.replace("return 2", "return 3")})
+    head = _commit(repo, {"docs/c.md": "d\n"})
+    return Suite(repo, seed, base, head)
+
+
+def _suite_units(suite: Suite, head: str, durations: dict[str, float]) -> tuple[Unit, ...]:
+    paths = filter(None, _git(suite.repo, "ls-tree", "-r", "-z", "--name-only", head).split("\0"))
+    blobs = {path: _blob(suite.repo, head, path) for path in paths}
+    shown = ["git", "-C", str(suite.repo), "show"]
+    tree = {path: subprocess.run([*shown, f"{head}:{path}"], capture_output=True, check=True).stdout for path in blobs}
+    chain = Toolchain("3.12", {}, blobs["uv.lock"], blobs["pyproject.toml"], "image", {})
+    return expand_tests.units(SUITE_MANIFEST, tree, blobs, durations, chain)
+
+
+def _tree(suite: Suite, head: str) -> str:
+    return _git(suite.repo, "rev-parse", f"{head}^{{tree}}").strip()
+
+
+@pytest.fixture
+def staticless(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(scheduler, "discover", lambda workflow, registry: [])
+
+
+@pytest.mark.feature("lab-scheduler-test-units")
+@pytest.mark.usefixtures("staticless")
+@pytest.mark.parametrize("tier", [Priority.PULL_REQUEST, Priority.HOTFIX])
+def test_a_pull_request_or_hotfix_head_expands_no_test_units(tmp_path: Path, tier: Priority) -> None:
+    suite = _suite(tmp_path, DELIVERY["lab"])
+    port = Port()
+    found = port.expander(tmp_path).expand(suite.request(tier))
+    assert found == scheduler.frame(tier, _tree(suite, suite.head), suite.base, {})
+    assert (port.asked, port.looked) == ([], [])
+
+
+@pytest.mark.feature("lab-scheduler-test-units")
+@pytest.mark.usefixtures("staticless")
+@pytest.mark.parametrize("queue", [{}, {"queue": {"full_suite_entries": 2}}])
+def test_a_merge_group_head_runs_only_the_batches_its_entries_invalidate(tmp_path: Path, queue: dict[str, Any]) -> None:
+    suite = _suite(tmp_path, {**DELIVERY["lab"], **queue})
+    port = Port(SUITE_MANIFEST)
+    found = port.expander(tmp_path).expand(suite.request(Priority.QUEUE))
+    every = _suite_units(suite, suite.head, SUITE_DURATIONS)
+    assert [batch.members for batch in every] == [(FIRST_TEST,), (OTHER_TEST,), (SECOND_TEST,)]
+    assert found == scheduler.frame(Priority.QUEUE, _tree(suite, suite.head), suite.base, {"unit": every[2:]})
+    assert port.asked == [(suite.remote, [suite.base, suite.seed])]
+    assert port.looked == [(batch.kind, batch.key) for batch in every]
+
+
+@pytest.mark.feature("lab-scheduler-test-units")
+@pytest.mark.usefixtures("staticless")
+@pytest.mark.parametrize(
+    ("queue", "known"), [({}, False), ({"queue": {"full_suite_entries": 1}}, True)], ids=["cache", "entries"]
+)
+def test_a_merge_group_head_runs_every_batch_when_an_interaction_clause_holds(
+    tmp_path: Path, queue: dict[str, Any], known: bool
+) -> None:
+    suite = _suite(tmp_path, {**DELIVERY["lab"], **queue})
+    port = Port(SUITE_MANIFEST, known)
+    found = port.expander(tmp_path).expand(suite.request(Priority.QUEUE))
+    every = _suite_units(suite, suite.head, SUITE_DURATIONS)
+    assert found == scheduler.frame(Priority.QUEUE, _tree(suite, suite.head), suite.base, {"unit": every})
+
+
+@pytest.mark.feature("lab-scheduler-test-units")
+@pytest.mark.usefixtures("staticless")
+@pytest.mark.parametrize("tier", [Priority.PROMOTION, Priority.BACKFILL])
+def test_a_promotion_or_backfill_head_runs_every_batch_without_reading_the_cache(
+    tmp_path: Path, tier: Priority
+) -> None:
+    suite = _suite(tmp_path, DELIVERY["lab"])
+    port = Port(SUITE_MANIFEST)
+    found = port.expander(tmp_path).expand(suite.request(tier))
+    every = _suite_units(suite, suite.head, SUITE_DURATIONS)
+    assert found == scheduler.frame(tier, _tree(suite, suite.head), suite.head, {"unit": every})
+    assert (port.asked, port.looked) == ([(suite.remote, [suite.base, suite.seed])], [])
+
+
+@pytest.mark.feature("lab-scheduler-test-units")
+@pytest.mark.usefixtures("staticless")
+def test_a_head_without_stored_durations_keeps_each_test_file_whole(tmp_path: Path) -> None:
+    suite = _suite(tmp_path, DELIVERY["lab"])
+    head = _drop(suite.repo, ".test_durations")
+    found = Port(SUITE_MANIFEST).expander(tmp_path).expand(suite.request(Priority.PROMOTION, head))
+    every = _suite_units(suite, head, {})
+    assert [batch.members for batch in every] == [(FIRST_TEST, OTHER_TEST), (SECOND_TEST,)]
+    assert found.gates == {"unit": every}
+
+
+@pytest.mark.feature("lab-scheduler-test-units")
+@pytest.mark.usefixtures("staticless")
+@pytest.mark.parametrize("tier", [Priority.QUEUE, Priority.PROMOTION])
+def test_a_head_that_needs_test_units_without_a_manifest_cannot_expand(tmp_path: Path, tier: Priority) -> None:
+    suite = _suite(tmp_path, DELIVERY["lab"])
+    with pytest.raises(ValueError, match=f"^no dependency manifest at or before {suite.base}$"):
+        Port().expander(tmp_path).expand(suite.request(tier))
+
+
+@pytest.mark.feature("lab-scheduler-test-units")
+def test_stored_manifests_read_the_packed_manifest_of_the_nearest_stored_ancestor(tmp_path: Path) -> None:
+    objects = LocalObjects(tmp_path / "objects")
+    for commit in ("older", "newer"):
+        packed = dep_manifest.pack({**SUITE_MANIFEST, "commit": commit})
+        objects.write_once(f"{manifest_folder(SLUG)}{commit}.json", json.dumps(packed).encode())
+    objects.write_once(f"{manifest_folder('other/repo')}head.json", b"{}")
+    stored = scheduler.StoredManifests(objects)
+    assert stored(REPO, ["head", "newer", "older"]) == {**SUITE_MANIFEST, "commit": "newer"}
+    assert stored(REPO, ["head", "older"]) == {**SUITE_MANIFEST, "commit": "older"}
+    assert stored(REPO, ["head"]) is None
+    assert manifest_folder(SLUG) == "lab/manifests/the-cloud-clockwork--agentihooks/"
 
 
 @pytest.mark.feature("lab-control-routes")
@@ -984,6 +1231,10 @@ def test_build_wires_the_service_ports_from_the_environment(tmp_path: Path, monk
     assert isinstance(expander, scheduler.MirrorExpander)
     assert (expander.node, expander.root) == (tmp_path / "node", tmp_path / "stores")
     assert expander.toolchain == Toolchain(sys.version.split()[0], {}, "", "", "image", {})
+    assert isinstance(expander.manifests, scheduler.StoredManifests) and expander.manifests.objects is objects
+    stored = Verdict("static", key("static", 9), True, False, 1.0)
+    Store(client, objects).put(stored, {}, b"")
+    assert expander.verdicts("static", stored.key) == stored
     imageless = {name: value for name, value in environ.items() if name != scheduler.IMAGE}
     bare = scheduler.build(imageless, client, objects, consumer).ports.expander
     assert isinstance(bare, scheduler.MirrorExpander) and bare.toolchain.image == ""

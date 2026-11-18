@@ -188,6 +188,30 @@ def test_reap_allows_more_attempts(jobs: queue.Queue) -> None:
     assert jobs.reap(record, 100, 2) == "lost"
 
 
+@pytest.mark.feature("lab-scheduler-test-units")
+def test_retry_moves_a_finished_job_back_to_pending_with_one_more_attempt(jobs: queue.Queue) -> None:
+    jobs.enqueue([unit("a"), unit("b")], "h1", {})
+    assert take(jobs, "h1:test:a")
+    record = found(jobs, "h1:test:a")
+    assert jobs.retry(record) is False
+    assert jobs.finish(record, "tok", "crash")
+
+    assert jobs.retry(record) is True
+    again = found(jobs, "h1:test:a")
+    assert (again.state, again.outcome, again.attempts, again.worker) == ("pending", "", 1, "")
+    assert jobs.token("h1:test:a") == ""
+    assert jobs.pending() == ["h1:test:b", "h1:test:a"]
+    assert jobs.members("h1", "pending") == {"h1:test:a", "h1:test:b"}
+    assert jobs.members("h1", "done") == set()
+    assert jobs.client.smembers("agentihooks-ci:queue:done") == set()
+    assert jobs.retry(record) is False
+
+    assert take(jobs, "h1:test:a", "w2", "t2")
+    assert jobs.finish(found(jobs, "h1:test:a"), "t2", "crash")
+    assert jobs.retry(record) is True
+    assert found(jobs, "h1:test:a").attempts == 2
+
+
 def test_every_key_carries_the_lab_prefix(jobs: queue.Queue, client) -> None:
     jobs.enqueue([unit("a"), unit("b")], "h1", {})
     assert take(jobs, "h1:test:a")
