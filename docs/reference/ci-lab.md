@@ -70,7 +70,7 @@ built CI lab image.
 | `AGENTIHOOKS_LAB_REMOTE`, `AGENTIHOOKS_LAB_REMOTE_TOKEN` | yes | no | The lab remote URL a mirror fetches a sha GitHub lacks from, and its token, passed by reference; unset, the mirrors fetch from GitHub only |
 | `CI_LAB_IMAGE` | yes | no | Worker image name keyed into static unit keys; empty when unset |
 | `CI_LAB_CONTROL_TOKEN` | yes | no | Bearer token the [control routes](#control-routes) require, passed by reference; unset, they refuse every request. The swarm host that presses panic or merge priority holds the same variable |
-| `UV_CACHE_DIR` | no | yes | Shared uv cache for virtual environments |
+| `UV_CACHE_DIR` | no | yes | Not forwarded to [head venv builds](#head-venv-builds), which receive the sandbox's private `XDG_CACHE_HOME` |
 
 A worker started with any `GITHUB_APP_*` variable in its environment refuses to start. It exits
 1 and names each variable it found. Only the scheduler holds the App key.
@@ -1389,6 +1389,10 @@ scheduler enqueues a grade's misses with the grade's base and its plan's grader 
 | `stats` | a private copy of the head with every file under the `[tool.mutmut]` source paths behind its trampolines | the tree as root and `CI_LAB_MUTATION_CACHE` |
 | `mutant` | the same private trampolined copy | `CI_LAB_KILLERS`, `CI_LAB_MUTATION_BUDGET`, `CI_LAB_MUTATION_CAP` and the tests that the stats records of every test module in the tree show reaching the mutant's function, with their seconds |
 
+Before running a static gate, test batch or mutation unit, the executor selects or builds the
+[head's venv](#head-venv-builds). Dependency build hooks run with the pod's sandbox whitelist;
+they do not inherit the worker service's scheduler, bus or object store environment.
+
 The mutation runner runs in the sandbox as `python -m scripts.ci_lab.run_mutation REQUEST OUTPUT`
 from the private tree. A mutant unit passes only when every mutant is killed; a runner that exits
 non zero fails its unit. Each adapter uploads a JSON report with the unit's `seconds` (and `flaky`
@@ -2221,10 +2225,15 @@ Limitations:
 
 ### Head venv builds
 
-`venvs.venv_for(lockfile_digest, tree, root, build)` returns the baked image venv when its
-marker holds the digest. Otherwise it builds `root/<digest>` once, under a lock per digest, by
-running uv in a `Sandbox` from `build` (`venvs.Build`: ports, whitelist and time limit). The
-executors pass `Pod.build`, the pod's ports, whitelist and unit time limit.
+`venvs.venv_for(lockfile_digest, tree, root, build)` returns `(venv, built)`: the selected venv
+path and whether this call built it. The digest is the SHA256 of the head's `uv.lock` bytes.
+When `/opt/agentihooks-venv/lockfile.sha256` holds that digest, it returns the baked image venv
+with `built=False`. Otherwise it reuses a matching `root/<digest>/lockfile.sha256`, or builds
+that venv under a lock per digest and returns `built=True`. Concurrent callers wait for the
+same build; another digest gets its own venv.
+
+The build runs uv in a `Sandbox` from `build` (`venvs.Build`: ports, whitelist and time limit).
+The executors pass `Pod.build`, the pod's ports, whitelist and unit time limit.
 
 | Part | Value |
 |---|---|
@@ -2240,6 +2249,89 @@ builds again. A worker without `uv` on its `PATH` raises
 `uv is not installed, so a venv cannot be built`. The build is isolated by environment only:
 it runs as the worker's user with no PID namespace, so it can still read and write the host
 filesystem, `/proc` included.
+
+#### Worker configuration
+
+The worker service uses `executors.WHITELIST`, currently `{"LANG": "C.UTF-8"}`, and
+`UNIT_TIMEOUT_S`, currently 1800 seconds, for both the venv build and the unit run. Its
+`PortAllocator` spans 20000 to 29999 in ranges of 10. The build root is
+`<CI_LAB_WORK_ROOT>/venvs`, so a failed build's log is under
+`<CI_LAB_WORK_ROOT>/venvs/builds/<run folder>/log.txt`.
+
+The [worker environment](#environment) configures the service. It does not extend the build
+whitelist: exporting `UV_CACHE_DIR`, a package index setting or a credential on the pod does not
+pass it to uv or its hooks. There is no service CLI flag or environment override for the build
+whitelist or time limit; changing these defaults requires changing the worker code and building
+its image.
+
+A library caller chooses the settings explicitly:
+
+| `Build` field | Meaning |
+|---|---|
+| `ports` | Allocator supplying the build's `CI_LAB_PORT_FIRST` and `CI_LAB_PORT_LAST` |
+| `whitelist` | Values available to uv and all its build hooks; start with an explicit mapping, never the whole worker environment |
+| `timeout` | Maximum build duration in seconds |
+
+`UV_PROJECT_ENVIRONMENT` always names the selected venv, overriding any whitelist value.
+`PATH` comes from the whitelist or falls back to `/bin:/usr/bin`. The sandbox's
+[private variables](#unit-sandbox) override matching whitelist entries, including `HOME`,
+`TMPDIR`, every listed XDG variable and `LANG`. The worker resolves the uv executable before
+clearing the environment and passes its own Python interpreter with `--python`; build hooks
+that need other executables must find them on the build's `PATH`.
+
+#### Build or reuse a head venv
+
+The service does this automatically; there is no separate venv build command. For a library
+caller, use absolute paths to an existing head tree containing `uv.lock` and `pyproject.toml`,
+and a writable venv root. This example adds only a nonsecret build setting and an executable
+search path:
+
+```python
+from pathlib import Path
+
+from scripts.ci_lab.executors import lockfile_digest
+from scripts.ci_lab.sandbox import PortAllocator
+from scripts.ci_lab.venvs import Build, venv_for
+
+head = Path("/srv/ci-lab/head")
+root = Path("/srv/ci-lab/venvs")
+build = Build(
+    ports=PortAllocator(first=20000, last=29999, width=10),
+    whitelist={"BUILD_MODE": "ci", "PATH": "/usr/local/bin:/bin:/usr/bin"},
+    timeout=1800,
+)
+venv, built = venv_for(lockfile_digest(head), head, root, build)
+print(venv, built)
+```
+
+The caller needs uv installed on its own `PATH`, the worker Python and network access to fetch
+locked dependencies. `--no-install-project` skips installing the head project; dependencies
+can still run build hooks. Successful builds write the digest marker and remove their private
+run folder. The next call with the same digest returns `built=False` without running uv.
+Changing `Build.whitelist` or `Build.timeout` alone does not rebuild a marked venv.
+
+#### Build failures and limits
+
+| Symptom | Meaning | Check or action |
+|---|---|---|
+| `uv is not installed, so a venv cannot be built` | No uv executable on the worker's `PATH` | Install uv in the worker image and make it discoverable there; changing only `Build.whitelist["PATH"]` does not change executable resolution |
+| `uv sync for <tree> ended with code <nonzero>; its log is <log>` | uv or a dependency build hook failed | Read the named log; check the frozen lockfile, dependency access and the explicit build whitelist |
+| The same message with `code None` | The build exceeded `Build.timeout` and the sandbox killed its process group | Read the kept log and check the build duration against the worker's unit limit |
+| A pod variable is absent from a hook | Only the explicit build whitelist and sandbox variables reach the hook | Check `Pod.whitelist` or the library caller's `Build.whitelist`, not the service environment |
+| No build log after success | The build removed its run folder | Check the digest marker; reused venvs create no new build log |
+
+A nonzero exit or timeout writes no marker, so the next call attempts the build again, even
+when a partial venv remains. The missing-uv error starts no sandbox run and has no build log.
+
+Environment filtering does not prevent a hook from accessing the filesystem or `/proc` as the
+worker's user. Builds have network access, no read only trees and no PID namespace. The sandbox
+kills the process group on timeout only; a background child can outlive a successful build
+while its run folder is removed.
+
+The `lab-venv-build-sandbox` feature tests exercise a subprocess acting as a build hook and
+compare its whole environment with the whitelist plus sandbox variables. They also cover a
+failed build's retained log and retry, and a timeout without a marker. These run in CI in
+`tests/ci_lab/test_venvs.py`; the executor tests check that each adapter passes `Pod.build`.
 
 ### Use it
 
