@@ -127,6 +127,8 @@ Swarms created before the setting existed read as `legacy`. Any other value is r
    - An offer a hive may not take, pinned to another hive or needing a capability it lacks, goes back to the queue
      after 5 seconds without spending a delivery.
    - A claim conflict, or another live hive holding the claim, sends the offer back for later.
+   - A launch that fails after the hub admitted the offer gives the admission back with `reopen`, so the task
+     returns to `open` and is offered again; see [When a launch fails](hives.md#when-a-launch-fails).
    - After the last delivery the spoke writes a `dead_lettered` event to `AGENTIHOOKS-DEAD` and reopens the task.
 7. **Exit.** When the agent ends, `execution.exited` reaches the hub's `lifecycle` reactor. Only for the claim and
    generation it started, it releases the slot and the claim, then settles the task: `done`, or back to `open` with no
