@@ -9,7 +9,7 @@ outside the manifest, is keyed on every file under the measured trees and the te
 
 import hashlib
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import PurePosixPath
 from typing import Any
 
@@ -143,6 +143,20 @@ def unlisted_test_hashes(manifest: Mapping[str, Any], tree: Mapping[str, bytes])
                 _reached(tree, (parent / "conftest.py").as_posix(), reached)
             _reached(tree, path, reached)
     return {path: hashlib.sha256(tree[path]).hexdigest() for path in reached}
+
+
+def unlisted_units(
+    manifest: Mapping[str, Any], tree: Mapping[str, bytes], paths: Iterable[str], toolchain: Toolchain
+) -> tuple[Unit, ...]:
+    """Return one test unit per test module among the paths that the tree holds and that holds no manifest test, its
+    member the module's path, keyed as a broad test over the tree with the pytest invocation and the toolchain."""
+    listed = {test.partition("::")[0] for test in manifest["tests"]}
+    files = sorted({path for path in paths if _test_module(path) and path in tree and path not in listed})
+    keys = fingerprints({"units": [], "tests": {path: {"files": []} for path in files}}, tree)
+    return tuple(
+        Unit(KIND, test_key(TestInputs({path: keys[path]}, {}, PYTEST_INVOCATION, toolchain)), (path,))
+        for path in files
+    )
 
 
 def _parts(tests: list[str], seconds: Mapping[str, float], target: float) -> list[tuple[str, ...]]:
