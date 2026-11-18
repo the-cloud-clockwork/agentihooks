@@ -913,7 +913,7 @@ DISPATCH = {
 }
 
 
-def evaluate(payload, *, recursive=True, allow_rewrite=False):
+def evaluate(payload: dict[str, object], *, recursive: bool = True, allow_rewrite: bool = False) -> Verdict:
     handler = DISPATCH.get(payload.get("tool_name"))
     if handler is None:
         return ALLOW
