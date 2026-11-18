@@ -88,6 +88,16 @@ def task_counts(tasks):
     return {s: sum(1 for t in tasks if t.get("state") == s) for s in ("open", "claimed", "blocked", "pr", "done")}
 
 
+def section_lines(name: str, read: Callable[[], list[str]]) -> list[str]:
+    """A status section's lines, or one line naming the section when the Redis role may not read its keys."""
+    from redis.exceptions import NoPermissionError
+
+    try:
+        return read()
+    except NoPermissionError as exc:
+        return [f"{name} unreadable: {exc}"]
+
+
 def auto_snapshot(config):
     return {
         "last": snapshot.last_auto(config.slug),
