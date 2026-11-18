@@ -139,9 +139,9 @@ def dedicated_chart_group(name: str, block: object, job: dict[str, Any], trusted
 
 
 def only_concurrency_changed(name: str, job: dict[str, Any], trusted: dict[Any, Any]) -> bool:
-    baseline = (trusted.get("jobs") or cast(dict[Any, Any], {})).get(name)
-    return isinstance(baseline, dict) and {key: value for key, value in job.items() if key != "concurrency"} == {
-        key: value for key, value in cast(dict[Any, Any], baseline).items() if key != "concurrency"
+    baseline = mapping(mapping(trusted.get("jobs")).get(name))
+    return bool(baseline) and {key: value for key, value in job.items() if key != "concurrency"} == {
+        key: value for key, value in baseline.items() if key != "concurrency"
     }
 
 
