@@ -39,6 +39,7 @@ and [Worker executors](#worker-executors)).
 | `GITHUB_APP_*` | yes | never | GitHub App identity used to post check runs |
 | `CI_LAB_REDIS_URL` | yes | no | Queue, lease and verdict index store |
 | `CI_LAB_RUNTIME_CONFIG` | yes | no | Path of the mounted runtime config the scheduler reads at start, before it connects anywhere; its budget sets the budget fraction and shed classes of `/capacity` and `/metrics`; `python -m scripts.ci_lab runtime <path>` validates it |
+| `CI_LAB_URL` | yes | no | The lab scheduler address the relay builds each relayed check run's and draft pull request's grade link from, `<CI_LAB_URL>/grades/<sha>` |
 | `CI_LAB_SCHEDULER_URL` | no | yes | Base address of the scheduler lease API |
 | `CI_LAB_SLOTS` | no | yes | Number of units the worker runs at once |
 | `CI_LAB_GIT_MIRROR` | yes | yes | Path of the shared git mirror the worker cuts worktrees from and the scheduler borrows objects from |
@@ -807,6 +808,13 @@ the gates as the needs of a run of the grade's class: pull request and hotfix gr
 `workflow_dispatch`. `tests/fixtures/ci_lab/gate_required.json` records the step's verdict on cases
 built from the needs of real runs; one test holds `fold` to every case and another holds the cases
 to today's step.
+
+The scheduler service (`scripts.ci_lab.scheduler.serve`) ticks the lab relay after each pass and
+prints the relay's actions after the pass's own. `main` builds the relay once at start on its own
+lab heads consumer, the `ci-lab-relay` durable filtered to `ci.lab.head.notice`, which bus
+provisioning creates beside the scheduler's `ci-lab-scheduler` durable. A green grade of a pushed
+`refs/grade/<task>` head with a `branch` option then reaches that branch, its check runs and its
+draft pull request.
 
 A grade's state is one JSON document at `agentihooks-ci:grade:<run>`, where `<run>` is the grade
 key of the repository, head, base, class and grader revision. Live grades sit in

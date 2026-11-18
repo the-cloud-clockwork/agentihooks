@@ -988,10 +988,11 @@ def serve(
     clock: Callable[[], float],
     sleep: Callable[[float], None],
 ) -> int:
-    """Run passes every interval, forever when passes is zero, printing each action; return 0."""
+    """Run passes every interval, forever when passes is zero, ticking the relay after each pass and printing each
+    action of both; return 0."""
     done = 0
     while passes == 0 or done < passes:
-        for action in scheduler.tick(int(clock() * 1000)):
+        for action in (*scheduler.tick(int(clock() * 1000)), *relaying.tick()):
             print(action, flush=True)
         done += 1
         sleep(interval_s)
