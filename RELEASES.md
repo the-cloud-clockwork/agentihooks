@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.1041 · 2026-11-18
+
+### 2026-11-18 · 0f6335273714 · #12186 · @agenticore-app
+
+**Lab mutant unit keys cover data files a head added test reads**
+
+This change fixes a gap where mutant unit keys could lose precision whenever a new test module appeared without a matching entry in the dependency manifest: previously, `unlisted_test_hashes` would broadly hash every file under the measured and test trees, so unrelated data files, like a fixture under `tests/`, would needlessly rekey mutant units when they changed. Now that broad hashing only applies while a test module truly has no manifest record, listed test modules keep narrow, precise dependency tracking, preventing spurious mutant key churn and keeping the mutation testing pipeline stable and efficient as new tests are added.
+
+### 2026-11-18 · d855e4a56b0e · #12191 · @agenticore-app
+
+**Document the protected lint step grading the pull request head against its merge base**
+
+This change adds documentation for the protected gate behavior shipped in #11515: the Tests `lint` step grades the pull request head commit against its merge base, rather than grading the synthetic merge commit GitHub normally checks out. It explains why this matters, walks through hand-grading an example with sample output, and lists guards and limitations. New troubleshooting rows and a feature map entry were added, with cross-links from delivery-tiers and the reference index so operators can find the explanation when diagnosing lint or gate failures.
+
 ## v2.17.1040 · 2026-11-18
 
 ### 2026-11-18 · 48be728effd3 · #12185 · @agenticore-app
