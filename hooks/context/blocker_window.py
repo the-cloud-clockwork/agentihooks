@@ -46,6 +46,7 @@ _GIT_VALUES = frozenset(
     {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--super-prefix", "--config-env", "--attr-source"}
 )
 _PUSH_WIDENS = frozenset({"--all", "--branches", "--mirror", "--tags", "--follow-tags", "--prune", "--repo"})
+_PUSH_VALUES = frozenset({"-o", "--push-option"})
 _REDIRECTION = re.compile(r"([^<>]*)([<>].*)")
 _GLOBAL_VALUES = {"git": _GIT_VALUES, "gh": frozenset({"-R", "--repo"})}
 _GH_REPO = re.compile(r"-R.*|--repo(=.*)?")
@@ -266,13 +267,30 @@ def _ref(words: list[str]) -> str:
 
 def _pushed(words: list[str]) -> tuple[str, ...] | None:
     """Return the refs a push to origin writes, or None when it names another remote or an option that pushes more
-    than its refspecs; a push with no refspec writes the checked out branch and names none."""
+    than its refspecs; a push with no refspec writes the checked out branch and names none. A push to the lab writes
+    the branches its push options hand the relay, or none, which leaves the checked out branch it grades."""
+    from scripts.ci_lab.remote import checkout
+
     if any(word.partition("=")[0] in _PUSH_WIDENS for word in words):
         return None
-    named = [word for word in words if not word.startswith("-")]
+    named = _named(words)
+    if named[:1] == [checkout.REMOTE]:
+        return tuple(checkout.relayed(words))
     if named[:1] not in ([], ["origin"]):
         return None
     return _destinations(named[1:])
+
+
+def _named(words: list[str]) -> list[str]:
+    """Return a push's remote and refspecs: its words without options and the values of options that take one."""
+    named: list[str] = []
+    rest = iter(words)
+    for word in rest:
+        if word in _PUSH_VALUES:
+            next(rest, None)
+        elif not word.startswith("-"):
+            named.append(word)
+    return named
 
 
 def _destinations(refspecs: list[str]) -> tuple[str, ...]:

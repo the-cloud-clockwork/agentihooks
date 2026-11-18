@@ -1,4 +1,5 @@
 import json
+import subprocess
 import sys
 import threading
 import time
@@ -436,6 +437,60 @@ def test_rollout_readiness_is_published_only_after_a_successful_beat(monkeypatch
     with pytest.raises(RuntimeError if fails else KeyboardInterrupt):
         daemon.run(lambda: (object(), object()))
     assert marker.exists() is not fails
+
+
+@pytest.mark.feature("lab-remote-in-workspaces")
+def test_run_gives_hive_checkouts_the_lab_remote_once_the_operator_env_is_loaded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[object] = []
+
+    def refresh(environ: object) -> None:
+        events.append("quota")
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(daemon, "fill_operator_env", lambda: events.append("env"))
+    monkeypatch.setattr(daemon, "carry_lab", lambda environ: events.append(("lab", environ)))
+    monkeypatch.setattr(daemon.quota_refresh, "refresh", refresh)
+    with pytest.raises(KeyboardInterrupt):
+        daemon.run(lambda: pytest.fail("connected before the lab remote"))
+    assert events == ["env", ("lab", daemon.os.environ), "quota"]
+
+
+@pytest.mark.feature("lab-remote-in-workspaces")
+def test_carry_lab_gives_each_checkout_the_lab_serves_the_lab_remote(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    lab = "http://10.10.30.208/agentihooks.git"
+    for name, origin in (
+        ("agentihooks", "git@github.com:o/agentihooks.git"),
+        ("antoncore", "git@github.com:o/antoncore"),
+    ):
+        subprocess.run(["git", "init", "-q", str(tmp_path / name)], check=True)
+        subprocess.run(["git", "-C", str(tmp_path / name), "remote", "add", "origin", origin], check=True)
+    monkeypatch.setenv("HIVE_REPO_ROOT", str(tmp_path))
+    assert daemon.carry_lab({"AGENTIHOOKS_LAB_REMOTE": lab}) == [tmp_path / "agentihooks"]
+    remotes = [
+        subprocess.run(["git", "-C", str(tmp_path / name), "remote"], capture_output=True, text=True).stdout.split()
+        for name in ("agentihooks", "antoncore")
+    ]
+    assert remotes == [["lab", "origin"], ["origin"]]
+
+
+@pytest.mark.feature("lab-remote-in-workspaces")
+@pytest.mark.parametrize("failure", [subprocess.TimeoutExpired("git", 60), FileNotFoundError("git")])
+def test_carry_lab_skips_a_checkout_whose_git_fails_and_says_so(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str], failure: Exception
+) -> None:
+    (tmp_path / "agentihooks" / ".git").mkdir(parents=True)
+    monkeypatch.setenv("HIVE_REPO_ROOT", str(tmp_path))
+
+    def carry(git: object, environ: object) -> bool:
+        raise failure
+
+    monkeypatch.setattr(daemon.checkout, "carry", carry)
+    assert daemon.carry_lab({"AGENTIHOOKS_LAB_REMOTE": "http://lab.invalid/agentihooks.git"}) == []
+    assert capsys.readouterr().err == f"hive: the lab remote was not set in {tmp_path / 'agentihooks'}: {failure}\n"
 
 
 def test_run_deducts_observation_time_from_the_beat_interval(monkeypatch):
