@@ -138,14 +138,18 @@ def dedicated_chart_group(name: str, block: object, job: dict[str, Any], trusted
     )
 
 
-def flake_history_group(name: str, block: object, job: dict[str, Any], trusted: dict[Any, Any]) -> bool:
+def only_concurrency_changed(name: str, job: dict[str, Any], trusted: dict[Any, Any]) -> bool:
     baseline = (trusted.get("jobs") or cast(dict[Any, Any], {})).get(name)
+    return isinstance(baseline, dict) and {key: value for key, value in job.items() if key != "concurrency"} == {
+        key: value for key, value in cast(dict[Any, Any], baseline).items() if key != "concurrency"
+    }
+
+
+def flake_history_group(name: str, block: object, job: dict[str, Any], trusted: dict[Any, Any]) -> bool:
     return (
         trusted.get("name") == "Tests"
         and name == "flake-budget"
-        and isinstance(baseline, dict)
-        and {key: value for key, value in job.items() if key != "concurrency"}
-        == {key: value for key, value in cast(dict[Any, Any], baseline).items() if key != "concurrency"}
+        and only_concurrency_changed(name, job, trusted)
         and block == {"group": "flake-history", "queue": "max", "cancel-in-progress": False}
     )
 
@@ -154,7 +158,7 @@ def hive_release_group(name: str, block: object, job: dict[str, Any], trusted: d
     return (
         trusted.get("name") == "Swarm worker image"
         and name == "hive"
-        and job.get("if") == "github.event_name == 'release'"
+        and only_concurrency_changed(name, job, trusted)
         and block == {"group": "hive-worker-release", "queue": "max", "cancel-in-progress": False}
     )
 

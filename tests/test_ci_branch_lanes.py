@@ -1079,7 +1079,7 @@ def test_only_the_trusted_swarm_worker_image_hive_job_may_queue_on_the_hive_rele
     elif change == "events":
         updated[True] = {"workflow_dispatch": None}
     found = lanes.problems(updated, baseline)
-    assert bool(found) == (change not in (None, "steps"))
+    assert bool(found) == (change is not None)
     if found:
         assert any(problem.startswith(f"job {name} ") for problem in found)
 
