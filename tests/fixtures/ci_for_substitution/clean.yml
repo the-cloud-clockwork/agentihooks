@@ -23,9 +23,6 @@ jobs:
       - name: A python step is never read as shell
         shell: python
         run: for name in $(ls); do pass; done
-      - name: A blank shell is never read as shell
-        shell: " "
-        run: for name in $(ls); do :; done
   python-by-default:
     runs-on: ubuntu-latest
     defaults:

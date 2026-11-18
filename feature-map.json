@@ -665,7 +665,7 @@
       "id": "ci-for-loop-word-list-workflow-run-blocks",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-shell-for-rule-workflow-blocks",
-      "behaviour": "The lint gate that refuses a for loop whose word list holds a command substitution grades the bash and sh run texts of every tracked workflow under .github/workflows and every action definition file, besides tracked shell files. A step whose own shell or nearest default shell is not bash or sh is skipped, and GitHub expressions read as plain words so they hide no loop. Each refusal names the workflow file and the line: the loop's own line in a literal or folded block, read from the file's lines, and the first line of a plain or quoted run text. A tree without a tracked workflow file is red.",
+      "behaviour": "The lint gate that refuses a for loop whose word list holds a command substitution grades the bash and sh run texts of every tracked workflow under .github/workflows and every action definition file, besides tracked shell files. A step whose shell, its own or the nearest default, is neither bash nor sh, by name or by path, is skipped; a shell given by a GitHub expression is graded, since it is known only at run time, and a blank shell runs the default. GitHub expressions in run texts read as plain words so they hide no loop. Each refusal names the workflow file and the line: the loop's own line in a literal or folded block, read from the file's lines, and the first line of a plain or quoted run text. A tree without a tracked workflow file is red.",
       "seam": "the input set of the for loop word list gate",
       "tests": [
         "tests/test_ci_for_substitution.py::test_the_red_workflow_fixture_reports_every_refused_loop_at_its_file_line",

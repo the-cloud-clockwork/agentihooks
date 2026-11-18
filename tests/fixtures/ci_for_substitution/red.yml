@@ -25,13 +25,19 @@ jobs:
           docker exec "$node" true; done
       - name: A quoted run text names its first line
         run: "echo start\nfor _ in $(seq 2); do :; done"
+      - name: A shell chosen by a GitHub expression
+        shell: ${{ matrix.shell }}
+        run: for _ in $(seq 2); do :; done
+      - name: A blank shell runs the default shell
+        shell: " "
+        run: for _ in $(seq 2); do :; done
   python-by-default:
     runs-on: ubuntu-latest
     defaults:
       run:
         shell: python
     steps:
-      - name: A bash step in a python job
-        shell: bash --noprofile --norc -eo pipefail {0}
+      - name: A bash step named by its path in a python job
+        shell: /bin/bash --noprofile --norc -eo pipefail {0}
         run: |
           if true; then for job in $(jobs -p); do wait "$job"; done; fi
