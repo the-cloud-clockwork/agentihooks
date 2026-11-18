@@ -780,6 +780,35 @@ def test_a_failed_graph_read_without_error_text_reports_a_failed_api() -> None:
     assert str(exc.value) == "GitHub API failed"
 
 
+@pytest.mark.feature("merge-queue-signed-token")
+@pytest.mark.parametrize("read", ["graph", "rest"])
+def test_a_merge_queue_call_in_a_process_holding_the_app_key_runs_gh_with_its_signed_token(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, read: str
+) -> None:
+    from scripts import github_app_cli
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    monkeypatch.setenv("HIVE_GITHUB_AUTH_MODE", "app")
+    monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "pem")
+
+    def signed(command: list[str], base: Any) -> tuple[list[str], dict[str, str]]:
+        return ["/usr/bin/gh", *command[1:]], {"GH_TOKEN": "minted"}
+
+    monkeypatch.setattr(github_app_cli, "signed", signed)
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def run(command: list[str], **options: Any) -> subprocess.CompletedProcess[str]:
+        calls.append((command[0], options))
+        return subprocess.CompletedProcess(command, 0, '{"data": {"resource": {}}}', "")
+
+    if read == "graph":
+        merge_queue.graphql(merge_queue.STATE, {"url": URL}, run)
+    else:
+        merge_queue.rest("repos/o/r/actions/runs/5", run)
+    signed_options = {"capture_output": True, "text": True, "timeout": 20, "env": {"GH_TOKEN": "minted"}}
+    assert calls == [("/usr/bin/gh", signed_options)]
+
+
 def test_dequeue_removes_the_pull_request_then_reports_its_state():
     run, calls = runner(
         {"data": {"resource": {**OPEN, "mergeQueueEntry": ENTRY}}},

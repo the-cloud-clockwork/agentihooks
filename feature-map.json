@@ -7362,6 +7362,43 @@
       ]
     },
     {
+      "id": "merge-queue-signed-token",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2649",
+      "behaviour": "Every merge queue GraphQL and REST call a process holding the GitHub App key makes, as the swarm controller's merge pass does when it reads required checks and queues a released pull request, runs gh with the signed installation token environment github_reads puts in its options, so the controller reads a released green pull request green and queues it instead of failing every read with gh auth login.",
+      "seam": "scripts.swarm.merge_queue._port through scripts.swarm.merge_queue.graphql and scripts.swarm.merge_queue.rest",
+      "rules": [
+        "gh-runner-drops-signed-env"
+      ],
+      "tests": [
+        "tests/swarm/test_merge_queue.py::test_a_merge_queue_call_in_a_process_holding_the_app_key_runs_gh_with_its_signed_token"
+      ]
+    },
+    {
+      "id": "merge-pass-hold-reasons",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2649",
+      "behaviour": "Each time the swarm merge pass leaves a task as it is, it writes one stderr line naming the swarm, the task, its pull request and why: an unread pull request, a dependency wait, checks still running, a gate that never passed, a moved head, a head GitHub does not read green, a merge queue wait, a requeue backoff, an owner told to restack, a merge problem that cleared, a live owner, a release the ledger or ready record refused, or a split pull request the done gate refuses; required_green writes the GitHub error it holds on.",
+      "seam": "scripts.swarm.ready.merge_pass and scripts.swarm.waits.required_green",
+      "tests": [
+        "tests/swarm/test_ready.py::test_a_released_checks_wait_logs_why_it_holds",
+        "tests/swarm/test_ready.py::test_a_checks_wait_names_the_hold_of_its_fresh_read_over_a_green_snapshot",
+        "tests/swarm/test_ready.py::test_a_green_head_github_does_not_read_green_logs_its_hold",
+        "tests/swarm/test_ready.py::test_a_moved_head_logs_that_its_checks_are_read_again",
+        "tests/swarm/test_ready.py::test_an_unread_pull_request_logs_its_hold",
+        "tests/swarm/test_ready.py::test_a_queued_pull_request_logs_that_it_waits_in_the_queue",
+        "tests/swarm/test_ready.py::test_a_dependency_wait_logs_its_target",
+        "tests/swarm/test_ready.py::test_a_recovery_wait_logs_why_it_holds",
+        "tests/swarm/test_ready.py::test_an_unmergeable_pull_request_with_a_working_owner_logs_the_restack",
+        "tests/swarm/test_ready.py::test_an_unmergeable_pull_request_without_an_owner_logs_why_it_holds",
+        "tests/swarm/test_ready.py::test_a_red_pull_request_a_live_agent_owns_logs_its_hold",
+        "tests/swarm/test_ready.py::test_a_red_pull_request_whose_ready_record_moved_logs_its_hold",
+        "tests/swarm/test_ready.py::test_a_red_pull_request_whose_reopen_the_ledger_refuses_logs_its_hold",
+        "tests/swarm/test_ready.py::test_a_merged_split_pull_request_the_done_gate_refuses_logs_its_hold",
+        "tests/swarm/test_waits.py::test_required_green_logs_the_github_error_it_holds_on"
+      ]
+    },
+    {
       "id": "hive-registry-unique-name-suffix",
       "origin": "inventory",
       "behaviour": "A hive registry update that sets a name or ui setting derives a unique name with the first free numeric suffix when the settled name collides with another registered hive's name, so a second headed hive reads as swarm-master-2 instead of also reading as swarm-master, a derived name survives a restart or a later setting that does not rename it, and a headless hive renamed to a held name takes the next free suffix.",
