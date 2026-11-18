@@ -1,3 +1,5 @@
+import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -6,7 +8,43 @@ import yaml
 pytestmark = pytest.mark.unit
 
 CHART = Path(__file__).resolve().parents[1] / "deploy/helm/agentihooks-swarm"
-SMOKE = CHART / "ci" / "kind-smoke.sh"
+RELEASE = "agentihooks-swarm"
+API = f"{RELEASE}-api"
+LEDGER = f"{RELEASE}-ledger"
+HOST = "swarm.example"
+ENABLED = [
+    "--set",
+    "api.enabled=true",
+    "--set",
+    "ledger.env.AGENTIHOOKS_SWARM_DATABASE_URL=postgresql://ledger@db/ledger",
+]
+ROUTED = [*ENABLED, "--set", f"api.publicRoute.host={HOST}"]
+WRITES = ["POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+WRITE_MATCH = re.compile(r"Host\(`(?P<host>[^`]+)`\) && \((?P<methods>Method\(`\w+`\)(?: \|\| Method\(`\w+`\))*)\)")
+REFUSAL = "api.enabled needs the shared database"
+RELOAD = "secret.reloader.stakater.com/reload"
+
+
+def _helm(*settings: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(["helm", "template", RELEASE, str(CHART), *settings], capture_output=True, text=True)
+
+
+def _documents(*settings: str) -> list[dict]:
+    result = _helm(*settings)
+    assert result.returncode == 0, result.stderr
+    return [document for document in yaml.safe_load_all(result.stdout) if document]
+
+
+def _named(documents: list[dict], name: str) -> dict[str, dict]:
+    return {d["kind"]: d for d in documents if (d.get("metadata") or {}).get("name") == name}
+
+
+def _container(workload: dict) -> dict:
+    return workload["spec"]["template"]["spec"]["containers"][0]
+
+
+def _env(workload: dict) -> dict[str, str | None]:
+    return {row["name"]: row.get("value") for row in _container(workload).get("env", [])}
 
 
 def test_api_values_default_disabled_with_its_own_resources_and_public_route() -> None:
@@ -22,72 +60,125 @@ def test_api_values_default_disabled_with_its_own_resources_and_public_route() -
     assert "podDisruptionBudget" in api
 
 
-def test_the_kind_proof_renders_the_api_service_before_any_cluster_starts() -> None:
-    script = SMOKE.read_text()
-
-    assert 'python3 tests/chart_api.py "$chart"' in script
-    assert script.index("python3 tests/chart_api.py") < script.index("kind create cluster")
-
-
 def test_api_deployment_mirrors_the_ledgers_env_and_settings() -> None:
-    template = (CHART / "templates/api.yaml").read_text()
+    documents = _documents(
+        "--set",
+        "api.enabled=true",
+        "--set",
+        "ledger.secretEnv[0].name=AGENTIHOOKS_SWARM_DATABASE_URL",
+        "--set",
+        "ledger.secretEnv[0].secretName=swarm-postgres",
+        "--set",
+        "ledger.secretEnv[0].key=url",
+        "--set",
+        "ledger.env.LEDGER_SETTING=from-ledger",
+        "--set",
+        "secretEnv[0].name=SHARED_TOKEN",
+        "--set",
+        "secretEnv[0].secretName=swarm-shared",
+        "--set",
+        "secretEnv[0].key=token",
+        "--set",
+        "envFromSecrets[0]=swarm-env",
+        "--set",
+        "api.env.API_SETTING=from-api",
+        "--set",
+        "api.secretEnv[0].name=API_TOKEN",
+        "--set",
+        "api.secretEnv[0].secretName=swarm-api",
+        "--set",
+        "api.secretEnv[0].key=token",
+    )
+    api = _container(_named(documents, API)["Deployment"])
+    ledger = _container(_named(documents, LEDGER)["StatefulSet"])
+    own = {"LEDGER_HOST", "LEDGER_PORT", "SWARM_RELOAD", "SWARM_ALLOWED_HOSTS"}
 
-    assert "command: [python, -m, scripts.swarm_ledger.api_service, --serve]" in template
-    assert 'include "swarm.env" (dict "root" . "role" "ledger")' in template
-    assert 'include "swarm.secretKeyEnv" .Values.ledger.secretEnv' in template
-    assert 'include "swarm.extraEnv" .Values.ledger.env' in template
-    assert 'include "swarm.secretKeyEnv" .Values.api.secretEnv' in template
-    assert 'include "swarm.extraEnv" .Values.api.env' in template
-    assert 'value: "0.0.0.0"' in template
-    assert "LEDGER_API_PORT" in template
-    assert "SWARM_PUBLIC_URL" in template
-    assert "SWARM_ALLOWED_HOSTS" in template
+    assert api["command"] == ["python", "-m", "scripts.swarm_ledger.api_service", "--serve"]
+    assert [row for row in ledger["env"] if row["name"] not in own and row not in api["env"]] == []
+    assert {"name": "API_SETTING", "value": "from-api"} in api["env"]
+    assert {"name": "API_TOKEN", "valueFrom": {"secretKeyRef": {"name": "swarm-api", "key": "token"}}} in api["env"]
+    assert api["envFrom"] == ledger["envFrom"] == [{"secretRef": {"name": "swarm-env"}}]
 
 
 def test_api_fails_fast_without_the_shared_database() -> None:
-    template = (CHART / "templates/api.yaml").read_text()
-    guard = template.split("api.replicas must be at least 1", 1)[0]
+    unset = _helm("--set", "api.enabled=true", "--set", "api.replicas=0")
+    empty = _helm("--set", "api.enabled=true", "--set", "ledger.env.AGENTIHOOKS_SWARM_DATABASE_URL=")
+    zero = _helm(*ENABLED, "--set", "api.replicas=0")
 
-    assert "api.enabled needs the shared database" in guard
-    assert "AGENTIHOOKS_SWARM_DATABASE_URL" in guard
+    assert unset.returncode != 0 and REFUSAL in unset.stderr
+    assert empty.returncode != 0 and REFUSAL in empty.stderr
+    assert zero.returncode != 0 and "api.replicas must be at least 1" in zero.stderr
 
 
 def test_api_service_exposes_a_named_http_port() -> None:
-    template = (CHART / "templates/api.yaml").read_text()
+    for port in (8766, 9000):
+        docs = _named(_documents(*ENABLED, "--set", f"api.port={port}"), API)
+        deployment, service = docs["Deployment"], docs["Service"]
+        api, env = _container(deployment), _env(deployment)
+        probe = {
+            "path": "/healthz",
+            "port": "http",
+            "scheme": "HTTP",
+            "httpHeaders": [{"name": "Host", "value": f"127.0.0.1:{port}"}],
+        }
+        names = {f"{API}{suffix}:{port}" for suffix in ("", ".default", ".default.svc", ".default.svc.cluster.local")}
 
-    assert "kind: Service" in template
-    assert "name: {{ $host }}" in template
-    assert "- name: http" in template
-    assert "targetPort: http" in template
+        assert service["spec"]["ports"] == [{"name": "http", "port": port, "targetPort": "http"}]
+        assert service["spec"]["selector"] == deployment["spec"]["selector"]["matchLabels"]
+        assert service["spec"]["selector"].items() <= deployment["spec"]["template"]["metadata"]["labels"].items()
+        assert api["ports"] == [{"name": "http", "containerPort": port}]
+        assert (env["LEDGER_API_HOST"], env["LEDGER_API_PORT"]) == ("0.0.0.0", str(port))
+        assert api["readinessProbe"]["httpGet"] == api["livenessProbe"]["httpGet"] == probe
+        assert names <= set((env["SWARM_ALLOWED_HOSTS"] or "").split(","))
 
 
 def test_api_pod_disruption_budget_is_gated_on_its_own_setting() -> None:
-    template = (CHART / "templates/api.yaml").read_text()
+    budget, pair = ["--set", "api.podDisruptionBudget.enabled=true"], ["--set", "api.replicas=2"]
+    budgeted = _named(_documents(*ENABLED, *pair, *budget), API)
 
-    assert "kind: PodDisruptionBudget" in template
-    assert ".Values.api.podDisruptionBudget.enabled" in template
+    assert "PodDisruptionBudget" not in _named(_documents(*ENABLED, *budget), API)
+    assert "PodDisruptionBudget" not in _named(_documents(*ENABLED, *pair), API)
+    assert budgeted["Deployment"]["spec"]["replicas"] == 2
+    assert budgeted["PodDisruptionBudget"]["spec"] == {
+        "maxUnavailable": 1,
+        "selector": budgeted["Deployment"]["spec"]["selector"],
+    }
 
 
 def test_api_ingressroute_matches_write_methods_at_high_priority() -> None:
-    template = (CHART / "templates/api-ingressroute.yaml").read_text()
+    route = _named(_documents(*ROUTED), API)["IngressRoute"]
+    steering = ["--set", "api.publicRoute.priority=1500", "--set", "api.publicRoute.serversTransportName=api-transport"]
+    [steered] = _named(_documents(*ROUTED, *steering), API)["IngressRoute"]["spec"]["routes"]
+    [rule] = route["spec"]["routes"]
+    matched = WRITE_MATCH.fullmatch(rule["match"])
 
-    assert "apiVersion: traefik.io/v1alpha1" in template
-    assert "kind: IngressRoute" in template
-    assert ".Values.api.enabled .Values.api.publicRoute.host" in template
-    assert "Method(`POST`)" in template
-    assert "Method(`PUT`)" in template
-    assert "Method(`PATCH`)" in template
-    assert "Method(`DELETE`)" in template
-    assert "Method(`OPTIONS`)" in template
-    assert "priority: {{ int .Values.api.publicRoute.priority }}" in template
-    assert "serversTransport: {{ . }}" in template
+    assert route["apiVersion"] == "traefik.io/v1alpha1"
+    assert matched is not None, rule["match"]
+    assert matched["host"] == HOST
+    assert sorted(re.findall(r"`(\w+)`", matched["methods"])) == sorted(WRITES)
+    assert (rule["kind"], rule["priority"], rule["services"]) == ("Rule", 1000, [{"name": API, "port": "http"}])
+    assert steered["priority"] == 1500
+    assert steered["services"] == [{"name": API, "port": "http", "serversTransport": "api-transport"}]
+    assert "IngressRoute" not in _named(_documents(*ENABLED), API)
+    assert _named(_documents("--set", f"api.publicRoute.host={HOST}"), API) == {}
+    assert _named(_documents(*ROUTED, "--set", "hiveOnly=true", "--set", "nats.enabled=false"), API) == {}
 
 
 def test_api_ingressroute_reaches_the_api_pods_over_https_when_the_ledger_serves_tls() -> None:
-    template = (CHART / "templates/api-ingressroute.yaml").read_text()
-    service = template.split("port: http", 1)[1].split("serversTransport", 1)[0]
+    documents = _documents(*ROUTED, "--set", "ledger.tls.secretName=ledger-tls")
+    docs, ledger = _named(documents, API), _named(documents, LEDGER)
+    deployment = docs["Deployment"]
+    api, env = _container(deployment), _env(deployment)
+    [rule] = docs["IngressRoute"]["spec"]["routes"]
+    volumes = {volume["name"]: volume for volume in deployment["spec"]["template"]["spec"]["volumes"]}
+    reloads = [workload["metadata"]["annotations"][RELOAD] for workload in (deployment, ledger["StatefulSet"])]
 
-    assert "{{- if .Values.ledger.tls.secretName }}\n          scheme: https\n          {{- end }}" in service
+    assert rule["services"] == [{"name": API, "port": "http", "scheme": "https"}]
+    assert api["readinessProbe"]["httpGet"]["scheme"] == api["livenessProbe"]["httpGet"]["scheme"] == "HTTPS"
+    assert (env["LEDGER_TLS_CERT"], env["LEDGER_TLS_KEY"]) == ("/run/ledger-tls/tls.crt", "/run/ledger-tls/tls.key")
+    assert {"name": "ledger-tls", "mountPath": "/run/ledger-tls", "readOnly": True} in api["volumeMounts"]
+    assert volumes["ledger-tls"]["secret"]["secretName"] == "ledger-tls"
+    assert reloads == ["ledger-tls", "ledger-tls"]
 
 
 def test_hub_and_controller_get_the_ledgers_database_url() -> None:
@@ -119,9 +210,12 @@ def test_database_env_helper_never_duplicates_a_components_own_entry() -> None:
 
 
 def test_api_network_policy_admits_the_same_sources_as_the_ledger() -> None:
-    template = (CHART / "templates/networkpolicy.yaml").read_text()
-    documents = template.split("\n---\n")
-    section = next(doc for doc in documents if "{{ $fullname }}-api\n" in doc)
+    documents = _documents(*ENABLED, "--set", "networkPolicy.ingressFrom[0].namespaceSelector.matchLabels.team=swarm")
+    api, ledger = _named(documents, API), _named(documents, LEDGER)
+    policy = api["NetworkPolicy"]["spec"]
+    [rule] = policy["ingress"]
 
-    assert "networkPolicy.ingressFrom" in section
-    assert "port: http" in section
+    assert policy["podSelector"] == api["Deployment"]["spec"]["selector"]
+    assert policy["ingress"] == ledger["NetworkPolicy"]["spec"]["ingress"]
+    assert {"namespaceSelector": {"matchLabels": {"team": "swarm"}}} in rule["from"]
+    assert rule["ports"] == [{"port": "http"}]
