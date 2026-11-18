@@ -93,3 +93,43 @@ def test_probe_counts_the_tree_again_after_one_empty_source_shifts_the_runs() ->
         (ROOT / ADDED).unlink()
     report["shifted_versus_every_source"] = _differences(before, after, sorted(set(before) | set(after)))
     _publish("SHIFT PROBE", report)
+
+
+def _counted(files: list[str]) -> dict[str, int]:
+    root = ROOT.resolve()
+    counts: dict[str, int] = {}
+    for diagnostic in type_gate._check(ROOT, files):
+        if diagnostic["severity"] == "error":
+            path = Path(diagnostic["file"]).resolve().relative_to(root).as_posix()
+            counts[path] = counts.get(path, 0) + 1
+    return counts
+
+
+def test_probe_counts_the_stream_test_in_narrow_and_truncated_runs() -> None:
+    sources = type_gate.sources(ROOT)
+    size = -(-len(sources) // -(-len(sources) // type_gate._RUN))
+    index = sources.index(STREAM)
+    start = index - index % size
+    run = sources[start : start + size]
+    package = [path for path in sources if path.startswith("tests/swarm_ledger/") and path <= STREAM]
+    page = "tests/swarm_ledger/legacy_page.py"
+    narrow = sorted({page} | type_gate.importers(ROOT, sources, {type_gate.module_name(page)}))
+    report: dict[str, object] = {"head": _head(), "sources": len(sources), "run_start": start, "run_size": len(run)}
+    for name, files in (
+        ("alone", [STREAM]),
+        ("after_its_package", package),
+        ("legacy_page_pull_request", narrow),
+        ("its_run_truncated_after_it", run[: index - start + 1]),
+        ("its_whole_run", run),
+    ):
+        begin = time.monotonic()
+        counts = _counted(files)
+        report[name] = {
+            "checked": len(files),
+            "stream": counts.get(STREAM, 0),
+            "seconds": round(time.monotonic() - begin, 1),
+            "digest_up_to_stream": hashlib.sha256(
+                json.dumps({path: counts.get(path, 0) for path in run[: index - start + 1]}, sort_keys=True).encode()
+            ).hexdigest()[:16],
+        }
+    _publish("NARROW PROBE", report)
