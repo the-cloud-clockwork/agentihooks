@@ -3178,6 +3178,23 @@
       ]
     },
     {
+      "id": "swarm-pr-closes-only-named-issues",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2588",
+      "behaviour": "Swarm pr refuses to record a pull request whose body closes an issue that the task and its group members neither record as their issue nor name in their descriptions, because settle closes every such issue on merge; a prerequisite that keeps the recorded pull request is not checked.",
+      "seam": "agentihooks swarm pr, linked_issues.unnamed and refuse_unnamed, pull_head.pull_branch body",
+      "tests": [
+        "tests/swarm/test_linked_issues.py::test_unnamed_lists_each_closed_issue_no_task_records_or_names",
+        "tests/swarm/test_linked_issues.py::test_refuse_unnamed_names_every_issue_the_tasks_never_name",
+        "tests/swarm/test_linked_issues.py::test_refuse_unnamed_accepts_a_body_closing_only_named_issues",
+        "tests/swarm/test_linked_issues.py::test_refuse_unnamed_reads_each_group_member_issue_and_description",
+        "tests/swarm/test_pull_confirm.py::test_the_pull_branch_returns_the_body_of_the_pull_request",
+        "tests/swarm/test_pull_confirm.py::test_swarm_pr_refuses_a_body_closing_an_issue_the_task_never_names",
+        "tests/swarm/test_pull_confirm.py::test_swarm_pr_records_a_body_closing_issues_the_task_and_its_group_name",
+        "tests/swarm/test_pull_confirm.py::test_swarm_pr_records_a_prerequisite_without_checking_its_closing_keywords"
+      ]
+    },
+    {
       "id": "swarm-idle",
       "origin": "inventory",
       "behaviour": "An agent counts idle only when its pane, heartbeat and declared wait all say so.",
@@ -7745,6 +7762,19 @@
         "tests/swarm/test_master_wake.py::test_each_backstop_passes_the_seen_claim",
         "tests/swarm/test_master_retire.py::test_each_retire_ask_passes_the_seen_claim",
         "tests/tick/steps/test_step_starvation.py::test_each_starvation_of_a_step_passes_the_seen_claim"
+      ]
+    },
+    {
+      "id": "ledger-event-notices-pass-the-seen-claim",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-critic-repeating-inbox-refs",
+      "behaviour": "Every ledger event notice, follow-up raised reminder and priority notice carries its own ref: the notice prefix and its ledger target or item, followed by the event's ledger revision or, for a raised reminder or a priority, the send time. A second event on one target, the raised reminder after a follow-up's added notice and a priority raised again therefore reach the master through the seen claim instead of closing on delivery as already shown through the ledger, and the wake ladder still settles a follow-up or question notice decided on the ledger.",
+      "seam": "scripts.swarm.ledger_events.event_pass sending a second event on one target, a raised follow-up and a priority raised again, each delivered by scripts.inbox.seen.claim, and scripts.inbox.wake.wake_pass settling a follow-up notice decided on the ledger",
+      "tests": [
+        "tests/swarm/test_ledger_events.py::test_a_second_event_on_one_target_passes_the_seen_claim",
+        "tests/swarm/test_ledger_events.py::test_a_priority_raised_again_passes_the_seen_claim",
+        "tests/swarm/test_ledger_events.py::test_a_follow_up_raised_after_its_added_notice_passes_the_seen_claim",
+        "tests/inbox/test_decided_events.py::test_a_followup_closed_before_the_wake_never_reaches_the_master"
       ]
     },
     {

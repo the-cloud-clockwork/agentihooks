@@ -278,7 +278,7 @@ def _ladder(inbox, slug):
 
 
 def _decided(ref, doc):
-    collection, _, item_id = ref.partition(":event:")[2].partition("/")
+    collection, _, item_id = ref.partition(":event:")[2].partition(":")[0].partition("/")
     row = next((r for r in doc.get(collection, []) if r.get("id") == item_id), {})
     if collection == "followups":
         return bool(row.get("done") or row.get("needs_operator"))

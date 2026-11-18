@@ -61,6 +61,21 @@ def notice_with_one_ref_per_task_id(inbox: InboxStore, name: str, text: str, tas
     return inbox.send("swarm", name, text, ref=f"notice:{task_id}")
 
 
+def event_with_one_ref_per_target(mail: Any, key: str, address: str, text: str, target: str) -> Any:
+    # ruleid: inbox-send-fixed-ref
+    return mail.send(key, address, text, ref=f"{mail.slug}:event:{target}")
+
+
+def event_with_one_ref_per_event_target(mail: Any, key: str, address: str, text: str, event: dict) -> Any:
+    # ruleid: inbox-send-fixed-ref
+    return mail.send(key, address, text, ref=f"{mail.slug}:event:{event['target']}")
+
+
+def priority_with_one_ref_per_item(mail: Any, owner: str, text: str, item: str) -> Any:
+    # ruleid: inbox-send-fixed-ref
+    return mail.inbox.send("swarm", owner, text, ref=f"{mail.slug}:priority:{item}")
+
+
 def ask_with_its_own_ref(inbox: InboxStore, name: str, text: str, task: str, now_ms: int) -> Any:
     # ok: inbox-send-fixed-ref
     return inbox.send("swarm", name, text, ref=f"automated-activity:{now_ms}", task=task)
@@ -93,6 +108,11 @@ def overrun_with_the_agent_start(mail: Any, watch: Any, agent: Any, address: str
 def ask_for_a_waiting_task_with_its_time(inbox: InboxStore, victim: Any, text: str, waiting: str, now_ms: int) -> Any:
     # ok: inbox-send-fixed-ref
     return inbox.send("swarm", victim.name, text, ref=f"{REF}:{waiting}:{now_ms}", task=victim.task)
+
+
+def event_with_its_revision(mail: Any, key: str, address: str, text: str, event: dict) -> Any:
+    # ok: inbox-send-fixed-ref
+    return mail.send(key, address, text, ref=f"{mail.slug}:event:{event['target']}:{event['rev']}")
 
 
 def escalate_with_the_item_id(inbox: InboxStore, name: str, text: str, item: Any) -> Any:
