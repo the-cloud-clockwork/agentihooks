@@ -293,7 +293,7 @@ counts. The exception is raised in Python by `scripts.ci_lab.audit` and never re
 | `stacks/observability/provisioning/dashboards/CI/ci-lab.json` | The CI Lab dashboard, uid `ci-lab` | A push to `dev` under `stacks/` runs the `build-and-deploy.yml` workflow, which deploys the observability compose stack. Grafana mounts `provisioning/` read only. Its file provider sets `foldersFromFilesStructure: true`, so the dashboard lands in the `CI` folder |
 | `stacks/observability/provisioning/dashboards/CI/ci-delivery.json` | The CI Delivery dashboard, uid `ci-delivery`, with two lab panels added at its foot | As above |
 | `tests/prometheus/ci-lab.test.yml` | promtool cases: each alert fires on one input and stays silent on at least one other | The `Prometheus rule tests (promtool)` job of the CI Validate workflow |
-| `tests/unit/ci_lab/test_observability.py` | Pins the nine alert names with their labels and annotations, the ntfy route of each, the `absent()` guard, a firing and a silent promtool case per alert, the metric names against a copy of the lab contract, the dashboard uid and datasource, the panel titles, the node cap and the node price | The `Python tests (pytest)` job of the CI Validate workflow |
+| `tests/unit/ci_lab/test_observability.py` | Pins the nine alert names, their two labels, a non-empty summary and description on each, each promtool case's labels and description against its rule, the ntfy route of each, the `absent()` guard, a firing and a silent promtool case per alert, the metric names against a copy of the lab contract, the dashboard uid and datasource, the panel titles, the node cap and the node price | The `Python tests (pytest)` job of the CI Validate workflow |
 
 Both reach their targets on merge into `dev`, with no promotion step. Self heal reverts a hand
 edit of the live PrometheusRule, so change the file by pull request.
@@ -340,10 +340,10 @@ inhibit_rules:
 | `CILabQueueWaitHigh` | The predicted wait of the hotfix, pull request or queue class is over 1200 seconds, the 20 minute default past which the [lab behind claim hold](swarm-thresholds.md#lab-behind-claim-hold) holds new eng claims. A [wait the lab cannot predict](#a-wait-the-lab-cannot-predict) reads `+Inf` and fires it too, while the claim hold reads that wait as 0. Promotion and backfill never fire it | 10 minutes | class | Slots busy against slots total, and whether the worker pool sits at its maximum |
 | `CILabWorkersPending` | At least one `ci-lab-worker-*` pod in `ci-lab` is Pending | 15 minutes | the pool | The `cluster-autoscaler-oci-status` ConfigMap for the CI pool, and whether runners hold the CI nodes; every runner outranks a worker, see [Worker scheduling priority](#worker-scheduling-priority) |
 | `CILabBudgetShedding` | `ci_lab_class_shed` is 1 for a class: the day's core budget left fell below that class's shed fraction, so its units wait for the budget to reset. Only backfill, promotion and queue shed | 5 minutes | class | Budget left on the dashboard and the shed fractions in the runtime config at `CI_LAB_RUNTIME_CONFIG` |
-| `CILabPullRequestBlockedByCap` | Pull request units are queued, every slot is busy, and a HorizontalPodAutoscaler in `ci-lab`, the one KEDA builds for the workers, wants at least its maximum replicas. An autoscaler at its maximum in another namespace does not count | 10 minutes | the pool; its value is the queued pull request units | The worker maximum and the CI node cap; raising either is the operator's elasticity budget |
-| `CILabSchedulerBlind` | Prometheus holds no `ci_lab_slots_wanted` series while the `ci-lab-scheduler` Deployment asks for at least one replica. A scheduler scaled to zero, or no Deployment, keeps it silent | 10 minutes | the scheduler | The scheduler's scrape target and port `9108`; KEDA sizes the worker pool from this gauge and holds its fallback floor while it is missing |
+| `CILabPullRequestBlockedByCap` | Pull request units are queued, every slot is busy, and a HorizontalPodAutoscaler in `ci-lab`, the one KEDA is to build for the workers, wants at least its maximum replicas. An autoscaler at its maximum in another namespace does not count | 10 minutes | the pool; its value is the queued pull request units | The worker maximum and the CI node cap; raising either is the operator's elasticity budget |
+| `CILabSchedulerBlind` | Prometheus holds no `ci_lab_slots_wanted` series while the `ci-lab-scheduler` Deployment asks for at least one replica. A scheduler scaled to zero, or no Deployment, keeps it silent | 10 minutes | the scheduler | The scheduler's scrape target and port `9108`; the lab chart's planned KEDA scaler sizes the worker pool from this gauge and holds its fallback floor while it is missing |
 | `CILabCacheMissRatioHigh` | The git or uv node cache missed more than half its lookups over 30 minutes, with at least 10 misses. A cache with misses and no hit series counts its hits as 0. The verdict cache never fires it | 15 minutes | cache | The node cache DaemonSet on the CI nodes and the age of its git mirror |
-| `CILabScaleFlapping` | Over the last hour, sampled every 5 minutes, the worker Deployment's replicas rose against 5 minutes earlier in at least 4 samples and fell in at least 4. One ramp up and down again does not fire it | no hold | the pool; its value is the rising samples | Lengthen the scale down stabilisation window of the lab ScaledObject, since each swing churns CI nodes through the autoscaler |
+| `CILabScaleFlapping` | Over the last hour, sampled every 5 minutes, the worker Deployment's replicas rose against 5 minutes earlier in at least 4 samples and fell in at least 4. One ramp up and down again does not fire it | no hold | the pool; its value is the rising samples | Lengthen the scale down stabilisation window of the lab chart's planned ScaledObject, since each swing churns CI nodes through the autoscaler |
 | `CILabUnitsOverdue` | At least one leased unit has run past its estimate | 15 minutes | the scheduler; its value is the overdue units | The worker holding the lease; an expired lease requeues the unit once and loses it on the second expiry, see [Retry policy](#retry-policy) |
 | `CILabVerdictMismatch` | A gate's shadow mismatch counter rose in the last hour, or its series first appeared in that hour above 0 | no hold | gate | The mismatch rows of the [shadow report](#report), before the lab grades that gate for merges. It clears an hour after the gate's last new mismatch |
 
@@ -418,24 +418,27 @@ the scheduler's load snapshot through `metrics.observe_load`:
   `ci_lab_queue_wait_seconds`, once for each of the five classes
 - `ci_lab_slots_total`, `ci_lab_slots_busy` and `ci_lab_budget_fraction`
 
-No service code sets the other contract metrics yet. The registry writes their `HELP` and `TYPE`
-lines with no sample, so Prometheus stores no series for them:
+On agentihooks `dev` of 18 November 2026, no service code sets the other contract metrics. The
+registry writes their `HELP` and `TYPE` lines with no sample, so Prometheus stores no series for
+them:
 
 | Series | Read by | Until a service sets it |
 |---|---|---|
-| `ci_lab_slots_wanted` | `CILabSchedulerBlind`, the slots panels, the KEDA scaler | `CILabSchedulerBlind` fires 10 minutes after a `ci-lab-scheduler` Deployment with a replica appears, and the `wanted` lines stay empty. `scripts.ci_lab.budget.slots_wanted` computes the number; nothing publishes it |
+| `ci_lab_slots_wanted` | `CILabSchedulerBlind`, the slots panels, the lab chart's planned KEDA scaler | `CILabSchedulerBlind` fires 10 minutes after a `ci-lab-scheduler` Deployment with a replica appears, and the `wanted` lines stay empty. `scripts.ci_lab.budget.slots_wanted` computes the number; nothing publishes it |
 | `ci_lab_units_overdue` | `CILabUnitsOverdue` | The alert cannot fire |
 | `ci_lab_workers_ready` | Workers ready against desired | The `heartbeat` line stays empty |
 | `ci_lab_core_seconds_total`, `ci_lab_heads_graded_total` | Core minutes per merged pull request | The stat reads No data |
 | `ci_lab_cache_hits_total`, `ci_lab_cache_misses_total` | `CILabCacheMissRatioHigh`, Cache hit ratio | `metrics.observe_records` counts the `verdict` cache but has no live caller, and nothing counts `git` or `uv`, so the alert cannot fire and the panel stays empty |
 | `ci_lab_verdict_mismatch_total` | `CILabVerdictMismatch`, Shadow mismatches per gate | `shadow.Shadow` counts it in a registry of its own and has no live caller, so the alert cannot fire |
+| `ci_lab_unit_duration_seconds`, `ci_lab_mirror_age_seconds`, `ci_lab_units_redelivered_total`, `ci_lab_units_lost_total`, `ci_lab_github_rate_remaining` | No alert or panel | Nothing on these views changes. `metrics.observe_records` would set the unit duration; no code sets the other four |
 
 The kube-state-metrics series need the lab chart's objects in the `ci-lab` namespace: the
-`ci-lab-scheduler` and `ci-lab-worker` Deployments, the worker pods and the HorizontalPodAutoscaler
-KEDA builds for the workers. Prometheus reaches port `9108` only through a ServiceMonitor for the
-scheduler. Neither repository defines these objects yet. Until the lab chart ships them, every
-lab alert stays inactive, and only the spend estimate and the CI nodes panel show data, since both
-read node taints.
+`ci-lab-scheduler` and `ci-lab-worker` Deployments, the worker pods, and the KEDA ScaledObject
+with the HorizontalPodAutoscaler KEDA builds from it. Prometheus reaches port `9108` only through
+a ServiceMonitor for the scheduler. As of the deployment repository's pull request 1825, neither
+repository defines any of these objects. Until the lab chart ships them, every lab alert stays
+inactive, and only the spend estimate and the CI nodes panel show data, since both read node
+taints.
 
 ### CI Lab dashboard
 
@@ -447,8 +450,8 @@ holds `7`, the CI pool maximum.
 
 | Panel | Type | Shows |
 |---|---|---|
-| Spend estimate per day | stat, EUR | CI nodes now times EUR 0.308 per node hour times 24. A CI node carries both the `workload=ci` taint and the `remote=oci` taint of the cluster's label domain. At the cap of 7 nodes it reads EUR 51.74 |
-| Core minutes per merged pull request | stat, minutes | Lab core minutes of every class over the dashboard range, divided by the queue heads graded green in that range. GitHub builds one merge group head per queued pull request, so green queue heads count the pull requests that passed the merge queue |
+| Spend estimate per day | stat, EUR | CI nodes now times EUR 0.308 per node hour times 24. A CI node carries both the `workload=ci` taint and the `remote=oci` taint; both keys sit under the cluster's own label domain, written `<label domain>` below because this page does not name it. At the cap of 7 nodes it reads EUR 51.74 |
+| Core minutes per merged pull request | stat, minutes | Lab core minutes of every class over the dashboard range, divided by the queue heads graded green in that range. The panel counts each green queue head as one merged pull request, reading each merge group head as one queued pull request |
 | Budget left | stat, percent | `max(ci_lab_budget_fraction)` |
 | Queue wait by class | time series, seconds | Predicted wait per class, capped at 3600 so a `+Inf` wait plots at one hour, with a red threshold line at 1200, the `CILabQueueWaitHigh` level |
 | Slots busy, total and wanted | time series | `ci_lab_slots_busy`, `ci_lab_slots_total` and `ci_lab_slots_wanted` |
@@ -490,7 +493,7 @@ Every change is a pull request into the deployment repository's `dev`.
 - **The node price.** The spend expression must end in `* <price> * 24`, where `<price>` comes
   from the `| price | EUR <price>/h per node` row of `docs/2H-OCI-AUTOSCALING.md`.
   `test_the_spend_estimate_prices_ci_nodes_for_a_day_at_the_documented_euro_rate` reads that row.
-  The plan named EUR 0.297; the delivered price is 0.308, an E6 node with a 600 GB boot volume.
+  That row reads EUR 0.308 per node hour, an E6 node with a 600 GB boot volume.
 - **A panel.** Edit the dashboard JSON. The provider leaves `allowUiUpdates` unset, so Grafana
   refuses to save a change made in its editor over a provisioned dashboard; export the JSON from
   the editor and commit it instead.
@@ -555,8 +558,9 @@ curl -fsS -H "Authorization: Bearer $GRAFANA_TOKEN" "$GRAFANA_ROOT_URL/api/dashb
 {"title": "CI Lab", "folder": "CI", "provisioned": true, "panels": 11}
 ```
 
-For pull request 1825 the promtool job passed both rule test files, and the `build-and-deploy.yml`
-run on its merge commit deployed the observability stack.
+For pull request 1825, the deployment repository's Actions run 44258703320 passed the promtool job
+on both rule test files, and its `build-and-deploy.yml` run 44263157474 on the merge commit
+deployed the observability stack.
 
 ### Troubleshooting
 
@@ -565,7 +569,7 @@ run on its merge commit deployed the observability stack.
 | `kubectl get prometheusrule` lists no `ci-lab` | `ops-config` has not synced the merge, or its sync failed | `kubectl -n argocd get application ops-config -o jsonpath='{.status.sync.status} {.status.sync.revision}{"\n"}'`; the revision must be a `dev` commit holding the rule file |
 | The object exists but the rules API has no `ci-lab` group | The `release: kube-prometheus-stack` label is missing or changed, so the Prometheus rule selector skips the object | Restore the label; `test_the_rule_file_holds_exactly_the_nine_lab_alerts` pins it |
 | Every lab alert stays inactive and the lab panels read No data | Prometheus holds no lab series: the lab chart's objects and the scheduler's ServiceMonitor are not in the cluster | `count by (__name__) ({__name__=~"ci_lab_.+"})` in Prometheus lists the lab series it holds |
-| `CILabSchedulerBlind` fires as soon as the scheduler runs | No service code sets `ci_lab_slots_wanted` yet, or the scrape target is down | `up` for the scheduler target. With the target up, `curl -fsS http://<scheduler>:9108/metrics \| grep '^ci_lab_slots_wanted'` prints nothing until a service sets the gauge |
+| `CILabSchedulerBlind` fires 10 minutes after a `ci-lab-scheduler` replica exists | No service code sets `ci_lab_slots_wanted`, or the scrape target is down | `up` for the scheduler target. With the target up, `curl -fsS http://<scheduler>:9108/metrics \| grep '^ci_lab_slots_wanted'` prints nothing until a service sets the gauge |
 | Spend estimate reads No data | No node carries both CI taints, and `count` over no series is empty rather than 0 | Expected while the CI pool has no node |
 | Core minutes per merged pull request reads No data or Infinity | The core and graded head counters are not exported, or no queue head was graded green in the range | See [Lab series the rules read](#lab-series-the-rules-read); widen the range |
 | `CILabVerdictMismatch` keeps firing after the gate agrees again | It looks back one hour | Expected; it clears an hour after the last new mismatch of that gate |
