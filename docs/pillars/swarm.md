@@ -716,15 +716,17 @@ execution by writing to Redis by hand.
 
 `swarm <id> set masters=N` gives a swarm N master seats: `master@<id>` is the lead, the address every single master
 swarm already uses, then `master-2@<id>` up to `master-N@<id>`. A swarm with no count has one seat and routes as
-before. Code gives every ledger phase one owning seat and saves the owners per swarm, so a restart reads the same
-owners. A phase keeps its owner while its seat exists, except that a seat add or removal rebalances: an added seat
-takes the busiest seats' last phases up to an even share, a removed seat's phases go to the seats owning fewest, and
-every other phase keeps its owner. Items already delivered stay with the old owner. A tick item, priority, pull
-request notice or task health finding about a phase or a task in it reaches the live master owning that phase; any
-other item, and one whose owner seat has no live master, reaches the lead. Every operator write that no task
-claimant takes reaches the lead, the front door, whatever phase or hive it is about, and so does page chat naming a
-backend master; only a sync order and the `@swarm` information copy reach every live agent. The lead hands work to
-backend masters over the masters channel. While the lead seat is empty the lowest numbered live master answers.
+before. On hives, only the front door seat `master@<id>` takes the hive's native Claude login; the other seats route
+on subscription or api slots, see [Backend master seats](hives.md#backend-master-seats). Code gives every ledger
+phase one owning seat and saves the owners per swarm, so a restart reads the same owners. A phase keeps its owner
+while its seat exists, except that a seat add or removal rebalances: an added seat takes the busiest seats' last
+phases up to an even share, a removed seat's phases go to the seats owning fewest, and every other phase keeps its
+owner. Items already delivered stay with the old owner. A tick item, priority, pull request notice or task health
+finding about a phase or a task in it reaches the live master owning that phase; any other item, and one whose owner
+seat has no live master, reaches the lead. Every operator write that no task claimant takes reaches the lead, the
+front door, whatever phase or hive it is about, and so does page chat naming a backend master; only a sync order and
+the `@swarm` information copy reach every live agent. The lead hands work to backend masters over the masters
+channel. While the lead seat is empty the lowest numbered live master answers.
 
 #### A new master beside a starting front door
 
@@ -1077,6 +1079,7 @@ time, in seconds from the retire request to the retirement. Both are written to 
 | The count did not fall when agents finished. | The cool off has not run ten minutes at the lower count, or a rise restarted it. A count falls only past seats whose master has left; a master asked to hand off keeps its seat until it runs `swarm <id> handoff`. |
 | `master-2@<id>` still answers after the step changed. | The cool off has not run ten minutes, the asked master has not handed off yet, the swarm is stopping or stopped and so never shrinks, or a `master-per` rule overrides the step (run `set master-per=off`). |
 | The front door seat never retires. | That is by design: scaling only retires backend seats, highest number first. |
+| The count rose but `master-2@<id>` and up never launch, failing with `account reservation is full` on every tick. | Backend seats picked the front door's native login on a hive; see [Backend master seats](hives.md#backend-master-seats) for the cause and the fix. |
 
 ### Master inbox pool
 
