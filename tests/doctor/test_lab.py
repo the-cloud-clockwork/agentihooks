@@ -108,6 +108,9 @@ def test_each_class_with_a_hit_ratio_under_the_floor_is_a_finding() -> None:
     assert lab.findings(SLUG, late, NOW, LIMITS) == []
     edge = block({"queue": entry(None, 0.1)}, at=NOW - 10 * MINUTE)
     assert [found.subject for found in lab.findings(SLUG, edge, NOW, LIMITS)] == ["queue"]
+    [rounded] = lab.findings(SLUG, block({"queue": entry(None, 0.55)}), NOW, LIMITS)
+    assert rounded.measure == 55
+    assert "answered 55 percent of queue lookups" in rounded.summary
     assert lab.findings(SLUG, block({"pull_request": {"predicted_wait_s": None}}), NOW, LIMITS) == []
 
 
@@ -211,6 +214,11 @@ def test_the_gate_reader_asks_github_only_for_authoritative_gates(monkeypatch: p
     [mismatch] = lab.read_gates(store, SLUG, named, lambda path: found[path])
     assert mismatch == lab.gate_findings({"lint": 1}, 10)[0]
     assert seen == [ROOT, ROOT, ROOT]
+    monkeypatch.setattr(lab, "HEADS", 1)
+    asked: list[str] = []
+    [windowed] = lab.read_gates(store, SLUG, named, lambda path: asked.append(path) or found[path])
+    assert windowed == lab.gate_findings({"lint": 1}, 1)[0]
+    assert asked == list(found)[:2]
 
 
 @pytest.fixture
@@ -250,4 +258,14 @@ def test_doctor_findings_prints_a_faked_lab_reading_as_json(
     err = capsys.readouterr().err
     assert "doctor: no detector none, nothing; the detectors are " in err
     assert ", lab, lab gate, " in err and "trace" not in err
+    watched: list[Any] = []
+    calls: list[tuple[Any, ...]] = []
+    fakes = {"lab": lambda: [behind_finding()], "more": lambda: [ratio_finding()]}
+    monkeypatch.setattr(doctor, "_watched", lambda given, slug: watched.append(given) or slug)
+    monkeypatch.setattr(swarm_cli, "LedgerClient", lambda: "ledger")
+    monkeypatch.setattr(detect, "readers", lambda *args, **kwargs: calls.append((*args, kwargs)) or fakes)
+    assert doctor.main([SLUG, "findings"]) == 0
+    assert capsys.readouterr().out.splitlines() == [f"{f.id} {f.summary}" for f in (behind_finding(), ratio_finding())]
+    assert watched == [store]
+    assert calls == [(store, "ledger", SLUG, NOW, {"telemetry": False})]
     assert "run the detectors once and print their findings" in doctor.build_parser().format_help()

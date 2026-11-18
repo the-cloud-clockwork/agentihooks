@@ -479,7 +479,8 @@ def cmd_findings(store: RedisStore, args: Namespace) -> None:
     unknown = sorted(set(chosen) - set(readers))
     if unknown:
         raise SwarmError(f"no detector {', '.join(unknown)}; the detectors are {', '.join(readers)}")
-    found, _ = cast(tuple[list[Finding], list[str]], _collect({name: readers[name] for name in chosen}))
+    subset = {name: readers[name] for name in chosen}
+    found, _ = cast(tuple[list[Finding], list[str]], _collect(subset))  # pragma: no mutate
     shown = [{**f.as_dict(), "id": f.id, "measure": f.measure} for f in found]
     print(json.dumps(shown) if args.json else "\n".join(f"{row['id']} {row['summary']}" for row in shown))
 

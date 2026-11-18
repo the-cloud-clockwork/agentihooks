@@ -31,8 +31,8 @@ class Limits:
     @classmethod
     def from_env(cls, environ: Mapping[str, str]) -> "Limits":
         """The limits the environment sets, each falling back to its default when unset or malformed."""
-        raw = environ.get(HIT_FLOOR_ENV, "")
-        return cls(ci_behind_minutes(environ), float(raw) if FRACTION.fullmatch(raw) else HIT_FLOOR)
+        raw = environ.get(HIT_FLOOR_ENV)
+        return cls(ci_behind_minutes(environ), float(raw) if raw and FRACTION.fullmatch(raw) else HIT_FLOOR)
 
 
 def _unreachable(slug: str, block: dict[str, Any], now_ms: int) -> Finding:
@@ -146,7 +146,7 @@ def read_gates(
     gates = delivery.authoritative(root)
     if not gates:
         return []
-    app = environ.get(shadow_report.LAB_APP, "")
+    app = environ.get(shadow_report.LAB_APP)
     if not app:
         raise ValueError(f"{shadow_report.LAB_APP} names no lab App, so authoritative gate mismatches are unknown")
     sources = shadow.Sources(shadow.static_jobs(root), app)
