@@ -9927,6 +9927,16 @@
         "tests/ci_lab/test_head_notice.py::test_without_a_receiver_a_secret_or_an_actor_nothing_is_sent",
         "tests/ci_lab/test_head_notice.py::test_a_failed_send_is_reported_once_and_never_raised"
       ]
+    },
+    {
+      "id": "type-gate-one-context",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2611",
+      "behaviour": "The strict type gate counts each source in the one checker run it holds in the head's every source layout, so a pull request, prepush and a baseline refresh count a file the same type errors at one commit whichever other files they grade.",
+      "seam": "scripts.type_gate.measure through the source lists of its basedpyright runs",
+      "tests": [
+        "tests/test_type_gate.py::test_a_file_counts_the_same_errors_whichever_other_files_the_gate_checks"
+      ]
     }
   ],
   "unmapped_rules": [

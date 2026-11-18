@@ -581,6 +581,27 @@ def test_measure_checks_at_most_a_thousand_sources_per_checker_process_and_sums_
     assert [path for checked in runs for path in checked] == files
 
 
+@pytest.mark.feature("type-gate-one-context")
+def test_a_file_counts_the_same_errors_whichever_other_files_the_gate_checks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    head = _tree(tmp_path, {"hooks/a.py": "", "hooks/b.py": "", "scripts/c.py": ""})
+
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        checked = command[command.index("--pythonpath") + 2 :]
+        before = checked[: checked.index("hooks/b.py") + 1] if "hooks/b.py" in checked else []
+        diagnostics = [{"file": str(head / "hooks/b.py"), "severity": "error"} for _ in before]
+        report = {"generalDiagnostics": diagnostics, "summary": {"filesAnalyzed": len(checked)}}
+        return subprocess.CompletedProcess(command, 1, json.dumps(report), "")
+
+    monkeypatch.setattr(type_gate.subprocess, "run", run)
+    counted = [
+        type_gate.measure(head, files).get("hooks/b.py")
+        for files in (["hooks/b.py"], ["hooks/b.py", "scripts/c.py"], ["hooks/a.py", "hooks/b.py"], None)
+    ]
+    assert counted == [3, 3, 3, 3]
+
+
 def _peak(monkeypatch: pytest.MonkeyPatch, kib: int) -> None:
     def getrusage(who: int) -> SimpleNamespace:
         assert who == resource.RUSAGE_CHILDREN
