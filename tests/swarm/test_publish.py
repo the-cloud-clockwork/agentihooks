@@ -1,6 +1,9 @@
 import json
 import subprocess
+import threading
 import urllib.error
+from collections.abc import Iterator
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -2334,3 +2337,113 @@ def test_publish_command_names_its_lab_flags(
     shown = capsys.readouterr().out
     assert re.search(r"^  --via \{lab\} +grade HEAD on the lab remote before origin$", shown, re.M)
     assert re.search(r"^  --direct +with --via lab, push origin without the lab grade$", shown, re.M)
+
+
+NOTICE_SIGNER = "notice-signer"
+NOTICE_ACTOR = "agenticore-app[bot]"
+
+
+@pytest.fixture
+def lab_receiver(monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNamespace]:
+    """Serve the real webhook receiver with lab intake on a local port and point the notice settings at it."""
+    from scripts.ci_lab.head_notice import ACTOR_ENV, URL_ENV
+    from scripts.ci_lab.webhooks import NOTICE_SECRET_ENV, LabIntake
+    from scripts.events.config import BusConfig
+    from scripts.events.memory import open_bus
+    from scripts.hub import github_webhooks
+
+    bus = open_bus(BusConfig())
+    heads = bus.lab_heads.consumer("lab", "ci.lab.head.>")
+    intake = LabIntake(bus.lab_heads, NOTICE_SIGNER.encode())
+    pulls = github_webhooks.LazyPulls(bus)  # pyright: ignore[reportArgumentType]
+    ingress = github_webhooks.Ingress(pulls, b"webhook-signer", intake)
+    server = ThreadingHTTPServer(("localhost", 0), github_webhooks.handler(ingress))
+    serving = threading.Thread(target=server.serve_forever, daemon=True)
+    serving.start()
+    monkeypatch.setenv(URL_ENV, f"http://localhost:{server.server_address[1]}{github_webhooks.NOTICE_PATH}")
+    monkeypatch.setenv(NOTICE_SECRET_ENV, NOTICE_SIGNER)
+    monkeypatch.setenv(ACTOR_ENV, NOTICE_ACTOR)
+    yield SimpleNamespace(heads=heads)
+    server.shutdown()
+    server.server_close()
+    serving.join()
+
+
+@pytest.mark.feature("lab-head-notice-push")
+def test_a_published_push_sends_one_signed_notice_the_receiver_accepts(
+    publication: SimpleNamespace, lab_receiver: SimpleNamespace
+) -> None:
+    from scripts.swarm import publish
+
+    result = publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+    head = git(publication.root, "rev-parse", "HEAD")
+    notice = {
+        "event": "notice",
+        "repo": publish.lab_repository(str(publication.repo.parent / "remote.git")),
+        "head": head,
+        "base": git(publication.root, "merge-base", head, "origin/dev"),
+        "actor": NOTICE_ACTOR,
+        "action": "pushed",
+    }
+    deliveries = lab_receiver.heads.fetch(100, 0)
+    assert [(delivery.event.type, delivery.event.data) for delivery in deliveries] == [("ci.lab.head.notice", notice)]
+    assert result["lab_notice"] == "200"
+    assert git(publication.root, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
+
+
+@pytest.mark.feature("lab-head-notice-push")
+def test_a_notice_the_receiver_refuses_never_fails_the_push(
+    publication: SimpleNamespace,
+    lab_receiver: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from scripts.ci_lab.webhooks import NOTICE_SECRET_ENV
+    from scripts.swarm import publish
+
+    monkeypatch.setenv(NOTICE_SECRET_ENV, "another-signer")
+    result = publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+    head = git(publication.root, "rev-parse", "HEAD")
+    refused = f"lab head notice for {head} was not accepted: <HTTPError 401: 'Unauthorized'>; the push stands"
+    assert refused in capsys.readouterr().err.splitlines()
+    assert result["lab_notice"] == "0"
+    assert lab_receiver.heads.fetch(100, 0) == []
+    assert git(publication.root, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
+
+
+@pytest.mark.feature("lab-head-notice-push")
+def test_a_publish_without_the_lab_notice_settings_sends_and_records_no_notice(
+    publication: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.ci_lab.head_notice import ACTOR_ENV, URL_ENV
+    from scripts.ci_lab.webhooks import NOTICE_SECRET_ENV
+    from scripts.swarm import publish
+
+    monkeypatch.delenv(URL_ENV, raising=False)
+    monkeypatch.delenv(NOTICE_SECRET_ENV, raising=False)
+    monkeypatch.delenv(ACTOR_ENV, raising=False)
+    result = publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+    assert "lab_notice" not in result
+    assert result["head"] == git(publication.root, "rev-parse", "HEAD")
+
+
+@pytest.mark.feature("lab-head-notice-push")
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "git@github.com:The-Cloud-Clockwork/agentihooks.git",
+        "ssh://git@github.com/The-Cloud-Clockwork/agentihooks.git",
+        "https://github.com/the-cloud-clockwork/agentihooks/",
+    ],
+    ids=["scp ssh", "ssh url", "https"],
+)
+def test_the_notice_names_the_repository_as_github_deliveries_do(origin: str) -> None:
+    from scripts.swarm import publish
+
+    assert publish.lab_repository(origin) == "https://github.com/the-cloud-clockwork/agentihooks"

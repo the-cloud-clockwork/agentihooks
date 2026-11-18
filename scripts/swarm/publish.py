@@ -478,6 +478,11 @@ def remote_head(root: Path, branch: str) -> str:
     return listed.split()[0] if listed else ""
 
 
+def lab_repository(remote: str) -> str:
+    """Return the repository a lab head notice names for an origin remote, in the form GitHub deliveries give it."""
+    raise NotImplementedError
+
+
 def grade_and_push(
     slug: str, root: Path, primary: Path, fields: dict[str, str], head: str, route: LabRoute | None = None
 ) -> None:
