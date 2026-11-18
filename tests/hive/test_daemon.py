@@ -1283,6 +1283,7 @@ def test_an_overlong_beat_does_not_sleep_again(monkeypatch):
 
 
 def test_run_resumes_registration_after_a_dropped_and_restored_redis(monkeypatch):
+    monkeypatch.setattr(daemon, "revision", lambda root: "loaded")
     import fakeredis
 
     server = fakeredis.FakeServer()
@@ -1326,6 +1327,7 @@ def test_run_resumes_registration_after_a_dropped_and_restored_redis(monkeypatch
 
 
 def test_run_backoff_is_capped_and_restarts_after_a_good_beat_and_wait(monkeypatch, capsys):
+    monkeypatch.setattr(daemon, "revision", lambda root: "loaded")
     from redis.exceptions import ConnectionError, TimeoutError
 
     outcomes = iter([ConnectionError] * 6 + [None, None, TimeoutError, None])
