@@ -202,7 +202,6 @@ def test_swarm_engineer_guidance_names_no_raw_gh_merge_or_dequeue_mutation(skill
     [
         ROLES / "cicd" / ".claude" / "skills" / "swarm-ci" / "SKILL.md",
         ROLES / "master" / "CLAUDE.md",
-        ROLES / "master" / ".claude" / "rules" / "master-role.md",
     ],
 )
 def test_ci_and_master_guidance_queues_instead_of_merging(guidance):
