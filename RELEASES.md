@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.1028 · 2026-11-18
+
+### 2026-11-18 · 4286c104c8ef · #12077 · @agenticore-app
+
+**Give repeated stall alerts, overrun notices and preempt asks their own inbox refs**
+
+This change fixes a bug where repeated stall alerts, overrun notices, and preempt asks were silently closed as "already shown" instead of reaching the master, because their inbox refs were built only from a slug and task id, so every later notice about the same task collapsed onto the first. Refs now include stall start time, agent start, or ask time, ensuring genuinely new events reach the recipient while true repeats still dedupe correctly. A linter rule also now catches refs built only from constants, slug, and task id to prevent regressions.
+
+### 2026-11-18 · a5efd326f2d1 · #12121 · @agenticore-app
+
+**Default the mutation shard merge prefix to the report prefix**
+
+This change fixes the mutation shard merge script, which had defaulted its `--prefix` to `mutation-preflight-shard-`, a leftover from a deleted preflight branch, causing it to silently fail to find any mutation reports since the Tests workflow actually downloads artifacts into folders named `mutation-report-`. The default is now updated to match, so the merge step correctly locates and combines shard reports without requiring an explicit `--prefix` argument, restoring working CI mutation reporting.
+
 ## v2.17.1025 · 2026-11-18
 
 ### 2026-11-18 · 719a237e3049 · #12106 · @agenticore-app
