@@ -91,6 +91,16 @@ redis.call('SMOVE', KEYS[6], KEYS[8], ARGV[1])
 return 'lost'
 """
 
+RETRY = """
+if redis.call('HGET', KEYS[1], 'state') ~= 'done' then return 0 end
+redis.call('HINCRBY', KEYS[1], 'attempts', 1)
+redis.call('HSET', KEYS[1], 'state', 'pending', 'worker', '', 'outcome', '')
+redis.call('SREM', KEYS[2], ARGV[1])
+redis.call('ZADD', KEYS[3], redis.call('INCR', KEYS[4]), ARGV[1])
+redis.call('SMOVE', KEYS[5], KEYS[6], ARGV[1])
+return 1
+"""
+
 
 def _key(*parts: str) -> str:
     return PREFIX + ":".join(parts)
@@ -115,6 +125,7 @@ class Queue:
         self._extend = client.register_script(EXTEND)
         self._finish = client.register_script(FINISH)
         self._reap = client.register_script(REAP)
+        self._retry = client.register_script(RETRY)
 
     def enqueue(self, units: Sequence[Unit], head: str, requirements: Mapping[str, Requirement]) -> list[str]:
         """Add each unit of the head as a pending job unless that job is already known."""
@@ -201,3 +212,15 @@ class Queue:
             _head(job.head, "done"),
         ]
         return str(self._reap(keys=keys, args=[job.id, now_ms, requeues, LOST]))
+
+    def retry(self, job: Job) -> bool:
+        """Move a finished job back to pending with one more attempt; False when it is not finished."""
+        keys = [
+            _job(job.id),
+            _key("done"),
+            _key("pending"),
+            _key("seq"),
+            _head(job.head, "done"),
+            _head(job.head, "pending"),
+        ]
+        return bool(self._retry(keys=keys, args=[job.id]))

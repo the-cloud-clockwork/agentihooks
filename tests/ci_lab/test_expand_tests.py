@@ -5,7 +5,9 @@ from typing import Any
 
 import pytest
 
-from scripts.ci_lab import expand_tests
+from scripts.ci_lab import digests, expand_tests
+from scripts.ci_lab.digests import Toolchain
+from scripts.ci_lab.units import Unit
 from tests import dep_manifest
 
 ALPHA = "def first():\n    return 1\n\n\ndef second():\n    return 2\n"
@@ -267,3 +269,27 @@ def test_a_test_without_a_duration_counts_zero_seconds() -> None:
     names = ["tests/test_new.py::test_known", "tests/test_new.py::test_unknown"]
     durations = {"tests/test_new.py::test_known": 5.0}
     assert expand_tests.batches(_manifest(*names), durations, 5.5) == [tuple(names)]
+
+
+@pytest.mark.feature("lab-scheduler-test-units")
+def test_each_batch_is_one_test_unit_keyed_by_its_fingerprints_opened_files_and_toolchain(repository: Path) -> None:
+    tree = _tree(repository)
+    manifest = copy.deepcopy(MANIFEST)
+    manifest["tests"][RUN]["outside"] = ["docs/guide.md", "gone.txt"]
+    blobs = {path: f"blob of {path}" for path in tree}
+    durations = {FIRST: 30.0, SECOND: 30.5, RUN: 30.0, SPAWN: 30.0}
+    toolchain = Toolchain("3.12", {"ruff": "1"}, "lock", "project", "image", {"TZ": "UTC"})
+    keys = expand_tests.fingerprints(manifest, tree)
+
+    def batch(tests: tuple[str, ...], opened: dict[str, str]) -> Unit:
+        found = {test: keys[test] for test in tests}
+        inputs = digests.TestInputs(found, opened, expand_tests.PYTEST_INVOCATION, toolchain)
+        return Unit("test", digests.test_key(inputs), tests)
+
+    assert expand_tests.BATCH_SECONDS == 60.0
+    assert expand_tests.units(manifest, tree, blobs, durations, toolchain) == (
+        batch((SECOND,), {}),
+        batch((FIRST,), {}),
+        batch((RUN, SPAWN), {"docs/guide.md": "blob of docs/guide.md"}),
+        batch((ONE,), {}),
+    )

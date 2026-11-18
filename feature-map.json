@@ -7963,6 +7963,29 @@
       ]
     },
     {
+      "id": "lab-scheduler-test-units",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2629",
+      "behaviour": "The CI lab scheduler expands test units, one per batch of dependency manifest tests keyed by their fingerprints on the head tree. A pull request or hotfix head gets none. A merge group head runs the interaction rule over its entries with the entry limit of the grader's delivery.yaml and the batches the verdict store holds, and runs only the batches holding an invalidated test unless a clause sends it to the whole suite. A promotion or backfill head runs every batch. A head that needs test units and has no stored manifest cannot expand. A finished unit whose outcome the retry policy allows another run goes back to pending with one more attempt, so a crashed worker's unit reruns once before it makes the grade red.",
+      "seam": "scripts.ci_lab.scheduler.MirrorExpander.expand over a git origin fixture, scripts.ci_lab.scheduler.StoredManifests over the local object store, scripts.ci_lab.expand_tests.units, scripts.ci_lab.queue.Queue.retry and scripts.ci_lab.scheduler.Scheduler.tick over fakeredis",
+      "tests": [
+        "tests/ci_lab/test_expand_tests.py::test_each_batch_is_one_test_unit_keyed_by_its_fingerprints_opened_files_and_toolchain",
+        "tests/ci_lab/test_queue.py::test_retry_moves_a_finished_job_back_to_pending_with_one_more_attempt",
+        "tests/ci_lab/test_scheduler.py::test_a_crashed_unit_reruns_while_the_lost_retries_allow_then_makes_the_grade_red",
+        "tests/ci_lab/test_scheduler.py::test_a_failed_unit_reruns_while_the_failed_retries_allow_and_its_pass_is_stored",
+        "tests/ci_lab/test_scheduler.py::test_a_pull_request_or_hotfix_head_expands_no_test_units",
+        "tests/ci_lab/test_scheduler.py::test_a_merge_group_head_runs_only_the_batches_its_entries_invalidate",
+        "tests/ci_lab/test_scheduler.py::test_a_merge_group_head_whose_entries_invalidate_no_test_runs_no_batch",
+        "tests/ci_lab/test_scheduler.py::test_a_merge_group_head_runs_every_batch_when_an_interaction_clause_holds",
+        "tests/ci_lab/test_scheduler.py::test_a_promotion_or_backfill_head_runs_every_batch_without_reading_the_cache",
+        "tests/ci_lab/test_scheduler.py::test_a_head_without_stored_durations_keeps_each_test_file_whole",
+        "tests/ci_lab/test_scheduler.py::test_a_head_that_needs_test_units_without_a_manifest_cannot_expand",
+        "tests/ci_lab/test_scheduler.py::test_a_merge_group_head_refuses_an_entry_limit_the_delivery_schema_refuses",
+        "tests/ci_lab/test_scheduler.py::test_a_head_whose_grader_delivery_breaks_its_schema_is_dropped_with_its_reason",
+        "tests/ci_lab/test_scheduler.py::test_stored_manifests_read_the_packed_manifest_of_the_nearest_stored_ancestor"
+      ]
+    },
+    {
       "id": "lab-control-routes",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/swarm-panic-and-priority",
