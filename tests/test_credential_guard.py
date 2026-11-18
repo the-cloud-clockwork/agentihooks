@@ -397,6 +397,10 @@ GET_SECRET_VALUE_RENDERERS = [
     "kubectl get -f manifests/ -o json",
     "kubectl get --raw /api/v1/namespaces/prod/secrets/db",
     "kubectl get --raw=/api/v1/secrets",
+    "kubectl get -w $R db -o yaml",
+    "R=secret; kubectl get --show-labels $R db -o yaml",
+    "kubectl get --ignore-not-found $'secret' db -o yaml",
+    "kubectl get -Ao yaml $R",
 ]
 
 GET_SECRET_KEYS_AND_NAMES = [
@@ -416,10 +420,15 @@ GET_SECRET_KEYS_AND_NAMES = [
     "kubectl get configmap app -o jsonpath={.data}",
     "kubectl get pod secret-store-0 -o yaml",
     "kubectl get pods -o name | grep -o secret",
+    "kubectl get pods -o name; echo secret -o yaml",
     "kubectl -n secrets get pods -o yaml",
     "kubectl get pods -l app=$APP -o yaml",
     "kubectl get deploy/$NAME -o yaml",
     "kubectl get --raw /healthz",
+    "kubectl get -w pods -o yaml",
+    "kubectl get pods -n $NS --selector $SEL -o yaml",
+    "kubectl get -n $NS pods -o yaml",
+    "kubectl get -oyaml pods",
 ]
 
 

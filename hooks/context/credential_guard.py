@@ -584,6 +584,37 @@ SHELL_GROUPING = re.compile(r"[()`]")
 VALUE_FLAGS = {"--output": "output", "--template": "template", "--raw": "raw"}
 SHORT_OUTPUT = re.compile(r"-[arwh]*o=?(.*)")
 RAW_SECRET = re.compile(r"/secrets(?:[/?]|$)|\$")
+GET_VALUE_FLAGS = {
+    "-n",
+    "--namespace",
+    "-l",
+    "--selector",
+    "-f",
+    "--filename",
+    "-k",
+    "--kustomize",
+    "-o",
+    "--output",
+    "--template",
+    "--raw",
+    "--sort-by",
+    "--field-selector",
+    "--label-columns",
+    "--chunk-size",
+    "--subresource",
+    "--context",
+    "--cluster",
+    "--user",
+    "--kubeconfig",
+    "-s",
+    "--server",
+    "--token",
+    "--as",
+    "--as-group",
+    "--request-timeout",
+    "-v",
+    "--cache-dir",
+}
 VALUELESS_OUTPUTS = {"", "name", "wide"}
 GO_TEMPLATE_OUTPUTS = {"go-template", "template"}
 KEY_LISTING = re.compile(
@@ -613,7 +644,7 @@ def lists_keys_only(template: str) -> bool:
 
 
 def prints_field_values(outputs: list[str], templates: list[str]) -> bool:
-    """True when any kubectl output or template value can print a field: all but table, name, wide and the key listing."""
+    """True when an output or template value can print a field: all but table, name, wide and the key listing."""
     if not outputs and any(templates):
         outputs = ["go-template"]
     shown = [output.partition("=") for output in outputs if output not in VALUELESS_OUTPUTS]
@@ -625,6 +656,21 @@ def prints_field_values(outputs: list[str], templates: list[str]) -> bool:
     )
 
 
+def get_operands(words: list[str]) -> list[str]:
+    """Positional words of a kubectl get; only a flag known to take a value, written without =, consumes the next."""
+    operands: list[str] = []
+    taken = False
+    for word in words:
+        short = SHORT_OUTPUT.fullmatch(word)
+        if taken:
+            taken = False
+        elif word.startswith("-"):
+            taken = word in GET_VALUE_FLAGS or (short is not None and not short.group(1))
+        else:
+            operands.append(word)
+    return operands
+
+
 def prints_secret_values(words: list[str]) -> bool:
     """True when kubectl words get a Secret, or a type left to the shell, with an output that can print a data value."""
     if "get" not in words:
@@ -633,7 +679,8 @@ def prints_secret_values(words: list[str]) -> bool:
     if any(RAW_SECRET.search(raw) for raw in values["raw"]):
         return True
     rest = words[words.index("get") + 1 :]
-    return describe_may_show_secret(rest) and prints_field_values(values["output"], values["template"])
+    named = any(names_secret(word) for word in rest) or hidden_type(get_operands(rest))
+    return named and prints_field_values(values["output"], values["template"])
 
 
 def gets_secret_values(low: str) -> bool:
