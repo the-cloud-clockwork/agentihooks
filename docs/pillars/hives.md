@@ -1662,10 +1662,9 @@ seats place as:
 When the front door's own launch is refused because the native login's single reservation is still held, it moves to
 the next account with a free seat and never retries the refused login in that launch.
 
-Before this rule (pull request 11407, merged into dev on 16 November 2026), placement offered the native login to
-every master seat and ranked it above the slots. Each backend seat chose the login the front door already held, and
-hive admission refused it on every tick, so a swarm that scaled to three masters kept one. The tick's actions read,
-on every pass:
+Releases without pull request 11407 offer the native login to every master seat and rank it above the slots. There,
+each backend seat chooses the login the front door already holds, hive admission refuses it on every tick, and a
+swarm that scales to three masters keeps one. The tick's actions read, on every pass:
 
 ```text
 master spawn failed in seat master-2@rig-grade-swarm: account reservation is full: account=claude:unrouted sessions=1 cap=1 five_left=None week_left=None
