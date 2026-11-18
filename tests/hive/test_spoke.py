@@ -828,19 +828,21 @@ def test_an_offer_meeting_a_dead_claim_asks_the_hub_to_advance_its_generation_be
     assert claim(rig) == {"state": "dead"}
 
 
-def test_an_offer_meeting_a_withdrawn_claim_is_terminated_without_asking_the_hub(rig: SimpleNamespace) -> None:
+@pytest.mark.feature("withdrawn-offer-asked-again")
+def test_an_offer_meeting_a_withdrawn_claim_asks_the_hub_again_and_launches_once_admitted(rig: SimpleNamespace) -> None:
     import json
 
     from scripts.hive.spoke import claim_key
 
     rig.bus.state("spoke-work").create(claim_key(rig.event), json.dumps({"state": "withdrawn"}).encode())
 
-    assert rig.spoke.poll() == "withdrawn"
+    assert rig.spoke.poll() == "started"
 
+    rig.tasks.request.assert_called_once_with(rig.event)
     rig.tasks.dead_lettered.assert_not_called()
     rig.tasks.reopen.assert_not_called()
-    rig.tasks.request.assert_not_called()
-    assert rig.queue.take(0) is None
+    rig.runtime.spawn.assert_called_once()
+    assert claim(rig)["state"] == "started"
 
 
 def test_the_spoke_claim_and_launch_work_with_the_real_nats_backend(tmp_path):
@@ -1322,15 +1324,18 @@ def test_started_event_uses_a_millisecond_wall_clock(rig, monkeypatch):
     assert event.time == 1_234_567
 
 
-def test_withdrawn_work_retains_its_terminal_state_and_cannot_be_loaded_again(rig):
+@pytest.mark.feature("withdrawn-offer-asked-again")
+def test_withdrawn_work_asks_the_hub_again_for_a_later_offer_of_its_generation(rig: SimpleNamespace) -> None:
     from dataclasses import replace
 
     rig.tasks.request.return_value = None
     assert rig.spoke.poll() == "withdrawn"
     assert claim(rig) == {"state": "withdrawn"}
-    rig.queue.offer(replace(rig.event, id="withdrawn-duplicate"))
+    duplicate = replace(rig.event, id="withdrawn-duplicate")
+    rig.queue.offer(duplicate)
     assert rig.spoke.poll() == "withdrawn"
-    rig.tasks.request.assert_called_once_with(rig.event)
+    assert rig.tasks.request.call_args_list == [((rig.event,),), ((duplicate,),)]
+    assert claim(rig) == {"state": "withdrawn"}
 
 
 def test_spawned_agent_keeps_the_launch_claim_revision_after_started_publication(rig):

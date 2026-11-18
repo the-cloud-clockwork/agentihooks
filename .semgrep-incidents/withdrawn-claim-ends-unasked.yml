@@ -1,0 +1,20 @@
+rules:
+  - id: withdrawn-claim-ends-unasked
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A delivery that meets a withdrawn spoke claim must ask the hub to admit it again, because the hub refuses an
+      admission for conditions that pass while the task stays open at the same claim generation and readiness offers
+      that generation again, so a withdrawn claim that ends its deliveries unasked terms every later offer of the task,
+      which is then never placed. Route a withdrawn claim through the admit ask, as a ready one.
+    paths:
+      include:
+        - /scripts/hive/
+        - withdrawn-claim-ends-unasked.py
+    patterns:
+      - pattern-inside: |
+          if <... "withdrawn" ...>:
+              ...
+      - pattern-either:
+          - pattern: $SELF._ended(...)
+          - pattern: $DELIVERY.term()
