@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import json
-import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from scripts.ci_lab import delivery, shadow, shadow_report
+from scripts.ci_lab import delivery, shadow
 from scripts.doctor import cli as doctor
 from scripts.doctor import detect, lab
 from scripts.swarm import cli as swarm_cli
@@ -21,6 +20,7 @@ NOW = 1_794_960_000_000
 SLUG = "sw"
 URL = "http://lab.example:8080"
 REPOSITORY = "owner/repo"
+APP = "agentihooks-lab"
 HEAD = "a" * 40
 OTHER = "b" * 40
 ROOT = Path(__file__).resolve().parents[2]
@@ -179,9 +179,11 @@ def test_mismatches_count_each_authoritative_gate_through_the_acceptance_rule_re
         asked.append(path)
         return found[path]
 
-    assert lab.mismatches(fetch, REPOSITORY, ("lint",), frozenset({"lint"}), 2) == {"lint": 1}
+    sources = shadow.Sources(frozenset({"lint"}), APP)
+    assert lab.mismatches(fetch, REPOSITORY, ("lint",), sources, 2) == {"lint": 1}
     assert asked == list(found)
-    assert lab.mismatches(fetch, REPOSITORY, (), frozenset({"lint"}), 2) == {}
+    assert lab.mismatches(fetch, REPOSITORY, ("lint",), shadow.Sources(frozenset({"lint"}), "other"), 2) == {"lint": 0}
+    assert lab.mismatches(fetch, REPOSITORY, (), sources, 2) == {}
 
 
 @pytest.mark.feature("doctor-lab-health")
@@ -192,29 +194,18 @@ def test_the_gate_reader_asks_github_only_for_authoritative_gates(monkeypatch: p
     def refused(path: str) -> dict[str, Any]:
         raise AssertionError(path)
 
+    named = {"AGENTIHOOKS_LAB_APP": APP}
     monkeypatch.setattr(delivery, "authoritative", lambda root: ())
-    assert lab.read_gates(store, SLUG, refused) == []
+    assert lab.read_gates(store, SLUG, {}, refused) == []
     seen: list[Path] = []
     monkeypatch.setattr(delivery, "authoritative", lambda root: seen.append(root) or ("lint",))
+    with pytest.raises(ValueError, match="^AGENTIHOOKS_LAB_APP names no lab App, so authoritative gate mismatches"):
+        lab.read_gates(store, SLUG, {}, refused)
     monkeypatch.setattr(shadow, "static_jobs", lambda root: seen.append(root) or frozenset({"lint"}))
     found = answers("lint")
-    [mismatch] = lab.read_gates(store, SLUG, lambda path: found[path])
-    assert mismatch.id == "lab-gate-mismatch/lint"
-    assert mismatch.measure == 1
-    assert seen == [ROOT, ROOT]
-
-
-@pytest.mark.feature("doctor-lab-health")
-def test_the_github_fetch_goes_through_the_rate_limit_helper(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[tuple[list[str], dict[str, object]]] = []
-
-    def gh_api(args: list[str], **options: object) -> subprocess.CompletedProcess[str]:
-        calls.append((args, options))
-        return subprocess.CompletedProcess(args, 0, json.dumps({"check_runs": []}), "")
-
-    monkeypatch.setattr(shadow_report, "gh_api", gh_api)
-    assert lab.gh_fetch("repos/owner/repo/commits/a/check-runs") == {"check_runs": []}
-    assert calls == [(["repos/owner/repo/commits/a/check-runs"], {"timeout": 30.0, "text": True})]
+    [mismatch] = lab.read_gates(store, SLUG, named, lambda path: found[path])
+    assert mismatch == lab.gate_findings({"lint": 1}, 10)[0]
+    assert seen == [ROOT, ROOT, ROOT]
 
 
 @pytest.fixture
@@ -233,8 +224,8 @@ def test_the_doctor_reads_the_stored_lab_block_and_registers_both_readers(
     assert lab.read(store, SLUG, NOW, {"AGENTIHOOKS_DOCTOR_LAB_HIT_FLOOR": "0.4"}) == [behind_finding()]
     readers = detect.readers(store, None, SLUG, NOW, environ={"AGENTIHOOKS_HEALTH_CI_BEHIND_MINUTES": "30"})
     assert readers["lab"]() == [ratio_finding()]
-    monkeypatch.setattr(lab, "read_gates", lambda given, slug: [given, slug])
-    assert readers["lab gate"]() == [store, SLUG]
+    monkeypatch.setattr(lab, "read_gates", lambda given, slug, environ: [given, slug, environ])
+    assert readers["lab gate"]() == [store, SLUG, {"AGENTIHOOKS_HEALTH_CI_BEHIND_MINUTES": "30"}]
 
 
 @pytest.mark.feature("doctor-lab-health")
@@ -251,4 +242,7 @@ def test_doctor_findings_prints_a_faked_lab_reading_as_json(
     assert doctor.main([SLUG, "findings", "--detector", "lab"]) == 0
     assert capsys.readouterr().out.splitlines() == [f"{f.id} {f.summary}" for f in (behind_finding(), ratio_finding())]
     assert doctor.main([SLUG, "findings", "--detector", "lab", "--detector", "nothing"]) == 1
-    assert "no detector nothing" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "doctor: no detector nothing; the detectors are " in err
+    assert ", lab, lab gate, " in err and "trace" not in err
+    assert "run the detectors once and print their findings" in doctor.build_parser().format_help()
