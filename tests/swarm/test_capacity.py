@@ -816,14 +816,14 @@ def test_status_names_the_hive_admission_section_a_hive_redis_role_cannot_read(m
     store.create(SwarmConfig("sw", "/repo", max_eng=2, max_ci=1))
     registry.register(store.redis, "other", "other", [])
     monkeypatch.setattr(cli, "LedgerClient", lambda: FakeLedger([]))
-    allowed = store.redis.eval
+    allowed = store.redis.execute_command
 
-    def refused(script: str, numkeys: int, *keys_and_args: Any) -> Any:
-        if numkeys and str(keys_and_args[0]).startswith(admission.key("")):
+    def refused(*args: Any, **options: Any) -> Any:
+        if any(str(arg).startswith(admission.key("")) for arg in args[1:]):
             raise NoPermissionError("No permissions to access a key")
-        return allowed(script, numkeys, *keys_and_args)
+        return allowed(*args, **options)
 
-    monkeypatch.setattr(store.redis, "eval", refused)
+    monkeypatch.setattr(store.redis, "execute_command", refused)
     cli.cmd_status(store, SimpleNamespace(slug="sw", json=False))
     out = capsys.readouterr().out.splitlines()
     assert "hive admission unreadable: No permissions to access a key" in out
