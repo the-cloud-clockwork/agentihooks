@@ -300,6 +300,26 @@ def test_a_unit_that_cannot_run_makes_the_grade_red_and_stores_no_verdict(lab: C
     assert run.store.get(item.kind, item.key) is None
 
 
+@pytest.mark.feature("lab-unit-outcomes")
+def test_an_unknown_outcome_is_refused_on_completion_and_stores_no_verdict(lab: Callable[..., Run]) -> None:
+    item = unit(1)
+    run = lab({HEAD_A: plan({"lint": (item,)})})
+    run.push(HEAD_A)
+    run.tick(1000)
+    grant = run.lease()[0]
+    run.lab.objects.write_once(upload_path(grant.job, "report"), json.dumps({"seconds": 1.0}).encode())
+    run.lab.objects.write_once(upload_path(grant.job, "log"), b"unit log")
+
+    assert run.leases().complete(grant.job, grant.token, "taken") is False
+    run.tick(1100)
+
+    job = run.engine.queue.job(grant.job)
+    assert job is not None and (job.state, job.outcome) == ("leased", "")
+    assert run.grade(HEAD_A).units[ref(item)].outcome == ""
+    assert run.grade(HEAD_A).conclusion == ""
+    assert run.store.get(item.kind, item.key) is None
+
+
 @pytest.mark.feature("lab-scheduler-grade")
 def test_the_fold_reproduces_gate_required_on_recorded_fixtures() -> None:
     fixture = load()

@@ -7678,6 +7678,19 @@
       ]
     },
     {
+      "id": "lab-unit-outcomes",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-unit-outcomes-shared",
+      "behaviour": "A CI lab lease completes only with an outcome a worker reports: passed, failed, gate_failed, survived, crash or cannot_run. Any other outcome, lost and dropped included, is refused: the job stays leased with no outcome and the scheduler stores no verdict for it. A worker executor that answers an unknown outcome raises, so its lease is reaped.",
+      "seam": "scripts.ci_lab.leases.Leases.complete over fakeredis, scripts.ci_lab.scheduler.Scheduler.tick after a refused completion, and scripts.ci_lab.worker.Finished",
+      "tests": [
+        "tests/ci_lab/test_leases.py::test_complete_refuses_an_unknown_outcome_and_records_nothing",
+        "tests/ci_lab/test_leases.py::test_complete_records_every_outcome_a_worker_reports",
+        "tests/ci_lab/test_scheduler.py::test_an_unknown_outcome_is_refused_on_completion_and_stores_no_verdict",
+        "tests/ci_lab/test_worker.py::test_an_executor_answer_with_an_unknown_outcome_is_refused"
+      ]
+    },
+    {
       "id": "lab-capacity-reader",
       "origin": "inventory",
       "behaviour": "The tick step lab capacity reads GET /capacity from the swarm lab url into the swarm lab block in Redis, keeps the last capacity with the error when a read fails, ships one lab_capacity row per class to the metrics outbox, and swarm status json carries the lab block.",
