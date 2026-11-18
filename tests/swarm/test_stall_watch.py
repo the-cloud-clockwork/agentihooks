@@ -459,6 +459,7 @@ def test_a_ready_task_unclaimed_while_the_lane_is_full_and_seats_are_free_alerts
     swarm.tick(START + 15 * MINUTE)
     [item] = swarm.inbox()
     assert "unclaimed while its lane is full for 15 minutes" in item.text
+    assert item.ref == f"sw:stall:t1:unclaimed:{START}:alert"
     assert swarm.retired == [] and swarm.ledger.rows["t1"]["state"] == "open"
     swarm.tick(START + 16 * MINUTE)
     assert len(swarm.inbox()) == 1
@@ -919,6 +920,8 @@ def test_the_same_stall_answered_once_is_not_shown_again() -> None:
     inbox.close(first.id, LEAD, "done", "handled")
     swarm.tick(START + 11 * MINUTE)
     assert seen.claim(inbox, LEAD) == []
+    [repeat] = [item for item in swarm.inbox() if item.id != first.id]
+    assert (repeat.ref, repeat.state, repeat.reason) == (first.ref, "done", f"done: {seen.SEEN_ON_LEDGER}")
 
 
 def test_an_open_unclaimed_alert_is_not_repeated_when_the_task_waits_again():

@@ -234,7 +234,6 @@ def _judged(
     seen: dict[str, int],
     agent: AgentRecord | None,
 ) -> tuple[str | None, int]:
-    """The task's stall case and the start its clock runs from; None and 0 when it is not stalled."""
     case, since = _stall(watch, task, pull, marks, seen, agent)
     if case is None:
         return None, 0
