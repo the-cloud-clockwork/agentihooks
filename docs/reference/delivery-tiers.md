@@ -1243,7 +1243,7 @@ $ python -m scripts.gate_protected --base origin/dev --head HEAD
 graded HEAD against merge base fad7e9be3aac: 0 protected gate problems
 ```
 
-The Tests `lint` job runs the same command from its grader checkout at the event base, with the pull request head as `--head`. [Protected gate step in lint](grader-gate-steps.md#protected-gate-step-in-lint) describes that step.
+The Tests `lint` job runs `python -m scripts.gate_protected --head <pull request head>` with no `--base`, from its grader checkout at the event base, so `--base` is that checkout's `HEAD`. [Protected gate step in lint](grader-gate-steps.md#protected-gate-step-in-lint) describes that step.
 
 ### Changing the pinned names or the inventory
 

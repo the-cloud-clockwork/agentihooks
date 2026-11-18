@@ -25,13 +25,14 @@ made each chart step run the grader's copy over an empty tree first and refuse
 unless that copy reports no chart, so a copy that ignores `--root` fails
 closed instead of grading the base's own charts.
 
-The other lint gate steps are outside this page. Several of them look for
-their module in the grader and run the head's copy when it is missing. The
+The other lint gate steps are outside the step table. Several of them look
+for their module in the grader and run the head's copy when it is missing. The
 [For loop word list gate](for-loop-word-list-gate.md) is one of them. The
 [Tick pattern gate](tick-pattern-gate.md) fails instead. The protected gate
-step is another one; its own section,
-[Protected gate step in lint](#protected-gate-step-in-lint), covers which
-revision it grades.
+step runs `scripts.gate_protected` from the grader, and runs the head's
+`scripts.ci_runner_trust` when the grader has no `scripts/ci_runner_trust.py`.
+[Protected gate step in lint](#protected-gate-step-in-lint) covers that step
+and which revision it grades.
 
 For a pull request, the Tests workflow runs every step on this page unless the
 CI lab verdict covers the job, and each step feeds `Gate — Required`, the
@@ -265,20 +266,26 @@ The head changes tests/registry/FROZEN_GATES.json and the frozen gate file scrip
 ```
 
 The head `e4900bc2ed` and the event base held the same `scripts/gate_protected.py`
-blob. The changed blob came from `dev`. Lint stayed red until the owner merged
-`dev` into the pull request.
+blob. The changed blob came from `dev`. Merging `dev` into a pull request
+cleared it with the old step: pull request 11335, opened before both merges,
+had refreshed `dev`, and its lint job
+[132997128606](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/43774359032/job/132997128606)
+graded `0 protected gate problems`.
 
 ### Pull requests behind dev
 
-These results come from the regression tests. Each runs the real step text
-over a planted repository whose `dev` landed a registry announcement and the
-frozen file change it announces after the event base:
+The regression tests plant a repository whose `dev` landed a registry
+announcement and the frozen file change it announces after the event base.
+The current column comes from those tests, which run the real step text. The
+column before pull request 11515 follows from `_frozen_problems` on the same
+planted commits, and Tests run 43830625093 confirmed its red cases on the old
+step text:
 
 | The head changes | Step before pull request 11515 | Current step |
 | --- | --- | --- |
 | A file outside the registry | Red: `The head changes tests/registry/FROZEN_GATES.json and the frozen gate file gates/one.py together; ...` | Green: `0 protected gate problems` |
 | Only the registry, announcing a blob for another frozen file | Red, with the same problem | Green: `0 protected gate problems` |
-| A frozen file, to a blob the base registry does not accept | Red: the registry and frozen file together problem for `gates/one.py`, which `dev` changed, and for `gates/two.py` | Red: `The head changes the frozen gate file gates/two.py to content tests/registry/FROZEN_GATES.json on the base does not accept; announce its blob there by its own pull request first.` The problem names only the head's own file |
+| A frozen file, to a blob the base registry does not accept | Red: `The head changes tests/registry/FROZEN_GATES.json and the frozen gate file <path> together; ...` twice, once for `gates/one.py`, which `dev` changed, and once for `gates/two.py` | Red: `The head changes the frozen gate file gates/two.py to content tests/registry/FROZEN_GATES.json on the base does not accept; announce its blob there by its own pull request first.` The problem names only the head's own file |
 
 A frozen file change in the head is still refused. To change a frozen file,
 announce its blob first, as
@@ -287,8 +294,11 @@ workflow.
 
 ### Grade a pull request the way the lint step does
 
-Read the event base from the `GRADER:` line of the `Check out the protected
-grader` step in the lint job log. Then, from a clone of this repository:
+The event base is the `GRADER:` value in the env block that the lint job log
+prints under `Run git fetch --no-tags origin "$GRADER"`, the
+`Check out the protected grader` step. `gh pr view <number> --json baseRefOid`
+returns the current base instead, which differs from the event base once
+`dev` moves. Then, from a clone of this repository:
 
 ```bash
 grader="$(mktemp -d)/grader"
@@ -305,9 +315,11 @@ To see what the step graded before pull request 11515, fetch
 rebuilds that ref when `dev` moves, so it can differ from the run's
 `GITHUB_SHA`.
 
-The `5868238ae4e0` grader was run over planted commits that repeat pull request
-11341. One head adds a registry blob on top of `5868238ae4e0`, and one merge
-commit merges that head into `c133027b0a`:
+On 18 November 2026 the `scripts` tree of `5868238ae4e0` was run locally, as
+the grader, over planted commits that repeat pull request 11341. One head adds
+a registry blob on top of `5868238ae4e0`, and one merge commit merges that
+head into `c133027b0a`. The planted commits exist only in that local run, so
+their shas differ on every rerun:
 
 ```text
 $ python -m scripts.gate_protected --head <synthetic merge>
@@ -333,17 +345,21 @@ graded c11f19e52f28 against merge base 5868238ae4e0: 1 protected gate problems
 | `tests/test_gate_protected.py::test_the_protected_lint_step_passes_a_pull_request_behind_landed_frozen_changes` | Two cases, `unrelated` and `registry`. A head behind `dev` that changes an unrelated file or only the registry grades `0 protected gate problems` against the event base, exit 0 |
 | `tests/test_gate_protected.py::test_the_protected_lint_step_still_refuses_a_frozen_edit_behind_dev` | A head behind `dev` that edits a frozen file exits 1 with the unaccepted content problem for that file, and the output never names the file `dev` changed |
 | `tests/test_gate_protected.py::test_the_protected_lint_step_grades_the_run_revision_outside_a_pull_request` | With no pull request head in the event, the step grades `github.sha` |
-| Feature map entry `protected-lint-grades-the-pull-request-head` | Origin `regression`. Lists the three tests above, with the seam the lint step run text that invokes `scripts.gate_protected` |
+| Feature map entry `protected-lint-grades-the-pull-request-head` | Origin `regression`. Lists the three tests above. Its seam is the lint step run text that invokes `scripts.gate_protected` |
 | Semgrep incident rule `protected-gate-grades-synthetic-merge` in `.semgrep-incidents/` | Refuses a workflow line that runs `scripts.gate_protected` with `--head` set to `$GITHUB_SHA`, `${GITHUB_SHA...}` or {% raw %}`${{ github.sha }}`{% endraw %} |
 
 The tests read the step from `.github/workflows/test.yml` and run its `run`
 text with `bash --noprofile --norc -eo pipefail`, the shell GitHub uses. They
 resolve the step's `env` with `scripts.ci_lab.expressions.interpolate` and
 run from a grader worktree at the event base. The grader imports the
-checkout's own gate code. On the old step text, Tests run 43830625093 attempt
-2 failed both behind `dev` cases and blamed `gates/one.py` in the frozen edit
-case. The outside a pull request case passed there. On the fixed step, Tests
-run 43835878743 passed all four cases.
+checkout's own gate code. On the old step text, at `f223d38af`, Tests run
+43830625093 attempt 2, job
+[133185537748](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/43830625093/job/133185537748),
+failed both behind `dev` cases and blamed `gates/one.py` in the frozen edit
+case. The case with no pull request head passed on the old step text. On the
+fixed step, at `1b9b25c460`, Tests run 43835878743, job
+[133193737010](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/43835878743/job/133193737010),
+passed all four cases.
 
 The Semgrep `scan` step `Fail on findings new against the base` runs the
 incident rules from the grader and the head, and fails only on findings new
@@ -445,6 +461,7 @@ does not exist.
 | An edit to the head's copy of one of these scripts changes nothing in the run | Only the grader's copy runs | Expected. The edit grades later pull requests once it merges into `dev` |
 | `::error::The protected grader's copy of tests/ci_charts/<script> does not grade the tree --root names, ...`, exit 1 | The Semgrep `base` predates pull request 11361, or its grader has no copy of the script. See [Stale base on the chart steps](#stale-base-on-the-chart-steps) | Run again with a base that carries `--root`. A pull request into `dev` always grades with the `dev` tip |
 | `The head changes tests/registry/FROZEN_GATES.json and the frozen gate file <path> together; ...` from `Require trusted actors before private runner admission`, on a pull request whose own commits leave `<path>` unchanged | The step graded a revision that carries `dev`'s frozen changes: a run of the step text from before pull request 11515, or a head that merged in `dev` commits newer than the event base. See [Why the step grades the head instead of the synthetic merge](#why-the-step-grades-the-head-instead-of-the-synthetic-merge) | Compare the sha on the `graded` line with the pull request head sha. Run `git diff --name-only <merge base> <head> -- tests/registry/FROZEN_GATES.json <path>` with the two shas from that line to list what the graded revision changed |
+| `The head drops the frozen gate file <path> from tests/registry/FROZEN_GATES.json; a frozen file stays frozen.` from the same step | The head's registry no longer lists a file the event base registry freezes | Restore the entry in `tests/registry/FROZEN_GATES.json`. A frozen file stays frozen |
 | `The head changes the frozen gate file <path> to content tests/registry/FROZEN_GATES.json on the base does not accept; ...` from the same step | The head changes a frozen file to a blob the event base registry does not list | Land a pull request that adds the blob to the registry first. See [Change the job](ci-lab.md#change-the-job) |
 | Semgrep reports `protected-gate-grades-synthetic-merge` | A new workflow line runs `scripts.gate_protected` with `--head` set to the run sha | Pass the pull request head instead, through {% raw %}`HEAD_SHA: ${{ github.event.pull_request.head.sha \|\| github.sha }}`{% endraw %}, as in [Protected gate step in lint](#protected-gate-step-in-lint) |
 
