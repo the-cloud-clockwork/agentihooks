@@ -1747,6 +1747,18 @@
       ]
     },
     {
+      "id": "hive-restart-on-checkout-move",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-service-restart-on-checkout-move",
+      "behaviour": "The hive run reads the checkout revision it loaded its code from at start and again after every beat; when the revision moved it says so on stderr and ends between beats so its user unit starts it again on the new code, and it keeps beating while the revision is unchanged or cannot be read.",
+      "seam": "scripts.hive.daemon.run",
+      "tests": [
+        "tests/hive/test_daemon_checkout_restart.py::test_a_moved_checkout_ends_the_hive_run_after_its_beat",
+        "tests/hive/test_daemon_checkout_restart.py::test_an_unchanged_checkout_keeps_the_hive_beating",
+        "tests/hive/test_daemon_checkout_restart.py::test_an_unreadable_checkout_keeps_the_hive_beating"
+      ]
+    },
+    {
       "id": "scheduled-run-hive-placement",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/hvr4",
