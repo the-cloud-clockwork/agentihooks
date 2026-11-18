@@ -821,7 +821,7 @@ def _history(root: Path) -> tuple[str, str]:
     """Commit a base, a source change on the first parent and a merged side commit; return the merge and change."""
 
     def git(*args: str, when: int = 0) -> str:
-        stamp = {"GIT_AUTHOR_DATE": f"{when} +0000", "GIT_COMMITTER_DATE": f"{when} +0000"}
+        stamp = {"GIT_AUTHOR_DATE": f"@{when} +0000", "GIT_COMMITTER_DATE": f"@{when} +0000"}
         identity = ["-c", "user.name=t", "-c", "user.email=t@t"]
         command = ["git", "-C", str(root), *identity, *args]
         return subprocess.run(command, check=True, capture_output=True, text=True, env={**os.environ, **stamp}).stdout

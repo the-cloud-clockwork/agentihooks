@@ -26,3 +26,25 @@ def test_a_shard_without_a_units_serial_group_adds_no_serial_time() -> None:
     seconds = {"a": 0.5, "b": 0.4}
     zero = dict.fromkeys(seconds, 0.0)
     assert assign_work(seconds, zero, zero, 2, 1) == [["a"], ["b"]]
+
+
+def test_an_empty_shard_starts_with_no_parallel_load() -> None:
+    seconds = {"a": 0.0, "b": 1.5}
+    serial = {"a": 2.0, "b": 0.0}
+    zero = dict.fromkeys(seconds, 0.0)
+    assert assign_work(seconds, serial, zero, 2, 1) == [["a"], ["b"]]
+
+
+def test_an_empty_shard_starts_with_no_serial_peak() -> None:
+    seconds = {"p": 0.6, "q": 0.35, "d": 0.01}
+    serial = dict.fromkeys(seconds, 0.0)
+    collection = {"p": 0.1, "q": 0.0, "d": 0.3}
+    files = {"p": "fb", "q": "fq", "d": "fb"}
+    assert assign_work(seconds, serial, collection, 2, 1, None, files) == [["p"], ["q", "d"]]
+
+
+def test_a_shards_first_serial_unit_adds_only_its_own_serial_time() -> None:
+    seconds = {"a": 2.7, "c": 0.1, "b": 0.5}
+    serial = {"a": 0.0, "c": 1.5, "b": 0.8}
+    zero = dict.fromkeys(seconds, 0.0)
+    assert assign_work(seconds, serial, zero, 2, 1) == [["a"], ["c", "b"]]
