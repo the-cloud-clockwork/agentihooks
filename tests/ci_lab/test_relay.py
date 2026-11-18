@@ -308,8 +308,19 @@ def test_a_tick_holds_a_pending_head_until_a_grade_of_it_closes_then_relays_it_o
     assert actions[0] == f"pushed {HEAD} to {BRANCH}"
     assert actions[-1] == f"opened {PULL}"
     assert client.hgetall(relay.PENDING) == {}
+    assert {output.details for output in calls.outputs} == {f"{LAB}/grades/{HEAD}"}
     assert engine.tick() == []
     assert [call for call in calls.log if call[0] == "push"] == [("push", HEAD, BRANCH)]
+
+
+def test_a_tick_holds_a_head_with_no_closed_grade_and_still_relays_the_next_one() -> None:
+    client, calls = fake_redis(), Calls()
+    found: dict[str, list[State]] = {HEAD: [], OTHER: [replace(grade("success"), head=OTHER)]}
+    first, second = relay.Pending(REPO, HEAD, REF, BRANCH), relay.Pending(REPO, OTHER, "refs/grade/t2", "engineer-2")
+    engine = relay.Relay(client, Notices([first, second]), found.__getitem__, calls.ports(), LAB)
+    actions = engine.tick()
+    assert actions[2] == f"pushed {OTHER} to engineer-2"
+    assert list(client.hgetall(relay.PENDING)) == [f"{HEAD} {BRANCH}"]
 
 
 def test_a_tick_relays_the_green_one_of_several_closed_grades() -> None:
@@ -522,6 +533,15 @@ def test_an_open_pull_request_of_the_branch_is_reported_updated_with_no_create(m
     )
 
 
+def test_the_open_pull_request_lookup_names_the_first_path_segment_as_the_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = Mock(return_value=answer(200, [{"html_url": PULL, "number": 9}]))
+    monkeypatch.setattr(requests, "request", request)
+    relay.PullRequests("example/group/repo", Token()).open(BRANCH, "title", "body")
+    assert request.call_args.kwargs["params"] == {"head": f"example:{BRANCH}", "state": "open"}
+
+
 def test_a_branch_without_an_open_pull_request_gets_a_draft_into_dev(monkeypatch: pytest.MonkeyPatch) -> None:
     request = Mock(side_effect=[answer(200, []), answer(201, {"html_url": PULL, "number": 9})])
     monkeypatch.setattr(requests, "request", request)
@@ -627,3 +647,5 @@ def test_build_wires_the_relay_to_the_scheduler_grades_the_mirror_and_the_lab_ur
     assert engine.ports.checks(SLUG) is engine.ports.checks(SLUG)
     assert cast(relay.Checks, engine.ports.checks("acme/other")).repo == "acme/other"
     assert engine.grades(HEAD) == []
+    again = relay.build({**environ, post_receive.LAB_URL: "http://lab.example/X/"}, scheduler, consumer)
+    assert again.lab == "http://lab.example/X"
