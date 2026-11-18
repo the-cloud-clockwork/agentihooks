@@ -161,16 +161,6 @@ jobs:
         run: |
           digest="$(jq -r .digest "$RUNNER_TEMP/worker-image-attestation/candidate/promoted.json")"
           docker buildx imagetools create --tag "$REPOSITORY:dev" "$REPOSITORY@$digest"
-      - name: Tag the release version and move the release tag when it is the newest
-        if: github.event_name == 'release'
-        env:
-          RELEASE: ${{ github.event.release.tag_name }}
-          LATEST: ${{ steps.main.outputs.latest }}
-        run: |
-          digest="$(jq -r .digest "$RUNNER_TEMP/worker-image-attestation/candidate/promoted.json")"
-          tags=(--tag "$REPOSITORY:${RELEASE#v}")
-          if [[ "$LATEST" == true ]]; then tags+=(--tag "$REPOSITORY:release"); fi
-          docker buildx imagetools create "${tags[@]}" "$REPOSITORY@$digest"
       - name: Keep the qualified candidate layers
         if: steps.layers.outputs.cache-hit != 'true'
         run: |
@@ -205,6 +195,7 @@ jobs:
       packages: write
     env:
       IMAGE: ghcr.io/the-cloud-clockwork/agentihooks-hive-worker
+      WORKER: ghcr.io/the-cloud-clockwork/agentihooks-worker
       RELEASE: ${{ github.event.release.tag_name }}
     steps:
       - uses: actions/checkout@v4
@@ -215,6 +206,9 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Tag the worker release and move the release tag unless a newer release already published
+        run: |
+          bash docker/swarm-node/release.sh "$WORKER" "$RELEASE" "$GITHUB_SHA"
       - name: Publish the hive worker once per release version
         run: |
           bash deploy/worker/release-hive.sh "$IMAGE" "$RELEASE" "$GITHUB_SHA"

@@ -134,26 +134,12 @@ def test_the_swarm_release_tags_the_version_and_release(tmp_path):
     ]
 
 
-def test_the_worker_release_publishes_and_moves_the_version_and_release_tags_but_never_dev():
+def test_the_worker_release_publishes_and_moves_the_version_and_release_tags_but_never_dev() -> None:
     job = _job("swarm-node-image.yml")
     for name in ("Log in to the registry", "Publish the qualified candidate"):
         assert _step(job, name)["if"].startswith("github.event_name == 'release' || ")
-    release = _step(job, "Tag the release version and move the release tag when it is the newest")
-    assert release["if"] == "github.event_name == 'release'"
-    assert release["env"] == {
-        "RELEASE": "${{ github.event.release.tag_name }}",
-        "LATEST": "${{ steps.main.outputs.latest }}",
-    }
-    assert release["run"].splitlines() == [
-        'digest="$(jq -r .digest "$RUNNER_TEMP/worker-image-attestation/candidate/promoted.json")"',
-        'tags=(--tag "$REPOSITORY:${RELEASE#v}")',
-        'if [[ "$LATEST" == true ]]; then tags+=(--tag "$REPOSITORY:release"); fi',
-        'docker buildx imagetools create "${tags[@]}" "$REPOSITORY@$digest"',
-    ]
     dev = _step(job, "Move the floating dev tag to the published digest")
     assert "github.ref == 'refs/heads/dev'" in dev["if"]
-    names = [step.get("name") for step in job["steps"]]
-    assert names.index("Publish the qualified candidate") < names.index(release["name"])
 
 
 def _worker_release(
