@@ -201,6 +201,7 @@ def test_pre_tool_use_carries_no_root_in_auto_mode_or_on_other_targets(
     monkeypatch.setenv("AGENTIHOOKS_TARGET", "copilot")
     hm.on_pre_tool_use(_payload("find_symbol", {}, mode="default"))
     assert ROOT_ARG not in capsys.readouterr().out
+    assert hm._input_rewrite(_payload("find_symbol", {}, mode="default"), "mcp__serena__find_symbol") is None
     assert store.hgetall(redis_key("serena_root", SESSION)) == {"": str(repo["a"])}
 
 

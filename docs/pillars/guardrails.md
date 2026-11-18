@@ -484,8 +484,6 @@ The root goes out as `updatedInput` with no `permissionDecision` of its own, in 
 
 A call without a recorded root keeps the session's last activation, as before. That applies without Redis, with `AGENTIHOOKS_SERENA=false`, in auto mode, or on another harness.
 
-A quick check in a session that is not in bypass mode: activate worktree A, have a sub agent activate worktree B, then edit from the parent with no root. The result line reads `(applied in A)` and the permission prompt shows exactly when it did before.
-
 ### Configuration
 
 | Variable | Default | Description |
