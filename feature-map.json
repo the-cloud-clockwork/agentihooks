@@ -5406,6 +5406,28 @@
       ]
     },
     {
+      "id": "panic-rerun-reads-run-branch",
+      "origin": "regression",
+      "ordered_at": "2026-11-18",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2572",
+      "behaviour": "While panic holds a swarm, a rerun from a session bound to it is spared only when the head branch of the one run or job it names, read from the checkout's origin repository, is the checked out branch or the branch it tracks on origin and a registered fix of that repository. A rerun of a dev run or of any other branch's run, of a run that cannot be read, or naming no single run or job stays frozen.",
+      "seam": "The PreToolUse panic freeze in the blocker window hook: blocker_window.pretool for a session bound to the panicking swarm, with the run read through the panic source control port",
+      "tests": [
+        "tests/swarm/test_panic.py::test_a_fix_branch_session_rerunning_a_dev_run_stays_frozen"
+      ]
+    },
+    {
+      "id": "panic-drop-one-fix",
+      "origin": "regression",
+      "ordered_at": "2026-11-18",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2572",
+      "behaviour": "The master or the operator removes one registered fix from a swarm's panic with agentihooks swarm SLUG panic drop --fix URL: the panic keeps its start, reason, mode and other fixes and tells the lab the remaining fix heads, and no run is cancelled.",
+      "seam": "cmd_panic through the swarm command parser, read back with panic.state",
+      "tests": [
+        "tests/swarm/test_panic.py::test_the_master_drops_one_panic_fix_and_keeps_the_panic_and_its_other_fixes"
+      ]
+    },
+    {
       "id": "panic-fix-pull-request-head-in-its-repository",
       "origin": "regression",
       "ordered_at": "2026-11-16",
