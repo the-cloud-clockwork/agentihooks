@@ -23,6 +23,16 @@ async def strip_the_carried_root_unread(pool: Pool, binding: Binding, name: str,
     return await backend.call(name, arguments)
 
 
+async def resolve_the_carried_root_but_route_by_the_session(
+    pool: Pool, binding: Binding, session: Binding, name: str, arguments: dict
+) -> object:
+    binding = await carried_binding(binding, arguments)
+    arguments = {key: value for key, value in arguments.items() if key != ROOT_ARG}
+    backend = await pool.get(session.root)
+    # ruleid: serena-router-routes-by-the-session-binding-alone
+    return await backend.call(name, arguments)
+
+
 async def route_by_the_carried_root(pool: Pool, binding: Binding, name: str, arguments: dict) -> object:
     binding = await carried_binding(binding, arguments)
     arguments = {key: value for key, value in arguments.items() if key != ROOT_ARG}

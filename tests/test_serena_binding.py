@@ -102,7 +102,7 @@ def test_an_activated_subfolder_records_its_checkout_root(store: fakeredis.FakeR
 
 
 @pytest.mark.feature(FEATURE)
-def test_a_failed_activation_keeps_the_previous_root(
+def test_an_activation_outside_a_checkout_keeps_the_previous_root(
     store: fakeredis.FakeRedis, repo: dict[str, Path], tmp_path: Path
 ) -> None:
     _activate(repo["a"])
