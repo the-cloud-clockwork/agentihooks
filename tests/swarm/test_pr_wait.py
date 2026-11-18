@@ -385,6 +385,7 @@ def test_the_hook_marks_a_grade_push_with_its_head(tmp_path: Path, store: RedisS
         "git push origin HEAD",
         "git push lab HEAD:refs/heads/t1",
         "git push lab HEAD:refs/grade/a HEAD:refs/grade/b",
+        "git push lab HEAD:refs/grade/t1:x",
         "git push lab missing:refs/grade/t1",
         "git push lab refs/grade/t1",
         "git push lab",

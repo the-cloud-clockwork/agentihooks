@@ -76,7 +76,9 @@ def pushed_head(command: str, cwd: str) -> str:
     for kind, where, args in actions(command, cwd):
         if kind == "push":
             specs = positionals(args)[1:]
-            source, _, end = specs[0].lstrip("+").rpartition(":") if len(specs) == 1 else ("", "", "")
+            if len(specs) != 1:
+                return ""
+            source, _, end = specs[0].removeprefix("+").rpartition(":")
             if not end.startswith(GRADE_REFS):
                 return ""
             return git(where, "rev-parse", "--verify", f"{source or end}^{{commit}}").stdout.strip()
@@ -87,7 +89,7 @@ def lab_grade(lab_url: str, head: str) -> str:
     """The grade url of the head on the lab at lab_url while the lab holds a grade of it, '' otherwise."""
     if not (lab_url and head):
         return ""
-    url = f"{lab_url.rstrip('/')}/grades/{head}"
+    url = f"{lab_url.removesuffix('/')}/grades/{head}"
     try:
         return url if lab_wait.grades(url) else ""
     except (OSError, ValueError):
@@ -143,10 +145,10 @@ def enforce_pass(
         pushed = read(store.redis, slug, agent.name)
         if agent.state == "finished" or not pushed or agent.task not in rows:
             continue
-        lookup = either(forge, lab, pushed.get("pushed_head", ""))
-        url = pull_of(store.redis, slug, agent.name, pushed, rows[agent.task], now_ms, lookup) or ""
-        pull = github(url) if waits.PULL_URL.fullmatch(url) else None
-        if pull is None and not lab_wait.GRADE_URL.fullmatch(url):
+        lookup = either(forge, lab, pushed.get("pushed_head") or "")
+        url = pull_of(store.redis, slug, agent.name, pushed, rows[agent.task], now_ms, lookup)
+        pull = github(url) if url and waits.PULL_URL.fullmatch(url) else None
+        if pull is None and not (url and lab_wait.GRADE_URL.fullmatch(url)):
             continue
         clear(store.redis, slug, agent.name)
         held = idle.wait(store.redis, slug, agent.name) or {}
