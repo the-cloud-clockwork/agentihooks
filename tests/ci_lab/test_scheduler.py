@@ -861,6 +861,9 @@ def test_the_load_counts_each_job_once_in_the_most_urgent_class_of_the_live_grad
         cache_hits={"promotion": 2},
         cache_misses={"promotion": 3, "queue": 2, "pull_request": 2},
         frees_in=(estimate, estimate),
+        running_slots={"queue": 2},
+        pending_slots={"promotion": 2, "pull_request": 1},
+        workers_ready=1,
     )
 
 
@@ -884,10 +887,12 @@ def test_the_load_counts_leased_slots_and_the_free_slots_workers_offered_within_
         cache_hits={},
         cache_misses={},
         frees_in=(scheduler.UNIT_ESTIMATE_S,) * 2,
+        workers_ready=2,
     )
     run.engine.queue.offer("busy", 1, 1000)
     assert run.engine.load(1000 + scheduler.READY_MS).slots_total == 2 + 1 + 4
     assert run.engine.load(1001 + scheduler.READY_MS).slots_total == 2 + 4
+    assert run.engine.load(1001 + scheduler.READY_MS).workers_ready == 1
 
 
 @pytest.mark.feature("lab-scheduler-service")
@@ -979,6 +984,194 @@ def test_listen_serves_leases_capacity_grades_and_metrics_from_one_budgeted_load
         for server in servers:
             server.shutdown()
             server.server_close()
+
+
+def scrape(run: Run, now: int) -> str:
+    spending = budget.Budget(run.lab.client, lambda: now, budget.Policy(100.0, {}))
+    routes = lease_api.ControlRoutes(run.lab.client, "tok", lambda: now)
+    servers = scheduler.listen(run.engine, run.leases(), routes, spending, lambda: now, (0, 0))
+    for server in servers:
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        return _read(f"http://127.0.0.1:{servers[1].server_address[1]}/metrics").decode()
+    finally:
+        for server in servers:
+            server.shutdown()
+            server.server_close()
+
+
+@pytest.mark.feature("lab-scheduler-metrics")
+def test_the_exposition_asks_for_the_running_and_waiting_slots_after_a_pass(lab: Callable[..., Run]) -> None:
+    held, waiting, big = unit(1), unit(2), unit(3)
+    run = lab({HEAD_A: plan({"lint": (held, waiting, big)})})
+    run.push(HEAD_A)
+    run.tick(1000)
+    run.lab.client.hset(f"{queue.PREFIX}job:{scheduler.job_id(HEAD_A, big)}", "slots", 3)
+    assert [grant.unit for grant in run.lease()] == [held]
+    run.tick(1100)
+    assert "\nci_lab_slots_wanted 5.0\n" in scrape(run, 1100)
+
+
+@pytest.mark.feature("lab-scheduler-metrics")
+def test_the_exposition_counts_the_workers_that_polled_within_the_ready_window_after_a_pass(
+    lab: Callable[..., Run],
+) -> None:
+    run = lab({})
+    run.lab.now = 1000
+    assert run.leases().lease("first", 2, frozenset(), 0) == []
+    run.lab.now = 1500
+    assert run.leases().lease("second", 1, frozenset(), 0) == []
+    run.tick(1000 + scheduler.READY_MS)
+    assert "\nci_lab_workers_ready 2.0\n" in scrape(run, 1000 + scheduler.READY_MS)
+    assert "\nci_lab_workers_ready 1.0\n" in scrape(run, 1001 + scheduler.READY_MS)
+
+
+@pytest.mark.feature("lab-scheduler-metrics")
+def test_the_exposition_counts_leased_units_past_their_estimate_after_a_pass(lab: Callable[..., Run]) -> None:
+    first, second = unit(1), unit(2)
+    run = lab({HEAD_A: plan({"lint": (first, second)})})
+    run.push(HEAD_A)
+    run.tick(1000)
+    assert [grant.unit for grant in run.lease(ttl_ms=10**6)] == [first]
+    run.lab.now = 2000
+    assert [grant.unit for grant in run.lease(ttl_ms=10**6)] == [second]
+    estimate_ms = int(scheduler.UNIT_ESTIMATE_S * 1000)
+    run.tick(1000 + estimate_ms)
+    assert "\nci_lab_units_overdue 0.0\n" in scrape(run, 1000 + estimate_ms)
+    assert "\nci_lab_units_overdue 1.0\n" in scrape(run, 1001 + estimate_ms)
+    assert "\nci_lab_units_overdue 2.0\n" in scrape(run, 2001 + estimate_ms)
+    run.lab.client.hdel(f"{queue.PREFIX}job:{scheduler.job_id(HEAD_A, first)}", "leased_ms")
+    assert "\nci_lab_units_overdue 1.0\n" in scrape(run, 2001 + estimate_ms)
+
+
+@pytest.mark.feature("lab-scheduler-metrics")
+def test_the_exposition_counts_each_finished_attempts_core_seconds_once_in_its_most_urgent_class_after_a_pass(
+    lab: Callable[..., Run],
+) -> None:
+    shared, solo = unit(1), unit(2)
+    run = lab({HEAD_A: plan({"lint": (shared, solo)})}, retries=Policy(failed=1))
+    run.push(HEAD_A)
+    run.tick(1000)
+    run.lab.expander.plans[HEAD_A] = plan({"lint": (shared,)})
+    run.push(HEAD_A, lane="gh-readonly-queue/dev/pr-1", event="merge_group", action="checks_requested")
+    run.tick(1100)
+    run.lab.client.hset(f"{queue.PREFIX}job:{scheduler.job_id(HEAD_A, shared)}", "slots", 2)
+    grants = {grant.unit: grant for grant in run.lease(slots=3)}
+    run.finish(grants[shared], scheduler.PASSED, {"seconds": 30.0})
+    run.finish(grants[solo], scheduler.FAILED, {"seconds": 5.0})
+    run.tick(1200)
+    text = scrape(run, 1200)
+    assert 'ci_lab_core_seconds_total{class="queue"} 60.0' in text
+    assert 'ci_lab_core_seconds_total{class="promotion"} 5.0' in text
+    [again] = run.lease()
+    run.finish(again, scheduler.PASSED, {"seconds": 5.0})
+    run.tick(1300)
+    run.tick(1400)
+    text = scrape(run, 1400)
+    assert 'ci_lab_core_seconds_total{class="queue"} 60.0' in text
+    assert 'ci_lab_core_seconds_total{class="promotion"} 10.0' in text
+    assert run.lab.client.smembers(scheduler.LIVE) == set()
+
+
+@pytest.mark.feature("lab-scheduler-metrics")
+def test_the_exposition_shows_the_last_finished_units_duration_per_kind_after_a_pass(lab: Callable[..., Run]) -> None:
+    first, second = unit(1), unit(2)
+    run = lab({HEAD_A: plan({"lint": (first, second)})})
+    run.push(HEAD_A)
+    run.tick(1000)
+    grants = {grant.unit: grant for grant in run.lease(slots=2)}
+    run.finish(grants[first], scheduler.PASSED, {"seconds": 4.0})
+    run.tick(1100)
+    assert 'ci_lab_unit_duration_seconds{kind="static"} 4.0' in scrape(run, 1100)
+    run.finish(grants[second], scheduler.PASSED, {"seconds": 9.5})
+    run.tick(1200)
+    assert 'ci_lab_unit_duration_seconds{kind="static"} 9.5' in scrape(run, 1200)
+
+
+@pytest.mark.feature("lab-scheduler-metrics")
+def test_the_exposition_counts_each_verdict_store_lookup_a_pass_makes(lab: Callable[..., Run]) -> None:
+    cached, fresh, other = unit(1), unit(2), unit(3)
+    run = lab({HEAD_A: plan({"lint": (cached, fresh, other)}), HEAD_B: plan({"lint": (cached, fresh)})})
+    run.cache(cached)
+    run.push(HEAD_A)
+    run.tick(1000)
+    text = scrape(run, 1000)
+    assert 'ci_lab_cache_hits_total{cache="verdict"} 1.0' in text
+    assert 'ci_lab_cache_misses_total{cache="verdict"} 2.0' in text
+    assert [grant.unit for grant in run.lease()] == [fresh]
+    run.push(HEAD_B)
+    run.tick(1100)
+    assert run.grade(HEAD_B).units[ref(fresh)].job == scheduler.job_id(HEAD_A, fresh)
+    text = scrape(run, 1100)
+    assert 'ci_lab_cache_hits_total{cache="verdict"} 2.0' in text
+    assert 'ci_lab_cache_misses_total{cache="verdict"} 3.0' in text
+
+
+@pytest.mark.feature("lab-scheduler-metrics")
+def test_the_exposition_counts_the_git_and_uv_lookups_a_finished_units_report_carries_after_a_pass(
+    lab: Callable[..., Run],
+) -> None:
+    first, second, silent = unit(1), unit(2), unit(3)
+    run = lab({HEAD_A: plan({"lint": (first, second, silent)})})
+    run.push(HEAD_A)
+    run.tick(1000)
+    grants = {grant.unit: grant for grant in run.lease(slots=3)}
+    cut = {"git": {"hits": 2, "misses": 1}, "uv": {"hits": 0, "misses": 1}}
+    reused = {"git": {"hits": 1, "misses": 0}, "uv": {"hits": 1, "misses": 0}}
+    run.finish(grants[first], scheduler.PASSED, {"seconds": 1.0, "caches": cut})
+    run.finish(grants[second], scheduler.PASSED, {"seconds": 1.0, "caches": reused})
+    run.finish(grants[silent], scheduler.PASSED, {"seconds": 1.0})
+    run.tick(1100)
+    run.tick(1200)
+    text = scrape(run, 1200)
+    assert 'ci_lab_cache_hits_total{cache="git"} 3.0' in text
+    assert 'ci_lab_cache_misses_total{cache="git"} 1.0' in text
+    assert 'ci_lab_cache_hits_total{cache="uv"} 1.0' in text
+    assert 'ci_lab_cache_misses_total{cache="uv"} 1.0' in text
+
+
+@pytest.mark.feature("lab-scheduler-metrics")
+def test_the_exposition_counts_each_grade_a_pass_closes_by_class_and_conclusion(lab: Callable[..., Run]) -> None:
+    passing, failing = unit(1), unit(2)
+    run = lab({HEAD_A: plan({"lint": (passing,)}), HEAD_B: plan({"lint": (failing,)})})
+    run.cache(passing)
+    run.cache(failing, passed=False)
+    run.push(HEAD_A)
+    run.push(HEAD_B, lane="gh-readonly-queue/dev/pr-1", event="merge_group", action="checks_requested")
+    run.tick(1000)
+    run.tick(1100)
+    text = scrape(run, 1100)
+    assert 'ci_lab_heads_graded_total{class="promotion",conclusion="success"} 1.0' in text
+    failed = run.grade(HEAD_B).conclusion
+    assert failed in ("failure", "success")
+    assert f'ci_lab_heads_graded_total{{class="queue",conclusion="{failed}"}} 1.0' in text
+    assert text.count("ci_lab_heads_graded_total{") == 2
+
+
+@pytest.mark.feature("lab-scheduler-metrics")
+def test_the_exposition_counts_each_expired_lease_a_pass_requeues(lab: Callable[..., Run]) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)})})
+    run.push(HEAD_A)
+    run.tick(1000)
+    run.lease(ttl_ms=100)
+    run.tick(1100)
+    text = scrape(run, 1100)
+    assert "\nci_lab_units_redelivered_total 1.0\n" in text
+    assert "\nci_lab_units_lost_total " not in text
+
+
+@pytest.mark.feature("lab-scheduler-metrics")
+def test_the_exposition_counts_each_expired_lease_a_pass_marks_lost(lab: Callable[..., Run]) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)})})
+    run.push(HEAD_A)
+    run.tick(1000)
+    run.lease(ttl_ms=100)
+    run.tick(1100)
+    run.lease(ttl_ms=100)
+    run.tick(1300)
+    text = scrape(run, 1300)
+    assert "\nci_lab_units_lost_total 1.0\n" in text
+    assert "\nci_lab_units_redelivered_total 1.0\n" in text
 
 
 FLUSHED = "<flushed>"

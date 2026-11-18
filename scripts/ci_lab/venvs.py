@@ -52,16 +52,17 @@ def _sync(tree: Path, venv: Path, root: Path, build: Build) -> None:
     shutil.rmtree(outcome.log.parent)
 
 
-def venv_for(lockfile_digest: str, tree: Path, root: Path, build: Build, baked: Path = BAKED) -> Path:
+def venv_for(lockfile_digest: str, tree: Path, root: Path, build: Build, baked: Path = BAKED) -> tuple[Path, bool]:
     """Return the baked venv when its marker holds the digest, else the digest's own venv under root, built once in
-    the sandbox build names."""
+    the sandbox build names, and whether this call built it."""
     if _marked(baked, lockfile_digest):
-        return baked
+        return baked, False
     venv = root / lockfile_digest
     root.mkdir(parents=True, exist_ok=True)
     with (root / f"{lockfile_digest}.lock").open("w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        if not _marked(venv, lockfile_digest):
+        built = not _marked(venv, lockfile_digest)
+        if built:
             _sync(tree, venv, root, build)
             (venv / MARKER).write_text(f"{lockfile_digest}\n")
-    return venv
+    return venv, built
