@@ -827,7 +827,11 @@ def test_the_changed_files_come_from_the_merge_base(repo):
     assert ci_select.changed_files(repo, base, head) == ["hooks/sample.py"]
 
 
-TREE_CHECK_FILES = {"tests/test_codeowners.py": "OWNERS = 1\n", "tests/test_ci_pull_request_api.py": "API = 1\n"}
+TREE_CHECK_FILES = {
+    "tests/test_codeowners.py": "OWNERS = 1\n",
+    "tests/test_ci_pull_request_api.py": "API = 1\n",
+    "tests/test_baseline_paths.py": "PATHS = 1\n",
+}
 
 
 @pytest.fixture
@@ -902,7 +906,8 @@ def test_main_selects_the_whole_tree_checks_for_a_moved_file(tree, monkeypatch, 
     git(tree, "mv", "scripts/lonely.py", "scripts/moved.py")
     git(tree, "commit", "-m", "move")
     assert run_main(tree, monkeypatch, tmp_path, "pull_request") == (
-        "scope=selected\nlegs=[1]\ncount=1\nfiles_1=tests/test_ci_pull_request_api.py tests/test_codeowners.py\n"
+        "scope=selected\nlegs=[1]\ncount=1\n"
+        "files_1=tests/test_baseline_paths.py tests/test_ci_pull_request_api.py tests/test_codeowners.py\n"
     )
 
 
