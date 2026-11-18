@@ -292,8 +292,8 @@ def prioritize(
     displaced: Any = None,
     lab: Callable[[str], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Move the pull request to the front of the dev merge queue, restore every entry it displaced in order and, once
-    the queue moved without an error, mark its head hotfix through ``lab``; the journal's priority record carries the
+    """Move the pull request to the front of the dev merge queue, restore every entry it displaced in order and mark
+    its head hotfix through ``lab``, whether or not a queue step failed; the journal's priority record carries the
     queue steps and the lab's acknowledgement under ``lab``."""
     displaced = displaced or Untracked()
     raw = graphql(STATE, {"url": url}, run)["resource"]
@@ -327,7 +327,7 @@ def prioritize(
             except SwarmError as exc:
                 errors.append(str(exc))
         restored = restore(removed, run, displaced, steps, errors)
-        if lab is not None and not errors:
+        if lab is not None:
             acknowledged = lab(raw["headRefOid"])
         return {"url": url, "displaced": restored, "errors": errors, "lab": acknowledged}
     finally:

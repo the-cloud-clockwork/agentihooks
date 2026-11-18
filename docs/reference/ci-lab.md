@@ -72,7 +72,7 @@ head is a pull request head commit or its head branch. The state lives in the la
 
 `agentihooks swarm <slug> panic on --fix <url>` marks the fix branches and the recorded fixer branches hotfix and
 pauses `pull_request` except them, printing `lab paused pull request grading except <heads>`; `panic off`, and the
-release of an automatic panic that paused the lab, resume it. `agentihooks swarm <slug> merge priority <url>` marks
+release of an automatic panic, resume the lab only when that swarm's panic paused it. `agentihooks swarm <slug> merge priority <url>` marks
 the pull request head hotfix and records the lab's reply under `lab` in the queue journal. The swarm reads the lab
 address set with `agentihooks swarm <slug> set lab-url=<address>` and the token from `CI_LAB_CONTROL_TOKEN` on its
 host.

@@ -148,23 +148,23 @@ def test_priority_keeps_displaced_ahead_of_later_arrivals_in_one_pass():
 
 
 class Journal:
-    def __init__(self):
-        self.records = []
+    def __init__(self) -> None:
+        self.records: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
 
-    def groups(self):
+    def groups(self) -> list[dict[str, Any]]:
         return []
 
-    def write(self, *args, **kwargs):
+    def write(self, *args: Any, **kwargs: Any) -> None:
         self.records.append((args, kwargs))
 
 
 @pytest.mark.feature("merge-priority-reaches-lab")
-def test_the_priority_journal_records_the_queue_move_and_the_lab_acknowledgement():
+def test_the_priority_journal_records_the_queue_move_and_the_lab_acknowledgement() -> None:
     queue = FakeQueue()
     ack = {"priority": ["head9"], "class": "hotfix", "expires_ms": 7}
-    told = []
+    told: list[tuple[str, list[Any]]] = []
 
-    def lab(head):
+    def lab(head: str) -> dict[str, Any]:
         told.append((head, list(queue.mutations)))
         return ack
 
@@ -179,7 +179,7 @@ def test_the_priority_journal_records_the_queue_move_and_the_lab_acknowledgement
 
 
 @pytest.mark.feature("merge-priority-reaches-lab")
-def test_a_lab_that_cannot_be_told_leaves_the_queue_move_standing():
+def test_a_lab_that_cannot_be_told_leaves_the_queue_move_standing() -> None:
     queue = FakeQueue()
     journal = Journal()
     refused = {"error": "the swarm has no lab url"}
@@ -190,28 +190,29 @@ def test_a_lab_that_cannot_be_told_leaves_the_queue_move_standing():
 
 
 @pytest.mark.feature("merge-priority-reaches-lab")
-def test_a_failed_queue_move_tells_the_lab_nothing():
+def test_a_failed_queue_move_still_tells_the_lab() -> None:
     queue = FakeQueue()
 
-    def run(command, **kwargs):
+    def run(command: list[str], **kwargs: Any) -> Any:
         if "enqueuePullRequest" in " ".join(command) and "id=P9" in command:
             return subprocess.CompletedProcess(command, 1, "", "insertion refused")
         return queue.run(command, **kwargs)
 
-    told = []
+    ack = {"priority": ["head9"], "class": "hotfix", "expires_ms": 7}
+    told: list[str] = []
 
-    def lab(head):
+    def lab(head: str) -> dict[str, Any]:
         told.append(head)
-        return {}
+        return ack
 
     journal = Journal()
     result = merge_queue.prioritize(URL, run=run, journal=journal, lab=lab)
-    assert (told, result["errors"], result["lab"]) == ([], ["insertion refused"], None)
-    assert journal.records[0][1]["lab"] is None
+    assert (told, result["errors"], result["lab"]) == (["head9"], ["insertion refused"], ack)
+    assert journal.records[0][1]["lab"] == ack
 
 
 @pytest.mark.feature("merge-priority-reaches-lab")
-def test_the_swarm_tells_its_own_lab_of_a_priority_move(monkeypatch):
+def test_the_swarm_tells_its_own_lab_of_a_priority_move(monkeypatch: pytest.MonkeyPatch) -> None:
     import fakeredis
 
     from scripts.swarm import lab_control
@@ -221,13 +222,15 @@ def test_the_swarm_tells_its_own_lab_of_a_priority_move(monkeypatch):
     store.names.mint = lambda: "a1b2c3"
     store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=1, lab_url="http://lab:8800"))
     monkeypatch.setenv(lab_control.TOKEN, "tok")
-    asked = []
+    asked: list[tuple[str, str, str]] = []
 
-    def acknowledge(url, head, environ):
+    def acknowledge(url: str, head: str, environ: Any) -> dict[str, Any]:
         asked.append((url, head, environ[lab_control.TOKEN]))
         return {"ok": True}
 
-    def prioritize(url, journal, displaced, lab):
+    def prioritize(
+        url: str, journal: queue_record.Journal, displaced: Any, lab: Callable[[str], dict[str, Any]]
+    ) -> dict[str, Any]:
         assert (url, journal.url) == (URL, URL)
         return {"url": url, "displaced": [], "errors": [], "lab": lab("head9")}
 
@@ -252,7 +255,7 @@ def test_master_priority_notifies_displaced_owners(monkeypatch, capsys, errors, 
     from tests.swarm.test_merge_queue import swarm_of
 
     store = swarm_of("master")
-    store.config = lambda slug: None
+    store.config = lambda slug: SimpleNamespace(lab_url="")
     monkeypatch.setattr(cli, "connect", lambda: store)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     tasks = [

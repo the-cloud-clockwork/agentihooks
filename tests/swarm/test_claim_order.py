@@ -1,3 +1,5 @@
+from typing import Any
+
 import pytest
 
 from scripts.swarm import claim_order
@@ -7,12 +9,12 @@ def rows(*tasks):
     return {t["id"]: {"state": "open", **t} for t in tasks}
 
 
-def ordered(ledger, fix_phase=""):
+def ordered(ledger: dict[str, dict[str, Any]], fix_phase: str = "") -> list[str]:
     return [task["id"] for task in sorted(ledger.values(), key=claim_order.key(ledger, fix_phase))]
 
 
 @pytest.mark.feature("swarm-claim-order")
-def test_a_task_of_the_fix_phase_claims_ahead_of_every_rank():
+def test_a_task_of_the_fix_phase_claims_ahead_of_every_rank() -> None:
     ledger = rows(
         {"id": "urgent", "rank": "urgent", "phase": "p1"},
         {"id": "high", "rank": "high", "phase": "p1"},

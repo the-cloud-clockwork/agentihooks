@@ -188,8 +188,8 @@ def alarm(store: RedisStore, slug: str, now_ms: int) -> str:
         engage(store, slug, f"{count} errors in the last hour", True, (), now_ms)
         return f"panic engaged: {count} errors in the last hour"
     if current.auto and release(store, slug, now_ms):
-        resumed = f"; {lab_release(store, slug)}" if _client(store).exists(_swarm_key(slug, LAB)) else ""
-        return f"panic released: the fleet is back at business as usual{resumed}"
+        resumed = lab_release(store, slug)
+        return f"panic released: the fleet is back at business as usual{f'; {resumed}' if resumed else ''}"
     return ""
 
 
@@ -334,8 +334,11 @@ def lab_engage(store: RedisStore, slug: str, fixes: Iterable[str]) -> str:
 
 
 def lab_release(store: RedisStore, slug: str) -> str:
-    """Tell the swarm's lab to resume its paused grading and clear the swarm's mark of holding it. Return the action
-    line; a lab that cannot be told is a line, never a raise, and the mark stays."""
+    """Tell the swarm's lab to resume its paused grading and clear the swarm's mark of holding it, only while the
+    swarm's panic holds the lab. Return the action line, empty when its panic holds no lab pause; a lab that cannot be
+    told is a line, never a raise, and the mark stays."""
+    if not _client(store).exists(_swarm_key(slug, LAB)):
+        return ""
     try:
         lab_control.resume(lab_control.lab(store.config(slug).lab_url, os.environ))
     except lab_control.LabError as error:

@@ -179,11 +179,12 @@ def reorder(
     journal: queue_record.Journal,
     ahead: Collection[str] = (),
 ) -> dict:
+    lab_url = store.config(slug).lab_url
     result = merge_queue.prioritize(
         url,
         journal=journal,
         displaced=Displaced(store, slug),
-        lab=lambda head: lab_control.acknowledge(store.config(slug).lab_url, head, os.environ),
+        lab=lambda head: lab_control.acknowledge(lab_url, head, os.environ),
         **({"ahead": ahead} if ahead else {}),
     )
     for task in owners(tasks, result["displaced"]):
