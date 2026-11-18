@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.999 · 2026-11-18
+
+### 2026-11-18 · ee636df8f537 · #11875 · @nestorcolt
+
+**Credential guard refuses kubectl describe of a Secret**
+
+The credential guard previously let `kubectl describe` of a Secret through whenever the command line didn't explicitly name a non-Secret resource type, which meant it missed the many shells of hiding a Secret type (quoting, line continuations, variables, pipes, xargs, `-f`/`-k` flags, etc.) and let the full service-account token print unrefused; it now refuses describe in all these forms while still allowing legitimate non-Secret describes, and both refusal paths offer a safe `kubectl get secret --template` key listing instead, closing a real credential-leak gap backed by new regression tests and a Semgrep rule.
+
 ## v2.17.997 · 2026-11-18
 
 ### 2026-11-18 · f17da458dda5 · #11870 · @agenticore-app
