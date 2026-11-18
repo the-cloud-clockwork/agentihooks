@@ -65,16 +65,17 @@ def _unseal(tree: Path) -> None:
 @dataclass(frozen=True)
 class Mirror:
     """The node's bare mirror, shared and read only, and the pod's private store that borrows its objects, with the
-    lab remote it falls back to, if any."""
+    lab remote it falls back to, if any, and the repository URL its heads belong to when the remote does not name it."""
 
     node: Path
     store: Path
     remote: str
     lab: Lab | None = None
+    repository: str = ""  # pragma: no mutate
 
     def fetch(self, sha: str) -> bool:
         """Make sha present in the store, fetching only its missing objects from the remote, else from the lab remote
-        when it serves the remote's repository; True when anything was fetched."""
+        when it serves the repository, or the remote's repository when none is set; True when anything was fetched."""
         if not self.store.exists():
             _git(self.store.parent, "init", "--quiet", "--bare", str(self.store))
             (self.store / "objects/info/alternates").write_text(f"{self.node / 'objects'}\n")
@@ -84,7 +85,7 @@ class Mirror:
         try:
             _git(self.store, "fetch", "--no-write-fetch-head", self.remote, sha)
         except subprocess.CalledProcessError:
-            if self.lab is None or not checkout.serves(self.lab.url, self.remote):
+            if self.lab is None or not checkout.serves(self.lab.url, self.repository or self.remote):
                 raise
             _git(self.store, "fetch", "--no-write-fetch-head", self.lab.url, sha, env=self.lab.environ())
         return True

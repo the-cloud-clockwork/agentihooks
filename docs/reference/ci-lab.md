@@ -66,8 +66,8 @@ built CI lab image.
 | `CI_LAB_MUTATION_CAP` | no | yes | Most mutants a mutant unit grades at once |
 | `CI_LAB_MINIO_ENDPOINT`, `CI_LAB_MINIO_BUCKET`, `CI_LAB_MINIO_ACCESS_KEY`, `CI_LAB_MINIO_SECRET_KEY` | yes | no | The object store names the scheduler reads |
 | `CI_LAB_MIRROR_STORE` | yes | no | Folder of the scheduler's private git stores, one per repository, that borrow the mirror's objects |
-| `CI_LAB_REPOSITORY` | yes | no | Repository URL whose dev runner trust list admits head actors |
-| `AGENTIHOOKS_LAB_REMOTE`, `AGENTIHOOKS_LAB_REMOTE_TOKEN` | yes | no | The lab remote URL a mirror fetches a sha GitHub lacks from, and its token, passed by reference; unset, the mirrors fetch from GitHub only |
+| `CI_LAB_REPOSITORY` | yes | yes | Repository URL whose dev runner trust list admits head actors; on the worker, the repository its node mirror holds, which the lab remote URL must name |
+| `AGENTIHOOKS_LAB_REMOTE`, `AGENTIHOOKS_LAB_REMOTE_TOKEN` | yes | yes | The lab remote URL a mirror fetches a sha GitHub or the node mirror lacks from, and its token, passed by reference; unset, the mirrors fetch from GitHub and the node mirror only |
 | `CI_LAB_IMAGE` | yes | no | Worker image name keyed into static unit keys; empty when unset |
 | `CI_LAB_CONTROL_TOKEN` | yes | no | Bearer token the [control routes](#control-routes) require, passed by reference; unset, they refuse every request. The swarm host that presses panic or merge priority holds the same variable |
 | `UV_CACHE_DIR` | no | yes | Shared uv cache for virtual environments |
@@ -944,11 +944,15 @@ after git writes the refs, so it cannot turn a push away. The remote's pre recei
 outside `refs/grade/*`. A deleted grade ref, or a root commit pushed without `-o base`, prints
 `lab remote: <ref> is not graded` and publishes nothing.
 
-GitHub does not hold a head pushed only to the lab remote, so the scheduler and the relay fetch it
-from there. Their mirrors fetch a sha from the GitHub repository first and, when that fetch fails,
-from the lab remote `AGENTIHOOKS_LAB_REMOTE` names, but only when that URL names the same
-repository. Git gets `AGENTIHOOKS_LAB_REMOTE_TOKEN` as the basic password of the user `lab` for
-that URL alone, through its environment config, and no store or log keeps it. A grade of a head pushed
+GitHub does not hold a head pushed only to the lab remote, so the scheduler, the relay and the
+worker fetch it from there. The scheduler and relay mirrors fetch a sha from the GitHub repository
+first and, when that fetch fails, from the lab remote `AGENTIHOOKS_LAB_REMOTE` names, but only
+when that URL names the same repository. The node cache fills the worker's node mirror from GitHub,
+so a worker whose node mirror lacks the sha fetches it from the lab remote into its pod store
+before it cuts the tree, but only when `CI_LAB_REPOSITORY` names the repository the lab URL names.
+Git gets `AGENTIHOOKS_LAB_REMOTE_TOKEN` as the basic password of the user `lab` for that URL alone,
+through its environment config, and no store or log keeps it. Worker units run with the sandbox
+whitelist alone, so no unit sees the token. A grade of a head pushed
 to a `refs/grade/*` ref keeps the ref and records each check's status and conclusion. It posts no
 GitHub check run; the relay posts them once it has pushed the head. The relay's push token asks
 for contents write and workflows write, so a relayed branch that changes workflow files is
