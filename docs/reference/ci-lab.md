@@ -430,7 +430,7 @@ them:
 | `ci_lab_core_seconds_total`, `ci_lab_heads_graded_total` | Core minutes per merged pull request | The stat reads No data |
 | `ci_lab_cache_hits_total`, `ci_lab_cache_misses_total` | `CILabCacheMissRatioHigh`, Cache hit ratio | `metrics.observe_records` counts the `verdict` cache but has no live caller, and nothing counts `git` or `uv`, so the alert cannot fire and the panel stays empty |
 | `ci_lab_verdict_mismatch_total` | `CILabVerdictMismatch`, Shadow mismatches per gate | `shadow.Shadow` counts it in a registry of its own and has no live caller, so the alert cannot fire |
-| `ci_lab_unit_duration_seconds`, `ci_lab_mirror_age_seconds`, `ci_lab_units_redelivered_total`, `ci_lab_units_lost_total`, `ci_lab_github_rate_remaining` | No alert or panel | Nothing on these views changes. `metrics.observe_records` would set the unit duration; no code sets the other four |
+| `ci_lab_unit_duration_seconds`, `ci_lab_mirror_age_seconds`, `ci_lab_units_redelivered_total`, `ci_lab_units_lost_total`, `ci_lab_github_rate_remaining` | No alert or panel | Nothing, since no alert or panel reads them. `metrics.observe_records` sets the unit duration when a caller runs it; no code sets the other four |
 
 The kube-state-metrics series need the lab chart's objects in the `ci-lab` namespace: the
 `ci-lab-scheduler` and `ci-lab-worker` Deployments, the worker pods, and the KEDA ScaledObject
@@ -451,7 +451,7 @@ holds `7`, the CI pool maximum.
 | Panel | Type | Shows |
 |---|---|---|
 | Spend estimate per day | stat, EUR | CI nodes now times EUR 0.308 per node hour times 24. A CI node carries both the `workload=ci` taint and the `remote=oci` taint; both keys sit under the cluster's own label domain, written `<label domain>` below because this page does not name it. At the cap of 7 nodes it reads EUR 51.74 |
-| Core minutes per merged pull request | stat, minutes | Lab core minutes of every class over the dashboard range, divided by the queue heads graded green in that range. The panel counts each green queue head as one merged pull request, reading each merge group head as one queued pull request |
+| Core minutes per merged pull request | stat, minutes | Lab core minutes of every class over the dashboard range, divided by the queue heads graded green in that range. The panel's description gives the reason: GitHub builds one merge group head per queued pull request, so each green queue head counts as one merged pull request |
 | Budget left | stat, percent | `max(ci_lab_budget_fraction)` |
 | Queue wait by class | time series, seconds | Predicted wait per class, capped at 3600 so a `+Inf` wait plots at one hour, with a red threshold line at 1200, the `CILabQueueWaitHigh` level |
 | Slots busy, total and wanted | time series | `ci_lab_slots_busy`, `ci_lab_slots_total` and `ci_lab_slots_wanted` |
