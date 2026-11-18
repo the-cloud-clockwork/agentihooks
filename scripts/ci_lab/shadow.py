@@ -236,7 +236,7 @@ def ancestor(repo: Path, older: str, newer: str) -> bool:
 def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     """Print the shadow report: python -m scripts.ci_lab shadow report --since REVISION [--repo PATH] [--redis URL]."""
     parser = argparse.ArgumentParser(prog="python -m scripts.ci_lab shadow")
-    report_parser = parser.add_subparsers(dest="command", required=True).add_parser("report")
+    report_parser = parser.add_subparsers(required=True).add_parser("report")
     report_parser.add_argument("--since", required=True)
     report_parser.add_argument("--repo", default=".")
     report_parser.add_argument("--redis", default=environ.get(contract.REDIS_URL))

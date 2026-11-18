@@ -459,3 +459,8 @@ def test_the_report_command_refuses_without_a_lab_redis(capsys: pytest.CaptureFi
     with pytest.raises(SystemExit) as bare:
         cli.main(["shadow"], {})
     assert bare.value.code == 2
+    capsys.readouterr()
+    with pytest.raises(SystemExit) as sinceless:
+        cli.main(["shadow", "report", "--redis", URL], {})
+    assert sinceless.value.code == 2
+    assert capsys.readouterr().err.endswith("error: the following arguments are required: --since\n")
