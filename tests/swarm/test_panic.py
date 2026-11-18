@@ -1952,6 +1952,88 @@ def test_panic_freezes_a_push_behind_git_global_options_or_a_redirection(
 
 
 @pytest.mark.parametrize(
+    "command",
+    [
+        "kubectl -n ns apply -f x.yaml",
+        "kubectl --namespace=ns apply -f x.yaml",
+        "kubectl --context c rollout restart deploy/x",
+        "kubectl --insecure-skip-tls-verify --kubeconfig k -v 6 apply -f x.yaml",
+        "/usr/local/bin/kubectl -s https://k:6443 --token t apply -f x.yaml",
+        "helm --kube-context c upgrade r ch",
+        "helm -n ns install r ch",
+        "helm --debug --kubeconfig k upgrade --install r ch",
+        "argocd --grpc-web app sync a",
+        "argocd --server s --auth-token t app sync a",
+        "argocd app --grpc-web sync a",
+        "argocd -H 'x: y' app --server s sync a",
+        "gh workflow --repo o/r run ci.yml --ref dev",
+        "gh run -R o/r rerun 5",
+    ],
+)
+@pytest.mark.feature("panic-freeze-global-options")
+def test_panic_freezes_a_deploy_behind_kubectl_helm_argocd_or_gh_global_options(
+    bound: None, store: RedisStore, command: str
+) -> None:
+    panic.engage(store, SLUG, "reason", True, [], 0)
+    block = blocker_window.pretool("Bash", {"command": command}, "engineer-session")[1]
+    assert block == blocker_window.FROZEN.format(slug=SLUG, reason="reason")
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "gh api -X POST repos/o/r/actions/workflows/ci.yml/dispatches -f ref=dev",
+        "gh api repos/{owner}/{repo}/actions/workflows/ci.yml/dispatches -f ref=dev",
+        "gh api --method POST /repos/o/r/dispatches -f event_type=go",
+        "gh api -H 'Accept: application/vnd.github+json' https://api.github.com/repos/o/r/dispatches/",
+        "gh api --input body.json repos/o/r/actions/workflows/7/dispatches",
+    ],
+)
+@pytest.mark.feature("panic-freeze-global-options")
+def test_panic_freezes_a_workflow_dispatch_through_gh_api(bound: None, store: RedisStore, command: str) -> None:
+    panic.engage(store, SLUG, "reason", True, [], 0)
+    block = blocker_window.pretool("Bash", {"command": command}, "engineer-session")[1]
+    assert block == blocker_window.FROZEN.format(slug=SLUG, reason="reason")
+
+
+@pytest.mark.feature("panic-freeze-global-options")
+def test_a_fix_branch_session_stays_frozen_for_a_gh_api_dispatch(
+    bound: None, store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _branches(monkeypatch, {FIX: "fix-branch"})
+    panic.engage(store, SLUG, "reason", False, [FIX], 0)
+    cwd = _checkout(tmp_path / "fix", "fix-branch")
+    command = "gh api repos/{owner}/{repo}/actions/workflows/t.yml/dispatches -f ref=fix-branch"
+    block = blocker_window.pretool("Bash", {"command": command}, "engineer-session", cwd)[1]
+    assert block == blocker_window.FROZEN.format(slug=SLUG, reason="reason")
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "kubectl -n apply get pods",
+        "kubectl --context rollout get deploy",
+        "helm -n upgrade list",
+        "argocd app --server sync get a",
+        "argocd --grpc-web app get a",
+        "gh api repos/o/r/actions/workflows",
+        "gh api -f q=dispatches graphql",
+        "gh api repos/o/r/actions/runs -q .dispatches",
+    ],
+)
+@pytest.mark.feature("panic-freeze-global-options")
+def test_a_read_behind_global_options_stays_unfrozen(bound: None, store: RedisStore, command: str) -> None:
+    panic.engage(store, SLUG, "reason", True, [], 0)
+    assert blocker_window.pretool("Bash", {"command": command}, "engineer-session") == (None, None)
+
+
+@pytest.mark.feature("panic-freeze-global-options")
+def test_every_frozen_program_has_a_global_option_set() -> None:
+    programs = {prefix[0] for prefix in blocker_window._FROZEN_COMMANDS}
+    assert programs <= set(blocker_window._GLOBAL_VALUES)
+
+
+@pytest.mark.parametrize(
     ("tokens", "command"),
     [
         ([], ([], [])),
@@ -1993,7 +2075,16 @@ def test_panic_freezes_a_push_behind_git_global_options_or_a_redirection(
         ),
         (["gh", "-R", "o/r", "run", "rerun"], (["gh", "run", "rerun"], [("-R", "o/r")])),
         (["gh", "--repo=o/r", "-R"], (["gh"], [("--repo=o/r", ""), ("-R", "")])),
-        (["kubectl", "-n", "x", "apply"], (["kubectl", "-n", "x", "apply"], [])),
+        (["kubectl", "-n", "x", "apply"], (["kubectl", "apply"], [("-n", "x")])),
+        (["helm", "--debug", "-n", "x", "upgrade", "r"], (["helm", "upgrade", "r"], [("--debug", ""), ("-n", "x")])),
+        (
+            ["argocd", "app", "--grpc-web", "--server", "s", "sync", "a"],
+            (["argocd", "app", "sync", "a"], [("--grpc-web", ""), ("--server", "s")]),
+        ),
+        (["argocd", "app", "-H", "h", "get", "-H", "a"], (["argocd", "app", "get", "-H", "a"], [("-H", "h")])),
+        (["gh", "run", "-R", "o/r", "rerun", "5"], (["gh", "run", "rerun", "5"], [("-R", "o/r")])),
+        (["gh", "api", "-X", "POST", "x"], (["gh", "api", "-X", "POST", "x"], [])),
+        (["ls", "-la"], (["ls", "-la"], [])),
         (
             [">/dev/null", "git", "push", "2>", "&", "1", "origin", "&", ">", "out", "dev>x", "3<", "in", "x"],
             (["git", "push", "origin", "dev", "x"], []),
