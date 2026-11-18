@@ -445,7 +445,7 @@ A worker running a unit shows `1000`; an idle one shows `<none>`.
 |---|---|---|
 | Every worker shows `<none>` while units run | The scheduler's patches are refused or never reach the API server | `kubectl auth can-i patch pods -n <namespace> --as system:serviceaccount:<namespace>:ci-lab-scheduler`, then the scheduler's network policy egress to the API server |
 | Grants and completions slow by about five seconds each | The API server does not answer the patches | The check above; the patch timeout bounds each patch at five seconds, and a completion that raced a grant sends two |
-| A busy worker shows `<none>` after a grant raced a clear | The busy patch of the re-check was refused or timed out | The `kubectl auth can-i` check above; the worker's next lease poll that grants sets it again |
+| A busy worker shows `<none>` after a grant raced a clear | The busy patch of the re-check was refused or timed out | The `kubectl auth can-i` check above; the cost stays cleared until the raced lease ends, and the worker's next poll that grants sets it again |
 | An idle worker shows `1000` | A grant marked it busy again during a clear, and that lease ended before the re-check's patch landed | Its next lease poll that grants and the end of that lease reset it |
 
 ## Lab head intake
