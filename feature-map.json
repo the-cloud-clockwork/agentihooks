@@ -1796,6 +1796,17 @@
       ]
     },
     {
+      "id": "hive-restart-waits-resume-processes",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-restart-waits-resume-processes",
+      "behaviour": "The hive keeps each resume order process it starts and counts it as running work until it ends, so a hive whose checkout moved keeps beating while a resume it started is still running and restarts on the new code only after the resume ends.",
+      "seam": "scripts.hive.daemon.run restart wait over scripts.hive.dispatch.busy, with scripts.hive.orders.Consumer._spawn_resume and scripts.hive.dispatch.track",
+      "tests": [
+        "tests/hive/test_daemon_checkout_restart.py::test_a_moved_checkout_waits_for_a_running_resume_process",
+        "tests/hive/test_daemon_checkout_restart.py::test_busy_holds_while_a_tracked_resume_process_runs"
+      ]
+    },
+    {
       "id": "scheduled-run-hive-placement",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/hvr4",
@@ -5616,6 +5627,16 @@
       ]
     },
     {
+      "id": "hive-release-jobs-run-one-at-a-time",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-worker-release-tag-stuck",
+      "behaviour": "The hive job of every release waits in one queued concurrency group, hive-worker-release with queue max and no cancelling, so two releases never check and move the hive worker release tag at the same time and an older release finishing last cannot move the tag back; a waiting hive job is never replaced, so every release still publishes its hive version image.",
+      "seam": "Swarm worker image hive job concurrency group",
+      "tests": [
+        "tests/deployment/test_worker_hive_image.py::test_every_release_hive_job_queues_behind_the_last_one_in_one_group"
+      ]
+    },
+    {
       "id": "hive-pods-not-rolled-by-release-image-digest",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-roll-every-release",
@@ -5633,6 +5654,21 @@
       "seam": "hive-rollout.yaml hook Job container image and the chart release package appVersion",
       "tests": [
         "tests/test_swarm_chart_hive_rollout_release.py::test_the_rollout_hooks_run_the_hive_worker_tag_the_chart_release_stamps"
+      ]
+    },
+    {
+      "id": "hive-worker-release-tag-moves-on-every-release",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-worker-release-tag-stuck",
+      "behaviour": "Each release's hive job moves the hive worker release tag onto its own image unless a newer release has already published its hive version image, so a newer release that is only tagged never holds the tag on an older release; a registry error on a newer release image fails the job before any tag moves, a prerelease never moves the tag, and the workflow passes no newest flag to the script.",
+      "seam": "release-hive.sh release tag move and the Swarm worker image hive job arguments",
+      "tests": [
+        "tests/deployment/test_worker_hive_image.py::test_a_release_moves_the_release_tag_while_newer_releases_have_no_hive_image",
+        "tests/deployment/test_worker_hive_image.py::test_a_newer_release_at_move_time_keeps_the_release_tag_and_still_tags_the_version",
+        "tests/deployment/test_worker_hive_image.py::test_a_release_stops_at_the_newest_published_release_past_newer_unpublished_ones",
+        "tests/deployment/test_worker_hive_image.py::test_a_registry_error_on_a_newer_release_image_fails_before_moving_any_tag",
+        "tests/deployment/test_worker_hive_image.py::test_a_prerelease_leaves_the_release_tag_without_reading_tags_and_still_tags_its_version",
+        "tests/deployment/test_worker_hive_image.py::test_a_release_builds_the_hive_worker_on_its_released_worker_and_lets_the_script_decide_the_release_tag"
       ]
     },
     {
@@ -7663,6 +7699,21 @@
       ]
     },
     {
+      "id": "swarm-park-unpushed-dependency-on-dev",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2634",
+      "behaviour": "Swarm park stacks a task on origin dev and records dev's merge base as its stacked base when an unclaimed dependency records a branch that origin answers it does not hold; a dependency branch origin holds keeps the merge base with origin's copy, and a missing branch on a claimed dependency or an unanswered origin probe still refuses the park.",
+      "seam": "swarm park in scripts.swarm.stack",
+      "rules": [
+        "park-fetches-unpushed-dependency-branch"
+      ],
+      "tests": [
+        "tests/swarm/test_stack.py::test_park_stacks_on_dev_when_an_unclaimed_dependency_records_a_branch_origin_lacks",
+        "tests/swarm/test_stack.py::test_park_keeps_the_dependency_base_when_origin_holds_an_unclaimed_dependency_branch",
+        "tests/swarm/test_stack.py::test_park_refuses_a_missing_dependency_branch_unless_origin_answers_for_an_unclaimed_dependency"
+      ]
+    },
+    {
       "id": "hive-loss-events-engine-only",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-hive-loss-engine-filter",
@@ -7965,6 +8016,52 @@
         "tests/ci_lab/test_scheduler.py::test_a_lost_worker_requeues_once_then_its_unit_makes_the_grade_red",
         "tests/ci_lab/test_scheduler.py::test_a_unit_that_cannot_run_makes_the_grade_red_and_stores_no_verdict",
         "tests/ci_lab/test_scheduler.py::test_the_fold_reproduces_gate_required_on_recorded_fixtures"
+      ]
+    },
+    {
+      "id": "lab-scheduler-test-units",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2629",
+      "behaviour": "The CI lab scheduler expands test units, one per batch of dependency manifest tests keyed by their fingerprints on the head tree. A pull request or hotfix head gets none. A merge group head runs the interaction rule over its entries with the entry limit of the grader's delivery.yaml and the batches the verdict store holds, and runs only the batches holding an invalidated test unless a clause sends it to the whole suite. A promotion or backfill head runs every batch. A head that needs test units and has no stored manifest cannot expand. A finished unit whose outcome the retry policy allows another run goes back to pending with one more attempt, so a crashed worker's unit reruns once before it makes the grade red.",
+      "seam": "scripts.ci_lab.scheduler.MirrorExpander.expand over a git origin fixture, scripts.ci_lab.scheduler.StoredManifests over the local object store, scripts.ci_lab.expand_tests.units, scripts.ci_lab.queue.Queue.retry and scripts.ci_lab.scheduler.Scheduler.tick over fakeredis",
+      "tests": [
+        "tests/ci_lab/test_expand_tests.py::test_each_batch_is_one_test_unit_keyed_by_its_fingerprints_opened_files_and_toolchain",
+        "tests/ci_lab/test_queue.py::test_retry_moves_a_finished_job_back_to_pending_with_one_more_attempt",
+        "tests/ci_lab/test_scheduler.py::test_a_crashed_unit_reruns_while_the_lost_retries_allow_then_makes_the_grade_red",
+        "tests/ci_lab/test_scheduler.py::test_a_failed_unit_reruns_while_the_failed_retries_allow_and_its_pass_is_stored",
+        "tests/ci_lab/test_scheduler.py::test_a_pull_request_or_hotfix_head_expands_no_test_units",
+        "tests/ci_lab/test_scheduler.py::test_a_merge_group_head_runs_only_the_batches_its_entries_invalidate",
+        "tests/ci_lab/test_scheduler.py::test_a_merge_group_head_whose_entries_invalidate_no_test_runs_no_batch",
+        "tests/ci_lab/test_scheduler.py::test_a_merge_group_head_runs_every_batch_when_an_interaction_clause_holds",
+        "tests/ci_lab/test_scheduler.py::test_a_promotion_or_backfill_head_runs_every_batch_without_reading_the_cache",
+        "tests/ci_lab/test_scheduler.py::test_a_head_without_stored_durations_keeps_each_test_file_whole",
+        "tests/ci_lab/test_scheduler.py::test_a_head_that_needs_test_units_without_a_manifest_cannot_expand",
+        "tests/ci_lab/test_scheduler.py::test_a_merge_group_head_refuses_an_entry_limit_the_delivery_schema_refuses",
+        "tests/ci_lab/test_scheduler.py::test_a_head_whose_grader_delivery_breaks_its_schema_is_dropped_with_its_reason",
+        "tests/ci_lab/test_scheduler.py::test_stored_manifests_read_the_packed_manifest_of_the_nearest_stored_ancestor"
+      ]
+    },
+    {
+      "id": "lab-scheduler-service",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ci-lab-scheduler-service",
+      "behaviour": "The agentihooks ci-lab-scheduler command runs the CI lab scheduler service and keeps the offline self test behind --self-test; the service reads the runtime config at CI_LAB_RUNTIME_CONFIG before it connects, serves the lease API, GET /capacity and GET /grades/<sha> on the scheduler port and GET /metrics on the metrics port, both from one load built from the pending and leased queue jobs, the classes of the live grades holding them, the free slots workers offered on a lease poll within the ready window and the day's core budget; a grade lookup returns every open and closed grade of one full commit sha and refuses anything else; the swarm image carries the locked git package the mirror expander runs.",
+      "seam": "scripts.ci_lab.contract.scheduler, scripts.ci_lab.scheduler.main and listen, scripts.ci_lab.service.Routes, scripts.ci_lab.scheduler.Scheduler.load and grades_of over fakeredis and the local object store, scripts.ci_lab.leases.Leases.lease offers and the root Dockerfile shell packages",
+      "tests": [
+        "tests/ci_lab/test_contract.py::test_the_scheduler_command_runs_the_service_and_keeps_the_self_test",
+        "tests/ci_lab/test_scheduler.py::test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes",
+        "tests/ci_lab/test_scheduler.py::test_listen_serves_leases_capacity_grades_and_metrics_from_one_budgeted_load",
+        "tests/ci_lab/test_scheduler.py::test_the_load_counts_each_job_once_in_the_most_urgent_class_of_the_live_grades_holding_it",
+        "tests/ci_lab/test_scheduler.py::test_the_load_counts_leased_slots_and_the_free_slots_workers_offered_within_the_ready_window",
+        "tests/ci_lab/test_scheduler.py::test_the_grades_of_a_commit_are_its_live_grades_and_the_closed_ones_its_evidence_names",
+        "tests/ci_lab/test_service.py::test_the_scheduler_port_answers_capacity_from_the_load_snapshot",
+        "tests/ci_lab/test_service.py::test_the_scheduler_port_answers_every_grade_of_a_commit",
+        "tests/ci_lab/test_service.py::test_a_grade_lookup_refuses_anything_but_one_full_commit_sha",
+        "tests/ci_lab/test_service.py::test_the_scheduler_port_keeps_every_lease_route",
+        "tests/ci_lab/test_service.py::test_the_scheduler_port_serves_its_routes_over_http",
+        "tests/ci_lab/test_queue.py::test_leased_lists_each_leased_job_and_offers_keep_each_workers_latest_free_slots",
+        "tests/ci_lab/test_leases.py::test_a_lease_poll_offers_the_workers_free_slots_while_it_waits_and_what_its_grants_leave",
+        "tests/test_swarm_packaging.py::test_the_swarm_image_carries_the_locked_git_the_lab_mirror_expander_runs"
       ]
     },
     {
@@ -8784,6 +8881,16 @@
         "tests/events/test_nats_lab_stream.py::test_the_lab_head_stream_takes_the_bus_dedupe_window",
         "tests/events/test_nats_lab_stream.py::test_the_memory_bus_keeps_lab_heads_on_their_own_log_with_its_dead_letters",
         "tests/hub/test_github_webhooks.py::test_main_wires_the_lab_intake_only_when_its_notice_secret_is_set"
+      ]
+    },
+    {
+      "id": "lab-head-durable-consumer",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2515",
+      "behaviour": "Every provisioning bus open creates the lab scheduler's ci-lab-scheduler durable consumer on the lab head stream, filtered on ci.lab.head.>, so the scheduler binds it in bind mode, where it never creates a consumer, and a head published while the scheduler is stopped is read after it restarts while a head it read and acknowledged before the stop is not read again.",
+      "seam": "scripts.events.nats NatsBus provisioning of LAB_CONSUMER on LAB_STREAM, read through scripts.ci_lab.scheduler BusInbox on the bind mode bus that scheduler main always opens, its lab_heads consumer of DURABLE and SUBJECT",
+      "tests": [
+        "tests/events/test_nats_lab_stream.py::test_a_bound_scheduler_reads_the_heads_published_while_it_was_stopped"
       ]
     },
     {

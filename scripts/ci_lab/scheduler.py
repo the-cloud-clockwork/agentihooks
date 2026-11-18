@@ -9,17 +9,21 @@ the first unit, completed on the last. A grade's state is the JSON document at `
 A newer head of a lane drops the older head's pending units, carries its leased and finished jobs and cancels its
 checks; a push grade of a tree a merge group grade passed carries that grade's gates. A head or lane the control
 routes marked hotfix grades in the hotfix class, and a paused class holds its heads but the excepted ones until
-resume. `python -m scripts.ci_lab scheduler` runs the service: the lease API with its control routes on the scheduler
-port and one pass every interval.
+resume. `agentihooks ci-lab-scheduler` runs the service: the lease API with its control routes, capacity and a
+commit's grades on the scheduler port, metrics on the metrics port, both from one load, and one pass every interval.
 """
 
 import argparse
+import io
 import json
 import subprocess
 import sys
 import time
+from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field, fields, replace
+from functools import partial
+from http.server import ThreadingHTTPServer
 from pathlib import Path, PurePosixPath
 from threading import Thread
 from typing import Any, Protocol, cast
@@ -28,16 +32,18 @@ from urllib.parse import urlsplit
 import jsonschema
 import yaml
 
-from scripts.ci_lab import contract, control, evidence, lease_api
+from scripts import ci_select
+from scripts.ci_lab import budget, contract, control, evidence, expand_tests, interaction, lease_api, metrics, service
+from scripts.ci_lab.capacity import Load
 from scripts.ci_lab.checks import Checks, Output
-from scripts.ci_lab.delivery import CLASSES, DELIVERY, DELIVERY_SCHEMA
+from scripts.ci_lab.delivery import CLASSES, DELIVERY, DELIVERY_SCHEMA, load_runtime
 from scripts.ci_lab.digests import GradeInputs, StaticInputs, Toolchain, grade_key, static_key
 from scripts.ci_lab.intake import GradeRequest, admit
 from scripts.ci_lab.leases import Leases
-from scripts.ci_lab.objects import Objects, S3Objects, Uploads, upload_path
+from scripts.ci_lab.objects import Objects, S3Objects, Uploads, manifest_folder, upload_path
 from scripts.ci_lab.outcomes import CANNOT_RUN, DROPPED, FAILED, LOSSES, PASSED
 from scripts.ci_lab.queue import Job, Queue
-from scripts.ci_lab.retry import Policy, policy
+from scripts.ci_lab.retry import Policy, UnitResult, decide, policy
 from scripts.ci_lab.static_gates import REGISTRY, WORKFLOW, discover
 from scripts.ci_lab.store import PREFIX, Store, Verdict
 from scripts.ci_lab.units import Priority, Unit
@@ -45,6 +51,7 @@ from scripts.ci_lab.webhooks import HEAD_SUBJECT, HeadEvent
 from scripts.ci_lab.worktrees import Mirror
 from scripts.ci_runner_trust import ACTORS, validate_actors
 from scripts.events.bus import Consumer
+from tests import dep_manifest
 
 __all__ = [
     "GRADES",
@@ -54,13 +61,18 @@ __all__ = [
     "MirrorExpander",
     "Plan",
     "Ports",
+    "READY_MS",
     "Scheduler",
     "Settings",
+    "StoredManifests",
+    "UNIT_ESTIMATE_S",
     "build",
     "fold",
     "frame",
+    "listen",
     "main",
     "serve",
+    "summary",
 ]
 
 GRADES = f"{PREFIX}grade:"
@@ -89,6 +101,7 @@ PUSH_SKIPPABLE = frozenset({"type-gate", "lint", "semgrep", "test-count"})
 HEAD_FIELDS = tuple(item.name for item in fields(HeadEvent))
 STATIC = "static"
 WHOLE_TREE = "."
+DURATIONS = ".test_durations"
 DEV = "dev"
 DURABLE = "ci-lab-scheduler"
 SUBJECT = f"{HEAD_SUBJECT}.>"
@@ -98,6 +111,8 @@ QUIET_MS = 30_000
 INTERVAL_S = 2.0
 LEASE_TTL_MS = 120_000
 LEASE_POLL_MS = 500
+UNIT_ESTIMATE_S = 60.0
+READY_MS = 2 * lease_api.MAX_WAIT_MS
 MINIO_ENDPOINT = f"{contract.MINIO_PREFIX}ENDPOINT"
 MINIO_BUCKET = f"{contract.MINIO_PREFIX}BUCKET"
 MINIO_ACCESS_KEY = f"{contract.MINIO_PREFIX}ACCESS_KEY"
@@ -107,6 +122,9 @@ IMAGE = "CI_LAB_IMAGE"
 REPOSITORY = "CI_LAB_REPOSITORY"
 
 Needs = Mapping[str, Mapping[str, Any]]
+Manifests = Callable[[str, Sequence[str]], dict[str, Any] | None]
+Verdicts = Callable[[str, str], Verdict | None]
+UNPACK = cast("Callable[[dict[str, Any]], dict[str, Any]]", dep_manifest.unpack)
 
 
 @dataclass(frozen=True)
@@ -424,6 +442,28 @@ def _slug(repo: str) -> str:
     return urlsplit(repo).path.removeprefix("/")
 
 
+def summary(state: State) -> dict[str, Any]:
+    """Return a grade as GET /grades/<sha> shows it: what it grades, its class and lane, how many of its units are
+    final, its conclusion once it closed and each check run's last post."""
+    checks = {
+        check: {"status": status, "conclusion": conclusion} for check, (status, conclusion) in state.posted.items()
+    }
+    return {
+        "run": state.run,
+        "repo": state.repo,
+        "head": state.head,
+        "base": state.base,
+        "class": CLASSES[state.tier],
+        "lane": state.lane,
+        "tree": state.tree,
+        "grader": state.grader,
+        "conclusion": state.conclusion or None,
+        "superseded": state.superseded,
+        "units": {"total": len(state.units), "final": sum(1 for slot in state.units.values() if slot.outcome)},
+        "checks": checks,
+    }
+
+
 class Scheduler:
     """The lab's grading over its Redis state, verdict store, object store and ports."""
 
@@ -446,6 +486,66 @@ class Scheduler:
         """Return a grade's state, or None for an unknown run."""
         raw = self.client.get(GRADES + run)
         return None if raw is None else _parse(raw)
+
+    def load(self, now_ms: int) -> Load:
+        """Return the queue and slots now: each pending job's estimate and each leased job per the most urgent class of
+        the live grades holding it, verdict cache use per class of those grades, the slots leased jobs take, and the
+        free slots workers offered on a lease poll within the ready window; a leased job frees its slots in one
+        estimate."""
+        classes, hits, misses = self._demand()
+        pending: dict[str, list[float]] = {}
+        for job in self._jobs(self.queue.pending()):
+            if job.id in classes:
+                pending.setdefault(CLASSES[classes[job.id]], []).append(UNIT_ESTIMATE_S * job.requirement.slots)
+        running: Counter[str] = Counter()
+        busy = 0
+        for job in self._jobs(self.queue.leased()):
+            busy += job.requirement.slots
+            if job.id in classes:
+                running[CLASSES[classes[job.id]]] += 1
+        ready = now_ms - READY_MS
+        self.queue.prune(ready)
+        offered = sum(free for free, _ in self.queue.offers(ready).values())
+        return Load(
+            pending,
+            dict(running),
+            busy + offered,
+            busy,
+            cache_hits=dict(hits),
+            cache_misses=dict(misses),
+            frees_in=(UNIT_ESTIMATE_S,) * busy,
+        )
+
+    def _demand(self) -> tuple[dict[str, int], Counter[str], Counter[str]]:
+        """Return the most urgent tier of the live grades holding each queue job, and per class the live grades' units
+        the verdict store answered and those it sent to the queue."""
+        tiers: dict[str, int] = {}
+        hits: Counter[str] = Counter()
+        misses: Counter[str] = Counter()
+        for state in self._live():
+            name = CLASSES[state.tier]
+            for slot in state.units.values():
+                if not slot.job:
+                    hits[name] += 1
+                    continue
+                misses[name] += 1
+                tiers[slot.job] = min(tiers.get(slot.job, state.tier), state.tier)
+        return tiers, hits, misses
+
+    def grades_of(self, head: str) -> list[dict[str, Any]]:
+        """Return every grade of a commit by run: its live grades and the closed ones its evidence markers name."""
+        prefix = evidence.head_prefix(head)
+        runs = {key.removeprefix(prefix) for key in self.objects.keys(prefix)}
+        runs.update(state.run for state in self._live() if state.head == head)
+        return [summary(state) for run in sorted(runs) if (state := self.grade(run)) is not None]
+
+    def _live(self) -> list[State]:
+        """Return the state of every live grade that still has one."""
+        return [state for run in sorted(self.client.smembers(LIVE)) if (state := self.grade(run)) is not None]
+
+    def _jobs(self, ids: Sequence[str]) -> list[Job]:
+        """Return the queue jobs of the ids whose records still exist."""
+        return [job for job in map(self.queue.job, ids) if job is not None]
 
     def _save(self, state: State) -> None:
         self.client.set(GRADES + state.run, json.dumps(asdict(state)))
@@ -488,7 +588,13 @@ class Scheduler:
             self.client.hdel(WAITING, name)
             try:
                 actions.append(self._start(request, held["lane"], now_ms))
-            except (subprocess.CalledProcessError, ValueError, KeyError, yaml.YAMLError) as error:
+            except (
+                subprocess.CalledProcessError,
+                ValueError,
+                KeyError,
+                yaml.YAMLError,
+                jsonschema.ValidationError,
+            ) as error:
                 actions.append(f"cannot expand {request.head}: {error}")
         return actions
 
@@ -598,17 +704,24 @@ class Scheduler:
         return actions
 
     def _collect(self, slot: Slot) -> None:
-        """Take a finished job's outcome into its slot, storing its verdict; a vanished job was dropped."""
+        """Take a finished job's outcome into its slot, storing its verdict, unless the retry policy runs it again; a
+        vanished job was dropped."""
         if slot.outcome or not slot.job:
             return
         job = self.queue.job(slot.job)
         if job is None:
             slot.outcome = DROPPED
-        elif job.state in FINISHED:
+        elif job.state in FINISHED and not self._rerun(job):
             slot.outcome = job.outcome
             self._remember(job)
         else:
             slot.started = slot.started or job.state == "leased"
+
+    def _rerun(self, job: Job) -> bool:
+        """Move a finished job back to pending when the retry policy allows its outcome a rerun; return whether it
+        moved."""
+        result = UnitResult(job.outcome, job.attempts)
+        return decide(result, self.settings.retries) == "retry" and self.queue.retry(job)
 
     def _remember(self, job: Job) -> None:
         """Store the verdict of a graded job from the report its worker uploaded; a lost or unrun job is no verdict."""
@@ -676,6 +789,13 @@ def _within(files: Mapping[str, str], paths: Sequence[str]) -> dict[str, str]:
     return {path: blob for path, blob in files.items() if path in paths or path.startswith(folders)}
 
 
+def _lab_block(document: str) -> Mapping[str, Any]:
+    """Return the lab block of a delivery.yaml document, validated against its schema."""
+    data = yaml.safe_load(document)
+    jsonschema.validate(data, DELIVERY_SCHEMA)
+    return data["lab"]
+
+
 def frame(tier: Priority, tree: str, grader: str, gates: Mapping[str, tuple[Unit, ...]]) -> Plan:
     """Return a tier's plan: the lab's gates its `Gate — Required` rules require, and every other job they require as
     a gate without units, which passes, so only what the lab grades can turn the grade red.
@@ -693,13 +813,32 @@ def frame(tier: Priority, tree: str, grader: str, gates: Mapping[str, tuple[Unit
     return Plan(tree, grader, framed, outputs={"select": {"scope": "none"}})
 
 
+@dataclass(frozen=True)
+class StoredManifests:
+    """Packed dependency manifests in the lab object store, one per dev commit under `objects.manifest_folder`."""
+
+    objects: Objects
+
+    def __call__(self, repo: str, commits: Sequence[str]) -> dict[str, Any] | None:
+        """Return the manifest of the first commit that has one stored, None when none has."""
+        folder = manifest_folder(_slug(repo))
+        stored = frozenset(self.objects.keys(folder))
+        for commit in commits:
+            path = f"{folder}{commit}.json"
+            if path in stored:
+                return UNPACK(json.loads(self.objects.read(path)))
+        return None
+
+
 class MirrorExpander:
     """Static gate units of a head read from a git mirror with ls-tree and show, never a checkout."""
 
-    def __init__(self, node: Path, root: Path, toolchain: Toolchain) -> None:
+    def __init__(self, node: Path, root: Path, toolchain: Toolchain, manifests: Manifests, verdicts: Verdicts) -> None:
         self.node = node
         self.root = root
         self.toolchain = toolchain
+        self.manifests = manifests
+        self.verdicts = verdicts
 
     def _mirror(self, repo: str) -> Mirror:
         self.root.mkdir(parents=True, exist_ok=True)
@@ -734,13 +873,11 @@ class MirrorExpander:
 
     def retries(self, repo: str) -> Policy:
         """Return the retry policy of the lab block of delivery.yaml on the repository's dev branch."""
-        document = yaml.safe_load(self._on_dev(repo, DELIVERY))
-        jsonschema.validate(document, DELIVERY_SCHEMA)
-        return policy(document["lab"])
+        return policy(_lab_block(self._on_dev(repo, DELIVERY)))
 
     def expand(self, request: GradeRequest) -> Plan:
         """Return one unit per static gate the grader's workflow runs, keyed by the files it reads at head and base,
-        framed by the request's tier."""
+        and the unit job's test units of a merge group, promotion or backfill head, framed by the request's tier."""
         mirror = self._mirror(request.repo)
         grader = request.head if request.tier >= Priority.PROMOTION else request.base
         for sha in dict.fromkeys((request.head, request.base, grader)):
@@ -755,14 +892,62 @@ class MirrorExpander:
                 gate.name, _within(head, gate.paths), _within(base, gate.base_paths), grader, toolchain
             )
             gates.setdefault(gate.job, []).append(Unit(STATIC, static_key(inputs), (gate.name,)))
+        if request.tier >= Priority.QUEUE:
+            gates.setdefault(UNIT_JOBS[0], []).extend(self._tests(mirror, request, grader, head, toolchain))
         tree = self._git(mirror, "rev-parse", f"{request.head}^{{tree}}").strip()
         return frame(request.tier, tree, grader, {job: tuple(units) for job, units in gates.items()})
+
+    def _tests(
+        self, mirror: Mirror, request: GradeRequest, grader: str, files: Mapping[str, str], toolchain: Toolchain
+    ) -> tuple[Unit, ...]:
+        """Return every test batch of the head, or for a merge group head the batches that hold a test its entries
+        invalidate, unless the interaction rule sends the group to the whole suite."""
+        ancestry = self._git(mirror, "rev-list", "--first-parent", request.base).split()
+        manifest = self.manifests(request.repo, ancestry)
+        if manifest is None:
+            raise ValueError(f"no dependency manifest at or before {request.base}")
+        tree = self._contents(mirror, files)
+        suite = expand_tests.units(manifest, tree, files, json.loads(tree.get(DURATIONS, b"{}")), toolchain)
+        if request.tier != Priority.QUEUE:
+            return suite
+        cached = {test for unit in suite if self.verdicts(unit.kind, unit.key) is not None for test in unit.members}
+        limit = interaction.entry_limit(_lab_block(self._git(mirror, "show", f"{grader}:{DELIVERY}")))
+        chosen = interaction.decide(self._group(mirror, request), manifest, cached, limit)
+        if chosen == interaction.FULL:
+            return suite
+        return tuple(unit for unit in suite if chosen.intersection(unit.members))
+
+    def _group(self, mirror: Mirror, request: GradeRequest) -> interaction.Group:
+        """Return a merge group head: its changes against the base and those of each entry, one first parent commit
+        each."""
+        span = f"{request.base}..{request.head}"
+        entries = tuple(
+            tuple(dep_manifest.changes(mirror.store, f"{entry}^", entry))
+            for entry in self._git(mirror, "rev-list", "--first-parent", span).split()
+        )
+        changes = tuple(dep_manifest.changes(mirror.store, request.base, request.head))
+        pyproject = ci_select.pyproject_reaches_tests(mirror.store, request.base, request.head)
+        return interaction.Group(changes, entries, pyproject)
+
+    def _contents(self, mirror: Mirror, files: Mapping[str, str]) -> dict[str, bytes]:
+        """Return each file's bytes by path, read in one git cat-file batch keyed by the object ids it prints."""
+        blobs = list(dict.fromkeys(files.values()))
+        listing = "".join(f"{blob}\n" for blob in blobs).encode()
+        argv = ["git", "-C", str(mirror.store), "cat-file", "--batch"]
+        stream = io.BytesIO(subprocess.check_output(argv, input=listing))
+        found: dict[str, bytes] = {}
+        for _ in blobs:
+            name, _kind, size = stream.readline().split()
+            found[name.decode()] = stream.read(int(size))
+            stream.read(1)
+        return {path: found[blob] for path, blob in files.items()}
 
 
 def build(environ: Mapping[str, str], client: Any, objects: Objects, consumer: Consumer) -> Scheduler:
     """Return the service's scheduler over its clients, trusting the runner trust list of the repository's dev."""
     toolchain = Toolchain(sys.version.split()[0], {}, "", "", environ.get(IMAGE, ""), {})
-    expander = MirrorExpander(Path(environ[contract.GIT_MIRROR]), Path(environ[MIRROR_STORE]), toolchain)
+    node, root = Path(environ[contract.GIT_MIRROR]), Path(environ[MIRROR_STORE])
+    expander = MirrorExpander(node, root, toolchain, StoredManifests(objects), Store(client, objects).get)
     checks: dict[str, Poster] = {}
 
     def poster(repo: str) -> Poster:
@@ -789,6 +974,26 @@ def serve(
     return 0
 
 
+def listen(
+    scheduler: Scheduler,
+    leases: Leases,
+    routes: lease_api.ControlRoutes,
+    spending: budget.Budget,
+    clock: Callable[[], int],
+    ports: tuple[int, int],
+) -> tuple[ThreadingHTTPServer, ThreadingHTTPServer]:
+    """Bind the scheduler port's lease API, control, capacity and grades routes and the metrics port, both over one
+    load whose budget fraction and shed classes come from the day's spending; the caller runs each serve_forever."""
+
+    def snapshot() -> Load:
+        return budget.observe(scheduler.load(clock()), spending.status())
+
+    api, exposition = ports
+    lease = partial(lease_api.answer, leases, Uploads(scheduler.objects), routes)
+    port = service.Routes(lease, snapshot, scheduler.grades_of)
+    return service.serve("", api, port), metrics.serve("", exposition, snapshot, metrics.Registry())
+
+
 def _now_ms() -> int:
     """Return the wall clock in milliseconds."""
     return int(time.time() * 1000)
@@ -800,7 +1005,8 @@ def _sleep_ms(ms: int) -> None:
 
 
 def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
-    """Run the scheduler service: the lease API on the scheduler port and a pass every interval."""
+    """Run the scheduler service from its mounted runtime config: the lease API, capacity and grades on the scheduler
+    port, metrics on the metrics port and a pass every interval."""
     import boto3  # pyright: ignore[reportMissingTypeStubs]
     import redis
 
@@ -811,6 +1017,7 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     parser.add_argument("--interval", type=float, default=INTERVAL_S)
     parser.add_argument("--passes", type=int, default=0)
     arguments = parser.parse_args(argv)
+    runtime = load_runtime(Path(environ[contract.RUNTIME_CONFIG]))
     client: Any = redis.Redis.from_url(environ[contract.REDIS_URL], decode_responses=True)  # pyright: ignore[reportUnknownMemberType]
     s3: Any = boto3.client(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
         "s3",
@@ -819,10 +1026,12 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
         aws_secret_access_key=environ[MINIO_SECRET_KEY],
     )
     objects = S3Objects(s3, environ[MINIO_BUCKET], "")
-    consumer = open_bus(BusConfig.from_environ(environ)).lab_heads.consumer(DURABLE, SUBJECT)
+    consumer = open_bus(replace(BusConfig.from_environ(environ), provision=False)).lab_heads.consumer(DURABLE, SUBJECT)
     scheduler = build(environ, client, objects, consumer)
     leases = Leases(scheduler.queue, LEASE_TTL_MS, _now_ms, _sleep_ms, LEASE_POLL_MS)
     routes = lease_api.ControlRoutes(client, environ.get(contract.CONTROL_TOKEN, ""), _now_ms)
-    server = lease_api.serve("", contract.SCHEDULER_PORT, leases, Uploads(objects), routes)
-    Thread(target=server.serve_forever, daemon=True).start()
+    spending = budget.Budget(client, _now_ms, budget.policy(runtime))
+    ports = (contract.SCHEDULER_PORT, contract.METRICS_PORT)
+    for server in listen(scheduler, leases, routes, spending, _now_ms, ports):
+        Thread(target=server.serve_forever, daemon=True).start()
     return serve(scheduler, arguments.interval, arguments.passes, time.time, time.sleep)

@@ -188,6 +188,30 @@ def test_reap_allows_more_attempts(jobs: queue.Queue) -> None:
     assert jobs.reap(record, 100, 2) == "lost"
 
 
+@pytest.mark.feature("lab-scheduler-test-units")
+def test_retry_moves_a_finished_job_back_to_pending_with_one_more_attempt(jobs: queue.Queue) -> None:
+    jobs.enqueue([unit("a"), unit("b")], "h1", {})
+    assert take(jobs, "h1:test:a")
+    record = found(jobs, "h1:test:a")
+    assert jobs.retry(record) is False
+    assert jobs.finish(record, "tok", "crash")
+
+    assert jobs.retry(record) is True
+    again = found(jobs, "h1:test:a")
+    assert (again.state, again.outcome, again.attempts, again.worker) == ("pending", "", 1, "")
+    assert jobs.token("h1:test:a") == ""
+    assert jobs.pending() == ["h1:test:b", "h1:test:a"]
+    assert jobs.members("h1", "pending") == {"h1:test:a", "h1:test:b"}
+    assert jobs.members("h1", "done") == set()
+    assert jobs.client.smembers("agentihooks-ci:queue:done") == set()
+    assert jobs.retry(record) is False
+
+    assert take(jobs, "h1:test:a", "w2", "t2")
+    assert jobs.finish(found(jobs, "h1:test:a"), "t2", "crash")
+    assert jobs.retry(record) is True
+    assert found(jobs, "h1:test:a").attempts == 2
+
+
 def test_every_key_carries_the_lab_prefix(jobs: queue.Queue, client) -> None:
     jobs.enqueue([unit("a"), unit("b")], "h1", {})
     assert take(jobs, "h1:test:a")
@@ -210,3 +234,28 @@ def test_every_key_carries_the_lab_prefix(jobs: queue.Queue, client) -> None:
 def test_missing_job_reads_none(jobs: queue.Queue) -> None:
     assert jobs.job("h1:test:none") is None
     assert jobs.token("h1:test:none") == ""
+
+
+@pytest.mark.feature("lab-scheduler-service")
+def test_leased_lists_each_leased_job_and_offers_keep_each_workers_latest_free_slots(jobs: queue.Queue) -> None:
+    ids = jobs.enqueue([unit("a"), unit("b"), unit("c")], "h1", {})
+    assert jobs.leased() == [] and jobs.offers(0) == {}
+    assert jobs.claim(found(jobs, ids[2]), "w1", "t1", 900)
+    assert jobs.claim(found(jobs, ids[0]), "w1", "t2", 500)
+    assert jobs.claim(found(jobs, ids[1]), "w2", "t3", 700)
+    assert jobs.leased() == [ids[0], ids[1], ids[2]]
+    assert jobs.finish(found(jobs, ids[0]), "t2", "passed")
+    assert jobs.leased() == [ids[1], ids[2]]
+    jobs.offer("w1", 3, 1000)
+    jobs.offer("w2", 0, 1100)
+    jobs.offer("w1", 1, 1200)
+    assert jobs.offers(1100) == {"w1": (1, 1200), "w2": (0, 1100)}
+    assert jobs.offers(1101) == {"w1": (1, 1200)}
+    assert jobs.offers(0) == {"w1": (1, 1200), "w2": (0, 1100)}
+    assert jobs.prune(1100) == 0
+    assert jobs.prune(1101) == 1
+    assert jobs.offers(0) == {"w1": (1, 1200)}
+    jobs.offer("w3", 2, 900)
+    jobs.offer("w3", 5, 1300)
+    assert jobs.prune(1201) == 1
+    assert jobs.offers(0) == {"w3": (5, 1300)}
