@@ -1351,7 +1351,7 @@ fixture it reads rekeys the mutant units as well.
 
 | Head | Mutation jobs |
 |---|---|
-| Pull request, hotfix, merge group | None: their frames hold no mutation units. The merge group `Gate — Required` rules require no mutation job and the test workflow runs none on `merge_group`; a pull request's mutation jobs run on Actions, as [Pull request mutation gate](mutation-gate.md) describes |
+| Pull request, hotfix, merge group | None: these heads get no mutation units. The merge group `Gate — Required` rules require no mutation job and the test workflow runs none on `merge_group`; a pull request's mutation jobs run on Actions, as [Pull request mutation gate](mutation-gate.md) describes |
 | Promotion, backfill | Both, unless the head changes no Python line under `hooks/` or `scripts/` |
 
 A mutant unit passes only when every mutant is killed, so a surviving mutant fails the `mutation`
