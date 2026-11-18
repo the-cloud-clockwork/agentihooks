@@ -1713,6 +1713,86 @@ def test_a_fix_branch_session_keeps_a_command_that_writes_only_its_branch(
     assert blocker_window.pretool("Bash", {"command": command}, "engineer-session", cwd) == (None, None)
 
 
+def _successor(root: Path, remote: str = "origin") -> str:
+    cwd = _checkout(root, "engineer-successor")
+    subprocess.run(["git", "-C", cwd, "config", "branch.engineer-successor.remote", remote], check=True)
+    subprocess.run(["git", "-C", cwd, "config", "branch.engineer-successor.merge", "refs/heads/fix-branch"], check=True)
+    return cwd
+
+
+@pytest.mark.parametrize("fix", [FIX, BRANCH_FIX])
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git push origin HEAD:fix-branch",
+        "git push -u origin HEAD:fix-branch",
+        "git push origin engineer-successor:refs/heads/fix-branch",
+        "gh workflow run t.yml --ref fix-branch",
+        "gh run rerun 5",
+    ],
+)
+@pytest.mark.feature("panic-spares-a-successor-of-a-fix")
+def test_a_successor_branch_tracking_a_registered_fix_keeps_its_fix_pushes_dispatches_and_reruns(
+    bound: None, store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fix: str, command: str
+) -> None:
+    _branches(monkeypatch, {FIX: "fix-branch"})
+    panic.engage(store, SLUG, "reason", False, [fix], 0)
+    cwd = _successor(tmp_path / "successor")
+    assert blocker_window.pretool("Bash", {"command": command}, "engineer-session", cwd) == (None, None)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git push",
+        "git push origin HEAD",
+        "git push -u origin HEAD:dev",
+        "git push origin HEAD:fix-branch HEAD:dev",
+        "git push origin engineer-successor",
+        "gh workflow run t.yml --ref dev",
+        "gh workflow run t.yml --ref engineer-successor",
+    ],
+)
+@pytest.mark.feature("panic-spares-a-successor-of-a-fix")
+def test_a_successor_branch_tracking_a_registered_fix_stays_frozen_for_any_other_target(
+    bound: None, store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, command: str
+) -> None:
+    _branches(monkeypatch, {FIX: "fix-branch"})
+    panic.engage(store, SLUG, "reason", False, [FIX], 0)
+    cwd = _successor(tmp_path / "successor")
+    block = blocker_window.pretool("Bash", {"command": command}, "engineer-session", cwd)[1]
+    assert block == blocker_window.FROZEN.format(slug=SLUG, reason="reason")
+
+
+@pytest.mark.feature("panic-spares-a-successor-of-a-fix")
+def test_a_rerun_from_a_branch_tracking_a_fix_on_another_remote_stays_frozen(
+    bound: None, store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _branches(monkeypatch, {FIX: "fix-branch"})
+    panic.engage(store, SLUG, "reason", False, [FIX], 0)
+    cwd = _successor(tmp_path / "successor", "elsewhere")
+    block = blocker_window.pretool("Bash", {"command": "gh run rerun 5"}, "engineer-session", cwd)[1]
+    assert block == blocker_window.FROZEN.format(slug=SLUG, reason="reason")
+
+
+@pytest.mark.parametrize(("remote", "tracked"), [("origin", "fix-branch"), ("elsewhere", "")])
+@pytest.mark.feature("panic-spares-a-successor-of-a-fix")
+def test_a_branch_tracks_only_a_branch_on_origin(tmp_path: Path, remote: str, tracked: str) -> None:
+    cwd = _successor(tmp_path / "successor", remote)
+    assert blocker_window._tracked(cwd, "engineer-successor") == tracked
+    assert blocker_window._tracked(_checkout(tmp_path / "plain", "plain"), "plain") == ""
+
+
+@pytest.mark.parametrize(("cwd", "fixes"), [("", (FIX,)), ("/work", ())])
+@pytest.mark.feature("panic-spares-a-successor-of-a-fix")
+def test_a_rerun_without_a_directory_or_a_fix_reads_no_git(
+    monkeypatch: pytest.MonkeyPatch, cwd: str, fixes: tuple[str, ...]
+) -> None:
+    asked = _reads(monkeypatch, {})
+    assert blocker_window._works_on_fix(cwd, fixes) is False
+    assert asked == []
+
+
 @pytest.mark.feature("panic-fix-spare-reads-target")
 def test_git_c_decides_the_checkout_a_push_is_spared_in(
     bound: None, store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -1720,7 +1800,7 @@ def test_git_c_decides_the_checkout_a_push_is_spared_in(
     _branches(monkeypatch, {})
     panic.engage(store, SLUG, "reason", False, [BRANCH_FIX], 0)
     fix = _checkout(tmp_path / "fix", "fix-branch")
-    other = _checkout(tmp_path / "other", "other-branch")
+    other = _checkout(tmp_path / "other", "other-branch", "git@github.com:The-Cloud-Clockwork/antoncore.git")
     frozen = blocker_window.FROZEN.format(slug=SLUG, reason="reason")
     assert blocker_window.pretool("Bash", {"command": f"git -C {other} push"}, "s", fix)[1] == frozen
     assert blocker_window.pretool("Bash", {"command": f"git -C {other} push origin fix-branch"}, "s", fix)[1] == frozen

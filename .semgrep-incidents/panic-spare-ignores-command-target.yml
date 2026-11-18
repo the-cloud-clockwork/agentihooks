@@ -6,7 +6,7 @@ rules:
       The panic spare once read only the checked out branch: a fix branch session could push another refspec to dev
       or main, dispatch on another ref or push from another checkout with git -C, and git -C push was not frozen at
       all. Freeze on the words _command returns, and pass _on_fix_branch the refs _targets reads from the command so
-      it spares only a command whose every ref is the checked out fix branch.
+      it spares only a command whose every ref is a registered fix branch.
     paths:
       include:
         - /hooks/context/blocker_window.py
