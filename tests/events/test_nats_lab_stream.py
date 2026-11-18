@@ -5,7 +5,7 @@ from nats.js.api import StreamInfo
 
 from scripts.ci_lab import scheduler
 from scripts.ci_lab.webhooks import HeadEvent, envelope
-from scripts.events import memory, nats
+from scripts.events import factory, memory, nats
 from scripts.events.bus import NoStream
 from scripts.events.config import BusConfig
 from scripts.events.nats_legacy import LEGACY_EVENTS
@@ -87,7 +87,7 @@ def test_the_memory_bus_keeps_lab_heads_on_their_own_log_with_its_dead_letters()
 
 def _scheduler_heads(url: str) -> list[scheduler.Head]:
     """Start the scheduler's bind mode bus, read one batch through its durable consumer, then stop it."""
-    bus = nats.open_bus(BusConfig(url=url, provision=False))
+    bus = factory.open_bus(BusConfig(backend="nats", url=url, provision=False))
     try:
         return scheduler.BusInbox(bus.lab_heads.consumer(scheduler.DURABLE, scheduler.SUBJECT)).heads()
     finally:
