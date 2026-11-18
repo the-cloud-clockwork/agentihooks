@@ -1052,7 +1052,7 @@
  "tests/test_credential_guard.py::test_kubectl_describe_of_a_secret_is_refused": {
   "assertions": 1,
   "calls": 2,
-  "cases": 23,
+  "cases": 24,
   "texts": [
    "23abbafacff91842"
   ]

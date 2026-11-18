@@ -421,6 +421,7 @@ DESCRIBE_SECRET_COMMANDS = [
     'ssh host "kubectl describe secret db"',
     "sudo kubectl describe secret db | head",
     "kubectl describe pod web | kubectl describe secret db",
+    'echo "$(kubectl describe secrets)"',
     "kubectl get secrets -o name | xargs kubectl describe",
     'for s in $(kubectl get secrets -o name); do kubectl describe "$s"; done',
     "kubectl describe $RES db",

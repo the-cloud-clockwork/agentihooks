@@ -492,8 +492,8 @@ SECRET_KEY_LISTING = (
 
 
 def describe_words(rest: str) -> list[str]:
-    """Words of a kubectl describe argument list as the shell passes them, with quotes and escapes removed."""
-    return re.sub(r"[\"'\\]", "", rest).split()
+    """Words of a kubectl describe argument list as the shell passes them, with quotes, escapes and parentheses removed."""
+    return re.sub(r"[\"'\\()]", "", rest).split()
 
 
 def describe_operands(words: list[str]) -> list[str]:
