@@ -7664,6 +7664,24 @@
       ]
     },
     {
+      "id": "lab-reuse-audit",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/lab-audit",
+      "behaviour": "The CI lab reuse audit regrades units with no verdict store reuse and compares each fresh verdict with the cached one: a promotion audit grades a dev head's whole suite in the promotion class, and a daily sample regrades a deterministic share of the day's store hits, ranked by digest under the day digest, in the backfill class. A differing verdict disables reuse of its kind, files one ci task per kind on the ledger naming the cached run and the audit run, and raises CILabVerdictMismatch; a cached flaky pass that fails again and a unit missing either verdict are not mismatches.",
+      "seam": "scripts.ci_lab.audit.Audit.promotion_audit and Audit.sample over a fakeredis verdict store, a fake lab port and a recording ledger, and scripts.ci_lab.audit.chosen",
+      "tests": [
+        "tests/ci_lab/test_audit.py::test_a_seeded_mismatch_disables_the_kind_files_a_ci_task_with_both_runs_and_raises",
+        "tests/ci_lab/test_audit.py::test_matching_verdicts_file_nothing_and_return_the_audit_run",
+        "tests/ci_lab/test_audit.py::test_a_cached_flaky_pass_that_fails_again_agrees_and_a_cached_failure_that_passes_differs",
+        "tests/ci_lab/test_audit.py::test_units_without_a_cached_or_a_regraded_verdict_are_not_compared",
+        "tests/ci_lab/test_audit.py::test_each_differing_kind_is_disabled_and_gets_its_own_task",
+        "tests/ci_lab/test_audit.py::test_the_sample_regrades_the_chosen_share_of_the_day_in_the_backfill_class",
+        "tests/ci_lab/test_audit.py::test_a_sampled_mismatch_disables_the_kind_and_files_the_task",
+        "tests/ci_lab/test_audit.py::test_the_sample_is_deterministic_from_the_day_digest",
+        "tests/ci_lab/test_audit.py::test_the_same_unit_hit_on_two_heads_ranks_by_its_head"
+      ]
+    },
+    {
       "id": "lab-capacity-reader",
       "origin": "inventory",
       "behaviour": "The tick step lab capacity reads GET /capacity from the swarm lab url into the swarm lab block in Redis, keeps the last capacity with the error when a read fails, ships one lab_capacity row per class to the metrics outbox, and swarm status json carries the lab block.",
