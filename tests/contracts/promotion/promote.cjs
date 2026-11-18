@@ -586,6 +586,8 @@ test('a repeated promotion does not open or merge another pull request', async (
   assert.equal(f.outputs.main, 'main');
 });
 
+const unstableFixture = () => fixture({ existing: true, mergeState: 'unstable' });
+
 for (const [name, alter] of [
   ['a red check of a dispatched run', f => f.checks.push({ name: 'load', status: 'completed', conclusion: 'failure',
     details_url: 'https://github.com/owner/repo/actions/runs/44/job/80' })],
@@ -594,7 +596,7 @@ for (const [name, alter] of [
   ['a failed commit status', f => f.statuses.push({ context: 'policy', state: 'failure' })],
 ]) {
   test(`an unstable snapshot merges on its first poll despite ${name} on the triggering commit`, async () => {
-    const f = fixture({ existing: true, mergeState: 'unstable' });
+    const f = unstableFixture();
     alter(f);
     await promote(f);
     assert.equal(f.now(), 0);
@@ -603,10 +605,8 @@ for (const [name, alter] of [
   });
 }
 
-const selfWaitFixture = () => fixture({ existing: true, mergeState: 'unstable' });
-
 test('an unstable snapshot merges without reading the checks or statuses of the triggering commit', async () => {
-  const f = selfWaitFixture();
+  const f = unstableFixture();
   await promote(f);
   assert.equal(f.outputs.main, 'rebased');
   assert.equal(f.writes[0][1].sha, 'snapshot');
@@ -618,7 +618,7 @@ test('an unstable snapshot merges without reading the checks or statuses of the 
 for (const name of ['mutation-stats-seed', 'test-summary']) {
   for (const outcome of ['queued', 'in_progress', 'failure', 'cancelled']) {
     test(`an exempt side job never holds the release: ${name} ${outcome}`, async () => {
-      const f = selfWaitFixture();
+      const f = unstableFixture();
       const pending = outcome === 'queued' || outcome === 'in_progress';
       const job = { name, status: pending ? outcome : 'completed', conclusion: pending ? null : outcome };
       f.jobs.push({ id: 75, run_id: 42, ...job });
@@ -637,7 +637,7 @@ for (const [name, alter] of [
   ['completed current job', f => { f.jobs[0].status = 'completed'; }],
 ]) {
   test(`an unverified current grade or job blocks promotion: ${name}`, async () => {
-    const f = selfWaitFixture();
+    const f = unstableFixture();
     alter(f);
     await assert.rejects(promote(f));
     assert.deepEqual(f.writes, []);
@@ -645,7 +645,7 @@ for (const [name, alter] of [
 }
 
 test('finds the exact current job beyond the first hundred jobs', async () => {
-  const f = selfWaitFixture();
+  const f = unstableFixture();
   f.jobs.unshift(...Array.from({ length: 110 }, (_, id) => ({ id, run_id: 42, name: `extra-${id}`, status: 'completed', conclusion: 'success' })));
   await promote(f);
   assert.equal(f.outputs.main, 'rebased');
