@@ -195,6 +195,25 @@ def test_a_new_life_on_the_same_task_starts_its_own_clock() -> None:
     assert swarm.store.redis.hgetall(swarm.store.key(SLUG, overrun.KEY)) == {}
 
 
+@pytest.mark.feature("swarm-task-notices-pass-the-seen-claim")
+def test_a_successor_overrunning_the_same_task_passes_the_seen_claim() -> None:
+    from scripts.inbox import seen
+
+    swarm = Swarm()
+    inbox = InboxStore(swarm.store.redis)
+    swarm.tick(REPORT)
+    (first,) = seen.claim(inbox, "master@sw")
+    inbox.close(first.id, "master@sw", "done", "read")
+    swarm.store.drop_agent(SLUG, OWNER)
+    successor = "engineer@abc-0002"
+    swarm.store.put_agent(SLUG, AgentRecord(successor, "eng", "t1", seat=SEAT, started_at=REPORT))
+    swarm.ledger.rows["t1"]["claimed_by"] = successor
+    swarm.live = {successor}
+    assert len(swarm.tick(REPORT + REPORT_MS)) == 1
+    (second,) = seen.claim(inbox, "master@sw")
+    assert (first.ref, second.ref) == (f"sw:overrun:t1:{REPORT}", f"sw:overrun:t1:{REPORT + REPORT_MS}")
+
+
 def test_one_tick_reports_every_overrunning_agent_past_a_finished_one():
     swarm = Swarm(agent=AgentRecord("engineer@abc-0000", "eng", "t0", state="finished", started_at=START))
     others = ("engineer@abc-0002", "engineer@abc-0003")

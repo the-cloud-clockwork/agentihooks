@@ -7648,6 +7648,21 @@
       ]
     },
     {
+      "id": "swarm-task-notices-pass-the-seen-claim",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-critic-repeating-inbox-refs",
+      "behaviour": "Every stall alert, overrun report, preempt ask, ledger event notice, follow-up raised reminder and priority notice carries its own ref: the notice prefix and its task, target or item, followed by the send time or, for a ledger event, its revision. A second notice about the same task or target therefore reaches the recipient through the seen claim instead of closing on delivery as already shown through the ledger, and the wake ladder still settles a follow-up or question notice decided on the ledger.",
+      "seam": "scripts.swarm.stall_watch.stall_pass alerting one task twice, scripts.swarm.overrun.overrun_pass reporting a successor on the same task, scripts.swarm.preempt.step asking the same holder again, and scripts.swarm.ledger_events.event_pass sending a second event on one target, a raised follow-up and a priority raised again, each delivered by scripts.inbox.seen.claim",
+      "tests": [
+        "tests/swarm/test_stall_watch.py::test_a_second_stall_alert_on_one_task_passes_the_seen_claim",
+        "tests/swarm/test_overrun.py::test_a_successor_overrunning_the_same_task_passes_the_seen_claim",
+        "tests/swarm/test_preempt.py::test_a_second_ask_to_the_same_holder_passes_the_seen_claim",
+        "tests/swarm/test_ledger_events.py::test_a_second_event_on_one_target_passes_the_seen_claim",
+        "tests/swarm/test_ledger_events.py::test_a_priority_raised_again_passes_the_seen_claim",
+        "tests/swarm/test_ledger_events.py::test_a_follow_up_raised_after_its_added_notice_passes_the_seen_claim"
+      ]
+    },
+    {
       "id": "hive-create-name-reservation",
       "origin": "inventory",
       "behaviour": "A real hive create run reserves its chosen name in Redis with SET NX and an expiry before the manifests pull request opens, skips or refuses a name another run reserved, an unnamed create skips it for the next free name and an explicit --name is refused, reclaims its own reservation on resume until its pull request exists, releases it by compare and delete on failure or completion while leaving a reservation another run took, and a dry run reserves nothing.",

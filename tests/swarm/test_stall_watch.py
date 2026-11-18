@@ -653,6 +653,23 @@ def test_a_reopen_writes_the_exact_ledger_update_comment_alert_and_seat_exit():
     assert (exit_record["seat"], exit_record["reason"]) == ("eng-1@sw", "stopped")
 
 
+@pytest.mark.feature("swarm-task-notices-pass-the-seen-claim")
+def test_a_second_stall_alert_on_one_task_passes_the_seen_claim() -> None:
+    from scripts.inbox import seen
+
+    swarm = Swarm(GREEN)
+    inbox = InboxStore(swarm.store.redis)
+    swarm.tick(START)
+    swarm.tick(START + 10 * MINUTE)
+    (first,) = seen.claim(inbox, "master@sw")
+    inbox.close(first.id, "master@sw", "done", "owner told to requeue")
+    swarm.ledger.rows["t1"].update({"state": "pr", "claimed_by": OWNER})
+    swarm.store.put_agent(SLUG, AgentRecord(OWNER, "eng", "t1", seat="eng-1@sw"))
+    assert len(swarm.tick(START + 20 * MINUTE)) == 1
+    (second,) = seen.claim(inbox, "master@sw")
+    assert (first.ref, second.ref) == (f"sw:stall:t1:{START + 10 * MINUTE}", f"sw:stall:t1:{START + 20 * MINUTE}")
+
+
 def test_the_watch_settings_set_the_limits():
     swarm = Swarm(GREEN, environ={"AGENTIHOOKS_STALL_GREEN_MINUTES": "3"})
     swarm.tick(START)
