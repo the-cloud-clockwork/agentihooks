@@ -2,6 +2,38 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.987 · 2026-11-18
+
+### 2026-11-18 · ffe89a1839be · #11812 · @agenticore-app
+
+**Refuse tests that swap LedgerClient for a function**
+
+This change adds a Semgrep rule that catches tests which swap `scripts.swarm.ledger_client.LedgerClient` for a lambda or function, a pattern that previously broke any module first imported under the swap because `LedgerClient | None` type hints can't evaluate against a plain function, causing the 17 November merge group outage. It migrates all 16 affected swaps to a new fake class helper, extends CI to scan every test file (previously skipped via `.semgrepignore`) with these outage rules, and verifies the pipeline stays green with zero findings on dev, adding only about 15 seconds to the scan job.
+
+### 2026-11-18 · 99339e5aac43 · #11818 · @agenticore-app
+
+**Move waiting merge queue entries at once on a merge priority**
+
+This change fixes merge priority requests that previously waited for the head merge group's Tests run to finish before moving a pull request forward, which caused it to miss the next group once GitHub started building the first queued entry. Now, when a priority is requested without `--lift`, waiting entries ahead of the target are immediately dequeued and requeued behind it without touching running entries or storing a deferred record, so the pull request reliably advances. A new Semgrep rule guards against regressions that would reintroduce the hold or deferred storage.
+
+### 2026-11-18 · 026429ad7685 · #11500 · @agenticore-app
+
+**Announce the protected grader blob that pins the lab verdict job and its lab clauses**
+
+This change updates `scripts/gate_protected.py` on dev so the protected grader now pins the lab verdict job to its base job and ties each gate condition to its exact trailing lab clause, preventing stale or ambiguous matches as the file evolves. It announces two new blobs reflecting this fix—one merged cleanly with current dev, and one combined with a concurrent grader edit from #11816 that was verified conflict-free via `git merge-tree --write-tree`, so either merge order stays valid. The previously announced blob from an older dev snapshot is now dropped as obsolete.
+
+### 2026-11-18 · c769335386e8 · #11505 · @agenticore-app
+
+**Document the CI lab retry policy**
+
+This change adds documentation for the CI lab retry policy that was already implemented in PR #11343, giving operators a single reference page explaining how outcomes are classified, how `decide` and `red` behave with default and configured retry tables, how `lab.retry` is configured in `delivery.yaml` with its defaults and error messages, and where the flake-rule exception lives. It also clarifies gaps between policy and current reality, such as `Leases.reap` not yet reading from `lab.retry` and no code reporting `crash` yet, plus a troubleshooting table, so operators can reason about retry behavior and known limitations without reading source code.
+
+### 2026-11-18 · 1f4b4fb51b6e · #11770 · @agenticore-app
+
+**Status publish keeps the last published findings when the pass stored none**
+
+When a passing tick's health findings step stores nothing, the closing status publish step now falls back to the findings from the swarm's last published status instead of leaving the gap for status_report to rebuild under the tighter publish budget, which was causing timeouts and abandoned publishes. This only applies to successful passes; a failed pass still builds fresh findings so the spawn stall alarm keeps showing. The reuse goes through a new commands.published_findings helper, is gated behind a feature flag, and is covered by new feature, scenario, and closing-lane tests, fixing the abandonment pattern observed in production tick records.
+
 ## v2.17.986 · 2026-11-18
 
 ### 2026-11-18 · 7a0c73bb0b6f · #11816 · @agenticore-app
