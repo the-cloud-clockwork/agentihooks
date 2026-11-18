@@ -1045,7 +1045,7 @@ recorded test durations. Without the file, that starting estimate remains.
 Omitting `--repository` uses import selection without the recorded dev lookup.
 The repository lookup needs the workflow's `GH_TOKEN` for `gh api`.
 
-Use the [focused mutation proof](#pull-request-mutation-gate) on a pushed branch
+Dispatch the [focused mutation proof](#pull-request-mutation-gate) on a pushed branch
 to exercise planning in CI. For a completed run, inspect the log and job step
 times without executing tests locally:
 
@@ -1417,7 +1417,7 @@ A shard grades its unsplit mutants normally and records split results under `uni
 
 Splitting changes execution units, not the selected mutant set or the clearance fingerprint. An uncleared combined survivor on graded lines still fails. Per-shard `expected` and `graded` count assigned units, so their sum can exceed the number of distinct mutants; use the merged file counts when comparing distinct mutant totals. Retained mutation replay uses the same split selection and combined grading, and checks completeness against the planned unit count.
 
-### Inspect a run
+### Download a run's evidence
 
 Download evidence from the Tests run being investigated into a task work folder. Replace `RUN_ID` and `EVIDENCE_DIR` with that run and folder:
 

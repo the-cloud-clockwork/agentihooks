@@ -1860,8 +1860,8 @@ pull request for the published branch with `swarm pr`.
 
 A successor continuing an existing pull request publishes its commit only to
 the retained pull request branch. Its newly prepared local branch is not also
-pushed, so the same commit is never pushed to a second branch. The `push-stop` gate uses the same
-retained target when it pushes committed work at Stop.
+pushed, so the same commit is never pushed to a second branch. The `push-stop`
+gate uses the same retained target when it pushes committed work at Stop.
 
 For `publish`, the retained target can come from `continue_from` in the
 handoff envelope, its reclaim record when there is no nonempty handoff

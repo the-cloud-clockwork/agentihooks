@@ -55,7 +55,7 @@ Promotion never publishes to PyPI and never dispatches another workflow. PyPI pu
 
 The `Squash the graded tree snapshot into main` step runs `promote.cjs`, so it covers steps 2 to 8 of the list above: snapshot, pull request, the mergeability wait, the squash, the tree check and the branch delete. Its time is the step 5 wait plus the API calls of the other steps; the command below reports only the step total.
 
-Pushing a `promotion/**` branch runs no mutation: the promotion head's changes were already mutation graded on their pull requests. Other workflows still run on that push; on the snapshot of v2.17.2 they were `grade` (Branch workflow lanes) and two `measure` checks (Startup stages, Worker resources).
+Pushing a `promotion/**` branch runs no mutation: the promotion head's changes were already mutation graded on their pull requests. Other workflows can still run on that push when their path filters match; on the snapshot of v2.17.2 they were `grade` (Branch workflow lanes) and two `measure` checks (Startup stages, Worker resources).
 
 The step can still wait on the graded `dev` commit. When the promotion pull request reports `unstable`, step 5 admits it only while this run's `promote / promote` job is the one check still running, this run's `Gate — Required` succeeded, every other check on the graded commit has completed with success or skipped, and the latest commit status of every context is success. A slow non-gate workflow on that commit, such as the Worker hive pod `kind` job, holds the merge until it finishes or the four minute limit fails the step.
 
