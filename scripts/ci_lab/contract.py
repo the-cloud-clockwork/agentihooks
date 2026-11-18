@@ -1,9 +1,9 @@
 """The CI lab service contract: entry points, environment names, ports and metric names.
 
 The scheduler and worker services, their platform manifests and their tests import these
-names instead of repeating the strings. `agentihooks ci-lab-scheduler` runs the scheduler service;
-`agentihooks ci-lab-scheduler --self-test` and `agentihooks ci-lab-worker --self-test` check the
-contract offline and print it as JSON.
+names instead of repeating the strings. `agentihooks ci-lab-scheduler` runs the scheduler service
+and `agentihooks ci-lab-worker` the worker service; `agentihooks ci-lab-scheduler --self-test` and
+`agentihooks ci-lab-worker --self-test` check the contract offline and print it as JSON.
 """
 
 import argparse
@@ -28,6 +28,13 @@ CONTROL_TOKEN = "CI_LAB_CONTROL_TOKEN"
 SLOTS = "CI_LAB_SLOTS"
 GIT_MIRROR = "CI_LAB_GIT_MIRROR"
 UV_CACHE_DIR = "UV_CACHE_DIR"
+WORK_ROOT = "CI_LAB_WORK_ROOT"
+MANIFEST = "CI_LAB_MANIFEST"
+FLAKES = "CI_LAB_FLAKES"
+MUTATION_CACHE = "CI_LAB_MUTATION_CACHE"
+KILLERS = "CI_LAB_KILLERS"
+MUTATION_BUDGET = "CI_LAB_MUTATION_BUDGET"
+MUTATION_CAP = "CI_LAB_MUTATION_CAP"
 
 UNITS_QUEUED = "ci_lab_units_queued"
 UNITS_RUNNING = "ci_lab_units_running"
@@ -99,7 +106,19 @@ WORKER = Service(
     name="worker",
     ports=(METRICS_PORT,),
     prefixes=(BUS_PREFIX, MINIO_PREFIX),
-    names=(SCHEDULER_URL, SLOTS, GIT_MIRROR, UV_CACHE_DIR),
+    names=(
+        SCHEDULER_URL,
+        SLOTS,
+        GIT_MIRROR,
+        UV_CACHE_DIR,
+        WORK_ROOT,
+        MANIFEST,
+        FLAKES,
+        MUTATION_CACHE,
+        KILLERS,
+        MUTATION_BUDGET,
+        MUTATION_CAP,
+    ),
     metrics=METRICS,
 )
 
@@ -166,5 +185,9 @@ def scheduler(argv: list[str]) -> int:
 
 
 def worker(argv: list[str]) -> int:
-    """Run the worker entry point against the process environment."""
-    return run(WORKER, argv, os.environ)
+    """Run the worker service against the process environment, or its offline self test with --self-test."""
+    if SELF_TEST in argv:
+        return run(WORKER, argv, os.environ)
+    from scripts.ci_lab import executors
+
+    return executors.main(argv, os.environ)

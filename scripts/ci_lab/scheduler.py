@@ -14,7 +14,9 @@ commit's grades on the scheduler port, metrics on the metrics port, both from on
 """
 
 import argparse
+import io
 import json
+import logging
 import subprocess
 import sys
 import time
@@ -31,17 +33,18 @@ from urllib.parse import urlsplit
 import jsonschema
 import yaml
 
-from scripts.ci_lab import budget, contract, control, evidence, lease_api, metrics, service
+from scripts import ci_select
+from scripts.ci_lab import budget, contract, control, evidence, expand_tests, interaction, lease_api, metrics, service
 from scripts.ci_lab.capacity import Load
 from scripts.ci_lab.checks import Checks, Output
 from scripts.ci_lab.delivery import CLASSES, DELIVERY, DELIVERY_SCHEMA, load_runtime
 from scripts.ci_lab.digests import GradeInputs, StaticInputs, Toolchain, grade_key, static_key
 from scripts.ci_lab.intake import GradeRequest, admit
 from scripts.ci_lab.leases import Leases
-from scripts.ci_lab.objects import Objects, S3Objects, Uploads, upload_path
+from scripts.ci_lab.objects import Objects, S3Objects, Uploads, manifest_folder, upload_path
 from scripts.ci_lab.outcomes import CANNOT_RUN, DROPPED, FAILED, LOSSES, PASSED
 from scripts.ci_lab.queue import Job, Queue
-from scripts.ci_lab.retry import Policy, policy
+from scripts.ci_lab.retry import Policy, UnitResult, decide, policy
 from scripts.ci_lab.static_gates import REGISTRY, WORKFLOW, discover
 from scripts.ci_lab.store import PREFIX, Store, Verdict
 from scripts.ci_lab.units import Priority, Unit
@@ -49,6 +52,7 @@ from scripts.ci_lab.webhooks import HEAD_SUBJECT, HeadEvent
 from scripts.ci_lab.worktrees import Mirror
 from scripts.ci_runner_trust import ACTORS, validate_actors
 from scripts.events.bus import Consumer
+from tests import dep_manifest
 
 __all__ = [
     "GRADES",
@@ -61,6 +65,7 @@ __all__ = [
     "READY_MS",
     "Scheduler",
     "Settings",
+    "StoredManifests",
     "UNIT_ESTIMATE_S",
     "build",
     "fold",
@@ -97,6 +102,7 @@ PUSH_SKIPPABLE = frozenset({"type-gate", "lint", "semgrep", "test-count"})
 HEAD_FIELDS = tuple(item.name for item in fields(HeadEvent))
 STATIC = "static"
 WHOLE_TREE = "."
+DURATIONS = ".test_durations"
 DEV = "dev"
 DURABLE = "ci-lab-scheduler"
 SUBJECT = f"{HEAD_SUBJECT}.>"
@@ -115,8 +121,12 @@ MINIO_SECRET_KEY = f"{contract.MINIO_PREFIX}SECRET_KEY"
 MIRROR_STORE = "CI_LAB_MIRROR_STORE"
 IMAGE = "CI_LAB_IMAGE"
 REPOSITORY = "CI_LAB_REPOSITORY"
+REINDEX_ON_START = "CI_LAB_REINDEX_ON_START"
 
 Needs = Mapping[str, Mapping[str, Any]]
+Manifests = Callable[[str, Sequence[str]], dict[str, Any] | None]
+Verdicts = Callable[[str, str], Verdict | None]
+UNPACK = cast("Callable[[dict[str, Any]], dict[str, Any]]", dep_manifest.unpack)
 
 
 @dataclass(frozen=True)
@@ -580,7 +590,13 @@ class Scheduler:
             self.client.hdel(WAITING, name)
             try:
                 actions.append(self._start(request, held["lane"], now_ms))
-            except (subprocess.CalledProcessError, ValueError, KeyError, yaml.YAMLError) as error:
+            except (
+                subprocess.CalledProcessError,
+                ValueError,
+                KeyError,
+                yaml.YAMLError,
+                jsonschema.ValidationError,
+            ) as error:
                 actions.append(f"cannot expand {request.head}: {error}")
         return actions
 
@@ -616,7 +632,7 @@ class Scheduler:
                 state.units.update({ref: replace(source.units[ref]) for ref in source.gates[gate]})
                 continue
             state.gates[gate] = [self._place(state, unit, request.bypass_negative, carried, misses) for unit in units]
-        self.queue.enqueue(misses, request.head, {})
+        self.queue.enqueue(misses, request.head, {}, request.base, plan.grader)
         self._save(state)
         self.client.sadd(LIVE, run)
         self.client.set(f"{LANES}{request.repo}|{lane}|{int(request.tier)}", run)
@@ -690,17 +706,24 @@ class Scheduler:
         return actions
 
     def _collect(self, slot: Slot) -> None:
-        """Take a finished job's outcome into its slot, storing its verdict; a vanished job was dropped."""
+        """Take a finished job's outcome into its slot, storing its verdict, unless the retry policy runs it again; a
+        vanished job was dropped."""
         if slot.outcome or not slot.job:
             return
         job = self.queue.job(slot.job)
         if job is None:
             slot.outcome = DROPPED
-        elif job.state in FINISHED:
+        elif job.state in FINISHED and not self._rerun(job):
             slot.outcome = job.outcome
             self._remember(job)
         else:
             slot.started = slot.started or job.state == "leased"
+
+    def _rerun(self, job: Job) -> bool:
+        """Move a finished job back to pending when the retry policy allows its outcome a rerun; return whether it
+        moved."""
+        result = UnitResult(job.outcome, job.attempts)
+        return decide(result, self.settings.retries) == "retry" and self.queue.retry(job)
 
     def _remember(self, job: Job) -> None:
         """Store the verdict of a graded job from the report its worker uploaded; a lost or unrun job is no verdict."""
@@ -742,7 +765,7 @@ class Scheduler:
 
 
 class BusInbox:
-    """Lab head events read from the bus consumer of `ci.lab.head.>`, each acknowledged once read."""
+    """Lab head events read from the bus consumer of `ci.lab.head.>`, each acknowledged once read, or terminated."""
 
     def __init__(self, consumer: Consumer, batch: int = BATCH, timeout_ms: int = FETCH_MS) -> None:
         self.consumer = consumer
@@ -750,10 +773,19 @@ class BusInbox:
         self.timeout_ms = timeout_ms
 
     def heads(self) -> list[Head]:
-        """Return the heads of the next batch of envelopes; a head's lane is its branch, else the head itself."""
+        """Return the heads of the next batch of envelopes; a head's lane is its branch, else the head itself. An
+        envelope missing a head field is terminated with a logged warning, never redelivered to the dead letter cap.
+        """
         heads: list[Head] = []
         for delivery in self.consumer.fetch(self.batch, self.timeout_ms):
             data = cast(Mapping[str, Any], delivery.event.data)  # pragma: no mutate
+            missing = [name for name in HEAD_FIELDS if name not in data]
+            if missing:
+                logging.getLogger(__name__).warning(
+                    "terminated lab head %s missing %s", delivery.event.id, ", ".join(missing)
+                )
+                delivery.term()
+                continue
             event = HeadEvent(*(str(data[name]) for name in HEAD_FIELDS))
             heads.append(Head(event, str(data.get("branch") or event.head)))
             delivery.ack()
@@ -766,6 +798,13 @@ def _within(files: Mapping[str, str], paths: Sequence[str]) -> dict[str, str]:
         return dict(files)
     folders = tuple(path.removesuffix("/") + "/" for path in paths)
     return {path: blob for path, blob in files.items() if path in paths or path.startswith(folders)}
+
+
+def _lab_block(document: str) -> Mapping[str, Any]:
+    """Return the lab block of a delivery.yaml document, validated against its schema."""
+    data = yaml.safe_load(document)
+    jsonschema.validate(data, DELIVERY_SCHEMA)
+    return data["lab"]
 
 
 def frame(tier: Priority, tree: str, grader: str, gates: Mapping[str, tuple[Unit, ...]]) -> Plan:
@@ -785,13 +824,32 @@ def frame(tier: Priority, tree: str, grader: str, gates: Mapping[str, tuple[Unit
     return Plan(tree, grader, framed, outputs={"select": {"scope": "none"}})
 
 
+@dataclass(frozen=True)
+class StoredManifests:
+    """Packed dependency manifests in the lab object store, one per dev commit under `objects.manifest_folder`."""
+
+    objects: Objects
+
+    def __call__(self, repo: str, commits: Sequence[str]) -> dict[str, Any] | None:
+        """Return the manifest of the first commit that has one stored, None when none has."""
+        folder = manifest_folder(_slug(repo))
+        stored = frozenset(self.objects.keys(folder))
+        for commit in commits:
+            path = f"{folder}{commit}.json"
+            if path in stored:
+                return UNPACK(json.loads(self.objects.read(path)))
+        return None
+
+
 class MirrorExpander:
     """Static gate units of a head read from a git mirror with ls-tree and show, never a checkout."""
 
-    def __init__(self, node: Path, root: Path, toolchain: Toolchain) -> None:
+    def __init__(self, node: Path, root: Path, toolchain: Toolchain, manifests: Manifests, verdicts: Verdicts) -> None:
         self.node = node
         self.root = root
         self.toolchain = toolchain
+        self.manifests = manifests
+        self.verdicts = verdicts
 
     def _mirror(self, repo: str) -> Mirror:
         self.root.mkdir(parents=True, exist_ok=True)
@@ -826,13 +884,11 @@ class MirrorExpander:
 
     def retries(self, repo: str) -> Policy:
         """Return the retry policy of the lab block of delivery.yaml on the repository's dev branch."""
-        document = yaml.safe_load(self._on_dev(repo, DELIVERY))
-        jsonschema.validate(document, DELIVERY_SCHEMA)
-        return policy(document["lab"])
+        return policy(_lab_block(self._on_dev(repo, DELIVERY)))
 
     def expand(self, request: GradeRequest) -> Plan:
         """Return one unit per static gate the grader's workflow runs, keyed by the files it reads at head and base,
-        framed by the request's tier."""
+        and the unit job's test units of a merge group, promotion or backfill head, framed by the request's tier."""
         mirror = self._mirror(request.repo)
         grader = request.head if request.tier >= Priority.PROMOTION else request.base
         for sha in dict.fromkeys((request.head, request.base, grader)):
@@ -847,14 +903,62 @@ class MirrorExpander:
                 gate.name, _within(head, gate.paths), _within(base, gate.base_paths), grader, toolchain
             )
             gates.setdefault(gate.job, []).append(Unit(STATIC, static_key(inputs), (gate.name,)))
+        if request.tier >= Priority.QUEUE:
+            gates.setdefault(UNIT_JOBS[0], []).extend(self._tests(mirror, request, grader, head, toolchain))
         tree = self._git(mirror, "rev-parse", f"{request.head}^{{tree}}").strip()
         return frame(request.tier, tree, grader, {job: tuple(units) for job, units in gates.items()})
+
+    def _tests(
+        self, mirror: Mirror, request: GradeRequest, grader: str, files: Mapping[str, str], toolchain: Toolchain
+    ) -> tuple[Unit, ...]:
+        """Return every test batch of the head, or for a merge group head the batches that hold a test its entries
+        invalidate, unless the interaction rule sends the group to the whole suite."""
+        ancestry = self._git(mirror, "rev-list", "--first-parent", request.base).split()
+        manifest = self.manifests(request.repo, ancestry)
+        if manifest is None:
+            raise ValueError(f"no dependency manifest at or before {request.base}")
+        tree = self._contents(mirror, files)
+        suite = expand_tests.units(manifest, tree, files, json.loads(tree.get(DURATIONS, b"{}")), toolchain)
+        if request.tier != Priority.QUEUE:
+            return suite
+        cached = {test for unit in suite if self.verdicts(unit.kind, unit.key) is not None for test in unit.members}
+        limit = interaction.entry_limit(_lab_block(self._git(mirror, "show", f"{grader}:{DELIVERY}")))
+        chosen = interaction.decide(self._group(mirror, request), manifest, cached, limit)
+        if chosen == interaction.FULL:
+            return suite
+        return tuple(unit for unit in suite if chosen.intersection(unit.members))
+
+    def _group(self, mirror: Mirror, request: GradeRequest) -> interaction.Group:
+        """Return a merge group head: its changes against the base and those of each entry, one first parent commit
+        each."""
+        span = f"{request.base}..{request.head}"
+        entries = tuple(
+            tuple(dep_manifest.changes(mirror.store, f"{entry}^", entry))
+            for entry in self._git(mirror, "rev-list", "--first-parent", span).split()
+        )
+        changes = tuple(dep_manifest.changes(mirror.store, request.base, request.head))
+        pyproject = ci_select.pyproject_reaches_tests(mirror.store, request.base, request.head)
+        return interaction.Group(changes, entries, pyproject)
+
+    def _contents(self, mirror: Mirror, files: Mapping[str, str]) -> dict[str, bytes]:
+        """Return each file's bytes by path, read in one git cat-file batch keyed by the object ids it prints."""
+        blobs = list(dict.fromkeys(files.values()))
+        listing = "".join(f"{blob}\n" for blob in blobs).encode()
+        argv = ["git", "-C", str(mirror.store), "cat-file", "--batch"]
+        stream = io.BytesIO(subprocess.check_output(argv, input=listing))
+        found: dict[str, bytes] = {}
+        for _ in blobs:
+            name, _kind, size = stream.readline().split()
+            found[name.decode()] = stream.read(int(size))
+            stream.read(1)
+        return {path: found[blob] for path, blob in files.items()}
 
 
 def build(environ: Mapping[str, str], client: Any, objects: Objects, consumer: Consumer) -> Scheduler:
     """Return the service's scheduler over its clients, trusting the runner trust list of the repository's dev."""
     toolchain = Toolchain(sys.version.split()[0], {}, "", "", environ.get(IMAGE, ""), {})
-    expander = MirrorExpander(Path(environ[contract.GIT_MIRROR]), Path(environ[MIRROR_STORE]), toolchain)
+    node, root = Path(environ[contract.GIT_MIRROR]), Path(environ[MIRROR_STORE])
+    expander = MirrorExpander(node, root, toolchain, StoredManifests(objects), Store(client, objects).get)
     checks: dict[str, Poster] = {}
 
     def poster(repo: str) -> Poster:
@@ -933,8 +1037,10 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
         aws_secret_access_key=environ[MINIO_SECRET_KEY],
     )
     objects = S3Objects(s3, environ[MINIO_BUCKET], "")
-    consumer = open_bus(BusConfig.from_environ(environ)).lab_heads.consumer(DURABLE, SUBJECT)
+    consumer = open_bus(replace(BusConfig.from_environ(environ), provision=False)).lab_heads.consumer(DURABLE, SUBJECT)
     scheduler = build(environ, client, objects, consumer)
+    if environ.get(REINDEX_ON_START) == "true":
+        print(f"reindexed {scheduler.store.reindex()} verdicts", flush=True)
     leases = Leases(scheduler.queue, LEASE_TTL_MS, _now_ms, _sleep_ms, LEASE_POLL_MS)
     routes = lease_api.ControlRoutes(client, environ.get(contract.CONTROL_TOKEN, ""), _now_ms)
     spending = budget.Budget(client, _now_ms, budget.policy(runtime))

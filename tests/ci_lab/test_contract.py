@@ -71,7 +71,19 @@ WORKER_DESCRIPTION = {
     "ports": [9108],
     "environment": {
         "prefixes": ["AGENTIHOOKS_BUS", "CI_LAB_MINIO_"],
-        "names": ["CI_LAB_SCHEDULER_URL", "CI_LAB_SLOTS", "CI_LAB_GIT_MIRROR", "UV_CACHE_DIR"],
+        "names": [
+            "CI_LAB_SCHEDULER_URL",
+            "CI_LAB_SLOTS",
+            "CI_LAB_GIT_MIRROR",
+            "UV_CACHE_DIR",
+            "CI_LAB_WORK_ROOT",
+            "CI_LAB_MANIFEST",
+            "CI_LAB_FLAKES",
+            "CI_LAB_MUTATION_CACHE",
+            "CI_LAB_KILLERS",
+            "CI_LAB_MUTATION_BUDGET",
+            "CI_LAB_MUTATION_CAP",
+        ],
     },
     "metrics": sorted(EXPECTED_METRICS),
 }
@@ -87,6 +99,13 @@ ENVIRONMENT_NAMES = (
     "CI_LAB_SLOTS",
     "CI_LAB_GIT_MIRROR",
     "UV_CACHE_DIR",
+    "CI_LAB_WORK_ROOT",
+    "CI_LAB_MANIFEST",
+    "CI_LAB_FLAKES",
+    "CI_LAB_MUTATION_CACHE",
+    "CI_LAB_KILLERS",
+    "CI_LAB_MUTATION_BUDGET",
+    "CI_LAB_MUTATION_CAP",
 )
 
 
@@ -119,6 +138,37 @@ def test_environment_names() -> None:
     assert contract.GIT_MIRROR == "CI_LAB_GIT_MIRROR"
     assert contract.UV_CACHE_DIR == "UV_CACHE_DIR"
     assert contract.RUNTIME_CONFIG == "CI_LAB_RUNTIME_CONFIG"
+    assert contract.WORK_ROOT == "CI_LAB_WORK_ROOT"
+    assert contract.MANIFEST == "CI_LAB_MANIFEST"
+    assert contract.FLAKES == "CI_LAB_FLAKES"
+    assert contract.MUTATION_CACHE == "CI_LAB_MUTATION_CACHE"
+    assert contract.KILLERS == "CI_LAB_KILLERS"
+    assert contract.MUTATION_BUDGET == "CI_LAB_MUTATION_BUDGET"
+    assert contract.MUTATION_CAP == "CI_LAB_MUTATION_CAP"
+
+
+@pytest.mark.feature("lab-worker-executors")
+def test_the_worker_command_runs_the_service_and_keeps_the_self_test(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.ci_lab import executors
+
+    seen: list[tuple[list[str], object]] = []
+
+    def main(argv: list[str], environ: object) -> int:
+        seen.append((list(argv), environ))
+        return 5
+
+    monkeypatch.setattr(executors, "main", main)
+    for variable in contract.github_app_variables(dict(os.environ)):
+        monkeypatch.delenv(variable)
+    assert contract.worker([]) == 5
+    assert lab_cli.main(["worker", "--x"], {"A": "1"}) == 5
+    assert seen == [([], os.environ), (["--x"], {"A": "1"})]
+    assert contract.worker(["--self-test"]) == 0
+    assert lab_cli.main(["worker", "--self-test"], {}) == 0
+    assert capsys.readouterr().out == f"{json.dumps(WORKER_DESCRIPTION)}\n" * 2
+    assert len(seen) == 2
 
 
 def test_scheduler_self_test_passes_offline(capsys: pytest.CaptureFixture[str]) -> None:

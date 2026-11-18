@@ -82,6 +82,15 @@ def test_lease_grants_fitting_jobs_in_order_with_distinct_tokens(jobs: queue.Que
     assert not lab.owns("h1:test:net", grants[1].token)
 
 
+@pytest.mark.feature("lab-worker-executors")
+def test_a_grant_carries_the_base_and_grader_revision_of_its_job(jobs: queue.Queue, lab: leases.Leases) -> None:
+    jobs.enqueue([unit("a")], "h1", {}, "b1", "g1")
+
+    [grant] = lab.lease("w1", 1, frozenset(), 0)
+
+    assert grant == leases.Grant("h1:test:a", grant.token, "h1", unit("a"), 1, 1500, "b1", "g1")
+
+
 def test_lease_stops_at_free_slots(jobs: queue.Queue, lab: leases.Leases) -> None:
     jobs.enqueue([unit("a"), unit("b"), unit("c")], "h1", {})
 

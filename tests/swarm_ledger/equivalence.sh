@@ -17,7 +17,8 @@ replay() {
 
 settle() {
   failed=0
-  for job in $(jobs -p); do
+  pids="$(jobs -p)"
+  for job in $pids; do
     wait "$job" || failed=1
   done
   return "$failed"

@@ -32,7 +32,7 @@ docker run -d --name "$run-hive" --network "$run" --user "$(id -u):$(id -g)" -v 
 docker run -d --name "$run-member" --network "$run" -v "$tls/cert.pem:/tls/cert.pem:ro" \
   -e AGENTIHOOKS_DEPLOYMENT=compose -e SSL_CERT_FILE=/tls/cert.pem "$image" sleep infinity >/dev/null
 ready=""
-for _ in $(seq 60); do
+for _ in {1..60}; do
   logs="$(docker logs "$run-hive" 2>&1)"
   if [[ $logs == *"hive endpoint on https://"* ]]; then
     ready=1
