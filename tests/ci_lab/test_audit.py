@@ -25,6 +25,22 @@ AUDIT_RUN = "grade-v1-audit"
 DAY = "2026-11-18"
 
 
+def _key(kind: str, name: str) -> str:
+    return f"{kind}-v1-{digest({'seed': name})}"
+
+
+LINT = _key("static", "lint")
+DOCS = _key("static", "docs")
+ONE = _key("test", "one")
+TWO = _key("test", "two")
+SAME = _key("test", "same")
+FLAKY = _key("test", "flaky")
+LOST = _key("test", "lost")
+UNKNOWN = _key("test", "unknown")
+ELSEWHERE = _key("test", "elsewhere")
+RED = _key("mutant", "red")
+
+
 @pytest.fixture
 def client() -> fakeredis.FakeRedis:
     import fakeredis
@@ -81,39 +97,39 @@ def _unit(kind: str, key: str, run: str, head: str = HEAD) -> audit.Cached:
 
 
 def _hits(count: int, head: str = HEAD) -> list[audit.Cached]:
-    return [_unit("test", f"test-v1-{n:03d}", f"grade-v1-{n:03d}", head) for n in range(count)]
+    return [_unit("test", _key("test", f"hit {n}"), f"grade-v1-{n:03d}", head) for n in range(count)]
 
 
 @pytest.mark.feature("lab-reuse-audit")
 def test_a_seeded_mismatch_disables_the_kind_files_a_ci_task_with_both_runs_and_raises(
     store: Store, client: fakeredis.FakeRedis
 ) -> None:
-    cached = _cache(store, "static", "static-v1-lint", True)
-    _cache(store, "static", "static-v1-docs", True)
-    _cache(store, "test", "test-v1-one", True)
+    cached = _cache(store, "static", LINT, True)
+    _cache(store, "static", DOCS, True)
+    _cache(store, "test", ONE, True)
     units = [
-        _unit("static", "static-v1-lint", "grade-v1-cached"),
-        _unit("static", "static-v1-docs", "grade-v1-cached"),
-        _unit("test", "test-v1-one", "grade-v1-older"),
-        _unit("test", "test-v1-elsewhere", "grade-v1-older", OTHER),
+        _unit("static", LINT, "grade-v1-cached"),
+        _unit("static", DOCS, "grade-v1-cached"),
+        _unit("test", ONE, "grade-v1-older"),
+        _unit("test", ELSEWHERE, "grade-v1-older", OTHER),
     ]
-    lab = Lab(units=units, fresh={"static-v1-lint": False, "static-v1-docs": True, "test-v1-one": True})
+    lab = Lab(units=units, fresh={LINT: False, DOCS: True, ONE: True})
     ledger = Ledger()
 
     with pytest.raises(audit.CILabVerdictMismatch) as raised:
         audit.Audit(store, lab, ledger, SLUG).promotion_audit(HEAD)
 
-    fresh = Verdict("static", "static-v1-lint", False, False, 1.0)
+    fresh = Verdict("static", LINT, False, False, 1.0)
     assert raised.value.mismatches == (audit.Mismatch(cached, fresh, "grade-v1-cached", AUDIT_RUN),)
     assert str(raised.value) == "regraded verdicts differ from the cached ones for static"
     assert lab.graded == [(units[:3], Priority.PROMOTION)]
     assert client.smembers(DISABLED) == {"static"}
-    assert store.get("static", "static-v1-docs") is None
-    assert store.get("test", "test-v1-one") is not None
+    assert store.get("static", DOCS) is None
+    assert store.get("test", ONE) is not None
     task = f"lab-mismatch-static-{digest({'kind': 'static', 'run': AUDIT_RUN})[:16]}"
     description = (
         f"The lab audit run {AUDIT_RUN} regraded static units differently from their cached verdicts: "
-        "static-v1-lint cached passed by run grade-v1-cached, regraded failed. "
+        f"{LINT} cached passed by run grade-v1-cached, regraded failed. "
         "Reuse of static verdicts is off until a pull request enables the kind again "
         "with the fix for the input its key misses."
     )
@@ -136,10 +152,10 @@ def test_a_seeded_mismatch_disables_the_kind_files_a_ci_task_with_both_runs_and_
 
 @pytest.mark.feature("lab-reuse-audit")
 def test_matching_verdicts_file_nothing_and_return_the_audit_run(store: Store, client: fakeredis.FakeRedis) -> None:
-    _cache(store, "static", "static-v1-lint", True)
-    _cache(store, "test", "test-v1-one", False)
-    units = [_unit("static", "static-v1-lint", "grade-v1-cached"), _unit("test", "test-v1-one", "grade-v1-cached")]
-    lab = Lab(units=units, fresh={"static-v1-lint": True, "test-v1-one": False})
+    _cache(store, "static", LINT, True)
+    _cache(store, "test", ONE, False)
+    units = [_unit("static", LINT, "grade-v1-cached"), _unit("test", ONE, "grade-v1-cached")]
+    lab = Lab(units=units, fresh={LINT: True, ONE: False})
     ledger = Ledger()
 
     regrade = audit.Audit(store, lab, ledger, SLUG).promotion_audit(HEAD)
@@ -152,55 +168,55 @@ def test_matching_verdicts_file_nothing_and_return_the_audit_run(store: Store, c
 
 @pytest.mark.feature("lab-reuse-audit")
 def test_a_cached_flaky_pass_that_fails_again_agrees_and_a_cached_failure_that_passes_differs(store: Store) -> None:
-    _cache(store, "test", "test-v1-flaky", True, flaky=True)
-    cached = _cache(store, "mutant", "mutant-v1-red", False)
-    units = [_unit("test", "test-v1-flaky", "grade-v1-cached"), _unit("mutant", "mutant-v1-red", "grade-v1-cached")]
-    lab = Lab(units=units, fresh={"test-v1-flaky": False, "mutant-v1-red": True})
+    _cache(store, "test", FLAKY, True, flaky=True)
+    cached = _cache(store, "mutant", RED, False)
+    units = [_unit("test", FLAKY, "grade-v1-cached"), _unit("mutant", RED, "grade-v1-cached")]
+    lab = Lab(units=units, fresh={FLAKY: False, RED: True})
     ledger = Ledger()
 
     with pytest.raises(audit.CILabVerdictMismatch) as raised:
         audit.Audit(store, lab, ledger, SLUG).promotion_audit(HEAD)
 
-    fresh = Verdict("mutant", "mutant-v1-red", True, False, 1.0)
+    fresh = Verdict("mutant", RED, True, False, 1.0)
     assert raised.value.mismatches == (audit.Mismatch(cached, fresh, "grade-v1-cached", AUDIT_RUN),)
     assert [fields["title"] for _, fields, _ in ledger.added] == ["Lab verdict mismatch: mutant reuse disabled"]
-    assert "mutant-v1-red cached failed by run grade-v1-cached, regraded passed." in ledger.added[0][1]["description"]
+    assert f"{RED} cached failed by run grade-v1-cached, regraded passed." in ledger.added[0][1]["description"]
 
 
 @pytest.mark.feature("lab-reuse-audit")
 def test_units_without_a_cached_or_a_regraded_verdict_are_not_compared(store: Store) -> None:
-    _cache(store, "test", "test-v1-lost", True)
-    units = [_unit("test", "test-v1-unknown", "grade-v1-cached"), _unit("test", "test-v1-lost", "grade-v1-cached")]
-    lab = Lab(units=units, fresh={"test-v1-unknown": False})
+    _cache(store, "test", LOST, True)
+    units = [_unit("test", UNKNOWN, "grade-v1-cached"), _unit("test", LOST, "grade-v1-cached")]
+    lab = Lab(units=units, fresh={UNKNOWN: False})
     ledger = Ledger()
 
     regrade = audit.Audit(store, lab, ledger, SLUG).promotion_audit(HEAD)
 
-    assert [verdict.key for verdict in regrade.verdicts] == ["test-v1-unknown"]
+    assert [verdict.key for verdict in regrade.verdicts] == [UNKNOWN]
     assert ledger.added == []
 
 
 @pytest.mark.feature("lab-reuse-audit")
 def test_each_differing_kind_is_disabled_and_gets_its_own_task(store: Store, client: fakeredis.FakeRedis) -> None:
-    for key in ("test-v1-one", "test-v1-two", "test-v1-same"):
+    for key in (ONE, TWO, SAME):
         _cache(store, "test", key, True)
-    _cache(store, "static", "static-v1-lint", False)
+    _cache(store, "static", LINT, False)
     units = [
-        _unit("test", "test-v1-one", "grade-v1-first"),
-        _unit("test", "test-v1-two", "grade-v1-second"),
-        _unit("test", "test-v1-same", "grade-v1-second"),
-        _unit("static", "static-v1-lint", "grade-v1-third"),
+        _unit("test", ONE, "grade-v1-first"),
+        _unit("test", TWO, "grade-v1-second"),
+        _unit("test", SAME, "grade-v1-second"),
+        _unit("static", LINT, "grade-v1-third"),
     ]
-    fresh = {"test-v1-one": False, "test-v1-two": False, "test-v1-same": True, "static-v1-lint": True}
+    fresh = {ONE: False, TWO: False, SAME: True, LINT: True}
     ledger = Ledger()
 
     with pytest.raises(audit.CILabVerdictMismatch) as raised:
         audit.Audit(store, Lab(units=units, fresh=fresh), ledger, SLUG).promotion_audit(HEAD)
 
     assert [(m.cached.key, m.cached_run) for m in raised.value.mismatches] == [
-        ("test-v1-one", "grade-v1-first"),
-        ("test-v1-two", "grade-v1-second"),
-        ("static-v1-lint", "grade-v1-third"),
+        (ONE, "grade-v1-first"),
+        (TWO, "grade-v1-second"),
+        (LINT, "grade-v1-third"),
     ]
     assert str(raised.value) == "regraded verdicts differ from the cached ones for static, test"
     assert client.smembers(DISABLED) == {"static", "test"}
@@ -211,10 +227,10 @@ def test_each_differing_kind_is_disabled_and_gets_its_own_task(store: Store, cli
         f"The lab audit run {AUDIT_RUN} regraded test units differently from their cached verdicts: "
     )
     assert (
-        "test-v1-one cached passed by run grade-v1-first, regraded failed; "
-        "test-v1-two cached passed by run grade-v1-second, regraded failed. "
+        f"{ONE} cached passed by run grade-v1-first, regraded failed; "
+        f"{TWO} cached passed by run grade-v1-second, regraded failed. "
     ) in tests
-    assert "test-v1-same" not in tests
+    assert SAME not in tests
     assert ledger.added[0][1]["task"] != ledger.added[1][1]["task"]
 
 
@@ -274,10 +290,8 @@ def test_the_sample_is_deterministic_from_the_day_digest() -> None:
 
 @pytest.mark.feature("lab-reuse-audit")
 def test_the_same_unit_hit_on_two_heads_ranks_by_its_head() -> None:
-    first, second = _unit("test", "test-v1-one", "grade-v1-one"), _unit("test", "test-v1-one", "grade-v1-one", OTHER)
+    first, second = _unit("test", ONE, "grade-v1-one"), _unit("test", ONE, "grade-v1-one", OTHER)
     seed = digest({"day": DAY})
-    ranked = sorted(
-        [first, second], key=lambda hit: digest({"seed": seed, "unit": "test:test-v1-one", "head": hit.head})
-    )
+    ranked = sorted([first, second], key=lambda hit: digest({"seed": seed, "unit": f"test:{ONE}", "head": hit.head}))
 
     assert audit.chosen(DAY, [first, second], 0.5) == ranked[:1]
