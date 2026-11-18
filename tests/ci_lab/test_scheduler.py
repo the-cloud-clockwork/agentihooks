@@ -1841,6 +1841,7 @@ SUITE_DURATIONS = {FIRST_TEST: 40.0, OTHER_TEST: 40.0, SECOND_TEST: 1.0}
 PINNED = '[project]\nname = "suite"\n\n[project.optional-dependencies]\ndev = ["mutmut==3.6.0"]\n'
 FIRST = "scripts.alpha.x_first"
 SECOND = "scripts.alpha.x_second"
+GAMMA = "tests/test_gamma.py"
 
 
 @dataclass(frozen=True)
@@ -2001,6 +2002,26 @@ def test_a_merge_group_head_runs_every_batch_when_an_interaction_clause_holds(
     found = port.expander(tmp_path).expand(suite.request(Priority.QUEUE))
     every = _suite_units(suite, suite.head, SUITE_DURATIONS)
     assert found == scheduler.frame(Priority.QUEUE, _tree(suite, suite.head), suite.base, {"unit": every})
+
+
+@pytest.mark.feature("lab-scheduler-test-units")
+@pytest.mark.usefixtures("staticless")
+@pytest.mark.parametrize(("known", "picked"), [(True, slice(2, 3)), (False, slice(0, 3))], ids=["invalidated", "full"])
+def test_a_merge_group_entry_that_adds_a_test_file_the_manifest_lacks_runs_its_unit(
+    tmp_path: Path, known: bool, picked: slice
+) -> None:
+    suite = _suite(tmp_path, DELIVERY["lab"])
+    _git(suite.repo, "switch", "-q", "-c", "added", suite.base)
+    beta = "def test_second():\n    assert True\n"
+    head = _commit(suite.repo, {GAMMA: "def test_third():\n    pass\n", "tests/test_beta.py": beta})
+    found = Port(SUITE_MANIFEST, known).expander(tmp_path).expand(suite.request(Priority.QUEUE, head))
+    every = _suite_units(suite, head, SUITE_DURATIONS)
+    paths = filter(None, _git(suite.repo, "ls-tree", "-r", "-z", "--name-only", head).split("\0"))
+    blobs = {path: _blob(suite.repo, head, path) for path in paths}
+    chain = Toolchain("3.12", {}, blobs["uv.lock"], blobs["pyproject.toml"], "image", {})
+    added = expand_tests.unlisted_units(SUITE_MANIFEST, _contents(suite, head), [GAMMA], chain)
+    assert [unit.members for unit in added] == [(GAMMA,)]
+    assert found == scheduler.frame(Priority.QUEUE, _tree(suite, head), suite.base, {"unit": (*every[picked], *added)})
 
 
 @pytest.mark.feature("lab-scheduler-test-units")

@@ -131,8 +131,9 @@ def _durations(attempt: Attempt) -> dict[str, float]:
 
 
 def outside(opened: set[str], batch: Sequence[str], tree: Path, manifest: Mapping[str, Any]) -> tuple[str, ...]:
-    """Return the tree files the batch opened that neither its manifest records nor the inputs every test shares hold."""
-    listed = {path for test in batch for path in manifest["tests"][test]["files"]}
+    """Return the tree files the batch opened that neither its manifest records nor the inputs every test shares hold;
+    a batch member the manifest does not list, such as a test module path, records none."""
+    listed = {path for test in batch for path in manifest["tests"].get(test, {}).get("files", ())}
     found = (path for path in opened if path not in listed and not _shared(path) and (tree / path).is_file())
     return tuple(sorted(found))
 
