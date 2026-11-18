@@ -2,7 +2,7 @@ from pathlib import Path
 
 import yaml
 
-from tests.test_ci_smoke_image_reuse import build_command
+from tests.test_ci_smoke_image_reuse import assert_pulls_every_runtime_image, build_command
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -24,6 +24,7 @@ def test_container_proofs_share_one_runner_without_losing_commands() -> None:
         elif step.get("id") == "build" and build_command(step["run"]) == (
             "docker build -t local/agentihooks-swarm:clients-check --output type=image,compression=uncompressed ."
         ):
+            assert_pulls_every_runtime_image(step["run"])
             commands.append("docker build -t local/agentihooks-swarm:clients-check .")
         elif "run" in step:
             commands.append(step["run"])
