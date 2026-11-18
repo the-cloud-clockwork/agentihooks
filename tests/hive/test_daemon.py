@@ -1,5 +1,6 @@
 import json
 import threading
+import time
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
@@ -346,6 +347,12 @@ def _once(connection):
 def _quiet_quota(monkeypatch):
     monkeypatch.setattr(daemon.quota_refresh, "refresh", lambda environ: None)
     monkeypatch.setattr(daemon.quota_refresh, "start", lambda environ, worker, attempted_at: (None, attempted_at))
+
+
+def _polling_revision(root: Path | str) -> str:
+    """Return a fixed revision after the millisecond sleep the subprocess wait inside the real read makes."""
+    time.sleep(0.001)
+    return "loaded"
 
 
 def test_run_beats_immediately_then_waits_a_beat_less_the_wake_slack(monkeypatch):
@@ -1300,6 +1307,7 @@ def test_run_backoff_is_capped_and_restarts_after_a_good_beat_and_wait(monkeypat
     _quiet_quota(monkeypatch)
     monkeypatch.setattr(daemon, "hive_id", lambda: "local")
     monkeypatch.setattr(daemon, "beat", beat)
+    monkeypatch.setattr(daemon, "revision", _polling_revision)
     monkeypatch.setattr(daemon.time, "sleep", sleeps.append)
     monkeypatch.setattr(daemon, "scheduled_wait", wait)
     with pytest.raises(KeyboardInterrupt):
