@@ -17,6 +17,7 @@ import argparse
 import io
 import json
 import logging
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -36,19 +37,7 @@ import jsonschema
 import yaml
 
 from scripts import ci_select
-from scripts.ci_lab import (
-    budget,
-    contract,
-    control,
-    evidence,
-    executors,
-    expand_mutation,
-    expand_tests,
-    interaction,
-    lease_api,
-    metrics,
-    service,
-)
+from scripts.ci_lab import budget, contract, control, evidence, expand_tests, interaction, lease_api, metrics, service
 from scripts.ci_lab.capacity import Load
 from scripts.ci_lab.checks import Checks, Output
 from scripts.ci_lab.delivery import CLASSES, DELIVERY, DELIVERY_SCHEMA, load_runtime
@@ -859,8 +848,8 @@ class StoredManifests:
 
 
 class MirrorExpander:
-    """Units of a head read from a git mirror with ls-tree and show; only mutation units, whose builders read files,
-    use a temporary checkout."""
+    """Units of a head read from a git mirror with ls-tree and show. Only the mutation units use a temporary checkout
+    of the head, since their builders read files from disk."""
 
     def __init__(self, node: Path, root: Path, toolchain: Toolchain, manifests: Manifests, verdicts: Verdicts) -> None:
         self.node = node
@@ -970,6 +959,8 @@ class MirrorExpander:
         """Return one mutant unit per function the head changes against its base and one stats unit per test file
         present at the head that holds a test running such a function, built in a temporary checkout of the head;
         none when the head changes no measured Python line."""
+        from scripts.ci_lab import executors, expand_mutation
+
         with self._checkout(mirror, request.head) as root:
             changes = scope.changes_since(root, request.base, request.head)
             if not changes:
@@ -986,11 +977,12 @@ class MirrorExpander:
     def _checkout(self, mirror: Mirror, sha: str) -> Generator[Path]:
         """Yield a temporary worktree of a commit cut from the mirror's store under the mirror root, removed on exit."""
         folder = Path(tempfile.mkdtemp(dir=self.root))
-        self._git(mirror, "worktree", "add", str(folder), sha)
         try:
+            self._git(mirror, "worktree", "add", str(folder), sha)
             yield folder
         finally:
-            self._git(mirror, "worktree", "remove", str(folder))
+            shutil.rmtree(folder)
+            self._git(mirror, "worktree", "prune")
 
     def _group(self, mirror: Mirror, request: GradeRequest) -> interaction.Group:
         """Return a merge group head: its changes against the base and those of each entry, one first parent commit

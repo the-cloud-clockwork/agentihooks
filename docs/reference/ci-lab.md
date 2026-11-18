@@ -878,7 +878,7 @@ cache the worker's mutant runner reads before it runs the mutants.
 
 A mutant unit passes only when every mutant is killed, so a surviving mutant fails the `mutation`
 gate and the promotion grade folds red. A changed function no recorded test ran still gets its unit;
-with no covering test its mutants survive.
+the runner finds no test reaching it, grades its mutants `no tests` and fails the unit.
 
 ### Grades of a commit
 

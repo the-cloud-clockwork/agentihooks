@@ -1490,7 +1490,7 @@ def test_a_promotion_or_backfill_head_names_the_mutants_of_each_changed_function
     tmp_path: Path, tier: Priority, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     suite = _suite(tmp_path, DELIVERY["lab"])
-    source = ALPHA.replace("return 1", "return 4").replace("2", "3")
+    source = "def first():\n    return 4\n\n\ndef second():\n    return 3\n"
     head = _commit(suite.repo, {"scripts/alpha.py": source})
     checkouts: list[tuple[Path, str]] = []
     build = expand_mutation.mutant_units
@@ -1530,15 +1530,18 @@ def test_a_promotion_or_backfill_head_names_the_mutants_of_each_changed_function
 def test_a_promotion_head_keys_a_mutant_unit_by_the_tests_that_ran_its_function(tmp_path: Path) -> None:
     suite = _suite(tmp_path, DELIVERY["lab"])
     expander = Port(SUITE_MANIFEST).expander(tmp_path)
-    before = expander.expand(suite.request(Priority.PROMOTION)).gates["mutation"]
-    first = _commit(
+    _git(suite.repo, "switch", "-q", "-c", "other", suite.base)
+    changed = _commit(suite.repo, {"scripts/alpha.py": ALPHA.replace("return 1", "return 4")})
+    before = expander.expand(suite.request(Priority.PROMOTION, changed)).gates["mutation"]
+    other = _commit(suite.repo, {"tests/test_beta.py": "def test_second():\n    assert True\n"})
+    own = _commit(
         suite.repo, {"tests/test_alpha.py": "def test_first():\n    assert True\n\n\ndef test_other():\n    pass\n"}
     )
-    second = _commit(suite.repo, {"tests/test_beta.py": "def test_second():\n    assert True\n"})
-    assert expander.expand(suite.request(Priority.PROMOTION, first)).gates["mutation"] == before
-    after = expander.expand(suite.request(Priority.PROMOTION, second)).gates["mutation"]
+    assert [executors.function_of(unit.members[0]) for unit in before] == [FIRST]
+    assert expander.expand(suite.request(Priority.PROMOTION, other)).gates["mutation"] == before
+    after = expander.expand(suite.request(Priority.PROMOTION, own)).gates["mutation"]
     assert [unit.members for unit in after] == [unit.members for unit in before]
-    assert [unit.key for unit in after] != [unit.key for unit in before]
+    assert after[0].key != before[0].key
 
 
 @pytest.mark.feature("lab-scheduler-mutation-units")
