@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.993 · 2026-11-18
+
+### 2026-11-18 · b1c7d45a95d2 · #11817 · @agenticore-app
+
+**Ledger watch on a remote host reads the ledger in process instead of fetching an agent token**
+
+On a remote host such as a hive worker, `agentihooks ledger watch` now reads the ledger in process over the shared database instead of fetching an agent token and following the ledger server's stream. This avoids crashing with `NoPermissionError`, since the member Redis grant deliberately excludes the credential store and no safe path exists to widen it without exposing other members' credentials. Local hosts are unaffected and still use the ledger server's stream with credentials; polling is paced by the existing `--interval` sleep and returns only incremental changes after the first full read.
+
 ## v2.17.992 · 2026-11-18
 
 ### 2026-11-18 · 8a615d8d7897 · #11849 · @nestorcolt
