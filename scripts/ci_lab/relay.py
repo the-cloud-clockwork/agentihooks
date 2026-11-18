@@ -37,7 +37,6 @@ from scripts.events.bus import Consumer
 from scripts.github_app import GitHubAppAuth
 
 __all__ = [
-    "CONTENTS",
     "DURABLE",
     "PENDING",
     "PROTECTED",
@@ -61,7 +60,6 @@ __all__ = [
 PENDING = f"{PREFIX}relay"
 DURABLE = "ci-lab-relay"
 SUBJECT = f"{HEAD_SUBJECT}.{NOTICE}"
-CONTENTS = {"contents": "write"}
 PULLS = {"pull_requests": "write"}
 GITHUB = "https://github.com/"
 DEV = "dev"
@@ -229,7 +227,7 @@ class GitPusher:
     def __init__(self, mirror: Mirror, slug: str, auth: Token | None = None) -> None:
         self.mirror = mirror
         self.slug = slug
-        self.auth: Token = auth if auth is not None else GitHubAppAuth(f"github.com/{slug}", permissions=CONTENTS)
+        self.auth: Token = auth if auth is not None else GitHubAppAuth(f"github.com/{slug}")
 
     def push(self, sha: str, branch: str) -> None:
         """Make the sha present in the mirror's store and push it to the branch, never forced, with the token passed

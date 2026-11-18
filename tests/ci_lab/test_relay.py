@@ -266,6 +266,13 @@ def test_a_red_grade_relays_nothing_and_names_its_failed_units() -> None:
     assert actions == [f"held {HEAD} for {BRANCH}: grade run-7 is failure, failed units tests:batch-2"]
 
 
+def test_a_red_grade_names_every_failed_unit_separated_by_a_comma() -> None:
+    state = grade("failure", outcome=FAILED)
+    state.units["static:ruff-1"].outcome = FAILED
+    actions = relay.relay(state, BRANCH, Calls().ports(), LAB)
+    assert actions == [f"held {HEAD} for {BRANCH}: grade run-7 is failure, failed units static:ruff-1, tests:batch-2"]
+
+
 def test_a_failed_grade_without_a_failed_unit_says_so() -> None:
     calls = Calls()
     actions = relay.relay(grade("failure"), BRANCH, calls.ports(), LAB)
@@ -531,7 +538,7 @@ def test_a_refused_push_raises_relay_refused_with_git_s_reason(monkeypatch: pyte
 
 
 def test_the_push_token_asks_only_contents_write(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    minted = mint(monkeypatch, relay.CONTENTS)
+    minted = mint(monkeypatch, {"contents": "write"})
     monkeypatch.setattr(relay.subprocess, "run", Mock(return_value=subprocess.CompletedProcess([], 0, "", "")))
     relay.GitPusher(cast(Mirror, Mock(spec=Mirror, store=tmp_path)), "example/repo").push(HEAD, BRANCH)
     assert minted.call_args.kwargs["json"] == {"repositories": ["repo"], "permissions": {"contents": "write"}}
