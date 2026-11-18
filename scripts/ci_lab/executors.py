@@ -220,7 +220,7 @@ def _trampolined(tree: Path) -> None:
     """Rewrite every Python file under the tree's mutmut source paths behind its trampolines."""
     roots: list[str] = tomllib.loads((tree / PYPROJECT).read_text())["tool"]["mutmut"]["source_paths"]
     for path in _tracked(tree):
-        if path.startswith(tuple(roots)):
+        if any(Path(path).is_relative_to(root) for root in roots):
             run_mutation.trampoline(tree, path)
 
 

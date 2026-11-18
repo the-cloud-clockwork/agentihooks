@@ -265,7 +265,9 @@ def mutation_tree(tmp_path: Path) -> Path:
         tmp_path,
         "mutation",
         {
-            "pyproject.toml": '[tool.mutmut]\nsource_paths = ["scripts/"]\n',
+            "pyproject.toml": '[tool.mutmut]\nsource_paths = ["scripts/", "hooks/pkg"]\n',
+            "hooks/pkg/gamma.py": "",
+            "hooks/pkgold/delta.py": "",
             "uv.lock": "lock-m",
             "scripts/alpha.py": "def first():\n    return 1\n",
             "scripts/pkg/__init__.py": "",
@@ -308,7 +310,11 @@ def test_mutation_runs_a_stats_unit_with_its_tree_as_root_and_the_stats_cache(
     finished = executors.mutation(pod, mutation_settings(tmp_path), lease("stats", "k1", ("tests/test_alpha.py",)))
 
     assert venv.calls == [(hashlib.sha256(b"lock-m").hexdigest(), mutation_tree, pod.root / "venvs")]
-    assert trampolines.calls == [(mutation_tree, "scripts/alpha.py"), (mutation_tree, "scripts/pkg/__init__.py")]
+    assert trampolines.calls == [
+        (mutation_tree, "hooks/pkg/gamma.py"),
+        (mutation_tree, "scripts/alpha.py"),
+        (mutation_tree, "scripts/pkg/__init__.py"),
+    ]
     assert box.requests == [
         {
             "kind": "stats",
