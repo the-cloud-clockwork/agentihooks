@@ -822,7 +822,7 @@ class StoredManifests:
     the newest `MANIFEST_DEPTH` commits with none stored is fetched from its dev push Tests run and stored once."""
 
     objects: Objects
-    fetch: Fetch
+    fetch: Fetch = field(default_factory=Fetcher)
 
     def __call__(self, repo: str, commits: Sequence[str]) -> dict[str, Any] | None:
         """Return the manifest of the first commit that has one stored or, among the newest, fetched; None when none
@@ -958,7 +958,7 @@ def build(environ: Mapping[str, str], client: Any, objects: Objects, consumer: C
     """Return the service's scheduler over its clients, trusting the runner trust list of the repository's dev."""
     toolchain = Toolchain(sys.version.split()[0], {}, "", "", environ.get(IMAGE, ""), {})
     node, root = Path(environ[contract.GIT_MIRROR]), Path(environ[MIRROR_STORE])
-    expander = MirrorExpander(node, root, toolchain, StoredManifests(objects, Fetcher()), Store(client, objects).get)
+    expander = MirrorExpander(node, root, toolchain, StoredManifests(objects), Store(client, objects).get)
     checks: dict[str, Poster] = {}
 
     def poster(repo: str) -> Poster:
