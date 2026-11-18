@@ -107,18 +107,15 @@ def test_a_step_ready_beside_more_lock_takers_than_workers_starts_while_they_wai
     assert {record.name: record.outcome for record in rows} == {step.name: engine.OK for step in steps}
 
 
-@pytest.mark.feature("placement-lock-steps-on-one-placement-worker")
 def test_lock_taking_steps_of_a_pass_run_one_at_a_time_on_its_one_placement_worker() -> None:
     guard = Lock()
     running: list[int] = [0]
     peak: list[int] = [0]
-    threads: list[str] = []
 
     def placed(ctx: Context) -> Result:
         with guard:
             running[0] += 1
             peak[0] = max(peak[0], running[0])
-            threads.append(current_thread().name)
         sleep(0.1)
         with guard:
             running[0] -= 1
@@ -129,30 +126,47 @@ def test_lock_taking_steps_of_a_pass_run_one_at_a_time_on_its_one_placement_work
         rows = engine.run_group(GROUP, _ctx(), steps)
 
     assert peak == [1]
-    assert {name.split("_")[0] for name in threads} == {"tick-placing"}
     assert [record.outcome for record in rows] == [engine.OK] * 3
 
 
-@pytest.mark.feature("placement-lock-steps-on-one-placement-worker")
 def test_a_lock_taking_step_on_the_slow_lane_runs_on_the_placement_worker() -> None:
-    threads: list[str] = []
+    order: list[str] = []
+    gate, started, critical = Event(), Event(), Event()
+
+    def slow(ctx: Context) -> Result:
+        order.append("slow started")
+        started.set()
+        gate.wait(3)
+        order.append("slow ended")
+        return Result()
 
     def placed(ctx: Context) -> Result:
-        threads.append(current_thread().name)
+        order.append("critical ran")
+        critical.set()
+        return Result()
+
+    def free(ctx: Context) -> Result:
+        critical.wait(0.5)
+        gate.set()
         return Result()
 
     later: list[tuple[engine.StepRecord, ...]] = []
-    with pool.running(workers=2, critical_s=4.0, slow_s=4.0):
+    with pool.running(workers=2, critical_s=6.0, slow_s=6.0):
         engine.run_group(
             GROUP,
             _ctx(),
-            (Step("placing slow", placed, GROUP, lane=Lane("slow"), placing=True),),
+            (Step("placing slow", slow, GROUP, lane=Lane("slow"), placing=True),),
             finished=later.append,
         )
-        engine.run_group("plain", _ctx(), (Step("plain step", _quick, "plain"),))
+        assert started.wait(3)
+        rows = engine.run_group(
+            "plain",
+            _ctx(),
+            (Step("placing critical", placed, "plain", placing=True), Step("plain free", free, "plain")),
+        )
 
-    assert [name.split("_")[0] for name in threads] == ["tick-placing"]
-    assert [record.outcome for row in later for record in row] == [engine.OK]
+    assert order == ["slow started", "slow ended", "critical ran"]
+    assert [record.outcome for row in (*later, rows) for record in row] == [engine.OK] * 3
 
 
 def test_a_step_runs_on_the_placement_worker_only_when_it_declares_the_placement_lock() -> None:
@@ -165,7 +179,7 @@ def test_a_pass_runs_an_ordinary_step_on_its_step_workers_and_shuts_its_placemen
     with pool.running(workers=2) as found:
         assert found.executor("plain step", False) is found.steps
         assert found.executor("plain step", True) is found.placer
-        assert found.placer.submit(lambda: 1).result() == 1
+        assert found.placer.submit(lambda: current_thread().name).result().startswith("tick-placing_")
     with pytest.raises(RuntimeError):
         found.placer.submit(lambda: 1)
 
