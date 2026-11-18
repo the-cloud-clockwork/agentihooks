@@ -6325,6 +6325,18 @@
       ]
     },
     {
+      "id": "codex-opening-provider-failure",
+      "origin": "regression",
+      "ordered_at": "2026-11-18",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2535",
+      "behaviour": "An opening Codex turn that completes failed with a provider error other than an account refusal or a capacity error, such as model not found, fails the launch at once with class opening_failed and fails its profile binding report naming that error, so the canary wait ends within seconds instead of timing out. A turn that completes, fails with no error, is interrupted or starts answering keeps the launch connected and the canary waiting.",
+      "seam": "scripts.codex_session.supervisor.launch opening turn read through scripts.profiles.binding.wait",
+      "tests": [
+        "tests/codex_session/test_supervisor.py::test_a_failed_opening_turn_fails_the_canary_at_once_naming_the_provider_error",
+        "tests/codex_session/test_supervisor.py::test_a_healthy_opening_turn_leaves_the_canary_waiting"
+      ]
+    },
+    {
       "id": "launch-canary-fails-on-agent-exit",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-binding-wait-launcher-exit",

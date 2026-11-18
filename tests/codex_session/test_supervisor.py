@@ -1048,10 +1048,81 @@ def test_a_refused_opening_fails_the_canary_before_the_pump_starts(
             binding.wait(report, 0.1)
 
 
+MODEL_NOT_FOUND = (
+    "unexpected status 404 Not Found: model_not_found: The model `opus` does not exist or you do not have access to it."
+)
+STREAM_LOST = "stream disconnected before completion"
+
+
+@pytest.mark.feature("codex-opening-provider-failure")
+@pytest.mark.parametrize(
+    ("message", "info"),
+    [(MODEL_NOT_FOUND, {"httpConnectionFailed": {"httpStatusCode": 404}}), (STREAM_LOST, None)],
+)
+@pytest.mark.parametrize("reported", [True, False])
+def test_a_failed_opening_turn_fails_the_canary_at_once_naming_the_provider_error(
+    store: RedisStore,
+    server: Server,
+    clock: Clock,
+    root: Path,
+    tmp_path: Path,
+    message: str,
+    info: dict | None,
+    reported: bool,
+) -> None:
+    from scripts.profiles import binding
+
+    event = completed("failed", message)
+    if info:
+        event["params"]["turn"]["error"]["codexErrorInfo"] = info
+    server.turn_events = [[event], [completed("failed", CAPACITY)]]
+    spec, report = reported_spec(store, server, tmp_path)
+    if not reported:
+        spec = replace(spec, environ={key: value for key, value in spec.environ.items() if key != binding.REPORT})
+
+    failure = failed(store, server, clock, root, spec, "opening_failed")
+
+    reason = f"the opening Codex turn failed on a provider error: {message}"
+    assert str(failure) == reason
+    assert len(server.params("turn/start")) == 1
+    record = only_record(store)
+    assert (record.state, record.last_error_class) == (FAILED, "opening_failed")
+    assert server.processes[-1].poll() is not None
+    if reported:
+        assert json.loads(report.read_text())["state"] == "failed"
+        assert json.loads(report.read_text())["reason"] == reason
+        with pytest.raises(ValueError) as refused:
+            binding.wait(report, 0.1)
+        assert str(refused.value) == reason
+
+
+@pytest.mark.feature("codex-opening-provider-failure")
 @pytest.mark.parametrize(
     "events",
     [
-        [completed("failed", "stream disconnected before completion")],
+        [completed("completed")],
+        [completed("failed")],
+        [completed("interrupted", "the turn was interrupted")],
+        [item("reasoning")],
+        [item("agentMessage"), completed("failed", MODEL_NOT_FOUND)],
+    ],
+)
+def test_a_healthy_opening_turn_leaves_the_canary_waiting(
+    store: RedisStore, server: Server, clock: Clock, root: Path, tmp_path: Path, events: list[dict]
+) -> None:
+    server.turn_events = [events, [completed("failed", CAPACITY)]]
+    spec, report = reported_spec(store, server, tmp_path)
+
+    started = supervisor.launch(store, spec, deps(server, clock, root))
+
+    assert len(server.params("turn/start")) == 1
+    assert (started.record.state, started.record.active_turn_id) == (CONNECTED, "turn-opening")
+    assert json.loads(report.read_text())["state"] == "pending"
+
+
+@pytest.mark.parametrize(
+    "events",
+    [
         [completed("completed")],
         [completed("failed")],
         [item("agentMessage"), completed("failed", CAPACITY)],
