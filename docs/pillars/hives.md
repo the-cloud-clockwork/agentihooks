@@ -1986,24 +1986,30 @@ agent's conversation.
 An `execution.exited` for a dead pane reaches the reactor two ways:
 
 - the hive publishes it when its execution report shows the agent's pane `exited` or `dead`;
-- the hub's `reconciler` hands it to the reactor on each five minute pass while the hive's latest report still shows
-  the pane ended, or no longer lists it.
+- the hub's `reconciler` calls the reactor's handler directly on each five minute pass while the hive's latest report
+  shows the pane ended, no longer lists the agent's recorded pane or, for a hub admitted agent past its startup
+  window, no longer lists the agent at all.
 
-The reactor first matches the exit to the spoke claim and the execution record, and holds it while an outage holds
-the agent. For an execution whose spoke claim is still `started`, it then orders a resume only when every one of
-these holds:
+Other exits carry a `reason`: the hub's `hive-loss` reactor publishes `hive-lost` and the reconciler `lost` for an
+execution on a lost hive, and the hive publishes `stopped` after it honors an execution stop.
+
+The reactor first matches the exit to the spoke claim and the execution record. It holds the exit while an outage
+holds the agent or the tick's outage recovery of the agent is still pending (see
+[Outage holds and recovery](swarm.md#outage-holds-and-recovery)). For an execution whose spoke claim is still
+`started`, it then orders a resume only when every one of these holds:
 
 | Check | When it fails |
 |---|---|
 | The agent's hive is known: the agent record's hive, else the host its runtime target names. | No resume. |
-| The exit carries no `reason`. A lost hive exit (`lost`, `hive-lost`) and an execution stop exit (`stopped`) carry one. | No resume. |
+| The exit carries no `reason`. | No resume. |
 | No deliberate exit is recorded for the agent. `agentihooks terminate-agent` records one; the reactor consumes it here. | No resume. |
 | The execution has had fewer than three resumes (`RECOVERY_ATTEMPTS`), counted in `resumes` on its spoke claim. | No resume. |
 | The swarm is not `stopped` or `stopping`. | No resume. |
 | The task row's claim generation is the one the execution started under. | No resume. |
 | The tick's dead resume gate holds: no handoff was submitted for the task, the agent recorded a conversation id, its conversation is under the swarm's compact limit and has not ended after each of its last three tick resumes, and the agent still holds its record, its seat as occupant, its task row in `claimed` or `pr` naming it, and its task claim. | No resume. |
 
-An exit that orders no resume takes the normal exit path: the reactor removes the agent record, releases the launch
+The tick counts only its own resumes toward that gate; the hub's resumes count only in the spoke claim's
+`resumes`. An exit that orders no resume takes the normal exit path: the reactor removes the agent record, releases the launch
 slot and the claim, and returns a task the agent still holds to `open` with no claimant, as in
 [How the hive honors the stop](#how-the-hive-honors-the-stop). The next offer goes to a fresh agent.
 
@@ -2038,7 +2044,8 @@ The notice appears in the ledger's notifications panel:
 Starting a fresh agent after engineer@<code>-<n> ended because resume failed: <failure>.
 ```
 
-After the third resume of the same execution, the next death drops the agent without a notice and its task reopens.
+Each death gets one resume order, and the exit of a resumed pane is judged as a new death. After the third resume
+of the same execution, the next death drops the agent without a notice and its task reopens.
 
 #### How the hive runs the order
 
@@ -2052,8 +2059,9 @@ command order runs inside the heartbeat. A resume order runs in its own process,
 3. A marker that expires with no answer, as after a crashed process, lets a later heartbeat start another process.
    When a fourth start comes due, the heartbeat stores the answer `failed` with `resume never answered` instead.
 4. The order stays on the command stream until its receipt holds an answer; the next heartbeat then deletes it.
-5. The first answer stored is final: a late answer never overwrites it. An exception before or during the resume
-   stores `failed` with `error: <exception type>`.
+5. The first answer stored is final: a late answer never overwrites it. An exception while the resume runs stores
+   `failed` with `error: <exception type>`. A process that fails to start, or fails before it opens its Redis
+   client, stores no answer: its marker expires and a later heartbeat starts another process, as in step 3.
 
 The hive keeps every resume order process it starts, so a restart on a moved checkout waits for a resume in flight
 (see [Adding a machine to a hive](#adding-a-machine-to-a-hive)).
@@ -2064,7 +2072,7 @@ Inside the process the hive:
    that it runs on this hive (the host its runtime target names, else its record's hive), and that the agent still
    holds its task claim. Any difference answers `failed` with `identity`.
 2. Reaps any process still running under the agent's name. A failed reap answers `failed` with the runtime's detail,
-   such as `a process carrying it still runs`.
+   such as `a process carrying <agent> still runs`.
 3. Reopens the agent's conversation in its seat through the runtime's native resume, the same herdr resume the tick
    uses. The swarm's repository is passed as the origin the swarm recorded at its switch to `events`
    (`repo_origin`), when it has one, instead of the workstation path. A refused resume answers `failed` with the
@@ -2085,8 +2093,8 @@ The hub and every hive need a release carrying pull request #11246:
 
 - A hub on an older release orders no resume; every dead hub started agent is dropped and its task reopens.
 - A hive on an older release cannot parse a resume order and deletes it unanswered, so the hub waits the full 30
-  minutes before it hands the task to a fresh agent. An order leaves out the launch time and pane when it carries
-  neither, so older hives still parse every other command order.
+  minutes before it hands the task to a fresh agent. An order leaves out its launch time and its pane when each is
+  unset, so older hives still parse every other command order, which carries neither.
 
 A hive process loads its code when it starts: restart `agentihooks-hive` with `systemctl --user restart
 agentihooks-hive` on a workstation or VM, or roll the hive pods on Kubernetes.
@@ -2116,7 +2124,7 @@ this path.
 | Notice `resume failed: its hive never answered` | The hive's release and its service | The hive predates pull request #11246, or its service is not running. Upgrade or restart it as in [Upgrading for the hub resume](#upgrading-for-the-hub-resume). |
 | Notice `resume failed: resume never answered` | The hive's service log | Three resume processes started and none stored an answer. Read the hive log for the process's error. |
 | Notice `resume failed: identity` | The task's claimant and the agent record | The record or claim changed between the hub's order and the hive's resume: a successor took the task or a newer launch replaced the record. Expected: the old agent is dropped, and the task stays with its successor or reopens for a fresh agent. |
-| Notice `resume failed: a process carrying it still runs` | herdr on that hive | The old session could not be reaped. Close it on the hive; the next death of a later agent resumes normally. |
+| Notice `resume failed: a process carrying <agent> still runs` | herdr on that hive | The old session could not be reaped. Close it on the hive; the next death of a later agent resumes normally. |
 | Notice `resume failed: <runtime detail>` or `resume failed: error: <exception type>` | The detail it names | Fix the cause it names: a missing conversation, the hive's checkout of the repository, or the error type in the hive log. |
 
 ### Running a spoke

@@ -9054,11 +9054,12 @@ input and permission prompts are left alone. A pane still showing the provider e
 resume attempts on separate ticks before normal idle rules apply. An agent whose process
 died reopens its own conversation in the same seat; if that cannot resume, the handoff supplies its
 successor's context. On the `events` engine the hub orders that resume from the agent's hive; see
-[Resuming a dead agent the hub started](hives.md#resuming-a-dead-agent-the-hub-started). An agent stopped on purpose with `agentihooks terminate-agent` is never reopened:
-the command records a deliberate exit for its swarm agent, and the tick drops that agent, refunds its
-claim and returns its task to open for the next claim under the lane cap. Recovery preserves the
-existing task claim. A changed claim owner or execution generation, expired claim lease or changed seat
-occupant fences out the old agent, so recovery cannot resume work already taken by a successor.
+[Resuming a dead agent the hub started](hives.md#resuming-a-dead-agent-the-hub-started). An agent stopped
+on purpose with `agentihooks terminate-agent` is never reopened: the command records a deliberate exit for its
+swarm agent, and the tick drops that agent, refunds its claim and returns its task to open for the next claim
+under the lane cap. Recovery preserves the existing task claim. A changed claim owner or execution generation,
+expired claim lease or changed seat occupant fences out the old agent, so recovery cannot resume work already
+taken by a successor.
 
 ### Staged compatibility before admission
 
