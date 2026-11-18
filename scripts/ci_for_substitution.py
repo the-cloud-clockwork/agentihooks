@@ -3,7 +3,6 @@
 import argparse
 import re
 import subprocess
-import textwrap
 from collections.abc import Iterator, Sequence
 from pathlib import Path, PurePosixPath
 
@@ -49,7 +48,7 @@ def findings(source: bytes) -> list[int]:
 
 
 def blank_expressions(text: str) -> str:
-    """Overwrite each GitHub expression with underscores, keeping its newlines, so the shell parser reads a plain word."""
+    """Overwrite each GitHub expression with underscores, keeping its newlines, so the shell parser reads one word."""
     return EXPRESSION.sub(lambda match: re.sub(r"[^\n]", "_", match.group()), text)
 
 
@@ -84,12 +83,12 @@ def _run_blocks(node: yaml.Node | None, shell: str) -> Iterator[yaml.ScalarNode]
 def _run_lines(lines: list[str], run: yaml.ScalarNode) -> list[int]:
     """List the file line of each refused loop in one run text.
 
-    A literal or folded block is graded from its own lines in the file, so each loop names its line; a plain or quoted
-    run text, whose lines YAML may fold or escape, names its first line.
+    A literal or folded block is graded from its own lines in the file, indentation and all, so each loop names its
+    line; a plain or quoted run text, whose lines YAML may fold or escape, names its first line.
     """
     block = run.style in ("|", ">")
     end = run.end_mark.line + bool(run.end_mark.column)
-    body = textwrap.dedent("\n".join(lines[run.start_mark.line + 1 : end])) if block else run.value
+    body = "\n".join(lines[run.start_mark.line + 1 : end]) if block else run.value
     return [run.start_mark.line + 1 + (line if block else 0) for line in findings(blank_expressions(body).encode())]
 
 
@@ -102,13 +101,13 @@ def workflow_findings(text: str) -> list[int]:
 
 
 def _is_workflow_or_action(name: str) -> bool:
-    """Tell whether a tracked file is a workflow under .github/workflows or an action definition, whose run steps count."""
+    """Tell whether a tracked file is a workflow under .github/workflows or an action definition with run steps."""
     path = PurePosixPath(name)
     return path.name in ACTIONS or (path.parent == WORKFLOWS and path.suffix in (".yml", ".yaml"))
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Grade every tracked shell file but the red fixture and every workflow and action file, and report each refusal."""
+    """Grade every tracked shell file but the red fixture and every workflow and action, and report each refusal."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
     root: Path = parser.parse_args(argv).root
