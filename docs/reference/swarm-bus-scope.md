@@ -216,6 +216,57 @@ hub: refused a release in swarm rig: slot request names hive 'two' but the sendi
 A member can therefore neither take a slot in another hive's name nor release or renew another hive's hold. Holds
 already in the buckets are unchanged by a refused request.
 
+### How the hub serves requests
+
+nats-py runs the callbacks of one subscription one after another, so a handler run in the callback would hold every
+later request on `slots.*.*` behind a slow one. The NATS bus therefore hands each request to its own pool of
+`SERVE_WORKERS` threads, 8, and returns at once. A slow admission holds one thread while the other seven keep
+answering takes, heartbeats and releases. Once all eight are busy, further requests wait in the pool's queue in the
+order they arrived. The pool belongs to the bus, and the hub runner serves `slots.*.*` and its `exits.*.*` subscription
+(queue group `hub-exits`) from one bus, so slot and exit requests share the same eight threads.
+
+The hub records when each request arrived. When a thread picks the request up, `NatsBus.serve` measures how long it
+waited in the queue and compares that with the `wait_ms` its caller passed:
+
+| Subscription | `wait_ms` | A request that waited `wait_ms` or longer |
+|---|---|---|
+| `slots.*.*`, queue group `hub-slots` | `account_slots.REQUEST_TIMEOUT_MS`, 10 000 ms: how long a hive waits for a slot answer | Dropped: its handler never runs, so it claims no account slot and no task, and nothing is sent back |
+| `exits.*.*`, queue group `hub-exits` | None | Never dropped; it runs whenever a thread frees |
+
+The hive has stopped waiting by the time the hub drops a request. Its own call has already raised
+`TimeoutError: request to 'slots.<swarm>.<hive>' timed out after 10000 ms`. For `admit` the spoke keeps the offer as
+its pending admission and asks the hub again on its next poll; that ask runs as a new request, so the dropped one
+leaves no claim behind for it to find. The hub prints one line for each drop to its standard error, which is the hub
+container log:
+
+```text
+bus: dropped a request on 'slots.rig.one' after it waited 10412 ms in the serve queue, past its requester's 10000 ms wait
+```
+
+The check runs once, when a thread picks the request up. A request picked up before its wait ran out runs to the
+end, even when it finishes after the hive gave up on it.
+
+A request that is not dropped runs with its queue wait in `scripts.events.bus.SERVE_WAITED_MS`, a context variable
+the bus sets for the length of the handler call and that reads 0 everywhere else. Lane admission uses it to time its
+answer budget from when the hub received the request. The budget, `ANSWER_MS` in `scripts.hub.admission`, is 8 000 ms,
+2 000 ms short of the hive's wait. An `admit` that finishes past it keeps its claim, so a hive still waiting gets the
+admission and a hive that gave up gets the same admission when it asks again for that offer. The hub logs:
+
+```text
+hub: events admission swarm=rig task=t1 hive=one late: finished after 9120 ms, past the 8000 ms answer budget, claim kept release=3 held=1 stopped=0 snapshot=12 withdrawal=0 placement=40 cap=2 turn=0 full=1 claim=30 seat=18 execution=9 ledger=4
+```
+
+`finished after` counts from receipt, queue wait included. The step timings after `claim kept` count from when the
+handler started, so their sum falls short of `finished after` by at least the time the request spent in the queue. In this
+example the request queued for 9 000 ms of its 9 120 ms. A late line with small steps therefore points at a full serve
+pool, not at a slow admission step.
+
+`NatsBus.close` returns without waiting for the handlers still running and cancels every queued request: those never
+start and are never answered, and their hives time out.
+
+The memory bus, `AGENTIHOOKS_BUS=memory`, runs each handler on the requesting thread with no queue. It accepts
+`wait_ms` and ignores it, never drops a request, and leaves `SERVE_WAITED_MS` at 0.
+
 ### Limits
 
 - The binding rests on the NATS publish grant. Any credential allowed `slots.*.*`, such as the hub or controller
@@ -224,6 +275,10 @@ already in the buckets are unchanged by a refused request.
 - A hive name must be one NATS subject token: no `.`, `*`, `>` or whitespace. `asker` raises
   `Unavailable: hive '<name>' cannot ask for account slots (invalid event subject token '<name>')` for any other
   name, and `member_claims` refuses to render a scoped grant without a member id.
+- The hub drops a slot request against a fixed wait, `account_slots.REQUEST_TIMEOUT_MS`, not the requester's own
+  timeout. The launch path asks with that default. A caller that builds `asker(bus, swarm, hive, timeout_ms)` with a
+  shorter timeout gives up sooner, and the hub still runs its request when a thread picks it up within 10 000 ms.
+- The pool size, `SERVE_WORKERS`, and both waits are constants in code; no setting changes them.
 - Older members asked on `swarm.<swarm>.slots`. The hub no longer serves it and member grants no longer carry it,
   so a member running code from before the change gets no responders until it updates and runs
   `agentihooks hive refresh`.
@@ -387,7 +442,9 @@ missing hive user is accepted only in operator mode, where the values file has n
 | A launch fails with `slot request names hive '<a>' but the sending credential is bound to hive '<b>'`, and the hub log shows `hub: refused a <op> in swarm <swarm>: ...` | The request body names a hive other than the one in its subject: a caller built `asker` and `Remote` with different hives | Pass the member's own hive to both; the launch path does this from `AGENTIHOOKS_SLOT_HIVE` |
 | `TimeoutError: no responders for 'slots.<swarm>.<hive>'` on a member | No hub serves that subject | Check the hub is running and serving the swarm's account slots |
 | `TimeoutError: request to 'slots.<swarm>.<hive>' timed out after <n> ms` on a member that also logs `permissions violation for publish` | The member's credential does not grant that subject, because the hive is not the one it was minted for or the swarm is not in its `member_swarms` entry, so the server drops the request | Ask as the member's own hive and swarm; `agentihooks hive refresh` the member |
-| `TimeoutError: request to 'slots.<swarm>.<hive>' timed out after <n> ms` on a member with no permissions violation | The hub most likely answered after the timeout | Check the hub is running and not overloaded |
+| `TimeoutError: request to 'slots.<swarm>.<hive>' timed out after <n> ms` on a member with no permissions violation | The hub most likely answered after the timeout, or dropped the request from its serve queue | Check the hub is running and not overloaded; read its log for the `bus: dropped a request` and `late:` lines below |
+| Hub log shows `bus: dropped a request on 'slots.<swarm>.<hive>' after it waited <n> ms in the serve queue, past its requester's 10000 ms wait` | All eight serve threads stayed busy for the hive's whole wait, so the request reached a thread after the hive gave up; see [How the hub serves requests](#how-the-hub-serves-requests) | Nothing to undo: the request claimed nothing, and for an `admit` the spoke asks again on its next poll. Find what holds the threads in the `late:` admission lines and their step timings |
+| Hub log shows `hub: events admission ... late: finished after <n> ms` with step timings that add up to far less than `<n>` | The admission waited in the serve queue before it started; `finished after` counts that wait, the step timings do not | Treat it as a full serve pool: look for slow admissions on other threads, not for a slow step in this one |
 | `TimeoutError: nats: the server at <url> did not finish the connect handshake within <n> s` on a member | The NATS server accepted the connection but did not finish the handshake within the first connect bound | Check the NATS server is running and not overloaded |
 | `no responders for 'swarm.<swarm>.slots'` | The member runs code from before the slot subject moved to `slots.<swarm>.<hive>` | Update the member to current code and run `agentihooks hive refresh` |
 | `Unavailable: hive '<name>' cannot ask for account slots (invalid event subject token '<name>')` | The hive name holds `.`, `*`, `>` or whitespace | Use a hive name that is one subject token |
