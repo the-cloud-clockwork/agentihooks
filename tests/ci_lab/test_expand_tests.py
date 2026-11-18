@@ -234,9 +234,31 @@ def test_unlisted_hashes_each_test_module_that_holds_no_manifest_test_with_its_c
         "tests/other/conftest.py": b"",
     }
     tree = {path: text.encode() for path, text in FILES.items()} | added | others
-    expected = {**added, **{path: FILES[path].encode() for path in ("tests/helpers.py", "tests/conftest.py")}}
+    outside = ("pyproject.toml", "uv.lock", "docs/guide.md", "tool.py", ".github/workflows/test.yml")
     assert expand_tests.unlisted_test_hashes(MANIFEST, tree) == {
-        path: hashlib.sha256(text).hexdigest() for path, text in expected.items()
+        path: hashlib.sha256(text).hexdigest() for path, text in tree.items() if path not in outside
+    }
+
+
+@pytest.mark.feature("lab-mutant-unit-unlisted-reads")
+def test_unlisted_hashes_every_measured_and_test_tree_file_only_while_a_test_module_holds_no_manifest_test() -> None:
+    tree = {path: text.encode() for path, text in FILES.items()}
+    assert expand_tests.unlisted_test_hashes(MANIFEST, tree) == {}
+    tree["tests/test_new.py"] = b"def test_new():\n    pass\n"
+    trees = [
+        "scripts/alpha.py",
+        "scripts/data.json",
+        "hooks/beta.py",
+        "tests/conftest.py",
+        "tests/helpers.py",
+        "tests/test_alpha.py",
+        "tests/test_beta.py",
+        "tests/test_group.py",
+        "tests/fixtures/sample.txt",
+        "tests/test_new.py",
+    ]
+    assert expand_tests.unlisted_test_hashes(MANIFEST, tree) == {
+        path: hashlib.sha256(tree[path]).hexdigest() for path in trees
     }
 
 
