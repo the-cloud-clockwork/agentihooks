@@ -4511,6 +4511,18 @@
       ]
     },
     {
+      "id": "queue-sweep-keeps-merged-group-runs",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-merge-group-cancellations",
+      "behaviour": "A merge group Tests run's select step cancels each older merge group run of the same pull request and each older run whose queue branch is gone, but keeps and logs a run whose head commit is an ancestor of this group's base commit in the full history base checkout, because GitHub deletes a group's branch when the group merges and cancelling that run turned a green merged run's conclusion into cancelled.",
+      "seam": "The Cancel superseded and dead merge queue runs step of the Tests workflow select job",
+      "tests": [
+        "tests/test_ci_queue_supersede.py::test_a_run_whose_group_merged_is_kept_though_its_queue_branch_is_gone",
+        "tests/test_ci_queue_supersede.py::test_older_runs_of_the_same_pull_request_and_older_runs_of_gone_branches_are_cancelled",
+        "tests/test_ci_queue_supersede.py::test_the_sweep_reads_the_full_base_history_checked_out_before_it"
+      ]
+    },
+    {
       "id": "ledger-artifacts-panel",
       "origin": "inventory",
       "behaviour": "The artifacts panel lists every artifact newest first, renders Markdown, JSON and SVG without running scripts, and offers delete and trash restore.",

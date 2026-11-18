@@ -1,0 +1,35 @@
+name: fixture
+on: merge_group
+jobs:
+  select:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cancel dead queue runs by their missing branch alone
+        env:
+          RUN: ${{ github.run_id }}
+        # ruleid: queue-sweep-cancels-merged-group-runs
+        run: |
+          refs="$(gh api --paginate "repos/$GITHUB_REPOSITORY/git/matching-refs/heads/gh-readonly-queue/" --jq '.[].ref')"
+          while read -r id branch; do
+            [[ "$id" -lt "$RUN" ]] || continue
+            grep -qxF "refs/heads/$branch" <<< "$refs" && continue
+            gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/cancel" --silent
+          done < runs.txt
+
+      - name: Cancel dead queue runs but keep merged groups
+        env:
+          RUN: ${{ github.run_id }}
+          BASE: ${{ github.event.merge_group.base_sha }}
+        # ok: queue-sweep-cancels-merged-group-runs
+        run: |
+          refs="$(gh api --paginate "repos/$GITHUB_REPOSITORY/git/matching-refs/heads/gh-readonly-queue/" --jq '.[].ref')"
+          while read -r id branch sha; do
+            [[ "$id" -lt "$RUN" ]] || continue
+            grep -qxF "refs/heads/$branch" <<< "$refs" && continue
+            git -C provenance-grader merge-base --is-ancestor "$sha" "$BASE" && continue
+            gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/cancel" --silent
+          done < runs.txt
+
+      - name: Cancel a rejected queue run
+        # ok: queue-sweep-cancels-merged-group-runs
+        run: gh run cancel "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY"
