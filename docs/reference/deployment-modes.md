@@ -150,8 +150,8 @@ The command runs these steps in order and stops at the first refusal:
    signer again.
 4. Mints the root member credential, a user JWT named `hive-root` signed by the swarm account. It grants only the
    subjects of the swarms the record lists for `root`; see
-   [What a scoped member is granted](swarm-bus-scope.md#what-a-scoped-member-is-granted). The command holds the
-   credential to a 65,536 byte NATS control line less 4,096 bytes of headroom, so a credential over 61,440 bytes is
+   [What a scoped member is granted](swarm-bus-scope.md#what-a-scoped-member-is-granted). The credential
+   may take at most 61,440 bytes, the 65,536 byte NATS control line less 4,096 bytes of headroom; a larger one is
    refused before any file is written.
 5. Writes the credential to `~/.agentihooks/root-bus/bus.creds` and the settings to
    `~/.agentihooks/root-bus/bus.env`, both mode 0600, in a folder created with mode 0700. A rerun overwrites both.
@@ -209,7 +209,7 @@ journalctl --user -u agentihooks-hive --since "5 minutes ago" | grep 'hive spoke
 ```
 
 The spokes also beat the root hive's presence entry, key `root` in each `events` swarm's `hive-presence` bucket.
-Each spoke poll renews it when it starts and every 15 seconds while it runs. When no spoke takes work in a pass, the
+Each spoke renews it when its poll starts and again every 15 seconds while the poll runs. When no spoke takes work in a pass, the
 hive waits 5 seconds before the next pass. The entry holds `heartbeat_ms` and `expires_ms` and lapses 45 seconds after the last beat. With the
 root credential its state subject can be read directly; the state stream name follows
 [Subjects and streams per swarm](swarm-bus-scope.md#subjects-and-streams-per-swarm):
@@ -305,7 +305,7 @@ Each refusal prints `hive root-bus refused: <message>` and exits 1:
 | `the hub signer record does not list root for every swarm and this host cannot update it` | A wanted swarm is missing for `root`, and the signer is a `file:` folder or OpenBao settings are missing | Set `OPENBAO_URL` and `OPENBAO_TOKEN` with an OpenBao signer, or add the swarms to the folder's `member_swarms` file |
 | `member_swarms contains an invalid swarm name (<reason>)` | A `--swarm` name, or a swarm name in the record, is not one subject token | Use the swarm's slug, or fix the record |
 | `member_swarms must map member ids to lists of swarm names` | The record's `member_swarms` field has the wrong shape | Fix the field; see [Swarm scoped bus credentials](swarm-bus-scope.md#when-a-credential-is-scoped) |
-| The OpenBao error text | Reading or updating the record's listing failed in OpenBao | Fix the OpenBao access the error names, then rerun |
+| An OpenBao error, shown as is | Reading or updating the record's listing failed in OpenBao | Fix the OpenBao access the error names, then rerun |
 | `listed hive root in the hub signer record, but a fresh read does not list it` | The record read back after the update still lacks a wanted swarm | Run the command again; if it repeats, read the record's `member_swarms` entry for `root` |
 | `the root credential is <n> bytes for <k> swarms, past the 65536 byte NATS control line; name fewer swarms with --swarm` | `root` is listed for too many swarms | Narrow the listing as in Limits |
 | `the hub refused the root hive credential in <path> (<error type>: <error>)` | The connect check failed: NATS is unreachable at the record's `url`, or the server rejects the credential | Fix the address or the server's operator trust and rerun. The files stay written and the service is not restarted |
