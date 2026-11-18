@@ -40,6 +40,7 @@ from scripts.ci_lab.delivery import CLASSES, DELIVERY, DELIVERY_SCHEMA, load_run
 from scripts.ci_lab.digests import GradeInputs, StaticInputs, Toolchain, grade_key, static_key
 from scripts.ci_lab.intake import GradeRequest, admit
 from scripts.ci_lab.leases import Leases
+from scripts.ci_lab.manifests import Fetcher
 from scripts.ci_lab.objects import Objects, S3Objects, Uploads, manifest_folder, upload_path
 from scripts.ci_lab.outcomes import CANNOT_RUN, DROPPED, FAILED, LOSSES, PASSED
 from scripts.ci_lab.queue import Job, Queue
@@ -120,9 +121,11 @@ MINIO_SECRET_KEY = f"{contract.MINIO_PREFIX}SECRET_KEY"
 MIRROR_STORE = "CI_LAB_MIRROR_STORE"
 IMAGE = "CI_LAB_IMAGE"
 REPOSITORY = "CI_LAB_REPOSITORY"
+MANIFEST_DEPTH = 10
 
 Needs = Mapping[str, Mapping[str, Any]]
 Manifests = Callable[[str, Sequence[str]], dict[str, Any] | None]
+Fetch = Callable[[str, str], bytes | None]
 Verdicts = Callable[[str, str], Verdict | None]
 UNPACK = cast("Callable[[dict[str, Any]], dict[str, Any]]", dep_manifest.unpack)
 
@@ -818,6 +821,7 @@ class StoredManifests:
     """Packed dependency manifests in the lab object store, one per dev commit under `objects.manifest_folder`."""
 
     objects: Objects
+    fetch: Fetch
 
     def __call__(self, repo: str, commits: Sequence[str]) -> dict[str, Any] | None:
         """Return the manifest of the first commit that has one stored, None when none has."""
@@ -947,7 +951,7 @@ def build(environ: Mapping[str, str], client: Any, objects: Objects, consumer: C
     """Return the service's scheduler over its clients, trusting the runner trust list of the repository's dev."""
     toolchain = Toolchain(sys.version.split()[0], {}, "", "", environ.get(IMAGE, ""), {})
     node, root = Path(environ[contract.GIT_MIRROR]), Path(environ[MIRROR_STORE])
-    expander = MirrorExpander(node, root, toolchain, StoredManifests(objects), Store(client, objects).get)
+    expander = MirrorExpander(node, root, toolchain, StoredManifests(objects, Fetcher()), Store(client, objects).get)
     checks: dict[str, Poster] = {}
 
     def poster(repo: str) -> Poster:
