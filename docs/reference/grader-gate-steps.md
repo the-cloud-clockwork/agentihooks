@@ -26,8 +26,8 @@ unless that copy reports no chart, so a copy that ignores `--root` fails
 closed instead of grading the base's own charts.
 
 The other lint gate steps are outside this page. Several of them look for
-their module in the grader and run the head's copy when it is missing, as the
-[For loop word list gate](for-loop-word-list-gate.md) does; the
+their module in the grader and run the head's copy when it is missing. The
+[For loop word list gate](for-loop-word-list-gate.md) is one of them. The
 [Tick pattern gate](tick-pattern-gate.md) fails instead.
 
 For a pull request, the Tests workflow runs every step on this page unless the

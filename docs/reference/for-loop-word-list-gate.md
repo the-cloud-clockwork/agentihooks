@@ -10,8 +10,9 @@ nav_order: 93
 shell `for` loop takes its word list from a command substitution. Errexit
 (`set -e`) never sees a command fail in that position, so a script that should
 stop runs the loop over whatever output the failed command printed, often
-none, and carries on. The gate reads every tracked shell script and the bash
-and sh run blocks of every workflow and action file.
+none, and carries on. The gate reads every tracked bash script, one with a
+`.sh` name or a bash shebang, and the bash and sh run blocks of every workflow
+and action file.
 [Pull request 11926](https://github.com/the-cloud-clockwork/agentihooks/pull/11926)
 added the gate for shell scripts and rewrote thirty loops that broke the rule.
 [Pull request 11964](https://github.com/the-cloud-clockwork/agentihooks/pull/11964)
@@ -121,13 +122,15 @@ classification the comment gate uses.
 The gate walks the whole YAML document and reads every `run` key whose value is
 a scalar. It grades the run text when the step's shell is bash or sh:
 
-- The step's own `shell` wins. Without one, the nearest `defaults.run.shell`
-  above it applies, the job's before the workflow's. Without either, the shell
-  is bash, as GitHub's default on Linux runners is.
-- A shell counts when it is `bash` or `sh`, a path that ends in one, such as
-  `/bin/bash`, either with arguments, such as `bash -e {0}` or
-  `/bin/bash --noprofile --norc -eo pipefail {0}`, or a GitHub expression such
-  as `${{ matrix.shell }}`, which is known only at run time.
+- The step's own `shell` wins. Without one, the job's `defaults.run.shell`
+  applies; without that, the workflow's `defaults.run.shell` applies. Without
+  any of them, the shell is bash, as GitHub's default on Linux runners is.
+- A shell counts when it is one of these:
+  - `bash` or `sh`, with or without arguments, such as `bash -e {0}`.
+  - A path that ends in `bash` or `sh`, with or without arguments, such as
+    `/bin/bash` or `/bin/bash --noprofile --norc -eo pipefail {0}`.
+  - A GitHub expression, such as `${{ matrix.shell }}`, which is known only at
+    run time.
 - A step whose shell is `python`, `pwsh` or any other program is skipped.
 - A blank shell, such as `shell: " "`, falls back to the inherited shell, as an
   absent one does.
@@ -179,17 +182,19 @@ pushing a shell or workflow change.
 
 ## Run it locally
 
-From the repository root, with the workspace virtual environment that holds
-`tree-sitter-bash` and `pyyaml`, both base dependencies in `pyproject.toml`:
+From the repository root, with a Python environment where the package is
+installed, so it holds `tree-sitter-bash` and `pyyaml`, both base dependencies
+in `pyproject.toml`:
 
 ```bash
-~/dev/tcc-ecosystem/.venv/bin/python -m scripts.ci_for_substitution --root .
+python -m scripts.ci_for_substitution --root .
 ```
 
-A clean tree prints one line and exits 0:
+A clean tree prints one line and exits 0. The counts are the tracked files the
+gate graded, so they change with the tree:
 
 ```text
-For loop word lists: 86 shell files, 64 workflow files, 0 problems
+For loop word lists: <shells> shell files, <workflows> workflow files, 0 problems
 ```
 
 A refused loop adds one GitHub annotation line per finding and exits 1. Shell
