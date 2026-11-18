@@ -888,9 +888,11 @@ id, as keywords; see
 #### Undeclared pass reads
 
 A step's call reads the pass state through the reader it is handed, `get`,
-and that reader refuses every pass box value the step's `reads` and `writes`
-do not declare. `CallStep.run` and `WriteStep.run` (`scripts.tick.steps.tasks`)
-build it on every pass with `scripts.tick.steps.declared_read` over
+and that reader refuses every `BOX_KEYS` value the step's `reads` and `writes`
+do not declare; a test keeps `BOX_KEYS` equal to the keys steps and site hooks
+store (see below). `CallStep.run` (`scripts.tick.steps`) and `WriteStep.run`
+(`scripts.tick.steps.tasks`) build it on every pass with
+`scripts.tick.steps.declared_read` over
 `declared_keys(reads | writes)`; no setting turns it off. A refused read raises
 `scripts.tick.steps.UndeclaredRead`:
 
@@ -946,14 +948,17 @@ To clear a refusal, declare the key the message names on the step it names:
 
 A step that stores a value under a new key also adds the key to `BOX_KEYS`:
 `test_the_box_keys_are_the_values_steps_and_hooks_declare_writing` fails until
-`BOX_KEYS` equals the keys that step and site hook `writes` name.
+`BOX_KEYS` equals the keys all steps and site hooks write.
 
-The refusal is an exception raised from the step's call. A step wrapped with
-`tasks.held` holds it like any other exception, as described under
+The refusal is an exception raised from the step's call. A step whose call is
+wrapped to hold its exception through `scripts.tick.steps.hold`, by
+`tasks.held`, `host.held`, the master steps' `_held` or the `observe` group's
+`_run`, holds it like any other exception, as described under
 [Exceptions](#exceptions): the step returns no actions and the tick raises it
-from the group site. `test_a_planted_undeclared_read_is_named` shows it: with
-`pass:rows` removed from the reads of `verify`, a replay of `running` through
-`tick` raises the `UndeclaredRead` for `verify` and `rows`.
+from the group site. `test_a_planted_undeclared_read_is_named` shows it for
+`verify`, wrapped by `_run`: with `pass:rows` removed from its reads, a replay
+of `running` through `tick` raises the `UndeclaredRead` for `verify` and
+`rows`.
 
 | Test | What it holds |
 | --- | --- |
