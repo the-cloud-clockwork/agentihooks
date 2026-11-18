@@ -2,10 +2,11 @@
 
 python -m scripts.ci_lab shadow report --gate GATE [--heads N] [--event merge_group] [--app SLUG] reads the newest
 completed Tests runs of the event and, for each distinct head, joins the github-actions jobs the shadow recorder maps to
-the gate with the head's lab-shadow/<gate> check run from the lab App, named by --app or AGENTIHOOKS_LAB_APP. A head whose jobs of the gate were cancelled, still run or never graded leaves
-the window; a unit job the workflow reran after a lost runner counts by its rerun. It prints one row per head and the
-counts, and exits 0 only when the window holds N heads with no mismatch, a lab verdict on 48 and a lab verdict
-completed first on 45 of every 50, rounded up, and 1 otherwise.
+the gate with the head's lab-shadow/<gate> check run from the lab App, named by --app or AGENTIHOOKS_LAB_APP. A head
+whose jobs of the gate were cancelled, still run or never graded leaves the window; a unit job the workflow reran after
+a lost runner counts by its rerun. It prints one row per head and the counts, and exits 0 only when the window holds N
+heads with no mismatch, a lab verdict on 48 and a lab verdict completed first on 45 of every 50, rounded up, and 1
+otherwise.
 """
 
 import argparse
@@ -250,7 +251,7 @@ def main(argv: Sequence[str], environ: Mapping[str, str], fetch: Fetch = api) ->
     parser.add_argument("--gate", required=True)
     parser.add_argument("--heads", type=int, default=HEADS)
     parser.add_argument("--event", choices=(PULL_REQUEST, MERGE_GROUP), default=PULL_REQUEST)
-    parser.add_argument("--app", default=environ.get(LAB_APP, ""))
+    parser.add_argument("--app", default=environ.get(LAB_APP))
     arguments = parser.parse_args(argv)
     if arguments.heads < 1:
         parser.error("--heads must be at least 1")

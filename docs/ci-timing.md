@@ -743,7 +743,7 @@ merged on 19 October 2026 and was applied at 20:40:31 UTC. Its recorded stale
 snapshot regression failed in [red Proofs run 39289504095](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39289504095):
 a job started in seconds had raised a 336 second runner wait. The fix passed
 [Tests run 39292565892](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39292565892)
-and [Mutation preflight run 39292554608](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39292554608).
+and [mutation run 39292554608](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39292554608).
 
 The [source task's measurement](https://github.com/the-cloud-clockwork/agentihooks/issues/4834)
 compared two hour windows on 19 October. From 15:00 to 17:00 UTC, 114 of 124
@@ -768,7 +768,7 @@ regression tests failed in
 a confirmed wait with a queued sibling raised both findings, and a 336 second
 unconfirmed job raised queue age. The fix passed
 [Tests run 39373027273](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39373027273)
-and [Mutation preflight run 39373022081](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39373022081).
+and [mutation run 39373022081](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39373022081).
 The source task targeted zero retracted queue age findings per hour; no after
 window count was recorded on it.
 
@@ -1900,7 +1900,7 @@ stale finding visible indefinitely.
 [Delivered pull request #4012](https://github.com/the-cloud-clockwork/agentihooks/pull/4012)
 records red CI proofs for missing grouped evidence and the missing run anchor,
 followed by a [successful focused proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39024469354)
-and [successful mutation preflight](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39026092462).
+and [successful mutation run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39026092462).
 The delivered regression cases cover per-stage counts and worst times, run URL
 selection, repeated-run stability, sample expiry and isolation from the Doctor
 ledger. These are reporting checks, not evidence that every CI run meets the
@@ -1945,147 +1945,18 @@ gh api repos/the-cloud-clockwork/agentihooks/actions/runs/<run id>/jobs \
 
 A dispatch whose first job starts within seconds of its `created_at` did not queue. If a dispatch still sits queued for minutes, list the runs on its lane: another dispatch or a lane workflow run holds it, not a Startup stages or Worker resources push. `tests/test_ci_hosted_lanes.py` checks, for a sample branch across all ten run id endings, that a branch push of either workflow never resolves to a lane while a dispatch still does.
 
-## Mutation preflight legs on the batch pool
-
-The `stats` and `mutation-shard` legs of the Mutation preflight workflow hold no lane. Each leg's concurrency group names its own run id and matrix index, `mutation-preflight-job-<run id>-stats-<part>` or `mutation-preflight-job-<run id>-shard-<shard>`, so no other run ever shares it. A ready leg waits only for a free runner on the `anton-oss-batch` runner scale set, whose ceiling of 12 runners caps how many legs run at once across every branch. The ceiling is the `maxRunners` value in antoncore's `arc-runners-oss` chart, `values-oss-batch.yaml`. Every planned mutant and every covering test still runs; only the queueing changed.
-
-Grouping per branch stays at the workflow level. A branch push run joins `mutation-preflight-refs/heads/<branch>` with `cancel-in-progress`, so a newer push to the same branch cancels the older run, and a push to another branch never waits on it. When Tests or Proofs calls the workflow, the legs take the caller's run id in the same per run form.
-
-| Job | Runner label | Concurrency group |
-|---|---|---|
-| Whole run, branch push | per job, below | `mutation-preflight-refs/heads/<branch>`, newer push cancels the older run |
-| `refine`, `mutation` | `anton-oss-light` | the run's group only |
-| `plan`, `touched-tests` | `anton-oss` | the run's group only |
-| `stats` | `anton-oss-batch` | `mutation-preflight-job-<run id>-stats-<part>` |
-| `mutation-shard` | `anton-oss-batch` | `mutation-preflight-job-<run id>-shard-<shard>` |
-
-The runner labels apply to runs from the trusted actors the workflow lists and to merge queue runs; any other run takes `ubuntu-latest`.
-
-### Branch workflow lanes compatibility
+## Branch workflow lanes
 
 The `Branch workflow lanes` workflow grades branch pushes using the grader from
 `dev`; it fetches the pushed head as data. It excludes pushes to `dev`, `main`
 and merge queue branches. Its `grade` job checks new or edited workflows, so an
 older branch can be refused even when `Gate Required` passes. Read both checks.
 
-The Mutation preflight exception accepts the current per run groups and the exact
-superseded three lane expression. The latter keeps branches cut before the batch
-pool change gradeable until they incorporate `dev`; it does not move current
-jobs back onto shared lanes or remove the batch pool ceiling.
+A branch only job with no accepted job or workflow level lane group is refused
+with `job <name> has no shared hosted lane concurrency group`. Give it an
+accepted shared hosted lane, using an existing hosted workflow as the model.
 
-For maintainers changing the existing jobs, these are the current job level
-`concurrency` blocks. Keep the jobs' existing runner expressions, matrices and
-other configuration:
-
-{% raw %}
-```yaml
-jobs:
-  stats:
-    concurrency:
-      group: ${{ format('mutation-preflight-job-{0}-stats-{1}', github.run_id, matrix.part) }}
-  mutation-shard:
-    concurrency:
-      group: ${{ format('mutation-preflight-job-{0}-shard-{1}', github.run_id, matrix.shard) }}
-```
-{% endraw %}
-
-Neither block has `queue` or `cancel-in-progress`. Workflow level cancellation
-of older pushes stays in effect. No new environment variable or operator toggle
-enables compatibility; the trusted grader supplies it automatically.
-
-The accepted legacy `stats` block below is a compatibility example, not a
-recommended configuration for new work:
-
-{% raw %}
-```yaml
-concurrency:
-  group: ${{ format('{0}-stats-{1}', github.workflow == 'Mutation preflight' && format('mutation-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || format('mutation-preflight-job-{0}', github.run_id), matrix.part) }}
-  queue: ${{ github.workflow == 'Mutation preflight' && 'max' || 'single' }}
-```
-{% endraw %}
-
-For the legacy `mutation-shard` block, the stage is `shard` and the index is
-`matrix.shard`; every other part of the expression and queue policy is identical.
-Under the workflow's own name, these legacy blocks select `mutation-lane-a`,
-`mutation-lane-b` or `mutation-lane-c` with `queue: max`. Under a caller's name,
-they select the caller's per run group with `queue: single`.
-
-This exception has a narrow boundary:
-
-| Requirement | Accepted boundary |
-|---|---|
-| Trusted workflow | The same workflow path exists in the trusted baseline, with matching workflow name and event configuration; its name is `Mutation preflight` |
-| Job | Only the baseline's existing `stats` and `mutation-shard` jobs qualify |
-| Runner | The job's `runs-on` expression equals the baseline's expression, including its hosted fallback |
-| Group | The entire concurrency mapping equals the current per run block or the superseded block for that job |
-| Other branch workflows | A copied preflight, renamed job or branch only job gains no mutation exception; the ordinary lane rules still apply |
-
-A different stage, matrix index, lane selection, queue policy or an added
-`cancel-in-progress` field fails this exception. A branch only job with no
-accepted job or workflow level lane group is still refused with
-`job <name> has no shared hosted lane concurrency group`.
-
-### Before the change
-
-Until pull request [#4487](https://github.com/the-cloud-clockwork/agentihooks/pull/4487), the two legs shared three mutation lanes, `mutation-lane-a`, `mutation-lane-b` and `mutation-lane-c`, picked from the last digit of the run id like the hosted lanes, with `queue: max`. A lane held one stats leg and one shard leg per matrix index, so a ready shard queued behind the shard of the same index from another branch whose run id ended in the same range, even while batch runners sat free. In [run 39086455436](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39086455436), shard 2 was created at 01:32:17 and started at 01:45:36, a 799 second wait; the investigation found 794 seconds of it before its runner pod was created, while pods on the batch pool were created, scheduled and ready within two seconds of being asked. Pull request #4487 superseded [#4300](https://github.com/the-cloud-clockwork/agentihooks/pull/4300), which computed the lane count from the ceiling and stage width and still gave three lanes for ten shards and a ceiling of 30.
-
-### Check a run
-
-List each shard's creation and start time:
-
-```bash
-gh api repos/the-cloud-clockwork/agentihooks/actions/runs/<run id>/jobs --paginate \
-  --jq '.jobs[] | select(.name | startswith("mutation-shard")) | [.name, .created_at, .started_at] | @tsv'
-```
-
-A shard that started within seconds of its creation did not queue. When shards wait for minutes, read the batch runner set's load:
-
-```bash
-kubectl get autoscalingrunnerset anton-oss-batch -n arc-runners-oss
-```
-
-Current runners at the 30 maximum means the pool ceiling holds the shards, which is the intended limit. Current runners below the maximum with shards still queued points to runner provisioning, not to concurrency. The concurrency groups themselves live in `.github/workflows/mutation-preflight.yml`:
-
-```bash
-grep -n -A1 'concurrency:' .github/workflows/mutation-preflight.yml
-```
-
-### Measured result
-
-Shard pickup is a shard job's `started_at` minus its `created_at`, read for every branch push run of the workflow in a 24 hour window, counting shards that ran (not skipped or cancelled). The before window is the day up to the merge of #4487 at 16:30 UTC on 18 October; the after window is 21 October UTC.
-
-| Window | Push runs | Runs with shards | Shard jobs | Median | 90th percentile | Max | Over 600 s | 799 s or more |
-|---|---|---|---|---|---|---|---|---|
-| 17 Oct 16:30 to 18 Oct 16:30 UTC | 1266 | 221 | 1428 | 11 s | 816 s | 2644 s | 210 | 147 |
-| 21 Oct 00:00 to 22 Oct 00:00 UTC | 615 | 114 | 525 | 12 s | 150 s | 501 s | 0 | 0 |
-
-No shard in the after window waited as long as the 799 second case. A push run uses the workflow file on its own branch, so a branch cut before the merge still queued on the old lanes until it took `dev`. The script that produced these rows pages the workflow's push runs in two hour slices, then reads each run's jobs with the shard command above.
-
-### Mutation shard troubleshooting
-
-| Symptom | Check |
-|---|---|
-| A shard queues for minutes while other branches run mutation | Read the batch runner set's current and maximum runners; at the maximum, the ceiling is the limit |
-| A branch's older preflight run disappears | A newer push to the same branch cancelled it; read the newer run |
-| A shard runs on `ubuntu-latest` | The actor or triggering actor is not on the workflow's trusted list |
-| Branch workflow lanes refuses `stats` or `mutation-shard` | Check the trusted workflow name, events and runner expression, then compare the entire concurrency mapping with the current or exact legacy block above. Incorporating `dev` restores the current per run groups |
-| Gate Protected refuses a workflow edit | Read that separate gate's diagnostic; a passing branch lane grade does not establish that every workflow protection passed |
-| A branch only job without a lane group is refused | Give it an accepted shared hosted lane using an existing hosted workflow as the model; copying a mutation job's per run group does not qualify it for the exception |
-| The lanes contract test fails after a workflow edit | A leg's group no longer names its own run id, or the leg left `anton-oss-batch`; restore the per run group |
-
-`tests/test_ci_hosted_lanes.py` holds the contract: `test_mutation_legs_of_two_branches_never_share_a_concurrency_lane_and_stay_on_the_batch_pool` resolves both legs for two branches and asserts two distinct groups, none of them a lane, and the `anton-oss-batch` label; `test_a_branch_mutation_job_never_holds_a_lane_that_proofs_or_dispatches_wait_on` asserts the per run group for ten run ids and three indexes. In the red Tests run [39123433688](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39123433688), the `unit-selected (3.11, 2)` job failed the new contract test with both branches on `mutation-lane-a`; the green Tests run [39136265932](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39136265932) passed after the branch lane grader accepted per run groups in [#4491](https://github.com/the-cloud-clockwork/agentihooks/pull/4491).
-
-Pull request [#4576](https://github.com/the-cloud-clockwork/agentihooks/pull/4576)
-then added legacy block compatibility. Its regression cases cover both jobs,
-altered queue, cancellation, stage, index, lane and runner, changed events,
-swapped blocks and a branch only copy. The original refusal of a job without a
-lane group remains covered. The delivery issue records two refusals among eight
-branch pushes in its initial sample; this is narrower than the source task's
-claim that every push failed. The Doctor's applied check reports all first six
-branch lane runs after the merge passed, including
-[39154101511](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39154101511).
-
-To diagnose the branch grade separately from shard pickup, inspect its push run:
+To diagnose the branch grade, inspect its push run:
 
 ```bash
 gh run list --workflow branch-lanes.yml --branch <branch> --limit 5
@@ -2101,10 +1972,9 @@ gh run list --workflow proofs.yml --branch <branch> --limit 5
 gh run view <proof run id> --log
 ```
 
-Keep the no group refusal control alongside the accepted current and legacy
-cases. A green grade proves workflow admission; it does not prove that mutation
-tests passed or that a runner was immediately available. Run no tests on the
-shared development host.
+A green grade proves workflow admission; it does not prove that tests passed or
+that a runner was immediately available. Run no tests on the shared development
+host.
 
 ## Focused proof CPU worker limits
 
@@ -2556,7 +2426,7 @@ Runs [39100700634](https://github.com/the-cloud-clockwork/agentihooks/actions/ru
 
 For Helm chart proof timing, see [Helm kind proof input keys](/docs/reference/ci-result-cache/#helm-kind-proof-input-keys): the declared inputs, skipped job versus skipped steps, branch hit measurements and outstanding dev comparison.
 
-For branch mutation preflight, see [Measured shards and split mutants](reference/mutation-gate.md#measured-shards-and-split-mutants): heavy mutants run a shared fast test head plus separate tail slices on distinct shards, and the merge job combines their results into one grade per mutant. The reference includes planning defaults, proof commands, completeness checks and the distinction between estimated work and observed mutation step timing.
+For pull request mutation, see [Measured shards and split mutants](reference/mutation-gate.md#measured-shards-and-split-mutants): heavy mutants run a shared fast test head plus separate tail slices on distinct shards, and the merge job combines their results into one grade per mutant. The reference includes planning defaults, proof commands, completeness checks and the distinction between estimated work and observed mutation step timing.
 
 Last ten runs of the Tests workflow on dev (35380163028, 35379942561, 35379468297, 35156774129, 35156548701, 35156299806, 35155214526, 35138446531, 35138276256, 35137837913). Seconds per step, mean and max over those runs.
 

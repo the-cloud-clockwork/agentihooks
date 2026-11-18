@@ -13,6 +13,7 @@ import pytest
 
 from tests.hive.test_controller_launch import setup as setup
 from tests.hive.test_controller_launch import write_hive
+from tests.swarm.client_class import client_class
 
 MINUTE = 60_000
 SEAT_MINUTES = 10
@@ -134,7 +135,7 @@ def _deployed(setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, login_wee
     monkeypatch.setattr(master_claude_login, "unusable", lambda: "")
     monkeypatch.setattr(controller, "_workstation_herdr", lambda memo=None: False)
     client = SimpleNamespace(join=lambda *args: joined.append(args), say=lambda *args: said.append(args))
-    monkeypatch.setattr(ledger_client, "LedgerClient", lambda **_: client)
+    monkeypatch.setattr(ledger_client, "LedgerClient", client_class(client))
     now = lease.now_ms(setup.store)
     _root_hive(setup, login_week_left)
     old = _recycled(setup, now)

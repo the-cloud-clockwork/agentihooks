@@ -318,7 +318,9 @@ def meet(mine, theirs, failure):
 """
 
 
-def _stubbed_combine_tree(tmp_path, lcov_exit=0, xml_exit=0, lcov_late=0):
+def _stubbed_combine_tree(
+    tmp_path: Path, lcov_exit: int = 0, xml_exit: int = 0, lcov_late: int = 0, parts: int = 1
+) -> subprocess.CompletedProcess[str]:
     shutil.copytree(ROOT / ".github/coverage", tmp_path / ".github/coverage")
     (tmp_path / ".github/coverage/flatten.py").write_text(
         "import shutil, sys\nshutil.copyfile(sys.argv[1], sys.argv[2])\n"
@@ -327,16 +329,31 @@ def _stubbed_combine_tree(tmp_path, lcov_exit=0, xml_exit=0, lcov_late=0):
         report = tmp_path / ".coverage-shards" / f"coverage-3.12-{shard}" / ".coverage"
         report.parent.mkdir(parents=True)
         report.write_text("data")
+    measured = CoverageData(basename=str(tmp_path / ".coverage"))
+    for folder in range(parts):
+        (tmp_path / f"folder{folder}").mkdir()
+        (tmp_path / f"folder{folder}/part.py").write_text("value = 1\n")
+        measured.add_lines({f"folder{folder}/part.py": [1]})
+    measured.write()
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts/ci_cpu_quota.py").write_text("print(4)\n")
     (tmp_path / "coverage").mkdir()
     (tmp_path / "coverage/__init__.py").write_text("")
     (tmp_path / "coverage/__main__.py").write_text(
         _RENDEZVOUS
         + f"""
 if sys.argv[1] == "xml":
+    out = Path(sys.argv[sys.argv.index("-o") + 1])
     meet("xml.started", "lcov.started", "the JS conversion never ran beside the XML")
+    Path(f"{{out}}.part").touch()
+    deadline = time.monotonic() + 5
+    while len(list(out.parent.glob("*.part"))) < {parts}:
+        if time.monotonic() > deadline:
+            sys.exit("the XML parts never ran beside each other")
+        time.sleep(0.05)
     if {xml_exit}:
         sys.exit({xml_exit})
-    Path("coverage.xml").write_text("<coverage/>")
+    out.write_text('<coverage lines-valid="1" lines-covered="1" branches-valid="0" branches-covered="0"><packages/></coverage>')
 elif sys.argv[1] == "report":
     print("TOTAL")
 """
@@ -380,6 +397,100 @@ def test_a_failed_python_xml_fails_the_merge_and_stops_the_js_conversion(tmp_pat
     assert not (tmp_path / "coverage.xml").exists()
     time.sleep(3)
     assert not (tmp_path / "lcov.info").exists()
+
+
+def test_the_python_coverage_xml_runs_in_parts_beside_each_other(tmp_path: Path) -> None:
+    result = _stubbed_combine_tree(tmp_path, parts=2)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "from 2 parts" in result.stdout
+    assert ET.parse(tmp_path / "coverage.xml").getroot().get("lines-valid") == "2"
+
+
+def test_a_failed_coverage_xml_part_fails_the_merge_with_its_code(tmp_path: Path) -> None:
+    result = _stubbed_combine_tree(tmp_path, xml_exit=5, parts=2)
+    assert result.returncode == 5, result.stdout + result.stderr
+    assert not (tmp_path / "coverage.xml").exists()
+
+
+def _xml_shape(path: Path) -> tuple[dict[str, str], list[str | None], list[object]]:
+    root = ET.parse(path).getroot()
+    packages: list[object] = [
+        (
+            package.attrib,
+            [(node.attrib, [line.attrib for line in node.iter("line")]) for node in package.iter("class")],
+        )
+        for package in root.iter("package")
+    ]
+    head = {key: value for key, value in root.attrib.items() if key != "timestamp"}
+    return head, [source.text for source in root.iter("source")], packages
+
+
+def test_the_parallel_coverage_xml_equals_the_single_report_across_packages(tmp_path: Path) -> None:
+    sources = {
+        "hooks/__init__.py": "",
+        "hooks/pick.py": "def pick(flag):\n    if flag:\n        return 1\n    return 2\n",
+        "hooks/memory/__init__.py": "",
+        "hooks/memory/value.py": "value = 1\n",
+        "scripts/__init__.py": "",
+        "scripts/never.py": "def never():\n    return 3\n",
+        "scripts/swarm/__init__.py": "",
+        "scripts/swarm/loop.py": "for item in range(2):\n    value = item\n",
+    }
+    for name, text in sources.items():
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(text)
+    generator = """
+import runpy
+import sys
+from coverage import Coverage
+cov = Coverage(config_file=sys.argv[1])
+cov.start()
+runpy.run_path('hooks/pick.py')['pick'](True)
+runpy.run_path('hooks/memory/value.py')
+runpy.run_path('scripts/swarm/loop.py')
+cov.stop()
+cov.save()
+"""
+    config = str(ROOT / ".github/coverage/coverage.ini")
+    subprocess.run([sys.executable, "-c", generator, config], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        [sys.executable, "-m", "coverage", "xml", f"--rcfile={config}", "-o", "expected.xml"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    result = subprocess.run(
+        [sys.executable, str(ROOT / ".github/coverage/parallel_xml.py"), config, "3", "coverage.xml"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "from 3 parts" in result.stdout
+    joined, single = _xml_shape(tmp_path / "coverage.xml"), _xml_shape(tmp_path / "expected.xml")
+    assert len(single[2]) == 4
+    assert joined == single
+
+
+def test_the_xml_split_keeps_each_folder_whole_and_balances_the_parts_by_size(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spec = importlib.util.spec_from_file_location("sonar_parallel_xml", ROOT / ".github/coverage/parallel_xml.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    sizes = {"big/a.py": 900, "mid/b.py": 500, "mid/c.py": 300, "small/d.py": 200, "small/e.py": 100, "tiny/f.py": 50}
+    for name, size in sizes.items():
+        (tmp_path / name).parent.mkdir(exist_ok=True)
+        (tmp_path / name).write_text("x" * size)
+    monkeypatch.chdir(tmp_path)
+    parts = module.split(sorted(sizes), 2)
+    assert sorted(name for part in parts for name in part) == sorted(sizes)
+    folders = [{Path(name).parent for name in part} for part in parts]
+    assert len(parts) == 2 and not folders[0] & folders[1]
+    assert sorted(sum(sizes[name] for name in part) for part in parts) == [950, 1100]
+    assert module.split([], 3) == [[]]
+    assert module.split(["gone/x.py"], 4) == [["gone/x.py"]]
 
 
 def test_coverage_options_do_not_reach_nested_test_runners(tmp_path):

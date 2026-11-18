@@ -159,7 +159,7 @@ AGENTIHOOKS_HEALTH_CI_BEHIND_MINUTES=30 agentihooks swarm example-swarm status -
 records the implementation and cadence proofs. Its
 [green focused run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/41331855281)
 reports 13634 passing tests, and its
-[mutation preflight](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/41333972390)
+[mutation run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/41333972390)
 passed. The elapsed cadence tests cover idle nudge and retirement at three
 minute intervals, input waits, idle health and the ledger probe. These runs
 establish regression behavior, not a production rollout.

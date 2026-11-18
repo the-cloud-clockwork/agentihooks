@@ -1,6 +1,6 @@
 """The CI lab command line: python -m scripts.ci_lab cutover --grader-root PATH, evidence --grade RUN,
-shadow report --since REVISION, shadow report --gate GATE [--heads N] [--event merge_group], or scheduler|worker
---self-test."""
+shadow report --since REVISION, shadow report --gate GATE [--heads N] [--event merge_group], scheduler
+[--interval S] [--passes N] to run the scheduler service, or scheduler|worker --self-test."""
 
 import os
 import sys
@@ -9,10 +9,15 @@ from collections.abc import Mapping, Sequence
 from scripts.ci_lab import contract, delivery, evidence, shadow, shadow_report
 
 SERVICES = {contract.SCHEDULER.name: contract.SCHEDULER, contract.WORKER.name: contract.WORKER}
+SELF_TEST = "--self-test"
 
 
 def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     """Dispatch a CI lab command and return its exit code."""
+    if argv[:1] == [contract.SCHEDULER.name] and SELF_TEST not in argv:
+        from scripts.ci_lab import scheduler
+
+        return scheduler.main(argv[1:], environ)
     if argv and argv[0] in SERVICES:
         return contract.run(SERVICES[argv[0]], argv[1:], environ)
     if argv and argv[0] == "evidence":

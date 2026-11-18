@@ -234,6 +234,16 @@
       ]
     },
     {
+      "id": "ledger-rolls-before-deployments",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2610",
+      "behaviour": "Every swarm chart service Deployment that renders beside the ledger carries Argo CD sync wave 1 while the ledger StatefulSet stays at wave 0, so a release rolls both ledger replicas to Ready before any Deployment creates a pod, and no new Deployment pod can take the room a rolling ledger replica frees on the node its local-path volume pins.",
+      "seam": "argocd.argoproj.io/sync-wave on the api, auth, controller, github-webhook, hive-join and hub Deployments of the swarm chart",
+      "tests": [
+        "tests/test_swarm_chart_ledger_rollout.py::test_every_service_deployment_rolls_in_a_sync_wave_after_the_ledger"
+      ]
+    },
+    {
       "id": "controller-waits-ride-out-redis-outage",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-kind-controller-redis-grace",
@@ -4218,6 +4228,30 @@
       ]
     },
     {
+      "id": "hive-watch-in-process",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-ledger-watch-redis-acl",
+      "behaviour": "A ledger watch on a remote host, such as a hive worker with no agent token, reads the ledger in process over the shared database every interval, each read taking only the changes since the export it holds, and prints each operator event once; it fetches no agent token, so the hive member Redis login never meets the hive credential store its ACL refuses, while a watch on a local host still follows the ledger server's event stream with its credentials.",
+      "seam": "scripts.swarm_ledger.watch_ledger.credentials, stream and polled, driven by scripts.swarm_ledger.watch_ledger.main",
+      "tests": [
+        "tests/swarm_ledger/test_hive_watch_in_process.py::test_a_hive_watch_prints_operator_events_while_its_member_login_cannot_read_the_credential_store",
+        "tests/swarm_ledger/test_hive_watch_in_process.py::test_a_hive_watch_prints_an_event_written_between_its_reads_once",
+        "tests/swarm_ledger/test_hive_watch_in_process.py::test_a_remote_watch_takes_no_credentials_and_a_local_watch_follows_the_ledger_server_stream",
+        "tests/swarm_ledger/test_hive_watch_in_process.py::test_a_remote_poll_reads_the_ledger_in_process_with_the_kept_exports"
+      ]
+    },
+    {
+      "id": "merge-priority-moves-waiting-entries-at-once",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2604",
+      "behaviour": "A merge priority request moves the waiting dev queue entries ahead of the pull request behind it at once, even while the head merge group still tests, so the pull request joins the next group; running entries stay in place and no deferred record is stored.",
+      "seam": "scripts.swarm.queue_priority.request through agentihooks swarm merge priority",
+      "tests": [
+        "tests/swarm/test_queue_priority.py::test_priority_moves_waiting_entries_at_once_while_the_head_group_tests",
+        "tests/swarm/test_merge_queue_priority.py::test_master_priority_moves_waiting_entries_without_cancelling_running_head"
+      ]
+    },
+    {
       "id": "launch-model-suits-harness",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2562",
@@ -4954,7 +4988,7 @@
       "origin": "regression",
       "ordered_at": "2026-11-16",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-fix-registration-hardening",
-      "behaviour": "While fleet panic is on, a session on a registered fix branch keeps a rerun in its own repository, a dispatch only when its ref names that branch, and a push only when it pushes to origin, every refspec writes that checked out branch and no git config may route it elsewhere; git -C moves the checkout the branch is read in. A push to any other ref, remote or set of refs, a push git config may route to another remote or ref (a push refspec, push url or mirror on origin, a url pushInsteadOf rewrite of the push url, push tag following, a push or tracking remote other than origin, or a push default other than simple or current), a dispatch without a ref or on another ref, a gh command aimed at another repository, a git global option other than -C, a command that sets a git repository or config environment variable, and a push or dispatch behind git or gh global options or a redirection stay frozen.",
+      "behaviour": "While fleet panic is on, a session on a registered fix branch keeps a rerun in its own repository, a dispatch only when its ref names that branch, and a push only when it pushes to origin, every refspec writes a registered fix branch and no git config may route it elsewhere; git -C moves the checkout the branch is read in. A push to any other ref, remote or set of refs, a push git config may route to another remote or ref (a push refspec, push url or mirror on origin, a url pushInsteadOf rewrite of the push url, push tag following, a push or tracking remote other than origin, or a push default other than simple or current), a dispatch without a ref or on another ref, a gh command aimed at another repository, a git global option other than -C, a command that sets a git repository or config environment variable, and a push or dispatch behind git or gh global options or a redirection stay frozen.",
       "seam": "The PreToolUse panic freeze in the blocker window hook: the frozen command parse and the fix branch spare",
       "rules": [
         "panic-spare-ignores-command-target"
@@ -4969,6 +5003,21 @@
         "tests/swarm/test_panic.py::test_a_command_reads_without_its_redirections_and_git_global_options",
         "tests/swarm/test_panic.py::test_a_spared_command_names_the_refs_it_writes",
         "tests/swarm/test_panic.py::test_a_dispatch_without_a_ref_names_an_empty_ref"
+      ]
+    },
+    {
+      "id": "panic-spares-a-successor-of-a-fix",
+      "origin": "regression",
+      "ordered_at": "2026-11-18",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-spare-upstream-fix-branch",
+      "behaviour": "While panic holds a swarm, a successor seat whose worktree branch has its own name keeps the fix work it inherited: a push whose every refspec writes a registered fix branch of the checkout's origin repository and a dispatch on one are spared whatever branch is checked out, and a rerun is spared in a checkout whose checked out branch or whose upstream on origin is a registered fix branch. A push with no refspec or of HEAD writes the checked out branch's own name and stays frozen unless that branch is a fix, as do a push or dispatch naming any other ref and a rerun from a branch that tracks a fix on another remote.",
+      "seam": "The PreToolUse panic freeze in the blocker window hook: blocker_window.pretool for a session bound to the panicking swarm",
+      "tests": [
+        "tests/swarm/test_panic.py::test_a_successor_branch_tracking_a_registered_fix_keeps_its_fix_pushes_dispatches_and_reruns",
+        "tests/swarm/test_panic.py::test_a_successor_branch_tracking_a_registered_fix_stays_frozen_for_any_other_target",
+        "tests/swarm/test_panic.py::test_a_rerun_from_a_branch_tracking_a_fix_on_another_remote_stays_frozen",
+        "tests/swarm/test_panic.py::test_a_branch_tracks_only_a_branch_on_origin",
+        "tests/swarm/test_panic.py::test_a_rerun_without_a_directory_or_a_fix_reads_no_git"
       ]
     },
     {
@@ -5546,6 +5595,16 @@
       "seam": "Frozen ruleset payload registry",
       "tests": [
         "tests/test_gate_recovery_payload.py::test_the_frozen_registry_accepts_the_admin_pull_request_recovery_payload"
+      ]
+    },
+    {
+      "id": "frozen-writer-lock-workflow",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-freeze-writer-lock-workflow",
+      "behaviour": "The frozen gate registry holds the writer lock workflow, so the protected grader refuses a pull request head that drops any of its jobs, while a head that leaves the workflow unchanged passes.",
+      "seam": "Frozen gate registry and the protected grader's frozen file check",
+      "tests": [
+        "tests/test_gate_protected.py::test_the_repository_registry_refuses_a_head_dropping_any_writer_lock_job"
       ]
     },
     {
@@ -6610,10 +6669,20 @@
       "id": "promotion-red-graded-job-fails-at-once",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2598",
-      "behaviour": "The promotion step fails on its first poll and names each red job when the Tests run it grades, its own or a newer green run it picked, already holds a job that ended red outside the launch hotfix route, so it never holds the release group through the thirty minute wait.",
+      "behaviour": "The promotion step fails on its first poll and names each red job when the Tests run it grades, its own or a newer green run it picked, already holds a job off the exempt list that ended red outside the launch hotfix route, so it never holds the release group through the thirty minute wait.",
       "seam": "snapshotGradeComplete in .github/scripts/promote.cjs, driven by the promotion API contract harness tests/contracts/promotion/promote.cjs",
       "tests": [
         "tests/contracts/promotion/test_promote.py::test_promotion_api_contracts"
+      ]
+    },
+    {
+      "id": "promotion-graded-jobs-gate-or-exempt",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-promo-side-job-contract",
+      "behaviour": "Every job of the Tests workflow that promotion grades either sits in the Promotion ready needs, directly or through another job, or is named on the promote script's exempt list, whose side jobs the every job rule skips whatever their state, so a side job such as the mutation stats seed or the test summary never holds the release.",
+      "seam": "EXEMPT and settled in .github/scripts/promote.cjs against the promotion-ready needs of .github/workflows/test.yml",
+      "tests": [
+        "tests/contracts/promotion/test_workflow.py::test_every_graded_job_gates_promotion_or_sits_on_the_promote_script_exempt_list"
       ]
     },
     {
@@ -7196,6 +7265,21 @@
       ]
     },
     {
+      "id": "root-keeps-slots-for-pinned-tasks",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-root-prefers-workstation-tasks",
+      "behaviour": "Under the events engine the root hive keeps one free slot for each claimable task of the asking swarm that only root takes and can place, a workstation task pinned to no other hive or a task pinned to root: the hub answers a root admission for work any hive can run with a held answer once root's live workers plus those waiting tasks reach its max agents, so the root lane spoke launches the pinned task on its next poll and the unpinned offer stays queued for another hive, while a pinned task and every other hive are admitted as before.",
+      "seam": "scripts.swarm.readiness root_only and root_waiting through scripts.hub.admission Admission.admit, Admission._reserved and Admission._full, observed at scripts.hive.lanes.run_once",
+      "tests": [
+        "tests/swarm/test_events_placement.py::test_root_only_names_the_tasks_only_the_root_hive_takes",
+        "tests/swarm/test_events_placement.py::test_root_waiting_counts_only_claimable_tasks_the_root_hive_alone_takes_and_can_place",
+        "tests/swarm/test_events_placement.py::test_root_with_one_free_slot_holds_the_unpinned_task_for_another_hive_and_admits_the_workstation_task",
+        "tests/swarm/test_events_placement.py::test_root_keeps_a_slot_only_for_a_workstation_task_it_can_place",
+        "tests/swarm/test_events_placement.py::test_root_admits_unpinned_work_only_into_slots_beyond_the_waiting_workstation_tasks",
+        "tests/swarm/test_events_placement.py::test_root_with_one_free_slot_launches_the_workstation_task_on_the_poll_after_holding_the_unpinned_one"
+      ]
+    },
+    {
       "id": "unfit-refusal-spends-no-delivery",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2584",
@@ -7681,19 +7765,21 @@
         "tests/test_ci_lone_artifact_download.py::test_the_gate_summary_counts_every_leg_however_many_legs_ran",
         "tests/test_ci_branch_reuse_workflow.py::test_sonar_takes_a_lone_selected_legs_coverage_from_the_bare_download_folder",
         "tests/test_ci_branch_reuse_workflow.py::test_sonar_leaves_a_bare_download_at_the_folder_root_when_two_legs_were_selected",
-        "tests/test_ci_branch_reuse_workflow.py::test_sonar_takes_a_lone_legs_newest_attempt_when_its_attempts_land_in_their_own_folders"
+        "tests/test_ci_branch_reuse_workflow.py::test_sonar_takes_a_lone_legs_newest_attempt_when_its_attempts_land_in_their_own_folders",
+        "tests/test_ci_lone_artifact_download.py::test_the_gate_summary_counts_a_lone_report_that_lands_at_the_folder_root"
       ]
     },
     {
       "id": "test-summary-downloads-every-report-in-one-step",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-test-summary-single-download",
-      "behaviour": "The protected grader admits a test summary job that fetches its durations and flakes reports with one artifact download step under the pattern {durations,flakes}-3.*, retried once, beside the reviewed two download job, so a blob response that download-artifact leaves open idles the job at most once and it stays inside its five minute limit.",
-      "seam": "scripts.gate_protected.grade over the test-summary job, through scripts.gate_protected._one_download",
+      "behaviour": "The Tests workflow test summary job fetches its durations and flakes reports with one artifact download step under the pattern {durations,flakes}-3.*, retried once, and the protected grader admits that job beside the reviewed two download job, so a blob response that download-artifact leaves open idles the job at most once and it stays inside its five minute limit.",
+      "seam": "the test-summary job of the Tests workflow, and scripts.gate_protected.grade over it through scripts.gate_protected._one_download",
       "tests": [
         "tests/test_gate_protected.py::test_the_separate_summary_accepts_one_download_of_every_report",
         "tests/test_gate_protected.py::test_the_separate_summary_refuses_one_download_of_other_reports",
-        "tests/test_gate_protected.py::test_the_one_download_puts_one_step_for_every_report_where_the_first_download_was"
+        "tests/test_gate_protected.py::test_the_one_download_puts_one_step_for_every_report_where_the_first_download_was",
+        "tests/test_ci_gate_summary.py::test_the_test_summary_downloads_every_report_in_one_step"
       ]
     },
     {
@@ -7713,7 +7799,7 @@
       "id": "lab-shadow-comparison",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/lab-shadow",
-      "behaviour": "The CI lab shadow recorder reads check_run.completed deliveries: a github-actions check run gives the Actions verdict of the gate its job name maps to (unit* to tests, mutation* to mutation, a static job to its gate id, anything else listed unmapped) and a lab-shadow check run gives the lab verdict and its grader revision; each side folds failing when any of its check runs failed, the row of a gate and head holding both lands in Redis, the object store and the lab_shadow table, a turn into a mismatch counts ci_lab_verdict_mismatch_total, and the shadow report prints heads compared and mismatches per gate since a grader revision.",
+      "behaviour": "The CI lab shadow recorder reads check_run.completed deliveries: a github-actions check run gives the Actions verdict of the gate its job name maps to (unit* to tests, mutation* to mutation, a static job to its gate id, anything else listed unmapped) and a lab-shadow check run from the lab's GitHub App gives the lab verdict and its grader revision; each side folds failing when any of its check runs failed, the row of a gate and head holding both lands in Redis, the object store and the lab_shadow table, a turn into a mismatch counts ci_lab_verdict_mismatch_total, and the shadow report prints heads compared and mismatches per gate since a grader revision.",
       "seam": "scripts.ci_lab.shadow gate_of, static_jobs, Shadow.observe and Shadow.record, rows, report and main through python -m scripts.ci_lab shadow report",
       "tests": [
         "tests/ci_lab/test_shadow.py::test_every_actions_check_run_of_a_pull_request_head_maps_to_a_gate_or_is_listed_unmapped",
@@ -7723,10 +7809,24 @@
       ]
     },
     {
+      "id": "lab-scheduler-grade",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/lab-scheduler",
+      "behaviour": "The CI lab scheduler grades an admitted head in passes of Scheduler.tick: a head whose every unit the verdict store answers enqueues nothing and completes its check runs at once; a newer head of the same lane drops the older head's pending units, carries its running jobs and reuses its stored verdicts; an expired lease requeues once and a second loss makes the grade red; a unit that cannot run makes the grade red and stores no verdict; and the grade's conclusion folds the gates by the Gate Required rules of the test workflow, matching every recorded case.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis and the local object store, and scripts.ci_lab.scheduler.fold against the recorded cases in tests/fixtures/ci_lab/gate_required.json",
+      "tests": [
+        "tests/ci_lab/test_scheduler.py::test_a_fully_cached_head_enqueues_nothing_and_completes_at_once",
+        "tests/ci_lab/test_scheduler.py::test_a_newer_head_drops_pending_units_and_reuses_carried_verdicts",
+        "tests/ci_lab/test_scheduler.py::test_a_lost_worker_requeues_once_then_its_unit_makes_the_grade_red",
+        "tests/ci_lab/test_scheduler.py::test_a_unit_that_cannot_run_makes_the_grade_red_and_stores_no_verdict",
+        "tests/ci_lab/test_scheduler.py::test_the_fold_reproduces_gate_required_on_recorded_fixtures"
+      ]
+    },
+    {
       "id": "lab-shadow-acceptance-report",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/cut-shadow-report",
-      "behaviour": "python -m scripts.ci_lab shadow report --gate GATE reads the newest completed Tests runs of the event, pull_request unless --event merge_group, and joins each distinct head's github-actions jobs of the gate with its lab-shadow check run; a head whose jobs of the gate were cancelled, still run or never graded leaves the window, a unit job the workflow reran after a lost runner counts by its rerun, and the report prints one row per head with each verdict, whether the lab verdict completed first and whether the two disagree, then the counts, and exits 0 only when the window holds the asked heads, no mismatch, a lab verdict on 48 and a lab verdict first on 45 of every 50, rounded up.",
+      "behaviour": "python -m scripts.ci_lab shadow report --gate GATE reads the newest completed Tests runs of the event, pull_request unless --event merge_group, and joins each distinct head's github-actions jobs of the gate with its lab-shadow check run from the lab App named by --app or AGENTIHOOKS_LAB_APP, refusing to run without one; a head whose jobs of the gate were cancelled, still run or never graded leaves the window, a unit job the workflow reran after a lost runner counts by its rerun, and the report prints one row per head with each verdict, whether the lab verdict completed first and whether the two disagree, then the counts, and exits 0 only when the window holds the asked heads, no mismatch, a lab verdict on 48 and a lab verdict first on 45 of every 50, rounded up.",
       "seam": "scripts.ci_lab.shadow_report actions, lab, head, rule, tally, holds, render, collect, claims and main through python -m scripts.ci_lab shadow report --gate",
       "tests": [
         "tests/ci_lab/test_shadow_report.py::test_a_lab_verdict_that_disagrees_with_actions_is_a_mismatch_that_fails_the_rule",
@@ -7739,6 +7839,18 @@
         "tests/ci_lab/test_shadow_report.py::test_the_report_command_names_its_repository_and_refuses_an_empty_window",
         "tests/ci_lab/test_shadow_report.py::test_only_a_report_with_a_gate_is_the_acceptance_rule_report",
         "tests/ci_lab/test_shadow_report.py::test_a_paged_list_stops_at_a_short_page_or_after_ten_pages"
+      ]
+    },
+    {
+      "id": "lab-scheduler-evidence",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-scheduler-record-grades",
+      "behaviour": "When the CI lab scheduler closes a grade because every unit is final, it records the grade through the evidence printer: the grade document under its run and an empty marker under its head, carrying the grade inputs and one unit per unit of the grade with the grade run that used its verdict, so the evidence printer shows the grade by run and the head index lists it; a grade still waiting on a unit records nothing.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis and the local object store, read back through scripts.ci_lab.evidence.show and scripts.ci_lab.evidence.head_prefix",
+      "tests": [
+        "tests/ci_lab/test_scheduler.py::test_a_folded_grade_is_recorded_so_show_finds_it_by_run_and_head",
+        "tests/ci_lab/test_scheduler.py::test_a_grade_is_recorded_only_when_its_last_unit_is_final",
+        "tests/ci_lab/test_scheduler.py::test_a_grade_with_a_lost_unit_is_recorded_and_show_names_its_missing_objects"
       ]
     },
     {
@@ -8434,6 +8546,30 @@
       ]
     },
     {
+      "id": "lab-sandbox-bwrap-pull-request-tier",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-sandbox-bwrap-ci",
+      "behaviour": "Every pull request touching the lab sandbox module, the static gate and test unit runners that build it, their tests or the writer lock workflow runs those tests on a GitHub hosted runner where bubblewrap can create user and network namespaces, through the writer lock workflow, which feeds Gate Required; the job fails when bubblewrap cannot isolate there or when any of those tests fails or skips, so a unit that can write into the grader or base tree turns the pull request red.",
+      "seam": "writer-lock.yml lab-sandbox selection step and lab-sandbox job",
+      "tests": [
+        "tests/test_ci_lab_sandbox_pr.py::test_lab_sandbox_selection",
+        "tests/test_ci_lab_sandbox_pr.py::test_the_lab_sandbox_job_feeds_the_required_gate_on_selected_pull_requests",
+        "tests/test_ci_lab_sandbox_pr.py::test_the_job_fails_unless_bubblewrap_isolates_after_the_userns_restriction_is_lifted",
+        "tests/test_ci_lab_sandbox_pr.py::test_the_job_installs_bubblewrap_from_the_ubuntu_archive_when_the_runner_lacks_it",
+        "tests/test_ci_lab_sandbox_pr.py::test_the_lab_sandbox_run_fails_on_a_skipped_or_failed_test"
+      ]
+    },
+    {
+      "id": "lab-static-read-only-trees",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-worker-readonly-trees",
+      "behaviour": "The lab's static gate executor builds each gate step's sandbox with the grader tree and the base tree as its read only trees, so the step runs inside bubblewrap with both trees bound read only after the root bind and cannot write into the grader that grades it, while the head tree stays writable.",
+      "seam": "scripts.ci_lab.run_static run, the Sandbox it builds for the gate step and the bubblewrap arguments the step runs under",
+      "tests": [
+        "tests/ci_lab/test_run_static.py::test_the_step_runs_with_the_grader_and_base_trees_bound_read_only"
+      ]
+    },
+    {
       "id": "lab-static-step-env",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-step-env",
@@ -8633,6 +8769,18 @@
       "tests": [
         "tests/test_compose_stack.py::test_the_stack_never_reads_the_bus_settings_of_the_shell_that_runs_compose",
         "tests/test_compose_stack.py::test_an_agent_shell_on_the_anton_bus_leaves_the_controller_on_the_stack_nats"
+      ]
+    },
+    {
+      "id": "tick-view-merged-pull-cache",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-view-slow-github-reads",
+      "behaviour": "The batched pull request read serves every pull request the swarm Redis keeps as merged and reads only the rest from GitHub, then keeps each view GitHub answered merged in full for two days, because a merged view never changes. A new controller process after a roll therefore reads only the open pull requests of its tick view instead of every merged pull request of the last day, so its first tick view build fits the pass view wait and the merge pass runs. Open and closed pull requests, and an entry another release wrote with other fields, are read again.",
+      "seam": "views in scripts.swarm.ledger_events, called by tick_view and fresh_reader with the swarm Redis as its cache",
+      "tests": [
+        "tests/swarm/test_pull_views.py::test_a_new_process_reads_only_the_pull_requests_not_kept_merged",
+        "tests/swarm/test_pull_views.py::test_open_and_closed_pull_requests_are_read_again_by_a_new_process",
+        "tests/swarm/test_pull_views.py::test_a_kept_entry_with_other_fields_is_read_again_and_replaced"
       ]
     }
   ],

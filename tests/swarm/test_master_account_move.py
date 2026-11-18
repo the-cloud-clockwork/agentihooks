@@ -1,5 +1,7 @@
 import pytest
 
+from tests.swarm.client_class import client_class
+
 pytestmark = pytest.mark.unit
 
 LAUNCH = {"profile": "master", "harness": "claude", "account": "login", "model": "opus", "effort": "high"}
@@ -44,14 +46,14 @@ def test_a_master_that_keeps_its_account_posts_nothing(previous, account):
     assert chat.lines == []
 
 
-def test_the_tick_names_the_new_account_when_a_master_successor_moves(monkeypatch):
+def test_the_tick_names_the_new_account_when_a_master_successor_moves(monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts.swarm import ledger_client
     from scripts.swarm.store import MASTER
     from scripts.swarm.tick import Placed, _master
     from tests.swarm.test_tick_master import direct
 
     chat = _Chat()
-    monkeypatch.setattr(ledger_client, "LedgerClient", lambda: chat)
+    monkeypatch.setattr(ledger_client, "LedgerClient", client_class(chat))
     swarm, runtime = direct()
     spawn = runtime.spawn
 
