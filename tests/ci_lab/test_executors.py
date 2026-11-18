@@ -11,7 +11,7 @@ from typing import Any, cast
 import pytest
 
 from scripts import ci_wiring
-from scripts.ci_lab import contract, executors, run_static, run_tests, static_gates, worker
+from scripts.ci_lab import contract, executors, run_static, run_tests, static_gates, venvs, worker
 from scripts.ci_lab.outcomes import FAILED, PASSED
 from scripts.ci_lab.sandbox import CannotRun, Outcome, PortAllocator, PortRange
 from scripts.ci_lab.units import Unit
@@ -168,7 +168,9 @@ def test_static_runs_the_gate_the_grader_tree_names_over_the_head_with_its_base_
 
     head, base, grader = (static_trees.trees[sha] for sha in ("h1", "b1", "g1"))
     assert len(gates) == 2
-    assert venv.calls == [(hashlib.sha256(b"lock-h").hexdigest(), head, pod.root / "venvs")]
+    assert venv.calls == [
+        (hashlib.sha256(b"lock-h").hexdigest(), head, pod.root / "venvs", venvs.Build(pod.ports, WHITELIST, 30.0))
+    ]
     settings = run_static.Settings(pod.runs, tmp_path / "venv", pod.ports, WHITELIST, 30.0, {"inputs.base": "b1"})
     assert ran.calls == [(gates[name], head, base, grader, settings)]
     assert finished == Finished(PASSED, finished.report, tmp_path / "log.txt")
@@ -270,7 +272,9 @@ def test_tests_runs_the_batch_on_the_lockfile_venv_with_the_manifest_and_flake_l
 
     finished = executors.tests(pod, suite, lease("test", "k", ("tests/a.py::t",), slots=3))
 
-    assert venv.calls == [(hashlib.sha256(b"lock-h").hexdigest(), tree, pod.root / "venvs")]
+    assert venv.calls == [
+        (hashlib.sha256(b"lock-h").hexdigest(), tree, pod.root / "venvs", venvs.Build(pod.ports, WHITELIST, 30.0))
+    ]
     lab = run_tests.Lab(pod.runs, pod.ports, WHITELIST, manifest, tmp_path / "flakes.jsonl", 30.0, False)
     assert ran.calls == [(("tests/a.py::t",), tree, tmp_path / "venv", 3, lab)]
     assert finished == Finished(PASSED, finished.report, tmp_path / "log.txt")
@@ -335,7 +339,14 @@ def test_mutation_runs_a_stats_unit_with_its_tree_as_root_and_the_stats_cache(
 
     finished = executors.mutation(pod, mutation_settings(tmp_path), lease("stats", "k1", ("tests/test_alpha.py",)))
 
-    assert venv.calls == [(hashlib.sha256(b"lock-m").hexdigest(), mutation_tree, pod.root / "venvs")]
+    assert venv.calls == [
+        (
+            hashlib.sha256(b"lock-m").hexdigest(),
+            mutation_tree,
+            pod.root / "venvs",
+            venvs.Build(pod.ports, WHITELIST, 30.0),
+        )
+    ]
     assert trampolines.calls == [
         (mutation_tree, "hooks/pkg/gamma.py"),
         (mutation_tree, "scripts/alpha.py"),
