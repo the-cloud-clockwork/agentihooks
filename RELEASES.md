@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.1042 · 2026-11-18
+
+### 2026-11-18 · 6beaea992663 · #12200 · @nestorcolt
+
+**Document the refusal a tick step meets on an undeclared pass read**
+
+This change adds documentation only, with no code behavior changes, explaining the UndeclaredRead refusal a tick step encounters when it reads a pass box value that its reads/writes declarations don't cover. It details which keys are guarded, how the DeclaredBox view behaves, how hook domains are treated, how to fix the error, and how the refusal propagates through existing exception-handling wrappers. A troubleshooting row and changelog fragment are included, giving operators and engineers a clear reference for diagnosing and resolving this specific tick engine error without altering runtime logic.
+
 ## v2.17.1041 · 2026-11-18
 
 ### 2026-11-18 · 0f6335273714 · #12186 · @agenticore-app
