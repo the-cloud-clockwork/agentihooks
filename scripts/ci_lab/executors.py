@@ -33,6 +33,7 @@ from scripts.ci_lab import contract, run_mutation, run_static, run_tests, venvs,
 from scripts.ci_lab.outcomes import FAILED, PASSED
 from scripts.ci_lab.sandbox import PortAllocator, Sandbox
 from scripts.ci_lab.static_gates import REGISTRY, WORKFLOW, StaticGate, discover
+from scripts.ci_lab.venvs import Build
 from scripts.ci_lab.worker import Executor, Finished, Lease
 from scripts.ci_lab.worktrees import Mirror, Worktrees
 
@@ -136,9 +137,9 @@ class Pod:
         return self.root / "venvs"
 
     @property
-    def build(self) -> venvs.Build:
+    def build(self) -> Build:
         """The sandbox a head's venv build runs in: the pod's ports, whitelist and unit time limit."""
-        return venvs.Build(self.ports, self.whitelist, self.timeout)
+        return Build(self.ports, self.whitelist, self.timeout)
 
 
 @dataclass(frozen=True)
