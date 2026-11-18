@@ -1983,8 +1983,10 @@ the tick launches no workstation task and offers each one pinned to the root hiv
 are its only taker, and only a spoke poll beats the hive's presence. `hive run` loads the operator env files before
 the spokes read their bus settings, and a draining hive polls no spoke but keeps beating presence on every `events`
 swarm, so the hub never judges its running agents lost. Only a memory bus refuses the lane spokes, on every hive.
-The bus settings a hive needs arrive with its
-invite; see [The hub and the bus](../reference/deployment-modes.md#the-hub-and-the-bus).
+The bus settings a member hive needs arrive with its
+invite; see [The hub and the bus](../reference/deployment-modes.md#the-hub-and-the-bus). The workstation root hive
+has no invite and gets them from `agentihooks hive root-bus`; see
+[Root hive bus settings](../reference/deployment-modes.md#root-hive-bus-settings).
 
 ## Workstation fallback
 
