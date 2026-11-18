@@ -1243,6 +1243,8 @@ $ python -m scripts.gate_protected --base origin/dev --head HEAD
 graded HEAD against merge base fad7e9be3aac: 0 protected gate problems
 ```
 
+The Tests `lint` job runs the same command from its grader checkout at the event base, with the pull request head as `--head`. [Protected gate step in lint](grader-gate-steps.md#protected-gate-step-in-lint) describes that step.
+
 ### Changing the pinned names or the inventory
 
 There is no setting or environment variable. The pinned names are whatever the base writes for the jobs whose names equal `GATE_NAME` and `SUMMARY_NAME`. The inventory is `REQUIRED`, `SKIPPED`, `ANNOUNCED` and `LAB_VERDICT` in `scripts.ci_gate_queue`. Because `Gate — Protected` runs the base branch's grader, a need the base does not know is refused in the pull request that adds it. `ANNOUNCED` lists promotion gates that the base accepts before the pull request that adds them lands. To add a need, first land a grader pull request that adds the job to `ANNOUNCED`, then add the need to `gate-required` in a later pull request.
