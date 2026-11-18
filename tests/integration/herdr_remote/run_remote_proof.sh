@@ -85,7 +85,7 @@ trap cleanup EXIT
 
 /usr/sbin/sshd -f "$proof_root/sshd/sshd_config" -D -e 2> "$proof_root/sshd/sshd.log" &
 sshd_pid=$!
-for _ in $(seq 1 50); do
+for _ in {1..50}; do
     grep -q "Server listening" "$proof_root/sshd/sshd.log" && break
     sleep 0.1
 done
@@ -97,7 +97,7 @@ start_server() {
         "${leader[@]}" herdr server > "$proof_root/remote/server-$1.log" 2>&1 &
     server_pid=$!
     local status
-    for _ in $(seq 1 100); do
+    for _ in {1..100}; do
         status="$(remote herdr status server --json 2>/dev/null || true)"
         [[ "$status" == *'"running":true'* ]] && return 0
         sleep 0.2
