@@ -1987,6 +1987,7 @@ def test_panic_freezes_a_deploy_behind_kubectl_helm_argocd_or_gh_global_options(
         "gh api --method POST /repos/o/r/dispatches -f event_type=go",
         "gh api -H 'Accept: application/vnd.github+json' https://api.github.com/repos/o/r/dispatches/",
         "gh api --input body.json repos/o/r/actions/workflows/7/dispatches",
+        "gh api repos/o/r/dispatches?per_page=1",
     ],
 )
 @pytest.mark.feature("panic-freeze-global-options")
@@ -2037,7 +2038,7 @@ def test_every_frozen_program_has_a_global_option_set() -> None:
 _KUBECTL_VALUE_OPTIONS = (
     "-n --namespace -s --server -v --v --as --as-group --as-uid --as-user-extra --cache-dir --certificate-authority "
     "--client-certificate --client-key --cluster --context --kubeconfig --kuberc --log-flush-frequency --password "
-    "--profile --profile-output --request-timeout --tls-server-name --token --user --username --vmodule"
+    "--profile --profile-output --proxy-url --request-timeout --tls-server-name --token --user --username --vmodule"
 )
 _HELM_VALUE_OPTIONS = (
     "-n --namespace --burst-limit --color --colour --content-cache --kube-apiserver --kube-as-group --kube-as-user "
@@ -2118,6 +2119,8 @@ def test_a_gh_api_option_takes_its_value_before_the_endpoint(option: str) -> Non
         (["gh", "-R", "o/r", "run", "rerun"], (["gh", "run", "rerun"], [("-R", "o/r")])),
         (["gh", "--repo=o/r", "-R"], (["gh"], [("--repo=o/r", ""), ("-R", "")])),
         (["kubectl", "-n", "x", "apply"], (["kubectl", "apply"], [("-n", "x")])),
+        (["kubectl", "apply", "-n", "x"], (["kubectl", "apply", "-n", "x"], [])),
+        (["kubectl", "-n"], (["kubectl"], [("-n", "")])),
         (["helm", "--debug", "-n", "x", "upgrade", "r"], (["helm", "upgrade", "r"], [("--debug", ""), ("-n", "x")])),
         (
             ["argocd", "app", "--grpc-web", "--server", "s", "sync", "a"],

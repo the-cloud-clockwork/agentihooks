@@ -72,6 +72,7 @@ _KUBECTL_VALUES = frozenset(
         "--password",
         "--profile",
         "--profile-output",
+        "--proxy-url",
         "--request-timeout",
         "--tls-server-name",
         "--token",
