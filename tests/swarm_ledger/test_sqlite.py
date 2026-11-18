@@ -2,6 +2,9 @@ import copy
 import json
 import sqlite3
 import threading
+from contextlib import closing
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -451,6 +454,27 @@ def test_concurrent_first_connections_set_up_the_store_once(tmp_path, monkeypatc
         thread.join(5)
     assert errors == []
     assert len(setups) == 1
+
+
+@pytest.mark.feature("ledger-new-file-setup-waits-out-another-write-lock")
+def test_a_new_store_waits_out_another_connections_write_lock_before_it_turns_on_wal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "ledgers.sqlite3"
+    holder = sqlite3.connect(path, isolation_level=None, check_same_thread=False)
+    holder.execute("BEGIN IMMEDIATE")
+    pauses: list[float] = []
+
+    def pause(seconds: float) -> None:
+        pauses.append(seconds)
+        holder.execute("ROLLBACK")
+
+    monkeypatch.setattr(sqlite, "time", SimpleNamespace(monotonic=lambda: 0.0, sleep=pause), raising=False)
+    assert SQLiteLedgerRepository(path).summaries() == []
+    holder.close()
+    assert pauses == [0.05]
+    with closing(sqlite3.connect(path)) as connection:
+        assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
 
 
 def test_one_thread_reads_existence_credential_and_task_rows_through_one_connection(tmp_path, monkeypatch):
