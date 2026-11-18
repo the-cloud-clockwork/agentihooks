@@ -907,9 +907,21 @@ Each request also logs `github-webhook: delivery <X-GitHub-Delivery> event <X-Gi
 on standard error; a notice carries neither header, so both print `None`.
 
 The deployment's public ingress routes only `/github`. A notice reaches the receiver's Service on
-port 8790 from inside the cluster, where the receiver's network policy admits the pod network. No
-agentihooks command sends notices yet, so until one does, a head reaches the lab only through a
-GitHub delivery or a notice sent by hand as above.
+port 8790 from inside the cluster, where the receiver's network policy admits the pod network.
+
+`agentihooks swarm <slug> publish` sends one notice after each push to origin. Its body names the
+origin in the `https://github.com/<owner>/<repo>` form, the pushed head, the head's merge base with
+`origin/dev` and the actor below, signed as above. The publish result records the receiver's status
+as `lab_notice`, or `0` when the send failed. Without all three settings nothing is sent and
+`lab_notice` is absent. A send the receiver refuses, or that cannot reach it, prints
+`lab head notice for <head> was not accepted: <error>; the push stands` on standard error, records
+`lab_notice` `0` and leaves the push in place.
+
+| Name | Meaning |
+|---|---|
+| `AGENTIHOOKS_CI_LAB_NOTICE_URL` | The receiver's `/lab/head` address, such as `http://agentihooks-swarm-github-webhook.agentihooks-swarm.svc:8790/lab/head` |
+| `AGENTIHOOKS_CI_LAB_NOTICE_SECRET` | The lab notice secret the receiver verifies with |
+| `AGENTIHOOKS_CI_LAB_NOTICE_ACTOR` | The GitHub login the notice names. It must be on the trust list, or the scheduler records the head without grading it |
 
 ### Push a head to the lab remote
 
