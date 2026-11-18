@@ -101,6 +101,12 @@ class Unreachable(SwarmError):
     pass
 
 
+class IdentityConflict(SwarmError):
+    def step_fields(self) -> dict[str, str]:
+        """The conflict message a failed tick step records as its detail."""
+        return {"detail": str(self)}
+
+
 @dataclass(frozen=True)
 class SwarmConfig:
     slug: str

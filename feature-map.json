@@ -435,7 +435,8 @@
       "behaviour": "Two admissions racing for one seat on a records layout swarm, such as two hub replicas claiming two tasks at once, never both commit: the second commit is refused on the seat index, retried, and refused as a replacement that does not match the current execution, so the seat holds one current execution and no twin is left whose every write conflicts.",
       "seam": "RedisStore.start_execution through ExecutionRegistry admission and the fencing records seat index",
       "tests": [
-        "tests/swarm/test_execution_concurrency.py::test_an_admission_that_loses_its_seat_to_another_admission_is_refused"
+        "tests/swarm/test_execution_concurrency.py::test_an_admission_that_loses_its_seat_to_another_admission_is_refused",
+        "tests/swarm/test_fencing_records.py::test_the_seat_index_follows_the_newest_execution_of_each_seat"
       ]
     },
     {
