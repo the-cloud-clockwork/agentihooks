@@ -13,15 +13,15 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from scripts.scheduler.process_timer import POLL_S
+from scripts.scheduler.service import PASS_S
 from scripts.swarm_ledger.events.stream import parse
 from scripts.swarm_ledger.ledger_server import FOLLOW_S
 from tests.ledger_load import gate
 
 SECONDS = 30
 WRITES_PER_SECOND = 2
-SCHEDULER_PASS_S = 1.0
 PUBLISH_MARGIN_S = 1.0
-FOLLOW_PASS_S = SCHEDULER_PASS_S + FOLLOW_S + POLL_S + PUBLISH_MARGIN_S
+FOLLOW_PASS_S = PASS_S + FOLLOW_S + POLL_S + PUBLISH_MARGIN_S
 DELIVERY_POLL_S = 0.05
 
 
