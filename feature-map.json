@@ -4876,6 +4876,31 @@
       ]
     },
     {
+      "id": "credential-guard-reads-shell-scripts",
+      "origin": "regression",
+      "ordered_at": "2026-11-18",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-env-guard-gap",
+      "behaviour": "The credential guard checks the script a shell runs with -c like a command of its own, whether the shell is the command itself or the command a kubectl, docker or ssh wrapper runs, so an environment dump, a credential file read or a recursive search of a tree that holds a credential file inside sh -c, bash -c, zsh -c or dash -c is refused the same way as at the top level, while a script that prints no value, a count, a shell running a script file and a -c flag of another tool pass.",
+      "seam": "hooks.context.credential_guard.shell_scripts, read by hooks.context.credential_guard.decide and hooks.context.credential_guard.evaluate",
+      "tests": [
+        "tests/test_credential_guard.py::test_an_environment_dump_inside_a_shell_script_is_refused",
+        "tests/test_credential_guard.py::test_a_shell_script_that_prints_no_value_passes",
+        "tests/test_credential_guard.py::test_a_shell_script_keeps_the_credential_tree_scan"
+      ]
+    },
+    {
+      "id": "credential-guard-refuses-awk-environ-values",
+      "origin": "regression",
+      "ordered_at": "2026-11-18",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-env-guard-gap",
+      "behaviour": "The credential guard refuses an awk, gawk, mawk or nawk stage whose program reads a value out of ENVIRON with a subscript, in any stage of a pipeline, while the name only listing that loops over ENVIRON and prints the names, an awk program that never reads ENVIRON and another tool naming ENVIRON pass.",
+      "seam": "hooks.context.credential_guard.awk_environ_verdict, read by hooks.context.credential_guard.decide",
+      "tests": [
+        "tests/test_credential_guard.py::test_an_awk_read_of_an_environment_value_is_refused",
+        "tests/test_credential_guard.py::test_an_awk_listing_of_environment_names_passes"
+      ]
+    },
+    {
       "id": "swarm-outage-recovery-hub-admitted",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-outage-recovery",
