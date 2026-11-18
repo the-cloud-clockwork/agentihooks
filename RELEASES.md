@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.1017 · 2026-11-18
+
+### 2026-11-18 · 91ff13fabc59 · #12004 · @nestorcolt
+
+**Compose front reads healthy only once nginx serves the ledger health route**
+
+This change adds a healthcheck to the front service in both compose.yaml and its swarm copy, polling nginx's /healthz route via wget until it responds. Previously, front was marked ready as soon as its container started, even if nginx hadn't finished initializing, causing connection resets during the smoke test right after `docker compose up --wait` returned. Now `--wait` only completes once nginx is actually serving traffic, preventing premature requests and flaky promotion failures.
+
 ## v2.17.1014 · 2026-11-18
 
 ### 2026-11-18 · 9c05a1894570 · #11984 · @agenticore-app
