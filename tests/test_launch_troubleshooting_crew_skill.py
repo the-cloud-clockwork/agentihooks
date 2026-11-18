@@ -1,5 +1,6 @@
 import json
 import re
+from dataclasses import asdict, replace
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -8,12 +9,13 @@ import pytest
 import yaml
 
 from scripts.swarm import troubleshooting_crew
+from scripts.swarm_ledger import ledger_comments
 
 pytestmark = pytest.mark.unit
 
 SKILL = Path(__file__).parents[1] / "profiles/package/skills/launch-troubleshooting-crew"
 NOW = 1794614400.0
-CID = "crew-1114000000"
+CID = "crew-261114-000000"
 ME = ["agentihooks", "ledger", "--slug", "demo", "--as", "master@demo"]
 QUOTE = troubleshooting_crew.LAUNCH_QUOTE
 ENTRY = '"${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/skills/launch-troubleshooting-crew/scripts/crew.py'
@@ -55,6 +57,8 @@ class Ledger:
             task = command[-1].removeprefix("tasks/")
             row: dict[str, Any] = {"id": task, "state": "done" if task in self.done else "claimed"}
             return json.dumps({**row, "done": True} if task in self.flagged else row)
+        if command[6:8] == ["task", "add"]:
+            ledger_comments.check(command[9], "item")
         return "{}"
 
     def writes(self) -> list[list[str]]:
@@ -511,3 +515,70 @@ def test_run_returns_output_and_raises_on_a_failure(crew: ModuleType) -> None:
         crew.run(["sh", "-c", "echo bad >&2; exit 3", "zero", "one"])
     with pytest.raises(crew.CommandFailed, match="^sh -c echo shown; exit 1 failed: shown$"):
         crew.run(["sh", "-c", "echo shown; exit 1"])
+
+
+@pytest.mark.feature("troubleshooting-crew-task-titles")
+def test_a_scout_dry_run_then_a_real_run_adds_every_scout_task(
+    crew: ModuleType, capsys: pytest.CaptureFixture[str]
+) -> None:
+    dry = Ledger()
+    assert crew.main(["scout", "demo", "--problem", "p", "--dry-run"], runner=dry, now=NOW) == 0
+    printed = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line.startswith("[")]
+    assert dry.calls == [] and not crew.state_path("demo").exists()
+    ledger = Ledger()
+    run(crew, ledger, "scout", "demo", "--problem", "p", capsys=capsys)
+    adds = [command for command in ledger.writes() if command[6:8] == ["task", "add"]]
+    assert adds == [command for command in printed if command[6:8] == ["task", "add"]]
+    assert [command[8] for command in adds] == [f"{CID}-scout-{n}" for n in range(1, 6)]
+    assert json.loads(crew.state_path("demo").read_text())["scout_tasks"] == [command[8] for command in adds]
+
+
+@pytest.mark.feature("troubleshooting-crew-task-titles")
+def test_a_scout_title_the_ledger_refuses_stops_the_stage_before_any_write(crew: ModuleType) -> None:
+    crew.save_state("demo", crew.State("crew-1116073743", "p", asdict(crew.Crew())))
+    saved = crew.state_path("demo").read_text()
+    refused = (
+        "^the ledger would refuse the title of crew task crew-1116073743-scout-1: run or job id '1116073743'; "
+        "nothing was written$"
+    )
+    for argv in (["scout", "demo", "--problem", "p"], ["scout", "demo", "--problem", "p", "--dry-run"]):
+        ledger = Ledger()
+        with pytest.raises(SystemExit, match=refused):
+            crew.main(argv, runner=ledger, now=NOW)
+        assert ledger.calls == [] and crew.state_path("demo").read_text() == saved
+
+
+@pytest.mark.feature("troubleshooting-crew-task-titles")
+def test_fix_and_harden_stop_before_any_write_on_a_title_the_ledger_refuses(crew: ModuleType) -> None:
+    scouts = [f"crew-1116073743-scout-{n}" for n in range(1, 6)]
+    old = crew.State("crew-1116073743", "p", asdict(crew.Crew()), scout_tasks=scouts, launched=True)
+    for stage, task, fixers in (("fix", "fix-1", []), ("harden", "harden", ["crew-1116073743-fix-1"])):
+        crew.save_state("demo", replace(old, fixer_tasks=fixers))
+        saved = crew.state_path("demo").read_text()
+        refused = (
+            f"^the ledger would refuse the title of crew task crew-1116073743-{task}: run or job id '1116073743'; "
+            "nothing was written$"
+        )
+        for argv in ([stage, "demo", "--cause", "c1"], [stage, "demo", "--cause", "c1", "--dry-run"]):
+            ledger = Ledger(done=set(scouts))
+            with pytest.raises(SystemExit, match=refused):
+                crew.main(argv, runner=ledger, now=NOW)
+            assert ledger.writes() == [] and crew.state_path("demo").read_text() == saved
+
+
+@pytest.mark.feature("troubleshooting-crew-task-titles")
+def test_every_crew_task_title_passes_the_ledger_rule(crew: ModuleType, capsys: pytest.CaptureFixture[str]) -> None:
+    scout, fix, _, harden = run(crew, Ledger(), "plan", "demo", "--problem", "p", capsys=capsys)["stages"]
+    tasks = [*scout["tasks"], *fix["tasks"], harden["task"]]
+    refused = [task for task in tasks if ledger_comments.problems(f"Troubleshooting crew {task}", "item")]
+    assert len(tasks) == 11 and refused == []
+
+
+@pytest.mark.feature("troubleshooting-crew-task-titles")
+def test_a_crew_task_title_the_ledger_refuses_names_every_reason(crew: ModuleType) -> None:
+    refused = (
+        "^the ledger would refuse the title of crew task crew-1116073743-2026-11-16: date '2026-11-16'; run or job id "
+        "'1116073743'; nothing was written$"
+    )
+    with pytest.raises(SystemExit, match=refused):
+        crew.add_task("demo", "master@demo", "crew-1116073743-2026-11-16", "scout")

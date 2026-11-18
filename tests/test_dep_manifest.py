@@ -202,6 +202,7 @@ def test_a_change_to_a_file_a_test_opened_outside_its_record_invalidates_that_te
     }
     hit = {"tests/test_a.py::test_one", "tests/test_b.py::test_two"}
     assert dep_manifest.invalidated(manifest, [("docs/a.md", "a", "b")]) == (hit, None)
+    assert dep_manifest.invalidated(manifest, [("docs/other.md", "a", "b")]) == (set(), None)
 
 
 def test_a_source_change_invalidates_the_tests_that_read_it_as_data():

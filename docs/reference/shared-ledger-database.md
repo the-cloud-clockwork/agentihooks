@@ -8,7 +8,9 @@ nav_order: 48
 {: .no_toc }
 
 When `AGENTIHOOKS_SWARM_DATABASE_URL` is set, every ledger server, ledger API service and swarm process stores its
-ledgers in one shared Postgres database through `PostgresLedgerRepository`. Writers take turns through one writer
+ledgers in one shared Postgres database through `PostgresLedgerRepository`. The ledger server only reads; the ledger
+API service and every swarm client write through the ledger API route code ([Ledger write
+path](ledger-write-path.md)). Writers take turns through one writer
 lock. Every connection asks the server to end a session that stalls, so a client that dies or gives up while it
 holds or waits for that lock cannot stop ledger writes for every swarm on the database. The database also stores
 the oldest writer version it allows, and refuses ledger writes from older code that would make every replica

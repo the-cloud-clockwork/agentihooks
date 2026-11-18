@@ -34,12 +34,6 @@ class Load:
         """Slots not running a unit, never below zero."""
         return max(self.slots_total - self.slots_busy, 0)
 
-    @property
-    def slots_wanted(self) -> int:
-        """Slots the running and pending units of every class not shed take."""
-        held = (*self.running_slots.items(), *self.pending_slots.items())
-        return sum(slots for name, slots in held if name not in self.shed)
-
 
 def predicted_wait(estimates: Sequence[float], free_slots: int, frees_in: Sequence[float] = ()) -> float | None:
     """Seconds until the pending estimates drain across the pool, each free slot working from now and each busy slot

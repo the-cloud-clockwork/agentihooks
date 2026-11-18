@@ -58,6 +58,7 @@ UNKNOWN_SECONDS = 10.0
 class Record(TypedDict):
     units: list[int]
     files: NotRequired[list[str]]
+    outside: NotRequired[list[str]]
 
 
 def changed_files(root: Path, base: str, head: str) -> list[str]:
@@ -144,7 +145,8 @@ def reshaped(root: Path, base: str, head: str) -> bool:
 
 
 def recorded_tests(manifest: dict[str, Any], changed: list[str]) -> set[str]:
-    """Test files whose recorded run executed a changed unit or read a changed file that not every test reads."""
+    """Test files whose recorded run executed a changed unit or read a changed file that not every test reads, among
+    its recorded files and the files it opened outside its record."""
     names: list[str] = manifest["units"]
     records: dict[str, Record] = manifest["tests"]
     units = {index for index, unit in enumerate(names) if unit.partition("::")[0] in changed}
@@ -153,7 +155,7 @@ def recorded_tests(manifest: dict[str, Any], changed: list[str]) -> set[str]:
     return {
         test.partition("::")[0]
         for test, found in records.items()
-        if units.intersection(found["units"]) or read.intersection(found.get("files", []))
+        if units.intersection(found["units"]) or read.intersection([*found.get("files", []), *found.get("outside", [])])
     }
 
 

@@ -544,6 +544,20 @@ troubleshooting.
 
 ---
 
+## Secret reads with kubectl get
+
+The credential guard refuses a `kubectl get` that may fetch a Secret whenever
+an output or template value can print a `data` or `stringData` value: `yaml`,
+`json`, every jsonpath, custom columns and go template format in any flag
+spelling, and a raw API path under `secrets`. The table, `-o name`, `-o wide`
+and a go template that prints only the key names pass, and so does a get of a
+literal non Secret type with any output. See
+[Secret reads with kubectl get](../reference/credential-guard-get-secret.md)
+for when a get counts as a Secret get, the refused and passing forms, the key
+listing rules, configuration, limits and troubleshooting.
+
+---
+
 ## All guardrails at a glance
 
 | # | Guardrail | Hook event | Default | Block or warn | Config key |

@@ -194,7 +194,7 @@ def test_the_record_step_passes_every_flag_the_writer_parses(tmp_path, started):
     assert "Branch record for leg 7" in result.stdout
 
 
-def _planner_repo(tmp_path: Path, branch_planner: bool) -> Path:
+def _planner_repo(tmp_path: Path, branch_planner: bool, filter_copy: str) -> Path:
     workspace = tmp_path / "workspace"
     files = {
         ".github/scripts/pypi-retry.sh": "exit 0\n",
@@ -205,8 +205,9 @@ def _planner_repo(tmp_path: Path, branch_planner: bool) -> Path:
             "import os\nopen(os.environ['GITHUB_OUTPUT'], 'a').write(f\"reused={os.environ['FAKE_REUSED']}\\n\")\n"
         ),
         "tests/__init__.py": "",
-        "tests/reused_coverage.py": "",
     }
+    if filter_copy:
+        files[filter_copy] = ""
     if branch_planner:
         files["scripts/ci_branch_plan.py"] = (
             "import json, os, sys\n"
@@ -224,9 +225,14 @@ def _planner_repo(tmp_path: Path, branch_planner: bool) -> Path:
 
 
 def _plan(
-    tmp_path: Path, event: str, reused: str = "0", branch_planner: bool = True, bash_env: str = ""
+    tmp_path: Path,
+    event: str,
+    reused: str = "0",
+    branch_planner: bool = True,
+    bash_env: str = "",
+    filter_copy: str = "scripts/reused_coverage.py",
 ) -> tuple[Path, str]:
-    workspace = _planner_repo(tmp_path, branch_planner)
+    workspace = _planner_repo(tmp_path, branch_planner, filter_copy)
     runner, marks = tmp_path / "runner", tmp_path / "marks"
     runner.mkdir()
     marks.mkdir()
@@ -293,6 +299,23 @@ def test_a_grader_without_the_branch_planner_reuses_nothing_from_earlier_runs(tm
     called, outputs = _plan(tmp_path, "pull_request", branch_planner=False)
     assert not called.exists()
     assert "The grader has no branch planner" in outputs
+
+
+@pytest.mark.parametrize("filter_copy", ["scripts/reused_coverage.py", "tests/reused_coverage.py"])
+def test_a_pull_request_plans_with_the_reused_coverage_filter_in_either_package(
+    tmp_path: Path, filter_copy: str
+) -> None:
+    called, outputs = _plan(tmp_path, "pull_request", filter_copy=filter_copy)
+    assert called.exists()
+    assert "branch=2" in outputs
+
+
+def test_a_grader_without_the_reused_coverage_filter_reuses_nothing(tmp_path: Path) -> None:
+    called, outputs = _plan(tmp_path, "pull_request", reused="3", filter_copy="")
+    assert not called.exists()
+    assert "The grader cannot carry reused tests' coverage into Sonar; every test runs." in outputs
+    assert "reused=0" in outputs
+    assert "branch=" not in outputs
 
 
 def test_a_reader_never_sees_the_plan_status_before_its_writer_finishes(tmp_path):

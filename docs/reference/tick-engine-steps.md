@@ -885,19 +885,98 @@ The positional order is name, group, call, `needs`, `reads`, `writes`.
 id, as keywords; see
 [Declaring effects on a step](tick-adapters.md#declaring-effects-on-a-step).
 
-`tests/tick/test_pass_edges.py` replays the twelve tick scenarios through
-`scripts.swarm.tick.tick` and `scripts.swarm.cli.run_tick` with a recording
-pass box and recording pass views. It records which step stored and read each
-key and names every gap:
+#### The pass edges test
+
+`tests/tick/test_pass_edges.py` holds these declarations to what the steps do.
+It replays tick scenarios through `scripts.swarm.tick.tick` and
+`scripts.swarm.cli.run_tick` with a recording pass box and recording pass
+views, records which step stored and read each key, and names every gap:
 
 - `<step> reads pass <key> without declaring it`
 - `<step> reads pass <key> without needing its writer [<writers>]`
 - `<step> writes pass <key> without declaring it`
 
-It also fails when a registered step never ran in any scenario. The feature map
-entry `swarm-tick-pass-edges` links this behavior to the test; the delivered
-change is
-[pull request 9623](https://github.com/the-cloud-clockwork/agentihooks/pull/9623).
+A read counts as needing its writer when the writer is the reader itself or is
+on the reader's `needs` path in `registry.waves()`; when the recorder saw no
+writer, any step that declares the key in its `writes` counts. Reads and writes made by
+the `scripts.swarm.cli` wrapper's site hooks are left out; they belong to no
+step.
+
+The check runs as one test case per scenario plus one covering test, so each
+replay stays far below the per test time limit of the CI unit jobs:
+
+| Test | Replays | Asserts |
+| --- | --- | --- |
+| `test_every_pass_box_read_is_declared_with_a_need_on_its_writer[<scenario>]` | One scenario of `SCENARIOS` through both entry points, with its own recorder | No gap in that scenario's reads and writes |
+| `test_the_covering_scenarios_run_every_step_and_write_and_read_every_pass_value` | Every scenario in `COVERING` through both entry points, into one recorder | Every registered step ran; every value in `WRITTEN` was stored, and every one but `judged` was read |
+| `test_a_planted_undeclared_read_is_named` | `running` through `tick`, with `pass:rows` removed from the reads of `verify` | The step's pass box view raises `UndeclaredRead: step verify reads pass value rows it does not declare` |
+| `test_a_planted_missing_need_is_named` | No scenario; one recorded read of `found` by `bottleneck status` | Both the undeclared read and the missing need on `health findings` are named |
+
+`SCENARIOS` comes from `tests/swarm/tick_scenarios/test_characterisation.py`,
+the same tuple the golden replay uses: `running`, `second-pass`, `paused`,
+`stopping`, `stopped`, `drained`, `finished`, `lost`, `orphan`,
+`failed-spawn`, `full-capacity`, `dependency`, `interval`, `interval-slow` and
+`hive-roll`. The scenario name is the case id, so the CI log names the failing
+scenario, for example
+`tests/tick/test_pass_edges.py::test_every_pass_box_read_is_declared_with_a_need_on_its_writer[hive-roll]`,
+and its assertion lists one gap per line under a count:
+
+```text
+AssertionError: <n> broken of <reads> pass box reads and <writes> writes:
+<step> reads pass <key> without declaring it
+<step> reads pass <key> without needing its writer [<writers>]
+```
+
+The covering test fails with `<n> registered steps never ran: [<names>]` when
+the `COVERING` scenarios do not run a step, and with a set comparison when a
+`WRITTEN` value is never stored or read. Three module constants set what it
+grades:
+
+| Constant | Value | Change it when |
+| --- | --- | --- |
+| `COVERING` | `("running",)` | A new step runs in no `COVERING` scenario: add a scenario that runs it. Each scenario added here adds its replay time to this one test |
+| `WRITTEN` | `config`, `doc`, `rows`, `sleeping`, `agents`, `view`, `judged`, `live`, `found` | A step stores a new pass value that a covering scenario stores: add it so the test fails when no covering scenario stores or reads it |
+| `KEYS` | `WRITTEN` plus `finished` and `stop` | A step reads a new pass value through its pass view: add it, because a pass view read is recorded only for a key listed here. A read through the pass box itself, not a pass view, is recorded for any key a step stored earlier in the replay |
+
+A scenario added to `SCENARIOS` gets its own case with no change to this test.
+A per scenario case does not check that every step ran; only the covering test
+does, and only over `COVERING`.
+[Probe run 43785100130](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/43785100130)
+was a dispatch on a throwaway branch whose probe cases fail on purpose to print
+what they recorded. In it, every scenario on its own had no gap, and `running`
+alone ran every registered step, stored all nine `WRITTEN` values and read all
+of them but `judged`.
+
+The `unit` job (the sharded full suite) and the `unit-selected` job (the test
+files a pull request selects) of the Tests workflow run pytest with these per
+test limits:
+
+```text
+--timeout=60 --timeout-method=thread -o faulthandler_timeout=45
+```
+
+At 45 seconds faulthandler prints the stack of every thread and the test runs
+on. At 60 seconds pytest-timeout prints the stacks again and ends the worker
+process, so pytest-xdist reports the worker crashed and the test fails.
+`pyproject.toml` sets no per test limit, so a local run has none.
+
+Before the split, one test replayed all fifteen scenarios through both entry
+points, thirty replays. It took 15.4 seconds on a quiet runner, but on
+15 November merge group
+[Tests run 43724674267](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/43724674267)
+(job `unit (3.12, 11)`) lost workers `gw4` and `gw2` to the 60 second limit
+while each was still finishing steps, and a third attempt of the same code
+passed in 40.6 seconds. After the split, in the `unit-selected` jobs of
+[Tests run 43785461519](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/43785461519),
+the slowest case, `interval-slow`, took 6.49 seconds, then `hive-roll`
+5.46 seconds and `second-pass` 3.38 seconds; every other case took under
+3.1 seconds and the covering test 1.78 seconds.
+
+The feature map entry `swarm-tick-pass-edges` links this behavior to the four
+tests. The check was delivered by
+[pull request 9623](https://github.com/the-cloud-clockwork/agentihooks/pull/9623)
+and split per scenario by
+[pull request 11367](https://github.com/the-cloud-clockwork/agentihooks/pull/11367).
 
 ## Groups and their sites
 
@@ -1455,7 +1534,7 @@ The delivered proof and limitations are recorded in
 | `tests/swarm/test_tick_groups.py` | The group sites run in the order of the table above |
 | `tests/tick/test_observe.py` | The `start`, `pass setup` and `observe` steps in their groups and orders, the stopped branch endings, the observe calls with the pass state, and a raising step holding its exception and stopping the later steps |
 | `tests/tick/test_agents.py` | The agent steps in their groups, including the `close` steps before settle and close space, and the tick site printing the actions and failures of handed off slow steps |
-| `tests/tick/test_pass_edges.py` | Every pass box read over the twelve tick scenarios is declared with a need on its writer and every pass box write is declared; a planted undeclared read and a planted missing need are named |
+| `tests/tick/test_pass_edges.py` | In each tick scenario on its own, one case per scenario, every pass box read is declared with a need on its writer and every pass box write is declared; the `COVERING` scenarios run every registered step and store and read every `WRITTEN` value; a planted undeclared read and a planted missing need are named. See [The pass edges test](#the-pass-edges-test) |
 | `tests/tick/test_catalogue.py` | A step with no feature, an unknown feature or no scenario refused, an unmapped step passing, stale unmapped entries refused, a planted index drop red, a grown unmapped list red from `shrink`, and the recorded catalogue holding every registered step |
 | `tests/tick/steps/test_common.py` | Each of the eleven helpers is defined in `scripts.tick.steps.common` and is the same object on `scripts.swarm.tick`; a patch on the tick module reaches `_follow`; the held, owner, ended, operator line, reopen, rebind, follow, skip, drop and collected behavior described under [Shared helpers](#shared-helpers-scriptstickstepscommon) |
 | `tests/tick/test_registry.py` | Unordered writers and crossed readers refused within a lane and across lanes, with the lane names in the message |
@@ -1478,6 +1557,10 @@ The delivered proof and limitations are recorded in
 | `Unordered writers in lanes tick and slow` on the first group run | A slow step and a critical step touch the same domain with no dependency; add the step that must run first to `needs`; moving both into one lane does not clear it |
 | `Unordered reader and writer ... for pass:<key>` on the first pass | A step reads a pass box key with no need path to the step that writes it; add that writer, or a step that needs it, to the reader's `needs` |
 | `test_pass_edges` names `reads pass <key> without declaring it` | The step reads that key from the box or its pass view; add `pass_domain("<key>")` to its `reads` and its writer to its `needs` |
+| `test_pass_edges` names `reads pass <key> without needing its writer [<writers>]` | No listed writer is on the reader's `needs` path; add one of them, or a step that needs it, to the reader's `needs` |
+| `test_pass_edges` names `writes pass <key> without declaring it` | The step stores that key in the pass box; add `pass_domain("<key>")` to its `writes` |
+| `<n> registered steps never ran: [<names>]` from the covering pass edges test | No scenario in `COVERING` runs the named steps; add a scenario that runs them to `COVERING`. See [The pass edges test](#the-pass-edges-test) |
+| A `test_pass_edges` case prints a thread dump at 45 seconds or its worker crashes at 60 seconds in CI | Each case replays one scenario, named in its id, and took at most 6.49 seconds when the split landed; that scenario's replay has slowed. A stack dump is one sample of where each thread was, not proof of a hang |
 | A critical step is recorded late with no error | It needs a slow lane step, so it was handed off and waited for that step while the critical deadline ran out. Drop the need or keep the needed step critical |
 | `swarm_tick_step_abandoned` in the tick journal | That step was still running at its budget or its lane deadline and the writes it names were dropped. Its worker may still finish its external calls. One line now and then is a slow call; the same step on most passes means its budget is below its real wall time, see [The abandoned write journal line](#the-abandoned-write-journal-line) |
 | A step is late in `tick-report` but no `swarm_tick_step_abandoned` line exists | The step declares no write beyond its own `actions:<name>` domain, or it was dropped before it started because a step it needs was dropped or its lane had expired. Neither loses writes |

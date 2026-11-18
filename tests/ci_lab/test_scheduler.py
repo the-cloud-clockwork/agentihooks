@@ -10,15 +10,18 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
+from unittest.mock import Mock
 
 import jsonschema
 import pytest
+import requests
 import yaml
 
 from scripts import ci_wiring, dep_manifest
 from scripts.ci_lab import __main__ as cli
 from scripts.ci_lab import (
     budget,
+    checks,
     control,
     delivery,
     evidence,
@@ -30,6 +33,7 @@ from scripts.ci_lab import (
     queue,
     scheduler,
     static_gates,
+    worktrees,
 )
 from scripts.ci_lab.capacity import Load
 from scripts.ci_lab.checks import Output
@@ -137,6 +141,9 @@ class Expander:
 class Poster:
     posts: list[Post] = field(default_factory=list[Post])
 
+    def seed(self, head: str, gate: str, run: str, run_id: int, status: str, shadow: bool) -> None:
+        pass
+
     def post(self, head: str, gate: str, status: str, conclusion: str | None, output: Output, shadow: bool) -> int:
         self.posts.append((head, gate, status, conclusion, output, shadow))
         return len(self.posts)
@@ -175,10 +182,10 @@ class Lab:
         self.asked.append(self.now)
         return frozenset(self.fixes)
 
-    def build(self, quiet_ms: int, retries: Policy) -> scheduler.Scheduler:
+    def build(self, quiet_ms: int, retries: Policy, spending: budget.Budget | None) -> scheduler.Scheduler:
         ports = scheduler.Ports(self.inbox, self.expander, self.checks, self.hotfixes, self.kube)
         settings = scheduler.Settings(frozenset({ACTOR}), quiet_ms, retries)
-        return scheduler.Scheduler(self.client, self.objects, ports, settings)
+        return scheduler.Scheduler(self.client, self.objects, ports, settings, spending)
 
 
 @dataclass
@@ -191,9 +198,15 @@ class Run:
         return self.engine.store
 
     def push(
-        self, head: str, lane: str = "feature", event: str = "push", action: str = "pushed", actor: str = ACTOR
+        self,
+        head: str,
+        lane: str = "feature",
+        event: str = "push",
+        action: str = "pushed",
+        actor: str = ACTOR,
+        ref: str = "",
     ) -> None:
-        self.lab.inbox.pending.append(scheduler.Head(HeadEvent(event, REPO, head, BASE, actor, action), lane))
+        self.lab.inbox.pending.append(scheduler.Head(HeadEvent(event, REPO, head, BASE, actor, action), lane, ref))
 
     def tick(self, at: int) -> list[str]:
         self.lab.now = at
@@ -225,10 +238,16 @@ class Run:
 
 @pytest.fixture
 def lab(tmp_path: Path) -> Callable[..., Run]:
-    def make(plans: dict[str, scheduler.Plan], quiet_ms: int = 0, retries: Policy = Policy()) -> Run:
+    def make(
+        plans: dict[str, scheduler.Plan],
+        quiet_ms: int = 0,
+        retries: Policy = Policy(),
+        spend: budget.Policy | None = None,
+    ) -> Run:
         client = fake_redis()
         state = Lab(client, LocalObjects(tmp_path / "objects"), Inbox(), Expander(plans))
-        return Run(state, state.build(quiet_ms, retries))
+        spending = None if spend is None else budget.Budget(client, lambda: state.now, spend)
+        return Run(state, state.build(quiet_ms, retries, spending))
 
     return make
 
@@ -249,9 +268,73 @@ def test_a_fully_cached_head_enqueues_nothing_and_completes_at_once(lab: Callabl
     assert run.lab.poster.moves(HEAD_A, "lint") == [("completed", "success")]
     assert run.lab.poster.moves(HEAD_A, scheduler.REQUIRED) == [("completed", "success")]
     assert run.lab.client.smembers(scheduler.LIVE) == set()
-    assert f"grading {grade.run} with 0 of 2 units enqueued" in actions
+    assert f"grading {grade.run} with 0 of 2 units held" in actions
     assert f"completed {grade.run} success" in actions
     assert run.lab.repos == [SLUG]
+
+
+@pytest.mark.feature("lab-remote-heads")
+def test_a_grade_ref_head_posts_no_check_run_and_keeps_each_check_s_conclusion_for_the_relay(
+    lab: Callable[..., Run],
+) -> None:
+    units = (unit(1), unit(2))
+    run = lab({HEAD_A: plan({"lint": units}), HEAD_B: plan({"lint": units})})
+    for item in units:
+        run.cache(item)
+    run.push(HEAD_A, lane="engineer-1", ref="refs/grade/t1")
+    run.push(HEAD_B, lane="engineer-2")
+    actions = run.tick(1000)
+    relayed = run.grade(HEAD_A)
+    assert relayed.ref == "refs/grade/t1"
+    assert relayed.conclusion == "success"
+    assert relayed.posted == {"lint": ["completed", "success"], scheduler.REQUIRED: ["completed", "success"]}
+    assert relayed.runs == {}
+    assert run.lab.poster.moves(HEAD_A, "lint") == []
+    assert run.lab.poster.moves(HEAD_A, scheduler.REQUIRED) == []
+    assert f"left lint completed on {HEAD_A} to the relay" in actions
+    assert f"left {scheduler.REQUIRED} completed on {HEAD_A} to the relay" in actions
+    assert run.grade(HEAD_B).ref == ""
+    assert run.lab.poster.moves(HEAD_B, scheduler.REQUIRED) == [("completed", "success")]
+
+
+@pytest.mark.feature("lab-remote-heads")
+def test_a_grade_ref_head_held_in_its_quiet_window_keeps_its_ref(lab: Callable[..., Run]) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)})}, quiet_ms=500)
+    run.cache(unit(1))
+    run.push(HEAD_A, lane="engineer-1", ref="refs/grade/t1")
+    assert run.tick(1000) == [f"received {HEAD_A} on engineer-1"]
+    run.tick(1600)
+    assert run.grade(HEAD_A).ref == "refs/grade/t1"
+    assert run.lab.poster.posts == []
+
+
+@pytest.mark.feature("lab-remote-heads")
+def test_a_held_head_takes_the_grade_ref_it_arrives_again_with_and_keeps_one_it_holds(lab: Callable[..., Run]) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)}), HEAD_B: plan({"lint": (unit(1),)})}, quiet_ms=500)
+    run.cache(unit(1))
+    run.push(HEAD_A, lane="engineer-1")
+    run.push(HEAD_B, lane="engineer-2", ref="refs/grade/t2")
+    run.tick(1000)
+    run.push(HEAD_A, lane="engineer-1", ref="refs/grade/t1")
+    run.push(HEAD_B, lane="engineer-2")
+    assert run.tick(1200) == [f"holding {HEAD_A}", f"holding {HEAD_B}"]
+    run.tick(1600)
+    assert (run.grade(HEAD_A).ref, run.grade(HEAD_B).ref) == ("refs/grade/t1", "refs/grade/t2")
+    assert run.lab.poster.posts == []
+
+
+@pytest.mark.feature("lab-remote-heads")
+def test_a_head_held_before_grade_refs_were_kept_starts_with_no_ref_and_posts(lab: Callable[..., Run]) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)})}, quiet_ms=500)
+    run.cache(unit(1))
+    run.push(HEAD_A, lane="engineer-1")
+    run.tick(1000)
+    for name, raw in run.lab.client.hgetall(scheduler.WAITING).items():
+        older = {key: value for key, value in json.loads(raw).items() if key != "ref"}
+        run.lab.client.hset(scheduler.WAITING, name, json.dumps(older))
+    run.tick(1600)
+    assert run.grade(HEAD_A).ref == ""
+    assert run.lab.poster.moves(HEAD_A, scheduler.REQUIRED) == [("completed", "success")]
 
 
 @pytest.mark.feature("lab-scheduler-evidence")
@@ -374,6 +457,64 @@ def test_a_lost_worker_requeues_once_then_its_unit_makes_the_grade_red(lab: Call
     assert run.grade(HEAD_A).conclusion == "failure"
     assert run.lab.poster.moves(HEAD_A, "lint")[-1] == ("completed", "failure")
     assert run.store.get(item.kind, item.key) is None
+
+
+CHECK_RUNS = f"{checks.API}/repos/{SLUG}/check-runs"
+
+
+class FixtureToken:
+    def get_token(self) -> str:
+        return "fixture"
+
+
+def github(calls: list[tuple[str, str]]) -> Callable[..., Mock]:
+    def request(method: str, url: str, **_: Any) -> Mock:
+        calls.append((method, url))
+        created = sum(1 for sent, _ in calls if sent == "POST")
+        run = created if method == "POST" else int(url.rsplit("/", 1)[1])
+        return Mock(status_code=201 if method == "POST" else 200, json=Mock(return_value={"id": run}), text="")
+
+    return request
+
+
+def restarted(run: Run, poster: checks.Checks) -> Run:
+    ports = scheduler.Ports(run.lab.inbox, run.lab.expander, lambda _repo: poster, run.lab.hotfixes, run.lab.kube)
+    settings = scheduler.Settings(frozenset({ACTOR}), 0, Policy())
+    return Run(run.lab, scheduler.Scheduler(run.lab.client, run.lab.objects, ports, settings))
+
+
+@pytest.mark.feature("lab-scheduler-check-run-restart")
+def test_a_restarted_scheduler_advances_the_stored_check_runs_with_no_new_create(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[str, str]] = []
+    seeds: list[tuple[Any, ...]] = []
+    seed = checks.Checks.seed
+
+    def spy(self: checks.Checks, *args: Any) -> None:
+        seeds.append(args)
+        seed(self, *args)
+
+    monkeypatch.setattr(requests, "request", github(calls))
+    monkeypatch.setattr(checks.Checks, "seed", spy)
+    first = restarted(lab({HEAD_A: plan({"lint": (unit(1),)})}), checks.Checks(SLUG, FixtureToken()))
+    first.push(HEAD_A)
+    first.tick(1000)
+    grade = first.grade(HEAD_A)
+    again = restarted(first, checks.Checks(SLUG, FixtureToken()))
+    again.lease()
+    assert again.tick(1100) == [f"posted lint in_progress on {HEAD_A}", f"posted required in_progress on {HEAD_A}"]
+    assert calls == [
+        ("POST", CHECK_RUNS),
+        ("POST", CHECK_RUNS),
+        ("PATCH", f"{CHECK_RUNS}/1"),
+        ("PATCH", f"{CHECK_RUNS}/2"),
+    ]
+    assert seeds == [
+        (HEAD_A, "lint", grade.run, 1, "queued", True),
+        (HEAD_A, scheduler.REQUIRED, grade.run, 2, "queued", True),
+    ]
+    assert grade.runs == again.grade(HEAD_A).runs == {"lint": 1, scheduler.REQUIRED: 2}
 
 
 @pytest.mark.feature("lab-worker-executors")
@@ -1024,6 +1165,91 @@ def test_the_exposition_asks_for_the_running_and_waiting_slots_after_a_pass(lab:
     assert "\nci_lab_slots_wanted 5.0\n" in scrape(run, 1100)
 
 
+LOW_BUDGET = budget.Policy(100.0, {"backfill": 0.5})
+DAY_MS = 24 * 60 * 60 * 1000
+
+
+def _spend(run: Run) -> None:
+    spending = run.engine.spending
+    assert spending is not None
+    spending.charge(1, 3600.0)
+
+
+@pytest.mark.feature("lab-scheduler-budget")
+def test_a_forced_low_budget_enqueues_no_backfill_unit_and_still_enqueues_every_pull_request_unit(
+    lab: Callable[..., Run],
+) -> None:
+    swept, checked, linted = unit(1), unit(2), unit(3)
+    run = lab({HEAD_A: plan({"lint": (swept,)}), HEAD_B: plan({"lint": (checked, linted)})}, spend=LOW_BUDGET)
+    _spend(run)
+    run.engine.queue.offer("worker", 8, 1000)
+    run.push(HEAD_A, lane="sweep", event="backfill")
+    run.push(HEAD_B, lane="pr-2", event="pull_request", action="synchronize")
+    actions = run.tick(1000)
+    held, pulled = run.grade(HEAD_A), run.grade(HEAD_B)
+    assert run.engine.queue.pending() == [scheduler.job_id(HEAD_B, checked), scheduler.job_id(HEAD_B, linted)]
+    assert [(slot.job, slot.held) for slot in held.units.values()] == [(scheduler.job_id(HEAD_A, swept), True)]
+    assert [slot.held for slot in pulled.units.values()] == [False, False]
+    assert f"grading {held.run} with 1 of 1 units held" in actions
+    assert f"enqueued 2 units of {pulled.run}" in actions
+    assert f"enqueued 1 units of {held.run}" not in actions
+    assert held.run in run.lab.client.smembers(scheduler.LIVE)
+    assert run.lab.poster.moves(HEAD_A, scheduler.REQUIRED) == [("queued", None)]
+    assert run.tick(1100) == []
+    reset = DAY_MS + 1000
+    run.engine.queue.offer("worker", 8, reset)
+    assert f"enqueued 1 units of {held.run}" in run.tick(reset)
+    assert run.engine.queue.pending()[-1] == scheduler.job_id(HEAD_A, swept)
+    assert [slot.held for slot in run.grade(HEAD_A).units.values()] == [False]
+
+
+@pytest.mark.feature("lab-scheduler-budget")
+def test_backfill_takes_only_the_slots_left_free_after_the_units_waiting_in_other_classes(
+    lab: Callable[..., Run],
+) -> None:
+    first, second, third, fourth, checked, linted = (unit(number) for number in range(1, 7))
+    run = lab({HEAD_A: plan({"lint": (first, second, third, fourth)}), HEAD_B: plan({"lint": (checked, linted)})})
+    run.engine.queue.offer("worker", 3, 1000)
+    run.push(HEAD_A, lane="sweep", event="backfill")
+    run.push(HEAD_B, lane="pr-2", event="pull_request", action="synchronize")
+    run.tick(1000)
+    pulled = [scheduler.job_id(HEAD_B, checked), scheduler.job_id(HEAD_B, linted)]
+    assert run.engine.queue.pending() == [*pulled, scheduler.job_id(HEAD_A, first)]
+    assert "\nci_lab_slots_wanted 2.0\n" in scrape(run, 1000)
+    assert run.tick(1050) == []
+    assert run.engine.queue.pending() == [*pulled, scheduler.job_id(HEAD_A, first)]
+    grants = run.lease(slots=3)
+    assert [grant.job for grant in grants] == [*pulled, scheduler.job_id(HEAD_A, first)]
+    for grant in grants:
+        run.finish(grant, "passed", {"seconds": 1.0})
+    run.tick(1100)
+    assert run.engine.queue.pending() == []
+    assert run.lease(slots=3) == []
+    assert run.tick(1200) == [f"enqueued 3 units of {run.grade(HEAD_A).run}"]
+    assert run.engine.queue.pending() == [scheduler.job_id(HEAD_A, item) for item in (second, third, fourth)]
+
+
+@pytest.mark.feature("lab-scheduler-budget")
+def test_a_newer_backfill_head_drops_the_held_units_of_the_older_one(lab: Callable[..., Run]) -> None:
+    older, newer = unit(1), unit(2)
+    run = lab({HEAD_A: plan({"lint": (older,)}), HEAD_B: plan({"lint": (newer,)})}, spend=LOW_BUDGET)
+    _spend(run)
+    run.engine.queue.offer("worker", 4, 1000)
+    run.push(HEAD_A, lane="sweep", event="backfill")
+    run.tick(1000)
+    run.push(HEAD_B, lane="sweep", event="backfill")
+    run.tick(1100)
+    old = run.grade(HEAD_A)
+    assert old.superseded
+    assert [(slot.held, slot.outcome) for slot in old.units.values()] == [(False, "dropped")]
+    assert run.lab.poster.moves(HEAD_A, scheduler.REQUIRED)[-1] == ("completed", "cancelled")
+    assert old.run not in run.lab.client.smembers(scheduler.LIVE)
+    assert run.engine.queue.pending() == []
+    run.engine.queue.offer("worker", 4, DAY_MS)
+    run.tick(DAY_MS)
+    assert run.engine.queue.pending() == [scheduler.job_id(HEAD_B, newer)]
+
+
 @pytest.mark.feature("lab-scheduler-metrics")
 def test_the_exposition_counts_the_workers_that_polled_within_the_ready_window_after_a_pass(
     lab: Callable[..., Run],
@@ -1273,6 +1499,15 @@ def test_the_bus_inbox_reads_each_head_with_its_branch_as_lane_and_acknowledges_
     assert [delivery.acked for delivery in deliveries] == [True, True]
     assert [delivery.termed for delivery in deliveries] == [False, False]
     assert consumer.asked == [(scheduler.BATCH, scheduler.FETCH_MS)]
+
+
+@pytest.mark.feature("lab-remote-heads")
+def test_the_bus_inbox_keeps_the_grade_ref_a_lab_remote_notice_names() -> None:
+    pushed = HeadEvent("notice", REPO, HEAD_A, BASE, ACTOR, "pushed")
+    notice = envelope(pushed)
+    notice = replace(notice, data={**notice.data, "ref": "refs/grade/t1", "branch": "engineer-1"})
+    inbox = scheduler.BusInbox(Consumer([Delivery(notice), Delivery(envelope(pushed))]))
+    assert inbox.heads() == [scheduler.Head(pushed, "engineer-1", "refs/grade/t1"), scheduler.Head(pushed, HEAD_A)]
 
 
 def _without(event: HeadEvent, *names: str) -> Envelope:
@@ -1604,12 +1839,15 @@ def _contents(suite: Suite, head: str) -> dict[str, bytes]:
 def _mutation_gates(
     suite: Suite, head: str, changes: dict[str, list[int]], files: list[str], covering: dict[str, list[str]]
 ) -> dict[str, tuple[Unit, ...]]:
-    keys = expand_tests.fingerprints(SUITE_MANIFEST, _contents(suite, head))
+    contents = _contents(suite, head)
+    keys = expand_tests.fingerprints(SUITE_MANIFEST, contents)
     checkout = suite.repo.parent / f"expected-{head}"
     _git(suite.repo, "worktree", "add", "-q", "--detach", str(checkout), head)
     stats = expand_mutation.stats_units(checkout, files, executors.OPTIONS)
     covered = {name: {test: keys[test] for test in tests} for name, tests in covering.items()}
-    mutants = expand_mutation.mutant_units(checkout, changes, covered)
+    mutants = expand_mutation.mutant_units(
+        checkout, changes, covered, expand_tests.unlisted_test_hashes(SUITE_MANIFEST, contents)
+    )
     _git(suite.repo, "worktree", "remove", "--force", str(checkout))
     return {name: units for name, units in {"mutation-stats": stats, "mutation": mutants}.items() if units}
 
@@ -1731,9 +1969,9 @@ def test_a_promotion_or_backfill_head_names_the_mutants_of_each_changed_function
     checkouts: list[tuple[Path, str]] = []
     build = expand_mutation.mutant_units
 
-    def spy(root: Path, changes: Any, covering: Any) -> tuple[Unit, ...]:
+    def spy(root: Path, changes: Any, covering: Any, unlisted: Any) -> tuple[Unit, ...]:
         checkouts.append((root.parent, (root / "scripts/alpha.py").read_text()))
-        return build(root, changes, covering)
+        return build(root, changes, covering, unlisted)
 
     monkeypatch.setattr(expand_mutation, "mutant_units", spy)
     found = Port(SUITE_MANIFEST).expander(tmp_path).expand(suite.request(tier, head))
@@ -1778,6 +2016,22 @@ def test_a_promotion_head_keys_a_mutant_unit_by_the_tests_that_ran_its_function(
     after = expander.expand(suite.request(Priority.PROMOTION, own)).gates["mutation"]
     assert [unit.members for unit in after] == [unit.members for unit in before]
     assert after[0].key != before[0].key
+
+
+@pytest.mark.feature("lab-mutant-unit-unlisted-tests")
+@pytest.mark.usefixtures("staticless")
+def test_a_promotion_head_keys_a_mutant_unit_by_the_test_modules_the_manifest_lacks(tmp_path: Path) -> None:
+    suite = _suite(tmp_path, DELIVERY["lab"])
+    expander = Port(SUITE_MANIFEST).expander(tmp_path)
+    _git(suite.repo, "switch", "-q", "-c", "other", suite.base)
+    changed = _commit(suite.repo, {"scripts/alpha.py": ALPHA.replace("return 1", "return 4")})
+    added = _commit(suite.repo, {"tests/test_gamma.py": "def test_third():\n    pass\n"})
+    edited = _commit(suite.repo, {"tests/test_gamma.py": "def test_third():\n    assert True\n"})
+    found = [
+        expander.expand(suite.request(Priority.PROMOTION, head)).gates["mutation"] for head in (changed, added, edited)
+    ]
+    assert [[executors.function_of(unit.members[0]) for unit in units] for units in found] == [[FIRST]] * 3
+    assert len({units[0].key for units in found}) == 3
 
 
 @pytest.mark.feature("lab-scheduler-mutation-units")
@@ -2034,7 +2288,9 @@ def test_build_wires_the_service_ports_from_the_environment(tmp_path: Path, monk
     client = fake_redis()
     consumer = Consumer([])
     objects = LocalObjects(tmp_path / "objects")
-    built = scheduler.build(environ, client, objects, consumer)
+    spending = budget.Budget(client, lambda: 0, budget.Policy(100.0, {}))
+    built = scheduler.build(environ, client, objects, consumer, spending)
+    assert built.spending is spending
     assert built.ports.pods is kube and pods_of == [environ]
     assert built.objects is objects
     assert built.settings.trusted == frozenset({"repository"})
@@ -2052,7 +2308,7 @@ def test_build_wires_the_service_ports_from_the_environment(tmp_path: Path, monk
     Store(client, objects).put(stored, {}, b"")
     assert expander.verdicts("static", stored.key) == stored
     imageless = {name: value for name, value in environ.items() if name != scheduler.IMAGE}
-    bare = scheduler.build(imageless, client, objects, consumer).ports.expander
+    bare = scheduler.build(imageless, client, objects, consumer, spending).ports.expander
     assert isinstance(bare, scheduler.MirrorExpander) and bare.toolchain.image == ""
     first = built.ports.checks(SLUG)
     assert first == FakeChecks(SLUG) and built.ports.checks(SLUG) is first
@@ -2060,6 +2316,33 @@ def test_build_wires_the_service_ports_from_the_environment(tmp_path: Path, monk
     hotfixes = built.ports.hotfixes
     assert isinstance(hotfixes, control.Priorities)
     assert (hotfixes.client, hotfixes.clock) == (client, scheduler._now_ms)
+
+
+@pytest.mark.feature("lab-remote-heads")
+def test_build_gives_each_expander_mirror_the_lab_remote_the_environment_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(scheduler.MirrorExpander, "trusted", lambda self, repo: frozenset({repo}))
+    monkeypatch.setattr(scheduler.MirrorExpander, "retries", lambda self, repo: Policy())
+    monkeypatch.setattr(scheduler, "worker_pods", lambda found: FakeKube())
+    environ = {
+        scheduler.contract.GIT_MIRROR: str(tmp_path / "node"),
+        scheduler.MIRROR_STORE: str(tmp_path / "stores"),
+        scheduler.REPOSITORY: "repository",
+        "AGENTIHOOKS_LAB_REMOTE": "http://ci-lab-remote.ci-lab:8080/agentihooks.git",
+        "AGENTIHOOKS_LAB_REMOTE_TOKEN": "lab-token",
+    }
+    client = fake_redis()
+    spending = budget.Budget(client, lambda: 0, budget.Policy(100.0, {}))
+    objects = LocalObjects(tmp_path / "objects")
+    built = scheduler.build(environ, client, objects, Consumer([]), spending)
+    expander = built.ports.expander
+    assert isinstance(expander, scheduler.MirrorExpander)
+    verdicts = getattr(expander.verdicts, "__self__")
+    assert isinstance(verdicts, Store) and (verdicts.client, verdicts.objects) == (client, objects)
+    found = worktrees.Lab("http://ci-lab-remote.ci-lab:8080/agentihooks.git", "lab-token")
+    store = tmp_path / "stores" / "the-cloud-clockwork--agentihooks"
+    assert expander._mirror(REPO) == worktrees.Mirror(tmp_path / "node", store, REPO, found)
 
 
 @pytest.mark.feature("lab-scheduler-service")
@@ -2090,10 +2373,10 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
     class Bus:
         lab_heads = Events()
 
-    def build(environ: Any, redis_client: Any, objects: Any, consumer: Any) -> scheduler.Scheduler:
-        calls["build"] = (environ, redis_client, objects, consumer)
+    def build(environ: Any, redis_client: Any, objects: Any, consumer: Any, spending: Any) -> scheduler.Scheduler:
+        calls["build"] = (environ, redis_client, objects, consumer, spending)
         ports = scheduler.Ports(Inbox(), Expander({}), lambda repo: Poster(), frozenset[str], FakeKube())
-        return scheduler.Scheduler(redis_client, objects, ports, scheduler.Settings(frozenset()))
+        return scheduler.Scheduler(redis_client, objects, ports, scheduler.Settings(frozenset()), spending)
 
     class Server:
         def serve_forever(self) -> None:
@@ -2169,7 +2452,7 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
     assert calls["redis"] == ("redis://lab", {"decode_responses": True})
     options = {"endpoint_url": "endpoint", "aws_access_key_id": "access", "aws_secret_access_key": "secret"}
     assert calls["s3"] == ("s3", options)
-    built_from, redis_client, objects, consumer = calls["build"]
+    built_from, redis_client, objects, consumer, built_spending = calls["build"]
     assert (built_from, redis_client, consumer) == (environ, client, "consumer")
     assert (objects.client, objects.bucket, objects.prefix) == ("s3 client", "bucket", "")
     assert calls["consumer"] == (scheduler.DURABLE, "ci.lab.head.>")
@@ -2183,6 +2466,7 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
     assert Clock.slept == [1.5]
     assert spending.client is client and spending.clock() == 1_000_250
     assert spending.policy == budget.Policy(600, {"backfill": 0.5})
+    assert built_spending is spending and found.spending is spending
     assert ports == (8800, 9108)
     assert calls["thread"] is True and calls["served"] == 2
     found, interval, passes, clock, sleep = calls["serve"]
@@ -2254,7 +2538,7 @@ def test_main_rebuilds_the_verdict_index_before_serving_only_when_reindex_on_sta
     def poster(_repo: str) -> Poster:
         return Poster()
 
-    def build(_environ: Any, redis_client: Any, _objects: Any, _consumer: Any) -> scheduler.Scheduler:
+    def build(_environ: Any, redis_client: Any, _objects: Any, _consumer: Any, _spending: Any) -> scheduler.Scheduler:
         ports = scheduler.Ports(Inbox(), Expander({}), poster, frozenset[str])
         return scheduler.Scheduler(redis_client, objects, ports, scheduler.Settings(frozenset()))
 

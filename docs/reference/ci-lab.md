@@ -66,6 +66,7 @@ built CI lab image.
 | `CI_LAB_MINIO_ENDPOINT`, `CI_LAB_MINIO_BUCKET`, `CI_LAB_MINIO_ACCESS_KEY`, `CI_LAB_MINIO_SECRET_KEY` | yes | no | The object store names the scheduler reads |
 | `CI_LAB_MIRROR_STORE` | yes | no | Folder of the scheduler's private git stores, one per repository, that borrow the mirror's objects |
 | `CI_LAB_REPOSITORY` | yes | no | Repository URL whose dev runner trust list admits head actors |
+| `AGENTIHOOKS_LAB_REMOTE`, `AGENTIHOOKS_LAB_REMOTE_TOKEN` | yes | no | The lab remote URL a mirror fetches a sha GitHub lacks from, and its token, passed by reference; unset, the mirrors fetch from GitHub only |
 | `CI_LAB_IMAGE` | yes | no | Worker image name keyed into static unit keys; empty when unset |
 | `CI_LAB_CONTROL_TOKEN` | yes | no | Bearer token the [control routes](#control-routes) require, passed by reference; unset, they refuse every request. The swarm host that presses panic or merge priority holds the same variable |
 | `UV_CACHE_DIR` | no | yes | Shared uv cache for virtual environments |
@@ -129,7 +130,7 @@ The scheduler sets every metric its queue, lease and worker state answers, on on
 
 | Metric | Set from |
 |---|---|
-| `ci_lab_slots_wanted` | `Load.slots_wanted`: the slots running and pending units take in every class not shed |
+| `ci_lab_slots_wanted` | `scripts.ci_lab.budget.slots_wanted`: the running slots of every class but backfill plus the pending slots of every class but backfill that is not shed, so backfill never raises it |
 | `ci_lab_workers_ready` | The workers that offered free slots on a lease poll within `READY_MS` |
 | `ci_lab_units_overdue` | Leased units whose lease started, as `Queue.claim` stores it, more than `UNIT_ESTIMATE_S` ago; a lease claimed before the start was stored is not counted |
 | `ci_lab_core_seconds_total` | Each finished attempt's slots times its report's `seconds`, counted once (`Queue.tally`) in the most urgent class of the live grades holding its job; an attempt whose worker uploaded no report adds nothing |
@@ -200,7 +201,7 @@ Until the lab records measured unit durations, every estimate is the fixed `UNIT
 | `shed` | `()` | Classes the budget sheds; `scripts.ci_lab.budget.observe` sets them |
 | `cache_hits`, `cache_misses` | `{}` | Verdict cache lookups, keyed by class |
 | `frees_in` | `()` | Seconds until each busy slot frees, one entry per busy slot; an entry at or below zero counts as a slot free now |
-| `running_slots`, `pending_slots` | `{}` | Slots running and pending units take, keyed by class; `slots_wanted` sums them over the classes not shed |
+| `running_slots`, `pending_slots` | `{}` | Slots running and pending units take, keyed by class; `scripts.ci_lab.budget.slots_wanted` reads them for `ci_lab_slots_wanted` |
 | `workers_ready` | `0` | Workers that offered slots within the ready window |
 | `overdue` | `0` | Leased units past their estimate |
 
@@ -474,7 +475,7 @@ them:
 
 | Series | Read by | Until a service sets it |
 |---|---|---|
-| `ci_lab_slots_wanted` | `CILabSchedulerBlind`, the slots panels, the lab chart's planned KEDA scaler | `CILabSchedulerBlind` fires 10 minutes after a `ci-lab-scheduler` Deployment with a replica appears, and the `wanted` lines stay empty. `scripts.ci_lab.budget.slots_wanted` computes the number; nothing publishes it |
+| `ci_lab_slots_wanted` | `CILabSchedulerBlind`, the slots panels, the lab chart's planned KEDA scaler | `CILabSchedulerBlind` fires 10 minutes after a `ci-lab-scheduler` Deployment with a replica appears, and the `wanted` lines stay empty. The scheduler sets it from `scripts.ci_lab.budget.slots_wanted` on every scrape |
 | `ci_lab_units_overdue` | `CILabUnitsOverdue` | The alert cannot fire |
 | `ci_lab_workers_ready` | Workers ready against desired | The `heartbeat` line stays empty |
 | `ci_lab_core_seconds_total`, `ci_lab_heads_graded_total` | Core minutes per merged pull request | The stat reads No data |
@@ -907,9 +908,21 @@ Each request also logs `github-webhook: delivery <X-GitHub-Delivery> event <X-Gi
 on standard error; a notice carries neither header, so both print `None`.
 
 The deployment's public ingress routes only `/github`. A notice reaches the receiver's Service on
-port 8790 from inside the cluster, where the receiver's network policy admits the pod network. No
-agentihooks command sends notices yet, so until one does, a head reaches the lab only through a
-GitHub delivery or a notice sent by hand as above.
+port 8790 from inside the cluster, where the receiver's network policy admits the pod network.
+
+`agentihooks swarm <slug> publish` sends one notice after each push to origin. Its body names the
+origin in the `https://github.com/<owner>/<repo>` form, the pushed head, the head's merge base with
+`origin/dev` and the actor below, signed as above. The publish result records the receiver's status
+as `lab_notice`, or `0` when the send failed. Without all three settings nothing is sent and
+`lab_notice` is absent. A send the receiver refuses, or that cannot reach it, prints
+`lab head notice for <head> was not accepted: <error>; the push stands` on standard error, records
+`lab_notice` `0` and leaves the push in place.
+
+| Name | Meaning |
+|---|---|
+| `AGENTIHOOKS_CI_LAB_NOTICE_URL` | The receiver's `/lab/head` address, such as `http://agentihooks-swarm-github-webhook.agentihooks-swarm.svc:8790/lab/head` |
+| `AGENTIHOOKS_CI_LAB_NOTICE_SECRET` | The lab notice secret the receiver verifies with |
+| `AGENTIHOOKS_CI_LAB_NOTICE_ACTOR` | The GitHub login the notice names. It must be on the trust list, or the scheduler records the head without grading it |
 
 ### Push a head to the lab remote
 
@@ -929,6 +942,16 @@ event. The base is the `-o base=<sha>` push option, else the head's first parent
 after git writes the refs, so it cannot turn a push away. The remote's pre receive hook refuses refs
 outside `refs/grade/*`. A deleted grade ref, or a root commit pushed without `-o base`, prints
 `lab remote: <ref> is not graded` and publishes nothing.
+
+GitHub does not hold a head pushed only to the lab remote, so the scheduler and the relay fetch it
+from there. Their mirrors fetch a sha from the GitHub repository first and, when that fetch fails,
+from the lab remote `AGENTIHOOKS_LAB_REMOTE` names, but only when that URL names the same
+repository. Git gets `AGENTIHOOKS_LAB_REMOTE_TOKEN` as the basic password of the user `lab` for
+that URL alone, through its environment config, and no store or log keeps it. A grade of a head pushed
+to a `refs/grade/*` ref keeps the ref and records each check's status and conclusion. It posts no
+GitHub check run; the relay posts them once it has pushed the head. The relay's push token asks
+for contents write and workflows write, so a relayed branch that changes workflow files is
+accepted.
 
 | Name | Meaning |
 |---|---|
@@ -1171,19 +1194,29 @@ key; the builders are pure and read no file, clock or network.
 4. The verdict store answers what it can. A newer head of the lane drops the older head's pending
    units, carries its leased and finished jobs and cancels its check runs. A push grade of a tree a
    merge group grade passed carries that grade's units for every gate both grades hold: the unit
-   suite, since the queue rules require lint, type-gate and semgrep to be skipped. The rest is enqueued.
-5. Expired leases requeue while `lab.retry.lost` of the repository's dev `delivery.yaml` allows (once by
+   suite, since the queue rules require lint, type-gate and semgrep to be skipped. The rest is held for
+   the budget.
+5. Held units are enqueued as `scripts.ci_lab.budget.admits` lets them in, the most urgent grade first.
+   Every unit of a class the day's core budget does not shed is enqueued; a shed class enqueues nothing
+   until the budget resets the next UTC day, though its units already in the queue still run. Backfill
+   takes only the slots workers offered free on a lease poll within the ready window after the units
+   already waiting in the queue. A newer head of the lane drops the older head's held units.
+6. Expired leases requeue while `lab.retry.lost` of the repository's dev `delivery.yaml` allows (once by
    default); the next loss is `lost`.
-6. Finished jobs are collected. A job whose outcome `retry.decide` allows another run under
+7. Finished jobs are collected. A job whose outcome `retry.decide` allows another run under
    `lab.retry` goes back to pending with one more attempt, so a `crash` reruns once by default.
    Otherwise a graded outcome with an uploaded report becomes a verdict in the
    store; `lost`, `crash` and `cannot_run` stay out of it and make their grade red. A lease
    completes only with an outcome `scripts/ci_lab/outcomes.py` lists in `COMPLETED`: `passed`,
    `failed`, `gate_failed`, `survived`, `crash` or `cannot_run`. Any other outcome is refused
    with `403`, records nothing and stores no verdict; the lease stays held until it expires.
-7. Check runs move `queued` on receipt, `in_progress` on the first unit a worker starts and
+8. Check runs move `queued` on receipt, `in_progress` on the first unit a worker starts and
    `completed` on the last, one per gate with units and `required` for the whole grade. A completed
-   check run never moves again.
+   check run never moves again. The grade state keeps each check run's id, and the scheduler seeds
+   its poster with that id and the last status it posted before the next move, so a restarted
+   scheduler advances the same check run instead of opening a second one. A grade of a head pushed
+   to a `refs/grade/*` ref records the same moves and posts none, leaving its check runs to the
+   relay.
 
 Expansion frames a head by its class (`scripts.ci_lab.scheduler.frame`): a pull request or hotfix grade
 keeps the lab gates the pull request rules require and names every other required job as a gate without
@@ -1251,8 +1284,10 @@ where `<digest>` is `digests.digest` of that note. The object store is write onc
 `StoredManifests` read that finds or fetches a packed manifest merges each note of the repository
 into the `outside` list of each test record the note names, sorted and without duplicates, and skips
 a test the manifest lacks; the next expansion keys those tests on the measured tree and the batch on the
-noted files' blob ids, and `tests.dep_manifest.invalidated` counts a change to a file in a
-record's `outside` list as a change to that test, as it does for a file in its `files` list. The
+noted files' blob ids. `scripts.dep_manifest.invalidated`, pull request test selection in
+`scripts.ci_select.recorded_tests` and mutation test selection in
+`scripts.ci_mutation.plan.covering_tests` and `line_covering_tests` count a change to a file in a
+record's `outside` list as a change to that test, as they do for a file in its `files` list. The
 list is per batch, so every test of the batch takes it, and notes are per repository rather than
 per manifest commit.
 
@@ -1282,7 +1317,11 @@ The changed lines are `scripts.ci_mutation.scope.changes_since` of the base and 
 pull request mutation gate grades. `expand_mutation.covering` maps each function to the fingerprint
 of every dependency manifest test that ran it or a function nested in it, and those fingerprints
 enter the mutant key, so a changed covering test rekeys the unit. The stats units warm the stats
-cache the worker's mutant runner reads before it runs the mutants.
+cache the worker's mutant runner reads before it runs the mutants. The manifest only names the tests
+of the base, while the mutant runner runs every test module of the head, so
+`expand_tests.unlisted_test_hashes` hashes each test module of the head that holds no manifest test,
+with every conftest pytest loads for it and every test tree module either imports, and those hashes
+enter every mutant key too: a head that adds or edits such a module rekeys its units.
 
 | Head | Mutation jobs |
 |---|---|

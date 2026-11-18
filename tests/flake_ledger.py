@@ -15,8 +15,6 @@ import pytest
 from xdist.dsession import get_default_max_worker_restart
 from xdist.scheduler import LoadGroupScheduling, LoadScopeScheduling
 
-from tests.shards import slowest_first
-
 WORKER_FILES = pytest.StashKey[dict[str, list[str]]]()
 
 
@@ -42,7 +40,9 @@ class RefillingLoadGroupScheduling(LoadGroupScheduling):
             return super().add_node_collection(node, collection)
         self.registered_collections[node] = list(collection)
 
-    def schedule(self):
+    def schedule(self) -> None:
+        from tests.shards import slowest_first
+
         if self.collection is not None or not self._owned():
             return super().schedule()
         durations = json.loads((self.config.rootpath / ".test_durations").read_text())
