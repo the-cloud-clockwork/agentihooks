@@ -217,26 +217,22 @@ def lab_clause(condition: str | None, gate: str) -> str:
 
 def _reads_needs_freely(condition: str) -> bool:
     """Return whether a condition reads the needs context, in any letter case, other than by a literal job name."""
-    literal = re.sub(r"needs\s*\[\s*'[^']*'\s*\]", "needs.job", condition, flags=re.IGNORECASE)
-    bare = re.sub(r"'(?:[^']|'')*'", "''", literal)
-    return re.search(r"(?<![\w.-])needs\b(?!\s*\.\s*[A-Za-z_])", bare, flags=re.IGNORECASE) is not None
+    bare = re.sub(r"'(?:[^']|'')*'", "''", condition)
+    return re.search(r"(?<![\w.-])needs\b(?!\s*(?:\.\s*\w|\[\s*''\s*\]))", bare, flags=re.IGNORECASE) is not None
 
 
 def _lab_problems(base: dict[str, Any], head: dict[str, Any], gate: dict[str, Any]) -> list[str]:
-    """Refuse a lab verdict job or a gate condition off its reviewed form while the lab form is in play.
+    """Refuse a lab verdict job or a gate condition off its reviewed form.
 
     A gate whose base condition reads the lab verdict keeps that condition exactly. Any other gate reads the lab
     verdict, or the needs context by a computed key or as a whole, only through its base condition plus its exact lab
     clause.
     """
-    steps: list[dict[str, Any]] = gate.get("steps") or []
     problems: list[str] = []
     if head.get(LAB_VERDICT_JOB) != base.get(LAB_VERDICT_JOB):
         problems.append(
             "The head's lab verdict job differs from the reviewed rendering; the protected branch grades with its own."
         )
-    if LAB_VERDICT_JOB not in head and not any(ci_reuse.LAB_VERDICT in str(step.get("run")) for step in steps):
-        return problems
 
     def off_base(need: str) -> bool:
         condition: str | None = head[need].get("if")
@@ -380,8 +376,8 @@ def grade(
     problems += _reuse_problems(base_workflows[file]["jobs"], head_jobs, policy)
     problems += _lab_problems(
         base_workflows[file]["jobs"],
-        cast("dict[str, Any]", head_jobs),
-        cast("dict[str, Any]", head_gates[0][2]),
+        cast("dict[str, Any]", head_jobs),  # pragma: no mutate
+        cast("dict[str, Any]", head_gates[0][2]),  # pragma: no mutate
     )
     problems += duration_problems
     config = _protected_config(base_config, head_config)

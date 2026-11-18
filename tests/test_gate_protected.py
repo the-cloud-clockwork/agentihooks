@@ -1268,6 +1268,81 @@ def test_a_condition_reads_the_needs_context_freely_when_a_computed_read_remains
     assert gate_protected._reads_needs_freely(condition) is free
 
 
+def _lab_aggregators() -> tuple[dict[str, Any], dict[str, Any]]:
+    """Return a base and a head copy of a small workflow in the lab form, lint behind its lab clause and unit outside."""
+    from scripts import ci_reuse
+
+    base, _ = _aggregators()
+    jobs = base["jobs"]
+    jobs["lab-verdict"] = {"runs-on": "ubuntu-latest", "if": "github.event_name == 'pull_request'"}
+    jobs["lint"] = {
+        "runs-on": "ubuntu-latest",
+        "needs": ["lab-verdict"],
+        "if": gate_protected.lab_clause("${{ !cancelled() }}", "lint"),
+    }
+    jobs["unit"] = {"runs-on": "ubuntu-latest", "if": "${{ !cancelled() }}"}
+    jobs["gate-required"]["needs"] = [*jobs["gate-required"]["needs"], "lab-verdict"]
+    jobs["gate-required"]["steps"] = ci_reuse.lab_verdict(ci_reuse.gate_steps())
+    return base, copy.deepcopy(base)
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        lambda jobs: jobs.update(
+            {"lab-verdict": {"runs-on": "ubuntu-latest", "outputs": {"authoritative": '{"lint": true}'}}}
+        ),
+        lambda jobs: jobs.pop("lab-verdict"),
+    ],
+)
+def test_a_small_lab_form_refuses_a_forged_or_dropped_lab_verdict_job(edit: Callable[[dict[str, Any]], object]) -> None:
+    base, head = _lab_aggregators()
+    edit(head["jobs"])
+    assert _grade({"test.yml": head}, base={"test.yml": base}) == [
+        "The head's lab verdict job differs from the reviewed rendering; the protected branch grades with its own."
+    ]
+
+
+@pytest.mark.parametrize(
+    ("gate", "edit"),
+    [
+        ("lint", lambda condition: condition.removesuffix(" }}") + " && false }}"),
+        ("lint", lambda condition: gate_protected.lab_clause(condition, "lint")),
+        ("lint", lambda _: "${{ !cancelled() }}"),
+        ("lint", lambda condition: condition.replace("['lint']", "['unit']")),
+        ("lint", lambda _: gate_protected.lab_clause("${{ github.event_name != 'pull_request' || false }}", "lint")),
+        ("lint", lambda condition: condition.upper()),
+        ("lint", lambda _: None),
+        ("unit", lambda _: gate_protected.lab_clause("${{ always() }}", "unit")),
+        ("unit", lambda _: "${{ needs['lab-verdict'].result == 'success' }}"),
+        ("unit", lambda _: "${{ needs[format('lab-{0}', 'verdict')].result == 'success' }}"),
+        ("unit", lambda _: "${{ !contains(toJSON(needs), 'lint') }}"),
+        ("unit", lambda _: "${{ NEEDS.LAB-VERDICT.result == 'success' }}"),
+    ],
+)
+def test_a_small_lab_form_refuses_a_gate_condition_off_its_base_plus_its_exact_lab_clause(
+    gate: str, edit: Callable[[str], str | None]
+) -> None:
+    base, head = _lab_aggregators()
+    head["jobs"][gate]["if"] = edit(head["jobs"][gate]["if"])
+    assert _grade({"test.yml": head}, base={"test.yml": base}) == [
+        f"The head's {gate} condition differs from its base condition plus its exact lab clause; "
+        "the protected branch grades with its own."
+    ]
+
+
+@pytest.mark.parametrize(
+    "condition",
+    ["${{ !cancelled() }}", gate_protected.lab_clause("${{ !cancelled() }}", "unit"), "${{ always() }}", None],
+)
+def test_a_small_lab_form_lets_a_gate_without_a_base_lab_clause_change_or_take_its_exact_clause(
+    condition: str | None,
+) -> None:
+    base, head = _lab_aggregators()
+    head["jobs"]["unit"]["if"] = condition
+    assert _grade({"test.yml": head}, base={"test.yml": base}) == []
+
+
 @pytest.mark.parametrize("docs", [False, True])
 @pytest.mark.parametrize("form", ["canonical", "unchanged", "weakened", "unwired"])
 def test_typing_admission_requires_the_exact_reviewed_aggregation(docs: bool, form: str) -> None:
