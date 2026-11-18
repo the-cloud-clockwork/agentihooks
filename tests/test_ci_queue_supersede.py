@@ -25,6 +25,7 @@ RUNS = {
         (510, QUEUE + "ddd444"),
         (440, "gh-readonly-queue/dev/pr-12-eee555"),
         (480, "gh-readonly-queue/dev/pr-77-abc777"),
+        (485, "gh-readonly-queue/dev/pr-66-abc666"),
         (490, MERGED),
         (520, "gh-readonly-queue/dev/pr-88-abc888"),
     ],
@@ -185,9 +186,10 @@ def test_the_sweep_runs_on_the_app_token_minted_to_cancel() -> None:
 def test_older_runs_of_the_same_pull_request_and_older_runs_of_gone_branches_are_cancelled(tmp_path: Path) -> None:
     result, cancelled = _run(tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert cancelled == [410, 430, 480, 455, 460, 470]
+    assert cancelled == [410, 430, 480, 485, 455, 460, 470]
     assert f"Cancelled queue run 410 ({QUEUE}aaa111): superseded by run {RUN}" in result.stdout
     assert "Cancelled queue run 480 (gh-readonly-queue/dev/pr-77-abc777): its queue branch is gone" in result.stdout
+    assert "Cancelled queue run 485 (gh-readonly-queue/dev/pr-66-abc666): its queue branch is gone" in result.stdout
 
 
 @pytest.mark.feature("queue-sweep-keeps-merged-group-runs")
@@ -195,7 +197,7 @@ def test_a_run_whose_group_merged_is_kept_though_its_queue_branch_is_gone(tmp_pa
     result, cancelled = _run(tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
     assert 490 not in cancelled
-    assert f"Kept queue run 490 ({MERGED}): its group merged" in result.stdout
+    assert f"Kept queue run 490 ({MERGED}): its head is in this group's base history" in result.stdout
     assert "Cancelled queue run 490" not in result.stdout
 
 
@@ -209,7 +211,7 @@ def test_the_sweep_reads_the_full_base_history_checked_out_before_it() -> None:
         if step.get("with", {}).get("path") == "provenance-grader"
     ]
     assert index < names.index(STEP)
-    assert "github.event_name == 'merge_group'" in checkout["if"]
+    assert resolve("${{ " + checkout["if"] + " }}", **event("merge_group")) is True
     assert checkout["with"]["ref"] == "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}"
     assert checkout["with"]["fetch-depth"] == 0
     assert 'git -C "$GITHUB_WORKSPACE/provenance-grader" merge-base --is-ancestor "$sha" "$BASE"' in _step()["run"]

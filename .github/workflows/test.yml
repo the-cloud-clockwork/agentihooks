@@ -559,7 +559,7 @@ jobs:
               reason="superseded by run $RUN"
             elif [[ -n "$live" ]] && ! grep -qxF "refs/heads/$branch" <<< "$live"; then
               if git -C "$GITHUB_WORKSPACE/provenance-grader" merge-base --is-ancestor "$sha" "$BASE" 2>/dev/null; then
-                echo "Kept queue run $id ($branch): its group merged"
+                echo "Kept queue run $id ($branch): its head is in this group's base history"
                 continue
               fi
               reason="its queue branch is gone"
