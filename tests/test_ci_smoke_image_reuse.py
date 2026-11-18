@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -7,6 +8,17 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 IMAGE = "local/agentihooks-swarm:clients-check"
+
+
+def build_command(run: str) -> str:
+    script = (ROOT / "scripts/packaging/pull-runtime-image.sh").read_text()
+    images = re.findall(r'"\$image" == mirror\.gcr\.io/library/([^\s*)]+)', script)
+    assert images
+    for image in images:
+        assert f"bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/{image} &&" in run, image
+        assert f"docker tag public.ecr.aws/docker/library/{image} mirror.gcr.io/library/{image}" in run, image
+    line = run.replace("\\\n", "").partition("\n")[0]
+    return " ".join(re.sub(r"\$\{[^}]*\}", "", line).split()).removesuffix(" &")
 
 
 def test_main_image_is_built_once_before_every_compatible_smoke() -> None:
@@ -22,31 +34,9 @@ def test_main_image_is_built_once_before_every_compatible_smoke() -> None:
     build = builds[0]
     step = steps[build]
     if "run" in step:
-        assert step["run"].replace(
-            ' \\\n  ${LAYERS_FROM:+--cache-from "$LAYERS_FROM"} ${LAYERS_TO:+--cache-to "$LAYERS_TO"}', ""
-        ) in {
+        assert build_command(step["run"]) in {
             f"docker build -t {IMAGE} .",
             f"docker build -t {IMAGE} --output type=image,compression=uncompressed .",
-            """docker build -t local/agentihooks-swarm:clients-check --output type=image,compression=uncompressed . &
-build=$!
-status=0
-bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/redis:7 &&
-  docker tag public.ecr.aws/docker/library/redis:7 mirror.gcr.io/library/redis:7 &
-redis=$!
-bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/nats:2.15.1-alpine &&
-  docker tag public.ecr.aws/docker/library/nats:2.15.1-alpine mirror.gcr.io/library/nats:2.15.1-alpine &
-nats=$!
-bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/nginx:1.27-alpine &&
-  docker tag public.ecr.aws/docker/library/nginx:1.27-alpine mirror.gcr.io/library/nginx:1.27-alpine &
-nginx=$!
-bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/redis:7-alpine &&
-  docker tag public.ecr.aws/docker/library/redis:7-alpine mirror.gcr.io/library/redis:7-alpine || status=$?
-wait "$redis" || status=$?
-wait "$nats" || status=$?
-wait "$nginx" || status=$?
-wait "$build" || status=$?
-exit "$status"
-""",
         }
     else:
         assert step["with"]["context"] == "."
