@@ -15,8 +15,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from scripts import coverage_check
 from scripts.dep_manifest import node
-from tests import coverage_check
 
 
 def line_map(old: str, new: str) -> dict[int, int]:
@@ -87,9 +87,8 @@ def _show(repo: Path, revision: str, path: str) -> str | None:
 
 
 def moved_lines(repo: Path, commit: str, head: str) -> dict[str, dict[int, int] | None]:
-    # In a partial clone --numstat fetches the missing blobs in one batch; --name-only fetches none.
     command = ["git", "-C", str(repo), "diff", "--no-renames", "--numstat", commit, head, "--", "*.py"]
-    moved = {}
+    moved: dict[str, dict[int, int] | None] = {}
     for line in subprocess.run(command, check=True, capture_output=True, text=True).stdout.splitlines():
         path = line.split("\t", 2)[2]
         old, new = _show(repo, commit, path), _show(repo, head, path)

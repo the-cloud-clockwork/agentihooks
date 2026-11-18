@@ -1,0 +1,6 @@
+{
+  "scripts/reused_coverage.py:scripts.reused_coverage.x_keep:b9c5d3684caf6d81047d268c52534c296f56847cd9420fee8cf779f1bad86ab5": {
+    "reader": "standards-reader",
+    "reason": "SQLite keywords and unquoted identifiers, including the arc table and its columns, resolve case insensitively, so the uppercased insert writes the same rows (confirmed in an in-memory run)."
+  }
+}

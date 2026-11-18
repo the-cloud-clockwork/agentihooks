@@ -10,6 +10,12 @@ import tests.shards
 # ruleid: shipped-code-imports-tests
 import tests.shards as shards
 
+# ruleid: shipped-code-imports-tests
+from tests import coverage_check, reused_coverage
+
+# ok: shipped-code-imports-tests
+from scripts import coverage_check as checked, reused_coverage as reused
+
 # ok: shipped-code-imports-tests
 from scripts import dep_manifest as manifest
 
@@ -27,4 +33,5 @@ def lazy() -> object:
     return SDK_GROUP
 
 
-print(dep_manifest, SLOWDOWN, tests.shards, shards, manifest, FIRST_SHARD_FILES, testsuite, lazy)
+print(dep_manifest, SLOWDOWN, tests.shards, shards, coverage_check, reused_coverage, checked, reused)
+print(manifest, FIRST_SHARD_FILES, testsuite, lazy)

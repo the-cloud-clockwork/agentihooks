@@ -8174,7 +8174,7 @@
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-dep-manifest-coverage-slow",
       "behaviour": "The coverage database check reads each database file fully before SQLite opens it, so a downloaded shard database that has left the page cache is read in one pass instead of page by page from a busy node disk.",
-      "seam": "tests.coverage_check.problem, run by the dep-manifest and unit jobs of the Tests workflow, scripts.ci_branch_coverage and tests.reused_coverage",
+      "seam": "scripts.coverage_check.problem, run by the dep-manifest and unit jobs of the Tests workflow, scripts.ci_branch_coverage and scripts.reused_coverage",
       "tests": [
         "tests/test_reused_coverage.py::test_the_check_reads_each_database_through_before_sqlite_opens_it"
       ]
@@ -9520,6 +9520,16 @@
         "tests/ci_lab/test_wheel_imports.py::test_every_lab_module_imports_without_the_tests_package",
         "tests/ci_lab/test_wheel_imports.py::test_an_import_of_the_tests_package_fails_where_the_wheel_is_installed",
         "tests/test_dep_manifest.py::test_the_split_deselects_with_a_grader_that_keeps_the_manifest_under_tests"
+      ]
+    },
+    {
+      "id": "branch-coverage-wheel-imports",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2659",
+      "behaviour": "The branch coverage script and the coverage check and reused coverage modules it runs import from the hooks, scripts and profiles packages the wheel ships, never from the tests package. The coverage check lives in scripts.coverage_check and the reused coverage filter in scripts.reused_coverage.",
+      "seam": "a fresh interpreter whose import system cannot find the tests package imports scripts.ci_branch_coverage, scripts.coverage_check and scripts.reused_coverage",
+      "tests": [
+        "tests/ci_lab/test_wheel_imports.py::test_the_branch_coverage_script_imports_without_the_tests_package"
       ]
     },
     {
