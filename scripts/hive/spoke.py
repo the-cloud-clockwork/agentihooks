@@ -207,11 +207,11 @@ class Spoke:
         if waiting := self._waiting(prior):
             delivery.nak(self.config.policy.ack_wait_ms)
             return waiting
-        if prior.get("state") in ("dead", "withdrawn"):
-            return self._ended(delivery, prior["state"])
+        if prior.get("state") == "dead":
+            return self._ended(delivery)
         if prior.get("state") == "dead_pending":
             return self._exhaust(delivery)
-        if entry and prior["state"] not in ("ready", "claimed", "launching", ASKED):
+        if entry and prior["state"] not in ("ready", "claimed", "launching", ASKED, "withdrawn"):
             delivery.nak(self.config.policy.ack_wait_ms)
             return "busy"
         value = json.dumps({"owner": self.config.hive, "state": "claimed"}).encode()
@@ -244,14 +244,12 @@ class Spoke:
         self._report_launch(event, launch)
         return "started"
 
-    def _ended(self, delivery: Delivery, state: str) -> str:
-        """Terms an offer whose claim at this generation is dead or withdrawn; a dead claim first asks the hub to
-        advance the task's claim generation, so a task whose offer dead lettered unadmitted is offered again under a
-        fresh claim key."""
-        if state == "dead":
-            self.tasks.dead_lettered(delivery.event)
+    def _ended(self, delivery: Delivery) -> str:
+        """Terms an offer whose claim at this generation is dead after asking the hub to advance the task's claim
+        generation, so a task whose offer dead lettered unadmitted is offered again under a fresh claim key."""
+        self.tasks.dead_lettered(delivery.event)
         delivery.term()
-        return state
+        return "dead"
 
     def _ask_again(
         self, event: Envelope, attempt: int, revision: int, pending_revision: int, heartbeat: presence.Heartbeat
