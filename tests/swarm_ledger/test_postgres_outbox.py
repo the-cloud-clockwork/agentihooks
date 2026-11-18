@@ -6,7 +6,9 @@ import psycopg2
 import pytest
 
 from scripts.events import memory
+from scripts.events.bus import NoStream
 from scripts.events.config import BusConfig
+from scripts.events.envelope import Envelope
 from scripts.swarm_ledger.repository import outbox, postgres, sqlite
 
 URL = os.environ.get("LEDGER_TEST_POSTGRES_URL", "")
@@ -78,6 +80,29 @@ def test_the_relay_publishes_postgres_outbox_rows_once_and_marks_them_sent(ledge
             "SELECT count(*) FROM outbox WHERE slug = %s AND id NOT IN (SELECT id FROM outbox_sent)", (slug,)
         )
         assert cursor.fetchone() == (0,)
+
+
+class Streamless:
+    def publish(self, subject: str, event: Envelope) -> bool:
+        raise NoStream(subject)
+
+
+def test_a_postgres_small_ledger_writes_no_row_and_its_leftover_row_no_stream_takes_is_marked_sent() -> None:
+    slug = f"outbox-{uuid.uuid4().hex[:12]}"
+    repository = postgres.PostgresLedgerRepository(URL)
+    repository.migrate()
+    repository.create(slug, CONTENT)
+    assert subjects(slug) == []
+    with repository.connect() as connection, connection:
+        outbox.write(connection, slug, 1, {}, {"tasks": [{"id": "t9"}]})
+    with repository.connect() as connection:
+        assert outbox.relay_ledger(connection, slug, Streamless(), 10, lambda: 1_000) == 1
+    assert subjects(slug) == [(f"swarm.{slug}.task.t9", 1)]
+    with closing(psycopg2.connect(URL)) as reader, reader.cursor() as cursor:
+        cursor.execute("SELECT id FROM outbox WHERE slug = %s", (slug,))
+        [(row_id,)] = cursor.fetchall()
+        cursor.execute("SELECT sent_at FROM outbox_sent WHERE id = %s", (row_id,))
+        assert cursor.fetchone() == (1_000,)
 
 
 def test_postgres_prune_deletes_sent_rows_and_marks_older_than_the_window_and_keeps_the_rest(ledger):

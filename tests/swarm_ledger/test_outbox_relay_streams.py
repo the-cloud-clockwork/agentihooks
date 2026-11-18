@@ -137,7 +137,7 @@ def test_rows_no_stream_takes_from_a_ledger_no_longer_stored_are_marked_sent_and
     assert sent(repository) == sorted(dropped)
     assert unsent_slugs(repository) == [("crew",)]
     assert capsys.readouterr().err == "".join(
-        f"ledger outbox: row {row_id} dropped: ledger gone has no swarm\n" for row_id in dropped
+        f"ledger outbox: row {row_id} dropped: ledger gone is small or no longer stored\n" for row_id in dropped
     )
 
 
@@ -156,4 +156,6 @@ def test_a_row_no_stream_takes_from_a_small_ledger_is_marked_sent_while_a_swarm_
     assert outbox.relay(repository, Streamless()) == 1
     assert sent(repository) == [row_id]
     assert rows(repository, "crew") == held and unsent_slugs(repository) == [("crew",)]
-    assert capsys.readouterr().err == f"ledger outbox: row {row_id} dropped: ledger session has no swarm\n"
+    assert (
+        capsys.readouterr().err == f"ledger outbox: row {row_id} dropped: ledger session is small or no longer stored\n"
+    )

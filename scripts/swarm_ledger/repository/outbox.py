@@ -106,7 +106,7 @@ def relay_ledger(connection: Any, slug: str, events: Publisher, batch: int, cloc
         except NoStream:
             if awaited(connection, slug):
                 return published
-            sys.stderr.write(f"ledger outbox: row {row_id} dropped: ledger {slug} has no swarm\n")
+            sys.stderr.write(f"ledger outbox: row {row_id} dropped: ledger {slug} is small or no longer stored\n")
         with connection:
             connection.execute(SENT, (row_id, clock()))
     return len(pending)
