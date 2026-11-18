@@ -112,6 +112,18 @@ def test_priority_moves_waiting_entries_at_once_while_the_head_group_tests(
     assert not p.store.redis.hgetall(p.store.key("sw", queue_priority.PENDING))
 
 
+def test_refresh_leaves_a_stored_deferred_record_alone(priority: SimpleNamespace) -> None:
+    p = priority
+    key = p.store.key("sw", "queue-priority")
+    raw = json.dumps({"repo": "o/r", "group_head": "group-head", "run_id": 42, "sender": "master", "order": 1})
+    p.store.redis.hset(key, URL, raw)
+    p.run["status"] = "completed"
+    assert queue_priority.refresh(p.store, "sw", p.tasks) == []
+    assert p.queue.mutations == []
+    assert p.reads == []
+    assert p.store.redis.hgetall(key) == {URL: raw}
+
+
 def test_deferred_priority_runs_after_original_tests_complete(priority: SimpleNamespace) -> None:
     p = priority
     deferred(p)
