@@ -15,7 +15,7 @@ pull request carries the pasted report.
 ## Command
 
 ```bash
-python -m scripts.ci_lab shadow report --gate <gate> [--heads 50] [--event merge_group]
+python -m scripts.ci_lab shadow report --gate <gate> [--heads 50] [--event merge_group] [--app <slug>]
 ```
 
 | Option | Default | Meaning |
@@ -23,6 +23,7 @@ python -m scripts.ci_lab shadow report --gate <gate> [--heads 50] [--event merge
 | `--gate` | required | The gate id: `tests`, `mutation`, or a static gate such as `lint` or `type-gate` |
 | `--heads` | `50` | How many heads the window holds; at least 1 |
 | `--event` | `pull_request` | Read pull request heads, or merge group heads with `merge_group` |
+| `--app` | `AGENTIHOOKS_LAB_APP` | The slug of the lab's GitHub App; the command exits 2 when neither names one |
 
 The repository comes from `GITHUB_REPOSITORY`, or `the-cloud-clockwork/agentihooks` when it is
 unset. Every GitHub call goes through the rate limited helper `scripts.ci_budget.rate_limit.gh_api`,
@@ -41,7 +42,9 @@ and takes each distinct head once. For each head it reads every check run on the
   to the gate, the same mapping the shadow recorder uses. The verdict is `fail` when any of them
   concluded `failure` or `timed_out`, `pass` when all graded ones succeeded. `skipped` and other
   conclusions grade nothing. It completed when the last graded job completed.
-- **Lab verdict.** The newest `lab-shadow/<gate>` check run not posted by `github-actions`.
+- **Lab verdict.** The newest `lab-shadow/<gate>` check run posted by the lab App, the same trust
+  the shadow recorder applies; a check run of that name from any other App, a workflow token
+  included, is ignored.
   `success` is `pass`, `failure` and `timed_out` are `fail`. Any other conclusion, a run still in
   progress or no run at all leaves the lab verdict missing.
 

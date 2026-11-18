@@ -17,6 +17,9 @@ THIRD = "c" * 40
 REPOSITORY = "owner/repo"
 RUNS = f"repos/{REPOSITORY}/actions/workflows/test.yml/runs?event=pull_request&status=completed"
 NONE: frozenset[str] = frozenset()
+APP = "agentihooks-lab"
+SOURCES = shadow.Sources(NONE, APP)
+LINT = shadow.Sources(frozenset({"lint"}), APP)
 
 
 def stamp(minute: int) -> str:
@@ -62,7 +65,7 @@ def graded(
 @pytest.mark.feature("lab-shadow-acceptance-report")
 def test_a_lab_verdict_that_disagrees_with_actions_is_a_mismatch_that_fails_the_rule() -> None:
     runs = [job("unit (3.12, 1)", "failure", 10), job("unit (3.12, 2)", "timed_out", 12), lab("tests", "success", 5)]
-    found = shadow_report.head(HEAD, runs, "tests", NONE)
+    found = shadow_report.head(HEAD, runs, "tests", SOURCES)
     assert found == graded(HEAD, "fail", "pass", 12, 5)
     assert found is not None
     assert shadow_report.mismatch(found) is True
@@ -71,7 +74,7 @@ def test_a_lab_verdict_that_disagrees_with_actions_is_a_mismatch_that_fails_the_
     agreed = graded(HEAD, "pass", "pass")
     assert shadow_report.mismatch(agreed) is False
     assert shadow_report.holds(shadow_report.tally([agreed]), shadow_report.rule(1)) is True
-    lab_failed = shadow_report.head(HEAD, [job("lint"), lab("lint", "failure", 4)], "lint", frozenset({"lint"}))
+    lab_failed = shadow_report.head(HEAD, [job("lint"), lab("lint", "failure", 4)], "lint", LINT)
     assert lab_failed == graded(HEAD, "pass", "fail", 10, 4)
     assert lab_failed is not None
     assert shadow_report.mismatch(lab_failed) is True
@@ -80,14 +83,18 @@ def test_a_lab_verdict_that_disagrees_with_actions_is_a_mismatch_that_fails_the_
 @pytest.mark.feature("lab-shadow-acceptance-report")
 def test_a_head_without_a_lab_verdict_counts_against_presence() -> None:
     actions = [job("unit (3.12, 1)")]
-    assert shadow_report.lab(actions, "tests") is None
-    assert shadow_report.lab([*actions, lab(status="in_progress")], "tests") is None
-    assert shadow_report.lab([*actions, lab(conclusion="cancelled")], "tests") is None
-    assert shadow_report.lab([*actions, lab(slug="github-actions")], "tests") is None
-    assert shadow_report.lab([*actions, lab("lint")], "tests") is None
+    assert shadow_report.lab(actions, "tests", APP) is None
+    assert shadow_report.lab([*actions, lab(status="in_progress")], "tests", APP) is None
+    assert shadow_report.lab([*actions, lab(conclusion="cancelled")], "tests", APP) is None
+    assert shadow_report.lab([*actions, lab(slug="github-actions")], "tests", APP) is None
+    assert shadow_report.lab([*actions, lab(slug="another-app")], "tests", APP) is None
+    assert shadow_report.lab([*actions, lab(slug="another-app")], "tests", "another-app") == (
+        shadow_report.Verdict("pass", at(5))
+    )
+    assert shadow_report.lab([*actions, lab("lint")], "tests", APP) is None
     newest = [lab(conclusion="failure", minute=3, run_id=7), lab(conclusion="success", minute=4, run_id=9)]
-    assert shadow_report.lab(newest, "tests") == shadow_report.Verdict("pass", at(4))
-    assert shadow_report.lab(list(reversed(newest)), "tests") == shadow_report.Verdict("pass", at(4))
+    assert shadow_report.lab(newest, "tests", APP) == shadow_report.Verdict("pass", at(4))
+    assert shadow_report.lab(list(reversed(newest)), "tests", APP) == shadow_report.Verdict("pass", at(4))
     missing = graded(HEAD, "fail", None)
     assert shadow_report.mismatch(missing) is False
     assert shadow_report.first(missing) is False
@@ -135,16 +142,18 @@ def test_a_cancelled_actions_job_takes_its_head_out_of_the_window() -> None:
         asked.append(path)
         return answers[path]
 
-    found = shadow_report.collect(fetch, REPOSITORY, "pull_request", "tests", NONE, 2)
+    found = shadow_report.collect(fetch, REPOSITORY, "pull_request", "tests", SOURCES, 2)
     assert found == [graded(OTHER, "fail", "pass"), graded(THIRD, "pass", None)]
     assert asked == list(answers)
-    assert shadow_report.collect(fetch, REPOSITORY, "pull_request", "tests", NONE, 1) == [graded(OTHER, "fail", "pass")]
+    assert shadow_report.collect(fetch, REPOSITORY, "pull_request", "tests", SOURCES, 1) == [
+        graded(OTHER, "fail", "pass")
+    ]
 
 
 @pytest.mark.feature("lab-shadow-acceptance-report")
 def test_a_lab_verdict_completing_after_the_actions_jobs_is_late() -> None:
     runs = [job("unit (3.12, 1)", minute=9), job("unit (3.12, 2)", minute=12)]
-    late = shadow_report.head(HEAD, [*runs, lab(minute=15)], "tests", NONE)
+    late = shadow_report.head(HEAD, [*runs, lab(minute=15)], "tests", SOURCES)
     assert late == graded(HEAD, "pass", "pass", 12, 15)
     assert late is not None
     assert shadow_report.first(late) is False
@@ -231,7 +240,7 @@ def test_the_report_command_reads_live_heads_through_the_github_api(
 
     monkeypatch.setattr(shadow_report, "gh_api", gh_api)
     monkeypatch.setattr(shadow, "static_jobs", static_jobs)
-    environ = {"GITHUB_REPOSITORY": REPOSITORY}
+    environ = {"GITHUB_REPOSITORY": REPOSITORY, "AGENTIHOOKS_LAB_APP": APP}
     argv = ["shadow", "report", "--gate", "lint", "--heads", "1", "--event", "merge_group"]
     assert cli.main(argv, environ) == 0
     out = capsys.readouterr().out
@@ -243,7 +252,8 @@ def test_the_report_command_reads_live_heads_through_the_github_api(
     assert [args for args, _ in calls] == [first_page, first_checks, second_checks]
     assert all(options == {"timeout": 30.0, "text": True} for _, options in calls)
     calls.clear()
-    assert cli.main(["shadow", "report", "--gate=lint", "--heads", "2", "--event", "merge_group"], environ) == 1
+    flagged = ["shadow", "report", "--gate=lint", "--heads", "2", "--event", "merge_group", "--app", APP]
+    assert cli.main(flagged, {"GITHUB_REPOSITORY": REPOSITORY}) == 1
     assert capsys.readouterr().out.endswith(
         "heads 1 of 2\nlab verdict present 1 of at least 2\nmismatches 0 of at most 0\n"
         "lab verdict first 1 of at least 2\nrule fails\n"
@@ -266,11 +276,11 @@ def test_the_report_command_names_its_repository_and_refuses_an_empty_window(
         "repos/the-cloud-clockwork/agentihooks/actions/workflows/test.yml/runs?event=pull_request&status=completed"
         "&per_page=100&page=1"
     )
-    assert shadow_report.main(["--gate", "tests"], {"GITHUB_REPOSITORY": ""}, fetch) == 1
+    assert shadow_report.main(["--gate", "tests", "--app", APP], {"GITHUB_REPOSITORY": ""}, fetch) == 1
     assert asked == [default]
     capsys.readouterr()
     asked.clear()
-    assert shadow_report.main(["--gate", "tests"], {}, fetch) == 1
+    assert shadow_report.main(["--gate", "tests", "--app", APP], {}, fetch) == 1
     assert asked == [default]
     assert capsys.readouterr().out.endswith(
         "heads 0 of 50\nlab verdict present 0 of at least 48\nmismatches 0 of at most 0\n"
@@ -283,8 +293,15 @@ def test_the_report_command_names_its_repository_and_refuses_an_empty_window(
     assert error.startswith("usage: python -m scripts.ci_lab shadow report")
     assert error.endswith("error: --heads must be at least 1\n")
     with pytest.raises(SystemExit) as gateless:
-        shadow_report.main(["--heads", "3"], {}, fetch)
+        shadow_report.main(["--heads", "3", "--app", APP], {}, fetch)
     assert gateless.value.code == 2
+    capsys.readouterr()
+    asked.clear()
+    with pytest.raises(SystemExit) as appless:
+        shadow_report.main(["--gate", "tests"], {"AGENTIHOOKS_LAB_APP": ""}, fetch)
+    assert appless.value.code == 2
+    assert capsys.readouterr().err.endswith("error: --app or AGENTIHOOKS_LAB_APP names the lab App\n")
+    assert asked == []
 
 
 @pytest.mark.feature("lab-shadow-acceptance-report")

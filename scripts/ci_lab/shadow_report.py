@@ -1,8 +1,8 @@
 """The acceptance rule report: GitHub Actions jobs against lab-shadow check runs over the last heads of one gate.
 
-python -m scripts.ci_lab shadow report --gate GATE [--heads N] [--event merge_group] reads the newest completed Tests
-runs of the event and, for each distinct head, joins the github-actions jobs the shadow recorder maps to the gate with
-the head's lab-shadow/<gate> check run. A head whose jobs of the gate were cancelled, still run or never graded leaves
+python -m scripts.ci_lab shadow report --gate GATE [--heads N] [--event merge_group] [--app SLUG] reads the newest
+completed Tests runs of the event and, for each distinct head, joins the github-actions jobs the shadow recorder maps to
+the gate with the head's lab-shadow/<gate> check run from the lab App, named by --app or AGENTIHOOKS_LAB_APP. A head whose jobs of the gate were cancelled, still run or never graded leaves
 the window; a unit job the workflow reran after a lost runner counts by its rerun. It prints one row per head and the
 counts, and exits 0 only when the window holds N heads with no mismatch, a lab verdict on 48 and a lab verdict
 completed first on 45 of every 50, rounded up, and 1 otherwise.
@@ -47,6 +47,7 @@ gh_api = cast("Callable[..., subprocess.CompletedProcess[str]]", scripts.ci_budg
 
 ROOT = Path(__file__).resolve().parents[2]
 REPOSITORY = "the-cloud-clockwork/agentihooks"
+LAB_APP = "AGENTIHOOKS_LAB_APP"
 WORKFLOW = "test.yml"
 PULL_REQUEST = "pull_request"
 MERGE_GROUP = "merge_group"
@@ -136,10 +137,10 @@ def actions(runs: Sequence[Mapping[str, Any]], gate: str, static: Collection[str
     return Verdict(shadow.FAIL if shadow.FAIL in outcomes else shadow.PASS, max(map(completed, graded)))
 
 
-def lab(runs: Sequence[Mapping[str, Any]], gate: str) -> Verdict | None:
-    """Return the newest lab-shadow verdict on the gate, or None when the lab posted no completed pass or fail."""
+def lab(runs: Sequence[Mapping[str, Any]], gate: str, app: str) -> Verdict | None:
+    """Return the lab App's newest lab-shadow verdict on the gate, or None when it posted no completed pass or fail."""
     name = f"{shadow.LAB_NAME}{gate}"
-    posted = [run for run in runs if run["name"] == name and run["app"]["slug"] != shadow.ACTIONS]
+    posted = [run for run in runs if run["name"] == name and run["app"]["slug"] == app]
     if not posted:
         return None
     newest = max(posted, key=lambda run: int(run["id"]))
@@ -147,10 +148,10 @@ def lab(runs: Sequence[Mapping[str, Any]], gate: str) -> Verdict | None:
     return None if outcome is None else Verdict(outcome, completed(newest))
 
 
-def head(sha: str, runs: Sequence[Mapping[str, Any]], gate: str, static: Collection[str]) -> Head | None:
+def head(sha: str, runs: Sequence[Mapping[str, Any]], gate: str, sources: shadow.Sources) -> Head | None:
     """Return the head's verdicts on the gate, or None when it holds no Actions verdict."""
-    found = actions(runs, gate, static)
-    return None if found is None else Head(sha, found, lab(runs, gate))
+    found = actions(runs, gate, sources.static)
+    return None if found is None else Head(sha, found, lab(runs, gate, sources.lab_app))
 
 
 def mismatch(found: Head) -> bool:
@@ -220,12 +221,12 @@ def heads_of(fetch: Fetch, repository: str, event: str) -> Iterator[str]:
             yield sha
 
 
-def collect(fetch: Fetch, repository: str, event: str, gate: str, static: Collection[str], count: int) -> list[Head]:
+def collect(fetch: Fetch, repository: str, event: str, gate: str, sources: shadow.Sources, count: int) -> list[Head]:
     """Return the newest count heads of the event that hold an Actions verdict on the gate."""
     found: list[Head] = []
     for sha in heads_of(fetch, repository, event):
         runs = list(pages(fetch, f"repos/{repository}/commits/{sha}/check-runs?filter=latest", "check_runs"))
-        graded = head(sha, runs, gate, static)
+        graded = head(sha, runs, gate, sources)
         if graded is not None:
             found.append(graded)
         if len(found) == count:
@@ -249,11 +250,15 @@ def main(argv: Sequence[str], environ: Mapping[str, str], fetch: Fetch = api) ->
     parser.add_argument("--gate", required=True)
     parser.add_argument("--heads", type=int, default=HEADS)
     parser.add_argument("--event", choices=(PULL_REQUEST, MERGE_GROUP), default=PULL_REQUEST)
+    parser.add_argument("--app", default=environ.get(LAB_APP, ""))
     arguments = parser.parse_args(argv)
     if arguments.heads < 1:
         parser.error("--heads must be at least 1")
+    if not arguments.app:
+        parser.error(f"--app or {LAB_APP} names the lab App")
     repository = environ.get("GITHUB_REPOSITORY") or REPOSITORY
     window = rule(arguments.heads)
-    found = collect(fetch, repository, arguments.event, arguments.gate, shadow.static_jobs(ROOT), arguments.heads)
+    sources = shadow.Sources(shadow.static_jobs(ROOT), arguments.app)
+    found = collect(fetch, repository, arguments.event, arguments.gate, sources, arguments.heads)
     sys.stdout.write(render(arguments.gate, arguments.event, found, window))
     return 0 if holds(tally(found), window) else 1
