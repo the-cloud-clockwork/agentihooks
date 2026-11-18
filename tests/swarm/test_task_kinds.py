@@ -16,6 +16,13 @@ def test_a_task_without_a_kind_gets_the_code_prompt():
     assert "agentihooks swarm sw ready <handoff doc>" in build()
 
 
+def test_the_prompt_names_the_api_command_in_the_stop_hook_warning():
+    assert (
+        "A hook blocks your stop while operator events are unhandled or you have gone many "
+        "tool calls without an api command."
+    ) in build()
+
+
 def test_each_kind_gets_its_own_prompt():
     texts = {kind: build(kind=kind) for kind in KINDS}
     assert len(set(texts.values())) == len(KINDS)
