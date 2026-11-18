@@ -4,6 +4,7 @@ import os
 import resource
 import subprocess
 import time
+import warnings
 from pathlib import Path
 
 from scripts import type_gate
@@ -51,6 +52,15 @@ def _differences(left: dict[str, int], right: dict[str, int], paths: list[str]) 
     }
 
 
+def _publish(label: str, report: dict[str, object]) -> None:
+    text = f"{label} {json.dumps(report, sort_keys=True)}"
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        with Path(summary).open("a") as handle:
+            handle.write(f"```\n{text}\n```\n")
+    warnings.warn(text, stacklevel=1)
+
+
 def _head() -> str:
     return subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
 
@@ -70,7 +80,7 @@ def test_probe_counts_one_file_by_the_files_checked_with_it() -> None:
     graded, report["pull_request_layout"] = _measure(pull_request)
     every, report["every_source_layout"] = _measure(None)
     report["pull_request_versus_every_source"] = _differences(every, graded, pull_request)
-    print("CONTEXT PROBE " + json.dumps(report, sort_keys=True))
+    _publish("CONTEXT PROBE", report)
 
 
 def test_probe_counts_the_tree_again_after_one_empty_source_shifts_the_runs() -> None:
@@ -82,4 +92,4 @@ def test_probe_counts_the_tree_again_after_one_empty_source_shifts_the_runs() ->
     finally:
         (ROOT / ADDED).unlink()
     report["shifted_versus_every_source"] = _differences(before, after, sorted(set(before) | set(after)))
-    print("SHIFT PROBE " + json.dumps(report, sort_keys=True))
+    _publish("SHIFT PROBE", report)
