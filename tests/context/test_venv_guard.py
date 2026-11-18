@@ -187,6 +187,14 @@ def test_editable_install_from_a_primary_checkout_or_into_another_venv_passes(
 
 
 @pytest.mark.feature("venv-guard-refuses-worktree-editable-install")
+def test_an_install_from_a_primary_checkout_whose_path_holds_a_space_passes(checkouts: dict[str, Path]) -> None:
+    primary = checkouts["venv"].parent / "work space"
+    primary.mkdir()
+    _git("-C", str(primary), "init", "-q")
+    check_venv_guard(_bash(f"uv pip install --python {checkouts['venv']}/bin/python -e '{primary}'", primary))
+
+
+@pytest.mark.feature("venv-guard-refuses-worktree-editable-install")
 def test_the_shell_guards_refuse_a_worktree_editable_install_into_the_hooks_venv(
     checkouts: dict[str, Path], isolated: None
 ) -> None:
