@@ -117,7 +117,7 @@ def test_a_seeded_mismatch_disables_the_kind_files_a_ci_task_with_both_runs_and_
     ledger = Ledger()
 
     with pytest.raises(audit.CILabVerdictMismatch) as raised:
-        audit.Audit(store, lab, ledger, SLUG).promotion_audit(HEAD)
+        audit.promotion_audit(audit.Ports(store, lab, ledger, SLUG), HEAD)
 
     fresh = Verdict("static", LINT, False, False, 1.0)
     assert raised.value.mismatches == (audit.Mismatch(cached, fresh, "grade-v1-cached", AUDIT_RUN),)
@@ -128,8 +128,8 @@ def test_a_seeded_mismatch_disables_the_kind_files_a_ci_task_with_both_runs_and_
     assert store.get("test", ONE) is not None
     task = f"lab-mismatch-static-{digest({'kind': 'static', 'run': AUDIT_RUN})[:16]}"
     description = (
-        f"The lab audit run {AUDIT_RUN} regraded static units differently from their cached verdicts: "
-        f"{LINT} cached passed by run grade-v1-cached, regraded failed. "
+        "The lab audit regraded static units differently from their cached verdicts: "
+        f"{LINT} cached passed by run grade-v1-cached, regraded failed by run {AUDIT_RUN}. "
         "Reuse of static verdicts is off until a pull request enables the kind again "
         "with the fix for the input its key misses."
     )
@@ -158,7 +158,7 @@ def test_matching_verdicts_file_nothing_and_return_the_audit_run(store: Store, c
     lab = Lab(units=units, fresh={LINT: True, ONE: False})
     ledger = Ledger()
 
-    regrade = audit.Audit(store, lab, ledger, SLUG).promotion_audit(HEAD)
+    regrade = audit.promotion_audit(audit.Ports(store, lab, ledger, SLUG), HEAD)
 
     assert regrade.run == AUDIT_RUN
     assert len(regrade.verdicts) == 2
@@ -175,12 +175,15 @@ def test_a_cached_flaky_pass_that_fails_again_agrees_and_a_cached_failure_that_p
     ledger = Ledger()
 
     with pytest.raises(audit.CILabVerdictMismatch) as raised:
-        audit.Audit(store, lab, ledger, SLUG).promotion_audit(HEAD)
+        audit.promotion_audit(audit.Ports(store, lab, ledger, SLUG), HEAD)
 
     fresh = Verdict("mutant", RED, True, False, 1.0)
     assert raised.value.mismatches == (audit.Mismatch(cached, fresh, "grade-v1-cached", AUDIT_RUN),)
     assert [fields["title"] for _, fields, _ in ledger.added] == ["Lab verdict mismatch: mutant reuse disabled"]
-    assert f"{RED} cached failed by run grade-v1-cached, regraded passed." in ledger.added[0][1]["description"]
+    assert (
+        f"{RED} cached failed by run grade-v1-cached, regraded passed by run {AUDIT_RUN}."
+        in ledger.added[0][1]["description"]
+    )
 
 
 @pytest.mark.feature("lab-reuse-audit")
@@ -190,7 +193,7 @@ def test_units_without_a_cached_or_a_regraded_verdict_are_not_compared(store: St
     lab = Lab(units=units, fresh={UNKNOWN: False})
     ledger = Ledger()
 
-    regrade = audit.Audit(store, lab, ledger, SLUG).promotion_audit(HEAD)
+    regrade = audit.promotion_audit(audit.Ports(store, lab, ledger, SLUG), HEAD)
 
     assert [verdict.key for verdict in regrade.verdicts] == [UNKNOWN]
     assert ledger.added == []
@@ -211,7 +214,7 @@ def test_each_differing_kind_is_disabled_and_gets_its_own_task(store: Store, cli
     ledger = Ledger()
 
     with pytest.raises(audit.CILabVerdictMismatch) as raised:
-        audit.Audit(store, Lab(units=units, fresh=fresh), ledger, SLUG).promotion_audit(HEAD)
+        audit.promotion_audit(audit.Ports(store, Lab(units=units, fresh=fresh), ledger, SLUG), HEAD)
 
     assert [(m.cached.key, m.cached_run) for m in raised.value.mismatches] == [
         (ONE, "grade-v1-first"),
@@ -223,12 +226,10 @@ def test_each_differing_kind_is_disabled_and_gets_its_own_task(store: Store, cli
     titles = [fields["title"] for _, fields, _ in ledger.added]
     assert titles == ["Lab verdict mismatch: static reuse disabled", "Lab verdict mismatch: test reuse disabled"]
     tests = ledger.added[1][1]["description"]
-    assert tests.startswith(
-        f"The lab audit run {AUDIT_RUN} regraded test units differently from their cached verdicts: "
-    )
+    assert tests.startswith("The lab audit regraded test units differently from their cached verdicts: ")
     assert (
-        f"{ONE} cached passed by run grade-v1-first, regraded failed; "
-        f"{TWO} cached passed by run grade-v1-second, regraded failed. "
+        f"{ONE} cached passed by run grade-v1-first, regraded failed by run {AUDIT_RUN}; "
+        f"{TWO} cached passed by run grade-v1-second, regraded failed by run {AUDIT_RUN}. "
     ) in tests
     assert SAME not in tests
     assert ledger.added[0][1]["task"] != ledger.added[1][1]["task"]
@@ -243,7 +244,7 @@ def test_the_sample_regrades_the_chosen_share_of_the_day_in_the_backfill_class(
         _cache(store, hit.kind, hit.key, True)
     lab = Lab(days={DAY: hits}, fresh={hit.key: True for hit in hits})
 
-    regrade = audit.Audit(store, lab, Ledger(), SLUG).sample(DAY)
+    regrade = audit.sample(audit.Ports(store, lab, Ledger(), SLUG), DAY)
 
     chosen = audit.chosen(DAY, hits, audit.SHARE)
     assert audit.SHARE == 0.05
@@ -262,7 +263,7 @@ def test_a_sampled_mismatch_disables_the_kind_and_files_the_task(store: Store, c
     ledger = Ledger()
 
     with pytest.raises(audit.CILabVerdictMismatch) as raised:
-        audit.Audit(store, lab, ledger, SLUG).sample(DAY, 0.5)
+        audit.sample(audit.Ports(store, lab, ledger, SLUG), DAY, 0.5)
 
     assert len(raised.value.mismatches) == 5
     assert lab.graded[0][1] == Priority.BACKFILL

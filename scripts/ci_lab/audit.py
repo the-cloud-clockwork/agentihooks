@@ -1,34 +1,42 @@
 """The lab reuse audit: regrades that check the verdict store's reuse against fresh grades of the same units.
 
-Audit.promotion_audit grades a dev head's whole suite with no store reuse and compares every verdict with the cached
-one; Audit.sample regrades a deterministic share of a day's store hits in the backfill class. A mismatch disables
-reuse of its kind, files one ci task per kind on the ledger naming the cached run and the audit run, and raises
+promotion_audit grades a dev head's whole suite with no store reuse and compares every verdict with the cached one;
+sample regrades a deterministic share of a day's store hits in the backfill class. A mismatch disables reuse of its
+kind, files one ci task per kind on the ledger naming each cached run and the audit run, and raises
 CILabVerdictMismatch. Only a pull request enables a kind again.
 """
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from scripts.ci_lab.digests import digest
 from scripts.ci_lab.store import Store, Verdict
 from scripts.ci_lab.units import Priority
 
 __all__ = [
     "NOT_DUPLICATE",
+    "SENDER",
     "SHARE",
-    "Audit",
+    "TASK_PREFIX",
     "CILabVerdictMismatch",
     "Cached",
     "Lab",
     "Mismatch",
+    "Ports",
     "Regrade",
     "Tasks",
     "chosen",
     "mismatches",
+    "promotion_audit",
+    "sample",
 ]
 
 SHARE = 0.05
-NOT_DUPLICATE = ""
+SENDER = "swarm"
+TASK_PREFIX = "lab-mismatch-"
+NOT_DUPLICATE = "The lab audit files one task per kind and audit run whose regrade differs from the cached verdicts."
 
 
 @dataclass(frozen=True)
@@ -64,7 +72,8 @@ class CILabVerdictMismatch(RuntimeError):
 
     def __init__(self, found: Sequence[Mismatch]) -> None:
         self.mismatches = tuple(found)
-        super().__init__("")
+        kinds = sorted({mismatch.cached.kind for mismatch in self.mismatches})
+        super().__init__(f"regraded verdicts differ from the cached ones for {', '.join(kinds)}")
 
 
 class Lab(Protocol):
@@ -75,7 +84,7 @@ class Lab(Protocol):
         ...
 
     def hits(self, day: str) -> Sequence[Cached]:
-        """Return every unit the store answered on a UTC day."""
+        """Return every unit the store answered on a UTC day, once per unit and head."""
         ...
 
     def grade(self, units: Sequence[Cached], tier: Priority) -> Regrade:
@@ -91,29 +100,87 @@ class Tasks(Protocol):
         ...
 
 
+@dataclass(frozen=True)
+class Ports:
+    """What an audit reads and writes: the verdict store, the lab, the ledger task API and the ledger it files on."""
+
+    store: Store
+    lab: Lab
+    tasks: Tasks
+    slug: str
+
+
 def chosen(day: str, hits: Sequence[Cached], share: float) -> list[Cached]:
-    """Return the share of a day's hits that ranks first by digest under the day digest."""
-    return list(hits)
+    """Return the ceiling of the share of a day's hits, taken in the order of each hit's digest under the day digest."""
+    seed = digest({"day": day})
+    ranked = sorted(hits, key=lambda hit: digest({"seed": seed, "unit": f"{hit.kind}:{hit.key}", "head": hit.head}))
+    return ranked[: math.ceil(share * len(ranked))]
 
 
 def mismatches(store: Store, units: Sequence[Cached], regrade: Regrade) -> list[Mismatch]:
-    """Return every unit whose regraded verdict differs from its cached one."""
-    return []
+    """Return every unit whose regraded verdict differs from its cached one; a cached flaky pass agrees with a failure."""
+    graded = {(verdict.kind, verdict.key): verdict for verdict in regrade.verdicts}
+    found: list[Mismatch] = []
+    for unit in units:
+        cached = store.get(unit.kind, unit.key)
+        fresh = graded.get((unit.kind, unit.key))
+        if cached is not None and fresh is not None and cached.passed != fresh.passed and not cached.flaky:
+            found.append(Mismatch(cached, fresh, unit.run, regrade.run))
+    return found
 
 
-class Audit:
-    """Regrades that check reuse: each compares a fresh grade with the store and stops reuse of a differing kind."""
+def _word(verdict: Verdict) -> str:
+    return "passed" if verdict.passed else "failed"
 
-    def __init__(self, store: Store, lab: Lab, tasks: Tasks, slug: str) -> None:
-        self.store = store
-        self.lab = lab
-        self.tasks = tasks
-        self.slug = slug
 
-    def promotion_audit(self, head: str) -> Regrade:
-        """Grade the head's whole suite uncached in the promotion class and compare every verdict with the cached one."""
-        return Regrade("", ())
+def _line(mismatch: Mismatch) -> str:
+    cached, regraded = mismatch.cached, mismatch.regraded
+    return (
+        f"{cached.key} cached {_word(cached)} by run {mismatch.cached_run}, "
+        f"regraded {_word(regraded)} by run {mismatch.audit_run}"
+    )
 
-    def sample(self, day: str, share: float = SHARE) -> Regrade:
-        """Regrade a deterministic share of the day's store hits in the backfill class and compare them."""
-        return Regrade("", ())
+
+def _description(kind: str, found: Sequence[Mismatch]) -> str:
+    return (
+        f"The lab audit regraded {kind} units differently from their cached verdicts: "
+        + "; ".join(_line(mismatch) for mismatch in found)
+        + f". Reuse of {kind} verdicts is off until a pull request enables the kind again "
+        + "with the fix for the input its key misses."
+    )
+
+
+def _file(ports: Ports, kind: str, found: Sequence[Mismatch], run: str) -> None:
+    """File one kind's mismatches as a ci task naming every cached run and the audit run."""
+    fields = {
+        "task": f"{TASK_PREFIX}{kind}-{digest({'kind': kind, 'run': run})[:16]}",
+        "title": f"Lab verdict mismatch: {kind} reuse disabled",
+        "lane": "ci",
+        "kind": "ci",
+        "rank": "urgent",
+        "description": _description(kind, found),
+        "not_duplicate": NOT_DUPLICATE,
+    }
+    ports.tasks.add_task(ports.slug, fields, SENDER)
+
+
+def _audit(ports: Ports, units: Sequence[Cached], tier: Priority) -> Regrade:
+    """Grade the units uncached; stop reuse of each kind whose verdicts differ, file its task, then raise."""
+    regrade = ports.lab.grade(units, tier)
+    found = mismatches(ports.store, units, regrade)
+    for kind in sorted({mismatch.cached.kind for mismatch in found}):
+        ports.store.disable(kind)
+        _file(ports, kind, [mismatch for mismatch in found if mismatch.cached.kind == kind], regrade.run)
+    if found:
+        raise CILabVerdictMismatch(found)
+    return regrade
+
+
+def promotion_audit(ports: Ports, head: str) -> Regrade:
+    """Grade the head's whole suite uncached in the promotion class and compare every verdict with the cached one."""
+    return _audit(ports, ports.lab.suite(head), Priority.PROMOTION)
+
+
+def sample(ports: Ports, day: str, share: float = SHARE) -> Regrade:
+    """Regrade a deterministic share of the day's store hits in the backfill class and compare them."""
+    return _audit(ports, chosen(day, ports.lab.hits(day), share), Priority.BACKFILL)
