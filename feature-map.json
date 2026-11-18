@@ -1572,6 +1572,21 @@
       ]
     },
     {
+      "id": "hive-remove-stops-host-services",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-remove-stops-host-services",
+      "behaviour": "Hive remove stops and disables the agentihooks hive and scheduler user services installed on the removed hive's machine over its herdr SSH route, after the drain and before the member revoke and the herdr forget, and reports the result; a dry run names what it would stop and makes no SSH call; an unreachable host or a refused stop is named in the step line and every remaining step still runs.",
+      "seam": "remove.remove and its host step remove.stop_services",
+      "rules": [
+        "hive-remove-steps-skip-host"
+      ],
+      "tests": [
+        "tests/hive/test_remove.py::test_remove_of_a_machine_hive_stops_and_disables_its_services_over_its_ssh_route_first",
+        "tests/hive/test_remove.py::test_an_unreachable_host_is_named_and_every_other_step_still_runs",
+        "tests/hive/test_remove.py::test_the_host_stop_disables_only_the_installed_units_and_fails_on_a_refused_stop"
+      ]
+    },
+    {
       "id": "master-safety-nudge",
       "origin": "operator",
       "operator_words": "Wherever we have masters running we need some sort of OS cron set that nudges masters with either claude or codex depending on what the master is running. If a master is running it publishes a message to that herdr panel to nudge the master every 1 hour: Safety Nudge: In case the main tick or controller is down.",

@@ -1,0 +1,13 @@
+rules:
+  - id: hive-remove-steps-skip-host
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A hive remove step list forgets the herdr machine without first stopping the hive services on its host. The
+      herdr step deletes the only SSH route to the machine, and revoking the member leaves its hive user service
+      running and retrying swarm Redis logins. Run the host step, stop_services, before the herdr step.
+    patterns:
+      - pattern: |
+          STEPS = (..., ("herdr", $FORGET), ...)
+      - pattern-not: |
+          STEPS = (..., ("host", $STOP), ..., ("herdr", $FORGET), ...)
