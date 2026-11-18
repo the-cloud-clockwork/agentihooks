@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.986 · 2026-11-18
+
+### 2026-11-18 · 7a0c73bb0b6f · #11816 · @agenticore-app
+
+**Let the protected grader admit a test summary that downloads every report in one step**
+
+This change updates the protected gate grader so it accepts a test-summary job that fetches every report with a single download step, in addition to the existing two-download form it already allowed. It matters because each artifact download step can idle roughly 175 seconds due to a known issue with the download-artifact action, and with two steps and a 5-minute limit the job risks being cancelled, which blocks promotion. Since the grader checks workflow definitions against the base branch's reviewed summary, this admission step must land before the actual workflow can switch to the faster, single-step download.
+
 ## v2.17.985 · 2026-11-18
 
 ### 2026-11-17 · 418621a14deb · #11820 · @nestorcolt
