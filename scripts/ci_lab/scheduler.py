@@ -876,7 +876,7 @@ class MirrorExpander:
             for path, blob in self._files(mirror, sha).items()
             if PurePosixPath(path).parent.as_posix() == folder and path.endswith((".yml", ".yaml"))
         }
-        return {name: yaml.safe_load(text) for name, text in self._contents(mirror, files).items()}
+        return {name: yaml.safe_load(text) or {} for name, text in self._contents(mirror, files).items()}
 
     def _on_dev(self, repo: str, path: str) -> str:
         """Return one file of the repository's dev branch head."""

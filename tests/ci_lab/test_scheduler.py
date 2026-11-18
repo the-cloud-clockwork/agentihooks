@@ -1080,6 +1080,7 @@ def origin(tmp_path: Path) -> tuple[Path, str, str]:
             ".github/workflows/trusted-actors.json": json.dumps(ACTORS),
             ".github/workflows/scan.yaml": "jobs: {scan: {}}\n",
             ".github/workflows/nested/deep.yml": "jobs: {}\n",
+            ".github/workflows/empty.yml": "",
             "delivery.yaml": json.dumps(DELIVERY),
             "uv.lock": "lock",
             "pyproject.toml": "[project]\n",
@@ -1152,7 +1153,8 @@ def test_the_mirror_expander_keys_static_gates_from_git_objects_without_a_checko
     }
     tree = _git(repo, "rev-parse", f"{head}^{{tree}}").strip()
     assert found == scheduler.frame(Priority.PULL_REQUEST, tree, base, expected)
-    assert read == [("jobs: {}\n", {"gates": {}}, {"test.yml": {"jobs": {}}, "scan.yaml": {"jobs": {"scan": {}}}})]
+    reusable = {"test.yml": {"jobs": {}}, "scan.yaml": {"jobs": {"scan": {}}}, "empty.yml": {}}
+    assert read == [("jobs: {}\n", {"gates": {}}, reusable)]
     promoted = expander.expand(GradeRequest(remote, head, base, Priority.PROMOTION, ACTOR, False))
     assert (promoted.tree, promoted.grader, set(promoted.gates), promoted.skipped) == (
         tree,
