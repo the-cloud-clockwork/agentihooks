@@ -2,13 +2,14 @@
 
 import json
 from collections.abc import Callable
+from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Protocol, TypeGuard
 from urllib.parse import parse_qs, urlsplit
 
 from scripts.ci_lab.leases import Grant, Leases
 
-__all__ = ["MAX_WAIT_MS", "UploadSigner", "respond", "serve"]
+__all__ = ["MAX_WAIT_MS", "Reply", "UploadSigner", "bind", "respond", "serve"]
 
 MAX_WAIT_MS = 30_000
 MAX_BODY_BYTES = 65_536
@@ -140,13 +141,14 @@ def respond(leases: Leases, signer: UploadSigner, method: str, target: str, raw:
         return 400, {"error": "bad request"}
 
 
-def serve(host: str, port: int, leases: Leases, signer: UploadSigner) -> ThreadingHTTPServer:
-    """Bind the lease API on host and port; the caller runs serve_forever."""
+def bind(host: str, port: int, reply: Callable[[str, str, bytes], Reply]) -> ThreadingHTTPServer:
+    """Bind JSON routes on host and port, each request's method, target and body answered by reply; the caller runs
+    serve_forever."""
 
     def answer(request: BaseHTTPRequestHandler) -> None:
         length = request.headers.get(LENGTH) or "0"
         if length.isascii() and length.isdigit() and int(length) <= MAX_BODY_BYTES:
-            status, payload = respond(leases, signer, request.command, request.path, request.rfile.read(int(length)))
+            status, payload = reply(request.command, request.path, request.rfile.read(int(length)))
         else:
             status, payload = 400, {"error": "bad request"}
         data = json.dumps(payload).encode()
@@ -158,3 +160,8 @@ def serve(host: str, port: int, leases: Leases, signer: UploadSigner) -> Threadi
 
     handler = type(BaseHTTPRequestHandler.__name__, (BaseHTTPRequestHandler,), {"do_GET": answer, "do_POST": answer})
     return ThreadingHTTPServer((host, port), handler)
+
+
+def serve(host: str, port: int, leases: Leases, signer: UploadSigner) -> ThreadingHTTPServer:
+    """Bind the lease API on host and port; the caller runs serve_forever."""
+    return bind(host, port, partial(respond, leases, signer))

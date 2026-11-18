@@ -8,8 +8,8 @@ the first unit, completed on the last. A grade's state is the JSON document at `
 
 A newer head of a lane drops the older head's pending units, carries its leased and finished jobs and cancels its
 checks; a push grade of a tree a merge group grade passed carries that grade's gates. A head on a panic fix branch
-grades in the hotfix class. `python -m scripts.ci_lab scheduler` runs the service: the lease API on the scheduler port
-and one pass every interval.
+grades in the hotfix class. `agentihooks ci-lab-scheduler` runs the service: the lease API, capacity and a commit's
+grades on the scheduler port, metrics on the metrics port, both from one load, and one pass every interval.
 """
 
 import argparse
@@ -17,8 +17,10 @@ import json
 import subprocess
 import sys
 import time
+from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field, fields, replace
+from http.server import ThreadingHTTPServer
 from pathlib import Path, PurePosixPath
 from threading import Thread
 from typing import Any, Protocol, cast
@@ -27,9 +29,10 @@ from urllib.parse import urlsplit
 import jsonschema
 import yaml
 
-from scripts.ci_lab import contract, evidence, lease_api
+from scripts.ci_lab import budget, contract, evidence, lease_api, metrics, service
+from scripts.ci_lab.capacity import Load
 from scripts.ci_lab.checks import Checks, Output
-from scripts.ci_lab.delivery import CLASSES, DELIVERY, DELIVERY_SCHEMA
+from scripts.ci_lab.delivery import CLASSES, DELIVERY, DELIVERY_SCHEMA, load_runtime
 from scripts.ci_lab.digests import GradeInputs, StaticInputs, Toolchain, grade_key, static_key
 from scripts.ci_lab.intake import GradeRequest, admit
 from scripts.ci_lab.leases import Leases
@@ -54,13 +57,17 @@ __all__ = [
     "PanicFixes",
     "Plan",
     "Ports",
+    "READY_MS",
     "Scheduler",
     "Settings",
+    "UNIT_ESTIMATE_S",
     "build",
     "fold",
     "frame",
+    "listen",
     "main",
     "serve",
+    "summary",
 ]
 
 GRADES = f"{PREFIX}grade:"
@@ -98,6 +105,8 @@ QUIET_MS = 30_000
 INTERVAL_S = 2.0
 LEASE_TTL_MS = 120_000
 LEASE_POLL_MS = 500
+UNIT_ESTIMATE_S = 60.0
+READY_MS = 2 * lease_api.MAX_WAIT_MS
 MINIO_ENDPOINT = f"{contract.MINIO_PREFIX}ENDPOINT"
 MINIO_BUCKET = f"{contract.MINIO_PREFIX}BUCKET"
 MINIO_ACCESS_KEY = f"{contract.MINIO_PREFIX}ACCESS_KEY"
@@ -424,6 +433,28 @@ def _slug(repo: str) -> str:
     return urlsplit(repo).path.removeprefix("/")
 
 
+def summary(state: State) -> dict[str, Any]:
+    """Return a grade as GET /grades/<sha> shows it: what it grades, its class and lane, how many of its units are
+    final, its conclusion once it closed and each check run's last post."""
+    checks = {
+        check: {"status": status, "conclusion": conclusion} for check, (status, conclusion) in state.posted.items()
+    }
+    return {
+        "run": state.run,
+        "repo": state.repo,
+        "head": state.head,
+        "base": state.base,
+        "class": CLASSES[state.tier],
+        "lane": state.lane,
+        "tree": state.tree,
+        "grader": state.grader,
+        "conclusion": state.conclusion or None,
+        "superseded": state.superseded,
+        "units": {"total": len(state.units), "final": sum(1 for slot in state.units.values() if slot.outcome)},
+        "checks": checks,
+    }
+
+
 class Scheduler:
     """The lab's grading over its Redis state, verdict store, object store and ports."""
 
@@ -446,6 +477,58 @@ class Scheduler:
         """Return a grade's state, or None for an unknown run."""
         raw = self.client.get(GRADES + run)
         return None if raw is None else _parse(raw)
+
+    def load(self, now_ms: int) -> Load:
+        """Return the queue and slots now: each pending job's estimate and each leased job per the most urgent class of
+        the live grades holding it, verdict cache use per class of those grades, the slots leased jobs take, and the
+        free slots workers offered on a lease poll within the ready window; a leased job frees its slots in one
+        estimate."""
+        classes: dict[str, int] = {}
+        hits: Counter[str] = Counter()
+        misses: Counter[str] = Counter()
+        for state in self._live():
+            name = CLASSES[state.tier]
+            for slot in state.units.values():
+                if not slot.job:
+                    hits[name] += 1
+                    continue
+                misses[name] += 1
+                classes[slot.job] = min(classes.get(slot.job, state.tier), state.tier)
+        pending: dict[str, list[float]] = {}
+        for job in self._jobs(self.queue.pending()):
+            if job.id in classes:
+                pending.setdefault(CLASSES[classes[job.id]], []).append(UNIT_ESTIMATE_S * job.requirement.slots)
+        running: Counter[str] = Counter()
+        busy = 0
+        for job in self._jobs(self.queue.leased()):
+            busy += job.requirement.slots
+            if job.id in classes:
+                running[CLASSES[classes[job.id]]] += 1
+        offered = sum(free for free, at_ms in self.queue.offers().values() if now_ms - at_ms <= READY_MS)
+        return Load(
+            pending,
+            dict(running),
+            busy + offered,
+            busy,
+            cache_hits=dict(hits),
+            cache_misses=dict(misses),
+            frees_in=(UNIT_ESTIMATE_S,) * busy,
+        )
+
+    def grades_of(self, head: str) -> list[dict[str, Any]]:
+        """Return every grade of a commit by run: its live grades and the closed ones its evidence markers name."""
+        prefix = evidence.head_prefix(head)
+        runs = {key.removeprefix(prefix) for key in self.objects.keys(prefix)}
+        runs.update(state.run for state in self._live() if state.head == head)
+        return [summary(state) for run in sorted(runs) if (state := self.grade(run)) is not None]
+
+    def _live(self) -> list[State]:
+        """Return the state of every live grade that still has one."""
+        return [state for run in sorted(self.client.smembers(LIVE)) if (state := self.grade(run)) is not None]
+
+    def _jobs(self, ids: Sequence[str]) -> list[Job]:
+        """Return the queue jobs of the ids whose records still exist."""
+        return [job for job in map(self.queue.job, ids) if job is not None]
 
     def _save(self, state: State) -> None:
         self.client.set(GRADES + state.run, json.dumps(asdict(state)))
@@ -806,6 +889,24 @@ def serve(
     return 0
 
 
+def listen(
+    scheduler: Scheduler,
+    leases: Leases,
+    spending: budget.Budget,
+    clock: Callable[[], int],
+    ports: tuple[int, int],
+) -> tuple[ThreadingHTTPServer, ThreadingHTTPServer]:
+    """Bind the scheduler port's lease API, capacity and grades routes and the metrics port, both over one load whose
+    budget fraction and shed classes come from the day's spending; the caller runs each serve_forever."""
+
+    def snapshot() -> Load:
+        return budget.observe(scheduler.load(clock()), spending.status())
+
+    api, exposition = ports
+    routes = service.Routes(leases, Uploads(scheduler.objects), snapshot, scheduler.grades_of)
+    return service.serve("", api, routes), metrics.serve("", exposition, snapshot, metrics.Registry())
+
+
 def _now_ms() -> int:
     """Return the wall clock in milliseconds."""
     return int(time.time() * 1000)
@@ -817,7 +918,8 @@ def _sleep_ms(ms: int) -> None:
 
 
 def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
-    """Run the scheduler service: the lease API on the scheduler port and a pass every interval."""
+    """Run the scheduler service from its mounted runtime config: the lease API, capacity and grades on the scheduler
+    port, metrics on the metrics port and a pass every interval."""
     import boto3  # pyright: ignore[reportMissingTypeStubs]
     import redis
 
@@ -829,6 +931,7 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     parser.add_argument("--interval", type=float, default=INTERVAL_S)
     parser.add_argument("--passes", type=int, default=0)
     arguments = parser.parse_args(argv)
+    runtime = load_runtime(Path(environ[contract.RUNTIME_CONFIG]))
     client: Any = redis.Redis.from_url(environ[contract.REDIS_URL], decode_responses=True)  # pyright: ignore[reportUnknownMemberType]
     s3: Any = boto3.client(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
         "s3",
@@ -840,6 +943,7 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     consumer = open_bus(BusConfig.from_environ(environ)).lab_heads.consumer(DURABLE, SUBJECT)
     scheduler = build(environ, client, objects, consumer, get_redis())
     leases = Leases(scheduler.queue, LEASE_TTL_MS, _now_ms, _sleep_ms, LEASE_POLL_MS)
-    server = lease_api.serve("", contract.SCHEDULER_PORT, leases, Uploads(objects))
-    Thread(target=server.serve_forever, daemon=True).start()
+    spending = budget.Budget(client, _now_ms, budget.policy(runtime))
+    for server in listen(scheduler, leases, spending, _now_ms, (contract.SCHEDULER_PORT, contract.METRICS_PORT)):
+        Thread(target=server.serve_forever, daemon=True).start()
     return serve(scheduler, arguments.interval, arguments.passes, time.time, time.sleep)

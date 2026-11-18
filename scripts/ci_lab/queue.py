@@ -188,6 +188,22 @@ class Queue:
     def expired(self, now_ms: int) -> list[str]:
         return list(self.client.zrangebyscore(_key("leased"), 0, now_ms))
 
+    def leased(self) -> list[str]:
+        """Return every leased job, soonest expiry first."""
+        return list(self.client.zrange(_key("leased"), 0, -1))
+
+    def offer(self, worker: str, free_slots: int, at_ms: int) -> None:
+        """Record the free slots a worker offered on its latest lease poll and when."""
+        self.client.hset(_key("offers"), worker, json.dumps([free_slots, at_ms]))
+
+    def offers(self) -> dict[str, tuple[int, int]]:
+        """Return each worker's latest offered free slots and the millisecond it offered them."""
+        offered: dict[str, tuple[int, int]] = {}
+        for worker, raw in self.client.hgetall(_key("offers")).items():
+            free_slots, at_ms = json.loads(raw)
+            offered[worker] = (int(free_slots), int(at_ms))
+        return offered
+
     def reap(self, job: Job, now_ms: int, requeues: int) -> str:
         """Requeue an expired lease while attempts remain, else mark it lost; empty when it no longer expired."""
         keys = [

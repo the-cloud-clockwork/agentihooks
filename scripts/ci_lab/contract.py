@@ -1,8 +1,9 @@
 """The CI lab service contract: entry points, environment names, ports and metric names.
 
 The scheduler and worker services, their platform manifests and their tests import these
-names instead of repeating the strings. `agentihooks ci-lab-scheduler --self-test` and
-`agentihooks ci-lab-worker --self-test` check the contract offline and print it as JSON.
+names instead of repeating the strings. `agentihooks ci-lab-scheduler` runs the scheduler service;
+`agentihooks ci-lab-scheduler --self-test` and `agentihooks ci-lab-worker --self-test` check the
+contract offline and print it as JSON.
 """
 
 import argparse
@@ -15,6 +16,7 @@ from typing import NamedTuple
 
 SCHEDULER_PORT = 8800
 METRICS_PORT = 9108
+SELF_TEST = "--self-test"
 
 BUS_PREFIX = "AGENTIHOOKS_BUS"
 MINIO_PREFIX = "CI_LAB_MINIO_"
@@ -142,7 +144,7 @@ def run(service: Service, argv: Sequence[str], environ: Mapping[str, str]) -> in
         print(f"ci-lab {service.name} refuses to start: {', '.join(granted)} is set", file=sys.stderr)
         return 1
     parser = argparse.ArgumentParser(prog=f"agentihooks ci-lab-{service.name}")
-    parser.add_argument("--self-test", action="store_true")
+    parser.add_argument(SELF_TEST, action="store_true")
     if not parser.parse_args(argv).self_test:
         parser.error("only --self-test is available until the service loops land")
     problems = self_test(service)
@@ -154,8 +156,12 @@ def run(service: Service, argv: Sequence[str], environ: Mapping[str, str]) -> in
 
 
 def scheduler(argv: list[str]) -> int:
-    """Run the scheduler entry point against the process environment."""
-    return run(SCHEDULER, argv, os.environ)
+    """Run the scheduler service against the process environment, or its offline self test with --self-test."""
+    if SELF_TEST in argv:
+        return run(SCHEDULER, argv, os.environ)
+    from scripts.ci_lab import scheduler as service
+
+    return service.main(argv, os.environ)
 
 
 def worker(argv: list[str]) -> int:
