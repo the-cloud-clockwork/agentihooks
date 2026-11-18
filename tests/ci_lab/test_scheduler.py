@@ -2315,9 +2315,12 @@ def test_build_gives_each_expander_mirror_the_lab_remote_the_environment_names(
     }
     client = fake_redis()
     spending = budget.Budget(client, lambda: 0, budget.Policy(100.0, {}))
-    built = scheduler.build(environ, client, LocalObjects(tmp_path / "objects"), Consumer([]), spending)
+    objects = LocalObjects(tmp_path / "objects")
+    built = scheduler.build(environ, client, objects, Consumer([]), spending)
     expander = built.ports.expander
     assert isinstance(expander, scheduler.MirrorExpander)
+    verdicts = getattr(expander.verdicts, "__self__")
+    assert isinstance(verdicts, Store) and (verdicts.client, verdicts.objects) == (client, objects)
     found = worktrees.Lab("http://ci-lab-remote.ci-lab:8080/agentihooks.git", "lab-token")
     store = tmp_path / "stores" / "the-cloud-clockwork--agentihooks"
     assert expander._mirror(REPO) == worktrees.Mirror(tmp_path / "node", store, REPO, found)
