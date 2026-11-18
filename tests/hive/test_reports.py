@@ -96,7 +96,7 @@ def test_remote_host_is_another_hive_than_this_one(remote):
     assert remote.reports.host(replace(remote.agent, runtime_backend="kubernetes")) == ""
 
 
-@pytest.mark.feature("work-folder-follows-the-task-across-hives")
+@pytest.mark.feature("work-folder-readers-and-launch-pointers")
 def test_the_work_folder_host_is_the_host_target_else_the_hive_on_the_record(remote: SimpleNamespace) -> None:
     named = remote.reports.workspace_host
     assert named(replace(remote.agent, hive="elsewhere")) == HIVE

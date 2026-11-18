@@ -77,7 +77,7 @@ def test_local_codex_legacy_admission_records_the_root_hive(storage, monkeypatch
     assert storage.execution_occupants("sw")[admitted.seat].hive == "workstation-root"
 
 
-@pytest.mark.feature("work-folder-follows-the-task-across-hives")
+@pytest.mark.feature("work-folder-readers-and-launch-pointers")
 def test_a_legacy_codex_session_a_hive_starts_records_that_hive_as_its_task_work_folder(
     storage: RedisStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:

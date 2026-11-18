@@ -134,8 +134,14 @@ def contents(slug: str, task_id: str) -> dict[str, str]:
 
 
 def _latest(text: str, limit: int) -> str:
-    """The longest end of text whose JSON takes at most limit bytes."""
-    return text[bisect.bisect_left(range(len(text)), True, key=lambda start: _json_bytes(text[start:]) <= limit) :]
+    """The longest end of text whose JSON takes at most limit bytes; a character takes at least one byte, so only the
+    last limit characters are searched."""
+    tail = text[max(len(text) - limit, 0) :]
+
+    def fits(start: int) -> bool:
+        return _json_bytes(tail[start:]) <= limit
+
+    return tail[bisect.bisect_left(range(len(tail)), True, key=fits) :]
 
 
 def _json_bytes(text: str) -> int:

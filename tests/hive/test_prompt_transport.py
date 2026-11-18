@@ -422,6 +422,7 @@ def test_progress_and_proof_longer_than_sixty_four_kilobytes_travel_whole(homes:
     assert (sent["progress.md"], sent["proof.md"]) == (progress, proof)
 
 
+@pytest.mark.feature("work-folder-follows-the-task-across-hives")
 def test_an_added_file_travels_only_while_every_carried_file_fits_the_seed_budget(homes: SimpleNamespace) -> None:
     lines = ledger_workspace.LINE_BYTES
     with at(homes.controller):
@@ -433,7 +434,7 @@ def test_an_added_file_travels_only_while_every_carried_file_fits_the_seed_budge
         sent = ledger_workspace.seeds("fixture", "task")
     assert sorted(sent) == ["b.log", "progress.md", "proof.md", "steering.md"]
     carried = sum(len(json.dumps(text)) - 2 for name, text in sent.items() if name != "steering.md")
-    assert carried == ledger_workspace.SEED_BYTES
+    assert carried == 262144
 
 
 @pytest.mark.feature("work-folder-follows-the-task-across-hives")
@@ -591,7 +592,7 @@ def test_a_hive_syncs_the_work_folder_of_a_session_it_started_that_names_only_it
     assert json.loads(held) == {"progress.md": "started step\n"}
 
 
-@pytest.mark.feature("work-folder-follows-the-task-across-hives")
+@pytest.mark.feature("work-folder-readers-and-launch-pointers")
 @pytest.mark.parametrize("target", [{}, {"pid": 4242, "pid_start": 9001}], ids=["hub admitted", "hive started"])
 def test_the_mirror_and_the_page_tails_read_a_task_from_the_hive_on_its_record(
     setup: SimpleNamespace, homes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, target: dict[str, int]
@@ -614,6 +615,7 @@ def test_the_mirror_and_the_page_tails_read_a_task_from_the_hive_on_its_record(
     assert tails == {"task": {"latest_progress": "hive step", "latest_proof": "hive proof"}}
 
 
+@pytest.mark.feature("work-folder-readers-and-launch-pointers")
 def test_the_page_and_the_mirror_keep_a_task_after_its_hive_stops_publishing(
     setup: SimpleNamespace, homes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:

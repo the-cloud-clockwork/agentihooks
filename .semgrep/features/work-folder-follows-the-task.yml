@@ -3,15 +3,13 @@ rules:
     languages: [python]
     severity: ERROR
     message: >-
-      Ordered 2026-11-17 after the 16 November hive roll left successors on other hives with only steering, and
-      widened 2026-11-18 for the reader, retention and launch gaps (#12195): a hive publishes the work folder of every
-      execution it runs and keeps one copy per task under its own key with no expiry, the controller reads each task
-      from that hive, and every launch records its hive for the hub to seed the next agent from.
-      Consumer.sync_workspaces must take the host target, else the hive on the execution record;
-      ledger_workspace.sync must write each hosted task's copy under task_files_key with no expiry;
-      ledger_workspace._synced must name a task's hive with reports.workspace_host; launched_on must write the
-      WORK_FOLDER key; Admission.launched, HiveLaunch.complete and codex.admit_legacy must call
-      ledger_workspace.launched_on; Admission._seeds must read that hive's task copy.
+      Ordered 2026-11-17 after the 16 November hive roll left successors on other hives with only steering: a hive
+      publishes the work folder of every execution it runs and keeps one copy per task under its own key, and the hub
+      seeds a successor from the hive that last launched the task. Consumer.sync_workspaces must take the host target,
+      else the hive on the execution record; ledger_workspace.sync must write each hosted task's copy under
+      task_files_key with no expiry (#12195); Admission.launched must record the launching hive under WORK_FOLDER;
+      Admission._seeds must read
+      that hive's task copy.
     patterns:
       - pattern-either:
           - patterns:
@@ -36,40 +34,12 @@ rules:
                     ...
           - patterns:
               - pattern: |
-                  def _synced(...):
+                  def launched(...):
                     ...
               - pattern-not: |
-                  def _synced(...):
+                  def launched(...):
                     ...
-                    for $TASK in $TASKS:
-                      ...
-                      $HOST = <... ports.hive().reports.workspace_host(...) ...>
-                      ...
-                    ...
-          - patterns:
-              - pattern: |
-                  def launched_on(...):
-                    ...
-              - pattern-not: |
-                  def launched_on(...):
-                    ...
-                    $STORE.redis.set($STORE.key($SLUG, WORK_FOLDER, ...), $HIVE)
-                    ...
-          - patterns:
-              - pattern-either:
-                  - pattern: |
-                      def launched(...):
-                        ...
-                  - pattern: |
-                      def complete(self, ...):
-                        ...
-                  - pattern: |
-                      def admit_legacy(...):
-                        ...
-              - pattern-not: |
-                  def $FUNCTION(...):
-                    ...
-                    ledger_workspace.launched_on(...)
+                    $FOLDER = self.store.key($SLUG, WORK_FOLDER, ...)
                     ...
           - patterns:
               - pattern: |
@@ -84,8 +54,6 @@ rules:
     paths:
       include:
         - /scripts/hive/orders.py
-        - /scripts/hive/launch.py
         - /scripts/swarm_ledger/ledger_workspace.py
         - /scripts/hub/admission.py
-        - /scripts/swarm_v2/runtime/codex.py
         - '*.test.py'
