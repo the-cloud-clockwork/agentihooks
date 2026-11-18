@@ -4211,6 +4211,19 @@
       ]
     },
     {
+      "id": "hive-watch-in-process",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-ledger-watch-redis-acl",
+      "behaviour": "A ledger watch on a remote host, such as a hive worker with no agent token, reads the ledger in process over the shared database every interval, each read taking only the changes since the export it holds, and prints each operator event once; it fetches no agent token, so the hive member Redis login never meets the hive credential store its ACL refuses, while a watch on a local host still follows the ledger server's event stream with its credentials.",
+      "seam": "scripts.swarm_ledger.watch_ledger.credentials, stream and polled, driven by scripts.swarm_ledger.watch_ledger.main",
+      "tests": [
+        "tests/swarm_ledger/test_hive_watch_in_process.py::test_a_hive_watch_prints_operator_events_while_its_member_login_cannot_read_the_credential_store",
+        "tests/swarm_ledger/test_hive_watch_in_process.py::test_a_hive_watch_prints_an_event_written_between_its_reads_once",
+        "tests/swarm_ledger/test_hive_watch_in_process.py::test_a_remote_watch_takes_no_credentials_and_a_local_watch_follows_the_ledger_server_stream",
+        "tests/swarm_ledger/test_hive_watch_in_process.py::test_a_remote_poll_reads_the_ledger_in_process_with_the_kept_exports"
+      ]
+    },
+    {
       "id": "merge-priority-moves-waiting-entries-at-once",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2604",
@@ -7782,6 +7795,19 @@
       ]
     },
     {
+      "id": "lab-shadow-comparison",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/lab-shadow",
+      "behaviour": "The CI lab shadow recorder reads check_run.completed deliveries: a github-actions check run gives the Actions verdict of the gate its job name maps to (unit* to tests, mutation* to mutation, a static job to its gate id, anything else listed unmapped) and a lab-shadow check run from the lab's GitHub App gives the lab verdict and its grader revision; each side folds failing when any of its check runs failed, the row of a gate and head holding both lands in Redis, the object store and the lab_shadow table, a turn into a mismatch counts ci_lab_verdict_mismatch_total, and the shadow report prints heads compared and mismatches per gate since a grader revision.",
+      "seam": "scripts.ci_lab.shadow gate_of, static_jobs, Shadow.observe and Shadow.record, rows, report and main through python -m scripts.ci_lab shadow report",
+      "tests": [
+        "tests/ci_lab/test_shadow.py::test_every_actions_check_run_of_a_pull_request_head_maps_to_a_gate_or_is_listed_unmapped",
+        "tests/ci_lab/test_shadow.py::test_shards_fold_into_one_row_that_counts_each_turn_into_a_mismatch",
+        "tests/ci_lab/test_shadow.py::test_the_report_counts_heads_compared_and_mismatches_per_gate_since_a_grader_revision",
+        "tests/ci_lab/test_shadow.py::test_the_report_command_reads_the_lab_redis"
+      ]
+    },
+    {
       "id": "lab-scheduler-grade",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/lab-scheduler",
@@ -7813,6 +7839,18 @@
         "tests/ci_lab/test_scheduler.py::test_a_paused_class_holds_its_heads_but_the_excepted_ones_until_resume",
         "tests/ci_lab/test_scheduler.py::test_a_pause_of_another_class_leaves_pull_request_grading_alone",
         "tests/ci_lab/test_scheduler.py::test_the_hotfix_port_reads_the_heads_the_control_routes_marked"
+      ]
+    },
+    {
+      "id": "lab-scheduler-evidence",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-scheduler-record-grades",
+      "behaviour": "When the CI lab scheduler closes a grade because every unit is final, it records the grade through the evidence printer: the grade document under its run and an empty marker under its head, carrying the grade inputs and one unit per unit of the grade with the grade run that used its verdict, so the evidence printer shows the grade by run and the head index lists it; a grade still waiting on a unit records nothing.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis and the local object store, read back through scripts.ci_lab.evidence.show and scripts.ci_lab.evidence.head_prefix",
+      "tests": [
+        "tests/ci_lab/test_scheduler.py::test_a_folded_grade_is_recorded_so_show_finds_it_by_run_and_head",
+        "tests/ci_lab/test_scheduler.py::test_a_grade_is_recorded_only_when_its_last_unit_is_final",
+        "tests/ci_lab/test_scheduler.py::test_a_grade_with_a_lost_unit_is_recorded_and_show_names_its_missing_objects"
       ]
     },
     {
@@ -8505,6 +8543,20 @@
       "tests": [
         "tests/ci_lab/test_sandbox.py::test_a_unit_with_read_only_trees_runs_inside_bwrap_with_each_tree_bound_read_only",
         "tests/ci_lab/test_sandbox.py::test_a_unit_with_network_and_read_only_trees_cannot_run_without_bwrap"
+      ]
+    },
+    {
+      "id": "lab-sandbox-bwrap-pull-request-tier",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-sandbox-bwrap-ci",
+      "behaviour": "Every pull request touching the lab sandbox module, the static gate and test unit runners that build it, their tests or the writer lock workflow runs those tests on a GitHub hosted runner where bubblewrap can create user and network namespaces, through the writer lock workflow, which feeds Gate Required; the job fails when bubblewrap cannot isolate there or when any of those tests fails or skips, so a unit that can write into the grader or base tree turns the pull request red.",
+      "seam": "writer-lock.yml lab-sandbox selection step and lab-sandbox job",
+      "tests": [
+        "tests/test_ci_lab_sandbox_pr.py::test_lab_sandbox_selection",
+        "tests/test_ci_lab_sandbox_pr.py::test_the_lab_sandbox_job_feeds_the_required_gate_on_selected_pull_requests",
+        "tests/test_ci_lab_sandbox_pr.py::test_the_job_fails_unless_bubblewrap_isolates_after_the_userns_restriction_is_lifted",
+        "tests/test_ci_lab_sandbox_pr.py::test_the_job_installs_bubblewrap_from_the_ubuntu_archive_when_the_runner_lacks_it",
+        "tests/test_ci_lab_sandbox_pr.py::test_the_lab_sandbox_run_fails_on_a_skipped_or_failed_test"
       ]
     },
     {
