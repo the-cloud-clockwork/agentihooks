@@ -867,6 +867,21 @@ def test_a_pull_request_read_that_is_no_tick_view_logs_no_counts(
     assert pull_view_lines(capsys.readouterr().err) == []
 
 
+@pytest.mark.feature("tick-view-read-counts")
+def test_a_tick_view_read_that_raises_leaves_later_reads_uncounted(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import ledger_events
+
+    def refused(urls: list[str], cache: object = None, ttl: float = 0.0) -> dict[str, Any]:
+        assert ledger_events.TICK_VIEW_READ.get() is True
+        raise OSError("read refused")
+
+    monkeypatch.setattr(ledger_events, "views", refused)
+
+    with pytest.raises(OSError, match="read refused"):
+        ledger_events._counted_views(["https://github.com/o/r/pull/1"], None, 180)
+    assert ledger_events.TICK_VIEW_READ.get() is False
+
+
 def test_an_empty_read_never_asks_the_shared_cache_for_no_keys() -> None:
     refusing = SimpleNamespace(mget=lambda keys: pytest.fail("an empty read asked the shared cache for no keys"))
 

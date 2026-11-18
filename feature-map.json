@@ -9338,10 +9338,11 @@
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2521",
       "behaviour": "A tick view inside a tick pass that reads at least one pull request writes one swarm_pull_views line to the controller log naming its swarm, its pass, how many distinct pull requests it had no earlier view of, how many of those the swarm Redis served as kept merged and how many it read from GitHub, so a controller rollout shows whether its first passes read only the open pull requests. Every other pull request read, a tick view with nothing to read and a tick view outside a pass write nothing.",
-      "seam": "tick_view in scripts.swarm.ledger_events, run inside timing.tick with an empty delivery history and the swarm Redis as its cache",
+      "seam": "tick_view in scripts.swarm.ledger_events, run inside timing.tick with an empty metrics spool, as on a fresh controller pod, and the swarm Redis as its cache",
       "tests": [
         "tests/swarm/test_pull_views.py::test_a_fresh_tick_view_logs_that_redis_kept_the_merged_pull_request_and_github_read_the_open_one",
-        "tests/swarm/test_pull_views.py::test_a_pull_request_read_that_is_no_tick_view_logs_no_counts"
+        "tests/swarm/test_pull_views.py::test_a_pull_request_read_that_is_no_tick_view_logs_no_counts",
+        "tests/swarm/test_pull_views.py::test_a_tick_view_read_that_raises_leaves_later_reads_uncounted"
       ]
     },
     {
