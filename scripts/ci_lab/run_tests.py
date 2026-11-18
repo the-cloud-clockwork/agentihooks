@@ -16,6 +16,7 @@ from typing import Any
 
 from scripts.ci_lab import open_capture
 from scripts.ci_lab.expand_tests import PYTEST_INVOCATION
+from scripts.ci_lab.outcomes import FAILED, PASSED
 from scripts.ci_lab.sandbox import PortAllocator, Sandbox
 from tests import dep_manifest
 
@@ -160,7 +161,7 @@ def run(batch: Sequence[str], tree: Path, venv: Path, slots: int, lab: Lab) -> V
             ledger.writelines(json.dumps(row) + "\n" for row in flake_rows(attempts[0], batch))
     opened = {path for attempt in attempts for path in _opened(attempt)}
     return Verdict(
-        outcome="passed" if final.code == 0 else "failed",
+        outcome=PASSED if final.code == 0 else FAILED,
         flaky=flaky,
         outside=outside(opened, batch, tree, lab.manifest),
         durations=_durations(final),
