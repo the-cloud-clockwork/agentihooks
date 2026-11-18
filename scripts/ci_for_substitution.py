@@ -16,7 +16,7 @@ BASH = Language(tree_sitter_bash.language())
 RED_FIXTURE = "tests/fixtures/ci_for_substitution/red.sh"
 WORKFLOWS = PurePosixPath(".github/workflows")
 ACTIONS = ("action.yml", "action.yaml")
-SHELL = re.compile(r"(?:\S*/)?(?:bash|sh)(?:\s|$)|\$\{\{")
+SHELL = re.compile(r"(?:bash|sh)(?:\s|$)")
 EXPRESSION = re.compile(r"\$\{\{.*?\}\}", re.DOTALL)
 ADVICE = (
     "a for loop word list holds a command substitution, so errexit never sees that command fail; "
@@ -67,17 +67,14 @@ def _field(node: yaml.Node | None, *keys: str) -> yaml.Node | None:
 
 
 def _run_blocks(node: yaml.Node | None, shell: str) -> Iterator[yaml.ScalarNode]:
-    """Yield every run text beneath a node whose shell is bash, sh or a GitHub expression known only at run time.
-
-    A step's own shell wins over the nearest default; a blank one runs the default, as an absent one does.
-    """
+    """Yield every run text beneath a node whose shell, the step's own or the nearest default, is bash or sh."""
     if isinstance(node, yaml.SequenceNode):
         for item in node.value:
             yield from _run_blocks(item, shell)
     elif isinstance(node, yaml.MappingNode):
-        shell = _scalar(_field(node, "defaults", "run", "shell")).strip() or shell
+        shell = _scalar(_field(node, "defaults", "run", "shell")) or shell
         run = _field(node, "run")
-        if isinstance(run, yaml.ScalarNode) and SHELL.match(_scalar(_field(node, "shell")).strip() or shell):
+        if isinstance(run, yaml.ScalarNode) and SHELL.match((_scalar(_field(node, "shell")) or shell).strip()):
             yield run
         for _, value in node.value:
             yield from _run_blocks(value, shell)
