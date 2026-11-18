@@ -2,7 +2,7 @@ import json
 import subprocess
 import threading
 import urllib.error
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
@@ -2407,35 +2407,44 @@ def test_a_published_push_sends_one_signed_notice_the_receiver_accepts(
     assert result["lab_notice"] == "200"
 
 
+def refuse_the_notice(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sign the notice with a secret the receiver does not hold, so it answers 401."""
+    from scripts.ci_lab.webhooks import NOTICE_SECRET_ENV
+
+    monkeypatch.setenv(NOTICE_SECRET_ENV, "another-signer")
+
+
+def send_the_notice_nowhere(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point the notice at a local port nothing listens on, so the connection is refused."""
+    import socket
+
+    from scripts.ci_lab.head_notice import URL_ENV
+
+    with socket.socket() as probe:
+        probe.bind(("localhost", 0))
+        port = probe.getsockname()[1]
+    monkeypatch.setenv(URL_ENV, f"http://localhost:{port}/lab/head")
+
+
 @pytest.mark.feature("lab-head-notice-push")
-@pytest.mark.parametrize("failure", ["refused", "unreachable"])
+@pytest.mark.parametrize("failure", [refuse_the_notice, send_the_notice_nowhere], ids=["refused", "unreachable"])
 def test_a_failed_notice_never_fails_the_push(
     publication: SimpleNamespace,
     lab_receiver: SimpleNamespace,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    failure: str,
+    failure: Callable[[pytest.MonkeyPatch], None],
 ) -> None:
-    import socket
-
-    from scripts.ci_lab.head_notice import URL_ENV
-    from scripts.ci_lab.webhooks import NOTICE_SECRET_ENV
     from scripts.swarm import publish
 
-    if failure == "refused":
-        monkeypatch.setenv(NOTICE_SECRET_ENV, "another-signer")
-    else:
-        with socket.socket() as probe:
-            probe.bind(("localhost", 0))
-            port = probe.getsockname()[1]
-        monkeypatch.setenv(URL_ENV, f"http://localhost:{port}/lab/head")
+    failure(monkeypatch)
     result = publish.publish(
         "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
     )
     head = git(publication.root, "rev-parse", "HEAD")
     prefix, suffix = f"lab head notice for {head} was not accepted: ", "; the push stands"
     lines = capsys.readouterr().err.splitlines()
-    assert [line for line in lines if line.startswith(prefix) and line.endswith(suffix)] != []
+    assert any(line.startswith(prefix) and line.endswith(suffix) for line in lines)
     assert result["lab_notice"] == "0"
     assert lab_receiver.heads.fetch(100, 0) == []
     assert lab_receiver.tips == []
