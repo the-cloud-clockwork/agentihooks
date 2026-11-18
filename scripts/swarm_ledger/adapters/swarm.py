@@ -1,4 +1,7 @@
-class Swarm:
+from scripts.swarm_ledger import ports
+
+
+class Swarm(ports.Swarm):
     @property
     def naming(self):
         from scripts.swarm import naming
@@ -172,9 +175,3 @@ class Swarm:
         from scripts.swarm_v2 import authority
 
         return authority
-
-    @property
-    def ledger_cutover(self):
-        from scripts.swarm import ledger_cutover
-
-        return ledger_cutover

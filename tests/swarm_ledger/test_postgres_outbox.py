@@ -32,6 +32,7 @@ def subjects(slug):
 def ledger():
     slug = f"outbox-{uuid.uuid4().hex[:12]}"
     repository = postgres.PostgresLedgerRepository(URL)
+    repository.migrate()
     repository.create(slug, CONTENT)
     return repository, slug
 
@@ -120,7 +121,9 @@ def test_a_postgres_mark_table_without_the_sent_time_gains_it_with_old_marks_at_
         with closing(psycopg2.connect(legacy)) as writer, writer, writer.cursor() as cursor:
             cursor.execute("CREATE TABLE outbox_sent (id TEXT PRIMARY KEY)")
             cursor.execute("INSERT INTO outbox_sent VALUES ('old')")
-        postgres.PostgresLedgerRepository(legacy).create("legacy", CONTENT)
+        legacy_repository = postgres.PostgresLedgerRepository(legacy)
+        legacy_repository.migrate()
+        legacy_repository.create("legacy", CONTENT)
         with closing(psycopg2.connect(legacy)) as reader, reader.cursor() as cursor:
             cursor.execute("SELECT id, sent_at FROM outbox_sent WHERE id = 'old'")
             assert cursor.fetchall() == [("old", 0)]

@@ -9,7 +9,6 @@ from typing import Any
 
 import pytest
 
-from scripts.swarm_ledger import ledger, ledger_route
 from scripts.swarm_ledger.api import task_list
 from scripts.tick.adapters import database_ledger
 
@@ -197,59 +196,18 @@ def test_the_database_client_carries_the_base_timeout_and_in_process_transport()
 
 
 @pytest.mark.feature("swarm-tick-database-ledger")
-def test_the_ledger_client_is_the_database_client_inside_a_database_pass(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(ledger, "base", lambda slug: f"base:{slug}")
-    services: list[bool] = []
-    monkeypatch.setattr(ledger, "credentials", lambda slug, service: services.append(service) or {"X": slug})
-    with database_ledger.scoped({database_ledger.postgres.URL: "postgresql://ledger@shared/ledger"}):
-        inside = ledger.client("sw", timeout=3.0)
-    outside = ledger.client("sw")
-    assert (inside.base, inside.credentials, inside.timeout) == ("base:sw", {}, 3.0)
-    assert inside.transport is database_ledger.request
-    assert (outside.base, outside.credentials, outside.transport) == ("base:sw", {"X": "sw"}, None)
-    assert services == [False]
-
-
-@pytest.mark.feature("swarm-tick-database-ledger")
-def test_a_database_call_sends_its_service_flag_and_exits_as_the_server_refusal(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    sent: list[tuple[Any, ...]] = []
-    monkeypatch.setattr(ledger, "request", lambda *args: sent.append(args) or {"rev": 1})
-    assert ledger.database_call("sw", [{"op": "add"}], True) == {"rev": 1}
-    assert sent == [("sw", [{"op": "add"}], True)]
-
-    def refuse(*args: object) -> dict[str, Any]:
-        raise urllib.error.HTTPError("u", 409, "m", Message(), io.BytesIO(b"busy"))
-
-    monkeypatch.setattr(ledger, "request", refuse)
-    with pytest.raises(SystemExit, match="^server refused: 409 busy$"):
-        ledger.database_call("sw", None, False)
-
-
-@pytest.mark.feature("swarm-tick-database-ledger")
-def test_a_tick_routed_call_keeps_its_own_ledger_route(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(ledger_route, "configured", lambda store, slug: "http://hive-ledger")
-
-    @ledger_route.tick
-    def probe(store: object, slug: str) -> str:
-        return ledger_route.url(slug)
-
-    assert probe(object(), "sw") == "http://hive-ledger"
-
-
-@pytest.mark.feature("swarm-tick-database-ledger")
-def test_the_port_builds_the_database_client_with_its_base_and_bounded_timeout(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_the_port_bounds_each_built_clients_timeout_by_the_deadline_left(monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts.swarm import ledger_client
     from scripts.tick.adapters.ledger import resource_client
 
-    fake = SimpleNamespace(base=lambda slug: f"http://ledger/{slug}", REQUEST_TIMEOUT=10)
+    calls: list[tuple[str, float]] = []
+
+    def fake_client(slug: str, timeout: float) -> str:
+        calls.append((slug, timeout))
+        return "built"
+
+    fake = SimpleNamespace(REQUEST_TIMEOUT=10, client=fake_client)
     monkeypatch.setattr(ledger_client, "_ledger", lambda: fake)
-    build = resource_client("sw", service=True)
-    with database_ledger.scoped({database_ledger.postgres.URL: "postgresql://ledger@shared/ledger"}):
-        short, long = build(2.5), build(30.0)
-    assert (short.base, short.credentials, short.timeout) == ("http://ledger/sw", {}, 2.5)
-    assert (long.base, long.timeout) == ("http://ledger/sw", 10)
-    assert short.transport is database_ledger.request
+    build = resource_client("sw")
+    assert (build(2.5), build(30.0)) == ("built", "built")
+    assert calls == [("sw", 2.5), ("sw", 10)]

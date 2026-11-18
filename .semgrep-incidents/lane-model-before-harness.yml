@@ -1,0 +1,31 @@
+rules:
+  - id: lane-model-before-harness
+    languages: [python]
+    severity: ERROR
+    message: Resolve Claude only lane models for Codex before returning an explicit effort; otherwise engineer launches fail before their profile canary.
+    paths:
+      include:
+        - /scripts/swarm/model_pick.py
+        - lane-model-before-harness.py
+    patterns:
+      - pattern: |
+          $DEFAULT = ModelPick(...)
+          ...
+          if $DEFAULT.effort != AUTO or $HARNESS not in EFFORTS:
+              return $DEFAULT
+      - pattern-not: |
+          $DEFAULT = ModelPick(...)
+          ...
+          if <... $HARNESS == "codex" ...>:
+              $DEFAULT = replace($DEFAULT, model=$MODEL)
+          ...
+          if $DEFAULT.effort != AUTO or $HARNESS not in EFFORTS:
+              return $DEFAULT
+      - pattern-not: |
+          $DEFAULT = ModelPick(...)
+          ...
+          if <... foreign($HARNESS, $DEFAULT.model) ...>:
+              $DEFAULT = replace($DEFAULT, model=$MODEL)
+          ...
+          if $DEFAULT.effort != AUTO or $HARNESS not in EFFORTS:
+              return $DEFAULT

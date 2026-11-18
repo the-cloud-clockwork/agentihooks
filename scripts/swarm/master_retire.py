@@ -35,7 +35,7 @@ def hold(store: RedisStore, slug: str, agent: AgentRecord, reason: str, live: bo
     if raw is None:
         text = ASK.format(reason=reason, slug=slug, minutes=f"{minutes:g}")
         inbox = InboxStore(store.redis)
-        item = inbox.send(exits.BY, agent.name, text, ref=REF)
+        item = inbox.send(exits.BY, agent.name, text, ref=f"{REF}:{now_ms}")
         request = {"at": now_ms, "reason": reason, "item": item.id, "world": inbox.world or inbox.home(agent.name)}
         store.redis.hset(_key(store, slug), agent.name, json.dumps(request))
         return f"asked {agent.name} for a handoff before retiring it: {reason}"

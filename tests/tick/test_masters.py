@@ -55,7 +55,7 @@ def _tick(calls: list[tuple[Any, ...]]) -> SimpleNamespace:
 
     return SimpleNamespace(
         PLACING=nullcontext(),
-        panic=SimpleNamespace(state=lambda store: None),
+        panic=SimpleNamespace(state=lambda store, slug: None),
         skip_refused=skip_refused,
         _master_down="master down",
         _night_watch="night watch",
@@ -142,7 +142,7 @@ def test_master_alarm_passes_the_promoted_master(monkeypatch: pytest.MonkeyPatch
     assert found == ["ran 1"]
 
 
-def test_a_raising_step_is_held_and_the_rest_of_its_group_skips(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_raising_step_is_held_and_the_rest_of_its_group_runs(monkeypatch: pytest.MonkeyPatch) -> None:
     ran: list[str] = []
 
     def boom(*args: Any) -> list[str]:
@@ -152,8 +152,8 @@ def test_a_raising_step_is_held_and_the_rest_of_its_group_skips(monkeypatch: pyt
     monkeypatch.setattr(lifetime, "retire_idle_master", lambda *args: ran.append("retire") or ["retired"])
     state = _pass()
     records = engine.run_group("masters", Context(_State(state), Deadline.after(60.0)), masters.STEPS)
-    assert actions(records) == []
-    assert ran == []
+    assert "retired" in actions(records)
+    assert ran == ["retire"]
     assert isinstance(state["box"][masters.RAISED], RuntimeError)
     with pytest.raises(RuntimeError, match="down"):
         tasks.raise_held(state["box"])

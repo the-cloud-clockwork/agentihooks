@@ -21,11 +21,9 @@ class Stop(BaseException):
 
 @pytest.fixture
 def quiet_watch(monkeypatch):
-    for name in ("bin_closed_without_swarm", "expire_alerts", "sample_streams"):
-        monkeypatch.setattr(ledger_server, name, lambda: None)
+    monkeypatch.setattr(ledger_server, "sample_streams", lambda: None)
     monkeypatch.setattr(ledger_server.ledger_bin, "tidy", lambda: None)
     monkeypatch.setattr(ledger_server, "reloading", lambda *args: False)
-    monkeypatch.setattr(ledger_server, "unrelayed", lambda: {})
     monkeypatch.setattr(ledger_server, "metrics_journal", lambda *args: None)
     monkeypatch.setattr(ledger_server.HUB, "watched", lambda: [])
 
@@ -106,7 +104,7 @@ def test_the_shared_server_runs_watch_and_follow_under_the_retrying_runner(monke
     monkeypatch.setattr("scripts.swarm_ledger.outbox_host.running", lambda repository: nullcontext())
     ledger_server.serve()
     targets = [call.kwargs["target"] for call in ledger_server.threading.Thread.call_args_list]
-    assert [targets[1].__wrapped__, targets[4].__wrapped__] == [
+    assert [targets[0].__wrapped__, targets[3].__wrapped__] == [
         ledger_server.watch_ledgers,
         ledger_server.follow_shared,
     ]

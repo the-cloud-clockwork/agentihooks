@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api_service.py:scripts.swarm_ledger.api_service.x_gate_pairs:4f82abaea6438ff9801372689af7976cd29214e933a68c009fcb28eed82a09ed": {
+    "reader": "standards-reader",
+    "reason": "typing.cast returns its value argument unchanged at run time; the mutant replaces only the unused type argument."
+  }
+}

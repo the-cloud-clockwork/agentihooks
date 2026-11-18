@@ -257,19 +257,6 @@ def test_a_remote_client_refuses_service_writes():
             ledger.credentials(SLUG, service=True)
 
 
-def test_a_remote_client_never_starts_a_local_ledger_server():
-    with (
-        patch.dict(os.environ, {**REMOTE, "AGENTIHOOKS_LEDGER_AGENT_TOKEN": "launch-token"}),
-        patch.object(ledger, "request", side_effect=OSError("down")),
-        patch.object(ledger.repository, "exists", return_value=True),
-        patch.object(ledger.subprocess, "run") as run,
-        pytest.raises(SystemExit, match="not answering"),
-    ):
-        os.environ.pop("LEDGER_AUTOSTART", None)
-        ledger.call(SLUG)
-    run.assert_not_called()
-
-
 def test_a_remote_session_start_starts_no_ledger_server(tmp_path, monkeypatch):
     (tmp_path / "remote.json").write_text("{}", encoding="utf-8")
     monkeypatch.setattr(ledger_hook, "LEDGER_DIR", tmp_path)
@@ -310,19 +297,19 @@ def test_remote_refusals_name_what_is_missing():
 
 
 def test_a_refused_launch_token_fetch_sends_both_headers_and_names_the_status():
-    client = Mock()
-    client.return_value.request.side_effect = urllib.error.HTTPError("u", 403, "Forbidden", {}, None)
+    from scripts.tick.adapters import database_ledger
+
     with (
         patch.dict(os.environ, {**REMOTE, "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL": CREDENTIAL}),
-        patch.object(ledger, "BASE", ""),
-        patch("scripts.swarm_ledger.api.client.ResourceClient", client),
-        exits("unauthenticated: the ledger server refused the hive credential: 403"),
+        patch.object(
+            database_ledger, "exchanged", side_effect=urllib.error.HTTPError("u", 403, "Forbidden", {}, None)
+        ) as exchanged,
+        exits("unauthenticated: the ledger API refused the hive credential: 403"),
     ):
         ledger.launch_token(SLUG, WORKER)
-    client.assert_called_once_with(
-        "https://hub.example", {"X-Hive-Credential": CREDENTIAL, "X-Ledger-Agent": WORKER}, ledger.REQUEST_TIMEOUT
+    exchanged.assert_called_once_with(
+        "POST", f"/api/v1/ledgers/{SLUG}/agent-token", {}, {"X-Hive-Credential": CREDENTIAL, "X-Ledger-Agent": WORKER}
     )
-    client.return_value.request.assert_called_once_with(SLUG, "agent-token", {})
 
 
 def test_the_agent_token_route_answers_or_names_what_is_missing():

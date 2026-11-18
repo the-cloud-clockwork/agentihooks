@@ -56,6 +56,8 @@ jobs:
 
       - name: Create venv and install
         if: steps.key.outputs.hit != 'true'
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
         run: |
           uv venv .venv
           uv pip install --python .venv/bin/python -e ".[all]"

@@ -1109,6 +1109,41 @@ def test_the_master_overflow_keeps_off_a_reserved_account_while_another_is_open(
     assert (decision.account, decision.source) == ("BEST", "master overflow")
 
 
+def _refused_under_every_floor(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> tuple[dict[str, str], balancer.RoutingError]:
+    spent = [
+        balancer.parse_probe(name, _stream(0.10, week), 100) for name, week in (("A", 0.99), ("B", 0.97), ("C", 0.96))
+    ]
+    monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: (spent, "cached"))
+    env = {"AH_CC_TOKEN_A": "a", "AH_CC_TOKEN_B": "b", "AH_CC_TOKEN_C": "c"}
+    with pytest.raises(balancer.RoutingError) as refused:
+        balancer.select_master_credential(env, cache_file=tmp_path / "c.json", sessions={}, now=1000)
+    return env, refused.value
+
+
+@pytest.mark.feature("forced-master-start")
+def test_a_forced_master_takes_the_account_with_most_room_under_every_floor(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    env, refused = _refused_under_every_floor(monkeypatch, tmp_path)
+    decision = balancer.forced_credential(env, refused, ["C"])
+    assert (decision.account, decision.source) == ("B", "forced master")
+    assert decision.credential == balancer.Credential("AH_CC_TOKEN_B", "b")
+    assert decision.result == next(result for result in refused.results if result.account == "B")
+    assert balancer.forced_credential(env, refused, []).credential == balancer.Credential("AH_CC_TOKEN_C", "c")
+
+
+@pytest.mark.feature("forced-master-start")
+def test_a_forced_master_with_every_account_excluded_still_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    env, refused = _refused_under_every_floor(monkeypatch, tmp_path)
+    with pytest.raises(balancer.RoutingError) as raised:
+        balancer.forced_credential(env, refused, ["A", "B", "C"])
+    assert raised.value is refused
+
+
 def test_the_master_overflow_reads_the_clock_when_no_time_is_given(monkeypatch, tmp_path):
     env = _three(monkeypatch)
     monkeypatch.setattr(balancer.time, "time", lambda: 1000)

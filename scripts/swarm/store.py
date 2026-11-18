@@ -132,8 +132,6 @@ class SwarmConfig:
     masters_step: int = 0
     caps_pinned: bool = False
     master_move_grace: int = DEFAULT_MASTER_MOVE_GRACE
-    pending_api_url: str = ""
-    ledger_staged_at: int = 0
     swap_full_share: float = DEFAULT_SWAP_FULL_SHARE
     swap_floor_mb: int = DEFAULT_SWAP_FLOOR_MB
     hive_placement: bool = False
@@ -308,8 +306,6 @@ class RedisStore:
             int(raw.get("masters_step") or 0),
             raw.get("caps_pinned", "True") == "True",
             int(raw.get("master_move_grace") or DEFAULT_MASTER_MOVE_GRACE),
-            raw.get("pending_api_url", ""),
-            int(raw.get("ledger_staged_at") or 0),
             float(raw.get("swap_full_share") or DEFAULT_SWAP_FULL_SHARE),
             int(raw.get("swap_floor_mb") or DEFAULT_SWAP_FLOOR_MB),
             raw.get("hive_placement") == "True",
@@ -338,10 +334,6 @@ class RedisStore:
         if set(default_models.FIELDS.values()) & changes.keys():
             if refused := default_models.refusal(changes, model_catalog.catalog(os.environ, self.redis, time.time())):
                 raise SwarmError(refused)
-        if "pending_api_url" in changes:
-            from scripts.swarm import lease
-
-            changes["ledger_staged_at"] = lease.now_ms(self) if changes["pending_api_url"] else 0
         previous = self.config(slug)
         config = replace(previous, **changes)
         if {"lanes", "effort_min", "effort_max"} & set(changes):
@@ -504,9 +496,12 @@ class RedisStore:
         return {name: json.loads(raw) for name, raw in self.redis.hgetall(self.key(slug, "reclaims")).items()}
 
     def earlier_lives(self, slug: str, task: str) -> list[str]:
+        """The task's earlier worker agents, last ended first, leaving out one retired while still starting with no
+        pane: no hive ever ran it, so it pushed no branch to continue."""
         rows = [json.loads(raw) for raw in self.redis.lrange(self.key(slug, "history"), 0, -1)]
         mine = [row for row in rows if row.get("task") == task and row.get("lane") != MASTER]
-        return [row["name"] for row in sorted(mine, key=lambda row: row.get("ended_at") or 0, reverse=True)]
+        ran = [row for row in mine if row.get("pane_id") or row.get("state") != "starting"]
+        return [row["name"] for row in sorted(ran, key=lambda row: row.get("ended_at") or 0, reverse=True)]
 
     def ensure_code(self, slug):
         config = self.config(slug)

@@ -3,6 +3,7 @@ import json
 import sys
 import urllib.error
 import uuid
+from typing import Any
 
 import chat_ledger  # noqa: E402
 import ledger_hook  # noqa: E402
@@ -13,21 +14,33 @@ from scripts.swarm_ledger import chat_ledger as chat_ledger_module  # noqa: E402
 from scripts.swarm_ledger import ledger as ledger_module  # noqa: E402
 from scripts.swarm_ledger import ledger_hook as ledger_hook_module  # noqa: E402, F401
 from scripts.swarm_ledger.api import client as api_client  # noqa: E402
+from scripts.tick.adapters import database_ledger
+from tests.swarm_ledger.ledger_front import Front
 from tests.swarm_ledger.test_api_v1 import authority_live, live  # noqa: F401
-from tests.swarm_ledger.test_ledger_authority import SLUG, cli_ledger, server
+from tests.swarm_ledger.test_ledger_authority import SLUG, cli_ledger
 
 
 @pytest.fixture
 def routes(live, monkeypatch):  # noqa: F811
+    from scripts.tick.adapters import database_ledger
+
     seen = []
     for method in ("do_GET", "do_POST", "do_PUT"):
-        original = getattr(server.Handler, method)
+        original = getattr(Front, method)
 
         def record(self, original=original, method=method):
             seen.append((method.removeprefix("do_"), self.path.split("?", 1)[0]))
             return original(self)
 
-        monkeypatch.setattr(server.Handler, method, record)
+        monkeypatch.setattr(Front, method, record)
+
+    original_request = database_ledger.request
+
+    def record_request(slug: str, path: str, payload: dict | None = None) -> dict:
+        seen.append(("GET" if payload is None else "POST", f"/api/v1/ledgers/{slug}/{path}"))
+        return original_request(slug, path, payload)
+
+    monkeypatch.setattr(database_ledger, "request", record_request)
     return seen
 
 
@@ -61,14 +74,6 @@ def test_chat_command_posts_through_the_versioned_operations_route(routes, monke
     assert legacy(routes) == []
 
 
-def test_chat_command_reports_a_dead_server(monkeypatch):
-    monkeypatch.setattr(cli_ledger, "BASE", "http://127.0.0.1:9")
-    monkeypatch.setattr(sys, "argv", ["chat_ledger.py", SLUG, "--as", "api-reader", "--reply-to", "o-0", "Nobody"])
-    with pytest.raises(SystemExit) as exit_:
-        chat_ledger.main()
-    assert str(exit_.value).startswith("ledger server not answering on http://127.0.0.1:9: ")
-
-
 def test_stop_gate_bypass_is_recorded_through_the_versioned_route(routes):
     ledger_hook.post_bypass({"slug": SLUG, "name": "api-reader"}, 3)
     events = [row for row in request_rows("events") if row.get("kind") == "gate bypassed"]
@@ -77,9 +82,14 @@ def test_stop_gate_bypass_is_recorded_through_the_versioned_route(routes):
     assert legacy(routes) == []
 
 
-def test_stop_gate_bypass_never_raises_when_the_server_is_gone(monkeypatch):
-    logged = []
-    monkeypatch.setattr(cli_ledger, "BASE", "http://127.0.0.1:9")
+def test_stop_gate_bypass_never_raises_when_the_server_is_gone(monkeypatch: pytest.MonkeyPatch) -> None:
+    logged: list[str] = []
+
+    def gone(slug: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Answer as a ledger database that does not answer."""
+        raise OSError("the ledger database is not answering")
+
+    monkeypatch.setattr(database_ledger, "request", gone)
     monkeypatch.setattr(ledger_hook, "log", logged.append)
     ledger_hook.post_bypass({"slug": SLUG, "name": "api-reader"}, 1)
     assert len(logged) == 1
@@ -141,9 +151,9 @@ class Recorder:
     def __init__(self, reply=None, error=None):
         self.calls, self.reply, self.error = [], reply, error
 
-    def __call__(self, slug, ops, service=False, **options):
-        self.calls.append((slug, [dict(op) for op in ops], service))
-        self.options = options
+    def __call__(self, slug: str, ops: list[dict[str, Any]], timeout: float | None = None) -> Any:
+        self.calls.append((slug, [dict(op) for op in ops], database_ledger.ACTING.get() == ""))
+        self.options = {} if timeout is None else {"timeout": timeout}
         if self.error is not None:
             raise self.error
         return self.reply
@@ -155,7 +165,7 @@ def test_chat_command_sends_one_service_chat_operation(monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["chat_ledger.py", SLUG, "--as", "api-reader", "--reply-to", "o-0", "  Spaced  "])
     chat_ledger.main()
     [(slug, [op], service)] = recorder.calls
-    assert (slug, service) == (SLUG, True)
+    assert slug == SLUG and service is False
     assert op["id"].startswith("m-") and len(op["id"]) == 12
     assert {key: value for key, value in op.items() if key != "id"} == {
         "op": "add",
@@ -308,23 +318,20 @@ def test_the_client_timeout_reaches_the_transport(monkeypatch):
 
 
 def test_the_request_layer_passes_its_timeout_to_the_client(monkeypatch: pytest.MonkeyPatch) -> None:
-    built = []
+    built: list[float] = []
 
     class Client:
-        def __init__(self, base, credentials, timeout):
-            built.append((base, credentials, timeout))
-
-        def mutate(self, slug, ops):
+        def mutate(self, slug: str, ops: list) -> dict:
             return {"applied": []}
 
-    monkeypatch.setattr(api_client, "ResourceClient", Client)
-    monkeypatch.setattr(ledger_module, "credentials", lambda slug, service: {"service": service})
+    def client(slug: str, timeout: float) -> Client:
+        built.append(timeout)
+        return Client()
+
+    monkeypatch.setattr(ledger_module, "client", client)
     ledger_module.request(SLUG, chat_add())
-    ledger_module.request(SLUG, chat_add(), service=True, timeout=3)
-    assert built == [
-        (ledger_module.BASE, {"service": False}, ledger_module.WRITE_TIMEOUT),
-        (ledger_module.BASE, {"service": True}, 3),
-    ]
+    ledger_module.request(SLUG, chat_add(), timeout=3)
+    assert built == [ledger_module.WRITE_TIMEOUT, 3]
 
 
 def test_stop_gate_bypass_never_raises_on_any_failure(monkeypatch):

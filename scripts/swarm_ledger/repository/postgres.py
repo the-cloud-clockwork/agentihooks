@@ -407,11 +407,15 @@ class PostgresLedgerRepository(SQLiteLedgerRepository):
     def connect(self) -> Iterator[Connection]:
         connection = Connection(self.address)
         try:
-            if self.address not in self._ready:
-                self._set_up(connection, self.address)
             yield connection
         finally:
             connection.close()
+
+    def migrate(self) -> None:
+        """Create or update the shared ledger schema and raise the writer floor; only the ledger API service runs
+        it, so no client or reader takes the schema lock."""
+        with self.connect() as connection:
+            self._set_up(connection, self.address)
 
     def _reader(self):
         return self.connect()

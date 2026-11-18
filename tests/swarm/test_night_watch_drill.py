@@ -72,7 +72,8 @@ def rig(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> dict[str, Any]:
 
     launch = {"seats": True}
 
-    def master(slug: str, config: SwarmConfig, held: RedisStore, live: Runtime, at: int) -> list[str]:
+    def master(slug: str, config: SwarmConfig, held: RedisStore, live: Runtime, at: int, forced: bool) -> list[str]:
+        assert forced
         started.append((slug, at))
         if launch["seats"]:
             name = f"master@{slug}"
@@ -368,7 +369,10 @@ def test_a_respawned_master_that_is_not_seated_on_the_front_door_leaves_the_dril
     name = "master@proof"
     held = front_door.seat(SCRATCH) if seat is None else f"{seat}@{SCRATCH}"
 
-    def master(slug: str, config: SwarmConfig, _store: RedisStore, _runtime: Runtime, at: int) -> list[str]:
+    def master(
+        slug: str, config: SwarmConfig, _store: RedisStore, _runtime: Runtime, at: int, forced: bool
+    ) -> list[str]:
+        assert forced
         store.put_agent(slug, AgentRecord(name, MASTER, MASTER, started_at=at, state=state, seat=held))
         if live:
             rig["runtime"].live.add(name)

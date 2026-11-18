@@ -1,5 +1,5 @@
-"""Ledger port adapter: the tick's ledger tools over the ledger server's export and mutate routes, each call
-bounded by its deadline and every write stamped with the controller epoch of its ledger."""
+"""Ledger port adapter: the tick's ledger tools over the ledger API export and mutate routes run in process over the
+shared database, each call bounded by its deadline and every write stamped with the controller epoch of its ledger."""
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -15,11 +15,10 @@ __all__ = ["ClientLedger", "resource_client"]
 Clients = Callable[[float], ResourceClient]
 
 
-def resource_client(slug: str, service: bool = False) -> Clients:
-    """Build clients for ledger slug whose request timeout never outlasts the deadline left, served in process
-    over the shared database while a database pass is in scope."""
+def resource_client(slug: str) -> Clients:
+    """Build clients for ledger slug, served in process over the shared database, whose request timeout never
+    outlasts the deadline left."""
     from scripts.swarm.ledger_client import _ledger  # pyright: ignore[reportPrivateUsage]
-    from scripts.tick.adapters import database_ledger
 
     ledger: Any = _ledger()
 
@@ -28,12 +27,8 @@ def resource_client(slug: str, service: bool = False) -> Clients:
 
         if offline():
             raise LedgerOffline(f"ledger {slug}: {OFFLINE_READ}")
-        base: str = ledger.base(slug)
-        timeout: float = min(ledger.REQUEST_TIMEOUT, remaining)
-        if database_ledger.serving():
-            return database_ledger.client(base, timeout)
-        credentials: dict[str, str] = ledger.credentials(slug, service)
-        return ResourceClient(base, credentials, timeout)
+        built: ResourceClient = ledger.client(slug, min(ledger.REQUEST_TIMEOUT, remaining))
+        return built
 
     return build
 

@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 IMAGE = "local/agentihooks-swarm:clients-check"
 
 
-def test_main_image_is_built_once_before_every_compatible_smoke():
+def test_main_image_is_built_once_before_every_compatible_smoke() -> None:
     job = yaml.safe_load((ROOT / ".github/workflows/swarm-smoke.yml").read_text())["jobs"]["smoke"]
     assert job["env"]["SWARM_SMOKE_IMAGE"] == IMAGE
     steps = job["steps"]
@@ -36,10 +36,14 @@ redis=$!
 bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/nats:2.15.1-alpine &&
   docker tag public.ecr.aws/docker/library/nats:2.15.1-alpine mirror.gcr.io/library/nats:2.15.1-alpine &
 nats=$!
+bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/nginx:1.27-alpine &&
+  docker tag public.ecr.aws/docker/library/nginx:1.27-alpine mirror.gcr.io/library/nginx:1.27-alpine &
+nginx=$!
 bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/redis:7-alpine &&
   docker tag public.ecr.aws/docker/library/redis:7-alpine mirror.gcr.io/library/redis:7-alpine || status=$?
 wait "$redis" || status=$?
 wait "$nats" || status=$?
+wait "$nginx" || status=$?
 wait "$build" || status=$?
 exit "$status"
 """,
@@ -55,6 +59,7 @@ exit "$status"
         "compose-hive-smoke",
         "compose-task-smoke",
         "compose-recovery-drill",
+        "compose-master-drill",
         "stability-smoke",
     ):
         assert build < next(
@@ -71,6 +76,7 @@ exit "$status"
         "compose-hive-smoke",
         "compose-task-smoke",
         "compose-recovery-drill",
+        "compose-master-drill",
         "stability-smoke",
     ],
 )

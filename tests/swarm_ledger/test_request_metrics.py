@@ -6,7 +6,7 @@ from http.server import ThreadingHTTPServer
 
 import pytest
 
-from scripts.swarm_ledger import api, new_ledger
+from scripts.swarm_ledger import api, api_service, new_ledger
 from scripts.swarm_ledger import ledger_server as server
 from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
 
@@ -84,7 +84,7 @@ def test_server_write_command_reports_cpu_lock_wait_and_remaining_wall(tmp_path,
         clock.cpu += 1.5
 
     monkeypatch.setattr(api, "handle", write)
-    handler = server.Handler.__new__(server.Handler)
+    handler = api_service.WriteHandler.__new__(api_service.WriteHandler)
     handler.path = "/api/v1/ledgers/timing/operations?private=hidden"
     handler.command = "POST"
     try:
@@ -240,7 +240,7 @@ def test_failed_write_keeps_its_file_lock_wait(tmp_path, monkeypatch):
 
     monkeypatch.setattr(legacy.fcntl, "flock", flock)
     monkeypatch.setattr(api, "handle", write)
-    handler = server.Handler.__new__(server.Handler)
+    handler = api_service.WriteHandler.__new__(api_service.WriteHandler)
     handler.path, handler.command = "/api/v1/ledgers/timing/operations", "POST"
     with pytest.raises(ValueError, match="refused"):
         handler.do_POST()
@@ -277,7 +277,7 @@ def test_a_write_waiting_on_another_load_of_its_ledger_counts_that_wait(tmp_path
         clock.wall += 1.0
 
     monkeypatch.setattr(api, "handle", write)
-    handler = server.Handler.__new__(server.Handler)
+    handler = api_service.WriteHandler.__new__(api_service.WriteHandler)
     handler.path, handler.command = "/api/v1/ledgers/timing/operations", "POST"
     handler.do_POST()
     result = metrics.report(1.0)

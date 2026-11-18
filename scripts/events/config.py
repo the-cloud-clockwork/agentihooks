@@ -11,6 +11,7 @@ CREDENTIALS_ENV = "AGENTIHOOKS_BUS_CREDENTIALS"
 BIND_ENV = "AGENTIHOOKS_BUS_BIND"
 SCOPED_ENV = "AGENTIHOOKS_BUS_SCOPED"
 SWARMS_ENV = "AGENTIHOOKS_BUS_SWARMS"
+REPLICAS_ENV = "AGENTIHOOKS_BUS_REPLICAS"
 OPENBAO_SCHEME = "openbao:"
 CREDENTIALS_FIELD = "credentials"
 INLINE_CREDENTIALS = "-----BEGIN NATS USER JWT-----"
@@ -59,8 +60,9 @@ class BusConfig:
     provision: bool = True
     scoped: bool = False
     reconnect: bool = False
+    replicas: int = 1
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not isinstance(self.backend, str) or not self.backend:
             raise ValueError("bus backend must be non empty text")
         if self.url is not None and (not isinstance(self.url, str) or not self.url):
@@ -69,6 +71,8 @@ class BusConfig:
             raise ValueError("bus dedupe window must be a positive integer")
         if not isinstance(self.queue, QueuePolicy):
             raise ValueError("bus queue must be a QueuePolicy")
+        if not _positive(self.replicas):
+            raise ValueError("bus replicas must be a positive integer")
 
     @classmethod
     def from_environ(cls, environ: Mapping[str, str] = os.environ) -> "BusConfig":
@@ -78,6 +82,7 @@ class BusConfig:
             credentials=credentials_from(environ),
             provision=environ.get(BIND_ENV) != "1",
             scoped=environ.get(SCOPED_ENV) == "1",
+            replicas=int(environ.get(REPLICAS_ENV) or 1),
         )
 
 

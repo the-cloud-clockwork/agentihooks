@@ -5,7 +5,7 @@ from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, replace
 from typing import cast
 
-from .bus import Bus, EventLog, StateConflict, StateEntry, WorkQueue
+from .bus import Bus, Delivery, EventLog, StateConflict, StateEntry, WorkQueue
 from .config import BusConfig, QueuePolicy
 from .dead import dead_letter
 from .envelope import Envelope
@@ -81,6 +81,9 @@ class MemoryDelivery:
     def term(self) -> None:
         self._pending.settle(self._message, self.attempt)
 
+    def release(self, delay_ms: int) -> None:
+        self._pending.release(self._message, self.attempt, delay_ms)
+
 
 class _Pending:
     def __init__(
@@ -130,6 +133,13 @@ class _Pending:
             if message.attempt == attempt and not message.settled:
                 message.ready_at = self._runtime.clock() + delay_ms
                 self._runtime.cond.notify_all()
+
+    def release(self, message: _Message, attempt: int, delay_ms: int) -> None:
+        """Hands the delivery back without counting it, so the next take delivers ``attempt`` again."""
+        with self._runtime.cond:
+            if message.attempt == attempt and not message.settled:
+                self.retry(message, attempt, delay_ms)
+                message.attempt -= 1
 
     def _ready(self, taken: list[_Message] = ()) -> _Message | None:
         for event in self._source():
@@ -230,6 +240,9 @@ class MemoryWorkQueue:
 
     def withdraw(self, stale: Callable[[Envelope], bool]) -> int:
         return self._pending.withdraw(stale)
+
+    def release(self, delivery: Delivery, delay_ms: int) -> None:
+        cast(MemoryDelivery, delivery).release(delay_ms)
 
 
 class MemoryStateStore:
@@ -349,7 +362,9 @@ class MemoryBus:
             self._runtime.require_open()
             return self._buckets.setdefault(bucket, MemoryStateStore(self._runtime))
 
-    def serve(self, subject: str, queue: str, handler: Callable[[str, bytes], bytes]) -> None:
+    def serve(
+        self, subject: str, queue: str, handler: Callable[[str, bytes], bytes], wait_ms: int | None = None
+    ) -> None:
         with self._runtime.cond:
             self._runtime.require_open()
             self._runtime.handlers.append((subject, handler))

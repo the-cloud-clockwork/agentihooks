@@ -18,6 +18,7 @@ HEALTHY = [
     {"Service": "swarm", "State": "running", "Health": "healthy"},
     {"Service": "controller", "State": "running", "Health": "healthy"},
     {"Service": "nats", "State": "running", "Health": "healthy"},
+    {"Service": "api", "State": "running", "Health": "healthy"},
 ]
 STACK_FILES = [
     "compose.yaml",
@@ -387,6 +388,10 @@ def test_an_unhealthy_service_is_named_with_its_fix_and_logs(home):
         "  Fix: read its logs; the ledger server needs Redis healthy, and if port 8766 is in use, "
         f"set SWARM_PORT in {env} to a free port, then run agentihooks swarm init again.\n"
         "  Logs: docker compose --project-name agentihooks-swarm logs swarm\n"
+        "Swarm stack not ready: api is not created.\n"
+        "  Fix: read its logs; the write API starts once Redis and NATS are healthy, so fix those first, "
+        "then run agentihooks swarm init again.\n"
+        "  Logs: docker compose --project-name agentihooks-swarm logs api\n"
         "Swarm stack not ready: controller is not created.\n"
         "  Fix: read its logs; the controller starts once Redis and the ledger server are healthy "
         "and then holds a lease, so fix those first, then run agentihooks swarm init again.\n"
@@ -424,7 +429,7 @@ def test_an_unhealthy_redis_names_its_port_and_password(home):
 
 
 def test_an_unhealthy_nats_holds_the_stack_back_with_its_own_fix(home):
-    rows = [*HEALTHY[:3], {"Service": "nats", "State": "running", "Health": "unhealthy"}]
+    rows = [*HEALTHY[:3], {"Service": "nats", "State": "running", "Health": "unhealthy"}, *HEALTHY[4:]]
     code, out = init(home, Docker(rows=rows, up_code=1))
     assert code == 1
     assert out == (

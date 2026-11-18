@@ -1,5 +1,6 @@
 import sqlite3
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -12,7 +13,7 @@ import new_ledger  # noqa: E402
 from scripts.inbox import seen  # noqa: E402
 from scripts.inbox.store import InboxStore  # noqa: E402
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig  # noqa: E402
-from scripts.swarm_ledger import ledger_server  # noqa: E402
+from scripts.swarm_ledger import api_service, ledger_server  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
 
 SLUG = "relay-outage-2026-01-01"
@@ -75,8 +76,8 @@ def make_ledger(description="d"):
 def write(op, refused=()):
     state, rejected = core.sync(SLUG, ops=[op])
     assert rejected == list(refused)
-    ledger_server.relay_to_inbox(SLUG, state)
-    ledger_server.deliver_alerts(SLUG, state)
+    api_service.relay_to_inbox(SLUG, state)
+    api_service.deliver_alerts(SLUG, state)
     return state
 
 
@@ -104,12 +105,12 @@ def test_writes_made_while_redis_is_down_reach_their_agents_once_after_recovery(
     operator_writes(phase, question)
     swarm_say(monkeypatch)
     outage.down(False)
-    ledger_server.replay_unrelayed()
-    ledger_server.replay_unrelayed()
+    api_service.replay_unrelayed()
+    api_service.replay_unrelayed()
     replay_outbox(outage)
     assert_each_write_reached_its_agent_once(outage)
     assert len(mentions(outage.texts(ENG.name), "the docs build is green")) == 1
-    assert ledger_server.unrelayed() == {}
+    assert api_service.unrelayed() == {}
 
 
 def swarm_say(monkeypatch):
@@ -144,7 +145,7 @@ def test_the_next_write_after_recovery_replays_every_revision_it_could_not_relay
     operator_writes(phase, question)
     outage.down(False)
     write({"op": "add", "thread": "chat", "id": "m-2", "text": "@ro-eng-1 and run the docs build"})
-    ledger_server.replay_unrelayed()
+    api_service.replay_unrelayed()
     assert_each_write_reached_its_agent_once(outage)
     assert len(mentions(outage.texts(ENG.seat), "run the docs build")) == 1
 
@@ -152,8 +153,8 @@ def test_the_next_write_after_recovery_replays_every_revision_it_could_not_relay
 def test_a_write_relayed_while_redis_is_up_leaves_nothing_to_replay(outage):
     phase, question = make_ledger()
     operator_writes(phase, question)
-    assert ledger_server.unrelayed() == {}
-    ledger_server.replay_unrelayed()
+    assert api_service.unrelayed() == {}
+    api_service.replay_unrelayed()
     assert_each_write_reached_its_agent_once(outage)
 
 
@@ -163,28 +164,28 @@ def test_an_alert_raised_while_redis_is_down_reaches_the_master_once_after_recov
     taken = {"op": "phase_append", "id": "plan", "by": "master", "phases": [{"phase": "p1", "title": "Taken"}]}
     write(taken, refused=["plan"])
     outage.down(False)
-    ledger_server.replay_unrelayed()
-    ledger_server.replay_unrelayed()
+    api_service.replay_unrelayed()
+    api_service.replay_unrelayed()
     assert len([text for text in outage.texts(BOSS.seat) if "alert" in text]) == 1
-    assert ledger_server.unrelayed() == {}
+    assert api_service.unrelayed() == {}
 
 
-@pytest.mark.parametrize("kind", [ledger_server.RELAY, ledger_server.ALERTS])
+@pytest.mark.parametrize("kind", [api_service.RELAY, api_service.ALERTS])
 def test_a_held_revision_with_nothing_left_to_send_clears_on_replay(outage, kind):
     make_ledger()
     state, _ = core.sync(SLUG)
-    ledger_server.unrelayed_on(kind, SLUG, state["_meta"]["rev"])
-    ledger_server.replay_unrelayed()
-    assert ledger_server.unrelayed() == {}
+    api_service.unrelayed_on(kind, SLUG, state["_meta"]["rev"])
+    api_service.replay_unrelayed()
+    assert api_service.unrelayed() == {}
 
 
 def test_a_held_revision_of_a_ledger_that_is_gone_is_dropped_and_the_next_ledger_still_replays(outage):
     make_ledger()
     state, _ = core.sync(SLUG)
-    ledger_server.unrelayed_on(ledger_server.RELAY, "gone-2026-01-01", 3)
-    ledger_server.unrelayed_on(ledger_server.RELAY, SLUG, state["_meta"]["rev"])
-    ledger_server.replay_unrelayed()
-    assert ledger_server.unrelayed() == {}
+    api_service.unrelayed_on(api_service.RELAY, "gone-2026-01-01", 3)
+    api_service.unrelayed_on(api_service.RELAY, SLUG, state["_meta"]["rev"])
+    api_service.replay_unrelayed()
+    assert api_service.unrelayed() == {}
 
 
 def test_an_alert_held_during_the_outage_goes_out_with_the_next_write_after_recovery(outage):
@@ -195,57 +196,57 @@ def test_an_alert_held_during_the_outage_goes_out_with_the_next_write_after_reco
     outage.down(False)
     write({"op": "add", "thread": "chat", "id": "m-3", "text": "back again"})
     assert len([text for text in outage.texts(BOSS.seat) if "alert" in text]) == 1
-    assert ledger_server.unrelayed() == {}
+    assert api_service.unrelayed() == {}
 
 
 def test_a_relay_forgets_only_the_revisions_it_covered():
     for rev in (3, 9):
-        ledger_server.unrelayed_on(ledger_server.RELAY, SLUG, rev)
-    ledger_server.relayed(ledger_server.RELAY, SLUG, 1, 5)
-    assert ledger_server.unrelayed() == {ledger_server.RELAY: {SLUG: [9]}}
+        api_service.unrelayed_on(api_service.RELAY, SLUG, rev)
+    api_service.relayed(api_service.RELAY, SLUG, 1, 5)
+    assert api_service.unrelayed() == {api_service.RELAY: {SLUG: [9]}}
 
 
 def first_read(monkeypatch, seen):
     """unrelayed() answers seen once, as another thread's write lands, then reads the file again."""
-    real, calls = ledger_server.unrelayed, []
+    real, calls = api_service.unrelayed, []
 
     def read():
         calls.append(1)
         return seen if len(calls) == 1 else real()
 
-    monkeypatch.setattr(ledger_server, "unrelayed", read)
+    monkeypatch.setattr(api_service, "unrelayed", read)
     return real
 
 
-@pytest.mark.parametrize("left", [{}, {ledger_server.RELAY: {"other-2026-01-01": [7]}}])
+@pytest.mark.parametrize("left", [{}, {api_service.RELAY: {"other-2026-01-01": [7]}}])
 def test_a_relay_whose_revisions_another_thread_forgot_leaves_the_record_as_it_found_it(monkeypatch, left):
-    for slug, revs in left.get(ledger_server.RELAY, {}).items():
-        ledger_server.unrelayed_on(ledger_server.RELAY, slug, revs[0])
-    real = first_read(monkeypatch, {ledger_server.RELAY: {SLUG: [5]}})
-    ledger_server.relayed(ledger_server.RELAY, SLUG, 0, 9)
+    for slug, revs in left.get(api_service.RELAY, {}).items():
+        api_service.unrelayed_on(api_service.RELAY, slug, revs[0])
+    real = first_read(monkeypatch, {api_service.RELAY: {SLUG: [5]}})
+    api_service.relayed(api_service.RELAY, SLUG, 0, 9)
     assert real() == left
 
 
 def test_a_replay_whose_gone_ledger_another_thread_forgot_carries_on(monkeypatch):
-    real = first_read(monkeypatch, {ledger_server.RELAY: {"gone-2026-01-01": [4]}})
-    ledger_server.replay_unrelayed()
+    real = first_read(monkeypatch, {api_service.RELAY: {"gone-2026-01-01": [4]}})
+    api_service.replay_unrelayed()
     assert real() == {}
 
 
 def test_the_unrelayed_record_creates_its_folder(monkeypatch, tmp_path):
     monkeypatch.setattr("hooks.config.AGENTIHOOKS_HOME", str(tmp_path / "home" / "state"))
-    ledger_server.unrelayed_on(ledger_server.RELAY, SLUG, 3)
-    assert ledger_server.unrelayed() == {ledger_server.RELAY: {SLUG: [3]}}
+    api_service.unrelayed_on(api_service.RELAY, SLUG, 3)
+    assert api_service.unrelayed() == {api_service.RELAY: {SLUG: [3]}}
 
 
 def test_a_trimmed_range_notice_names_the_range_and_resumes_the_relay_after_it(outage):
     make_ledger()
-    ledger_server.unrelayed_on(ledger_server.RELAY, SLUG, 3)
-    assert ledger_server.record_trimmed(SLUG, 3, 7) == 8
+    api_service.unrelayed_on(api_service.RELAY, SLUG, 3)
+    assert api_service.record_trimmed(SLUG, 3, 7) == 8
     state, _ = core.sync(SLUG)
     [notice] = [row for row in state["notifications"] if "left the ledger history" in row["text"]]
     assert "from revision 3 through 7" in notice["text"] and notice["by"] == "ledger"
-    assert ledger_server.unrelayed() == {}
+    assert api_service.unrelayed() == {}
 
 
 class Unwritable:
@@ -254,11 +255,11 @@ class Unwritable:
 
 
 def test_a_trimmed_range_whose_notice_cannot_be_written_stays_held(outage, monkeypatch, capsys):
-    ledger_server.unrelayed_on(ledger_server.RELAY, SLUG, 3)
+    api_service.unrelayed_on(api_service.RELAY, SLUG, 3)
     monkeypatch.setattr(ledger_server, "repository", Unwritable())
-    assert ledger_server.record_trimmed(SLUG, 3, 7) == 3
+    assert api_service.record_trimmed(SLUG, 3, 7) == 3
     assert "trimmed notice for" in capsys.readouterr().err
-    assert ledger_server.unrelayed() == {ledger_server.RELAY: {SLUG: [3]}}
+    assert api_service.unrelayed() == {api_service.RELAY: {SLUG: [3]}}
 
 
 class Stop(Exception):
@@ -274,21 +275,22 @@ def watch_passes(monkeypatch, held, replay, count=6):
         if len(passes) == count:
             raise Stop
 
-    for name in ("bin_closed_without_swarm", "expire_alerts", "sample_streams"):
-        monkeypatch.setattr(ledger_server, name, lambda: None)
+    for name in ("bin_closed_without_swarm", "expire_alerts"):
+        monkeypatch.setattr(api_service, name, lambda: None)
+    monkeypatch.setattr(ledger_server, "sample_streams", lambda: None)
     monkeypatch.setattr(ledger_server.ledger_bin, "tidy", lambda: None)
     monkeypatch.setattr(ledger_server, "reloading", lambda *args: False)
-    monkeypatch.setattr(ledger_server, "unrelayed", lambda: held)
-    monkeypatch.setattr(ledger_server, "replay_unrelayed", lambda: replay(len(passes)))
+    monkeypatch.setattr(api_service, "unrelayed", lambda: held)
+    monkeypatch.setattr(api_service, "replay_unrelayed", lambda: replay(len(passes)))
     monkeypatch.setattr(ledger_server, "scheduled_wait", sleep)
     with pytest.raises(Stop):
-        ledger_server.watch_ledgers()
+        api_service.upkeep(threading.Event())
 
 
 def test_the_watch_loop_replays_held_revisions_every_fifth_pass_and_survives_a_failed_replay(
     monkeypatch, tmp_path, capsys
 ):
-    held, replayed = {ledger_server.RELAY: {SLUG: [1]}}, []
+    held, replayed = {api_service.RELAY: {SLUG: [1]}}, []
 
     def replay(at):
         replayed.append(at)
@@ -311,7 +313,7 @@ class Unreadable:
 
 def test_an_unreadable_relay_journal_reads_as_nothing_held(monkeypatch):
     monkeypatch.setattr(ledger_server, "stored", Unreadable())
-    assert ledger_server.unrelayed() == {}
+    assert api_service.unrelayed() == {}
 
 
 def test_the_watch_loop_survives_a_failed_journal_read(monkeypatch, capsys):
@@ -320,16 +322,17 @@ def test_the_watch_loop_survives_a_failed_journal_read(monkeypatch, capsys):
     def unreadable():
         raise OSError("disk gone")
 
-    monkeypatch.setattr(ledger_server, "unrelayed", unreadable)
+    monkeypatch.setattr(api_service, "unrelayed", unreadable)
     passes = []
     monkeypatch.setattr(ledger_server, "scheduled_wait", lambda _: passes.append(1) or len(passes) == 6 and stop())
-    for name in ("bin_closed_without_swarm", "expire_alerts", "sample_streams"):
-        monkeypatch.setattr(ledger_server, name, lambda: None)
+    for name in ("bin_closed_without_swarm", "expire_alerts"):
+        monkeypatch.setattr(api_service, name, lambda: None)
+    monkeypatch.setattr(ledger_server, "sample_streams", lambda: None)
     monkeypatch.setattr(ledger_server.ledger_bin, "tidy", lambda: None)
     monkeypatch.setattr(ledger_server, "reloading", lambda *args: False)
-    monkeypatch.setattr(ledger_server, "replay_unrelayed", lambda: replayed.append(1))
+    monkeypatch.setattr(api_service, "replay_unrelayed", lambda: replayed.append(1))
     with pytest.raises(Stop):
-        ledger_server.watch_ledgers()
+        api_service.upkeep(threading.Event())
     assert replayed == [] and capsys.readouterr().err.count("unrelayed replay: disk gone") == 2
 
 
@@ -344,23 +347,23 @@ def test_each_operator_write_trimmed_before_its_relay_leaves_one_notice_for_the_
     outage.down()
     operator_writes(phase, question)
     outage.down(False)
-    ledger_server.replay_unrelayed()
-    ledger_server.replay_unrelayed()
+    api_service.replay_unrelayed()
+    api_service.replay_unrelayed()
     state, _ = core.sync(SLUG)
     notices = [row["text"] for row in state.get("notifications", []) if "left the ledger history" in row["text"]]
-    assert len(notices) == len(set(notices)) == 2 and ledger_server.unrelayed() == {}
+    assert len(notices) == len(set(notices)) == 2 and api_service.unrelayed() == {}
     assert len(mentions(outage.texts(BOSS.seat), "use the queue")) == 1
 
 
 def test_a_journal_an_older_server_left_in_its_own_file_is_held_once_and_the_file_removed(monkeypatch, tmp_path):
     monkeypatch.setattr("hooks.config.AGENTIHOOKS_HOME", str(tmp_path))
-    legacy = tmp_path / ledger_server.UNRELAYED
+    legacy = tmp_path / api_service.UNRELAYED
     legacy.write_text('{"relay": {"%s": [3, 5]}, "alerts": {"%s": [4]}}' % (SLUG, SLUG))
-    ledger_server.adopt_unrelayed()
+    api_service.adopt_unrelayed()
     assert not legacy.exists()
-    assert ledger_server.unrelayed() == {ledger_server.RELAY: {SLUG: [3, 5]}, ledger_server.ALERTS: {SLUG: [4]}}
-    ledger_server.adopt_unrelayed()
-    assert ledger_server.unrelayed() == {ledger_server.RELAY: {SLUG: [3, 5]}, ledger_server.ALERTS: {SLUG: [4]}}
+    assert api_service.unrelayed() == {api_service.RELAY: {SLUG: [3, 5]}, api_service.ALERTS: {SLUG: [4]}}
+    api_service.adopt_unrelayed()
+    assert api_service.unrelayed() == {api_service.RELAY: {SLUG: [3, 5]}, api_service.ALERTS: {SLUG: [4]}}
 
 
 @pytest.mark.parametrize(
@@ -368,6 +371,6 @@ def test_a_journal_an_older_server_left_in_its_own_file_is_held_once_and_the_fil
 )
 def test_an_unreadable_or_foreign_journal_file_holds_nothing(monkeypatch, tmp_path, text):
     monkeypatch.setattr("hooks.config.AGENTIHOOKS_HOME", str(tmp_path))
-    (tmp_path / ledger_server.UNRELAYED).write_text(text)
-    ledger_server.adopt_unrelayed()
-    assert ledger_server.unrelayed() == {}
+    (tmp_path / api_service.UNRELAYED).write_text(text)
+    api_service.adopt_unrelayed()
+    assert api_service.unrelayed() == {}

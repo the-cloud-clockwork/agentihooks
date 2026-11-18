@@ -1,4 +1,5 @@
 import json
+from typing import Any
 
 import pytest
 
@@ -286,7 +287,7 @@ def test_the_operator_lift_arms_the_talk_gate_beside_the_condition_gates(tmp_pat
 
 @pytest.mark.parametrize(("ops", "gated"), [([{"op": "ack", "id": "ack-1"}], True), (None, False), ([], False)])
 def test_the_server_gates_only_requests_that_carry_ops(monkeypatch, ops, gated):
-    from scripts.swarm_ledger import ledger_server
+    from scripts.swarm_ledger import api_service, ledger_server
 
     seen, seen_changes, changes = [], [], [{"path": "phases/p1/done", "value": True}]
 
@@ -296,9 +297,9 @@ def test_the_server_gates_only_requests_that_carry_ops(monkeypatch, ops, gated):
         return {"_meta": {"members": {}, "rev": 1}, "tasks": []}, []
 
     monkeypatch.setattr(ledger_server.repository, "apply_ops", sync)
-    monkeypatch.setattr(ledger_server, "relay_to_inbox", lambda slug, state: [])
-    monkeypatch.setattr(ledger_server, "doctor_phrase", lambda slug, state: None)
-    handler = ledger_server.Handler.__new__(ledger_server.Handler)
+    monkeypatch.setattr(api_service, "relay_to_inbox", lambda slug, state: [])
+    monkeypatch.setattr(api_service, "doctor_phrase", lambda slug, state: None)
+    handler: Any = api_service.WriteHandler.__new__(api_service.WriteHandler)
     handler.path = f"/api/{SLUG}?view=agent"
     handler.send = lambda code, body, ctype: code
     assert handler.reply_state(SLUG, changes=changes, ops=ops) == 200

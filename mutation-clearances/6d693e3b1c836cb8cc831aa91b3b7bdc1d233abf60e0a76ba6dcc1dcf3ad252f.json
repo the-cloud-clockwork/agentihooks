@@ -1,0 +1,6 @@
+{
+  "scripts/tick/adapters/database_ledger.py:scripts.tick.adapters.database_ledger.x_upload:4951016d1d6e64516af35bb5754aa7615a79648042ee5fdee4e229fc9f643a15": {
+    "reader": "standards-reader",
+    "reason": "upload stores the key in an email Message whose get ignores name case, and Content-Length is read only through get, so the key case is never observed."
+  }
+}

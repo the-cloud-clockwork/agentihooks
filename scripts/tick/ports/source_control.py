@@ -81,6 +81,7 @@ class RepositoryRun:
     event: str
     status: str
     head_sha: str = ""
+    title: str = ""
 
 
 @dataclass(frozen=True)

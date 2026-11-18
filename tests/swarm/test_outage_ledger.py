@@ -17,12 +17,17 @@ from tests.swarm.test_tick import store as store
 pytestmark = pytest.mark.unit
 
 
+def _unreachable(slug: str, timeout: float | None = None) -> None:
+    raise urllib.error.URLError("refused")
+
+
 @pytest.mark.parametrize("response", [None, ""])
 def test_tick_records_a_failed_ledger_health_probe_and_closes_it_when_health_returns(
     store, tmp_path, monkeypatch, response
 ):
     monkeypatch.setattr(outage, "HOME", tmp_path)
     monkeypatch.setattr(cli, "now_ms", lambda: 1000)
+    monkeypatch.setattr(cli.ledger_view, "start", _unreachable)
     probe = Mock(return_value=response)
     monkeypatch.setattr(LedgerClient, "metadata", probe)
     assert cli.run_tick(store, "sw", LedgerClient(), FakeRuntime()) == ["Ledger health probe failed"]

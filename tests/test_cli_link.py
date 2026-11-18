@@ -83,7 +83,10 @@ def _uv_run(calls, returncode=0, stderr=""):
     return run
 
 
-def test_a_source_checkout_installs_the_editable_tree(wheel_install, monkeypatch):
+@pytest.mark.feature("uv-tool-install-nats-extra")
+def test_a_source_checkout_installs_the_editable_tree_with_the_nats_extra(
+    wheel_install: tuple[Path, Path, list[str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
     printed = wheel_install[2]
     calls = []
     monkeypatch.setattr(install, "_is_source_checkout", lambda: True)
@@ -94,11 +97,11 @@ def test_a_source_checkout_installs_the_editable_tree(wheel_install, monkeypatch
 
     assert calls == [
         (
-            ["/bin/uv", "tool", "install", "--editable", "--force", "."],
+            ["/bin/uv", "tool", "install", "--editable", "--force", ".[nats]"],
             {"cwd": str(install.AGENTIHOOKS_ROOT), "capture_output": True, "text": True},
         )
     ]
-    assert printed == ["  [OK] CLI installed via: uv tool install --editable ."]
+    assert printed == ["  [OK] CLI installed via: uv tool install --editable .[nats]"]
 
 
 def test_a_failed_editable_install_reports_uv(wheel_install, monkeypatch):

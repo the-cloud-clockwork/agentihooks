@@ -7,7 +7,7 @@ import pytest
 from scripts.gates import catalog, entry, intent, lift, modes
 from scripts.swarm import clearance, cli
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
-from scripts.swarm_ledger import ledger_server
+from scripts.swarm_ledger import api_service, ledger_server
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
 pytestmark = pytest.mark.unit
@@ -248,7 +248,7 @@ def test_every_panel_control_is_a_cleared_command_the_command_line_takes(swarm, 
         patch.object(model_catalog, "catalog", return_value=models),
         patch.object(ledger_server, "swarm_models", return_value=models),
     ):
-        argv = ledger_server.control_argv(body)
+        argv = api_service.control_argv(body)
         assert argv[0] in clearance.COMMANDS
         acting(monkeypatch, MASTER, "demo")
         assert cli.main(["demo", *argv]) == 0

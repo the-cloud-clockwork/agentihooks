@@ -1,5 +1,5 @@
 """Night watch: each tick, with or without a master, holds the front door seat, the spawn path and the dev merge
-queue against a limit. Every action passes the night watch gate, log only by default; its findings show in every
+queue against a limit. Every action passes the night watch gate, deny by default; its findings show in every
 mode."""
 
 import json
@@ -7,6 +7,7 @@ import os
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+from typing import Any
 
 from scripts.gates import modes
 from scripts.gates.base import Who
@@ -139,7 +140,7 @@ def _seat_held(watch):
     )
 
 
-def _seat(watch, state):
+def _seat(watch: Watch, state: dict[str, Any]) -> list[str]:
     if watch.store.config(watch.slug).state != "running" or watch.sleeping or _seat_held(watch):
         return _clear(watch, state, SEAT, CLEARED.format(what="the front door master seat is held again"))
     episode = state.setdefault(SEAT, {"since": watch.now_ms})
@@ -149,7 +150,7 @@ def _seat(watch, state):
     from scripts.swarm.tick import spawn_holds
 
     held_by = spawn_holds(watch.store, watch.slug)
-    why = held_by[0] if held_by else tick_master._launch_refusal(watch.store, watch.slug)
+    why = held_by[0] if held_by else tick_master._launch_refusal(watch.store, watch.slug, watch.now_ms)
     episode.update(minutes=minutes, why=why)
     actions = []
     due = watch.now_ms - episode.get("respawned", episode["since"]) >= SEAT_MS

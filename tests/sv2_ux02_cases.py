@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from scripts.swarm import command_runner, commands, lifecycle
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
-from scripts.swarm_ledger import ledger_server
+from scripts.swarm_ledger import api_service, ledger_server
 
 FIXTURES = Path(__file__).parent / "fixtures" / "swarm_v2"
 
@@ -66,7 +66,7 @@ class World:
             patch.object(ledger_server.repository, "read", return_value=self.stamps()),
         ):
             try:
-                ledger_server.lifecycle_control(self.slug, body, True)
+                api_service.lifecycle_control(self.slug, body, True)
             except lifecycle.Refused as refused:
                 return refused.status, str(refused)
         return 200, ""

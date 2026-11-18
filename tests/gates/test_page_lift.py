@@ -382,7 +382,7 @@ class TestCommand:
 
 class TestServerRoute:
     def test_page_lift_routes_to_the_swarm_lift_command(self):
-        from scripts.swarm_ledger.ledger_server import control_argv
+        from scripts.swarm_ledger.api_service import control_argv
 
         assert control_argv({"action": "lift", "agent": ME, "gate": "watch-budget"}) == ["lift", ME, "watch-budget"]
         assert control_argv({"action": "lift", "agent": "Eng@X", "gate": "talk"}) == ["lift", "Eng@X", "talk"]
@@ -397,7 +397,7 @@ class TestServerRoute:
         ],
     )
     def test_bad_lifts_are_refused(self, body, refusal):
-        from scripts.swarm_ledger.ledger_server import control_argv
+        from scripts.swarm_ledger.api_service import control_argv
 
         with pytest.raises(ValueError, match=f"^{refusal}$"):
             control_argv(body)

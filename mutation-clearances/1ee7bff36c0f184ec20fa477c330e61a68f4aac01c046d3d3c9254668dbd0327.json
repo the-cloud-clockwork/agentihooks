@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger.py:scripts.swarm_ledger.ledger.x_upload:c80c9dc241066b2680485ecb4b426116386e411665d654b07127719053bb61ef": {
+    "reader": "standards-reader",
+    "reason": "The upper-case value reaches admin.py get_content_type(), which lowercases it; receive never reads Content-Type, so the route sees application/octet-stream either way."
+  }
+}

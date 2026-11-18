@@ -2,7 +2,6 @@ import io
 import json
 import ssl
 import threading
-import urllib.error
 import urllib.request
 from pathlib import Path
 from types import SimpleNamespace
@@ -144,10 +143,6 @@ def test_a_master_from_a_freshly_added_hive_passes_its_ledger_join(admin, cert, 
     monkeypatch.setattr(ledger, "base", lambda slug="": tls_ledger["base"])
     monkeypatch.setattr(ledger, "credentials", lambda slug, service=False: {"X-Ledger-Token": tls_ledger["admin"]})
     master = SimpleNamespace(slug=SLUG, name="master@hive-proof", role="member")
-
-    with pytest.raises(urllib.error.URLError) as untrusted:
-        ledger.request(SLUG, [ledger.op("join", master, role="member")])
-    assert isinstance(untrusted.value.reason, ssl.SSLCertVerificationError)
 
     httpd = server.make_server(admin, PUBLIC, "localhost", 0, cert, ledger_ca=pem)
     port = _serving(httpd)

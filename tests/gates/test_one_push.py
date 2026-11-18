@@ -20,6 +20,7 @@ from scripts.gates.one_push import (
 from scripts.gates.subagents import SubagentBudget
 from scripts.gates.verdicts import Verdicts
 from scripts.swarm.ledger_events import PullRequest, pull_request
+from scripts.swarm.store import SwarmError
 
 ME = Who(name="ci@323133-0001", swarm="demo", lane="ci", task="t1")
 URL = "https://github.com/o/r/pull/7"
@@ -56,15 +57,16 @@ def reviewed(tmp_path, *readers):
 
 
 class Ledger:
-    def __init__(self, pr_url=URL, branch="task"):
-        self.pr_url, self.branch = pr_url, branch
+    def __init__(self, pr_url=URL, branch="task", readers=()):
+        self.pr_url, self.branch, self.readers = pr_url, branch, list(readers)
 
     def tasks(self, slug):
         raise AssertionError(f"read every task of {slug!r} on a push")
 
     def task(self, slug, task_id):
         found = slug == "demo" and task_id == "t1"
-        return {"id": "t1", "pr_url": self.pr_url, "branch": self.branch} if found else None
+        row = {"id": "t1", "pr_url": self.pr_url, "branch": self.branch, "review_readers": self.readers}
+        return row if found else None
 
 
 def pull(state="OPEN", red=False, running=True, queued=False):
@@ -80,9 +82,11 @@ def pull(state="OPEN", red=False, running=True, queued=False):
     )
 
 
-def gate(found=None, pr_url=URL, target="claude", branch="task"):
+def gate(found=None, pr_url=URL, target="claude", branch="task", readers=()):
     return OnePush(
-        ledger=lambda: Ledger(pr_url, branch), github=lambda url: found if url == pr_url else None, target=target
+        ledger=lambda: Ledger(pr_url, branch, readers),
+        github=lambda url: found if url == pr_url else None,
+        target=target,
     )
 
 
@@ -314,6 +318,46 @@ def test_a_draft_open_passes_before_any_review(tree, tmp_path):
 
 def test_a_harness_without_sub_agents_is_not_asked_for_readers(tree, tmp_path):
     assert gate(target="codex").decide(bash("gh pr create --base dev", tree), ME, state(tmp_path)).allowed
+
+
+@pytest.mark.feature("review-state-on-ledger")
+@pytest.mark.parametrize("command", ["gh pr ready 7", "gh pr create --base dev"])
+def test_a_successor_opens_the_pull_request_its_predecessor_reviewed_on_another_hive(tree, tmp_path, command):
+    decision = gate(readers=["spec-reader", "standards-reader"]).decide(bash(command, tree), ME, state(tmp_path))
+    assert decision.allowed
+
+
+@pytest.mark.feature("review-state-on-ledger")
+def test_a_reader_neither_this_machine_nor_the_ledger_task_records_still_refuses_the_open(tree, tmp_path):
+    reviewed(tmp_path, "standards-reader")
+    decision = gate(readers=["standards-reader"]).decide(bash("gh pr ready 7", tree), ME, state(tmp_path))
+    assert decision.reason == open_refusal("demo", ["spec-reader"], "") + f". Checked worktree: {tree}"
+
+
+def test_this_machine_and_the_ledger_task_each_supply_one_reader(tree, tmp_path):
+    reviewed(tmp_path, "standards-reader")
+    assert gate(readers=["spec-reader"]).decide(bash("gh pr ready 7", tree), ME, state(tmp_path)).allowed
+
+
+class Unread(Ledger):
+    def task(self, slug, task_id):
+        raise AssertionError("read the ledger although this machine counted both readers")
+
+
+def test_both_readers_counted_on_this_machine_never_read_the_ledger(tree, tmp_path):
+    reviewed(tmp_path, "standards-reader", "spec-reader")
+    assert OnePush(ledger=Unread, target="claude").decide(bash("gh pr ready 7", tree), ME, state(tmp_path)).allowed
+
+
+@pytest.mark.parametrize("failure", [OSError("connection refused"), SwarmError("ledger demo: unreachable")])
+def test_an_unreadable_ledger_keeps_the_refusal_for_readers_missing_here(tree, tmp_path, failure):
+    class Down(Ledger):
+        def task(self, slug, task_id):
+            raise failure
+
+    decision = OnePush(ledger=Down, target="claude").decide(bash("gh pr ready 7", tree), ME, state(tmp_path))
+    missing = open_refusal("demo", ["standards-reader", "spec-reader"], "")
+    assert decision.reason == f"{missing}. Checked worktree: {tree}"
 
 
 def test_a_push_while_checks_run_and_none_is_red_is_refused(tree, tmp_path):

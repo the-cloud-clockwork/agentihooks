@@ -2,6 +2,7 @@ from dataclasses import replace
 from typing import Any
 
 import pytest
+from nats import errors as nats_errors
 
 from scripts.events import nats
 from scripts.events.bus import StateConflict
@@ -294,15 +295,133 @@ def test_a_scoped_member_reaches_the_hub_slot_service_only_through_its_own_swarm
         own = account_slots.Remote(account_slots.asker(client.for_swarm("rig"), "rig", "m1"), "m1", lambda: report)
         assert own.take("one", "claude") == "a"
         foreign = account_slots.Remote(account_slots.asker(client, "other", "m1", 500), "m1", lambda: report)
-        with pytest.raises(TimeoutError, match="^no responders for 'slots.other.m1'$"):
+        with pytest.raises(TimeoutError, match="^request to 'slots.other.m1' timed out after 500 ms$"):
             foreign.take("two", "claude")
         posing = account_slots.Remote(account_slots.asker(client.for_swarm("rig"), "rig", "m2", 500), "m2")
-        with pytest.raises(TimeoutError, match="^no responders for 'slots.rig.m2'$"):
+        with pytest.raises(TimeoutError, match="^request to 'slots.rig.m2' timed out after 500 ms$"):
             posing.release("one", "claude", "a")
         own.release("one", "claude", "a")
         assert own.take("two", "claude") == "a"
     finally:
         client.close()
+
+
+@pytest.mark.feature("hub-slot-requests-answered-concurrently")
+def test_a_slow_admission_does_not_delay_a_heartbeat_answer_on_the_same_hub(hub: Any, signer: Any) -> None:
+    import threading
+
+    from scripts.hive import account_slots
+    from scripts.hub import slots
+
+    entered, release = threading.Event(), threading.Event()
+
+    class SlowAdmission:
+        def admit(self, slug: str, request: dict[str, Any]) -> None:
+            entered.set()
+            release.wait(30)
+
+    admitter: Any = SlowAdmission()
+    slots.serve(hub, clock=lambda: 1000, admitter=admitter)
+    report = {"slots": [{"harness": "claude", "account": "a", "cap": 1}], "sessions": {"claude:a": 0}}
+    client = member(signer)
+    admitted: list[Any] = []
+    admit = account_slots.asker(client.for_swarm("rig"), "rig", "m1", 30_000)
+    beat = account_slots.Remote(account_slots.asker(client.for_swarm("rig"), "rig", "m1", 3_000), "m1")
+    admitting = threading.Thread(target=lambda: admitted.append(admit({"op": "admit", "hive": "m1", "task": "t"})))
+    admitting.start()
+    try:
+        assert entered.wait(10)
+        beat.heartbeat(report, {})
+        assert admitting.is_alive()
+    finally:
+        release.set()
+        admitting.join(30)
+        client.close()
+    assert admitted == [None]
+
+
+@pytest.mark.feature("hub-slot-serve-drops-abandoned-requests")
+def test_a_slot_take_the_hive_stopped_waiting_for_never_claims_the_slot(
+    hub: Any, signer: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Thirty three held admissions fill every hub serve thread, so a take sent after them waits in the hub queue
+    past the hive's wait; one freed thread then drains the queue in order, and the next execution's take finds the
+    slot free."""
+    import re
+    import threading
+    import time
+
+    from scripts.hive import account_slots
+    from scripts.hub import slots
+
+    monkeypatch.setattr(account_slots, "REQUEST_TIMEOUT_MS", 500)
+    gates = {f"held-{n}": threading.Event() for n in range(33)}
+    entered: list[str] = []
+
+    class HeldAdmission:
+        def admit(self, slug: str, request: dict[str, Any]) -> None:
+            entered.append(request["task"])
+            gates[request["task"]].wait(30)
+
+    admitter: Any = HeldAdmission()
+    slots.serve(hub, clock=lambda: 1000, admitter=admitter)
+    report = {"slots": [{"harness": "claude", "account": "a", "cap": 1}], "sessions": {"claude:a": 0}}
+    client = member(signer)
+    rig = client.for_swarm("rig")
+    try:
+        hold = account_slots.asker(rig, "rig", "m1", 20)
+        for task in gates:
+            with pytest.raises(TimeoutError):
+                hold({"op": "admit", "hive": "m1", "task": task})
+        lost = account_slots.Remote(account_slots.asker(rig, "rig", "m1", 500), "m1", lambda: report)
+        with pytest.raises(TimeoutError):
+            lost.take("lost", "claude")
+        time.sleep(0.2)
+        queued = gates.keys() - set(entered)
+        for task in (entered[0], *queued):
+            gates[task].set()
+        after = account_slots.Remote(account_slots.asker(rig, "rig", "m1", 5_000), "m1", lambda: report)
+        assert after.take("next", "claude") == "a"
+    finally:
+        for gate in gates.values():
+            gate.set()
+        client.close()
+    dropped = (
+        r"^bus: dropped a request on 'slots\.rig\.m1' after it waited \d+ ms in the serve queue, "
+        r"past its requester's 500 ms wait$"
+    )
+    assert re.search(dropped, capsys.readouterr().err, re.MULTILINE)
+
+
+@pytest.mark.feature("hub-slot-serve-drops-abandoned-requests")
+def test_a_bus_serves_eight_requests_at_once_and_closing_it_never_starts_the_queued_ones(hub: Any) -> None:
+    """Nine held requests leave one queued behind the bus's eight serve threads; closing the bus returns while all eight
+    are held and cancels the queued one, so freeing the threads afterwards starts nothing more."""
+    import threading
+    import time
+
+    gate = threading.Event()
+    entered: list[bytes] = []
+
+    def held(subject: str, data: bytes) -> bytes:
+        entered.append(data)
+        gate.wait(30)
+        return data
+
+    hub.serve("swarm.rig.held", "workers", held)
+    try:
+        for n in range(9):
+            with pytest.raises(TimeoutError):
+                hub.request("swarm.rig.held", str(n).encode(), 20)
+        time.sleep(0.1)
+        closing = threading.Thread(target=hub.close)
+        closing.start()
+        closing.join(5)
+        assert not closing.is_alive()
+    finally:
+        gate.set()
+    hub._serving.shutdown(wait=True)
+    assert sorted(entered) == [str(n).encode() for n in range(8)]
 
 
 def test_a_scoped_member_view_refuses_a_request_outside_its_swarm(hub, signer):
@@ -332,18 +451,27 @@ def test_nats_requests_wait_their_timeout_and_reach_one_replica_of_a_queue_group
     assert calls == ["swarm.rig.slow", "swarm.rig.slow"]
 
 
-def test_a_nats_request_passes_its_timeout_and_maps_a_nats_timeout():
+@pytest.mark.feature("bus-request-error-text")
+@pytest.mark.parametrize(
+    ("error", "text"),
+    [
+        (nats_errors.TimeoutError, "^request to 'swarm.rig.silent' timed out after 300 ms$"),
+        (nats_errors.NoRespondersError, "^no responders for 'swarm.rig.silent'$"),
+    ],
+    ids=["late answer", "missing responder"],
+)
+def test_a_nats_request_passes_its_timeout_and_tells_a_late_answer_from_a_missing_responder(
+    error: type[nats_errors.Error], text: str
+) -> None:
     import asyncio
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
 
-    from nats.errors import TimeoutError as NatsTimeout
-
     bus = object.__new__(nats.NatsBus)
-    silent = AsyncMock(side_effect=NatsTimeout)
+    silent = AsyncMock(side_effect=error)
     bus._loop = SimpleNamespace(run=asyncio.run)
     bus._nc = SimpleNamespace(request=silent, max_payload=1048576)
-    with pytest.raises(TimeoutError, match="^no responders for 'swarm.rig.silent'$"):
+    with pytest.raises(TimeoutError, match=text):
         bus.request("swarm.rig.silent", b"", 300)
     silent.assert_awaited_once_with("swarm.rig.silent", b"", timeout=0.3)
 

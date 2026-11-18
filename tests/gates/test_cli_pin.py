@@ -33,7 +33,7 @@ def outside_swarm(monkeypatch):
 def _routing_store():
     return SimpleNamespace(
         names=SimpleNamespace(swarm_slug=lambda slug: slug),
-        config=lambda slug: SimpleNamespace(api_url="", pending_api_url=""),
+        config=lambda slug: SimpleNamespace(api_url=""),
         redis=SimpleNamespace(hget=lambda *_: None),
         key=lambda slug, tail: f"{slug}:{tail}",
     )

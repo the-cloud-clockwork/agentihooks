@@ -96,34 +96,37 @@ def ledger_probe(monkeypatch, failure):
     return join_checks.ledger_checks({"slug": "sw", "agent": "engineer", "checks": {}})
 
 
-def transport_failure(kind):
+def transport_failure(kind: str) -> OSError:
     import io
     import urllib.error
 
     if kind == "unreachable":
         return urllib.error.URLError(ConnectionRefusedError(111, "Connection refused"))
-    body = b'{"error": "Missing or wrong ledger credential"}' if kind == "credential" else b'{"error": "write refused"}'
-    return urllib.error.HTTPError("http://ledger.example/sw", 403, "Forbidden", {}, io.BytesIO(body))
+    return urllib.error.HTTPError(
+        "http://ledger.example/sw", 403, "Forbidden", {}, io.BytesIO(b'{"error": "write refused"}')
+    )
 
 
 @pytest.mark.parametrize("probe", ["join", "ack"])
-def test_refused_unreachable_and_credential_faults_report_distinct_reasons(monkeypatch, probe):
+def test_refused_unreachable_and_credential_faults_report_distinct_reasons(
+    monkeypatch: pytest.MonkeyPatch, probe: str
+) -> None:
     from scripts.hive import join_checks
     from scripts.swarm import ledger_client
 
     ledger = ledger_client._ledger()
+    monkeypatch.setattr(ledger, "BASE", "http://ledger.example")
     name = {"join": "ledger_join", "ack": "ledger_write"}[probe]
     reported = {}
-    for kind in ("refused", "unreachable", "credential"):
+    for kind in ("refused", "unreachable"):
 
-        def request(slug, ops, service, kind=kind):
+        def request(slug, ops, timeout=None, kind=kind):
             if ops[0]["op"] == probe:
                 raise transport_failure(kind)
             return {"_meta": {"rev": 1}}
 
         monkeypatch.setattr(ledger, "request", request)
-        with ledger.ledger_route.scoped("sw", "http://ledger.example"):
-            checks = join_checks.ledger_checks({"slug": "sw", "agent": "engineer", "checks": {}})
+        checks = join_checks.ledger_checks({"slug": "sw", "agent": "engineer", "checks": {}})
         assert checks[name] is False
         assert set(checks["errors"]) == {name}
         reported[kind] = checks["errors"][name]
@@ -137,11 +140,6 @@ def test_refused_unreachable_and_credential_faults_report_distinct_reasons(monke
         "status": None,
         "message": "ledger sw: ledger server not answering on http://ledger.example: "
         "<urlopen error [Errno 111] Connection refused>",
-    }
-    assert reported["credential"] == {
-        "error": "Unauthenticated",
-        "status": None,
-        "message": "ledger sw: unauthenticated: the ledger server refused the credential",
     }
 
 

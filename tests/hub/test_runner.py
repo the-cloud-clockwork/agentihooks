@@ -1,6 +1,8 @@
 import hashlib
 import signal
 import threading
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -407,14 +409,34 @@ def test_a_single_pass_hub_starts_no_lease_keeper(monkeypatch, hive):
     assert runner.main(["run", "--once"]) == 0
 
 
+@pytest.mark.feature("hub-serving-readiness")
+@pytest.mark.parametrize("stale", [True, False])
+def test_the_hub_marks_itself_serving_only_after_its_slots_and_exits_responders_subscribe(
+    monkeypatch: pytest.MonkeyPatch, hive: Any, tmp_path: Path, stale: bool
+) -> None:
+    mark = tmp_path / "hub.serving"
+    if stale:
+        mark.touch()
+    seen = []
+    monkeypatch.setenv("AGENTIHOOKS_HUB_SERVING_FILE", str(mark))
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")
+    monkeypatch.delenv("LEDGER_URL", raising=False)
+    monkeypatch.setattr(runner.slots, "serve", lambda bus, admitter: seen.append(("slots", mark.exists())))
+    monkeypatch.setattr(runner.exits, "serve", lambda bus: seen.append(("exits", mark.exists())))
+    monkeypatch.setattr(runner.HubRunner, "run_once", lambda self: {"page": ["handled"]})
+    assert runner.main(["run", "--once"]) == 0
+    assert seen == [("slots", False), ("exits", False)]
+    assert mark.is_file()
+
+
 def test_the_hub_command_runs_the_registry_once_on_the_configured_bus(monkeypatch, capsys):
     handler = Recorder()
     declared = registry.Registry([registry.Reactor("lifecycle", "swarm.*.task.>", handler, singleton=True)])
     opened = memory.open_bus(BusConfig())
     opened.events.publish(SUBJECT, event("e1", 1))
 
-    def configured(bus):
-        assert bus is opened
+    def configured(bus: Any, source: Any = None) -> registry.Registry:
+        assert (bus, source) == (opened, None)
         return declared
 
     monkeypatch.setattr(registry, "configured", configured)
@@ -461,7 +483,7 @@ def test_sigterm_ends_the_hub_with_143_and_releases_its_leases(monkeypatch):
     opened = memory.open_bus(BusConfig())
     opened.events.publish(SUBJECT, event("e1", 1))
 
-    def configured(bus):
+    def configured(bus: Any, source: Any = None) -> registry.Registry:
         assert bus is opened
         return declared
 
@@ -531,6 +553,7 @@ def test_a_hub_with_a_remote_ledger_writes_as_its_own_service_and_renews_that_cr
     renewed = []
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "distributed")
     monkeypatch.setenv("LEDGER_URL", "https://ledger.example")
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_DATABASE_URL", "postgresql://ledger@shared/ledger")
     monkeypatch.setattr(runner, "_renewal", lambda redis, credential: renewed.append((redis, credential)))
     monkeypatch.setattr(runner.HubRunner, "run_once", stop_after(iter([{"page": ["handled"]}])))
     with pytest.raises(Stop):
@@ -694,3 +717,36 @@ def test_scoped_delivery_provisions_the_event_view_before_the_handler(monkeypatc
     finally:
         hub.stop()
         bus.close()
+
+
+@pytest.mark.feature("hub-shared-ledger-copy")
+def test_one_hub_process_hands_one_ledger_copy_to_admission_readiness_and_preemption(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    opened = memory.open_bus(BusConfig())
+    served: list[Any] = []
+    built: list[registry.Registry] = []
+    configured = registry.configured
+
+    def serve(bus: Any, admitter: Any = None) -> None:
+        served.append(admitter)
+
+    def configure(bus: Any, **wiring: Any) -> registry.Registry:
+        built.append(configured(bus, **wiring))
+        return built[-1]
+
+    monkeypatch.setenv("AGENTIHOOKS_BUS", "nats")
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")
+    monkeypatch.delenv("LEDGER_URL", raising=False)
+    monkeypatch.setattr(runner, "open_bus", lambda config: opened)
+    monkeypatch.setattr(runner.buckets, "provision", lambda bus: None)
+    monkeypatch.setattr(runner.exits, "serve", lambda bus: None)
+    monkeypatch.setattr(runner.slots, "serve", serve)
+    monkeypatch.setattr(registry, "configured", configure)
+    monkeypatch.setattr(runner.HubRunner, "run_once", lambda self: {})
+    assert runner.main(["run", "--once"]) == 0
+    holders = {reactor.name: getattr(reactor.poll, "__self__", None) for reactor in built[0]}
+    [admitter] = served
+    assert admitter is not None
+    assert getattr(holders["readiness"], "_source") is admitter.source
+    assert getattr(holders["preemption"], "_source") is admitter.source

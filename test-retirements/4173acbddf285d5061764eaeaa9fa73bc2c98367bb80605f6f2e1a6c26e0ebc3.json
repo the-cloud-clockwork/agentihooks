@@ -1,0 +1,6 @@
+{
+  "tests/swarm_ledger/test_remote_ledger_client.py::test_a_remote_client_never_starts_a_local_ledger_server": {
+    "reader": "standards-reader",
+    "reason": "Ledger server autostart is deleted with the HTTP write path; ledger.call and ledger.request never start a server."
+  }
+}

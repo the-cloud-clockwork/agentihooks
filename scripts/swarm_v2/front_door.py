@@ -6,16 +6,23 @@ from agents are refused.
 """
 
 import re
+from collections.abc import Callable
+from typing import Any, Protocol
 
 from scripts.gates import log
 from scripts.gates.base import Who
 from scripts.inbox.seats import SeatRegistry, seat_address
-from scripts.swarm.store import MASTER
+from scripts.swarm.store import MASTER, AgentRecord
+from scripts.swarm_v2 import masters
 
 NAME = "front-door"
 CHAT = "chat"
 CHAT_WRITES = ("add", "edit", "delete")
 NEEDS_OPERATOR = re.compile(r"^followups/[^/]+/needs_operator$")
+LOGIN_ROUTES = ("master-login", "interactive")
+FALLBACK = "fallback"
+CLAUDE_AI_LOGIN = "claude ai login"
+TOKEN_FALLBACK = "token fallback"
 
 
 def seat(slug: str) -> str:
@@ -25,6 +32,51 @@ def seat(slug: str) -> str:
 def holds(slug: str, held: str) -> bool:
     """A master with no seat predates seats and holds the front door."""
     return held in ("", seat(slug))
+
+
+def landed(agent: AgentRecord) -> str:
+    """The route a master landed on: the claude ai login, the token it fell back to when that login was wanted, or
+    nothing for a route no login launch wrote."""
+    login = agent.route_kind in LOGIN_ROUTES
+    if login and agent.placement != FALLBACK:
+        return CLAUDE_AI_LOGIN
+    wanted = login or agent.desired_route_kind == "interactive"
+    token = agent.placement == FALLBACK or agent.route_kind == "subscription"
+    return TOKEN_FALLBACK if wanted and token else ""
+
+
+def master_route(slug: str, agent: AgentRecord, held: list[str]) -> str:
+    """The route a working Claude master landed on when it holds the seat the tick lead rule names over the held master
+    seats; empty for every other agent."""
+    door = agent.lane == MASTER and agent.state == "working" and agent.harness == "claude"
+    lead = masters.lead_of(slug, held)
+    return landed(agent) if door and lead in (agent.seat or seat(slug), agent.seat or agent.name) else ""
+
+
+class Swarms(Protocol):
+    """The swarm store reads that list every swarm's agents and the Redis its master seats live in."""
+
+    redis: Any
+
+    def slugs(self) -> list[str]: ...
+
+    def agents(self, slug: str) -> list[AgentRecord]: ...
+
+
+def master_routes(store: Swarms, live: Callable[[list[AgentRecord]], list[AgentRecord]]) -> dict[str, str]:
+    """The route of every swarm's live front door master, keyed by the account it runs on; the seats are held over
+    every record, as the tick holds them."""
+    doors: list[tuple[AgentRecord, str]] = []
+    for slug in store.slugs():
+        held = held_seats(store, slug)
+        doors += [(agent, found) for agent in store.agents(slug) if (found := master_route(slug, agent, held))]
+    alive = {agent.name for agent in live([agent for agent, _ in doors])}
+    return {agent.account: found for agent, found in doors if agent.name in alive}
+
+
+def held_seats(store: Swarms, slug: str) -> list[str]:
+    """The master seats the tick holds for a swarm, lead first, read over every agent record it keeps."""
+    return list(masters.held(store.redis, slug, store.agents(slug)))  # pyright: ignore[reportUnknownMemberType]
 
 
 def chat_write(op: dict) -> bool:

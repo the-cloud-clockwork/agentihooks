@@ -1,0 +1,13 @@
+rules:
+  - id: compose-stack-agent-bus
+    languages: [generic]
+    severity: ERROR
+    message: >-
+      The Compose swarm stack reads a bus setting from the shell that runs compose, where an agent's own bus settings
+      reach the stack without their credential. Interpolate the stack-scoped SWARM_BUS and SWARM_BUS_URL instead.
+    paths:
+      include:
+        - /compose.yaml
+        - /scripts/swarm/stack/**/*.yaml
+        - '**/compose-stack-agent-bus.test.yaml'
+    pattern-regex: '\$\{AGENTIHOOKS_BUS\w*'

@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -85,3 +86,23 @@ def test_each_retried_shared_mutation_stats_download_gives_up_after_one_minute()
     ]
     assert len(attempts) == 6
     assert {step.get("timeout-minutes") for step in attempts} == {1}
+
+
+def _download_steps(node: object) -> list[str]:
+    if isinstance(node, dict):
+        uses = node.get("uses")
+        found = [uses] if isinstance(uses, str) and uses.startswith("actions/download-artifact@") else []
+        return found + [ref for value in node.values() for ref in _download_steps(value)]
+    if isinstance(node, list):
+        return [ref for value in node for ref in _download_steps(value)]
+    return []
+
+
+@pytest.mark.feature("artifact-downloads-retry-a-stalled-blob")
+def test_every_download_step_uses_the_release_that_retries_a_stalled_blob() -> None:
+    github = ROOT / ".github"
+    files = [*github.rglob("*.yml"), *github.rglob("*.yaml"), ROOT / "scripts/ci_gate_summary_steps.yml"]
+    refs = {str(path.relative_to(ROOT)): _download_steps(yaml.safe_load(path.read_text())) for path in files}
+    written = sum(len(re.findall(r"uses:\s*['\"]?actions/download-artifact@", path.read_text())) for path in files)
+    assert written and sum(len(found) for found in refs.values()) >= written
+    assert {path: found for path, found in refs.items() if set(found) - {"actions/download-artifact@v8.0.2"}} == {}

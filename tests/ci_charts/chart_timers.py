@@ -7,6 +7,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 TIMED_KINDS = {"CronJob"}
+REQUIRED_VALUES = Path("ci") / "required-values.yaml"
 
 
 def charts(root: Path) -> list[Path]:
@@ -22,7 +23,7 @@ def tree(argv: list[str] | None = None) -> Path:
 
 
 def values_files(chart: Path) -> list[Path | None]:
-    skipped = {chart / name for name in ("Chart.yaml", "Chart.lock", "values.yaml")}
+    skipped = {chart / name for name in ("Chart.yaml", "Chart.lock", "values.yaml", REQUIRED_VALUES)}
     found = [p for pattern in ("*.yaml", "*.yml") for p in chart.rglob(pattern)]
     return [None] + sorted(
         p for p in found if p not in skipped and not {"templates", "charts"} & set(p.relative_to(chart).parts)
@@ -30,7 +31,11 @@ def values_files(chart: Path) -> list[Path | None]:
 
 
 def render(chart: Path, values: Path | None) -> subprocess.CompletedProcess:
-    command = ["helm", "template", "timer-check", str(chart)] + (["-f", str(values)] if values else [])
+    """Render chart over its ci/required-values.yaml when it ships one, then over values when given."""
+    required = chart / REQUIRED_VALUES
+    command = ["helm", "template", "timer-check", str(chart)]
+    command += ["-f", str(required)] if required.is_file() else []
+    command += ["-f", str(values)] if values else []
     return subprocess.run(command, capture_output=True, text=True)
 
 
