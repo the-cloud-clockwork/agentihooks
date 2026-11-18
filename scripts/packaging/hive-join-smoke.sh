@@ -21,7 +21,7 @@ bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/redis:7-alpin
 if [[ -n "${SWARM_SMOKE_IMAGE:-}" ]]; then
   docker tag "$SWARM_SMOKE_IMAGE" "$image"
 else
-  bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12-slim-bookworm
+  bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12.12-slim-bookworm
   docker build --progress=plain -t "$image" .
 fi
 docker network create "$run" >/dev/null

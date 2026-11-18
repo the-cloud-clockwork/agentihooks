@@ -667,6 +667,14 @@ def test_compose_smoke_jobs_pull_every_dockerfile_base_before_building(job, scri
         assert "continue-on-error" not in steps[pull]
 
 
+def test_hive_join_job_pulls_every_dockerfile_base_before_building() -> None:
+    steps = yaml.safe_load((ROOT / ".github/workflows/hive-join.yml").read_text())["jobs"]["smoke"]["steps"]
+    runs = [step.get("run", "") for step in steps]
+    build = next(i for i, run in enumerate(runs) if "docker build " in run)
+    for base in dockerfile_bases():
+        assert runs.index(f"bash scripts/packaging/pull-runtime-image.sh {base}") < build
+
+
 def test_hive_launch_pulls_the_worker_base_and_never_retries_the_launch(tmp_path):
     script = (ROOT / "scripts/packaging/hive-launch-smoke.sh").read_text()
     for base in dockerfile_bases():

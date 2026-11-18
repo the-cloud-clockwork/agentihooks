@@ -242,6 +242,10 @@ class Queue:
         """Return every leased job, soonest expiry first."""
         return list(self.client.zrange(_key("leased"), 0, -1))
 
+    def holds(self, worker: str) -> bool:
+        """Whether the worker holds a live lease on any job."""
+        return any(self.client.hget(_job(job), "worker") == worker for job in self.leased())
+
     def offer(self, worker: str, free_slots: int, at_ms: int) -> None:
         """Record the free slots a worker offered on its latest lease poll and when."""
         self.client.hset(_key("offers"), worker, f"{free_slots} {at_ms}")
