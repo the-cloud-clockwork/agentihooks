@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from hooks.context import account_sessions, broadcast, profile_chain
 from scripts import claude_quota_balancer as balancer
 from scripts import codex_router, github_app_cli, master_claude_login, session_bands, updater
+from scripts.ci_lab.remote import checkout
 from scripts.hive import bundle_refresh, dispatch, quota_refresh, registry
 from scripts.routing import claude_api, codex_api
 from scripts.scheduler.process_timer import wait as scheduled_wait
@@ -309,6 +310,7 @@ def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
     lost = (ConnectionError, TimeoutError)
     loaded = revision(ROOT)
     fill_operator_env()
+    carry_lab(os.environ)
     quota_refresh.refresh(os.environ)
     worker, attempted_at = None, time.time()
     renewed = bundled = time.time()
@@ -572,6 +574,11 @@ def repositories() -> list[str]:
 def local_checkout(repo: str) -> str:
     matches = sorted(str(path) for path in _checkouts() if origin(path) == repo)
     return matches[0] if matches else repo
+
+
+def carry_lab(environ: Mapping[str, str]) -> list[Path]:
+    """Give each hive checkout whose origin the lab remote serves the lab remote; return the checkouts that carry it."""
+    return [path for path in _checkouts() if checkout.carry(checkout.at(path), environ)]
 
 
 def _checkouts() -> list[Path]:

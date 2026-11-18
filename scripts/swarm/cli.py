@@ -2029,7 +2029,8 @@ def publication_command(store: RedisStore, args: argparse.Namespace) -> dict:
         task = ledger.task(args.slug, agent.task) or {}
         if args.command == "prepare":
             return publish.prepare(args.slug, agent, repo, ledger)
-        return publish.publish(args.slug, agent, repo, ledger, args.message, args.files)
+        lab = publish.LabRoute(agent.task, args.direct) if args.via == publish.LAB else None
+        return publish.publish(args.slug, agent, repo, ledger, args.message, args.files, lab)
     except SwarmError as exc:
         branch = exc.branch if isinstance(exc, publish.PublicationRefusal) else publish.refusal_branch(Path(repo), task)
         syslog.openlog("agentihooks-swarm")
@@ -2829,6 +2830,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("prepare")
     publish = sub.add_parser("publish")
     publish.add_argument("--message", "-m", required=True)
+    publish.add_argument("--via", choices=["lab"], default="", help="grade HEAD on the lab remote before origin")
+    publish.add_argument("--direct", action="store_true", help="with --via lab, push origin without the lab grade")
     publish.add_argument("files", nargs="*")
     sub.add_parser("branch")
     sub.add_parser("review")

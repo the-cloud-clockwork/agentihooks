@@ -1,14 +1,19 @@
 import io
 import json
+import os
 import re
 import shlex
 import subprocess
 import sys
+import time
+import urllib.request
 from contextlib import redirect_stderr
+from dataclasses import dataclass
 from pathlib import Path
 
 from hooks.context import blocker_window
 from scripts import ci_prepush
+from scripts.ci_lab.remote import checkout
 from scripts.gates import entry as gate_entry
 from scripts.swarm import continuation, git_https, naming, publish_queue, stack
 from scripts.swarm.ledger_client import LedgerClient
@@ -20,6 +25,60 @@ class PublicationRefusal(SwarmError):
         super().__init__(reason)
         self.repository = str(repository)
         self.branch = branch
+
+
+LAB = "lab"
+GRADE_REFS = "refs/grade/"
+GRADE_URL = re.compile(r"lab grade: (\S+)")
+GREEN = "success"
+LAB_WAIT_S = 1800
+LAB_POLL_S = 15
+LAB_READ_TIMEOUT_S = 10
+
+
+@dataclass(frozen=True)
+class LabRoute:
+    """A publish through the lab: the task whose grade ref it pushes, and whether origin follows without the grade."""
+
+    task: str
+    direct: bool
+
+
+def read_grade(url: str) -> dict:
+    """Return the lab's answer for one head's grades, as GET /grades/<sha> gives it."""
+    with urllib.request.urlopen(url, timeout=LAB_READ_TIMEOUT_S) as answer:
+        return json.load(answer)
+
+
+def lab_conclusion(url: str) -> str:
+    """Wait for the newest grade at url to conclude and return its conclusion; refuse once LAB_WAIT_S has passed."""
+    deadline = time.monotonic() + LAB_WAIT_S
+    while not (grades := read_grade(url)["grades"]) or not grades[-1]["conclusion"]:
+        if time.monotonic() >= deadline:
+            raise SwarmError(f"the lab grade {url} has not concluded after {LAB_WAIT_S} s; origin was not pushed")
+        time.sleep(LAB_POLL_S)
+    return grades[-1]["conclusion"]
+
+
+def lab_push(root: Path, task: str, branch: str) -> str:
+    """Push HEAD to the task's grade ref on the lab remote with the branch the relay writes, show the lab's answer and
+    return the grade url it names."""
+    if not checkout.carry(checkout.at(root), os.environ):
+        raise SwarmError(f"publish --via {LAB} needs {checkout.URL_ENV} naming the lab remote of this repository")
+    done = git_https.run(["git", "push", "-o", f"branch={branch}", LAB, f"HEAD:{GRADE_REFS}{task}"], cwd=root)
+    print(done.stderr, end="", file=sys.stderr)
+    found = GRADE_URL.search(done.stderr)
+    if done.returncode or not found:
+        raise SwarmError(f"the lab push named no grade url; origin was not pushed: {done.stderr.strip()}")
+    return found[1]
+
+
+def through_lab(root: Path, route: LabRoute, fields: dict[str, str]) -> None:
+    """Grade HEAD on the lab before origin: push it there and, unless the route is direct, wait for a green grade."""
+    url = fields["lab_grade"] = lab_push(root, route.task, fields["branch"])
+    verdict = GREEN if route.direct else lab_conclusion(url)
+    if verdict != GREEN:
+        raise SwarmError(f"the lab grade {url} concluded {verdict}; origin was not pushed")
 
 
 def execute(argv: list[str], root: Path) -> str:
@@ -410,7 +469,9 @@ def remote_head(root: Path, branch: str) -> str:
     return listed.split()[0] if listed else ""
 
 
-def grade_and_push(slug: str, root: Path, primary: Path, fields: dict[str, str], head: str) -> None:
+def grade_and_push(
+    slug: str, root: Path, primary: Path, fields: dict[str, str], head: str, route: LabRoute | None = None
+) -> None:
     held = blocker_window.held_push(str(root), fields["branch"], slug)
     if held:
         raise SwarmError(held)
@@ -424,12 +485,22 @@ def grade_and_push(slug: str, root: Path, primary: Path, fields: dict[str, str],
         execute([python, "-I", str(Path(__file__).with_name("publish_gate.py"))], root)
     if not ci_prepush.passed(root) or git(root, "rev-parse", "HEAD") != head:
         raise SwarmError("the committed HEAD has no passing prepush evidence")
+    if route is not None:
+        through_lab(root, route, fields)
     ref = f"refs/heads/{fields['branch']}"
     publish_queue.require_unqueued(git(root, "remote", "get-url", "--push", "origin"), fields["branch"])
     git(root, "push", "-u", "origin", f"HEAD:{ref}")
 
 
-def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, message: str, files: list[str]) -> dict:
+def publish(
+    slug: str,
+    agent: AgentRecord,
+    repo: str,
+    ledger: LedgerClient,
+    message: str,
+    files: list[str],
+    lab: LabRoute | None = None,
+) -> dict:
     task = task_row(slug, agent, ledger)
     primary, scoped, fields = Path(repo), task, {}
     retry = ""
@@ -451,7 +522,7 @@ def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, mess
             git(root, "commit", "-m", message)
         head = git(root, "rev-parse", "HEAD")
         if changed or remote_head(root, fields["branch"]) != head:
-            grade_and_push(slug, root, primary, fields, head)
+            grade_and_push(slug, root, primary, fields, head, lab)
         else:
             fields["unchanged"] = (
                 "no changes in the listed files and the remote branch already points at this head; nothing pushed"

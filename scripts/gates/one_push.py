@@ -7,6 +7,7 @@ import re
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
+from scripts.ci_lab.remote import checkout
 from scripts.gates.base import Decision, Who
 from scripts.gates.budget import Budget
 from scripts.gates.identity import program_index, simple_commands
@@ -103,8 +104,11 @@ def repo_of(path, args):
     return f"{found.group(1)}/{found.group(2)}".lower() if found else ""
 
 
-def destinations(path, args):
-    """The branches a push writes: each refspec's destination, the current branch for HEAD or no refspec."""
+def destinations(path: Path, args: list[str]) -> set[str]:
+    """The branches a push writes: each refspec's destination, the current branch for HEAD or no refspec; for a push
+    to the lab, the branches its push options hand the relay to write on green."""
+    if positionals(args)[:1] == [checkout.REMOTE]:
+        return set(checkout.relayed(args))
     current = git(path, "branch", "--show-current").stdout.strip()
     specs = positionals(args)[1:]
     ends = [spec.lstrip("+").rpartition(":")[2].removeprefix("refs/heads/") for spec in specs] or [""]
@@ -202,7 +206,8 @@ class OnePush:
         repo = repo_of(where, args)
         if repo and repo != found.group(1).lower():
             return ""
-        if task.get("branch") and task["branch"] not in destinations(where, args):
+        targets = destinations(where, args)
+        if not targets or (task.get("branch") and task["branch"] not in targets):
             return ""
         pull = self.github()(task["pr_url"])
         if pull is None or finished(pull):

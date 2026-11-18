@@ -14,6 +14,7 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
+from scripts.ci_lab.remote import checkout
 from scripts.swarm import naming
 from scripts.swarm_v2.filesystem import SEGMENT, Execution
 
@@ -202,6 +203,7 @@ def _mirror(execution: Execution, request: Request, project: str, reuse: bool) -
     else:
         _clone(request.origin, mirror, project)
     _fetch(mirror, project)
+    checkout.carry(checkout.at(mirror), os.environ)
     return mirror
 
 

@@ -140,6 +140,23 @@ origin_repo() {
   echo "${url/://}"
 }
 
+repo_name() {
+  local url="${1%/}"
+  url="${url##*[/:]}"; url="${url%.git}"
+  echo "${url,,}"
+}
+
+lab_remote() {
+  local url="${AGENTIHOOKS_LAB_REMOTE:-}" origin verb=add
+  [[ -n "${url}" ]] || return 0
+  origin="$(git -C "${REPO}" config --get remote.origin.url)" || return 0
+  [[ -n "$(repo_name "${url}")" && "$(repo_name "${url}")" == "$(repo_name "${origin}")" ]] || return 0
+  git -C "${REPO}" config --get remote.lab.url >/dev/null && verb=set-url
+  git -C "${REPO}" remote "${verb}" lab "${url}"
+  git -C "${REPO}" config "credential.${url}.helper" \
+    '!f() { if test "$1" = get; then printf "username=lab\npassword=%s\n" "$AGENTIHOOKS_LAB_REMOTE_TOKEN"; fi; }; f'
+}
+
 list_repo() {
   local repo="$1"
   git -C "${repo}" fetch origin "${BASE}" --quiet 2>/dev/null || true
@@ -171,6 +188,7 @@ case "${cmd}" in
     else
       git -C "${REPO}" worktree add --no-track -b "${NAME}" "${DEST}" "${FROM_REF}" >&2
     fi
+    lab_remote || echo "wt: the lab remote was not set in ${REPO}" >&2
     lease "${DEST}" worktree
     echo "${DEST}"
     ;;
@@ -190,6 +208,7 @@ case "${cmd}" in
       rmdir "${DEST}"
       die "cannot create a worktree at ${FROM_REF}"
     fi
+    lab_remote || echo "wt: the lab remote was not set in ${REPO}" >&2
     lease "${DEST}" ephemeral
     echo "${DEST}"
     ;;
