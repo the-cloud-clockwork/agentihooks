@@ -334,6 +334,7 @@ def test_root_keeps_a_slot_only_for_a_workstation_task_it_can_place(
 
     admitted = rig.admitter.admit(SLUG, ask("plain", ROOT))
 
+    assert admitted is not None
     assert ("held" in admitted) is held
     assert (rig.store.claimant(SLUG, "plain") is None) is held
 
