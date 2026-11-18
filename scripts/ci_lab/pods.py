@@ -15,7 +15,9 @@ from scripts.swarm_v2.kubernetes.client import ACCOUNT, KubeHttp
 
 __all__ = [
     "ANNOTATION",
+    "AUTHORIZATION",
     "BUSY",
+    "CONTENT_TYPE",
     "MERGE_PATCH",
     "SERVICE_HOST",
     "TIMEOUT_S",
@@ -28,6 +30,8 @@ __all__ = [
 ANNOTATION = "controller.kubernetes.io/pod-deletion-cost"
 BUSY = "1000"
 MERGE_PATCH = "application/merge-patch+json"
+CONTENT_TYPE = "Content-Type"
+AUTHORIZATION = "Authorization"
 SERVICE_HOST = "KUBERNETES_SERVICE_HOST"
 TIMEOUT_S = 5
 Opener = Callable[..., Any]
@@ -55,9 +59,9 @@ class KubePods:
         body = {"metadata": {"annotations": {ANNOTATION: BUSY if busy else None}}}
         url = f"{self.server}/api/v1/namespaces/{self.namespace}/pods/{quote_plus(pod)}"
         request = urllib.request.Request(url, data=json.dumps(body).encode(), method="PATCH")
-        request.add_header("Content-Type", MERGE_PATCH)
+        request.add_header(CONTENT_TYPE, MERGE_PATCH)
         try:
-            request.add_header("Authorization", f"Bearer {self.token.read_text().strip()}")
+            request.add_header(AUTHORIZATION, f"Bearer {self.token.read_text().strip()}")
             with self.opener(request, timeout=TIMEOUT_S, context=self.context):
                 return True
         except (OSError, http.client.HTTPException):
