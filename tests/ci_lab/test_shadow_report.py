@@ -268,7 +268,8 @@ def test_the_report_command_names_its_repository_and_refuses_an_empty_window(
         "&per_page=100&page=1"
     ]
     assert capsys.readouterr().out.endswith(
-        "heads 0 of 50\nlab verdict present 0 of at least 48\nmismatches 0 of at most 0\nlab verdict first 0 of at least 45\nrule fails\n"
+        "heads 0 of 50\nlab verdict present 0 of at least 48\nmismatches 0 of at most 0\n"
+        "lab verdict first 0 of at least 45\nrule fails\n"
     )
     with pytest.raises(SystemExit) as refused:
         shadow_report.main(["--gate", "tests", "--heads", "0"], {}, fetch)

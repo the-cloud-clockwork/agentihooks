@@ -48,7 +48,9 @@ and takes each distinct head once. For each head it reads every check run on the
 A head leaves the window, and the next older head takes its place, when any Actions job of the
 gate was cancelled, is still running, or none of them graded. A unit job that the workflow reran
 after a lost runner (`unit (3.12, 1)` beside `unit rerun (3.12, 1)`) counts only by its rerun, so a
-lost runner retry is never a mismatch.
+lost runner retry is never a mismatch. The Tests workflow creates `unit rerun` jobs only on merge
+group runs, and only for the shards its `unit-lost` job names through `scripts.ci_unit_rerun` as
+having lost their runner, so a rerun never hides a shard that failed on a live runner.
 
 ## The acceptance rule
 
@@ -60,6 +62,10 @@ Over the window of the newest `--heads` heads that hold an Actions verdict:
 | Mismatches | zero heads where both verdicts exist and disagree |
 | Lab verdict present | at least 48 of every 50 heads |
 | Lab verdict first | at least 45 of every 50 heads have a lab verdict that completed before the Actions verdict |
+
+The plan words the window as heads "with both verdicts"; the report reads it as heads with an
+Actions verdict, because a window of heads that all carry a lab verdict would make the presence
+count meaningless. A head without a lab verdict stays in the window and counts against presence.
 
 For a window other than 50 the two thresholds scale and round up: 10 heads need 10 present and 9
 first. The rule counts heads; it never sets a time limit. A lab verdict that completes at the same
