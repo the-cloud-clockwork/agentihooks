@@ -94,6 +94,7 @@ def test_inputs(
     records: dict[str, tuple[str, set[str], list[ast.AST]]],
     resources: dict[str, set[str]],
     dynamic_imports: bool = True,
+    discovered: dict[str, set[str]] | None = None,
 ) -> dict[str, str]:
     dynamic_modules = modules.values() if dynamic_imports else ()
     starts = [path] if isinstance(path, str) else path
@@ -115,6 +116,8 @@ def test_inputs(
                 text = content.decode()
                 nodes = list(ast.walk(ast.parse(text)))
                 names = set(imported_names(text, Path(current).parent.parts))
+                if discovered is not None:
+                    discovered[current] = discovery_inputs(nodes, names, resources)
                 loaders = {name: name for name in DYNAMIC_IMPORTS} | {
                     alias.asname or alias.name: alias.name
                     for node in nodes
@@ -206,7 +209,7 @@ class StatsInputs:
     changes: dict
     records: dict = field(default_factory=lambda: {True: {}, False: {}})
     traced: dict = field(default_factory=dict)
-    discovered: dict = field(default_factory=dict)
+    discovered: dict[str, set[str]] = field(default_factory=dict)
 
     def for_test(self, path: str, covered: list[str] | None, fresh: list[dict] | None = None) -> dict:
         measured = covered is not None
@@ -214,7 +217,7 @@ class StatsInputs:
         group = (name, measured)
         if group not in self.traced:
             self.traced[group] = test_inputs(
-                self.root, name, self.modules, self.records[measured], self.resources, not measured
+                self.root, name, self.modules, self.records[measured], self.resources, not measured, self.discovered
             )
         inputs = dict(self.traced[group])
         if covered == [] and fresh is not None and any(self.records[measured][name][2] for name in inputs):
@@ -224,7 +227,11 @@ class StatsInputs:
             )
             inputs.update({name: value[0] for name, value in loaded.items()})
         if covered:
-            inputs.update(test_inputs(self.root, covered, self.modules, self.records[measured], self.resources, False))
+            inputs.update(
+                test_inputs(
+                    self.root, covered, self.modules, self.records[measured], self.resources, False, self.discovered
+                )
+            )
         if not any(not name.startswith("tests/") for name in inputs) and (
             changed := sorted(self.changes.keys() & self.resources)
         ):
