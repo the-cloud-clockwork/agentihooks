@@ -1011,6 +1011,18 @@
       ]
     },
     {
+      "id": "merge-pass-released-green-hold-reopens",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-released-pr-claim-reopen",
+      "behaviour": "A released task whose pull request reads green and unqueued for twenty minutes, outage time left out, while the merge pass cannot queue it reopens for the next engineer under the fix wait with its handoff, and its ready record is removed; a pull request that runs checks again or queues restarts the twenty minutes.",
+      "seam": "ready merge pass advancing a released record whose checks wait never resolves or whose queue call keeps holding",
+      "tests": [
+        "tests/swarm/test_ready.py::test_a_released_pull_request_the_merge_pass_cannot_queue_reopens_after_twenty_green_minutes",
+        "tests/swarm/test_ready.py::test_a_released_pull_request_that_stops_reading_green_and_unqueued_restarts_its_hold",
+        "tests/swarm/test_ready.py::test_outage_time_never_counts_toward_a_released_pull_request_green_hold"
+      ]
+    },
+    {
       "id": "hive-workstation-release",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2154",
@@ -8044,6 +8056,17 @@
         "tests/ci_lab/test_scheduler.py::test_a_merge_group_head_refuses_an_entry_limit_the_delivery_schema_refuses",
         "tests/ci_lab/test_scheduler.py::test_a_head_whose_grader_delivery_breaks_its_schema_is_dropped_with_its_reason",
         "tests/ci_lab/test_scheduler.py::test_stored_manifests_read_the_packed_manifest_of_the_nearest_stored_ancestor"
+      ]
+    },
+    {
+      "id": "lab-reusable-workflow-gates",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-expand-reusable-workflows",
+      "behaviour": "The CI lab scheduler's mirror expander reads every workflow file directly in the grader revision's workflow folder from the git mirror, and the worker's static executor reads them from the grader tree, and both pass them to static gate discovery, so a static job that calls a reusable workflow, the Tests workflow's semgrep job, expands into one static unit per gate step and runs on the worker instead of discovery refusing the head as cannot expand.",
+      "seam": "scripts.ci_lab.scheduler.MirrorExpander.expand over a git origin fixture holding the repository's real workflows and input key registry, and scripts.ci_lab.executors.gate over the repository tree",
+      "tests": [
+        "tests/ci_lab/test_scheduler.py::test_the_mirror_expander_expands_the_real_tests_workflow_with_its_reusable_workflows",
+        "tests/ci_lab/test_executors.py::test_gate_returns_a_gate_of_a_reusable_workflow_the_real_tests_workflow_calls"
       ]
     },
     {

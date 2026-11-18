@@ -28,7 +28,7 @@ from pathlib import Path
 from types import FrameType
 from typing import Any
 
-from scripts import ci_cpu_quota
+from scripts import ci_cpu_quota, ci_wiring
 from scripts.ci_lab import contract, run_mutation, run_static, run_tests, venvs, worker
 from scripts.ci_lab.outcomes import FAILED, PASSED
 from scripts.ci_lab.sandbox import PortAllocator, Sandbox
@@ -170,7 +170,8 @@ def _report(pod: Pod, record: Mapping[str, Any]) -> Path:
 def gate(grader_tree: Path, name: str) -> StaticGate:
     """Return the gate named name that the grader tree's workflow runs, as the scheduler discovered it."""
     registry = json.loads((grader_tree / REGISTRY).read_text())
-    found = {item.name: item for item in discover((grader_tree / WORKFLOW).read_text(), registry)}
+    workflow = (grader_tree / WORKFLOW).read_text()
+    found = {item.name: item for item in discover(workflow, registry, ci_wiring.load(grader_tree))}
     return found[name]
 
 
