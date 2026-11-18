@@ -1,13 +1,13 @@
 """Launch and step the operator's troubleshooting crew on one swarm ledger.
 
 The launch-troubleshooting-crew skill runs this through its entry point, with one stage per call; every stage takes
---dry-run, which prints the commands and writes nothing.
+--dry-run, which prints the commands and writes nothing. A stage whose task title the ledger would refuse stops
+before its first write, dry run or not.
 
 plan     prints the whole crew plan for the given counts, models and efforts and runs nothing.
-scout    checks every scout task title with the ledger's title rule before any write, saves the earlier focus, eng
-         lane and working agents, sets the eng lane to the scout model and effort, adds one eng troubleshoot task per
-         scout, focuses only the crew, records the order as a canon seat note, asks every agent on another task to
-         hand off, and prints the thirty minute intent cron and the restore command.
+scout    saves the earlier focus, eng lane and working agents, sets the eng lane to the scout model and effort, adds
+         one eng troubleshoot task per scout, focuses only the crew, records the order as a canon seat note, asks
+         every agent on another task to hand off, and prints the thirty minute intent cron and the restore command.
 fix      refuses until every scout task is done, then adds the fixer tasks for the proven causes and focuses them.
 critics  prints the critic sub agents the master launches over the fixers' pull requests.
 harden   adds the hardening task and focuses it.
@@ -142,11 +142,8 @@ class State:
 
 
 def crew_id(now: float) -> str:
-    """Name a crew from the UTC minute it launched: its day of the year, hour and minute.
-
-    Seven digits stay below the eight digit run the ledger refuses as a run or job id in a crew task title.
-    """
-    return "crew-" + time.strftime("%j%H%M", time.gmtime(now))
+    """Name a crew from the UTC second it launched, as its date and its time of day in two groups of six digits."""
+    return "crew-" + time.strftime("%y%m%d-%H%M%S", time.gmtime(now))
 
 
 def numbered(cid: str, kind: str, count: int, start: int = 0) -> list[str]:
@@ -189,17 +186,13 @@ def focus_commands(slug: str, tasks: Sequence[str], quote: str, lead: str) -> li
 
 
 def add_task(slug: str, who: str, task: str, kind: str, *rest: str) -> list[str]:
-    """Add one urgent eng lane crew task with a title naming its id."""
+    """Add one urgent eng lane crew task named by its id, refusing a title the ledger would refuse."""
+    title = f"Troubleshooting crew {task}"
+    if found := ledger_comments.problems(title, "item"):
+        sys.exit(REFUSED_TITLE.format(task=task, reasons="; ".join(found)))
     lane = ("--lane", "eng", "--kind", "troubleshoot" if kind == "scout" else "code", "--rank", "urgent")
     distinct = ("--not-duplicate", DISTINCT[kind])
-    return ledger(slug, who, "task", "add", task, f"Troubleshooting crew {task}", *distinct, *lane, *rest)
-
-
-def check_titles(commands: Sequence[list[str]]) -> None:
-    """Refuse before any write when the ledger's own title rule would refuse a task add among ``commands``."""
-    for command in commands:
-        if command[6:8] == ["task", "add"] and (found := ledger_comments.problems(command[9], "item")):
-            raise CommandFailed(REFUSED_TITLE.format(task=command[8], reasons="; ".join(found)))
+    return ledger(slug, who, "task", "add", task, title, *distinct, *lane, *rest)
 
 
 def scout_task(slug: str, who: str, task: str, problem: str, hypothesis: str) -> list[str]:
@@ -372,8 +365,7 @@ def recorder(slug: str, state: State) -> Callable[[list[str]], None]:
 def stage_scout(args: argparse.Namespace, crew: Crew, runner: Runner) -> dict[str, Any]:
     """Launch the crew, finish a launch that failed partway, or add scouts to the running crew.
 
-    Every scout task title passes the ledger's title rule before anything is written, in a dry run too; the earlier
-    focus and lane are saved before any other write, and each scout is recorded only once its add landed.
+    The earlier focus and lane are saved before any write, and each scout is recorded only once its add landed.
     """
     state = launched(args, crew, runner)
     first = not state.launched
@@ -385,7 +377,6 @@ def stage_scout(args: argparse.Namespace, crew: Crew, runner: Runner) -> dict[st
     ]
     commands += focus_commands(args.slug, scouts, args.quote, "--only" if first else "--bottom")
     commands += [canon_note(args.slug, crew), *stop_commands(args.slug, state)] if first else []
-    check_titles(commands)
     if not args.dry_run:
         save_state(args.slug, state)
     execute(commands, runner, args.dry_run, recorder(args.slug, state))
