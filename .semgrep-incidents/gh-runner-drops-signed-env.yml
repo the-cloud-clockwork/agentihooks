@@ -1,0 +1,21 @@
+rules:
+  - id: gh-runner-drops-signed-env
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A gh runner handed to the GitHub adapter calls the caller's runner without the env option it received.
+      github_reads signs a call in a process holding the App key by switching the command to the bare gh client
+      and putting the installation token in env; a runner that drops env runs gh with no token, so every read
+      and queue call fails with gh auth login. Forward env when the options carry it.
+    paths:
+      include:
+        - /scripts/
+        - /hooks/
+        - gh-runner-drops-signed-env.py
+    patterns:
+      - pattern-inside: |
+          def $GH($ARGV, **$OPTIONS):
+              ...
+      - pattern: $RUN($ARGV, ..., timeout=$TIMEOUT, ...)
+      - pattern-not: $RUN($ARGV, ..., env=$ENV, ...)
+      - pattern-not: $RUN($ARGV, ..., **$SIGNED)

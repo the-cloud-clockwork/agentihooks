@@ -2089,6 +2089,20 @@ def test_required_green_holds_when_github_cannot_answer(monkeypatch, error):
     assert REAL_REQUIRED_GREEN(URL, "first") is False
 
 
+@pytest.mark.feature("merge-pass-hold-reasons")
+def test_required_green_logs_the_github_error_it_holds_on(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def view(url: str, run: Any) -> None:
+        raise SwarmError("To get started with GitHub CLI, please run:  gh auth login")
+
+    monkeypatch.setattr(merge_queue, "required_view", view)
+    assert REAL_REQUIRED_GREEN(URL, "first") is False
+    assert capsys.readouterr().err == (
+        f"required checks of {URL} unread: To get started with GitHub CLI, please run:  gh auth login\n"
+    )
+
+
 def test_the_required_reading_of_an_older_commit_carries_no_head():
     from scripts.swarm.ledger_events import GATE, _required_pull_request
 
