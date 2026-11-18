@@ -755,6 +755,33 @@ def test_a_packed_manifest_without_lines_unpacks_without_lines():
     assert dep_manifest.unpack(dep_manifest.pack(manifest)) == manifest
 
 
+@pytest.mark.feature("packed-manifest-outside-files")
+def test_a_packed_manifest_keeps_each_test_outside_list_and_unpacks_the_three_field_layout() -> None:
+    manifest = {
+        "commit": "c",
+        "units": [],
+        "tests": {
+            "tests/test_a.py::test_one": {"units": [0], "files": ["x"], "escapes": False, "outside": ["docs/a.md"]},
+            "tests/test_a.py::test_two": {"units": [], "files": ["x"], "escapes": True, "outside": []},
+            "tests/test_b.py::test_b": {"units": [], "files": ["docs/a.md"], "escapes": False},
+        },
+    }
+    packed = dep_manifest.pack(json.loads(json.dumps(manifest)))
+    assert packed["files"] == [["x"], ["docs/a.md"], []]
+    assert packed["tests"] == {
+        "tests/test_a.py::test_one": [[0], 0, False, 1],
+        "tests/test_a.py::test_two": [[], 0, True, 2],
+        "tests/test_b.py::test_b": [[], 1, False],
+    }
+    assert dep_manifest.unpack(json.loads(json.dumps(packed))) == manifest
+    three = {"commit": "c", "units": [], "tests": {"t": [[1], 0, True]}, "files": [["x"]], "spans": []}
+    assert dep_manifest.unpack(three) == {
+        "commit": "c",
+        "units": [],
+        "tests": {"t": {"units": [1], "files": ["x"], "escapes": True}},
+    }
+
+
 def test_the_build_writes_the_packed_manifest_only_when_asked_and_the_workflow_uploads_it(tmp_path, monkeypatch):
     built = {"version": 2, "commit": "c", "units": [], "tests": {"t": {"units": [], "files": ["x"], "escapes": False}}}
     monkeypatch.setattr(dep_manifest, "build", lambda *args: built)
