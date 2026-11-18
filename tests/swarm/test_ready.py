@@ -2561,6 +2561,17 @@ def test_a_red_pull_request_whose_ready_record_moved_logs_its_hold(
 
 
 @pytest.mark.feature("merge-pass-hold-reasons")
+def test_a_red_pull_request_whose_reopen_the_ledger_refuses_logs_its_hold(
+    merging: SimpleNamespace, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(merging.ledger, "update_task", lambda *args, **kwargs: dict(merging.rows["t1"]))
+    merging.pulls[URL] = RED
+    assert merging.run() == []
+    assert merging.rows["t1"]["state"] == "pr"
+    assert _holds(capsys) == [HOLD + "the ledger or its ready record changed before the swarm could release it"]
+
+
+@pytest.mark.feature("merge-pass-hold-reasons")
 def test_a_merged_split_pull_request_the_done_gate_refuses_logs_its_hold(
     merging: SimpleNamespace, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:

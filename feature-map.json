@@ -7344,6 +7344,7 @@
         "tests/swarm/test_ready.py::test_an_unmergeable_pull_request_without_an_owner_logs_why_it_holds",
         "tests/swarm/test_ready.py::test_a_red_pull_request_a_live_agent_owns_logs_its_hold",
         "tests/swarm/test_ready.py::test_a_red_pull_request_whose_ready_record_moved_logs_its_hold",
+        "tests/swarm/test_ready.py::test_a_red_pull_request_whose_reopen_the_ledger_refuses_logs_its_hold",
         "tests/swarm/test_ready.py::test_a_merged_split_pull_request_the_done_gate_refuses_logs_its_hold",
         "tests/swarm/test_waits.py::test_required_green_logs_the_github_error_it_holds_on"
       ]
