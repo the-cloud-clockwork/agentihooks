@@ -1780,6 +1780,17 @@
       ]
     },
     {
+      "id": "hive-restart-waits-resume-processes",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-restart-waits-resume-processes",
+      "behaviour": "The hive keeps each resume order process it starts and counts it as running work until it ends, so a hive whose checkout moved keeps beating while a resume it started is still running and restarts on the new code only after the resume ends.",
+      "seam": "scripts.hive.daemon.run restart wait over scripts.hive.dispatch.busy, with scripts.hive.orders.Consumer._spawn_resume and scripts.hive.dispatch.track",
+      "tests": [
+        "tests/hive/test_daemon_checkout_restart.py::test_a_moved_checkout_waits_for_a_running_resume_process",
+        "tests/hive/test_daemon_checkout_restart.py::test_busy_holds_while_a_tracked_resume_process_runs"
+      ]
+    },
+    {
       "id": "scheduled-run-hive-placement",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/hvr4",
