@@ -31,11 +31,16 @@ class Unclaimed:
         return self.events.publish(subject, event)
 
 
+class Streamless:
+    def publish(self, subject: str, event: Envelope) -> bool:
+        raise NoStream(subject)
+
+
 @pytest.fixture
 def repo(tmp_path: Path) -> SQLiteLedgerRepository:
     repository = SQLiteLedgerRepository(tmp_path / "ledgers" / sqlite.DATABASE)
-    repository.create("ledger", CONTENT)
-    repository.create("alpha", CONTENT)
+    repository.create("ledger", CONTENT, "swarm")
+    repository.create("alpha", CONTENT, "swarm")
     return repository
 
 
@@ -94,3 +99,63 @@ def test_each_ledger_takes_its_own_batch_of_rows(repo: SQLiteLedgerRepository, l
     alpha, ledger = rows(repo, "alpha"), rows(repo, "ledger")
     assert outbox.relay(repo, log, batch=1) == 2
     assert published(log) == [alpha[0], ledger[0]]
+
+
+@pytest.mark.feature("ledger-outbox-small-ledgers")
+def test_a_relay_beside_a_small_ledger_publishes_the_swarm_ledgers_rows_and_leaves_no_unsent_row(
+    tmp_path: Path, log: memory.MemoryEventLog
+) -> None:
+    repository = SQLiteLedgerRepository(tmp_path / "ledgers" / sqlite.DATABASE)
+    repository.create("session", CONTENT)
+    repository.create("crew", CONTENT, "swarm")
+    with repository.transaction() as transaction:
+        transaction.purge("session")
+    taken = rows(repository, "crew")
+    assert rows(repository, "session") == []
+    assert outbox.relay(repository, Unclaimed(log, "session")) == len(taken) == 2
+    assert published(log) == taken
+    with repository.connect() as connection:
+        assert connection.execute(outbox.SLUGS).fetchall() == []
+
+
+def unsent_slugs(repo: SQLiteLedgerRepository) -> list[tuple[str]]:
+    with repo.connect() as connection:
+        return connection.execute(outbox.SLUGS).fetchall()
+
+
+@pytest.mark.feature("ledger-outbox-small-ledgers")
+def test_rows_no_stream_takes_from_a_ledger_no_longer_stored_are_marked_sent_and_reported(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repository = SQLiteLedgerRepository(tmp_path / "ledgers" / sqlite.DATABASE)
+    repository.create("crew", CONTENT, "swarm")
+    with repository.connect() as connection, connection:
+        outbox.write(connection, "gone", 2, {"phases": [{"id": "p1"}, {"id": "p2"}]}, {})
+    dropped = [row_id for row_id, _ in rows(repository, "gone")]
+    capsys.readouterr()
+    assert outbox.relay(repository, Streamless(), clock=lambda: 1_000) == 2
+    assert sent(repository) == sorted(dropped)
+    assert unsent_slugs(repository) == [("crew",)]
+    assert capsys.readouterr().err == "".join(
+        f"ledger outbox: row {row_id} dropped: ledger gone is small or no longer stored\n" for row_id in dropped
+    )
+
+
+@pytest.mark.feature("ledger-outbox-small-ledgers")
+def test_a_row_no_stream_takes_from_a_small_ledger_is_marked_sent_while_a_swarm_ledger_keeps_its_rows(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repository = SQLiteLedgerRepository(tmp_path / "ledgers" / sqlite.DATABASE)
+    repository.create("session", CONTENT)
+    repository.create("crew", CONTENT, "swarm")
+    with repository.connect() as connection, connection:
+        outbox.write(connection, "session", 1, {}, {"tasks": [{"id": "t9"}]})
+    [(row_id, _)] = rows(repository, "session")
+    held = rows(repository, "crew")
+    capsys.readouterr()
+    assert outbox.relay(repository, Streamless()) == 1
+    assert sent(repository) == [row_id]
+    assert rows(repository, "crew") == held and unsent_slugs(repository) == [("crew",)]
+    assert (
+        capsys.readouterr().err == f"ledger outbox: row {row_id} dropped: ledger session is small or no longer stored\n"
+    )

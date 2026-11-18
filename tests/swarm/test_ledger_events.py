@@ -110,7 +110,7 @@ def test_only_the_task_done_notice_is_informational(store):
     assert [i.fyi for i in InboxStore(store.redis).inbox(MASTER_SEAT)] == [False, False, False, True]
 
 
-@pytest.mark.feature("swarm-task-notices-pass-the-seen-claim")
+@pytest.mark.feature("ledger-event-notices-pass-the-seen-claim")
 def test_a_second_event_on_one_target_passes_the_seen_claim(store: RedisStore) -> None:
     from scripts.inbox import seen
 
@@ -292,7 +292,7 @@ def test_a_priority_raised_again_after_it_cleared_makes_a_new_item(store):
     assert len(texts(store, MASTER_SEAT)) == 2
 
 
-@pytest.mark.feature("swarm-task-notices-pass-the-seen-claim")
+@pytest.mark.feature("ledger-event-notices-pass-the-seen-claim")
 def test_a_priority_raised_again_passes_the_seen_claim(store: RedisStore) -> None:
     from scripts.inbox import seen
 
@@ -433,7 +433,7 @@ def test_an_open_follow_up_is_raised_again_after_fifteen_minutes_then_shown_to_t
     assert "Retries need a cap" in ledger.priorities[0][1]
 
 
-@pytest.mark.feature("swarm-task-notices-pass-the-seen-claim")
+@pytest.mark.feature("ledger-event-notices-pass-the-seen-claim")
 def test_a_follow_up_raised_after_its_added_notice_passes_the_seen_claim(store: RedisStore) -> None:
     from scripts.inbox import seen
 

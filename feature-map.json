@@ -200,6 +200,41 @@
       ]
     },
     {
+      "id": "serena-router-routes-each-call-by-its-carried-root",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2661",
+      "behaviour": "A Serena call that carries a worktree root reaches that root's backend, is held to that root's primary checkout refusal and names that root in its applied in line, whatever the MCP session last activated, and the router strips the root before forwarding the call. The parent and sub agents of one Claude session share one MCP session, so a sub agent's activation no longer moves the parent's or a sibling's edits into its own worktree. A call without a root keeps the session binding, and a carried root that is outside a git checkout or was removed is refused with the activation hint.",
+      "seam": "hooks.serena_router.server.dispatch through carried_binding, reached over one in process MCP session",
+      "rules": [
+        "serena-router-routes-by-the-session-binding-alone"
+      ],
+      "tests": [
+        "tests/test_serena_router.py::test_one_session_routes_each_call_by_the_root_it_carries",
+        "tests/test_serena_router.py::test_a_carried_primary_root_refuses_edits_on_a_worktree_session",
+        "tests/test_serena_router.py::test_a_carried_root_that_is_no_checkout_is_refused_with_the_activation_hint"
+      ]
+    },
+    {
+      "id": "serena-hook-carries-each-agent-activated-root",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2661",
+      "behaviour": "PreToolUse records the checkout root each agent of a Claude session activates on Serena, keyed by session id and agent id with the parent under an empty id, and on Claude under bypass permissions puts the calling agent's root on its later Serena calls, falling back to the parent's root for a sub agent that never activated. A sub agent's activation leaves the parent's root unchanged, an activation of a path outside a git checkout keeps the previous root, and without Redis or with AGENTIHOOKS_SERENA=false nothing is recorded or carried.",
+      "seam": "hooks.context.serena_binding.rewrite, reached through hook_manager.on_pre_tool_use",
+      "tests": [
+        "tests/test_serena_binding.py::test_a_sub_agent_activation_leaves_the_parent_root_unchanged",
+        "tests/test_serena_binding.py::test_a_sub_agent_without_its_own_activation_carries_the_parent_root",
+        "tests/test_serena_binding.py::test_an_activated_subfolder_records_its_checkout_root",
+        "tests/test_serena_binding.py::test_an_activation_outside_a_checkout_keeps_the_previous_root",
+        "tests/test_serena_binding.py::test_calls_carry_nothing_without_an_activation_or_outside_serena",
+        "tests/test_serena_binding.py::test_roots_live_in_one_session_hash_that_expires",
+        "tests/test_serena_binding.py::test_without_redis_nothing_is_recorded_or_carried",
+        "tests/test_serena_binding.py::test_a_redis_error_records_and_carries_nothing",
+        "tests/test_serena_binding.py::test_pre_tool_use_injects_the_calling_agent_root_under_bypass",
+        "tests/test_serena_binding.py::test_pre_tool_use_never_injects_outside_bypass_or_on_other_targets",
+        "tests/test_serena_binding.py::test_the_serena_off_switch_records_and_carries_nothing"
+      ]
+    },
+    {
       "id": "hive-service-start-ensures-serena-router",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-serena-before-launch",
@@ -4123,6 +4158,20 @@
       ]
     },
     {
+      "id": "ledger-outbox-small-ledgers",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2525",
+      "behaviour": "A small ledger, one session's work with no swarm, writes no outbox row when it is created, changed or purged, and a row no stream takes from a small ledger or from a ledger no longer stored, a removed swarm ledger included, is marked sent and reported, so the ledger bus relay never retries rows no swarm stream will take; a swarm ledger, or a ledger with no size, still writes its rows, the relay still publishes them, and a swarm ledger's rows wait unsent for its stream.",
+      "seam": "scripts.swarm_ledger.repository.outbox.write through the SQLite ledger repository create, write and purge, and outbox.relay",
+      "tests": [
+        "tests/swarm_ledger/test_repository_outbox.py::test_a_small_ledger_writes_no_outbox_row_when_created_changed_or_purged",
+        "tests/swarm_ledger/test_repository_outbox.py::test_an_outbox_write_skips_a_small_ledger_and_keeps_a_swarm_or_sizeless_one",
+        "tests/swarm_ledger/test_outbox_relay_streams.py::test_a_relay_beside_a_small_ledger_publishes_the_swarm_ledgers_rows_and_leaves_no_unsent_row",
+        "tests/swarm_ledger/test_outbox_relay_streams.py::test_rows_no_stream_takes_from_a_ledger_no_longer_stored_are_marked_sent_and_reported",
+        "tests/swarm_ledger/test_outbox_relay_streams.py::test_a_row_no_stream_takes_from_a_small_ledger_is_marked_sent_while_a_swarm_ledger_keeps_its_rows"
+      ]
+    },
+    {
       "id": "ledger-write-timeout",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-api-timeouts",
@@ -4494,6 +4543,20 @@
         "tests/swarm/test_harness_model_fallback.py::test_a_successor_saved_model_of_the_other_harness_falls_back_to_the_swarm_harness_model",
         "tests/swarm/test_harness_model_fallback.py::test_a_claude_first_life_on_a_codex_pinned_engineer_lane_takes_the_swarm_claude_model",
         "tests/swarm/test_harness_model_fallback.py::test_a_resumed_model_of_the_other_harness_falls_back_to_the_swarm_harness_model"
+      ]
+    },
+    {
+      "id": "lane-model-listed-in-a-harness-catalog",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lane-model-catalog-check",
+      "behaviour": "Setting a lane model with agentihooks swarm set, or any store update of the lanes, is refused before anything is written when the new model is not auto, not empty and not listed in the claude or codex model catalog; a lane model the change leaves as it was is never checked again, a change that sets no new fixed lane model never reads the catalog, and the catalog is read through the store's Redis cache with the process environment and the current time.",
+      "seam": "SwarmStore.update through default_models.lane_models and default_models.lane_refusal, reached by cli.cmd_set",
+      "tests": [
+        "tests/swarm/test_default_models.py::test_set_refuses_a_lane_model_no_harness_catalog_lists_without_writing",
+        "tests/swarm/test_default_models.py::test_set_accepts_a_lane_model_any_harness_catalog_lists",
+        "tests/swarm/test_default_models.py::test_a_set_that_fixes_no_new_lane_model_reads_no_catalog",
+        "tests/swarm/test_default_models.py::test_a_lane_update_without_a_model_reads_no_catalog",
+        "tests/swarm/test_default_models.py::test_lane_model_validation_uses_the_store_cache_and_current_context"
       ]
     },
     {
@@ -6447,6 +6510,23 @@
       ]
     },
     {
+      "id": "placement-lock-steps-on-one-placement-worker",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2522",
+      "rules": ["tick-step-takes-placement-lock-in-its-call"],
+      "behaviour": "The eight tick steps that place agents (quota notice, codex hook order, rank pass, master down, tick master, master scale, seat alarm, dispatch seat) declare the host placement lock; the step runs its call holding tick.PLACING and the engine runs it on the pass's one placement worker, so lock taking steps run one at a time and a step waiting for the lock never holds one of the pass's shared step workers while an ordinary ready step waits for one.",
+      "seam": "CallStep and WriteStep placing declaration and run, pool.Pass.executor and its placement worker, engine._eager submission",
+      "tests": [
+        "tests/tick/test_placement_worker.py::test_a_step_ready_beside_more_lock_takers_than_workers_starts_while_they_wait_for_the_lock",
+        "tests/tick/test_placement_worker.py::test_a_kept_lock_taking_step_runs_on_the_placement_worker_and_leaves_the_step_worker_free",
+        "tests/tick/test_placement_worker.py::test_lock_taking_steps_of_a_pass_run_one_at_a_time_on_its_one_placement_worker",
+        "tests/tick/test_placement_worker.py::test_a_lock_taking_step_on_the_slow_lane_runs_on_the_placement_worker",
+        "tests/tick/test_placement_worker.py::test_a_call_step_that_declares_the_placement_lock_runs_its_call_holding_it",
+        "tests/tick/test_placement_worker.py::test_a_write_step_that_declares_the_placement_lock_runs_its_call_holding_it",
+        "tests/tick/test_placement_worker.py::test_the_eight_steps_that_place_agents_declare_the_placement_lock"
+      ]
+    },
+    {
       "id": "tick-step-budget-from-start",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-step-abandon-before-run",
@@ -7401,7 +7481,7 @@
       "id": "front-door-launch-chain",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-launch-proven-tests",
-      "behaviour": "deployed shape: the front door master launch the swarm runtime hands to init-agent reaches claude through the launcher script, the agentihooks claude entry and the claude ai login route with Remote Control on and no token variable in its environment, and the runtime records Remote Control on; a primary login at its week reserve hands the launch to the next stored login on the same route; an expired login reaches claude on the subscription token fallback without Remote Control, and the runtime records and reports that fallback.",
+      "behaviour": "deployed shape: the front door master launch the swarm runtime hands to init-agent reaches claude through the launcher script, the agentihooks claude entry and the claude ai login route with Remote Control on and no token variable in its environment, and the runtime records Remote Control on, read from the report a real init-agent launch prints with its terminal start and profile canary injected; a primary login at its week reserve hands the launch to the next stored login on the same route; an expired login reaches claude on the subscription token fallback without Remote Control, and the runtime records and reports that fallback.",
       "seam": "scripts.swarm.runtime.HerdrRuntime.spawn through scripts.init_agent.main, scripts.install.cmd_claude and scripts.routing.claude_ai.launch_claude",
       "tests": [
         "tests/swarm/test_front_door_launch_chain.py::test_the_front_door_launch_execs_claude_on_the_login_slot_with_remote_control_and_no_token",
@@ -7648,19 +7728,30 @@
       ]
     },
     {
-      "id": "swarm-task-notices-pass-the-seen-claim",
+      "id": "ledger-event-notices-pass-the-seen-claim",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-critic-repeating-inbox-refs",
-      "behaviour": "Every stall alert, overrun report, preempt ask, ledger event notice, follow-up raised reminder and priority notice carries its own ref: the notice prefix and its task, target or item, followed by the send time or, for a ledger event, its revision. A second notice about the same task or target therefore reaches the recipient through the seen claim instead of closing on delivery as already shown through the ledger, and the wake ladder still settles a follow-up or question notice decided on the ledger.",
-      "seam": "scripts.swarm.stall_watch.stall_pass alerting one task twice, scripts.swarm.overrun.overrun_pass reporting a successor on the same task, scripts.swarm.preempt.step asking the same holder again, and scripts.swarm.ledger_events.event_pass sending a second event on one target, a raised follow-up and a priority raised again, each delivered by scripts.inbox.seen.claim, and scripts.inbox.wake.wake_pass settling a follow-up notice decided on the ledger",
+      "behaviour": "Every ledger event notice, follow-up raised reminder and priority notice carries its own ref: the notice prefix and its ledger target or item, followed by the event's ledger revision or, for a raised reminder or a priority, the send time. A second event on one target, the raised reminder after a follow-up's added notice and a priority raised again therefore reach the master through the seen claim instead of closing on delivery as already shown through the ledger, and the wake ladder still settles a follow-up or question notice decided on the ledger.",
+      "seam": "scripts.swarm.ledger_events.event_pass sending a second event on one target, a raised follow-up and a priority raised again, each delivered by scripts.inbox.seen.claim, and scripts.inbox.wake.wake_pass settling a follow-up notice decided on the ledger",
       "tests": [
-        "tests/swarm/test_stall_watch.py::test_a_second_stall_alert_on_one_task_passes_the_seen_claim",
-        "tests/swarm/test_overrun.py::test_a_successor_overrunning_the_same_task_passes_the_seen_claim",
-        "tests/swarm/test_preempt.py::test_a_second_ask_to_the_same_holder_passes_the_seen_claim",
         "tests/swarm/test_ledger_events.py::test_a_second_event_on_one_target_passes_the_seen_claim",
         "tests/swarm/test_ledger_events.py::test_a_priority_raised_again_passes_the_seen_claim",
         "tests/swarm/test_ledger_events.py::test_a_follow_up_raised_after_its_added_notice_passes_the_seen_claim",
         "tests/inbox/test_decided_events.py::test_a_followup_closed_before_the_wake_never_reaches_the_master"
+      ]
+    },
+    {
+      "id": "repeated-subject-notices-pass-the-seen-claim",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2574",
+      "behaviour": "Stall watch alerts, overrun notices and preempt asks that repeat for one task keep reaching their recipient through the seen claim: a stall alert's ref names its task, case, stall start and action, so a new stall of the task and a reopen after an alert on the same stall reach the master while a repeat of a stall the master already answered is not shown again; an overrun notice's ref ends with the overrunning agent's start, so each agent that overruns the task reaches the master; and a preempt ask's ref ends with its ask time, so a holder asked again for the same waiting task reads the new ask.",
+      "seam": "scripts.swarm.stall_watch.stall_pass alerting on a task that stalls again or is reopened, scripts.swarm.overrun.overrun_pass reporting a successor that overruns the same task and scripts.swarm.preempt.step asking the same holder again for one waiting task, each delivered by scripts.inbox.seen.claim",
+      "tests": [
+        "tests/swarm/test_stall_watch.py::test_each_stall_of_a_task_passes_the_seen_claim",
+        "tests/swarm/test_stall_watch.py::test_a_reopen_after_an_alert_on_the_same_stall_passes_the_seen_claim",
+        "tests/swarm/test_stall_watch.py::test_the_same_stall_answered_once_is_not_shown_again",
+        "tests/swarm/test_overrun.py::test_each_agent_overrun_on_one_task_passes_the_seen_claim",
+        "tests/swarm/test_preempt.py::test_each_ask_for_one_waiting_task_passes_the_seen_claim"
       ]
     },
     {

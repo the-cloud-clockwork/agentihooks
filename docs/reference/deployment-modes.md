@@ -381,7 +381,8 @@ process against the one shared repository its address names: Postgres when `AGEN
 else the SQLite folder under `LEDGER_DIR`. A browser's reads and the live event stream still go to the ledger
 server over HTTP, and a browser's writes go to the ledger API service ([The hub and the
 bus](#the-hub-and-the-bus); [Shared ledger database sessions](shared-ledger-database.md)); every other reader and
-writer, including a worker Pod's, already shares the one database once that setting is the same everywhere.
+writer, including a worker Pod's, already shares the one database once that setting is the same everywhere. The
+API service, its chart values and the method routing are in [Ledger write path](ledger-write-path.md).
 
 Moving a swarm onto a distributed controller is therefore only a Redis and database change, with no staged
 activation step: point the chart's controller at the same `AGENTIHOOKS_SWARM_REDIS_URL` (or

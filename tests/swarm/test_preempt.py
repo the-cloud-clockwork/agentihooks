@@ -94,20 +94,20 @@ def test_an_ask_is_forgotten_once_its_holder_left(store):
     assert store.redis.hgetall(store.key(SLUG, preempt.ASKED)) == {"e1": '["t3", 2]'}
 
 
-@pytest.mark.feature("swarm-task-notices-pass-the-seen-claim")
-def test_a_second_ask_to_the_same_holder_passes_the_seen_claim(store: RedisStore) -> None:
+@pytest.mark.feature("repeated-subject-notices-pass-the-seen-claim")
+def test_each_ask_for_one_waiting_task_passes_the_seen_claim(store):
+    """A holder asked again for the same waiting task after its lane freed and filled again reads the new ask."""
     from scripts.inbox import seen
 
     inbox = InboxStore(store.redis)
     preempt.step(SLUG, store, ROWS, doc(), full("t3"), 1)
     preempt.step(SLUG, store, ROWS, doc(), full("t3"), 2)
     (first,) = seen.claim(inbox, "e2")
-    inbox.close(first.id, "e2", "done", "handing off soon")
     preempt.step(SLUG, store, ROWS, doc(), {}, 3)
     preempt.step(SLUG, store, ROWS, doc(), full("t3"), 4)
-    assert len(preempt.step(SLUG, store, ROWS, doc(), full("t3"), 5)) == 1
-    (second,) = seen.claim(inbox, "e2")
-    assert (first.ref, second.ref) == ("preempt:t3:2", "preempt:t3:5")
+    preempt.step(SLUG, store, ROWS, doc(), full("t3"), 5)
+    assert [item.ref for item in seen.claim(inbox, "e2")] == ["preempt:t3:5"]
+    assert first.ref == "preempt:t3:2"
 
 
 def refuse(store, task, seen_at, lane="eng"):

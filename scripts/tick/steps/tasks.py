@@ -99,16 +99,6 @@ def held(call: Callable[[Any, Get], Any]) -> Callable[[Any, Get], Any]:
     return run
 
 
-def placing(call: Callable[[Any, Get], Any]) -> Callable[[Any, Get], Any]:
-    """Wrap ``call`` to run holding the host placement lock, so placements of the swarms on a host never overlap."""
-
-    def run(tick: Any, get: Get) -> Any:
-        with tick.PLACING:
-            return call(tick, get)
-
-    return run
-
-
 def raise_held(box: dict[str, Any]) -> None:
     """Raise the exception a step held, as the hand written pass let it escape."""
     if RAISED in box:
@@ -374,6 +364,7 @@ class WriteStep:
         base = CallStep(name, group, call, needs, reads, writes, lane, **declared)
         self.effects = base.effects
         self.feature = base.feature
+        self.placing = base.placing
         self.name = base.name
         self.group = base.group
         self.call = base.call
@@ -390,9 +381,12 @@ class WriteStep:
         return budgets.floored(self.name, self.floor_s)
 
     def run(self, ctx: Context) -> Result:
-        """Run the call against the pass state, returning its actions and its writes."""
+        """Run the call against the pass state, holding the host placement lock when the step is placing, returning its
+        actions and its writes."""
         reader = partial(steps.declared_read, ctx, self.name, steps.declared_keys(self.reads | self.writes))
-        found: list[object] = list(self.call(steps.import_module("scripts.swarm.tick"), reader) or [])
+        tick = steps.import_module("scripts.swarm.tick")
+        with steps.placed(tick, self.placing):
+            found: list[object] = list(self.call(tick, reader) or [])
         writes = tuple(item for item in found if isinstance(item, Write))
         lines = [item for item in found if not isinstance(item, Write)]
         return Result((Write(actions_of(self.name), self.name, lines), *writes))
