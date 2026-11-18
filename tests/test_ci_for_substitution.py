@@ -148,5 +148,9 @@ def test_lint_grades_the_head_tree_with_the_protected_grader() -> None:
 
 
 @pytest.mark.feature("ci-for-loop-word-list-workflow-run-blocks")
-def test_the_repository_tree_holds_no_refused_word_list(capsys: pytest.CaptureFixture[str]) -> None:
-    assert main(["--root", str(ROOT)]) == 0, capsys.readouterr().out
+def test_no_workflow_or_action_in_the_repository_holds_a_refused_word_list() -> None:
+    workflows = sorted(ROOT.glob(".github/workflows/*.y*ml"))
+    actions = sorted(ROOT.glob(".github/actions/**/action.y*ml"))
+    assert workflows and actions
+    found = {path.relative_to(ROOT).as_posix(): workflow_findings(path.read_text()) for path in workflows + actions}
+    assert {name: lines for name, lines in found.items() if lines} == {}

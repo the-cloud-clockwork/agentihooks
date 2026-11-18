@@ -672,7 +672,7 @@
         "tests/test_ci_for_substitution.py::test_the_clean_workflow_fixture_reports_nothing",
         "tests/test_ci_for_substitution.py::test_github_expressions_become_underscores_that_keep_their_newlines",
         "tests/test_ci_for_substitution.py::test_tracked_workflows_and_actions_with_a_substitution_word_list_are_red",
-        "tests/test_ci_for_substitution.py::test_the_repository_tree_holds_no_refused_word_list"
+        "tests/test_ci_for_substitution.py::test_no_workflow_or_action_in_the_repository_holds_a_refused_word_list"
       ]
     },
     {
