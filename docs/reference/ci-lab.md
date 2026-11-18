@@ -992,17 +992,18 @@ of lost objects runs on `LocalObjects` only.
 
 ## Reuse audit
 
-`scripts.ci_lab.audit` checks the [verdict store](#verdict-store)'s reuse. It grades units again
-with no store reuse and compares each fresh verdict with the cached one. It reads a fresh verdict
-that differs as a key that misses an input, so it stops reuse of that kind, files a ci task on the
-ledger asking for the fix and raises `CILabVerdictMismatch`.
+`scripts.ci_lab.audit` checks the [verdict store](#verdict-store)'s reuse. The lab's `grade`
+port grades units again with no store reuse, and the audit compares each fresh verdict with the
+cached one. When one differs, the audit stops reuse of that kind, files a ci task on the ledger and
+raises `CILabVerdictMismatch`. The task asks for the fix of an input the kind's key misses; the
+audit itself only detects the difference, not its cause.
 
 | Call | Units it grades again | Class |
 |---|---|---|
 | `promotion_audit(ports, head)` | Every unit of the head's cached promotion grade, from `ports.lab.suite(head)` | `Priority.PROMOTION` |
 | `sample(ports, day, share=audit.SHARE)` | A deterministic share of the units the store answered on `day`, from `ports.lab.hits(day)`; `SHARE` is `0.05`, 5 percent | `Priority.BACKFILL` |
 
-Both return the audit's `Regrade` when every compared verdict agrees, and write nothing then.
+Both return the audit's `Regrade` and write nothing when every compared verdict agrees.
 
 The audit is a library. No scheduler pass, command, workflow or tick step calls `promotion_audit`
 or `sample` yet, and no `Lab` implementation exists outside `tests/ci_lab/test_audit.py`, so a
@@ -1031,9 +1032,10 @@ caller supplies its own ports.
 graded and the run whose verdict that grade used. That run is the cached run a mismatch names.
 `audit.Regrade(run, verdicts)` holds the audit's own run and a tuple of verdicts.
 
-### The daily sample
+### Sample of a day's hits
 
-`chosen(day, hits, share)` picks the units `sample` grades:
+`chosen(day, hits, share)` picks the units `sample` grades. `sample` takes one day per call;
+nothing calls it on a schedule yet.
 
 1. The seed is `digest({"day": day})`, the sha256 hex of the record's canonical JSON, as in the
    [digest specification](#digest-specification).
@@ -1057,7 +1059,10 @@ different units.
 
 ```python
 >>> from scripts.ci_lab import audit
->>> hits = [audit.Cached("test", f"test-v1-{n:064x}", "a" * 40, f"grade-v1-{n:03d}") for n in range(40)]
+>>> hits = [
+...     audit.Cached("test", f"test-v1-{n:064x}", "a" * 40, f"grade-v1-{n:03d}")
+...     for n in range(40)
+... ]
 >>> len(audit.chosen("2026-11-18", hits, audit.SHARE))
 2
 >>> audit.chosen("2026-11-18", hits, 0.05) == audit.chosen("2026-11-18", hits[::-1], 0.05)
@@ -1081,7 +1086,9 @@ fresh verdict from the regrade, in the order of `units`:
 | Any | None: the regrade holds no verdict for the unit | Not compared |
 
 `get` runs with its default, so a cached negative verdict is compared like a pass. A disabled
-kind's `get` misses, so an audit compares nothing of a kind that is already disabled.
+kind's `get` misses, so an audit compares nothing of a kind that is already disabled. It still
+grades that kind's units: the audit passes every unit it listed to `grade` and skips only the
+comparison, so each later audit spends a grade on a disabled kind for nothing.
 
 ### What a mismatch does
 
@@ -1121,7 +1128,8 @@ regraded verdicts differ from the cached ones for static, test
 
 When the ledger refuses a task, the exception `add_task` raised propagates and
 `CILabVerdictMismatch` is not raised. Every differing kind is already disabled, so none is reused,
-but the refused kind and the kinds after it in sorted order have no task.
+but the refused kind and every later kind in sorted order have no task. The audit keeps no copy of
+its mismatches, so on this path the differing units and their runs are lost with the exception.
 
 ### Enable reuse again
 
@@ -1170,15 +1178,25 @@ the flaky pass rule; units with no verdict on either side; one task per differin
 that refuses the task; the sample's share and class; and the sample's ranking from the day digest.
 
 After an audit raised, read the disabled kinds and the task it filed, with `KIND` set to a
-differing kind and `RUN` to the audit run:
+differing kind, `RUN` to the audit run and `SLUG` to the ledger in `Ports.slug`:
 
 ```bash
 redis-cli -u "$CI_LAB_REDIS_URL" SMEMBERS agentihooks-ci:disabled
-task="$(python -c 'import sys; from scripts.ci_lab.digests import digest; print(f"lab-mismatch-{sys.argv[1]}-" + digest({"kind": sys.argv[1], "run": sys.argv[2]})[:16])' "$KIND" "$RUN")"
+task="$(python - "$KIND" "$RUN" <<'PY'
+import sys
+
+from scripts.ci_lab.audit import TASK_PREFIX
+from scripts.ci_lab.digests import digest
+
+kind, run = sys.argv[1:]
+print(f"{TASK_PREFIX}{kind}-{digest({'kind': kind, 'run': run})[:16]}")
+PY
+)"
 agentihooks ledger --slug "$SLUG" get "tasks/$task"
 ```
 
-Run the `python` line from a checkout of this repository.
+Run the `python` step from the root of a checkout of this repository. With `KIND=static` and
+`RUN=grade-v1-audit` it prints `lab-mismatch-static-73a2319d23e54d76`.
 
 ### Troubleshooting
 
@@ -1189,7 +1207,8 @@ Run the `python` line from a checkout of this repository.
 | A later audit finds nothing for a kind that differed before | The kind is disabled, so its `get` misses and nothing of it is compared | `SISMEMBER agentihooks-ci:disabled <kind>` |
 | A unit that ran is never compared | It has no index entry, or the regrade holds no verdict for it | `EXISTS agentihooks-ci:verdict:<kind>:<key>`, and the verdicts of the `Regrade` the lab returned |
 | A cached pass regraded red is not reported | The cached verdict is flaky; a flaky pass agrees with a failure | The `flaky` field of the index entry |
-| The ledger's error propagates instead of `CILabVerdictMismatch` | `add_task` refused a task | Every differing kind is already disabled, and no task exists from the refused kind on in sorted order; a second audit does not file it, because the disabled kind is not compared, so file that ci task by hand |
+| The ledger's error propagates instead of `CILabVerdictMismatch` | `add_task` raised for one kind | The ledger error in the audit caller's output names it. Each differing kind is already disabled, so none is reused. The refused kind and every later kind in sorted order have no task, and a later audit files none because a disabled kind is not compared. The mismatch list is lost with the exception, so take the units and runs from the caller's lab (the audit run's verdicts and each unit's cached run) and file those ci tasks by hand, naming the kind and both runs |
+| An audit grades units of a kind it then does not compare | The kind is disabled; the audit grades every listed unit and skips only the comparison | `SMEMBERS agentihooks-ci:disabled`; leave a disabled kind's units out of what the lab lists |
 | Two callers sample different units on the same day | They pass the day in different formats, or their lab returns different hits | Pass the UTC day as `YYYY-MM-DD` and compare the `hits(day)` lists |
 
 ## Retry policy
