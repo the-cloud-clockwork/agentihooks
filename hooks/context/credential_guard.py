@@ -586,7 +586,7 @@ def renderer_verdict(command: str) -> str | None:
     return None
 
 
-KUBECTL_WORDS = re.compile(r"""\bkubectl\b((?:'[^']*'|"(?:[^"\\]|\\.)*"|\\.|[^|<>;&])*)""")
+KUBECTL_WORDS = re.compile(r"""\bkubectl\b(?=((?:'[^']*'|"(?:[^"\\]|\\.)*"|\\.|[^|<>;&])*))""")
 SHELL_GROUPING = re.compile(r"[()`]")
 VALUE_FLAGS = {"--output": "output", "--template": "template", "--raw": "raw"}
 SHORT_OUTPUT = re.compile(r"-[arwh]*o=?(.*)")
@@ -699,15 +699,21 @@ def types_secret(rest: list[str]) -> bool:
     return not types or any(names_secret(word) or UNSHOWN_TYPE.search(word.split("/")[0]) for word in types)
 
 
+def get_verb(words: list[str]) -> int | None:
+    """Index of the first get word that no listed value flag right before it takes as its value."""
+    taken = {index + 1 for index, word in enumerate(words) if word in GET_VALUE_FLAGS}
+    return next((index for index, word in enumerate(words) if word == "get" and index not in taken), None)
+
+
 def prints_secret_values(words: list[str]) -> bool:
     """True when kubectl words get a Secret, or a type left to the shell, with an output that can print a data value."""
-    if "get" not in words:
+    verb = get_verb(words)
+    if verb is None:
         return False
     values = flag_values(words)
     if any(RAW_SECRET.search(raw) for raw in values["raw"]):
         return True
-    named = any(types_secret(words[index + 1 :]) for index, word in enumerate(words) if word == "get")
-    return named and prints_field_values(values["output"], values["template"])
+    return types_secret(words[verb + 1 :]) and prints_field_values(values["output"], values["template"])
 
 
 def gets_secret_values(low: str) -> bool:
