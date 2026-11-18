@@ -57,6 +57,8 @@ class Ledger:
             task = command[-1].removeprefix("tasks/")
             row: dict[str, Any] = {"id": task, "state": "done" if task in self.done else "claimed"}
             return json.dumps({**row, "done": True} if task in self.flagged else row)
+        if command[6:8] == ["task", "add"]:
+            ledger_comments.check(command[9], "item")
         return "{}"
 
     def writes(self) -> list[list[str]]:
@@ -528,7 +530,6 @@ def test_a_scout_dry_run_then_a_real_run_adds_every_scout_task(
     adds = [command for command in ledger.writes() if command[6:8] == ["task", "add"]]
     assert adds == [command for command in printed if command[6:8] == ["task", "add"]]
     assert [command[8] for command in adds] == [f"{CID}-scout-{n}" for n in range(1, 6)]
-    assert [ledger_comments.problems(command[9], "item") for command in adds] == [[]] * 5
     assert json.loads(crew.state_path("demo").read_text())["scout_tasks"] == [command[8] for command in adds]
 
 
