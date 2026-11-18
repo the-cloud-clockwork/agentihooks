@@ -21,13 +21,14 @@ worker's PriorityClass is a cluster object outside that module;
 | `agentihooks ci-lab-scheduler --self-test` | `python -m scripts.ci_lab scheduler --self-test` | Checks the scheduler contract offline and prints it as JSON |
 | `agentihooks ci-lab-scheduler [--interval S] [--passes N]` | `python -m scripts.ci_lab scheduler [--interval S] [--passes N]` | Runs the scheduler service: reads the runtime config, serves the lease API, `/capacity` and `/grades/<sha>` on port 8800 and `/metrics` on 9108, and runs one grading pass every interval (2 seconds), forever unless `--passes` is set |
 | `agentihooks ci-lab-worker --self-test` | `python -m scripts.ci_lab worker --self-test` | Refuses any GitHub App variable, checks the worker contract offline and prints it as JSON |
+| `agentihooks ci-lab-worker` | `python -m scripts.ci_lab worker` | Runs the worker service: builds the pod from the worker environment, leases units from the scheduler and runs each through the adapter of its kind (see [Worker executors](#worker-executors)) until SIGTERM, then lets running units drain |
 
 The self tests make no network, Redis, object store or GitHub calls. They exit 0 when the
 contract holds and 1 with the reason on standard error when it does not. A self test fails when
 a metric name is not a valid Prometheus name starting with `ci_lab_`, a port repeats or falls
 outside 1 to 65535, or the worker environment grants `GITHUB_APP_`. `-h` prints usage. The
-scheduler without `--self-test` runs its service (see [Scheduler loop](#scheduler-loop)); any other
-worker start without `--self-test` exits 2 until the worker loop lands.
+scheduler and the worker without `--self-test` run their services (see [Scheduler loop](#scheduler-loop)
+and [Worker executors](#worker-executors)).
 
 ## Environment
 
@@ -41,6 +42,13 @@ worker start without `--self-test` exits 2 until the worker loop lands.
 | `CI_LAB_SCHEDULER_URL` | no | yes | Base address of the scheduler lease API |
 | `CI_LAB_SLOTS` | no | yes | Number of units the worker runs at once |
 | `CI_LAB_GIT_MIRROR` | yes | yes | Path of the shared git mirror the worker cuts worktrees from and the scheduler borrows objects from |
+| `CI_LAB_WORK_ROOT` | no | yes | Folder of the worker's private git store, its trees, venvs and unit runs and reports |
+| `CI_LAB_MANIFEST` | no | yes | Path of the dependency manifest JSON a test unit's batch is checked against |
+| `CI_LAB_FLAKES` | no | yes | Path of the flake ledger a test unit appends to when its retry passes |
+| `CI_LAB_MUTATION_CACHE` | no | yes | Folder of the mutation stats cache, keyed by tree content |
+| `CI_LAB_KILLERS` | no | yes | Path of the kill memory that orders a mutant's tests, its remembered killer first |
+| `CI_LAB_MUTATION_BUDGET` | no | yes | Seconds a mutant unit may take before its mutants run side by side |
+| `CI_LAB_MUTATION_CAP` | no | yes | Most mutants a mutant unit grades at once |
 | `CI_LAB_MINIO_ENDPOINT`, `CI_LAB_MINIO_BUCKET`, `CI_LAB_MINIO_ACCESS_KEY`, `CI_LAB_MINIO_SECRET_KEY` | yes | no | The object store names the scheduler reads |
 | `CI_LAB_MIRROR_STORE` | yes | no | Folder of the scheduler's private git stores, one per repository, that borrow the mirror's objects |
 | `CI_LAB_REPOSITORY` | yes | no | Repository URL whose dev runner trust list admits head actors |
@@ -513,6 +521,32 @@ port 8790 from inside the cluster, where the receiver's network policy admits th
 agentihooks command sends notices yet, so until one does, a head reaches the lab only through a
 GitHub delivery or a notice sent by hand as above.
 
+### Push a head to the lab remote
+
+The lab remote is a git endpoint beside the scheduler. Its post receive hook,
+`python -m scripts.ci_lab.remote.post_receive`, turns each pushed `refs/grade/*` head into a
+`ci.lab.head.notice` envelope on the same stream, and prints the head's grade url to the pusher:
+
+```text
+$ git push -o branch=<branch> lab HEAD:refs/grade/<task>
+remote: lab grade: <CI_LAB_URL>/grades/<sha>
+```
+
+The url is the scheduler's [`/grades/<sha>`](#grades-of-a-commit) route. The envelope carries the
+pushed `ref` and the `branch` push option, which becomes the head's scheduler lane. Its id covers
+both, so the same head pushed again with another branch or to another grade ref is a new head
+event. The base is the `-o base=<sha>` push option, else the head's first parent. The hook runs
+after git writes the refs, so it cannot turn a push away. The remote's pre receive hook refuses refs
+outside `refs/grade/*`. A deleted grade ref, or a root commit pushed without `-o base`, prints
+`lab remote: <ref> is not graded` and publishes nothing.
+
+| Name | Meaning |
+|---|---|
+| `CI_LAB_REPOSITORY` | The repository URL the head belongs to, in the `https://github.com/<owner>/<repo>` form GitHub deliveries use |
+| `CI_LAB_REMOTE_ACTOR` | The actor every pushed head is recorded under. It must be on the trust list, or the scheduler records the head without grading it |
+| `CI_LAB_URL` | The lab scheduler address a hive and the workstation can reach, used as the base of the grade url |
+| `AGENTIHOOKS_BUS`, `AGENTIHOOKS_BUS_URL`, `AGENTIHOOKS_BUS_CREDENTIALS` | The bus the hook publishes on, opened with provisioning off |
+
 ### Provisioning in the deployment
 
 The deployment repository wires the secret in `k8s/manifests/agentihooks-swarm/github-webhook.yaml`,
@@ -825,6 +859,10 @@ included, and the entry limit is `interaction.entry_limit` of the grader's `deli
 block. The clauses are in the
 [Lab merge group interaction rule](delivery-tiers.md#lab-merge-group-interaction-rule).
 
+Since a push grade folds only the static gates,
+[Post merge testing with automatic revert](../research/post-merge-testing.md) measures the red
+`dev` rate from the Tests workflow's runs on GitHub, not from lab push grades.
+
 ### Grades of a commit
 
 `GET /grades/<sha>` on port 8800 answers every grade of one commit, open or closed, ordered by
@@ -847,6 +885,33 @@ Each grade is `scripts.ci_lab.scheduler.summary` of its state:
 | `superseded` | Whether a newer head of its lane cancelled it |
 | `units` | `total` units and how many are `final` |
 | `checks` | Each check run's last posted `status` and `conclusion`, `required` included |
+
+## Worker executors
+
+`agentihooks ci-lab-worker` builds the pod from the [worker environment](#environment), leases units
+from the scheduler and runs each through `scripts.ci_lab.executors`, the adapter its unit kind
+names. Every grant of `POST /lease` carries the job's `head`, `base` and `grader` revisions: the
+scheduler enqueues a grade's misses with the grade's base and its plan's grader revision.
+
+| Kind | Trees | Executor inputs |
+|---|---|---|
+| `static` | head, base and grader, read only, shared by the pod's units | the gate the unit names from the grader tree's workflow and input registry, the venv of the head's `uv.lock` digest and `inputs.base` set to the base revision |
+| `test` | head, read only | the batch, the venv of the head's `uv.lock` digest, `CI_LAB_MANIFEST`, `CI_LAB_FLAKES` and one pytest worker per slot |
+| `stats` | a private copy of the head with every file under the `[tool.mutmut]` source paths behind its trampolines | the tree as root and `CI_LAB_MUTATION_CACHE` |
+| `mutant` | the same private trampolined copy | `CI_LAB_KILLERS`, `CI_LAB_MUTATION_BUDGET`, `CI_LAB_MUTATION_CAP` and the tests that the stats records of every test module in the tree show reaching the mutant's function, with their seconds |
+
+The mutation runner runs in the sandbox as `python -m scripts.ci_lab.run_mutation REQUEST OUTPUT`
+from the private tree. A mutant unit passes only when every mutant is killed; a runner that exits
+non zero fails its unit. Each adapter uploads a JSON report with the unit's `seconds` (and `flaky`
+for a test unit), which the scheduler stores with the verdict, and releases every tree it cut,
+also when the executor raises. SIGTERM stops leasing and lets running units drain within the
+termination grace.
+
+Check the wiring offline:
+
+```bash
+agentihooks ci-lab-worker --self-test | python -c 'import json,sys; print(json.load(sys.stdin)["environment"]["names"])'
+```
 
 ## Verdict store
 
@@ -986,6 +1051,9 @@ verdicts.enable("test")
 The disabled set lives only in Redis. A Redis flush enables every kind again, and `reindex` does
 not restore the set, so disable the kind again after a flush.
 
+The [reuse audit](#reuse-audit) is the caller that disables a kind, when a regrade of one of its
+units differs from the cached verdict.
+
 ### Rebuild the index
 
 `reindex()` lists every object under `lab/`, keeps the paths `is_report` matches, reads each report
@@ -1087,6 +1155,227 @@ of lost objects runs on `LocalObjects` only.
 | `reindex()` returns `0` right after a flush | No report objects under `lab/` at this root, from a wrong directory, bucket or prefix; or every entry was already indexed | `verdicts.objects.keys("lab/")` lists the stored objects |
 | A unit folder holds `report.json` without `log.txt` | The writer stopped between the two writes; later puts never add a log | To run the unit again, delete its folder and its index entry; the next put stores a fresh verdict |
 | A worker gets `403` from `/upload-url` | The lease expired or the token belongs to another lease | Heartbeat before the lease expires; once it has expired, lease the job again |
+
+## Reuse audit
+
+`scripts.ci_lab.audit` checks the [verdict store](#verdict-store)'s reuse. The `grade` method of
+`ports.lab` grades units again with no store reuse, and the audit compares each fresh verdict with
+the cached one. When one differs, the audit stops reuse of that kind, files a ci task on the ledger
+and raises `CILabVerdictMismatch`. The task asks for the fix of an input the kind's key misses; the
+audit itself only detects the difference, not its cause.
+
+| Call | Units it grades again | Class |
+|---|---|---|
+| `promotion_audit(ports, head)` | Every unit of the head's cached promotion grade, from `ports.lab.suite(head)` | `Priority.PROMOTION` |
+| `sample(ports, day, share=audit.SHARE)` | A deterministic share of the units the store answered on `day`, from `ports.lab.hits(day)`; `SHARE` is `0.05`, 5 percent | `Priority.BACKFILL` |
+
+Both return the audit's `Regrade` and write nothing when every compared verdict agrees.
+
+The audit is a library. No scheduler pass, command, workflow or tick step calls `promotion_audit`
+or `sample` yet, and no `Lab` implementation exists outside `tests/ci_lab/test_audit.py`, so a
+caller supplies its own ports.
+
+### Ports
+
+`audit.Ports(store, lab, tasks, slug)` is a frozen dataclass:
+
+| Field | Type | What the audit does with it |
+|---|---|---|
+| `store` | `store.Store` | Reads each cached verdict with `get` and stops reuse with `disable` |
+| `lab` | `audit.Lab` | Lists the units to compare and grades them |
+| `tasks` | `audit.Tasks` | Files one task per differing kind with `add_task(slug, fields, by)`; `scripts.swarm.ledger_client.LedgerClient` has that method |
+| `slug` | `str` | The ledger the tasks go to |
+
+`audit.Lab` is a protocol of three methods:
+
+| Method | Returns |
+|---|---|
+| `suite(head)` | Every unit of the head's cached promotion grade, as `audit.Cached` |
+| `hits(day)` | Every unit the store answered on that UTC day, once per unit and head, as `audit.Cached` |
+| `grade(units, tier)` | An `audit.Regrade`: the run of a grade of those units in the tier's class with no store reuse, and the `store.Verdict` of each unit it graded |
+
+`audit.Cached(kind, key, head, run)` names one unit a grade answered: its kind and key, the head it
+graded and the run whose verdict that grade used. That run is the cached run a mismatch names.
+`audit.Regrade(run, verdicts)` holds the audit's own run and a tuple of verdicts.
+
+### Sample of a day's hits
+
+`chosen(day, hits, share)` picks the units `sample` grades. `sample` takes one day per call;
+nothing calls it on a schedule yet.
+
+1. The seed is `digest({"day": day})`, the sha256 hex of the record's canonical JSON, as in the
+   [digest specification](#digest-specification).
+2. Each hit ranks by `digest({"seed": <seed>, "unit": "<kind>:<key>", "head": <head>})`, lowest
+   hex string first.
+3. It returns the first `ceil(share * len(hits))` hits of that ranking.
+
+The same day and hits give the same units on every machine and every run, in whatever order the
+hits arrive. Another day gives another selection. The same unit hit on two heads is two hits that
+rank apart, so one can be picked without the other. `day` is hashed as given and never parsed: the
+tests pass a UTC day as `YYYY-MM-DD`, and two callers that format the day differently pick
+different units.
+
+| Hits that day | Units graded at `share=0.05` |
+|---|---|
+| 0 | 0 |
+| 1 to 20 | 1 |
+| 21 to 40 | 2 |
+| 41 | 3 |
+| 100 | 5 |
+
+```python
+>>> from scripts.ci_lab import audit
+>>> hits = [
+...     audit.Cached("test", f"test-v1-{n:064x}", "a" * 40, f"grade-v1-{n:03d}")
+...     for n in range(40)
+... ]
+>>> len(audit.chosen("2026-11-18", hits, audit.SHARE))
+2
+>>> audit.chosen("2026-11-18", hits, 0.05) == audit.chosen("2026-11-18", hits[::-1], 0.05)
+True
+>>> audit.chosen("2026-11-18", hits, 0.05) == audit.chosen("2026-11-19", hits, 0.05)
+False
+```
+
+### Mismatches
+
+`mismatches(store, units, regrade)` reads each unit's cached verdict with `store.get` and its
+fresh verdict from the regrade, in the order of `units`:
+
+| Cached verdict | Fresh verdict | Result |
+|---|---|---|
+| Pass | Fail | Mismatch |
+| Fail | Pass | Mismatch |
+| Flaky pass | Fail | Agrees: a flaky pass already failed once on the same inputs |
+| Pass or fail | The same | Agrees |
+| None: no index entry, or the kind is disabled | Any | Not compared |
+| Any | None: the regrade holds no verdict for the unit | Not compared |
+
+`get` runs with its default, so a cached negative verdict is compared like a pass. A disabled
+kind's `get` misses, so an audit compares nothing of a kind that is already disabled. It still
+grades that kind's units: the audit passes every unit it listed to `grade` and skips only the
+comparison, so each later audit spends a grade on a disabled kind for nothing.
+
+### What a mismatch does
+
+When any unit differs, the audit:
+
+1. Disables every differing kind with `Store.disable`, all of them before it files any task. The
+   whole kind stops hitting, its agreeing units included; other kinds keep hitting.
+2. Files one task per kind, in sorted kind order, with `tasks.add_task(slug, fields, "swarm")`.
+   `"swarm"` is `audit.SENDER`.
+3. Raises `CILabVerdictMismatch`.
+
+Each task carries these fields:
+
+| Field | Value |
+|---|---|
+| `task` | `lab-mismatch-<kind>-<16 hex>`, where the hex is the first 16 characters of `digest({"kind": <kind>, "run": <audit run>})`, so one id per kind and audit run; the prefix is `audit.TASK_PREFIX` |
+| `title` | `Lab verdict mismatch: <kind> reuse disabled` |
+| `lane` | `ci` |
+| `kind` | `ci` |
+| `rank` | `urgent` |
+| `description` | Every mismatch of the kind with its cached run and the audit run, then the rule that reuse stays off until a pull request enables the kind again |
+| `not_duplicate` | `audit.NOT_DUPLICATE`: `The lab audit files one task per kind and audit run whose regrade differs from the cached verdicts.` |
+
+A description reads, with two units of the kind differing:
+
+```text
+The lab audit regraded test units differently from their cached verdicts: <key one> cached passed by run grade-v1-first, regraded failed by run grade-v1-audit; <key two> cached passed by run grade-v1-second, regraded failed by run grade-v1-audit. Reuse of test verdicts is off until a pull request enables the kind again with the fix for the input its key misses.
+```
+
+`CILabVerdictMismatch` is a `RuntimeError`. Its `mismatches` attribute is a tuple of
+`audit.Mismatch(cached, regraded, cached_run, audit_run)` across every kind, in the order of the
+units, and its message names the differing kinds sorted and comma separated:
+
+```text
+regraded verdicts differ from the cached ones for static, test
+```
+
+When the ledger refuses a task, the exception `add_task` raised propagates and
+`CILabVerdictMismatch` is not raised. Every differing kind is already disabled, so none is reused,
+but the refused kind and every later kind in sorted order have no task. The audit keeps no copy of
+its mismatches, so on this path the differing units and their runs are lost with the exception.
+
+### Enable reuse again
+
+The audit never enables a kind. Reuse of a kind comes back through a pull request that fixes the
+input its key misses, as the task says. No code enables a kind when that pull request merges, and
+no service, command or workflow calls `Store.enable` yet. The call is:
+
+```python
+verdicts.enable("test")
+```
+
+It removes the kind from `agentihooks-ci:disabled`. A Redis flush empties that set too, which
+enables every kind again; see [Disable and enable a kind](#disable-and-enable-a-kind).
+
+### Use it
+
+With `client` and `verdicts` built as in [Use the store](#use-the-store), `lab` an object with the
+`Lab` methods, `slug` the ledger and `head` a dev head:
+
+```python
+import datetime
+
+from scripts.ci_lab import audit
+from scripts.swarm.ledger_client import LedgerClient
+
+ports = audit.Ports(store=verdicts, lab=lab, tasks=LedgerClient(), slug=slug)
+
+try:
+    audit.promotion_audit(ports, head)
+    audit.sample(ports, datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d"))
+except audit.CILabVerdictMismatch as found:
+    for mismatch in found.mismatches:
+        print(mismatch.cached.kind, mismatch.cached.key, mismatch.cached_run, mismatch.audit_run)
+    raise
+```
+
+A mismatch in the promotion audit stops the sample in this example; call each in its own `try` to
+run both.
+
+### Verify
+
+The tests in `tests/ci_lab/test_audit.py`, under the feature map entry `lab-reuse-audit`, run in CI
+on a fakeredis verdict store, a fake lab and a recording ledger. They cover a seeded mismatch that
+disables its kind, files the task with both runs and raises; matching verdicts that file nothing;
+the flaky pass rule; units with no verdict on either side; one task per differing kind; a ledger
+that refuses the task; the sample's share and class; and the sample's ranking from the day digest.
+
+After an audit raised, read the disabled kinds and the task it filed, with `KIND` set to a
+differing kind, `RUN` to the audit run and `SLUG` to the ledger in `Ports.slug`:
+
+```bash
+redis-cli -u "$CI_LAB_REDIS_URL" SMEMBERS agentihooks-ci:disabled
+task="$(python - "$KIND" "$RUN" <<'PY'
+import sys
+
+from scripts.ci_lab.audit import TASK_PREFIX
+from scripts.ci_lab.digests import digest
+
+kind, run = sys.argv[1:]
+print(f"{TASK_PREFIX}{kind}-{digest({'kind': kind, 'run': run})[:16]}")
+PY
+)"
+agentihooks ledger --slug "$SLUG" get "tasks/$task"
+```
+
+Run the `python` step from the root of a checkout of this repository. With `KIND=static` and
+`RUN=grade-v1-audit` it prints `lab-mismatch-static-73a2319d23e54d76`.
+
+### Troubleshooting
+
+| Symptom | Cause | Check |
+|---|---|---|
+| `CILabVerdictMismatch: regraded verdicts differ from the cached ones for <kinds>` | A regrade differed from a cached verdict of each named kind | `found.mismatches` lists every unit with its cached run and the audit run; the filed task names the same |
+| Every unit of a kind runs again after an audit | The audit disabled the kind | `SISMEMBER agentihooks-ci:disabled <kind>`; reuse comes back as in [Enable reuse again](#enable-reuse-again) |
+| A later audit finds nothing for a kind that differed before | The kind is disabled, so its `get` misses and nothing of it is compared | `SISMEMBER agentihooks-ci:disabled <kind>` |
+| A unit that ran is never compared | It has no index entry, or the regrade holds no verdict for it | `EXISTS agentihooks-ci:verdict:<kind>:<key>`, and the verdicts of the `Regrade` the lab returned |
+| A cached pass regraded red is not reported | The cached verdict is flaky; a flaky pass agrees with a failure | The `flaky` field of the index entry |
+| The ledger's error propagates instead of `CILabVerdictMismatch` | `add_task` raised for one kind | The ledger error names the ledger and its refusal detail, not the kind; `SMEMBERS agentihooks-ci:disabled` lists the disabled kinds, this audit's among them. Each differing kind is already disabled, so none is reused. The refused kind and every later kind in sorted order have no task, and a later audit files none because a disabled kind is not compared. The mismatch list is lost with the exception. Each unit's cached run comes from `ports.lab.suite(head)`, or from `chosen(day, ports.lab.hits(day), share)` for a sample. The audit run and the fresh verdicts exist only in the `Regrade` that `grade` returned, which the audit does not return on this path, so they are recoverable only from the lab's own record of that grade. File those ci tasks by hand, naming the kind and both runs |
+| An audit grades units of a kind it then does not compare | The kind is disabled; the audit grades every listed unit and skips only the comparison | `SMEMBERS agentihooks-ci:disabled`; leave a disabled kind's units out of what the lab lists |
+| Two callers sample different units on the same day | They pass the day in different formats, or their lab returns different hits | Pass the UTC day as `YYYY-MM-DD` and compare the `hits(day)` lists |
 
 ## Retry policy
 
@@ -1438,11 +1727,8 @@ Limitations:
   receives no grader or base tree.
 - `RUNNER_TEMP` is writable, so a step can delete or replace its own `grader` or `base` symlink.
   That changes only what its own run reads; the trees stay unchanged.
-- No worker runs either runner yet. `scripts.ci_lab.worker.Worker` runs each unit through the
-  `executors` mapping its caller passes, and no code passes `run_static.run` or `run_tests.run` in
-  that mapping. The worker entry point still exits 2 without `--self-test` (see
-  [Entry points](#entry-points)). Both runners run today only through code that calls them
-  directly, such as the tests.
+- The worker service runs both runners through `scripts.ci_lab.executors` (see
+  [Worker executors](#worker-executors)).
 
 ### Use it
 

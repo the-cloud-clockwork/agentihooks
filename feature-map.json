@@ -1011,6 +1011,18 @@
       ]
     },
     {
+      "id": "merge-pass-released-green-hold-reopens",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-released-pr-claim-reopen",
+      "behaviour": "A released task whose pull request reads green and unqueued for twenty minutes, outage time left out, while the merge pass cannot queue it reopens for the next engineer under the fix wait with its handoff, and its ready record is removed; a pull request that runs checks again or queues restarts the twenty minutes.",
+      "seam": "ready merge pass advancing a released record whose checks wait never resolves or whose queue call keeps holding",
+      "tests": [
+        "tests/swarm/test_ready.py::test_a_released_pull_request_the_merge_pass_cannot_queue_reopens_after_twenty_green_minutes",
+        "tests/swarm/test_ready.py::test_a_released_pull_request_that_stops_reading_green_and_unqueued_restarts_its_hold",
+        "tests/swarm/test_ready.py::test_outage_time_never_counts_toward_a_released_pull_request_green_hold"
+      ]
+    },
+    {
       "id": "hive-workstation-release",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2154",
@@ -1777,6 +1789,17 @@
         "tests/hive/test_daemon_checkout_restart.py::test_a_checkout_unread_at_start_restarts_the_hive_once_it_reads",
         "tests/hive/test_daemon_checkout_restart.py::test_a_moved_checkout_waits_for_running_order_workers",
         "tests/hive/test_daemon_checkout_restart.py::test_busy_counts_only_order_workers_still_running"
+      ]
+    },
+    {
+      "id": "hive-restart-waits-resume-processes",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-restart-waits-resume-processes",
+      "behaviour": "The hive keeps each resume order process it starts and counts it as running work until it ends, so a hive whose checkout moved keeps beating while a resume it started is still running and restarts on the new code only after the resume ends.",
+      "seam": "scripts.hive.daemon.run restart wait over scripts.hive.dispatch.busy, with scripts.hive.orders.Consumer._spawn_resume and scripts.hive.dispatch.track",
+      "tests": [
+        "tests/hive/test_daemon_checkout_restart.py::test_a_moved_checkout_waits_for_a_running_resume_process",
+        "tests/hive/test_daemon_checkout_restart.py::test_busy_holds_while_a_tracked_resume_process_runs"
       ]
     },
     {
@@ -4088,6 +4111,17 @@
         "tests/ci_lab/test_outcomes.py::test_only_the_queue_and_the_scheduler_set_lost_and_dropped",
         "tests/ci_lab/test_scheduler.py::test_an_unknown_outcome_is_refused_on_completion_and_stores_no_verdict",
         "tests/ci_lab/test_worker.py::test_an_executor_answer_with_an_unknown_outcome_is_refused"
+      ]
+    },
+    {
+      "id": "packed-manifest-outside-files",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-packed-manifest-opened-files",
+      "behaviour": "The packed dependency manifest keeps each test record's outside list, the repository files the test opened that its manifest record leaves out, so the unpacked manifest the CI lab reads still names them and a record with outside files stays keyed on the measured tree. A record without the list unpacks without it, and a packed manifest in the three field layout still unpacks.",
+      "seam": "tests.dep_manifest.pack and tests.dep_manifest.unpack round trip, and scripts.ci_lab.expand_tests.fingerprints over a packed then unpacked manifest",
+      "tests": [
+        "tests/ci_lab/test_expand_tests.py::test_a_packed_then_unpacked_record_with_outside_files_stays_keyed_on_the_measured_tree",
+        "tests/test_dep_manifest.py::test_a_packed_manifest_keeps_each_test_outside_list_and_unpacks_the_three_field_layout"
       ]
     },
     {
@@ -7672,6 +7706,21 @@
       ]
     },
     {
+      "id": "swarm-park-unpushed-dependency-on-dev",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2634",
+      "behaviour": "Swarm park stacks a task on origin dev and records dev's merge base as its stacked base when an unclaimed dependency records a branch that origin answers it does not hold; a dependency branch origin holds keeps the merge base with origin's copy, and a missing branch on a claimed dependency or an unanswered origin probe still refuses the park.",
+      "seam": "swarm park in scripts.swarm.stack",
+      "rules": [
+        "park-fetches-unpushed-dependency-branch"
+      ],
+      "tests": [
+        "tests/swarm/test_stack.py::test_park_stacks_on_dev_when_an_unclaimed_dependency_records_a_branch_origin_lacks",
+        "tests/swarm/test_stack.py::test_park_keeps_the_dependency_base_when_origin_holds_an_unclaimed_dependency_branch",
+        "tests/swarm/test_stack.py::test_park_refuses_a_missing_dependency_branch_unless_origin_answers_for_an_unclaimed_dependency"
+      ]
+    },
+    {
       "id": "hive-loss-events-engine-only",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-hive-loss-engine-filter",
@@ -7977,6 +8026,16 @@
       ]
     },
     {
+      "id": "lab-head-missing-field-terminate",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-head-missing-field-terminate",
+      "behaviour": "The CI lab scheduler's bus inbox terminates a lab head envelope missing any head event field, logging the head's envelope id and the missing fields, and keeps reading the rest of the batch, so a malformed head is never left unacknowledged to be redelivered until the dead letter cap, whose publish the scheduler's bus grant refuses, which stopped the scheduler reading heads.",
+      "seam": "scripts.ci_lab.scheduler.BusInbox.heads over a fake bus consumer and its deliveries",
+      "tests": [
+        "tests/ci_lab/test_scheduler.py::test_the_bus_inbox_terminates_each_head_missing_a_field_with_a_logged_reason_and_reads_the_next_head"
+      ]
+    },
+    {
       "id": "lab-scheduler-test-units",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2629",
@@ -8000,24 +8059,14 @@
       ]
     },
     {
-      "id": "lab-dev-manifest-fetch",
+      "id": "lab-reusable-workflow-gates",
       "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t-dev-push-publishes-dep-manifest",
-      "behaviour": "When no packed dependency manifest is stored for one of the newest commits on the first parent chain of a head's base, the CI lab scheduler fetches it before expanding test units: it finds the dev push run of the Tests workflow for that commit, downloads the run's dep-manifest-packed artifact with a token its own GitHub App scopes to actions read, and stores the packed file once at lab/manifests/<owner>--<name>/<commit>.json, so a stored commit is never fetched again. A commit without such a run or artifact, an expired artifact, an archive GitHub answers is gone and a manifest recorded for another commit fetch nothing; a refused request or an archive without a readable packed.json drops the head with its reason.",
-      "seam": "scripts.ci_lab.manifests.fetch over a fake GitHub client, scripts.ci_lab.manifests.Actions and Fetcher over mocked requests and App token minting, scripts.ci_lab.scheduler.StoredManifests over the local object store, scripts.ci_lab.scheduler.MirrorExpander.expand over a git origin fixture and scripts.ci_lab.scheduler.Scheduler.tick over fakeredis",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-expand-reusable-workflows",
+      "behaviour": "The CI lab scheduler's mirror expander reads every workflow file directly in the grader revision's workflow folder from the git mirror, and the worker's static executor reads them from the grader tree, and both pass them to static gate discovery, so a static job that calls a reusable workflow, the Tests workflow's semgrep job, expands into one static unit per gate step and runs on the worker instead of discovery refusing the head as cannot expand.",
+      "seam": "scripts.ci_lab.scheduler.MirrorExpander.expand over a git origin fixture holding the repository's real workflows and input key registry, and scripts.ci_lab.executors.gate over the repository tree",
       "tests": [
-        "tests/ci_lab/test_manifests.py::test_fetch_answers_the_packed_manifest_the_dev_push_tests_run_of_the_commit_kept",
-        "tests/ci_lab/test_manifests.py::test_fetch_answers_none_for_a_commit_whose_dev_push_run_kept_no_manifest",
-        "tests/ci_lab/test_manifests.py::test_fetch_never_downloads_an_expired_artifact_and_answers_none_for_one_whose_archive_is_gone",
-        "tests/ci_lab/test_manifests.py::test_fetch_passes_over_dead_artifacts_and_another_commits_manifest_to_the_next_live_one",
-        "tests/ci_lab/test_manifests.py::test_fetch_refuses_an_archive_without_a_readable_packed_manifest",
-        "tests/ci_lab/test_manifests.py::test_the_lab_reads_the_actions_api_with_a_token_that_carries_only_actions_read",
-        "tests/ci_lab/test_manifests.py::test_actions_answers_none_for_a_gone_archive_and_names_any_other_refused_request",
-        "tests/ci_lab/test_manifests.py::test_the_fetcher_reads_each_repository_through_one_reader_of_its_own",
-        "tests/ci_lab/test_scheduler.py::test_stored_manifests_fetch_a_newest_commit_stored_nowhere_and_keep_it_by_repository_and_commit",
-        "tests/ci_lab/test_scheduler.py::test_stored_manifests_fetch_only_the_newest_commits_of_the_chain",
-        "tests/ci_lab/test_scheduler.py::test_a_head_that_needs_test_units_expands_on_the_manifest_stored_from_its_base_dev_push_run",
-        "tests/ci_lab/test_scheduler.py::test_a_head_whose_manifest_fetch_github_refuses_is_dropped_with_its_reason"
+        "tests/ci_lab/test_scheduler.py::test_the_mirror_expander_expands_the_real_tests_workflow_with_its_reusable_workflows",
+        "tests/ci_lab/test_executors.py::test_gate_returns_a_gate_of_a_reusable_workflow_the_real_tests_workflow_calls"
       ]
     },
     {
@@ -8041,6 +8090,37 @@
         "tests/ci_lab/test_queue.py::test_leased_lists_each_leased_job_and_offers_keep_each_workers_latest_free_slots",
         "tests/ci_lab/test_leases.py::test_a_lease_poll_offers_the_workers_free_slots_while_it_waits_and_what_its_grants_leave",
         "tests/test_swarm_packaging.py::test_the_swarm_image_carries_the_locked_git_the_lab_mirror_expander_runs"
+      ]
+    },
+    {
+      "id": "lab-scheduler-reindex-on-start",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/ops-dr-rebuild",
+      "behaviour": "With CI_LAB_REINDEX_ON_START set to true the CI lab scheduler rebuilds its verdict index from the report objects in the bucket before it serves, so a scheduler restarted after a Redis loss answers its stored verdicts again, and it prints and flushes reindexed N verdicts with the number of index entries it added; unset or any other value starts the scheduler without a reindex and prints nothing.",
+      "seam": "scripts.ci_lab.scheduler.main over fakeredis and the local object store, with scripts.ci_lab.store.Store.reindex",
+      "tests": [
+        "tests/ci_lab/test_scheduler.py::test_main_rebuilds_the_verdict_index_before_serving_only_when_reindex_on_start_is_true"
+      ]
+    },
+    {
+      "id": "lab-dev-manifest-fetch",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-dev-push-publishes-dep-manifest",
+      "behaviour": "When no packed dependency manifest is stored for one of the newest commits on the first parent chain of a head's base, the CI lab scheduler fetches it before expanding test units: it finds the dev push run of the Tests workflow for that commit, downloads the run's dep-manifest-packed artifact with a token its own GitHub App scopes to actions read, and stores the packed file once at lab/manifests/<owner>--<name>/<commit>.json, so a stored commit is never fetched again. A commit without such a run or artifact, an expired artifact, an archive GitHub answers is gone and a manifest recorded for another commit fetch nothing; a refused request or an archive without a readable packed.json drops the head with its reason.",
+      "seam": "scripts.ci_lab.manifests.fetch over a fake GitHub client, scripts.ci_lab.manifests.Actions and Fetcher over mocked requests and App token minting, scripts.ci_lab.scheduler.StoredManifests over the local object store, scripts.ci_lab.scheduler.MirrorExpander.expand over a git origin fixture and scripts.ci_lab.scheduler.Scheduler.tick over fakeredis",
+      "tests": [
+        "tests/ci_lab/test_manifests.py::test_fetch_answers_the_packed_manifest_the_dev_push_tests_run_of_the_commit_kept",
+        "tests/ci_lab/test_manifests.py::test_fetch_answers_none_for_a_commit_whose_dev_push_run_kept_no_manifest",
+        "tests/ci_lab/test_manifests.py::test_fetch_never_downloads_an_expired_artifact_and_answers_none_for_one_whose_archive_is_gone",
+        "tests/ci_lab/test_manifests.py::test_fetch_passes_over_dead_artifacts_and_another_commits_manifest_to_the_next_live_one",
+        "tests/ci_lab/test_manifests.py::test_fetch_refuses_an_archive_without_a_readable_packed_manifest",
+        "tests/ci_lab/test_manifests.py::test_the_lab_reads_the_actions_api_with_a_token_that_carries_only_actions_read",
+        "tests/ci_lab/test_manifests.py::test_actions_answers_none_for_a_gone_archive_and_names_any_other_refused_request",
+        "tests/ci_lab/test_manifests.py::test_the_fetcher_reads_each_repository_through_one_reader_of_its_own",
+        "tests/ci_lab/test_scheduler.py::test_stored_manifests_fetch_a_newest_commit_stored_nowhere_and_keep_it_by_repository_and_commit",
+        "tests/ci_lab/test_scheduler.py::test_stored_manifests_fetch_only_the_newest_commits_of_the_chain",
+        "tests/ci_lab/test_scheduler.py::test_a_head_that_needs_test_units_expands_on_the_manifest_stored_from_its_base_dev_push_run",
+        "tests/ci_lab/test_scheduler.py::test_a_head_whose_manifest_fetch_github_refuses_is_dropped_with_its_reason"
       ]
     },
     {
@@ -8198,6 +8278,33 @@
         "tests/ci_lab/test_worker.py::test_the_worker_environment_keeps_only_the_service_contract_variables",
         "tests/ci_lab/test_worker.py::test_slots_come_from_the_cpu_quota_capped_by_ci_lab_slots",
         "tests/ci_lab/test_worker.py::test_build_makes_the_pod_worker_from_a_clean_environment_and_refuses_redis"
+      ]
+    },
+    {
+      "id": "lab-worker-executors",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2533",
+      "behaviour": "The CI lab queue stores the base and grader revision of every job a grade enqueues and the lease reply carries both; agentihooks ci-lab-worker builds the worker from the worker contract environment and runs each leased unit through the adapter of its kind: a static unit runs the gate it names from the grader tree's workflow over the head with the base and grader trees and inputs.base, a test unit runs its batch on the venv of the head's lockfile digest with the manifest and flake ledger, and a stats or mutant unit runs the mutation runner in the sandbox from a private trampolined tree of the head with the stats cache, kill memory, budget, cap and the tests the tree's stats records show reaching the mutant's function; each adapter answers a JSON report with the unit's seconds and releases every tree it cut, and SIGTERM stops the worker.",
+      "seam": "scripts.ci_lab.queue Queue.enqueue and job, scripts.ci_lab.leases Leases.lease, scripts.ci_lab.lease_api POST /lease, scripts.ci_lab.worker Client.lease, scripts.ci_lab.executors static, tests, mutation, executors, settings and main, and scripts.ci_lab.contract worker",
+      "tests": [
+        "tests/ci_lab/test_queue.py::test_enqueue_stores_the_base_and_grader_revision_each_job_reads",
+        "tests/ci_lab/test_leases.py::test_a_grant_carries_the_base_and_grader_revision_of_its_job",
+        "tests/ci_lab/test_lease_api.py::test_lease_returns_the_grant_payload",
+        "tests/ci_lab/test_scheduler.py::test_each_enqueued_job_carries_the_grades_base_and_its_plans_grader",
+        "tests/ci_lab/test_contract.py::test_the_worker_command_runs_the_service_and_keeps_the_self_test",
+        "tests/ci_lab/test_executors.py::test_static_runs_the_gate_the_grader_tree_names_over_the_head_with_its_base_and_grader_trees",
+        "tests/ci_lab/test_executors.py::test_static_answers_the_gates_verdict",
+        "tests/ci_lab/test_executors.py::test_static_releases_every_tree_it_leased_when_a_lease_or_the_gate_raises",
+        "tests/ci_lab/test_executors.py::test_tests_runs_the_batch_on_the_lockfile_venv_with_the_manifest_and_flake_ledger",
+        "tests/ci_lab/test_executors.py::test_mutation_runs_a_stats_unit_with_its_tree_as_root_and_the_stats_cache",
+        "tests/ci_lab/test_executors.py::test_mutation_grades_a_mutant_unit_with_the_tests_its_trees_stats_show_reaching_its_function",
+        "tests/ci_lab/test_executors.py::test_mutation_fails_a_mutant_unit_whose_runner_fails_or_whose_mutant_lives",
+        "tests/ci_lab/test_executors.py::test_mutation_drops_its_private_tree_when_the_runner_raises",
+        "tests/ci_lab/test_executors.py::test_covering_takes_each_test_a_stats_record_shows_reaching_the_function_with_its_seconds",
+        "tests/ci_lab/test_executors.py::test_function_of_names_the_function_a_mutant_mutates",
+        "tests/ci_lab/test_executors.py::test_executors_name_the_adapter_of_every_unit_kind",
+        "tests/ci_lab/test_executors.py::test_settings_read_the_worker_contract_environment",
+        "tests/ci_lab/test_executors.py::test_main_runs_the_worker_over_the_adapters_until_sigterm_stops_it"
       ]
     },
     {
@@ -8860,6 +8967,16 @@
         "tests/events/test_nats_lab_stream.py::test_the_lab_head_stream_takes_the_bus_dedupe_window",
         "tests/events/test_nats_lab_stream.py::test_the_memory_bus_keeps_lab_heads_on_their_own_log_with_its_dead_letters",
         "tests/hub/test_github_webhooks.py::test_main_wires_the_lab_intake_only_when_its_notice_secret_is_set"
+      ]
+    },
+    {
+      "id": "lab-head-durable-consumer",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2515",
+      "behaviour": "Every provisioning bus open creates the lab scheduler's ci-lab-scheduler durable consumer on the lab head stream, filtered on ci.lab.head.>, so the scheduler binds it in bind mode, where it never creates a consumer, and a head published while the scheduler is stopped is read after it restarts while a head it read and acknowledged before the stop is not read again.",
+      "seam": "scripts.events.nats NatsBus provisioning of LAB_CONSUMER on LAB_STREAM, read through scripts.ci_lab.scheduler BusInbox on the bind mode bus that scheduler main always opens, its lab_heads consumer of DURABLE and SUBJECT",
+      "tests": [
+        "tests/events/test_nats_lab_stream.py::test_a_bound_scheduler_reads_the_heads_published_while_it_was_stopped"
       ]
     },
     {
