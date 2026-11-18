@@ -147,4 +147,6 @@ def lab_reason(store: Any, slug: str, fix: str) -> Callable[[dict[str, Any]], st
     from scripts.swarm import lab_capacity
     from scripts.swarm.health import findings
 
-    return partial(ci_behind, reading=lab_capacity.status(store, slug), limit=findings.ci_behind_minutes(), fix=fix)
+    return partial(
+        ci_behind, reading=lab_capacity.status(store, slug) and None, limit=findings.ci_behind_minutes(), fix=fix
+    )
