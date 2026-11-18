@@ -17,7 +17,7 @@ import sys
 
 
 class Unshipped:
-    def find_spec(self, name, path=None, target=None):
+    def find_spec(self, name: str, path: object = None, target: object = None) -> None:
         if name == "tests" or name.startswith("tests."):
             raise ModuleNotFoundError(f"No module named {name!r}", name=name)
         return None

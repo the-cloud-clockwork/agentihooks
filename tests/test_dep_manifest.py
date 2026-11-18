@@ -48,7 +48,9 @@ def _step(job, name):
     return next(step for step in _job(job)["steps"] if step.get("name") == name)
 
 
-def _deselect_in_test_count(tmp_path, head_manifest, package="scripts"):
+def _deselect_in_test_count(
+    tmp_path: Path, head_manifest: str, package: str = "scripts"
+) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
     collected = ["tests/test_a.py::one", "tests/test_a.py::two", "tests/test_b.py::one", "tests/test_b.py::new"]
     reused = ["tests/test_a.py::one", "tests/test_a.py::two", "tests/test_b.py::one"]
     runner = tmp_path / "runner"
@@ -705,7 +707,7 @@ def test_the_split_deselects_the_same_tests_when_the_head_keeps_the_manifest_cod
 
 
 @pytest.mark.feature("lab-wheel-imports")
-def test_the_split_deselects_with_a_grader_that_keeps_the_manifest_under_tests(tmp_path):
+def test_the_split_deselects_with_a_grader_that_keeps_the_manifest_under_tests(tmp_path: Path) -> None:
     manifest = (ROOT / "scripts" / "dep_manifest.py").read_text()
     chosen, expected = _deselect_in_test_count(tmp_path, manifest, "tests")
     assert chosen == expected
