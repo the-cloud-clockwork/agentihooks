@@ -85,17 +85,39 @@ def alone(verdicts: Verdicts, entry: Entry) -> bool | None:
 
 def name(verdicts: Verdicts, group: str, entries: Sequence[Entry]) -> Finding | None:
     """Return the first entry red alone as the culprit, else an interaction of every entry; None while undecided."""
-    raise NotImplementedError
+    for entry in entries:
+        green = alone(verdicts, entry)
+        if green is None:
+            return None
+        if not green:
+            return Finding(CULPRIT, group, (entry.url,))
+    return Finding(INTERACTION, group, tuple(entry.url for entry in entries)) if entries else None
 
 
 def body(finding: Finding, details: str) -> str:
     """Return the comment the lab posts on each pull request a finding names."""
-    raise NotImplementedError
+    head = f"The lab graded the merge group at {finding.group} red."
+    leaves = "leaves the merge queue; the queue re-forms without it."
+    if finding.kind == CULPRIT:
+        found = f"Graded alone against dev from the lab's cache, {finding.removed} is red, so it is the culprit and {leaves}"
+    else:
+        named = ", ".join(finding.urls)
+        found = (
+            "Every entry is green alone against dev from the lab's cache, so the group is red only together: "
+            f"an interaction of {named}. {finding.removed} {leaves}"
+        )
+    return f"{head} {found}\n\nDetails: {details}"
 
 
 def observation(finding: Finding, comments: Sequence[str]) -> Observation:
     """Return the hub observation that the removed entry left the queue, carrying the culprit its event names."""
-    raise NotImplementedError
+    named: dict[str, object] = {
+        "kind": finding.kind,
+        "group": finding.group,
+        "urls": list(finding.urls),
+        "comments": list(comments),
+    }
+    return Observation(finding.removed, queued=False, culprit=named)
 
 
 class Culprits:
@@ -107,11 +129,16 @@ class Culprits:
 
     def comment(self, url: str, text: str) -> str:
         """Post a comment on the pull request at url; return the comment's html url."""
-        raise NotImplementedError
+        number = url.rsplit("/", 1)[-1]
+        posted = self._send(f"repos/{self.repo}/issues/{number}/comments", {"body": text}, CREATED)
+        return str(posted["html_url"])
 
     def dequeue(self, url: str) -> None:
         """Remove the pull request at url from its merge queue, so GitHub re-forms the groups behind it."""
-        raise NotImplementedError
+        pull = self._graphql(NODE, {"url": url})["resource"]
+        if pull is None:
+            raise PostRefused(f"GitHub has no pull request at {url}")
+        self._graphql(DEQUEUE, {"id": pull["id"]})
 
     def _graphql(self, query: str, variables: Mapping[str, str]) -> dict[str, Any]:
         """Send one GraphQL request; return its data, or raise PostRefused naming its errors."""
