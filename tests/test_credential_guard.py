@@ -401,6 +401,11 @@ GET_SECRET_VALUE_RENDERERS = [
     "R=secret; kubectl get --show-labels $R db -o yaml",
     "kubectl get --ignore-not-found $'secret' db -o yaml",
     "kubectl get -Ao yaml $R",
+    "kubectl get --client-key k $R db -o yaml",
+    "kubectl get --username u $R db -o yaml",
+    "kubectl get -An prod $R db -o yaml",
+    "kubectl get -L app $R db -o yaml",
+    "kubectl get --unknown-value v $R db -o yaml",
 ]
 
 GET_SECRET_KEYS_AND_NAMES = [
@@ -429,6 +434,9 @@ GET_SECRET_KEYS_AND_NAMES = [
     "kubectl get pods -n $NS --selector $SEL -o yaml",
     "kubectl get -n $NS pods -o yaml",
     "kubectl get -oyaml pods",
+    "kubectl get --client-key k pods -o yaml",
+    "kubectl get pod/$POD -o yaml",
+    "kubectl get pods -n",
 ]
 
 

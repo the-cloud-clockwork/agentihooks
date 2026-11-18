@@ -614,6 +614,13 @@ GET_VALUE_FLAGS = {
     "--request-timeout",
     "-v",
     "--cache-dir",
+    "--client-key",
+    "--client-certificate",
+    "--certificate-authority",
+    "--tls-server-name",
+    "--username",
+    "--password",
+    "--as-uid",
 }
 VALUELESS_OUTPUTS = {"", "name", "wide"}
 GO_TEMPLATE_OUTPUTS = {"go-template", "template"}
@@ -659,16 +666,18 @@ def prints_field_values(outputs: list[str], templates: list[str]) -> bool:
 def get_operands(words: list[str]) -> list[str]:
     """Positional words of a kubectl get; only a flag known to take a value, written without =, consumes the next."""
     operands: list[str] = []
-    taken = False
-    for word in words:
-        short = SHORT_OUTPUT.fullmatch(word)
-        if taken:
-            taken = False
-        elif word.startswith("-"):
-            taken = word in GET_VALUE_FLAGS or (short is not None and not short.group(1))
-        else:
+    remaining = iter(words)
+    for word in remaining:
+        if not word.startswith("-"):
             operands.append(word)
+        elif word in GET_VALUE_FLAGS:
+            next(remaining, None)
     return operands
+
+
+def leaves_type_to_shell(operands: list[str]) -> bool:
+    """True when a kubectl get names no operand, or leaves the type part of any operand to the shell."""
+    return not operands or any(UNSHOWN_TYPE.search(word.split("/")[0]) for word in operands)
 
 
 def prints_secret_values(words: list[str]) -> bool:
@@ -679,7 +688,7 @@ def prints_secret_values(words: list[str]) -> bool:
     if any(RAW_SECRET.search(raw) for raw in values["raw"]):
         return True
     rest = words[words.index("get") + 1 :]
-    named = any(names_secret(word) for word in rest) or hidden_type(get_operands(rest))
+    named = any(names_secret(word) for word in rest) or leaves_type_to_shell(get_operands(rest))
     return named and prints_field_values(values["output"], values["template"])
 
 
