@@ -97,6 +97,15 @@ class Ledger:
         """The ledger document with every row as it stands now."""
         return doc([dict(row) for row in self.rows.values()])
 
+    def tasks(self, slug: str) -> list[dict[str, Any]]:
+        """Every row as it stands now, as the tick reads them."""
+        return [dict(row) for row in self.rows.values()]
+
+    def task(self, slug: str, task_id: str) -> dict[str, Any] | None:
+        """One row as it stands now, or None when the ledger holds no such task."""
+        row = self.rows.get(task_id)
+        return None if row is None else dict(row)
+
     def update_task(
         self,
         slug: str,
