@@ -28,7 +28,7 @@ jobs:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "2"
         with:
           path: ${{ runner.temp }}/swarm-smoke-runtime-images
-          key: swarm-smoke-runtime-images-v1
+          key: swarm-smoke-runtime-images-v2
       - name: Load the saved runtime images
         run: |
           archive="$RUNNER_TEMP/swarm-smoke-runtime-images/images.tar"
@@ -38,7 +38,7 @@ jobs:
       - name: Pull the Python base with bounded retries
         env:
           PULL_REUSE_LOCAL: "true"
-        run: bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12-slim-bookworm
+        run: bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12.12-slim-bookworm
       - name: Restore the swarm smoke layers
         id: layers
         uses: actions/cache/restore@v4
@@ -103,6 +103,11 @@ jobs:
       - name: Run the pinned herdr and ssh clients inside the swarm image
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: bash scripts/packaging/swarm-image-clients.sh local/agentihooks-swarm:clients-check
+      - name: Import the lab scheduler's modules inside the swarm image
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          docker run --rm --network none --entrypoint python local/agentihooks-swarm:clients-check
+          -c 'import scripts.ci_lab.scheduler, scripts.ci_lab.interaction, scripts.ci_lab.expand_tests, scripts.ci_test_plan'
       - name: Keep the swarm smoke layers
         if: steps.layers.outputs.cache-hit != 'true'
         run: |
@@ -119,7 +124,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/swarm-smoke-runtime-images"
           docker save -o "$RUNNER_TEMP/swarm-smoke-runtime-images/images.tar" \
-            mirror.gcr.io/library/python:3.12-slim-bookworm \
+            mirror.gcr.io/library/python:3.12.12-slim-bookworm \
             public.ecr.aws/docker/library/redis:7 mirror.gcr.io/library/redis:7 \
             public.ecr.aws/docker/library/redis:7-alpine mirror.gcr.io/library/redis:7-alpine \
             public.ecr.aws/docker/library/nats:2.15.1-alpine mirror.gcr.io/library/nats:2.15.1-alpine
@@ -128,4 +133,4 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ${{ runner.temp }}/swarm-smoke-runtime-images
-          key: swarm-smoke-runtime-images-v1
+          key: swarm-smoke-runtime-images-v2

@@ -1,8 +1,14 @@
 import json
 
 from scripts.swarm import queue_record
-from scripts.swarm.queue_priority import ORDER, PENDING, apply, blocking
+from scripts.swarm.queue_priority import ORDER, apply
 from scripts.swarm.store import RedisStore
+
+PENDING = "queue-priority"
+
+
+def blocking(url: str, journal: queue_record.Journal) -> dict | None:
+    return None
 
 
 def request_held_on_the_head_run(
@@ -28,12 +34,3 @@ def request_applied_at_once(store: RedisStore, slug: str, url: str, sender: str,
         journal.write("priority-lift", url, "", None, None)
     # ok: merge-priority-request-holds-on-head-run
     return apply(store, slug, url, sender, tasks, journal)
-
-
-def replayed_by_the_refresh(store: RedisStore, slug: str, url: str, record: dict) -> None:
-    journal = queue_record.Journal(url)
-    # ok: merge-priority-request-holds-on-head-run
-    held = blocking(url, journal, record["group_head"])
-    if held is not None:
-        # ok: merge-priority-request-holds-on-head-run
-        store.redis.hset(store.key(slug, PENDING), url, json.dumps({**record, **held}))

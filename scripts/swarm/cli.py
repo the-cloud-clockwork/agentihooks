@@ -110,6 +110,7 @@ from scripts.swarm import (
     idle,
     launch_check,
     ledger_events,
+    linked_issues,
     master_launch,
     master_move,
     master_queue,
@@ -163,6 +164,7 @@ from scripts.swarm.status import (
     auto_snapshot,
     findings,
     live_agents,
+    section_lines,
     status_report,
     task_counts,
     transport,
@@ -1623,7 +1625,7 @@ def cmd_status(store: Any, args: Any) -> None:
 
     held += admission.status_lines(placement_waits.read(store, args.slug))
     held += master_refusals.status_lines(store, args.slug, now_ms())
-    held += hive_admission(store, config.slug)["lines"]
+    held += section_lines("hive admission", lambda: hive_admission(store, config.slug)["lines"])
     for line in ledger_freezes.lines(doc) + quota + held + outbox.status_lines():
         print(line)
     print(bottleneck.line(bottleneck.read(store, args.slug), now_ms()))
@@ -2029,7 +2031,10 @@ def publication_command(store: RedisStore, args: argparse.Namespace) -> dict:
         task = ledger.task(args.slug, agent.task) or {}
         if args.command == "prepare":
             return publish.prepare(args.slug, agent, repo, ledger)
-        return publish.publish(args.slug, agent, repo, ledger, args.message, args.files)
+        if args.direct and args.via != publish.LAB:
+            raise SwarmError("publish --direct goes with --via lab")
+        lab = publish.LabRoute(agent.task, args.direct) if args.via == publish.LAB else None
+        return publish.publish(args.slug, agent, repo, ledger, args.message, args.files, lab)
     except SwarmError as exc:
         branch = exc.branch if isinstance(exc, publish.PublicationRefusal) else publish.refusal_branch(Path(repo), task)
         syslog.openlog("agentihooks-swarm")
@@ -2075,8 +2080,10 @@ def cmd_pr(store: RedisStore, args: argparse.Namespace) -> None:
     ledger = LedgerClient()
     doc, row = _stamp_scope(ledger, args.slug, agent.task)
     keeps_main = args.prerequisite is not None and (row.get("pr_url") or args.url) != args.url
-    head, repo, number, sha = PullHead(*pull_branch(args.url))
+    head, repo, number, sha, body = PullHead(*pull_branch(args.url))
     pull_head.refuse_other_branch(row, args, PullHead(head, repo))
+    if not keeps_main:
+        linked_issues.refuse_unnamed(args.url, body, row, lambda member: ledger.task(args.slug, member))
     branch = {"branch": head, "branch_repo": repo} if head and not keeps_main else {}
     confirmed = {"pr_number": number, "pr_head": sha} if number and not keeps_main else {}
     fields = {"state": "pr", "awaiting": awaiting, **branch, **confirmed} | ({} if keeps_main else {"pr_url": args.url})
@@ -2829,6 +2836,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("prepare")
     publish = sub.add_parser("publish")
     publish.add_argument("--message", "-m", required=True)
+    publish.add_argument("--via", choices=["lab"], default="", help="grade HEAD on the lab remote before origin")
+    publish.add_argument("--direct", action="store_true", help="with --via lab, push origin without the lab grade")
     publish.add_argument("files", nargs="*")
     sub.add_parser("branch")
     sub.add_parser("review")

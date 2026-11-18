@@ -198,3 +198,32 @@ def test_talk_before_the_first_outcome_reads_as_none():
         marks.talk(worked)
     rows = [{"name": fresh, "lane": "eng"}, {"name": worked, "lane": "eng"}, {"name": master, "lane": "master"}]
     assert talk_since_outcome(store, "s", rows) == {fresh: 0, worked: 12}
+
+
+def test_a_status_section_the_redis_role_may_read_keeps_its_lines():
+    from scripts.swarm.status import section_lines
+
+    assert section_lines("hive admission", lambda: ["hive h1  admission room 2"]) == ["hive h1  admission room 2"]
+
+
+def test_a_status_section_the_redis_role_may_not_read_is_named_unreadable():
+    from redis.exceptions import NoPermissionError
+
+    from scripts.swarm.status import section_lines
+
+    def refused() -> list[str]:
+        raise NoPermissionError("No permissions to access a key")
+
+    assert section_lines("hive admission", refused) == ["hive admission unreadable: No permissions to access a key"]
+
+
+def test_a_status_section_lost_to_a_connection_error_still_raises():
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    from scripts.swarm.status import section_lines
+
+    def lost() -> list[str]:
+        raise RedisConnectionError("Connection refused")
+
+    with pytest.raises(RedisConnectionError):
+        section_lines("hive admission", lost)

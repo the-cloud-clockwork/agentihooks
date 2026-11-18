@@ -20,9 +20,14 @@ moved these steps onto the grader.
 removed the head copy fallback from the marker key vector step and the two
 chart steps. Each of those three steps now runs only the grader's copy of its
 script, and the head's copy never runs.
+[Pull request 12025](https://github.com/the-cloud-clockwork/agentihooks/pull/12025)
+made each chart step run the grader's copy over an empty tree first and refuse
+unless that copy reports no chart, so a copy that ignores `--root` fails
+closed instead of grading the base's own charts.
 
 The other lint gate steps are outside this page. Several of them look for
-their module in the grader and run the head's copy when it is missing; the
+their module in the grader and run the head's copy when it is missing. The
+[For loop word list gate](for-loop-word-list-gate.md) is one of them. The
 [Tick pattern gate](tick-pattern-gate.md) fails instead.
 
 For a pull request, the Tests workflow runs every step on this page unless the
@@ -96,8 +101,9 @@ fi
 
 The chart steps used the same shape and tested for `tree(argv)` in the
 grader's script. In that `else` branch a head could edit its own copy of the
-script to exit 0 and pass. Pull request 11387 removed the branch. The steps
-now read:
+script to exit 0 and pass. Pull request 11387 removed the branch, and pull
+request 12025 added the empty tree probe to the chart steps. The steps now
+read:
 
 ```bash
 # Refuse marker key vector drift from kernel dev
@@ -107,37 +113,47 @@ python -m scripts.ci_marker_vectors --root "$GITHUB_WORKSPACE" "$vectors"
 
 # A chart version bump leaves every pod template unchanged
 script=tests/ci_charts/chart_pod_templates.py
-python "$RUNNER_TEMP/grader/$script" --root "$GITHUB_WORKSPACE"
-
-# Charts render no CronJob outside the scheduler
-script=tests/ci_charts/chart_timers.py
+empty="$(mktemp -d -p "$RUNNER_TEMP")"
+if [[ "$(python "$RUNNER_TEMP/grader/$script" --root "$empty" 2>&1)" != *"No chart found under deploy"* ]]; then
+  echo "::error::The protected grader's copy of $script does not grade the tree --root names, so nothing trusted can grade the head's charts."
+  exit 1
+fi
 python "$RUNNER_TEMP/grader/$script" --root "$GITHUB_WORKSPACE"
 ```
+
+`Charts render no CronJob outside the scheduler` runs the same lines with
+`script=tests/ci_charts/chart_timers.py`.
 
 What each step does depends on the grader revision:
 
 | Grader revision | Marker vector step | Chart steps |
 | --- | --- | --- |
-| Carries `--root`, from pull request 11361 onwards | Grades the head's fixture | Grade the head's charts |
-| Predates pull request 11361 | argparse refuses the option: `error: unrecognized arguments: --root ...`, exit 2, red | The old scripts have no argument parser. They ignore `--root` and grade the grader's own charts under `deploy`, then exit 0 when those charts are clean. The head's charts are not graded |
-| Has no copy of the script | `No module named scripts.ci_marker_vectors`, exit 1, red | `can't open file ...: No such file or directory`, exit 2, red |
+| Carries `--root`, from pull request 11361 onwards | Grades the head's fixture | The probe prints `No chart found under deploy`, then the step grades the head's charts |
+| Predates pull request 11361 | argparse refuses the option: `error: unrecognized arguments: --root ...`, exit 2, red | The old scripts have no argument parser, so the probe grades the grader's own charts. The step prints `::error::The protected grader's copy of tests/ci_charts/<script> does not grade the tree --root names, ...` and exits 1, red. The head's charts are not graded |
+| Has no copy of the script | `No module named scripts.ci_marker_vectors`, exit 1, red | The probe gets `can't open file ...: No such file or directory`, and the step refuses with the same error, exit 1, red |
 
-### Stale base limit for the chart steps
+### Stale base on the chart steps
 
-On a base older than pull request 11361, the chart steps pass on the base's
-own charts. They do not fail closed. With such a grader and a head carrying a
-planted CronJob template, the timer check printed
+On a base older than pull request 11361, the grader's chart scripts ignore
+`--root` and grade the base's own charts under `deploy`. Before pull request
+12025 the chart steps passed on that verdict: with such a grader and a head
+carrying a planted CronJob template, the timer check printed
 `0 rendered CronJob objects and 0 failed renders across 11 renders of 1 charts.`
-and exited 0. The same head under the `dev` grader printed the CronJob and
-exited 1.
+and exited 0.
 
-The limit reaches only runs whose Semgrep `base` predates pull request 11361.
+Each chart step now runs the grader's copy over an empty temporary tree
+before it grades the head. A copy that grades the tree `--root` names prints
+`No chart found under deploy; the check graded nothing.` there. Any other
+output means the copy graded another tree, rejected `--root` or did not run,
+so the step refuses with exit 1 and the head's charts are not graded by it.
+
 A pull request into `dev` always grades its charts with the current `dev` tip,
-which carries `--root`. The limit applies to a pull request into another
-branch whose base predates 11361, and to a dispatch that passes an older
-`base`. The stale base tests for the chart steps use a stand-in grader script
-that parses arguments, so they pin the argparse refusal and do not exercise
-the old scripts.
+which carries `--root`. The refusal reaches a pull request into another
+branch whose base predates 11361, and a dispatch that passes an older
+`base`. The chart step tests run each step over two stand-in grader copies:
+one that rejects `--root` through argparse, and one that ignores its
+arguments, prints a clean summary and exits 0, the way the old scripts behave
+on a clean base.
 
 ### Stale base on the marker vector step
 
@@ -237,16 +253,17 @@ does not exist.
 | `<chart> with <values>: <Kind>/<name>` and `A pod template carries the chart version` | A pod template changes when only the chart version changes | Keep `helm.sh/chart` on object metadata, off the pod template |
 | `<chart> with <values> failed to render: ...` | `helm template` failed | Fix the template or values file it names |
 | An edit to the head's copy of one of these scripts changes nothing in the run | Only the grader's copy runs | Expected. The edit grades later pull requests once it merges into `dev` |
-| A chart step is green on a head with a broken chart | The Semgrep `base` predates pull request 11361 | See [Stale base limit for the chart steps](#stale-base-limit-for-the-chart-steps); run again with a base that carries `--root` |
+| `::error::The protected grader's copy of tests/ci_charts/<script> does not grade the tree --root names, ...`, exit 1 | The Semgrep `base` predates pull request 11361, or its grader has no copy of the script. See [Stale base on the chart steps](#stale-base-on-the-chart-steps) | Run again with a base that carries `--root`. A pull request into `dev` always grades with the `dev` tip |
 
 ## Tests and feature map
 
-The behaviour is pinned by two feature map entries in `feature-map.json`,
+The behaviour is pinned by three feature map entries in `feature-map.json`,
 with tests in `tests/test_ci_grader_gates.py`:
 
 | Feature | What its tests hold |
 | --- | --- |
-| `grader-gates-fail-closed-on-stale-base` | A stale grader copy that refuses `--root` fails the marker step and each chart step with exit 2, and a planted head copy that exits 0 never runs |
+| `grader-gates-fail-closed-on-stale-base` | A stale grader copy that refuses `--root` fails the marker step with exit 2 and each chart step with the refusal, exit 1, and a planted head copy that exits 0 never runs |
+| `chart-checks-refuse-a-grader-that-ignores-root` | A grader copy that ignores its arguments, prints a clean summary and exits 0 makes each chart step refuse with exit 1, and its summary never reaches the step output |
 | `lint-gates-grade-from-grader` | A head that drops a ruff rule, ships a shadow `ruff` package, changes the formatter config, or rewrites the wiring, marker or chart check to pass itself stays red. The marker check reads the fixture under its `--root` and runs after the grader checkout. Each Semgrep job checks out the caller's `base` as the grader and scans with both rule sets |
 
 `tests/context/test_marker_key_vectors.py::test_vector_check_is_on_the_required_tests_path`

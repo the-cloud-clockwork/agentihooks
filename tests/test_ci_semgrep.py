@@ -1,5 +1,6 @@
 import json
 import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -130,7 +131,7 @@ def test_outage_rules_for_tests_scan_every_test_file_with_the_head_and_the_grade
     assert _run_test_rules(tmp_path, graded=True) == (
         0,
         [
-            "scan --error --strict --metrics off --x-ignore-semgrepignore-files "
+            "scan --error --strict --timeout 30 --metrics off --x-ignore-semgrepignore-files "
             f"--config {rule} --config {tmp_path}/grader/{rule} tests"
         ],
     )
@@ -140,12 +141,27 @@ def test_outage_rules_for_tests_grade_with_the_head_copy_on_a_base_without_the_r
     rule = _test_rules_step()["env"]["RULES"]
     assert _run_test_rules(tmp_path, graded=False) == (
         0,
-        [f"scan --error --strict --metrics off --x-ignore-semgrepignore-files --config {rule} tests"],
+        [f"scan --error --strict --timeout 30 --metrics off --x-ignore-semgrepignore-files --config {rule} tests"],
     )
 
 
 def test_outage_rules_for_tests_fail_the_step_on_a_finding(tmp_path: Path) -> None:
     assert _run_test_rules(tmp_path, graded=True, scan_exit=1)[0] == 1
+
+
+def test_every_semgrep_scan_passes_an_explicit_timeout() -> None:
+    scans = [
+        (shlex.split(line, comments=True), step.get("env", {}))
+        for job in _jobs().values()
+        for step in job["steps"]
+        for line in step.get("run", "").splitlines()
+        if line.split()[:2] == ["semgrep", "scan"]
+    ]
+    assert "tests" in [words[-1] for words, _ in scans]
+    for words, env in scans:
+        assert "--timeout" in words[:-1], words
+        value = words[words.index("--timeout") + 1]
+        assert str(env.get(value.removeprefix("$"), value)).isdigit(), words
 
 
 def test_each_outage_rule_for_tests_reaches_the_tests_and_its_fixture() -> None:
@@ -397,6 +413,13 @@ def test_scan_reads_the_domain_rules_folder_that_holds_rule_files() -> None:
     assert any(_ROOT.glob(".semgrep/*.yml"))
     assert "semgrep --metrics off --test --config rules rules" in step["run"]
     assert '--config "$RUNNER_TEMP/grader/$RULES" --config "$RULES" .' in step["run"]
+
+
+def test_own_rules_scan_gives_each_rule_thirty_seconds_on_a_file() -> None:
+    step = next(
+        step for step in _jobs()["scan"]["steps"] if step.get("name") == "Own rules hold on their fixtures and the code"
+    )
+    assert "semgrep scan --error --strict --timeout 30 --metrics off" in step["run"]
 
 
 def test_scan_and_charts_run_on_the_select_runner_expression():

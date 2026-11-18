@@ -1,0 +1,6 @@
+{
+  "scripts/reused_coverage.py:scripts.reused_coverage.x_keep:b9a894d328b2eb5b40bc3073373cac43c0c163cc9a5793be3f007b67cf2830b8": {
+    "reader": "standards-reader",
+    "reason": "SQLite resolves the unquoted table name LINE_BITS the same as line_bits inside the f-string delete, so the loop deletes the same rows."
+  }
+}

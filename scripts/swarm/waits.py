@@ -7,6 +7,7 @@ through its inbox, which the wake ladder delivers. A bare minutes wait, checked 
 import json
 import re
 import subprocess
+import sys
 from collections.abc import Callable
 from typing import Any
 
@@ -78,10 +79,12 @@ def checks_resolution(held, github, reread=None):
     return f"{outcome}; {current.unpassed_gate} never passed" if current.unpassed_gate else outcome
 
 
-def required_green(target, head):
+def required_green(target: str, head: str) -> bool:
+    """Whether GitHub reads every required check of ``target`` passed on ``head``; logs the error a failed read holds on."""
     try:
         pull = merge_queue.required_view(target, subprocess.run)
-    except (SwarmError, KeyError, TypeError):
+    except (SwarmError, KeyError, TypeError) as exc:
+        print(f"required checks of {target} unread: {exc}", file=sys.stderr)
         return False
     return pull is not None and pull.head == head and pull.resolved and not pull.red
 
@@ -116,7 +119,8 @@ def target_problem(
     if kind == "merge":
         return "" if PULL_URL.fullmatch(target) else f"wait on merge needs a pull request url, not {target}"
     if kind == "lab":
-        return "" if lab_wait.CHECK_URL.fullmatch(target) else f"wait on lab needs a check run url, not {target}"
+        known = lab_wait.CHECK_URL.fullmatch(target) or lab_wait.GRADE_URL.fullmatch(target)
+        return "" if known else f"wait on lab needs a check run url or a lab grade url, not {target}"
     if kind == "intent":
         own = rows.get(mine, {}).get("pr_url")
         return (

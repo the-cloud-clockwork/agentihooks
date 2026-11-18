@@ -1308,6 +1308,28 @@ def _credential_guard(payload: dict, tool_name: str) -> tuple[dict, str] | None:
     return _credential_rewrite
 
 
+def _input_rewrite(payload: dict[str, Any], tool_name: str) -> tuple[dict[str, Any], str, str | None] | None:
+    """The credential guard's rewrite with its allow, else the calling agent's own Serena root with no decision.
+
+    Claude applies a rewrite that carries no decision and still runs its own permission rules on the changed input, so
+    the root leaves every prompt as it was. Auto mode carries none: its classifier reviewed the input Claude wrote.
+    """
+    from hooks.config import SERENA_EDIT_GUARD_ENABLED
+
+    rewrite: tuple[dict[str, Any], str] | None = _credential_guard(payload, tool_name)
+    if rewrite is not None:
+        return *rewrite, "allow"
+    if not SERENA_EDIT_GUARD_ENABLED or not tool_name.startswith("mcp__serena__"):
+        return None
+    from hooks.context.serena_binding import rewrite as serena_rewrite
+    from hooks.targets.capabilities import applies_input_rewrite
+
+    patch = serena_rewrite(payload)
+    if patch is None or not applies_input_rewrite() or payload.get("permission_mode") == "auto":
+        return None
+    return patch, "", None
+
+
 def _plan_read_guard(payload: dict, tool_name: str) -> None:
     try:
         from hooks.context.plan_read_guard import check as _plan_read_check
@@ -1325,7 +1347,7 @@ def _plan_read_guard(payload: dict, tool_name: str) -> None:
         log("plan_read_guard failed", {"error": str(e)})
 
 
-def _check_shell_guards(payload: dict) -> None:
+def _check_shell_guards(payload: dict[str, Any]) -> None:
     from hooks.context.local_test_guard import check_local_tests
     from hooks.context.swarm_wait_nudge import check_github_watch
 
@@ -1340,11 +1362,13 @@ def _check_shell_guards(payload: dict) -> None:
     try:
         from hooks.context.branch_guard import check_branch_guard, check_commit_on_main
         from hooks.context.master_coding import protection_refusal
+        from hooks.context.venv_guard import check_venv_guard
 
         check_branch_guard(payload)
         check_commit_on_main(payload)
         if refusal := protection_refusal(payload):
             raise BlockAction(refusal)
+        check_venv_guard(payload)
     except BlockAction:
         raise
     except Exception as e:
@@ -1643,7 +1667,7 @@ def on_pre_tool_use(payload: dict) -> None:
 
         log_new_entries(session_id, transcript_path)
 
-    _credential_rewrite = _credential_guard(payload, tool_name)
+    _input_patch = _input_rewrite(payload, tool_name)
     _plan_read_guard(payload, tool_name)
 
     if tool_name == "Read":
@@ -1813,12 +1837,12 @@ def on_pre_tool_use(payload: dict) -> None:
     _pretool_context = _fit_pretool(_pretool_blocks)
 
     _cond_decision = _conditions.decision if _conditions is not None else None
-    if _credential_rewrite or _cond_decision in ("allow", "ask"):
-        _updated, _note = _credential_rewrite or ({}, "")
-        _rewritten = bool(_credential_rewrite) or (_conditions is not None and _conditions.rewrite is not None)
+    if _input_patch or _cond_decision in ("allow", "ask"):
+        _updated, _note, _own = _input_patch or ({}, "", _cond_decision)
+        _rewritten = bool(_input_patch) or (_conditions is not None and _conditions.rewrite is not None)
         emit_permission_decision(
             "PreToolUse",
-            "ask" if _cond_decision == "ask" else "allow",
+            _cond_decision if _cond_decision in ("allow", "ask") else _own,
             "\n".join(r for r in (_note, _conditions.reason if _conditions is not None else "") if r),
             updated_input={**(payload.get("tool_input") or {}), **_updated} if _rewritten else None,
             additional_context=_pretool_context or None,
@@ -2632,13 +2656,16 @@ def on_permission_request(payload: dict) -> None:
 
 def emit_permission_decision(
     event_name: str,
-    decision: str,
+    decision: str | None,
     reason: str = "",
     *,
     updated_input: dict | None = None,
     additional_context: str | None = None,
 ) -> None:
     """Print a ``hookSpecificOutput.permissionDecision`` envelope.
+
+    A *decision* of None prints the envelope without one, so Claude applies *updated_input* and still runs its own
+    permission rules on it.
 
     The single legal call site for emitting a permission decision — route any
     future allow/deny/ask logic through here rather than printing directly.
@@ -2659,7 +2686,7 @@ def emit_permission_decision(
     from hooks.targets.capabilities import allowed_permission_decisions, arg_mutation_field, supports_arg_mutation
 
     target = current_target()
-    if decision not in allowed_permission_decisions(target):
+    if decision is not None and decision not in allowed_permission_decisions(target):
         log(
             "permission decision dropped — not allowed on this target",
             {"target": target, "event": event_name, "decision": decision},
@@ -2698,12 +2725,9 @@ def emit_permission_decision(
         )
         return
 
-    output = {
-        "hookSpecificOutput": {
-            "hookEventName": event_name,
-            "permissionDecision": decision,
-        }
-    }
+    output = {"hookSpecificOutput": {"hookEventName": event_name}}
+    if decision is not None:
+        output["hookSpecificOutput"]["permissionDecision"] = decision
     if reason:
         output["hookSpecificOutput"]["permissionDecisionReason"] = reason
     if updated_input is not None:

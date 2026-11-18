@@ -8,6 +8,7 @@ from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 
@@ -16,7 +17,7 @@ from scripts.gates import log as gate_log
 from scripts.gates.verdicts import Verdicts
 from scripts.inbox import wake
 from scripts.inbox.store import InboxStore
-from scripts.swarm import cli, commands, dispatcher, fencing, lease, metrics, publish, runtime, timer
+from scripts.swarm import cli, commands, dispatcher, fencing, lease, metrics, model_catalog, publish, runtime, timer
 from scripts.swarm.health import checks
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.resume import Outcome
@@ -2047,7 +2048,7 @@ def test_the_pull_request_head_branch_and_repository_are_read_through_the_port()
     ports, provider, reference = _pull_port("fork-owner/bundle", seen)
 
     head = cli.pull_branch("https://github.com/o/r/pull/3", ports)
-    assert head == ("engineer-a1b2c3-0001", "https://github.com/fork-owner/bundle", 3, "h")
+    assert head == ("engineer-a1b2c3-0001", "https://github.com/fork-owner/bundle", 3, "h", "")
     assert seen == ["https://github.com/o/r/pull/3"]
     [call] = provider.calls
     assert (call.operation, call.args) == ("change", (reference,))
@@ -2057,7 +2058,7 @@ def test_the_pull_request_head_branch_and_repository_are_read_through_the_port()
 def test_a_pull_request_without_a_head_repository_gives_the_branch_alone() -> None:
     ports, _, _ = _pull_port("")
 
-    assert cli.pull_branch("https://github.com/o/r/pull/3", ports) == ("engineer-a1b2c3-0001", "", 3, "h")
+    assert cli.pull_branch("https://github.com/o/r/pull/3", ports) == ("engineer-a1b2c3-0001", "", 3, "h", "")
 
 
 @pytest.mark.parametrize(
@@ -2510,8 +2511,11 @@ def test_create_with_an_unknown_template_is_refused(env, home):
     assert store.slugs() == []
 
 
-def test_set_changes_one_lane_field_and_refuses_a_bad_one(env, home):
+def test_set_changes_one_lane_field_and_refuses_a_bad_one(
+    env: tuple[RedisStore, Any, FakeRuntime], home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     store, _, _ = env
+    monkeypatch.setattr(model_catalog, "catalog", Mock(return_value={"claude": [{"model": "sonnet"}], "codex": []}))
     run("sw", "create", "--repo", "/repo")
     assert run("sw", "eng-model=sonnet", "eng-agent=claude") == 0
     eng = store.config("sw").lanes["eng"]
@@ -2521,8 +2525,11 @@ def test_set_changes_one_lane_field_and_refuses_a_bad_one(env, home):
     assert store.config("sw").lanes["eng"]["agent"] == "claude"
 
 
-def test_save_then_create_round_trips(env, home):
+def test_save_then_create_round_trips(
+    env: tuple[RedisStore, Any, FakeRuntime], home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     store, _, _ = env
+    monkeypatch.setattr(model_catalog, "catalog", Mock(return_value={"claude": [{"model": "sonnet"}], "codex": []}))
     run("sw", "create", "--repo", "/repo", "--template", "codex-ci", "--max-eng-agents", "3")
     run("sw", "set", "eng-model=sonnet", "eng-role=a reviewer", "compact-limit=300")
     assert run("sw", "save-template", "mine") == 0

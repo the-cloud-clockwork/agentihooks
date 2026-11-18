@@ -1,0 +1,6 @@
+{
+  "scripts/reused_coverage.py:scripts.reused_coverage.x_keep:900ef97c07cda28fdcf10640f85c488d099c284b0e0129b28b26054f594564f8": {
+    "reader": "standards-reader",
+    "reason": "SQLite keywords and unquoted identifiers, including table and column names, resolve case insensitively, so the uppercased select returns the same path and id pairs."
+  }
+}

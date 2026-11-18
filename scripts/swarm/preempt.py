@@ -9,7 +9,7 @@ from typing import Any
 
 from scripts.inbox import store as inbox_store
 from scripts.swarm import dispatcher, freeze, hash_pages
-from scripts.swarm.store import RedisStore
+from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm_ledger import ledger_rank
 from scripts.swarm_ledger.repository import hierarchy
 
@@ -136,7 +136,7 @@ def step(
                 asked[victim.name] = json.dumps([task["id"], now_ms])
                 redis.hset(store.key(slug, ASKED), victim.name, asked[victim.name])
                 redis.hset(store.key(slug, VICTIMS), victim.name, task["id"])
-                actions += _ask(inbox_store.InboxStore(redis), slug, lane, victim, task["id"])
+                actions += _ask(inbox_store.InboxStore(redis), slug, lane, victim, task["id"], now_ms)
     redis.delete(store.key(slug, WAITING))
     if waiting:
         redis.sadd(store.key(slug, WAITING), *waiting)
@@ -163,9 +163,11 @@ def _victim(holders, rows, doc, graph):
     return max(lower, key=lambda a: (ledger_rank.order(rows[a.task]), a.started_at), default=None)
 
 
-def _ask(inbox, slug, lane, victim, waiting):
+def _ask(
+    inbox: inbox_store.InboxStore, slug: str, lane: str, victim: AgentRecord, waiting: str, now_ms: int
+) -> list[str]:
     text = TEXT.format(slug=slug, waiting=waiting, lane=lane, task=victim.task)
-    item = inbox.send(SENDER, victim.name, text, ref=f"{REF}:{waiting}", task=victim.task)
+    item = inbox.send(SENDER, victim.name, text, ref=f"{REF}:{waiting}:{now_ms}", task=victim.task)
     return [f"asked {victim.name} to hand off task {victim.task} for urgent task {waiting} as message {item.id}"]
 
 

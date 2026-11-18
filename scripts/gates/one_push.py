@@ -7,6 +7,7 @@ import re
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
+from scripts.ci_lab.remote import checkout
 from scripts.gates.base import Decision, Who
 from scripts.gates.budget import Budget
 from scripts.gates.identity import program_index, simple_commands
@@ -111,6 +112,14 @@ def destinations(path, args):
     return {current if end in ("", "HEAD") else end for end in ends}
 
 
+def written(path: Path, args: list[str]) -> set[str]:
+    """The branches a push writes on GitHub: its destinations, or for a push to the lab the branches its push options
+    hand the relay to write on green."""
+    if positionals(args)[:1] == [checkout.REMOTE]:
+        return set(checkout.relayed(args))
+    return destinations(path, args)
+
+
 def open_refusal(slug, missing, held):
     owed = []
     if missing:
@@ -202,7 +211,8 @@ class OnePush:
         repo = repo_of(where, args)
         if repo and repo != found.group(1).lower():
             return ""
-        if task.get("branch") and task["branch"] not in destinations(where, args):
+        targets = written(where, args)
+        if not targets or (task.get("branch") and task["branch"] not in targets):
             return ""
         pull = self.github()(task["pr_url"])
         if pull is None or finished(pull):

@@ -34,6 +34,7 @@ class Job:
     outcome: str
     base: str = ""
     grader: str = ""
+    leased_ms: int = 0
 
 
 ENQUEUE = """
@@ -53,10 +54,15 @@ return 1
 
 CLAIM = """
 if redis.call('ZREM', KEYS[2], ARGV[1]) == 0 then return 0 end
-redis.call('HSET', KEYS[1], 'state', 'leased', 'worker', ARGV[2], 'token', ARGV[3])
+redis.call('HSET', KEYS[1], 'state', 'leased', 'worker', ARGV[2], 'token', ARGV[3], 'leased_ms', ARGV[5])
 redis.call('ZADD', KEYS[3], ARGV[4], ARGV[1])
 redis.call('SMOVE', KEYS[4], KEYS[5], ARGV[1])
 return 1
+"""
+
+TALLY = """
+if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
+return redis.call('HSETNX', KEYS[1], 'tallied:' .. ARGV[1], 1)
 """
 
 EXTEND = """
@@ -141,6 +147,7 @@ class Queue:
         self._reap = client.register_script(REAP)
         self._retry = client.register_script(RETRY)
         self._prune = client.register_script(PRUNE)
+        self._tally = client.register_script(TALLY)
 
     def enqueue(
         self,
@@ -204,15 +211,20 @@ class Queue:
             outcome=record["outcome"],
             base=record["base"],
             grader=record["grader"],
+            leased_ms=int(record.get("leased_ms", 0)),
         )
 
     def token(self, job: str) -> str:
         return str(self.client.hget(_job(job), "token") or "")
 
-    def claim(self, job: Job, worker: str, token: str, expires_ms: int) -> bool:
-        """Lease a pending job to the worker; only one caller ever wins it."""
+    def claim(self, job: Job, worker: str, token: str, expires_ms: int, leased_ms: int) -> bool:
+        """Lease a pending job to the worker from leased_ms; only one caller ever wins it."""
         keys = [_job(job.id), _key("pending"), _key("leased"), _head(job.head, "pending"), _head(job.head, "leased")]
-        return bool(self._claim(keys=keys, args=[job.id, worker, token, expires_ms]))
+        return bool(self._claim(keys=keys, args=[job.id, worker, token, expires_ms, leased_ms]))
+
+    def tally(self, job: Job) -> bool:
+        """Mark the job's finished attempt counted; True only for the first caller of that attempt."""
+        return bool(self._tally(keys=[_job(job.id)], args=[job.attempts]))
 
     def extend(self, job: str, token: str, expires_ms: int) -> bool:
         """Move the expiry of a lease the token holds."""
@@ -229,6 +241,10 @@ class Queue:
     def leased(self) -> list[str]:
         """Return every leased job, soonest expiry first."""
         return list(self.client.zrange(_key("leased"), 0, -1))
+
+    def holds(self, worker: str) -> bool:
+        """Whether the worker holds a live lease on any job."""
+        return any(self.client.hget(_job(job), "worker") == worker for job in self.leased())
 
     def offer(self, worker: str, free_slots: int, at_ms: int) -> None:
         """Record the free slots a worker offered on its latest lease poll and when."""

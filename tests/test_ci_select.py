@@ -63,6 +63,7 @@ def decide(root, changed, durations=None, limit=3):
         [".github/test-excludes.txt"],
         ["tests/__init__.py"],
         ["tests/shards.py"],
+        ["scripts/shard_sizing.py"],
         ["tests/flake_ledger.py"],
         ["tests/browser_coverage.py"],
         ["tests/node_capture.cjs"],
@@ -1121,6 +1122,21 @@ def test_a_recorded_method_unit_selects_its_test_by_the_file_before_the_first_se
         "tests": {"tests/test_box.py::test_size": {"units": [0]}, "tests/test_other.py::test_other": {"units": []}},
     }
     assert ci_select.recorded_tests(manifest, ["hooks/sample.py"]) == {"tests/test_box.py"}
+
+
+@pytest.mark.feature("selectors-read-outside-files")
+def test_a_change_to_a_file_a_test_opened_outside_its_record_selects_that_test_file() -> None:
+    manifest = {
+        "units": [],
+        "tests": {
+            "tests/test_a.py::test_one": {"units": [], "files": [], "outside": ["docs/a.md"]},
+            "tests/test_b.py::test_two": {"units": [], "files": ["docs/b.md"]},
+            "tests/test_c.py::test_three": {"units": []},
+        },
+    }
+    assert ci_select.recorded_tests(manifest, ["docs/a.md"]) == {"tests/test_a.py"}
+    assert ci_select.recorded_tests(manifest, ["docs/b.md"]) == {"tests/test_b.py"}
+    assert ci_select.recorded_tests(manifest, ["docs/other.md"]) == set()
 
 
 def test_main_reads_the_recorded_reads_for_a_change_without_python_source(repo, monkeypatch, tmp_path):

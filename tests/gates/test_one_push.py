@@ -16,6 +16,7 @@ from scripts.gates.one_push import (
     positionals,
     push_refusal,
     queue_refusal,
+    written,
 )
 from scripts.gates.subagents import SubagentBudget
 from scripts.gates.verdicts import Verdicts
@@ -405,6 +406,27 @@ def test_a_push_to_another_branch_passes_and_one_to_the_task_branch_is_held(tree
     assert gate(pull()).decide(bash("git push origin HEAD:wip/x", tree), ME, state(tmp_path)).allowed
     assert not gate(pull()).decide(bash("git push origin task", tree), ME, state(tmp_path)).allowed
     assert not gate(pull(), branch=None).decide(bash("git push origin HEAD:wip/x", tree), ME, state(tmp_path)).allowed
+
+
+@pytest.mark.feature("lab-remote-in-workspaces")
+def test_a_lab_push_writes_the_branch_its_push_option_hands_the_relay(tree: Path) -> None:
+    assert written(tree, ["-o", "branch=task", "lab", "HEAD:refs/grade/t1"]) == {"task"}
+    assert written(tree, ["lab", "HEAD:refs/grade/t1"]) == set()
+    assert written(tree, ["origin", "-o", "branch=x", "HEAD:refs/heads/y"]) == {"y"}
+    assert destinations(tree, ["-o", "branch=task", "lab", "HEAD:refs/grade/t1"]) == {"refs/grade/t1"}
+
+
+@pytest.mark.feature("lab-remote-in-workspaces")
+def test_a_lab_push_relaying_the_task_branch_is_held_while_checks_run(tree: Path, tmp_path: Path) -> None:
+    git(tree, "remote", "add", "lab", "http://lab.invalid/r.git")
+    relayed = gate(pull()).decide(bash("git push -o branch=task lab HEAD:refs/grade/t1", tree), ME, state(tmp_path))
+    assert relayed.reason == push_refusal("demo", URL)
+    assert not relayed.allowed
+    other = bash("git push -o branch=wip lab HEAD:refs/grade/t1", tree)
+    assert gate(pull()).decide(other, ME, state(tmp_path)).allowed
+    graded = bash("git push lab HEAD:refs/grade/t1", tree)
+    assert gate(pull(), branch="").decide(graded, ME, state(tmp_path)).allowed
+    assert not gate(pull(), branch="").decide(other, ME, state(tmp_path)).allowed
 
 
 def test_sessions_outside_a_worker_task_are_never_held(tree, tmp_path):

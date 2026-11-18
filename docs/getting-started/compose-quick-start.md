@@ -32,9 +32,9 @@ One run does the following, in order:
 
 1. Checks that `docker` is on the `PATH`, that the daemon answers `docker info` and that `docker compose version` works.
 2. Copies the Compose files packaged with AgentiHooks into `$AGENTIHOOKS_HOME/swarm-stack` (default `~/.agentihooks/swarm-stack`).
-3. On first use writes `.env` there, readable only by you: a random Redis password, a free ledger port (8765 when free), a free Redis port (6379 when free) and `SWARM_IMAGE_TAG=release`. It also writes `client.env`, the settings a shell needs to reach the stack.
-4. Runs `docker compose up --detach --wait` for `redis`, `nats` (the event bus, JetStream on the `nats-data` volume, reachable only inside the stack), `swarm` (the ledger server) and `controller`. The first run pulls the released images.
-5. Waits until all four services are healthy, up to `--timeout` seconds (default 300), then checks that the ledger's `/healthz` route answers and its home page is served.
+3. On first use writes `.env` there, readable only by you: a random Redis password, a free ledger port (8765 when free), a free Redis port (6379 when free), `SWARM_DEPLOYMENT=compose` and `SWARM_IMAGE_TAG=release`. It also writes `client.env`, the settings a shell needs to reach the stack. The `controller` and `hive` services take their deployment mode only from the stack's own `SWARM_DEPLOYMENT` (default `compose`), while `swarm` and `api` always run `local`, and the base stack services take their scheduler state backend only from `SWARM_SCHEDULER_STATE_BACKEND` (default `bus`), so an `AGENTIHOOKS_DEPLOYMENT` or `AGENTIHOOKS_SCHEDULER_STATE_BACKEND` in the shell that runs Compose never reaches them.
+4. Runs `docker compose up --detach --wait` for `redis`, `nats` (the event bus, JetStream on the `nats-data` volume, reachable only inside the stack), `swarm` (the read only ledger server), `api` (the ledger API service, which takes the page's writes), `front` (the nginx front on the ledger port, which sends `GET` and `HEAD` to `swarm` and every other method to `api`) and `controller`. The first run pulls the released images.
+5. Waits until `redis`, `nats`, `swarm`, `api` and `controller` are healthy, up to `--timeout` seconds (default 300), then checks that the ledger's `/healthz` route answers and its home page is served. Every client in the stack and on the host writes the ledger in process over the shared store; only the browser's writes pass through `front` to `api` ([Ledger write path](../reference/ledger-write-path.md)).
 6. Creates the swarm and its ledger inside the stack, paused. Without `--content`, the ledger holds one automatic phase titled after the `--plan` file, or after the name when there is no plan. Without `--repo`, the swarm works the current directory.
 
 | Option | Use |
@@ -120,7 +120,7 @@ The recording persists: later `agentihooks swarm init` runs without `--adopt` ke
 While `SWARM_ADOPT_LEDGER_DIR` is set:
 
 - Every Compose call on the stack adds `deploy/compose/adopt.yaml`. The `swarm` service runs as the recorded user and group, mounts the ledger folder at its own absolute path and the host `~/.agentihooks` at the same path, and shares the host PID and network namespaces, so server pidfiles stay valid on the host. It runs the ledger server under its reload supervisor from the recorded checkout with reload on, so a code reload hands the listening socket to a successor while the container keeps running, bound to 127.0.0.1:8765, against the recorded Redis, so every swarm keeps its ledger, inbox items and seats. Stop the legacy ledger container by its id before the bundle `swarm` service starts on that port.
-- The adopted `swarm` service sets `AGENTIHOOKS_BUS=memory` and `AGENTIHOOKS_SCHEDULER_STATE_BACKEND=redis` as fixed values, so a host shell or `.env` setting cannot change them. The base stack defaults to `AGENTIHOOKS_BUS=nats` at `nats://nats:4222`, set only through the stack's own `SWARM_BUS` and `SWARM_BUS_URL` so an agent shell's `AGENTIHOOKS_BUS*` values never reach it, and keeps scheduler state on that bus, but on the host network with `depends_on` reset no Compose `nats` service is reachable and the name `nats` does not resolve. The memory bus matches the workstation tick and inbox on the host, and scheduler state stays in the recorded Redis instead of a store local to one server process. The adopted server therefore neither relays ledger events to NATS nor consumes them; reach a NATS hub only from a stack without adoption or from a hive.
+- The adopted `swarm` service sets `AGENTIHOOKS_BUS=memory` and `AGENTIHOOKS_SCHEDULER_STATE_BACKEND=redis` as fixed values, so a host shell or `.env` setting cannot change them. The base stack defaults to `AGENTIHOOKS_BUS=nats` at `nats://nats:4222`, set only through the stack's own `SWARM_BUS` and `SWARM_BUS_URL` so an agent shell's `AGENTIHOOKS_BUS*` values never reach it, and keeps scheduler state on that bus through `SWARM_SCHEDULER_STATE_BACKEND`, default `bus`, but on the host network with `depends_on` reset no Compose `nats` service is reachable and the name `nats` does not resolve. The memory bus matches the workstation tick and inbox on the host, and scheduler state stays in the recorded Redis instead of a store local to one server process. The adopted server therefore neither relays ledger events to NATS nor consumes them; reach a NATS hub only from a stack without adoption or from a hive.
 - `agentihooks ledger serve --ensure` and `--stop` for the adopted folder, and the Doctor and watchdog restarts built on them, start and stop the bundle `swarm` service. The legacy `ledger` service of the `agentihooks-ledger` Compose project and the host process server are not started again.
 - A shared ledger folder other than the adopted one is refused with `the swarm stack adopts <adopted>, not <folder>; the legacy ledger service stays down`.
 - The stack Redis gives the `swarm` user every command except `FLUSHALL` and `FLUSHDB` (`+@all -flushall -flushdb`). Redis answers a flush with a `NOPERM` error, so the bundle cannot empty the shared Redis data it takes over. Hive member users keep `-@dangerous` and the `default` user stays off.
@@ -161,7 +161,7 @@ Hives join through the hosted join endpoint on the Anton Redis, set per hive wit
 cd "${AGENTIHOOKS_HOME:-$HOME/.agentihooks}/swarm-stack"
 project="$(sed -n 's/^SWARM_COMPOSE_PROJECT=//p' .env)"
 docker compose --project-name "${project:-agentihooks-swarm}" ps
-docker compose --project-name "${project:-agentihooks-swarm}" logs --tail 50 swarm controller redis
+docker compose --project-name "${project:-agentihooks-swarm}" logs --tail 50 swarm api front controller redis
 docker compose --project-name "${project:-agentihooks-swarm}" down
 ```
 
@@ -184,6 +184,7 @@ Swarm stack not ready: redis is created.
 | `the Docker Compose plugin is missing` | Install Docker Compose v2, the `docker compose` plugin |
 | `redis is <state>` | Read its logs; if the Redis port is in use, set `SWARM_REDIS_PORT` in `.env` to a free port and keep the original password |
 | `swarm is <state>` | Read its logs; the ledger server needs Redis healthy, and if the ledger port is in use, set `SWARM_PORT` in `.env` to a free port. With adoption recorded (see [Adopt an existing workstation ledger](#adopt-an-existing-workstation-ledger)), stop the legacy ledger container by its id first |
+| `api is <state>` | Read its logs; the ledger API service starts once Redis and NATS are healthy, so fix those first. On a SQLite stack it holds the data folder's writer lease and exits when another writer holds it |
 | `controller is <state>` | Read its logs; fix Redis and the ledger server first, since the controller starts after both are healthy |
 | `no prepared swarm Redis client to adopt` | Run `agentihooks swarm init --prepare-clients`, then `agentihooks swarm init --adopt` |
 | `the ledger page does not answer` | Read the ledger logs; the message names the route that did not answer or did not serve the ledger home page |
@@ -192,7 +193,7 @@ Swarm stack not ready: redis is created.
 
 ## Share one database across hosts
 
-Set `AGENTIHOOKS_SWARM_DATABASE_URL` to the shared Postgres connection URL and `AGENTIHOOKS_SWARM_REDIS_URL` to the shared Redis connection URL before initialization. Both URLs are retained in the private stack settings and generated client settings. Every ledger server, ledger API service and swarm engine must use the same database and Redis. Without the database setting, the ledger uses SQLite in `LEDGER_DIR`.
+Set `AGENTIHOOKS_SWARM_DATABASE_URL` to the shared Postgres connection URL and `AGENTIHOOKS_SWARM_REDIS_URL` to the shared Redis connection URL before initialization. Both URLs are retained in the private stack settings and generated client settings. Every ledger server, ledger API service and swarm engine must use the same database and Redis. Without the database setting, the ledger uses SQLite in `LEDGER_DIR`. The ledger API service creates the shared schema at start, so start it before any other writer on a new database.
 
 Supply credentials through environment settings or your secret manager. Hosted Kubernetes services use ExternalSecret references. Do not print connection URLs or paste generated client settings into chat. Keep TLS certificate verification enabled for remote connections.
 

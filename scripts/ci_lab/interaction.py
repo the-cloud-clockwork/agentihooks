@@ -4,8 +4,7 @@ from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final, Literal, cast
 
-from scripts import ci_select
-from tests import dep_manifest
+from scripts import ci_select, dep_manifest
 
 __all__ = [
     "FULL",
@@ -35,9 +34,9 @@ INVALIDATED = cast("Callable[[dict[str, Any], list[Change]], tuple[set[str], str
 class Group:
     """A merge group head.
 
-    changes is the group head's diff against dev and each entry holds the changes from dev to that entry's graded tree,
-    both as (path, dev text, head text). pyproject says whether a pyproject.toml change reaches every test, as
-    scripts.ci_select.pyproject_reaches_tests decides.
+    changes is the group head's diff against dev and each entry holds the changes of one first parent commit
+    between dev and the head against its own first parent, both as (path, old text, new text). pyproject says
+    whether a pyproject.toml change reaches every test, as scripts.ci_select.pyproject_reaches_tests decides.
     """
 
     changes: tuple[Change, ...]

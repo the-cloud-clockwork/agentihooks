@@ -17,6 +17,7 @@ from tests.helpers.seat import SLUG, seat_agent
 from tests.swarm.test_cli import env, run  # noqa: F401
 
 URL = "https://github.com/o/r/pull/3"
+REPO = "https://github.com/o/r"
 MINE = "engineer-a1b2c3-0001"
 
 
@@ -30,9 +31,9 @@ def _started(env: Any, monkeypatch: pytest.MonkeyPatch, pull: cli.PullHead) -> d
     return ledger.rows["t1"]
 
 
-def _ports(state: str, branch: str = MINE) -> Callable[[str], tuple[FakeSourceControl, ChangeRef]]:
+def _ports(state: str, branch: str = MINE, body: str = "") -> Callable[[str], tuple[FakeSourceControl, ChangeRef]]:
     reference = ChangeRef("o/r", 3)
-    change = ChangeState(reference, state, "abc123", "dev", False, "u", branch, "", False, "")
+    change = ChangeState(reference, state, "abc123", "dev", False, "u", branch, body, False, "")
     return lambda url: (FakeSourceControl({"change": change}), reference)
 
 
@@ -62,6 +63,59 @@ def test_swarm_pr_stores_the_confirmed_number_and_head(env: Any, monkeypatch: py
 
 def test_the_pull_branch_returns_the_number_and_head_of_an_open_pull_request() -> None:
     assert pull_head.pull_branch(URL, _ports("open")) == cli.PullHead(MINE, "", 3, "abc123")
+
+
+@pytest.mark.feature("swarm-pr-closes-only-named-issues")
+def test_the_pull_branch_returns_the_body_of_the_pull_request() -> None:
+    assert pull_head.pull_branch(URL, _ports("open", body="Closes #9")) == cli.PullHead(
+        MINE, "", 3, "abc123", "Closes #9"
+    )
+
+
+@pytest.mark.feature("swarm-pr-closes-only-named-issues")
+def test_swarm_pr_refuses_a_body_closing_an_issue_the_task_never_names(
+    env: Any,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    row = _started(env, monkeypatch, cli.PullHead(MINE, "", 3, "abc123", "Closes #5\nCloses #9"))
+    row.update(issue_url=f"{REPO}/issues/5", description="Fix the crash")
+    capsys.readouterr()
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "pr", URL) != 0
+    refusal = (
+        f"pull request {URL} closes {REPO}/issues/9, which this task neither records nor names in its description: "
+        "drop the closing keyword from the body, or record the task's own issue with swarm issue"
+    )
+    assert capsys.readouterr().err.strip().endswith(refusal)
+    assert not row.get("pr_url") and row["state"] != "pr"
+
+
+@pytest.mark.feature("swarm-pr-closes-only-named-issues")
+def test_swarm_pr_records_a_body_closing_issues_the_task_and_its_group_name(
+    env: Any,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    row = _started(env, monkeypatch, cli.PullHead(MINE, "", 3, "abc123", "Closes #5, closes #7, closes #9"))
+    row.update(issue_url=f"{REPO}/issues/5", description="Also fixes #7", group_members=["t2"])
+    rows = env[1].rows
+    rows["t2"]["issue_url"] = f"{REPO}/issues/9"
+    reads: list[tuple[str, str]] = []
+    monkeypatch.setattr(env[1], "task", lambda slug, task_id: reads.append((slug, task_id)) or rows.get(task_id))
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "pr", URL) == 0
+    assert (row["pr_url"], row["state"]) == (URL, "pr")
+    assert ("sw", "t2") in reads and {slug for slug, _ in reads} == {"sw"}
+
+
+@pytest.mark.feature("swarm-pr-closes-only-named-issues")
+def test_swarm_pr_records_a_prerequisite_without_checking_its_closing_keywords(
+    env: Any,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    final = "https://github.com/o/r/pull/1"
+    row = _started(env, monkeypatch, cli.PullHead(MINE, "", 3, "abc123", "Closes #9"))
+    row.update(issue_url=f"{REPO}/issues/5", pr_url=final)
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "pr", URL, "--prerequisite", "the schema") == 0
+    assert (row["pr_url"], row["pull_scopes"][URL]["kind"]) == (final, "prerequisite")
 
 
 def test_the_pull_branch_refuses_a_closed_pull_request() -> None:

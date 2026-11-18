@@ -14,16 +14,18 @@ PULL_SECONDS = 20
 
 
 class PullHead(NamedTuple):
-    """The head branch, its repository url, the number and the head commit of a pull request GitHub confirmed."""
+    """The head branch, its repository url, the number, the head commit and the body of a pull request GitHub
+    confirmed."""
 
     branch: str
     repo: str
     number: int = 0
     head: str = ""
+    body: str = ""
 
 
 def pull_branch(url: str, ports: Callable[[str], tuple[SourceControl, ChangeRef]] = stack.source_control) -> PullHead:
-    """Read an open pull request's head branch, repository url, number and head, refusing one GitHub does not
+    """Read an open pull request's head branch, repository url, number, head and body, refusing one GitHub does not
     confirm open."""
     try:
         provider, reference = ports(url)
@@ -34,7 +36,7 @@ def pull_branch(url: str, ports: Callable[[str], tuple[SourceControl, ChangeRef]
         raise SwarmError(f"pull request {url} is {change.state}, not open")
     host = url.split("/pull/")[0].rsplit("/", 2)[0]
     repo = f"{host}/{change.head_repository}" if change.head_repository else ""
-    return PullHead(change.head_branch, repo, change.reference.number, change.head)
+    return PullHead(change.head_branch, repo, change.reference.number, change.head, change.body)
 
 
 def refuse_other_branch(row: dict[str, Any], args: argparse.Namespace, pull: PullHead) -> None:

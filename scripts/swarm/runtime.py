@@ -735,7 +735,8 @@ class HerdrRuntime:
         if master_claude_login.enabled(slug, task.get("seat", ""), lane, harness or "claude"):
             return "subscription" if self._master_account_spent() else "interactive"
         explicit = task.get("route_kind")
-        if explicit or lane != MASTER or harness not in ("", "claude"):
+        front = front_door.holds(slug, task.get("seat", ""))
+        if explicit or lane != MASTER or harness not in ("", "claude") or not front:
             return explicit or "subscription"
         try:
             native_login.check(os.environ, "native", self.run)

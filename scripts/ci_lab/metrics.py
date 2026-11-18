@@ -2,14 +2,15 @@
 
 import hashlib
 import json
+import threading
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from math import inf, isfinite, isnan
-from typing import Protocol
+from typing import Any, Protocol
 from urllib.parse import urlsplit
 
-from scripts.ci_lab import contract
+from scripts.ci_lab import budget, caches, contract
 from scripts.ci_lab.capacity import Load, document, predicted_wait
 from scripts.ci_lab.delivery import CLASSES
 from scripts.swarm import metrics_outbox
@@ -26,6 +27,7 @@ __all__ = [
     "grade_row",
     "observe_load",
     "observe_records",
+    "observe_unit",
     "record",
     "respond",
     "serve",
@@ -144,17 +146,21 @@ def _sample(name: str, labels: tuple[tuple[str, str], ...], value: float) -> str
 
 
 class Registry:
-    """Current values of the contract metrics, rendered as Prometheus text."""
+    """Current values of the contract metrics, rendered as Prometheus text; the scheduler's pass thread and the
+    metrics port's request threads share one, so every read and write holds its lock."""
 
     def __init__(self) -> None:
         self.values: dict[str, dict[tuple[tuple[str, str], ...], float]] = {m.name: {} for m in CONTRACT}
+        self.lock = threading.Lock()
 
     def set(self, name: str, value: float, labels: Mapping[str, str] | None = None) -> None:
         """Set a gauge sample."""
         metric = BY_NAME[name]
         if metric.kind != "gauge" or isnan(value):
             raise ValueError(f"{name} takes only a gauge value that is a number")
-        self.values[name][_labels(metric, labels or {})] = float(value)
+        key = _labels(metric, labels or {})
+        with self.lock:
+            self.values[name][key] = float(value)
 
     def inc(self, name: str, value: float = 1.0, labels: Mapping[str, str] | None = None) -> None:
         """Add a non negative amount to a counter sample."""
@@ -162,21 +168,24 @@ class Registry:
         if metric.kind != "counter" or not isfinite(value) or value < 0:
             raise ValueError(f"{name} takes only non negative counter increments")
         key = _labels(metric, labels or {})
-        self.values[name][key] = self.values[name].get(key, 0.0) + float(value)
+        with self.lock:
+            self.values[name][key] = self.values[name].get(key, 0.0) + float(value)
 
     def render(self) -> str:
         """Prometheus text exposition: HELP and TYPE for every contract metric, samples only once observed."""
         lines: list[str] = []
-        for metric in CONTRACT:
-            lines.append(f"# HELP {metric.name} {metric.help}")
-            lines.append(f"# TYPE {metric.name} {metric.kind}")
-            samples = self.values[metric.name]
-            lines.extend(_sample(metric.name, labels, value) for labels, value in sorted(samples.items()))
+        with self.lock:
+            for metric in CONTRACT:
+                lines.append(f"# HELP {metric.name} {metric.help}")
+                lines.append(f"# TYPE {metric.name} {metric.kind}")
+                samples = self.values[metric.name]
+                lines.extend(_sample(metric.name, labels, value) for labels, value in sorted(samples.items()))
         return "\n".join(lines) + "\n"
 
 
 def observe_load(registry: Registry, load: Load) -> None:
-    """Set the queue, slot, predicted wait, budget and shed gauges from one load snapshot."""
+    """Set the queue, slot, predicted wait, budget, shed, wanted slot, ready worker and overdue unit gauges from one
+    load snapshot."""
     free = load.slots_free
     for name in CLASSES:
         labels = {"class": name}
@@ -189,6 +198,21 @@ def observe_load(registry: Registry, load: Load) -> None:
     registry.set("ci_lab_slots_total", load.slots_total)
     registry.set("ci_lab_slots_busy", load.slots_busy)
     registry.set("ci_lab_budget_fraction", load.budget_fraction)
+    registry.set(contract.SLOTS_WANTED, budget.slots_wanted(load.running_slots, load.pending_slots, load.shed))
+    registry.set(contract.WORKERS_READY, load.workers_ready)
+    registry.set(contract.UNITS_OVERDUE, load.overdue)
+
+
+def observe_unit(registry: Registry, priority: str, kind: str, slots: int, report: Mapping[str, Any]) -> None:
+    """Count a finished attempt's core seconds in its class and the worker cache lookups its report carries, and set
+    its kind's last duration when the report measured one."""
+    seconds = report.get("seconds")
+    registry.inc(contract.CORE_SECONDS_TOTAL, slots * float(seconds or 0.0), {"class": priority})
+    if seconds is not None:
+        registry.set(contract.UNIT_DURATION_SECONDS, float(seconds), {"kind": kind})
+    for cache, (hits, misses) in caches.read(report).items():
+        registry.inc(contract.CACHE_HITS_TOTAL, hits, {"cache": cache})
+        registry.inc(contract.CACHE_MISSES_TOTAL, misses, {"cache": cache})
 
 
 @dataclass(frozen=True)

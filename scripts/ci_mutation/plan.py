@@ -24,7 +24,7 @@ from scripts.ci_mutation.browser import needs_browser
 from scripts.ci_mutation.scope import discover_changes, graded_green, module_facts, own_bases, select_tests, test_file
 from scripts.ci_mutation.selection import file_seconds, mutation_counts, partition, stats_shards
 from scripts.ci_test_plan import find_record
-from tests.dep_manifest import (
+from scripts.dep_manifest import (
     GLOBAL_FILES,
     MEASURED,
     _git,
@@ -34,7 +34,7 @@ from tests.dep_manifest import (
     line_units,
     node,
 )
-from tests.dep_manifest import changes as recorded_changes
+from scripts.dep_manifest import changes as recorded_changes
 
 # Upper quartile of measured worker seconds per mutant; stored test timings did not predict the cost.
 MUTANT_SECONDS = 5.6
@@ -308,13 +308,14 @@ def new_functions(old: str | None, tree: ast.Module) -> set[str]:
     }
 
 
-def covering_tests(manifest: dict, units: set[int], paths: set[str]) -> set[str]:
+def covering_tests(manifest: dict[str, Any], units: set[int], paths: set[str]) -> set[str]:
     # A child process loads the selection light bootstrap, whose trampoline hit records nothing, so a test reaching
     # code only there never enters mutmut's statistics and grades nothing.
     return {
         node(test).partition("[")[0]
         for test, found in manifest["tests"].items()
-        if units.intersection(found["units"]) or paths.intersection(found.get("files", ()))
+        if units.intersection(found["units"])
+        or paths.intersection((*found.get("files", ()), *found.get("outside", ())))
     }
 
 
@@ -536,7 +537,7 @@ def table_reads(tree: ast.Module, tables: dict[str, bool]) -> set[int]:
 
 def line_covering_tests(
     root: Path,
-    manifest: dict,
+    manifest: dict[str, Any],
     changes: dict[str, set[int]],
     paths: set[str],
     direct: dict[str, list[str]] | None = None,
@@ -549,7 +550,7 @@ def line_covering_tests(
         for test, found in manifest["tests"].items()
         if test not in manifest["lines"]
         or fallback.intersection(found["units"])
-        or paths.intersection(found.get("files", ()))
+        or paths.intersection((*found.get("files", ()), *found.get("outside", ())))
         or any(changed.intersection(manifest["lines"][test].get(path, ())) for path, changed in lines.items())
         or any(
             path in manifest["lines"][test] and re.search(rf"\b{name}\b", file_text(root / test_file(test)))

@@ -131,7 +131,7 @@ def test_past_the_report_limit_the_master_hears_the_task_its_age_and_last_steps_
     assert "t1" in item.text and OWNER in item.text and " 90 minutes " in item.text
     assert "Last steps: pushed the red test; fixed the push guard; waiting on the queue. " in item.text
     assert item.text.startswith("Overrun on swarm sw: ") and " Only its context limit hands it off. " in item.text
-    assert (item.ref, item.task) == ("sw:overrun:t1", "t1")
+    assert (item.ref, item.task) == (f"sw:overrun:t1:{START}", "t1")
     assert actions == [f"overrun: told master@sw that {OWNER} has run 90 minutes on task t1"]
     assert swarm.agent_inbox() == []
     assert swarm.tick(REPORT + 10 * MINUTE) == []
@@ -193,6 +193,26 @@ def test_a_new_life_on_the_same_task_starts_its_own_clock() -> None:
     swarm.live = {successor}
     assert swarm.tick(REPORT + MINUTE) == []
     assert swarm.store.redis.hgetall(swarm.store.key(SLUG, overrun.KEY)) == {}
+
+
+@pytest.mark.feature("repeated-subject-notices-pass-the-seen-claim")
+def test_each_agent_overrun_on_one_task_passes_the_seen_claim() -> None:
+    """A successor that overruns the task its predecessor overran reaches the master through the seen claim."""
+    from scripts.inbox import seen
+
+    swarm = Swarm()
+    inbox = InboxStore(swarm.store.redis)
+    swarm.tick(REPORT)
+    (first,) = seen.claim(inbox, "master@sw")
+    swarm.store.drop_agent(SLUG, OWNER)
+    successor = "engineer@abc-0002"
+    swarm.store.put_agent(SLUG, AgentRecord(successor, "eng", "t1", seat=SEAT, started_at=REPORT))
+    swarm.ledger.rows["t1"]["claimed_by"] = successor
+    swarm.live = {successor}
+    swarm.tick(REPORT + REPORT_MS)
+    shown = seen.claim(inbox, "master@sw")
+    assert [item.ref for item in shown] == [f"sw:overrun:t1:{REPORT}"]
+    assert successor in shown[0].text and first.ref == f"sw:overrun:t1:{START}"
 
 
 def test_one_tick_reports_every_overrunning_agent_past_a_finished_one():
