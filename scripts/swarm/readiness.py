@@ -160,12 +160,13 @@ def placeable(task: Mapping[str, Any], hive: str, capabilities: Callable[[], Ite
 
 def rooted(task: Mapping[str, Any]) -> bool:
     """A task only the root hive takes: one pinned to it, or a workstation task pinned to no other hive."""
-    return False
+    return task.get("hive") == ROOT or (bool(task.get("workstation")) and not task.get("hive"))
 
 
 def root_waiting(view: Snapshot) -> int:
     """The claimable tasks only the root hive takes, each keeping one root slot from work any hive can run."""
-    return 0
+    rows: Any = view.rows
+    return sum(1 for task in rows.values() if rooted(task) and task.get("lane") and claimable(task, task["lane"], view))
 
 
 def fits(event: Envelope, hive: str, capabilities: Callable[[], Iterable[str]]) -> bool:
