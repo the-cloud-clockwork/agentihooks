@@ -767,6 +767,10 @@ head supersedes nothing until intake records the branch; expansion keys static g
 jobs the lab does not run yet pass by their frame and a push grade folds only the static gates; a
 rerequested grade reuses the finished jobs of its own head.
 
+Because a push grade folds only the static gates, the lab holds no full post merge grade of `dev`.
+[Post merge testing with automatic revert](../research/post-merge-testing.md) measures the red
+`dev` rate from the Tests workflow's runs on GitHub instead.
+
 ## Verdict store
 
 `scripts.ci_lab.store.Store` keeps one verdict per unit key, the key the

@@ -1,3 +1,9 @@
+---
+title: Post merge testing with automatic revert
+parent: Research
+nav_order: 1
+---
+
 # Post merge testing with automatic revert
 
 **Verdict: no go.** Dev is already red on 33.4 % of its graded pushes, and its newest graded head is red 29.9 % of the time. Merging on the lab's pull request verdict, grading dev after the merge and reverting the culprit automatically would raise that to an estimated 36.4 % to 46.5 % of the time, even if every revert were right. The blocking number is the red dev baseline. A culprit cannot be told apart from noise while a third of dev grades are red and half of the red streaks end on the next grade. The reversible first step is shadow culprit attribution on today's red dev pushes, which changes no merge path.
@@ -84,7 +90,7 @@ At the p90 verdict time, 7 merges sit on a culprit, and nearly one revert in fiv
 
 ## Gates that would make it safe
 
-Each gate is measured with the same commands, so the master can recheck it in a later window.
+Each gate is measured with the same commands, so the master can recheck it in a later window; [Rechecking in a later window](#rechecking-in-a-later-window) lists what to change.
 
 | Gate | Go when | Today | Command |
 |---|---|---|---|
@@ -404,3 +410,49 @@ git grep -l -i -E 'git revert|auto[ _-]?revert|culprit' origin/dev -- scripts ho
 ```text
 0
 ```
+
+## Rechecking in a later window
+
+The commands under [Method](#method) carry this window's dates, sample sizes and derived numbers as literals. A recheck sets each literal in the order below, because every derived number comes from an earlier command's output.
+
+| Literal | Where | Set it to |
+|---|---|---|
+| `created=2026-11-04..2026-11-17` | `WINDOW` in the downloads, and again inside the C1 loop | the new first and last UTC day, both included |
+| `--since=2026-11-04T00:00:00Z --until=2026-11-18T00:00:00Z` | C3 | midnight UTC at the start of the first day, and after the last day |
+| `336` | C4, merges per hour | hours in the window, 24 × days |
+| `25` | C5 | the red dev push sample, no larger than the C1 `push&branch=dev failure` count |
+| `36` | C7 | the cancelled merge group sample, no larger than the C2 `merge_group cancelled` count |
+| `66` | C9, twice | 2 × the C4 `verdict minutes p50` |
+| `114` | C9, three times | C2 `merge_group failure` + C2 `merge_group cancelled` × the C7 runs with a failed job other than the summary / the C7 sample |
+| `13 / 19` | C9 | the C8 rejects followed by at least one new commit / all C8 rejects |
+| `0.334` | C9 | the C1 red share: `push&branch=dev failure` / (`success` + `failure`) |
+| `943` | C9 | the C3 merge count |
+| `1.58` | C9 | the C4 `merges per graded push mean` |
+
+The commands depend on each other:
+
+- The downloads and C3 come first. C1 and C2 are counts that need nothing else.
+- C4 and C9 run in one Python session, because C9 reads C4's `pos`, `ctime`, `pairs`, `span` and `pct`. Append C9 to the C4 file and run it with `python3`.
+- C8 reads the `c7-jobs.jsonl` that C7 writes, and the `mg-failure.jsonl` and `mg-cancelled.jsonl` downloads.
+- C10 runs on its own over `dev-commits.txt` and `dev-push.jsonl`. It calls `git merge-tree` once per window merge for each of the four distances and once per green to red candidate, 3,860 merges in this window, all local.
+- C11 reads `origin/dev` and has no window.
+
+The GitHub reads cost about 130 REST calls at this window's run counts: 24 download pages of 100 runs, 9 counts in C1, one jobs read per sampled run in C5 and C7, and two reads per reject in C8. Every agent on a swarm hive shares one GitHub API limit, so read the remaining budget first and, on a rate limit error, wait for the reset it reports instead of retrying:
+
+```bash
+gh api rate_limit --jq '.resources.core | {remaining, reset}'
+```
+
+Before C4, compare every download with its C1 or C2 count. `mg-success.jsonl`, `mg-cancelled.jsonl` and `mg-failure.jsonl` each hold exactly their count; `dev-push.jsonl` holds no fewer lines than the three `push&branch=dev` counts together, because it also keeps runs with other conclusions:
+
+```bash
+wc -l dev-push.jsonl mg-success.jsonl mg-cancelled.jsonl mg-failure.jsonl
+```
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| A download is shorter than its count | GitHub lists at most 1,000 runs for a filtered [workflow runs](https://docs.github.com/en/rest/actions/workflow-runs) search; this window reached 942 green merge groups | Split `created` into two ranges, download each, and concatenate the files |
+| `mg-failure.jsonl` holds exactly 100 lines | Its download has no `--paginate`, because this window had 4 failed merge groups | Add `--paginate` to that download |
+| C4 or C10 stops with a `KeyError` on a head sha | A run created inside the window graded a commit made before `--since`, so the sha is missing from `pos` | Keep only those runs before sorting `graded`: `runs = [r for r in runs if r["head_sha"] in pos]` |
+
+A recheck changes the verdict only through [Gates that would make it safe](#gates-that-would-make-it-safe): compare each new value with its "Go when" column. [Reversible first step](#reversible-first-step) sets the rule for taking the question up again: shadow culprit attribution at least 95 % precise over 14 days, with the green dev baseline and the detection gates holding. C11 still finds no revert or culprit code on `dev`, so a recheck can move the baseline and detection rows, but nothing reopens the question until the shadow attribution runs.
