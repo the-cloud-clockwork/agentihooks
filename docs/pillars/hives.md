@@ -1886,8 +1886,11 @@ step; the hub reconciler and the lost hive rules above cover it.
 
 #### The stop and what the tick reports
 
-The stop is an `execution.stop` event published on the swarm's subject ending in `execution.stop.<hive>`, which
-only that hive reads. Its id is `stop:<started event id>`, and its data names the agent, the hive and the reason.
+The stop is an `execution.stop` event published on the swarm's stop stream, on the subject ending in
+`execution.stop.<hive>`, which only that hive reads: a member credential may fetch and acknowledge its own hive's
+stop consumer and no other, and only the hub publishes stops.
+[Execution stops](../reference/swarm-bus-scope.md#execution-stops) lists the stream, the consumer names and the
+grants. The stop's id is `stop:<started event id>`, and its data names the agent, the hive and the reason.
 The first stop sent for a hive creates that hive's durable stop consumer; until then the hive's stop reader finds
 nothing and tries again on its next pass.
 
