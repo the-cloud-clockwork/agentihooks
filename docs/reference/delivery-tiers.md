@@ -375,6 +375,44 @@ agentihooks swarm <slug> merge queue https://github.com/the-cloud-clockwork/agen
 
 For agentibrain-kernel, whose `dev` rules require `Gate — Required` reported by GitHub Actions (`gh api repos/the-cloud-clockwork/agentibrain-kernel/rules/branches/dev` lists it with `integration_id` 15368), the command grades that check, not a Tests run, and enqueues into the kernel's `dev` merge queue. A repository with no merge queue on `dev`, such as antoncore, takes the squash merge described above. The checks wait accepts a pull request or an Actions run in another repository the same way: `agentihooks swarm <slug> wait --on checks https://github.com/<owner>/<repo>/actions/runs/<id>` reads only that repository's run and, when it is red, its jobs.
 
+### Merge priority
+
+The master or the operator moves a green critical pull request ahead of the waiting entries of the `dev` merge queue:
+
+```bash
+agentihooks swarm <slug> merge priority https://github.com/<owner>/<repo>/pull/<number>
+```
+
+The priority applies when the command runs, also while a merge group's Tests run is building. The swarm stores no deferred priority and replays none.
+
+The command:
+
+1. Refuses every caller but the swarm's master seat and the operator with `only the master or the operator prioritizes the merge queue`.
+2. Takes the swarm's priority lock, the `queue-priority-active` key, for at most an hour. A holder on the same hive whose process has ended is cleared first. While another priority or the refresh requeue holds the lock, the command fails with `another merge queue priority is running; try again when it ends`.
+3. Reads the pull request and refuses, in this order: `queue priority requires an open pull request into dev`, `queue priority requires a ready pull request`, `queue priority requires a dev merge queue`, `staged compatibility: <reason>`, and `required checks on the current pull request head must pass before queueing`. A refused priority moves nothing and writes no journal record.
+4. Dequeues, tail first, every waiting (`QUEUED`) entry ahead of the pull request, and every waiting entry behind it when it is already queued. Entries whose merge group is building stay in place.
+5. Queues the pull request at its head when it is not in the queue. After a failed dequeue it does so only for a pull request that was queued when the command started and that the queue ejected during the pass. It then queues each displaced entry again at the head it had, in its original order, after that entry's own staged compatibility check. Restoring stops at the first refused entry.
+6. Marks the pull request head hotfix in the swarm's [CI lab](ci-lab.md#control-routes), even when a queue step failed, and writes the `priority` record with the queue steps and the lab's reply to the [queue journal](#the-queue-journal).
+7. Sends an information only inbox notice to the owner of each restored entry still working its task ([Merge priority owner notices](../pillars/swarm.md#merge-priority-owner-notices)).
+8. When a step failed, requeues the entries still left out at once, as below, and fails with the step errors joined by `; `.
+
+`--lift` is the operator's only; any other caller gets `only the operator lifts a running merge group priority hold`. It writes a `priority-lift` journal record before taking the lock, so a busy or refused priority can still leave one, then runs the same steps. The reorder is the same as without it: no building group leaves the queue.
+
+#### Entries an interrupted priority left out
+
+An entry the priority dequeued and could not queue again stays in the swarm's displaced set, the `queue-priority-displaced` key. The command retries it at once after a failed step, and the swarm refresh job the tick starts retries it on every run under the same lock, earliest displacement first. Each retry reads the pull request:
+
+| Pull request | Result |
+|---|---|
+| Closed, merged, no longer into `dev`, or already back in the queue | Dropped from the set with no record |
+| A draft, a moved head or a conflict with `dev` | Left out: a `priority-requeue-skipped` record carrying `reason`, one inbox notice to its owner, and dropped from the set |
+| Anything else | Queued again at its recorded head once its staged compatibility check passes: a `priority-requeue` record |
+| The read, the check or the enqueue fails | The entry stays for the next run and its owner gets one inbox notice per displacement. The refresh job also raises the ledger alert `merge-priority-requeue:<url>` naming the error |
+
+While a priority holds the lock, the refresh job reports `merge queue priority waits: another merge queue priority is running; try again when it ends` and retries on its next run.
+
+`tests/swarm/test_merge_queue_priority.py` and `tests/swarm/test_queue_priority.py` pin this behaviour. [Pull request 11818](https://github.com/the-cloud-clockwork/agentihooks/pull/11818) made the priority move the waiting entries at once, and [pull request 12065](https://github.com/the-cloud-clockwork/agentihooks/pull/12065) retired the replay of deferred priorities from the refresh.
+
 ## Lab merge group interaction rule
 
 For a `merge_group` head, the lab scheduler calls `scripts.ci_lab.interaction.decide` to choose between the test units the group's entries invalidate and the whole suite. A test unit is a test id of the manifest. The rule is pure. It reads the group's diff against `dev`, each entry's changes from `dev` to its graded tree, the dependency manifest of `scripts.dep_manifest`, the test units with a cached verdict, the entry limit and the `pyproject.toml` flag, which the caller computes with `scripts.ci_select.pyproject_reaches_tests`. It returns the unit set or `FULL`. `full_reason` names the clause that held, checked in this order:
@@ -1400,10 +1438,10 @@ Every record is one JSON line appended to `merge-queue-events.jsonl` in the Agen
 |---|---|---|
 | `queue` | `agentihooks swarm <slug> merge queue <url>`, the `ready` merge pass and the requeue sweep `python -m scripts.ci_requeue` | yes |
 | `dequeue` | `agentihooks swarm <slug> merge dequeue <url>` and the `ready` merge pass | yes |
-| `priority` | `agentihooks swarm <slug> merge priority <url>` when it reorders the queue | yes |
-| `priority-lift` | A priority request with `--lift` | no |
-| `priority-requeue` | The tick requeuing an entry an interrupted priority left out | no |
-| `priority-requeue-skipped` | The tick leaving such an entry out because it became a draft, its head moved or it conflicts with `dev` | no |
+| `priority` | `agentihooks swarm <slug> merge priority <url>` once the pull request passes every [refusal](#merge-priority), even when a queue step then fails | yes |
+| `priority-lift` | `merge priority --lift`, before the same reorder, which writes its own `priority` record | no |
+| `priority-requeue` | `merge priority` after a failed step, and the swarm refresh job the tick starts, requeuing an entry an interrupted priority left out | no |
+| `priority-requeue-skipped` | The same two writers leaving such an entry out because it became a draft, its head moved or it conflicts with `dev` | no |
 
 `merge state` writes nothing. A `queue` for a pull request already in the queue writes nothing, and neither does a `queue` into a repository with no `dev` merge queue, which squash merges instead.
 
@@ -1423,6 +1461,7 @@ Each record carries:
 | `gaps` | Why a queue read failed, as `queue unreadable: <error>` |
 | `errors` | The GitHub errors the mutation returned; the after read still runs when the mutation fails |
 | `steps` | `priority` only: each `["dequeue", url]`, `["queue", url]` and `["restore", url]` in the order sent |
+| `lab` | `priority` only: the [CI lab](ci-lab.md#control-routes) reply to the hotfix mark on the pull request head, or `{"error": why}` when the lab could not be told |
 
 Each queue group lists `pull`, `pull_head`, `position`, `state`, `jump`, `enqueued_at`, `enqueuer`, `head` (the merge group commit) and `base`. An entry still waiting for its group has a `null` head. `rebuilt`, `removed` and `added` appear only when both reads succeeded. Records from the `ready` merge pass also carry `swarm`, `task`, `timer` (the tick process ID) and `by: "merge watcher"`. A `queue` the master seat makes carries `route` and `task`: `spawn stall` while a spawn stall finding is open for a focused urgent task, or `master freeze` for a pull request whose head branch starts with `master-`, the worktree name code gives a master session's sub agents, and whose task, not done, a master seat froze by name; without either route the master is refused. `priority-requeue-skipped` carries `reason`.
 
