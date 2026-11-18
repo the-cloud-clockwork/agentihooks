@@ -14,8 +14,9 @@ import jsonschema
 import pytest
 import yaml
 
+from scripts import ci_wiring
 from scripts.ci_lab import __main__ as cli
-from scripts.ci_lab import budget, control, delivery, evidence, expand_tests, lease_api, queue, scheduler
+from scripts.ci_lab import budget, control, delivery, evidence, expand_tests, lease_api, queue, scheduler, static_gates
 from scripts.ci_lab.capacity import Load
 from scripts.ci_lab.checks import Output
 from scripts.ci_lab.delivery import CLASSES
@@ -1209,6 +1210,32 @@ def test_the_mirror_expander_fails_on_a_git_read_that_fails(tmp_path: Path, orig
         expander.expand(GradeRequest(f"file://{repo}", unregistered, base, Priority.PROMOTION, ACTOR, False))
     with pytest.raises(subprocess.CalledProcessError):
         expander.trusted(f"file://{tmp_path / 'missing'}")
+
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.mark.feature("lab-reusable-workflow-gates")
+def test_the_mirror_expander_expands_the_real_tests_workflow_with_its_reusable_workflows(tmp_path: Path) -> None:
+    repo = tmp_path / "origin"
+    _git(tmp_path, "init", "-q", "-b", "dev", str(repo))
+    workflows = ROOT / ".github" / "workflows"
+    registry = ROOT / ".github" / "input-keys.json"
+    tree = {f".github/workflows/{path.name}": path.read_text() for path in workflows.iterdir() if path.is_file()}
+    base = _commit(repo, {**tree, ".github/input-keys.json": registry.read_text(), "uv.lock": "lock"})
+    head = _commit(repo, {"src/a.py": "a = 1\n"})
+    node = tmp_path / "node"
+    _git(tmp_path, "init", "-q", "--bare", str(node))
+    expander = scheduler.MirrorExpander(
+        node, tmp_path / "stores", Toolchain("3.12", {}, "", "", "", {}), _no_tests, _unknown
+    )
+    found = expander.expand(GradeRequest(f"file://{repo}", head, base, Priority.PROMOTION, ACTOR, False))
+    text = (workflows / "test.yml").read_text()
+    expected: dict[str, list[str]] = {"unit": []}
+    for gate in static_gates.discover(text, json.loads(registry.read_text()), ci_wiring.load(ROOT)):
+        expected.setdefault(gate.job, []).append(gate.name)
+    assert {job: [name for item in units for name in item.members] for job, units in found.gates.items()} == expected
+    assert {"semgrep/scan", "semgrep/feature-tests", "semgrep/charts"} <= set(found.gates)
 
 
 ALPHA = "def first():\n    return 1\n\n\ndef second():\n    return 2\n"

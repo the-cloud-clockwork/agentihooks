@@ -8047,6 +8047,17 @@
       ]
     },
     {
+      "id": "lab-reusable-workflow-gates",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-expand-reusable-workflows",
+      "behaviour": "The CI lab scheduler's mirror expander reads every workflow file directly in the grader revision's workflow folder from the git mirror, and the worker's static executor reads them from the grader tree, and both pass them to static gate discovery, so a static job that calls a reusable workflow, the Tests workflow's semgrep job, expands into one static unit per gate step and runs on the worker instead of discovery refusing the head as cannot expand.",
+      "seam": "scripts.ci_lab.scheduler.MirrorExpander.expand over a git origin fixture holding the repository's real workflows and input key registry, and scripts.ci_lab.executors.gate over the repository tree",
+      "tests": [
+        "tests/ci_lab/test_scheduler.py::test_the_mirror_expander_expands_the_real_tests_workflow_with_its_reusable_workflows",
+        "tests/ci_lab/test_executors.py::test_gate_returns_a_gate_of_a_reusable_workflow_the_real_tests_workflow_calls"
+      ]
+    },
+    {
       "id": "lab-scheduler-service",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-ci-lab-scheduler-service",
