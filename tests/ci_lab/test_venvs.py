@@ -100,7 +100,7 @@ def test_the_baked_venv_lives_where_the_image_puts_it() -> None:
 
 def test_the_baked_venv_serves_a_matching_digest(tmp_path: Path, uv: Uv) -> None:
     baked = _baked(tmp_path, DIGEST)
-    assert venvs.venv_for(DIGEST, _tree(tmp_path), tmp_path / "venvs", _build(), baked) == baked
+    assert venvs.venv_for(DIGEST, _tree(tmp_path), tmp_path / "venvs", _build(), baked) == (baked, False)
     assert uv.seen() == []
     assert not (tmp_path / "venvs").exists()
 
@@ -110,7 +110,7 @@ def test_a_digest_the_baked_venv_lacks_builds_its_own_venv(tmp_path: Path, uv: U
     venv = tmp_path / "pod" / "venvs" / DIGEST
     tree = _tree(tmp_path)
     built = venvs.venv_for(DIGEST, tree, tmp_path / "pod" / "venvs", _build(), _baked(tmp_path, baked_digest))
-    assert built == venv
+    assert built == (venv, True)
     assert [_call(seen) for seen in uv.seen()] == [_sync(tree)]
     assert (venv / "lockfile.sha256").read_text() == f"{DIGEST}\n"
 
@@ -121,7 +121,7 @@ def test_a_build_hook_sees_only_the_whitelist_and_the_sandbox_environment(
     tmp_path: Path, uv: Uv, whitelist: dict[str, str]
 ) -> None:
     root = tmp_path / "venvs"
-    venv = venvs.venv_for(DIGEST, _tree(tmp_path), root, _build(whitelist), _baked(tmp_path, None))
+    venv, _ = venvs.venv_for(DIGEST, _tree(tmp_path), root, _build(whitelist), _baked(tmp_path, None))
     (seen,) = uv.seen()
     env = seen["env"]
     directory = Path(env["HOME"]).parent
@@ -135,11 +135,12 @@ def test_a_build_hook_sees_only_the_whitelist_and_the_sandbox_environment(
 def test_a_built_venv_is_reused_for_its_digest_only(tmp_path: Path, uv: Uv) -> None:
     baked = _baked(tmp_path, None)
     tree, other_tree = _tree(tmp_path), _tree(tmp_path, "other")
-    first = venvs.venv_for(DIGEST, tree, tmp_path / "venvs", _build(), baked)
-    again = venvs.venv_for(DIGEST, other_tree, tmp_path / "venvs", _build(), baked)
-    other = venvs.venv_for(OTHER, other_tree, tmp_path / "venvs", _build(), baked)
+    first, built = venvs.venv_for(DIGEST, tree, tmp_path / "venvs", _build(), baked)
+    again, rebuilt = venvs.venv_for(DIGEST, other_tree, tmp_path / "venvs", _build(), baked)
+    other, fresh = venvs.venv_for(OTHER, other_tree, tmp_path / "venvs", _build(), baked)
     assert first == again == tmp_path / "venvs" / DIGEST
     assert other == tmp_path / "venvs" / OTHER
+    assert (built, rebuilt, fresh) == (True, False, True)
     assert [_call(seen) for seen in uv.seen()] == [_sync(tree), _sync(other_tree)]
 
 
@@ -154,7 +155,7 @@ def test_a_failed_build_leaves_no_marker_and_builds_again(tmp_path: Path, uv: Uv
     (kept,) = (root / "builds").iterdir()
     assert (kept / "log.txt").read_text() == "uv answered 3\n"
     uv.answer()
-    assert venvs.venv_for(DIGEST, tree, root, _build(), baked) == root / DIGEST
+    assert venvs.venv_for(DIGEST, tree, root, _build(), baked) == (root / DIGEST, True)
     assert [_call(seen) for seen in uv.seen()] == [_sync(tree)] * 2
 
 
@@ -178,7 +179,7 @@ def test_a_second_caller_waits_for_the_running_build(tmp_path: Path, uv: Uv) -> 
     hold = tmp_path / "hold"
     uv.answer(hold=hold)
     baked, tree = _baked(tmp_path, None), _tree(tmp_path)
-    built: list[Path] = []
+    built: list[tuple[Path, bool]] = []
 
     def call() -> None:
         built.append(venvs.venv_for(DIGEST, tree, tmp_path / "venvs", _build(), baked))
@@ -195,5 +196,5 @@ def test_a_second_caller_waits_for_the_running_build(tmp_path: Path, uv: Uv) -> 
     hold.touch()
     first.join(10)
     second.join(10)
-    assert built == [tmp_path / "venvs" / DIGEST] * 2
+    assert sorted(built) == [(tmp_path / "venvs" / DIGEST, False), (tmp_path / "venvs" / DIGEST, True)]
     assert [_call(seen) for seen in uv.seen()] == [_sync(tree)]
