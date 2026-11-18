@@ -44,12 +44,6 @@ redis.call('PEXPIRE', KEYS[1], ARGV[3])
 return {1, held}
 """
 
-_PENDING = """
-local now = redis.call('TIME')
-local millis = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
-return redis.call('ZCOUNT', KEYS[1], '(' .. millis, '+inf')
-"""
-
 _RECORD = """
 local now = redis.call('TIME')
 local millis = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
@@ -59,6 +53,7 @@ redis.call('PEXPIRE', KEYS[1], ARGV[2])
 _ADMITTED = """
 redis.call('HINCRBY', KEYS[2], 'admitted', 1)
 """
+_UNBOUNDED = "+inf"
 
 
 @dataclass(frozen=True)
@@ -228,7 +223,10 @@ def record(redis: "Redis", machine: str, member: str, totals: str = "") -> None:
 
 
 def pending(redis: "Redis", machine: str) -> int:
-    return int(redis.eval(_PENDING, 1, key(machine)))
+    """Count the unexpired launch reservations on ``machine`` by the Redis server clock with read commands only. A
+    hive member may only read other hives' admission keys, and Redis declares every key an EVAL names written."""
+    seconds, micros = redis.time()  # pyright: ignore[reportUnknownMemberType]
+    return int(redis.zcount(key(machine), f"({seconds * 1000 + micros // 1000}", _UNBOUNDED))
 
 
 def release(redis: "Redis", machine: str, member: str) -> None:

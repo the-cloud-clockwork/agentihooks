@@ -13,7 +13,7 @@ import requests
 
 from scripts import github_app
 from scripts.ci_lab import manifests
-from scripts.ci_lab.manifests import Actions, Fetcher, FetchRefused
+from scripts.ci_lab.manifests import Actions, Fetcher, FetchRefused, FetchUnanswered
 
 COMMIT = "c" * 40
 OTHER = "d" * 40
@@ -220,6 +220,29 @@ def test_actions_answers_none_for_a_gone_archive_and_names_any_other_refused_req
     runs = call(f"{URL}{COMMIT_RUNS_PATH}", headers=HEADERS, timeout=30)
     assert get.call_args_list == [lists, downloads, downloads, downloads, runs, downloads]
     assert token.minted == len(answers)
+
+
+@pytest.mark.feature("lab-manifest-fetch-holds-head")
+def test_actions_marks_a_request_github_never_answered_or_answered_with_a_server_error_unanswered(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    get = Mock(side_effect=[answer(500), answer(599), answer(499), requests.ReadTimeout("read timed out")])
+    monkeypatch.setattr(requests, "get", get)
+    actions = Actions("example/repo", Token())
+    with pytest.raises(FetchUnanswered, match="^GET actions/artifacts/9/zip answered 500$"):
+        actions.archive(zipped(9))
+    with pytest.raises(FetchUnanswered, match=f"^GET actions/workflows/test.yml/runs\\?.*={COMMIT} answered 599$"):
+        actions.json(COMMIT_RUNS_PATH)
+    with pytest.raises(FetchRefused, match="^GET actions/artifacts/9/zip answered 499$") as client_error:
+        actions.archive(zipped(9))
+    assert not isinstance(client_error.value, FetchUnanswered)
+    with pytest.raises(FetchUnanswered, match="^GET actions/artifacts/9/zip failed: read timed out$"):
+        actions.archive(zipped(9))
+    with pytest.raises(FetchUnanswered, match="^GET actions/artifacts/9/zip failed: mint reset$"):
+        Actions("example/repo", Unminted()).archive(zipped(9))
+    with pytest.raises(FetchRefused, match="^actions/artifacts/5/zip holds no readable packed.json$") as unreadable:
+        manifests.fetch(github([1], {1: [artifact(5)]}, {5: b"not a zip"}), COMMIT)
+    assert not isinstance(unreadable.value, FetchUnanswered)
 
 
 @pytest.mark.feature("lab-dev-manifest-fetch")

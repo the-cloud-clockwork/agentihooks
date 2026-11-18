@@ -32,6 +32,16 @@
       ]
     },
     {
+      "id": "lab-scheduler-runs-relay",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-relay-in-scheduler",
+      "behaviour": "The lab scheduler service builds the lab relay once at start on its own lab heads consumer, the ci-lab-relay durable on ci.lab.head.notice that bus provisioning creates, and ticks it after each scheduler pass, printing every action the relay returns after the pass's own; the scheduler service contract names CI_LAB_URL, the lab url the relay builds its grade links from.",
+      "seam": "scripts.ci_lab.scheduler.serve and main, scripts.ci_lab.contract.SCHEDULER, scripts.events.nats.NatsBus provisioning",
+      "tests": [
+        "tests/ci_lab/test_scheduler.py::test_serve_ticks_the_relay_after_each_pass_and_prints_its_actions"
+      ]
+    },
+    {
       "id": "tick-status-publish-last-findings",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-status-publish-budget",
@@ -6464,6 +6474,16 @@
       ]
     },
     {
+      "id": "hive-member-reads-every-hive-pending-admission",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2555",
+      "behaviour": "A hive member reads the pending admission count of every hive, its own included, with plain read commands that its read only grant on the admission keys allows, so swarm status on a hive worker shows each hive's admission room instead of failing on a Redis key permission refusal.",
+      "seam": "admission.pending under the hive member Redis grant from auth._acl_keys",
+      "tests": [
+        "tests/hive/test_admission.py::test_a_hive_member_reads_every_hives_pending_admission_through_its_read_only_grant"
+      ]
+    },
+    {
       "id": "hive-run-order-receipt-outlives-order",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-run-order-receipt-expiry",
@@ -8558,7 +8578,7 @@
       "id": "lab-dev-manifest-fetch",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-dev-push-publishes-dep-manifest",
-      "behaviour": "When no packed dependency manifest is stored for one of the newest commits on the first parent chain of a head's base, the CI lab scheduler fetches it before expanding test units: it finds the dev push run of the Tests workflow for that commit, downloads the run's dep-manifest-packed artifact with a token its own GitHub App scopes to actions read, and stores the packed file once at lab/manifests/<owner>--<name>/<commit>.json, so a stored commit is never fetched again. A commit without such a run or artifact, an expired artifact, an archive GitHub answers is gone and a manifest recorded for another commit fetch nothing; a refused or unanswered request or an archive without a readable packed.json drops the head with its reason.",
+      "behaviour": "When no packed dependency manifest is stored for one of the newest commits on the first parent chain of a head's base, the CI lab scheduler fetches it before expanding test units: it finds the dev push run of the Tests workflow for that commit, downloads the run's dep-manifest-packed artifact with a token its own GitHub App scopes to actions read, and stores the packed file once at lab/manifests/<owner>--<name>/<commit>.json, so a stored commit is never fetched again. A commit without such a run or artifact, an expired artifact, an archive GitHub answers is gone and a manifest recorded for another commit fetch nothing; a request GitHub refuses with an answer other than a server error, or an archive without a readable packed.json, drops the head with its reason.",
       "seam": "scripts.ci_lab.manifests.fetch over a fake GitHub client, scripts.ci_lab.manifests.Actions and Fetcher over mocked requests and App token minting, scripts.ci_lab.scheduler.StoredManifests over the local object store, scripts.ci_lab.scheduler.MirrorExpander.expand over a git origin fixture and scripts.ci_lab.scheduler.Scheduler.tick over fakeredis",
       "tests": [
         "tests/ci_lab/test_manifests.py::test_fetch_answers_the_packed_manifest_the_dev_push_tests_run_of_the_commit_kept",
@@ -8573,6 +8593,18 @@
         "tests/ci_lab/test_scheduler.py::test_stored_manifests_fetch_only_the_newest_commits_of_the_chain",
         "tests/ci_lab/test_scheduler.py::test_a_head_that_needs_test_units_expands_on_the_manifest_stored_from_its_base_dev_push_run",
         "tests/ci_lab/test_scheduler.py::test_a_head_whose_manifest_fetch_github_refuses_is_dropped_with_its_reason"
+      ]
+    },
+    {
+      "id": "lab-manifest-fetch-holds-head",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2655",
+      "behaviour": "When GitHub never answers the CI lab scheduler's fetch of the packed dependency manifest a head's expansion needs, a request timeout or a token mint without an answer included, or answers it with a server error, the fetch raises FetchUnanswered and the scheduler keeps the head waiting in its lane with the quiet window restarted, so the first pass after that window fetches the manifest again and grades the head once GitHub answers. A definite missing manifest, none stored or fetched for the newest commits on the first parent chain of the head's base, still drops the head with its reason.",
+      "seam": "scripts.ci_lab.manifests.Actions over mocked requests and token minting, and scripts.ci_lab.scheduler.Scheduler.tick over fakeredis, with a scheduler.MirrorExpander over a git origin fixture reading scheduler.StoredManifests through manifests.Fetcher and Actions over mocked requests, and with an expander that raises an unanswered fetch and then a missing manifest",
+      "tests": [
+        "tests/ci_lab/test_manifests.py::test_actions_marks_a_request_github_never_answered_or_answered_with_a_server_error_unanswered",
+        "tests/ci_lab/test_scheduler.py::test_a_head_whose_manifest_fetch_times_out_waits_out_its_window_again_and_a_later_pass_grades_it",
+        "tests/ci_lab/test_scheduler.py::test_a_head_whose_manifest_fetch_github_answers_with_a_server_error_waits_until_a_pass_finds_no_manifest"
       ]
     },
     {
