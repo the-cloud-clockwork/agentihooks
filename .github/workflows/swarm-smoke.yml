@@ -74,7 +74,6 @@ jobs:
           bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/redis:7-alpine &&
             docker tag public.ecr.aws/docker/library/redis:7-alpine mirror.gcr.io/library/redis:7-alpine || status=$?
           wait "$redis" || status=$?
-          wait "$nats" || status=$?
           wait "$nginx" || status=$?
           wait "$build" || status=$?
           exit "$status"
