@@ -29,6 +29,7 @@ CAP_UNSENT = (
 MAX_UNSENT = 10_000
 BATCH = 100
 AUTHOR = "ledger"
+SMALL = "small"
 RESERVED = re.compile(r"[%.*>\s]")
 
 
@@ -48,7 +49,10 @@ def changed(before: dict, after: dict) -> list:
     return found
 
 
-def write(connection, slug: str, revision: int, before: dict, after: dict) -> None:
+def write(connection: Any, slug: str, revision: int, before: dict, after: dict) -> None:
+    """One relay row per changed task and phase, and none for a small ledger, which has no swarm stream to take them."""
+    if (after or before).get("size") == SMALL:
+        return
     for entity, key, item in changed(before, after):
         event = envelope.create(
             type=f"{entity}.{'removed' if item is None else 'changed'}",
