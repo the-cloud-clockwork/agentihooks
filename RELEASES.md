@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.1036 · 2026-11-18
+
+### 2026-11-18 · 34c3546f8ce7 · #12165 · @agenticore-app
+
+**Hive remove stops the hive and scheduler services on a machine hive host**
+
+This change adds a host step to `agentihooks hive remove`, running right after drain and before member, so that removing a hive now actually stops and disables its `agentihooks-hive.service` and `agentihooks-scheduler.service` on the owning machine via SSH. Previously this step was missing entirely, which let a retired automation VM keep the hive service running for days, hammering swarm Redis logins roughly 264,000 times. Unreachable hosts or pods without unit files are handled gracefully with clear messages, and later steps still proceed regardless.
+
 ## v2.17.1033 · 2026-11-18
 
 ### 2026-11-18 · 42eeef30506f · #12050 · @nestorcolt
