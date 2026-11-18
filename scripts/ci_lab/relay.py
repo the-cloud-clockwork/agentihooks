@@ -1,0 +1,295 @@
+"""The CI lab relay: a green grade of a `refs/grade/<task>` head pushed with a branch reaches GitHub.
+
+`Relay.tick` reads the lab remote's head notices from its own consumer and keeps each pushed `refs/grade/*` head that
+names a `branch=<name>` push option pending in Redis until a grade of that head closes. A green grade pushes the sha
+to `origin refs/heads/<branch>` with an App token holding contents write, never forced, posts the `lab/<gate>` check
+run of every gate and the required check, completed, with the grade's run and verdicts, and opens the branch's draft
+pull request into dev with a token holding pull requests write, or names the open one the push updated. A red grade
+relays nothing and names its failed units. A head whose grades were all superseded is dropped, and a relay GitHub
+refuses is named and dropped.
+"""
+
+import base64
+import json
+import os
+import subprocess
+from collections.abc import Callable, Mapping
+from dataclasses import asdict, dataclass
+from functools import partial
+from pathlib import Path
+from typing import Any, Protocol, cast
+from urllib.parse import urlsplit
+
+import requests
+
+from scripts.ci_lab import contract, evidence
+from scripts.ci_lab.checks import API, HEADERS, Checks, Output, PostRefused, Token, name
+from scripts.ci_lab.delivery import CLASSES
+from scripts.ci_lab.outcomes import PASSED
+from scripts.ci_lab.remote.post_receive import BRANCH, GRADE_REFS, LAB_URL
+from scripts.ci_lab.scheduler import MIRROR_STORE, REQUIRED, Poster, Scheduler, State
+from scripts.ci_lab.store import PREFIX
+from scripts.ci_lab.units import Unit
+from scripts.ci_lab.webhooks import HEAD_SUBJECT, NOTICE
+from scripts.ci_lab.worktrees import Mirror
+from scripts.events.bus import Consumer
+from scripts.github_app import GitHubAppAuth
+
+__all__ = [
+    "CONTENTS",
+    "DURABLE",
+    "PENDING",
+    "PULLS",
+    "SUBJECT",
+    "BusNotices",
+    "GitPusher",
+    "Pending",
+    "Ports",
+    "PullRequests",
+    "Relay",
+    "RelayRefused",
+    "build",
+    "closed",
+    "failed",
+    "output",
+    "pending",
+    "relay",
+]
+
+PENDING = f"{PREFIX}relay"
+DURABLE = "ci-lab-relay"
+SUBJECT = f"{HEAD_SUBJECT}.{NOTICE}"
+CONTENTS = {"contents": "write"}
+PULLS = {"pull_requests": "write"}
+GITHUB = "https://github.com/"
+DEV = "dev"
+SUCCESS = "success"
+TIMEOUT = 30
+ACCEPTED = (200, 201)
+BATCH = 50
+FETCH_MS = 100
+
+
+class RelayRefused(RuntimeError):
+    """GitHub refused a relay's push or pull request call."""
+
+
+@dataclass(frozen=True)
+class Pending:
+    """A pushed grade ref head waiting for its grade: its repository, sha, grade ref and the branch it relays to."""
+
+    repo: str
+    head: str
+    ref: str
+    branch: str
+
+
+class Pusher(Protocol):
+    """What puts a graded sha on a GitHub branch."""
+
+    def push(self, sha: str, branch: str) -> None:
+        """Point the branch at the sha by a fast forward only."""
+        ...
+
+
+class Pulls(Protocol):
+    """What opens or finds a branch's pull request."""
+
+    def open(self, branch: str, title: str, body: str) -> str:
+        """Open the branch's draft pull request, or find its open one; return which and its url."""
+        ...
+
+
+class Notices(Protocol):
+    """Where pending relays come from."""
+
+    def pending(self) -> list[Pending]:
+        """Return the relays the notices since the last call name."""
+        ...
+
+
+@dataclass(frozen=True)
+class Ports:
+    """The relay's outside world: a pusher per repository URL, and check runs and pull requests per owner/name."""
+
+    pusher: Callable[[str], Pusher]
+    checks: Callable[[str], Poster]
+    pulls: Callable[[str], Pulls]
+
+
+def _slug(repo: str) -> str:
+    """Return owner/name of a repository URL."""
+    return urlsplit(repo).path.removeprefix("/")
+
+
+def pending(data: Mapping[str, Any]) -> Pending | None:
+    """Return the relay a head notice's data names: a pushed refs/grade/* head with a branch, else None."""
+    ref, branch = data.get("ref"), data.get(BRANCH)
+    if not isinstance(ref, str) or not ref.startswith(GRADE_REFS) or not branch:
+        return None
+    return Pending(str(data["repo"]), str(data["head"]), ref, str(branch))
+
+
+def failed(state: State) -> list[str]:
+    """Return the refs of a grade's units whose outcome is not passed, in grade order."""
+    return [ref for ref, slot in state.units.items() if slot.outcome != PASSED]
+
+
+def output(state: State, check: str, lab: str) -> Output:
+    """Return a relayed check run's output: the check's units, the grade run, the grader revision and the grade page."""
+    refs = list(state.units) if check == REQUIRED else state.gates[check]
+    units = tuple(Unit(slot.kind, slot.key, tuple(slot.members)) for slot in (state.units[ref] for ref in refs))
+    summary = f"{len(units)} units of {check} on {state.head} against {state.base}, relayed from the lab grade"
+    details = f"{lab}/grades/{state.head}"
+    return Output(f"{CLASSES[state.tier]} grade relayed", summary, units, state.run, state.grader, details)
+
+
+def relay(state: State, branch: str, ports: Ports, lab: str) -> list[str]:
+    """Relay a closed grade: a green one pushes the sha to the branch, posts every check run completed and opens the
+    draft pull request, in that order; a red one relays nothing and names its failed units."""
+    if state.conclusion != SUCCESS:
+        units = ", ".join(failed(state)) or "none"
+        return [f"held {state.head} for {branch}: grade {state.run} is {state.conclusion}, failed units {units}"]
+    slug = _slug(state.repo)
+    ports.pusher(state.repo).push(state.head, branch)
+    actions = [f"pushed {state.head} to {branch}"]
+    poster = ports.checks(slug)
+    for check, (_, conclusion) in state.posted.items():
+        poster.post(state.head, check, "completed", conclusion, output(state, check, lab), False)
+        actions.append(f"posted {name(check, False)} {conclusion} on {state.head}")
+    body = f"Relayed by the CI lab from grade {state.run}: {lab}/grades/{state.head}"
+    actions.append(ports.pulls(slug).open(branch, branch, body))
+    return actions
+
+
+class Relay:
+    """The relay's pending heads in Redis, read from its notices and relayed once a grade of each closes."""
+
+    def __init__(
+        self, client: Any, notices: Notices, grades: Callable[[str], list[State]], ports: Ports, lab: str
+    ) -> None:
+        self.client = client
+        self.notices = notices
+        self.grades = grades
+        self.ports = ports
+        self.lab = lab
+
+    def tick(self) -> list[str]:
+        """Record the new notices' relays, then relay each pending head a closed grade answers and forget it."""
+        actions: list[str] = []
+        for item in self.notices.pending():
+            self.client.hset(PENDING, item.head, json.dumps(asdict(item)))
+            actions.append(f"pending {item.head} for {item.branch}")
+        for head, raw in sorted(self.client.hgetall(PENDING).items()):
+            states = self.grades(head)
+            if states:
+                self.client.hdel(PENDING, head)
+                actions.extend(self._relay(Pending(**json.loads(raw)), states))
+        return actions
+
+    def _relay(self, item: Pending, states: list[State]) -> list[str]:
+        """Relay a head's green grade, else hold its red one; drop a head whose grades were all superseded."""
+        live = [state for state in states if not state.superseded]
+        if not live:
+            return [f"dropped {item.head} for {item.branch}: every grade superseded"]
+        state = next((state for state in live if state.conclusion == SUCCESS), live[0])
+        try:
+            return relay(state, item.branch, self.ports, self.lab)
+        except (RelayRefused, PostRefused) as error:
+            return [f"refused {item.head} for {item.branch}: {error}"]
+
+
+class BusNotices:
+    """Relays read from the bus consumer of lab head notices, each envelope acknowledged once read."""
+
+    def __init__(self, consumer: Consumer) -> None:
+        self.consumer = consumer
+
+    def pending(self) -> list[Pending]:
+        """Return the relays of the next batch of notices."""
+        found: list[Pending] = []
+        for delivery in self.consumer.fetch(BATCH, FETCH_MS):
+            item = pending(cast(Mapping[str, Any], delivery.event.data))
+            if item is not None:
+                found.append(item)
+            delivery.ack()
+        return found
+
+
+class GitPusher:
+    """Pushes a graded sha from the lab's git mirror to a GitHub branch with an App token holding contents write."""
+
+    def __init__(self, mirror: Mirror, slug: str, auth: Token | None = None) -> None:
+        self.mirror = mirror
+        self.slug = slug
+        self.auth: Token = auth if auth is not None else GitHubAppAuth(f"github.com/{slug}", permissions=CONTENTS)
+
+    def push(self, sha: str, branch: str) -> None:
+        """Make the sha present in the mirror's store and push it to the branch, never forced, with the token passed
+        through git's environment config; raise RelayRefused with git's reason on a refusal."""
+        self.mirror.fetch(sha)
+        secret = base64.b64encode(f"x-access-token:{self.auth.get_token()}".encode()).decode()
+        environ = {
+            **os.environ,
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": f"http.{GITHUB}.extraheader",
+            "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {secret}",
+            "GIT_TERMINAL_PROMPT": "0",
+        }
+        argv = ["git", "-C", str(self.mirror.store), "push", f"{GITHUB}{self.slug}.git", f"{sha}:refs/heads/{branch}"]
+        done = subprocess.run(argv, env=environ, capture_output=True, text=True, check=False)
+        if done.returncode != 0:
+            raise RelayRefused(f"git push of {sha} to {branch} answered {done.returncode}: {done.stderr.strip()}")
+
+
+class PullRequests:
+    """A repository's pull requests through the App with a token holding pull requests write."""
+
+    def __init__(self, slug: str, auth: Token | None = None) -> None:
+        self.slug = slug
+        self.auth: Token = auth if auth is not None else GitHubAppAuth(f"github.com/{slug}", permissions=PULLS)
+
+    def open(self, branch: str, title: str, body: str) -> str:
+        """Name the branch's open pull request the push updated, else open its draft into dev; return which and its
+        url."""
+        owner = self.slug.partition("/")[0]
+        found = self._send("GET", {"head": f"{owner}:{branch}", "state": "open"}, None)
+        if found:
+            return f"updated {found[0]['html_url']}"
+        made = self._send("POST", None, {"title": title, "head": branch, "base": DEV, "body": body, "draft": True})
+        return f"opened {made['html_url']}"
+
+    def _send(self, method: str, params: Mapping[str, str] | None, body: Mapping[str, Any] | None) -> Any:
+        """Send one pulls request with a fresh token and return its JSON; raise RelayRefused naming a refused one."""
+        response = requests.request(
+            method,
+            f"{API}/repos/{self.slug}/pulls",
+            headers={"Authorization": f"Bearer {self.auth.get_token()}", **HEADERS},
+            params=params,
+            json=body,
+            timeout=TIMEOUT,
+        )
+        if response.status_code not in ACCEPTED:
+            raise RelayRefused(f"{method} pulls answered {response.status_code}")
+        return response.json()
+
+
+def closed(scheduler: Scheduler, head: str) -> list[State]:
+    """Return the closed grades of a head: the runs its evidence markers name that still have a state."""
+    prefix = evidence.head_prefix(head)
+    runs = (key.removeprefix(prefix) for key in scheduler.objects.keys(prefix))
+    return [state for run in runs if (state := scheduler.grade(run)) is not None]
+
+
+def build(environ: Mapping[str, str], scheduler: Scheduler, consumer: Consumer) -> Relay:
+    """Return the relay over the scheduler's Redis and closed grades, pushing from the lab's git mirror stores."""
+    node, stores = Path(environ[contract.GIT_MIRROR]), Path(environ[MIRROR_STORE])
+    stores.mkdir(parents=True, exist_ok=True)
+
+    def pusher(repo: str) -> Pusher:
+        slug = _slug(repo)
+        return GitPusher(Mirror(node, stores / slug.replace("/", "--"), repo), slug)
+
+    ports = Ports(pusher, Checks, PullRequests)
+    lab = environ[LAB_URL].rstrip("/")
+    return Relay(scheduler.client, BusNotices(consumer), partial(closed, scheduler), ports, lab)

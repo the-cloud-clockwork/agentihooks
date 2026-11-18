@@ -334,6 +334,12 @@ def test_bus_notices_keep_grade_ref_heads_with_a_branch_and_acknowledge_every_en
     assert relay.SUBJECT == "ci.lab.head.notice"
 
 
+def test_bus_notices_fetch_one_batch_of_fifty_within_a_hundred_milliseconds() -> None:
+    consumer = Mock(fetch=Mock(return_value=[]))
+    assert relay.BusNotices(consumer).pending() == []
+    consumer.fetch.assert_called_once_with(50, 100)
+
+
 def test_closed_grades_of_a_head_are_the_runs_its_evidence_markers_name(tmp_path: Path) -> None:
     objects = LocalObjects(tmp_path)
     objects.write_once(f"{head_prefix(HEAD)}run-2", b"")
@@ -461,20 +467,21 @@ def test_build_wires_the_relay_to_the_scheduler_grades_the_mirror_and_the_lab_ur
     monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "fixture")
     environ = {
         relay.contract.GIT_MIRROR: str(tmp_path / "node"),
-        relay.MIRROR_STORE: str(tmp_path / "stores"),
+        relay.MIRROR_STORE: str(tmp_path / "deep" / "stores"),
         post_receive.LAB_URL: f"{LAB}/",
     }
     client = fake_redis()
     scheduler = cast(Scheduler, Mock(client=client, objects=LocalObjects(tmp_path / "objects")))
     consumer = open_bus(BusConfig()).lab_heads.consumer(relay.DURABLE, relay.SUBJECT)
+    relay.build(environ, scheduler, consumer)
     engine = relay.build(environ, scheduler, consumer)
     assert engine.client is client
     assert engine.lab == LAB
     assert cast(relay.BusNotices, engine.notices).consumer is consumer
     pusher = cast(relay.GitPusher, engine.ports.pusher(REPO))
     assert pusher.slug == SLUG
-    assert pusher.mirror == Mirror(tmp_path / "node", tmp_path / "stores" / "acme--widgets", REPO)
-    assert (tmp_path / "stores").is_dir()
+    assert pusher.mirror == Mirror(tmp_path / "node", tmp_path / "deep" / "stores" / "acme--widgets", REPO)
+    assert (tmp_path / "deep" / "stores").is_dir()
     assert cast(relay.PullRequests, engine.ports.pulls(SLUG)).slug == SLUG
     assert cast(relay.Checks, engine.ports.checks(SLUG)).repo == SLUG
     assert engine.grades(HEAD) == []
