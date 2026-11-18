@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.991 · 2026-11-18
+
+### 2026-11-18 · 4641ca6fc351 · #11834 · @agenticore-app
+
+**Lab merge group interaction rule: units or the whole suite**
+
+This change adds the decision rule for merge-queue CI: scripts.ci_lab.interaction.decide now computes which test units a merge_group run must execute, or falls back to running the full suite when any of four conditions trip—harness changes needing full coverage, too many entries in the group (configurable via a new lab.queue.full_suite_entries setting, default 5), two entries touching the same module, or too much of the cache being stale. This keeps merge-queue runs fast and targeted by default while safely escalating to the full suite when risk is high, with the logic and thresholds documented in delivery-tiers.md and verified by 397 passing tests.
+
 ## v2.17.988 · 2026-11-18
 
 ### 2026-11-18 · 40090a111d3e · #11830 · @nestorcolt
