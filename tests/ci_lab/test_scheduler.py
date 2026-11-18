@@ -1,6 +1,8 @@
 import json
 import subprocess
 import sys
+import threading
+import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -11,7 +13,8 @@ import pytest
 import yaml
 
 from scripts.ci_lab import __main__ as cli
-from scripts.ci_lab import evidence, queue, scheduler
+from scripts.ci_lab import budget, delivery, evidence, queue, scheduler
+from scripts.ci_lab.capacity import Load
 from scripts.ci_lab.checks import Output
 from scripts.ci_lab.delivery import CLASSES
 from scripts.ci_lab.digests import GradeInputs, StaticInputs, Toolchain, grade_key, static_key
@@ -673,6 +676,144 @@ def test_a_live_run_without_a_grade_is_forgotten(lab: Callable[..., Run]) -> Non
     assert run.lab.client.smembers(scheduler.LIVE) == set()
 
 
+@pytest.mark.feature("lab-scheduler-service")
+def test_the_load_counts_each_job_once_in_the_most_urgent_class_of_the_live_grades_holding_it(
+    lab: Callable[..., Run],
+) -> None:
+    cached, shared, solo, pulled, lost = unit(1), unit(2), unit(3), unit(4), unit(5)
+    run = lab({HEAD_A: plan({"lint": (cached, shared, solo)}), HEAD_B: plan({"lint": (pulled, lost)})})
+    run.cache(cached)
+    run.push(HEAD_A)
+    run.tick(1000)
+    run.lab.expander.plans[HEAD_A] = plan({"lint": (shared,)})
+    run.push(HEAD_A, lane="gh-readonly-queue/dev/pr-1", event="merge_group", action="checks_requested")
+    run.push(HEAD_B, lane="pr-2", event="pull_request", action="synchronize")
+    run.tick(1100)
+    assert [grant.unit for grant in run.lease()] == [shared]
+    run.lab.client.delete(f"{queue.PREFIX}job:{scheduler.job_id(HEAD_B, lost)}")
+    run.lab.client.sadd(scheduler.LIVE, "grade-v1-gone")
+    estimate = scheduler.UNIT_ESTIMATE_S
+    assert run.engine.load(1100) == Load(
+        pending={"promotion": [estimate], "pull_request": [estimate]},
+        running={"queue": 1},
+        slots_total=1,
+        slots_busy=1,
+        cache_hits={"promotion": 1},
+        cache_misses={"promotion": 2, "queue": 1, "pull_request": 2},
+        frees_in=(estimate,),
+    )
+
+
+@pytest.mark.feature("lab-scheduler-service")
+def test_the_load_counts_leased_slots_and_the_free_slots_workers_offered_within_the_ready_window(
+    lab: Callable[..., Run],
+) -> None:
+    run = lab({})
+    big, small = unit(8), unit(9)
+    run.engine.queue.enqueue([big, small], HEAD_B, {big.key: queue.Requirement(slots=2)})
+    run.lab.now = 1000
+    assert [grant.slots for grant in run.leases().lease("busy", 2, frozenset(), 0)] == [2]
+    run.engine.queue.offer("idle", 4, 1500)
+    run.engine.queue.offer("stale", 8, 999)
+    load = run.engine.load(1000 + scheduler.READY_MS)
+    assert load == Load(
+        pending={},
+        running={},
+        slots_total=2 + 0 + 4,
+        slots_busy=2,
+        cache_hits={},
+        cache_misses={},
+        frees_in=(scheduler.UNIT_ESTIMATE_S,) * 2,
+    )
+    run.engine.queue.offer("busy", 1, 1000)
+    assert run.engine.load(1000 + scheduler.READY_MS).slots_total == 2 + 1 + 4
+    assert run.engine.load(1001 + scheduler.READY_MS).slots_total == 2 + 4
+
+
+@pytest.mark.feature("lab-scheduler-service")
+def test_the_grades_of_a_commit_are_its_live_grades_and_the_closed_ones_its_evidence_names(
+    lab: Callable[..., Run],
+) -> None:
+    cached, waiting, other = unit(1), unit(2), unit(3)
+    run = lab({HEAD_A: plan({"lint": (cached,)}), HEAD_B: plan({"lint": (other,)})})
+    run.cache(cached)
+    run.push(HEAD_A)
+    run.push(HEAD_B, lane="other")
+    run.tick(1000)
+    closed = run.grade(HEAD_A)
+    run.lab.expander.plans[HEAD_A] = plan({"lint": (waiting,)})
+    run.push(HEAD_A, lane="gh-readonly-queue/dev/pr-1", event="merge_group", action="checks_requested")
+    run.tick(2000)
+    live = next(grade for grade in run.grades() if grade.head == HEAD_A and grade.run != closed.run)
+    done = {"status": "completed", "conclusion": "success"}
+    assert scheduler.summary(closed) == {
+        "run": closed.run,
+        "repo": REPO,
+        "head": HEAD_A,
+        "base": BASE,
+        "class": "promotion",
+        "lane": "feature",
+        "tree": TREE,
+        "grader": BASE,
+        "conclusion": "success",
+        "superseded": False,
+        "units": {"total": 1, "final": 1},
+        "checks": {"lint": done, scheduler.REQUIRED: done},
+    }
+    queued = {"status": "queued", "conclusion": None}
+    assert scheduler.summary(live) == {
+        **scheduler.summary(live),
+        "class": "queue",
+        "lane": "gh-readonly-queue/dev/pr-1",
+        "conclusion": None,
+        "units": {"total": 1, "final": 0},
+        "checks": {"lint": queued, scheduler.REQUIRED: queued},
+    }
+    both = sorted([scheduler.summary(closed), scheduler.summary(live)], key=lambda grade: str(grade["run"]))
+    assert run.engine.grades_of(HEAD_A) == both
+    assert [grade["head"] for grade in run.engine.grades_of(HEAD_B)] == [HEAD_B]
+    assert run.engine.grades_of("f" * 40) == []
+    run.lab.client.delete(scheduler.GRADES + closed.run)
+    assert run.engine.grades_of(HEAD_A) == [scheduler.summary(live)]
+
+
+def _read(url: str, data: bytes | None = None) -> bytes:
+    with urllib.request.urlopen(urllib.request.Request(url, data=data), timeout=5) as reply:
+        return reply.read()
+
+
+@pytest.mark.feature("lab-scheduler-service")
+def test_listen_serves_leases_capacity_grades_and_metrics_from_one_budgeted_load(lab: Callable[..., Run]) -> None:
+    item = unit(1)
+    run = lab({HEAD_A: plan({"lint": (item,)})})
+    run.push(HEAD_A)
+    run.tick(1000)
+    spending = budget.Budget(run.lab.client, lambda: 0, budget.Policy(100.0, {"backfill": 0.5}))
+    spending.charge(1, 3600.0)
+    servers = scheduler.listen(run.engine, run.leases(), spending, lambda: 1000, (0, 0))
+    for server in servers:
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+    api, exposition = (f"http://127.0.0.1:{server.server_address[1]}" for server in servers)
+    try:
+        capacity = json.loads(_read(f"{api}/capacity"))
+        assert capacity["classes"]["promotion"]["pending"] == 1
+        assert capacity["budget_fraction"] == pytest.approx(0.4)
+        assert capacity["shed"] == ["backfill"]
+        grades = json.loads(_read(f"{api}/grades/{HEAD_A}"))
+        assert [grade["run"] for grade in grades["grades"]] == [run.grade(HEAD_A).run]
+        body = json.dumps({"worker": "w", "free_slots": 1, "capabilities": [], "wait_ms": 0}).encode()
+        leased = json.loads(_read(f"{api}/lease", body))["leases"]
+        assert [grant["job"] for grant in leased] == [scheduler.job_id(HEAD_A, item)]
+        text = _read(f"{exposition}/metrics").decode()
+        assert 'ci_lab_units_running{class="promotion"} 1.0' in text
+        assert 'ci_lab_class_shed{class="backfill"} 1.0' in text
+        assert "ci_lab_slots_busy 1.0" in text
+    finally:
+        for server in servers:
+            server.shutdown()
+            server.server_close()
+
+
 FLUSHED = "<flushed>"
 
 
@@ -967,14 +1108,17 @@ def test_build_wires_the_service_ports_from_the_environment(tmp_path: Path, monk
     assert isinstance(hotfixes, scheduler.PanicFixes) and hotfixes.redis is swarm
 
 
-def test_main_serves_the_lease_api_and_runs_the_passes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.feature("lab-scheduler-service")
+def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import boto3  # pyright: ignore[reportMissingTypeStubs]
     import redis
 
     from hooks import _redis
     from scripts.events import config, factory
 
-    calls: dict[str, Any] = {}
+    calls: dict[str, Any] = {"served": 0}
     client = fake_redis()
 
     def from_url(url: str, **options: Any) -> Any:
@@ -1000,11 +1144,11 @@ def test_main_serves_the_lease_api_and_runs_the_passes(tmp_path: Path, monkeypat
 
     class Server:
         def serve_forever(self) -> None:
-            calls["served"] = True
+            calls["served"] += 1
 
-    def serve_api(host: str, port: int, leases: Leases, signer: Any) -> Server:
-        calls["api"] = (host, port, leases, signer)
-        return Server()
+    def listen(found: Any, leases: Leases, spending: Any, clock: Any, ports: tuple[int, int]) -> list[Server]:
+        calls["listen"] = (found, leases, spending, clock, ports)
+        return [Server(), Server()]
 
     class Thread:
         def __init__(self, target: Callable[[], None], daemon: bool) -> None:
@@ -1029,8 +1173,19 @@ def test_main_serves_the_lease_api_and_runs_the_passes(tmp_path: Path, monkeypat
         calls["serve"] = (found, interval, passes, clock, sleep)
         return 7
 
+    runtime = tmp_path / "runtime.yaml"
+    runtime.write_text(
+        yaml.safe_dump(
+            {
+                "classes": list(CLASSES),
+                "budget": {"coreMinutesPerDay": 600, "shed": {"backfill": 0.5}},
+                "backfill": {"auditShare": 0.1, "moduleSweeps": False},
+            }
+        )
+    )
     environ = {
         scheduler.contract.REDIS_URL: "redis://lab",
+        scheduler.contract.RUNTIME_CONFIG: str(runtime),
         scheduler.MINIO_ENDPOINT: "endpoint",
         scheduler.MINIO_ACCESS_KEY: "access",
         scheduler.MINIO_SECRET_KEY: "secret",
@@ -1044,7 +1199,7 @@ def test_main_serves_the_lease_api_and_runs_the_passes(tmp_path: Path, monkeypat
     monkeypatch.setattr(factory, "open_bus", lambda found: Bus() if found == "config" else None)
     monkeypatch.setattr(_redis, "get_redis", lambda: "swarm")
     monkeypatch.setattr(scheduler, "build", build)
-    monkeypatch.setattr(scheduler.lease_api, "serve", serve_api)
+    monkeypatch.setattr(scheduler, "listen", listen)
     monkeypatch.setattr(scheduler, "Thread", Thread)
     monkeypatch.setattr(scheduler, "time", Clock)
     monkeypatch.setattr(scheduler, "serve", serve)
@@ -1056,17 +1211,25 @@ def test_main_serves_the_lease_api_and_runs_the_passes(tmp_path: Path, monkeypat
     assert (built_from, redis_client, consumer, swarm) == (environ, client, "consumer", "swarm")
     assert (objects.client, objects.bucket, objects.prefix) == ("s3 client", "bucket", "")
     assert calls["consumer"] == (scheduler.DURABLE, "ci.lab.head.>")
-    host, port, leases, signer = calls["api"]
-    assert (host, port, leases.ttl_ms, leases.poll_ms) == ("", 8800, scheduler.LEASE_TTL_MS, scheduler.LEASE_POLL_MS)
-    assert signer.objects is objects and leases.queue.client is client
-    assert leases.clock() == 1_000_250
+    found, leases, spending, clock, ports = calls["listen"]
+    assert found.queue.client is client and leases.queue is found.queue
+    assert (leases.ttl_ms, leases.poll_ms) == (scheduler.LEASE_TTL_MS, scheduler.LEASE_POLL_MS)
+    assert leases.clock() == 1_000_250 and clock() == 1_000_250
     leases.sleep(1500)
     assert Clock.slept == [1.5]
-    assert calls["thread"] is True and calls["served"] is True
+    assert spending.client is client and spending.clock() == 1_000_250
+    assert spending.policy == budget.Policy(600, {"backfill": 0.5})
+    assert ports == (8800, 9108)
+    assert calls["thread"] is True and calls["served"] == 2
     found, interval, passes, clock, sleep = calls["serve"]
     assert (found.queue.client, interval, passes, clock, sleep) == (client, 0.5, 3, Clock.time, Clock.sleep)
     assert scheduler.main([], environ) == 7
     assert calls["serve"][1:3] == (scheduler.INTERVAL_S, 0)
+    calls.clear()
+    runtime.write_text(yaml.safe_dump({"classes": []}))
+    with pytest.raises(delivery.DeliveryError):
+        scheduler.main([], environ)
+    assert calls == {}
 
 
 def test_the_service_names_its_command_in_its_usage(capsys: pytest.CaptureFixture[str]) -> None:

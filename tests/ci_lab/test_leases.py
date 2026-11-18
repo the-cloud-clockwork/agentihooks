@@ -272,3 +272,22 @@ def test_reap_skips_vanished_and_live_leases(
 
 def test_complete_of_an_unknown_job_is_refused(lab: leases.Leases) -> None:
     assert lab.complete("h1:test:none", "tok", "passed") is False
+
+
+@pytest.mark.feature("lab-scheduler-service")
+def test_a_lease_poll_offers_the_workers_free_slots_while_it_waits_and_what_its_grants_leave(
+    jobs: queue.Queue, clock: Clock
+) -> None:
+    seen: list[dict[str, tuple[int, int]]] = []
+
+    def wait(ms: int) -> None:
+        seen.append(jobs.offers())
+        clock.sleep(ms)
+
+    lab = leases.Leases(jobs, ttl_ms=500, clock=clock, sleep=wait, poll_ms=50)
+    assert lab.lease("w1", 3, frozenset(), 60) == []
+    assert seen == [{"w1": (3, 1000)}, {"w1": (3, 1000)}]
+    assert jobs.offers() == {"w1": (3, 1060)}
+    jobs.enqueue([unit("a"), unit("b")], "h1", {"b": queue.Requirement(slots=2)})
+    assert len(lab.lease("w1", 4, frozenset(), 0)) == 2
+    assert jobs.offers() == {"w1": (1, 1060)}
