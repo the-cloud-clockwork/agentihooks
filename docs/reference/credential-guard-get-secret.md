@@ -14,9 +14,9 @@ value. A Secret's values are only base64 encoded, so a value printed by
 `-o yaml`, `-o jsonpath={.data.password}` or a go template is the credential
 itself. It enters the transcript, and an exposed credential has to be rotated.
 
-Two forms still pass for a Secret: the default table, `-o name` and `-o wide`,
-which print no value, and one go template that prints only the key names. A
-get of a non Secret type, such as a pod, passes with any output.
+For a Secret, the default table, `-o name` and `-o wide` still pass, because
+they print no value, and so does one go template that prints only the key
+names. A get of a non Secret type, such as a pod, passes with any output.
 
 The guard runs at `PreToolUse` on every install target (Claude Code, Codex and
 Copilot CLI) and checks `Bash` commands. Related pages:
@@ -203,7 +203,7 @@ kubectl get secret <name> --template='{{range $k,$v:=.data}}{{$k}} {{end}}' list
 | Which keys does it hold? | `kubectl get secret db --template='{{range $k,$v:=.data}}{{$k}} {{end}}'` |
 | Which Secrets are in a namespace? | `kubectl get secrets -n prod -o name` |
 
-The guard allows no form that prints a value. A
+The guard allows no form that prints a Secret value. A
 `kubectl describe` of a Secret is refused by a separate check of the same
 guard, with the same key listing as its alternative.
 
@@ -247,9 +247,10 @@ in the transcript are a hard floor.
   [Listing key names](#listing-key-names): two different variables, a range
   over `.data`, only `{{$KEY}}` and quoted strings inside, nothing outside
   `{{range …}}` and `{{end}}`. Copy the template from the refusal message.
-- **A namespace or pod named `secret` is refused.** It should not be:
-  `kubectl get pods -n secret -o yaml` and `kubectl get pod secret -o yaml`
-  pass. Check that the type operand is a literal non Secret type.
+- **A get in a namespace or of a resource named `secret`.** Only the type
+  operand is judged, so `kubectl get pods -n secret -o yaml` and
+  `kubectl get pod secret -o yaml` pass. When such a get is refused, its type
+  operand is not a literal non Secret type.
 - **A Secret value was printed.** Check that `CREDENTIAL_GUARD_ENABLED` is
   unset or `true`, and that the command calls `kubectl` by that name outside a
   heredoc. If both hold, report the exact command so a test can cover it.
@@ -267,7 +268,8 @@ narrowed the check to the type operand, so a pod name in a variable after a
 literal type, such as `kubectl get pod $POD -o yaml`, passes again.
 
 The check is `gets_secret_values` in `hooks.context.credential_guard`, called
-from `renderer_verdict` in the guard's `Bash` decision. Guards:
+from `renderer_verdict` in the guard's `Bash` decision. Tests, feature map
+entries and the Semgrep rule that hold the behavior:
 
 - Tests `test_kubectl_get_secret_forms_that_print_a_value_are_refused`,
   `test_kubectl_get_secret_forms_that_print_no_value_pass`,
