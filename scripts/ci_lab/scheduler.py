@@ -55,7 +55,7 @@ from scripts.ci_lab.delivery import CLASSES, DELIVERY, DELIVERY_SCHEMA, load_run
 from scripts.ci_lab.digests import GradeInputs, StaticInputs, Toolchain, digest, grade_key, static_key
 from scripts.ci_lab.intake import GradeRequest, admit
 from scripts.ci_lab.leases import Leases, release
-from scripts.ci_lab.manifests import Fetcher
+from scripts.ci_lab.manifests import Fetcher, FetchUnanswered
 from scripts.ci_lab.objects import Objects, S3Objects, Uploads, manifest_folder, upload_path
 from scripts.ci_lab.outcomes import CANNOT_RUN, DROPPED, FAILED, LOSSES, PASSED
 from scripts.ci_lab.pods import Pods, unmanaged, worker_pods
@@ -342,6 +342,14 @@ class Poster(Protocol):
 
     def post(self, head: str, gate: str, status: str, conclusion: str | None, output: Output, shadow: bool) -> int:
         """Create or advance one check run and return its id."""
+        ...
+
+
+class Relaying(Protocol):
+    """What the service ticks after each pass: `relay.Relay.tick`."""
+
+    def tick(self) -> list[str]:
+        """Relay what the closed grades answer and return the actions taken."""
         ...
 
 
@@ -637,7 +645,9 @@ class Scheduler:
         return f"received {request.head} on {lane}"
 
     def _release(self, now_ms: int) -> list[str]:
-        """Start each held head whose quiet window ended, except one a pause of its class holds."""
+        """Start each held head whose quiet window ended, except one a pause of its class holds. A head whose manifest
+        fetch GitHub never answered or answered with a server error waits out the window again; any other expansion
+        failure drops it."""
         actions: list[str] = []
         pauses = control.paused(self.client)
         for name, raw in sorted(self.client.hgetall(WAITING).items()):
@@ -651,6 +661,9 @@ class Scheduler:
             self.client.hdel(WAITING, name)
             try:
                 actions.append(self._start(request, held["lane"], held.get("ref", ""), now_ms))
+            except FetchUnanswered as error:
+                self.client.hset(WAITING, name, json.dumps({**held, "since": now_ms}))
+                actions.append(f"holding {request.head}: {error}")
             except (
                 subprocess.CalledProcessError,
                 ValueError,
@@ -1197,12 +1210,20 @@ def build(
 
 
 def serve(
-    scheduler: Scheduler, interval_s: float, passes: int, clock: Callable[[], float], sleep: Callable[[float], None]
+    scheduler: Scheduler,
+    relaying: Relaying,
+    interval_s: float,
+    passes: int,
+    clock: Callable[[], float],
+    sleep: Callable[[float], None],
 ) -> int:
-    """Run passes every interval, forever when passes is zero, printing each action; return 0."""
+    """Run passes every interval, forever when passes is zero, ticking the relay after each pass and printing each
+    action of both; return 0."""
     done = 0
     while passes == 0 or done < passes:
         for action in scheduler.tick(int(clock() * 1000)):
+            print(action, flush=True)
+        for action in relaying.tick():
             print(action, flush=True)
         done += 1
         sleep(interval_s)
@@ -1246,6 +1267,7 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     import boto3  # pyright: ignore[reportMissingTypeStubs]
     import redis
 
+    from scripts.ci_lab import relay
     from scripts.events.config import BusConfig
     from scripts.events.factory import open_bus
 
@@ -1262,9 +1284,10 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
         aws_secret_access_key=environ[MINIO_SECRET_KEY],
     )
     objects = S3Objects(s3, environ[MINIO_BUCKET], "")
-    consumer = open_bus(replace(BusConfig.from_environ(environ), provision=False)).lab_heads.consumer(DURABLE, SUBJECT)
+    heads = open_bus(replace(BusConfig.from_environ(environ), provision=False)).lab_heads
     spending = budget.Budget(client, _now_ms, budget.policy(runtime))
-    scheduler = build(environ, client, objects, consumer, spending)
+    scheduler = build(environ, client, objects, heads.consumer(DURABLE, SUBJECT), spending)
+    relaying = relay.build(environ, scheduler, heads.consumer(relay.DURABLE, relay.SUBJECT))
     if environ.get(REINDEX_ON_START) == "true":
         print(f"reindexed {scheduler.store.reindex()} verdicts", flush=True)
     leases = Leases(scheduler.queue, LEASE_TTL_MS, _now_ms, _sleep_ms, LEASE_POLL_MS, scheduler.ports.pods)
@@ -1272,4 +1295,4 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     ports = (contract.SCHEDULER_PORT, contract.METRICS_PORT)
     for server in listen(scheduler, leases, routes, spending, _now_ms, ports):
         Thread(target=server.serve_forever, daemon=True).start()
-    return serve(scheduler, arguments.interval, arguments.passes, time.time, time.sleep)
+    return serve(scheduler, relaying, arguments.interval, arguments.passes, time.time, time.sleep)

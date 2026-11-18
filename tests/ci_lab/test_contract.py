@@ -61,7 +61,7 @@ SCHEDULER_DESCRIPTION = {
     "ports": [8800, 9108],
     "environment": {
         "prefixes": ["AGENTIHOOKS_BUS", "CI_LAB_MINIO_", "GITHUB_APP_"],
-        "names": ["CI_LAB_REDIS_URL", "CI_LAB_RUNTIME_CONFIG"],
+        "names": ["CI_LAB_REDIS_URL", "CI_LAB_RUNTIME_CONFIG", "CI_LAB_URL"],
     },
     "metrics": sorted(EXPECTED_METRICS),
 }
@@ -95,6 +95,7 @@ ENVIRONMENT_NAMES = (
     "GITHUB_APP_",
     "CI_LAB_REDIS_URL",
     "CI_LAB_RUNTIME_CONFIG",
+    "CI_LAB_URL",
     "CI_LAB_SCHEDULER_URL",
     "CI_LAB_SLOTS",
     "CI_LAB_GIT_MIRROR",
@@ -138,6 +139,7 @@ def test_environment_names() -> None:
     assert contract.GIT_MIRROR == "CI_LAB_GIT_MIRROR"
     assert contract.UV_CACHE_DIR == "UV_CACHE_DIR"
     assert contract.RUNTIME_CONFIG == "CI_LAB_RUNTIME_CONFIG"
+    assert contract.LAB_URL == "CI_LAB_URL"
     assert contract.WORK_ROOT == "CI_LAB_WORK_ROOT"
     assert contract.MANIFEST == "CI_LAB_MANIFEST"
     assert contract.FLAKES == "CI_LAB_FLAKES"

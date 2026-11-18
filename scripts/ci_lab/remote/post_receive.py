@@ -17,6 +17,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import asdict, replace
 from typing import TextIO
 
+from scripts.ci_lab.contract import LAB_URL
 from scripts.ci_lab.webhooks import NOTICE, PUSHED, HeadEvent, Publisher, envelope
 from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
@@ -24,7 +25,6 @@ from scripts.events.factory import open_bus
 
 REPOSITORY = "CI_LAB_REPOSITORY"
 ACTOR = "CI_LAB_REMOTE_ACTOR"
-LAB_URL = "CI_LAB_URL"
 OPTION_COUNT = "GIT_PUSH_OPTION_COUNT"
 OPTION = "GIT_PUSH_OPTION_"
 GRADE_REFS = "refs/grade/"

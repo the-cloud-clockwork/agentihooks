@@ -53,6 +53,7 @@ built CI lab image.
 | `GITHUB_APP_*` | yes | never | GitHub App identity used to post check runs and read dev push manifest artifacts; the App needs checks write and actions read |
 | `CI_LAB_REDIS_URL` | yes | no | Queue, lease and verdict index store |
 | `CI_LAB_RUNTIME_CONFIG` | yes | no | Path of the mounted runtime config the scheduler reads at start, before it connects anywhere; its budget sets the budget fraction and shed classes of `/capacity` and `/metrics`; `python -m scripts.ci_lab runtime <path>` validates it |
+| `CI_LAB_URL` | yes | no | The lab scheduler address the relay builds each relayed check run's and draft pull request's grade link from, `<CI_LAB_URL>/grades/<sha>` |
 | `CI_LAB_SCHEDULER_URL` | no | yes | Base address of the scheduler lease API |
 | `CI_LAB_SLOTS` | no | yes | Number of units the worker runs at once |
 | `CI_LAB_GIT_MIRROR` | yes | yes | Path of the shared git mirror the worker cuts worktrees from and the scheduler borrows objects from |
@@ -1232,6 +1233,13 @@ the gates as the needs of a run of the grade's class: pull request and hotfix gr
 built from the needs of real runs; one test holds `fold` to every case and another holds the cases
 to today's step.
 
+The scheduler service (`scripts.ci_lab.scheduler.serve`) ticks the lab relay after each pass and
+prints the relay's actions after the pass's own. `main` builds the relay once at start on its own
+lab heads consumer, the `ci-lab-relay` durable filtered to `ci.lab.head.notice`, which bus
+provisioning creates beside the scheduler's `ci-lab-scheduler` durable. A green grade of a pushed
+`refs/grade/<task>` head with a `branch` option then reaches that branch, its check runs and its
+draft pull request.
+
 A grade's state is one JSON document at `agentihooks-ci:grade:<run>`, where `<run>` is the grade
 key of the repository, head, base, class and grader revision. Live grades sit in
 `agentihooks-ci:grades`, held heads in `agentihooks-ci:waiting`, a lane's latest run at
@@ -1269,8 +1277,11 @@ the lab's GitHub App scopes to actions read (`manifests.Actions`, one per reposi
 `manifests.Fetcher`). Its `packed.json` is written once at that commit's key, so a stored commit is
 never fetched again. A commit without such a run or artifact, an expired artifact, an archive
 GitHub answers is gone (410) and a manifest recorded for another commit fetch nothing; a refused
-or unanswered request or an archive without a readable `packed.json` raises `manifests.FetchRefused`
-and drops the head with its reason. The dev push artifact is kept 7 days, so a commit older
+or unanswered request or an archive without a readable `packed.json` raises `manifests.FetchRefused`.
+A request GitHub never answered, a token mint without an answer included, or answered with a server
+error raises its subclass `manifests.FetchUnanswered`, and the scheduler puts the head back in its
+lane with the quiet window restarted, so the first pass after that window fetches again; any other
+refusal drops the head with its reason. The dev push artifact is kept 7 days, so a commit older
 than that is answered only from the store. A head that needs test units and finds none fails with
 `no dependency manifest at or before <base>` and is dropped with that reason, so a merge group
 never folds green on an empty unit job.
