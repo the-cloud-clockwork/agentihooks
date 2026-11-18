@@ -58,6 +58,19 @@ def sync(redis, hive, hosted, ttl):
     redis.set(files_key(hive), json.dumps(files), ex=FILES_SECONDS)
 
 
+# ok: feature-work-folder-follows-the-task
+def sync(redis, hive, hosted, ttl):
+    copy, files = {}, {}
+    for slug, task_id in hosted:
+        copy.setdefault(slug, {})[task_id] = tails(slug, task_id)
+        found = contents(slug, task_id)
+        files.setdefault(slug, {})[task_id] = found
+        if found:
+            redis.set(task_files_key(hive, slug, task_id), json.dumps(found))
+    redis.set(synced_key(hive), json.dumps(copy), ex=ttl)
+    redis.set(files_key(hive), json.dumps(files), ex=FILES_SECONDS)
+
+
 # ruleid: feature-work-folder-follows-the-task
 def launched(self, slug, request):
     if not self.store.execution_registry.set_launch(slug, occupant.execution_id, decision):
@@ -72,6 +85,15 @@ def launched(self, slug, request):
         return False
     folder = self.store.key(slug, WORK_FOLDER, request["task"])
     cast(Any, self.store).redis.set(folder, request["hive"])
+    cast(Any, self.store).redis.hdel(self.store.key(slug, "launch-assignments"), request["task"])
+    return True
+
+
+# ok: feature-work-folder-follows-the-task
+def launched(self, slug, request):
+    if not self.store.execution_registry.set_launch(slug, occupant.execution_id, decision):
+        return False
+    ledger_workspace.launched_on(self.store, slug, request["task"], request["hive"])
     cast(Any, self.store).redis.hdel(self.store.key(slug, "launch-assignments"), request["task"])
     return True
 
