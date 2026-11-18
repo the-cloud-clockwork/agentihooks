@@ -3,6 +3,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 
@@ -10,6 +11,7 @@ from scripts.events.config import BusConfig
 from scripts.events.memory import open_bus
 from scripts.hive import account_slots
 from scripts.hub import admission, slots
+from scripts.swarm import model_catalog
 from scripts.swarm.store import RedisStore, SwarmConfig
 from tests.helpers import store_seed
 from tests.swarm.test_readiness import doc, snapshot, task
@@ -484,7 +486,11 @@ def test_a_refused_transfer_attach_releases_the_claim_the_agent_and_the_ledger_r
 @pytest.mark.feature("swarm-tick-successor-fill")
 def test_a_hive_successor_from_a_saved_launch_with_neither_field_is_admitted_on_the_lane_model_inside_the_range(
     rig: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(
+        model_catalog, "catalog", Mock(return_value={"claude": [{"model": "sonnet-lane"}], "codex": []})
+    )
     rig.store.update(SLUG, lanes={"eng": {"model": "sonnet-lane"}})
     launch = {"profile": "engineer", "harness": "claude", "model": "", "effort": "", "account": "a1"}
     rig.store.put_handoff(SLUG, "t1", "handoff", envelope={"reason": "context", "launch": launch})
