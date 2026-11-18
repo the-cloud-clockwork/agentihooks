@@ -2476,7 +2476,7 @@ Each tick pass reads the CI lab scheduler's capacity document from the swarm's `
 |---|---|
 | The predicted pull request wait exceeds `AGENTIHOOKS_HEALTH_CI_BEHIND_MINUTES` (default 20) | The tick holds new claims of eng tasks outside the fix phase with the reason `the lab is N minutes behind on pull request grading`, and fires the standing `lab_wait` finding |
 | The wait falls back to the limit or below | The finding clears and claims resume on the next pass |
-| The reading is older than ten minutes, failed or missing | Nothing is held |
+| The last good reading is older than ten minutes, or there is none | Nothing is held; a failed read keeps the last good reading until it ages out |
 | A task outside the eng lane, or in the fix phase | Never held by the lab wait |
 
 A lab wait is back pressure, never a red: nobody retries a run or dispatches work to catch up. The bottleneck hunter proposes a ci task titled Lab capacity when the `lab_wait` stage keeps firing.
