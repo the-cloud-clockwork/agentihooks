@@ -2,10 +2,10 @@
 
 `Relay.tick` reads the lab remote's head notices from its own consumer and keeps each trusted actor's pushed
 `refs/grade/*` head that names a `branch=<name>` push option outside the protected branches pending in Redis, per
-head and branch, until a grade of that head closes. A green grade pushes the sha
-to `origin refs/heads/<branch>` with an App token holding contents write, never forced, posts the `lab/<gate>` check
-run of every gate and the required check, completed, with the grade's run and verdicts, and opens the branch's draft
-pull request into dev with a token holding pull requests write, or names the open one the push updated. A red grade
+head and branch, until a grade of that head closes. A green grade pushes the sha, fetched from the lab remote when
+GitHub lacks it, to `origin refs/heads/<branch>` with an App token holding contents and workflows write, never forced,
+posts the `lab/<gate>` check run of every gate and the required check, completed, with the grade's run and verdicts,
+and opens the branch's draft pull request into dev with a token holding pull requests write, or names the open one the push updated. A red grade
 relays nothing and names its failed units. A head whose grades were all superseded is dropped, and a relay GitHub
 refuses is named and dropped.
 """
@@ -23,7 +23,7 @@ from urllib.parse import urlsplit
 
 import requests
 
-from scripts.ci_lab import contract, evidence
+from scripts.ci_lab import contract, evidence, worktrees
 from scripts.ci_lab.checks import API, HEADERS, Checks, Key, Output, PostRefused, Token, name
 from scripts.ci_lab.delivery import CLASSES
 from scripts.ci_lab.outcomes import PASSED
@@ -41,6 +41,7 @@ __all__ = [
     "PENDING",
     "PROTECTED",
     "PULLS",
+    "PUSH",
     "SUBJECT",
     "BusNotices",
     "GitPusher",
@@ -61,6 +62,7 @@ PENDING = f"{PREFIX}relay"
 DURABLE = "ci-lab-relay"
 SUBJECT = f"{HEAD_SUBJECT}.{NOTICE}"
 PULLS = {"pull_requests": "write"}
+PUSH = {"contents": "write", "workflows": "write"}
 GITHUB = "https://github.com/"
 DEV = "dev"
 PROTECTED = frozenset({DEV, "main", "master", "v1"})
@@ -240,12 +242,13 @@ class BusNotices:
 
 
 class GitPusher:
-    """Pushes a graded sha from the lab's git mirror to a GitHub branch with an App token holding contents write."""
+    """Pushes a graded sha from the lab's git mirror to a GitHub branch with an App token holding contents and workflows
+    write, so a branch that changes workflow files is accepted."""
 
     def __init__(self, mirror: Mirror, slug: str, auth: Token | None = None) -> None:
         self.mirror = mirror
         self.slug = slug
-        self.auth: Token = auth if auth is not None else GitHubAppAuth(f"github.com/{slug}")
+        self.auth: Token = auth if auth is not None else GitHubAppAuth(f"github.com/{slug}", permissions=PUSH)
 
     def push(self, sha: str, branch: str) -> None:
         """Make the sha present in the mirror's store and push it to the branch, never forced, with the token passed
@@ -305,13 +308,15 @@ def closed(scheduler: Scheduler, head: str) -> list[State]:
 
 
 def build(environ: Mapping[str, str], scheduler: Scheduler, consumer: Consumer) -> Relay:
-    """Return the relay over the scheduler's Redis and closed grades, pushing from the lab's git mirror stores."""
+    """Return the relay over the scheduler's Redis and closed grades, pushing from the lab's git mirror stores, which
+    fall back to the lab remote the environment names."""
     node, stores = Path(environ[contract.GIT_MIRROR]), Path(environ[MIRROR_STORE])
     stores.mkdir(parents=True, exist_ok=True)
+    remote = worktrees.lab(environ)
 
     def pusher(repo: str) -> Pusher:
         slug = _slug(repo)
-        return GitPusher(Mirror(node, stores / slug.replace("/", "--"), repo), slug)
+        return GitPusher(Mirror(node, stores / slug.replace("/", "--"), repo, remote), slug)
 
     posters: dict[str, CheckRuns] = {}
 

@@ -66,6 +66,7 @@ built CI lab image.
 | `CI_LAB_MINIO_ENDPOINT`, `CI_LAB_MINIO_BUCKET`, `CI_LAB_MINIO_ACCESS_KEY`, `CI_LAB_MINIO_SECRET_KEY` | yes | no | The object store names the scheduler reads |
 | `CI_LAB_MIRROR_STORE` | yes | no | Folder of the scheduler's private git stores, one per repository, that borrow the mirror's objects |
 | `CI_LAB_REPOSITORY` | yes | no | Repository URL whose dev runner trust list admits head actors |
+| `AGENTIHOOKS_LAB_REMOTE`, `AGENTIHOOKS_LAB_REMOTE_TOKEN` | yes | no | The lab remote URL a mirror fetches a sha GitHub lacks from, and its token, passed by reference; unset, the mirrors fetch from GitHub only |
 | `CI_LAB_IMAGE` | yes | no | Worker image name keyed into static unit keys; empty when unset |
 | `CI_LAB_CONTROL_TOKEN` | yes | no | Bearer token the [control routes](#control-routes) require, passed by reference; unset, they refuse every request. The swarm host that presses panic or merge priority holds the same variable |
 | `UV_CACHE_DIR` | no | yes | Shared uv cache for virtual environments |
@@ -930,6 +931,16 @@ after git writes the refs, so it cannot turn a push away. The remote's pre recei
 outside `refs/grade/*`. A deleted grade ref, or a root commit pushed without `-o base`, prints
 `lab remote: <ref> is not graded` and publishes nothing.
 
+GitHub does not hold a head pushed only to the lab remote, so the scheduler and the relay fetch it
+from there. Their mirrors fetch a sha from the GitHub repository first and, when that fetch fails,
+from the lab remote `AGENTIHOOKS_LAB_REMOTE` names, but only when that URL names the same
+repository. Git gets `AGENTIHOOKS_LAB_REMOTE_TOKEN` as an `Authorization: Bearer` header for that
+URL alone, through its environment config, and no store or log keeps it. A grade of a head pushed
+to a `refs/grade/*` ref keeps the ref and records each check's status and conclusion. It posts no
+GitHub check run; the relay posts them once it has pushed the head. The relay's push token asks
+for contents write and workflows write, so a relayed branch that changes workflow files is
+accepted.
+
 | Name | Meaning |
 |---|---|
 | `CI_LAB_REPOSITORY` | The repository URL the head belongs to, in the `https://github.com/<owner>/<repo>` form GitHub deliveries use |
@@ -1191,7 +1202,9 @@ key; the builders are pure and read no file, clock or network.
    `completed` on the last, one per gate with units and `required` for the whole grade. A completed
    check run never moves again. The grade state keeps each check run's id, and the scheduler seeds
    its poster with that id and the last status it posted before the next move, so a restarted
-   scheduler advances the same check run instead of opening a second one.
+   scheduler advances the same check run instead of opening a second one. A grade of a head pushed
+   to a `refs/grade/*` ref records the same moves and posts none, leaving its check runs to the
+   relay.
 
 Expansion frames a head by its class (`scripts.ci_lab.scheduler.frame`): a pull request or hotfix grade
 keeps the lab gates the pull request rules require and names every other required job as a gate without
