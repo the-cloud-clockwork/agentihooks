@@ -303,7 +303,7 @@ class Consumer:
             return self.reap_execution(order, agent)
         if order.action == "resume":
             return self.resume(order)
-        if agent.generation != order.generation or agent.runtime_target.get("host_id") != self.hive:
+        if agent.generation != order.generation or (agent.runtime_target.get("host_id") or agent.hive) != self.hive:
             return FOREIGN
         if order.action == "name":
             return _done(self.runtime.herdr.name_pane(agent))

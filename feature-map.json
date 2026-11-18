@@ -791,6 +791,18 @@
       ]
     },
     {
+      "id": "swarm-nudges-hub-admitted-workers-through-their-hive",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2569",
+      "behaviour": "A nudge for a worker the hub admitted to another hive, which carries no host target, such as an outage resume prompt or an idle activity question, goes to that hive as a nudge order and the hive that runs the worker types it into the worker's pane, instead of the controller typing it into its own herdr; such a nudge is refused while that hive is not reporting, without touching the controller herdr, and a hive answers a nudge order as foreign when the execution's host target, or with no host target its hub admitted hive, names another hive.",
+      "seam": "scripts.swarm.runtime.HerdrRuntime.nudge resolves the hive through scripts.hive.reports.admitted and sends the order through scripts.hive.orders.Orders.command; scripts.hive.orders.Consumer.command accepts it when the execution's host target, or with no host target its record's hive, names this hive",
+      "tests": [
+        "tests/hive/test_reports.py::test_a_nudge_for_a_hub_admitted_worker_is_typed_into_its_pane_by_the_hive_that_runs_it",
+        "tests/hive/test_reports.py::test_a_nudge_for_a_hub_admitted_worker_whose_hive_is_lost_is_refused_without_the_controller_herdr",
+        "tests/hive/test_reports.py::test_a_hive_refuses_a_nudge_for_an_execution_another_hive_runs"
+      ]
+    },
+    {
       "id": "swarm-history-bounded",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2501",
