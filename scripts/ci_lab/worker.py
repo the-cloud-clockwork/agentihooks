@@ -251,7 +251,7 @@ class Worker:
 
 def environment(environ: Mapping[str, str]) -> dict[str, str]:
     """Return the worker service contract's variables, refusing an environment that holds any GitHub App or Redis
-    variable so neither the worker nor a unit process it starts holds a GitHub App or Redis credential."""
+    variable so neither the worker nor a unit process it starts holds a credential."""
     refused = sorted({*contract.github_app_variables(environ), *(name for name in environ if REDIS in name.upper())})
     if refused:
         raise Refused(f"ci-lab worker refuses {', '.join(refused)}")

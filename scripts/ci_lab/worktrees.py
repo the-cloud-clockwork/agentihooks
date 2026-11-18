@@ -71,11 +71,12 @@ class Mirror:
     store: Path
     remote: str
     lab: Lab | None = None
-    repository: str = ""  # pragma: no mutate
+    repository: str | None = None  # pragma: no mutate
 
     def fetch(self, sha: str) -> bool:
         """Make sha present in the store, fetching only its missing objects from the remote, else from the lab remote
-        when it serves the repository, or the remote's repository when none is set; True when anything was fetched."""
+        when it serves the repository, or the remote's repository when the repository is None; True when anything was
+        fetched."""
         if not self.store.exists():
             _git(self.store.parent, "init", "--quiet", "--bare", str(self.store))
             (self.store / "objects/info/alternates").write_text(f"{self.node / 'objects'}\n")
@@ -85,7 +86,8 @@ class Mirror:
         try:
             _git(self.store, "fetch", "--no-write-fetch-head", self.remote, sha)
         except subprocess.CalledProcessError:
-            if self.lab is None or not checkout.serves(self.lab.url, self.repository or self.remote):
+            origin = self.remote if self.repository is None else self.repository
+            if self.lab is None or not checkout.serves(self.lab.url, origin):
                 raise
             _git(self.store, "fetch", "--no-write-fetch-head", self.lab.url, sha, env=self.lab.environ())
         return True
