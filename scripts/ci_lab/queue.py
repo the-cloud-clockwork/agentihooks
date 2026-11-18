@@ -32,6 +32,8 @@ class Job:
     attempts: int
     worker: str
     outcome: str
+    base: str = ""
+    grader: str = ""
 
 
 ENQUEUE = """
@@ -140,13 +142,23 @@ class Queue:
         self._retry = client.register_script(RETRY)
         self._prune = client.register_script(PRUNE)
 
-    def enqueue(self, units: Sequence[Unit], head: str, requirements: Mapping[str, Requirement]) -> list[str]:
-        """Add each unit of the head as a pending job unless that job is already known."""
+    def enqueue(
+        self,
+        units: Sequence[Unit],
+        head: str,
+        requirements: Mapping[str, Requirement],
+        base: str = "",
+        grader: str = "",
+    ) -> list[str]:
+        """Add each unit of the head as a pending job, with the base and grader revision its grade reads, unless that
+        job is already known."""
         added: list[str] = []
         for unit in units:
             job = f"{head}:{unit.kind}:{unit.key}"
             need = requirements.get(unit.key, DEFAULT)
             record = {
+                "base": base,
+                "grader": grader,
                 "kind": unit.kind,
                 "key": unit.key,
                 "members": json.dumps(unit.members),
@@ -190,6 +202,8 @@ class Queue:
             attempts=int(record["attempts"]),
             worker=record["worker"],
             outcome=record["outcome"],
+            base=record["base"],
+            grader=record["grader"],
         )
 
     def token(self, job: str) -> str:

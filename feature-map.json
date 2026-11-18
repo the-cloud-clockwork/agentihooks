@@ -8014,6 +8014,16 @@
       ]
     },
     {
+      "id": "lab-head-missing-field-terminate",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-head-missing-field-terminate",
+      "behaviour": "The CI lab scheduler's bus inbox terminates a lab head envelope missing any head event field, logging the head's envelope id and the missing fields, and keeps reading the rest of the batch, so a malformed head is never left unacknowledged to be redelivered until the dead letter cap, whose publish the scheduler's bus grant refuses, which stopped the scheduler reading heads.",
+      "seam": "scripts.ci_lab.scheduler.BusInbox.heads over a fake bus consumer and its deliveries",
+      "tests": [
+        "tests/ci_lab/test_scheduler.py::test_the_bus_inbox_terminates_each_head_missing_a_field_with_a_logged_reason_and_reads_the_next_head"
+      ]
+    },
+    {
       "id": "lab-scheduler-test-units",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2629",
@@ -8057,6 +8067,16 @@
         "tests/ci_lab/test_queue.py::test_leased_lists_each_leased_job_and_offers_keep_each_workers_latest_free_slots",
         "tests/ci_lab/test_leases.py::test_a_lease_poll_offers_the_workers_free_slots_while_it_waits_and_what_its_grants_leave",
         "tests/test_swarm_packaging.py::test_the_swarm_image_carries_the_locked_git_the_lab_mirror_expander_runs"
+      ]
+    },
+    {
+      "id": "lab-scheduler-reindex-on-start",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/ops-dr-rebuild",
+      "behaviour": "With CI_LAB_REINDEX_ON_START set to true the CI lab scheduler rebuilds its verdict index from the report objects in the bucket before it serves, so a scheduler restarted after a Redis loss answers its stored verdicts again, and it prints and flushes reindexed N verdicts with the number of index entries it added; unset or any other value starts the scheduler without a reindex and prints nothing.",
+      "seam": "scripts.ci_lab.scheduler.main over fakeredis and the local object store, with scripts.ci_lab.store.Store.reindex",
+      "tests": [
+        "tests/ci_lab/test_scheduler.py::test_main_rebuilds_the_verdict_index_before_serving_only_when_reindex_on_start_is_true"
       ]
     },
     {
@@ -8214,6 +8234,33 @@
         "tests/ci_lab/test_worker.py::test_the_worker_environment_keeps_only_the_service_contract_variables",
         "tests/ci_lab/test_worker.py::test_slots_come_from_the_cpu_quota_capped_by_ci_lab_slots",
         "tests/ci_lab/test_worker.py::test_build_makes_the_pod_worker_from_a_clean_environment_and_refuses_redis"
+      ]
+    },
+    {
+      "id": "lab-worker-executors",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2533",
+      "behaviour": "The CI lab queue stores the base and grader revision of every job a grade enqueues and the lease reply carries both; agentihooks ci-lab-worker builds the worker from the worker contract environment and runs each leased unit through the adapter of its kind: a static unit runs the gate it names from the grader tree's workflow over the head with the base and grader trees and inputs.base, a test unit runs its batch on the venv of the head's lockfile digest with the manifest and flake ledger, and a stats or mutant unit runs the mutation runner in the sandbox from a private trampolined tree of the head with the stats cache, kill memory, budget, cap and the tests the tree's stats records show reaching the mutant's function; each adapter answers a JSON report with the unit's seconds and releases every tree it cut, and SIGTERM stops the worker.",
+      "seam": "scripts.ci_lab.queue Queue.enqueue and job, scripts.ci_lab.leases Leases.lease, scripts.ci_lab.lease_api POST /lease, scripts.ci_lab.worker Client.lease, scripts.ci_lab.executors static, tests, mutation, executors, settings and main, and scripts.ci_lab.contract worker",
+      "tests": [
+        "tests/ci_lab/test_queue.py::test_enqueue_stores_the_base_and_grader_revision_each_job_reads",
+        "tests/ci_lab/test_leases.py::test_a_grant_carries_the_base_and_grader_revision_of_its_job",
+        "tests/ci_lab/test_lease_api.py::test_lease_returns_the_grant_payload",
+        "tests/ci_lab/test_scheduler.py::test_each_enqueued_job_carries_the_grades_base_and_its_plans_grader",
+        "tests/ci_lab/test_contract.py::test_the_worker_command_runs_the_service_and_keeps_the_self_test",
+        "tests/ci_lab/test_executors.py::test_static_runs_the_gate_the_grader_tree_names_over_the_head_with_its_base_and_grader_trees",
+        "tests/ci_lab/test_executors.py::test_static_answers_the_gates_verdict",
+        "tests/ci_lab/test_executors.py::test_static_releases_every_tree_it_leased_when_a_lease_or_the_gate_raises",
+        "tests/ci_lab/test_executors.py::test_tests_runs_the_batch_on_the_lockfile_venv_with_the_manifest_and_flake_ledger",
+        "tests/ci_lab/test_executors.py::test_mutation_runs_a_stats_unit_with_its_tree_as_root_and_the_stats_cache",
+        "tests/ci_lab/test_executors.py::test_mutation_grades_a_mutant_unit_with_the_tests_its_trees_stats_show_reaching_its_function",
+        "tests/ci_lab/test_executors.py::test_mutation_fails_a_mutant_unit_whose_runner_fails_or_whose_mutant_lives",
+        "tests/ci_lab/test_executors.py::test_mutation_drops_its_private_tree_when_the_runner_raises",
+        "tests/ci_lab/test_executors.py::test_covering_takes_each_test_a_stats_record_shows_reaching_the_function_with_its_seconds",
+        "tests/ci_lab/test_executors.py::test_function_of_names_the_function_a_mutant_mutates",
+        "tests/ci_lab/test_executors.py::test_executors_name_the_adapter_of_every_unit_kind",
+        "tests/ci_lab/test_executors.py::test_settings_read_the_worker_contract_environment",
+        "tests/ci_lab/test_executors.py::test_main_runs_the_worker_over_the_adapters_until_sigterm_stops_it"
       ]
     },
     {
