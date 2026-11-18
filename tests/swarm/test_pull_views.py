@@ -801,6 +801,87 @@ def test_a_kept_entry_with_other_fields_is_read_again_and_replaced(
     assert json.loads(str(cache.get(key)))["head"] == "h2"
 
 
+def pull_view_lines(err: str) -> list[dict[str, Any]]:
+    """Return the pull view count lines a view wrote to the controller log ``err``."""
+    return [json.loads(line) for line in err.splitlines() if '"swarm_pull_views"' in line]
+
+
+@pytest.mark.feature("tick-view-read-counts")
+def test_a_fresh_tick_view_logs_that_redis_kept_the_merged_pull_request_and_github_read_the_open_one(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import time
+
+    import fakeredis
+
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import ledger_events, metrics_outbox, stack, timing
+    from scripts.swarm.store import RedisStore
+    from tests.swarm.graph_port import RunPort, read_views
+
+    opened, merged = "https://github.com/o/r/pull/1", "https://github.com/o/r/pull/2"
+    doc = {
+        "tasks": [{"id": "active", "state": "pr", "pr_url": opened}, {"id": "done", "state": "done", "pr_url": merged}],
+        "_meta": {"events": [{"kind": "task done", "target": "tasks/done", "at": int(time.time() * 1000)}]},
+    }
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    queries: list[str] = []
+    run = answering({opened: resource("h1"), merged: landed("h2")}, queries)
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    monkeypatch.setattr(metrics_outbox, "spool_path", lambda: tmp_path / "fresh-pod-history.sqlite")
+    monkeypatch.setattr(stack, "login_source_control", lambda: RunPort(run))
+    monkeypatch.setattr(ledger_events, "views", read_views)
+    views([merged], run, store.redis)
+    queries.clear()
+    with timing.tick("sw"):
+        token = timing.PASS.set({"pass_id": "pass-1"})
+        first = ledger_events.tick_view(InboxStore(store.redis), store, "sw", doc)
+        timing.PASS.reset(token)
+        ledger_events.tick_view(InboxStore(store.redis), store, "sw", doc, first)
+        ledger_events.tick_view(InboxStore(store.redis), store, "sw", doc)
+    ledger_events.tick_view(InboxStore(store.redis), store, "sw", doc)
+
+    assert queries and all(json.dumps(opened) in query and json.dumps(merged) not in query for query in queries)
+    assert pull_view_lines(capsys.readouterr().err) == [
+        {"event": "swarm_pull_views", "slug": "sw", "pass_id": "pass-1", "pulls": 2, "kept_merged": 1, "read": 1},
+        {"event": "swarm_pull_views", "slug": "sw", "pass_id": None, "pulls": 2, "kept_merged": 1, "read": 1},
+    ]
+
+
+@pytest.mark.feature("tick-view-read-counts")
+def test_a_pull_request_read_that_is_no_tick_view_logs_no_counts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import fakeredis
+
+    from scripts.swarm import timing
+
+    opened, merged = "https://github.com/o/r/pull/1", "https://github.com/o/r/pull/2"
+    cache = fakeredis.FakeRedis(decode_responses=True)
+    run = answering({opened: resource("h1"), merged: landed("h2")}, [])
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    views([opened, merged], run, cache)
+    with timing.tick("sw"):
+        views([opened, merged], run, cache)
+
+    assert pull_view_lines(capsys.readouterr().err) == []
+
+
+@pytest.mark.feature("tick-view-read-counts")
+def test_a_tick_view_read_that_raises_leaves_later_reads_uncounted(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import ledger_events
+
+    def refused(urls: list[str], cache: object = None, ttl: float = 0.0) -> dict[str, Any]:
+        assert ledger_events.TICK_VIEW_READ.get() is True
+        raise OSError("read refused")
+
+    monkeypatch.setattr(ledger_events, "views", refused)
+
+    with pytest.raises(OSError, match="read refused"):
+        ledger_events._counted_views(["https://github.com/o/r/pull/1"], None, 180)
+    assert ledger_events.TICK_VIEW_READ.get() is False
+
+
 def test_an_empty_read_never_asks_the_shared_cache_for_no_keys() -> None:
     refusing = SimpleNamespace(mget=lambda keys: pytest.fail("an empty read asked the shared cache for no keys"))
 
