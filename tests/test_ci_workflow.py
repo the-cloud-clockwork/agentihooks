@@ -391,9 +391,9 @@ def test_unit_installs_extras_with_uv_and_no_uv_cache():
     }
     assert install["run"].strip().splitlines() == [
         'if [[ -x "$BAKED_VENV/bin/python" && "$("$BAKED_VENV/bin/python" -c \'import sys; print(sys.base_prefix)\')" == "$pythonLocation" ]]; then ln -s "$BAKED_VENV" "$HOME/venv"; else uv venv --python "$PYTHON_PATH" "$HOME/venv"; fi',
-        'uv pip install --offline --no-index --find-links /opt/wheelhouse --constraint .github/test-requirements.lock --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]" && { echo "::notice title=Wheelhouse hit::The runner wheelhouse served the install offline"; exit 0; }',
+        'uv pip install --offline --no-index --find-links /opt/wheelhouse --exact --constraint .github/test-requirements.lock --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]" && { echo "::notice title=Wheelhouse hit::The runner wheelhouse served the install offline"; exit 0; }',
         'echo "::notice title=Wheelhouse miss::The runner wheelhouse cannot serve the install; fetching from PyPI"',
-        'bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --constraint .github/test-requirements.lock --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"',
+        'bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --exact --constraint .github/test-requirements.lock --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"',
     ]
 
 
@@ -417,7 +417,7 @@ def test_unit_restores_one_venv_per_interpreter_and_dependency_files() -> None:
     ]
 
 
-def test_records_name_the_test_environment_when_the_wheelhouse_skips_its_restore() -> None:
+def test_records_name_the_test_environment_when_a_self_hosted_runner_skips_its_restore() -> None:
     workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
     jobs = workflow["jobs"]
     for name in ("test-count", "unit", "unit-selected"):

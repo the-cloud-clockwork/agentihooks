@@ -987,9 +987,9 @@ jobs:
           BAKED_VENV: /opt/agentihooks-venv
         run: |
           if [[ -x "$BAKED_VENV/bin/python" && "$("$BAKED_VENV/bin/python" -c 'import sys; print(sys.base_prefix)')" == "$pythonLocation" ]]; then ln -s "$BAKED_VENV" "$HOME/venv"; else uv venv --python "$PYTHON_PATH" "$HOME/venv"; fi
-          uv pip install --offline --no-index --find-links /opt/wheelhouse --constraint .github/test-requirements.lock --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]" && { echo "::notice title=Wheelhouse hit::The runner wheelhouse served the install offline"; exit 0; }
+          uv pip install --offline --no-index --find-links /opt/wheelhouse --exact --constraint .github/test-requirements.lock --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]" && { echo "::notice title=Wheelhouse hit::The runner wheelhouse served the install offline"; exit 0; }
           echo "::notice title=Wheelhouse miss::The runner wheelhouse cannot serve the install; fetching from PyPI"
-          bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --constraint .github/test-requirements.lock --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"
+          bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --exact --constraint .github/test-requirements.lock --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       # Queue refs cannot read dev's entries, so saving there only fills the store with copies.
       - &use-venv
@@ -1651,7 +1651,7 @@ jobs:
         if: runner.environment == 'self-hosted'
         run: |
           start=$(( $(awk '$1 == "btime" {print $2}' /proc/stat) + $(awk '{print $22}' /proc/1/stat) / $(getconf CLK_TCK) ))
-          find "$HOME" /tmp /opt/agentihooks-venv /opt/hostedtoolcache -xdev -type f -newerct "@$start" -printf '%i %s\n' 2>/dev/null | awk '!seen[$1]++ {bytes += $2} END {printf "::notice title=Test setup disk writes::%.0f MB (%.0f bytes) written to the runner disk before the tests\n", bytes / 1048576, bytes}'
+          find "$HOME" "$HOME/venv/" /tmp /opt/hostedtoolcache -xdev -type f -newerct "@$start" -printf '%D:%i %s\n' | awk '!seen[$1]++ {bytes += $2} END {printf "::notice title=Test setup disk writes::%.0f MB (%.0f bytes) written to the runner disk before the tests\n", bytes / 1048576, bytes}'
 
       # NOT `-m unit`: only 439 of 999 tests carry that marker, so 560 —
       # including every ownership-scope test guarding what uninstall and prune
