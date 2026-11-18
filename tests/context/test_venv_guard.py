@@ -1,7 +1,16 @@
 """Tests for hooks.context.venv_guard."""
 
+import subprocess
+import sys
+from collections.abc import Iterator
+from pathlib import Path
+from unittest.mock import patch
+
 import pytest
 
+import hooks.config
+from hooks import hook_manager
+from hooks.context import quota_policy, venv_guard
 from hooks.context.venv_guard import check_venv_guard
 from hooks.hook_manager import BlockAction
 
@@ -63,3 +72,106 @@ def test_no_active_venv_allowed(workspace, monkeypatch):
     _, _, project = workspace
     monkeypatch.delenv("VIRTUAL_ENV")
     check_venv_guard(_bash("uv sync --active", project))
+
+
+def _git(*args: str) -> None:
+    subprocess.run(["git", *args], check=True, capture_output=True)
+
+
+@pytest.fixture
+def checkouts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
+    venv = tmp_path / "workspace" / ".venv"
+    (venv / "bin").mkdir(parents=True)
+    primary = tmp_path / "workspace" / "repo"
+    primary.mkdir()
+    _git("-C", str(primary), "init", "-q")
+    _git("-C", str(primary), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init")
+    worktree = tmp_path / "worktrees" / "repo" / "wt"
+    _git("-C", str(primary), "worktree", "add", "-q", str(worktree))
+    loose = tmp_path / "loose"
+    loose.mkdir()
+    monkeypatch.setattr(sys, "prefix", str(venv))
+    monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+    return {"venv": venv, "primary": primary, "worktree": worktree, "loose": loose}
+
+
+@pytest.fixture
+def isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    monkeypatch.setattr(hooks.config, "AGENTIHOOKS_HOME", tmp_path / "home")
+    for name in ("AGENTIHOOKS_SWARM", "AGENTIHOOKS_AGENT_NAME", "AGENTIHOOKS_SWARM_TASK"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(quota_policy, "evaluate", lambda session: None)
+    with patch("hooks._redis.get_redis", return_value=None):
+        yield
+
+
+@pytest.mark.feature("venv-guard-refuses-worktree-editable-install")
+@pytest.mark.parametrize(
+    ("command", "cwd"),
+    [
+        ('uv pip install --python {venv}/bin/python -e ".[all]"', "worktree"),
+        ("uv pip install -p {venv} -e {worktree}", "primary"),
+        ("uv pip install --python={venv}/bin/python --editable {worktree}", "primary"),
+        ("{venv}/bin/pip install -e .", "worktree"),
+        ("{venv}/bin/python -m pip install --editable={worktree}", "primary"),
+        ("cd {worktree} && uv pip install --python {venv}/bin/python -e .", "primary"),
+        ("V={venv}/bin; uv pip install --python $V/python -e .", "worktree"),
+        ("uv pip install -e {worktree}", "primary"),
+        ("uv pip install --python {venv}/bin/python -e {loose}", "primary"),
+    ],
+)
+def test_editable_install_into_the_hooks_venv_from_outside_a_primary_checkout_is_refused(
+    checkouts: dict[str, Path], command: str, cwd: str
+) -> None:
+    with pytest.raises(BlockAction, match="not inside a primary checkout"):
+        check_venv_guard(_bash(command.format(**checkouts), checkouts[cwd]))
+
+
+@pytest.mark.feature("venv-guard-refuses-worktree-editable-install")
+def test_editable_install_into_the_active_hooks_venv_from_a_worktree_is_refused(
+    checkouts: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VIRTUAL_ENV", str(checkouts["venv"]))
+    with pytest.raises(BlockAction, match="not inside a primary checkout"):
+        check_venv_guard(_bash("pip install -e .", checkouts["worktree"]))
+
+
+@pytest.mark.feature("venv-guard-refuses-worktree-editable-install")
+@pytest.mark.parametrize(
+    ("command", "cwd"),
+    [
+        ('uv pip install --python {venv}/bin/python -e ".[all]"', "primary"),
+        ("uv pip install --python {venv}/bin/python -e {primary}", "worktree"),
+        ("uv pip install -e .", "primary"),
+        ("uv pip install --python {worktree}/.venv/bin/python -e .", "worktree"),
+        ("uv pip install -e .", "worktree"),
+        ("pip install -e .", "worktree"),
+        ("uv pip install --python {venv}/bin/python requests", "worktree"),
+        ("git commit -m 'uv pip install --python {venv}/bin/python -e .'", "worktree"),
+    ],
+)
+def test_editable_install_from_a_primary_checkout_or_into_another_venv_passes(
+    checkouts: dict[str, Path], command: str, cwd: str
+) -> None:
+    check_venv_guard(_bash(command.format(**checkouts), checkouts[cwd]))
+
+
+@pytest.mark.feature("venv-guard-refuses-worktree-editable-install")
+def test_the_shell_guards_refuse_a_worktree_editable_install_into_the_hooks_venv(
+    checkouts: dict[str, Path], isolated: None
+) -> None:
+    payload = _bash(f"uv pip install --python {checkouts['venv']}/bin/python -e .", checkouts["worktree"])
+    with pytest.raises(BlockAction, match="not inside a primary checkout"):
+        hook_manager._check_shell_guards({**payload, "session_id": "s1"})
+
+
+@pytest.mark.feature("venv-guard-refuses-worktree-editable-install")
+def test_the_shell_guards_warn_when_the_venv_guard_crashes(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], isolated: None
+) -> None:
+    def crash(payload: dict[str, object]) -> None:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(venv_guard, "check_venv_guard", crash)
+    hook_manager._check_shell_guards({"tool_name": "Bash", "session_id": "s1", "tool_input": {"command": "echo hi"}})
+    assert "venv_guard check failed (boom)" in capsys.readouterr().err
