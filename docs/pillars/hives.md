@@ -79,7 +79,9 @@ agentihooks hive install          # user service that runs agentihooks hive run
   `the hive <pid> restarts on the new code: the checkout moved from <old> to <new>` and exits, so the service starts it
   again on the new code. Agents run in herdr panes outside the service's cgroup and keep running. A revision it cannot
   read, as in an image with no git checkout, keeps it running. A revision it could not read at start and reads later
-  restarts it once, since the code it loaded is then unknown.
+  restarts it once, since the code it loaded is then unknown. A launch order worker that never exits holds the restart
+  until it exits. A resume order process still running at the restart sits in the service's cgroup and ends with it,
+  as on any restart of the service.
 - `agentihooks hive refresh` mints a new Redis credential; `agentihooks hive revoke <id>` deletes a member's
   ledger credential and Redis user.
 - `agentihooks hive remove <name>` reverses `hive create` in one run; the name may also be the member id. It runs
