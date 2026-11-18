@@ -1179,7 +1179,7 @@ def test_a_merge_group_head_runs_only_the_batches_its_entries_invalidate(tmp_pat
 def test_a_merge_group_head_whose_entries_invalidate_no_test_runs_no_batch(tmp_path: Path) -> None:
     suite = _suite(tmp_path, DELIVERY["lab"])
     _git(suite.repo, "switch", "-q", "-c", "docs", suite.base)
-    head = _commit(suite.repo, {"docs/c.md": "e\n"})
+    head = _commit(suite.repo, {"docs/q.md": "q\n"})
     port = Port(SUITE_MANIFEST)
     found = port.expander(tmp_path).expand(suite.request(Priority.QUEUE, head))
     assert found == scheduler.frame(Priority.QUEUE, _tree(suite, head), suite.base, {"unit": ()})

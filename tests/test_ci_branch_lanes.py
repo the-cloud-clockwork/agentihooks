@@ -1048,6 +1048,57 @@ def test_only_the_trusted_tests_flake_budget_may_queue_on_the_flake_history_grou
         assert any(problem.startswith(f"job {name} ") for problem in found)
 
 
+@pytest.mark.parametrize(
+    "change",
+    [
+        None,
+        "steps",
+        "group",
+        "queue",
+        "cancel",
+        "other-job",
+        "if",
+        "new-hive",
+        "untrusted",
+        "trusted-name",
+        "name",
+        "events",
+    ],
+)
+def test_only_the_trusted_swarm_worker_image_hive_job_may_queue_on_the_hive_release_group(change: str | None) -> None:
+    import copy
+
+    baseline = yaml.safe_load((ROOT / lanes.WORKFLOWS / "swarm-node-image.yml").read_text())
+    baseline["jobs"]["hive"].pop("concurrency", None)
+    updated = copy.deepcopy(baseline)
+    name = "image" if change == "other-job" else "hive"
+    updated["jobs"][name]["concurrency"] = {"group": "hive-worker-release", "queue": "max", "cancel-in-progress": False}
+    if change == "steps":
+        updated["jobs"][name]["steps"] = updated["jobs"][name]["steps"][:1]
+    elif change == "group":
+        updated["jobs"][name]["concurrency"]["group"] = "hive-worker-release-other"
+    elif change == "queue":
+        updated["jobs"][name]["concurrency"]["queue"] = "single"
+    elif change == "cancel":
+        updated["jobs"][name]["concurrency"]["cancel-in-progress"] = True
+    elif change == "if":
+        updated["jobs"][name]["if"] = "github.event_name != 'pull_request'"
+    elif change == "new-hive":
+        baseline["jobs"].pop("hive")
+    elif change == "untrusted":
+        baseline = None
+    elif change == "trusted-name":
+        baseline["name"] = updated["name"] = "Other image"
+    elif change == "name":
+        updated["name"] = "Other image"
+    elif change == "events":
+        updated[True] = {"workflow_dispatch": None}
+    found = lanes.problems(updated, baseline)
+    assert bool(found) == (change is not None)
+    if found:
+        assert any(problem.startswith(f"job {name} ") for problem in found)
+
+
 def test_a_tests_workflow_whose_trusted_baseline_has_no_jobs_mapping_is_still_graded() -> None:
     baseline = _workflow()
     baseline["name"] = "Tests"

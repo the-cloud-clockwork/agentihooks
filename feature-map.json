@@ -1,6 +1,24 @@
 {
   "features": [
     {
+      "id": "doctor-lab-health",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/swarm-doctor-lab-detector",
+      "behaviour": "The Doctor reports lab health as findings: the last capacity read failed (lab unreachable, measured from the last good read), a fresh reading predicts pull request grading more than the claim hold limit AGENTIHOOKS_HEALTH_CI_BEHIND_MINUTES behind (lab behind), a class of a fresh reading has a verdict cache hit ratio below AGENTIHOOKS_DOCTOR_LAB_HIT_FLOOR, default 0.6 (lab cache hit ratio), and a gate the swarm checkout's delivery.yaml makes authoritative disagrees with GitHub Actions on any of its newest ten pull request heads as the acceptance rule report counts them with lab verdicts from the App AGENTIHOOKS_LAB_APP names, the detector failing while no App is named (lab gate mismatch); agentihooks doctor <slug> findings --json prints the findings the detectors find now.",
+      "seam": "scripts.doctor.lab findings, gate_findings, mismatches, read and read_gates, registered as the lab and lab gate readers of scripts.doctor.detect.readers, through agentihooks doctor <slug> findings",
+      "tests": [
+        "tests/doctor/test_lab.py::test_an_unreachable_lab_is_one_finding_measured_from_its_last_good_read",
+        "tests/doctor/test_lab.py::test_a_fresh_reading_behind_the_limit_is_a_finding_and_at_the_limit_is_not",
+        "tests/doctor/test_lab.py::test_each_class_with_a_hit_ratio_under_the_floor_is_a_finding",
+        "tests/doctor/test_lab.py::test_the_wait_limit_and_hit_floor_come_from_the_environment",
+        "tests/doctor/test_lab.py::test_an_authoritative_gate_with_a_mismatch_is_a_finding",
+        "tests/doctor/test_lab.py::test_mismatches_count_each_authoritative_gate_through_the_acceptance_rule_report",
+        "tests/doctor/test_lab.py::test_the_gate_reader_asks_github_only_for_authoritative_gates",
+        "tests/doctor/test_lab.py::test_the_doctor_reads_the_stored_lab_block_and_registers_both_readers",
+        "tests/doctor/test_lab.py::test_doctor_findings_prints_a_faked_lab_reading_as_json"
+      ]
+    },
+    {
       "id": "tick-status-publish-last-findings",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-status-publish-budget",
@@ -1747,6 +1765,21 @@
       ]
     },
     {
+      "id": "hive-restart-on-checkout-move",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-service-restart-on-checkout-move",
+      "behaviour": "The hive run reads the checkout revision it loaded its code from at start and again after every beat with no order worker running; when the revision moved, or first became readable, it says so on stderr and ends between beats so its user unit starts it again on the new code, and it keeps beating while the revision is unchanged or cannot be read.",
+      "seam": "scripts.hive.daemon.run and scripts.hive.dispatch.busy",
+      "tests": [
+        "tests/hive/test_daemon_checkout_restart.py::test_a_moved_checkout_ends_the_hive_run_after_its_beat",
+        "tests/hive/test_daemon_checkout_restart.py::test_an_unchanged_checkout_keeps_the_hive_beating",
+        "tests/hive/test_daemon_checkout_restart.py::test_an_unreadable_checkout_keeps_the_hive_beating",
+        "tests/hive/test_daemon_checkout_restart.py::test_a_checkout_unread_at_start_restarts_the_hive_once_it_reads",
+        "tests/hive/test_daemon_checkout_restart.py::test_a_moved_checkout_waits_for_running_order_workers",
+        "tests/hive/test_daemon_checkout_restart.py::test_busy_counts_only_order_workers_still_running"
+      ]
+    },
+    {
       "id": "scheduled-run-hive-placement",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/hvr4",
@@ -2212,6 +2245,21 @@
         "tests/swarm/test_night_watch_drill.py::test_a_respawned_master_that_is_not_seated_on_the_front_door_leaves_the_drill_without_a_recovery",
         "tests/swarm/test_night_watch_drill.py::test_a_respawned_master_seated_on_the_front_door_is_a_recovery",
         "tests/swarm/test_night_watch_drill.py::test_a_respawned_starting_master_counts_as_seated_once_it_wrote_the_ledger_since_launch"
+      ]
+    },
+    {
+      "id": "credential-guard-refuses-get-secret-values",
+      "origin": "regression",
+      "ordered_at": "2026-11-18",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2623",
+      "behaviour": "The credential guard refuses a kubectl get whose words after get name the Secret type, as a plain, plural, group qualified, listed or TYPE/NAME type, or leave the type to the shell, a file or xargs, whenever any output or template flag value can print a data or stringData value: the short output flag alone, in a cluster, with an equals sign or attached, or the long one with a space or an equals sign, set to yaml, json, kyaml, any jsonpath, go template, template or custom columns format, a template or columns file, or a format the command line does not show; and a template flag with no output flag, which kubectl renders as a go template. Every template value is judged, and only a range over .data with a key and a value variable that prints only the key passes, because the metadata of an applied Secret carries its data values. A raw get of a secrets API path is refused. Continued lines are joined as the shell joins them, and command substitution, quotes, flags before get and an ssh wrapper do not hide the words. The default table, name and wide output and the key listing pass.",
+      "seam": "hooks.context.credential_guard.renderer_verdict through hooks.context.credential_guard.gets_secret_values, read by hooks.context.credential_guard.decide",
+      "rules": [
+        "credential-guard-get-secret-output-regex"
+      ],
+      "tests": [
+        "tests/test_credential_guard.py::test_kubectl_get_secret_forms_that_print_a_value_are_refused",
+        "tests/test_credential_guard.py::test_kubectl_get_secret_forms_that_print_no_value_pass"
       ]
     },
     {
@@ -4699,6 +4747,18 @@
         "tests/test_credential_guard.py::test_kubectl_describe_of_a_secret_is_refused",
         "tests/test_credential_guard.py::test_kubectl_commands_that_name_no_secret_type_pass",
         "tests/test_credential_guard.py::test_get_secret_refusal_offers_the_key_listing_and_not_describe"
+      ]
+    },
+    {
+      "id": "credential-guard-describe-flag-words",
+      "origin": "regression",
+      "ordered_at": "2026-11-18",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-credential-guard-flag-words",
+      "behaviour": "In the credential guard's kubectl describe check only a flag that takes a value, written without =, consumes the next word: kubectl describe's own value flags and kubectl's global ones, long or short, and a shorthand cluster of boolean shorthands ending in a value shorthand. A boolean flag such as show events, recursive or insecure skip tls verify, a value attached to its shorthand, and a flag kubectl does not know leave the next word an operand, so a resource type held in a shell variable after a boolean flag is refused, and a named non Secret type after a boolean flag passes.",
+      "seam": "hooks.context.credential_guard.describe_operands, read by hooks.context.credential_guard.decide",
+      "tests": [
+        "tests/test_credential_guard.py::test_a_hidden_describe_type_after_any_flag_is_refused",
+        "tests/test_credential_guard.py::test_a_named_describe_type_after_any_flag_passes"
       ]
     },
     {
