@@ -98,10 +98,10 @@ def test_a_run_ships_its_rows_to_both_tables_and_prints_the_headline(
         report.LEAD.widen(),
         f"INSERT INTO {metrics_outbox.DATABASE}.ci_lead_time FORMAT JSONEachRow",
     }
-    assert [(row["scope"], row["name"], row["runner_minutes"]) for row in body(sent, report.COST)] == [
-        ("window", "all", 3.0),
-        ("tier", "pull request", 3.0),
+    assert sorted((row["scope"], row["name"], row["runner_minutes"]) for row in body(sent, report.COST)) == [
         ("pool", "anton-oss", 0.0),
+        ("tier", "pull request", 3.0),
+        ("window", "all", 3.0),
     ]
     assert [(row["pr"], row["minutes"], row["ledger"]) for row in body(sent, report.LEAD)] == [(7, 30.0, REPO)]
     printed = capsys.readouterr().out.splitlines()
