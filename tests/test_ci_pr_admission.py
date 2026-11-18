@@ -110,3 +110,8 @@ def test_selection_fails_when_its_ruff_differs_from_the_pinned_lint_version(
 ) -> None:
     code, calls, _ = _install_ruff(jobs, tmp_path, "", pip_gives=OTHER_RUFF)
     assert (code, calls) == (1, [f"-m pip install ruff=={RUFF_VERSION}"])
+
+
+def test_the_lock_the_runner_image_smoke_reads_pins_the_lint_ruff() -> None:
+    lock = Path(__file__).resolve().parents[1] / ".github/test-requirements.lock"
+    assert f"ruff=={RUFF_VERSION}" in lock.read_text().splitlines()
