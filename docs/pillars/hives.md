@@ -1608,8 +1608,9 @@ A headless hive takes masters only when the operator opts it in, in one of two w
 An opted-in headless hive still comes after every UI hive that fits: placement sorts UI hives before headless ones,
 then within each kind uses two tiers, each tried in `prefer` order:
 
-1. A hive that holds the native interactive login for the master's harness.
-2. A hive with a subscription or api slot for that harness.
+1. A hive that holds the native interactive login for the master's harness. Only the front door seat,
+   `master@<id>` or a master with no seat, considers this tier; see [Backend master seats](#backend-master-seats).
+2. A hive with a subscription or api slot for that harness whose account has a free seat and is not closed.
 
 A hive names a subscription slot by its `AH_CC_TOKEN_<slug>` slug; a hosted controller names the same account by
 its Secret key. The two may differ only in `_` against `-`, and master placement treats them as one account. A
@@ -1618,6 +1619,63 @@ worker cap. The hive computes that cap from its own quota reading of the account
 [Claude account load balancing](load-balancing.md), and reports 0 while it has no fresh reading. When the
 reservations on the account already reach the cap, the launch is not started and reports "account reservation is
 full".
+
+#### Backend master seats
+
+A hive's native interactive login is the account a person signed in with `claude` on that machine. It carries no
+routed quota token and has a session cap of 1, and the front door master holds it. Backend master seats,
+`master-2@<id>` and up, never take it: master placement offers them only the hive's subscription and api slots, so
+they route on `AH_CC_TOKEN_<slug>` accounts like workers. The same seat rule already kept backend seats off a hive's
+[claude ai master login](../reference/account-login.md#master-claude-ai-login).
+
+The controller decides the front door from the launch task's seat alone. A master whose seat is `master@<id>`, or
+that has no seat, is the front door; every other master seat is a backend seat, whatever its hive or route.
+
+For example, the workstation `desk` is a UI hive where the operator ran `claude` once and also gave the daemon one
+`AH_CC_TOKEN_ops` token. An excerpt of `agentihooks hive show desk`:
+
+```json
+{
+  "id": "desk",
+  "ui": "yes",
+  "interactive": {"claude": "unrouted", "codex": ""},
+  "slots": [{"harness": "claude", "account": "ops", "kind": "subscription", "cap": 4, "provider": "", "agents": 1}]
+}
+```
+
+With `masters-step` asking for three masters (see [Several master seats](swarm.md#several-master-seats)), the
+seats place as:
+
+| Seat | Hive | Account | Route |
+|---|---|---|---|
+| `master@<id>` | `desk` | `unrouted` | `interactive` |
+| `master-2@<id>` | `desk` | `ops` | `subscription` |
+| `master-3@<id>` | `desk` | `ops` | `subscription` |
+
+`master-2` and `master-3` each reserve one of the four `ops` sessions, beside the workers already on that account.
+When the front door's own launch is refused because the native login's single session is still reserved, it retries
+once on a subscription slot and leaves the refused login alone.
+
+Before this rule (pull request 11407, merged into dev on 16 November 2026), placement offered the native login to
+every master seat and ranked it above the slots. Each backend seat chose the login the front door already held, and
+hive admission refused it on every tick, so a swarm that scaled to three masters kept one:
+
+```text
+master spawn failed in seat master-2@rig-grade-swarm: account reservation is full: account=claude:unrouted sessions=1 cap=1
+```
+
+The regression tests `test_a_secondary_master_ignores_a_hive_interactive_login` and
+`test_a_secondary_master_on_a_native_login_hive_is_ordered_on_a_subscription_slot` hold the rule, under the feature
+map entry `master-interactive-login-without-front-gate`. The Semgrep incident rule of the same name flags a native
+login candidate in `place_master` that does not check `front`.
+
+This rule covers placement on hives. A master the controller leaves to the workstation's own herdr server follows
+[Auth fallback and move back](swarm.md#auth-fallback-and-move-back) instead.
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Every tick logs `master spawn failed in seat master-2@<id>: account reservation is full: account=claude:<login> sessions=1 cap=1`, and `swarm status` shows one master while `masters-step` wants more | The controller runs a release from before the front door rule, so backend seats pick the native login the front door holds. | Roll the controller onto a release that carries pull request 11407. |
+| A backend seat waits with `no hive for master advertises a claude slot` while the front door runs | No live hive that takes `master` and lists the repo has a Claude subscription or api slot whose account has a free seat and is not closed. The native login does not count for a backend seat. | Give a UI hive an `AH_CC_TOKEN_<slug>` with quota left, then read `slots` and each `cap` in `agentihooks hive show <hive>`. |
 
 ### Who writes placement
 
@@ -1916,7 +1974,8 @@ invite; see [The hub and the bus](../reference/deployment-modes.md#the-hub-and-t
 ## Workstation fallback
 
 When no UI hive fits, because none is live, or the live ones lack the repo, or lack both a slot and the interactive
-login for the master's harness, the hive controller leaves the master to the workstation herdr server. It does the
+login for the master's harness (a slot alone for a [backend seat](#backend-master-seats)), the hive controller
+leaves the master to the workstation herdr server. It does the
 same when the hive runtime is disabled on the controller. When the controller's own herdr server answers, the
 controller spawns the master there. Otherwise it refuses the launch with "the workstation hive spawns master work"
 followed by the placement reason, and the tick reports that line in its actions.
@@ -1927,7 +1986,7 @@ The refusal carries the master placement wait reason after the colon:
 |---|---|---|
 | `no live hive takes master` | No hive that takes `master` is live: the UI hive's heartbeat is over ninety seconds old, it is draining, or it excludes `master`, and every headless hive excludes it too. | Start or restart `agentihooks hive run` on the UI hive, end its drain, or remove `master` from its `excluded` list. |
 | `no hive for master lists the repo <repo>` | Hives take `master`, but none lists the swarm's repo, under any checkout path or the same remote origin. | Clone the repo on the UI hive; its next heartbeat lists it. See [Matching a repo across machines](#matching-a-repo-across-machines). |
-| `no hive for master advertises a claude slot` | A hive takes `master` and lists the repo, but holds neither the native Claude interactive login nor a Claude subscription or api slot whose account has a free seat and is not closed. | Log the UI hive in with `claude`, or give it a `AH_CC_TOKEN_<slug>` with quota left; `agentihooks hive show <hive>` lists `interactive` and `slots`. |
+| `no hive for master advertises a claude slot` | A hive takes `master` and lists the repo, but holds neither the native Claude interactive login nor a Claude subscription or api slot whose account has a free seat and is not closed. For a backend seat (`master-2@<id>` and up) the native login does not count, so only such a slot fits. | Log the UI hive in with `claude` (front door only), or give it a `AH_CC_TOKEN_<slug>` with quota left; `agentihooks hive show <hive>` lists `interactive` and `slots`. |
 
 For example, a swarm on the workstation `desk` and one Anton pod, where the operator cloned the repo only on the
 pod:
