@@ -2835,6 +2835,138 @@ redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" GET "$P:hive:<id>:executions" \
 
 An empty answer means the hive has not beaten for 45 seconds.
 
+### Join reports after a hive restart
+
+Every agent on a hive writes one join report when its session starts: the SessionStart join hook grades its checks
+and stores the report in the hash `<root>:hive:<id>:join-reports`, one field per execution id. When the session
+ends, the hook writes `ended_at`, `exit_reason` and `status` into the same report; a Codex session's supervisor
+writes the same end with `exit_reason` `codex transport exited` when its transport exits. A report without
+`ended_at` keeps the agent listed on its hive while its agent record runs, and counted by the hive's drain.
+
+An agent killed together with its pod never runs that end. The hive daemon's join report heartbeat, which runs on
+every 15 second beat, ends those reports itself once the restarted daemon is back.
+
+#### What a join report records about its member
+
+| Field | Value |
+|---|---|
+| `member` | The host name of the machine or pod that runs the agent, `registry.member_name()`: the pod name on a worker hive. |
+| `epoch` | `<boot id>/<start tick>`: the kernel boot id from `/proc/sys/kernel/random/boot_id`, and the start time of process 1 in clock ticks since boot, field 22 of `/proc/1/stat`. Empty when either cannot be read. |
+
+A container restart inside the same pod, such as after an OOM kill, keeps the pod name and starts a new process 1,
+so the epoch changes. A reboot changes the boot id. Restarting only the `agentihooks-hive` service on a machine
+whose process 1 is its init system keeps the epoch. The start tick counts from boot, so a step of the wall clock
+does not move it.
+
+The join hook runs in the agent's session and the heartbeat in the hive daemon, so the check relies on both reading
+the same host name and the same process 1. The hive daemon and the agents it starts run in the same pod or on the
+same machine, and the hive chart sets none of `hostPID`, `hostNetwork` or `shareProcessNamespace`. Pull
+request #11279 recorded the agent hook and the daemon reading one PID namespace on a worker pod and on the
+workstation root hive; compare them on a live hive with the commands in
+[Checking it on a live hive](#checking-it-on-a-live-hive).
+
+#### What the heartbeat does on each beat
+
+The heartbeat takes the hive's reports whose `status` is `running` and judges each in this order:
+
+1. **Restarted member.** It ends the report with `exit_reason` `agent ended with its member's restart` and `status`
+   `ended` when all of these hold: the daemon can read its own epoch, the report's `member` is the daemon's own host
+   name, and the report carries an epoch that differs from the daemon's.
+2. **Gone from the swarm.** It ends the report with `exit_reason` `agent gone from the swarm` and `status` `ended`
+   when the swarm holds no agent record for the report's swarm, execution id and generation in a state other than
+   `finished` or `ended`.
+3. **Refresh.** A report both checks keep, whose `heartbeat_at` is 180 seconds old or older, gets `heartbeat_at` set
+   to the beat time and its checks probed again. A check that passed at join stays passed.
+
+The first two checks run on every beat; only the refresh waits 180 seconds. A restarted hive therefore ends the
+reports it wrote before the restart on its first beat. An end is written only while the stored report still
+belongs to the same session. Ended reports stay in the hash.
+
+The restart check sorts the running reports this way:
+
+| Report | Restart check |
+|---|---|
+| Written by this member under the current epoch | Kept |
+| Written by this member under an earlier epoch | Ended with `agent ended with its member's restart` |
+| Written by another member of the same hive | Kept; only the member that wrote a report ends it for a restart |
+| No `member` or no `epoch`, written by a release before [pull request #11279](https://github.com/the-cloud-clockwork/agentihooks/pull/11279) | Kept |
+| Any report, while the daemon cannot read its own epoch | Kept |
+
+A kept report still goes through the gone check and the refresh.
+
+#### What reads the report
+
+| Reader | While the report runs | Once it has ended |
+|---|---|---|
+| `agentihooks hive list` | Lists the agent under its hive with its grade, misses and `heartbeat=<ms>`, the last heartbeat time in epoch milliseconds, while its execution still runs, and counts it in `workers=` unless it is a master. | Drops the agent from the hive's lines and from `workers=`. |
+| `agentihooks hive drain`: the pod's preStop, the release roll and `hive remove` | Counts the agent as running and waits for it to hand off. When one member of a shared hive drains, it counts only agents whose recorded process namespace is its own. | No longer counts the agent, so the drain stops waiting on it. |
+| The [stall watchdog](swarm.md#stall-watchdog) | Counts a task's hive owner as live while its report runs with a heartbeat no older than 360 seconds, twice the refresh interval. | Stops counting that owner as live, so the task can stall as `owner not live` after `AGENTIHOOKS_STALL_OWNER_MINUTES` (default 10). |
+| `agentihooks swarm <slug> status` | Prints a `hive join` line for the agent. | Adds `exit=<reason>` and `status=ended` to that line. |
+
+```bash
+agentihooks swarm <slug> status | grep 'hive join'
+# hive join  engineer@<code>-<n>  complete  misses=none  heartbeat=<ms>
+# hive join  engineer@<code>-<m>  complete  misses=none  heartbeat=<ms>  exit=agent ended with its member's restart  status=ended
+```
+
+The fields are separated by tabs, shown aligned here.
+
+The heartbeat changes only the join report. The agent record, its task claim and its inbox items stay until the
+controller tick retires the agent, as in [A hive worker whose pane is gone](#a-hive-worker-whose-pane-is-gone).
+
+Before [pull request #11279](https://github.com/the-cloud-clockwork/agentihooks/pull/11279) the heartbeat refreshed
+every running report whose agent record still ran. That pull request records the incident: on 14 November the
+worker container of `swarm-hive-001` was OOM killed and restarted at 17:09:58 UTC. At 21:48 UTC `ps` in the pod
+showed no process for two engineers, while their join reports still read `running` with heartbeats from 21:50 UTC,
+so `hive list` showed both as `complete` and `hive drain` counted them as running.
+
+#### Upgrade
+
+The join hook that records `member` and `epoch` and the daemon that compares them run from the same agentihooks
+install on the hive. Upgrade the hive to a release carrying
+[pull request #11279](https://github.com/the-cloud-clockwork/agentihooks/pull/11279) and restart its hive service or
+roll its pod. Agents that start after the upgrade write both fields; reports of agents that started earlier carry
+neither and are kept by the restart check.
+
+#### Limitations
+
+- A report without `member` or `epoch` ends only through the gone check, when its agent record ends.
+- A pod that is deleted and replaced, rather than restarted, comes back under a new host name. The replacement
+  reads the old reports as another member's and keeps refreshing them until their agent records end and the gone
+  check ends them.
+- The check needs each member to have its own host name and its own process 1. With `hostPID` set, process 1 is
+  the node's init, so a container restart leaves the epoch unchanged; with `hostNetwork` set, every pod on a node
+  takes the node's host name.
+
+#### Checking it on a live hive
+
+```bash
+# On the hive: its member name and current epoch
+hostname
+echo "$(cat /proc/sys/kernel/random/boot_id)/$(sed 's/.*) //' /proc/1/stat | cut -d' ' -f20)"
+# swarm-hive-001-agentihooks-swarm-worker-hive-68c5d5fb-wwszw
+# e8adb1a1-f80b-4d66-962f-26f39eacd37d/189301145
+
+# On the hive: the daemon and a Claude agent process read one PID namespace
+readlink /proc/"$(pgrep -f 'agentihooks hive run' | head -1)"/ns/pid /proc/"$(pgrep -x claude | head -1)"/ns/pid
+# pid:[4026532913]
+# pid:[4026532913]
+
+# From any joined machine: the running reports with the member and epoch each recorded
+P=${AGENTIHOOKS_SWARM_KEY_PREFIX:-agentihooks}
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" HVALS "$P:hive:<id>:join-reports" \
+  | jq -c 'select(.status == "running") | {agent, member, epoch, heartbeat_at}'
+
+# The reports the heartbeat ended for a restart
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" HVALS "$P:hive:<id>:join-reports" \
+  | jq -c --arg r "agent ended with its member's restart" 'select(.exit_reason == $r) | {agent, member, epoch, ended_at}'
+```
+
+A running report whose `member` is the hive's host name and whose `epoch` differs from the hive's current one is
+ended on the hive's next beat. If it is still running a beat later, either the hive daemon runs a release older than
+pull request #11279, or the daemon cannot read its own epoch because `/proc/sys/kernel/random/boot_id` or
+`/proc/1/stat` is unreadable in its pod, which keeps every report.
+
 ### Troubleshooting
 
 | Symptom | Check | Fix |
@@ -2845,6 +2977,8 @@ An empty answer means the hive has not beaten for 45 seconds.
 | A spawn failed with `the hive launch order ended before its acknowledgement` | `agentihooks hive list` for the order's hive | The order's receipt holds no acknowledgement, so the hive never answered it. Check that the hive beats and its `agentihooks-hive` service runs. |
 | A hive worker whose pane closed stays `suspect` and holds its seat | The hive's report, as in [A hive worker whose pane is gone](#a-hive-worker-whose-pane-is-gone) | `pane_ids` `null` or missing: herdr refused the listing, or the hive daemon predates pull request #5387; fix herdr on the hive or upgrade it. `observed_at` older than the launch: the hive's snapshot is stale; check that it beats. A fresh heartbeat from the worker keeps the claim until it ages past ten minutes. |
 | The tick printed `retired <agent>: its hive pane is gone` for a worker that was running | The report's `process_namespace` and `started_at` against the worker's launch | The hive pod restarted after the launch, which ends every process it ran. The task reopens for a successor. |
+| After a hive pod restart, `hive list` still shows agents with fresh heartbeats whose processes are gone, and `hive drain` waits on them | Each running join report's `member` and `epoch` against the hive's own, with the commands in [Join reports after a hive restart](#join-reports-after-a-hive-restart) | No `member` or `epoch`: the report predates pull request #11279 and ends when its agent record ends. A `member` naming another pod: the pod was replaced, not restarted, so the report ends only when its agent record ends. The same member with an earlier epoch: the hive daemon runs an older release, so upgrade the hive; or the daemon cannot read its own epoch, so check that the two `/proc` files the epoch comes from are readable in the pod. The same member and epoch: the agent should still run, so look for its process in the pod. |
+| `swarm status` shows `exit=agent ended with its member's restart` for an agent | The hive pod's restart time against the agent's launch | Expected: the agent's process ended with the restart, so `hive list` and the drain no longer count it. The agent record, its claim and its inbox items stay until the controller tick retires the agent, as in [A hive worker whose pane is gone](#a-hive-worker-whose-pane-is-gone). |
 
 ## Hive placement for one swarm on a local machine
 
@@ -3070,10 +3204,12 @@ The `agentihooks-swarm` chart runs worker pods from the hive worker image. Each 
 When the pod stops, for an image update, a rollout or a node drain, its preStop runs `agentihooks hive drain --wait
 <workers.drainSeconds>` (default 3600): the hive sets `draining=yes`, so placement sends it no new agent, sends
 each agent it hosts one inbox order to hand off, so the agent's successor starts on another hive, and waits until no
-agent it hosts is running. The drain writes its result to the pod log. The grace period is `workers.drainSeconds` plus
-30 seconds, so a Recreate rollout starts the new pod as soon as the old hive's agents hand off, or when the wait runs
-out. With `workers.rollout.enabled` the drain is bounded by `workers.rollout.drainSeconds` and the hives roll one at a
-time; see [Release roll one hive at a time](#release-roll-one-hive-at-a-time).
+agent it hosts is running. An agent counts as running while its join report has not ended; see
+[Join reports after a hive restart](#join-reports-after-a-hive-restart). The drain writes its result to the pod log.
+The grace period is `workers.drainSeconds` plus 30 seconds, so a Recreate rollout starts the new pod as soon as the
+old hive's agents hand off, or when the wait runs out. With `workers.rollout.enabled` the drain is bounded by
+`workers.rollout.drainSeconds` and the hives roll one at a time; see
+[Release roll one hive at a time](#release-roll-one-hive-at-a-time).
 
 The bundle origin and the token come from the hive settings record through `workers.envFromSecrets`. Write the
 whole record from the workstation with one command:
