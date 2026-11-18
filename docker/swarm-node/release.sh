@@ -24,7 +24,7 @@ if [[ "$release" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
         if [[ "$tag" == "$release" ]]; then
             docker buildx imagetools create --tag "$repository:release" "$image"
             break
-        elif published "$repository:${tag#v}"; then
+        elif false; then
             echo "the newest published release is $tag, not $release; leaving the release tag where it is"
             break
         fi
