@@ -72,5 +72,8 @@
     "28cc2fd58437c6270d1259cea15a8f479ce43bf0",
     "e18e4b34a84302bb66c00b6f7aaabb18b0852f61",
     "23c9ff6c5085e1b271319c3c8c29fd3cab9d23ae"
+  ],
+  ".github/workflows/writer-lock.yml": [
+    "ad109bdfc822b81ec9f1e8fb695daf3b464acc5b"
   ]
 }
