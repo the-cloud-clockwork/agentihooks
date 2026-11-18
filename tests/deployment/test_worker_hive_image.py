@@ -524,7 +524,13 @@ def test_a_release_builds_the_hive_worker_on_its_released_worker_and_moves_relea
 
 
 def release_hive(
-    tmp_path: Path, *, version: str, candidate: str = "not found", latest: str = "true", newest: str = "v2.1.7"
+    tmp_path: Path,
+    *,
+    version: str,
+    candidate: str = "not found",
+    latest: str = "true",
+    newest: str = "v2.1.7",
+    newer: str = "not found",
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     tools = tmp_path / "bin"
     tools.mkdir()
@@ -532,7 +538,11 @@ def release_hive(
     (tools / "docker").write_text(
         '#!/usr/bin/env bash\nprintf "docker %s\\n" "$*" >> "$COMMAND_LOG"\n'
         'if [[ "$1 $2 $3" == "buildx imagetools inspect" ]]; then\n'
-        '  if [[ "$4" == *:2.1.7 ]]; then answer="$FAKE_VERSION"; else answer="$FAKE_CANDIDATE"; fi\n'
+        '  case "$4" in\n'
+        '    *:2.1.7) answer="$FAKE_VERSION" ;;\n'
+        '    *:abc123) answer="$FAKE_CANDIDATE" ;;\n'
+        '    *) answer="$FAKE_NEWER" ;;\n'
+        "  esac\n"
         '  [[ "$answer" == published ]] && exit 0\n'
         '  echo "ERROR: $4: $answer" >&2; exit 1\nfi\n'
     )
@@ -552,6 +562,7 @@ def release_hive(
         "FAKE_VERSION": version,
         "FAKE_CANDIDATE": candidate,
         "FAKE_NEWEST": newest,
+        "FAKE_NEWER": newer,
     }
     result = subprocess.run(
         ["bash", str(ROOT / "deploy/worker/release-hive.sh"), "registry/hive", "v2.1.7", latest, "abc123"],
@@ -609,12 +620,34 @@ def test_an_unpublished_hive_release_builds_proves_and_pushes_release_before_its
 def test_a_newer_release_at_move_time_keeps_the_release_tag_and_still_tags_the_version(
     tmp_path: Path, newest: str, candidate: str
 ) -> None:
-    result, commands = release_hive(tmp_path, version="not found", candidate=candidate, newest=newest)
+    result, commands = release_hive(
+        tmp_path, version="not found", candidate=candidate, newest=newest, newer="published"
+    )
     assert result.returncode == 0, result.stderr
     assert all(":release " not in command for command in commands)
     assert commands[-1] == "docker buildx imagetools create --tag registry/hive:2.1.7 registry/hive:abc123"
-    assert f"the newest release is {newest}, not v2.1.7" in result.stdout
+    assert f"{newest}, not v2.1.7; leaving the release tag where it is" in result.stdout
     assert (tmp_path / "git").read_text().splitlines() == ["git ls-remote --tags --refs origin"]
+
+
+@pytest.mark.parametrize("newest", ["v2.1.8", "v2.1.10", "v3.0.0"])
+def test_a_release_moves_the_release_tag_while_newer_releases_have_no_hive_image(tmp_path: Path, newest: str) -> None:
+    result, commands = release_hive(tmp_path, version="not found", candidate="published", newest=newest)
+    assert result.returncode == 0, result.stderr
+    assert commands[-3:] == [
+        f"docker buildx imagetools inspect registry/hive:{newest.removeprefix('v')}",
+        "docker buildx imagetools create --tag registry/hive:release registry/hive:abc123",
+        "docker buildx imagetools create --tag registry/hive:2.1.7 registry/hive:abc123",
+    ]
+
+
+def test_a_registry_error_on_a_newer_release_image_fails_before_moving_any_tag(tmp_path: Path) -> None:
+    result, commands = release_hive(
+        tmp_path, version="not found", candidate="published", newest="v2.1.8", newer="unauthorized"
+    )
+    assert result.returncode != 0
+    assert "unauthorized" in result.stderr
+    assert all("imagetools create" not in command for command in commands)
 
 
 def test_a_release_the_image_job_did_not_name_latest_reads_no_tags(tmp_path: Path) -> None:
