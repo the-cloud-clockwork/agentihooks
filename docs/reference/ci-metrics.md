@@ -24,7 +24,7 @@ python -m scripts.github_app_cli exec python -m scripts.ci_metrics \
 | Flag | Default | Meaning |
 |------|---------|---------|
 | `--repo` | required | Repository whose workflow runs are measured |
-| `--prometheus` | required | Prometheus base URL for the pending runner average |
+| `--prometheus` | required | Prometheus base URL for the pending runner average, with no trailing slash |
 | `--lag-hours` | 2 | Measure the hour that ended this many hours before the current hour, so its runs have finished |
 | `--until` | none | Measure the hour that ends at this UTC time instead |
 
@@ -44,8 +44,9 @@ the run, and its hour has no rows until it is measured again:
 kubectl -n agentihooks-swarm create job --from=cronjob/agentihooks-swarm-ci-metrics ci-metrics-rerun
 ```
 
-reruns the lagged hour, and a run with `--until` set to the end of the missed
-hour measures an older one. Rows of a window measured twice replace each other.
+reruns the hour the lag points at, so it recovers a failed run only before the
+next hour starts. An older hour needs a run of the module with `--until` set to
+the end of that hour. Rows of a window measured twice replace each other.
 
 ## What one run reads
 
@@ -151,5 +152,5 @@ requests of these raw files (SHA256):
 | `jobs_rest.ndjson` | `b5f5af4d36541d78557cdfe537777421f1ddbd7aeacc08256b280148790fd3f9` |
 | `prs_merged.json` | `fc23b4d573d6d9fb710a2748c7640d65c4a8a05e2b177ee0bdbdd39575e39981` |
 
-49 lines of `jobs.ndjson` that two parallel writers interleaved do not parse
+49 lines of `jobs_rest.ndjson` that parallel writers interleaved do not parse
 and are left out, as the report's scripts left them out.
