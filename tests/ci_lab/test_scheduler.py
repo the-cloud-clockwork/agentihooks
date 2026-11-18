@@ -6,6 +6,7 @@ import subprocess
 import sys
 import threading
 import urllib.request
+import zipfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -893,18 +894,24 @@ def test_a_head_whose_grader_delivery_breaks_its_schema_is_dropped_with_its_reas
     assert run.grades() == []
 
 
-@pytest.mark.feature("lab-dev-manifest-fetch")
-def test_a_head_whose_manifest_fetch_github_refuses_is_dropped_with_its_reason(
+@pytest.mark.feature("lab-manifest-fetch-holds-head")
+def test_a_head_whose_manifest_fetch_github_refuses_waits_until_a_pass_finds_no_manifest(
     lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     run = lab({})
+    refusals = [FetchRefused(f"GET actions/workflows/test.yml/runs answered 502 for {BASE}")]
 
-    def refused(request: GradeRequest) -> scheduler.Plan:
-        raise FetchRefused(f"GET actions/workflows/test.yml/runs answered 502 for {request.base}")
+    def expand(request: GradeRequest) -> scheduler.Plan:
+        if refusals:
+            raise refusals.pop()
+        raise ValueError(f"no dependency manifest at or before {request.base}")
 
-    monkeypatch.setattr(run.lab.expander, "expand", refused)
+    monkeypatch.setattr(run.lab.expander, "expand", expand)
     run.push(HEAD_A)
-    assert run.tick(1000)[-1] == f"cannot expand {HEAD_A}: GET actions/workflows/test.yml/runs answered 502 for {BASE}"
+    assert run.tick(1000)[-1] == f"holding {HEAD_A}: GET actions/workflows/test.yml/runs answered 502 for {BASE}"
+    assert list(run.lab.client.hgetall(scheduler.WAITING)) == [f"{REPO}|feature|{int(Priority.PROMOTION)}"]
+    assert run.grades() == []
+    assert run.tick(2000)[-1] == f"cannot expand {HEAD_A}: no dependency manifest at or before {BASE}"
     assert run.lab.client.hgetall(scheduler.WAITING) == {}
     assert run.grades() == []
 
@@ -2167,6 +2174,47 @@ def test_a_head_that_needs_test_units_expands_on_the_manifest_stored_from_its_ba
     slug = str(suite.repo).removeprefix("/")
     assert fetches.asked == [(slug, suite.base)]
     assert objects.read(f"{manifest_folder(slug)}{suite.base}.json") == packed_file(STORED_MANIFEST, suite.base)
+
+
+@pytest.mark.feature("lab-manifest-fetch-holds-head")
+@pytest.mark.usefixtures("staticless")
+def test_a_head_whose_manifest_fetch_times_out_waits_out_its_window_again_and_a_later_pass_grades_it(
+    lab: Callable[..., Run], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    suite = _suite(tmp_path, DELIVERY["lab"])
+    packed = packed_file(STORED_MANIFEST, suite.base)
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w") as written:
+        written.writestr("packed.json", packed)
+    get = Mock(
+        side_effect=[
+            requests.ReadTimeout("read timed out"),
+            Mock(status_code=200, json=Mock(return_value={"workflow_runs": [{"id": 1}]})),
+            Mock(status_code=200, json=Mock(return_value={"artifacts": [{"id": 2, "expired": False}]})),
+            Mock(status_code=200, content=archive.getvalue()),
+        ]
+    )
+    monkeypatch.setattr(requests, "get", get)
+    run = lab({}, quiet_ms=30_000)
+    token = Mock(get_token=Mock(return_value="fixture"))
+    stored = scheduler.StoredManifests(run.lab.objects, Fetcher(lambda repo: Actions(repo, token)))
+    node = tmp_path / "node"
+    _git(tmp_path, "init", "-q", "--bare", str(node))
+    toolchain = Toolchain("3.12", {}, "", "", "image", {})
+    expander = scheduler.MirrorExpander(node, tmp_path / "stores", toolchain, stored, Port().verdicts)
+    monkeypatch.setattr(run.lab.expander, "expand", expander.expand)
+    event = HeadEvent("push", suite.remote, suite.head, suite.base, ACTOR, "pushed")
+    run.lab.inbox.pending.append(scheduler.Head(event, "dev"))
+    assert run.tick(1000) == [f"received {suite.head} on dev"]
+    runs = f"actions/workflows/test.yml/runs?event=push&branch=dev&head_sha={suite.base}"
+    assert run.tick(31_000) == [f"holding {suite.head}: GET {runs} failed: read timed out"]
+    assert run.tick(60_999) == []
+    assert get.call_count == 1
+    assert run.tick(61_000)[0].startswith("grading ")
+    assert run.grade(suite.head).base == suite.base
+    slug = str(suite.repo).removeprefix("/")
+    assert run.lab.objects.read(f"{manifest_folder(slug)}{suite.base}.json") == packed
+    assert get.call_count == 4
 
 
 @pytest.mark.feature("lab-control-routes")
