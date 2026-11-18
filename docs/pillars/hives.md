@@ -1769,6 +1769,9 @@ member's credential may publish only for its own hive; a request naming another 
 starts the execution on that hive, occupies a seat, marks the task claimed (or back in `pr`) and returns the primed
 spawn task. A repeat from the same hive returns the same admission, so a retried launch keeps its agent; any other
 hive gets none. When the offer runs out of deliveries, the spoke sends `reopen`, which returns the task to `open`.
+The hub answers these requests on a pool of eight threads and drops one that waited there as long as the hive waits
+for its answer, so an admission the hive gave up on never claims the task; see
+[How the hub serves requests](../reference/swarm-bus-scope.md#how-the-hub-serves-requests).
 Unlike a tick launch, a hub admission scaffolds no task work folder on the hub and resolves no reclaim continuation,
 stack base, overlaps or group; the spawn task carries the seat's handoff, recaps and learned notes.
 
