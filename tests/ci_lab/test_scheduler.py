@@ -967,9 +967,9 @@ def test_the_bus_inbox_terminates_each_head_missing_a_field_with_a_logged_reason
         assert inbox.heads() == [scheduler.Head(bare, HEAD_B)]
     assert [delivery.termed for delivery in deliveries] == [True, True, False]
     assert [delivery.acked for delivery in deliveries] == [False, False, True]
-    assert caplog.messages == [
-        f"terminated lab head {one.id} missing action",
-        f"terminated lab head {two.id} missing actor, action",
+    assert caplog.record_tuples == [
+        (scheduler.__name__, logging.WARNING, f"terminated lab head {one.id} missing action"),
+        (scheduler.__name__, logging.WARNING, f"terminated lab head {two.id} missing actor, action"),
     ]
 
 
