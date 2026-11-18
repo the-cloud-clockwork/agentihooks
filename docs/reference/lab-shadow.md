@@ -168,7 +168,7 @@ For a window other than 50 the two thresholds scale and round up, `scripts.ci_la
 | 3 | 3 | 3 |
 
 Below 25 heads every head needs a lab verdict, and below 10 every lab verdict must also come
-first. The plan's flip rule uses the default 50.
+first. Phase 4 of the grading lab plan uses the default 50.
 
 ## Output
 
@@ -229,7 +229,7 @@ against 0, and 2 first verdicts against 4.
 | Every row shows `missing` | The lab is not posting `lab-shadow/<gate>` check runs on these heads | Check the lab scheduler and worker are live and grading in shadow |
 | One head shows `missing` although it has a `lab-shadow/<gate>` check run | The run came from another App or a workflow token, or the newest run of that name is still in progress or concluded `cancelled`, `skipped` or `neutral` | `gh api 'repos/<repo>/commits/<sha>/check-runs?check_name=lab-shadow/<gate>'` shows each run's `app.slug`, `status` and `conclusion` |
 | `heads N of 50` below 50 | Too few completed Tests runs with a graded job of the gate in the newest 1000 runs | Use a smaller `--heads`, or wait for more heads |
-| `heads 0 of 50` and `rule fails`, exit 1 | An unknown or mistyped gate id: `gate_of` maps no Actions job to it, so every head leaves the window. A wrong id is no argument error, and the report reads every distinct head of the newest 1000 runs, at least one API call each and up to about 1000 calls in all, before it prints | Check the id against the `job` field of `python -m scripts.ci_lab.static_gates` and `scripts.ci_lab.shadow.gate_of` before running; run from a checkout of current dev |
+| `heads 0 of 50` and `rule fails`, exit 1 | An unknown or mistyped gate id: `gate_of` maps no Actions job to it, so every head leaves the window. A wrong id is no argument error, and the report reads every distinct head of the newest 1000 runs before it prints: 10 pages of runs plus at least one API call per distinct head | Check the id against the `job` field of `python -m scripts.ci_lab.static_gates` and `scripts.ci_lab.shadow.gate_of` before running; run from a checkout of current dev |
 | `error: --app or AGENTIHOOKS_LAB_APP names the lab App`, exit 2 | Neither the flag nor the variable names the lab App | Pass `--app <lab App slug>` or export `AGENTIHOOKS_LAB_APP` |
 | `error: --heads must be at least 1`, exit 2 | `--heads` is 0 or negative | Pass a window of at least 1 |
 | `error: argument --event: invalid choice`, exit 2 | The event is neither `pull_request` nor `merge_group` | Pass one of the two |
