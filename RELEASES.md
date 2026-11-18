@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.1031 · 2026-11-18
+
+### 2026-11-18 · a38685c9a0a2 · #12132 · @nestorcolt
+
+**Outage rules Semgrep scan over tests gives each rule 30 seconds on a file**
+
+This change adds `--timeout 30` to the Semgrep gate step that scans `tests` for outage rules, matching the timeout already used elsewhere in the same job. Previously, Semgrep's default 5 second per rule per file timeout caused the `ledger-client-swapped-for-a-function` rule to silently time out on slow runners for certain test files, so `--strict` failed the pull request even though no real findings existed. With the longer timeout, the rule reliably completes and still correctly flags genuine violations, while avoiding spurious CI failures caused purely by runner speed.
+
 ## v2.17.1028 · 2026-11-18
 
 ### 2026-11-18 · 4286c104c8ef · #12077 · @agenticore-app
