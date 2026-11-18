@@ -1,4 +1,5 @@
 import copy
+import hashlib
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -6,7 +7,7 @@ from typing import Any
 import pytest
 
 from scripts import dep_manifest
-from scripts.ci_lab import digests, expand_tests
+from scripts.ci_lab import digests, executors, expand_tests
 from scripts.ci_lab.digests import Toolchain
 from scripts.ci_lab.units import Unit
 
@@ -216,6 +217,40 @@ def test_fingerprints_are_golden() -> None:
         "tests/test_alpha.py::test_first": "50453d70f855a2c09ef48a172dee6f277fb53e9d727059b5eb3ff0ebfca4ea01",
         "tests/test_alpha.py::test_second": "9107747a4089126a323cbfc2a542aa9a339ad2254648c5c96fa651fb32e1a19f",
     }
+
+
+@pytest.mark.feature("lab-mutant-unit-unlisted-tests")
+def test_unlisted_hashes_each_test_module_that_holds_no_manifest_test_with_its_conftests_and_imports() -> None:
+    added = {
+        "tests/test_new.py": b"from tests.helpers import VALUE\n\n\ndef test_new():\n    assert VALUE\n",
+        "tests/inner/test_deep.py": b"",
+        "tests/inner/conftest.py": b"",
+        "conftest.py": b"ROOT = 1\n",
+    }
+    others = {
+        "tests/test_data.json": b"{}\n",
+        "scripts/test_tool.py": b"TOOL = 1\n",
+        "tests/unused.py": b"X = 1\n",
+        "tests/other/conftest.py": b"",
+    }
+    tree = {path: text.encode() for path, text in FILES.items()} | added | others
+    expected = {**added, **{path: FILES[path].encode() for path in ("tests/helpers.py", "tests/conftest.py")}}
+    assert expand_tests.unlisted_test_hashes(MANIFEST, tree) == {
+        path: hashlib.sha256(text).hexdigest() for path, text in expected.items()
+    }
+
+
+@pytest.mark.feature("lab-mutant-unit-unlisted-tests")
+def test_unlisted_keys_every_test_module_the_mutant_runner_runs(repository: Path) -> None:
+    extra = {"tests/inner/test_deep.py": "", "tests/test_data.json": "{}\n", "scripts/test_tool.py": "TOOL = 1\n"}
+    for path, text in extra.items():
+        (repository / path).parent.mkdir(parents=True, exist_ok=True)
+        (repository / path).write_text(text)
+    _git(repository, "add", "-A")
+    _git(repository, "commit", "-qm", "extra")
+    runs = executors._test_files(repository)  # pyright: ignore[reportPrivateUsage]
+    assert set(runs) <= set(expand_tests.unlisted_test_hashes({"tests": {}}, _tree(repository)))
+    assert "tests/inner/test_deep.py" in runs
 
 
 def _manifest(*tests: str) -> dict[str, Any]:

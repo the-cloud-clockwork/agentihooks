@@ -1400,12 +1400,8 @@ Every record is one JSON line appended to `merge-queue-events.jsonl` in the Agen
 |---|---|---|
 | `queue` | `agentihooks swarm <slug> merge queue <url>`, the `ready` merge pass and the requeue sweep `python -m scripts.ci_requeue` | yes |
 | `dequeue` | `agentihooks swarm <slug> merge dequeue <url>` and the `ready` merge pass | yes |
-| `priority` | `agentihooks swarm <slug> merge priority <url>` when it reorders the queue, at once or when the tick replays a deferred request | yes |
-| `priority-deferred` | A priority request that waits because the head group's merge group run has not completed | no |
-| `priority-lift` | A priority request with `--lift`, which skips that wait | no |
-| `priority-applied` | The tick replaying a deferred priority that succeeded | no |
-| `priority-failed` | The tick replaying a deferred priority that failed | no |
-| `priority-dropped` | The tick dropping a deferred priority whose pull request closed, left `dev` or became a draft | no |
+| `priority` | `agentihooks swarm <slug> merge priority <url>` when it reorders the queue | yes |
+| `priority-lift` | A priority request with `--lift` | no |
 | `priority-requeue` | The tick requeuing an entry an interrupted priority left out | no |
 | `priority-requeue-skipped` | The tick leaving such an entry out because it became a draft, its head moved or it conflicts with `dev` | no |
 
@@ -1419,7 +1415,7 @@ Each record carries:
 | `action` | One of the actions above |
 | `token_actor` | The GitHub login of the token that read the queue, which is the actor GitHub records for the mutation; `null` when no queue read succeeded |
 | `agent` | `AGENTIHOOKS_AGENT_NAME` of the calling session; `null` outside a swarm session |
-| `pull`, `expected_head` | The pull request URL, always set, and the head it was queued or dequeued at; `expected_head` is empty for `priority-deferred`, `priority-lift`, `priority-applied`, `priority-failed` and `priority-dropped` |
+| `pull`, `expected_head` | The pull request URL, always set, and the head it was queued or dequeued at; `expected_head` is empty for `priority-lift` |
 | `old_groups`, `new_groups` | Every `dev` queue entry, all pages, in queue order, read just before and just after the mutation; `null` when not read or unreadable |
 | `observed_between` | The times of the first and last queue reads |
 | `rebuilt` | Each pull request in both reads whose group head changed, with `old_head`, `new_head`, `old_base` and `new_base` |
@@ -1428,7 +1424,7 @@ Each record carries:
 | `errors` | The GitHub errors the mutation returned; the after read still runs when the mutation fails |
 | `steps` | `priority` only: each `["dequeue", url]`, `["queue", url]` and `["restore", url]` in the order sent |
 
-Each queue group lists `pull`, `pull_head`, `position`, `state`, `jump`, `enqueued_at`, `enqueuer`, `head` (the merge group commit) and `base`. An entry still waiting for its group has a `null` head. `rebuilt`, `removed` and `added` appear only when both reads succeeded. Records from the `ready` merge pass also carry `swarm`, `task`, `timer` (the tick process ID) and `by: "merge watcher"`. A `queue` the master seat makes carries `route` and `task`: `spawn stall` while a spawn stall finding is open for a focused urgent task, or `master freeze` for a pull request whose head branch starts with `master-`, the worktree name code gives a master session's sub agents, and whose task, not done, a master seat froze by name; without either route the master is refused. Deferred priority records carry the request's `repo`, `group_head`, `run_id`, `sender` and `order`; `priority-dropped` and `priority-requeue-skipped` carry `reason`.
+Each queue group lists `pull`, `pull_head`, `position`, `state`, `jump`, `enqueued_at`, `enqueuer`, `head` (the merge group commit) and `base`. An entry still waiting for its group has a `null` head. `rebuilt`, `removed` and `added` appear only when both reads succeeded. Records from the `ready` merge pass also carry `swarm`, `task`, `timer` (the tick process ID) and `by: "merge watcher"`. A `queue` the master seat makes carries `route` and `task`: `spawn stall` while a spawn stall finding is open for a focused urgent task, or `master freeze` for a pull request whose head branch starts with `master-`, the worktree name code gives a master session's sub agents, and whose task, not done, a master seat froze by name; without either route the master is refused. `priority-requeue-skipped` carries `reason`.
 
 `rebuilt` shows only what changed between two reads taken seconds apart. GitHub rebuilds groups after the mutation returns, so most records show no rebuild, and an entry that gained its first group head counts as rebuilt from `null`. To find the mutation behind a rebuild, search by time, as below.
 

@@ -1271,8 +1271,10 @@ where `<digest>` is `digests.digest` of that note. The object store is write onc
 `StoredManifests` read that finds or fetches a packed manifest merges each note of the repository
 into the `outside` list of each test record the note names, sorted and without duplicates, and skips
 a test the manifest lacks; the next expansion keys those tests on the measured tree and the batch on the
-noted files' blob ids, and `tests.dep_manifest.invalidated` counts a change to a file in a
-record's `outside` list as a change to that test, as it does for a file in its `files` list. The
+noted files' blob ids. `scripts.dep_manifest.invalidated`, pull request test selection in
+`scripts.ci_select.recorded_tests` and mutation test selection in
+`scripts.ci_mutation.plan.covering_tests` and `line_covering_tests` count a change to a file in a
+record's `outside` list as a change to that test, as they do for a file in its `files` list. The
 list is per batch, so every test of the batch takes it, and notes are per repository rather than
 per manifest commit.
 
@@ -1302,7 +1304,11 @@ The changed lines are `scripts.ci_mutation.scope.changes_since` of the base and 
 pull request mutation gate grades. `expand_mutation.covering` maps each function to the fingerprint
 of every dependency manifest test that ran it or a function nested in it, and those fingerprints
 enter the mutant key, so a changed covering test rekeys the unit. The stats units warm the stats
-cache the worker's mutant runner reads before it runs the mutants.
+cache the worker's mutant runner reads before it runs the mutants. The manifest only names the tests
+of the base, while the mutant runner runs every test module of the head, so
+`expand_tests.unlisted_test_hashes` hashes each test module of the head that holds no manifest test,
+with every conftest pytest loads for it and every test tree module either imports, and those hashes
+enter every mutant key too: a head that adds or edits such a module rekeys its units.
 
 | Head | Mutation jobs |
 |---|---|
