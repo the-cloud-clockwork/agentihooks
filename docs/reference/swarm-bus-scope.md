@@ -176,15 +176,16 @@ python -c 'from scripts.hive import stop_names; print(stop_names.stream("rig"), 
 
 - **The hub** sends a stop with `scripts.hive.execution_stop.stop(bus, swarm, agent, reason)`. On the swarm's stops
   log it creates the hive's durable, filtered on that hive's stop subject, then publishes the stop. Its answer is
-  `sent`, `pending` (the same stop went out within the bus dedupe window), `ended` or `unknown`. The hub's root bus,
-  with `AGENTIHOOKS_BUS_SCOPED=1`, creates each swarm's stop stream when it first opens that swarm, beside its events
-  and dead letter streams.
+  `sent`, `pending` (the same stop went out within the bus dedupe window), `ended` or `unknown`. The hub's root bus
+  creates each swarm's stop stream at `AGENTIHOOKS_BUS_REPLICAS` when it first opens that swarm, beside its events
+  and dead letter streams. It does so only with `AGENTIHOOKS_BUS_SCOPED=1` and without `AGENTIHOOKS_BUS_BIND`; a
+  member binds and creates none.
 - **The hive** reads with `scripts.hive.execution_stop.Stopper`, one per swarm. Each pass binds the same durable and
   fetches up to 10 stops. Until the hub has sent the hive's first stop the durable does not exist, and the reader
   answers nothing until its next pass. Any other failure prints
-  `hive execution stops for swarm <swarm> failed (<error>)` on the hive's stderr. A settled stop is acknowledged; a
-  failed reap is redelivered after 30 seconds, up to 100,000 deliveries, after which the stop is dead lettered like
-  an event.
+  `hive execution stops for swarm <swarm> failed (<exception type>: <message>)` on the hive's stderr. A settled stop
+  is acknowledged; a failed reap is redelivered after 30 seconds, up to 100,000 deliveries, after which the stop is
+  dead lettered like an event.
 
 `Bus.stops` is the event log for stops, beside `events` and `dead`:
 
@@ -223,8 +224,9 @@ they are published. A pull fetch on its own consumer delivers on its `_INBOX.<us
 does not touch.
 
 `member_claims` called without member swarms still renders the legacy unscoped grant, whose
-`$JS.API.CONSUMER.MSG.NEXT.>` and `$JS.ACK.>` reach every stop consumer. No mint path issues it: the hive endpoint,
-`hive root-bus`, `hive invite` and `hive create` refuse a member the hub signer record does not list, as
+`$JS.API.CONSUMER.MSG.NEXT.>` and `$JS.ACK.>` reach every stop consumer. No mint path issues it: the hive endpoint
+and `hive root-bus` refuse a signer record with no `member_swarms` field and a member the record does not list, and
+`hive invite` and `hive create` refuse a record with no `member_swarms` field, as
 [When a credential is scoped](#when-a-credential-is-scoped) describes. [The grant check](#the-grant-check) renders it
 only to compare it with the retired shared `swarm-hive` user.
 
@@ -246,14 +248,18 @@ NATS Python client lowercases the server's error line, as the stop grant regress
 so a hive log prints the subject as `$js.api...` and `agentihooks-<hex>-stop`.
 
 The feature map entry `hive-own-stop-consumer` lists the regression tests, which run these refusals and a member's
-own fetch and acknowledgement against a live NATS server. The Semgrep incident rule `stop-on-events-log` fails any
-code that creates a stop consumer or publishes a stop on the events log.
+own fetch and acknowledgement against a live NATS server. The Semgrep incident rule `stop-on-events-log` fails code
+under `scripts/` that passes a stop subject or a stop durable to an events log `consumer` call, or a stop subject to
+an events log `publish` call.
 
 ### Upgrading to the stop stream
 
 - A credential keeps the grant it was minted with. A hive whose credential predates the stop stream grants logs
   `hive execution stops for swarm <swarm> failed (...)` with a permissions violation on the stop stream until it gets
-  a new one: run `agentihooks hive refresh` on a member hive. The workstation root hive re-mints its stored
+  a new one. On a member hive run `agentihooks hive refresh`, then restart its hive service:
+  `systemctl --user restart agentihooks-hive` on a workstation or VM, a pod roll on Kubernetes. The refresh rewrites
+  the saved credential and `hive.env`, while a running hive service keeps the bus it opened when its lanes started.
+  The workstation root hive re-mints its stored
   credential when `hive run` starts and finds its grant differs from a fresh mint; see
   [Troubleshooting ended agents](../pillars/hives.md#troubleshooting-ended-agents).
 - Stops still unacknowledged on the events stream when the hub moves to the stop stream are not carried over, and
@@ -519,5 +525,5 @@ missing hive user is accepted only in operator mode, where the values file has n
 | `scoped queue migration is incomplete` | The hub has not finished `migrate_queue` for that lane | Finish the migration on the hub, then restart the member |
 | The grant check fails with `the SWARM account has no swarm-hive user` | The antoncore values file still defines the `SWARM` account, so the check expects the shared user | Finish the antoncore operator mode change, which removes the `accounts` block, or restore the user |
 | The grant check fails with `the SWARM account has no swarm-controller user` | The controller user is missing from antoncore `users.yaml` | Restore `swarm-controller` there; only the hive user may be retired |
-| A hive logs `hive execution stops for swarm <swarm> failed (...)` naming a permissions violation on `$js.api.consumer.info.agentihooks-<hex>-stop.<consumer>` | The hive's credential was minted before the stop stream grants | `agentihooks hive refresh` on a member hive; restart the hive service on the workstation root hive, as in [Upgrading to the stop stream](#upgrading-to-the-stop-stream) |
+| A hive logs `hive execution stops for swarm <swarm> failed (...)` naming a permissions violation on `$js.api.consumer.info.agentihooks-<hex>-stop.<consumer>` | The hive's credential was minted before the stop stream grants | On a member hive, `agentihooks hive refresh`, then restart its hive service; on the workstation root hive, restart the hive service; as in [Upgrading to the stop stream](#upgrading-to-the-stop-stream) |
 | A hive logs a permissions violation on another hive's stop consumer, or on publishing or subscribing to `swarm.<swarm>.stop.>` | Code on that hive reads or writes stops outside its own consumer, which the grant forbids by design | Read stops only through `Stopper` on the hive's own durable; only the hub publishes stops |
