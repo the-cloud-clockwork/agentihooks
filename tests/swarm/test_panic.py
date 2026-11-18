@@ -1763,6 +1763,35 @@ def test_a_successor_branch_tracking_a_registered_fix_stays_frozen_for_any_other
     assert block == blocker_window.FROZEN.format(slug=SLUG, reason="reason")
 
 
+@pytest.mark.feature("panic-spares-a-successor-of-a-fix")
+def test_a_rerun_from_a_branch_tracking_a_fix_on_another_remote_stays_frozen(
+    bound: None, store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _branches(monkeypatch, {FIX: "fix-branch"})
+    panic.engage(store, SLUG, "reason", False, [FIX], 0)
+    cwd = _successor(tmp_path / "successor", "elsewhere")
+    block = blocker_window.pretool("Bash", {"command": "gh run rerun 5"}, "engineer-session", cwd)[1]
+    assert block == blocker_window.FROZEN.format(slug=SLUG, reason="reason")
+
+
+@pytest.mark.parametrize(("remote", "tracked"), [("origin", "fix-branch"), ("elsewhere", "")])
+@pytest.mark.feature("panic-spares-a-successor-of-a-fix")
+def test_a_branch_tracks_only_a_branch_on_origin(tmp_path: Path, remote: str, tracked: str) -> None:
+    cwd = _successor(tmp_path / "successor", remote)
+    assert blocker_window._tracked(cwd, "engineer-successor") == tracked
+    assert blocker_window._tracked(_checkout(tmp_path / "plain", "plain"), "plain") == ""
+
+
+@pytest.mark.parametrize(("cwd", "fixes"), [("", (FIX,)), ("/work", ())])
+@pytest.mark.feature("panic-spares-a-successor-of-a-fix")
+def test_a_rerun_without_a_directory_or_a_fix_reads_no_git(
+    monkeypatch: pytest.MonkeyPatch, cwd: str, fixes: tuple[str, ...]
+) -> None:
+    asked = _reads(monkeypatch, {})
+    assert blocker_window._works_on_fix(cwd, fixes) is False
+    assert asked == []
+
+
 @pytest.mark.feature("panic-fix-spare-reads-target")
 def test_git_c_decides_the_checkout_a_push_is_spared_in(
     bound: None, store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -1770,7 +1799,7 @@ def test_git_c_decides_the_checkout_a_push_is_spared_in(
     _branches(monkeypatch, {})
     panic.engage(store, SLUG, "reason", False, [BRANCH_FIX], 0)
     fix = _checkout(tmp_path / "fix", "fix-branch")
-    other = _checkout(tmp_path / "other", "other-branch")
+    other = _checkout(tmp_path / "other", "other-branch", "git@github.com:The-Cloud-Clockwork/antoncore.git")
     frozen = blocker_window.FROZEN.format(slug=SLUG, reason="reason")
     assert blocker_window.pretool("Bash", {"command": f"git -C {other} push"}, "s", fix)[1] == frozen
     assert blocker_window.pretool("Bash", {"command": f"git -C {other} push origin fix-branch"}, "s", fix)[1] == frozen
