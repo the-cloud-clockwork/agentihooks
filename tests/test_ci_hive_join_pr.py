@@ -23,6 +23,7 @@ def workflow(name: str) -> dict:
         (".github/workflows/test.yml", "true"),
         ("README.md", "false"),
         ("scripts/hive/other.py", "false"),
+        ("scripts/hive/headroom.py", "false"),
     ],
 )
 def test_hive_join_selection(path: str, expected: str, tmp_path: Path) -> None:
