@@ -1419,12 +1419,14 @@ function. A stats unit's key is `StoredStats.identity` of its test file at the h
 fields the `stats` rows of [Inputs per kind](#inputs-per-kind) list, with the worker's options
 `-q -p no:cacheprovider`. The expander builds both keys itself, without the `digests` builders, so
 they are bare 64 hex digests rather than the `<kind>-v<schema>-<digest>` form the
-[digest specification](#digest-specification) describes.
+[digest specification](#digest-specification) describes. `scripts.ci_lab.objects.unit_path`
+refuses a key of that form with `ValueError: not a <kind> unit key: <key>`, so the
+[verdict store](#verdict-store) cannot hold a stats or mutant verdict yet.
 
 #### How a worker runs them
 
-Both kinds run through `scripts.ci_lab.executors.mutation` in the private trampolined copy
-[Worker executors](#worker-executors) describes:
+Both kinds run through `scripts.ci_lab.executors.mutation` in the private trampolined copy,
+as [Worker executors](#worker-executors) describes:
 
 | Kind | Runner requests | Passes when |
 |---|---|---|
@@ -1492,7 +1494,7 @@ A check run is posted only for a gate with units, so a promotion or backfill gra
 |---|---|---|
 | A promotion grade has no `mutation` check | The head changes no kept line: only tests, docs, files outside `hooks/` and `scripts/`, docstrings, annotations or moved code | `git diff <base>...<head> -- hooks/ scripts/` |
 | A pull request or hotfix grade has no `mutation` check | Those classes never expand mutation units | The Actions mutation jobs grade a pull request into `dev`, as [Pull request mutation gate](mutation-gate.md) describes |
-| A merge group grade has no `mutation` check | Its frame holds no mutation gate, and the test workflow runs no mutation on `merge_group` | Nothing to fix |
+| A merge group grade has no `mutation` check | Merge group grades hold no mutation gate, and the test workflow runs no mutation on `merge_group` | Nothing to fix |
 | `cannot expand <head>: <checkout>/pyproject.toml pins no mutmut version` | The head's `pyproject.toml` holds no quoted `mutmut==<version>` | Pin mutmut in the head's `pyproject.toml` |
 | `cannot expand <head>: no dependency manifest at or before <base>` | No manifest is stored or fetchable on the base's first parent chain | Read [Test units](#test-units) for how the lab fetches manifests |
 | `cannot expand <head>:` naming a failed `git worktree add` | The repository's store lacks the head commit, or `CI_LAB_MIRROR_STORE` is not writable | `git -C <store> cat-file -t <head>` and the folder's permissions |
