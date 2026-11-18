@@ -428,6 +428,12 @@ DESCRIBE_SECRET_COMMANDS = [
     "kubectl describe pod/web $NAME",
     "kubectl describe -f deploy.yaml",
     "kubectl describe --filename=deploy.yaml",
+    "kubectl describe -k overlays/prod",
+    "kubectl describe --kustomize dir",
+    "kubectl describe\\\n  secret db",
+    "kubectl describe sec\\ret db",
+    "kubectl describe --kubeconfig x $RES",
+    "kubectl describe -s x $RES",
 ]
 
 DESCRIBE_ALLOWED_COMMANDS = [
@@ -445,6 +451,8 @@ DESCRIBE_ALLOWED_COMMANDS = [
     "kubectl describe --selector $SEL pods",
     "kubectl describe --selector=$SEL pods",
     "kubectl describe --context $CTX pod web",
+    "kubectl describe -A pods",
+    "kubectl describe --all-namespaces pods",
     "kubectl get pods | grep describe",
     "kubectl logs web-describe-0",
     "kubectl get secret db --template='{{range $k,$v:=.data}}{{$k}} {{end}}'",

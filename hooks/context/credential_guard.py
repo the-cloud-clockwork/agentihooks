@@ -481,8 +481,7 @@ def echo_secret_verdict(command):
 
 
 KUBECTL_DESCRIBE = re.compile(r"\bkubectl\b[^|]*?(?<!\S)describe(?!\S)([^|<>]*)")
-DESCRIBE_VALUE_FLAGS = {"-n", "--namespace", "-l", "--selector", "--context"}
-DESCRIBE_FILE_FLAG = re.compile(r"-[fk]|--filename|--kustomize")
+DESCRIBE_BOOLEAN_FLAGS = {"-a", "--all-namespaces"}
 UNSHOWN_TYPE = re.compile(r"[$`{}*?\[]")
 SECRET_RESOURCES = {"secret", "secrets"}
 SECRET_KEY_LISTING = (
@@ -492,20 +491,20 @@ SECRET_KEY_LISTING = (
 
 
 def describe_words(rest: str) -> list[str]:
-    """Words of a kubectl describe argument list as the shell passes them, with quotes, escapes and parentheses removed."""
+    """Words of a kubectl describe argument list as the shell passes them, quotes, escapes and parentheses removed."""
     return re.sub(r"[\"'\\()]", "", rest).split()
 
 
 def describe_operands(words: list[str]) -> list[str]:
-    """Positional words of a kubectl describe, with the values of its value flags dropped."""
+    """Positional words of a kubectl describe; a flag without =, unless a known boolean, consumes the next word."""
     operands: list[str] = []
     skip = False
     for word in words:
         if skip:
             skip = False
-        elif word in DESCRIBE_VALUE_FLAGS:
-            skip = True
-        elif not word.startswith("-"):
+        elif word.startswith("-"):
+            skip = "=" not in word and word not in DESCRIBE_BOOLEAN_FLAGS
+        else:
             operands.append(word)
     return operands
 
@@ -524,15 +523,14 @@ def names_secret(word: str) -> bool:
 
 
 def describe_may_show_secret(words: list[str]) -> bool:
-    """True when a describe names Secrets, reads its resources from a file, or leaves its type to the shell."""
-    return any(names_secret(word) or DESCRIBE_FILE_FLAG.match(word) is not None for word in words) or hidden_type(
-        describe_operands(words)
-    )
+    """True when a describe names Secrets or no literal resource type, as with a file flag or a shell expansion."""
+    return any(names_secret(word) for word in words) or hidden_type(describe_operands(words))
 
 
 def describes_secrets(low: str) -> bool:
-    """True when any kubectl describe in the lowercased segment may print a Secret."""
-    return any(describe_may_show_secret(describe_words(found.group(1))) for found in KUBECTL_DESCRIBE.finditer(low))
+    """True when any kubectl describe in the lowercased segment, line continuations joined, may print a Secret."""
+    joined = low.replace("\\\n", "")
+    return any(describe_may_show_secret(describe_words(found.group(1))) for found in KUBECTL_DESCRIBE.finditer(joined))
 
 
 def renderer_verdict(command: str) -> str | None:
