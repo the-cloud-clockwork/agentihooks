@@ -124,3 +124,55 @@ def test_busy_counts_only_order_workers_still_running(monkeypatch: pytest.Monkey
     assert dispatch.busy() is True
     monkeypatch.setattr(dispatch, "_workers", {})
     assert dispatch.busy() is False
+
+
+@pytest.mark.feature("hive-restart-waits-resume-processes")
+def test_a_moved_checkout_waits_for_a_running_resume_process(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import fakeredis
+
+    from scripts.hive import orders
+
+    resume = Mock()
+    resume.poll.return_value = None
+
+    def resume_ends(*args: object, **kwargs: object) -> None:
+        if resume.poll.return_value is not None:
+            raise AssertionError("waited after the resume process ended")
+        resume.poll.return_value = 0
+
+    busy = dispatch.busy
+    monkeypatch.setattr(dispatch, "_workers", {})
+    monkeypatch.setattr(dispatch, "_resumes", [])
+    with monkeypatch.context() as spawn:
+        spawn.setattr(orders.subprocess, "Popen", Mock(return_value=resume))
+        redis = fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True)
+        order = orders.CommandOrder("resume:x:1:1", "resume", "rig", "engineer", "x", 1, "continue", 5, "pane")
+        orders.Consumer(redis, "root", Mock())._spawn_resume(order)
+    roots, beats = _hive(monkeypatch, ["loaded", "moved"], Mock(side_effect=resume_ends))
+    monkeypatch.setattr(dispatch, "busy", busy)
+    daemon.run(_connect())
+    assert beats == ["root", "root"]
+    assert roots == [CHECKOUT, CHECKOUT]
+    assert capsys.readouterr().err.count("restarts on the new code") == 1
+
+
+@pytest.mark.feature("hive-restart-waits-resume-processes")
+def test_busy_holds_while_a_tracked_resume_process_runs(monkeypatch: pytest.MonkeyPatch) -> None:
+    ended, running, later = Mock(), Mock(), Mock()
+    ended.poll.return_value = 0
+    running.poll.return_value = None
+    later.poll.return_value = None
+    monkeypatch.setattr(dispatch, "_workers", {})
+    monkeypatch.setattr(dispatch, "_resumes", [])
+    dispatch.track(ended)
+    assert dispatch.busy() is False
+    dispatch.track(running)
+    assert dispatch.busy() is True
+    dispatch.track(later)
+    assert dispatch._resumes == [running, later]
+    running.poll.return_value = 0
+    assert dispatch.busy() is True
+    later.poll.return_value = 0
+    assert dispatch.busy() is False

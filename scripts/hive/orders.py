@@ -9,7 +9,7 @@ from dataclasses import asdict, dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 from scripts import serena_router_daemon
-from scripts.hive import placement, registry
+from scripts.hive import dispatch, placement, registry
 from scripts.scheduler.process_interval import Interval
 from scripts.swarm import launch_check, lease, model_pick, overlays, prompt, reaper
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmError
@@ -369,11 +369,14 @@ class Consumer:
         answer(redis, receipt, ack)
 
     def _spawn_resume(self, order: CommandOrder) -> None:
-        """Run a resume order in its own process so a slow herdr resume never holds the heartbeat."""
-        subprocess.Popen(
-            [sys.executable, "-m", "scripts.hive.resume_order", self.hive, order.encode()],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
+        """Run a resume order in its own process so a slow herdr resume never holds the heartbeat, and keep that
+        process so a restart on a moved checkout waits for it."""
+        dispatch.track(
+            subprocess.Popen(
+                [sys.executable, "-m", "scripts.hive.resume_order", self.hive, order.encode()],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+            )
         )
 
     def _holding(self, order: CommandOrder) -> AgentRecord | None:

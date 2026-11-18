@@ -137,7 +137,7 @@ fi
 worker_pod="$(python3 -c 'import json, sys; print(json.loads(sys.argv[1])["pod"])' "$opened")"
 printf 'terminal endpoint opened and host key recorded for the worker attempt: %s\n' "$opened"
 ready=""
-for _ in $(seq 120); do
+for _ in {1..120}; do
   ready="$(kubectl logs -n "$namespace" "$worker_pod" 2>/dev/null | grep -F 'terminal worker ready' || true)"
   [[ -n $ready ]] && break
   sleep 1
@@ -153,7 +153,7 @@ printf '%s\n' "$ready"
 kubectl rollout restart deployment "$release-controller"
 kubectl rollout status deployment "$release-controller" --timeout 2m
 attached=""
-for _ in $(seq 120); do
+for _ in {1..120}; do
   attached="$(kubectl logs "deployment/$release-controller" -c controller | grep -F "controller: kept saved herdr machines for $slug on start" || true)"
   [[ -n $attached ]] && break
   sleep 1

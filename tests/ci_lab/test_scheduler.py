@@ -1,7 +1,12 @@
+import copy
+import io
 import json
+import logging
 import subprocess
 import sys
-from collections.abc import Callable
+import threading
+import urllib.request
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -10,14 +15,17 @@ import jsonschema
 import pytest
 import yaml
 
+from scripts import ci_wiring
 from scripts.ci_lab import __main__ as cli
-from scripts.ci_lab import control, evidence, lease_api, queue, scheduler
+from scripts.ci_lab import budget, control, delivery, evidence, expand_tests, lease_api, queue, scheduler, static_gates
+from scripts.ci_lab.capacity import Load
 from scripts.ci_lab.checks import Output
 from scripts.ci_lab.delivery import CLASSES
 from scripts.ci_lab.digests import GradeInputs, StaticInputs, Toolchain, grade_key, static_key
 from scripts.ci_lab.intake import GradeRequest
 from scripts.ci_lab.leases import Grant, Leases
-from scripts.ci_lab.objects import LocalObjects, unit_path, upload_path
+from scripts.ci_lab.objects import LocalObjects, manifest_folder, unit_path, upload_path
+from scripts.ci_lab.outcomes import CRASH
 from scripts.ci_lab.retry import Policy
 from scripts.ci_lab.static_gates import StaticGate
 from scripts.ci_lab.store import Store, Verdict
@@ -25,6 +33,7 @@ from scripts.ci_lab.units import Priority, Unit
 from scripts.ci_lab.webhooks import HeadEvent, envelope
 from scripts.events import bus
 from scripts.events.envelope import Envelope
+from tests import dep_manifest
 from tests.ci_lab.gate_required_cases import load, materialize
 from tests.dep_manifest import _git
 
@@ -123,6 +132,15 @@ class Poster:
         return [(post[2], post[3]) for post in self.posts if post[0] == head and post[1] == gate]
 
 
+class FakeKube:
+    def __init__(self) -> None:
+        self.patches: list[tuple[str, bool]] = []
+
+    def __call__(self, pod: str, busy: bool) -> bool:
+        self.patches.append((pod, busy))
+        return True
+
+
 @dataclass
 class Lab:
     client: Any
@@ -133,6 +151,7 @@ class Lab:
     fixes: set[str] = field(default_factory=set[str])
     asked: list[int] = field(default_factory=list[int])
     repos: list[str] = field(default_factory=list[str])
+    kube: FakeKube = field(default_factory=FakeKube)
     now: int = 0
 
     def checks(self, repo: str) -> Poster:
@@ -144,7 +163,7 @@ class Lab:
         return frozenset(self.fixes)
 
     def build(self, quiet_ms: int, retries: Policy) -> scheduler.Scheduler:
-        ports = scheduler.Ports(self.inbox, self.expander, self.checks, self.hotfixes)
+        ports = scheduler.Ports(self.inbox, self.expander, self.checks, self.hotfixes, self.kube)
         settings = scheduler.Settings(frozenset({ACTOR}), quiet_ms, retries)
         return scheduler.Scheduler(self.client, self.objects, ports, settings)
 
@@ -168,7 +187,7 @@ class Run:
         return self.engine.tick(at)
 
     def leases(self, ttl_ms: int = 1000) -> Leases:
-        return Leases(self.engine.queue, ttl_ms, lambda: self.lab.now, lambda _: None, 1)
+        return Leases(self.engine.queue, ttl_ms, lambda: self.lab.now, lambda _: None, 1, self.lab.kube)
 
     def lease(self, slots: int = 1, ttl_ms: int = 1000) -> list[Grant]:
         return self.leases(ttl_ms).lease("worker", slots, frozenset(), 0)
@@ -344,6 +363,18 @@ def test_a_lost_worker_requeues_once_then_its_unit_makes_the_grade_red(lab: Call
     assert run.store.get(item.kind, item.key) is None
 
 
+@pytest.mark.feature("lab-worker-executors")
+def test_each_enqueued_job_carries_the_grades_base_and_its_plans_grader(lab: Callable[..., Run]) -> None:
+    grader = "e" * 40
+    run = lab({HEAD_A: scheduler.Plan(TREE, grader, {"lint": (unit(1),)})})
+    run.push(HEAD_A)
+    run.tick(1000)
+
+    [grant] = run.lease()
+
+    assert (grant.head, grant.base, grant.grader) == (HEAD_A, BASE, grader)
+
+
 def test_the_lost_retries_come_from_the_settings(lab: Callable[..., Run]) -> None:
     run = lab({HEAD_A: plan({"lint": (unit(1),)})}, retries=Policy(lost=0))
     run.push(HEAD_A)
@@ -351,6 +382,22 @@ def test_the_lost_retries_come_from_the_settings(lab: Callable[..., Run]) -> Non
     grant = run.lease(ttl_ms=100)[0]
     assert f"reaped {grant.job} lost" in run.tick(1100)
     assert run.grade(HEAD_A).conclusion == "failure"
+
+
+@pytest.mark.feature("lab-worker-deletion-cost")
+def test_the_reap_pass_clears_the_pod_cost_of_a_worker_only_once_its_last_lease_expired(
+    lab: Callable[..., Run],
+) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1), unit(2))})})
+    run.push(HEAD_A)
+    run.tick(1000)
+    first, second = run.lease(slots=2, ttl_ms=100)
+    assert run.lab.kube.patches == [("worker", True)]
+    assert run.leases(ttl_ms=500).heartbeat(second.job, second.token) == 1500
+    assert f"reaped {first.job} pending" in run.tick(1100)
+    assert run.lab.kube.patches == [("worker", True)]
+    assert f"reaped {second.job} pending" in run.tick(1500)
+    assert run.lab.kube.patches == [("worker", True), ("worker", False)]
 
 
 @pytest.mark.feature("lab-scheduler-grade")
@@ -364,6 +411,51 @@ def test_a_unit_that_cannot_run_makes_the_grade_red_and_stores_no_verdict(lab: C
     assert run.grade(HEAD_A).conclusion == "failure"
     assert run.lab.poster.moves(HEAD_A, scheduler.REQUIRED)[-1] == ("completed", "failure")
     assert run.store.get(item.kind, item.key) is None
+
+
+@pytest.mark.feature("lab-scheduler-test-units")
+@pytest.mark.parametrize(("retries", "runs"), [(Policy(), 2), (Policy(lost=0), 1), (Policy(lost=2), 3)])
+def test_a_crashed_unit_reruns_while_the_lost_retries_allow_then_makes_the_grade_red(
+    lab: Callable[..., Run], retries: Policy, runs: int
+) -> None:
+    item = unit(1)
+    run = lab({HEAD_A: plan({"lint": (item,)})}, retries=retries)
+    run.push(HEAD_A)
+    run.tick(1000)
+    job = scheduler.job_id(HEAD_A, item)
+    for attempt in range(runs):
+        grants = run.lease()
+        assert [grant.job for grant in grants] == [job]
+        run.finish(grants[0], CRASH)
+        run.tick(1100 + attempt)
+        record = run.engine.queue.job(job)
+        assert record is not None
+        final = attempt == runs - 1
+        assert (record.state, record.attempts) == ("done" if final else "pending", attempt if final else attempt + 1)
+        assert run.grade(HEAD_A).units[ref(item)].outcome == (CRASH if final else "")
+    assert run.lease() == []
+    assert run.grade(HEAD_A).conclusion == "failure"
+    assert run.lab.poster.moves(HEAD_A, scheduler.REQUIRED)[-1] == ("completed", "failure")
+    assert run.store.get(item.kind, item.key) is None
+
+
+@pytest.mark.feature("lab-scheduler-test-units")
+def test_a_failed_unit_reruns_while_the_failed_retries_allow_and_its_pass_is_stored(lab: Callable[..., Run]) -> None:
+    item = unit(1)
+    run = lab({HEAD_A: plan({"lint": (item,)})}, retries=Policy(failed=1))
+    run.push(HEAD_A)
+    run.tick(1000)
+    first = run.lease()[0]
+    run.finish(first, scheduler.FAILED, {"seconds": 3.0})
+    run.tick(1100)
+    assert run.store.get(item.kind, item.key) is None
+    assert run.grade(HEAD_A).units[ref(item)].outcome == ""
+    second = run.lease()[0]
+    assert second.job == first.job
+    run.finish(second, scheduler.PASSED, {"seconds": 3.0})
+    run.tick(1200)
+    assert run.grade(HEAD_A).conclusion == "success"
+    assert run.store.get(item.kind, item.key) == Verdict(item.kind, item.key, True, False, 3.0)
 
 
 @pytest.mark.feature("lab-unit-outcomes")
@@ -702,11 +794,174 @@ def test_a_head_whose_expansion_fails_is_dropped_with_its_reason(
     assert run.grades() == []
 
 
+@pytest.mark.feature("lab-scheduler-test-units")
+def test_a_head_whose_grader_delivery_breaks_its_schema_is_dropped_with_its_reason(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = lab({})
+
+    def invalid(request: GradeRequest) -> scheduler.Plan:
+        raise jsonschema.ValidationError(f"lab.queue at {request.base} is not of type 'object'")
+
+    monkeypatch.setattr(run.lab.expander, "expand", invalid)
+    run.push(HEAD_A)
+    assert run.tick(1000)[-1] == f"cannot expand {HEAD_A}: lab.queue at {BASE} is not of type 'object'"
+    assert run.lab.client.hgetall(scheduler.WAITING) == {}
+    assert run.grades() == []
+
+
 def test_a_live_run_without_a_grade_is_forgotten(lab: Callable[..., Run]) -> None:
     run = lab({})
     run.lab.client.sadd(scheduler.LIVE, "grade-v1-gone")
     assert run.tick(1000) == ["forgot grade-v1-gone"]
     assert run.lab.client.smembers(scheduler.LIVE) == set()
+
+
+@pytest.mark.feature("lab-scheduler-service")
+def test_the_load_counts_each_job_once_in_the_most_urgent_class_of_the_live_grades_holding_it(
+    lab: Callable[..., Run],
+) -> None:
+    cached, stored, shared, joined, solo, pulled, lost = (unit(number) for number in range(1, 8))
+    run = lab({HEAD_A: plan({"lint": (cached, stored, shared, joined, solo)}), HEAD_B: plan({"lint": (pulled, lost)})})
+    run.cache(cached)
+    run.cache(stored)
+    run.push(HEAD_A)
+    run.tick(1000)
+    run.lab.expander.plans[HEAD_A] = plan({"lint": (shared, joined)})
+    run.push(HEAD_A, lane="gh-readonly-queue/dev/pr-1", event="merge_group", action="checks_requested")
+    run.push(HEAD_B, lane="pr-2", event="pull_request", action="synchronize")
+    run.tick(1100)
+    assert [grant.unit for grant in run.lease(slots=2)] == [shared, joined]
+    run.lab.client.hset(f"{queue.PREFIX}job:{scheduler.job_id(HEAD_A, solo)}", "slots", 2)
+    run.lab.client.delete(f"{queue.PREFIX}job:{scheduler.job_id(HEAD_B, lost)}")
+    run.lab.client.sadd(scheduler.LIVE, "grade-v1-gone")
+    estimate = scheduler.UNIT_ESTIMATE_S
+    assert run.engine.load(1100) == Load(
+        pending={"promotion": [2 * estimate], "pull_request": [estimate]},
+        running={"queue": 2},
+        slots_total=2,
+        slots_busy=2,
+        cache_hits={"promotion": 2},
+        cache_misses={"promotion": 3, "queue": 2, "pull_request": 2},
+        frees_in=(estimate, estimate),
+    )
+
+
+@pytest.mark.feature("lab-scheduler-service")
+def test_the_load_counts_leased_slots_and_the_free_slots_workers_offered_within_the_ready_window(
+    lab: Callable[..., Run],
+) -> None:
+    run = lab({})
+    big, small = unit(8), unit(9)
+    run.engine.queue.enqueue([big, small], HEAD_B, {big.key: queue.Requirement(slots=2)})
+    run.lab.now = 1000
+    assert [grant.slots for grant in run.leases().lease("busy", 2, frozenset(), 0)] == [2]
+    run.engine.queue.offer("idle", 4, 1500)
+    run.engine.queue.offer("stale", 8, 999)
+    load = run.engine.load(1000 + scheduler.READY_MS)
+    assert load == Load(
+        pending={},
+        running={},
+        slots_total=2 + 0 + 4,
+        slots_busy=2,
+        cache_hits={},
+        cache_misses={},
+        frees_in=(scheduler.UNIT_ESTIMATE_S,) * 2,
+    )
+    run.engine.queue.offer("busy", 1, 1000)
+    assert run.engine.load(1000 + scheduler.READY_MS).slots_total == 2 + 1 + 4
+    assert run.engine.load(1001 + scheduler.READY_MS).slots_total == 2 + 4
+
+
+@pytest.mark.feature("lab-scheduler-service")
+def test_the_grades_of_a_commit_are_its_live_grades_and_the_closed_ones_its_evidence_names(
+    lab: Callable[..., Run],
+) -> None:
+    cached, waiting, other = unit(1), unit(2), unit(3)
+    run = lab({HEAD_A: plan({"lint": (cached,)}), HEAD_B: plan({"lint": (other,)})})
+    run.cache(cached)
+    run.push(HEAD_A)
+    run.push(HEAD_B, lane="other")
+    run.tick(1000)
+    closed = run.grade(HEAD_A)
+    run.lab.expander.plans[HEAD_A] = plan({"lint": (waiting,)})
+    run.push(HEAD_A, lane="gh-readonly-queue/dev/pr-1", event="merge_group", action="checks_requested")
+    run.tick(2000)
+    live = next(grade for grade in run.grades() if grade.head == HEAD_A and grade.run != closed.run)
+    done = {"status": "completed", "conclusion": "success"}
+    assert scheduler.summary(closed) == {
+        "run": closed.run,
+        "repo": REPO,
+        "head": HEAD_A,
+        "base": BASE,
+        "class": "promotion",
+        "lane": "feature",
+        "tree": TREE,
+        "grader": BASE,
+        "conclusion": "success",
+        "superseded": False,
+        "units": {"total": 1, "final": 1},
+        "checks": {"lint": done, scheduler.REQUIRED: done},
+    }
+    queued = {"status": "queued", "conclusion": None}
+    assert scheduler.summary(live) == {
+        **scheduler.summary(live),
+        "class": "queue",
+        "lane": "gh-readonly-queue/dev/pr-1",
+        "conclusion": None,
+        "units": {"total": 1, "final": 0},
+        "checks": {"lint": queued, scheduler.REQUIRED: queued},
+    }
+    both = sorted([scheduler.summary(closed), scheduler.summary(live)], key=lambda grade: str(grade["run"]))
+    assert run.engine.grades_of(HEAD_A) == both
+    assert [grade["head"] for grade in run.engine.grades_of(HEAD_B)] == [HEAD_B]
+    assert run.engine.grades_of("f" * 40) == []
+    run.lab.client.delete(scheduler.GRADES + closed.run)
+    assert run.engine.grades_of(HEAD_A) == [scheduler.summary(live)]
+
+
+def _read(url: str, data: bytes | None = None) -> bytes:
+    with urllib.request.urlopen(urllib.request.Request(url, data=data), timeout=5) as reply:
+        return reply.read()
+
+
+@pytest.mark.feature("lab-scheduler-service")
+def test_listen_serves_leases_capacity_grades_and_metrics_from_one_budgeted_load(lab: Callable[..., Run]) -> None:
+    item = unit(1)
+    run = lab({HEAD_A: plan({"lint": (item,)})})
+    run.push(HEAD_A)
+    run.tick(1000)
+    spending = budget.Budget(run.lab.client, lambda: 0, budget.Policy(100.0, {"backfill": 0.5}))
+    spending.charge(1, 3600.0)
+    routes = lease_api.ControlRoutes(run.lab.client, "tok", lambda: 1000)
+    servers = scheduler.listen(run.engine, run.leases(), routes, spending, lambda: 1000, (0, 0))
+    for server in servers:
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+    api, exposition = (f"http://127.0.0.1:{server.server_address[1]}" for server in servers)
+    try:
+        capacity = json.loads(_read(f"{api}/capacity"))
+        assert capacity["classes"]["promotion"]["pending"] == 1
+        assert capacity["budget_fraction"] == pytest.approx(0.4)
+        assert capacity["shed"] == ["backfill"]
+        grades = json.loads(_read(f"{api}/grades/{HEAD_A}"))
+        assert [grade["run"] for grade in grades["grades"]] == [run.grade(HEAD_A).run]
+        body = json.dumps({"worker": "w", "free_slots": 1, "capabilities": [], "wait_ms": 0}).encode()
+        leased = json.loads(_read(f"{api}/lease", body))["leases"]
+        assert [grant["job"] for grant in leased] == [scheduler.job_id(HEAD_A, item)]
+        job, token = leased[0]["job"], leased[0]["token"]
+        signed = json.loads(_read(f"{api}/upload-url?job={job}&token={token}&name=report"))
+        assert signed == {"url": run.lab.objects.upload_url(upload_path(job, "report"), 0)}
+        resume = urllib.request.Request(f"{api}/resume", data=b"", headers={"Authorization": "Bearer tok"})
+        with urllib.request.urlopen(resume, timeout=5) as reply:
+            assert json.loads(reply.read()) == {"resumed": []}
+        text = _read(f"{exposition}/metrics").decode()
+        assert 'ci_lab_units_running{class="promotion"} 1.0' in text
+        assert 'ci_lab_class_shed{class="backfill"} 1.0' in text
+        assert "ci_lab_slots_busy 1.0" in text
+    finally:
+        for server in servers:
+            server.shutdown()
+            server.server_close()
 
 
 FLUSHED = "<flushed>"
@@ -762,6 +1017,7 @@ class Delivery:
     event: Envelope
     attempt: int = 1
     acked: bool = False
+    termed: bool = False
 
     def ack(self) -> None:
         self.acked = True
@@ -770,7 +1026,7 @@ class Delivery:
         raise AssertionError(delay_ms)
 
     def term(self) -> None:
-        raise AssertionError(self.event.id)
+        self.termed = True
 
 
 @dataclass
@@ -793,7 +1049,32 @@ def test_the_bus_inbox_reads_each_head_with_its_branch_as_lane_and_acknowledges_
     inbox = scheduler.BusInbox(consumer)
     assert inbox.heads() == [scheduler.Head(branched, "dev"), scheduler.Head(bare, HEAD_B)]
     assert [delivery.acked for delivery in deliveries] == [True, True]
+    assert [delivery.termed for delivery in deliveries] == [False, False]
     assert consumer.asked == [(scheduler.BATCH, scheduler.FETCH_MS)]
+
+
+def _without(event: HeadEvent, *names: str) -> Envelope:
+    full = envelope(event)
+    return replace(full, data={name: value for name, value in full.data.items() if name not in names})
+
+
+@pytest.mark.feature("lab-head-missing-field-terminate")
+def test_the_bus_inbox_terminates_each_head_missing_a_field_with_a_logged_reason_and_reads_the_next_head(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    one = _without(HeadEvent("push", REPO, HEAD_A, BASE, ACTOR, "pushed"), "action")
+    two = _without(HeadEvent("push", REPO, HEAD_A, BASE, ACTOR, "forced"), "actor", "action")
+    bare = HeadEvent("pull_request", REPO, HEAD_B, BASE, ACTOR, "opened")
+    deliveries = [Delivery(one), Delivery(two), Delivery(envelope(bare))]
+    inbox = scheduler.BusInbox(Consumer([*deliveries]))
+    with caplog.at_level(logging.WARNING, logger=scheduler.__name__):
+        assert inbox.heads() == [scheduler.Head(bare, HEAD_B)]
+    assert [delivery.termed for delivery in deliveries] == [True, True, False]
+    assert [delivery.acked for delivery in deliveries] == [False, False, True]
+    assert caplog.record_tuples == [
+        (scheduler.__name__, logging.WARNING, f"terminated lab head {one.id} missing action"),
+        (scheduler.__name__, logging.WARNING, f"terminated lab head {two.id} missing actor, action"),
+    ]
 
 
 def _commit(repo: Path, files: dict[str, str]) -> str:
@@ -824,6 +1105,9 @@ def origin(tmp_path: Path) -> tuple[Path, str, str]:
             ".github/workflows/test.yml": "jobs: {}\n",
             ".github/input-keys.json": '{"gates": {}}',
             ".github/workflows/trusted-actors.json": json.dumps(ACTORS),
+            ".github/workflows/scan.yaml": "jobs: {scan: {}}\n",
+            ".github/workflows/nested/deep.yml": "jobs: {}\n",
+            ".github/workflows/empty.yml": "",
             "delivery.yaml": json.dumps(DELIVERY),
             "uv.lock": "lock",
             "pyproject.toml": "[project]\n",
@@ -840,19 +1124,27 @@ def _gate(name: str, job: str, paths: tuple[str, ...], base_paths: tuple[str, ..
     return StaticGate(name, job, name, (), (), "", paths, base_paths)
 
 
+def _no_tests(repo: str, commits: Sequence[str]) -> dict[str, Any]:
+    return {"units": [], "tests": {}}
+
+
+def _unknown(kind: str, key: str) -> Verdict | None:
+    return None
+
+
 def test_the_mirror_expander_keys_static_gates_from_git_objects_without_a_checkout(
     tmp_path: Path, origin: tuple[Path, str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo, base, head = origin
-    read: list[tuple[str, Any]] = []
+    read: list[tuple[str, Any, Any]] = []
     gates = [
         _gate("size", "lint", ("src",), ("src/a.py",)),
         _gate("format", "lint", ("src/",), ()),
         _gate("semgrep", "semgrep", (".",), ("docs/c.md", "sr")),
     ]
 
-    def discover(workflow: str, registry: Any) -> list[StaticGate]:
-        read.append((workflow, registry))
+    def discover(workflow: str, registry: Any, reusable: Any) -> list[StaticGate]:
+        read.append((workflow, registry, reusable))
         return gates
 
     monkeypatch.setattr(scheduler, "discover", discover)
@@ -860,7 +1152,7 @@ def test_the_mirror_expander_keys_static_gates_from_git_objects_without_a_checko
     _git(tmp_path, "init", "-q", "--bare", str(node))
     toolchain = Toolchain("3.12", {}, "", "", "image", {})
     root = tmp_path / "mirrors" / "stores"
-    expander = scheduler.MirrorExpander(node, root, toolchain)
+    expander = scheduler.MirrorExpander(node, root, toolchain, _no_tests, _unknown)
     remote = f"file://{repo}"
     request = GradeRequest(remote, head, base, Priority.PULL_REQUEST, ACTOR, False)
     found = expander.expand(request)
@@ -888,12 +1180,13 @@ def test_the_mirror_expander_keys_static_gates_from_git_objects_without_a_checko
     }
     tree = _git(repo, "rev-parse", f"{head}^{{tree}}").strip()
     assert found == scheduler.frame(Priority.PULL_REQUEST, tree, base, expected)
-    assert read == [("jobs: {}\n", {"gates": {}})]
+    reusable = {"test.yml": {"jobs": {}}, "scan.yaml": {"jobs": {"scan": {}}}, "empty.yml": {}}
+    assert read == [("jobs: {}\n", {"gates": {}}, reusable)]
     promoted = expander.expand(GradeRequest(remote, head, base, Priority.PROMOTION, ACTOR, False))
     assert (promoted.tree, promoted.grader, set(promoted.gates), promoted.skipped) == (
         tree,
         head,
-        {"lint", "semgrep"},
+        {"lint", "semgrep", "unit"},
         frozenset(),
     )
 
@@ -902,7 +1195,9 @@ def test_the_mirror_expander_trusts_the_runner_trust_list_on_dev(tmp_path: Path,
     repo, _, _ = origin
     node = tmp_path / "node"
     _git(tmp_path, "init", "-q", "--bare", str(node))
-    expander = scheduler.MirrorExpander(node, tmp_path / "stores", Toolchain("3.12", {}, "", "", "", {}))
+    expander = scheduler.MirrorExpander(
+        node, tmp_path / "stores", Toolchain("3.12", {}, "", "", "", {}), _no_tests, _unknown
+    )
     assert expander.trusted(f"file://{repo}") == frozenset([*ACTORS["actors"], ACTORS["queue_actor"]])
     assert expander.retries(f"file://{repo}") == Policy(lost=2, failed=0)
     _commit(repo, {"delivery.yaml": json.dumps({"lab": {**DELIVERY["lab"], "retry": {"lost": -1}}})})
@@ -921,15 +1216,19 @@ def test_a_head_without_a_lockfile_or_pyproject_keys_its_units_with_neither(
 ) -> None:
     repo, base, _ = origin
     bare = _drop(repo, "uv.lock", "pyproject.toml")
-    monkeypatch.setattr(scheduler, "discover", lambda workflow, registry: [_gate("format", "lint", ("src/",), ())])
+    monkeypatch.setattr(
+        scheduler, "discover", lambda workflow, registry, reusable: [_gate("format", "lint", ("src/",), ())]
+    )
     node = tmp_path / "node"
     _git(tmp_path, "init", "-q", "--bare", str(node))
-    expander = scheduler.MirrorExpander(node, tmp_path / "stores", Toolchain("3.12", {}, "old", "old", "image", {}))
+    expander = scheduler.MirrorExpander(
+        node, tmp_path / "stores", Toolchain("3.12", {}, "old", "old", "image", {}), _no_tests, _unknown
+    )
     found = expander.expand(GradeRequest(f"file://{repo}", bare, base, Priority.PROMOTION, ACTOR, False))
     inputs = StaticInputs(
         "format", {"src/a.py": _blob(repo, bare, "src/a.py")}, {}, bare, Toolchain("3.12", {}, "", "", "image", {})
     )
-    assert found.gates == {"lint": (Unit("static", static_key(inputs), ("format",)),)}
+    assert found.gates == {"lint": (Unit("static", static_key(inputs), ("format",)),), "unit": ()}
 
 
 def test_the_mirror_expander_fails_on_a_git_read_that_fails(tmp_path: Path, origin: tuple[Path, str, str]) -> None:
@@ -937,11 +1236,258 @@ def test_the_mirror_expander_fails_on_a_git_read_that_fails(tmp_path: Path, orig
     unregistered = _drop(repo, ".github/input-keys.json")
     node = tmp_path / "node"
     _git(tmp_path, "init", "-q", "--bare", str(node))
-    expander = scheduler.MirrorExpander(node, tmp_path / "stores", Toolchain("3.12", {}, "", "", "", {}))
+    expander = scheduler.MirrorExpander(
+        node, tmp_path / "stores", Toolchain("3.12", {}, "", "", "", {}), _no_tests, _unknown
+    )
     with pytest.raises(subprocess.CalledProcessError):
         expander.expand(GradeRequest(f"file://{repo}", unregistered, base, Priority.PROMOTION, ACTOR, False))
     with pytest.raises(subprocess.CalledProcessError):
         expander.trusted(f"file://{tmp_path / 'missing'}")
+
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.mark.feature("lab-reusable-workflow-gates")
+def test_the_mirror_expander_expands_the_real_tests_workflow_with_its_reusable_workflows(tmp_path: Path) -> None:
+    repo = tmp_path / "origin"
+    _git(tmp_path, "init", "-q", "-b", "dev", str(repo))
+    workflows = ROOT / ".github" / "workflows"
+    registry = ROOT / ".github" / "input-keys.json"
+    tree = {f".github/workflows/{path.name}": path.read_text() for path in workflows.iterdir() if path.is_file()}
+    base = _commit(repo, {**tree, ".github/input-keys.json": registry.read_text(), "uv.lock": "lock"})
+    head = _commit(repo, {"src/a.py": "a = 1\n"})
+    node = tmp_path / "node"
+    _git(tmp_path, "init", "-q", "--bare", str(node))
+    expander = scheduler.MirrorExpander(
+        node, tmp_path / "stores", Toolchain("3.12", {}, "", "", "", {}), _no_tests, _unknown
+    )
+    found = expander.expand(GradeRequest(f"file://{repo}", head, base, Priority.PROMOTION, ACTOR, False))
+    text = (workflows / "test.yml").read_text()
+    expected: dict[str, list[str]] = {"unit": []}
+    for gate in static_gates.discover(text, json.loads(registry.read_text()), ci_wiring.load(ROOT)):
+        expected.setdefault(gate.job, []).append(gate.name)
+    assert {job: [name for item in units for name in item.members] for job, units in found.gates.items()} == expected
+    assert {"semgrep/scan", "semgrep/feature-tests", "semgrep/charts"} <= set(found.gates)
+
+
+ALPHA = "def first():\n    return 1\n\n\ndef second():\n    return 2\n"
+FIRST_TEST = "tests/test_alpha.py::test_first"
+OTHER_TEST = "tests/test_alpha.py::test_other"
+SECOND_TEST = "tests/test_beta.py::test_second"
+SUITE_MANIFEST: dict[str, Any] = {
+    "version": 2,
+    "commit": "dev",
+    "environment": "py312",
+    "units": ["scripts/alpha.py::first", "scripts/alpha.py::second"],
+    "tests": {
+        FIRST_TEST: {"units": [0], "files": [], "escapes": False},
+        OTHER_TEST: {"units": [0], "files": [], "escapes": False},
+        SECOND_TEST: {"units": [1], "files": [], "escapes": False, "outside": ["docs/c.md"]},
+    },
+    "lines": {},
+}
+STORED_MANIFEST: dict[str, Any] = {
+    **SUITE_MANIFEST,
+    "tests": {FIRST_TEST: {"units": [0], "files": [], "escapes": False}},
+}
+SUITE_DURATIONS = {FIRST_TEST: 40.0, OTHER_TEST: 40.0, SECOND_TEST: 1.0}
+
+
+@dataclass(frozen=True)
+class Suite:
+    repo: Path
+    seed: str
+    base: str
+    head: str
+
+    @property
+    def remote(self) -> str:
+        return f"file://{self.repo}"
+
+    def request(self, tier: Priority, head: str = "") -> GradeRequest:
+        return GradeRequest(self.remote, head or self.head, self.base, tier, ACTOR, False)
+
+
+@dataclass
+class Port:
+    manifest: dict[str, Any] | None = None
+    known: bool = True
+    asked: list[tuple[str, list[str]]] = field(default_factory=list[tuple[str, list[str]]])
+    looked: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
+
+    def manifests(self, repo: str, commits: Sequence[str]) -> dict[str, Any] | None:
+        self.asked.append((repo, list(commits)))
+        return copy.deepcopy(self.manifest)
+
+    def verdicts(self, kind: str, key: str) -> Verdict | None:
+        self.looked.append((kind, key))
+        return Verdict(kind, key, False, False, 1.0) if self.known else None
+
+    def expander(self, tmp_path: Path) -> scheduler.MirrorExpander:
+        node = tmp_path / "node"
+        _git(tmp_path, "init", "-q", "--bare", str(node))
+        toolchain = Toolchain("3.12", {}, "", "", "image", {})
+        return scheduler.MirrorExpander(node, tmp_path / "stores", toolchain, self.manifests, self.verdicts)
+
+
+def _suite(tmp_path: Path, lab: dict[str, Any]) -> Suite:
+    repo = tmp_path / "suite"
+    _git(tmp_path, "init", "-q", "-b", "dev", str(repo))
+    seed = _commit(
+        repo,
+        {
+            ".github/workflows/test.yml": "jobs: {}\n",
+            ".github/input-keys.json": '{"gates": {}}',
+            "delivery.yaml": json.dumps({"lab": lab}),
+            "uv.lock": "lock",
+            "pyproject.toml": "[project]\n",
+            ".test_durations": json.dumps(SUITE_DURATIONS),
+            "scripts/alpha.py": ALPHA,
+            "tests/test_alpha.py": "def test_first():\n    pass\n\n\ndef test_other():\n    pass\n",
+            "tests/test_beta.py": "def test_second():\n    pass\n",
+        },
+    )
+    base = _merged(repo, "side", {"docs/c.md": "c\n"})
+    _merged(repo, "entry", {"scripts/alpha.py": ALPHA.replace("return 2", "return 3")}, {"docs/p.md": "p\n"})
+    head = _commit(repo, {"docs/c.md": "d\n"})
+    return Suite(repo, seed, base, head)
+
+
+def _merged(repo: Path, branch: str, *changes: dict[str, str]) -> str:
+    _git(repo, "switch", "-q", "-c", branch)
+    for files in changes:
+        _commit(repo, files)
+    _git(repo, "switch", "-q", "dev")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "merge", "-q", "--no-ff", "-m", branch, branch)
+    return _git(repo, "rev-parse", "HEAD").strip()
+
+
+def _suite_units(suite: Suite, head: str, durations: dict[str, float]) -> tuple[Unit, ...]:
+    paths = filter(None, _git(suite.repo, "ls-tree", "-r", "-z", "--name-only", head).split("\0"))
+    blobs = {path: _blob(suite.repo, head, path) for path in paths}
+    shown = ["git", "-C", str(suite.repo), "show"]
+    tree = {path: subprocess.run([*shown, f"{head}:{path}"], capture_output=True, check=True).stdout for path in blobs}
+    chain = Toolchain("3.12", {}, blobs["uv.lock"], blobs["pyproject.toml"], "image", {})
+    return expand_tests.units(SUITE_MANIFEST, tree, blobs, durations, chain)
+
+
+def _tree(suite: Suite, head: str) -> str:
+    return _git(suite.repo, "rev-parse", f"{head}^{{tree}}").strip()
+
+
+@pytest.fixture
+def staticless(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(scheduler, "discover", lambda workflow, registry, reusable: [])
+
+
+@pytest.mark.feature("lab-scheduler-test-units")
+@pytest.mark.usefixtures("staticless")
+@pytest.mark.parametrize("tier", [Priority.PULL_REQUEST, Priority.HOTFIX])
+def test_a_pull_request_or_hotfix_head_expands_no_test_units(tmp_path: Path, tier: Priority) -> None:
+    suite = _suite(tmp_path, DELIVERY["lab"])
+    port = Port()
+    found = port.expander(tmp_path).expand(suite.request(tier))
+    assert found == scheduler.frame(tier, _tree(suite, suite.head), suite.base, {})
+    assert (port.asked, port.looked) == ([], [])
+
+
+@pytest.mark.feature("lab-scheduler-test-units")
+@pytest.mark.usefixtures("staticless")
+@pytest.mark.parametrize("queue", [{}, {"queue": {"full_suite_entries": 2}}])
+def test_a_merge_group_head_runs_only_the_batches_its_entries_invalidate(tmp_path: Path, queue: dict[str, Any]) -> None:
+    suite = _suite(tmp_path, {**DELIVERY["lab"], **queue})
+    port = Port(SUITE_MANIFEST)
+    found = port.expander(tmp_path).expand(suite.request(Priority.QUEUE))
+    every = _suite_units(suite, suite.head, SUITE_DURATIONS)
+    assert [batch.members for batch in every] == [(FIRST_TEST,), (OTHER_TEST,), (SECOND_TEST,)]
+    assert found == scheduler.frame(Priority.QUEUE, _tree(suite, suite.head), suite.base, {"unit": every[2:]})
+    assert port.asked == [(suite.remote, [suite.base, suite.seed])]
+    assert port.looked == [(batch.kind, batch.key) for batch in every]
+
+
+@pytest.mark.feature("lab-scheduler-test-units")
+@pytest.mark.usefixtures("staticless")
+def test_a_merge_group_head_whose_entries_invalidate_no_test_runs_no_batch(tmp_path: Path) -> None:
+    suite = _suite(tmp_path, DELIVERY["lab"])
+    _git(suite.repo, "switch", "-q", "-c", "docs", suite.base)
+    head = _commit(suite.repo, {"docs/q.md": "q\n"})
+    port = Port(SUITE_MANIFEST)
+    found = port.expander(tmp_path).expand(suite.request(Priority.QUEUE, head))
+    assert found == scheduler.frame(Priority.QUEUE, _tree(suite, head), suite.base, {"unit": ()})
+    assert port.asked == [(suite.remote, [suite.base, suite.seed])]
+    assert port.looked == [(batch.kind, batch.key) for batch in _suite_units(suite, head, SUITE_DURATIONS)]
+
+
+@pytest.mark.feature("lab-scheduler-test-units")
+@pytest.mark.usefixtures("staticless")
+@pytest.mark.parametrize(
+    ("queue", "known"), [({}, False), ({"queue": {"full_suite_entries": 1}}, True)], ids=["cache", "entries"]
+)
+def test_a_merge_group_head_runs_every_batch_when_an_interaction_clause_holds(
+    tmp_path: Path, queue: dict[str, Any], known: bool
+) -> None:
+    suite = _suite(tmp_path, {**DELIVERY["lab"], **queue})
+    port = Port(SUITE_MANIFEST, known)
+    found = port.expander(tmp_path).expand(suite.request(Priority.QUEUE))
+    every = _suite_units(suite, suite.head, SUITE_DURATIONS)
+    assert found == scheduler.frame(Priority.QUEUE, _tree(suite, suite.head), suite.base, {"unit": every})
+
+
+@pytest.mark.feature("lab-scheduler-test-units")
+@pytest.mark.usefixtures("staticless")
+@pytest.mark.parametrize("tier", [Priority.PROMOTION, Priority.BACKFILL])
+def test_a_promotion_or_backfill_head_runs_every_batch_without_reading_the_cache(
+    tmp_path: Path, tier: Priority
+) -> None:
+    suite = _suite(tmp_path, DELIVERY["lab"])
+    port = Port(SUITE_MANIFEST)
+    found = port.expander(tmp_path).expand(suite.request(tier))
+    every = _suite_units(suite, suite.head, SUITE_DURATIONS)
+    assert found == scheduler.frame(tier, _tree(suite, suite.head), suite.head, {"unit": every})
+    assert (port.asked, port.looked) == ([(suite.remote, [suite.base, suite.seed])], [])
+
+
+@pytest.mark.feature("lab-scheduler-test-units")
+@pytest.mark.usefixtures("staticless")
+def test_a_head_without_stored_durations_keeps_each_test_file_whole(tmp_path: Path) -> None:
+    suite = _suite(tmp_path, DELIVERY["lab"])
+    head = _drop(suite.repo, ".test_durations")
+    found = Port(SUITE_MANIFEST).expander(tmp_path).expand(suite.request(Priority.PROMOTION, head))
+    every = _suite_units(suite, head, {})
+    assert [batch.members for batch in every] == [(FIRST_TEST, OTHER_TEST), (SECOND_TEST,)]
+    assert found.gates == {"unit": every}
+
+
+@pytest.mark.feature("lab-scheduler-test-units")
+@pytest.mark.usefixtures("staticless")
+@pytest.mark.parametrize("tier", [Priority.QUEUE, Priority.PROMOTION])
+def test_a_head_that_needs_test_units_without_a_manifest_cannot_expand(tmp_path: Path, tier: Priority) -> None:
+    suite = _suite(tmp_path, DELIVERY["lab"])
+    with pytest.raises(ValueError, match=f"^no dependency manifest at or before {suite.base}$"):
+        Port().expander(tmp_path).expand(suite.request(tier))
+
+
+@pytest.mark.feature("lab-scheduler-test-units")
+@pytest.mark.usefixtures("staticless")
+def test_a_merge_group_head_refuses_an_entry_limit_the_delivery_schema_refuses(tmp_path: Path) -> None:
+    suite = _suite(tmp_path, {**DELIVERY["lab"], "queue": {"full_suite_entries": 0}})
+    with pytest.raises(jsonschema.ValidationError, match="0 is less than the minimum of 1"):
+        Port(SUITE_MANIFEST).expander(tmp_path).expand(suite.request(Priority.QUEUE))
+
+
+@pytest.mark.feature("lab-scheduler-test-units")
+def test_stored_manifests_read_the_packed_manifest_of_the_nearest_stored_ancestor(tmp_path: Path) -> None:
+    objects = LocalObjects(tmp_path / "objects")
+    for commit in ("older", "newer"):
+        packed = dep_manifest.pack({**STORED_MANIFEST, "commit": commit})
+        objects.write_once(f"{manifest_folder(SLUG)}{commit}.json", json.dumps(packed).encode())
+    objects.write_once(f"{manifest_folder('other/repo')}head.json", b"{}")
+    stored = scheduler.StoredManifests(objects)
+    assert stored(REPO, ["head", "newer", "older"]) == {**STORED_MANIFEST, "commit": "newer"}
+    assert stored(REPO, ["head", "older"]) == {**STORED_MANIFEST, "commit": "older"}
+    assert stored(REPO, ["head"]) is None
+    assert manifest_folder(SLUG) == "lab/manifests/the-cloud-clockwork--agentihooks/"
 
 
 @pytest.mark.feature("lab-control-routes")
@@ -961,10 +1507,19 @@ class FakeChecks:
     repo: str
 
 
+@pytest.mark.feature("lab-worker-deletion-cost")
 def test_build_wires_the_service_ports_from_the_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(scheduler.MirrorExpander, "trusted", lambda self, repo: frozenset({repo}))
     monkeypatch.setattr(scheduler.MirrorExpander, "retries", lambda self, repo: Policy(lost=len(repo)))
     monkeypatch.setattr(scheduler, "Checks", FakeChecks)
+    kube = FakeKube()
+    pods_of: list[Mapping[str, str]] = []
+
+    def worker_pods(found: Mapping[str, str]) -> FakeKube:
+        pods_of.append(found)
+        return kube
+
+    monkeypatch.setattr(scheduler, "worker_pods", worker_pods)
     environ = {
         scheduler.contract.GIT_MIRROR: str(tmp_path / "node"),
         scheduler.MIRROR_STORE: str(tmp_path / "stores"),
@@ -975,6 +1530,7 @@ def test_build_wires_the_service_ports_from_the_environment(tmp_path: Path, monk
     consumer = Consumer([])
     objects = LocalObjects(tmp_path / "objects")
     built = scheduler.build(environ, client, objects, consumer)
+    assert built.ports.pods is kube and pods_of == [environ]
     assert built.objects is objects
     assert built.settings.trusted == frozenset({"repository"})
     assert built.settings.retries == Policy(lost=len("repository"))
@@ -984,6 +1540,10 @@ def test_build_wires_the_service_ports_from_the_environment(tmp_path: Path, monk
     assert isinstance(expander, scheduler.MirrorExpander)
     assert (expander.node, expander.root) == (tmp_path / "node", tmp_path / "stores")
     assert expander.toolchain == Toolchain(sys.version.split()[0], {}, "", "", "image", {})
+    assert isinstance(expander.manifests, scheduler.StoredManifests) and expander.manifests.objects is objects
+    stored = Verdict("static", key("static", 9), True, False, 1.0)
+    Store(client, objects).put(stored, {}, b"")
+    assert expander.verdicts("static", stored.key) == stored
     imageless = {name: value for name, value in environ.items() if name != scheduler.IMAGE}
     bare = scheduler.build(imageless, client, objects, consumer).ports.expander
     assert isinstance(bare, scheduler.MirrorExpander) and bare.toolchain.image == ""
@@ -995,13 +1555,16 @@ def test_build_wires_the_service_ports_from_the_environment(tmp_path: Path, monk
     assert (hotfixes.client, hotfixes.clock) == (client, scheduler._now_ms)
 
 
-def test_main_serves_the_lease_api_and_runs_the_passes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.feature("lab-scheduler-service")
+def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import boto3  # pyright: ignore[reportMissingTypeStubs]
     import redis
 
     from scripts.events import config, factory
 
-    calls: dict[str, Any] = {}
+    calls: dict[str, Any] = {"served": 0}
     client = fake_redis()
 
     def from_url(url: str, **options: Any) -> Any:
@@ -1022,16 +1585,23 @@ def test_main_serves_the_lease_api_and_runs_the_passes(tmp_path: Path, monkeypat
 
     def build(environ: Any, redis_client: Any, objects: Any, consumer: Any) -> scheduler.Scheduler:
         calls["build"] = (environ, redis_client, objects, consumer)
-        ports = scheduler.Ports(Inbox(), Expander({}), lambda repo: Poster(), frozenset[str])
+        ports = scheduler.Ports(Inbox(), Expander({}), lambda repo: Poster(), frozenset[str], FakeKube())
         return scheduler.Scheduler(redis_client, objects, ports, scheduler.Settings(frozenset()))
 
     class Server:
         def serve_forever(self) -> None:
-            calls["served"] = True
+            calls["served"] += 1
 
-    def serve_api(host: str, port: int, leases: Leases, signer: Any, routes: lease_api.ControlRoutes) -> Server:
-        calls["api"] = (host, port, leases, signer, routes)
-        return Server()
+    def listen(
+        found: Any,
+        leases: Leases,
+        routes: lease_api.ControlRoutes,
+        spending: Any,
+        clock: Any,
+        ports: tuple[int, int],
+    ) -> list[Server]:
+        calls["listen"] = (found, leases, routes, spending, clock, ports)
+        return [Server(), Server()]
 
     class Thread:
         def __init__(self, target: Callable[[], None], daemon: bool) -> None:
@@ -1056,8 +1626,19 @@ def test_main_serves_the_lease_api_and_runs_the_passes(tmp_path: Path, monkeypat
         calls["serve"] = (found, interval, passes, clock, sleep)
         return 7
 
+    runtime = tmp_path / "runtime.yaml"
+    runtime.write_text(
+        yaml.safe_dump(
+            {
+                "classes": list(CLASSES),
+                "budget": {"coreMinutesPerDay": 600, "shed": {"backfill": 0.5}},
+                "backfill": {"auditShare": 0.1, "moduleSweeps": False},
+            }
+        )
+    )
     environ = {
         scheduler.contract.REDIS_URL: "redis://lab",
+        scheduler.contract.RUNTIME_CONFIG: str(runtime),
         scheduler.MINIO_ENDPOINT: "endpoint",
         scheduler.MINIO_ACCESS_KEY: "access",
         scheduler.MINIO_SECRET_KEY: "secret",
@@ -1066,12 +1647,14 @@ def test_main_serves_the_lease_api_and_runs_the_passes(tmp_path: Path, monkeypat
     }
     monkeypatch.setattr(redis.Redis, "from_url", from_url)
     monkeypatch.setattr(boto3, "client", s3)
+    provisioning = config.BusConfig(backend="nats", url="nats://lab")
+    bound = config.BusConfig(backend="nats", url="nats://lab", provision=False)
     monkeypatch.setattr(
-        config.BusConfig, "from_environ", classmethod(lambda cls, found: "config" if found is environ else None)
+        config.BusConfig, "from_environ", classmethod(lambda cls, found: provisioning if found is environ else None)
     )
-    monkeypatch.setattr(factory, "open_bus", lambda found: Bus() if found == "config" else None)
+    monkeypatch.setattr(factory, "open_bus", lambda found: Bus() if found == bound else None)
     monkeypatch.setattr(scheduler, "build", build)
-    monkeypatch.setattr(scheduler.lease_api, "serve", serve_api)
+    monkeypatch.setattr(scheduler, "listen", listen)
     monkeypatch.setattr(scheduler, "Thread", Thread)
     monkeypatch.setattr(scheduler, "time", Clock)
     monkeypatch.setattr(scheduler, "serve", serve)
@@ -1083,21 +1666,131 @@ def test_main_serves_the_lease_api_and_runs_the_passes(tmp_path: Path, monkeypat
     assert (built_from, redis_client, consumer) == (environ, client, "consumer")
     assert (objects.client, objects.bucket, objects.prefix) == ("s3 client", "bucket", "")
     assert calls["consumer"] == (scheduler.DURABLE, "ci.lab.head.>")
-    host, port, leases, signer, routes = calls["api"]
+    found, leases, routes, spending, clock, ports = calls["listen"]
+    assert found.queue.client is client and leases.queue is found.queue
+    assert leases.pods is found.ports.pods
     assert routes == lease_api.ControlRoutes(client, "tok", scheduler._now_ms)
-    assert (host, port, leases.ttl_ms, leases.poll_ms) == ("", 8800, scheduler.LEASE_TTL_MS, scheduler.LEASE_POLL_MS)
-    assert signer.objects is objects and leases.queue.client is client
-    assert leases.clock() == 1_000_250
+    assert (leases.ttl_ms, leases.poll_ms) == (scheduler.LEASE_TTL_MS, scheduler.LEASE_POLL_MS)
+    assert leases.clock() == 1_000_250 and clock() == 1_000_250
     leases.sleep(1500)
     assert Clock.slept == [1.5]
-    assert calls["thread"] is True and calls["served"] is True
+    assert spending.client is client and spending.clock() == 1_000_250
+    assert spending.policy == budget.Policy(600, {"backfill": 0.5})
+    assert ports == (8800, 9108)
+    assert calls["thread"] is True and calls["served"] == 2
     found, interval, passes, clock, sleep = calls["serve"]
     assert (found.queue.client, interval, passes, clock, sleep) == (client, 0.5, 3, Clock.time, Clock.sleep)
     assert scheduler.main([], environ) == 7
     assert calls["serve"][1:3] == (scheduler.INTERVAL_S, 0)
     del environ[scheduler.contract.CONTROL_TOKEN]
     assert scheduler.main([], environ) == 7
-    assert calls["api"][4].token == ""
+    assert calls["listen"][2].token == ""
+    calls.clear()
+    runtime.write_text(yaml.safe_dump({"classes": []}))
+    with pytest.raises(delivery.DeliveryError):
+        scheduler.main([], environ)
+    assert calls == {}
+
+
+@pytest.mark.feature("lab-scheduler-reindex-on-start")
+@pytest.mark.parametrize(
+    ("setting", "printed"),
+    [
+        ({"CI_LAB_REINDEX_ON_START": "true"}, "reindexed 1 verdicts\n"),
+        ({"CI_LAB_REINDEX_ON_START": "false"}, ""),
+        ({}, ""),
+    ],
+)
+def test_main_rebuilds_the_verdict_index_before_serving_only_when_reindex_on_start_is_true(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, setting: dict[str, str], printed: str
+) -> None:
+    import boto3  # pyright: ignore[reportMissingTypeStubs]
+    import redis
+
+    from scripts.events import config, factory
+
+    client = fake_redis()
+    objects = LocalObjects(tmp_path / "objects")
+    verdict = Verdict(kind="test", key=key("test", 1), passed=True, flaky=False, seconds=1.0)
+    Store(client, objects).put(verdict, {}, b"ok\n")
+    client.flushall()
+    served: list[scheduler.Scheduler] = []
+
+    class Stdout(io.StringIO):
+        def __init__(self) -> None:
+            super().__init__()
+            self.flushed: list[str] = []
+
+        def flush(self) -> None:
+            self.flushed.append(self.getvalue())
+            super().flush()
+
+    class Events:
+        def consumer(self, durable: str, subject: str) -> str:
+            return f"{durable} {subject}"
+
+    class Bus:
+        lab_heads = Events()
+
+    def from_url(_url: str, **_options: Any) -> Any:
+        return client
+
+    def s3(name: str, **_options: Any) -> str:
+        return name
+
+    def from_environ(_cls: type[Any], _found: Any) -> config.BusConfig:
+        return config.BusConfig(backend="nats", url="nats://lab")
+
+    def open_bus(_found: Any) -> Bus:
+        return Bus()
+
+    def poster(_repo: str) -> Poster:
+        return Poster()
+
+    def build(_environ: Any, redis_client: Any, _objects: Any, _consumer: Any) -> scheduler.Scheduler:
+        ports = scheduler.Ports(Inbox(), Expander({}), poster, frozenset[str])
+        return scheduler.Scheduler(redis_client, objects, ports, scheduler.Settings(frozenset()))
+
+    def listen(*_arguments: Any) -> list[Any]:
+        return []
+
+    def serve(found: scheduler.Scheduler, *_arguments: Any) -> int:
+        served.append(found)
+        return 0
+
+    runtime = tmp_path / "runtime.yaml"
+    runtime.write_text(
+        yaml.safe_dump(
+            {
+                "classes": list(CLASSES),
+                "budget": {"coreMinutesPerDay": 600, "shed": {"backfill": 0.5}},
+                "backfill": {"auditShare": 0.1, "moduleSweeps": False},
+            }
+        )
+    )
+    environ = {
+        scheduler.contract.REDIS_URL: "redis://lab",
+        scheduler.contract.RUNTIME_CONFIG: str(runtime),
+        scheduler.MINIO_ENDPOINT: "endpoint",
+        scheduler.MINIO_ACCESS_KEY: "access",
+        scheduler.MINIO_SECRET_KEY: "secret",
+        scheduler.MINIO_BUCKET: "bucket",
+    } | setting
+    stdout = Stdout()
+    monkeypatch.setattr(redis.Redis, "from_url", from_url)
+    monkeypatch.setattr(boto3, "client", s3)
+    monkeypatch.setattr(config.BusConfig, "from_environ", classmethod(from_environ))
+    monkeypatch.setattr(factory, "open_bus", open_bus)
+    monkeypatch.setattr(scheduler, "build", build)
+    monkeypatch.setattr(scheduler, "listen", listen)
+    monkeypatch.setattr(scheduler, "serve", serve)
+    monkeypatch.setattr(sys, "stdout", stdout)
+
+    assert scheduler.main([], environ) == 0
+
+    assert stdout.getvalue() == printed
+    assert stdout.flushed == ([printed] if printed else [])
+    assert served[0].store.get("test", verdict.key) == (verdict if printed else None)
 
 
 def test_the_service_names_its_command_in_its_usage(capsys: pytest.CaptureFixture[str]) -> None:
