@@ -2336,6 +2336,29 @@ def test_a_released_checks_wait_logs_why_it_holds(
 
 
 @pytest.mark.feature("merge-pass-hold-reasons")
+@pytest.mark.parametrize(
+    "fresh, reason",
+    [
+        (None, "GitHub did not answer a read of its pull request"),
+        (PullRequest("OPEN", None, 1, False, True), "GitHub did not answer a read of its pull request"),
+        (RUNNING, "its required checks have not all finished"),
+        (PullRequest("OPEN", None, 1, False, True, head=HEAD, unpassed_gate="Gate"), "its Gate never passed"),
+        (
+            PullRequest("OPEN", None, 1, False, True, head="b" * 40),
+            "its head moved, so its checks are read again on the new head",
+        ),
+    ],
+    ids=["unread", "headless", "checks-run", "gate-never-passed", "head-moved"],
+)
+def test_a_checks_wait_names_the_hold_of_its_fresh_read_over_a_green_snapshot(
+    merging: SimpleNamespace, capsys: pytest.CaptureFixture[str], fresh: PullRequest | None, reason: str
+) -> None:
+    assert _pass(merging, {URL: GREEN}.get, {URL: fresh}.get) == []
+    assert merging.queued == []
+    assert _holds(capsys) == [HOLD + reason]
+
+
+@pytest.mark.feature("merge-pass-hold-reasons")
 def test_a_green_head_github_does_not_read_green_logs_its_hold(
     merging: SimpleNamespace, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:

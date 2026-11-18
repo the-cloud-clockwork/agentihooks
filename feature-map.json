@@ -7321,6 +7321,7 @@
       "seam": "scripts.swarm.ready.merge_pass and scripts.swarm.waits.required_green",
       "tests": [
         "tests/swarm/test_ready.py::test_a_released_checks_wait_logs_why_it_holds",
+        "tests/swarm/test_ready.py::test_a_checks_wait_names_the_hold_of_its_fresh_read_over_a_green_snapshot",
         "tests/swarm/test_ready.py::test_a_green_head_github_does_not_read_green_logs_its_hold",
         "tests/swarm/test_ready.py::test_a_moved_head_logs_that_its_checks_are_read_again",
         "tests/swarm/test_ready.py::test_an_unread_pull_request_logs_its_hold",

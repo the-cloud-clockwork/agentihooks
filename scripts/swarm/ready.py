@@ -367,25 +367,34 @@ def _requeue(run, row, found):
 
 def _checks(run: Pass, row: dict[str, Any], found: dict[str, Any], pull: Any) -> list[str]:
     before = found["on"].get("head")
-    outcome = waits.checks_resolution(found["on"], run.github, run.reread)
+    seen: list[Any] = []
+
+    def reread(url: str) -> Any:
+        """The pass's fresh read of ``url``, kept so a hold names the read the checks wait stopped on."""
+        seen.append(run.reread(url))
+        return seen[-1]
+
+    outcome = waits.checks_resolution(found["on"], run.github, reread)
     if not outcome.startswith(f"checks on {found['url']}"):
         save(run.store, run.slug, row["id"], found)
-        return _hold(run, row, found["url"], _checks_held(before, found["on"], pull))
+        return _hold(run, row, found["url"], _checks_held(before, found["on"], seen[-1] if seen else pull))
     if outcome.startswith(f"checks on {found['url']}, now red"):
         steps = ", ".join(pull.failed)
         return _reopen(run, row, found, f"has red checks: {steps}" if steps else "has red checks")
     return _queue(run, row, found)
 
 
-def _checks_held(before: str | None, held: Mapping[str, Any], pull: Any) -> str:
-    """Why a checks wait holds: a moved head, checks still running, a gate that never passed, or a head GitHub does
-    not read green."""
+def _checks_held(before: str | None, held: Mapping[str, Any], current: Any) -> str:
+    """Why a checks wait holds, read from the last pull request read it made: a moved head, an unread pull request,
+    checks still running, a gate that never passed, or a head GitHub does not read green."""
     if held.get("head") != before:
         return HEAD_MOVED
-    if not pull.resolved:
+    if current is None or not current.head:
+        return UNREAD
+    if not current.resolved:
         return CHECKS_RUN
-    if pull.unpassed_gate and not pull.failed:
-        return GATE_HELD.format(gate=pull.unpassed_gate)
+    if current.unpassed_gate and not current.failed:
+        return GATE_HELD.format(gate=current.unpassed_gate)
     return NOT_GREEN
 
 
