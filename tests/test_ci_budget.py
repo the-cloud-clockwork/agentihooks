@@ -143,13 +143,20 @@ def test_a_mutation_plan_takes_the_collected_budget_only_when_it_took_the_collec
     assert ci_budget.budget("select", jobs) == ci_budget.BUDGETS["select"]
 
 
-def test_the_collected_budget_follows_the_plan_stage_and_no_other_stage() -> None:
+@pytest.mark.parametrize(
+    ("collected", "budget"),
+    [
+        ("success", ci_budget.COLLECTED_BUDGETS["mutation-plan"]),
+        ("skipped", ci_budget.BUDGETS["mutation-plan"]),
+    ],
+)
+def test_the_collected_budget_follows_the_plan_stage_and_no_other_stage(collected: str, budget: int) -> None:
     jobs = [
         {**_job("select", "00:00", "00:10"), "steps": [{"name": COLLECTED, "conclusion": "success"}]},
-        {**_plan("00:10"), "name": "mutation-plan (1)"},
+        {**_plan("00:10", collected), "name": "mutation-plan (1)"},
     ]
     assert ci_budget.budget("select", jobs) == ci_budget.BUDGETS["select"]
-    assert ci_budget.budget("mutation-plan", jobs) == ci_budget.COLLECTED_BUDGETS["mutation-plan"]
+    assert ci_budget.budget("mutation-plan", jobs) == budget
 
 
 @pytest.mark.parametrize(("completed", "expected"), [("05:30", "ok"), ("05:31", "over")])
