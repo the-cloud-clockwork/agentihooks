@@ -8756,6 +8756,16 @@
       ]
     },
     {
+      "id": "lab-head-durable-consumer",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2515",
+      "behaviour": "Every provisioning bus open creates the lab scheduler's ci-lab-scheduler durable consumer on the lab head stream, filtered on ci.lab.head.>, so the scheduler binds it in bind mode with no consumer create grant, and a head published while the scheduler is stopped is read after it restarts while a head it read and acknowledged before the stop is not read again.",
+      "seam": "scripts.events.nats NatsBus provisioning of LAB_CONSUMER on LAB_STREAM, read through scripts.ci_lab.scheduler BusInbox on a bind mode bus lab_heads consumer of DURABLE and SUBJECT",
+      "tests": [
+        "tests/events/test_nats_lab_stream.py::test_a_bound_scheduler_reads_the_heads_published_while_it_was_stopped"
+      ]
+    },
+    {
       "id": "master-interactive-login-without-front-gate",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-backend-master-unrouted-account",
