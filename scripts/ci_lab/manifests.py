@@ -82,7 +82,8 @@ class Actions:
 
     def _get(self, path: str) -> requests.Response:
         """Send one GET under the repository with a fresh token; requests drops it on the archive's storage redirect.
-        A request that fails before GitHub answers it, its token mint included, raises FetchUnanswered naming it."""
+        A request that fails before GitHub answers it, a token mint without an answer included, raises FetchUnanswered
+        naming it."""
         try:
             return requests.get(
                 f"{API}/repos/{self.repo}/{path}",
