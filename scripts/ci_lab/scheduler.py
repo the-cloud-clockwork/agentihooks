@@ -7,9 +7,10 @@ and then the gates by the tier's `Gate — Required` rules, and moves the check 
 the first unit, completed on the last. A grade's state is the JSON document at `agentihooks-ci:grade:<run>`.
 
 A newer head of a lane drops the older head's pending units, carries its leased and finished jobs and cancels its
-checks; a push grade of a tree a merge group grade completed carries that grade's gates. A head on a panic fix branch
-grades in the hotfix class. `python -m scripts.ci_lab scheduler` runs the service: the lease API on the scheduler port
-and one pass every interval.
+checks; a push grade of a tree a merge group grade completed carries that grade's gates. A head or lane the control
+routes marked hotfix grades in the hotfix class, and a paused class holds its heads but the excepted ones until
+resume. `python -m scripts.ci_lab scheduler` runs the service: the lease API with its control routes on the scheduler
+port and one pass every interval.
 """
 
 import argparse
@@ -27,7 +28,7 @@ from urllib.parse import urlsplit
 import jsonschema
 import yaml
 
-from scripts.ci_lab import contract, lease_api
+from scripts.ci_lab import contract, control, lease_api
 from scripts.ci_lab.checks import Checks, Output
 from scripts.ci_lab.delivery import CLASSES, DELIVERY, DELIVERY_SCHEMA
 from scripts.ci_lab.digests import GradeInputs, StaticInputs, Toolchain, grade_key, static_key
@@ -50,7 +51,6 @@ __all__ = [
     "Flags",
     "Head",
     "MirrorExpander",
-    "PanicFixes",
     "Plan",
     "Ports",
     "Scheduler",
@@ -301,7 +301,7 @@ class Poster(Protocol):
 
 @dataclass(frozen=True)
 class Ports:
-    """The scheduler's outside world: heads in, plans, check runs out per repository, and the panic fix branches."""
+    """The scheduler's outside world: heads in, plans, check runs out per repository, and the heads marked hotfix."""
 
     inbox: Inbox
     expander: Expander
@@ -455,7 +455,7 @@ class Scheduler:
             if request is None:
                 actions.append(f"untrusted {head.event.actor} head {head.event.head}")
                 continue
-            if head.lane in fixes:
+            if head.lane in fixes or head.event.head in fixes:
                 request = replace(request, tier=Priority.HOTFIX)
             actions.append(self._hold(request, head.lane, now_ms))
         return actions
@@ -470,12 +470,16 @@ class Scheduler:
         return f"received {request.head} on {lane}"
 
     def _release(self, now_ms: int) -> list[str]:
+        """Start each held head whose quiet window ended, except one a pause of its class holds."""
         actions: list[str] = []
+        pauses = control.paused(self.client)
         for name, raw in sorted(self.client.hgetall(WAITING).items()):
             held = json.loads(raw)
             request = _request(held["request"])
             quiet = 0 if request.tier == Priority.HOTFIX else self.settings.quiet_ms
-            if now_ms - held["since"] < quiet:
+            if now_ms - held["since"] < quiet or control.holds(
+                pauses, CLASSES[request.tier], request.head, held["lane"]
+            ):
                 continue
             self.client.hdel(WAITING, name)
             try:
@@ -749,27 +753,7 @@ class MirrorExpander:
         return frame(request.tier, tree, grader, {job: tuple(units) for job, units in gates.items()})
 
 
-class PanicFixes:
-    """The head branches of the fix pull requests panic names, read from the swarm store; none while panic is off."""
-
-    def __init__(self, redis: Any) -> None:
-        self.redis = redis
-
-    def __call__(self) -> frozenset[str]:
-        """Return the fix branches of every swarm in panic, or none when no panic is on or its fixes cannot be read."""
-        from scripts.swarm import panic
-        from scripts.swarm.store import RedisStore, SwarmError
-
-        store = RedisStore(self.redis)
-        try:
-            slugs = cast(list[str], store.slugs())  # pragma: no mutate
-            held = [current for slug in slugs if (current := panic.state(store, slug))]
-            return frozenset(panic.fix_branch(url) for current in held for url in current.fixes)
-        except (subprocess.SubprocessError, OSError, ValueError, KeyError, SwarmError):
-            return frozenset()
-
-
-def build(environ: Mapping[str, str], client: Any, objects: Objects, consumer: Consumer, swarm: Any) -> Scheduler:
+def build(environ: Mapping[str, str], client: Any, objects: Objects, consumer: Consumer) -> Scheduler:
     """Return the service's scheduler over its clients, trusting the runner trust list of the repository's dev."""
     toolchain = Toolchain(sys.version.split()[0], {}, "", "", environ.get(IMAGE, ""), {})
     expander = MirrorExpander(Path(environ[contract.GIT_MIRROR]), Path(environ[MIRROR_STORE]), toolchain)
@@ -780,8 +764,7 @@ def build(environ: Mapping[str, str], client: Any, objects: Objects, consumer: C
             checks[repo] = Checks(repo)
         return checks[repo]
 
-    hotfixes = PanicFixes(swarm) if swarm is not None else frozenset[str]
-    ports = Ports(BusInbox(consumer), expander, poster, hotfixes)
+    ports = Ports(BusInbox(consumer), expander, poster, control.Priorities(client, _now_ms))
     repository = environ[REPOSITORY]
     settings = Settings(expander.trusted(repository), retries=expander.retries(repository))
     return Scheduler(client, objects, ports, settings)
@@ -815,7 +798,6 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     import boto3  # pyright: ignore[reportMissingTypeStubs]
     import redis
 
-    from hooks._redis import get_redis
     from scripts.events.config import BusConfig
     from scripts.events.factory import open_bus
 
@@ -832,7 +814,7 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     )
     objects = S3Objects(s3, environ[MINIO_BUCKET], "")
     consumer = open_bus(BusConfig.from_environ(environ)).lab_heads.consumer(DURABLE, SUBJECT)
-    scheduler = build(environ, client, objects, consumer, get_redis())
+    scheduler = build(environ, client, objects, consumer)
     leases = Leases(scheduler.queue, LEASE_TTL_MS, _now_ms, _sleep_ms, LEASE_POLL_MS)
     routes = lease_api.ControlRoutes(client, environ.get(contract.CONTROL_TOKEN, ""), _now_ms)
     server = lease_api.serve("", contract.SCHEDULER_PORT, leases, Uploads(objects), routes)

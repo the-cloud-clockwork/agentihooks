@@ -45,6 +45,7 @@ worker start without `--self-test` exits 2 until the worker loop lands.
 | `CI_LAB_MIRROR_STORE` | yes | no | Folder of the scheduler's private git stores, one per repository, that borrow the mirror's objects |
 | `CI_LAB_REPOSITORY` | yes | no | Repository URL whose dev runner trust list admits head actors |
 | `CI_LAB_IMAGE` | yes | no | Worker image name keyed into static unit keys; empty when unset |
+| `CI_LAB_CONTROL_TOKEN` | yes | no | Bearer token the [control routes](#control-routes) require, passed by reference; unset, they refuse every request. The swarm host that presses panic or merge priority holds the same variable |
 | `UV_CACHE_DIR` | no | yes | Shared uv cache for virtual environments |
 
 A worker started with any `GITHUB_APP_*` variable in its environment refuses to start. It exits
@@ -54,8 +55,27 @@ A worker started with any `GITHUB_APP_*` variable in its environment refuses to 
 
 | Port | Service | Serves |
 |---|---|---|
-| `8800` | scheduler | The lease API workers call, and [`/capacity`](#capacity-document) |
+| `8800` | scheduler | The lease API workers call, the [control routes](#control-routes) a swarm calls, and [`/capacity`](#capacity-document) |
 | `9108` | scheduler and worker | Prometheus metrics |
+
+## Control routes
+
+The scheduler port serves three routes a swarm calls with `Authorization: Bearer <token>`, the token being the
+scheduler's `CI_LAB_CONTROL_TOKEN`. Any other token, or a scheduler without one, answers 401 and changes nothing. A
+head is a pull request head commit or its head branch. The state lives in the lab Redis.
+
+| Route | Body | Effect |
+|---|---|---|
+| `POST /priority` | `{"heads": [...], "class": "hotfix"}` | Marks the heads hotfix for six hours; a marked head is received in the hotfix class, with no quiet window |
+| `POST /pause` | `{"class": "<class>", "except": [...]}` | Holds every waiting head of the class but the excepted ones until resume |
+| `POST /resume` | none | Lifts every pause and answers the classes it held |
+
+`agentihooks swarm <slug> panic on --fix <url>` marks the fix branches and the recorded fixer branches hotfix and
+pauses `pull_request` except them, printing `lab paused pull request grading except <heads>`; `panic off`, and the
+release of an automatic panic that paused the lab, resume it. `agentihooks swarm <slug> merge priority <url>` marks
+the pull request head hotfix and records the lab's reply under `lab` in the queue journal. The swarm reads the lab
+address set with `agentihooks swarm <slug> set lab-url=<address>` and the token from `CI_LAB_CONTROL_TOKEN` on its
+host.
 
 ## Metrics
 
