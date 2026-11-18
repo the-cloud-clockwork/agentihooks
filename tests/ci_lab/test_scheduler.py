@@ -33,6 +33,7 @@ from scripts.ci_lab import (
     queue,
     scheduler,
     static_gates,
+    worktrees,
 )
 from scripts.ci_lab.capacity import Load
 from scripts.ci_lab.checks import Output
@@ -197,9 +198,15 @@ class Run:
         return self.engine.store
 
     def push(
-        self, head: str, lane: str = "feature", event: str = "push", action: str = "pushed", actor: str = ACTOR
+        self,
+        head: str,
+        lane: str = "feature",
+        event: str = "push",
+        action: str = "pushed",
+        actor: str = ACTOR,
+        ref: str = "",
     ) -> None:
-        self.lab.inbox.pending.append(scheduler.Head(HeadEvent(event, REPO, head, BASE, actor, action), lane))
+        self.lab.inbox.pending.append(scheduler.Head(HeadEvent(event, REPO, head, BASE, actor, action), lane, ref))
 
     def tick(self, at: int) -> list[str]:
         self.lab.now = at
@@ -264,6 +271,41 @@ def test_a_fully_cached_head_enqueues_nothing_and_completes_at_once(lab: Callabl
     assert f"grading {grade.run} with 0 of 2 units held" in actions
     assert f"completed {grade.run} success" in actions
     assert run.lab.repos == [SLUG]
+
+
+@pytest.mark.feature("lab-remote-heads")
+def test_a_grade_ref_head_posts_no_check_run_and_keeps_each_check_s_conclusion_for_the_relay(
+    lab: Callable[..., Run],
+) -> None:
+    units = (unit(1), unit(2))
+    run = lab({HEAD_A: plan({"lint": units}), HEAD_B: plan({"lint": units})})
+    for item in units:
+        run.cache(item)
+    run.push(HEAD_A, lane="engineer-1", ref="refs/grade/t1")
+    run.push(HEAD_B, lane="engineer-2")
+    actions = run.tick(1000)
+    relayed = run.grade(HEAD_A)
+    assert relayed.ref == "refs/grade/t1"
+    assert relayed.conclusion == "success"
+    assert relayed.posted == {"lint": ["completed", "success"], scheduler.REQUIRED: ["completed", "success"]}
+    assert relayed.runs == {}
+    assert run.lab.poster.moves(HEAD_A, "lint") == []
+    assert run.lab.poster.moves(HEAD_A, scheduler.REQUIRED) == []
+    assert f"left lint completed on {HEAD_A} to the relay" in actions
+    assert f"left {scheduler.REQUIRED} completed on {HEAD_A} to the relay" in actions
+    assert run.grade(HEAD_B).ref == ""
+    assert run.lab.poster.moves(HEAD_B, scheduler.REQUIRED) == [("completed", "success")]
+
+
+@pytest.mark.feature("lab-remote-heads")
+def test_a_grade_ref_head_held_in_its_quiet_window_keeps_its_ref(lab: Callable[..., Run]) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)})}, quiet_ms=500)
+    run.cache(unit(1))
+    run.push(HEAD_A, lane="engineer-1", ref="refs/grade/t1")
+    assert run.tick(1000) == [f"received {HEAD_A} on engineer-1"]
+    run.tick(1600)
+    assert run.grade(HEAD_A).ref == "refs/grade/t1"
+    assert run.lab.poster.posts == []
 
 
 @pytest.mark.feature("lab-scheduler-evidence")
@@ -1430,6 +1472,15 @@ def test_the_bus_inbox_reads_each_head_with_its_branch_as_lane_and_acknowledges_
     assert consumer.asked == [(scheduler.BATCH, scheduler.FETCH_MS)]
 
 
+@pytest.mark.feature("lab-remote-heads")
+def test_the_bus_inbox_keeps_the_grade_ref_a_lab_remote_notice_names() -> None:
+    pushed = HeadEvent("notice", REPO, HEAD_A, BASE, ACTOR, "pushed")
+    notice = envelope(pushed)
+    notice = replace(notice, data={**notice.data, "ref": "refs/grade/t1", "branch": "engineer-1"})
+    inbox = scheduler.BusInbox(Consumer([Delivery(notice), Delivery(envelope(pushed))]))
+    assert inbox.heads() == [scheduler.Head(pushed, "engineer-1", "refs/grade/t1"), scheduler.Head(pushed, HEAD_A)]
+
+
 def _without(event: HeadEvent, *names: str) -> Envelope:
     full = envelope(event)
     return replace(full, data={name: value for name, value in full.data.items() if name not in names})
@@ -2217,6 +2268,30 @@ def test_build_wires_the_service_ports_from_the_environment(tmp_path: Path, monk
     hotfixes = built.ports.hotfixes
     assert isinstance(hotfixes, control.Priorities)
     assert (hotfixes.client, hotfixes.clock) == (client, scheduler._now_ms)
+
+
+@pytest.mark.feature("lab-remote-heads")
+def test_build_gives_each_expander_mirror_the_lab_remote_the_environment_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(scheduler.MirrorExpander, "trusted", lambda self, repo: frozenset({repo}))
+    monkeypatch.setattr(scheduler.MirrorExpander, "retries", lambda self, repo: Policy())
+    monkeypatch.setattr(scheduler, "worker_pods", lambda found: FakeKube())
+    environ = {
+        scheduler.contract.GIT_MIRROR: str(tmp_path / "node"),
+        scheduler.MIRROR_STORE: str(tmp_path / "stores"),
+        scheduler.REPOSITORY: "repository",
+        "AGENTIHOOKS_LAB_REMOTE": "http://ci-lab-remote.ci-lab:8080/agentihooks.git",
+        "AGENTIHOOKS_LAB_REMOTE_TOKEN": "lab-token",
+    }
+    client = fake_redis()
+    spending = budget.Budget(client, lambda: 0, budget.Policy(100.0, {}))
+    built = scheduler.build(environ, client, LocalObjects(tmp_path / "objects"), Consumer([]), spending)
+    expander = built.ports.expander
+    assert isinstance(expander, scheduler.MirrorExpander)
+    found = worktrees.Lab("http://ci-lab-remote.ci-lab:8080/agentihooks.git", "lab-token")
+    store = tmp_path / "stores" / "the-cloud-clockwork--agentihooks"
+    assert expander._mirror(REPO) == worktrees.Mirror(tmp_path / "node", store, REPO, found)
 
 
 @pytest.mark.feature("lab-scheduler-service")
