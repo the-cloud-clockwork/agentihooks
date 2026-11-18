@@ -22,6 +22,7 @@ from scripts.swarm import readiness, run_window, successor_fill
 from scripts.swarm.execution import TERMINAL_STATES
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError, connect
+from scripts.swarm_ledger.ledger_workspace import WORK_FOLDER
 
 ADMITTED = "spoke-admission"
 # Long enough for every redelivery of one offer; a reopen raises the claim generation, so a new offer has a new key.
@@ -29,7 +30,6 @@ ADMITTED_MS = 24 * 60 * 60 * 1000
 ANSWER_MS = account_slots.REQUEST_TIMEOUT_MS - 2_000
 TURN_MS, TURN_TRIES, TURN_WAIT_S = 30_000, 40, 0.05  # pragma: no mutate
 BUSY = "another admission for the hive is in progress"
-WORK_FOLDER = "work-folder"
 
 
 def release_key(text: str) -> Version | None:
@@ -492,8 +492,9 @@ class Admission:
         placed = {field: launch[field] for field in account_slots.LAUNCH_PLACEMENT if field in launch}
         if not self.store.execution_registry.set_launch(slug, occupant.execution_id, {**decision, **placed}):
             return False
-        folder = self.store.key(slug, WORK_FOLDER, request["task"])
-        cast(Any, self.store).redis.set(folder, request["hive"])
+        from scripts.swarm_ledger import ledger_workspace
+
+        ledger_workspace.launched_on(self.store, slug, request["task"], request["hive"])
         cast(Any, self.store).redis.hdel(self.store.key(slug, "launch-assignments"), request["task"])
         return True
 

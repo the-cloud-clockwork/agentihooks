@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from scripts.swarm_ledger import plan_read, ports
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
 
     from redis import Redis
 
@@ -24,6 +24,7 @@ SEED_BUDGET = 2 * LINE_CHARS
 FILES = 32
 FILES_SECONDS = 86400
 ENDED = ("ended", "finished")
+WORK_FOLDER = "work-folder"
 
 
 def folder(slug: str, task_id: str) -> Path:
@@ -107,21 +108,24 @@ def seeds(slug, task_id):
     return {**sent, **contents(slug, task_id)}
 
 
-def contents(slug, task_id):
-    """Progress and proof keep their latest text; another plain text file travels whole or not at all."""
-    found = {}
-    added = 0
+def contents(slug: str, task_id: str) -> dict[str, str]:
+    """Progress and proof keep their latest LINE_CHARS; another plain text file travels whole or not at all, up to
+    SEED_CHARS and while every carried file stays within SEED_BUDGET, so the hub admit reply carrying them stays under
+    the NATS payload limit."""
+    found: dict[str, str] = {}
+    added, left = 0, SEED_BUDGET
     for file in _files(folder(slug, task_id)):
         seed = file.name in SEEDS
         if not seed and added >= FILES:
             break
         try:
-            if not seed and file.stat().st_size > SEED_CHARS:
+            if not seed and file.stat().st_size > min(SEED_CHARS, left):
                 continue
             text = file.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
-        found[file.name] = text[-SEED_CHARS:]
+        found[file.name] = text[-LINE_CHARS:] if seed else text
+        left -= len(found[file.name])
         added += not seed
     return found
 
@@ -169,8 +173,9 @@ def task_files_key(hive: str, slug: str, task_id: str) -> str:
 
 
 def sync(redis: "Redis", hive: str, hosted: list[tuple[str, str]], ttl: int) -> None:
-    """Publishes the hosted tasks' latest lines and files, and keeps each task's files under its own key for the files
-    TTL, so the copy outlives the hive hosting the task; a task holding no files leaves its copy as it was."""
+    """Publishes the hosted tasks' latest lines and files, and keeps each task's files under its own key with no expiry,
+    so the copy seeds the task's next agent however long after this hive stops hosting the task; a task holding no files
+    leaves its copy as it was."""
     copy: dict[str, dict[str, dict[str, str]]] = {}
     files: dict[str, dict[str, dict[str, str]]] = {}
     for slug, task_id in hosted:
@@ -178,9 +183,14 @@ def sync(redis: "Redis", hive: str, hosted: list[tuple[str, str]], ttl: int) -> 
         found = contents(slug, task_id)
         files.setdefault(slug, {})[task_id] = found
         if found:
-            redis.set(task_files_key(hive, slug, task_id), json.dumps(found), ex=FILES_SECONDS)
+            redis.set(task_files_key(hive, slug, task_id), json.dumps(found))
     redis.set(synced_key(hive), json.dumps(copy), ex=ttl)
     redis.set(files_key(hive), json.dumps(files), ex=FILES_SECONDS)
+
+
+def launched_on(store: Any, slug: str, task_id: str, hive: str) -> None:
+    """Records the hive that last launched the task, whose task copy seeds the task's next agent."""
+    store.redis.set(store.key(slug, WORK_FOLDER, task_id), hive)
 
 
 def latest(agents: "Iterable[Any]") -> "dict[str, Any]":
@@ -207,15 +217,15 @@ def mirror(store, slug, ledger):
                 (path / name).write_text(text, encoding="utf-8")
 
 
-def _synced(store, slug, ledger, key):
+def _synced(store: Any, slug: str, ledger: dict[str, Any], key: "Callable[[str], str]") -> dict[str, Any]:
     """Each work folder task's copy from the hive that runs, or last ran, its execution; None for one run here."""
     ran = latest(store.agents(slug))
-    copies = {}
-    found = {}
+    copies: dict[str, Any] = {}
+    found: dict[str, Any] = {}
     for task in ledger.get("tasks", []):
         if not task.get("workspace"):
             continue
-        host = ports.hive().reports.host(ran[task["id"]]) if task["id"] in ran else ""
+        host = ports.hive().reports.workspace_host(ran[task["id"]]) if task["id"] in ran else ""
         if not host:
             found[task["id"]] = None
             continue

@@ -12,6 +12,7 @@ from scripts.swarm.store import (
     connect,
 )
 from scripts.swarm.tick import Placed, Runtime, SpawnError
+from scripts.swarm_ledger import ledger_workspace
 from scripts.swarm_v2.runtime import process
 
 
@@ -65,9 +66,12 @@ def admit_legacy(
         previous = store.execution_occupants(slug).get(agent.seat)
         from scripts.swarm.commands import hive_id
 
-        return store.start_execution(
-            slug, replace(agent, hive=hive_id(), runtime_target=target), previous.execution_id if previous else ""
+        hive = hive_id()
+        started = store.start_execution(
+            slug, replace(agent, hive=hive, runtime_target=target), previous.execution_id if previous else ""
         )
+        ledger_workspace.launched_on(store, slug, started.task, hive)
+        return started
     except Exception as exc:
         runtime.retire(agent)
         raise SpawnError(str(exc), pane_id=agent.pane_id) from exc

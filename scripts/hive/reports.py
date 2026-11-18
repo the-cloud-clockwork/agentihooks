@@ -35,6 +35,15 @@ def admitted(agent: "AgentRecord") -> str:
     return hive if hive and hive != hive_id() else ""
 
 
+def workspace_host(agent: "AgentRecord") -> str:
+    """The hive that publishes an agent's work folder: its host target, else the hive on its record, which a hub
+    admission and a session a hive started itself carry; '' when that hive is this one."""
+    from scripts.swarm.commands import hive_id
+
+    hive = agent.runtime_target.get("host_id") or agent.hive
+    return hive if hive and hive != hive_id() else ""
+
+
 def pane_key(agent: "AgentRecord") -> str:
     remote = host(agent)
     return f"{remote}/{agent.pane_id}" if remote else agent.pane_id
