@@ -225,6 +225,7 @@ def test_unlisted_hashes_each_test_module_that_holds_no_manifest_test_with_its_c
         "tests/test_new.py": b"from tests.helpers import VALUE\n\n\ndef test_new():\n    assert VALUE\n",
         "tests/inner/test_deep.py": b"",
         "tests/inner/conftest.py": b"",
+        "conftest.py": b"ROOT = 1\n",
     }
     others = {
         "tests/test_data.json": b"{}\n",
