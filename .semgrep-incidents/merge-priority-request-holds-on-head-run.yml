@@ -4,8 +4,9 @@ rules:
     severity: ERROR
     message: >-
       A merge priority request held behind the head merge group's Tests run waits until that run ends, when GitHub
-      has already started building the next waiting entry, so the pull request always misses the next merge group. The move dequeues only waiting entries, which never sit ahead
-      of a building group, so it cancels no run: apply the priority at once.
+      has already started building the next waiting entry, so the pull request always misses the next merge group.
+      The move dequeues only waiting entries, which never sit ahead of a building group, so it cancels no run: apply
+      the priority at once.
     paths:
       include:
         - /scripts/swarm/queue_priority.py
