@@ -741,12 +741,13 @@
       "id": "ci-select-tick-catalogue-page",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2607",
-      "behaviour": "A pull request that changes a tick step module, whose selection otherwise names tests, also selects the tick step catalogue page test, which loads every step module at runtime so no import or name reaches it, and a stale catalogue page fails the pull request instead of the merge queue. A step module no test reaches still runs the full suite, and a tick change outside the step package leaves the page test out.",
+      "behaviour": "A pull request that changes a tick step module, whose selection otherwise names tests, also selects the tick step catalogue page test, which loads every step module at runtime so no import or name reaches it, and a stale catalogue page fails the pull request instead of the merge queue. A step module no test reaches still runs the full suite, a tree without the page test never selects it, and a tick change outside the step package selects the page test only through the modules it imports.",
       "seam": "scripts.ci_select.selected_tests through scripts.ci_select.decide",
       "tests": [
         "tests/test_ci_select.py::test_a_changed_tick_step_module_selects_the_catalogue_page_test",
         "tests/test_ci_select.py::test_a_tick_step_module_no_test_reaches_still_runs_the_full_suite",
-        "tests/test_ci_select.py::test_a_tick_change_outside_the_step_package_leaves_the_catalogue_page_test_out"
+        "tests/test_ci_select.py::test_a_tick_change_outside_the_step_package_adds_no_catalogue_page_test",
+        "tests/test_ci_select.py::test_a_tree_without_the_catalogue_page_test_never_selects_it"
       ]
     },
     {

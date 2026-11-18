@@ -553,7 +553,7 @@ def test_a_tick_step_module_no_test_reaches_still_runs_the_full_suite(repo: Path
 
 
 @pytest.mark.feature("ci-select-tick-catalogue-page")
-def test_a_tick_change_outside_the_step_package_leaves_the_catalogue_page_test_out(repo: Path) -> None:
+def test_a_tick_change_outside_the_step_package_adds_no_catalogue_page_test(repo: Path) -> None:
     write(
         repo,
         {
@@ -563,6 +563,18 @@ def test_a_tick_change_outside_the_step_package_leaves_the_catalogue_page_test_o
         },
     )
     assert decide(repo, ["scripts/tick/engine.py"]) == ("selected", [["tests/tick/test_engine.py"]])
+
+
+@pytest.mark.feature("ci-select-tick-catalogue-page")
+def test_a_tree_without_the_catalogue_page_test_never_selects_it(repo: Path) -> None:
+    write(
+        repo,
+        {
+            "scripts/tick/steps/report.py": "VALUE = 1\n",
+            "tests/tick/test_report.py": "import scripts.tick.steps.report\n",
+        },
+    )
+    assert decide(repo, ["scripts/tick/steps/report.py"]) == ("selected", [["tests/tick/test_report.py"]])
 
 
 @pytest.mark.parametrize("name", ["hooks/new.py", "scripts/static/new.js"])
