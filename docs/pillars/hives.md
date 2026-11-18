@@ -1772,8 +1772,10 @@ hive gets none. When the offer runs out of deliveries, the spoke sends `reopen`,
 The hub answers these requests on a pool of eight threads and drops one that waited there as long as the hive waits
 for its answer, so an admission the hive gave up on never claims the task; see
 [How the hub serves requests](../reference/swarm-bus-scope.md#how-the-hub-serves-requests).
-Unlike a tick launch, a hub admission scaffolds no task work folder on the hub and resolves no reclaim continuation,
-stack base, overlaps or group; the spawn task carries the seat's handoff, recaps and learned notes.
+Unlike a tick launch, a hub admission scaffolds no task work folder on the hub. It resolves the task's continuation,
+stack base, overlaps and group on the claimed row and attaches the handoff transfer the predecessor left (see
+[Handoff continuity on admission](#handoff-continuity-on-admission)); the spawn task carries the seat's handoff,
+recaps and learned notes.
 
 The hub creates the hive buckets; members are not allowed to create them:
 
@@ -1789,6 +1791,136 @@ The hub creates the hive buckets; members are not allowed to create them:
 | `hive-slot-accounts` | Per hive, the harness and account pairs it has reported, so its beat renews every slot it holds. |
 
 A hive beats `hive-presence` every 15 seconds. A beat expires after 45 seconds.
+
+### Handoff continuity on admission
+
+An eng, ci or plan successor the hub admits continues from what its predecessor left: the handoff text, its runtime
+envelope and the handoff transfer travel in the spawn task the hub returns to the hive. No setting changes this; the
+admission adds them on every claim.
+
+#### What the admission adds
+
+The admission takes the seat of a saved launch assignment, else the seat the handoff names; a preferred seat that is
+taken gives way to the lowest free seat of the lane. After it occupies the seat, it reads the task's stored handoff.
+
+| Stored for the task | The spawn task carries |
+|---|---|
+| A handoff text: one written by `agentihooks swarm <slug> handoff`, `ready` or `park`, or the recovery handoff `agentihooks hive remove` stores for each agent that did not hand off within its wait | `handoff`, the text, and `handoff_envelope`, the stored envelope resolved on the claimed row so a cleared protected branch is never continued |
+| No handoff, but earlier lives or a recorded branch | `reclaim`, the branch the task continues from, or the decision to start fresh, and why; also stored for the admitted agent |
+| Neither, on a first life | Nothing |
+
+The admission then attaches the transfer. It takes the latest row of the task in the swarm's transfers hash that has
+no successor yet, whatever recorded it, and sets on it:
+
+| Field | Value |
+|---|---|
+| `successor` | The admitted agent's name |
+| `seat` | The seat the agent occupies |
+| `generation` | That seat's occupancy generation |
+| `attached_at` | The attach time, in milliseconds |
+
+The attached row is the spawn task's `transfer`. A task with no open transfer carries `"transfer": null`. The
+admission records no transfer row of its own. An attached row stays with its successor until `reopen` or the launch
+check free detaches it, unless its binding is already `live` (see
+[Handing the transfer back](#handing-the-transfer-back)); the next admission then attaches that same row.
+
+#### What the successor reads
+
+The hive launches the spawn task as it is:
+
+- The seat history in the opening prompt starts with the transfer: `Read this handoff before continuing. Confirm you
+  read it and will take its first Next action by running agentihooks swarm <slug> confirm-handoff <transfer id> --next
+  '<first Next action>'`, followed by the handoff text. Item 1 of the history then shows the handoff runtime envelope
+  and `Handoff document: continue from it:` with the text. A transfer with no handoff text adds no confirm
+  instruction, and a task with no handoff reads `1. Handoff document: none was left for this task.`
+- When a transfer is attached and the envelope names the predecessor's `conversation_id`, the launch sets
+  `AGENTIHOOKS_PREDECESSOR_SESSION` to it, and traces record it as `predecessor.session.id` (see
+  [Observability with Langfuse](../reference/observability-langfuse.md)). With no transfer the launch names no
+  predecessor.
+- A transfer that names `avoid_harness`, as a content refusal or an outage handoff records, steers the successor's
+  harness choice away from that harness.
+
+#### When the transfer binds
+
+Attach leaves `binding` at `pending` and `continuity` as the predecessor's handoff recorded it. The tick's
+`handoff transfers` step, in the `close` group of every pass (see
+[tick engine steps](../reference/tick-engine-steps.md)), skips a successor that is still `starting` or `launching`.
+Once the seat's occupant and generation still match the row, it marks binding `live` when the successor runs, either
+listed live by the runtime or reported with an execution by its hive, and `absent` otherwise. Continuity stays apart
+from binding: it waits on `confirm-handoff` (see [swarm commands](swarm.md#commands)).
+
+#### Handing the transfer back
+
+Every path that returns an admitted task to `open` detaches its transfer before it drops the claim:
+
+| Path | When | What happens |
+|---|---|---|
+| `reopen` | The spoke gives the offer back after a failed launch while deliveries remain, or dead letters the final delivery | The admission cancels the pending life, detaches the transfer, drops the claim and the agent, and sets the ledger row back to `open` with `claimed_by` empty. The row keeps its id, handoff text and `pending` binding with an empty `successor`, so the next admission attaches the same row. A repeated `reopen` finds no admission, answers `false` and leaves the transfer as it is; when the repeat is the dead letter of the final delivery, the hub may raise the task's claim generation instead. |
+| Launch check free | The hub launch check halts an admitted agent that no hive started | The same steps, after the agent's hive slot is freed. |
+| Refused attach | Another writer changed the transfers hash while the admission attached, so attach raised `The transfer changed; retry the command` | The same steps. The refused write never reached the row, so it keeps an empty `successor`, and the admission keeps nothing for the offer. The hive's admit ask is answered with that error; the task is `open` with no claimant, so the next ask for the offer starts clean. |
+
+Detach clears `successor` only on a row whose binding is not `live`, so a transfer that already bound to a running
+successor stays with it. A launch failure the hive reports with `failed` leaves the transfer attached; the `reopen`
+that gives the offer back releases it.
+
+An admission that finishes past its 8,000 millisecond answer budget, the 10,000 millisecond slot request timeout less
+two seconds, keeps its claim and its attached transfer. The hub logs
+`hub: events admission swarm=<slug> task=<task id> hive=<hive> late: finished after <n> ms, past the 8000 ms answer
+budget, claim kept <step timings>`. A hive still waiting receives the admission; a hive that stopped waiting asks
+again for the same offer on its next poll and receives the same admission, transfer included.
+
+#### Checking continuity on a live swarm
+
+```bash
+# The task's transfers: who left each one, which successor holds it, and its binding and continuity
+agentihooks swarm <slug> status --json \
+  | jq -c '.transfers[] | select(.task == "<task id>")
+      | {id, reason, predecessor, successor, seat, generation, binding, continuity}'
+# {"id":"<transfer id>","reason":"recycle","predecessor":"engineer@<code>-<n>","successor":"engineer@<code>-<m>",
+#  "seat":"eng-1@<slug>","generation":7,"binding":{"state":"live",...},"continuity":{"state":"pending"}}
+
+# The same rows and the stored handoff text, straight from the swarm Redis
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" HGETALL agentihooks:swarm:<slug>:transfers
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" GET agentihooks:swarm:<slug>:handoff:<task id>
+
+# Admissions the hub finished late and kept
+kubectl -n <namespace> logs deployment/agentihooks-swarm-hub | grep 'hub: events admission .* late:'
+```
+
+The keys start with `AGENTIHOOKS_SWARM_KEY_PREFIX`, default `agentihooks`. A row with a `successor` and binding
+`pending` belongs to a successor the tick has not yet seen running. A row with an empty `successor` waits for the
+task's next admission.
+
+#### Continuity guards
+
+- Feature `hub-admission-claim-continuity` in `feature-map.json`. Its tests in `tests/hub/test_admission.py` cover
+  the attach after a handoff and after a recovery handoff, a task with no transfer, a reopen that hands the transfer
+  to the next successor, a repeated reopen, a late admission that keeps its transfer, and a refused attach that
+  releases the claim, the agent and the ledger row.
+- Semgrep incident rule `admission-claim-skips-continuity`, scoped to `scripts/hub/`: a function that calls
+  `tick.primed` with no `transfers.attach` in the same function is an error. The Semgrep workflow runs every rule in
+  `.semgrep-incidents/`. Run it by hand with:
+
+```bash
+semgrep scan --config .semgrep-incidents/admission-claim-skips-continuity.yml scripts/hub/
+semgrep --test --config .semgrep-incidents/admission-claim-skips-continuity.yml \
+  .semgrep-incidents/admission-claim-skips-continuity.py
+```
+
+#### Continuity limitations
+
+- Masters are outside this path: a master spoke rechecks its own offer, and the master launch attaches the master
+  seat's transfer itself.
+- The admission attaches only the latest open row of the task. An older row with no successor stays unattached.
+
+#### Continuity troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| An events successor's opening has no `confirm-handoff` line, and the task's transfer keeps an empty `successor` while the successor runs | The hub runs a release from before pull request [#11138](https://github.com/the-cloud-clockwork/agentihooks/pull/11138), whose admission attached no transfer | Roll the hub to the newest release. The running successor goes on without the transfer; the open row attaches to the task's next admission. |
+| An events successor reads `1. Handoff document: none was left for this task.` although its predecessor handed off | The hub runs a release from before pull request [#11139](https://github.com/the-cloud-clockwork/agentihooks/pull/11139), whose admission read no handoff, or no handoff text is stored for the task | Read the handoff key above. Roll the hub when the text is there. |
+| The hive's admit ask is answered `The transfer changed; retry the command` | Another writer changed the swarm's transfers while the admission attached | Nothing to fix: the admission released its claim, agent and ledger row, and the next ask for the offer admits again. |
+| A transfer names a successor that never launched | The admission is kept, because it finished late or the hive's launch is still running | The hive asks again and launches it. Otherwise `reopen` or the launch check free hands the transfer back; see [Handing the transfer back](#handing-the-transfer-back). |
 
 ### When a hive is lost
 
@@ -2838,6 +2970,138 @@ redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" GET "$P:hive:<id>:executions" \
 
 An empty answer means the hive has not beaten for 45 seconds.
 
+### Join reports after a hive restart
+
+Every agent on a hive writes one join report when its session starts: the SessionStart join hook grades its checks
+and stores the report in the hash `<root>:hive:<id>:join-reports`, one field per execution id. When the session
+ends, the hook writes `ended_at`, `exit_reason` and `status` into the same report; a Codex session's supervisor
+writes the same end with `exit_reason` `codex transport exited` when its transport exits. A report without
+`ended_at` keeps the agent listed on its hive while its agent record runs, and counted by the hive's drain.
+
+An agent killed together with its pod never runs that end. The hive daemon's join report heartbeat, which runs on
+every 15 second beat, ends those reports itself once the restarted daemon is back.
+
+#### What a join report records about its member
+
+| Field | Value |
+|---|---|
+| `member` | The host name of the machine or pod that runs the agent, `registry.member_name()`: the pod name on a worker hive. |
+| `epoch` | `<boot id>/<start tick>`: the kernel boot id from `/proc/sys/kernel/random/boot_id`, and the start time of process 1 in clock ticks since boot, field 22 of `/proc/1/stat`. Empty when either cannot be read. |
+
+A container restart inside the same pod, such as after an OOM kill, keeps the pod name and starts a new process 1,
+so the epoch changes. A reboot changes the boot id. Restarting only the `agentihooks-hive` service on a machine
+whose process 1 is its init system keeps the epoch. The start tick counts from boot, so a step of the wall clock
+does not move it.
+
+The join hook runs in the agent's session and the heartbeat in the hive daemon, so the check relies on both reading
+the same host name and the same process 1. The hive daemon and the agents it starts run in the same pod or on the
+same machine, and the hive chart sets none of `hostPID`, `hostNetwork` or `shareProcessNamespace`. Pull
+request #11279 recorded the agent hook and the daemon reading one PID namespace on a worker pod and on the
+workstation root hive; compare them on a live hive with the commands in
+[Checking it on a live hive](#checking-it-on-a-live-hive).
+
+#### What the heartbeat does on each beat
+
+The heartbeat takes the hive's reports whose `status` is `running` and judges each in this order:
+
+1. **Restarted member.** It ends the report with `exit_reason` `agent ended with its member's restart` and `status`
+   `ended` when all of these hold: the daemon can read its own epoch, the report's `member` is the daemon's own host
+   name, and the report carries an epoch that differs from the daemon's.
+2. **Gone from the swarm.** It ends the report with `exit_reason` `agent gone from the swarm` and `status` `ended`
+   when the swarm holds no agent record for the report's swarm, execution id and generation in a state other than
+   `finished` or `ended`.
+3. **Refresh.** A report both checks keep, whose `heartbeat_at` is 180 seconds old or older, gets `heartbeat_at` set
+   to the beat time and its checks probed again. A check that passed at join stays passed.
+
+The first two checks run on every beat; only the refresh waits 180 seconds. A restarted hive therefore ends the
+reports it wrote before the restart on its first beat. An end is written only while the stored report still
+belongs to the same session. Ended reports stay in the hash.
+
+The restart check sorts the running reports this way:
+
+| Report | Restart check |
+|---|---|
+| Written by this member under the current epoch | Kept |
+| Written by this member under an earlier epoch | Ended with `agent ended with its member's restart` |
+| Written by another member of the same hive | Kept; only the member that wrote a report ends it for a restart |
+| No `member` or no `epoch`, written by a release before [pull request #11279](https://github.com/the-cloud-clockwork/agentihooks/pull/11279) | Kept |
+| Any report, while the daemon cannot read its own epoch | Kept |
+
+A kept report still goes through the gone check and the refresh.
+
+#### What reads the report
+
+| Reader | While the report runs | Once it has ended |
+|---|---|---|
+| `agentihooks hive list` | Lists the agent under its hive with its grade, misses and `heartbeat=<ms>`, the last heartbeat time in epoch milliseconds, while its execution still runs, and counts it in `workers=` unless it is a master. | Drops the agent from the hive's lines and from `workers=`. |
+| `agentihooks hive drain`: the pod's preStop, the release roll and `hive remove` | Counts the agent as running and waits for it to hand off. When one member of a shared hive drains, it counts only agents whose recorded process namespace is its own. | No longer counts the agent, so the drain stops waiting on it. |
+| The [stall watchdog](swarm.md#stall-watchdog) | Counts a task's hive owner as live while its report runs with a heartbeat no older than 360 seconds, twice the refresh interval. | Stops counting that owner as live, so the task can stall as `owner not live` after `AGENTIHOOKS_STALL_OWNER_MINUTES` (default 10). |
+| `agentihooks swarm <slug> status` | Prints a `hive join` line for the agent. | Adds `exit=<reason>` and `status=ended` to that line. |
+
+```bash
+agentihooks swarm <slug> status | grep 'hive join'
+# hive join  engineer@<code>-<n>  complete  misses=none  heartbeat=<ms>
+# hive join  engineer@<code>-<m>  complete  misses=none  heartbeat=<ms>  exit=agent ended with its member's restart  status=ended
+```
+
+The fields are separated by tabs, shown aligned here.
+
+The heartbeat changes only the join report. The agent record, its task claim and its inbox items stay until the
+controller tick retires the agent, as in [A hive worker whose pane is gone](#a-hive-worker-whose-pane-is-gone).
+
+Before [pull request #11279](https://github.com/the-cloud-clockwork/agentihooks/pull/11279) the heartbeat refreshed
+every running report whose agent record still ran. That pull request records the incident: on 14 November the
+worker container of `swarm-hive-001` was OOM killed and restarted at 17:09:58 UTC. At 21:48 UTC `ps` in the pod
+showed no process for two engineers, while their join reports still read `running` with heartbeats from 21:50 UTC,
+so `hive list` showed both as `complete` and `hive drain` counted them as running.
+
+#### Upgrade
+
+The join hook that records `member` and `epoch` and the daemon that compares them run from the same agentihooks
+install on the hive. Upgrade the hive to a release carrying
+[pull request #11279](https://github.com/the-cloud-clockwork/agentihooks/pull/11279) and restart its hive service or
+roll its pod. Agents that start after the upgrade write both fields; reports of agents that started earlier carry
+neither and are kept by the restart check.
+
+#### Limitations
+
+- A report without `member` or `epoch` ends only through the gone check, when its agent record ends.
+- A pod that is deleted and replaced, rather than restarted, comes back under a new host name. The replacement
+  reads the old reports as another member's and keeps refreshing them until their agent records end and the gone
+  check ends them.
+- The check needs each member to have its own host name and its own process 1. With `hostPID` set, process 1 is
+  the node's init, so a container restart leaves the epoch unchanged; with `hostNetwork` set, every pod on a node
+  takes the node's host name.
+
+#### Checking it on a live hive
+
+```bash
+# On the hive: its member name and current epoch
+hostname
+echo "$(cat /proc/sys/kernel/random/boot_id)/$(sed 's/.*) //' /proc/1/stat | cut -d' ' -f20)"
+# swarm-hive-001-agentihooks-swarm-worker-hive-68c5d5fb-wwszw
+# e8adb1a1-f80b-4d66-962f-26f39eacd37d/189301145
+
+# On the hive: the daemon and a Claude agent process read one PID namespace
+readlink /proc/"$(pgrep -f 'agentihooks hive run' | head -1)"/ns/pid /proc/"$(pgrep -x claude | head -1)"/ns/pid
+# pid:[4026532913]
+# pid:[4026532913]
+
+# From any joined machine: the running reports with the member and epoch each recorded
+P=${AGENTIHOOKS_SWARM_KEY_PREFIX:-agentihooks}
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" HVALS "$P:hive:<id>:join-reports" \
+  | jq -c 'select(.status == "running") | {agent, member, epoch, heartbeat_at}'
+
+# The reports the heartbeat ended for a restart
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" HVALS "$P:hive:<id>:join-reports" \
+  | jq -c --arg r "agent ended with its member's restart" 'select(.exit_reason == $r) | {agent, member, epoch, ended_at}'
+```
+
+A running report whose `member` is the hive's host name and whose `epoch` differs from the hive's current one is
+ended on the hive's next beat. If it is still running a beat later, either the hive daemon runs a release older than
+pull request #11279, or the daemon cannot read its own epoch because `/proc/sys/kernel/random/boot_id` or
+`/proc/1/stat` is unreadable in its pod, which keeps every report.
+
 ### Troubleshooting
 
 | Symptom | Check | Fix |
@@ -2848,6 +3112,8 @@ An empty answer means the hive has not beaten for 45 seconds.
 | A spawn failed with `the hive launch order ended before its acknowledgement` | `agentihooks hive list` for the order's hive | The order's receipt holds no acknowledgement, so the hive never answered it. Check that the hive beats and its `agentihooks-hive` service runs. |
 | A hive worker whose pane closed stays `suspect` and holds its seat | The hive's report, as in [A hive worker whose pane is gone](#a-hive-worker-whose-pane-is-gone) | `pane_ids` `null` or missing: herdr refused the listing, or the hive daemon predates pull request #5387; fix herdr on the hive or upgrade it. `observed_at` older than the launch: the hive's snapshot is stale; check that it beats. A fresh heartbeat from the worker keeps the claim until it ages past ten minutes. |
 | The tick printed `retired <agent>: its hive pane is gone` for a worker that was running | The report's `process_namespace` and `started_at` against the worker's launch | The hive pod restarted after the launch, which ends every process it ran. The task reopens for a successor. |
+| After a hive pod restart, `hive list` still shows agents with fresh heartbeats whose processes are gone, and `hive drain` waits on them | Each running join report's `member` and `epoch` against the hive's own, with the commands in [Join reports after a hive restart](#join-reports-after-a-hive-restart) | No `member` or `epoch`: the report predates pull request #11279 and ends when its agent record ends. A `member` naming another pod: the pod was replaced, not restarted, so the report ends only when its agent record ends. The same member with an earlier epoch: the hive daemon runs an older release, so upgrade the hive; or the daemon cannot read its own epoch, so check that the two `/proc` files the epoch comes from are readable in the pod. The same member and epoch: the agent should still run, so look for its process in the pod. |
+| `swarm status` shows `exit=agent ended with its member's restart` for an agent | The hive pod's restart time against the agent's launch | Expected: the agent's process ended with the restart, so `hive list` and the drain no longer count it. The agent record, its claim and its inbox items stay until the controller tick retires the agent, as in [A hive worker whose pane is gone](#a-hive-worker-whose-pane-is-gone). |
 
 ## Hive placement for one swarm on a local machine
 
@@ -3073,10 +3339,12 @@ The `agentihooks-swarm` chart runs worker pods from the hive worker image. Each 
 When the pod stops, for an image update, a rollout or a node drain, its preStop runs `agentihooks hive drain --wait
 <workers.drainSeconds>` (default 3600): the hive sets `draining=yes`, so placement sends it no new agent, sends
 each agent it hosts one inbox order to hand off, so the agent's successor starts on another hive, and waits until no
-agent it hosts is running. The drain writes its result to the pod log. The grace period is `workers.drainSeconds` plus
-30 seconds, so a Recreate rollout starts the new pod as soon as the old hive's agents hand off, or when the wait runs
-out. With `workers.rollout.enabled` the drain is bounded by `workers.rollout.drainSeconds` and the hives roll one at a
-time; see [Release roll one hive at a time](#release-roll-one-hive-at-a-time).
+agent it hosts is running. An agent counts as running while its join report has not ended; see
+[Join reports after a hive restart](#join-reports-after-a-hive-restart). The drain writes its result to the pod log.
+The grace period is `workers.drainSeconds` plus 30 seconds, so a Recreate rollout starts the new pod as soon as the
+old hive's agents hand off, or when the wait runs out. With `workers.rollout.enabled` the drain is bounded by
+`workers.rollout.drainSeconds` and the hives roll one at a time; see
+[Release roll one hive at a time](#release-roll-one-hive-at-a-time).
 
 The bundle origin and the token come from the hive settings record through `workers.envFromSecrets`. Write the
 whole record from the workstation with one command:
