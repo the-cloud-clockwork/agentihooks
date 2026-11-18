@@ -72,6 +72,10 @@ EXCLUDED = {
 }
 if (_WORKFLOWS / "access-audit.yml").exists():
     EXCLUDED["access-audit.yml"] = "dev push, weekly and manual, one short read only job, no pull request trigger"
+SERIAL = {
+    "swarm-node-image.yml:hive": "every release's hive job queues behind the last one, so a newer published hive "
+    "image always decides the release tag and no waiting hive job is replaced",
+}
 CALLERS = ("test.yml", "proofs.yml")
 REQUIRED = ("pull_request", "merge_group", "pull_request_target")
 REFS = ("refs/heads/dev", "refs/heads/main", "refs/heads/diffcheck/plant", "refs/heads/task-branch")
@@ -197,8 +201,9 @@ def test_every_lane_user_names_the_same_three_lanes():
             assert LANE in block["group"], where
 
 
-def test_a_run_on_a_lane_queues_and_is_never_cancelled():
+def test_a_run_on_a_lane_queues_and_is_never_cancelled() -> None:
     seen = set()
+    assert set(SERIAL) <= {where for where, _ in _blocks()}
     for where, block in _blocks():
         for github in _contexts(where):
             resolved = _resolve(block, **github)
@@ -206,6 +211,8 @@ def test_a_run_on_a_lane_queues_and_is_never_cancelled():
                 seen.add(where)
                 assert resolved["queue"] == "max", (where, github)
                 assert not resolved["cancel-in-progress"], (where, github)
+            elif where in SERIAL:
+                assert resolved["queue"] == "max" and not resolved["cancel-in-progress"], (where, github)
             else:
                 dev_push = (github["event_name"], github["ref"]) == ("push", "refs/heads/dev")
                 assert resolved["queue"] in (None, "single") or dev_push, (where, github)

@@ -5516,6 +5516,18 @@
       ]
     },
     {
+      "id": "hive-worker-release-tag-moves-on-every-release",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-worker-release-tag-stuck",
+      "behaviour": "Each release's hive job moves the hive worker release tag onto its own image unless a newer release has already published its hive version image, so a newer release that is only tagged never holds the tag on an older release; every release's hive job runs one at a time in one queued concurrency group, so an older release finishing last cannot move the tag back.",
+      "seam": "release-hive.sh release tag move and the Swarm worker image hive job concurrency group",
+      "tests": [
+        "tests/deployment/test_worker_hive_image.py::test_a_release_moves_the_release_tag_while_newer_releases_have_no_hive_image",
+        "tests/deployment/test_worker_hive_image.py::test_a_newer_release_at_move_time_keeps_the_release_tag_and_still_tags_the_version",
+        "tests/deployment/test_worker_hive_image.py::test_a_release_builds_the_hive_worker_on_its_released_worker_and_moves_release_only_when_newest"
+      ]
+    },
+    {
       "id": "hive-retire-absence",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1772",

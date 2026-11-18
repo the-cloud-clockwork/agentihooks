@@ -508,19 +508,21 @@ def test_the_kind_job_keeps_the_runner_kind_and_downloads_only_without_one(tmp_p
     assert commands[-1] == "kind version"
 
 
-def test_a_release_builds_the_hive_worker_on_its_released_worker_and_moves_release_only_when_newest():
+@pytest.mark.feature("hive-worker-release-tag-moves-on-every-release")
+def test_a_release_builds_the_hive_worker_on_its_released_worker_and_moves_release_only_when_newest() -> None:
     jobs = yaml.safe_load((ROOT / ".github/workflows/swarm-node-image.yml").read_text())["jobs"]
     hive = jobs["hive"]
     assert hive["if"] == "github.event_name == 'release'"
     assert hive["needs"] == "image"
-    assert jobs["image"]["outputs"]["latest"] == "${{ steps.main.outputs.latest }}"
+    assert hive["concurrency"] == {"group": "hive-worker-release", "queue": "max", "cancel-in-progress": False}
+    assert "latest" not in jobs["image"].get("outputs", {})
     assert hive["env"]["IMAGE"] == "ghcr.io/the-cloud-clockwork/agentihooks-hive-worker"
     steps = {step.get("name", step.get("uses")): step for step in hive["steps"]}
     names = list(steps)
     assert names.index("docker/login-action@v3") < names.index("Publish the hive worker once per release version")
     publish = steps["Publish the hive worker once per release version"]
-    assert publish["env"]["LATEST"] == "${{ needs.image.outputs.latest }}"
-    assert publish["run"] == 'bash deploy/worker/release-hive.sh "$IMAGE" "$RELEASE" "$LATEST" "$GITHUB_SHA"\n'
+    assert "env" not in publish
+    assert publish["run"] == 'bash deploy/worker/release-hive.sh "$IMAGE" "$RELEASE" "$GITHUB_SHA"\n'
 
 
 def release_hive(
@@ -528,7 +530,6 @@ def release_hive(
     *,
     version: str,
     candidate: str = "not found",
-    latest: str = "true",
     newest: str = "v2.1.7",
     newer: str = "not found",
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
@@ -565,7 +566,7 @@ def release_hive(
         "FAKE_NEWER": newer,
     }
     result = subprocess.run(
-        ["bash", str(ROOT / "deploy/worker/release-hive.sh"), "registry/hive", "v2.1.7", latest, "abc123"],
+        ["bash", str(ROOT / "deploy/worker/release-hive.sh"), "registry/hive", "v2.1.7", "abc123"],
         env=env,
         capture_output=True,
         text=True,
@@ -593,8 +594,10 @@ def test_a_rerun_after_a_partial_hive_release_retags_the_built_digest_without_bu
 
 
 @pytest.mark.parametrize("latest", ["true", "false"])
-def test_an_unpublished_hive_release_builds_proves_and_pushes_release_before_its_version(tmp_path, latest):
-    result, commands = release_hive(tmp_path, version="not found", latest=latest)
+def test_an_unpublished_hive_release_builds_proves_and_pushes_release_before_its_version(
+    tmp_path: Path, latest: str
+) -> None:
+    result, commands = release_hive(tmp_path, version="not found", newest="v2.1.7" if latest == "true" else "v2.1.8")
     assert result.returncode == 0, result.stderr
     assert commands[:2] == [
         "docker buildx imagetools inspect registry/hive:2.1.7",
@@ -607,14 +610,16 @@ def test_an_unpublished_hive_release_builds_proves_and_pushes_release_before_its
     assert "--build-arg AGENTIHOOKS_VERSION=2.1.7" in build
     assert build.endswith("--tag registry/hive:abc123 .")
     assert proof.startswith("docker run --rm ") and "agentihooks init --profile engineer" in proof
-    release = ["docker buildx imagetools create --tag registry/hive:release registry/hive:abc123"]
+    newer = [] if latest == "true" else ["docker buildx imagetools inspect registry/hive:2.1.8"]
     assert commands[4:] == [
         "docker push registry/hive:abc123",
-        *(release if latest == "true" else []),
+        *newer,
+        "docker buildx imagetools create --tag registry/hive:release registry/hive:abc123",
         "docker buildx imagetools create --tag registry/hive:2.1.7 registry/hive:abc123",
     ]
 
 
+@pytest.mark.feature("hive-worker-release-tag-moves-on-every-release")
 @pytest.mark.parametrize("newest", ["v2.1.8", "v2.1.10", "v3.0.0"])
 @pytest.mark.parametrize("candidate", ["not found", "published"])
 def test_a_newer_release_at_move_time_keeps_the_release_tag_and_still_tags_the_version(
@@ -625,11 +630,15 @@ def test_a_newer_release_at_move_time_keeps_the_release_tag_and_still_tags_the_v
     )
     assert result.returncode == 0, result.stderr
     assert all(":release " not in command for command in commands)
-    assert commands[-1] == "docker buildx imagetools create --tag registry/hive:2.1.7 registry/hive:abc123"
-    assert f"{newest}, not v2.1.7; leaving the release tag where it is" in result.stdout
+    assert commands[-2:] == [
+        f"docker buildx imagetools inspect registry/hive:{newest.removeprefix('v')}",
+        "docker buildx imagetools create --tag registry/hive:2.1.7 registry/hive:abc123",
+    ]
+    assert f"the newest published release is {newest}, not v2.1.7; leaving the release tag where it is" in result.stdout
     assert (tmp_path / "git").read_text().splitlines() == ["git ls-remote --tags --refs origin"]
 
 
+@pytest.mark.feature("hive-worker-release-tag-moves-on-every-release")
 @pytest.mark.parametrize("newest", ["v2.1.8", "v2.1.10", "v3.0.0"])
 def test_a_release_moves_the_release_tag_while_newer_releases_have_no_hive_image(tmp_path: Path, newest: str) -> None:
     result, commands = release_hive(tmp_path, version="not found", candidate="published", newest=newest)
@@ -648,13 +657,6 @@ def test_a_registry_error_on_a_newer_release_image_fails_before_moving_any_tag(t
     assert result.returncode != 0
     assert "unauthorized" in result.stderr
     assert all("imagetools create" not in command for command in commands)
-
-
-def test_a_release_the_image_job_did_not_name_latest_reads_no_tags(tmp_path: Path) -> None:
-    result, commands = release_hive(tmp_path, version="not found", candidate="published", latest="false")
-    assert result.returncode == 0, result.stderr
-    assert not (tmp_path / "git").exists()
-    assert commands[-1] == "docker buildx imagetools create --tag registry/hive:2.1.7 registry/hive:abc123"
 
 
 def test_a_failed_newest_release_read_fails_before_moving_any_tag(tmp_path: Path) -> None:
