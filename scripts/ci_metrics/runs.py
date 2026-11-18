@@ -79,14 +79,14 @@ def merged_pulls(repo: str, since: datetime, until: datetime) -> list[dict[str, 
 
 def branch_runs(repo: str, branch: str) -> list[dict[str, Any]]:
     """Every workflow run on one branch."""
-    name = urllib.parse.quote(branch, safe="")
+    name = urllib.parse.quote(branch)
     return rows(f"repos/{repo}/actions/runs?branch={name}&per_page=100", "workflow_runs")
 
 
 def pending(url: str, until: datetime) -> dict[str, float]:
     """Average pending ephemeral runners per ARC runner pool over the hour before `until`."""
     query = urllib.parse.urlencode({"query": PENDING, "time": until.timestamp()})
-    with urllib.request.urlopen(f"{url.rstrip('/')}/api/v1/query?{query}", timeout=TIMEOUT_S) as reply:
+    with urllib.request.urlopen(f"{url}/api/v1/query?{query}", timeout=TIMEOUT_S) as reply:
         found = json.load(reply)
     return {item["metric"]["name"]: float(item["value"][1]) for item in found["data"]["result"]}
 

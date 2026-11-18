@@ -27,7 +27,7 @@ def ship(
 ) -> int:
     """Ship every row through a fresh outbox and return how many reached the sink."""
     with tempfile.TemporaryDirectory() as folder:
-        box = metrics_outbox.Outbox(Path(folder) / "outbox.sqlite", sink)
+        box = metrics_outbox.Outbox(Path(folder) / metrics_outbox.spool_path().name, sink)
         try:
             for table, found in batches.items():
                 box.append(table, found)  # pyright: ignore[reportUnknownMemberType]
@@ -45,11 +45,11 @@ def end_of_window(until: str | None, lag_hours: int, now: datetime) -> datetime:
 
 def main(argv: list[str] | None = None) -> int:
     """Read one window, compute its rows, ship them and print the headline numbers."""
-    parser = argparse.ArgumentParser(description="Measure one hour of CI runner cost and lead time")
+    parser = argparse.ArgumentParser()
     parser.add_argument("--repo", required=True)
-    parser.add_argument("--prometheus", required=True, help="Prometheus base URL for the pending runner average")
+    parser.add_argument("--prometheus", required=True)
     parser.add_argument("--lag-hours", type=int, default=LAG_HOURS)
-    parser.add_argument("--until", help="end of the hour to measure, UTC, as 2026-11-04T15:00:00Z")
+    parser.add_argument("--until")
     args = parser.parse_args(argv)
     sink = metrics_outbox.settings(os.environ)  # pyright: ignore[reportUnknownMemberType]
     if sink is None:
@@ -63,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
     built = sum(len(found) for found in batches.values())
     shipped = ship(sink, batches, round(time.time() * 1000))
     print(json.dumps({"since": since.isoformat(), "until": until.isoformat(), "rows": built, "shipped": shipped}))
-    print(json.dumps(report.summary(tiers, len(pull.merged), leads, pending), indent=1))
+    print(json.dumps(report.summary(tiers, len(pull.merged), leads, pending)))
     if shipped != built:
         raise SystemExit(f"ci metrics failed: shipped {shipped} of {built} rows to the metrics sink")
     return 0

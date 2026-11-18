@@ -177,6 +177,12 @@ def test_percentiles_interpolate_between_the_closest_ranks() -> None:
     assert report.percentile([], 0.5) is None
 
 
+def test_lead_time_percentiles_print_to_a_tenth_of_a_minute() -> None:
+    merged = datetime(2026, 11, 4, 11, 30, 15, tzinfo=UTC)
+    found = report.summary({}, 0, [report.Lead(7, "feature", START.replace(hour=10), merged, heads=1, runs=1)], {})
+    assert found["lead_time"] == {"pull_requests": 1, "p50_minutes": 90.2, "p90_minutes": 90.2}
+
+
 def test_the_summary_reports_cost_shares_lead_time_heads_and_pending_runners() -> None:
     runs, jobs = window()
     tiers = report.by_tier(report.tallies(runs, jobs))

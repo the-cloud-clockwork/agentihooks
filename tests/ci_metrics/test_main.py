@@ -1,5 +1,6 @@
 import json
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -111,7 +112,8 @@ def test_a_run_ships_its_rows_to_both_tables_and_prints_the_headline(
         "rows": 4,
         "shipped": 4,
     }
-    headline = json.loads("\n".join(printed[1:]))
+    assert len(printed) == 2
+    headline = json.loads(printed[1])
     assert (headline["merged"], headline["per_merged"], headline["lead_time"]["p50_minutes"]) == (1, 3.0, 30.0)
     assert headline["pending_runners"] == {"anton-oss": 2.5}
 
@@ -147,3 +149,59 @@ def test_the_end_of_the_window_is_the_given_time_or_the_lagged_hour() -> None:
 
 def test_lead_times_read_the_whole_branch_history() -> None:
     assert entry.OPENED == datetime.min.replace(tzinfo=UTC)
+
+
+@pytest.mark.parametrize("missing", ["--repo", "--prometheus"])
+def test_a_run_needs_the_repository_and_the_prometheus_url(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], missing: str
+) -> None:
+    wired(monkeypatch, True)
+    given = {"--repo": REPO, "--prometheus": PROMETHEUS}
+    argv = [part for flag, value in given.items() if flag != missing for part in (flag, value)]
+    with pytest.raises(SystemExit) as refused:
+        entry.main(argv)
+    assert refused.value.code == 2
+    assert f"the following arguments are required: {missing}" in capsys.readouterr().err
+
+
+def test_the_lag_is_read_as_whole_hours(monkeypatch: pytest.MonkeyPatch) -> None:
+    lags: list[object] = []
+    wired(monkeypatch, True)
+
+    def end(until: str | None, lag_hours: int, now: datetime) -> datetime:
+        lags.append(lag_hours)
+        return UNTIL
+
+    monkeypatch.setattr(entry, "end_of_window", end)
+    assert entry.main(["--repo", REPO, "--prometheus", PROMETHEUS, "--lag-hours", "3"]) == 0
+    assert lags == [3]
+
+
+def test_the_outbox_is_flushed_at_the_current_time_in_milliseconds(monkeypatch: pytest.MonkeyPatch) -> None:
+    flushed: list[int] = []
+    wired(monkeypatch, True)
+
+    def ship(
+        settings: metrics_outbox.Settings, batches: dict[metrics_outbox.Table, list[dict[str, Any]]], now_ms: int
+    ) -> int:
+        flushed.append(now_ms)
+        return sum(len(found) for found in batches.values())
+
+    monkeypatch.setattr(entry, "ship", ship)
+    monkeypatch.setattr(entry.time, "time", lambda: 1794000000.2504)
+    assert entry.main(ARGS) == 0
+    assert flushed == [1794000000250]
+
+
+def test_the_temporary_outbox_takes_the_spool_file_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    paths: list[str] = []
+    original = metrics_outbox.Outbox
+
+    def outbox(path: Path, sink: metrics_outbox.Settings) -> metrics_outbox.Outbox:
+        paths.append(Path(path).name)
+        return original(path, sink)
+
+    wired(monkeypatch, True)
+    monkeypatch.setattr(metrics_outbox, "Outbox", outbox)
+    assert entry.main(ARGS) == 0
+    assert paths == [metrics_outbox.spool_path().name]

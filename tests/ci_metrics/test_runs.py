@@ -98,7 +98,7 @@ def test_branch_runs_list_every_run_on_the_quoted_branch(monkeypatch: pytest.Mon
     calls: list[tuple[str, str]] = []
     monkeypatch.setattr(runs, "rows", lambda path, key: calls.append((path, key)) or [{"id": 1}])
     assert runs.branch_runs(REPO, "a/b c") == [{"id": 1}]
-    assert calls == [(f"repos/{REPO}/actions/runs?branch=a%2Fb%20c&per_page=100", "workflow_runs")]
+    assert calls == [(f"repos/{REPO}/actions/runs?branch=a/b%20c&per_page=100", "workflow_runs")]
 
 
 def test_pending_reads_the_hourly_average_per_runner_pool_from_prometheus(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -119,7 +119,7 @@ def test_pending_reads_the_hourly_average_per_runner_pool_from_prometheus(monkey
         return io.BytesIO(json.dumps(answer).encode())
 
     monkeypatch.setattr(runs.urllib.request, "urlopen", fake)
-    assert runs.pending("http://prometheus:9090/", UNTIL) == {"anton-oss": 8.94, "anton-oss-batch": 0.0}
+    assert runs.pending("http://prometheus:9090", UNTIL) == {"anton-oss": 8.94, "anton-oss-batch": 0.0}
     query = runs.urllib.parse.urlencode({"query": runs.PENDING, "time": 1793800800.0})
     assert calls == [(f"http://prometheus:9090/api/v1/query?{query}", 60)]
     assert runs.PENDING == "avg_over_time(sum by (name) (gha_controller_pending_ephemeral_runners)[1h:1m])"
@@ -129,16 +129,26 @@ def test_read_budgets_the_job_reads_before_it_reads_them(monkeypatch: pytest.Mon
     order: list[Any] = []
     listed = [{"id": 1}, {"id": 2}]
     merged = [{"number": 7, "branch": "feature"}]
-    monkeypatch.setattr(ci_minutes, "read_runs", lambda repo, since, until: order.append(("runs", repo)) or listed)
-    monkeypatch.setattr(runs, "merged_pulls", lambda repo, since, until: order.append(("merged", since)) or merged)
+    monkeypatch.setattr(
+        ci_minutes, "read_runs", lambda repo, since, until: order.append(("runs", repo, since, until)) or listed
+    )
+    monkeypatch.setattr(
+        runs, "merged_pulls", lambda repo, since, until: order.append(("merged", repo, since, until)) or merged
+    )
     monkeypatch.setattr(ci_minutes, "within_budget", lambda reads: order.append(("budget", reads)))
 
     def jobs(repo: str, found: list[dict[str, Any]], cache: dict[str, Any]) -> list[dict[str, Any]]:
-        order.append(("jobs", found, cache))
+        order.append(("jobs", repo, found, cache))
         return [{"id": 10, "run_id": 1}]
 
     monkeypatch.setattr(ci_minutes, "read_jobs", jobs)
-    monkeypatch.setattr(runs, "branch_runs", lambda repo, branch: order.append(("branch", branch)) or [{"id": 3}])
+    monkeypatch.setattr(runs, "branch_runs", lambda repo, branch: order.append(("branch", repo, branch)) or [{"id": 3}])
     found = runs.read(REPO, SINCE, UNTIL)
     assert found == runs.Pull(listed, [{"id": 10, "run_id": 1}], merged, [{"id": 3}])
-    assert order == [("runs", REPO), ("merged", SINCE), ("budget", 3), ("jobs", listed, {}), ("branch", "feature")]
+    assert order == [
+        ("runs", REPO, SINCE, UNTIL),
+        ("merged", REPO, SINCE, UNTIL),
+        ("budget", 3),
+        ("jobs", REPO, listed, {}),
+        ("branch", REPO, "feature"),
+    ]
