@@ -868,6 +868,17 @@ class MirrorExpander:
             files[path] = meta.split()[2]
         return files
 
+    def _workflows(self, mirror: Mirror, sha: str) -> dict[str, Any]:
+        """Return each workflow file directly in a commit's workflow folder, parsed and keyed by file name the way
+        scripts.ci_wiring.load reads a tree, for the reusable workflows a static job calls."""
+        folder = WORKFLOW.parent.as_posix()
+        files = {
+            PurePosixPath(path).name: blob
+            for path, blob in self._files(mirror, sha).items()
+            if PurePosixPath(path).parent.as_posix() == folder and path.endswith((".yml", ".yaml"))
+        }
+        return {name: yaml.safe_load(text) or {} for name, text in self._contents(mirror, files).items()}
+
     def _on_dev(self, repo: str, path: str) -> str:
         """Return one file of the repository's dev branch head."""
         mirror = self._mirror(repo)
@@ -898,7 +909,7 @@ class MirrorExpander:
         registry = json.loads(self._git(mirror, "show", f"{grader}:{REGISTRY.as_posix()}"))
         toolchain = replace(self.toolchain, lockfile=head.get("uv.lock", ""), pyproject=head.get("pyproject.toml", ""))
         gates: dict[str, list[Unit]] = {}
-        for gate in discover(workflow, registry):
+        for gate in discover(workflow, registry, self._workflows(mirror, grader)):
             inputs = StaticInputs(
                 gate.name, _within(head, gate.paths), _within(base, gate.base_paths), grader, toolchain
             )
