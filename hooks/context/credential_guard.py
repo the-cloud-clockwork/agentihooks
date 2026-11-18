@@ -523,10 +523,17 @@ def describe_may_show_secret(words: list[str]) -> bool:
     return any(names_secret(word) for word in words) or hidden_type(describe_operands(words))
 
 
+def joined_continuations(low: str) -> str:
+    """The lowercased segment with each backslash newline removed, as the shell joins a continued line."""
+    return low.replace("\\\n", "")
+
+
 def describes_secrets(low: str) -> bool:
     """True when any kubectl describe in the lowercased segment, line continuations joined, may print a Secret."""
-    joined = low.replace("\\\n", "")
-    return any(describe_may_show_secret(describe_words(found.group(1))) for found in KUBECTL_DESCRIBE.finditer(joined))
+    return any(
+        describe_may_show_secret(describe_words(found.group(1)))
+        for found in KUBECTL_DESCRIBE.finditer(joined_continuations(low))
+    )
 
 
 def renderer_verdict(command: str) -> str | None:
@@ -547,7 +554,7 @@ def renderer_verdict(command: str) -> str | None:
             )
             + "\nSelect fields instead:  docker inspect --format '{{.State.Status}}' <container>"
         )
-    if re.search(r"\bkubectl\b.*\bget\s+secret", low) and re.search(r"-o\s*(yaml|json)", low):
+    if gets_secret_values(low):
         return (
             block(
                 "printing Secret data (kubectl get secret -o yaml/json)",
@@ -570,6 +577,127 @@ def renderer_verdict(command: str) -> str | None:
             + '\nEvaluate it instead:  eval "$(agentihooks access env)", then test each variable by name.'
         )
     return None
+
+
+KUBECTL_WORDS = re.compile(r"\bkubectl\b([^|<>;&]*)")
+SHELL_GROUPING = re.compile(r"[()`]")
+VALUE_FLAGS = {"--output": "output", "--template": "template", "--raw": "raw"}
+SHORT_OUTPUT = re.compile(r"-[arwh]*o=?(.*)")
+RAW_SECRET = re.compile(r"/secrets(?:[/?]|$)|\$")
+GET_VALUE_FLAGS = {
+    "-n",
+    "--namespace",
+    "-l",
+    "--selector",
+    "-f",
+    "--filename",
+    "-k",
+    "--kustomize",
+    "-o",
+    "--output",
+    "--template",
+    "--raw",
+    "--sort-by",
+    "--field-selector",
+    "--label-columns",
+    "--chunk-size",
+    "--subresource",
+    "--context",
+    "--cluster",
+    "--user",
+    "--kubeconfig",
+    "-s",
+    "--server",
+    "--token",
+    "--as",
+    "--as-group",
+    "--request-timeout",
+    "-v",
+    "--cache-dir",
+    "--client-key",
+    "--client-certificate",
+    "--certificate-authority",
+    "--tls-server-name",
+    "--username",
+    "--password",
+    "--as-uid",
+}
+VALUELESS_OUTPUTS = {"", "name", "wide"}
+GO_TEMPLATE_OUTPUTS = {"go-template", "template"}
+KEY_LISTING = re.compile(
+    r"\{\{-?\s*range\s+\$(?P<key>\w+)\s*,\s*\$(?P<value>\w+)\s*:=\s*\.data\s*-?\}\}"
+    r"(?:[^{}]|\{\{-?\s*(?:\$(?P=key)|\"(?:[^\"\\{}$]|\\.)*\")\s*-?\}\})*"
+    r"\{\{-?\s*end\s*-?\}\}"
+)
+
+
+def flag_values(words: list[str]) -> dict[str, list[str]]:
+    """Every output, template and raw flag value of kubectl words: a separate word, after = or attached to -o."""
+    values: dict[str, list[str]] = {"output": [], "template": [], "raw": []}
+    for word, following in zip(words, [*words[1:], ""]):
+        flag, equals, attached = word.partition("=")
+        short = SHORT_OUTPUT.fullmatch(word)
+        if flag in VALUE_FLAGS:
+            values[VALUE_FLAGS[flag]].append(attached if equals else following)
+        elif short:
+            values["output"].append(short.group(1) or following)
+    return values
+
+
+def lists_keys_only(template: str) -> bool:
+    """True when a go template ranges over .data with a key and a value variable and prints only the key."""
+    found = KEY_LISTING.fullmatch(template)
+    return found is not None and found["key"] != found["value"]
+
+
+def prints_field_values(outputs: list[str], templates: list[str]) -> bool:
+    """True when an output or template value can print a field: all but table, name, wide and the key listing."""
+    if not outputs and any(templates):
+        outputs = ["go-template"]
+    shown = [output.partition("=") for output in outputs if output not in VALUELESS_OUTPUTS]
+    bodies = [inline for _, _, inline in shown if inline] + templates
+    return bool(shown) and (
+        any(name not in GO_TEMPLATE_OUTPUTS for name, _, _ in shown)
+        or not bodies
+        or not all(lists_keys_only(body) for body in bodies)
+    )
+
+
+def get_operands(words: list[str]) -> list[str]:
+    """Positional words of a kubectl get; only a flag known to take a value, written without =, consumes the next."""
+    operands: list[str] = []
+    remaining = iter(words)
+    for word in remaining:
+        if not word.startswith("-"):
+            operands.append(word)
+        elif word in GET_VALUE_FLAGS:
+            next(remaining, None)
+    return operands
+
+
+def leaves_type_to_shell(operands: list[str]) -> bool:
+    """True when a kubectl get names no operand, or leaves the type part of any operand to the shell."""
+    return not operands or any(UNSHOWN_TYPE.search(word.split("/")[0]) for word in operands)
+
+
+def prints_secret_values(words: list[str]) -> bool:
+    """True when kubectl words get a Secret, or a type left to the shell, with an output that can print a data value."""
+    if "get" not in words:
+        return False
+    values = flag_values(words)
+    if any(RAW_SECRET.search(raw) for raw in values["raw"]):
+        return True
+    rest = words[words.index("get") + 1 :]
+    named = any(names_secret(word) for word in rest) or leaves_type_to_shell(get_operands(rest))
+    return named and prints_field_values(values["output"], values["template"])
+
+
+def gets_secret_values(low: str) -> bool:
+    """True when any kubectl get in the lowercased segment, continued lines joined, may print a Secret value."""
+    return any(
+        prints_secret_values(tokens_of(SHELL_GROUPING.sub(" ", found.group(1))))
+        for found in KUBECTL_WORDS.finditer(joined_continuations(low))
+    )
 
 
 def prints_gh_token(toks):
