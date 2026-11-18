@@ -151,8 +151,8 @@ The command runs these steps in order and stops at the first refusal:
 4. Mints the root member credential, a user JWT named `hive-root` signed by the swarm account. It grants only the
    subjects of the swarms the record lists for `root`; see
    [What a scoped member is granted](swarm-bus-scope.md#what-a-scoped-member-is-granted). The command holds the
-   credential to a 65,536 byte NATS control line less 4,096 bytes kept for the rest of the connect message, so a
-   credential over 61,440 bytes is refused before any file is written.
+   credential to a 65,536 byte NATS control line less 4,096 bytes of headroom, so a credential over 61,440 bytes is
+   refused before any file is written.
 5. Writes the credential to `~/.agentihooks/root-bus/bus.creds` and the settings to
    `~/.agentihooks/root-bus/bus.env`, both mode 0600, in a folder created with mode 0700. A rerun overwrites both.
 6. Connects to the hub's NATS once with the written settings, then closes the connection.
@@ -209,8 +209,8 @@ journalctl --user -u agentihooks-hive --since "5 minutes ago" | grep 'hive spoke
 ```
 
 The spokes also beat the root hive's presence entry, key `root` in each `events` swarm's `hive-presence` bucket.
-Each spoke poll renews it when it starts and every 15 seconds while it runs, and an idle spoke polls again after 5
-seconds. The entry holds `heartbeat_ms` and `expires_ms` and lapses 45 seconds after the last beat. With the
+Each spoke poll renews it when it starts and every 15 seconds while it runs. When no spoke takes work in a pass, the
+hive waits 5 seconds before the next pass. The entry holds `heartbeat_ms` and `expires_ms` and lapses 45 seconds after the last beat. With the
 root credential its state subject can be read directly; the state stream name follows
 [Subjects and streams per swarm](swarm-bus-scope.md#subjects-and-streams-per-swarm):
 
@@ -261,14 +261,14 @@ revoked root
 ```
 
 The first line reads `the hub signer record <path> lists no member swarms for root` when the record had no entry
-for `root`, and `AGENTIHOOKS_NATS_SIGNER names no hub signer record, so no member swarms entry to unlist` when the
-signer is not an OpenBao hub record.
+for `root`. A signer that is not an OpenBao hub record prints no unlist line.
 
 A refusal prints `hive revoke refused: <message>` and exits 1. `no OpenBao client to unlist root from <path>`
-means `OPENBAO_URL` or `OPENBAO_TOKEN` is unset, and nothing has changed yet.
-`NATS refused the account update (<description>)`, or a push that times out after 10 seconds, stops the command
-after `root` is unlisted and before the files are deleted. Run `agentihooks hive revoke root` again once NATS
-answers.
+means `OPENBAO_URL` or `OPENBAO_TOKEN` is unset, and nothing has changed yet. Step 2 records the revocation in
+Redis before it pushes the account, so a failed push leaves `root` unlisted, the revocation recorded and both files
+in place. The push fails with `hive revoke refused: NATS refused the account update (<description>)`, or with a
+`TimeoutError` traceback when NATS does not answer within 10 seconds. Run `agentihooks hive revoke root` again once
+NATS answers.
 
 The command does not restart the hive service. After the next restart the hive reads its bus settings from its
 other env files only; when they set none, it runs on the memory bus and its lane spokes refuse, as above. Run
