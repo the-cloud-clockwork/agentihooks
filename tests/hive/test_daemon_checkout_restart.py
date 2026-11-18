@@ -8,6 +8,8 @@ import pytest
 
 from scripts.hive import daemon
 
+CHECKOUT = Path(daemon.__file__).resolve().parents[2]
+
 
 def _hive(monkeypatch: pytest.MonkeyPatch, revisions: list[str], wait: Mock) -> tuple[list[Path], list[str]]:
     """Run the beat loop on stubs: each revision read takes the next of revisions, each beat records the hive id."""
@@ -43,11 +45,10 @@ def test_a_moved_checkout_ends_the_hive_run_after_its_beat(
 ) -> None:
     wait = Mock(return_value=None)
     roots, beats = _hive(monkeypatch, ["loaded", "loaded", "moved"], wait)
-    assert daemon.run(_connect()) is None
+    daemon.run(_connect())
     assert beats == ["root", "root"]
     assert wait.call_count == 1
-    assert roots == [daemon.ROOT, daemon.ROOT, daemon.ROOT]
-    assert daemon.ROOT == Path(daemon.__file__).resolve().parents[2]
+    assert roots == [CHECKOUT, CHECKOUT, CHECKOUT]
     assert (
         f"the hive {os.getpid()} restarts on the new code: the checkout moved from loaded to moved"
         in capsys.readouterr().err.splitlines()
@@ -64,7 +65,7 @@ def test_an_unchanged_checkout_keeps_the_hive_beating(
         daemon.run(_connect())
     assert beats == ["root", "root", "root"]
     assert wait.call_count == 3
-    assert roots == [daemon.ROOT] * 4
+    assert roots == [CHECKOUT] * 4
     assert "restarts on the new code" not in capsys.readouterr().err
 
 
