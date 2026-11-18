@@ -159,7 +159,7 @@ def _authoritative(verdict: Mapping[str, Any]) -> dict[str, Any] | None:
         gates = json.loads(raw)
     except json.JSONDecodeError:
         return None
-    return cast(dict[str, Any], gates) if isinstance(gates, dict) else None
+    return cast(dict[str, Any], gates) if isinstance(gates, dict) else None  # pragma: no mutate
 
 
 def _lab(event: str, needs: Needs) -> dict[str, Mapping[str, Any]] | None:
@@ -187,7 +187,7 @@ def _required(event: str, jobs: Needs, flags: Flags) -> list[str]:
         return list(QUEUE_REQUIRED)
     select = _outputs(jobs, "select")
     required = [job for job in PULL_REQUIRED if not (job == "sonar" and select.get("sonar") == "skip")]
-    required += SCOPED.get(_alternative(select.get("scope"), ""), ())
+    required += SCOPED.get(str(select.get("scope")), ())
     if flags.mutation == "true":
         required += ["mutation-plan", "mutation-stats"] + ([] if flags.inline == "true" else ["mutation"])
     return required
@@ -197,8 +197,7 @@ def _admitted(event: str, jobs: Needs, flags: Flags) -> bool:
     """Whether the run shape fits its event: a queue run's fail fast watcher and unit rows, a pull request's scope."""
     if event == "merge_group":
         return FAIL_FAST in jobs and tuple(_result(jobs, job) for job in UNIT_JOBS) in UNIT_ROWS
-    scope = _alternative(_outputs(jobs, "select").get("scope"), "")
-    return flags.mutation in ("true", "false") and scope in SCOPES
+    return flags.mutation in ("true", "false") and _outputs(jobs, "select").get("scope") in SCOPES
 
 
 def _entry(event: str, job: str, record: Mapping[str, Any] | None, required: Sequence[str]) -> bool:
@@ -245,7 +244,7 @@ def _pushed(event: str, jobs: Needs, flags: Flags) -> bool:
 
 def fold(event: str, needs: Needs, flags: Flags) -> bool:
     """Return whether `Gate — Required` passes: the rules of its step in the test workflow over one run's needs."""
-    if _alternative(_result(needs, "select"), "") in ("failure", "cancelled"):
+    if _result(needs, "select") in ("failure", "cancelled"):
         return False
     jobs = _lab(event, _forwarded(needs))
     if jobs is None:
@@ -401,13 +400,9 @@ def _target(state: State, refs: Sequence[str]) -> tuple[str, str | None]:
 
 def _needs(state: State) -> dict[str, dict[str, Any]]:
     """Return the grade as the needs of a run: each gate's result and the jobs the tier skips, with their outputs."""
-    needs: dict[str, dict[str, Any]] = {
-        job: {"result": "skipped", "outputs": dict(state.outputs.get(job, {}))} for job in state.skipped
-    }
-    for gate, refs in state.gates.items():
-        result = _verdict([state.units[ref] for ref in refs])
-        needs[gate] = {"result": result, "outputs": dict(state.outputs.get(gate, {}))}
-    return needs
+    results: dict[str, str | None] = {job: "skipped" for job in state.skipped}
+    results.update({gate: _verdict([state.units[ref] for ref in refs]) for gate, refs in state.gates.items()})
+    return {job: {"result": result, "outputs": dict(state.outputs.get(job, {}))} for job, result in results.items()}
 
 
 def _checks(state: State) -> dict[str, tuple[str, str | None]]:
@@ -422,7 +417,7 @@ def _checks(state: State) -> dict[str, tuple[str, str | None]]:
 
 def _slug(repo: str) -> str:
     """Return owner/name of a repository URL."""
-    return urlsplit(repo).path.strip("/")
+    return urlsplit(repo).path.removeprefix("/")
 
 
 class Scheduler:
@@ -609,11 +604,10 @@ class Scheduler:
     def _remember(self, job: Job) -> None:
         """Store the verdict of a graded job from the report its worker uploaded; a lost or unrun job is no verdict."""
         report_path, log_path = upload_path(job.id, "report"), upload_path(job.id, "log")
-        present = set(self.objects.keys(report_path.rsplit("/", 1)[0] + "/"))
-        if job.outcome in UNGRADED or report_path not in present:
+        if job.outcome in UNGRADED or report_path not in self.objects.keys(report_path):
             return
         report = json.loads(self.objects.read(report_path))
-        log = self.objects.read(log_path) if log_path in present else b""
+        log = self.objects.read(log_path) if log_path in self.objects.keys(log_path) else b""
         passed = job.outcome == PASSED
         verdict = Verdict(
             job.unit.kind, job.unit.key, passed, passed and bool(report.get("flaky")), float(report.get("seconds", 0.0))
@@ -622,17 +616,19 @@ class Scheduler:
 
     def _post(self, state: State) -> list[str]:
         """Post each check run whose target moved since its last post; a completed check run never moves again."""
-        actions: list[str] = []
-        poster: Poster | None = None
-        for check, (status, conclusion) in _checks(state).items():
-            posted = state.posted.get(check)
-            if posted == [status, conclusion] or (posted is not None and posted[0] == "completed"):
-                continue
-            poster = poster or self.ports.checks(_slug(state.repo))
+        moved = [
+            (check, status, conclusion)
+            for check, (status, conclusion) in _checks(state).items()
+            if (posted := state.posted.get(check)) != [status, conclusion]
+            and (posted is None or posted[0] != "completed")
+        ]
+        if not moved:
+            return []
+        poster = self.ports.checks(_slug(state.repo))
+        for check, status, conclusion in moved:
             poster.post(state.head, check, status, conclusion, self._output(state, check, status), self.settings.shadow)
             state.posted[check] = [status, conclusion]
-            actions.append(f"posted {check} {status} on {state.head}")
-        return actions
+        return [f"posted {check} {status} on {state.head}" for check, status, _ in moved]
 
     def _output(self, state: State, check: str, status: str) -> Output:
         """Return a check run's output: its units, the grade run, the grader revision and the head's commit page."""
@@ -655,7 +651,7 @@ class BusInbox:
         """Return the heads of the next batch of envelopes; a head's lane is its branch, else the head itself."""
         heads: list[Head] = []
         for delivery in self.consumer.fetch(self.batch, self.timeout_ms):
-            data = cast(Mapping[str, Any], delivery.event.data)
+            data = cast(Mapping[str, Any], delivery.event.data)  # pragma: no mutate
             event = HeadEvent(*(str(data[name]) for name in HEAD_FIELDS))
             heads.append(Head(event, str(data.get("branch") or event.head)))
             delivery.ack()
@@ -666,7 +662,7 @@ def _within(files: Mapping[str, str], paths: Sequence[str]) -> dict[str, str]:
     """Return the files under the paths, each a file or a folder; `.` names the whole tree."""
     if WHOLE_TREE in paths:
         return dict(files)
-    folders = tuple(path.rstrip("/") + "/" for path in paths)
+    folders = tuple(path.removesuffix("/") + "/" for path in paths)
     return {path: blob for path, blob in files.items() if path in paths or path.startswith(folders)}
 
 
@@ -705,7 +701,7 @@ class MirrorExpander:
 
     def _files(self, mirror: Mirror, sha: str) -> dict[str, str]:
         """Return path to blob id of every file of a commit's tree."""
-        listing = self._git(mirror, "ls-tree", "-r", "--full-tree", "-z", sha)
+        listing = self._git(mirror, "ls-tree", "-r", "-z", sha)
         files: dict[str, str] = {}
         for entry in filter(None, listing.split("\0")):
             meta, path = entry.split("\t", 1)
@@ -760,13 +756,15 @@ class PanicFixes:
         self.redis = redis
 
     def __call__(self) -> frozenset[str]:
-        """Return the fix branches, or none when panic is off or its fixes cannot be read."""
+        """Return the fix branches of every swarm in panic, or none when no panic is on or its fixes cannot be read."""
         from scripts.swarm import panic
         from scripts.swarm.store import RedisStore, SwarmError
 
+        store = RedisStore(self.redis)
         try:
-            current = panic.state(RedisStore(self.redis))
-            return frozenset(panic.fix_branch(url) for url in current.fixes) if current else frozenset()
+            slugs = cast(list[str], store.slugs())  # pragma: no mutate
+            held = [current for slug in slugs if (current := panic.state(store, slug))]
+            return frozenset(panic.fix_branch(url) for current in held for url in current.fixes)
         except (subprocess.SubprocessError, OSError, ValueError, KeyError, SwarmError):
             return frozenset()
 

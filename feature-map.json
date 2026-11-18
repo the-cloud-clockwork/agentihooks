@@ -5780,6 +5780,18 @@
       ]
     },
     {
+      "id": "type-gate-repeatable-counts",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-strict-type-gate-flake",
+      "behaviour": "The strict type gate checks its sorted sources in contiguous runs of at most a thousand files, one basedpyright process each, and refuses a measurement whose checker reached the memory line where basedpyright empties its type cache, so one commit counts the same type errors on every run.",
+      "seam": "scripts.type_gate.measure through its basedpyright subprocess runs and the peak resident memory of its child processes",
+      "tests": [
+        "tests/test_type_gate.py::test_measure_checks_at_most_a_thousand_sources_per_checker_process_and_sums_their_counts",
+        "tests/test_type_gate.py::test_a_checker_peak_at_the_line_where_basedpyright_empties_its_type_cache_is_refused",
+        "tests/test_type_gate.py::test_a_checker_peak_under_the_line_where_basedpyright_empties_its_type_cache_is_kept"
+      ]
+    },
+    {
       "id": "hive-master-refused-account-retry",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-scale-cpu",
