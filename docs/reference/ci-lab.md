@@ -2289,8 +2289,9 @@ ls -A "$probe"
 The `bwrap` command prints `Read-only file system` and exits 1, and `ls` prints nothing.
 
 The pull request tier proves the sandbox under real bubblewrap in the writer lock workflow's
-`lab-sandbox` job, which runs on every pull request that changes the sandbox, its two runners
-or their tests, and fails when any of those tests fails or skips. See
+`lab-sandbox` job. It runs on every pull request that changes `scripts/ci_lab/sandbox.py`,
+`scripts/ci_lab/run_static.py`, `scripts/ci_lab/run_tests.py`, one of their three test files or
+`.github/workflows/writer-lock.yml`, and fails when any of those tests fails or skips. See
 [Pull request job under real bubblewrap](#pull-request-job-under-real-bubblewrap).
 These tests prove the read only trees:
 
@@ -2308,8 +2309,8 @@ above carry no feature entry; the job that runs them unskipped is mapped as
 
 ### Pull request job under real bubblewrap
 
-The self hosted runner image installs no bubblewrap, so the four tests that need real bubblewrap skip in
-every unit shard of the Tests workflow. Each one first probes
+The four tests that need real bubblewrap skip in the unit shards of the Tests workflow, which run
+on self hosted runners where bubblewrap cannot isolate. Each one first probes
 `bwrap --dev-bind / / --unshare-net true` and skips when `bwrap` is missing or the probe fails.
 The `lab-sandbox` job of the `Writer lock` workflow (`.github/workflows/writer-lock.yml`) runs
 them on a GitHub hosted runner, where a skip turns the job red:
@@ -2340,8 +2341,10 @@ The job's condition:
 if: (github.event_name == 'pull_request' && needs.inputs.outputs.lab_sandbox == 'true') || github.workflow == 'Writer lock'
 ```
 
-Inside a called workflow `github.workflow` names the caller, `Tests`, so the second clause holds
-only when the `Writer lock` workflow itself is dispatched.
+GitHub gives a called workflow its caller's `github` context, so under the Tests workflow
+`github.workflow` is `Tests` and the second clause holds only when the `Writer lock` workflow
+itself is dispatched. A Tests run on a pull request that changes no input shows
+`writer-lock / lab-sandbox` as skipped.
 
 The `inputs` job's `Select lab sandbox inputs` step (id `lab-sandbox`) runs only on
 `pull_request`. It diffs the merge base of `origin/<base branch>` and the pull request head with
@@ -2362,22 +2365,22 @@ shows as deleted under its old name, and that selects it.
 
 #### What the job does
 
-The job runs on `ubuntu-latest` with a 10 minute timeout. It took 24 and 39 seconds in the
-delivery runs.
+The job runs on `ubuntu-latest` with a 10 minute timeout. It finished in under 40 seconds in the
+green delivery run.
 
 | Step | Does | Fails the job when |
 |---|---|---|
 | Checkout | Checks out `github.sha` without persisted credentials | |
 | Python and uv | Python 3.12, and uv `0.12.23` pinned by checksum with no cache | |
 | `Let bubblewrap create user and network namespaces` | Installs `bubblewrap` with apt only when `bwrap` is not on `PATH`, runs `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`, then probes `bwrap --dev-bind / / --unshare-net true` | The install, the sysctl or the probe exits non zero |
-| `Install dependencies` | `uv pip install --system` with `.github/test-requirements.lock` and `.github/test-excludes.txt`, through `.github/scripts/pypi-retry.sh`, which retries package index outages for up to 150 seconds | The install still fails after its retries |
+| `Install dependencies` | `uv pip install --system` with `.github/test-requirements.lock` and `.github/test-excludes.txt`, through `.github/scripts/pypi-retry.sh`, which retries a package index outage until 150 seconds of backoff are spent, not counting the attempts | The install still fails after its retries |
 | `Run the lab sandbox tests under real bubblewrap` | `python -m pytest` over `tests/ci_lab/test_sandbox.py`, `tests/ci_lab/test_run_static.py` and `tests/ci_lab/test_run_tests.py` with `-n 0 -v -rs --tb=short`, its output copied to `$RUNNER_TEMP/lab-sandbox.log` | A test fails (exit 1), no test is collected (exit 5), or the log contains `SKIPPED` (exit 1) |
 
 The apt install reads only the Ubuntu archive source list, `/etc/apt/sources.list.d/ubuntu.sources`,
 or `/etc/apt/sources.list` when that file is absent. It passes `Dir::Etc::sourceparts=-`, so no
 other source list on the image is read, and `Acquire::Retries=5`. A failed index refresh does not
-stop the step: it prints the warning below and installs from the indexes that loaded. The hosted
-image normally carries `bwrap` already, and none of the delivery runs needed the install.
+stop the step: it prints the warning below and installs from the indexes that loaded. In the green
+delivery run the hosted image already carried `bwrap`, so the install did not run.
 
 ```text
 ::warning::apt archive index refresh incomplete; installing bubblewrap from the indexes that loaded
@@ -2475,9 +2478,11 @@ git push origin diffcheck/<name>
 gh workflow run writer-lock.yml --ref diffcheck/<name>
 ```
 
-The job is red: `test_a_unit_cannot_restore_write_bits_or_write_into_a_read_only_tree` fails on
-both parameters because `chmod`, the rewrite and the new file land in both trees where `EROFS` was
-expected. Delete the branch after reading the run with `git push origin --delete diffcheck/<name>`.
+The job is red with 4 failed and 15 passed.
+`test_a_unit_cannot_restore_write_bits_or_write_into_a_read_only_tree` fails on both parameters
+because `chmod`, the rewrite and the new file land in both trees where `EROFS` was expected, and
+`test_a_unit_with_read_only_trees_runs_inside_bwrap_with_each_tree_bound_read_only` fails on both
+parameters because the arguments no longer carry `--ro-bind`. Delete the branch after reading the run with `git push origin --delete diffcheck/<name>`.
 
 #### Guard tests
 
@@ -2496,6 +2501,18 @@ The prepare step tests run its shell with fake `sudo` and `bwrap` on `PATH`, so 
 root nor bubblewrap and run in every unit shard. `tests/test_ci_writer_lock.py` expects the
 `lab_sandbox` output of the `inputs` job.
 
+#### Limitations
+
+- Only the three test files in the run step run. A new real bubblewrap test elsewhere is not
+  covered until the run step names its file.
+- The unit shards still skip the four real bubblewrap tests. This job is the only place they run
+  in CI.
+- A pull request runs the job only when its diff names a path in `LAB_SANDBOX_INPUTS`. A change to a
+  module they import, such as `scripts.ci_mutation.runner`, which `Sandbox` runs units through, or
+  `scripts.ci_lab.static_gates`, does not select it.
+- The job never runs in the merge queue or on a push to `dev`, so a merge group is not retested
+  under real bubblewrap.
+
 #### Delivery evidence
 
 Pull request [#11849](https://github.com/the-cloud-clockwork/agentihooks/pull/11849) delivered the
@@ -2510,8 +2527,8 @@ job:
   on `25a402b959` failed the 14 guard test cases before the job existed.
 - Planted fault, writable trees:
   [Writer lock run 44213673884](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/44213673884)
-  on a `diffcheck/` branch binding the trees with `--bind` was red: `chmod`, the rewrite and the
-  new file landed in both trees.
+  on a `diffcheck/` branch binding the trees with `--bind` was red with 4 failed and 15 passed:
+  `chmod`, the rewrite and the new file landed in both trees.
 - Planted fault, no namespaces:
   [Writer lock run 44213944663](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/44213944663),
   with `user.max_user_namespaces=0` and no probe, skipped the real cases, and the run step failed
@@ -2522,8 +2539,8 @@ job:
   the only other failing check was `writer-lock / lab-sandbox`.
 - Green:
   [Tests run 44217954418](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/44217954418)
-  on `d74089e45d`. `writer-lock / lab-sandbox` passed 40 tests with none skipped in 39 seconds,
-  and `Gate — Required` passed.
+  on `d74089e45d`. `writer-lock / lab-sandbox` passed 40 tests with none skipped in under 40
+  seconds, and `Gate — Required` passed.
 
 ### Troubleshooting
 
