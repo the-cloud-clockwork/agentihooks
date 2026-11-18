@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -22,7 +23,7 @@ CLAIM = {"op": "task_update", "id": "u1", "by": "eng", "item": "tasks/t2", "fiel
 CHAT = {"op": "add", "id": "m1", "thread": "chat", "text": "hello"}
 
 
-def store(tmp_path):
+def store(tmp_path: Path) -> SQLiteLedgerRepository:
     repo = SQLiteLedgerRepository(tmp_path / "ledgers" / sqlite.DATABASE)
     repo.create("ledger", CONTENT, "swarm")
     with repo.connect() as connection, connection:
@@ -127,7 +128,7 @@ def test_purging_a_slug_with_no_ledger_writes_no_outbox_row(tmp_path):
 
 
 @pytest.mark.feature("ledger-outbox-small-ledgers")
-def test_a_small_ledger_writes_no_outbox_row_when_created_changed_or_purged(tmp_path):
+def test_a_small_ledger_writes_no_outbox_row_when_created_changed_or_purged(tmp_path: Path) -> None:
     repo = SQLiteLedgerRepository(tmp_path / "ledgers" / sqlite.DATABASE)
     repo.create("session", CONTENT)
     assert repo.get_document("session")["size"] == "small"
@@ -139,7 +140,7 @@ def test_a_small_ledger_writes_no_outbox_row_when_created_changed_or_purged(tmp_
 
 
 @pytest.mark.feature("ledger-outbox-small-ledgers")
-def test_an_outbox_write_skips_a_small_ledger_and_keeps_a_swarm_or_sizeless_one():
+def test_an_outbox_write_skips_a_small_ledger_and_keeps_a_swarm_or_sizeless_one() -> None:
     connection = sqlite3.connect(":memory:")
     connection.executescript(sqlite.SCHEMA)
     small, swarm = {"size": "small", "tasks": [{"id": "t1"}]}, {"size": "swarm", "tasks": [{"id": "t2"}]}

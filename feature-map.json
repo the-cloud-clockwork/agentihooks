@@ -4068,12 +4068,14 @@
       "id": "ledger-outbox-small-ledgers",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2525",
-      "behaviour": "A small ledger, one session's work with no swarm, writes no outbox row when it is created, changed or purged, so the ledger bus relay never retries rows no swarm stream takes; a swarm ledger, or a ledger with no size, still writes its rows and the relay still publishes them.",
+      "behaviour": "A small ledger, one session's work with no swarm, writes no outbox row when it is created, changed or purged, and a row no stream takes from a small ledger or a ledger no longer stored is marked sent and reported, so the ledger bus relay never retries rows no swarm stream will take; a swarm ledger, or a ledger with no size, still writes its rows, the relay still publishes them, and a swarm ledger's rows wait unsent for its stream.",
       "seam": "scripts.swarm_ledger.repository.outbox.write through the SQLite ledger repository create, write and purge, and outbox.relay",
       "tests": [
         "tests/swarm_ledger/test_repository_outbox.py::test_a_small_ledger_writes_no_outbox_row_when_created_changed_or_purged",
         "tests/swarm_ledger/test_repository_outbox.py::test_an_outbox_write_skips_a_small_ledger_and_keeps_a_swarm_or_sizeless_one",
-        "tests/swarm_ledger/test_outbox_relay_streams.py::test_a_relay_beside_a_small_ledger_publishes_the_swarm_ledgers_rows_and_leaves_no_unsent_row"
+        "tests/swarm_ledger/test_outbox_relay_streams.py::test_a_relay_beside_a_small_ledger_publishes_the_swarm_ledgers_rows_and_leaves_no_unsent_row",
+        "tests/swarm_ledger/test_outbox_relay_streams.py::test_rows_no_stream_takes_from_a_ledger_no_longer_stored_are_marked_sent_and_reported",
+        "tests/swarm_ledger/test_outbox_relay_streams.py::test_a_row_no_stream_takes_from_a_small_ledger_is_marked_sent_while_a_swarm_ledger_keeps_its_rows"
       ]
     },
     {
