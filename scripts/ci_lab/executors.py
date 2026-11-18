@@ -29,7 +29,7 @@ from types import FrameType
 from typing import Any
 
 from scripts import ci_cpu_quota, ci_wiring
-from scripts.ci_lab import contract, run_mutation, run_static, run_tests, venvs, worker
+from scripts.ci_lab import caches, contract, run_mutation, run_static, run_tests, venvs, worker
 from scripts.ci_lab.outcomes import FAILED, PASSED
 from scripts.ci_lab.sandbox import PortAllocator, Sandbox
 from scripts.ci_lab.static_gates import REGISTRY, WORKFLOW, StaticGate, discover
@@ -86,28 +86,33 @@ class Trees:
     lock: threading.Lock = field(default_factory=threading.Lock)
 
     @contextlib.contextmanager
-    def shared(self, *heads: str) -> Generator[list[Path]]:
-        """Lease the read only tree of each revision for the block and release every one it leased."""
+    def shared(self, *heads: str) -> Generator[tuple[list[Path], list[bool]]]:
+        """Lease the read only tree of each revision for the block, with whether the store fetched each, and release
+        every one it leased."""
         leased: list[str] = []
         try:
             trees: list[Path] = []
+            fetched: list[bool] = []
             for head in heads:
                 with self.lock:
-                    trees.append(self.worktrees.lease(head))
+                    tree, cut = self.worktrees.lease(head)
+                trees.append(tree)
+                fetched.append(cut)
                 leased.append(head)
-            yield trees
+            yield trees, fetched
         finally:
             for head in leased:
                 with self.lock:
                     self.worktrees.release(head)
 
     @contextlib.contextmanager
-    def owned(self, head: str) -> Generator[Path]:
-        """Cut a private writable tree of the revision for the block and drop it after."""
+    def owned(self, head: str) -> Generator[tuple[Path, bool]]:
+        """Cut a private writable tree of the revision for the block, with whether the store fetched it, and drop it
+        after."""
         with self.lock:
-            tree = self.worktrees.own(head)
+            tree, fetched = self.worktrees.own(head)
         try:
-            yield tree
+            yield tree, fetched
         finally:
             with self.lock:
                 self.worktrees.drop(tree)
@@ -177,10 +182,10 @@ def gate(grader_tree: Path, name: str) -> StaticGate:
 
 def static(pod: Pod, lease: Lease) -> Finished:
     """Run the static gate the lease names over its head, with its base and grader trees and its base revision as
-    inputs.base, on the venv of the head's lockfile."""
-    with pod.trees.shared(lease.head, lease.base, lease.grader) as (head, base, grader):
+    inputs.base, on the venv of the head's lockfile; the report counts the git and uv cache lookups it made."""
+    with pod.trees.shared(lease.head, lease.base, lease.grader) as ((head, base, grader), fetched):
         found = gate(grader, lease.unit.members[0])
-        venv = venvs.venv_for(lockfile_digest(head), head, pod.venvs)
+        venv, built = venvs.venv_for(lockfile_digest(head), head, pod.venvs)
         context = {INPUTS_BASE: lease.base}
         options = run_static.Settings(pod.runs, venv, pod.ports, pod.whitelist, pod.timeout, context)
         started = pod.clock()
@@ -188,14 +193,16 @@ def static(pod: Pod, lease: Lease) -> Finished:
         seconds = pod.clock() - started
     summary = result.report.read_text()
     record = {"gate": result.gate, "code": result.code, "skipped": result.skipped, "summary": summary}
-    return Finished(PASSED if result.green else FAILED, _report(pod, {**record, "seconds": seconds}), result.log)
+    lookups = caches.report(fetched, [built])
+    report = _report(pod, {**record, "seconds": seconds, caches.KEY: lookups})
+    return Finished(PASSED if result.green else FAILED, report, result.log)
 
 
 def tests(pod: Pod, suite: Suite, lease: Lease) -> Finished:
     """Run the lease's test batch on its head with the venv of the head's lockfile digest, the manifest and the flake
-    ledger, on as many workers as its slots."""
-    with pod.trees.shared(lease.head) as (tree,):
-        venv = venvs.venv_for(lockfile_digest(tree), tree, pod.venvs)
+    ledger, on as many workers as its slots; the report counts the git and uv cache lookups it made."""
+    with pod.trees.shared(lease.head) as ((tree,), fetched):
+        venv, built = venvs.venv_for(lockfile_digest(tree), tree, pod.venvs)
         manifest = json.loads(suite.manifest.read_text())
         lab = run_tests.Lab(pod.runs, pod.ports, pod.whitelist, manifest, suite.flakes, pod.timeout, False)
         started = pod.clock()
@@ -207,6 +214,7 @@ def tests(pod: Pod, suite: Suite, lease: Lease) -> Finished:
         "durations": dict(verdict.durations),
         "attempts": verdict.attempts,
         "seconds": seconds,
+        caches.KEY: caches.report(fetched, [built]),
     }
     return Finished(verdict.outcome, _report(pod, record), verdict.log)
 
@@ -253,11 +261,12 @@ def _run(pod: Pod, tree: Path, venv: Path, request: Mapping[str, Any]) -> tuple[
 
 def mutation(pod: Pod, settings: Mutation, lease: Lease) -> Finished:
     """Run a stats unit with the tree as root and the stats cache, or a mutant unit with the kill memory, budget, cap
-    and the tests the tree's stats records show reaching its function, in a private trampolined tree of the head."""
+    and the tests the tree's stats records show reaching its function, in a private trampolined tree of the head; the
+    report counts the git and uv cache lookups it made."""
     unit = lease.unit
     named = {"kind": unit.kind, "key": unit.key, "options": list(OPTIONS)}
-    with pod.trees.owned(lease.head) as tree:
-        venv = venvs.venv_for(lockfile_digest(tree), tree, pod.venvs)
+    with pod.trees.owned(lease.head) as (tree, fetched):
+        venv, built = venvs.venv_for(lockfile_digest(tree), tree, pod.venvs)
         _trampolined(tree)
         started = pod.clock()
         stats = {**named, "kind": STATS, "root": str(tree), "cache": str(settings.cache)}
@@ -270,7 +279,10 @@ def mutation(pod: Pod, settings: Mutation, lease: Lease) -> Finished:
             result, log = _run(pod, tree, venv, {**named, **graded, **limits})
         seconds = pod.clock() - started
     passed = result is not None and all(row["status"] == KILLED for row in result.get("rows", ()))
-    return Finished(PASSED if passed else FAILED, _report(pod, {**(result or {}), "seconds": seconds}), log)
+    lookups = caches.report([fetched], [built])
+    return Finished(
+        PASSED if passed else FAILED, _report(pod, {**(result or {}), "seconds": seconds, caches.KEY: lookups}), log
+    )
 
 
 def executors(pod: Pod, suite: Suite, settings: Mutation) -> dict[str, Executor]:

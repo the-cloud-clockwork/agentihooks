@@ -60,8 +60,11 @@ class Leases:
             if job is None or job.requirement.slots > free_slots:
                 continue
             token = secrets.token_hex(16)
-            expires_ms = self.clock() + self.ttl_ms
-            if not job.requirement.capabilities <= capabilities or not self.queue.claim(job, worker, token, expires_ms):
+            now = self.clock()
+            expires_ms = now + self.ttl_ms
+            if not job.requirement.capabilities <= capabilities or not self.queue.claim(
+                job, worker, token, expires_ms, now
+            ):
                 continue
             grants.append(
                 Grant(job_id, token, job.head, job.unit, job.requirement.slots, expires_ms, job.base, job.grader)

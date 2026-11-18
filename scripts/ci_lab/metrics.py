@@ -6,10 +6,10 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from math import inf, isfinite, isnan
-from typing import Protocol
+from typing import Any, Protocol
 from urllib.parse import urlsplit
 
-from scripts.ci_lab import contract
+from scripts.ci_lab import caches, contract
 from scripts.ci_lab.capacity import Load, document, predicted_wait
 from scripts.ci_lab.delivery import CLASSES
 from scripts.swarm import metrics_outbox
@@ -26,6 +26,7 @@ __all__ = [
     "grade_row",
     "observe_load",
     "observe_records",
+    "observe_unit",
     "record",
     "respond",
     "serve",
@@ -176,7 +177,8 @@ class Registry:
 
 
 def observe_load(registry: Registry, load: Load) -> None:
-    """Set the queue, slot, predicted wait, budget and shed gauges from one load snapshot."""
+    """Set the queue, slot, predicted wait, budget, shed, wanted slot, ready worker and overdue unit gauges from one
+    load snapshot."""
     free = load.slots_free
     for name in CLASSES:
         labels = {"class": name}
@@ -189,6 +191,21 @@ def observe_load(registry: Registry, load: Load) -> None:
     registry.set("ci_lab_slots_total", load.slots_total)
     registry.set("ci_lab_slots_busy", load.slots_busy)
     registry.set("ci_lab_budget_fraction", load.budget_fraction)
+    registry.set(contract.SLOTS_WANTED, load.slots_wanted)
+    registry.set(contract.WORKERS_READY, load.workers_ready)
+    registry.set(contract.UNITS_OVERDUE, load.overdue)
+
+
+def observe_unit(registry: Registry, priority: str, kind: str, slots: int, report: Mapping[str, Any]) -> None:
+    """Count a finished attempt's core seconds in its class and the worker cache lookups its report carries, and set
+    its kind's last duration when the report measured one."""
+    seconds = report.get("seconds")
+    registry.inc(contract.CORE_SECONDS_TOTAL, slots * float(seconds or 0.0), {"class": priority})
+    if seconds is not None:
+        registry.set(contract.UNIT_DURATION_SECONDS, float(seconds), {"kind": kind})
+    for cache, (hits, misses) in caches.read(report).items():
+        registry.inc(contract.CACHE_HITS_TOTAL, hits, {"cache": cache})
+        registry.inc(contract.CACHE_MISSES_TOTAL, misses, {"cache": cache})
 
 
 @dataclass(frozen=True)

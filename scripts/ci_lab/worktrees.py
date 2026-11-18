@@ -60,11 +60,13 @@ class Worktrees:
     capacity: int
     live: OrderedDict[str, int] = field(default_factory=OrderedDict)
 
-    def lease(self, head: str) -> Path:
-        """Return the head's shared tree, cutting it on first use, and count one more live unit on it."""
+    def lease(self, head: str) -> tuple[Path, bool]:
+        """Return the head's shared tree, cutting it on first use, and whether the store fetched the head for it; count
+        one more live unit on it."""
         tree = self.root / head
+        fetched = False
         if head not in self.live:
-            self.mirror.fetch(head)
+            fetched = self.mirror.fetch(head)
             if tree.exists():
                 self.drop(tree)
             _git(self.mirror.store, "worktree", "add", "--quiet", str(tree), head)
@@ -73,20 +75,20 @@ class Worktrees:
         self.live[head] += 1
         self.live.move_to_end(head)
         self._evict()
-        return tree
+        return tree, fetched
 
     def release(self, head: str) -> None:
         """Count one live unit off the head's tree."""
         self.live[head] -= 1
         self._evict()
 
-    def own(self, head: str) -> Path:
-        """Cut a private writable worktree of head for a mutation unit."""
-        self.mirror.fetch(head)
+    def own(self, head: str) -> tuple[Path, bool]:
+        """Cut a private writable worktree of head for a mutation unit and say whether the store fetched head for it."""
+        fetched = self.mirror.fetch(head)
         self.root.mkdir(parents=True, exist_ok=True)
         tree = Path(tempfile.mkdtemp(prefix=f"{head}.", dir=self.root))
         _git(self.mirror.store, "worktree", "add", "--quiet", str(tree), head)
-        return tree
+        return tree, fetched
 
     def drop(self, tree: Path) -> None:
         """Remove a worktree directory, registered or not, and prune the store's registrations."""

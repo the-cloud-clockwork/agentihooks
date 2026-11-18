@@ -34,7 +34,18 @@ import jsonschema
 import yaml
 
 from scripts import ci_select
-from scripts.ci_lab import budget, contract, control, evidence, expand_tests, interaction, lease_api, metrics, service
+from scripts.ci_lab import (
+    budget,
+    caches,
+    contract,
+    control,
+    evidence,
+    expand_tests,
+    interaction,
+    lease_api,
+    metrics,
+    service,
+)
 from scripts.ci_lab.capacity import Load
 from scripts.ci_lab.checks import Checks, Output
 from scripts.ci_lab.delivery import CLASSES, DELIVERY, DELIVERY_SCHEMA, load_runtime
@@ -83,6 +94,7 @@ WAITING = f"{PREFIX}waiting"
 TREES = f"{PREFIX}tree:"
 UNGRADED = frozenset({*LOSSES, CANNOT_RUN, DROPPED})
 FINISHED = frozenset({"done", "lost"})
+REAPED = {"pending": contract.UNITS_REDELIVERED_TOTAL, "lost": contract.UNITS_LOST_TOTAL}
 REQUIRED = "required"
 EVENTS = ("pull_request", "pull_request", "merge_group", "push", "workflow_dispatch")
 GRADED_EVENTS = frozenset({"merge_group", "pull_request"})
@@ -476,12 +488,15 @@ class Scheduler:
         self.queue = Queue(client)
         self.ports = ports
         self.settings = settings
+        self.registry = metrics.Registry()
 
     def tick(self, now_ms: int) -> list[str]:
-        """Run one pass: intake, release quiet lanes, reap expired leases, then advance every live grade."""
+        """Run one pass: intake, release quiet lanes, reap expired leases, then advance every live grade, counting each
+        finished job in the most urgent tier of the live grades holding it."""
         actions = [*self._intake(now_ms), *self._release(now_ms), *self._reap(now_ms)]
+        tiers, _, _ = self._demand()
         for run in sorted(self.client.smembers(LIVE)):
-            actions.extend(self._advance(run))
+            actions.extend(self._advance(run, tiers))
         return actions
 
     def grade(self, run: str) -> State | None:
@@ -490,32 +505,44 @@ class Scheduler:
         return None if raw is None else _parse(raw)
 
     def load(self, now_ms: int) -> Load:
-        """Return the queue and slots now: each pending job's estimate and each leased job per the most urgent class of
-        the live grades holding it, verdict cache use per class of those grades, the slots leased jobs take, and the
-        free slots workers offered on a lease poll within the ready window; a leased job frees its slots in one
-        estimate."""
+        """Return the queue and slots now: each pending job's estimate and slots and each leased job and its slots per
+        the most urgent class of the live grades holding it, verdict cache use per class of those grades, the slots
+        leased jobs take, the leased jobs leased more than one estimate ago, and the workers that offered free slots on
+        a lease poll within the ready window with those slots; a leased job frees its slots in one estimate."""
         classes, hits, misses = self._demand()
         pending: dict[str, list[float]] = {}
+        pending_slots: Counter[str] = Counter()
         for job in self._jobs(self.queue.pending()):
             if job.id in classes:
-                pending.setdefault(CLASSES[classes[job.id]], []).append(UNIT_ESTIMATE_S * job.requirement.slots)
+                name = CLASSES[classes[job.id]]
+                pending.setdefault(name, []).append(UNIT_ESTIMATE_S * job.requirement.slots)
+                pending_slots[name] += job.requirement.slots
         running: Counter[str] = Counter()
-        busy = 0
+        running_slots: Counter[str] = Counter()
+        busy = overdue = 0
+        since = now_ms - int(UNIT_ESTIMATE_S * 1000)
         for job in self._jobs(self.queue.leased()):
             busy += job.requirement.slots
+            overdue += job.leased_ms < since
             if job.id in classes:
-                running[CLASSES[classes[job.id]]] += 1
+                name = CLASSES[classes[job.id]]
+                running[name] += 1
+                running_slots[name] += job.requirement.slots
         ready = now_ms - READY_MS
         self.queue.prune(ready)
-        offered = sum(free for free, _ in self.queue.offers(ready).values())
+        offers = self.queue.offers(ready)
         return Load(
             pending,
             dict(running),
-            busy + offered,
+            busy + sum(free for free, _ in offers.values()),
             busy,
             cache_hits=dict(hits),
             cache_misses=dict(misses),
             frees_in=(UNIT_ESTIMATE_S,) * busy,
+            running_slots=dict(running_slots),
+            pending_slots=dict(pending_slots),
+            workers_ready=len(offers),
+            overdue=overdue,
         )
 
     def _demand(self) -> tuple[dict[str, int], Counter[str], Counter[str]]:
@@ -661,12 +688,14 @@ class Scheduler:
         }
 
     def _place(self, state: State, unit: Unit, bypass: bool, carried: Mapping[str, str], misses: list[Unit]) -> str:
-        """Answer a unit from the store, a carried job or a new job, and return its ref."""
+        """Answer a unit from the store, a carried job or a new job, counting the store lookup, and return its ref."""
         ref = f"{unit.kind}:{unit.key}"
         if ref in state.units:
             return ref
         slot = Slot(unit.kind, unit.key, list(unit.members))
         verdict = self.store.get(unit.kind, unit.key, bypass_negative=bypass)
+        lookup = contract.CACHE_MISSES_TOTAL if verdict is None else contract.CACHE_HITS_TOTAL
+        self.registry.inc(lookup, 1.0, {"cache": caches.VERDICT})
         if verdict is not None:
             slot.outcome = PASSED if verdict.passed else FAILED
         elif ref in carried:
@@ -678,22 +707,24 @@ class Scheduler:
         return ref
 
     def _reap(self, now_ms: int) -> list[str]:
-        """Requeue each expired lease while the lost retries allow, else mark its unit lost."""
+        """Requeue each expired lease while the lost retries allow, else mark its unit lost, counting either."""
         actions: list[str] = []
         for expired in self.queue.expired(now_ms):
             job = self.queue.job(expired)
             if job is not None and (state := self.queue.reap(job, now_ms, self.settings.retries.lost)):
+                self.registry.inc(REAPED[state])
                 actions.append(f"reaped {expired} {state}")
         return actions
 
-    def _advance(self, run: str) -> list[str]:
-        """Collect a grade's finished jobs, post its check runs and close it once every unit is final."""
+    def _advance(self, run: str, tiers: Mapping[str, int]) -> list[str]:
+        """Collect a grade's finished jobs, each counted in its tier, post its check runs and close it once every unit
+        is final, counting the closed grade."""
         state = self.grade(run)
         if state is None:
             self.client.srem(LIVE, run)
             return [f"forgot {run}"]
         for slot in state.units.values():
-            self._collect(slot)
+            self._collect(slot, tiers)
         actions = self._post(state)
         if all(slot.outcome for slot in state.units.values()):
             self.client.srem(LIVE, run)
@@ -701,23 +732,33 @@ class Scheduler:
             if state.tier == Priority.QUEUE and state.conclusion == "success":
                 self.client.set(f"{TREES}{state.repo}|{state.tree}", run)
             evidence.record(self.objects, _evidence(state))
+            graded = {"class": CLASSES[state.tier], "conclusion": state.conclusion}
+            self.registry.inc(contract.HEADS_GRADED_TOTAL, 1.0, graded)
             actions.append(f"completed {run} {state.conclusion}")
         self._save(state)
         return actions
 
-    def _collect(self, slot: Slot) -> None:
-        """Take a finished job's outcome into its slot, storing its verdict, unless the retry policy runs it again; a
-        vanished job was dropped."""
+    def _collect(self, slot: Slot, tiers: Mapping[str, int]) -> None:
+        """Take a finished job into its slot in the class of its tier; a vanished job was dropped."""
         if slot.outcome or not slot.job:
             return
         job = self.queue.job(slot.job)
         if job is None:
             slot.outcome = DROPPED
-        elif job.state in FINISHED and not self._rerun(job):
-            slot.outcome = job.outcome
-            self._remember(job)
+        elif job.state in FINISHED:
+            self._finished(slot, job, tiers[job.id])
         else:
             slot.started = slot.started or job.state == "leased"
+
+    def _finished(self, slot: Slot, job: Job, tier: int) -> None:
+        """Count the finished attempt once in the tier's class from its report, then take its outcome into the slot,
+        storing its verdict, unless the retry policy runs it again."""
+        uploaded = self._uploaded(job)
+        if uploaded is not None and self.queue.tally(job):
+            metrics.observe_unit(self.registry, CLASSES[tier], job.unit.kind, job.requirement.slots, uploaded[0])
+        if not self._rerun(job):
+            slot.outcome = job.outcome
+            self._remember(job, uploaded)
 
     def _rerun(self, job: Job) -> bool:
         """Move a finished job back to pending when the retry policy allows its outcome a rerun; return whether it
@@ -725,19 +766,27 @@ class Scheduler:
         result = UnitResult(job.outcome, job.attempts)
         return decide(result, self.settings.retries) == "retry" and self.queue.retry(job)
 
-    def _remember(self, job: Job) -> None:
-        """Store the verdict of a graded job from the report its worker uploaded; a lost or unrun job is no verdict."""
-        report_path, log_path = upload_path(job.id, "report"), upload_path(job.id, "log")
-        present = set(self.objects.keys(str(PurePosixPath(report_path).parent) + "/"))
-        if job.outcome in UNGRADED or report_path not in present:
+    def _remember(self, job: Job, uploaded: tuple[dict[str, Any], bytes] | None) -> None:
+        """Store the verdict of a graded job from the report and log its worker uploaded; a lost or unrun job is no
+        verdict."""
+        if job.outcome in UNGRADED or uploaded is None:
             return
-        report = json.loads(self.objects.read(report_path))
-        log = self.objects.read(log_path) if log_path in present else b""
+        report, log = uploaded
         passed = job.outcome == PASSED
         verdict = Verdict(
             job.unit.kind, job.unit.key, passed, passed and bool(report.get("flaky")), float(report.get("seconds", 0.0))
         )
         self.store.put(verdict, report, log)
+
+    def _uploaded(self, job: Job) -> tuple[dict[str, Any], bytes] | None:
+        """Return the report and log a finished job's worker uploaded, the log empty when it uploaded none; None
+        without a report."""
+        report_path, log_path = upload_path(job.id, "report"), upload_path(job.id, "log")
+        present = set(self.objects.keys(str(PurePosixPath(report_path).parent) + "/"))
+        if report_path not in present:
+            return None
+        log = self.objects.read(log_path) if log_path in present else b""
+        return json.loads(self.objects.read(report_path)), log
 
     def _post(self, state: State) -> list[str]:
         """Post each check run whose target moved since its last post; a completed check run never moves again."""
@@ -1005,7 +1054,8 @@ def listen(
     ports: tuple[int, int],
 ) -> tuple[ThreadingHTTPServer, ThreadingHTTPServer]:
     """Bind the scheduler port's lease API, control, capacity and grades routes and the metrics port, both over one
-    load whose budget fraction and shed classes come from the day's spending; the caller runs each serve_forever."""
+    load whose budget fraction and shed classes come from the day's spending, the metrics port with the counters the
+    scheduler's passes keep; the caller runs each serve_forever."""
 
     def snapshot() -> Load:
         return budget.observe(scheduler.load(clock()), spending.status())
@@ -1013,7 +1063,7 @@ def listen(
     api, exposition = ports
     lease = partial(lease_api.answer, leases, Uploads(scheduler.objects), routes)
     port = service.Routes(lease, snapshot, scheduler.grades_of)
-    return service.serve("", api, port), metrics.serve("", exposition, snapshot, metrics.Registry())
+    return service.serve("", api, port), metrics.serve("", exposition, snapshot, scheduler.registry)
 
 
 def _now_ms() -> int:

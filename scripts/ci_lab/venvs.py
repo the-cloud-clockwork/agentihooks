@@ -16,19 +16,21 @@ def _marked(venv: Path, digest: str) -> bool:
     return marker.is_file() and marker.read_text().strip() == digest
 
 
-def venv_for(lockfile_digest: str, tree: Path, root: Path, baked: Path = BAKED) -> Path:
-    """Return the baked venv when its marker holds the digest, else the digest's own venv under root, built once."""
+def venv_for(lockfile_digest: str, tree: Path, root: Path, baked: Path = BAKED) -> tuple[Path, bool]:
+    """Return the baked venv when its marker holds the digest, else the digest's own venv under root, built once, and
+    whether this call built it."""
     if _marked(baked, lockfile_digest):
-        return baked
+        return baked, False
     venv = root / lockfile_digest
     root.mkdir(parents=True, exist_ok=True)
     with (root / f"{lockfile_digest}.lock").open("w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        if not _marked(venv, lockfile_digest):
+        built = not _marked(venv, lockfile_digest)
+        if built:
             subprocess.run(
                 ["uv", "sync", "--frozen", "--no-install-project", "--all-extras", "--project", str(tree)],
                 check=True,
                 env={**os.environ, "UV_PROJECT_ENVIRONMENT": str(venv)},
             )
             (venv / MARKER).write_text(f"{lockfile_digest}\n")
-    return venv
+    return venv, built
