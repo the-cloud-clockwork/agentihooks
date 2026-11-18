@@ -48,7 +48,7 @@ def _connect() -> Mock:
 def test_a_moved_checkout_ends_the_hive_run_after_its_beat(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    wait = Mock(return_value=None)
+    wait = Mock(side_effect=[None, AssertionError("waited after the checkout moved")])
     roots, beats = _hive(monkeypatch, ["loaded", "loaded", "moved"], wait)
     daemon.run(_connect())
     assert beats == ["root", "root"]
@@ -104,7 +104,7 @@ def test_a_checkout_unread_at_start_restarts_the_hive_once_it_reads(
 def test_a_moved_checkout_waits_for_running_order_workers(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    wait = Mock(return_value=None)
+    wait = Mock(side_effect=[None, AssertionError("waited after the order workers finished")])
     roots, beats = _hive(monkeypatch, ["loaded", "moved"], wait, busy=[True, False])
     daemon.run(_connect())
     assert beats == ["root", "root"]
