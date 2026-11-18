@@ -1009,6 +1009,22 @@
    "0c85cd31a58dff89"
   ]
  },
+ "tests/test_credential_guard.py::test_a_shell_script_keeps_the_credential_tree_scan": {
+  "assertions": 1,
+  "calls": 4,
+  "cases": 1,
+  "texts": [
+   "98d8b50d408a306a"
+  ]
+ },
+ "tests/test_credential_guard.py::test_a_shell_script_that_prints_no_value_passes": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 6,
+  "texts": [
+   "a76f47343f702669"
+  ]
+ },
  "tests/test_credential_guard.py::test_access_env_block_names_the_token_and_the_eval_form": {
   "assertions": 3,
   "calls": 4,
@@ -1017,6 +1033,30 @@
    "220198d3168fb794",
    "3dd0b20f4f4d501c",
    "ddd80769766b432d"
+  ]
+ },
+ "tests/test_credential_guard.py::test_an_awk_listing_of_environment_names_passes": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 4,
+  "texts": [
+   "a76f47343f702669"
+  ]
+ },
+ "tests/test_credential_guard.py::test_an_awk_read_of_an_environment_value_is_refused": {
+  "assertions": 1,
+  "calls": 3,
+  "cases": 5,
+  "texts": [
+   "a4f6f90a6eb4c427"
+  ]
+ },
+ "tests/test_credential_guard.py::test_an_environment_dump_inside_a_shell_script_is_refused": {
+  "assertions": 1,
+  "calls": 3,
+  "cases": 9,
+  "texts": [
+   "c4b74481ca248577"
   ]
  },
  "tests/test_credential_guard.py::test_get_secret_refusal_offers_the_key_listing_and_not_describe": {
@@ -1046,7 +1086,7 @@
  "tests/test_credential_guard.py::test_guard_decision": {
   "assertions": 1,
   "calls": 1,
-  "cases": 131,
+  "cases": 135,
   "texts": [
    "7590ae6ade04c870"
   ]

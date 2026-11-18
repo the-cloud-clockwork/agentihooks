@@ -865,7 +865,7 @@ def shell_scripts(toks: list[str]) -> list[str]:
     if verb_of(toks) not in SHELLS:
         return []
     i = verb_index(toks)
-    return [word for flag, word in zip(toks[i + 1 :], toks[i + 2 :], strict=False) if SHELL_SCRIPT_FLAG.match(flag)]
+    return [word for flag, word in zip(toks[i + 1 :], toks[i + 2 :]) if SHELL_SCRIPT_FLAG.match(flag)]
 
 
 def find_filters(toks):
