@@ -1338,7 +1338,10 @@ cache the worker's mutant runner reads before it runs the mutants. The manifest 
 of the base, while the mutant runner runs every test module of the head, so
 `expand_tests.unlisted_test_hashes` hashes each test module of the head that holds no manifest test,
 with every conftest pytest loads for it and every test tree module either imports, and those hashes
-enter every mutant key too: a head that adds or edits such a module rekeys its units.
+enter every mutant key too: a head that adds or edits such a module rekeys its units. The manifest
+records no file such a module reads, so while the head holds one, the hashes also cover every file
+under the measured trees and the test trees, the files its test unit is keyed on: an edit to a
+fixture it reads rekeys the mutant units as well.
 
 | Head | Mutation jobs |
 |---|---|
