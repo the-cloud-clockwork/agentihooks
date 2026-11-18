@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/proof_ledger.py:scripts.swarm_ledger.proof_ledger.x_control:3c1794d722ecd5a68b0f246218761e4856641369c8f4c953562e36a5b729a312": {
+    "reader": "standards-reader",
+    "reason": "exchanged copies the dict into an email Message with sent[name]=value, and proofs.control reads it with headers.get, which ignores name case."
+  }
+}

@@ -61,7 +61,7 @@ class Drill:
     def send(self, monkeypatch):
         from scripts.inbox import cli
         from scripts.swarm import cli as swarm_cli
-        from scripts.swarm_ledger import ledger_server
+        from scripts.swarm_ledger import api_service
 
         monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", self.master.name)
         self.accepted.append(cli.main(["send", self.agents[0].name, "drill direct message"]))
@@ -74,20 +74,20 @@ class Drill:
         )
         for by, kind, target, text in events:
             self.ledger.write(by, kind, target, text, self.clock)
-            ledger_server.relay_to_inbox("sw", self.ledger.document("sw"))
+            api_service.relay_to_inbox("sw", self.ledger.document("sw"))
         self.tick()
 
     def recover(self):
-        from scripts.swarm_ledger import ledger_server
+        from scripts.swarm_ledger import api_service
 
         self.server.connected, self.ledger.online, self.runtime.healthy = True, True, True
-        ledger_server.relay_to_inbox("sw", self.ledger.state("sw"))
-        ledger_server.replay_unrelayed()
+        api_service.relay_to_inbox("sw", self.ledger.state("sw"))
+        api_service.replay_unrelayed()
         for step in range(3):
             self.clock = (10 + step) * MINUTE
             self.tick()
-        ledger_server.relay_to_inbox("sw", self.ledger.state("sw"))
-        ledger_server.replay_unrelayed()
+        api_service.relay_to_inbox("sw", self.ledger.state("sw"))
+        api_service.replay_unrelayed()
 
     def items(self):
         return {

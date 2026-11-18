@@ -1,3 +1,6 @@
+import threading
+from typing import Any, cast
+
 import pytest
 
 from scripts.events import memory
@@ -176,6 +179,15 @@ def test_a_new_claim_generation_is_offered_again(bus):
     assert queued(bus, "eng", reopened) == ["a"]
 
 
+@pytest.mark.feature("unfit-refusal-spends-no-delivery")
+def test_an_offer_still_queued_past_the_dedupe_window_is_not_offered_again(bus: Bus, clock: Clock) -> None:
+    view = snapshot(doc([task("a")]))
+    assert readiness.publish(bus, view, NOW) == ["ready:sw:a:0"]
+    clock.now += BusConfig().dedupe_window_ms
+    assert readiness.publish(bus, view, clock.now) == []
+    assert queued(bus, "eng", view) == ["a"]
+
+
 def test_an_unfrozen_task_is_offered_again_once_the_dedupe_window_from_its_first_offer_passes(bus, clock):
     found = doc([task("a")])
     readiness.publish(bus, snapshot(found), NOW)
@@ -268,3 +280,128 @@ def test_take_with_no_snapshot_returns_the_first_offer_for_the_hub_to_check(bus)
     queue = bus.queue(readiness.queue_name(SLUG, "eng"), QueuePolicy())
     delivery = readiness.take(queue, lambda: None, 0)
     assert delivery.event.key == "a"
+
+
+@pytest.mark.feature("hub-shared-ledger-copy")
+def test_threads_asking_for_one_new_revision_fetch_the_export_once() -> None:
+    began, second = threading.Event(), threading.Event()
+
+    class Ledger:
+        def __init__(self) -> None:
+            self.fetches = 0
+
+        def metadata(self, slug: str) -> dict[str, Any]:
+            return {"_meta": {"rev": 7}}
+
+        def state(self, slug: str) -> dict[str, Any]:
+            self.fetches += 1
+            if self.fetches == 1:
+                began.set()
+                second.wait(0.5)
+            else:
+                second.set()
+            return doc([task("t1")])
+
+    ledger = Ledger()
+    source = readiness.Source(ledger=cast(Any, ledger))
+    reader = threading.Thread(target=source.state, args=(SLUG,))
+    reader.start()
+    assert began.wait(5)
+    source.state(SLUG)
+    reader.join()
+    assert ledger.fetches == 1
+
+
+@pytest.mark.feature("hub-shared-ledger-copy")
+def test_one_swarms_fetch_never_waits_for_another_swarms_fetch() -> None:
+    began, other = threading.Event(), threading.Event()
+    waited: list[bool] = []
+
+    class Ledger:
+        def metadata(self, slug: str) -> dict[str, Any]:
+            return {"_meta": {"rev": 7}}
+
+        def state(self, slug: str) -> dict[str, Any]:
+            if slug == "a":
+                began.set()
+                waited.append(other.wait(0.5))
+            else:
+                other.set()
+            return doc([task("t1")])
+
+    source = readiness.Source(ledger=cast(Any, Ledger()))
+    reader = threading.Thread(target=source.state, args=("a",))
+    reader.start()
+    assert began.wait(5)
+    source.state("b")
+    reader.join()
+    assert waited == [True]
+
+
+class Exports:
+    """A ledger that answers its revisions in turn and counts every export it serves."""
+
+    def __init__(self, *revisions: int) -> None:
+        self.revisions, self.fetches = iter(revisions), 0
+
+    def metadata(self, slug: str) -> dict[str, Any]:
+        return {"_meta": {"rev": next(self.revisions)}}
+
+    def state(self, slug: str) -> dict[str, Any]:
+        self.fetches += 1
+        return doc([task("t1")])
+
+
+@pytest.mark.feature("hub-shared-ledger-copy-revision")
+def test_a_reader_handed_an_older_revision_keeps_the_newer_copy_and_fetches_nothing() -> None:
+    ledger = Exports(7, 6, 7)
+    source = readiness.Source(ledger=cast(Any, ledger))
+    for _ in range(3):
+        source.state(SLUG)
+    assert ledger.fetches == 1
+
+
+@pytest.mark.feature("hub-shared-ledger-copy-revision")
+def test_a_reader_waiting_behind_a_fetch_reads_the_revision_current_at_its_turn() -> None:
+    began, asked, release = threading.Event(), threading.Event(), threading.Event()
+    got: list[dict[str, Any]] = []
+
+    class Ledger:
+        def __init__(self) -> None:
+            self.rev, self.reads = 7, 0
+
+        def metadata(self, slug: str) -> dict[str, Any]:
+            self.reads += 1
+            if self.reads == 2:
+                asked.set()
+            return {"_meta": {"rev": self.rev}}
+
+        def state(self, slug: str) -> dict[str, Any]:
+            rev = self.rev
+            if rev == 7:
+                began.set()
+                release.wait(5)
+            return doc([task(f"t{rev}")])
+
+    ledger = Ledger()
+    source = readiness.Source(ledger=cast(Any, ledger))
+    first = threading.Thread(target=source.state, args=(SLUG,))
+    first.start()
+    assert began.wait(5)
+    second = threading.Thread(target=lambda: got.append(source.state(SLUG)))
+    second.start()
+    asked.wait(0.5)
+    ledger.rev = 8
+    release.set()
+    first.join()
+    second.join()
+    assert [row["id"] for row in got[0]["tasks"]] == ["t8"]
+
+
+@pytest.mark.feature("hub-shared-ledger-copy-revision")
+def test_a_readers_change_to_its_task_rows_never_reaches_the_shared_copy() -> None:
+    ledger = Exports(7, 7)
+    source = readiness.Source(ledger=cast(Any, ledger))
+    source.state(SLUG)["tasks"][0].update(state="blocked")
+    assert [row["state"] for row in source.state(SLUG)["tasks"]] == ["open"]
+    assert ledger.fetches == 1

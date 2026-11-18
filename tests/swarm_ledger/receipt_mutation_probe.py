@@ -8,6 +8,7 @@ from scripts.ci_mutation.runner import prepare_workspace, run_gate
 
 PATHS = [
     "scripts/swarm_ledger/api/mutations.py",
+    "scripts/swarm_ledger/api_service.py",
     "scripts/swarm_ledger/events/hub.py",
     "scripts/swarm_ledger/events/patch.py",
     "scripts/swarm_ledger/events/publishing.py",
@@ -32,14 +33,15 @@ def statistics(root, work, baseline=False, delay=False):
     if delay:
         (work / CASE).write_text(
             "import time\n"
-            "from tests.swarm_ledger.test_api_v1 import authority_live, live, server, "
+            "from scripts.swarm_ledger import api_service\n"
+            "from tests.swarm_ledger.test_api_v1 import authority_live, live, "
             "test_latest_thousand_operation_receipts_remain_retry_safe as receipt_case\n\n"
             "def test_latest_thousand_operation_receipts_remain_retry_safe(live, monkeypatch):\n"
-            "    post = server.Handler.do_POST\n"
+            "    post = api_service.WriteHandler.do_POST\n"
             "    def delayed_post(handler):\n"
             "        time.sleep(6)\n"
             "        return post(handler)\n"
-            "    monkeypatch.setattr(server.Handler, 'do_POST', delayed_post)\n"
+            "    monkeypatch.setattr(api_service.WriteHandler, 'do_POST', delayed_post)\n"
             "    receipt_case(live)\n"
         )
     if baseline:

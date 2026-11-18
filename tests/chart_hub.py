@@ -31,6 +31,10 @@ def hub_problems(deployment: dict) -> list[str]:
     bus = {"AGENTIHOOKS_BUS": "nats", "AGENTIHOOKS_BUS_URL": "nats://nats.swarm:4222"}
     if {name: env.get(name) for name in bus} != bus:
         found.append(f"the hub bus env is {[env.get(name) for name in bus]}, expected {list(bus.values())}")
+    serving = env.get("AGENTIHOOKS_HUB_SERVING_FILE")
+    probe = container.get("readinessProbe", {}).get("exec", {}).get("command")
+    if not serving or probe != ["test", "-f", serving]:
+        found.append(f"the hub turns ready on {probe} instead of its serving file {serving}")
     labels = deployment["spec"]["template"]["metadata"]["labels"]
     if labels.get("app.kubernetes.io/component") != "hub":
         found.append("the hub pods are not labelled with the hub component")
@@ -38,6 +42,10 @@ def hub_problems(deployment: dict) -> list[str]:
         found.append("the hub pods may run as root")
     if RELOAD in deployment["metadata"].get("annotations", {}):
         found.append("a hub without hub.secretEnv still carries a secret reload annotation")
+    strategy = deployment["spec"].get("strategy", {})
+    rolling = strategy.get("rollingUpdate", {})
+    if strategy.get("type") != "RollingUpdate" or rolling.get("maxSurge") != 0 or rolling.get("maxUnavailable") != 1:
+        found.append(f"the hub rollout adds a pod before an old one leaves: {strategy}")
     return found
 
 
@@ -115,13 +123,22 @@ def problems(chart: str) -> list[str]:
     deployments = hubs(enabled.stdout)
     if len(deployments) != 1:
         return [*found, f"an enabled hub renders {len(deployments)} hub Deployments, expected 1"]
-    found += hub_problems(deployments[0])
+    found += hub_problems(deployments[0]) + spread_problems(chart)
+    single = render(chart, *ENABLED, "--set", "hub.replicas=1")
+    if single.returncode or any(d["spec"].get("strategy") for d in hubs(single.stdout)):
+        found.append("a single hub replica rolls out by taking the only hub down first")
     alone = render(chart, *ENABLED, "--set", "hiveOnly=true")
     if alone.returncode or hubs(alone.stdout):
         found.append("a hive only release renders the hub")
     unaddressed = render(chart, "--set", "hub.enabled=true", "--set", "nats.enabled=false")
     if unaddressed.returncode == 0 or "hub.bus.url" not in unaddressed.stderr:
         found.append("a NATS hub without hub.bus.url renders instead of failing on the missing address")
+    unmarked = render(chart, *ENABLED, "--set", "hub.servingFile=")
+    if unmarked.returncode == 0 or "hub.servingFile" not in unmarked.stderr:
+        found.append("a hub without hub.servingFile renders a readiness probe that never passes")
+    overlaid = render(chart, *ENABLED, "--set", "hub.env.AGENTIHOOKS_HUB_SERVING_FILE=/elsewhere")
+    if overlaid.returncode or any(hub_problems(d) for d in hubs(overlaid.stdout)):
+        found.append("a hub.env entry for AGENTIHOOKS_HUB_SERVING_FILE moves the hub off the file its probe reads")
     if receivers(default.stdout):
         found.append("the default release renders the GitHub webhook receiver")
     return found + scope_problems(chart) + secret_env_problems(chart) + receiver_release_problems(chart)
@@ -175,6 +192,41 @@ def receiver_release_problems(chart: str) -> list[str]:
     return found
 
 
+def spread_problems(chart: str) -> list[str]:
+    rendered = render(chart, *ENABLED)
+    if rendered.returncode:
+        return [f"an enabled hub fails to render: {rendered.stderr.strip()}"]
+    deployment = hubs(rendered.stdout)[0]
+    affinity = deployment["spec"]["template"]["spec"].get("affinity", {})
+    selector = {"matchLabels": deployment["spec"]["selector"]["matchLabels"]}
+    term = {"weight": 100, "podAffinityTerm": {"topologyKey": "kubernetes.io/hostname", "labelSelector": selector}}
+    found = []
+    if affinity.get("podAntiAffinity") != {"preferredDuringSchedulingIgnoredDuringExecution": [term]}:
+        found.append(f"the hub pods do not prefer a node without another hub: {affinity.get('podAntiAffinity')}")
+    if "nodeAffinity" not in affinity:
+        found.append("the hub pods lose the configured node affinity beside the spread preference")
+    labels = deployment["spec"]["template"]["metadata"]["labels"]
+    if not selector["matchLabels"].items() <= labels.items():
+        found.append(f"the spread term selects {selector['matchLabels']}, which the hub pod labels {labels} lack")
+    single = render(chart, *ENABLED, "--set", "hub.replicas=1")
+    spread = [d["spec"]["template"]["spec"].get("affinity", {}).get("podAntiAffinity") for d in hubs(single.stdout)]
+    if single.returncode:
+        found.append(f"a single hub replica fails to render: {single.stderr.strip()}")
+    elif any(spread):
+        found.append(f"a single hub replica renders a spread preference: {spread}")
+    key = "hub.affinity.podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution[0]"
+    given = ["--set", f"{key}.topologyKey=topology.kubernetes.io/zone"]
+    given += ["--set", f"{key}.labelSelector.matchLabels.team=hub"]
+    kept = render(chart, *ENABLED, *given)
+    rows = [d["spec"]["template"]["spec"].get("affinity", {}).get("podAntiAffinity") for d in hubs(kept.stdout)]
+    wanted = {"topologyKey": "topology.kubernetes.io/zone", "labelSelector": {"matchLabels": {"team": "hub"}}}
+    if kept.returncode:
+        found.append(f"a hub with a pod anti affinity in hub.affinity fails to render: {kept.stderr.strip()}")
+    elif rows != [{"requiredDuringSchedulingIgnoredDuringExecution": [wanted]}]:
+        found.append(f"a hub.affinity pod anti affinity renders as {rows}, expected it as given: {wanted}")
+    return found
+
+
 if __name__ == "__main__":
     failures = problems(sys.argv[1])
     for line in failures:
@@ -182,6 +234,8 @@ if __name__ == "__main__":
     if failures:
         sys.exit(1)
     print(
-        "the hub renders two replicas of agentihooks hub run on the configured bus, and only outside a hive;"
+        "the hub renders two replicas of agentihooks hub run on the configured bus that prefer different nodes"
+        " and turn ready only once they serve,"
+        " and only outside a hive;"
         " the GitHub webhook receiver renders beside it on the chart image with its secret by reference"
     )

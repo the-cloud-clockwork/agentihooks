@@ -216,6 +216,7 @@ def test_status_names_a_running_pane_spawned_without_its_herdr_name(tmp_path):
             conversation_id=conversation,
             runtime_backend="local",
             runtime_target={},
+            hive="",
         )
 
     assert runtime.status(agent("eng-3", "w:p4", "c3")) == "working"
@@ -854,6 +855,92 @@ def test_resume_preserves_the_recorded_resolved_model_and_effort(tmp_path):
     config.lanes = {"eng": {"model": "opus", "effort": "high"}}
     runtime.resume(config, replace(agent, model="sonnet", effort="medium"), "continue")
     assert _passed(seen["runs"][0]) == ["--route", "a1", "--model", "sonnet", "--effort", "medium"]
+
+
+@pytest.mark.feature("launch-model-suits-harness")
+@pytest.mark.parametrize(
+    ("harness", "pinned", "launch"),
+    [
+        ("codex", "opus", ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="medium"']),
+        ("claude", "gpt-6.1-sol", ["--model", "opus", "--effort", "medium"]),
+    ],
+)
+def test_a_resume_with_no_recorded_model_never_takes_the_other_harness_pinned_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, harness: str, pinned: str, launch: list[str]
+) -> None:
+    from dataclasses import replace
+
+    for key in ("CLAUDE_MODEL", "CLAUDE_EFFORT", "CODEX_MODEL", "CODEX_EFFORT"):
+        monkeypatch.delenv(f"AGENTIHOOKS_{key}", raising=False)
+    runtime, config, agent, seen = _resuming(tmp_path, "c0ffee", harness=harness)
+    config.lanes = {"eng": {"model": pinned, "effort": "medium"}}
+    runtime.resume(config, replace(agent, model="", effort=""), "you were restored")
+    assert _passed(seen["runs"][0]) == ["--route", "a1", *launch]
+
+
+@pytest.mark.feature("launch-model-suits-harness")
+@pytest.mark.parametrize(
+    ("harness", "recorded", "launch"),
+    [
+        ("codex", "opus", ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="high"']),
+        ("claude", "gpt-6.1-sol", ["--model", "opus", "--effort", "high"]),
+    ],
+)
+def test_a_resume_never_relaunches_a_recorded_model_of_the_other_harness(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, harness: str, recorded: str, launch: list[str]
+) -> None:
+    from dataclasses import replace
+
+    for key in ("CLAUDE_MODEL", "CLAUDE_EFFORT", "CODEX_MODEL", "CODEX_EFFORT"):
+        monkeypatch.delenv(f"AGENTIHOOKS_{key}", raising=False)
+    runtime, config, agent, seen = _resuming(tmp_path, "c0ffee", harness=harness)
+    runtime.resume(config, replace(agent, model=recorded), "you were restored")
+    assert _passed(seen["runs"][0]) == ["--route", "a1", *launch]
+
+
+@pytest.mark.feature("launch-model-suits-harness")
+@pytest.mark.parametrize(
+    ("harness", "pinned", "launch"),
+    [
+        ("codex", "opus", ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="medium"']),
+        ("claude", "gpt-6.1-sol", ["--model", "opus", "--effort", "medium"]),
+    ],
+)
+def test_a_lane_outside_eng_and_ci_never_launches_the_other_harness_pinned_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, harness: str, pinned: str, launch: list[str]
+) -> None:
+    task = {"id": "t1", "title": "Slice the phase", "difficulty": "S", "rank": "normal"}
+    lanes = {"plan": {"model": pinned, "effort": "medium"}}
+    assert _launched(tmp_path, monkeypatch, "plan", task, lanes=lanes, harness=harness) == launch
+
+
+@pytest.mark.feature("launch-model-suits-harness")
+def test_a_claude_first_life_on_a_codex_pinned_engineer_lane_launches_the_claude_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    task = {"id": "t1", "title": "Fix typo", "difficulty": "S", "rank": "normal"}
+    lanes = {"eng": {"model": "gpt-6.1-sol", "effort": "medium"}}
+    launched = _launched(tmp_path, monkeypatch, "eng", task, lanes=lanes, harness="claude")
+    assert launched == ["--model", "opus", "--effort", "medium"]
+
+
+@pytest.mark.feature("launch-model-suits-harness")
+@pytest.mark.parametrize(
+    ("harness", "saved_model", "launch"),
+    [
+        ("codex", "opus", ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="medium"']),
+        ("claude", "gpt-6.1-sol", ["--model", "opus", "--effort", "medium"]),
+        ("claude", "sonnet", ["--model", "sonnet", "--effort", "medium"]),
+    ],
+)
+def test_a_successor_never_launches_a_saved_model_of_the_other_harness(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, harness: str, saved_model: str, launch: list[str]
+) -> None:
+    from scripts.swarm.templates import DEFAULT_PROFILES
+
+    saved = {"profile": DEFAULT_PROFILES["eng"], "harness": harness, "model": saved_model, "effort": "medium"}
+    task = {"id": "t1", "title": "Fix typo", "handoff_envelope": {"launch": saved}}
+    assert _launched(tmp_path, monkeypatch, "eng", task, harness=harness) == launch
 
 
 def _launched(tmp_path, monkeypatch, lane, task, lanes=None, harness="claude", env=None):

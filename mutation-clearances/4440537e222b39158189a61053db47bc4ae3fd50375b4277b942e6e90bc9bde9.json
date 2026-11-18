@@ -1,0 +1,6 @@
+{
+  "scripts/tick/adapters/database_ledger.py:scripts.tick.adapters.database_ledger.x_exchanged:b3c21b25bc6aaf7e51a04a5fd50b6e22e4a25d22e4e4f061c5be2fbaa12dce2e": {
+    "reader": "standards-reader",
+    "reason": "exchanged stores Content-Length in an email Message whose get ignores name case; the value and read path are unchanged."
+  }
+}

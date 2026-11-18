@@ -6,10 +6,11 @@ from http.server import ThreadingHTTPServer
 
 import pytest
 
-from scripts.swarm_ledger import ledger_agent_ops, ledger_comments, new_ledger
+from scripts.swarm_ledger import api_service, ledger_agent_ops, ledger_comments, new_ledger
 from scripts.swarm_ledger import ledger_core as validation
 from scripts.swarm_ledger import ledger_server as server
 from tests.swarm_ledger import legacy_page  # noqa: E402
+from tests.swarm_ledger.ledger_front import Front
 
 core = server.core
 
@@ -23,9 +24,9 @@ def ledger_page(monkeypatch):
     html_path.write_text(legacy_page.render(doc, "demo", server.PORT))
     core.sync("demo", ops=[{"op": "join", "id": "join", "by": "engineer"}])
     token = legacy_page.stored_token(html_path)
-    monkeypatch.setattr(server, "relay_to_inbox", lambda *args: None)
-    monkeypatch.setattr(server, "doctor_phrase", lambda *args: None)
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+    monkeypatch.setattr(api_service, "relay_to_inbox", lambda *args: None)
+    monkeypatch.setattr(api_service, "doctor_phrase", lambda *args: None)
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), Front)
     thread = threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.01})
     thread.start()
 

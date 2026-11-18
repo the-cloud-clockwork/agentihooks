@@ -477,44 +477,6 @@ def test_beat_keeps_beating_through_a_hosted_lease_outage(
     assert renewals == [(store, "sw", held)] * 2
 
 
-@pytest.mark.parametrize(
-    ("raised", "unavailable"),
-    [
-        (OSError("timed out"), True),
-        ("503", True),
-        ("500", True),
-        ("409", False),
-    ],
-)
-def test_hosted_lease_failures_name_an_outage_apart_from_a_stale_refusal(
-    monkeypatch: pytest.MonkeyPatch, raised: OSError | str, unavailable: bool
-) -> None:
-    import io
-    import json
-    import urllib.error
-    from email.message import Message
-
-    from scripts.swarm import ledger_client
-    from scripts.swarm_ledger.api import client
-
-    class Ledger:
-        def credentials(self, slug: str, service: bool = False) -> dict[str, str]:
-            return {}
-
-    def request(self: object, slug: str, path: str, payload: object) -> dict[str, object]:
-        if isinstance(raised, OSError):
-            raise raised
-        body = json.dumps({"error": {"code": "stale_controller", "message": "stale"}}).encode()
-        raise urllib.error.HTTPError("https://ledger.example", int(raised), "failed", Message(), io.BytesIO(body))
-
-    monkeypatch.setattr(lease, "_address", lambda slug: "https://ledger.example")
-    monkeypatch.setattr(ledger_client, "_ledger", lambda: Ledger())
-    monkeypatch.setattr(client.ResourceClient, "request", request)
-    with pytest.raises(SwarmError) as error:
-        lease._remote("sw", "renew", {"owner": "home", "epoch": 1})
-    assert isinstance(error.value, lease.LeaseUnavailable) is unavailable
-
-
 def test_a_fenced_launch_slower_than_the_lease_keeps_it(store, clock, monkeypatch):
     store.create(SwarmConfig("sw", ".", 1, 0))
     monkeypatch.delenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", raising=False)

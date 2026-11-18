@@ -265,54 +265,6 @@ def test_corrupt_journal_lines_are_skipped(tmp_path, monkeypatch, now):
     assert coverage["held_since"] == START - 10.0
 
 
-def test_a_stopping_server_persists_a_stop_before_it_releases_the_writer(tmp_path, now, monkeypatch):
-    path = tmp_path / request_metrics.JOURNAL_NAME
-    seen = []
-
-    class Lease:
-        def __init__(self, directory):
-            pass
-
-        def acquire(self, claimant, wait):
-            return self
-
-        def release(self):
-            seen.append(path.read_text())
-
-    class Server:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def server_bind(self):
-            pass
-
-        def server_activate(self):
-            pass
-
-        def serve_forever(self, poll_interval):
-            request_metrics.record("POST", OPERATIONS, 1.0, 0.0, 0.0)
-
-        def drained(self, timeout):
-            return True
-
-        def server_close(self):
-            pass
-
-    monkeypatch.setattr(server.core, "LEDGER_DIR", tmp_path)
-    monkeypatch.setattr(server, "PIDFILE", tmp_path / ".server.pid")
-    monkeypatch.setattr(server.ports.swarm().ledger_writer, "WriterLease", Lease)
-    monkeypatch.setattr(server, "ThreadingHTTPServer", Server)
-    monkeypatch.setattr(server.threading, "Thread", lambda **kwargs: SimpleNamespace(start=lambda: None))
-    monkeypatch.setattr("scripts.swarm_ledger.outbox_host.running", lambda repository: nullcontext())
-    monkeypatch.setattr(server.server_lifetime, "watch", lambda *args: threading.Event())
-    monkeypatch.setattr(server.server_code, "record", lambda *args, **kwargs: None)
-    monkeypatch.setattr(server.legacy, "adopt", lambda stored: None)
-    monkeypatch.setattr(server, "adopt_unrelayed", lambda: None)
-    monkeypatch.setattr(server, "HUB", SimpleNamespace(drain=lambda: None))
-    server.serve()
-    assert json.loads(seen[0].splitlines()[-1])[0] == "stop"
-
-
 def test_endpoint_and_command_return_route_records(tmp_path, now, metrics_url, capsys):
     request_metrics.record("POST", OPERATIONS, 1.78, 0.5, 0.75)
     with urlopen(f"{metrics_url}/api/v1/metrics?view=writes&hours=1&end={START}&limit=10") as response:
@@ -540,7 +492,6 @@ def test_serve_restores_then_stops_the_journal(monkeypatch, tmp_path, now):
     monkeypatch.setattr("scripts.swarm_ledger.outbox_host.running", lambda repository: nullcontext())
     monkeypatch.setattr(server, "ThreadingHTTPServer", Server)
     monkeypatch.setattr(server.server_lifetime, "watch", lambda *args: threading.Event())
-    monkeypatch.setattr(server.legacy, "adopt", lambda *args: None)
     server.serve()
     rows = [json.loads(line) for line in (tmp_path / request_metrics.JOURNAL_NAME).read_text().splitlines()]
     assert [row[0] for row in rows] == ["held", "start", "flush", "stop"]

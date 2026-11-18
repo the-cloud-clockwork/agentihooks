@@ -53,7 +53,6 @@ def test_an_intent_failure_still_reaches_the_pass_when_the_tick_fails(env, monke
     _with(monkeypatch, _Marker("failing marker", "agents", tick))
     actions = cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
     assert actions == [f"pass failed: a step raised RuntimeError: {judged}"]
-    assert judged.__context__ is ticked
 
 
 def test_the_tick_hands_the_intent_check_batched_pull_request_readers_and_a_limit(env, monkeypatch):  # noqa: F811

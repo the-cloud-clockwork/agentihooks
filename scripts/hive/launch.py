@@ -13,12 +13,13 @@ from scripts.hive import admission, ceiling, headroom, orders, placement, placem
 from scripts.hive import config as hive_config
 from scripts.hive.orders import STALE_EPOCH, Ack, CommandOrder, LaunchOrder, Orders
 from scripts.quota_state import CLOSED
-from scripts.routing.reservation import LaunchSlots
+from scripts.routing.reservation import LaunchSlots, master_five_floor, primary_reserve_pct
 from scripts.routing.slots import account_key
 from scripts.swarm import capacity, lease, profile_choice
 from scripts.swarm.store import ROUND_ROBIN, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import ACK_LATER, Placed
 from scripts.swarm_v2 import front_door
+from scripts.swarm_v2.kubernetes import approved
 from scripts.swarm_v2.runtime.base import Capability, Outcome, SpawnRequest, Status
 
 HIVE = "hive"
@@ -31,6 +32,8 @@ PENDING = "hive launch ordered, waiting for its acknowledgement"
 EXPIRED = "hive launch acknowledgement expired"
 LATE = "hive launch reservation expired"
 ACCOUNT_FULL = "account reservation is full"
+MASTER_FLOOR = "{account} is at the master floor with {left:.0f}% of its {window} left"
+NO_MASTER_SLOT = f"no {placement.HIVE} for {placement.MASTER} advertises a claude slot"
 
 
 @dataclass(frozen=True)
@@ -153,6 +156,42 @@ def _master_logins(hives: list[dict], front: bool) -> list[dict]:
         if result.provider_status in ("revoked", "rejected")
     }
     return [hive for hive in hives if placement.account_key(hive["master_login"].get("claude", "")) not in rejected]
+
+
+def _master_closed(row: capacity.Account) -> bool:
+    """Whether ``row`` refuses a master: at the master floor, or closed for a reason the worker drain floor does not
+    explain."""
+    drained = approved.draining(row.harness, row.five_left, row.week_left)
+    return row.state == CLOSED and (_master_floor(row) is not None or not drained)
+
+
+def _master_floor(row: capacity.Account) -> tuple[str, float] | None:
+    """The window and percent left at which ``row`` sits at the master floor: its week at or under the primary login
+    reserve, or its five hour window at or under the hard five hour handoff."""
+    if row.week_left is not None and row.week_left <= primary_reserve_pct(os.environ):
+        return "week", row.week_left
+    if row.five_left is not None and row.five_left <= master_five_floor():
+        return "five hour window", row.five_left
+    return None
+
+
+def _floored(waited: placement.Wait, rows: list[capacity.Account], hives: list[dict[str, Any]]) -> placement.Wait:
+    """``waited`` naming each hosting hive's Claude master login the master floor closed, when no hive offered a Claude
+    slot for the master."""
+    if waited.reason != NO_MASTER_SLOT:
+        return waited
+    logins = {
+        placement.account_key(hive["master_login"]["claude"]) for hive in hives if "claude" in hive["master_login"]
+    }
+    floored = [
+        MASTER_FLOOR.format(account=row.name, window=floor[0], left=floor[1])
+        for row in rows
+        if row.harness == "claude"
+        and row.state == CLOSED
+        and placement.account_key(row.name) in logins
+        and (floor := _master_floor(row)) is not None
+    ]
+    return replace(waited, reason="; ".join([waited.reason, *floored]))
 
 
 def _open_rows(rows: list, harness: str = "claude") -> list:
@@ -385,8 +424,7 @@ class HiveLaunch:
         rows = [row for row in rows if f"{row.harness}:{row.name}" not in accounts]
         rows = capacity.unreserved(rows) if lane == "master" else rows
         if lane == "master" and not task.get("route_kind"):
-            front = front_door.holds(self.slug, task.get("seat", ""))
-            selected = self._master_selection(config, decision, hives, now, rows, front, accounts)
+            selected = self._master_selection(config, decision, hives, now, rows, task, accounts)
             return self._record_wait(lane, task, selected)
         from scripts.swarm import local_slots
         from scripts.swarm.commands import hive_id
@@ -449,24 +487,33 @@ class HiveLaunch:
         hives: list[dict[str, Any]],
         now: int,
         rows: list[capacity.Account],
-        front: bool,
+        task: dict[str, Any],
         refused: frozenset[str] = frozenset(),
     ) -> Selection | placement.Wait:
-        """Place a master on a hive, refusing every Claude account its capacity rows mark closed and every
-        ``harness:account`` key in ``refused`` whose reservation already turned this launch away."""
+        """Place the master ``task`` on a hive, refusing every Claude account closed for a master, at the master floor
+        or for a reason the worker drain floor does not explain, unless the task is a forced start, and every
+        ``harness:account`` key in ``refused`` whose reservation already turned this launch away. A slot is taken on an
+        account with a free seat; a forced start takes any Claude account's slot when no account has one."""
+        front = front_door.holds(self.slug, task.get("seat", ""))
         closed = frozenset(
-            placement.account_key(row.name) for row in rows if row.harness == "claude" and row.state == CLOSED
+            placement.account_key(row.name)
+            for row in rows
+            if row.harness == "claude" and _master_closed(row) and not task.get("forced")
         ) | frozenset(placement.account_key(key.removeprefix("claude:")) for key in refused)
         accounts = {
             placement.account_key(row.name): row for row in rows if row.harness == "claude" and capacity.free_seats(row)
         }
+        if not accounts and task.get("forced"):
+            accounts = {placement.account_key(row.name): row for row in rows if row.harness == "claude"}
         available = [
             {**hive, "slots": [slot for slot in hive["slots"] if placement.account_key(slot["account"]) in accounts]}
             for hive in _master_logins(hives, front)
         ]
         selected = placement.place_master("claude", "", config.repo, available, now, front, closed)
         if isinstance(selected, placement.Wait):
-            return selected if hives else placement.Wait(f"no live hive takes {placement.MASTER}")
+            return _floored(
+                selected if hives else placement.Wait(f"no live hive takes {placement.MASTER}"), rows, hives
+            )
         if selected.route_kind == placement.MASTER_LOGIN:
             account = capacity.Account("claude", selected.account, "room", 0, None, None, kind=placement.MASTER_LOGIN)
         elif selected.route_kind == "interactive":
@@ -705,7 +752,7 @@ class HiveLaunch:
             reading = self.slots.reserve_reading(
                 f"{account.harness}:{account.name}", admitted.execution_id, account.cap, TTL_MS
             )
-            if not reading.accepted:
+            if not reading.accepted and not request.task.get("forced"):
                 refused = (
                     f"{ACCOUNT_FULL}: account={account.harness}:{account.name} "
                     f"sessions={reading.sessions} cap={account.cap} "
@@ -901,6 +948,7 @@ class HiveLaunch:
         live = replace(
             agent,
             account=account,
+            placement=ack.execution.get("placement", agent.placement),
             runtime_target=ack.target,
             state="working",
             pane_id=ack.execution.get("pane_id", agent.pane_id),

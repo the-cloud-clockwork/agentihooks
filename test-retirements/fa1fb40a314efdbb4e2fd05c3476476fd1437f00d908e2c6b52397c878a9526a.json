@@ -1,0 +1,6 @@
+{
+  "tests/swarm_ledger/test_hosted_client_lookup.py::test_02_later_read_uses_the_current_client": {
+    "reader": "standards-reader",
+    "reason": "The HTTP ledger client transport is deleted: uploads, proof ledger calls, proof controls, launch tokens, replays and the controller and chat clients run the ledger API route code in process, so no credential, access header, plain http refusal, HTTP timeout or stall retry of these calls remains, and ledger.resource and ledger.export always retry, so the run once read is gone."
+  }
+}

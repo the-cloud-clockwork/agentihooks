@@ -1,8 +1,10 @@
-"""The controller's ledger in deployed mode: the hosted ledger server holds every task and applies every write."""
+"""The controller's ledger in deployed mode: the ledger API route code run in this process over the shared database
+holds every task and applies every write."""
 
 import json
 import time
 import urllib.error
+from typing import Any
 
 from scripts.swarm.store import RedisStore
 from scripts.swarm_ledger import ledger
@@ -42,13 +44,20 @@ def _task_key(op: dict) -> str:
 
 
 class HostedLedger:
-    """Reads and writes tasks through the hosted ledger server with the controller credential; it keeps no folder."""
+    """Reads and writes tasks through the ledger API route code over the shared database; it keeps no folder."""
 
-    def __init__(self, base: str, credential: str, store: RedisStore) -> None:
-        self.base, self.credential, self.store = base, credential, store
+    def __init__(self, base: str, store: RedisStore) -> None:
+        self.base, self.store = base, store
 
     def client(self) -> hub_client.ResourceClient:
-        return hub_client.ResourceClient(self.base, {"X-Controller-Credential": self.credential})
+        """The ledger API client run in this process over the shared database, judged as the swarm's service."""
+        from scripts.tick.adapters import database_ledger
+
+        def served(slug: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+            with database_ledger.acting(""):
+                return database_ledger.request(slug, path, payload)
+
+        return hub_client.ResourceClient(self.base, {}, ledger.REQUEST_TIMEOUT, transport=served)
 
     def fetch(self, slug: str, key: str) -> tuple[dict | None, str | None]:
         try:

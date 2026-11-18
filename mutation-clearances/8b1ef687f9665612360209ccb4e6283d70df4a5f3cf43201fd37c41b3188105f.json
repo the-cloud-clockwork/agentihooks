@@ -1,0 +1,6 @@
+{
+  "scripts/events/memory.py:scripts.events.memory.xǁMemoryWorkQueueǁrelease:d37504a83db217306ef8b862cf12f568ae235f6be9f70e06778a146034b02e98": {
+    "reader": "standards-reader",
+    "reason": "`cast` only changes the static type of its operand; at runtime it returns `delivery` unchanged, and the call dispatches to the runtime object's own `release` method. Replacing the cast target with None changes no runtime behaviour. Only a static type checker could observe it, and that check runs outside mutation testing."
+  }
+}

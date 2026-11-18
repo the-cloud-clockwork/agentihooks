@@ -1,12 +1,12 @@
 import pytest
 
+from scripts.swarm_ledger import api_service
 from scripts.swarm_ledger.api.errors import APIError
 from tests.swarm_ledger.test_controller_hosted_ledger import (
     SLUG,
     _held_task,
     _hl,
     core,
-    ledger_server,
 )
 from tests.swarm_ledger.test_controller_hosted_ledger import (
     deployed as deployed,
@@ -43,7 +43,7 @@ def test_hosted_apply_accepts_the_current_spec_even_with_an_old_task_guard(deplo
     operation = _operation(deployed)
     payload = {"operation_id": "direct-current", "ops": [operation], "guards": {schemas.target(operation): "f" * 64}}
 
-    reply = mutations.apply(ledger_server.api_services(), SLUG, "", payload)
+    reply = mutations.apply(api_service.services(), SLUG, "", payload)
 
     assert reply["applied"] == ["worker-direct"]
     assert reply["rejected"] == []
@@ -63,7 +63,7 @@ def test_hosted_worker_apply_uses_the_current_redis_adapter_after_module_loading
         with patch("scripts.swarm.store.connect", return_value=_store()):
             importlib.reload(worker_writes)
 
-        reply = mutations.apply(ledger_server.api_services(), SLUG, "", payload)
+        reply = mutations.apply(api_service.services(), SLUG, "", payload)
 
         assert reply["applied"] == ["worker-direct"]
         assert _held_task()["state"] == "pr"

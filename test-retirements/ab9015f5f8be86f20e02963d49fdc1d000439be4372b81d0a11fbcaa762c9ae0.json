@@ -1,0 +1,6 @@
+{
+  "tests/swarm_ledger/test_ledger_outbox.py::test_outage_join_is_kept_replayed_once_and_counted_at_launch[False]": {
+    "reader": "standards-reader",
+    "reason": "Talk queueing while the ledger server is down, the hold of other writes behind queued talk and the flush before a live write lived only in the deleted HTTP server_call; ledger.queue is fed only by LedgerClient offline writes, whose in order replay keeps its own test."
+  }
+}

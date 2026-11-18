@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api_service.py:scripts.swarm_ledger.api_service.x_gate_pairs:c4c53d5c4e23b5e50683b19f56160f65b16cde4f9a0eafb52d5699e5d9e90061": {
+    "reader": "standards-reader",
+    "reason": "typing.cast returns gates unchanged at run time; the .items() call is identical."
+  }
+}

@@ -19,6 +19,7 @@ import new_ledger  # noqa: E402
 from scripts.swarm_ledger import ledger_server as server  # noqa: E402
 from scripts.swarm_ledger.events import Hub, patch, stream  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
+from tests.swarm_ledger.ledger_front import Front  # noqa: E402
 
 browser = chromium_browser
 ROOT = Path(__file__).resolve().parents[2]
@@ -106,7 +107,7 @@ def live(monkeypatch):
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content, "swarm"), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
     core.sync(SLUG)
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), Front)
     hosts = {f"127.0.0.1:{httpd.server_address[1]}"}
     status = {"value": {**SWARM, "config": {**SWARM["config"], "state": "running"}}}
     monkeypatch.setattr(server, "HUB", Hub())

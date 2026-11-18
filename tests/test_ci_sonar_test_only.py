@@ -146,6 +146,7 @@ def test_a_failed_diff_cannot_publish_a_test_only_decision(tmp_path):
     "name",
     [
         "Install coverage",
+        "Take each shard's coverage as it lands",
         "Start Cloudflare Access proxy",
     ],
 )

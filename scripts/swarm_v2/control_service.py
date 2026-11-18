@@ -313,7 +313,7 @@ def host(environ: Mapping[str, str], store: RedisStore, owner: str) -> ControlSe
         if service.controller.terminals is not None:
             service.views = deployed.terminal_views(service.controller, environ)
     if hosted:
-        service.hosted_ledger = HostedLedger(ledger_link.base(environ), credential, store)
+        service.hosted_ledger = HostedLedger(ledger_link.base(environ), store)
     else:
         service.ledger_folder = ledger_host.folder(environ)
     try:

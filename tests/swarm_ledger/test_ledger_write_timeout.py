@@ -20,8 +20,8 @@ class Answering:
 def timeouts(monkeypatch: pytest.MonkeyPatch) -> list:
     seen = []
 
-    def client(slug: str, service: bool = False, timeout: float = -1.0, headers: dict | None = None) -> Answering:
-        seen.append((slug, service, timeout))
+    def client(slug: str, timeout: float = -1.0) -> Answering:
+        seen.append((slug, timeout))
         return Answering()
 
     monkeypatch.setattr(ledger, "client", client)
@@ -30,24 +30,24 @@ def timeouts(monkeypatch: pytest.MonkeyPatch) -> list:
 
 @pytest.mark.feature("ledger-write-timeout")
 def test_a_write_waits_past_the_server_writer_lock_budget(timeouts: list) -> None:
-    assert ledger.request("ledger", [ADD], service=True) == {"wrote": "ledger", "ops": [ADD]}
-    assert timeouts == [("ledger", True, 40)]
+    assert ledger.request("ledger", [ADD]) == {"wrote": "ledger", "ops": [ADD]}
+    assert timeouts == [("ledger", 40)]
     assert ledger.WRITE_TIMEOUT == postgres.LOCK_TRIES * postgres.LOCK_WAIT + ledger.REQUEST_TIMEOUT
 
 
 @pytest.mark.feature("ledger-write-timeout")
 def test_an_empty_operation_list_is_still_a_write(timeouts: list) -> None:
     assert ledger.request("ledger", []) == {"wrote": "ledger", "ops": []}
-    assert timeouts == [("ledger", False, 40)]
+    assert timeouts == [("ledger", 40)]
 
 
 @pytest.mark.feature("ledger-write-timeout")
 def test_a_read_keeps_the_request_timeout(timeouts: list) -> None:
     assert ledger.request("ledger") == {"read": "ledger"}
-    assert timeouts == [("ledger", False, 10)]
+    assert timeouts == [("ledger", 10)]
 
 
 @pytest.mark.feature("ledger-write-timeout")
 def test_an_explicit_timeout_wins_for_a_write(timeouts: list) -> None:
     assert ledger.request("ledger", [ADD], timeout=2) == {"wrote": "ledger", "ops": [ADD]}
-    assert timeouts == [("ledger", False, 2)]
+    assert timeouts == [("ledger", 2)]

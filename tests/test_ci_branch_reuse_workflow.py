@@ -519,14 +519,17 @@ def test_full_scope_shard_check_grades_and_summarizes_the_branch_plan():
         ({"steps.source.outputs.test_only": "true"}, False),
     ],
 )
-def test_sonar_carries_the_branch_coverage_only_on_same_repo_pull_requests(values, carried):
+def test_sonar_carries_the_branch_coverage_only_on_same_repo_pull_requests(
+    values: dict[str, str], carried: bool
+) -> None:
     base = {**SAME_REPO, "needs.select.outputs.scope": "selected", "steps.source.outputs.test_only": "false"}
     names = [step.get("name") for step in _jobs()["sonar"]["steps"]]
     carry = _step("sonar", "Carry the pull request runs' coverage of the reused tests")
     mint = next(step for step in _jobs()["sonar"]["steps"] if step.get("id") == "app-token")
     assert mint["if"] == carry["if"]
     assert _evaluate(carry["if"], {**base, **values}) is carried
-    assert names.index("Download shard coverage") < names.index(carry["name"]) < names.index("Merge shard coverage")
+    arrivals = "Take each shard's coverage as it lands"
+    assert names.index(carry["name"]) < names.index(arrivals) < names.index("Merge shard coverage")
     assert carry["env"] == {
         "GH_TOKEN": "${{ steps.app-token.outputs.token }}",
         "GRADER": "${{ github.event.pull_request.base.sha }}",
@@ -585,19 +588,13 @@ def test_a_selected_leg_uploads_its_coverage_once_when_its_branch_coverage_carri
     assert not _evaluate(condition, {**SAME_REPO, "matrix.python-version": "3.13", **values})
 
 
-def test_sonar_downloads_the_branch_coverage_only_for_a_selected_scope():
-    download = _step("sonar", "Download shard coverage")
-    assert download["with"]["pattern"] == (
-        "${{ needs.select.outputs.scope == 'selected' && '{coverage,branch-coverage}-3.12-*' || 'coverage-3.12-*' }}"
-    )
+def test_sonar_takes_the_branch_coverage_only_for_a_selected_scope() -> None:
+    arrivals = _step("sonar", "Take each shard's coverage as it lands")
+    assert arrivals["env"]["SCOPE"] == "${{ needs.select.outputs.scope }}"
     take = _step("sonar", "Take each selected leg's latest branch coverage")
     assert take["if"] == "needs.select.outputs.scope == 'selected'"
     names = [step.get("name") for step in _jobs()["sonar"]["steps"]]
-    assert (
-        names.index("Download shard coverage, attempt 2")
-        < names.index(take["name"])
-        < names.index("Merge shard coverage")
-    )
+    assert names.index(arrivals["name"]) < names.index(take["name"]) < names.index("Merge shard coverage")
 
 
 def test_sonar_takes_each_legs_newest_branch_coverage_over_an_older_uploaded_attempt(tmp_path: Path) -> None:
@@ -633,6 +630,42 @@ def test_sonar_takes_each_legs_newest_branch_coverage_over_an_older_uploaded_att
         "twelve",
     ]
     assert (shards / "coverage-3.12-1/js-coverage").is_dir()
+
+
+@pytest.mark.feature("pattern-downloads-keep-a-lone-artifact-where-its-reader-looks")
+def test_sonar_takes_a_lone_selected_legs_coverage_from_the_bare_download_folder(tmp_path: Path) -> None:
+    shards = tmp_path / ".coverage-shards"
+    (shards / "js-coverage").mkdir(parents=True)
+    (shards / ".coverage").write_text("lone")
+    take = _step("sonar", "Take each selected leg's latest branch coverage")
+    assert take["env"] == {"COUNT": "${{ needs.select.outputs.count }}"}
+    subprocess.run(["bash", "-e", "-c", take["run"]], cwd=tmp_path, env={**os.environ, "COUNT": "1"}, check=True)
+    assert [path.name for path in shards.iterdir()] == ["coverage-3.12-1"]
+    assert (shards / "coverage-3.12-1/.coverage").read_text() == "lone"
+    assert (shards / "coverage-3.12-1/js-coverage").is_dir()
+
+
+@pytest.mark.feature("pattern-downloads-keep-a-lone-artifact-where-its-reader-looks")
+def test_sonar_leaves_a_bare_download_at_the_folder_root_when_two_legs_were_selected(tmp_path: Path) -> None:
+    shards = tmp_path / ".coverage-shards"
+    shards.mkdir()
+    (shards / ".coverage").write_text("bare")
+    run = _step("sonar", "Take each selected leg's latest branch coverage")["run"]
+    subprocess.run(["bash", "-e", "-c", run], cwd=tmp_path, env={**os.environ, "COUNT": "2"}, check=True)
+    assert [path.name for path in shards.iterdir()] == [".coverage"]
+
+
+@pytest.mark.feature("pattern-downloads-keep-a-lone-artifact-where-its-reader-looks")
+def test_sonar_takes_a_lone_legs_newest_attempt_when_its_attempts_land_in_their_own_folders(tmp_path: Path) -> None:
+    shards = tmp_path / ".coverage-shards"
+    for attempt, text in ((1, "old"), (2, "new")):
+        folder = shards / f"branch-coverage-3.12-1-{attempt}"
+        folder.mkdir(parents=True)
+        (folder / ".coverage").write_text(text)
+    run = _step("sonar", "Take each selected leg's latest branch coverage")["run"]
+    subprocess.run(["bash", "-e", "-c", run], cwd=tmp_path, env={**os.environ, "COUNT": "1"}, check=True)
+    assert [path.name for path in shards.iterdir()] == ["coverage-3.12-1"]
+    assert (shards / "coverage-3.12-1/.coverage").read_text() == "new"
 
 
 def test_a_selected_leg_stamps_the_attempt_that_measured_its_uploaded_coverage(tmp_path: Path) -> None:

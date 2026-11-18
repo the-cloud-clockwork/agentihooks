@@ -391,6 +391,287 @@ def test_failed_work_is_nacked_with_backoff_and_can_be_claimed_on_retry(rig, fai
     assert rig.runtime.spawn.call_count == (1 if failure == "request" else 2)
 
 
+@pytest.mark.feature("hub-admission-late-answer-keeps-claim")
+def test_an_admit_ask_that_times_out_asks_again_without_reopening_the_offer(rig: SimpleNamespace) -> None:
+    from scripts.hive import admission
+
+    rig.tasks.request.side_effect = [admission.Unanswered("no responders for 'slots.rig.one'"), rig.request]
+
+    assert rig.spoke.poll() == "asked"
+
+    rig.tasks.reopen.assert_not_called()
+    assert rig.spoke.poll() == "started"
+    assert rig.tasks.request.call_count == 2
+
+
+@pytest.mark.feature("hub-admission-hive-asks-again")
+def test_a_late_kept_admission_launches_on_the_next_poll_after_the_hub_withdrew_its_offer(
+    rig: SimpleNamespace,
+) -> None:
+    import json
+
+    from scripts.hive import admission
+
+    rig.tasks.request.side_effect = [admission.Unanswered("no responders for 'slots.rig.hive-a'"), rig.request]
+
+    assert rig.spoke.poll() == "asked"
+    assert claim(rig) == {"state": "asked", "owner": "hive-a"}
+    pending = rig.bus.state("spoke-pending")
+    assert json.loads(pending.get(rig.spoke._pending_key).value)["event"] == rig.event.to_dict()
+    assert rig.queue.withdraw(lambda event: True) == 1
+
+    assert rig.spoke.poll() == "started"
+
+    assert rig.tasks.request.call_args_list == [((rig.event,),)] * 2
+    rig.tasks.reopen.assert_not_called()
+    rig.runtime.spawn.assert_called_once()
+    assert claim(rig)["state"] == "started"
+    assert pending.get(rig.spoke._pending_key).value == b"{}"
+
+
+@pytest.mark.feature("hub-admission-hive-asks-again")
+@pytest.mark.parametrize(
+    ("answer", "outcome", "state", "kept"),
+    [
+        ("unanswered", "asked", {"state": "asked", "owner": "hive-a"}, True),
+        ("held", "held", {"state": "ready"}, False),
+        ("refused", "withdrawn", {"state": "withdrawn"}, False),
+    ],
+)
+def test_an_admission_asked_again_keeps_asking_returns_a_held_offer_and_drops_a_refused_one(
+    rig: SimpleNamespace, answer: str, outcome: str, state: dict[str, str], kept: bool
+) -> None:
+    import json
+
+    from scripts.hive import admission
+
+    again = {
+        "unanswered": admission.Unanswered("no responders for 'slots.rig.hive-a'"),
+        "held": admission.Held("2 of 2 agents on the hive"),
+        "refused": None,
+    }[answer]
+    rig.tasks.request.side_effect = [admission.Unanswered("no responders for 'slots.rig.hive-a'"), again]
+    assert rig.spoke.poll() == "asked"
+
+    assert rig.spoke.poll() == outcome
+
+    assert claim(rig) == state
+    assert (json.loads(rig.bus.state("spoke-pending").get(rig.spoke._pending_key).value) != {}) is kept
+    assert rig.tasks.request.call_count == 2
+    rig.tasks.reopen.assert_not_called()
+    rig.runtime.spawn.assert_not_called()
+
+
+@pytest.mark.feature("hub-admission-hive-asks-again")
+@pytest.mark.parametrize("failure", ["unavailable", "ambiguous"])
+def test_an_admission_asked_again_whose_launch_fails_settles_like_a_first_launch(
+    rig: SimpleNamespace, failure: str
+) -> None:
+    import json
+
+    from scripts.hive import admission
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    rig.tasks.request.side_effect = [admission.Unanswered("no responders for 'slots.rig.hive-a'"), rig.request]
+    if failure == "unavailable":
+        rig.runtime.spawn.return_value = Outcome("spawn", Status.UNAVAILABLE, "local", detail="no room")
+    else:
+        rig.runtime.spawn.side_effect = RuntimeError("response lost")
+    assert rig.spoke.poll() == "asked"
+
+    assert rig.spoke.poll() == "retry"
+
+    pending = json.loads(rig.bus.state("spoke-pending").get(rig.spoke._pending_key).value)
+    if failure == "unavailable":
+        assert claim(rig) == {"state": "ready"}
+        assert pending == {}
+        rig.tasks.reopen.assert_called_once_with(rig.event)
+    else:
+        assert claim(rig) == {"state": "launching", "owner": "hive-a", "name": "agent-a"}
+        assert pending["event"] == rig.event.to_dict()
+        rig.tasks.reopen.assert_not_called()
+
+
+@pytest.mark.feature("hub-admission-hive-asks-again")
+def test_a_spoke_asking_again_logs_each_unanswered_ask_and_takes_no_new_offer(
+    rig: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.hive import admission
+
+    unanswered = admission.Unanswered("no responders for 'slots.rig.hive-a'")
+    rig.tasks.request.side_effect = [unanswered, unanswered]
+    assert rig.spoke.poll() == "asked"
+    assert rig.queue.take(0) is None
+    rig.queue.offer(replace(rig.event, id="ready-b", key="task-b"))
+
+    assert rig.spoke.poll() == "asked"
+
+    assert rig.tasks.request.call_args_list == [((rig.event,),)] * 2
+    line = "hive spoke for swarm rig lane eng poll failed (Unanswered: no responders for 'slots.rig.hive-a')"
+    assert capsys.readouterr().err.count(line) == 2
+    assert rig.queue.take(0).event.key == "task-b"
+
+
+@pytest.mark.feature("hub-admission-hive-asks-again")
+def test_a_pending_admission_another_hive_now_asks_for_is_dropped(rig: SimpleNamespace) -> None:
+    pending = seed_pending(rig, {"state": "asked", "owner": "hive-b"})
+    rig.spoke.measure = lambda: None
+
+    assert rig.spoke.poll() == "held"
+
+    assert pending.get(rig.spoke._pending_key).value == b"{}"
+    assert claim(rig) == {"state": "asked", "owner": "hive-b"}
+    rig.tasks.request.assert_not_called()
+    rig.spoke.measure = reading
+    assert rig.queue.withdraw(lambda event: event.key == "task-a") == 1
+    other = replace(rig.event, id="ready-b", key="task-b")
+    rig.queue.offer(other)
+
+    assert rig.spoke.poll() == "started"
+
+    rig.tasks.request.assert_called_once_with(other)
+
+
+@pytest.mark.feature("hub-admission-hive-asks-again")
+def test_an_admission_the_hub_leaves_unanswered_keeps_asking_past_the_delivery_cap(rig: SimpleNamespace) -> None:
+    from scripts.hive import admission
+
+    rig.tasks.request.side_effect = admission.Unanswered("no responders for 'slots.rig.hive-a'")
+    polls = rig.config.policy.max_deliver + 2
+
+    assert [rig.spoke.poll() for _ in range(polls)] == ["asked"] * polls
+
+    assert rig.tasks.request.call_count == polls
+    rig.tasks.reopen.assert_not_called()
+    assert claim(rig) == {"state": "asked", "owner": "hive-a"}
+    assert rig.bus.dead.consumer("audit", "dead.>").fetch(1, 0) == []
+
+
+@pytest.mark.feature("hub-admission-hive-asks-again")
+def test_an_admission_asked_again_launches_without_measuring_room_again(rig: SimpleNamespace) -> None:
+    from scripts.hive import admission
+
+    rig.tasks.request.side_effect = [admission.Unanswered("no responders for 'slots.rig.hive-a'"), rig.request]
+    assert rig.spoke.poll() == "asked"
+    rig.spoke.measure = lambda: None
+
+    assert rig.spoke.poll() == "started"
+
+    rig.runtime.spawn.assert_called_once()
+
+
+@pytest.mark.feature("hive-spoke-own-claimed-leftover-asked-again")
+def test_a_claim_its_own_ended_admission_wait_left_asks_the_hub_again_one_ask_timeout_later(
+    rig: SimpleNamespace,
+) -> None:
+    from scripts.hive import account_slots
+
+    pending = seed_pending(rig, {"owner": "hive-a", "state": "claimed"}, attempt=2)
+    assert rig.queue.withdraw(lambda event: True) == 1
+    rig.spoke.clock = lambda: rig.clock.now
+    rig.clock.now = 5_000
+    assert rig.spoke.poll() == "busy"
+    rig.clock.now = 5_000 + account_slots.REQUEST_TIMEOUT_MS - 1
+    assert rig.spoke.poll() == "busy"
+    assert claim(rig) == {"owner": "hive-a", "state": "claimed"}
+    rig.tasks.request.assert_not_called()
+    rig.clock.now = 5_000 + account_slots.REQUEST_TIMEOUT_MS
+
+    assert rig.spoke.poll() == "started"
+
+    rig.tasks.request.assert_called_once_with(rig.event)
+    rig.tasks.reopen.assert_not_called()
+    rig.runtime.spawn.assert_called_once()
+    assert claim(rig)["state"] == "started"
+    assert pending.get(rig.spoke._pending_key).value == b"{}"
+
+
+@pytest.mark.feature("hive-spoke-own-claimed-leftover-asked-again")
+def test_a_new_pending_reservation_under_a_claimed_claim_restarts_the_admit_ask_timeout(
+    rig: SimpleNamespace,
+) -> None:
+    import json
+
+    from scripts.hive import account_slots
+
+    pending = seed_pending(rig, {"owner": "hive-a", "state": "claimed"})
+    assert rig.queue.withdraw(lambda event: True) == 1
+    rig.spoke.clock = lambda: rig.clock.now
+    rig.clock.now = 5_000
+    assert rig.spoke.poll() == "busy"
+    cleared = pending.update(rig.spoke._pending_key, b"{}", pending.get(rig.spoke._pending_key).revision)
+    reserved = json.dumps({"event": rig.event.to_dict(), "attempt": 2}).encode()
+    pending.update(rig.spoke._pending_key, reserved, cleared)
+    rig.clock.now = 5_000 + account_slots.REQUEST_TIMEOUT_MS
+    assert rig.spoke.poll() == "busy"
+    rig.clock.now = 5_000 + 2 * account_slots.REQUEST_TIMEOUT_MS - 1
+    assert rig.spoke.poll() == "busy"
+    rig.tasks.request.assert_not_called()
+    rig.clock.now = 5_000 + 2 * account_slots.REQUEST_TIMEOUT_MS
+
+    assert rig.spoke.poll() == "started"
+
+    rig.tasks.request.assert_called_once_with(rig.event)
+    assert pending.get(rig.spoke._pending_key).value == b"{}"
+
+
+@pytest.mark.feature("hive-spoke-own-claimed-leftover-asked-again")
+@pytest.mark.parametrize(
+    ("answer", "outcome", "state", "kept"),
+    [
+        ("held", "held", {"state": "ready"}, False),
+        ("refused", "withdrawn", {"state": "withdrawn"}, False),
+        ("unanswered", "asked", {"state": "asked", "owner": "hive-a"}, True),
+    ],
+)
+def test_a_claim_its_own_ended_admission_wait_left_settles_like_an_asked_claim_on_the_repeat_ask(
+    rig: SimpleNamespace, answer: str, outcome: str, state: dict[str, str], kept: bool
+) -> None:
+    import json
+
+    from scripts.hive import account_slots, admission
+
+    pending = seed_pending(rig, {"owner": "hive-a", "state": "claimed"})
+    assert rig.queue.withdraw(lambda event: True) == 1
+    rig.tasks.request.side_effect = [
+        {
+            "held": admission.Held("2 of 2 agents on the hive"),
+            "refused": None,
+            "unanswered": admission.Unanswered("no responders for 'slots.rig.hive-a'"),
+        }[answer]
+    ]
+    rig.spoke.clock = lambda: rig.clock.now
+    assert rig.spoke.poll() == "busy"
+    rig.clock.now = account_slots.REQUEST_TIMEOUT_MS
+
+    assert rig.spoke.poll() == outcome
+
+    assert claim(rig) == state
+    assert (json.loads(pending.get(rig.spoke._pending_key).value) != {}) is kept
+    rig.tasks.request.assert_called_once_with(rig.event)
+    rig.runtime.spawn.assert_not_called()
+
+
+@pytest.mark.feature("hive-spoke-own-claimed-leftover-asked-again")
+def test_a_claimed_claim_another_hive_holds_keeps_the_spoke_busy_past_the_admit_ask_timeout(
+    rig: SimpleNamespace,
+) -> None:
+    from scripts.hive import account_slots
+
+    pending = seed_pending(rig, {"owner": "hive-b", "state": "claimed"})
+    before = pending.get(rig.spoke._pending_key)
+    rig.spoke.clock = lambda: rig.clock.now
+    assert rig.spoke.poll() == "busy"
+    rig.clock.now = account_slots.REQUEST_TIMEOUT_MS
+
+    assert rig.spoke.poll() == "busy"
+
+    assert claim(rig) == {"owner": "hive-b", "state": "claimed"}
+    assert pending.get(rig.spoke._pending_key).revision == before.revision
+    rig.tasks.request.assert_not_called()
+    rig.runtime.spawn.assert_not_called()
+
+
 @pytest.mark.feature("events-failed-launch-releases-admission")
 @pytest.mark.parametrize("status", ["REFUSED", "AMBIGUOUS", "UNSUPPORTED"])
 def test_a_launch_failed_on_a_harness_steers_its_task_off_that_harness(rig, status):
@@ -495,13 +776,15 @@ def test_the_final_failed_attempt_is_dead_lettered_and_reopened_before_term(rig)
     rig.bus.dead.publish = publish
     rig.queue.take = take
     rig.tasks.reopen.side_effect = lambda event: observed.append("reopen")
+    rig.tasks.dead_lettered.side_effect = lambda event: observed.append("dead_lettered")
     assert rig.spoke.poll() == "retry"
     rig.clock.now = 10
     assert rig.spoke.poll() == "retry"
     rig.clock.now = 30
     assert rig.spoke.poll() == "dead"
-    assert observed == ["reopen", "reopen", "dead", "reopen", "term"]
-    assert rig.tasks.reopen.call_args_list == [((rig.event,),)] * 3
+    assert observed == ["reopen", "reopen", "dead", "dead_lettered", "term"]
+    assert rig.tasks.reopen.call_args_list == [((rig.event,),)] * 2
+    assert rig.tasks.dead_lettered.call_args_list == [((rig.event,),)]
     letters = rig.bus.dead.consumer("audit", "dead.>").fetch(10, 0)
     assert len(letters) == 1
     letter = letters[0].event
@@ -512,11 +795,52 @@ def test_the_final_failed_attempt_is_dead_lettered_and_reopened_before_term(rig)
     assert letter.data["source"] == "swarm.rig.ready.eng"
     letters[0].ack()
     assert real_take(0) is None
-    rig.queue.offer(replace(rig.event, id="duplicate-after-dead"))
+    duplicate = replace(rig.event, id="duplicate-after-dead")
+    rig.queue.offer(duplicate)
     assert rig.spoke.poll() == "dead"
     assert rig.runtime.spawn.call_count == 3
-    assert rig.tasks.reopen.call_count == 3
+    assert rig.tasks.reopen.call_count == 2
+    assert rig.tasks.dead_lettered.call_args_list == [((rig.event,),), ((duplicate,),)]
     assert rig.bus.dead.consumer("audit", "dead.>").fetch(10, 0) == []
+
+
+@pytest.mark.feature("dead-offer-generation")
+def test_an_offer_meeting_a_dead_claim_asks_the_hub_to_advance_its_generation_before_term(
+    rig: SimpleNamespace,
+) -> None:
+    import json
+
+    from scripts.hive.spoke import claim_key
+
+    rig.bus.state("spoke-work").create(claim_key(rig.event), json.dumps({"state": "dead"}).encode())
+    rig.tasks.dead_lettered.side_effect = RuntimeError("hub unavailable")
+
+    assert rig.spoke.poll() == "retry"
+    rig.tasks.dead_lettered.side_effect = None
+    rig.clock.now = 10
+    assert rig.spoke.poll() == "dead"
+
+    assert rig.tasks.dead_lettered.call_args_list == [((rig.event,),)] * 2
+    rig.tasks.reopen.assert_not_called()
+    rig.tasks.request.assert_not_called()
+    rig.runtime.spawn.assert_not_called()
+    assert rig.queue.take(0) is None
+    assert claim(rig) == {"state": "dead"}
+
+
+def test_an_offer_meeting_a_withdrawn_claim_is_terminated_without_asking_the_hub(rig: SimpleNamespace) -> None:
+    import json
+
+    from scripts.hive.spoke import claim_key
+
+    rig.bus.state("spoke-work").create(claim_key(rig.event), json.dumps({"state": "withdrawn"}).encode())
+
+    assert rig.spoke.poll() == "withdrawn"
+
+    rig.tasks.dead_lettered.assert_not_called()
+    rig.tasks.reopen.assert_not_called()
+    rig.tasks.request.assert_not_called()
+    assert rig.queue.take(0) is None
 
 
 def test_the_spoke_claim_and_launch_work_with_the_real_nats_backend(tmp_path):
@@ -579,7 +903,7 @@ def test_the_spoke_claim_and_launch_work_with_the_real_nats_backend(tmp_path):
             bus.close()
 
 
-@pytest.mark.parametrize("boundary", ["started", "dead", "reopen"])
+@pytest.mark.parametrize("boundary", ["started", "dead", "dead_lettered"])
 def test_completion_survives_the_queue_attempt_cap_and_loss_of_admission(rig, boundary):
     from scripts.hive.spoke import Spoke
     from scripts.swarm_v2.runtime.base import Outcome, Status
@@ -588,8 +912,8 @@ def test_completion_survives_the_queue_attempt_cap_and_loss_of_admission(rig, bo
         rig.runtime.spawn.return_value = Outcome("spawn", Status.UNAVAILABLE, "local", detail="no room")
     target = rig.bus.events if boundary == "started" else rig.bus.dead
     real_publish = target.publish
-    if boundary == "reopen":
-        rig.tasks.reopen.side_effect = RuntimeError("ledger unavailable")
+    if boundary == "dead_lettered":
+        rig.tasks.dead_lettered.side_effect = RuntimeError("ledger unavailable")
     else:
         target.publish = Mock(side_effect=RuntimeError("bus unavailable"))
     for now in (0, 10, 30):
@@ -602,7 +926,7 @@ def test_completion_survives_the_queue_attempt_cap_and_loss_of_admission(rig, bo
         if delivery is not None:
             delivery.nak(0)
     assert rig.queue.take(0) is None
-    rig.tasks.reopen.side_effect = None
+    rig.tasks.dead_lettered.side_effect = None
     restarted = Spoke(rig.config, rig.bus, rig.runtime, rig.tasks, lambda: None)
     assert restarted.poll() == ("started" if boundary == "started" else "dead")
     if boundary == "started":
@@ -610,9 +934,10 @@ def test_completion_survives_the_queue_attempt_cap_and_loss_of_admission(rig, bo
             replace(rig.request, task={**rig.request.task, "claim_fence": ANY, "account_slot_hive": "hive-a"})
         )
         rig.tasks.reopen.assert_not_called()
+        rig.tasks.dead_lettered.assert_not_called()
     else:
         assert rig.runtime.spawn.call_count == 3
-        assert rig.tasks.reopen.call_args.args == (rig.event,)
+        assert rig.tasks.dead_lettered.call_args.args == (rig.event,)
 
 
 def test_a_restarted_spoke_relaunches_its_own_ambiguous_spawn_under_a_new_claim_fence(rig):
@@ -861,7 +1186,8 @@ def test_ready_recovery_retries_below_the_cap_and_reopens_at_the_cap(rig, attemp
     else:
         assert rig.spoke.poll() == "dead"
         rig.runtime.spawn.assert_not_called()
-        rig.tasks.reopen.assert_called_once_with(rig.event)
+        rig.tasks.reopen.assert_not_called()
+        rig.tasks.dead_lettered.assert_called_once_with(rig.event)
         letter = rig.bus.dead.consumer("audit", "dead.>").fetch(1, 0)[0].event
         assert letter.data["attempts"] == 3
     assert pending.get(rig.spoke._pending_key).value == b"{}"
@@ -879,7 +1205,8 @@ def test_own_launching_recovery_releases_the_claim_and_takes_new_work(rig, attem
     else:
         assert rig.spoke.poll() == "dead"
         assert claim(rig) == {"state": "dead"}
-        rig.tasks.reopen.assert_called_once_with(rig.event)
+        rig.tasks.reopen.assert_not_called()
+        rig.tasks.dead_lettered.assert_called_once_with(rig.event)
     assert pending.get(rig.spoke._pending_key).value == b"{}"
     rig.runtime.spawn.assert_not_called()
 
@@ -955,7 +1282,8 @@ def test_another_spoke_finishes_a_pending_dead_letter_without_a_local_pending_re
         claim_key(rig.event), json.dumps({"state": "dead_pending", "event": letter.to_dict()}).encode()
     )
     assert rig.spoke.poll() == "dead"
-    rig.tasks.reopen.assert_called_once_with(rig.event)
+    rig.tasks.reopen.assert_not_called()
+    rig.tasks.dead_lettered.assert_called_once_with(rig.event)
     rig.runtime.spawn.assert_not_called()
     assert rig.queue.take(0) is None
 
@@ -971,10 +1299,12 @@ def test_completed_dead_work_does_not_repeat_recovery_on_a_held_spoke(rig):
     assert rig.spoke.poll() == "empty"
     rig.clock.now = 30
     assert rig.spoke.poll() == "dead"
-    assert rig.tasks.reopen.call_args_list == [((rig.event,),)] * 3
+    assert rig.tasks.reopen.call_args_list == [((rig.event,),)] * 2
+    assert rig.tasks.dead_lettered.call_args_list == [((rig.event,),)]
     rig.spoke.measure = lambda: None
     assert rig.spoke.poll() == "held"
-    assert rig.tasks.reopen.call_count == 3
+    assert rig.tasks.reopen.call_count == 2
+    assert rig.tasks.dead_lettered.call_count == 1
 
 
 def test_ambiguous_launch_intent_keeps_owner_and_name_after_the_exception(rig):
@@ -1110,7 +1440,8 @@ def test_poll_renews_presence_even_when_admission_holds_the_hive(rig, monkeypatc
     assert json.loads(renewed.value) == {"heartbeat_ms": 3333, "expires_ms": 48333}
 
 
-@pytest.mark.parametrize("state", ["claimed", "launching"])
+@pytest.mark.feature("hub-admission-hive-asks-again")
+@pytest.mark.parametrize("state", ["claimed", "launching", "asked"])
 def test_lost_hive_work_redelivers_and_changes_the_old_claim_fence(rig, monkeypatch, state):
     import json
 
@@ -1134,7 +1465,8 @@ def test_lost_hive_work_redelivers_and_changes_the_old_claim_fence(rig, monkeypa
     assert rig.queue.take(0) is None
 
 
-@pytest.mark.parametrize("state", ["claimed", "launching"])
+@pytest.mark.feature("hub-admission-hive-asks-again")
+@pytest.mark.parametrize("state", ["claimed", "launching", "asked"])
 def test_a_fresh_hive_keeps_its_claim_until_presence_expires(rig, monkeypatch, state):
     import json
 
@@ -1145,7 +1477,7 @@ def test_a_fresh_hive_keeps_its_claim_until_presence_expires(rig, monkeypatch, s
     store = rig.bus.state("spoke-work")
     value = json.dumps({"state": state, "owner": "hive-live"}).encode()
     revision = store.create(spoke.claim_key(rig.event), value)
-    assert rig.spoke.poll() == ("busy" if state == "claimed" else "uncertain")
+    assert rig.spoke.poll() == ("uncertain" if state == "launching" else "busy")
     assert store.get(spoke.claim_key(rig.event)).revision == revision
     rig.runtime.spawn.assert_not_called()
 

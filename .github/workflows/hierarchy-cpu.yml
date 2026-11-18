@@ -82,6 +82,8 @@ jobs:
           exit 1
       - name: Install dependencies shared by both revisions
         working-directory: head
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
         run: uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
       - name: Prepare identical hierarchy probes for base and head
         run: |
@@ -165,6 +167,8 @@ jobs:
           exit 1
       - name: Install dependencies shared by both revisions
         working-directory: head
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
         run: uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
       - name: Prepare the same load harness for base and head
         run: |
@@ -186,7 +190,9 @@ jobs:
           pids=()
           for side in "${order[@]}"; do
             mkdir -p "$GITHUB_WORKSPACE/load-home/$side"
-            ( cd "$side" && REDIS_URL="redis://127.0.0.1:6379/$database" \
+            ( cd "$side" \
+              && python -c 'import pathlib, scripts.swarm_ledger.ledger_server as m; assert pathlib.Path(m.__file__).resolve().is_relative_to(pathlib.Path.cwd().resolve()), m.__file__' \
+              && REDIS_URL="redis://127.0.0.1:6379/$database" \
               AGENTIHOOKS_SWARM_REDIS_URL="redis://127.0.0.1:6379/$database" \
               AGENTIHOOKS_HOME="$GITHUB_WORKSPACE/load-home/$side" \
               python -m tests.ledger_load.memory \
@@ -228,11 +234,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8.0.2
         with:
           pattern: load-pair-*
           path: load-evidence
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8.0.2
         with:
           pattern: hierarchy-pair-*
           path: hierarchy-evidence

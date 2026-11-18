@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import shutil
@@ -8,7 +9,9 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+import nats as nats_py
 import pytest
+from nats.errors import Error as NatsError
 from nats.js.errors import APIError
 
 from scripts.events import nats
@@ -16,6 +19,8 @@ from scripts.events import nats
 REQUIRED_ENV = "NATS_SERVER_REQUIRED"
 UNMATCHED_MSG_ID = "never-a-last-msg-id"
 WRONG_LAST_MSG_ID = 10070
+CLUSTER = "replicas"
+READY_STREAM = "CLUSTER_READY"
 
 
 def binary() -> str:
@@ -109,3 +114,76 @@ def running(store: Path) -> Iterator[str]:
     finally:
         process.terminate()
         process.wait(10)
+
+
+def _replicated(url: str, size: int, deadline_s: float = 30) -> None:
+    async def probe() -> None:
+        client = await nats_py.connect(url)
+        try:
+            js = client.jetstream()
+            stop = time.monotonic() + deadline_s
+            while True:
+                try:
+                    await js.add_stream(name=READY_STREAM, subjects=[READY_STREAM.lower()], num_replicas=size)
+                    await js.delete_stream(READY_STREAM)
+                    return
+                except NatsError:
+                    if time.monotonic() >= stop:
+                        raise
+                    await asyncio.sleep(0.2)
+        finally:
+            await client.close()
+
+    asyncio.run(probe())
+
+
+def _held_port() -> socket.socket:
+    """Return a socket bound to a free port and never listening, so no other bind takes the port while a server that
+    sets SO_REUSEADDR, as nats-server does, still binds it."""
+    hold = socket.socket()
+    hold.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    hold.bind(("127.0.0.1", 0))
+    return hold
+
+
+@contextmanager
+def cluster(root: Path, size: int = 3) -> Iterator[list[str]]:
+    """Run `size` routed JetStream servers and yield their client urls once a stream can hold a replica on each.
+
+    A clustered JetStream server refuses to start without configured routes, so each server listens for routes on a
+    held port and every server is given the route to all of them.
+    """
+    executable = binary()
+    ports = root / "ports"
+    ports.mkdir(parents=True, exist_ok=True)
+    holds = [_held_port() for _ in range(size)]
+    listens = [f"127.0.0.1:{hold.getsockname()[1]}" for hold in holds]
+    routes = [f"nats://{listen}" for listen in listens]
+    processes: list[subprocess.Popen] = []
+    try:
+        for index, listen in enumerate(listens):
+            config = root / f"server-{index}.conf"
+            config.write_text(
+                json.dumps(
+                    {
+                        "server_name": f"{CLUSTER}-{index}",
+                        "listen": "127.0.0.1:-1",
+                        "ports_file_dir": str(ports),
+                        "jetstream": {"store_dir": str(root / f"store-{index}")},
+                        "cluster": {"name": CLUSTER, "listen": listen, "routes": routes},
+                    }
+                )
+            )
+            processes.append(
+                subprocess.Popen([executable, "-c", str(config)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            )
+        urls = [_wait_url(ports / f"{Path(executable).name}_{process.pid}.ports", process) for process in processes]
+        _replicated(urls[0], size)
+        yield urls
+    finally:
+        for hold in holds:
+            hold.close()
+        for process in processes:
+            process.terminate()
+        for process in processes:
+            process.wait(10)

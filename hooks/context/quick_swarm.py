@@ -14,7 +14,7 @@ def refocus(session_id: str, event: str, environ: Mapping[str, str] | None = Non
     from scripts.quick import member, paths, seeds
 
     env = os.environ if environ is None else environ
-    found = member.find(env) if session_id else None
+    found = (member.bind(env, session_id) or member.find(env)) if session_id else None
     if found is None:
         return ""
     block = seeds.block(found)

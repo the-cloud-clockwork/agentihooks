@@ -3,7 +3,8 @@ from types import SimpleNamespace
 import pytest
 
 from hooks.classifier import Answer, DecisionResult
-from scripts.swarm import model_pick
+from scripts.init_agent import MODEL_DEFAULTS
+from scripts.swarm import default_models, model_pick
 from scripts.swarm.model_pick import ModelPick
 from tests.swarm.profile_fixture import validated
 from tests.swarm.test_runtime import _launched
@@ -217,6 +218,82 @@ def test_an_explicit_lane_effort_never_calls_the_classifier(monkeypatch):
     monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: pytest.fail("explicit lane called classifier"))
     picked = model_pick.pick("claude", {"model": "opus", "effort": "high"}, {"difficulty": "S"}, {})
     assert picked == ModelPick("opus", "high")
+
+
+@pytest.mark.feature("lane-model-harness-compatibility")
+@pytest.mark.parametrize(
+    ("harness", "lane_model", "expected"),
+    [
+        ("codex", "opus", "gpt-6-sol"),
+        ("codex", "sonnet", "gpt-6-sol"),
+        ("codex", "haiku", "gpt-6-sol"),
+        ("codex", "fable", "gpt-6-sol"),
+        ("claude", "opus", "opus"),
+        ("codex", "gpt-6.1-sol", "gpt-6.1-sol"),
+    ],
+)
+def test_lane_model_matches_harness_before_explicit_effort_returns(
+    harness: str, lane_model: str, expected: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: pytest.fail("explicit lane called classifier"))
+    picked = model_pick.pick(harness, {"model": lane_model, "effort": "xhigh"}, {}, {}, default_model="gpt-6-sol")
+    assert picked == ModelPick(expected, "xhigh")
+
+
+@pytest.mark.feature("lane-model-harness-compatibility")
+@pytest.mark.parametrize(
+    ("effort", "expected"),
+    [("high", ModelPick("gpt-6.1-sol", "high")), ("auto", ModelPick("gpt-6.1-sol", "medium", "band"))],
+)
+def test_a_claude_lane_model_with_no_configured_codex_model_takes_the_codex_launch_model(
+    effort: str, expected: ModelPick, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: pytest.fail("a one option band asked the classifier"))
+    picked = model_pick.pick("codex", {"model": "claude-opus-5-5", "effort": effort}, {"difficulty": "S"}, {})
+    assert picked == expected
+
+
+@pytest.mark.feature("lane-model-harness-compatibility")
+@pytest.mark.parametrize("defaults", [MODEL_DEFAULTS, default_models.DEFAULTS], ids=["launch", "swarm"])
+def test_only_the_claude_default_model_carries_a_claude_prefix(defaults: dict[str, str]) -> None:
+    prefixed = {harness: model.startswith(model_pick.CLAUDE_PREFIXES) for harness, model in defaults.items()}
+    assert prefixed == {"claude": True, "codex": False}
+
+
+@pytest.mark.feature("launch-model-suits-harness")
+@pytest.mark.parametrize(
+    ("harness", "model", "expected"),
+    [
+        ("codex", "opus", "fallback"),
+        ("codex", "claude-sonnet-5-5", "fallback"),
+        ("codex", "gpt-6.1-sol", "gpt-6.1-sol"),
+        ("codex", "auto", "auto"),
+        ("codex", "", ""),
+        ("claude", "gpt-6.1-sol", "fallback"),
+        ("claude", "o1-pro", "fallback"),
+        ("claude", "o3-mini", "fallback"),
+        ("claude", "o4-mini", "fallback"),
+        ("claude", "codex-mini", "fallback"),
+        ("claude", "fable", "fable"),
+        ("copilot", "gpt-6.1-sol", "gpt-6.1-sol"),
+        ("copilot", "claude-opus", "claude-opus"),
+    ],
+)
+def test_suited_keeps_a_model_its_harness_runs_and_replaces_the_other_harness_model(
+    harness: str, model: str, expected: str
+) -> None:
+    assert model_pick.suited(harness, model, "fallback") == expected
+
+
+@pytest.mark.feature("launch-model-suits-harness")
+@pytest.mark.parametrize("defaults", [MODEL_DEFAULTS, default_models.DEFAULTS], ids=["launch", "swarm"])
+def test_every_default_model_suits_its_own_harness_and_not_the_other(defaults: dict[str, str]) -> None:
+    own = {harness: model_pick.foreign(harness, model) for harness, model in defaults.items()}
+    other = {
+        harness: model_pick.foreign({"claude": "codex", "codex": "claude"}[harness], model)
+        for harness, model in defaults.items()
+    }
+    assert (own, other) == ({"claude": False, "codex": False}, {"claude": True, "codex": True})
 
 
 def test_an_absent_lane_is_left_to_the_launch_default(monkeypatch):

@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts.swarm_ledger import api_service
 from scripts.swarm_ledger import ledger_server as server
 from scripts.swarm_ledger.api import mutations, resources, schemas
 from scripts.swarm_ledger.api.errors import APIError
@@ -53,7 +54,7 @@ def replay(tmp_path, monkeypatch, profiled=False):
     monkeypatch.setattr(server, "served_version", lambda: "replay")
     monkeypatch.setattr("hooks._redis.get_redis", lambda: None)
     monkeypatch.setattr("scripts.gates.talk.Budget._marks", lambda self: None)
-    deliveries, relay_outcomes = operations_relay.install(tmp_path, monkeypatch, SLUG, server)
+    deliveries, relay_outcomes = operations_relay.install(tmp_path, monkeypatch, SLUG, api_service)
     repository = SQLiteLedgerRepository(tmp_path / "ledger.sqlite3", domain=core)
     repository.import_document(SLUG, recorded["state"])
     publisher = getattr(server, "publish_snapshot", server.publish_ledger)
@@ -83,7 +84,7 @@ def replay(tmp_path, monkeypatch, profiled=False):
             profiler.enable()
         start = time.thread_time()
         try:
-            reply = mutations.apply(server.api_services(), SLUG, "", payload)
+            reply = mutations.apply(api_service.services(), SLUG, "", payload)
         except APIError as exc:
             reply = {"status": exc.status, **exc.envelope()}
         seconds.append(time.thread_time() - start)

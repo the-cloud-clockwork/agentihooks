@@ -1,0 +1,6 @@
+{
+  "tests/swarm_ledger/test_ledger_authority.py::test_call_prints_the_refusal_when_the_retry_after_starting_the_server_is_refused": {
+    "reader": "standards-reader",
+    "reason": "Ledger server autostart is deleted with the HTTP write path; ledger.call and ledger.request never start a server."
+  }
+}

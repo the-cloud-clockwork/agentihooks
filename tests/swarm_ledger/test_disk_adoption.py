@@ -1,4 +1,4 @@
-from scripts.swarm_ledger import ledger_server
+from scripts.swarm_ledger import api_service, ledger_server
 
 
 def test_the_server_adopts_every_ledger_folder_past_a_failing_one(monkeypatch, capsys, tmp_path):
@@ -13,6 +13,6 @@ def test_the_server_adopts_every_ledger_folder_past_a_failing_one(monkeypatch, c
             raise OSError("unreadable")
 
     monkeypatch.setattr(ledger_server.ledger_artifacts, "adopt_disk", adopt)
-    ledger_server.adopt_disk_files()
+    api_service.adopt_disk_files()
     assert seen == ["a", "b"]
     assert capsys.readouterr().err == "disk adoption a: unreadable\n"

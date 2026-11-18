@@ -217,7 +217,7 @@ def test_coach_mode_cannot_be_set_for_another_gate():
 
 
 def test_coach_mode_is_accepted_by_the_control_endpoint():
-    from scripts.swarm_ledger.ledger_server import control_argv
+    from scripts.swarm_ledger.api_service import control_argv
 
     assert control_argv({"action": "set", "gates": {"intent": "coach"}}) == ["set", "intent-gate=coach"]
     with pytest.raises(ValueError):

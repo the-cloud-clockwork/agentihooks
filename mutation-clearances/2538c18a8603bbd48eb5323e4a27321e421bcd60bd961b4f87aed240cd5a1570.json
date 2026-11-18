@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api_service.py:scripts.swarm_ledger.api_service.x\u01c1WriteHandler\u01c1do_OPTIONS:e11ed9c5dd3d7cc2dc1a30375033f4aee6410b02a299872d2d6722609d442b14": {
+    "reader": "standards-reader",
+    "reason": "self.headers is an email Message subclass whose get ignores name case; Access-Control-Request-Private-Network is read identically in upper case."
+  }
+}
