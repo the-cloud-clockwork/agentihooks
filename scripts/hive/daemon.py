@@ -578,7 +578,16 @@ def local_checkout(repo: str) -> str:
 
 def carry_lab(environ: Mapping[str, str]) -> list[Path]:
     """Give each hive checkout whose origin the lab remote serves the lab remote; return the checkouts that carry it."""
-    return [path for path in _checkouts() if checkout.carry(checkout.at(path), environ)]
+    return [path for path in _checkouts() if _carried(path, environ)]
+
+
+def _carried(path: Path, environ: Mapping[str, str]) -> bool:
+    """Give one checkout the lab remote; a git that fails or hangs there leaves it without one and is said on stderr."""
+    try:
+        return checkout.carry(checkout.at(path), environ)
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"hive: the lab remote was not set in {path}: {exc}", file=sys.stderr)
+        return False
 
 
 def _checkouts() -> list[Path]:

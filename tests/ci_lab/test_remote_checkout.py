@@ -110,6 +110,7 @@ def test_at_runs_git_in_the_checkout_with_its_timeout(tmp_path: Path, monkeypatc
         (["--push-option", "branch=engineer-1", "lab", "HEAD:refs/grade/t1"], ["engineer-1"]),
         (["--push-option=branch=engineer-1", "lab", "HEAD:refs/grade/t1"], ["engineer-1"]),
         (["-o", "base=abc", "lab", "HEAD:refs/grade/t1"], []),
+        (["-o", "branch=", "lab", "HEAD:refs/grade/t1"], []),
         (["lab", "HEAD:refs/grade/branch=x"], []),
     ],
 )

@@ -418,10 +418,12 @@ def test_rollout_readiness_is_published_only_after_a_successful_beat(monkeypatch
 
 
 @pytest.mark.feature("lab-remote-in-workspaces")
-def test_run_gives_hive_checkouts_the_lab_remote_once_the_operator_env_is_loaded(monkeypatch):
-    events = []
+def test_run_gives_hive_checkouts_the_lab_remote_once_the_operator_env_is_loaded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[object] = []
 
-    def refresh(environ):
+    def refresh(environ: object) -> None:
         events.append("quota")
         raise KeyboardInterrupt
 
@@ -434,7 +436,9 @@ def test_run_gives_hive_checkouts_the_lab_remote_once_the_operator_env_is_loaded
 
 
 @pytest.mark.feature("lab-remote-in-workspaces")
-def test_carry_lab_gives_each_checkout_the_lab_serves_the_lab_remote(monkeypatch, tmp_path):
+def test_carry_lab_gives_each_checkout_the_lab_serves_the_lab_remote(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     lab = "http://10.10.30.208/agentihooks.git"
     for name, origin in (
         ("agentihooks", "git@github.com:o/agentihooks.git"),
@@ -449,6 +453,22 @@ def test_carry_lab_gives_each_checkout_the_lab_serves_the_lab_remote(monkeypatch
         for name in ("agentihooks", "antoncore")
     ]
     assert remotes == [["lab", "origin"], ["origin"]]
+
+
+@pytest.mark.feature("lab-remote-in-workspaces")
+@pytest.mark.parametrize("failure", [subprocess.TimeoutExpired("git", 60), FileNotFoundError("git")])
+def test_carry_lab_skips_a_checkout_whose_git_fails_and_says_so(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str], failure: Exception
+) -> None:
+    (tmp_path / "agentihooks" / ".git").mkdir(parents=True)
+    monkeypatch.setenv("HIVE_REPO_ROOT", str(tmp_path))
+
+    def carry(git: object, environ: object) -> bool:
+        raise failure
+
+    monkeypatch.setattr(daemon.checkout, "carry", carry)
+    assert daemon.carry_lab({"AGENTIHOOKS_LAB_REMOTE": "http://lab.invalid/agentihooks.git"}) == []
+    assert capsys.readouterr().err == f"hive: the lab remote was not set in {tmp_path / 'agentihooks'}: {failure}\n"
 
 
 def test_run_deducts_observation_time_from_the_beat_interval(monkeypatch):

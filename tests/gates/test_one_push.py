@@ -408,14 +408,14 @@ def test_a_push_to_another_branch_passes_and_one_to_the_task_branch_is_held(tree
 
 
 @pytest.mark.feature("lab-remote-in-workspaces")
-def test_a_lab_push_writes_the_branch_its_push_option_hands_the_relay(tree):
+def test_a_lab_push_writes_the_branch_its_push_option_hands_the_relay(tree: Path) -> None:
     assert destinations(tree, ["-o", "branch=task", "lab", "HEAD:refs/grade/t1"]) == {"task"}
     assert destinations(tree, ["lab", "HEAD:refs/grade/t1"]) == set()
     assert destinations(tree, ["origin", "-o", "branch=x", "HEAD:refs/heads/y"]) == {"y"}
 
 
 @pytest.mark.feature("lab-remote-in-workspaces")
-def test_a_lab_push_relaying_the_task_branch_is_held_while_checks_run(tree, tmp_path):
+def test_a_lab_push_relaying_the_task_branch_is_held_while_checks_run(tree: Path, tmp_path: Path) -> None:
     git(tree, "remote", "add", "lab", "http://lab.invalid/r.git")
     relayed = gate(pull()).decide(bash("git push -o branch=task lab HEAD:refs/grade/t1", tree), ME, state(tmp_path))
     assert relayed.reason == push_refusal("demo", URL)

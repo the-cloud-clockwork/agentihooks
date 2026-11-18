@@ -10,6 +10,7 @@ import urllib.request
 from contextlib import redirect_stderr
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from hooks.context import blocker_window
 from scripts import ci_prepush
@@ -44,16 +45,24 @@ class LabRoute:
     direct: bool
 
 
-def read_grade(url: str) -> dict:
+def read_grade(url: str) -> dict[str, Any]:
     """Return the lab's answer for one head's grades, as GET /grades/<sha> gives it."""
     with urllib.request.urlopen(url, timeout=LAB_READ_TIMEOUT_S) as answer:
         return json.load(answer)
 
 
+def lab_grades(url: str) -> list[dict[str, Any]]:
+    """Return the grades the lab holds at url; an answer that cannot be read refuses the publish."""
+    try:
+        return read_grade(url)["grades"]
+    except (OSError, ValueError, KeyError) as exc:
+        raise SwarmError(f"the lab grade {url} could not be read, so origin was not pushed: {exc!r}") from exc
+
+
 def lab_conclusion(url: str) -> str:
     """Wait for the newest grade at url to conclude and return its conclusion; refuse once LAB_WAIT_S has passed."""
     deadline = time.monotonic() + LAB_WAIT_S
-    while not (grades := read_grade(url)["grades"]) or not grades[-1]["conclusion"]:
+    while not (grades := lab_grades(url)) or not grades[-1]["conclusion"]:
         if time.monotonic() >= deadline:
             raise SwarmError(f"the lab grade {url} has not concluded after {LAB_WAIT_S} s; origin was not pushed")
         time.sleep(LAB_POLL_S)
@@ -485,10 +494,10 @@ def grade_and_push(
         execute([python, "-I", str(Path(__file__).with_name("publish_gate.py"))], root)
     if not ci_prepush.passed(root) or git(root, "rev-parse", "HEAD") != head:
         raise SwarmError("the committed HEAD has no passing prepush evidence")
-    if route is not None:
-        through_lab(root, route, fields)
     ref = f"refs/heads/{fields['branch']}"
     publish_queue.require_unqueued(git(root, "remote", "get-url", "--push", "origin"), fields["branch"])
+    if route is not None:
+        through_lab(root, route, fields)
     git(root, "push", "-u", "origin", f"HEAD:{ref}")
 
 

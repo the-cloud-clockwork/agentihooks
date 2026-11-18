@@ -2029,6 +2029,8 @@ def publication_command(store: RedisStore, args: argparse.Namespace) -> dict:
         task = ledger.task(args.slug, agent.task) or {}
         if args.command == "prepare":
             return publish.prepare(args.slug, agent, repo, ledger)
+        if args.direct and args.via != publish.LAB:
+            raise SwarmError("publish --direct goes with --via lab")
         lab = publish.LabRoute(agent.task, args.direct) if args.via == publish.LAB else None
         return publish.publish(args.slug, agent, repo, ledger, args.message, args.files, lab)
     except SwarmError as exc:

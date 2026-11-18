@@ -1,5 +1,6 @@
 import json
 import subprocess
+import urllib.error
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -49,7 +50,7 @@ def test_out_of_order_push_names_the_committed_head_gate(repository):
 
 
 @pytest.mark.feature("lab-remote-in-workspaces")
-def test_a_lab_push_needs_the_prepush_gate_like_any_push(repository):
+def test_a_lab_push_needs_the_prepush_gate_like_any_push(repository: Path) -> None:
     git(repository, "remote", "add", "lab", "http://lab.invalid/repo.git")
     with pytest.raises(BlockAction) as blocked:
         check_prepush(
@@ -59,7 +60,7 @@ def test_a_lab_push_needs_the_prepush_gate_like_any_push(repository):
 
 
 @pytest.mark.feature("lab-remote-in-workspaces")
-def test_the_stop_gate_counts_a_head_pushed_only_to_the_lab_as_unpushed(repository, tmp_path):
+def test_the_stop_gate_counts_a_head_pushed_only_to_the_lab_as_unpushed(repository: Path, tmp_path: Path) -> None:
     import re
 
     from scripts.gates import push_stop
@@ -2081,7 +2082,7 @@ LAB_HOOK = (
 
 
 @pytest.fixture
-def lab(publication, tmp_path, monkeypatch):
+def lab(publication: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     bare = tmp_path / "lab" / "remote.git"
     git(tmp_path, "init", "-q", "--bare", str(bare))
     git(bare, "config", "receive.advertisePushOptions", "true")
@@ -2092,7 +2093,7 @@ def lab(publication, tmp_path, monkeypatch):
     return bare
 
 
-def _publish_via_lab(publication, direct=False):
+def _publish_via_lab(publication: SimpleNamespace, direct: bool = False) -> dict:
     from scripts.swarm import publish
 
     return publish.publish(
@@ -2106,14 +2107,14 @@ def _publish_via_lab(publication, direct=False):
     )
 
 
-def _origin(publication):
+def _origin(publication: SimpleNamespace) -> str:
     return git(publication.root, "ls-remote", "origin", "refs/heads/engineer-test")
 
 
 @pytest.mark.feature("lab-remote-in-workspaces")
 def test_publish_via_lab_grades_head_on_the_lab_before_origin_and_pushes_origin_on_green(
-    publication, lab, monkeypatch, capfd
-):
+    publication: SimpleNamespace, lab: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     from scripts.swarm import publish
 
     answers = iter(
@@ -2125,7 +2126,7 @@ def test_publish_via_lab_grades_head_on_the_lab_before_origin_and_pushes_origin_
     )
     read, slept = [], []
 
-    def read_grade(url):
+    def read_grade(url: str) -> dict:
         read.append((url, _origin(publication)))
         return next(answers)
 
@@ -2147,7 +2148,9 @@ def test_publish_via_lab_grades_head_on_the_lab_before_origin_and_pushes_origin_
 
 
 @pytest.mark.feature("lab-remote-in-workspaces")
-def test_publish_via_lab_leaves_origin_untouched_on_a_red_grade(publication, lab, monkeypatch):
+def test_publish_via_lab_leaves_origin_untouched_on_a_red_grade(
+    publication: SimpleNamespace, lab: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from scripts.swarm import publish
     from scripts.swarm.store import SwarmError
 
@@ -2163,7 +2166,9 @@ def test_publish_via_lab_leaves_origin_untouched_on_a_red_grade(publication, lab
 
 
 @pytest.mark.feature("lab-remote-in-workspaces")
-def test_publish_via_lab_direct_pushes_origin_after_the_lab_without_waiting(publication, lab, monkeypatch):
+def test_publish_via_lab_direct_pushes_origin_after_the_lab_without_waiting(
+    publication: SimpleNamespace, lab: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from scripts.swarm import publish
 
     monkeypatch.setattr(publish, "read_grade", lambda url: pytest.fail("a direct publish read the grade"))
@@ -2175,7 +2180,9 @@ def test_publish_via_lab_direct_pushes_origin_after_the_lab_without_waiting(publ
 
 
 @pytest.mark.feature("lab-remote-in-workspaces")
-def test_publish_via_lab_refuses_without_a_lab_remote_for_the_repository(publication, monkeypatch):
+def test_publish_via_lab_refuses_without_a_lab_remote_for_the_repository(
+    publication: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from scripts.swarm.store import SwarmError
 
     monkeypatch.delenv("AGENTIHOOKS_LAB_REMOTE", raising=False)
@@ -2192,7 +2199,9 @@ def test_publish_via_lab_refuses_without_a_lab_remote_for_the_repository(publica
     ("hook", "code"),
     [("post-receive", "true"), ("pre-receive", 'echo "lab grade: http://lab.invalid/grades/refused"; exit 1')],
 )
-def test_publish_via_lab_refuses_a_lab_push_without_a_landed_grade(publication, lab, hook, code):
+def test_publish_via_lab_refuses_a_lab_push_without_a_landed_grade(
+    publication: SimpleNamespace, lab: Path, hook: str, code: str
+) -> None:
     from scripts.swarm.store import SwarmError
 
     (lab / "hooks" / hook).write_text(f"#!/bin/sh\ncat >/dev/null\n{code}\n")
@@ -2204,7 +2213,7 @@ def test_publish_via_lab_refuses_a_lab_push_without_a_landed_grade(publication, 
 
 
 @pytest.mark.feature("lab-remote-in-workspaces")
-def test_lab_conclusion_refuses_once_the_wait_runs_out(monkeypatch):
+def test_lab_conclusion_refuses_once_the_wait_runs_out(monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts.swarm import publish
     from scripts.swarm.store import SwarmError
 
@@ -2221,14 +2230,58 @@ def test_lab_conclusion_refuses_once_the_wait_runs_out(monkeypatch):
 
 
 @pytest.mark.feature("lab-remote-in-workspaces")
-def test_read_grade_reads_the_lab_answer_with_its_timeout(monkeypatch):
+@pytest.mark.parametrize(
+    "answer",
+    [urllib.error.URLError("refused"), json.JSONDecodeError("no json", "", 0), {"head": "abc"}],
+)
+def test_an_unreadable_lab_grade_refuses_the_publish(monkeypatch: pytest.MonkeyPatch, answer: object) -> None:
+    from scripts.swarm import publish
+    from scripts.swarm.store import SwarmError
+
+    def read_grade(url: str) -> object:
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    monkeypatch.setattr(publish, "read_grade", read_grade)
+    with pytest.raises(SwarmError) as refused:
+        publish.lab_conclusion("http://lab.invalid/grades/abc")
+    cause = answer if isinstance(answer, Exception) else KeyError("grades")
+    assert str(refused.value) == (
+        f"the lab grade http://lab.invalid/grades/abc could not be read, so origin was not pushed: {cause!r}"
+    )
+
+
+@pytest.mark.feature("lab-remote-in-workspaces")
+def test_publish_direct_without_the_lab_route_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    import syslog
+    from typing import Any
+
+    from scripts.swarm import cli, publish
+    from scripts.swarm.store import SwarmError
+
+    store: Any = None
+    monkeypatch.setattr(syslog, "syslog", lambda *args: None)
+    monkeypatch.setattr(cli, "_worker", lambda store, args: SimpleNamespace(task="t1", name="engineer@test"))
+    monkeypatch.setattr(cli, "_local_repo", lambda store, slug: "/repo")
+    monkeypatch.setattr(cli, "LedgerClient", lambda: SimpleNamespace(task=lambda slug, task: {}))
+    monkeypatch.setattr(publish, "refusal_branch", lambda repo, task: "")
+    monkeypatch.setattr(publish, "publish", lambda *args: pytest.fail("published without the lab route"))
+    args = cli.build_parser().parse_args(["swarm", "publish", "--direct", "-m", "Change", "chosen.txt"])
+    with pytest.raises(SwarmError) as refused:
+        cli.publication_command(store, args)
+    assert str(refused.value) == "publish --direct goes with --via lab"
+
+
+@pytest.mark.feature("lab-remote-in-workspaces")
+def test_read_grade_reads_the_lab_answer_with_its_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     import io
 
     from scripts.swarm import publish
 
     opened = []
 
-    def urlopen(url, timeout):
+    def urlopen(url: str, timeout: int) -> io.BytesIO:
         opened.append((url, timeout))
         return io.BytesIO(b'{"head": "abc", "grades": []}')
 
@@ -2242,7 +2295,9 @@ def test_read_grade_reads_the_lab_answer_with_its_timeout(monkeypatch):
     ("flags", "route"),
     [([], None), (["--via", "lab"], ("t1", False)), (["--via", "lab", "--direct"], ("t1", True))],
 )
-def test_publish_command_hands_the_lab_route_to_publish(monkeypatch, flags, route):
+def test_publish_command_hands_the_lab_route_to_publish(
+    monkeypatch: pytest.MonkeyPatch, flags: list[str], route: tuple[str, bool] | None
+) -> None:
     from typing import Any
 
     from scripts.swarm import cli, publish

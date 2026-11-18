@@ -212,7 +212,9 @@ def test_prepare_starts_the_agent_in_an_isolated_worktree_at_the_fresh_base(worl
 
 
 @pytest.mark.feature("lab-remote-in-workspaces")
-def test_prepare_gives_the_mirror_the_lab_remote_its_worktree_shows(world, monkeypatch):
+def test_prepare_gives_the_mirror_the_lab_remote_its_worktree_shows(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from scripts.ci_lab.remote import checkout
 
     lab = "http://lab.invalid/origin.git"
@@ -223,7 +225,7 @@ def test_prepare_gives_the_mirror_the_lab_remote_its_worktree_shows(world, monke
 
 
 @pytest.mark.feature("lab-remote-in-workspaces")
-def test_prepare_adds_no_lab_remote_for_another_repository(world, monkeypatch):
+def test_prepare_adds_no_lab_remote_for_another_repository(world: World, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENTIHOOKS_LAB_REMOTE", "http://lab.invalid/agentihooks.git")
     prepared = workspaces.prepare(world.execution, world.request(), clock=fake_clock())
     assert "lab\t" not in git("remote", "-v", cwd=prepared.path)

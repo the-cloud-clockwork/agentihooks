@@ -152,7 +152,7 @@ lab_remote() {
   origin="$(git -C "${REPO}" config --get remote.origin.url)" || return 0
   [[ -n "$(repo_name "${url}")" && "$(repo_name "${url}")" == "$(repo_name "${origin}")" ]] || return 0
   git -C "${REPO}" config --get remote.lab.url >/dev/null && verb=set-url
-  git -C "${REPO}" remote "${verb}" lab "${url}"
+  git -C "${REPO}" remote "${verb}" lab "${url}" || return 1
   git -C "${REPO}" config "credential.${url}.helper" \
     '!f() { if test "$1" = get; then printf "username=lab\npassword=%s\n" "$AGENTIHOOKS_LAB_REMOTE_TOKEN"; fi; }; f'
 }
