@@ -2580,11 +2580,12 @@
       "id": "swarm-claim-order",
       "origin": "inventory",
       "behaviour": "Claimable tasks are taken with the tasks of the swarm's fix phase first, then by rank, then resumed work, then the fast clear exception, then dependency depth, with ledger order breaking ties.",
-      "seam": "scripts.swarm.claim_order ordering key",
+      "seam": "scripts.swarm.claim_order ordering key and the tick claim view that sorts by it",
       "tests": [
         "tests/swarm/test_claim_order.py::test_key_is_rank_then_resumed_work_then_the_fast_clear_exception_then_depth",
         "tests/swarm/test_claim_order.py::test_within_a_rank_the_longer_chain_goes_first_and_ledger_order_breaks_ties",
-        "tests/swarm/test_claim_order.py::test_a_task_of_the_fix_phase_claims_ahead_of_every_rank"
+        "tests/swarm/test_claim_order.py::test_a_task_of_the_fix_phase_claims_ahead_of_every_rank",
+        "tests/swarm/test_claim_view.py::test_the_claim_view_orders_the_tasks_of_the_swarm_fix_phase_first"
       ]
     },
     {
