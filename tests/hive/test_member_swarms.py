@@ -161,7 +161,7 @@ def test_remove_after_create_leaves_the_signer_record_without_the_hive_and_a_sec
 
 
 def test_hive_remove_after_create_unlists_the_hive_and_a_second_hive_remove_still_passes(monkeypatch):
-    for name in ("drain", "revoke", "unregister", "unmanifest", "unbank"):
+    for name in ("drain", "stop_services", "revoke", "unregister", "unmanifest", "unbank"):
         monkeypatch.setattr(remove, name, lambda *args: [])
     monkeypatch.setattr(remove.machine, "forget", lambda *args: [])
     fake = Bao({SIGNER: {"account_seed": "kept", "member_swarms": {"m2": ["rig"]}}})
@@ -216,6 +216,7 @@ def test_the_remove_command_unlists_the_hub_signer_record_create_lists(
 def test_remove_unlists_the_signer_record_right_after_it_revokes_the_member():
     assert [title for title, _ in remove.STEPS] == [
         "drain",
+        "host",
         "member",
         "signer",
         "herdr",

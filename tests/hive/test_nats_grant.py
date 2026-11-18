@@ -752,7 +752,7 @@ def test_hive_remove_and_serve_carry_the_signer(admin, wired, monkeypatch):
 
 def test_remove_revokes_with_the_plan_signer(admin, monkeypatch):
     signed, calls = object(), []
-    for step in ("drain", "forget", "unbank", "unmanifest"):
+    for step in ("drain", "stop_services", "forget", "unbank", "unmanifest"):
         monkeypatch.setattr(remove, step, lambda *args: [])
     monkeypatch.setattr(remove.machine, "forget", lambda *args: [])
     monkeypatch.setattr(remove, "revoke", lambda *args: (calls.append(args), ["revoked"])[1])
