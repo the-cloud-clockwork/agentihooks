@@ -7579,7 +7579,8 @@ steps: pushed the red test; fixed the push guard; waiting on the queue. Only its
 this item once you have looked.
 ```
 
-It comes from sender `swarm`, carries the ref `<slug>:overrun:<task>` and is tagged with the task. It goes to the
+It comes from sender `swarm`, carries the ref `<slug>:overrun:<task>:<agent start>` and is tagged with the task, so
+each agent that overruns the same task reaches the master past its seen marks. It goes to the
 master seat that owns the task's phase. When that seat is not live it goes to the lead master, or to the lowest
 numbered live master when the lead seat is not live either. The last steps are the last three non empty lines of
 the task's `progress.md`. For a task running on a hive, they come from the copy the hive
