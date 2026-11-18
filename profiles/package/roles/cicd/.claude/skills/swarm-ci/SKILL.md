@@ -62,6 +62,7 @@ call. `agentihooks msg inbox` lists them, `agentihooks msg read <id>` shows one.
 ## Waits
 
 - Checks on your pull request: `agentihooks swarm <slug> wait --on checks <url>`.
+- A lab check run on your pull request, by its check run url: `agentihooks swarm <slug> wait --on lab <url>`.
 - A reply to an inbox item: `agentihooks swarm <slug> wait --on reply <id>`.
 - Another task: `agentihooks swarm <slug> wait --on task <id>`.
 - A pipeline or rollout, at most an hour: `agentihooks swarm <slug> wait 20 --reason "<what>"`.

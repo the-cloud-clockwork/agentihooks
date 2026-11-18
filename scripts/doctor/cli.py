@@ -54,6 +54,7 @@ from collections import Counter
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import cast
 
 from scripts.doctor import (
     ci_measure,
@@ -74,7 +75,7 @@ from scripts.gates import Who
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import clearance, engine_migration, scheduled_tick
 from scripts.swarm import cli as swarm
-from scripts.swarm.health.findings import MINUTE_MS, limits
+from scripts.swarm.health.findings import MINUTE_MS, Finding, limits
 from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.ledger_client import LEDGER_DIR
 from scripts.swarm.store import RedisStore, SwarmError
@@ -470,13 +471,27 @@ def cmd_rates(store, args):
     print(json.dumps(found) if args.json else rates.table(found))
 
 
+def cmd_findings(store: RedisStore, args: Namespace) -> None:
+    """Run the named detectors, or every one but the trace read, once on the watched swarm and print what they
+    find; a failed detector is a line on stderr."""
+    readers = detect.readers(store, swarm.LedgerClient(), _watched(store, args.slug), swarm.now_ms(), telemetry=False)
+    chosen = args.detector or list(readers)
+    unknown = sorted(set(chosen) - set(readers))
+    if unknown:
+        raise SwarmError(f"no detector {', '.join(unknown)}; the detectors are {', '.join(readers)}")
+    subset = {name: readers[name] for name in chosen}
+    found, _ = cast(tuple[list[Finding], list[str]], _collect(subset))  # pragma: no mutate
+    shown = [{**f.as_dict(), "id": f.id, "measure": f.measure} for f in found]
+    print(json.dumps(shown) if args.json else "\n".join(f"{row['id']} {row['summary']}" for row in shown))
+
+
 def cmd_intervene(store, args):
     slug, doctor = _pair_of(store, args.slug)
     ctx = interventions.Context(store, swarm.LedgerClient(), slug, doctor)
     print(json.dumps({"intervention": args.action, "logged": interventions.apply(ctx, args.action, args)}))
 
 
-def build_parser():
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agentihooks doctor", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -507,6 +522,9 @@ def build_parser():
     rated.add_argument("--hours", type=float, default=24)
     rated.add_argument("--at")
     rated.add_argument("--json", action="store_true")
+    found = sub.add_parser("findings", help="run the detectors once and print their findings")
+    found.add_argument("--detector", action="append")
+    found.add_argument("--json", action="store_true")
     intervene = sub.add_parser("intervene")
     intervene.add_argument("action")
     for flag in ("--to", "--text", "--file"):
@@ -522,6 +540,7 @@ COMMANDS = {
     "task": cmd_task,
     "measure": cmd_measure,
     "rates": cmd_rates,
+    "findings": cmd_findings,
     "verdict-log": cmd_verdict_log,
     "intervene": cmd_intervene,
 }

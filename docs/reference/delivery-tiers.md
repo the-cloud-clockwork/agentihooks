@@ -20,6 +20,12 @@ Each tier has a wall time budget. A check that does not fit the pull request or 
 
 How a green promotion run merges `dev` into `main` and creates the release is in [Promotion and releases](promotion.md).
 
+## Lab authority and back pressure
+
+The CI lab grades pull request heads from content addressed units and a verdict cache ([CI lab service contract](ci-lab.md)). A gate moves to the lab only when the base branch's `delivery.yaml` names it under `lab.authoritative`. On a `pull_request` run the `lab-verdict` job reads that list, the Actions job of each named gate is skipped, and `lab-verdict` waits for the lab's check run for that gate instead. An empty list keeps every pull request gate on Actions. The queue and promotion tiers still run on Actions.
+
+A long lab wait is back pressure, never a red. Each tick pass reads the lab's capacity document. When its predicted pull request wait exceeds `AGENTIHOOKS_HEALTH_CI_BEHIND_MINUTES` (default 20), the swarm holds new claims of eng tasks outside the fix phase and raises the standing `lab_wait` finding. A reading older than ten minutes holds nothing, and the finding clears once the wait falls back. Nobody retries or dispatches to catch up. [Lab wait and capacity](../ci-timing.md#lab-wait-and-capacity) shows how to read the wait.
+
 ## Hierarchy CPU proof at promotion
 
 The Tests workflow calls `Hierarchy CPU proof` as `hierarchy-cpu` on a push to
