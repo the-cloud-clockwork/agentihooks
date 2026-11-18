@@ -33,6 +33,7 @@ from scripts.ci_lab import contract, run_mutation, run_static, run_tests, venvs,
 from scripts.ci_lab.outcomes import FAILED, PASSED
 from scripts.ci_lab.sandbox import PortAllocator, Sandbox
 from scripts.ci_lab.static_gates import REGISTRY, WORKFLOW, StaticGate, discover
+from scripts.ci_lab.venvs import Build
 from scripts.ci_lab.worker import Executor, Finished, Lease
 from scripts.ci_lab.worktrees import Mirror, Worktrees
 
@@ -135,6 +136,11 @@ class Pod:
         """The folder of the venvs built per lockfile digest."""
         return self.root / "venvs"
 
+    @property
+    def build(self) -> Build:
+        """The sandbox a head's venv build runs in: the pod's ports, whitelist and unit time limit."""
+        return Build(self.ports, self.whitelist, self.timeout)
+
 
 @dataclass(frozen=True)
 class Suite:
@@ -180,7 +186,7 @@ def static(pod: Pod, lease: Lease) -> Finished:
     inputs.base, on the venv of the head's lockfile."""
     with pod.trees.shared(lease.head, lease.base, lease.grader) as (head, base, grader):
         found = gate(grader, lease.unit.members[0])
-        venv = venvs.venv_for(lockfile_digest(head), head, pod.venvs)
+        venv = venvs.venv_for(lockfile_digest(head), head, pod.venvs, pod.build)
         context = {INPUTS_BASE: lease.base}
         options = run_static.Settings(pod.runs, venv, pod.ports, pod.whitelist, pod.timeout, context)
         started = pod.clock()
@@ -195,7 +201,7 @@ def tests(pod: Pod, suite: Suite, lease: Lease) -> Finished:
     """Run the lease's test batch on its head with the venv of the head's lockfile digest, the manifest and the flake
     ledger, on as many workers as its slots."""
     with pod.trees.shared(lease.head) as (tree,):
-        venv = venvs.venv_for(lockfile_digest(tree), tree, pod.venvs)
+        venv = venvs.venv_for(lockfile_digest(tree), tree, pod.venvs, pod.build)
         manifest = json.loads(suite.manifest.read_text())
         lab = run_tests.Lab(pod.runs, pod.ports, pod.whitelist, manifest, suite.flakes, pod.timeout, False)
         started = pod.clock()
@@ -257,7 +263,7 @@ def mutation(pod: Pod, settings: Mutation, lease: Lease) -> Finished:
     unit = lease.unit
     named = {"kind": unit.kind, "key": unit.key, "options": list(OPTIONS)}
     with pod.trees.owned(lease.head) as tree:
-        venv = venvs.venv_for(lockfile_digest(tree), tree, pod.venvs)
+        venv = venvs.venv_for(lockfile_digest(tree), tree, pod.venvs, pod.build)
         _trampolined(tree)
         started = pod.clock()
         stats = {**named, "kind": STATS, "root": str(tree), "cache": str(settings.cache)}
