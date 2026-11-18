@@ -164,6 +164,7 @@ from scripts.swarm.status import (
     auto_snapshot,
     findings,
     live_agents,
+    section_lines,
     status_report,
     task_counts,
     transport,
@@ -1624,7 +1625,7 @@ def cmd_status(store: Any, args: Any) -> None:
 
     held += admission.status_lines(placement_waits.read(store, args.slug))
     held += master_refusals.status_lines(store, args.slug, now_ms())
-    held += hive_admission(store, config.slug)["lines"]
+    held += section_lines("hive admission", lambda: hive_admission(store, config.slug)["lines"])
     for line in ledger_freezes.lines(doc) + quota + held + outbox.status_lines():
         print(line)
     print(bottleneck.line(bottleneck.read(store, args.slug), now_ms()))
