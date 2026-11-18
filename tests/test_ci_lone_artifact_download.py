@@ -21,10 +21,7 @@ GREEN = {"files": [], "not_mutated": [], "failed": False}
 MUTATION = ("workflows/test.yml", "mutation", "mutation-report-*")
 REPLAY = ("workflows/mutation-replay.yml", "verify", "mutation-replay-grade-*")
 LONE_FOLDER = {MUTATION, REPLAY}
-ROOT_READ = {
-    ("workflows/test.yml", "test-summary", "durations-3.*"),
-    ("workflows/test.yml", "test-summary", "flakes-3.*"),
-}
+ROOT_READ = {("workflows/test.yml", "test-summary", "{durations,flakes}-3.*")}
 UNAFFECTED = {
     ("workflows/hierarchy-cpu.yml", "grade", "load-pair-*"),
     ("workflows/hierarchy-cpu.yml", "grade", "hierarchy-pair-*"),
@@ -70,6 +67,15 @@ def _steps(file: str, job: str) -> dict[str, dict[str, Any]]:
     return {step["name"]: step for step in steps if "name" in step}
 
 
+def _matches(name: str, pattern: str) -> bool:
+    """Return whether an artifact name matches a download pattern, expanding brace groups as minimatch does."""
+    braces = re.fullmatch(r"([^{]*)\{([^{}]*)\}(.*)", pattern)
+    if braces is None:
+        return fnmatch(name, pattern)
+    head, options, tail = braces.groups()
+    return any(_matches(name, head + option + tail) for option in options.split(","))
+
+
 def _download(
     step: dict[str, Any], artifacts: dict[str, dict[str, str]], workspace: Path, contexts: dict[str, str]
 ) -> None:
@@ -81,7 +87,7 @@ def _download(
     assert step["uses"] == "actions/download-artifact@v8.0.2"
     settings = step["with"]
     path = workspace / interpolate(settings["path"], contexts)
-    matched = [name for name in sorted(artifacts) if fnmatch(name, settings["pattern"])]
+    matched = [name for name in sorted(artifacts) if _matches(name, settings["pattern"])]
     for name in matched:
         folder = path if len(matched) == 1 or settings.get("merge-multiple") is True else path / name
         for relative, text in artifacts[name].items():
@@ -171,3 +177,14 @@ def test_the_gate_summary_counts_every_leg_however_many_legs_ran(tmp_path: Path,
         _download(downloads[key], reports, tmp_path, {})
     folder = shlex.split(_steps("workflows/test.yml", "test-summary")["Summarize this run's tests"]["run"])[2]
     assert ci_gate_summary.counts(tmp_path / folder) == {"ran": 2 * legs, "flaky": legs, "failed": 0}
+
+
+@pytest.mark.feature("pattern-downloads-keep-a-lone-artifact-where-its-reader-looks")
+def test_the_gate_summary_counts_a_lone_report_that_lands_at_the_folder_root(tmp_path: Path) -> None:
+    reports = {"durations-3.12-1": {"durations.json": json.dumps({"test_ok": 1})}}
+    downloads = _pattern_downloads()
+    for key in sorted(ROOT_READ):
+        _download(downloads[key], reports, tmp_path, {})
+    folder = shlex.split(_steps("workflows/test.yml", "test-summary")["Summarize this run's tests"]["run"])[2]
+    assert (tmp_path / folder / "durations.json").is_file()
+    assert ci_gate_summary.counts(tmp_path / folder) == {"ran": 1, "flaky": 0, "failed": 0}

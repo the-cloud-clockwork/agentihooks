@@ -56,7 +56,8 @@ def _folder(root: Path, base_tree: Path, grader_tree: Path) -> Path:
 
 
 def run(gate: StaticGate, head_tree: Path, base_tree: Path, grader_tree: Path, settings: Settings) -> Result:
-    """Run the gate's step in the sandbox from the head tree, as the workflow runs it, with no network.
+    """Run the gate's step in the sandbox from the head tree, as the workflow runs it, with no network and with the
+    grader and base trees bound read only, so the step cannot rewrite the grader that grades it.
 
     The step finds the grader and base trees at $RUNNER_TEMP/grader and $RUNNER_TEMP/base and the head at
     $GITHUB_WORKSPACE, so a step that changes into the grader runs the grader's copy of its module and reads the
@@ -79,6 +80,12 @@ def run(gate: StaticGate, head_tree: Path, base_tree: Path, grader_tree: Path, s
         "GITHUB_WORKSPACE": str(head_tree),
         SUMMARY: str(folder / SUMMARY),
     }
-    unit = Sandbox(root=settings.root, cwd=head_tree, ports=settings.ports, whitelist=whitelist)
+    unit = Sandbox(
+        root=settings.root,
+        cwd=head_tree,
+        ports=settings.ports,
+        whitelist=whitelist,
+        readonly=(grader_tree, base_tree),
+    )
     outcome = unit.run([*SHELL, gate.run], settings.timeout)
     return Result(gate=gate.name, code=outcome.code, log=outcome.log, report=folder / SUMMARY)
