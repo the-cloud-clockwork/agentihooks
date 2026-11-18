@@ -25,6 +25,7 @@ import os
 import re
 import shlex
 import sys
+from collections.abc import Mapping
 from typing import NamedTuple
 
 SAFE_SUFFIXES = (".example", ".sample", ".template", ".dist", ".tpl")
@@ -913,7 +914,7 @@ DISPATCH = {
 }
 
 
-def evaluate(payload: dict[str, object], *, recursive: bool = True, allow_rewrite: bool = False) -> Verdict:
+def evaluate(payload: Mapping[str, object], *, recursive: bool = True, allow_rewrite: bool = False) -> Verdict:
     handler = DISPATCH.get(payload.get("tool_name"))
     if handler is None:
         return ALLOW
