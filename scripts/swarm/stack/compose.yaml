@@ -65,6 +65,13 @@ services:
       SWARM_LEDGER_SCHEME: ${SWARM_LEDGER_SCHEME:-http}
     volumes:
       - ./deploy/compose/ledger-front.conf:/etc/nginx/templates/default.conf.template:ro
+    healthcheck:
+      test: [CMD, wget, -q, -O-, "http://127.0.0.1:8765/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+      start_interval: 1s
     depends_on:
       swarm:
         condition: service_healthy
