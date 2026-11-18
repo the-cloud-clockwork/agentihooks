@@ -145,8 +145,8 @@ Over the window of the newest `--heads` heads that hold an Actions verdict:
 | Lab verdict present | at least 48 of every 50 heads |
 | Lab verdict first | at least 45 of every 50 heads have a lab verdict that completed before the Actions verdict |
 
-The [Phase 4 plan](https://github.com/the-cloud-clockwork/agentihooks/issues/10375) sets this rule
-for every gate flip, printed with `--heads 50` and pasted in the flip pull request. It words the
+Phase 4 of the grading lab plan, shadow and cutover, sets this rule for every gate flip, printed
+with `--heads 50` and pasted in the flip pull request. It words the
 window as heads "with both verdicts"; the report reads it as heads with an
 Actions verdict, because a window of heads that all carry a lab verdict would make the presence
 count meaningless. A head without a lab verdict stays in the window and counts against presence.
@@ -172,7 +172,7 @@ first. The plan's flip rule uses the default 50.
 
 ## Output
 
-A live run on 18 November 2026, at dev `3be36adff`, of
+A live run at dev `3be36adff` of
 `python -m scripts.ci_lab shadow report --gate tests --heads 3 --event merge_group --app <lab App slug>`.
 The merge group heads carried no `lab-shadow/tests` check runs, so it exits 1:
 
@@ -229,7 +229,7 @@ against 0, and 2 first verdicts against 4.
 | Every row shows `missing` | The lab is not posting `lab-shadow/<gate>` check runs on these heads | Check the lab scheduler and worker are live and grading in shadow |
 | One head shows `missing` although it has a `lab-shadow/<gate>` check run | The run came from another App or a workflow token, or the newest run of that name is still in progress or concluded `cancelled`, `skipped` or `neutral` | `gh api 'repos/<repo>/commits/<sha>/check-runs?check_name=lab-shadow/<gate>'` shows each run's `app.slug`, `status` and `conclusion` |
 | `heads N of 50` below 50 | Too few completed Tests runs with a graded job of the gate in the newest 1000 runs | Use a smaller `--heads`, or wait for more heads |
-| `heads 0 of 50` and `rule fails`, exit 1 | An unknown or mistyped gate id: `gate_of` maps no Actions job to it, so every head leaves the window. A wrong id is no argument error, and the report reads every distinct head of the newest 1000 runs, at least one API call each, before it prints | Check the id against the `job` field of `python -m scripts.ci_lab.static_gates` and `scripts.ci_lab.shadow.gate_of` before running; run from a checkout of current dev |
+| `heads 0 of 50` and `rule fails`, exit 1 | An unknown or mistyped gate id: `gate_of` maps no Actions job to it, so every head leaves the window. A wrong id is no argument error, and the report reads every distinct head of the newest 1000 runs, at least one API call each and up to about 1000 calls in all, before it prints | Check the id against the `job` field of `python -m scripts.ci_lab.static_gates` and `scripts.ci_lab.shadow.gate_of` before running; run from a checkout of current dev |
 | `error: --app or AGENTIHOOKS_LAB_APP names the lab App`, exit 2 | Neither the flag nor the variable names the lab App | Pass `--app <lab App slug>` or export `AGENTIHOOKS_LAB_APP` |
 | `error: --heads must be at least 1`, exit 2 | `--heads` is 0 or negative | Pass a window of at least 1 |
 | `error: argument --event: invalid choice`, exit 2 | The event is neither `pull_request` nor `merge_group` | Pass one of the two |
