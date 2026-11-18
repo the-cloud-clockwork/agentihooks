@@ -8573,6 +8573,17 @@
       ]
     },
     {
+      "id": "lab-mutant-unit-unlisted-reads",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-mutant-key-data-reads",
+      "behaviour": "While the head holds a test module that holds no dependency manifest test, every CI lab mutant unit key also carries the hash of every file under the measured trees and the test trees, the files that module's own test unit is keyed on, because the manifest records no file reads for a test it never ran. A data file such a test reads, such as a json fixture under the test tree, changes the key of each mutant unit when it changes, so no cached mutant verdict graded against the old file is reused. With every test module listed in the manifest the keys carry none of these files.",
+      "seam": "scripts.ci_lab.scheduler.MirrorExpander.expand over a git origin fixture and scripts.ci_lab.expand_tests.unlisted_test_hashes over a tree",
+      "tests": [
+        "tests/ci_lab/test_scheduler.py::test_a_promotion_head_rekeys_a_mutant_unit_when_a_file_a_test_module_the_manifest_lacks_reads_changes",
+        "tests/ci_lab/test_expand_tests.py::test_unlisted_hashes_every_measured_and_test_tree_file_only_while_a_test_module_holds_no_manifest_test"
+      ]
+    },
+    {
       "id": "lab-reusable-workflow-gates",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-expand-reusable-workflows",

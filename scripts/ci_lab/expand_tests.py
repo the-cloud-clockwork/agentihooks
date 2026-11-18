@@ -134,7 +134,8 @@ def fingerprints(
 
 def unlisted_test_hashes(manifest: Mapping[str, Any], tree: Mapping[str, bytes]) -> dict[str, str]:
     """Return the sha256 of every test module of the tree that holds no manifest test, of each conftest pytest loads
-    for such a module and of each test tree module either imports."""
+    for such a module and of each test tree module either imports, and while there is such a module, of every file
+    under the measured and test trees, since the manifest records no file a test it never ran reads."""
     listed = {test.partition("::")[0] for test in manifest["tests"]}
     reached: set[str] = set()
     for path in tree:
@@ -142,6 +143,8 @@ def unlisted_test_hashes(manifest: Mapping[str, Any], tree: Mapping[str, bytes])
             for parent in PurePosixPath(path).parents:
                 _reached(tree, (parent / "conftest.py").as_posix(), reached)
             _reached(tree, path, reached)
+    if reached:
+        reached.update(path for path in tree if path.startswith(BROAD_TREES))
     return {path: hashlib.sha256(tree[path]).hexdigest() for path in reached}
 
 

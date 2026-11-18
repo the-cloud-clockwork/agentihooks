@@ -148,7 +148,8 @@ def mutant_units(
 
     changes maps each mutated source file, a Python file present under root, to its changed lines; covering maps a
     qualified mutmut function name to the fingerprints of the tests that cover it; unlisted maps each test module
-    under root that holds no manifest test to its hash, and enters every key, since the mutant runner runs it too.
+    under root that holds no manifest test to its hash, together with every file under the measured and test trees
+    while such a module exists, and enters every key, since the mutant runner runs it too.
     """
     runner = runner_digest(root)
     return tuple(
