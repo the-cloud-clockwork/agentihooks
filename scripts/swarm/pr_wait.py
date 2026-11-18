@@ -42,8 +42,10 @@ def triggered(command: str | None) -> bool:
 def mark(redis: Any, slug: str, agent: str, at: int, repo: str, branch: str, head: str) -> None:
     key = Progress(redis, slug).key(agent)
     redis.hdel(key, "looked", "pushed_head")
-    pushed = {"pushed_at": at, "pushed_repo": repo, "pushed_branch": branch}
-    redis.hset(key, mapping={**pushed, **({"pushed_head": head} if head else {})})
+    pushed: dict[str, int | str] = {"pushed_at": at, "pushed_repo": repo, "pushed_branch": branch}
+    if head:
+        pushed["pushed_head"] = head
+    redis.hset(key, mapping=pushed)
 
 
 def read(redis, slug: str, agent: str) -> dict | None:
@@ -118,7 +120,7 @@ def either(forge: Callable[[str, str], str], lab: Callable[[str], str], head: st
 
 
 def pull_wait(pull: Any, url: str) -> dict[str, Any]:
-    """The checked wait on an open pull request: on its merge while it is queued, on its checks at its head otherwise."""
+    """The checked wait on an open pull request: on its merge while queued, on its checks at its head otherwise."""
     on = waits.on("merge" if pull.queued else "checks", url)
     if on["kind"] == "checks":
         on["head"] = pull.head

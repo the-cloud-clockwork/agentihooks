@@ -1,4 +1,7 @@
 import subprocess
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -48,7 +51,7 @@ def git_repo(path, branch="feature"):
     return path
 
 
-def committed(path):
+def committed(path: Path) -> str:
     git_repo(path)
     subprocess.run(["git", "-C", str(path), "remote", "add", "lab", f"{LAB}/o/r.git"], check=True)
     author = ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
@@ -163,11 +166,18 @@ def test_the_push_names_its_repository_and_one_branch(tmp_path, command, where):
     assert pr_wait.pushed_where(command, str(git_repo(tmp_path))) == where
 
 
-def mark(store, name=ME, repo="", branch=""):
+def mark(store: RedisStore, name: str = ME, repo: str = "", branch: str = "") -> None:
     pr_wait.mark(store.redis, "sw", name, 100, repo, branch, "")
 
 
-def enforce(store, rows, pulls, now=5_000, forge=None, grade=None):
+def enforce(
+    store: RedisStore,
+    rows: dict[str, dict[str, Any]],
+    pulls: dict[str, PullRequest],
+    now: int = 5_000,
+    forge: Callable[[str, str], str] | None = None,
+    grade: Callable[[str], str] | None = None,
+) -> list[str]:
     forge, grade = forge or (lambda repo, branch: ""), grade or (lambda head: "")
     return pr_wait.enforce_pass(store, "sw", rows, pulls.get, now, forge, grade)
 
@@ -358,7 +368,7 @@ def test_the_forge_lookup_answers_empty_when_no_pull_request_is_found(monkeypatc
 
 @pytest.mark.parametrize("spec", ["HEAD:refs/grade/t1", "+HEAD:refs/grade/t1", "feature:refs/grade/t1"])
 @pytest.mark.feature("swarm-push-wait")
-def test_the_hook_marks_a_grade_push_with_its_head(tmp_path, store, spec):
+def test_the_hook_marks_a_grade_push_with_its_head(tmp_path: Path, store: RedisStore, spec: str) -> None:
     head = committed(tmp_path)
     assert swarm_heartbeat.push_mark(shell(f"git push lab {spec}", str(tmp_path)), ENV, store.redis, 77) is True
     assert pushed(store) == {
@@ -381,25 +391,25 @@ def test_the_hook_marks_a_grade_push_with_its_head(tmp_path, store, spec):
         PUBLISH,
     ],
 )
-def test_only_a_push_of_one_commit_to_a_grade_ref_names_a_head(tmp_path, command):
+def test_only_a_push_of_one_commit_to_a_grade_ref_names_a_head(tmp_path: Path, command: str) -> None:
     committed(tmp_path)
     assert pr_wait.pushed_head(command, str(tmp_path)) == ""
 
 
-def test_a_later_push_drops_the_head_of_an_earlier_grade_push(store):
+def test_a_later_push_drops_the_head_of_an_earlier_grade_push(store: RedisStore) -> None:
     pr_wait.mark(store.redis, "sw", ME, 100, "", "refs/grade/t1", SHA)
     pr_wait.mark(store.redis, "sw", ME, 200, "o/r", "t1", "")
     assert pushed(store) == {"pushed_at": "200", "pushed_repo": "o/r", "pushed_branch": "t1"}
 
 
-def grade_mark(store):
+def grade_mark(store: RedisStore) -> None:
     pr_wait.mark(store.redis, "sw", ME, 100, "", "refs/grade/t1", SHA)
 
 
 @pytest.mark.feature("swarm-push-wait")
-def test_the_tick_sets_a_lab_wait_on_the_grade_of_a_grade_push(store):
+def test_the_tick_sets_a_lab_wait_on_the_grade_of_a_grade_push(store: RedisStore) -> None:
     grade_mark(store)
-    asked = []
+    asked: list[str] = []
     assert enforce(store, UNPULLED, {}, grade=lambda head: asked.append(head) or GRADE) == [
         f"set the wait of {ME} on lab of {GRADE} from its push"
     ]
@@ -412,9 +422,9 @@ def test_the_tick_sets_a_lab_wait_on_the_grade_of_a_grade_push(store):
     assert enforce(store, UNPULLED, {}, grade=lambda head: GRADE) == []
 
 
-def test_a_grade_push_the_lab_has_not_graded_keeps_the_mark_until_the_next_lookup(store):
+def test_a_grade_push_the_lab_has_not_graded_keeps_the_mark_until_the_next_lookup(store: RedisStore) -> None:
     grade_mark(store)
-    asked = []
+    asked: list[str] = []
     for now in (5_000, 5_000 + pr_wait.LOOKUP_MS - 1):
         assert enforce(store, UNPULLED, {}, now, grade=lambda head: asked.append(head) or "") == []
     assert asked == [SHA]
@@ -428,21 +438,21 @@ def test_a_grade_push_the_lab_has_not_graded_keeps_the_mark_until_the_next_looku
     }
 
 
-def test_a_grade_push_of_a_task_with_a_pull_request_waits_on_its_checks(store):
+def test_a_grade_push_of_a_task_with_a_pull_request_waits_on_its_checks(store: RedisStore) -> None:
     grade_mark(store)
     assert enforce(store, ROWS, {URL: OPEN}, grade=lambda head: pytest.fail("asked the lab")) == [
         f"set the wait of {ME} on checks of {URL} from its push"
     ]
 
 
-def test_a_pull_request_the_forge_finds_wins_over_the_lab_grade(store):
+def test_a_pull_request_the_forge_finds_wins_over_the_lab_grade(store: RedisStore) -> None:
     grade_mark(store)
     assert enforce(store, UNPULLED, {URL: OPEN}, forge=lambda repo, branch: URL, grade=lambda head: GRADE) == [
         f"set the wait of {ME} on checks of {URL} from its push"
     ]
 
 
-def test_a_live_lab_wait_on_the_grade_covers_the_push(store):
+def test_a_live_lab_wait_on_the_grade_covers_the_push(store: RedisStore) -> None:
     idle.declare_wait(store.redis, "sw", ME, 10_000_000, "", 1, on={"kind": "lab", "target": GRADE})
     grade_mark(store)
     assert enforce(store, UNPULLED, {}, grade=lambda head: GRADE) == []
@@ -450,14 +460,14 @@ def test_a_live_lab_wait_on_the_grade_covers_the_push(store):
     assert pr_wait.read(store.redis, "sw", ME) is None
 
 
-def test_a_push_without_a_grade_head_never_asks_the_lab(store):
+def test_a_push_without_a_grade_head_never_asks_the_lab(store: RedisStore) -> None:
     mark(store, repo="o/r", branch="b")
     assert enforce(store, UNPULLED, {}, grade=lambda head: pytest.fail("asked the lab")) == []
     assert (pr_wait.read(store.redis, "sw", ME) or {})["looked"] == "5000"
 
 
-def test_the_lab_lookup_answers_the_grade_url_while_the_lab_holds_a_grade(monkeypatch):
-    seen = []
+def test_the_lab_lookup_answers_the_grade_url_while_the_lab_holds_a_grade(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[str] = []
     monkeypatch.setattr(pr_wait.lab_wait, "grades", lambda url: seen.append(url) or [{"run": "r1"}])
     assert pr_wait.lab_grade(f"{LAB}/", SHA) == GRADE
     assert seen == [GRADE]
@@ -473,8 +483,10 @@ def test_the_lab_lookup_answers_the_grade_url_while_the_lab_holds_a_grade(monkey
         (LAB, SHA, ValueError("lab grades document carries no grades")),
     ],
 )
-def test_the_lab_lookup_answers_empty_when_the_lab_holds_no_grade_or_cannot_say(monkeypatch, lab, head, answer):
-    def grades(url):
+def test_the_lab_lookup_answers_empty_when_the_lab_holds_no_grade_or_cannot_say(
+    monkeypatch: pytest.MonkeyPatch, lab: str, head: str, answer: list[dict[str, str]] | Exception
+) -> None:
+    def grades(url: str) -> list[dict[str, str]]:
         if isinstance(answer, Exception):
             raise answer
         return answer
@@ -484,14 +496,16 @@ def test_the_lab_lookup_answers_empty_when_the_lab_holds_no_grade_or_cannot_say(
 
 
 @pytest.mark.feature("swarm-push-wait")
-def test_an_agent_that_pushes_to_the_lab_is_woken_when_its_grade_closes(tmp_path, store, monkeypatch):
+def test_an_agent_that_pushes_to_the_lab_is_woken_when_its_grade_closes(
+    tmp_path: Path, store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
     head = committed(tmp_path)
     grade = f"{LAB}/grades/{head}"
     config = {"slug": "sw", "repo": "/r", "max_eng": 1, "max_ci": 1, "state": "running", "lab_url": LAB}
     store.redis.hset(store.key("sw", "config"), mapping=config)
     closed: dict[str, str | None] = {"conclusion": None}
 
-    def graded(url):
+    def graded(url: str) -> list[dict[str, Any]]:
         return [{"run": "r1", "conclusion": closed["conclusion"], "superseded": False, "checks": {}}]
 
     monkeypatch.setattr(pr_wait.lab_wait, "grades", graded)
