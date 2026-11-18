@@ -2,9 +2,9 @@
 
 `fetch` finds the dev push run of the Tests workflow for one commit, lists that run's `dep-manifest-packed` artifact
 and downloads its archive. A commit with no such run or artifact, an expired artifact, an archive GitHub answers is
-gone and a manifest recorded for another commit answer None; a refused request or an archive without a readable
-`packed.json` raises `FetchRefused`. `Actions` reads one repository's Actions API with a token the lab's GitHub App
-scopes to actions read, and `Fetcher` keeps one reader per repository the lab grades.
+gone and a manifest recorded for another commit answer None; a refused or unanswered request or an archive without a
+readable `packed.json` raises `FetchRefused`. `Actions` reads one repository's Actions API with a token the lab's
+GitHub App scopes to actions read, and `Fetcher` keeps one reader per repository the lab grades.
 """
 
 import io
@@ -26,14 +26,14 @@ PERMISSIONS = {"actions": "read"}
 TIMEOUT = 30
 OK = 200
 GONE = 410
-RUNS = "actions/workflows/test.yml/runs?event=push&branch=dev&head_sha="
+DEV_PUSH_RUNS_PATH = "actions/workflows/test.yml/runs?event=push&branch=dev&head_sha="
 ARTIFACT = "dep-manifest-packed"
-LISTED = f"artifacts?name={ARTIFACT}"
+ARTIFACTS_BY_NAME_QUERY = f"artifacts?name={ARTIFACT}"
 PACKED = "packed.json"
 
 
 class FetchRefused(ValueError):
-    """GitHub refused a manifest request, or sent an archive that holds no readable packed manifest."""
+    """GitHub refused or never answered a manifest request, or sent an archive without a readable packed manifest."""
 
 
 class GitHub(Protocol):
@@ -73,33 +73,39 @@ class Actions:
         return None if response.status_code == GONE else _accepted(response, path).content
 
     def _get(self, path: str) -> requests.Response:
-        """Send one GET under the repository with a fresh token; requests drops it on the archive's storage redirect."""
-        return requests.get(
-            f"{API}/repos/{self.repo}/{path}",
-            headers={"Authorization": f"Bearer {self.auth.get_token()}", **HEADERS},
-            timeout=TIMEOUT,
-        )
+        """Send one GET under the repository with a fresh token; requests drops it on the archive's storage redirect.
+        A request that gets no answer raises FetchRefused naming it."""
+        try:
+            return requests.get(
+                f"{API}/repos/{self.repo}/{path}",
+                headers={"Authorization": f"Bearer {self.auth.get_token()}", **HEADERS},
+                timeout=TIMEOUT,
+            )
+        except requests.RequestException as error:
+            raise FetchRefused(f"GET {path} got no answer: {error}") from error
 
 
-def _packed(data: bytes, path: str) -> bytes:
-    """Return the packed manifest file of an artifact archive, or raise FetchRefused naming the archive."""
+def _packed(data: bytes, path: str) -> tuple[bytes, object]:
+    """Return the packed manifest file of an artifact archive and the commit it records, or raise FetchRefused naming
+    the archive."""
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
-            return archive.read(PACKED)
-    except (zipfile.BadZipFile, KeyError) as error:
+            packed = archive.read(PACKED)
+        return packed, json.loads(packed)["commit"]
+    except (zipfile.BadZipFile, KeyError, TypeError, ValueError) as error:
         raise FetchRefused(f"{path} holds no readable {PACKED}") from error
 
 
 def fetch(github: GitHub, commit: str) -> bytes | None:
     """Return the packed manifest file the dev push Tests run of a commit kept, None when no run kept a live one."""
-    for run in github.json(f"{RUNS}{commit}")["workflow_runs"]:
-        for artifact in github.json(f"actions/runs/{run['id']}/{LISTED}")["artifacts"]:
+    for run in github.json(f"{DEV_PUSH_RUNS_PATH}{commit}")["workflow_runs"]:
+        for artifact in github.json(f"actions/runs/{run['id']}/{ARTIFACTS_BY_NAME_QUERY}")["artifacts"]:
             path = f"actions/artifacts/{artifact['id']}/zip"
             data = None if artifact["expired"] else github.archive(path)
             if data is None:
                 continue
-            packed = _packed(data, path)
-            if json.loads(packed)["commit"] == commit:
+            packed, recorded = _packed(data, path)
+            if recorded == commit:
                 return packed
     return None
 

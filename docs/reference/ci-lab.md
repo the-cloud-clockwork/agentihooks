@@ -845,9 +845,9 @@ the lab's GitHub App scopes to actions read (`manifests.Actions`, one per reposi
 `manifests.Fetcher`). Its `packed.json` is written once at that commit's key, so a stored commit is
 never fetched again. A commit without such a run or artifact, an expired artifact, an archive
 GitHub answers is gone (410) and a manifest recorded for another commit fetch nothing; a refused
-request or an archive without a readable `packed.json` raises `manifests.FetchRefused` and drops
-the head with its reason. The dev push artifact is kept 7 days, so a commit older than that is
-answered only from the store. A head that needs test units and finds none fails with
+or unanswered request or an archive without a readable `packed.json` raises `manifests.FetchRefused`
+and drops the head with its reason. The dev push artifact is kept 7 days, so a commit older
+than that is answered only from the store. A head that needs test units and finds none fails with
 `no dependency manifest at or before <base>` and is dropped with that reason, so a merge group
 never folds green on an empty unit job.
 

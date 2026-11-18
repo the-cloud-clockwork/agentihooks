@@ -17,7 +17,7 @@ from scripts.ci_lab.manifests import Actions, Fetcher, FetchRefused
 
 COMMIT = "c" * 40
 OTHER = "d" * 40
-RUNS = f"actions/workflows/test.yml/runs?event=push&branch=dev&head_sha={COMMIT}"
+COMMIT_RUNS_PATH = f"actions/workflows/test.yml/runs?event=push&branch=dev&head_sha={COMMIT}"
 URL = "https://api.github.com/repos/example/repo/"
 HEADERS = {
     "Authorization": "Bearer fixture",
@@ -80,7 +80,7 @@ def github(
 ) -> FakeGitHub:
     """Return a fake API whose commit has the dev push runs, each with its artifacts and their archives."""
     fake = FakeGitHub()
-    fake.listings[RUNS] = {"workflow_runs": [{"id": run} for run in runs]}
+    fake.listings[COMMIT_RUNS_PATH] = {"workflow_runs": [{"id": run} for run in runs]}
     for run, found in artifacts.items():
         fake.listings[listed(run)] = {"artifacts": found}
     for number, data in archives.items():
@@ -109,7 +109,7 @@ def answer(status: int, body: Mapping[str, Any] | None = None, content: bytes = 
 def test_fetch_answers_the_packed_manifest_the_dev_push_tests_run_of_the_commit_kept() -> None:
     fake = github([7], {7: [artifact(9)]}, {9: archive({"packed.json": packed(COMMIT)})})
     assert manifests.fetch(fake, COMMIT) == packed(COMMIT)
-    assert fake.asked == [RUNS, listed(7), zipped(9)]
+    assert fake.asked == [COMMIT_RUNS_PATH, listed(7), zipped(9)]
 
 
 @pytest.mark.feature("lab-dev-manifest-fetch")
@@ -119,14 +119,14 @@ def test_fetch_answers_none_for_a_commit_whose_dev_push_run_kept_no_manifest(
 ) -> None:
     fake = github(runs, artifacts, {})
     assert manifests.fetch(fake, COMMIT) is None
-    assert fake.asked == [RUNS, *map(listed, runs)]
+    assert fake.asked == [COMMIT_RUNS_PATH, *map(listed, runs)]
 
 
 @pytest.mark.feature("lab-dev-manifest-fetch")
 def test_fetch_never_downloads_an_expired_artifact_and_answers_none_for_one_whose_archive_is_gone() -> None:
     fake = github([7], {7: [artifact(8, expired=True), artifact(9)]}, {9: None})
     assert manifests.fetch(fake, COMMIT) is None
-    assert fake.asked == [RUNS, listed(7), zipped(9)]
+    assert fake.asked == [COMMIT_RUNS_PATH, listed(7), zipped(9)]
 
 
 @pytest.mark.feature("lab-dev-manifest-fetch")
@@ -136,11 +136,21 @@ def test_fetch_passes_over_dead_artifacts_and_another_commits_manifest_to_the_ne
     runs = {6: [artifact(8, expired=True), artifact(9)], 7: [artifact(10), artifact(11)]}
     fake = github([6, 7], runs, {9: None, 10: other, 11: found})
     assert manifests.fetch(fake, COMMIT) == packed(COMMIT)
-    assert fake.asked == [RUNS, listed(6), zipped(9), listed(7), zipped(10), zipped(11)]
+    assert fake.asked == [COMMIT_RUNS_PATH, listed(6), zipped(9), listed(7), zipped(10), zipped(11)]
 
 
 @pytest.mark.feature("lab-dev-manifest-fetch")
-@pytest.mark.parametrize("data", [b"torn", archive({"manifest.json": packed(COMMIT)})], ids=["torn", "unpacked"])
+@pytest.mark.parametrize(
+    "data",
+    [
+        b"torn",
+        archive({"manifest.json": packed(COMMIT)}),
+        archive({"packed.json": b"{"}),
+        archive({"packed.json": b"{}"}),
+        archive({"packed.json": b"[]"}),
+    ],
+    ids=["torn", "unpacked", "not-json", "no-commit", "not-an-object"],
+)
 def test_fetch_refuses_an_archive_without_a_readable_packed_manifest(data: bytes) -> None:
     fake = github([7], {7: [artifact(9)]}, {9: data})
     with pytest.raises(FetchRefused, match="^actions/artifacts/9/zip holds no readable packed.json$"):
@@ -165,7 +175,7 @@ def test_the_lab_reads_the_actions_api_with_a_token_that_carries_only_actions_re
     monkeypatch.setattr(requests, "post", mint)
     get = Mock(return_value=answer(200, {"workflow_runs": []}))
     monkeypatch.setattr(requests, "get", get)
-    assert Actions("example/repo").json(RUNS) == {"workflow_runs": []}
+    assert Actions("example/repo").json(COMMIT_RUNS_PATH) == {"workflow_runs": []}
     assert mint.call_args.kwargs["json"] == {"repositories": ["repo"], "permissions": {"actions": "read"}}
     assert get.call_args.kwargs["headers"]["Authorization"] == "Bearer lab-token"
 
@@ -174,7 +184,14 @@ def test_the_lab_reads_the_actions_api_with_a_token_that_carries_only_actions_re
 def test_actions_answers_none_for_a_gone_archive_and_names_any_other_refused_request(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    answers = [answer(200, {"artifacts": []}), answer(200, content=b"zip"), answer(410), answer(404), answer(502)]
+    answers = [
+        answer(200, {"artifacts": []}),
+        answer(200, content=b"zip"),
+        answer(410),
+        answer(404),
+        answer(502),
+        requests.ConnectionError("reset"),
+    ]
     get = Mock(side_effect=answers)
     monkeypatch.setattr(requests, "get", get)
     token = Token()
@@ -185,11 +202,13 @@ def test_actions_answers_none_for_a_gone_archive_and_names_any_other_refused_req
     with pytest.raises(FetchRefused, match="^GET actions/artifacts/9/zip answered 404$"):
         actions.archive(zipped(9))
     with pytest.raises(FetchRefused, match=f"^GET actions/workflows/test.yml/runs\\?.*={COMMIT} answered 502$"):
-        actions.json(RUNS)
+        actions.json(COMMIT_RUNS_PATH)
+    with pytest.raises(FetchRefused, match="^GET actions/artifacts/9/zip got no answer: reset$"):
+        actions.archive(zipped(9))
     lists = call(f"{URL}{listed(7)}", headers=HEADERS, timeout=30)
     downloads = call(f"{URL}{zipped(9)}", headers=HEADERS, timeout=30)
-    runs = call(f"{URL}{RUNS}", headers=HEADERS, timeout=30)
-    assert get.call_args_list == [lists, downloads, downloads, downloads, runs]
+    runs = call(f"{URL}{COMMIT_RUNS_PATH}", headers=HEADERS, timeout=30)
+    assert get.call_args_list == [lists, downloads, downloads, downloads, runs, downloads]
     assert token.minted == len(answers)
 
 
