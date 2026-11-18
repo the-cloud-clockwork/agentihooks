@@ -117,8 +117,7 @@ def grader_revision(summary: str | None) -> str:
 
 def static_jobs(root: Path) -> frozenset[str]:
     """Return the gate id of every static job of the workflow tree at root whose steps gate."""
-    registry = json.loads((root / static_gates.REGISTRY).read_text())
-    found = static_gates.discover((root / static_gates.WORKFLOW).read_text(), registry, ci_wiring.load(root))
+    found = static_gates.discover((root / static_gates.WORKFLOW).read_text(), reusable=ci_wiring.load(root))
     return frozenset(item.job for item in found)
 
 
