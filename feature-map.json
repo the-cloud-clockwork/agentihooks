@@ -8708,6 +8708,18 @@
         "tests/test_compose_stack.py::test_the_stack_never_reads_the_bus_settings_of_the_shell_that_runs_compose",
         "tests/test_compose_stack.py::test_an_agent_shell_on_the_anton_bus_leaves_the_controller_on_the_stack_nats"
       ]
+    },
+    {
+      "id": "tick-view-merged-pull-cache",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-view-slow-github-reads",
+      "behaviour": "The batched pull request read serves every pull request the swarm Redis keeps as merged and reads only the rest from GitHub, then keeps each view GitHub answered merged in full for two days, because a merged view never changes. A new controller process after a roll therefore reads only the open pull requests of its tick view instead of every merged pull request of the last day, so its first tick view build fits the pass view wait and the merge pass runs. Open and closed pull requests, and an entry another release wrote with other fields, are read again.",
+      "seam": "views in scripts.swarm.ledger_events, called by tick_view and fresh_reader with the swarm Redis as its cache",
+      "tests": [
+        "tests/swarm/test_pull_views.py::test_a_new_process_reads_only_the_pull_requests_not_kept_merged",
+        "tests/swarm/test_pull_views.py::test_open_and_closed_pull_requests_are_read_again_by_a_new_process",
+        "tests/swarm/test_pull_views.py::test_a_kept_entry_with_other_fields_is_read_again_and_replaced"
+      ]
     }
   ],
   "unmapped_rules": [
