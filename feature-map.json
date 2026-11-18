@@ -5503,6 +5503,18 @@
       ]
     },
     {
+      "id": "ledger-record-read-scoped",
+      "origin": "inventory",
+      "behaviour": "A ledger API read of one record of a record collection, such as tasks/t1 or phases/p1, with no query reads only that record's stored rows and their ancestors and answers exactly as a read of the whole ledger would, so a fresh process, as every agentihooks ledger get is, never streams and parses every row of the ledger to answer it.",
+      "seam": "scripts.swarm_ledger.api.routes.ledger_read with record_path, over the repository read of one key",
+      "tests": [
+        "tests/swarm_ledger/test_record_read_scoped.py::test_a_record_read_never_loads_the_whole_ledger",
+        "tests/swarm_ledger/test_record_read_scoped.py::test_a_record_read_answers_as_the_whole_ledger_read",
+        "tests/swarm_ledger/test_record_read_scoped.py::test_a_missing_record_read_is_refused_as_missing",
+        "tests/swarm_ledger/test_record_read_scoped.py::test_only_one_record_of_a_record_collection_takes_the_scoped_read"
+      ]
+    },
+    {
       "id": "swarm-ledger-api-writes",
       "origin": "operator",
       "operator_words": "finish the API to database path so it works, shift every swarm write onto it, and remove the old ledger write path completely. No fallback, no switch, no dual mode, no allowlist, no workaround left behind.",

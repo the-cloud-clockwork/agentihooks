@@ -82,5 +82,6 @@ def serve_document(monkeypatch, repository: object, document: dict) -> None:
 
     entry = SimpleNamespace(generation=1, state=document, views={})
     monkeypatch.setattr(repository, "current", lambda slug: entry)
+    monkeypatch.setattr(repository, "read", lambda slug, *keys: document)
     monkeypatch.setattr(repository, "task_rows", task_rows(lambda: entry))
     monkeypatch.setattr(task_list, "HELD", {})
