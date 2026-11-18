@@ -1,5 +1,6 @@
 import subprocess
 import sys
+from pathlib import Path
 
 import yaml
 
@@ -17,7 +18,8 @@ EMPTY_ENV = ["--set", "ledger.env.AGENTIHOOKS_SWARM_DATABASE_URL="]
 REFUSAL = "ledger.replicas above 1 needs the shared database"
 EXTRA_HOST = "ledger-internal.example:8765"
 WAVE = "argocd.argoproj.io/sync-wave"
-SERVICES = [
+HIVE_WORKLOADS = {"worker.yaml", "worker-hive.yaml"}
+SERVICE_FLAGS = [
     "--set",
     "hub.enabled=true",
     "--set",
@@ -129,23 +131,30 @@ def wave(doc: dict) -> int:
 
 
 def wave_problems(chart: str) -> list[str]:
-    result = render(chart, "--set", "ledger.replicas=2", *SHARED, *SERVICES)
+    result = render(chart, "--set", "ledger.replicas=2", *SHARED, *SERVICE_FLAGS)
     if result.returncode:
         return [f"a release with every service Deployment fails to render: {result.stderr.strip()}"]
     ledger = ledger_docs(result.stdout).get("StatefulSet")
     if ledger is None:
         return [f"a release with every service Deployment renders no ledger StatefulSet named {LEDGER}"]
-    deployments = [d for d in yaml.safe_load_all(result.stdout) if d and d["kind"] == "Deployment"]
-    found = [
-        f"{d['metadata']['name']} rolls in sync wave {wave(d)}, not after the ledger's wave {wave(ledger)}, "
-        "so its new pods can take the room a rolling ledger replica frees on the node its volume pins"
-        for d in deployments
-        if wave(d) <= wave(ledger)
+    deployments = [
+        (Path(chunk.split("# Source: ", 1)[1].split("\n", 1)[0]).name, doc)
+        for chunk in result.stdout.split("\n---\n")
+        if (doc := yaml.safe_load(chunk)) and doc["kind"] == "Deployment"
     ]
-    if len(deployments) < 6:
-        found.append(
-            f"a release with every service Deployment renders only {[d['metadata']['name'] for d in deployments]}"
-        )
+    templates = {
+        path.name for path in (Path(chart) / "templates").glob("*.yaml") if "kind: Deployment" in path.read_text()
+    }
+    found = [
+        f"a release with every service Deployment renders none from {name}: enable it in SERVICE_FLAGS"
+        for name in sorted(templates - HIVE_WORKLOADS - {source for source, _ in deployments})
+    ]
+    found += [
+        f"{doc['metadata']['name']} from {source} rolls in sync wave {wave(doc)}, not after the ledger's wave "
+        f"{wave(ledger)}, so its new pods can take the room a rolling ledger replica frees on the node its volume pins"
+        for source, doc in deployments
+        if wave(doc) <= wave(ledger)
+    ]
     return found
 
 
