@@ -23,6 +23,7 @@ from scripts.ci_lab.remote import post_receive
 from scripts.ci_lab.scheduler import Flags, Scheduler, Slot, State
 from scripts.ci_lab.units import Unit
 from scripts.ci_lab.worktrees import Mirror
+from scripts.events.bus import Consumer
 from scripts.events.config import BusConfig
 from scripts.events.memory import open_bus
 
@@ -248,7 +249,9 @@ def test_failed_names_every_unit_whose_outcome_is_not_passed_in_grade_order() ->
 def test_a_tick_holds_a_pending_head_until_a_grade_of_it_closes_then_relays_it_once() -> None:
     client, calls = fake_redis(), Calls()
     grades: dict[str, list[State]] = {}
-    engine = relay.Relay(client, Notices([relay.Pending(REPO, HEAD, REF, BRANCH)]), grades.get, calls.ports(), LAB)
+    engine = relay.Relay(
+        client, Notices([relay.Pending(REPO, HEAD, REF, BRANCH)]), grades.__getitem__, calls.ports(), LAB
+    )
     grades[HEAD] = []
     assert engine.tick() == [f"pending {HEAD} for {BRANCH}"]
     assert calls.log == []
@@ -266,7 +269,9 @@ def test_a_tick_relays_the_green_one_of_several_closed_grades() -> None:
     client, calls = fake_redis(), Calls()
     states = [grade("failure", outcome=FAILED, run="run-1"), grade("success", run="run-2")]
     found = {HEAD: states}
-    engine = relay.Relay(client, Notices([relay.Pending(REPO, HEAD, REF, BRANCH)]), found.get, calls.ports(), LAB)
+    engine = relay.Relay(
+        client, Notices([relay.Pending(REPO, HEAD, REF, BRANCH)]), found.__getitem__, calls.ports(), LAB
+    )
     actions = engine.tick()
     assert actions[1] == f"pushed {HEAD} to {BRANCH}"
     assert {output.run for output in calls.outputs} == {"run-2"}
@@ -275,7 +280,9 @@ def test_a_tick_relays_the_green_one_of_several_closed_grades() -> None:
 def test_a_tick_holds_a_head_whose_closed_grades_are_all_red_and_forgets_it() -> None:
     client, calls = fake_redis(), Calls()
     found = {HEAD: [grade("failure", outcome=FAILED)]}
-    engine = relay.Relay(client, Notices([relay.Pending(REPO, HEAD, REF, BRANCH)]), found.get, calls.ports(), LAB)
+    engine = relay.Relay(
+        client, Notices([relay.Pending(REPO, HEAD, REF, BRANCH)]), found.__getitem__, calls.ports(), LAB
+    )
     assert engine.tick() == [
         f"pending {HEAD} for {BRANCH}",
         f"held {HEAD} for {BRANCH}: grade run-7 is failure, failed units tests:batch-2",
@@ -287,7 +294,9 @@ def test_a_tick_holds_a_head_whose_closed_grades_are_all_red_and_forgets_it() ->
 def test_a_tick_drops_a_head_whose_closed_grades_were_all_superseded() -> None:
     client, calls = fake_redis(), Calls()
     found = {HEAD: [grade("cancelled", superseded=True)]}
-    engine = relay.Relay(client, Notices([relay.Pending(REPO, HEAD, REF, BRANCH)]), found.get, calls.ports(), LAB)
+    engine = relay.Relay(
+        client, Notices([relay.Pending(REPO, HEAD, REF, BRANCH)]), found.__getitem__, calls.ports(), LAB
+    )
     assert engine.tick() == [f"pending {HEAD} for {BRANCH}", f"dropped {HEAD} for {BRANCH}: every grade superseded"]
     assert calls.log == []
     assert client.hgetall(relay.PENDING) == {}
@@ -296,7 +305,9 @@ def test_a_tick_drops_a_head_whose_closed_grades_were_all_superseded() -> None:
 def test_a_tick_names_a_refused_relay_and_forgets_the_head() -> None:
     client, calls = fake_redis(), Refusing()
     found = {HEAD: [grade("success")]}
-    engine = relay.Relay(client, Notices([relay.Pending(REPO, HEAD, REF, BRANCH)]), found.get, calls.ports(), LAB)
+    engine = relay.Relay(
+        client, Notices([relay.Pending(REPO, HEAD, REF, BRANCH)]), found.__getitem__, calls.ports(), LAB
+    )
     assert engine.tick() == [
         f"pending {HEAD} for {BRANCH}",
         f"refused {HEAD} for {BRANCH}: git push answered 1: non fast forward",
@@ -309,7 +320,7 @@ def test_a_tick_keeps_each_pending_head_apart() -> None:
     client, calls = fake_redis(), Calls()
     found: dict[str, list[State]] = {HEAD: [], OTHER: []}
     first, second = relay.Pending(REPO, HEAD, REF, BRANCH), relay.Pending(REPO, OTHER, "refs/grade/t2", "engineer-2")
-    engine = relay.Relay(client, Notices([first, second]), found.get, calls.ports(), LAB)
+    engine = relay.Relay(client, Notices([first, second]), found.__getitem__, calls.ports(), LAB)
     assert engine.tick() == [f"pending {HEAD} for {BRANCH}", f"pending {OTHER} for engineer-2"]
     assert relay.Pending(**json.loads(client.hget(relay.PENDING, OTHER))) == second
 
@@ -328,7 +339,7 @@ def test_bus_notices_keep_grade_ref_heads_with_a_branch_and_acknowledge_every_en
     post_receive.run(lines, environ, bus.lab_heads, lambda sha: BASE, StringIO())
     bare = {key: value for key, value in environ.items() if not key.startswith("GIT_PUSH")}
     post_receive.run([f"{'0' * 40} {OTHER} refs/grade/t2\n"], bare, bus.lab_heads, lambda sha: BASE, StringIO())
-    notices = relay.BusNotices(consumer)
+    notices = relay.BusNotices(cast(Consumer, consumer))
     assert notices.pending() == [relay.Pending(REPO, HEAD, REF, BRANCH)]
     assert notices.pending() == []
     assert relay.SUBJECT == "ci.lab.head.notice"
@@ -472,7 +483,7 @@ def test_build_wires_the_relay_to_the_scheduler_grades_the_mirror_and_the_lab_ur
     }
     client = fake_redis()
     scheduler = cast(Scheduler, Mock(client=client, objects=LocalObjects(tmp_path / "objects")))
-    consumer = open_bus(BusConfig()).lab_heads.consumer(relay.DURABLE, relay.SUBJECT)
+    consumer = cast(Consumer, open_bus(BusConfig()).lab_heads.consumer(relay.DURABLE, relay.SUBJECT))
     relay.build(environ, scheduler, consumer)
     engine = relay.build(environ, scheduler, consumer)
     assert engine.client is client
