@@ -371,7 +371,7 @@ Reasons that fail an `app_server` canary before its deadline:
 | The provider's error message, verbatim with no prefix, or its `codexErrorInfo` value when the message is empty | The opening turn fails on an account refusal; the supervisor exits 3 |
 | `the opening Codex turn failed on a provider error: <message>` | The opening turn fails on another provider error; the supervisor exits 3 |
 | `the opening Codex turn ended twice on a provider capacity error: <message>` | Both opening turn attempts end on a capacity error; the supervisor exits 3 |
-| `codex-session launch refused: <error>` | Any other failure while the supervisor launches the server and its thread, before it starts the pump; the supervisor exits 3. A failure to prepare the launch exits 2 and writes only the route report |
+| `codex-session launch refused: <error>` | Any other failure while the supervisor launches the server and its thread, before it starts the pump; the supervisor exits 3. A failure to prepare the launch exits 2 and writes its error to the route report that `init-agent` waits on before the canary (`--route-timeout`), not to the profile report |
 | `Codex provider refused the routed account` | The inbox pump exits with status 4 (`REFUSED_EXIT`); the supervisor exits 4 |
 | `Codex app server exited with status <N> before the profile canary validated` | The app server exits while the pump still runs; the supervisor exits N |
 
