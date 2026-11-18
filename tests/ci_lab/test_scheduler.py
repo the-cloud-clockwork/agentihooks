@@ -1629,8 +1629,8 @@ def test_main_rebuilds_the_verdict_index_before_serving_only_when_reindex_on_sta
     def s3(name: str, **_options: Any) -> str:
         return name
 
-    def from_environ(_cls: type[Any], _found: Any) -> str:
-        return "config"
+    def from_environ(_cls: type[Any], _found: Any) -> config.BusConfig:
+        return config.BusConfig(backend="nats", url="nats://lab")
 
     def open_bus(_found: Any) -> Bus:
         return Bus()
