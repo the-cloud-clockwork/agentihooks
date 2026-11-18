@@ -481,7 +481,14 @@ def echo_secret_verdict(command):
 
 
 KUBECTL_DESCRIBE = re.compile(r"\bkubectl\b[^|]*?(?<!\S)describe(?!\S)([^|<>]*)")
-DESCRIBE_BOOLEAN_FLAGS = {"-a", "--all-namespaces"}
+DESCRIBE_VALUE_FLAGS = frozenset(
+    "-f -k -l -n -s -v --chunk-size --filename --kustomize --selector --as --as-group --as-uid --as-user-extra "
+    "--cache-dir --certificate-authority --client-certificate --client-key --cluster --context --kubeconfig --kuberc "
+    "--log-backtrace-at --log-dir --log-file --log-file-max-size --log-flush-frequency --namespace --profile "
+    "--profile-output --request-timeout --server --stderrthreshold --tls-server-name --user --username --v --vmodule "
+    "--password --token".split()
+)
+DESCRIBE_BOOLEAN_SHORTHANDS = "ar"
 UNSHOWN_TYPE = re.compile(r"[$`{}*?\[]")
 SECRET_RESOURCES = {"secret", "secrets"}
 SECRET_KEY_LISTING = (
@@ -496,11 +503,11 @@ def describe_words(rest: str) -> list[str]:
 
 
 def describe_operands(words: list[str]) -> list[str]:
-    """Positional words of a kubectl describe; a flag without =, unless a known boolean, consumes the next word."""
+    """Positional words of a kubectl describe; only a value flag written without = consumes the next word."""
     taken = {
         index + 1
         for index, word in enumerate(words)
-        if word.startswith("-") and "=" not in word and word not in DESCRIBE_BOOLEAN_FLAGS
+        if word.startswith("-") and "-" + word[1:].lstrip(DESCRIBE_BOOLEAN_SHORTHANDS) in DESCRIBE_VALUE_FLAGS
     }
     return [word for index, word in enumerate(words) if index not in taken and not word.startswith("-")]
 

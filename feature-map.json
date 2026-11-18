@@ -4735,6 +4735,18 @@
       ]
     },
     {
+      "id": "credential-guard-describe-flag-words",
+      "origin": "regression",
+      "ordered_at": "2026-11-18",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-credential-guard-flag-words",
+      "behaviour": "In the credential guard's kubectl describe check only a flag that takes a value, written without =, consumes the next word: kubectl describe's own value flags and kubectl's global ones, long or short, and a shorthand cluster of boolean shorthands ending in a value shorthand. A boolean flag such as show events, recursive or insecure skip tls verify, a value attached to its shorthand, and a flag kubectl does not know leave the next word an operand, so a resource type held in a shell variable after a boolean flag is refused, and a named non Secret type after a boolean flag passes.",
+      "seam": "hooks.context.credential_guard.describe_operands, read by hooks.context.credential_guard.decide",
+      "tests": [
+        "tests/test_credential_guard.py::test_a_hidden_describe_type_after_any_flag_is_refused",
+        "tests/test_credential_guard.py::test_a_named_describe_type_after_any_flag_passes"
+      ]
+    },
+    {
       "id": "swarm-outage-recovery-hub-admitted",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-outage-recovery",
