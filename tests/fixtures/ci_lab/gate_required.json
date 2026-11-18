@@ -3809,6 +3809,105 @@
    "results": {
     "unit": "skipped"
    }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request sonar skipped by selection",
+   "outputs": {
+    "select": {
+     "count": "15",
+     "key": "durations-merged-61a7e07aa53290f55f7f736e948a1f811b682fc6",
+     "legs": "[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]",
+     "scope": "selected",
+     "sonar": "skip"
+    }
+   },
+   "passes": true,
+   "results": {
+    "sonar": "skipped"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request authoritative false reads as no authoritative gates",
+   "outputs": {
+    "lab-verdict": {
+     "authoritative": false
+    }
+   },
+   "passes": true
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request authoritative gate without a lab result keeps its own",
+   "outputs": {
+    "lab-verdict": {
+     "authoritative": "{\"lint\": true}"
+    }
+   },
+   "passes": true
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request authoritative select keeps its outputs",
+   "outputs": {
+    "lab-verdict": {
+     "authoritative": "{\"select\": true}",
+     "lab_select": "success"
+    }
+   },
+   "passes": true
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request failed selection the lab grades green",
+   "outputs": {
+    "lab-verdict": {
+     "authoritative": "{\"select\": true}",
+     "lab_select": "success"
+    }
+   },
+   "passes": false,
+   "results": {
+    "select": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request cancelled selection the lab grades green",
+   "outputs": {
+    "lab-verdict": {
+     "authoritative": "{\"select\": true}",
+     "lab_select": "success"
+    }
+   },
+   "passes": false,
+   "results": {
+    "select": "cancelled"
+   }
+  },
+  {
+   "base": "pull_request",
+   "flags": {
+    "mutation": ""
+   },
+   "name": "pull_request without a mutation flag",
+   "passes": false,
+   "results": {
+    "mutation": "skipped",
+    "mutation-plan": "skipped",
+    "mutation-stats": "skipped"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge group fail fast without outputs",
+   "passes": true,
+   "set": {
+    "queue-fail-fast": {
+     "result": "success"
+    }
+   }
   }
  ],
  "source": "Gate \u2014 Required step of .github/workflows/test.yml; needs recorded from Actions runs"

@@ -699,8 +699,8 @@ key; the builders are pure and read no file, clock or network.
 `scripts.ci_lab.scheduler.Scheduler.tick(now_ms)` runs one grading pass:
 
 1. Intake reads new heads from the `ci.lab.head.>` lab heads stream and admits only actors on the
-   runner trust list of the repository's dev branch. A head on a panic fix branch grades in the
-   hotfix class.
+   runner trust list of the repository's dev branch. A head on the fix branch of any swarm in
+   panic grades in the hotfix class.
 2. Each head waits in its lane (repository, branch and class) for the quiet window, 30 seconds by
    default; a newer head of the lane restarts it and a hotfix waits for none.
 3. Expansion reads the grader's test workflow and input key registry and the head and base trees
