@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -231,6 +232,16 @@ def test_a_check_run_name_maps_by_prefix_or_by_the_static_job_its_steps_carry() 
     assert shadow.gate_of("lintx", STATIC) == "unmapped"
     assert shadow.gate_of("semgrep", STATIC) == "unmapped"
     assert shadow.gate_of("a test", STATIC) == "unmapped"
+
+
+def test_the_recorder_reads_the_shadow_check_run_names_the_lab_posts() -> None:
+    assert shadow.LAB_NAME == checks.name("", shadow=True)
+
+
+def test_the_recorder_imports_without_the_http_client_the_dashboard_column_checker_lacks() -> None:
+    probe = "import sys; sys.modules['requests'] = None; import scripts.ci_lab.shadow"
+    done = subprocess.run([sys.executable, "-c", probe], cwd=ROOT, capture_output=True, text=True, check=False)
+    assert (done.returncode, done.stderr) == (0, "")
 
 
 @pytest.mark.feature("lab-shadow-comparison")

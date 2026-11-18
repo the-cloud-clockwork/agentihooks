@@ -23,9 +23,9 @@ from typing import Any
 
 from scripts import ci_wiring
 from scripts.ci_lab import contract, metrics, static_gates
-from scripts.ci_lab.checks import SHADOW
 from scripts.ci_lab.objects import ROOT, Objects
 from scripts.ci_lab.store import PREFIX as STORE_PREFIX
+from scripts.ci_lab.webhooks import CHECK_PREFIX
 from scripts.swarm import metrics_outbox
 
 __all__ = [
@@ -61,7 +61,7 @@ VERDICTS = {"success": PASS, "failure": FAIL, "timed_out": FAIL}
 PREFIX = f"{STORE_PREFIX}shadow:"
 UNMAPPED_KEY = f"{STORE_PREFIX}shadow-unmapped"
 OBJECTS = f"{ROOT}shadow/"
-LAB_NAME = f"{SHADOW}/"
+LAB_NAME = f"{CHECK_PREFIX}-shadow/"
 MATRIX = re.compile(r" \(.*\)$")
 GRADER = re.compile(r"^Grader revision: (\S+)$", re.MULTILINE)
 TABLE = metrics_outbox.Table(
@@ -133,7 +133,10 @@ def _table_row(row: Row, ts_ms: int) -> dict[str, object]:
 
 
 class Shadow:
-    """The shadow recorder: folds check_run.completed deliveries into one row per gate and head."""
+    """The shadow recorder: folds check_run.completed deliveries into one row per gate and head.
+
+    Its caller observes deliveries one at a time, as the scheduler tick does, so a turn into a mismatch is read and
+    written by one observe at a time and counted once by the process registry."""
 
     def __init__(
         self,
@@ -223,13 +226,13 @@ def ancestor(repo: Path, older: str, newer: str) -> bool:
 def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     """Print the shadow report: python -m scripts.ci_lab shadow report --since REVISION [--repo PATH] [--redis URL]."""
     parser = argparse.ArgumentParser(prog="python -m scripts.ci_lab shadow")
-    command = parser.add_subparsers(dest="command", required=True).add_parser("report")
-    command.add_argument("--since", required=True)
-    command.add_argument("--repo", type=Path, default=Path())
-    command.add_argument("--redis", default=environ.get(contract.REDIS_URL, ""))
+    report_parser = parser.add_subparsers(dest="command", required=True).add_parser("report")
+    report_parser.add_argument("--since", required=True)
+    report_parser.add_argument("--repo", type=Path, default=Path())
+    report_parser.add_argument("--redis", default=environ.get(contract.REDIS_URL, ""))
     arguments = parser.parse_args(argv)
     if not arguments.redis:
-        command.error(f"--redis or {contract.REDIS_URL} names the lab Redis")
+        report_parser.error(f"--redis or {contract.REDIS_URL} names the lab Redis")
     import redis
 
     factory: Any = redis.Redis
