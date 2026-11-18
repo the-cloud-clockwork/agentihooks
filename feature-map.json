@@ -1,6 +1,19 @@
 {
   "features": [
     {
+      "id": "lab-scheduler-budget",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/lab-budget-live-proof",
+      "behaviour": "The CI lab scheduler admits units through the day's core budget: Scheduler.tick holds every unit a grade sends to the queue and enqueues the held units the budget admits, the most urgent grade first; a shed class enqueues nothing until the budget resets the next UTC day, while every pull request unit is still enqueued; backfill takes only the slots workers offered free after the units already waiting; a newer head of the lane drops the older head's held units without enqueuing them; and ci_lab_slots_wanted counts the running slots of every class but backfill plus the waiting slots, so backfill never raises it.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick with a scripts.ci_lab.budget.Budget on an injected clock over fakeredis and the local object store, scripts.ci_lab.metrics.observe_load, and scripts.ci_lab.scheduler.build and main passing one Budget to the scheduler and listen",
+      "tests": [
+        "tests/ci_lab/test_scheduler.py::test_a_forced_low_budget_enqueues_no_backfill_unit_and_still_enqueues_every_pull_request_unit",
+        "tests/ci_lab/test_scheduler.py::test_backfill_takes_only_the_slots_left_free_after_the_units_waiting_in_other_classes",
+        "tests/ci_lab/test_scheduler.py::test_a_newer_backfill_head_drops_the_held_units_of_the_older_one",
+        "tests/ci_lab/test_metrics.py::test_backfill_slots_never_raise_the_slots_wanted_gauge_and_a_shed_class_keeps_its_running_slots"
+      ]
+    },
+    {
       "id": "doctor-lab-health",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/swarm-doctor-lab-detector",

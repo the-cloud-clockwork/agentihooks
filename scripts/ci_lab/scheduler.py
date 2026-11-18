@@ -363,7 +363,8 @@ class Settings:
 
 @dataclass
 class Slot:
-    """One unit of a grade: the job grading it, if any, its outcome once final and whether a worker started it."""
+    """One unit of a grade: the job grading it, if any, its outcome once final, whether a worker started it and
+    whether it waits for the day's budget to admit it to the queue."""
 
     kind: str
     key: str
@@ -371,6 +372,7 @@ class Slot:
     job: str = ""
     outcome: str = ""
     started: bool = False
+    held: bool = False
 
 
 @dataclass
@@ -494,13 +496,16 @@ def summary(state: State) -> dict[str, Any]:
 class Scheduler:
     """The lab's grading over its Redis state, verdict store, object store and ports."""
 
-    def __init__(self, client: Any, objects: Objects, ports: Ports, settings: Settings) -> None:
+    def __init__(
+        self, client: Any, objects: Objects, ports: Ports, settings: Settings, spending: budget.Budget | None = None
+    ) -> None:
         self.client = client
         self.objects = objects
         self.store = Store(client, objects)
         self.queue = Queue(client)
         self.ports = ports
         self.settings = settings
+        self.spending = spending
         self.registry = metrics.Registry()
 
     def tick(self, now_ms: int) -> list[str]:
@@ -1098,7 +1103,9 @@ class MirrorExpander:
         return {path: found[blob] for path, blob in files.items()}
 
 
-def build(environ: Mapping[str, str], client: Any, objects: Objects, consumer: Consumer) -> Scheduler:
+def build(
+    environ: Mapping[str, str], client: Any, objects: Objects, consumer: Consumer, spending: budget.Budget
+) -> Scheduler:
     """Return the service's scheduler over its clients, trusting the runner trust list of the repository's dev."""
     toolchain = Toolchain(sys.version.split()[0], {}, "", "", environ.get(IMAGE, ""), {})
     node, root = Path(environ[contract.GIT_MIRROR]), Path(environ[MIRROR_STORE])
@@ -1183,12 +1190,12 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     )
     objects = S3Objects(s3, environ[MINIO_BUCKET], "")
     consumer = open_bus(replace(BusConfig.from_environ(environ), provision=False)).lab_heads.consumer(DURABLE, SUBJECT)
-    scheduler = build(environ, client, objects, consumer)
+    spending = budget.Budget(client, _now_ms, budget.policy(runtime))
+    scheduler = build(environ, client, objects, consumer, spending)
     if environ.get(REINDEX_ON_START) == "true":
         print(f"reindexed {scheduler.store.reindex()} verdicts", flush=True)
     leases = Leases(scheduler.queue, LEASE_TTL_MS, _now_ms, _sleep_ms, LEASE_POLL_MS, scheduler.ports.pods)
     routes = lease_api.ControlRoutes(client, environ.get(contract.CONTROL_TOKEN, ""), _now_ms)
-    spending = budget.Budget(client, _now_ms, budget.policy(runtime))
     ports = (contract.SCHEDULER_PORT, contract.METRICS_PORT)
     for server in listen(scheduler, leases, routes, spending, _now_ms, ports):
         Thread(target=server.serve_forever, daemon=True).start()
