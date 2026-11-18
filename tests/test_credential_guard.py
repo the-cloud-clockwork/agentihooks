@@ -343,6 +343,76 @@ def test_access_env_block_names_the_token_and_the_eval_form():
     )
 
 
+GET_SECRET_VALUE_RENDERERS = [
+    "kubectl get secret db --output yaml",
+    "kubectl get secret db --output=yaml",
+    "kubectl get secret db -o=json",
+    "kubectl get secret db -o 'yaml'",
+    'kubectl get secret db -o "json"',
+    "kubectl get secret db -o kyaml",
+    "kubectl get secret db -oyaml",
+    "kubectl get secrets -o json",
+    "kubectl get secret db -o jsonpath={.data}",
+    "kubectl get secret db -o jsonpath-as-json={.data}",
+    "kubectl get secret db -o=jsonpath={.data.password}",
+    "kubectl get secret db --output=jsonpath={.data.password}",
+    "kubectl get secret db -o go-template={{.data.password}}",
+    "kubectl get secret db -o template='{{.data.password}}'",
+    "kubectl get secret db --template='{{.data.password}}'",
+    "kubectl get secret db -o go-template --template '{{.data.password}}'",
+    "kubectl get secret db -o go-template='{{range $k,$v := .data}}{{$v}} {{end}}'",
+    "kubectl get secret db -o go-template='{{range $k := .data}}{{$k}} {{end}}'",
+    "kubectl get secret db -o go-template='{{range $k,$v := .data}}{{$k}}={{$v}} {{end}}'",
+    "kubectl get secret db -o go-template='{{range $k,$k := .data}}{{$k}} {{end}}'",
+    "kubectl get secret db -o go-template='{{.metadata.annotations}}'",
+    "kubectl get secret db -o go-template-file=values.tmpl",
+    "kubectl get secret db -o templatefile=values.tmpl",
+    "kubectl get secret db -o custom-columns=V:.data.password",
+    "kubectl get secret db -o custom-columns-file=columns.txt",
+    "kubectl get secret db -o $FORMAT",
+    "kubectl get -n prod secret db -o yaml",
+    "kubectl get --namespace=prod secrets -o json",
+    "kubectl get configmap,secret -o yaml",
+    "kubectl get -o yaml secret db",
+    "kubectl get Secret/db --output=json",
+    "kubectl get secrets.v1. db --output=yaml",
+    "kubectl get secret db \\\n  --output yaml",
+    "kubectl get secret db -o=json | jq .data",
+    "ssh hive-002 'kubectl get secret db --output=yaml'",
+    "kubectl get pods && kubectl get secret db -o=yaml",
+]
+
+GET_SECRET_KEYS_AND_NAMES = [
+    "kubectl get secret db",
+    "kubectl get secrets -n prod",
+    "kubectl get secrets -o name",
+    "kubectl get secrets -o wide",
+    "kubectl get secret db -o go-template='{{range $k,$v := .data}}{{$k}} {{end}}'",
+    "kubectl get secret db --template='{{range $k,$v:=.data}}{{$k}} {{end}}'",
+    "kubectl get secret db -o template --template '{{range $key, $_ := .data}}{{$key}}{{\"\\n\"}}{{end}}'",
+    "kubectl get secrets -o name | xargs -n1 echo",
+    "kubectl get pods -o yaml",
+    "kubectl get configmap app -o jsonpath={.data}",
+    "kubectl get pod secret-store-0 -o yaml",
+]
+
+
+@pytest.mark.feature("credential-guard-refuses-get-secret-values")
+@pytest.mark.parametrize("command", GET_SECRET_VALUE_RENDERERS)
+def test_kubectl_get_secret_forms_that_print_a_value_are_refused(command: str) -> None:
+    reason = decide({"tool_name": "Bash", "tool_input": {"command": command}})
+
+    assert reason is not None and reason.startswith(
+        block("printing Secret data (kubectl get secret -o yaml/json)", KIND_ENVIRONMENT)
+    )
+
+
+@pytest.mark.feature("credential-guard-refuses-get-secret-values")
+@pytest.mark.parametrize("command", GET_SECRET_KEYS_AND_NAMES)
+def test_kubectl_get_secret_forms_that_print_no_value_pass(command: str) -> None:
+    assert decide({"tool_name": "Bash", "tool_input": {"command": command}}) is None
+
+
 GH_TOKEN_RENDERERS = [
     "gh auth status",
     "gh auth status --show-token",

@@ -2215,6 +2215,18 @@
       ]
     },
     {
+      "id": "credential-guard-refuses-get-secret-values",
+      "origin": "regression",
+      "ordered_at": "2026-11-18",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2623",
+      "behaviour": "The credential guard refuses a kubectl get that names the Secret type anywhere in its words, as a plain, plural, group qualified, listed or TYPE/NAME type and after flags, a line continuation, quotes or an ssh wrapper, whenever its output can print a data or stringData value: the short or long output flag with a space, an equals sign, no separator or a quoted value, set to yaml, json, kyaml, any jsonpath, go template, template or custom columns format, a template or columns file, or a format the command line does not show; and a template flag with no output flag, which kubectl renders as a go template. Every template other than a range over .data with a key and a value variable that prints only the key is refused, because the metadata of an applied Secret carries its data values. The default table, name and wide output and the key listing template pass.",
+      "seam": "hooks.context.credential_guard.renderer_verdict through hooks.context.credential_guard.gets_secret_values, read by hooks.context.credential_guard.decide",
+      "tests": [
+        "tests/test_credential_guard.py::test_kubectl_get_secret_forms_that_print_a_value_are_refused",
+        "tests/test_credential_guard.py::test_kubectl_get_secret_forms_that_print_no_value_pass"
+      ]
+    },
+    {
       "id": "swarm-tick-successor-fill",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1793",
