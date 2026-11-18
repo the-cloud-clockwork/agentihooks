@@ -136,7 +136,7 @@ def _usable(
         download = pool.submit(_api, f"{actions}/artifacts/{kept[0]['id']}/zip")
         tally["requests"] += 2
         passed = {job["name"] for job in jobs.result() if job["conclusion"] == "success"}
-        if not (UNIT_JOBS <= passed or COPY_JOB in passed):
+        if not UNIT_JOBS <= passed:
             tally["failed"] += 1
             continue
         try:
