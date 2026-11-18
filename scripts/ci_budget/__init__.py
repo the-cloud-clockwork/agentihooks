@@ -1,10 +1,12 @@
 """Each Tests stage's wall time, from its first job's creation to its last job's end, against its budget.
 
 A stage's budget includes runner pickup, and the budgets along the longest chain of needs keep a pull request run
-under fifteen minutes from push to Gate Required.
+under fifteen minutes from push to Gate Required. A mutation plan job that collected the mutation stats or refined
+its shards itself does the stats and refine jobs' work, so it is held to its collected budget instead.
 """
 
 from datetime import datetime
+from typing import Any
 
 RUN_BUDGET_S = 15 * 60
 GATE = "Gate — Required"
@@ -62,6 +64,11 @@ BUDGETS = {
     "flake-budget": 120,
     "stage-budget": 60,
 }
+COLLECTED_BUDGETS = {"mutation-plan": 330}
+COLLECTED_STEPS = (
+    "Collect every stats part as a parallel process",
+    "Refine mutation shards from measured statistics",
+)
 
 
 def seconds(stamp: str) -> float:
@@ -90,9 +97,18 @@ def stages(jobs: list[dict]) -> dict[str, float]:
     return {stage: end - begin for stage, (begin, end) in spans.items()}
 
 
-def report(run: dict, jobs: list[dict], end_s: float) -> dict:
+def budget(stage: str, jobs: list[dict[str, Any]]) -> int | None:
+    collected = stage in COLLECTED_BUDGETS and any(
+        stage_of(job["name"]) == stage and step["name"] in COLLECTED_STEPS and step["conclusion"] != "skipped"
+        for job in jobs
+        for step in job.get("steps", ())
+    )
+    return COLLECTED_BUDGETS[stage] if collected else BUDGETS.get(stage)
+
+
+def report(run: dict[str, Any], jobs: list[dict[str, Any]], end_s: float) -> dict[str, Any]:
     rows = [
-        {"stage": stage, "seconds": round(spent), "budget": BUDGETS.get(stage)}
+        {"stage": stage, "seconds": round(spent), "budget": budget(stage, jobs)}
         for stage, spent in sorted(stages(jobs).items(), key=lambda item: (-item[1], item[0]))
     ]
     return {"total": round(end_s - seconds(run["run_started_at"])), "stages": rows}
