@@ -9073,6 +9073,20 @@
       ]
     },
     {
+      "id": "troubleshooting-crew-task-titles",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2549",
+      "behaviour": "Every troubleshooting crew task id and title carries the crew's UTC launch second as two six digit groups, the date and the time of day, so no crew task title holds the eight digit run the ledger refuses as a run or job id. Every crew task title is checked with the ledger's own title rule while the stage builds its commands, so a title the ledger would refuse stops the scout, fix or harden stage, dry run or real, with no crew state saved, no eng lane change and no task added, and names every reason; a scout dry run followed by a real run adds every scout task the dry run printed. Crew fixer ids keep the shape the panic cancel sweep spares; the feature panic-spares-fixer-branches checks it with fixer ids built by crew_id.",
+      "seam": "scripts.swarm.troubleshooting_crew main and add_task with an injected fake ledger that runs the ledger's own task add title check, scripts.swarm_ledger.ledger_comments check with the item kind, on every task add it receives",
+      "tests": [
+        "tests/test_launch_troubleshooting_crew_skill.py::test_a_scout_dry_run_then_a_real_run_adds_every_scout_task",
+        "tests/test_launch_troubleshooting_crew_skill.py::test_a_scout_title_the_ledger_refuses_stops_the_stage_before_any_write",
+        "tests/test_launch_troubleshooting_crew_skill.py::test_fix_and_harden_stop_before_any_write_on_a_title_the_ledger_refuses",
+        "tests/test_launch_troubleshooting_crew_skill.py::test_every_crew_task_title_passes_the_ledger_rule",
+        "tests/test_launch_troubleshooting_crew_skill.py::test_a_crew_task_title_the_ledger_refuses_names_every_reason"
+      ]
+    },
+    {
       "id": "worker-profile-detached-lifecycle-gc",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-worker-proof-gc-child",
