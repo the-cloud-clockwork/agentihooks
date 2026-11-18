@@ -311,7 +311,7 @@ def _advance(
     if held["kind"] == RECOVER:
         return _recover(run, row, found)
     stalled = _green_hold(run, row, found, pull)
-    if stalled is not None:
+    if stalled:
         return stalled
     if held["kind"] == "checks":
         return _checks(run, row, found, pull)
@@ -327,16 +327,17 @@ def _advance(
     return _reopen(run, row, found, HEAD_RED if red else "left the merge queue without merging")
 
 
-def _green_hold(run: Pass, row: dict[str, Any], found: dict[str, Any], pull: Any) -> list[str] | None:
+def _green_hold(run: Pass, row: dict[str, Any], found: dict[str, Any], pull: Any) -> list[str]:
     """Reopen a released task whose pull request read green and unqueued for ``GREEN_HOLD_MS``, outage time left out,
-    while the merge pass could not queue it; a pull request reading otherwise restarts the hold."""
+    while the merge pass could not queue it; a pull request reading otherwise restarts the hold. No action when the
+    hold is short or the reopen is refused, so the pass carries on."""
     if pull.queued or pull.red or not pull.resolved or pull.draft:
         found.pop("green_since", None)
-        return None
+        return []
     since = found.setdefault("green_since", run.now_ms)
     held = run.now_ms - since - outage.paused_ms(run.slug, since, run.now_ms)
     if held < GREEN_HOLD_MS:
-        return None
+        return []
     return _reopen(run, row, found, STALLED.format(minutes=held // 60_000))
 
 
@@ -361,7 +362,7 @@ def _requeue(run, row, found):
     return actions
 
 
-def _checks(run, row, found, pull):
+def _checks(run: Pass, row: dict[str, Any], found: dict[str, Any], pull: Any) -> list[str]:
     if pull.mergeable == "CONFLICTING":
         return _reopen(run, row, found, CONFLICT)
     outcome = waits.checks_resolution(found["on"], run.github, run.reread)

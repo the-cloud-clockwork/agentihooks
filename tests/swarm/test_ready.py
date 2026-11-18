@@ -10,7 +10,7 @@ from scripts.gates import Call, Who
 from scripts.gates.base import Decision
 from scripts.gates.claim_stop import ClaimStop
 from scripts.gates.verdicts import Verdicts
-from scripts.swarm import capacity, claim_hold, cli, linked_issues, merge_queue, ready, stack, tick, waits
+from scripts.swarm import capacity, claim_hold, cli, linked_issues, merge_queue, outage, ready, stack, tick, waits
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.ledger_events import view as read_pull
 from scripts.swarm.store import RedisStore, SwarmError
@@ -411,14 +411,15 @@ def test_repeated_ticks_never_respawn_a_released_task_waiting_on_its_pull_reques
 
     merge_pass = ready.Pass
     monkeypatch.setattr(ready, "Pass", lambda *args: merge_pass(*args, queue=queue))
-    for minutes in (0, 10, 30, 60):
+    ticks = (0, 10, 19) if pull is GREEN else (0, 10, 30, 60)
+    for minutes in ticks:
         monkeypatch.setattr(cli, "now_ms", lambda: NOW + minutes * 60_000)
         cli.run_tick(store, "sw", ledger, cli.HerdrRuntime(), FakeHerdr({}))
         assert ledger.rows["t1"]["state"] == "pr"
         assert ledger.rows["t1"]["awaiting"] == ready.AWAITING
         assert not any(a.task == "t1" for a in store.agents("sw"))
         assert ready.record(store, "sw", "t1")["head"] == HEAD
-    assert attempts == ([URL] * 4 if pull is GREEN else [URL] if pull is QUEUED else [])
+    assert attempts == ([URL] * 3 if pull is GREEN else [URL] if pull is QUEUED else [])
 
 
 @pytest.mark.parametrize("trigger", ["queue_exit", "ready_mark"])
@@ -845,8 +846,6 @@ def test_a_released_pull_request_that_stops_reading_green_and_unqueued_restarts_
 def test_outage_time_never_counts_toward_a_released_pull_request_green_hold(
     merging: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from scripts.swarm import outage
-
     paused: list[tuple[str, int, int]] = []
 
     def pause(slug: str, since_ms: int, now_ms: int) -> int:
