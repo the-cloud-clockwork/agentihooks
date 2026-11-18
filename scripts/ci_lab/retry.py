@@ -21,8 +21,8 @@ class Policy:
 class UnitResult:
     """One run of a unit: its outcome and how many times the unit already ran again.
 
-    Outcomes: passed; lost (an expired lease) and crash (a crashed worker) are losses; failed (a test failure),
-    gate_failed (a static gate failure), survived (a survived mutant) and any other outcome are failures.
+    Outcomes are those scripts.ci_lab.outcomes names: passed; lost (an expired lease) and crash (a crashed worker)
+    are losses; failed, gate_failed, survived and cannot_run are failures.
     """
 
     outcome: str
