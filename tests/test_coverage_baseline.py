@@ -15,7 +15,7 @@ Measured = tuple[Path, dict[str, str], list[Path]]
 def _summarize(summary: Path, lines: dict[str, set[int]]) -> None:
     """Write the executed lines summary a unit shard uploads when its own database ran these lines."""
     summary.parent.mkdir(parents=True, exist_ok=True)
-    summary.write_text(json.dumps({".coverage": {path: sorted(ran) for path, ran in lines.items()}}))
+    summary.write_text(json.dumps({cache.OWN_DATABASE: {path: sorted(ran) for path, ran in lines.items()}}))
 
 
 @pytest.fixture
@@ -123,7 +123,7 @@ def test_an_incomplete_suite_cannot_publish_a_baseline(measured: Measured) -> No
     assert not target.exists()
 
 
-@pytest.mark.parametrize("folders,code", [(2, 0), (3, 1)], ids=["exact", "extra-shard"])
+@pytest.mark.parametrize("folders,code", [(2, 0), (3, 1), (1, 1)], ids=["exact", "extra-shard", "missing-shard"])
 def test_the_recorder_reads_exactly_the_shards_the_run_split(measured: Measured, folders: int, code: int) -> None:
     root, _, _ = measured
     for index in range(1, folders + 1):
@@ -192,7 +192,8 @@ def test_the_publisher_never_downloads_a_shard_coverage_database() -> None:
     ]
     assert downloads and all(pattern == "executed-lines-3.12-*" for pattern in downloads)
     summary = next(step["run"] for step in jobs["unit"]["steps"] if step.get("name") == "Summarize the executed lines")
-    assert "databases=(.coverage)" in summary
+    assert f"databases=({cache.OWN_DATABASE})" in summary
+    assert 'python -m tests.coverage_summary --out executed-lines.json "${databases[@]}"' in summary
 
 
 def test_a_shard_summary_records_the_lines_its_database_ran(
@@ -223,7 +224,7 @@ def test_a_shard_summary_records_the_lines_its_database_ran(
 def test_the_baseline_reads_only_each_shards_own_database(measured: Measured) -> None:
     root, _, shards = measured
     own = {"hooks/example.py": [1]}
-    shards[0].write_text(json.dumps({".coverage": own, "reused-coverage/.coverage": {"hooks/example.py": [2]}}))
+    shards[0].write_text(json.dumps({cache.OWN_DATABASE: own, "reused-coverage/.coverage": {"hooks/example.py": [2]}}))
     target = root / "baseline.json"
     cache.record(root, shards, target)
     assert cache.read(target)["executed"] == own
@@ -231,7 +232,7 @@ def test_the_baseline_reads_only_each_shards_own_database(measured: Measured) ->
 
 def test_a_shard_summary_without_graded_lines_cannot_publish(measured: Measured) -> None:
     root, _, shards = measured
-    shards[0].write_text(json.dumps({".coverage": {}, "reused-coverage/.coverage": {"hooks/example.py": [1]}}))
+    shards[0].write_text(json.dumps({cache.OWN_DATABASE: {}, "reused-coverage/.coverage": {"hooks/example.py": [1]}}))
     target = root / "baseline.json"
     with pytest.raises(ValueError, match="measured no line under hooks or scripts"):
         cache.record(root, shards, target)

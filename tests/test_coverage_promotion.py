@@ -38,10 +38,11 @@ def _publish(job, result):
     return process.returncode == 0
 
 
-def _summarize(shard: Path, summary: Path) -> None:
+def _summarize_database(shard: Path, summary: Path) -> None:
     """Write the executed lines summary a unit shard uploads for its own database."""
     summary.parent.mkdir(parents=True, exist_ok=True)
-    summary.write_text(json.dumps({".coverage": {path: sorted(ran) for path, ran in measured_lines(shard).items()}}))
+    lines = {path: sorted(ran) for path, ran in measured_lines(shard).items()}
+    summary.write_text(json.dumps({baseline.OWN_DATABASE: lines}))
 
 
 def test_a_coverage_loss_stays_red_on_the_next_promotion_head(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -61,7 +62,7 @@ def test_a_coverage_loss_stays_red_on_the_next_promotion_head(tmp_path: Path, mo
     data.add_lines({"hooks/example.py": {1, 2}})
     data.write()
     summary = tmp_path / "summaries/executed-lines-3.12-1/executed-lines.json"
-    _summarize(shard, summary)
+    _summarize_database(shard, summary)
     stored = tmp_path / "baseline.json"
     baseline.record(repo, [summary], stored)
     statuses = []
@@ -75,7 +76,7 @@ def test_a_coverage_loss_stays_red_on_the_next_promotion_head(tmp_path: Path, mo
         data.erase()
         data.add_lines({"hooks/example.py": lines})
         data.write()
-        _summarize(shard, summary)
+        _summarize_database(shard, summary)
         out = tmp_path / name
         status = ratchet.main(
             [
