@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.1022 · 2026-11-18
+
+### 2026-11-18 · 635d25832f84 · #12085 · @agenticore-app
+
+**Document handoff continuity on events hub admission**
+
+This change updates the pillars documentation to accurately describe how handoff continuity works when an events hub admission occurs, replacing an outdated sentence that claimed no reclaim continuation was resolved. It adds a new subsection, "Handoff continuity on admission," detailing what the admission adds, what the successor reads on launch, when binding activates, the paths that return the transfer, and how late admissions now retain the claim rather than handing it back. Every statement was verified against current dev code, so operators get a trustworthy reference for troubleshooting handoff behavior on live swarms.
+
 ## v2.17.1021 · 2026-11-18
 
 ### 2026-11-18 · 8604dc4aa191 · #12078 · @agenticore-app
