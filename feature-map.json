@@ -7667,7 +7667,8 @@
         "tests/ci_lab/test_shadow_report.py::test_the_table_prints_a_row_per_head_and_the_rule_counts",
         "tests/ci_lab/test_shadow_report.py::test_the_report_command_reads_live_heads_through_the_github_api",
         "tests/ci_lab/test_shadow_report.py::test_the_report_command_names_its_repository_and_refuses_an_empty_window",
-        "tests/ci_lab/test_shadow_report.py::test_only_a_report_with_a_gate_is_the_acceptance_rule_report"
+        "tests/ci_lab/test_shadow_report.py::test_only_a_report_with_a_gate_is_the_acceptance_rule_report",
+        "tests/ci_lab/test_shadow_report.py::test_a_paged_list_stops_at_a_short_page_or_after_ten_pages"
       ]
     },
     {

@@ -289,3 +289,25 @@ def test_only_a_report_with_a_gate_is_the_acceptance_rule_report() -> None:
     assert shadow_report.claims(["--gate", "lint"]) is False
     assert shadow_report.claims(["report", "--gateway", "lint"]) is False
     assert shadow_report.claims([]) is False
+
+
+@pytest.mark.feature(FEATURE)
+def test_a_paged_list_stops_at_a_short_page_or_after_ten_pages() -> None:
+    asked: list[str] = []
+
+    def full(path: str) -> dict[str, Any]:
+        asked.append(path)
+        return {"items": [{"page": len(asked)}] * 100}
+
+    found = list(shadow_report.pages(full, "list?a=1", "items"))
+    assert len(found) == 1000
+    assert asked == [f"list?a=1&per_page=100&page={page}" for page in range(1, 11)]
+    assert found[-1] == {"page": 10}
+    asked.clear()
+
+    def short(path: str) -> dict[str, Any]:
+        asked.append(path)
+        return {"items": [{}] * 99}
+
+    assert len(list(shadow_report.pages(short, "list?a=1", "items"))) == 99
+    assert asked == ["list?a=1&per_page=100&page=1"]
