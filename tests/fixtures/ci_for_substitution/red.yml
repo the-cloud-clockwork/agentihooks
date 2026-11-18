@@ -17,11 +17,14 @@ jobs:
           for name in `ls`; do
             echo "$name"
           done
-      - name: A folded block
+      - name: A folded block whose loop follows a comment line
         shell: bash
         run: >
+          # wait for the kind nodes
           for node in $(kind get nodes); do
           docker exec "$node" true; done
+      - name: A quoted run text names its first line
+        run: "echo start\nfor _ in $(seq 2); do :; done"
   python-by-default:
     runs-on: ubuntu-latest
     defaults:

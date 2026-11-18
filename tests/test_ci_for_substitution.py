@@ -43,12 +43,17 @@ def test_loops_far_down_a_long_script_report_their_exact_lines() -> None:
 
 @pytest.mark.feature("ci-for-loop-word-list-workflow-run-blocks")
 def test_the_red_workflow_fixture_reports_every_refused_loop_at_its_file_line() -> None:
-    assert workflow_findings((ROOT / RED_WORKFLOW).read_text()) == [7, 11, 17, 23, 34]
+    assert workflow_findings((ROOT / RED_WORKFLOW).read_text()) == [7, 11, 17, 24, 27, 37]
 
 
 @pytest.mark.feature("ci-for-loop-word-list-workflow-run-blocks")
 def test_the_clean_workflow_fixture_reports_nothing() -> None:
     assert workflow_findings((ROOT / CLEAN_WORKFLOW).read_text()) == []
+
+
+@pytest.mark.feature("ci-for-loop-word-list-workflow-run-blocks")
+def test_a_run_block_ending_the_file_without_a_newline_keeps_its_last_line() -> None:
+    assert workflow_findings(ACTION.format(loop="$(seq 3)").rstrip("\n")) == [6]
 
 
 @pytest.mark.feature("ci-for-loop-word-list-workflow-run-blocks")
@@ -89,6 +94,7 @@ def test_tracked_workflows_and_actions_with_a_substitution_word_list_are_red(
         {
             ".github/workflows/wait.yml": WORKFLOW.format(loop=refused),
             ".github/workflows/poll.yaml": WORKFLOW.format(loop=refused),
+            ".github/workflows/red.yml": (ROOT / RED_WORKFLOW).read_text(),
             ".github/workflows/trusted.json": WORKFLOW.format(loop=refused),
             ".github/actions/tick/action.yml": ACTION.format(loop=refused),
             ".github/actions/old/action.yaml": ACTION.format(loop=refused),
@@ -98,10 +104,11 @@ def test_tracked_workflows_and_actions_with_a_substitution_word_list_are_red(
     )
     assert main(["--root", str(root)]) == 1
     assert capsys.readouterr().out.splitlines() == [
-        "For loop word lists: 1 shell files, 4 workflow files, 4 problems",
+        "For loop word lists: 1 shell files, 5 workflow files, 10 problems",
         f"::error::.github/actions/old/action.yaml:6: {ADVICE}",
         f"::error::.github/actions/tick/action.yml:6: {ADVICE}",
         f"::error::.github/workflows/poll.yaml:6: {ADVICE}",
+        *(f"::error::.github/workflows/red.yml:{line}: {ADVICE}" for line in (7, 11, 17, 24, 27, 37)),
         f"::error::.github/workflows/wait.yml:6: {ADVICE}",
     ]
 
@@ -115,6 +122,7 @@ def test_a_tree_of_the_fixtures_grades_the_clean_ones_and_skips_the_red_ones(
     assert capsys.readouterr().out.splitlines() == ["For loop word lists: 1 shell files, 1 workflow files, 0 problems"]
 
 
+@pytest.mark.feature("ci-for-loop-word-list-workflow-run-blocks")
 def test_a_tree_without_a_tracked_shell_or_workflow_file_grades_nothing_and_is_red(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
