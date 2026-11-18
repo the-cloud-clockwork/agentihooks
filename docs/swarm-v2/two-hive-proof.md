@@ -103,7 +103,7 @@ The live proof must satisfy the SV2-GIT-05 dependency and name the scratch ledge
 
 The delivered worker home fix is narrower than G10 qualification. Its
 [green focused proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39052518488)
-and [green mutation preflight](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39052466377)
+and [green mutation run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39052466377)
 verify the filter, including mixed case names and browser role enabled and
 disabled. They do not show two live masters completing the proof.
 

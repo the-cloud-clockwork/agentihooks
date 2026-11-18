@@ -52,7 +52,7 @@ These two tests stay unfixed until slice 1 lands, so they keep proving the retry
 | Merge queue reuse of a passed tree: the `reuse` job, `scripts/ci_reuse.py` | whole Tests run | head tree, base tree, grader tree, `.github` tree, UTC day | all or nothing; any dev move between pull request and queue misses |
 | Cached shard environments: `venv-*`, `chromium-*`, `sonar-*` caches | environment | interpreter, `pyproject.toml`, day; Playwright version | caches tools, not results |
 | Durations and coverage baselines: `durations-merged-<sha>`, `coverage-baseline-<tree>` | data | commit or tree | not results |
-| Mutation reuse of the preflight result: `own_bases` and `graded_green` in `scripts/ci_mutation/scope.py` | mutation scope | ancestor commit whose preflight `mutation` job passed | per commit, not per input |
+| Mutation reuse of graded commits: `own_bases` and `graded_green` in `scripts/ci_mutation/scope.py` | mutation scope | ancestor commit whose pull request Tests run graded every mutation shard | per commit, not per input |
 | Helm kind chart proof: `kind-due` and `helm-kind` | one job | job input key | none: `kind-due` looks up the `helm-kind` key |
 | Pull request branch reuse: `tests/branch_record.py` on each 3.12 leg, `scripts/ci_branch_plan.py` in `test-count` | test | the earlier run's commit, its per test dependency manifest, the venv cache key | same-repo pull requests into dev only; a dev change to `.github/` or `pyproject.toml` between pushes voids every record |
 | Dev push | whole run | none | always runs everything; `ci_reuse.py` decides reuse only for `merge_group`, so the dev push reuse named in the task does not exist yet |
