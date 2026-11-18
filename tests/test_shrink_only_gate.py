@@ -32,12 +32,13 @@ def test_main_needs_a_base_without_write(capsys: pytest.CaptureFixture[str]) -> 
 
 def test_main_write_records_the_measurement(tmp_path: Path) -> None:
     (tmp_path / ALLOWLIST.parent).mkdir(parents=True)
+
+    def measure(tree: Path) -> dict[str, int]:
+        assert tree == tmp_path
+        return {"a.py": 1}
+
     code = shrink_only_gate.main(
-        ["--write", "--head", str(tmp_path)],
-        ALLOWLIST,
-        lambda tree: {"a.py": 1},
-        lambda base, head, recorded: [],
-        "noun",
+        ["--write", "--head", str(tmp_path)], ALLOWLIST, measure, lambda base, head, recorded: [], "noun"
     )
     assert code == 0
     assert shrink_only_gate.load_allowlist(tmp_path, ALLOWLIST) == {"a.py": 1}
@@ -50,13 +51,15 @@ def test_main_grades_the_head_against_the_base(tmp_path: Path, capsys: pytest.Ca
     shrink_only_gate.write_allowlist(base, ALLOWLIST, {})
     shrink_only_gate.write_allowlist(head, ALLOWLIST, {"a.py": 1})
 
+    def measure(tree: Path) -> dict[str, int]:
+        assert tree == head
+        return {"a.py": 1}
+
     def grade(base: dict[str, int] | None, head: dict[str, int], recorded: dict[str, int] | None) -> list[str]:
         allowed = base or {}
         return [f"{name} over" for name, count in head.items() if count > allowed.get(name, 0)]
 
-    code = shrink_only_gate.main(
-        ["--base", str(base), "--head", str(head)], ALLOWLIST, lambda tree: {"a.py": 1}, grade, "noun"
-    )
+    code = shrink_only_gate.main(["--base", str(base), "--head", str(head)], ALLOWLIST, measure, grade, "noun")
     assert code == 1
     assert capsys.readouterr().out == "1 files noun, 0 on the base allowlist, 1 errors\n::error::a.py over\n"
 

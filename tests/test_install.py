@@ -2990,3 +2990,14 @@ def test_global_install_refuses_before_taking_the_lock(operator_install, monkeyp
     with patch.object(installer, "_sync_lock") as lock, pytest.raises(SystemExit):
         _call_operator_install(installer, external, "global")
     lock.assert_not_called()
+
+
+@pytest.mark.parametrize("prog", ["ledger", "api"])
+def test_main_dispatches_ledger_and_api_by_their_own_invoked_name(prog, monkeypatch):
+    mock_run = MagicMock(return_value=7)
+    monkeypatch.setattr("scripts.swarm_ledger.run", mock_run)
+    monkeypatch.setattr(install.sys, "argv", ["agentihooks", prog, "subcmd"])
+    with pytest.raises(SystemExit) as raised:
+        install.main()
+    assert raised.value.code == 7
+    mock_run.assert_called_once_with(["subcmd"], prog=prog)

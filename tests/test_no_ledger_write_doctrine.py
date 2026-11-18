@@ -102,6 +102,44 @@ def test_a_missing_base_allowlist_allows_nothing(tmp_path: Path, capsys: pytest.
     assert "docs/example.md teaches a ledger write 1 times; the base allowlist allows 0" in out
 
 
+def test_a_file_over_its_own_allowance_names_that_allowance(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    base = _recorded(tmp_path / "base", {"docs/example.md": WRITE_LINE})
+    head = _recorded(tmp_path / "head", {"docs/example.md": WRITE_LINE * 3})
+    code, out = _grade(base, head, capsys)
+    assert code == 1
+    assert "docs/example.md teaches a ledger write 3 times; the base allowlist allows 1" in out
+
+
+def test_a_file_at_its_allowance_is_not_an_error(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    base = _recorded(tmp_path / "base", {"docs/example.md": WRITE_LINE})
+    same = _recorded(tmp_path / "same", {"docs/example.md": WRITE_LINE})
+    assert _grade(base, same, capsys) == (0, "1 files teach a ledger write, 1 on the base allowlist, 0 errors\n")
+
+
+def test_an_allowlist_that_differs_from_the_head_measurement_names_the_write_command(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    base = _recorded(tmp_path / "base", {"docs/example.md": READ_LINE})
+    head = _tree(tmp_path / "head", {"docs/example.md": WRITE_LINE})
+    (head / gate.ALLOWLIST).write_text((base / gate.ALLOWLIST).read_text())
+    code, out = _grade(base, head, capsys)
+    assert code == 1
+    assert (
+        f"{gate.ALLOWLIST} differs from the head's measurement; run python -m scripts.no_ledger_write_doctrine --write"
+        in out
+    )
+
+
+def test_a_file_that_cannot_be_decoded_names_itself(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    head = tmp_path / "head"
+    (head / "tests").mkdir(parents=True)
+    (head / "docs").mkdir(parents=True)
+    (head / "docs" / "example.md").write_bytes(b"\xff\xfe")
+    code, out = _grade(tmp_path / "base", head, capsys)
+    assert code == 1
+    assert out.startswith("::error::cannot read docs/example.md: ")
+
+
 def test_write_records_one_space_indented_sorted_json(tmp_path: Path) -> None:
     tree = _recorded(tmp_path, {"docs/b.md": WRITE_LINE, "profiles/a.md": WRITE_LINE + WRITE_LINE})
     expected = '{\n "docs/b.md": 1,\n "profiles/a.md": 2\n}\n'

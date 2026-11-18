@@ -180,6 +180,7 @@ class Gate(unittest.TestCase):
         self.assertTrue(ledger_hook.is_ledger_cli(["agentihooks", "api", "say"]))
         self.assertFalse(ledger_hook.is_ledger_cli(["pytest", "tests/test_ledger.py", "-k", "edit"]))
         self.assertFalse(ledger_hook.is_ledger_cli(["python3", "watch_ledger.py", "s"]))
+        self.assertFalse(ledger_hook.is_ledger_cli(["echo", "ledger", "say"]))
 
     def test_agentihooks_join_command_binds_the_session(self):
         (core.LEDGER_DIR / ".sessions" / f"{SID}.json").unlink()
