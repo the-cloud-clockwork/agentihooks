@@ -3,6 +3,7 @@ import re
 import secrets
 import sqlite3
 import threading
+import time
 import weakref
 from collections.abc import Callable
 from contextlib import contextmanager, nullcontext, suppress
@@ -48,6 +49,10 @@ GENERATION_SHIFT = 20
 CHANGES_KEPT = 256
 VIEW_BUILD = threading.Lock()
 BEGIN_IMMEDIATE = "BEGIN IMMEDIATE"
+WAL = "PRAGMA journal_mode=WAL"
+BUSY = "database is locked"
+BUSY_TIMEOUT_S = 30
+WAL_RETRY_S = 0.05
 STORED = "SELECT 1 FROM ledgers WHERE slug=?"
 GENERATION = "SELECT generation FROM ledgers WHERE slug=?"
 TOKEN = "SELECT token FROM ledgers WHERE slug=?"
@@ -401,6 +406,20 @@ def close_all(held: dict) -> None:
         closing()
 
 
+def wal(connection: sqlite3.Connection) -> None:
+    """Turn the file to WAL, retrying within the busy timeout while another connection holds a new file's write
+    lock, because SQLite refuses that lock upgrade at once instead of calling the busy handler."""
+    deadline = time.monotonic() + BUSY_TIMEOUT_S
+    while True:
+        try:
+            connection.execute(WAL)
+            return
+        except sqlite3.OperationalError as error:
+            if BUSY not in str(error) or time.monotonic() >= deadline:
+                raise
+        time.sleep(WAL_RETRY_S)
+
+
 class SQLiteLedgerRepository:
     """The durable ledger record: one row per JSON value, written only where a mutation changed it."""
 
@@ -479,7 +498,7 @@ class SQLiteLedgerRepository:
         with self._guard:
             if path in self._ready:
                 return
-            connection.execute("PRAGMA journal_mode=WAL")
+            wal(connection)
             connection.executescript(SCHEMA)
             connection.executescript(hierarchy.SCHEMA)
             connection.executescript(ROWS_SCHEMA)
