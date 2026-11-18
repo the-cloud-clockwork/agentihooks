@@ -98,11 +98,29 @@ def test_the_grade_url_joins_a_lab_address_with_a_trailing_slash_once() -> None:
     "line",
     [f"{ZERO} {HEAD} refs/heads/dev", f"{ZERO} {HEAD} refs/tags/v1", f"{HEAD} {ZERO} refs/grade/t1"],
 )
-def test_another_ref_or_a_deleted_grade_ref_is_refused_and_grades_nothing(line: str) -> None:
+def test_another_ref_or_a_deleted_grade_ref_is_not_graded(line: str) -> None:
     entries, printed = receive([line], ENVIRON)
     ref = line.split()[2]
     assert entries == []
-    assert printed == [f"lab remote: refused {ref}, only a pushed refs/grade/* head is graded"]
+    assert printed == [f"lab remote: {ref} is not graded, only a pushed refs/grade/* head with a base is"]
+
+
+def test_a_root_commit_pushed_without_a_base_option_is_not_graded() -> None:
+    published, out = Published(), StringIO()
+    post_receive.run([f"{ZERO} {HEAD} refs/grade/t1"], ENVIRON, published, lambda sha: "", out)
+    assert published.entries == []
+    assert out.getvalue() == "lab remote: refs/grade/t1 is not graded, only a pushed refs/grade/* head with a base is\n"
+
+
+def test_the_same_head_on_another_branch_is_a_new_head_event_and_the_same_push_keeps_its_id() -> None:
+    line = f"{ZERO} {HEAD} refs/grade/t1"
+    first, _ = receive([line], {**ENVIRON, **options("branch=one")})
+    again, _ = receive([line], {**ENVIRON, **options("branch=one")})
+    other, _ = receive([line], {**ENVIRON, **options("branch=two")})
+    moved, _ = receive([f"{ZERO} {HEAD} refs/grade/t2"], {**ENVIRON, **options("branch=one")})
+    ids = [entries[0][1].id for entries in (first, again, other, moved)]
+    assert ids[0] == ids[1]
+    assert len({ids[0], ids[2], ids[3]}) == 3
 
 
 def test_each_grade_ref_of_one_push_is_graded_and_a_blank_line_is_skipped() -> None:
@@ -113,7 +131,7 @@ def test_each_grade_ref_of_one_push_is_graded_and_a_blank_line_is_skipped() -> N
         (OTHER, "refs/grade/t2"),
     ]
     assert printed[0] == f"lab grade: {LAB}/grades/{HEAD}"
-    assert printed[1].startswith("lab remote: refused refs/heads/x")
+    assert printed[1].startswith("lab remote: refs/heads/x is not graded")
     assert printed[2] == f"lab grade: {LAB}/grades/{OTHER}"
 
 
@@ -145,10 +163,29 @@ def test_main_reads_the_ref_lines_from_stdin_and_prints_the_grade_url(
 
 
 def _git(cwd: Path, *argv: str, extra: dict[str, str] | None = None) -> str:
-    """Run git outside the operator's global and system configuration and return its output and error text."""
-    environ = {**os.environ, **(extra or {}), "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+    """Run git outside any outer repository and the global and system configuration; return its output and error text."""
+    inherited = {name: value for name, value in os.environ.items() if not name.startswith("GIT_")}
+    environ = {**inherited, **(extra or {}), "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
     done = subprocess.run(["git", *argv], cwd=cwd, env=environ, capture_output=True, text=True, check=True)
     return done.stdout + done.stderr
+
+
+def _commit(work: Path, name: str) -> str:
+    """Commit one new file to the work repository and return the commit."""
+    (work / name).write_text(name)
+    _git(work, "add", name)
+    _git(work, "-c", "user.name=lab", "-c", "user.email=lab@example.com", "commit", "--quiet", "-m", name)
+    return _git(work, "rev-parse", "HEAD").strip()
+
+
+def test_first_parent_names_a_commit_parent_and_empty_text_for_a_root_commit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _git(tmp_path, "init", "--quiet", str(tmp_path / "work"))
+    root = _commit(tmp_path / "work", "first")
+    child = _commit(tmp_path / "work", "second")
+    monkeypatch.chdir(tmp_path / "work")
+    assert (post_receive.first_parent(child), post_receive.first_parent(root)) == (root, "")
 
 
 HOOK = """import json, os, sys
@@ -178,11 +215,8 @@ def test_a_git_push_to_a_grade_ref_shows_the_grade_url_in_the_push_transcript(tm
     _git(lab, "config", "core.hooksPath", str(hooks))
     _git(lab, "config", "receive.advertisePushOptions", "true")
     _git(tmp_path, "init", "--quiet", str(work))
-    for name in ("first", "second"):
-        (work / name).write_text(name)
-        _git(work, "add", name)
-        _git(work, "-c", "user.name=lab", "-c", "user.email=lab@example.com", "commit", "--quiet", "-m", name)
-    head, base = _git(work, "rev-parse", "HEAD", "HEAD^").split()
+    base = _commit(work, "first")
+    head = _commit(work, "second")
     transcript = _git(work, "push", "-o", "branch=engineer-1", str(lab), "HEAD:refs/grade/t1", extra=ENVIRON)
     assert f"remote: lab grade: {LAB}/grades/{head}" in transcript
     [published] = [json.loads(line) for line in record.read_text().splitlines()]
