@@ -164,3 +164,40 @@ def test_replaced_names_the_changed_and_added_keys_or_none_when_the_stored_order
     assert fragments.replaced({"b": second, "a": first}, old) is None
     assert fragments.replaced({"a": first}, old) is None
     assert fragments.replaced({"a": first}, {}) == ["a"]
+
+
+@pytest.mark.feature("ledger-write-stamp-cost")
+def test_a_write_leaves_the_stored_fragments_and_the_state_it_started_from_unchanged() -> None:
+    published, writer = stored(50)
+    replace_one(writer)
+    writer["_meta"]["stamps"]["tasks/t99/done"] = {"at": 100, "rev": 2, "by": "engineer"}
+    stamps = child(published, "_meta", "stamps")
+    kept_parts, kept_values = dict(cast(dict[str, Fragment], stamps.parts)), dict(mapped(stamps))
+    built = document(writer, published)
+    built_parts, built_values = dict(cast(dict[str, Fragment], built.parts)), dict(mapped(built))
+    built_meta = dict(cast(dict[str, Fragment], child(built, "_meta").parts))
+    rebuilt, copied = writer_copy.detached(built, published, writer)
+    held = cast(dict[str, Any], copied)
+    assert cast(dict[str, Fragment], stamps.parts) == kept_parts and mapped(stamps) == kept_values
+    assert all(cast(dict[str, Fragment], stamps.parts)[key] is part for key, part in kept_parts.items())
+    assert all(cast(dict[str, Fragment], built.parts)[key] is part for key, part in built_parts.items())
+    assert all(mapped(built)[key] is value for key, value in built_values.items())
+    assert all(cast(dict[str, Fragment], child(built, "_meta").parts)[key] is part for key, part in built_meta.items())
+    assert held is not writer and held["_meta"] is not writer["_meta"]
+    assert rebuilt.value == held == writer
+
+
+@pytest.mark.feature("ledger-write-stamp-cost")
+def test_a_write_that_reorders_the_ledger_and_its_stamp_records_stores_the_new_order_in_both_copies() -> None:
+    published, writer = stored(5)
+    replace_one(writer)
+    records = writer["_meta"]["stamps"]
+    writer["_meta"]["stamps"] = dict(reversed(list(records.items())))
+    reordered = {"tasks": writer["tasks"], "_meta": writer["_meta"]}
+    rebuilt, held = writer_copy.written(reordered, published)
+    assert list(mapped(rebuilt)) == list(held) == ["tasks", "_meta"]
+    assert list(mapped(child(rebuilt, "_meta", "stamps"))) == list(reversed(list(records)))
+    assert rebuilt.value == held == reordered
+    assert encoded(rebuilt) == encoded(document(reordered))
+    assert held["tasks"][0] is not mapped(rebuilt)["tasks"][0]
+    assert held["tasks"][0] is not reordered["tasks"][0]
