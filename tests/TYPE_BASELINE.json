@@ -40,7 +40,7 @@
   "hooks/context/context_recycle.py": 47,
   "hooks/context/context_usage.py": 7,
   "hooks/context/controls_toggle.py": 1,
-  "hooks/context/credential_guard.py": 515,
+  "hooks/context/credential_guard.py": 505,
   "hooks/context/dep_banner.py": 10,
   "hooks/context/documentation.py": 24,
   "hooks/context/documentation_evidence.py": 75,

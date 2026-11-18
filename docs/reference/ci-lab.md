@@ -567,7 +567,7 @@ annotation restarts the receiver. Every notice sender needs the same value.
 ```bash
 kubectl -n agentihooks-swarm get pushsecret agentihooks-ci-lab-notice
 kubectl -n agentihooks-swarm get externalsecret agentihooks-swarm-github-webhook
-kubectl -n agentihooks-swarm describe secret agentihooks-swarm-github-webhook
+kubectl -n agentihooks-swarm get secret agentihooks-swarm-github-webhook -o go-template='{{range $k, $v := .data}}{{$k}}{{"\n"}}{{end}}'
 ```
 
 The PushSecret reports `Synced`, the ExternalSecret reports ready, and `describe` lists
@@ -596,7 +596,7 @@ and `ci.lab.head.push` at stream sequence 9 for an agentihooks head pushed by
 
 | Symptom | Cause | Check |
 |---|---|---|
-| `/lab/head` answers `404` | The receiver started without `AGENTIHOOKS_CI_LAB_NOTICE_SECRET` | `describe secret` as above. A key in the Secret that the pod lacks means the pod predates it: `kubectl -n agentihooks-swarm rollout restart deploy/agentihooks-swarm-github-webhook` |
+| `/lab/head` answers `404` | The receiver started without `AGENTIHOOKS_CI_LAB_NOTICE_SECRET` | The Secret's key listing as above. A key in the Secret that the pod lacks means the pod predates it: `kubectl -n agentihooks-swarm rollout restart deploy/agentihooks-swarm-github-webhook` |
 | Pushes answer `200` but the stream gains no head | Lab intake is off for the same reason, or the delivery names no head: a tag, a deleted branch, a closed pull request or a check whose name does not start with `lab` | [Heads it records](#heads-it-records) |
 | The receiver Secret lacks the key | The PushSecret is not `Synced`, or the ExternalSecret has not refreshed | `kubectl -n agentihooks-swarm describe pushsecret agentihooks-ci-lab-notice` and the ExternalSecret's events |
 | A notice answers `401` | It was signed with another value, sent without the header, or its body changed after signing | Sign the bytes sent, with the value the Secret holds |

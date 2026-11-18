@@ -479,7 +479,28 @@ def echo_secret_verdict(command):
     return None
 
 
-def renderer_verdict(command):
+KUBECTL_DESCRIBE = re.compile(r"\bkubectl\b.*?\bdescribe\b([^|<>]*)", re.S)
+DESCRIBE_WORD = re.compile(r"[\s'\"]+")
+SECRET_RESOURCES = {"secret", "secrets"}
+SECRET_KEY_LISTING = (
+    "\nkubectl get secret <name> -o go-template='{{range $k, $v := .data}}{{$k}}{{\"\\n\"}}{{end}}' "
+    "lists the key names without the values."
+)
+
+
+def describes_secrets(low: str) -> bool:
+    """True when a kubectl describe in the lowercased segment names the Secret resource type."""
+    found = KUBECTL_DESCRIBE.search(low)
+    if found is None:
+        return False
+    return any(
+        part.split("/")[0].split(".")[0] in SECRET_RESOURCES
+        for word in DESCRIBE_WORD.split(found.group(1))
+        for part in word.split(",")
+    )
+
+
+def renderer_verdict(command: str) -> str | None:
     low = command.lower()
     if re.search(r"\bdocker[- ]compose\b.*\bconfig\b", low) and "--no-interpolate" not in low:
         return (
@@ -503,7 +524,15 @@ def renderer_verdict(command):
                 "printing Secret data (kubectl get secret -o yaml/json)",
                 KIND_ENVIRONMENT,
             )
-            + "\nkubectl describe secret <name> shows the keys and byte sizes without the values."
+            + SECRET_KEY_LISTING
+        )
+    if describes_secrets(low):
+        return (
+            block(
+                "describing a Secret (kubectl describe secret prints the token of a service account token Secret)",
+                KIND_ENVIRONMENT,
+            )
+            + SECRET_KEY_LISTING
         )
     if len(re.findall(ACCESS_ENV, low)) > len(re.findall(rf'\beval\s+"\$\([^()]*{ACCESS_ENV}\s*\)"', low)):
         return (
