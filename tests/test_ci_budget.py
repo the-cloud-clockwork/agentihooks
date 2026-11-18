@@ -23,15 +23,11 @@ def _job(name, created, completed, conclusion="success"):
     }
 
 
-STATS = "Collect every stats part as a parallel process"
-REFINE = "Refine mutation shards from measured statistics"
+COLLECTED = "Take the local actions from the workflow revision for the stats"
 
 
-def _plan(completed: str, stats: str = "success", refine: str = "skipped") -> dict[str, object]:
-    return {
-        **_job("mutation-plan", "00:00", completed),
-        "steps": [{"name": STATS, "conclusion": stats}, {"name": REFINE, "conclusion": refine}],
-    }
+def _plan(completed: str, collected: str = "success") -> dict[str, object]:
+    return {**_job("mutation-plan", "00:00", completed), "steps": [{"name": COLLECTED, "conclusion": collected}]}
 
 
 JOBS = [
@@ -132,20 +128,28 @@ def test_dispatch_admission_and_mutation_planning_have_bounded_wall_times(name, 
 
 
 @pytest.mark.parametrize(
-    ("stats", "refine", "budget"),
+    ("collected", "budget"),
     [
-        ("success", "skipped", 330),
-        ("failure", "skipped", 330),
-        ("skipped", "success", 330),
-        ("skipped", "skipped", 60),
+        ("success", ci_budget.COLLECTED_BUDGETS["mutation-plan"]),
+        ("failure", ci_budget.COLLECTED_BUDGETS["mutation-plan"]),
+        ("skipped", ci_budget.BUDGETS["mutation-plan"]),
     ],
 )
-def test_a_mutation_plan_that_collected_or_refined_its_stats_takes_the_collected_budget(
-    stats: str, refine: str, budget: int
+def test_a_mutation_plan_takes_the_collected_budget_only_when_it_took_the_collected_path(
+    collected: str, budget: int
 ) -> None:
-    jobs = [_job("select", "00:00", "00:10"), _plan("00:10", stats, refine)]
+    jobs = [_job("select", "00:00", "00:10"), _plan("00:10", collected)]
     assert ci_budget.budget("mutation-plan", jobs) == budget
-    assert ci_budget.budget("select", jobs) == 120
+    assert ci_budget.budget("select", jobs) == ci_budget.BUDGETS["select"]
+
+
+def test_the_collected_budget_follows_the_plan_stage_and_no_other_stage() -> None:
+    jobs = [
+        {**_job("select", "00:00", "00:10"), "steps": [{"name": COLLECTED, "conclusion": "success"}]},
+        {**_plan("00:10"), "name": "mutation-plan (1)"},
+    ]
+    assert ci_budget.budget("select", jobs) == ci_budget.BUDGETS["select"]
+    assert ci_budget.budget("mutation-plan", jobs) == ci_budget.COLLECTED_BUDGETS["mutation-plan"]
 
 
 @pytest.mark.parametrize(("completed", "expected"), [("05:30", "ok"), ("05:31", "over")])
@@ -156,10 +160,11 @@ def test_a_collected_mutation_plan_inside_its_budget_reports_ok_and_a_slow_one_o
     assert ci_budget.verdict(result["stages"][0]) == expected
 
 
-def test_the_collected_steps_run_only_when_the_tests_workflow_mutation_plan_collects() -> None:
+def test_the_collected_step_is_the_first_mutation_plan_step_the_collect_output_guards() -> None:
     workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
-    steps = {step.get("name"): step.get("if", "") for step in workflow["jobs"]["mutation-plan"]["steps"]}
-    assert all("steps.collect.outputs.collected == 'true'" in steps[name] for name in ci_budget.COLLECTED_STEPS)
+    steps = workflow["jobs"]["mutation-plan"]["steps"]
+    first = next(step for step in steps if "steps.collect.outputs.collected" in step.get("if", ""))
+    assert (first["name"], first["if"]) == (ci_budget.COLLECTED_STEP, "steps.collect.outputs.collected == 'true'")
 
 
 def test_render_prints_every_stage_and_the_run_against_the_budget():
@@ -178,11 +183,14 @@ def test_render_prints_every_stage_and_the_run_against_the_budget():
 def test_every_job_of_the_tests_workflow_has_a_budget() -> None:
     jobs = set(_workflow_jobs())
     assert jobs <= set(ci_budget.BUDGETS) <= jobs | {"type-gate"}
+    assert set(ci_budget.COLLECTED_BUDGETS) <= set(ci_budget.BUDGETS)
 
 
 def test_the_longest_chain_of_budgets_to_gate_required_fits_fifteen_minutes() -> None:
     jobs = _workflow_jobs()
-    collected = {**ci_budget.BUDGETS, **ci_budget.COLLECTED_BUDGETS, "mutation-stats": 0, "mutation-refine": 0}
+    skipped = {"mutation-stats": 0, "mutation-refine": 0}
+    assert all("needs.mutation-plan.outputs.collected != 'true'" in jobs[job]["if"] for job in skipped)
+    collected = {**ci_budget.BUDGETS, **ci_budget.COLLECTED_BUDGETS, **skipped}
 
     def chain(job: str, budgets: dict[str, int]) -> int:
         needs = jobs[job].get("needs", [])

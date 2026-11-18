@@ -1,8 +1,9 @@
 """Each Tests stage's wall time, from its first job's creation to its last job's end, against its budget.
 
 A stage's budget includes runner pickup, and the budgets along the longest chain of needs keep a pull request run
-under fifteen minutes from push to Gate Required. A mutation plan job that collected the mutation stats or refined
-its shards itself does the stats and refine jobs' work, so it is held to its collected budget instead.
+under fifteen minutes from push to Gate Required. A mutation plan job that took the collected path, collecting the
+mutation stats and refining or mutating in the job, does the stats and refine jobs' work, so it is held to its
+collected budget instead.
 """
 
 from datetime import datetime
@@ -65,10 +66,7 @@ BUDGETS = {
     "stage-budget": 60,
 }
 COLLECTED_BUDGETS = {"mutation-plan": 330}
-COLLECTED_STEPS = (
-    "Collect every stats part as a parallel process",
-    "Refine mutation shards from measured statistics",
-)
+COLLECTED_STEP = "Take the local actions from the workflow revision for the stats"
 
 
 def seconds(stamp: str) -> float:
@@ -99,7 +97,7 @@ def stages(jobs: list[dict]) -> dict[str, float]:
 
 def budget(stage: str, jobs: list[dict[str, Any]]) -> int | None:
     collected = stage in COLLECTED_BUDGETS and any(
-        stage_of(job["name"]) == stage and step["name"] in COLLECTED_STEPS and step["conclusion"] != "skipped"
+        stage_of(job["name"]) == stage and step["name"] == COLLECTED_STEP and step["conclusion"] != "skipped"
         for job in jobs
         for step in job.get("steps", ())
     )
