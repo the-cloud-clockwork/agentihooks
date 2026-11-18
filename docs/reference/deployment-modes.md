@@ -73,7 +73,7 @@ With a remote ledger, `agentihooks hub run` first issues the replica its own ser
 | `readiness` | A poll; it also subscribes to `swarm.*.readiness.requested`, which nothing publishes yet | Offers the claimable tasks of every `events` swarm to the lane work queues. |
 | `preemption` | A one minute poll; it also subscribes to `swarm.*.preemption.requested`, which nothing publishes yet | Asks the lowest ranked holder of a full lane to hand off when an urgent or focused task of a running `events` swarm still waits one poll later, as the legacy tick does. |
 | `pulls` | `swarm.*.task.*` and a poll | Publishes pull request, merge queue and check events, also fed by `agentihooks github-webhook`. |
-| `launch-checks` | A ten second poll; it also subscribes to `swarm.*.launch-checks.requested`, which nothing publishes yet | Judges the launch check of each worker the hub admitted, from the launch time its execution started write records. A worker whose hive reports no launch fails 300 seconds after admission. A failed worker is stopped on its hive, and its task relaunches once. |
+| `launch-checks` | A ten second poll; it also subscribes to `swarm.*.launch-checks.requested`, which nothing publishes yet | Judges the launch check of each worker the hub admitted, from the launch time its execution started write records. A worker whose hive reports no launch fails 360 seconds after its hive took the launch, or after admission when no hive took it. A failed worker is stopped on its hive, and its task relaunches once. |
 
 ### Reactor leases
 
@@ -147,6 +147,7 @@ and a checkout of this repository.
    kubectl get deploy -n <namespace> <release>-hub \
      -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'
    # ghcr.io/<owner>/agentihooks-swarm:<version>
+   git fetch --tags origin
    git merge-base --is-ancestor <merge commit> v<version> && echo carries
    # carries
    ```
@@ -187,23 +188,20 @@ and a checkout of this repository.
    on both pods. `kubectl logs` reads only the current container; after a restart, add `--previous` to read the
    container before it.
 
-3. Confirm the swarm runs on the `events` engine, since only hub admitted launches are acknowledged this way:
+3. Read each agent's acknowledged launch. Every swarm runs on the `events` engine since
+   [#11141](https://github.com/the-cloud-clockwork/agentihooks/pull/11141); a stored engine of any other value fails
+   to load with `engine must be events`, so no engine check is needed first.
 
-   ```bash
-   agentihooks swarm <slug> status --json | jq -r .config.engine
-   # events
-   ```
-
-4. Read each agent's acknowledged launch. A hive spoke writes `null` to the `execution-starts` bucket before it
-   spawns an agent. Once the spawn returns, it replaces that value with the `execution.started` record and publishes
-   the record on `swarm.<slug>.execution.started`. The key is the SHA-256 of the JSON list
+   A hive spoke writes `null` to the `execution-starts` bucket before it spawns an agent. Once the spawn returns, it
+   replaces that value with the `execution.started` record and publishes the record on
+   `swarm.<slug>.execution.started`. The key is the SHA-256 of the JSON list
    `[<slug>, <agent name>, <generation>]`, so a launch the hive never acknowledged still reads `null`. No
    `agentihooks` command lists these records yet; the read below uses the reconciler's own matching helper,
    `scripts.hub.reconciler._start`, which returns the record only when its swarm, execution, generation, agent name
    and task match the agent record. The hub pod carries the swarm store and bus settings it needs:
 
    ```bash
-   cat > launches.py <<'EOF'
+   kubectl exec -i -n <namespace> deploy/<release>-hub -- python - <slug> <<'EOF'
    import sys
 
    from scripts.events.config import BusConfig
@@ -224,14 +222,13 @@ and a checkout of this repository.
    finally:
        bus.close()
    EOF
-   kubectl exec -i -n <namespace> deploy/<release>-hub -- python - <slug> < launches.py
    ```
 
    Output from the same 15 November read, one line per agent:
 
    ```text
    engineer@<code>-<n> <hive id> 1794704229546 1794704268058 2147 ready:<slug>:<task>:12
-   <tick launched agent> no acknowledged start
+   <master name> no acknowledged start
    ```
 
    | Field | Meaning |
@@ -244,8 +241,9 @@ and a checkout of this repository.
 
    The record's `data` also carries `task`, `task_generation`, `claim_key`, `generation`, `lane`, `name`,
    `pane_id`, `harness`, `account`, `conversation_id` and `overlays`. The read passes when every agent the hub
-   admitted prints a record whose author is a hive. An agent the tick or an operator launched outside hub admission,
-   such as a master, prints `no acknowledged start`.
+   admitted prints a record whose author is a hive. An agent started outside hub admission prints
+   `no acknowledged start`; on the 15 November read that was the swarm's master, while 6 of its 7 agents printed a
+   record.
 
 #### Hub verification troubleshooting
 
@@ -258,8 +256,7 @@ and a checkout of this repository.
 | `hub: reactor inbox-wake timer callback failed` with `InboxError: no message <id>` | The hub runs a release without [#7630](https://github.com/the-cloud-clockwork/agentihooks/pull/7630). | Roll the hub to a release that carries it, checked as in step 1. |
 | `hub: reactor inbox-wake timer callback failed` with another error | An outbox item whose send keeps failing, such as `ValueError: invalid event subject token` for an invalid address. | The id stays in the outbox until the item is repaired or settled. Other ids still drain because the order changes on every pass. |
 | `item id already belongs to a different message` in a traceback | A send outside the outbox flush reused an item id for a different message. The flush catches this error itself. | The traceback's frames name the sender. |
-| Step 3 prints `legacy` | The swarm runs on the tick, which records no hub launch acknowledgements. | Switch with `agentihooks swarm <slug> set engine=events`; see [Event driven engine](../pillars/swarm.md#event-driven-engine). |
-| An admitted agent prints `no acknowledged start` | The spawn failed or has not returned, so the record still reads `null`, or the record names another execution, generation or task than the agent record. | The `launch-checks` reactor fails a worker with no reported launch 300 seconds after admission and relaunches its task once. Read the spoke's log on the agent's hive. |
+| An admitted agent prints `no acknowledged start` | The spawn failed or has not returned, so the record still reads `null`, or the record names another execution, generation or task than the agent record. | The `launch-checks` reactor fails a worker with no started record 360 seconds after the hive wrote its `null`, or after admission when the hive never wrote one: the 300 second spawn timeout plus the 60 second launch check deadline. It then relaunches the task once. Read the spoke's log on the agent's hive. |
 
 ### Bus settings
 
