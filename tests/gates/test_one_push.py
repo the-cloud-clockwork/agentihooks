@@ -16,6 +16,7 @@ from scripts.gates.one_push import (
     positionals,
     push_refusal,
     queue_refusal,
+    written,
 )
 from scripts.gates.subagents import SubagentBudget
 from scripts.gates.verdicts import Verdicts
@@ -409,9 +410,10 @@ def test_a_push_to_another_branch_passes_and_one_to_the_task_branch_is_held(tree
 
 @pytest.mark.feature("lab-remote-in-workspaces")
 def test_a_lab_push_writes_the_branch_its_push_option_hands_the_relay(tree: Path) -> None:
-    assert destinations(tree, ["-o", "branch=task", "lab", "HEAD:refs/grade/t1"]) == {"task"}
-    assert destinations(tree, ["lab", "HEAD:refs/grade/t1"]) == set()
-    assert destinations(tree, ["origin", "-o", "branch=x", "HEAD:refs/heads/y"]) == {"y"}
+    assert written(tree, ["-o", "branch=task", "lab", "HEAD:refs/grade/t1"]) == {"task"}
+    assert written(tree, ["lab", "HEAD:refs/grade/t1"]) == set()
+    assert written(tree, ["origin", "-o", "branch=x", "HEAD:refs/heads/y"]) == {"y"}
+    assert destinations(tree, ["-o", "branch=task", "lab", "HEAD:refs/grade/t1"]) == {"refs/grade/t1"}
 
 
 @pytest.mark.feature("lab-remote-in-workspaces")

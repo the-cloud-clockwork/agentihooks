@@ -2155,6 +2155,7 @@ def test_publish_via_lab_leaves_origin_untouched_on_a_red_grade(
     from scripts.swarm.store import SwarmError
 
     monkeypatch.setattr(publish, "read_grade", lambda url: {"grades": [{"conclusion": "failure"}]})
+    monkeypatch.setattr(publish, "LAB_WAIT_S", 0)
     with pytest.raises(SwarmError) as refused:
         _publish_via_lab(publication)
     head = git(publication.root, "rev-parse", "HEAD")
@@ -2312,3 +2313,24 @@ def test_publish_command_hands_the_lab_route_to_publish(
     cli.publication_command(store, args)
     assert called[0][5] == ["chosen.txt"]
     assert called[0][6] == (publish.LabRoute(*route) if route else None)
+
+
+@pytest.mark.feature("lab-remote-in-workspaces")
+def test_publish_command_names_its_lab_flags(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import re
+
+    from scripts.swarm import cli
+
+    monkeypatch.setenv("COLUMNS", "200")
+    parser = cli.build_parser()
+    assert parser.parse_args(["swarm", "publish", "-m", "Change"]).via == ""
+    with pytest.raises(SystemExit) as refused:
+        parser.parse_args(["swarm", "publish", "--via", "origin", "-m", "Change"])
+    assert refused.value.code == 2
+    with pytest.raises(SystemExit):
+        parser.parse_args(["swarm", "publish", "--help"])
+    shown = capsys.readouterr().out
+    assert re.search(r"^  --via \{lab\} +grade HEAD on the lab remote before origin$", shown, re.M)
+    assert re.search(r"^  --direct +with --via lab, push origin without the lab grade$", shown, re.M)

@@ -104,15 +104,20 @@ def repo_of(path, args):
     return f"{found.group(1)}/{found.group(2)}".lower() if found else ""
 
 
-def destinations(path: Path, args: list[str]) -> set[str]:
-    """The branches a push writes: each refspec's destination, the current branch for HEAD or no refspec; for a push
-    to the lab, the branches its push options hand the relay to write on green."""
-    if positionals(args)[:1] == [checkout.REMOTE]:
-        return set(checkout.relayed(args))
+def destinations(path, args):
+    """The branches a push writes: each refspec's destination, the current branch for HEAD or no refspec."""
     current = git(path, "branch", "--show-current").stdout.strip()
     specs = positionals(args)[1:]
     ends = [spec.lstrip("+").rpartition(":")[2].removeprefix("refs/heads/") for spec in specs] or [""]
     return {current if end in ("", "HEAD") else end for end in ends}
+
+
+def written(path: Path, args: list[str]) -> set[str]:
+    """The branches a push writes on GitHub: its destinations, or for a push to the lab the branches its push options
+    hand the relay to write on green."""
+    if positionals(args)[:1] == [checkout.REMOTE]:
+        return set(checkout.relayed(args))
+    return destinations(path, args)
 
 
 def open_refusal(slug, missing, held):
@@ -206,7 +211,7 @@ class OnePush:
         repo = repo_of(where, args)
         if repo and repo != found.group(1).lower():
             return ""
-        targets = destinations(where, args)
+        targets = written(where, args)
         if not targets or (task.get("branch") and task["branch"] not in targets):
             return ""
         pull = self.github()(task["pr_url"])
