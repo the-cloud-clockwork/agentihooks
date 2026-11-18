@@ -21,13 +21,14 @@ worker's PriorityClass is a cluster object outside that module;
 | `agentihooks ci-lab-scheduler --self-test` | `python -m scripts.ci_lab scheduler --self-test` | Checks the scheduler contract offline and prints it as JSON |
 | `agentihooks ci-lab-scheduler [--interval S] [--passes N]` | `python -m scripts.ci_lab scheduler [--interval S] [--passes N]` | Runs the scheduler service: reads the runtime config, serves the lease API, `/capacity` and `/grades/<sha>` on port 8800 and `/metrics` on 9108, and runs one grading pass every interval (2 seconds), forever unless `--passes` is set |
 | `agentihooks ci-lab-worker --self-test` | `python -m scripts.ci_lab worker --self-test` | Refuses any GitHub App variable, checks the worker contract offline and prints it as JSON |
+| `agentihooks ci-lab-worker` | `python -m scripts.ci_lab worker` | Runs the worker service: builds the pod from the worker environment, leases units from the scheduler and runs each through the adapter of its kind (see [Worker executors](#worker-executors)) until SIGTERM, then lets running units drain |
 
 The self tests make no network, Redis, object store or GitHub calls. They exit 0 when the
 contract holds and 1 with the reason on standard error when it does not. A self test fails when
 a metric name is not a valid Prometheus name starting with `ci_lab_`, a port repeats or falls
 outside 1 to 65535, or the worker environment grants `GITHUB_APP_`. `-h` prints usage. The
-scheduler without `--self-test` runs its service (see [Scheduler loop](#scheduler-loop)); any other
-worker start without `--self-test` exits 2 until the worker loop lands.
+scheduler and the worker without `--self-test` run their services (see [Scheduler loop](#scheduler-loop)
+and [Worker executors](#worker-executors)).
 
 ## Environment
 
@@ -41,6 +42,13 @@ worker start without `--self-test` exits 2 until the worker loop lands.
 | `CI_LAB_SCHEDULER_URL` | no | yes | Base address of the scheduler lease API |
 | `CI_LAB_SLOTS` | no | yes | Number of units the worker runs at once |
 | `CI_LAB_GIT_MIRROR` | yes | yes | Path of the shared git mirror the worker cuts worktrees from and the scheduler borrows objects from |
+| `CI_LAB_WORK_ROOT` | no | yes | Folder of the worker's private git store, its trees, venvs and unit runs and reports |
+| `CI_LAB_MANIFEST` | no | yes | Path of the dependency manifest JSON a test unit's batch is checked against |
+| `CI_LAB_FLAKES` | no | yes | Path of the flake ledger a test unit appends to when its retry passes |
+| `CI_LAB_MUTATION_CACHE` | no | yes | Folder of the mutation stats cache, keyed by tree content |
+| `CI_LAB_KILLERS` | no | yes | Path of the kill memory that orders a mutant's tests, its remembered killer first |
+| `CI_LAB_MUTATION_BUDGET` | no | yes | Seconds a mutant unit may take before its mutants run side by side |
+| `CI_LAB_MUTATION_CAP` | no | yes | Most mutants a mutant unit grades at once |
 | `CI_LAB_MINIO_ENDPOINT`, `CI_LAB_MINIO_BUCKET`, `CI_LAB_MINIO_ACCESS_KEY`, `CI_LAB_MINIO_SECRET_KEY` | yes | no | The object store names the scheduler reads |
 | `CI_LAB_MIRROR_STORE` | yes | no | Folder of the scheduler's private git stores, one per repository, that borrow the mirror's objects |
 | `CI_LAB_REPOSITORY` | yes | no | Repository URL whose dev runner trust list admits head actors |
@@ -842,6 +850,33 @@ Each grade is `scripts.ci_lab.scheduler.summary` of its state:
 | `superseded` | Whether a newer head of its lane cancelled it |
 | `units` | `total` units and how many are `final` |
 | `checks` | Each check run's last posted `status` and `conclusion`, `required` included |
+
+## Worker executors
+
+`agentihooks ci-lab-worker` builds the pod from the [worker environment](#environment), leases units
+from the scheduler and runs each through `scripts.ci_lab.executors`, the adapter its unit kind
+names. Every grant of `POST /lease` carries the job's `head`, `base` and `grader` revisions: the
+scheduler enqueues a grade's misses with the grade's base and its plan's grader revision.
+
+| Kind | Trees | Executor inputs |
+|---|---|---|
+| `static` | head, base and grader, read only, shared by the pod's units | the gate the unit names from the grader tree's workflow and input registry, the venv of the head's `uv.lock` digest and `inputs.base` set to the base revision |
+| `test` | head, read only | the batch, the venv of the head's `uv.lock` digest, `CI_LAB_MANIFEST`, `CI_LAB_FLAKES` and one pytest worker per slot |
+| `stats` | a private copy of the head with every file under the `[tool.mutmut]` source paths behind its trampolines | the tree as root and `CI_LAB_MUTATION_CACHE` |
+| `mutant` | the same private trampolined copy | `CI_LAB_KILLERS`, `CI_LAB_MUTATION_BUDGET`, `CI_LAB_MUTATION_CAP` and the tests that the stats records of every test module in the tree show reaching the mutant's function, with their seconds |
+
+The mutation runner runs in the sandbox as `python -m scripts.ci_lab.run_mutation REQUEST OUTPUT`
+from the private tree. A mutant unit passes only when every mutant is killed; a runner that exits
+non zero fails its unit. Each adapter uploads a JSON report with the unit's `seconds` (and `flaky`
+for a test unit), which the scheduler stores with the verdict, and releases every tree it cut,
+also when the executor raises. SIGTERM stops leasing and lets running units drain within the
+termination grace.
+
+Check the wiring offline:
+
+```bash
+agentihooks ci-lab-worker --self-test | python -c 'import json,sys; print(json.load(sys.stdin)["environment"]["names"])'
+```
 
 ## Verdict store
 
@@ -1657,11 +1692,8 @@ Limitations:
   receives no grader or base tree.
 - `RUNNER_TEMP` is writable, so a step can delete or replace its own `grader` or `base` symlink.
   That changes only what its own run reads; the trees stay unchanged.
-- No worker runs either runner yet. `scripts.ci_lab.worker.Worker` runs each unit through the
-  `executors` mapping its caller passes, and no code passes `run_static.run` or `run_tests.run` in
-  that mapping. The worker entry point still exits 2 without `--self-test` (see
-  [Entry points](#entry-points)). Both runners run today only through code that calls them
-  directly, such as the tests.
+- The worker service runs both runners through `scripts.ci_lab.executors` (see
+  [Worker executors](#worker-executors)).
 
 ### Use it
 

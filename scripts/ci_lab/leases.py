@@ -22,6 +22,8 @@ class Grant:
     unit: Unit
     slots: int
     expires_ms: int
+    base: str = ""
+    grader: str = ""
 
 
 @dataclass
@@ -61,7 +63,9 @@ class Leases:
             expires_ms = self.clock() + self.ttl_ms
             if not job.requirement.capabilities <= capabilities or not self.queue.claim(job, worker, token, expires_ms):
                 continue
-            grants.append(Grant(job_id, token, job.head, job.unit, job.requirement.slots, expires_ms))
+            grants.append(
+                Grant(job_id, token, job.head, job.unit, job.requirement.slots, expires_ms, job.base, job.grader)
+            )
             free_slots -= job.requirement.slots
         return grants
 
