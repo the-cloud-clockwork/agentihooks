@@ -138,19 +138,19 @@ def build(coverage_file: Path, inputs: list[Path], root: Path, commit: str, envi
     }
 
 
+def _entry(found: dict, files: dict) -> list:
+    """Return a test record packed as units, files index, escapes and, when it has one, its outside list's index."""
+    entry = [found["units"], files.setdefault(tuple(found["files"]), len(files)), found["escapes"]]
+    if "outside" in found:
+        entry.append(files.setdefault(tuple(found["outside"]), len(files)))
+    return entry
+
+
 def pack(manifest: dict) -> dict:
-    """Return the manifest with each test as units, files index, escapes and, when it has one, its outside index."""
+    """Return the manifest with each test record packed by _entry and its file lists and line spans stored once."""
     files, spans = {}, {}
     packed = {key: value for key, value in manifest.items() if key not in ("tests", "lines")}
-    packed["tests"] = {
-        test: [
-            found["units"],
-            files.setdefault(tuple(found["files"]), len(files)),
-            found["escapes"],
-            *([files.setdefault(tuple(found["outside"]), len(files))] if "outside" in found else []),
-        ]
-        for test, found in manifest["tests"].items()
-    }
+    packed["tests"] = {test: _entry(found, files) for test, found in manifest["tests"].items()}
     if "lines" in manifest:
         packed["lines"] = {
             test: [spans.setdefault((path, tuple(found)), len(spans)) for path, found in paths.items()]
@@ -161,13 +161,20 @@ def pack(manifest: dict) -> dict:
     return packed
 
 
+def _record(entry: list, files: list) -> dict:
+    """Return the test record a packed entry holds, with its outside list only when the entry carries one."""
+    units, index, escapes, *outside = entry
+    record = {"units": units, "files": files[index], "escapes": escapes}
+    if outside:
+        (at,) = outside
+        record["outside"] = files[at]
+    return record
+
+
 def unpack(packed: dict) -> dict:
-    """Return the manifest a packed one holds, restoring a test's outside list only where it was packed."""
+    """Return the manifest a packed one holds, each test record restored by _record."""
     files, spans = packed.pop("files"), packed.pop("spans")
-    packed["tests"] = {
-        test: {"units": units, "files": files[index], "escapes": escapes, **{"outside": files[at] for at in outside}}
-        for test, (units, index, escapes, *outside) in packed["tests"].items()
-    }
+    packed["tests"] = {test: _record(entry, files) for test, entry in packed["tests"].items()}
     if "lines" in packed:
         packed["lines"] = {test: dict(spans[index] for index in found) for test, found in packed["lines"].items()}
     return packed
