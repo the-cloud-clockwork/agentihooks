@@ -147,6 +147,7 @@ def test_operator_lift_is_journaled(priority, monkeypatch, capsys):
     assert cli.main(["sw", "merge", "priority", URL, "--lift"]) == 0
     assert json.loads(capsys.readouterr().out)["errors"] == []
     assert records[0] == (("priority-lift", URL, "", None, None), {})
+    assert priority.queue.mutations
 
 
 def test_priority_help_explains_operator_lift(capsys):
