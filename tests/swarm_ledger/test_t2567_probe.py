@@ -333,3 +333,64 @@ def test_reload_with_ledger_reads_before_and_during_on_one_core(tmp_path: Path, 
         reloads(tmp_path, ledger_port, CPUS[7 % len(CPUS)], "/api/v1/ledgers", "before"),
     )
     assert data["locked"] == 0, json.dumps(data, indent=1)
+
+
+@pytest.mark.wall_clock
+@pytest.mark.xdist_group("t2567-reload-held")
+def test_reload_while_another_process_holds_the_new_ledger_files_write_lock(tmp_path: Path, ledger_port: int) -> None:
+    folder = tmp_path / "ledger"
+    folder.mkdir()
+    holder = sqlite3.connect(folder / "ledgers.sqlite3", isolation_level=None, check_same_thread=False)
+    holder.execute("BEGIN IMMEDIATE")
+    release = threading.Timer(6.0, lambda: holder.execute("ROLLBACK"))
+    cpu = CPUS[0]
+    env = {
+        **os.environ,
+        "PYTHONPATH": str(ROOT),
+        "LEDGER_DIR": str(folder),
+        "LEDGER_PORT": str(ledger_port),
+        "SWARM_RELOAD": "0",
+    }
+    env.pop("LEDGER_RUN_PID", None)
+    env.pop("LEDGER_RUN_START", None)
+    log = folder / "server.out"
+    with log.open("w") as out:
+        first = subprocess.Popen(
+            [sys.executable, str(SERVER), "--serve"],
+            env=env,
+            stdout=out,
+            stderr=out,
+            preexec_fn=lambda: os.sched_setaffinity(0, {cpu}),
+        )
+    successor = None
+    try:
+        assert until(lambda: pid_of(folder) == first.pid, 60) and get(ledger_port, "/healthz") == 200
+        os.kill(first.pid, signal.SIGHUP)
+        started = time.monotonic()
+        release.start()
+        finished = until(lambda: first.poll() is not None or "never reported ready" in log.read_text(), 90)
+        successor = pid_of(folder) if first.poll() is not None else None
+        outcome = "handed over" if successor not in (None, first.pid) else ("never ready" if finished else "timeout")
+        text = log.read_text()
+        data = report(
+            "reload-held-new-file-one-core",
+            {
+                "outcome": outcome,
+                "seconds": round(time.monotonic() - started, 2),
+                "locked": "database is locked" in text,
+                "log": text[-4000:],
+            },
+        )
+    finally:
+        release.cancel()
+        for pid in {first.pid, successor} - {None}:
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        try:
+            first.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            first.kill()
+        holder.close()
+    assert data["outcome"] == "handed over" and not data["locked"], json.dumps(data, indent=1)
