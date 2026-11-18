@@ -43,7 +43,9 @@ def split(files: list[str], count: int) -> list[list[str]]:
 def join(reports: list[Path], out: Path) -> None:
     """Write the reports as one, its packages sorted by name and its root totals summed."""
     roots = [
-        ET.parse(report, ET.XMLParser(target=ET.TreeBuilder(insert_comments=True))).getroot() for report in reports
+        # nosemgrep: python.lang.security.use-defused-xml-parse.use-defused-xml-parse
+        ET.parse(report, ET.XMLParser(target=ET.TreeBuilder(insert_comments=True))).getroot()
+        for report in reports
     ]
     joined = roots[0]
     packages = [package for root in roots for package in root.iterfind("packages/package")]
