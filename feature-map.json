@@ -7765,6 +7765,19 @@
       ]
     },
     {
+      "id": "ledger-event-notices-pass-the-seen-claim",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-critic-repeating-inbox-refs",
+      "behaviour": "Every ledger event notice, follow-up raised reminder and priority notice carries its own ref: the notice prefix and its ledger target or item, followed by the event's ledger revision or, for a raised reminder or a priority, the send time. A second event on one target, the raised reminder after a follow-up's added notice and a priority raised again therefore reach the master through the seen claim instead of closing on delivery as already shown through the ledger, and the wake ladder still settles a follow-up or question notice decided on the ledger.",
+      "seam": "scripts.swarm.ledger_events.event_pass sending a second event on one target, a raised follow-up and a priority raised again, each delivered by scripts.inbox.seen.claim, and scripts.inbox.wake.wake_pass settling a follow-up notice decided on the ledger",
+      "tests": [
+        "tests/swarm/test_ledger_events.py::test_a_second_event_on_one_target_passes_the_seen_claim",
+        "tests/swarm/test_ledger_events.py::test_a_priority_raised_again_passes_the_seen_claim",
+        "tests/swarm/test_ledger_events.py::test_a_follow_up_raised_after_its_added_notice_passes_the_seen_claim",
+        "tests/inbox/test_decided_events.py::test_a_followup_closed_before_the_wake_never_reaches_the_master"
+      ]
+    },
+    {
       "id": "repeated-subject-notices-pass-the-seen-claim",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2574",
