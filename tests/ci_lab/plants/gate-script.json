@@ -1,0 +1,16 @@
+{
+  "gate": "lint",
+  "reason": "the grader's comment gate refuses the comment planted in scripts/ci_lab/units.py that the head's edited scripts/no_comments.py admits",
+  "edits": [
+    {
+      "path": "scripts/no_comments.py",
+      "before": "    r\"NOSONAR\",\n",
+      "after": "    r\"NOSONAR\",\n    r\"lab plant\",\n"
+    },
+    {
+      "path": "scripts/ci_lab/units.py",
+      "before": "class Priority(IntEnum):\n",
+      "after": "# lab plant\nclass Priority(IntEnum):\n"
+    }
+  ]
+}

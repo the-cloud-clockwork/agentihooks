@@ -1,0 +1,11 @@
+{
+  "gate": "lint",
+  "reason": "ruff I001 refuses the unsorted import block of scripts/ci_lab/units.py in the lint check",
+  "edits": [
+    {
+      "path": "scripts/ci_lab/units.py",
+      "before": "from dataclasses import dataclass\nfrom enum import IntEnum\n",
+      "after": "from enum import IntEnum\nfrom dataclasses import dataclass\n"
+    }
+  ]
+}

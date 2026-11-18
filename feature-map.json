@@ -9105,6 +9105,31 @@
         "tests/swarm/test_pull_views.py::test_open_and_closed_pull_requests_are_read_again_by_a_new_process",
         "tests/swarm/test_pull_views.py::test_a_kept_entry_with_other_fields_is_read_again_and_replaced"
       ]
+    },
+    {
+      "id": "lab-plant-proofs",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/cut-plant-proofs",
+      "behaviour": "python -m scripts.ci_lab grade --plant NAME reads tests/ci_lab/plants/NAME.json, cuts a twin commit carrying the base tree and the plant commit carrying the plant's edits on it, each edit replacing a text found exactly once, both under a fixed identity dated at the base so a rerun on the same base cuts the same commits, and points diffcheck/ci-lab-NAME at the plant, leaving a branch already there and deleting one at another commit before its push. It sends the lab a notice signed with the lab notice secret for the twin and the plant against the base, reads each grade's lab check runs from every GitHub page by its pull request class run key until its required check completes, polling every twenty seconds for thirty minutes by default, and prints the proof table row with both check run links. It exits 0 when the twin's required check succeeds and the plant's fails with the plant's gate its only failing gate, 1 when the proof does not hold and 2 when it cannot run. Each plant still replaces text found once in the tree: the lint plant is an import block ruff refuses as unsorted, and the gate script plant passes only the head's edited comment gate.",
+      "seam": "scripts.ci_lab.plant load, planted, commits, push, notice, signature, run_key, checks, settled, problems, row, prove and main, through python -m scripts.ci_lab grade --plant NAME",
+      "tests": [
+        "tests/ci_lab/plants/test_plant.py::test_every_plant_replaces_text_found_once_in_this_tree",
+        "tests/ci_lab/plants/test_plant.py::test_the_lint_plant_is_an_import_block_ruff_refuses_as_unsorted",
+        "tests/ci_lab/plants/test_plant.py::test_the_gate_script_plant_passes_only_the_heads_edited_comment_gate",
+        "tests/ci_lab/plants/test_plant.py::test_grade_cuts_a_twin_with_the_base_tree_and_the_plant_on_top",
+        "tests/ci_lab/plants/test_plant.py::test_grade_sends_a_signed_notice_for_the_twin_and_the_plant_against_the_base",
+        "tests/ci_lab/plants/test_plant.py::test_a_rerun_on_the_same_base_cuts_the_same_commits_and_pushes_nothing",
+        "tests/ci_lab/plants/test_plant.py::test_a_plant_cut_on_a_new_base_deletes_the_old_branch_before_its_push",
+        "tests/ci_lab/plants/test_plant.py::test_a_plant_text_held_other_than_once_is_refused",
+        "tests/ci_lab/plants/test_plant.py::test_the_proof_holds_only_when_the_twin_passes_and_the_plant_fails_its_gate_alone",
+        "tests/ci_lab/plants/test_plant.py::test_checks_read_every_page_and_keep_only_the_grades_lab_check_runs",
+        "tests/ci_lab/plants/test_plant.py::test_a_grade_the_lab_never_completes_fails_after_its_last_poll",
+        "tests/ci_lab/plants/test_plant.py::test_a_refused_notice_stops_the_proof",
+        "tests/ci_lab/plants/test_plant.py::test_grade_prints_the_proof_table_and_exits_by_the_proof",
+        "tests/ci_lab/plants/test_plant.py::test_grade_waits_thirty_minutes_polling_every_twenty_seconds_by_default",
+        "tests/ci_lab/plants/test_plant.py::test_grade_refuses_to_run_without_its_repository_actor_secret_and_token",
+        "tests/ci_lab/plants/test_plant.py::test_the_real_ports_post_the_notice_and_read_github_with_the_token"
+      ]
     }
   ],
   "unmapped_rules": [
