@@ -271,6 +271,7 @@ def mutation_tree(tmp_path: Path) -> Path:
             "scripts/pkg/__init__.py": "",
             "scripts/notes.txt": "",
             "hooks/beta.py": "",
+            "hooks/test_hook.py": "",
             "tests/helper.py": "",
             "tests/test_alpha.py": "",
             "tests/unit/test_beta.py": "",
@@ -370,6 +371,7 @@ def test_mutation_grades_a_mutant_unit_with_the_tests_its_trees_stats_show_reach
             "cap": 4,
         },
     ]
+    assert box.made == [(pod.runs, mutation_tree, pod.ports, WHITELIST)] * 2
     assert finished == Finished(PASSED, finished.report, tmp_path / "log2.txt")
     assert report(finished, pod) == {**graded, "seconds": 2.5}
 
@@ -440,6 +442,12 @@ def test_covering_takes_each_test_a_stats_record_shows_reaching_the_function_wit
 @pytest.mark.feature("lab-worker-executors")
 def test_function_of_names_the_function_a_mutant_mutates() -> None:
     assert executors.function_of("scripts.alpha.xǁQueueǁenqueue__mutmut_12") == "scripts.alpha.xǁQueueǁenqueue"
+    assert executors.function_of("scripts.alpha.x_a__mutmut_b__mutmut_3") == "scripts.alpha.x_a__mutmut_b"
+
+
+def test_the_tracked_listing_refuses_a_tree_git_cannot_read(tmp_path: Path) -> None:
+    with pytest.raises(subprocess.CalledProcessError):
+        executors._tracked(folder(tmp_path, "plain", {"a.py": ""}))  # pyright: ignore[reportPrivateUsage]
 
 
 @pytest.mark.feature("lab-worker-executors")
@@ -486,6 +494,7 @@ def test_settings_read_the_worker_contract_environment(tmp_path: Path) -> None:
     assert (pod.trees.worktrees.root, pod.trees.worktrees.capacity) == (work / "trees", 8)
     assert (pod.root, pod.whitelist, pod.timeout, pod.clock) == (work, {"LANG": "C.UTF-8"}, 1800.0, time.monotonic)
     assert (work / "runs").is_dir() and (work / "venvs").is_dir()
+    assert executors.settings(environ_of(tmp_path))[0].root == work
     assert suite == executors.Suite(tmp_path / "manifest.json", tmp_path / "flakes.jsonl")
     assert graded == executors.Mutation(tmp_path / "cache", tmp_path / "killers.json", 90.5, 3)
     ranges: list[PortRange] = []
@@ -503,7 +512,7 @@ def test_settings_refuse_a_redis_variable(tmp_path: Path) -> None:
 @pytest.mark.feature("lab-worker-executors")
 @pytest.mark.parametrize(("cpus", "slots"), [(4, 4), (None, 1)])
 def test_main_runs_the_worker_over_the_adapters_until_sigterm_stops_it(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, cpus: int | None, slots: int
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path, cpus: int | None, slots: int
 ) -> None:
     class Service:
         def __init__(self) -> None:
@@ -542,6 +551,16 @@ def test_main_runs_the_worker_over_the_adapters_until_sigterm_stops_it(
         slots,
         2.0,
     )
+    found = {kind: parts(adapter) for kind, adapter in cast("dict[str, object]", adapters).items()}
+    static_pod = cast("executors.Pod", found["static"][1][0])
+    suite = executors.Suite(tmp_path / "manifest.json", tmp_path / "flakes.jsonl")
+    graded = executors.Mutation(tmp_path / "cache", tmp_path / "killers.json", 90.5, 3)
+    assert static_pod.root == tmp_path / "work"
+    assert found["test"] == (executors.tests, (static_pod, suite))
+    assert found["mutant"] == (executors.mutation, (static_pod, graded))
     assert service.events == ["run", "stop"]
     with pytest.raises(SystemExit):
         executors.main(["--unknown"], environ)
+    assert capsys.readouterr().err == (
+        "usage: agentihooks ci-lab-worker [-h]\nagentihooks ci-lab-worker: error: unrecognized arguments: --unknown\n"
+    )

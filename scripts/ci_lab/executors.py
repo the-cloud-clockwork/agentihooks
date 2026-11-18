@@ -209,22 +209,23 @@ def tests(pod: Pod, suite: Suite, lease: Lease) -> Finished:
     return Finished(verdict.outcome, _report(pod, record), verdict.log)
 
 
-def _tracked(tree: Path, *paths: str) -> list[str]:
-    """List the Python files git tracks in the tree under the paths."""
-    listing = subprocess.run(["git", "-C", str(tree), "ls-files", "-z", "--", *paths], capture_output=True, check=True)
+def _tracked(tree: Path) -> list[str]:
+    """List the Python files git tracks in the tree."""
+    listing = subprocess.run(["git", "-C", str(tree), "ls-files", "-z"], capture_output=True, check=True)
     return [path for path in os.fsdecode(listing.stdout).split("\0") if path.endswith(PYTHON)]
 
 
 def _trampolined(tree: Path) -> None:
     """Rewrite every Python file under the tree's mutmut source paths behind its trampolines."""
     roots: list[str] = tomllib.loads((tree / PYPROJECT).read_text())["tool"]["mutmut"]["source_paths"]
-    for path in _tracked(tree, *roots):
-        run_mutation.trampoline(tree, path)
+    for path in _tracked(tree):
+        if path.startswith(tuple(roots)):
+            run_mutation.trampoline(tree, path)
 
 
 def _test_files(tree: Path) -> list[str]:
     """List the tracked test modules of the tree."""
-    return [path for path in _tracked(tree, TEST_FOLDER) if Path(path).name.startswith(TEST_PREFIX)]
+    return [path for path in _tracked(tree) if path.startswith(TEST_FOLDER) and Path(path).name.startswith(TEST_PREFIX)]
 
 
 def function_of(mutant: str) -> str:

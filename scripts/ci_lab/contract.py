@@ -1,9 +1,9 @@
 """The CI lab service contract: entry points, environment names, ports and metric names.
 
 The scheduler and worker services, their platform manifests and their tests import these
-names instead of repeating the strings. `agentihooks ci-lab-scheduler` runs the scheduler service and
-`agentihooks ci-lab-worker` the worker service; `agentihooks ci-lab-scheduler --self-test` and `agentihooks ci-lab-worker --self-test` check the
-contract offline and print it as JSON.
+names instead of repeating the strings. `agentihooks ci-lab-scheduler` runs the scheduler service
+and `agentihooks ci-lab-worker` the worker service; `agentihooks ci-lab-scheduler --self-test` and
+`agentihooks ci-lab-worker --self-test` check the contract offline and print it as JSON.
 """
 
 import argparse
