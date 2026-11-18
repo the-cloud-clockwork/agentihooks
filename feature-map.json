@@ -7647,19 +7647,21 @@
         "tests/test_ci_lone_artifact_download.py::test_the_gate_summary_counts_every_leg_however_many_legs_ran",
         "tests/test_ci_branch_reuse_workflow.py::test_sonar_takes_a_lone_selected_legs_coverage_from_the_bare_download_folder",
         "tests/test_ci_branch_reuse_workflow.py::test_sonar_leaves_a_bare_download_at_the_folder_root_when_two_legs_were_selected",
-        "tests/test_ci_branch_reuse_workflow.py::test_sonar_takes_a_lone_legs_newest_attempt_when_its_attempts_land_in_their_own_folders"
+        "tests/test_ci_branch_reuse_workflow.py::test_sonar_takes_a_lone_legs_newest_attempt_when_its_attempts_land_in_their_own_folders",
+        "tests/test_ci_lone_artifact_download.py::test_the_gate_summary_counts_a_lone_report_that_lands_at_the_folder_root"
       ]
     },
     {
       "id": "test-summary-downloads-every-report-in-one-step",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-test-summary-single-download",
-      "behaviour": "The protected grader admits a test summary job that fetches its durations and flakes reports with one artifact download step under the pattern {durations,flakes}-3.*, retried once, beside the reviewed two download job, so a blob response that download-artifact leaves open idles the job at most once and it stays inside its five minute limit.",
-      "seam": "scripts.gate_protected.grade over the test-summary job, through scripts.gate_protected._one_download",
+      "behaviour": "The Tests workflow test summary job fetches its durations and flakes reports with one artifact download step under the pattern {durations,flakes}-3.*, retried once, and the protected grader admits that job beside the reviewed two download job, so a blob response that download-artifact leaves open idles the job at most once and it stays inside its five minute limit.",
+      "seam": "the test-summary job of the Tests workflow, and scripts.gate_protected.grade over it through scripts.gate_protected._one_download",
       "tests": [
         "tests/test_gate_protected.py::test_the_separate_summary_accepts_one_download_of_every_report",
         "tests/test_gate_protected.py::test_the_separate_summary_refuses_one_download_of_other_reports",
-        "tests/test_gate_protected.py::test_the_one_download_puts_one_step_for_every_report_where_the_first_download_was"
+        "tests/test_gate_protected.py::test_the_one_download_puts_one_step_for_every_report_where_the_first_download_was",
+        "tests/test_ci_gate_summary.py::test_the_test_summary_downloads_every_report_in_one_step"
       ]
     },
     {
