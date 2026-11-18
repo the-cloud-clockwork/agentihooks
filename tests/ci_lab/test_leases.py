@@ -179,6 +179,31 @@ def test_complete_needs_the_lease_token(jobs: queue.Queue, lab: leases.Leases) -
     assert lab.reap(9999) == []
 
 
+@pytest.mark.feature("lab-unit-outcomes")
+def test_complete_refuses_an_unknown_outcome_and_records_nothing(jobs: queue.Queue, lab: leases.Leases) -> None:
+    jobs.enqueue([unit("a")], "h1", {})
+    grant = lab.lease("w1", 1, frozenset(), 0)[0]
+
+    for outcome in ("taken", "lost", "dropped", ""):
+        assert lab.complete(grant.job, grant.token, outcome) is False
+
+    held = found(jobs, grant.job)
+    assert (held.state, held.outcome) == ("leased", "")
+    assert lab.owns(grant.job, grant.token)
+
+
+@pytest.mark.feature("lab-unit-outcomes")
+@pytest.mark.parametrize("outcome", ["passed", "failed", "gate_failed", "survived", "crash", "cannot_run"])
+def test_complete_records_every_outcome_a_worker_reports(jobs: queue.Queue, lab: leases.Leases, outcome: str) -> None:
+    jobs.enqueue([unit("a")], "h1", {})
+    grant = lab.lease("w1", 1, frozenset(), 0)[0]
+
+    assert lab.complete(grant.job, grant.token, outcome) is True
+
+    done = found(jobs, grant.job)
+    assert (done.state, done.outcome) == ("done", outcome)
+
+
 def test_unleased_job_has_no_owner(jobs: queue.Queue, lab: leases.Leases) -> None:
     jobs.enqueue([unit("a")], "h1", {})
 
