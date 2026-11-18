@@ -817,7 +817,7 @@ def test_a_fresh_tick_view_logs_that_redis_kept_the_merged_pull_request_and_gith
     from scripts.inbox.store import InboxStore
     from scripts.swarm import ledger_events, metrics_outbox, stack, timing
     from scripts.swarm.store import RedisStore
-    from tests.swarm.graph_port import RunPort
+    from tests.swarm.graph_port import RunPort, read_views
 
     opened, merged = "https://github.com/o/r/pull/1", "https://github.com/o/r/pull/2"
     doc = {
@@ -830,6 +830,7 @@ def test_a_fresh_tick_view_logs_that_redis_kept_the_merged_pull_request_and_gith
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
     monkeypatch.setattr(metrics_outbox, "spool_path", lambda: tmp_path / "fresh-pod-history.sqlite")
     monkeypatch.setattr(stack, "login_source_control", lambda: RunPort(run))
+    monkeypatch.setattr(ledger_events, "views", read_views)
     views([merged], run, store.redis)
     queries.clear()
     with timing.tick("sw"):
