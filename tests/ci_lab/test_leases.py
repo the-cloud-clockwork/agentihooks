@@ -91,6 +91,16 @@ def test_a_grant_carries_the_base_and_grader_revision_of_its_job(jobs: queue.Que
     assert grant == leases.Grant("h1:test:a", grant.token, "h1", unit("a"), 1, 1500, "b1", "g1")
 
 
+@pytest.mark.feature("lab-scheduler-metrics")
+def test_a_grant_records_the_millisecond_its_lease_started(jobs: queue.Queue, lab: leases.Leases, clock: Clock) -> None:
+    jobs.enqueue([unit("a")], "h1", {})
+    clock.now = 1234
+
+    [grant] = lab.lease("w1", 1, frozenset(), 0)
+
+    assert (grant.expires_ms, found(jobs, "h1:test:a").leased_ms) == (1734, 1234)
+
+
 def test_lease_stops_at_free_slots(jobs: queue.Queue, lab: leases.Leases) -> None:
     jobs.enqueue([unit("a"), unit("b"), unit("c")], "h1", {})
 
@@ -366,7 +376,7 @@ class RacedKube(FakeKube):
     def __call__(self, pod: str, busy: bool) -> bool:
         if not busy and self.job:
             raced = found(self.jobs, self.job)
-            assert self.jobs.claim(raced, pod, "raced", 9999)
+            assert self.jobs.claim(raced, pod, "raced", 9999, 0)
             self.job = ""
         return super().__call__(pod, busy)
 

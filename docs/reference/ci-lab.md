@@ -110,6 +110,28 @@ host.
 | `ci_lab_github_rate_remaining` | | `GITHUB_RATE_REMAINING` |
 | `ci_lab_verdict_mismatch_total` | `gate` | `VERDICT_MISMATCH_TOTAL` |
 
+The scheduler sets every metric its queue, lease and worker state answers, on one
+`scripts.ci_lab.metrics.Registry` the `Scheduler` builds and `listen` serves on 9108:
+
+| Metric | Set from |
+|---|---|
+| `ci_lab_slots_wanted` | `Load.slots_wanted`: the slots running and pending units take in every class not shed |
+| `ci_lab_workers_ready` | The workers that offered free slots on a lease poll within `READY_MS` |
+| `ci_lab_units_overdue` | Leased units whose lease started, as `Queue.claim` stores it, more than `UNIT_ESTIMATE_S` ago; a lease claimed before the start was stored is not counted |
+| `ci_lab_core_seconds_total` | Each finished attempt's slots times its report's `seconds`, counted once (`Queue.tally`) in the most urgent class of the live grades holding its job; an attempt whose worker uploaded no report adds nothing |
+| `ci_lab_unit_duration_seconds` | The last finished attempt's report `seconds` per unit kind |
+| `ci_lab_cache_hits_total`, `ci_lab_cache_misses_total` | `cache="verdict"`: each verdict store lookup a grade's placement makes; `cache="git"` and `cache="uv"`: the lookups a finished attempt's report carries under `caches` |
+| `ci_lab_heads_graded_total` | Each grade a pass closes, by class and conclusion |
+| `ci_lab_units_redelivered_total`, `ci_lab_units_lost_total` | Each expired lease a pass requeues or marks lost |
+
+A worker unit's report carries `caches` from `scripts.ci_lab.caches.report`: per revision it
+leased, a git hit when the pod store already held the commit and a miss when `Mirror.fetch`
+fetched it; per venv, a uv hit when it reused one and a miss when `venvs.venv_for` built it.
+`ci_lab_mirror_age_seconds`, `ci_lab_github_rate_remaining` and `ci_lab_verdict_mismatch_total`
+answer from no queue, lease or worker state and stay without samples. The counters live in the
+scheduler process and start from zero when it restarts, so KEDA triggers and alerts read them
+through `rate()` or `increase()`.
+
 `METRICS` maps each name to its label names. Environment names have constants too:
 `BUS_PREFIX`, `MINIO_PREFIX`, `GITHUB_APP_PREFIX`, `REDIS_URL`, `RUNTIME_CONFIG`,
 `SCHEDULER_URL`, `SLOTS`, `GIT_MIRROR` and `UV_CACHE_DIR`, with `SCHEDULER_PORT` and
@@ -139,6 +161,9 @@ The scheduler service builds the snapshot on every request with
 | `slots_total` | `slots_busy` plus the free slots each worker offered on its latest lease poll, when that poll is at most `READY_MS` (60 seconds, twice the longest lease wait) old |
 | `cache_hits`, `cache_misses` | The live grades' units the verdict store answered, and those it sent to the queue, per class |
 | `frees_in` | One `UNIT_ESTIMATE_S` entry per busy slot |
+| `running_slots`, `pending_slots` | The slots each leased and each pending job takes, in the class `running` and `pending` count it |
+| `workers_ready` | The workers whose latest lease poll is within `READY_MS` |
+| `overdue` | The leased jobs whose lease started more than `UNIT_ESTIMATE_S` ago |
 | `budget_fraction`, `shed` | The day's core budget from the runtime config, through `scripts.ci_lab.budget.observe` |
 
 A worker's lease poll records its free slots when the poll starts and what its grants leave when
@@ -161,6 +186,9 @@ Until the lab records measured unit durations, every estimate is the fixed `UNIT
 | `shed` | `()` | Classes the budget sheds; `scripts.ci_lab.budget.observe` sets them |
 | `cache_hits`, `cache_misses` | `{}` | Verdict cache lookups, keyed by class |
 | `frees_in` | `()` | Seconds until each busy slot frees, one entry per busy slot; an entry at or below zero counts as a slot free now |
+| `running_slots`, `pending_slots` | `{}` | Slots running and pending units take, keyed by class; `slots_wanted` sums them over the classes not shed |
+| `workers_ready` | `0` | Workers that offered slots within the ready window |
+| `overdue` | `0` | Leased units past their estimate |
 
 ### Document fields
 

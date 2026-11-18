@@ -2372,3 +2372,212 @@ def test_the_merge_pass_queues_only_once_a_fresh_read_confirms_green(merging):
     assert merging.queued == []
     assert run(GREEN, GREEN) == [f"queued {URL} for task t1"]
     assert merging.queued == [("queue", URL)]
+
+
+HOLD = f"sw: merge pass holds task t1 {URL}: "
+
+
+def _holds(capsys: pytest.CaptureFixture[str]) -> list[str]:
+    """The merge pass hold lines a pass wrote to stderr."""
+    return [line for line in capsys.readouterr().err.splitlines() if " merge pass holds " in line]
+
+
+def _pass(merging: SimpleNamespace, github: Any, reread: Any, now: int = NOW) -> list[str]:
+    """Run one merge pass over the fixture's rows with its own snapshot and fresh readers."""
+    run = ready.Pass(merging.store, "sw", merging.ledger, github, reread, now, merging.queue, merging.exits)
+    return ready.merge_pass(run, merging.rows)
+
+
+@pytest.mark.feature("merge-pass-hold-reasons")
+@pytest.mark.parametrize(
+    "pull, reason",
+    [
+        (RUNNING, "its required checks have not all finished"),
+        (PullRequest("OPEN", None, 1, False, True, head=HEAD, unpassed_gate="Gate"), "its Gate never passed"),
+    ],
+    ids=["checks-run", "gate-never-passed"],
+)
+def test_a_released_checks_wait_logs_why_it_holds(
+    merging: SimpleNamespace, capsys: pytest.CaptureFixture[str], pull: PullRequest, reason: str
+) -> None:
+    merging.pulls[URL] = pull
+    assert merging.run() == []
+    assert merging.queued == []
+    assert _holds(capsys) == [HOLD + reason]
+
+
+@pytest.mark.feature("merge-pass-hold-reasons")
+@pytest.mark.parametrize(
+    "fresh, reason",
+    [
+        (None, "GitHub did not answer a read of its pull request"),
+        (PullRequest("OPEN", None, 1, False, True), "GitHub did not answer a read of its pull request"),
+        (RUNNING, "its required checks have not all finished"),
+        (PullRequest("OPEN", None, 1, False, True, head=HEAD, unpassed_gate="Gate"), "its Gate never passed"),
+        (
+            PullRequest("OPEN", None, 1, False, True, head="b" * 40),
+            "its head moved, so its checks are read again on the new head",
+        ),
+    ],
+    ids=["unread", "headless", "checks-run", "gate-never-passed", "head-moved"],
+)
+def test_a_checks_wait_names_the_hold_of_its_fresh_read_over_a_green_snapshot(
+    merging: SimpleNamespace, capsys: pytest.CaptureFixture[str], fresh: PullRequest | None, reason: str
+) -> None:
+    assert _pass(merging, {URL: GREEN}.get, {URL: fresh}.get) == []
+    assert merging.queued == []
+    assert _holds(capsys) == [HOLD + reason]
+
+
+@pytest.mark.feature("merge-pass-hold-reasons")
+def test_a_green_head_github_does_not_read_green_logs_its_hold(
+    merging: SimpleNamespace, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(waits, "required_green", lambda target, head: False)
+    merging.pulls[URL] = GREEN
+    assert merging.run() == []
+    assert merging.queued == []
+    assert _holds(capsys) == [HOLD + "GitHub does not read every required check green on its head"]
+
+
+@pytest.mark.feature("merge-pass-hold-reasons")
+def test_a_moved_head_logs_that_its_checks_are_read_again(
+    merging: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+) -> None:
+    ready.save(merging.store, "sw", "t1", ready.held_record(URL, "b" * 40, TOP, AGENT, NOW))
+    merging.pulls[URL] = GREEN
+    assert merging.run() == []
+    assert _holds(capsys) == [HOLD + "its head moved, so its checks are read again on the new head"]
+
+
+@pytest.mark.feature("merge-pass-hold-reasons")
+def test_an_unread_pull_request_logs_its_hold(merging: SimpleNamespace, capsys: pytest.CaptureFixture[str]) -> None:
+    merging.pulls.clear()
+    assert merging.run() == []
+    assert _holds(capsys) == [HOLD + "GitHub did not answer a read of its pull request"]
+
+
+@pytest.mark.feature("merge-pass-hold-reasons")
+def test_a_queued_pull_request_logs_that_it_waits_in_the_queue(
+    merging: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+) -> None:
+    queued_at_now(merging)
+    merging.pulls[URL] = QUEUED
+    capsys.readouterr()
+    assert merging.run(NOW + 60_000) == []
+    assert _holds(capsys) == [HOLD + "it waits in the merge queue"]
+
+
+@pytest.mark.feature("merge-pass-hold-reasons")
+def test_a_dependency_wait_logs_its_target(merging: SimpleNamespace, capsys: pytest.CaptureFixture[str]) -> None:
+    found = ready.held_record(URL, HEAD, TOP, AGENT, NOW)
+    found["dependency"] = {"kind": "task", "target": "t2"}
+    ready.save(merging.store, "sw", "t1", found)
+    merging.pulls[URL] = GREEN
+    assert merging.run() == []
+    assert merging.queued == []
+    assert _holds(capsys) == [HOLD + "it waits on its dependency t2"]
+
+
+@pytest.mark.feature("merge-pass-hold-reasons")
+@pytest.mark.parametrize(
+    "retry_at, reread, reason",
+    [
+        (NOW + 1, GREEN, "it queues again after its backoff"),
+        (NOW, None, "GitHub did not answer a read of its pull request"),
+    ],
+    ids=["backoff", "unread"],
+)
+def test_a_recovery_wait_logs_why_it_holds(
+    merging: SimpleNamespace,
+    capsys: pytest.CaptureFixture[str],
+    retry_at: int,
+    reread: PullRequest | None,
+    reason: str,
+) -> None:
+    found = ready.held_record(URL, HEAD, TOP, AGENT, NOW)
+    found.update(on={"kind": ready.RECOVER, "head": HEAD}, retry_at=retry_at, recoveries=0)
+    ready.save(merging.store, "sw", "t1", found)
+    assert _pass(merging, {URL: GREEN}.get, {URL: reread}.get) == []
+    assert merging.queued == []
+    assert _holds(capsys) == [HOLD + reason]
+
+
+@pytest.mark.feature("merge-pass-hold-reasons")
+def test_an_unmergeable_pull_request_with_a_working_owner_logs_the_restack(
+    merging: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.swarm.ledger_events import pull_request
+    from scripts.swarm.store import AgentRecord
+
+    merging.store.put_agent("sw", AgentRecord(AGENT, "eng", "t1", state="working"))
+    pull = pull_request({"state": "OPEN", "mergeable": "CONFLICTING", "mergeQueueEntry": None})
+    merging.pulls[URL] = pull
+    assert merging.run() == []
+    assert _holds(capsys) == [HOLD + f"its owner was told to restack it: {pull.merge_problem}"]
+
+
+@pytest.mark.feature("merge-pass-hold-reasons")
+@pytest.mark.parametrize(
+    "fresh, reason",
+    [
+        (GREEN, "its merge problem cleared on a fresh read"),
+        (None, "GitHub did not answer a read of its pull request"),
+    ],
+    ids=["cleared", "unread"],
+)
+def test_an_unmergeable_pull_request_without_an_owner_logs_why_it_holds(
+    merging: SimpleNamespace, capsys: pytest.CaptureFixture[str], fresh: PullRequest | None, reason: str
+) -> None:
+    from scripts.swarm.ledger_events import pull_request
+
+    pull = pull_request({"state": "OPEN", "mergeable": "CONFLICTING", "mergeQueueEntry": None})
+    assert _pass(merging, {URL: pull}.get, {URL: fresh}.get) == []
+    assert merging.rows["t1"]["state"] == "pr"
+    assert _holds(capsys) == [HOLD + reason]
+
+
+@pytest.mark.feature("merge-pass-hold-reasons")
+def test_a_red_pull_request_a_live_agent_owns_logs_its_hold(
+    merging: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.swarm.store import AgentRecord
+
+    merging.store.put_agent("sw", AgentRecord(AGENT, "eng", "t1", state="working"))
+    merging.pulls[URL] = RED
+    assert merging.run() == []
+    assert merging.rows["t1"]["state"] == "pr"
+    assert _holds(capsys) == [HOLD + "a live agent still owns it"]
+
+
+@pytest.mark.feature("merge-pass-hold-reasons")
+def test_a_red_pull_request_whose_ready_record_moved_logs_its_hold(
+    merging: SimpleNamespace, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(merging.store, "release_ready", lambda *args: False)
+    merging.pulls[URL] = RED
+    assert merging.run() == []
+    assert _holds(capsys) == [HOLD + "the ledger or its ready record changed before the swarm could release it"]
+
+
+@pytest.mark.feature("merge-pass-hold-reasons")
+def test_a_red_pull_request_whose_reopen_the_ledger_refuses_logs_its_hold(
+    merging: SimpleNamespace, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(merging.ledger, "update_task", lambda *args, **kwargs: dict(merging.rows["t1"]))
+    merging.pulls[URL] = RED
+    assert merging.run() == []
+    assert merging.rows["t1"]["state"] == "pr"
+    assert _holds(capsys) == [HOLD + "the ledger or its ready record changed before the swarm could release it"]
+
+
+@pytest.mark.feature("merge-pass-hold-reasons")
+def test_a_merged_split_pull_request_the_done_gate_refuses_logs_its_hold(
+    merging: SimpleNamespace, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(ready.done_gate, "refusal", lambda row, url, github: "another split pull request is open")
+    merging.rows["t1"]["split"] = True
+    merging.pulls[URL] = MERGED
+    assert merging.run() == []
+    assert merging.rows["t1"]["state"] == "pr"
+    assert _holds(capsys) == [HOLD + "the done gate refuses its split pull requests"]
