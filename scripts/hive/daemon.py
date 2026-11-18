@@ -328,7 +328,7 @@ def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
                 beat(redis, local_id)
                 if marker := os.environ.get("HIVE_READY_FILE"):
                     Path(marker).touch()
-                if _moved(loaded):
+                if not dispatch.busy() and _moved(loaded):
                     return
                 elapsed = time.monotonic() - started
                 delay = max(0, BEAT_SECONDS - max(WAKE_SLACK_S, elapsed))
