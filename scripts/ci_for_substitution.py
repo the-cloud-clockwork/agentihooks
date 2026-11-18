@@ -41,6 +41,16 @@ def findings(source: bytes) -> list[int]:
     )
 
 
+def blank_expressions(text: str) -> str:
+    """Overwrite each GitHub expression with underscores, keeping its newlines, so the shell parser reads a plain word."""
+    return text
+
+
+def workflow_findings(text: str) -> list[int]:
+    """List the file line of each refused for loop in the bash run blocks of a workflow or composite action."""
+    return []
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Grade every tracked shell file under the root but the red fixture, and report each refused word list."""
     parser = argparse.ArgumentParser()

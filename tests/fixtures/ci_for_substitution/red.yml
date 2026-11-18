@@ -1,0 +1,34 @@
+name: Red fixture for the for loop word list gate
+on: push
+jobs:
+  steps-without-a-shell:
+    runs-on: ubuntu-latest
+    steps:
+      - run: for _ in $(seq 3); do sleep 1; done
+      - name: A literal block after assignments from GitHub expressions
+        run: |
+          first=${{ inputs.first }} last=${{ inputs.last }}
+          for _ in $(seq "$first" "$last"); do
+            sleep 1
+          done
+      - name: Backticks in a POSIX shell
+        shell: sh
+        run: |
+          for name in `ls`; do
+            echo "$name"
+          done
+      - name: A folded block
+        shell: bash
+        run: >
+          for node in $(kind get nodes); do
+          docker exec "$node" true; done
+  python-by-default:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: python
+    steps:
+      - name: A bash step in a python job
+        shell: bash --noprofile --norc -eo pipefail {0}
+        run: |
+          if true; then for job in $(jobs -p); do wait "$job"; done; fi
