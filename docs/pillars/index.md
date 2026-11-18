@@ -22,6 +22,8 @@ See [stall watchdog refreshed checks](swarm.md#requeued-pull-requests-and-refres
 
 For publication retries, see [publishing unchanged files](swarm.md#publishing-unchanged-files): automatic remote comparison, skipped gates and pushes, output and missing branch handling.
 
+For publication during a swarm panic, see [publishing under panic mode](swarm.md#publishing-under-panic-mode): the registered fix and git config rule publish shares with the panic push guard, the refusal and what it leaves behind, publishing a fix and troubleshooting.
+
 For resumed work, see [publishing after a successor prepares a branch](swarm.md#publishing-after-a-successor-prepares-a-branch): branch selection, restacking, repository configuration and publication retries. See [recording a published upstream branch](swarm.md#recording-a-published-upstream-branch) for successor tracking setup, task metadata and pull request head checks.
 
 For an existing pull request, see [continuing with one push](swarm.md#continue-an-existing-pull-request-with-one-push): retained branch selection, Stop behavior and lease failures.
