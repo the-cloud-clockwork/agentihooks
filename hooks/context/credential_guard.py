@@ -497,7 +497,7 @@ def renderer_verdict(command):
             )
             + "\nSelect fields instead:  docker inspect --format '{{.State.Status}}' <container>"
         )
-    if re.search(r"\bkubectl\b.*\bget\s+secret", low) and re.search(r"-o\s*(yaml|json)", low):
+    if gets_secret_values(low):
         return (
             block(
                 "printing Secret data (kubectl get secret -o yaml/json)",
@@ -511,6 +511,64 @@ def renderer_verdict(command):
             + '\nEvaluate it instead:  eval "$(agentihooks access env)", then test each variable by name.'
         )
     return None
+
+
+KUBECTL_WORDS = re.compile(r"\bkubectl\b([^|<>;&]*)")
+SECRET_TYPES = {"secret", "secrets"}
+VALUELESS_OUTPUTS = {"", "name", "wide"}
+GO_TEMPLATE_OUTPUTS = {"go-template", "template"}
+KEY_LISTING = re.compile(
+    r"\{\{-?\s*range\s+\$(?P<key>\w+)\s*,\s*\$(?P<value>\w+)\s*:=\s*\.data\s*-?\}\}"
+    r"(?:[^{}]|\{\{-?\s*(?:\$(?P=key)|\"(?:[^\"\\{}$]|\\.)*\")\s*-?\}\})*"
+    r"\{\{-?\s*end\s*-?\}\}"
+)
+
+
+def names_secret_type(word: str) -> bool:
+    """True when a kubectl word names the Secret type: plain, plural, group qualified, in a list or as TYPE/NAME."""
+    return any(part.split("/")[0].split(".")[0] in SECRET_TYPES for part in word.split(","))
+
+
+def output_of(words: list[str]) -> tuple[str, str]:
+    """The output flag and template flag values of kubectl words in every spelling; the last of each wins."""
+    output = template = ""
+    for word, following in zip(words, [*words[1:], ""]):
+        if word in ("-o", "--output"):
+            output = following
+        elif word.startswith("--output="):
+            output = word.partition("=")[2]
+        elif word.startswith("-o"):
+            output = word[2:].removeprefix("=")
+        elif word == "--template":
+            template = following
+        elif word.startswith("--template="):
+            template = word.partition("=")[2]
+    return output, template
+
+
+def lists_keys_only(template: str) -> bool:
+    """True when a go template ranges over .data with a key and a value variable and prints only the key."""
+    found = KEY_LISTING.fullmatch(template)
+    return found is not None and found["key"] != found["value"]
+
+
+def prints_secret_values(words: list[str]) -> bool:
+    """True when kubectl words get the Secret type with an output that can print a data or stringData value."""
+    if "get" not in words or not any(names_secret_type(word) for word in words):
+        return False
+    output, template = output_of(words)
+    name, _, inline = output.partition("=")
+    if not name and template:
+        name = "go-template"
+    if name in VALUELESS_OUTPUTS:
+        return False
+    return name not in GO_TEMPLATE_OUTPUTS or not lists_keys_only(inline or template)
+
+
+def gets_secret_values(low: str) -> bool:
+    """True when any kubectl get in the lowercased segment, line continuations joined, may print a Secret value."""
+    joined = low.replace("\\\n", " ")
+    return any(prints_secret_values(tokens_of(found.group(1))) for found in KUBECTL_WORDS.finditer(joined))
 
 
 def prints_gh_token(toks):
