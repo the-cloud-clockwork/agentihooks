@@ -7640,6 +7640,19 @@
       ]
     },
     {
+      "id": "lab-shadow-comparison",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/lab-shadow",
+      "behaviour": "The CI lab shadow recorder reads check_run.completed deliveries: a github-actions check run gives the Actions verdict of the gate its job name maps to (unit* to tests, mutation* to mutation, a static job to its gate id, anything else listed unmapped) and a lab-shadow check run gives the lab verdict and its grader revision; each side folds failing when any of its check runs failed, the row of a gate and head holding both lands in Redis, the object store and the lab_shadow table, a turn into a mismatch counts ci_lab_verdict_mismatch_total, and the shadow report prints heads compared and mismatches per gate since a grader revision.",
+      "seam": "scripts.ci_lab.shadow gate_of, static_jobs, Shadow.observe and Shadow.record, rows, report and main through python -m scripts.ci_lab shadow report",
+      "tests": [
+        "tests/ci_lab/test_shadow.py::test_every_actions_check_run_of_a_pull_request_head_maps_to_a_gate_or_is_listed_unmapped",
+        "tests/ci_lab/test_shadow.py::test_shards_fold_into_one_row_that_counts_each_turn_into_a_mismatch",
+        "tests/ci_lab/test_shadow.py::test_the_report_counts_heads_compared_and_mismatches_per_gate_since_a_grader_revision",
+        "tests/ci_lab/test_shadow.py::test_the_report_command_reads_the_lab_redis"
+      ]
+    },
+    {
       "id": "lab-capacity-reader",
       "origin": "inventory",
       "behaviour": "The tick step lab capacity reads GET /capacity from the swarm lab url into the swarm lab block in Redis, keeps the last capacity with the error when a read fails, ships one lab_capacity row per class to the metrics outbox, and swarm status json carries the lab block.",
