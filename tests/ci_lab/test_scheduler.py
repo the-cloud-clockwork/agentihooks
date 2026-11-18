@@ -750,6 +750,22 @@ def test_a_head_whose_expansion_fails_is_dropped_with_its_reason(
     assert run.grades() == []
 
 
+@pytest.mark.feature("lab-scheduler-test-units")
+def test_a_head_whose_grader_delivery_breaks_its_schema_is_dropped_with_its_reason(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = lab({})
+
+    def invalid(request: GradeRequest) -> scheduler.Plan:
+        raise jsonschema.ValidationError(f"lab.queue at {request.base} is not of type 'object'")
+
+    monkeypatch.setattr(run.lab.expander, "expand", invalid)
+    run.push(HEAD_A)
+    assert run.tick(1000)[-1] == f"cannot expand {HEAD_A}: lab.queue at {BASE} is not of type 'object'"
+    assert run.lab.client.hgetall(scheduler.WAITING) == {}
+    assert run.grades() == []
+
+
 def test_a_live_run_without_a_grade_is_forgotten(lab: Callable[..., Run]) -> None:
     run = lab({})
     run.lab.client.sadd(scheduler.LIVE, "grade-v1-gone")
@@ -1175,6 +1191,14 @@ def test_a_head_that_needs_test_units_without_a_manifest_cannot_expand(tmp_path:
     suite = _suite(tmp_path, DELIVERY["lab"])
     with pytest.raises(ValueError, match=f"^no dependency manifest at or before {suite.base}$"):
         Port().expander(tmp_path).expand(suite.request(tier))
+
+
+@pytest.mark.feature("lab-scheduler-test-units")
+@pytest.mark.usefixtures("staticless")
+def test_a_merge_group_head_refuses_an_entry_limit_the_delivery_schema_refuses(tmp_path: Path) -> None:
+    suite = _suite(tmp_path, {**DELIVERY["lab"], "queue": {"full_suite_entries": 0}})
+    with pytest.raises(jsonschema.ValidationError, match="0 is less than the minimum of 1"):
+        Port(SUITE_MANIFEST).expander(tmp_path).expand(suite.request(Priority.QUEUE))
 
 
 @pytest.mark.feature("lab-scheduler-test-units")
