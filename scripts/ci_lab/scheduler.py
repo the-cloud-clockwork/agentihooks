@@ -743,7 +743,8 @@ class Scheduler:
 
     def _admit(self, now_ms: int) -> list[str]:
         """Enqueue the held units the day's budget admits, the most urgent grade first: every unit of a class not shed,
-        and backfill only into the slots workers offered free after the units already waiting in the queue."""
+        and backfill only into the slots workers offered free after every unit already waiting in the queue, backfill
+        and those admitted in this pass included, since the queue leases in order."""
         grades = sorted(
             (state for state in self._live() if any(slot.held for slot in state.units.values())),
             key=lambda state: state.tier,

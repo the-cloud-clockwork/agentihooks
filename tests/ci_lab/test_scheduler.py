@@ -1082,6 +1082,8 @@ def test_backfill_takes_only_the_slots_left_free_after_the_units_waiting_in_othe
     pulled = [scheduler.job_id(HEAD_B, checked), scheduler.job_id(HEAD_B, linted)]
     assert run.engine.queue.pending() == [*pulled, scheduler.job_id(HEAD_A, first)]
     assert "\nci_lab_slots_wanted 2.0\n" in scrape(run, 1000)
+    assert run.tick(1050) == []
+    assert run.engine.queue.pending() == [*pulled, scheduler.job_id(HEAD_A, first)]
     grants = run.lease(slots=3)
     assert [grant.job for grant in grants] == [*pulled, scheduler.job_id(HEAD_A, first)]
     for grant in grants:
