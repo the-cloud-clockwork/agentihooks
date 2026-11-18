@@ -612,6 +612,12 @@ def _kept(step: Step) -> bool:
     return bool(getattr(step, "kept", False))
 
 
+def _placing(step: Step) -> bool:
+    """Return whether ``step`` runs its call holding the host placement lock, so it runs on the pass's placement
+    worker."""
+    return bool(getattr(step, "placing", False))
+
+
 def _kept_after(earlier: frozenset[str], step: Step, ctx: Context, found: pool.Pass, start: _Start) -> StepRecord:
     """Run the kept ``step`` once every handed off step of an earlier group in ``earlier`` ended, waiting at most its
     own budget for them, and run it even when one of them was dropped, unless the pass ended before it started."""
@@ -697,7 +703,7 @@ def _eager(
                 elif _kept(step):
                     earlier = _earlier(step, names, found, awaited)
                     start = _Start(clock)
-                    future = found.executor(step.name).submit(
+                    future = found.executor(step.name, _placing(step)).submit(
                         copy_context().run, _kept_after, earlier, step, ctx, found, start
                     )
                     submitted.append(future)
@@ -706,7 +712,7 @@ def _eager(
                     earlier = _earlier(step, names, found, awaited)
                     lane_ctx = _lane_context(lane, ctx)
                     start = _Start(clock)
-                    future = found.executor(step.name).submit(
+                    future = found.executor(step.name, _placing(step)).submit(
                         copy_context().run, _after, earlier, step, lane_ctx, found, start
                     )
                     submitted.append(future)
