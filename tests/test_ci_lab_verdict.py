@@ -19,15 +19,18 @@ WORKFLOW = {"on": "push", "jobs": {"lint": {}, "type-gate": {}, "unit": {}}}
 LAB = "agenticore-app"
 
 
-def tree(root: Path, authoritative: list[str], prefix: str = "lab") -> Path:
-    """Write a repository tree holding one workflow and a delivery.yaml naming the authoritative gates."""
+def tree(root: Path, authoritative: list[str], prefix: str = "lab", queue: list[str] | None = None) -> Path:
+    """Write a repository tree holding one workflow and a delivery.yaml naming the authoritative gates, and the
+    queue gates when given."""
     (root / ".github/workflows").mkdir(parents=True)
     (root / ".github/workflows/test.yml").write_text(yaml.safe_dump(WORKFLOW))
-    lab = {
+    lab: dict[str, Any] = {
         "authoritative": authoritative,
         "mutation": {"run_on": "every_push", "mutants_per_changed_line": "all", "arid": []},
         "check_prefix": prefix,
     }
+    if queue is not None:
+        lab["queue"] = {"authoritative": queue}
     (root / "delivery.yaml").write_text(yaml.safe_dump({"lab": lab}))
     return root
 
@@ -88,9 +91,30 @@ def test_only_true_switches_the_lab_off(tmp_path: Path, value: str) -> None:
     }
 
 
-@pytest.mark.parametrize("event", ["push", "merge_group", "workflow_dispatch", "pull_request_target", ""])
-def test_authority_is_published_only_on_pull_requests(tmp_path: Path, event: str) -> None:
-    assert verdict.authority(tree(tmp_path, ["lint"]), event, {}) == {}
+@pytest.mark.parametrize("event", ["push", "workflow_dispatch", "pull_request_target", ""])
+def test_authority_is_published_only_on_pull_requests_and_merge_groups(tmp_path: Path, event: str) -> None:
+    assert verdict.authority(tree(tmp_path, ["lint"], queue=["unit"]), event, {}) == {}
+
+
+def test_merge_group_authority_publishes_the_base_queue_gates(tmp_path: Path) -> None:
+    grader = tree(tmp_path, ["lint"], queue=["unit", "type-gate"])
+    assert verdict.authority(grader, "merge_group", {}) == {"authoritative": '{"type-gate": true, "unit": true}'}
+    assert verdict.authority(grader, "pull_request", {}) == {"authoritative": '{"lint": true}'}
+
+
+def test_merge_group_authority_is_empty_without_queue_gates(tmp_path: Path) -> None:
+    assert verdict.authority(tree(tmp_path, ["lint"]), "merge_group", {}) == {"authoritative": "{}"}
+
+
+def test_head_cannot_widen_queue_authority(tmp_path: Path) -> None:
+    grader = tree(tmp_path / "grader", [], queue=[])
+    tree(tmp_path / "head", [], queue=["unit"])
+    assert verdict.authority(grader, "merge_group", {}) == {"authoritative": "{}"}
+
+
+def test_lab_off_keeps_every_actions_queue_gate(tmp_path: Path) -> None:
+    grader = tree(tmp_path, [], queue=["unit"])
+    assert verdict.authority(grader, "merge_group", {"AGENTIHOOKS_LAB_OFF": "true"}) == {"authoritative": "{}"}
 
 
 def test_absent_runs_have_no_verdict() -> None:
