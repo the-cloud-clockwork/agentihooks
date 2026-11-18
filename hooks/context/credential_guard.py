@@ -139,6 +139,10 @@ READER_VERBS = {
 
 SOURCERS = {"source", "."}
 INTERPRETERS = {"python", "python2", "python3", "node", "ruby", "perl", "php", "sh", "bash", "zsh", "dash"}
+SHELLS = frozenset({"sh", "bash", "zsh", "dash"})
+SHELL_SCRIPT_FLAG = re.compile(r"^-[A-Za-z]*c[A-Za-z]*$")
+AWKS = frozenset({"awk", "gawk", "mawk", "nawk"})
+ENVIRON_VALUE = re.compile(r"\bENVIRON\s*\[")
 GREP_FAMILY = {"grep", "egrep", "fgrep", "rg", "ack"}
 PAGERS = {"cat", "head", "tail", "less", "more", "bat", "tac", "nl"}
 WRAPPERS = {"docker", "podman", "nerdctl", "kubectl", "ssh"}
@@ -477,6 +481,14 @@ def echo_secret_verdict(command):
                 "printing ${} to stdout".format(name),
                 KIND_ENVIRONMENT,
             )
+    return None
+
+
+def awk_environ_verdict(command: str) -> str | None:
+    """Block reason when an awk stage of the command reads a value out of ENVIRON."""
+    for stage in split_outside_quotes(STAGE_DELIM, command)[::2]:
+        if verb_of(tokens_of(stage)) in AWKS and ENVIRON_VALUE.search(stage):
+            return block("printing environment values (awk ENVIRON[...])", KIND_ENVIRONMENT)
     return None
 
 
@@ -846,6 +858,16 @@ def inner_command(toks):
     return None
 
 
+def shell_scripts(toks: list[str]) -> list[str]:
+    """The scripts a shell stage runs with -c, directly or as a wrapper's command; empty for any other stage."""
+    if verb_of(toks) in WRAPPERS:
+        toks = inner_command(toks) or []
+    if verb_of(toks) not in SHELLS:
+        return []
+    i = verb_index(toks)
+    return [word for flag, word in zip(toks[i + 1 :], toks[i + 2 :], strict=False) if SHELL_SCRIPT_FLAG.match(flag)]
+
+
 def find_filters(toks):
     filters = []
     for i, tok in enumerate(toks):
@@ -1020,14 +1042,23 @@ def find_fed_verdict(ctx, roots):
     return recursive_verdict(KIND_RECURSIVE, roots, ctx)
 
 
-def segment_verdict(segment, ctx):
+def script_verdict(stage_text: str, ctx: Context) -> Verdict:
+    """The stage's verdict once each -c script a shell in it runs is checked as a command first."""
+    for script in shell_scripts(tokens_of(stage_text)):
+        v = decide_bash({"command": script}, Context(ctx.cwd, ctx.recursive))
+        if v.block:
+            return v
+    return stage_verdict(stage_text, ctx)
+
+
+def segment_verdict(segment: str, ctx: Context) -> Verdict:
     ctx.find_filters = None
     parts = split_outside_quotes(STAGE_DELIM, segment)
     changed = False
     for i in range(0, len(parts), 2):
         if not parts[i].strip():
             continue
-        v = stage_verdict(parts[i], ctx)
+        v = script_verdict(parts[i], ctx)
         if v.block:
             return v
         if v.rewrite:
@@ -1036,7 +1067,7 @@ def segment_verdict(segment, ctx):
     return Verdict(rewrite="".join(parts)) if changed else ALLOW
 
 
-def decide_bash(tool_input, ctx=None):
+def decide_bash(tool_input: Mapping[str, object], ctx: Context | None = None) -> Verdict:
     command = tool_input.get("command") or ""
     if not command:
         return ALLOW
@@ -1051,7 +1082,7 @@ def decide_bash(tool_input, ctx=None):
         seg = parts[i]
         if not seg.strip():
             continue
-        for check in (env_dump_verdict, echo_secret_verdict, renderer_verdict, gh_token_verdict):
+        for check in (env_dump_verdict, echo_secret_verdict, awk_environ_verdict, renderer_verdict, gh_token_verdict):
             reason = check(seg)
             if reason:
                 return Verdict(block=reason)
