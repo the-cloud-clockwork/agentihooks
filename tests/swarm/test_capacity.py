@@ -804,6 +804,32 @@ def test_status_command_prints_the_capacity_reason(monkeypatch, capsys):
     assert "scaling auto, live of ceiling eng 0 of 2, ci 0 of 1, plan 0 of 1" in out
 
 
+def test_status_names_the_hive_admission_section_a_hive_redis_role_cannot_read(monkeypatch, capsys):
+    from types import SimpleNamespace
+
+    from redis.exceptions import NoPermissionError
+
+    from scripts.hive import admission, registry
+    from scripts.swarm import cli
+
+    store = _store()
+    store.create(SwarmConfig("sw", "/repo", max_eng=2, max_ci=1))
+    registry.register(store.redis, "other", "other", [])
+    monkeypatch.setattr(cli, "LedgerClient", lambda: FakeLedger([]))
+    allowed = store.redis.eval
+
+    def refused(script: str, numkeys: int, *keys_and_args: Any) -> Any:
+        if numkeys and str(keys_and_args[0]).startswith(admission.key("")):
+            raise NoPermissionError("No permissions to access a key")
+        return allowed(script, numkeys, *keys_and_args)
+
+    monkeypatch.setattr(store.redis, "eval", refused)
+    cli.cmd_status(store, SimpleNamespace(slug="sw", json=False))
+    out = capsys.readouterr().out.splitlines()
+    assert "hive admission unreadable: No permissions to access a key" in out
+    assert any(line.startswith("Agent\tLane\tHarness\tProfile") for line in out)
+
+
 def test_runtime_preserves_flexible_first_then_fixed_task_reservations(monkeypatch, tmp_path):
     from scripts.swarm import runtime as module
 
