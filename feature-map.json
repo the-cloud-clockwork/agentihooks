@@ -5580,6 +5580,16 @@
       ]
     },
     {
+      "id": "frozen-writer-lock-workflow",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-freeze-writer-lock-workflow",
+      "behaviour": "The frozen gate registry holds the writer lock workflow, so the protected grader refuses a pull request head that drops any of its jobs, while a head that leaves the workflow unchanged passes.",
+      "seam": "Frozen gate registry and the protected grader's frozen file check",
+      "tests": [
+        "tests/test_gate_protected.py::test_the_repository_registry_refuses_a_head_dropping_any_writer_lock_job"
+      ]
+    },
+    {
       "id": "gate-declarations-never-expire",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-gate-never-deadlock",
@@ -7234,6 +7244,21 @@
       "tests": [
         "tests/swarm/test_events_placement.py::test_a_workstation_task_under_events_is_offered_admitted_and_launched_on_the_root_hive",
         "tests/swarm/test_events_placement.py::test_under_events_the_tick_launches_no_workstation_task"
+      ]
+    },
+    {
+      "id": "root-keeps-slots-for-pinned-tasks",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-root-prefers-workstation-tasks",
+      "behaviour": "Under the events engine the root hive keeps one free slot for each claimable task of the asking swarm that only root takes and can place, a workstation task pinned to no other hive or a task pinned to root: the hub answers a root admission for work any hive can run with a held answer once root's live workers plus those waiting tasks reach its max agents, so the root lane spoke launches the pinned task on its next poll and the unpinned offer stays queued for another hive, while a pinned task and every other hive are admitted as before.",
+      "seam": "scripts.swarm.readiness root_only and root_waiting through scripts.hub.admission Admission.admit, Admission._reserved and Admission._full, observed at scripts.hive.lanes.run_once",
+      "tests": [
+        "tests/swarm/test_events_placement.py::test_root_only_names_the_tasks_only_the_root_hive_takes",
+        "tests/swarm/test_events_placement.py::test_root_waiting_counts_only_claimable_tasks_the_root_hive_alone_takes_and_can_place",
+        "tests/swarm/test_events_placement.py::test_root_with_one_free_slot_holds_the_unpinned_task_for_another_hive_and_admits_the_workstation_task",
+        "tests/swarm/test_events_placement.py::test_root_keeps_a_slot_only_for_a_workstation_task_it_can_place",
+        "tests/swarm/test_events_placement.py::test_root_admits_unpinned_work_only_into_slots_beyond_the_waiting_workstation_tasks",
+        "tests/swarm/test_events_placement.py::test_root_with_one_free_slot_launches_the_workstation_task_on_the_poll_after_holding_the_unpinned_one"
       ]
     },
     {
