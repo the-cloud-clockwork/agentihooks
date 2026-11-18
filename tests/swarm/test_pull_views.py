@@ -1,6 +1,9 @@
 import json
 import subprocess
+from collections.abc import Callable
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -715,3 +718,90 @@ def test_a_merged_pull_request_with_empty_check_entries_reads_merged():
         False,
         True,
     )
+
+
+def answering(answers: dict[str, dict[str, Any]], queries: list[str]) -> Callable[..., SimpleNamespace]:
+    """Answer each batched read with the pull requests of ``answers`` its query names, in query order, and log the
+    query."""
+
+    def run(command: list[str], **kwargs: Any) -> SimpleNamespace:
+        query = command[-1]
+        queries.append(query)
+        named = [url for url in answers if json.dumps(url) in query]
+        return SimpleNamespace(
+            returncode=0, stdout=json.dumps({"data": {f"p{i}": answers[url] for i, url in enumerate(named)}})
+        )
+
+    return run
+
+
+def landed(head: str) -> dict[str, Any]:
+    """Return a pull request GitHub answers merged in full at ``head``."""
+    return {**resource(head, "MERGED"), "mergedAt": "2026-10-21T10:00:00Z"}
+
+
+@pytest.mark.feature("tick-view-merged-pull-cache")
+def test_a_new_process_reads_only_the_pull_requests_not_kept_merged(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import fakeredis
+
+    opened, merged = "https://github.com/o/r/pull/1", "https://github.com/o/r/pull/2"
+    cache = fakeredis.FakeRedis(decode_responses=True)
+    queries: list[str] = []
+    run = answering({opened: resource("h1"), merged: landed("h2")}, queries)
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "first"))
+    first = views([opened, merged], run, cache)
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "second"))
+    second = views([opened, merged], run, cache)
+
+    assert len(queries) == 2
+    assert json.dumps(opened) in queries[1]
+    assert json.dumps(merged) not in queries[1]
+    assert second == first
+    assert second[merged].merged_at == 1_792_576_800_000
+    assert cache.ttl(f"{PREFIX}:merged-pull-view:{merged}") == 2 * 24 * 3600
+
+
+@pytest.mark.feature("tick-view-merged-pull-cache")
+def test_open_and_closed_pull_requests_are_read_again_by_a_new_process(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import fakeredis
+
+    opened, closed = "https://github.com/o/r/pull/1", "https://github.com/o/r/pull/3"
+    cache = fakeredis.FakeRedis(decode_responses=True)
+    queries: list[str] = []
+    run = answering({opened: resource("h1"), closed: resource("h3", "CLOSED")}, queries)
+    for home in ("first", "second"):
+        monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / home))
+        views([opened, closed], run, cache)
+
+    assert [[json.dumps(url) in query for url in (opened, closed)] for query in queries] == [[True, True]] * 2
+    assert cache.keys(f"{PREFIX}:merged-pull-view:*") == []
+
+
+@pytest.mark.feature("tick-view-merged-pull-cache")
+def test_a_kept_entry_with_other_fields_is_read_again_and_replaced(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import fakeredis
+
+    merged = "https://github.com/o/r/pull/2"
+    key = f"{PREFIX}:merged-pull-view:{merged}"
+    cache = fakeredis.FakeRedis(decode_responses=True)
+    cache.set(key, json.dumps({"state": "MERGED", "retired": True}))
+    queries: list[str] = []
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+
+    found = views([merged], answering({merged: landed("h2")}, queries), cache)
+
+    assert len(queries) == 1
+    assert found[merged].head == "h2"
+    assert json.loads(str(cache.get(key)))["head"] == "h2"
+
+
+def test_an_empty_read_never_asks_the_shared_cache_for_no_keys() -> None:
+    refusing = SimpleNamespace(mget=lambda keys: pytest.fail("an empty read asked the shared cache for no keys"))
+
+    assert views([], lambda *a, **k: pytest.fail("empty request"), refusing) == {}

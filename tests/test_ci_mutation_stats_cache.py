@@ -1,5 +1,8 @@
+import ast
 import subprocess
+from collections import Counter
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -1427,6 +1430,41 @@ def test_measured_stats_trace_every_covered_source_in_one_walk(tmp_path, monkeyp
     (root / "scripts/shared_helper.py").write_text("value = 2\n")
     stats_cache.collect_cached_stats(root, cache, {}, files, [], collect)
     assert calls == [files, files]
+
+
+def test_a_measured_record_parses_each_closure_source_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.ci_mutation import stats_cache
+
+    root = tmp_path / "repo"
+    sources = {
+        "scripts/scan.py": "from pathlib import Path\n\n\ndef names():\n    return sorted(Path('data').glob('*.json'))\n",
+        "scripts/helper.py": "from scripts.scan import names\n",
+        "tests/test_measured.py": "def test_names():\n    assert True\n",
+    }
+    _repository(root, {**sources, "data/a.json": "{}\n"})
+    node = "tests/test_measured.py::test_names"
+    parsed: Counter[str] = Counter()
+    parse = ast.parse
+
+    def counted(text: str) -> ast.Module:
+        parsed[text] += 1
+        return parse(text)
+
+    monkeypatch.setattr(stats_cache, "ast", SimpleNamespace(**{**vars(ast), "parse": counted}))
+    calls: list[list[str]] = []
+
+    def collect(chosen: list[str]) -> list[dict[str, object]]:
+        calls.append(chosen)
+        return [
+            {"status": 0, "tests": {}, "durations": {node: 1}, "cpu": 1, "dependencies": {node: ["scripts/helper.py"]}}
+        ]
+
+    cache = tmp_path / "cache"
+    for _ in range(2):
+        parsed.clear()
+        stats_cache.collect_cached_stats(root, cache, {}, ["tests/test_measured.py"], [], collect)
+        assert {path: parsed[text] for path, text in sources.items()} == dict.fromkeys(sources, 1)
+    assert calls == [["tests/test_measured.py"]]
 
 
 def test_selected_test_ids_read_the_collected_stats_once_not_once_per_id(tmp_path):

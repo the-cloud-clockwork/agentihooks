@@ -5623,6 +5623,16 @@
       ]
     },
     {
+      "id": "frozen-writer-lock-workflow",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-freeze-writer-lock-workflow",
+      "behaviour": "The frozen gate registry holds the writer lock workflow, so the protected grader refuses a pull request head that drops any of its jobs, while a head that leaves the workflow unchanged passes.",
+      "seam": "Frozen gate registry and the protected grader's frozen file check",
+      "tests": [
+        "tests/test_gate_protected.py::test_the_repository_registry_refuses_a_head_dropping_any_writer_lock_job"
+      ]
+    },
+    {
       "id": "gate-declarations-never-expire",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-gate-never-deadlock",
@@ -7280,6 +7290,21 @@
       ]
     },
     {
+      "id": "root-keeps-slots-for-pinned-tasks",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-root-prefers-workstation-tasks",
+      "behaviour": "Under the events engine the root hive keeps one free slot for each claimable task of the asking swarm that only root takes and can place, a workstation task pinned to no other hive or a task pinned to root: the hub answers a root admission for work any hive can run with a held answer once root's live workers plus those waiting tasks reach its max agents, so the root lane spoke launches the pinned task on its next poll and the unpinned offer stays queued for another hive, while a pinned task and every other hive are admitted as before.",
+      "seam": "scripts.swarm.readiness root_only and root_waiting through scripts.hub.admission Admission.admit, Admission._reserved and Admission._full, observed at scripts.hive.lanes.run_once",
+      "tests": [
+        "tests/swarm/test_events_placement.py::test_root_only_names_the_tasks_only_the_root_hive_takes",
+        "tests/swarm/test_events_placement.py::test_root_waiting_counts_only_claimable_tasks_the_root_hive_alone_takes_and_can_place",
+        "tests/swarm/test_events_placement.py::test_root_with_one_free_slot_holds_the_unpinned_task_for_another_hive_and_admits_the_workstation_task",
+        "tests/swarm/test_events_placement.py::test_root_keeps_a_slot_only_for_a_workstation_task_it_can_place",
+        "tests/swarm/test_events_placement.py::test_root_admits_unpinned_work_only_into_slots_beyond_the_waiting_workstation_tasks",
+        "tests/swarm/test_events_placement.py::test_root_with_one_free_slot_launches_the_workstation_task_on_the_poll_after_holding_the_unpinned_one"
+      ]
+    },
+    {
       "id": "unfit-refusal-spends-no-delivery",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2584",
@@ -7840,6 +7865,25 @@
         "tests/ci_lab/test_scheduler.py::test_a_paused_class_holds_its_heads_but_the_excepted_ones_until_resume",
         "tests/ci_lab/test_scheduler.py::test_a_pause_of_another_class_leaves_pull_request_grading_alone",
         "tests/ci_lab/test_scheduler.py::test_the_hotfix_port_reads_the_heads_the_control_routes_marked"
+      ]
+    },
+    {
+      "id": "lab-shadow-acceptance-report",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/cut-shadow-report",
+      "behaviour": "python -m scripts.ci_lab shadow report --gate GATE reads the newest completed Tests runs of the event, pull_request unless --event merge_group, and joins each distinct head's github-actions jobs of the gate with its lab-shadow check run from the lab App named by --app or AGENTIHOOKS_LAB_APP, refusing to run without one; a head whose jobs of the gate were cancelled, still run or never graded leaves the window, a unit job the workflow reran after a lost runner counts by its rerun, and the report prints one row per head with each verdict, whether the lab verdict completed first and whether the two disagree, then the counts, and exits 0 only when the window holds the asked heads, no mismatch, a lab verdict on 48 and a lab verdict first on 45 of every 50, rounded up.",
+      "seam": "scripts.ci_lab.shadow_report actions, lab, head, rule, tally, holds, render, collect, claims and main through python -m scripts.ci_lab shadow report --gate",
+      "tests": [
+        "tests/ci_lab/test_shadow_report.py::test_a_lab_verdict_that_disagrees_with_actions_is_a_mismatch_that_fails_the_rule",
+        "tests/ci_lab/test_shadow_report.py::test_a_head_without_a_lab_verdict_counts_against_presence",
+        "tests/ci_lab/test_shadow_report.py::test_a_cancelled_actions_job_takes_its_head_out_of_the_window",
+        "tests/ci_lab/test_shadow_report.py::test_a_lab_verdict_completing_after_the_actions_jobs_is_late",
+        "tests/ci_lab/test_shadow_report.py::test_a_lost_runners_unit_job_counts_by_its_rerun",
+        "tests/ci_lab/test_shadow_report.py::test_the_table_prints_a_row_per_head_and_the_rule_counts",
+        "tests/ci_lab/test_shadow_report.py::test_the_report_command_reads_live_heads_through_the_github_api",
+        "tests/ci_lab/test_shadow_report.py::test_the_report_command_names_its_repository_and_refuses_an_empty_window",
+        "tests/ci_lab/test_shadow_report.py::test_only_a_report_with_a_gate_is_the_acceptance_rule_report",
+        "tests/ci_lab/test_shadow_report.py::test_a_paged_list_stops_at_a_short_page_or_after_ten_pages"
       ]
     },
     {
@@ -8770,6 +8814,18 @@
       "tests": [
         "tests/test_compose_stack.py::test_the_stack_never_reads_the_bus_settings_of_the_shell_that_runs_compose",
         "tests/test_compose_stack.py::test_an_agent_shell_on_the_anton_bus_leaves_the_controller_on_the_stack_nats"
+      ]
+    },
+    {
+      "id": "tick-view-merged-pull-cache",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-view-slow-github-reads",
+      "behaviour": "The batched pull request read serves every pull request the swarm Redis keeps as merged and reads only the rest from GitHub, then keeps each view GitHub answered merged in full for two days, because a merged view never changes. A new controller process after a roll therefore reads only the open pull requests of its tick view instead of every merged pull request of the last day, so its first tick view build fits the pass view wait and the merge pass runs. Open and closed pull requests, and an entry another release wrote with other fields, are read again.",
+      "seam": "views in scripts.swarm.ledger_events, called by tick_view and fresh_reader with the swarm Redis as its cache",
+      "tests": [
+        "tests/swarm/test_pull_views.py::test_a_new_process_reads_only_the_pull_requests_not_kept_merged",
+        "tests/swarm/test_pull_views.py::test_open_and_closed_pull_requests_are_read_again_by_a_new_process",
+        "tests/swarm/test_pull_views.py::test_a_kept_entry_with_other_fields_is_read_again_and_replaced"
       ]
     }
   ],
