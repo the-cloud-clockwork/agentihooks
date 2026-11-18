@@ -12,7 +12,7 @@ import pytest
 import yaml
 
 from scripts.ci_lab import __main__ as cli
-from scripts.ci_lab import control, evidence, expand_tests, lease_api, queue, scheduler
+from scripts.ci_lab import control, evidence, expand_tests, interaction, lease_api, queue, scheduler
 from scripts.ci_lab.checks import Output
 from scripts.ci_lab.delivery import CLASSES
 from scripts.ci_lab.digests import GradeInputs, StaticInputs, Toolchain, digest, grade_key, static_key
@@ -1289,6 +1289,10 @@ def test_a_test_verdict_outside_list_reaches_the_stored_records_and_the_followin
         for tests, files in ((members, both), ((FIRST_TEST,), ["docs/c.md"]))
     ]
     assert run.lab.objects.keys(folder) == sorted([f"{folder}dev.json", *notes])
+    change = [[("docs/p.md", "p\n", "q\n")]]
+    assert before is not None and after is not None
+    assert interaction.invalidated(before, change) == frozenset()
+    assert interaction.invalidated(after, change) == {OTHER_TEST, SECOND_TEST}
     assert _batch_keys(before, b"p\n") == _batch_keys(before, b"q\n")
     assert _batch_keys(after, b"p\n")[(FIRST_TEST, OTHER_TEST)] != _batch_keys(after, b"q\n")[(FIRST_TEST, OTHER_TEST)]
 

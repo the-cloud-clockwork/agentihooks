@@ -242,7 +242,7 @@ def invalidated(manifest: dict, changed: list[tuple[str, str | None, str | None]
     hit = set()
     source_changed = False
     for path, old, new in changed:
-        hit.update(test for test, found in tests.items() if path in found["files"])
+        hit.update(test for test, found in tests.items() if path in found["files"] or path in found.get("outside", ()))
         if path.startswith(MEASURED):
             source_changed = True
             if path.endswith(".py"):
