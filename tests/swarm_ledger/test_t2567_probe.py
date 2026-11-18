@@ -80,17 +80,19 @@ class Child:
             text=True,
             env=env,
         )
-        assert self.process.stdout.readline().strip() == "ready"
+        assert self.process.stdin is not None and self.process.stdout is not None
+        self.stdin, self.stdout = self.process.stdin, self.process.stdout
+        assert self.stdout.readline().strip() == "ready"
 
     def send(self, line: str) -> None:
-        self.process.stdin.write(line + "\n")
-        self.process.stdin.flush()
+        self.stdin.write(line + "\n")
+        self.stdin.flush()
 
     def result(self) -> dict:
-        return json.loads(self.process.stdout.readline())
+        return json.loads(self.stdout.readline())
 
     def close(self) -> None:
-        self.process.stdin.close()
+        self.stdin.close()
         self.process.wait(30)
 
 
