@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.1009 · 2026-11-18
+
+### 2026-11-18 · 2a0087b300eb · #11896 · @agenticore-app
+
+**Move the hive worker release tag unless a newer release already published its hive image**
+
+This fixes a bug where fast-arriving releases (2.17.992–994) each saw a newer tag already exist at move time and skipped moving the `:release` hive worker tag, leaving it stuck on an old release until a later one found no successor. The script now walks remote tags newest first, moving `:release` for this release only if no newer tag has actually published its hive image yet, correctly handling the case where `:release` is pushed before the version tag. The checkout-time `latest` flag path, which had the same stalling behavior, is removed, and registry errors still fail safely before any tag moves.
+
+### 2026-11-18 · 03066abec46c · #11909 · @agenticore-app
+
+**Run every release's hive job one at a time in the hive release group**
+
+This change puts every release's hive job into a single concurrency group with queue max and cancel-in-progress false, so hive jobs from different releases run strictly one at a time instead of overlapping. It matters because an upcoming change to the hive release script moves the shared release tag only if a newer release hasn't already published its hive image, and if an older release's check and move interleaved with a newer release's publish, the tag could be pushed back onto the older image, reopening the race that #10166 was meant to prevent.
+
 ## v2.17.1008 · 2026-11-18
 
 ### 2026-11-18 · 47820637e1f2 · #11916 · @nestorcolt
