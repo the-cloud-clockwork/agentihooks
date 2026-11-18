@@ -1159,6 +1159,19 @@ def test_a_merge_group_head_runs_only_the_batches_its_entries_invalidate(tmp_pat
 
 @pytest.mark.feature("lab-scheduler-test-units")
 @pytest.mark.usefixtures("staticless")
+def test_a_merge_group_head_whose_entries_invalidate_no_test_runs_no_batch(tmp_path: Path) -> None:
+    suite = _suite(tmp_path, DELIVERY["lab"])
+    _git(suite.repo, "switch", "-q", "-c", "docs", suite.base)
+    head = _commit(suite.repo, {"docs/c.md": "e\n"})
+    port = Port(SUITE_MANIFEST)
+    found = port.expander(tmp_path).expand(suite.request(Priority.QUEUE, head))
+    assert found == scheduler.frame(Priority.QUEUE, _tree(suite, head), suite.base, {"unit": ()})
+    assert port.asked == [(suite.remote, [suite.base, suite.seed])]
+    assert port.looked == [(batch.kind, batch.key) for batch in _suite_units(suite, head, SUITE_DURATIONS)]
+
+
+@pytest.mark.feature("lab-scheduler-test-units")
+@pytest.mark.usefixtures("staticless")
 @pytest.mark.parametrize(
     ("queue", "known"), [({}, False), ({"queue": {"full_suite_entries": 1}}, True)], ids=["cache", "entries"]
 )

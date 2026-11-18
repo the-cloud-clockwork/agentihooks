@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/scheduler.py:scripts.ci_lab.scheduler.xǁMirrorExpanderǁ_group:8c4ada77c38ffab2c72d2bbaf6e360b0085b39345861e6d5634b1e3c0be11ae5": {
+    "reader": "standards_reader",
+    "reason": "Same argument as the pyproject assignment, stated on the Group constructor: any flag value yields the same test units, because a pyproject.toml change already invalidates every manifest test through dep_manifest.global_input."
+  }
+}
