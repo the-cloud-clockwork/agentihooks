@@ -86,7 +86,7 @@ def test_a_reload_hands_over_without_a_failed_or_slow_request(tmp_path: Path, le
                     events.append(("child", child))
                 try:
                     status: int | str = healthy(ledger_port)
-                except OSError as exc:
+                except Exception as exc:
                     status = repr(exc)
                 events.append(("old" if (tmp_path / ".server.pid").read_text() == str(first.pid) else "new", status))
                 time.sleep(0.005)
