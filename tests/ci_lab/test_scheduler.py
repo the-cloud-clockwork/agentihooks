@@ -1765,7 +1765,9 @@ def _mutation_gates(
     _git(suite.repo, "worktree", "add", "-q", "--detach", str(checkout), head)
     stats = expand_mutation.stats_units(checkout, files, executors.OPTIONS)
     covered = {name: {test: keys[test] for test in tests} for name, tests in covering.items()}
-    mutants = expand_mutation.mutant_units(checkout, changes, covered, expand_tests.unlisted(SUITE_MANIFEST, contents))
+    mutants = expand_mutation.mutant_units(
+        checkout, changes, covered, expand_tests.unlisted_test_hashes(SUITE_MANIFEST, contents)
+    )
     _git(suite.repo, "worktree", "remove", "--force", str(checkout))
     return {name: units for name, units in {"mutation-stats": stats, "mutation": mutants}.items() if units}
 

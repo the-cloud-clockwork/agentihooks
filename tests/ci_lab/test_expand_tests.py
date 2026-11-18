@@ -220,15 +220,21 @@ def test_fingerprints_are_golden() -> None:
 
 
 @pytest.mark.feature("lab-mutant-unit-unlisted-tests")
-def test_unlisted_hashes_each_test_module_that_holds_no_manifest_test_and_the_test_modules_it_imports() -> None:
+def test_unlisted_hashes_each_test_module_that_holds_no_manifest_test_with_its_conftests_and_imports() -> None:
     added = {
         "tests/test_new.py": b"from tests.helpers import VALUE\n\n\ndef test_new():\n    assert VALUE\n",
         "tests/inner/test_deep.py": b"",
+        "tests/inner/conftest.py": b"",
     }
-    others = {"tests/test_data.json": b"{}\n", "scripts/test_tool.py": b"TOOL = 1\n", "tests/unused.py": b"X = 1\n"}
+    others = {
+        "tests/test_data.json": b"{}\n",
+        "scripts/test_tool.py": b"TOOL = 1\n",
+        "tests/unused.py": b"X = 1\n",
+        "tests/other/conftest.py": b"",
+    }
     tree = {path: text.encode() for path, text in FILES.items()} | added | others
-    expected = {**added, "tests/helpers.py": FILES["tests/helpers.py"].encode()}
-    assert expand_tests.unlisted(MANIFEST, tree) == {
+    expected = {**added, **{path: FILES[path].encode() for path in ("tests/helpers.py", "tests/conftest.py")}}
+    assert expand_tests.unlisted_test_hashes(MANIFEST, tree) == {
         path: hashlib.sha256(text).hexdigest() for path, text in expected.items()
     }
 
@@ -242,7 +248,7 @@ def test_unlisted_keys_every_test_module_the_mutant_runner_runs(repository: Path
     _git(repository, "add", "-A")
     _git(repository, "commit", "-qm", "extra")
     runs = executors._test_files(repository)  # pyright: ignore[reportPrivateUsage]
-    assert sorted(expand_tests.unlisted({"tests": {}}, _tree(repository))) == sorted(runs)
+    assert set(runs) <= set(expand_tests.unlisted_test_hashes({"tests": {}}, _tree(repository)))
     assert "tests/inner/test_deep.py" in runs
 
 
