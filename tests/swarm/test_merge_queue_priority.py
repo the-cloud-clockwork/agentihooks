@@ -137,7 +137,98 @@ def test_priority_keeps_displaced_ahead_of_later_arrivals_in_one_pass():
     result = merge_queue.prioritize(URL, run=queue.run)
     assert [int(e["pullRequest"]["id"][1:]) for e in queue.entries] == [1, 9, 2, 3, 4, 5, 6]
     assert queue.mutations == [("dequeue", n) for n in (6, 5, 4, 3, 2)] + [("queue", n) for n in (2, 3, 4, 5, 6)]
-    assert result == {"url": URL, "displaced": [URL[:-1] + str(n) for n in (2, 3, 4, 5, 6)], "errors": []}
+    assert result == {
+        "url": URL,
+        "displaced": [URL[:-1] + str(n) for n in (2, 3, 4, 5, 6)],
+        "errors": [],
+        "lab": None,
+    }
+
+
+class Journal:
+    def __init__(self):
+        self.records = []
+
+    def groups(self):
+        return []
+
+    def write(self, *args, **kwargs):
+        self.records.append((args, kwargs))
+
+
+@pytest.mark.feature("merge-priority-reaches-lab")
+def test_the_priority_journal_records_the_queue_move_and_the_lab_acknowledgement():
+    queue = FakeQueue()
+    ack = {"priority": ["head9"], "class": "hotfix", "expires_ms": 7}
+    told = []
+
+    def lab(head):
+        told.append((head, list(queue.mutations)))
+        return ack
+
+    journal = Journal()
+    result = merge_queue.prioritize(URL, run=queue.run, journal=journal, lab=lab)
+    assert result["lab"] == ack
+    assert told == [("head9", queue.mutations)]
+    ((args, kwargs),) = journal.records
+    assert args[:3] == ("priority", URL, "head9")
+    assert ["queue", URL] in kwargs["steps"]
+    assert kwargs["lab"] == ack
+
+
+@pytest.mark.feature("merge-priority-reaches-lab")
+def test_a_lab_that_cannot_be_told_leaves_the_queue_move_standing():
+    queue = FakeQueue()
+    journal = Journal()
+    refused = {"error": "the swarm has no lab url"}
+    result = merge_queue.prioritize(URL, run=queue.run, journal=journal, lab=lambda head: refused)
+    assert (result["errors"], result["lab"]) == ([], refused)
+    assert journal.records[0][1]["lab"] == refused
+    assert [int(e["pullRequest"]["id"][1:]) for e in queue.entries] == [1, 9, 2, 3]
+
+
+@pytest.mark.feature("merge-priority-reaches-lab")
+def test_a_failed_queue_move_tells_the_lab_nothing():
+    queue = FakeQueue()
+
+    def run(command, **kwargs):
+        if "enqueuePullRequest" in " ".join(command) and "id=P9" in command:
+            return subprocess.CompletedProcess(command, 1, "", "insertion refused")
+        return queue.run(command, **kwargs)
+
+    told = []
+    journal = Journal()
+    result = merge_queue.prioritize(URL, run=run, journal=journal, lab=told.append)
+    assert (told, result["errors"], result["lab"]) == ([], ["insertion refused"], None)
+    assert journal.records[0][1]["lab"] is None
+
+
+@pytest.mark.feature("merge-priority-reaches-lab")
+def test_the_swarm_tells_its_own_lab_of_a_priority_move(monkeypatch):
+    import fakeredis
+
+    from scripts.swarm import lab_control
+    from scripts.swarm.store import RedisStore, SwarmConfig
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.names.mint = lambda: "a1b2c3"
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=1, lab_url="http://lab:8800"))
+    monkeypatch.setenv(lab_control.TOKEN, "tok")
+    asked = []
+
+    def acknowledge(url, head, environ):
+        asked.append((url, head, environ[lab_control.TOKEN]))
+        return {"ok": True}
+
+    def prioritize(url, journal, displaced, lab):
+        assert (url, journal.url) == (URL, URL)
+        return {"url": url, "displaced": [], "errors": [], "lab": lab("head9")}
+
+    monkeypatch.setattr(lab_control, "acknowledge", acknowledge)
+    monkeypatch.setattr(merge_queue, "prioritize", prioritize)
+    result = queue_priority.reorder(store, "sw", URL, "master", [], queue_record.Journal(URL))
+    assert result["lab"] == {"ok": True}
+    assert asked == [("http://lab:8800", "head9", "tok")]
 
 
 def test_priority_leaves_earlier_priority_targets_in_place_on_either_side():

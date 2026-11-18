@@ -31,6 +31,7 @@ BRANCH_FIX = "https://github.com/the-cloud-clockwork/agentihooks/tree/fix-branch
 HELD_S = 5.0
 CODE = "a1b2c3"
 MINE = f"engineer-{CODE}-0001"
+NO_LAB = "lab not told: the swarm has no lab url"
 
 
 def _owns_all(branch: str) -> bool:
@@ -1126,6 +1127,7 @@ def test_the_panic_button_cancels_and_prints(
             f"the-cloud-clockwork/antoncore run 7 on {MINE}",
             f"the-cloud-clockwork/antoncore run 8 on {MINE}-2",
         ],
+        "lab": NO_LAB,
     }
     current = panic.state(store, SLUG)
     assert current is not None
@@ -1158,7 +1160,7 @@ def test_the_panic_button_off_clears_once_stable(store, counted, capsys):
     panic.engage(store, SLUG, "pressed", False, [], 0)
     args = cli.build_parser().parse_args([SLUG, "panic", "off"])
     args.handler(store, args)
-    assert json.loads(capsys.readouterr().out) == {"panic": "off"}
+    assert json.loads(capsys.readouterr().out) == {"panic": "off", "lab": NO_LAB}
     assert panic.state(store, SLUG) is None
 
 
@@ -1197,7 +1199,7 @@ def test_the_panic_button_without_a_fix_spares_only_the_merge_queue(store, count
     args = cli.build_parser().parse_args([SLUG, "panic", "on"])
     assert args.fix == []
     args.handler(store, args)
-    assert json.loads(capsys.readouterr().out) == {"panic": "on", "fixes": [], "cancelled": []}
+    assert json.loads(capsys.readouterr().out) == {"panic": "on", "fixes": [], "cancelled": [], "lab": NO_LAB}
 
 
 def _press(store: RedisStore, monkeypatch: pytest.MonkeyPatch, runs: Runs, *argv: str) -> None:
@@ -1251,7 +1253,12 @@ def test_the_swarm_master_presses_panic_on_with_a_checked_fix(
     store.put_agent(SLUG, AgentRecord("master@a1b2c3-0001", "master", "master"))
     _press(store, monkeypatch, _busy(), "--as", "master@a1b2c3-0001", "panic", "on", "--fix", BRANCH_FIX)
     cancelled = [f"{repo} run 7 on engineer-a1b2c3-0001" for repo in panic.REPOS]
-    assert json.loads(capsys.readouterr().out) == {"panic": "on", "fixes": [BRANCH_FIX], "cancelled": cancelled}
+    assert json.loads(capsys.readouterr().out) == {
+        "panic": "on",
+        "fixes": [BRANCH_FIX],
+        "cancelled": cancelled,
+        "lab": NO_LAB,
+    }
     assert asked == []
 
 
