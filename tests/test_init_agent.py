@@ -1307,6 +1307,19 @@ def test_the_launched_claude_reads_the_config_holding_the_recorded_trust(monkeyp
     assert config["projects"][str(project)]["hasTrustDialogAccepted"] is True
 
 
+def test_the_default_terminal_start_opens_the_command_in_its_own_session_with_the_launch_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    opened: list[tuple[list[str], dict[str, object]]] = []
+    monkeypatch.setattr(init_agent.subprocess, "Popen", lambda command, **kwargs: opened.append((command, kwargs)))
+
+    init_agent._open_terminal(["/usr/bin/terminal", "/run/launcher.sh"], {"HOME": "/home/a"})
+
+    assert opened == [
+        (["/usr/bin/terminal", "/run/launcher.sh"], {"env": {"HOME": "/home/a"}, "start_new_session": True})
+    ]
+
+
 def test_a_codex_launcher_leaves_the_claude_config_home_alone(tmp_path):
     text = _launcher_text(tmp_path, {"CLAUDE_CONFIG_DIR": str(tmp_path / "profile")}, "codex")
     assert "CLAUDE_CONFIG_DIR" not in text
