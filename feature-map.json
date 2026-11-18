@@ -9141,7 +9141,7 @@
         "tests/swarm/test_publish.py::test_publish_via_lab_refuses_without_a_lab_remote_for_the_repository",
         "tests/swarm/test_publish.py::test_publish_via_lab_refuses_a_lab_push_without_a_landed_grade",
         "tests/swarm/test_publish.py::test_lab_conclusion_refuses_once_the_wait_runs_out",
-        "tests/swarm/test_publish.py::test_an_unreadable_lab_grade_refuses_the_publish",
+        "tests/swarm/test_publish.py::test_an_unreadable_lab_grade_refuses_the_wait",
         "tests/swarm/test_publish.py::test_publish_direct_without_the_lab_route_is_refused",
         "tests/swarm/test_publish.py::test_read_grade_reads_the_lab_answer_with_its_timeout",
         "tests/swarm/test_publish.py::test_publish_command_hands_the_lab_route_to_publish",

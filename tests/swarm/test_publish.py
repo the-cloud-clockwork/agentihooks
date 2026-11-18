@@ -2131,7 +2131,7 @@ def test_publish_via_lab_grades_head_on_the_lab_before_origin_and_pushes_origin_
         return next(answers)
 
     monkeypatch.setattr(publish, "read_grade", read_grade)
-    monkeypatch.setattr(publish.time, "sleep", slept.append)
+    monkeypatch.setattr(publish.time, "sleep", lambda seconds: slept.append(seconds) if seconds >= 1 else None)
     result = _publish_via_lab(publication)
     head = git(publication.root, "rev-parse", "HEAD")
     url = f"http://lab.invalid/grades/{head}"
@@ -2234,7 +2234,7 @@ def test_lab_conclusion_refuses_once_the_wait_runs_out(monkeypatch: pytest.Monke
     "answer",
     [urllib.error.URLError("refused"), json.JSONDecodeError("no json", "", 0), {"head": "abc"}],
 )
-def test_an_unreadable_lab_grade_refuses_the_publish(monkeypatch: pytest.MonkeyPatch, answer: object) -> None:
+def test_an_unreadable_lab_grade_refuses_the_wait(monkeypatch: pytest.MonkeyPatch, answer: object) -> None:
     from scripts.swarm import publish
     from scripts.swarm.store import SwarmError
 
