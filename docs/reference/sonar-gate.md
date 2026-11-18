@@ -174,7 +174,7 @@ The workflow supplies the merge inputs:
 | Download layout | `.coverage-shards/coverage-3.12-<shard>/.coverage`; each shard's optional `reused-coverage/.coverage` is included when nonempty. A `flat-<name>` beside a database is its flat copy from the coverage wait. |
 | Coverage configuration | `.github/coverage/coverage.ini` enables branch coverage and relative filenames and includes `hooks/*` and `scripts/*` in reports. |
 | Scanner report settings | `sonar.python.coverage.reportPaths=coverage.xml` and `sonar.javascript.lcov.reportPaths=lcov.info`. |
-| Scan inputs | `sonar.exclusions` lists `coverage.xml`, `lcov.info`, `sonar-scope.txt` and `.coverage-shards/**`, the files this job writes into the checkout, so the scan grades repository files only. Sonar still reads both reports from their report paths on disk. |
+| Scan inputs | `sonar.exclusions` lists `coverage.xml`, `lcov.info`, `sonar-scope.txt` and `.coverage-shards/**`, the files this job writes into the checkout that `.gitignore` does not already drop, so the scan and its secret detection grade repository files only. Sonar still reads both reports from their report paths on disk. |
 
 For example, the current full scope workflow invokes the merge as follows from
 the checkout root, after downloading that run's artifacts:
