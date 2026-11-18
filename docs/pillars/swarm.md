@@ -8983,7 +8983,7 @@ revision range for the operator; the watcher and tick also report trimmed histor
 
 #### Queued ledger writes
 
-Ledger talk uses the same outbox when the local ledger server does not answer: answers, relays, new list
+Ledger talk uses the same outbox when the ledger database does not answer: answers, relays, new list
 items and comments with an author and no attachments queue as `ledger` records in `inbox-outbox.jsonl`. Any
 other ledger write is refused while ledger records wait, with
 `ledger talk queued while the server was down still waits in <outbox>; retry once it lands`. A ledger linked

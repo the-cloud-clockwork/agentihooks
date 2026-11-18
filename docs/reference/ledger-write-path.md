@@ -166,7 +166,7 @@ The ledger server (`scripts.swarm_ledger.ledger_server`) keeps every read: the p
 stream, media files and exports. Its HTTP handler defines only `GET` and `OPTIONS`:
 
 - `POST`, `PUT`, `PATCH` and `DELETE` get `501 Unsupported method` from the HTTP server. So does `HEAD`, which the
-  fronts route to it with `GET`.
+  fronts send to it.
 - Its CORS preflight allows only `GET`.
 - Its ledger services carry no write hooks: each hook (bin, layout, write gate, inbox relay, alert delivery, swarm
   control and its arguments, lifecycle, quota refresh, the doctor stop phrase) raises `405 method_not_allowed` with
