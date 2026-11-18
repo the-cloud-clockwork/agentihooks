@@ -105,7 +105,17 @@ Flattening removes that repeated context data from the scan's combined database
 while retaining measured files, including files with no hits, and file tracer
 metadata. It leaves the downloaded shard databases intact.
 
-The merge produces `coverage.xml`, the coverage report table and `lcov.info`.
+The merge produces `coverage.xml`, a TOTAL line naming the lines and branches
+it covers, and `lcov.info`. `.github/coverage/parallel_xml.py` writes the XML
+with one `coverage xml` process per part, as many parts as
+`scripts/ci_cpu_quota.py` allows. It splits the measured files by directory, so
+every package lands whole in one part, puts each directory on the part with
+the fewest source bytes so far, and joins the parts sorted by package with the
+root totals summed, so Sonar reads the same report a single process writes.
+Most of the XML's time is parsing each source file, which is why it divides by
+file; a per file report table would parse every file again, so the merge
+prints only the TOTAL line and the per file view stays in Sonar and in the
+uploaded `coverage.xml`.
 Python XML still covers `hooks` and `scripts`; JavaScript LCOV still includes
 node and browser captures. The optimization changes coverage preparation only:
 Sonar sensors, rules, scan inputs and Delivery L2 conditions remain enabled.
@@ -144,7 +154,9 @@ which names it.
 
 `combine.sh` moves each `flat-<report>` it finds into its combine input and
 flattens only the reports that have no flat copy. After the last shard lands,
-only that shard's flatten, the combine and the reports remain before the scan.
+only that shard's flatten, the combine and the XML parts remain before the
+scan. A failed part fails the merge with its exit code and leaves no
+`coverage.xml`.
 
 `Merge shard coverage` runs in the background while the proxy starts.
 `Wait for the coverage merge` must succeed before `SonarQube Scan` starts. The
