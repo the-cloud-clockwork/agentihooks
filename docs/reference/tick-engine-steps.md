@@ -885,6 +885,86 @@ The positional order is name, group, call, `needs`, `reads`, `writes`.
 id, as keywords; see
 [Declaring effects on a step](tick-adapters.md#declaring-effects-on-a-step).
 
+#### Undeclared pass reads
+
+A step's call reads the pass state through the reader it is handed, `get`,
+and that reader refuses every pass box value the step's `reads` and `writes`
+do not declare. `CallStep.run` and `WriteStep.run` (`scripts.tick.steps.tasks`)
+build it on every pass with `scripts.tick.steps.declared_read` over
+`declared_keys(reads | writes)`; no setting turns it off. A refused read raises
+`scripts.tick.steps.UndeclaredRead`:
+
+```text
+UndeclaredRead: step <name> reads pass value <key> it does not declare
+```
+
+`declared_keys` takes the key of every `pass:<key>` and `hook:<key>` domain the
+step names and adds `raised`, the [held exception](#exceptions), so every step
+may read `raised` without declaring it. The reader answers a key in this order:
+
+| Read | Answer |
+| --- | --- |
+| `get("tools")`, `get("deadline")` | The pass tools and the step deadline, with no check |
+| `get("box")`, or a key whose value is a `PassBox`, such as the wrapper's `judging` box | A `DeclaredBox` view of that box |
+| A key in `BOX_KEYS` the step does not declare | Refused, whether or not a step stored it yet |
+| Any other key | The value the pass view holds under it, with no check: `slug`, `store`, `ledger`, `runtime`, `now_ms`, and a plain dictionary under any key |
+
+`BOX_KEYS` holds the thirteen values steps and site hooks store: `agents`,
+`config`, `count`, `doc`, `finished`, `found`, `judged`, `live`,
+`phase changed`, `rows`, `sleeping`, `stop` and `view`. The `DeclaredBox` view:
+
+- refuses `view[<key>]`, `<key> in view` and `view.get(<key>)` when the step
+  does not declare the key and the key is in `BOX_KEYS` or is stored in the
+  box, so a key outside `BOX_KEYS` is guarded from the moment a step stores it;
+- raises `Left`, a `KeyError`, for a declared key the box does not hold, so
+  `view.get(<key>, <default>)` returns the default;
+- lists and counts only the declared keys the box holds;
+- passes `view[<key>] = <value>` and `del view[<key>]` through to the box with
+  no check.
+
+Some values are stored by a site hook rather than a step: the
+`scripts.swarm.cli` wrapper hooks store `agents`, `config`, `count`, `doc`,
+`rows` and `view`. A step that reads one declares `hook_domains("<key>")`, the
+domain `hook:<key>`, in its `reads`, as `urgent hold` and the other
+`wrapper phases` steps do with `reads=hook_domains("doc")`. The reader counts a
+`hook:<key>` domain exactly as it counts `pass:<key>`: either one opens
+`<key>`. No step writes a `hook:<key>` domain, and the pass edges test below
+grades only `pass:<key>` declarations. Each site hook declares the domains it
+reads and writes for its site in `scripts.swarm.cli.WRAPPER_HOOK_KEYS` and
+`scripts.tick.sites.TICK_HOOK_KEYS`. A live site hook reads the box itself
+rather than a `DeclaredBox` view, so `UndeclaredRead` never names one; the
+separate `scripts.tick.hook_reads` guard, set by `AGENTIHOOKS_TICK_HOOK_READS`,
+checks those reads.
+
+To clear a refusal, declare the key the message names on the step it names:
+
+| The value is stored by | Add to the step |
+| --- | --- |
+| Another step | `pass_domain("<key>")` in `reads`, and that writer, or a step that needs it, in `needs` |
+| The step itself | `pass_domain("<key>")` in `writes` |
+| A site hook | `hook_domains("<key>")` in `reads` |
+
+A step that stores a value under a new key also adds the key to `BOX_KEYS`:
+`test_the_box_keys_are_the_values_steps_and_hooks_declare_writing` fails until
+`BOX_KEYS` equals the keys that step and site hook `writes` name.
+
+The refusal is an exception raised from the step's call. A step wrapped with
+`tasks.held` holds it like any other exception, as described under
+[Exceptions](#exceptions): the step returns no actions and the tick raises it
+from the group site. `test_a_planted_undeclared_read_is_named` shows it: with
+`pass:rows` removed from the reads of `verify`, a replay of `running` through
+`tick` raises the `UndeclaredRead` for `verify` and `rows`.
+
+| Test | What it holds |
+| --- | --- |
+| `tests/tick/test_declared_reads.py` | The refusal by name for a stored value and for one no step stored yet; declared step and hook values and plain pass state reading through; the view rules above; a `PassBox` in the pass state guarded and a plain dictionary not; a `WriteStep` reading what its `reads` and `writes` declare; every site hook declaring its keys; every `hook:<key>` a step reads written by a site hook at or before the step's site; `BOX_KEYS` equal to the keys steps and site hooks declare writing |
+| `test_recorded_passes_read_only_declared_values` in `tests/swarm/tick_scenarios/test_characterisation.py` | Every scenario through both entry points with each site hook reading a `DeclaredBox` named `hook <site>` over the domains its site declares: no hook read refused, and no hook storing a key its writes do not declare |
+| `tests/tick/test_pass_edges.py` | Every scenario replayed through both entry points with the reader in place, so a refused read in a held step fails that scenario's case with the `UndeclaredRead`; see [The pass edges test](#the-pass-edges-test) |
+
+The feature map entry `swarm-tick-declared-reads` links this behaviour to those
+tests. The refusal was delivered by
+[pull request 10541](https://github.com/the-cloud-clockwork/agentihooks/pull/10541).
+
 #### The pass edges test
 
 `tests/tick/test_pass_edges.py` holds these declarations to what the steps do.
@@ -1559,6 +1639,7 @@ The delivered proof and limitations are recorded in
 | `test_pass_edges` names `reads pass <key> without declaring it` | The step reads that key from the box or its pass view; add `pass_domain("<key>")` to its `reads` and its writer to its `needs` |
 | `test_pass_edges` names `reads pass <key> without needing its writer [<writers>]` | No listed writer is on the reader's `needs` path; add one of them, or a step that needs it, to the reader's `needs` |
 | `test_pass_edges` names `writes pass <key> without declaring it` | The step stores that key in the pass box; add `pass_domain("<key>")` to its `writes` |
+| `UndeclaredRead: step <name> reads pass value <key> it does not declare` from a tick pass or a test | Step `<name>` read `<key>` through its reader or its box view with no `pass:<key>` or `hook:<key>` domain in its `reads` or `writes`; declare it as shown under [Undeclared pass reads](#undeclared-pass-reads). A `<name>` of `hook <site>` comes from `test_recorded_passes_read_only_declared_values`: add the domain to that site's reads in `WRAPPER_HOOK_KEYS` or `TICK_HOOK_KEYS` |
 | `<n> registered steps never ran: [<names>]` from the covering pass edges test | No scenario in `COVERING` runs the named steps; add a scenario that runs them to `COVERING`. See [The pass edges test](#the-pass-edges-test) |
 | A `test_pass_edges` case prints a thread dump at 45 seconds or its worker crashes at 60 seconds in CI | Each case replays one scenario, named in its id, and took at most 6.49 seconds when the split landed; that scenario's replay has slowed. A stack dump is one sample of where each thread was, not proof of a hang |
 | A critical step is recorded late with no error | It needs a slow lane step, so it was handed off and waited for that step while the critical deadline ran out. Drop the need or keep the needed step critical |
