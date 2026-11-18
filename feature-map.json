@@ -662,6 +662,22 @@
       ]
     },
     {
+      "id": "ci-for-loop-word-list-workflow-run-blocks",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-shell-for-rule-workflow-blocks",
+      "behaviour": "The lint gate that refuses a for loop whose word list holds a command substitution grades the bash and sh run texts of every tracked workflow under .github/workflows and every action definition file, besides tracked shell files. A step whose shell, its own or the nearest default, is neither bash nor sh, by name or by path, is skipped; a shell given by a GitHub expression is graded, since it is known only at run time, and a blank shell runs the default. GitHub expressions in run texts read as plain words so they hide no loop. Each refusal names the workflow file and the line: the loop's own line in a literal or folded block, read from the file's lines, and the first line of a plain or quoted run text. A tree without a tracked workflow file is red.",
+      "seam": "the input set of the for loop word list gate",
+      "tests": [
+        "tests/test_ci_for_substitution.py::test_the_red_workflow_fixture_reports_every_refused_loop_at_its_file_line",
+        "tests/test_ci_for_substitution.py::test_the_clean_workflow_fixture_reports_nothing",
+        "tests/test_ci_for_substitution.py::test_a_run_block_ending_the_file_without_a_newline_keeps_its_last_line",
+        "tests/test_ci_for_substitution.py::test_github_expressions_become_underscores_that_keep_their_newlines",
+        "tests/test_ci_for_substitution.py::test_tracked_workflows_and_actions_with_a_substitution_word_list_are_red",
+        "tests/test_ci_for_substitution.py::test_a_tree_without_a_tracked_shell_or_workflow_file_grades_nothing_and_is_red",
+        "tests/test_ci_for_substitution.py::test_no_workflow_or_action_in_the_repository_holds_a_refused_word_list"
+      ]
+    },
+    {
       "id": "hive-launch-pane-off-controller-hold",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2481",
@@ -4114,6 +4130,27 @@
       ]
     },
     {
+      "id": "lab-worker-deletion-cost",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-worker-deletion-cost",
+      "behaviour": "A lab worker's pod carries the controller.kubernetes.io/pod-deletion-cost annotation at the busy cost while the worker holds a lease, so a scale down of the worker ReplicaSet removes idle workers first. A lease poll that grants a job patches the pod busy and one that grants nothing patches nothing; the completion or reap of the worker's last lease clears the annotation, the end of one of several leases leaves it, and a grant that lands while the clear is in flight marks the pod busy again. The patch is one JSON merge patch on the pod in the service account's namespace; a refused or unreachable API server answers false and never fails a grant, a completion or a tick. Outside a cluster the port patches nothing.",
+      "seam": "scripts.ci_lab.leases.Leases.lease, Leases.complete and Leases.reap over fakeredis with a fake Kubernetes client, scripts.ci_lab.scheduler.Scheduler.tick through its reap pass, scripts.ci_lab.scheduler.build wiring the pods port, and scripts.ci_lab.pods.KubePods over a fake opener",
+      "tests": [
+        "tests/ci_lab/test_leases.py::test_a_granting_poll_marks_the_worker_pod_busy_and_a_poll_granting_nothing_patches_nothing",
+        "tests/ci_lab/test_leases.py::test_the_worker_pod_cost_clears_only_when_its_last_lease_completes",
+        "tests/ci_lab/test_leases.py::test_a_reaped_last_lease_clears_the_worker_pod_cost_whether_requeued_or_lost",
+        "tests/ci_lab/test_leases.py::test_a_grant_landing_while_the_last_lease_clears_its_cost_marks_the_worker_pod_busy_again",
+        "tests/ci_lab/test_scheduler.py::test_the_reap_pass_clears_the_pod_cost_of_a_worker_only_once_its_last_lease_expired",
+        "tests/ci_lab/test_scheduler.py::test_build_wires_the_service_ports_from_the_environment",
+        "tests/ci_lab/test_pods.py::test_a_cost_is_one_merge_patch_on_the_pod_with_the_service_account_token",
+        "tests/ci_lab/test_pods.py::test_a_worker_name_stays_one_path_segment_of_the_pod_url",
+        "tests/ci_lab/test_pods.py::test_a_refused_or_unreachable_api_server_answers_false",
+        "tests/ci_lab/test_pods.py::test_an_unreadable_token_answers_false_and_sends_nothing",
+        "tests/ci_lab/test_pods.py::test_outside_a_cluster_the_pods_port_patches_nothing",
+        "tests/ci_lab/test_pods.py::test_in_a_cluster_the_pods_port_patches_in_the_service_account_namespace"
+      ]
+    },
+    {
       "id": "packed-manifest-outside-files",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-packed-manifest-opened-files",
@@ -4557,6 +4594,18 @@
       "tests": [
         "tests/swarm_ledger/test_ledger_alerts.py::test_a_backend_master_claims_and_closes_the_sync_alert_its_refused_write_raised",
         "tests/swarm_ledger/test_ledger_alerts.py::test_a_refused_alert_claim_or_close_carries_the_server_reason"
+      ]
+    },
+    {
+      "id": "queue-sweep-keeps-merged-group-runs",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-merge-group-cancellations",
+      "behaviour": "A merge group Tests run's select step cancels each older merge group run of the same pull request and each older run whose queue branch is gone, but keeps and logs a run whose head commit is an ancestor of this group's base commit in the full history base checkout, because GitHub deletes a group's branch when the group merges and cancelling that run turned a green merged run's conclusion into cancelled.",
+      "seam": "The Cancel superseded and dead merge queue runs step of the Tests workflow select job",
+      "tests": [
+        "tests/test_ci_queue_supersede.py::test_a_run_whose_group_merged_is_kept_though_its_queue_branch_is_gone",
+        "tests/test_ci_queue_supersede.py::test_older_runs_of_the_same_pull_request_and_older_runs_of_gone_branches_are_cancelled",
+        "tests/test_ci_queue_supersede.py::test_the_sweep_reads_the_full_base_history_checked_out_before_it"
       ]
     },
     {
@@ -8120,6 +8169,27 @@
       ]
     },
     {
+      "id": "lab-dev-manifest-fetch",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-dev-push-publishes-dep-manifest",
+      "behaviour": "When no packed dependency manifest is stored for one of the newest commits on the first parent chain of a head's base, the CI lab scheduler fetches it before expanding test units: it finds the dev push run of the Tests workflow for that commit, downloads the run's dep-manifest-packed artifact with a token its own GitHub App scopes to actions read, and stores the packed file once at lab/manifests/<owner>--<name>/<commit>.json, so a stored commit is never fetched again. A commit without such a run or artifact, an expired artifact, an archive GitHub answers is gone and a manifest recorded for another commit fetch nothing; a refused or unanswered request or an archive without a readable packed.json drops the head with its reason.",
+      "seam": "scripts.ci_lab.manifests.fetch over a fake GitHub client, scripts.ci_lab.manifests.Actions and Fetcher over mocked requests and App token minting, scripts.ci_lab.scheduler.StoredManifests over the local object store, scripts.ci_lab.scheduler.MirrorExpander.expand over a git origin fixture and scripts.ci_lab.scheduler.Scheduler.tick over fakeredis",
+      "tests": [
+        "tests/ci_lab/test_manifests.py::test_fetch_answers_the_packed_manifest_the_dev_push_tests_run_of_the_commit_kept",
+        "tests/ci_lab/test_manifests.py::test_fetch_answers_none_for_a_commit_whose_dev_push_run_kept_no_manifest",
+        "tests/ci_lab/test_manifests.py::test_fetch_never_downloads_an_expired_artifact_and_answers_none_for_one_whose_archive_is_gone",
+        "tests/ci_lab/test_manifests.py::test_fetch_passes_over_dead_artifacts_and_another_commits_manifest_to_the_next_live_one",
+        "tests/ci_lab/test_manifests.py::test_fetch_refuses_an_archive_without_a_readable_packed_manifest",
+        "tests/ci_lab/test_manifests.py::test_the_lab_reads_the_actions_api_with_a_token_that_carries_only_actions_read",
+        "tests/ci_lab/test_manifests.py::test_actions_answers_none_for_a_gone_archive_and_names_any_other_refused_request",
+        "tests/ci_lab/test_manifests.py::test_the_fetcher_reads_each_repository_through_one_reader_of_its_own",
+        "tests/ci_lab/test_scheduler.py::test_stored_manifests_fetch_a_newest_commit_stored_nowhere_and_keep_it_by_repository_and_commit",
+        "tests/ci_lab/test_scheduler.py::test_stored_manifests_fetch_only_the_newest_commits_of_the_chain",
+        "tests/ci_lab/test_scheduler.py::test_a_head_that_needs_test_units_expands_on_the_manifest_stored_from_its_base_dev_push_run",
+        "tests/ci_lab/test_scheduler.py::test_a_head_whose_manifest_fetch_github_refuses_is_dropped_with_its_reason"
+      ]
+    },
+    {
       "id": "lab-control-routes",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/swarm-panic-and-priority",
@@ -8906,6 +8976,18 @@
       "tests": [
         "tests/ci_lab/test_sandbox.py::test_a_unit_with_read_only_trees_runs_inside_bwrap_with_each_tree_bound_read_only",
         "tests/ci_lab/test_sandbox.py::test_a_unit_with_network_and_read_only_trees_cannot_run_without_bwrap"
+      ]
+    },
+    {
+      "id": "lab-venv-build-sandbox",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2644",
+      "behaviour": "A lab worker builds a head's venv by running the worker's uv sync with the worker's Python from the head tree through the lab sandbox with network, so the environment of uv and every build hook it starts holds only the sandbox whitelist, its private folders, PATH and UV_PROJECT_ENVIRONMENT, never a pod variable; a build the sandbox ends with a nonzero code or its time limit is CannotRun, keeps its log and writes no marker, so the next call builds again.",
+      "seam": "scripts.ci_lab.venvs venv_for with its Build, the environment and outcome of the sandboxed uv sync",
+      "tests": [
+        "tests/ci_lab/test_venvs.py::test_a_build_hook_sees_only_the_whitelist_and_the_sandbox_environment",
+        "tests/ci_lab/test_venvs.py::test_a_failed_build_leaves_no_marker_and_builds_again",
+        "tests/ci_lab/test_venvs.py::test_a_build_past_its_time_limit_is_cannot_run"
       ]
     },
     {

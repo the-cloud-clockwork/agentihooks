@@ -534,13 +534,14 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           QUEUE_REF: ${{ github.event.merge_group.head_ref }}
           RUN: ${{ github.run_id }}
+          BASE: ${{ github.event.merge_group.base_sha }}
         run: |
           [[ "$QUEUE_REF" =~ ^refs/heads/(gh-readonly-queue/.+/pr-[0-9]+-)[0-9a-f]+$ ]] || { echo "::warning::Unrecognised merge queue ref $QUEUE_REF"; exit 0; }
           prefix="${BASH_REMATCH[1]}"
           runs="repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs"
           listed=""
           for status in queued in_progress waiting pending requested; do
-            if page="$(gh api --paginate "$runs?event=merge_group&status=$status&per_page=100" --jq '.workflow_runs[] | "\(.id) \(.head_branch)"')"; then
+            if page="$(gh api --paginate "$runs?event=merge_group&status=$status&per_page=100" --jq '.workflow_runs[] | "\(.id) \(.head_branch) \(.head_sha)"')"; then
               listed+="$page"$'\n'
             else
               echo "::warning::Cannot list $status merge queue runs"
@@ -552,11 +553,15 @@ jobs:
           else
             echo "::warning::Cannot read the live queue branches; only older runs of this pull request are cancelled"
           fi
-          while read -r id branch; do
+          while read -r id branch sha; do
             [[ -n "$id" && "$id" -lt "$RUN" ]] || continue
             if [[ "$branch" == "$prefix"* && "${branch#"$prefix"}" =~ ^[0-9a-f]+$ ]]; then
               reason="superseded by run $RUN"
             elif [[ -n "$live" ]] && ! grep -qxF "refs/heads/$branch" <<< "$live"; then
+              if git -C "$GITHUB_WORKSPACE/provenance-grader" merge-base --is-ancestor "$sha" "$BASE" 2>/dev/null; then
+                echo "Kept queue run $id ($branch): its head is in this group's base history"
+                continue
+              fi
               reason="its queue branch is gone"
             else
               continue
@@ -2138,7 +2143,7 @@ jobs:
         timeout-minutes: 3
         run: |
           pid=$(cat "$RUNNER_TEMP/nats-bg.pid")
-          for _ in $(seq 150); do [[ -f "$RUNNER_TEMP/nats-bg.status" ]] || ! kill -0 "$pid" 2>/dev/null && break; sleep 1; done
+          for _ in {1..150}; do [[ -f "$RUNNER_TEMP/nats-bg.status" ]] || ! kill -0 "$pid" 2>/dev/null && break; sleep 1; done
           cat "$RUNNER_TEMP/nats-bg.log"
           [[ "$(cat "$RUNNER_TEMP/nats-bg.status")" == 0 ]]
           echo "$RUNNER_TEMP/nats-bg" >> "$GITHUB_PATH"
@@ -3264,13 +3269,13 @@ jobs:
           trap 'docker rm -f "$CLICKHOUSE" >/dev/null 2>&1 || true' EXIT
           [[ -f .antoncore/scripts/swarm_dashboard_columns.py ]] || { echo "::error::The antoncore dashboard column checker could not be checked out."; exit 1; }
           echo "$ANTONCORE_REVISION"
-          for _ in $(seq 180); do
+          for _ in {1..180}; do
             [[ -s "$RUNNER_TEMP/columns-venv.status" && -s "$RUNNER_TEMP/clickhouse.status" ]] && break
             sleep 1
           done
           [[ "$(cat "$RUNNER_TEMP/columns-venv.status" 2>/dev/null)" == 0 ]] || { cat "$RUNNER_TEMP/columns-venv.log" || true; echo "::error::The dashboard checker environment did not install."; exit 1; }
           [[ "$(cat "$RUNNER_TEMP/clickhouse.status" 2>/dev/null)" == 0 ]] || { cat "$RUNNER_TEMP/clickhouse.log" || true; echo "::error::The ClickHouse container did not start."; exit 1; }
-          for _ in $(seq 60); do
+          for _ in {1..60}; do
             docker exec "$CLICKHOUSE" clickhouse-client -q 'SELECT 1' >/dev/null 2>&1 && break
             sleep 1
           done
