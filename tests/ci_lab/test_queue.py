@@ -59,8 +59,10 @@ def test_enqueue_stores_the_base_and_grader_revision_each_job_reads(jobs: queue.
     assert (found(jobs, "h2:test:c").base, found(jobs, "h2:test:c").grader) == ("", "")
 
 
-def take(jobs: queue.Queue, job: str, worker: str = "w1", token: str = "tok", expires_ms: int = 100) -> bool:
-    return jobs.claim(found(jobs, job), worker, token, expires_ms)
+def take(
+    jobs: queue.Queue, job: str, worker: str = "w1", token: str = "tok", expires_ms: int = 100, leased_ms: int = 0
+) -> bool:
+    return jobs.claim(found(jobs, job), worker, token, expires_ms, leased_ms)
 
 
 def test_enqueue_skips_jobs_already_known(jobs: queue.Queue) -> None:
@@ -100,8 +102,8 @@ def test_claim_is_won_once(jobs: queue.Queue) -> None:
     jobs.enqueue([unit("a")], "h1", {})
     record = found(jobs, "h1:test:a")
 
-    assert jobs.claim(record, "w1", "t1", 100) is True
-    assert jobs.claim(record, "w2", "t2", 100) is False
+    assert jobs.claim(record, "w1", "t1", 100, 0) is True
+    assert jobs.claim(record, "w2", "t2", 100, 0) is False
     assert jobs.pending() == []
     assert (found(jobs, "h1:test:a").worker, jobs.token("h1:test:a")) == ("w1", "t1")
 
@@ -117,6 +119,38 @@ def test_claim_records_the_lease(jobs: queue.Queue) -> None:
     assert jobs.members("h1", "pending") == {"h1:test:b"}
     assert jobs.expired(99) == []
     assert jobs.expired(100) == ["h1:test:a"]
+
+
+@pytest.mark.feature("lab-scheduler-metrics")
+def test_claim_records_when_the_lease_started_and_an_older_lease_reads_zero(jobs: queue.Queue, client) -> None:
+    jobs.enqueue([unit("a"), unit("b")], "h1", {})
+    assert found(jobs, "h1:test:a").leased_ms == 0
+    assert take(jobs, "h1:test:a", expires_ms=1100, leased_ms=1000)
+    assert found(jobs, "h1:test:a").leased_ms == 1000
+    assert take(jobs, "h1:test:b", expires_ms=1100, leased_ms=1000)
+    client.hdel("agentihooks-ci:queue:job:h1:test:b", "leased_ms")
+    assert found(jobs, "h1:test:b").leased_ms == 0
+
+
+@pytest.mark.feature("lab-scheduler-metrics")
+def test_tally_counts_each_finished_attempt_of_a_job_once(jobs: queue.Queue) -> None:
+    jobs.enqueue([unit("a"), unit("b")], "h1", {})
+    assert take(jobs, "h1:test:a")
+    assert jobs.finish(found(jobs, "h1:test:a"), "tok", "crash")
+    first = found(jobs, "h1:test:a")
+    assert jobs.tally(first) is True
+    assert jobs.tally(first) is False
+    assert jobs.retry(first)
+    assert take(jobs, "h1:test:a", "w2", "t2")
+    assert jobs.finish(found(jobs, "h1:test:a"), "t2", "passed")
+    second = found(jobs, "h1:test:a")
+    assert second.attempts == 1
+    assert jobs.tally(second) is True
+    assert jobs.tally(second) is False
+    assert jobs.tally(first) is False
+    assert take(jobs, "h1:test:b")
+    assert jobs.finish(found(jobs, "h1:test:b"), "tok", "passed")
+    assert jobs.tally(found(jobs, "h1:test:b")) is True
 
 
 def test_expired_includes_a_lease_at_time_zero(jobs: queue.Queue) -> None:
@@ -249,9 +283,9 @@ def test_missing_job_reads_none(jobs: queue.Queue) -> None:
 def test_leased_lists_each_leased_job_and_offers_keep_each_workers_latest_free_slots(jobs: queue.Queue) -> None:
     ids = jobs.enqueue([unit("a"), unit("b"), unit("c")], "h1", {})
     assert jobs.leased() == [] and jobs.offers(0) == {}
-    assert jobs.claim(found(jobs, ids[2]), "w1", "t1", 900)
-    assert jobs.claim(found(jobs, ids[0]), "w1", "t2", 500)
-    assert jobs.claim(found(jobs, ids[1]), "w2", "t3", 700)
+    assert jobs.claim(found(jobs, ids[2]), "w1", "t1", 900, 0)
+    assert jobs.claim(found(jobs, ids[0]), "w1", "t2", 500, 0)
+    assert jobs.claim(found(jobs, ids[1]), "w2", "t3", 700, 0)
     assert jobs.leased() == [ids[0], ids[1], ids[2]]
     assert jobs.finish(found(jobs, ids[0]), "t2", "passed")
     assert jobs.leased() == [ids[1], ids[2]]

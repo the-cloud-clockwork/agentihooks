@@ -55,7 +55,7 @@ def test_the_baked_venv_lives_where_the_image_puts_it() -> None:
 
 def test_the_baked_venv_serves_a_matching_digest(tmp_path: Path, uv: Uv) -> None:
     baked = _baked(tmp_path, DIGEST)
-    assert venvs.venv_for(DIGEST, tmp_path / "tree", tmp_path / "venvs", baked) == baked
+    assert venvs.venv_for(DIGEST, tmp_path / "tree", tmp_path / "venvs", baked) == (baked, False)
     assert uv.calls == []
     assert not (tmp_path / "venvs").exists()
 
@@ -64,18 +64,19 @@ def test_the_baked_venv_serves_a_matching_digest(tmp_path: Path, uv: Uv) -> None
 def test_a_digest_the_baked_venv_lacks_builds_its_own_venv(tmp_path: Path, uv: Uv, baked_digest: str | None) -> None:
     venv = tmp_path / "pod" / "venvs" / DIGEST
     built = venvs.venv_for(DIGEST, tmp_path / "tree", tmp_path / "pod" / "venvs", _baked(tmp_path, baked_digest))
-    assert built == venv
+    assert built == (venv, True)
     assert uv.calls == [_build(tmp_path / "tree", venv)]
     assert (venv / "lockfile.sha256").read_text() == f"{DIGEST}\n"
 
 
 def test_a_built_venv_is_reused_for_its_digest_only(tmp_path: Path, uv: Uv) -> None:
     baked = _baked(tmp_path, None)
-    first = venvs.venv_for(DIGEST, tmp_path / "tree", tmp_path / "venvs", baked)
-    again = venvs.venv_for(DIGEST, tmp_path / "other", tmp_path / "venvs", baked)
-    other = venvs.venv_for(OTHER, tmp_path / "other", tmp_path / "venvs", baked)
+    first, built = venvs.venv_for(DIGEST, tmp_path / "tree", tmp_path / "venvs", baked)
+    again, rebuilt = venvs.venv_for(DIGEST, tmp_path / "other", tmp_path / "venvs", baked)
+    other, fresh = venvs.venv_for(OTHER, tmp_path / "other", tmp_path / "venvs", baked)
     assert first == again == tmp_path / "venvs" / DIGEST
     assert other == tmp_path / "venvs" / OTHER
+    assert (built, rebuilt, fresh) == (True, False, True)
     assert uv.calls == [_build(tmp_path / "tree", first), _build(tmp_path / "other", other)]
 
 
@@ -89,7 +90,7 @@ def test_a_failed_build_leaves_no_marker_and_builds_again(
         venvs.venv_for(DIGEST, tmp_path / "tree", tmp_path / "venvs", baked)
     assert not (tmp_path / "venvs" / DIGEST / "lockfile.sha256").exists()
     monkeypatch.setattr(subprocess, "run", uv)
-    assert venvs.venv_for(DIGEST, tmp_path / "tree", tmp_path / "venvs", baked) == tmp_path / "venvs" / DIGEST
+    assert venvs.venv_for(DIGEST, tmp_path / "tree", tmp_path / "venvs", baked) == (tmp_path / "venvs" / DIGEST, True)
     assert failing.calls == uv.calls == [_build(tmp_path / "tree", tmp_path / "venvs" / DIGEST)]
 
 
@@ -103,7 +104,7 @@ def test_a_second_caller_waits_for_the_running_build(tmp_path: Path, uv: Uv, mon
 
     monkeypatch.setattr(subprocess, "run", slow)
     baked = _baked(tmp_path, None)
-    built: list[Path] = []
+    built: list[tuple[Path, bool]] = []
 
     def call() -> None:
         built.append(venvs.venv_for(DIGEST, tmp_path / "tree", tmp_path / "venvs", baked))
@@ -117,5 +118,5 @@ def test_a_second_caller_waits_for_the_running_build(tmp_path: Path, uv: Uv, mon
     finish.set()
     first.join(10)
     second.join(10)
-    assert built == [tmp_path / "venvs" / DIGEST] * 2
+    assert sorted(built) == [(tmp_path / "venvs" / DIGEST, False), (tmp_path / "venvs" / DIGEST, True)]
     assert uv.calls == [_build(tmp_path / "tree", tmp_path / "venvs" / DIGEST)]
