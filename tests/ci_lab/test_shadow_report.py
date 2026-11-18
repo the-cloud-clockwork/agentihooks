@@ -11,7 +11,6 @@ import pytest
 import scripts.ci_lab.__main__ as cli
 from scripts.ci_lab import shadow, shadow_report
 
-FEATURE = "lab-shadow-acceptance-report"
 HEAD = "a" * 40
 OTHER = "b" * 40
 THIRD = "c" * 40
@@ -60,7 +59,7 @@ def graded(
     return shadow_report.Head(sha, shadow_report.Verdict(actions, at(actions_minute)), verdict)
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-shadow-acceptance-report")
 def test_a_lab_verdict_that_disagrees_with_actions_is_a_mismatch_that_fails_the_rule() -> None:
     runs = [job("unit (3.12, 1)", "failure", 10), job("unit (3.12, 2)", "timed_out", 12), lab("tests", "success", 5)]
     found = shadow_report.head(HEAD, runs, "tests", NONE)
@@ -78,7 +77,7 @@ def test_a_lab_verdict_that_disagrees_with_actions_is_a_mismatch_that_fails_the_
     assert shadow_report.mismatch(lab_failed) is True
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-shadow-acceptance-report")
 def test_a_head_without_a_lab_verdict_counts_against_presence() -> None:
     actions = [job("unit (3.12, 1)")]
     assert shadow_report.lab(actions, "tests") is None
@@ -95,6 +94,7 @@ def test_a_head_without_a_lab_verdict_counts_against_presence() -> None:
     assert shadow_report.rule(50) == shadow_report.Rule(50, 48, 45)
     assert shadow_report.rule(10) == shadow_report.Rule(10, 10, 9)
     assert shadow_report.rule(1) == shadow_report.Rule(1, 1, 1)
+    assert shadow_report.rule(5) == shadow_report.Rule(5, 5, 5)
     two_missing = [graded(HEAD, "pass", None)] * 2 + [graded(HEAD, "pass", "pass")] * 48
     assert shadow_report.tally(two_missing) == shadow_report.Tally(50, 48, 0, 48)
     assert shadow_report.holds(shadow_report.tally(two_missing), shadow_report.rule(50)) is True
@@ -103,7 +103,7 @@ def test_a_head_without_a_lab_verdict_counts_against_presence() -> None:
     assert shadow_report.holds(shadow_report.tally(two_missing[1:]), shadow_report.rule(50)) is False
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-shadow-acceptance-report")
 def test_a_cancelled_actions_job_takes_its_head_out_of_the_window() -> None:
     assert shadow_report.actions([job("unit (3.12, 1)"), job("unit (3.12, 2)", "cancelled")], "tests", NONE) is None
     assert (
@@ -141,7 +141,7 @@ def test_a_cancelled_actions_job_takes_its_head_out_of_the_window() -> None:
     assert shadow_report.collect(fetch, REPOSITORY, "pull_request", "tests", NONE, 1) == [graded(OTHER, "fail", "pass")]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-shadow-acceptance-report")
 def test_a_lab_verdict_completing_after_the_actions_jobs_is_late() -> None:
     runs = [job("unit (3.12, 1)", minute=9), job("unit (3.12, 2)", minute=12)]
     late = shadow_report.head(HEAD, [*runs, lab(minute=15)], "tests", NONE)
@@ -158,7 +158,7 @@ def test_a_lab_verdict_completing_after_the_actions_jobs_is_late() -> None:
     assert shadow_report.holds(shadow_report.tally(too_late), window) is False
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-shadow-acceptance-report")
 def test_a_lost_runners_unit_job_counts_by_its_rerun() -> None:
     assert shadow_report.rerun("unit (3.12, 1)") == "unit rerun (3.12, 1)"
     assert shadow_report.rerun("unit") is None
@@ -176,7 +176,7 @@ def test_a_lost_runners_unit_job_counts_by_its_rerun() -> None:
     assert shadow_report.actions(unrelated, "tests", NONE) == shadow_report.Verdict("fail", at(14))
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-shadow-acceptance-report")
 def test_the_table_prints_a_row_per_head_and_the_rule_counts() -> None:
     heads = [
         graded(HEAD, "pass", "pass", 12, 11),
@@ -207,7 +207,7 @@ def answer(stdout: dict[str, Any]) -> subprocess.CompletedProcess[str]:
     return subprocess.CompletedProcess([], 0, stdout=json.dumps(stdout))
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-shadow-acceptance-report")
 def test_the_report_command_reads_live_heads_through_the_github_api(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -251,7 +251,7 @@ def test_the_report_command_reads_live_heads_through_the_github_api(
     assert [args for args, _ in calls] == [first_page, first_checks, second_checks, second_page]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-shadow-acceptance-report")
 def test_the_report_command_names_its_repository_and_refuses_an_empty_window(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -262,11 +262,16 @@ def test_the_report_command_names_its_repository_and_refuses_an_empty_window(
         return {"workflow_runs": []}
 
     monkeypatch.setattr(shadow, "static_jobs", lambda root: NONE)
-    assert shadow_report.main(["--gate", "tests"], {}, fetch) == 1
-    assert asked == [
+    default = (
         "repos/the-cloud-clockwork/agentihooks/actions/workflows/test.yml/runs?event=pull_request&status=completed"
         "&per_page=100&page=1"
-    ]
+    )
+    assert shadow_report.main(["--gate", "tests"], {"GITHUB_REPOSITORY": ""}, fetch) == 1
+    assert asked == [default]
+    capsys.readouterr()
+    asked.clear()
+    assert shadow_report.main(["--gate", "tests"], {}, fetch) == 1
+    assert asked == [default]
     assert capsys.readouterr().out.endswith(
         "heads 0 of 50\nlab verdict present 0 of at least 48\nmismatches 0 of at most 0\n"
         "lab verdict first 0 of at least 45\nrule fails\n"
@@ -282,7 +287,7 @@ def test_the_report_command_names_its_repository_and_refuses_an_empty_window(
     assert gateless.value.code == 2
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-shadow-acceptance-report")
 def test_only_a_report_with_a_gate_is_the_acceptance_rule_report() -> None:
     assert shadow_report.claims(["report", "--gate", "lint"]) is True
     assert shadow_report.claims(["report", "--heads", "5", "--gate=lint"]) is True
@@ -292,7 +297,7 @@ def test_only_a_report_with_a_gate_is_the_acceptance_rule_report() -> None:
     assert shadow_report.claims([]) is False
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-shadow-acceptance-report")
 def test_a_paged_list_stops_at_a_short_page_or_after_ten_pages() -> None:
     asked: list[str] = []
 
