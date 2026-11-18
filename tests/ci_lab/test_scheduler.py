@@ -24,6 +24,7 @@ from scripts.ci_lab.delivery import CLASSES
 from scripts.ci_lab.digests import GradeInputs, StaticInputs, Toolchain, grade_key, static_key
 from scripts.ci_lab.intake import GradeRequest
 from scripts.ci_lab.leases import Grant, Leases
+from scripts.ci_lab.manifests import Actions, Fetcher, FetchRefused
 from scripts.ci_lab.objects import LocalObjects, manifest_folder, unit_path, upload_path
 from scripts.ci_lab.outcomes import CRASH
 from scripts.ci_lab.retry import Policy
@@ -810,6 +811,22 @@ def test_a_head_whose_grader_delivery_breaks_its_schema_is_dropped_with_its_reas
     assert run.grades() == []
 
 
+@pytest.mark.feature("lab-dev-manifest-fetch")
+def test_a_head_whose_manifest_fetch_github_refuses_is_dropped_with_its_reason(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = lab({})
+
+    def refused(request: GradeRequest) -> scheduler.Plan:
+        raise FetchRefused(f"GET actions/workflows/test.yml/runs answered 502 for {request.base}")
+
+    monkeypatch.setattr(run.lab.expander, "expand", refused)
+    run.push(HEAD_A)
+    assert run.tick(1000)[-1] == f"cannot expand {HEAD_A}: GET actions/workflows/test.yml/runs answered 502 for {BASE}"
+    assert run.lab.client.hgetall(scheduler.WAITING) == {}
+    assert run.grades() == []
+
+
 def test_a_live_run_without_a_grade_is_forgotten(lab: Callable[..., Run]) -> None:
     run = lab({})
     run.lab.client.sadd(scheduler.LIVE, "grade-v1-gone")
@@ -1476,6 +1493,25 @@ def test_a_merge_group_head_refuses_an_entry_limit_the_delivery_schema_refuses(t
         Port(SUITE_MANIFEST).expander(tmp_path).expand(suite.request(Priority.QUEUE))
 
 
+def unfetched(slug: str, commit: str) -> bytes | None:
+    return None
+
+
+def packed_file(manifest: dict[str, Any], commit: str) -> bytes:
+    found: dict[str, Any] = dep_manifest.pack({**manifest, "commit": commit})
+    return json.dumps(found, separators=(",", ":")).encode()
+
+
+@dataclass
+class Fetches:
+    found: dict[str, bytes]
+    asked: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
+
+    def __call__(self, slug: str, commit: str) -> bytes | None:
+        self.asked.append((slug, commit))
+        return self.found.get(commit)
+
+
 @pytest.mark.feature("lab-scheduler-test-units")
 def test_stored_manifests_read_the_packed_manifest_of_the_nearest_stored_ancestor(tmp_path: Path) -> None:
     objects = LocalObjects(tmp_path / "objects")
@@ -1483,11 +1519,60 @@ def test_stored_manifests_read_the_packed_manifest_of_the_nearest_stored_ancesto
         packed = dep_manifest.pack({**STORED_MANIFEST, "commit": commit})
         objects.write_once(f"{manifest_folder(SLUG)}{commit}.json", json.dumps(packed).encode())
     objects.write_once(f"{manifest_folder('other/repo')}head.json", b"{}")
-    stored = scheduler.StoredManifests(objects)
+    stored = scheduler.StoredManifests(objects, unfetched)
     assert stored(REPO, ["head", "newer", "older"]) == {**STORED_MANIFEST, "commit": "newer"}
     assert stored(REPO, ["head", "older"]) == {**STORED_MANIFEST, "commit": "older"}
     assert stored(REPO, ["head"]) is None
     assert manifest_folder(SLUG) == "lab/manifests/the-cloud-clockwork--agentihooks/"
+
+
+@pytest.mark.feature("lab-dev-manifest-fetch")
+def test_stored_manifests_fetch_a_newest_commit_stored_nowhere_and_keep_it_by_repository_and_commit(
+    tmp_path: Path,
+) -> None:
+    objects = LocalObjects(tmp_path / "objects")
+    objects.write_once(f"{manifest_folder(SLUG)}older.json", packed_file(STORED_MANIFEST, "older"))
+    fetches = Fetches({"newer": packed_file(STORED_MANIFEST, "newer")})
+    stored = scheduler.StoredManifests(objects, fetches)
+    assert stored(REPO, ["head", "newer", "older"]) == {**STORED_MANIFEST, "commit": "newer"}
+    assert fetches.asked == [(SLUG, "head"), (SLUG, "newer")]
+    folder = "lab/manifests/the-cloud-clockwork--agentihooks/"
+    assert objects.keys("lab/") == [f"{folder}newer.json", f"{folder}older.json"]
+    assert objects.read(f"{folder}newer.json") == packed_file(STORED_MANIFEST, "newer")
+    assert stored(REPO, ["newer", "older"]) == {**STORED_MANIFEST, "commit": "newer"}
+    assert stored(REPO, ["older"]) == {**STORED_MANIFEST, "commit": "older"}
+    assert fetches.asked == [(SLUG, "head"), (SLUG, "newer")]
+
+
+@pytest.mark.feature("lab-dev-manifest-fetch")
+def test_stored_manifests_fetch_only_the_newest_commits_of_the_chain(tmp_path: Path) -> None:
+    objects = LocalObjects(tmp_path / "objects")
+    commits = [f"commit-{index}" for index in range(scheduler.MANIFEST_DEPTH + 1)]
+    fetches = Fetches({commits[-1]: packed_file(STORED_MANIFEST, commits[-1])})
+    assert scheduler.StoredManifests(objects, fetches)(REPO, commits) is None
+    assert fetches.asked == [(SLUG, commit) for commit in commits[:-1]]
+    assert objects.keys("lab/") == []
+
+
+@pytest.mark.feature("lab-dev-manifest-fetch")
+@pytest.mark.usefixtures("staticless")
+def test_a_head_that_needs_test_units_expands_on_the_manifest_stored_from_its_base_dev_push_run(
+    tmp_path: Path,
+) -> None:
+    suite = _suite(tmp_path, DELIVERY["lab"])
+    objects = LocalObjects(tmp_path / "objects")
+    fetches = Fetches({suite.base: packed_file(STORED_MANIFEST, suite.base)})
+    node = tmp_path / "node"
+    _git(tmp_path, "init", "-q", "--bare", str(node))
+    toolchain = Toolchain("3.12", {}, "", "", "image", {})
+    port = Port()
+    stored = scheduler.StoredManifests(objects, fetches)
+    expander = scheduler.MirrorExpander(node, tmp_path / "stores", toolchain, stored, port.verdicts)
+    found = expander.expand(suite.request(Priority.PROMOTION))
+    assert [batch.members for batch in found.gates["unit"]] == [(FIRST_TEST,)]
+    slug = str(suite.repo).removeprefix("/")
+    assert fetches.asked == [(slug, suite.base)]
+    assert objects.read(f"{manifest_folder(slug)}{suite.base}.json") == packed_file(STORED_MANIFEST, suite.base)
 
 
 @pytest.mark.feature("lab-control-routes")
@@ -1541,6 +1626,8 @@ def test_build_wires_the_service_ports_from_the_environment(tmp_path: Path, monk
     assert (expander.node, expander.root) == (tmp_path / "node", tmp_path / "stores")
     assert expander.toolchain == Toolchain(sys.version.split()[0], {}, "", "", "image", {})
     assert isinstance(expander.manifests, scheduler.StoredManifests) and expander.manifests.objects is objects
+    fetch = expander.manifests.fetch
+    assert isinstance(fetch, Fetcher) and fetch.reader is Actions and fetch.readers == {}
     stored = Verdict("static", key("static", 9), True, False, 1.0)
     Store(client, objects).put(stored, {}, b"")
     assert expander.verdicts("static", stored.key) == stored
