@@ -226,4 +226,11 @@ def test_leased_lists_each_leased_job_and_offers_keep_each_workers_latest_free_s
     jobs.offer("w1", 1, 1200)
     assert jobs.offers(1100) == {"w1": (1, 1200), "w2": (0, 1100)}
     assert jobs.offers(1101) == {"w1": (1, 1200)}
+    assert jobs.offers(0) == {"w1": (1, 1200), "w2": (0, 1100)}
+    assert jobs.prune(1100) == 0
+    assert jobs.prune(1101) == 1
     assert jobs.offers(0) == {"w1": (1, 1200)}
+    jobs.offer("w3", 2, 900)
+    jobs.offer("w3", 5, 1300)
+    assert jobs.prune(1201) == 1
+    assert jobs.offers(0) == {"w3": (5, 1300)}

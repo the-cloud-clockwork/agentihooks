@@ -495,7 +495,9 @@ class Scheduler:
             busy += job.requirement.slots
             if job.id in classes:
                 running[CLASSES[classes[job.id]]] += 1
-        offered = sum(free for free, _ in self.queue.offers(now_ms - READY_MS).values())
+        ready = now_ms - READY_MS
+        self.queue.prune(ready)
+        offered = sum(free for free, _ in self.queue.offers(ready).values())
         return Load(
             pending,
             dict(running),
