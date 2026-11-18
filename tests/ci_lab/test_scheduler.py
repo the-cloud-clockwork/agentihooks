@@ -20,7 +20,7 @@ from scripts.ci_lab import budget, control, delivery, evidence, expand_tests, le
 from scripts.ci_lab.capacity import Load
 from scripts.ci_lab.checks import Output
 from scripts.ci_lab.delivery import CLASSES
-from scripts.ci_lab.digests import GradeInputs, StaticInputs, Toolchain, grade_key, static_key
+from scripts.ci_lab.digests import GradeInputs, StaticInputs, Toolchain, digest, grade_key, static_key
 from scripts.ci_lab.intake import GradeRequest
 from scripts.ci_lab.leases import Grant, Leases
 from scripts.ci_lab.objects import LocalObjects, manifest_folder, unit_path, upload_path
@@ -1444,11 +1444,11 @@ def test_a_test_verdict_outside_list_reaches_the_stored_records_and_the_followin
     lab: Callable[..., Run],
 ) -> None:
     members = (OTHER_TEST, SECOND_TEST, "tests/test_gone.py::test_gone")
-    first, again, plain = (
+    first, twin, failed, plain = (
         Unit(expand_tests.KIND, key(expand_tests.KIND, number), tests)
-        for number, tests in ((1, members), (2, members), (3, (FIRST_TEST,)))
+        for number, tests in ((1, members), (2, members), (3, (FIRST_TEST,)), (4, (FIRST_TEST,)))
     )
-    run = lab({HEAD_A: plan({"unit": (first, again, plain)})})
+    run = lab({HEAD_A: plan({"unit": (first, twin, failed, plain)})})
     folder = manifest_folder(SLUG)
     packed = dep_manifest.pack(copy.deepcopy(SUITE_MANIFEST))
     run.lab.objects.write_once(f"{folder}dev.json", json.dumps(packed).encode())
@@ -1456,9 +1456,10 @@ def test_a_test_verdict_outside_list_reaches_the_stored_records_and_the_followin
     before = stored(REPO, ["dev"])
     run.push(HEAD_A)
     run.tick(1000)
-    grants = {grant.unit: grant for grant in run.lease(slots=3)}
+    grants = {grant.unit: grant for grant in run.lease(slots=4)}
     run.finish(grants[first], "passed", {"seconds": 1.0, "outside": ["docs/p.md", "docs/c.md"]})
-    run.finish(grants[again], "failed", {"seconds": 1.0, "outside": ["docs/c.md", "docs/p.md"]})
+    run.finish(grants[twin], "passed", {"seconds": 1.0, "outside": ["docs/c.md", "docs/p.md"]})
+    run.finish(grants[failed], "failed", {"seconds": 1.0, "outside": ["docs/c.md"]})
     run.finish(grants[plain], "passed", {"seconds": 1.0, "outside": []})
     run.tick(1100)
     after = stored(REPO, ["dev"])
@@ -1468,15 +1469,16 @@ def test_a_test_verdict_outside_list_reaches_the_stored_records_and_the_followin
     assert after == {
         **SUITE_MANIFEST,
         "tests": {
-            FIRST_TEST: records[FIRST_TEST],
+            FIRST_TEST: {**records[FIRST_TEST], "outside": ["docs/c.md"]},
             OTHER_TEST: {**records[OTHER_TEST], "outside": both},
             SECOND_TEST: {**records[SECOND_TEST], "outside": both},
         },
     }
-    assert [path.removeprefix(folder).partition("/")[0] for path in run.lab.objects.keys(folder)] == [
-        "dev.json",
-        "outside",
+    notes = [
+        f"{folder}outside/{digest({'tests': list(tests), 'outside': files})}.json"
+        for tests, files in ((members, both), ((FIRST_TEST,), ["docs/c.md"]))
     ]
+    assert run.lab.objects.keys(folder) == sorted([f"{folder}dev.json", *notes])
     assert _batch_keys(before, b"p\n") == _batch_keys(before, b"q\n")
     assert _batch_keys(after, b"p\n")[(FIRST_TEST, OTHER_TEST)] != _batch_keys(after, b"q\n")[(FIRST_TEST, OTHER_TEST)]
 
