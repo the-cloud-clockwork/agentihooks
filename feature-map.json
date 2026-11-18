@@ -4200,6 +4200,17 @@
       ]
     },
     {
+      "id": "merge-priority-moves-waiting-entries-at-once",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2604",
+      "behaviour": "A merge priority request moves the waiting dev queue entries ahead of the pull request behind it at once, even while the head merge group still tests, so the pull request joins the next group; running entries stay in place and no deferred record is stored.",
+      "seam": "scripts.swarm.queue_priority.request through agentihooks swarm merge priority",
+      "tests": [
+        "tests/swarm/test_queue_priority.py::test_priority_moves_waiting_entries_at_once_while_the_head_group_tests",
+        "tests/swarm/test_merge_queue_priority.py::test_master_priority_moves_waiting_entries_without_cancelling_running_head"
+      ]
+    },
+    {
       "id": "launch-model-suits-harness",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2562",
