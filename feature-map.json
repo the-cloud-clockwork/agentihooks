@@ -8405,6 +8405,16 @@
       ]
     },
     {
+      "id": "lab-static-read-only-trees",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-worker-readonly-trees",
+      "behaviour": "The lab's static gate executor builds each gate step's sandbox with the grader tree and the base tree as its read only trees, so the step runs inside bubblewrap with both trees bound read only after the root bind and cannot write into the grader that grades it, while the head tree stays writable.",
+      "seam": "scripts.ci_lab.run_static run, the Sandbox it builds for the gate step and the bubblewrap arguments the step runs under",
+      "tests": [
+        "tests/ci_lab/test_run_static.py::test_the_step_runs_with_the_grader_and_base_trees_bound_read_only"
+      ]
+    },
+    {
       "id": "lab-static-step-env",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-step-env",
