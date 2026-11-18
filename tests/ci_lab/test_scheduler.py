@@ -1441,6 +1441,13 @@ class CountingRelay:
         return [f"relayed {self.ticks}"]
 
 
+class SilentRelay:
+    """A relay stand in with nothing to relay."""
+
+    def tick(self) -> list[str]:
+        return []
+
+
 @dataclass
 class RelayBuilds:
     """A relay build stand in recording the environment, scheduler and consumer of each build."""
@@ -1467,9 +1474,9 @@ def test_serve_runs_the_given_passes_and_prints_each_action(
         slept.append(seconds)
         assert len(slept) <= 2
 
-    assert scheduler.serve(run.engine, CountingRelay(Stdout()), 0.25, 2, lambda: 2.5, sleep) == 0
+    assert scheduler.serve(run.engine, SilentRelay(), 0.25, 2, lambda: 2.5, sleep) == 0
     assert slept == [0.25, 0.25]
-    assert out.events[:3] == [f"received {HEAD_A} on feature", "\n", FLUSHED]
+    assert out.events == [f"received {HEAD_A} on feature", "\n", FLUSHED]
     assert json.loads(run.lab.client.hget(scheduler.WAITING, f"{REPO}|feature|3"))["since"] == 2500
 
 
