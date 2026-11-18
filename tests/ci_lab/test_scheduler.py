@@ -8,6 +8,7 @@ from typing import Any
 
 import jsonschema
 import pytest
+import yaml
 
 from scripts.ci_lab import __main__ as cli
 from scripts.ci_lab import control, lease_api, queue, scheduler
@@ -338,6 +339,8 @@ def test_framed_grades_fold_green_unless_a_lab_gate_fails(lab: Callable[..., Run
     run.tick(1000)
     assert run.grade(HEAD_A).conclusion == "success"
     assert run.grade(HEAD_B).conclusion == "failure"
+    assert run.lab.client.get(f"{scheduler.TREES}{REPO}|{TREE}") == run.grade(HEAD_A).run
+    assert run.lab.client.get(f"{scheduler.TREES}{REPO}|{OTHER_TREE}") is None
 
 
 def test_a_head_waits_out_its_lanes_quiet_window_and_a_newer_head_restarts_it(lab: Callable[..., Run]) -> None:
@@ -498,9 +501,9 @@ def test_a_dev_push_grade_reuses_the_merge_group_grade_of_the_same_tree(lab: Cal
     queued, pushed, other = unit(1), unit(2), unit(3)
     run = lab(
         {
-            HEAD_A: plan({"lint": (queued,)}),
-            HEAD_B: plan({"lint": (pushed,)}),
-            BASE: plan({"lint": (other,)}, tree=OTHER_TREE),
+            HEAD_A: scheduler.frame(Priority.QUEUE, TREE, BASE, {"unit": (queued,)}),
+            HEAD_B: plan({"unit": (pushed,)}),
+            BASE: plan({"unit": (other,)}, tree=OTHER_TREE),
         }
     )
     run.push(HEAD_A, lane="gh-readonly-queue/dev/pr-1", event="merge_group", action="checks_requested")
@@ -508,12 +511,13 @@ def test_a_dev_push_grade_reuses_the_merge_group_grade_of_the_same_tree(lab: Cal
     run.finish(run.lease()[0], "passed", {})
     run.tick(1100)
     queue = run.grade(HEAD_A)
+    assert queue.conclusion == "success"
     assert run.lab.client.get(f"{scheduler.TREES}{REPO}|{TREE}") == queue.run
     run.push(HEAD_B, lane="dev")
     run.tick(1200)
     pushed_grade = run.grade(HEAD_B)
     assert run.engine.queue.pending() == []
-    assert pushed_grade.gates == {"lint": [ref(queued)]}
+    assert pushed_grade.gates == {"unit": [ref(queued)]}
     assert pushed_grade.conclusion == "success"
     assert run.lab.client.get(f"{scheduler.TREES}{REPO}|{TREE}") == queue.run
     run.push(BASE, lane="dev")
@@ -543,11 +547,14 @@ def test_a_framed_push_grade_carries_the_unit_suite_its_merge_group_grade_graded
 
 def test_a_merge_group_grade_of_a_tree_serves_no_other_tier(lab: Callable[..., Run]) -> None:
     queued, pulled = unit(1), unit(2)
-    run = lab({HEAD_A: plan({"lint": (queued,)}), HEAD_B: plan({"lint": (pulled,)})})
+    run = lab(
+        {HEAD_A: scheduler.frame(Priority.QUEUE, TREE, BASE, {"unit": (queued,)}), HEAD_B: plan({"unit": (pulled,)})}
+    )
     run.push(HEAD_A, lane="gh-readonly-queue/dev/pr-1", event="merge_group", action="checks_requested")
     run.tick(1000)
     run.finish(run.lease()[0], "passed", {})
     run.tick(1100)
+    assert run.lab.client.get(f"{scheduler.TREES}{REPO}|{TREE}") == run.grade(HEAD_A).run
     run.push(HEAD_B, event="pull_request", action="synchronize")
     run.tick(1200)
     assert run.engine.queue.pending() == [scheduler.job_id(HEAD_B, pulled)]
@@ -590,12 +597,22 @@ def test_a_graded_job_stores_its_verdict_from_the_uploaded_report(lab: Callable[
     assert run.grade(HEAD_A).conclusion == "failure"
 
 
-def test_a_head_whose_expansion_fails_is_dropped_with_its_reason(lab: Callable[..., Run]) -> None:
+def test_a_head_whose_expansion_fails_is_dropped_with_its_reason(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
     run = lab({})
     run.push(HEAD_A)
     actions = run.tick(1000)
     assert actions[-1].startswith(f"cannot expand {HEAD_A}: ")
     assert run.lab.client.hgetall(scheduler.WAITING) == {}
+    assert run.grades() == []
+
+    def malformed(request: GradeRequest) -> scheduler.Plan:
+        raise yaml.YAMLError(f"malformed workflow at {request.base}")
+
+    monkeypatch.setattr(run.lab.expander, "expand", malformed)
+    run.push(HEAD_B)
+    assert run.tick(2000)[-1] == f"cannot expand {HEAD_B}: malformed workflow at {BASE}"
     assert run.grades() == []
 
 

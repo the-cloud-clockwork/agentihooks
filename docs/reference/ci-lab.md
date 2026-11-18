@@ -728,7 +728,7 @@ key; the builders are pure and read no file, clock or network.
    unit per gate step.
 4. The verdict store answers what it can. A newer head of the lane drops the older head's pending
    units, carries its leased and finished jobs and cancels its check runs. A push grade of a tree a
-   merge group grade completed carries that grade's units for every gate both grades hold: the unit
+   merge group grade passed carries that grade's units for every gate both grades hold: the unit
    suite, since the queue rules require lint, type-gate and semgrep to be skipped. The rest is enqueued.
 5. Expired leases requeue while `lab.retry.lost` of the repository's dev `delivery.yaml` allows (once by
    default); the next loss is `lost`.
@@ -755,7 +755,7 @@ to today's step.
 A grade's state is one JSON document at `agentihooks-ci:grade:<run>`, where `<run>` is the grade
 key of the repository, head, base, class and grader revision. Live grades sit in
 `agentihooks-ci:grades`, held heads in `agentihooks-ci:waiting`, a lane's latest run at
-`agentihooks-ci:lane:<repository>|<lane>|<class>` and a completed merge group grade at
+`agentihooks-ci:lane:<repository>|<lane>|<class>` and a passing merge group grade at
 `agentihooks-ci:tree:<repository>|<tree>`. A rerequested check run grades the head again under
 `<run>-<now_ms>`, bypassing negative verdicts in the store.
 

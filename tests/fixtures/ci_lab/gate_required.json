@@ -3575,14 +3575,6 @@
    }
   },
   {
-   "base": "push",
-   "name": "push select cancelled",
-   "passes": false,
-   "results": {
-    "select": "cancelled"
-   }
-  },
-  {
    "base": "pull_request",
    "name": "pull request scope selected",
    "outputs": {

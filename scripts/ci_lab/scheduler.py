@@ -7,7 +7,7 @@ and then the gates by the tier's `Gate — Required` rules, and moves the check 
 the first unit, completed on the last. A grade's state is the JSON document at `agentihooks-ci:grade:<run>`.
 
 A newer head of a lane drops the older head's pending units, carries its leased and finished jobs and cancels its
-checks; a push grade of a tree a merge group grade completed carries that grade's gates. A head or lane the control
+checks; a push grade of a tree a merge group grade passed carries that grade's gates. A head or lane the control
 routes marked hotfix grades in the hotfix class, and a paused class holds its heads but the excepted ones until
 resume. `python -m scripts.ci_lab scheduler` runs the service: the lease API with its control routes on the scheduler
 port and one pass every interval.
@@ -20,7 +20,7 @@ import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field, fields, replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from threading import Thread
 from typing import Any, Protocol, cast
 from urllib.parse import urlsplit
@@ -484,7 +484,7 @@ class Scheduler:
             self.client.hdel(WAITING, name)
             try:
                 actions.append(self._start(request, held["lane"], now_ms))
-            except (subprocess.CalledProcessError, ValueError, KeyError) as error:
+            except (subprocess.CalledProcessError, ValueError, KeyError, yaml.YAMLError) as error:
                 actions.append(f"cannot expand {request.head}: {error}")
         return actions
 
@@ -527,7 +527,7 @@ class Scheduler:
         return f"grading {run} with {len(misses)} of {len(state.units)} units enqueued"
 
     def _merge_group(self, request: GradeRequest, tree: str) -> State | None:
-        """Return the completed merge group grade of the tree a push grade grades, if one exists."""
+        """Return the passing merge group grade of the tree a push grade grades, if one exists."""
         if request.tier != Priority.PROMOTION:
             return None
         run = self.client.get(f"{TREES}{request.repo}|{tree}")
@@ -586,7 +586,7 @@ class Scheduler:
         if all(slot.outcome for slot in state.units.values()):
             self.client.srem(LIVE, run)
             state.conclusion = str(state.posted[REQUIRED][1])
-            if state.tier == Priority.QUEUE and not state.superseded:
+            if state.tier == Priority.QUEUE and state.conclusion == "success":
                 self.client.set(f"{TREES}{state.repo}|{state.tree}", run)
             actions.append(f"completed {run} {state.conclusion}")
         self._save(state)
@@ -608,10 +608,11 @@ class Scheduler:
     def _remember(self, job: Job) -> None:
         """Store the verdict of a graded job from the report its worker uploaded; a lost or unrun job is no verdict."""
         report_path, log_path = upload_path(job.id, "report"), upload_path(job.id, "log")
-        if job.outcome in UNGRADED or report_path not in self.objects.keys(report_path):
+        present = set(self.objects.keys(str(PurePosixPath(report_path).parent) + "/"))
+        if job.outcome in UNGRADED or report_path not in present:
             return
         report = json.loads(self.objects.read(report_path))
-        log = self.objects.read(log_path) if log_path in self.objects.keys(log_path) else b""
+        log = self.objects.read(log_path) if log_path in present else b""
         passed = job.outcome == PASSED
         verdict = Verdict(
             job.unit.kind, job.unit.key, passed, passed and bool(report.get("flaky")), float(report.get("seconds", 0.0))
