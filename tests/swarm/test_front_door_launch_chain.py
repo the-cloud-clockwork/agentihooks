@@ -1,22 +1,24 @@
 """The front door master launch in its deployed shape: the swarm runtime's spawn, the init-agent launcher script, the
 agentihooks claude entry and the claude ai login route run unstubbed between the login check and the process exec."""
 
+import contextlib
+import io
 import json
 import os
 import shlex
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
+from hooks.context import account_sessions
 from scripts import herdr_host, init_agent, install, master_logins, openbao_kv, select_profile
 from scripts import master_claude_login as login
 from scripts.profiles import binding
 from scripts.routing import native_login
 from scripts.swarm import remote_control
 from scripts.swarm.runtime import HerdrRuntime
-from tests.swarm.profile_fixture import validated
 
 pytestmark = pytest.mark.unit
 
@@ -41,6 +43,7 @@ def executed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[Exec]:
     every process boundary recorded."""
     from scripts import claude_quota_balancer, deps_preflight, profile_telemetry
     from scripts.hive import account_slots
+    from scripts.scheduler import service
 
     monkeypatch.setattr(login.hooks_config, "AGENTIHOOKS_HOME", tmp_path / "ah")
     monkeypatch.setattr(login.hooks_config, "MASTER_CLAUDE_LOGIN", True)
@@ -53,6 +56,8 @@ def executed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[Exec]:
     rendered.mkdir(parents=True)
     (rendered / "settings.json").write_text("{}")
     (rendered / login.CONFIG).write_text("{}")
+    (rendered / binding.PERSONAS["claude"]).write_text("persona\n")
+    (rendered.parent / "claude.sources.json").write_text("[]")
     for number, email in ((1, "one@example.com"), (2, "two@example.com")):
         target = login.home(number)
         target.mkdir(parents=True)
@@ -65,7 +70,8 @@ def executed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[Exec]:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(herdr_host, "binary", lambda: None)
     monkeypatch.setattr(profile_telemetry, "installed_langfuse_env", lambda target: {})
-    monkeypatch.setattr(select_profile, "prepare", lambda *args: ({"AGENTIHOOKS_PROFILE": "master"}, args[4]))
+    monkeypatch.setattr(select_profile, "prepare", lambda *args: _render(rendered, *args))
+    monkeypatch.setattr(service, "ensure_running", lambda environ: False)
     monkeypatch.setattr(init_agent, "_launch_command", lambda launcher, *_: ("linux", ["terminal", str(launcher)]))
     monkeypatch.setattr(install.shutil, "which", lambda name: f"/opt/{name}")
     state = tmp_path / "state"
@@ -81,34 +87,50 @@ def executed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[Exec]:
     return seen
 
 
-def _pane(tmp_path: Path, argv: list[str], **_: Any) -> SimpleNamespace:
-    """Run what the herdr pane runs for an init-agent launch and print the lines init-agent reports back."""
+def _pane(tmp_path: Path, executed: list[Exec], argv: list[str]) -> SimpleNamespace:
+    """Run what the herdr pane runs for an init-agent launch, with a terminal start that runs the launcher in process
+    and a canary that answers for the claude process it execs, and return the report init-agent prints."""
     args = argv[argv.index("init-agent") + 1 :]
     at = args.index("--host")
     del args[at : at + 2]
-    folder = tmp_path / "runtime"
-    assert init_agent.main(["--dry-run", *args], {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(folder)}) == 0
-    (launcher,) = folder.rglob("*.sh")
-    (line,) = [text for text in launcher.read_text().splitlines() if " select-profile " in text]
+    environ = {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "runtime")}
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = cast(Any, init_agent.main)(
+            args, environ, start=_terminal, canary=lambda report, _: _canary(report, executed)
+        )
+    return SimpleNamespace(returncode=code, stdout=out.getvalue(), stderr=err.getvalue())
+
+
+def _render(home: Path, profile: str, agent: str, *rest: Any) -> tuple[dict[str, str], list[str]]:
+    """Render the requested profile's binding evidence into the stored home, the way select-profile prepares it."""
+    binding.write(home, profile, agent)
+    return {"AGENTIHOOKS_PROFILE": "master", binding.HOMES[agent]: str(home)}, rest[2]
+
+
+def _terminal(command: list[str], environ: dict[str, str]) -> None:
+    """Start the launcher the terminal command names: write its started marker and run its harness line in process."""
+    lines = Path(command[-1]).read_text().splitlines()
+    (marker,) = [shlex.split(text)[2] for text in lines if text.startswith(": > ")]
+    Path(marker).touch()
+    (line,) = [text for text in lines if " select-profile " in text]
     words = shlex.split(line)
-    claude_args = words[words.index("--") + 1 :]
-    install.cmd_claude(claude_args)
-    route = init_agent._take_route_report(Path(claude_args[claude_args.index("--agentihooks-report") + 1]))[0]
-    lines = [
-        "status=started",
-        f"route_status={route['status']}",
-        f"account={route['account']}",
-        f"placement={route['placement']}",
-    ]
-    return SimpleNamespace(returncode=0, stdout=validated(argv, "\n".join(lines) + "\n"), stderr="")
+    install.cmd_claude(words[words.index("--") + 1 :])
 
 
-def _front_door(tmp_path: Path) -> Any:
+def _canary(report: Path, executed: list[Exec]) -> dict[str, Any]:
+    """The validation the exec'd claude process writes: the binding the launch requested, on that process's account."""
+    rendered = json.loads(report.read_text())["rendered"]
+    account = account_sessions.account_from_names(executed[-1][2])
+    return {**rendered, "state": "validated", "pid": os.getpid(), "account": account}
+
+
+def _front_door(tmp_path: Path, executed: list[Exec]) -> Any:
     """Spawn the front door master of swarm proof through the runtime with the pane run in process."""
     home = tmp_path / "home"
     home.mkdir()
     runtime = HerdrRuntime(
-        home=home, run=lambda argv, **kwargs: _pane(tmp_path, argv, **kwargs), choose=lambda *_: ("claude", "requested")
+        home=home, run=lambda argv, **_: _pane(tmp_path, executed, argv), choose=lambda *_: ("claude", "requested")
     )
     config = SimpleNamespace(
         slug="proof",
@@ -126,7 +148,7 @@ def _front_door(tmp_path: Path) -> Any:
 def test_the_front_door_launch_execs_claude_on_the_login_slot_with_remote_control_and_no_token(
     tmp_path: Path, executed: list[Exec]
 ) -> None:
-    placed = _front_door(tmp_path)
+    placed = _front_door(tmp_path, executed)
     ((binary, argv, environ),) = executed
     assert argv[:4] == [binary, "--dangerously-skip-permissions", *login.SETTINGS]
     at = argv.index("--remote-control")
@@ -136,6 +158,8 @@ def test_the_front_door_launch_execs_claude_on_the_login_slot_with_remote_contro
     assert environ["CLAUDE_CONFIG_DIR"] == str(login.home(1))
     assert (placed.route_kind, placed.account) == ("interactive", "oneatexample_com")
     assert placed.remote_control == {"state": "on", "detail": TITLE}
+    assert {"launcher_at", "harness_at"} <= set(placed.launch_timings)
+    assert placed.profile_decision["validation"]["account"] == "oneatexample_com"
 
 
 @pytest.mark.feature("front-door-launch-chain")
@@ -143,7 +167,7 @@ def test_a_primary_login_at_its_week_reserve_hands_the_front_door_launch_to_the_
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, executed: list[Exec]
 ) -> None:
     monkeypatch.setattr(master_logins, "week_left", lambda account, now: 1.0 if account == "oneatexample_com" else 90.0)
-    placed = _front_door(tmp_path)
+    placed = _front_door(tmp_path, executed)
     ((_, argv, environ),) = executed
     assert environ["CLAUDE_CONFIG_DIR"] == str(login.home(2))
     assert not [name for name in environ if name == "CLAUDE_CODE_OAUTH_TOKEN" or name.startswith("AH_CC_TOKEN_")]
@@ -158,7 +182,6 @@ def test_a_primary_login_at_its_week_reserve_hands_the_front_door_launch_to_the_
 def test_an_expired_front_door_login_execs_the_token_fallback_and_reports_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, executed: list[Exec]
 ) -> None:
-    from hooks.context import account_sessions
     from scripts import claude_quota_balancer as router
 
     def expired(*_: Any) -> dict[str, Any]:
@@ -170,7 +193,7 @@ def test_an_expired_front_door_login_execs_the_token_fallback_and_reports_it(
     monkeypatch.setattr(
         router, "select_master_credential", lambda environ, **_: router.RouteDecision(credential, None, "cache")
     )
-    placed = _front_door(tmp_path)
+    placed = _front_door(tmp_path, executed)
     ((_, argv, environ),) = executed
     assert not {"--remote-control", "--remote-control-session-name-prefix"} & set(argv)
     assert environ["CLAUDE_CODE_OAUTH_TOKEN"] == "routed"
