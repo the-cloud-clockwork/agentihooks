@@ -308,7 +308,7 @@ def new_functions(old: str | None, tree: ast.Module) -> set[str]:
     }
 
 
-def covering_tests(manifest: dict, units: set[int], paths: set[str]) -> set[str]:
+def covering_tests(manifest: dict[str, Any], units: set[int], paths: set[str]) -> set[str]:
     # A child process loads the selection light bootstrap, whose trampoline hit records nothing, so a test reaching
     # code only there never enters mutmut's statistics and grades nothing.
     return {
@@ -537,7 +537,7 @@ def table_reads(tree: ast.Module, tables: dict[str, bool]) -> set[int]:
 
 def line_covering_tests(
     root: Path,
-    manifest: dict,
+    manifest: dict[str, Any],
     changes: dict[str, set[int]],
     paths: set[str],
     direct: dict[str, list[str]] | None = None,
