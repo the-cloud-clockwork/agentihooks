@@ -151,14 +151,17 @@ def test_outage_rules_for_tests_fail_the_step_on_a_finding(tmp_path: Path) -> No
 
 def test_every_semgrep_scan_passes_an_explicit_timeout() -> None:
     scans = [
-        shlex.split(line, comments=True)
+        (shlex.split(line, comments=True), step.get("env", {}))
         for job in _jobs().values()
         for step in job["steps"]
         for line in step.get("run", "").splitlines()
         if line.split()[:2] == ["semgrep", "scan"]
     ]
-    assert "tests" in [words[-1] for words in scans]
-    assert [words for words in scans if "--timeout" not in words[:-1]] == []
+    assert "tests" in [words[-1] for words, _ in scans]
+    for words, env in scans:
+        assert "--timeout" in words[:-1], words
+        value = words[words.index("--timeout") + 1]
+        assert str(env.get(value.removeprefix("$"), value)).isdigit(), words
 
 
 def test_each_outage_rule_for_tests_reaches_the_tests_and_its_fixture() -> None:
