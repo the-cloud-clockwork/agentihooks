@@ -202,10 +202,10 @@ def lab_clause(condition: str | None, gate: str) -> str:
 
 
 def _lab_problems(base: dict[str, Any], head: dict[str, Any], gate: dict[str, Any]) -> list[str]:
-    """Refuse a lab verdict job off the base's reviewed one and, with the lab form in play, a gate's lab clause off its form.
+    """Refuse a lab verdict job or a gate condition off its reviewed form while the lab form is in play.
 
-    A gate condition may read the lab verdict only through its own exact trailing lab clause, and keeps that clause
-    once the base carries it.
+    A gate whose base condition reads the lab verdict keeps that condition exactly. Any other gate reads the lab
+    verdict only through its base condition plus its exact lab clause.
     """
     steps: list[dict[str, Any]] = gate.get("steps") or []
     problems: list[str] = []
@@ -216,19 +216,18 @@ def _lab_problems(base: dict[str, Any], head: dict[str, Any], gate: dict[str, An
     if LAB_VERDICT_JOB not in head and not any(ci_reuse.LAB_VERDICT in str(step.get("run")) for step in steps):
         return problems
 
-    def off_clause(need: str) -> bool:
-        clause = f"{LAB_CLAUSE_PREFIX}['{need}'] != true"
+    def off_base(need: str) -> bool:
         condition: str | None = head[need].get("if")
-        text = str(condition)
-        if clause not in text:
-            return f"needs.{LAB_VERDICT_JOB}" in text or clause in str(base[need].get("if"))
-        rest = None if condition == lab_clause(None, need) else text.replace(f" && {clause}", "", 1)
-        return text.count(f"needs.{LAB_VERDICT_JOB}") != 1 or condition != lab_clause(rest, need)
+        reviewed: str | None = base[need].get("if")
+        if LAB_VERDICT_JOB in str(reviewed):
+            return condition != reviewed
+        return LAB_VERDICT_JOB in str(condition) and condition != lab_clause(reviewed, need)
 
     return problems + [
-        f"The head's {need} condition changes its lab clause; the protected branch grades with its own."
+        f"The head's {need} condition differs from its base condition plus its exact lab clause; "
+        "the protected branch grades with its own."
         for need in sorted(ci_wiring.needs_of(gate) - LAB_UPSTREAM)
-        if need in base and need in head and off_clause(need)
+        if need in base and need in head and off_base(need)
     ]
 
 

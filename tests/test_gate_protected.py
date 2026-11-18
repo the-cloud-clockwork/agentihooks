@@ -1156,10 +1156,9 @@ def test_a_forged_lab_verdict_job_is_red() -> None:
 def test_a_head_dropping_the_lab_verdict_job_is_red() -> None:
     workflows, head, config, actors = _repository_lab_form()
     del head["test.yml"]["jobs"]["lab-verdict"]
-    assert (
+    assert gate_protected.grade(workflows, config, head, config, actors) == [
         "The head's lab verdict job differs from the reviewed rendering; the protected branch grades with its own."
-        in gate_protected.grade(workflows, config, head, config, actors)
-    )
+    ]
 
 
 @pytest.mark.parametrize(
@@ -1169,6 +1168,8 @@ def test_a_head_dropping_the_lab_verdict_job_is_red() -> None:
         ("lint", lambda condition: gate_protected.lab_clause(condition, "lint")),
         ("lint", lambda condition: condition.replace(f" && {gate_protected.LAB_CLAUSE_PREFIX}['lint'] != true", "")),
         ("lint", lambda condition: condition.replace("['lint'] != true", "['docs'] != true")),
+        ("lint", lambda condition: condition.replace("github.event_name != 'push'", "github.event_name != 'schedule'")),
+        ("lint", lambda _: gate_protected.lab_clause("${{ github.event_name != 'pull_request' || false }}", "lint")),
         ("select", lambda condition: gate_protected.lab_clause(condition, "select").replace("!= true", "!= false")),
         (
             "select",
@@ -1176,14 +1177,20 @@ def test_a_head_dropping_the_lab_verdict_job_is_red() -> None:
                 "${{ ", f"${{{{ {gate_protected.LAB_CLAUSE_PREFIX}['select'] != true && ", 1
             ),
         ),
+        (
+            "select",
+            lambda condition: gate_protected.lab_clause(condition.replace("!cancelled()", "always()"), "select"),
+        ),
+        ("select", lambda condition: condition.removesuffix(" }}") + " && needs['lab-verdict'].result == 'success' }}"),
     ],
 )
-def test_a_gate_condition_off_its_lab_clause_is_red(gate: str, edit: Callable[[str], str]) -> None:
+def test_a_gate_condition_off_its_base_plus_its_exact_lab_clause_is_red(gate: str, edit: Callable[[str], str]) -> None:
     workflows, head, config, actors = _repository_lab_form()
     job = head["test.yml"]["jobs"][gate]
     job["if"] = edit(job["if"])
     assert gate_protected.grade(workflows, config, head, config, actors) == [
-        f"The head's {gate} condition changes its lab clause; the protected branch grades with its own."
+        f"The head's {gate} condition differs from its base condition plus its exact lab clause; "
+        "the protected branch grades with its own."
     ]
 
 
@@ -1191,11 +1198,12 @@ def test_a_gate_condition_off_its_lab_clause_is_red(gate: str, edit: Callable[[s
     ("gate", "edit"),
     [
         ("select", lambda condition: gate_protected.lab_clause(condition, "select")),
-        ("lint", lambda condition: condition.replace("github.event_name != 'push'", "github.event_name != 'schedule'")),
         ("select", lambda condition: condition.removesuffix(" }}") + " && always() }}"),
     ],
 )
-def test_a_gate_keeping_its_exact_lab_clause_grades_green(gate: str, edit: Callable[[str], str]) -> None:
+def test_a_gate_without_a_base_lab_clause_grades_green_with_its_exact_clause_or_none(
+    gate: str, edit: Callable[[str], str]
+) -> None:
     workflows, head, config, actors = _repository_lab_form()
     jobs = head["test.yml"]["jobs"]
     jobs[gate]["if"] = edit(jobs[gate]["if"])
