@@ -5,6 +5,7 @@ import subprocess
 import sys
 from io import StringIO
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -12,6 +13,7 @@ from scripts.ci_lab import intake
 from scripts.ci_lab.remote import post_receive
 from scripts.ci_lab.scheduler import DURABLE, SUBJECT, BusInbox
 from scripts.ci_lab.units import Priority
+from scripts.events.bus import Consumer
 from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
 from scripts.events.memory import open_bus
@@ -126,7 +128,7 @@ def test_the_scheduler_inbox_reads_a_graded_push_as_a_trusted_pull_request_head_
     consumer = bus.lab_heads.consumer(DURABLE, SUBJECT)
     environ = {**ENVIRON, **options("branch=engineer-1")}
     post_receive.run([f"{ZERO} {HEAD} refs/grade/t1"], environ, bus.lab_heads, parent, StringIO())
-    [head] = BusInbox(consumer).heads()
+    [head] = BusInbox(cast(Consumer, consumer)).heads()
     assert (head.event.head, head.event.base, head.lane) == (HEAD, PARENT, "engineer-1")
     request = intake.admit(head.event, {ACTOR})
     assert request is not None

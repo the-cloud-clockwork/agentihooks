@@ -12,7 +12,7 @@ import os
 import subprocess
 import sys
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import replace
+from dataclasses import asdict, replace
 from typing import TextIO
 
 from scripts.ci_lab.webhooks import NOTICE, PUSHED, HeadEvent, Publisher, envelope
@@ -58,8 +58,8 @@ def run(
             print(f"lab remote: refused {ref}, only a pushed refs/grade/* head is graded", file=out)
             continue
         base = options.get(BASE) or parent(new)
-        head = envelope(HeadEvent(NOTICE, environ[REPOSITORY], new, base, environ[ACTOR], PUSHED))
-        head = replace(head, data={**head.data, "ref": ref, BRANCH: options.get(BRANCH, "")})
+        event = HeadEvent(NOTICE, environ[REPOSITORY], new, base, environ[ACTOR], PUSHED)
+        head = replace(envelope(event), data={**asdict(event), "ref": ref, BRANCH: options.get(BRANCH, "")})
         events.publish(head.type, head)
         print(f"lab grade: {lab}/grades/{new}", file=out)
     return 0
