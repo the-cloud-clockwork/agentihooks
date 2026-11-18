@@ -98,6 +98,27 @@ def section_lines(name: str, read: Callable[[], list[str]]) -> list[str]:
         return [f"{name} unreadable: {exc}"]
 
 
+def readable_hives(store: Any) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    """The live hives whose pending admission count the Redis role may read, and each live hive it may not read with
+    the refusal, so a hive member lists the admission rooms it can read and names the counts it cannot."""
+    from redis.exceptions import NoPermissionError
+
+    from scripts.hive.launch import live_hives
+
+    refused: dict[str, str] = {}
+
+    def count(redis: Any, machine: str) -> int:
+        try:
+            return admission.pending(redis, machine)
+        except NoPermissionError as exc:
+            refused[machine] = str(exc)
+            return 0
+
+    live = live_hives(store, count)
+    named = {hive["id"]: refused[hive["id"]] for hive in live if hive["id"] in refused}
+    return [hive for hive in live if hive["id"] not in named], named
+
+
 def auto_snapshot(config):
     return {
         "last": snapshot.last_auto(config.slug),

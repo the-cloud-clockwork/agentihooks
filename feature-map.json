@@ -6532,6 +6532,17 @@
       ]
     },
     {
+      "id": "status-names-each-hive-admission-count-a-member-may-not-read",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-status-skips-unreadable-counts",
+      "behaviour": "Swarm status run as a hive member whose Redis login refuses some hives' pending admission counts skips only those counts: it prints the admission room of every live hive it can read, one line per other live hive naming its admission count unreadable with the refusal, the binding limit over the hives it read, and every other status line.",
+      "seam": "status.readable_hives reading the live hives through launch.live_hives with a pending count reader, admission.view_lines with the refused hives, and cli.hive_admission in cmd_status under a restricted Redis ACL user",
+      "tests": [
+        "tests/swarm/test_capacity.py::test_status_names_each_hive_admission_count_a_restricted_redis_user_may_not_read_and_prints_the_rest",
+        "tests/hive/test_admission.py::test_view_lines_name_each_refused_count_and_bind_only_over_the_hives_read"
+      ]
+    },
+    {
       "id": "hive-run-order-receipt-outlives-order",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-run-order-receipt-expiry",
