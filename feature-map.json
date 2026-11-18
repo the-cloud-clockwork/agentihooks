@@ -8047,6 +8047,17 @@
       ]
     },
     {
+      "id": "lab-reusable-workflow-gates",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-expand-reusable-workflows",
+      "behaviour": "The CI lab scheduler's mirror expander reads every workflow file directly in the grader revision's workflow folder from the git mirror, and the worker's static executor reads them from the grader tree, and both pass them to static gate discovery, so a static job that calls a reusable workflow, the Tests workflow's semgrep job, expands into one static unit per gate step and runs on the worker instead of discovery refusing the head as cannot expand.",
+      "seam": "scripts.ci_lab.scheduler.MirrorExpander.expand over a git origin fixture holding the repository's real workflows and input key registry, and scripts.ci_lab.executors.gate over the repository tree",
+      "tests": [
+        "tests/ci_lab/test_scheduler.py::test_the_mirror_expander_expands_the_real_tests_workflow_with_its_reusable_workflows",
+        "tests/ci_lab/test_executors.py::test_gate_returns_a_gate_of_a_reusable_workflow_the_real_tests_workflow_calls"
+      ]
+    },
+    {
       "id": "lab-scheduler-service",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-ci-lab-scheduler-service",
@@ -8067,6 +8078,16 @@
         "tests/ci_lab/test_queue.py::test_leased_lists_each_leased_job_and_offers_keep_each_workers_latest_free_slots",
         "tests/ci_lab/test_leases.py::test_a_lease_poll_offers_the_workers_free_slots_while_it_waits_and_what_its_grants_leave",
         "tests/test_swarm_packaging.py::test_the_swarm_image_carries_the_locked_git_the_lab_mirror_expander_runs"
+      ]
+    },
+    {
+      "id": "lab-scheduler-reindex-on-start",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/ops-dr-rebuild",
+      "behaviour": "With CI_LAB_REINDEX_ON_START set to true the CI lab scheduler rebuilds its verdict index from the report objects in the bucket before it serves, so a scheduler restarted after a Redis loss answers its stored verdicts again, and it prints and flushes reindexed N verdicts with the number of index entries it added; unset or any other value starts the scheduler without a reindex and prints nothing.",
+      "seam": "scripts.ci_lab.scheduler.main over fakeredis and the local object store, with scripts.ci_lab.store.Store.reindex",
+      "tests": [
+        "tests/ci_lab/test_scheduler.py::test_main_rebuilds_the_verdict_index_before_serving_only_when_reindex_on_start_is_true"
       ]
     },
     {

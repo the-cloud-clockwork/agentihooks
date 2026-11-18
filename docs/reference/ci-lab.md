@@ -521,6 +521,32 @@ port 8790 from inside the cluster, where the receiver's network policy admits th
 agentihooks command sends notices yet, so until one does, a head reaches the lab only through a
 GitHub delivery or a notice sent by hand as above.
 
+### Push a head to the lab remote
+
+The lab remote is a git endpoint beside the scheduler. Its post receive hook,
+`python -m scripts.ci_lab.remote.post_receive`, turns each pushed `refs/grade/*` head into a
+`ci.lab.head.notice` envelope on the same stream, and prints the head's grade url to the pusher:
+
+```text
+$ git push -o branch=<branch> lab HEAD:refs/grade/<task>
+remote: lab grade: <CI_LAB_URL>/grades/<sha>
+```
+
+The url is the scheduler's [`/grades/<sha>`](#grades-of-a-commit) route. The envelope carries the
+pushed `ref` and the `branch` push option, which becomes the head's scheduler lane. Its id covers
+both, so the same head pushed again with another branch or to another grade ref is a new head
+event. The base is the `-o base=<sha>` push option, else the head's first parent. The hook runs
+after git writes the refs, so it cannot turn a push away. The remote's pre receive hook refuses refs
+outside `refs/grade/*`. A deleted grade ref, or a root commit pushed without `-o base`, prints
+`lab remote: <ref> is not graded` and publishes nothing.
+
+| Name | Meaning |
+|---|---|
+| `CI_LAB_REPOSITORY` | The repository URL the head belongs to, in the `https://github.com/<owner>/<repo>` form GitHub deliveries use |
+| `CI_LAB_REMOTE_ACTOR` | The actor every pushed head is recorded under. It must be on the trust list, or the scheduler records the head without grading it |
+| `CI_LAB_URL` | The lab scheduler address a hive and the workstation can reach, used as the base of the grade url |
+| `AGENTIHOOKS_BUS`, `AGENTIHOOKS_BUS_URL`, `AGENTIHOOKS_BUS_CREDENTIALS` | The bus the hook publishes on, opened with provisioning off |
+
 ### Provisioning in the deployment
 
 The deployment repository wires the secret in `k8s/manifests/agentihooks-swarm/github-webhook.yaml`,
