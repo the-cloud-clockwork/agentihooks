@@ -2699,8 +2699,8 @@ whose process 1 is its init system keeps the epoch. The start tick counts from b
 does not move it.
 
 The join hook runs in the agent's session and the heartbeat in the hive daemon, so the check relies on both reading
-the same host name and the same process 1. The hive daemon starts its agents in its own pod or machine, and the hive
-chart sets none of `hostPID`, `hostNetwork` or `shareProcessNamespace`. Pull request #11279 recorded the agent hook
+the same host name and the same process 1. The hive daemon and the agents it starts run in the same pod or on the
+same machine, and the hive chart sets none of `hostPID`, `hostNetwork` or `shareProcessNamespace`. Pull request #11279 recorded the agent hook
 and the daemon reading one PID namespace on a worker pod and on the workstation root hive; compare them on a live
 hive with the commands in [Checking it on a live hive](#checking-it-on-a-live-hive).
 
@@ -2786,8 +2786,8 @@ echo "$(cat /proc/sys/kernel/random/boot_id)/$(sed 's/.*) //' /proc/1/stat | cut
 # swarm-hive-001-agentihooks-swarm-worker-hive-68c5d5fb-wwszw
 # e8adb1a1-f80b-4d66-962f-26f39eacd37d/189301145
 
-# On the hive: the daemon and an agent session read one PID namespace
-readlink /proc/"$(pgrep -f 'agentihooks hive run' | head -1)"/ns/pid /proc/self/ns/pid
+# On the hive: the daemon and a Claude agent process read one PID namespace
+readlink /proc/"$(pgrep -f 'agentihooks hive run' | head -1)"/ns/pid /proc/"$(pgrep -x claude | head -1)"/ns/pid
 # pid:[4026532913]
 # pid:[4026532913]
 
@@ -3046,8 +3046,9 @@ each agent it hosts one inbox order to hand off, so the agent's successor starts
 agent it hosts is running. An agent counts as running while its join report has not ended; see
 [Join reports after a hive restart](#join-reports-after-a-hive-restart). The drain writes its result to the pod log.
 The grace period is `workers.drainSeconds` plus 30 seconds, so a Recreate rollout starts the new pod as soon as the
-old hive's agents hand off, or when the wait runs out. With `workers.rollout.enabled` the drain is bounded by `workers.rollout.drainSeconds` and the hives roll one at a
-time; see [Release roll one hive at a time](#release-roll-one-hive-at-a-time).
+old hive's agents hand off, or when the wait runs out. With `workers.rollout.enabled` the drain is bounded by
+`workers.rollout.drainSeconds` and the hives roll one at a time; see
+[Release roll one hive at a time](#release-roll-one-hive-at-a-time).
 
 The bundle origin and the token come from the hive settings record through `workers.envFromSecrets`. Write the
 whole record from the workstation with one command:
