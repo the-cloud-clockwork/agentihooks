@@ -56,7 +56,9 @@ def test_tracked_shell_files_with_a_substitution_word_list_are_red(
     ]
 
 
-def test_the_red_fixture_is_the_one_shell_file_skipped(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_a_tree_of_both_fixtures_grades_the_clean_one_and_skips_the_red_one(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     fixtures = {name: (ROOT / name).read_text() for name in (RED_FIXTURE, CLEAN_FIXTURE)}
     assert main(["--root", str(_repo(tmp_path, fixtures))]) == 0
     assert capsys.readouterr().out.splitlines() == ["For loop word lists: 1 shell files, 0 problems"]
