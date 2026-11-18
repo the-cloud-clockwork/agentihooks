@@ -1557,6 +1557,17 @@ def test_a_promotion_head_expands_no_stats_unit_for_a_covering_test_file_it_dele
 
 @pytest.mark.feature("lab-scheduler-mutation-units")
 @pytest.mark.usefixtures("staticless")
+def test_a_promotion_head_expands_the_stats_unit_of_a_covering_test_inside_a_class(tmp_path: Path) -> None:
+    suite = _suite(tmp_path, DELIVERY["lab"])
+    test = "tests/test_beta.py::TestBeta::test_second"
+    tests = {FIRST_TEST: SUITE_MANIFEST["tests"][FIRST_TEST], test: {"units": [1], "files": [], "escapes": False}}
+    found = Port({**SUITE_MANIFEST, "tests": tests}).expander(tmp_path).expand(suite.request(Priority.PROMOTION))
+    assert [(unit.kind, unit.members) for unit in found.gates["mutation-stats"]] == [("stats", ("tests/test_beta.py",))]
+    assert [executors.function_of(unit.members[0]) for unit in found.gates["mutation"]] == [SECOND]
+
+
+@pytest.mark.feature("lab-scheduler-mutation-units")
+@pytest.mark.usefixtures("staticless")
 def test_a_promotion_head_expands_a_mutant_unit_for_a_changed_function_no_recorded_test_ran(tmp_path: Path) -> None:
     suite = _suite(tmp_path, DELIVERY["lab"])
     head = _commit(suite.repo, {"scripts/alpha.py": ALPHA.replace("2", "3") + "\n\ndef third():\n    return 3\n"})

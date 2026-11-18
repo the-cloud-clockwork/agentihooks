@@ -164,10 +164,10 @@ def covering(
     for path in changes:
         tree = ast.parse((root / path).read_text())
         classes = frozenset(node.name for node in tree.body if isinstance(node, ast.ClassDef))
+        prefix = f"{path}::"
         for index, name in enumerate(manifest["units"]):
-            source, _, unit = name.partition("::")
-            if source == path:
-                owners[index] = owner(path, unit, classes)
+            if name.startswith(prefix):
+                owners[index] = owner(path, name.removeprefix(prefix), classes)
     found: dict[str, dict[str, str]] = {}
     for test, record in manifest["tests"].items():
         for index in owners.keys() & set(record["units"]):
