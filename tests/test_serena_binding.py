@@ -171,6 +171,7 @@ def test_pre_tool_use_injects_the_calling_agent_root_under_bypass(
     hm.on_pre_tool_use(_payload("find_symbol", {"name_path_pattern": "Binding"}, agent_id="sub-1"))
     child = json.loads(capsys.readouterr().out.strip())["hookSpecificOutput"]
     assert parent["permissionDecision"] == "allow"
+    assert parent.get("permissionDecisionReason", "") == ""
     assert parent["updatedInput"] == {"relative_path": "f.txt", "repl": "x", ROOT_ARG: str(repo["a"])}
     assert child["updatedInput"] == {"name_path_pattern": "Binding", ROOT_ARG: str(repo["b"])}
 
