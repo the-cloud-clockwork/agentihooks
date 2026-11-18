@@ -211,6 +211,13 @@ def test_ci_and_master_guidance_queues_instead_of_merging(guidance):
     assert "merge on green" not in text.lower()
 
 
+def test_master_role_rule_names_no_merge_on_green() -> None:
+    """The master role rule never tells the master to merge on green."""
+    text = " ".join((ROLES / "master" / ".claude" / "rules" / "master-role.md").read_text().split())
+
+    assert "merge on green" not in text.lower()
+
+
 @pytest.mark.parametrize("role", sorted(p.name for p in ROLES.iterdir() if (p / "CLAUDE.md").is_file()))
 def test_role_rules_repeat_no_line_of_the_role_persona(role: str) -> None:
     """A package role's rule files carry no bullet line its CLAUDE.md already states."""
