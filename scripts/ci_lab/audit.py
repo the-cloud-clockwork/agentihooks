@@ -3,7 +3,7 @@
 promotion_audit grades a dev head's whole suite with no store reuse and compares every verdict with the cached one;
 sample regrades a deterministic share of a day's store hits in the backfill class. A mismatch disables reuse of its
 kind, files one ci task per kind on the ledger naming each cached run and the audit run, and raises
-CILabVerdictMismatch. Only a pull request enables a kind again.
+CILabVerdictMismatch. The audit never enables a kind again; that takes a pull request.
 """
 
 import math
@@ -118,7 +118,7 @@ def chosen(day: str, hits: Sequence[Cached], share: float) -> list[Cached]:
 
 
 def mismatches(store: Store, units: Sequence[Cached], regrade: Regrade) -> list[Mismatch]:
-    """Return every unit whose regraded verdict differs from its cached one; a cached flaky pass agrees with a failure."""
+    """Return every unit whose regrade differs from its cached verdict; a cached flaky pass agrees with a failure."""
     graded = {(verdict.kind, verdict.key): verdict for verdict in regrade.verdicts}
     found: list[Mismatch] = []
     for unit in units:

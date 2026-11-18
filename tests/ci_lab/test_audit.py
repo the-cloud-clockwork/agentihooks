@@ -96,8 +96,8 @@ def _unit(kind: str, key: str, run: str, head: str = HEAD) -> audit.Cached:
     return audit.Cached(kind, key, head, run)
 
 
-def _hits(count: int, head: str = HEAD) -> list[audit.Cached]:
-    return [_unit("test", _key("test", f"hit {n}"), f"grade-v1-{n:03d}", head) for n in range(count)]
+def _hits(count: int) -> list[audit.Cached]:
+    return [_unit("test", _key("test", f"hit {n}"), f"grade-v1-{n:03d}") for n in range(count)]
 
 
 @pytest.mark.feature("lab-reuse-audit")
@@ -276,12 +276,23 @@ def test_the_sample_is_deterministic_from_the_day_digest() -> None:
     hits = _hits(100)
     shuffled = list(hits)
     random.Random(7).shuffle(shuffled)
-    seed = digest({"day": DAY})
-    ranked = sorted(hits, key=lambda hit: digest({"seed": seed, "unit": f"{hit.kind}:{hit.key}", "head": hit.head}))
 
     chosen = audit.chosen(DAY, hits, 0.05)
 
-    assert chosen == ranked[:5]
+    assert [hit.run for hit in chosen] == [
+        "grade-v1-036",
+        "grade-v1-086",
+        "grade-v1-092",
+        "grade-v1-006",
+        "grade-v1-017",
+    ]
+    assert [hit.run for hit in audit.chosen("2026-11-19", hits, 0.05)] == [
+        "grade-v1-078",
+        "grade-v1-045",
+        "grade-v1-022",
+        "grade-v1-081",
+        "grade-v1-033",
+    ]
     assert audit.chosen(DAY, shuffled, 0.05) == chosen
     assert audit.chosen("2026-11-19", hits, 0.05) != chosen
     assert len(audit.chosen(DAY, _hits(30), 0.05)) == math.ceil(30 * 0.05) == 2
@@ -292,7 +303,6 @@ def test_the_sample_is_deterministic_from_the_day_digest() -> None:
 @pytest.mark.feature("lab-reuse-audit")
 def test_the_same_unit_hit_on_two_heads_ranks_by_its_head() -> None:
     first, second = _unit("test", ONE, "grade-v1-one"), _unit("test", ONE, "grade-v1-one", OTHER)
-    seed = digest({"day": DAY})
-    ranked = sorted([first, second], key=lambda hit: digest({"seed": seed, "unit": f"test:{ONE}", "head": hit.head}))
 
-    assert audit.chosen(DAY, [first, second], 0.5) == ranked[:1]
+    assert audit.chosen(DAY, [first, second], 0.5) == [first]
+    assert audit.chosen(DAY, [second, first], 0.5) == [first]
