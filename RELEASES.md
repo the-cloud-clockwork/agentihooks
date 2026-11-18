@@ -2,6 +2,26 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.988 · 2026-11-18
+
+### 2026-11-18 · 40090a111d3e · #11830 · @nestorcolt
+
+**Rewrite the docs that name the branch mutation preflight run**
+
+This change updates the documentation to reflect that the branch mutation preflight workflow no longer exists, aligning every affected page with the actual delivery tiers: changed-line coverage and mutation checks run in the pull request Tests run, the unit suite runs in the merge queue, and module sweeps happen at promotion. It removes preflight-only sections, relabels historical proof links as mutation runs, fixes a few review nits for clarity, and adjusts the docs sanity baseline counts so future scans match the corrected content, keeping the docs consistent with the code and preventing confusion for anyone relying on them.
+
+### 2026-11-18 · 847339b6fbac · #11829 · @agenticore-app
+
+**Document front door only native login placement for backend master seats**
+
+This change updates docs/pillars/hives.md and swarm.md to document existing behavior from PR #11407: only the front door seat in a hive master placement gets offered native interactive Claude login, while backend master seats route through subscription or api slots instead. It adds a new Backend master seats subsection with examples, the failure message seen before the fix, troubleshooting guidance, and cross-links so operators understand why backend seats behave differently and can diagnose stalled launches without confusion.
+
+### 2026-11-18 · de59471eb3eb · #11810 · @agenticore-app
+
+**Promotion skips exempt side jobs and a contract test classifies every graded job**
+
+This change fixes promote.cjs so it no longer waits on mutation-stats-seed and test-summary, two side jobs outside the graded promotion-ready set that grade nothing, by adding an explicit EXEMPT list that settled always treats as settled regardless of their outcome. Previously a failing or slow side job could block a healthy run for thirty minutes and then fail promotion outright, as happened on the 17 November dev push. A new contract test now checks every job in test.yml is either part of promotion-ready, on the exempt list, or correctly excluded, preventing this class of false failure from recurring.
+
 ## v2.17.987 · 2026-11-18
 
 ### 2026-11-18 · ffe89a1839be · #11812 · @agenticore-app
