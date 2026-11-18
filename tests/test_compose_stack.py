@@ -213,6 +213,20 @@ def test_the_front_proxies_reads_with_the_scheme_the_swarm_serves() -> None:
     assert smoke.index(read) < smoke.index('docker run -d --name "$run-member"')
 
 
+@pytest.mark.feature("compose-front-ready-before-wait")
+@pytest.mark.parametrize("compose_file", ["compose.yaml", "scripts/swarm/stack/compose.yaml"])
+def test_the_front_reads_healthy_only_once_nginx_serves_the_ledger_health_route(compose_file: str) -> None:
+    front = yaml.safe_load((ROOT / compose_file).read_text())["services"]["front"]
+    assert front["healthcheck"] == {
+        "test": ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:8765/healthz"],
+        "interval": "5s",
+        "timeout": "3s",
+        "retries": 5,
+        "start_period": "30s",
+        "start_interval": "1s",
+    }
+
+
 @pytest.mark.feature("compose-api-health-and-front-proxy")
 @pytest.mark.parametrize(
     "conf",
