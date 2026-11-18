@@ -26,6 +26,20 @@ step and to `proof.md` per piece of evidence.
   when it expires. Act on every OPERATOR line about your task, then
   `agentihooks api --slug <slug> --as <name> ack`.
 
+## Plan
+
+Before your first edit, a planner sub-agent writes `plan.md` in your task
+work folder, one piece per line: `- what | area, area | why`, each area a
+repo-relative path prefix the piece touches. With no sub-agent tool (Codex),
+write it yourself. Run `agentihooks swarm <slug> trace-plan`: it keeps the
+pieces your task needs and files the cut ones as follow-ups through
+`agentihooks api`. The build gate refuses an edit or a commit outside the
+kept areas and your task's territory, and before a passing verdict for the
+current `plan.md`. A piece you find later is appended to `plan.md` and traced
+again; a plan it fails is revised and traced once more, then the task blocks.
+Done when `plan-verdict.json` reads `pass`, or `unchecked` when the
+classifier did not answer.
+
 ## Recall
 
 When the operator says remember, yesterday or names earlier work, and before
@@ -67,6 +81,13 @@ tick-step skill first and follows it for the step's artefacts and checks.
    `agentihooks api --slug <slug> --as <name> comment phases/<phase> "<what landed>"`.
    A follow up you find is proposed, never queued as your own task:
    `agentihooks api --slug <slug> --as <name> followup add "<text>"`.
+
+## Review
+
+Every sub-agent you launch or continue in this task, whatever its name,
+counts against the task's sub-agent budget. When the `subagents` gate
+refuses, merge with the ruled findings, file the open Spec finding as a
+follow-up through `agentihooks api`, or block the task.
 
 ## CI proofs
 
