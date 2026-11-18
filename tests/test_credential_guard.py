@@ -381,6 +381,22 @@ GET_SECRET_VALUE_RENDERERS = [
     'echo "$(kubectl get secret db -o=json)"',
     "ssh hive-002 'kubectl get secret db --output=yaml'",
     "kubectl get pods && kubectl get secret db -o=yaml",
+    "kubectl get sec\\\nret db -o yaml",
+    "kubectl get secret db -o yaml -o name",
+    "kubectl get secret db -o name -o yaml",
+    "kubectl get secret db -o go-template",
+    "kubectl get secret db -o go-template='{{range $k,$v := .metadata.annotations}}{{$k}}{{end}}'",
+    "kubectl get secret db -o 'go-template={{range $k,$v := .data}}{{$k}} {{end}}' --template='{{.data.password}}'",
+    "kubectl get secret db -o==yaml",
+    "kubectl get secrets -Ao yaml",
+    "kubectl -o yaml get secret db",
+    "kubectl get $(echo secret) db -o yaml",
+    "echo secret db | xargs kubectl get -o yaml",
+    "R=secret; kubectl get $R db -o yaml",
+    "kubectl get $'secret' db -o yaml",
+    "kubectl get -f manifests/ -o json",
+    "kubectl get --raw /api/v1/namespaces/prod/secrets/db",
+    "kubectl get --raw=/api/v1/secrets",
 ]
 
 GET_SECRET_KEYS_AND_NAMES = [
@@ -399,6 +415,11 @@ GET_SECRET_KEYS_AND_NAMES = [
     "kubectl get pods -o yaml",
     "kubectl get configmap app -o jsonpath={.data}",
     "kubectl get pod secret-store-0 -o yaml",
+    "kubectl get pods -o name | grep -o secret",
+    "kubectl -n secrets get pods -o yaml",
+    "kubectl get pods -l app=$APP -o yaml",
+    "kubectl get deploy/$NAME -o yaml",
+    "kubectl get --raw /healthz",
 ]
 
 

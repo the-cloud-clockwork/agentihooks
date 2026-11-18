@@ -1060,7 +1060,7 @@
  "tests/test_credential_guard.py::test_kubectl_get_secret_forms_that_print_a_value_are_refused": {
   "assertions": 1,
   "calls": 3,
-  "cases": 37,
+  "cases": 53,
   "texts": [
    "6ca0fa9dca6fdbd0"
   ]
@@ -1068,7 +1068,7 @@
  "tests/test_credential_guard.py::test_kubectl_get_secret_forms_that_print_no_value_pass": {
   "assertions": 1,
   "calls": 1,
-  "cases": 15,
+  "cases": 20,
   "texts": [
    "0c85cd31a58dff89"
   ]
