@@ -4511,6 +4511,20 @@
       ]
     },
     {
+      "id": "lane-model-listed-in-a-harness-catalog",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lane-model-catalog-check",
+      "behaviour": "Setting a lane model with agentihooks swarm set, or any store update of the lanes, is refused before anything is written when the new model is not auto, not empty and not listed in the claude or codex model catalog; a lane model the change leaves as it was is never checked again, a change that sets no new fixed lane model never reads the catalog, and the catalog is read through the store's Redis cache with the process environment and the current time.",
+      "seam": "SwarmStore.update through default_models.lane_models and default_models.lane_refusal, reached by cli.cmd_set",
+      "tests": [
+        "tests/swarm/test_default_models.py::test_set_refuses_a_lane_model_no_harness_catalog_lists_without_writing",
+        "tests/swarm/test_default_models.py::test_set_accepts_a_lane_model_any_harness_catalog_lists",
+        "tests/swarm/test_default_models.py::test_a_set_that_fixes_no_new_lane_model_reads_no_catalog",
+        "tests/swarm/test_default_models.py::test_a_lane_update_without_a_model_reads_no_catalog",
+        "tests/swarm/test_default_models.py::test_lane_model_validation_uses_the_store_cache_and_current_context"
+      ]
+    },
+    {
       "id": "artifact-request-rule",
       "origin": "inventory",
       "behaviour": "An agent publishes an artifact only on a task marked artifact requested or against an operator message that asked for it; any other publish is refused naming where proofs go.",
