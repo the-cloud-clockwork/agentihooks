@@ -9691,6 +9691,18 @@
       ]
     },
     {
+      "id": "compose-stack-own-modes",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2609",
+      "behaviour": "The Compose swarm stack reads its deployment mode and scheduler state backend only from the stack settings SWARM_DEPLOYMENT and SWARM_SCHEDULER_STATE_BACKEND, defaulting to compose and bus, and swarm init writes SWARM_DEPLOYMENT into the stack .env. A shell that runs compose with AGENTIHOOKS_DEPLOYMENT or AGENTIHOOKS_SCHEDULER_STATE_BACKEND set, such as an agent shell on a hive in distributed mode, renders the same values for every stack service as a shell that leaves both unset.",
+      "seam": "the shared x-swarm-env block of the Compose stack file and its swarm init copy, and the stack .env that swarm init writes",
+      "tests": [
+        "tests/test_compose_stack.py::test_the_stack_never_reads_the_deployment_or_scheduler_backend_of_the_shell",
+        "tests/test_compose_stack.py::test_the_stack_renders_one_deployment_and_scheduler_backend_from_any_shell",
+        "tests/swarm/test_stack_env.py::test_first_settings_are_generated_private"
+      ]
+    },
+    {
       "id": "tick-view-merged-pull-cache",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-view-slow-github-reads",
