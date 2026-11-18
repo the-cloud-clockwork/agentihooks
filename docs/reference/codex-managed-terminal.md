@@ -337,7 +337,7 @@ prints the reason on stderr and exits 3:
 agentihooks init-agent: Codex app server exited with status 1 before the profile canary validated
 ```
 
-Before this change the supervisor only left its loop, the report stayed
+Before pull request 11266 the supervisor only left its loop, the report stayed
 `pending`, and the canary wait ran until `--canary-timeout` or the 270 second
 [launch deadline](#launch-waits-and-the-spawn-timeout) ran out.
 
@@ -368,10 +368,10 @@ Reasons that fail an `app_server` canary before its deadline:
 |---|---|
 | A reason listed under [Refusals](#refusals) | The execution home's evidence cannot be confirmed |
 | `codex-session launch refused: app-server exited with status <N> before it answered` | The server exits during startup, before the supervisor connects to it; the supervisor exits 3 |
-| The provider's error message | The opening turn fails on an account refusal; the supervisor exits 3 |
+| The provider's error message, verbatim with no prefix, or its `codexErrorInfo` value when the message is empty | The opening turn fails on an account refusal; the supervisor exits 3 |
 | `the opening Codex turn failed on a provider error: <message>` | The opening turn fails on another provider error; the supervisor exits 3 |
 | `the opening Codex turn ended twice on a provider capacity error: <message>` | Both opening turn attempts end on a capacity error; the supervisor exits 3 |
-| `codex-session launch refused: <error>` | Any other launch failure before the supervisor starts the pump; the supervisor exits 3 |
+| `codex-session launch refused: <error>` | Any other failure while the supervisor launches the server and its thread, before it starts the pump; the supervisor exits 3. A failure to prepare the launch exits 2 and writes only the route report |
 | `Codex provider refused the routed account` | The inbox pump exits with status 4 (`REFUSED_EXIT`); the supervisor exits 4 |
 | `Codex app server exited with status <N> before the profile canary validated` | The app server exits while the pump still runs; the supervisor exits N |
 
@@ -380,7 +380,7 @@ is never rewritten.
 
 A launch run with `--defer-canary` has already returned
 `profile_validation=pending` before the canary wait, so the failure reaches
-only the launch report it named as `profile_report=<path>`: its `state` reads
+only the profile report at `profile_report=<path>`: its `state` reads
 `failed` and its `reason` holds the text above.
 
 In a swarm the reason is written to the swarm timer journal as
@@ -389,10 +389,10 @@ spawn reopens the task; see [When the deadline cuts a wait](#when-the-deadline-c
 
 #### Find the cause
 
-The report records the exit status and no server output. The server's own output is in the
-serve log. `init-agent` prints the launcher as `launcher=<path>.sh`, and the
-serve log is `<path>.serve.log` beside it. The supervisor writes its launch
-line there:
+The report records the exit status and no server output. The server's own
+output is in the serve log. `init-agent` prints the launcher as
+`launcher=<path>.sh`, and the serve log is `<path>.serve.log` beside it. The
+supervisor writes its launch line there:
 
 ```text
 [agentihooks codex-session] execution=<id> thread=<id> endpoint=unix://<path> state=<state>
@@ -444,9 +444,10 @@ TZ=UTC journalctl --user -u agentihooks-swarm.service \
 
 Delivered in
 [pull request 11266](https://github.com/the-cloud-clockwork/agentihooks/pull/11266).
-In its [Tests run on the tests alone](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/43628094591),
-later cancelled, both exit status cases failed with `Failed: init-agent
-waited on an exited app server`, while the validated case passed.
+In the [Tests run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/43628094591)
+of its test only commit, both exit status cases failed with `Failed:
+init-agent waited on an exited app server`, while the validated case passed.
+That run was later cancelled.
 
 ### Read the result
 
