@@ -6135,10 +6135,10 @@ def main() -> None:
         from scripts.serena_router_daemon import main as serena_main
 
         raise SystemExit(serena_main(_argv[1:]))
-    if _argv and _argv[0] == "ledger":
+    if _argv and _argv[0] in ("ledger", "api"):
         from scripts.swarm_ledger import run as ledger_run
 
-        raise SystemExit(ledger_run(_argv[1:]))
+        raise SystemExit(ledger_run(_argv[1:], prog=_argv[0]))
     if _argv and _argv[0] in ("swarm", "controller"):
         from scripts.swarm import cli, controller
 
@@ -6323,7 +6323,12 @@ def main() -> None:
     sub.add_parser("quota", help="One table for every Claude and Codex account")
     sub.add_parser("skill", help="Run skill evaluations with quota routed Claude authentication: eval -- <command>")
     sub.add_parser("serena", help="Run the Serena router: start|stop|restart|status|release <path>")
-    sub.add_parser("ledger", help="Swarm ledger: agent CLI, or new|serve|watch|chat <args>")
+    sub.add_parser("ledger", help="Swarm ledger page: read only, plus new|serve|watch|chat|storage <args>")
+    sub.add_parser(
+        "api",
+        help="Swarm write API: --slug <slug> --as <name> task add|task set|comment|followup|relay|answer|"
+        "join|ack|alert|priority|phase|publish-plan|artifact <args> (same route code as `agentihooks ledger`)",
+    )
     sub.add_parser(
         "swarm",
         help="Swarm of agents over a swarm ledger: <id> create|start|pause|stop|set|status|send-message, list, tick",

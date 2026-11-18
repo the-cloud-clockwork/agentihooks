@@ -20,11 +20,11 @@ step and to `proof.md` per piece of evidence.
 
 ## Join
 
-- `agentihooks ledger --slug <slug> --as <name> join`, once.
+- `agentihooks api --slug <slug> --as <name> join`, once.
 - Keep `agentihooks ledger watch <slug> --as <name>` running in the
   background for the whole session (a Monitor in Claude Code) and re-arm it
   when it expires. Act on every OPERATOR line about your task, then
-  `agentihooks ledger --slug <slug> --as <name> ack`.
+  `agentihooks api --slug <slug> --as <name> ack`.
 
 ## Recall
 
@@ -64,9 +64,9 @@ tick-step skill first and follows it for the step's artefacts and checks.
 3. Record the pull request with `agentihooks swarm <slug> pr <url>` and mark
    it ready once its checks are green.
 4. Record landed work in plain words:
-   `agentihooks ledger --slug <slug> --as <name> comment phases/<phase> "<what landed>"`.
+   `agentihooks api --slug <slug> --as <name> comment phases/<phase> "<what landed>"`.
    A follow up you find is proposed, never queued as your own task:
-   `agentihooks ledger --slug <slug> --as <name> followup add "<text>"`.
+   `agentihooks api --slug <slug> --as <name> followup add "<text>"`.
 
 ## CI proofs
 
@@ -130,7 +130,7 @@ fix a queued pull request, dequeue it first with
 checks pass queue it again with `agentihooks swarm <slug> merge queue <url>`.
 
 Once merged, remove the worktree, then
-`agentihooks ledger --slug <slug> --as <name> leave` and close with the proof
+`agentihooks api --slug <slug> --as <name> leave` and close with the proof
 your task kind needs. The ledger refuses `done` without it.
 
 | Kind | Close |

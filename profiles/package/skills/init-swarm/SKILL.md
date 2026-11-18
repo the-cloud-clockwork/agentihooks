@@ -145,13 +145,13 @@ immediately before each task heading; the section ends at the next anchor or hea
 level. Publish it for the manual phases before adding their tasks:
 
 ```bash
-agentihooks ledger --slug <slug> --as <name> publish-plan <plan-file> --phase <phase-ids>
+agentihooks api --slug <slug> --as <name> publish-plan <plan-file> --phase <phase-ids>
 ```
 
 Then add each task with its anchor; the ledger computes its plan lines:
 
 ```bash
-agentihooks ledger --slug <slug> task add <id> "<title>" --lane eng|ci --phase <phase> --plan-slice <id> --description "<seam and done condition>" \
+agentihooks api --slug <slug> task add <id> "<title>" --lane eng|ci --phase <phase> --plan-slice <id> --description "<seam and done condition>" \
   [--depends-on <id>,<id>] [--territory <path or area>,<path or area>] \
   [--kind ci] [--kind ops|troubleshoot|tune|research --must "<true when done>" --check "<how>" --judge "<who>"]
 ```
