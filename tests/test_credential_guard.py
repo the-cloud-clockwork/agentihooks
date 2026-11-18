@@ -5,6 +5,7 @@ The guard now runs on every target, so they run in CI instead of by hand.
 """
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -12,6 +13,7 @@ from hooks.context.credential_guard import (
     ENV_NAMES_SAFE,
     GREP_EXCLUDES,
     KIND_ENVIRONMENT,
+    KIND_RECURSIVE,
     RG_EXCLUDES,
     block,
     decide,
@@ -315,6 +317,47 @@ CASES = [
     ("grep -r home", {"tool_name": "Bash", "tool_input": {"command": "grep -r X ~"}}, True),
     ("grep -f attached", {"tool_name": "Bash", "tool_input": {"command": "sed -n 1p -f.env x"}}, True),
     ("ssh sudo cat", {"tool_name": "Bash", "tool_input": {"command": "ssh host sudo cat /root/.netrc"}}, True),
+    (
+        "kubectl exec sh -c env grep sed",
+        {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": "H=$(kubectl get pods -n swarm-hive-001 -o name | grep worker-hive | head -1); "
+                'kubectl exec -n swarm-hive-001 $H -- sh -c \'env | grep -iE "ledger|swarm_url|8765|8766" | '
+                'sed -E "s/(TOKEN|KEY|SECRET|PASS)[^=]*=.*/\\1=<redacted>/"\' 2>&1 | '
+                'grep -viE "token|key|secret|pass" | head -10'
+            },
+        },
+        True,
+    ),
+    (
+        "kubectl exec sh -c env cut grep",
+        {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": 'kubectl -n swarm-hive-001 exec "$P" -c worker-hive -- sh -c '
+                "'env | cut -d= -f1 | grep -i -E \"ca|cert|ssl|ledger|swarm_url\" | sort' 2>&1 | head -30"
+            },
+        },
+        True,
+    ),
+    (
+        "awk ENVIRON value print",
+        {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": 'agentihooks hive list 2>&1 | head -30; echo "---"; hostname; '
+                "awk 'BEGIN{for(k in ENVIRON) if(k ~ /^(AGENTIHOOKS_(HIVE|SWARM|AGENT_NAME|SWARM_TASK|COMPACT_LIMIT)"
+                '[A-Z_]*)$/) print k"="ENVIRON[k]}\''
+            },
+        },
+        True,
+    ),
+    (
+        "kubectl exec sh -c ls",
+        {"tool_name": "Bash", "tool_input": {"command": "kubectl exec pod -- sh -c 'ls /app'"}},
+        False,
+    ),
 ]
 
 
@@ -648,6 +691,86 @@ def test_a_named_describe_type_after_any_flag_passes(command: str) -> None:
 
 def _bash(command, cwd=""):
     return {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": cwd}
+
+
+SHELL_SCRIPT_DUMPS = [
+    ("sh -c 'env | sort'", "dumping the whole environment (env)"),
+    ("bash -lc 'printenv | grep REDIS'", "dumping the whole environment (printenv)"),
+    ("zsh -c 'export -p'", "dumping the whole environment (export)"),
+    ("dash -ec 'set'", "dumping the whole environment (set)"),
+    ("bash -ce 'env'", "dumping the whole environment (env)"),
+    ("sudo bash -euo pipefail -c 'env | cut -d= -f1'", "dumping the whole environment (env)"),
+    ("docker exec box bash -c 'printenv'", "dumping the whole environment (printenv)"),
+    ("ssh host sh -c 'env'", "dumping the whole environment (env)"),
+    (
+        "kubectl exec -n ns pod -- sh -c 'env | cut -d= -f1 | grep -i -E \"ca|cert\" | sort' 2>&1 | head -30",
+        "dumping the whole environment (env)",
+    ),
+    ("kubectl exec pod -- sh -c \"awk '{print ENVIRON[$1]}'\"", "printing environment values (awk ENVIRON[...])"),
+]
+
+SHELL_SCRIPTS_THAT_PRINT_NO_VALUE = [
+    "kubectl exec -n ns pod -- sh -c 'ls /app'",
+    "bash -c 'env | wc -l'",
+    "bash -c 'compgen -e'",
+    "bash script.sh",
+    "bash script.sh check env",
+    "bash --rcfile env",
+    "bash -c",
+    "grep -c env notes.txt",
+    "python3 -c 'env'",
+]
+
+
+@pytest.mark.feature("credential-guard-reads-shell-scripts")
+@pytest.mark.parametrize(("command", "what"), SHELL_SCRIPT_DUMPS)
+def test_an_environment_dump_inside_a_shell_script_is_refused(command: str, what: str) -> None:
+    assert decide(_bash(command)) == block(what, KIND_ENVIRONMENT)
+
+
+@pytest.mark.feature("credential-guard-reads-shell-scripts")
+@pytest.mark.parametrize("command", SHELL_SCRIPTS_THAT_PRINT_NO_VALUE)
+def test_a_shell_script_that_prints_no_value_passes(command: str) -> None:
+    assert decide(_bash(command)) is None
+
+
+@pytest.mark.feature("credential-guard-reads-shell-scripts")
+def test_a_shell_script_keeps_the_credential_tree_scan(tmp_path: Path) -> None:
+    (tmp_path / ".env").write_text("A=1\n")
+
+    verdict = evaluate(_bash(f"bash -c 'grep -r needle {tmp_path}'"))
+
+    assert verdict.block == block(f"searching a tree that holds {tmp_path / '.env'}", KIND_RECURSIVE)
+
+
+AWK_ENVIRON_VALUE_READS = [
+    "awk 'BEGIN{for(k in ENVIRON) if(k ~ /^AGENTIHOOKS_(HIVE|SWARM)/) print k\"=\"ENVIRON[k]}'",
+    "gawk 'BEGIN{print ENVIRON[\"DATABASE_URL\"]}'",
+    "mawk 'BEGIN { print ENVIRON [\"REDIS_URL\"] }'",
+    "nawk 'BEGIN{print ENVIRON[\"X\"]}'",
+    "compgen -e | /usr/bin/awk '{print $1\"=\"ENVIRON[$1]}'",
+    "kubectl exec pod -- awk 'BEGIN{print ENVIRON[\"DATABASE_URL\"]}'",
+]
+
+AWK_ENVIRON_NAME_ONLY = [
+    ENV_NAMES_SAFE,
+    "awk 'BEGIN{for(k in ENVIRON) if(k ~ /LEDGER/) print k}'",
+    "awk -F= '{print $1}' names.txt",
+    "awk '{print MYENVIRON[1]}' data.txt",
+    "grep -n 'ENVIRON[' notes.txt",
+]
+
+
+@pytest.mark.feature("credential-guard-refuses-awk-environ-values")
+@pytest.mark.parametrize("command", AWK_ENVIRON_VALUE_READS)
+def test_an_awk_read_of_an_environment_value_is_refused(command: str) -> None:
+    assert decide(_bash(command)) == block("printing environment values (awk ENVIRON[...])", KIND_ENVIRONMENT)
+
+
+@pytest.mark.feature("credential-guard-refuses-awk-environ-values")
+@pytest.mark.parametrize("command", AWK_ENVIRON_NAME_ONLY)
+def test_an_awk_listing_of_environment_names_passes(command: str) -> None:
+    assert decide(_bash(command)) is None
 
 
 class TestEnvironmentNames:
