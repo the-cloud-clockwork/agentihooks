@@ -69,7 +69,7 @@ jobs:
             args+=(--config "$rule")
             if [[ -e "$RUNNER_TEMP/grader/$rule" ]]; then args+=(--config "$RUNNER_TEMP/grader/$rule"); fi
           done
-          semgrep scan --error --strict --metrics off --x-ignore-semgrepignore-files "${args[@]}" tests
+          semgrep scan --error --strict --timeout 30 --metrics off --x-ignore-semgrepignore-files "${args[@]}" tests
 
       - name: Rule exceptions only shrink
         env:
