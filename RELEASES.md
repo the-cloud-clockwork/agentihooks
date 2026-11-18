@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.1033 · 2026-11-18
+
+### 2026-11-18 · 42eeef30506f · #12050 · @nestorcolt
+
+**Rebuild only the replaced stamp records in the ledger writer copy**
+
+This change stops every ledger write from rebuilding the entire stamps fragment record by record while holding the writer lock. A new `fragments.replaced` scan (running in C) identifies only the keys whose values actually changed or were added, and `fragments.stamps`/`writer_copy.detached` now copy the stored structure and re-encode or recurse into just those keys, falling back to the old full rebuild only when key order has shifted. On the 76k-record test ledger this cuts single-write CPU time roughly threefold and nearly halves lock-wait times under concurrent load, with equivalence tests confirming identical output to the old behavior.
+
+### 2026-11-18 · 157164982249 · #12150 · @agenticore-app
+
+**Run test files a merge group entry adds that the stored manifest lacks**
+
+Previously, when a merge group entry introduced a brand-new test file, the scheduler's MirrorExpander only built test units from the stored dev dependency manifest, so the new test never ran and the executor would crash with a KeyError on unlisted files. This change adds logic to detect test modules present in the tree but absent from the manifest, generate a lab test unit for each with a broad fingerprint key, and append those units for merge group entries so new tests are actually executed instead of silently skipped or crashing the run.
+
 ## v2.17.1031 · 2026-11-18
 
 ### 2026-11-18 · a38685c9a0a2 · #12132 · @nestorcolt
