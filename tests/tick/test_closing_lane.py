@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 from scripts.swarm import cli, reboot, tick_heartbeat
+from scripts.swarm.store import RedisStore
 from scripts.tick import engine, pool, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain, Lane, Result
@@ -87,10 +88,13 @@ def test_the_closing_steps_sit_in_the_closing_group_and_lane() -> None:
 
 @pytest.mark.feature("tick-status-publish-survives-dropped-findings")
 def test_status_publish_runs_when_the_health_findings_it_needs_were_dropped(monkeypatch: pytest.MonkeyPatch) -> None:
+    import fakeredis
+
     calls: list[tuple[Any, ...]] = []
     monkeypatch.setattr(cli, "_publish_tick_status", lambda *args: calls.append(args))
     step = next(step for step in report.STEPS if step.name == "status publish")
-    state: dict[str, object] = {"store": None, "slug": "sw", "doc": {}, "view": None, "box": {}, "failure": None}
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    state: dict[str, object] = {"store": store, "slug": "sw", "doc": {}, "view": None, "box": {}, "failure": None}
     with pool.running(critical_s=0.01) as current:
         current.hand({"health findings"})
         current.end("health findings", True)

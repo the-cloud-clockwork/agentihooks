@@ -21,6 +21,9 @@
   "reap": [
    "hive-roll"
   ],
+  "status publish": [
+   "running"
+  ],
   "step starvation": [
    "running"
   ],
@@ -112,7 +115,6 @@
   "snapshot job",
   "spawn hold clear",
   "stall watch",
-  "status publish",
   "stopped branch",
   "strays",
   "tick view",

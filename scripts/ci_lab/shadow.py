@@ -23,9 +23,9 @@ from typing import Any
 
 from scripts import ci_wiring
 from scripts.ci_lab import contract, metrics, static_gates
-from scripts.ci_lab.checks import SHADOW
 from scripts.ci_lab.objects import ROOT, Objects
 from scripts.ci_lab.store import PREFIX as STORE_PREFIX
+from scripts.ci_lab.webhooks import CHECK_PREFIX
 from scripts.swarm import metrics_outbox
 
 __all__ = [
@@ -39,6 +39,7 @@ __all__ = [
     "UNMAPPED_KEY",
     "Row",
     "Shadow",
+    "Sources",
     "ancestor",
     "gate_of",
     "grader_revision",
@@ -61,7 +62,7 @@ VERDICTS = {"success": PASS, "failure": FAIL, "timed_out": FAIL}
 PREFIX = f"{STORE_PREFIX}shadow:"
 UNMAPPED_KEY = f"{STORE_PREFIX}shadow-unmapped"
 OBJECTS = f"{ROOT}shadow/"
-LAB_NAME = f"{SHADOW}/"
+LAB_NAME = f"{CHECK_PREFIX}-shadow/"
 MATRIX = re.compile(r" \(.*\)$")
 GRADER = re.compile(r"^Grader revision: (\S+)$", re.MULTILINE)
 TABLE = metrics_outbox.Table(
@@ -87,6 +88,14 @@ class Row:
     lab_verdict: str
     actions_verdict: str
     mismatch: bool
+
+
+@dataclass(frozen=True)
+class Sources:
+    """Where each side's verdicts come from: the static gate ids Actions jobs map to and the lab's GitHub App slug."""
+
+    static: Collection[str]
+    lab_app: str
 
 
 def gate_of(name: str, static: Collection[str]) -> str:
@@ -133,7 +142,10 @@ def _table_row(row: Row, ts_ms: int) -> dict[str, object]:
 
 
 class Shadow:
-    """The shadow recorder: folds check_run.completed deliveries into one row per gate and head."""
+    """The shadow recorder: folds check_run.completed deliveries into one row per gate and head.
+
+    Its caller observes deliveries one at a time, as one scheduler will once it feeds the recorder, so a turn into a
+    mismatch is read and written by one observe at a time and counted once by the process registry."""
 
     def __init__(
         self,
@@ -141,24 +153,26 @@ class Shadow:
         objects: Objects,
         sink: metrics.Sink,
         registry: metrics.Registry,
-        static: Collection[str],
+        sources: Sources,
         now_ms: Callable[[], int] = _now_ms,
     ) -> None:
         self.client = client
         self.objects = objects
         self.sink = sink
         self.registry = registry
-        self.static = static
+        self.sources = sources
         self.now_ms = now_ms
 
     def observe(self, payload: Mapping[str, Any]) -> Row | None:
-        """Fold one check run delivery into its gate and head; return the row once both verdicts are known."""
+        """Fold one check run delivery into its gate and head; return the row once both verdicts are known.
+
+        A lab-shadow check run counts only from the lab's App and every other check run only from github-actions."""
         run = payload["check_run"]
         name = str(run["name"])
         lab = name.startswith(LAB_NAME)
-        if payload["action"] != COMPLETED or (not lab and run["app"]["slug"] != ACTIONS):
+        if payload["action"] != COMPLETED or run["app"]["slug"] != (self.sources.lab_app if lab else ACTIONS):
             return None
-        gate = gate_of(name.removeprefix(LAB_NAME), self.static)
+        gate = gate_of(name.removeprefix(LAB_NAME), self.sources.static)
         if gate == UNMAPPED:
             self.client.sadd(UNMAPPED_KEY, name)
             return None
@@ -223,17 +237,19 @@ def ancestor(repo: Path, older: str, newer: str) -> bool:
 def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     """Print the shadow report: python -m scripts.ci_lab shadow report --since REVISION [--repo PATH] [--redis URL]."""
     parser = argparse.ArgumentParser(prog="python -m scripts.ci_lab shadow")
-    command = parser.add_subparsers(dest="command", required=True).add_parser("report")
-    command.add_argument("--since", required=True)
-    command.add_argument("--repo", type=Path, default=Path())
-    command.add_argument("--redis", default=environ.get(contract.REDIS_URL, ""))
+    report_parser = parser.add_subparsers(dest="command", required=True).add_parser("report")
+    report_parser.add_argument("--since", required=True)
+    report_parser.add_argument("--repo", type=Path, default=Path())
+    report_parser.add_argument("--redis", default=environ.get(contract.REDIS_URL, ""))
     arguments = parser.parse_args(argv)
     if not arguments.redis:
-        command.error(f"--redis or {contract.REDIS_URL} names the lab Redis")
+        report_parser.error(f"--redis or {contract.REDIS_URL} names the lab Redis")
+    descends = functools.cache(functools.partial(ancestor, arguments.repo))
+    if not descends(arguments.since, arguments.since):
+        report_parser.error(f"--since {arguments.since} names no commit in {arguments.repo}")
     import redis
 
     factory: Any = redis.Redis
     client = factory.from_url(arguments.redis, decode_responses=True)
-    descends = functools.cache(functools.partial(ancestor, arguments.repo))
     sys.stdout.write(report(rows(client), client.smembers(UNMAPPED_KEY), arguments.since, descends))
     return 0

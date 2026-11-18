@@ -20,6 +20,22 @@
       ]
     },
     {
+      "id": "tick-status-publish-last-findings",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-status-publish-budget",
+      "behaviour": "Status publish publishes the health findings the pass stored; a passing pass whose health findings step stored none publishes the findings of the swarm's last published status, and only a failed pass or a swarm with no published findings leaves them for the status report to build, so the closing lane never repeats the whole findings build under its own budget, which abandoned it at its eleven second budget after controller rollouts.",
+      "seam": "report._status_publish with commands.published_findings, run by engine.run_group on the closing group",
+      "tests": [
+        "tests/tick/steps/test_status_publish.py::test_status_publish",
+        "tests/tick/steps/test_status_publish.py::test_status_publish_publishes_the_last_findings_when_the_pass_stored_none",
+        "tests/tick/steps/test_status_publish.py::test_status_publish_leaves_the_findings_to_the_report_before_the_first_publish",
+        "tests/tick/steps/test_status_publish.py::test_status_publish_leaves_the_findings_to_the_report_when_the_pass_failed",
+        "tests/tick/steps/test_status_publish.py::test_status_publish_keeps_the_findings_the_pass_stored",
+        "tests/tick/steps/test_status_publish.py::test_status_publish_keeps_an_empty_list_the_pass_stored",
+        "tests/tick/steps/test_status_publish.py::test_status_publish_leaves_the_findings_to_the_report_when_the_last_publish_holds_none"
+      ]
+    },
+    {
       "id": "compose-master-drill",
       "origin": "regression",
       "ordered_at": "2026-11-17",
@@ -4050,6 +4066,18 @@
       ]
     },
     {
+      "id": "gate-protected-finds-the-tests-run-through-check-runs",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-gate-protected-find-run-by-checks",
+      "behaviour": "Gate Protected finds a pull request head's newest Tests run through the head commit's check runs while the GitHub run listing still omits that run, reading each other workflow run those check runs name once, so a clean head whose Tests run already runs with jobs passes the gate instead of failing with the Tests run missing.",
+      "seam": "ci_tests_start.verify and the check runs lookup it falls back to",
+      "tests": [
+        "tests/test_ci_tests_start.py::test_finds_the_tests_run_through_the_head_check_runs_while_the_listing_omits_it",
+        "tests/test_ci_tests_start.py::test_check_runs_of_other_runs_are_read_once_and_never_pass",
+        "tests/test_ci_tests_start.py::test_the_newest_tests_run_named_by_check_runs_is_read_first"
+      ]
+    },
+    {
       "id": "trace-plan-per-repository-size",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t447",
@@ -5784,6 +5812,18 @@
         "tests/test_type_gate.py::test_type_records_load_and_refresh_without_rewriting_the_shared_baseline",
         "tests/test_type_gate.py::test_independent_source_branches_merge_their_records_in_either_order",
         "tests/test_feature_map.py::test_feature_fragments_preserve_validation_and_retirement"
+      ]
+    },
+    {
+      "id": "type-gate-repeatable-counts",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-strict-type-gate-flake",
+      "behaviour": "The strict type gate checks its sorted sources in contiguous runs of at most a thousand files, one basedpyright process each, and refuses a measurement whose checker reached the memory line where basedpyright empties its type cache, so one commit counts the same type errors on every run.",
+      "seam": "scripts.type_gate.measure through its basedpyright subprocess runs and the peak resident memory of its child processes",
+      "tests": [
+        "tests/test_type_gate.py::test_measure_checks_at_most_a_thousand_sources_per_checker_process_and_sums_their_counts",
+        "tests/test_type_gate.py::test_a_checker_peak_at_the_line_where_basedpyright_empties_its_type_cache_is_refused",
+        "tests/test_type_gate.py::test_a_checker_peak_under_the_line_where_basedpyright_empties_its_type_cache_is_kept"
       ]
     },
     {
@@ -7646,6 +7686,18 @@
       ]
     },
     {
+      "id": "test-summary-downloads-every-report-in-one-step",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-test-summary-single-download",
+      "behaviour": "The protected grader admits a test summary job that fetches its durations and flakes reports with one artifact download step under the pattern {durations,flakes}-3.*, retried once, beside the reviewed two download job, so a blob response that download-artifact leaves open idles the job at most once and it stays inside its five minute limit.",
+      "seam": "scripts.gate_protected.grade over the test-summary job, through scripts.gate_protected._one_download",
+      "tests": [
+        "tests/test_gate_protected.py::test_the_separate_summary_accepts_one_download_of_every_report",
+        "tests/test_gate_protected.py::test_the_separate_summary_refuses_one_download_of_other_reports",
+        "tests/test_gate_protected.py::test_the_one_download_puts_one_step_for_every_report_where_the_first_download_was"
+      ]
+    },
+    {
       "id": "lab-full-pool-wait",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-full-pool-wait",
@@ -7686,7 +7738,8 @@
         "tests/ci_lab/test_shadow_report.py::test_the_table_prints_a_row_per_head_and_the_rule_counts",
         "tests/ci_lab/test_shadow_report.py::test_the_report_command_reads_live_heads_through_the_github_api",
         "tests/ci_lab/test_shadow_report.py::test_the_report_command_names_its_repository_and_refuses_an_empty_window",
-        "tests/ci_lab/test_shadow_report.py::test_only_a_report_with_a_gate_is_the_acceptance_rule_report"
+        "tests/ci_lab/test_shadow_report.py::test_only_a_report_with_a_gate_is_the_acceptance_rule_report",
+        "tests/ci_lab/test_shadow_report.py::test_a_paged_list_stops_at_a_short_page_or_after_ten_pages"
       ]
     },
     {
