@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.1040 · 2026-11-18
+
+### 2026-11-18 · 48be728effd3 · #12185 · @agenticore-app
+
+**Document the hub admission release when an events launch fails**
+
+This change adds documentation to docs/pillars/hives.md explaining how an events hive returns a hub admission when its launch fails, covering the spoke's action per failure outcome, what the hub reopen releases, recovery of a stale launching claim, the exception for late admissions that keep their claim after #11511 reverted the earlier #11051 behavior, relevant QueuePolicy and timing settings, live checks, upgrade notes, guards, and troubleshooting. It also fixes a stale cross-reference in swarm.md and adds a changelog entry, so operators have accurate, verified guidance matching current dev behavior instead of outdated assumptions.
+
 ## v2.17.1039 · 2026-11-18
 
 ### 2026-11-18 · 24c838cd2b36 · #12169 · @agenticore-app
