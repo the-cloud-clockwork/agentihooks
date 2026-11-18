@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.1025 · 2026-11-18
+
+### 2026-11-18 · 719a237e3049 · #12106 · @agenticore-app
+
+**Init agent takes an injectable terminal start and profile canary so the launch chain test reads its real report**
+
+This change makes `init_agent.main` accept injectable `start` and `canary` boundaries instead of hardcoding the real terminal spawn and profile canary wait, keeping existing defaults so current callers are unaffected. It lets the front door launch chain test run a genuine (non dry-run) launch, with the pane helper substituting a start that validates the launch environment and runs the launcher inline, and a canary that answers for the exec'd process, so the test now asserts on init-agent's actual emitted report fields rather than a hand-written stand-in, making the test more faithful to real behavior.
+
+### 2026-11-18 · a087965505ad · #12061 · @nestorcolt
+
+**Venv guard refuses a worktree editable install into the hooks venv**
+
+This change fixes a real incident: because a worktree editable install silently replaced the hooks' own venv, every bundle check importing scripts.gates.entry started failing open with ModuleNotFoundError until manually repaired. The venv guard now blocks editable installs targeting the hooks' venv unless the source is the primary checkout, and its call was restored into hook_manager's shell guard checks after being dropped by an earlier revert. A new semgrep incident rule and feature-map entry guard against this wiring disappearing again; a known gap around shared exception handling across the four guards is tracked separately in #12070.
+
 ## v2.17.1023 · 2026-11-18
 
 ### 2026-11-18 · c1c1c0a5e706 · #12099 · @agenticore-app
