@@ -158,15 +158,23 @@ def placeable(task: Mapping[str, Any], hive: str, capabilities: Callable[[], Ite
     )
 
 
-def rooted(task: Mapping[str, Any]) -> bool:
+def root_only(task: Mapping[str, Any]) -> bool:
     """A task only the root hive takes: one pinned to it, or a workstation task pinned to no other hive."""
     return task.get("hive") == ROOT or (bool(task.get("workstation")) and not task.get("hive"))
 
 
-def root_waiting(view: Snapshot) -> int:
-    """The claimable tasks only the root hive takes, each keeping one root slot from work any hive can run."""
+def root_waiting(view: Snapshot, capabilities: Callable[[], Iterable[str]]) -> int:
+    """The snapshot swarm's claimable tasks only the root hive takes and can place, each keeping one root slot from
+    work any hive can run; root's capabilities are read only for a task that names needs."""
     rows: Any = view.rows
-    return sum(1 for task in rows.values() if rooted(task) and task.get("lane") and claimable(task, task["lane"], view))
+    return sum(
+        1
+        for task in rows.values()
+        if root_only(task)
+        and task.get("lane")
+        and placeable(task, ROOT, capabilities)
+        and claimable(task, task["lane"], view)
+    )
 
 
 def fits(event: Envelope, hive: str, capabilities: Callable[[], Iterable[str]]) -> bool:
