@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -7,6 +8,29 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 IMAGE = "local/agentihooks-swarm:clients-check"
+
+
+def runtime_images() -> list[str]:
+    script = (ROOT / "scripts/packaging/pull-runtime-image.sh").read_text()
+    return re.findall(r'"\$image" == mirror\.gcr\.io/library/([^\s*)]+)', script)
+
+
+def assert_pulls_every_runtime_image(run: str) -> None:
+    images = runtime_images()
+    assert images
+    lines = [line.strip() for line in run.splitlines()]
+    for image in images:
+        assert f"bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/{image} &&" in lines, image
+        assert any(
+            line.startswith(f"docker tag public.ecr.aws/docker/library/{image} mirror.gcr.io/library/{image} ")
+            for line in lines
+        ), image
+
+
+def build_command(run: str) -> str:
+    builds = [line for line in run.replace("\\\n", "").splitlines() if line.strip().startswith("docker build ")]
+    assert len(builds) == 1, builds
+    return " ".join(re.sub(r'\$\{\w+:\+--cache-(?:from|to) "\$\w+"\}', "", builds[0]).split()).removesuffix(" &")
 
 
 def test_main_image_is_built_once_before_every_compatible_smoke() -> None:
@@ -22,31 +46,10 @@ def test_main_image_is_built_once_before_every_compatible_smoke() -> None:
     build = builds[0]
     step = steps[build]
     if "run" in step:
-        assert step["run"].replace(
-            ' \\\n  ${LAYERS_FROM:+--cache-from "$LAYERS_FROM"} ${LAYERS_TO:+--cache-to "$LAYERS_TO"}', ""
-        ) in {
+        assert_pulls_every_runtime_image(step["run"])
+        assert build_command(step["run"]) in {
             f"docker build -t {IMAGE} .",
             f"docker build -t {IMAGE} --output type=image,compression=uncompressed .",
-            """docker build -t local/agentihooks-swarm:clients-check --output type=image,compression=uncompressed . &
-build=$!
-status=0
-bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/redis:7 &&
-  docker tag public.ecr.aws/docker/library/redis:7 mirror.gcr.io/library/redis:7 &
-redis=$!
-bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/nats:2.15.1-alpine &&
-  docker tag public.ecr.aws/docker/library/nats:2.15.1-alpine mirror.gcr.io/library/nats:2.15.1-alpine &
-nats=$!
-bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/nginx:1.27-alpine &&
-  docker tag public.ecr.aws/docker/library/nginx:1.27-alpine mirror.gcr.io/library/nginx:1.27-alpine &
-nginx=$!
-bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/redis:7-alpine &&
-  docker tag public.ecr.aws/docker/library/redis:7-alpine mirror.gcr.io/library/redis:7-alpine || status=$?
-wait "$redis" || status=$?
-wait "$nats" || status=$?
-wait "$nginx" || status=$?
-wait "$build" || status=$?
-exit "$status"
-""",
         }
     else:
         assert step["with"]["context"] == "."
@@ -65,6 +68,20 @@ exit "$status"
         assert build < next(
             i for i, step in enumerate(steps) if f"scripts/packaging/{script}.sh" in step.get("run", "").split()
         )
+
+
+@pytest.mark.parametrize("commented", [False, True])
+def test_the_build_check_fails_when_the_step_loses_any_runtime_image(commented: bool) -> None:
+    steps = yaml.safe_load((ROOT / ".github/workflows/swarm-smoke.yml").read_text())["jobs"]["smoke"]["steps"]
+    run = next(step["run"] for step in steps if step.get("id") == "build")
+    assert_pulls_every_runtime_image(run)
+    for image in runtime_images():
+        lost = "\n".join(
+            (f"# {line}" if commented else "") if f"/library/{image} " in f"{line} " else line
+            for line in run.splitlines()
+        )
+        with pytest.raises(AssertionError, match=f"(?m)^{re.escape(image)}$"):
+            assert_pulls_every_runtime_image(lost)
 
 
 @pytest.mark.parametrize(
