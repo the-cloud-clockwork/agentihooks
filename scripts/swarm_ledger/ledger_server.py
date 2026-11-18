@@ -1009,8 +1009,8 @@ def serve() -> None:
     drained = True
     try:
         with projector.running(repository, HUB):
-            PIDFILE.write_text(str(os.getpid()))
             try:
+                PIDFILE.write_text(str(os.getpid()))
                 server.serve_forever(POLL_S)
             finally:
                 stopped.set()

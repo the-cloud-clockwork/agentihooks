@@ -2,6 +2,7 @@ import os
 import re
 import threading
 from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock, call
@@ -303,16 +304,31 @@ def test_the_ledger_server_gives_the_projector_its_store_and_stops_it_before_clo
     ]
 
 
+def patched_serve(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, server: Mock) -> Path:
+    from scripts.swarm_ledger import ledger_server
+
+    pidfile = tmp_path / "server.pid"
+    monkeypatch.setattr(ledger_server, "PIDFILE", pidfile)
+    monkeypatch.setattr(ledger_server.core, "LEDGER_DIR", tmp_path)
+    monkeypatch.setattr(ledger_server.storage, "shared", lambda: None)
+    monkeypatch.setattr(ledger_server.threading, "Thread", Mock())
+    monkeypatch.setattr(ledger_server, "metrics_journal", Mock())
+    monkeypatch.setattr(ledger_server.server_code, "record", Mock())
+    monkeypatch.setattr(ledger_server.server_lifetime, "watch", Mock())
+    monkeypatch.setattr(ledger_server, "ThreadingHTTPServer", Mock(return_value=server))
+    return pidfile
+
+
 @pytest.mark.feature("ledger-server-pid-file-after-projector")
 def test_the_ledger_server_writes_its_pid_file_only_once_the_projector_runs(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from contextlib import contextmanager
-
     from scripts.swarm_ledger import ledger_server
 
-    pidfile = tmp_path / "server.pid"
     seen: list[tuple[str, str | None]] = []
+    server = Mock()
+    server.drained.return_value = True
+    pidfile = patched_serve(monkeypatch, tmp_path, server)
 
     def written() -> str | None:
         return pidfile.read_text() if pidfile.exists() else None
@@ -326,21 +342,26 @@ def test_the_ledger_server_writes_its_pid_file_only_once_the_projector_runs(
         seen.append(("serving", written()))
         raise ValueError("serving failed")
 
-    monkeypatch.setattr(projector, "running", projecting)
-    monkeypatch.setattr(ledger_server, "PIDFILE", pidfile)
-    monkeypatch.setattr(ledger_server.core, "LEDGER_DIR", tmp_path)
-    monkeypatch.setattr(ledger_server.storage, "shared", lambda: None)
-    monkeypatch.setattr(ledger_server.threading, "Thread", Mock())
-    monkeypatch.setattr(ledger_server, "metrics_journal", Mock())
-    monkeypatch.setattr(ledger_server.server_code, "record", Mock())
-    monkeypatch.setattr(ledger_server.server_lifetime, "watch", Mock())
-    server = Mock()
     server.serve_forever.side_effect = serving
-    server.drained.return_value = True
-    monkeypatch.setattr(ledger_server, "ThreadingHTTPServer", Mock(return_value=server))
+    monkeypatch.setattr(projector, "running", projecting)
     with pytest.raises(ValueError, match="serving failed"):
         ledger_server.serve()
     assert seen == [("projector started", None), ("serving", str(os.getpid()))]
+
+
+@pytest.mark.feature("ledger-server-pid-file-after-projector")
+def test_a_ledger_server_whose_projector_fails_to_start_writes_no_pid_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from scripts.swarm_ledger import ledger_server
+
+    server = Mock()
+    pidfile = patched_serve(monkeypatch, tmp_path, server)
+    monkeypatch.setattr(projector, "running", Mock(side_effect=RuntimeError("projector failed")))
+    with pytest.raises(RuntimeError, match="projector failed"):
+        ledger_server.serve()
+    assert not pidfile.exists()
+    server.serve_forever.assert_not_called()
 
 
 def test_a_relay_that_fails_to_start_releases_the_lease_without_serving(
