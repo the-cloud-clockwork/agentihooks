@@ -109,6 +109,7 @@ Set the nonsecret addresses and mounted paths for your deployment, for example:
 ```bash
 export CI_LAB_RUNTIME_CONFIG=/etc/ci-lab/runtime.yaml
 export CI_LAB_REDIS_URL=redis://redis:6379/0
+export CI_LAB_URL=http://lab:8800
 export CI_LAB_MINIO_ENDPOINT=http://minio:9000
 export CI_LAB_MINIO_BUCKET=ci-lab
 export AGENTIHOOKS_BUS=nats
@@ -119,6 +120,9 @@ export CI_LAB_REPOSITORY=https://github.com/the-cloud-clockwork/agentihooks.git
 
 agentihooks ci-lab-scheduler
 ```
+
+`CI_LAB_URL` is the address consumers can reach; the relay uses it in grade links. It is
+required at startup and does not change the listener's bind address.
 
 The deployment must also inject `CI_LAB_MINIO_ACCESS_KEY`, `CI_LAB_MINIO_SECRET_KEY`, the
 scheduler's `GITHUB_APP_*` identity and any bus or repository authentication. Keep their values
