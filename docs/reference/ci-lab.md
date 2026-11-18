@@ -1229,6 +1229,10 @@ gate tests compared 2 mismatches 0
 unmapped docs
 ```
 
+`shadow report --gate <gate>` is a different command: the acceptance rule report that a gate's
+flip pull request pastes. It reads Actions jobs and `lab-shadow/<gate>` check runs from GitHub,
+not these rows. See [CI lab shadow acceptance report](lab-shadow.md).
+
 ### Troubleshooting
 
 | Symptom | Cause | Check |
