@@ -31,6 +31,10 @@ def hub_problems(deployment: dict) -> list[str]:
     bus = {"AGENTIHOOKS_BUS": "nats", "AGENTIHOOKS_BUS_URL": "nats://nats.swarm:4222"}
     if {name: env.get(name) for name in bus} != bus:
         found.append(f"the hub bus env is {[env.get(name) for name in bus]}, expected {list(bus.values())}")
+    serving = env.get("AGENTIHOOKS_HUB_SERVING_FILE")
+    probe = container.get("readinessProbe", {}).get("exec", {}).get("command")
+    if not serving or probe != ["test", "-f", serving]:
+        found.append(f"the hub turns ready on {probe} instead of its serving file {serving}")
     labels = deployment["spec"]["template"]["metadata"]["labels"]
     if labels.get("app.kubernetes.io/component") != "hub":
         found.append("the hub pods are not labelled with the hub component")
@@ -129,6 +133,12 @@ def problems(chart: str) -> list[str]:
     unaddressed = render(chart, "--set", "hub.enabled=true", "--set", "nats.enabled=false")
     if unaddressed.returncode == 0 or "hub.bus.url" not in unaddressed.stderr:
         found.append("a NATS hub without hub.bus.url renders instead of failing on the missing address")
+    unmarked = render(chart, *ENABLED, "--set", "hub.servingFile=")
+    if unmarked.returncode == 0 or "hub.servingFile" not in unmarked.stderr:
+        found.append("a hub without hub.servingFile renders a readiness probe that never passes")
+    overlaid = render(chart, *ENABLED, "--set", "hub.env.AGENTIHOOKS_HUB_SERVING_FILE=/elsewhere")
+    if overlaid.returncode or any(hub_problems(d) for d in hubs(overlaid.stdout)):
+        found.append("a hub.env entry for AGENTIHOOKS_HUB_SERVING_FILE moves the hub off the file its probe reads")
     if receivers(default.stdout):
         found.append("the default release renders the GitHub webhook receiver")
     return found + scope_problems(chart) + secret_env_problems(chart) + receiver_release_problems(chart)
@@ -224,7 +234,8 @@ if __name__ == "__main__":
     if failures:
         sys.exit(1)
     print(
-        "the hub renders two replicas of agentihooks hub run on the configured bus that prefer different nodes,"
+        "the hub renders two replicas of agentihooks hub run on the configured bus that prefer different nodes"
+        " and turn ready only once they serve,"
         " and only outside a hive;"
         " the GitHub webhook receiver renders beside it on the chart image with its secret by reference"
     )

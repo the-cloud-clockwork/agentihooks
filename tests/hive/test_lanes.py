@@ -133,6 +133,17 @@ def test_dead_lane_work_asks_the_hub_to_reopen_its_task(hub):
     ]
 
 
+def test_a_dead_lettered_offer_asks_the_hub_to_reopen_its_task_as_dead(hub: SimpleNamespace) -> None:
+    lanes.LaneTasks(hub.bus, "hive-a", Mock()).dead_lettered(offer(lane="ci"))
+    assert hub.hub.seen == [
+        (
+            "reopen",
+            "rig",
+            {"op": "reopen", "hive": "hive-a", "task": "t1", "lane": "ci", "generation": 2, "dead": True},
+        )
+    ]
+
+
 def test_a_launch_failed_on_a_harness_is_reported_to_the_hub(hub):
     lanes.LaneTasks(hub.bus, "hive-a", Mock()).failed(offer(), "codex", "launch failed")
     assert hub.hub.seen == [

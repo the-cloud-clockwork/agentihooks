@@ -1,6 +1,22 @@
 {
   "features": [
     {
+      "id": "tick-status-publish-last-findings",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-status-publish-budget",
+      "behaviour": "Status publish publishes the health findings the pass stored; a passing pass whose health findings step stored none publishes the findings of the swarm's last published status, and only a failed pass or a swarm with no published findings leaves them for the status report to build, so the closing lane never repeats the whole findings build under its own budget, which abandoned it at its eleven second budget after controller rollouts.",
+      "seam": "report._status_publish with commands.published_findings, run by engine.run_group on the closing group",
+      "tests": [
+        "tests/tick/steps/test_status_publish.py::test_status_publish",
+        "tests/tick/steps/test_status_publish.py::test_status_publish_publishes_the_last_findings_when_the_pass_stored_none",
+        "tests/tick/steps/test_status_publish.py::test_status_publish_leaves_the_findings_to_the_report_before_the_first_publish",
+        "tests/tick/steps/test_status_publish.py::test_status_publish_leaves_the_findings_to_the_report_when_the_pass_failed",
+        "tests/tick/steps/test_status_publish.py::test_status_publish_keeps_the_findings_the_pass_stored",
+        "tests/tick/steps/test_status_publish.py::test_status_publish_keeps_an_empty_list_the_pass_stored",
+        "tests/tick/steps/test_status_publish.py::test_status_publish_leaves_the_findings_to_the_report_when_the_last_publish_holds_none"
+      ]
+    },
+    {
       "id": "compose-master-drill",
       "origin": "regression",
       "ordered_at": "2026-11-17",
@@ -187,6 +203,16 @@
       "seam": "runner.main, after slots.serve and exits.serve",
       "tests": [
         "tests/hub/test_runner.py::test_the_hub_marks_itself_serving_only_after_its_slots_and_exits_responders_subscribe"
+      ]
+    },
+    {
+      "id": "hub-ready-only-when-serving",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2600",
+      "behaviour": "The swarm chart sets AGENTIHOOKS_HUB_SERVING_FILE on the hub container and gives it a readiness probe that passes only while that file exists, so the one pod at a time hub rollout terminates the last old hub pod only after a new hub pod has subscribed to slots.",
+      "seam": "hub container env and readinessProbe in the swarm chart hub Deployment",
+      "tests": [
+        "tests/test_swarm_chart_hub_readiness.py::test_the_hub_turns_ready_only_once_its_serving_file_exists"
       ]
     },
     {
@@ -4021,6 +4047,18 @@
       ]
     },
     {
+      "id": "gate-protected-finds-the-tests-run-through-check-runs",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-gate-protected-find-run-by-checks",
+      "behaviour": "Gate Protected finds a pull request head's newest Tests run through the head commit's check runs while the GitHub run listing still omits that run, reading each other workflow run those check runs name once, so a clean head whose Tests run already runs with jobs passes the gate instead of failing with the Tests run missing.",
+      "seam": "ci_tests_start.verify and the check runs lookup it falls back to",
+      "tests": [
+        "tests/test_ci_tests_start.py::test_finds_the_tests_run_through_the_head_check_runs_while_the_listing_omits_it",
+        "tests/test_ci_tests_start.py::test_check_runs_of_other_runs_are_read_once_and_never_pass",
+        "tests/test_ci_tests_start.py::test_the_newest_tests_run_named_by_check_runs_is_read_first"
+      ]
+    },
+    {
       "id": "trace-plan-per-repository-size",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t447",
@@ -4172,6 +4210,17 @@
         "tests/swarm_ledger/test_hive_watch_in_process.py::test_a_hive_watch_prints_an_event_written_between_its_reads_once",
         "tests/swarm_ledger/test_hive_watch_in_process.py::test_a_remote_watch_takes_no_credentials_and_a_local_watch_follows_the_ledger_server_stream",
         "tests/swarm_ledger/test_hive_watch_in_process.py::test_a_remote_poll_reads_the_ledger_in_process_with_its_kept_export_every_interval"
+      ]
+    },
+    {
+      "id": "merge-priority-moves-waiting-entries-at-once",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2604",
+      "behaviour": "A merge priority request moves the waiting dev queue entries ahead of the pull request behind it at once, even while the head merge group still tests, so the pull request joins the next group; running entries stay in place and no deferred record is stored.",
+      "seam": "scripts.swarm.queue_priority.request through agentihooks swarm merge priority",
+      "tests": [
+        "tests/swarm/test_queue_priority.py::test_priority_moves_waiting_entries_at_once_while_the_head_group_tests",
+        "tests/swarm/test_merge_queue_priority.py::test_master_priority_moves_waiting_entries_without_cancelling_running_head"
       ]
     },
     {
@@ -5771,6 +5820,18 @@
       ]
     },
     {
+      "id": "type-gate-repeatable-counts",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-strict-type-gate-flake",
+      "behaviour": "The strict type gate checks its sorted sources in contiguous runs of at most a thousand files, one basedpyright process each, and refuses a measurement whose checker reached the memory line where basedpyright empties its type cache, so one commit counts the same type errors on every run.",
+      "seam": "scripts.type_gate.measure through its basedpyright subprocess runs and the peak resident memory of its child processes",
+      "tests": [
+        "tests/test_type_gate.py::test_measure_checks_at_most_a_thousand_sources_per_checker_process_and_sums_their_counts",
+        "tests/test_type_gate.py::test_a_checker_peak_at_the_line_where_basedpyright_empties_its_type_cache_is_refused",
+        "tests/test_type_gate.py::test_a_checker_peak_under_the_line_where_basedpyright_empties_its_type_cache_is_kept"
+      ]
+    },
+    {
       "id": "hive-master-refused-account-retry",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-scale-cpu",
@@ -5827,6 +5888,19 @@
         "tests/hive/test_master_fallback_launch.py::test_master_fill_checks_a_seat_two_master_against_its_own_seat_not_the_front_door",
         "tests/hive/test_master_fallback_launch.py::test_the_distributed_controller_admits_the_front_door_master_on_a_login_its_fleet_rows_drain",
         "tests/swarm/test_quota_handoff.py::test_a_front_door_master_is_warned_only_at_its_master_floor"
+      ]
+    },
+    {
+      "id": "dead-offer-generation",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-dead-offer-generation",
+      "behaviour": "An offer that dead letters while the hub holds no admission for it advances its open, unclaimed task's claim generation by one, and a delivery that meets a dead claim marker asks the hub for that advance before it is terminated, so the task's next offer carries a fresh claim key and is placed on a later pass instead of being terminated forever.",
+      "seam": "Spoke._finish_dead and Spoke._ended through LaneTasks.dead_lettered against Admission.reopen and the ledger task_update claim generation advance",
+      "rules": ["dead-letter-reopen-keeps-generation"],
+      "tests": [
+        "tests/swarm/test_events_placement.py::test_a_task_whose_offer_dead_lettered_at_its_current_generation_is_placed_on_a_later_pass",
+        "tests/hub/test_admission.py::test_a_dead_lettered_reopen_with_no_admission_held_advances_the_claim_generation",
+        "tests/hive/test_spoke.py::test_an_offer_meeting_a_dead_claim_asks_the_hub_to_advance_its_generation_before_term"
       ]
     },
     {
@@ -7301,6 +7375,19 @@
       ]
     },
     {
+      "id": "proof-master-claude-launch-scratch-redis",
+      "origin": "regression",
+      "ordered_at": "2026-11-17",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-proof-master-keeps-proof-redis",
+      "behaviour": "agentihooks claude keeps a scratch proof swarm's AGENTIHOOKS_SWARM_REDIS_URL from its launcher over the env files it loads, so a master forced up on the proof swarm, its hooks and its commands read and bind on the proof Redis; every other env file value still overrides the shell, and a live swarm session takes the env file Redis.",
+      "seam": "scripts.install._load_claude_runtime_env as scripts.install.cmd_claude runs it before routing the session",
+      "tests": [
+        "tests/test_proof_master_redis.py::test_agentihooks_claude_starts_a_proof_master_on_the_scratch_redis",
+        "tests/test_proof_master_redis.py::test_agentihooks_claude_starts_a_live_swarm_session_on_the_env_file_redis",
+        "tests/test_proof_master_redis.py::test_only_a_proof_swarm_that_exported_its_redis_keeps_it_over_the_env_files"
+      ]
+    },
+    {
       "id": "hive-chart-capabilities",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-anton-hive-capability-chart",
@@ -7601,6 +7688,18 @@
         "tests/test_ci_branch_reuse_workflow.py::test_sonar_takes_a_lone_selected_legs_coverage_from_the_bare_download_folder",
         "tests/test_ci_branch_reuse_workflow.py::test_sonar_leaves_a_bare_download_at_the_folder_root_when_two_legs_were_selected",
         "tests/test_ci_branch_reuse_workflow.py::test_sonar_takes_a_lone_legs_newest_attempt_when_its_attempts_land_in_their_own_folders"
+      ]
+    },
+    {
+      "id": "test-summary-downloads-every-report-in-one-step",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-test-summary-single-download",
+      "behaviour": "The protected grader admits a test summary job that fetches its durations and flakes reports with one artifact download step under the pattern {durations,flakes}-3.*, retried once, beside the reviewed two download job, so a blob response that download-artifact leaves open idles the job at most once and it stays inside its five minute limit.",
+      "seam": "scripts.gate_protected.grade over the test-summary job, through scripts.gate_protected._one_download",
+      "tests": [
+        "tests/test_gate_protected.py::test_the_separate_summary_accepts_one_download_of_every_report",
+        "tests/test_gate_protected.py::test_the_separate_summary_refuses_one_download_of_other_reports",
+        "tests/test_gate_protected.py::test_the_one_download_puts_one_step_for_every_report_where_the_first_download_was"
       ]
     },
     {
@@ -8497,6 +8596,17 @@
         "tests/test_ci_stats_seed.py::test_harvest_downloads_a_failed_artifact_again_after_a_wait",
         "tests/test_ci_stats_seed.py::test_harvest_fails_naming_the_artifact_once_every_download_failed",
         "tests/test_ci_stats_seed.py::test_harvest_retries_neither_a_timed_out_download_nor_a_failed_listing"
+      ]
+    },
+    {
+      "id": "compose-stack-own-bus",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-compose-controller-bus-auth",
+      "behaviour": "The Compose swarm stack reads its bus backend and address only from the stack settings SWARM_BUS and SWARM_BUS_URL, defaulting to the stack's own NATS service. An agent shell that runs compose with its own Anton bus settings and credential leaves every stack service, the controller included, on the stack NATS, never on the Anton bus without its credential.",
+      "seam": "the shared x-swarm-env block of the Compose stack file and its swarm init copy",
+      "tests": [
+        "tests/test_compose_stack.py::test_the_stack_never_reads_the_bus_settings_of_the_shell_that_runs_compose",
+        "tests/test_compose_stack.py::test_an_agent_shell_on_the_anton_bus_leaves_the_controller_on_the_stack_nats"
       ]
     }
   ],
