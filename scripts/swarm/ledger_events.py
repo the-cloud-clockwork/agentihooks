@@ -16,7 +16,7 @@ import sys
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from contextvars import copy_context
+from contextvars import ContextVar, copy_context
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Any
@@ -35,6 +35,7 @@ from scripts.tick.ports.contracts import SourceControl
 MINUTE_MS = 60_000
 TICK_VIEW_TTL_S = 180
 MERGED_VIEW_TTL_S = 2 * 24 * 3600
+TICK_VIEW_READ: ContextVar[bool] = ContextVar("tick_view_read", default=False)
 TASK_FINDINGS = frozenset({"proof loop", "failed launch", "stale claim"})
 HELD_FINDINGS = frozenset({"idle with claim", "waiting on input", "stalled", "working on drain"})
 FOLLOWUP_RAISE_MS = 15 * MINUTE_MS
@@ -492,14 +493,24 @@ def _keep_merged(cache: Any, found: dict[str, PullRequest | None]) -> None:
 
 
 def _count_views(pulls: int, kept: int) -> None:
-    """Write to the controller log how many of ``pulls`` distinct pull requests a view inside a tick pass served from
-    the merged views the swarm Redis keeps and how many it read from GitHub; a view outside a pass writes nothing."""
+    """Write to the controller log how many of ``pulls`` distinct pull requests a tick view inside a tick pass had no
+    earlier view of, how many of those it served from the merged views the swarm Redis keeps and how many it read from
+    GitHub; any other read, a tick view with nothing to read and one outside a pass write nothing."""
     slug = timing.SWARM.get()
-    if slug is None:
+    if slug is None or not pulls or not TICK_VIEW_READ.get():
         return
     current = timing.PASS.get() or {}
     line = {"event": "swarm_pull_views", "slug": slug, "pass_id": current.get("pass_id"), "pulls": pulls}
-    print(json.dumps({**line, "kept_merged": kept, "read": pulls - kept}), file=sys.stderr, flush=True)
+    print(json.dumps({**line, "kept_merged": kept, "read": pulls - kept}), file=sys.stderr)
+
+
+def _counted_views(urls: list[str], cache: Any, ttl: float) -> dict[str, PullRequest | None]:
+    """Read ``urls`` through :func:`views` as a tick view, whose read counts reach the controller log."""
+    token = TICK_VIEW_READ.set(True)
+    try:
+        return views(urls, cache=cache, ttl=ttl)
+    finally:
+        TICK_VIEW_READ.reset(token)
 
 
 def views(
@@ -672,7 +683,7 @@ def tick_view(
     known = {url: pr for url, pr in getattr(earlier, "snapshots", {}).items() if pr is not None}
     snapshots = {
         **known,
-        **views([url for url in dict.fromkeys(urls) if url not in known], cache=store.redis, ttl=TICK_VIEW_TTL_S),
+        **_counted_views([url for url in dict.fromkeys(urls) if url not in known], store.redis, TICK_VIEW_TTL_S),
     }
 
     @functools.cache
