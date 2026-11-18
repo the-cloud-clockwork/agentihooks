@@ -40,7 +40,7 @@ def send(
 ) -> int | None:
     """Post the signed notice of a pushed head and return the receiver's status, 0 when the send failed, or None when
     the environment does not name a receiver, a secret and an actor."""
-    url, secret, actor = environ.get(URL_ENV, ""), environ.get(NOTICE_SECRET_ENV, ""), environ.get(ACTOR_ENV, "")
+    url, secret, actor = environ.get(URL_ENV), environ.get(NOTICE_SECRET_ENV), environ.get(ACTOR_ENV)
     if not (url and secret and actor):
         return None
     request = notice(url, secret.encode(), {"repo": repo, "head": head, "base": base, "actor": actor})
