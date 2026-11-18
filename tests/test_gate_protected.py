@@ -1190,6 +1190,13 @@ def test_a_head_dropping_the_lab_verdict_job_is_red() -> None:
             ),
         ),
         ("select", lambda condition: condition.removesuffix(" }}") + " && !contains(toJSON(needs), 'lint') }}"),
+        (
+            "select",
+            lambda _: (
+                "${{ fromJSON(NEEDS[format('lab-{0}', 'verdict')].outputs.authoritative || '{}')['select'] != true }}"
+            ),
+        ),
+        ("select", lambda _: "${{ NEEDS.LAB-VERDICT.outputs.authoritative != '' }}"),
     ],
 )
 def test_a_gate_condition_off_its_base_plus_its_exact_lab_clause_is_red(gate: str, edit: Callable[[str], str]) -> None:
@@ -1253,9 +1260,11 @@ def test_the_lab_clause_extends_the_base_condition(condition: str | None, render
         ("${{ !contains(toJSON(needs), 'lint') }}", True),
         ("${{ contains(needs.*.result, 'failure') }}", True),
         ("${{ 'it''s' == needs }}", True),
+        ("${{ NEEDS['select'].result }}", False),
+        ("${{ Needs[format('x', 'y')] }}", True),
     ],
 )
-def test_a_condition_reads_the_needs_context_freely_only_without_a_literal_job_name(condition: str, free: bool) -> None:
+def test_a_condition_reads_the_needs_context_freely_when_a_computed_read_remains(condition: str, free: bool) -> None:
     assert gate_protected._reads_needs_freely(condition) is free
 
 

@@ -216,10 +216,10 @@ def lab_clause(condition: str | None, gate: str) -> str:
 
 
 def _reads_needs_freely(condition: str) -> bool:
-    """Return whether a condition reads the needs context other than by a literal job name."""
-    literal = re.sub(r"needs\s*\[\s*'[^']*'\s*\]", "needs.job", condition)
+    """Return whether a condition reads the needs context, in any letter case, other than by a literal job name."""
+    literal = re.sub(r"needs\s*\[\s*'[^']*'\s*\]", "needs.job", condition, flags=re.IGNORECASE)
     bare = re.sub(r"'(?:[^']|'')*'", "''", literal)
-    return re.search(r"(?<![\w.-])needs\b(?!\s*\.\s*[A-Za-z_])", bare) is not None
+    return re.search(r"(?<![\w.-])needs\b(?!\s*\.\s*[A-Za-z_])", bare, flags=re.IGNORECASE) is not None
 
 
 def _lab_problems(base: dict[str, Any], head: dict[str, Any], gate: dict[str, Any]) -> list[str]:
@@ -241,9 +241,9 @@ def _lab_problems(base: dict[str, Any], head: dict[str, Any], gate: dict[str, An
     def off_base(need: str) -> bool:
         condition: str | None = head[need].get("if")
         reviewed: str | None = base[need].get("if")
-        if LAB_VERDICT_JOB in str(reviewed):
+        if LAB_VERDICT_JOB in str(reviewed).lower():
             return condition != reviewed
-        reads = LAB_VERDICT_JOB in str(condition) or _reads_needs_freely(str(condition))
+        reads = LAB_VERDICT_JOB in str(condition).lower() or _reads_needs_freely(str(condition))
         return reads and condition not in (reviewed, lab_clause(reviewed, need))
 
     return problems + [
