@@ -2,6 +2,32 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.997 · 2026-11-18
+
+### 2026-11-18 · f17da458dda5 · #11870 · @agenticore-app
+
+**Frozen gate registry holds the writer lock workflow so a pull request cannot drop its own jobs**
+
+This change adds `.github/workflows/writer-lock.yml` to the frozen gate registry, pinned at its current blob, so the protected grader now checks the reusable workflow's jobs directly rather than trusting only the caller. Previously a pull request could silently delete one of the writer lock's jobs (inputs, events, tick, hive-join, features, lab-sandbox, scenario) since nothing graded from the base pinned them, letting a head quietly drop test coverage while still passing Gate Required. A planted draft PR proved the hole before this fix and is confirmed blocked after it, closing a real gap in CI integrity enforcement.
+
+### 2026-11-18 · b50c98986849 · #11858 · @agenticore-app
+
+**Root hive keeps its free slots for waiting workstation tasks**
+
+This change fixes a bug where root was handing out all its slots to generic work before checking whether workstation tasks pinned specifically to it were waiting. Now root reserves one slot for each claimable task only it can run, holding generic admission once live workers plus those waiting tasks hit max agents, so other hives pick up the generic work and root's lane spoke launches the pinned task next poll. This prevents workstation tasks from sitting idle for an hour, as happened on 18 November when root ran full on unpinned work while three pinned tasks waited.
+
+### 2026-11-18 · f405e30ca605 · #11868 · @agenticore-app
+
+**Accept the writer lock freeze inventory before its registration (Refs #11865)**
+
+This change updates the registry inventory test so it tolerates the frozen file set both with and without `.github/workflows/writer-lock.yml`, letting the test pass ahead of that file's actual registration. It's a deliberate test-first step for #11865, following the gate-change rule that tests must land before the behavior they verify, ensuring the writer-lock workflow can later be frozen into the gate registry without a pull request being able to strip its own jobs.
+
+### 2026-11-18 · 8ac7ea752a4f · #11876 · @agenticore-app
+
+**Announce the grader blob that grades the lab pin without equivalent mutants**
+
+This change updates the grader pin in scripts/gate_protected.py to the latest verified blob from the merged mutation testing pass, keeping the existing rules intact: the lab verdict job must match the base job, gates whose base condition reads the lab verdict preserve it exactly, and any gate referencing the lab verdict or needs context (via computed key, whole object, or any casing) must equal its base condition plus the exact clause. It also removes three equivalent mutants the prior mutation run flagged as unnecessary, tightening the pin without changing actual grading behavior.
+
 ## v2.17.993 · 2026-11-18
 
 ### 2026-11-18 · b1c7d45a95d2 · #11817 · @agenticore-app
