@@ -23,8 +23,9 @@ from hooks.hook_manager import BlockAction
 _ACTIVE_SYNC_RE = re.compile(r"\buv\s+(?:run|sync)\b[^|&;\n]*--active\b")
 _PIP = re.compile(r"pip[\d.]*")
 _PYTHON = re.compile(r"python[\d.]*")
-_EDITABLE = re.compile(r"(?:-e|--editable)(?:=?(.+))?")
-_INTERPRETER = re.compile(r"(?:--python|-p)(?:=(.+))?")
+_EDITABLE_OPTION = re.compile(r"(?:-e|--editable)(?:=?(.+))?")
+_PYTHON_OPTION = re.compile(r"(?:--python|-p)(?:=(.+))?")
+_ASSIGNED_VENV = re.compile(r"\b(?:VIRTUAL_ENV|UV_PYTHON)=[\"']?([^\s\"';&|()]+)")
 _EXTRAS = re.compile(r"\[[^\]]*\]$")
 
 
@@ -39,7 +40,7 @@ def _expanded(word: str) -> str:
     return os.path.expanduser(os.path.expandvars(word))
 
 
-def _here(cwd: Path, folders: list[str]) -> Path:
+def _cwd_after_cds(cwd: Path, folders: list[str]) -> Path:
     """The folder a command runs in once the cd words before it have run."""
     for folder in folders:
         target = cwd / _expanded(folder)
@@ -63,28 +64,28 @@ def _sources(words: list[str]) -> list[str]:
     return [
         _EXTRAS.sub("", value)
         for word, after in zip(words, [*words[1:], None])
-        if (match := _EDITABLE.fullmatch(word)) and (value := match[1] or after)
+        if (match := _EDITABLE_OPTION.fullmatch(word)) and (value := match[1] or after)
     ]
 
 
-def _target(tokens: list[str], cwd: Path) -> Path | None:
-    """The venv path an install writes into: its --python or -p value, its program's path, $VIRTUAL_ENV, or for uv
-    the nearest .venv, the order uv and pip look in."""
+def _target(tokens: list[str], cwd: Path, active: str) -> Path | None:
+    """The venv path an install writes into: its --python or -p value, its program's path, the active venv, or for
+    uv the nearest .venv, the order uv and pip look in."""
     for word, after in zip(tokens, [*tokens[1:], None]):
-        if (match := _INTERPRETER.fullmatch(word)) and (value := match[1] or after):
+        if (match := _PYTHON_OPTION.fullmatch(word)) and (value := match[1] or after):
             return cwd / _expanded(value)
     if "/" in tokens[0]:
         return cwd / _expanded(tokens[0])
-    if active := os.environ.get("VIRTUAL_ENV"):
-        return Path(active)
+    if active:
+        return cwd / _expanded(active)
     if Path(tokens[0]).name == "uv":
         return next((folder / ".venv" for folder in (cwd, *cwd.parents) if (folder / ".venv").is_dir()), None)
     return None
 
 
-def _into_hooks_venv(tokens: list[str], cwd: Path) -> bool:
+def _into_hooks_venv(tokens: list[str], cwd: Path, active: str) -> bool:
     """Whether an install writes into the venv the hooks run from, or into one an unexpanded variable hides."""
-    target = _target(tokens, cwd)
+    target = _target(tokens, cwd, active)
     if target is None or "$" in str(target):
         return target is not None
     venv = target if target.is_dir() else target.parent.parent
@@ -103,12 +104,17 @@ def _in_primary_checkout(folder: Path) -> bool:
 
 
 def _editable_refusal(command: str, cwd: Path) -> str:
-    """The refusal for an editable install into the hooks' venv whose source is not inside a primary checkout."""
+    """The refusal for an editable install into the hooks' venv whose source is not inside a primary checkout.
+
+    The active venv is the last VIRTUAL_ENV or UV_PYTHON the command assigns, else $VIRTUAL_ENV.
+    """
+    assigned = _ASSIGNED_VENV.findall(command)
+    active = assigned[-1] if assigned else os.environ.get("VIRTUAL_ENV", "")
     for tokens, folders in located(command):
         if not _installs(tokens):
             continue
-        here = _here(cwd, folders)
-        if _into_hooks_venv(tokens, here):
+        here = _cwd_after_cds(cwd, folders)
+        if _into_hooks_venv(tokens, here, active):
             for source in _sources(tokens):
                 folder = here / _expanded(source)
                 if not _in_primary_checkout(folder):
