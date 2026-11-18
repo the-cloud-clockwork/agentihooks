@@ -327,7 +327,7 @@ def open_turn(connection: protocol.Connection, thread_id: str, launch: Launch, d
 
 
 def opening_failure(turn: dict[str, Any]) -> str:
-    """The refusal for an opening turn the provider failed with an error a second attempt does not clear, else empty."""
+    """The refusal for an opening turn that failed with a provider error other than a capacity error, else empty."""
     message = str((turn.get("error") or {}).get("message") or "")
     terminal = turn.get("status") == TURN_FAILED and bool(message) and CAPACITY not in message
     return OPENING_FAILED.format(message) if terminal else ""

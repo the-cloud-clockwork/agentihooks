@@ -1059,7 +1059,7 @@ STREAM_LOST = "stream disconnected before completion"
     "error",
     [
         {"message": MODEL_NOT_FOUND, "codexErrorInfo": {"httpConnectionFailed": {"httpStatusCode": 404}}},
-        {"message": STREAM_LOST},
+        {"message": STREAM_LOST, "codexErrorInfo": {"responseStreamDisconnected": {"httpStatusCode": None}}},
     ],
 )
 @pytest.mark.parametrize("reported", [True, False])
@@ -1084,8 +1084,8 @@ def test_a_failed_opening_turn_fails_the_canary_at_once_naming_the_provider_erro
     assert (record.state, record.last_error_class) == (FAILED, "opening_failed")
     assert server.processes[-1].poll() is not None
     if reported:
-        assert json.loads(report.read_text())["state"] == "failed"
-        assert json.loads(report.read_text())["reason"] == reason
+        written = json.loads(report.read_text())
+        assert (written["state"], written["reason"]) == ("failed", reason)
         with pytest.raises(ValueError) as refused:
             binding.wait(report, 0.1)
         assert str(refused.value) == reason
@@ -1102,7 +1102,7 @@ def test_a_failed_opening_turn_fails_the_canary_at_once_naming_the_provider_erro
         [item("agentMessage"), completed("failed", MODEL_NOT_FOUND)],
     ],
 )
-def test_a_healthy_opening_turn_leaves_the_canary_waiting(
+def test_an_opening_turn_without_a_provider_error_leaves_the_canary_waiting(
     store: RedisStore, server: Server, clock: Clock, root: Path, tmp_path: Path, events: list[dict]
 ) -> None:
     server.turn_events = [events, [completed("failed", CAPACITY)]]
