@@ -4670,6 +4670,22 @@
       ]
     },
     {
+      "id": "credential-guard-refuses-describe-secret",
+      "origin": "regression",
+      "ordered_at": "2026-11-18",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2617",
+      "behaviour": "The credential guard refuses a kubectl describe whose resource type names Secrets, in any form: a bare or plural type, a type slash name, a type in a comma list, a group qualified type, a type after namespace flags or a line continuation, and inside an ssh or sudo wrapper; kubectl describe prints the token of a service account token Secret in full and the command line never shows the Secret's type. Describe of other kinds passes, including names and pipes that only mention secret, and both the describe refusal and the get secret yaml or json refusal offer a go-template that lists the data key names without the values instead of describe.",
+      "seam": "hooks.context.credential_guard.renderer_verdict through hooks.context.credential_guard.describes_secrets, read by hooks.context.credential_guard.decide",
+      "rules": [
+        "credential-guard-offers-describe-secret"
+      ],
+      "tests": [
+        "tests/test_credential_guard.py::test_kubectl_describe_of_a_secret_is_refused",
+        "tests/test_credential_guard.py::test_kubectl_commands_that_name_no_secret_type_pass",
+        "tests/test_credential_guard.py::test_get_secret_refusal_offers_the_key_listing_and_not_describe"
+      ]
+    },
+    {
       "id": "swarm-outage-recovery-hub-admitted",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-outage-recovery",
