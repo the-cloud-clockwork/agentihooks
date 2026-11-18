@@ -475,6 +475,7 @@ GET_NON_SECRET_DIAGNOSTICS = [
     "kubectl get -A pods -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name",
     "kubectl get pods -n get -o jsonpath='{.items[*].metadata.name}'",
     "kubectl get pod get -o jsonpath='{.status.phase}'",
+    "kubectl get secrets -o name | grep -o yaml",
     'kubectl get priorityclass -o jsonpath=\'{range .items[*]}{.metadata.name}{";"}{.value}{"\\n"}{end}\'',
     'kubectl get pods -A -o jsonpath=\'{range .items[*]}{.metadata.name}{"|"}{.status.phase}{"\\n"}{end}\'',
     "kubectl get pods -o jsonpath=\"{.items[?(@.status.phase=='Running')].metadata.name}{'&'}\"",

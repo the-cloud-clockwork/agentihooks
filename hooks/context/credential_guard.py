@@ -586,7 +586,8 @@ def renderer_verdict(command: str) -> str | None:
     return None
 
 
-KUBECTL_WORDS = re.compile(r"""\bkubectl\b(?=((?:'[^']*'|"(?:[^"\\]|\\.)*"|\\.|[^|<>;&])*))""")
+KUBECTL_WORDS = re.compile(r"\bkubectl\b")
+KUBECTL_END = re.compile(r"[|<>;&]")
 SHELL_GROUPING = re.compile(r"[()`]")
 VALUE_FLAGS = {"--output": "output", "--template": "template", "--raw": "raw"}
 SHORT_OUTPUT = re.compile(r"-[arwh]*o=?(.*)")
@@ -687,10 +688,10 @@ def get_operands(words: list[str]) -> list[tuple[str, bool]]:
 def type_operands(operands: list[tuple[str, bool]]) -> list[str]:
     """Operands that may hold the resource type: all in TYPE/NAME form, else each up to the first no flag can take."""
     words = [word for word, _ in operands]
-    if any("/" in word for word in words):
+    claimed = [claimable for _, claimable in operands]
+    if any("/" in word for word in words) or False not in claimed:
         return words
-    count = next((index + 1 for index, (_, claimable) in enumerate(operands) if not claimable), len(words))
-    return words[:count]
+    return words[: claimed.index(False) + 1]
 
 
 def types_secret(rest: list[str]) -> bool:
@@ -718,9 +719,12 @@ def prints_secret_values(words: list[str]) -> bool:
 
 def gets_secret_values(low: str) -> bool:
     """True when any kubectl get in the lowercased segment, continued lines joined, may print a Secret value."""
+    joined = joined_continuations(low)
     return any(
-        prints_secret_values(tokens_of(SHELL_GROUPING.sub(" ", found.group(1))))
-        for found in KUBECTL_WORDS.finditer(joined_continuations(low))
+        prints_secret_values(
+            tokens_of(SHELL_GROUPING.sub(" ", split_outside_quotes(KUBECTL_END, joined[found.end() :])[0]))
+        )
+        for found in KUBECTL_WORDS.finditer(joined)
     )
 
 
