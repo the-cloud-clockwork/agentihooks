@@ -157,45 +157,53 @@ def test_a_hive_watch_prints_an_event_written_between_its_reads_once(
 def test_a_remote_watch_takes_no_credentials_and_a_local_watch_follows_the_ledger_server_stream(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    streamed: list[tuple[str, str | None, dict[str, str]]] = []
-    polls: list[tuple[str, float, dict[Any, Any]]] = []
+    fetched: list[str] = []
+    polls: list[str] = []
+    opened: list[tuple[str, float]] = []
 
-    def stream(slug: str, cursor: str | None, headers: dict[str, str]) -> Iterator[tuple[str, Any, str | None]]:
-        streamed.append((slug, cursor, headers))
-        return iter(())
+    class Refused(Exception):
+        """The ledger server refusing a stream, so the test sees the request without a server."""
 
-    def polled(slug: str, interval: float, kept: dict[Any, Any]) -> Iterator[tuple[str, Any, None]]:
-        polls.append((slug, interval, kept))
-        return iter(())
+    def fetch(slug: str) -> dict[str, str]:
+        fetched.append(slug)
+        return {"X-Ledger-Token": f"for {slug}"}
 
-    monkeypatch.setattr(watch_ledger, "stream", stream)
+    def polled(slug: str) -> Iterator[tuple[str, Any, None]]:
+        polls.append(slug)
+        yield "snapshot", {"ledger": {"slug": slug}}, None
+
+    def urlopen(request: Any, timeout: float) -> Any:
+        opened.append((request.full_url, timeout))
+        raise Refused
+
+    monkeypatch.setitem(sys.modules, "ledger", types.SimpleNamespace(credentials=fetch))
     monkeypatch.setattr(watch_ledger, "polled", polled)
-    monkeypatch.setattr(watch_ledger, "credentials", lambda slug: {"X-Ledger-Token": f"for {slug}"})
     monkeypatch.setattr(watch_ledger.ledger_link, "remote", lambda environ=None, slug="": slug == "far")
+    monkeypatch.setattr(watch_ledger.ledger_link, "base", lambda: "http://h:1")
+    monkeypatch.setattr(watch_ledger.ledger_link, "urlopen", urlopen)
 
-    assert watch_ledger.held("far", {"X-Ledger-Token": "kept"}) is None
-    assert watch_ledger.held("near", None) == {"X-Ledger-Token": "for near"}
-    assert watch_ledger.held("near", {"X-Ledger-Token": "kept"}) == {"X-Ledger-Token": "kept"}
+    assert watch_ledger.credentials("far") == {}
+    assert fetched == []
+    assert watch_ledger.credentials("near") == {"X-Ledger-Token": "for near"}
+    assert fetched == ["near"]
 
-    kept: dict[Any, Any] = {("in-process", "far"): (3, {})}
-    assert list(watch_ledger.follow("far", "c1", None, 7.0, kept)) == []
-    assert polls == [("far", 7.0, kept)]
-    assert streamed == []
+    assert list(watch_ledger.stream("far", None, {})) == [("snapshot", {"ledger": {"slug": "far"}}, None)]
+    assert polls == ["far"]
+    assert opened == []
 
-    assert list(watch_ledger.follow("near", "c2", {"X-Ledger-Token": "kept"}, 7.0, kept)) == []
-    assert streamed == [("near", "c2", {"X-Ledger-Token": "kept"})]
-    assert len(polls) == 1
+    with pytest.raises(Refused):
+        next(watch_ledger.stream("near", "c2", {"X-Ledger-Token": "kept"}))
+    assert opened == [("http://h:1/api/v1/ledgers/near/events", watch_ledger.STREAM_TIMEOUT_S)]
+    assert polls == ["far"]
+    assert fetched == ["near"]
 
 
 @pytest.mark.feature("hive-watch-in-process")
-def test_a_remote_poll_reads_the_ledger_in_process_with_its_kept_export_every_interval(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_a_remote_poll_reads_the_ledger_in_process_with_the_kept_exports(monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts.tick.adapters import database_ledger
 
     built: list[tuple[str, float]] = []
     reads: list[tuple[str, dict[Any, Any]]] = []
-    pauses: list[float] = []
 
     class Client:
         def export(self, slug: str, kept: dict[Any, Any]) -> dict[str, Any]:
@@ -207,16 +215,9 @@ def test_a_remote_poll_reads_the_ledger_in_process_with_its_kept_export_every_in
         return Client()
 
     monkeypatch.setattr(database_ledger, "client", client)
-    monkeypatch.setattr(watch_ledger, "time", types.SimpleNamespace(sleep=pauses.append))
-    kept: dict[Any, Any] = {}
 
-    frames = watch_ledger.polled("far", 7.0, kept)
-
-    assert [next(frames), next(frames)] == [
-        ("snapshot", {"ledger": {"read": 1}}, None),
-        ("snapshot", {"ledger": {"read": 2}}, None),
-    ]
-    assert built == [(watch_ledger.IN_PROCESS, watch_ledger.STREAM_TIMEOUT_S)]
-    assert reads == [("far", kept), ("far", kept)]
-    assert all(held is kept for _, held in reads)
-    assert pauses == [7.0]
+    assert list(watch_ledger.polled("far")) == [("snapshot", {"ledger": {"read": 1}}, None)]
+    assert list(watch_ledger.polled("far")) == [("snapshot", {"ledger": {"read": 2}}, None)]
+    assert built == [(watch_ledger.IN_PROCESS, watch_ledger.STREAM_TIMEOUT_S)] * 2
+    assert reads == [("far", watch_ledger.EXPORTS)] * 2
+    assert all(kept is watch_ledger.EXPORTS for _, kept in reads)

@@ -46,16 +46,27 @@ from scripts.swarm_ledger.events import stream as events_stream  # noqa: E402
 
 STREAM_TIMEOUT_S = 3 * events_stream.HEARTBEAT_S
 IN_PROCESS = "in-process"
+EXPORTS: dict[Any, Any] = {}
 
 
-def credentials(slug):
+def credentials(slug: str) -> dict[str, str]:
+    """The credential headers the ledger server's event stream needs; none on a remote host, such as a hive worker,
+    which reads the ledger in process and so never fetches an agent token."""
+    if remote(slug):
+        return {}
     import ledger
 
     return ledger.credentials(slug)
 
 
-def stream(slug, cursor=None, headers=None):
-    """Yield (event, data, cursor) from the ledger server's event stream; Expired when the cursor is gone."""
+def stream(
+    slug: str, cursor: str | None = None, headers: dict[str, str] | None = None
+) -> Iterator[tuple[str, Any, str | None]]:
+    """Yield (event, data, cursor) from the ledger: one snapshot read in process on a remote host, such as a hive
+    worker, else the ledger server's event stream; Expired when the cursor is gone."""
+    if remote(slug):
+        yield from polled(slug)
+        return
     url, headers = request(slug, cursor, credentials(slug) if headers is None else headers)
     try:
         response = ledger_link.urlopen(urllib.request.Request(url, headers=headers), STREAM_TIMEOUT_S)
@@ -75,38 +86,17 @@ def request(slug, cursor, headers):
     return f"{ledger_link.base()}/api/v1/ledgers/{urllib.parse.quote(slug, safe='')}/events", headers
 
 
-def polled(slug: str, interval: float, kept: dict[Any, Any]) -> Iterator[tuple[str, dict[str, Any], None]]:
-    """Yield the ledger as a snapshot every interval seconds, read in process over the shared database as every other
-    non browser read is; kept holds the last export, so each later read takes only the changes since it."""
+def polled(slug: str) -> Iterator[tuple[str, dict[str, Any], None]]:
+    """Yield the ledger once as a snapshot read in process over the shared database, as every other non browser read
+    is; EXPORTS holds the last export, so each later read takes only the changes since it."""
     from scripts.tick.adapters import database_ledger
 
-    client = database_ledger.client(IN_PROCESS, STREAM_TIMEOUT_S)
-    while True:
-        yield "snapshot", {"ledger": client.export(slug, kept)}, None
-        time.sleep(interval)
+    yield "snapshot", {"ledger": database_ledger.client(IN_PROCESS, STREAM_TIMEOUT_S).export(slug, EXPORTS)}, None
 
 
 def remote(slug: str) -> bool:
     """Whether this host reaches the ledger as a remote client, such as a hive worker."""
     return ledger_link.remote(slug=slug)
-
-
-def held(slug: str, headers: dict[str, str] | None) -> dict[str, str] | None:
-    """The credential headers a watcher reads with: none on a remote host, such as a hive worker, which polls the
-    ledger in process and so never fetches an agent token; else the headers it holds, or fresh ones."""
-    if remote(slug):
-        return None
-    return headers or credentials(slug)
-
-
-def follow(
-    slug: str, cursor: str | None, headers: dict[str, str] | None, interval: float, kept: dict[Any, Any]
-) -> Iterator[tuple[str, Any, str | None]]:
-    """The events a watcher takes: on a remote host the ledger polled in process, else the ledger server's event
-    stream read with the credential headers."""
-    if remote(slug):
-        return polled(slug, interval, kept)
-    return stream(slug, cursor, headers)
 
 
 def say(text):
@@ -216,14 +206,13 @@ def main() -> None:
         atexit.register(beat.unlink, missing_ok=True)
         signal.signal(signal.SIGTERM, stop)
     headers, cursor, failure = None, None, None
-    kept: dict[Any, Any] = {}
     while not stopping:
         alive(beat)
         try:
-            headers = held(args.slug, headers)
+            headers = headers or credentials(args.slug)
             if stopping:
                 continue
-            for name, data, event_id in follow(args.slug, cursor, headers, args.interval, kept):
+            for name, data, event_id in stream(args.slug, cursor, headers):
                 alive(beat)
                 watch.take(name, data)
                 cursor, failure = event_id or cursor, None
