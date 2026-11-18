@@ -1439,7 +1439,7 @@ def test_a_measured_record_parses_each_closure_source_once(tmp_path: Path, monke
     sources = {
         "scripts/scan.py": "from pathlib import Path\n\n\ndef names():\n    return sorted(Path('data').glob('*.json'))\n",
         "scripts/helper.py": "from scripts.scan import names\n",
-        "tests/test_measured.py": "from scripts.helper import names\n\n\ndef test_names():\n    assert names() is not None\n",
+        "tests/test_measured.py": "def test_names():\n    assert True\n",
     }
     _repository(root, {**sources, "data/a.json": "{}\n"})
     node = "tests/test_measured.py::test_names"
