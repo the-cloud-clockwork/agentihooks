@@ -1325,7 +1325,7 @@ def _plan_read_guard(payload: dict, tool_name: str) -> None:
         log("plan_read_guard failed", {"error": str(e)})
 
 
-def _check_shell_guards(payload: dict) -> None:
+def _check_shell_guards(payload: dict[str, Any]) -> None:
     from hooks.context.local_test_guard import check_local_tests
     from hooks.context.swarm_wait_nudge import check_github_watch
 
@@ -1340,11 +1340,13 @@ def _check_shell_guards(payload: dict) -> None:
     try:
         from hooks.context.branch_guard import check_branch_guard, check_commit_on_main
         from hooks.context.master_coding import protection_refusal
+        from hooks.context.venv_guard import check_venv_guard
 
         check_branch_guard(payload)
         check_commit_on_main(payload)
         if refusal := protection_refusal(payload):
             raise BlockAction(refusal)
+        check_venv_guard(payload)
     except BlockAction:
         raise
     except Exception as e:
