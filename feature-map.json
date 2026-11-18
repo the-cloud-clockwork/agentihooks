@@ -334,6 +334,16 @@
       ]
     },
     {
+      "id": "compose-ledger-ensure-starts-front-and-api",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2695",
+      "behaviour": "Legacy local Compose ledger ensure pulls and starts the ledger, write API and front together, so the published front port can answer. Stopping the legacy ledger stops all three services. Adopted stacks keep their swarm service commands.",
+      "seam": "server_compose.start and stop, the docker compose command list",
+      "tests": [
+        "tests/swarm_ledger/test_server_compose.py::test_compose_runs_with_the_folder_the_code_and_this_user"
+      ]
+    },
+    {
       "id": "compose-api-health-and-front-proxy",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/promo-43992907244-10",
