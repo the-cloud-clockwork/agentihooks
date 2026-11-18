@@ -21,7 +21,7 @@ import tempfile
 import threading
 import time
 import tomllib
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
@@ -85,7 +85,7 @@ class Trees:
     lock: threading.Lock = field(default_factory=threading.Lock)
 
     @contextlib.contextmanager
-    def shared(self, *heads: str) -> Iterator[list[Path]]:
+    def shared(self, *heads: str) -> Generator[list[Path]]:
         """Lease the read only tree of each revision for the block and release every one it leased."""
         leased: list[str] = []
         try:
@@ -101,7 +101,7 @@ class Trees:
                     self.worktrees.release(head)
 
     @contextlib.contextmanager
-    def owned(self, head: str) -> Iterator[Path]:
+    def owned(self, head: str) -> Generator[Path]:
         """Cut a private writable tree of the revision for the block and drop it after."""
         with self.lock:
             tree = self.worktrees.own(head)

@@ -4,8 +4,9 @@ import signal
 import subprocess
 import time
 from collections.abc import Callable, Iterator
+from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -14,7 +15,7 @@ from scripts.ci_lab.outcomes import FAILED, PASSED
 from scripts.ci_lab.sandbox import CannotRun, Outcome, PortAllocator, PortRange
 from scripts.ci_lab.units import Unit
 from scripts.ci_lab.worker import Finished, Lease
-from scripts.ci_lab.worktrees import Mirror
+from scripts.ci_lab.worktrees import Mirror, Worktrees
 
 WORKFLOW = """
 on: pull_request
@@ -97,7 +98,12 @@ def ticking(*values: float) -> Callable[[], float]:
 
 def pod_of(root: Path, trees: FakeWorktrees) -> executors.Pod:
     pod = executors.Pod(
-        executors.Trees(trees), root / "pod", PortAllocator(1, 10, 10), WHITELIST, 30.0, ticking(10, 12.5)
+        executors.Trees(cast("Worktrees", trees)),
+        root / "pod",
+        PortAllocator(1, 10, 10),
+        WHITELIST,
+        30.0,
+        ticking(10, 12.5),
     )
     pod.runs.mkdir(parents=True)
     return pod
@@ -379,12 +385,11 @@ def test_mutation_grades_a_mutant_unit_with_the_tests_its_trees_stats_show_reach
         ([(0, {"stats": []}), (0, {"rows": [{"name": "m", "status": "no tests", "seconds": 0.0}]})], 2, "log2.txt"),
     ],
 )
+@pytest.mark.usefixtures("venv", "trampolines")
 def test_mutation_fails_a_mutant_unit_whose_runner_fails_or_whose_mutant_lives(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    venv: Recorder,
     mutation_tree: Path,
-    trampolines: Recorder,
     scripted: list[tuple[int | None, dict[str, Any] | None]],
     runs: int,
     log: str,
@@ -445,12 +450,17 @@ def test_executors_name_the_adapter_of_every_unit_kind(tmp_path: Path) -> None:
 
     found = executors.executors(pod, suite, graded)
 
-    assert {kind: (adapter.func, adapter.args) for kind, adapter in found.items()} == {
+    assert {kind: parts(adapter) for kind, adapter in found.items()} == {
         "static": (executors.static, (pod,)),
         "test": (executors.tests, (pod, suite)),
         "stats": (executors.mutation, (pod, graded)),
         "mutant": (executors.mutation, (pod, graded)),
     }
+
+
+def parts(adapter: object) -> tuple[object, tuple[object, ...]]:
+    assert isinstance(adapter, partial)
+    return adapter.func, adapter.args
 
 
 def environ_of(tmp_path: Path) -> dict[str, str]:
@@ -525,7 +535,7 @@ def test_main_runs_the_worker_over_the_adapters_until_sigterm_stops_it(
     assert executors.main([], environ) == 0
 
     [(given, adapters, name, count, quota)] = built
-    assert (given, sorted(adapters), name, count, quota) == (
+    assert (given, sorted(cast("dict[str, object]", adapters)), name, count, quota) == (
         environ,
         ["mutant", "static", "stats", "test"],
         "pod-1",
