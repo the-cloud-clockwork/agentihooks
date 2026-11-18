@@ -1768,8 +1768,8 @@ ledger reads. The hub answers `admit` on the same `slots.<swarm>.<hive>` request
 member's credential may publish only for its own hive; a request naming another hive than its subject is refused. It rechecks the offer against the ledger, claims the task,
 starts the execution on that hive, occupies a seat, marks the task claimed (or back in `pr`) and returns the primed
 spawn task. A repeat from the same hive returns the same admission, so a retried launch keeps its agent; any other
-hive gets none. When a launch fails after the admission, the spoke sends `reopen`, which returns the task to `open`
-(see [When a launch fails](#when-a-launch-fails)). The hub answers these requests on a pool of eight threads and
+hive gets none. After a failed admit ask or launch, the spoke sends `reopen`, which returns an admitted task to
+`open` (see [When a launch fails](#when-a-launch-fails)). The hub answers these requests on a pool of eight threads and
 drops one that waited there as long as the hive waits for its answer, so an admission the hive gave up on never
 claims the task; see
 [How the hub serves requests](../reference/swarm-bus-scope.md#how-the-hub-serves-requests).
@@ -1796,18 +1796,19 @@ A hive beats `hive-presence` every 15 seconds. A beat expires after 45 seconds.
 ### When a launch fails
 
 An admission claims the task, starts its execution, occupies a seat and marks the ledger row `claimed` before the
-hive launches anything. When the launch then fails, the hive gives the admission back with `reopen` on the same
-poll, so the task returns to `open` within seconds and is offered again. Every eng, ci and plan spoke does this on
-every `events` swarm; no setting turns it on or off. A master spoke admits nothing on the hub and is outside this
-path.
+hive launches anything. When the launch then fails, the hive gives the admission back with `reopen`, so the task
+returns to `open` and is offered again: on the same poll for most failures, on the next poll for a launch the spoke
+left `launching`, and through the dead letter on the offer's last delivery. An admit ask the hub did not answer and a
+held answer send no `reopen`; the table below lists every case. Every eng, ci and plan spoke does this on every
+`events` swarm; no setting turns it on or off. A master spoke admits nothing on the hub and is outside this path.
 
 Before pull request [#11051](https://github.com/the-cloud-clockwork/agentihooks/pull/11051) the spoke reset only
 its own claim and nacked the offer. The hub kept the admission, its readiness pass withdrew the offer because the
 task was claimed, and every other hive's `admit` was refused as `already admitted to hive <hive>`. The task then
 waited for the tick to retire the admitted agent with `its hive no longer lists it`, six minutes or more after the
-launch (see [A hive worker whose pane is gone](#a-hive-worker-whose-pane-is-gone)). On 13 November eight engineers
-of one swarm were lost that way, each for about eight minutes, after admit asks that timed out, ledger
-authentication errors and launch refusals.
+launch (see [A hive worker whose pane is gone](#a-hive-worker-whose-pane-is-gone)). The investigation in pull request
+#11051 found eight engineers of one swarm lost that way on 13 November, each for about eight minutes, after admit
+asks that timed out, ledger authentication errors and launch refusals.
 
 #### What the spoke does after a failure
 
@@ -1816,7 +1817,7 @@ The spoke reads its claim in `spoke-work` after the failure and acts on it. Whil
 | Outcome of the offer | Spoke claim after it | What the spoke asks the hub | The delivery |
 |---|---|---|---|
 | The `admit` ask gets no answer inside the 10,000 millisecond request wait | `asked`, owned by this hive; the launch slot in `spoke-pending` stays reserved | Nothing on this poll. The next poll asks `admit` again and receives the admission the hub kept | Nacked for `ack_wait_ms` |
-| The hub answers held, because the hive is at its max agents | `ready`; the launch slot is freed | Nothing: the hub wrote no admission | Nacked for `ack_wait_ms`, so another hive may take it |
+| The hub answers held: the hive is at its max agents, or another admission for the hive held its turn past the wait (`another admission for the hive is in progress`) | `ready`; the launch slot is freed | Nothing: the hub wrote no admission | Nacked for `ack_wait_ms`, so another hive may take it |
 | The `admit` ask fails another way: the hub answers with an error, or the hive cannot start its Serena router | `ready`; the launch slot is freed | `reopen` | Nacked for the backoff step |
 | The runtime refuses the launch with `refused`, `ambiguous` or `unsupported` | `ready`; the launch slot is freed | `failed` with the harness and the runtime's detail, then `reopen` | Nacked for the backoff step |
 | The runtime answers `unavailable` | `ready`; the launch slot is freed | `reopen` | Nacked for the backoff step |
@@ -1834,19 +1835,15 @@ answers `unavailable` sends no `failed` and steers nothing.
 
 On the offer's last delivery, `max_deliver`, the spoke sends no `reopen` on the failure itself. It dead letters the
 offer to `dead.<swarm>` and terminates it, and the dead letter sends `reopen` with `dead` set, which releases a held
-admission the same way. A claim still `launching` at that point dead letters on the next poll, after its recovery.
+admission the same way. A claim still `launching` at that point dead letters on the next poll, as soon as that
+poll's recovery has ended the leftover agent.
 
 #### What `reopen` releases
 
 The hub finds the admission it kept for the offer under `spoke-admission:<task id>:<generation>`. When the asking
-hive holds it, the hub:
-
-1. cancels the task's pending life;
-2. detaches the handoff transfer (see [Handing the transfer back](#handing-the-transfer-back));
-3. releases the claim and drops the agent record;
-4. sets the ledger row back to `open` with `claimed_by` empty, only while the row is `claimed` or `pr` and still
-   names that agent;
-5. deletes the admission key and answers `true`.
+hive holds it, the hub releases it as the `reopen` row of [Handing the transfer back](#handing-the-transfer-back)
+lists. The ledger write applies only while the row is `claimed` or `pr` and still names that agent. The hub then
+deletes the admission key and answers `true`.
 
 The change of claimant raises the task's claim generation (see
 [Event driven engine](swarm.md#event-driven-engine)), so the nacked offer comes back stale and is withdrawn, and
@@ -1872,17 +1869,17 @@ may hold an admission for it, so the spoke asks `admit` again and launches the a
 
 #### Late admissions keep their claim
 
-An admission that finishes 8,000 milliseconds or more after its request arrived, time queued for a hub serve thread
-included, keeps its claim and logs the `late:` line described in
-[Handing the transfer back](#handing-the-transfer-back). The hive whose ask timed out holds its claim as `asked` and
-receives that admission on its next poll. Pull request #11051 also released and refused a late admission; pull
+An admission that finishes past the answer budget keeps its claim; see
+[Handing the transfer back](#handing-the-transfer-back). The budget counts from the request's arrival, so time
+queued for a hub serve thread is included. The hive whose ask timed out holds its claim as `asked` and receives
+that admission on its next poll. Pull request #11051 also released and refused a late admission; pull
 request [#11511](https://github.com/the-cloud-clockwork/agentihooks/pull/11511) reverted that part, because the
 release raised the claim generation and withdrew the offer, so on 16 November no urgent ci task kept a live
 claimant.
 
-#### Launch failure settings
+#### Launch failure limits
 
-| Setting | Default | What it does |
+| Limit | Value | What it does |
 |---|---|---|
 | `max_deliver` | 5 | Deliveries of one lane offer. Failures below it send `reopen`; a failure on the last one dead letters the offer. |
 | `ack_wait_ms` | 30,000 ms | An offer not acknowledged within it is delivered again. It is also the nack delay for an unanswered, held or busy offer, and for a failure when `backoff_ms` is empty. |
@@ -1934,9 +1931,9 @@ so roll every hive image whenever the hub rolls.
 - Feature `events-failed-launch-releases-admission` in `feature-map.json`. Its tests in `tests/hive/test_spoke.py`
   cover a failed admit ask and a failed launch that each send one `reopen` and are taken again after the backoff,
   a launch refused on a harness that sends `failed` before `reopen`, and a recovered own `launching` claim that
-  sends `reopen` below the cap and dead letters at it. No Semgrep rule guards it: the defect was a missing call on
-  a failure path, and the launch slot rollback before any admission correctly has none, so no code pattern tells the
-  two apart.
+  sends `reopen` below the cap and dead letters at it. Pull request #11051 added no Semgrep rule for it: the defect
+  was a missing call on a failure path, and the launch slot rollback before any admission correctly has none, so no
+  code pattern tells the two apart.
 - Feature `hub-admission-late-answer-keeps-claim`, with the Semgrep incident rule
   `hub-admission-late-answer-releases-claim`, scoped to `scripts/hub/admission.py`: a `reopen`, `_release` or
   `_unclaim` call inside `Admission._answered` is an error. Run it by hand with:
