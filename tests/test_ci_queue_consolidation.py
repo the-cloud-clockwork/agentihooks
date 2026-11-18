@@ -52,7 +52,7 @@ exit "$status"
         'if [[ -f "$archive" ]] && ! docker load -i "$archive"; then\n'
         '  echo "::warning::The saved runtime images did not load; pulling them instead"\n'
         "fi\n",
-        "bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12-slim-bookworm",
+        "bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12.12-slim-bookworm",
         "docker build -t local/agentihooks-swarm:clients-check .",
         "bash scripts/packaging/swarm-smoke-parallel.sh scripts/packaging/hive-launch-smoke.sh"
         " scripts/packaging/swarm-smoke.sh scripts/packaging/hive-join-smoke.sh scripts/packaging/compose-hive-smoke.sh"
@@ -65,7 +65,7 @@ exit "$status"
         'mv "$RUNNER_TEMP/swarm-smoke-layers-next" "$RUNNER_TEMP/swarm-smoke-layers"\n',
         'mkdir -p "$RUNNER_TEMP/swarm-smoke-runtime-images"\n'
         'docker save -o "$RUNNER_TEMP/swarm-smoke-runtime-images/images.tar" \\\n'
-        "  mirror.gcr.io/library/python:3.12-slim-bookworm \\\n"
+        "  mirror.gcr.io/library/python:3.12.12-slim-bookworm \\\n"
         "  public.ecr.aws/docker/library/redis:7 mirror.gcr.io/library/redis:7 \\\n"
         "  public.ecr.aws/docker/library/redis:7-alpine mirror.gcr.io/library/redis:7-alpine \\\n"
         "  public.ecr.aws/docker/library/nats:2.15.1-alpine mirror.gcr.io/library/nats:2.15.1-alpine\n",

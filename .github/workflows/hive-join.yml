@@ -22,7 +22,7 @@ jobs:
         with:
           ref: ${{ github.sha }}
       - name: Pull the Python base with bounded retries
-        run: bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12-slim-bookworm
+        run: bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12.12-slim-bookworm
       - name: Restore the swarm smoke layers
         id: layers
         uses: actions/cache/restore@v4
