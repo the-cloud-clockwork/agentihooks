@@ -23,6 +23,9 @@ jobs:
       - name: A python step is never read as shell
         shell: python
         run: for name in $(ls); do pass; done
+      - run: |
+          echo the key after this block is not shell
+        name: for name in $(ls); do :; done
   python-by-default:
     runs-on: ubuntu-latest
     defaults:

@@ -41,3 +41,10 @@ jobs:
         shell: /bin/bash --noprofile --norc -eo pipefail {0}
         run: |
           if true; then for job in $(jobs -p); do wait "$job"; done; fi
+  blank-default:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: " "
+    steps:
+      - run: for _ in $(seq 2); do :; done

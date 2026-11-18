@@ -43,7 +43,7 @@ def test_loops_far_down_a_long_script_report_their_exact_lines() -> None:
 
 @pytest.mark.feature("ci-for-loop-word-list-workflow-run-blocks")
 def test_the_red_workflow_fixture_reports_every_refused_loop_at_its_file_line() -> None:
-    assert workflow_findings((ROOT / RED_WORKFLOW).read_text()) == [7, 11, 17, 24, 27, 30, 33, 43]
+    assert workflow_findings((ROOT / RED_WORKFLOW).read_text()) == [7, 11, 17, 24, 27, 30, 33, 43, 50]
 
 
 @pytest.mark.feature("ci-for-loop-word-list-workflow-run-blocks")
@@ -104,11 +104,11 @@ def test_tracked_workflows_and_actions_with_a_substitution_word_list_are_red(
     )
     assert main(["--root", str(root)]) == 1
     assert capsys.readouterr().out.splitlines() == [
-        "For loop word lists: 1 shell files, 5 workflow files, 12 problems",
+        "For loop word lists: 1 shell files, 5 workflow files, 13 problems",
         f"::error::.github/actions/old/action.yaml:6: {ADVICE}",
         f"::error::.github/actions/tick/action.yml:6: {ADVICE}",
         f"::error::.github/workflows/poll.yaml:6: {ADVICE}",
-        *(f"::error::.github/workflows/red.yml:{line}: {ADVICE}" for line in (7, 11, 17, 24, 27, 30, 33, 43)),
+        *(f"::error::.github/workflows/red.yml:{line}: {ADVICE}" for line in (7, 11, 17, 24, 27, 30, 33, 43, 50)),
         f"::error::.github/workflows/wait.yml:6: {ADVICE}",
     ]
 
