@@ -2009,8 +2009,8 @@ holds the agent or the tick's outage recovery of the agent is still pending (see
 | The tick's dead resume gate holds: no handoff was submitted for the task, the agent recorded a conversation id, its conversation is under the swarm's compact limit and has not ended after each of its last three tick resumes, and the agent still holds its record, its seat as occupant, its task row in `claimed` or `pr` naming it, and its task claim. | No resume. |
 
 The tick counts only its own resumes toward that gate; the hub's resumes count only in the spoke claim's
-`resumes`. An exit that orders no resume takes the normal exit path: the reactor removes the agent record, releases the launch
-slot and the claim, and returns a task the agent still holds to `open` with no claimant, as in
+`resumes`. An exit that orders no resume takes the normal exit path: the reactor removes the agent record,
+releases the launch slot and the claim, and returns a task the agent still holds to `open` with no claimant, as in
 [How the hive honors the stop](#how-the-hive-honors-the-stop). The next offer goes to a fresh agent.
 
 #### The resume order
@@ -2060,8 +2060,10 @@ command order runs inside the heartbeat. A resume order runs in its own process,
    When a fourth start comes due, the heartbeat stores the answer `failed` with `resume never answered` instead.
 4. The order stays on the command stream until its receipt holds an answer; the next heartbeat then deletes it.
 5. The first answer stored is final: a late answer never overwrites it. An exception while the resume runs stores
-   `failed` with `error: <exception type>`. A process that fails to start, or fails before it opens its Redis
-   client, stores no answer: its marker expires and a later heartbeat starts another process, as in step 3.
+   `failed` with `error: <exception type>`. A process that fails before it opens its Redis client stores no
+   answer: its marker expires and a later heartbeat starts another process, as in step 3. A process that cannot be
+   started raises out of the heartbeat and ends `hive run`; the service starts it again five seconds later, and the
+   first heartbeat after the marker expires starts the order again.
 
 The hive keeps every resume order process it starts, so a restart on a moved checkout waits for a resume in flight
 (see [Adding a machine to a hive](#adding-a-machine-to-a-hive)).
@@ -2093,8 +2095,8 @@ The hub and every hive need a release carrying pull request #11246:
 
 - A hub on an older release orders no resume; every dead hub started agent is dropped and its task reopens.
 - A hive on an older release cannot parse a resume order and deletes it unanswered, so the hub waits the full 30
-  minutes before it hands the task to a fresh agent. An order leaves out its launch time and its pane when each is
-  unset, so older hives still parse every other command order, which carries neither.
+  minutes before it hands the task to a fresh agent. An order leaves out a launch time or pane that is unset, and
+  other command orders never set them, so older hives still parse those.
 
 A hive process loads its code when it starts: restart `agentihooks-hive` with `systemctl --user restart
 agentihooks-hive` on a workstation or VM, or roll the hive pods on Kubernetes.
