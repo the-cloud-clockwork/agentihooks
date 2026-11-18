@@ -1500,7 +1500,7 @@ A `gh api` call that times out, or that would start after the deadline, raises a
 
 ### Download retry
 
-`download` fetches each artifact with `gh api actions/artifacts/<id>/zip`. When gh exits non-zero, it waits and downloads the same artifact again, at most four downloads:
+`download` fetches each artifact with `gh api repos/{owner}/{repo}/actions/artifacts/<id>/zip`. When gh exits non-zero, it waits and downloads the same artifact again, at most four downloads:
 
 | Download | Wait before it |
 |---|---|
