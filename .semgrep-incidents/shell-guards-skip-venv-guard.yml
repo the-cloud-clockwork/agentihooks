@@ -1,0 +1,25 @@
+rules:
+  - id: shell-guards-skip-venv-guard
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The shell guards judge every Bash call, and without check_venv_guard nothing refuses an editable install that
+      points the venv the hooks run from at a worktree. Once wt.sh done removes that worktree, every hook and gate
+      condition importing from it fails open, as on 16 November. Call check_venv_guard(payload) in
+      _check_shell_guards.
+    paths:
+      include:
+        - /hooks/hook_manager.py
+        - shell-guards-skip-venv-guard.py
+    patterns:
+      - pattern: |
+          def $GUARDS(...):
+              ...
+      - metavariable-regex:
+          metavariable: $GUARDS
+          regex: ^_check_shell_guards
+      - pattern-not: |
+          def $GUARDS(...):
+              ...
+              check_venv_guard(...)
+              ...

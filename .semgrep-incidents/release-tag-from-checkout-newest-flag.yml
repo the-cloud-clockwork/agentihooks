@@ -1,0 +1,26 @@
+rules:
+  - id: release-tag-from-checkout-newest-flag
+    languages: [yaml]
+    severity: ERROR
+    message: >-
+      A release step moves a release tag from a newest release flag that an earlier step read at checkout. Releases
+      overlap by minutes, so an older release whose job finishes after a newer one moves the tag back to itself; on 18
+      November two overlapping releases both read the worker image flag as newest. Decide at move time instead: walk the
+      remote stable tags newest first, move the tag only when no newer release has already published its image, push
+      the release tag before the version tag, and run the move in a job that queues every release in one concurrency
+      group, as docker/swarm-node/release.sh in the hive job does.
+    patterns:
+      - pattern: |
+          env:
+            ...
+            $NAME: $FLAG
+            ...
+          ...
+          run: $SCRIPT
+      - metavariable-regex:
+          metavariable: $FLAG
+          regex: ^\$\{\{\s*(steps|needs)\.[\w-]+\.outputs\.latest\s*\}\}$
+      - metavariable-regex:
+          metavariable: $SCRIPT
+          regex: (?s).*release.*
+      - focus-metavariable: $FLAG

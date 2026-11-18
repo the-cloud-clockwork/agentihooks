@@ -1,0 +1,41 @@
+name: Swarm worker image
+jobs:
+  image:
+    steps:
+      - name: Require a release tag on main
+        id: main
+        run: |
+          newest="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-version:refname | head -n 1)"
+          if [[ "$newest" == "$GITHUB_REF_NAME" ]]; then latest=true; else latest=false; fi
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+      - name: Tag the release version and move the release tag when it is the newest
+        env:
+          RELEASE: ${{ github.event.release.tag_name }}
+          # ruleid: release-tag-from-checkout-newest-flag
+          LATEST: ${{ steps.main.outputs.latest }}
+        run: |
+          tags=(--tag "$REPOSITORY:${RELEASE#v}")
+          if [[ "$LATEST" == true ]]; then tags+=(--tag "$REPOSITORY:release"); fi
+          docker buildx imagetools create "${tags[@]}" "$REPOSITORY@$digest"
+      - name: Move the floating dev tag to the published digest
+        env:
+          # ok: release-tag-from-checkout-newest-flag
+          DIGEST: ${{ steps.publish.outputs.digest }}
+        run: |
+          docker buildx imagetools create --tag "$REPOSITORY:dev" "$REPOSITORY@$DIGEST"
+  hive:
+    needs: image
+    env:
+      WORKER: ghcr.io/the-cloud-clockwork/agentihooks-worker
+      # ok: release-tag-from-checkout-newest-flag
+      RELEASE: ${{ github.event.release.tag_name }}
+    steps:
+      - name: Publish the hive worker once per release version
+        env:
+          # ruleid: release-tag-from-checkout-newest-flag
+          LATEST: ${{ needs.image.outputs.latest }}
+        run: |
+          bash deploy/worker/release-hive.sh "$IMAGE" "$RELEASE" "$LATEST" "$GITHUB_SHA"
+      - name: Tag the worker release and move the release tag unless a newer release already published
+        run: |
+          bash docker/swarm-node/release.sh "$WORKER" "$RELEASE" "$GITHUB_SHA"
