@@ -1724,6 +1724,7 @@ def _successor(root: Path, remote: str = "origin") -> str:
 @pytest.mark.parametrize(
     "command",
     [
+        "git push origin HEAD:fix-branch",
         "git push -u origin HEAD:fix-branch",
         "git push origin engineer-successor:refs/heads/fix-branch",
         "gh workflow run t.yml --ref fix-branch",
