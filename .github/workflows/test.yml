@@ -1646,6 +1646,12 @@ jobs:
           PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
         run: bash .github/actions/browser-cache/use-image.sh
 
+      - name: Measure the test setup disk writes
+        if: runner.environment == 'self-hosted'
+        run: |
+          start=$(( $(awk '$1 == "btime" {print $2}' /proc/stat) + $(awk '{print $22}' /proc/1/stat) / $(getconf CLK_TCK) ))
+          find "$HOME" /tmp /opt/agentihooks-venv /opt/hostedtoolcache -xdev -type f -newerct "@$start" -printf '%i %s\n' 2>/dev/null | awk '!seen[$1]++ {bytes += $2} END {printf "::notice title=Test setup disk writes::%.0f MB (%.0f bytes) written to the runner disk before the tests\n", bytes / 1048576, bytes}'
+
       # NOT `-m unit`: only 439 of 999 tests carry that marker, so 560 —
       # including every ownership-scope test guarding what uninstall and prune
       # are allowed to delete — never ran in CI at all.
