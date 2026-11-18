@@ -521,7 +521,7 @@ def test_a_stacked_claim_on_two_dependencies_reads_exactly():
         "4. Gates green on what you built, commit with the issue in the message (Refs #<n>) so the branch points "
         "at the issue, push the branch (git push -u origin HEAD) and record it: agentihooks swarm sw branch.",
         "5. Write a Handoff v2 document with the handoff skill whose Stopped at names the open dependency and what "
-        "waits on it. Leave the crew with agentihooks ledger --slug sw --as engineer@a1b2c3-0003 leave, then park: "
+        "waits on it. Leave the crew with agentihooks api --slug sw --as engineer@a1b2c3-0003 leave, then park: "
         "agentihooks swarm sw park <doc>. Park comments the branch on the issue so they point at each other, and "
         "the task waits on its branch. The swarm then closes this session; stop working.",
         "",

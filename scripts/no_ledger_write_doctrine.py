@@ -20,6 +20,7 @@ EXTRA_FILES = (
     "scripts/swarm/profile_choice.py",
     "scripts/swarm/claim_hold.py",
     "scripts/swarm/ledger_events.py",
+    "scripts/gates/build.py",
     "scripts/gates/claims.py",
     "hooks/context/conditions.py",
     "hooks/context/context_recycle.py",

@@ -82,8 +82,14 @@ def test_files_outside_the_scope_are_not_graded(tmp_path: Path) -> None:
     assert gate.load(tree) == {"docs/example.md": 1}
 
 
-def test_the_ledger_implementation_skill_is_excluded(tmp_path: Path) -> None:
+def test_the_ledger_implementation_skill_is_graded_like_any_other(tmp_path: Path) -> None:
     files = {"profiles/package/skills/swarm-ledger/SKILL.md": WRITE_LINE}
+    tree = _recorded(tmp_path / "tree", files)
+    assert gate.load(tree) == {"profiles/package/skills/swarm-ledger/SKILL.md": 1}
+
+
+def test_the_triage_priorities_script_is_excluded(tmp_path: Path) -> None:
+    files = {"profiles/package/skills/triage-priorities/scripts/list_priorities.py": WRITE_LINE}
     tree = _recorded(tmp_path / "tree", files)
     assert gate.load(tree) == {}
 

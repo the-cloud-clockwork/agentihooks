@@ -329,6 +329,6 @@ def test_another_role_works_with_the_operator_and_exits_when_he_says_so():
     assert lines[4:] == [
         "Work with the operator on what he asks in this pane. Make any code change in your own worktree (wt.sh new, "
         "the worktree skill) and a pull request into dev. Never join the ledger crew or claim a task. Propose other "
-        'work with agentihooks ledger --slug sw --as engineer@a1b2c3-0002 followup add "<plain words>".',
+        'work with agentihooks api --slug sw --as engineer@a1b2c3-0002 followup add "<plain words>".',
         "When he says you are done, end this session with agentihooks swarm sw --as engineer@a1b2c3-0002 exit.",
     ]

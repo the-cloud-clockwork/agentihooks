@@ -91,7 +91,7 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
     if codex:
         task = codex_master.handoff(task, slug, push)
     me = f"agentihooks swarm {slug} --as {name}"
-    led = f"agentihooks ledger --slug {slug} --as {name}"
+    led = f"agentihooks api --slug {slug} --as {name}"
     summary = summary_lines(slug)
     lines = [
         f"You are {name}, the master of swarm {slug}, working over the repo {repo}. The operator talks to the swarm "
@@ -216,7 +216,7 @@ def summary_lines(slug):
 
 
 def build_operator(slug, repo, name, role, profile):
-    led = f"agentihooks ledger --slug {slug} --as {name}"
+    led = f"agentihooks api --slug {slug} --as {name}"
     leave = f"end this session with agentihooks swarm {slug} --as {name} exit."
     planner = role == "planner"
     lines = [
@@ -267,7 +267,7 @@ def build_dispatcher(slug: str, repo: str, name: str, task: dict, autonomy: str 
     from scripts.swarm import dispatch_seat
 
     me = f"agentihooks swarm {slug}"
-    led = f"agentihooks ledger --slug {slug} --as {name}"
+    led = f"agentihooks api --slug {slug} --as {name}"
     lines = [
         f"You are {name}, the dispatcher of swarm {slug}, working beside its master in the repo {repo}. "
         f"The swarm runs at {autonomy} autonomy.",
@@ -300,7 +300,7 @@ def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
     if lane == DISPATCH:
         return build_dispatcher(slug, repo, name, task, autonomy)
     me = f"agentihooks swarm {slug}"
-    led = f"agentihooks ledger --slug {slug} --as {name}"
+    led = f"agentihooks api --slug {slug} --as {name}"
     phase = task.get("phase") or "<phase id>"
     lines = [
         f"You are {name}, {role or LANE_ROLE[lane]} in swarm {slug}, working in the repo {repo}.",
