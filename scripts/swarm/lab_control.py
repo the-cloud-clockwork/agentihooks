@@ -7,7 +7,9 @@ from typing import Any, NamedTuple, TypeGuard
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-TOKEN = "CI_LAB_CONTROL_TOKEN"
+from scripts.ci_lab.contract import CONTROL_TOKEN
+
+TOKEN = CONTROL_TOKEN
 TIMEOUT_S = 3
 HOTFIX = "hotfix"
 PULL_REQUEST = "pull_request"

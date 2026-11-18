@@ -1160,7 +1160,7 @@ def test_the_panic_button_off_clears_once_stable(store, counted, capsys):
     panic.engage(store, SLUG, "pressed", False, [], 0)
     args = cli.build_parser().parse_args([SLUG, "panic", "off"])
     args.handler(store, args)
-    assert json.loads(capsys.readouterr().out) == {"panic": "off", "lab": NO_LAB}
+    assert json.loads(capsys.readouterr().out) == {"panic": "off", "lab": ""}
     assert panic.state(store, SLUG) is None
 
 
