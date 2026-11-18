@@ -150,6 +150,15 @@ def flake_history_group(name: str, block: object, job: dict[str, Any], trusted: 
     )
 
 
+def hive_release_group(name: str, block: object, job: dict[str, Any], trusted: dict[Any, Any]) -> bool:
+    return (
+        trusted.get("name") == "Swarm worker image"
+        and name == "hive"
+        and job.get("if") == "github.event_name == 'release'"
+        and block == {"group": "hive-worker-release", "queue": "max", "cancel-in-progress": False}
+    )
+
+
 def mapping(value: object) -> dict[Any, Any]:
     return cast(dict[Any, Any], value) if isinstance(value, dict) else {}  # pragma: no mutate
 
@@ -215,7 +224,11 @@ def problems(workflow: object, baseline: object = None, ancestor: object = None)
         block = job.get("concurrency", cast(dict[Any, Any], workflow).get("concurrency"))
         base_job = (trusted.get("jobs") or cast(dict[Any, Any], {})).get(name, cast(dict[Any, Any], {}))
         base_block = base_job.get("concurrency", trusted.get("concurrency"))
-        if dedicated_chart_group(name, block, job, trusted) or flake_history_group(name, block, job, trusted):
+        if (
+            dedicated_chart_group(name, block, job, trusted)
+            or flake_history_group(name, block, job, trusted)
+            or hive_release_group(name, block, job, trusted)
+        ):
             continue
         if dev_push_group(block, cast(dict[Any, Any], workflow)):  # pragma: no mutate
             continue
