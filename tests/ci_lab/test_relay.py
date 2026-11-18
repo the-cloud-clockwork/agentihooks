@@ -17,7 +17,7 @@ import requests
 from scripts import github_app
 from scripts.ci_lab import relay
 from scripts.ci_lab import scheduler as scheduler_module
-from scripts.ci_lab.checks import Output
+from scripts.ci_lab.checks import Output, name
 from scripts.ci_lab.evidence import head_prefix
 from scripts.ci_lab.objects import LocalObjects
 from scripts.ci_lab.outcomes import FAILED, PASSED
@@ -86,6 +86,7 @@ class Calls:
     def __init__(self) -> None:
         self.log: list[tuple[Any, ...]] = []
         self.outputs: list[Output] = []
+        self.posted: dict[tuple[str, str, str], str] = {}
 
     def pusher(self, repo: str) -> "Calls":
         """Return the pusher of a repository."""
@@ -106,10 +107,15 @@ class Calls:
         """Keep the push."""
         self.log.append(("push", sha, branch))
 
+    def status(self, key: tuple[str, str, str]) -> str | None:
+        """Return the last status posted for a check run, or None before its first post."""
+        return self.posted.get(key)
+
     def post(self, head: str, gate: str, status: str, conclusion: str | None, output: Output, shadow: bool) -> int:
-        """Keep the check run post and its output."""
+        """Keep the check run post, its output and its last status."""
         self.log.append(("post", head, gate, status, conclusion, shadow))
         self.outputs.append(output)
+        self.posted[(head, name(gate, shadow), output.run)] = status
         return len(self.outputs)
 
     def open(self, branch: str, title: str, body: str) -> str:
@@ -407,6 +413,33 @@ def test_a_relay_whose_call_fails_stays_pending_and_the_next_head_still_relays(e
     assert client.hget(relay.PENDING, f"{HEAD} {BRANCH}") is not None
 
 
+class Flaky(Calls):
+    """Fake relay ports whose first pull requests call fails before GitHub answers."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.down = True
+
+    def open(self, branch: str, title: str, body: str) -> str:
+        """Fail the first call, then answer that it opened one."""
+        if self.down:
+            self.down = False
+            raise OSError("connection reset")
+        return super().open(branch, title, body)
+
+
+def test_a_retried_relay_posts_each_check_run_once_then_opens_the_pull_request() -> None:
+    client, calls = fake_redis(), Flaky()
+    found = {HEAD: [grade("success")]}
+    engine = relay.Relay(
+        client, Notices([relay.Pending(REPO, HEAD, REF, BRANCH)]), found.__getitem__, calls.ports(), LAB
+    )
+    assert engine.tick()[-1] == f"retry {HEAD} for {BRANCH}: connection reset"
+    assert engine.tick() == [f"pushed {HEAD} to {BRANCH}", f"opened {PULL}"]
+    assert [call[2] for call in calls.log if call[0] == "post"] == ["lint", "unit", "required"]
+    assert client.hgetall(relay.PENDING) == {}
+
+
 def test_a_failing_git_call_keeps_its_head_pending_and_the_next_head_still_relays() -> None:
     client, calls = fake_redis(), Failing()
     first, second = relay.Pending(REPO, HEAD, REF, BRANCH), relay.Pending(REPO, OTHER, "refs/grade/t2", "engineer-2")
@@ -591,4 +624,6 @@ def test_build_wires_the_relay_to_the_scheduler_grades_the_mirror_and_the_lab_ur
     assert (tmp_path / "deep" / "stores").is_dir()
     assert cast(relay.PullRequests, engine.ports.pulls(SLUG)).slug == SLUG
     assert cast(relay.Checks, engine.ports.checks(SLUG)).repo == SLUG
+    assert engine.ports.checks(SLUG) is engine.ports.checks(SLUG)
+    assert cast(relay.Checks, engine.ports.checks("acme/other")).repo == "acme/other"
     assert engine.grades(HEAD) == []

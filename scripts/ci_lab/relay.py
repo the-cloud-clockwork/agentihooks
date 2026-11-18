@@ -24,11 +24,11 @@ from urllib.parse import urlsplit
 import requests
 
 from scripts.ci_lab import contract, evidence
-from scripts.ci_lab.checks import API, HEADERS, Checks, Output, PostRefused, Token, name
+from scripts.ci_lab.checks import API, HEADERS, Checks, Key, Output, PostRefused, Token, name
 from scripts.ci_lab.delivery import CLASSES
 from scripts.ci_lab.outcomes import PASSED
 from scripts.ci_lab.remote.post_receive import BRANCH, GRADE_REFS, LAB_URL
-from scripts.ci_lab.scheduler import BATCH, FETCH_MS, MIRROR_STORE, REQUIRED, Poster, Scheduler, State
+from scripts.ci_lab.scheduler import BATCH, FETCH_MS, MIRROR_STORE, REQUIRED, Scheduler, State
 from scripts.ci_lab.store import PREFIX
 from scripts.ci_lab.units import Unit
 from scripts.ci_lab.webhooks import HEAD_SUBJECT, NOTICE
@@ -99,6 +99,18 @@ class Pulls(Protocol):
         ...
 
 
+class CheckRuns(Protocol):
+    """Where relayed check runs go: `Checks`, which remembers the last status of each run it posted."""
+
+    def status(self, key: Key) -> str | None:
+        """Return the last status posted for a check run, or None before its first post."""
+        ...
+
+    def post(self, head: str, gate: str, status: str, conclusion: str | None, output: Output, shadow: bool) -> int:
+        """Create or advance one check run and return its id."""
+        ...
+
+
 class Notices(Protocol):
     """Where pending relays come from."""
 
@@ -112,7 +124,7 @@ class Ports:
     """The relay's outside world: a pusher per repository URL, and check runs and pull requests per owner/name."""
 
     pusher: Callable[[str], Pusher]
-    checks: Callable[[str], Poster]
+    checks: Callable[[str], CheckRuns]
     pulls: Callable[[str], Pulls]
 
 
@@ -145,8 +157,8 @@ def output(state: State, check: str, lab: str) -> Output:
 
 
 def relay(state: State, branch: str, ports: Ports, lab: str) -> list[str]:
-    """Relay a closed grade: a green one pushes the sha to the branch, posts every check run completed and opens the
-    draft pull request, in that order; a red one relays nothing and names its failed units."""
+    """Relay a closed grade: a green one pushes the sha to the branch, posts every check run completed that is not
+    already, and opens the draft pull request, in that order; a red one relays nothing and names its failed units."""
     if state.conclusion != SUCCESS:
         units = ", ".join(failed(state)) or "none"
         return [f"held {state.head} for {branch}: grade {state.run} is {state.conclusion}, failed units {units}"]
@@ -155,8 +167,9 @@ def relay(state: State, branch: str, ports: Ports, lab: str) -> list[str]:
     actions = [f"pushed {state.head} to {branch}"]
     poster = ports.checks(slug)
     for check, (_, conclusion) in state.posted.items():
-        poster.post(state.head, check, "completed", conclusion, output(state, check, lab), False)
-        actions.append(f"posted {name(check, False)} {conclusion} on {state.head}")
+        if poster.status((state.head, name(check, False), state.run)) is None:
+            poster.post(state.head, check, "completed", conclusion, output(state, check, lab), False)
+            actions.append(f"posted {name(check, False)} {conclusion} on {state.head}")
     body = f"Relayed by the CI lab from grade {state.run}: {lab}/grades/{state.head}"
     actions.append(ports.pulls(slug).open(branch, branch, body))
     return actions
@@ -300,7 +313,14 @@ def build(environ: Mapping[str, str], scheduler: Scheduler, consumer: Consumer) 
         slug = _slug(repo)
         return GitPusher(Mirror(node, stores / slug.replace("/", "--"), repo), slug)
 
-    ports = Ports(pusher, Checks, PullRequests)
+    posters: dict[str, CheckRuns] = {}
+
+    def checks(slug: str) -> CheckRuns:
+        if slug not in posters:
+            posters[slug] = Checks(slug)
+        return posters[slug]
+
+    ports = Ports(pusher, checks, PullRequests)
     lab = environ[LAB_URL].rstrip("/")
     notices = BusNotices(consumer, scheduler.settings.trusted)
     return Relay(scheduler.client, notices, partial(closed, scheduler), ports, lab)
