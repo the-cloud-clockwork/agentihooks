@@ -1153,6 +1153,7 @@ JOB_KEYS = (
     "with",
     "secrets",
     "snapshot",
+    "cache-mode",
 )
 
 
@@ -1237,16 +1238,19 @@ def test_every_literal_concurrency_group_in_the_grader_sits_in_a_dedicated_admis
 def test_every_dedicated_group_admission_refuses_a_job_edited_outside_its_concurrency_block(admission: str) -> None:
     trusted, head, block = _dedicated_fixture(admission)
     admit = getattr(lanes, admission)
-    jobs = DEDICATED_GROUPS[admission][1]
-    edits = [(name, edit, job) for name in jobs for edit, job in _outside_edits(head["jobs"][name]).items()]
+    edits = {name: _outside_edits(head["jobs"][name]) for name in DEDICATED_GROUPS[admission][1]}
     let_through = [
         f"{name}: {edit}"
-        for name, edit, job in edits
+        for name, edited in edits.items()
+        for edit, job in edited.items()
         if admit(name, block, job, trusted)
         or lanes.problems({**head, "jobs": {**head["jobs"], name: job}}, trusted)
         != [f"job {name} has no shared hosted lane concurrency group"]
     ]
-    assert len(edits) >= len(JOB_KEYS) * len(jobs)
+    kept = {name: len(set(head["jobs"][name]) - {"concurrency"}) for name in edits}
+    assert {name: Counter(edit.split()[0] for edit in edited) for name, edited in edits.items()} == {
+        name: Counter(change=count, drop=count, add=len(JOB_KEYS) - count) for name, count in kept.items()
+    }
     assert let_through == []
 
 
@@ -1275,14 +1279,34 @@ def test_every_dedicated_group_admission_refuses_another_job_block_or_workflow(a
     cases = {
         "another job": admit("other-job", block, job, copied),
         "another workflow": admit(name, block, job, {**trusted, "name": "Other workflow"}),
-        **{
-            f"block {wrong}": admit(
-                name, wrong, {**job, "concurrency": wrong} if "concurrency" in job else job, trusted
-            )
-            for wrong in blocks
-        },
+        **{f"block {wrong}": admit(name, wrong, job, trusted) for wrong in blocks},
     }
     assert [case for case, admitted in cases.items() if admitted] == []
+
+
+@pytest.mark.parametrize(
+    "path", sorted(file.name for file in (ROOT / lanes.WORKFLOWS).iterdir() if file.suffix in (".yml", ".yaml"))
+)
+def test_no_lane_rule_skip_lets_a_job_edited_outside_its_block_onto_a_group_of_its_own(path: str) -> None:
+    trusted = _workflow_file(path)
+    blocks = [
+        {"group": group, "queue": "max", "cancel-in-progress": False}
+        for group in ["lane-probe", *(entry[2] for entry in DEDICATED_GROUPS.values())]
+    ]
+    moves = [
+        (name, block, {**job, "concurrency": block, "continue-on-error": "edited"})
+        for name, job in trusted["jobs"].items()
+        for block in blocks
+        if block != job.get("concurrency", trusted.get("concurrency"))
+    ]
+    let_through = [
+        f"{name} on {block['group']}"
+        for name, block, job in moves
+        if lanes.problems({**trusted, "jobs": {**trusted["jobs"], name: job}}, trusted)
+        != [f"job {name} has no shared hosted lane concurrency group"]
+    ]
+    assert moves
+    assert let_through == []
 
 
 def test_refused_asks_git_for_inherited_workflows_with_the_path_separator(monkeypatch: pytest.MonkeyPatch) -> None:
