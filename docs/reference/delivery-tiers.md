@@ -369,7 +369,7 @@ For agentibrain-kernel, whose `dev` rules require `Gate — Required` reported b
 
 ## Lab merge group interaction rule
 
-For a `merge_group` head, the lab scheduler calls `scripts.ci_lab.interaction.decide` to choose between the test units the group's entries invalidate and the whole suite. The rule is pure. It reads the group's diff against `dev`, each entry's changes from `dev` to its graded tree, the dependency manifest of `tests.dep_manifest`, the test units with a cached verdict and the entry limit, and returns the unit set or `FULL`. `full_reason` names the clause that held, checked in this order:
+For a `merge_group` head, the lab scheduler calls `scripts.ci_lab.interaction.decide` to choose between the test units the group's entries invalidate and the whole suite. A test unit is a test id of the manifest. The rule is pure. It reads the group's diff against `dev`, each entry's changes from `dev` to its graded tree, the dependency manifest of `tests.dep_manifest`, the test units with a cached verdict, the entry limit and the `pyproject.toml` flag, which the caller computes with `scripts.ci_select.pyproject_reaches_tests`. It returns the unit set or `FULL`. `full_reason` names the clause that held, checked in this order:
 
 | Clause | `FULL` when | Read from |
 |---|---|---|
@@ -378,7 +378,7 @@ For a `merge_group` head, the lab scheduler calls `scripts.ci_lab.interaction.de
 | `overlap` | two entries change a common Python module; a shared file that is no module, such as `feature-map.json`, does not count | each entry's changes |
 | `cache` | more than half the manifest's test units have no cached verdict | the store lookups for the group head |
 
-When no clause holds, the result is the union of `tests.dep_manifest.invalidated` over the entries. `tests/ci_lab/test_interaction.py` holds the property cases for each clause and its boundary.
+When no clause holds, the result is the union of `tests.dep_manifest.invalidated` over the entries. An entry that changes a global input of the manifest, such as `uv.lock`, invalidates every unit, so the set is then the whole manifest. `tests/ci_lab/test_interaction.py` holds the property cases for each clause and its boundary.
 
 ## Queue shard sizing
 

@@ -85,7 +85,7 @@ def test_a_disjoint_group_returns_the_union_of_its_entries_invalidated_units(ent
 def test_a_harness_change_in_the_group_diff_runs_the_whole_suite(entries: list[list[Change]], path: str) -> None:
     head = group(entries, extra=[(path, "a = 1\n", "a = 2\n")])
     assert interaction.full_reason(head, MANIFEST, CACHED, LIMIT) == "harness"
-    assert interaction.decide(head, MANIFEST, CACHED, LIMIT) == interaction.FULL
+    assert interaction.decide(head, MANIFEST, CACHED, LIMIT) == "FULL"
 
 
 @pytest.mark.parametrize(
@@ -109,7 +109,7 @@ def test_more_entries_than_the_limit_run_the_whole_suite(count: int, limit: int)
     head = group([[edit(path)] for path in MODULES[:count]])
     expected = "entries" if count > limit else None
     assert interaction.full_reason(head, MANIFEST, CACHED, limit) == expected
-    assert (interaction.decide(head, MANIFEST, CACHED, limit) == interaction.FULL) is (count > limit)
+    assert (interaction.decide(head, MANIFEST, CACHED, limit) == "FULL") is (count > limit)
 
 
 @pytest.mark.parametrize(("count", "expected"), [(3, None), (4, "entries")])
@@ -124,13 +124,27 @@ def test_two_entries_touching_one_module_run_the_whole_suite(entries: list[list[
     head = group([*entries, [edit(shared)]])
     expected = "overlap" if shared in modules(entries) else None
     assert interaction.full_reason(head, MANIFEST, CACHED, LIMIT) == expected
-    assert (interaction.decide(head, MANIFEST, CACHED, LIMIT) == interaction.FULL) is (expected is not None)
+    assert (interaction.decide(head, MANIFEST, CACHED, LIMIT) == "FULL") is (expected is not None)
 
 
 def test_the_first_and_last_entries_sharing_a_module_overlap() -> None:
     entries = [[edit(MODULES[0])], [edit(MODULES[1])], [edit(MODULES[2]), edit(MODULES[0])]]
     assert interaction.overlap(entries) is True
     assert interaction.overlap(entries[:2]) is False
+
+
+@pytest.mark.parametrize(
+    ("entries", "extra", "cached", "expected"),
+    [
+        ([[edit(path)] for path in MODULES[:4]], [("tests/shards.py", "a", "b")], CACHED, "harness"),
+        ([[edit(MODULES[0])], [edit(MODULES[0])], [edit(MODULES[1])], [edit(MODULES[2])]], [], CACHED, "entries"),
+        ([[edit(MODULES[0])], [edit(MODULES[0])]], [], frozenset[str](), "overlap"),
+    ],
+)
+def test_the_clauses_hold_in_their_documented_order(
+    entries: list[list[Change]], extra: list[Change], cached: frozenset[str], expected: str
+) -> None:
+    assert interaction.full_reason(group(entries, extra=extra), MANIFEST, cached, 3) == expected
 
 
 @pytest.mark.parametrize("path", ["feature-map.json", "docs/reference/delivery-tiers.md", "tests/TYPE_BASELINE.json"])
@@ -146,7 +160,7 @@ def test_a_cache_missing_more_than_half_the_units_runs_the_whole_suite(missing: 
     head = group([[edit(MODULES[0])]])
     expected = "cache" if 2 * len(missing) > len(CACHED) else None
     assert interaction.full_reason(head, MANIFEST, CACHED - missing, LIMIT) == expected
-    assert (interaction.decide(head, MANIFEST, CACHED - missing, LIMIT) == interaction.FULL) is (expected is not None)
+    assert (interaction.decide(head, MANIFEST, CACHED - missing, LIMIT) == "FULL") is (expected is not None)
 
 
 @pytest.mark.parametrize(("missing", "expected"), [(3, False), (4, False), (5, True), (8, True)])
