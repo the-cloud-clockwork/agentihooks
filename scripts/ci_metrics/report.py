@@ -1,3 +1,4 @@
+# pyright: reportUnusedImport=false
 """Runner cost and lead time over one window, measured the way the 4 November CI at agent scale report measured them.
 
 Runner minutes are the summed run time of every job that was not skipped. A workflow's runs whose jobs were not read
@@ -5,13 +6,13 @@ are counted at the minutes per run of its read runs. A merged pull request's lea
 its branch to its merge.
 """
 
-from collections import defaultdict  # noqa: F401  # pyright: ignore[reportUnusedImport]
+from collections import defaultdict  # noqa: F401
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from scripts import ci_minutes  # noqa: F401  # pyright: ignore[reportUnusedImport]
+from scripts import ci_minutes  # noqa: F401
 from scripts.swarm import metrics_outbox
 
 CANCELLED = "cancelled"

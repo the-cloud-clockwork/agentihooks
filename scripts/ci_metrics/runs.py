@@ -1,3 +1,4 @@
+# pyright: reportUnusedImport=false
 """Reads one hour of agentihooks CI from GitHub and the ARC pending runner average from Prometheus.
 
 Every agent shares one GitHub API limit, so a run reads one hour window: its workflow runs, the jobs of each run with
@@ -5,16 +6,16 @@ their steps, the pull requests merged into dev in the window and the runs of eac
 when they would leave less than the reserve that `scripts.ci_minutes` keeps for the other users of the limit.
 """
 
-import json  # noqa: F401  # pyright: ignore[reportUnusedImport]
-import subprocess  # noqa: F401  # pyright: ignore[reportUnusedImport]
-import urllib.parse  # pyright: ignore[reportUnusedImport]
-import urllib.request  # noqa: F401  # pyright: ignore[reportUnusedImport]
+import json  # noqa: F401
+import subprocess  # noqa: F401
+import urllib.parse
+import urllib.request  # noqa: F401
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
-from scripts import ci_minutes  # noqa: F401  # pyright: ignore[reportUnusedImport]
-from scripts.ci_storage import rows  # noqa: F401  # pyright: ignore[reportUnusedImport]
+from scripts import ci_minutes  # noqa: F401
+from scripts.ci_storage import rows  # noqa: F401
 
 PULL_PAGES = 10
 TIMEOUT_S = 60
