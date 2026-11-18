@@ -1,11 +1,11 @@
-FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS dependencies
+FROM mirror.gcr.io/library/python:3.12.12-slim-bookworm AS dependencies
 COPY --from=ghcr.io/astral-sh/uv:0.10.9 /uv /usr/local/bin/uv
 WORKDIR /build
 COPY docker/swarm/requirements.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv venv /opt/venv && uv pip install --python /opt/venv/bin/python --compile-bytecode --require-hashes -r requirements.lock
 
-FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS build
+FROM mirror.gcr.io/library/python:3.12.12-slim-bookworm AS build
 COPY --from=ghcr.io/astral-sh/uv:0.10.9 /uv /usr/local/bin/uv
 WORKDIR /build
 COPY pyproject.toml README.md ./
@@ -20,16 +20,16 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     && uv venv /opt/venv \
     && uv pip install --python /opt/venv/bin/python --prefix /opt/package --compile-bytecode --no-deps dist/*.whl
 
-FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS herdr
+FROM mirror.gcr.io/library/python:3.12.12-slim-bookworm AS herdr
 ARG TARGETARCH=amd64
 COPY docker/swarm-node/versions.lock docker/swarm-node/requirements.lock /opt/swarm-node/
 COPY scripts/swarm_v2/worker_image.py /opt/swarm-node/worker_image.py
 RUN python /opt/swarm-node/worker_image.py install --tool herdr --architecture "$TARGETARCH"
 
-FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS gh
+FROM mirror.gcr.io/library/python:3.12.12-slim-bookworm AS gh
 RUN apt-get update && apt-get install -y --no-install-recommends gh
 
-FROM mirror.gcr.io/library/python:3.12-slim-bookworm
+FROM mirror.gcr.io/library/python:3.12.12-slim-bookworm
 ENV PATH=/opt/venv/bin:$PATH \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

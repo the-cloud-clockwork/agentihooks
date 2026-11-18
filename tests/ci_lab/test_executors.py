@@ -10,6 +10,7 @@ from typing import Any, cast
 
 import pytest
 
+from scripts import ci_wiring
 from scripts.ci_lab import contract, executors, run_static, run_tests, static_gates, worker
 from scripts.ci_lab.outcomes import FAILED, PASSED
 from scripts.ci_lab.sandbox import CannotRun, Outcome, PortAllocator, PortRange
@@ -224,6 +225,17 @@ def test_static_releases_every_tree_it_leased_when_a_lease_or_the_gate_raises(
 def test_gate_refuses_a_name_the_grader_workflow_does_not_run(static_trees: FakeWorktrees) -> None:
     with pytest.raises(KeyError):
         executors.gate(static_trees.trees["g1"], "lint/missing")
+
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.mark.feature("lab-reusable-workflow-gates")
+def test_gate_returns_a_gate_of_a_reusable_workflow_the_real_tests_workflow_calls() -> None:
+    registry = json.loads((ROOT / static_gates.REGISTRY).read_text())
+    gates = static_gates.discover((ROOT / static_gates.WORKFLOW).read_text(), registry, ci_wiring.load(ROOT))
+    semgrep = next(gate for gate in gates if gate.job.startswith("semgrep/"))
+    assert executors.gate(ROOT, semgrep.name) == semgrep
 
 
 @pytest.mark.feature("lab-worker-executors")
