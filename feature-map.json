@@ -4171,6 +4171,18 @@
       ]
     },
     {
+      "id": "lab-verdict-outside-to-manifest",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-verdict-outside-to-manifest",
+      "behaviour": "A graded lab job whose uploaded report lists files its batch opened outside the manifest writes one note per batch tests and sorted list into its repository's manifest folder, whatever its graded outcome. The next stored manifest read that finds or fetches a packed manifest merges every note into the outside list of each test record it names, sorted and without duplicates, skipping tests the manifest lacks, so the following test unit key changes when one of those files changes, and a change to one of those files invalidates the tests whose records list it. A report without the list or with an empty list writes no note.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis and the local object store, scripts.ci_lab.scheduler.StoredManifests, scripts.ci_lab.expand_tests.units, scripts.ci_lab.interaction.invalidated and tests.dep_manifest.invalidated",
+      "tests": [
+        "tests/ci_lab/test_scheduler.py::test_a_test_verdict_outside_list_reaches_the_stored_records_and_the_following_key",
+        "tests/ci_lab/test_scheduler.py::test_a_note_joins_the_outside_list_a_stored_or_fetched_record_already_holds",
+        "tests/test_dep_manifest.py::test_a_change_to_a_file_a_test_opened_outside_its_record_invalidates_that_test"
+      ]
+    },
+    {
       "id": "gate-required-waits-for-aggregator",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2504",
@@ -8151,6 +8163,23 @@
         "tests/ci_lab/test_scheduler.py::test_a_merge_group_head_refuses_an_entry_limit_the_delivery_schema_refuses",
         "tests/ci_lab/test_scheduler.py::test_a_head_whose_grader_delivery_breaks_its_schema_is_dropped_with_its_reason",
         "tests/ci_lab/test_scheduler.py::test_stored_manifests_read_the_packed_manifest_of_the_nearest_stored_ancestor"
+      ]
+    },
+    {
+      "id": "lab-scheduler-mutation-units",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-mutation-expansion",
+      "behaviour": "The CI lab scheduler expands the mutation units of a promotion or backfill head beside its test units, so a surviving mutant can turn a lab grade red. In a temporary checkout of the head it finds the lines the head changes against its base in measured Python files, builds one mutant unit per changed function under the mutation job, keyed with the fingerprint of every dependency manifest test that ran the function or a function nested in it, and one stats unit per test file holding such a test, present at the head, under the mutation-stats job. It removes the checkout after expansion. A head that changes no measured Python line gets neither job, and a hotfix, pull request or merge group head never does, since its frame and Gate Required rules hold no mutation job.",
+      "seam": "scripts.ci_lab.scheduler.MirrorExpander.expand over a git origin fixture and scripts.ci_lab.expand_mutation.covering over a fixture repository",
+      "tests": [
+        "tests/ci_lab/test_expand_mutation.py::test_covering_maps_each_function_of_the_changed_files_to_the_tests_that_ran_it_or_a_function_nested_in_it",
+        "tests/ci_lab/test_scheduler.py::test_a_hotfix_pull_request_or_merge_group_head_expands_no_mutation_units",
+        "tests/ci_lab/test_scheduler.py::test_a_promotion_or_backfill_head_names_the_mutants_of_each_changed_function_in_a_checkout_it_removes",
+        "tests/ci_lab/test_scheduler.py::test_a_promotion_head_keys_a_mutant_unit_by_the_tests_that_ran_its_function",
+        "tests/ci_lab/test_scheduler.py::test_a_promotion_head_expands_no_stats_unit_for_a_covering_test_file_it_deletes",
+        "tests/ci_lab/test_scheduler.py::test_a_promotion_head_expands_the_stats_unit_of_a_covering_test_inside_a_class",
+        "tests/ci_lab/test_scheduler.py::test_a_promotion_head_expands_a_mutant_unit_for_a_changed_function_no_recorded_test_ran",
+        "tests/ci_lab/test_scheduler.py::test_a_promotion_head_that_changes_no_measured_python_expands_no_mutation_units"
       ]
     },
     {
