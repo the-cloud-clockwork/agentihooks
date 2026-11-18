@@ -1,10 +1,11 @@
-"""The CI lab command line: python -m scripts.ci_lab cutover --grader-root PATH, evidence --grade RUN, or scheduler|worker --self-test."""
+"""The CI lab command line: python -m scripts.ci_lab cutover --grader-root PATH, evidence --grade RUN,
+shadow report --since REVISION, or scheduler|worker --self-test."""
 
 import os
 import sys
 from collections.abc import Mapping, Sequence
 
-from scripts.ci_lab import contract, delivery, evidence
+from scripts.ci_lab import contract, delivery, evidence, shadow
 
 SERVICES = {contract.SCHEDULER.name: contract.SCHEDULER, contract.WORKER.name: contract.WORKER}
 
@@ -15,6 +16,8 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
         return contract.run(SERVICES[argv[0]], argv[1:], environ)
     if argv and argv[0] == "evidence":
         return evidence.main(argv[1:])
+    if argv and argv[0] == "shadow":
+        return shadow.main(argv[1:], environ)
     return delivery.main(argv, environ)
 
 

@@ -1,18 +1,42 @@
-"""Shadow comparison of lab verdicts with GitHub Actions: one row per gate and head."""
+"""Shadow comparison of lab verdicts with GitHub Actions: one row per gate and head.
 
+`Shadow.observe` reads a check_run.completed delivery. A github-actions check run gives the Actions verdict of the
+gate its job name maps to, and a lab-shadow/<gate> check run gives the lab verdict and the grader revision its
+summary names; the check runs of one side fold, failing when any failed. Once a gate and head hold both verdicts,
+`Shadow.record` writes the row to Redis agentihooks-ci:shadow:<gate>:<head>, once per verdict pair under
+lab/shadow/ and to the lab_shadow table, and counts ci_lab_verdict_mismatch_total{gate} when the row turns into
+a mismatch. python -m scripts.ci_lab shadow report --since REVISION prints heads compared and mismatches per gate.
+"""
+
+import argparse
+import functools
+import hashlib
+import json
+import re
+import subprocess
+import sys
 import time
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from scripts.ci_lab import metrics
-from scripts.ci_lab.objects import Objects
+from scripts import ci_wiring
+from scripts.ci_lab import contract, metrics, static_gates
+from scripts.ci_lab.checks import SHADOW
+from scripts.ci_lab.objects import ROOT, Objects
+from scripts.ci_lab.store import PREFIX as STORE_PREFIX
+from scripts.swarm import metrics_outbox
 
 __all__ = [
+    "ACTIONS",
     "MUTATION",
+    "OBJECTS",
+    "PREFIX",
+    "TABLE",
     "TESTS",
     "UNMAPPED",
+    "UNMAPPED_KEY",
     "Row",
     "Shadow",
     "ancestor",
@@ -24,9 +48,33 @@ __all__ = [
     "static_jobs",
 ]
 
+ACTIONS = "github-actions"
+LAB = "lab"
+COMPLETED = "completed"
 TESTS = "tests"
 MUTATION = "mutation"
+UNIT = "unit"
 UNMAPPED = "unmapped"
+PASS = "pass"
+FAIL = "fail"
+VERDICTS = {"success": PASS, "failure": FAIL, "timed_out": FAIL}
+PREFIX = f"{STORE_PREFIX}shadow:"
+UNMAPPED_KEY = f"{STORE_PREFIX}shadow-unmapped"
+OBJECTS = f"{ROOT}shadow/"
+LAB_NAME = f"{SHADOW}/"
+MATRIX = re.compile(r" \(.*\)$")
+GRADER = re.compile(r"^Grader revision: (\S+)$", re.MULTILINE)
+TABLE = metrics_outbox.Table(
+    "lab_shadow",
+    (
+        ("head", "String"),
+        ("gate", "String"),
+        ("grader", "String"),
+        ("lab_verdict", "String"),
+        ("actions_verdict", "String"),
+        ("mismatch", "Int64"),
+    ),
+)
 
 
 @dataclass(frozen=True)
@@ -42,22 +90,46 @@ class Row:
 
 
 def gate_of(name: str, static: Collection[str]) -> str:
-    """Return the gate a check run name maps to."""
-    return UNMAPPED
+    """Return the gate a check run name maps to: unit* to tests, mutation* to mutation, a static job or one of its
+    steps to the job's gate id, anything else unmapped; a matrix suffix and the reusable workflow separator drop."""
+    job = MATRIX.sub("", name).replace(" / ", "/")
+    if job == TESTS or job.startswith(UNIT):
+        return TESTS
+    if job.startswith(MUTATION):
+        return MUTATION
+    return next((label for label in static if job == label or job.startswith(f"{label}/")), UNMAPPED)
 
 
 def grader_revision(summary: str | None) -> str:
-    """Return the grader revision a lab check run summary names."""
-    return ""
+    """Return the grader revision a lab check run summary names, or an empty string when it names none."""
+    match = GRADER.search(summary or "")
+    return "" if match is None else match.group(1)
 
 
 def static_jobs(root: Path) -> frozenset[str]:
-    """Return the gate id of every static job of the workflow tree at root."""
-    return frozenset()
+    """Return the gate id of every static job of the workflow tree at root whose steps gate."""
+    registry = json.loads((root / static_gates.REGISTRY).read_text())
+    found = static_gates.discover((root / static_gates.WORKFLOW).read_text(), registry, ci_wiring.load(root))
+    return frozenset(item.job for item in found)
+
+
+def _fold(stored: Mapping[str, str], side: str) -> str | None:
+    found = {value for field, value in stored.items() if field.startswith(f"{side}:")}
+    if not found:
+        return None
+    return FAIL if FAIL in found else PASS
 
 
 def _now_ms() -> int:
-    return time.time_ns()
+    return time.time_ns() // 1_000_000
+
+
+def _table_row(row: Row, ts_ms: int) -> dict[str, object]:
+    parts = (row.gate, row.head, row.lab_verdict, row.actions_verdict)
+    event = hashlib.sha256("\0".join(parts).encode()).hexdigest()
+    base: dict[str, object] = dict.fromkeys(metrics_outbox.BASE_NAMES, "")
+    fields = {"event_id": event, "ledger": metrics.LEDGER, "ts_ms": ts_ms, "mismatch": int(row.mismatch)}
+    return {**base, **asdict(row), **fields}
 
 
 class Shadow:
@@ -80,29 +152,88 @@ class Shadow:
         self.now_ms = now_ms
 
     def observe(self, payload: Mapping[str, Any]) -> Row | None:
-        """Fold one check run delivery into its gate and head."""
-        return None
+        """Fold one check run delivery into its gate and head; return the row once both verdicts are known."""
+        run = payload["check_run"]
+        name = str(run["name"])
+        lab = name.startswith(LAB_NAME)
+        if payload["action"] != COMPLETED or (not lab and run["app"]["slug"] != ACTIONS):
+            return None
+        gate = gate_of(name.removeprefix(LAB_NAME), self.static)
+        if gate == UNMAPPED:
+            self.client.sadd(UNMAPPED_KEY, name)
+            return None
+        outcome = VERDICTS.get(str(run["conclusion"]))
+        if outcome is None:
+            return None
+        head = str(run["head_sha"])
+        key = f"{PREFIX}{gate}:{head}"
+        fields = {f"{LAB if lab else ACTIONS}:{name}": outcome}
+        if lab:
+            fields["grader"] = grader_revision(run["output"]["summary"])
+        self.client.hset(key, mapping=fields)
+        stored = self.client.hgetall(key)
+        lab_verdict, actions_verdict = _fold(stored, LAB), _fold(stored, ACTIONS)
+        if lab_verdict is None or actions_verdict is None:
+            return None
+        return self.record(head, gate, lab_verdict, actions_verdict, stored["grader"])
 
     def record(self, head: str, gate: str, lab_verdict: str, actions_verdict: str, grader: str) -> Row:
-        """Write one gate and head's row."""
-        return Row(head, gate, grader, lab_verdict, actions_verdict, False)
+        """Write one gate and head's row to Redis, the object store and lab_shadow; count a turn into a mismatch."""
+        row = Row(head, gate, grader, lab_verdict, actions_verdict, lab_verdict != actions_verdict)
+        key = f"{PREFIX}{gate}:{head}"
+        before = self.client.hget(key, "mismatch")
+        self.client.hset(key, mapping={**asdict(row), "mismatch": int(row.mismatch)})
+        document = json.dumps(asdict(row), sort_keys=True).encode()
+        self.objects.write_once(f"{OBJECTS}{gate}/{head}/{lab_verdict}-{actions_verdict}.json", document)
+        self.sink.append(TABLE, [_table_row(row, self.now_ms())])
+        if row.mismatch and before != "1":
+            self.registry.inc(contract.VERDICT_MISMATCH_TOTAL, 1.0, {"gate": gate})
+        return row
 
 
 def rows(client: Any) -> list[Row]:
     """Return every shadow row in Redis that holds both verdicts."""
-    return []
+    found: list[Row] = []
+    for key in client.scan_iter(match=f"{PREFIX}*"):
+        stored = client.hgetall(key)
+        if "mismatch" in stored:
+            verdicts = (stored["lab_verdict"], stored["actions_verdict"])
+            found.append(Row(stored["head"], stored["gate"], stored["grader"], *verdicts, stored["mismatch"] == "1"))
+    return found
 
 
 def report(found: Iterable[Row], unmapped: Iterable[str], since: str, descends: Callable[[str, str], bool]) -> str:
-    """Return heads compared and mismatches per gate since a grader revision."""
-    return ""
+    """Return heads compared, then per gate the rows compared and mismatches, over the rows whose grader revision is
+    since or descends from it, then a line per unmapped check run name."""
+    chosen = [row for row in found if descends(since, row.grader)]
+    lines = [f"since {since}", f"heads compared {len({row.head for row in chosen})}"]
+    for gate in sorted({row.gate for row in chosen}):
+        gated = [row for row in chosen if row.gate == gate]
+        lines.append(f"gate {gate} compared {len(gated)} mismatches {sum(row.mismatch for row in gated)}")
+    lines.extend(f"unmapped {name}" for name in sorted(unmapped))
+    return "\n".join(lines) + "\n"
 
 
 def ancestor(repo: Path, older: str, newer: str) -> bool:
     """Whether older is newer or one of its ancestors in the git repository at repo."""
-    return False
+    command = ["git", "-C", str(repo), "merge-base", "--is-ancestor", older, newer]
+    return subprocess.run(command, capture_output=True, check=False).returncode == 0
 
 
 def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
-    """Print the shadow report."""
+    """Print the shadow report: python -m scripts.ci_lab shadow report --since REVISION [--repo PATH] [--redis URL]."""
+    parser = argparse.ArgumentParser(prog="python -m scripts.ci_lab shadow")
+    command = parser.add_subparsers(dest="command", required=True).add_parser("report")
+    command.add_argument("--since", required=True)
+    command.add_argument("--repo", type=Path, default=Path())
+    command.add_argument("--redis", default=environ.get(contract.REDIS_URL, ""))
+    arguments = parser.parse_args(argv)
+    if not arguments.redis:
+        command.error(f"--redis or {contract.REDIS_URL} names the lab Redis")
+    import redis
+
+    factory: Any = redis.Redis
+    client = factory.from_url(arguments.redis, decode_responses=True)
+    descends = functools.cache(functools.partial(ancestor, arguments.repo))
+    sys.stdout.write(report(rows(client), client.smembers(UNMAPPED_KEY), arguments.since, descends))
     return 0
