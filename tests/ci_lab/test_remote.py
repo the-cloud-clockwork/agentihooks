@@ -163,8 +163,9 @@ def test_main_reads_the_ref_lines_from_stdin_and_prints_the_grade_url(
 
 
 def _git(cwd: Path, *argv: str, extra: dict[str, str] | None = None) -> str:
-    """Run git outside the operator's global and system configuration and return its output and error text."""
-    environ = {**os.environ, **(extra or {}), "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+    """Run git outside any outer repository and the global and system configuration; return its output and error text."""
+    inherited = {name: value for name, value in os.environ.items() if not name.startswith("GIT_")}
+    environ = {**inherited, **(extra or {}), "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
     done = subprocess.run(["git", *argv], cwd=cwd, env=environ, capture_output=True, text=True, check=True)
     return done.stdout + done.stderr
 

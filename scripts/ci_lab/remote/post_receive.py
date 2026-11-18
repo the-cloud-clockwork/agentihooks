@@ -18,7 +18,9 @@ from dataclasses import asdict, replace
 from typing import TextIO
 
 from scripts.ci_lab.webhooks import NOTICE, PUSHED, HeadEvent, Publisher, envelope
+from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
+from scripts.events.factory import open_bus
 
 REPOSITORY = "CI_LAB_REPOSITORY"
 ACTOR = "CI_LAB_REMOTE_ACTOR"
@@ -83,9 +85,6 @@ def run(
 
 def main(environ: Mapping[str, str] = os.environ) -> int:
     """Run the hook over git's stdin, publishing on the bus the AGENTIHOOKS_BUS settings name."""
-    from scripts.events.config import BusConfig
-    from scripts.events.factory import open_bus
-
     bus = open_bus(replace(BusConfig.from_environ(environ), provision=False))
     try:
         return run(sys.stdin, environ, bus.lab_heads, first_parent, sys.stdout)
