@@ -9334,6 +9334,16 @@
       ]
     },
     {
+      "id": "tick-view-read-counts",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2521",
+      "behaviour": "Each batched pull request read inside a tick pass writes one swarm_pull_views line to the controller log naming its swarm, its pass, how many distinct pull requests it was asked for, how many the swarm Redis served as kept merged and how many it read from GitHub, so a controller rollout shows whether its first passes read only the open pull requests. A read outside a tick pass writes nothing.",
+      "seam": "views in scripts.swarm.ledger_events, run inside timing.tick with the swarm Redis as its cache",
+      "tests": [
+        "tests/swarm/test_pull_views.py::test_a_tick_pass_view_logs_how_many_pull_requests_redis_kept_merged_and_github_read"
+      ]
+    },
+    {
       "id": "lab-wheel-imports",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2646",

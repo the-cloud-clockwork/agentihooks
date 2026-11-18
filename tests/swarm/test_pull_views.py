@@ -801,6 +801,38 @@ def test_a_kept_entry_with_other_fields_is_read_again_and_replaced(
     assert json.loads(str(cache.get(key)))["head"] == "h2"
 
 
+def pull_view_lines(err: str) -> list[dict[str, Any]]:
+    """Return the pull view count lines a view wrote to the controller log ``err``."""
+    return [json.loads(line) for line in err.splitlines() if '"swarm_pull_views"' in line]
+
+
+@pytest.mark.feature("tick-view-read-counts")
+def test_a_tick_pass_view_logs_how_many_pull_requests_redis_kept_merged_and_github_read(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import fakeredis
+
+    from scripts.swarm import timing
+
+    opened, merged = "https://github.com/o/r/pull/1", "https://github.com/o/r/pull/2"
+    cache = fakeredis.FakeRedis(decode_responses=True)
+    run = answering({opened: resource("h1"), merged: landed("h2")}, [])
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    views([opened, merged], run, cache)
+    outside = capsys.readouterr().err
+    with timing.tick("swarm-a"):
+        token = timing.PASS.set({"pass_id": "pass-1"})
+        views([opened, merged, opened], run, cache)
+        timing.PASS.reset(token)
+        views([opened], run, cache)
+
+    assert pull_view_lines(outside) == []
+    assert pull_view_lines(capsys.readouterr().err) == [
+        {"event": "swarm_pull_views", "slug": "swarm-a", "pass_id": "pass-1", "pulls": 2, "kept_merged": 1, "read": 1},
+        {"event": "swarm_pull_views", "slug": "swarm-a", "pass_id": None, "pulls": 1, "kept_merged": 0, "read": 1},
+    ]
+
+
 def test_an_empty_read_never_asks_the_shared_cache_for_no_keys() -> None:
     refusing = SimpleNamespace(mget=lambda keys: pytest.fail("an empty read asked the shared cache for no keys"))
 
