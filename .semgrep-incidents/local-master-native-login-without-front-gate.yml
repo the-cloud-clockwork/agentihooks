@@ -1,0 +1,15 @@
+rules:
+  - id: local-master-native-login-without-front-gate
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The native claude.ai login belongs to the front door master seat alone. A local route choice that falls
+      through to the native login for any claude master, without checking `front_door.holds` on the task seat,
+      hands a backend master seat the login the hive path already refuses it.
+    paths:
+      include:
+        - /scripts/swarm/runtime.py
+        - local-master-native-login-without-front-gate.py
+    pattern: |
+      if $EXPLICIT or $LANE != MASTER or $HARNESS not in ("", "claude"):
+          return $EXPLICIT or "subscription"

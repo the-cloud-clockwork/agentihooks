@@ -288,7 +288,8 @@ def test_the_semgrep_scan_grades_the_code_with_the_grader_rules_and_the_head_rul
     steps = _steps("semgrep.yml", "scan")
     own = steps["Own rules hold on their fixtures and the code"]["run"].splitlines()[-1]
     assert (
-        own == 'semgrep scan --error --strict --metrics off --config "$RUNNER_TEMP/grader/$RULES" --config "$RULES" .'
+        own
+        == 'semgrep scan --error --strict --timeout 30 --metrics off --config "$RUNNER_TEMP/grader/$RULES" --config "$RULES" .'
     )
     findings = steps["Fail on findings new against the base"]
     assert ".semgrep-incidents" in findings["env"]["CONFIGS"].split()

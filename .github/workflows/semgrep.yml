@@ -58,7 +58,7 @@ jobs:
           cp -r "$RULES" "$copy/rules"
           : > "$copy/.semgrepignore"
           (cd "$copy" && semgrep --metrics off --test --config rules rules)
-          semgrep scan --error --strict --metrics off --config "$RUNNER_TEMP/grader/$RULES" --config "$RULES" .
+          semgrep scan --error --strict --timeout 30 --metrics off --config "$RUNNER_TEMP/grader/$RULES" --config "$RULES" .
 
       - name: Outage rules for tests hold on every test file
         env:

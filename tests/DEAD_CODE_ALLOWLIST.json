@@ -56,7 +56,6 @@
  "scripts/ci_mutation/killers.py": 2,
  "scripts/ci_mutation/selection.py": 3,
  "scripts/ci_mutation/stats_cache.py": 1,
- "scripts/ci_touched_tests.py": 1,
  "scripts/codex_quota.py": 2,
  "scripts/codex_session/binding.py": 6,
  "scripts/gates/identity.py": 2,

@@ -55,7 +55,8 @@
 /tests/mutation_line_selection_proof.py @nestorcolt
 /tests/mutation_self_plant/ @nestorcolt
 /tests/pass_record.py @nestorcolt
-/tests/reused_coverage.py @nestorcolt
+/scripts/reused_coverage.py @nestorcolt
+/scripts/coverage_check.py @nestorcolt
 /tests/test_coverage_*.py @nestorcolt
 /tests/dev_durations.py @nestorcolt
 /tests/chaos/ @nestorcolt
