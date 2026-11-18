@@ -693,9 +693,10 @@ def type_operands(operands: list[tuple[str, bool]]) -> list[str]:
     return words[:count]
 
 
-def leaves_type_to_shell(operands: list[tuple[str, bool]]) -> bool:
-    """True when a kubectl get names no operand, or leaves the type part of an operand that may hold it to the shell."""
-    return not operands or any(UNSHOWN_TYPE.search(word.split("/")[0]) for word in type_operands(operands))
+def types_secret(rest: list[str]) -> bool:
+    """True when the words after a kubectl get name no operand, or the Secret type or a shell filled type in one."""
+    types = type_operands(get_operands(rest))
+    return not types or any(names_secret(word) or UNSHOWN_TYPE.search(word.split("/")[0]) for word in types)
 
 
 def prints_secret_values(words: list[str]) -> bool:
@@ -705,8 +706,7 @@ def prints_secret_values(words: list[str]) -> bool:
     values = flag_values(words)
     if any(RAW_SECRET.search(raw) for raw in values["raw"]):
         return True
-    rest = words[words.index("get") + 1 :]
-    named = any(names_secret(word) for word in rest) or leaves_type_to_shell(get_operands(rest))
+    named = any(types_secret(words[index + 1 :]) for index, word in enumerate(words) if word == "get")
     return named and prints_field_values(values["output"], values["template"])
 
 
