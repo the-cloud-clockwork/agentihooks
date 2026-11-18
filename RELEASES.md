@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.1008 · 2026-11-18
+
+### 2026-11-18 · 47820637e1f2 · #11916 · @nestorcolt
+
+**CI cost and lead time measurement written to ClickHouse every hour**
+
+This adds a new `scripts.ci_metrics` tool that, each hour, pulls one hour of agentihooks CI activity (runs, jobs, merged pull requests, runner queue pressure) and computes runner minutes by tier and pull request, cancellation rates, merge lead time (p50/p90), and branch head counts, then writes stable, deduplicated rows into `swarm.ci_cost` and `swarm.ci_lead_time` via the metrics outbox. It refuses to run without sink configuration and fails loudly if rows are dropped, giving us a trustworthy, documented baseline for tracking CI cost and lead time over time; the hourly CronJob that invokes it ships in a separate, linked pull request.
+
 ## v2.17.1007 · 2026-11-18
 
 ### 2026-11-18 · 61ab4184a890 · #11913 · @agenticore-app
