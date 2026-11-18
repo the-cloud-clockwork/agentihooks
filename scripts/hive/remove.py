@@ -1,4 +1,5 @@
-"""agentihooks hive remove: drain a hive, then delete it from Redis, herdr, OpenBao and antoncore."""
+"""agentihooks hive remove: drain a hive, stop its host services, then delete it from Redis, herdr, OpenBao and
+antoncore."""
 
 import json
 import re
@@ -74,6 +75,10 @@ MANIFESTS = (
 NO_SIGNER = f"{nats_grant.SIGNER_ENV} names no hub signer record, so no member swarms entry to unlist"
 MEMBER_ID = re.compile("[0-9a-f]{16}")
 TREE = 'if .truncated then error("the tree listing is truncated") else .tree[] | select(.type == "blob") | .path end'
+STOP_UNITS = (
+    'for unit in {units}; do if test -f "$HOME/.config/systemd/user/$unit"; then '
+    'systemctl --user disable --now "$unit" || exit 1; echo "$unit"; fi; done'
+)
 
 
 @dataclass(frozen=True)
@@ -350,6 +355,27 @@ def _rescued(path: Path, host: Host) -> str:
         return f"left in worktree {path} because its push failed ({error})"
 
 
+def stop_services(store: "RedisStore | None", bao: openbao_kv.OpenBao | None, plan: Plan, host: Host) -> list[str]:
+    """Stop and disable the hive and scheduler user services installed on the plan's machine over its herdr SSH route,
+    so a removed hive's host stops reaching the swarm; an unreachable host is named and the later steps still run."""
+    from scripts.hive.daemon import UNIT
+    from scripts.scheduler.service import UNIT as SCHEDULER
+
+    target = machine.targets(host.run).get(plan.label)
+    if target is None:
+        return [f"herdr holds no machine {plan.label}, so there is no SSH route to stop its services on"]
+    if plan.dry_run:
+        return [f"would stop and disable {UNIT} and {SCHEDULER} where installed on {target}"]
+    argv = ["ssh", "-o", "BatchMode=yes", target, STOP_UNITS.format(units=f"{UNIT} {SCHEDULER}")]
+    try:
+        stopped = machine.run_checked(host.run, argv, None, machine.SSH_TIMEOUT_S).splitlines()
+    except auth.HiveError as error:
+        return [f"could not stop the services on {target} ({error}); stop and disable {UNIT} there by hand"]
+    if not stopped:
+        return [f"{target} has no agentihooks user service to stop"]
+    return [f"stopped and disabled {', '.join(stopped)} on {target}"]
+
+
 def revoke(redis: "Redis", hive: str, signer: "nats_grant.Signer | None" = None, dry_run: bool = False) -> list[str]:
     if auth.member(redis, hive) is None:
         return [f"{hive} holds no member credential"]
@@ -468,6 +494,7 @@ def _until(
 
 STEPS = (
     ("drain", lambda store, bao, plan, host: drain(store, plan, host)),
+    ("host", stop_services),
     ("member", lambda store, bao, plan, host: revoke(store.redis, plan.hive, plan.signer, plan.dry_run)),
     ("signer", unlist),
     ("herdr", lambda store, bao, plan, host: machine.forget(plan.label, host.known_hosts, host.run, plan.dry_run)),
