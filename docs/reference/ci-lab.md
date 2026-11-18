@@ -1303,9 +1303,12 @@ bubblewrap whenever it needs network isolation or holds a read only tree:
 When bubblewrap is required and `bwrap` is not on `PATH`, `Sandbox.run` raises `CannotRun`
 before starting anything. `CannotRun` means the unit cannot run on this worker and its verdict is
 red; `run_static.run` and `run_tests.run` do not catch it, so their caller records that red
-verdict. A unit with read only trees gets
-`bwrap is not installed, so a unit with read only trees cannot run`, and a unit without network
-and without trees gets `bwrap is not installed, so a unit without network cannot run`.
+verdict.
+
+| Unit | `CannotRun` message |
+|---|---|
+| With read only trees, with or without network | `bwrap is not installed, so a unit with read only trees cannot run` |
+| Without network and without read only trees | `bwrap is not installed, so a unit without network cannot run` |
 
 ### Which units get read only trees
 
@@ -1425,10 +1428,10 @@ The pull request tier proves the sandbox under real bubblewrap. The writer lock 
 `lab-sandbox` job runs on every pull request that changes `scripts/ci_lab/sandbox.py`,
 `scripts/ci_lab/run_static.py`, `scripts/ci_lab/run_tests.py`, `tests/ci_lab/test_sandbox.py`,
 `tests/ci_lab/test_run_static.py`, `tests/ci_lab/test_run_tests.py` or
-`.github/workflows/writer-lock.yml`, and on every manual dispatch of the Writer lock workflow.
-It runs on a GitHub hosted `ubuntu-latest` runner, installs
-bubblewrap when the runner lacks it, and sets `kernel.apparmor_restrict_unprivileged_userns=0`.
-It then runs those three test files and fails when any of their tests fails or skips. The Tests
+`.github/workflows/writer-lock.yml`, and on every manual dispatch of the writer lock workflow.
+It runs on a GitHub hosted `ubuntu-latest` runner, installs bubblewrap when the runner lacks it,
+and sets `kernel.apparmor_restrict_unprivileged_userns=0`. It then runs those three test files
+and fails when any of their tests fails or skips. The Tests
 workflow calls the writer lock workflow from its `writer-lock` job, which `Gate — Required` needs.
 These tests prove the read only trees:
 
