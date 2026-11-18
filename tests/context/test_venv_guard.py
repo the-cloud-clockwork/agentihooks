@@ -99,7 +99,7 @@ def checkouts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path
 @pytest.fixture
 def isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     def no_policy(session: str) -> None:
-        return None
+        pass
 
     monkeypatch.setattr(hooks.config, "AGENTIHOOKS_HOME", tmp_path / "home")
     for name in ("AGENTIHOOKS_SWARM", "AGENTIHOOKS_AGENT_NAME", "AGENTIHOOKS_SWARM_TASK"):
@@ -126,6 +126,9 @@ def isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         ("uv pip install --python ~/workspace/.venv/bin/python -e .", "worktree"),
         ("VIRTUAL_ENV={venv} uv pip install -e .", "worktree"),
         ("export UV_PYTHON={venv}/bin/python && uv pip install -e .", "worktree"),
+        ("VIRTUAL_ENV={worktree}/.venv uv pip install -e .", "worktree"),
+        ("VIRTUAL_ENV=/elsewhere true && uv pip install -e .", "worktree"),
+        ("git commit -m 'VIRTUAL_ENV=/elsewhere' && uv pip install -e .", "worktree"),
     ],
 )
 def test_editable_install_into_the_hooks_venv_from_outside_a_primary_checkout_is_refused(
@@ -150,11 +153,11 @@ def test_the_refusal_names_the_hooks_venv_the_source_and_the_way_out(checkouts: 
     with pytest.raises(BlockAction) as refused:
         check_venv_guard(_bash(f"uv pip install --python {venv}/bin/python -e .", worktree))
     assert str(refused.value) == (
-        f"BLOCKED: this editable install points the venv the hooks run from ({venv}) at {worktree}, which is not "
+        f"BLOCKED: this editable install can point the venv the hooks run from ({venv}) at {worktree}, which is not "
         "inside a primary checkout. Once that folder goes, as wt.sh done removes a worktree, every hook and gate "
         "condition that imports from it fails open.\n"
         f"Install from the primary checkout (uv pip install --python {venv}/bin/python -e <primary checkout>), or "
-        "install the worktree into its own venv."
+        "name the worktree's own venv with --python."
     )
 
 
@@ -166,7 +169,7 @@ def test_the_refusal_names_the_hooks_venv_the_source_and_the_way_out(checkouts: 
         ("uv pip install --python {venv}/bin/python -e {primary}", "worktree"),
         ("uv pip install -e .", "primary"),
         ("cd {worktree}/missing && uv pip install --python {venv}/bin/python -e .", "primary"),
-        ("VIRTUAL_ENV={worktree}/.venv uv pip install -e .", "worktree"),
+        ("VIRTUAL_ENV={worktree}/.venv uv pip install --python {worktree}/.venv/bin/python -e .", "worktree"),
         ("uv pip install --python {worktree}/.venv/bin/python -e .", "worktree"),
         ("uv pip install -e .", "worktree"),
         ("pip install -e .", "worktree"),
@@ -207,5 +210,5 @@ def test_the_shell_guards_warn_when_the_venv_guard_crashes(
     monkeypatch.setattr(venv_guard, "check_venv_guard", crash)
     monkeypatch.setattr(hook_manager, "log", record)
     hook_manager._check_shell_guards({"tool_name": "Bash", "session_id": "s1", "tool_input": {"command": "echo hi"}})
-    assert ("venv_guard check failed", {"error": "boom"}) in logged
-    assert "WARNING: venv_guard check failed (boom) — guard bypassed\n" in capsys.readouterr().err
+    assert ("branch_guard check failed", {"error": "boom"}) in logged
+    assert "WARNING: branch_guard check failed (boom) — guard bypassed\n" in capsys.readouterr().err

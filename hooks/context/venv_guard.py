@@ -25,7 +25,7 @@ _PIP = re.compile(r"pip[\d.]*")
 _PYTHON = re.compile(r"python[\d.]*")
 _EDITABLE_OPTION = re.compile(r"(?:-e|--editable)(?:=?(.+))?")
 _PYTHON_OPTION = re.compile(r"(?:--python|-p)(?:=(.+))?")
-_ASSIGNED_VENV = re.compile(r"\b(?:VIRTUAL_ENV|UV_PYTHON)=[\"']?([^\s\"';&|()]+)")
+_ASSIGNS_VENV = re.compile(r"\b(?:VIRTUAL_ENV|UV_PYTHON)=")
 _EXTRAS = re.compile(r"\[[^\]]*\]$")
 
 
@@ -68,24 +68,32 @@ def _sources(words: list[str]) -> list[str]:
     ]
 
 
-def _target(tokens: list[str], cwd: Path, active: str) -> Path | None:
-    """The venv path an install writes into: its --python or -p value, its program's path, the active venv, or for
-    uv the nearest .venv, the order uv and pip look in."""
+def _named_target(tokens: list[str], cwd: Path) -> Path | None:
+    """The venv path an install names itself: its --python or -p value, else its program's path."""
     for word, after in zip(tokens, [*tokens[1:], None]):
         if (match := _PYTHON_OPTION.fullmatch(word)) and (value := match[1] or after):
             return cwd / _expanded(value)
     if "/" in tokens[0]:
         return cwd / _expanded(tokens[0])
-    if active:
-        return cwd / _expanded(active)
+    return None
+
+
+def _environment_target(tokens: list[str], cwd: Path) -> Path | None:
+    """The venv an install that names none writes into: $VIRTUAL_ENV, else for uv the nearest .venv."""
+    if active := os.environ.get("VIRTUAL_ENV"):
+        return Path(active)
     if Path(tokens[0]).name == "uv":
         return next((folder / ".venv" for folder in (cwd, *cwd.parents) if (folder / ".venv").is_dir()), None)
     return None
 
 
-def _into_hooks_venv(tokens: list[str], cwd: Path, active: str) -> bool:
-    """Whether an install writes into the venv the hooks run from, or into one an unexpanded variable hides."""
-    target = _target(tokens, cwd, active)
+def _into_hooks_venv(tokens: list[str], cwd: Path, assigns_venv: bool) -> bool:
+    """Whether an install writes into the venv the hooks run from, or into one the guard cannot read: a path an
+    unexpanded variable hides, or a venv the command picks by assigning VIRTUAL_ENV or UV_PYTHON."""
+    target = _named_target(tokens, cwd)
+    if target is None and assigns_venv:
+        return True
+    target = target or _environment_target(tokens, cwd)
     if target is None or "$" in str(target):
         return target is not None
     venv = target if target.is_dir() else target.parent.parent
@@ -104,26 +112,22 @@ def _in_primary_checkout(folder: Path) -> bool:
 
 
 def _editable_refusal(command: str, cwd: Path) -> str:
-    """The refusal for an editable install into the hooks' venv whose source is not inside a primary checkout.
-
-    The active venv is the last VIRTUAL_ENV or UV_PYTHON the command assigns, else $VIRTUAL_ENV.
-    """
-    assigned = _ASSIGNED_VENV.findall(command)
-    active = assigned[-1] if assigned else os.environ.get("VIRTUAL_ENV", "")
+    """The refusal for an editable install into the hooks' venv whose source is not inside a primary checkout."""
+    assigns_venv = bool(_ASSIGNS_VENV.search(command))
     for tokens, folders in located(command):
         if not _installs(tokens):
             continue
         here = _cwd_after_cds(cwd, folders)
-        if _into_hooks_venv(tokens, here, active):
+        if _into_hooks_venv(tokens, here, assigns_venv):
             for source in _sources(tokens):
                 folder = here / _expanded(source)
                 if not _in_primary_checkout(folder):
                     return (
-                        f"BLOCKED: this editable install points the venv the hooks run from ({sys.prefix}) at "
+                        f"BLOCKED: this editable install can point the venv the hooks run from ({sys.prefix}) at "
                         f"{folder}, which is not inside a primary checkout. Once that folder goes, as wt.sh done "
                         "removes a worktree, every hook and gate condition that imports from it fails open.\n"
                         f"Install from the primary checkout (uv pip install --python {sys.prefix}/bin/python -e "
-                        "<primary checkout>), or install the worktree into its own venv."
+                        "<primary checkout>), or name the worktree's own venv with --python."
                     )
     return ""
 
