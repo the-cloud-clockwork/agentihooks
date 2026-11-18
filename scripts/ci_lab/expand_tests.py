@@ -133,13 +133,14 @@ def fingerprints(
 
 
 def unlisted(manifest: Mapping[str, Any], tree: Mapping[str, bytes]) -> dict[str, str]:
-    """Return the sha256 of every test module of the tree that holds no manifest test."""
+    """Return the sha256 of every test module of the tree that holds no manifest test and of each test tree module
+    such a module imports."""
     listed = {test.partition("::")[0] for test in manifest["tests"]}
-    return {
-        path: hashlib.sha256(content).hexdigest()
-        for path, content in tree.items()
-        if _test_module(path) and path not in listed
-    }
+    reached: set[str] = set()
+    for path in tree:
+        if _test_module(path) and path not in listed:
+            _reached(tree, path, reached)
+    return {path: hashlib.sha256(tree[path]).hexdigest() for path in reached}
 
 
 def _parts(tests: list[str], seconds: Mapping[str, float], target: float) -> list[tuple[str, ...]]:
