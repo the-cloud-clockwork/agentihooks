@@ -269,6 +269,8 @@ def test_coverage_shards_ship_the_reused_tests_dev_coverage_to_sonar_and_the_rat
     steps = _steps("unit")
     names = list(steps)
     kept = steps["Keep the reused tests' dev coverage"]
+    assert "package=scripts\n" in kept["run"]
+    assert "if [[ ! -f scripts/reused_coverage.py ]]; then package=tests; fi\n" in kept["run"]
     assert 'python -m "$package.reused_coverage"' in kept["run"]
     assert 'cd "$RUNNER_TEMP/grader"' in kept["run"]
     assert kept["env"]["GRADER"] == "${{ github.event_name == 'pull_request' && 'origin/dev' || github.sha }}"
