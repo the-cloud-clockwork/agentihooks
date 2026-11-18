@@ -152,10 +152,11 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "swarm.fullname" . }}-controller
-  {{- if and $workers.apiUrl $workers.podPolicyConfigMap }}
   annotations:
+    argocd.argoproj.io/sync-wave: "1"
+    {{- if and $workers.apiUrl $workers.podPolicyConfigMap }}
     configmap.reloader.stakater.com/reload: {{ $workers.podPolicyConfigMap | quote }}
-  {{- end }}
+    {{- end }}
   labels:
     {{- include "swarm.labels" . | nindent 4 }}
     app.kubernetes.io/component: controller
