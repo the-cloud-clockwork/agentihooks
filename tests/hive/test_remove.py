@@ -48,9 +48,16 @@ TEMPLATE_READ = [
 ]
 READS = [
     list(machine.LIST),
+    list(machine.LIST),
     TEMPLATE_READ,
     ["gh", "api", "repos/the-cloud-clockwork/antoncore/git/trees/dev?recursive=1", "--jq", remove.TREE],
 ]
+STOP = (
+    "for unit in agentihooks-hive.service agentihooks-scheduler.service; do "
+    'if test -f "$HOME/.config/systemd/user/$unit"; then systemctl --user disable --now "$unit" || exit 1; '
+    'echo "$unit"; fi; done'
+)
+STEP_TITLES = ["drain", "host", "member", "signer", "herdr", "herdr", "registry", "registry", "registry"]
 
 
 class Swarm:
@@ -263,6 +270,7 @@ def test_remove_runs_every_step_in_order_and_deletes_the_hive_everywhere(store, 
 
     assert done == [
         f"drain: drained {member}: 1 agents ordered to hand off; 0 handed off: none; 0 claims released: none; 0 agents retired: none",
+        f"host: {TARGET} has no agentihooks user service to stop",
         f"member: revoked member {member} and its Redis user",
         f"signer: {remove.NO_SIGNER}",
         "herdr: removed herdr machine anton-9: hive removed",
@@ -285,7 +293,7 @@ def test_remove_runs_every_step_in_order_and_deletes_the_hive_everywhere(store, 
     repo, message = "the-cloud-clockwork/antoncore", "Remove worker hive anton-9\n\nOpened by agentihooks hive remove."
     posted = ["--input", "-", "--jq", ".sha"]
     assert [argv for argv, _ in run.calls if argv[0] == "gh"] == [
-        *READS[1:],
+        *READS[2:],
         ["gh", "pr", "list", "-R", repo, "--head", "remove-anton-9", "--state", "all", "--json", "url,state"]
         + ["--jq", '[.[] | select(.state != "CLOSED")][0].url // ""'],
         ["gh", "api", f"repos/{repo}/git/ref/heads/dev", "--jq", ".object.sha"],
@@ -314,6 +322,7 @@ def test_a_rerun_after_a_completed_remove_writes_nothing_and_succeeds(store, tmp
 
     assert again == [
         f"drain: drained {member}: 0 agents ordered to hand off; 0 handed off: none; 0 claims released: none; 0 agents retired: none",
+        "host: herdr holds no machine anton-9, so there is no SSH route to stop its services on",
         f"member: {member} holds no member credential",
         f"signer: {remove.NO_SIGNER}",
         "herdr: herdr holds no machine anton-9",
@@ -439,7 +448,7 @@ def test_remove_lists_exactly_the_manifests_hive_create_wrote(label: str) -> Non
         f"would open a pull request into the-cloud-clockwork/antoncore dev deleting {', '.join(written)} "
         "and merge it once its checks pass"
     ]
-    assert [argv for argv, _ in run.calls] == READS[1:]
+    assert [argv for argv, _ in run.calls] == READS[2:]
 
 
 def test_remove_still_finds_the_prefixed_layout_of_older_hives() -> None:
@@ -542,6 +551,7 @@ def test_a_dry_run_prints_every_step_first_and_writes_nothing(store, tmp_path):
 
     assert shown == [
         f"drain: would stop placement on {member} and wait up to 600 seconds for engineer@1 to hand off",
+        f"host: would stop and disable agentihooks-hive.service and agentihooks-scheduler.service where installed on {TARGET}",
         f"member: would revoke member {member} and its Redis user",
         f"signer: {remove.NO_SIGNER}",
         "herdr: would remove herdr machine anton-9 and the host key of [10.10.30.207]:2222",
@@ -558,6 +568,88 @@ def test_a_dry_run_prints_every_step_first_and_writes_nothing(store, tmp_path):
     assert [argv for argv, _ in run.calls] == READS
     assert bao.opener.requests == []
     assert _orders(store, SEAT) == []
+
+
+@pytest.mark.feature("hive-remove-stops-host-services")
+def test_remove_of_a_machine_hive_stops_and_disables_its_services_over_its_ssh_route_first(
+    store: Any, tmp_path: Path
+) -> None:
+    member, run, bao, plan = _removal(store, tmp_path)
+    stopping = ["ssh", "-o", "BatchMode=yes", TARGET, STOP]
+
+    def machine_hive(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        done = run(argv, **kwargs)
+        if argv == stopping:
+            return subprocess.CompletedProcess(argv, 0, "agentihooks-hive.service\nagentihooks-scheduler.service\n", "")
+        return done
+
+    done = remove.remove(store, bao, plan, _host(Clock(store, member, 2), machine_hive, tmp_path))
+
+    assert done[1] == f"host: stopped and disabled agentihooks-hive.service, agentihooks-scheduler.service on {TARGET}"
+    assert [line.split(":")[0] for line in done] == [*STEP_TITLES, "manifests", "openbao"]
+    assert (stopping, machine.SSH_TIMEOUT_S) in run.calls
+    commands = [argv for argv, _ in run.calls]
+    assert commands.index(stopping) < commands.index(["herdr", "machine", "remove", "p7"])
+    assert run.inputs[commands.index(stopping)] is None
+    assert not auth.member(store.redis, member)
+
+
+@pytest.mark.feature("hive-remove-stops-host-services")
+@pytest.mark.parametrize(
+    ("answer", "error"),
+    [
+        (
+            subprocess.CompletedProcess(["ssh"], 255, "", "ssh: connect to host 10.10.30.207 port 2222: timed out\n"),
+            "ssh exited 255: ssh: connect to host 10.10.30.207 port 2222: timed out",
+        ),
+        (subprocess.TimeoutExpired("ssh", 60), "ssh failed (Command 'ssh' timed out after 60 seconds)"),
+    ],
+    ids=["refused", "timed-out"],
+)
+def test_an_unreachable_host_is_named_and_every_other_step_still_runs(
+    store: Any, tmp_path: Path, answer: "subprocess.CompletedProcess[str] | subprocess.TimeoutExpired", error: str
+) -> None:
+    member, run, bao, plan = _removal(store, tmp_path)
+
+    def unreachable(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        done = run(argv, **kwargs)
+        if argv[0] != "ssh":
+            return done
+        if isinstance(answer, subprocess.TimeoutExpired):
+            raise answer
+        return answer
+
+    done = remove.remove(store, bao, plan, _host(Clock(store, member, 2), unreachable, tmp_path))
+
+    assert done[1] == (
+        f"host: could not stop the services on {TARGET} ({error}); "
+        "stop and disable agentihooks-hive.service and agentihooks-scheduler.service there by hand"
+    )
+    assert [line.split(":")[0] for line in done] == [*STEP_TITLES, "manifests", "openbao"]
+    assert not auth.member(store.redis, member)
+    assert ["herdr", "machine", "remove", "p7"] in [argv for argv, _ in run.calls]
+
+
+@pytest.mark.feature("hive-remove-stops-host-services")
+@pytest.mark.parametrize(("code", "printed"), [(0, "agentihooks-hive.service\n"), (1, "")], ids=["stopped", "refused"])
+def test_the_host_stop_disables_only_the_installed_units_and_fails_on_a_refused_stop(
+    tmp_path: Path, code: int, printed: str
+) -> None:
+    units = tmp_path / ".config" / "systemd" / "user"
+    units.mkdir(parents=True)
+    (units / "agentihooks-hive.service").write_text("")
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    log = tmp_path / "systemctl.log"
+    systemctl = tools / "systemctl"
+    systemctl.write_text(f'#!/bin/sh\necho "$@" >> "{log}"\nexit {code}\n')
+    systemctl.chmod(0o755)
+    env = {"HOME": str(tmp_path), "PATH": f"{tools}:/usr/bin:/bin"}
+
+    ran = subprocess.run(["sh", "-c", STOP], env=env, capture_output=True, text=True, timeout=30, check=False)
+
+    assert (ran.returncode, ran.stdout) == (code, printed)
+    assert log.read_text() == "--user disable --now agentihooks-hive.service\n"
 
 
 class Drill(Clock):
@@ -603,10 +695,11 @@ def test_remove_with_running_agents_leaves_every_unfinished_claim_handed_off_or_
 
     done = remove.remove(store, bao, plan, _host(clock, Run(), tmp_path, ledger))
 
-    assert done[:4] == [
+    assert done[:5] == [
         f"drain: drained {member}: 5 agents ordered to hand off; 2 handed off: engineer@1, engineer@7; "
         "3 claims released: t2, t3, t6; 6 agents retired: ci@2, ci@6, engineer@1, engineer@3, engineer@5, engineer@7",
         "drain: engineer@3, engineer@5 still ran after 30 seconds and were retired",
+        "host: herdr holds no machine anton-9, so there is no SSH route to stop its services on",
         f"member: revoked member {member} and its Redis user",
         f"signer: {remove.NO_SIGNER}",
     ]
