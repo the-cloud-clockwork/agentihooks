@@ -1,0 +1,21 @@
+rules:
+  - id: tick-step-takes-placement-lock-in-its-call
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A tick step that takes the host placement lock inside its own call blocks one of the pass's shared step workers
+      while it waits for the lock. From 16 November eight such steps held up to all eight step workers while quota
+      notice refreshed quota under the lock, and other ready steps waited up to 39 seconds for a worker. Declare the
+      step placing=True: the step class takes tick.PLACING around its call and the engine runs it on the pass's one
+      placement worker.
+    paths:
+      include:
+        - /scripts/tick/steps/
+        - tick-step-takes-placement-lock-in-its-call.py
+    patterns:
+      - pattern: |
+          with $TICK.PLACING:
+              ...
+      - pattern-not-inside: |
+          def respawn(...):
+              ...

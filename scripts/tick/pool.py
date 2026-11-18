@@ -57,6 +57,11 @@ def _handoff(workers: int) -> ThreadPoolExecutor:
     return ThreadPoolExecutor(max_workers=workers, thread_name_prefix="tick-handed")
 
 
+def _placer() -> ThreadPoolExecutor:
+    """Return the one worker of a pass's steps that take the host placement lock."""
+    return ThreadPoolExecutor(max_workers=1, thread_name_prefix="tick-placing")
+
+
 Item = TypeVar("Item")
 Found = TypeVar("Found")
 
@@ -82,10 +87,15 @@ class Pass:
     guard: Lock = field(default_factory=Lock, compare=False)
     tracked: set[str] = field(default_factory=set[str], compare=False)
     handoff: ThreadPoolExecutor | None = field(default=None, compare=False)
+    placer: ThreadPoolExecutor | None = field(default=None, compare=False)
 
-    def executor(self, name: str) -> ThreadPoolExecutor:
-        """Return the workers step ``name`` runs on: the handed off steps' own when the pass has them, else the pass's
-        step workers, so the handed lane never takes a worker from the rest of the pass."""
+    def executor(self, name: str, placing: bool) -> ThreadPoolExecutor:
+        """Return the workers step ``name`` runs on: the pass's one placement worker when it is ``placing`` under the
+        host placement lock, so a step waiting for that lock holds no other worker; else the handed off steps' own
+        when the pass has them, else the pass's step workers, so the handed lane never takes a worker from the rest
+        of the pass."""
+        if placing and self.placer is not None:
+            return self.placer
         return self.handoff if self.handoff is not None and self.handed_of((name,)) else self.steps
 
     def hand(self, names: Iterable[str]) -> None:
@@ -226,6 +236,7 @@ def running(
         closing_s,
         reserved(critical_s) if reserves is None else reserves,
         handoff=_handoff(workers),
+        placer=_placer(),
     )
     token = _ACTIVE.set(current)
     beat = _Beat(heartbeat, critical_s) if heartbeat is not None and current.parallel else None
@@ -238,6 +249,8 @@ def running(
         current.steps.shutdown(wait=False, cancel_futures=True)
         if current.handoff is not None:
             current.handoff.shutdown(wait=False, cancel_futures=True)
+        if current.placer is not None:
+            current.placer.shutdown(wait=False, cancel_futures=True)
         current.fans.shutdown(wait=False, cancel_futures=True)
         _ACTIVE.reset(token)
         if beat is not None:

@@ -6299,6 +6299,7 @@
       "id": "placement-lock-steps-on-one-placement-worker",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2522",
+      "rules": ["tick-step-takes-placement-lock-in-its-call"],
       "behaviour": "The eight tick steps that place agents (quota notice, codex hook order, rank pass, master down, tick master, master scale, seat alarm, dispatch seat) declare the host placement lock; the step runs its call holding tick.PLACING and the engine runs it on the pass's one placement worker, so lock taking steps run one at a time and a step waiting for the lock never holds one of the pass's shared step workers while an ordinary ready step waits for one.",
       "seam": "CallStep and WriteStep placing declaration and run, pool.Pass.executor and its placement worker, engine._eager submission",
       "tests": [

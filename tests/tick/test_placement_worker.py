@@ -157,12 +157,12 @@ def test_a_lock_taking_step_on_the_slow_lane_runs_on_the_placement_worker() -> N
 
 def test_a_pass_runs_an_ordinary_step_on_its_step_workers_and_shuts_its_placement_worker_down() -> None:
     with pool.running(workers=2) as found:
-        assert found.executor("plain step", False) is found.steps  # pyright: ignore[reportCallIssue]
-        assert found.placer is not None  # pyright: ignore[reportAttributeAccessIssue]
-        assert found.executor("plain step", True) is found.placer  # pyright: ignore[reportCallIssue, reportAttributeAccessIssue]
-        assert found.placer.submit(lambda: 1).result() == 1  # pyright: ignore[reportAttributeAccessIssue]
+        assert found.executor("plain step", False) is found.steps
+        assert found.placer is not None
+        assert found.executor("plain step", True) is found.placer
+        assert found.placer.submit(lambda: 1).result() == 1
     with pytest.raises(RuntimeError):
-        found.placer.submit(lambda: 1)  # pyright: ignore[reportAttributeAccessIssue]
+        found.placer.submit(lambda: 1)
 
 
 def test_a_pass_cancels_lock_taking_steps_still_queued_on_its_placement_worker_when_it_ends() -> None:
@@ -175,10 +175,10 @@ def test_a_pass_cancels_lock_taking_steps_still_queued_on_its_placement_worker_w
     try:
         begun = monotonic()
         with pool.running(workers=1) as found:
-            assert found.placer is not None  # pyright: ignore[reportAttributeAccessIssue]
-            found.placer.submit(blocker)  # pyright: ignore[reportAttributeAccessIssue]
+            assert found.placer is not None
+            found.placer.submit(blocker)
             assert started.wait(5)
-            queued = found.placer.submit(lambda: None)  # pyright: ignore[reportAttributeAccessIssue]
+            queued = found.placer.submit(lambda: None)
         assert monotonic() - begun < 3
         assert queued.cancelled()
     finally:
@@ -202,10 +202,10 @@ def test_a_call_step_that_declares_the_placement_lock_runs_its_call_holding_it(m
         seen.append(tick.PLACING.held)
         return ["placed"]
 
-    placed = CallStep("quota notice", GROUP, call, placing=True)  # pyright: ignore[reportCallIssue]
+    placed = CallStep("quota notice", GROUP, call, placing=True)
     result = placed.run(_ctx())
 
-    assert placed.placing is True  # pyright: ignore[reportAttributeAccessIssue]
+    assert placed.placing is True
     assert seen == [True]
     assert (lock.entered, lock.held) == (1, False)
     assert [write.value for write in result.writes] == [["placed"]]
@@ -222,7 +222,7 @@ def test_a_call_step_that_declares_no_placement_lock_runs_its_call_without_it(mo
     plain = CallStep("quota notice", GROUP, call)
     plain.run(_ctx())
 
-    assert plain.placing is False  # pyright: ignore[reportAttributeAccessIssue]
+    assert plain.placing is False
     assert seen == [False]
     assert lock.entered == 0
 
@@ -238,12 +238,12 @@ def test_a_write_step_that_declares_the_placement_lock_runs_its_call_holding_it(
         seen.append(tick.PLACING.held)
         return ["ranked"]
 
-    placed = WriteStep("rank pass", GROUP, call, placing=True)  # pyright: ignore[reportCallIssue]
+    placed = WriteStep("rank pass", GROUP, call, placing=True)
     result = placed.run(_ctx())
     plain = WriteStep("rank pass", GROUP, call)
     plain.run(_ctx())
 
-    assert (placed.placing, plain.placing) == (True, False)  # pyright: ignore[reportAttributeAccessIssue]
+    assert (placed.placing, plain.placing) == (True, False)
     assert seen == [True, False]
     assert (lock.entered, lock.held) == (1, False)
     assert [write.value for write in result.writes] == [["ranked"]]
