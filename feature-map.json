@@ -662,6 +662,20 @@
       ]
     },
     {
+      "id": "ci-for-loop-word-list-workflow-run-blocks",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-shell-for-rule-workflow-blocks",
+      "behaviour": "The lint gate that refuses a for loop whose word list holds a command substitution grades the bash and sh run blocks of every tracked workflow under .github/workflows and every composite action file, besides tracked shell files. A step whose own shell or nearest default shell is another language is skipped, GitHub expressions read as plain words so they hide no loop, each refusal names the workflow file and the loop's line in it, and a tree without a tracked workflow file is red.",
+      "seam": "the input set of the for loop word list gate",
+      "tests": [
+        "tests/test_ci_for_substitution.py::test_the_red_workflow_fixture_reports_every_refused_loop_at_its_file_line",
+        "tests/test_ci_for_substitution.py::test_the_clean_workflow_fixture_reports_nothing",
+        "tests/test_ci_for_substitution.py::test_github_expressions_become_underscores_that_keep_their_newlines",
+        "tests/test_ci_for_substitution.py::test_tracked_workflows_and_actions_with_a_substitution_word_list_are_red",
+        "tests/test_ci_for_substitution.py::test_the_repository_tree_holds_no_refused_word_list"
+      ]
+    },
+    {
       "id": "hive-launch-pane-off-controller-hold",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2481",

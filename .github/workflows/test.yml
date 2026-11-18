@@ -2138,7 +2138,7 @@ jobs:
         timeout-minutes: 3
         run: |
           pid=$(cat "$RUNNER_TEMP/nats-bg.pid")
-          for _ in $(seq 150); do [[ -f "$RUNNER_TEMP/nats-bg.status" ]] || ! kill -0 "$pid" 2>/dev/null && break; sleep 1; done
+          for _ in {1..150}; do [[ -f "$RUNNER_TEMP/nats-bg.status" ]] || ! kill -0 "$pid" 2>/dev/null && break; sleep 1; done
           cat "$RUNNER_TEMP/nats-bg.log"
           [[ "$(cat "$RUNNER_TEMP/nats-bg.status")" == 0 ]]
           echo "$RUNNER_TEMP/nats-bg" >> "$GITHUB_PATH"
@@ -3264,13 +3264,13 @@ jobs:
           trap 'docker rm -f "$CLICKHOUSE" >/dev/null 2>&1 || true' EXIT
           [[ -f .antoncore/scripts/swarm_dashboard_columns.py ]] || { echo "::error::The antoncore dashboard column checker could not be checked out."; exit 1; }
           echo "$ANTONCORE_REVISION"
-          for _ in $(seq 180); do
+          for _ in {1..180}; do
             [[ -s "$RUNNER_TEMP/columns-venv.status" && -s "$RUNNER_TEMP/clickhouse.status" ]] && break
             sleep 1
           done
           [[ "$(cat "$RUNNER_TEMP/columns-venv.status" 2>/dev/null)" == 0 ]] || { cat "$RUNNER_TEMP/columns-venv.log" || true; echo "::error::The dashboard checker environment did not install."; exit 1; }
           [[ "$(cat "$RUNNER_TEMP/clickhouse.status" 2>/dev/null)" == 0 ]] || { cat "$RUNNER_TEMP/clickhouse.log" || true; echo "::error::The ClickHouse container did not start."; exit 1; }
-          for _ in $(seq 60); do
+          for _ in {1..60}; do
             docker exec "$CLICKHOUSE" clickhouse-client -q 'SELECT 1' >/dev/null 2>&1 && break
             sleep 1
           done
