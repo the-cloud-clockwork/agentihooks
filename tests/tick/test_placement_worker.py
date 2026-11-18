@@ -4,7 +4,7 @@ a step waiting for the lock never holds one of the pass's shared step workers.""
 from collections.abc import Callable
 from dataclasses import dataclass
 from threading import Event, Lock, current_thread
-from time import monotonic, sleep
+from time import sleep
 from typing import Any
 
 import pytest
@@ -166,20 +166,20 @@ def test_a_pass_runs_an_ordinary_step_on_its_step_workers_and_shuts_its_placemen
 
 
 def test_a_pass_cancels_lock_taking_steps_still_queued_on_its_placement_worker_when_it_ends() -> None:
-    gate, started = Event(), Event()
+    gate, started, finished = Event(), Event(), Event()
 
     def blocker() -> None:
         started.set()
         gate.wait(5)
+        finished.set()
 
     try:
-        begun = monotonic()
         with pool.running(workers=1) as found:
             assert found.placer is not None
             found.placer.submit(blocker)
             assert started.wait(5)
             queued = found.placer.submit(lambda: None)
-        assert monotonic() - begun < 3
+        assert not finished.is_set(), "the pass end waited for the running lock taking step"
         assert queued.cancelled()
     finally:
         gate.set()
