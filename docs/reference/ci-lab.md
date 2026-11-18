@@ -992,9 +992,9 @@ of lost objects runs on `LocalObjects` only.
 
 ## Reuse audit
 
-`scripts.ci_lab.audit` checks the [verdict store](#verdict-store)'s reuse. The lab's `grade`
-port grades units again with no store reuse, and the audit compares each fresh verdict with the
-cached one. When one differs, the audit stops reuse of that kind, files a ci task on the ledger and
+`scripts.ci_lab.audit` checks the [verdict store](#verdict-store)'s reuse. The `grade` method of
+`ports.lab` grades units again with no store reuse, and the audit compares each fresh verdict with
+the cached one. When one differs, the audit stops reuse of that kind, files a ci task on the ledger and
 raises `CILabVerdictMismatch`. The task asks for the fix of an input the kind's key misses; the
 audit itself only detects the difference, not its cause.
 
@@ -1207,7 +1207,7 @@ Run the `python` step from the root of a checkout of this repository. With `KIND
 | A later audit finds nothing for a kind that differed before | The kind is disabled, so its `get` misses and nothing of it is compared | `SISMEMBER agentihooks-ci:disabled <kind>` |
 | A unit that ran is never compared | It has no index entry, or the regrade holds no verdict for it | `EXISTS agentihooks-ci:verdict:<kind>:<key>`, and the verdicts of the `Regrade` the lab returned |
 | A cached pass regraded red is not reported | The cached verdict is flaky; a flaky pass agrees with a failure | The `flaky` field of the index entry |
-| The ledger's error propagates instead of `CILabVerdictMismatch` | `add_task` raised for one kind | The ledger error in the audit caller's output names it. Each differing kind is already disabled, so none is reused. The refused kind and every later kind in sorted order have no task, and a later audit files none because a disabled kind is not compared. The mismatch list is lost with the exception, so take the units and runs from the caller's lab (the audit run's verdicts and each unit's cached run) and file those ci tasks by hand, naming the kind and both runs |
+| The ledger's error propagates instead of `CILabVerdictMismatch` | `add_task` raised for one kind | The ledger error names the ledger and its refusal detail, not the kind; `SMEMBERS agentihooks-ci:disabled` lists the disabled kinds, this audit's among them. Each differing kind is already disabled, so none is reused. The refused kind and every later kind in sorted order have no task, and a later audit files none because a disabled kind is not compared. The mismatch list is lost with the exception. Each unit's cached run comes from `ports.lab.suite(head)`, or from `chosen(day, ports.lab.hits(day), share)` for a sample. The audit run and the fresh verdicts exist only in the `Regrade` that `grade` returned, which the audit does not return on this path, so they are recoverable only from the lab's own record of that grade. File those ci tasks by hand, naming the kind and both runs |
 | An audit grades units of a kind it then does not compare | The kind is disabled; the audit grades every listed unit and skips only the comparison | `SMEMBERS agentihooks-ci:disabled`; leave a disabled kind's units out of what the lab lists |
 | Two callers sample different units on the same day | They pass the day in different formats, or their lab returns different hits | Pass the UTC day as `YYYY-MM-DD` and compare the `hits(day)` lists |
 
