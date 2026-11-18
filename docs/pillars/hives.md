@@ -1969,6 +1969,156 @@ whose work ended.
 | The hive logs `hive execution stops for swarm <slug> failed (<error>)` | The error type and message it prints | Fix the cause the error names. A NATS permission error means the hive's bus credential lacks the stop grants: on the workstation root hive, restart the hive service: `hive run` compares the stored root credential's publish and subscribe grant with a fresh mint at start and re-mints it when they differ, logging `hive re-minted the root bus credential in <path>`; a `hive kept the stored root bus credential (<reason>)` line names why it could not, and `agentihooks hive root-bus` mints it by hand. On a member hive, run `agentihooks hive refresh`. |
 | The tick prints `could not send the stop for <agent>, retrying next tick: failed (<error>)` | The error, NATS from the controller and the controller's bus credentials | Fix the bus; the next pass sends the stop again. |
 
+### Resuming a dead agent the hub started
+
+When the pane of a hub started agent dies before its work ends, its hive reopens the agent's own conversation in the
+same seat, under the same task claim. This is the dead resume the tick gives agents it launched itself (see
+[Outage holds and recovery](swarm.md#outage-holds-and-recovery)). The tick's reap step leaves hub admitted agents
+to the hub, so on the `events` engine the hub's `lifecycle` reactor decides the resume and sends the agent's hive a
+`resume` command order. When the resume cannot run, the agent is dropped and its task reopens for a fresh agent.
+
+Before [pull request #11246](https://github.com/the-cloud-clockwork/agentihooks/pull/11246) the reactor had no
+resume. It dropped every dead hub started agent and reopened its task, so the next agent started without the dead
+agent's conversation.
+
+#### Which exits are resumed
+
+An `execution.exited` for a dead pane reaches the reactor two ways:
+
+- the hive publishes it when its execution report shows the agent's pane `exited` or `dead`;
+- the hub's `reconciler` hands it to the reactor on each five minute pass while the hive's latest report still shows
+  the pane ended, or no longer lists it.
+
+The reactor first matches the exit to the spoke claim and the execution record, and holds it while an outage holds
+the agent. For an execution whose spoke claim is still `started`, it then orders a resume only when every one of
+these holds:
+
+| Check | When it fails |
+|---|---|
+| The agent's hive is known: the agent record's hive, else the host its runtime target names. | No resume. |
+| The exit carries no `reason`. A lost hive exit (`lost`, `hive-lost`) and an execution stop exit (`stopped`) carry one. | No resume. |
+| No deliberate exit is recorded for the agent. `agentihooks terminate-agent` records one; the reactor consumes it here. | No resume. |
+| The execution has had fewer than three resumes (`RECOVERY_ATTEMPTS`), counted in `resumes` on its spoke claim. | No resume. |
+| The swarm is not `stopped` or `stopping`. | No resume. |
+| The task row's claim generation is the one the execution started under. | No resume. |
+| The tick's dead resume gate holds: no handoff was submitted for the task, the agent recorded a conversation id, its conversation is under the swarm's compact limit and has not ended after each of its last three tick resumes, and the agent still holds its record, its seat as occupant, its task row in `claimed` or `pr` naming it, and its task claim. | No resume. |
+
+An exit that orders no resume takes the normal exit path: the reactor removes the agent record, releases the launch
+slot and the claim, and returns a task the agent still holds to `open` with no claimant, as in
+[How the hive honors the stop](#how-the-hive-honors-the-stop). The next offer goes to a fresh agent.
+
+#### The resume order
+
+The reactor writes the order into the spoke claim, with the agent's launch time and pane as it judged them and the
+time of the exit, and raises the claim's `resumes` count. It then puts the order on the hive's command stream,
+`agentihooks:hive:<hive>:commands` under the default keyspace root. The order id is
+`resume:<execution>:<generation>:<attempt>`, so each attempt is a new order with its own receipt,
+`agentihooks:hive:<hive>:command:<order id>`. The order carries the swarm, the agent, the execution, its generation,
+the judged launch time and pane, and the prompt the tick's resume also types:
+
+```text
+Your pane ended unexpectedly. Continue your task in this conversation and seat. Read your task progress and proof and handle your inbox before continuing.
+```
+
+While the order is out the agent keeps its record, seat, task claim and task row, and the exit is held. Each later
+reading of the exit decides from the order's receipt:
+
+| What the reactor reads | Action |
+|---|---|
+| No answer, less than 30 minutes (`RESUME_DEADLINE_MS`) after the exit that ordered the resume | Holds the exit. |
+| Answer `done` | Holds the exit. The agent runs in its new pane. |
+| Answer `failed` | Posts a swarm notice and drops the agent; its task reopens. |
+| No answer 30 minutes after the exit that ordered the resume | Posts a swarm notice naming `its hive never answered` and drops the agent; its task reopens. |
+| An exit observed before the resumed pane's launch time | Holds it: the exit belongs to the old pane. |
+| An exit of the resumed pane | Judges it as a new death and orders the next attempt. |
+
+The notice appears in the ledger's notifications panel:
+
+```text
+Starting a fresh agent after engineer@<code>-<n> ended because resume failed: <failure>.
+```
+
+After the third resume of the same execution, the next death drops the agent without a notice and its task reopens.
+
+#### How the hive runs the order
+
+The hive reads its command stream on every heartbeat, every fifteen seconds, including while it drains. Every other
+command order runs inside the heartbeat. A resume order runs in its own process,
+`python -m scripts.hive.resume_order <hive> <order>`, so a slow herdr resume never delays the heartbeat:
+
+1. The heartbeat sets the running marker `<receipt>:running` for 120 seconds, counts the start in the receipt's `runs`
+   field and starts the process. While the marker lives, no second process starts.
+2. The process renews the marker every 30 seconds while it works.
+3. A marker that expires with no answer, as after a crashed process, lets a later heartbeat start another process.
+   When a fourth start comes due, the heartbeat stores the answer `failed` with `resume never answered` instead.
+4. The order stays on the command stream until its receipt holds an answer; the next heartbeat then deletes it.
+5. The first answer stored is final: a late answer never overwrites it. An exception before or during the resume
+   stores `failed` with `error: <exception type>`.
+
+The hive keeps every resume order process it starts, so a restart on a moved checkout waits for a resume in flight
+(see [Adding a machine to a hive](#adding-a-machine-to-a-hive)).
+
+Inside the process the hive:
+
+1. Reads the execution record and checks that it names the agent, generation, launch time and pane the hub judged,
+   that it runs on this hive (the host its runtime target names, else its record's hive), and that the agent still
+   holds its task claim. Any difference answers `failed` with `identity`.
+2. Reaps any process still running under the agent's name. A failed reap answers `failed` with the runtime's detail,
+   such as `a process carrying it still runs`.
+3. Reopens the agent's conversation in its seat through the runtime's native resume, the same herdr resume the tick
+   uses. The swarm's repository is passed as the origin the swarm recorded at its switch to `events`
+   (`repo_origin`), when it has one, instead of the workstation path. A refused resume answers `failed` with the
+   runtime's detail.
+4. Checks the record and the claim again. When a successor claimed the task during the resume, it closes the new pane
+   and answers `failed` with `identity`.
+5. Records the new pane and launch time on the agent record and resets its idle count to zero. A failed write closes
+   the new pane and answers `failed` with `error: <exception type>`.
+6. Answers `done`.
+
+The hub checks the ledger task row, its claim generation and the seat before it orders a resume. The hive checks the
+execution record and the task claim before and after the resume. A successor's work is therefore never resumed by
+the old agent: a successor's claim, or a newer launch that replaced the record, makes the hive answer `identity`.
+
+#### Upgrading for the hub resume
+
+The hub and every hive need a release carrying pull request #11246:
+
+- A hub on an older release orders no resume; every dead hub started agent is dropped and its task reopens.
+- A hive on an older release cannot parse a resume order and deletes it unanswered, so the hub waits the full 30
+  minutes before it hands the task to a fresh agent. An order leaves out the launch time and pane when it carries
+  neither, so older hives still parse every other command order.
+
+A hive process loads its code when it starts: restart `agentihooks-hive` with `systemctl --user restart
+agentihooks-hive` on a workstation or VM, or roll the hive pods on Kubernetes.
+
+#### Checking a resume on a live swarm
+
+```bash
+# The resume orders a hive received, with their running markers
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" --scan --pattern 'agentihooks:hive:<hive>:command:resume:*'
+
+# One order's receipt: sent, runs and, once answered, ack
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" HGETALL 'agentihooks:hive:<hive>:command:resume:<execution>:<generation>:<attempt>'
+# ack {"status": "done", "target": {"host_id": "<hive>"}, "failure": ""}
+
+# The agent keeps its seat and task
+agentihooks swarm <slug> status
+```
+
+A receipt expires a day after its last write. The feature map entry `hub-dead-resume` lists the regression tests for
+this path.
+
+#### Troubleshooting dead agent resumes
+
+| Symptom | Check | Fix |
+|---|---|---|
+| A hub started agent died and its task reopened with no notice | The exit's reason, the task's handoff, `agentihooks swarm <slug> status` and the swarm state | Expected for a lost hive, an execution stop, a deliberate `terminate-agent`, a submitted handoff, a conversation at its compact limit, a third resume already spent or a stopped swarm. With none of those, the hub predates pull request #11246: roll it onto a release that carries it. |
+| Notice `resume failed: its hive never answered` | The hive's release and its service | The hive predates pull request #11246, or its service is not running. Upgrade or restart it as in [Upgrading for the hub resume](#upgrading-for-the-hub-resume). |
+| Notice `resume failed: resume never answered` | The hive's service log | Three resume processes started and none stored an answer. Read the hive log for the process's error. |
+| Notice `resume failed: identity` | The task's claimant and the agent record | The record or claim changed between the hub's order and the hive's resume: a successor took the task or a newer launch replaced the record. Expected: the old agent is dropped, and the task stays with its successor or reopens for a fresh agent. |
+| Notice `resume failed: a process carrying it still runs` | herdr on that hive | The old session could not be reaped. Close it on the hive; the next death of a later agent resumes normally. |
+| Notice `resume failed: <runtime detail>` or `resume failed: error: <exception type>` | The detail it names | Fix the cause it names: a missing conversation, the hive's checkout of the repository, or the error type in the hive log. |
+
 ### Running a spoke
 
 With `AGENTIHOOKS_DEPLOYMENT=distributed`, `agentihooks swarm spoke` runs the master lane spoke on the workstation,
