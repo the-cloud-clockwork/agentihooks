@@ -648,7 +648,7 @@ def test_a_reopen_writes_the_exact_ledger_update_comment_alert_and_seat_exit():
     assert swarm.ledger.comments == [("t1", comment, "swarm")]
     [item] = swarm.inbox()
     assert item.text == _alert(case="green", minutes=10, wait=20, title="Fix it")
-    assert (item.sender, item.ref) == ("swarm", "sw:stall:t1")
+    assert (item.sender, item.ref) == ("swarm", f"sw:stall:t1:green:{START}:reopen")
     exit_record = InboxStore(swarm.store.redis).seats.exit_of(OWNER)
     assert (exit_record["seat"], exit_record["reason"]) == ("eng-1@sw", "stopped")
 
@@ -868,6 +868,57 @@ def test_an_answered_alert_does_not_block_the_next_reopen():
     InboxStore(swarm.store.redis).close(swarm.inbox()[0].id, "master@sw", "done", "handled")
     swarm.ledger.rows["t1"].update(state="pr", claimed_by=OWNER)
     assert len(swarm.tick(START + 11 * MINUTE)) == 1 and len(swarm.inbox()) == 2
+
+
+@pytest.mark.feature("repeated-subject-notices-pass-the-seen-claim")
+def test_each_stall_of_a_task_passes_the_seen_claim() -> None:
+    """A task that stalls again after a new push alerts the master again through the seen claim."""
+    from scripts.inbox import seen
+
+    swarm = Swarm(GREEN)
+    swarm.store.update(SLUG, gates={})
+    inbox = InboxStore(swarm.store.redis)
+    swarm.tick(START)
+    swarm.tick(START + 10 * MINUTE)
+    (first,) = seen.claim(inbox, LEAD)
+    inbox.close(first.id, LEAD, "done", "handled")
+    swarm.pulls[URL] = replace(GREEN, pushed_at=START + 20 * MINUTE)
+    swarm.tick(START + 30 * MINUTE)
+    assert [item.ref for item in seen.claim(inbox, LEAD)] == [f"sw:stall:t1:green:{START + 20 * MINUTE}:alert"]
+    assert first.ref == f"sw:stall:t1:green:{START}:alert"
+
+
+@pytest.mark.feature("repeated-subject-notices-pass-the-seen-claim")
+def test_a_reopen_after_an_alert_on_the_same_stall_passes_the_seen_claim() -> None:
+    """A stall the watchdog alerted on and then reopens tells the master of the reopen through the seen claim."""
+    from scripts.inbox import seen
+
+    swarm = Swarm(GREEN)
+    swarm.store.update(SLUG, gates={})
+    inbox = InboxStore(swarm.store.redis)
+    swarm.tick(START)
+    swarm.tick(START + 10 * MINUTE)
+    seen.claim(inbox, LEAD)
+    swarm.store.update(SLUG, gates={"stall": "enforce"})
+    swarm.tick(START + 11 * MINUTE)
+    assert _reopened(swarm)
+    assert [item.ref for item in seen.claim(inbox, LEAD)] == [f"sw:stall:t1:green:{START}:reopen"]
+
+
+@pytest.mark.feature("repeated-subject-notices-pass-the-seen-claim")
+def test_the_same_stall_answered_once_is_not_shown_again() -> None:
+    """A stall alert the master answered is not shown again while the same stall lasts."""
+    from scripts.inbox import seen
+
+    swarm = Swarm(GREEN)
+    swarm.store.update(SLUG, gates={})
+    inbox = InboxStore(swarm.store.redis)
+    swarm.tick(START)
+    swarm.tick(START + 10 * MINUTE)
+    (first,) = seen.claim(inbox, LEAD)
+    inbox.close(first.id, LEAD, "done", "handled")
+    swarm.tick(START + 11 * MINUTE)
+    assert seen.claim(inbox, LEAD) == []
 
 
 def test_an_open_unclaimed_alert_is_not_repeated_when_the_task_waits_again():
