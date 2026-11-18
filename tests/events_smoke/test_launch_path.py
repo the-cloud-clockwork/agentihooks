@@ -224,9 +224,10 @@ class Seated:
 
 def seated(smoke: Smoke, monkeypatch: pytest.MonkeyPatch) -> Seated:
     """Admits t1 through the hub for a hive-a spoke, runs the hub claim lives reactor over the start the spoke
-    published, passes the agent's launch check and points the tick's bus at the smoke's nats-server; the tick's
-    runtime sees the agent's pane live."""
-    for name, value in ((BACKEND_ENV, "nats"), (URL_ENV, smoke.url), (BIND_ENV, "1"), (SCOPED_ENV, "1")):
+    published, passes the agent's launch check and points the tick's bus at the smoke's nats-server with the hub's
+    scoped provisioning settings; the tick's runtime sees the agent's pane live."""
+    monkeypatch.delenv(BIND_ENV, raising=False)
+    for name, value in ((BACKEND_ENV, "nats"), (URL_ENV, smoke.url), (SCOPED_ENV, "1")):
         monkeypatch.setenv(name, value)
     offline(monkeypatch)
     hive = smoke.spoke("hive-a", "eng")
