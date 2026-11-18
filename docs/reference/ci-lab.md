@@ -2484,7 +2484,8 @@ expected, and `test_a_unit_with_read_only_trees_runs_inside_bwrap_with_each_tree
 fails on both parameters because the arguments no longer carry `--ro-bind`. `run_static.run`
 builds its unit through the same `argv_for`, so the job's `test_run_static.py` bind tests,
 `test_the_step_runs_with_the_grader_and_base_trees_bound_read_only` and
-`test_a_step_cannot_write_into_the_grader_or_base_tree`, see the writable binds as well. Delete the branch after reading the run with `git push origin --delete diffcheck/<name>`.
+`test_a_step_cannot_write_into_the_grader_or_base_tree`, see the writable binds as well. Delete the
+branch after reading the run with `git push origin --delete diffcheck/<name>`.
 
 #### Guard tests
 
