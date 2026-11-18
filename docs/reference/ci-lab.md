@@ -994,8 +994,8 @@ of lost objects runs on `LocalObjects` only.
 
 `scripts.ci_lab.audit` checks the [verdict store](#verdict-store)'s reuse. The `grade` method of
 `ports.lab` grades units again with no store reuse, and the audit compares each fresh verdict with
-the cached one. When one differs, the audit stops reuse of that kind, files a ci task on the ledger and
-raises `CILabVerdictMismatch`. The task asks for the fix of an input the kind's key misses; the
+the cached one. When one differs, the audit stops reuse of that kind, files a ci task on the ledger
+and raises `CILabVerdictMismatch`. The task asks for the fix of an input the kind's key misses; the
 audit itself only detects the difference, not its cause.
 
 | Call | Units it grades again | Class |
