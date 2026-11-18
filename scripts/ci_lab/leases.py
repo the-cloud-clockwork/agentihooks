@@ -105,6 +105,9 @@ class Leases:
 
 
 def release(queue: Queue, pods: Pods, worker: str) -> None:
-    """Clear the deletion cost of the worker's pod once the worker holds no live lease."""
+    """Clear the deletion cost of the worker's pod once the worker holds no live lease, and mark it busy again when a
+    grant landed while the clear was in flight."""
     if not queue.holds(worker):
         pods.cost(worker, False)
+        if queue.holds(worker):
+            pods.cost(worker, True)

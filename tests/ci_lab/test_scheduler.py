@@ -6,7 +6,7 @@ import subprocess
 import sys
 import threading
 import urllib.request
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -1480,8 +1480,13 @@ def test_build_wires_the_service_ports_from_the_environment(tmp_path: Path, monk
     monkeypatch.setattr(scheduler.MirrorExpander, "retries", lambda self, repo: Policy(lost=len(repo)))
     monkeypatch.setattr(scheduler, "Checks", FakeChecks)
     kube = FakeKube()
-    pods_of: list[Any] = []
-    monkeypatch.setattr(scheduler, "worker_pods", lambda found: pods_of.append(found) or kube)
+    pods_of: list[Mapping[str, str]] = []
+
+    def worker_pods(found: Mapping[str, str]) -> FakeKube:
+        pods_of.append(found)
+        return kube
+
+    monkeypatch.setattr(scheduler, "worker_pods", worker_pods)
     environ = {
         scheduler.contract.GIT_MIRROR: str(tmp_path / "node"),
         scheduler.MIRROR_STORE: str(tmp_path / "stores"),

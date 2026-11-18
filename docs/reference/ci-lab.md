@@ -417,16 +417,18 @@ with the leases, so idle workers go before busy ones:
 | A lease poll grants the worker at least one job | annotation set to `1000` |
 | The completion or reap of the worker's last live lease | annotation removed |
 | The end of one lease while the worker holds another | none |
+| A grant that lands while the last lease's clear is in flight | annotation set to `1000` again |
 
-A worker names itself by its pod hostname, so the worker name on a lease is its pod name.
-`scripts.ci_lab.pods.KubePods` sends one JSON merge patch on
+A worker names itself by its pod hostname, so the worker name on a lease is its pod name; a pod on
+the host network, or one whose name runs past 63 characters, has another hostname and its patch is
+refused. `scripts.ci_lab.pods.KubePods` sends one JSON merge patch on
 `/api/v1/namespaces/<namespace>/pods/<worker>`, with the namespace, token and CA of the scheduler's
 mounted service account. Outside a cluster (`KUBERNETES_SERVICE_HOST` unset) the scheduler patches
-nothing. A refused or unreachable API server never fails a grant, a completion or a pass; the
-annotation then lags until the worker's next transition.
+nothing. A refused or unreachable API server never fails a grant, a completion or a pass, but each
+patch waits up to five seconds for it; the annotation then lags until the worker's next transition.
 
-The scheduler pod needs `get` and `patch` on `pods` in the lab namespace, a mounted service account
-token, and network egress to the API server.
+The scheduler pod needs `patch` on `pods` in the lab namespace, a mounted service account token,
+and network egress to the API server.
 
 ### Verify
 
@@ -442,7 +444,8 @@ A worker running a unit shows `1000`; an idle one shows `<none>`.
 | Symptom | Cause | Check |
 |---|---|---|
 | Every worker shows `<none>` while units run | The scheduler's patches are refused or never reach the API server | `kubectl auth can-i patch pods -n <namespace> --as system:serviceaccount:<namespace>:ci-lab-scheduler`, then the scheduler's network policy egress to the API server |
-| A busy worker shows `<none>` | A completion cleared the cost while a new grant for the same worker raced it | The worker's next grant or completion sets it again |
+| Grants and completions slow by about five seconds each | The API server does not answer the patches | The check above; the patch timeout bounds each wait |
+| An idle worker shows `1000` | A grant marked it busy again during a clear, and that lease ended before the re-check's patch landed | Its next lease poll that grants and the end of that lease reset it |
 
 ## Lab head intake
 
