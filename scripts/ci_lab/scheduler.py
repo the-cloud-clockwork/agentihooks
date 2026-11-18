@@ -15,6 +15,7 @@ commit's grades on the scheduler port, metrics on the metrics port, both from on
 
 import argparse
 import json
+import logging
 import subprocess
 import sys
 import time
@@ -742,7 +743,7 @@ class Scheduler:
 
 
 class BusInbox:
-    """Lab head events read from the bus consumer of `ci.lab.head.>`, each acknowledged once read."""
+    """Lab head events read from the bus consumer of `ci.lab.head.>`, each acknowledged once read, or terminated."""
 
     def __init__(self, consumer: Consumer, batch: int = BATCH, timeout_ms: int = FETCH_MS) -> None:
         self.consumer = consumer
@@ -750,10 +751,19 @@ class BusInbox:
         self.timeout_ms = timeout_ms
 
     def heads(self) -> list[Head]:
-        """Return the heads of the next batch of envelopes; a head's lane is its branch, else the head itself."""
+        """Return the heads of the next batch of envelopes; a head's lane is its branch, else the head itself. An
+        envelope missing a head field is terminated with a logged warning, never redelivered to the dead letter cap.
+        """
         heads: list[Head] = []
         for delivery in self.consumer.fetch(self.batch, self.timeout_ms):
             data = cast(Mapping[str, Any], delivery.event.data)  # pragma: no mutate
+            missing = [name for name in HEAD_FIELDS if name not in data]
+            if missing:
+                logging.getLogger(__name__).warning(
+                    "terminated lab head %s missing %s", delivery.event.id, ", ".join(missing)
+                )
+                delivery.term()
+                continue
             event = HeadEvent(*(str(data[name]) for name in HEAD_FIELDS))
             heads.append(Head(event, str(data.get("branch") or event.head)))
             delivery.ack()
