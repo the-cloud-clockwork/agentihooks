@@ -33,7 +33,7 @@ work folder, one piece per line: `- what | area, area | why`, each area a
 repo-relative path prefix the piece touches. With no sub-agent tool (Codex),
 write it yourself. Run `agentihooks swarm <slug> trace-plan`: it keeps the
 pieces your task needs and files the cut ones as follow-ups through
-`agentihooks api`. The build gate refuses an edit or a commit outside the
+the api. The build gate refuses an edit or a commit outside the
 kept areas and your task's territory, and before a passing verdict for the
 current `plan.md`. A piece you find later is appended to `plan.md` and traced
 again; a plan it fails is revised and traced once more, then the task blocks.
@@ -87,7 +87,7 @@ tick-step skill first and follows it for the step's artefacts and checks.
 Every sub-agent you launch or continue in this task, whatever its name,
 counts against the task's sub-agent budget. When the `subagents` gate
 refuses, merge with the ruled findings, file the open Spec finding as a
-follow-up through `agentihooks api`, or block the task.
+follow-up through the api, or block the task.
 
 ## CI proofs
 
