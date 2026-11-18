@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.1020 · 2026-11-18
+
+### 2026-11-18 · 4a629e1401c1 · #12063 · @nestorcolt
+
+**Send the lab a signed head notice after each publish push**
+
+After each `agentihooks swarm publish` push, the lab now gets an immediate signed notice of the new head instead of waiting on GitHub's own webhook delivery, letting it react sooner to agent activity. The sender is opt-in via three environment settings and quietly logs and ignores any failure—refused, unreachable, or malformed—so a broken notification never blocks a push; the result is recorded as `lab_notice` on the publish outcome. Note that pods in the hive don't yet set these three settings, so this only applies where an operator configures them manually; wiring them through the chart is left as follow-up work.
+
 ## v2.17.1017 · 2026-11-18
 
 ### 2026-11-18 · 91ff13fabc59 · #12004 · @nestorcolt
