@@ -12,6 +12,7 @@ import subprocess
 import sys
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
 import libcst as cst
 from libcst.metadata import ParentNodeProvider, PositionProvider, WhitespaceInclusivePositionProvider
@@ -33,7 +34,7 @@ from scripts.ci_mutation.stats_cache import (
 )
 from scripts.ci_mutation.stats_dependencies import StoredStats, digest  # pyright: ignore[reportUnknownVariableType]
 
-__all__ = ["mutant_units", "stats_units"]
+__all__ = ["covering", "mutant_units", "stats_units"]
 
 RUNNER = "scripts/ci_mutation/"
 PIN = re.compile(r"""["']mutmut\s*==\s*([^"'\s]+)\s*["']""")
@@ -144,3 +145,31 @@ def mutant_units(
     return tuple(
         unit for path in sorted(changes) for unit in function_units(root, path, set(changes[path]), runner, covering)
     )
+
+
+def owner(path: str, unit: str, classes: frozenset[str]) -> str:
+    """Return the mutmut name of the top level function or method of path that holds a dependency manifest unit."""
+    first, _, rest = unit.partition(".")
+    if first in classes:
+        return get_mutant_name(Path(path), mangle_function_name(name=rest.partition(".")[0], class_name=first))
+    return get_mutant_name(Path(path), mangle_function_name(name=first, class_name=None))
+
+
+def covering(
+    root: Path, manifest: Mapping[str, Any], keys: Mapping[str, str], changes: Iterable[str]
+) -> dict[str, dict[str, str]]:
+    """Map the mutmut name of each function of the changed files to the fingerprint of every dependency manifest test
+    that ran it or a function nested in it."""
+    owners: dict[int, str] = {}
+    for path in changes:
+        tree = ast.parse((root / path).read_text())
+        classes = frozenset(node.name for node in tree.body if isinstance(node, ast.ClassDef))
+        prefix = f"{path}::"
+        for index, name in enumerate(manifest["units"]):
+            if name.startswith(prefix):
+                owners[index] = owner(path, name.removeprefix(prefix), classes)
+    found: dict[str, dict[str, str]] = {}
+    for test, record in manifest["tests"].items():
+        for index in owners.keys() & set(record["units"]):
+            found.setdefault(owners[index], {})[test] = keys[test]
+    return found

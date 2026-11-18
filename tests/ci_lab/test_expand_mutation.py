@@ -257,6 +257,36 @@ def test_covering_fingerprints_enter_only_their_function_key(tmp_path: Path) -> 
     assert all(one[other] == two[other] == base[other] for other in base if other != name)
 
 
+@pytest.mark.feature("lab-scheduler-mutation-units")
+def test_covering_maps_each_function_of_the_changed_files_to_the_tests_that_ran_it_or_a_function_nested_in_it(
+    tmp_path: Path,
+) -> None:
+    root = repository(tmp_path, MUTANT_FILES)
+    manifest = {
+        "units": [
+            "scripts/sample.py::first",
+            "scripts/sample.py::Box.grow",
+            "scripts/sample.py::second.helper",
+            "scripts/other.py::first",
+            "scripts/sample.py::Box.shrink.inner",
+        ],
+        "tests": {
+            "tests/test_a.py::test_one": {"units": [0, 3]},
+            "tests/test_a.py::test_two@group": {"units": [1, 2]},
+            "tests/test_b.py::test_three": {"units": [4, 0]},
+            "tests/test_b.py::test_other": {"units": [3]},
+        },
+    }
+    keys = {test: f"key {index}" for index, test in enumerate(manifest["tests"])}
+    assert expand_mutation.covering(root, manifest, keys, {PATH: [7]}) == {
+        "scripts.sample.x_first": {"tests/test_a.py::test_one": "key 0", "tests/test_b.py::test_three": "key 2"},
+        "scripts.sample.xǁBoxǁgrow": {"tests/test_a.py::test_two@group": "key 1"},
+        "scripts.sample.x_second": {"tests/test_a.py::test_two@group": "key 1"},
+        "scripts.sample.xǁBoxǁshrink": {"tests/test_b.py::test_three": "key 2"},
+    }
+    assert expand_mutation.covering(root, manifest, keys, {}) == {}
+
+
 def test_stats_units_carry_the_stats_cache_identity(tmp_path: Path) -> None:
     root = repository(tmp_path / "repo", STATS_FILES)
     for name in ("setup.cfg", "tests/fixtures/gone.json"):

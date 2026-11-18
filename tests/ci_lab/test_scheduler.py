@@ -22,6 +22,8 @@ from scripts.ci_lab import (
     control,
     delivery,
     evidence,
+    executors,
+    expand_mutation,
     expand_tests,
     interaction,
     lease_api,
@@ -1513,6 +1515,9 @@ STORED_MANIFEST: dict[str, Any] = {
     "tests": {FIRST_TEST: {"units": [0], "files": [], "escapes": False}},
 }
 SUITE_DURATIONS = {FIRST_TEST: 40.0, OTHER_TEST: 40.0, SECOND_TEST: 1.0}
+PINNED = '[project]\nname = "suite"\n\n[project.optional-dependencies]\ndev = ["mutmut==3.6.0"]\n'
+FIRST = "scripts.alpha.x_first"
+SECOND = "scripts.alpha.x_second"
 
 
 @dataclass(frozen=True)
@@ -1562,7 +1567,7 @@ def _suite(tmp_path: Path, lab: dict[str, Any]) -> Suite:
             ".github/input-keys.json": '{"gates": {}}',
             "delivery.yaml": json.dumps({"lab": lab}),
             "uv.lock": "lock",
-            "pyproject.toml": "[project]\n",
+            "pyproject.toml": PINNED,
             ".test_durations": json.dumps(SUITE_DURATIONS),
             "scripts/alpha.py": ALPHA,
             "tests/test_alpha.py": "def test_first():\n    pass\n\n\ndef test_other():\n    pass\n",
@@ -1587,10 +1592,27 @@ def _merged(repo: Path, branch: str, *changes: dict[str, str]) -> str:
 def _suite_units(suite: Suite, head: str, durations: dict[str, float]) -> tuple[Unit, ...]:
     paths = filter(None, _git(suite.repo, "ls-tree", "-r", "-z", "--name-only", head).split("\0"))
     blobs = {path: _blob(suite.repo, head, path) for path in paths}
-    shown = ["git", "-C", str(suite.repo), "show"]
-    tree = {path: subprocess.run([*shown, f"{head}:{path}"], capture_output=True, check=True).stdout for path in blobs}
     chain = Toolchain("3.12", {}, blobs["uv.lock"], blobs["pyproject.toml"], "image", {})
-    return expand_tests.units(SUITE_MANIFEST, tree, blobs, durations, chain)
+    return expand_tests.units(SUITE_MANIFEST, _contents(suite, head), blobs, durations, chain)
+
+
+def _contents(suite: Suite, head: str) -> dict[str, bytes]:
+    paths = filter(None, _git(suite.repo, "ls-tree", "-r", "-z", "--name-only", head).split("\0"))
+    shown = ["git", "-C", str(suite.repo), "show"]
+    return {path: subprocess.run([*shown, f"{head}:{path}"], capture_output=True, check=True).stdout for path in paths}
+
+
+def _mutation_gates(
+    suite: Suite, head: str, changes: dict[str, list[int]], files: list[str], covering: dict[str, list[str]]
+) -> dict[str, tuple[Unit, ...]]:
+    keys = expand_tests.fingerprints(SUITE_MANIFEST, _contents(suite, head))
+    checkout = suite.repo.parent / f"expected-{head}"
+    _git(suite.repo, "worktree", "add", "-q", "--detach", str(checkout), head)
+    stats = expand_mutation.stats_units(checkout, files, executors.OPTIONS)
+    covered = {name: {test: keys[test] for test in tests} for name, tests in covering.items()}
+    mutants = expand_mutation.mutant_units(checkout, changes, covered)
+    _git(suite.repo, "worktree", "remove", "--force", str(checkout))
+    return {name: units for name, units in {"mutation-stats": stats, "mutation": mutants}.items() if units}
 
 
 def _tree(suite: Suite, head: str) -> str:
@@ -1665,7 +1687,10 @@ def test_a_promotion_or_backfill_head_runs_every_batch_without_reading_the_cache
     port = Port(SUITE_MANIFEST)
     found = port.expander(tmp_path).expand(suite.request(tier))
     every = _suite_units(suite, suite.head, SUITE_DURATIONS)
-    assert found == scheduler.frame(tier, _tree(suite, suite.head), suite.head, {"unit": every})
+    mutation = _mutation_gates(
+        suite, suite.head, {"scripts/alpha.py": [6]}, ["tests/test_beta.py"], {SECOND: [SECOND_TEST]}
+    )
+    assert found == scheduler.frame(tier, _tree(suite, suite.head), suite.head, {"unit": every, **mutation})
     assert (port.asked, port.looked) == ([(suite.remote, [suite.base, suite.seed])], [])
 
 
@@ -1677,7 +1702,131 @@ def test_a_head_without_stored_durations_keeps_each_test_file_whole(tmp_path: Pa
     found = Port(SUITE_MANIFEST).expander(tmp_path).expand(suite.request(Priority.PROMOTION, head))
     every = _suite_units(suite, head, {})
     assert [batch.members for batch in every] == [(FIRST_TEST, OTHER_TEST), (SECOND_TEST,)]
-    assert found.gates == {"unit": every}
+    mutation = _mutation_gates(suite, head, {"scripts/alpha.py": [6]}, ["tests/test_beta.py"], {SECOND: [SECOND_TEST]})
+    assert found.gates == {"unit": every, **mutation}
+
+
+def _store(tmp_path: Path, suite: Suite) -> Path:
+    return tmp_path / "stores" / str(suite.repo).removeprefix("/").replace("/", "--")
+
+
+@pytest.mark.feature("lab-scheduler-mutation-units")
+@pytest.mark.usefixtures("staticless")
+@pytest.mark.parametrize("tier", [Priority.HOTFIX, Priority.PULL_REQUEST, Priority.QUEUE])
+def test_a_hotfix_pull_request_or_merge_group_head_expands_no_mutation_units(tmp_path: Path, tier: Priority) -> None:
+    suite = _suite(tmp_path, DELIVERY["lab"])
+    found = Port(SUITE_MANIFEST).expander(tmp_path).expand(suite.request(tier))
+    assert {"mutation-stats", "mutation"}.isdisjoint(found.gates)
+    assert list((tmp_path / "stores").iterdir()) == [_store(tmp_path, suite)]
+
+
+@pytest.mark.feature("lab-scheduler-mutation-units")
+@pytest.mark.usefixtures("staticless")
+@pytest.mark.parametrize("tier", [Priority.PROMOTION, Priority.BACKFILL])
+def test_a_promotion_or_backfill_head_names_the_mutants_of_each_changed_function_in_a_checkout_it_removes(
+    tmp_path: Path, tier: Priority, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    suite = _suite(tmp_path, DELIVERY["lab"])
+    source = "def first():\n    return 4\n\n\ndef second():\n    return 3\n"
+    head = _commit(suite.repo, {"scripts/alpha.py": source})
+    checkouts: list[tuple[Path, str]] = []
+    build = expand_mutation.mutant_units
+
+    def spy(root: Path, changes: Any, covering: Any) -> tuple[Unit, ...]:
+        checkouts.append((root.parent, (root / "scripts/alpha.py").read_text()))
+        return build(root, changes, covering)
+
+    monkeypatch.setattr(expand_mutation, "mutant_units", spy)
+    found = Port(SUITE_MANIFEST).expander(tmp_path).expand(suite.request(tier, head))
+    monkeypatch.undo()
+    assert checkouts == [(tmp_path / "stores", source)]
+    mutation = _mutation_gates(
+        suite,
+        head,
+        {"scripts/alpha.py": [2, 6]},
+        ["tests/test_alpha.py", "tests/test_beta.py"],
+        {FIRST: [FIRST_TEST, OTHER_TEST], SECOND: [SECOND_TEST]},
+    )
+    assert found.gates == {"unit": _suite_units(suite, head, SUITE_DURATIONS), **mutation}
+    stats, mutants = found.gates["mutation-stats"], found.gates["mutation"]
+    assert [(unit.kind, unit.members) for unit in stats] == [
+        ("stats", ("tests/test_alpha.py",)),
+        ("stats", ("tests/test_beta.py",)),
+    ]
+    assert [(unit.kind, executors.function_of(unit.members[0])) for unit in mutants] == [
+        ("mutant", FIRST),
+        ("mutant", SECOND),
+    ]
+    store = _store(tmp_path, suite)
+    assert list((tmp_path / "stores").iterdir()) == [store]
+    assert _git(store, "worktree", "list", "--porcelain").count("worktree ") == 1
+
+
+@pytest.mark.feature("lab-scheduler-mutation-units")
+@pytest.mark.usefixtures("staticless")
+def test_a_promotion_head_keys_a_mutant_unit_by_the_tests_that_ran_its_function(tmp_path: Path) -> None:
+    suite = _suite(tmp_path, DELIVERY["lab"])
+    expander = Port(SUITE_MANIFEST).expander(tmp_path)
+    _git(suite.repo, "switch", "-q", "-c", "other", suite.base)
+    changed = _commit(suite.repo, {"scripts/alpha.py": ALPHA.replace("return 1", "return 4")})
+    before = expander.expand(suite.request(Priority.PROMOTION, changed)).gates["mutation"]
+    other = _commit(suite.repo, {"tests/test_beta.py": "def test_second():\n    assert True\n"})
+    own = _commit(
+        suite.repo, {"tests/test_alpha.py": "def test_first():\n    assert True\n\n\ndef test_other():\n    pass\n"}
+    )
+    assert [executors.function_of(unit.members[0]) for unit in before] == [FIRST]
+    assert expander.expand(suite.request(Priority.PROMOTION, other)).gates["mutation"] == before
+    after = expander.expand(suite.request(Priority.PROMOTION, own)).gates["mutation"]
+    assert [unit.members for unit in after] == [unit.members for unit in before]
+    assert after[0].key != before[0].key
+
+
+@pytest.mark.feature("lab-scheduler-mutation-units")
+@pytest.mark.usefixtures("staticless")
+def test_a_promotion_head_expands_no_stats_unit_for_a_covering_test_file_it_deletes(tmp_path: Path) -> None:
+    suite = _suite(tmp_path, DELIVERY["lab"])
+    head = _drop(suite.repo, "tests/test_beta.py")
+    found = Port(SUITE_MANIFEST).expander(tmp_path).expand(suite.request(Priority.PROMOTION, head))
+    mutation = _mutation_gates(suite, head, {"scripts/alpha.py": [6]}, [], {SECOND: [SECOND_TEST]})
+    assert list(mutation) == ["mutation"]
+    assert found.gates == {"unit": _suite_units(suite, head, SUITE_DURATIONS), **mutation}
+
+
+@pytest.mark.feature("lab-scheduler-mutation-units")
+@pytest.mark.usefixtures("staticless")
+def test_a_promotion_head_expands_the_stats_unit_of_a_covering_test_inside_a_class(tmp_path: Path) -> None:
+    suite = _suite(tmp_path, DELIVERY["lab"])
+    test = "tests/test_beta.py::TestBeta::test_second"
+    tests = {FIRST_TEST: SUITE_MANIFEST["tests"][FIRST_TEST], test: {"units": [1], "files": [], "escapes": False}}
+    found = Port({**SUITE_MANIFEST, "tests": tests}).expander(tmp_path).expand(suite.request(Priority.PROMOTION))
+    assert [(unit.kind, unit.members) for unit in found.gates["mutation-stats"]] == [("stats", ("tests/test_beta.py",))]
+    assert [executors.function_of(unit.members[0]) for unit in found.gates["mutation"]] == [SECOND]
+
+
+@pytest.mark.feature("lab-scheduler-mutation-units")
+@pytest.mark.usefixtures("staticless")
+def test_a_promotion_head_expands_a_mutant_unit_for_a_changed_function_no_recorded_test_ran(tmp_path: Path) -> None:
+    suite = _suite(tmp_path, DELIVERY["lab"])
+    head = _commit(suite.repo, {"scripts/alpha.py": ALPHA.replace("2", "3") + "\n\ndef third():\n    return 3\n"})
+    found = Port(SUITE_MANIFEST).expander(tmp_path).expand(suite.request(Priority.PROMOTION, head))
+    mutation = _mutation_gates(
+        suite, head, {"scripts/alpha.py": [6, 7, 8, 9, 10]}, ["tests/test_beta.py"], {SECOND: [SECOND_TEST]}
+    )
+    assert [executors.function_of(unit.members[0]) for unit in mutation["mutation"]] == [
+        SECOND,
+        "scripts.alpha.x_third",
+    ]
+    assert found.gates == {"unit": _suite_units(suite, head, SUITE_DURATIONS), **mutation}
+
+
+@pytest.mark.feature("lab-scheduler-mutation-units")
+@pytest.mark.usefixtures("staticless")
+def test_a_promotion_head_that_changes_no_measured_python_expands_no_mutation_units(tmp_path: Path) -> None:
+    suite = _suite(tmp_path, DELIVERY["lab"])
+    _git(suite.repo, "switch", "-q", "-c", "other", suite.base)
+    head = _commit(suite.repo, {"docs/q.md": "q\n", "tests/test_beta.py": "def test_second():\n    assert True\n"})
+    found = Port(SUITE_MANIFEST).expander(tmp_path).expand(suite.request(Priority.PROMOTION, head))
+    assert found.gates == {"unit": _suite_units(suite, head, SUITE_DURATIONS)}
 
 
 @pytest.mark.feature("lab-scheduler-test-units")
