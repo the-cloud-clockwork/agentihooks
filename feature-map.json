@@ -1,6 +1,22 @@
 {
   "features": [
     {
+      "id": "tick-status-publish-last-findings",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-status-publish-budget",
+      "behaviour": "Status publish publishes the health findings the pass stored; a passing pass whose health findings step stored none publishes the findings of the swarm's last published status, and only a failed pass or a swarm with no published findings leaves them for the status report to build, so the closing lane never repeats the whole findings build under its own budget, which abandoned it at its eleven second budget after controller rollouts.",
+      "seam": "report._status_publish with commands.published_findings, run by engine.run_group on the closing group",
+      "tests": [
+        "tests/tick/steps/test_status_publish.py::test_status_publish",
+        "tests/tick/steps/test_status_publish.py::test_status_publish_publishes_the_last_findings_when_the_pass_stored_none",
+        "tests/tick/steps/test_status_publish.py::test_status_publish_leaves_the_findings_to_the_report_before_the_first_publish",
+        "tests/tick/steps/test_status_publish.py::test_status_publish_leaves_the_findings_to_the_report_when_the_pass_failed",
+        "tests/tick/steps/test_status_publish.py::test_status_publish_keeps_the_findings_the_pass_stored",
+        "tests/tick/steps/test_status_publish.py::test_status_publish_keeps_an_empty_list_the_pass_stored",
+        "tests/tick/steps/test_status_publish.py::test_status_publish_leaves_the_findings_to_the_report_when_the_last_publish_holds_none"
+      ]
+    },
+    {
       "id": "compose-master-drill",
       "origin": "regression",
       "ordered_at": "2026-11-17",
@@ -4181,6 +4197,17 @@
       "tests": [
         "tests/test_ledger_comments.py::test_parentheses_and_semicolons_inside_a_web_link_are_not_counted",
         "tests/test_ledger_comments.py::test_parentheses_and_semicolons_in_prose_beside_a_link_are_still_counted"
+      ]
+    },
+    {
+      "id": "merge-priority-moves-waiting-entries-at-once",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2604",
+      "behaviour": "A merge priority request moves the waiting dev queue entries ahead of the pull request behind it at once, even while the head merge group still tests, so the pull request joins the next group; running entries stay in place and no deferred record is stored.",
+      "seam": "scripts.swarm.queue_priority.request through agentihooks swarm merge priority",
+      "tests": [
+        "tests/swarm/test_queue_priority.py::test_priority_moves_waiting_entries_at_once_while_the_head_group_tests",
+        "tests/swarm/test_merge_queue_priority.py::test_master_priority_moves_waiting_entries_without_cancelling_running_head"
       ]
     },
     {
