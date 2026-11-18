@@ -819,7 +819,7 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
         aws_secret_access_key=environ[MINIO_SECRET_KEY],
     )
     objects = S3Objects(s3, environ[MINIO_BUCKET], "")
-    consumer = open_bus(BusConfig.from_environ(environ)).lab_heads.consumer(DURABLE, SUBJECT)
+    consumer = open_bus(replace(BusConfig.from_environ(environ), provision=False)).lab_heads.consumer(DURABLE, SUBJECT)
     scheduler = build(environ, client, objects, consumer)
     leases = Leases(scheduler.queue, LEASE_TTL_MS, _now_ms, _sleep_ms, LEASE_POLL_MS)
     routes = lease_api.ControlRoutes(client, environ.get(contract.CONTROL_TOKEN, ""), _now_ms)
