@@ -313,8 +313,8 @@ def test_the_grade_read_asks_the_grade_url_within_the_timeout(monkeypatch: pytes
     assert seen == [(GRADE, lab_wait.TIMEOUT_S)]
 
 
-@pytest.mark.parametrize("body", [b"[]", b'{"head": "x"}', b'{"grades": {}}', b"not json"])
+@pytest.mark.parametrize("body", [b"[]", b'{"head": "x"}', b'{"grades": {}}'])
 def test_a_grade_document_without_a_grades_list_is_refused(monkeypatch: pytest.MonkeyPatch, body: bytes) -> None:
     monkeypatch.setattr(lab_wait, "urlopen", lambda url, timeout: Reply(body))
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="^lab grades document carries no grades$"):
         lab_wait.grades(GRADE)

@@ -1,8 +1,10 @@
 """A swarm worker's push sets its checked wait: the hook marks each push from the git command, the tick declares the wait.
 
-The PostToolUse hook, shared by every harness, marks a Bash call that pushes a task branch or queues its pull request.
-The tick finds the task's open pull request, the recorded one or the forge's for the pushed branch, and declares a wait
-on its merge while it sits in the merge queue, on its checks otherwise, so no agent relies on running swarm wait.
+The PostToolUse hook, shared by every harness, marks a Bash call that pushes a task branch or queues its pull request,
+and the head of a push of one commit to a lab grade ref. The tick finds the task's open pull request, the recorded one
+or the forge's for the pushed branch, and declares a wait on its merge while it sits in the merge queue, on its checks
+otherwise. With no pull request it declares a wait on the lab grade of the pushed head once the swarm's lab holds one,
+so no agent relies on running swarm wait.
 """
 
 import re
@@ -17,8 +19,9 @@ TRIGGERS = re.compile(
     r"(?:^|[;&|(\n]\s*)(?:gh\s+pr\s+(?:create|ready)\b|agentihooks\s+swarm\s+\S+\s+(?:publish|merge\s+queue)\b)"
 )
 GITHUB = re.compile(r"(?:^|github\.com[:/])([\w.-]+)/([\w.-]+?)(?:\.git)?/?$")
-COVERS = ("checks", "merge")
-FIELDS = ("pushed_at", "pushed_repo", "pushed_branch", "looked")
+COVERS = ("checks", "merge", "lab")
+FIELDS = ("pushed_at", "pushed_repo", "pushed_branch", "pushed_head", "looked")
+GRADE_REFS = "refs/grade/"
 LOOKUP_MS = 5 * 60_000
 REASON = "set by the swarm from the push of the task branch"
 QUERY = """query($owner: String!, $name: String!, $branch: String!) {
@@ -38,8 +41,9 @@ def triggered(command: str | None) -> bool:
 
 def mark(redis: Any, slug: str, agent: str, at: int, repo: str, branch: str, head: str) -> None:
     key = Progress(redis, slug).key(agent)
-    redis.hdel(key, "looked")
-    redis.hset(key, mapping={"pushed_at": at, "pushed_repo": repo, "pushed_branch": branch})
+    redis.hdel(key, "looked", "pushed_head")
+    pushed = {"pushed_at": at, "pushed_repo": repo, "pushed_branch": branch}
+    redis.hset(key, mapping={**pushed, **({"pushed_head": head} if head else {})})
 
 
 def read(redis, slug: str, agent: str) -> dict | None:
@@ -64,6 +68,16 @@ def pushed_where(command: str, cwd: str) -> tuple[str, str]:
 
 def pushed_head(command: str, cwd: str) -> str:
     """The commit a git push in the command sends to its one lab grade ref, '' for any other push."""
+    from scripts.gates.one_push import actions, positionals
+    from scripts.gates.push_stop import git
+
+    for kind, where, args in actions(command, cwd):
+        if kind == "push":
+            specs = positionals(args)[1:]
+            source, _, end = specs[0].lstrip("+").rpartition(":") if len(specs) == 1 else ("", "", "")
+            if not end.startswith(GRADE_REFS):
+                return ""
+            return git(where, "rev-parse", "--verify", f"{source or end}^{{commit}}").stdout.strip()
     return ""
 
 
@@ -98,6 +112,19 @@ def pull_of(redis, slug, agent, pushed, task, now_ms, forge):
     return forge(task.get("branch_repo") or pushed["pushed_repo"], task.get("branch") or pushed["pushed_branch"])
 
 
+def either(forge: Callable[[str, str], str], lab: Callable[[str], str], head: str) -> Callable[[str, str], str]:
+    """The forge lookup, falling back to the lab grade url of the pushed head when the forge finds no pull request."""
+    return lambda repo, branch: forge(repo, branch) or (head and lab(head))
+
+
+def pull_wait(pull: Any, url: str) -> dict[str, Any]:
+    """The checked wait on an open pull request: on its merge while it is queued, on its checks at its head otherwise."""
+    on = waits.on("merge" if pull.queued else "checks", url)
+    if on["kind"] == "checks":
+        on["head"] = pull.head
+    return on
+
+
 def enforce_pass(
     store: Any,
     slug: str,
@@ -107,23 +134,25 @@ def enforce_pass(
     forge: Callable[[str, str], str] = forge_pull,
     grade: Callable[[str], str] | None = None,
 ) -> list[str]:
-    actions = []
+    """Declare each pushing agent's wait on its open pull request, else on the lab grade of its pushed head."""
+    lab = grade or (lambda head: lab_grade(store.config(slug).lab_url, head))
+    actions: list[str] = []
     for agent in store.agents(slug):
         pushed = read(store.redis, slug, agent.name)
         if agent.state == "finished" or not pushed or agent.task not in rows:
             continue
-        url = pull_of(store.redis, slug, agent.name, pushed, rows[agent.task], now_ms, forge)
-        pull = github(url) if url and waits.PULL_URL.fullmatch(url) else None
-        if pull is None:
+        lookup = either(forge, lab, pushed.get("pushed_head", ""))
+        url = pull_of(store.redis, slug, agent.name, pushed, rows[agent.task], now_ms, lookup) or ""
+        pull = github(url) if waits.PULL_URL.fullmatch(url) else None
+        if pull is None and not lab_wait.GRADE_URL.fullmatch(url):
             continue
         clear(store.redis, slug, agent.name)
         held = idle.wait(store.redis, slug, agent.name) or {}
         on = held.get("on") or {}
-        if pull.state != "OPEN" or (on.get("kind") in COVERS and on.get("target") == url and held["until"] > now_ms):
+        closed = pull is not None and pull.state != "OPEN"
+        if closed or (on.get("kind") in COVERS and on.get("target") == url and held["until"] > now_ms):
             continue
-        on = waits.on("merge" if pull.queued else "checks", url)
-        if on["kind"] == "checks":
-            on["head"] = pull.head
+        on = waits.on("lab", url) if pull is None else pull_wait(pull, url)
         idle.declare_wait(store.redis, slug, agent.name, now_ms + waits.CHECKED_MINUTES * 60_000, REASON, now_ms, on)
         actions.append(f"set the wait of {agent.name} on {on['kind']} of {url} from its push")
     return actions

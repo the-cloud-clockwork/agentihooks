@@ -450,6 +450,12 @@ def test_a_live_lab_wait_on_the_grade_covers_the_push(store):
     assert pr_wait.read(store.redis, "sw", ME) is None
 
 
+def test_a_push_without_a_grade_head_never_asks_the_lab(store):
+    mark(store, repo="o/r", branch="b")
+    assert enforce(store, UNPULLED, {}, grade=lambda head: pytest.fail("asked the lab")) == []
+    assert (pr_wait.read(store.redis, "sw", ME) or {})["looked"] == "5000"
+
+
 def test_the_lab_lookup_answers_the_grade_url_while_the_lab_holds_a_grade(monkeypatch):
     seen = []
     monkeypatch.setattr(pr_wait.lab_wait, "grades", lambda url: seen.append(url) or [{"run": "r1"}])
