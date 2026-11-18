@@ -101,6 +101,18 @@ redis.call('SMOVE', KEYS[5], KEYS[6], ARGV[1])
 return 1
 """
 
+PRUNE = """
+local fields = redis.call('HGETALL', KEYS[1])
+local dropped = 0
+for index = 1, #fields, 2 do
+  if tonumber(string.match(fields[index + 1], '(%-?%d+)$')) < tonumber(ARGV[1]) then
+    redis.call('HDEL', KEYS[1], fields[index])
+    dropped = dropped + 1
+  end
+end
+return dropped
+"""
+
 
 def _key(*parts: str) -> str:
     return PREFIX + ":".join(parts)
@@ -126,6 +138,7 @@ class Queue:
         self._finish = client.register_script(FINISH)
         self._reap = client.register_script(REAP)
         self._retry = client.register_script(RETRY)
+        self._prune = client.register_script(PRUNE)
 
     def enqueue(self, units: Sequence[Unit], head: str, requirements: Mapping[str, Requirement]) -> list[str]:
         """Add each unit of the head as a pending job unless that job is already known."""
@@ -198,6 +211,29 @@ class Queue:
 
     def expired(self, now_ms: int) -> list[str]:
         return list(self.client.zrangebyscore(_key("leased"), 0, now_ms))
+
+    def leased(self) -> list[str]:
+        """Return every leased job, soonest expiry first."""
+        return list(self.client.zrange(_key("leased"), 0, -1))
+
+    def offer(self, worker: str, free_slots: int, at_ms: int) -> None:
+        """Record the free slots a worker offered on its latest lease poll and when."""
+        self.client.hset(_key("offers"), worker, f"{free_slots} {at_ms}")
+
+    def offers(self, since_ms: int) -> dict[str, tuple[int, int]]:
+        """Return each worker's latest offered free slots and the millisecond it offered them, for offers made at or
+        after since_ms."""
+        offered: dict[str, tuple[int, int]] = {}
+        for worker, raw in self.client.hgetall(_key("offers")).items():
+            free_slots, at_ms = map(int, raw.split())
+            if at_ms >= since_ms:
+                offered[worker] = (free_slots, at_ms)
+        return offered
+
+    def prune(self, since_ms: int) -> int:
+        """Forget every offer made before since_ms and return how many; one script reads and deletes, so an offer a
+        worker renews meanwhile stays."""
+        return int(self._prune(keys=[_key("offers")], args=[since_ms]))
 
     def reap(self, job: Job, now_ms: int, requeues: int) -> str:
         """Requeue an expired lease while attempts remain, else mark it lost; empty when it no longer expired."""

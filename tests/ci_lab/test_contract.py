@@ -145,6 +145,27 @@ def test_delegates_read_the_process_environment(
     assert capsys.readouterr().err == "ci-lab worker refuses to start: GITHUB_APP_ID is set\n"
 
 
+@pytest.mark.feature("lab-scheduler-service")
+def test_the_scheduler_command_runs_the_service_and_keeps_the_self_test(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.ci_lab import scheduler
+
+    seen: list[tuple[list[str], object]] = []
+
+    def main(argv: list[str], environ: object) -> int:
+        seen.append((list(argv), environ))
+        return 4
+
+    monkeypatch.setattr(scheduler, "main", main)
+    assert contract.scheduler(["--passes", "1"]) == 4
+    assert contract.scheduler([]) == 4
+    assert seen == [(["--passes", "1"], os.environ), ([], os.environ)]
+    assert contract.scheduler(["--self-test"]) == 0
+    assert json.loads(capsys.readouterr().out) == SCHEDULER_DESCRIPTION
+    assert len(seen) == 2
+
+
 @pytest.mark.parametrize("variable", ["GITHUB_APP_ID", "GITHUB_APP_PRIVATE_KEY", "GITHUB_APP_INSTALLATION_ID"])
 def test_worker_refuses_any_github_app_variable(variable: str, capsys: pytest.CaptureFixture[str]) -> None:
     assert contract.run(contract.WORKER, ["--self-test"], {variable: "x"}) == 1
