@@ -465,9 +465,9 @@ def test_a_dev_push_grade_reuses_the_merge_group_grade_of_the_same_tree(lab: Cal
     queued, pushed, other = unit(1), unit(2), unit(3)
     run = lab(
         {
-            HEAD_A: plan({"lint": (queued,)}),
-            HEAD_B: plan({"lint": (pushed,)}),
-            BASE: plan({"lint": (other,)}, tree=OTHER_TREE),
+            HEAD_A: scheduler.frame(Priority.QUEUE, TREE, BASE, {"unit": (queued,)}),
+            HEAD_B: plan({"unit": (pushed,)}),
+            BASE: plan({"unit": (other,)}, tree=OTHER_TREE),
         }
     )
     run.push(HEAD_A, lane="gh-readonly-queue/dev/pr-1", event="merge_group", action="checks_requested")
@@ -475,12 +475,13 @@ def test_a_dev_push_grade_reuses_the_merge_group_grade_of_the_same_tree(lab: Cal
     run.finish(run.lease()[0], "passed", {})
     run.tick(1100)
     queue = run.grade(HEAD_A)
+    assert queue.conclusion == "success"
     assert run.lab.client.get(f"{scheduler.TREES}{REPO}|{TREE}") == queue.run
     run.push(HEAD_B, lane="dev")
     run.tick(1200)
     pushed_grade = run.grade(HEAD_B)
     assert run.engine.queue.pending() == []
-    assert pushed_grade.gates == {"lint": [ref(queued)]}
+    assert pushed_grade.gates == {"unit": [ref(queued)]}
     assert pushed_grade.conclusion == "success"
     assert run.lab.client.get(f"{scheduler.TREES}{REPO}|{TREE}") == queue.run
     run.push(BASE, lane="dev")
@@ -510,11 +511,14 @@ def test_a_framed_push_grade_carries_the_unit_suite_its_merge_group_grade_graded
 
 def test_a_merge_group_grade_of_a_tree_serves_no_other_tier(lab: Callable[..., Run]) -> None:
     queued, pulled = unit(1), unit(2)
-    run = lab({HEAD_A: plan({"lint": (queued,)}), HEAD_B: plan({"lint": (pulled,)})})
+    run = lab(
+        {HEAD_A: scheduler.frame(Priority.QUEUE, TREE, BASE, {"unit": (queued,)}), HEAD_B: plan({"unit": (pulled,)})}
+    )
     run.push(HEAD_A, lane="gh-readonly-queue/dev/pr-1", event="merge_group", action="checks_requested")
     run.tick(1000)
     run.finish(run.lease()[0], "passed", {})
     run.tick(1100)
+    assert run.lab.client.get(f"{scheduler.TREES}{REPO}|{TREE}") == run.grade(HEAD_A).run
     run.push(HEAD_B, event="pull_request", action="synchronize")
     run.tick(1200)
     assert run.engine.queue.pending() == [scheduler.job_id(HEAD_B, pulled)]
