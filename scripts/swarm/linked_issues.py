@@ -1,6 +1,7 @@
 """Close the issues a merged ready pull request settles: GitHub closes them only on a merge into the default branch."""
 
 import re
+from collections.abc import Callable
 from typing import Any
 
 from scripts.swarm import stack
@@ -30,8 +31,10 @@ def unnamed(url: str, body: str, tasks: list[dict[str, Any]]) -> list[str]:
     return [f"{repo}/issues/{number}" for number in dict.fromkeys(KEYWORD.findall(body)) if number not in named]
 
 
-def refuse_unnamed(url: str, body: str, tasks: list[dict[str, Any]]) -> None:
-    """Refuse recording ``url`` when its body closes an issue ``tasks`` never name, since settle closes it on merge."""
+def refuse_unnamed(url: str, body: str, row: dict[str, Any], task: Callable[[str], dict[str, Any] | None]) -> None:
+    """Refuse recording ``url`` when its body closes an issue that the task ``row`` and its group members, read
+    through ``task``, never name, since settle closes it on merge."""
+    tasks = [row, *(task(member) or {} for member in row.get("group_members") or [])]
     if issues := unnamed(url, body, tasks):
         raise SwarmError(
             f"pull request {url} closes {', '.join(issues)}, which this task neither records nor names in its "

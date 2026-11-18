@@ -3122,6 +3122,7 @@
         "tests/swarm/test_linked_issues.py::test_unnamed_lists_each_closed_issue_no_task_records_or_names",
         "tests/swarm/test_linked_issues.py::test_refuse_unnamed_names_every_issue_the_tasks_never_name",
         "tests/swarm/test_linked_issues.py::test_refuse_unnamed_accepts_a_body_closing_only_named_issues",
+        "tests/swarm/test_linked_issues.py::test_refuse_unnamed_reads_each_group_member_issue_and_description",
         "tests/swarm/test_pull_confirm.py::test_the_pull_branch_returns_the_body_of_the_pull_request",
         "tests/swarm/test_pull_confirm.py::test_swarm_pr_refuses_a_body_closing_an_issue_the_task_never_names",
         "tests/swarm/test_pull_confirm.py::test_swarm_pr_records_a_body_closing_issues_the_task_and_its_group_name",
