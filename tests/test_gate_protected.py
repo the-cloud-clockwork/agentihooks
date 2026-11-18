@@ -2658,7 +2658,11 @@ def test_the_repository_registry_freezes_the_grader_and_rulesets_at_their_curren
     registry = json.loads((_ROOT / gate_protected.FROZEN).read_text())
     rulesets = {str(path.relative_to(_ROOT)) for path in (_ROOT / ".github/rulesets").glob("*.json")}
     expected = {"scripts/gate_protected.py", ".github/workflows/gate-protected.yml", *rulesets}
-    assert set(registry) in (expected, expected | {"scripts/ci_reuse.py"})
+    assert set(registry) in (
+        expected,
+        expected | {"scripts/ci_reuse.py"},
+        expected | {"scripts/ci_reuse.py", ".github/workflows/writer-lock.yml"},
+    )
     for path, accepted in registry.items():
         assert _git(_ROOT, "rev-parse", f"HEAD:{path}") in accepted, path
 
