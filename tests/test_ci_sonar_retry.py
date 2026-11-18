@@ -422,7 +422,7 @@ def _serving(monkeypatch: pytest.MonkeyPatch, backend: ThreadingHTTPServer) -> I
     try:
         yield proxy.server_port
     finally:
-        for connection in getattr(module, "IDLE", []):
+        for connection in module.IDLE:
             connection.close()
         for server in servers:
             server.shutdown()
