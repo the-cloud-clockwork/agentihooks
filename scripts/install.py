@@ -6098,11 +6098,10 @@ def cmd_migrate(args) -> None:
 
 
 def _crew_doctor(argv: list[str]) -> bool:
-    if len(argv) < 3 or argv[0] != "doctor" or argv[1].startswith("-"):
-        return False
-    from scripts.doctor.cli import COMMANDS
+    import time
 
-    return argv[2] in COMMANDS
+    while True:
+        time.sleep(30)
 
 
 def main() -> None:
@@ -6759,13 +6758,6 @@ notes:
         _cmd_brain(args)
     elif args.command == "refresh-rules":
         _cmd_refresh_rules(args)
-
-
-def _planted_sleep_loop() -> None:
-    import time
-
-    while True:
-        time.sleep(30)
 
 
 if __name__ == "__main__":
