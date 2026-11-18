@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[1]
 PREPARE = "Let bubblewrap create user and network namespaces"
 RUN = "Run the lab sandbox tests under real bubblewrap"
@@ -33,10 +34,13 @@ def fake(folder: Path, name: str, body: str) -> None:
     ("path", "expected"),
     [
         ("scripts/ci_lab/sandbox.py", "true"),
+        ("scripts/ci_lab/run_static.py", "true"),
+        ("scripts/ci_lab/run_tests.py", "true"),
         ("tests/ci_lab/test_sandbox.py", "true"),
+        ("tests/ci_lab/test_run_static.py", "true"),
+        ("tests/ci_lab/test_run_tests.py", "true"),
         (".github/workflows/writer-lock.yml", "true"),
-        ("scripts/ci_lab/run_static.py", "false"),
-        ("tests/ci_lab/test_run_static.py", "false"),
+        ("scripts/ci_lab/worker.py", "false"),
         ("README.md", "false"),
     ],
 )
@@ -76,7 +80,7 @@ def test_the_lab_sandbox_job_feeds_the_required_gate_on_selected_pull_requests()
     job = jobs["lab-sandbox"]
     assert job["needs"] == ["inputs"]
     assert job["if"] == (
-        "github.event_name == 'pull_request' && needs.inputs.outputs.lab_sandbox == 'true'"
+        "(github.event_name == 'pull_request' && needs.inputs.outputs.lab_sandbox == 'true')"
         " || github.workflow == 'Writer lock'"
     )
     assert job["runs-on"] == "ubuntu-latest"
@@ -152,5 +156,11 @@ def test_the_lab_sandbox_run_fails_on_a_skipped_or_failed_test(
         check=False,
     )
     assert result.returncode == code
-    assert (tmp_path / "python-args").read_text().split()[:3] == ["-m", "pytest", "tests/ci_lab/test_sandbox.py"]
+    assert (tmp_path / "python-args").read_text().split()[:5] == [
+        "-m",
+        "pytest",
+        "tests/ci_lab/test_sandbox.py",
+        "tests/ci_lab/test_run_static.py",
+        "tests/ci_lab/test_run_tests.py",
+    ]
     assert (tmp_path / "lab-sandbox.log").read_text() == output

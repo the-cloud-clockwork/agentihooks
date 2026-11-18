@@ -140,7 +140,9 @@ jobs:
           PR_BASE: origin/${{ github.base_ref }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
           LAB_SANDBOX_INPUTS: >-
-            scripts/ci_lab/sandbox.py tests/ci_lab/test_sandbox.py .github/workflows/writer-lock.yml
+            scripts/ci_lab/sandbox.py scripts/ci_lab/run_static.py scripts/ci_lab/run_tests.py
+            tests/ci_lab/test_sandbox.py tests/ci_lab/test_run_static.py tests/ci_lab/test_run_tests.py
+            .github/workflows/writer-lock.yml
         run: |
           base=$(git merge-base "$PR_BASE" "$PR_HEAD")
           git diff --no-ext-diff --no-renames --name-only -z "$base" "$PR_HEAD" > "$RUNNER_TEMP/lab-sandbox-changed"
@@ -175,7 +177,7 @@ jobs:
 
   lab-sandbox:
     needs: [inputs]
-    if: github.event_name == 'pull_request' && needs.inputs.outputs.lab_sandbox == 'true' || github.workflow == 'Writer lock'
+    if: (github.event_name == 'pull_request' && needs.inputs.outputs.lab_sandbox == 'true') || github.workflow == 'Writer lock'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -215,7 +217,7 @@ jobs:
       - name: Run the lab sandbox tests under real bubblewrap
         shell: bash
         run: |
-          python -m pytest tests/ci_lab/test_sandbox.py -n 0 -v -rs --tb=short | tee "$RUNNER_TEMP/lab-sandbox.log"
+          python -m pytest tests/ci_lab/test_sandbox.py tests/ci_lab/test_run_static.py tests/ci_lab/test_run_tests.py -n 0 -v -rs --tb=short | tee "$RUNNER_TEMP/lab-sandbox.log"
           if grep -q SKIPPED "$RUNNER_TEMP/lab-sandbox.log"; then
             echo '::error::A lab sandbox test skipped, so bubblewrap did not isolate it on this runner.'
             exit 1
