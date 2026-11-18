@@ -12,6 +12,7 @@ import functools
 import json
 import re
 import subprocess
+import sys
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -21,7 +22,7 @@ from datetime import datetime
 from typing import Any
 
 from scripts.inbox.store import CLOSED, InboxError
-from scripts.swarm import github_reads, idle, merge_queue, outage, run_wait, stack
+from scripts.swarm import github_reads, idle, merge_queue, outage, run_wait, stack, timing
 from scripts.swarm.health import stall_blockers
 from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.naming import lane_of
@@ -490,6 +491,17 @@ def _keep_merged(cache: Any, found: dict[str, PullRequest | None]) -> None:
             cache.set(_merged_key(url), json.dumps(asdict(pull)), ex=MERGED_VIEW_TTL_S)
 
 
+def _count_views(pulls: int, kept: int) -> None:
+    """Write to the controller log how many of ``pulls`` distinct pull requests a view inside a tick pass served from
+    the merged views the swarm Redis keeps and how many it read from GitHub; a view outside a pass writes nothing."""
+    slug = timing.SWARM.get()
+    if slug is None:
+        return
+    current = timing.PASS.get() or {}
+    line = {"event": "swarm_pull_views", "slug": slug, "pass_id": current.get("pass_id"), "pulls": pulls}
+    print(json.dumps({**line, "kept_merged": kept, "read": pulls - kept}), file=sys.stderr, flush=True)
+
+
 def views(
     urls: list[str],
     source: SourceControl | None = None,
@@ -527,6 +539,7 @@ def views(
                 else None
             )
     _keep_merged(cache, {url: found[url] for url in pending})
+    _count_views(len(urls), len(kept))
     return found
 
 
