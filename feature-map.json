@@ -7915,6 +7915,27 @@
       ]
     },
     {
+      "id": "lab-dev-manifest-fetch",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-dev-push-publishes-dep-manifest",
+      "behaviour": "When no packed dependency manifest is stored for one of the newest commits on the first parent chain of a head's base, the CI lab scheduler fetches it before expanding test units: it finds the dev push run of the Tests workflow for that commit, downloads the run's dep-manifest-packed artifact with a token its own GitHub App scopes to actions read, and stores the packed file once at lab/manifests/<owner>--<name>/<commit>.json, so a stored commit is never fetched again. A commit without such a run or artifact, an expired artifact, an archive GitHub answers is gone and a manifest recorded for another commit fetch nothing; a refused request or an archive without a readable packed.json drops the head with its reason.",
+      "seam": "scripts.ci_lab.manifests.fetch over a fake GitHub client, scripts.ci_lab.manifests.Actions and Fetcher over mocked requests and App token minting, scripts.ci_lab.scheduler.StoredManifests over the local object store, scripts.ci_lab.scheduler.MirrorExpander.expand over a git origin fixture and scripts.ci_lab.scheduler.Scheduler.tick over fakeredis",
+      "tests": [
+        "tests/ci_lab/test_manifests.py::test_fetch_answers_the_packed_manifest_the_dev_push_tests_run_of_the_commit_kept",
+        "tests/ci_lab/test_manifests.py::test_fetch_answers_none_for_a_commit_whose_dev_push_run_kept_no_manifest",
+        "tests/ci_lab/test_manifests.py::test_fetch_never_downloads_an_expired_artifact_and_answers_none_for_one_whose_archive_is_gone",
+        "tests/ci_lab/test_manifests.py::test_fetch_passes_over_dead_artifacts_and_another_commits_manifest_to_the_next_live_one",
+        "tests/ci_lab/test_manifests.py::test_fetch_refuses_an_archive_without_a_readable_packed_manifest",
+        "tests/ci_lab/test_manifests.py::test_the_lab_reads_the_actions_api_with_a_token_that_carries_only_actions_read",
+        "tests/ci_lab/test_manifests.py::test_actions_answers_none_for_a_gone_archive_and_names_any_other_refused_request",
+        "tests/ci_lab/test_manifests.py::test_the_fetcher_reads_each_repository_through_one_reader_of_its_own",
+        "tests/ci_lab/test_scheduler.py::test_stored_manifests_fetch_a_newest_commit_stored_nowhere_and_keep_it_by_repository_and_commit",
+        "tests/ci_lab/test_scheduler.py::test_stored_manifests_fetch_only_the_newest_commits_of_the_chain",
+        "tests/ci_lab/test_scheduler.py::test_a_head_that_needs_test_units_expands_on_the_manifest_stored_from_its_base_dev_push_run",
+        "tests/ci_lab/test_scheduler.py::test_a_head_whose_manifest_fetch_github_refuses_is_dropped_with_its_reason"
+      ]
+    },
+    {
       "id": "lab-control-routes",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/swarm-panic-and-priority",
