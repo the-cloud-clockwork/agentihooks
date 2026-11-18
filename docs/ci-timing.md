@@ -2467,3 +2467,23 @@ The 3.12 shards measure coverage again and were the slowest unit jobs: 209 to 22
 ## Python 3.12 unit stage in twenty shards (20 October 2026)
 
 Python 3.12 is the only unit leg, so its twelve coverage shards set the unit stage. Over the last ten successful full scope pull request Tests runs the slowest 3.12 shard took a median 388 seconds and the unit stage, from its first job's creation to its last job's end, a median 526 seconds against its 300 second budget; push to Gate Required took a median 984 seconds. The same suite now splits twenty ways on the same measured durations, fewer jobs than the 24 unit jobs (twelve per version) those runs held before Python 3.11 left the matrix, so each shard runs about 180 seconds of tests plus its fixed setup. Measured with the task's script over the runs before and after ([issue 5339](https://github.com/the-cloud-clockwork/agentihooks/issues/5339)).
+
+## Lab wait and capacity
+
+Each tick pass reads the CI lab scheduler's capacity document from the swarm's `lab-url` setting and keeps it in the swarm's Redis lab block ([How the swarm reads it](reference/ci-lab.md#how-the-swarm-reads-it)). The pull request class's `predicted_wait_s` is the lab wait the swarm acts on.
+
+| Condition | Effect |
+|---|---|
+| The predicted pull request wait exceeds `AGENTIHOOKS_HEALTH_CI_BEHIND_MINUTES` (default 20) | The tick holds new claims of eng tasks outside the fix phase with the reason `the lab is N minutes behind on pull request grading`, and fires the standing `lab_wait` finding |
+| The wait falls back to the limit or below | The finding clears and claims resume on the next pass |
+| The reading is older than ten minutes, failed or missing | Nothing is held |
+| A task outside the eng lane, or in the fix phase | Never held by the lab wait |
+
+A lab wait is back pressure, never a red: nobody retries a run or dispatches work to catch up. The bottleneck hunter proposes a ci task titled Lab capacity when the `lab_wait` stage keeps firing.
+
+Read the wait the swarm last captured:
+
+```bash
+agentihooks swarm example-swarm status --json \
+  | jq '.lab | {at, error, wait_s: .capacity.classes.pull_request.predicted_wait_s}'
+```
