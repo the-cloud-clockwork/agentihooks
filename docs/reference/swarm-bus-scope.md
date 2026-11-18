@@ -8,7 +8,8 @@ nav_order: 50
 
 A hive member's NATS credential reaches the event, work queue, dead letter and state resources of the swarms it
 belongs to, and in each of them the execution stop consumer of its own hive, and nothing of any other swarm or hive.
-Every subject a scoped member publishes or reads sits under `swarm.<swarm>.`, except its account slot request subject `slots.<swarm>.<hive>`; see
+Every subject a scoped member publishes or reads sits under `swarm.<swarm>.`, except its account slot request
+subject `slots.<swarm>.<hive>`; see
 [Hub slot requests and the hive binding](#hub-slot-requests-and-the-hive-binding). The JetStream API subjects that cannot carry that prefix are granted only for stream and consumer
 names that carry the swarm id. A member credential of one swarm is refused by the NATS server on another swarm's
 queue, dead letter, state and stream subjects, even when those resources exist.
@@ -161,7 +162,7 @@ them before that hive saw them.
 | Stream | `AGENTIHOOKS-<hex>-STOP`, holding `swarm.<swarm>.stop.>` | `scripts.hive.stop_names.stream(swarm)` |
 | Subject of one hive's stops, as callers write it | `swarm.<swarm>.execution.stop.<hive>` | `scripts.hive.execution_stop.stop_subject(swarm, hive)` |
 | The same subject on the wire | `swarm.<swarm>.stop.execution.stop.<hive>` | the scoped stops log |
-| Durable consumer of one hive | `execution-stop-` followed by the SHA-256 hex digest of the JSON array `["<swarm>", "<hive>"]` | `scripts.hive.stop_names.durable(swarm, hive)`; `stop_names.consumer(swarm, hive)` gives the name the server holds, which is the durable unchanged |
+| Durable consumer of one hive | `execution-stop-` followed by the SHA-256 hex digest of the JSON array `["<swarm>", "<hive>"]` | `scripts.hive.stop_names.durable(swarm, hive)`; `stop_names.consumer(swarm, hive)` gives the name the server holds, the durable unchanged because it already fits the consumer name pattern |
 
 For swarm `rig` and hive `m1` the stream is `AGENTIHOOKS-726967-STOP` and the consumer is
 `execution-stop-2a86bfeeb11f91465322e7471f40fc6d918465df25b25614b74cddcda7b45e1f`. To compute them for another
@@ -241,8 +242,8 @@ nats --server "$AGENTIHOOKS_BUS_URL" --creds "$AGENTIHOOKS_BUS_CREDENTIALS" \
 The server answers with a permissions violation for publish to that subject. It refuses
 `$JS.API.CONSUMER.INFO.AGENTIHOOKS-<hex>-STOP.<other consumer>` and `$JS.ACK.AGENTIHOOKS-<hex>-STOP.<other consumer>.>`
 the same way, any publish to `swarm.<swarm>.stop.execution.stop.<hive>`, and a subscription on a stop subject. The
-NATS Python client lowercases the server's error line, so a hive log prints the subject as `$js.api...` and
-`agentihooks-<hex>-stop`.
+NATS Python client lowercases the server's error line, as the stop grant regression tests expect for these refusals,
+so a hive log prints the subject as `$js.api...` and `agentihooks-<hex>-stop`.
 
 The feature map entry `hive-own-stop-consumer` lists the regression tests, which run these refusals and a member's
 own fetch and acknowledgement against a live NATS server. The Semgrep incident rule `stop-on-events-log` fails any
