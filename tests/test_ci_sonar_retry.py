@@ -1,10 +1,12 @@
 import contextlib
 import importlib.util
 import os
+import ssl
 import subprocess
 import threading
 import time
 from collections.abc import Iterator
+from http.client import HTTPMessage
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError
@@ -380,7 +382,7 @@ def test_a_refused_upstream_answer_is_logged_with_who_refused(monkeypatch, capsy
     assert "client-secret-fixture" not in log
 
 
-def _keep_alive_backend(close_after: int = 0) -> tuple[ThreadingHTTPServer, list[tuple[int, str]]]:
+def _keep_alive_backend(close_after: int | None = None) -> tuple[ThreadingHTTPServer, list[tuple[int, str]]]:
     seen: list[tuple[int, str]] = []
 
     class KeepAlive(BaseHTTPRequestHandler):
@@ -429,6 +431,7 @@ def _serving(monkeypatch: pytest.MonkeyPatch, backend: ThreadingHTTPServer) -> I
             server.server_close()
         for thread in threads:
             thread.join(timeout=5)
+            assert not thread.is_alive()
 
 
 def _status(port: int, method: str) -> int:
@@ -465,3 +468,62 @@ def test_a_pooled_connection_the_upstream_closed_is_replaced(monkeypatch: pytest
     assert len(clients) == 3
     assert clients[0] == clients[1]
     assert clients[2] != clients[0]
+
+
+class _Answer:
+    status = 200
+    headers = HTTPMessage()
+    will_close = False
+
+    def read(self) -> bytes:
+        return b"fresh"
+
+
+class _Upstream:
+    def __init__(self, failure: OSError | None) -> None:
+        self.failure = failure
+        self.sent: list[str] = []
+        self.closed = False
+
+    def request(self, method: str, url: str, body: bytes | None = None, headers: dict[str, str] | None = None) -> None:
+        self.sent.append(url)
+        if self.failure is not None:
+            raise self.failure
+
+    def getresponse(self) -> _Answer:
+        return _Answer()
+
+    def close(self) -> None:
+        self.closed = True
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [ssl.SSLEOFError(8, "EOF occurred in violation of protocol"), BrokenPipeError(32, "Broken pipe")],
+    ids=["tls-close-without-notify", "broken-pipe"],
+)
+def test_a_pooled_connection_that_fails_before_an_answer_is_replaced(
+    monkeypatch: pytest.MonkeyPatch, failure: OSError
+) -> None:
+    module = _proxy_module()
+    stale, fresh = _Upstream(failure), _Upstream(None)
+    module.IDLE.append(stale)
+    monkeypatch.setattr(module, "upstream", lambda origin: fresh)
+    monkeypatch.setenv("SONAR_HOST_URL", "https://sonar.example/prefix")
+    status, _, payload = module.exchange("GET", "/api/system/status", None, {})
+    assert (status, payload) == (200, b"fresh")
+    assert stale.closed
+    assert stale.sent == fresh.sent == ["/prefix/api/system/status"]
+    assert module.IDLE == [fresh]
+
+
+def test_a_pooled_connection_that_times_out_is_not_resent(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _proxy_module()
+    stale = _Upstream(TimeoutError("timed out"))
+    module.IDLE.append(stale)
+    monkeypatch.setattr(module, "upstream", lambda origin: pytest.fail("a timed out GET was sent again"))
+    monkeypatch.setenv("SONAR_HOST_URL", "https://sonar.example")
+    with pytest.raises(TimeoutError):
+        module.exchange("GET", "/api/system/status", None, {})
+    assert stale.closed
+    assert module.IDLE == []
