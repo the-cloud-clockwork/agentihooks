@@ -1073,8 +1073,8 @@ def test_a_forced_low_budget_enqueues_no_backfill_unit_and_still_enqueues_every_
 def test_backfill_takes_only_the_slots_left_free_after_the_units_waiting_in_other_classes(
     lab: Callable[..., Run],
 ) -> None:
-    first, second, third, checked, linted = (unit(number) for number in range(1, 6))
-    run = lab({HEAD_A: plan({"lint": (first, second, third)}), HEAD_B: plan({"lint": (checked, linted)})})
+    first, second, third, fourth, checked, linted = (unit(number) for number in range(1, 7))
+    run = lab({HEAD_A: plan({"lint": (first, second, third, fourth)}), HEAD_B: plan({"lint": (checked, linted)})})
     run.engine.queue.offer("worker", 3, 1000)
     run.push(HEAD_A, lane="sweep", event="backfill")
     run.push(HEAD_B, lane="pr-2", event="pull_request", action="synchronize")
@@ -1089,8 +1089,8 @@ def test_backfill_takes_only_the_slots_left_free_after_the_units_waiting_in_othe
     run.tick(1100)
     assert run.engine.queue.pending() == []
     assert run.lease(slots=3) == []
-    assert run.tick(1200) == [f"enqueued 2 units of {run.grade(HEAD_A).run}"]
-    assert run.engine.queue.pending() == [scheduler.job_id(HEAD_A, second), scheduler.job_id(HEAD_A, third)]
+    assert run.tick(1200) == [f"enqueued 3 units of {run.grade(HEAD_A).run}"]
+    assert run.engine.queue.pending() == [scheduler.job_id(HEAD_A, item) for item in (second, third, fourth)]
 
 
 @pytest.mark.feature("lab-scheduler-budget")
@@ -2347,7 +2347,7 @@ def test_main_rebuilds_the_verdict_index_before_serving_only_when_reindex_on_sta
     def poster(_repo: str) -> Poster:
         return Poster()
 
-    def build(_environ: Any, redis_client: Any, _objects: Any, _consumer: Any) -> scheduler.Scheduler:
+    def build(_environ: Any, redis_client: Any, _objects: Any, _consumer: Any, _spending: Any) -> scheduler.Scheduler:
         ports = scheduler.Ports(Inbox(), Expander({}), poster, frozenset[str])
         return scheduler.Scheduler(redis_client, objects, ports, scheduler.Settings(frozenset()))
 

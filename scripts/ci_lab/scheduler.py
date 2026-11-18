@@ -59,7 +59,7 @@ from scripts.ci_lab.manifests import Fetcher
 from scripts.ci_lab.objects import Objects, S3Objects, Uploads, manifest_folder, upload_path
 from scripts.ci_lab.outcomes import CANNOT_RUN, DROPPED, FAILED, LOSSES, PASSED
 from scripts.ci_lab.pods import Pods, unmanaged, worker_pods
-from scripts.ci_lab.queue import Job, Queue
+from scripts.ci_lab.queue import DEFAULT, Job, Queue
 from scripts.ci_lab.retry import Policy, UnitResult, decide, policy
 from scripts.ci_lab.static_gates import REGISTRY, WORKFLOW, discover
 from scripts.ci_lab.store import PREFIX, Store, Verdict
@@ -509,9 +509,10 @@ class Scheduler:
         self.registry = metrics.Registry()
 
     def tick(self, now_ms: int) -> list[str]:
-        """Run one pass: intake, release quiet lanes, reap expired leases, then advance every live grade, counting each
-        finished job in the most urgent tier of the live grades holding it."""
-        actions = [*self._intake(now_ms), *self._release(now_ms), *self._reap(now_ms)]
+        """Run one pass: intake, release quiet lanes, reap expired leases, enqueue the held units the budget admits,
+        then advance every live grade, counting each finished job in the most urgent tier of the live grades holding
+        it."""
+        actions = [*self._intake(now_ms), *self._release(now_ms), *self._reap(now_ms), *self._admit(now_ms)]
         tiers, _, _ = self._demand()
         for run in sorted(self.client.smembers(LIVE)):
             actions.extend(self._advance(run, tiers))
@@ -647,8 +648,8 @@ class Scheduler:
         return actions
 
     def _start(self, request: GradeRequest, lane: str, now_ms: int) -> str:
-        """Open a grade: supersede the lane's older head, place every unit and enqueue the store's misses; a request
-        that bypasses negative verdicts grades again under a run of its own."""
+        """Open a grade: supersede the lane's older head, place every unit and hold the store's misses for the budget;
+        a request that bypasses negative verdicts grades again under a run of its own."""
         plan = self.ports.expander.expand(request)
         inputs = GradeInputs(request.repo, request.head, request.base, CLASSES[request.tier], plan.grader)
         run = grade_key(inputs)
@@ -678,11 +679,10 @@ class Scheduler:
                 state.units.update({ref: replace(source.units[ref]) for ref in source.gates[gate]})
                 continue
             state.gates[gate] = [self._place(state, unit, request.bypass_negative, carried, misses) for unit in units]
-        self.queue.enqueue(misses, request.head, {}, request.base, plan.grader)
         self._save(state)
         self.client.sadd(LIVE, run)
         self.client.set(f"{LANES}{request.repo}|{lane}|{int(request.tier)}", run)
-        return f"grading {run} with {len(misses)} of {len(state.units)} units enqueued"
+        return f"grading {run} with {len(misses)} of {len(state.units)} units held"
 
     def _merge_group(self, request: GradeRequest, tree: str) -> State | None:
         """Return the passing merge group grade of the tree a push grade grades, if one exists."""
@@ -692,13 +692,16 @@ class Scheduler:
         return None if run is None else self.grade(run)
 
     def _supersede(self, request: GradeRequest, lane: str) -> dict[str, str]:
-        """Drop the pending units of the lane's older head and return its unfinished jobs by unit."""
+        """Drop the pending and held units of the lane's older head and return its unfinished jobs by unit."""
         previous = self.client.get(f"{LANES}{request.repo}|{lane}|{int(request.tier)}")
         old = None if previous is None else self.grade(previous)
         if old is None or old.head == request.head:
             return {}
         dropped = set(self.queue.supersede(old.head))
         old.superseded = True
+        for slot in old.units.values():
+            if slot.held:
+                slot.held, slot.outcome = False, DROPPED
         self._save(old)
         return {
             ref: slot.job
@@ -707,7 +710,8 @@ class Scheduler:
         }
 
     def _place(self, state: State, unit: Unit, bypass: bool, carried: Mapping[str, str], misses: list[Unit]) -> str:
-        """Answer a unit from the store, a carried job or a new job, counting the store lookup, and return its ref."""
+        """Answer a unit from the store, a carried job or a new job held for the budget, counting the store lookup, and
+        return its ref."""
         ref = f"{unit.kind}:{unit.key}"
         if ref in state.units:
             return ref
@@ -720,7 +724,7 @@ class Scheduler:
         elif ref in carried:
             slot.job = carried[ref]
         else:
-            slot.job = job_id(state.head, unit)
+            slot.job, slot.held = job_id(state.head, unit), True
             misses.append(unit)
         state.units[ref] = slot
         return ref
@@ -735,6 +739,32 @@ class Scheduler:
                 self.registry.inc(REAPED[state])
                 actions.append(f"reaped {expired} {state}")
                 release(self.queue, self.ports.pods, job.worker)
+        return actions
+
+    def _admit(self, now_ms: int) -> list[str]:
+        """Enqueue the held units the day's budget admits, the most urgent grade first: every unit of a class not shed,
+        and backfill only into the slots workers offered free after the units already waiting in the queue."""
+        grades = sorted(
+            (state for state in self._live() if any(slot.held for slot in state.units.values())),
+            key=lambda state: state.tier,
+        )
+        if not grades:
+            return []
+        shed = () if self.spending is None else self.spending.status().shed
+        load = self.load(now_ms)
+        waiting = sum(load.pending_slots.values())
+        actions: list[str] = []
+        for state in grades:
+            admitted: list[Unit] = []
+            for slot in state.units.values():
+                if slot.held and budget.admits(CLASSES[state.tier], DEFAULT.slots, load.slots_free, waiting, shed):
+                    slot.held = False
+                    admitted.append(Unit(slot.kind, slot.key, tuple(slot.members)))
+                    waiting += DEFAULT.slots
+            if admitted:
+                self.queue.enqueue(admitted, state.head, {}, state.base, state.grader)
+                self._save(state)
+                actions.append(f"enqueued {len(admitted)} units of {state.run}")
         return actions
 
     def _advance(self, run: str, tiers: Mapping[str, int]) -> list[str]:
@@ -760,8 +790,9 @@ class Scheduler:
         return actions
 
     def _collect(self, slot: Slot, tiers: Mapping[str, int], repo: str) -> None:
-        """Take a finished job into its slot in the class of its tier; a vanished job was dropped."""
-        if slot.outcome or not slot.job:
+        """Take a finished job into its slot in the class of its tier; a vanished job was dropped and a held one waits
+        for the budget."""
+        if slot.outcome or slot.held or not slot.job:
             return
         job = self.queue.job(slot.job)
         if job is None:
@@ -1106,7 +1137,8 @@ class MirrorExpander:
 def build(
     environ: Mapping[str, str], client: Any, objects: Objects, consumer: Consumer, spending: budget.Budget
 ) -> Scheduler:
-    """Return the service's scheduler over its clients, trusting the runner trust list of the repository's dev."""
+    """Return the service's scheduler over its clients and the day's budget, trusting the runner trust list of the
+    repository's dev."""
     toolchain = Toolchain(sys.version.split()[0], {}, "", "", environ.get(IMAGE, ""), {})
     node, root = Path(environ[contract.GIT_MIRROR]), Path(environ[MIRROR_STORE])
     expander = MirrorExpander(node, root, toolchain, StoredManifests(objects), Store(client, objects).get)
@@ -1120,7 +1152,7 @@ def build(
     ports = Ports(BusInbox(consumer), expander, poster, control.Priorities(client, _now_ms), worker_pods(environ))
     repository = environ[REPOSITORY]
     settings = Settings(expander.trusted(repository), retries=expander.retries(repository))
-    return Scheduler(client, objects, ports, settings)
+    return Scheduler(client, objects, ports, settings, spending)
 
 
 def serve(
