@@ -450,6 +450,27 @@
       ]
     },
     {
+      "id": "swarm-seat-admission-race",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2680",
+      "behaviour": "Two admissions racing for one seat on a records layout swarm, such as two hub replicas claiming two tasks at once, never both commit: the second commit is refused on the seat index, retried, and refused as a replacement that does not match the current execution, so the seat holds one current execution and no twin is left whose every write conflicts.",
+      "seam": "RedisStore.start_execution through ExecutionRegistry admission and the fencing records seat index",
+      "tests": [
+        "tests/swarm/test_execution_concurrency.py::test_an_admission_that_loses_its_seat_to_another_admission_is_refused",
+        "tests/swarm/test_fencing_records.py::test_the_seat_index_follows_the_newest_execution_of_each_seat"
+      ]
+    },
+    {
+      "id": "swarm-tick-step-conflict-detail",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2680",
+      "behaviour": "A tick step that fails on an execution identity conflict records the conflict message as the detail of its step record, so the controller log names the refused identity check instead of only the error class.",
+      "seam": "scripts.swarm.timing.step around a write the execution registry refuses",
+      "tests": [
+        "tests/swarm/test_execution_identity.py::test_a_step_refused_by_an_identity_conflict_records_the_conflict_message"
+      ]
+    },
+    {
       "id": "hive-saved-account-slot-preference",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-saved-account-pin",
