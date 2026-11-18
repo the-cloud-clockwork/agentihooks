@@ -2207,23 +2207,28 @@ session on a fix branch follows the same rule for a plain `git push`; see
 | Panic holds; the pushed branch is a registered fix of the worktree's repository; git config cannot route the push | Grade and push as usual. |
 | Panic holds; no fix registers the pushed branch for that repository | Refuse before the gate; nothing is pushed. |
 | Panic holds; the branch is registered, but git config can route the push | Refuse before the gate; nothing is pushed. |
+| Panic holds; the only fix that could register the branch is a pull request whose head branch cannot be read from GitHub | Refuse before the gate; nothing is pushed. |
 | Nothing new to publish and origin already points at `HEAD` | No panic check: the [unchanged result](#publishing-unchanged-files), nothing pushed. |
-| The swarm store cannot be reached or read | Grade and push as usual: the check fails open, like the guard. |
+| The swarm store cannot be reached, or reading the panic fails with a Redis error | Grade and push as usual: the check fails open, like the guard. |
 
 A registered fix is one `--fix` link of the panic:
 
 - a branch link `https://github.com/OWNER/NAME/tree/BRANCH` whose repository
   is the one the worktree's `origin` names and whose branch is the pushed
-  branch, or
+  branch, matched without a GitHub read, or
 - a pull request link in that repository whose head branch is the pushed
-  branch. A fix pull request whose head branch cannot be read registers
-  nothing.
+  branch, read from GitHub on each check. A fix pull request whose head
+  branch cannot be read registers nothing, so a branch link keeps a fix
+  publishing when GitHub is unreachable.
 
-The check reads the branch publish writes on origin, the task's
-[delivery branch](#publishing-after-a-successor-prepares-a-branch), not the
-branch checked out in the worktree. A successor continuing a registered fix
-pull request from a worktree on its own branch still publishes to that pull
-request's branch.
+The check tests the branch publish pushes, the
+[delivery branch](#publishing-after-a-successor-prepares-a-branch): the
+task's recorded branch when an open pull request delivers it and the worktree
+descends from it, otherwise the branch checked out in the worktree. A
+successor continuing a registered fix pull request from a worktree on its own
+branch still publishes to that pull request's branch. Publish writes that
+branch to the task's `branch` field before the check, so the task record
+names the branch a refusal tested.
 
 Git config can route the push when the worktree's `git config --list` holds
 any of:
@@ -2242,8 +2247,8 @@ The check applies to every caller, the swarm's master included: the master
 keeps every tool during panic, but its publish of an unregistered branch is
 held like any other session's. No flag or environment variable enables it.
 The panic is read from the swarm store every `agentihooks swarm` command uses:
-`AGENTIHOOKS_HIVE_REDIS_URL` on a hive, otherwise
-`AGENTIHOOKS_SWARM_REDIS_URL`, or the local default.
+`AGENTIHOOKS_HIVE_REDIS_URL` when it is set and the deployment is not local,
+otherwise `AGENTIHOOKS_SWARM_REDIS_URL`, or the local default.
 
 #### A refused publish
 
@@ -2255,9 +2260,11 @@ swarm: BLOCKED: panic mode holds swarm rig-grade-swarm (60 errors in the last ho
 ```
 
 The parenthesis carries the panic reason: `<count> errors in the last hour`
-for an automatic panic, `pressed on swarm <id>` for one engaged by hand. The
-refusal is also logged to syslog as a `swarm_publication_refused` event with
-the swarm, task, branch and reason.
+for an automatic panic, `pressed on swarm <id>` for one engaged by hand. A
+hand press on an automatic panic keeps the automatic reason. The refusal is
+also logged to syslog as a `swarm_publication_refused` event with the swarm,
+the task, the reason and the branch the task recorded for that repository
+before this publish.
 
 A refused publish leaves:
 
@@ -2267,8 +2274,9 @@ A refused publish leaves:
 - no prepush gate run and nothing pushed to origin.
 
 Repeat the `Next:` command once the panic clears, at business as usual or on
-`panic off`, or once the master registers the branch as a fix. The committed
-head is then graded and pushed with no new commit.
+`panic off`, or once the master registers the branch as a fix. When the listed
+files are unchanged since the refusal, the committed head is then graded and
+pushed with no new commit.
 
 #### Publishing a fix during panic
 
@@ -2287,16 +2295,16 @@ agentihooks swarm <id> publish --message "Fix the stale tick" -- scripts/swarm/t
 ```
 
 `panic on --fix` adds fixes to a panic already on. The publish result is the
-usual one, with `branch`, `gate` and `head`.
+usual one, with `branch`, `gate` and `head` among its fields.
 
 #### Troubleshooting
 
 | Symptom | Check |
 |---|---|
-| Refused although the fix is registered | Compare the publish `Next:` branch and the task's recorded `branch` with the fix link's branch or the fix pull request's head branch; they must match exactly. Compare `git remote get-url origin` in the worktree with the fix link's `OWNER/NAME`: a fix in another repository does not register this one. |
+| Refused although the fix is registered | Compare the task's recorded `branch` (`agentihooks ledger --slug <id> get tasks/<task>`), which publish wrote before the check, with the fix link's branch or the fix pull request's head branch; they must match exactly. Compare `git remote get-url origin` in the worktree with the fix link's `OWNER/NAME`: a fix in another repository does not register this one. For a pull request fix, check that `gh pr view <url> --json headRefName` answers from that host, or have the master add the branch link. |
 | Refused on a registered branch with matching names | Read the worktree's routing config with `git config --list` and `git remote get-url --push --all origin`. Remove the routing key, or the extra push url, then repeat the `Next:` command. |
 | Publish pushed while a panic was on | Check that the panic holds the swarm named in the publish command (`agentihooks swarm <id> panic status`), that the pushed branch is not a registered fix, and that the swarm store was reachable from that host: an unreachable store lets the push through. |
-| A plain `git push` is denied but publish pushes the same unregistered branch | The host runs a release older than [pull request 11718](https://github.com/the-cloud-clockwork/agentihooks/pull/11718). Update agentihooks on that host. |
+| A plain `git push` is denied but publish pushes the same unregistered branch | A release from before [pull request 11718](https://github.com/the-cloud-clockwork/agentihooks/pull/11718) has no publish check. With the Python that runs `agentihooks` on that host, `python -c "import inspect; from scripts.swarm import publish; print('held_push' in inspect.getsource(publish.grade_and_push))"` prints `True` when the installed release holds publish; `False` means it predates the check. |
 
 Delivered in [pull request 11718](https://github.com/the-cloud-clockwork/agentihooks/pull/11718).
 The tests mapped to feature `panic-publish-holds` in `feature-map.json` cover
