@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.1039 · 2026-11-18
+
+### 2026-11-18 · 24c838cd2b36 · #12169 · @agenticore-app
+
+**Render the ledger API service chart in the kind proof and assert its write route and deployment**
+
+This change adds tests/chart_api.py, a helm-template render check for the ledger API service chart that actually asserts parsed Deployment, Service, TLS, environment, PodDisruptionBudget, write-route, and NetworkPolicy output, closing a gap where existing tests only matched raw YAML text and missed a real cutover bug where probes and the API listened on different ports. The kind proof now runs this check before any cluster starts, catching rendering regressions on dev pushes, while the existing substring tests remain the only guard on pull requests since the unit suite forbids invoking live helm.
+
+### 2026-11-18 · 522fce16c978 · #12177 · @nestorcolt
+
+**Document the Codex app server exit failing the pending launch canary**
+
+This change adds documentation explaining a previously unrecorded behavior: when a supervised Codex app server exits before its session validates the profile canary, the pending launch report fails immediately, causing init-agent to fail on its next canary poll rather than waiting the full 270 second launch deadline. It details the supervision loop, failure reasons, exit codes, relevant log locations, and troubleshooting guidance across the Codex managed terminal and profile launch docs, helping operators quickly diagnose and resolve this specific failure mode instead of mistaking it for a timeout.
+
 ## v2.17.1038 · 2026-11-18
 
 ### 2026-11-18 · 0d35163edcd2 · #12175 · @agenticore-app
