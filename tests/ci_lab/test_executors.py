@@ -556,6 +556,48 @@ def test_settings_refuse_a_redis_variable(tmp_path: Path) -> None:
         executors.settings({**environ_of(tmp_path), "CI_LAB_REDIS_URL": "redis://x"})
 
 
+def graded_on_the_lab_only(tmp_path: Path) -> tuple[str, Path]:
+    source, lab = tmp_path / "source", tmp_path / "lab" / "agentihooks.git"
+    subprocess.run([*GIT, "init", "-q", "-b", "main", str(source)], check=True)
+    (source / "a").write_text("a")
+    subprocess.run([*GIT, "-C", str(source), "add", "a"], check=True)
+    subprocess.run([*GIT, "-C", str(source), "commit", "-q", "-m", "a"], check=True)
+    head = subprocess.run(["git", "-C", str(source), "rev-parse", "HEAD"], capture_output=True, text=True, check=True)
+    for bare in (tmp_path / "node", lab):
+        subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    subprocess.run(["git", "-C", str(source), "push", "-q", f"file://{lab}", "HEAD:refs/grade/t1"], check=True)
+    return head.stdout.strip(), lab
+
+
+def lab_environ(tmp_path: Path, lab: Path, repository: str | None) -> dict[str, str]:
+    environ = {
+        **environ_of(tmp_path),
+        "AGENTIHOOKS_LAB_REMOTE": f"file://{lab}",
+        "AGENTIHOOKS_LAB_REMOTE_TOKEN": "lab-token",
+    }
+    return environ if repository is None else {**environ, "CI_LAB_REPOSITORY": repository}
+
+
+@pytest.mark.feature("lab-remote-heads")
+def test_a_worker_cuts_the_tree_of_a_head_only_the_lab_remote_holds(tmp_path: Path) -> None:
+    head, lab = graded_on_the_lab_only(tmp_path)
+    environ = lab_environ(tmp_path, lab, "https://github.com/the-cloud-clockwork/agentihooks.git")
+
+    tree, fetched = executors.settings(environ)[0].trees.worktrees.lease(head)
+
+    assert fetched is True
+    assert (tree / "a").read_text() == "a"
+
+
+@pytest.mark.feature("lab-remote-heads")
+@pytest.mark.parametrize("repository", ["https://github.com/the-cloud-clockwork/widgets.git", None])
+def test_a_worker_never_asks_a_lab_remote_its_repository_does_not_name(tmp_path: Path, repository: str | None) -> None:
+    head, lab = graded_on_the_lab_only(tmp_path)
+
+    with pytest.raises(subprocess.CalledProcessError):
+        executors.settings(lab_environ(tmp_path, lab, repository))[0].trees.worktrees.lease(head)
+
+
 @pytest.mark.feature("lab-worker-executors")
 @pytest.mark.parametrize(("cpus", "slots"), [(4, 4), (None, 1)])
 def test_main_runs_the_worker_over_the_adapters_until_sigterm_stops_it(
