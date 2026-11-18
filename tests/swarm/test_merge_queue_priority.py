@@ -1,6 +1,8 @@
 import json
 import subprocess
+from collections.abc import Callable
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -470,7 +472,10 @@ def test_priority_checks_each_restored_entry_with_an_empty_body_when_it_has_none
     assert checked == [(URL[:-1] + str(n), f"head{n}", "") for n in (9, 2, 3)]
 
 
-def test_master_priority_defers_without_cancelling_running_head(monkeypatch, capsys):
+@pytest.mark.feature("merge-priority-moves-waiting-entries-at-once")
+def test_master_priority_moves_waiting_entries_without_cancelling_running_head(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     from tests.swarm.test_merge_queue import swarm_of
 
     store = swarm_of("master")
@@ -478,7 +483,7 @@ def test_master_priority_defers_without_cancelling_running_head(monkeypatch, cap
     monkeypatch.setattr(cli, "connect", lambda: store)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     monkeypatch.setattr(cli, "LedgerClient", lambda: SimpleNamespace(tasks=lambda slug: []))
-    queue = FakeQueue()
+    queue = FakeQueue(queued=True)
     prioritize = merge_queue.prioritize
     monkeypatch.setattr(
         merge_queue,
@@ -489,23 +494,29 @@ def test_master_priority_defers_without_cancelling_running_head(monkeypatch, cap
     records = []
     monkeypatch.setattr(queue_record.Journal, "groups", lambda self: groups)
     monkeypatch.setattr(queue_record.Journal, "write", lambda self, *args, **kwargs: records.append((args, kwargs)))
-
+    runs = []
     original_rest = merge_queue.rest
 
-    def rest(path, run):
+    def rest(path: str, run: Callable[..., Any]) -> Any:
         if "/actions/" not in path:
             return original_rest(path, run)
-        assert path == "repos/o/r/actions/workflows/test.yml/runs?event=merge_group&head_sha=group-head&per_page=100"
+        runs.append(path)
         return {"workflow_runs": [{"id": 42, "status": "in_progress", "head_sha": "group-head"}]}
 
     monkeypatch.setattr(merge_queue, "rest", rest)
     assert cli.main(["sw", "merge", "priority", URL]) == 0
-    assert queue.mutations == []
-    assert json.loads(capsys.readouterr().out)["deferred"] is True
-    pending = store.redis.hgetall(store.key("sw", "queue-priority"))
-    assert len(pending) == 1
-    assert json.loads(pending[URL])["run_id"] == 42
-    assert records[0][0][0] == "priority-deferred"
+    assert queue.mutations == [("dequeue", n) for n in (4, 3, 2)] + [("queue", n) for n in (2, 3, 4)]
+    assert [(entry["pullRequest"]["id"], entry["state"]) for entry in queue.entries] == [
+        ("P1", "AWAITING_CHECKS"),
+        ("P9", "QUEUED"),
+        ("P2", "QUEUED"),
+        ("P3", "QUEUED"),
+        ("P4", "QUEUED"),
+    ]
+    assert json.loads(capsys.readouterr().out)["displaced"] == [URL[:-1] + str(n) for n in (2, 3, 4)]
+    assert store.redis.hgetall(store.key("sw", "queue-priority")) == {}
+    assert runs == []
+    assert [args[0] for args, _ in records] == ["priority"]
 
 
 class Displaced:

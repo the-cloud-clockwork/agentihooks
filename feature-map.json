@@ -1,6 +1,22 @@
 {
   "features": [
     {
+      "id": "tick-status-publish-last-findings",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-status-publish-budget",
+      "behaviour": "Status publish publishes the health findings the pass stored; a passing pass whose health findings step stored none publishes the findings of the swarm's last published status, and only a failed pass or a swarm with no published findings leaves them for the status report to build, so the closing lane never repeats the whole findings build under its own budget, which abandoned it at its eleven second budget after controller rollouts.",
+      "seam": "report._status_publish with commands.published_findings, run by engine.run_group on the closing group",
+      "tests": [
+        "tests/tick/steps/test_status_publish.py::test_status_publish",
+        "tests/tick/steps/test_status_publish.py::test_status_publish_publishes_the_last_findings_when_the_pass_stored_none",
+        "tests/tick/steps/test_status_publish.py::test_status_publish_leaves_the_findings_to_the_report_before_the_first_publish",
+        "tests/tick/steps/test_status_publish.py::test_status_publish_leaves_the_findings_to_the_report_when_the_pass_failed",
+        "tests/tick/steps/test_status_publish.py::test_status_publish_keeps_the_findings_the_pass_stored",
+        "tests/tick/steps/test_status_publish.py::test_status_publish_keeps_an_empty_list_the_pass_stored",
+        "tests/tick/steps/test_status_publish.py::test_status_publish_leaves_the_findings_to_the_report_when_the_last_publish_holds_none"
+      ]
+    },
+    {
       "id": "compose-master-drill",
       "origin": "regression",
       "ordered_at": "2026-11-17",
@@ -197,6 +213,16 @@
       "seam": "hub container env and readinessProbe in the swarm chart hub Deployment",
       "tests": [
         "tests/test_swarm_chart_hub_readiness.py::test_the_hub_turns_ready_only_once_its_serving_file_exists"
+      ]
+    },
+    {
+      "id": "ledger-rolls-before-deployments",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2610",
+      "behaviour": "Every swarm chart service Deployment that renders beside the ledger carries Argo CD sync wave 1 while the ledger StatefulSet stays at wave 0, so a release rolls both ledger replicas to Ready before any Deployment creates a pod, and no new Deployment pod can take the room a rolling ledger replica frees on the node its local-path volume pins.",
+      "seam": "argocd.argoproj.io/sync-wave on the api, auth, controller, github-webhook, hive-join and hub Deployments of the swarm chart",
+      "tests": [
+        "tests/test_swarm_chart_ledger_rollout.py::test_every_service_deployment_rolls_in_a_sync_wave_after_the_ledger"
       ]
     },
     {
@@ -4185,6 +4211,17 @@
       ]
     },
     {
+      "id": "merge-priority-moves-waiting-entries-at-once",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2604",
+      "behaviour": "A merge priority request moves the waiting dev queue entries ahead of the pull request behind it at once, even while the head merge group still tests, so the pull request joins the next group; running entries stay in place and no deferred record is stored.",
+      "seam": "scripts.swarm.queue_priority.request through agentihooks swarm merge priority",
+      "tests": [
+        "tests/swarm/test_queue_priority.py::test_priority_moves_waiting_entries_at_once_while_the_head_group_tests",
+        "tests/swarm/test_merge_queue_priority.py::test_master_priority_moves_waiting_entries_without_cancelling_running_head"
+      ]
+    },
+    {
       "id": "launch-model-suits-harness",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2562",
@@ -4921,7 +4958,7 @@
       "origin": "regression",
       "ordered_at": "2026-11-16",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-fix-registration-hardening",
-      "behaviour": "While fleet panic is on, a session on a registered fix branch keeps a rerun in its own repository, a dispatch only when its ref names that branch, and a push only when it pushes to origin, every refspec writes that checked out branch and no git config may route it elsewhere; git -C moves the checkout the branch is read in. A push to any other ref, remote or set of refs, a push git config may route to another remote or ref (a push refspec, push url or mirror on origin, a url pushInsteadOf rewrite of the push url, push tag following, a push or tracking remote other than origin, or a push default other than simple or current), a dispatch without a ref or on another ref, a gh command aimed at another repository, a git global option other than -C, a command that sets a git repository or config environment variable, and a push or dispatch behind git or gh global options or a redirection stay frozen.",
+      "behaviour": "While fleet panic is on, a session on a registered fix branch keeps a rerun in its own repository, a dispatch only when its ref names that branch, and a push only when it pushes to origin, every refspec writes a registered fix branch and no git config may route it elsewhere; git -C moves the checkout the branch is read in. A push to any other ref, remote or set of refs, a push git config may route to another remote or ref (a push refspec, push url or mirror on origin, a url pushInsteadOf rewrite of the push url, push tag following, a push or tracking remote other than origin, or a push default other than simple or current), a dispatch without a ref or on another ref, a gh command aimed at another repository, a git global option other than -C, a command that sets a git repository or config environment variable, and a push or dispatch behind git or gh global options or a redirection stay frozen.",
       "seam": "The PreToolUse panic freeze in the blocker window hook: the frozen command parse and the fix branch spare",
       "rules": [
         "panic-spare-ignores-command-target"
@@ -4936,6 +4973,21 @@
         "tests/swarm/test_panic.py::test_a_command_reads_without_its_redirections_and_git_global_options",
         "tests/swarm/test_panic.py::test_a_spared_command_names_the_refs_it_writes",
         "tests/swarm/test_panic.py::test_a_dispatch_without_a_ref_names_an_empty_ref"
+      ]
+    },
+    {
+      "id": "panic-spares-a-successor-of-a-fix",
+      "origin": "regression",
+      "ordered_at": "2026-11-18",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-spare-upstream-fix-branch",
+      "behaviour": "While panic holds a swarm, a successor seat whose worktree branch has its own name keeps the fix work it inherited: a push whose every refspec writes a registered fix branch of the checkout's origin repository and a dispatch on one are spared whatever branch is checked out, and a rerun is spared in a checkout whose checked out branch or whose upstream on origin is a registered fix branch. A push with no refspec or of HEAD writes the checked out branch's own name and stays frozen unless that branch is a fix, as do a push or dispatch naming any other ref and a rerun from a branch that tracks a fix on another remote.",
+      "seam": "The PreToolUse panic freeze in the blocker window hook: blocker_window.pretool for a session bound to the panicking swarm",
+      "tests": [
+        "tests/swarm/test_panic.py::test_a_successor_branch_tracking_a_registered_fix_keeps_its_fix_pushes_dispatches_and_reruns",
+        "tests/swarm/test_panic.py::test_a_successor_branch_tracking_a_registered_fix_stays_frozen_for_any_other_target",
+        "tests/swarm/test_panic.py::test_a_rerun_from_a_branch_tracking_a_fix_on_another_remote_stays_frozen",
+        "tests/swarm/test_panic.py::test_a_branch_tracks_only_a_branch_on_origin",
+        "tests/swarm/test_panic.py::test_a_rerun_without_a_directory_or_a_fix_reads_no_git"
       ]
     },
     {
@@ -6617,10 +6669,20 @@
       "id": "promotion-red-graded-job-fails-at-once",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2598",
-      "behaviour": "The promotion step fails on its first poll and names each red job when the Tests run it grades, its own or a newer green run it picked, already holds a job that ended red outside the launch hotfix route, so it never holds the release group through the thirty minute wait.",
+      "behaviour": "The promotion step fails on its first poll and names each red job when the Tests run it grades, its own or a newer green run it picked, already holds a job off the exempt list that ended red outside the launch hotfix route, so it never holds the release group through the thirty minute wait.",
       "seam": "snapshotGradeComplete in .github/scripts/promote.cjs, driven by the promotion API contract harness tests/contracts/promotion/promote.cjs",
       "tests": [
         "tests/contracts/promotion/test_promote.py::test_promotion_api_contracts"
+      ]
+    },
+    {
+      "id": "promotion-graded-jobs-gate-or-exempt",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-promo-side-job-contract",
+      "behaviour": "Every job of the Tests workflow that promotion grades either sits in the Promotion ready needs, directly or through another job, or is named on the promote script's exempt list, whose side jobs the every job rule skips whatever their state, so a side job such as the mutation stats seed or the test summary never holds the release.",
+      "seam": "EXEMPT and settled in .github/scripts/promote.cjs against the promotion-ready needs of .github/workflows/test.yml",
+      "tests": [
+        "tests/contracts/promotion/test_workflow.py::test_every_graded_job_gates_promotion_or_sits_on_the_promote_script_exempt_list"
       ]
     },
     {
@@ -7688,7 +7750,21 @@
         "tests/test_ci_lone_artifact_download.py::test_the_gate_summary_counts_every_leg_however_many_legs_ran",
         "tests/test_ci_branch_reuse_workflow.py::test_sonar_takes_a_lone_selected_legs_coverage_from_the_bare_download_folder",
         "tests/test_ci_branch_reuse_workflow.py::test_sonar_leaves_a_bare_download_at_the_folder_root_when_two_legs_were_selected",
-        "tests/test_ci_branch_reuse_workflow.py::test_sonar_takes_a_lone_legs_newest_attempt_when_its_attempts_land_in_their_own_folders"
+        "tests/test_ci_branch_reuse_workflow.py::test_sonar_takes_a_lone_legs_newest_attempt_when_its_attempts_land_in_their_own_folders",
+        "tests/test_ci_lone_artifact_download.py::test_the_gate_summary_counts_a_lone_report_that_lands_at_the_folder_root"
+      ]
+    },
+    {
+      "id": "test-summary-downloads-every-report-in-one-step",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-test-summary-single-download",
+      "behaviour": "The Tests workflow test summary job fetches its durations and flakes reports with one artifact download step under the pattern {durations,flakes}-3.*, retried once, and the protected grader admits that job beside the reviewed two download job, so a blob response that download-artifact leaves open idles the job at most once and it stays inside its five minute limit.",
+      "seam": "the test-summary job of the Tests workflow, and scripts.gate_protected.grade over it through scripts.gate_protected._one_download",
+      "tests": [
+        "tests/test_gate_protected.py::test_the_separate_summary_accepts_one_download_of_every_report",
+        "tests/test_gate_protected.py::test_the_separate_summary_refuses_one_download_of_other_reports",
+        "tests/test_gate_protected.py::test_the_one_download_puts_one_step_for_every_report_where_the_first_download_was",
+        "tests/test_ci_gate_summary.py::test_the_test_summary_downloads_every_report_in_one_step"
       ]
     },
     {
@@ -8428,6 +8504,16 @@
       "tests": [
         "tests/ci_lab/test_sandbox.py::test_a_unit_with_read_only_trees_runs_inside_bwrap_with_each_tree_bound_read_only",
         "tests/ci_lab/test_sandbox.py::test_a_unit_with_network_and_read_only_trees_cannot_run_without_bwrap"
+      ]
+    },
+    {
+      "id": "lab-static-read-only-trees",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-worker-readonly-trees",
+      "behaviour": "The lab's static gate executor builds each gate step's sandbox with the grader tree and the base tree as its read only trees, so the step runs inside bubblewrap with both trees bound read only after the root bind and cannot write into the grader that grades it, while the head tree stays writable.",
+      "seam": "scripts.ci_lab.run_static run, the Sandbox it builds for the gate step and the bubblewrap arguments the step runs under",
+      "tests": [
+        "tests/ci_lab/test_run_static.py::test_the_step_runs_with_the_grader_and_base_trees_bound_read_only"
       ]
     },
     {

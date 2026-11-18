@@ -12,6 +12,7 @@ from scripts.swarm.health import merge_stall, night_watch
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import MANUAL_SCALING, MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_v2 import front_door
+from tests.swarm.client_class import client_class
 
 pytestmark = pytest.mark.unit
 
@@ -86,7 +87,7 @@ def rig(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> dict[str, Any]:
     monkeypatch.setattr(merge_stall, "observe", lambda repo, at: {**QUIET, "at": at})
     monkeypatch.setattr(capacity, "ready_work", ready_work)
     monkeypatch.setattr(tick, "_master", master)
-    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient", lambda: ledger)
+    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient", client_class(ledger))
     monkeypatch.setattr("scripts.swarm_v2.runtime.routed.routed", routed)
     monkeypatch.setattr(cli, "now_ms", lambda: NOW)
     return {

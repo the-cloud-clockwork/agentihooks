@@ -147,14 +147,10 @@ def requeue(store: RedisStore, slug: str, tasks: list[dict], ledger=None) -> lis
     return actions
 
 
-def blocking(url: str, journal: queue_record.Journal, head: str | None = None) -> dict | None:
+def blocking(url: str, journal: queue_record.Journal, head: str) -> dict | None:
     groups = journal.groups()
     if groups is None:
         raise SwarmError("queue priority waits until the head group can be read")
-    if head is None:
-        if not groups or not groups[0]["head"]:
-            return None
-        head = groups[0]["head"]
     repo = "/".join(url.split("/")[3:5])
     runs = merge_queue.rest(
         f"repos/{repo}/actions/workflows/test.yml/runs?event=merge_group&head_sha={head}&per_page=100",
@@ -206,12 +202,6 @@ def reorder(
 
 def request(store: RedisStore, slug: str, url: str, sender: str, tasks: list[dict], lift: bool) -> dict:
     journal = queue_record.Journal(url)
-    held = None if lift else blocking(url, journal)
-    if held is not None:
-        record = {**held, "sender": sender, "order": store.redis.incr(store.key(slug, ORDER))}
-        store.redis.hset(store.key(slug, PENDING), url, json.dumps(record))
-        journal.write("priority-deferred", url, "", None, None, **record)
-        return {"url": url, "deferred": True, "displaced": [], "errors": [], **held}
     if lift:
         journal.write("priority-lift", url, "", None, None)
     return apply(store, slug, url, sender, tasks, journal)

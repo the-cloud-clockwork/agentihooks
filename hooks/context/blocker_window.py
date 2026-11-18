@@ -2,8 +2,8 @@
 window automatically and injects a once-a-minute notice naming each sustained category, putting the master in
 troubleshooting mode with every tool it needs. A swarm's panic opens the same window for its master and denies the
 pushes, reruns, dispatches and deploys of every other session bound to that swarm; sessions bound to another swarm
-and unbound sessions are never held. A session on a registered fix branch, or on the head branch of a registered fix
-pull request, keeps reruns in its repository and the pushes and dispatches that write only that branch. Swarm
+and unbound sessions are never held. A push or dispatch whose every ref is a registered fix branch, or the head branch
+of a registered fix pull request, is spared, and so is a rerun from a checkout whose branch or upstream is one. Swarm
 publish, which pushes from its own process, asks the same panic rule through held_push before it pushes.
 Fails open on a store error."""
 
@@ -187,7 +187,8 @@ def _directory(cwd: str, folders: list[str]) -> str:
 
 
 def _spared(tokens: list[str], cwd: str, fixes: tuple[str, ...]) -> bool:
-    """Return whether a frozen command writes only the registered fix branch checked out where it runs: git -C moves
+    """Return whether a frozen command writes only registered fix branches of the checkout where it runs: a push or
+    dispatch whose every ref is one, or a rerun from a checkout whose branch or upstream on origin is one; git -C moves
     that directory, and any other git global option, or a git config that may route the push elsewhere, keeps it
     frozen."""
     words, options = _command(tokens)
@@ -195,6 +196,8 @@ def _spared(tokens: list[str], cwd: str, fixes: tuple[str, ...]) -> bool:
     if targets is None or any(option != "-C" for option, _ in options):
         return False
     here = _directory(cwd, [value for _, value in options])
+    if words[:3] == ["gh", "run", "rerun"]:
+        return _works_on_fix(here, fixes)
     return _on_fix_branch(here, fixes, targets) and not (words[:2] == ["git", "push"] and _routed(here))
 
 
@@ -307,14 +310,30 @@ def _fix_branch(url: str) -> str:
 
 
 def _on_fix_branch(cwd: str, fixes: tuple[str, ...], targets: tuple[str, ...]) -> bool:
-    """Return whether the session works in the repository and on the branch of a registered fix, a fix branch link
-    naming both or a fix pull request whose head branch it is, and every ref the command names is that branch."""
+    """Return whether every ref the command writes is a registered fix branch of the repository origin names in the
+    checkout at cwd, a fix branch link naming both or a fix pull request whose head branch it is: each ref the command
+    names, or the checked out branch when it names none."""
+    if not (cwd and fixes):
+        return False
+    named = [target.removeprefix("refs/heads/") for target in targets] or [_git(cwd, "branch", "--show-current")]
+    return all(_registered(cwd, fixes, branch) for branch in named)
+
+
+def _works_on_fix(cwd: str, fixes: tuple[str, ...]) -> bool:
+    """Return whether the checked out branch at cwd, or the branch it tracks on origin, is a registered fix of the
+    repository origin names there."""
     if not (cwd and fixes):
         return False
     branch = _git(cwd, "branch", "--show-current")
-    if not branch or any(target not in (branch, f"refs/heads/{branch}") for target in targets):
-        return False
-    return _registered(cwd, fixes, branch)
+    return _registered(cwd, fixes, branch) or _registered(cwd, fixes, _tracked(cwd, branch))
+
+
+def _tracked(cwd: str, branch: str) -> str:
+    """Return the branch on origin that branch tracks in the checkout at cwd, or an empty name when it tracks no branch
+    there."""
+    if _git(cwd, "config", f"branch.{branch}.remote") != "origin":
+        return ""
+    return _git(cwd, "config", f"branch.{branch}.merge").removeprefix("refs/heads/")
 
 
 def _registered(cwd: str, fixes: tuple[str, ...], branch: str) -> bool:
@@ -323,7 +342,7 @@ def _registered(cwd: str, fixes: tuple[str, ...], branch: str) -> bool:
     from scripts.swarm import panic
     from scripts.swarm.stack import repo_key
 
-    origin = _git(cwd, "remote", "get-url", "origin")
+    origin = branch and _git(cwd, "remote", "get-url", "origin")
     if not origin:
         return False
     repository = repo_key(origin)

@@ -41,6 +41,7 @@ LEDGER_SELECT_OUTPUT = {"ledger": "${{ steps.select.outputs.ledger }}"}
 FROZEN = "tests/registry/FROZEN_GATES.json"
 DOWNLOAD_ARTIFACT = "actions/download-artifact@"
 SUMMARY_DOWNLOADS = ("actions/download-artifact@v4", "actions/download-artifact@v8.0.2")
+SUMMARY_REPORTS = ("Download this run's test reports", "{durations,flakes}-3.*")
 
 
 def _gates(workflows: dict[str, dict]) -> list[tuple[str, str, dict]]:
@@ -62,6 +63,18 @@ def _protected_config(base: Mapping[str, Any], head: Mapping[str, Any]) -> dict:
 def _summary_download(steps: list[dict[str, Any]], uses: str) -> list[dict[str, Any]]:
     """Return the reviewed summary steps with every artifact download step pinned to ``uses``."""
     return [{**step, "uses": uses} if str(step.get("uses")).startswith(DOWNLOAD_ARTIFACT) else step for step in steps]
+
+
+def _one_download(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return the reviewed summary steps with one step, in the first download's place, downloading every report."""
+    name, pattern = SUMMARY_REPORTS
+    joined: list[dict[str, Any]] = []
+    for step in steps:
+        if not str(step.get("uses")).startswith(DOWNLOAD_ARTIFACT):
+            joined.append(step)
+        elif not any(str(kept.get("uses")).startswith(DOWNLOAD_ARTIFACT) for kept in joined):
+            joined.append({**step, "name": name, "with": {**step["with"], "pattern": pattern}})
+    return joined
 
 
 def runners(policy: object = None) -> list[str]:
@@ -322,10 +335,11 @@ def grade(
                 "if": "${{ always() }}",
                 "runs-on": runner,
                 "timeout-minutes": 5,
-                "steps": finish(retry(_summary_download(ci_reuse.summary_steps(), uses))),
+                "steps": finish(retry(join(_summary_download(ci_reuse.summary_steps(), uses)))),
             }
             for runner in runners(policy)
             for uses in SUMMARY_DOWNLOADS
+            for join in (list, _one_download)
             for finish in (list, ci_reuse.pipefail_summary)
             for retry in (list, ci_reuse.retried_summary)
         ]

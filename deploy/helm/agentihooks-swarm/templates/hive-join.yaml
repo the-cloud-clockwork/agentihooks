@@ -29,6 +29,7 @@ kind: Deployment
 metadata:
   name: {{ $fullname }}-hive-join
   annotations:
+    argocd.argoproj.io/sync-wave: "1"
     secret.reloader.stakater.com/reload: {{ join "," $reload | quote }}
   labels:
     {{- include "swarm.labels" . | nindent 4 }}
