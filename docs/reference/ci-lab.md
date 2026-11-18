@@ -19,7 +19,7 @@ worker's PriorityClass is a cluster object outside that module;
 | Command | Module form | What it does today |
 |---|---|---|
 | `agentihooks ci-lab-scheduler --self-test` | `python -m scripts.ci_lab scheduler --self-test` | Checks the scheduler contract offline and prints it as JSON |
-| `python -m scripts.ci_lab scheduler [--interval S] [--passes N]` | same | Runs the scheduler service: the lease API on port 8800 and one grading pass every interval (2 seconds), forever unless `--passes` is set |
+| `agentihooks ci-lab-scheduler [--interval S] [--passes N]` | `python -m scripts.ci_lab scheduler [--interval S] [--passes N]` | Runs the scheduler service: reads the runtime config, serves the lease API, `/capacity` and `/grades/<sha>` on port 8800 and `/metrics` on 9108, and runs one grading pass every interval (2 seconds), forever unless `--passes` is set |
 | `agentihooks ci-lab-worker --self-test` | `python -m scripts.ci_lab worker --self-test` | Refuses any GitHub App variable, checks the worker contract offline and prints it as JSON |
 
 The self tests make no network, Redis, object store or GitHub calls. They exit 0 when the
@@ -37,7 +37,7 @@ worker start without `--self-test` exits 2 until the worker loop lands.
 | `CI_LAB_MINIO_*` | yes | yes | Object store endpoint, bucket and credentials, passed by reference |
 | `GITHUB_APP_*` | yes | never | GitHub App identity used to post check runs |
 | `CI_LAB_REDIS_URL` | yes | no | Queue, lease and verdict index store |
-| `CI_LAB_RUNTIME_CONFIG` | yes | no | Path of the mounted runtime config; `python -m scripts.ci_lab runtime <path>` validates it |
+| `CI_LAB_RUNTIME_CONFIG` | yes | no | Path of the mounted runtime config the scheduler reads at start, before it connects anywhere; its budget sets the budget fraction and shed classes of `/capacity` and `/metrics`; `python -m scripts.ci_lab runtime <path>` validates it |
 | `CI_LAB_SCHEDULER_URL` | no | yes | Base address of the scheduler lease API |
 | `CI_LAB_SLOTS` | no | yes | Number of units the worker runs at once |
 | `CI_LAB_GIT_MIRROR` | yes | yes | Path of the shared git mirror the worker cuts worktrees from and the scheduler borrows objects from |
@@ -55,8 +55,8 @@ A worker started with any `GITHUB_APP_*` variable in its environment refuses to 
 
 | Port | Service | Serves |
 |---|---|---|
-| `8800` | scheduler | The lease API workers call, the [control routes](#control-routes) a swarm calls, and [`/capacity`](#capacity-document) |
-| `9108` | scheduler and worker | Prometheus metrics |
+| `8800` | scheduler | The lease API workers call, the [control routes](#control-routes) a swarm calls, [`/capacity`](#capacity-document) and [`/grades/<sha>`](#grades-of-a-commit) |
+| `9108` | scheduler and worker | Prometheus metrics at `/metrics` |
 
 ## Control routes
 
@@ -116,9 +116,25 @@ snapshot sets the queue, slot and `ci_lab_queue_wait_seconds` gauges through
 `scripts.ci_lab.metrics.observe_load`. The swarm tick reads the document to decide the
 [lab behind claim hold](swarm-thresholds.md#lab-behind-claim-hold).
 
-No service loop builds a `Load` yet: the scheduler starts only with `--self-test`
-([Entry points](#entry-points)). The code that will build the snapshot must fill `frees_in`, or
-a pool with every slot busy predicts no wait and the claim hold cannot fire on a full lab.
+The scheduler service builds the snapshot on every request with
+`scripts.ci_lab.scheduler.Scheduler.load` and serves `/capacity` on port 8800 and `/metrics` on
+9108 from it, through `scripts.ci_lab.scheduler.listen`:
+
+| Field | Built from |
+|---|---|
+| `pending` | Each pending queue job, in the most urgent class of the live grades holding it, estimated at `UNIT_ESTIMATE_S` (60 seconds) per slot it takes |
+| `running` | Each leased queue job, counted in the same class |
+| `slots_busy` | The slots every leased job takes, whether or not a live grade holds it |
+| `slots_total` | `slots_busy` plus the free slots each worker offered on its latest lease poll, when that poll is at most `READY_MS` (60 seconds, twice the longest lease wait) old |
+| `cache_hits`, `cache_misses` | The live grades' units the verdict store answered, and those it sent to the queue, per class |
+| `frees_in` | One `UNIT_ESTIMATE_S` entry per busy slot |
+| `budget_fraction`, `shed` | The day's core budget from the runtime config, through `scripts.ci_lab.budget.observe` |
+
+A worker's lease poll records its free slots when the poll starts and what its grants leave when
+it returns (`Queue.offer`); each load forgets the offers older than the ready window with
+`Queue.prune`, one script that reads and deletes, so an offer a worker renews meanwhile stays.
+A queue job no live grade holds counts toward the busy slots only.
+Until the lab records measured unit durations, every estimate is the fixed `UNIT_ESTIMATE_S`.
 
 ### Load snapshot
 
@@ -766,6 +782,29 @@ Known limits: a lab head event carries no branch yet, so a head's lane is its ow
 head supersedes nothing until intake records the branch; expansion keys static gates only, so the
 jobs the lab does not run yet pass by their frame and a push grade folds only the static gates; a
 rerequested grade reuses the finished jobs of its own head.
+
+### Grades of a commit
+
+`GET /grades/<sha>` on port 8800 answers every grade of one commit, open or closed, ordered by
+run: the live grades of that head and the closed grades its evidence markers
+(`lab/heads/<sha>/<run>`) name. The sha is 40 or 64 lowercase hex characters; anything else
+answers `400` with `{"error": "a grade lookup names one full commit sha"}`. A commit the lab
+never graded answers an empty list.
+
+```bash
+curl -s http://lab:8800/grades/0123456789abcdef0123456789abcdef01234567 | jq '.grades[] | {class, conclusion, units}'
+```
+
+Each grade is `scripts.ci_lab.scheduler.summary` of its state:
+
+| Field | Meaning |
+|---|---|
+| `run`, `repo`, `head`, `base`, `tree`, `grader` | What the grade grades and the grader revision it read |
+| `class`, `lane` | Its scheduling class and lane |
+| `conclusion` | `success` or `failure` once every unit is final, `null` while it runs |
+| `superseded` | Whether a newer head of its lane cancelled it |
+| `units` | `total` units and how many are `final` |
+| `checks` | Each check run's last posted `status` and `conclusion`, `required` included |
 
 ## Verdict store
 

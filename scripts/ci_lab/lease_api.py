@@ -5,6 +5,7 @@ import hmac
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Protocol, TypeGuard
 from urllib.parse import parse_qs, urlsplit
@@ -13,7 +14,18 @@ from scripts.ci_lab import control
 from scripts.ci_lab.delivery import CLASSES
 from scripts.ci_lab.leases import Grant, Leases
 
-__all__ = ["MAX_WAIT_MS", "ControlRoutes", "UploadSigner", "command", "respond", "serve"]
+__all__ = [
+    "MAX_WAIT_MS",
+    "Answer",
+    "ControlRoutes",
+    "Reply",
+    "UploadSigner",
+    "answer",
+    "bind",
+    "command",
+    "respond",
+    "serve",
+]
 
 MAX_WAIT_MS = 30_000
 MAX_BODY_BYTES = 65_536
@@ -22,6 +34,7 @@ AUTHORIZATION = "Authorization"
 UPLOADS = frozenset({"report", "log"})
 
 Reply = tuple[int, dict[str, Any]]
+Answer = Callable[[str, str, bytes, str | None], Reply]
 
 
 class UploadSigner(Protocol):
@@ -205,17 +218,28 @@ def command(routes: ControlRoutes, method: str, target: str, raw: bytes, authori
         return 400, {"error": "bad request"}
 
 
-def serve(host: str, port: int, leases: Leases, signer: UploadSigner, routes: ControlRoutes) -> ThreadingHTTPServer:
-    """Bind the lease API and its control routes on host and port; the caller runs serve_forever."""
+def answer(
+    leases: Leases,
+    signer: UploadSigner,
+    routes: ControlRoutes,
+    method: str,
+    target: str,
+    raw: bytes,
+    authorization: str | None,
+) -> Reply:
+    """Answer one request: a control route with its bearer token, any other through the lease API."""
+    return command(routes, method, target, raw, authorization) or respond(leases, signer, method, target, raw)
 
-    def answer(request: BaseHTTPRequestHandler) -> None:
+
+def bind(host: str, port: int, reply: Answer) -> ThreadingHTTPServer:
+    """Bind JSON routes on host and port, each request's method, target, body and Authorization header answered by
+    reply; the caller runs serve_forever."""
+
+    def handle(request: BaseHTTPRequestHandler) -> None:
         length = request.headers.get(LENGTH) or "0"
         if length.isascii() and length.isdigit() and int(length) <= MAX_BODY_BYTES:
             raw = request.rfile.read(int(length))
-            authorization = request.headers.get(AUTHORIZATION)
-            status, payload = command(routes, request.command, request.path, raw, authorization) or respond(
-                leases, signer, request.command, request.path, raw
-            )
+            status, payload = reply(request.command, request.path, raw, request.headers.get(AUTHORIZATION))
         else:
             status, payload = 400, {"error": "bad request"}
         data = json.dumps(payload).encode()
@@ -225,5 +249,10 @@ def serve(host: str, port: int, leases: Leases, signer: UploadSigner, routes: Co
         request.end_headers()
         request.wfile.write(data)
 
-    handler = type(BaseHTTPRequestHandler.__name__, (BaseHTTPRequestHandler,), {"do_GET": answer, "do_POST": answer})
+    handler = type(BaseHTTPRequestHandler.__name__, (BaseHTTPRequestHandler,), {"do_GET": handle, "do_POST": handle})
     return ThreadingHTTPServer((host, port), handler)
+
+
+def serve(host: str, port: int, leases: Leases, signer: UploadSigner, routes: ControlRoutes) -> ThreadingHTTPServer:
+    """Bind the lease API and its control routes on host and port; the caller runs serve_forever."""
+    return bind(host, port, partial(answer, leases, signer, routes))
