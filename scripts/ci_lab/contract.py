@@ -100,7 +100,7 @@ SCHEDULER = Service(
     name="scheduler",
     ports=(SCHEDULER_PORT, METRICS_PORT),
     prefixes=(BUS_PREFIX, MINIO_PREFIX, GITHUB_APP_PREFIX),
-    names=(REDIS_URL, RUNTIME_CONFIG),
+    names=(REDIS_URL, RUNTIME_CONFIG, LAB_URL),
     metrics=METRICS,
 )
 WORKER = Service(
