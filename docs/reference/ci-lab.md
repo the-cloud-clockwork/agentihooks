@@ -2069,6 +2069,28 @@ Limitations:
 - The worker service runs both runners through `scripts.ci_lab.executors` (see
   [Worker executors](#worker-executors)).
 
+### Head venv builds
+
+`venvs.venv_for(lockfile_digest, tree, root, build)` returns the baked image venv when its
+marker holds the digest. Otherwise it builds `root/<digest>` once, under a lock per digest, by
+running uv in a `Sandbox` from `build` (`venvs.Build`: ports, whitelist and time limit). The
+executors pass `Pod.build`, the pod's ports, whitelist and unit time limit.
+
+| Part | Value |
+|---|---|
+| Command | the worker's `uv` with `sync --frozen --no-install-project --all-extras --python <worker python> --project <tree>` |
+| Runs from | the head tree, with network, under `env -i` and no bubblewrap |
+| Environment | `build.whitelist`, `PATH` (the whitelist's, else `/bin:/usr/bin`), `UV_PROJECT_ENVIRONMENT=root/<digest>` and the sandbox's private folders |
+| Run folder | under `root/builds`, removed after a build that ends with code 0 |
+
+uv and every build hook it starts get no other worker variable in their environment. A build
+that runs past the unit time limit or ends with a
+nonzero code raises `CannotRun` naming its kept log and writes no marker, so the next call
+builds again. A worker without `uv` on its `PATH` raises
+`uv is not installed, so a venv cannot be built`. The build is isolated by environment only:
+it runs as the worker's user with no PID namespace, so it can still read and write the host
+filesystem, `/proc` included.
+
 ### Use it
 
 Run one gate step of the grader's workflow over a head:
