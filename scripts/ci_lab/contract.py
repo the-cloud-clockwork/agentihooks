@@ -14,6 +14,8 @@ import sys
 from collections.abc import Mapping, Sequence
 from typing import NamedTuple
 
+from scripts.ci_lab.remote import checkout
+
 SCHEDULER_PORT = 8800
 METRICS_PORT = 9108
 SELF_TEST = "--self-test"
@@ -36,6 +38,7 @@ MUTATION_CACHE = "CI_LAB_MUTATION_CACHE"
 KILLERS = "CI_LAB_KILLERS"
 MUTATION_BUDGET = "CI_LAB_MUTATION_BUDGET"
 MUTATION_CAP = "CI_LAB_MUTATION_CAP"
+REPOSITORY = "CI_LAB_REPOSITORY"
 
 UNITS_QUEUED = "ci_lab_units_queued"
 UNITS_RUNNING = "ci_lab_units_running"
@@ -119,6 +122,9 @@ WORKER = Service(
         KILLERS,
         MUTATION_BUDGET,
         MUTATION_CAP,
+        REPOSITORY,
+        checkout.URL_ENV,
+        checkout.TOKEN_ENV,
     ),
     metrics=METRICS,
 )

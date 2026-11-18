@@ -93,7 +93,7 @@ def test_migration_copies_the_document_into_records_and_reads_it_back(store: Any
     written = fencing.migrate_records(store, "sw", writers_upgraded=True)
 
     after = fencing.read(store, "sw")
-    assert written == 10
+    assert written == 11
     assert after[fencing.RECORDS_SLUG] == "sw"
     indexed = fencing.records(store, "sw").record("sw", fencing.ARCHIVED_NAMES, "old")
     assert indexed is not None and indexed.value == "z"
@@ -285,6 +285,19 @@ def test_name_heads_pick_the_later_row_on_a_tie() -> None:
     assert fencing._heads({"e": {"name": "x", "generation": 1.5}}) == {"x": "e"}
 
 
+@pytest.mark.feature("swarm-seat-admission-race")
+def test_the_seat_index_follows_the_newest_execution_of_each_seat(store: Any) -> None:
+    from scripts.swarm import fencing
+
+    port = _migrated(store)
+    fencing.write(store, "sw", lambda doc: doc["executions"].update(a=_row("a", "eng", 1), b=_row("b", "ci", 2)))
+    assert port.record("sw", fencing.BY_SEAT, "eng-1").value == "b"
+    fencing.write(store, "sw", lambda doc: doc["executions"].pop("b"))
+    assert port.record("sw", fencing.BY_SEAT, "eng-1").value == "a"
+    fencing.write(store, "sw", lambda doc: doc["executions"].pop("a"))
+    assert port.sections("sw", (fencing.BY_SEAT,)) == {fencing.BY_SEAT: {}}
+
+
 def test_moving_rows_into_the_archive_writes_only_the_moved_rows(store: Any) -> None:
     from scripts.swarm import fencing
 
@@ -300,7 +313,7 @@ def test_moving_rows_into_the_archive_writes_only_the_moved_rows(store: Any) -> 
     fencing.write(store, "sw", move)
     entries = _log(store)
     assert len(entries) == count + 1
-    assert entries[-1]["records"] == "4"
+    assert entries[-1]["records"] == "5"
     assert port.record("sw", "archive", "a").value == _row("a", "eng", 1)
     assert port.record("sw", fencing.ARCHIVED_NAMES, "eng").value == "a"
     assert set(fencing.read(store, "sw")["archive"]) == {"0", "1", "2", "3", "4", "a"}
@@ -620,6 +633,7 @@ def test_the_whole_document_port_fences_and_applies_a_batch(store: Any, clock: l
                 RecordWrite("put", "grants", "g", 0, {"n": 1}),
                 RecordWrite("put", "meta", "grants_disabled", revision, "off"),
                 RecordWrite("put", "by-name", "eng", 0, "ignored"),
+                RecordWrite("put", "by-seat", "eng-1", 0, "ignored"),
                 RecordWrite("put", "archive", "z", BLIND, _row("z", "old", 0)),
                 RecordWrite("check", "meta", "epoch", revision),
             ),
@@ -928,11 +942,13 @@ def test_a_change_that_adds_or_drops_sections_writes_their_records_and_name_head
         RecordWrite("delete", "executions", "a", BLIND),
         RecordWrite("delete", "grants", "g", 7),
         RecordWrite("delete", "by-name", "eng", BLIND),
+        RecordWrite("delete", "by-seat", "eng-1", BLIND),
     ]
     assert fencing._changes({}, {"executions": {"a": _row("a", "eng", 1)}, "grants": {"g": 1}}, {}) == [
         RecordWrite("put", "executions", "a", BLIND, _row("a", "eng", 1)),
         RecordWrite("put", "grants", "g", BLIND, 1),
         RecordWrite("put", "by-name", "eng", BLIND, "a"),
+        RecordWrite("put", "by-seat", "eng-1", BLIND, "a"),
     ]
 
 

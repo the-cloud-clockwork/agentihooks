@@ -334,6 +334,16 @@
       ]
     },
     {
+      "id": "compose-ledger-ensure-starts-front-and-api",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2695",
+      "behaviour": "Legacy local Compose ledger ensure pulls and starts the ledger, write API and front together, so the published front port can answer. Stopping the legacy ledger stops all three services. Adopted stacks keep their swarm service commands.",
+      "seam": "server_compose.start and stop, the docker compose command list",
+      "tests": [
+        "tests/swarm_ledger/test_server_compose.py::test_compose_runs_with_the_folder_the_code_and_this_user"
+      ]
+    },
+    {
       "id": "compose-api-health-and-front-proxy",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/promo-43992907244-10",
@@ -363,6 +373,17 @@
       "seam": "ledger_server.serve, the hub projector import against server_handoff.announce",
       "tests": [
         "tests/swarm_ledger/test_server_compose.py::test_a_successor_that_cannot_import_the_hub_never_reports_ready"
+      ]
+    },
+    {
+      "id": "ledger-server-pid-file-after-projector",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2689",
+      "behaviour": "A ledger server writes its process id file only once its hub projector is running, just before it serves requests, so the pid file never names a server whose projector has not started.",
+      "seam": "ledger_server.serve, the pid file write against projector.running and server.serve_forever",
+      "tests": [
+        "tests/swarm_ledger/test_outbox_host.py::test_the_ledger_server_writes_its_pid_file_only_once_the_projector_runs",
+        "tests/swarm_ledger/test_outbox_host.py::test_a_ledger_server_whose_projector_fails_to_start_writes_no_pid_file"
       ]
     },
     {
@@ -436,6 +457,27 @@
         "tests/swarm/test_resume.py::test_a_restored_execution_keeps_its_identity_and_start_and_records_the_resume_as_launch",
         "tests/swarm/test_outage_resume.py::test_a_reopened_owner_keeps_its_execution_and_start_and_records_the_resume_as_launch",
         "tests/swarm/test_outage_resume.py::test_an_owner_restarted_from_its_handoff_keeps_its_execution_and_records_the_restart_as_launch"
+      ]
+    },
+    {
+      "id": "swarm-seat-admission-race",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2680",
+      "behaviour": "Two admissions racing for one seat on a records layout swarm, such as two hub replicas claiming two tasks at once, never both commit: the second commit is refused on the seat index, retried, and refused as a replacement that does not match the current execution, so the seat holds one current execution and no twin is left whose every write conflicts.",
+      "seam": "RedisStore.start_execution through ExecutionRegistry admission and the fencing records seat index",
+      "tests": [
+        "tests/swarm/test_execution_concurrency.py::test_an_admission_that_loses_its_seat_to_another_admission_is_refused",
+        "tests/swarm/test_fencing_records.py::test_the_seat_index_follows_the_newest_execution_of_each_seat"
+      ]
+    },
+    {
+      "id": "swarm-tick-step-conflict-detail",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2680",
+      "behaviour": "A tick step that fails on an execution identity conflict records the conflict message as the detail of its step record, so the controller log names the refused identity check instead of only the error class.",
+      "seam": "scripts.swarm.timing.step around a write the execution registry refuses",
+      "tests": [
+        "tests/swarm/test_execution_identity.py::test_a_step_refused_by_an_identity_conflict_records_the_conflict_message"
       ]
     },
     {
@@ -9844,13 +9886,15 @@
       "id": "lab-remote-heads",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2645",
-      "behaviour": "A head pushed only to the lab remote grades and relays: the scheduler's expander mirrors and the relay's pusher mirror fetch a sha their GitHub remote lacks from the lab remote AGENTIHOOKS_LAB_REMOTE names when it serves the same repository, sending AGENTIHOOKS_LAB_REMOTE_TOKEN as the basic password of the user lab through git's environment config only. A grade of a head pushed to refs/grade/* keeps the notice's ref, also when the held head arrives again with it, records each check's status and conclusion for the relay and posts no GitHub check run. The relay push token asks contents write and workflows write, so a relayed branch that changes workflow files is accepted.",
-      "seam": "Mirror.fetch over a sha only the lab remote holds, scheduler.build and relay.build mirror wiring, BusInbox.heads over a lab remote notice, Scheduler.tick over a grade ref head, and the GitPusher token request",
+      "behaviour": "A head pushed only to the lab remote grades and relays: the scheduler's expander mirrors and the relay's pusher mirror fetch a sha their GitHub remote lacks from the lab remote AGENTIHOOKS_LAB_REMOTE names when it serves the same repository, and a worker whose node mirror lacks the sha fetches it from that lab remote when CI_LAB_REPOSITORY names the repository the lab URL names, before it cuts the tree, sending AGENTIHOOKS_LAB_REMOTE_TOKEN as the basic password of the user lab through git's environment config only. A grade of a head pushed to refs/grade/* keeps the notice's ref, also when the held head arrives again with it, records each check's status and conclusion for the relay and posts no GitHub check run. The relay push token asks contents write and workflows write, so a relayed branch that changes workflow files is accepted.",
+      "seam": "Mirror.fetch over a sha only the lab remote holds, scheduler.build and relay.build mirror wiring, Worktrees.lease on the worker executors.settings builds, BusInbox.heads over a lab remote notice, Scheduler.tick over a grade ref head, and the GitPusher token request",
       "tests": [
         "tests/ci_lab/test_worktrees.py::test_fetch_takes_a_sha_only_the_lab_remote_holds_from_the_lab_remote",
         "tests/ci_lab/test_worktrees.py::test_fetch_never_asks_a_lab_remote_of_another_repository",
         "tests/ci_lab/test_worktrees.py::test_a_lab_fetch_sends_the_token_as_the_lab_user_s_basic_password_for_the_lab_url_only",
         "tests/ci_lab/test_worktrees.py::test_the_lab_remote_comes_from_the_environment_and_never_shows_its_token",
+        "tests/ci_lab/test_executors.py::test_a_worker_cuts_the_tree_of_a_head_only_the_lab_remote_holds",
+        "tests/ci_lab/test_executors.py::test_a_worker_never_asks_a_lab_remote_its_repository_does_not_name",
         "tests/ci_lab/test_scheduler.py::test_a_grade_ref_head_posts_no_check_run_and_keeps_each_check_s_conclusion_for_the_relay",
         "tests/ci_lab/test_scheduler.py::test_a_grade_ref_head_held_in_its_quiet_window_keeps_its_ref",
         "tests/ci_lab/test_scheduler.py::test_a_held_head_takes_the_grade_ref_it_arrives_again_with_and_keeps_one_it_holds",
