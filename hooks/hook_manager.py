@@ -1308,12 +1308,12 @@ def _credential_guard(payload: dict, tool_name: str) -> tuple[dict, str] | None:
     return _credential_rewrite
 
 
-def _input_rewrite(payload: dict, tool_name: str) -> tuple[dict, str] | None:
+def _input_rewrite(payload: dict[str, Any], tool_name: str) -> tuple[dict[str, Any], str] | None:
     """The credential guard's rewrite, else the calling agent's own Serena root where Claude applies a rewrite.
 
     The patch rides an allow decision, so it is emitted only under bypass permissions, where no prompt is skipped.
     """
-    rewrite = _credential_guard(payload, tool_name)
+    rewrite: tuple[dict[str, Any], str] | None = _credential_guard(payload, tool_name)
     if rewrite is not None or not tool_name.startswith("mcp__serena__"):
         return rewrite
     from hooks.context.serena_binding import rewrite as serena_rewrite

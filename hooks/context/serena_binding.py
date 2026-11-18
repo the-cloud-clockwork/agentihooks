@@ -49,7 +49,8 @@ def root_for(session_id: str, agent_id: str) -> str:
         roots = client.hgetall(_key(session_id))
     except RedisError:
         return ""
-    return roots.get(agent_id) or roots.get("") or ""
+    root = roots.get(agent_id) or roots.get("")
+    return root if isinstance(root, str) else ""
 
 
 def rewrite(payload: dict[str, Any]) -> dict[str, str] | None:
@@ -60,7 +61,8 @@ def rewrite(payload: dict[str, Any]) -> dict[str, str] | None:
         return None
     agent_id = payload.get("agent_id") or ""
     if tool_name == ACTIVATE:
-        record(session_id, agent_id, str((payload.get("tool_input") or {}).get("project")))
+        tool_input: dict[str, Any] = payload.get("tool_input") or {}
+        record(session_id, agent_id, str(tool_input.get("project")))
         return None
     root = root_for(session_id, agent_id)
     return {ROOT_ARG: root} if root else None
