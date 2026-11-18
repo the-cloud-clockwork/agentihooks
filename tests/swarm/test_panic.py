@@ -1988,6 +1988,7 @@ def test_panic_freezes_a_deploy_behind_kubectl_helm_argocd_or_gh_global_options(
         "gh api -H 'Accept: application/vnd.github+json' https://api.github.com/repos/o/r/dispatches/",
         "gh api --input body.json repos/o/r/actions/workflows/7/dispatches",
         "gh api repos/o/r/dispatches?per_page=1",
+        "gh api --paginate repos/o/r/actions/workflows/ci.yml/dispatches",
     ],
 )
 @pytest.mark.feature("panic-freeze-global-options")
@@ -2022,6 +2023,7 @@ def test_a_fix_branch_session_stays_frozen_for_a_gh_api_dispatch(
         "gh api repos/o/r/actions/runs -q .dispatches",
         "gh api -X POST --paginate",
         "gh api repos/o/r/dispatchesX",
+        "gh api --paginate -X",
     ],
 )
 @pytest.mark.feature("panic-freeze-global-options")
