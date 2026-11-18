@@ -166,7 +166,8 @@ def test_the_step_runs_with_the_grader_and_base_trees_bound_read_only(
 def test_a_step_cannot_write_into_the_grader_or_base_tree(
     tmp_path: Path, settings: run_static.Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("PATH", os.environ["PATH"].removeprefix(f"{tmp_path / 'bin'}{os.pathsep}"))
+    folders = os.environ["PATH"].split(os.pathsep)
+    monkeypatch.setenv("PATH", os.pathsep.join(folder for folder in folders if folder != str(tmp_path / "bin")))
     bwrap = shutil.which("bwrap")
     probe = [str(bwrap), "--dev-bind", "/", "/", "--unshare-net", "true"]
     if bwrap is None or subprocess.run(probe, capture_output=True, check=False).returncode != 0:
