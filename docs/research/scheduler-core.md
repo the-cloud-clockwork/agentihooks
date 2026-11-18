@@ -1,3 +1,9 @@
+---
+title: Scheduler core engine choice
+parent: Research
+nav_order: 2
+---
+
 # Scheduler core engine choice
 
 AgentiHooks uses a small asyncio runner with Redis schedule and delivery state, and the maintained `croniter` pip dependency for cron expressions. APScheduler was evaluated with its Redis job store. It provides scheduling and coalescing, but its execution and persistence boundaries do not provide the durable signal delivery required here.

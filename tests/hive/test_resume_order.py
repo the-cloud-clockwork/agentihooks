@@ -35,10 +35,11 @@ def _ack(redis: Any, order: Any) -> dict[str, Any]:
 def test_the_hive_spawns_the_resume_order_process_with_the_encoded_order(
     redis: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from scripts.hive import orders
+    from scripts.hive import dispatch, orders
 
     spawned = Mock()
     monkeypatch.setattr(orders.subprocess, "Popen", spawned)
+    monkeypatch.setattr(dispatch, "_resumes", [])
     order = _order()
     orders.Consumer(redis, HIVE, Mock())._spawn_resume(order)
     assert spawned.call_args.args[0] == [sys.executable, "-m", "scripts.hive.resume_order", HIVE, order.encode()]

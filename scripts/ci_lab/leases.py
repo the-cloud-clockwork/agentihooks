@@ -6,10 +6,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from scripts.ci_lab.outcomes import COMPLETED
+from scripts.ci_lab.pods import Pods, unmanaged
 from scripts.ci_lab.queue import Queue
 from scripts.ci_lab.units import Unit
 
-__all__ = ["REQUEUES", "Grant", "Leases"]
+__all__ = ["REQUEUES", "Grant", "Leases", "release"]
 
 REQUEUES = 1
 
@@ -22,6 +23,8 @@ class Grant:
     unit: Unit
     slots: int
     expires_ms: int
+    base: str = ""
+    grader: str = ""
 
 
 @dataclass
@@ -31,9 +34,19 @@ class Leases:
     clock: Callable[[], int]
     sleep: Callable[[int], None]
     poll_ms: int
+    pods: Pods = unmanaged
 
     def lease(self, worker: str, free_slots: int, capabilities: frozenset[str], wait_ms: int) -> list[Grant]:
-        """Grant fitting pending jobs, polling until some are granted or the wait ends."""
+        """Grant fitting pending jobs, polling until some are granted or the wait ends; the worker's offer is its free
+        slots while it waits and what its grants leave once it returns, and a poll that grants marks its pod busy."""
+        self.queue.offer(worker, free_slots, self.clock())
+        grants = self._poll(worker, free_slots, capabilities, wait_ms)
+        self.queue.offer(worker, free_slots - sum(grant.slots for grant in grants), self.clock())
+        if grants:
+            self.pods(worker, True)
+        return grants
+
+    def _poll(self, worker: str, free_slots: int, capabilities: frozenset[str], wait_ms: int) -> list[Grant]:
         deadline = self.clock() + wait_ms
         while not (grants := self._take(worker, free_slots, capabilities)):
             left = deadline - self.clock()
@@ -54,7 +67,9 @@ class Leases:
             expires_ms = self.clock() + self.ttl_ms
             if not job.requirement.capabilities <= capabilities or not self.queue.claim(job, worker, token, expires_ms):
                 continue
-            grants.append(Grant(job_id, token, job.head, job.unit, job.requirement.slots, expires_ms))
+            grants.append(
+                Grant(job_id, token, job.head, job.unit, job.requirement.slots, expires_ms, job.base, job.grader)
+            )
             free_slots -= job.requirement.slots
         return grants
 
@@ -73,7 +88,10 @@ class Leases:
         if outcome not in COMPLETED:
             return False
         record = self.queue.job(job)
-        return record is not None and self.queue.finish(record, token, outcome)
+        if record is None or not self.queue.finish(record, token, outcome):
+            return False
+        release(self.queue, self.pods, record.worker)
+        return True
 
     def reap(self, now_ms: int) -> list[tuple[str, str]]:
         """Requeue each expired lease once; a job that expires again is lost."""
@@ -82,4 +100,14 @@ class Leases:
             record = self.queue.job(job)
             if record is not None and (state := self.queue.reap(record, now_ms, REQUEUES)):
                 reaped.append((job, state))
+                release(self.queue, self.pods, record.worker)
         return reaped
+
+
+def release(queue: Queue, pods: Pods, worker: str) -> None:
+    """Clear the deletion cost of the worker's pod once the worker holds no live lease, and mark it busy again when a
+    grant landed while the clear was in flight."""
+    if not queue.holds(worker):
+        pods(worker, False)
+        if queue.holds(worker):
+            pods(worker, True)

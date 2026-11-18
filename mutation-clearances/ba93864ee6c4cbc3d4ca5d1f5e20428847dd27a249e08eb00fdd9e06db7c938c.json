@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/scheduler.py:scripts.ci_lab.scheduler.x_build:959ff31f6e047c37c8cb8d441886fab99db0b7ebfd4953de7dc454ab87a091a5": {
+    "reader": "standards_reader",
+    "reason": "Store.get reads only self.client (the disabled set and the verdict index key); the expander is handed only the bound get, so the objects argument is never reached on that path."
+  }
+}

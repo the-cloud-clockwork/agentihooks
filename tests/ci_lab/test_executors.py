@@ -1,0 +1,595 @@
+import hashlib
+import json
+import signal
+import subprocess
+import time
+from collections.abc import Callable, Iterator
+from functools import partial
+from pathlib import Path
+from typing import Any, cast
+
+import pytest
+
+from scripts import ci_wiring
+from scripts.ci_lab import contract, executors, run_static, run_tests, static_gates, venvs, worker
+from scripts.ci_lab.outcomes import FAILED, PASSED
+from scripts.ci_lab.sandbox import CannotRun, Outcome, PortAllocator, PortRange
+from scripts.ci_lab.units import Unit
+from scripts.ci_lab.worker import Finished, Lease
+from scripts.ci_lab.worktrees import Mirror, Worktrees
+
+WORKFLOW = """
+on: pull_request
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint check
+        run: python -m ruff check scripts/
+      - name: Format check
+        run: python -m ruff format --check scripts/
+"""
+REGISTRY = {"lint/lint-check": {"paths": ["scripts"], "tools": ["ruff"]}}
+OPTIONS = ["-q", "-p", "no:cacheprovider"]
+WHITELIST = {"LANG": "C"}
+GIT = ("git", "-c", "user.name=lab", "-c", "user.email=lab@example.invalid")
+
+
+class FakeWorktrees:
+    def __init__(self, trees: dict[str, Path], broken: str = "") -> None:
+        self.trees = trees
+        self.broken = broken
+        self.calls: list[tuple[str, object]] = []
+
+    def lease(self, head: str) -> Path:
+        if head == self.broken:
+            raise RuntimeError(head)
+        self.calls.append(("lease", head))
+        return self.trees[head]
+
+    def release(self, head: str) -> None:
+        self.calls.append(("release", head))
+
+    def own(self, head: str) -> Path:
+        self.calls.append(("own", head))
+        return self.trees[head]
+
+    def drop(self, tree: Path) -> None:
+        self.calls.append(("drop", tree))
+
+
+class Recorder:
+    def __init__(self, answer: object) -> None:
+        self.answer = answer
+        self.calls: list[tuple[object, ...]] = []
+
+    def __call__(self, *args: object) -> object:
+        self.calls.append(args)
+        if isinstance(self.answer, Exception):
+            raise self.answer
+        return self.answer
+
+
+class Box:
+    def __init__(self, scripted: list[tuple[int | None, dict[str, Any] | None]], logs: Path) -> None:
+        self.scripted = scripted
+        self.logs = logs
+        self.made: list[tuple[object, ...]] = []
+        self.requests: list[dict[str, Any]] = []
+        self.runs: list[tuple[list[str], float]] = []
+
+    def __call__(self, root: Path, cwd: Path, ports: PortAllocator, whitelist: dict[str, str]) -> "Box":
+        self.made.append((root, cwd, ports, whitelist))
+        return self
+
+    def run(self, argv: list[str], timeout: float) -> Outcome:
+        self.requests.append(json.loads(Path(argv[3]).read_text()))
+        self.runs.append((argv, timeout))
+        code, result = self.scripted.pop(0)
+        if result is not None:
+            Path(argv[4]).write_text(json.dumps(result))
+        return Outcome(code=code, log=self.logs / f"log{len(self.runs)}.txt")
+
+
+def ticking(*values: float) -> Callable[[], float]:
+    readings: Iterator[float] = iter(values)
+    return lambda: next(readings)
+
+
+def pod_of(root: Path, trees: FakeWorktrees) -> executors.Pod:
+    pod = executors.Pod(
+        executors.Trees(cast("Worktrees", trees)),
+        root / "pod",
+        PortAllocator(1, 10, 10),
+        WHITELIST,
+        30.0,
+        ticking(10, 12.5),
+    )
+    pod.runs.mkdir(parents=True)
+    return pod
+
+
+def lease(kind: str, key: str, members: tuple[str, ...], slots: int = 1) -> Lease:
+    return Lease("job", "tok", "h1", Unit(kind, key, members), slots, 1500, "b1", "g1")
+
+
+def folder(root: Path, name: str, files: dict[str, str]) -> Path:
+    tree = root / name
+    for path, text in files.items():
+        (tree / path).parent.mkdir(parents=True, exist_ok=True)
+        (tree / path).write_text(text)
+    return tree
+
+
+def report(finished: Finished, pod: executors.Pod) -> dict[str, Any]:
+    assert finished.report.name == "report.json"
+    assert finished.report.parent.parent == pod.runs
+    return json.loads(finished.report.read_text())
+
+
+@pytest.fixture
+def venv(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Recorder:
+    recorder = Recorder(tmp_path / "venv")
+    monkeypatch.setattr(executors.venvs, "venv_for", recorder)
+    return recorder
+
+
+@pytest.fixture
+def static_trees(tmp_path: Path) -> FakeWorktrees:
+    head = folder(tmp_path, "head", {"uv.lock": "lock-h"})
+    base = folder(tmp_path, "base", {"uv.lock": "lock-b"})
+    grader = folder(
+        tmp_path,
+        "grader",
+        {".github/workflows/test.yml": WORKFLOW, ".github/input-keys.json": json.dumps(REGISTRY), "uv.lock": "lock-g"},
+    )
+    return FakeWorktrees({"h1": head, "b1": base, "g1": grader})
+
+
+@pytest.mark.feature("lab-worker-executors")
+def test_static_runs_the_gate_the_grader_tree_names_over_the_head_with_its_base_and_grader_trees(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, venv: Recorder, static_trees: FakeWorktrees
+) -> None:
+    gates = {found.name: found for found in static_gates.discover(WORKFLOW, REGISTRY)}
+    name = sorted(gates)[1]
+    summary = folder(tmp_path, "run", {"summary.md": "ok\n"}) / "summary.md"
+    ran = Recorder(run_static.Result(name, 0, tmp_path / "log.txt", summary))
+    monkeypatch.setattr(executors.run_static, "run", ran)
+    pod = pod_of(tmp_path, static_trees)
+
+    finished = executors.static(pod, lease("static", "k", (name,)))
+
+    head, base, grader = (static_trees.trees[sha] for sha in ("h1", "b1", "g1"))
+    assert len(gates) == 2
+    assert venv.calls == [
+        (hashlib.sha256(b"lock-h").hexdigest(), head, pod.root / "venvs", venvs.Build(pod.ports, WHITELIST, 30.0))
+    ]
+    settings = run_static.Settings(pod.runs, tmp_path / "venv", pod.ports, WHITELIST, 30.0, {"inputs.base": "b1"})
+    assert ran.calls == [(gates[name], head, base, grader, settings)]
+    assert finished == Finished(PASSED, finished.report, tmp_path / "log.txt")
+    assert report(finished, pod) == {"gate": name, "code": 0, "skipped": False, "summary": "ok\n", "seconds": 2.5}
+    assert static_trees.calls == [
+        ("lease", "h1"),
+        ("lease", "b1"),
+        ("lease", "g1"),
+        ("release", "h1"),
+        ("release", "b1"),
+        ("release", "g1"),
+    ]
+
+
+@pytest.mark.feature("lab-worker-executors")
+@pytest.mark.parametrize(
+    ("code", "skipped", "outcome"), [(1, False, FAILED), (None, False, FAILED), (None, True, PASSED)]
+)
+def test_static_answers_the_gates_verdict(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    venv: Recorder,
+    static_trees: FakeWorktrees,
+    code: int | None,
+    skipped: bool,
+    outcome: str,
+) -> None:
+    summary = folder(tmp_path, "run", {"summary.md": ""}) / "summary.md"
+    result = run_static.Result("lint/lint-check", code, tmp_path / "log.txt", summary, skipped)
+    monkeypatch.setattr(executors.run_static, "run", Recorder(result))
+    pod = pod_of(tmp_path, static_trees)
+
+    finished = executors.static(pod, lease("static", "k", ("lint/lint-check",)))
+
+    assert finished.outcome == outcome
+    assert (report(finished, pod)["code"], report(finished, pod)["skipped"]) == (code, skipped)
+
+
+@pytest.mark.feature("lab-worker-executors")
+def test_static_releases_every_tree_it_leased_when_a_lease_or_the_gate_raises(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, venv: Recorder, static_trees: FakeWorktrees
+) -> None:
+    monkeypatch.setattr(executors.run_static, "run", Recorder(RuntimeError("gate")))
+    pod = pod_of(tmp_path, static_trees)
+    with pytest.raises(RuntimeError, match="^gate$"):
+        executors.static(pod, lease("static", "k", ("lint/lint-check",)))
+    assert [call for call in static_trees.calls if call[0] == "release"] == [
+        ("release", "h1"),
+        ("release", "b1"),
+        ("release", "g1"),
+    ]
+
+    static_trees.calls.clear()
+    static_trees.broken = "b1"
+    with pytest.raises(RuntimeError, match="^b1$"):
+        executors.static(pod, lease("static", "k", ("lint/lint-check",)))
+    assert static_trees.calls == [("lease", "h1"), ("release", "h1")]
+
+
+def test_gate_refuses_a_name_the_grader_workflow_does_not_run(static_trees: FakeWorktrees) -> None:
+    with pytest.raises(KeyError):
+        executors.gate(static_trees.trees["g1"], "lint/missing")
+
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.mark.feature("lab-reusable-workflow-gates")
+def test_gate_returns_a_gate_of_a_reusable_workflow_the_real_tests_workflow_calls() -> None:
+    registry = json.loads((ROOT / static_gates.REGISTRY).read_text())
+    gates = static_gates.discover((ROOT / static_gates.WORKFLOW).read_text(), registry, ci_wiring.load(ROOT))
+    semgrep = next(gate for gate in gates if gate.job.startswith("semgrep/"))
+    assert executors.gate(ROOT, semgrep.name) == semgrep
+
+
+@pytest.mark.feature("lab-worker-executors")
+def test_tests_runs_the_batch_on_the_lockfile_venv_with_the_manifest_and_flake_ledger(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, venv: Recorder
+) -> None:
+    tree = folder(tmp_path, "head", {"uv.lock": "lock-h"})
+    manifest = {"tests": {"tests/a.py::t": {"files": ["scripts/a.py"]}}}
+    suite = executors.Suite(
+        folder(tmp_path, "in", {"manifest.json": json.dumps(manifest)}) / "manifest.json", tmp_path / "flakes.jsonl"
+    )
+    verdict = run_tests.Verdict(
+        PASSED, True, ("x.txt",), {"tests/a.py::t": 0.5}, 2, tmp_path / "log.txt", tmp_path / "cov"
+    )
+    ran = Recorder(verdict)
+    monkeypatch.setattr(executors.run_tests, "run", ran)
+    trees = FakeWorktrees({"h1": tree})
+    pod = pod_of(tmp_path, trees)
+
+    finished = executors.tests(pod, suite, lease("test", "k", ("tests/a.py::t",), slots=3))
+
+    assert venv.calls == [
+        (hashlib.sha256(b"lock-h").hexdigest(), tree, pod.root / "venvs", venvs.Build(pod.ports, WHITELIST, 30.0))
+    ]
+    lab = run_tests.Lab(pod.runs, pod.ports, WHITELIST, manifest, tmp_path / "flakes.jsonl", 30.0, False)
+    assert ran.calls == [(("tests/a.py::t",), tree, tmp_path / "venv", 3, lab)]
+    assert finished == Finished(PASSED, finished.report, tmp_path / "log.txt")
+    assert report(finished, pod) == {
+        "flaky": True,
+        "outside": ["x.txt"],
+        "durations": {"tests/a.py::t": 0.5},
+        "attempts": 2,
+        "seconds": 2.5,
+    }
+    assert trees.calls == [("lease", "h1"), ("release", "h1")]
+
+
+@pytest.fixture
+def mutation_tree(tmp_path: Path) -> Path:
+    tree = folder(
+        tmp_path,
+        "mutation",
+        {
+            "pyproject.toml": '[tool.mutmut]\nsource_paths = ["scripts/", "hooks/pkg"]\n',
+            "hooks/pkg/gamma.py": "",
+            "hooks/pkgold/delta.py": "",
+            "uv.lock": "lock-m",
+            "scripts/alpha.py": "def first():\n    return 1\n",
+            "scripts/pkg/__init__.py": "",
+            "scripts/notes.txt": "",
+            "hooks/beta.py": "",
+            "hooks/test_hook.py": "",
+            "tests/helper.py": "",
+            "tests/test_alpha.py": "",
+            "tests/unit/test_beta.py": "",
+            "tests/unit/test_data.json": "",
+        },
+    )
+    subprocess.run([*GIT, "init", "-q", str(tree)], check=True)
+    subprocess.run([*GIT, "-C", str(tree), "add", "."], check=True)
+    subprocess.run([*GIT, "-C", str(tree), "commit", "-q", "-m", "tree"], check=True)
+    return tree
+
+
+@pytest.fixture
+def trampolines(monkeypatch: pytest.MonkeyPatch) -> Recorder:
+    recorder = Recorder(None)
+    monkeypatch.setattr(executors.run_mutation, "trampoline", recorder)
+    return recorder
+
+
+def mutation_settings(tmp_path: Path) -> executors.Mutation:
+    return executors.Mutation(tmp_path / "cache", tmp_path / "killers.json", 60.0, 4)
+
+
+@pytest.mark.feature("lab-worker-executors")
+def test_mutation_runs_a_stats_unit_with_its_tree_as_root_and_the_stats_cache(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, venv: Recorder, mutation_tree: Path, trampolines: Recorder
+) -> None:
+    stats = {"stats": [{"status": 0, "tests": {}, "durations": {}, "cpu": 1.0}]}
+    box = Box([(0, stats)], tmp_path)
+    monkeypatch.setattr(executors, "Sandbox", box)
+    trees = FakeWorktrees({"h1": mutation_tree})
+    pod = pod_of(tmp_path, trees)
+
+    finished = executors.mutation(pod, mutation_settings(tmp_path), lease("stats", "k1", ("tests/test_alpha.py",)))
+
+    assert venv.calls == [
+        (
+            hashlib.sha256(b"lock-m").hexdigest(),
+            mutation_tree,
+            pod.root / "venvs",
+            venvs.Build(pod.ports, WHITELIST, 30.0),
+        )
+    ]
+    assert trampolines.calls == [
+        (mutation_tree, "hooks/pkg/gamma.py"),
+        (mutation_tree, "scripts/alpha.py"),
+        (mutation_tree, "scripts/pkg/__init__.py"),
+    ]
+    assert box.requests == [
+        {
+            "kind": "stats",
+            "key": "k1",
+            "options": OPTIONS,
+            "root": str(mutation_tree),
+            "cache": str(tmp_path / "cache"),
+            "members": ["tests/test_alpha.py"],
+        }
+    ]
+    [(argv, timeout)] = box.runs
+    assert argv[:3] == [str(tmp_path / "venv" / "bin" / "python"), "-m", "scripts.ci_lab.run_mutation"]
+    assert (Path(argv[3]).name, Path(argv[4]).name, Path(argv[3]).parent.parent) == (
+        "request.json",
+        "result.json",
+        pod.runs,
+    )
+    assert timeout == 30.0
+    assert box.made == [(pod.runs, mutation_tree, pod.ports, WHITELIST)]
+    assert finished == Finished(PASSED, finished.report, tmp_path / "log1.txt")
+    assert report(finished, pod) == {**stats, "seconds": 2.5}
+    assert trees.calls == [("own", "h1"), ("drop", mutation_tree)]
+
+
+@pytest.mark.feature("lab-worker-executors")
+def test_mutation_grades_a_mutant_unit_with_the_tests_its_trees_stats_show_reaching_its_function(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, venv: Recorder, mutation_tree: Path, trampolines: Recorder
+) -> None:
+    durations = {"tests/test_alpha.py::test_a": 0.5, "tests/unit/test_beta.py::test_b": 0.25}
+    reached = {"scripts.alpha.x_first": ["tests/test_alpha.py::test_a"], "scripts.alpha.x_second": ["x"]}
+    stats = {"stats": [{"status": 0, "tests": reached, "durations": durations, "cpu": 1.0}]}
+    members = ("scripts.alpha.x_first__mutmut_1", "scripts.alpha.x_first__mutmut_2")
+    graded = {
+        "collection_seconds": 0.1,
+        "rows": [{"name": name, "status": "killed", "seconds": 0.2} for name in members],
+    }
+    box = Box([(0, stats), (0, graded)], tmp_path)
+    monkeypatch.setattr(executors, "Sandbox", box)
+    pod = pod_of(tmp_path, FakeWorktrees({"h1": mutation_tree}))
+
+    finished = executors.mutation(pod, mutation_settings(tmp_path), lease("mutant", "m1", members))
+
+    assert box.requests == [
+        {
+            "kind": "stats",
+            "key": "m1",
+            "options": OPTIONS,
+            "root": str(mutation_tree),
+            "cache": str(tmp_path / "cache"),
+            "members": ["tests/test_alpha.py", "tests/unit/test_beta.py"],
+        },
+        {
+            "kind": "mutant",
+            "key": "m1",
+            "options": OPTIONS,
+            "members": list(members),
+            "killers": str(tmp_path / "killers.json"),
+            "tests": {"tests/test_alpha.py::test_a": 0.5},
+            "budget": 60.0,
+            "cap": 4,
+        },
+    ]
+    assert box.made == [(pod.runs, mutation_tree, pod.ports, WHITELIST)] * 2
+    assert finished == Finished(PASSED, finished.report, tmp_path / "log2.txt")
+    assert report(finished, pod) == {**graded, "seconds": 2.5}
+
+
+@pytest.mark.feature("lab-worker-executors")
+@pytest.mark.parametrize(
+    ("scripted", "runs", "log"),
+    [
+        ([(1, None)], 1, "log1.txt"),
+        ([(None, None)], 1, "log1.txt"),
+        ([(0, {"stats": []}), (1, None)], 2, "log2.txt"),
+        ([(0, {"stats": []}), (0, {"rows": [{"name": "m", "status": "survived", "seconds": 0.1}]})], 2, "log2.txt"),
+        ([(0, {"stats": []}), (0, {"rows": [{"name": "m", "status": "no tests", "seconds": 0.0}]})], 2, "log2.txt"),
+    ],
+)
+@pytest.mark.usefixtures("venv", "trampolines")
+def test_mutation_fails_a_mutant_unit_whose_runner_fails_or_whose_mutant_lives(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    mutation_tree: Path,
+    scripted: list[tuple[int | None, dict[str, Any] | None]],
+    runs: int,
+    log: str,
+) -> None:
+    results = [result for _, result in scripted]
+    box = Box(list(scripted), tmp_path)
+    monkeypatch.setattr(executors, "Sandbox", box)
+    trees = FakeWorktrees({"h1": mutation_tree})
+    pod = pod_of(tmp_path, trees)
+
+    finished = executors.mutation(
+        pod, mutation_settings(tmp_path), lease("mutant", "m1", ("scripts.alpha.x_first__mutmut_1",))
+    )
+
+    assert finished == Finished(FAILED, finished.report, tmp_path / log)
+    assert len(box.runs) == runs
+    assert report(finished, pod) == {**(results[-1] or {}), "seconds": 2.5}
+    assert trees.calls == [("own", "h1"), ("drop", mutation_tree)]
+
+
+@pytest.mark.feature("lab-worker-executors")
+def test_mutation_drops_its_private_tree_when_the_runner_raises(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, venv: Recorder, mutation_tree: Path, trampolines: Recorder
+) -> None:
+    monkeypatch.setattr(executors, "Sandbox", Recorder(CannotRun("no bwrap")))
+    trees = FakeWorktrees({"h1": mutation_tree})
+
+    with pytest.raises(CannotRun, match="^no bwrap$"):
+        executors.mutation(
+            pod_of(tmp_path, trees), mutation_settings(tmp_path), lease("stats", "k", ("tests/test_alpha.py",))
+        )
+
+    assert trees.calls == [("own", "h1"), ("drop", mutation_tree)]
+
+
+@pytest.mark.feature("lab-worker-executors")
+def test_covering_takes_each_test_a_stats_record_shows_reaching_the_function_with_its_seconds() -> None:
+    records = [
+        {"tests": {"f": ["a", "b"], "g": ["c"]}, "durations": {"a": 1.0, "b": 2.0, "c": 3.0}},
+        {"tests": {"f": ["d"]}, "durations": {"d": 4.0}},
+        {"tests": {}, "durations": {}},
+    ]
+
+    assert executors.covering(records, "f") == {"a": 1.0, "b": 2.0, "d": 4.0}
+    assert executors.covering(records, "h") == {}
+
+
+@pytest.mark.feature("lab-worker-executors")
+def test_function_of_names_the_function_a_mutant_mutates() -> None:
+    assert executors.function_of("scripts.alpha.xǁQueueǁenqueue__mutmut_12") == "scripts.alpha.xǁQueueǁenqueue"
+    assert executors.function_of("scripts.alpha.x_a__mutmut_b__mutmut_3") == "scripts.alpha.x_a__mutmut_b"
+
+
+def test_the_tracked_listing_refuses_a_tree_git_cannot_read(tmp_path: Path) -> None:
+    with pytest.raises(subprocess.CalledProcessError):
+        executors._tracked(folder(tmp_path, "plain", {"a.py": ""}))  # pyright: ignore[reportPrivateUsage]
+
+
+@pytest.mark.feature("lab-worker-executors")
+def test_executors_name_the_adapter_of_every_unit_kind(tmp_path: Path) -> None:
+    pod = pod_of(tmp_path, FakeWorktrees({}))
+    suite = executors.Suite(tmp_path / "manifest.json", tmp_path / "flakes.jsonl")
+    graded = mutation_settings(tmp_path)
+
+    found = executors.executors(pod, suite, graded)
+
+    assert {kind: parts(adapter) for kind, adapter in found.items()} == {
+        "static": (executors.static, (pod,)),
+        "test": (executors.tests, (pod, suite)),
+        "stats": (executors.mutation, (pod, graded)),
+        "mutant": (executors.mutation, (pod, graded)),
+    }
+
+
+def parts(adapter: object) -> tuple[object, tuple[object, ...]]:
+    assert isinstance(adapter, partial)
+    return adapter.func, adapter.args
+
+
+def environ_of(tmp_path: Path) -> dict[str, str]:
+    return {
+        contract.SCHEDULER_URL: "http://scheduler:8800",
+        contract.GIT_MIRROR: str(tmp_path / "node"),
+        contract.WORK_ROOT: str(tmp_path / "work"),
+        contract.MANIFEST: str(tmp_path / "manifest.json"),
+        contract.FLAKES: str(tmp_path / "flakes.jsonl"),
+        contract.MUTATION_CACHE: str(tmp_path / "cache"),
+        contract.KILLERS: str(tmp_path / "killers.json"),
+        contract.MUTATION_BUDGET: "90.5",
+        contract.MUTATION_CAP: "3",
+    }
+
+
+@pytest.mark.feature("lab-worker-executors")
+def test_settings_read_the_worker_contract_environment(tmp_path: Path) -> None:
+    pod, suite, graded = executors.settings({**environ_of(tmp_path), "OTHER": "x"})
+
+    work = tmp_path / "work"
+    assert pod.trees.worktrees.mirror == Mirror(tmp_path / "node", work / "store", str(tmp_path / "node"))
+    assert (pod.trees.worktrees.root, pod.trees.worktrees.capacity) == (work / "trees", 8)
+    assert (pod.root, pod.whitelist, pod.timeout, pod.clock) == (work, {"LANG": "C.UTF-8"}, 1800.0, time.monotonic)
+    assert (work / "runs").is_dir() and (work / "venvs").is_dir()
+    assert executors.settings(environ_of(tmp_path))[0].root == work
+    assert suite == executors.Suite(tmp_path / "manifest.json", tmp_path / "flakes.jsonl")
+    assert graded == executors.Mutation(tmp_path / "cache", tmp_path / "killers.json", 90.5, 3)
+    ranges: list[PortRange] = []
+    with pytest.raises(CannotRun):
+        while True:
+            ranges.append(pod.ports.take())
+    assert (len(ranges), ranges[0], ranges[-1]) == (1000, PortRange(20000, 20009), PortRange(29990, 29999))
+
+
+def test_settings_refuse_a_redis_variable(tmp_path: Path) -> None:
+    with pytest.raises(worker.Refused):
+        executors.settings({**environ_of(tmp_path), "CI_LAB_REDIS_URL": "redis://x"})
+
+
+@pytest.mark.feature("lab-worker-executors")
+@pytest.mark.parametrize(("cpus", "slots"), [(4, 4), (None, 1)])
+def test_main_runs_the_worker_over_the_adapters_until_sigterm_stops_it(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path, cpus: int | None, slots: int
+) -> None:
+    class Service:
+        def __init__(self) -> None:
+            self.events: list[str] = []
+
+        def run(self) -> list[Lease]:
+            self.events.append("run")
+            handlers[signal.SIGTERM](signal.SIGTERM, None)
+            return []
+
+        def stop(self) -> None:
+            self.events.append("stop")
+
+    service = Service()
+    built: list[tuple[object, ...]] = []
+    handlers: dict[int, Callable[[int, object], None]] = {}
+
+    def build(*args: object) -> Service:
+        built.append(args)
+        return service
+
+    monkeypatch.setattr(executors.worker, "build", build)
+    monkeypatch.setattr(executors.signal, "signal", lambda number, handler: handlers.__setitem__(number, handler))
+    monkeypatch.setattr(executors.socket, "gethostname", lambda: "pod-1")
+    monkeypatch.setattr(executors.os, "cpu_count", lambda: cpus)
+    monkeypatch.setattr(executors.ci_cpu_quota, "quota_cpus", lambda: 2.0)
+    environ = environ_of(tmp_path)
+
+    assert executors.main([], environ) == 0
+
+    [(given, adapters, name, count, quota)] = built
+    assert (given, sorted(cast("dict[str, object]", adapters)), name, count, quota) == (
+        environ,
+        ["mutant", "static", "stats", "test"],
+        "pod-1",
+        slots,
+        2.0,
+    )
+    found = {kind: parts(adapter) for kind, adapter in cast("dict[str, object]", adapters).items()}
+    static_pod = cast("executors.Pod", found["static"][1][0])
+    suite = executors.Suite(tmp_path / "manifest.json", tmp_path / "flakes.jsonl")
+    graded = executors.Mutation(tmp_path / "cache", tmp_path / "killers.json", 90.5, 3)
+    assert static_pod.root == tmp_path / "work"
+    assert found["test"] == (executors.tests, (static_pod, suite))
+    assert found["mutant"] == (executors.mutation, (static_pod, graded))
+    assert service.events == ["run", "stop"]
+    with pytest.raises(SystemExit):
+        executors.main(["--unknown"], environ)
+    assert capsys.readouterr().err == (
+        "usage: agentihooks ci-lab-worker [-h]\nagentihooks ci-lab-worker: error: unrecognized arguments: --unknown\n"
+    )

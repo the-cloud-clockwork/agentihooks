@@ -148,7 +148,7 @@ if [[ $refused != *'"reason": "project_unpermitted"'* || $refused != *'"removed"
 fi
 pod="$(python3 -c 'import json, sys; print(json.loads(sys.argv[1])["pod"])' "$refused")"
 execution="$(python3 -c 'import json, sys; print(json.loads(sys.argv[1])["execution"])' "$refused")"
-for _ in $(seq 60); do
+for _ in {1..60}; do
   kubectl get pod -n "$namespace" "$pod" >/dev/null 2>&1 || break
   sleep 1
 done

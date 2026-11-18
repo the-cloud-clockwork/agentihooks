@@ -21,7 +21,7 @@ bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/redis:7-alpin
 if [[ -n "${SWARM_SMOKE_IMAGE:-}" ]]; then
   docker tag "$SWARM_SMOKE_IMAGE" "$image"
 else
-  bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12-slim-bookworm
+  bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12.12-slim-bookworm
   docker build --progress=plain -t "$image" .
 fi
 docker network create "$run" >/dev/null
@@ -32,7 +32,7 @@ docker run -d --name "$run-hive" --network "$run" --user "$(id -u):$(id -g)" -v 
 docker run -d --name "$run-member" --network "$run" -v "$tls/cert.pem:/tls/cert.pem:ro" \
   -e AGENTIHOOKS_DEPLOYMENT=compose -e SSL_CERT_FILE=/tls/cert.pem "$image" sleep infinity >/dev/null
 ready=""
-for _ in $(seq 60); do
+for _ in {1..60}; do
   logs="$(docker logs "$run-hive" 2>&1)"
   if [[ $logs == *"hive endpoint on https://"* ]]; then
     ready=1
