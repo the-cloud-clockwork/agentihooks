@@ -22,6 +22,7 @@ REPO = "https://github.com/o/r"
         ("Refs #9", [{}], []),
         ("Closes #9", [{"issue_url": f"{REPO}/issues/5", "description": "Fix #99 and #90"}], [f"{REPO}/issues/9"]),
         ("Closes #9", [{"issue_url": "https://github.com/o/other/issues/9"}], [f"{REPO}/issues/9"]),
+        ("Closes #9", [{"issue_url": "https://githubXcom/o/r/issues/9"}], [f"{REPO}/issues/9"]),
         ("Closes #5. Fixes #9, fixes #9", [{"issue_url": f"{REPO}/issues/5"}], [f"{REPO}/issues/9"]),
     ],
 )
@@ -57,4 +58,7 @@ def test_refuse_unnamed_reads_each_group_member_issue_and_description() -> None:
     assert linked_issues.refuse_unnamed(URL, "Closes #5, closes #7, closes #9", row, members.__getitem__) is None
     with pytest.raises(SwarmError) as refused:
         linked_issues.refuse_unnamed(URL, "Closes #8", row, members.__getitem__)
-    assert str(refused.value).startswith(f"pull request {URL} closes {REPO}/issues/8, which")
+    assert str(refused.value) == (
+        f"pull request {URL} closes {REPO}/issues/8, which this task neither records nor names in its description: "
+        "drop the closing keyword from the body, or record the task's own issue with swarm issue"
+    )
