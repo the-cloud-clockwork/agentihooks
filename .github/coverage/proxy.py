@@ -22,14 +22,14 @@ def exchange(method: str, target: str, body: bytes | None, headers: dict[str, st
     while True:
         with IDLE_LOCK:
             pooled = IDLE.pop() if method == "GET" and IDLE else None
-        connection = pooled or upstream(origin)
+        connection = upstream(origin) if pooled is None else pooled
         try:
             connection.request(method, urlsplit(origin).path + target, body=body, headers=headers)
             response = connection.getresponse()
             payload = response.read()
         except Exception as error:
             connection.close()
-            if pooled is None or not isinstance(error, ConnectionError):
+            if pooled is None or not isinstance(error, OSError) or isinstance(error, TimeoutError):
                 raise
             continue
         if method == "GET" and not response.will_close:
