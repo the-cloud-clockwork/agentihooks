@@ -497,16 +497,12 @@ def describe_words(rest: str) -> list[str]:
 
 def describe_operands(words: list[str]) -> list[str]:
     """Positional words of a kubectl describe; a flag without =, unless a known boolean, consumes the next word."""
-    operands: list[str] = []
-    skip = False
-    for word in words:
-        if skip:
-            skip = False
-        elif word.startswith("-"):
-            skip = "=" not in word and word not in DESCRIBE_BOOLEAN_FLAGS
-        else:
-            operands.append(word)
-    return operands
+    taken = {
+        index + 1
+        for index, word in enumerate(words)
+        if word.startswith("-") and "=" not in word and word not in DESCRIBE_BOOLEAN_FLAGS
+    }
+    return [word for index, word in enumerate(words) if index not in taken and not word.startswith("-")]
 
 
 def hidden_type(operands: list[str]) -> bool:
