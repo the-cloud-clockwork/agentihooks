@@ -478,7 +478,7 @@ done
   `swarm waker-report` probes are `KILLED`. Before the pattern the test failed
   on the daemon probes ([Proofs run
   39369840962](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39369840962));
-  with it, [Mutation preflight
+  with it, [mutation run
   39369956185](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39369956185)
   passed.
 - `~/guard-config.json` links to the repository file, so the exclusion went

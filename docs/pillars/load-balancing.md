@@ -538,8 +538,8 @@ record noted `balance` showing that account `CLOSED` for workers with 39% of
 its week left and workers stopping at 60%. The agent then handed off through
 `init-agent --handoff` into an unseated session. Pull request
 [#5044](https://github.com/the-cloud-clockwork/agentihooks/pull/5044) added
-the stored closure and the seat handoff directive; its red Mutation
-preflight run 39357837089 failed the four new cases and Tests run
+the stored closure and the seat handoff directive; its red mutation
+run 39357837089 failed the four new cases and Tests run
 39363775886 passed on the final pull request head. Cases live in
 `tests/swarm/test_reserved_latch.py` and `tests/context/test_quota_policy.py`.
 
