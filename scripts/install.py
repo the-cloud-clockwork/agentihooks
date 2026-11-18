@@ -6105,16 +6105,6 @@ def _crew_doctor(argv: list[str]) -> bool:
     return argv[2] in COMMANDS
 
 
-def _add_ledger_subparsers(sub: argparse._SubParsersAction) -> None:
-    """Register the read only ledger page subcommand and its `api` write alias."""
-    sub.add_parser("ledger", help="Swarm ledger page: read only, plus new|serve|watch|chat|storage <args>")
-    sub.add_parser(
-        "api",
-        help="Swarm write API: --slug <slug> --as <name> task add|task set|comment|followup|relay|answer|"
-        "join|ack|alert|priority|phase|publish-plan|artifact <args> (same route code as `agentihooks ledger`)",
-    )
-
-
 def main() -> None:
     _argv = bundles.user_last(sys.argv[1:])
     if _argv[:1] == ["enforcement"] and "--local" in _argv[2:]:
@@ -6333,7 +6323,7 @@ def main() -> None:
     sub.add_parser("quota", help="One table for every Claude and Codex account")
     sub.add_parser("skill", help="Run skill evaluations with quota routed Claude authentication: eval -- <command>")
     sub.add_parser("serena", help="Run the Serena router: start|stop|restart|status|release <path>")
-    _add_ledger_subparsers(sub)
+    sub.add_parser("ledger", help="Swarm ledger page: read only; agentihooks api is the write agent CLI")
     sub.add_parser(
         "swarm",
         help="Swarm of agents over a swarm ledger: <id> create|start|pause|stop|set|status|send-message, list, tick",
