@@ -72,7 +72,7 @@ def test_hive_join_retries_the_redis_mirror_pull_before_starting_redis():
     start = 'docker run --pull never -d --name "$run-redis"'
     retry = (ROOT / "scripts/packaging/pull-runtime-image.sh").read_text()
     assert "attempts=3" in retry
-    assert 'for attempt in $(seq "$attempts"); do' in retry
+    assert "for ((attempt = 1; attempt <= attempts; attempt++)); do" in retry
     assert 'if acquire "$@"; then' in retry
     assert 'if (( attempt == attempts )); then\n    exit "$status"\n  fi' in retry
     assert 'delay="${PULL_RETRY_SECONDS:-10}"' in retry

@@ -142,7 +142,7 @@ PY
 
 live=""
 live_row="$member_id"$'\t'live$'\t'
-for _ in $(seq 60); do
+for _ in {1..60}; do
   live="$(docker exec "$run-member" agentihooks hive list 2>/dev/null || true)"
   if [[ $live == *"$live_row"* ]]; then
     break

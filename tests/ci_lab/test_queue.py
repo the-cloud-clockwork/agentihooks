@@ -50,6 +50,15 @@ def test_enqueue_records_pending_jobs_in_order_per_head(jobs: queue.Queue) -> No
     assert found(jobs, "h1:test:a").requirement == queue.Requirement(slots=1, capabilities=frozenset())
 
 
+@pytest.mark.feature("lab-worker-executors")
+def test_enqueue_stores_the_base_and_grader_revision_each_job_reads(jobs: queue.Queue) -> None:
+    jobs.enqueue([unit("a")], "h1", {}, "b1", "g1")
+    jobs.enqueue([unit("c")], "h2", {})
+
+    assert (found(jobs, "h1:test:a").base, found(jobs, "h1:test:a").grader) == ("b1", "g1")
+    assert (found(jobs, "h2:test:c").base, found(jobs, "h2:test:c").grader) == ("", "")
+
+
 def take(jobs: queue.Queue, job: str, worker: str = "w1", token: str = "tok", expires_ms: int = 100) -> bool:
     return jobs.claim(found(jobs, job), worker, token, expires_ms)
 
@@ -186,6 +195,30 @@ def test_reap_allows_more_attempts(jobs: queue.Queue) -> None:
     assert found(jobs, "h1:test:a").attempts == 2
     assert take(jobs, "h1:test:a")
     assert jobs.reap(record, 100, 2) == "lost"
+
+
+@pytest.mark.feature("lab-scheduler-test-units")
+def test_retry_moves_a_finished_job_back_to_pending_with_one_more_attempt(jobs: queue.Queue) -> None:
+    jobs.enqueue([unit("a"), unit("b")], "h1", {})
+    assert take(jobs, "h1:test:a")
+    record = found(jobs, "h1:test:a")
+    assert jobs.retry(record) is False
+    assert jobs.finish(record, "tok", "crash")
+
+    assert jobs.retry(record) is True
+    again = found(jobs, "h1:test:a")
+    assert (again.state, again.outcome, again.attempts, again.worker) == ("pending", "", 1, "")
+    assert jobs.token("h1:test:a") == ""
+    assert jobs.pending() == ["h1:test:b", "h1:test:a"]
+    assert jobs.members("h1", "pending") == {"h1:test:a", "h1:test:b"}
+    assert jobs.members("h1", "done") == set()
+    assert jobs.client.smembers("agentihooks-ci:queue:done") == set()
+    assert jobs.retry(record) is False
+
+    assert take(jobs, "h1:test:a", "w2", "t2")
+    assert jobs.finish(found(jobs, "h1:test:a"), "t2", "crash")
+    assert jobs.retry(record) is True
+    assert found(jobs, "h1:test:a").attempts == 2
 
 
 def test_every_key_carries_the_lab_prefix(jobs: queue.Queue, client) -> None:

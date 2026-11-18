@@ -4102,6 +4102,17 @@
       ]
     },
     {
+      "id": "packed-manifest-outside-files",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-packed-manifest-opened-files",
+      "behaviour": "The packed dependency manifest keeps each test record's outside list, the repository files the test opened that its manifest record leaves out, so the unpacked manifest the CI lab reads still names them and a record with outside files stays keyed on the measured tree. A record without the list unpacks without it, and a packed manifest in the three field layout still unpacks.",
+      "seam": "tests.dep_manifest.pack and tests.dep_manifest.unpack round trip, and scripts.ci_lab.expand_tests.fingerprints over a packed then unpacked manifest",
+      "tests": [
+        "tests/ci_lab/test_expand_tests.py::test_a_packed_then_unpacked_record_with_outside_files_stays_keyed_on_the_measured_tree",
+        "tests/test_dep_manifest.py::test_a_packed_manifest_keeps_each_test_outside_list_and_unpacks_the_three_field_layout"
+      ]
+    },
+    {
       "id": "gate-required-waits-for-aggregator",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2504",
@@ -7683,6 +7694,21 @@
       ]
     },
     {
+      "id": "swarm-park-unpushed-dependency-on-dev",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2634",
+      "behaviour": "Swarm park stacks a task on origin dev and records dev's merge base as its stacked base when an unclaimed dependency records a branch that origin answers it does not hold; a dependency branch origin holds keeps the merge base with origin's copy, and a missing branch on a claimed dependency or an unanswered origin probe still refuses the park.",
+      "seam": "swarm park in scripts.swarm.stack",
+      "rules": [
+        "park-fetches-unpushed-dependency-branch"
+      ],
+      "tests": [
+        "tests/swarm/test_stack.py::test_park_stacks_on_dev_when_an_unclaimed_dependency_records_a_branch_origin_lacks",
+        "tests/swarm/test_stack.py::test_park_keeps_the_dependency_base_when_origin_holds_an_unclaimed_dependency_branch",
+        "tests/swarm/test_stack.py::test_park_refuses_a_missing_dependency_branch_unless_origin_answers_for_an_unclaimed_dependency"
+      ]
+    },
+    {
       "id": "hive-loss-events-engine-only",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-hive-loss-engine-filter",
@@ -7988,6 +8014,39 @@
       ]
     },
     {
+      "id": "lab-head-missing-field-terminate",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-head-missing-field-terminate",
+      "behaviour": "The CI lab scheduler's bus inbox terminates a lab head envelope missing any head event field, logging the head's envelope id and the missing fields, and keeps reading the rest of the batch, so a malformed head is never left unacknowledged to be redelivered until the dead letter cap, whose publish the scheduler's bus grant refuses, which stopped the scheduler reading heads.",
+      "seam": "scripts.ci_lab.scheduler.BusInbox.heads over a fake bus consumer and its deliveries",
+      "tests": [
+        "tests/ci_lab/test_scheduler.py::test_the_bus_inbox_terminates_each_head_missing_a_field_with_a_logged_reason_and_reads_the_next_head"
+      ]
+    },
+    {
+      "id": "lab-scheduler-test-units",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2629",
+      "behaviour": "The CI lab scheduler expands test units, one per batch of dependency manifest tests keyed by their fingerprints on the head tree. A pull request or hotfix head gets none. A merge group head runs the interaction rule over its entries with the entry limit of the grader's delivery.yaml and the batches the verdict store holds, and runs only the batches holding an invalidated test unless a clause sends it to the whole suite. A promotion or backfill head runs every batch. A head that needs test units and has no stored manifest cannot expand. A finished unit whose outcome the retry policy allows another run goes back to pending with one more attempt, so a crashed worker's unit reruns once before it makes the grade red.",
+      "seam": "scripts.ci_lab.scheduler.MirrorExpander.expand over a git origin fixture, scripts.ci_lab.scheduler.StoredManifests over the local object store, scripts.ci_lab.expand_tests.units, scripts.ci_lab.queue.Queue.retry and scripts.ci_lab.scheduler.Scheduler.tick over fakeredis",
+      "tests": [
+        "tests/ci_lab/test_expand_tests.py::test_each_batch_is_one_test_unit_keyed_by_its_fingerprints_opened_files_and_toolchain",
+        "tests/ci_lab/test_queue.py::test_retry_moves_a_finished_job_back_to_pending_with_one_more_attempt",
+        "tests/ci_lab/test_scheduler.py::test_a_crashed_unit_reruns_while_the_lost_retries_allow_then_makes_the_grade_red",
+        "tests/ci_lab/test_scheduler.py::test_a_failed_unit_reruns_while_the_failed_retries_allow_and_its_pass_is_stored",
+        "tests/ci_lab/test_scheduler.py::test_a_pull_request_or_hotfix_head_expands_no_test_units",
+        "tests/ci_lab/test_scheduler.py::test_a_merge_group_head_runs_only_the_batches_its_entries_invalidate",
+        "tests/ci_lab/test_scheduler.py::test_a_merge_group_head_whose_entries_invalidate_no_test_runs_no_batch",
+        "tests/ci_lab/test_scheduler.py::test_a_merge_group_head_runs_every_batch_when_an_interaction_clause_holds",
+        "tests/ci_lab/test_scheduler.py::test_a_promotion_or_backfill_head_runs_every_batch_without_reading_the_cache",
+        "tests/ci_lab/test_scheduler.py::test_a_head_without_stored_durations_keeps_each_test_file_whole",
+        "tests/ci_lab/test_scheduler.py::test_a_head_that_needs_test_units_without_a_manifest_cannot_expand",
+        "tests/ci_lab/test_scheduler.py::test_a_merge_group_head_refuses_an_entry_limit_the_delivery_schema_refuses",
+        "tests/ci_lab/test_scheduler.py::test_a_head_whose_grader_delivery_breaks_its_schema_is_dropped_with_its_reason",
+        "tests/ci_lab/test_scheduler.py::test_stored_manifests_read_the_packed_manifest_of_the_nearest_stored_ancestor"
+      ]
+    },
+    {
       "id": "lab-scheduler-service",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-ci-lab-scheduler-service",
@@ -8008,6 +8067,16 @@
         "tests/ci_lab/test_queue.py::test_leased_lists_each_leased_job_and_offers_keep_each_workers_latest_free_slots",
         "tests/ci_lab/test_leases.py::test_a_lease_poll_offers_the_workers_free_slots_while_it_waits_and_what_its_grants_leave",
         "tests/test_swarm_packaging.py::test_the_swarm_image_carries_the_locked_git_the_lab_mirror_expander_runs"
+      ]
+    },
+    {
+      "id": "lab-scheduler-reindex-on-start",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/ops-dr-rebuild",
+      "behaviour": "With CI_LAB_REINDEX_ON_START set to true the CI lab scheduler rebuilds its verdict index from the report objects in the bucket before it serves, so a scheduler restarted after a Redis loss answers its stored verdicts again, and it prints and flushes reindexed N verdicts with the number of index entries it added; unset or any other value starts the scheduler without a reindex and prints nothing.",
+      "seam": "scripts.ci_lab.scheduler.main over fakeredis and the local object store, with scripts.ci_lab.store.Store.reindex",
+      "tests": [
+        "tests/ci_lab/test_scheduler.py::test_main_rebuilds_the_verdict_index_before_serving_only_when_reindex_on_start_is_true"
       ]
     },
     {
@@ -8165,6 +8234,33 @@
         "tests/ci_lab/test_worker.py::test_the_worker_environment_keeps_only_the_service_contract_variables",
         "tests/ci_lab/test_worker.py::test_slots_come_from_the_cpu_quota_capped_by_ci_lab_slots",
         "tests/ci_lab/test_worker.py::test_build_makes_the_pod_worker_from_a_clean_environment_and_refuses_redis"
+      ]
+    },
+    {
+      "id": "lab-worker-executors",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2533",
+      "behaviour": "The CI lab queue stores the base and grader revision of every job a grade enqueues and the lease reply carries both; agentihooks ci-lab-worker builds the worker from the worker contract environment and runs each leased unit through the adapter of its kind: a static unit runs the gate it names from the grader tree's workflow over the head with the base and grader trees and inputs.base, a test unit runs its batch on the venv of the head's lockfile digest with the manifest and flake ledger, and a stats or mutant unit runs the mutation runner in the sandbox from a private trampolined tree of the head with the stats cache, kill memory, budget, cap and the tests the tree's stats records show reaching the mutant's function; each adapter answers a JSON report with the unit's seconds and releases every tree it cut, and SIGTERM stops the worker.",
+      "seam": "scripts.ci_lab.queue Queue.enqueue and job, scripts.ci_lab.leases Leases.lease, scripts.ci_lab.lease_api POST /lease, scripts.ci_lab.worker Client.lease, scripts.ci_lab.executors static, tests, mutation, executors, settings and main, and scripts.ci_lab.contract worker",
+      "tests": [
+        "tests/ci_lab/test_queue.py::test_enqueue_stores_the_base_and_grader_revision_each_job_reads",
+        "tests/ci_lab/test_leases.py::test_a_grant_carries_the_base_and_grader_revision_of_its_job",
+        "tests/ci_lab/test_lease_api.py::test_lease_returns_the_grant_payload",
+        "tests/ci_lab/test_scheduler.py::test_each_enqueued_job_carries_the_grades_base_and_its_plans_grader",
+        "tests/ci_lab/test_contract.py::test_the_worker_command_runs_the_service_and_keeps_the_self_test",
+        "tests/ci_lab/test_executors.py::test_static_runs_the_gate_the_grader_tree_names_over_the_head_with_its_base_and_grader_trees",
+        "tests/ci_lab/test_executors.py::test_static_answers_the_gates_verdict",
+        "tests/ci_lab/test_executors.py::test_static_releases_every_tree_it_leased_when_a_lease_or_the_gate_raises",
+        "tests/ci_lab/test_executors.py::test_tests_runs_the_batch_on_the_lockfile_venv_with_the_manifest_and_flake_ledger",
+        "tests/ci_lab/test_executors.py::test_mutation_runs_a_stats_unit_with_its_tree_as_root_and_the_stats_cache",
+        "tests/ci_lab/test_executors.py::test_mutation_grades_a_mutant_unit_with_the_tests_its_trees_stats_show_reaching_its_function",
+        "tests/ci_lab/test_executors.py::test_mutation_fails_a_mutant_unit_whose_runner_fails_or_whose_mutant_lives",
+        "tests/ci_lab/test_executors.py::test_mutation_drops_its_private_tree_when_the_runner_raises",
+        "tests/ci_lab/test_executors.py::test_covering_takes_each_test_a_stats_record_shows_reaching_the_function_with_its_seconds",
+        "tests/ci_lab/test_executors.py::test_function_of_names_the_function_a_mutant_mutates",
+        "tests/ci_lab/test_executors.py::test_executors_name_the_adapter_of_every_unit_kind",
+        "tests/ci_lab/test_executors.py::test_settings_read_the_worker_contract_environment",
+        "tests/ci_lab/test_executors.py::test_main_runs_the_worker_over_the_adapters_until_sigterm_stops_it"
       ]
     },
     {
@@ -8827,6 +8923,16 @@
         "tests/events/test_nats_lab_stream.py::test_the_lab_head_stream_takes_the_bus_dedupe_window",
         "tests/events/test_nats_lab_stream.py::test_the_memory_bus_keeps_lab_heads_on_their_own_log_with_its_dead_letters",
         "tests/hub/test_github_webhooks.py::test_main_wires_the_lab_intake_only_when_its_notice_secret_is_set"
+      ]
+    },
+    {
+      "id": "lab-head-durable-consumer",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2515",
+      "behaviour": "Every provisioning bus open creates the lab scheduler's ci-lab-scheduler durable consumer on the lab head stream, filtered on ci.lab.head.>, so the scheduler binds it in bind mode, where it never creates a consumer, and a head published while the scheduler is stopped is read after it restarts while a head it read and acknowledged before the stop is not read again.",
+      "seam": "scripts.events.nats NatsBus provisioning of LAB_CONSUMER on LAB_STREAM, read through scripts.ci_lab.scheduler BusInbox on the bind mode bus that scheduler main always opens, its lab_heads consumer of DURABLE and SUBJECT",
+      "tests": [
+        "tests/events/test_nats_lab_stream.py::test_a_bound_scheduler_reads_the_heads_published_while_it_was_stopped"
       ]
     },
     {
