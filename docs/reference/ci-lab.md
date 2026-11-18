@@ -73,8 +73,8 @@ budget:
   coreMinutesPerDay: 600
   shed:
     backfill: 0.5
-    promotion: 0.25
-    queue: 0.1
+    promotion: 0.75
+    queue: 0.9
 backfill:
   auditShare: 0.1
   moduleSweeps: false
@@ -83,8 +83,10 @@ backfill:
 All three top level fields, `classes`, `budget` and `backfill`, are required; unknown fields
 are refused. Classes must be unique names from the list above, and the daily budget must be
 positive. Shed fractions and `auditShare` range from 0 to 1; `moduleSweeps` is a boolean. Only
-`backfill`, `promotion` and `queue` may have shed thresholds. In this example, backfill is shed
-below half the daily budget remaining, promotion below a quarter and queue below a tenth.
+`backfill`, `promotion` and `queue` may have shed thresholds. Each threshold is the fraction of
+the daily budget spent; reaching it sheds that class and every less urgent class. In this
+example, backfill is shed at half the daily budget remaining, promotion at a quarter and queue
+at a tenth; each stays shed as the remaining budget falls further.
 Hotfix and pull request work remain admitted. The budget resets on the next UTC day; work
 already queued still runs. See [Scheduler loop](#scheduler-loop) for admission rules.
 
