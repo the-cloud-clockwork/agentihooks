@@ -1020,7 +1020,7 @@
  "tests/test_credential_guard.py::test_a_shell_script_that_prints_no_value_passes": {
   "assertions": 1,
   "calls": 2,
-  "cases": 6,
+  "cases": 8,
   "texts": [
    "a76f47343f702669"
   ]

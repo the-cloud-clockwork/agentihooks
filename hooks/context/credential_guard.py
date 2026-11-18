@@ -140,7 +140,6 @@ READER_VERBS = {
 SOURCERS = {"source", "."}
 INTERPRETERS = {"python", "python2", "python3", "node", "ruby", "perl", "php", "sh", "bash", "zsh", "dash"}
 SHELLS = frozenset({"sh", "bash", "zsh", "dash"})
-SHELL_SCRIPT_FLAG = re.compile(r"^-[A-Za-z]*c[A-Za-z]*$")
 AWKS = frozenset({"awk", "gawk", "mawk", "nawk"})
 ENVIRON_VALUE = re.compile(r"\bENVIRON\s*\[")
 GREP_FAMILY = {"grep", "egrep", "fgrep", "rg", "ack"}
@@ -865,7 +864,11 @@ def shell_scripts(toks: list[str]) -> list[str]:
     if verb_of(toks) not in SHELLS:
         return []
     i = verb_index(toks)
-    return [word for flag, word in zip(toks[i + 1 :], toks[i + 2 :]) if SHELL_SCRIPT_FLAG.match(flag)]
+    return [
+        word
+        for flag, word in zip(toks[i + 1 :], toks[i + 2 :])
+        if flag.startswith("-") and not flag.startswith("--") and "c" in flag
+    ]
 
 
 def find_filters(toks):

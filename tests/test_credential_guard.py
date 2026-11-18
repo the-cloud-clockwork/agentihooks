@@ -709,6 +709,8 @@ SHELL_SCRIPTS_THAT_PRINT_NO_VALUE = [
     "bash -c 'env | wc -l'",
     "bash -c 'compgen -e'",
     "bash script.sh",
+    "bash script.sh check env",
+    "bash --rcfile env",
     "bash -c",
     "grep -c env notes.txt",
 ]
