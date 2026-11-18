@@ -1769,6 +1769,9 @@ member's credential may publish only for its own hive; a request naming another 
 starts the execution on that hive, occupies a seat, marks the task claimed (or back in `pr`) and returns the primed
 spawn task. A repeat from the same hive returns the same admission, so a retried launch keeps its agent; any other
 hive gets none. When the offer runs out of deliveries, the spoke sends `reopen`, which returns the task to `open`.
+The hub answers these requests on a pool of eight threads and drops one that waited there as long as the hive waits
+for its answer, so an admission the hive gave up on never claims the task; see
+[How the hub serves requests](../reference/swarm-bus-scope.md#how-the-hub-serves-requests).
 Unlike a tick launch, a hub admission scaffolds no task work folder on the hub. It resolves the task's continuation,
 stack base, overlaps and group on the claimed row and attaches the handoff transfer the predecessor left (see
 [Handoff continuity on admission](#handoff-continuity-on-admission)); the spawn task carries the seat's handoff,
@@ -2275,8 +2278,10 @@ the tick launches no workstation task and offers each one pinned to the root hiv
 are its only taker, and only a spoke poll beats the hive's presence. `hive run` loads the operator env files before
 the spokes read their bus settings, and a draining hive polls no spoke but keeps beating presence on every `events`
 swarm, so the hub never judges its running agents lost. Only a memory bus refuses the lane spokes, on every hive.
-The bus settings a hive needs arrive with its
-invite; see [The hub and the bus](../reference/deployment-modes.md#the-hub-and-the-bus).
+The bus settings a member hive needs arrive with its
+invite; see [The hub and the bus](../reference/deployment-modes.md#the-hub-and-the-bus). The workstation root hive
+has no invite and gets them from `agentihooks hive root-bus`; see
+[Root hive bus settings](../reference/deployment-modes.md#root-hive-bus-settings).
 
 ## Workstation fallback
 

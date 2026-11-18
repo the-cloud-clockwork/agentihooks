@@ -4231,6 +4231,18 @@
       ]
     },
     {
+      "id": "selectors-read-outside-files",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2636",
+      "behaviour": "Pull request touched test selection and mutation test selection read each dependency manifest test record's outside list, the repository files the test opened that its record leaves out, as well as its recorded files, so a change to one of those files selects that test while a change to a file no record lists selects nothing.",
+      "seam": "scripts.ci_select.recorded_tests, scripts.ci_mutation.plan.covering_tests and scripts.ci_mutation.plan.line_covering_tests",
+      "tests": [
+        "tests/test_ci_select.py::test_a_change_to_a_file_a_test_opened_outside_its_record_selects_that_test_file",
+        "tests/test_ci_mutation_plan.py::test_a_drifted_file_a_test_opened_outside_its_record_selects_that_test",
+        "tests/test_ci_mutation_plan.py::test_a_drifted_file_a_test_opened_outside_its_record_selects_that_test_by_line"
+      ]
+    },
+    {
       "id": "gate-required-waits-for-aggregator",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2504",
@@ -8316,6 +8328,19 @@
         "tests/ci_lab/test_scheduler.py::test_a_promotion_head_expands_the_stats_unit_of_a_covering_test_inside_a_class",
         "tests/ci_lab/test_scheduler.py::test_a_promotion_head_expands_a_mutant_unit_for_a_changed_function_no_recorded_test_ran",
         "tests/ci_lab/test_scheduler.py::test_a_promotion_head_that_changes_no_measured_python_expands_no_mutation_units"
+      ]
+    },
+    {
+      "id": "lab-mutant-unit-unlisted-tests",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2658",
+      "behaviour": "Every CI lab mutant unit key also carries the hash of each test module of the head that holds no dependency manifest test, of each conftest pytest loads for such a module and of each test tree module either imports, because the mutation executor runs every test module of the head against the mutants while the stored manifest only names the tests of the base. A head that adds a test module changes the key of each of its mutant units, and an edit to that module changes it again, so no cached mutant verdict graded without the new tests is reused.",
+      "seam": "scripts.ci_lab.scheduler.MirrorExpander.expand over a git origin fixture, scripts.ci_lab.expand_tests.unlisted_test_hashes over a tree and scripts.ci_lab.expand_mutation.mutant_units over a fixture repository",
+      "tests": [
+        "tests/ci_lab/test_scheduler.py::test_a_promotion_head_keys_a_mutant_unit_by_the_test_modules_the_manifest_lacks",
+        "tests/ci_lab/test_expand_tests.py::test_unlisted_hashes_each_test_module_that_holds_no_manifest_test_with_its_conftests_and_imports",
+        "tests/ci_lab/test_expand_tests.py::test_unlisted_keys_every_test_module_the_mutant_runner_runs",
+        "tests/ci_lab/test_expand_mutation.py::test_an_unlisted_test_module_enters_the_key_of_every_function"
       ]
     },
     {

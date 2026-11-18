@@ -3,6 +3,7 @@ import re
 import subprocess
 import threading
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -1737,6 +1738,34 @@ def test_narrowing_keeps_the_covering_tests_of_a_fully_recorded_file_and_whole_o
         "tests/test_stale.py",
     ]
     assert plan.narrow(tmp_path, ["tests/test_recorded.py"], set(), recorded, set()) == ["tests/test_recorded.py"]
+
+
+def _outside_manifest() -> dict[str, Any]:
+    tests = {
+        "tests/test_a.py::test_one": {"units": [], "files": [], "outside": ["docs/a.md"]},
+        "tests/test_b.py::test_two": {"units": [], "files": ["docs/b.md"]},
+        "tests/test_c.py::test_three": {"units": []},
+    }
+    return {"commit": "recorded", "units": [], "tests": tests, "lines": {test: {} for test in tests}}
+
+
+@pytest.mark.feature("selectors-read-outside-files")
+def test_a_drifted_file_a_test_opened_outside_its_record_selects_that_test() -> None:
+    manifest = _outside_manifest()
+    assert plan.covering_tests(manifest, set(), {"docs/a.md"}) == {"tests/test_a.py::test_one"}
+    assert plan.covering_tests(manifest, set(), {"docs/b.md"}) == {"tests/test_b.py::test_two"}
+    assert plan.covering_tests(manifest, set(), {"docs/other.md"}) == set()
+
+
+@pytest.mark.feature("selectors-read-outside-files")
+def test_a_drifted_file_a_test_opened_outside_its_record_selects_that_test_by_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = _outside_manifest()
+    monkeypatch.setattr(plan, "recorded_changes", lambda *args: [])
+    assert plan.line_covering_tests(tmp_path, manifest, {}, {"docs/a.md"}) == {"tests/test_a.py::test_one"}
+    assert plan.line_covering_tests(tmp_path, manifest, {}, {"docs/b.md"}) == {"tests/test_b.py::test_two"}
+    assert plan.line_covering_tests(tmp_path, manifest, {}, {"docs/other.md"}) == set()
 
 
 def test_defined_tests_name_test_functions_and_methods_but_not_their_nested_helpers(tmp_path):

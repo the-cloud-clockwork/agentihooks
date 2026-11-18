@@ -106,7 +106,7 @@ def function_of(unit: Unit) -> str:
 
 def keys(root: Path, covering: dict[str, dict[str, str]] | None = None) -> dict[str, str]:
     """Map each function of the sample module that has mutants to its unit key."""
-    units = expand_mutation.mutant_units(root, EVERY_LINE, covering or {})
+    units = expand_mutation.mutant_units(root, EVERY_LINE, covering or {}, {})
     return {function_of(unit): unit.key for unit in units}
 
 
@@ -133,13 +133,13 @@ def edit(root: Path, name: str, old: str, new: str) -> None:
 )
 def test_one_unit_per_changed_function_with_mutants(tmp_path: Path, lines: list[int], functions: list[str]) -> None:
     root = repository(tmp_path, MUTANT_FILES)
-    units = expand_mutation.mutant_units(root, {PATH: lines}, {})
+    units = expand_mutation.mutant_units(root, {PATH: lines}, {}, {})
     assert [function_of(unit) for unit in units] == [f"scripts.sample.{name}" for name in functions]
 
 
 def test_a_unit_names_every_mutant_of_its_function_as_mutmut_does(tmp_path: Path) -> None:
     root = repository(tmp_path, MUTANT_FILES)
-    units = expand_mutation.mutant_units(root, {PATH: [12, 28]}, {})
+    units = expand_mutation.mutant_units(root, {PATH: [12, 28]}, {}, {})
     owners = {"scripts.sample.x_second", "scripts.sample.xǁBoxǁgrow"}
     every = [f"scripts.sample.{name}" for name in selected_mutant_names(PATH, SAMPLE, set(range(1, 40)))]
     assert [member for unit in units for member in unit.members] == [
@@ -152,14 +152,14 @@ def test_a_malformed_pragma_is_refused_naming_its_file(tmp_path: Path) -> None:
     broken = "# pragma: no mutate end\ndef first(value):\n    return value + 1\n"
     root = repository(tmp_path, {**MUTANT_FILES, "scripts/broken.py": broken})
     with pytest.raises(PragmaParseError) as refused:
-        expand_mutation.mutant_units(root, {"scripts/broken.py": [3]}, {})
+        expand_mutation.mutant_units(root, {"scripts/broken.py": [3]}, {}, {})
     assert str(refused.value) == "# pragma: no mutate end at scripts/broken.py:1 without a # pragma: no mutate start"
 
 
 def test_mutant_names_and_keys_are_stable_across_runs_and_checkouts(tmp_path: Path) -> None:
-    first = expand_mutation.mutant_units(repository(tmp_path / "a", MUTANT_FILES), EVERY_LINE, {})
-    again = expand_mutation.mutant_units(tmp_path / "a", EVERY_LINE, {})
-    other = expand_mutation.mutant_units(repository(tmp_path / "b", MUTANT_FILES), EVERY_LINE, {})
+    first = expand_mutation.mutant_units(repository(tmp_path / "a", MUTANT_FILES), EVERY_LINE, {}, {})
+    again = expand_mutation.mutant_units(tmp_path / "a", EVERY_LINE, {}, {})
+    other = expand_mutation.mutant_units(repository(tmp_path / "b", MUTANT_FILES), EVERY_LINE, {}, {})
     assert first == again == other
     assert first
     assert len({unit.key for unit in first}) == len(first)
@@ -167,7 +167,7 @@ def test_mutant_names_and_keys_are_stable_across_runs_and_checkouts(tmp_path: Pa
 
 def test_the_same_function_in_another_module_gets_its_own_key(tmp_path: Path) -> None:
     root = repository(tmp_path, {**MUTANT_FILES, "scripts/copy.py": SAMPLE})
-    units = expand_mutation.mutant_units(root, {PATH: [7], "scripts/copy.py": [7]}, {})
+    units = expand_mutation.mutant_units(root, {PATH: [7], "scripts/copy.py": [7]}, {}, {})
     assert [function_of(unit) for unit in units] == ["scripts.copy.x_first", "scripts.sample.x_first"]
     assert units[0].key != units[1].key
 
@@ -255,6 +255,18 @@ def test_covering_fingerprints_enter_only_their_function_key(tmp_path: Path) -> 
     two = keys(root, {name: {"tests/test_a.py::test_first": "two"}})
     assert len({base[name], one[name], two[name]}) == 3
     assert all(one[other] == two[other] == base[other] for other in base if other != name)
+
+
+@pytest.mark.feature("lab-mutant-unit-unlisted-tests")
+def test_an_unlisted_test_module_enters_the_key_of_every_function(tmp_path: Path) -> None:
+    root = repository(tmp_path, MUTANT_FILES)
+    found = [
+        {function_of(unit): unit.key for unit in expand_mutation.mutant_units(root, EVERY_LINE, {}, unlisted)}
+        for unlisted in ({}, {"tests/test_new.py": "one"}, {"tests/test_new.py": "two"})
+    ]
+    assert found[0]
+    assert found[0].keys() == found[1].keys() == found[2].keys()
+    assert all(len({keys[name] for keys in found}) == 3 for name in found[0])
 
 
 @pytest.mark.feature("lab-scheduler-mutation-units")
