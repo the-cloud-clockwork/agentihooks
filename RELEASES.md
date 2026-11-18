@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.1014 · 2026-11-18
+
+### 2026-11-18 · 9c05a1894570 · #11984 · @agenticore-app
+
+**Lab scheduler sets every exported metric queue, lease and worker state answers**
+
+The lab scheduler's metrics endpoint previously only reported load, leaving KEDA scaling and lab alerting blind to slots wanted, workers ready, overdue units, core seconds, and the git/uv cache counters. This change wires queue, lease, and worker state into every contract metric: the scheduler tracks running, pending, ready, and overdue counts each pass, counts finished attempts exactly once via a Lua-backed tally, and workers now report cache hits so executors populate those counters. A shared, locked metrics registry serves all of this safely across threads, closing the gap that left real autoscaling and alerting signals silently zero.
+
 ## v2.17.1013 · 2026-11-18
 
 ### 2026-11-18 · 1aa8d666aa78 · #11992 · @nestorcolt
