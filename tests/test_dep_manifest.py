@@ -940,6 +940,204 @@ def test_the_invalidated_and_share_commands_read_the_working_repository_by_defau
     assert capsys.readouterr().out == json.dumps(shared, indent=2) + "\n"
 
 
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["build", "--inputs", "i", "--commit", "c", "--environment", "e", "--out", "o"],
+        ["build", "--coverage", "c", "--commit", "c", "--environment", "e", "--out", "o"],
+        ["build", "--coverage", "c", "--inputs", "i", "--commit", "c", "--environment", "e"],
+        ["deselect", "--collected", "c", "--out", "o"],
+        ["deselect", "--plan", "p", "--out", "o"],
+        ["deselect", "--plan", "p", "--collected", "c"],
+    ],
+    ids=["no-coverage", "no-inputs", "no-out", "no-plan", "no-collected", "no-deselect-out"],
+)
+def test_the_build_and_deselect_commands_refuse_a_missing_required_option(argv: list[str]) -> None:
+    with pytest.raises(SystemExit) as refused:
+        dep_manifest.main(argv)
+    assert refused.value.code == 2
+
+
+def test_the_build_command_forwards_typed_paths_and_reports_what_it_wrote(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    called: list[tuple[Any, ...]] = []
+    built = {"version": 2, "commit": "c", "units": ["u"], "tests": {"t": {"units": [0], "files": [], "escapes": True}}}
+    monkeypatch.setattr(dep_manifest, "build", lambda *args: called.append(args) or built)
+    report = tmp_path / "inputs" / "a.jsonl"
+    report.parent.mkdir()
+    report.write_text("")
+    out = tmp_path / "m.json"
+    argv = ["build", "--coverage", "cov", "--inputs", str(report.parent), "--root", str(tmp_path)]
+    assert dep_manifest.main([*argv, "--commit", "abc", "--environment", "e", "--out", str(out)]) == 0
+    assert called == [(Path("cov"), [report], tmp_path.resolve(), "abc", "e")]
+    assert out.read_text() == json.dumps(built, separators=(",", ":"))
+    assert capsys.readouterr().out == "Dependency manifest: 1 tests, 1 units, 1 escape\n"
+
+
+def test_the_build_command_is_red_when_the_coverage_holds_no_test_contexts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(dep_manifest, "build", lambda *args: {"tests": {}})
+    (tmp_path / "a.jsonl").write_text("")
+    argv = ["build", "--coverage", "c", "--inputs", str(tmp_path), "--commit", "c", "--environment", "e"]
+    assert dep_manifest.main([*argv, "--out", str(tmp_path / "m.json")]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "::error::The coverage data holds no per test contexts.\n"
+    assert not (tmp_path / "m.json").exists()
+
+
+def test_the_invalidated_command_passes_its_repository_and_revisions_as_given(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    called: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(dep_manifest, "changes", lambda *args: called.append(args) or [])
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps(_history_manifest("recorded")))
+    argv = ["invalidated", "--manifest", str(manifest), "--repo", str(tmp_path), "--base", "b0", "--head", "h0"]
+    assert dep_manifest.main(argv) == 0
+    assert called == [(tmp_path, "b0", "h0")]
+    assert json.loads(capsys.readouterr().out) == {"global": None, "tests": []}
+
+
+def test_the_share_command_passes_its_defaults_and_typed_options(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    called: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(dep_manifest, "share", lambda *args: called.append(args) or {"rows": []})
+    manifest = tmp_path / "manifest.json"
+    recorded = _history_manifest("recorded")
+    manifest.write_text(json.dumps(recorded))
+    monkeypatch.chdir(tmp_path)
+    assert dep_manifest.main(["share", "--manifest", str(manifest)]) == 0
+    argv = ["share", "--manifest", str(manifest), "--repo", "elsewhere", "--ref", "r", "--merges", "3"]
+    assert dep_manifest.main(argv) == 0
+    assert called == [(recorded, Path.cwd(), "origin/dev", 40), (recorded, Path("elsewhere"), "r", 3)]
+    assert capsys.readouterr().out == 2 * (json.dumps({"rows": []}, indent=2) + "\n")
+
+
+def test_the_deselect_command_reads_every_plan_and_the_collection(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    collected = ["tests/a.py::one", "tests/a.py::two", "tests/b.py::one"]
+    (tmp_path / "collected.json").write_text(json.dumps(collected))
+    (tmp_path / "dev.json").write_text(json.dumps({"tests": ["tests/a.py::one", "tests/a.py::two"]}))
+    (tmp_path / "branch.json").write_text(json.dumps({"runs": [], "tests": ["tests/b.py::one"]}))
+    out = tmp_path / "out.json"
+    plans = ["--plan", str(tmp_path / "dev.json"), "--plan", str(tmp_path / "branch.json")]
+    assert (
+        dep_manifest.main(["deselect", *plans, "--collected", str(tmp_path / "collected.json"), "--out", str(out)]) == 0
+    )
+    assert json.loads(out.read_text()) == {
+        "tests": collected,
+        "files": ["tests/a.py", "tests/b.py"],
+        "branch": ["tests/b.py::one"],
+    }
+    assert capsys.readouterr().out == (
+        "Reusing 3 collected tests; 2 test files are not collected\n1 of them passed on earlier runs of this pull request\n"
+    )
+
+
+def test_a_function_inside_a_block_and_the_line_after_it_map_as_written() -> None:
+    source = "if True:\n    def f():\n        return 1\nx = 1\n"
+    assert dep_manifest.line_units(source) == {3: "f"}
+    changed = source.replace("x = 1", "x = 2")
+    assert (
+        dep_manifest.unit_hashes(source)[dep_manifest.MODULE] != dep_manifest.unit_hashes(changed)[dep_manifest.MODULE]
+    )
+
+
+def test_unit_hashes_join_module_lines_and_repeated_definitions_as_specified() -> None:
+    module = "x = 1\ny = 2\n"
+    assert dep_manifest.unit_hashes(module)[dep_manifest.MODULE] == hashlib.sha256(b"x = 1\ny = 2").hexdigest()
+    twice = "def f():\n    return 1\ndef f():\n    return 2\n"
+    expected = hashlib.sha256(b"def f():\n    return 1\x00def f():\n    return 2").hexdigest()
+    assert dep_manifest.unit_hashes(twice)["f"] == expected
+
+
+def test_the_build_keeps_ids_with_bars_skips_missing_files_and_maps_broken_sources_to_the_module(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "hooks"
+    package.mkdir()
+    (package / "sample.py").write_text(SOURCE)
+    (package / "broken.py").write_text("def (\n")
+    data = CoverageData(basename=str(tmp_path / ".coverage"))
+    data.set_context("tests/test_m.py::test_x[a|b]|run")
+    data.add_arcs(
+        {
+            str(tmp_path / "aaa" / "gone.py"): [(-1, 1), (1, -1)],
+            str(package / "broken.py"): [(-1, 1), (1, -1)],
+            str(package / "sample.py"): [(-6, 7), (7, -6)],
+        }
+    )
+    data.write()
+    report = tmp_path / "inputs.jsonl"
+    report.write_text(json.dumps({"test": "tests/test_n.py::test_y", "files": ["f"], "escapes": False}) + "\n   \n")
+    manifest = dep_manifest.build(tmp_path / ".coverage", [report], tmp_path, "abc", "env")
+    assert sorted(manifest["tests"]) == ["tests/test_m.py::test_x[a|b]", "tests/test_n.py::test_y"]
+    assert _units(manifest, "tests/test_m.py::test_x[a|b]") == {
+        "hooks/broken.py::<module>",
+        "hooks/sample.py::double",
+        "hooks/sample.py::<module>",
+    }
+    assert manifest["tests"]["tests/test_n.py::test_y"] == {"units": [], "files": ["f"], "escapes": False}
+
+
+def test_changes_list_both_sides_of_a_rename_and_fail_on_an_unknown_revision(tmp_path: Path) -> None:
+    def git(*args: str) -> None:
+        subprocess.run(["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@t", *args], check=True)
+
+    git("init", "-q")
+    (tmp_path / "notes.md").write_text("a long enough body to be detected as a rename\n" * 5)
+    git("add", ".")
+    git("commit", "-qm", "base")
+    git("mv", "notes.md", "moved.md")
+    git("commit", "-qm", "head")
+    assert dep_manifest.changes(tmp_path, "HEAD^1", "HEAD") == [("moved.md", None, None), ("notes.md", None, None)]
+    with pytest.raises(subprocess.CalledProcessError):
+        dep_manifest.changes(tmp_path, "missing", "HEAD")
+
+
+def test_workflow_execution_reads_env_every_producer_and_a_malformed_split_as_changed() -> None:
+    def changed(before: dict[str, Any], after: dict[str, Any]) -> bool:
+        return dep_manifest.workflow_execution_changed(yaml.safe_dump(before), yaml.safe_dump(after))
+
+    jobs = {"unit": {"needs": ["a"]}, "unit-selected": {"needs": ["split"]}, "split": {}, "a": {"x": 1}}
+    base = {"env": {"A": "1"}, "jobs": jobs}
+    assert changed(base, base) is False
+    assert changed(base, {**base, "env": {"A": "2"}}) is True
+    assert changed(base, {**base, "jobs": {**jobs, "a": {"x": 2}}}) is True
+    assert changed(base, {**base, "jobs": {**jobs, "unit-selected": {"needs": ["split"], "y": 1}}}) is True
+    malformed = {"jobs": {"unit": {}, "split": "x"}}
+    assert changed(malformed, malformed) is True
+
+
+def test_a_python_file_under_the_workflows_folder_is_a_global_input() -> None:
+    assert dep_manifest.global_input(".github/workflows/helper.py", None, None, 2) is True
+
+
+def test_invalidation_reads_nested_test_files_and_every_change_after_a_test_file() -> None:
+    tests = {
+        "tests/sub/test_b.py::one": {"units": [], "files": [], "escapes": False},
+        "tests/test_c.py::one": {"units": [0], "files": [], "escapes": False},
+        "tests/test_d.py::one": {"units": [], "files": [], "escapes": False},
+    }
+    manifest = {"version": 2, "commit": "c", "units": ["hooks/sample.py::double"], "tests": tests}
+    changed: list[tuple[str, str | None, str | None]] = [
+        ("tests/sub/test_b.py", "", ""),
+        ("hooks/sample.py", SOURCE, SOURCE.replace("value * 2", "value * 3")),
+    ]
+    assert dep_manifest.invalidated(manifest, changed) == ({"tests/sub/test_b.py::one", "tests/test_c.py::one"}, None)
+
+
+def test_deselection_keys_files_by_path_and_needs_every_test_of_a_file() -> None:
+    collected = ["tests/a.py::Case::one", "tests/a.py::Case::two", "tests/b.py::Case::one"]
+    chosen = dep_manifest.deselect(["tests/a.py::Case::two", "tests/b.py::Case::one"], collected)
+    assert chosen == {"tests": ["tests/a.py::Case::two", "tests/b.py::Case::one"], "files": ["tests/b.py"]}
+
+
 def test_the_inputs_plugin_records_python_files_a_test_reads_as_data_but_not_its_imports(tmp_path):
     (tmp_path / "source.py").write_text("VALUE = 1\n")
     (tmp_path / "helper.py").write_text("VALUE = 2\n")
