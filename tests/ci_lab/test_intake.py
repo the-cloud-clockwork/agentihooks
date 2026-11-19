@@ -72,6 +72,13 @@ def test_a_push_to_a_branch_is_a_head_event() -> None:
     assert webhooks.head_events("push", push()) == [head("push", "nestorcolt", "pushed")]
 
 
+@pytest.mark.feature("lab-zero-base-push")
+def test_a_new_branch_push_with_a_zero_before_names_no_head() -> None:
+    payload = push(ref="refs/heads/new-branch")
+    payload["before"] = "0" * 40
+    assert webhooks.head_events("push", payload) == []
+
+
 @pytest.mark.parametrize("payload", [push(deleted=True), push(ref="refs/tags/v1.2.3")])
 def test_a_branch_delete_or_a_tag_push_names_no_head(payload: dict[str, Any]) -> None:
     assert webhooks.head_events("push", payload) == []
