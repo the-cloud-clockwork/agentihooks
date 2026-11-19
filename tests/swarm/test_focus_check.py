@@ -83,6 +83,9 @@ def test_a_task_outside_the_focus_is_named_as_held_by_it() -> None:
 @pytest.mark.feature("swarm-focus-verdict")
 def test_a_target_that_does_not_exist_has_no_verdict() -> None:
     assert one(ledger_doc(), "focus/tasks/nope") is None
+    assert one(ledger_doc(record("tasks/t1", "focus")), "focus/tasks/nope") is None
+    found = one(ledger_doc(record("tasks/gone", "focus")), "focus/tasks/gone")
+    assert found is not None and found["tasks"] == []
     assert focus_check.lines("unfreeze", "tasks/nope", None) == ["unfreeze tasks/nope: no such target"]
 
 
@@ -154,6 +157,20 @@ def test_a_written_focus_says_so_when_the_ledger_gives_no_verdict(
     assert json.loads(out) == {"focus": "tasks/t2", "by": "operator"}
     assert err.startswith("focus tasks/t2: written, but the ledger gave no verdict: ")
     assert [entry[:3] for entry in fake.freezes] == [("demo", "focus", "tasks/t2")]
+
+
+class OneTarget:
+    def focus_verdicts(self, slug: str, target: str) -> dict[str, Any]:
+        return {"target": target, "claimable": 1, "done": [], "tasks": []}
+
+
+@pytest.mark.feature("swarm-focus-verdict")
+def test_checked_runs_the_command_then_writes_the_verdict_on_its_target(capsys: pytest.CaptureFixture[str]) -> None:
+    ran: list[str] = []
+    run = focus_check.checked(lambda store, args: ran.append(args.target), OneTarget)
+    run(None, SimpleNamespace(slug="demo", command="focus", target="tasks/t1"))
+    assert ran == ["tasks/t1"]
+    assert capsys.readouterr().err == "focus tasks/t1: 1 claimable, 0 open, 0 done\n"
 
 
 @pytest.mark.feature("swarm-focus-read")

@@ -10356,6 +10356,7 @@
         "tests/swarm/test_focus_check.py::test_focus_and_unfreeze_print_the_verdict_after_the_write",
         "tests/swarm/test_focus_check.py::test_freeze_prints_no_verdict",
         "tests/swarm/test_focus_check.py::test_a_written_focus_says_so_when_the_ledger_gives_no_verdict",
+        "tests/swarm/test_focus_check.py::test_checked_runs_the_command_then_writes_the_verdict_on_its_target",
         "tests/swarm/test_focus_check.py::test_unfreeze_of_a_target_that_does_not_exist_is_refused"
       ]
     },
