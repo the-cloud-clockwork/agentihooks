@@ -2,6 +2,21 @@ import re
 import shlex
 from pathlib import Path
 
+__all__ = [
+    "Path",
+    "commands",
+    "located",
+    "re",
+    "shlex",
+    "unwrap",
+    "_FROZEN_COMMANDS",
+    "_GLOBAL_VALUES",
+    "_command",
+    "_dispatches",
+    "_ref",
+    "_targets",
+]
+
 _ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z_0-9]*=")
 _SEPARATORS = ";|&()\n"
 _GROUPS = frozenset({"{", "}"})
