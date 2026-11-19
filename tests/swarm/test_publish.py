@@ -2188,13 +2188,15 @@ def test_publish_via_lab_direct_pushes_origin_after_the_lab_without_waiting(
 def test_lab_publication_records_its_head_and_wait_before_polling(
     publication: SimpleNamespace, lab: Path, monkeypatch: pytest.MonkeyPatch, direct: bool
 ) -> None:
+    from typing import Any
+
     import fakeredis
 
     from hooks.context import swarm_heartbeat
     from scripts.swarm import cli, idle, pr_wait, publish, waits
 
     redis = fakeredis.FakeRedis(decode_responses=True)
-    store = SimpleNamespace(redis=redis)
+    store: Any = SimpleNamespace(redis=redis)
     monkeypatch.setattr(cli, "_worker", lambda store, args: publication.agent)
     monkeypatch.setattr(cli, "_local_repo", lambda store, slug: str(publication.repo))
     monkeypatch.setattr(cli, "LedgerClient", lambda: publication.ledger)
