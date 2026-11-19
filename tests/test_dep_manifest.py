@@ -640,10 +640,7 @@ def test_queue_shards_split_on_the_tests_the_planner_did_not_reuse():
     assert _step("test-count", "Wait for the test plan")["id"] == "plan"
     assert _step("split", "Adopt the test plan")["id"] == "plan"
     deselected = _step("test-count", "Deselect the reused tests")
-    assert deselected["run"].startswith(
-        'cd "$RUNNER_TEMP/planner"\npackage=scripts\nif [[ ! -f scripts/dep_manifest.py ]]; then package=tests; fi\n'
-        '"$PYTHON_PATH" -m "$package.dep_manifest" deselect'
-    )
+    assert deselected["run"].startswith('cd "$RUNNER_TEMP/planner"\n"$PYTHON_PATH" -m scripts.dep_manifest deselect')
     assert deselected["env"]["PYTHON_PATH"] == plan["env"]["PYTHON_PATH"]
     assert _step("unit", "Run tests")["env"]["CI_REUSED"] == "${{ github.workspace }}/reused.json"
     check = _step("shard-check", "Check every collected test ran in exactly one shard")
@@ -695,7 +692,7 @@ def test_every_bare_interpreter_call_into_the_manifest_code_installs_pyyaml_firs
         steps = job.get("steps", [])
         for index, step in enumerate(steps):
             run = step.get("run", "")
-            for call in ("-m scripts.ci_test_plan", "-m scripts.dep_manifest", '-m "$package.dep_manifest"'):
+            for call in ("-m scripts.ci_test_plan", "-m scripts.dep_manifest"):
                 if call in run:
                     calls.add((name, step["name"]))
                     earlier = [s.get("run", "") for s in steps[:index]]
