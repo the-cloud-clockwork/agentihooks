@@ -1350,6 +1350,7 @@ That repository's `tests/unit/ci_lab/test_remote.py` renders every object below 
 |---|---|
 | StatefulSet `ci-lab-remote` | One replica on the scheduler's image, `ghcr.io/the-cloud-clockwork/agentihooks-swarm`, so the image updater that moves the scheduler moves the remote too. It runs as user 10001 with a read only root filesystem and no service account token, and takes the scheduler's node affinity, which keeps it off the pools in the chart value `scheduler.excludedPools`. It requests 100m of CPU and 256Mi of memory and may use up to 1Gi of memory. Its `reloader.stakater.com/auto` annotation makes Reloader restart the pod when the Secret `ci-lab-remote` changes |
 | Init container `init` | Runs `git init --bare /srv/git/agentihooks.git` on every start. On a repository that already exists git reinitializes it and keeps every ref and object |
+| Container `remote` | Runs `python /etc/ci-lab-remote/serve.py`, listening on port 8790, named `http`. A TCP readiness probe on that port runs every 10 seconds |
 | Claim `repo` | `local-path`, `ReadWriteOnce`, 20Gi, mounted at `/srv/git`. It holds the repository and the request bodies spooled during a push |
 | Volume `scratch` | An `emptyDir` of at most 2Gi mounted at `/tmp` |
 | ConfigMap `ci-lab-remote` | `serve.py`, `gitconfig`, `pre-receive` and `post-receive`, mounted read only at `/etc/ci-lab-remote`. The pod template carries a checksum of these files, so a change to one rolls the pod |
@@ -1406,9 +1407,10 @@ container's environment; [Push a head to the lab remote](#push-a-head-to-the-lab
 what it publishes and prints. It reads `CI_LAB_URL`, `CI_LAB_REPOSITORY`, `CI_LAB_REMOTE_ACTOR` and
 the `AGENTIHOOKS_BUS` settings from that environment, and needs a bus login allowed to publish
 `ci.lab.head.notice`. The chart gives the remote container only `CI_LAB_REMOTE_PORT`,
-`CI_LAB_REMOTE_ROOT`, `GIT_CONFIG_GLOBAL` and `CI_LAB_REMOTE_TOKEN`. The chart's only bus login
-belongs to the scheduler, which also holds the lab's key value bucket and both lab consumers, so the
-remote does not share it; a follow up gives the remote its own login and the hook's settings. The
+`CI_LAB_REMOTE_ROOT`, `GIT_CONFIG_GLOBAL` and `CI_LAB_REMOTE_TOKEN`. The chart's only bus login,
+the Secret `ci-lab-nats` read from the OpenBao key in the chart value `openbao.nats`, belongs to the
+scheduler, so the remote does not share it; a follow up gives the remote its own login and the
+hook's settings. The
 NetworkPolicy already lets the pod reach the bus, and nothing on the remote uses that route yet.
 
 Until then the hook fails on every grade push after git has written the ref: the push lands, the
@@ -1487,8 +1489,9 @@ and answering:
 curl -s -D - -o /dev/null "$AGENTIHOOKS_LAB_REMOTE/info/refs?service=git-upload-pack"
 ```
 
-The answer is `401` with both challenges. On 19 November 2026, after the `ci-lab` Application
-synced, a hive pod asking `http://ci-lab-remote.ci-lab.svc:8790/agentihooks.git` this way got:
+The answer is `401` with both challenges. On 19 November 2026, with the `ci-lab` Application on the
+deployment repository's merge commit `c26d2c0c`, a hive pod asking
+`http://ci-lab-remote.ci-lab.svc:8790/agentihooks.git` this way got:
 
 ```text
 HTTP/1.1 401 Unauthorized
@@ -1501,7 +1504,9 @@ Connection: close
 
 and `git ls-remote` of the same URL with no credential helper exited 128 with `could not read
 Username`. A timeout or a refused connection in place of the `401` points at the `Failed to connect`
-row of the troubleshooting table below.
+row of the troubleshooting table below. That hive carried neither client setting, and the hive
+template maps neither, so on that day the authenticated listing below had not yet run from a hive or
+from the workstation.
 
 From a hive and from the workstation, with the helper above set:
 
