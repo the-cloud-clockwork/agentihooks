@@ -6,6 +6,7 @@ from typing import Any
 from scripts.ci_lab import head_notice, plant_proofs
 from scripts.ci_lab.digests import GradeInputs, grade_key
 from scripts.ci_lab.head_notice import Opener
+from scripts.ci_lab.remote.checkout import at
 from scripts.ci_lab.webhooks import NOTICE_SECRET_ENV
 
 
@@ -19,7 +20,7 @@ class Ports:
 
 def _matching(repository: str, head: str, run: str, ports: Ports) -> list[Mapping[str, Any]]:
     slug = repository.removeprefix("https://github.com/")
-    matching = []
+    matching: list[Mapping[str, Any]] = []
     for page in range(1, 101):
         path = f"repos/{slug}/commits/{head}/check-runs?filter=all&per_page=100&page={page}"
         rows = ports.fetch(path)["check_runs"]
@@ -63,10 +64,13 @@ def _verdict(rows: list[Mapping[str, Any]], pair: plant_proofs.Pair, planted: bo
 
 def _push(root: Path, pair: plant_proofs.Pair, head: str) -> None:
     branch = f"refs/heads/diffcheck/ci-lab-{pair.name}"
-    remote = plant_proofs._git(root, "ls-remote", "--heads", "origin", branch).split()
+    git = at(root)
+    result = git("ls-remote", "--heads", "origin", branch)
+    result.check_returncode()
+    remote = result.stdout.split()
     if remote and remote[0] in {head, pair.red}:
         return
-    plant_proofs._git(root, "push", "origin", f"{head}:{branch}")
+    git("push", "origin", f"{head}:{branch}").check_returncode()
 
 
 def prove(
@@ -83,7 +87,7 @@ def prove(
     if timeout_s <= 0:
         raise ValueError("the grade timeout must be positive")
     pair = plant_proofs.prepare(root, name, base)
-    links = []
+    links: list[str] = []
     for head, planted in ((pair.green, False), (pair.red, True)):
         _push(root, pair, head)
         status = head_notice.send(environ, repository, head, pair.base, opener=ports.opener)
