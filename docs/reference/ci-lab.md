@@ -1420,7 +1420,12 @@ or unanswered request or an archive without a readable `packed.json` raises `man
 A request GitHub never answered, a token mint without an answer included, or answered with a server
 error raises its subclass `manifests.FetchUnanswered`, and the scheduler puts the head back in its
 lane with the quiet window restarted, so the first pass after that window fetches again; any other
-refusal drops the head with its reason. The dev push artifact is kept 7 days, so a commit older
+refusal drops the head with its reason. The service runs each fetch off the scheduler pass through
+`manifests.Background`, at most `WORKERS` (4) at once: while a fetch runs the call raises
+`manifests.FetchPending`, and the scheduler puts the head back in its lane with its quiet window
+unchanged, so the next pass reads the finished fetch and a GitHub that never answers holds no pass
+from reaping leases or advancing grades. A failed fetch answers once; any other answers every call
+for `FRESH_S` (300 seconds) after the fetch started. The dev push artifact is kept 7 days, so a commit older
 than that is answered only from the store. A head that needs test units and finds none fails with
 `no dependency manifest at or before <base>` and is dropped with that reason, so a merge group
 never folds green on an empty unit job.

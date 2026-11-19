@@ -55,7 +55,7 @@ from scripts.ci_lab.delivery import CLASSES, DELIVERY, DELIVERY_SCHEMA, load_run
 from scripts.ci_lab.digests import GradeInputs, StaticInputs, Toolchain, digest, grade_key, static_key
 from scripts.ci_lab.intake import GradeRequest, admit
 from scripts.ci_lab.leases import Leases, release
-from scripts.ci_lab.manifests import Fetcher, FetchUnanswered
+from scripts.ci_lab.manifests import Background, Fetcher, FetchPending, FetchUnanswered
 from scripts.ci_lab.objects import Objects, S3Objects, Uploads, manifest_folder, upload_path
 from scripts.ci_lab.outcomes import CANNOT_RUN, DROPPED, FAILED, LOSSES, PASSED
 from scripts.ci_lab.pods import Pods, unmanaged, worker_pods
@@ -646,8 +646,8 @@ class Scheduler:
 
     def _release(self, now_ms: int) -> list[str]:
         """Start each held head whose quiet window ended, except one a pause of its class holds. A head whose manifest
-        fetch GitHub never answered or answered with a server error waits out the window again; any other expansion
-        failure drops it."""
+        fetch still runs off the pass keeps its place and window for the next pass; one whose fetch GitHub never
+        answered or answered with a server error waits out the window again; any other expansion failure drops it."""
         actions: list[str] = []
         pauses = control.paused(self.client)
         for name, raw in sorted(self.client.hgetall(WAITING).items()):
@@ -661,6 +661,9 @@ class Scheduler:
             self.client.hdel(WAITING, name)
             try:
                 actions.append(self._start(request, held["lane"], held.get("ref", ""), now_ms))
+            except FetchPending as error:
+                self.client.hset(WAITING, name, raw)
+                actions.append(f"holding {request.head}: {error}")
             except FetchUnanswered as error:
                 self.client.hset(WAITING, name, json.dumps({**held, "since": now_ms}))
                 actions.append(f"holding {request.head}: {error}")
@@ -972,11 +975,12 @@ def frame(tier: Priority, tree: str, grader: str, gates: Mapping[str, tuple[Unit
 @dataclass(frozen=True)
 class StoredManifests:
     """Packed dependency manifests in the lab object store, one per dev commit under `objects.manifest_folder`; one of
-    the newest `MANIFEST_DEPTH` commits with none stored is fetched from its dev push Tests run and stored once. The
-    notes of the files test batches opened outside them sit under its `outside/` folder."""
+    the newest `MANIFEST_DEPTH` commits with none stored is fetched from its dev push Tests run, off the scheduler pass
+    unless another fetch is given, and stored once. The notes of the files test batches opened outside them sit under
+    its `outside/` folder."""
 
     objects: Objects
-    fetch: Fetch = field(default_factory=Fetcher)
+    fetch: Fetch = field(default_factory=lambda: Background(Fetcher()))
 
     def __call__(self, repo: str, commits: Sequence[str]) -> dict[str, Any] | None:
         """Return the manifest of the first commit that has one stored or, among the newest, fetched, with every note of
