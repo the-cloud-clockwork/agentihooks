@@ -9408,7 +9408,8 @@
       "seam": "scripts.ci_lab.audit.promotion_audit and scripts.ci_lab.audit.unfiled over a fakeredis verdict store, a fake lab port and a ledger fake that refuses every write while down",
       "tests": [
         "tests/ci_lab/test_audit.py::test_a_refused_mismatch_task_leaves_its_units_recorded_as_unfiled",
-        "tests/ci_lab/test_audit.py::test_the_audit_after_a_refused_mismatch_task_files_it_with_the_same_units"
+        "tests/ci_lab/test_audit.py::test_the_audit_after_a_refused_mismatch_task_files_it_with_the_same_units",
+        "tests/ci_lab/test_audit.py::test_a_kind_filed_before_a_refused_kind_stays_filed_and_only_the_refused_kind_is_filed_again"
       ]
     },
     {

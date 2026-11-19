@@ -83,13 +83,14 @@ class LedgerDown(Exception):
 
 @dataclass
 class Ledger:
-    """A ledger that records every task it is asked to add, or refuses every write while down."""
+    """A ledger that records every task it is asked to add, or refuses every write while down or once it holds takes."""
 
     added: list[tuple[str, dict[str, Any], str]] = field(default_factory=list[tuple[str, dict[str, Any], str]])
     down: bool = False
+    takes: int | None = None
 
     def add_task(self, slug: str, fields: dict[str, Any], by: str) -> None:
-        if self.down:
+        if self.down or (self.takes is not None and len(self.added) >= self.takes):
             raise LedgerDown(slug)
         self.added.append((slug, fields, by))
 
@@ -301,6 +302,31 @@ def test_the_audit_after_a_refused_mismatch_task_files_it_with_the_same_units(st
     assert audit.unfiled(store) == []
     assert audit.promotion_audit(ports, HEAD).run == "grade-v1-retry"
     assert len(ledger.added) == 1
+
+
+@pytest.mark.feature("lab-audit-refiles-refused-mismatches")
+def test_a_kind_filed_before_a_refused_kind_stays_filed_and_only_the_refused_kind_is_filed_again(
+    store: Store,
+) -> None:
+    _cache(store, "static", LINT, True)
+    cached = _cache(store, "test", ONE, True)
+    units = [_unit("static", LINT, "grade-v1-cached"), _unit("test", ONE, "grade-v1-cached")]
+    ledger = Ledger(takes=1)
+    ports = audit.Ports(store, Lab(units=units, fresh={LINT: False, ONE: False}), ledger, SLUG)
+    with pytest.raises(LedgerDown):
+        audit.promotion_audit(ports, HEAD)
+
+    refused = audit.Mismatch(cached, Verdict("test", ONE, False, False, 1.0), "grade-v1-cached", AUDIT_RUN)
+    assert audit.unfiled(store) == [refused]
+    ledger.takes = None
+    with pytest.raises(audit.CILabVerdictMismatch) as raised:
+        audit.promotion_audit(ports, HEAD)
+
+    assert raised.value.mismatches == (refused,)
+    assert [fields["title"] for _, fields, _ in ledger.added] == [
+        "Lab verdict mismatch: static reuse disabled",
+        "Lab verdict mismatch: test reuse disabled",
+    ]
 
 
 @pytest.mark.feature("lab-reuse-audit")

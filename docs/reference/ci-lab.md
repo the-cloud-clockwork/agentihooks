@@ -3683,6 +3683,10 @@ verdicts.enable("test")
 It removes the kind from `agentihooks-ci:disabled`. A Redis flush empties that set too, which
 enables every kind again; see [Disable and enable a kind](#disable-and-enable-a-kind).
 
+`enable` leaves the kind's entry in `agentihooks-ci:unfiled`. A kind enabled before its task is
+filed is disabled again by the next audit, which files the recorded units; a recorded unit that
+differs again in that audit is listed twice in the task.
+
 ### Use it
 
 With `client` and `verdicts` built as in [Use the store](#use-the-store), `lab` an object with the
