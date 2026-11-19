@@ -84,16 +84,18 @@ def _refuse_parse(text: str, lines: list[int]) -> dict[int, int]:
 
 
 @pytest.mark.parametrize(
-    ("source", "ran", "published"),
+    ("source", "ran", "published", "warned"),
     [
-        ('value = max(\n    1,\n    2,\n)\nscript = """\nconst a = 1;\n"""\n', {1, 2, 3, 5, 6}, [1, 5]),
+        ('value = max(\n    1,\n    2,\n)\nscript = """\nconst a = 1;\n"""\n', {1, 2, 3, 5, 6}, [1, 5], []),
         (
             "try:\n    import fcntl\nexcept ImportError:  # pragma: no cover - Windows\n    fcntl = None\nvalue = 1\n",
             {1, 2, 5},
             [1, 2, 5],
+            [],
         ),
+        ('"""Module."""\nvalue = 1\n', {1, 2, 9}, [2], [1, 9]),
     ],
-    ids=["continuation-lines", "excluded-lines-not-run"],
+    ids=["continuation-lines", "excluded-lines-not-run", "unexcluded-module-drops-docstring-and-impossible-lines"],
 )
 def test_a_matching_statement_summary_maps_the_lines_without_parsing(
     measured: Measured,
@@ -102,6 +104,7 @@ def test_a_matching_statement_summary_maps_the_lines_without_parsing(
     source: str,
     ran: set[int],
     published: list[int],
+    warned: list[int],
 ) -> None:
     root, _, shards = measured
     (root / "hooks/example.py").write_text(source)
@@ -110,7 +113,10 @@ def test_a_matching_statement_summary_maps_the_lines_without_parsing(
     monkeypatch.setattr(cache, "statements_of", _refuse_parse)
     target = root / "baseline.json"
     cache.record(root, shards, target)
-    assert "hooks/example.py" not in capsys.readouterr().out
+    assert [line for line in capsys.readouterr().out.splitlines() if line.startswith("::warning::")] == [
+        f"::warning::hooks/example.py:{line} is not executable in the current source; dropped from baseline"
+        for line in warned
+    ]
     assert cache.read(target)["executed"] == {"hooks/example.py": published}
 
 
