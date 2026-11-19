@@ -8150,6 +8150,21 @@
       ]
     },
     {
+      "id": "hive-set-drain-stops-lane-spokes",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-offer-single-hive",
+      "behaviour": "A hive whose record says draining, as agentihooks hive set draining=yes writes it, takes no new agents through its lane spokes, just as a hive whose pod member is draining: the lane loop beats presence and polls no spoke, so the hub never refuses it an offer as draining and the spoke never terms the only offer copy before a hive with room sees it; a hive drained neither way, or with only another pod's member draining, keeps polling.",
+      "seam": "scripts.hive.lanes.draining read by scripts.hive.lanes.run",
+      "tests": [
+        "tests/hive/test_lanes.py::test_a_hive_drained_as_a_whole_or_by_this_pods_member_takes_no_new_agents",
+        "tests/hive/test_lanes.py::test_a_store_without_redis_reads_no_hive_record_and_is_not_draining",
+        "tests/hive/test_lanes.py::test_the_lane_loop_beats_and_polls_no_spoke_on_a_hive_drained_with_hive_set"
+      ],
+      "rules": [
+        "lane-drain-reads-member-only"
+      ]
+    },
+    {
       "id": "monitor-counts-registered-seats",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2506",
