@@ -170,6 +170,15 @@ def test_rejected_exchange_preserves_the_http_status_without_changing_its_messag
     assert str(refused.value) == module.REFUSED
 
 
+@pytest.mark.feature("lab-token-mint-status")
+def test_a_refusal_without_an_http_status_keeps_its_message() -> None:
+    from scripts.github_app import REFUSED, GitAuthRefused
+
+    refused = GitAuthRefused(REFUSED)
+    assert refused.status_code is None
+    assert str(refused) == REFUSED
+
+
 def test_permission_tokens_request_only_those_permissions(monkeypatch: pytest.MonkeyPatch) -> None:
     module, post = scoped(monkeypatch, {"checks": "write", "metadata": "read"}, [])
     requested = {"checks": "write"}
