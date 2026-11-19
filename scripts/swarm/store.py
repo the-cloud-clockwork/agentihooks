@@ -257,7 +257,7 @@ class RedisStore:
     def slugs(self):
         return sorted(self.redis.smembers(f"{PREFIX}:index"))
 
-    def create(self, config):
+    def create(self, config: SwarmConfig) -> None:
         from scripts.swarm import model_catalog
 
         changes = {
@@ -269,6 +269,11 @@ class RedisStore:
             refused := default_models.refusal(changes, model_catalog.catalog(os.environ, self.redis, time.time()))
         ):
             raise SwarmError(refused)
+        if models := default_models.lane_models(config.lanes, {}):
+            if refused := default_models.lane_refusal(
+                models, model_catalog.catalog(os.environ, self.redis, time.time())
+            ):
+                raise SwarmError(refused)
         refused = effort_range.refusal((config.effort_min, config.effort_max), config.lanes) or scaling_refusal(config)
         if refused:
             raise SwarmError(refused)
