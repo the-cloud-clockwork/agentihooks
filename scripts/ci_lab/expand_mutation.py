@@ -112,12 +112,11 @@ def module_digest(source: str) -> str:
 
 
 def split_members(members: tuple[str, ...], timeout: float) -> list[tuple[str, ...]]:
-    """Split a function's mutants, in order, into the fewest near equal parts that each price within timeout at
-    MUTANT_SECONDS a mutant, one mutant a part at the least; all of them in one part when they price within it."""
-    if len(members) * MUTANT_SECONDS <= timeout:
-        return [members]
-    count = -(-len(members) // max(1, math.floor(timeout / MUTANT_SECONDS)))
-    return [members[index * len(members) // count : (index + 1) * len(members) // count] for index in range(count)]
+    """Split a function's mutants, in order, into the fewest near equal parts whose largest prices within timeout at
+    MUTANT_SECONDS a mutant, one part when all of them do and one mutant a part when even one prices over it."""
+    size = len(members)
+    count = next((parts for parts in range(1, size) if -(-size // parts) * MUTANT_SECONDS <= timeout), size)
+    return [members[index * size // count : (index + 1) * size // count] for index in range(count)]
 
 
 def function_units(

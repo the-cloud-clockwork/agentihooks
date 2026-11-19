@@ -168,20 +168,24 @@ def test_mutant_names_and_keys_are_stable_across_runs_and_checkouts(tmp_path: Pa
 
 
 @pytest.mark.feature("lab-mutant-unit-split")
-@pytest.mark.parametrize("per", [1, 2])
+@pytest.mark.parametrize(
+    ("timeout", "sizes"),
+    [
+        (1.0, [1, 1, 1, 1, 1]),
+        (MUTANT_SECONDS + 1.0, [1, 1, 1, 1, 1]),
+        (2 * MUTANT_SECONDS + 1.0, [1, 2, 2]),
+        (3 * MUTANT_SECONDS - 1.0, [1, 2, 2]),
+        (3 * MUTANT_SECONDS, [2, 3]),
+    ],
+)
 def test_a_unit_priced_over_the_timeout_splits_into_the_fewest_parts_that_each_price_within_it(
-    tmp_path: Path, per: int
+    tmp_path: Path, timeout: float, sizes: list[int]
 ) -> None:
     root = repository(tmp_path, MUTANT_FILES)
-    timeout = per * MUTANT_SECONDS + 1.0
     (whole,) = expand_mutation.mutant_units(root, {PATH: [12]}, {}, {})
     parts = expand_mutation.mutant_units(root, {PATH: [12]}, {}, {}, timeout=timeout)
-    sizes = [len(unit.members) for unit in parts]
-    assert len(whole.members) > 2
+    assert [len(unit.members) for unit in parts] == sizes
     assert [member for unit in parts for member in unit.members] == list(whole.members)
-    assert len(parts) == -(-len(whole.members) // per)
-    assert max(sizes) <= per
-    assert max(sizes) - min(sizes) <= 1
     assert [unit.kind for unit in parts] == ["mutant"] * len(parts)
     assert len({unit.key for unit in parts} | {whole.key}) == len(parts) + 1
     assert [unit.key for unit in parts] == [digest([whole.key, list(unit.members)]) for unit in parts]

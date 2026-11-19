@@ -1813,9 +1813,9 @@ A mutant unit's key is the sha256 of the JSON, object keys sorted, of a list hol
 6. the unlisted test hashes described above.
 
 Its members are `<name>__mutmut_1` to `<name>__mutmut_<n>`, one per mutation mutmut creates in the
-function. The worker runs a unit's mutants in one sandbox run bounded by `executors.UNIT_TIMEOUT_S`,
-1800 seconds, which `MirrorExpander._mutation` passes as the `timeout` of
-`expand_mutation.mutant_units`. A function whose mutants price over it, `n` times
+function. The worker grades a unit's mutants in one sandbox run after the unit's stats run, each run
+bounded by `executors.UNIT_TIMEOUT_S`, 1800 seconds, which `MirrorExpander._mutation` passes as the
+`timeout` of `expand_mutation.mutant_units`. A function whose mutants price over it, `n` times
 `scripts.ci_mutation.plan.MUTANT_SECONDS` (5.6 seconds a mutant, the fallback of
 `pricing.estimate`), gets the fewest near equal parts that each price within it, at most 321
 mutants a part, in mutant order; `expand_mutation.split_members` cuts them. Each part's key is the
