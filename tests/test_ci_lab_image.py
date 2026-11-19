@@ -179,8 +179,12 @@ def test_the_image_job_smokes_the_candidate_before_it_publishes_dev_and_the_shor
     job = _workflow()["jobs"]["image"]
     assert job["if"] == "github.event_name != 'schedule'"
     assert job["permissions"] == {"contents": "read", "packages": "write"}
-    checkout, login, build, smoke, publish = job["steps"]
-    assert checkout == {"uses": "actions/checkout@v4", "with": {"persist-credentials": False}}
+    checkout, guard, login, build, smoke, publish, release = job["steps"]
+    assert checkout == {
+        "uses": "actions/checkout@v4",
+        "with": {"fetch-depth": "${{ github.event_name == 'release' && '0' || '1' }}", "persist-credentials": False},
+    }
+    assert guard["if"] == release["if"] == "github.event_name == 'release'"
     assert login["uses"] == "docker/login-action@v3"
     assert '--file docker/ci-lab/Dockerfile --tag "$CANDIDATE" .' in build["run"]
     digest = "$(sha256sum .github/test-requirements.lock | cut -d ' ' -f 1)"
@@ -196,6 +200,33 @@ def test_the_image_job_smokes_the_candidate_before_it_publishes_dev_and_the_shor
         f"tag candidate {image}:dev",
         f"push {image}:dev",
     ]
+
+
+def test_a_published_release_builds_behind_the_swarm_image_guard() -> None:
+    workflow = _workflow()
+    assert workflow[True]["release"] == {"types": ["published"]}
+    checkout, guard = workflow["jobs"]["image"]["steps"][:2]
+    swarm = yaml.safe_load((ROOT / ".github/workflows/swarm-image.yml").read_text())["jobs"]["publish"]["steps"]
+    assert checkout["with"].get("fetch-depth") == swarm[0]["with"]["fetch-depth"]
+    assert guard == next(step for step in swarm if step.get("id") == "main")
+
+
+@pytest.mark.parametrize(("latest", "tags"), [("true", ["2.17.1071", "release"]), ("false", ["2.17.1071"])])
+def test_a_release_publishes_its_version_and_moves_release_only_for_the_newest_tag(
+    tmp_path: Path, latest: str, tags: list[str]
+) -> None:
+    job = _workflow()["jobs"]["image"]
+    release = job["steps"][-1]
+    assert release["if"] == "github.event_name == 'release'"
+    assert release["env"] == {
+        "RELEASE": "${{ github.event.release.tag_name }}",
+        "LATEST": "${{ steps.main.outputs.latest }}",
+    }
+    env = {**_fake_docker(tmp_path), **job["env"], "CANDIDATE": "candidate", "RELEASE": "v2.17.1071", "LATEST": latest}
+    subprocess.run(["bash", "-e", "-c", release["run"]], env=env, check=True)
+    image = "ghcr.io/the-cloud-clockwork/agentihooks-ci-lab-worker"
+    expected = [line for tag in tags for line in (f"tag candidate {image}:{tag}", f"push {image}:{tag}")]
+    assert (tmp_path / "docker.log").read_text().splitlines() == expected
 
 
 def test_every_lab_image_job_is_registered_in_the_runner_class_map() -> None:
