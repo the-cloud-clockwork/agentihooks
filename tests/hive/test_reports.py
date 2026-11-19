@@ -1086,20 +1086,31 @@ def test_a_nudge_for_a_hub_admitted_worker_whose_hive_is_lost_is_refused_without
 ) -> None:
     from scripts.hive.orders import Orders
 
-    remote.runtime.herdr = Mock(side_effect=AssertionError("the controller herdr holds no hub admitted pane"))
+    remote.runtime.herdr = Mock(return_value={})
     assert remote.runtime.nudge(remote.agent, "check your task") == f"hive {HIVE} is not reporting"
     assert remote.redis.xrange(Orders(remote.redis).commands(HIVE)) == []
     remote.runtime.herdr.assert_not_called()
 
 
 @pytest.mark.feature("swarm-nudges-hub-admitted-workers-through-their-hive")
-@pytest.mark.parametrize(("hive", "target"), [("other", {}), (HIVE, {"host_id": "other"})])
-def test_a_hive_refuses_a_nudge_for_an_execution_another_hive_runs(
-    remote: SimpleNamespace, hive: str, target: dict[str, str]
+@pytest.mark.parametrize(
+    ("hive", "target", "accepted"),
+    [
+        (HIVE, {}, True),
+        ("other", {}, False),
+        (HIVE, {"host_id": HIVE}, True),
+        ("other", {"host_id": HIVE}, True),
+        (HIVE, {"host_id": "other"}, False),
+        (HIVE, {"pid": 12, "pid_start": 34}, False),
+    ],
+)
+def test_a_hive_takes_a_nudge_order_exactly_when_the_controller_sends_it_there(
+    remote: SimpleNamespace, hive: str, target: dict[str, str | int], accepted: bool
 ) -> None:
     from scripts.hive.orders import FOREIGN, Consumer
     from scripts.swarm.runtime import _command
     from scripts.swarm.store import AgentRecord
+    from scripts.swarm_v2.runtime.base import LOCAL, Outcome, Status
 
     agent = remote.store.start_execution(
         "fixture",
@@ -1113,9 +1124,12 @@ def test_a_hive_refuses_a_nudge_for_an_execution_another_hive_runs(
             runtime_target=target,
         ),
     )
+    assert ((remote.reports.host(agent) or remote.reports.admitted(agent)) == HIVE) is accepted
     runtime = Mock()
-    assert Consumer(remote.redis, HIVE, runtime).command(_command("nudge", agent, "check your task")) == FOREIGN
-    runtime.command.assert_not_called()
+    runtime.command.return_value = Outcome("command", Status.OK, LOCAL)
+    ack = Consumer(remote.redis, HIVE, runtime).command(_command("nudge", agent, "check your task"))
+    assert (ack != FOREIGN) is accepted
+    assert runtime.command.called is accepted
 
 
 def test_pane_naming_and_stray_reaping_are_hive_orders(remote):
