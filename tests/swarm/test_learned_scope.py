@@ -117,7 +117,6 @@ def test_scoped_memory_without_matching_notes_is_empty(env: tuple[Any, Any, Any]
     assert memory.scoped("sw", "eng-1@sw") == []
 
 
-@pytest.mark.feature("swarm-learned-scope")
 def test_scoped_memory_reads_learned_lists_without_listing_agent_pointers(
     env: tuple[Any, Any, Any],  # noqa: F811
     monkeypatch: pytest.MonkeyPatch,
@@ -127,6 +126,8 @@ def test_scoped_memory_reads_learned_lists_without_listing_agent_pointers(
     store, _, _ = env
     store.memory.learn("eng-1@sw", "previous occupant", "own note", 1, "note")
     store.memory.learn("ci-1@sw", "previous occupant", "shared canon", 1, "canon")
+    store.memory.learn("eng-1@sw-doctor", "previous occupant", "doctor canon", 1, "canon")
+    store.memory.learn("x:eng-1@sw", "previous occupant", "colon canon", 1, "canon")
 
     def refused(self: SeatRegistry, slug: str) -> list[tuple[str, str]]:
         raise AssertionError(f"learned notes listed every agent seat of {slug}")
