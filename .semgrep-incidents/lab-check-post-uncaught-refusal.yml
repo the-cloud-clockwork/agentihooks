@@ -6,17 +6,14 @@ rules:
       A check run post that the GitHub App token, GitHub or the network refuses raises out of the lab scheduler pass
       and ends the scheduler process. On 19 November the App installation refused the checks write token, the
       GitAuthRefused escaped serve, and the scheduler restarted six times in 35 minutes while no grade advanced. Catch
-      GitAuthRefused, PostRefused and OSError around the post, record the refusal and leave the check run to a later
-      pass.
+      GitAuthRefused, PostRefused and OSError around every check run post, record the refusal and leave the check run
+      to a later pass.
     paths:
       include:
         - /scripts/ci_lab/scheduler.py
         - lab-check-post-uncaught-refusal.py
     patterns:
-      - pattern-inside: |
-          def _post(...):
-              ...
-      - pattern: $POSTER.post(...)
+      - pattern: $POSTER.post($HEAD, $CHECK, $STATUS, $CONCLUSION, $OUTPUT, $SHADOW)
       - pattern-not-inside: |
           try:
               ...

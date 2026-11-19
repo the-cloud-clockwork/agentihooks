@@ -2630,7 +2630,10 @@ the action `cannot expand <head>: <error>` and drops the head: the head has alre
 `agentihooks-ci:waiting` and is not put back, so it gets no grade. `Scheduler._refuse` then posts
 one completed `lab-shadow/required` check run with conclusion `failure` on the head, whose summary
 reads `cannot expand <head> against <base>: <error>`, so the head still shows a lab status. A head
-with no plan has no authoritative gates, so the check posts under the shadow name. A head pushed to
+with no plan has no authoritative gates, so the check posts under the shadow name. A post of that
+check that the App token, GitHub or the network refuses is recorded as
+`cannot post the failed required check on <head>: <error>` and not retried, since the dropped head
+keeps no grade, and the pass goes on. A head pushed to
 a grade ref gets no check run, since GitHub does not hold that head. A manifest fetch that raises `FetchPending` or `FetchUnanswered` holds the head again instead, as
 `holding <head>: <error>`; [Test units](#test-units) describes both. The scheduler service prints
 each action on its own line:

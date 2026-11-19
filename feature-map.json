@@ -166,7 +166,8 @@
         "tests/ci_lab/test_scheduler_posts.py::test_a_refused_post_holds_the_posts_of_every_grade_of_the_repository_until_the_hold_ends",
         "tests/ci_lab/test_scheduler_posts.py::test_a_refused_post_holds_only_its_own_repository_and_another_repository_keeps_posting",
         "tests/ci_lab/test_scheduler_posts.py::test_a_post_github_refuses_holds_only_its_grade_across_a_restart_while_other_grades_keep_posting",
-        "tests/ci_lab/test_scheduler_posts.py::test_the_check_poster_s_refused_app_token_is_held_by_the_pass_and_tried_again_after_the_hold"
+        "tests/ci_lab/test_scheduler_posts.py::test_the_check_poster_s_refused_app_token_is_held_by_the_pass_and_tried_again_after_the_hold",
+        "tests/ci_lab/test_scheduler_posts.py::test_a_refused_failed_check_of_a_head_that_cannot_expand_is_recorded_and_the_pass_goes_on"
       ]
     },
     {

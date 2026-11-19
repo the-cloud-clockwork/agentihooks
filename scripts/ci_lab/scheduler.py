@@ -737,21 +737,26 @@ class Scheduler:
                 jsonschema.ValidationError,
             ) as error:
                 actions.append(f"cannot expand {request.head}: {error}")
-                self._refuse(request, ref, error, now_ms)
+                actions.extend(self._refuse(request, ref, error, now_ms))
             if started == STARTS_PER_PASS:
                 break
         return actions
 
-    def _refuse(self, request: GradeRequest, ref: str, error: Exception, now_ms: int) -> None:
+    def _refuse(self, request: GradeRequest, ref: str, error: Exception, now_ms: int) -> list[str]:
         """Post a completed required check run with conclusion failure on a head that cannot expand, naming the error,
         so the head shows a lab status. A head with no plan has no authoritative gates, so the check posts as
-        lab-shadow/required; a head pushed to a grade ref posts nothing, since GitHub does not hold it."""
+        lab-shadow/required; a head pushed to a grade ref posts nothing, since GitHub does not hold it. A post the App
+        token, GitHub or the network refuses is recorded and not retried, since the dropped head keeps no grade."""
         if ref.startswith(GRADE_REFS):
-            return
+            return []
         reason = f"cannot expand {request.head} against {request.base}: {error}"
         title = f"{CLASSES[request.tier]} grade cannot expand"
         output = Output(title, reason, (), f"unexpanded-{now_ms}", "unknown", f"{request.repo}/commit/{request.head}")
-        self.ports.checks(_slug(request.repo)).post(request.head, REQUIRED, "completed", "failure", output, True)
+        try:
+            self.ports.checks(_slug(request.repo)).post(request.head, REQUIRED, "completed", "failure", output, True)
+        except (GitAuthRefused, PostRefused, OSError) as refusal:
+            return [f"cannot post the failed {REQUIRED} check on {request.head}: {refusal}"]
+        return []
 
     def _start(self, request: GradeRequest, lane: str, ref: str, now_ms: int) -> str:
         """Open a grade of a head and the grade ref it was pushed to: supersede the lane's older head, place every unit

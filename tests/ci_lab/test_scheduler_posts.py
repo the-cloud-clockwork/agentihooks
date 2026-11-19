@@ -201,3 +201,17 @@ def test_the_check_poster_s_refused_app_token_is_held_by_the_pass_and_tried_agai
     assert engine.tick(1000 + HOLD_MS - 1) == []
     assert held in engine.tick(1000 + HOLD_MS)
     assert (poster.runs, run.grade(HEAD_A).posted) == ({}, {})
+
+
+@pytest.mark.feature("lab-scheduler-post-refusal")
+def test_a_refused_failed_check_of_a_head_that_cannot_expand_is_recorded_and_the_pass_goes_on(
+    lab: Callable[..., Run],
+) -> None:
+    run = lab({HEAD_B: plan({"lint": (unit(2),)})})
+    poster = refusing(run, GitAuthRefused(REFUSED), heads=frozenset({HEAD_A}))
+    run.push(HEAD_A, lane="first")
+    run.push(HEAD_B, lane="second")
+    actions = run.tick(1000)
+    assert f"cannot post the failed {scheduler.REQUIRED} check on {HEAD_A}: {REFUSED}" in actions
+    assert poster.moves(HEAD_A, scheduler.REQUIRED) == []
+    assert poster.moves(HEAD_B, "lint") == [("queued", None)]
