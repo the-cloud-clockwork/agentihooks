@@ -1,9 +1,12 @@
 import argparse
 import json
+import re
 import subprocess
 from pathlib import Path
 
+from coverage.config import DEFAULT_EXCLUDE
 from coverage.exceptions import NotPython
+from coverage.misc import join_regex
 from coverage.python import get_python_source
 
 from tests.coverage_grade import statements_of
@@ -12,6 +15,7 @@ from tests.coverage_summary import STATEMENTS, digest
 from tests.coverage_summary import statements as statement_summaries
 
 OWN_DATABASE = ".coverage"
+EXCLUDED = re.compile(join_regex(DEFAULT_EXCLUDE), re.MULTILINE)
 
 
 def _git(repo: Path, revision: str) -> str:
@@ -45,14 +49,15 @@ def _executed(summaries: list[Path]) -> dict[str, list[int]]:
 
 def _statements(source: Path, lines: list[int], known: dict | None) -> dict[int, int]:
     """Map executed lines to their statement's first line, reading the shard's statement summary when it parsed this
-    exact text and holds every executed line; coverage exclusions only remove statements, so the parse then agrees.
+    exact text and either holds every executed line or none of coverage's default exclusions match the text; the shard
+    reporter applies only those exclusions and they only remove statements, so the parse then agrees.
     """
     text = source.read_text()
     if known and digest(source.read_bytes()) == known["digest"] and text == get_python_source(str(source)):
-        first = known["first"]
+        first, starts = known["first"], set(known["statements"])
         mapped = {line: first.get(str(line), line) for line in lines}
-        if set(mapped.values()) <= set(known["statements"]):
-            return mapped
+        if set(mapped.values()) <= starts or not EXCLUDED.search(text):
+            return {line: start for line, start in mapped.items() if start in starts}
     return statements_of(text, lines)
 
 
