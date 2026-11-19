@@ -2267,6 +2267,185 @@ whose work ended.
 | The hive logs `hive execution stops for swarm <slug> failed (<error>)` | The error type and message it prints | Fix the cause the error names. A NATS permission error means the hive's bus credential lacks the stop grants: on the workstation root hive, restart the hive service: `hive run` compares the stored root credential's publish and subscribe grant with a fresh mint at start and re-mints it when they differ, logging `hive re-minted the root bus credential in <path>`; a `hive kept the stored root bus credential (<reason>)` line names why it could not, and `agentihooks hive root-bus` mints it by hand. On a member hive, run `agentihooks hive refresh`. |
 | The tick prints `could not send the stop for <agent>, retrying next tick: failed (<error>)` | The error, NATS from the controller and the controller's bus credentials | Fix the bus; the next pass sends the stop again. |
 
+### Retiring a hub admitted agent
+
+The tick also retires a hub admitted agent whose work has not ended: when it sits idle, its account is revoked,
+it repeats content refusals, it stays stuck on a provider error or its live binding no longer matches its record.
+The tick drops the agent, refunds its claim life, reopens its task, and sends the agent's hive the execution stop
+naming the retirement reason. The hive then ends the execution as in
+[How the hive honors the stop](#how-the-hive-honors-the-stop), with `stop_reason` set to that reason.
+
+Before [pull request #11209](https://github.com/the-cloud-clockwork/agentihooks/pull/11209) the `verify` and `reap`
+steps judged only the agents on the hub reconciler's legacy list, which leaves out every agent whose hive recorded
+its `execution.started` on a real bus. Nothing on the hub or hive side retired such an agent for a mismatch or
+idling, so it kept its seat and its claim life never came back. Pull request #11209 put hub admitted agents into
+both steps with a refund.
+[Pull request #11250](https://github.com/the-cloud-clockwork/agentihooks/pull/11250) made the `reap` step's
+retirements send the hive stop,
+[pull request #11293](https://github.com/the-cloud-clockwork/agentihooks/pull/11293) did the same for the `verify`
+step's mismatch, and [pull request #11296](https://github.com/the-cloud-clockwork/agentihooks/pull/11296) resends a
+stop the bus refused.
+
+#### Which retirements send the stop
+
+| Stop reason | Step and trigger | Tick action |
+|---|---|---|
+| `idle` | `reap`: the idle watch counted 20 idle passes (`IDLE_KILL_TICKS`, from `IDLE_KILL_MS`, nineteen one minute passes) | `stalled <agent>` |
+| `revoked` | `reap`: the agent's harness account is revoked | `freed the seat of <agent>: <harness> account <account> was revoked` |
+| `refused` | `reap`: the pane shows repeated content refusals while the task row names the agent | `freed <agent> after repeated content refusals` |
+| `stuck` | `reap`: the pane shows a provider error and either the agent's outage recovery is exhausted, or the agent is idle and its pane has been held on the error for 30 minutes (`HOLD_LIMIT_MS`) | `freed the seat of <agent>, stuck on a provider error` |
+| `mismatch` | `verify`: the agent's live binding differs from its record in the fields the action names | `retired <agent> after mismatched <fields>` |
+
+The drop appends `, task <task> reopened` when it reopened the task, and `, task <task> left to the merge of <url>`
+when the agent was waiting on its own pull request's merge. An `idle` action adds
+`; outage recovery could not proceed: <blocker>` when an outage recovery of the agent was still pending.
+
+The `reap` step watches a hub admitted agent only while the controller lists its pane as live and its work has not
+ended. It skips an agent in `awaiting-decision` or `retiring`, a master still `starting` and an agent whose launch
+acknowledgement is still being collected. The `verify` step judges a hub admitted agent only when the runtime
+returned binding facts for it. Masters are never retired for idling or a stuck provider error. A master on a
+revoked account is recycled in its seat instead, and a master's mismatch first passes the master retirement hold,
+which can keep it seated.
+
+#### Retire, drop, then stop
+
+For `idle` and `mismatch` the tick reaps the agent first:
+
+1. The tick asks its own runtime to retire the agent, which reaps the session with the task's scratch homes. A
+   `mismatch` skips this when the hive's latest report already shows the agent gone.
+2. When the runtime cannot reach the agent, as from the controller pod while the pane lives on the hive, the tick
+   sends the execution stop to the agent's hive instead. A `sent` or `pending` answer counts as retired.
+3. With neither, the agent stays seated. An `idle` agent is judged again on the next pass. A `mismatch` agent is
+   marked `retiring`, with the action `could not retire <agent> after mismatched <fields>, retrying next tick`.
+4. The tick drops the agent with the refund below.
+5. Once the store took the drop, the tick sends the stop naming the reason. For an agent its runtime reaped this is
+   the only stop. For an agent stopped in step 2 it is the same stop inside the 120 second bus dedupe window, so it
+   answers `pending` and nothing new reaches the hive.
+
+For `revoked`, `refused` and `stuck` the agent counts as retired when its hive's latest report shows it gone or the
+tick's runtime retires it. Otherwise the agent stays seated, and the action reads
+`could not retire <agent> on revoked <harness> account <account>, retrying next tick`,
+`could not retire <agent> after repeated content refusals, retrying next tick` or
+`could not retire <agent>, stuck on a provider error, retrying next tick`. A retired agent is dropped with the
+refund, then the stop goes out as in step 5.
+
+The stop goes out only after a drop the store took. When the store refuses the drop, no stop follows and the next
+pass judges the agent again. The `reap` step then reports
+`kept <agent>, the store refused its drop, retrying next pass`, and a `verify` mismatch action ends
+`, the store refused its drop, retrying next pass`. An unreachable `idle` or `mismatch` agent was already stopped in
+step 2, so it stays seated with its execution stopped when the store refuses its drop.
+
+An agent with no recorded start, a legacy launch, gets no stop: no started event on the bus matches it, so the
+stop answers `unknown`. On the memory bus the stop answers `unknown` without opening a bus.
+
+#### The claim life refund
+
+Every one of these drops refunds. The drop gives the task back one claim life when all of these hold:
+
+- the task row is `claimed` or `pr`, names the agent as claimant and does not await merge;
+- the agent declared no wait on the merge of the task's own pull request;
+- the task's started lives count is above zero, and a fresh ledger read still names the agent at the claim
+  generation the pass read;
+- the task claim still names the agent at that generation, no refund is recorded for that generation and the
+  task's claim authority is not held.
+
+The refund lowers the task's count in `agentihooks:swarm:<slug>:started-lives`, or cancels the life still pending
+for it, and records the generation in `agentihooks:swarm:<slug>:claim:<task>:refunded`, so a generation is refunded
+at most once. The drop then releases the claim, removes the agent record, reopens the task guarded on the claimant
+and claim generation it read and, when the task reopened, keeps the agent's seat for it. In `deny` mode the
+`claims` gate blocks an open task once it has spent three lives (`CAP` in `scripts.gates.claims`), so without the
+refund three such retirements would block the task.
+
+When the hive later publishes the agent's exit, the hub's `lifecycle` reactor releases the launch slot and marks the
+spoke claim `exited`, and refunds no second life.
+
+#### What holds an idle agent
+
+A hub admitted agent counts idle passes under the same watch as an agent the tick launched. None of these count
+toward its retirement:
+
+- the pane waits on an input prompt, which also resets the idle count;
+- a declared wait (`agentihooks swarm <slug> wait`) or a working heartbeat; a checked wait holds only while the last
+  waits pass ran within the idle retirement window;
+- text in the pane's input line, or an operator prompt to the pane within the quiet window;
+- a ledger probe hold, or an automated gc run that owns the agent;
+- an outage hold whose recovery is not exhausted, or an outage recovery still pending.
+
+A held agent keeps its seat and claim, and the tick sends its hive no stop.
+
+#### The stop line and resent stops
+
+Every stop prints one line on the tick's stderr, the controller log in a cluster install, with the answers listed
+in [The stop and what the tick reports](#the-stop-and-what-the-tick-reports):
+
+```text
+hub execution stop for engineer@<code>-<n> in swarm <slug> after idle: sent
+```
+
+When the stop sent after the drop answers `failed (<error>)` and the agent has an execution id, the tick keeps it
+in the hash `agentihooks:swarm:<slug>:pending-stops`, keyed by execution id, with the agent record and the reason.
+At the start of every `reap` pass the tick sends each kept stop again and reports one action for each:
+
+```text
+sent the idle stop for engineer@<code>-<n> again: sent
+```
+
+Any answer other than `failed` removes the stop from the hash. The first `failed` answer ends that pass's resends
+and leaves the rest for the next pass. A kept stop whose execution the swarm still seats is removed unsent, because
+the next judgement of that agent sends a fresh one. On the memory bus nothing is kept or resent. A stop sent before
+the drop in step 2 is never kept: a failed one leaves the agent seated for the next pass.
+
+#### Retirement stop limitations
+
+- `agentihooks swarm <slug> stop now` retires each agent through the runtime and refunds its claim life, but sends
+  no execution stop to any hive.
+- A hive that predates the execution stop reader ignores the stop, so an agent the tick's runtime could not reach
+  keeps its session running on that hive after the swarm dropped it.
+
+#### Upgrading for the retirement stop
+
+The controller, or the workstation tick in local mode, needs a release carrying pull requests #11209, #11250,
+#11293 and #11296. Each hive needs the execution stop reader, as in [Upgrade](#upgrade).
+
+#### Checking a retirement on a live swarm
+
+```bash
+# Retirement stops the controller sent in the last hour
+kubectl -n <namespace> logs deploy/agentihooks-swarm-controller --since=1h \
+  | grep -E 'hub execution stop for .* after (idle|revoked|refused|stuck|mismatch):'
+# hub execution stop for engineer@<code>-<n> in swarm <slug> after mismatch: sent
+
+# Stops the bus refused, waiting for the next reap pass
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" HGETALL 'agentihooks:swarm:<slug>:pending-stops'
+
+# The task's started lives after the refund, and the generation refunded
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" HGET 'agentihooks:swarm:<slug>:started-lives' <task>
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" GET 'agentihooks:swarm:<slug>:claim:<task>:refunded'
+
+# The task reopened with no claimant
+agentihooks ledger --slug <slug> get tasks/<task>
+```
+
+The feature map entries `events-retirement-refunds-claim-life`, `events-retirement-stops-the-execution`,
+`events-refused-stop-resent` and `events-legacy-free-sends-no-stop` list the regression tests for this path, and
+`events-smoke-mismatch-retire` and `events-smoke-idle-retire` the smoke tests on a real nats-server and Redis. The
+Semgrep incident rule `tick-free-skips-execution-stop` fails a tick path that retires an agent through
+`retire_unless_gone` and drops it with a refund without sending the hive stop.
+[Pull request #11211](https://github.com/the-cloud-clockwork/agentihooks/pull/11211) added that rule and the legacy
+no stop tests, and [pull request #12020](https://github.com/the-cloud-clockwork/agentihooks/pull/12020) added the
+mismatch and idle smoke tests.
+
+#### Troubleshooting retirements
+
+| Symptom | Check | Fix |
+|---|---|---|
+| An idle hub admitted agent is never retired | `agentihooks swarm <slug> status`, the agent's declared wait and its pane | Expected while a hold in [What holds an idle agent](#what-holds-an-idle-agent) applies, or while the controller cannot list its pane. With none of those, the controller predates pull request #11209; roll it onto a release that carries it. |
+| `could not retire <agent> after mismatched <fields>, retrying next tick` on every pass | The controller log for `hub execution stop for <agent>` | `unknown`: no started event matches the agent's current execution. `ended`: its execution already ended, and the hub reconciler settles it. `failed (<error>)`: fix the bus the error names. |
+| The tick reports `kept <agent>, the store refused its drop, retrying next pass`, or a mismatch action ends with that text | The agent record and the swarm Redis | No stop went out unless step 2 already stopped the agent. The next pass judges the agent again. |
+| `sent the <reason> stop for <agent> again: failed (<error>)` on every pass | NATS from the controller and the controller's bus credentials | Fix the bus; the stop stays in `pending-stops` until the bus takes it. |
+| The controller logs `sent`, and the retired agent's session still runs on its hive | The hive's log for `hive execution stop` | As in [Troubleshooting ended agents](#troubleshooting-ended-agents). |
+| A task blocks at the claim cap after its agents were retired for these reasons | `started-lives` and `claim:<task>:refunded` for the task | No refund was recorded: the controller predates pull request #11209, or the task row no longer named the agent when it was dropped. |
+
 ### Resuming a dead agent the hub started
 
 When the pane of a hub started agent dies before its work ends, its hive reopens the agent's own conversation in the
