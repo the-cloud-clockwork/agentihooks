@@ -62,6 +62,16 @@ def corpus() -> list[list[str]]:
 
 
 def test_the_nine_helpers_move_verbatim(original: ModuleType) -> None:
+    for name in (
+        "_FROZEN_COMMANDS",
+        "_GLOBAL_VALUES",
+        "_PUSH_WIDENS",
+        "_PUSH_VALUES",
+        "_API_VALUES",
+        "_GH_REPO",
+        "_REDIRECTION",
+    ):
+        assert getattr(shell_commands, name) == getattr(original, name), name
     for name in HELPERS:
         before = next(
             node
