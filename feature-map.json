@@ -997,6 +997,19 @@
       ]
     },
     {
+      "id": "live-binding-reads-hub-admitted-bindings-from-their-hive",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-live-binding-unobserved-model",
+      "behaviour": "A Codex app server worker the hub admitted to another hive, which carries no host target, takes its live binding facts from the binding its hive reports for its execution and generation instead of the controller's own managed path, whose server check can never pass off the server's host, so the live worker is recorded with its observed model and effort; each hive reports the binding of every hub admitted execution it runs, and a missing report, map entry, binding or hive reader, or an entry for another generation, gives no facts.",
+      "seam": "scripts.hive.daemon.execution_report writes the admitted bindings, read through scripts.hive.reports.Reports.admitted_binding by scripts.swarm.runtime.HerdrRuntime.bindings for scripts.swarm.live_binding.record",
+      "tests": [
+        "tests/hive/test_reports.py::test_the_controller_reads_a_hub_admitted_codex_workers_binding_from_the_hive_that_runs_it",
+        "tests/hive/test_reports.py::test_a_hub_admitted_worker_its_hive_reports_no_binding_for_gets_no_facts_from_this_host",
+        "tests/hive/test_reports.py::test_a_hub_admitted_worker_without_an_app_server_keeps_the_controllers_session_read",
+        "tests/hive/test_reports.py::test_an_app_server_worker_the_hub_admitted_to_this_hive_is_read_from_this_host"
+      ]
+    },
+    {
       "id": "swarm-history-bounded",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2501",
