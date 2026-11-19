@@ -928,52 +928,6 @@ def test_host_sample_counts_agents_on_headed_hives_wherever_the_sampler_runs(mon
     assert {"workstation_agents", "hive_agents"} <= {column for column, _ in metrics_swarm.HOST.columns}
 
 
-def test_swarm_review_rounds_ship_as_review_round_events(tmp_path, monkeypatch):
-    monkeypatch.setattr(metrics_swarm.gate_log, "gates_dir", lambda slug: tmp_path)
-    box = Outbox(tmp_path / "outbox.db", Settings("http://sink", "", ""))
-    try:
-        assert metrics_swarm.read_review_rounds(SLUG, box).rows == []
-        folder = tmp_path / "reviews"
-        folder.mkdir()
-        lines = [{"task": "t", "counter": "rounds", "round": round_, "at": NOW + round_} for round_ in (1, 2)]
-        (folder / "rounds.jsonl").write_text("".join(json.dumps(line) + "\n" for line in lines))
-        rows = metrics_swarm.read_review_rounds(SLUG, box).rows
-        assert [(row["kind"], row["target"], row["at"], row["review_id"]) for row in rows] == [
-            ("review round", "tasks/t", NOW + 1, "swarm:t:rounds:1"),
-            ("review round", "tasks/t", NOW + 2, "swarm:t:rounds:2"),
-        ]
-        delivery = metrics_swarm.delivery_rows(SLUG, doc(rows), [AGENT], {})
-        assert [row["kind"] for row in delivery] == ["review_round", "review_round"]
-        assert len({row["event_id"] for row in delivery}) == 2
-    finally:
-        box.close()
-
-
-def test_record_pass_ships_each_swarm_review_round_once(tmp_path, monkeypatch):
-    import fakeredis
-
-    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    store.create(SwarmConfig(SLUG, ".", 0, 0))
-    monkeypatch.setattr(metrics_swarm.host_budget, "read_host", lambda: HostSample(2.0, 2, 512, 1))
-    monkeypatch.setattr(metrics_swarm.gate_log, "since", lambda *args, **kwargs: [])
-    monkeypatch.setattr(metrics_swarm.gate_log, "gates_dir", lambda slug: tmp_path)
-    monkeypatch.setattr(metrics_swarm, "read_classifier_calls", lambda box: metrics_swarm.LogBatch("", 0, []))
-    monkeypatch.setattr(metrics_swarm, "read_review_events", lambda slug, box: metrics_swarm.LogBatch("", 0, []))
-    (tmp_path / "reviews").mkdir()
-    log = tmp_path / "reviews" / "rounds.jsonl"
-    log.write_text(json.dumps({"task": TASK["id"], "counter": "rounds", "round": 1, "at": NOW}) + "\n")
-    box = Outbox(tmp_path / "outbox.db", Settings("http://sink", "", ""))
-    try:
-        batch = metrics_swarm.read_review_rounds(SLUG, box)
-        assert batch.source.startswith(f"{log}:") and batch.position == log.stat().st_size
-        metrics_swarm.record_pass(box, SLUG, NOW + 1_000, store, doc(), [], {})
-        rounds = [row for row in box.recent("delivery_events", NOW + 1_000) if row["kind"] == "review_round"]
-        assert [row["ts_ms"] for row in rounds] == [NOW]
-        assert metrics_swarm.read_review_rounds(SLUG, box).rows == []
-    finally:
-        box.close()
-
-
 @pytest.mark.feature("review-round-metrics-from-ledger")
 def test_review_rounds_ship_from_the_round_stamps_on_each_ledger_task():
     rounds = {"rounds": [f"{NOW + 1}-a", "b", f"{NOW + 3}-c"], "rounds-other": [f"{NOW + 4}-d"]}
