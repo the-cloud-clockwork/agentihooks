@@ -1,6 +1,7 @@
 import base64
 import time
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -22,7 +23,7 @@ def test_an_undecodable_head_is_dead_lettered_and_the_next_head_is_read(payload:
         bus = nats.open_bus(BusConfig(url=url, queue=policy))
         try:
             consumer = bus.lab_heads.consumer(scheduler.DURABLE, scheduler.SUBJECT)
-            inbox = scheduler.BusInbox(consumer, batch=2, timeout_ms=100)
+            inbox = scheduler.BusInbox(cast(scheduler.Consumer, consumer), batch=2, timeout_ms=100)
             published = bus._loop.run(bus._js.publish("ci.lab.head.push", payload, stream=nats.LAB_STREAM))
             bus.lab_heads.publish("ci.lab.head.push", envelope(good))
             errors = []
