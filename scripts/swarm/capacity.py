@@ -746,7 +746,7 @@ def pins(
     return {"pins": found} if found else {}
 
 
-def apply(slug: str, config: SwarmConfig, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -> list[str]:
+def apply(slug: str, config: Any, store: Any, ledger: Any, runtime: Any, now_ms: int) -> list[str]:
     reader = getattr(runtime, "quota_capacity", None)
     if reader is None:
         return []
