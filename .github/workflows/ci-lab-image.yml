@@ -78,15 +78,11 @@ jobs:
             docker tag "$CANDIDATE" "$tag"
             docker push "$tag"
           done
-      - name: Publish the release tags
+      - name: Publish the release tags unless a newer release already published
         if: github.event_name == 'release'
         env:
           RELEASE: ${{ github.event.release.tag_name }}
-          LATEST: ${{ steps.main.outputs.latest }}
         run: |
-          tags=("$IMAGE:${RELEASE#v}")
-          if [[ "$LATEST" == true ]]; then tags+=("$IMAGE:release"); fi
-          for tag in "${tags[@]}"; do
-            docker tag "$CANDIDATE" "$tag"
-            docker push "$tag"
-          done
+          docker tag "$CANDIDATE" "$IMAGE:sha-$GITHUB_SHA"
+          docker push "$IMAGE:sha-$GITHUB_SHA"
+          bash docker/swarm-node/release.sh "$IMAGE" "$RELEASE" "$GITHUB_SHA"

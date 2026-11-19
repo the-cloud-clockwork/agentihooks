@@ -202,31 +202,28 @@ def test_the_image_job_smokes_the_candidate_before_it_publishes_dev_and_the_shor
     ]
 
 
-def test_a_published_release_builds_behind_the_swarm_image_guard() -> None:
-    workflow = _workflow()
-    assert workflow[True]["release"] == {"types": ["published"]}
-    checkout, guard = workflow["jobs"]["image"]["steps"][:2]
-    swarm = yaml.safe_load((ROOT / ".github/workflows/swarm-image.yml").read_text())["jobs"]["publish"]["steps"]
-    assert checkout["with"].get("fetch-depth") == swarm[0]["with"]["fetch-depth"]
-    assert guard == next(step for step in swarm if step.get("id") == "main")
-
-
-@pytest.mark.parametrize(("latest", "tags"), [("true", ["2.17.1071", "release"]), ("false", ["2.17.1071"])])
-def test_a_release_publishes_its_version_and_moves_release_only_for_the_newest_tag(
-    tmp_path: Path, latest: str, tags: list[str]
-) -> None:
+def test_a_release_publishes_the_qualified_candidate_before_the_release_script_moves_its_tags(tmp_path: Path) -> None:
     job = _workflow()["jobs"]["image"]
     release = job["steps"][-1]
     assert release["if"] == "github.event_name == 'release'"
-    assert release["env"] == {
-        "RELEASE": "${{ github.event.release.tag_name }}",
-        "LATEST": "${{ steps.main.outputs.latest }}",
+    assert release["env"] == {"RELEASE": "${{ github.event.release.tag_name }}"}
+    script = tmp_path / "docker/swarm-node/release.sh"
+    script.parent.mkdir(parents=True)
+    script.write_text('printf "release.sh %s\\n" "$*" >> "$DOCKER_LOG"\n')
+    env = {
+        **_fake_docker(tmp_path),
+        **job["env"],
+        "CANDIDATE": "candidate",
+        "GITHUB_SHA": "123456789abcdef",
+        "RELEASE": "v2.17.1071",
     }
-    env = {**_fake_docker(tmp_path), **job["env"], "CANDIDATE": "candidate", "RELEASE": "v2.17.1071", "LATEST": latest}
-    subprocess.run(["bash", "-e", "-c", release["run"]], env=env, check=True)
+    subprocess.run(["bash", "-e", "-c", release["run"]], env=env, cwd=tmp_path, check=True)
     image = "ghcr.io/the-cloud-clockwork/agentihooks-ci-lab-worker"
-    expected = [line for tag in tags for line in (f"tag candidate {image}:{tag}", f"push {image}:{tag}")]
-    assert (tmp_path / "docker.log").read_text().splitlines() == expected
+    assert (tmp_path / "docker.log").read_text().splitlines() == [
+        f"tag candidate {image}:sha-123456789abcdef",
+        f"push {image}:sha-123456789abcdef",
+        f"release.sh {image} v2.17.1071 123456789abcdef",
+    ]
 
 
 def test_every_lab_image_job_is_registered_in_the_runner_class_map() -> None:
