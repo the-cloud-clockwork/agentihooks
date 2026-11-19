@@ -957,23 +957,17 @@ def cmd_tick_watch(store, args):
     tick_watch.run(store, now_ms, repair)
 
 
-def cmd_create(store, args):
+def create_config(args: argparse.Namespace) -> SwarmConfig:
+    from scripts.hive.daemon import origin
+
     if not SLUG_RE.match(args.slug):
         raise SwarmError("a swarm id is lowercase letters, digits and dashes, starting with a letter, at most 48 long")
     if WEB_REPO.match(args.repo):
         raise SwarmError(f"--repo takes a folder on this host, not the web address {args.repo}")
     repo = os.path.abspath(os.path.expanduser(args.repo))
     template = templates.load(args.template, os.environ) if args.template else templates.parse({"name": "none"})
-    ledger = LedgerClient()
-    tasks = ledger_creator.swarm_tasks(ledger.state(args.slug))
-    refused = ledger_creator.swarm_refusal(os.environ) or (
-        args.template != priming.TEMPLATE and ledger_creator.floor_refusal(os.environ, tasks, args.operator_asked)
-    )
-    if refused:
-        raise SwarmError(refused)
-    ledger.mark_swarm(args.slug)
     caps = {key: value.cap for key, value in template.lanes.items()}
-    config = SwarmConfig(
+    return SwarmConfig(
         args.slug,
         repo,
         caps["eng"] if args.max_eng_agents is None else args.max_eng_agents,
@@ -990,8 +984,21 @@ def cmd_create(store, args):
         codex_inbox_transport=APP_SERVER_TRANSPORT,
         masters_step=DEFAULT_MASTERS_STEP,
         engine=EVENTS_ENGINE,
-        repo_origin=_create_origin(repo),
+        repo_origin=origin(Path(repo)),
     )
+
+
+def cmd_create(store: RedisStore, args: argparse.Namespace) -> None:
+    config = create_config(args)
+    ledger = LedgerClient()
+    tasks = ledger_creator.swarm_tasks(ledger.state(args.slug))
+    refused = ledger_creator.swarm_refusal(os.environ) or (
+        args.template != priming.TEMPLATE and ledger_creator.floor_refusal(os.environ, tasks, args.operator_asked)
+    )
+    refused = refused or store.refusal(config)
+    if refused:
+        raise SwarmError(refused)
+    ledger.mark_swarm(args.slug)
     store.create(config)
     from scripts.swarm import commands
 
@@ -1000,7 +1007,7 @@ def cmd_create(store, args):
         json.dumps(
             {
                 "created": args.slug,
-                "repo": repo,
+                "repo": config.repo,
                 "state": "paused",
                 "template": args.template,
                 "scaling": config.scaling,
@@ -1330,13 +1337,6 @@ def _engine_origin(config, changes):
     if not identity:
         raise SwarmError("events engine requires a checkout with a Git origin or a stored repository origin")
     return {**changes, "repo_origin": identity}
-
-
-def _create_origin(repo: str) -> str:
-    """The Git origin of the checkout a new swarm works in, empty when it has none."""
-    from scripts.hive.daemon import origin
-
-    return origin(Path(repo))
 
 
 def on_off(value):

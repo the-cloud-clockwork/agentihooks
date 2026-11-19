@@ -1885,10 +1885,19 @@ def test_the_mirror_expander_expands_the_real_tests_workflow_with_its_reusable_w
     found = expander.expand(GradeRequest(f"file://{repo}", head, base, Priority.PROMOTION, ACTOR, False))
     text = (workflows / "test.yml").read_text()
     expected: dict[str, list[str]] = {"unit": []}
+    ungraded: list[str] = []
     for gate in static_gates.discover(text, json.loads(registry.read_text()), ci_wiring.load(ROOT)):
-        expected.setdefault(gate.job, []).append(gate.name)
+        if gate.missing:
+            ungraded.append(gate.name)
+        else:
+            expected.setdefault(gate.job, []).append(gate.name)
     assert {job: [name for item in units for name in item.members] for job, units in found.gates.items()} == expected
     assert {"semgrep/scan", "semgrep/feature-tests", "semgrep/charts"} <= set(found.gates)
+    assert ungraded == [
+        "lint/refuse-changelog-fragments-named-off-the-branch-or-opening-without-a-section-heading",
+        "lint/artifact-sanity-checks",
+        "lint/prove-the-mutation-gate-kills-with-the-real-test-and-fails-with-a-weakened-one",
+    ]
 
 
 ALPHA = "def first():\n    return 1\n\n\ndef second():\n    return 2\n"

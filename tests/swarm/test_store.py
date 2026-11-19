@@ -53,6 +53,26 @@ def test_create_twice_is_refused(store):
         store.create(config())
 
 
+def test_refusal_names_what_create_refuses_and_writes_nothing(store: RedisStore) -> None:
+    assert store.refusal(config()) == ""
+    assert store.refusal(config(swap_full_share=1.5)) == "swap full share must be above 0 and at most 1"
+    assert store.slugs() == [] and not store.redis.exists(store.key("smoke", "config"))
+    store.create(config())
+    assert store.refusal(config()) == "swarm smoke already exists"
+
+
+def test_create_refuses_a_swarm_made_after_its_refusal_check(store: RedisStore) -> None:
+    from unittest.mock import patch
+
+    store.create(config(max_eng=3))
+    with (
+        patch.object(store, "refusal", return_value=""),
+        pytest.raises(SwarmError, match="^swarm smoke already exists$"),
+    ):
+        store.create(config())
+    assert store.config("smoke").max_eng == 3
+
+
 def test_set_updates_caps_and_state(store):
     store.create(config())
     store.update("smoke", max_eng=3, state="paused")

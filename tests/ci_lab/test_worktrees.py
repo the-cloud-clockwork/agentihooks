@@ -76,6 +76,54 @@ def test_fetch_takes_only_the_objects_the_node_mirror_lacks(
     assert capfd.readouterr() == ("", "")
 
 
+@pytest.mark.feature("lab-store-incremental-fetch")
+@pytest.mark.parametrize("fallback", [False, True])
+def test_fetch_without_a_node_mirror_keeps_heads_and_takes_only_new_objects(
+    tmp_path: Path, origin: Path, fallback: bool
+) -> None:
+    base = _commit(origin, "a", "\n".join(str(number) for number in range(10000)))
+    store = tmp_path / "store"
+    _git(tmp_path, "init", "-q", "--bare", str(store))
+    _git(store, "config", "fetch.unpackLimit", "1")
+    remote = f"file://{origin}"
+    mirror = worktrees.Mirror(
+        node=tmp_path / "absent",
+        store=store,
+        remote=f"file://{tmp_path / 'unreachable'}" if fallback else remote,
+        lab=worktrees.Lab(remote, "") if fallback else None,
+        repository=remote,
+    )
+    assert mirror.fetch(base) is True
+    before = set((store / "objects/pack").glob("*.idx"))
+    head = _commit(origin, "b", "b")
+    assert mirror.fetch(head) is True
+    added = set((store / "objects/pack").glob("*.idx")) - before
+    assert len(added) == 1
+    packed = _git(store, "verify-pack", "-v", str(added.pop()))
+    assert f"{head} commit" in packed
+    assert f"{base} commit" not in packed
+    assert set(_git(store, "for-each-ref", "--format=%(objectname)", "refs/lab/").splitlines()) == {base, head}
+    assert mirror.fetch(base) is False
+    assert mirror.fetch(head) is False
+    assert not (store / "FETCH_HEAD").exists()
+
+
+@pytest.mark.feature("lab-store-incremental-fetch")
+@pytest.mark.parametrize("node_exists", [False, True])
+def test_fetch_never_names_a_missing_node_objects_directory_in_alternates(
+    tmp_path: Path, origin: Path, node_exists: bool, capfd: pytest.CaptureFixture[str]
+) -> None:
+    head = _commit(origin, "a", "a")
+    node = tmp_path / "node"
+    if node_exists:
+        node.mkdir()
+    mirror = worktrees.Mirror(node=node, store=tmp_path / "store", remote=f"file://{origin}")
+    assert mirror.fetch(head) is True
+    assert not (mirror.store / "objects/info/alternates").exists()
+    assert _git(mirror.store, "cat-file", "-t", head) == "commit\n"
+    assert "alternate" not in capfd.readouterr().err
+
+
 def test_fetch_of_an_unknown_sha_raises(tmp_path: Path, origin: Path) -> None:
     mirror = _mirror(tmp_path, origin, _commit(origin, "a", "a"))
     with pytest.raises(subprocess.CalledProcessError):
@@ -133,8 +181,26 @@ def test_a_lab_fetch_sends_the_token_as_the_lab_user_s_basic_password_for_the_la
     assert mirror.fetch("1" * 40) is True
     store = str(mirror.store)
     assert [argv for argv, _ in calls[1:]] == [
-        ["git", "-C", store, "fetch", "--no-write-fetch-head", f"file://{origin}", "1" * 40],
-        ["git", "-C", store, "fetch", "--no-write-fetch-head", "https://lab.example/git/origin.git", "1" * 40],
+        [
+            "git",
+            "-C",
+            store,
+            "fetch",
+            "--quiet",
+            "--no-write-fetch-head",
+            f"file://{origin}",
+            f"{'1' * 40}:refs/lab/{'1' * 40}",
+        ],
+        [
+            "git",
+            "-C",
+            store,
+            "fetch",
+            "--quiet",
+            "--no-write-fetch-head",
+            "https://lab.example/git/origin.git",
+            f"{'1' * 40}:refs/lab/{'1' * 40}",
+        ],
     ]
     assert calls[1][1] is None
     assert calls[2][1] == {
