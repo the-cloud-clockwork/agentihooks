@@ -528,18 +528,13 @@ def views(
         'file(path:".github/workflows"){object{...on Tree{entries{name object{...on Blob{text}}}}}}',
         'file(path:".github/workflows"){object{id}}',
     )
-    for start in range(0, len(pending), 20):
-        batch = pending[start : start + 20]
-        fields = [
-            f"p{i}:" + selection.replace("$url", json.dumps(url)).replace("$number", _number(url))
-            for i, url in enumerate(batch)
+    batches = [pending[start : start + 20] for start in range(0, len(pending), 20)]
+    with ThreadPoolExecutor() as workers:
+        reads = [
+            workers.submit(copy_context().run, _views_batch, batch, selection, port, cache, ttl) for batch in batches
         ]
-        query = "{" + " ".join(fields) + "}"
-        data = (
-            github_reads.snapshot(query, time.time(), lambda: _graphql(query, port), ttl)
-            if cache is not None
-            else _graphql(query, port)
-        )
+        documents = [read.result() for read in reads]
+    for batch, data in zip(batches, documents):
         gates = _workflow_gates(data, port, cache)
         for i, url in enumerate(batch):
             raw = data.get(f"p{i}")
@@ -552,6 +547,21 @@ def views(
     _keep_merged(cache, {url: found[url] for url in pending})
     _count_views(len(urls), len(kept))
     return found
+
+
+def _views_batch(
+    batch: list[str], selection: str, port: SourceControl, cache: object | None, ttl: float
+) -> dict[str, Any]:
+    """Return the answer of one document reading up to twenty pull requests in ``batch`` through ``selection``, served
+    from the shared snapshot of the same document for ``ttl`` seconds when ``cache`` is given."""
+    fields = [
+        f"p{i}:" + selection.replace("$url", json.dumps(url)).replace("$number", _number(url))
+        for i, url in enumerate(batch)
+    ]
+    query = "{" + " ".join(fields) + "}"
+    if cache is None:
+        return _graphql(query, port)
+    return github_reads.snapshot(query, time.time(), lambda: _graphql(query, port), ttl)
 
 
 def fresh_reader(
