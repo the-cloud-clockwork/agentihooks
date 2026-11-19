@@ -639,6 +639,17 @@
       ]
     },
     {
+      "id": "controller-work-folder-admitted-hive",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-folder-mirror-hive",
+      "behaviour": "Controller status publication and task folder mirroring read the synced copy from the hive the hub admitted when an execution has no runtime target. An explicit host target keeps precedence, and executions admitted or explicitly targeted to the controller keep their local work folders.",
+      "seam": "command_runner.publish, ledger_workspace.published and ledger_workspace.mirror",
+      "tests": [
+        "tests/hive/test_prompt_transport.py::test_controller_status_publishes_the_execution_hives_work_folder",
+        "tests/hive/test_prompt_transport.py::test_controller_mirrors_the_execution_hives_work_folder"
+      ]
+    },
+    {
       "id": "work-folder-follows-the-task-across-hives",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-work-folder-sync-across-hives",
