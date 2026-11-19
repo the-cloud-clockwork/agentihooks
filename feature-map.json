@@ -255,6 +255,18 @@
       ]
     },
     {
+      "id": "condition-rewrite-without-a-decision",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-condition-input-rewrite",
+      "behaviour": "On Claude a bundle condition that rewrites PreToolUse tool input with no decision leaves PreToolUse as updatedInput with no permissionDecision, in default, acceptEdits, plan, dontAsk and bypass permissions sessions alike, so Claude applies it and still runs its own permission rules and every prompt the user would have seen still shows. A condition's allow or ask still decides and carries the rewrite. Auto mode drops a rewrite with no decision and tells the agent why, because auto mode can deny a call a hook changed.",
+      "seam": "conditions.pre_effect rewrite and decision, through hook_manager.on_pre_tool_use and hook_manager.emit_permission_decision",
+      "tests": [
+        "tests/test_conditions.py::TestPreToolUseEnvelope::test_bypass_rewrite_rides_one_envelope",
+        "tests/test_conditions.py::TestPreToolUseEnvelope::test_rewrite_without_decision_carries_no_decision_outside_bypass",
+        "tests/test_conditions.py::TestPreToolUseEnvelope::test_auto_mode_drops_rewrite_without_decision"
+      ]
+    },
+    {
       "id": "hive-service-start-ensures-serena-router",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-serena-before-launch",

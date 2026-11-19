@@ -407,6 +407,7 @@ def forced_claude(isolated_hook, monkeypatch):
 
 
 class TestPreToolUseEnvelope:
+    @pytest.mark.feature("condition-rewrite-without-a-decision")
     def test_bypass_rewrite_rides_one_envelope(
         self, forced_claude: tuple[Path, Path, Path], capsys: pytest.CaptureFixture[str]
     ) -> None:
@@ -422,6 +423,7 @@ class TestPreToolUseEnvelope:
         assert "use long" in out["additionalContext"]
         assert "tool input rewritten by pre-bash.ls-long.sh" in out["additionalContext"]
 
+    @pytest.mark.feature("condition-rewrite-without-a-decision")
     @pytest.mark.parametrize("mode", ["default", "acceptEdits", "plan", "dontAsk"])
     def test_rewrite_without_decision_carries_no_decision_outside_bypass(
         self, forced_claude: tuple[Path, Path, Path], capsys: pytest.CaptureFixture[str], mode: str
@@ -433,6 +435,7 @@ class TestPreToolUseEnvelope:
         assert out["updatedInput"] == {"command": "ls -la", "description": "probe"}
         assert "tool input rewritten by pre-bash-long.sh" in out["additionalContext"]
 
+    @pytest.mark.feature("condition-rewrite-without-a-decision")
     def test_auto_mode_drops_rewrite_without_decision(
         self, forced_claude: tuple[Path, Path, Path], capsys: pytest.CaptureFixture[str]
     ) -> None:
