@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 
 from scripts.ci_lab import sandbox, venvs
+from tests.ci_lab import fake_bwrap
 
 DIGEST = "a" * 64
 OTHER = "b" * 64
@@ -55,9 +56,7 @@ def uv(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Uv:
     script = folder / "uv"
     script.write_text(f"#!{sys.executable}\n{UV}")
     script.chmod(0o755)
-    bwrap = folder / "bwrap"
-    bwrap.write_text("#!/bin/sh\nexit 97\n")
-    bwrap.chmod(0o755)
+    fake_bwrap.install(folder, tmp_path / "bwrap.args")
     fake = Uv(folder, tmp_path / "record.jsonl")
     fake.answer()
     monkeypatch.setenv("PATH", f"{folder}{os.pathsep}{os.environ['PATH']}")

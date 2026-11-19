@@ -9589,6 +9589,18 @@
       ]
     },
     {
+      "id": "lab-sandbox-private-pid",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-sandbox-private-pid",
+      "behaviour": "Every lab unit, with or without network, runs inside bubblewrap with --unshare-pid and a fresh --proc /proc after the root bind, so it cannot see the worker process or read its environment through proc; a networked unit keeps the host network, and no unit can run when bwrap is missing.",
+      "seam": "scripts.ci_lab.sandbox Sandbox.run, argv_for and the bubblewrap lookup _bwrap",
+      "tests": [
+        "tests/ci_lab/test_sandbox.py::test_every_unit_runs_inside_bwrap_in_a_private_process_namespace",
+        "tests/ci_lab/test_sandbox.py::test_the_argv_of_a_networked_unit_keeps_the_host_network_in_a_private_process_namespace",
+        "tests/ci_lab/test_sandbox.py::test_a_missing_bwrap_is_cannot_run"
+      ]
+    },
+    {
       "id": "lab-venv-build-sandbox",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2644",

@@ -9,6 +9,7 @@ import coverage
 import pytest
 
 from scripts.ci_lab import retry, run_tests, sandbox
+from tests.ci_lab import fake_bwrap
 
 ROOT = Path(__file__).resolve().parents[2]
 VENV = Path(sys.prefix)
@@ -72,6 +73,12 @@ def _tree(folder: Path, files: dict[str, str]) -> Path:
 def _manifest(records: dict[str, list[str]]) -> dict[str, object]:
     tests = {test: {"units": [], "files": files, "escapes": False} for test, files in records.items()}
     return {"units": [], "tests": tests}
+
+
+@pytest.fixture(autouse=True)
+def _bwrap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_bwrap.install(tmp_path / "bwrap", tmp_path / "bwrap.args")
+    monkeypatch.setenv("PATH", f"{tmp_path / 'bwrap'}{os.pathsep}{os.environ['PATH']}")
 
 
 def _lab(tmp_path: Path, manifest: dict[str, object], whitelist: dict[str, str]) -> run_tests.Lab:
