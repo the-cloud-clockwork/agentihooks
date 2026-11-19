@@ -146,10 +146,16 @@ def requeue(store: RedisStore, slug: str, tasks: list[dict], ledger=None) -> lis
 
 
 def apply(
-    store: RedisStore, slug: str, url: str, sender: str, tasks: list[dict], journal: queue_record.Journal
+    store: RedisStore,
+    slug: str,
+    url: str,
+    sender: str,
+    tasks: list[dict],
+    journal: queue_record.Journal,
+    lift: bool = False,
 ) -> dict:
     with exclusive(store, slug):
-        return reorder(store, slug, url, sender, tasks, journal)
+        return reorder(store, slug, url, sender, tasks, journal, lift=lift)
 
 
 def reorder(
@@ -159,12 +165,14 @@ def reorder(
     sender: str,
     tasks: list[dict],
     journal: queue_record.Journal,
+    lift: bool = False,
 ) -> dict:
     lab_url = store.config(slug).lab_url
     result = merge_queue.prioritize(
         url,
         journal=journal,
         displaced=Displaced(store, slug),
+        lift=lift,
         lab=lambda head: lab_control.acknowledge(lab_url, head, os.environ),
     )
     for task in owners(tasks, result["displaced"]):
@@ -184,7 +192,7 @@ def request(store: RedisStore, slug: str, url: str, sender: str, tasks: list[dic
     journal = queue_record.Journal(url)
     if lift:
         journal.write("priority-lift", url, "", None, None)
-    return apply(store, slug, url, sender, tasks, journal)
+    return apply(store, slug, url, sender, tasks, journal, lift=lift)
 
 
 def refresh(store: RedisStore, slug: str, tasks: list[dict], ledger=None) -> list[str]:

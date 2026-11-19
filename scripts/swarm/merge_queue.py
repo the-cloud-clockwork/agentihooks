@@ -226,7 +226,7 @@ def operate(action: str, url: str, run=subprocess.run, admit=None, journal=None,
     }
 
 
-def waiting_around(url: str, target: str, run) -> tuple[list[dict], list[dict]]:
+def waiting_around(url: str, target: str, run: Callable[..., Any], lift: bool = False) -> tuple[list[dict], list[dict]]:
     query = """query($url: URI!, $after: String) { resource(url: $url) { ... on PullRequest {
       repository { mergeQueue(branch: "dev") { entries(first: 100, after: $after) {
         nodes { state pullRequest { id url headRefOid } }
@@ -241,7 +241,7 @@ def waiting_around(url: str, target: str, run) -> tuple[list[dict], list[dict]]:
         for entry in page["nodes"]:
             if entry["pullRequest"]["id"] == target:
                 waiting = behind
-            elif entry["state"] == "QUEUED":
+            elif lift or entry["state"] == "QUEUED":
                 waiting.append(entry["pullRequest"])
         if not page["pageInfo"]["hasNextPage"]:
             return ahead, behind
@@ -256,12 +256,19 @@ class Untracked:
         pass
 
 
-def displace(waiting: list[dict], run, displaced, removed: list[dict], steps: list) -> None:
+def displace(
+    waiting: list[dict],
+    run: Callable[..., Any],
+    displaced: Any,
+    removed: list[dict],
+    steps: list,
+    lift: bool = False,
+) -> None:
     for pull in waiting:
         displaced.add(pull)
     for pull in reversed(waiting):
         current = graphql(STATE, {"url": pull["url"]}, run)["resource"]
-        if current["mergeQueueEntry"] is not None and current["mergeQueueEntry"]["state"] == "QUEUED":
+        if current["mergeQueueEntry"] is not None and (lift or current["mergeQueueEntry"]["state"] == "QUEUED"):
             removed.append(pull)
             steps.append(["dequeue", pull["url"]])
             graphql(DEQUEUE, {"id": pull["id"]}, run)
@@ -293,6 +300,7 @@ def prioritize(
     ahead: Collection[str] = (),
     displaced: Any = None,
     lab: Callable[[str], dict[str, Any]] | None = None,
+    lift: bool = False,
 ) -> dict[str, Any]:
     """Move the pull request to the front of the dev merge queue, restore every entry it displaced in order and mark
     its head hotfix through ``lab``, whether or not a queue step failed; the journal's priority record carries the
@@ -307,7 +315,7 @@ def prioritize(
         raise SwarmError("queue priority requires a dev merge queue")
     staged_compatibility.require(url, raw["headRefOid"], raw.get("body") or "", run)
     require_green(url, raw["headRefOid"], run)
-    displacing, behind = waiting_around(url, raw["id"], run)
+    displacing, behind = waiting_around(url, raw["id"], run, lift=lift)
     waiting = [pull for pull in [*displacing, *behind] if pull["url"] not in ahead]
     before = journal.groups() if journal is not None else None
     errors = []
@@ -316,7 +324,7 @@ def prioritize(
     try:
         removed = []
         try:
-            displace(waiting, run, displaced, removed, steps)
+            displace(waiting, run, displaced, removed, steps, lift=lift)
         except SwarmError as exc:
             errors.append(str(exc))
         target_queued = raw["mergeQueueEntry"] is not None
