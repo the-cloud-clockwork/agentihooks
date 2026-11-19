@@ -1,0 +1,125 @@
+import argparse
+from types import SimpleNamespace
+from typing import Any, cast
+
+import pytest
+
+from scripts.swarm import cli, merge_queue, queue_priority, ready
+from tests.swarm.test_merge_queue_priority import URL
+from tests.swarm.test_queue_priority import priority
+
+_fixture = priority
+pytestmark = pytest.mark.unit
+
+
+def ledger_for(rank: str, targets: list[str]) -> SimpleNamespace:
+    task = {"id": "t9", "phase": "p", "rank": rank, "lane": "eng", "pr_url": URL, "state": "pr"}
+    return SimpleNamespace(
+        tasks_targeting=lambda slug, url: [task],
+        freezes=lambda slug: [{"verb": "focus", "target": target} for target in targets],
+        hierarchy=lambda slug: [
+            {"node": "phases/p", "kind": "phase", "parent": "missions/m"},
+            {"node": "missions/m", "kind": "mission", "parent": None},
+        ],
+        notice=lambda *args: None,
+    )
+
+
+@pytest.mark.feature("merge-priority-automatic-entry")
+@pytest.mark.parametrize(
+    ("rank", "targets", "prioritized"),
+    [
+        ("urgent", [], True),
+        ("normal", ["tasks/t9"], True),
+        ("normal", ["phases/p"], True),
+        ("normal", ["missions/m"], True),
+        ("normal", ["lane:eng"], True),
+        ("normal", [], False),
+        ("normal", ["phases/other"], False),
+    ],
+)
+def test_queue_entry_applies_focus_or_urgency_without_interrupting_tests(
+    priority: SimpleNamespace, rank: str, targets: list[str], prioritized: bool
+) -> None:
+    ledger = ledger_for(rank, targets)
+    result = cast(Any, merge_queue.operate)(
+        "queue",
+        URL,
+        run=priority.queue.run,
+        priority=lambda: cast(Any, queue_priority).automatic(priority.store, "sw", URL, ledger),
+    )
+    assert result["queued"] is True
+    expected = ["P1", "P9", "P2", "P3"] if prioritized else ["P1", "P2", "P3", "P9"]
+    assert [entry["pullRequest"]["id"] for entry in priority.queue.entries] == expected
+    assert ("dequeue", 1) not in priority.queue.mutations
+
+
+@pytest.mark.feature("merge-priority-automatic-entry")
+def test_an_existing_queue_entry_does_not_repeat_automatic_priority(priority: SimpleNamespace) -> None:
+    priority.queue.entries.append(priority.queue.entry(9))
+    callbacks = []
+    result = cast(Any, merge_queue.operate)(
+        "queue", URL, run=priority.queue.run, priority=lambda: callbacks.append(URL)
+    )
+    assert result["queued"] is True
+    assert callbacks == []
+    assert priority.queue.mutations == []
+
+
+@pytest.mark.feature("merge-priority-automatic-entry")
+def test_a_repository_without_a_queue_does_not_apply_automatic_priority(monkeypatch: pytest.MonkeyPatch) -> None:
+    raw = {
+        "id": "P9",
+        "baseRefName": "dev",
+        "state": "MERGED",
+        "headRefOid": "head9",
+        "mergeQueueEntry": None,
+        "repository": {"mergeQueue": None},
+        "isDraft": False,
+        "reviewDecision": "APPROVED",
+    }
+    monkeypatch.setattr(merge_queue, "graphql", lambda *args: {"resource": raw})
+    monkeypatch.setattr(merge_queue.staged_compatibility, "require", lambda *args: None)
+    monkeypatch.setattr(merge_queue, "settle", lambda *args: None)
+    monkeypatch.setattr(merge_queue, "squash", lambda *args: "merge-head")
+    callbacks = []
+    result = cast(Any, merge_queue.operate)("queue", URL, priority=lambda: callbacks.append(URL))
+    assert result["queued"] is False
+    assert result["merge_commit"] == "merge-head"
+    assert callbacks == []
+
+
+@pytest.mark.feature("merge-priority-automatic-entry")
+def test_cli_queue_entry_supplies_automatic_priority(
+    priority: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(cli, "_hotfix_master", lambda *args: True)
+    monkeypatch.setattr(cli, "LedgerClient", lambda: ledger_for("urgent", []))
+
+    def operate(action: str, url: str, **kwargs: Any) -> dict:
+        kwargs["priority"]()
+        return {"queued": True}
+
+    monkeypatch.setattr(merge_queue, "operate", operate)
+    cli.cmd_merge(priority.store, argparse.Namespace(action="queue", slug="sw", url=URL))
+    assert [entry["pullRequest"]["id"] for entry in priority.queue.entries] == ["P1", "P9", "P2", "P3"]
+
+
+@pytest.mark.feature("merge-priority-automatic-entry")
+@pytest.mark.parametrize("recovering", [False, True])
+def test_watcher_queue_entry_supplies_automatic_priority(
+    priority: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, recovering: bool
+) -> None:
+    def queue(action: str, url: str, **kwargs: Any) -> dict:
+        kwargs["priority"]()
+        return {"queued": True}
+
+    fresh = SimpleNamespace(head="head9", mergeable="MERGEABLE", red=False, merge_problem="", resolved=True)
+    run = ready.Pass(priority.store, "sw", ledger_for("urgent", []), lambda url: fresh, lambda url: fresh, 1000, queue)
+    monkeypatch.setattr(ready, "save", lambda *args: None)
+    monkeypatch.setattr(ready, "_journal", lambda *args: None)
+    row = {"id": "t9"}
+    found = {"url": URL, "on": {"head": "head9"}, "retry_at": 0, "recoveries": 0}
+    messages = ready._recover(run, row, found) if recovering else ready._queue(run, row, found)
+    assert messages == [f"queued {URL} for task t9"]
+    assert [entry["pullRequest"]["id"] for entry in priority.queue.entries] == ["P1", "P9", "P2", "P3"]

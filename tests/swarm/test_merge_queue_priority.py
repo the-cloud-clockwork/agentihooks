@@ -229,7 +229,11 @@ def test_the_swarm_tells_its_own_lab_of_a_priority_move(monkeypatch: pytest.Monk
         return {"ok": True}
 
     def prioritize(
-        url: str, journal: queue_record.Journal, displaced: Any, lab: Callable[[str], dict[str, Any]]
+        url: str,
+        journal: queue_record.Journal,
+        displaced: Any,
+        lab: Callable[[str], dict[str, Any]],
+        lift: bool = False,
     ) -> dict[str, Any]:
         assert (url, journal.url) == (URL, URL)
         return {"url": url, "displaced": [], "errors": [], "lab": lab("head9")}
