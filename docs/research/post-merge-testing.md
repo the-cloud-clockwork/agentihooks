@@ -50,11 +50,11 @@ Today's `dev` already runs its slow checks after the merge: the promotion tier g
 |---|---|---|
 | `Tests` runs on `merge_group` | 1211: 942 success, 4 failure, 265 cancelled | C2 |
 | Green merge group run, created to completed | p50 13 min, p90 21 min | C6 |
-| Cancelled merge group runs that hid a failed job | 15 of 36 sampled: 14 with a failed unit shard, 1 with a failed `select`; in the other 21 no job other than the summary failed, and the cancel came from outside the run, because its verifier never ran its cancel step | C7, C7b |
+| Cancelled merge group runs that hid a failed job | 15 of 36 sampled: 14 with a failed unit shard, 1 with a failed `select`; in the other 21 no job other than the summary failed, and the verifier's cancel step did not run, so something other than the verifier cancelled them | C7, C7b |
 | Estimated queue rejects in the window | 4 + 265 × 15 / 36 ≈ **114**, or 12.1 per 100 merges | C2, C7 |
 | Rejects in C7 and C2 whose pull request changed before merging | 13 of 19 rejects (18 pull requests) were followed by a new commit; after 6 the pull request merged with no new commit | C8 |
 
-On a rejected merge group the queue verifier, named `Gate — Required` on `merge_group`, cancels its own run with its `Cancel a rejected queue run` step, so most rejects show as `cancelled` rather than `failure`. Of the 12 sampled rejects that GitHub still served on 19 November, that step ran in 9. The other 3 were cancelled from outside the run before the verifier started (C7b).
+On a rejected merge group the queue verifier, named `Gate — Required` on `merge_group`, cancels its own run with its `Cancel a rejected queue run` step, so most rejects show as `cancelled` rather than `failure` (C2). Of the 12 sampled rejects that GitHub still served on 19 November, that step ran in 9. The other 3 were cancelled before the verifier started (C7b).
 
 ### Predicted red dev rate under post merge testing
 
@@ -309,31 +309,41 @@ for kind, n in sorted(kinds.items()):
 1 no other job failed: verifier started, own cancel step did not run
 ```
 
-A cancel step ran when it has a start time. The workflow cancels a run in only two places, the same at the first and the last window merge. The verifier's step cancels its own run. The `Cancel superseded and dead merge queue runs` step cancels only queue runs with a lower id than its own. A run whose verifier did not run its cancel step was therefore cancelled from outside it:
+A cancel step ran when it has a start time. At the first and the last window merge, the workflow file calls the cancel API in two steps, and its concurrency group cancels only `pull_request` runs. The verifier's `Cancel a rejected queue run` step cancels its own run. The `Cancel superseded and dead merge queue runs` step cancels only queue runs with a lower id than its own. C7b does not show what cancelled a run whose verifier did not run its cancel step:
 
 ```bash
 for c in $(tail -1 dev-commits.txt | cut -d" " -f1) $(head -1 dev-commits.txt | cut -d" " -f1); do
-  git show "$c:.github/workflows/test.yml" | grep -n -E 'gh run cancel|runs/\$id/cancel|-lt "\$RUN"'
+  git show "$c:.github/workflows/test.yml" | grep -n -E 'cancel-in-progress|name: Cancel|gh run cancel|runs/\$id/cancel|-lt "\$RUN"'
 done
 ```
 
 ```text
+29:  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+391:      - name: Cancel superseded and dead merge queue runs
 416:            [[ -n "$id" && "$id" -lt "$RUN" ]] || continue
 424:            if gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/cancel" --silent; then
+3359:      - name: Cancel a rejected queue run
 3363:        run: gh run cancel "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY"
+29:  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+531:      - name: Cancel superseded and dead merge queue runs
 556:            [[ -n "$id" && "$id" -lt "$RUN" ]] || continue
 564:            if gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/cancel" --silent; then
+3730:      - name: Cancel a rejected queue run
 3734:        run: gh run cancel "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY"
 ```
 
-C7b ran on 19 November 2026. GitHub no longer served the 18 earliest of the 265 cancelled merge group runs by then, so `c7-ids.txt` was rebuilt from a fresh `mg-cancelled.jsonl` with the C7 rule shifted by those 18 runs, and C7's jobs loop ran again over it. That keeps 33 of the 36 runs. The 3 missing are the first three runs in C8, each with a failed job, so all 21 runs where no other job failed are included:
+C7b ran on 19 November 2026 in its own working folder, so the C7 and C8 files of 18 November stayed as they were. GitHub no longer served the 18 earliest of the 265 cancelled merge group runs by then, so that folder's `c7-ids.txt` was rebuilt from a fresh `mg-cancelled.jsonl` with the C7 rule shifted by those 18 runs, and C7's jobs loop ran again over it there. That keeps 33 of the 36 runs. The first three runs in C8 were created before the earliest run still served, so they are the 3 missing, each with a failed job, and all 21 runs where no other job failed are included:
 
 ```bash
+wc -l < mg-cancelled.jsonl
+python3 -c 'import json; print(min(json.loads(l)["created_at"] for l in open("mg-cancelled.jsonl")))'
 python3 -c 'import json; r=sorted(map(json.loads, open("mg-cancelled.jsonl")), key=lambda r: r["created_at"]); off=265-len(r); [print(r[int(i*265/36)-off]["id"]) for i in range(36) if int(i*265/36) >= off]' > c7-ids.txt
 wc -l < c7-ids.txt
 ```
 
 ```text
+247
+2026-11-04T21:12:06Z
 33
 ```
 
@@ -447,7 +457,7 @@ for k in (1, 2, 7, 20):
                 hot[f] = hot.get(f, 0) + 1
 print("at 7:", ", ".join("%s %d" % kv for kv in sorted(hot.items(), key=lambda kv: -kv[1])[:6]))
 reg = [h for h in at7 if h & REGISTRIES]
-print("at 7: %d of %d conflicting reverts hit a registry, %d hit only registries" % (len(reg), len(at7), sum(h <= REGISTRIES for h in reg)))
+print("at 7: %d of %d conflicting reverts hit a registry, %d hit only registries, %d hit two or more" % (len(reg), len(at7), sum(h <= REGISTRIES for h in reg), sum(len(h & REGISTRIES) >= 2 for h in reg)))
 runs = [json.loads(line) for line in open("dev-push.jsonl")]
 graded = sorted((r for r in runs if r["conclusion"] in ("success", "failure")), key=lambda r: pos[r["head_sha"]])
 candidates = bad = 0
@@ -466,11 +476,11 @@ print("candidates %d, conflicting at verdict time %d (%.1f%%)" % (candidates, ba
 7 later: 171/936 conflict (18.3%)
 20 later: 340/923 conflict (36.8%)
 at 7: feature-map.json 98, tests/TYPE_BASELINE.json 18, tests/registry/FROZEN_GATES.json 7, tests/swarm/tick_scenarios/goldens.json 5, docs/reference/index.md 5, scripts/swarm/tick.py 5
-at 7: 118 of 171 conflicting reverts hit a registry, 83 hit only registries
+at 7: 118 of 171 conflicting reverts hit a registry, 83 hit only registries, 5 hit two or more
 candidates 118, conflicting at verdict time 11 (9.3%)
 ```
 
-The per file line counts a revert once for each file it conflicts in. The three registry counts add up to 123 because the 5 reverts that conflict in two registries count twice; 118 reverts are behind them. The `hit a registry` line was added on 19 November 2026. That rerun printed the four distance lines and the per file line above unchanged. Its last line read 106 candidates, because GitHub had dropped the window's earliest dev push runs by then; the line above keeps the 18 November value.
+The per file line counts a revert once for each file it conflicts in. The three registry counts add up to 123, five more than the 118 reverts behind them, because each of the 5 reverts that hit two or more registries counts once per registry. The `hit a registry` line was added on 19 November 2026. That rerun printed the four distance lines and the per file line above unchanged. Its last line read 106 candidates from a fresh `dev-push.jsonl` of 842 runs, against the 903 of C1, so the line above keeps the 18 November value.
 
 C11, revert or culprit code on `dev`:
 
@@ -506,7 +516,7 @@ The commands depend on each other:
 
 - The downloads and C3 come first. C1 and C2 are counts that need nothing else.
 - C4 and C9 run in one Python session, because C9 reads C4's `pos`, `ctime`, `pairs`, `span` and `pct`. Append C9 to the C4 file and run it with `python3`.
-- C7b reads the `c7-ids.txt` and `c7-jobs.jsonl` that C7 writes, and `dev-commits.txt` from C3. Run it in the same window as C7, so it needs no rebuilt `c7-ids.txt`.
+- C7b reads the `c7-ids.txt` and `c7-jobs.jsonl` that C7 writes, and `dev-commits.txt` from C3. Run it in the same window as C7, so it needs no rebuilt `c7-ids.txt` and skips the rebuild command under its output.
 - C8 reads the `c7-jobs.jsonl` that C7 writes, and the `mg-failure.jsonl` and `mg-cancelled.jsonl` downloads.
 - C10 runs on its own over `dev-commits.txt` and `dev-push.jsonl`. It calls `git merge-tree` once per window merge for each of the four distances and once per green to red candidate, 3,860 merges in this window, all local.
 - C11 reads `origin/dev` and has no window.
