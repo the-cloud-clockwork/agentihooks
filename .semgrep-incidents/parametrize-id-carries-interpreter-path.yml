@@ -1,0 +1,23 @@
+rules:
+  - id: parametrize-id-carries-interpreter-path
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A pytest.mark.parametrize value is built from the interpreter path, so pytest writes that path into the test id.
+      The dev push split job collects tests in ~/venv while the unit shards run the runner image venv, so on 19 November
+      seven worker home cases collected under one spelling ran under another and shard-check held the release. Keep a
+      fixed token in the parameter and substitute the interpreter path inside the test, or pass fixed ids.
+    paths:
+      include:
+        - /tests/
+        - parametrize-id-carries-interpreter-path.py
+    patterns:
+      - pattern-either:
+          - pattern: pytest.mark.parametrize($NAMES, [..., f"...{sys.$PATH}...", ...], ...)
+          - pattern: pytest.mark.parametrize($NAMES, [..., (..., f"...{sys.$PATH}...", ...), ...], ...)
+          - pattern: pytest.mark.parametrize($NAMES, [..., sys.$PATH, ...], ...)
+          - pattern: pytest.mark.parametrize($NAMES, [..., (..., sys.$PATH, ...), ...], ...)
+      - pattern-not: pytest.mark.parametrize(..., ids=$IDS, ...)
+      - metavariable-regex:
+          metavariable: $PATH
+          regex: ^(prefix|base_prefix|exec_prefix|executable)$
