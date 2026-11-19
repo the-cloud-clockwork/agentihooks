@@ -1062,8 +1062,8 @@ kubectl -n ci-lab get pods -l app.kubernetes.io/component=worker \
   -o custom-columns='NAME:.metadata.name,SCHEDULER:.spec.schedulerName,CLASS:.spec.priorityClassName,PRIORITY:.spec.priority,QOS:.status.qosClass'
 ```
 
-Every row reads `runner-binpack`, `ci-lab-worker-preempt`, `250` and `Guaranteed`. Read the policy as the
-cluster holds it:
+Every row reads `runner-binpack`, `ci-lab-worker-preempt`, `250` and `Guaranteed`. Read the policy
+as the cluster holds it:
 
 ```bash
 kubectl -n ci-lab describe networkpolicy ci-lab-worker
