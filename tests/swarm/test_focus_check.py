@@ -15,8 +15,9 @@ from scripts.swarm.health import focus_check
 from scripts.swarm.ledger_client import LedgerClient, LedgerOffline
 from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_ledger import ledger, ledger_freezes
-from scripts.swarm_ledger.api import routes
-from tests.swarm.test_freeze import doc, record, task
+from scripts.swarm_ledger.api import resources, routes
+from scripts.swarm_ledger.api.errors import APIError
+from tests.swarm.test_freeze import ELSEWHERE, doc, record, task
 from tests.swarm.test_swarm_freeze_cli import acting, swarm  # noqa: F401
 
 pytestmark = pytest.mark.unit
@@ -160,23 +161,31 @@ def test_a_written_focus_says_so_when_the_ledger_gives_no_verdict(
 
 
 class OneTarget:
+    asked: list[str] = []
+
     def focus_verdicts(self, slug: str, target: str) -> dict[str, Any]:
+        self.asked.append(slug)
         return {"target": target, "claimable": 1, "done": [], "tasks": []}
 
 
 @pytest.mark.feature("swarm-focus-verdict")
 def test_checked_runs_the_command_then_writes_the_verdict_on_its_target(capsys: pytest.CaptureFixture[str]) -> None:
-    ran: list[str] = []
-    run = focus_check.checked(lambda store, args: ran.append(args.target), OneTarget)
-    run(None, SimpleNamespace(slug="demo", command="focus", target="tasks/t1"))
-    assert ran == ["tasks/t1"]
+    ran: list[tuple[Any, str]] = []
+    store, OneTarget.asked = object(), []
+    run = focus_check.checked(lambda given, args: ran.append((given, args.target)), OneTarget)
+    run(store, SimpleNamespace(slug="demo", command="focus", target="tasks/t1"))
+    assert ran == [(store, "tasks/t1")]
+    assert OneTarget.asked == ["demo"]
     assert capsys.readouterr().err == "focus tasks/t1: 1 claimable, 0 open, 0 done\n"
 
 
 @pytest.mark.feature("swarm-focus-read")
 def test_the_fix_phase_comes_from_the_swarm_config_and_is_empty_without_a_swarm() -> None:
+    slugs: list[str] = []
+
     def services(config: Any) -> Any:
         def read(slug: str) -> SwarmConfig:
+            slugs.append(slug)
             if config is None:
                 raise SwarmError(f"no swarm {slug}")
             return config
@@ -187,6 +196,7 @@ def test_the_fix_phase_comes_from_the_swarm_config_and_is_empty_without_a_swarm(
     assert routes.fix_phase(services(doctor), "demo") == loop.FIX_PHASE
     assert routes.fix_phase(services(SwarmConfig("demo", "/repo", max_eng=1, max_ci=1)), "demo") == ""
     assert routes.fix_phase(services(None), "demo") == ""
+    assert slugs == ["demo", "demo", "demo"]
 
 
 class Context:
@@ -287,3 +297,115 @@ def test_the_client_reads_one_target_and_answers_none_for_a_missing_one(monkeypa
     assert LedgerClient().focus_verdicts("demo", "tasks/t1") == {"target": "tasks/t1"}
     assert LedgerClient().focus_verdicts("demo", "tasks/nope") is None
     assert paths == ["focus/tasks/t1", "focus/tasks/nope"]
+
+
+@pytest.mark.feature("swarm-focus-read")
+@pytest.mark.parametrize(("code", "error"), [(404, "internal"), (500, "resource_missing")])
+def test_the_client_raises_a_failure_other_than_a_missing_target(
+    monkeypatch: pytest.MonkeyPatch, code: int, error: str
+) -> None:
+    slugs: list[str] = []
+
+    def resource(self: LedgerClient, slug: str, path: str, collection: bool = False) -> dict[str, Any]:
+        slugs.append(slug)
+        raise missing(code, error)
+
+    monkeypatch.setattr(LedgerClient, "_resource", resource)
+    with pytest.raises(urllib.error.HTTPError) as raised:
+        LedgerClient().focus_verdicts("demo", "tasks/t1")
+    assert raised.value.code == code
+    assert slugs == ["demo"]
+
+
+@pytest.mark.feature("swarm-focus-verdict")
+def test_a_task_with_no_state_lane_or_claimant_reads_as_open_unlaned_and_claimed_by_an_agent() -> None:
+    bare = [
+        {"id": "t1", "lane": "eng", "phase": "p1"},
+        {"id": "t6", "state": "claimed", "phase": "p1"},
+        {"id": "t9", "lane": "eng", "state": "parked", "phase": "p1"},
+    ]
+    found = one(doc(record("phases/p1", "focus"), tasks=bare), "focus/phases/p1")
+    assert found is not None
+    assert found["tasks"] == [
+        {"id": "t1", "lane": "eng", "state": "open", "verdict": "claimable"},
+        {"id": "t6", "lane": "", "state": "claimed", "verdict": "it is claimed by an agent"},
+        {"id": "t9", "lane": "eng", "state": "parked", "verdict": "it is parked"},
+    ]
+
+
+@pytest.mark.feature("swarm-focus-verdict")
+def test_the_fix_phase_passes_a_doctor_fix_through_a_focus_elsewhere() -> None:
+    found = doc(record("lane:ci", "focus"), tasks=[task("t1", phase=loop.FIX_PHASE), ELSEWHERE])
+    fixed = focus_check.read(found, "focus/lane:eng", loop.FIX_PHASE, 0)
+    plain = focus_check.read(found, "focus/lane:eng", "", 0)
+    assert isinstance(fixed, dict) and isinstance(plain, dict)
+    assert verdicts(fixed) == {"t1": "claimable"}
+    assert verdicts(plain) == {"t1": "a focus elsewhere holds it"}
+
+
+@pytest.mark.feature("swarm-focus-verdict")
+def test_a_selector_target_is_known_only_with_a_value_and_split_at_its_first_colon() -> None:
+    bare = ledger_doc()
+    seen = focus_check.view(bare, "")
+    assert one(bare, "focus/lane:eng") is not None
+    assert one(bare, "focus/lane:") is None
+    assert focus_check.known("lane:eng:x", seen) is True
+    assert focus_check.under("nope:x", seen) == []
+
+
+@pytest.mark.feature("swarm-focus-read")
+def test_unclaimed_minutes_count_whole_minutes_and_never_go_below_zero() -> None:
+    found = {"tasks": [{"state": "open"}]}
+    assert focus_check.unclaimed({"at": 0}, found, 90_000) == 1
+    assert focus_check.unclaimed({"at": 0}, found, 30_000) == 0
+    assert focus_check.unclaimed({"at": 90_000}, found, 0) == 0
+
+
+class Current:
+    def __init__(self, state: dict[str, Any]) -> None:
+        self.state = state
+        self.asked: list[str] = []
+
+    def current(self, slug: str) -> Any:
+        self.asked.append(slug)
+        return SimpleNamespace(state=self.state)
+
+
+@pytest.mark.feature("swarm-focus-read")
+@pytest.mark.parametrize("path", ["focus", "focus/tasks/t1"])
+def test_the_focus_route_reads_the_slug_state_fix_phase_and_clock(monkeypatch: pytest.MonkeyPatch, path: str) -> None:
+    state: dict[str, Any] = {"tasks": []}
+    repository = Current(state)
+    services = SimpleNamespace(repository=repository)
+    fixes: list[tuple[Any, str]] = []
+    reads: list[tuple[Any, ...]] = []
+    found: Any = [{"target": "tasks/t1"}] if path == "focus" else {"target": "tasks/t1"}
+
+    def fix_phase(given: Any, slug: str) -> str:
+        fixes.append((given, slug))
+        return "p9"
+
+    def read(doc: dict[str, Any], asked: str, fix: str, now_ms: int) -> Any:
+        reads.append((doc, asked, fix, now_ms))
+        return found
+
+    monkeypatch.setattr(routes, "time", SimpleNamespace(time=lambda: 12.5))
+    monkeypatch.setattr(routes, "fix_phase", fix_phase)
+    monkeypatch.setattr(focus_check, "read", read)
+    reply = routes.focus_read(services, "demo", path)  # type: ignore[arg-type]
+    assert repository.asked == ["demo"]
+    assert fixes == [(services, "demo")]
+    assert reads == [(state, path, "p9", 12_500)]
+    assert reply["data"] == found
+    assert reply["revision"] == resources.revision(found)
+    assert ("next_cursor" in reply) is (path == "focus")
+
+
+@pytest.mark.feature("swarm-focus-read")
+def test_the_focus_route_answers_404_for_a_target_that_does_not_exist(monkeypatch: pytest.MonkeyPatch) -> None:
+    services = SimpleNamespace(repository=Current({"tasks": []}))
+    monkeypatch.setattr(routes, "fix_phase", lambda given, slug: "")
+    monkeypatch.setattr(focus_check, "read", lambda doc, asked, fix, now_ms: None)
+    with pytest.raises(APIError) as raised:
+        routes.focus_read(services, "demo", "focus/tasks/nope")  # type: ignore[arg-type]
+    assert (raised.value.status, raised.value.code, str(raised.value)) == (404, "resource_missing", "No such target")

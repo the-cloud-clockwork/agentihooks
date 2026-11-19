@@ -101,7 +101,7 @@ def unclaimed(record: dict[str, Any], found: dict[str, Any], now_ms: int) -> int
     states = {row["state"] for row in found["tasks"]}
     if "open" not in states or states & BUSY:
         return None
-    return max(now_ms - record["at"], 0) // MINUTE_MS
+    return max((now_ms - record["at"]) // MINUTE_MS, 0)
 
 
 def report(seen: View, now_ms: int) -> list[dict[str, Any]]:
