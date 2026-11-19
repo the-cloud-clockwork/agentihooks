@@ -12,16 +12,17 @@ import functools
 import json
 import re
 import subprocess
+import sys
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from contextvars import copy_context
+from contextvars import ContextVar, copy_context
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Any
 
 from scripts.inbox.store import CLOSED, InboxError
-from scripts.swarm import github_reads, idle, merge_queue, outage, run_wait, stack
+from scripts.swarm import github_reads, idle, merge_queue, outage, run_wait, stack, timing
 from scripts.swarm.health import stall_blockers
 from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.naming import lane_of
@@ -34,6 +35,7 @@ from scripts.tick.ports.contracts import SourceControl
 MINUTE_MS = 60_000
 TICK_VIEW_TTL_S = 180
 MERGED_VIEW_TTL_S = 2 * 24 * 3600
+TICK_VIEW_READ: ContextVar[bool] = ContextVar("tick_view_read", default=False)
 TASK_FINDINGS = frozenset({"proof loop", "failed launch", "stale claim"})
 HELD_FINDINGS = frozenset({"idle with claim", "waiting on input", "stalled", "working on drain"})
 FOLLOWUP_RAISE_MS = 15 * MINUTE_MS
@@ -490,6 +492,27 @@ def _keep_merged(cache: Any, found: dict[str, PullRequest | None]) -> None:
             cache.set(_merged_key(url), json.dumps(asdict(pull)), ex=MERGED_VIEW_TTL_S)
 
 
+def _count_views(pulls: int, kept: int) -> None:
+    """Write to the controller log how many of ``pulls`` distinct pull requests a tick view inside a tick pass had no
+    earlier view of, how many of those it served from the merged views the swarm Redis keeps and how many it read from
+    GitHub; any other read, a tick view with nothing to read and one outside a pass write nothing."""
+    slug = timing.SWARM.get()
+    if slug is None or not pulls or not TICK_VIEW_READ.get():
+        return
+    current = timing.PASS.get() or {}
+    line = {"event": "swarm_pull_views", "slug": slug, "pass_id": current.get("pass_id"), "pulls": pulls}
+    print(json.dumps({**line, "kept_merged": kept, "read": pulls - kept}), file=sys.stderr)
+
+
+def _counted_views(urls: list[str], cache: Any, ttl: float) -> dict[str, PullRequest | None]:
+    """Read ``urls`` through :func:`views` as a tick view, whose read counts reach the controller log."""
+    token = TICK_VIEW_READ.set(True)
+    try:
+        return views(urls, cache=cache, ttl=ttl)
+    finally:
+        TICK_VIEW_READ.reset(token)
+
+
 def views(
     urls: list[str],
     source: SourceControl | None = None,
@@ -527,6 +550,7 @@ def views(
                 else None
             )
     _keep_merged(cache, {url: found[url] for url in pending})
+    _count_views(len(urls), len(kept))
     return found
 
 
@@ -541,7 +565,7 @@ def fresh_reader(
         known = getattr(earlier, "snapshots", {})
         shared = [target for target, pull in known.items() if pull is not None and pull.state == "OPEN"]
         if not read and shared and not run_wait.backing_off():
-            read.update(views(shared, cache=cache, ttl=0))
+            read.update(timing.timed(views, shared, cache=cache, ttl=0))
         pull = read.get(url)
         return pull if pull is not None else view(url)
 
@@ -659,7 +683,7 @@ def tick_view(
     known = {url: pr for url, pr in getattr(earlier, "snapshots", {}).items() if pr is not None}
     snapshots = {
         **known,
-        **views([url for url in dict.fromkeys(urls) if url not in known], cache=store.redis, ttl=TICK_VIEW_TTL_S),
+        **_counted_views([url for url in dict.fromkeys(urls) if url not in known], store.redis, TICK_VIEW_TTL_S),
     }
 
     @functools.cache
@@ -733,7 +757,7 @@ def event_pass(inbox, store, slug, doc, ledger, now_ms, github=view):
         + stall_blockers.observe(store, slug, doc, tasks.values(), github, now_ms, held)  # pyright: ignore[reportUnknownArgumentType]
         + _settle_red_notices(mail, github)
         + _move_task_notices(mail, ledger, tasks)
-        + _priorities(mail, doc, raised)
+        + _priorities(mail, doc, raised, now_ms)
     )
 
 
@@ -861,7 +885,7 @@ def _events(mail, events, tasks, raised):
                 f"event:{event['rev']}:{event['kind']}:{event['target']}",
                 mail.owner(event["target"]),
                 text,
-                ref=f"{mail.slug}:event:{event['target']}",
+                ref=f"{mail.slug}:event:{event['target']}:{event['rev']}",
                 fyi=event["kind"] == "task done",
             )
     return sent
@@ -874,7 +898,7 @@ def _describe(slug, event, tasks):
         return (
             f"{by} added a follow-up {item} on ledger {slug}: {event.get('text', '')}\n"
             "Decide it: turn it into a task, close it with a status, or flag it for the operator.\n"
-            f"Close it: agentihooks ledger --slug {slug} followup done {item}"
+            f"Close it: agentihooks api --slug {slug} followup done {item}"
         )
     if kind == "added" and name == "questions":
         return f"{by} asked on ledger {slug}: {event.get('text', '')}\nAnswer it, or raise it to the operator."
@@ -904,9 +928,9 @@ def _followups(mail, doc, events, ledger, now_ms):
                 f"A follow-up {followup['id']} on ledger {mail.slug} is still open fifteen minutes "
                 f"after {event['by']} added it: {followup['text']}\n"
                 "Decide it now, or it goes to the operator's Priorities.\n"
-                f"Close it: agentihooks ledger --slug {mail.slug} followup done {followup['id']}"
+                f"Close it: agentihooks api --slug {mail.slug} followup done {followup['id']}"
             )
-            sent += mail.send(f"{target}:raised", mail.owner(target), text, ref=f"{mail.slug}:event:{target}")
+            sent += mail.send(f"{target}:raised", mail.owner(target), text, ref=f"{mail.slug}:event:{target}:{now_ms}")
         if age >= FOLLOWUP_OPERATOR_MS:
             ask = "Open half an hour without a decision: " + " ".join(followup["text"].split()[:ASK_WORDS])
             if mail.once(f"{target}:operator", lambda: ledger.priority(mail.slug, target, ask)):
@@ -914,7 +938,7 @@ def _followups(mail, doc, events, ledger, now_ms):
     return sent
 
 
-def _priorities(mail, doc, raised):
+def _priorities(mail: Mail, doc: dict[str, Any], raised: set[str], now_ms: int) -> list[str]:
     key = mail.store.key(mail.slug, "priorities-sent")
     rows = {p["item"]: p for p in doc.get("priorities", [])}
     seen = mail.store.redis.smembers(key)
@@ -935,7 +959,7 @@ def _priorities(mail, doc, raised):
             step = ledger_blockers.notice(mail.slug, mail.store.config(mail.slug).autonomy, item, rec)
             text = f"New priority on ledger {mail.slug} for {item}: {row['text']}\n{step}"
             owner = mail.owner(item)
-            mail.inbox.send(SENDER, owner, text, ref=f"{mail.slug}:priority:{item}")
+            mail.inbox.send(SENDER, owner, text, ref=f"{mail.slug}:priority:{item}:{now_ms}")
             sent.append(f"told {owner}: priority {item}")
         mail.store.redis.sadd(key, item)
     mail.store.redis.set(marker, 1)

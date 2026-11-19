@@ -677,12 +677,26 @@ def _binding_request(args, agent: str, prompt: str, environ: dict[str, str], fla
     return f"{binding.PROMPT}\n\n{prompt}"
 
 
-def _binding_result(environ: dict[str, str], timeout: float, route: dict) -> list[str]:
+Start = Callable[[list[str], dict[str, str]], None]
+Canary = Callable[[Path, float], dict[str, Any]]
+
+
+def _open_terminal(command: list[str], environ: dict[str, str]) -> None:
+    subprocess.Popen(command, env=environ, start_new_session=True)
+
+
+def _wait_binding(report: Path, timeout: float) -> dict[str, Any]:
+    from scripts.profiles import binding
+
+    return binding.wait(report, timeout)
+
+
+def _binding_result(environ: dict[str, str], timeout: float, route: dict, canary: Canary = _wait_binding) -> list[str]:
     from scripts.profiles import binding
 
     if not environ.get(binding.REPORT):
         return []
-    result = binding.wait(Path(environ[binding.REPORT]), timeout)
+    result = canary(Path(environ[binding.REPORT]), timeout)
     if route.get("account") and result["account"] != route["account"]:
         raise ValueError("live process account differs from requested route")
     return [
@@ -700,11 +714,13 @@ def _binding_deferred(environ: dict[str, str]) -> list[str]:
     return ["profile_validation=pending", f"profile_report={environ[binding.REPORT]}"]
 
 
-def _profile_canary(args, environ: dict[str, str], launch, route: dict) -> list[str]:
+def _profile_canary(
+    args: argparse.Namespace, environ: dict[str, str], launch: LaunchDeadline, route: dict, canary: Canary
+) -> list[str]:
     if args.defer_canary and (deferred := _binding_deferred(environ)):
         return deferred
-    canary = math.inf if args.canary_timeout is None else args.canary_timeout
-    return launch.run("profile canary", canary, lambda seconds: _binding_result(environ, seconds, route))
+    limit = math.inf if args.canary_timeout is None else args.canary_timeout
+    return launch.run("profile canary", limit, lambda seconds: _binding_result(environ, seconds, route, canary))
 
 
 def _detach() -> bool:
@@ -1115,7 +1131,13 @@ def _unrouted(args: argparse.Namespace, route: dict[str, str]) -> tuple[str, str
     return "routed_only=failed", "the agent was not routed to an account, so the launch failed"
 
 
-def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -> int:
+def main(
+    argv: list[str] | None = None,
+    environ: dict[str, str] | None = None,
+    *,
+    start: Start = _open_terminal,
+    canary: Canary = _wait_binding,
+) -> int:
     args = _parser().parse_args(argv)
     launch = LaunchDeadline(_launch_seconds(args))
     active_env = dict(os.environ if environ is None else environ)
@@ -1234,7 +1256,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
     try:
         if host != "herdr":
             report.append(f"command={shlex.join(command)}")
-            subprocess.Popen(command, env=active_env, start_new_session=True)
+            start(command, active_env)
     except OSError as exc:
         discard()
         print(f"agentihooks init-agent: {exc}", file=sys.stderr)
@@ -1294,7 +1316,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         return 3
     try:
         _route_reported(active_env, args.route_timeout, route)
-        report += _profile_canary(args, active_env, launch, route)
+        report += _profile_canary(args, active_env, launch, route, canary)
     except (OSError, ValueError) as exc:
         _refuse_binding(active_env, exc)
         print("\n".join([*report, "profile_validation=failed"]))

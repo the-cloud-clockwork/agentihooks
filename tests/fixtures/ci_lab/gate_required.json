@@ -3526,6 +3526,42 @@
   },
   {
    "base": "pull_request",
+   "name": "pull request lab skipped for an authoritative gate the head does not run",
+   "outputs": {
+    "lab-verdict": {
+     "authoritative": "{\"unit\": true}",
+     "lab_unit": "skipped"
+    }
+   },
+   "passes": true,
+   "results": {
+    "unit": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull request lab check missing at the deadline for an authoritative gate the head does not run",
+   "outputs": {
+    "lab-verdict": {
+     "authoritative": "{\"unit\": true}",
+     "lab_unit": "failure"
+    }
+   },
+   "passes": false
+  },
+  {
+   "base": "pull_request",
+   "name": "pull request lab skipped for an authoritative gate the head requires",
+   "outputs": {
+    "lab-verdict": {
+     "authoritative": "{\"unit-selected\": true}",
+     "lab_unit-selected": "skipped"
+    }
+   },
+   "passes": false
+  },
+  {
+   "base": "pull_request",
    "name": "pull request lab not authoritative",
    "outputs": {
     "lab-verdict": {

@@ -21,7 +21,7 @@ def _choose(
 
 
 REMEDY = (
-    "set it with agentihooks ledger --slug sw task set t9 profile=<frontend|engineer|qa>, "
+    "set it with agentihooks api --slug sw task set t9 profile=<frontend|engineer|qa>, "
     "or split the task into one public responsibility each, then reopen it"
 )
 INSTRUCTIONS = (
@@ -288,7 +288,7 @@ def test_a_legacy_floor_above_one_is_refused_with_its_remedy(monkeypatch, tmp_pa
         _choose("eng", {}, TASK, {"AGENTIHOOKS_PROFILE_PICK_MIN_CONFIDENCE": "1.5"})
     assert str(refused.value) == (
         "task t9 profile classification is unavailable (threshold confidence must be between zero and one): "
-        "set it with agentihooks ledger --slug sw task set t9 profile=<frontend|engineer|qa>, or split the task "
+        "set it with agentihooks api --slug sw task set t9 profile=<frontend|engineer|qa>, or split the task "
         "into one public responsibility each, then reopen it"
     )
 
@@ -302,7 +302,7 @@ def test_a_refused_definition_is_unresolved_with_its_remedy(monkeypatch, tmp_pat
         profile_choice.classify("sw", TASK, {"AGENTIHOOKS_CLASSIFIER_PROFILE_PICK_CONFIDENCE": "1.5"})
     assert str(refused.value) == (
         "task t9 profile classification is unavailable (threshold confidence must be between zero and one): "
-        "set it with agentihooks ledger --slug sw task set t9 profile=<frontend|engineer|qa>, or split the task "
+        "set it with agentihooks api --slug sw task set t9 profile=<frontend|engineer|qa>, or split the task "
         "into one public responsibility each, then reopen it"
     )
 

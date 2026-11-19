@@ -1,0 +1,20 @@
+rules:
+  - id: admission-pending-runs-eval
+    languages: [python]
+    severity: ERROR
+    message: >-
+      admission.pending is read by hive members whose Redis grant only reads the admission keys, and Redis declares
+      every key an EVAL or EVALSHA names written, including the EVALSHA a register_script call sends, so a script
+      here refuses swarm status on every hive worker. Read the count with plain read commands such as TIME and ZCOUNT.
+    paths:
+      include:
+        - /scripts/hive/admission.py
+        - admission-pending-runs-eval.py
+    patterns:
+      - pattern-inside: |
+          def pending(...):
+              ...
+      - pattern-either:
+          - pattern: $R.eval(...)
+          - pattern: $R.evalsha(...)
+          - pattern: $R.register_script(...)

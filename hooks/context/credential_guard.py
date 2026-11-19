@@ -139,6 +139,9 @@ READER_VERBS = {
 
 SOURCERS = {"source", "."}
 INTERPRETERS = {"python", "python2", "python3", "node", "ruby", "perl", "php", "sh", "bash", "zsh", "dash"}
+SHELLS = frozenset({"sh", "bash", "zsh", "dash"})
+AWKS = frozenset({"awk", "gawk", "mawk", "nawk"})
+ENVIRON_VALUE = re.compile(r"\bENVIRON\s*\[")
 GREP_FAMILY = {"grep", "egrep", "fgrep", "rg", "ack"}
 PAGERS = {"cat", "head", "tail", "less", "more", "bat", "tac", "nl"}
 WRAPPERS = {"docker", "podman", "nerdctl", "kubectl", "ssh"}
@@ -187,7 +190,24 @@ NAME_STAGE = (
 NEUTRAL_STAGE = re.compile(r"^\s*(sort|uniq|column|tr)\b")
 
 
-HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1.*?^\s*\2\s*$", re.S | re.M)
+HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1([^\n]*)\n(.*?)^\s*\2\s*$", re.S | re.M)
+HEREDOC_TOKEN = re.compile(r"<<AHHEREDOC(\d+)([^\n]*)")
+SCRIPT_RUNNERS = SHELLS | SOURCERS | {"eval", "su", "ksh", "mksh", "ash", "fish", "csh", "tcsh"}
+LAUNCHERS = {
+    "sudo",
+    "doas",
+    "env",
+    "command",
+    "exec",
+    "time",
+    "nohup",
+    "nice",
+    "timeout",
+    "xargs",
+    "stdbuf",
+    "setsid",
+    "busybox",
+}
 SEGMENT_DELIM = re.compile(r"&&|\|\||;|\n")
 STAGE_DELIM = re.compile(r"(?<!\|)\|(?!\|)")
 SUBSTITUTION = re.compile(r"\$\(([^()]*)\)|`([^`]*)`|<\(([^()]*)\)")
@@ -222,24 +242,31 @@ def split_outside_quotes(delim, text):
     return parts
 
 
-def strip_heredocs(cmd):
-    """Drop heredoc bodies — they are data fed to a command, not commands."""
-    return HEREDOC.sub("<<HEREDOC", cmd)
+def strip_heredocs(cmd: str) -> str:
+    """Drop heredoc bodies — they are data fed to a command, not commands; the delimiter line stays."""
+    return HEREDOC.sub(lambda m: "<<HEREDOC" + m.group(3), cmd)
 
 
-def mask_heredocs(cmd):
+def mask_heredocs(cmd: str) -> tuple[str, list[re.Match[str]]]:
     """``strip_heredocs`` that can be undone: (masked command, original heredocs)."""
-    kept = []
+    kept: list[re.Match[str]] = []
 
-    def _keep(match):
-        kept.append(match.group(0))
-        return f"<<AHHEREDOC{len(kept) - 1}"
+    def _keep(match: re.Match[str]) -> str:
+        kept.append(match)
+        return f"<<AHHEREDOC{len(kept) - 1}{match.group(3)}"
 
     return HEREDOC.sub(_keep, cmd), kept
 
 
-def unmask_heredocs(cmd, kept):
-    return re.sub(r"<<AHHEREDOC(\d+)", lambda m: kept[int(m.group(1))], cmd)
+def unmask_heredocs(cmd: str, kept: list[re.Match[str]]) -> str:
+    """The masked command with each heredoc's opener and body put back around its delimiter line."""
+
+    def _restore(token: re.Match[str]) -> str:
+        heredoc = kept[int(token.group(1))]
+        line_start, line_end = heredoc.span(3)
+        return heredoc.string[heredoc.start() : line_start] + token.group(2) + heredoc.string[line_end : heredoc.end()]
+
+    return HEREDOC_TOKEN.sub(_restore, cmd)
 
 
 def split_commands(cmd):
@@ -480,6 +507,14 @@ def echo_secret_verdict(command):
     return None
 
 
+def awk_environ_verdict(command: str) -> str | None:
+    """Block reason when an awk stage of the command reads a value out of ENVIRON."""
+    for stage in split_outside_quotes(STAGE_DELIM, command)[::2]:
+        if verb_of(unwrapped(tokens_of(stage))) in AWKS and ENVIRON_VALUE.search(stage):
+            return block("printing environment values (awk ENVIRON[...])", KIND_ENVIRONMENT)
+    return None
+
+
 KUBECTL_DESCRIBE = re.compile(r"\bkubectl\b[^|]*?(?<!\S)describe(?!\S)([^|<>]*)")
 DESCRIBE_VALUE_FLAGS = frozenset(
     "-f -k -l -n -s -v --chunk-size --filename --kustomize --selector --as --as-group --as-uid --as-user-extra "
@@ -586,7 +621,8 @@ def renderer_verdict(command: str) -> str | None:
     return None
 
 
-KUBECTL_WORDS = re.compile(r"\bkubectl\b([^|<>;&]*)")
+KUBECTL_WORDS = re.compile(r"\bkubectl\b")
+KUBECTL_END = re.compile(r"[|<>;&]")
 SHELL_GROUPING = re.compile(r"[()`]")
 VALUE_FLAGS = {"--output": "output", "--template": "template", "--raw": "raw"}
 SHORT_OUTPUT = re.compile(r"-[arwh]*o=?(.*)")
@@ -670,40 +706,60 @@ def prints_field_values(outputs: list[str], templates: list[str]) -> bool:
     )
 
 
-def get_operands(words: list[str]) -> list[str]:
-    """Positional words of a kubectl get; only a flag known to take a value, written without =, consumes the next."""
-    operands: list[str] = []
+def get_operands(words: list[str]) -> list[tuple[str, bool]]:
+    """Positional words of a kubectl get, each with whether an unlisted flag right before it may take it as a value."""
+    operands: list[tuple[str, bool]] = []
+    claimable = False
     remaining = iter(words)
     for word in remaining:
         if not word.startswith("-"):
-            operands.append(word)
+            operands.append((word, claimable))
         elif word in GET_VALUE_FLAGS:
             next(remaining, None)
+        claimable = word.startswith("-") and word not in GET_VALUE_FLAGS and "=" not in word
     return operands
 
 
-def leaves_type_to_shell(operands: list[str]) -> bool:
-    """True when a kubectl get names no operand, or leaves the type part of any operand to the shell."""
-    return not operands or any(UNSHOWN_TYPE.search(word.split("/")[0]) for word in operands)
+def type_operands(operands: list[tuple[str, bool]]) -> list[str]:
+    """Operands that may hold the resource type: all in TYPE/NAME form, else each up to the first no flag can take."""
+    words = [word for word, _ in operands]
+    claimed = [claimable for _, claimable in operands]
+    if any("/" in word for word in words) or False not in claimed:
+        return words
+    return words[: claimed.index(False) + 1]
+
+
+def types_secret(rest: list[str]) -> bool:
+    """True when the words after a kubectl get name no operand, or the Secret type or a shell filled type in one."""
+    types = type_operands(get_operands(rest))
+    return not types or any(names_secret(word) or UNSHOWN_TYPE.search(word.split("/")[0]) for word in types)
+
+
+def get_verb(words: list[str]) -> int | None:
+    """Index of the first get word that no listed value flag right before it takes as its value."""
+    taken = {index + 1 for index, word in enumerate(words) if word in GET_VALUE_FLAGS}
+    return next((index for index, word in enumerate(words) if word == "get" and index not in taken), None)
 
 
 def prints_secret_values(words: list[str]) -> bool:
     """True when kubectl words get a Secret, or a type left to the shell, with an output that can print a data value."""
-    if "get" not in words:
+    verb = get_verb(words)
+    if verb is None:
         return False
     values = flag_values(words)
     if any(RAW_SECRET.search(raw) for raw in values["raw"]):
         return True
-    rest = words[words.index("get") + 1 :]
-    named = any(names_secret(word) for word in rest) or leaves_type_to_shell(get_operands(rest))
-    return named and prints_field_values(values["output"], values["template"])
+    return types_secret(words[verb + 1 :]) and prints_field_values(values["output"], values["template"])
 
 
 def gets_secret_values(low: str) -> bool:
     """True when any kubectl get in the lowercased segment, continued lines joined, may print a Secret value."""
+    joined = joined_continuations(low)
     return any(
-        prints_secret_values(tokens_of(SHELL_GROUPING.sub(" ", found.group(1))))
-        for found in KUBECTL_WORDS.finditer(joined_continuations(low))
+        prints_secret_values(
+            tokens_of(SHELL_GROUPING.sub(" ", split_outside_quotes(KUBECTL_END, joined[found.end() :])[0]))
+        )
+        for found in KUBECTL_WORDS.finditer(joined)
     )
 
 
@@ -844,6 +900,26 @@ def inner_command(toks):
         if base in READER_VERBS or base in SOURCERS or base in INTERPRETERS:
             return toks[i:]
     return None
+
+
+def unwrapped(toks: list[str]) -> list[str]:
+    """The tokens of the command a container or remote wrapper runs, or the tokens themselves."""
+    if verb_of(toks) in WRAPPERS:
+        return inner_command(toks) or []
+    return toks
+
+
+def shell_scripts(toks: list[str]) -> list[str]:
+    """The scripts a shell stage runs with -c, directly or as a wrapper's command; empty for any other stage."""
+    toks = unwrapped(toks)
+    if verb_of(toks) not in SHELLS:
+        return []
+    i = verb_index(toks)
+    return [
+        word
+        for flag, word in zip(toks[i + 1 :], toks[i + 2 :])
+        if flag.startswith("-") and not flag.startswith("--") and "c" in flag
+    ]
 
 
 def find_filters(toks):
@@ -1020,14 +1096,50 @@ def find_fed_verdict(ctx, roots):
     return recursive_verdict(KIND_RECURSIVE, roots, ctx)
 
 
-def segment_verdict(segment, ctx):
+def script_verdict(stage_text: str, ctx: Context) -> Verdict:
+    """The stage's verdict once each -c script a shell in it runs is checked as a command first."""
+    for script in shell_scripts(tokens_of(stage_text)):
+        v = decide_bash({"command": script}, Context(ctx.cwd, ctx.recursive))
+        if v.block:
+            return v
+    return stage_verdict(stage_text, ctx)
+
+
+def runs_input_script(stage_text: str) -> bool:
+    """Whether the stage, its wrapped or launched command or a substitution in it runs a shell, source or eval."""
+    for m in SUBSTITUTION.finditer(stage_text):
+        if runs_input_script(next(g for g in m.groups() if g is not None)):
+            return True
+    toks = tokens_of(stage_text)
+    if verb_of(toks) in WRAPPERS:
+        toks = inner_command([word for tok in toks for word in tok.split()]) or []
+    words = [tok.split("/")[-1] for tok in toks if not ASSIGNMENT.match(tok)]
+    if words and words[0] in LAUNCHERS:
+        return any(word in SCRIPT_RUNNERS for word in words)
+    return verb_of(toks) in SCRIPT_RUNNERS
+
+
+def heredoc_verdict(segment: str, heredocs: list[re.Match[str]], ctx: Context) -> Verdict:
+    """The verdict on each heredoc body of the segment, checked as a command once a stage of it runs a shell."""
+    if not any(runs_input_script(stage) for stage in split_outside_quotes(STAGE_DELIM, segment)[::2]):
+        return ALLOW
+    for token in HEREDOC_TOKEN.finditer(segment):
+        index = int(token.group(1))
+        body = {"command": heredocs[index].group(4)} if index < len(heredocs) else {}
+        v = decide_bash(body, Context(ctx.cwd, ctx.recursive))
+        if v.block:
+            return v
+    return ALLOW
+
+
+def segment_verdict(segment: str, ctx: Context) -> Verdict:
     ctx.find_filters = None
     parts = split_outside_quotes(STAGE_DELIM, segment)
     changed = False
     for i in range(0, len(parts), 2):
         if not parts[i].strip():
             continue
-        v = stage_verdict(parts[i], ctx)
+        v = script_verdict(parts[i], ctx)
         if v.block:
             return v
         if v.rewrite:
@@ -1036,7 +1148,7 @@ def segment_verdict(segment, ctx):
     return Verdict(rewrite="".join(parts)) if changed else ALLOW
 
 
-def decide_bash(tool_input, ctx=None):
+def decide_bash(tool_input: Mapping[str, object], ctx: Context | None = None) -> Verdict:
     command = tool_input.get("command") or ""
     if not command:
         return ALLOW
@@ -1051,11 +1163,13 @@ def decide_bash(tool_input, ctx=None):
         seg = parts[i]
         if not seg.strip():
             continue
-        for check in (env_dump_verdict, echo_secret_verdict, renderer_verdict, gh_token_verdict):
+        for check in (env_dump_verdict, echo_secret_verdict, awk_environ_verdict, renderer_verdict, gh_token_verdict):
             reason = check(seg)
             if reason:
                 return Verdict(block=reason)
-        v = segment_verdict(seg, ctx)
+        v = heredoc_verdict(seg, heredocs, ctx)
+        if not v.block:
+            v = segment_verdict(seg, ctx)
         if v.block:
             return v
         if v.rewrite:

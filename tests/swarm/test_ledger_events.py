@@ -110,6 +110,23 @@ def test_only_the_task_done_notice_is_informational(store):
     assert [i.fyi for i in InboxStore(store.redis).inbox(MASTER_SEAT)] == [False, False, False, True]
 
 
+@pytest.mark.feature("ledger-event-notices-pass-the-seen-claim")
+def test_a_second_event_on_one_target_passes_the_seen_claim(store: RedisStore) -> None:
+    from scripts.inbox import seen
+
+    inbox = InboxStore(store.redis)
+    tasks = [{"id": "t1", "title": "Build the thing", "state": "blocked", "claimed_by": "sw-eng-1"}]
+    blocked = event(11, 100_000, "sw-eng-1", "task blocked", "tasks/t1")
+    again = event(12, 200_000, "sw-eng-1", "task blocked", "tasks/t1")
+    run(store, recorded())
+    run(store, recorded([blocked], tasks=tasks))
+    (first,) = seen.claim(inbox, MASTER_SEAT)
+    inbox.close(first.id, MASTER_SEAT, "done", "unblocked it")
+    run(store, recorded([blocked, again], tasks=tasks))
+    (second,) = seen.claim(inbox, MASTER_SEAT)
+    assert (first.ref, second.ref) == ("sw:event:tasks/t1:11", "sw:event:tasks/t1:12")
+
+
 def test_a_replay_of_the_same_ledger_makes_no_item(store):
     run(store, recorded())
     doc = recorded(AGENT_EVENTS, tasks=[DONE_T2])
@@ -211,7 +228,7 @@ def test_a_new_priority_makes_one_master_item_naming_the_item_and_the_ask(store)
         'protocol step is to attempt 1 of 2: agentihooks swarm sw resolve attempt tasks/t1 --tried "<what you tried>" '
         '--command "<the command run>" --output "<its output>".'
     )
-    assert item.ref == "sw:priority:tasks/t1" and not item.fyi
+    assert item.ref == "sw:priority:tasks/t1:100000" and not item.fyi
     assert actions == [f"told {MASTER_SEAT}: priority tasks/t1"]
     assert store.redis.smembers(store.key("sw", "priorities-sent")) == {"tasks/t1"}
     assert texts(store, ENG_SEAT) == []
@@ -243,7 +260,7 @@ def test_a_priority_on_a_follow_up_the_swarm_raised_for_the_operator_sends_the_m
     run(store, doc)
     doc["_meta"]["events"] = [e for e in doc["_meta"]["events"] if e["target"] != "followups/f1"]
     run(store, doc)
-    assert [i.ref for i in InboxStore(store.redis).inbox(MASTER_SEAT)] == ["sw:priority:followups/f2"]
+    assert [i.ref for i in InboxStore(store.redis).inbox(MASTER_SEAT)] == ["sw:priority:followups/f2:100000"]
 
 
 def test_priorities_open_before_the_first_pass_are_not_announced_and_later_ones_are(store):
@@ -273,6 +290,22 @@ def test_a_priority_raised_again_after_it_cleared_makes_a_new_item(store):
     run(store, with_priorities())
     run(store, with_priorities(row))
     assert len(texts(store, MASTER_SEAT)) == 2
+
+
+@pytest.mark.feature("ledger-event-notices-pass-the-seen-claim")
+def test_a_priority_raised_again_passes_the_seen_claim(store: RedisStore) -> None:
+    from scripts.inbox import seen
+
+    inbox = InboxStore(store.redis)
+    row = priority("tasks/t1", "Blocked: the deploy key is missing", by="ledger")
+    run(store, with_priorities())
+    run(store, with_priorities(row), now_ms=200_000)
+    (first,) = seen.claim(inbox, MASTER_SEAT)
+    inbox.close(first.id, MASTER_SEAT, "done", "resolved it")
+    run(store, with_priorities(), now_ms=300_000)
+    run(store, with_priorities(row), now_ms=400_000)
+    (second,) = seen.claim(inbox, MASTER_SEAT)
+    assert (first.ref, second.ref) == ("sw:priority:tasks/t1:200000", "sw:priority:tasks/t1:400000")
 
 
 def test_a_priority_the_master_added_is_not_announced_beside_an_agent_ask(store):
@@ -341,13 +374,13 @@ def open_followup(added_at, **fields):
             1,
             "sw-eng-1 added a follow-up f1 on ledger sw: Retries need a cap\n"
             "Decide it: turn it into a task, close it with a status, or flag it for the operator.\n"
-            "Close it: agentihooks ledger --slug sw followup done f1",
+            "Close it: agentihooks api --slug sw followup done f1",
         ),
         (
             15 * MINUTE,
             "A follow-up f1 on ledger sw is still open fifteen minutes after sw-eng-1 added it: "
             "Retries need a cap\nDecide it now, or it goes to the operator's Priorities.\n"
-            "Close it: agentihooks ledger --slug sw followup done f1",
+            "Close it: agentihooks api --slug sw followup done f1",
         ),
     ],
 )
@@ -369,7 +402,7 @@ def test_follow_up_notices_name_each_item_and_its_completion_command(store, now_
     assert first == expected_first
     assert "follow-up f2 on ledger sw" in second
     assert "Queue needs a limit" in second
-    assert second.endswith("Close it: agentihooks ledger --slug sw followup done f2")
+    assert second.endswith("Close it: agentihooks api --slug sw followup done f2")
 
 
 def test_a_follow_up_event_without_text_keeps_its_identifier_and_completion_command(store):
@@ -378,7 +411,7 @@ def test_a_follow_up_event_without_text_keeps_its_identifier_and_completion_comm
     assert texts(store, MASTER_SEAT) == [
         "sw-eng-1 added a follow-up f1 on ledger sw: \n"
         "Decide it: turn it into a task, close it with a status, or flag it for the operator.\n"
-        "Close it: agentihooks ledger --slug sw followup done f1"
+        "Close it: agentihooks api --slug sw followup done f1"
     ]
 
 
@@ -398,6 +431,21 @@ def test_an_open_follow_up_is_raised_again_after_fifteen_minutes_then_shown_to_t
     run(store, doc, now_ms=31 * MINUTE, ledger=ledger)
     assert [item for item, _ in ledger.priorities] == ["followups/f1"]
     assert "Retries need a cap" in ledger.priorities[0][1]
+
+
+@pytest.mark.feature("ledger-event-notices-pass-the-seen-claim")
+def test_a_follow_up_raised_after_its_added_notice_passes_the_seen_claim(store: RedisStore) -> None:
+    from scripts.inbox import seen
+
+    inbox = InboxStore(store.redis)
+    doc = open_followup(0)
+    run(store, recorded())
+    run(store, doc, now_ms=1)
+    (added,) = seen.claim(inbox, MASTER_SEAT)
+    inbox.close(added.id, MASTER_SEAT, "done", "looking at it")
+    run(store, doc, now_ms=15 * MINUTE)
+    (raised,) = seen.claim(inbox, MASTER_SEAT)
+    assert (added.ref, raised.ref) == ("sw:event:followups/f1:11", f"sw:event:followups/f1:{15 * MINUTE}")
 
 
 def test_a_closed_or_operator_flagged_follow_up_is_not_raised(store):

@@ -57,6 +57,11 @@ def _handoff(workers: int) -> ThreadPoolExecutor:
     return ThreadPoolExecutor(max_workers=workers, thread_name_prefix="tick-handed")
 
 
+def _placer() -> ThreadPoolExecutor:
+    """Return the one worker of a pass's steps that take the host placement lock."""
+    return ThreadPoolExecutor(max_workers=1, thread_name_prefix="tick-placing")
+
+
 Item = TypeVar("Item")
 Found = TypeVar("Found")
 
@@ -82,10 +87,15 @@ class Pass:
     guard: Lock = field(default_factory=Lock, compare=False)
     tracked: set[str] = field(default_factory=set[str], compare=False)
     handoff: ThreadPoolExecutor | None = field(default=None, compare=False)
+    placer: ThreadPoolExecutor = field(default_factory=_placer, compare=False)
 
-    def executor(self, name: str) -> ThreadPoolExecutor:
-        """Return the workers step ``name`` runs on: the handed off steps' own when the pass has them, else the pass's
-        step workers, so the handed lane never takes a worker from the rest of the pass."""
+    def executor(self, name: str, placing: bool) -> ThreadPoolExecutor:
+        """Return the workers step ``name`` runs on: the pass's one placement worker when it is ``placing`` under the
+        host placement lock, so a step waiting for that lock holds no other worker; else the handed off steps' own
+        when the pass has them, else the pass's step workers, so the handed lane never takes a worker from the rest
+        of the pass."""
+        if placing:
+            return self.placer
         return self.handoff if self.handoff is not None and self.handed_of((name,)) else self.steps
 
     def hand(self, names: Iterable[str]) -> None:
@@ -127,15 +137,15 @@ class Pass:
                 self.gone.add(name)
             self.handed[name].set()
 
-    def ended(self, names: Iterable[str], timeout: float) -> bool:
-        """Return whether every handed off step in ``names`` ended within ``timeout`` seconds and none was dropped."""
+    def ended(self, names: Iterable[str], timeout: float, required: Iterable[str] | None = None) -> bool:
+        """Wait for every named step, rejecting loss only among required dependencies when supplied."""
         with self.guard:
             events = [self.handed[name] for name in set(names)]
         until = monotonic() + timeout
         if not all(event.wait(until - monotonic()) for event in events):
             return False
         with self.guard:
-            return not self.gone.intersection(names)
+            return not self.gone.intersection(names if required is None else required)
 
     def detach(self, work: Callable[[], object]) -> None:
         """Start ``work`` under the caller's copied context on a daemon thread the pass joins when it ends."""
@@ -238,6 +248,7 @@ def running(
         current.steps.shutdown(wait=False, cancel_futures=True)
         if current.handoff is not None:
             current.handoff.shutdown(wait=False, cancel_futures=True)
+        current.placer.shutdown(wait=False, cancel_futures=True)
         current.fans.shutdown(wait=False, cancel_futures=True)
         _ACTIVE.reset(token)
         if beat is not None:

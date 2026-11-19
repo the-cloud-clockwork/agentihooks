@@ -6,19 +6,24 @@ import subprocess
 import sys
 import threading
 import urllib.request
+import zipfile
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import wait
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
+from unittest.mock import Mock
 
 import jsonschema
 import pytest
+import requests
 import yaml
 
-from scripts import ci_wiring
+from scripts import ci_wiring, dep_manifest
 from scripts.ci_lab import __main__ as cli
 from scripts.ci_lab import (
     budget,
+    checks,
     control,
     delivery,
     evidence,
@@ -27,9 +32,12 @@ from scripts.ci_lab import (
     expand_tests,
     interaction,
     lease_api,
+    manifests,
     queue,
+    relay,
     scheduler,
     static_gates,
+    worktrees,
 )
 from scripts.ci_lab.capacity import Load
 from scripts.ci_lab.checks import Output
@@ -37,7 +45,7 @@ from scripts.ci_lab.delivery import CLASSES
 from scripts.ci_lab.digests import GradeInputs, StaticInputs, Toolchain, digest, grade_key, static_key
 from scripts.ci_lab.intake import GradeRequest
 from scripts.ci_lab.leases import Grant, Leases
-from scripts.ci_lab.manifests import Actions, Fetcher, FetchRefused
+from scripts.ci_lab.manifests import Actions, Fetcher, FetchRefused, FetchUnanswered
 from scripts.ci_lab.objects import LocalObjects, manifest_folder, unit_path, upload_path
 from scripts.ci_lab.outcomes import CRASH
 from scripts.ci_lab.retry import Policy
@@ -45,11 +53,11 @@ from scripts.ci_lab.static_gates import StaticGate
 from scripts.ci_lab.store import Store, Verdict
 from scripts.ci_lab.units import Priority, Unit
 from scripts.ci_lab.webhooks import HeadEvent, envelope
+from scripts.ci_mutation.plan import MUTANT_SECONDS
+from scripts.dep_manifest import _git
 from scripts.events import bus
 from scripts.events.envelope import Envelope
-from tests import dep_manifest
 from tests.ci_lab.gate_required_cases import load, materialize
-from tests.dep_manifest import _git
 
 REPO = "/the-cloud-clockwork/agentihooks"
 SLUG = "the-cloud-clockwork/agentihooks"
@@ -133,10 +141,16 @@ class Expander:
         self.seen.append(request)
         return self.plans[request.head]
 
+    def merge_base(self, repo: str, head: str) -> str:
+        return self.plans[head].grader
+
 
 @dataclass
 class Poster:
     posts: list[Post] = field(default_factory=list[Post])
+
+    def seed(self, head: str, gate: str, run: str, run_id: int, status: str, shadow: bool) -> None:
+        pass
 
     def post(self, head: str, gate: str, status: str, conclusion: str | None, output: Output, shadow: bool) -> int:
         self.posts.append((head, gate, status, conclusion, output, shadow))
@@ -176,10 +190,10 @@ class Lab:
         self.asked.append(self.now)
         return frozenset(self.fixes)
 
-    def build(self, quiet_ms: int, retries: Policy) -> scheduler.Scheduler:
+    def build(self, quiet_ms: int, retries: Policy, spending: budget.Budget | None) -> scheduler.Scheduler:
         ports = scheduler.Ports(self.inbox, self.expander, self.checks, self.hotfixes, self.kube)
         settings = scheduler.Settings(frozenset({ACTOR}), quiet_ms, retries)
-        return scheduler.Scheduler(self.client, self.objects, ports, settings)
+        return scheduler.Scheduler(self.client, self.objects, ports, settings, spending)
 
 
 @dataclass
@@ -192,9 +206,15 @@ class Run:
         return self.engine.store
 
     def push(
-        self, head: str, lane: str = "feature", event: str = "push", action: str = "pushed", actor: str = ACTOR
+        self,
+        head: str,
+        lane: str = "feature",
+        event: str = "push",
+        action: str = "pushed",
+        actor: str = ACTOR,
+        ref: str = "",
     ) -> None:
-        self.lab.inbox.pending.append(scheduler.Head(HeadEvent(event, REPO, head, BASE, actor, action), lane))
+        self.lab.inbox.pending.append(scheduler.Head(HeadEvent(event, REPO, head, BASE, actor, action), lane, ref))
 
     def tick(self, at: int) -> list[str]:
         self.lab.now = at
@@ -226,10 +246,16 @@ class Run:
 
 @pytest.fixture
 def lab(tmp_path: Path) -> Callable[..., Run]:
-    def make(plans: dict[str, scheduler.Plan], quiet_ms: int = 0, retries: Policy = Policy()) -> Run:
+    def make(
+        plans: dict[str, scheduler.Plan],
+        quiet_ms: int = 0,
+        retries: Policy = Policy(),
+        spend: budget.Policy | None = None,
+    ) -> Run:
         client = fake_redis()
         state = Lab(client, LocalObjects(tmp_path / "objects"), Inbox(), Expander(plans))
-        return Run(state, state.build(quiet_ms, retries))
+        spending = None if spend is None else budget.Budget(client, lambda: state.now, spend)
+        return Run(state, state.build(quiet_ms, retries, spending))
 
     return make
 
@@ -250,9 +276,73 @@ def test_a_fully_cached_head_enqueues_nothing_and_completes_at_once(lab: Callabl
     assert run.lab.poster.moves(HEAD_A, "lint") == [("completed", "success")]
     assert run.lab.poster.moves(HEAD_A, scheduler.REQUIRED) == [("completed", "success")]
     assert run.lab.client.smembers(scheduler.LIVE) == set()
-    assert f"grading {grade.run} with 0 of 2 units enqueued" in actions
+    assert f"grading {grade.run} with 0 of 2 units held" in actions
     assert f"completed {grade.run} success" in actions
     assert run.lab.repos == [SLUG]
+
+
+@pytest.mark.feature("lab-remote-heads")
+def test_a_grade_ref_head_posts_no_check_run_and_keeps_each_check_s_conclusion_for_the_relay(
+    lab: Callable[..., Run],
+) -> None:
+    units = (unit(1), unit(2))
+    run = lab({HEAD_A: plan({"lint": units}), HEAD_B: plan({"lint": units})})
+    for item in units:
+        run.cache(item)
+    run.push(HEAD_A, lane="engineer-1", ref="refs/grade/t1")
+    run.push(HEAD_B, lane="engineer-2")
+    actions = run.tick(1000)
+    relayed = run.grade(HEAD_A)
+    assert relayed.ref == "refs/grade/t1"
+    assert relayed.conclusion == "success"
+    assert relayed.posted == {"lint": ["completed", "success"], scheduler.REQUIRED: ["completed", "success"]}
+    assert relayed.runs == {}
+    assert run.lab.poster.moves(HEAD_A, "lint") == []
+    assert run.lab.poster.moves(HEAD_A, scheduler.REQUIRED) == []
+    assert f"left lint completed on {HEAD_A} to the relay" in actions
+    assert f"left {scheduler.REQUIRED} completed on {HEAD_A} to the relay" in actions
+    assert run.grade(HEAD_B).ref == ""
+    assert run.lab.poster.moves(HEAD_B, scheduler.REQUIRED) == [("completed", "success")]
+
+
+@pytest.mark.feature("lab-remote-heads")
+def test_a_grade_ref_head_held_in_its_quiet_window_keeps_its_ref(lab: Callable[..., Run]) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)})}, quiet_ms=500)
+    run.cache(unit(1))
+    run.push(HEAD_A, lane="engineer-1", ref="refs/grade/t1")
+    assert run.tick(1000) == [f"received {HEAD_A} on engineer-1"]
+    run.tick(1600)
+    assert run.grade(HEAD_A).ref == "refs/grade/t1"
+    assert run.lab.poster.posts == []
+
+
+@pytest.mark.feature("lab-remote-heads")
+def test_a_held_head_takes_the_grade_ref_it_arrives_again_with_and_keeps_one_it_holds(lab: Callable[..., Run]) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)}), HEAD_B: plan({"lint": (unit(1),)})}, quiet_ms=500)
+    run.cache(unit(1))
+    run.push(HEAD_A, lane="engineer-1")
+    run.push(HEAD_B, lane="engineer-2", ref="refs/grade/t2")
+    run.tick(1000)
+    run.push(HEAD_A, lane="engineer-1", ref="refs/grade/t1")
+    run.push(HEAD_B, lane="engineer-2")
+    assert run.tick(1200) == [f"holding {HEAD_A}", f"holding {HEAD_B}"]
+    run.tick(1600)
+    assert (run.grade(HEAD_A).ref, run.grade(HEAD_B).ref) == ("refs/grade/t1", "refs/grade/t2")
+    assert run.lab.poster.posts == []
+
+
+@pytest.mark.feature("lab-remote-heads")
+def test_a_head_held_before_grade_refs_were_kept_starts_with_no_ref_and_posts(lab: Callable[..., Run]) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)})}, quiet_ms=500)
+    run.cache(unit(1))
+    run.push(HEAD_A, lane="engineer-1")
+    run.tick(1000)
+    for name, raw in run.lab.client.hgetall(scheduler.WAITING).items():
+        older = {key: value for key, value in json.loads(raw).items() if key != "ref"}
+        run.lab.client.hset(scheduler.WAITING, name, json.dumps(older))
+    run.tick(1600)
+    assert run.grade(HEAD_A).ref == ""
+    assert run.lab.poster.moves(HEAD_A, scheduler.REQUIRED) == [("completed", "success")]
 
 
 @pytest.mark.feature("lab-scheduler-evidence")
@@ -375,6 +465,64 @@ def test_a_lost_worker_requeues_once_then_its_unit_makes_the_grade_red(lab: Call
     assert run.grade(HEAD_A).conclusion == "failure"
     assert run.lab.poster.moves(HEAD_A, "lint")[-1] == ("completed", "failure")
     assert run.store.get(item.kind, item.key) is None
+
+
+CHECK_RUNS = f"{checks.API}/repos/{SLUG}/check-runs"
+
+
+class FixtureToken:
+    def get_token(self) -> str:
+        return "fixture"
+
+
+def github(calls: list[tuple[str, str]]) -> Callable[..., Mock]:
+    def request(method: str, url: str, **_: Any) -> Mock:
+        calls.append((method, url))
+        created = sum(1 for sent, _ in calls if sent == "POST")
+        run = created if method == "POST" else int(url.rsplit("/", 1)[1])
+        return Mock(status_code=201 if method == "POST" else 200, json=Mock(return_value={"id": run}), text="")
+
+    return request
+
+
+def restarted(run: Run, poster: checks.Checks) -> Run:
+    ports = scheduler.Ports(run.lab.inbox, run.lab.expander, lambda _repo: poster, run.lab.hotfixes, run.lab.kube)
+    settings = scheduler.Settings(frozenset({ACTOR}), 0, Policy())
+    return Run(run.lab, scheduler.Scheduler(run.lab.client, run.lab.objects, ports, settings))
+
+
+@pytest.mark.feature("lab-scheduler-check-run-restart")
+def test_a_restarted_scheduler_advances_the_stored_check_runs_with_no_new_create(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[str, str]] = []
+    seeds: list[tuple[Any, ...]] = []
+    seed = checks.Checks.seed
+
+    def spy(self: checks.Checks, *args: Any) -> None:
+        seeds.append(args)
+        seed(self, *args)
+
+    monkeypatch.setattr(requests, "request", github(calls))
+    monkeypatch.setattr(checks.Checks, "seed", spy)
+    first = restarted(lab({HEAD_A: plan({"lint": (unit(1),)})}), checks.Checks(SLUG, FixtureToken()))
+    first.push(HEAD_A)
+    first.tick(1000)
+    grade = first.grade(HEAD_A)
+    again = restarted(first, checks.Checks(SLUG, FixtureToken()))
+    again.lease()
+    assert again.tick(1100) == [f"posted lint in_progress on {HEAD_A}", f"posted required in_progress on {HEAD_A}"]
+    assert calls == [
+        ("POST", CHECK_RUNS),
+        ("POST", CHECK_RUNS),
+        ("PATCH", f"{CHECK_RUNS}/1"),
+        ("PATCH", f"{CHECK_RUNS}/2"),
+    ]
+    assert seeds == [
+        (HEAD_A, "lint", grade.run, 1, "queued", True),
+        (HEAD_A, scheduler.REQUIRED, grade.run, 2, "queued", True),
+    ]
+    assert grade.runs == again.grade(HEAD_A).runs == {"lint": 1, scheduler.REQUIRED: 2}
 
 
 @pytest.mark.feature("lab-worker-executors")
@@ -831,13 +979,61 @@ def test_a_head_whose_manifest_fetch_github_refuses_is_dropped_with_its_reason(
     run = lab({})
 
     def refused(request: GradeRequest) -> scheduler.Plan:
-        raise FetchRefused(f"GET actions/workflows/test.yml/runs answered 502 for {request.base}")
+        raise FetchRefused(f"GET actions/workflows/test.yml/runs answered 404 for {request.base}")
 
     monkeypatch.setattr(run.lab.expander, "expand", refused)
     run.push(HEAD_A)
-    assert run.tick(1000)[-1] == f"cannot expand {HEAD_A}: GET actions/workflows/test.yml/runs answered 502 for {BASE}"
+    assert run.tick(1000)[-1] == f"cannot expand {HEAD_A}: GET actions/workflows/test.yml/runs answered 404 for {BASE}"
     assert run.lab.client.hgetall(scheduler.WAITING) == {}
     assert run.grades() == []
+
+
+@pytest.mark.feature("lab-manifest-fetch-holds-head")
+def test_a_head_whose_manifest_fetch_github_answers_with_a_server_error_waits_until_a_pass_finds_no_manifest(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = lab({})
+    refusals = [FetchUnanswered(f"GET actions/workflows/test.yml/runs answered 502 for {BASE}")]
+
+    def expand(request: GradeRequest) -> scheduler.Plan:
+        if refusals:
+            raise refusals.pop()
+        raise ValueError(f"no dependency manifest at or before {request.base}")
+
+    monkeypatch.setattr(run.lab.expander, "expand", expand)
+    run.push(HEAD_A)
+    assert run.tick(1000)[-1] == f"holding {HEAD_A}: GET actions/workflows/test.yml/runs answered 502 for {BASE}"
+    assert list(run.lab.client.hgetall(scheduler.WAITING)) == [f"{REPO}|feature|{int(Priority.PROMOTION)}"]
+    assert run.grades() == []
+    assert run.tick(2000)[-1] == f"cannot expand {HEAD_A}: no dependency manifest at or before {BASE}"
+    assert run.lab.client.hgetall(scheduler.WAITING) == {}
+    assert run.grades() == []
+
+
+@pytest.mark.feature("lab-manifest-fetch-off-pass")
+def test_a_head_whose_manifest_still_fetches_keeps_its_window_and_each_pass_reads_the_fetch_again(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)})}, quiet_ms=500)
+    run.cache(unit(1))
+    fetching = [manifests.FetchPending(f"{SLUG} manifest of {BASE} is still fetching")] * 2
+    planned = run.lab.expander.expand
+
+    def expand(request: GradeRequest) -> scheduler.Plan:
+        if fetching:
+            raise fetching.pop()
+        return planned(request)
+
+    monkeypatch.setattr(run.lab.expander, "expand", expand)
+    run.push(HEAD_A)
+    assert run.tick(1000) == [f"received {HEAD_A} on feature"]
+    held = run.lab.client.hgetall(scheduler.WAITING)
+    holding = f"holding {HEAD_A}: {SLUG} manifest of {BASE} is still fetching"
+    assert run.tick(1500) == [holding]
+    assert run.lab.client.hgetall(scheduler.WAITING) == held
+    assert run.tick(1501) == [holding]
+    assert run.tick(1502)[0] == f"grading {run.grade(HEAD_A).run} with 0 of 1 units held"
+    assert run.lab.client.hgetall(scheduler.WAITING) == {}
 
 
 def test_a_live_run_without_a_grade_is_forgotten(lab: Callable[..., Run]) -> None:
@@ -1025,6 +1221,133 @@ def test_the_exposition_asks_for_the_running_and_waiting_slots_after_a_pass(lab:
     assert "\nci_lab_slots_wanted 5.0\n" in scrape(run, 1100)
 
 
+LOW_BUDGET = budget.Policy(100.0, {"backfill": 0.5})
+DAY_MS = 24 * 60 * 60 * 1000
+
+
+def _spend(run: Run) -> None:
+    spending = run.engine.spending
+    assert spending is not None
+    spending.charge(1, 3600.0)
+
+
+@pytest.mark.feature("lab-scheduler-budget")
+def test_a_forced_low_budget_enqueues_no_backfill_unit_and_still_enqueues_every_pull_request_unit(
+    lab: Callable[..., Run],
+) -> None:
+    swept, checked, linted = unit(1), unit(2), unit(3)
+    run = lab({HEAD_A: plan({"lint": (swept,)}), HEAD_B: plan({"lint": (checked, linted)})}, spend=LOW_BUDGET)
+    _spend(run)
+    run.engine.queue.offer("worker", 8, 1000)
+    run.push(HEAD_A, lane="sweep", event="backfill")
+    run.push(HEAD_B, lane="pr-2", event="pull_request", action="synchronize")
+    actions = run.tick(1000)
+    held, pulled = run.grade(HEAD_A), run.grade(HEAD_B)
+    assert run.engine.queue.pending() == [scheduler.job_id(HEAD_B, checked), scheduler.job_id(HEAD_B, linted)]
+    assert [(slot.job, slot.held) for slot in held.units.values()] == [(scheduler.job_id(HEAD_A, swept), True)]
+    assert [slot.held for slot in pulled.units.values()] == [False, False]
+    assert f"grading {held.run} with 1 of 1 units held" in actions
+    assert f"enqueued 2 units of {pulled.run}" in actions
+    assert f"enqueued 1 units of {held.run}" not in actions
+    assert held.run in run.lab.client.smembers(scheduler.LIVE)
+    assert run.lab.poster.moves(HEAD_A, scheduler.REQUIRED) == [("queued", None)]
+    assert run.tick(1100) == []
+    reset = DAY_MS + 1000
+    run.engine.queue.offer("worker", 8, reset)
+    assert f"enqueued 1 units of {held.run}" in run.tick(reset)
+    assert run.engine.queue.pending()[-1] == scheduler.job_id(HEAD_A, swept)
+    assert [slot.held for slot in run.grade(HEAD_A).units.values()] == [False]
+
+
+@pytest.mark.feature("lab-scheduler-budget")
+def test_backfill_takes_only_the_slots_left_free_after_the_units_waiting_in_other_classes(
+    lab: Callable[..., Run],
+) -> None:
+    first, second, third, fourth, checked, linted = (unit(number) for number in range(1, 7))
+    run = lab({HEAD_A: plan({"lint": (first, second, third, fourth)}), HEAD_B: plan({"lint": (checked, linted)})})
+    run.engine.queue.offer("worker", 3, 1000)
+    run.push(HEAD_A, lane="sweep", event="backfill")
+    run.push(HEAD_B, lane="pr-2", event="pull_request", action="synchronize")
+    run.tick(1000)
+    pulled = [scheduler.job_id(HEAD_B, checked), scheduler.job_id(HEAD_B, linted)]
+    assert run.engine.queue.pending() == [*pulled, scheduler.job_id(HEAD_A, first)]
+    assert "\nci_lab_slots_wanted 2.0\n" in scrape(run, 1000)
+    assert run.tick(1050) == []
+    assert run.engine.queue.pending() == [*pulled, scheduler.job_id(HEAD_A, first)]
+    grants = run.lease(slots=3)
+    assert [grant.job for grant in grants] == [*pulled, scheduler.job_id(HEAD_A, first)]
+    for grant in grants:
+        run.finish(grant, "passed", {"seconds": 1.0})
+    run.tick(1100)
+    assert run.engine.queue.pending() == []
+    assert run.lease(slots=3) == []
+    assert run.tick(1200) == [f"enqueued 3 units of {run.grade(HEAD_A).run}"]
+    assert run.engine.queue.pending() == [scheduler.job_id(HEAD_A, item) for item in (second, third, fourth)]
+
+
+@pytest.mark.feature("lab-scheduler-budget")
+def test_a_newer_backfill_head_drops_the_held_units_of_the_older_one(lab: Callable[..., Run]) -> None:
+    older, newer = unit(1), unit(2)
+    run = lab({HEAD_A: plan({"lint": (older,)}), HEAD_B: plan({"lint": (newer,)})}, spend=LOW_BUDGET)
+    _spend(run)
+    run.engine.queue.offer("worker", 4, 1000)
+    run.push(HEAD_A, lane="sweep", event="backfill")
+    run.tick(1000)
+    run.push(HEAD_B, lane="sweep", event="backfill")
+    run.tick(1100)
+    old = run.grade(HEAD_A)
+    assert old.superseded
+    assert [(slot.held, slot.outcome) for slot in old.units.values()] == [(False, "dropped")]
+    assert run.lab.poster.moves(HEAD_A, scheduler.REQUIRED)[-1] == ("completed", "cancelled")
+    assert old.run not in run.lab.client.smembers(scheduler.LIVE)
+    assert run.engine.queue.pending() == []
+    run.engine.queue.offer("worker", 4, DAY_MS)
+    run.tick(DAY_MS)
+    assert run.engine.queue.pending() == [scheduler.job_id(HEAD_B, newer)]
+
+
+@pytest.mark.feature("lab-scheduler-budget-charge")
+def test_a_finished_unit_charges_its_slots_times_its_report_seconds_once_and_no_seconds_charges_nothing(
+    lab: Callable[..., Run],
+) -> None:
+    timed, untimed, unreported = unit(1), unit(2), unit(3)
+    run = lab({HEAD_B: plan({"lint": (timed, untimed, unreported)})}, spend=LOW_BUDGET)
+    run.engine.queue.enqueue([timed], HEAD_B, {timed.key: queue.Requirement(slots=2)})
+    run.push(HEAD_B, lane="pr-2", event="pull_request", action="synchronize")
+    run.tick(1000)
+    first, second, third = run.lease(slots=4)
+    assert (first.slots, second.slots, third.slots) == (2, 1, 1)
+    run.finish(first, "passed", {"seconds": 1500.0})
+    run.finish(second, "passed", {})
+    run.finish(third, "passed")
+    run.tick(1100)
+    spending = run.engine.spending
+    assert spending is not None
+    assert spending.spent() == 50.0
+    run.tick(1200)
+    assert spending.spent() == 50.0
+
+
+@pytest.mark.feature("lab-scheduler-budget-charge")
+def test_the_first_pass_after_finished_units_shed_a_class_names_it_with_the_spent_share_once(
+    lab: Callable[..., Run],
+) -> None:
+    pulled, swept = unit(1), unit(2)
+    run = lab({HEAD_B: plan({"lint": (pulled,)}), HEAD_A: plan({"lint": (swept,)})}, spend=LOW_BUDGET)
+    run.engine.queue.offer("worker", 8, 1000)
+    run.push(HEAD_B, lane="pr-2", event="pull_request", action="synchronize")
+    run.tick(1000)
+    (grant,) = run.lease()
+    run.finish(grant, "passed", {"seconds": 3600.0})
+    assert not any(action.startswith("shed ") for action in run.tick(1100))
+    line = "shed backfill with 0.60 of the day's core budget spent"
+    assert line in run.tick(1200)
+    run.push(HEAD_A, lane="sweep", event="backfill")
+    assert line not in run.tick(1300)
+    assert [slot.held for slot in run.grade(HEAD_A).units.values()] == [True]
+    assert run.engine.queue.pending() == []
+
+
 @pytest.mark.feature("lab-scheduler-metrics")
 def test_the_exposition_counts_the_workers_that_polled_within_the_ready_window_after_a_pass(
     lab: Callable[..., Run],
@@ -1062,7 +1385,7 @@ def test_the_exposition_counts_each_finished_attempts_core_seconds_once_in_its_m
     lab: Callable[..., Run],
 ) -> None:
     shared, solo = unit(1), unit(2)
-    run = lab({HEAD_A: plan({"lint": (shared, solo)})}, retries=Policy(failed=1))
+    run = lab({HEAD_A: plan({"lint": (shared, solo)})}, retries=Policy(failed=1), spend=LOW_BUDGET)
     run.push(HEAD_A)
     run.tick(1000)
     run.lab.expander.plans[HEAD_A] = plan({"lint": (shared,)})
@@ -1084,6 +1407,9 @@ def test_the_exposition_counts_each_finished_attempts_core_seconds_once_in_its_m
     assert 'ci_lab_core_seconds_total{class="queue"} 60.0' in text
     assert 'ci_lab_core_seconds_total{class="promotion"} 10.0' in text
     assert run.lab.client.smembers(scheduler.LIVE) == set()
+    spending = run.engine.spending
+    assert spending is not None
+    assert spending.spent() == pytest.approx(70.0 / 60)
 
 
 @pytest.mark.feature("lab-scheduler-metrics")
@@ -1202,6 +1528,39 @@ class Stdout:
         self.events.append(FLUSHED)
 
 
+@dataclass
+class CountingRelay:
+    """A relay stand in that writes each tick to the output and returns one action naming it."""
+
+    out: Stdout
+    ticks: int = 0
+
+    def tick(self) -> list[str]:
+        self.ticks += 1
+        self.out.events.append(f"tick {self.ticks}")
+        return [f"relayed {self.ticks}"]
+
+
+class SilentRelay:
+    """A relay stand in with nothing to relay."""
+
+    def tick(self) -> list[str]:
+        return []
+
+
+@dataclass
+class RelayBuilds:
+    """A relay build stand in recording the environment, scheduler and consumer of each build."""
+
+    builds: list[tuple[Any, scheduler.Scheduler, Any]] = field(
+        default_factory=list[tuple[Any, scheduler.Scheduler, Any]]
+    )
+
+    def __call__(self, environ: Any, found: scheduler.Scheduler, consumer: Any) -> str:
+        self.builds.append((environ, found, consumer))
+        return "relay"
+
+
 def test_serve_runs_the_given_passes_and_prints_each_action(
     lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1215,10 +1574,42 @@ def test_serve_runs_the_given_passes_and_prints_each_action(
         slept.append(seconds)
         assert len(slept) <= 2
 
-    assert scheduler.serve(run.engine, 0.25, 2, lambda: 2.5, sleep) == 0
+    assert scheduler.serve(run.engine, SilentRelay(), 0.25, 2, lambda: 2.5, sleep) == 0
     assert slept == [0.25, 0.25]
     assert out.events == [f"received {HEAD_A} on feature", "\n", FLUSHED]
     assert json.loads(run.lab.client.hget(scheduler.WAITING, f"{REPO}|feature|3"))["since"] == 2500
+
+
+@pytest.mark.feature("lab-scheduler-runs-relay")
+def test_serve_ticks_the_relay_after_each_pass_and_prints_its_actions(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)})}, quiet_ms=60_000)
+    run.push(HEAD_A)
+    out = Stdout()
+    monkeypatch.setattr(sys, "stdout", out)
+    relaying = CountingRelay(out)
+
+    def sleep(seconds: float) -> None:
+        out.events.append(f"slept {seconds}")
+
+    assert scheduler.serve(run.engine, relaying, 0.25, 2, lambda: 2.5, sleep) == 0
+    assert relaying.ticks == 2
+    assert out.events == [
+        f"received {HEAD_A} on feature",
+        "\n",
+        FLUSHED,
+        "tick 1",
+        "relayed 1",
+        "\n",
+        FLUSHED,
+        "slept 0.25",
+        "tick 2",
+        "relayed 2",
+        "\n",
+        FLUSHED,
+        "slept 0.25",
+    ]
 
 
 def test_serve_without_a_pass_count_runs_until_stopped(lab: Callable[..., Run]) -> None:
@@ -1231,7 +1622,7 @@ def test_serve_without_a_pass_count_runs_until_stopped(lab: Callable[..., Run]) 
             raise KeyboardInterrupt
 
     with pytest.raises(KeyboardInterrupt):
-        scheduler.serve(run.engine, 1.0, 0, lambda: 1.0, sleep)
+        scheduler.serve(run.engine, CountingRelay(Stdout()), 1.0, 0, lambda: 1.0, sleep)
     assert passes == [1.0, 1.0, 1.0]
 
 
@@ -1274,6 +1665,15 @@ def test_the_bus_inbox_reads_each_head_with_its_branch_as_lane_and_acknowledges_
     assert [delivery.acked for delivery in deliveries] == [True, True]
     assert [delivery.termed for delivery in deliveries] == [False, False]
     assert consumer.asked == [(scheduler.BATCH, scheduler.FETCH_MS)]
+
+
+@pytest.mark.feature("lab-remote-heads")
+def test_the_bus_inbox_keeps_the_grade_ref_a_lab_remote_notice_names() -> None:
+    pushed = HeadEvent("notice", REPO, HEAD_A, BASE, ACTOR, "pushed")
+    notice = envelope(pushed)
+    notice = replace(notice, data={**notice.data, "ref": "refs/grade/t1", "branch": "engineer-1"})
+    inbox = scheduler.BusInbox(Consumer([Delivery(notice), Delivery(envelope(pushed))]))
+    assert inbox.heads() == [scheduler.Head(pushed, "engineer-1", "refs/grade/t1"), scheduler.Head(pushed, HEAD_A)]
 
 
 def _without(event: HeadEvent, *names: str) -> Envelope:
@@ -1348,7 +1748,7 @@ def _gate(name: str, job: str, paths: tuple[str, ...], base_paths: tuple[str, ..
 
 
 def _no_tests(repo: str, commits: Sequence[str]) -> dict[str, Any]:
-    return {"units": [], "tests": {}}
+    return {"commit": "dev", "units": [], "tests": {}}
 
 
 def _unknown(kind: str, key: str) -> Verdict | None:
@@ -1488,10 +1888,18 @@ def test_the_mirror_expander_expands_the_real_tests_workflow_with_its_reusable_w
     found = expander.expand(GradeRequest(f"file://{repo}", head, base, Priority.PROMOTION, ACTOR, False))
     text = (workflows / "test.yml").read_text()
     expected: dict[str, list[str]] = {"unit": []}
+    ungraded: list[str] = []
     for gate in static_gates.discover(text, json.loads(registry.read_text()), ci_wiring.load(ROOT)):
-        expected.setdefault(gate.job, []).append(gate.name)
+        if gate.missing:
+            ungraded.append(gate.name)
+        else:
+            expected.setdefault(gate.job, []).append(gate.name)
     assert {job: [name for item in units for name in item.members] for job, units in found.gates.items()} == expected
     assert {"semgrep/scan", "semgrep/feature-tests", "semgrep/charts"} <= set(found.gates)
+    assert ungraded == [
+        "lint/refuse-changelog-fragments-named-off-the-branch-or-opening-without-a-section-heading",
+        "lint/artifact-sanity-checks",
+    ]
 
 
 ALPHA = "def first():\n    return 1\n\n\ndef second():\n    return 2\n"
@@ -1518,6 +1926,7 @@ SUITE_DURATIONS = {FIRST_TEST: 40.0, OTHER_TEST: 40.0, SECOND_TEST: 1.0}
 PINNED = '[project]\nname = "suite"\n\n[project.optional-dependencies]\ndev = ["mutmut==3.6.0"]\n'
 FIRST = "scripts.alpha.x_first"
 SECOND = "scripts.alpha.x_second"
+GAMMA = "tests/test_gamma.py"
 
 
 @dataclass(frozen=True)
@@ -1605,12 +2014,15 @@ def _contents(suite: Suite, head: str) -> dict[str, bytes]:
 def _mutation_gates(
     suite: Suite, head: str, changes: dict[str, list[int]], files: list[str], covering: dict[str, list[str]]
 ) -> dict[str, tuple[Unit, ...]]:
-    keys = expand_tests.fingerprints(SUITE_MANIFEST, _contents(suite, head))
+    contents = _contents(suite, head)
+    keys = expand_tests.fingerprints(SUITE_MANIFEST, contents)
     checkout = suite.repo.parent / f"expected-{head}"
     _git(suite.repo, "worktree", "add", "-q", "--detach", str(checkout), head)
     stats = expand_mutation.stats_units(checkout, files, executors.OPTIONS)
     covered = {name: {test: keys[test] for test in tests} for name, tests in covering.items()}
-    mutants = expand_mutation.mutant_units(checkout, changes, covered)
+    mutants = expand_mutation.mutant_units(
+        checkout, changes, covered, expand_tests.unlisted_test_hashes(SUITE_MANIFEST, contents)
+    )
     _git(suite.repo, "worktree", "remove", "--force", str(checkout))
     return {name: units for name, units in {"mutation-stats": stats, "mutation": mutants}.items() if units}
 
@@ -1644,7 +2056,8 @@ def test_a_merge_group_head_runs_only_the_batches_its_entries_invalidate(tmp_pat
     found = port.expander(tmp_path).expand(suite.request(Priority.QUEUE))
     every = _suite_units(suite, suite.head, SUITE_DURATIONS)
     assert [batch.members for batch in every] == [(FIRST_TEST,), (OTHER_TEST,), (SECOND_TEST,)]
-    assert found == scheduler.frame(Priority.QUEUE, _tree(suite, suite.head), suite.base, {"unit": every[2:]})
+    expected = scheduler.frame(Priority.QUEUE, _tree(suite, suite.head), suite.base, {"unit": every[2:]})
+    assert found == replace(expected, manifest="dev")
     assert port.asked == [(suite.remote, [suite.base, suite.seed])]
     assert port.looked == [(batch.kind, batch.key) for batch in every]
 
@@ -1657,7 +2070,9 @@ def test_a_merge_group_head_whose_entries_invalidate_no_test_runs_no_batch(tmp_p
     head = _commit(suite.repo, {"docs/q.md": "q\n"})
     port = Port(SUITE_MANIFEST)
     found = port.expander(tmp_path).expand(suite.request(Priority.QUEUE, head))
-    assert found == scheduler.frame(Priority.QUEUE, _tree(suite, head), suite.base, {"unit": ()})
+    assert found == replace(
+        scheduler.frame(Priority.QUEUE, _tree(suite, head), suite.base, {"unit": ()}), manifest="dev"
+    )
     assert port.asked == [(suite.remote, [suite.base, suite.seed])]
     assert port.looked == [(batch.kind, batch.key) for batch in _suite_units(suite, head, SUITE_DURATIONS)]
 
@@ -1674,7 +2089,29 @@ def test_a_merge_group_head_runs_every_batch_when_an_interaction_clause_holds(
     port = Port(SUITE_MANIFEST, known)
     found = port.expander(tmp_path).expand(suite.request(Priority.QUEUE))
     every = _suite_units(suite, suite.head, SUITE_DURATIONS)
-    assert found == scheduler.frame(Priority.QUEUE, _tree(suite, suite.head), suite.base, {"unit": every})
+    expected = scheduler.frame(Priority.QUEUE, _tree(suite, suite.head), suite.base, {"unit": every})
+    assert found == replace(expected, manifest="dev")
+
+
+@pytest.mark.feature("lab-scheduler-test-units")
+@pytest.mark.usefixtures("staticless")
+@pytest.mark.parametrize(("known", "picked"), [(True, slice(2, 3)), (False, slice(0, 3))], ids=["invalidated", "full"])
+def test_a_merge_group_entry_that_adds_a_test_file_the_manifest_lacks_runs_its_unit(
+    tmp_path: Path, known: bool, picked: slice
+) -> None:
+    suite = _suite(tmp_path, DELIVERY["lab"])
+    _git(suite.repo, "switch", "-q", "-c", "added", suite.base)
+    beta = "def test_second():\n    assert True\n"
+    head = _commit(suite.repo, {GAMMA: "def test_third():\n    pass\n", "tests/test_beta.py": beta})
+    found = Port(SUITE_MANIFEST, known).expander(tmp_path).expand(suite.request(Priority.QUEUE, head))
+    every = _suite_units(suite, head, SUITE_DURATIONS)
+    paths = filter(None, _git(suite.repo, "ls-tree", "-r", "-z", "--name-only", head).split("\0"))
+    blobs = {path: _blob(suite.repo, head, path) for path in paths}
+    chain = Toolchain("3.12", {}, blobs["uv.lock"], blobs["pyproject.toml"], "image", {})
+    added = expand_tests.unlisted_units(SUITE_MANIFEST, _contents(suite, head), [GAMMA], chain)
+    assert [unit.members for unit in added] == [(GAMMA,)]
+    expected = scheduler.frame(Priority.QUEUE, _tree(suite, head), suite.base, {"unit": (*every[picked], *added)})
+    assert found == replace(expected, manifest="dev")
 
 
 @pytest.mark.feature("lab-scheduler-test-units")
@@ -1690,7 +2127,8 @@ def test_a_promotion_or_backfill_head_runs_every_batch_without_reading_the_cache
     mutation = _mutation_gates(
         suite, suite.head, {"scripts/alpha.py": [6]}, ["tests/test_beta.py"], {SECOND: [SECOND_TEST]}
     )
-    assert found == scheduler.frame(tier, _tree(suite, suite.head), suite.head, {"unit": every, **mutation})
+    expected = scheduler.frame(tier, _tree(suite, suite.head), suite.head, {"unit": every, **mutation})
+    assert found == replace(expected, manifest="dev")
     assert (port.asked, port.looked) == ([(suite.remote, [suite.base, suite.seed])], [])
 
 
@@ -1732,9 +2170,9 @@ def test_a_promotion_or_backfill_head_names_the_mutants_of_each_changed_function
     checkouts: list[tuple[Path, str]] = []
     build = expand_mutation.mutant_units
 
-    def spy(root: Path, changes: Any, covering: Any) -> tuple[Unit, ...]:
+    def spy(root: Path, changes: Any, covering: Any, unlisted: Any, *, timeout: float) -> tuple[Unit, ...]:
         checkouts.append((root.parent, (root / "scripts/alpha.py").read_text()))
-        return build(root, changes, covering)
+        return build(root, changes, covering, unlisted, timeout=timeout)
 
     monkeypatch.setattr(expand_mutation, "mutant_units", spy)
     found = Port(SUITE_MANIFEST).expander(tmp_path).expand(suite.request(tier, head))
@@ -1762,6 +2200,19 @@ def test_a_promotion_or_backfill_head_names_the_mutants_of_each_changed_function
     assert _git(store, "worktree", "list", "--porcelain").count("worktree ") == 1
 
 
+@pytest.mark.feature("lab-mutant-unit-split")
+@pytest.mark.usefixtures("staticless")
+def test_a_promotion_head_splits_a_mutant_unit_priced_over_the_executors_unit_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    suite = _suite(tmp_path, DELIVERY["lab"])
+    head = _commit(suite.repo, {"scripts/alpha.py": ALPHA.replace("return 1", "return 4 + 1")})
+    monkeypatch.setattr(executors, "UNIT_TIMEOUT_S", MUTANT_SECONDS + 1.0)
+    mutants = Port(SUITE_MANIFEST).expander(tmp_path).expand(suite.request(Priority.PROMOTION, head)).gates["mutation"]
+    assert len(mutants) > 2
+    assert [unit.members for unit in mutants] == [(f"{FIRST}__mutmut_{index}",) for index in range(1, len(mutants) + 1)]
+
+
 @pytest.mark.feature("lab-scheduler-mutation-units")
 @pytest.mark.usefixtures("staticless")
 def test_a_promotion_head_keys_a_mutant_unit_by_the_tests_that_ran_its_function(tmp_path: Path) -> None:
@@ -1779,6 +2230,45 @@ def test_a_promotion_head_keys_a_mutant_unit_by_the_tests_that_ran_its_function(
     after = expander.expand(suite.request(Priority.PROMOTION, own)).gates["mutation"]
     assert [unit.members for unit in after] == [unit.members for unit in before]
     assert after[0].key != before[0].key
+
+
+@pytest.mark.feature("lab-mutant-unit-unlisted-tests")
+@pytest.mark.usefixtures("staticless")
+def test_a_promotion_head_keys_a_mutant_unit_by_the_test_modules_the_manifest_lacks(tmp_path: Path) -> None:
+    suite = _suite(tmp_path, DELIVERY["lab"])
+    expander = Port(SUITE_MANIFEST).expander(tmp_path)
+    _git(suite.repo, "switch", "-q", "-c", "other", suite.base)
+    changed = _commit(suite.repo, {"scripts/alpha.py": ALPHA.replace("return 1", "return 4")})
+    added = _commit(suite.repo, {"tests/test_gamma.py": "def test_third():\n    pass\n"})
+    edited = _commit(suite.repo, {"tests/test_gamma.py": "def test_third():\n    assert True\n"})
+    found = [
+        expander.expand(suite.request(Priority.PROMOTION, head)).gates["mutation"] for head in (changed, added, edited)
+    ]
+    assert [[executors.function_of(unit.members[0]) for unit in units] for units in found] == [[FIRST]] * 3
+    assert len({units[0].key for units in found}) == 3
+
+
+@pytest.mark.feature("lab-mutant-unit-unlisted-reads")
+@pytest.mark.usefixtures("staticless")
+@pytest.mark.parametrize("fixture", ["tests/fixtures/gamma.json", "scripts/gamma.json"])
+def test_a_promotion_head_rekeys_a_mutant_unit_when_a_file_a_test_module_the_manifest_lacks_reads_changes(
+    tmp_path: Path, fixture: str
+) -> None:
+    suite = _suite(tmp_path, DELIVERY["lab"])
+    expander = Port(SUITE_MANIFEST).expander(tmp_path)
+    _git(suite.repo, "switch", "-q", "-c", "other", suite.base)
+    reads = (
+        "from pathlib import Path\n\n\n"
+        f"def test_third():\n    assert (Path(__file__).parents[1] / {fixture!r}).read_text()\n"
+    )
+    added = _commit(
+        suite.repo,
+        {"scripts/alpha.py": ALPHA.replace("return 1", "return 4"), GAMMA: reads, fixture: '{"value": 1}\n'},
+    )
+    edited = _commit(suite.repo, {fixture: '{"value": 2}\n'})
+    found = [expander.expand(suite.request(Priority.PROMOTION, head)).gates["mutation"] for head in (added, edited)]
+    assert [[executors.function_of(unit.members[0]) for unit in units] for units in found] == [[FIRST]] * 2
+    assert found[0][0].key != found[1][0].key
 
 
 @pytest.mark.feature("lab-scheduler-mutation-units")
@@ -1884,7 +2374,11 @@ def test_a_note_joins_the_outside_list_a_stored_or_fetched_record_already_holds(
     objects = LocalObjects(tmp_path / "objects")
     objects.write_once(f"{manifest_folder(SLUG)}older.json", packed_file(SUITE_MANIFEST, "older"))
     stored = scheduler.StoredManifests(objects, Fetches({"newer": packed_file(SUITE_MANIFEST, "newer")}))
-    scheduler.note_outside(objects, REPO, (SECOND_TEST, "tests/test_gone.py::test_gone"), ["docs/p.md", "docs/a.md"])
+    assert stored(REPO, ["newer"]) == {**SUITE_MANIFEST, "commit": "newer"}
+    for commit in ("newer", "older"):
+        scheduler.note_outside(
+            objects, REPO, commit, (SECOND_TEST, "tests/test_gone.py::test_gone"), ["docs/p.md", "docs/a.md"]
+        )
     records = SUITE_MANIFEST["tests"]
     second = {**records[SECOND_TEST], "outside": ["docs/a.md", "docs/c.md", "docs/p.md"]}
     for commit in ("newer", "older"):
@@ -1908,7 +2402,7 @@ def test_a_test_verdict_outside_list_reaches_the_stored_records_and_the_followin
         Unit(expand_tests.KIND, key(expand_tests.KIND, number), tests)
         for number, tests in ((1, members), (2, members), (3, (FIRST_TEST,)), (4, (FIRST_TEST,)))
     )
-    run = lab({HEAD_A: plan({"unit": (first, twin, failed, plain)})})
+    run = lab({HEAD_A: replace(plan({"unit": (first, twin, failed, plain)}), manifest="dev")})
     folder = manifest_folder(SLUG)
     packed = dep_manifest.pack(copy.deepcopy(SUITE_MANIFEST))
     run.lab.objects.write_once(f"{folder}dev.json", json.dumps(packed).encode())
@@ -1935,7 +2429,7 @@ def test_a_test_verdict_outside_list_reaches_the_stored_records_and_the_followin
         },
     }
     notes = [
-        f"{folder}outside/{digest({'tests': list(tests), 'outside': files})}.json"
+        f"{folder}outside/dev/{digest({'tests': list(tests), 'outside': files})}.json"
         for tests, files in ((members, both), ((FIRST_TEST,), ["docs/c.md"]))
     ]
     assert run.lab.objects.keys(folder) == sorted([f"{folder}dev.json", *notes])
@@ -1945,6 +2439,55 @@ def test_a_test_verdict_outside_list_reaches_the_stored_records_and_the_followin
     assert interaction.invalidated(after, change) == {OTHER_TEST, SECOND_TEST}
     assert _batch_keys(before, b"p\n") == _batch_keys(before, b"q\n")
     assert _batch_keys(after, b"p\n")[(FIRST_TEST, OTHER_TEST)] != _batch_keys(after, b"q\n")[(FIRST_TEST, OTHER_TEST)]
+
+
+@pytest.mark.feature("lab-outside-notes-per-commit")
+def test_a_note_of_an_older_manifest_commit_leaves_a_newer_commit_key_unchanged(tmp_path: Path) -> None:
+    objects = LocalObjects(tmp_path / "objects")
+    folder = manifest_folder(SLUG)
+    for commit in ("older", "newer"):
+        objects.write_once(f"{folder}{commit}.json", packed_file(SUITE_MANIFEST, commit))
+    note: dict[str, object] = {"tests": [FIRST_TEST, OTHER_TEST], "outside": ["docs/p.md"]}
+    objects.write_once(f"{folder}outside/older/{digest(note)}.json", json.dumps(note).encode())
+    stored = scheduler.StoredManifests(objects, unfetched)
+    newer, older = stored(REPO, ["newer", "older"]), stored(REPO, ["older"])
+    records = SUITE_MANIFEST["tests"]
+    widened = {test: {**records[test], "outside": ["docs/p.md"]} for test in (FIRST_TEST, OTHER_TEST)}
+    assert newer == {**SUITE_MANIFEST, "commit": "newer"}
+    assert older == {**SUITE_MANIFEST, "commit": "older", "tests": {**records, **widened}}
+    assert _batch_keys(newer, b"p\n") == _batch_keys(newer, b"q\n")
+    assert _batch_keys(older, b"p\n")[(FIRST_TEST, OTHER_TEST)] != _batch_keys(older, b"q\n")[(FIRST_TEST, OTHER_TEST)]
+
+
+@pytest.mark.feature("lab-outside-notes-per-commit")
+def test_a_manifest_read_removes_the_notes_of_commits_with_no_stored_manifest(tmp_path: Path) -> None:
+    objects = LocalObjects(tmp_path / "objects")
+    folder, other = manifest_folder(SLUG), manifest_folder("other/repo")
+    objects.write_once(f"{folder}kept.json", packed_file(STORED_MANIFEST, "kept"))
+    note = json.dumps({"tests": [FIRST_TEST], "outside": ["docs/p.md"]}).encode()
+    kept, gone, flat = f"{folder}outside/kept/n.json", f"{folder}outside/gone/n.json", f"{folder}outside/n.json"
+    for path in (kept, gone, flat, f"{other}outside/gone/n.json"):
+        objects.write_once(path, note)
+    found = scheduler.StoredManifests(objects, unfetched)(REPO, ["kept"])
+    first = {**STORED_MANIFEST["tests"][FIRST_TEST], "outside": ["docs/p.md"]}
+    assert found == {**STORED_MANIFEST, "commit": "kept", "tests": {FIRST_TEST: first}}
+    assert objects.keys(folder) == [f"{folder}kept.json", kept]
+    assert objects.keys(other) == [f"{other}outside/gone/n.json"]
+    assert scheduler.StoredManifests(objects, unfetched)(REPO, ["missing"]) is None
+    assert objects.keys(folder) == [f"{folder}kept.json", kept]
+
+
+@pytest.mark.feature("lab-outside-notes-per-commit")
+def test_a_grade_that_keyed_no_manifest_writes_no_outside_note(lab: Callable[..., Run]) -> None:
+    batch = Unit(expand_tests.KIND, key(expand_tests.KIND, 1), (FIRST_TEST,))
+    run = lab({HEAD_A: plan({"unit": (batch,)})})
+    run.push(HEAD_A)
+    run.tick(1000)
+    (grant,) = run.lease(slots=1)
+    run.finish(grant, "passed", {"seconds": 1.0, "outside": ["docs/p.md"]})
+    run.tick(1100)
+    assert run.store.get(batch.kind, batch.key) is not None
+    assert run.lab.objects.keys(manifest_folder(SLUG)) == []
 
 
 @pytest.mark.feature("lab-dev-manifest-fetch")
@@ -1991,9 +2534,99 @@ def test_a_head_that_needs_test_units_expands_on_the_manifest_stored_from_its_ba
     expander = scheduler.MirrorExpander(node, tmp_path / "stores", toolchain, stored, port.verdicts)
     found = expander.expand(suite.request(Priority.PROMOTION))
     assert [batch.members for batch in found.gates["unit"]] == [(FIRST_TEST,)]
+    assert found.manifest == suite.base
     slug = str(suite.repo).removeprefix("/")
     assert fetches.asked == [(slug, suite.base)]
     assert objects.read(f"{manifest_folder(slug)}{suite.base}.json") == packed_file(STORED_MANIFEST, suite.base)
+
+
+@pytest.mark.feature("lab-manifest-fetch-holds-head")
+@pytest.mark.usefixtures("staticless")
+def test_a_head_whose_manifest_fetch_times_out_waits_out_its_window_again_and_a_later_pass_grades_it(
+    lab: Callable[..., Run], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    suite = _suite(tmp_path, DELIVERY["lab"])
+    packed = packed_file(STORED_MANIFEST, suite.base)
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w") as written:
+        written.writestr("packed.json", packed)
+    get = Mock(
+        side_effect=[
+            requests.ReadTimeout("read timed out"),
+            Mock(status_code=200, json=Mock(return_value={"workflow_runs": [{"id": 1}]})),
+            Mock(status_code=200, json=Mock(return_value={"artifacts": [{"id": 2, "expired": False}]})),
+            Mock(status_code=200, content=archive.getvalue()),
+        ]
+    )
+    monkeypatch.setattr(requests, "get", get)
+    run = lab({}, quiet_ms=30_000)
+    token = Mock(get_token=Mock(return_value="fixture"))
+    stored = scheduler.StoredManifests(run.lab.objects, Fetcher(lambda repo: Actions(repo, token)))
+    node = tmp_path / "node"
+    _git(tmp_path, "init", "-q", "--bare", str(node))
+    toolchain = Toolchain("3.12", {}, "", "", "image", {})
+    expander = scheduler.MirrorExpander(node, tmp_path / "stores", toolchain, stored, Port().verdicts)
+    monkeypatch.setattr(run.lab.expander, "expand", expander.expand)
+    event = HeadEvent("push", suite.remote, suite.head, suite.base, ACTOR, "pushed")
+    run.lab.inbox.pending.append(scheduler.Head(event, "dev"))
+    assert run.tick(1000) == [f"received {suite.head} on dev"]
+    runs = f"actions/workflows/test.yml/runs?event=push&branch=dev&head_sha={suite.base}"
+    assert run.tick(31_000) == [f"holding {suite.head}: GET {runs} failed: read timed out"]
+    assert run.tick(60_999) == []
+    assert get.call_count == 1
+    assert run.tick(61_000)[0].startswith("grading ")
+    assert run.grade(suite.head).base == suite.base
+    slug = str(suite.repo).removeprefix("/")
+    assert run.lab.objects.read(f"{manifest_folder(slug)}{suite.base}.json") == packed
+    assert get.call_count == 4
+
+
+@pytest.mark.wall_clock
+@pytest.mark.feature("lab-manifest-fetch-off-pass")
+@pytest.mark.usefixtures("staticless")
+def test_a_pass_reaps_leases_and_advances_grades_while_a_manifest_fetch_github_never_answers(
+    lab: Callable[..., Run], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    suite = _suite(tmp_path, DELIVERY["lab"])
+    answered = threading.Event()
+
+    def never_answers(fetcher: Fetcher, slug: str, commit: str) -> bytes | None:
+        answered.wait(2 * manifests.TIMEOUT)
+        return packed_file(STORED_MANIFEST, commit)
+
+    monkeypatch.setattr(Fetcher, "__call__", never_answers)
+    lost, done = unit(1), unit(2)
+    run = lab({HEAD_A: plan({"lint": (lost,)}), HEAD_B: plan({"lint": (done,)})})
+    run.push(HEAD_A, lane="lost")
+    run.push(HEAD_B, lane="done")
+    run.tick(1000)
+    grants = {grant.unit: grant for grant in run.lease(slots=2, ttl_ms=100)}
+    run.finish(grants[done], "passed", {})
+    node = tmp_path / "node"
+    _git(tmp_path, "init", "-q", "--bare", str(node))
+    toolchain = Toolchain("3.12", {}, "", "", "image", {})
+    stored = scheduler.StoredManifests(run.lab.objects)
+    expander = scheduler.MirrorExpander(node, tmp_path / "stores", toolchain, stored, Port().verdicts)
+    monkeypatch.setattr(run.lab.expander, "expand", expander.expand)
+    event = HeadEvent("push", suite.remote, suite.head, suite.base, ACTOR, "pushed")
+    run.lab.inbox.pending.append(scheduler.Head(event, "dev"))
+    passes: list[list[str]] = []
+    ticking = threading.Thread(target=lambda: passes.append(run.tick(1100)), daemon=True)
+    ticking.start()
+    ticking.join(manifests.TIMEOUT)
+    stalled = ticking.is_alive()
+    answered.set()
+    ticking.join()
+    assert not stalled
+    [actions] = passes
+    slug = str(suite.repo).removeprefix("/")
+    assert f"holding {suite.head}: {slug} manifest of {suite.base} is still fetching" in actions
+    assert f"reaped {grants[lost].job} pending" in actions
+    assert f"completed {run.grade(HEAD_B).run} success" in actions
+    assert isinstance(stored.fetch, manifests.Background)
+    wait([future for _, future in stored.fetch.fetches.values()])
+    assert run.tick(1200)[0].startswith("grading ")
+    assert run.grade(suite.head).base == suite.base
 
 
 @pytest.mark.feature("lab-control-routes")
@@ -2035,7 +2668,9 @@ def test_build_wires_the_service_ports_from_the_environment(tmp_path: Path, monk
     client = fake_redis()
     consumer = Consumer([])
     objects = LocalObjects(tmp_path / "objects")
-    built = scheduler.build(environ, client, objects, consumer)
+    spending = budget.Budget(client, lambda: 0, budget.Policy(100.0, {}))
+    built = scheduler.build(environ, client, objects, consumer, spending)
+    assert built.spending is spending
     assert built.ports.pods is kube and pods_of == [environ]
     assert built.objects is objects
     assert built.settings.trusted == frozenset({"repository"})
@@ -2047,13 +2682,15 @@ def test_build_wires_the_service_ports_from_the_environment(tmp_path: Path, monk
     assert (expander.node, expander.root) == (tmp_path / "node", tmp_path / "stores")
     assert expander.toolchain == Toolchain(sys.version.split()[0], {}, "", "", "image", {})
     assert isinstance(expander.manifests, scheduler.StoredManifests) and expander.manifests.objects is objects
-    fetch = expander.manifests.fetch
+    background = expander.manifests.fetch
+    assert isinstance(background, manifests.Background)
+    fetch = background.fetch
     assert isinstance(fetch, Fetcher) and fetch.reader is Actions and fetch.readers == {}
     stored = Verdict("static", key("static", 9), True, False, 1.0)
     Store(client, objects).put(stored, {}, b"")
     assert expander.verdicts("static", stored.key) == stored
     imageless = {name: value for name, value in environ.items() if name != scheduler.IMAGE}
-    bare = scheduler.build(imageless, client, objects, consumer).ports.expander
+    bare = scheduler.build(imageless, client, objects, consumer, spending).ports.expander
     assert isinstance(bare, scheduler.MirrorExpander) and bare.toolchain.image == ""
     first = built.ports.checks(SLUG)
     assert first == FakeChecks(SLUG) and built.ports.checks(SLUG) is first
@@ -2061,6 +2698,33 @@ def test_build_wires_the_service_ports_from_the_environment(tmp_path: Path, monk
     hotfixes = built.ports.hotfixes
     assert isinstance(hotfixes, control.Priorities)
     assert (hotfixes.client, hotfixes.clock) == (client, scheduler._now_ms)
+
+
+@pytest.mark.feature("lab-remote-heads")
+def test_build_gives_each_expander_mirror_the_lab_remote_the_environment_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(scheduler.MirrorExpander, "trusted", lambda self, repo: frozenset({repo}))
+    monkeypatch.setattr(scheduler.MirrorExpander, "retries", lambda self, repo: Policy())
+    monkeypatch.setattr(scheduler, "worker_pods", lambda found: FakeKube())
+    environ = {
+        scheduler.contract.GIT_MIRROR: str(tmp_path / "node"),
+        scheduler.MIRROR_STORE: str(tmp_path / "stores"),
+        scheduler.REPOSITORY: "repository",
+        "AGENTIHOOKS_LAB_REMOTE": "http://ci-lab-remote.ci-lab:8080/agentihooks.git",
+        "AGENTIHOOKS_LAB_REMOTE_TOKEN": "lab-token",
+    }
+    client = fake_redis()
+    spending = budget.Budget(client, lambda: 0, budget.Policy(100.0, {}))
+    objects = LocalObjects(tmp_path / "objects")
+    built = scheduler.build(environ, client, objects, Consumer([]), spending)
+    expander = built.ports.expander
+    assert isinstance(expander, scheduler.MirrorExpander)
+    verdicts = getattr(expander.verdicts, "__self__")
+    assert isinstance(verdicts, Store) and (verdicts.client, verdicts.objects) == (client, objects)
+    found = worktrees.Lab("http://ci-lab-remote.ci-lab:8080/agentihooks.git", "lab-token")
+    store = tmp_path / "stores" / "the-cloud-clockwork--agentihooks"
+    assert expander._mirror(REPO) == worktrees.Mirror(tmp_path / "node", store, REPO, found)
 
 
 @pytest.mark.feature("lab-scheduler-service")
@@ -2085,16 +2749,16 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
 
     class Events:
         def consumer(self, durable: str, subject: str) -> str:
-            calls["consumer"] = (durable, subject)
-            return "consumer"
+            calls.setdefault("consumers", []).append((durable, subject))
+            return f"{durable} consumer"
 
     class Bus:
         lab_heads = Events()
 
-    def build(environ: Any, redis_client: Any, objects: Any, consumer: Any) -> scheduler.Scheduler:
-        calls["build"] = (environ, redis_client, objects, consumer)
+    def build(environ: Any, redis_client: Any, objects: Any, consumer: Any, spending: Any) -> scheduler.Scheduler:
+        calls["build"] = (environ, redis_client, objects, consumer, spending)
         ports = scheduler.Ports(Inbox(), Expander({}), lambda repo: Poster(), frozenset[str], FakeKube())
-        return scheduler.Scheduler(redis_client, objects, ports, scheduler.Settings(frozenset()))
+        return scheduler.Scheduler(redis_client, objects, ports, scheduler.Settings(frozenset()), spending)
 
     class Server:
         def serve_forever(self) -> None:
@@ -2130,8 +2794,10 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
         def sleep(seconds: float) -> None:
             Clock.slept.append(seconds)
 
-    def serve(found: scheduler.Scheduler, interval: float, passes: int, clock: Any, sleep: Any) -> int:
-        calls["serve"] = (found, interval, passes, clock, sleep)
+    builds = RelayBuilds()
+
+    def serve(found: scheduler.Scheduler, relaying: Any, interval: float, passes: int, clock: Any, sleep: Any) -> int:
+        calls["serve"] = (found, relaying, interval, passes, clock, sleep)
         return 7
 
     runtime = tmp_path / "runtime.yaml"
@@ -2166,14 +2832,17 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
     monkeypatch.setattr(scheduler, "Thread", Thread)
     monkeypatch.setattr(scheduler, "time", Clock)
     monkeypatch.setattr(scheduler, "serve", serve)
+    monkeypatch.setattr(relay, "build", builds)
     assert scheduler.main(["--interval", "0.5", "--passes", "3"], environ) == 7
     assert calls["redis"] == ("redis://lab", {"decode_responses": True})
     options = {"endpoint_url": "endpoint", "aws_access_key_id": "access", "aws_secret_access_key": "secret"}
     assert calls["s3"] == ("s3", options)
-    built_from, redis_client, objects, consumer = calls["build"]
-    assert (built_from, redis_client, consumer) == (environ, client, "consumer")
+    built_from, redis_client, objects, consumer, built_spending = calls["build"]
+    assert (built_from, redis_client, consumer) == (environ, client, "ci-lab-scheduler consumer")
     assert (objects.client, objects.bucket, objects.prefix) == ("s3 client", "bucket", "")
-    assert calls["consumer"] == (scheduler.DURABLE, "ci.lab.head.>")
+    assert calls["consumers"] == [("ci-lab-scheduler", "ci.lab.head.>"), ("ci-lab-relay", "ci.lab.head.notice")]
+    relayed_from, relayed, relay_consumer = builds.builds[0]
+    assert (relayed_from, relayed.queue.client, relay_consumer) == (environ, client, "ci-lab-relay consumer")
     found, leases, routes, spending, clock, ports = calls["listen"]
     assert found.queue.client is client and leases.queue is found.queue
     assert leases.pods is found.ports.pods
@@ -2184,12 +2853,14 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
     assert Clock.slept == [1.5]
     assert spending.client is client and spending.clock() == 1_000_250
     assert spending.policy == budget.Policy(600, {"backfill": 0.5})
+    assert built_spending is spending and found.spending is spending
     assert ports == (8800, 9108)
     assert calls["thread"] is True and calls["served"] == 2
-    found, interval, passes, clock, sleep = calls["serve"]
+    found, relaying, interval, passes, clock, sleep = calls["serve"]
+    assert found is relayed and relaying == "relay"
     assert (found.queue.client, interval, passes, clock, sleep) == (client, 0.5, 3, Clock.time, Clock.sleep)
     assert scheduler.main([], environ) == 7
-    assert calls["serve"][1:3] == (scheduler.INTERVAL_S, 0)
+    assert calls["serve"][2:4] == (scheduler.INTERVAL_S, 0)
     del environ[scheduler.contract.CONTROL_TOKEN]
     assert scheduler.main([], environ) == 7
     assert calls["listen"][2].token == ""
@@ -2255,7 +2926,7 @@ def test_main_rebuilds_the_verdict_index_before_serving_only_when_reindex_on_sta
     def poster(_repo: str) -> Poster:
         return Poster()
 
-    def build(_environ: Any, redis_client: Any, _objects: Any, _consumer: Any) -> scheduler.Scheduler:
+    def build(_environ: Any, redis_client: Any, _objects: Any, _consumer: Any, _spending: Any) -> scheduler.Scheduler:
         ports = scheduler.Ports(Inbox(), Expander({}), poster, frozenset[str])
         return scheduler.Scheduler(redis_client, objects, ports, scheduler.Settings(frozenset()))
 
@@ -2292,6 +2963,7 @@ def test_main_rebuilds_the_verdict_index_before_serving_only_when_reindex_on_sta
     monkeypatch.setattr(scheduler, "build", build)
     monkeypatch.setattr(scheduler, "listen", listen)
     monkeypatch.setattr(scheduler, "serve", serve)
+    monkeypatch.setattr(relay, "build", RelayBuilds())
     monkeypatch.setattr(sys, "stdout", stdout)
 
     assert scheduler.main([], environ) == 0

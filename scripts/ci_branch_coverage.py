@@ -13,10 +13,10 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, cast
 
+from scripts import coverage_check, reused_coverage
 from scripts.ci_branch_plan import COMMIT, LEG
 from scripts.ci_budget import rate_limit
 from scripts.ci_test_plan import _api, _strings
-from tests import coverage_check, reused_coverage
 
 ARTIFACT = re.compile(rf"branch-coverage-3\.12-({LEG.pattern})-(\d+)", re.ASCII)
 PAGE = 100

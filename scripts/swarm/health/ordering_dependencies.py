@@ -3,7 +3,7 @@
 import json
 from typing import Any
 
-from scripts.swarm import timing
+from scripts.swarm import tick_activity
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.store import RedisStore
 from scripts.swarm_ledger import dependency_audit
@@ -18,7 +18,7 @@ EVIDENCE = (
 def observe(store: RedisStore, slug: str, doc: dict[str, Any]) -> list[dict[str, str]]:
     """Audit the ledger's open dependencies and save the ordering only ones for status."""
     found = dependency_audit.audit(doc.get("tasks", []), dependency_audit.plan_text(doc))
-    timing.keep()
+    tick_activity.renew_now()
     store.redis.set(store.key(slug, KEY), json.dumps(found))  # pyright: ignore[reportUnknownMemberType]
     return found
 

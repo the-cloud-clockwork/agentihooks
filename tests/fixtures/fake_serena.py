@@ -66,7 +66,11 @@ def handle(method: str, params: dict) -> dict:
     if method == "tools/list":
         return {"tools": [_tool(name, props, ro) for name, (_, props, ro) in TOOLS.items()]}
     if method == "tools/call":
-        text = TOOLS[params["name"]][0](**params.get("arguments", {}))
+        tool, properties, _ = TOOLS[params["name"]]
+        arguments = params.get("arguments", {})
+        if unknown := sorted(set(arguments) - set(properties)):
+            return {"content": [{"type": "text", "text": f"unknown arguments: {', '.join(unknown)}"}], "isError": True}
+        text = tool(**arguments)
         return {"content": [{"type": "text", "text": text}], "isError": False}
     return {}
 

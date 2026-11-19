@@ -350,6 +350,23 @@ def test_every_declared_authoritative_flag_is_green(tmp_path: Path, capsys: pyte
     assert capsys.readouterr().out == "1 workflows, 3 jobs, 0 wiring problems\n"
 
 
+def test_a_planted_undeclared_queue_flag_is_red(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    config = {"lab_gates": {"lab/unit": _lab_gate("test.yml/unit")}}
+    lab = {"authoritative": ["unit"], "queue": {"authoritative": ["unit", "lint"]}}
+    assert _main_with_lab(tmp_path, _gate_workflow(), config, lab) == 1
+    assert capsys.readouterr().out == (
+        "1 workflows, 3 jobs, 1 wiring problems\n"
+        "::error::lab.queue.authoritative names lint, but .github/gate-wiring.json declares no lab/lint lab gate.\n"
+    )
+
+
+def test_every_declared_queue_flag_is_green(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    config = {"lab_gates": {"lab/lint": _lab_gate(), "lab/unit": _lab_gate("test.yml/unit")}}
+    lab = {"authoritative": [], "queue": {"authoritative": ["unit", "lint"], "full_suite_entries": 3}}
+    assert _main_with_lab(tmp_path, _gate_workflow(), config, lab) == 0
+    assert capsys.readouterr().out == "1 workflows, 3 jobs, 0 wiring problems\n"
+
+
 @pytest.mark.parametrize("field", ["reason", "owner", "replaces"])
 def test_a_lab_gate_missing_a_field_is_red(field: str) -> None:
     config = {"lab_gates": {"lab/lint": _lab_gate(**{field: ""})}}

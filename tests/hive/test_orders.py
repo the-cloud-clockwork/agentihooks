@@ -2,7 +2,7 @@ import json
 from dataclasses import asdict, replace
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -812,13 +812,19 @@ def test_an_order_for_another_hive_does_not_hold_back_the_rest_of_the_batch(setu
     ],
 )
 def test_launch_keeps_lane_settings_and_selected_assignment(
-    setup, agent_model, agent_effort, lane_model, expected_model, expected_effort
-):
+    setup: SimpleNamespace,
+    agent_model: str,
+    agent_effort: str,
+    lane_model: str,
+    expected_model: str,
+    expected_effort: str,
+) -> None:
     agent = replace(setup.agent, model=agent_model, effort=agent_effort)
     setup.store.execution_registry.update("fixture", agent)
     config = setup.store.config("fixture")
     lane = {**config.lanes.get("eng", {}), "model": lane_model, "setting": "retained"}
-    setup.store.update("fixture", lanes={**config.lanes, "eng": lane})
+    with patch("scripts.swarm.model_catalog.catalog", return_value={"claude": [{"model": lane_model}], "codex": []}):
+        setup.store.update("fixture", lanes={**config.lanes, "eng": lane})
     setup.consumer.apply(setup.order)
     request = setup.runtime.spawn.call_args.args[0]
     assert request.config.lanes["eng"] == {**lane, "agent": "codex", "role": "engineer"}
@@ -847,7 +853,8 @@ def test_a_hive_order_never_launches_the_other_harness_lane_model(
     agent = replace(setup.agent, harness=harness, model="", effort="")
     setup.store.execution_registry.update("fixture", agent)
     config = setup.store.config("fixture")
-    setup.store.update("fixture", lanes={**config.lanes, "eng": {"model": lane_model}})
+    with patch("scripts.swarm.model_catalog.catalog", return_value={"claude": [{"model": lane_model}], "codex": []}):
+        setup.store.update("fixture", lanes={**config.lanes, "eng": {"model": lane_model}})
     setup.consumer.apply(replace(setup.order, harness=harness))
     assignment = setup.runtime.spawn.call_args.args[0].task["launch_assignment"]
     assert (assignment["harness"], assignment["model"]) == (harness, getattr(config, field))
@@ -858,7 +865,8 @@ def test_a_hive_order_keeps_a_lane_model_its_harness_runs(setup: SimpleNamespace
     agent = replace(setup.agent, harness="claude", model="", effort="")
     setup.store.execution_registry.update("fixture", agent)
     config = setup.store.config("fixture")
-    setup.store.update("fixture", lanes={**config.lanes, "eng": {"model": "fable"}})
+    with patch("scripts.swarm.model_catalog.catalog", return_value={"claude": [{"model": "fable"}], "codex": []}):
+        setup.store.update("fixture", lanes={**config.lanes, "eng": {"model": "fable"}})
     setup.consumer.apply(replace(setup.order, harness="claude"))
     assert setup.runtime.spawn.call_args.args[0].task["launch_assignment"]["model"] == "fable"
 

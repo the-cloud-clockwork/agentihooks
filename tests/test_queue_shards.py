@@ -6,8 +6,9 @@ from pathlib import Path
 import pytest
 import yaml
 
+from scripts.shard_sizing import SLOWDOWN
 from tests import refresh_durations
-from tests.queue_shards import SLOWDOWN, STARTUP_SECONDS
+from tests.queue_shards import STARTUP_SECONDS
 
 _ROOT = Path(__file__).resolve().parents[1]
 
@@ -574,7 +575,9 @@ def test_the_reused_tests_step_deselects_against_the_single_collection(tmp_path)
     root = Path(__file__).resolve().parents[1]
     steps = yaml.safe_load((root / ".github/workflows/test.yml").read_text())["jobs"]["test-count"]["steps"]
     runner = tmp_path / "runner"
-    (runner / "planner").mkdir(parents=True)
+    (runner / "planner/scripts").mkdir(parents=True)
+    (runner / "planner/scripts/__init__.py").write_text("")
+    (runner / "planner/scripts/dep_manifest.py").write_text((root / "scripts/dep_manifest.py").read_text())
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     common = "tests/test_common.py::test_common"

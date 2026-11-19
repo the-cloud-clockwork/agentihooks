@@ -1,6 +1,9 @@
 import json
 import subprocess
+import threading
 import urllib.error
+from collections.abc import Callable, Iterator
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -2195,6 +2198,27 @@ def test_publish_via_lab_refuses_without_a_lab_remote_for_the_repository(
     assert _origin(publication) == ""
 
 
+@pytest.mark.feature("publish-refusal-keeps-lab-route")
+@pytest.mark.parametrize(("direct", "flags"), [(False, ["--via", "lab"]), (True, ["--via", "lab", "--direct"])])
+def test_publish_via_lab_refusal_repeats_its_lab_route_in_the_next_command(
+    publication: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, direct: bool, flags: list[str]
+) -> None:
+    import shlex
+
+    from scripts.swarm import cli
+    from scripts.swarm.store import SwarmError
+
+    monkeypatch.delenv("AGENTIHOOKS_LAB_REMOTE", raising=False)
+    with pytest.raises(SwarmError) as refused:
+        _publish_via_lab(publication, direct=direct)
+    repeated = str(refused.value).split("; Next: ", 1)[1]
+    assert repeated == shlex.join(
+        ["agentihooks", "swarm", "swarm", "publish", "--message", "Change chosen", *flags, "--", "chosen.txt"]
+    )
+    args = cli.build_parser().parse_args(shlex.split(repeated)[2:])
+    assert (args.via, args.direct, args.files) == ("lab", direct, ["chosen.txt"])
+
+
 @pytest.mark.feature("lab-remote-in-workspaces")
 @pytest.mark.parametrize(
     ("hook", "code"),
@@ -2334,3 +2358,149 @@ def test_publish_command_names_its_lab_flags(
     shown = capsys.readouterr().out
     assert re.search(r"^  --via \{lab\} +grade HEAD on the lab remote before origin$", shown, re.M)
     assert re.search(r"^  --direct +with --via lab, push origin without the lab grade$", shown, re.M)
+
+
+NOTICE_SIGNER = "notice-signer"
+NOTICE_ACTOR = "agenticore-app[bot]"
+
+
+@pytest.fixture
+def lab_receiver(publication: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNamespace]:
+    """Serve the real webhook receiver with lab intake on a local port and point the notice settings at it.
+
+    The task worktree fetches from a GitHub origin url and pushes to its local remote, and tips keeps the remote task
+    branch as the receiver saw it at each notice it accepted."""
+    from scripts.ci_lab.head_notice import ACTOR_ENV, URL_ENV
+    from scripts.ci_lab.webhooks import NOTICE_SECRET_ENV, LabIntake
+    from scripts.events.config import BusConfig
+    from scripts.events.envelope import Envelope
+    from scripts.events.memory import open_bus
+    from scripts.hub import github_webhooks
+
+    remote = publication.repo.parent / "remote.git"
+    git(publication.root, "remote", "set-url", "origin", "git@github.com:Acme/Widgets.git")
+    git(publication.root, "config", "remote.origin.pushurl", str(remote))
+    bus = open_bus(BusConfig())
+    heads = bus.lab_heads.consumer("lab", "ci.lab.head.>")
+    tips: list[str] = []
+
+    class Witness:
+        def publish(self, subject: str, event: Envelope) -> bool:
+            tips.append(git(publication.root, "ls-remote", str(remote), "refs/heads/engineer-test"))
+            return bus.lab_heads.publish(subject, event)
+
+    intake = LabIntake(Witness(), NOTICE_SIGNER.encode())
+    pulls = github_webhooks.LazyPulls(bus)  # pyright: ignore[reportArgumentType]
+    ingress = github_webhooks.Ingress(pulls, b"webhook-signer", intake)
+    server = ThreadingHTTPServer(("localhost", 0), github_webhooks.handler(ingress))
+    serving = threading.Thread(target=server.serve_forever, daemon=True)
+    serving.start()
+    monkeypatch.setenv(URL_ENV, f"http://localhost:{server.server_address[1]}{github_webhooks.NOTICE_PATH}")
+    monkeypatch.setenv(NOTICE_SECRET_ENV, NOTICE_SIGNER)
+    monkeypatch.setenv(ACTOR_ENV, NOTICE_ACTOR)
+    yield SimpleNamespace(heads=heads, remote=remote, tips=tips)
+    server.shutdown()
+    server.server_close()
+    serving.join()
+
+
+@pytest.mark.feature("lab-head-notice-push")
+def test_a_published_push_sends_one_signed_notice_the_receiver_accepts(
+    publication: SimpleNamespace, lab_receiver: SimpleNamespace
+) -> None:
+    from scripts.swarm import publish
+
+    result = publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+    head = git(publication.root, "rev-parse", "HEAD")
+    notice = {
+        "event": "notice",
+        "repo": "https://github.com/acme/widgets",
+        "head": head,
+        "base": git(publication.root, "merge-base", head, "origin/dev"),
+        "actor": NOTICE_ACTOR,
+        "action": "pushed",
+    }
+    deliveries = lab_receiver.heads.fetch(100, 0)
+    assert [(delivery.event.type, delivery.event.data) for delivery in deliveries] == [("ci.lab.head.notice", notice)]
+    assert lab_receiver.tips == [f"{head}\trefs/heads/engineer-test"]
+    assert result["lab_notice"] == "200"
+
+
+def refuse_the_notice(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sign the notice with a secret the receiver does not hold, so it answers 401."""
+    from scripts.ci_lab.webhooks import NOTICE_SECRET_ENV
+
+    monkeypatch.setenv(NOTICE_SECRET_ENV, "another-signer")
+
+
+def send_the_notice_nowhere(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point the notice at a local port nothing listens on, so the connection is refused."""
+    import socket
+
+    from scripts.ci_lab.head_notice import URL_ENV
+
+    with socket.socket() as probe:
+        probe.bind(("localhost", 0))
+        port = probe.getsockname()[1]
+    monkeypatch.setenv(URL_ENV, f"http://localhost:{port}/lab/head")
+
+
+@pytest.mark.feature("lab-head-notice-push")
+@pytest.mark.parametrize("failure", [refuse_the_notice, send_the_notice_nowhere], ids=["refused", "unreachable"])
+def test_a_failed_notice_never_fails_the_push(
+    publication: SimpleNamespace,
+    lab_receiver: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    failure: Callable[[pytest.MonkeyPatch], None],
+) -> None:
+    from scripts.swarm import publish
+
+    failure(monkeypatch)
+    result = publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+    head = git(publication.root, "rev-parse", "HEAD")
+    prefix, suffix = f"lab head notice for {head} was not accepted: ", "; the push stands"
+    lines = capsys.readouterr().err.splitlines()
+    assert any(line.startswith(prefix) and line.endswith(suffix) for line in lines)
+    assert result["lab_notice"] == "0"
+    assert lab_receiver.heads.fetch(100, 0) == []
+    assert lab_receiver.tips == []
+    assert git(publication.root, "ls-remote", str(lab_receiver.remote), "refs/heads/engineer-test").split()[0] == head
+
+
+@pytest.mark.feature("lab-head-notice-push")
+def test_a_publish_without_the_lab_notice_settings_sends_and_records_no_notice(
+    publication: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.ci_lab.head_notice import ACTOR_ENV, URL_ENV
+    from scripts.ci_lab.webhooks import NOTICE_SECRET_ENV
+    from scripts.swarm import publish
+
+    monkeypatch.delenv(URL_ENV, raising=False)
+    monkeypatch.delenv(NOTICE_SECRET_ENV, raising=False)
+    monkeypatch.delenv(ACTOR_ENV, raising=False)
+    result = publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+    assert "lab_notice" not in result
+    assert result["head"] == git(publication.root, "rev-parse", "HEAD")
+
+
+@pytest.mark.feature("lab-head-notice-push")
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "git@github.com:The-Cloud-Clockwork/agentihooks.git",
+        "ssh://git@github.com/The-Cloud-Clockwork/agentihooks.git",
+        "https://github.com/the-cloud-clockwork/agentihooks/",
+    ],
+    ids=["scp ssh", "ssh url", "https"],
+)
+def test_the_notice_names_the_repository_as_github_deliveries_do(origin: str) -> None:
+    from scripts.swarm import publish
+
+    assert publish.lab_repository(origin) == "https://github.com/the-cloud-clockwork/agentihooks"

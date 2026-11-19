@@ -168,6 +168,17 @@ def test_a_new_grade_run_or_head_opens_a_fresh_check_run(monkeypatch: pytest.Mon
     assert request.call_args.kwargs["json"]["head_sha"] == "c" * 40
 
 
+@pytest.mark.feature("lab-scheduler-check-run-restart")
+def test_a_seeded_check_run_is_advanced_in_place_from_its_seeded_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    poster, request, _ = lab(monkeypatch, answer(200, {"id": 41}))
+    poster.seed(HEAD, "lint", OUTPUT.run, 41, "in_progress", True)
+    assert poster.status((HEAD, "lab-shadow/lint", OUTPUT.run)) == "in_progress"
+    with pytest.raises(ValueError, match=FORWARD):
+        poster.post(HEAD, "lint", "in_progress", None, OUTPUT, True)
+    assert poster.post(HEAD, "lint", "completed", "success", OUTPUT, True) == 41
+    assert [call.args for call in request.call_args_list] == [("PATCH", f"{URL}/41")]
+
+
 def test_the_output_lists_every_unit_key_the_run_id_the_grader_revision_and_the_details_link() -> None:
     assert checks.render(OUTPUT) == {
         "title": "2 units",

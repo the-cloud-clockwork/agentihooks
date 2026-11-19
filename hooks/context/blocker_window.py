@@ -48,7 +48,114 @@ _GIT_VALUES = frozenset(
 _PUSH_WIDENS = frozenset({"--all", "--branches", "--mirror", "--tags", "--follow-tags", "--prune", "--repo"})
 _PUSH_VALUES = frozenset({"-o", "--push-option"})
 _REDIRECTION = re.compile(r"([^<>]*)([<>].*)")
-_GLOBAL_VALUES = {"git": _GIT_VALUES, "gh": frozenset({"-R", "--repo"})}
+_KUBECTL_VALUES = frozenset(
+    {
+        "-n",
+        "--namespace",
+        "-s",
+        "--server",
+        "-v",
+        "--v",
+        "--as",
+        "--as-group",
+        "--as-uid",
+        "--as-user-extra",
+        "--cache-dir",
+        "--certificate-authority",
+        "--client-certificate",
+        "--client-key",
+        "--cluster",
+        "--context",
+        "--kubeconfig",
+        "--kuberc",
+        "--log-flush-frequency",
+        "--password",
+        "--profile",
+        "--profile-output",
+        "--proxy-url",
+        "--request-timeout",
+        "--tls-server-name",
+        "--token",
+        "--user",
+        "--username",
+        "--vmodule",
+    }
+)
+_HELM_VALUES = frozenset(
+    {
+        "-n",
+        "--namespace",
+        "--burst-limit",
+        "--color",
+        "--colour",
+        "--content-cache",
+        "--kube-apiserver",
+        "--kube-as-group",
+        "--kube-as-user",
+        "--kube-ca-file",
+        "--kube-context",
+        "--kube-tls-server-name",
+        "--kube-token",
+        "--kubeconfig",
+        "--qps",
+        "--registry-config",
+        "--repository-cache",
+        "--repository-config",
+    }
+)
+_ARGOCD_VALUES = frozenset(
+    {
+        "-H",
+        "--header",
+        "--argocd-context",
+        "--auth-token",
+        "--client-crt",
+        "--client-crt-key",
+        "--config",
+        "--controller-name",
+        "--grpc-web-root-path",
+        "--http-retry-max",
+        "--kube-context",
+        "--logformat",
+        "--loglevel",
+        "--port-forward-namespace",
+        "--redis-compress",
+        "--redis-haproxy-name",
+        "--redis-name",
+        "--repo-server-name",
+        "--server",
+        "--server-crt",
+        "--server-name",
+    }
+)
+_GLOBAL_VALUES = {
+    "git": _GIT_VALUES,
+    "gh": frozenset({"-R", "--repo"}),
+    "kubectl": _KUBECTL_VALUES,
+    "helm": _HELM_VALUES,
+    "argocd": _ARGOCD_VALUES,
+}
+_API_VALUES = frozenset(
+    {
+        "-F",
+        "--field",
+        "-f",
+        "--raw-field",
+        "-H",
+        "--header",
+        "-X",
+        "--method",
+        "-q",
+        "--jq",
+        "-t",
+        "--template",
+        "-p",
+        "--preview",
+        "--hostname",
+        "--input",
+        "--cache",
+    }
+)
 _GH_REPO = re.compile(r"-R.*|--repo(=.*)?")
 _GIT_ENVIRONMENT = re.compile(r"\bGIT_(DIR|WORK_TREE|COMMON_DIR|NAMESPACE|CONFIG\w*)=")
 _ROUTED = re.compile(
@@ -153,7 +260,7 @@ def _panic_found(store: "RedisStore", slug: str, now_ms: int) -> "dict[str, Bloc
 
 def _freezes(tokens: list[str]) -> bool:
     words = _command(tokens)[0]
-    return any(words[: len(prefix)] == list(prefix) for prefix in _FROZEN_COMMANDS)
+    return any(words[: len(prefix)] == list(prefix) for prefix in _FROZEN_COMMANDS) or _dispatches(words)
 
 
 def _frozen(tool_name: str, tool_input: dict[str, Any], cwd: str) -> str | None:
@@ -220,19 +327,41 @@ def _words(tokens: list[str]) -> list[str]:
 
 
 def _command(tokens: list[str]) -> tuple[list[str], list[tuple[str, str]]]:
-    """Return a simple command's words without redirections, its program's base name first, and the git or gh global
-    options before its subcommand, taken out of those words as (option, value) pairs."""
+    """Return a simple command's words without redirections, its program's base name first, and the global options
+    of git, gh, kubectl, helm or argocd before each subcommand word a frozen command names, taken out of those words
+    as (option, value) pairs."""
     words = _words(tokens)
     if not words:
         return [], []
-    program, rest = Path(words[0]).name, iter(words[1:])
-    values = _GLOBAL_VALUES.get(program)
+    head, rest = [Path(words[0]).name], iter(words[1:])
     options: list[tuple[str, str]] = []
     for word in rest:
-        if values is None or not word.startswith("-"):
-            return [program, word, *rest], options
-        options.append((word, next(rest, "") if word in values else ""))
-    return [program], options
+        if not _extends(head):
+            return [*head, word, *rest], options
+        if word.startswith("-"):
+            options.append((word, next(rest, "") if word in _GLOBAL_VALUES[head[0]] else ""))
+        else:
+            head.append(word)
+    return head, options
+
+
+def _extends(head: list[str]) -> bool:
+    """Return whether a frozen command names more subcommand words after head."""
+    return any(len(prefix) > len(head) and list(prefix[: len(head)]) == head for prefix in _FROZEN_COMMANDS)
+
+
+def _dispatches(words: list[str]) -> bool:
+    """Return whether a gh api call names a workflow or repository dispatch endpoint: its endpoint, the first word
+    that is neither an option nor an option's value, ends in dispatches."""
+    if words[:2] != ["gh", "api"]:
+        return False
+    rest = iter(words[2:])
+    for word in rest:
+        if word in _API_VALUES:
+            next(rest, None)
+        elif not word.startswith("-"):
+            return word.partition("?")[0].rstrip("/").rpartition("/")[2] == "dispatches"
+    return False
 
 
 def _targets(words: list[str]) -> tuple[str, ...] | None:
@@ -301,10 +430,13 @@ def _destinations(refspecs: list[str]) -> tuple[str, ...]:
 
 def _routed(cwd: str) -> bool:
     """Return whether git config may send a push from the checkout to another remote or ref: a push refspec, push url
-    or mirror on origin, a push url rewrite, tag following, a push or tracking remote other than origin, or a push
-    default other than simple or current; a config that cannot be read counts as routed."""
+    or mirror on origin, a push url rewrite, tag following, a push or tracking remote other than origin, a push default
+    other than simple or current, or more than one push url on origin, since git pushes to every one; a config that
+    cannot be read counts as routed."""
     lines = _git(cwd, "config", "--list").splitlines()
-    return not lines or any(_ROUTED.fullmatch(line) for line in lines)
+    if not lines or any(_ROUTED.fullmatch(line) for line in lines):
+        return True
+    return len(_git(cwd, "remote", "get-url", "--push", "--all", "origin").splitlines()) > 1
 
 
 def _git(cwd: str, *args: str) -> str:

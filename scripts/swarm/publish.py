@@ -14,6 +14,7 @@ from typing import Any
 
 from hooks.context import blocker_window
 from scripts import ci_prepush
+from scripts.ci_lab import head_notice
 from scripts.ci_lab.remote import checkout
 from scripts.gates import entry as gate_entry
 from scripts.swarm import continuation, git_https, naming, publish_queue, stack
@@ -43,6 +44,13 @@ class LabRoute:
 
     task: str
     direct: bool
+
+
+def route_flags(lab: LabRoute | None) -> list[str]:
+    """The publish flags that repeat a lab route, empty for a publish straight to origin."""
+    if lab is None:
+        return []
+    return ["--via", LAB, "--direct"] if lab.direct else ["--via", LAB]
 
 
 def read_grade(url: str) -> dict[str, Any]:
@@ -478,6 +486,21 @@ def remote_head(root: Path, branch: str) -> str:
     return listed.split()[0] if listed else ""
 
 
+def lab_repository(remote: str) -> str:
+    """Return the repository a lab head notice names for an origin remote, in the form GitHub deliveries give it."""
+    return f"https://{stack.repo_key(remote)}"
+
+
+def notify_lab(root: Path, fields: dict[str, str], head: str) -> None:
+    """Send the lab receiver the signed notice of the head just pushed, based on its merge base with dev, and record
+    the receiver's answer as lab_notice; a notice that is not configured is not sent, and one that fails leaves the
+    push standing."""
+    base = subprocess.run(["git", "merge-base", head, "origin/dev"], cwd=root, capture_output=True, text=True)
+    status = head_notice.send(os.environ, lab_repository(fields["branch_repo"]), head, base.stdout.strip())
+    if status is not None:
+        fields["lab_notice"] = str(status)
+
+
 def grade_and_push(
     slug: str, root: Path, primary: Path, fields: dict[str, str], head: str, route: LabRoute | None = None
 ) -> None:
@@ -499,6 +522,7 @@ def grade_and_push(
     if route is not None:
         through_lab(root, route, fields)
     git(root, "push", "-u", "origin", f"HEAD:{ref}")
+    notify_lab(root, fields, head)
 
 
 def publish(
@@ -519,7 +543,9 @@ def publish(
             raise SwarmError(f"task worktree missing; Next: agentihooks swarm {shlex.quote(slug)} prepare")
         fields = checkout_fields(root)
         selected = selected_files(root, files)
-        retry = shlex.join(["agentihooks", "swarm", slug, "publish", "--message", message, "--", *files])
+        retry = shlex.join(
+            ["agentihooks", "swarm", slug, "publish", "--message", message, *route_flags(lab), "--", *files]
+        )
         fields["branch"] = delivery_branch(root, scoped, fields["branch"])
         ledger.update_task(
             slug, agent.task, branch_record(fields, primary, drop_repository(task, primary)), by=agent.name

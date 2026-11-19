@@ -1044,11 +1044,14 @@ inside the `_spawn_order` row, and inside it one `launchable` row per lane and o
 order. The running filter keeps only the lane's agents that have not ended and still own their
 task, with a placeholder row for an agent whose task row is missing.
 
-### Focus ranks in spawn order
+### Focus ranks in offer order
 
 `scripts.swarm.focus_budget.ranks(doc)` gives every task in the ledger document its focus rank, the position of the
-first focus record that covers it; `focus_budget.ordered` then sorts the spawn queue focused tasks first, by rank band,
-then by that rank. Only `focus` records count: freeze records in the same `freezes` collection take no position.
+first focus record that covers it; `focus_budget.ordered` then sorts the hub's readiness offers focused tasks first,
+by ledger rank band, then by that rank (see [Offer order](../pillars/hives.md#offer-order)). The legacy tick spawn
+sorted its launch queue the same way until pull request
+[#11141](https://github.com/the-cloud-clockwork/agentihooks/pull/11141) removed it. Only `focus` records count:
+freeze records in the same `freezes` collection take no position.
 
 | Focus record target | Covers a task when | Example |
 |---|---|---|
@@ -1079,12 +1082,14 @@ selectors into one ordered list. Each task then costs one lookup per node of its
 plus the merged chain, and one comparison per selector record, instead of a match of every focus record against every
 task. On 3 November 2026, with the 284 focus records `rig-grade-swarm` held, one call over 3000 tasks went from
 0.622 s to 0.006 s with the same ranks
-([pull request 9573](https://github.com/the-cloud-clockwork/agentihooks/pull/9573)). Spawn order calls `ranks` once
-per lane inside `focus_budget.place`, which orders the lane's ready tasks with it, and once more after the lanes to sort
-the whole queue. Only that last call has its own `scripts.swarm.focus_budget.ranks` row; the per lane calls count in
-each lane's `focus_budget.place` row.
+([pull request 9573](https://github.com/the-cloud-clockwork/agentihooks/pull/9573)). `readiness.offers` runs
+twice per swarm on each readiness pass, once inside `publish` and once for the hub's log line, and calls `ranks` once
+each time. The legacy spawn order also called it once per lane inside
+`focus_budget.place`; that spawn order was removed with the spawn.
 
-Measure the spawn step over a thirty minute UTC window from its `swarm_tick_step` finished records:
+The measurement below is the record of pull request 9573 on the legacy spawn step. That step no longer runs, so on a
+swarm after the removal the command finds no `spawn` records. It measures the spawn step over a thirty minute UTC
+window from its `swarm_tick_step` finished records:
 
 ```bash
 SLUG=rig-grade-swarm
@@ -1105,13 +1110,14 @@ in other parts of spawn order or in the launch itself; split them with the rows 
 
 `tests/swarm/test_focus_budget.py` holds the contract: ranks by node address and selector, first position wins,
 duplicate targets, an empty selector value, colons inside task ids and selector values, and a test that ranks twenty
-node address focuses without calling `freeze.covers` once.
+node address focuses without calling `freeze.covers` once. The offer order tests in
+`tests/swarm/test_events_placement.py` hold the sort on the readiness offers; see
+[Offer order tests](../pillars/hives.md#offer-order-tests).
 
 | Symptom | Check |
 |---|---|
-| A task inside a focused phase launches after tasks of a later focus | An earlier `lane:` or `kind:` record covers the later tasks, or the task's `phase`, `slice` or `merged_into` link does not reach the focused node; read the task record and the ancestry its links give |
+| A task inside a focused phase is offered after tasks of a later focus in the same rank band | An earlier `lane:` or `kind:` record covers the later tasks, or the task's `phase`, `slice` or `merged_into` link does not reach the focused node; read the task record and the ancestry its links give |
 | A focus record never ranks any task | Its target is a selector with no value, such as `lane:`, or names a node that no task's ancestry holds; clear it with `unfreeze TARGET` |
-| The `focus_budget.ranks` row, times one more than the lane count, is close to the `_spawn_order` row | Ranking is the slow part, since every lane's `focus_budget.place` row holds one more `ranks` call; the ledger document holds many tasks or selector records, and each selector record costs one comparison per task |
 
 ## One lease heartbeat per tick pass
 

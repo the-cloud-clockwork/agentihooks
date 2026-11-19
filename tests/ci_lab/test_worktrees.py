@@ -1,13 +1,16 @@
+import base64
 import os
 import stat
 import subprocess
 from collections import OrderedDict
+from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from scripts.ci_lab import worktrees
-from tests.dep_manifest import _git
+from scripts.dep_manifest import _git
 
 WRITE = stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH
 
@@ -73,10 +76,155 @@ def test_fetch_takes_only_the_objects_the_node_mirror_lacks(
     assert capfd.readouterr() == ("", "")
 
 
+@pytest.mark.feature("lab-store-incremental-fetch")
+@pytest.mark.parametrize("fallback", [False, True])
+def test_fetch_without_a_node_mirror_keeps_heads_and_takes_only_new_objects(
+    tmp_path: Path, origin: Path, fallback: bool
+) -> None:
+    base = _commit(origin, "a", "\n".join(str(number) for number in range(10000)))
+    store = tmp_path / "store"
+    _git(tmp_path, "init", "-q", "--bare", str(store))
+    _git(store, "config", "fetch.unpackLimit", "1")
+    remote = f"file://{origin}"
+    mirror = worktrees.Mirror(
+        node=tmp_path / "absent",
+        store=store,
+        remote=f"file://{tmp_path / 'unreachable'}" if fallback else remote,
+        lab=worktrees.Lab(remote, "") if fallback else None,
+        repository=remote,
+    )
+    assert mirror.fetch(base) is True
+    before = set((store / "objects/pack").glob("*.idx"))
+    head = _commit(origin, "b", "b")
+    assert mirror.fetch(head) is True
+    added = set((store / "objects/pack").glob("*.idx")) - before
+    assert len(added) == 1
+    packed = _git(store, "verify-pack", "-v", str(added.pop()))
+    assert f"{head} commit" in packed
+    assert f"{base} commit" not in packed
+    assert set(_git(store, "for-each-ref", "--format=%(objectname)", "refs/lab/").splitlines()) == {base, head}
+    assert mirror.fetch(base) is False
+    assert mirror.fetch(head) is False
+    assert not (store / "FETCH_HEAD").exists()
+
+
+@pytest.mark.feature("lab-store-incremental-fetch")
+@pytest.mark.parametrize("node_exists", [False, True])
+def test_fetch_never_names_a_missing_node_objects_directory_in_alternates(
+    tmp_path: Path, origin: Path, node_exists: bool, capfd: pytest.CaptureFixture[str]
+) -> None:
+    head = _commit(origin, "a", "a")
+    node = tmp_path / "node"
+    if node_exists:
+        node.mkdir()
+    mirror = worktrees.Mirror(node=node, store=tmp_path / "store", remote=f"file://{origin}")
+    assert mirror.fetch(head) is True
+    assert not (mirror.store / "objects/info/alternates").exists()
+    assert _git(mirror.store, "cat-file", "-t", head) == "commit\n"
+    assert "alternate" not in capfd.readouterr().err
+
+
 def test_fetch_of_an_unknown_sha_raises(tmp_path: Path, origin: Path) -> None:
     mirror = _mirror(tmp_path, origin, _commit(origin, "a", "a"))
     with pytest.raises(subprocess.CalledProcessError):
         mirror.fetch("1" * 40)
+
+
+def _graded(tmp_path: Path, origin: Path, lab: Path) -> str:
+    _git(tmp_path, "init", "-q", "--bare", str(lab))
+    side = tmp_path / "side"
+    _git(tmp_path, "clone", "-q", str(origin), str(side))
+    head = _commit(side, "b", "b")
+    _git(side, "push", "-q", f"file://{lab}", f"{head}:refs/grade/t1")
+    return head
+
+
+@pytest.mark.feature("lab-remote-heads")
+def test_fetch_takes_a_sha_only_the_lab_remote_holds_from_the_lab_remote(tmp_path: Path, origin: Path) -> None:
+    base = _commit(origin, "a", "a")
+    lab = tmp_path / "lab" / "origin.git"
+    head = _graded(tmp_path, origin, lab)
+    mirror = replace(_mirror(tmp_path, origin, base), lab=worktrees.Lab(f"file://{lab}", "lab-token"))
+    assert mirror.fetch(head) is True
+    assert _git(mirror.store, "cat-file", "-t", head) == "commit\n"
+    assert mirror.fetch(head) is False
+
+
+@pytest.mark.feature("lab-remote-heads")
+def test_fetch_never_asks_a_lab_remote_of_another_repository(tmp_path: Path, origin: Path) -> None:
+    base = _commit(origin, "a", "a")
+    lab = tmp_path / "lab" / "widgets.git"
+    head = _graded(tmp_path, origin, lab)
+    mirror = replace(_mirror(tmp_path, origin, base), lab=worktrees.Lab(f"file://{lab}", "lab-token"))
+    with pytest.raises(subprocess.CalledProcessError):
+        mirror.fetch(head)
+
+
+@pytest.mark.feature("lab-remote-heads")
+def test_a_lab_fetch_sends_the_token_as_the_lab_user_s_basic_password_for_the_lab_url_only(
+    tmp_path: Path, origin: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    base = _commit(origin, "a", "a")
+    mirror = replace(
+        _mirror(tmp_path, origin, base), lab=worktrees.Lab("https://lab.example/git/origin.git", "lab-token")
+    )
+    assert mirror.fetch(base) is False
+    calls: list[tuple[list[str], dict[str, str] | None]] = []
+
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append((argv, kwargs.get("env")))
+        if "fetch" in argv and len(calls) == 2:
+            raise subprocess.CalledProcessError(128, argv)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(worktrees.subprocess, "run", run)
+    assert mirror.fetch("1" * 40) is True
+    store = str(mirror.store)
+    assert [argv for argv, _ in calls[1:]] == [
+        [
+            "git",
+            "-C",
+            store,
+            "fetch",
+            "--quiet",
+            "--no-write-fetch-head",
+            f"file://{origin}",
+            f"{'1' * 40}:refs/lab/{'1' * 40}",
+        ],
+        [
+            "git",
+            "-C",
+            store,
+            "fetch",
+            "--quiet",
+            "--no-write-fetch-head",
+            "https://lab.example/git/origin.git",
+            f"{'1' * 40}:refs/lab/{'1' * 40}",
+        ],
+    ]
+    assert calls[1][1] is None
+    assert calls[2][1] == {
+        **os.environ,
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "http.https://lab.example/git/origin.git.extraheader",
+        "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {base64.b64encode(b'lab:lab-token').decode()}",
+        "GIT_TERMINAL_PROMPT": "0",
+    }
+
+
+@pytest.mark.feature("lab-remote-heads")
+def test_the_lab_remote_comes_from_the_environment_and_never_shows_its_token() -> None:
+    environ = {
+        "AGENTIHOOKS_LAB_REMOTE": "https://lab.example/git/origin.git",
+        "AGENTIHOOKS_LAB_REMOTE_TOKEN": "lab-token",
+    }
+    found = worktrees.lab(environ)
+    assert found == worktrees.Lab("https://lab.example/git/origin.git", "lab-token")
+    assert "lab-token" not in repr(found)
+    assert worktrees.lab({"AGENTIHOOKS_LAB_REMOTE_TOKEN": "lab-token"}) is None
+    assert worktrees.lab({"AGENTIHOOKS_LAB_REMOTE": "https://lab.example/git/origin.git"}) == worktrees.Lab(
+        "https://lab.example/git/origin.git", ""
+    )
 
 
 def test_a_second_lease_of_the_same_head_reuses_the_tree(

@@ -3,7 +3,8 @@ import shlex
 from pathlib import Path
 
 _ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z_0-9]*=")
-_SEPARATORS = ";|&(){}\n"
+_SEPARATORS = ";|&()\n"
+_GROUPS = frozenset({"{", "}"})
 _ARITHMETIC = {"((": 1, "))": -1}
 _WORD = re.compile(r"""(?:[^\s;|&()<>'"]|'[^']*'|"[^"]*")*""")
 _OPERATORS = ("&&", "||", ";;", "|&", ";", "|", "&", "(", ")", "{", "}", "\n")
@@ -224,7 +225,7 @@ def located(command: str, depth: int = 0, folders: list[str] | None = None) -> l
             (words and words[-1].endswith((">", "<")))
             or any(word.startswith(">") for word in tokens[position + 1 : position + 2])
         )
-        if not token or token.strip(_SEPARATORS) or redirect:
+        if not token or (token.strip(_SEPARATORS) and token not in _GROUPS) or redirect:
             words.append(token)
             continue
         pairs, current = _expand(words, depth, current)

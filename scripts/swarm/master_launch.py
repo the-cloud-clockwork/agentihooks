@@ -171,7 +171,7 @@ def fill(saved, config):
     kept = {key: value for key, value in saved.items() if value}
     if harness not in effort_range.EFFORTS:
         return {**defaults, **kept}
-    pick = model_pick.frontier(harness)
+    pick = model_pick.master(config, harness)
     effort = effort_range.clamp(harness, kept.get("effort", pick.effort), effort_range.bounds(config, MASTER))
     return {**defaults, "harness": harness, "model": pick.model, **kept, "effort": effort}
 

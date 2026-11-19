@@ -33,6 +33,17 @@ def loader_name(node: ast.AST) -> str | None:
     return None
 
 
+def plugin_names(nodes: list[ast.AST]) -> set[str]:
+    return {
+        part.value
+        for node in nodes
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "pytest_plugins" for target in node.targets)
+        for part in ast.walk(node.value)
+        if isinstance(part, ast.Constant) and isinstance(part.value, str)
+    }
+
+
 def discovery_inputs(nodes: list[ast.AST], names: set[str], resources: dict[str, set[str]]) -> set[str]:
     scanners = {
         name: name
@@ -115,7 +126,7 @@ def test_inputs(
             if Path(current).suffix == ".py":
                 text = content.decode()
                 nodes = list(ast.walk(ast.parse(text)))
-                names = set(imported_names(text, Path(current).parent.parts))
+                names = set(imported_names(text, Path(current).parent.parts)) | plugin_names(nodes)
                 if discovered is not None:
                     discovered[current] = discovery_inputs(nodes, names, resources)
                 loaders = {name: name for name in DYNAMIC_IMPORTS} | {

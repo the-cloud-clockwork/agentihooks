@@ -628,7 +628,7 @@ jobs:
             echo "::error::No dev push Tests run passed, so the queue run has no dev durations."
             exit 1
           fi
-          kept=" $(read_api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?per_page=100" --jq '[.artifacts[] | select(.expired | not) | .name] | join(" ")') "
+          kept=" $(read_api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?name=durations-merged" --jq '[.artifacts[] | select(.expired | not) | .name] | join(" ")') "
           if [[ "$kept" != *" durations-merged "* ]]; then
             echo "::error::Dev push run $run kept no live durations-merged artifact."
             exit 1
@@ -656,7 +656,10 @@ jobs:
           runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?branch=dev&event=push&$filter&per_page=20" --jq '.workflow_runs[] | "\(.id) \(.head_sha)"')
           while read -r run head; do
             [[ -n "$run" ]] || continue
-            kept=" $(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?per_page=100" --jq '[.artifacts[] | select(.expired | not) | .name] | join(" ")') "
+            kept=" "
+            for name in durations-merged coverage-baseline; do
+              kept+="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?name=$name" --jq '[.artifacts[] | select(.expired | not) | .name] | join(" ")') "
+            done
             if [[ "$kept" == *" durations-merged "* && "$kept" == *" coverage-baseline "* ]]; then
               ancestry=$(gh api "repos/$GITHUB_REPOSITORY/compare/$head...dev" --jq .status)
               [[ "$ancestry" == ahead || "$ancestry" == identical ]] || continue
@@ -789,7 +792,13 @@ jobs:
 
       - name: Install admission ruff
         if: github.event_name == 'pull_request'
-        run: python -m pip install ruff==0.15.12
+        run: |
+          if [[ "$(python -I -m ruff --version 2>/dev/null)" == "ruff 0.15.12" ]]; then
+            echo "ruff 0.15.12 comes from the runner image"
+          else
+            python -m pip install ruff==0.15.12
+          fi
+          test "$(python -I -m ruff --version)" = "ruff 0.15.12"
 
       - name: Check out the admission base
         if: github.event_name == 'pull_request'
@@ -955,7 +964,7 @@ jobs:
 
       - &venv
         name: Restore the test environment
-        if: env.UNIT_WHEELHOUSE != '1' || runner.environment != 'self-hosted'
+        if: runner.environment != 'self-hosted'
         id: venv
         uses: actions/cache/restore@v4
         env:
@@ -984,16 +993,17 @@ jobs:
         env:
           SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
           PYTHON_PATH: ${{ steps.python.outputs.python-path }}
+          BAKED_VENV: /opt/agentihooks-venv
         run: |
-          uv venv --python "$PYTHON_PATH" "$HOME/venv"
-          uv pip install --offline --no-index --find-links /opt/wheelhouse --constraint .github/test-requirements.lock --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]" && { echo "::notice title=Wheelhouse hit::The runner wheelhouse served the install offline"; exit 0; }
+          if [[ -x "$BAKED_VENV/bin/python" && "$("$BAKED_VENV/bin/python" -c 'import sys; print(sys.base_prefix)')" == "$pythonLocation" ]]; then ln -s "$BAKED_VENV" "$HOME/venv"; else uv venv --python "$PYTHON_PATH" "$HOME/venv"; fi
+          uv pip install --offline --no-index --find-links /opt/wheelhouse --exact --constraint .github/test-requirements.lock --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]" && { echo "::notice title=Wheelhouse hit::The runner wheelhouse served the install offline"; exit 0; }
           echo "::notice title=Wheelhouse miss::The runner wheelhouse cannot serve the install; fetching from PyPI"
-          bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --constraint .github/test-requirements.lock --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"
+          bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --exact --constraint .github/test-requirements.lock --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       # Queue refs cannot read dev's entries, so saving there only fills the store with copies.
       - &use-venv
         name: Use the test environment
-        run: echo "$HOME/venv/bin" >> "$GITHUB_PATH"
+        run: echo "$(readlink -f "$HOME/venv")/bin" >> "$GITHUB_PATH"
 
       - name: Check out the base revision
         env:
@@ -1023,6 +1033,7 @@ jobs:
           private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
           repositories: ${{ github.event.repository.name }}
           permission-actions: read
+          permission-pull-requests: read
 
       - name: Fetch the base suite count recorded on dev
         if: steps.app-token.outcome == 'success' && (github.event_name == 'pull_request' || github.event_name == 'merge_group')
@@ -1040,6 +1051,14 @@ jobs:
           echo "Reading the suite count artifact $id recorded on dev for $base."
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$id/zip" > "$RUNNER_TEMP/count-record.zip" || exit 0
           python -c 'import sys, zipfile; sys.stdout.buffer.write(zipfile.ZipFile(sys.argv[1]).read("record.json"))' "$RUNNER_TEMP/count-record.zip" > "$RUNNER_TEMP/base-record.json" || rm -f "$RUNNER_TEMP/base-record.json"
+
+      - name: Read the pull request reviews
+        if: steps.app-token.outcome == 'success' && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PULL: ${{ github.event.pull_request.number }}
+        run: |
+          gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PULL/reviews?per_page=100" --jq '.[] | {user: .user.login, state, commit_id}' > "$RUNNER_TEMP/pull-reviews.jsonl" || rm -f "$RUNNER_TEMP/pull-reviews.jsonl"
 
       # The protected grader plans, so a queued change cannot widen what it reuses.
       - name: Plan the tests whose inputs did not change
@@ -1063,7 +1082,8 @@ jobs:
               echo "reused=0" >> "$GITHUB_OUTPUT"
               return 0
             fi
-            if [[ "$GITHUB_EVENT_NAME" != merge_group && ! -f "$RUNNER_TEMP/planner/tests/reused_coverage.py" ]]; then
+            if [[ "$GITHUB_EVENT_NAME" != merge_group && ! -f "$RUNNER_TEMP/planner/scripts/reused_coverage.py" \
+              && ! -f "$RUNNER_TEMP/planner/tests/reused_coverage.py" ]]; then
               echo "The grader cannot carry reused tests' coverage into Sonar; every test runs."
               echo "reused=0" >> "$GITHUB_OUTPUT"
               return 0
@@ -1102,6 +1122,8 @@ jobs:
           TEST_COUNT_ENVIRONMENT: ${{ steps.day.outputs.key }}
           TEST_COUNT_BASE_RECORD: ${{ runner.temp }}/base-record.json
           TEST_COUNT_HEAD_COLLECTION: ${{ runner.temp }}/collected.json
+          TEST_COUNT_REVIEWS: ${{ runner.temp }}/pull-reviews.jsonl
+          TEST_COUNT_REVIEWED_HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           if [[ ! -f "$RUNNER_TEMP/base/tests/count_floor.py" ]]; then
             echo "::error::The base carries no tests/count_floor.py, so nothing trusted can grade."
@@ -1156,7 +1178,7 @@ jobs:
           BRANCH_PLAN: ${{ steps.plan.outputs.branch != '' && steps.plan.outputs.branch != '0' && format('{0}/reused-branch.json', runner.temp) || '' }}
         run: |
           cd "$RUNNER_TEMP/planner"
-          "$PYTHON_PATH" -m tests.dep_manifest deselect ${DEV_PLAN:+--plan "$DEV_PLAN"} ${BRANCH_PLAN:+--plan "$BRANCH_PLAN"} \
+          "$PYTHON_PATH" -m scripts.dep_manifest deselect ${DEV_PLAN:+--plan "$DEV_PLAN"} ${BRANCH_PLAN:+--plan "$BRANCH_PLAN"} \
             --collected "$RUNNER_TEMP/collected.json" --out "$RUNNER_TEMP/reused.json"
 
       - name: Upload the deselected tests
@@ -1268,7 +1290,7 @@ jobs:
 
       - &save-venv
         name: Save the test environment from dev
-        if: env.UNIT_SOURCE == '' && steps.venv.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref == 'refs/heads/dev'
+        if: env.UNIT_SOURCE == '' && steps.venv.outcome == 'success' && steps.venv.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref == 'refs/heads/dev'
         uses: actions/cache/save@v4
         with:
           path: ~/venv
@@ -1471,7 +1493,6 @@ jobs:
       GIT_CONFIG_VALUE_0: "false"
       CODEX_RELEASE: rust-v0.160.0
       UNIT_SOURCE: ${{ needs.split.outputs.source }}
-      UNIT_WHEELHOUSE: ${{ github.event_name == 'pull_request' && '1' || '' }}
       UV_CONSTRAINT: ${{ github.workspace }}/.github/test-constraints.txt
       LEG: ${{ matrix.shard }}
     strategy:
@@ -1620,7 +1641,9 @@ jobs:
         run: |
           git worktree add --detach "$RUNNER_TEMP/grader" "$GRADER"
           cd "$RUNNER_TEMP/grader"
-          python -m tests.reused_coverage --repo "$GITHUB_WORKSPACE" --head HEAD \
+          package=scripts
+          if [[ ! -f scripts/reused_coverage.py ]]; then package=tests; fi
+          python -m "$package.reused_coverage" --repo "$GITHUB_WORKSPACE" --head HEAD \
             --coverage "$RUNNER_TEMP/dev-coverage/.coverage" --commit "$COMMIT" \
             --reused "$GITHUB_WORKSPACE/reused.json" --out "$GITHUB_WORKSPACE/reused-coverage/.coverage" \
             --captures "$RUNNER_TEMP/dev-coverage/js-coverage" --captures-out "$GITHUB_WORKSPACE/js-coverage"
@@ -1800,7 +1823,7 @@ jobs:
         run: |
           databases=(.coverage)
           if [[ -f reused-coverage/.coverage ]]; then databases+=(reused-coverage/.coverage); fi
-          python -m tests.coverage_check "${databases[@]}"
+          python -m scripts.coverage_check "${databases[@]}"
 
       - name: Upload coverage
         if: needs.split.outputs.source == '' && matrix.python-version == '3.12'
@@ -1917,7 +1940,6 @@ jobs:
       CODEX_RELEASE: rust-v0.160.0
       UV_CONSTRAINT: ${{ github.workspace }}/.github/test-constraints.txt
       UNIT_SOURCE: ""
-      UNIT_WHEELHOUSE: "1"
       LEG: ${{ matrix.leg }}
     strategy:
       fail-fast: false
@@ -2738,7 +2760,7 @@ jobs:
         shell: bash
         run: &dep-manifest-check-shard-coverage |
           shopt -s nullglob
-          python -m tests.coverage_check .coverage-shards/coverage-3.12-*/.coverage .coverage-shards/coverage-3.12-*/reused-coverage/.coverage
+          python -m scripts.coverage_check .coverage-shards/coverage-3.12-*/.coverage .coverage-shards/coverage-3.12-*/reused-coverage/.coverage
           python -c 'import json, pathlib; [json.loads(line) for path in pathlib.Path(".coverage-shards").rglob("*.jsonl") for line in path.read_text().splitlines() if line.strip()]'
 
       - name: Download torn shard coverage again
@@ -2773,7 +2795,7 @@ jobs:
           shopt -s nullglob
           python -m coverage combine --rcfile=.github/coverage/coverage.ini --keep --data-file="$RUNNER_TEMP/dep-manifest/.coverage" \
             .coverage-shards/coverage-3.12-*/.coverage .coverage-shards/coverage-3.12-*/reused-coverage/.coverage
-          python -m tests.dep_manifest build --coverage "$RUNNER_TEMP/dep-manifest/.coverage" --inputs .coverage-shards --root . \
+          python -m scripts.dep_manifest build --coverage "$RUNNER_TEMP/dep-manifest/.coverage" --inputs .coverage-shards --root . \
             --commit "$GITHUB_SHA" --environment "$ENVIRONMENT" --out "$RUNNER_TEMP/dep-manifest/manifest.json" \
             --packed "$RUNNER_TEMP/dep-manifest/packed.json"
 
@@ -2986,6 +3008,16 @@ jobs:
           fi
           python -m scripts.ci_for_substitution --root "$GITHUB_WORKSPACE"
 
+      - name: Refuse changelog fragments named off the branch or opening without a section heading
+        if: ${{ !cancelled() }}
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          if [[ -f "$RUNNER_TEMP/grader/scripts/ci_changelog_fragments.py" ]]; then
+            cd "$RUNNER_TEMP/grader"
+          fi
+          python -m scripts.ci_changelog_fragments --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE" --branch "$BRANCH"
+
       - name: Require trusted actors before private runner admission
         if: ${{ !cancelled() }}
         env:
@@ -3042,6 +3074,16 @@ jobs:
             echo "::error::dev carries no scripts/no_whole_ledger.py, so nothing trusted can grade."
             exit 1
           fi
+
+      # dev's copy grades once dev carries the grader; until then the head's copy measures the head,
+      # which still refuses a new ledger write doctrine line this very pull request adds.
+      - name: Hold ledger write doctrine out of skills, rules, docs and prompts
+        if: ${{ !cancelled() }}
+        run: |
+          if [[ -f "$RUNNER_TEMP/grader/scripts/no_ledger_write_doctrine.py" ]]; then
+            cd "$RUNNER_TEMP/grader"
+          fi
+          python -m scripts.no_ledger_write_doctrine --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
 
       - name: Hold the tick step pattern
         if: ${{ !cancelled() }}
@@ -4665,10 +4707,10 @@ jobs:
           mkdir -p "$RUNNER_TEMP/workflow"
           git archive "$GITHUB_SHA" .github/scripts .github/test-requirements.lock | tar -x -C "$RUNNER_TEMP/workflow"
 
-      - name: Take the upload action from the workflow revision
+      - name: Take the upload and download actions from the workflow revision
         run: |
           mkdir -p .workflow-revision
-          git archive "$GITHUB_SHA" .github/actions/retry-upload | tar -x -C .workflow-revision
+          git archive "$GITHUB_SHA" .github/actions/retry-upload .github/actions/pattern-download | tar -x -C .workflow-revision
 
       - *mutation-planning-install
 
@@ -4696,11 +4738,10 @@ jobs:
         timeout-minutes: 1
         id: download-refine-shared-mutation-stats
         continue-on-error: true
-        uses: actions/download-artifact@v8.0.2
+        uses: ./.workflow-revision/.github/actions/pattern-download
         with: &mutation-refine-download-the-shared-mutation-stats
           pattern: mutation-stats-*
           path: .mutation-stats
-          merge-multiple: true
 
       - name: Download the shared mutation stats, wait before attempt 2
         if: steps.download-refine-shared-mutation-stats.outcome == 'failure'
@@ -4712,7 +4753,7 @@ jobs:
       - name: Download the shared mutation stats, attempt 2
         timeout-minutes: 1
         if: steps.download-refine-shared-mutation-stats.outcome == 'failure'
-        uses: actions/download-artifact@v8.0.2
+        uses: ./.workflow-revision/.github/actions/pattern-download
         with: *mutation-refine-download-the-shared-mutation-stats
 
       - name: Restore the tests that killed this branch's earlier mutants
@@ -4830,11 +4871,10 @@ jobs:
         timeout-minutes: 1
         id: download-probe-shared-mutation-stats
         continue-on-error: true
-        uses: actions/download-artifact@v8.0.2
+        uses: ./.workflow-revision/.github/actions/pattern-download
         with: &mutation-probe-download-the-shared-mutation-stats
           pattern: mutation-stats-*
           path: .mutation-stats
-          merge-multiple: true
 
       - name: Download the shared mutation stats, wait before attempt 2
         if: steps.download-probe-shared-mutation-stats.outcome == 'failure'
@@ -4846,7 +4886,7 @@ jobs:
       - name: Download the shared mutation stats, attempt 2
         timeout-minutes: 1
         if: steps.download-probe-shared-mutation-stats.outcome == 'failure'
-        uses: actions/download-artifact@v8.0.2
+        uses: ./.workflow-revision/.github/actions/pattern-download
         with: *mutation-probe-download-the-shared-mutation-stats
 
       - name: Restore the tests that killed this branch's earlier mutants
@@ -5161,11 +5201,10 @@ jobs:
         if: needs.mutation-plan.outputs.forwarded != 'true'
         id: download-the-shared-mutation-stats
         continue-on-error: true
-        uses: actions/download-artifact@v8.0.2
+        uses: ./.workflow-revision/.github/actions/pattern-download
         with: &mutation-download-the-shared-mutation-stats
           pattern: mutation-stats-*
           path: .mutation-stats
-          merge-multiple: true
 
       - name: Download the shared mutation stats, wait before attempt 2
         if: steps.download-the-shared-mutation-stats.outcome == 'failure'
@@ -5177,7 +5216,7 @@ jobs:
       - name: Download the shared mutation stats, attempt 2
         timeout-minutes: 1
         if: steps.download-the-shared-mutation-stats.outcome == 'failure'
-        uses: actions/download-artifact@v8.0.2
+        uses: ./.workflow-revision/.github/actions/pattern-download
         with: *mutation-download-the-shared-mutation-stats
 
       - name: Check every mutation stats producer's part arrived
@@ -5192,7 +5231,7 @@ jobs:
         if: steps.stats-arrival.outputs.missing != ''
         id: download-the-missing-mutation-stats-parts
         continue-on-error: true
-        uses: actions/download-artifact@v8.0.2
+        uses: ./.workflow-revision/.github/actions/pattern-download
         with: *mutation-download-the-shared-mutation-stats
 
       - name: Download the missing mutation stats parts, wait before attempt 2
@@ -5205,7 +5244,7 @@ jobs:
       - name: Download the missing mutation stats parts, attempt 2
         timeout-minutes: 1
         if: steps.download-the-missing-mutation-stats-parts.outcome == 'failure'
-        uses: actions/download-artifact@v8.0.2
+        uses: ./.workflow-revision/.github/actions/pattern-download
         with: *mutation-download-the-shared-mutation-stats
 
       - name: Fail on a mutation stats producer whose part never arrived

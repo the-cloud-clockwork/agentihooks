@@ -101,6 +101,12 @@ class Unreachable(SwarmError):
     pass
 
 
+class IdentityConflict(SwarmError):
+    def step_fields(self) -> dict[str, str]:
+        """The conflict message a failed tick step records as its detail."""
+        return {"detail": str(self)}
+
+
 @dataclass(frozen=True)
 class SwarmConfig:
     slug: str
@@ -251,7 +257,8 @@ class RedisStore:
     def slugs(self):
         return sorted(self.redis.smembers(f"{PREFIX}:index"))
 
-    def create(self, config):
+    def refusal(self, config: SwarmConfig) -> str:
+        """Why create would refuse CONFIG, empty when it takes it; callers ask before they mark a ledger."""
         from scripts.swarm import model_catalog
 
         changes = {
@@ -262,9 +269,21 @@ class RedisStore:
         if changes and (
             refused := default_models.refusal(changes, model_catalog.catalog(os.environ, self.redis, time.time()))
         ):
-            raise SwarmError(refused)
+            return refused
+        if models := default_models.lane_models(config.lanes, {}):
+            if refused := default_models.lane_refusal(
+                models, model_catalog.catalog(os.environ, self.redis, time.time())
+            ):
+                return refused
         refused = effort_range.refusal((config.effort_min, config.effort_max), config.lanes) or scaling_refusal(config)
         if refused:
+            return refused
+        if self.redis.exists(self.key(config.slug, "config")):
+            return f"swarm {config.slug} already exists"
+        return ""
+
+    def create(self, config: SwarmConfig) -> None:
+        if refused := self.refusal(config):
             raise SwarmError(refused)
         if not self.redis.hsetnx(self.key(config.slug, "config"), "slug", config.slug):
             raise SwarmError(f"swarm {config.slug} already exists")
@@ -322,7 +341,7 @@ class RedisStore:
             raw.get("lab_url", ""),
         )
 
-    def update(self, slug, **changes):
+    def update(self, slug: str, **changes: Any) -> SwarmConfig:
         from scripts.swarm import model_catalog
 
         if changes.get("state", STATES[0]) not in STATES:
@@ -335,6 +354,11 @@ class RedisStore:
             if refused := default_models.refusal(changes, model_catalog.catalog(os.environ, self.redis, time.time())):
                 raise SwarmError(refused)
         previous = self.config(slug)
+        if models := default_models.lane_models(changes.get("lanes", {}), previous.lanes):
+            if refused := default_models.lane_refusal(
+                models, model_catalog.catalog(os.environ, self.redis, time.time())
+            ):
+                raise SwarmError(refused)
         config = replace(previous, **changes)
         if {"lanes", "effort_min", "effort_max"} & set(changes):
             refused = effort_range.refusal((config.effort_min, config.effort_max), config.lanes)
