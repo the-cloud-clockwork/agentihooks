@@ -66,6 +66,7 @@ KILLED = "killed"
 LOCKFILE = "uv.lock"
 PYPROJECT = "pyproject.toml"
 INPUTS_BASE = "inputs.base"
+MASK = b"***"
 MUTANT_SUFFIX = "__mutmut_"
 TEST_FOLDER = "tests/"
 TEST_PREFIX = "test_"
@@ -203,10 +204,18 @@ def _context(lease: Lease, found: StaticGate, secrets: Mapping[str, str]) -> dic
     }
 
 
+def _masked(text: bytes, secrets: Sequence[str]) -> bytes:
+    """The text with each secret value replaced by ***, the longest first."""
+    for value in sorted(secrets, key=len, reverse=True):
+        text = text.replace(value.encode(), MASK)
+    return text
+
+
 def static(pod: Pod, lease: Lease) -> Finished:
     """Run the static gate the lease names over its head, with its base and grader trees and the context of its lease
     fields and the secrets its steps read, on the venv of the head's lockfile; the report counts the git and uv cache
-    lookups it made."""
+    lookups it made, and each secret value the steps printed reads *** in the log and the summary, as Actions masks
+    it."""
     with pod.trees.shared(lease.head, lease.base, lease.grader) as ((head, base, grader), fetched):
         found = gate(grader, lease.unit.members[0])
         venv, built = venvs.venv_for(lockfile_digest(head), head, pod.venvs, pod.build)
@@ -215,7 +224,10 @@ def static(pod: Pod, lease: Lease) -> Finished:
         started = pod.clock()
         result = run_static.run(found, head, base, grader, options)
         seconds = pod.clock() - started
-    summary = result.report.read_text()
+    secrets = [value for name, value in context.items() if name.startswith(SECRETS) and value]
+    if secrets:
+        result.log.write_bytes(_masked(result.log.read_bytes(), secrets))
+    summary = _masked(result.report.read_bytes(), secrets).decode()
     record = {"gate": result.gate, "code": result.code, "skipped": result.skipped, "summary": summary}
     lookups = caches.report(fetched, [built])
     report = _report(pod, {**record, "seconds": seconds, caches.KEY: lookups})

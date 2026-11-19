@@ -324,7 +324,13 @@ def test_static_gives_a_step_each_secret_it_reads_by_name_and_writes_no_value_to
 ) -> None:
     (keywords,) = static_gates.discover(SECRET_WORKFLOW)
     probe = dataclasses.replace(
-        keywords, run='printf "%s %s" "$KEYWORDS" "$ABSENT" > "$GITHUB_WORKSPACE/seen"\necho ok\n'
+        keywords,
+        run=(
+            'printf "%s %s" "$KEYWORDS" "$ABSENT" > "$GITHUB_WORKSPACE/seen"\n'
+            'echo "keywords $KEYWORDS"\n'
+            'echo "summary $KEYWORDS" >> "$GITHUB_STEP_SUMMARY"\n'
+            "echo ok\n"
+        ),
     )
     contexts: list[Mapping[str, str]] = []
     real = run_static.run
@@ -349,7 +355,8 @@ def test_static_gives_a_step_each_secret_it_reads_by_name_and_writes_no_value_to
     assert finished.outcome == PASSED
     assert (head / "seen").read_text() == "s3cr3t-alpha,s3cr3t-beta xx"
     assert contexts == [{**LEASE_CONTEXT, "secrets.ABSENT": "", "secrets.KEYWORDS": "s3cr3t-alpha,s3cr3t-beta"}]
-    assert finished.log.read_text() == "ok\n"
+    assert finished.log.read_text() == "keywords ***\nok\n"
+    assert report(finished, pod)["summary"] == "summary ***\n"
     assert "s3cr3t" not in finished.report.read_text()
 
 

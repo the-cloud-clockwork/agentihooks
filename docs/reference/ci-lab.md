@@ -1480,8 +1480,9 @@ own code and log, and the gate never runs, as Actions ends the job. Any other ou
 including a delimited multi line block, raises `<id> wrote an output line that is not name=value`
 without the line's text.
 
-The executor writes no secret value into the unit report. Actions masks a secret that a step
-prints into its log, but the lab does not.
+The executor writes no secret value into the unit report or log. As Actions masks a secret, it
+replaces each non empty secret value the gate read with `***` in the unit log and in the step
+summary the report carries.
 
 A gate with any missing name is not lab gradable. The expander leases no unit for it, so its
 verdict stays with Actions. `python -m scripts.ci_lab.static_gates --root .` prints each gate's
