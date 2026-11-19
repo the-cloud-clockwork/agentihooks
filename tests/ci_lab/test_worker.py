@@ -481,7 +481,7 @@ def test_the_termination_grace_counts_every_delivery_call_of_a_unit(
     assert one.drain() == []
     assert client.calls == ["upload_url", "put", "upload_url", "put", "complete"]
     assert len(client.calls) == worker.DELIVERY_CALLS
-    assert client.timeout == worker.TIMEOUT_SECONDS
+    assert client.timeout == 60.0
 
 
 @pytest.mark.feature("lab-worker-pod-loop")
