@@ -3,7 +3,14 @@ from pathlib import Path
 import pytest
 
 from scripts import collection_imports
-from scripts.collection_imports import SDK_GROUP, _function_imports, _import_names, loads_heavy, loads_sdk_when_run
+from scripts.collection_imports import (
+    SDK_GROUP,
+    _function_imports,
+    _import_names,
+    calls_heavy,
+    loads_heavy,
+    loads_sdk_when_run,
+)
 from tests.shards import discover_test_files
 
 pytestmark = pytest.mark.unit
@@ -91,6 +98,15 @@ def test_the_run_check_reads_imports_inside_functions() -> None:
     assert loads_sdk_when_run(_ROOT, "def f():\n    from hooks.mcp import build_server\n")
     assert not loads_sdk_when_run(_ROOT, "def f():\n    from hooks.mcp._session import resolve_session_id\n")
     assert not loads_sdk_when_run(_ROOT, "def f():\n    from hooks.mcp import resolve_transport\n")
+
+
+def test_a_bare_name_calls_no_function_of_the_root_package(tmp_path: Path) -> None:
+    (tmp_path / "__init__.py").write_text("def run():\n    import mcp\n")
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg/__init__.py").write_text("def run():\n    import mcp\n")
+    assert calls_heavy(tmp_path, "pkg.run", set())
+    assert not calls_heavy(tmp_path, "run", set())
+    assert not loads_sdk_when_run(tmp_path, "import run\n")
 
 
 def test_function_imports_read_each_module_once(tmp_path, monkeypatch):
