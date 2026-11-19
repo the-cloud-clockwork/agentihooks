@@ -1,6 +1,22 @@
 {
   "features": [
     {
+      "id": "credential-guard-reads-heredoc-commands",
+      "origin": "regression",
+      "ordered_at": "2026-11-19",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-credential-guard-heredoc-mask",
+      "behaviour": "The credential guard masks only a heredoc's body and its terminator line, so the rest of the delimiter line is judged as commands and a credential read placed after the delimiter is refused the same way as at the top level, for unquoted, quoted and dash heredocs. A heredoc in a segment where a stage runs a shell, source or eval, as the stage's command, through sudo, env, timeout, nohup or another launcher, a kubectl, docker or ssh wrapper, after a pipe from the heredoc's stage or inside a command substitution, has its body checked as a command of its own, so a credential read, an environment dump or a recursive search of a tree that holds a credential file inside it is refused. A heredoc fed to a command that does not run it stays data, even when a shell name is only an argument of that command; a stage started through a launcher fails closed, so any shell word in it runs the body, since launcher option values cannot be told from the command. A body that reads no credential passes either way, a recursive search rewritten after a delimiter keeps the heredoc intact, and stripping heredocs keeps the delimiter line for the tool matcher and the prompts gate.",
+      "seam": "hooks.context.credential_guard.decide and hooks.context.credential_guard.evaluate on Bash payloads, and hooks.context.credential_guard.strip_heredocs",
+      "tests": [
+        "tests/test_credential_guard.py::test_a_credential_read_after_a_heredoc_delimiter_is_refused",
+        "tests/test_credential_guard.py::test_a_credential_read_in_a_heredoc_a_shell_runs_is_refused",
+        "tests/test_credential_guard.py::test_a_heredoc_that_reads_no_credential_passes",
+        "tests/test_credential_guard.py::test_a_heredoc_a_shell_runs_keeps_the_credential_tree_scan",
+        "tests/test_credential_guard.py::test_a_rewrite_after_a_heredoc_delimiter_keeps_the_heredoc",
+        "tests/test_credential_guard.py::test_stripping_heredocs_keeps_the_rest_of_the_delimiter_line"
+      ]
+    },
+    {
       "id": "lab-scheduler-budget",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/lab-budget-live-proof",
@@ -252,6 +268,20 @@
         "tests/test_serena_binding.py::test_pre_tool_use_carries_each_agent_root_without_a_permission_decision",
         "tests/test_serena_binding.py::test_pre_tool_use_carries_no_root_in_auto_mode_or_on_other_targets",
         "tests/test_serena_binding.py::test_a_condition_decision_carries_the_root_on_its_own_decision"
+      ]
+    },
+    {
+      "id": "condition-rewrite-without-a-decision",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-condition-input-rewrite",
+      "behaviour": "On Claude a bundle condition that rewrites PreToolUse tool input with no decision leaves PreToolUse as updatedInput with no permissionDecision, in default, acceptEdits, plan, dontAsk and bypass permissions sessions alike, so Claude applies it and still runs its own permission rules and every prompt the user would have seen still shows. A condition's allow or ask still decides and carries the rewrite. Auto mode drops a rewrite with no decision and tells the agent why, because auto mode can deny a call a hook changed.",
+      "seam": "conditions.pre_effect rewrite and decision, through hook_manager.on_pre_tool_use and hook_manager.emit_permission_decision",
+      "tests": [
+        "tests/test_conditions.py::TestPreToolUseEnvelope::test_bypass_rewrite_rides_one_envelope",
+        "tests/test_conditions.py::TestPreToolUseEnvelope::test_rewrite_without_decision_carries_no_decision_outside_bypass",
+        "tests/test_conditions.py::TestPreToolUseEnvelope::test_auto_mode_drops_rewrite_without_decision",
+        "tests/test_conditions.py::TestPreToolUseEnvelope::test_auto_mode_explicit_allow_applies_rewrite",
+        "tests/test_conditions.py::TestPreToolUseEnvelope::test_explicit_ask_without_rewrite_is_emitted"
       ]
     },
     {
@@ -777,6 +807,19 @@
         "tests/test_ci_select.py::test_a_markdown_only_change_selects_the_tests_that_glob_markdown",
         "tests/test_ci_select.py::test_a_markdown_change_skips_tests_that_glob_other_files",
         "tests/test_ci_select.py::test_a_source_change_does_not_select_the_tests_that_glob_markdown"
+      ]
+    },
+    {
+      "id": "ci-select-tick-catalogue-page",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2607",
+      "behaviour": "A pull request that changes a tick step module, whose selection otherwise names tests, also selects the tick step catalogue page test, which loads every step module at runtime so no import or name reaches it, and a stale catalogue page fails the pull request instead of the merge queue. A step module no test reaches still runs the full suite, a tree without the page test never selects it, and a tick change outside the step package selects the page test only through the modules it imports.",
+      "seam": "scripts.ci_select.selected_tests through scripts.ci_select.decide",
+      "tests": [
+        "tests/test_ci_select.py::test_a_changed_tick_step_module_selects_the_catalogue_page_test",
+        "tests/test_ci_select.py::test_a_tick_step_module_no_test_reaches_still_runs_the_full_suite",
+        "tests/test_ci_select.py::test_a_tick_change_outside_the_step_package_adds_no_catalogue_page_test",
+        "tests/test_ci_select.py::test_a_tree_without_the_catalogue_page_test_never_selects_it"
       ]
     },
     {
@@ -7323,6 +7366,16 @@
       ]
     },
     {
+      "id": "promotion-reference-timings",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2663",
+      "behaviour": "The promotion reference states the job timeout and mergeability wait read from the promotion workflow and script, distinguishing the reporting budget from the job timeout.",
+      "seam": "Promotion reference timing claims against the reusable promotion workflow timeout and promote script deadline",
+      "tests": [
+        "tests/contracts/promotion/test_reference.py::test_promotion_reference_timings_match_the_workflow_and_script"
+      ]
+    },
+    {
       "id": "promotion-graded-jobs-gate-or-exempt",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-promo-side-job-contract",
@@ -8752,6 +8805,20 @@
       ]
     },
     {
+      "id": "lab-manifest-fetch-off-pass",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2703",
+      "behaviour": "The CI lab scheduler service fetches packed dependency manifests off its pass, at most four at once: a fetch a head's expansion needs starts on a worker thread, and while it runs the scheduler keeps the head waiting in its lane with its quiet window unchanged, so the next pass reads the finished fetch. A pass whose manifest fetch GitHub never answers still reaps expired leases and advances live grades within one request timeout. A failed fetch answers once, so the head waits out its window again; a finished fetch answers every call for five minutes after it started, so a search past a commit with no manifest does not fetch it on every pass.",
+      "seam": "scripts.ci_lab.manifests.Background over a released fake fetch and a set clock, and scripts.ci_lab.scheduler.Scheduler.tick over fakeredis, with a scheduler.MirrorExpander over a git origin fixture reading the default scheduler.StoredManifests through a manifests.Fetcher that never answers, and with an expander that raises a pending fetch",
+      "tests": [
+        "tests/ci_lab/test_manifests.py::test_background_raises_pending_while_a_fetch_runs_and_answers_it_until_it_goes_stale",
+        "tests/ci_lab/test_manifests.py::test_background_answers_a_failed_fetch_once_and_fetches_it_again_on_the_next_call",
+        "tests/ci_lab/test_manifests.py::test_background_runs_at_most_four_fetches_at_once",
+        "tests/ci_lab/test_scheduler.py::test_a_head_whose_manifest_still_fetches_keeps_its_window_and_each_pass_reads_the_fetch_again",
+        "tests/ci_lab/test_scheduler.py::test_a_pass_reaps_leases_and_advances_grades_while_a_manifest_fetch_github_never_answers"
+      ]
+    },
+    {
       "id": "lab-control-routes",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/swarm-panic-and-priority",
@@ -9878,8 +9945,17 @@
       "seam": "a fresh interpreter whose import system cannot find the tests package imports every module of scripts.ci_lab and scripts.ci_test_plan",
       "tests": [
         "tests/ci_lab/test_wheel_imports.py::test_every_lab_module_imports_without_the_tests_package",
-        "tests/ci_lab/test_wheel_imports.py::test_an_import_of_the_tests_package_fails_where_the_wheel_is_installed",
-        "tests/test_dep_manifest.py::test_the_split_deselects_with_a_grader_that_keeps_the_manifest_under_tests"
+        "tests/ci_lab/test_wheel_imports.py::test_an_import_of_the_tests_package_fails_where_the_wheel_is_installed"
+      ]
+    },
+    {
+      "id": "deselect-scripts-manifest",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2654",
+      "behaviour": "The test count job's Deselect the reused tests step runs the grader checkout's scripts.dep_manifest alone. A grader checkout whose interpreter cannot import the tests package deselects exactly the tests scripts.dep_manifest.deselect picks, and a grader checkout that keeps the manifest only under the tests package never runs that manifest.",
+      "seam": "the Deselect the reused tests step run text executed in a fake grader checkout",
+      "tests": [
+        "tests/test_dep_manifest.py::test_the_split_deselects_with_the_scripts_manifest_alone_and_never_the_tests_package"
       ]
     },
     {

@@ -7,6 +7,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from scripts.ci_mutation.scope import is_test_file
+
 CONTEXT = "context.sha"
 SHARED = ".shared"
 # A restored cache of about 1 GB compressed held 3 GB of records and outran the planner's five minute job.
@@ -46,7 +48,8 @@ def measured_dependencies(
 
     data = CoverageData(basename=str(coverage_file))
     data.read()
-    shared, found = set(), {}
+    shared: set[str] = set()
+    found: dict[str, set[str]] = {}
     for module in list(sys.modules.values()):
         filename = getattr(module, "__file__", None)
         if isinstance(filename, str) and (path := source_path(filename, work, root, tracked)):
@@ -61,7 +64,8 @@ def measured_dependencies(
             found.setdefault(context.rpartition("|")[0], set()).add(path)
     if not all(node in found for node in nodeids):
         return {}
-    return {node: sorted(found[node] | shared) for node in nodeids}
+    test_modules = {path for path in shared if path.startswith("tests/") and is_test_file(path)}
+    return {node: sorted(found[node] | (shared - test_modules)) for node in nodeids}
 
 
 def digest(value: dict | list) -> str:

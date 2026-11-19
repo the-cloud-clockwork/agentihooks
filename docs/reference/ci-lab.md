@@ -1406,6 +1406,9 @@ list), the pytest invocation and the toolchain. The expander reads every head fi
 | Merge group | The batches that hold a test the group's entries invalidate, or every batch when `interaction.decide` returns `FULL` |
 | Promotion, backfill | Every batch; the verdict store is not consulted for the choice |
 
+The [mutation units](#mutation-units) of a promotion or backfill head are built from the same
+manifest and test fingerprints.
+
 The manifest comes from `scheduler.StoredManifests`: the packed manifest at
 `lab/manifests/<owner>--<name>/<commit>.json` (`objects.manifest_folder`) of the first commit on
 the first parent chain of the head's base that has one. Runners cannot reach the lab store, so the
@@ -1420,7 +1423,14 @@ or unanswered request or an archive without a readable `packed.json` raises `man
 A request GitHub never answered, a token mint without an answer included, or answered with a server
 error raises its subclass `manifests.FetchUnanswered`, and the scheduler puts the head back in its
 lane with the quiet window restarted, so the first pass after that window fetches again; any other
-refusal drops the head with its reason. The dev push artifact is kept 7 days, so a commit older
+refusal drops the head with its reason. The service runs each fetch off the scheduler pass through
+`manifests.Background`, at most `WORKERS` (4) at once: while a fetch runs the call raises
+`manifests.FetchPending`, and the scheduler puts the head back in its lane with its quiet window
+unchanged, so the next pass reads the finished fetch and a manifest request GitHub never answers
+holds no pass from reaping leases or advancing grades. Until the fetch finishes each pass repeats the
+head's expansion up to the manifest, its git reads included; the mirror's `git fetch` of a missing
+sha still runs on the pass. A failed fetch answers once; any other answers every call for `FRESH_S`
+(300 seconds) after the fetch started. The dev push artifact is kept 7 days, so a commit older
 than that is answered only from the store. A head that needs test units and finds none fails with
 `no dependency manifest at or before <base>` and is dropped with that reason, so a merge group
 never folds green on an empty unit job.
@@ -1462,7 +1472,10 @@ Since a push grade folds only the static gates,
 ### Mutation units
 
 A promotion or backfill head gets two more jobs, built by `scripts.ci_lab.expand_mutation` in a
-temporary worktree of the head cut from the mirror store and removed after expansion:
+temporary worktree of the head. `MirrorExpander._mutation` cuts it with `tempfile.mkdtemp` under
+`CI_LAB_MIRROR_STORE` and `git worktree add` from the repository's store, and removes it with
+`shutil.rmtree` and `git worktree prune` when expansion ends, also when it raises; the rest of
+expansion still reads the mirror with `git ls-tree` and `git show`:
 
 | Job | Units |
 |---|---|
@@ -1484,12 +1497,157 @@ fixture it reads rekeys the mutant units as well.
 
 | Head | Mutation jobs |
 |---|---|
-| Pull request, hotfix, merge group | None: their frames and `Gate — Required` rules hold no mutation job, and the test workflow runs none on `merge_group` |
+| Pull request, hotfix, merge group | None: these heads get no mutation units. The merge group `Gate — Required` rules require no mutation job and the test workflow runs none on `merge_group`; a pull request's mutation jobs run on Actions, as [Pull request mutation gate](mutation-gate.md) describes |
 | Promotion, backfill | Both, unless the head changes no Python line under `hooks/` or `scripts/` |
 
 A mutant unit passes only when every mutant is killed, so a surviving mutant fails the `mutation`
 gate and the promotion grade folds red. A changed function no recorded test ran still gets its unit;
 the runner finds no test reaching it, grades its mutants `no tests` and fails the unit.
+
+#### Measured lines
+
+`scripts.ci_mutation.scope.changes_since(root, base, head)` diffs the head against its merge base
+with the base (`git diff <base>...<head>`) under `hooks/` and `scripts/`, and keeps:
+
+- `.py` files the head still holds;
+- files whose syntax tree still differs once docstrings, and the annotations of undecorated
+  functions, are stripped, so a change to only those mutates nothing;
+- lines the whole diff does not colour as moved unchanged (`--color-moved=blocks`, indentation
+  changes allowed), so code moved between files mutates nothing.
+
+A kept line selects the function or method mutmut trampolines whose span holds it, a nested
+function selecting the function that holds it. A line of module level code selects no function.
+A head with no kept line gets neither mutation job, and its grade folds on its other gates.
+
+#### What a head needs
+
+| Input | Where | Without it |
+|---|---|---|
+| `[tool.mutmut]` `source_paths` | The head's `pyproject.toml` | The worker cannot trampoline its copy of the head, so the executor raises a `KeyError` before the runner starts |
+| A quoted `mutmut==<version>` requirement | The head's `pyproject.toml`, such as the `dev` extra of `[project.optional-dependencies]` | Expansion raises `<checkout>/pyproject.toml pins no mutmut version` |
+| A dependency manifest stored at or before the base | The lab store, fetched as [Test units](#test-units) describes | Expansion raises `no dependency manifest at or before <base>` before any mutation unit is built |
+| `CI_LAB_MIRROR_STORE` | The scheduler's [environment](#environment) | The scheduler does not start |
+| `CI_LAB_MUTATION_CACHE`, `CI_LAB_KILLERS`, `CI_LAB_MUTATION_BUDGET`, `CI_LAB_MUTATION_CAP` | The worker's [environment](#environment) | The worker does not start |
+
+This repository's `pyproject.toml` holds both:
+
+```toml
+[project.optional-dependencies]
+dev = [
+    # the other development requirements
+    "mutmut==3.6.0",
+]
+
+[tool.mutmut]
+source_paths = ["hooks/", "scripts/"]
+```
+
+A `ValueError`, `KeyError`, failed git command, YAML error or schema validation error raised in
+expansion makes the scheduler print
+`cannot expand <head>: <error>` and drop the head; nothing of it is graded.
+
+#### Unit keys
+
+A mutant unit's key is the sha256 of the JSON, object keys sorted, of a list holding:
+
+1. the function's mutmut name, such as `scripts.alpha.x_second`, or `scripts.sample.xǁBoxǁgrow`
+   for the method `grow` of the class `Box`;
+2. the function's source text, without the blank lines and comments above it;
+3. `expand_mutation.module_digest`: the syntax tree of the module's code outside its functions and
+   methods, so whitespace and comments do not count;
+4. `expand_mutation.runner_digest`: the mutmut pin and the sha256 of every tracked file under
+   `scripts/ci_mutation/`;
+5. the function's entry of `expand_mutation.covering`: test id to fingerprint;
+6. the unlisted test hashes described above.
+
+Its members are `<name>__mutmut_1` to `<name>__mutmut_<n>`, one per mutation mutmut creates in the
+function. A stats unit's key is `StoredStats.identity` of its test file at the head, over the
+fields the `stats` rows of [Inputs per kind](#inputs-per-kind) list, with the worker's options
+`-q -p no:cacheprovider`. The expander builds both keys itself, without the `digests` builders, so
+they are bare 64 hex digests rather than the `<kind>-v<schema>-<digest>` form the
+[digest specification](#digest-specification) describes. `scripts.ci_lab.objects.unit_path`
+refuses a key of that form with `ValueError: not a <kind> unit key: <key>`, so the
+[verdict store](#verdict-store) cannot hold a stats or mutant verdict yet.
+
+#### How a worker runs them
+
+Both kinds run through `scripts.ci_lab.executors.mutation` in the private trampolined copy,
+as [Worker executors](#worker-executors) describes:
+
+| Kind | Runner requests | Passes when |
+|---|---|---|
+| `stats` | One stats request over the unit's test file, with the copy as root and `CI_LAB_MUTATION_CACHE` | The runner exits 0 |
+| `mutant` | A stats request over every tracked `test_*.py` under `tests/` of the copy with the same cache, then a mutant request with the unit's mutant names, the tests those stats records show reaching its function with their seconds, `CI_LAB_KILLERS`, `CI_LAB_MUTATION_BUDGET` and `CI_LAB_MUTATION_CAP` | The runner exits 0 and every row reads `killed` |
+
+The stats request of a mutant unit reuses every record in `CI_LAB_MUTATION_CACHE` whose inputs
+still match, such as those the grade's stats units stored, and measures only the other test files.
+Each mutant row has a status:
+
+| Status | Meaning |
+|---|---|
+| `killed` | A test failed against the mutant |
+| `survived` | Every test the unit runs passed against the mutant |
+| `suspicious` | The mutant's child process exited with a code other than 0 or 1 |
+| `no tests` | No stats record shows a test reaching the function; every mutant of the unit reads it, at 0 seconds |
+
+A mutant unit's uploaded report holds `collection_seconds`, the `rows` as `name`, `status` and
+`seconds`, the unit's `seconds` and its cache lookups; a stats unit's report holds its `stats`
+records in place of the rows. A runner that exits non zero, such as on a
+collection error in the chosen tests, uploads no rows and fails the unit.
+
+#### Example
+
+A promotion head changes line 6 of `scripts/alpha.py`:
+
+```python
+def first():
+    return 1
+
+
+def second():
+    return 2
+```
+
+The base's manifest records `tests/test_beta.py::test_second` running `scripts/alpha.py::second`
+and the tests of `tests/test_alpha.py` running `first`. Beside its `unit` job the grade gets:
+
+| Job | Kind | Members |
+|---|---|---|
+| `mutation-stats` | `stats` | `tests/test_beta.py` |
+| `mutation` | `mutant` | `scripts.alpha.x_second__mutmut_1` to `scripts.alpha.x_second__mutmut_<n>` |
+
+`first` gets no unit because none of its lines changed, and `tests/test_alpha.py` no stats unit
+because none of its tests runs `second`. Had the head also deleted `tests/test_beta.py`, the grade
+would get no `mutation-stats` job and the same mutant members under a new key, since the deleted
+file changes the covering test's fingerprint; the unit's stats request then finds any test of the
+head that reaches `second`.
+
+#### Read a grade's mutation gates
+
+```bash
+curl -s "http://lab:8800/grades/$SHA" | jq '.grades[]
+  | select(.class == "promotion" or .class == "backfill")
+  | {run, conclusion, mutation: .checks.mutation, stats: .checks["mutation-stats"]}'
+```
+
+A check run is posted only for a gate with units, so a promotion or backfill grade without
+`mutation` and `mutation-stats` checks expanded no mutation unit. A `mutation` check that completes
+`failure` turns `required` red; the report its worker uploaded names each mutant and its status.
+
+#### Troubleshooting
+
+| Symptom | Cause | Check |
+|---|---|---|
+| A promotion grade has no `mutation` check | The head changes no kept line: only tests, docs, files outside `hooks/` and `scripts/`, docstrings, annotations or moved code | `git diff <base>...<head> -- hooks/ scripts/` |
+| A pull request or hotfix grade has no `mutation` check | Those classes never expand mutation units | The Actions mutation jobs grade a pull request into `dev`, as [Pull request mutation gate](mutation-gate.md) describes |
+| A merge group grade has no `mutation` check | Merge group grades hold no mutation gate, and the test workflow runs no mutation on `merge_group` | Nothing to fix |
+| `cannot expand <head>: <checkout>/pyproject.toml pins no mutmut version` | The head's `pyproject.toml` holds no quoted `mutmut==<version>` | Pin mutmut in the head's `pyproject.toml` |
+| `cannot expand <head>: no dependency manifest at or before <base>` | No manifest is stored or fetchable on the base's first parent chain | Read [Test units](#test-units) for how the lab fetches manifests |
+| `cannot expand <head>:` naming a failed `git worktree add` | The repository's store lacks the head commit, or `CI_LAB_MIRROR_STORE` is not writable | `git -C <store> cat-file -t <head>` and the folder's permissions |
+| Every row of a failed mutant unit reads `no tests` | No test of the head reaches the changed function | Add a test that calls the function |
+| Rows read `survived` | A test runs the function but none fails against the mutant | Assert on the behaviour the mutant changes |
+| Rows read `suspicious` | A mutant's child crashed or was killed | Read the unit's log |
+| A folder with a random name stays under `CI_LAB_MIRROR_STORE` | The scheduler stopped during an expansion, before its cleanup ran | Remove the folder; the `git worktree prune` that ends the next promotion or backfill expansion of that repository drops its registration |
 
 ### Grades of a commit
 
