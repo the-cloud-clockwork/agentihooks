@@ -14,7 +14,8 @@ agent only meant to list variable names.
 
 On 17 November three hive agent sessions printed credential values into their
 transcripts while listing environment names. The delivering pull request
-records that the guard was on in those pods and refused plain `env | grep` forms in the same sessions. These three commands, shortened here, passed:
+records that the guard was on in those pods and refused plain `env | grep`
+forms in the same sessions. These three commands, shortened here, passed:
 
 ```bash
 kubectl exec -n swarm-hive-001 $H -- sh -c 'env | grep -iE "ledger|swarm_url" | sed -E "s/(TOKEN|KEY|SECRET|PASS)[^=]*=.*/\1=<redacted>/"'
@@ -68,11 +69,12 @@ on a top level `Bash` command:
 
 - environment dumps (`env`, `printenv`, `export`, `export -p`, `declare -x`,
   `set`) that do not end in a count
-- `printenv` of a name that looks secret, and any part of the command that
-  runs `echo` or `printf` and names such a variable with `$` anywhere in it; a
-  name looks secret when it contains `PASSWORD`, `PASSWD`, `SECRET`, `TOKEN`,
-  `API_KEY`, `APIKEY`, `CREDENTIAL`, `PRIVATE_KEY`, `ACCESS_KEY`,
-  `SESSION_KEY` or `AUTH`, in any case
+- `printenv` of a name that looks secret, and any part of the command, split
+  at `&&`, `||`, `;` or a new line, that contains the word `echo` or `printf`
+  and names such a variable with `$` anywhere in it; a name looks secret when
+  it contains `PASSWORD`, `PASSWD`, `SECRET`, `TOKEN`, `API_KEY`, `APIKEY`,
+  `CREDENTIAL`, `PRIVATE_KEY`, `ACCESS_KEY`, `SESSION_KEY` or `AUTH`, in any
+  case
 - awk reads of `ENVIRON` values, described below
 - reads of `/proc/<pid>/environ`
 - reads of dotenv, shell startup and credential store files
