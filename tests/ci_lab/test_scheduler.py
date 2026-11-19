@@ -1381,7 +1381,7 @@ def test_the_exposition_counts_each_finished_attempts_core_seconds_once_in_its_m
     lab: Callable[..., Run],
 ) -> None:
     shared, solo = unit(1), unit(2)
-    run = lab({HEAD_A: plan({"lint": (shared, solo)})}, retries=Policy(failed=1))
+    run = lab({HEAD_A: plan({"lint": (shared, solo)})}, retries=Policy(failed=1), spend=LOW_BUDGET)
     run.push(HEAD_A)
     run.tick(1000)
     run.lab.expander.plans[HEAD_A] = plan({"lint": (shared,)})
@@ -1403,6 +1403,9 @@ def test_the_exposition_counts_each_finished_attempts_core_seconds_once_in_its_m
     assert 'ci_lab_core_seconds_total{class="queue"} 60.0' in text
     assert 'ci_lab_core_seconds_total{class="promotion"} 10.0' in text
     assert run.lab.client.smembers(scheduler.LIVE) == set()
+    spending = run.engine.spending
+    assert spending is not None
+    assert spending.spent() == pytest.approx(70.0 / 60)
 
 
 @pytest.mark.feature("lab-scheduler-metrics")
