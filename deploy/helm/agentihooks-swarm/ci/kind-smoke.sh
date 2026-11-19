@@ -667,7 +667,23 @@ for probe in startup liveness readiness; do
     printf 'the controller %s HTTP probe has path %s port %s host %s\n' "$probe" "$wired" "$port" "$host" >&2
     exit 1
   fi
-  kubectl exec "deployment/$release-controller" -c controller -- env PROBE_URL="http://127.0.0.1:8780$wired" PROBE_HOST="$host" python -c 'import os, urllib.request; request = urllib.request.Request(os.environ["PROBE_URL"], headers={"Host": os.environ["PROBE_HOST"]}); print(urllib.request.urlopen(request, timeout=8).read().decode())'
+  deadline=$((SECONDS + 60))
+  while true; do
+    if kubectl exec "deployment/$release-controller" -c controller -- env PROBE_URL="http://127.0.0.1:8780$wired" PROBE_HOST="$host" python -c 'import os, urllib.error, urllib.request
+request = urllib.request.Request(os.environ["PROBE_URL"], headers={"Host": os.environ["PROBE_HOST"]})
+try:
+    print(urllib.request.urlopen(request, timeout=8).read().decode())
+except urllib.error.HTTPError as error:
+    print(error.read().decode(), flush=True)
+    raise'; then
+      break
+    fi
+    if [[ "$probe" != readiness || "$SECONDS" -ge "$deadline" ]]; then
+      printf 'controller %s HTTP probe failed\n' "$probe" >&2
+      exit 1
+    fi
+    sleep 1
+  done
   printf 'controller %s HTTP probe passed\n' "$probe"
 done
 kubectl wait pod "${controller[@]}" --for=condition=Ready --timeout 2m

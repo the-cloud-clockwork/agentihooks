@@ -6405,6 +6405,16 @@
       ]
     },
     {
+      "id": "kind-controller-readiness",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/promo-44456673338-0",
+      "behaviour": "The kind proof waits within a deadline for transient controller readiness failures, fails persistent unavailability and fails startup or liveness errors immediately.",
+      "seam": "The deployed controller HTTP probe loop in the kind chart proof",
+      "tests": [
+        "tests/test_kind_controller_readiness.py::test_kind_probe_waits_only_for_readiness"
+      ]
+    },
+    {
       "id": "controller-busy-node-probes",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2429",
