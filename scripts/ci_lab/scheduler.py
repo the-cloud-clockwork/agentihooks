@@ -392,7 +392,8 @@ class Slot:
 @dataclass
 class State:
     """A grade's state: what it grades, its units by gate, whether a newer head superseded it, what it posted, the
-    id of each check run it posted and the grade ref a lab remote push wrote its head to, if any."""
+    id of each check run it posted by gate and of each check run the relay posted by check run name, and the grade ref
+    a lab remote push wrote its head to, if any."""
 
     run: str
     repo: str

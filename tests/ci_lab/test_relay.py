@@ -235,7 +235,21 @@ def test_a_green_grade_pushes_then_posts_every_check_run_completed_then_opens_th
         f"posted lab/required success on {HEAD}",
         f"opened {PULL}",
     ]
-    assert calls.saved == [{"lint": 1}, {"lint": 1, "unit": 2}, {"lint": 1, "unit": 2, "required": 3}]
+    assert calls.saved == [
+        {"lab/lint": 1},
+        {"lab/lint": 1, "lab/unit": 2},
+        {"lab/lint": 1, "lab/unit": 2, "lab/required": 3},
+    ]
+
+
+@pytest.mark.feature("lab-relay-check-run-restart")
+def test_a_relayed_grade_holding_the_scheduler_s_own_check_run_ids_still_posts_every_lab_check_run() -> None:
+    calls = Calls()
+    state = grade("success")
+    state.runs = {"lint": 41, "unit": 42, "required": 43}
+    relay.relay(state, BRANCH, calls.ports(), LAB)
+    assert [call[2] for call in calls.log if call[0] == "post"] == ["lint", "unit", "required"]
+    assert state.runs == {"lint": 41, "unit": 42, "required": 43, "lab/lint": 1, "lab/unit": 2, "lab/required": 3}
 
 
 def test_relayed_check_runs_carry_the_grade_run_its_units_and_the_lab_grade_page() -> None:
@@ -510,7 +524,7 @@ def test_a_restarted_relay_posts_no_second_completed_check_run(monkeypatch: pyte
     assert actions == [f"pushed {HEAD} to {BRANCH}", f"opened {PULL}"]
     stored = lab.grade(state.run)
     assert stored is not None
-    assert stored.runs == {"lint": 1, "unit": 2, "required": 3}
+    assert stored.runs == {"lab/lint": 1, "lab/unit": 2, "lab/required": 3}
     assert cast(Checks, again.ports.checks(SLUG)).runs == {
         (HEAD, "lab/lint", "run-7"): (1, "completed"),
         (HEAD, "lab/unit", "run-7"): (2, "completed"),

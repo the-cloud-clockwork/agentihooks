@@ -168,9 +168,10 @@ def output(state: State, check: str, lab: str) -> Output:
 
 def relay(state: State, branch: str, ports: Ports, lab: str) -> list[str]:
     """Relay a closed grade: a green one pushes the sha to the branch, posts every check run completed that is not
-    already, and opens the draft pull request, in that order; a red one relays nothing and names its failed units. A
-    check run the grade's state holds seeds the poster first and each new one is saved on the state as GitHub answers,
-    so a relay retried after a restart creates no second check run."""
+    already, and opens the draft pull request, in that order; a red one relays nothing and names its failed units. Each
+    check run the relay posts is saved on the grade's state under its check run name as GitHub answers, and seeds the
+    poster before the next relay of the grade, so a relay retried after a restart creates no second check run; the ids
+    the scheduler stores under gate names for its own posts never seed it."""
     if state.conclusion != SUCCESS:
         units = ", ".join(failed(state)) or "none"
         return [f"held {state.head} for {branch}: grade {state.run} is {state.conclusion}, failed units {units}"]
@@ -179,14 +180,15 @@ def relay(state: State, branch: str, ports: Ports, lab: str) -> list[str]:
     actions = [f"pushed {state.head} to {branch}"]
     poster = ports.checks(slug)
     for check, (_, conclusion) in state.posted.items():
-        if check in state.runs:
-            poster.seed(state.head, check, state.run, state.runs[check], "completed", False)
-        if poster.status((state.head, name(check, False), state.run)) is None:
-            state.runs[check] = poster.post(
+        relayed = name(check, False)
+        if relayed in state.runs:
+            poster.seed(state.head, check, state.run, state.runs[relayed], "completed", False)
+        if poster.status((state.head, relayed, state.run)) is None:
+            state.runs[relayed] = poster.post(
                 state.head, check, "completed", conclusion, output(state, check, lab), False
             )
             ports.save(state)
-            actions.append(f"posted {name(check, False)} {conclusion} on {state.head}")
+            actions.append(f"posted {relayed} {conclusion} on {state.head}")
     body = f"Relayed by the CI lab from grade {state.run}: {lab}/grades/{state.head}"
     actions.append(ports.pulls(slug).open(branch, branch, body))
     return actions
