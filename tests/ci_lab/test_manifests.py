@@ -5,7 +5,7 @@ import json
 import threading
 import zipfile
 from collections.abc import Mapping
-from concurrent.futures import wait
+from concurrent.futures import Future, wait
 from dataclasses import dataclass, field
 from typing import Any
 from unittest.mock import Mock, call
@@ -297,9 +297,9 @@ class Held:
         return answer
 
 
-def finished(background: manifests.Background) -> None:
-    """Wait until every fetch the background holds has finished."""
-    wait([future for _, future in background.fetches.values()])
+def finished(fetches: Mapping[tuple[str, str], tuple[float, Future[bytes | None]]]) -> None:
+    """Wait until every fetch a background holds has finished."""
+    wait([future for _, future in fetches.values()])
 
 
 @pytest.mark.feature("lab-manifest-fetch-off-pass")
@@ -314,7 +314,7 @@ def test_background_raises_pending_while_a_fetch_runs_and_answers_it_until_it_go
     with pytest.raises(manifests.FetchPending, match=f"^example/repo manifest of {OTHER} is still fetching$"):
         background("example/repo", OTHER)
     held.release.set()
-    finished(background)
+    finished(background.fetches)
     clock.now = 299.0
     assert background("example/repo", COMMIT) == packed(COMMIT)
     assert background("example/repo", COMMIT) == packed(COMMIT)
@@ -339,7 +339,7 @@ def test_background_answers_a_failed_fetch_once_and_fetches_it_again_on_the_next
         background("example/repo", COMMIT)
     assert isinstance(pending.value, FetchUnanswered)
     held.release.set()
-    finished(background)
+    finished(background.fetches)
     with pytest.raises(FetchUnanswered, match="^GET runs answered 502$"):
         background("example/repo", COMMIT)
     held.release.clear()
@@ -362,6 +362,6 @@ def test_background_runs_at_most_four_fetches_at_once() -> None:
     assert not held.started.acquire(timeout=0.2)
     held.release.set()
     assert held.started.acquire(timeout=WAIT_S)
-    finished(background)
+    finished(background.fetches)
     assert [background("example/repo", commit) for commit in commits] == [None] * 5
     assert sorted(held.asked) == [("example/repo", commit) for commit in commits]
