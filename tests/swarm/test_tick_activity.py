@@ -138,6 +138,7 @@ def test_the_step_hook_renews_again_once_its_interval_passed_or_the_clock_went_b
 def test_a_stolen_tick_lock_stops_every_step_from_the_first_renewal_after_the_interval(
     env: tuple[RedisStore, Any, Any],  # noqa: F811
 ) -> None:
+    assert tick_activity.RENEW_MS * 10 <= cli.TICK_LOCK_MS
     store = env[0]
     run("sw", "create", "--repo", "/repo")
     held = lease.acquire(store, "sw", commands.hive_id())
@@ -159,7 +160,6 @@ def test_a_stolen_tick_lock_stops_every_step_from_the_first_renewal_after_the_in
         with pytest.raises(SwarmError, match="the tick lock is stale"):
             renewal()
     assert tick_activity.read(store, "sw") == 1_000
-    assert tick_activity.RENEW_MS * 10 <= cli.TICK_LOCK_MS
 
 
 @pytest.mark.feature("swarm-tick-lock-renewal-interval")
@@ -175,3 +175,30 @@ def test_the_step_hook_renews_once_per_lease_tick_when_that_is_shorter_than_its_
         clock[0] = at
         renewal()
     assert renewals == [1_000, 6_000]
+
+
+@pytest.mark.feature("swarm-tick-lock-renewal-interval")
+def test_a_lease_another_controller_took_after_a_short_lease_tick_stops_the_next_step(
+    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = env[0]
+    run("sw", "create", "--repo", "/repo")
+    monkeypatch.setenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", "1")
+    clock = [1_000]
+    monkeypatch.setattr(lease, "now_ms", lambda saved: clock[0])
+    held = lease.acquire(store, "sw", commands.hive_id())
+    assert held is not None
+    token = controller.take_tick_lock(store, "sw", held, cli.TICK_LOCK_MS, "pass")
+    assert token is not None
+    renewal = tick_activity.Renewal(
+        store,
+        "sw",
+        lambda: controller.keep_tick(store, "sw", held, token, cli.TICK_LOCK_MS, "pass step"),
+        lambda: clock[0],
+    )
+    renewal()
+    clock[0] += lease.ttl_ms()
+    assert lease.acquire(store, "sw", "other") is not None
+    with pytest.raises(SwarmError, match="the controller lease is stale"):
+        renewal()
