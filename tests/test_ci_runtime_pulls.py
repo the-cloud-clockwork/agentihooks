@@ -437,6 +437,7 @@ def test_swarm_smoke_loads_saved_runtime_images_before_any_pull_reuses_them() ->
 @pytest.mark.parametrize("failure", ["", *runtime_images(), "build"])
 def test_the_smoke_build_overlaps_runtime_pulls_and_preserves_failures(tmp_path: Path, failure: str) -> None:
     images = runtime_images()
+    assert images
     log = tmp_path / "docker.log"
     tools = tools_with(
         tmp_path,
