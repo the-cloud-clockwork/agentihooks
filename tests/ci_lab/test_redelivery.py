@@ -23,9 +23,10 @@ def test_a_worker_killed_mid_unit_is_redelivered_once_and_its_verdict_posts_once
     killed = run.lease(ttl_ms=100)[0]
     run.tick(1099)
     assert run.tick(1100) == [f"reaped {killed.job} pending"]
-    assert run.leases().heartbeat(killed.job, killed.token) is None
     (second,) = run.leases(ttl_ms=100).lease("worker-2", 1, frozenset(), 0)
     assert second.job == killed.job
+    assert run.leases().heartbeat(killed.job, killed.token) is None
+    assert run.leases(ttl_ms=100).heartbeat(second.job, second.token) == 1200
     assert not run.leases().complete(killed.job, killed.token, "passed")
     run.finish(second, "passed", {})
     run.tick(1200)
@@ -36,4 +37,5 @@ def test_a_worker_killed_mid_unit_is_redelivered_once_and_its_verdict_posts_once
     assert run.store.get(item.kind, item.key) == Verdict(item.kind, item.key, True, False, 0.0)
     text = scrape(run, 1200)
     assert "\nci_lab_units_redelivered_total 1.0\n" in text
+    assert "\n# TYPE ci_lab_units_lost_total counter\n" in text
     assert "\nci_lab_units_lost_total " not in text
