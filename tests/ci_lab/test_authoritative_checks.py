@@ -9,8 +9,8 @@ import requests
 
 from scripts.ci_lab import checks, scheduler
 from scripts.ci_lab.digests import Toolchain
-from scripts.ci_lab.intake import GradeRequest
-from scripts.ci_lab.units import Priority
+from scripts.ci_lab.objects import LocalObjects
+from scripts.ci_lab.webhooks import HeadEvent
 from scripts.dep_manifest import _git
 from tests.ci_lab.test_scheduler import (
     ACTOR,
@@ -18,47 +18,69 @@ from tests.ci_lab.test_scheduler import (
     DELIVERY,
     HEAD_A,
     SLUG,
+    FakeKube,
     FixtureToken,
+    Inbox,
+    Poster,
     Run,
     _commit,
+    _gate,
     _no_tests,
     _unknown,
+    fake_redis,
     github,
     plan,
-    pull_plan,
     restarted,
     unit,
 )
 from tests.ci_lab.test_scheduler import lab as lab
 from tests.ci_lab.test_scheduler import origin as origin
 
-LISTED = frozenset({"lint"})
+LISTING = json.dumps({"lab": {**DELIVERY["lab"], "authoritative": ["lint"]}})
+
+
+def graded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repo: Path, heads: list[tuple[str, str, str]]
+) -> dict[str, list[str]]:
+    gates = [_gate("size", "lint", ("src",), ()), _gate("pages", "docs", ("docs",), ())]
+    monkeypatch.setattr(scheduler, "discover", lambda workflow, registry, reusable: gates)
+    node = tmp_path / "node"
+    _git(tmp_path, "init", "-q", "--bare", str(node))
+    toolchain = Toolchain("3.12", {}, "", "", "", {})
+    expander = scheduler.MirrorExpander(node, tmp_path / "stores", toolchain, _no_tests, _unknown)
+    inbox, poster = Inbox(), Poster()
+    ports = scheduler.Ports(inbox, expander, lambda _repo: poster, frozenset[str], FakeKube())
+    settings = scheduler.Settings(frozenset({ACTOR}), 0)
+    engine = scheduler.Scheduler(fake_redis(), LocalObjects(tmp_path / "objects"), ports, settings)
+    for lane, (event, head, base) in enumerate(heads):
+        pushed = HeadEvent(event, f"file://{repo}", head, base, ACTOR, "synchronize")
+        inbox.pending.append(scheduler.Head(pushed, str(lane), ""))
+    engine.tick(1000)
+    names: dict[str, list[str]] = {}
+    for head, gate, _, _, _, shadow in poster.posts:
+        names.setdefault(head, []).append(checks.name(gate, shadow))
+    return names
 
 
 @pytest.mark.feature("lab-authoritative-check-names")
-def test_a_merge_group_grade_takes_the_queue_list_and_a_pull_request_or_hotfix_grade_the_lab_list() -> None:
-    block = {"authoritative": ["lint"], "queue": {"full_suite_entries": 5, "authoritative": ["unit"]}}
-    for tier in (Priority.HOTFIX, Priority.PULL_REQUEST):
-        assert scheduler.authoritative_gates(block, tier) == LISTED
-    assert scheduler.authoritative_gates(block, Priority.QUEUE) == frozenset({"unit"})
-    unlisted = {"authoritative": ["lint"], "queue": {"full_suite_entries": 5}}
-    assert scheduler.authoritative_gates(unlisted, Priority.QUEUE) == frozenset()
-    assert scheduler.authoritative_gates({"authoritative": ["lint"]}, Priority.QUEUE) == frozenset()
-
-
-@pytest.mark.feature("lab-authoritative-check-names")
-def test_a_gate_the_grade_lists_as_authoritative_posts_as_lab_and_every_other_check_as_lab_shadow(
-    lab: Callable[..., Run],
+def test_a_pull_request_grade_posts_the_gates_its_base_lists_as_authoritative_as_lab_and_the_rest_as_lab_shadow(
+    tmp_path: Path, origin: tuple[Path, str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    lint, docs = unit(1), unit(2)
-    run = lab({HEAD_A: replace(pull_plan({"lint": (lint,), "docs": (docs,)}), authoritative=LISTED)})
-    run.cache(lint)
-    run.cache(docs)
-    run.push(HEAD_A, event="pull_request", action="synchronize")
-    run.tick(1000)
-    names = [(gate, checks.name(gate, shadow)) for _, gate, _, _, _, shadow in run.lab.poster.posts]
-    assert names == [("lint", "lab/lint"), ("docs", "lab-shadow/docs"), (scheduler.REQUIRED, "lab-shadow/required")]
-    assert run.grade(HEAD_A).authoritative == ["lint"]
+    repo, _, _ = origin
+    listing = _commit(repo, {"delivery.yaml": LISTING})
+    head = _commit(repo, {"src/a.py": "a = 3\n", "docs/c.md": "d\n"})
+    names = graded(tmp_path, monkeypatch, repo, [("pull_request", head, listing)])
+    assert names == {head: ["lab/lint", "lab-shadow/docs", "lab-shadow/required"]}
+
+
+@pytest.mark.feature("lab-authoritative-check-names")
+def test_a_head_listing_a_gate_itself_and_a_dev_push_grade_post_every_check_as_lab_shadow(
+    tmp_path: Path, origin: tuple[Path, str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, base, _ = origin
+    listing = _commit(repo, {"delivery.yaml": LISTING, "src/a.py": "a = 3\n", "docs/c.md": "d\n"})
+    names = graded(tmp_path, monkeypatch, repo, [("pull_request", listing, base), ("push", listing, base)])
+    assert names == {listing: ["lab-shadow/lint", "lab-shadow/docs", "lab-shadow/required"] * 2}
 
 
 @pytest.mark.feature("lab-authoritative-check-names")
@@ -75,7 +97,7 @@ def test_a_restarted_scheduler_seeds_each_check_run_under_the_name_the_grade_ope
 
     monkeypatch.setattr(requests, "request", github(calls))
     monkeypatch.setattr(checks.Checks, "seed", spy)
-    listed = replace(plan({"lint": (unit(1),)}), authoritative=LISTED)
+    listed = replace(plan({"lint": (unit(1),)}), authoritative=frozenset({"lint"}))
     first = restarted(lab({HEAD_A: listed}), checks.Checks(SLUG, FixtureToken()))
     first.push(HEAD_A, event="pull_request", action="synchronize")
     first.tick(1000)
@@ -93,23 +115,3 @@ def test_a_restarted_scheduler_seeds_each_check_run_under_the_name_the_grade_ope
         (HEAD_A, "lint", grade.run, 1, "queued", False),
         (HEAD_A, scheduler.REQUIRED, grade.run, 2, "queued", True),
     ]
-
-
-@pytest.mark.feature("lab-authoritative-check-names")
-def test_the_mirror_expander_takes_the_authoritative_gates_of_the_grader_delivery_for_the_grade_class(
-    tmp_path: Path, origin: tuple[Path, str, str]
-) -> None:
-    repo, base, _ = origin
-    listing = _commit(repo, {"delivery.yaml": json.dumps({"lab": {**DELIVERY["lab"], "authoritative": ["lint"]}})})
-    head = _commit(repo, {"src/a.py": "a = 3\n"})
-    node = tmp_path / "node"
-    _git(tmp_path, "init", "-q", "--bare", str(node))
-    toolchain = Toolchain("3.12", {}, "", "", "", {})
-    expander = scheduler.MirrorExpander(node, tmp_path / "stores", toolchain, _no_tests, _unknown)
-
-    def gates(head: str, base: str, tier: Priority) -> frozenset[str]:
-        return expander.expand(GradeRequest(f"file://{repo}", head, base, tier, ACTOR, False)).authoritative
-
-    assert gates(head, listing, Priority.PULL_REQUEST) == gates(head, listing, Priority.HOTFIX) == LISTED
-    assert gates(listing, base, Priority.PULL_REQUEST) == frozenset()
-    assert gates(listing, base, Priority.PROMOTION) == frozenset()
