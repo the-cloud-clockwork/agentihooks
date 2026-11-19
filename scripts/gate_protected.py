@@ -1,4 +1,5 @@
 import argparse
+import copy
 import json
 import re
 import subprocess
@@ -221,6 +222,37 @@ def _reads_needs_freely(condition: str) -> bool:
     return re.search(r"(?<![\w.-])needs\b(?!\s*(?:\.\s*\w|\[\s*''\s*\]))", bare, flags=re.IGNORECASE) is not None
 
 
+def _merge_group_lab_job(job: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not job or job.get("if") != "github.event_name == 'pull_request'":
+        return job
+    rendering = copy.deepcopy(job)
+    rendering["if"] = "github.event_name == 'pull_request' || github.event_name == 'merge_group'"
+    changes: list[str] = []
+    for step in rendering.get("steps", []):
+        if (
+            step.get("uses") == "actions/checkout@v4"
+            and step.get("with", {}).get("ref") == "${{ github.event.pull_request.base.sha }}"
+        ):
+            step["with"]["ref"] = "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}"
+            changes.append("authority")
+        elif step.get("id") == "authority" and "python -m scripts.ci_lab_verdict authority . pull_request" in step.get(
+            "run", ""
+        ):
+            step.setdefault("env", {})["EVENT"] = "${{ github.event_name }}"
+            step["run"] = step["run"].replace(
+                "python -m scripts.ci_lab_verdict authority . pull_request",
+                'python -m scripts.ci_lab_verdict authority . "$EVENT"',
+            )
+            changes.append("checkout")
+        elif (
+            step.get("id") == "verdict"
+            and step.get("env", {}).get("HEAD") == "${{ github.event.pull_request.head.sha }}"
+        ):
+            step["env"]["HEAD"] = "${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}"
+            changes.append("verdict")
+    return rendering if changes == ["checkout", "authority", "verdict"] else job
+
+
 def _lab_problems(base: dict[str, Any], head: dict[str, Any], gate: dict[str, Any]) -> list[str]:
     """Refuse a lab verdict job or a gate condition off its reviewed form.
 
@@ -229,7 +261,7 @@ def _lab_problems(base: dict[str, Any], head: dict[str, Any], gate: dict[str, An
     clause.
     """
     problems: list[str] = []
-    if head.get(LAB_VERDICT_JOB) != base.get(LAB_VERDICT_JOB):
+    if head.get(LAB_VERDICT_JOB) not in (base.get(LAB_VERDICT_JOB), _merge_group_lab_job(base.get(LAB_VERDICT_JOB))):
         problems.append(
             "The head's lab verdict job differs from the reviewed rendering; the protected branch grades with its own."
         )

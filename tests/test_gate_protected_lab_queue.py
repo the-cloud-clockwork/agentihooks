@@ -4,6 +4,7 @@ from typing import Any
 import pytest
 
 from scripts import gate_protected
+from tests.test_gate_protected import _lab_aggregators
 
 pytestmark = [pytest.mark.unit, pytest.mark.feature("lab-verdict-merge-group-rendering")]
 
@@ -51,7 +52,10 @@ def _queue(job: dict[str, Any]) -> dict[str, Any]:
 
 
 def _problems(base: dict[str, Any], head: dict[str, Any]) -> list[str]:
-    return gate_protected._lab_problems({"lab-verdict": base}, {"lab-verdict": head}, {"needs": []})
+    base_workflow, head_workflow = _lab_aggregators()
+    base_workflow["jobs"]["lab-verdict"] = base
+    head_workflow["jobs"]["lab-verdict"] = head
+    return gate_protected.grade({"test.yml": base_workflow}, {}, {"test.yml": head_workflow}, {})
 
 
 def test_the_exact_merge_group_lab_rendering_is_accepted_without_changing_the_base() -> None:
