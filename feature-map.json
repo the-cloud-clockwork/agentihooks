@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "swarm-refusal-size-warnings",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-phase-limit-scope",
+      "behaviour": "A refused swarm write prints each overview or phase size warning on its own warning line and keeps those diagnostics out of its refusal reason. The client preserves the missing focus target refusal and falls back to rejected operation identifiers when no refusal reason remains. Accepted replies remain accepted and unchanged.",
+      "seam": "LedgerClient.freeze and LedgerClient._call receiving a rejected or accepted ledger operation reply",
+      "tests": [
+        "tests/swarm/test_ledger_refusals.py::test_a_refused_focus_reports_size_warnings_separately",
+        "tests/swarm/test_ledger_refusals.py::test_size_warnings_do_not_refuse_an_accepted_swarm_write"
+      ]
+    },
+    {
       "id": "credential-guard-reads-heredoc-commands",
       "origin": "regression",
       "ordered_at": "2026-11-19",
@@ -636,6 +647,17 @@
         "tests/hub/test_admission.py::test_a_plan_task_steering_carries_its_phase_evidence",
         "tests/hub/test_admission.py::test_the_seeds_are_built_from_the_ledger_document_the_offer_was_read_against",
         "tests/hive/test_lanes.py::test_a_lane_spoke_writes_the_carried_work_folder_on_its_own_hive_before_the_spawn"
+      ]
+    },
+    {
+      "id": "controller-work-folder-admitted-hive",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-folder-mirror-hive",
+      "behaviour": "Controller status publication and task folder mirroring read the synced copy from the hive the hub admitted when an execution has no runtime target. An explicit host target keeps precedence, and executions admitted or explicitly targeted to the controller keep their local work folders.",
+      "seam": "command_runner.publish, ledger_workspace.published and ledger_workspace.mirror",
+      "tests": [
+        "tests/hive/test_prompt_transport.py::test_controller_status_publishes_the_execution_hives_work_folder",
+        "tests/hive/test_prompt_transport.py::test_controller_mirrors_the_execution_hives_work_folder"
       ]
     },
     {
@@ -4493,12 +4515,25 @@
       "id": "lab-verdict-outside-to-manifest",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-verdict-outside-to-manifest",
-      "behaviour": "A graded lab job whose uploaded report lists files its batch opened outside the manifest writes one note per batch tests and sorted list into its repository's manifest folder, whatever its graded outcome. The next stored manifest read that finds or fetches a packed manifest merges every note into the outside list of each test record it names, sorted and without duplicates, skipping tests the manifest lacks, so the following test unit key changes when one of those files changes, and a change to one of those files invalidates the tests whose records list it. A report without the list or with an empty list writes no note.",
+      "behaviour": "A graded lab job whose uploaded report lists files its batch opened outside the manifest writes one note per batch tests and sorted list into its repository's manifest folder under the manifest commit its grade keyed on, whatever its graded outcome. The next stored manifest read of that commit merges each of its notes into the outside list of each test record it names, sorted and without duplicates, skipping tests the manifest lacks, so the following test unit key changes when one of those files changes, and a change to one of those files invalidates the tests whose records list it. A report without the list or with an empty list writes no note.",
       "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis and the local object store, scripts.ci_lab.scheduler.StoredManifests, scripts.ci_lab.expand_tests.units, scripts.ci_lab.interaction.invalidated and tests.dep_manifest.invalidated",
       "tests": [
         "tests/ci_lab/test_scheduler.py::test_a_test_verdict_outside_list_reaches_the_stored_records_and_the_following_key",
         "tests/ci_lab/test_scheduler.py::test_a_note_joins_the_outside_list_a_stored_or_fetched_record_already_holds",
         "tests/test_dep_manifest.py::test_a_change_to_a_file_a_test_opened_outside_its_record_invalidates_that_test"
+      ]
+    },
+    {
+      "id": "lab-outside-notes-per-commit",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-outside-notes-per-commit",
+      "behaviour": "A lab grade keeps the dev commit of the dependency manifest its test units were keyed on, and a graded job's outside note is stored under that commit in its repository's manifest folder. A stored manifest read merges only the notes of the returned manifest's commit, so a note written while grades keyed on an older manifest leaves the outside lists and test unit keys of a newer commit unchanged. Every read removes the notes of commits with no stored manifest, including notes written before notes carried a commit, and keeps the notes of stored commits and of other repositories.",
+      "seam": "scripts.ci_lab.scheduler.MirrorExpander.expand, scripts.ci_lab.scheduler.Scheduler.tick over fakeredis and the local object store, scripts.ci_lab.scheduler.StoredManifests and scripts.ci_lab.expand_tests.units",
+      "tests": [
+        "tests/ci_lab/test_scheduler.py::test_a_note_of_an_older_manifest_commit_leaves_a_newer_commit_key_unchanged",
+        "tests/ci_lab/test_scheduler.py::test_a_manifest_read_removes_the_notes_of_commits_with_no_stored_manifest",
+        "tests/ci_lab/test_scheduler.py::test_a_grade_that_keyed_no_manifest_writes_no_outside_note",
+        "tests/ci_lab/test_store.py::test_objects_remove_one_path_and_take_a_missing_one_as_gone"
       ]
     },
     {
@@ -6437,6 +6472,17 @@
       ]
     },
     {
+      "id": "kind-controller-readiness",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/promo-44456673338-0",
+      "behaviour": "The kind proof waits within a deadline for transient controller readiness failures, fails persistent unavailability and fails startup or liveness errors immediately.",
+      "seam": "The deployed controller HTTP probe loop in the kind chart proof",
+      "tests": [
+        "tests/test_kind_controller_readiness.py::test_kind_probe_waits_only_for_readiness",
+        "tests/test_kind_controller_readiness.py::test_kind_probe_keeps_the_failed_http_response_body"
+      ]
+    },
+    {
       "id": "controller-busy-node-probes",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2429",
@@ -8183,6 +8229,22 @@
       ]
     },
     {
+      "id": "hive-set-drain-stops-lane-spokes",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-offer-single-hive",
+      "behaviour": "A hive whose record says draining, as agentihooks hive set draining=yes writes it, takes no new agents through its lane spokes, just as a hive whose pod member is draining: the lane loop beats presence and polls no spoke, so the hub never refuses it an offer as draining and the spoke never terms the only offer copy before a hive with room sees it; a hive drained neither way, or with only another pod's member draining, keeps polling.",
+      "seam": "scripts.hive.lanes.draining read by scripts.hive.lanes.run",
+      "tests": [
+        "tests/hive/test_lanes.py::test_a_hive_drained_as_a_whole_or_by_this_pods_member_takes_no_new_agents",
+        "tests/hive/test_lanes.py::test_a_store_without_redis_reads_no_hive_record_and_is_not_draining",
+        "tests/hive/test_lanes.py::test_the_lane_loop_beats_and_polls_no_spoke_on_a_hive_drained_with_hive_set",
+        "tests/hive/test_lanes.py::test_the_lane_loop_polls_its_spokes_while_only_another_pods_member_drains"
+      ],
+      "rules": [
+        "lane-drain-reads-member-only"
+      ]
+    },
+    {
       "id": "monitor-counts-registered-seats",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2506",
@@ -8879,6 +8941,17 @@
       "tests": [
         "tests/ci_lab/test_scheduler.py::test_a_restarted_scheduler_advances_the_stored_check_runs_with_no_new_create",
         "tests/ci_lab/test_checks.py::test_a_seeded_check_run_is_advanced_in_place_from_its_seeded_status"
+      ]
+    },
+    {
+      "id": "lab-relay-check-run-restart",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-relay-run-id-seed",
+      "behaviour": "The CI lab relay posts each relayed check run of a grade ref head once across a restart of the scheduler process that hosts it: it saves the id of each check run it creates on the grade's state in Redis under that check run's name as soon as GitHub answers, and before it tests whether a check run was posted it seeds the repository's poster with the id it saved under that name, so a relay retried after a restart, such as one whose pull request call failed after its posts, opens no second completed check run; the ids the scheduler stores under gate names for its own posts never seed it, so a grade the scheduler posted shadow check runs for still gets every lab check run.",
+      "seam": "scripts.ci_lab.relay.build over a real scripts.ci_lab.scheduler.Scheduler on fakeredis with a real scripts.ci_lab.checks.Checks on mocked requests, built again over the same Redis as a restart, ticked through scripts.ci_lab.relay.Relay.tick, and scripts.ci_lab.relay.relay over recording ports",
+      "tests": [
+        "tests/ci_lab/test_relay.py::test_a_restarted_relay_posts_no_second_completed_check_run",
+        "tests/ci_lab/test_relay.py::test_a_relayed_grade_holding_the_scheduler_s_own_check_run_ids_still_posts_every_lab_check_run"
       ]
     },
     {

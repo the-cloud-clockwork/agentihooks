@@ -1328,9 +1328,10 @@ key; the builders are pure and read no file, clock or network.
    default; a newer head of the lane restarts it and a hotfix waits for none.
 3. Expansion reads the grader's test workflow and input key registry and the head and base trees
    from the git mirror with `git ls-tree` and `git show`, never a checkout, and keys one static
-   unit per gate step. A merge group, promotion or backfill head also gets the `unit` job's test
-   units, described in [Test units](#test-units), and a promotion or backfill head its mutation
-   units, described in [Mutation units](#mutation-units).
+   unit per gate step, described in [Static units](#static-units). A merge group, promotion or
+   backfill head also gets the `unit` job's test units, described in [Test units](#test-units),
+   and a promotion or backfill head its mutation units, described in
+   [Mutation units](#mutation-units).
 4. The verdict store answers what it can. A newer head of the lane drops the older head's pending
    units, carries its leased and finished jobs and cancels its check runs. A push grade of a tree a
    merge group grade passed carries that grade's units for every gate both grades hold: the unit
@@ -1377,7 +1378,11 @@ prints the relay's actions after the pass's own. `main` builds the relay once at
 lab heads consumer, the `ci-lab-relay` durable filtered to `ci.lab.head.notice`, which bus
 provisioning creates beside the scheduler's `ci-lab-scheduler` durable. A green grade of a pushed
 `refs/grade/<task>` head with a `branch` option then reaches that branch, its check runs and its
-draft pull request.
+draft pull request. The relay keeps the id of each check run it creates on the grade's state under
+the check run's name as GitHub answers and seeds its poster with those ids before it posts, so a
+relay retried after the service restarts, such as one whose pull request call failed after its
+posts, creates no second completed check run. The ids the scheduler keeps under gate names for its
+own posts, such as shadow check runs of the same grade, never seed the relay.
 
 A grade's state is one JSON document at `agentihooks-ci:grade:<run>`, where `<run>` is the grade
 key of the repository, head, base, class and grader revision. Live grades sit in
@@ -1390,6 +1395,148 @@ Known limits: a lab head event carries no branch yet, so a head's lane is its ow
 head supersedes nothing until intake records the branch; expansion keys static gates, test units
 and mutation units only, so the other jobs the lab does not run yet pass by their frame; a
 rerequested grade reuses the finished jobs of its own head.
+
+### Static units
+
+Expansion keys one `static` unit per gate step of the static jobs of the grader revision's Tests
+workflow: `lint`, `type-gate` and `semgrep`, the jobs `scripts.ci_lab.static_gates.STATIC_JOBS`
+names. The grader revision is the head of a promotion or backfill grade and the base of every
+other grade. `scripts.ci_lab.scheduler.MirrorExpander.expand` reads three inputs at that
+revision from the git mirror and passes them to `scripts.ci_lab.static_gates.discover`:
+
+| Input | Read with | Passed to `discover` as |
+|---|---|---|
+| `.github/workflows/test.yml` | `git show <grader>:.github/workflows/test.yml` | The workflow text |
+| `.github/input-keys.json` | `git show <grader>:.github/input-keys.json` | The input key registry |
+| Every `.yml` and `.yaml` file directly in `.github/workflows` | `MirrorExpander._workflows`: `git ls-tree -r` of the grader revision, then one `git cat-file --batch` for the matching blobs | The reusable workflows: each file parsed with `yaml.safe_load`, an empty file as `{}`, keyed by file name |
+
+The reusable workflows hold the same files, keys and values as `scripts.ci_wiring.load` returns
+for a checked out tree. A file in a folder below `.github/workflows` is not read. GitHub does not
+run a reusable workflow from such a folder either.
+
+`discover` walks the static jobs in that order and labels their steps:
+
+- A job with its own `steps` labels them with the job name, such as `lint`.
+- A job with `uses: ./.github/workflows/<file>` looks `<file>` up in the reusable workflows. It
+  labels the steps of each job of that workflow `<job>/<reusable job>`. The Tests workflow's
+  `semgrep` job calls `semgrep.yml`, whose jobs are `scan`, `feature-tests` and `charts`.
+
+A step is a gate step when it has a `run` that calls a tool `static_gates.TOOLS` names or runs
+`python` on any module or script other than `basedpyright`, `ruff` and `venv`
+(`static_gates.UNGATED_MODULES`). Its gate name is the label, a `/`, then the step's `id`, or
+else its name (or the first line of its run) in lower case words joined by `-`, such as
+`semgrep/scan/fail-on-findings-new-against-the-base`. Each unit names one gate step, and
+its key is `static_key` over the gate name, the head files under the gate's registry paths, the
+base files under its base paths, the grader revision and the toolchain (see
+[Inputs per kind](#inputs-per-kind)). The plan groups units by label, so each label is one gate
+with its own check run.
+
+On dev, `python -m scripts.ci_lab.static_gates --root .` lists 38 gate steps:
+
+| Gate | Steps from | Gate steps |
+|---|---|---|
+| `lint` | The `lint` job of `test.yml` | 27 |
+| `type-gate` | The `type-gate` job of `test.yml` | 2 |
+| `semgrep/scan` | The `scan` job of `semgrep.yml` | 4 |
+| `semgrep/feature-tests` | The `feature-tests` job of `semgrep.yml` | 2 |
+| `semgrep/charts` | The `charts` job of `semgrep.yml` | 3 |
+
+Before pull request
+[#11978](https://github.com/the-cloud-clockwork/agentihooks/pull/11978), the expander passed only
+the workflow and the registry. The `semgrep` job's call to `semgrep.yml` then failed discovery
+with `semgrep uses ./.github/workflows/semgrep.yml, which was not given`, so every agentihooks head
+was dropped as `cannot expand` and the lab graded none at any class.
+
+#### Which grades run static units
+
+[Expansion frames a head by its class](#scheduler-loop), and the frames keep these static gates:
+
+| Class | Static gates with units |
+|---|---|
+| Pull request, hotfix | `lint` and `type-gate`. `semgrep` is framed as a gate without units, which passes. The pull request rules name the job `semgrep` (`scheduler.PULL_REQUIRED`), while its units sit under the `semgrep/scan`, `semgrep/feature-tests` and `semgrep/charts` labels |
+| Merge group | None: the queue rules require no static job |
+| Promotion, backfill | All five |
+
+#### A head that cannot expand
+
+The pass that releases a head from its lane catches a `ValueError`, `KeyError`,
+`yaml.YAMLError`, `jsonschema.ValidationError` or failed git command from expansion. It records
+the action `cannot expand <head>: <error>` and drops the head: the head has already left
+`agentihooks-ci:waiting` and is not put back, so it gets no grade and no check runs. A manifest
+fetch that raises `FetchPending` or `FetchUnanswered` holds the head again instead, as
+`holding <head>: <error>`; [Test units](#test-units) describes both. The scheduler service prints
+each action on its own line:
+
+```bash
+kubectl logs -n ci-lab deploy/ci-lab-scheduler | grep 'cannot expand'
+```
+
+| Text after `cannot expand <head>:` | Cause |
+|---|---|
+| `<job> uses <uses>, which was not given` | A static job calls a workflow that is not a file directly in `.github/workflows` at the grader revision, such as a workflow of another repository (`<owner>/<repo>/.github/workflows/<file>@<ref>`), or the caller passed no reusable workflows |
+| `<gate> names two gate steps` | Two gate steps resolve to the same gate name |
+| `'steps'` or `'jobs'` | The called workflow has no `jobs`, or one of its jobs has no `steps`, such as a job that calls another workflow |
+| A YAML parse error | A workflow file directly in `.github/workflows` at the grader revision does not parse, even one that no static job calls |
+
+#### The worker reads the same workflows
+
+The static executor finds its gate again on the worker. `scripts.ci_lab.executors.gate(grader_tree,
+name)` runs `discover` over the grader tree it cut for the lease, with `ci_wiring.load(grader_tree)`
+as the reusable workflows, and returns the gate step the unit names. When that discovery raises,
+or the grader workflow has no gate step of that name, the unit ends with no outcome. The worker
+prints `ci-lab worker: unit <job> crashed: <error>` to its standard error and the lease expires,
+so the unit follows the expired lease rule of step 6 of the [Scheduler loop](#scheduler-loop).
+
+#### Limitations
+
+- Only workflows directly in the grader's `.github/workflows` resolve. A static job that calls a
+  workflow of another repository cannot expand.
+- A reusable workflow resolves one level deep. A job of the called workflow that calls a third
+  workflow has no `steps`, and its head cannot expand.
+- Every expansion parses each workflow file directly in the folder, so one file that does not
+  parse drops every head the lab grades at that grader revision.
+- Pull request and hotfix grades run no `semgrep` units, as the frame table above shows.
+
+#### Verify
+
+List the gate labels discovery finds in a checkout, which match the keys a promotion grade's plan
+holds:
+
+```bash
+python -m scripts.ci_lab.static_gates --root . \
+  | python -c 'import json,sys; print(sorted({json.loads(line)["job"] for line in sys.stdin}))'
+```
+
+On dev it prints `['lint', 'semgrep/charts', 'semgrep/feature-tests', 'semgrep/scan', 'type-gate']`.
+The `checks` of a promotion grade hold one key per gate with units, so the five static gates
+appear there beside `unit`, the mutation gates the head has units for and `required`:
+
+```bash
+curl -s http://lab:8800/grades/<sha> | jq '.grades[] | select(.class == "promotion") | .checks | keys'
+```
+
+| Guard | What it holds |
+|---|---|
+| `tests/ci_lab/test_scheduler.py::test_the_mirror_expander_expands_the_real_tests_workflow_with_its_reusable_workflows` | `MirrorExpander.expand` over a git origin holding the repository's real workflows and registry keys one unit per gate step that `discover` lists, under the same labels, `semgrep/scan`, `semgrep/feature-tests` and `semgrep/charts` included |
+| `tests/ci_lab/test_executors.py::test_gate_returns_a_gate_of_a_reusable_workflow_the_real_tests_workflow_calls` | `executors.gate` over the repository tree returns a `semgrep/` gate step equal to the one discovery lists |
+| `tests/ci_lab/test_scheduler.py::test_the_mirror_expander_keys_static_gates_from_git_objects_without_a_checkout` | The reusable workflows hold only the `.yml` and `.yaml` files directly in the folder, an empty file as `{}` |
+
+The first two tests map to the `lab-reusable-workflow-gates` entry of `feature-map.json`. Before
+the fix, both failed with `ValueError: semgrep uses ./.github/workflows/semgrep.yml, which was not
+given` in
+[Tests run 44270664482](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/44270664482/job/134686811797),
+and both passed in
+[Tests run 44272811567](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/44272811567).
+
+#### Troubleshooting
+
+| Symptom | Cause | Check |
+|---|---|---|
+| A head gets no grade and no check runs, and the scheduler log reads `cannot expand <head>: semgrep uses ./.github/workflows/semgrep.yml, which was not given` | The scheduler runs a release older than pull request #11978, so its expander passes no reusable workflows | `kubectl -n ci-lab get deploy ci-lab-scheduler -o jsonpath='{.spec.template.spec.containers[0].image}'` names a release that carries the fix |
+| The same text names a workflow you just added to a static job | The called file is in a folder below `.github/workflows`, or not on the grader revision yet. A pull request, hotfix or merge group grade reads the base, so a new workflow counts only once the base holds it | `git ls-tree --name-only <grader> .github/workflows/` lists the file |
+| Every head graded at one grader revision is dropped with a YAML error | A workflow file directly in `.github/workflows` at that revision does not parse | In a checkout of that revision, `python -c 'import pathlib,yaml; [print(p) or yaml.safe_load(p.read_text()) for p in sorted(pathlib.Path(".github/workflows").glob("*.y*ml"))]'` prints each file before parsing it, so the last name printed before the traceback is the file |
+| The worker's standard error reads `ci-lab worker: unit <job> crashed: ValueError('semgrep uses ./.github/workflows/semgrep.yml, which was not given')` | The worker runs a release older than the fix while the scheduler expands with it | The `ci-lab-worker` image, as for the scheduler; the unit's lease expires and follows step 6 of the [Scheduler loop](#scheduler-loop) |
+| A pull request grade passes `semgrep` with no units | The pull request frame names the job `semgrep` while its units sit under the `semgrep/` labels | Expected today; see [Which grades run static units](#which-grades-run-static-units) |
 
 ### Test units
 
@@ -1435,21 +1582,26 @@ than that is answered only from the store. A head that needs test units and find
 `no dependency manifest at or before <base>` and is dropped with that reason, so a merge group
 never folds green on an empty unit job.
 
-A batch verdict lists the files the batch opened outside its tests' manifest records. When the
+A batch verdict lists the files the batch opened outside its tests' manifest records. The expander
+puts the `commit` of the manifest it keyed a head's test units on in the plan's `manifest`, and the
+grade's state keeps it; a pull request or hotfix grade keys no test units and keeps none. When the
 scheduler stores the verdict of a graded job whose uploaded report carries a non empty `outside`
-list, whatever its graded outcome, `note_outside` writes it as a note of the repository at
-`lab/manifests/<owner>--<name>/outside/<digest>.json`, holding the unit's tests and the sorted list,
-where `<digest>` is `digests.digest` of that note. The object store is write once, so the packed
-`<commit>.json` manifests are never rewritten, and the same tests and list write one note. A
-`StoredManifests` read that finds or fetches a packed manifest merges each note of the repository
-into the `outside` list of each test record the note names, sorted and without duplicates, and skips
-a test the manifest lacks; the next expansion keys those tests on the measured tree and the batch on the
-noted files' blob ids. `scripts.dep_manifest.invalidated`, pull request test selection in
-`scripts.ci_select.recorded_tests` and mutation test selection in
+list, whatever its graded outcome, `note_outside` writes it as a note of that manifest commit at
+`lab/manifests/<owner>--<name>/outside/<commit>/<digest>.json`, holding the unit's tests and the
+sorted list, where `<digest>` is `digests.digest` of that note. A grade with no manifest commit writes
+no note. The object store is write once, so the packed `<commit>.json` manifests are never rewritten,
+and the same tests and list write one note per commit. A `StoredManifests` read that finds a stored
+manifest merges each note of that manifest's commit into the `outside` list of each test record the
+note names, sorted and without duplicates, and skips a test the manifest lacks; the next expansion
+keys those tests on the measured tree and the batch on the noted files' blob ids. A note written
+while grades keyed on an older commit's manifest never reaches a newer commit's records or keys. A
+manifest the read fetches has no note yet. Every read first removes, through `Objects.remove`, each
+note of the repository whose commit has no stored `<commit>.json`, which includes the notes at
+`outside/<digest>.json` written before notes carried a commit. `scripts.dep_manifest.invalidated`,
+pull request test selection in `scripts.ci_select.recorded_tests` and mutation test selection in
 `scripts.ci_mutation.plan.covering_tests` and `line_covering_tests` count a change to a file in a
 record's `outside` list as a change to that test, as they do for a file in its `files` list. The
-list is per batch, so every test of the batch takes it, and notes are per repository rather than
-per manifest commit.
+list is per batch, so every test of the batch takes it.
 
 For a merge group head the expander builds `interaction.Group` from the mirror: the group's
 changes against the base, one entry per first parent commit between base and head with that
@@ -1681,7 +1833,7 @@ scheduler enqueues a grade's misses with the grade's base and its plan's grader 
 
 | Kind | Trees | Executor inputs |
 |---|---|---|
-| `static` | head, base and grader, read only, shared by the pod's units | the gate the unit names from the grader tree's workflow and input registry, the venv of the head's `uv.lock` digest and `inputs.base` set to the base revision |
+| `static` | head, base and grader, read only, shared by the pod's units | the gate the unit names from the grader tree's workflow, input registry and reusable workflows (see [The worker reads the same workflows](#the-worker-reads-the-same-workflows)), the venv of the head's `uv.lock` digest and `inputs.base` set to the base revision |
 | `test` | head, read only | the batch, the venv of the head's `uv.lock` digest, `CI_LAB_MANIFEST`, `CI_LAB_FLAKES` and one pytest worker per slot |
 | `stats` | a private copy of the head with every file under the `[tool.mutmut]` source paths behind its trampolines | the tree as root and `CI_LAB_MUTATION_CACHE` |
 | `mutant` | the same private trampolined copy | `CI_LAB_KILLERS`, `CI_LAB_MUTATION_BUDGET`, `CI_LAB_MUTATION_CAP` and the tests that the stats records of every test module in the tree show reaching the mutant's function, with their seconds |
@@ -1774,7 +1926,9 @@ it. `unit_path(kind, key, name)` builds a unit path and raises `ValueError: not 
 `is_report(path)` matches only `lab/<kind>/<64 hex>/report.json`, so grade, head and upload objects
 are never read as verdicts.
 
-Two backends implement the `Objects` protocol of `write_once`, `read`, `keys` and `upload_url`:
+Two backends implement the `Objects` protocol of `write_once`, `read`, `keys`, `remove` and
+`upload_url`. `remove(path)` deletes one object, unlinking the file or calling `delete_object`, and
+takes a missing path as already gone:
 
 | Backend | Construct | `write_once(path, data)` | `upload_url(path, expires_s)` |
 |---|---|---|---|
