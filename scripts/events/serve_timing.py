@@ -1,6 +1,6 @@
 import sys
 import threading
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 
 
@@ -11,7 +11,7 @@ class ServeTiming:
         self.lock = threading.Lock()
 
     @contextmanager
-    def request(self, subject: str, waited_ms: int) -> Iterator[None]:
+    def request(self, subject: str, waited_ms: int) -> Generator[None, None, None]:
         with self.lock:
             self.running += 1
             running = self.running
