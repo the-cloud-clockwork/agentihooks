@@ -72,7 +72,6 @@ def _image_third_party_imports(root: Path, entry_points: list[str]) -> set[str]:
 
 
 @pytest.mark.skipif("MUTANT_UNDER_TEST" in os.environ, reason="the mutated copy imports mutmut at module level")
-@pytest.mark.feature("swarm-image-lab-dependencies")
 def test_swarm_image_lock_pins_every_distribution_its_entry_points_import() -> None:
     root = Path(__file__).parents[1]
     lock = (root / "docker/swarm/requirements.lock").read_text()

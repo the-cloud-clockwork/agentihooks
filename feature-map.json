@@ -7,7 +7,6 @@
       "behaviour": "The swarm image installs the pinned test and mutation dependencies needed by every CI lab module, including the scheduler lazy executor and mutation expansion imports. Image smoke imports every lab module from the installed wheel and the dependency guard rejects imports absent from the hashed image lock.",
       "seam": "Swarm image hashed dependency lock, installed image lab module smoke and packaging dependency closure guard",
       "tests": [
-        "tests/test_swarm_packaging.py::test_swarm_image_lock_pins_every_distribution_its_entry_points_import",
         "tests/test_swarm_lab_imports.py::test_swarm_image_smoke_imports_every_discovered_lab_module_and_refuses_a_missing_dependency"
       ]
     },
