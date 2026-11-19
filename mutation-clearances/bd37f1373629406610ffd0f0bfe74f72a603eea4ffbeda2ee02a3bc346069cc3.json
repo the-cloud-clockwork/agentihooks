@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/relay.py:scripts.ci_lab.relay.x_relay:22716a2ef0ccac1e77bef3d8f2c129d300531386b95ca4d6f26f5f70c99cc6fc": {
+    "reader": "standards_reader",
+    "reason": "Passes None instead of False as the shadow flag of a relayed check run. checks.name returns the shadow prefix only when the flag is truthy, so name(check, None) and Checks.seed with shadow None build the same lab/<gate> key as False: the relayed key, the seeded poster entry and every request are unchanged. Equivalent; cleared by the Standards reader in review rounds one and two."
+  }
+}
