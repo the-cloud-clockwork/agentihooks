@@ -211,12 +211,11 @@ def test_a_run_on_a_lane_queues_and_is_never_cancelled() -> None:
                 seen.add(where)
                 assert resolved["queue"] == "max", (where, github)
                 assert not resolved["cancel-in-progress"], (where, github)
-            elif (where, resolved["group"]) in SERIAL:
+            elif (where, resolved["group"]) in {*SERIAL, ("proofs.yml", f"focused-proof-{github['run_id']}")}:
                 assert resolved["queue"] == "max" and not resolved["cancel-in-progress"], (where, github)
             else:
                 dev_push = (github["event_name"], github["ref"]) == ("push", "refs/heads/dev")
-                own_run = resolved["group"] == f"focused-proof-{github['run_id']}"
-                assert resolved["queue"] in (None, "single") or dev_push or own_run, (where, github)
+                assert resolved["queue"] in (None, "single") or dev_push, (where, github)
     assert seen == LANE_USERS
 
 
