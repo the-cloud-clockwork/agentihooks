@@ -8541,6 +8541,17 @@
       ]
     },
     {
+      "id": "shared-mutation-stats-download-ends-with-its-download",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2699",
+      "behaviour": "The mutation refine, probe and shard jobs download the shared mutation stats through the pattern download action, which asks the results service for this run's matching artifacts and closes every answer before it tries again, so the step ends with its download instead of waiting out the three minute socket timeout that an unread non-200 blob answer holds in download-artifact 8.0.2.",
+      "seam": "The pattern download composite action and its fetch script, used by the shared mutation stats download steps of the Tests workflow",
+      "tests": [
+        "tests/test_ci_artifact_download_retry.py::test_every_shared_mutation_stats_download_runs_the_action_that_closes_each_blob_answer",
+        "tests/test_ci_pattern_download.py::test_a_kept_alive_error_answer_is_closed_before_the_retry_and_every_part_merges"
+      ]
+    },
+    {
       "id": "coverage-check-reads-each-database-in-order",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-dep-manifest-coverage-slow",
