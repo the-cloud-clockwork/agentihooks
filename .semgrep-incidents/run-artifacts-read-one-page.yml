@@ -1,0 +1,23 @@
+rules:
+  - id: run-artifacts-read-one-page
+    languages: [yaml]
+    severity: ERROR
+    message: >-
+      A script lists a run's artifacts with one request and no name filter, so it reads only the first page, 30
+      artifacts by default and 100 at most. On 19 November dev push run 44549657285 held 106 artifacts and
+      durations-merged was not on the first page of 100, so the Tests select job found no live durations-merged
+      artifact and every merge group based on that run failed. Ask for the artifact by name with the name query
+      parameter, or pass --paginate and read every page.
+    paths:
+      include:
+        - '**/.github/workflows/*.yml'
+        - '**/.github/workflows/*.yaml'
+        - '**/.github/actions/**/action.yml'
+        - '**/.github/actions/**/action.yaml'
+        - '**/run-artifacts-read-one-page.test.yaml'
+    patterns:
+      - pattern: |
+          run: $SCRIPT
+      - metavariable-regex:
+          metavariable: $SCRIPT
+          regex: (?ms)\A.*?^(?![^\n]*--paginate)[^\n]*actions/runs/[^/\n]+/artifacts(?![^\s"']*[?&]name=)
