@@ -38,3 +38,8 @@ class ResetCountsAsClosed(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         # ok: fake-server-close-read-ignores-reset
         assert self.rfile.read(int(self.headers["Content-Length"])) == b"GET /next HTTP/1.1\r\n\r\n"
+
+
+def test_a_bodiless_request_reaches_the_route_code(exchange: BaseHTTPRequestHandler) -> None:
+    # ok: fake-server-close-read-ignores-reset
+    assert exchange.rfile.read() == b""

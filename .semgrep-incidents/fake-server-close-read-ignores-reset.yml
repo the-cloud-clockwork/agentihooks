@@ -17,6 +17,7 @@ rules:
           - pattern: $HANDLER.rfile.read(...) == b""
           - pattern: b"" == $HANDLER.rfile.read(...)
           - pattern: not $HANDLER.rfile.read(...)
+      - pattern-not-inside: assert $CHECK
       - pattern-not-inside: |
           try:
               ...

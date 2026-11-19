@@ -118,7 +118,7 @@ class Handler(BaseHTTPRequestHandler):
         kind, body = self.service.answer_for(name), _archive(name)
         if kind == "busy":
             self.answer(503, b"<Error><Code>ServerBusy</Code></Error>")
-            if self.rfile.read() == b"":
+            if self.client_closed():
                 self.service.closed_by_client.set()
         elif kind == "torn":
             self.answer(200, body[: len(body) // 2])
@@ -132,6 +132,12 @@ class Handler(BaseHTTPRequestHandler):
             self.answer(200, body)
         if kind != "ok":
             self.close_connection = True
+
+    def client_closed(self) -> bool:
+        try:
+            return self.rfile.read() == b""
+        except ConnectionResetError:
+            return True
 
     def partial(self, body: bytes, kind: str) -> None:
         if kind == "late" and self.service.released.wait(1):
