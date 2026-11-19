@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.1051 · 2026-11-19
+
+### 2026-11-19 · b3b1ce5ba6db · #12260 · @nestorcolt
+
+**Align promotion reference timings with its workflow and script**
+
+This change updates the promotion reference documentation so its stated timeout and wait values actually match what the workflow and script enforce: the job timeout is corrected from ten minutes to forty minutes, and a thirty minute mergeability wait is now documented, while the separate ten minute reporting budget is left untouched. Since the mismatch previously caused five timing assertions to fail in automated checks, this fix restores consistency between documentation and behavior, preventing confusion or false failures for anyone relying on these timing guarantees.
+
 ## v2.17.1050 · 2026-11-19
 
 ### 2026-11-19 · 7f0162984c27 · #12261 · @agenticore-app
