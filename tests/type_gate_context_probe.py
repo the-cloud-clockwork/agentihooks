@@ -133,3 +133,43 @@ def test_probe_counts_the_stream_test_in_narrow_and_truncated_runs() -> None:
             ).hexdigest()[:16],
         }
     _publish("NARROW PROBE", report)
+
+
+def _cgroup_peak_mb() -> int | None:
+    path = Path("/sys/fs/cgroup/memory.peak")
+    return int(path.read_text()) // 2**20 if path.is_file() else None
+
+
+def test_probe_the_cost_of_the_fixed_layout() -> None:
+    sources = type_gate.sources(ROOT)
+    baseline = type_gate.load(ROOT) or {}
+    report: dict[str, object] = {
+        "head": _head(),
+        "runner": _runner(),
+        "sources": len(sources),
+        "runs": len(type_gate.runs(ROOT)),
+        "run_limit": type_gate._RUN,
+        "workers": type_gate._WORKERS,
+    }
+    pull_request = sorted({MANAGER} | type_gate.importers(ROOT, sources, {type_gate.module_name(MANAGER)}))
+    direct = ["scripts/type_env.py", "scripts/type_gate.py", "tests/test_type_gate.py"]
+    for name, files in (
+        ("stream_alone", [STREAM]),
+        ("this_change_prepush_set", direct),
+        ("hook_manager_pull_request", pull_request),
+        ("every_source", None),
+    ):
+        begin = time.monotonic()
+        counts = type_gate.measure(ROOT, files)
+        report[name] = {
+            "graded": len(sources) if files is None else len(files),
+            "seconds": round(time.monotonic() - begin, 1),
+            "errors": sum(counts.values()),
+            "stream": counts.get(STREAM, 0),
+            "manager": counts.get(MANAGER, 0),
+            "peak_child_mb": resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss // 1024,
+            "cgroup_peak_mb": _cgroup_peak_mb(),
+        }
+        if files is None:
+            report["above_baseline"] = sorted(path for path in counts if counts[path] > baseline.get(path, 0))
+    _publish("COST PROBE", report)
