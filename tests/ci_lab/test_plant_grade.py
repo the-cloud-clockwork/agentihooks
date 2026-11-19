@@ -1,6 +1,3 @@
-import hashlib
-import hmac
-import io
 import json
 import subprocess
 import sys
@@ -8,22 +5,15 @@ import urllib.request
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
-from urllib.request import Request
 
 import pytest
 
-from scripts.ci_lab import head_notice, plant_grade
+from scripts.ci_lab import plant_grade
 from scripts.ci_lab.digests import GradeInputs, grade_key
-from scripts.ci_lab.webhooks import NOTICE_SECRET_ENV
 
-pytestmark = [pytest.mark.unit, pytest.mark.feature("lab-static-plant-proofs")]
+pytestmark = pytest.mark.unit
 
 REPOSITORY = "https://github.com/acme/widgets"
-ENVIRON = {
-    head_notice.URL_ENV: "https://receiver.invalid/lab/head",
-    head_notice.ACTOR_ENV: "plant-proof",
-    NOTICE_SECRET_ENV: "unit-proof-only",
-}
 
 
 def git(root: Path, *arguments: str) -> str:
@@ -39,8 +29,7 @@ def repository(tmp_path: Path) -> Path:
     git(root, "init", "-q")
     git(root, "config", "user.name", "Proof")
     git(root, "config", "user.email", "proof@example.invalid")
-    target = root / "sample.py"
-    target.write_text("before\n")
+    (root / "sample.py").write_text("before\n")
     catalog = root / "tests/ci_lab/plants"
     catalog.mkdir(parents=True)
     (catalog / "lint.json").write_text(
@@ -63,44 +52,43 @@ def repository(tmp_path: Path) -> Path:
     return root
 
 
-class Answer(io.BytesIO):
-    status = 202
-
-
 class Lab:
     def __init__(self, root: Path) -> None:
         self.root = root
-        self.notices: list[Mapping[str, str]] = []
+        self.base = git(root, "rev-parse", "HEAD")
+        self.heads: list[str] = []
         self.now = 0.0
-        self.answer = 202
         self.failure = "lint"
         self.required = "failure"
         self.incomplete = False
+        self.unrelated = False
+        self.full_first_page = False
         self.pages: list[str] = []
 
-    def open(self, request: Request, timeout: float) -> Answer:
-        assert timeout > 0
-        body = request.data
-        assert isinstance(body, bytes)
-        assert request.full_url == ENVIRON[head_notice.URL_ENV]
-        assert request.get_header("X-hub-signature-256") == (
-            "sha256=" + hmac.new(ENVIRON[NOTICE_SECRET_ENV].encode(), body, hashlib.sha256).hexdigest()
+    def published(self, head: str) -> bool:
+        tips = git(self.root, "ls-remote", "--heads", "origin", "refs/heads/diffcheck/lab-plant-lint-*")
+        return any(
+            subprocess.run(
+                ["git", "-C", str(self.root), "merge-base", "--is-ancestor", head, line.split()[0]],
+                capture_output=True,
+                check=False,
+            ).returncode
+            == 0
+            for line in tips.splitlines()
         )
-        fields = json.loads(body)
-        assert git(self.root, "ls-remote", "origin", "refs/heads/diffcheck/ci-lab-lint").split()[0] == fields["head"]
-        self.notices.append(fields)
-        answer = Answer()
-        answer.status = self.answer
-        return answer
 
     def fetch(self, path: str) -> Mapping[str, Any]:
         self.pages.append(path)
         assert path.startswith("repos/acme/widgets/commits/")
         assert "filter=all" in path
-        fields = self.notices[-1]
-        head, base = fields["head"], fields["base"]
-        run = grade_key(GradeInputs(REPOSITORY, head, base, "pull_request", base))
-        red = len(self.notices) == 2
+        head = path.split("/")[4]
+        assert self.published(head)
+        if head not in self.heads:
+            self.heads.append(head)
+        red = git(self.root, "show", f"{head}:sample.py") == "after"
+        run = grade_key(GradeInputs(REPOSITORY, head, self.base, "pull_request", self.base))
+        if self.full_first_page and path.endswith("page=1"):
+            return {"check_runs": [self.check("lab-shadow/lint", "failure", "other-grade")] * 100}
         rows = [
             self.check("lab-shadow/required", "success", "other-grade"),
             self.check("lab-shadow/lint", "failure", "other-grade"),
@@ -110,6 +98,9 @@ class Lab:
         ]
         if self.incomplete:
             rows[-2]["status"] = "in_progress"
+        if self.unrelated:
+            for row in rows:
+                row["external_id"] = "other-grade"
         return {"check_runs": rows}
 
     def check(self, name: str, conclusion: str, run: str) -> dict[str, Any]:
@@ -128,14 +119,14 @@ class Lab:
         return self.now
 
     def ports(self) -> plant_grade.Ports:
-        return plant_grade.Ports(self.fetch, self.open, self.sleep, self.clock)
+        return plant_grade.Ports(self.fetch, self.sleep, self.clock)
 
 
 @pytest.mark.feature("lab-static-plant-proofs")
-def test_two_signed_heads_grade_against_one_base_and_ignore_other_grades(repository: Path) -> None:
+def test_two_pushes_grade_against_one_protected_base_and_ignore_other_grades(repository: Path) -> None:
     lab = Lab(repository)
     base = git(repository, "rev-parse", "HEAD")
-    result = plant_grade.prove(repository, "lint", base, REPOSITORY, ENVIRON, lab.ports())
+    result = plant_grade.prove(repository, "lint", base, REPOSITORY, lab.ports())
     assert result == {
         "plant": "lint",
         "gate": "lint",
@@ -144,24 +135,18 @@ def test_two_signed_heads_grade_against_one_base_and_ignore_other_grades(reposit
         "green": "https://github.com/acme/widgets/runs/required",
         "red": "https://github.com/acme/widgets/runs/required",
     }
-    assert len(lab.notices) == 2
-    assert all(
-        notice["base"] == base and notice["repo"] == REPOSITORY and notice["actor"] == "plant-proof"
-        for notice in lab.notices
-    )
-    assert git(repository, "show", f"{lab.notices[0]['head']}:sample.py") == "before"
-    assert git(repository, "show", f"{lab.notices[1]['head']}:sample.py") == "after"
+    assert len(lab.heads) == 2
+    assert git(repository, "show", f"{lab.heads[0]}:sample.py") == "before"
+    assert git(repository, "show", f"{lab.heads[1]}:sample.py") == "after"
     assert git(repository, "rev-parse", "HEAD") == base
 
 
-@pytest.mark.parametrize("answer", [0, 200, 403, 500])
 @pytest.mark.feature("lab-static-plant-proofs")
-def test_a_refused_notice_cannot_be_used_as_a_proof(repository: Path, answer: int) -> None:
+def test_a_failed_push_cannot_be_used_as_a_proof(repository: Path) -> None:
     lab = Lab(repository)
-    lab.answer = answer
-    with pytest.raises(ValueError, match="notice"):
-        plant_grade.prove(repository, "lint", "HEAD", REPOSITORY, ENVIRON, lab.ports())
-    assert len(lab.notices) == 1
+    git(repository, "remote", "set-url", "origin", str(repository.parent / "missing.git"))
+    with pytest.raises(subprocess.CalledProcessError):
+        plant_grade.prove(repository, "lint", "HEAD", REPOSITORY, lab.ports())
     assert lab.pages == []
 
 
@@ -171,7 +156,7 @@ def test_a_wrong_red_gate_or_a_green_plant_is_refused(repository: Path, failure:
     lab = Lab(repository)
     lab.failure, lab.required = failure, required
     with pytest.raises(ValueError, match="plant"):
-        plant_grade.prove(repository, "lint", "HEAD", REPOSITORY, ENVIRON, lab.ports())
+        plant_grade.prove(repository, "lint", "HEAD", REPOSITORY, lab.ports())
 
 
 @pytest.mark.feature("lab-static-plant-proofs")
@@ -179,18 +164,49 @@ def test_an_incomplete_grade_expires_without_pushing_the_plant(repository: Path)
     lab = Lab(repository)
     lab.incomplete = True
     with pytest.raises(TimeoutError, match="grade"):
-        plant_grade.prove(repository, "lint", "HEAD", REPOSITORY, ENVIRON, lab.ports(), timeout_s=2)
-    assert len(lab.notices) == 1
+        plant_grade.prove(repository, "lint", "HEAD", REPOSITORY, lab.ports(), timeout_s=2)
+    assert len(lab.heads) == 1
     assert lab.now == 2
+
+
+@pytest.mark.feature("lab-static-plant-proofs")
+def test_an_unrelated_grade_expires_without_pushing_the_plant(repository: Path) -> None:
+    lab = Lab(repository)
+    lab.unrelated = True
+    with pytest.raises(TimeoutError, match="grade"):
+        plant_grade.prove(repository, "lint", "HEAD", REPOSITORY, lab.ports(), timeout_s=2)
+    assert len(lab.heads) == 1
+
+
+@pytest.mark.feature("lab-static-plant-proofs")
+def test_all_check_pages_are_read(repository: Path) -> None:
+    lab = Lab(repository)
+    lab.full_first_page = True
+    row = plant_grade.prove(repository, "lint", "HEAD", REPOSITORY, lab.ports())
+    assert row["plant"] == "lint"
+    assert sum(path.endswith("page=2") for path in lab.pages) == 2
 
 
 @pytest.mark.feature("lab-static-plant-proofs")
 def test_a_completed_pair_can_be_proven_again_without_rewinding_its_remote(repository: Path) -> None:
     first, second = Lab(repository), Lab(repository)
-    a = plant_grade.prove(repository, "lint", "HEAD", REPOSITORY, ENVIRON, first.ports())
-    b = plant_grade.prove(repository, "lint", "HEAD", REPOSITORY, ENVIRON, second.ports())
+    a = plant_grade.prove(repository, "lint", "HEAD", REPOSITORY, first.ports())
+    b = plant_grade.prove(repository, "lint", "HEAD", REPOSITORY, second.ports())
     assert a == b
-    assert first.notices == second.notices
+    assert first.heads == second.heads
+
+
+@pytest.mark.feature("lab-static-plant-proofs")
+def test_different_bases_use_independent_plant_branches(repository: Path) -> None:
+    first = Lab(repository)
+    a = plant_grade.prove(repository, "lint", "HEAD", REPOSITORY, first.ports())
+    git(repository, "commit", "--allow-empty", "-qm", "Advance protected base")
+    second = Lab(repository)
+    b = plant_grade.prove(repository, "lint", "HEAD", REPOSITORY, second.ports())
+    assert a["base"] != b["base"]
+    tips = git(repository, "ls-remote", "--heads", "origin", "refs/heads/diffcheck/lab-plant-lint-*")
+    assert len(tips.splitlines()) == 2
+    assert {line.split()[0] for line in tips.splitlines()} == {first.heads[-1], second.heads[-1]}
 
 
 @pytest.mark.feature("lab-static-plant-proofs")
@@ -216,11 +232,10 @@ def test_the_command_prints_links_and_appends_the_proof_summary(
     lab = Lab(repository)
     summary = tmp_path / "summary.md"
     summary.write_text("Earlier proof\n")
-    environ = {**ENVIRON, "GITHUB_STEP_SUMMARY": str(summary)}
     assert (
         plant_grade.main(
             ["--plant", "lint", "--base", "HEAD", "--repository", REPOSITORY],
-            environ,
+            {"GITHUB_STEP_SUMMARY": str(summary)},
             lab.ports(),
         )
         == 0
@@ -254,12 +269,14 @@ def test_the_command_uses_real_transport_adapters_and_normalizes_the_remote(
         path = arguments[arguments.index("api") + 1]
         return subprocess.CompletedProcess(arguments, 0, json.dumps(lab.fetch(path)), "")
 
+    def no_http(*arguments: Any, **options: Any) -> None:
+        raise AssertionError("the runner must not contact the lab receiver")
+
     monkeypatch.setattr(subprocess, "run", transport)
-    monkeypatch.setattr(urllib.request, "urlopen", lab.open)
-    assert plant_grade.main(["--plant", "lint", "--base", "HEAD"], ENVIRON) == 0
+    monkeypatch.setattr(urllib.request, "urlopen", no_http)
+    assert plant_grade.main(["--plant", "lint", "--base", "HEAD"], {}) == 0
     assert json.loads(capsys.readouterr().out)["plant"] == "lint"
-    assert len(lab.notices) == 2
-    assert all(notice["repo"] == REPOSITORY for notice in lab.notices)
+    assert len(lab.heads) == 2
 
 
 @pytest.mark.feature("lab-static-plant-proofs")
@@ -271,17 +288,17 @@ def test_a_refused_command_prints_no_success_row_or_summary(
 ) -> None:
     monkeypatch.chdir(repository)
     lab = Lab(repository)
-    lab.answer = 403
+    lab.required = "success"
     summary = tmp_path / "summary.md"
     assert (
         plant_grade.main(
             ["--plant", "lint", "--base", "HEAD", "--repository", REPOSITORY],
-            {**ENVIRON, "GITHUB_STEP_SUMMARY": str(summary)},
+            {"GITHUB_STEP_SUMMARY": str(summary)},
             lab.ports(),
         )
         == 1
     )
     output = capsys.readouterr()
     assert output.out == ""
-    assert "notice" in output.err
+    assert "plant" in output.err
     assert not summary.exists()
