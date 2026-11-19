@@ -4676,6 +4676,16 @@
       ]
     },
     {
+      "id": "merge-priority-operator-lift",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-merge-priority-doctrine",
+      "behaviour": "An operator lift removes merge queue entries already under test and restores them behind the priority target in their original order; ordinary priority preserves those entries.",
+      "seam": "scripts.swarm.cli.cmd_merge through queue_priority.request and merge_queue.prioritize",
+      "tests": [
+        "tests/swarm/test_queue_priority.py::test_operator_lift_is_journaled"
+      ]
+    },
+    {
       "id": "merge-priority-moves-waiting-entries-at-once",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2604",

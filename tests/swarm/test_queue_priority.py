@@ -140,14 +140,26 @@ def test_completed_head_group_prioritizes_immediately(priority, capsys):
     assert priority.queue.mutations
 
 
-def test_operator_lift_is_journaled(priority, monkeypatch, capsys):
+@pytest.mark.feature("merge-priority-operator-lift")
+def test_operator_lift_is_journaled(
+    priority: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     records = []
     monkeypatch.setattr(queue_record.Journal, "write", lambda self, *args, **kwargs: records.append((args, kwargs)))
     monkeypatch.setattr(cli.clearance, "is_operator", lambda store, who: True)
     assert cli.main(["sw", "merge", "priority", URL, "--lift"]) == 0
     assert json.loads(capsys.readouterr().out)["errors"] == []
     assert records[0] == (("priority-lift", URL, "", None, None), {})
-    assert priority.queue.mutations
+    assert priority.queue.mutations == [
+        ("dequeue", 3),
+        ("dequeue", 2),
+        ("dequeue", 1),
+        ("queue", 9),
+        ("queue", 1),
+        ("queue", 2),
+        ("queue", 3),
+    ]
+    assert [entry["pullRequest"]["id"] for entry in priority.queue.entries] == ["P9", "P1", "P2", "P3"]
 
 
 def test_priority_help_explains_operator_lift(capsys):
