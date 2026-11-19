@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "lab-store-incremental-fetch",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-store-mirror-mount",
+      "behaviour": "Without a node mirror, the lab store retains fetched heads under refs/lab so each later origin or lab fallback fetch transfers only its new objects. Store creation writes an alternate only when the node objects directory exists.",
+      "seam": "scripts.ci_lab.worktrees.Mirror.fetch over real file protocol remotes, inspecting the second fetched pack and stored refs and alternates",
+      "tests": [
+        "tests/ci_lab/test_worktrees.py::test_fetch_without_a_node_mirror_keeps_heads_and_takes_only_new_objects",
+        "tests/ci_lab/test_worktrees.py::test_fetch_never_names_a_missing_node_objects_directory_in_alternates"
+      ]
+    },
+    {
       "id": "lab-skipped-authoritative-gates",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2516",
