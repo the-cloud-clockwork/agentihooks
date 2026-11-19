@@ -903,7 +903,6 @@ def test_a_repeat_ask_waiting_on_the_hives_turn_answers_its_own_admission_once_i
 
 
 @pytest.mark.feature("hub-admission-hive-asks-again")
-@pytest.mark.feature("hub-admission-unlisted-retry")
 @pytest.mark.parametrize("listed", [True, False])
 def test_a_repeat_ask_that_read_the_offer_claimed_by_its_own_finished_admission_answers_that_admission(
     rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, listed: bool
@@ -927,7 +926,6 @@ def test_a_repeat_ask_that_read_the_offer_claimed_by_its_own_finished_admission_
 
 
 @pytest.mark.feature("hub-admission-hive-asks-again")
-@pytest.mark.feature("hub-admission-unlisted-retry")
 @pytest.mark.parametrize("listed", [True, False])
 def test_a_late_kept_admission_launches_on_the_hives_next_ask_after_readiness_withdrew_its_offer(
     rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], listed: bool
