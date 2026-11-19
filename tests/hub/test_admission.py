@@ -1227,6 +1227,88 @@ def test_the_hub_admits_no_launch_for_a_hive_draining_for_a_release(rig, monkeyp
     ]
 
 
+@pytest.mark.feature("hub-admission-hive-local-held")
+@pytest.mark.parametrize(
+    "member, draining, fields",
+    [
+        ("2.17.843", "yes", {}),
+        ("2.17.825", "no", {}),
+        ("2.17.843", "no", {"workstation": True}),
+        ("2.17.843", "no", {"hive": "hive-b"}),
+        ("2.17.843", "no", {"needs": ["gpu"]}),
+    ],
+)
+def test_a_hive_local_refusal_keeps_the_only_offer_for_an_eligible_second_hive(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, member: str, draining: str, fields: dict[str, Any]
+) -> None:
+    from scripts import serena_router_daemon
+    from scripts.hive import lanes, registry
+    from scripts.hive.spoke import Spoke, SpokeConfig
+    from scripts.swarm import readiness
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    _released(rig, monkeypatch, member, "2.17.843")
+    registry.update(rig.store.redis, "hive-a", [f"draining={draining}"])
+    rig.rows["t1"].update(fields)
+    destination = readiness.ROOT if fields.get("workstation") else "hive-b"
+    registry.beat(rig.store.redis, destination, {"heartbeat_at": 6_000, "capabilities": ["gpu"]})
+    monkeypatch.setattr(serena_router_daemon, "ensure", lambda: True)
+    clock = SimpleNamespace(now=1_000)
+    bus: Any = open_bus(BusConfig(), clock=lambda: clock.now)
+    slots.serve(bus, admitter=rig.admitter)
+    runtime, other_runtime = Mock(), Mock()
+    other_runtime.spawn.return_value = Outcome(
+        "spawn",
+        Status.OK,
+        "local",
+        SimpleNamespace(pane_id="pane-b", harness="claude", account="slot-b", launched_at=1_500),
+    )
+    reading = {"cpus": 32, "load5": 0, "available_mb": 60_000, "total_mb": 64_000}
+    config = SpokeConfig(rig.store.config(SLUG), "eng", "hive-a")
+    spoke = Spoke(
+        config,
+        bus,
+        runtime,
+        lanes.LaneTasks(bus, "hive-a", rig.store.config),
+        lambda: reading,
+        view=Mock(return_value=None),
+    )
+    other = Spoke(
+        SpokeConfig(config.swarm, "eng", destination),
+        bus,
+        other_runtime,
+        lanes.LaneTasks(bus, destination, rig.store.config),
+        lambda: reading,
+        view=Mock(return_value=None),
+    )
+    try:
+        readiness.publish(bus, rig.admitter.source.snapshot(SLUG), 1)
+        assert spoke.poll() == "held"
+        runtime.spawn.assert_not_called()
+        assert rig.store.claimant(SLUG, "t1") is None
+        assert rig.ledger.writes == []
+        clock.now += config.policy.ack_wait_ms
+        assert other.poll() == "started"
+        other_runtime.spawn.assert_called_once()
+        launched = other_runtime.spawn.call_args.args[0]
+        assert launched.task["id"] == "t1"
+        assert rig.store.claimant(SLUG, "t1") == launched.name
+        assert rig.rows["t1"]["state"] == "claimed"
+    finally:
+        bus.close()
+
+
+@pytest.mark.feature("hub-admission-hive-local-held")
+@pytest.mark.parametrize("fields", [{"state": "done"}, {"claim_generation": 1}, {"lane": "ci"}])
+def test_a_refusal_about_the_task_stays_terminal(rig: SimpleNamespace, fields: dict[str, Any]) -> None:
+    rig.rows["t1"].update(fields)
+
+    assert rig.admitter.admit(SLUG, ask()) is None
+    assert rig.store.claimant(SLUG, "t1") is None
+    assert rig.store.agents(SLUG) == []
+    assert rig.ledger.writes == []
+
+
 def _hive_holding(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, cap: str, live: int) -> None:
     from dataclasses import replace
 
