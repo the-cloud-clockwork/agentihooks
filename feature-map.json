@@ -4731,7 +4731,7 @@
       "id": "template-lane-model-listed-in-a-harness-catalog",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2700",
-      "behaviour": "Creating a swarm, from a template with agentihooks swarm create or swarm init or from any config with lanes, is refused before anything is written when a lane model is not auto, not empty and not listed in the claude or codex model catalog, with the same message swarm set gives; a creation that fixes no lane model never reads the catalog, and the catalog is read through the store's Redis cache with the process environment and the current time.",
+      "behaviour": "Creating a swarm, from a template with agentihooks swarm create or from any config with lanes, is refused before the swarm config is stored when a lane model is not auto, not empty and not listed in the claude or codex model catalog, with the same message swarm set gives; a creation that fixes no lane model never reads the catalog, and the catalog is read through the store's Redis cache with the process environment and the current time.",
       "seam": "SwarmStore.create through default_models.lane_models and default_models.lane_refusal, reached by cli.cmd_create with a template",
       "tests": [
         "tests/swarm/test_default_models.py::test_create_refuses_a_template_lane_model_no_harness_catalog_lists",
