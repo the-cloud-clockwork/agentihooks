@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.1050 · 2026-11-19
+
+### 2026-11-19 · 7f0162984c27 · #12261 · @agenticore-app
+
+**Fetch lab manifests off the scheduler pass**
+
+This change moves lab manifest fetching off the scheduler's main pass so a slow or unresponsive manifest fetch no longer blocks grading. A background pool runs up to four fetches at once, caches a finished result for 300 seconds so repeatedly-missing manifests aren't refetched every pass, and surfaces a pending status so the scheduler simply keeps waiting without restarting its quiet window. This fixes a real stall case where a never-answering manifest request could hold up an entire pass; the fix is wired in by default while still allowing synchronous fetching for callers that need it.
+
 ## v2.17.1047 · 2026-11-19
 
 ### 2026-11-19 · f1dc699fc89c · #12222 · @nestorcolt
