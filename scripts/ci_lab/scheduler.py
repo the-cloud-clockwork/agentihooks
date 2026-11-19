@@ -84,6 +84,7 @@ __all__ = [
     "Settings",
     "StoredManifests",
     "UNIT_ESTIMATE_S",
+    "authoritative_gates",
     "build",
     "fold",
     "frame",
@@ -308,8 +309,9 @@ class Head:
 class Plan:
     """How to grade one head: the tree and grader revision it reads, the units of each gate, the jobs the tier skips,
     the job outputs and flags the `Gate — Required` rules read, the dev commit of the dependency manifest its test
-    units are keyed on, empty when it keys none, and the authoritative gates a hotfix or pull request grade runs no
-    unit of, each posted as a skipped check."""
+    units are keyed on, empty when it keys none, the authoritative gates a hotfix or pull request grade runs no unit
+    of, each posted as a skipped check, and the gates the grader's delivery.yaml lists as authoritative for the head's
+    class."""
 
     tree: str
     grader: str
@@ -319,6 +321,7 @@ class Plan:
     flags: Flags = Flags()
     manifest: str = ""
     idle: frozenset[str] = frozenset()
+    authoritative: frozenset[str] = frozenset()
 
 
 class Inbox(Protocol):
@@ -371,12 +374,11 @@ class Ports:
 
 @dataclass(frozen=True)
 class Settings:
-    """The trusted actors, the quiet window of a lane, the retries of a lost unit and whether check runs are shadow."""
+    """The trusted actors, the quiet window of a lane and the retries of a lost unit."""
 
     trusted: frozenset[str]
     quiet_ms: int = QUIET_MS
     retries: Policy = Policy()
-    shadow: bool = True
 
 
 @dataclass
@@ -397,7 +399,8 @@ class Slot:
 class State:
     """A grade's state: what it grades, its units by gate, whether a newer head superseded it, what it posted, the
     id of each check run it posted, the grade ref a lab remote push wrote its head to, if any, the dev commit of the
-    dependency manifest its test units are keyed on, if any, and the authoritative gates it runs no unit of."""
+    dependency manifest its test units are keyed on, if any, the authoritative gates it runs no unit of, and the gates
+    it posts as lab/<gate> rather than lab-shadow/<gate>."""
 
     run: str
     repo: str
@@ -419,6 +422,7 @@ class State:
     ref: str = ""
     manifest: str = ""
     idle: list[str] = field(default_factory=list[str])
+    authoritative: list[str] = field(default_factory=list[str])
 
 
 def _parse(raw: str | bytes) -> State:
@@ -717,6 +721,7 @@ class Scheduler:
             ref=ref,
             manifest=plan.manifest,
             idle=sorted(plan.idle),
+            authoritative=sorted(plan.authoritative),
         )
         source = self._merge_group(request, plan.tree)
         misses: list[Unit] = []
@@ -907,10 +912,11 @@ class Scheduler:
         return json.loads(self.objects.read(report_path)), log
 
     def _post(self, state: State) -> list[str]:
-        """Post each check run whose target moved since its last post; a completed check run never moves again. A
-        check run the grade already holds seeds the poster first, so a restarted scheduler advances it in place. A grade
-        of a head pushed to a grade ref records each move for the relay and posts nothing, since GitHub does not hold
-        the head before the relay pushes it."""
+        """Post each check run whose target moved since its last post; a completed check run never moves again. A gate
+        the grade lists as authoritative posts as lab/<gate> and every other check as lab-shadow/<gate>. A check run
+        the grade already holds seeds the poster first, so a restarted scheduler advances it in place. A grade of a
+        head pushed to a grade ref records each move for the relay and posts nothing, since GitHub does not hold the
+        head before the relay pushes it."""
         moved = [
             (check, status, conclusion)
             for check, (status, conclusion) in _checks(state).items()
@@ -924,8 +930,8 @@ class Scheduler:
                 state.posted[check] = [status, conclusion]
             return [f"left {check} {status} on {state.head} to the relay" for check, status, _ in moved]
         poster = self.ports.checks(_slug(state.repo))
-        shadow = self.settings.shadow
         for check, status, conclusion in moved:
+            shadow = check not in state.authoritative
             if check in state.runs:
                 poster.seed(state.head, check, state.run, state.runs[check], str(state.posted[check][0]), shadow)
             output = self._output(state, check, status)
@@ -987,6 +993,15 @@ def _lab_block(document: str) -> Mapping[str, Any]:
     return data["lab"]
 
 
+def authoritative_gates(block: Mapping[str, Any], tier: Priority) -> frozenset[str]:
+    """Return the gates a delivery.yaml lab block lists as authoritative for a hotfix, pull request or merge group
+    grade: lab.queue.authoritative for a merge group grade and lab.authoritative for the others."""
+    if tier == Priority.QUEUE:
+        queue: Mapping[str, Any] = block.get("queue", {})
+        return frozenset(queue.get("authoritative", ()))
+    return frozenset(block["authoritative"])
+
+
 def frame(
     tier: Priority,
     tree: str,
@@ -998,17 +1013,20 @@ def frame(
     a gate without units, which passes, so only what the lab grades can turn the grade red.
 
     A pull request or hotfix grade runs with no test scope and no mutation, and names each authoritative gate it runs
-    no unit of, which it posts as skipped; a merge group grade runs only the queue suite with no lost unit rerun; a
-    promotion or backfill grade takes every lab gate, since those rules require no job by name.
+    no unit of, which it posts as skipped; a merge group grade runs only the queue suite with no lost unit rerun; both
+    keep the authoritative gates, which post as lab/<gate>; a promotion or backfill grade takes every lab gate, since
+    those rules require no job by name, and lists none.
     """
     if tier >= Priority.PROMOTION:
         return Plan(tree, grader, dict(gates))
+    listed = frozenset(authoritative)
     if tier == Priority.QUEUE:
         required = (*QUEUE_REQUIRED, FAIL_FAST, UNIT_JOBS[0])
-        return Plan(tree, grader, {job: gates.get(job, ()) for job in required}, frozenset(UNIT_JOBS[1:]))
+        queued = {job: gates.get(job, ()) for job in required}
+        return Plan(tree, grader, queued, frozenset(UNIT_JOBS[1:]), authoritative=listed)
     framed = {job: gates.get(job, ()) for job in PULL_REQUIRED}
     idle = frozenset(gate for gate in authoritative if not framed.get(gate))
-    return Plan(tree, grader, framed, outputs={"select": {"scope": "none"}}, idle=idle)
+    return Plan(tree, grader, framed, outputs={"select": {"scope": "none"}}, idle=idle, authoritative=listed)
 
 
 @dataclass(frozen=True)
@@ -1140,7 +1158,8 @@ class MirrorExpander:
         the unit job's test units of a merge group, promotion or backfill head and the mutation stats and mutant units
         of a promotion or backfill head, framed by the request's tier with the authoritative gates of the grader's
         delivery.yaml for a hotfix or pull request head, with the dev commit of the manifest its test units are keyed
-        on."""
+        on and, for a hotfix, pull request or merge group head, the gates that delivery.yaml lists as authoritative for
+        its class."""
         mirror = self._mirror(request.repo)
         grader = request.head if request.tier >= Priority.PROMOTION else request.base
         for sha in dict.fromkeys((request.head, request.base, grader)):
@@ -1156,7 +1175,6 @@ class MirrorExpander:
             )
             gates.setdefault(gate.job, []).append(Unit(STATIC, static_key(inputs), (gate.name,)))
         commit = ""
-        authoritative: Sequence[str] = ()  # pragma: no mutate
         if request.tier >= Priority.QUEUE:
             manifest, contents = self._manifest(mirror, request), self._contents(mirror, head)
             commit = manifest["commit"]
@@ -1166,10 +1184,11 @@ class MirrorExpander:
             )
             if request.tier >= Priority.PROMOTION:
                 gates.update(self._mutation(mirror, request, manifest, contents))
-        else:
-            authoritative = _lab_block(self._git(mirror, "show", f"{grader}:{DELIVERY}"))["authoritative"]
+        listed = frozenset[str]()
+        if request.tier < Priority.PROMOTION:
+            listed = authoritative_gates(_lab_block(self._git(mirror, "show", f"{grader}:{DELIVERY}")), request.tier)
         tree = self._git(mirror, "rev-parse", f"{request.head}^{{tree}}").strip()
-        plan = frame(request.tier, tree, grader, {job: tuple(units) for job, units in gates.items()}, authoritative)
+        plan = frame(request.tier, tree, grader, {job: tuple(units) for job, units in gates.items()}, sorted(listed))
         return replace(plan, manifest=commit)
 
     def _tests(
