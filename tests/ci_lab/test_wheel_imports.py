@@ -1,4 +1,4 @@
-"""Every CI lab module, the CI test planner and the branch coverage script import from the shipped packages alone."""
+"""Every CI lab module, the CI test and mutation planners and the branch coverage script use shipped packages alone."""
 
 import pkgutil
 import subprocess
@@ -61,3 +61,19 @@ def test_an_import_of_the_tests_package_fails_where_the_wheel_is_installed() -> 
     result = _import_without_tests(["tests.ci_lab"])
     assert result.returncode == 1
     assert "No module named 'tests'" in result.stderr
+
+
+@pytest.mark.feature("planner-wheel-imports")
+def test_the_mutation_planner_checks_test_collection_without_the_tests_package(tmp_path: Path) -> None:
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests/test_sample.py").write_text("import mcp\n")
+    check = (
+        "from pathlib import Path\n"
+        "from scripts.ci_mutation import plan\n"
+        f"plan.validate_tests(Path({str(tmp_path)!r}), ['tests/test_sample.py::test_one'])\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", WITHOUT_TESTS + check], cwd=ROOT, capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 1
+    assert result.stderr == "tests/test_sample.py: loads the MCP SDK while collecting\n"
