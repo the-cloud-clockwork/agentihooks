@@ -107,10 +107,11 @@ def test_an_edited_sibling_test_file_keeps_the_stats_of_a_test_that_never_import
         ]
 
     cache = tmp_path / "cache"
-    changes = {"scripts/sample.py": {"lines": [2]}}
-    collect_cached_stats(root, cache, changes, files, ["-q"], collect)
-    (root / "tests/test_b.py").write_text((root / "tests/test_b.py").read_text() + "\n\ndef test_more():\n    pass\n")
-    collect_cached_stats(root, cache, changes, files, ["-q"], collect)
+    scope = {"scripts/sample.py": [2]}
+    collect_cached_stats(root, cache, scope, files, ["-q"], collect)
+    edited = root / "tests/test_b.py"
+    edited.write_text(edited.read_text() + "\n\ndef test_more():\n    pass\n")
+    collect_cached_stats(root, cache, scope, files, ["-q"], collect)
     assert calls == [files, ["tests/test_b.py"]]
 
 
@@ -752,6 +753,34 @@ def test_dynamic_import_dependencies_invalidate_stats_alongside_static_imports(t
     cache = tmp_path / "cache"
     collect_cached_stats(root, cache, {}, files, [], collect)
     (root / "scripts/a.py").write_text("value = 2\n")
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    assert calls == [files, files]
+
+
+def test_a_test_module_its_test_file_loads_as_a_pytest_plugin_keys_its_stats(tmp_path: Path) -> None:
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    files = ["tests/test_sample.py"]
+    _repository(
+        root,
+        {
+            files[0]: 'pytest_plugins = ["tests.test_plugin"]\nunrelated = ["tests.test_other"]\n',
+            "tests/test_plugin.py": "value = 1\n",
+            "tests/test_other.py": "value = 1\n",
+        },
+    )
+    calls: list[list[str]] = []
+
+    def collect(chosen: list[str]) -> list[dict[str, object]]:
+        calls.append(chosen)
+        return [{"status": 0, "tests": {}, "durations": {}, "cpu": 1}]
+
+    cache = tmp_path / "cache"
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    (root / "tests/test_other.py").write_text("value = 2\n")
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    (root / "tests/test_plugin.py").write_text("value = 2\n")
     collect_cached_stats(root, cache, {}, files, [], collect)
     assert calls == [files, files]
 
