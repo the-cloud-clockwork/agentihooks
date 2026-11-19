@@ -15,11 +15,13 @@ from scripts.ci_lab.webhooks import HeadEvent
 from scripts.dep_manifest import _git
 from tests.ci_lab.test_scheduler import (
     ACTOR,
+    BASE,
     CHECK_RUNS,
     DELIVERY,
     HEAD_A,
     SLUG,
     SUITE_MANIFEST,
+    TREE,
     FakeKube,
     FixtureToken,
     Inbox,
@@ -148,6 +150,15 @@ def test_a_merge_group_grade_takes_the_queue_list_and_a_pull_request_or_hotfix_g
     unlisted = {"authoritative": ["lint"], "queue": {"full_suite_entries": 5}}
     assert scheduler.authoritative_gates(unlisted, Priority.QUEUE) == frozenset()
     assert scheduler.authoritative_gates({"authoritative": ["lint"]}, Priority.QUEUE) == frozenset()
+
+
+@pytest.mark.feature("lab-authoritative-check-names")
+def test_a_frame_keeps_the_authoritative_gates_of_every_grade_but_a_promotion_or_backfill_one() -> None:
+    gates = {"lint": (unit(1),)}
+    for tier in (Priority.HOTFIX, Priority.PULL_REQUEST, Priority.QUEUE):
+        assert scheduler.frame(tier, TREE, BASE, gates, ("unit", "lint")).authoritative == frozenset({"lint", "unit"})
+    for tier in (Priority.PROMOTION, Priority.BACKFILL):
+        assert scheduler.frame(tier, TREE, BASE, gates, ("lint",)).authoritative == frozenset()
 
 
 @pytest.mark.feature("lab-authoritative-check-names")

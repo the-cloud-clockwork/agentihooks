@@ -53,6 +53,7 @@ from scripts.ci_lab.static_gates import StaticGate
 from scripts.ci_lab.store import Store, Verdict
 from scripts.ci_lab.units import Priority, Unit
 from scripts.ci_lab.webhooks import HeadEvent, envelope
+from scripts.ci_mutation.plan import MUTANT_SECONDS
 from scripts.dep_manifest import _git
 from scripts.events import bus
 from scripts.events.envelope import Envelope
@@ -2158,9 +2159,9 @@ def test_a_promotion_or_backfill_head_names_the_mutants_of_each_changed_function
     checkouts: list[tuple[Path, str]] = []
     build = expand_mutation.mutant_units
 
-    def spy(root: Path, changes: Any, covering: Any, unlisted: Any) -> tuple[Unit, ...]:
+    def spy(root: Path, changes: Any, covering: Any, unlisted: Any, *, timeout: float) -> tuple[Unit, ...]:
         checkouts.append((root.parent, (root / "scripts/alpha.py").read_text()))
-        return build(root, changes, covering, unlisted)
+        return build(root, changes, covering, unlisted, timeout=timeout)
 
     monkeypatch.setattr(expand_mutation, "mutant_units", spy)
     found = Port(SUITE_MANIFEST).expander(tmp_path).expand(suite.request(tier, head))
@@ -2186,6 +2187,19 @@ def test_a_promotion_or_backfill_head_names_the_mutants_of_each_changed_function
     store = _store(tmp_path, suite)
     assert list((tmp_path / "stores").iterdir()) == [store]
     assert _git(store, "worktree", "list", "--porcelain").count("worktree ") == 1
+
+
+@pytest.mark.feature("lab-mutant-unit-split")
+@pytest.mark.usefixtures("staticless")
+def test_a_promotion_head_splits_a_mutant_unit_priced_over_the_executors_unit_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    suite = _suite(tmp_path, DELIVERY["lab"])
+    head = _commit(suite.repo, {"scripts/alpha.py": ALPHA.replace("return 1", "return 4 + 1")})
+    monkeypatch.setattr(executors, "UNIT_TIMEOUT_S", MUTANT_SECONDS + 1.0)
+    mutants = Port(SUITE_MANIFEST).expander(tmp_path).expand(suite.request(Priority.PROMOTION, head)).gates["mutation"]
+    assert len(mutants) > 2
+    assert [unit.members for unit in mutants] == [(f"{FIRST}__mutmut_{index}",) for index in range(1, len(mutants) + 1)]
 
 
 @pytest.mark.feature("lab-scheduler-mutation-units")
