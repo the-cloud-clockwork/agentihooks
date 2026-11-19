@@ -29,7 +29,6 @@ from typing import Any, Protocol
 SERVICE = "twirp/github.actions.results.api.v1.ArtifactService/"
 INTERVAL = 3
 TIMEOUT = 30
-WAIT = 44 * 60
 OUT = Path(".coverage-shards")
 FLATTEN = Path(__file__).with_name("flatten.py")
 FLAT = "flat-"
@@ -245,18 +244,20 @@ def arrive(
 
 
 def main() -> int:
-    """Wait for the SHARDS shards of SCOPE in this run attempt and say how the wait ended."""
+    """Wait up to WAIT_MINUTES for the SHARDS shards of SCOPE in this run attempt and say how the wait ended."""
     token = os.environ.get("ACTIONS_RUNTIME_TOKEN", "")
     base = os.environ.get("ACTIONS_RESULTS_URL", "")
     if not token or not base:
         print("::error::No artifact service token reached the coverage wait; the merge finds no shard coverage.")
         return 1
     shards = int(os.environ["SHARDS"])
+    minutes = int(os.environ["WAIT_MINUTES"])
     service = Results(base, token)
-    left = arrive(service, shards, os.environ["SCOPE"], int(os.environ["GITHUB_RUN_ATTEMPT"]), OUT, WAIT, Wall())
+    attempt = int(os.environ["GITHUB_RUN_ATTEMPT"])
+    left = arrive(service, shards, os.environ["SCOPE"], attempt, OUT, minutes * 60, Wall())
     if left:
         named = ", ".join(map(str, left))
-        print(f"::warning::Shards {named} had not ended after {WAIT // 60} minutes; the merge names their coverage.")
+        print(f"::warning::Shards {named} had not ended after {minutes} minutes; the merge names their coverage.")
     else:
         print(f"All {shards} shards ended.", flush=True)
     return 0

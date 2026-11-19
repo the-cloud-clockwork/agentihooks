@@ -375,10 +375,10 @@ def test_the_wait_names_the_shards_it_gave_up_on(
     monkeypatch.setenv("SHARDS", "2")
     monkeypatch.setenv("SCOPE", "full")
     monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
-    monkeypatch.setattr(arrivals, "WAIT", 0)
+    monkeypatch.setenv("WAIT_MINUTES", "0")
     monkeypatch.setattr(arrivals, "OUT", tmp_path / "shards")
     assert arrivals.main() == 0
-    assert "::warning::Shards 1, 2 had not ended" in capsys.readouterr().out
+    assert "::warning::Shards 1, 2 had not ended after 0 minutes" in capsys.readouterr().out
 
 
 @pytest.mark.feature("dev-push-sonar-waits-for-shards-that-queue-late")
