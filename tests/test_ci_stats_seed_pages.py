@@ -40,8 +40,16 @@ def test_harvest_finds_a_stats_artifact_past_the_first_artifact_page_of_a_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     pages: list[int] = []
-    _listing(monkeypatch, [*_fillers(100), {"id": 5, "name": "mutation-test-stats-cache-0", "expired": False}], pages)
-    assert seed.harvest(7, tmp_path, set()) == 1
+    _listing(
+        monkeypatch,
+        [
+            {"id": 4, "name": "mutation-test-stats-cache-0", "expired": False},
+            *_fillers(99),
+            {"id": 5, "name": "mutation-test-stats-cache-1", "expired": False},
+        ],
+        pages,
+    )
+    assert seed.harvest(7, tmp_path, set()) == 2
     assert (tmp_path / "x.index").read_text() == "k"
     assert pages == [1, 2]
 
