@@ -190,7 +190,9 @@ NAME_STAGE = (
 NEUTRAL_STAGE = re.compile(r"^\s*(sort|uniq|column|tr)\b")
 
 
-HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1.*?^\s*\2\s*$", re.S | re.M)
+HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1([^\n]*)\n(.*?)^\s*\2\s*$", re.S | re.M)
+HEREDOC_TOKEN = re.compile(r"<<AHHEREDOC(\d+)([^\n]*)")
+COMMAND_WORD = re.compile(r"[^\s'\"`$();|&<>]+")
 SEGMENT_DELIM = re.compile(r"&&|\|\||;|\n")
 STAGE_DELIM = re.compile(r"(?<!\|)\|(?!\|)")
 SUBSTITUTION = re.compile(r"\$\(([^()]*)\)|`([^`]*)`|<\(([^()]*)\)")
@@ -225,24 +227,31 @@ def split_outside_quotes(delim, text):
     return parts
 
 
-def strip_heredocs(cmd):
-    """Drop heredoc bodies — they are data fed to a command, not commands."""
-    return HEREDOC.sub("<<HEREDOC", cmd)
+def strip_heredocs(cmd: str) -> str:
+    """Drop heredoc bodies — they are data fed to a command, not commands; the delimiter line stays."""
+    return HEREDOC.sub(lambda m: "<<HEREDOC" + m.group(3), cmd)
 
 
-def mask_heredocs(cmd):
+def mask_heredocs(cmd: str) -> tuple[str, list[re.Match[str]]]:
     """``strip_heredocs`` that can be undone: (masked command, original heredocs)."""
-    kept = []
+    kept: list[re.Match[str]] = []
 
-    def _keep(match):
-        kept.append(match.group(0))
-        return f"<<AHHEREDOC{len(kept) - 1}"
+    def _keep(match: re.Match[str]) -> str:
+        kept.append(match)
+        return f"<<AHHEREDOC{len(kept) - 1}{match.group(3)}"
 
     return HEREDOC.sub(_keep, cmd), kept
 
 
-def unmask_heredocs(cmd, kept):
-    return re.sub(r"<<AHHEREDOC(\d+)", lambda m: kept[int(m.group(1))], cmd)
+def unmask_heredocs(cmd: str, kept: list[re.Match[str]]) -> str:
+    """The masked command with each heredoc's opener and body put back around its, possibly rewritten, delimiter line."""
+
+    def _restore(token: re.Match[str]) -> str:
+        heredoc = kept[int(token.group(1))]
+        line_start, line_end = heredoc.span(3)
+        return heredoc.string[heredoc.start() : line_start] + token.group(2) + heredoc.string[line_end : heredoc.end()]
+
+    return HEREDOC_TOKEN.sub(_restore, cmd)
 
 
 def split_commands(cmd):
@@ -1081,6 +1090,17 @@ def script_verdict(stage_text: str, ctx: Context) -> Verdict:
     return stage_verdict(stage_text, ctx)
 
 
+def heredoc_verdict(segment: str, heredocs: list[re.Match[str]], ctx: Context) -> Verdict:
+    """The verdict on each heredoc body of the segment, checked as a command once the segment names a shell."""
+    if not any(word.split("/")[-1] in SHELLS for word in COMMAND_WORD.findall(segment)):
+        return ALLOW
+    for token in HEREDOC_TOKEN.finditer(segment):
+        v = decide_bash({"command": heredocs[int(token.group(1))].group(4)}, Context(ctx.cwd, ctx.recursive))
+        if v.block:
+            return v
+    return ALLOW
+
+
 def segment_verdict(segment: str, ctx: Context) -> Verdict:
     ctx.find_filters = None
     parts = split_outside_quotes(STAGE_DELIM, segment)
@@ -1116,7 +1136,9 @@ def decide_bash(tool_input: Mapping[str, object], ctx: Context | None = None) ->
             reason = check(seg)
             if reason:
                 return Verdict(block=reason)
-        v = segment_verdict(seg, ctx)
+        v = heredoc_verdict(seg, heredocs, ctx)
+        if not v.block:
+            v = segment_verdict(seg, ctx)
         if v.block:
             return v
         if v.rewrite:
