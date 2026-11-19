@@ -2197,6 +2197,7 @@ def test_lab_publication_records_its_head_and_wait_before_polling(
 
     redis = fakeredis.FakeRedis(decode_responses=True)
     store: Any = SimpleNamespace(redis=redis)
+    monkeypatch.setattr(pr_wait, "time", SimpleNamespace(time=lambda: 0.125))
     monkeypatch.setattr(cli, "_worker", lambda store, args: publication.agent)
     monkeypatch.setattr(cli, "_local_repo", lambda store, slug: str(publication.repo))
     monkeypatch.setattr(cli, "LedgerClient", lambda: publication.ledger)
@@ -2205,12 +2206,14 @@ def test_lab_publication_records_its_head_and_wait_before_polling(
         head = git(lab, "rev-parse", "refs/grade/t1")
         marked = pr_wait.read(redis, "swarm", publication.agent.name) or {}
         assert marked["pushed_head"] == head
+        assert marked["pushed_at"] == "125"
         assert marked["pushed_branch"] == "refs/grade/t1"
         assert marked["pushed_repo"] == ""
         held = idle.wait(redis, "swarm", publication.agent.name) or {}
         assert held["on"] == {"kind": "lab", "target": f"http://lab.invalid/grades/{head}"}
         assert held["reason"] == pr_wait.REASON
-        assert held["until"] - held["at"] == waits.CHECKED_MINUTES * 60_000
+        assert held["at"] == 125
+        assert held["until"] == 125 + waits.CHECKED_MINUTES * 60_000
 
     def grade(url: str) -> dict:
         recorded()

@@ -1,0 +1,20 @@
+rules:
+  - id: lab-publish-polls-without-recording-head
+    languages: [python]
+    severity: ERROR
+    message: Record the accepted lab push and its checked wait before polling its grade.
+    paths:
+      include:
+        - /scripts/swarm/publish.py
+        - lab-publish-polls-without-recording-head.py
+    patterns:
+      - pattern: lab_conclusion(...)
+      - pattern-inside: |
+          def through_lab(...):
+              ...
+      - pattern-not-inside: |
+          def through_lab(...):
+              ...
+              if $ROUTE.pushed is not None:
+                  $ROUTE.pushed(...)
+              ...

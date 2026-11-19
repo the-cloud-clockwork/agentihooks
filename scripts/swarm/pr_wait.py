@@ -8,12 +8,13 @@ so no agent relies on running swarm wait.
 """
 
 import re
+import time
 from collections.abc import Callable
 from typing import Any
 
 from scripts.gates.progress import Progress
 from scripts.swarm import idle, lab_wait, merge_queue, waits
-from scripts.swarm.store import SwarmError
+from scripts.swarm.store import AgentRecord, SwarmError
 
 TRIGGERS = re.compile(
     r"(?:^|[;&|(\n]\s*)(?:gh\s+pr\s+(?:create|ready)\b|agentihooks\s+swarm\s+\S+\s+(?:publish|merge\s+queue)\b)"
@@ -48,7 +49,13 @@ def mark(redis: Any, slug: str, agent: str, at: int, repo: str, branch: str, hea
     redis.hset(key, mapping=pushed)
 
 
-def read(redis, slug: str, agent: str) -> dict | None:
+def lab_pushed(redis: Any, slug: str, agent: AgentRecord, head: str, url: str) -> None:
+    at = int(time.time() * 1000)
+    mark(redis, slug, agent.name, at, "", f"{GRADE_REFS}{agent.task}", head)
+    idle.declare_wait(redis, slug, agent.name, at + waits.CHECKED_MINUTES * 60_000, REASON, at, waits.on("lab", url))
+
+
+def read(redis: Any, slug: str, agent: str) -> dict[str, Any] | None:
     raw = redis.hgetall(Progress(redis, slug).key(agent))
     return raw if raw.get("pushed_at") else None
 

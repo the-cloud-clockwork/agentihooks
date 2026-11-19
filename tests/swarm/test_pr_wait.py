@@ -403,6 +403,23 @@ def test_a_later_push_drops_the_head_of_an_earlier_grade_push(store: RedisStore)
     assert pushed(store) == {"pushed_at": "200", "pushed_repo": "o/r", "pushed_branch": "t1"}
 
 
+@pytest.mark.feature("swarm-push-wait")
+@pytest.mark.parametrize("where", [("", ""), ("o/r", "b"), ("o/r", ""), ("", "b")])
+def test_outer_publish_preserves_a_precise_head_only_without_a_push_destination(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, where: tuple[str, str]
+) -> None:
+    pr_wait.mark(store.redis, "sw", ME, 100, "", "refs/grade/t1", SHA)
+    monkeypatch.setattr(pr_wait, "pushed_where", lambda command, cwd: where)
+    monkeypatch.setattr(pr_wait, "pushed_head", lambda command, cwd: "")
+    assert swarm_heartbeat.push_mark(shell(PUBLISH), ENV, store.redis, 200) is True
+    expected = (
+        {"pushed_at": "200", "pushed_repo": where[0], "pushed_branch": where[1]}
+        if any(where)
+        else {"pushed_at": "100", "pushed_repo": "", "pushed_branch": "refs/grade/t1", "pushed_head": SHA}
+    )
+    assert pushed(store) == expected
+
+
 def grade_mark(store: RedisStore) -> None:
     pr_wait.mark(store.redis, "sw", ME, 100, "", "refs/grade/t1", SHA)
 
