@@ -1,6 +1,22 @@
 {
   "features": [
     {
+      "id": "credential-guard-reads-heredoc-commands",
+      "origin": "regression",
+      "ordered_at": "2026-11-19",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-credential-guard-heredoc-mask",
+      "behaviour": "The credential guard masks only a heredoc's body and its terminator line, so the rest of the delimiter line is judged as commands and a credential read placed after the delimiter is refused the same way as at the top level, for unquoted, quoted and dash heredocs. A heredoc in a segment where a stage runs a shell, source or eval, as the stage's command, through sudo, env, timeout, nohup or another launcher, a kubectl, docker or ssh wrapper, after a pipe from the heredoc's stage or inside a command substitution, has its body checked as a command of its own, so a credential read, an environment dump or a recursive search of a tree that holds a credential file inside it is refused. A heredoc fed to a command that does not run it stays data, even when a shell name is only an argument of that command; a stage started through a launcher fails closed, so any shell word in it runs the body, since launcher option values cannot be told from the command. A body that reads no credential passes either way, a recursive search rewritten after a delimiter keeps the heredoc intact, and stripping heredocs keeps the delimiter line for the tool matcher and the prompts gate.",
+      "seam": "hooks.context.credential_guard.decide and hooks.context.credential_guard.evaluate on Bash payloads, and hooks.context.credential_guard.strip_heredocs",
+      "tests": [
+        "tests/test_credential_guard.py::test_a_credential_read_after_a_heredoc_delimiter_is_refused",
+        "tests/test_credential_guard.py::test_a_credential_read_in_a_heredoc_a_shell_runs_is_refused",
+        "tests/test_credential_guard.py::test_a_heredoc_that_reads_no_credential_passes",
+        "tests/test_credential_guard.py::test_a_heredoc_a_shell_runs_keeps_the_credential_tree_scan",
+        "tests/test_credential_guard.py::test_a_rewrite_after_a_heredoc_delimiter_keeps_the_heredoc",
+        "tests/test_credential_guard.py::test_stripping_heredocs_keeps_the_rest_of_the_delimiter_line"
+      ]
+    },
+    {
       "id": "lab-scheduler-budget",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/lab-budget-live-proof",
@@ -252,6 +268,20 @@
         "tests/test_serena_binding.py::test_pre_tool_use_carries_each_agent_root_without_a_permission_decision",
         "tests/test_serena_binding.py::test_pre_tool_use_carries_no_root_in_auto_mode_or_on_other_targets",
         "tests/test_serena_binding.py::test_a_condition_decision_carries_the_root_on_its_own_decision"
+      ]
+    },
+    {
+      "id": "condition-rewrite-without-a-decision",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-condition-input-rewrite",
+      "behaviour": "On Claude a bundle condition that rewrites PreToolUse tool input with no decision leaves PreToolUse as updatedInput with no permissionDecision, in default, acceptEdits, plan, dontAsk and bypass permissions sessions alike, so Claude applies it and still runs its own permission rules and every prompt the user would have seen still shows. A condition's allow or ask still decides and carries the rewrite. Auto mode drops a rewrite with no decision and tells the agent why, because auto mode can deny a call a hook changed.",
+      "seam": "conditions.pre_effect rewrite and decision, through hook_manager.on_pre_tool_use and hook_manager.emit_permission_decision",
+      "tests": [
+        "tests/test_conditions.py::TestPreToolUseEnvelope::test_bypass_rewrite_rides_one_envelope",
+        "tests/test_conditions.py::TestPreToolUseEnvelope::test_rewrite_without_decision_carries_no_decision_outside_bypass",
+        "tests/test_conditions.py::TestPreToolUseEnvelope::test_auto_mode_drops_rewrite_without_decision",
+        "tests/test_conditions.py::TestPreToolUseEnvelope::test_auto_mode_explicit_allow_applies_rewrite",
+        "tests/test_conditions.py::TestPreToolUseEnvelope::test_explicit_ask_without_rewrite_is_emitted"
       ]
     },
     {
@@ -9915,8 +9945,17 @@
       "seam": "a fresh interpreter whose import system cannot find the tests package imports every module of scripts.ci_lab and scripts.ci_test_plan",
       "tests": [
         "tests/ci_lab/test_wheel_imports.py::test_every_lab_module_imports_without_the_tests_package",
-        "tests/ci_lab/test_wheel_imports.py::test_an_import_of_the_tests_package_fails_where_the_wheel_is_installed",
-        "tests/test_dep_manifest.py::test_the_split_deselects_with_a_grader_that_keeps_the_manifest_under_tests"
+        "tests/ci_lab/test_wheel_imports.py::test_an_import_of_the_tests_package_fails_where_the_wheel_is_installed"
+      ]
+    },
+    {
+      "id": "deselect-scripts-manifest",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2654",
+      "behaviour": "The test count job's Deselect the reused tests step runs the grader checkout's scripts.dep_manifest alone. A grader checkout whose interpreter cannot import the tests package deselects exactly the tests scripts.dep_manifest.deselect picks, and a grader checkout that keeps the manifest only under the tests package never runs that manifest.",
+      "seam": "the Deselect the reused tests step run text executed in a fake grader checkout",
+      "tests": [
+        "tests/test_dep_manifest.py::test_the_split_deselects_with_the_scripts_manifest_alone_and_never_the_tests_package"
       ]
     },
     {
