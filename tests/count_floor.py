@@ -705,6 +705,7 @@ def _admitted(
 
 
 _RETIREMENTS = "test-retirements"
+_DECIDING = ("APPROVED", "CHANGES_REQUESTED", "DISMISSED")
 _SKIPPED = {".git", "__pycache__"}
 
 
@@ -784,7 +785,10 @@ def _signed(ruling: object) -> bool:
 
 
 def retirements(base: Path, head: Path) -> dict[str, str]:
-    """Return each node id the head newly retires under a Standards reader's signed ruling, mapped to that reader."""
+    """Return each node id the head newly retires under a Standards reader's signed ruling, mapped to who signed it.
+
+    While TEST_COUNT_REVIEWED_HEAD names the pull request head, only the retirements a code owner approved are kept.
+    """
     retired = {}
     if (head / _RETIREMENTS).is_symlink():
         print(f"{_RETIREMENTS} is a symbolic link, so it admits nothing")
@@ -806,7 +810,55 @@ def retirements(base: Path, head: Path) -> dict[str, str]:
             )
             continue
         retired[entry[0]] = entry[1]["reader"]
-    return retired
+    reviewed = os.environ.get("TEST_COUNT_REVIEWED_HEAD")
+    return _approved(base, retired, reviewed) if reviewed and retired else retired
+
+
+def code_owners(root: Path, path: str) -> list[str]:
+    """Return the owners named by the last rule of the tree's CODEOWNERS that matches a repository path."""
+    rules = root / ".github" / "CODEOWNERS"
+    owners: list[str] = []
+    for line in rules.read_text().splitlines() if rules.is_file() else []:
+        pattern, *named = line.split() or [""]
+        body = re.escape(pattern.strip("/")).replace(r"\*", "[^/]*") + ("/.*" if pattern.endswith("/") else "")
+        if pattern[:1] not in ("", "#") and re.fullmatch(body, path):
+            owners = named
+    return owners
+
+
+def approvers(reviews: Path, head: str) -> set[str]:
+    """Return each reviewer, as a lower case @login, whose last approval, change request or dismissal approves head."""
+    deciding = {}
+    try:
+        for line in reviews.read_text().splitlines():
+            review = json.loads(line)
+            if isinstance(review.get("user"), str) and review.get("state") in _DECIDING:
+                deciding[review["user"].lower()] = review
+    except (OSError, ValueError, AttributeError):
+        print("The pull request reviews could not be read, so no retirement is admitted")
+        return set()
+    return {
+        f"@{user}"
+        for user, review in deciding.items()
+        if review["state"] == "APPROVED" and review.get("commit_id") == head
+    }
+
+
+def _approved(base: Path, retired: dict[str, str], head: str) -> dict[str, str]:
+    """Keep each retirement a code owner of its file approved on the pull request head, naming that owner."""
+    approved = approvers(Path(os.environ.get("TEST_COUNT_REVIEWS", "")), head)
+    kept = {}
+    for nodeid, reader in retired.items():
+        name = retirement_path(base, nodeid).relative_to(base).as_posix()
+        owners = code_owners(base, name)
+        if approving := [owner for owner in owners if owner.lower() in approved]:
+            kept[nodeid] = f"{reader} and approved by {approving[0]}"
+        else:
+            print(
+                f"{name} is not approved on the pull request head by a code owner ({', '.join(owners) or 'none'}), "
+                "so it admits nothing"
+            )
+    return kept
 
 
 def write_retirements(head: Path, nodeids: list[str], reader: str, reason: str) -> int:
