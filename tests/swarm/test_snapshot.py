@@ -12,7 +12,7 @@ import pytest
 from scripts.hub import admission
 from scripts.inbox.dispatch import Dispatcher
 from scripts.inbox.store import InboxStore
-from scripts.swarm import cli, commands, name_state, readiness, resume, snapshot
+from scripts.swarm import cli, commands, model_catalog, name_state, readiness, resume, snapshot
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import tick
 from tests.helpers.seat import seat_agent
@@ -22,6 +22,11 @@ from tests.swarm_ledger import legacy_page
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"))
 import ledger_core as core  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def catalog(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(model_catalog, "catalog", lambda *args: {"claude": [{"model": "opus"}], "codex": []})
 
 
 @pytest.fixture

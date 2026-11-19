@@ -21,7 +21,7 @@ worker's PriorityClass is a cluster object outside that module;
 | `agentihooks ci-lab-scheduler --self-test` | `python -m scripts.ci_lab scheduler --self-test` | Checks the scheduler contract offline and prints it as JSON |
 | `agentihooks ci-lab-scheduler [--interval S] [--passes N]` | `python -m scripts.ci_lab scheduler [--interval S] [--passes N]` | Runs the scheduler service: reads the runtime config, serves the lease API, `/capacity` and `/grades/<sha>` on port 8800 and `/metrics` on 9108, and runs one grading pass every interval (2 seconds), forever unless `--passes` is set |
 | `agentihooks ci-lab-worker --self-test` | `python -m scripts.ci_lab worker --self-test` | Refuses any GitHub App variable, checks the worker contract offline and prints it as JSON |
-| `agentihooks ci-lab-worker` | `python -m scripts.ci_lab worker` | Runs the worker service: builds the pod from the worker environment, leases units from the scheduler and runs each through the adapter of its kind (see [Worker executors](#worker-executors)) until SIGTERM, then lets running units drain |
+| `agentihooks ci-lab-worker` | `python -m scripts.ci_lab worker` | Runs the worker service: builds the pod from the worker environment, leases units from the scheduler and runs each through the adapter of its kind (see [Worker executors](#worker-executors)) until SIGTERM, then lets running units drain; serves `/metrics` on 9108 from its own registry until the drain ends, and exits at start when it cannot bind 9108 |
 
 The self tests make no network, Redis, object store or GitHub calls. They exit 0 when the
 contract holds and 1 with the reason on standard error when it does not. A self test fails when
@@ -179,6 +179,10 @@ with `{"error": "a grade lookup names one full commit sha"}`. See
 | Capacity shows zero slots or an estimate differs from observed duration | Check worker lease polls and their free slot offers; the load discards stale offers and uses fixed unit estimates |
 | Grades returns an empty list | Confirm the full lowercase commit sha and that the lab received and graded that head |
 
+The [node cache DaemonSet](ci-lab-node-cache.md) prepares each CI node's bare mirror and uv
+cache. Its reference covers Helm values, placement, refresh stamps, lockfile warming and
+per-node verification; a Ready cache pod alone does not prove either cache is warm.
+
 ## Environment
 
 | Name | Scheduler | Worker | Meaning |
@@ -188,6 +192,7 @@ with `{"error": "a grade lookup names one full commit sha"}`. See
 | `CI_LAB_SECRET_*` | no | yes | A secret a static unit's step reads by name: `CI_LAB_SECRET_<NAME>` is `${{ secrets.<NAME> }}`, passed by reference and given only to a step whose env reads it (see [What a gate's steps read](#what-a-gates-steps-read)) |
 | `GITHUB_APP_*` | yes | never | GitHub App identity used to post check runs and read dev push manifest artifacts; the App needs checks write and actions read |
 | `CI_LAB_REDIS_URL` | yes | no | Queue, lease and verdict index store |
+| `CI_LAB_REINDEX_ON_START` | yes | no | Only the literal string `true` rebuilds missing verdict index entries from report objects before the listeners start and prints `reindexed N verdicts`; unset or any other value skips it. See [Recovery](#recovery) |
 | `CI_LAB_RUNTIME_CONFIG` | yes | no | Path of the mounted runtime config the scheduler reads at start, before it connects anywhere; its budget sets the budget fraction and shed classes of `/capacity` and `/metrics`; `python -m scripts.ci_lab runtime <path>` validates it |
 | `CI_LAB_URL` | yes | no | The lab scheduler address the relay builds each relayed check run's and draft pull request's grade link from, `<CI_LAB_URL>/grades/<sha>` |
 | `CI_LAB_SCHEDULER_URL` | no | yes | Base address of the scheduler lease API |
@@ -203,7 +208,7 @@ with `{"error": "a grade lookup names one full commit sha"}`. See
 | `CI_LAB_MINIO_ENDPOINT`, `CI_LAB_MINIO_BUCKET`, `CI_LAB_MINIO_ACCESS_KEY`, `CI_LAB_MINIO_SECRET_KEY` | yes | no | The object store names the scheduler reads |
 | `CI_LAB_MIRROR_STORE` | yes | no | Folder of the scheduler's private git stores, one per repository, that borrow the mirror's objects |
 | `CI_LAB_REPOSITORY` | yes | yes | Repository URL whose dev runner trust list admits head actors; on the worker, the repository its node mirror holds, which the lab remote URL must name |
-| `AGENTIHOOKS_LAB_REMOTE`, `AGENTIHOOKS_LAB_REMOTE_TOKEN` | yes | yes | The lab remote URL a mirror fetches a sha GitHub or the node mirror lacks from, and its token, passed by reference; unset, the mirrors fetch from GitHub and the node mirror only |
+| `AGENTIHOOKS_LAB_REMOTE`, `AGENTIHOOKS_LAB_REMOTE_TOKEN` | yes | yes | The lab remote URL a mirror fetches a sha GitHub or the node mirror lacks from, and its token, passed by reference; unset, the mirrors fetch from GitHub and the node mirror only. On a workstation or hive the same pair gives workspaces the `lab` remote; see [Workspaces that carry the lab remote](#workspaces-that-carry-the-lab-remote) |
 | `CI_LAB_IMAGE` | yes | no | Worker image name keyed into static unit keys; empty when unset |
 | `CI_LAB_CONTROL_TOKEN` | yes | no | Bearer token the [control routes](#control-routes) require, passed by reference; unset, they refuse every request. The swarm host that presses panic or merge priority holds the same variable |
 | `UV_CACHE_DIR` | no | yes | Shared uv cache for virtual environments |
@@ -598,7 +603,10 @@ description: The lab cannot add workers for pull request heads because the KEDA 
 
 ### Lab series the rules read
 
-Only the scheduler serves lab metrics; the worker serves none. `scripts.ci_lab.scheduler.listen`
+Only the scheduler sets lab series. The worker serves `/metrics` on 9108 through
+`metrics.serve_registry` from a registry of its own that observes nothing, so its exposition holds
+the `HELP` and `TYPE` lines and no sample: a worker scrape target reads up without doubling the
+scheduler's series, which already count every unit from its report. `scripts.ci_lab.scheduler.listen`
 binds the metrics port with a fresh `metrics.Registry`, and every `GET /metrics` sets these from
 the scheduler's load snapshot through `metrics.observe_load`:
 
@@ -1063,7 +1071,8 @@ as `lab_notice`, or `0` when the send failed. Without all three settings nothing
 
 ### Push a head to the lab remote
 
-The lab remote is a git endpoint beside the scheduler. Its post receive hook,
+The lab remote is a git endpoint beside the scheduler; [Lab remote service](#lab-remote-service)
+covers where it runs, how it authenticates, its token and the client settings. Its post receive hook,
 `python -m scripts.ci_lab.remote.post_receive`, turns each pushed `refs/grade/*` head into a
 `ci.lab.head.notice` envelope on the same stream, and prints the head's grade url to the pusher:
 
@@ -1071,6 +1080,11 @@ The lab remote is a git endpoint beside the scheduler. Its post receive hook,
 $ git push -o branch=<branch> lab HEAD:refs/grade/<task>
 remote: lab grade: <CI_LAB_URL>/grades/<sha>
 ```
+
+A swarm agent makes this push with `agentihooks swarm <slug> publish --via lab`, which then waits on
+the url before it pushes origin; see [Publishing through the lab](../pillars/swarm.md#publishing-through-the-lab).
+[Workspaces that carry the lab remote](#workspaces-that-carry-the-lab-remote) covers where the `lab`
+remote comes from.
 
 The url is the scheduler's [`/grades/<sha>`](#grades-of-a-commit) route. The envelope carries the
 pushed `ref` and the `branch` push option, which becomes the head's scheduler lane. Its id covers
@@ -1100,6 +1114,101 @@ accepted.
 | `CI_LAB_REMOTE_ACTOR` | The actor every pushed head is recorded under. It must be on the trust list, or the scheduler records the head without grading it |
 | `CI_LAB_URL` | The lab scheduler address a hive and the workstation can reach, used as the base of the grade url |
 | `AGENTIHOOKS_BUS`, `AGENTIHOOKS_BUS_URL`, `AGENTIHOOKS_BUS_CREDENTIALS` | The bus the hook publishes on, opened with provisioning off |
+
+### Workspaces that carry the lab remote
+
+An agent pushes to the lab through a git remote named `lab`. The workstation, hives and swarm v2
+workspaces add that remote by themselves when two variables are set where the workspace is made:
+
+| Name | Meaning |
+|---|---|
+| `AGENTIHOOKS_LAB_REMOTE` | The lab remote URL, such as `http://<lab host>/agentihooks.git`. Unset or empty, no workspace gets the remote |
+| `AGENTIHOOKS_LAB_REMOTE_TOKEN` | The token git sends as the basic password of the user `lab`. Only the name is written to git config; git reads the value from its own environment each time the lab asks |
+
+`scripts.ci_lab.remote.checkout.carry` does the work, and `wt.sh` repeats the same steps in shell.
+For a repository the URL matches, it writes two git config entries:
+
+1. `remote.lab.url`: `git remote add lab <url>`, or `git remote set-url lab <url>` when a `lab`
+   remote already exists, so a moved lab URL replaces the old one on the next pass.
+2. `credential.<url>.helper`: a shell function for that URL alone. On git's `get` request it prints
+   the user `lab` and the value of `AGENTIHOOKS_LAB_REMOTE_TOKEN` as the password; it answers no
+   other request and stores nothing. A shell without the variable sends an empty password, which
+   the lab refuses.
+
+**Which repositories match.** The lab serves one repository per URL, so the remote goes only to the
+repository the URL names. Each URL is reduced to its repository name: the last part after a `/` or
+`:`, without a trailing `/` or `.git`, in lowercase. The remote is added only when the lab URL
+yields a name and that name equals the name of the checkout's `origin`. Host and owner are not
+compared.
+
+| `AGENTIHOOKS_LAB_REMOTE` | `origin` | Gets `lab` |
+|---|---|---|
+| `http://<lab host>/agentihooks.git` | `git@github.com:The-Cloud-Clockwork/agentihooks.git` | Yes, both name `agentihooks` |
+| `http://<lab host>/agentihooks.git` | `https://github.com/the-cloud-clockwork/agentihooks-bundle` | No, the origin names `agentihooks-bundle` |
+| unset or empty | any | No |
+
+**Where it runs.**
+
+| Workspace | When | Repository that gets the remote | When git fails |
+|---|---|---|---|
+| `wt.sh new` and `wt.sh tmp` (the `worktree` skill) | After the worktree is created, before it is leased | The primary checkout, so every worktree of that repository shares the remote and its helper | Prints `wt: the lab remote was not set in <repo>` on standard error; the worktree is still created and its path printed |
+| `agentihooks swarm <slug> publish --via lab` | Before the lab push | The task worktree's repository | Refuses the publish; see [Publishing through the lab](../pillars/swarm.md#publishing-through-the-lab) |
+| Swarm v2 workspace prepare (`scripts.swarm_v2.workspaces.prepare`) | When a prepare builds a new workspace, the first for a task or for a newer generation, after the bare mirror is cloned or verified and fetched. A prepare that replays the workspace already recorded for the same generation skips it | The bare mirror, so the workspace worktree cut from it shows the remote | A git that cannot start or does not finish fails the prepare with `git <command> did not finish`. A `git remote` or `git config` that exits with an error is not reported, and the mirror can lack the remote or its helper |
+| The hive daemon, `agentihooks hive run` | Once at start, after it loads the operator's env files and before its first quota refresh | Every checkout under `HIVE_REPO_ROOT` (default `~/dev`): its direct children and one level into a child that is not a checkout itself | A git that cannot start or runs past 60 seconds in one checkout prints `hive: the lab remote was not set in <path>: <error>`; the daemon goes on with the next checkout. A `git remote` or `git config` that exits with an error is not reported, and the checkout can lack the remote or its helper |
+
+The daemon carries its checkouts only at start. A checkout cloned while it runs gets the remote at
+the next daemon start, the next `wt.sh new` or `wt.sh tmp` from it, or the next
+`publish --via lab` in it. The daemon reads the two variables from its own environment once the
+operator env files are loaded; a hive whose daemon lacks `AGENTIHOOKS_LAB_REMOTE` carries nothing.
+
+#### Verify the lab remote
+
+```bash
+git -C <checkout> remote -v
+git -C <checkout> config --get-regexp '^credential\..*\.helper$'
+test -n "${AGENTIHOOKS_LAB_REMOTE_TOKEN:-}" && echo set || echo unset
+```
+
+A fresh worktree of a matching repository lists the lab beside origin:
+
+```text
+lab	http://<lab host>/agentihooks.git (fetch)
+lab	http://<lab host>/agentihooks.git (push)
+origin	git@github.com:The-Cloud-Clockwork/agentihooks.git (fetch)
+origin	git@github.com:The-Cloud-Clockwork/agentihooks.git (push)
+```
+
+The second command prints one `credential.<lab url>.helper` line whose function names
+`$AGENTIHOOKS_LAB_REMOTE_TOKEN` and holds no token. The third tells whether the shell that will push
+holds the token, without printing it.
+
+#### Troubleshooting the lab remote
+
+| Symptom | Cause | Check |
+|---|---|---|
+| `git remote -v` lists no `lab` | The process that made the workspace had no `AGENTIHOOKS_LAB_REMOTE`, or the URL names another repository | `test -n "${AGENTIHOOKS_LAB_REMOTE:-}" && echo set \|\| echo unset` in that process's environment, then compare the last part of the lab URL with `git remote get-url origin` |
+| A hive checkout lacks `lab` while a fresh worktree has it | The checkout was cloned after the daemon started, or the daemon started without the variable | Restart the daemon, or run `wt.sh new` against that checkout |
+| `lab` points at an old URL | The workspace was carried before the URL changed | The next `wt.sh new`, `publish --via lab` or daemon start sets the new URL; the old URL's helper entry stays and is unused |
+| A push to `lab` fails authentication | The pushing shell has no `AGENTIHOOKS_LAB_REMOTE_TOKEN`, so the helper sends an empty password, or it holds another value than the lab expects | The third verify command; set the variable in the environment the agent runs in |
+| A push to `lab` fails with `Failed to connect` | The lab host is not reachable from this machine | `git ls-remote lab` from the same host lists the lab's grade refs once the host reaches the lab; until then, publish without `--via lab` |
+| `wt: the lab remote was not set in <repo>` | `git remote` or `git config` failed in the primary checkout, for example on a locked config file | Run `git -C <repo> remote -v`; the next `wt.sh new` tries again |
+
+### Guards on a lab push
+
+A `git push` to `lab` is a push for every guard, and the guards read its `branch=` push options as
+the branches it writes, because the relay writes them on GitHub once the grade is green.
+
+| Guard | A push to `lab` |
+|---|---|
+| Prepush guard | Needs the committed `HEAD` to pass `python -m scripts.ci_prepush`, as a push to origin does, in a repository that has that module. The guard skips the value of `-o` and `--push-option` when it reads the remote |
+| [One push gate](../pillars/swarm.md#pushing-while-checks-run) | Held under the same conditions as a push to origin when one of its `branch=` options names the task's recorded branch, or any `branch=` option when the task records none. A lab push with no `branch=` option relays nothing and is never held |
+| [Panic](../pillars/swarm.md#publishing-under-panic-mode) | Spared only when every branch its `branch=` options name is a registered fix, or, with no such option, when the checked out branch it grades is one; git config must not route the push elsewhere, as for any spared push |
+| `push-stop` gate | Counts only `origin`: a commit is unpushed until an `origin` remote branch holds it, so a head pushed only to the lab still holds the session's stop |
+
+```bash
+git push -o branch=engineer-a lab HEAD:refs/grade/t1   # writes engineer-a once green: judged like a push of engineer-a
+git push lab HEAD:refs/grade/t1                         # relays nothing: one push gate passes it
+```
 
 ### Provisioning in the deployment
 
@@ -1227,6 +1336,214 @@ and `ci.lab.head.push` at stream sequence 9 for an agentihooks head pushed by
 | A notice answers `400` | A field is missing, empty or not a string, or the body is not JSON | [Send a head notice](#send-a-head-notice) |
 | A GitHub delivery answers `400` while its signature is valid | The body is not JSON, or the delivery lacks a field the receiver reads; [Heads it records](#heads-it-records) says what was recorded before the answer | `kubectl -n agentihooks-swarm logs deploy/agentihooks-swarm-github-webhook` for the delivery id, then the delivery's payload in the GitHub webhook settings |
 | A request answers `503` and the log shows `could not record the event` | The publish failed: the stream does not exist yet, or the NATS credential lacks `ci.lab.head.*` | `stream info` as above; the hub creates the stream on its next start. On `/github` the pull request observations were recorded before the failure, and a GitHub redelivery records the head |
+
+## Lab remote service
+
+The lab remote is the git endpoint that [Push a head to the lab remote](#push-a-head-to-the-lab-remote)
+pushes to. It serves one bare repository, `agentihooks.git`, over git's smart HTTP protocol to
+callers that hold the lab remote token. The deployment repository's `ci-lab` chart runs it beside
+the scheduler in the `ci-lab` namespace, and the `ci-lab` ArgoCD Application syncs that chart from
+the deployment repository's `dev` branch. Pull request 1829 of the deployment repository added it
+on 19 November 2026.
+That repository's `tests/unit/ci_lab/test_remote.py` renders every object below by name and runs
+`serve.py` against a real bare repository to check its authentication, push and error answers.
+
+### Where it runs
+
+| Object | What it does |
+|---|---|
+| StatefulSet `ci-lab-remote` | One replica on the scheduler's image, `ghcr.io/the-cloud-clockwork/agentihooks-swarm`, so the image updater that moves the scheduler moves the remote too. It runs as user 10001 with a read only root filesystem and no service account token, and takes the scheduler's node affinity, which keeps it off the pools in the chart value `scheduler.excludedPools`. It requests 100m of CPU and 256Mi of memory and may use up to 1Gi of memory. Its `reloader.stakater.com/auto` annotation makes Reloader restart the pod when the Secret `ci-lab-remote` changes |
+| Init container `init` | Runs `git init --bare /srv/git/agentihooks.git` on every start. On a repository that already exists git reinitializes it and keeps every ref and object |
+| Container `remote` | Runs `python /etc/ci-lab-remote/serve.py`, listening on port 8790, named `http`. A TCP readiness probe on that port runs every 10 seconds |
+| Claim `repo` | `local-path`, `ReadWriteOnce`, 20Gi, mounted at `/srv/git`. It holds the repository and the request bodies spooled during a push |
+| Volume `scratch` | An `emptyDir` of at most 2Gi mounted at `/tmp` |
+| ConfigMap `ci-lab-remote` | `serve.py`, `gitconfig`, `pre-receive` and `post-receive`, mounted read only at `/etc/ci-lab-remote`. The pod template carries a checksum of these files, so a change to one rolls the pod |
+| Service `ci-lab-remote` | Headless, port 8790. Pods reach the remote at `http://ci-lab-remote.ci-lab.svc:8790/agentihooks.git` |
+| Service `ci-lab-remote-lan` | `LoadBalancer` on the MetalLB address in the chart value `remote.lan.address`, port 80. LAN hosts reach the remote at `http://<lab remote address>/agentihooks.git`, and tailnet hosts reach the same URL through the tailnet's route to the LAN |
+| NetworkPolicy `ci-lab-remote` | Admits TCP 8790 only from the ranges in the chart values `lan.sources` (the LAN and the pod network) and `remote.tailnet` (the tailnet). Egress goes only to cluster DNS, the `kube-dns` pods in `kube-system` on port 53 over UDP and TCP, and to the bus, the NATS pods in the namespace in the chart value `bus.namespace` on `bus.port` (4222). The bus route is held for the grade hook; see [Grade hook environment](#grade-hook-environment) |
+
+The remote speaks plain HTTP on both addresses. On the LAN the token crosses the network in clear
+text; the tailnet encrypts its own traffic.
+
+### How it answers git
+
+`serve.py` runs `git http-backend` once per request, because the image has git but no web server.
+It answers one request per connection and ends a request whose client sends nothing for 300
+seconds.
+
+- **Authentication.** A request must carry the token as `Authorization: Bearer <token>`, or as
+  basic credentials with the user `lab` and the token as the password. The server compares the
+  header in constant time. Every other request gets `401` with an empty body and two challenges,
+  `WWW-Authenticate: Bearer realm="ci-lab"` and `WWW-Authenticate: Basic realm="ci-lab"`. Git then
+  asks its credential helpers, and with none that answers it stops with `could not read Username`.
+- **The token stays in the server.** The server takes `CI_LAB_REMOTE_TOKEN` out of its own
+  environment at start, so `git http-backend` and the hooks never receive it. An empty token stops
+  the server at start with `the lab remote needs a non empty token`.
+- **Reads.** A token holder lists and fetches every ref, over git protocol version 0 or 2.
+- **Pushes.** The `gitconfig` the container names in `GIT_CONFIG_GLOBAL` turns on
+  `http.receivepack`, advertises push options and points `core.hooksPath` at `/etc/ci-lab-remote`.
+  The `pre-receive` hook refuses the whole push when any ref it updates lies outside
+  `refs/grade/*`. It prints `lab remote: only refs/grade/* takes pushes, refused <ref>` for each
+  such ref; no ref of that push lands and `post-receive` does not run. Git's defaults hold for the
+  rest: a grade ref may be force updated or deleted, so an agent can push a rebased head to the same
+  ref.
+- **Push options.** Because push options are advertised, `git push -o branch=<name>` reaches the
+  hooks as `GIT_PUSH_OPTION_COUNT` and `GIT_PUSH_OPTION_0`, and hook output reaches the pusher as
+  `remote:` lines.
+- **Pack bodies.** Git sends a pack larger than its `http.postBuffer` in chunked encoding. The
+  server spools every request body to an unnamed file on the `repo` claim before it starts the
+  backend, so the backend reads the whole body with its length. A push needs room on the claim for
+  its spooled body as well as for the objects git keeps.
+- **Errors.** A URL that names a repository other than `agentihooks.git` gets the backend's `404`.
+  A backend that ends without writing its headers gets `500`.
+- **Logs.** The server logs each request line and its answer code on standard error, so the pod log
+  shows every `401`, `404` and `500`. Request lines carry no credentials.
+
+The first push into the empty repository carries the whole history of the pushed head. Later pushes
+leave out the objects reachable from the advertised refs the pushing clone already holds. A clone
+that holds none of the lab's grade heads sends its whole history again; `git config push.negotiate
+true` makes git find the commits it shares with the lab before it builds the pack.
+
+### Grade hook environment
+
+The `post-receive` hook runs `python -m scripts.ci_lab.remote.post_receive` from the image with the
+container's environment; [Push a head to the lab remote](#push-a-head-to-the-lab-remote) describes
+what it publishes and prints. It reads `CI_LAB_URL`, `CI_LAB_REPOSITORY`, `CI_LAB_REMOTE_ACTOR` and
+the `AGENTIHOOKS_BUS` settings from that environment, and needs a bus login allowed to publish
+`ci.lab.head.notice`. The chart gives the remote container only `CI_LAB_REMOTE_PORT`,
+`CI_LAB_REMOTE_ROOT`, `GIT_CONFIG_GLOBAL` and `CI_LAB_REMOTE_TOKEN`. The chart's only bus login,
+the Secret `ci-lab-nats` read from the OpenBao key in the chart value `openbao.nats`, belongs to the
+scheduler, so the remote does not share it; a follow up gives the remote its own login and the
+hook's settings. The
+NetworkPolicy already lets the pod reach the bus, and nothing on the remote uses that route yet.
+
+Until then the hook fails on every grade push after git has written the ref: the push lands, the
+pusher reads the hook's error in place of a grade url, and the lab records no head. Reads never run
+a hook, so `git ls-remote` and fetches answer as described above.
+
+### Token and client settings
+
+The chart generates the token and keeps it in OpenBao, as the deployment does for the
+[lab notice secret](#provisioning-in-the-deployment):
+
+1. A `Password` generator, `ci-lab-remote-token`, makes a 48 character value with 8 digits and no
+   symbols.
+2. A `PushSecret`, `ci-lab-remote-token`, writes that value to the OpenBao key `k8s/ci-lab-remote`
+   (`secret/k8s/ci-lab-remote`), property `token`, through the `openbao` ClusterSecretStore.
+   `updatePolicy: IfNotExists` writes only while the key is absent, so the value is generated once
+   and its hourly resync and every redeploy leave it alone. `deletionPolicy: None` keeps the key when
+   the PushSecret is deleted.
+3. The `ExternalSecret` `ci-lab-remote` reads the property every five minutes into the Secret
+   `ci-lab-remote` as `CI_LAB_REMOTE_TOKEN`, and the remote container takes that key as an
+   environment variable when it starts. When the Secret changes, Reloader restarts the pod, so the
+   server serves the new value without a hand restart.
+
+Every client uses two settings and passes the token by reference:
+
+| Name | Value |
+|---|---|
+| `AGENTIHOOKS_LAB_REMOTE` | The lab remote URL: `http://<lab remote address>/agentihooks.git` on a host on the LAN or the tailnet, or `http://ci-lab-remote.ci-lab.svc:8790/agentihooks.git` in a pod |
+| `AGENTIHOOKS_LAB_REMOTE_TOKEN` | The value of the `token` property of `k8s/ci-lab-remote` |
+
+The chart writes neither setting outside the `ci-lab` namespace. A host takes both from an
+agentihooks env file under `~/.agentihooks/`, which agentihooks loads into the sessions it
+launches. The deployment repository's hive template maps neither setting; a hive gets the pair only
+once both are mapped into its hive settings from the same OpenBao property, after the PushSecret has
+written it. The lab mirrors in the
+[Environment](#environment) table read the same pair.
+
+### Use it
+
+`wt.sh`, swarm v2 workspaces and the hive daemon add the `lab` remote and its credential helper
+themselves when both settings are set; [Workspaces that carry the lab remote](#workspaces-that-carry-the-lab-remote)
+says where and when. By hand, in an agentihooks checkout:
+
+```bash
+git remote add lab "$AGENTIHOOKS_LAB_REMOTE"
+git config credential."$AGENTIHOOKS_LAB_REMOTE".helper \
+  '!f() { if test "$1" = get; then printf "username=lab\npassword=%s\n" "$AGENTIHOOKS_LAB_REMOTE_TOKEN"; fi; }; f'
+git config push.negotiate true
+git ls-remote lab
+git push -o branch="$(git branch --show-current)" lab HEAD:refs/grade/<task>
+```
+
+The helper answers git's `get` request for the lab URL alone, with the user `lab` and the token
+read from the environment when git asks. Git config holds the variable's name, never its value, and
+the helper stores nothing. A shell without `AGENTIHOOKS_LAB_REMOTE_TOKEN` sends an empty password,
+which the lab answers `401`.
+
+### Verify
+
+```bash
+kubectl -n ci-lab get statefulset ci-lab-remote
+kubectl -n ci-lab get pushsecret ci-lab-remote-token
+kubectl -n ci-lab get externalsecret ci-lab-remote
+kubectl -n ci-lab get secret ci-lab-remote --template='{{range $k,$v:=.data}}{{$k}} {{end}}'
+kubectl -n ci-lab get service ci-lab-remote ci-lab-remote-lan
+```
+
+The StatefulSet shows `1/1` ready, the PushSecret `Synced`, the ExternalSecret ready, the key
+listing `CI_LAB_REMOTE_TOKEN` and the LAN Service its external address. The key listing prints key
+names only, never values.
+
+Without kubectl or the token, a request that carries no token shows whether the server is reachable
+and answering:
+
+```bash
+curl -s -D - -o /dev/null "$AGENTIHOOKS_LAB_REMOTE/info/refs?service=git-upload-pack"
+```
+
+The answer is `401` with both challenges. On 19 November 2026, with the `ci-lab` Application on the
+deployment repository's merge commit `c26d2c0c`, a hive pod asking
+`http://ci-lab-remote.ci-lab.svc:8790/agentihooks.git` this way got:
+
+```text
+HTTP/1.1 401 Unauthorized
+Server: BaseHTTP/0.6 Python/3.12.12
+WWW-Authenticate: Bearer realm="ci-lab"
+WWW-Authenticate: Basic realm="ci-lab"
+Content-Length: 0
+Connection: close
+```
+
+and `git ls-remote` of the same URL with no credential helper exited 128 with `could not read
+Username`. A timeout or a refused connection in place of the `401` points at the `Failed to connect`
+row of the troubleshooting table below. That hive carried neither client setting, and the hive
+template maps neither, so on that day the authenticated listing below had not yet run from a hive or
+from the workstation.
+
+From a hive and from the workstation, with the helper above set:
+
+```bash
+test -n "${AGENTIHOOKS_LAB_REMOTE_TOKEN:-}" && echo set || echo unset
+git ls-remote "$AGENTIHOOKS_LAB_REMOTE"; echo "exit $?"
+```
+
+An empty repository lists nothing and exits 0. Once heads are pushed, each line is a commit and its
+`refs/grade/<task>` ref. A missing or wrong token fails with `could not read Username` or
+`Authentication failed`, and the pod log shows the `401`:
+
+```bash
+kubectl -n ci-lab logs ci-lab-remote-0 -c remote --since=10m
+```
+
+### Troubleshooting
+
+| Symptom | Cause | Check |
+|---|---|---|
+| `git ls-remote` fails with `could not read Username` | The request carried no token, so the lab answered `401` and no credential helper answered git | The `test -n` line above, then the helper with `git config --get-regexp '^credential\..*\.helper$'` |
+| `Authentication failed` while the token is set | The value differs from the one the pod read at start: another copy, or a value replaced in OpenBao that the ExternalSecret has not copied yet, which takes up to five minutes before Reloader restarts the pod | Map the value again from `k8s/ci-lab-remote`; after a replacement, compare the ExternalSecret's last refresh with the pod's start time in `kubectl -n ci-lab get externalsecret ci-lab-remote` and `kubectl -n ci-lab get pod ci-lab-remote-0` |
+| `Failed to connect` or a timeout | The host is outside the NetworkPolicy's ranges, the LAN Service has no external address, or the pod is not ready | `kubectl -n ci-lab get service ci-lab-remote-lan` and the StatefulSet's ready count |
+| A push is rejected with `lab remote: only refs/grade/* takes pushes, refused <ref>` | One of its refs lies outside `refs/grade/*`, which rejects the whole push | Push `HEAD:refs/grade/<task>` alone |
+| A grade push lands but prints a hook error in place of `lab grade:` | The remote container lacks the hook's settings | [Grade hook environment](#grade-hook-environment) |
+| A request answers `404` | The URL names a repository other than `agentihooks.git` | `AGENTIHOOKS_LAB_REMOTE` ends in `/agentihooks.git` |
+| The pod restarts with `the lab remote needs a non empty token` | The Secret holds an empty `CI_LAB_REMOTE_TOKEN` | The `token` property in OpenBao and the ExternalSecret's events |
+| The pod stays in `CreateContainerConfigError` | The Secret `ci-lab-remote` does not exist yet because the ExternalSecret has not synced | `kubectl -n ci-lab describe pushsecret ci-lab-remote-token` and `kubectl -n ci-lab describe externalsecret ci-lab-remote` |
+
+To replace the token, write the new value to the same OpenBao key and property. The PushSecret
+leaves an existing key alone, the ExternalSecret copies the value within five minutes, and Reloader
+restarts the pod once the Secret changes. Then give every host and hive the new value; until a client
+has it, the lab answers its requests `401`.
 
 ## Digest specification
 
@@ -1895,7 +2212,11 @@ from the private tree. A mutant unit passes only when every mutant is killed; a 
 non zero fails its unit. Each adapter uploads a JSON report with the unit's `seconds` (and `flaky`
 for a test unit), which the scheduler stores with the verdict, and releases every tree it cut,
 also when the executor raises. SIGTERM stops leasing and lets running units drain within the
-termination grace.
+termination grace: 2100 seconds, the 30 minute unit time limit (`worker.UNIT_TIMEOUT_SECONDS`,
+which every executor's pod timeout reads) plus the five delivery calls of a unit (two upload
+URLs, two puts and the completion) at the 60 second HTTP timeout. The worker Deployment of the
+deployment repository's `ci-lab` chart sets `worker.terminationGracePeriodSeconds` to the same 2100 seconds, so
+a rollout lets the longest unit finish and deliver before the pod is killed.
 
 Check the wiring offline:
 
@@ -2048,6 +2369,9 @@ units differs from the cached verdict.
 
 ### Rebuild the index
 
+For a running deployment, [Recover the verdict index](#recover-the-verdict-index) explains how
+to request this operation at scheduler startup without writing code inside its pod.
+
 `reindex()` lists every object under `lab/`, keeps the paths `is_report` matches, reads each report
 and indexes its verdict with `SET NX`. It returns how many entries it added. Entries already present
 stay unchanged and are not counted, so a second run returns `0`. Grade, head and upload objects are
@@ -2147,6 +2471,179 @@ of lost objects runs on `LocalObjects` only.
 | `reindex()` returns `0` right after a flush | No report objects under `lab/` at this root, from a wrong directory, bucket or prefix; or every entry was already indexed | `verdicts.objects.keys("lab/")` lists the stored objects |
 | A unit folder holds `report.json` without `log.txt` | The writer stopped between the two writes; later puts never add a log | To run the unit again, delete its folder and its index entry; the next put stores a fresh verdict |
 | A worker gets `403` from `/upload-url` | The lease expired or the token belongs to another lease | Heartbeat before the lease expires; once it has expired, lease the job again |
+
+## Recovery
+
+The node mirror and uv cache can be rebuilt from the repository. The Redis verdict index can
+be rebuilt from report objects; a lost object bucket needs its backup restored first. The
+deployment repository owns the CI lab chart, node cache script and
+[bucket backup runbook](#deployment-recovery-runbook).
+Change chart values through that repository's delivery process. Pod recreation and scheduler
+restarts below retain the deployed code.
+
+The scheduler supports startup reindexing. The node recovery steps use the deployment's
+node-cache DaemonSet. The mirror age gauge still has no samples, as listed in
+[Metrics](#metrics); a successful fetch log alone does not prove the fresh-node metric requirement.
+
+### Deployment recovery runbook
+
+In the deployment repository, open `docs/2K-CI-LAB.md`, section `Recovery`, for the cluster's
+cache paths, bucket addresses and backup target. Chart overrides belong in
+`k8s/charts/ci-lab/values.yaml`; the refresh script is
+`k8s/charts/ci-lab/files/warm-node-cache.sh`. Keep deployment addresses in that repository.
+[Where they live and how they deploy](#where-they-live-and-how-they-deploy) also lists the
+deployment's lab monitoring resources.
+
+### Configure node recovery
+
+These chart overrides use an example host cache root. Keep the root consistent with worker
+mounts, and retain the chart's node selection and tolerations so a cache pod reaches each CI node:
+
+```yaml
+nodeCache:
+  path: /var/cache/example-ci-lab
+  uid: 1001
+mirror:
+  intervalSeconds: 60
+scheduler:
+  repository: https://github.com/the-cloud-clockwork/agentihooks.git
+  reindexOnStart: false
+```
+
+The chart's refresh interval defaults to 60 seconds. The `ci-lab-node-cache` DaemonSet mounts
+`nodeCache.path` as `/cache`; its `prepare` init container creates `git` and `uv` for
+`nodeCache.uid`. A cold autoscaled node needs no manual cache creation. Its first refresh:
+
+1. Creates the bare mirror at `git/agentihooks.git` under the cache root.
+2. Fetches all branches and pull request heads from `scheduler.repository`.
+3. Atomically updates the mirror's `fetched-at` stamp with the last successful fetch time in
+   epoch seconds.
+4. Warms `uv` from the dev branch's `.github/test-requirements.lock`, applying
+   `.github/test-excludes.txt` when present.
+
+The uv marker `uv/warmed-lock` records the lockfile blob. An unchanged blob skips another
+install; a repository without that dev lockfile logs a skip. This cache contains packages for
+venv creation, not the verdict index.
+
+Inspect the cache pods and their refresh output:
+
+```bash
+kubectl -n ci-lab get daemonset ci-lab-node-cache
+kubectl -n ci-lab get pods -l app.kubernetes.io/component=node-cache -o wide
+kubectl -n ci-lab logs -l app.kubernetes.io/component=node-cache -c warm --tail 20
+```
+
+A successful refresh logs `mirror fetched`, followed by `uv cache warmed for lock <blob>` or
+`uv cache current for lock <blob>`. The stamp advances before uv warming, so a failed package
+install can follow a successful git fetch. Once the worker exports `ci_lab_mirror_age_seconds`,
+verify that a fresh node's sample is below `mirror.intervalSeconds` after one completed loop.
+Until then, retain the fetch output as cache evidence and leave the metric acceptance unproven.
+
+### Recover an interrupted refresh or deleted cache
+
+Each refresh first acquires `git/.warm.lock` with `flock`. With that lock held, it removes
+stale `*.lock` files inside the mirror before fetching. A killed fetch therefore recovers on
+the next loop. A concurrent refresh logs
+`node cache refresh skipped: another run holds the cache lock` and tries again on the next loop.
+
+Deleting the host cache root leaves running pods mounted on the deleted directory. Deleting
+only its `git` directory also needs pod recreation: the root belongs to root, so the refresh
+user cannot recreate that directory. The refresh logs `node cache refresh failed` and the
+stamp stops advancing. Recreate the node-cache pod on the affected node so the kubelet and
+`prepare` init container recreate the directories:
+
+```bash
+NODE=example-ci-node
+kubectl -n ci-lab delete pod -l app.kubernetes.io/component=node-cache \
+  --field-selector "spec.nodeName=$NODE"
+```
+
+Restart affected worker pods as well when they retain the deleted mount. A replacement cache
+pod rebuilds the mirror and uv cache like a cold node; cache loss does not restore or remove
+the report objects in the bucket.
+
+### Recover the verdict index
+
+Restore access to Redis and the existing report bucket before starting the scheduler. Preserve
+the [scheduler startup prerequisites](#run-the-scheduler-service), including bus consumers,
+repository access and `CI_LAB_URL`; reindexing runs after dependency construction and before
+either HTTP listener starts.
+
+For a host service with that environment already configured, request one recovery startup:
+
+```bash
+CI_LAB_REINDEX_ON_START=true agentihooks ci-lab-scheduler
+```
+
+Only lowercase `true` requests recovery. Unset, `false`, `True` and `1` all skip reindexing.
+For the chart deployment, deliver this override through git instead:
+
+```yaml
+scheduler:
+  reindexOnStart: true
+```
+
+The chart injects `CI_LAB_REINDEX_ON_START=true` and rolls the scheduler. Read its startup output:
+
+```bash
+kubectl -n ci-lab logs deployment/ci-lab-scheduler \
+  | grep --line-buffered -E 'reindexed [0-9]+ verdicts'
+```
+
+The scheduler prints and flushes `reindexed N verdicts`, where N counts entries added, then
+starts serving. The line `reindexed 1 verdicts` is an example for one missing entry, not a
+deployed recovery result. Existing entries remain unchanged; another run can print
+`reindexed 0 verdicts`. The [store rebuild rules](#rebuild-the-index) explain the report scan.
+
+If another recovery pass is needed while the chart setting remains on, restart the scheduler:
+
+```bash
+kubectl -n ci-lab rollout restart deployment/ci-lab-scheduler
+kubectl -n ci-lab rollout status deployment/ci-lab-scheduler
+```
+
+After verification, deliver `scheduler.reindexOnStart: false` through git, or remove the
+environment override from the host service. Leaving it on reads every report on every start
+and delays readiness as the bucket grows. Reindexing restores verdict entries only: queued
+and leased units remain lost, and Redis-only disabled kinds become enabled after a Redis
+flush. Restore those disable decisions before resuming reuse; see [Disable and enable a kind](#disable-and-enable-a-kind).
+
+### Restore a lost bucket
+
+Use the [deployment recovery runbook](#deployment-recovery-runbook) to identify the backup
+endpoint and retained copy.
+The supplied deployment's nightly MinIO backup mirrors buckets without deleting objects from
+the backup. A restore cannot recover reports written after the last successful backup; their
+units miss the verdict cache and grade again.
+
+From a workstation with `mc`, inject the endpoints and credentials through the approved secret
+mechanism. Set `CI_LAB_RESTORE_ENDPOINT` and `CI_LAB_BACKUP_ENDPOINT` to the destination and
+backup addresses, and `CI_LAB_MINIO_BUCKET` to the bucket, for example `ci-lab-artifacts`.
+`MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD` below are environment references, never literal values:
+
+```bash
+mc alias set lab-restore "$CI_LAB_RESTORE_ENDPOINT" "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"
+mc alias set lab-backup "$CI_LAB_BACKUP_ENDPOINT" "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"
+mc mb --ignore-existing "lab-restore/$CI_LAB_MINIO_BUCKET"
+mc mirror --overwrite --preserve "lab-backup/$CI_LAB_MINIO_BUCKET" "lab-restore/$CI_LAB_MINIO_BUCKET"
+```
+
+Restore the bucket before recovering its Redis index. Retain both the fresh-node metric sample
+and the deployed scheduler's `reindexed N verdicts` line to prove full recovery.
+
+### Recovery troubleshooting
+
+| Symptom | Check and action |
+|---|---|
+| No cache pod on the new node | Check DaemonSet readiness, node selection, tolerations and the `prepare` init container before investigating the refresh script |
+| `mirror fetched` followed by `node cache refresh failed` | The stamp was already updated; inspect repository lockfile access, package downloads and uv cache permissions |
+| Refresh repeatedly skips | Another run holds `git/.warm.lock`; confirm that run's state before treating a stale mirror lock as the cause |
+| Refresh fails after cache directory deletion | Recreate the affected node-cache pod and workers holding deleted mounts |
+| Mirror age sample is absent | The gauge is not exported yet; the fetch stamp and logs do not satisfy the metric requirement |
+| No reindex line | Check the exact environment value and startup dependency errors; the chart's default `false` omits the variable |
+| Reindex prints zero | Existing entries are preserved, or no matching reports exist in the configured bucket; check the endpoint, bucket and report objects |
+| Scheduler readiness is delayed during recovery | Reindex reads every report before serving; inspect startup logs and object store access, then disable the startup setting after recovery |
+| Verdicts return but queued work or disabled kinds are missing | Reindex restores only verdict entries; reconstruct pending work and restore disable decisions separately |
 
 ## Reuse audit
 

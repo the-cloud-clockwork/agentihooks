@@ -1,0 +1,16 @@
+rules:
+  - id: managed-process-without-owner-check
+    languages: [python]
+    severity: ERROR
+    message: Check the managed transport host before reading its process identity locally; a foreign server has unknown local liveness.
+    paths:
+      include:
+        - /scripts/swarm/live_binding.py
+        - managed-process-without-owner-check.py
+    patterns:
+      - pattern: supervisor.owns($RECORD, supervisor.start_time)
+      - pattern-not-inside: |
+          if $RECORD.host_id and $RECORD.host_id != socket.gethostname():
+              return None
+          ...
+          return supervisor.owns($RECORD, supervisor.start_time)

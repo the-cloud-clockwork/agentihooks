@@ -4,6 +4,7 @@ import threading
 import time
 import urllib.error
 from collections.abc import Iterator
+from concurrent.futures import Future, wait
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -16,6 +17,7 @@ from scripts.ci_lab.units import Unit
 CAPABILITIES = frozenset({"net", "browser"})
 UNIT_A = Unit(kind="test", key="a", members=("tests/a.py::t",))
 UNIT_B = Unit(kind="test", key="b", members=("tests/b.py::t",))
+EXPECTED_GRACE_SECONDS = 2_100.0
 
 
 class Clock:
@@ -48,6 +50,23 @@ class Counted(leases.Leases):
     def owns(self, job: str, token: str) -> bool:
         self.owned.append(job)
         return super().owns(job, token)
+
+
+@dataclass(frozen=True)
+class Calls(worker.Client):
+    calls: list[str] = field(default_factory=list[str])
+
+    def upload_url(self, job: str, token: str, name: str) -> str | None:
+        self.calls.append("upload_url")
+        return super().upload_url(job, token, name)
+
+    def put(self, url: str, path: Path) -> None:
+        self.calls.append("put")
+        super().put(url, path)
+
+    def complete(self, job: str, token: str, outcome: str) -> bool:
+        self.calls.append("complete")
+        return super().complete(job, token, outcome)
 
 
 class Sink:
@@ -410,6 +429,59 @@ def test_a_unit_past_the_termination_grace_is_left_to_reap(
     assert found(jobs, "h1:test:a").state == "leased"
     clock.now += lab.ttl_ms + 1
     assert lab.reap(clock.now) == [("h1:test:a", "pending")]
+
+
+@pytest.mark.feature("lab-worker-pod-loop")
+def test_a_built_worker_waits_out_its_longest_unit_and_its_delivery_after_stop(
+    scheduler: str, jobs: queue.Queue, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    jobs.enqueue([UNIT_A], "h1", {})
+    release = threading.Event()
+    waits: list[float | None] = []
+
+    def held(lease: worker.Lease) -> worker.Finished:
+        release.wait(10)
+        return finished(tmp_path, lease)
+
+    def virtual(
+        futures: list[Future[None]], timeout: float | None = None
+    ) -> tuple[set[Future[None]], set[Future[None]]]:
+        waits.append(timeout)
+        if timeout is not None and timeout >= EXPECTED_GRACE_SECONDS:
+            release.set()
+            return wait(futures, timeout=10)
+        return wait(futures, timeout=0)
+
+    monkeypatch.setattr(worker, "wait", virtual)
+    built = worker.build({"CI_LAB_SCHEDULER_URL": scheduler}, {"test": held}, "pod-1", 1, None)
+
+    assert len(built.run_once()) == 1
+    built.stop()
+    left = built.run()
+    release.set()
+
+    assert left == []
+    assert waits == [EXPECTED_GRACE_SECONDS]
+    assert found(jobs, "h1:test:a").outcome == "passed"
+
+
+@pytest.mark.feature("lab-worker-pod-loop")
+def test_the_termination_grace_counts_every_delivery_call_of_a_unit(
+    scheduler: str, jobs: queue.Queue, tmp_path: Path
+) -> None:
+    jobs.enqueue([UNIT_A], "h1", {})
+    client = Calls(scheduler)
+
+    def done(lease: worker.Lease) -> worker.Finished:
+        return finished(tmp_path, lease)
+
+    one = worker.Worker(client, {"test": done}, "pod-1", 1, wait_ms=0, grace_s=10)
+    one.run_once()
+
+    assert one.drain() == []
+    assert client.calls == ["upload_url", "put", "upload_url", "put", "complete"]
+    assert len(client.calls) == worker.DELIVERY_CALLS
+    assert client.timeout == 60.0
 
 
 @pytest.mark.feature("lab-worker-pod-loop")

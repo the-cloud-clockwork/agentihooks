@@ -522,6 +522,17 @@
       ]
     },
     {
+      "id": "swarm-tasks-read-command",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-swarm-tasks-read-command",
+      "behaviour": "agentihooks swarm <slug> tasks prints one JSON document keyed tasks and freezes, holding every task row and every freeze and focus record the swarm's ledger client reads for that swarm, so a caller names only the swarm; an unreachable ledger exits 1 with the reason on stderr and nothing on stdout.",
+      "seam": "agentihooks swarm <slug> tasks through scripts.swarm.cli.main, reading LedgerClient.tasks and LedgerClient.freezes",
+      "tests": [
+        "tests/swarm/test_tasks_read.py::test_swarm_tasks_prints_every_task_row_and_freeze_of_the_swarm_as_one_json_document",
+        "tests/swarm/test_tasks_read.py::test_swarm_tasks_exits_one_and_prints_no_rows_when_the_ledger_is_unreachable"
+      ]
+    },
+    {
       "id": "swarm-seat-admission-race",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2680",
@@ -1146,6 +1157,18 @@
       "tests": [
         "tests/swarm/test_managed_lifecycle.py::test_the_binding_pass_fails_a_connected_record_whose_server_died_and_frees_its_slot",
         "tests/swarm/test_managed_lifecycle.py::test_the_binding_pass_keeps_a_record_from_another_host_or_with_unknown_liveness"
+      ]
+    },
+    {
+      "id": "managed-process-owner-observation",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-live-binding-process-false",
+      "behaviour": "Managed Codex app server process liveness is inspected only on the owning host. A connected foreign transport with an empty runtime target remains unknown without a process mismatch or local process inspection, while local live bindings match and genuine local server death still reports a process mismatch.",
+      "seam": "scripts.swarm.runtime.HerdrRuntime.bindings through scripts.swarm.live_binding.server_alive, record and findings",
+      "tests": [
+        "tests/swarm/test_managed_lifecycle.py::test_a_foreign_managed_server_has_unknown_process_liveness",
+        "tests/swarm/test_managed_lifecycle.py::test_a_local_managed_server_keeps_its_matching_binding",
+        "tests/swarm/test_managed_lifecycle.py::test_a_dead_local_managed_server_still_has_a_process_mismatch"
       ]
     },
     {
@@ -4804,6 +4827,20 @@
         "tests/swarm/test_default_models.py::test_a_set_that_fixes_no_new_lane_model_reads_no_catalog",
         "tests/swarm/test_default_models.py::test_a_lane_update_without_a_model_reads_no_catalog",
         "tests/swarm/test_default_models.py::test_lane_model_validation_uses_the_store_cache_and_current_context"
+      ]
+    },
+    {
+      "id": "template-lane-model-listed-in-a-harness-catalog",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2700",
+      "behaviour": "Creating a swarm, from a template with agentihooks swarm create or from any config with lanes, is refused before the swarm config is stored when a lane model is not auto, not empty and not listed in the claude or codex model catalog, with the same message swarm set gives; a creation that fixes no lane model never reads the catalog, and the catalog is read through the store's Redis cache with the process environment and the current time.",
+      "seam": "SwarmStore.create through default_models.lane_models and default_models.lane_refusal, reached by cli.cmd_create with a template",
+      "tests": [
+        "tests/swarm/test_default_models.py::test_create_refuses_a_template_lane_model_no_harness_catalog_lists",
+        "tests/swarm/test_default_models.py::test_create_refuses_a_lane_model_no_harness_catalog_lists_without_writing",
+        "tests/swarm/test_default_models.py::test_create_accepts_lane_models_any_harness_catalog_lists",
+        "tests/swarm/test_default_models.py::test_a_create_that_fixes_no_lane_model_reads_no_catalog",
+        "tests/swarm/test_default_models.py::test_create_reads_lane_models_through_the_store_cache_and_current_context"
       ]
     },
     {
@@ -9137,7 +9174,7 @@
       "id": "lab-worker-pod-loop",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/lab-worker",
-      "behaviour": "The CI lab worker leases units into its free slots over the scheduler's HTTP lease API with the capabilities net and browser, runs each on the executor its kind names side by side, heartbeats each lease while its executor runs, uploads the report and log through the presigned URLs and completes the lease; a unit whose executor raises stops heartbeating and is left for the scheduler to reap, a refused token ends a unit's heartbeats and delivery, a heartbeat that cannot reach the scheduler is skipped, stop lets running units finish within the termination grace and abandons the rest to reap, slots come from the CPU quota capped by CI_LAB_SLOTS, and the worker environment refuses every GitHub App or Redis variable.",
+      "behaviour": "The CI lab worker leases units into its free slots over the scheduler's HTTP lease API with the capabilities net and browser, runs each on the executor its kind names side by side, heartbeats each lease while its executor runs, uploads the report and log through the presigned URLs and completes the lease; a unit whose executor raises stops heartbeating and is left for the scheduler to reap, a refused token ends a unit's heartbeats and delivery, a heartbeat that cannot reach the scheduler is skipped, stop lets running units finish within the termination grace (the unit time limit plus five delivery calls at the client timeout) and abandons the rest to reap, slots come from the CPU quota capped by CI_LAB_SLOTS, and the worker environment refuses every GitHub App or Redis variable.",
       "seam": "scripts.ci_lab.worker Worker.run_once, run, stop, drain and free, Client, environment, slots and build, against scripts.ci_lab.lease_api.serve",
       "tests": [
         "tests/ci_lab/test_worker.py::test_units_from_two_heads_run_concurrently_on_one_pod",
@@ -9149,6 +9186,8 @@
         "tests/ci_lab/test_worker.py::test_a_refused_upload_url_ends_the_units_delivery",
         "tests/ci_lab/test_worker.py::test_stop_lets_running_units_finish_within_the_termination_grace",
         "tests/ci_lab/test_worker.py::test_a_unit_past_the_termination_grace_is_left_to_reap",
+        "tests/ci_lab/test_worker.py::test_a_built_worker_waits_out_its_longest_unit_and_its_delivery_after_stop",
+        "tests/ci_lab/test_worker.py::test_the_termination_grace_counts_every_delivery_call_of_a_unit",
         "tests/ci_lab/test_worker.py::test_run_leases_again_as_a_unit_frees_its_slot",
         "tests/ci_lab/test_worker.py::test_the_pod_leases_only_units_its_net_and_browser_capabilities_and_free_slots_fit",
         "tests/ci_lab/test_worker.py::test_the_client_speaks_the_lease_api_and_reads_a_refused_token_as_none",
@@ -9184,6 +9223,17 @@
         "tests/ci_lab/test_executors.py::test_executors_name_the_adapter_of_every_unit_kind",
         "tests/ci_lab/test_executors.py::test_settings_read_the_worker_contract_environment",
         "tests/ci_lab/test_executors.py::test_main_runs_the_worker_over_the_adapters_until_sigterm_stops_it"
+      ]
+    },
+    {
+      "id": "lab-worker-metrics",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-worker-metrics",
+      "behaviour": "agentihooks ci-lab-worker binds the contract metrics port while the worker runs and answers GET /metrics with the Prometheus exposition of its own metrics registry, which observes no scheduler gauge and no unit sample; any other path answers 404 and a POST 405; once SIGTERM drains the worker, the server thread ends and the port closes.",
+      "seam": "scripts.ci_lab.executors main, scripts.ci_lab.metrics serve_registry and expose, and scripts.ci_lab.contract METRICS_PORT",
+      "tests": [
+        "tests/ci_lab/test_executors.py::test_main_serves_the_worker_metrics_on_the_contract_port_until_the_worker_drains",
+        "tests/ci_lab/test_metrics.py::test_a_registry_server_answers_only_the_metrics_route_over_http"
       ]
     },
     {
