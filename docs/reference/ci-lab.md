@@ -1426,12 +1426,12 @@ base files under its base paths, the grader revision and the toolchain (see
 [Inputs per kind](#inputs-per-kind)). The plan groups units by label, so each label is one gate
 with its own check run.
 
-On dev, `python -m scripts.ci_lab.static_gates --root .` lists 36 gate steps:
+On dev, `python -m scripts.ci_lab.static_gates --root .` lists 38 gate steps:
 
 | Gate | Steps from | Gate steps |
 |---|---|---|
-| `lint` | The `lint` job of `test.yml` | 26 |
-| `type-gate` | The `type-gate` job of `test.yml` | 1 |
+| `lint` | The `lint` job of `test.yml` | 27 |
+| `type-gate` | The `type-gate` job of `test.yml` | 2 |
 | `semgrep/scan` | The `scan` job of `semgrep.yml` | 4 |
 | `semgrep/feature-tests` | The `feature-tests` job of `semgrep.yml` | 2 |
 | `semgrep/charts` | The `charts` job of `semgrep.yml` | 3 |
@@ -1458,8 +1458,9 @@ The pass that releases a head from its lane catches a `ValueError`, `KeyError`,
 `yaml.YAMLError`, `jsonschema.ValidationError` or failed git command from expansion. It records
 the action `cannot expand <head>: <error>` and drops the head: the head has already left
 `agentihooks-ci:waiting` and is not put back, so it gets no grade and no check runs. A manifest
-fetch that raises `FetchUnanswered` holds the head again instead, as `holding <head>: <error>`.
-The scheduler service prints each action on its own line:
+fetch that raises `FetchPending` or `FetchUnanswered` holds the head again instead, as
+`holding <head>: <error>`; [Test units](#test-units) describes both. The scheduler service prints
+each action on its own line:
 
 ```bash
 kubectl logs -n ci-lab deploy/ci-lab-scheduler | grep 'cannot expand'
