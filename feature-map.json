@@ -10663,7 +10663,11 @@
         "tests/ci_lab/test_plant_grade.py::test_two_required_checks_make_the_grade_ambiguous",
         "tests/ci_lab/test_plant_grade.py::test_a_failed_twin_is_named_and_the_plant_is_never_pushed",
         "tests/ci_lab/test_plant_grade.py::test_conflicting_gate_checks_cannot_hide_an_extra_failure",
-        "tests/ci_lab/test_plant_grade.py::test_the_default_fetch_respects_the_remaining_budget_on_rate_limits"
+        "tests/ci_lab/test_plant_grade.py::test_the_default_fetch_respects_the_remaining_budget_on_rate_limits",
+        "tests/ci_lab/test_plant_publish.py::test_rest_publication_preserves_exact_trees_and_commit_identity",
+        "tests/ci_lab/test_plant_publish.py::test_rest_reruns_never_rewind_a_completed_plant",
+        "tests/ci_lab/test_plant_publish.py::test_rest_rejects_an_unexpected_object_identity_before_moving_the_ref",
+        "tests/ci_lab/test_plant_publish.py::test_rest_rejects_a_divergent_ref_without_writing_objects"
       ]
     },
     {
