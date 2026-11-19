@@ -596,8 +596,9 @@ def test_profile_and_saved_handoff_harnesses_are_reserved_before_automatic_work(
         "plan": [],
     }
     observed = [account(sessions=2), account("cx", sessions=2, harness="codex")]
-    decision = capacity.calculate(config, observed, [], {"eng": 1, "ci": 1, "plan": 0}, requirements)
     runtime._quota_accounts = observed
+    narrowed = runtime._quota_preferring(requirements)
+    decision = capacity.calculate(config, observed, [], {"eng": 1, "ci": 1, "plan": 0}, narrowed)
     runtime._quota_allocations = decision["allocation"]
     assert runtime._quota_choice("claude", "required", True, "eng") == ("claude", "required")
     assert runtime._quota_choice("claude", "priority", False, "ci")[0] == "codex"
