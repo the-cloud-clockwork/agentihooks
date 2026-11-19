@@ -1302,6 +1302,45 @@ def test_a_newer_backfill_head_drops_the_held_units_of_the_older_one(lab: Callab
     assert run.engine.queue.pending() == [scheduler.job_id(HEAD_B, newer)]
 
 
+@pytest.mark.feature("lab-scheduler-budget-charge")
+def test_a_finished_unit_charges_its_slots_times_its_report_seconds_once_and_no_seconds_charges_nothing(
+    lab: Callable[..., Run],
+) -> None:
+    timed, untimed = unit(1), unit(2)
+    run = lab({HEAD_B: plan({"lint": (timed, untimed)})}, spend=LOW_BUDGET)
+    run.push(HEAD_B, lane="pr-2", event="pull_request", action="synchronize")
+    run.tick(1000)
+    first, second = run.lease(slots=2)
+    run.finish(first, "passed", {"seconds": 3000.0})
+    run.finish(second, "passed", {})
+    run.tick(1100)
+    spending = run.engine.spending
+    assert spending is not None
+    assert spending.spent() == 50.0
+    run.tick(1200)
+    assert spending.spent() == 50.0
+
+
+@pytest.mark.feature("lab-scheduler-budget-charge")
+def test_the_first_pass_after_finished_units_shed_a_class_names_it_with_the_spent_share_once(
+    lab: Callable[..., Run],
+) -> None:
+    pulled, swept = unit(1), unit(2)
+    run = lab({HEAD_B: plan({"lint": (pulled,)}), HEAD_A: plan({"lint": (swept,)})}, spend=LOW_BUDGET)
+    run.engine.queue.offer("worker", 8, 1000)
+    run.push(HEAD_B, lane="pr-2", event="pull_request", action="synchronize")
+    run.tick(1000)
+    (grant,) = run.lease()
+    run.finish(grant, "passed", {"seconds": 3600.0})
+    assert not any(action.startswith("shed ") for action in run.tick(1100))
+    line = "shed backfill with 0.60 of the day's core budget spent"
+    assert line in run.tick(1200)
+    run.push(HEAD_A, lane="sweep", event="backfill")
+    assert line not in run.tick(1300)
+    assert [slot.held for slot in run.grade(HEAD_A).units.values()] == [True]
+    assert run.engine.queue.pending() == []
+
+
 @pytest.mark.feature("lab-scheduler-metrics")
 def test_the_exposition_counts_the_workers_that_polled_within_the_ready_window_after_a_pass(
     lab: Callable[..., Run],
