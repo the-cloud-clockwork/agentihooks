@@ -4703,6 +4703,19 @@
       ]
     },
     {
+      "id": "stale-queued-run-sweep",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-zombie-queued-runs",
+      "behaviour": "The Lost runner workflow, before its watch, lists the repository's queued runs, logs the job states of each run whose last update is at least 24 hours old, posts cancel to each, then force-cancel to the ones still queued, and warns for any run that stays queued.",
+      "seam": "scripts.ci_stale_runs stale, clear and main, and the Lost runner workflow sweep step",
+      "tests": [
+        "tests/test_ci_stale_runs.py::test_a_run_untouched_for_a_day_is_stale_and_a_younger_one_is_not",
+        "tests/test_ci_stale_runs.py::test_clear_force_cancels_only_the_runs_a_cancel_left_queued",
+        "tests/test_ci_stale_runs.py::test_main_sweeps_only_stale_runs_and_warns_for_each_one_left",
+        "tests/test_ci_stale_runs.py::test_the_lost_runner_workflow_sweeps_stale_runs_with_its_app_token_before_the_watch"
+      ]
+    },
+    {
       "id": "operator-host-plan-upload",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2482",
