@@ -10564,7 +10564,9 @@
         "tests/swarm/test_focus_check.py::test_the_client_raises_a_failure_other_than_a_missing_target",
         "tests/swarm/test_focus_check.py::test_unclaimed_minutes_count_whole_minutes_and_never_go_below_zero",
         "tests/swarm/test_focus_check.py::test_the_focus_route_reads_the_slug_state_fix_phase_and_clock",
-        "tests/swarm/test_focus_check.py::test_the_focus_route_answers_404_for_a_target_that_does_not_exist"
+        "tests/swarm/test_focus_check.py::test_the_focus_route_answers_404_for_a_target_that_does_not_exist",
+        "tests/swarm/test_focus_check.py::test_a_ledger_with_no_tasks_reads_each_focus_with_no_tasks",
+        "tests/swarm/test_focus_check.py::test_the_ledger_read_sends_a_focus_path_to_the_focus_read_with_its_slug"
       ]
     },
     {
@@ -10578,7 +10580,13 @@
         "tests/tick/steps/test_focus_unclaimed.py::test_a_focused_claimable_task_unclaimed_past_three_ticks_is_a_finding",
         "tests/tick/steps/test_focus_unclaimed.py::test_a_claim_or_a_hold_drops_the_count",
         "tests/tick/steps/test_focus_unclaimed.py::test_no_focus_raises_no_finding",
-        "tests/tick/steps/test_focus_unclaimed.py::test_the_finding_goes_to_the_master_inbox"
+        "tests/tick/steps/test_focus_unclaimed.py::test_the_finding_goes_to_the_master_inbox",
+        "tests/tick/steps/test_focus_unclaimed.py::test_each_tick_stores_its_time_and_keeps_the_first_unclaimed_time",
+        "tests/tick/steps/test_focus_unclaimed.py::test_a_freeze_record_before_the_focus_does_not_stop_the_count",
+        "tests/tick/steps/test_focus_unclaimed.py::test_a_task_the_gate_holds_does_not_stop_the_count_of_the_next_one",
+        "tests/tick/steps/test_focus_unclaimed.py::test_a_task_below_three_ticks_does_not_stop_the_finding_of_the_next_one",
+        "tests/tick/steps/test_focus_unclaimed.py::test_no_stored_count_is_no_finding",
+        "tests/tick/steps/test_focus_unclaimed.py::test_the_doctor_fix_phase_comes_from_the_swarm_config"
       ]
     },
     {

@@ -411,3 +411,24 @@ def test_the_focus_route_answers_404_for_a_target_that_does_not_exist(monkeypatc
     with pytest.raises(APIError) as raised:
         routes.focus_read(services, "demo", "focus/tasks/nope")  # type: ignore[arg-type]
     assert (raised.value.status, raised.value.code, str(raised.value)) == (404, "resource_missing", "No such target")
+
+
+@pytest.mark.feature("swarm-focus-read")
+def test_a_ledger_with_no_tasks_reads_each_focus_with_no_tasks() -> None:
+    bare = {key: value for key, value in doc(record("phases/p1", "focus")).items() if key != "tasks"}
+    [found] = every(bare, 0)
+    assert (found["target"], found["claimable"], found["done"], found["tasks"]) == ("phases/p1", 0, [], [])
+
+
+@pytest.mark.feature("swarm-focus-read")
+def test_the_ledger_read_sends_a_focus_path_to_the_focus_read_with_its_slug(monkeypatch: pytest.MonkeyPatch) -> None:
+    asked: list[tuple[Any, str, str]] = []
+
+    def focus_read(services: Any, slug: str, path: str) -> dict[str, Any]:
+        asked.append((services, slug, path))
+        return {"data": []}
+
+    services = SimpleNamespace()
+    monkeypatch.setattr(routes, "focus_read", focus_read)
+    assert routes.ledger_read(services, "demo", "focus/tasks/t1", {}) == {"data": []}  # type: ignore[arg-type]
+    assert asked == [(services, "demo", "focus/tasks/t1")]

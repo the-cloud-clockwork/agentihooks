@@ -88,3 +88,60 @@ def test_the_finding_goes_to_the_master_inbox(store: Any) -> None:
     [item] = inbox.pending_items(lead)
     assert "(focus unclaimed)" in item.text
     assert "claimable but unclaimed for 4 ticks" in item.text
+
+
+@pytest.mark.feature("swarm-focus-unclaimed-finding")
+def test_each_tick_stores_its_time_and_keeps_the_first_unclaimed_time(store: Any) -> None:
+    from scripts.swarm.health import focus_unclaimed
+
+    ledger = doc(record("tasks/t1", "focus"), tasks=[task("t1")])
+    focus_unclaimed.observe(store, SLUG, ledger, 1000)
+    focus_unclaimed.observe(store, SLUG, ledger, 2000)
+    stored = focus_unclaimed.read(store, SLUG)
+    assert stored["at"] == 2000
+    assert stored["tasks"] == {"t1": {"ticks": 2, "since": 1000, "title": "t1", "focus": "tasks/t1"}}
+
+
+@pytest.mark.feature("swarm-focus-unclaimed-finding")
+def test_a_freeze_record_before_the_focus_does_not_stop_the_count(store: Any) -> None:
+    ledger = doc(record("phases/p2"), record("tasks/t1", "focus"), tasks=[task("t1")])
+    assert [found.subject for found in ticks(store, ledger, 4)] == ["t1"]
+
+
+@pytest.mark.feature("swarm-focus-unclaimed-finding")
+def test_a_task_the_gate_holds_does_not_stop_the_count_of_the_next_one(store: Any) -> None:
+    ledger = doc(record("phases/p1", "focus"), tasks=[task("t1", state="claimed"), task("t2")])
+    assert [found.subject for found in ticks(store, ledger, 4)] == ["t2"]
+
+
+@pytest.mark.feature("swarm-focus-unclaimed-finding")
+def test_a_task_below_three_ticks_does_not_stop_the_finding_of_the_next_one(store: Any) -> None:
+    rows = [task("t1", state="claimed"), task("t2")]
+    ledger = doc(record("phases/p1", "focus"), tasks=rows)
+    ticks(store, ledger, 3)
+    rows[0]["state"] = "open"
+    assert [found.subject for found in ticks(store, ledger, 1)] == ["t2"]
+
+
+@pytest.mark.feature("swarm-focus-unclaimed-finding")
+def test_no_stored_count_is_no_finding(store: Any) -> None:
+    from scripts.swarm.health import focus_unclaimed
+
+    assert focus_unclaimed.read(store, SLUG) == {}
+    assert focus_unclaimed.findings(store, SLUG) == []
+
+
+@pytest.mark.feature("swarm-focus-unclaimed-finding")
+def test_the_doctor_fix_phase_comes_from_the_swarm_config(store: Any) -> None:
+    from scripts.doctor import loop, priming
+    from scripts.swarm import freeze
+    from scripts.swarm.health import focus_unclaimed
+    from scripts.swarm.store import SwarmConfig
+
+    store.create(SwarmConfig("fix", "/repo", max_eng=1, max_ci=1, template=priming.TEMPLATE))
+    rows = [task("t1", phase=loop.FIX_PHASE)]
+    ledger = {**doc(record("lane:eng", "focus"), tasks=rows), freeze.WATCHED: ["the focus elsewhere"]}
+    assert ticks(store, ledger, 4) == []
+    for at in range(4):
+        focus_unclaimed.observe(store, "fix", ledger, at)
+    assert [found.subject for found in focus_unclaimed.findings(store, "fix")] == ["t1"]
