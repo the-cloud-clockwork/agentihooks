@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -42,8 +43,10 @@ def test_a_range_narrowed_to_high_clamps_an_xhigh_pick_to_its_edge(tmp_path, mon
     assert _launched(tmp_path, monkeypatch, "eng", task) == ["--model", "opus", "--effort", "high"]
 
 
-@pytest.mark.parametrize("lane,edge", [("eng", "xhigh"), ("ci", "xhigh"), ("plan", "xhigh"), ("master", "high")])
-def test_a_lane_or_environment_effort_outside_the_range_launches_at_its_edge(tmp_path, monkeypatch, lane, edge):
+@pytest.mark.parametrize("lane,edge", [("eng", "xhigh"), ("ci", "xhigh"), ("plan", "xhigh"), ("master", "xhigh")])
+def test_a_lane_or_environment_effort_outside_the_range_launches_at_its_edge(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lane: str, edge: str
+) -> None:
     lanes = {lane: {"agent": "claude", "model": "auto", "effort": "max"}}
     task = {"id": "master", "peer": ""} if lane == "master" else TASK
     launch_env = {"AGENTIHOOKS_CLAUDE_EFFORT": "max"}
@@ -53,13 +56,15 @@ def test_a_lane_or_environment_effort_outside_the_range_launches_at_its_edge(tmp
 @pytest.mark.parametrize(
     "lane,configured,launched",
     [
-        ("master", ("low", "medium"), ("high", "high")),
-        ("master", ("medium", "xhigh"), ("high", "xhigh")),
+        ("master", ("low", "medium"), ("xhigh", "xhigh")),
+        ("master", ("medium", "xhigh"), ("xhigh", "xhigh")),
         ("master", ("xhigh", "max"), ("xhigh", "max")),
         ("eng", ("low", "medium"), ("low", "medium")),
     ],
 )
-def test_a_master_launch_range_is_the_swarm_range_lifted_to_high(lane, configured, launched):
+def test_a_master_launch_range_is_the_swarm_range_lifted_to_xhigh(
+    lane: str, configured: tuple[str, str], launched: tuple[str, str]
+) -> None:
     config = SwarmConfig("sw", "/repo", 0, 0, effort_min=configured[0], effort_max=configured[1])
     assert effort_range.bounds(config, lane) == launched
 

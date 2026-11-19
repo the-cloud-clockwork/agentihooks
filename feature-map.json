@@ -12,6 +12,19 @@
       ]
     },
     {
+      "id": "master-effort-xhigh",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-effort-xhigh",
+      "behaviour": "Masters start at effort xhigh by default and never below it, including handoff successors and restored sessions with a saved lower effort. Other lanes retain their configured swarm effort range.",
+      "seam": "master_launch.fill, HerdrRuntime.spawn and HerdrRuntime.resume at the harness arguments, and effort_range.bounds for worker lanes",
+      "tests": [
+        "tests/swarm/test_master_effort_xhigh.py::test_master_defaults_and_saved_lower_efforts_start_at_xhigh",
+        "tests/swarm/test_master_effort_xhigh.py::test_new_and_handoff_master_launches_pass_xhigh_to_the_harness",
+        "tests/swarm/test_master_effort_xhigh.py::test_restored_masters_raise_saved_effort_to_xhigh",
+        "tests/swarm/test_master_effort_xhigh.py::test_worker_lanes_keep_the_swarm_effort_range"
+      ]
+    },
+    {
       "id": "lab-skipped-authoritative-gates",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2516",
@@ -77,6 +90,16 @@
       ]
     },
     {
+      "id": "lab-scheduler-memory",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2755",
+      "behaviour": "The CI lab scheduler reads its live grades one at a time: a pass, the load that GET /capacity and every metrics scrape answer from, and the grades of a commit each hold at most one parsed live grade beside the one being read, however many grades are live, and admission keeps only the tier and run of each grade with held units and reads it again as it admits it, most urgent tier first, so the scheduler's memory no longer grows with the live set.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick, Scheduler.load and Scheduler.grades_of over fakeredis and the local object store, counting the parsed grades alive at once through scripts.ci_lab.scheduler._parse",
+      "tests": [
+        "tests/ci_lab/test_scheduler_memory.py::test_a_pass_and_a_load_hold_one_parsed_live_grade_at_a_time_however_many_grades_hold_units"
+      ]
+    },
+    {
       "id": "doctor-lab-health",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/swarm-doctor-lab-detector",
@@ -102,6 +125,16 @@
       "seam": "scripts.ci_lab.scheduler.serve and main, scripts.ci_lab.contract.SCHEDULER, scripts.events.nats.NatsBus provisioning",
       "tests": [
         "tests/ci_lab/test_scheduler.py::test_serve_ticks_the_relay_after_each_pass_and_prints_its_actions"
+      ]
+    },
+    {
+      "id": "tick-site-ordering-does-not-propagate-loss",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2732",
+      "behaviour": "A site barrier orders a tick step after earlier work without making added needs propagate drops. Only declared needs propagate abandoned, cut or raised predecessors, including slow handoff and transitive dependents.",
+      "seam": "registry.site_edges through engine.run_graph and the pass pool",
+      "tests": [
+        "tests/tick/test_site_failure_needs.py::test_abandoned_page_relay_does_not_drop_barrier_only_slow_work"
       ]
     },
     {
@@ -972,6 +1005,19 @@
         "tests/hive/test_reports.py::test_a_hub_admitted_worker_its_hive_reports_no_pane_for_reads_unknown",
         "tests/hive/test_reports.py::test_a_hub_admitted_worker_on_this_hive_is_read_from_its_own_herdr",
         "tests/tick/steps/test_idle_claim_retire.py::test_a_finished_hub_admitted_worker_on_another_hive_reaches_the_idle_retire"
+      ]
+    },
+    {
+      "id": "live-binding-reads-hub-admitted-bindings-from-their-hive",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-live-binding-unobserved-model",
+      "behaviour": "A Codex app server worker the hub admitted to another hive, which carries no host target, takes its live binding facts from the binding its hive reports for its execution and generation instead of the controller's own managed path, whose server check can never pass off the server's host, so the live worker is recorded with its observed model and effort; each hive reports the binding of every hub admitted execution it runs, and a missing report, map entry, binding or hive reader, or an entry for another generation, gives no facts.",
+      "seam": "scripts.hive.daemon.execution_report writes the admitted bindings, read through scripts.hive.reports.Reports.admitted_binding by scripts.swarm.runtime.HerdrRuntime.bindings for scripts.swarm.live_binding.record",
+      "tests": [
+        "tests/hive/test_reports.py::test_the_controller_reads_a_hub_admitted_codex_workers_binding_from_the_hive_that_runs_it",
+        "tests/hive/test_reports.py::test_a_hub_admitted_worker_its_hive_reports_no_binding_for_gets_no_facts_from_this_host",
+        "tests/hive/test_reports.py::test_a_hub_admitted_worker_without_an_app_server_keeps_the_controllers_session_read",
+        "tests/hive/test_reports.py::test_an_app_server_worker_the_hub_admitted_to_this_hive_is_read_from_this_host"
       ]
     },
     {
@@ -3002,6 +3048,24 @@
       ]
     },
     {
+      "id": "swarm-tick-lock-renewal-interval",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2735",
+      "behaviour": "A tick pass renews its tick lock and writes the activity mark at most once per renewal interval, or per lease tick when that is shorter, never before every step: every step still checks for a stop, the first step of a pass renews, a failed renewal is retried by the next step, a clock that went back renews at once, and a lease check before a write renews at once inside the interval.",
+      "seam": "The pass step hook scripts.swarm.tick_activity.Renewal that run_tick sets on timing.BEFORE_STEP, and scripts.swarm.tick_activity.renew_now, the forced lease check the health checks and the intent gate run before a write",
+      "tests": [
+        "tests/swarm/test_tick_activity.py::test_a_pass_renews_its_tick_lock_once_while_every_step_checks_for_a_stop",
+        "tests/swarm/test_tick_activity.py::test_the_step_hook_renews_again_once_its_interval_passed_or_the_clock_went_back",
+        "tests/swarm/test_tick_activity.py::test_a_stolen_tick_lock_stops_every_step_from_the_first_renewal_after_the_interval",
+        "tests/swarm/test_tick_activity.py::test_the_step_hook_renews_once_per_lease_tick_when_that_is_shorter_than_its_interval",
+        "tests/swarm/test_tick_activity.py::test_a_lease_another_controller_took_after_a_short_lease_tick_stops_the_next_step",
+        "tests/swarm/test_tick_activity.py::test_a_lease_check_before_a_write_renews_at_once_inside_the_interval"
+      ],
+      "rules": [
+        "pass-step-renewal-unthrottled"
+      ]
+    },
+    {
       "id": "swarm-tick-source-control-port",
       "origin": "inventory",
       "behaviour": "Swarm code reaches source control through the source control port: a gh list or the GitHub adapter's command builder outside the adapter is refused unless its file is on an exception list that only shrinks, and a change read names its state, head and head branch inside a deadline.",
@@ -3175,6 +3239,19 @@
       "tests": [
         "tests/swarm/test_seat_priming.py::test_culture_set_and_show_survive_swarm_remove",
         "tests/swarm/test_seat_priming.py::test_the_culture_sits_ahead_of_the_seat_recap_for_every_lane_and_the_master"
+      ]
+    },
+    {
+      "id": "swarm-learned-scope",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-learned-notes-scope",
+      "behaviour": "A seat start and the default learned command return only the caller seat notes and shared canon and insight; explicit all returns every seat while preserving note numbers.",
+      "seam": "agentihooks swarm learned and the seat launch prompt",
+      "tests": [
+        "tests/swarm/test_learned_scope.py::test_returned_notes_stay_with_the_caller_and_shared_guidance",
+        "tests/swarm/test_learned_scope.py::test_scoped_memory_preserves_live_notes_and_source_ordinals",
+        "tests/swarm/test_learned_scope.py::test_scoped_memory_without_matching_notes_is_empty",
+        "tests/swarm/test_learned_scope.py::test_learned_help_explains_the_explicit_full_listing"
       ]
     },
     {
@@ -4725,6 +4802,19 @@
         "tests/swarm_ledger/test_artifacts.py::TestStore::test_svg_is_stored_without_scripts_handlers_or_script_links",
         "tests/swarm_ledger/test_artifacts.py::TestStore::test_anything_else_is_refused",
         "tests/swarm_ledger/test_artifacts.py::TestStore::test_an_oversize_file_is_refused"
+      ]
+    },
+    {
+      "id": "stale-queued-run-sweep",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-zombie-queued-runs",
+      "behaviour": "The Lost runner workflow, before its watch, lists the repository's queued runs, logs the job states of each run whose last update is at least 24 hours old, deletes each such run that holds no job, cancels the others, and warns for any run still queued thirty seconds later; the watch runs even when the sweep step fails.",
+      "seam": "scripts.ci_stale_runs stale, clear and main, and the Lost runner workflow sweep step",
+      "tests": [
+        "tests/test_ci_stale_runs.py::test_a_run_untouched_for_a_day_is_stale_and_a_younger_one_is_not",
+        "tests/test_ci_stale_runs.py::test_clear_returns_the_stale_runs_still_queued_once_github_settles",
+        "tests/test_ci_stale_runs.py::test_main_sweeps_only_stale_runs_and_warns_for_each_one_left",
+        "tests/test_ci_stale_runs.py::test_the_lost_runner_workflow_sweeps_stale_runs_with_its_app_token_before_the_watch"
       ]
     },
     {
@@ -9028,6 +9118,22 @@
       ]
     },
     {
+      "id": "lab-authoritative-check-names",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-scheduler-authoritative-post",
+      "behaviour": "The CI lab scheduler posts the check run of each gate that the grader revision's delivery.yaml lists as authoritative for the grade's class as lab/<gate>, the name the lab-verdict job waits for, and every other gate and the required check as lab-shadow/<gate>: a pull request or hotfix grade takes lab.authoritative and a merge group grade lab.queue.authoritative from its base, so a head never widens either list, and a promotion or backfill grade lists none. The grade's state keeps the list, so a scheduler restarted mid grade seeds and advances each check run under the name it was opened with.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis with scripts.ci_lab.scheduler.MirrorExpander on a file git mirror and a recording poster, and with a real scripts.ci_lab.checks.Checks on mocked requests, restarted mid grade, and scripts.ci_lab.scheduler.authoritative_gates over lab blocks",
+      "tests": [
+        "tests/ci_lab/test_authoritative_checks.py::test_a_pull_request_grade_posts_the_gates_its_base_lists_as_authoritative_as_lab_and_the_rest_as_lab_shadow",
+        "tests/ci_lab/test_authoritative_checks.py::test_a_head_listing_a_gate_itself_and_a_dev_push_grade_post_every_check_as_lab_shadow",
+        "tests/ci_lab/test_authoritative_checks.py::test_a_restarted_scheduler_seeds_each_check_run_under_the_name_the_grade_opened_it_with",
+        "tests/ci_lab/test_authoritative_checks.py::test_a_grade_state_stored_before_the_list_was_kept_loads_with_none_and_keeps_posting_shadow",
+        "tests/ci_lab/test_authoritative_checks.py::test_a_merge_group_grade_takes_the_queue_list_and_a_pull_request_or_hotfix_grade_the_lab_list",
+        "tests/ci_lab/test_authoritative_checks.py::test_a_merge_group_grade_takes_no_gate_from_the_pull_request_list",
+        "tests/ci_lab/test_authoritative_checks.py::test_a_frame_keeps_the_authoritative_gates_of_every_grade_but_a_promotion_or_backfill_one"
+      ]
+    },
+    {
       "id": "lab-relay-check-run-restart",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-relay-run-id-seed",
@@ -10351,6 +10457,18 @@
         "tests/ci_lab/test_head_notice.py::test_a_configured_send_posts_one_notice_signed_over_its_exact_body",
         "tests/ci_lab/test_head_notice.py::test_without_a_receiver_a_secret_or_an_actor_nothing_is_sent",
         "tests/ci_lab/test_head_notice.py::test_a_failed_send_is_reported_once_and_never_raised"
+      ]
+    },
+    {
+      "id": "hub-admission-hive-local-held",
+      "rules": ["hub-hive-local-refusal-terminates-offer"],
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2740",
+      "behaviour": "An events admission refused for the asking hive being draining, on an old release, off the root for a workstation task, outside a task hive pin or missing required capabilities answers held so another eligible hive can receive the same offer; task refusals remain terminal.",
+      "seam": "Admission.admit through LaneTasks.request and Spoke.poll with two hives sharing one offer",
+      "tests": [
+        "tests/hub/test_admission.py::test_a_hive_local_refusal_keeps_the_only_offer_for_an_eligible_second_hive",
+        "tests/hub/test_admission.py::test_a_refusal_about_the_task_stays_terminal"
       ]
     }
   ],

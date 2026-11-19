@@ -3674,7 +3674,7 @@ which expires after 45 seconds, so a hive that stopped beating has no report. Th
 | `names` | The agent names the hive's herdr lists. |
 | `process_namespace` | The hive's process namespace. Written only while the hive runs at least one execution. |
 | `pane_ids` | Every pane id herdr lists. Written only while the hive runs at least one execution; `null` when herdr refuses the pane listing or its answer cannot be read. |
-| `admitted` | One entry per execution the hub admitted to this hive that no host target names yet, keyed by execution id: its `generation` and the `pane` this hive's herdr reads for it. |
+| `admitted` | One entry per execution the hub admitted to this hive that no host target names yet, keyed by execution id: its `generation`, the `pane` this hive's herdr reads for it, and the live `binding` facts this hive reads for it (`null` when it reads none). |
 
 A worker the hub admitted carries no host target, so the controller has no herdr that can read its pane. The tick
 reads that worker's pane from the `admitted` entry of the hive that admitted it, and counts it idle or working from
@@ -3682,6 +3682,15 @@ that pane like any local worker; an entry for another generation, or none, reads
 hive the tick runs on is read from that hive's own herdr. Both the controller and the hive must run a release that
 carries this report field; until then the worker reads `unknown`, which counts as working and never reaches the idle
 retire.
+
+The live binding check reads such a worker's facts from the same entry's `binding` when the worker runs on a local
+backend over the Codex app server transport, never from the controller's own server check: an app server's liveness
+can only be proven on the host that runs it, so the controller's own check stores an unknown process fact and would record the
+worker's model and effort as unobserved. An entry for another generation, an entry without a binding, or no entry at
+all gives the worker no facts, and the tick skips it that pass as it does a hosted worker whose hive reports no
+binding. Any other hub admitted worker keeps the controller's own session read, and an app server worker admitted to
+the hive the tick runs on is read from that host. The hive reads each admitted binding the way it reads a hosted one,
+so it also settles a dead app server of an admitted execution as failed, which frees its account slot.
 
 A worker's execution record names its hive in its runtime target (`host_id`). The tick counts the worker gone,
 and retires it with `its hive pane is gone`, when the report is no older than the worker's launch and one of these
