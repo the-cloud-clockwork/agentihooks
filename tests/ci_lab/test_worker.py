@@ -1,5 +1,7 @@
 """Tests of the CI lab worker pod loop against the real lease API over fakeredis and a presigned upload sink."""
 
+import email.message
+import http.client
 import threading
 import time
 import urllib.error
@@ -107,6 +109,16 @@ class Slow:
         handler = type("SlowHandler", (BaseHTTPRequestHandler,), {"do_GET": hold, "do_POST": hold, "do_PUT": hold})
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
+
+
+class Paced(threading.Event):
+    def __init__(self) -> None:
+        super().__init__()
+        self.waits: list[float | None] = []
+
+    def wait(self, timeout: float | None = None) -> bool:
+        self.waits.append(timeout)
+        return self.is_set()
 
 
 def _serving(server: ThreadingHTTPServer) -> threading.Thread:
@@ -507,6 +519,65 @@ def test_run_leases_again_as_a_unit_frees_its_slot(
     assert [found(jobs, job).outcome for job in ("h1:test:a", "h2:test:b")] == ["passed", "passed"]
     assert len(lab.asked) >= 2
     assert {free for _, free, _, _ in lab.asked} == {1}
+
+
+@pytest.mark.feature("lab-worker-pod-loop")
+def test_a_lease_call_the_scheduler_does_not_answer_backs_off_and_leases_again(
+    scheduler: str, lab: Counted, jobs: queue.Queue, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    jobs.enqueue([UNIT_A], "h1", {})
+    jobs.enqueue([UNIT_B], "h2", {})
+    refused = urllib.error.URLError(ConnectionRefusedError(111, "Connection refused"))
+    unavailable = urllib.error.HTTPError(
+        f"{scheduler}/lease", 503, "Service Unavailable", email.message.Message(), None
+    )
+    unanswered: list[Exception | None] = [
+        refused,
+        http.client.RemoteDisconnected("Remote end closed connection without response"),
+        ConnectionResetError(104, "Connection reset by peer"),
+        http.client.IncompleteRead(b"{"),
+        TimeoutError("timed out"),
+        unavailable,
+        None,
+        refused,
+        None,
+    ]
+
+    class Rolling(worker.Client):
+        def lease(self, worker: str, free_slots: int, capabilities: frozenset[str], wait_ms: int) -> list[worker.Lease]:
+            if unanswered and (error := unanswered.pop(0)) is not None:
+                raise error
+            return super().lease(worker, free_slots, capabilities, wait_ms)
+
+    executors: dict[str, worker.Executor] = {}
+    paced = Paced()
+    rolling = worker.Worker(Rolling(scheduler), executors, "pod-1", 1, wait_ms=0, stopping=paced)
+
+    def last(lease: worker.Lease) -> worker.Finished:
+        if lease.head == "h2":
+            rolling.stop()
+        return finished(tmp_path, lease)
+
+    executors["test"] = last
+    guard = threading.Timer(10, rolling.stop)
+    guard.start()
+
+    assert rolling.run_once() == []
+    assert rolling.run() == []
+    guard.cancel()
+    assert unanswered == []
+    assert paced.waits == [1.0, 2.0, 4.0, 8.0, 10.0, 10.0, 1.0]
+    assert [found(jobs, job).outcome for job in ("h1:test:a", "h2:test:b")] == ["passed", "passed"]
+    assert len(lab.asked) == 2
+    assert [line for line in capsys.readouterr().err.splitlines() if line.startswith("ci-lab worker:")] == [
+        "ci-lab worker: lease call failed, retrying in 1s: URLError(ConnectionRefusedError(111, 'Connection refused'))",
+        "ci-lab worker: lease call failed, retrying in 2s: RemoteDisconnected('Remote end closed connection without response')",
+        "ci-lab worker: lease call failed, retrying in 4s: ConnectionResetError(104, 'Connection reset by peer')",
+        "ci-lab worker: lease call failed, retrying in 8s: IncompleteRead(1 bytes read)",
+        "ci-lab worker: lease call failed, retrying in 10s: TimeoutError('timed out')",
+        "ci-lab worker: lease call failed, retrying in 10s: <HTTPError 503: 'Service Unavailable'>",
+        "ci-lab worker: lease call failed, retrying in 1s: URLError(ConnectionRefusedError(111, 'Connection refused'))",
+    ]
 
 
 @pytest.mark.feature("lab-worker-pod-loop")
