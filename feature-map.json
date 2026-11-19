@@ -9273,6 +9273,18 @@
       ]
     },
     {
+      "id": "lab-static-check-log-tail",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-check-diagnostics",
+      "behaviour": "The CI lab scheduler puts the stored log of each failed static unit of a gate, secret patterns redacted, on that gate's check run, and the check run text shows the last 4096 characters of each such log in a fenced block under its unit key ahead of the unit key listing, the blocks together within half of GitHub's 65535 character limit, so a plant proof that reads only the check run sees which diagnostic failed the gate. A passing unit, a failed unit with no stored or an empty log and the required check add no log, and their text is the unit key listing alone.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis, the local object store and a recording poster, and scripts.ci_lab.checks.render over outputs",
+      "tests": [
+        "tests/ci_lab/test_static_check_logs.py::test_a_failed_static_unit_s_gate_check_carries_the_tail_of_its_stored_log_with_secrets_redacted",
+        "tests/ci_lab/test_static_check_logs.py::test_a_failed_static_unit_answered_from_the_store_carries_its_stored_log_tail",
+        "tests/ci_lab/test_static_check_logs.py::test_a_gate_whose_static_units_pass_or_keep_no_log_posts_only_its_unit_keys"
+      ]
+    },
+    {
       "id": "lab-relay-check-run-restart",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-relay-run-id-seed",
