@@ -129,8 +129,8 @@ def test_no_finding_without_a_pin_free_other_seats_or_waiting_work(
 
 @pytest.mark.feature("swarm-harness-pin-guard")
 @pytest.mark.parametrize(("effective", "waiting"), [(2, []), (1, ["e2"])], ids=["busy-at-ceiling", "one-below-ceiling"])
-def test_a_lane_whose_busy_agents_fill_its_ceiling_lists_no_waiting_tasks(effective: int, waiting: list[str]) -> None:
-    """Busy agents at a ceiling above zero leave unplaced tasks waiting on the ceiling, never on the pin."""
+def test_waiting_tasks_list_only_below_the_lane_ceiling(effective: int, waiting: list[str]) -> None:
+    """Busy agents at a ceiling above zero list no waiting task; one seat below it the unplaced task waits."""
     config = SwarmConfig(SLUG, "/repo", max_eng=2, max_ci=0, max_plan=0, lanes={"eng": {"agent": "claude"}})
     decision = {
         "effective": {"eng": effective, "ci": 0, "plan": 0},

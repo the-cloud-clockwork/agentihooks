@@ -10740,7 +10740,7 @@
         "tests/swarm/test_harness_pin.py::test_a_claude_pin_with_free_codex_seats_and_waiting_tasks_raises_the_finding",
         "tests/swarm/test_harness_pin.py::test_a_codex_pin_with_free_claude_seats_raises_the_reverse_finding",
         "tests/swarm/test_harness_pin.py::test_no_finding_without_a_pin_free_other_seats_or_waiting_work",
-        "tests/swarm/test_harness_pin.py::test_a_lane_whose_busy_agents_fill_its_ceiling_lists_no_waiting_tasks",
+        "tests/swarm/test_harness_pin.py::test_waiting_tasks_list_only_below_the_lane_ceiling",
         "tests/swarm/test_harness_pin.py::test_the_pin_age_holds_while_the_pin_stands_and_restarts_when_it_changes",
         "tests/swarm/test_harness_pin.py::test_the_status_quota_lines_name_each_pinned_lane",
         "tests/swarm/test_harness_pin.py::test_findings_and_quota_lines_list_pinned_lanes_in_lane_name_order",
