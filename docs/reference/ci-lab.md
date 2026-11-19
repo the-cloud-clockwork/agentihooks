@@ -2627,8 +2627,11 @@ workflow order. On dev it prints:
 The pass that releases a head from its lane catches a `ValueError`, `KeyError`,
 `yaml.YAMLError`, `jsonschema.ValidationError` or failed git command from expansion. It records
 the action `cannot expand <head>: <error>` and drops the head: the head has already left
-`agentihooks-ci:waiting` and is not put back, so it gets no grade and no check runs. A manifest
-fetch that raises `FetchPending` or `FetchUnanswered` holds the head again instead, as
+`agentihooks-ci:waiting` and is not put back, so it gets no grade. `Scheduler._refuse` then posts
+one completed `lab-shadow/required` check run with conclusion `failure` on the head, whose summary
+reads `cannot expand <head> against <base>: <error>`, so the head still shows a lab status. A head
+with no plan has no authoritative gates, so the check posts under the shadow name. A head pushed to
+a grade ref gets no check run, since GitHub does not hold that head. A manifest fetch that raises `FetchPending` or `FetchUnanswered` holds the head again instead, as
 `holding <head>: <error>`; [Test units](#test-units) describes both. The scheduler service prints
 each action on its own line:
 
@@ -2862,7 +2865,9 @@ source_paths = ["hooks/", "scripts/"]
 
 A `ValueError`, `KeyError`, failed git command, YAML error or schema validation error raised in
 expansion makes the scheduler print
-`cannot expand <head>: <error>` and drop the head; nothing of it is graded.
+`cannot expand <head>: <error>` and drop the head; nothing of it is graded, and the head gets a
+failed `lab-shadow/required` check run naming the error (see
+[A head that cannot expand](#a-head-that-cannot-expand)).
 
 #### Unit keys
 

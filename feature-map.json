@@ -142,6 +142,17 @@
       ]
     },
     {
+      "id": "lab-scheduler-unexpanded-head",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2614",
+      "behaviour": "A head the CI lab scheduler cannot expand shows a lab status: when Scheduler.tick releases a held head and its expander raises a ValueError, KeyError, YAML error, schema validation error or failed git command, the scheduler drops the head as before and posts one completed required check run with conclusion failure on that head, named lab-shadow/required since a head with no plan has no authoritative gates, whose summary names the head, its base and the expansion error; a head pushed to a grade ref posts no check run, because GitHub does not hold that head.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis with a raising expander and a recording Poster behind scripts.ci_lab.scheduler.Ports.checks, read through the posts and the repositories the poster was asked for",
+      "tests": [
+        "tests/ci_lab/test_scheduler_unexpanded.py::test_a_head_that_cannot_expand_posts_a_failed_required_check_naming_its_reason",
+        "tests/ci_lab/test_scheduler_unexpanded.py::test_a_grade_ref_head_that_cannot_expand_posts_no_check_run"
+      ]
+    },
+    {
       "id": "lab-scheduler-post-refusal",
       "rules": ["lab-check-post-uncaught-refusal"],
       "origin": "regression",
