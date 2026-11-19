@@ -278,6 +278,19 @@ jobs:
         run: python -m scripts.check
 """
 
+BARE = r"""
+jobs:
+  lint:
+    steps:
+      - name: Write a bare line
+        id: block
+        run: printf 'secret line\n' >> "$GITHUB_OUTPUT"
+      - name: Check
+        env:
+          TEXT: ${{ steps.block.outputs.text }}
+        run: python -m scripts.check
+"""
+
 
 @pytest.mark.feature("lab-static-step-env")
 def test_earlier_steps_run_first_and_their_outputs_outcome_and_conclusion_reach_the_gate(
@@ -311,10 +324,11 @@ def test_a_failing_earlier_step_fails_the_gate_without_running_it(
 
 
 @pytest.mark.feature("lab-static-step-env")
+@pytest.mark.parametrize("workflow", [UNREADABLE, BARE], ids=["delimited", "bare"])
 def test_an_earlier_step_output_line_outside_name_equals_value_is_refused_without_its_text(
-    tmp_path: Path, settings: run_static.Settings
+    tmp_path: Path, settings: run_static.Settings, workflow: str
 ) -> None:
-    (gate,) = static_gates.discover(UNREADABLE)
+    (gate,) = static_gates.discover(workflow)
     with pytest.raises(ValueError) as refused:
         run_static.run(gate, *_folders(tmp_path), settings)
     assert str(refused.value) == "block wrote an output line that is not name=value"
