@@ -65,7 +65,7 @@ With a remote ledger, `agentihooks hub run` first issues the replica its own ser
 |---|---|---|
 | `timers` | `swarm.*.deadline.*` | Keeps scheduled deadlines and publishes `deadline.expired` when one is due. |
 | `inbox-wake` | `swarm.*.inbox-wake.requested` and a poll | Schedules the wake deadline for an inbox item and relays queued wake items onto the seat inbox. |
-| `inbox-wake-expiry` | `swarm.*.deadline.expired` | When the deadline expires, redelivers or wakes the item and schedules its next deadline. |
+| `inbox-wake-expiry` | `swarm.*.deadline.expired` | When the deadline expires, redelivers or wakes the item and schedules its next deadline. Sends no wake while an outage the tick published is open (see [Outage holds for agents the hub started](../pillars/hives.md#outage-holds-for-agents-the-hub-started)). |
 | `hive-loss` | `swarm.*.execution.started` | Publishes `execution.exited` for executions on a lost hive. |
 | `claim-lives` | `swarm.*.execution.started` | Counts each successful spoke launch once toward the task's three started lives cap. |
 | `lifecycle` | `swarm.*.execution.exited` | Orders the hive of an agent whose pane died to reopen its own conversation in its seat, up to three times, before it drops the agent (see [Resuming a dead agent the hub started](../pillars/hives.md#resuming-a-dead-agent-the-hub-started)). Refunds a started life on a park, quota handoff or operator preemption, releases the slot and claim, and settles the task. An exit a hive reports after an execution stop carries reason `stopped` and the stop's `stop_reason`, such as `ended` for an agent whose work ended (see [Stopping an agent whose work ended](../pillars/hives.md#stopping-an-agent-whose-work-ended)). |

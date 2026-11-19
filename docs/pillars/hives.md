@@ -2292,9 +2292,9 @@ Other exits carry a `reason`: the hub's `hive-loss` reactor publishes `hive-lost
 execution on a lost hive, and the hive publishes `stopped` after it honors an execution stop.
 
 The reactor first matches the exit to the spoke claim and the execution record. It holds the exit while an outage
-holds the agent or the tick's outage recovery of the agent is still pending (see
-[Outage holds and recovery](swarm.md#outage-holds-and-recovery)). For an execution whose spoke claim is still
-`started`, it then orders a resume only when every one of these holds:
+the tick shared is open or the tick's outage recovery of the agent is still pending (see
+[Outage holds for agents the hub started](#outage-holds-for-agents-the-hub-started)). For an execution whose spoke
+claim is still `started`, it then orders a resume only when every one of these holds:
 
 | Check | When it fails |
 |---|---|
@@ -2426,6 +2426,190 @@ this path.
 | Notice `resume failed: identity` | The task's claimant and the agent record | The record or claim changed between the hub's order and the hive's resume: a successor took the task or a newer launch replaced the record. Expected: the old agent is dropped, and the task stays with its successor or reopens for a fresh agent. |
 | Notice `resume failed: a process carrying <agent> still runs` | herdr on that hive | The old session could not be reaped. Close it on the hive; the next death of a later agent resumes normally. |
 | Notice `resume failed: <runtime detail>` or `resume failed: error: <exception type>` | The detail it names | Fix the cause it names: a missing conversation, the hive's checkout of the repository, or the error type in the hive log. |
+
+### Outage holds for agents the hub started
+
+On the `events` engine a hub started engineer leaves the swarm through the hub's `lifecycle` reactor, and its inbox
+wakes come from the hub's `inbox-wake-expiry` reactor. The tick keeps its outage records in files under its own swarm
+home, which the hub, running on another host, cannot read. So on every pass the tick also publishes those records to
+Redis, and both reactors read that copy. While a Redis, ledger or provider outage is open, a hub started engineer
+keeps its record, seat, task claim, launch slot and task, and gets no inbox wake. After recovery it gets the resume
+prompt the tick gives its own agents (see [Outage holds and recovery](swarm.md#outage-holds-and-recovery)).
+
+Before [pull request #11245](https://github.com/the-cloud-clockwork/agentihooks/pull/11245) the hub had no outage
+check. An exit the hub read during an outage dropped the engineer, released its claim and slot and reopened its
+task. The hub's inbox wake looked for outage records in a home the hub does not have, so it woke engineers during
+outages and counted outage time toward each wake window.
+
+A hub started engineer is one whose hive recorded its start on the bus. On any bus but the in-memory test bus, the
+hub reconciler's `admitted_agents` lists it, and the tick's reap step judges it by the hub admitted rules in
+[Stopping an agent whose work ended](#stopping-an-agent-whose-work-ended).
+
+#### How the hub reads the tick's outages
+
+The tick's `outage probes` step (group `wrapper probes`, every pass; see the
+[tick step catalogue](../reference/tick-step-catalogue.md)) runs the provider probes, then publishes every outage
+record of the swarm, open and closed, to one Redis string. The publish runs even when the probes raise.
+
+```text
+agentihooks:swarm:<slug>:open-outages
+```
+
+`agentihooks` is the default keyspace root; `AGENTIHOOKS_SWARM_KEY_PREFIX` moves it. The value is the swarm's
+`outages.json` from the tick's swarm home, wrapped with the publish time in milliseconds:
+
+```json
+{
+  "at": 1795035600000,
+  "records": {
+    "provider": {
+      "kind": "provider",
+      "started_at": 1795035000000,
+      "ended_at": null,
+      "evidence": ["engineer@<code>-<n> (codex, account <account>): stream disconnected before completion"]
+    },
+    "ledger": {
+      "kind": "ledger",
+      "started_at": 1795030000000,
+      "ended_at": 1795030120000,
+      "evidence": ["Ledger health probe failed"]
+    }
+  }
+}
+```
+
+A record whose `ended_at` is `null` is open. Every kind the tick records counts: `redis`, `ledger`, `hive-ledger`
+and `provider`. A record's `past` list holds the earlier closed spans of its kind, which the inbox wake uses, and a
+provider record also carries its affected agents and probe state.
+
+The share follows these rules:
+
+- It never expires. A tick that stops publishing, because it crashed or its host is down, leaves the last published
+  state standing, open outages included, and the hub keeps holding on it.
+- A share older than ten minutes (`SHARED_STALE_MS`, 600000 ms) that still holds an open record still holds, and
+  every hub read of it prints one line to the hub's log. A share exactly ten minutes old is not logged, and a stale
+  share with no open record is read without a line.
+
+  ```text
+  outage share of <slug> is stale since <publish time in ms>, still holding provider, ledger
+  ```
+
+- When the tick finishes a stopped swarm, the same step that closes it deletes the share.
+- The hub sees each record as the tick last published it, at most one pass behind the tick's own view.
+- A Redis outage reaches the share only after Redis answers again. While Redis is down, every tick pass ends at its
+  Redis check and publishes nothing, and the hub cannot drop an agent without Redis either. The first pass that finds
+  Redis back publishes the `redis` record still open; it closes at the end of that pass, and the next pass publishes
+  it closed. An engineer that stalled across the outage stays held through its pending outage resume, described in
+  [After the outage](#after-the-outage).
+
+#### Which exits the hub holds
+
+The `lifecycle` reactor reads an exit from a hive's `execution.exited` or from its own reconciler pass (see
+[Which exits are resumed](#which-exits-are-resumed)). It first matches the exit to the spoke claim and the
+execution record. It then checks the outage hold before it judges a resume, in this order; the first check that
+decides ends the judgement:
+
+| Order | Check | Result |
+|---|---|---|
+| 1 | The exit already returned the engineer's slot and claim (`returned` on the spoke claim) | Not held: the exit finishes settling. |
+| 2 | The tick has an outage resume pending for the engineer: state `pending` in `outage-resumes`, fewer than three attempts, the same task, seat, execution, generation and claim generation, and no deliberate exit | Held, even after every shared record closed. |
+| 3 | The engineer's record is `finished`, as after a handoff | Not held. |
+| 4 | No shared record is open | Not held. |
+| 5 | The ledger task row is done: `done` true or state `done` | Not held. |
+| 6 | A deliberate exit is recorded for the engineer, as `agentihooks terminate-agent` records | Not held. |
+| 7 | None of the above | Held. |
+
+A held exit changes nothing. The engineer keeps its record, seat, task claim and launch slot, its task row stays as
+it was, no life is refunded and no resume is ordered. The hub reconciler reads the exit again on each five minute
+pass while the hive's report still shows the pane ended or the engineer gone. Once nothing holds it, the exit goes
+on as in [Which exits are resumed](#which-exits-are-resumed): a hub resume when every resume check passes, else the
+engineer is dropped, its slot and claim return and its task reopens.
+
+#### Inbox wakes during an outage
+
+The hub's `inbox-wake-expiry` reactor reads the same share each time a wake deadline expires:
+
+- While any shared record is open it sends no wake and sets the next deadline one retry window later
+  (`AGENTIHOOKS_INBOX_RETRY_WINDOW_S`, 300 seconds by default).
+- Once every record is closed, the next deadline starts from the later of the receiver's seat clock and the item's
+  last recorded event, and adds the retry window plus the outage time since that start. Overlapping records count
+  once. An outage therefore never uses up an item's
+  window or one of its three wakes.
+
+#### After the outage
+
+The tick recovers hub started engineers the way it recovers its own:
+
+1. The tick's `track outages` step records an outage resume, state `pending`, for each engineer that owns its task
+   and stalled during the outage. Owning means: the engineer is `working`, its task row is `claimed` or `pr` and
+   names it, and it holds the task claim, its seat and a live claim lease. Stalled means its pane is gone, shows a
+   provider error or is idle. The record lives in the Redis hash `agentihooks:swarm:<slug>:outage-resumes`, one
+   field per engineer.
+2. Once every outage record in the tick's home is closed, the `recover outages` step sends each pending engineer
+   this prompt, through a nudge to a live pane, or by reopening the engineer's own conversation in its seat when its
+   process died:
+
+   ```text
+   Service is back after the outage. As <engineer>, re-read your task folder <folder> (steering.md, progress.md, proof.md), then run agentihooks msg inbox and continue your own task <task>. Keep your existing claim; do not claim new work.
+   ```
+
+   A busy pane, typed input or a permission prompt makes it wait, and the record's `blocked` field names why. A dead
+   process the runtime cannot resume restarts from an outage handoff. After three attempts the resume is
+   `exhausted`.
+3. While the resume is `pending`, the hub holds the engineer's exit (check 2). Once it is `done` or `exhausted`, the
+   next reading of the exit settles it.
+
+#### Limits of the hub outage hold
+
+- The hold has no time limit: an exit stays held as long as a shared record stays open or a resume stays pending.
+- The share is only as fresh as the tick. With the tick down, the last published state stands, and an outage that
+  opens after the tick stopped never reaches the hub.
+- A stale open record holds until a tick publishes again or the stop of the swarm deletes the share.
+- The stale age compares the hub's clock with the tick's publish time, so clock skew between the two hosts moves
+  the point where the stale line starts.
+- The hold covers an exit only until its slot returned. An exit already past that point finishes settling during
+  an outage.
+- An outage never holds a finished engineer, a done task or a deliberate exit.
+
+#### Upgrading for the hub outage hold
+
+Both sides need a release carrying pull request #11245:
+
+- The tick, which is the controller, or the workstation tick in local mode, publishes the share. With an older tick
+  no share exists and the hub holds nothing.
+- The hub reads the share. An older hub holds no exit during an outage, and its inbox wake reads only its own empty
+  outage home.
+
+The tick publishes on its first pass with the new code. A hub process loads its code when it starts, so roll the
+hub deployment onto the release.
+
+#### Checking the outage hold on a live swarm
+
+```bash
+# The share the hub reads: publish time and every record
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" GET 'agentihooks:swarm:<slug>:open-outages'
+
+# The tick's own open outages, and the held engineer still in its seat
+agentihooks swarm <slug> status
+
+# Outage resumes the hub waits for
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" HGET 'agentihooks:swarm:<slug>:outage-resumes' 'engineer@<code>-<n>'
+# {"identity": ["<task>", "<seat>", "<execution>", 1, 7], "episodes": [["provider", 1795035000000]], "attempts": 0, "state": "pending", "last_at": 0}
+
+# Stale shares the hub read
+kubectl -n <namespace> logs deployment/agentihooks-swarm-hub | grep 'outage share of'
+```
+
+The feature map entry `events-outage-hold-hub-agents` lists the regression tests for this path.
+
+#### Troubleshooting the hub outage hold
+
+| Symptom | Check | Fix |
+|---|---|---|
+| A hub started engineer was dropped and its task reopened during an outage | The share: does the key exist, is `at` recent, was a record open? The engineer's record and task row at the time | No key: the tick predates pull request #11245 or has run no pass since; upgrade it. Every record closed: the tick never recorded the outage, so only its recorded kinds hold. A finished engineer, a done task or a deliberate exit: expected. With an open record and none of those, the hub predates pull request #11245; roll it onto a release that carries it. |
+| The hub logs `outage share of <slug> is stale since <ms>, still holding <kinds>` | Whether the tick still runs passes for the swarm | The tick stopped publishing, and the hub keeps holding on its last state. Bring the tick back; its next pass publishes again. A swarm that is stopping deletes the share when its stop completes. |
+| Engineers stay seated long after the outage ended | The engineer's field in `outage-resumes` | `pending` below three attempts: `recover outages` has not run yet or waits, and `blocked` names why, such as `its pane holds input`. Clear what it names. After three attempts the resume is `exhausted` and the next reconciler pass settles the exit. |
+| No inbox wakes reach hub started engineers | The share for an open record | Expected while an outage is open. Wakes start again one retry window after it closes. A stale open record: as for the stale line above. |
 
 ### Running a spoke
 
