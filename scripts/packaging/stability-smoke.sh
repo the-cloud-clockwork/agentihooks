@@ -14,7 +14,7 @@ compose=(docker compose -f compose.yaml -f "$override")
 cleanup() {
   docker rm -f "$run-member" >/dev/null 2>&1 || true
   "${compose[@]}" down --volumes >/dev/null 2>&1 || true
-  rm -r -- "$tls"
+  rm -r -- "$tls" || true
 }
 trap cleanup EXIT
 

@@ -1,0 +1,24 @@
+rules:
+  - id: hub-admission-retry-needs-live-projection
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A held admission can have a current unlaunched execution and claim without
+      its live agents projection. Use the admission validity check on retries so
+      the same hive receives that admission before readiness withdraws it.
+    paths:
+      include:
+        - /scripts/hub/admission.py
+        - hub-admission-retry-needs-live-projection.py
+    patterns:
+      - pattern-inside: |
+          class Admission:
+              ...
+      - pattern-either:
+          - pattern-inside: |
+              def admit(self, ...):
+                  ...
+          - pattern-inside: |
+              def _kept(self, ...):
+                  ...
+      - pattern: self.store.listed(...)

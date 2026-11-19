@@ -18,6 +18,7 @@ from hooks.context.credential_guard import (
     block,
     decide,
     evaluate,
+    strip_heredocs,
 )
 
 pytestmark = pytest.mark.unit
@@ -801,6 +802,116 @@ def test_a_shell_script_keeps_the_credential_tree_scan(tmp_path: Path) -> None:
     verdict = evaluate(_bash(f"bash -c 'grep -r needle {tmp_path}'"))
 
     assert verdict.block == block(f"searching a tree that holds {tmp_path / '.env'}", KIND_RECURSIVE)
+
+
+HEREDOC_DELIMITER_LINE_READS = [
+    ("cat <<EOF > out; cat ~/.env\nbody\nEOF", "cat ~/.env"),
+    ("cat <<'EOF' && cat .env\nbody\nEOF", "cat .env"),
+    ("cat <<-EOF > out || cat .env\n\tbody\n\tEOF", "cat .env"),
+    ('tee notes <<"EOF" | cat - .env\nbody\nEOF', "cat - .env"),
+]
+
+HEREDOCS_A_SHELL_RUNS = [
+    ("cat <<EOF | bash\ncat ~/.env\nEOF", "cat ~/.env"),
+    ("cat <<'EOF' | sh\ncat .env\nEOF", "cat .env"),
+    ("bash <<EOF\ncat .env\nEOF", "cat .env"),
+    ("sh -s <<'X'\nenv\nX", "env"),
+    ("sudo bash <<EOF\nsource ~/.bashrc\nEOF", "source ~/.bashrc"),
+    ("kubectl exec -i pod -- sh <<EOF\nprintenv\nEOF", "printenv"),
+    ("ssh host 'bash -s' <<'EOF'\ncat .env\nEOF", "cat .env"),
+    ("/bin/zsh <<EOF\necho ok\ncat .env\nEOF", "cat .env"),
+    ('out="$(dash <<EOF\ncat .env\nEOF\n)"', "cat .env"),
+    ('bash -c "sh <<EOF\ncat .env\nEOF\n"', "cat .env"),
+    ("source /dev/stdin <<EOF\ncat ~/.env\nEOF", "cat ~/.env"),
+    (". /dev/stdin <<'EOF'\nenv\nEOF", "env"),
+    ('eval "$(cat <<EOF\ncat ~/.env\nEOF\n)"', "cat ~/.env"),
+    ("ksh <<EOF\ncat .env\nEOF", "cat .env"),
+    ("mksh <<EOF\ncat .env\nEOF", "cat .env"),
+    ("ash <<EOF\ncat .env\nEOF", "cat .env"),
+    ("fish <<EOF\ncat .env\nEOF", "cat .env"),
+    ("csh <<EOF\ncat .env\nEOF", "cat .env"),
+    ("tcsh <<EOF\ncat .env\nEOF", "cat .env"),
+    ("su <<EOF\ncat .env\nEOF", "cat .env"),
+    ("cat <<EOF | sudo -u root bash\ncat .env\nEOF", "cat .env"),
+    ("doas -u root sh <<EOF\ncat .env\nEOF", "cat .env"),
+    ("cat <<EOF | /usr/bin/env bash\ncat .env\nEOF", "cat .env"),
+    ("env -i bash <<EOF\ncat .env\nEOF", "cat .env"),
+    ("command -p bash <<EOF\ncat .env\nEOF", "cat .env"),
+    ("exec bash <<EOF\ncat .env\nEOF", "cat .env"),
+    ("time bash <<EOF\ncat .env\nEOF", "cat .env"),
+    ("nohup bash <<EOF\ncat .env\nEOF", "cat .env"),
+    ("nice -n 5 bash <<EOF\ncat .env\nEOF", "cat .env"),
+    ("timeout 5 bash <<EOF\ncat .env\nEOF", "cat .env"),
+    ("xargs bash <<EOF\ncat .env\nEOF", "cat .env"),
+    ("stdbuf -o0 bash <<EOF\ncat .env\nEOF", "cat .env"),
+    ("setsid bash <<EOF\ncat .env\nEOF", "cat .env"),
+    ("busybox sh <<EOF\ncat .env\nEOF", "cat .env"),
+]
+
+HEREDOCS_THAT_READ_NO_CREDENTIAL = [
+    "cat <<'EOF' > notes.md\ncat .env\nEOF",
+    "cat <<EOF | grep x\ncat .env\nEOF",
+    "python3 - <<'PY'\nprint('read the .env file')\nPY",
+    "bash <<EOF\necho hi\nEOF",
+    "cat <<EOF > out && echo done\nbody\nEOF",
+    "git commit -F - <<'EOF'\nStop reading .env in the setup script\nEOF",
+    "grep bash <<'EOF'\ncat .env\nEOF",
+    "cat <<EOF | grep sh\ncat .env\nEOF",
+    'bash -c "bash <<EOF\necho hi\nEOF\n"',
+    "timeout 5 tee notes.md <<'EOF'\ncat .env\nEOF",
+    "sudo -u root tee notes.md <<'EOF'\ncat .env\nEOF",
+]
+
+
+@pytest.mark.feature("credential-guard-reads-heredoc-commands")
+@pytest.mark.parametrize(("command", "read"), HEREDOC_DELIMITER_LINE_READS)
+def test_a_credential_read_after_a_heredoc_delimiter_is_refused(command: str, read: str) -> None:
+    reason = decide(_bash(command))
+
+    assert reason is not None
+    assert reason == decide(_bash(read))
+
+
+@pytest.mark.feature("credential-guard-reads-heredoc-commands")
+@pytest.mark.parametrize(("command", "read"), HEREDOCS_A_SHELL_RUNS)
+def test_a_credential_read_in_a_heredoc_a_shell_runs_is_refused(command: str, read: str) -> None:
+    reason = decide(_bash(command))
+
+    assert reason is not None
+    assert reason == decide(_bash(read))
+
+
+@pytest.mark.feature("credential-guard-reads-heredoc-commands")
+@pytest.mark.parametrize("command", HEREDOCS_THAT_READ_NO_CREDENTIAL)
+def test_a_heredoc_that_reads_no_credential_passes(command: str) -> None:
+    assert decide(_bash(command)) is None
+
+
+@pytest.mark.feature("credential-guard-reads-heredoc-commands")
+def test_a_heredoc_a_shell_runs_keeps_the_credential_tree_scan(tmp_path: Path) -> None:
+    (tmp_path / ".env").write_text("A=1\n")
+
+    verdict = evaluate(_bash("bash <<'EOF'\ngrep -r needle .\nEOF", cwd=str(tmp_path)))
+
+    assert verdict.block == block(f"searching a tree that holds {tmp_path}/./.env", KIND_RECURSIVE)
+
+
+@pytest.mark.feature("credential-guard-reads-heredoc-commands")
+def test_a_rewrite_after_a_heredoc_delimiter_keeps_the_heredoc() -> None:
+    command = "cat <<'EOF' > out && grep -rn needle .\nbody\nEOF\necho done"
+
+    verdict = evaluate(_bash(command, cwd="/srv"), allow_rewrite=True)
+
+    assert verdict.rewrite == {
+        "command": "cat <<'EOF' > out && grep " + GREP_EXCLUDES + " -rn needle .\nbody\nEOF\necho done"
+    }
+
+
+@pytest.mark.feature("credential-guard-reads-heredoc-commands")
+def test_stripping_heredocs_keeps_the_rest_of_the_delimiter_line() -> None:
+    command = "cat <<'EOF' > out; git push\nbody\nEOF\nls"
+
+    assert strip_heredocs(command) == "cat <<HEREDOC > out; git push\nls"
 
 
 AWK_ENVIRON_VALUE_READS = [

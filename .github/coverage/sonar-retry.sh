@@ -16,7 +16,7 @@ upload='Failed to upload report: Error 5[0-9][0-9] on https?://[^[:space:]]*/api
 deadline="${SONAR_RETRY_SECONDS:-180}"
 out=$(mktemp)
 err=$(mktemp)
-trap 'rm -f "$out" "$err"' EXIT
+trap 'rm -f "$out" "$err" || true' EXIT
 start=$SECONDS
 waited=0
 wait=2

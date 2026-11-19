@@ -70,7 +70,7 @@ WORKER_DESCRIPTION = {
     "service": "worker",
     "ports": [9108],
     "environment": {
-        "prefixes": ["AGENTIHOOKS_BUS", "CI_LAB_MINIO_"],
+        "prefixes": ["AGENTIHOOKS_BUS", "CI_LAB_MINIO_", "CI_LAB_SECRET_"],
         "names": [
             "CI_LAB_SCHEDULER_URL",
             "CI_LAB_SLOTS",
@@ -83,6 +83,9 @@ WORKER_DESCRIPTION = {
             "CI_LAB_KILLERS",
             "CI_LAB_MUTATION_BUDGET",
             "CI_LAB_MUTATION_CAP",
+            "CI_LAB_REPOSITORY",
+            "AGENTIHOOKS_LAB_REMOTE",
+            "AGENTIHOOKS_LAB_REMOTE_TOKEN",
         ],
     },
     "metrics": sorted(EXPECTED_METRICS),
@@ -92,6 +95,7 @@ WORKER_DESCRIPTION = {
 ENVIRONMENT_NAMES = (
     "AGENTIHOOKS_BUS",
     "CI_LAB_MINIO_",
+    "CI_LAB_SECRET_",
     "GITHUB_APP_",
     "CI_LAB_REDIS_URL",
     "CI_LAB_RUNTIME_CONFIG",
@@ -107,6 +111,9 @@ ENVIRONMENT_NAMES = (
     "CI_LAB_KILLERS",
     "CI_LAB_MUTATION_BUDGET",
     "CI_LAB_MUTATION_CAP",
+    "CI_LAB_REPOSITORY",
+    "AGENTIHOOKS_LAB_REMOTE",
+    "AGENTIHOOKS_LAB_REMOTE_TOKEN",
 )
 
 
@@ -132,6 +139,7 @@ def test_metric_constants_are_importable_by_name(constant: str, name: str) -> No
 def test_environment_names() -> None:
     assert contract.BUS_PREFIX == "AGENTIHOOKS_BUS"
     assert contract.MINIO_PREFIX == "CI_LAB_MINIO_"
+    assert contract.SECRET_PREFIX == "CI_LAB_SECRET_"
     assert contract.GITHUB_APP_PREFIX == "GITHUB_APP_"
     assert contract.REDIS_URL == "CI_LAB_REDIS_URL"
     assert contract.SCHEDULER_URL == "CI_LAB_SCHEDULER_URL"

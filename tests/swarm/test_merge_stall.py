@@ -286,11 +286,11 @@ def test_failed_jobs_in_cancelled_or_running_queue_runs_are_counted(monkeypatch,
 
 
 def test_every_github_request_renews_the_tick_before_waiting(monkeypatch):
-    from scripts.swarm import timing
+    from scripts.swarm import tick_activity
     from scripts.swarm.health import merge_stall
 
     order = []
-    monkeypatch.setattr(timing, "keep", lambda: order.append("renew"))
+    monkeypatch.setattr(tick_activity, "renew_now", lambda: order.append("renew"))
 
     def run(command, **kwargs):
         order.append((command, kwargs))
