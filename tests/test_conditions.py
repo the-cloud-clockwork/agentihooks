@@ -682,7 +682,7 @@ class TestStartStep:
 
 
 class TestHookProcess:
-    def test_python_m_hooks_emits_rewrite(self, tmp_path):
+    def test_python_m_hooks_emits_rewrite(self, tmp_path: Path) -> None:
         home = tmp_path / "ahome"
         bundle = tmp_path / "bundle"
         conditions_dir = bundle / ".claude" / "conditions"
@@ -711,7 +711,7 @@ class TestHookProcess:
         assert proc.returncode == 0, proc.stderr
         out = json.loads(proc.stdout.strip().splitlines()[-1])["hookSpecificOutput"]
         assert out["updatedInput"]["command"] == "echo rewritten"
-        assert out["permissionDecision"] == "allow"
+        assert "permissionDecision" not in out
 
     @pytest.mark.parametrize(
         "body, code",
