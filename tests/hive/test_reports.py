@@ -224,23 +224,37 @@ def test_the_controller_reads_a_hub_admitted_codex_workers_binding_from_the_hive
     from scripts.swarm import live_binding
     from scripts.swarm import runtime as runtime_module
     from scripts.swarm.pane import PaneObservation
-    from scripts.swarm.store import APP_SERVER_TRANSPORT
+    from scripts.swarm.store import APP_SERVER_TRANSPORT, AgentRecord
 
-    agent = replace(remote.agent, harness="codex", transport=APP_SERVER_TRANSPORT, model="gpt-6.1-sol", effort="xhigh")
+    codex = AgentRecord(
+        remote.store.next_name("fixture", "eng"),
+        "eng",
+        "codex",
+        seat="eng-2@fixture",
+        harness="codex",
+        profile="engineer",
+        model="gpt-6.1-sol",
+        effort="xhigh",
+        account="account",
+        hive=HIVE,
+        transport=APP_SERVER_TRANSPORT,
+    )
+    agent = remote.store.start_execution("fixture", codex)
     remote.store.put_agent("fixture", agent)
     monkeypatch.setattr(runtime_module, "connect", lambda: remote.store)
     herdr = Mock()
     herdr.live_names.return_value = {agent.name}
     herdr.observe.return_value = PaneObservation("working")
-    herdr.bindings.return_value = {agent.name: {**CODEX_BINDING, "rebound": 99}}
+    binding = {**CODEX_BINDING, "home": live_binding.assignment(agent)["home"]}
+    herdr.bindings.return_value = {agent.name: {**binding, "rebound": 99}}
     report = daemon.execution_report(remote.redis, HIVE, herdr)
     remote.redis.set(remote.reports.key(HIVE), json.dumps(report), ex=45)
 
-    assert [found.name for found in herdr.bindings.call_args.args[0]] == [agent.name]
-    assert report["admitted"][agent.execution_id]["binding"] == {**CODEX_BINDING, "rebound": 99}
+    assert report["admitted"][agent.execution_id].get("binding") == {**binding, "rebound": 99}
+    assert sorted(found.name for found in herdr.bindings.call_args.args[0]) == sorted([remote.agent.name, agent.name])
     assert live_binding.managed(agent)
     facts = remote.runtime.bindings([agent])
-    assert facts == {agent.name: CODEX_BINDING}
+    assert facts == {agent.name: binding}
     live_binding.record(remote.store, "fixture", agent, facts[agent.name], 1)
     stored = json.loads(remote.redis.hget(remote.store.key("fixture", "live-bindings"), agent.name))
     assert (stored["state"], stored["unobserved"]) == ("matching", {})
