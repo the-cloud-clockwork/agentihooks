@@ -9,7 +9,7 @@ import pytest
 
 from scripts.ci_lab import plant_proofs
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.feature("lab-static-plant-proofs")]
 SOURCE = Path(__file__).resolve().parents[2]
 
 

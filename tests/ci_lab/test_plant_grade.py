@@ -78,7 +78,8 @@ class Lab:
 
     def open(self, request: Request, timeout: float) -> Answer:
         assert timeout > 0
-        body = request.data or b""
+        body = request.data
+        assert isinstance(body, bytes)
         assert request.full_url == ENVIRON[head_notice.URL_ENV]
         assert request.get_header("X-hub-signature-256") == (
             "sha256=" + hmac.new(ENVIRON[NOTICE_SECRET_ENV].encode(), body, hashlib.sha256).hexdigest()
