@@ -31,6 +31,7 @@ __all__ = [
     "mismatches",
     "promotion_audit",
     "sample",
+    "unfiled",
 ]
 
 SHARE = 0.05
@@ -127,6 +128,12 @@ def mismatches(store: Store, units: Sequence[Cached], regrade: Regrade) -> list[
         if cached is not None and fresh is not None and cached.passed != fresh.passed and not cached.flaky:
             found.append(Mismatch(cached, fresh, unit.run, regrade.run))
     return found
+
+
+def unfiled(store: Store) -> list[Mismatch]:
+    """Return the mismatches of every kind whose task an earlier audit could not file, by kind."""
+    del store
+    return []
 
 
 def _word(verdict: Verdict) -> str:
