@@ -33,7 +33,7 @@ class View:
 def view(doc: dict[str, Any], fix: str) -> View:
     """The ledger read once for every verdict: its plan graph, its tasks by id and by every node above them."""
     doc = {"tasks": [], **doc}
-    graph = hierarchy.project(doc)[0]
+    graph: dict[str, Any] = hierarchy.project(doc)[0]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
     covered: dict[str, list[dict[str, Any]]] = {}
     for task in doc["tasks"]:
         for node in freeze.ancestry(task, graph):
@@ -50,7 +50,7 @@ def verdict(task: dict[str, Any], seen: View) -> str:
         return f"it is claimed by {task.get('claimed_by') or 'an agent'}"
     if state != "open":
         return f"it is {STATES.get(state, state)}"
-    return claim_hold.hold(task, seen.rows, seen.doc, seen.graph, seen.fix) or CLAIMABLE
+    return claim_hold.hold(task, seen.rows, seen.doc, seen.graph, seen.fix) or CLAIMABLE  # pyright: ignore[reportUnknownMemberType]
 
 
 def known(name: str, seen: View) -> bool:
@@ -104,7 +104,8 @@ def unclaimed(record: dict[str, Any], found: dict[str, Any], now_ms: int) -> int
 def report(seen: View, now_ms: int) -> list[dict[str, Any]]:
     """Every focus record with the verdicts under its target and the minutes it has gone without a claim."""
     found: list[dict[str, Any]] = []
-    for record in seen.doc.get("freezes") or []:
+    records: list[dict[str, Any]] = seen.doc.get("freezes") or []
+    for record in records:
         if record["verb"] != "focus":
             continue
         answer = target(record["target"], seen)

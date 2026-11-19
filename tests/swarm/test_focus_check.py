@@ -37,13 +37,26 @@ def ledger_doc(*records: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def verdicts(found: dict[str, Any]) -> dict[str, str]:
+def verdicts(found: dict[str, Any] | None) -> dict[str, str]:
+    assert found is not None
     return {row["id"]: row["verdict"] for row in found["tasks"]}
+
+
+def one(found: dict[str, Any], path: str) -> dict[str, Any] | None:
+    answer = focus_check.read(found, path, "", 0)
+    assert not isinstance(answer, list)
+    return answer
+
+
+def every(found: dict[str, Any], now_ms: int) -> list[dict[str, Any]]:
+    answer = focus_check.read(found, "focus", "", now_ms)
+    assert isinstance(answer, list)
+    return answer
 
 
 @pytest.mark.feature("swarm-focus-verdict")
 def test_every_task_under_a_focus_gets_its_claim_gate_verdict() -> None:
-    found = focus_check.read(ledger_doc(record("phases/p1", "focus"), record("tasks/t5")), "focus/phases/p1", "", 0)
+    found = one(ledger_doc(record("phases/p1", "focus"), record("tasks/t5")), "focus/phases/p1")
     assert found is not None
     assert verdicts(found) == {
         "t1": "claimable",
@@ -58,25 +71,25 @@ def test_every_task_under_a_focus_gets_its_claim_gate_verdict() -> None:
 
 @pytest.mark.feature("swarm-focus-verdict")
 def test_a_task_outside_the_focus_is_named_as_held_by_it() -> None:
-    found = focus_check.read(ledger_doc(record("tasks/t1", "focus")), "focus/tasks/t3", "", 0)
+    found = one(ledger_doc(record("tasks/t1", "focus")), "focus/tasks/t3")
     assert found is not None
     assert verdicts(found) == {"t3": "a focus elsewhere holds it"}
 
 
 @pytest.mark.feature("swarm-focus-verdict")
 def test_a_target_that_does_not_exist_has_no_verdict() -> None:
-    assert focus_check.read(ledger_doc(), "focus/tasks/nope", "", 0) is None
+    assert one(ledger_doc(), "focus/tasks/nope") is None
     assert focus_check.lines("unfreeze", "tasks/nope", None) == ["unfreeze tasks/nope: no such target"]
 
 
 @pytest.mark.feature("swarm-focus-verdict")
 def test_a_focus_with_nothing_claimable_prints_a_loud_head() -> None:
-    found = focus_check.read(ledger_doc(record("tasks/t2", "focus")), "focus/tasks/t2", "", 0)
+    found = one(ledger_doc(record("tasks/t2", "focus")), "focus/tasks/t2")
     assert focus_check.lines("focus", "tasks/t2", found) == [
         "focus tasks/t2: NOTHING CLAIMABLE, no agent will start work from it; 1 open, 0 done",
         "  t2  eng  it waits on task t3",
     ]
-    found = focus_check.read(ledger_doc(record("tasks/t1", "focus")), "focus/tasks/t1", "", 0)
+    found = one(ledger_doc(record("tasks/t1", "focus")), "focus/tasks/t1")
     assert focus_check.lines("focus", "tasks/t1", found)[0] == "focus tasks/t1: 1 claimable, 1 open, 0 done"
 
 
@@ -149,7 +162,7 @@ def test_the_focus_read_lists_every_focus_with_verdicts_and_unclaimed_minutes() 
         record("tasks/t4", "focus"),
         record("tasks/t6", "focus"),
     )
-    assert focus_check.read(found, "focus", "", 6 * MINUTE) == [
+    assert every(found, 6 * MINUTE) == [
         {
             "target": "tasks/t1",
             "claimable": 1,
@@ -186,11 +199,9 @@ def test_the_focus_read_lists_every_focus_with_verdicts_and_unclaimed_minutes() 
 @pytest.mark.feature("swarm-focus-read")
 def test_a_lane_focus_covers_every_task_of_its_lane() -> None:
     found = doc(record("lane:ci", "focus"), tasks=[task("t1"), task("c1", lane="ci")])
-    [row] = focus_check.read(found, "focus", "", 0)
+    [row] = every(found, 0)
     assert [task_row["id"] for task_row in row["tasks"]] == ["c1"]
-    assert focus_check.read(found, "focus/lane:ci", "", 0) == {
-        key: row[key] for key in ("target", "claimable", "done", "tasks")
-    }
+    assert one(found, "focus/lane:ci") == {key: row[key] for key in ("target", "claimable", "done", "tasks")}
 
 
 @pytest.mark.feature("swarm-focus-read")

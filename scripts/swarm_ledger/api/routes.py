@@ -107,8 +107,8 @@ def focus_read(services: Services, slug: str, path: str) -> dict[str, Any]:
     found = ports.swarm().focus_check.read(state, path, fix_phase(services, slug), int(time.time() * 1000))
     if found is None:
         raise APIError(404, "resource_missing", "No such target")
-    reply = {"data": found, "revision": resources.revision(found)}
-    return resources.bounded({**reply, "next_cursor": None} if path == "focus" else reply)
+    reply: dict[str, Any] = {"data": found, "revision": resources.revision(found)}
+    return resources.bounded({**reply, "next_cursor": None} if path == "focus" else reply)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
 
 
 def fix_phase(services: Services, slug: str) -> str:
@@ -117,7 +117,7 @@ def fix_phase(services: Services, slug: str) -> str:
 
     swarm = ports.swarm()
     try:
-        return swarm.freeze.fix_phase(services.swarm.store().config(slug))
+        return swarm.freeze.fix_phase(cast(Any, services.swarm.store()).config(slug))
     except (swarm.store.SwarmError, RedisError, ValueError, OSError):
         return ""
 

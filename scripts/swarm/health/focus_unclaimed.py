@@ -2,7 +2,7 @@
 a focus unclaimed health finding for the master."""
 
 import json
-from typing import Any
+from typing import Any, cast
 
 from scripts.swarm import freeze
 from scripts.swarm.health import focus_check
@@ -15,7 +15,7 @@ TICKS = 3
 
 
 def read(store: RedisStore, slug: str) -> dict[str, Any]:
-    raw = store.redis.get(store.key(slug, KEY))
+    raw: str | None = cast(Any, store).redis.get(store.key(slug, KEY))
     return json.loads(raw) if raw else {}
 
 
@@ -24,7 +24,8 @@ def observe(store: RedisStore, slug: str, doc: dict[str, Any], at: int) -> dict[
     before = read(store, slug).get("tasks", {})
     seen = focus_check.view(doc, freeze.fix_phase(store.config(slug)))
     counted: dict[str, Any] = {}
-    for record in doc.get("freezes") or []:
+    records: list[dict[str, Any]] = doc.get("freezes") or []
+    for record in records:
         if record["verb"] != "focus":
             continue
         for task in focus_check.under(record["target"], seen):
@@ -37,7 +38,7 @@ def observe(store: RedisStore, slug: str, doc: dict[str, Any], at: int) -> dict[
                 "title": task.get("title") or task["id"],
                 "focus": record["target"],
             }
-    store.redis.set(store.key(slug, KEY), json.dumps({"at": at, "tasks": counted}))
+    cast(Any, store).redis.set(store.key(slug, KEY), json.dumps({"at": at, "tasks": counted}))
     return counted
 
 
