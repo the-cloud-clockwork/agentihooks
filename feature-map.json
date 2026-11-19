@@ -1160,6 +1160,18 @@
       ]
     },
     {
+      "id": "managed-process-owner-observation",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-live-binding-process-false",
+      "behaviour": "Managed Codex app server process liveness is inspected only on the owning host. A connected foreign transport with an empty runtime target remains unknown without a process mismatch or local process inspection, while local live bindings match and genuine local server death still reports a process mismatch.",
+      "seam": "scripts.swarm.runtime.HerdrRuntime.bindings through scripts.swarm.live_binding.server_alive, record and findings",
+      "tests": [
+        "tests/swarm/test_managed_lifecycle.py::test_a_foreign_managed_server_has_unknown_process_liveness",
+        "tests/swarm/test_managed_lifecycle.py::test_a_local_managed_server_keeps_its_matching_binding",
+        "tests/swarm/test_managed_lifecycle.py::test_a_dead_local_managed_server_still_has_a_process_mismatch"
+      ]
+    },
+    {
       "id": "swarm-spawn-order-once-per-pass",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-spawn-order-budget",
