@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.1047 · 2026-11-19
+
+### 2026-11-19 · f1dc699fc89c · #12222 · @nestorcolt
+
+**Pull request checks run the tick catalogue page test when a tick step changes**
+
+This change fixes a gap where editing a tick step module under scripts/tick/steps/ could leave the committed tick-step catalogue page stale without any test catching it until the merge queue, since the catalogue test loads step modules dynamically and wasn't reachable by the existing import graph or name-based selection rules. Now, selected_tests explicitly adds tests/test_docs_tick.py whenever a changed step path is detected and other tests are already selected, ensuring the catalogue check runs on the pull request itself rather than failing late in the merge queue, which previously caused confusing, hard-to-diagnose failures and wasted CI cycles.
+
 ## v2.17.1045 · 2026-11-19
 
 ### 2026-11-18 · eedb119b1fff · #12206 · @agenticore-app
