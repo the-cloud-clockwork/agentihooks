@@ -27,7 +27,7 @@ def _workflow(name):
 
 
 def test_wrapper_runs_the_inline_scan_feature_tests_and_chart_guard() -> None:
-    assert set(_jobs()) == {"scan", "own-rules", "feature-tests", "charts"}
+    assert set(_jobs()) == {"scan", "own-rules", "test-rules", "feature-tests", "charts"}
 
 
 def test_scan_runs_inline_without_private_organization_workflow_calls():
@@ -48,8 +48,12 @@ def test_scan_keeps_the_reusable_workflow_steps() -> None:
             "Install PyYAML",
             "Check out the protected grader",
             "Own rules hold on their fixtures and the code",
-            "Outage rules for tests hold on every test file",
             "Rule exceptions only shrink",
+        ],
+        "test-rules": [
+            "Install Semgrep",
+            "Check out the protected grader",
+            "Outage rules for tests hold on every test file",
         ],
         "scan": [
             "Install Semgrep",
@@ -74,17 +78,19 @@ def test_scan_keeps_the_reusable_workflow_steps() -> None:
 
 def test_strict_scans_run_in_independent_jobs() -> None:
     jobs = _jobs()
-    own = jobs["own-rules"]
-    findings = jobs["scan"]
-    assert "needs" not in own and "needs" not in findings
-    assert "concurrency" not in own and "concurrency" not in findings
-    assert own["timeout-minutes"] == findings["timeout-minutes"] == 5
-    names = {job: {step.get("name") for step in body["steps"]} for job, body in jobs.items()}
-    assert "Own rules hold on their fixtures and the code" in names["own-rules"]
-    assert "Outage rules for tests hold on every test file" in names["own-rules"]
-    assert "Fail on findings new against the base" in names["scan"]
-    assert "Fail on findings new against the base" not in names["own-rules"]
-    assert "Own rules hold on their fixtures and the code" not in names["scan"]
+    scans = {name: jobs[name] for name in ("own-rules", "test-rules", "scan")}
+    assert all("needs" not in job for job in scans.values())
+    assert all(job["timeout-minutes"] == 5 for job in scans.values())
+    groups = [job.get("concurrency", {}).get("group") for job in scans.values()]
+    assert len(set(groups)) == len(groups)
+    names = {job: {step.get("name") for step in body["steps"]} for job, body in scans.items()}
+    expected = {
+        "own-rules": "Own rules hold on their fixtures and the code",
+        "test-rules": "Outage rules for tests hold on every test file",
+        "scan": "Fail on findings new against the base",
+    }
+    for job, step in expected.items():
+        assert {owner for owner, steps in names.items() if step in steps} == {job}
 
 
 def test_scan_grades_new_findings_against_the_caller_base():
@@ -127,7 +133,7 @@ SCAN_STUB = '#!/usr/bin/env bash\necho "$*" >> "$STUBS/calls"\nexit "$SCAN_EXIT"
 
 
 def _test_rules_step() -> dict[str, Any]:
-    return next(step for step in _jobs()["own-rules"]["steps"] if step.get("name") == TEST_RULES)
+    return next(step for step in _jobs()["test-rules"]["steps"] if step.get("name") == TEST_RULES)
 
 
 def _run_test_rules(tmp_path: Path, graded: bool, scan_exit: int = 0) -> tuple[int, list[str]]:
@@ -587,6 +593,7 @@ def test_feature_tests_and_charts_have_runner_classes() -> None:
         "semgrep.yml/feature-tests",
         "semgrep.yml/own-rules",
         "semgrep.yml/scan",
+        "semgrep.yml/test-rules",
     }
 
 

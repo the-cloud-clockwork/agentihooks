@@ -56,6 +56,7 @@
   "semgrep.yml/feature-tests": "light",
   "semgrep.yml/own-rules": "light",
   "semgrep.yml/scan": "light",
+  "semgrep.yml/test-rules": "light",
   "startup-stages.yml/measure": "standard",
   "swarm-image.yml/publish": "standard",
   "swarm-node-base.yml/copy": "standard",

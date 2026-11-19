@@ -260,11 +260,9 @@ def test_a_chart_check_refuses_a_grader_copy_that_ignores_the_root_instead_of_gr
     [
         (
             "own-rules",
-            [
-                "Own rules hold on their fixtures and the code",
-                "Outage rules for tests hold on every test file",
-            ],
+            ["Own rules hold on their fixtures and the code"],
         ),
+        ("test-rules", ["Outage rules for tests hold on every test file"]),
         ("scan", ["Fail on findings new against the base"]),
         ("charts", sorted(CHART_STEPS.values())),
     ],

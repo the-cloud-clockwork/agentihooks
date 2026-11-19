@@ -68,6 +68,7 @@ MOVED = {
     ("semgrep.yml", "feature-tests"): LIGHT,
     ("semgrep.yml", "own-rules"): LIGHT,
     ("semgrep.yml", "scan"): LIGHT,
+    ("semgrep.yml", "test-rules"): LIGHT,
     ("docs-sanity.yml", "scan"): LIGHT,
     ("startup-stages.yml", "measure"): STANDARD,
     ("swarm-image.yml", "publish"): STANDARD,
