@@ -138,6 +138,7 @@ The existing base grading command accepts these environment settings:
 | `TEST_COUNT_COLLECTION_CACHE` | Directory for the separate exact collection cache, used for sides still needing collection. |
 | `TEST_COUNT_ENVIRONMENT` | Environment key required to enable that cache; CI uses the restored test environment's primary cache key. |
 | `TEST_COUNT_HEAD_COLLECTION` | Optional output file for collected head ids, reused by later CI steps. |
+| `TEST_COUNT_REVIEWED_HEAD`, `TEST_COUNT_REVIEWS` | The pull request head and its reviews; see [Code owner approval](#code-owner-approval). |
 
 For example, the workflow grades from the base checkout with the downloaded record:
 
@@ -178,7 +179,7 @@ A cache miss preserves normal grading. Token creation is a separate workflow ste
 
 Admission is computed only when the head collects fewer tests than the base. Everything comes from parsing the two checkouts, except the [signed retirements](#signed-retirements) a pull request adds.
 
-A test id in the base and not in the head is admitted when it referenced code the head deletes (a top level name, a keyword branch, or executable steps in a JSON fixture or workflow), when its parametrized id names a file the head deletes, or when the pull request retires it under a Standards reader's signature.
+A test id in the base and not in the head is admitted when it referenced code the head deletes (a top level name, a keyword branch, or executable steps in a JSON fixture or workflow), when its parametrized id names a file the head deletes, or when the pull request retires it under a Standards reader's signature and, on a pull request, a code owner's approval.
 
 ### Deleted definitions and constants
 
@@ -244,13 +245,34 @@ An entry admits its lost test only when all of these hold:
 1. Its file name matches its node id and holds that one entry.
 2. The reader starts with the word `Standards`, in any case (`Standards reader`, `standards_reader`), and the reason is not blank.
 3. The base has no file of that name, so the pull request itself retires the test.
+4. On a pull request, a code owner of the retirement file approved the pull request head the run grades.
 
-Any other file under `test-retirements/`, a symbolic link included, is named in the log and admits nothing; a `test-retirements` folder that is itself a symbolic link admits nothing, and `--retire` refuses to write through one. A lost test without an entry still counts against the floor. `/test-retirements/` is code-owned, so every retirement goes through owner review.
+Any other file under `test-retirements/`, a symbolic link included, is named in the log and admits nothing; a `test-retirements` folder that is itself a symbolic link admits nothing, and `--retire` refuses to write through one. A lost test without an entry still counts against the floor. `/test-retirements/` is code-owned, so every retirement goes through owner review, which the floor checks on a pull request through [Code owner approval](#code-owner-approval).
 
 ```text
 test-retirements/0000….json is not a new retirement signed by a Standards reader, so it admits nothing
-tests/test_ci_workflow.py::test_nightly_report_uploads_its_summary is admitted: the pull request retires it, signed by Standards reader
+tests/test_ci_workflow.py::test_nightly_report_uploads_its_summary is admitted: the pull request retires it, signed by Standards reader and approved by @code-owner
 ```
+
+#### Code owner approval
+
+The reader is text the pull request writes, so on a pull request the floor also needs a code owner's approval. The `Read the pull request reviews` step of `test-count` lists the pull request's reviews on the job's App token, which holds pull requests read, and writes one line per review with its `user`, `state` and `commit_id`. The floor step hands that file and the pull request head from the event payload to the base copy of the floor:
+
+| Setting | Use |
+|---|---|
+| `TEST_COUNT_REVIEWED_HEAD` | The pull request head commit. While it is set, a retirement is admitted only with a code owner's approval of this commit. |
+| `TEST_COUNT_REVIEWS` | The reviews file. A missing or unreadable file admits no retirement while the head is set. |
+
+The owners of a retirement file are those the last matching rule of the base revision's `.github/CODEOWNERS` names, so a pull request cannot name its own approver. The floor reads anchored rules with a star inside one segment and a trailing slash for a folder, the grammar `tests/test_codeowners.py` holds the file to and matches with the same `tests.count_floor.code_owners`. One rule outside it (unanchored, `**`, `?`, a range, a negation, an escape or a folder without its slash), wherever it sits in the file, leaves no known owner, since GitHub might match it last; no retirement is then admitted. Each reviewer's last approval, request for changes or dismissal decides; a later comment leaves it standing, as on GitHub. An approval of an earlier head does not count, so every push after the approval needs a new one. Team owners are not matched, since a review names only its user.
+
+```text
+test-retirements/1f0f….json is not approved on the pull request head by a code owner (@code-owner), so it admits nothing
+The pull request reviews could not be read, so no retirement is admitted
+```
+
+A review does not start a Tests run. After a code owner approves the head, rerun the failed `test-count` job. GitHub refuses an author's approval of their own pull request, so a pull request authored by the only code owner's account cannot retire a test.
+
+Merge groups and dispatched runs carry no pull request head, so they grade signed retirements by the first three rules. A pull request enters the queue only with its own `test-count` green, which required the approval.
 
 ### Deleted keyword branches
 

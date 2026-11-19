@@ -22,7 +22,7 @@ cleanup() {
       kill "$job" 2>/dev/null || true
     fi
   done
-  rm -rf "$logs"
+  rm -rf "$logs" || true
 }
 trap cleanup EXIT
 values=(

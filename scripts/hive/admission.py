@@ -44,12 +44,6 @@ redis.call('PEXPIRE', KEYS[1], ARGV[3])
 return {1, held}
 """
 
-_PENDING = """
-local now = redis.call('TIME')
-local millis = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
-return redis.call('ZCOUNT', KEYS[1], '(' .. millis, '+inf')
-"""
-
 _RECORD = """
 local now = redis.call('TIME')
 local millis = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
@@ -59,6 +53,7 @@ redis.call('PEXPIRE', KEYS[1], ARGV[2])
 _ADMITTED = """
 redis.call('HINCRBY', KEYS[2], 'admitted', 1)
 """
+_UNBOUNDED = "+inf"
 
 
 @dataclass(frozen=True)
@@ -228,7 +223,10 @@ def record(redis: "Redis", machine: str, member: str, totals: str = "") -> None:
 
 
 def pending(redis: "Redis", machine: str) -> int:
-    return int(redis.eval(_PENDING, 1, key(machine)))
+    """Count the unexpired launch reservations on ``machine`` by the Redis server clock with read commands only. A
+    hive member may only read other hives' admission keys, and Redis declares every key an EVAL names written."""
+    seconds, micros = redis.time()  # pyright: ignore[reportUnknownMemberType]
+    return int(redis.zcount(key(machine), f"({seconds * 1000 + micros // 1000}", _UNBOUNDED))
 
 
 def release(redis: "Redis", machine: str, member: str) -> None:
@@ -275,6 +273,10 @@ def binding(hives: list[dict[str, Any]], others: dict[str, int | None]) -> str:
     return line + ": " + "; ".join(f"hive {hive['id']} {hive['refusal']}" for hive in hives)
 
 
-def view_lines(hives: list[dict[str, Any]], others: dict[str, int | None]) -> list[str]:
-    """The hive admission lines and the binding limit line, none when no hive is live."""
-    return [*hive_lines(hives), binding(hives, others)] if hives else []
+def view_lines(
+    hives: list[dict[str, Any]], others: dict[str, int | None], refused: dict[str, str] | None = None
+) -> list[str]:
+    """The hive admission lines, a line naming each live hive whose pending admission count the Redis role refused,
+    and the binding limit line over the hives read; none when no hive is live."""
+    named = [f"hive {hive}  admission count unreadable: {reason}" for hive, reason in (refused or {}).items()]
+    return [*hive_lines(hives), *named, binding(hives, others)] if hives else named

@@ -2,8 +2,10 @@
 
 import io
 import json
+import threading
 import zipfile
 from collections.abc import Mapping
+from concurrent.futures import Future, wait
 from dataclasses import dataclass, field
 from typing import Any
 from unittest.mock import Mock, call
@@ -13,7 +15,7 @@ import requests
 
 from scripts import github_app
 from scripts.ci_lab import manifests
-from scripts.ci_lab.manifests import Actions, Fetcher, FetchRefused
+from scripts.ci_lab.manifests import Actions, Fetcher, FetchRefused, FetchUnanswered
 
 COMMIT = "c" * 40
 OTHER = "d" * 40
@@ -222,6 +224,29 @@ def test_actions_answers_none_for_a_gone_archive_and_names_any_other_refused_req
     assert token.minted == len(answers)
 
 
+@pytest.mark.feature("lab-manifest-fetch-holds-head")
+def test_actions_marks_a_request_github_never_answered_or_answered_with_a_server_error_unanswered(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    get = Mock(side_effect=[answer(500), answer(599), answer(499), requests.ReadTimeout("read timed out")])
+    monkeypatch.setattr(requests, "get", get)
+    actions = Actions("example/repo", Token())
+    with pytest.raises(FetchUnanswered, match="^GET actions/artifacts/9/zip answered 500$"):
+        actions.archive(zipped(9))
+    with pytest.raises(FetchUnanswered, match=f"^GET actions/workflows/test.yml/runs\\?.*={COMMIT} answered 599$"):
+        actions.json(COMMIT_RUNS_PATH)
+    with pytest.raises(FetchRefused, match="^GET actions/artifacts/9/zip answered 499$") as client_error:
+        actions.archive(zipped(9))
+    assert not isinstance(client_error.value, FetchUnanswered)
+    with pytest.raises(FetchUnanswered, match="^GET actions/artifacts/9/zip failed: read timed out$"):
+        actions.archive(zipped(9))
+    with pytest.raises(FetchUnanswered, match="^GET actions/artifacts/9/zip failed: mint reset$"):
+        Actions("example/repo", Unminted()).archive(zipped(9))
+    with pytest.raises(FetchRefused, match="^actions/artifacts/5/zip holds no readable packed.json$") as unreadable:
+        manifests.fetch(github([1], {1: [artifact(5)]}, {5: b"not a zip"}), COMMIT)
+    assert not isinstance(unreadable.value, FetchUnanswered)
+
+
 @pytest.mark.feature("lab-dev-manifest-fetch")
 def test_the_fetcher_reads_each_repository_through_one_reader_of_its_own() -> None:
     made: list[str] = []
@@ -236,3 +261,107 @@ def test_the_fetcher_reads_each_repository_through_one_reader_of_its_own() -> No
     assert fetcher("other/repo", COMMIT) is None
     assert made == ["example/repo", "other/repo"]
     assert Fetcher().reader is Actions
+
+
+WAIT_S = 10.0
+
+
+@dataclass
+class Clock:
+    """A clock the test sets."""
+
+    now: float = 0.0
+
+    def __call__(self) -> float:
+        """Return the set time."""
+        return self.now
+
+
+@dataclass
+class Held:
+    """A manifest fetch that records its start, then answers its commit's canned answer once released."""
+
+    answers: dict[str, bytes | None | FetchRefused]
+    release: threading.Event = field(default_factory=threading.Event)
+    started: threading.Semaphore = field(default_factory=lambda: threading.Semaphore(0))
+    asked: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
+
+    def __call__(self, slug: str, commit: str) -> bytes | None:
+        """Record the fetch, wait for its release and answer it."""
+        self.asked.append((slug, commit))
+        self.started.release()
+        self.release.wait(WAIT_S)
+        answer = self.answers[commit]
+        if isinstance(answer, FetchRefused):
+            raise answer
+        return answer
+
+
+def finished(fetches: Mapping[tuple[str, str], tuple[float, Future[bytes | None]]]) -> None:
+    """Wait until every fetch a background holds has finished."""
+    wait([future for _, future in fetches.values()])
+
+
+@pytest.mark.feature("lab-manifest-fetch-off-pass")
+def test_background_raises_pending_while_a_fetch_runs_and_answers_it_until_it_goes_stale() -> None:
+    held = Held({COMMIT: packed(COMMIT), OTHER: None})
+    clock = Clock()
+    background = manifests.Background(held, clock=clock)
+    for _ in range(2):
+        with pytest.raises(manifests.FetchPending, match=f"^example/repo manifest of {COMMIT} is still fetching$"):
+            background("example/repo", COMMIT)
+    clock.now = 1.0
+    with pytest.raises(manifests.FetchPending, match=f"^example/repo manifest of {OTHER} is still fetching$"):
+        background("example/repo", OTHER)
+    held.release.set()
+    finished(background.fetches)
+    clock.now = 299.0
+    assert background("example/repo", COMMIT) == packed(COMMIT)
+    assert background("example/repo", COMMIT) == packed(COMMIT)
+    assert background("example/repo", OTHER) is None
+    assert sorted(held.asked) == [("example/repo", COMMIT), ("example/repo", OTHER)]
+    clock.now = 300.0
+    assert background("example/repo", OTHER) is None
+    assert list(background.fetches) == [("example/repo", OTHER)]
+    held.release.clear()
+    with pytest.raises(manifests.FetchPending):
+        background("example/repo", COMMIT)
+    assert all(held.started.acquire(timeout=WAIT_S) for _ in range(3))
+    assert sorted(held.asked) == [("example/repo", COMMIT), ("example/repo", COMMIT), ("example/repo", OTHER)]
+    held.release.set()
+
+
+@pytest.mark.feature("lab-manifest-fetch-off-pass")
+def test_background_answers_a_failed_fetch_once_and_fetches_it_again_on_the_next_call() -> None:
+    held = Held({COMMIT: FetchUnanswered("GET runs answered 502")})
+    background = manifests.Background(held)
+    with pytest.raises(manifests.FetchPending) as pending:
+        background("example/repo", COMMIT)
+    assert isinstance(pending.value, FetchUnanswered)
+    held.release.set()
+    finished(background.fetches)
+    with pytest.raises(FetchUnanswered, match="^GET runs answered 502$"):
+        background("example/repo", COMMIT)
+    held.release.clear()
+    with pytest.raises(manifests.FetchPending):
+        background("example/repo", COMMIT)
+    assert all(held.started.acquire(timeout=WAIT_S) for _ in range(2))
+    assert held.asked == [("example/repo", COMMIT), ("example/repo", COMMIT)]
+    held.release.set()
+
+
+@pytest.mark.feature("lab-manifest-fetch-off-pass")
+def test_background_runs_at_most_four_fetches_at_once() -> None:
+    commits = [f"{number:040x}" for number in range(5)]
+    held = Held({commit: None for commit in commits})
+    background = manifests.Background(held)
+    for commit in commits:
+        with pytest.raises(manifests.FetchPending):
+            background("example/repo", commit)
+    assert all(held.started.acquire(timeout=WAIT_S) for _ in range(4))
+    assert not held.started.acquire(timeout=0.2)
+    held.release.set()
+    assert held.started.acquire(timeout=WAIT_S)
+    finished(background.fetches)
+    assert [background("example/repo", commit) for commit in commits] == [None] * 5
+    assert sorted(held.asked) == [("example/repo", commit) for commit in commits]

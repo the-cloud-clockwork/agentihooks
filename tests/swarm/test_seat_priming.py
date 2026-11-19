@@ -253,7 +253,7 @@ def test_learned_without_text_lists_entries_with_seat_and_number(
     run("sw", "--as", "engineer@a1b2c3-0001", "learned", "lesson one because it held")
     run("sw", "--as", "engineer@a1b2c3-0001", "learned", "lesson two because it held twice", "--maturity", "insight")
     capsys.readouterr()
-    assert run("sw", "learned") == 0
+    assert run("sw", "learned", "--all") == 0
     assert capsys.readouterr().out.splitlines() == [
         "eng-1@sw\t1\tnote\tlesson one because it held",
         "eng-1@sw\t2\tinsight\tlesson two because it held twice",
@@ -281,7 +281,7 @@ def test_only_the_master_or_operator_retires_a_note_and_the_listing_drops_it(
     assert swarm.memory.learned("eng-1@sw")[1]["retired"]["by"] == "operator"
     run("sw", "--as", "engineer@a1b2c3-0001", "learned", "lesson three because it held")
     capsys.readouterr()
-    assert run("sw", "learned") == 0
+    assert run("sw", "learned", "--all") == 0
     assert capsys.readouterr().out.splitlines() == ["eng-1@sw\t3\tnote\tlesson three because it held"]
 
 

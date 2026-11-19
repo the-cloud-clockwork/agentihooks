@@ -32,11 +32,20 @@ def test_bus_provisions_only_when_requested(monkeypatch: pytest.MonkeyPatch, pro
                 num_replicas=1,
             )
         lab_consumer = nats._consumer_config("ci-lab-scheduler", "ci.lab.head.>", BusConfig().queue)
-        wanted = [call("AGENTIHOOKS-CI-LAB-HEADS", config=lab_consumer)] if provision else []
+        relay_consumer = nats._consumer_config("ci-lab-relay", "ci.lab.head.notice", BusConfig().queue)
+        wanted = (
+            [
+                call("AGENTIHOOKS-CI-LAB-HEADS", config=lab_consumer),
+                call("AGENTIHOOKS-CI-LAB-HEADS", config=relay_consumer),
+            ]
+            if provision
+            else []
+        )
         assert js.add_consumer.await_args_list == wanted
         configs = [found.kwargs["config"] for found in js.add_consumer.await_args_list]
         made = [(config.durable_name, config.filter_subject) for config in configs]
-        assert made == ([("ci-lab-scheduler", "ci.lab.head.>")] if provision else [])
+        lab_durables = [("ci-lab-scheduler", "ci.lab.head.>"), ("ci-lab-relay", "ci.lab.head.notice")]
+        assert made == (lab_durables if provision else [])
         state = bus.state("hub-github")
         assert bus.state("hub-github") is state
         if provision:

@@ -88,6 +88,27 @@ def task_counts(tasks):
     return {s: sum(1 for t in tasks if t.get("state") == s) for s in ("open", "claimed", "blocked", "pr", "done")}
 
 
+def section_lines(name: str, read: Callable[[], list[str]]) -> list[str]:
+    """A status section's lines, or one line naming the section when the Redis role may not read its keys."""
+    from redis.exceptions import NoPermissionError
+
+    try:
+        return read()
+    except NoPermissionError as exc:
+        return [f"{name} unreadable: {exc}"]
+
+
+def readable_hives(store: Any) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    """The live hives whose pending admission count the Redis role may read, and each live hive it may not read with
+    the refusal, so a hive member lists the admission rooms it can read and names the counts it cannot."""
+    from scripts.hive.launch import live_hives, pending_reader
+
+    refused: dict[str, str] = {}
+    live = live_hives(store, pending_reader(refused))
+    unreadable = {hive["id"]: refused[hive["id"]] for hive in live if hive["id"] in refused}
+    return [hive for hive in live if hive["id"] not in unreadable], unreadable
+
+
 def auto_snapshot(config):
     return {
         "last": snapshot.last_auto(config.slug),
@@ -293,6 +314,15 @@ def observation(store, slug, agent):
 def transport(agent: AgentRecord) -> dict:
     found = capabilities.of_agent(agent)
     return {"push_inbox": found.push_inbox, "native_terminal_attach": found.native_terminal_attach}
+
+
+def wait_label(store: RedisStore, slug: str, agent: AgentRecord) -> str:
+    """The agent's live declared wait as its kind and target, ``bare`` for a bare wait, or ``-`` without one."""
+    held = idle.wait(store.redis, slug, agent.name)
+    if not held:
+        return "-"
+    on = held.get("on")
+    return f"{on['kind']} {on['target']}" if on else "bare"
 
 
 def live_agents(agents: list[AgentRecord], runtime: Runtime) -> list[AgentRecord]:

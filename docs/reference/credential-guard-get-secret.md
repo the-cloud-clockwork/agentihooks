@@ -203,9 +203,10 @@ kubectl get secret <name> --template='{{range $k,$v:=.data}}{{$k}} {{end}}' list
 | Which keys does it hold? | `kubectl get secret db --template='{{range $k,$v:=.data}}{{$k}} {{end}}'` |
 | Which Secrets are in a namespace? | `kubectl get secrets -n prod -o name` |
 
-The guard allows no form that prints a Secret value. A
-`kubectl describe` of a Secret is refused by a separate check of the same
-guard, with the same key listing as its alternative.
+The guard allows no form that prints a Secret value.
+[Secret reads with kubectl describe](credential-guard-describe-secret.md)
+explains the separate describe refusal: service account token exposure,
+literal type requirements, command forms and the same key listing alternative.
 
 ## Configuration
 

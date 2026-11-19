@@ -1,0 +1,19 @@
+rules:
+  - id: heredoc-mask-swallows-delimiter-line
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The credential guard's heredoc pattern ran a lazy dot-star with DOTALL straight after the delimiter word, so
+      masking a heredoc also hid the rest of the delimiter line, and a credential read written after cat <<EOF on that
+      line passed the guard. Capture the rest of the delimiter line apart from the body, as ([^\n]*)\n, and keep it in
+      the command that is judged.
+    paths:
+      include:
+        - /hooks/
+        - /scripts/
+        - heredoc-mask-swallows-delimiter-line.py
+    patterns:
+      - pattern: re.$FUNCTION("$REGEX", ...)
+      - metavariable-regex:
+          metavariable: $REGEX
+          regex: '(?s).*<<.*\(\\{1,2}w\+\)(\\{1,2}1|''\?|\(\?P=\w+\))?\.\*'
