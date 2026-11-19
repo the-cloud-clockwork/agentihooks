@@ -2379,9 +2379,9 @@ Every refusal exits 1 with `swarm: ` and the reason, and leaves origin untouched
 
 Every refusal after the commit keeps the commit in the worktree, and one after the lab push keeps
 the head on the lab's `refs/grade/<task>` ref. A red grade relays nothing, so the branch on GitHub
-stays where it was. Fix the cause, then repeat the publish with `--via lab`: the `Next:` command a
-refusal prints repeats only `--message` and the files, so it publishes without the lab unless the
-flag is added back.
+stays where it was. Fix the cause, then run the `Next:` command the refusal prints: it repeats
+`--message`, the same `--via lab` and `--direct` flags and the files, so the retry takes the same
+lab route.
 
 The lab grades a head when the push moves its grade ref. A head the lab already holds on
 `refs/grade/<task>` moves nothing: git answers `Everything up-to-date`, the lab prints no grade url,
