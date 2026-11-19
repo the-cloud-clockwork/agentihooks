@@ -213,8 +213,8 @@ per-node verification; a Ready cache pod alone does not prove either cache is wa
 | `CI_LAB_CONTROL_TOKEN` | yes | no | Bearer token the [control routes](#control-routes) require, passed by reference; unset, they refuse every request. The swarm host that presses panic or merge priority holds the same variable |
 | `UV_CACHE_DIR` | no | yes | Shared uv cache for virtual environments |
 
-A worker started with any `GITHUB_APP_*` variable in its environment refuses to start. It exits
-1 and names each variable it found. Only the scheduler holds the App key.
+A worker started with any `GITHUB_APP_*` variable, or any variable with `REDIS` in its name, in its
+environment refuses to start. It exits 1 and names each variable it found. Only the scheduler holds the App key.
 
 ## Ports
 
@@ -533,10 +533,10 @@ inhibit_rules:
 | `CILabQueueWaitHigh` | The predicted wait of the hotfix, pull request or queue class is over 1200 seconds, the 20 minute default past which the [lab behind claim hold](swarm-thresholds.md#lab-behind-claim-hold) holds new eng claims. A [wait the lab cannot predict](#a-wait-the-lab-cannot-predict) reads `+Inf` and fires it too, while the claim hold reads that wait as 0. Promotion and backfill never fire it | 10 minutes | class | Slots busy against slots total, and whether the worker pool sits at its maximum |
 | `CILabWorkersPending` | At least one `ci-lab-worker-*` pod in `ci-lab` is Pending | 15 minutes | the pool | The `cluster-autoscaler-oci-status` ConfigMap for the CI pool, and whether runners hold the CI nodes; every runner outranks a worker, see [Worker scheduling priority](#worker-scheduling-priority) |
 | `CILabBudgetShedding` | `ci_lab_class_shed` is 1 for a class: the day's core budget left fell below that class's shed fraction, so its units wait for the budget to reset. Only backfill, promotion and queue shed | 5 minutes | class | Budget left on the dashboard and the shed fractions in the runtime config at `CI_LAB_RUNTIME_CONFIG` |
-| `CILabPullRequestBlockedByCap` | Pull request units are queued, every slot is busy, and a HorizontalPodAutoscaler in `ci-lab`, the one KEDA is to build for the workers, wants at least its maximum replicas. An autoscaler at its maximum in another namespace does not count | 10 minutes | the pool; its value is the queued pull request units | The worker maximum and the CI node cap; raising either is the operator's elasticity budget |
-| `CILabSchedulerBlind` | Prometheus holds no `ci_lab_slots_wanted` series while the `ci-lab-scheduler` Deployment asks for at least one replica. A scheduler scaled to zero, or no Deployment, keeps it silent | 10 minutes | the scheduler | The scheduler's scrape target and port `9108`; the lab chart's planned KEDA scaler sizes the worker pool from this gauge and holds its fallback floor while it is missing |
+| `CILabPullRequestBlockedByCap` | Pull request units are queued, every slot is busy, and a HorizontalPodAutoscaler in `ci-lab`, the one KEDA builds from the [worker ScaledObject](#packing), wants at least its maximum replicas. An autoscaler at its maximum in another namespace does not count | 10 minutes | the pool; its value is the queued pull request units | The worker maximum and the CI node cap; raising either is the operator's elasticity budget |
+| `CILabSchedulerBlind` | Prometheus holds no `ci_lab_slots_wanted` series while the `ci-lab-scheduler` Deployment asks for at least one replica. A scheduler scaled to zero, or no Deployment, keeps it silent | 10 minutes | the scheduler | The scheduler's scrape target and port `9108`; the worker ScaledObject sizes the worker pool from this gauge and holds `elasticity.floorWorkers` while it is missing |
 | `CILabCacheMissRatioHigh` | The git or uv node cache missed more than half its lookups over 30 minutes, with at least 10 misses. A cache with misses and no hit series counts its hits as 0. The verdict cache never fires it | 15 minutes | cache | The node cache DaemonSet on the CI nodes and the age of its git mirror |
-| `CILabScaleFlapping` | Over the last hour, sampled every 5 minutes, the worker Deployment's replicas rose against 5 minutes earlier in at least 4 samples and fell in at least 4. One ramp up and down again does not fire it | no hold | the pool; its value is the rising samples | Lengthen the scale down stabilisation window of the lab chart's planned ScaledObject, since each swing churns CI nodes through the autoscaler |
+| `CILabScaleFlapping` | Over the last hour, sampled every 5 minutes, the worker Deployment's replicas rose against 5 minutes earlier in at least 4 samples and fell in at least 4. One ramp up and down again does not fire it | no hold | the pool; its value is the rising samples | Lengthen the scale down stabilisation window of the worker ScaledObject, `elasticity.scaleDownWindowSeconds`, since each swing churns CI nodes through the autoscaler |
 | `CILabUnitsOverdue` | At least one leased unit has run past its estimate | 15 minutes | the scheduler; its value is the overdue units | The worker holding the lease; an expired lease requeues the unit once and loses it on the second expiry, see [Retry policy](#retry-policy) |
 | `CILabVerdictMismatch` | A gate's shadow mismatch counter rose in the last hour, or its series first appeared in that hour above 0 | no hold | gate | The mismatch rows of the [shadow report](#report), before the lab grades that gate for merges. It clears an hour after the gate's last new mismatch |
 
@@ -620,7 +620,7 @@ them:
 
 | Series | Read by | Until a service sets it |
 |---|---|---|
-| `ci_lab_slots_wanted` | `CILabSchedulerBlind`, the slots panels, the lab chart's planned KEDA scaler | `CILabSchedulerBlind` fires 10 minutes after a `ci-lab-scheduler` Deployment with a replica appears, and the `wanted` lines stay empty. The scheduler sets it from `scripts.ci_lab.budget.slots_wanted` on every scrape |
+| `ci_lab_slots_wanted` | `CILabSchedulerBlind`, the slots panels, the worker ScaledObject | `CILabSchedulerBlind` fires 10 minutes after a `ci-lab-scheduler` Deployment with a replica appears, and the `wanted` lines stay empty. The scheduler sets it from `scripts.ci_lab.budget.slots_wanted` on every scrape |
 | `ci_lab_units_overdue` | `CILabUnitsOverdue` | The alert cannot fire |
 | `ci_lab_workers_ready` | Workers ready against desired | The `heartbeat` line stays empty |
 | `ci_lab_core_seconds_total`, `ci_lab_heads_graded_total` | Core minutes per merged pull request | The stat reads No data |
@@ -631,10 +631,9 @@ them:
 The kube-state-metrics series need the lab chart's objects in the `ci-lab` namespace: the
 `ci-lab-scheduler` and `ci-lab-worker` Deployments, the worker pods, and the KEDA ScaledObject
 with the HorizontalPodAutoscaler KEDA builds from it. Prometheus reaches port `9108` only through
-a ServiceMonitor for the scheduler. As of the deployment repository's pull request 1825, neither
-repository defines any of these objects. Until the lab chart ships them, every lab alert stays
-inactive, and only the spend estimate and the CI nodes panel show data, since both read node
-taints.
+a ServiceMonitor for the scheduler. The deployment repository's chart ships all of them: the
+scheduler Deployment since its pull request 1818, the worker Deployment since 1826, the
+ScaledObject since 1834 and the scheduler's ServiceMonitor since 1841.
 
 ### CI Lab dashboard
 
@@ -776,15 +775,18 @@ deployed the observability stack.
 
 The deployment repository's `ci-lab` chart runs the [worker service](#worker-executors) as the
 `ci-lab-worker` Deployment in the `ci-lab` namespace, beside a NetworkPolicy of the same name.
-Both landed in that repository's pull request 1826 on 19 November 2026:
-`k8s/charts/ci-lab/templates/worker-deployment.yaml`, `templates/worker-networkpolicy.yaml` and
-the `worker` and `elasticity` blocks of the chart's `values.yaml`. The `ci-lab` Argo CD
-Application syncs `k8s/charts/ci-lab` from that repository's `dev` branch with automated prune and
-self heal, so a chart change reaches the cluster when it merges into `dev`.
+Both landed in that repository's pull request 1826 on 19 November 2026, in
+`k8s/charts/ci-lab/templates/worker-deployment.yaml` and `templates/worker-networkpolicy.yaml`,
+with the `worker` block of the chart's `values.yaml` and the `workersPerNode`, `nodeMax` and
+`nodeReserve` keys of its `elasticity` block. Pull request 1834 of the same day added the KEDA
+ScaledObject in `templates/scaledobject.yaml`, the other `elasticity` keys and the condition that
+drops `replicas` from the Deployment while elasticity is on. The `ci-lab` Argo CD Application
+syncs `k8s/charts/ci-lab` from that repository's `dev` branch with automated prune and self heal,
+so a chart change reaches the cluster when it merges into `dev`.
 
-A worker pod takes a third of a CI node, runs only on the CI node pool, holds no credential,
-writes only to its own `emptyDir` folders and reaches only cluster DNS, the scheduler and the
-object store.
+A worker pod takes 5 of a CI node's 16 vCPUs and 8 GiB of its memory, runs only on the CI node
+pool, holds no credential, writes only to its own `emptyDir` folders and reaches only cluster
+DNS, the scheduler and the object store.
 
 ### Placement
 
@@ -816,14 +818,15 @@ The pod's one container requests what it is limited to:
 | `memory` | `8Gi` | `8Gi` |
 | `ephemeral-storage` | `20Gi` | `20Gi` |
 
-Equal CPU and memory requests and limits give the pod the `Guaranteed` QoS class. The CPU is a
-whole number of cores and `CI_LAB_SLOTS` is `5`, one slot per core, so a worker runs at most five
-units at once.
+Equal CPU and memory requests and limits give the pod the `Guaranteed` QoS class. The worker
+runs as many slots as its CPU quota has whole cores, at most `CI_LAB_SLOTS`; both are 5, one slot
+per core, so a worker runs at most five units at once.
 
 The CI node shape comes from the `ci` entry of the OCI runner pools in the deployment
-repository's Terraform, `stacks/terraform/modules/oci-arc-runners/variables.tf`: 8 OCPUs, which is
-16 vCPUs, and 28 GB of memory. `elasticity.workersPerNode` workers plus `elasticity.nodeReserve`
-fill that node, and one more worker would not fit:
+repository's Terraform, `stacks/terraform/modules/oci-arc-runners/variables.tf`: `ocpus = 8`,
+which is 16 vCPUs, and `memory_gbs = 28`, which the packing test counts as 28 GiB.
+`elasticity.workersPerNode` workers plus `elasticity.nodeReserve` fill that node, and one more
+worker would not fit:
 
 | On one CI node | CPU | Memory |
 |---|---|---|
@@ -834,8 +837,8 @@ fill that node, and one more worker would not fit:
 
 The reserve holds the node's DaemonSets. Each node cache container requests 50m CPU and 128 MiB.
 Measured on a CI node in pull request 1826, the DaemonSet pods there requested 41m CPU and
-120 MiB, about 91m and 248 MiB with the node cache, and the node's allocatable equalled its
-capacity of 16 CPU and 27.4 GiB.
+120 MiB; with the node cache's 50m and 128 MiB added, about 91m and 248 MiB. The node's
+allocatable equalled its capacity of 16 CPU and 27.4 GiB.
 
 The worker count:
 
@@ -864,8 +867,8 @@ The pod holds no credential:
 | `volumes` | `emptyDir` and `hostPath` only | Secret, ConfigMap and projected volumes |
 
 On top of that, the worker refuses at start any variable with the `GITHUB_APP_` prefix or `REDIS`
-in its name, exiting with `ci-lab worker refuses <names>`. Its environment is exactly the worker
-contract:
+in its name: it raises `Refused` with `ci-lab worker refuses <names>` and exits 1. Its environment
+is exactly the worker contract:
 
 | Variable | Value |
 |---|---|
@@ -881,8 +884,10 @@ contract:
 | `CI_LAB_MUTATION_BUDGET` | `worker.mutation.budgetSeconds`, `1800` |
 | `CI_LAB_MUTATION_CAP` | `worker.mutation.cap`, `1` |
 
-`scripts.ci_lab.executors.settings` reads the last seven without a default, so a pod missing one
-fails at start. A mutant unit leases one slot, and the cap of 1 keeps its mutants inside it.
+`scripts.ci_lab.executors.settings` reads `CI_LAB_GIT_MIRROR` and the last seven without a
+default, and `scripts.ci_lab.worker.build` reads `CI_LAB_SCHEDULER_URL` the same way, so a pod
+missing one fails at start with a `KeyError`. A mutant unit leases one slot, and the cap of 1
+keeps its mutants inside it.
 [Environment](#environment) gives the meaning of each variable.
 
 | Level | Security setting |
@@ -917,7 +922,7 @@ and `uv`, the worker waits in `ContainerCreating` while the kubelet retries the 
 | Setting | Value | Effect |
 |---|---|---|
 | `cluster-autoscaler.kubernetes.io/safe-to-evict` | `"false"`, the pod template's only annotation | The cluster autoscaler never removes a node that runs a worker; a CI node goes only after its workers have. A scale down of the Deployment removes idle workers first, see [Worker pod deletion cost](#worker-pod-deletion-cost) |
-| `terminationGracePeriodSeconds` | `worker.terminationGracePeriodSeconds`, `2100` | A stopping worker stops leasing and drains its running units for up to `GRACE_SECONDS`, the same 2100 seconds; see [Worker executors](#worker-executors) |
+| `terminationGracePeriodSeconds` | `worker.terminationGracePeriodSeconds`, `2100` | How long the kubelet waits after SIGTERM before it kills the container. The worker's drain window is fixed in code, `worker.GRACE_SECONDS`, 2100 seconds: a stopping worker stops leasing and drains its running units for up to that long, see [Worker executors](#worker-executors). A Helm value below 2100 kills a worker mid drain |
 | `strategy` | `RollingUpdate` with `maxSurge: 0` and `maxUnavailable: 1` | A rollout adds no surge pod, so it asks the autoscaler for no extra node, and takes one worker down at a time; a busy worker holds its step for up to the grace |
 
 ### Network
@@ -949,7 +954,7 @@ console port and another LAN service were refused.
 | `worker.replicas` | `3` | Replicas when `elasticity.enabled` is `false` |
 | `worker.slots` | `5` | `CI_LAB_SLOTS` and the ScaledObject's target per worker |
 | `worker.uid` | `1001` | Pod UID and GID; keep it equal to `nodeCache.uid` |
-| `worker.terminationGracePeriodSeconds` | `2100` | Stop grace |
+| `worker.terminationGracePeriodSeconds` | `2100` | The kubelet's stop grace; keep it at or above the worker's 2100 second drain |
 | `worker.mutation.budgetSeconds` | `1800` | `CI_LAB_MUTATION_BUDGET` |
 | `worker.mutation.cap` | `1` | `CI_LAB_MUTATION_CAP` |
 | `worker.resources` | 5 CPU, `8Gi` and `20Gi` ephemeral, requests equal to limits | Container resources, copied as written |
@@ -957,6 +962,12 @@ console port and another LAN service were refused.
 | `elasticity.floorWorkers` | `3` | ScaledObject minimum and fallback replicas |
 | `elasticity.workersPerNode` | `3` | Workers per CI node: a factor of the ScaledObject maximum and its scale up step |
 | `elasticity.nodeMax` | `7` | CI pool node maximum: the other factor of the ScaledObject maximum |
+| `elasticity.pollingInterval` | `15` | Seconds between the ScaledObject's trigger reads |
+| `elasticity.fallbackFailures` | `3` | Failed trigger reads before the ScaledObject holds `floorWorkers` |
+| `elasticity.scaleUpPeriodSeconds` | `60` | Period of the scale up step of `workersPerNode` workers, with no stabilisation window |
+| `elasticity.scaleDownWindowSeconds` | `300` | Scale down stabilisation window |
+| `elasticity.scaleDownPodsPerMinute` | `2` | Most workers removed per 60 seconds |
+| `elasticity.prometheusAddress` | `http://kube-prometheus-stack-prometheus.monitoring.svc:9090` | Prometheus the trigger queries |
 | `elasticity.nodeReserve.cpu`, `elasticity.nodeReserve.memory` | `"1"`, `2Gi` | Room left on a CI node for its DaemonSets; only the packing test reads it |
 | `nodeCache.path` | The deployment's host cache root | Root of the two hostPath mounts |
 | `minio.namespace`, `minio.pods`, `minio.port` | The object store's namespace, `app: minio`, `9000` | The MinIO egress rule |
@@ -1026,8 +1037,9 @@ List the workers and their nodes:
 kubectl -n ci-lab get pods -l app.kubernetes.io/component=worker -o wide
 ```
 
-At the floor of three workers with room on one CI node, all three show the same `NODE`. Read
-that node's requests:
+The binpack score sends each worker to the fullest CI node it fits, so at the floor of three
+workers with one CI node that has room, expect all three on the same `NODE`. The chart does not
+force it: a worker scheduled while that node was full goes elsewhere. Read the node's requests:
 
 ```bash
 node=$(kubectl -n ci-lab get pods -l app.kubernetes.io/component=worker \
@@ -1035,8 +1047,9 @@ node=$(kubectl -n ci-lab get pods -l app.kubernetes.io/component=worker \
 kubectl describe node "$node" | sed -n '/^Allocated resources:/,/^Events:/p'
 ```
 
-With three workers, the `cpu` requests line shows about 15.1 of the 16 CPU, 94 percent: 15 from
-the workers and the rest from the node's DaemonSets.
+Computed from the requests, three workers put the `cpu` requests line at about 15.1 of the
+16 CPU, 94 percent: 15 from the workers and about 91m from the DaemonSets pull request 1826
+measured. [Worker delivery evidence](#worker-delivery-evidence) lists what has been recorded live.
 
 Check each worker's scheduler, priority and QoS class:
 
@@ -1052,15 +1065,18 @@ cluster holds it:
 kubectl -n ci-lab describe networkpolicy ci-lab-worker
 ```
 
-A worker that cuts a tree from the node mirror without a fetch reports a git hit, which the
-scheduler adds to its counters. From a client that reaches the scheduler, as in
-[Verify the running service](#verify-the-running-service):
+Each finished unit's report carries one git lookup per tree it leased, and the scheduler adds
+them to its counters. A lookup is a hit when the worker needed no fetch: the head's tree was
+already live in the pod, or the pod's store found the commit, its own or the node mirror's
+through `objects/info/alternates`. A miss is a fetch the worker made. From a client that reaches
+the scheduler, as in [Verify the running service](#verify-the-running-service):
 
 ```bash
 curl -fsS http://lab:9108/metrics | grep -E '^ci_lab_cache_(hits|misses)_total\{cache="git"\}'
 ```
 
-A hits count that rises as units finish shows workers reading the node mirror.
+Hits that rise as units finish, with misses flat, show workers cutting trees from the node mirror
+or from trees they already hold.
 
 ### Limitations
 
@@ -1075,10 +1091,25 @@ A hits count that rises as units finish shows workers reading the node mirror.
 - A head whose `uv.lock` digest differs from the image's baked venv builds its venv with
   `uv sync` under `env -i`, which drops `UV_CACHE_DIR`, and the build needs a package index this
   policy does not reach. See [Head venv builds](#head-venv-builds).
-- Nothing writes `/work/manifest.json`, so a test unit on these workers fails when it reads its
-  dependency manifest.
+- Nothing writes `/work/manifest.json`, so the test executor raises `FileNotFoundError` when it
+  reads its dependency manifest. The worker delivers nothing for the unit and the scheduler
+  reaps the lease; the [retry policy](#retry-policy) requeues it
+  once and marks it lost on the second expiry.
 - Seccomp is `Unconfined` for the whole pod; a `Localhost` profile that adds only the namespace
   calls bubblewrap needs is not written.
+
+### Worker delivery evidence
+
+Pull request 1826 recorded its tests and its network probe; the live placement and cache results
+its done criteria name are not recorded:
+
+| Criterion | Evidence |
+|---|---|
+| The packing, isolation and network seams | Red on run 44496821882 of the deployment repository, 2 failed and 2588 passed, on the tests alone; green on run 44502133418 at the final head, 2599 passed |
+| Egress only to DNS, the scheduler and MinIO | The live probe on a CI node described under [Network](#network) |
+| Three workers on one node, with `kubectl describe node` near 15 of 16 CPU requested | Not recorded; the figure in the verify steps above is computed |
+| A worker git hit from the node mirror | Not recorded |
+| The scheduler exporting `ci_lab_mirror_age_seconds` | Not delivered: no code sets it |
 
 ### Troubleshooting
 
