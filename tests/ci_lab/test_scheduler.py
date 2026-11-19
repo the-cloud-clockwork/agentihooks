@@ -2407,6 +2407,19 @@ def test_a_manifest_read_removes_the_notes_of_commits_with_no_stored_manifest(tm
     assert objects.keys(folder) == [f"{folder}kept.json", kept]
 
 
+@pytest.mark.feature("lab-outside-notes-per-commit")
+def test_a_grade_that_keyed_no_manifest_writes_no_outside_note(lab: Callable[..., Run]) -> None:
+    batch = Unit(expand_tests.KIND, key(expand_tests.KIND, 1), (FIRST_TEST,))
+    run = lab({HEAD_A: plan({"unit": (batch,)})})
+    run.push(HEAD_A)
+    run.tick(1000)
+    (grant,) = run.lease(slots=1)
+    run.finish(grant, "passed", {"seconds": 1.0, "outside": ["docs/p.md"]})
+    run.tick(1100)
+    assert run.store.get(batch.kind, batch.key) is not None
+    assert run.lab.objects.keys(manifest_folder(SLUG)) == []
+
+
 @pytest.mark.feature("lab-dev-manifest-fetch")
 def test_stored_manifests_fetch_a_newest_commit_stored_nowhere_and_keep_it_by_repository_and_commit(
     tmp_path: Path,

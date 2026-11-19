@@ -4476,6 +4476,7 @@
       "tests": [
         "tests/ci_lab/test_scheduler.py::test_a_note_of_an_older_manifest_commit_leaves_a_newer_commit_key_unchanged",
         "tests/ci_lab/test_scheduler.py::test_a_manifest_read_removes_the_notes_of_commits_with_no_stored_manifest",
+        "tests/ci_lab/test_scheduler.py::test_a_grade_that_keyed_no_manifest_writes_no_outside_note",
         "tests/ci_lab/test_store.py::test_objects_remove_one_path_and_take_a_missing_one_as_gone"
       ]
     },

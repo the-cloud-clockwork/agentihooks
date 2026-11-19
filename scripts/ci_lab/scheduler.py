@@ -1009,9 +1009,9 @@ class StoredManifests:
     def _prune(self, folder: str, stored: frozenset[str]) -> None:
         """Remove each note whose commit has no stored manifest, a note written without a commit included."""
         notes = folder + NOTES
-        for name in stored:
+        for name in [path for path in stored if path.startswith(notes)]:
             commit, _, rest = name.removeprefix(notes).partition("/")
-            if name.startswith(notes) and not (rest and f"{folder}{commit}.json" in stored):
+            if not (rest and f"{folder}{commit}.json" in stored):
                 self.objects.remove(name)
 
     def _merged(self, manifest: dict[str, Any], folder: str, stored: frozenset[str]) -> dict[str, Any]:
