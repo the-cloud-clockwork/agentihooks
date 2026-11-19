@@ -6095,6 +6095,9 @@ WantedBy=default.target
   Its supervisor prints `the scheduler supervisor <pid> stops: its state store refused its credential`, starts no
   new runner and exits 4, and systemd leaves it stopped. A timeout or a dropped connection still gets a new pass
   every second. The next `ensure_running` call starts the unit again.
+- Exit 3 means a proof swarm's runner stopped because its state store did not answer for 300 seconds. Its supervisor
+  prints `the scheduler supervisor <pid> stops: its state store did not answer`, starts no new runner and exits 3.
+  Exit 3 is not in `RestartPreventExitStatus`, so systemd restarts the supervisor as it does after any other exit.
 - `AGENTIHOOKS_SCHEDULER_UNIT=1` tells the supervisor that systemd started it. Only the unit sets it; never set it by
   hand.
 - [Workstation tick retirement](#workstation-tick-retirement) keeps this unit: a workstation whose swarms are all
