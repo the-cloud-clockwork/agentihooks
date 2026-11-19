@@ -131,6 +131,7 @@ SUBJECT = f"{HEAD_SUBJECT}.>"
 BATCH = 50
 FETCH_MS = 100
 QUIET_MS = 30_000
+STARTS_PER_PASS = 8
 INTERVAL_S = 2.0
 LEASE_TTL_MS = 120_000
 LEASE_POLL_MS = 500
@@ -452,6 +453,12 @@ def _request(data: Mapping[str, Any]) -> GradeRequest:
     )
 
 
+def _urgency(entry: tuple[str, str]) -> tuple[int, int, str]:
+    """Return a waiting head's place in release order: its class, then when it began waiting, then its lane."""
+    held = json.loads(entry[1])
+    return held["request"]["tier"], held["since"], entry[0]
+
+
 def job_id(head: str, unit: Unit) -> str:
     """Return the queue job of a unit on a head."""
     return f"{head}:{unit.kind}:{unit.key}"
@@ -662,12 +669,16 @@ class Scheduler:
         return f"received {request.head} on {lane}"
 
     def _release(self, now_ms: int) -> list[str]:
-        """Start each held head whose quiet window ended, except one a pause of its class holds. A head whose manifest
-        fetch still runs off the pass keeps its place and window for the next pass; one whose fetch GitHub never
-        answered or answered with a server error waits out the window again; any other expansion failure drops it."""
+        """Start at most `STARTS_PER_PASS` held heads whose quiet window ended, except one a pause of its class holds:
+        the most urgent class first and the longest waiting first within a class. A head still quiet or paused takes no
+        place, and the rest wait for a later pass, so every pass reaches admission. A head whose manifest fetch still
+        runs off the pass keeps its place and window for the next pass; one whose fetch GitHub never answered or
+        answered with a server error waits out the window again; any other expansion failure drops it. Each of these
+        takes a place, since its expansion ran on the pass."""
         actions: list[str] = []
         pauses = control.paused(self.client)
-        for name, raw in sorted(self.client.hgetall(WAITING).items()):
+        started = 0
+        for name, raw in sorted(self.client.hgetall(WAITING).items(), key=_urgency):
             held = json.loads(raw)
             request = _request(held["request"])
             quiet = 0 if request.tier == Priority.HOTFIX else self.settings.quiet_ms
@@ -675,6 +686,7 @@ class Scheduler:
                 pauses, CLASSES[request.tier], request.head, held["lane"]
             ):
                 continue
+            started += 1
             self.client.hdel(WAITING, name)
             try:
                 actions.append(self._start(request, held["lane"], held.get("ref", ""), now_ms))
@@ -692,6 +704,8 @@ class Scheduler:
                 jsonschema.ValidationError,
             ) as error:
                 actions.append(f"cannot expand {request.head}: {error}")
+            if started == STARTS_PER_PASS:
+                break
         return actions
 
     def _start(self, request: GradeRequest, lane: str, ref: str, now_ms: int) -> str:

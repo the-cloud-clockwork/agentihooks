@@ -2353,7 +2353,12 @@ key; the builders are pure and read no file, clock or network.
    runner trust list of the repository's dev branch. A head on the fix branch of any swarm in
    panic grades in the hotfix class.
 2. Each head waits in its lane (repository, branch and class) for the quiet window, 30 seconds by
-   default; a newer head of the lane restarts it and a hotfix waits for none.
+   default; a newer head of the lane restarts it and a hotfix waits for none. A pass starts at most
+   eight heads whose window ended (`STARTS_PER_PASS`): the most urgent class first (hotfix, pull
+   request, queue, promotion, backfill) and, within a class, the head that has waited longest. A head
+   still quiet or held by a pause takes no place; a head put back for its manifest fetch takes one,
+   since its expansion ran on the pass. The other heads wait for a later pass, so every pass reaches
+   steps 5 to 8 however many heads wait.
 3. Expansion reads the grader's test workflow and input key registry and the head and base trees
    from the git mirror with `git ls-tree` and `git show`, never a checkout, and keys one static
    unit per gate step, described in [Static units](#static-units). A merge group, promotion or
