@@ -1913,10 +1913,10 @@ with the rest of the suite.
 #### Offer order limitations
 
 - The dispatcher's claim key does not order offers. At `delegate` and `full` autonomy the capacity decision's ready
-  work and preemption still sort by `scripts.swarm.dispatcher.claim_key`, which puts the critical chain guard band
-  first, keeps only an operator rank, an `urgent` rank and a low rank on generated work as bands, and places every
-  other task by its dispatcher queue position. The dispatcher writes no rank, so offers see none of this: they count
-  every stored rank, a master's or a planner's included, as its band.
+  work and preemption sort by `scripts.swarm.dispatcher.claim_key`. That key puts the critical chain guard band
+  first. It keeps only these ranks as bands: an operator rank, an `urgent` rank, a `low` rank the swarm set on any
+  task, and a documentation follow up with no rank. It orders every other task by its place in the dispatcher's queue. The dispatcher writes no rank to
+  the ledger. Offers take the stored rank of every task as its band, a rank a master or planner set included.
 - A task whose last launch failed keeps its place. The tick's launch order demotes it inside its band; offers do not.
 - None of the tie rules inside a rank band from [Queue rank](swarm.md#queue-rank) apply: no longer critical path, no S
   task that unblocks another and no resumed work goes first. Focus record position breaks ties inside a band, then
@@ -1929,8 +1929,8 @@ in ledger row order. Pull request
 [#11136](https://github.com/the-cloud-clockwork/agentihooks/pull/11136) gave the offers the same sort while it mapped
 every feature whose tests reached the legacy spawn to tests that would survive its removal. That mapping was the file
 `tests/LEGACY_SPAWN_COVERAGE.json`, checked by `tests/swarm/test_legacy_spawn_coverage.py` under the feature
-`legacy-spawn-events-coverage`. It listed 23 features, not the 31 the task first counted from file imports; as the pull
-request description notes, many of those test files import the place or observe step only for helpers that stay.
+`legacy-spawn-events-coverage`. It listed 23 features. The task had counted 31 from file imports; the pull request
+description explains that many of those test files import the place or observe step only for helpers that stay.
 16 entries named tests from the feature map that reach none of the spawn, 10 named clauses that retire with the spawn
 and 3 named an events engine gap; an entry could name more than one of these.
 

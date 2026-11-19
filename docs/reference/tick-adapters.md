@@ -1088,7 +1088,7 @@ each time. The legacy spawn order also called it once per lane inside
 `focus_budget.place`; that spawn order was removed with the spawn.
 
 The measurement below is the record of pull request 9573 on the legacy spawn step. That step no longer runs, so on a
-swarm after the removal the command finds no `spawn` records. It measured the spawn step over a thirty minute UTC
+swarm after the removal the command finds no `spawn` records. It measures the spawn step over a thirty minute UTC
 window from its `swarm_tick_step` finished records:
 
 ```bash

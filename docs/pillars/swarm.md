@@ -8115,8 +8115,8 @@ The tick orders claimable tasks highest rank first. Within a rank, a task with a
 the longest chain of open tasks waiting on it. One exception: an S task that unblocks another open task (one whose
 other dependencies are all done), or is the last task of its phase not yet done, goes ahead of the rest of its rank.
 Phase order is never used, and ledger order breaks the remaining ties. Capacity placement reads the same order. The
-hub's offers on the `events` engine sort by focus, then rank band, then focus record position, with none of these
-tie rules; see [Offer order](hives.md#offer-order). The tick then applies the usual
+hub's offers on the `events` engine sort by focus, then rank band, then focus record position, with neither the
+critical path rule nor the S task rule above; see [Offer order](hives.md#offer-order). The tick then applies the usual
 rules: lane, phase, open dependencies and live claims still decide whether a task is claimable, so an
 urgent task never skips a dependency that is not done and never takes a task another agent holds. A `tune` task never stacks on a `code` or `ci` dependency that is claimed or in pull request: it waits until that dependency is done. In a Doctor swarm it also waits until the dependency carries `applied_at`, which the Doctor's `pull-dev` intervention records on each merged fix an open tune task measures, or `ledger task set <id> applied_at=<UTC time>` records by hand; the dispatcher's queue head reads the same rule. A territory
 another agent holds moves a task back within its rank without blocking it (see
@@ -8146,7 +8146,7 @@ Every open task is in one of three states. **Focused** tasks form an ordered que
 
 - **Freeze** holds the target and everything under it, unless a focus on a node nearer the task covers it. Freezing a focused target ends its focus.
 - **Focus** appends the target to the focus queue; `--top` puts it first and `--bottom` appends it. Focusing a target already in the queue with `--top` or `--bottom` moves it to that end; without either it keeps its place. `--only` drops every other focus, so the target and everything under it are the whole queue. A focus unfreezes its target and every node under it.
-- A task's place in the focus queue is the position of the first focus record that covers it, by node address in its ancestry or by a `lane:` or `kind:` selector; a task no focus covers comes after every focused one. The hub reads these places once per readiness pass and offers focused tasks first, by rank band and then by place (see [Offer order](hives.md#offer-order) and [Focus ranks in offer order](../reference/tick-adapters.md#focus-ranks-in-offer-order)).
+- A task's place in the focus queue is the position of the first focus record that covers it, by node address in its ancestry or by a `lane:` or `kind:` selector; a task no focus covers comes after every focused one. The hub reads these places on each readiness pass and offers focused tasks first, by rank band and then by place (see [Offer order](hives.md#offer-order) and [Focus ranks in offer order](../reference/tick-adapters.md#focus-ranks-in-offer-order)).
 - While any focused task is open, claimed, blocked or in a pull request, every task outside the focus waits, whatever its rank: `urgent` orders tasks within their state and never passes the focus queue. The tasks a focused task depends on or is parked on, and the open tasks of every phase its phase waits on, join the focus, so the queue never waits on held work. A focus whose tasks are all done, frozen or waiting on frozen work holds nothing.
 - A Doctor swarm's fix phase is exempt from focus, its own and the one on the ledger it watches.
 
