@@ -2184,6 +2184,28 @@ def test_publish_via_lab_direct_pushes_origin_after_the_lab_without_waiting(
 
 
 @pytest.mark.feature("lab-remote-in-workspaces")
+def test_publish_via_lab_pushes_the_grade_ref_with_push_negotiation(
+    publication: SimpleNamespace, lab: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import publish
+
+    real = publish.git_https.run
+    pushed: list[list[str]] = []
+
+    def run(argv: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+        if argv[-1].startswith("HEAD:refs/grade/"):
+            pushed.append(argv)
+        return real(argv, cwd=cwd)
+
+    monkeypatch.setattr(publish.git_https, "run", run)
+    _publish_via_lab(publication, direct=True)
+    assert pushed == [
+        ["git", "-c", "push.negotiate=true", "push", "-o", "branch=engineer-test", "lab", "HEAD:refs/grade/t1"]
+    ]
+    assert (lab / "pushed").read_text() == "refs/grade/t1 branch=engineer-test\n"
+
+
+@pytest.mark.feature("lab-remote-in-workspaces")
 def test_publish_via_lab_refuses_without_a_lab_remote_for_the_repository(
     publication: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
