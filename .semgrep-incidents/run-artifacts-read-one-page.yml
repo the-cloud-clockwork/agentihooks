@@ -28,12 +28,21 @@ rules:
       Python code lists a run's artifacts with a query that has no page and no name parameter, so it reads only the
       first page, 100 artifacts at most. On 19 November the two newest passed dev push runs each held 106 artifacts
       with coverage shards on the second page, so the pull request test planner skipped both and reused tests from a
-      dev run four commits behind. Read every page with the page parameter, or ask for the artifact by name.
+      dev run four commits behind. Read every page with the page parameter, or ask for the artifact by name. A
+      listing passed to rows is exempt, because the storage report's rows reads it with gh api --paginate.
     paths:
       include:
         - /scripts/**/*.py
         - /hooks/**/*.py
         - '**/run-artifacts-read-one-page.py'
-    patterns:
-      - pattern-regex: '/runs/[^/\s]+/artifacts(?=\?)(?![^"''\s]*[?&](?:page|name)=)'
-      - pattern-not-inside: rows(...)
+    pattern-either:
+      - patterns:
+          - pattern-regex: '/runs/[^/\s]+/artifacts(?=\?)(?![^"''\s]*[?&](?:page|name)=)'
+          - pattern-not-inside: rows(...)
+      - patterns:
+          - pattern-either:
+              - pattern: _api($URL, ...)
+              - pattern: api($URL, ...)
+          - metavariable-regex:
+              metavariable: $URL
+              regex: '.*/runs/[^/\s]+/artifacts["'']\Z'

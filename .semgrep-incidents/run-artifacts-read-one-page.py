@@ -13,6 +13,18 @@ def one_page_of_a_row(api: Callable[..., dict[str, Any]], row: dict[str, Any]) -
     return api(f"actions/runs/{row['id']}/artifacts?per_page=100", deadline=60)["artifacts"]
 
 
+def the_default_page(api: Callable[[str], bytes], actions: str, run: dict[str, Any]) -> list[dict[str, Any]]:
+    # ruleid: run-artifacts-read-one-page-python
+    return json.loads(api(f"{actions}/runs/{run['id']}/artifacts"))["artifacts"]
+
+
+def the_default_page_through_the_planner_reader(
+    _api: Callable[[str], bytes], actions: str, run: dict[str, Any]
+) -> list[dict[str, Any]]:
+    # ruleid: run-artifacts-read-one-page-python
+    return json.loads(_api(f"{actions}/runs/{run['id']}/artifacts"))["artifacts"]
+
+
 def every_page(api: Callable[[str], bytes], actions: str, run: dict[str, Any], page: int) -> list[dict[str, Any]]:
     # ok: run-artifacts-read-one-page-python
     return json.loads(api(f"{actions}/runs/{run['id']}/artifacts?per_page=100&page={page}"))["artifacts"]
