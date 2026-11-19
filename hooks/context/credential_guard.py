@@ -192,7 +192,22 @@ NEUTRAL_STAGE = re.compile(r"^\s*(sort|uniq|column|tr)\b")
 
 HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1([^\n]*)\n(.*?)^\s*\2\s*$", re.S | re.M)
 HEREDOC_TOKEN = re.compile(r"<<AHHEREDOC(\d+)([^\n]*)")
-SCRIPT_RUNNERS = SHELLS | SOURCERS | {"eval", "ksh", "mksh", "ash", "fish", "csh", "tcsh"}
+SCRIPT_RUNNERS = SHELLS | SOURCERS | {"eval", "su", "ksh", "mksh", "ash", "fish", "csh", "tcsh"}
+LAUNCHERS = {
+    "sudo",
+    "doas",
+    "env",
+    "command",
+    "exec",
+    "time",
+    "nohup",
+    "nice",
+    "timeout",
+    "xargs",
+    "stdbuf",
+    "setsid",
+    "busybox",
+}
 SEGMENT_DELIM = re.compile(r"&&|\|\||;|\n")
 STAGE_DELIM = re.compile(r"(?<!\|)\|(?!\|)")
 SUBSTITUTION = re.compile(r"\$\(([^()]*)\)|`([^`]*)`|<\(([^()]*)\)")
@@ -1091,13 +1106,16 @@ def script_verdict(stage_text: str, ctx: Context) -> Verdict:
 
 
 def runs_input_script(stage_text: str) -> bool:
-    """Whether the stage, its wrapped command or a command substitution in it runs a shell, source or eval."""
+    """Whether the stage, its wrapped or launched command or a substitution in it runs a shell, source or eval."""
     for m in SUBSTITUTION.finditer(stage_text):
         if runs_input_script(next(g for g in m.groups() if g is not None)):
             return True
     toks = tokens_of(stage_text)
     if verb_of(toks) in WRAPPERS:
         toks = inner_command([word for tok in toks for word in tok.split()]) or []
+    words = [tok.split("/")[-1] for tok in toks if not ASSIGNMENT.match(tok)]
+    if words and words[0] in LAUNCHERS:
+        return any(word in SCRIPT_RUNNERS for word in words)
     return verb_of(toks) in SCRIPT_RUNNERS
 
 

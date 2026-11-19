@@ -826,6 +826,26 @@ HEREDOCS_A_SHELL_RUNS = [
     (". /dev/stdin <<'EOF'\nenv\nEOF", "env"),
     ('eval "$(cat <<EOF\ncat ~/.env\nEOF\n)"', "cat ~/.env"),
     ("ksh <<EOF\ncat .env\nEOF", "cat .env"),
+    ("mksh <<EOF\ncat .env\nEOF", "cat .env"),
+    ("ash <<EOF\ncat .env\nEOF", "cat .env"),
+    ("fish <<EOF\ncat .env\nEOF", "cat .env"),
+    ("csh <<EOF\ncat .env\nEOF", "cat .env"),
+    ("tcsh <<EOF\ncat .env\nEOF", "cat .env"),
+    ("su <<EOF\ncat .env\nEOF", "cat .env"),
+    ("cat <<EOF | sudo -u root bash\ncat .env\nEOF", "cat .env"),
+    ("doas -u root sh <<EOF\ncat .env\nEOF", "cat .env"),
+    ("cat <<EOF | /usr/bin/env bash\ncat .env\nEOF", "cat .env"),
+    ("env -i bash <<EOF\ncat .env\nEOF", "cat .env"),
+    ("command -p bash <<EOF\ncat .env\nEOF", "cat .env"),
+    ("exec bash <<EOF\ncat .env\nEOF", "cat .env"),
+    ("time bash <<EOF\ncat .env\nEOF", "cat .env"),
+    ("nohup bash <<EOF\ncat .env\nEOF", "cat .env"),
+    ("nice -n 5 bash <<EOF\ncat .env\nEOF", "cat .env"),
+    ("timeout 5 bash <<EOF\ncat .env\nEOF", "cat .env"),
+    ("xargs bash <<EOF\ncat .env\nEOF", "cat .env"),
+    ("stdbuf -o0 bash <<EOF\ncat .env\nEOF", "cat .env"),
+    ("setsid bash <<EOF\ncat .env\nEOF", "cat .env"),
+    ("busybox sh <<EOF\ncat .env\nEOF", "cat .env"),
 ]
 
 HEREDOCS_THAT_READ_NO_CREDENTIAL = [
@@ -838,6 +858,8 @@ HEREDOCS_THAT_READ_NO_CREDENTIAL = [
     "grep bash <<'EOF'\ncat .env\nEOF",
     "cat <<EOF | grep sh\ncat .env\nEOF",
     'bash -c "bash <<EOF\necho hi\nEOF\n"',
+    "timeout 5 tee notes.md <<'EOF'\ncat .env\nEOF",
+    "sudo -u root tee notes.md <<'EOF'\ncat .env\nEOF",
 ]
 
 
