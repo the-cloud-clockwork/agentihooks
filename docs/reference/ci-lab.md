@@ -1016,7 +1016,7 @@ the next daemon start, the next `wt.sh new` or `wt.sh tmp` from it, or the next
 `publish --via lab` in it. The daemon reads the two variables from its own environment once the
 operator env files are loaded; a hive whose daemon lacks `AGENTIHOOKS_LAB_REMOTE` carries nothing.
 
-#### Verify
+#### Verify the lab remote
 
 ```bash
 git -C <checkout> remote -v
@@ -1037,7 +1037,7 @@ The second command prints one `credential.<lab url>.helper` line whose function 
 `$AGENTIHOOKS_LAB_REMOTE_TOKEN` and holds no token. The third tells whether the shell that will push
 holds the token, without printing it.
 
-#### Troubleshooting
+#### Troubleshooting the lab remote
 
 | Symptom | Cause | Check |
 |---|---|---|
