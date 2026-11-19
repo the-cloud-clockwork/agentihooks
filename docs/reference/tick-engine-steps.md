@@ -286,7 +286,7 @@ The tick report counts these runs per step in its Late share, Abandoned, Held an
 ### Profile a step
 
 The tick report shows how long a step ran and how much CPU it used, but not where that time went. To find out, list
-the step in `AGENTIHOOKS_TICK_PROFILE_STEPS`. `scripts.swarm.timing.within`, which runs every engine step at its
+the step in `AGENTIHOOKS_TICK_PROFILE_STEPS`, added by pull request 10512. `scripts.swarm.timing.within`, which runs every engine step at its
 budget, reads the variable on each step run and runs every listed step under `cProfile`. The value is a comma
 separated list of step names exactly as the [tick step catalogue](tick-step-catalogue.md) prints them. Spaces around
 each name are dropped, and an unset or empty value profiles nothing.
@@ -296,10 +296,11 @@ Set it in the environment of the process that runs the tick, as for `AGENTIHOOKS
 ticks, or the controller's deployment environment for a hosted controller.
 
 ```bash
-AGENTIHOOKS_TICK_PROFILE_STEPS="master scale,spawn"
+AGENTIHOOKS_TICK_PROFILE_STEPS="master scale,reap"
 ```
 
-Each profiled run writes one JSON line to standard error when the step returns or raises:
+Each profiled run writes one JSON line to standard error when the step returns or raises. An example, with each
+function list cut to its first entries:
 
 ```json
 {"event": "swarm_tick_step_profile", "step": "master scale", "wall_s": 41.73, "top_cumulative": ["/app/scripts/hive/launch.py:665(_placed) calls=1 own_s=0.0011 cumulative_s=40.9102", "/app/scripts/hive/launch.py:685(_reselect) calls=78 own_s=0.0094 cumulative_s=38.2210"], "top_own": ["~:0(<method 'recv_into' of '_socket.socket' objects>) calls=9120 own_s=6.1043 cumulative_s=6.1043"], "pass_id": "9e0d10c4f2a14b7e8d3c5a6b7c8d9e0f"}
@@ -320,7 +321,7 @@ step hands to other threads does not appear. It also slows every call it records
 `tick:records` walls rise while it is listed, so treat profiled walls as evidence only and empty the variable once
 the lines are read.
 
-Read the lines of the last hour from the tick journal; on a hosted controller, read the controller pod's log instead:
+Read the lines of the last hour from the tick journal:
 
 ```bash
 TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-1h" --until now \
@@ -332,14 +333,18 @@ for r in map(json.loads, sys.stdin):
     for line in r["top_cumulative"][:10]: print("   ", line)'
 ```
 
+On a hosted controller, the lines are in the controller pod's log; replace the `journalctl` line with
+`kubectl logs deployment/<controller> -n <namespace> --since=1h` and keep the rest of the pipe.
+
 A function called far more often than the step's work explains, or one whose cumulative time is most of `wall_s`,
 names the cost. The `master scale` profile that found the [master launch retry
 loop](../pillars/hives.md#retry-after-a-full-account-reservation) showed `HiveLaunch._reselect` called 78 times
-and `_admitted_selection` 79 times in a single master launch.
+and `_admitted_selection` 79 times in one master launch, in an 83 second pass of controller release 2.17.806.
 
 The `profile` input of the `.github/actions/tick-scale` action sets the same variable for the
 [tick scale gate](delivery-tiers.md#tick-scale-gate-at-promotion); a push to `diffcheck/tick-scale-profile`
-profiles `track outages`, `reap`, `spawn` and `tick view`. The tests under the feature map entry
+sets it to `track outages,reap,spawn,tick view`. No step is named `spawn` since pull request 11141 removed it, so
+that push profiles the other three. The tests under the feature map entry
 `tick-step-profiler`, in `tests/swarm/test_timing.py`, hold the behavior.
 
 | Symptom | Check | Fix |

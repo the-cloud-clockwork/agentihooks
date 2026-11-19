@@ -1697,7 +1697,7 @@ This rule covers placement on hives. A master the controller leaves to the works
 
 Before the controller sends a master's launch order to a hive, `HiveLaunch.send_order` reserves one session on the
 chosen account. The native login reserves with a cap of 1; a subscription or api slot uses the cap the hive reports
-for the account. When the reservations already reach the cap, no order is sent. The new execution record is ended,
+for the account, or the account's own cap when the hive reports none. When the reservations already reach the cap, no order is sent. The new execution record is ended,
 its reason is written to the swarm's `launch-endings` hash, and the launch is refused with:
 
 ```text
@@ -1714,12 +1714,14 @@ account reservation is full: account=<harness>:<account> sessions=<count> cap=<c
 3. When placement finds another account, the launch orders it there. Another full reservation repeats from step 1
    with one more refused account.
 4. When no account is left, selection returns a wait and the launch ends with the last `account reservation is full`
-   refusal. The tick reports it as described in [Several master seats](swarm.md#several-master-seats).
+   refusal. The tick's actions then read `master spawn failed in seat <seat>: account reservation is full: ...`;
+   see [Master scaling troubleshooting](swarm.md#master-scaling-troubleshooting).
 
 Each account is tried at most once per launch, so a launch makes no more tries than the master has candidate
 accounts, and every try adds one execution record to the seat. A forced start is not refused at reservation, and a
 [master claude ai login](../reference/account-login.md#master-claude-ai-login) launch takes no reservation, so neither
-retries.
+retries. The same retry runs for a worker launch on a hive; only the master lane passes the refused set into
+`_master_selection`, and a worker lane drops the refused accounts' quota rows alone.
 
 With the `desk` hive above, suppose the front door relaunches while the previous lead's reservation on the native
 login has not yet been released:
@@ -1741,13 +1743,18 @@ redis-cli HGETALL agentihooks:swarm:<slug>:launch-endings
 
 Releases without pull request 10731 left the refused set out of `_master_selection`. Dropping the quota row kept a
 full subscription slot off the next try, but `place_master` builds the native login candidate from the hive's
-`interactive` field and ranks it before every slot. Each retry therefore chose the same login and got the same
+`interactive` field, and releases before pull request 11407 offered it to every master seat, ranked ahead of that
+hive's slots within the same UI or headless tier. Each retry therefore chose the same login and got the same
 refusal. The loop ran until the pass heartbeat found the tick lock stale and raised `SwarmError` with `the tick lock
-is stale: ...`. The `master scale` step holds the host placement lock (`tick.PLACING`) while it launches, so
-`spawn` and every other placing step waited on it. On a hosted controller on 11 November, one `master-2` launch ran
-`_reselect` 78 times in a pass, and the seat held 35,141 executions, its newest 400 all ended with the same
-`claude:unrouted` refusal. That loop predates the [front door rule](#backend-master-seats), which now keeps backend
-seats off the native login; the retry rule covers the front door and any account whose reservation is full.
+is stale: pass heartbeat expected token ...`. The `master scale` step holds the host placement lock (`tick.PLACING`)
+while it launches, so every other step that takes the lock waited on it, the `spawn` step of those releases among
+them. In the evidence for pull request 10731, one `master-2` launch ran `_reselect` 78 times, the seat held 35,141
+executions, its newest 400 all ended with the same `claude:unrouted` refusal, and 30 of 30 `master scale` passes in
+the tick history ended with that `SwarmError`. In three passes of the 10 November scale proof
+([#10553](https://github.com/the-cloud-clockwork/agentihooks/issues/10553)), `master scale` held the placement lock
+37 to 48 seconds while its failing launch used 27 to 35 seconds of CPU, and `spawn` waited past its 33 second
+budget. That loop predates the [front door rule](#backend-master-seats), which now keeps backend seats off the
+native login; the retry rule covers the front door and any account whose reservation is full.
 
 Measured over the `tick:steps` stream (`own_cpu_s` of `master scale`) and the `spawn` records ended `abandoned`,
 before and after the fix:
@@ -1757,20 +1764,22 @@ before and after the fix:
 | Before | 24 | 392.7 | 45.0 | 11 | 1 |
 | After | 43 | 55.3 | 4.8 | 0 | 0 |
 
-The after window also ran with `master-per` off from its start, so not every drop in the master scale runs comes from
-the retry fix alone.
+The before window was read at 14:35 UTC and the after window runs from 15:20 to 16:46 UTC, on the day pull request
+10731 merged. Pull request 11141 later removed the `spawn` step. The after window also ran with `master-per` off from its start, so not every drop in the master scale
+runs comes from the retry fix alone.
 
 The cause was found with the [tick step profiler](../reference/tick-engine-steps.md#profile-a-step). The regression
-test `test_a_front_door_master_retry_leaves_a_full_native_login_for_a_subscription_slot` fails when a launch
-reselects a refused account, under the feature map entry `hive-master-refused-account-retry`. The Semgrep incident
+test `test_a_front_door_master_retry_leaves_a_full_native_login_for_a_subscription_slot` fails when a launch calls
+`_reselect` more than twice, or when its one retry does not end the native try with the full reservation reason
+and order the subscription slot, under the feature map entry `hive-master-refused-account-retry`. The Semgrep incident
 rule `master-retry-drops-refused-accounts` flags a `_master_selection` call inside `_select` that does not pass the
 refused accounts.
 
 | Symptom | Check | Fix |
 |---|---|---|
-| `master scale` runs tens of seconds of CPU every pass, `spawn` is abandoned at its budget, and one master seat gains thousands of executions ended `account reservation is full` for the same login | `HGETALL agentihooks:swarm:<slug>:launch-endings`: the reasons name one account again and again; the controller release | Roll the controller onto a release that carries pull request 10731. |
-| A pass reports `the tick lock is stale` from `master scale` | The `master scale` wall in `agentihooks swarm <slug> tick-report --passes 10` | The step outran the tick lock. With pull request 10731, profile the step as in [Profile a step](../reference/tick-engine-steps.md#profile-a-step) to find the cost. |
-| A master launch ends `account reservation is full` after more than one try | `agentihooks hive show <hive>`: `sessions` against each slot's `cap`, for every hive that takes `master` | Every candidate account was full. End a session on one of them, give the hive another `AH_CC_TOKEN_<slug>`, or wait for a stale sessions report to clear. |
+| `master scale` runs tens of seconds of CPU every pass, the steps that take the placement lock run late (`spawn` is abandoned at its budget on releases that have it), and one master seat gains thousands of executions ended `account reservation is full` for the same login | `HGETALL agentihooks:swarm:<slug>:launch-endings`: the reasons name one account again and again. Then check that the controller's release carries pull request 10731 | Roll the controller onto a release that carries pull request 10731. |
+| A pass fails with `the tick lock is stale: pass heartbeat expected token ...` while `master scale` runs long | The `master scale` wall in `agentihooks swarm <slug> tick-report --passes 10` | The step outran the tick lock. With pull request 10731, profile the step as in [Profile a step](../reference/tick-engine-steps.md#profile-a-step) to find the cost. |
+| A master launch ends `account reservation is full` after more than one try | `agentihooks hive show <hive>`: `sessions` against each slot's `cap`, for every hive that takes `master` | Every candidate account was full. End a session on one of them, give the hive another `AH_CC_TOKEN_<slug>`, or, when `sessions` counts more than run on the account, wait for the hive's next beat to correct it. |
 
 ### Who writes placement
 
