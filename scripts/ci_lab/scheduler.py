@@ -407,8 +407,9 @@ class Slot:
 class State:
     """A grade's state: what it grades, its units by gate, whether a newer head superseded it, what it posted, the
     id of each check run it posted, the grade ref a lab remote push wrote its head to, if any, the dev commit of the
-    dependency manifest its test units are keyed on, if any, the authoritative gates it runs no unit of, and the gates
-    it posts as lab/<gate> rather than lab-shadow/<gate>."""
+    dependency manifest its test units are keyed on, if any, the authoritative gates it runs no unit of, the gates it
+    posts as lab/<gate> rather than lab-shadow/<gate>, and the clock before which it posts nothing after GitHub refused
+    one of its posts."""
 
     run: str
     repo: str
@@ -431,6 +432,7 @@ class State:
     manifest: str = ""
     idle: list[str] = field(default_factory=list[str])
     authoritative: list[str] = field(default_factory=list[str])
+    hold: int = 0
 
 
 def _parse(raw: str | bytes) -> State:
@@ -960,8 +962,9 @@ class Scheduler:
         the grade lists as authoritative posts as lab/<gate> and every other check as lab-shadow/<gate>. A check run
         the grade already holds seeds the poster first, so a restarted scheduler advances it in place. A grade of a
         head pushed to a grade ref records each move for the relay and posts nothing, since GitHub does not hold the
-        head before the relay pushes it. A post the App token, GitHub or the network refuses is recorded, holds every
-        post of the repository for POST_HOLD_MS and leaves its check run to the first pass after the hold."""
+        head before the relay pushes it. A post the App token or the network refuses holds every post of the
+        repository for POST_HOLD_MS, and a post GitHub refuses holds the grade's posts for POST_HOLD_MS; either is
+        recorded and its check run waits for the first pass after the hold."""
         moved = _moved(state)
         if not moved:
             return []
@@ -969,7 +972,7 @@ class Scheduler:
             for check, status, conclusion in moved:
                 state.posted[check] = [status, conclusion]
             return [f"left {check} {status} on {state.head} to the relay" for check, status, _ in moved]
-        if now_ms < self.held[state.repo]:
+        if now_ms < max(state.hold, self.held[state.repo]):
             return []
         poster = self.ports.checks(_slug(state.repo))
         actions: list[str] = []
@@ -981,7 +984,11 @@ class Scheduler:
             try:
                 state.runs[check] = poster.post(state.head, check, status, conclusion, output, shadow)
             except (GitAuthRefused, PostRefused, OSError) as error:
-                self.held[state.repo] = now_ms + POST_HOLD_MS
+                until = now_ms + POST_HOLD_MS
+                if isinstance(error, PostRefused):
+                    state.hold = until
+                else:
+                    self.held[state.repo] = until
                 actions.append(f"held {check} {status} on {state.head} for a later pass: {error}")
                 break
             state.posted[check] = [status, conclusion]

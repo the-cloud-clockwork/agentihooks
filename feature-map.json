@@ -146,13 +146,16 @@
       "rules": ["lab-check-post-uncaught-refusal"],
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-check-post-auth-crash",
-      "behaviour": "A CI lab scheduler pass whose check run post is refused, by the GitHub App token, by GitHub or by the network, keeps running: it records the refusal as a pass action, holds the posts of every grade of that repository for one minute and keeps grading, and the first pass after the hold posts the check run again. A grade whose units are all final stays live until every one of its check runs is posted, so a refused completed post closes the grade on the later pass that posts it, and a check run already posted completed is never posted twice.",
+      "behaviour": "A CI lab scheduler pass whose check run post is refused, by the GitHub App token, by GitHub or by the network, keeps running: it records the refusal as a pass action and keeps grading, and the first pass after a one minute hold posts the check run again. A refused App token or network failure holds the posts of every grade of that repository and of no other repository; a refusal GitHub answers holds only that grade's posts, kept in the grade state so a restarted scheduler keeps the hold, while the other grades keep posting. A grade whose units are all final stays live until every one of its check runs is posted, so a refused completed post closes the grade on the later pass that posts it, and a check run already posted completed is never posted twice.",
       "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis and the local object store with a fake poster that raises GitAuthRefused, PostRefused or a requests connection error on chosen posts",
       "tests": [
         "tests/ci_lab/test_scheduler_posts.py::test_a_refused_check_run_post_is_recorded_and_the_pass_keeps_grading",
         "tests/ci_lab/test_scheduler_posts.py::test_a_grade_whose_completed_post_is_refused_stays_live_until_a_later_pass_posts_it",
         "tests/ci_lab/test_scheduler_posts.py::test_a_refused_required_post_keeps_the_posted_gate_and_closes_the_grade_on_the_next_post",
-        "tests/ci_lab/test_scheduler_posts.py::test_a_refused_post_holds_the_posts_of_every_grade_of_the_repository_until_the_hold_ends"
+        "tests/ci_lab/test_scheduler_posts.py::test_a_refused_post_holds_the_posts_of_every_grade_of_the_repository_until_the_hold_ends",
+        "tests/ci_lab/test_scheduler_posts.py::test_a_refused_post_holds_only_its_own_repository_and_another_repository_keeps_posting",
+        "tests/ci_lab/test_scheduler_posts.py::test_a_post_github_refuses_holds_only_its_grade_across_a_restart_while_other_grades_keep_posting",
+        "tests/ci_lab/test_scheduler_posts.py::test_the_check_poster_s_refused_app_token_is_held_by_the_pass_and_tried_again_after_the_hold"
       ]
     },
     {

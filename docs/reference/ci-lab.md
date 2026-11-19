@@ -2404,12 +2404,13 @@ key; the builders are pure and read no file, clock or network.
    from the base, so a head never widens either list. Every other gate and `required` post as
    `lab-shadow/<gate>`, the runs the shadow comparison reads, and promotion and backfill grades
    list no gate. The grade state keeps the list, so a restarted scheduler names each check run as
-   it did before. A post that the App token, GitHub or the network refuses (`GitAuthRefused`,
-   `PostRefused` or `OSError`) ends nothing: the pass records
-   `held <check> <status> on <head> for a later pass: <error>`, holds every post of that repository
-   for one minute (`POST_HOLD_MS`) and goes on grading, and the first pass after the hold posts the
-   check run again. A grade whose units are all final closes only once every one of its check runs
-   is posted. The refusal text `GitHub App cannot supply scoped contents write credentials` is the
+   it did before. A refused post ends nothing: the pass records
+   `held <check> <status> on <head> for a later pass: <error>` and goes on grading, and the first
+   pass after a one minute hold (`POST_HOLD_MS`) posts the check run again. A refusal of the App
+   token (`GitAuthRefused`) or of the network (`OSError`) holds every post of that repository; a
+   refusal GitHub answers (`PostRefused`) holds only that grade's posts, kept in the grade state as
+   `hold`, so the other grades keep posting and a restarted scheduler keeps the hold. A grade whose
+   units are all final closes only once every one of its check runs is posted. The refusal text `GitHub App cannot supply scoped contents write credentials` is the
    one message `GitHubAppAuth.get_token` raises for any refused token, so for the check runs token,
    which asks for checks write only, read the App installation's `permissions.checks` in the org
    installations listing.

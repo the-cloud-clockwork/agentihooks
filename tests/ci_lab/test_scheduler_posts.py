@@ -5,13 +5,16 @@ import pytest
 import requests
 
 from scripts.ci_lab import scheduler
-from scripts.ci_lab.checks import Output, PostRefused
+from scripts.ci_lab.checks import Checks, Output, PostRefused
+from scripts.ci_lab.retry import Policy
+from scripts.ci_lab.webhooks import HeadEvent
 from scripts.github_app import REFUSED, GitAuthRefused
-from tests.ci_lab.test_scheduler import HEAD_A, HEAD_B, Poster, Run, plan, unit
+from tests.ci_lab.test_scheduler import ACTOR, BASE, HEAD_A, HEAD_B, SLUG, Poster, Run, plan, unit
 from tests.ci_lab.test_scheduler import lab as _lab
 
 lab = _lab
 HOLD_MS = 60_000
+OTHER_REPO = "/the-cloud-clockwork/agentihooks-bundle"
 REFUSALS = [
     pytest.param(GitAuthRefused(REFUSED), id="token-refused"),
     pytest.param(PostRefused("POST check-runs answered 422"), id="post-refused"),
@@ -22,18 +25,20 @@ REFUSALS = [
 @dataclass
 class Refusing(Poster):
     refusals: list[Exception | None] = field(default_factory=list[Exception | None])
+    heads: frozenset[str] = frozenset()
     attempts: int = 0
 
     def post(self, head: str, gate: str, status: str, conclusion: str | None, output: Output, shadow: bool) -> int:
         self.attempts += 1
-        refusal = self.refusals.pop(0) if self.refusals else None
+        chosen = not self.heads or head in self.heads
+        refusal = self.refusals.pop(0) if chosen and self.refusals else None
         if refusal is not None:
             raise refusal
         return super().post(head, gate, status, conclusion, output, shadow)
 
 
-def refusing(run: Run, *refusals: Exception | None) -> Refusing:
-    poster = Refusing(refusals=list(refusals))
+def refusing(run: Run, *refusals: Exception | None, heads: frozenset[str] = frozenset()) -> Refusing:
+    poster = Refusing(refusals=list(refusals), heads=heads)
     run.lab.poster = poster
     return poster
 
@@ -106,6 +111,7 @@ def test_a_refused_required_post_keeps_the_posted_gate_and_closes_the_grade_on_t
     assert f"held {scheduler.REQUIRED} completed on {HEAD_A} for a later pass: {REFUSED}" in actions
     assert run.lab.client.smembers(scheduler.LIVE) == {grade.run}
     assert grade.posted == {"lint": ["completed", "success"]}
+    assert grade.runs == {"lint": 1}
     assert run.tick(1000 + HOLD_MS) == [
         f"posted {scheduler.REQUIRED} completed on {HEAD_A}",
         f"completed {grade.run} success",
@@ -134,3 +140,64 @@ def test_a_refused_post_holds_the_posts_of_every_grade_of_the_repository_until_t
     expected = {(head, gate, "queued") for head in (HEAD_A, HEAD_B) for gate in ("lint", scheduler.REQUIRED)}
     assert {(post[0], post[1], post[2]) for post in poster.posts} == expected
     assert poster.attempts == 5
+
+
+@pytest.mark.feature("lab-scheduler-post-refusal")
+def test_a_refused_post_holds_only_its_own_repository_and_another_repository_keeps_posting(
+    lab: Callable[..., Run],
+) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)}), HEAD_B: plan({"lint": (unit(2),)})})
+    poster = refusing(run, GitAuthRefused(REFUSED), heads=frozenset({HEAD_A}))
+    run.push(HEAD_A, lane="first")
+    other = HeadEvent("push", OTHER_REPO, HEAD_B, BASE, ACTOR, "pushed")
+    run.lab.inbox.pending.append(scheduler.Head(other, "second", ""))
+    actions = run.tick(1000)
+    assert f"held lint queued on {HEAD_A} for a later pass: {REFUSED}" in actions
+    assert run.grade(HEAD_B).repo == OTHER_REPO
+    assert poster.moves(HEAD_A, "lint") == []
+    assert poster.moves(HEAD_B, "lint") == [("queued", None)]
+    assert poster.moves(HEAD_B, scheduler.REQUIRED) == [("queued", None)]
+
+
+@pytest.mark.feature("lab-scheduler-post-refusal")
+def test_a_post_github_refuses_holds_only_its_grade_across_a_restart_while_other_grades_keep_posting(
+    lab: Callable[..., Run],
+) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)}), HEAD_B: plan({"lint": (unit(2),)})})
+    refusal = PostRefused("POST check-runs answered 422")
+    poster = refusing(run, refusal, heads=frozenset({HEAD_A}))
+    run.push(HEAD_A, lane="first")
+    run.push(HEAD_B, lane="second")
+    assert f"held lint queued on {HEAD_A} for a later pass: {refusal}" in run.tick(1000)
+    assert run.grade(HEAD_A).hold == 1000 + HOLD_MS
+    grant = next(grant for grant in run.lease(slots=2, ttl_ms=10 * HOLD_MS) if grant.job.startswith(HEAD_B))
+    run.finish(grant, "passed", {})
+    restarted = Run(run.lab, run.lab.build(0, Policy(), None))
+    actions = restarted.tick(1000 + HOLD_MS - 1)
+    assert f"completed {restarted.grade(HEAD_B).run} success" in actions
+    assert poster.moves(HEAD_A, "lint") == []
+    assert restarted.tick(1000 + HOLD_MS) == [
+        f"posted lint in_progress on {HEAD_A}",
+        f"posted {scheduler.REQUIRED} in_progress on {HEAD_A}",
+    ]
+
+
+class RefusedToken:
+    def get_token(self) -> str:
+        raise GitAuthRefused(REFUSED)
+
+
+@pytest.mark.feature("lab-scheduler-post-refusal")
+def test_the_check_poster_s_refused_app_token_is_held_by_the_pass_and_tried_again_after_the_hold(
+    lab: Callable[..., Run],
+) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)})})
+    poster = Checks(SLUG, RefusedToken())
+    ports = scheduler.Ports(run.lab.inbox, run.lab.expander, lambda _: poster, run.lab.hotfixes, run.lab.kube)
+    engine = scheduler.Scheduler(run.lab.client, run.lab.objects, ports, run.engine.settings)
+    run.push(HEAD_A)
+    held = f"held lint queued on {HEAD_A} for a later pass: {REFUSED}"
+    assert held in engine.tick(1000)
+    assert engine.tick(1000 + HOLD_MS - 1) == []
+    assert held in engine.tick(1000 + HOLD_MS)
+    assert (poster.runs, run.grade(HEAD_A).posted) == ({}, {})
