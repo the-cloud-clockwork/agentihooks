@@ -4999,7 +4999,7 @@ With `enabled: true` and at least one worker hive, the chart adds:
 | Bounded drain | The preStop drain waits `workers.rollout.drainSeconds` instead of `workers.drainSeconds`, and the grace period is that value plus 30 seconds. A value outside 0 to 1500 fails the render with `workers.rollout.drainSeconds must be between 0 and 1500`. |
 | Sync waves | Each worker hive Deployment of the release gets its own sync wave: wave 1 for the first worker hive, then one wave per further `workers.hives` entry, so ArgoCD rolls them in order inside one sync. |
 | RBAC | A ServiceAccount `<fullname>-rollout`, a Role in the Lease namespace that may create Leases and get and update the named one, and a Role that may get the release's worker hive Deployments. |
-| `release` stamp | A non empty value is written to the pod annotation `agentihooks.io/release`; changing it changes the pod template and rolls the hives through the Lease. |
+| `release` stamp | Written to the pod annotation `agentihooks.io/release`; changing it changes the pod template and rolls the hives through the Lease. When it is empty, a chart whose `appVersion` is a release version stamps that `appVersion` on each worker hive whose `workers.image.tag` is `release`, so every release chart rolls those hives once. |
 
 Each hook Job has 5500 seconds in total, its retries included, which holds the 5400 second acquire wait. The hook Jobs
 run the hive worker image at the chart's `appVersion` tag. A chart whose `appVersion` is neither a
@@ -5026,9 +5026,10 @@ workers:
     enabled: true
 ```
 
-ArgoCD syncs each release's chart, and a hive rolls only when that release changes its rendered pod template. Pod
-templates carry no chart version label, so a release that changes only the chart version rolls no hive
-([#10072](https://github.com/the-cloud-clockwork/agentihooks/pull/10072)). A rolled pod pulls the current `:release`
+ArgoCD syncs each release's chart. Pod templates carry no chart version label
+([#10072](https://github.com/the-cloud-clockwork/agentihooks/pull/10072)), but each leased worker hive on the `release`
+tag carries the release chart's `appVersion` as its `release` stamp, so every release changes it once and rolls the hive
+([#12360](https://github.com/the-cloud-clockwork/agentihooks/issues/12360)). A rolled pod pulls the current `:release`
 image. Each roll goes through the shared Lease `default/agentihooks-hive-rollout`, one hive at a time. The overlays
 set no `release` stamp and the Applications carry no image updater annotations, so no second writer changes the
 template after the chart moved; antoncore's `test_hive_release_roll` asserts both, and that a chart version bump
