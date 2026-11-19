@@ -2735,7 +2735,7 @@ def cmd_terminal(store, args):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    from scripts.swarm import master_drill, night_watch_drill, tick_report
+    from scripts.swarm import master_drill, night_watch_drill, tasks_read, tick_report
 
     parser = argparse.ArgumentParser(
         prog="agentihooks swarm", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -2751,7 +2751,7 @@ def build_parser() -> argparse.ArgumentParser:
     create.add_argument("--max-plan-agents", type=int, default=None)
     create.add_argument("--operator-asked")
     drills = {"night-watch-drill": night_watch_drill.command, "master-drill": master_drill.command}
-    for plain in ("start", "pause", "remove", "snapshot", "shutdown", "url", "reopen", "rename", *drills):
+    for plain in ("start", "pause", "remove", "snapshot", "shutdown", "url", "reopen", "rename", "exit", *drills):
         sub.add_parser(plain).set_defaults(handler=drills.get(plain))
     sub.add_parser("restore").add_argument("--from", dest="source", default="")
     sub.add_parser("stop").add_argument("--now", action="store_true")
@@ -2769,10 +2769,10 @@ def build_parser() -> argparse.ArgumentParser:
     pick.add_argument("--replace", dest="choice", action="store_const", const=master_launch.REPLACE)
     pick.add_argument("--forced", dest="choice", action="store_const", const=master_launch.FORCED)
     sub.add_parser("agent-up").add_argument("profile")
-    sub.add_parser("exit")
     sub.add_parser("set").add_argument("pairs", nargs="+")
     sub.add_parser("save-template").add_argument("template_name", metavar="name")
     sub.add_parser("status").add_argument("--json", action="store_true")
+    sub.add_parser("tasks").set_defaults(handler=tasks_read.command)
     sub.add_parser("probe").set_defaults(handler=probe_command)
     sub.add_parser("tick").set_defaults(handler=cmd_swarm_tick)
     report = sub.add_parser("tick-report")

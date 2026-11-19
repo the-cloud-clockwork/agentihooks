@@ -196,7 +196,7 @@ class LedgerClient:
     def metadata(self, slug):
         return self._resource(slug, "metadata")
 
-    def tasks(self, slug):
+    def tasks(self, slug: str) -> list[dict[str, Any]]:
         return self._resource(slug, "tasks", collection=True)
 
     def tasks_targeting(self, slug: str, url: str) -> list[dict[str, Any]]:
