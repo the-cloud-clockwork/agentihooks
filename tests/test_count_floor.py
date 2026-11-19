@@ -1442,8 +1442,16 @@ def test_a_signed_retirement_is_admitted_only_with_a_code_owner_approval_of_the_
 
 @pytest.mark.parametrize(
     "rule",
-    ["* @engineer", "/test-retirements/** @engineer", "/test-retirements/?.json @engineer", "/tests @engineer"],
-    ids=["unanchored", "double-star", "question-mark", "folder-without-slash"],
+    [
+        "* @engineer",
+        "/test-retirements/** @engineer",
+        "/test-retirements/?.json @engineer",
+        "/test-retirements/[0-9a-f]*.json @engineer",
+        "/test-retirements/!kept.json @engineer",
+        "/test-retirements/\\#kept.json @engineer",
+        "/tests @engineer",
+    ],
+    ids=["unanchored", "double-star", "question-mark", "range", "negation", "escape", "folder-without-slash"],
 )
 @pytest.mark.feature("count-floor-retirement-needs-code-owner-approval")
 def test_a_code_owner_rule_the_floor_cannot_match_admits_no_retirement(

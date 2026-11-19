@@ -830,8 +830,7 @@ def code_owners(root: Path, path: str) -> list[str]:
         folder = pattern.endswith("/")
         if (
             not pattern.startswith("/")
-            or "**" in pattern
-            or "?" in pattern
+            or any(mark in pattern for mark in ("**", "?", "[", "!", "\\"))
             or (not folder and (root / pattern.strip("/")).is_dir())
         ):
             print(f"CODEOWNERS rule {pattern} is outside the grammar the floor matches, so no code owner is known")
