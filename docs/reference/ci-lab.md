@@ -1062,7 +1062,8 @@ as `lab_notice`, or `0` when the send failed. Without all three settings nothing
 
 ### Push a head to the lab remote
 
-The lab remote is a git endpoint beside the scheduler. Its post receive hook,
+The lab remote is a git endpoint beside the scheduler; [Lab remote service](#lab-remote-service)
+covers where it runs, how it authenticates, its token and the client settings. Its post receive hook,
 `python -m scripts.ci_lab.remote.post_receive`, turns each pushed `refs/grade/*` head into a
 `ci.lab.head.notice` envelope on the same stream, and prints the head's grade url to the pusher:
 
@@ -1226,6 +1227,173 @@ and `ci.lab.head.push` at stream sequence 9 for an agentihooks head pushed by
 | A notice answers `400` | A field is missing, empty or not a string, or the body is not JSON | [Send a head notice](#send-a-head-notice) |
 | A GitHub delivery answers `400` while its signature is valid | The body is not JSON, or the delivery lacks a field the receiver reads; [Heads it records](#heads-it-records) says what was recorded before the answer | `kubectl -n agentihooks-swarm logs deploy/agentihooks-swarm-github-webhook` for the delivery id, then the delivery's payload in the GitHub webhook settings |
 | A request answers `503` and the log shows `could not record the event` | The publish failed: the stream does not exist yet, or the NATS credential lacks `ci.lab.head.*` | `stream info` as above; the hub creates the stream on its next start. On `/github` the pull request observations were recorded before the failure, and a GitHub redelivery records the head |
+
+## Lab remote service
+
+The lab remote is the git endpoint that [Push a head to the lab remote](#push-a-head-to-the-lab-remote)
+pushes to. It serves one bare repository, `agentihooks.git`, over git's smart HTTP protocol to
+callers that hold the lab remote token. The deployment repository's `ci-lab` chart runs it beside
+the scheduler in the `ci-lab` namespace, and the `ci-lab` ArgoCD Application syncs that chart from
+the deployment repository's `dev` branch. Pull request 1829 of the deployment repository added it.
+
+### Where it runs
+
+| Object | What it does |
+|---|---|
+| StatefulSet `ci-lab-remote` | One replica on the scheduler's image, `ghcr.io/the-cloud-clockwork/agentihooks-swarm`, so the image updater that moves the scheduler moves the remote too. It runs as user 10001 with a read only root filesystem and no service account token, and takes the scheduler's node affinity, which keeps it off the pools in the chart value `scheduler.excludedPools`. It requests 100m of CPU and 256Mi of memory and may use up to 1Gi of memory |
+| Init container `init` | Runs `git init --bare /srv/git/agentihooks.git` on every start. On a repository that already exists git reinitializes it and keeps every ref and object |
+| Claim `repo` | `local-path`, `ReadWriteOnce`, 20Gi, mounted at `/srv/git`. It holds the repository and the request bodies spooled during a push |
+| Volume `scratch` | An `emptyDir` of at most 2Gi mounted at `/tmp` |
+| ConfigMap `ci-lab-remote` | `serve.py`, `gitconfig`, `pre-receive` and `post-receive`, mounted read only at `/etc/ci-lab-remote`. The pod template carries a checksum of these files, so a change to one rolls the pod |
+| Service `ci-lab-remote` | Headless, port 8790. Pods reach the remote at `http://ci-lab-remote.ci-lab.svc:8790/agentihooks.git` |
+| Service `ci-lab-remote-lan` | `LoadBalancer` on the MetalLB address in the chart value `remote.lan.address`, port 80. LAN hosts reach the remote at `http://<lab remote address>/agentihooks.git`, and tailnet hosts reach the same URL through the tailnet's route to the LAN |
+| NetworkPolicy `ci-lab-remote` | Admits TCP 8790 only from the ranges in the chart values `lan.sources` (the LAN and the pod network) and `remote.tailnet` (the tailnet). It restricts ingress only; egress stays open |
+
+The remote speaks plain HTTP on both addresses. On the LAN the token crosses the network in clear
+text; the tailnet encrypts its own traffic.
+
+### How it answers git
+
+`serve.py` runs `git http-backend` once per request, because the image has git but no web server.
+It answers one request per connection and ends a request whose client sends nothing for 300
+seconds.
+
+- **Authentication.** A request must carry the token as `Authorization: Bearer <token>`, or as
+  basic credentials with the user `lab` and the token as the password. The server compares the
+  header in constant time. Every other request gets `401` with an empty body and two challenges,
+  `WWW-Authenticate: Bearer realm="ci-lab"` and `WWW-Authenticate: Basic realm="ci-lab"`. Git then
+  asks its credential helpers, and with none that answers it stops with `could not read Username`.
+- **The token stays in the server.** The server takes `CI_LAB_REMOTE_TOKEN` out of its own
+  environment at start, so `git http-backend` and the hooks never receive it. An empty token stops
+  the server at start with `the lab remote needs a non empty token`.
+- **Reads.** A token holder lists and fetches every ref, over git protocol version 0 or 2.
+- **Pushes.** The `gitconfig` the container names in `GIT_CONFIG_GLOBAL` turns on
+  `http.receivepack`, advertises push options and points `core.hooksPath` at `/etc/ci-lab-remote`.
+  The `pre-receive` hook refuses the whole push when any ref it updates lies outside
+  `refs/grade/*`. It prints `lab remote: only refs/grade/* takes pushes, refused <ref>` for each
+  such ref; no ref of that push lands and `post-receive` does not run. Git's defaults hold for the
+  rest: a grade ref may be force updated or deleted, so an agent can push a rebased head to the same
+  ref.
+- **Push options.** Because push options are advertised, `git push -o branch=<name>` reaches the
+  hooks as `GIT_PUSH_OPTION_COUNT` and `GIT_PUSH_OPTION_0`, and hook output reaches the pusher as
+  `remote:` lines.
+- **Pack bodies.** Git sends a pack larger than its `http.postBuffer` in chunked encoding. The
+  server spools every request body to an unnamed file on the `repo` claim before it starts the
+  backend, so the backend reads the whole body with its length. A push needs room on the claim for
+  its spooled body as well as for the objects git keeps.
+- **Errors.** A URL that names a repository other than `agentihooks.git` gets the backend's `404`.
+  A backend that ends without writing its headers gets `500`.
+- **Logs.** The server logs each request line and its answer code on standard error, so the pod log
+  shows every `401`, `404` and `500`. Request lines carry no credentials.
+
+The first push into the empty repository carries the whole history of the pushed head. Later pushes
+leave out the objects reachable from the advertised refs the pushing clone already holds. A clone
+that holds none of the lab's grade heads sends its whole history again; `git config push.negotiate
+true` makes git find the commits it shares with the lab before it builds the pack.
+
+### Grade hook environment
+
+The `post-receive` hook runs `python -m scripts.ci_lab.remote.post_receive` from the image with the
+container's environment; [Push a head to the lab remote](#push-a-head-to-the-lab-remote) describes
+what it publishes and prints. It reads `CI_LAB_URL`, `CI_LAB_REPOSITORY`, `CI_LAB_REMOTE_ACTOR` and
+the `AGENTIHOOKS_BUS` settings from that environment. The chart gives the remote container only
+`CI_LAB_REMOTE_PORT`, `CI_LAB_REMOTE_ROOT`, `GIT_CONFIG_GLOBAL` and `CI_LAB_REMOTE_TOKEN`. Until the
+chart adds the hook's settings, the hook fails on every grade push after git has written the ref:
+the push lands, the pusher reads the hook's error in place of a grade url, and the lab records no
+head.
+
+### Token and client settings
+
+The chart generates the token and keeps it in OpenBao, as the deployment does for the
+[lab notice secret](#provisioning-in-the-deployment):
+
+1. A `Password` generator, `ci-lab-remote-token`, makes a 48 character value with 8 digits and no
+   symbols.
+2. A `PushSecret`, `ci-lab-remote-token`, writes that value to the OpenBao key `k8s/ci-lab-remote`
+   (`secret/k8s/ci-lab-remote`), property `token`, through the `openbao` ClusterSecretStore.
+   `updatePolicy: IfNotExists` writes only while the key is absent, so the value is generated once
+   and its hourly resync and every redeploy leave it alone. `deletionPolicy: None` keeps the key when
+   the PushSecret is deleted.
+3. The `ExternalSecret` `ci-lab-remote` reads the property every five minutes into the Secret
+   `ci-lab-remote` as `CI_LAB_REMOTE_TOKEN`, and the remote container takes that key as an
+   environment variable when it starts.
+
+Every client uses two settings and passes the token by reference:
+
+| Name | Value |
+|---|---|
+| `AGENTIHOOKS_LAB_REMOTE` | The lab remote URL: `http://<lab remote address>/agentihooks.git` on a host on the LAN or the tailnet, or `http://ci-lab-remote.ci-lab.svc:8790/agentihooks.git` in a pod |
+| `AGENTIHOOKS_LAB_REMOTE_TOKEN` | The value of the `token` property of `k8s/ci-lab-remote` |
+
+The chart writes neither setting outside the `ci-lab` namespace. A host takes both from an
+agentihooks env file under `~/.agentihooks/`, which agentihooks loads into the sessions it
+launches. A hive takes both from its hive settings in the deployment repository, mapped from the
+same OpenBao property once the PushSecret has written it. The lab mirrors in the
+[Environment](#environment) table read the same pair.
+
+### Use it
+
+```bash
+git remote add lab "$AGENTIHOOKS_LAB_REMOTE"
+git config credential."$AGENTIHOOKS_LAB_REMOTE".helper \
+  '!f() { if test "$1" = get; then printf "username=lab\npassword=%s\n" "$AGENTIHOOKS_LAB_REMOTE_TOKEN"; fi; }; f'
+git config push.negotiate true
+git ls-remote lab
+git push -o branch="$(git branch --show-current)" lab HEAD:refs/grade/<task>
+```
+
+The helper answers git's `get` request for the lab URL alone, with the user `lab` and the token
+read from the environment when git asks. Git config holds the variable's name, never its value, and
+the helper stores nothing. A shell without `AGENTIHOOKS_LAB_REMOTE_TOKEN` sends an empty password,
+which the lab answers `401`.
+
+### Verify
+
+```bash
+kubectl -n ci-lab get statefulset ci-lab-remote
+kubectl -n ci-lab get pushsecret ci-lab-remote-token
+kubectl -n ci-lab get externalsecret ci-lab-remote
+kubectl -n ci-lab get secret ci-lab-remote --template='{{range $k,$v:=.data}}{{$k}} {{end}}'
+kubectl -n ci-lab get service ci-lab-remote ci-lab-remote-lan
+```
+
+The StatefulSet shows `1/1` ready, the PushSecret `Synced`, the ExternalSecret ready, the key
+listing `CI_LAB_REMOTE_TOKEN` and the LAN Service its external address. The key listing prints key
+names only, never values.
+
+From a hive and from the workstation, with the helper above set:
+
+```bash
+test -n "${AGENTIHOOKS_LAB_REMOTE_TOKEN:-}" && echo set || echo unset
+git ls-remote "$AGENTIHOOKS_LAB_REMOTE"; echo "exit $?"
+```
+
+An empty repository lists nothing and exits 0. Once heads are pushed, each line is a commit and its
+`refs/grade/<task>` ref. A missing or wrong token fails with `could not read Username` or
+`Authentication failed`, and the pod log shows the `401`:
+
+```bash
+kubectl -n ci-lab logs ci-lab-remote-0 -c remote --since=10m
+```
+
+### Troubleshooting
+
+| Symptom | Cause | Check |
+|---|---|---|
+| `git ls-remote` fails with `could not read Username` | The request carried no token, so the lab answered `401` and no credential helper answered git | The `test -n` line above, then the helper with `git config --get-regexp '^credential\..*\.helper$'` |
+| `Authentication failed` while the token is set | The value differs from the one the pod read at start: another copy, or a value replaced in OpenBao without restarting the pod | Map the value again from `k8s/ci-lab-remote`; after a replacement, `kubectl -n ci-lab rollout restart statefulset/ci-lab-remote` |
+| `Failed to connect` or a timeout | The host is outside the NetworkPolicy's ranges, the LAN Service has no external address, or the pod is not ready | `kubectl -n ci-lab get service ci-lab-remote-lan` and the StatefulSet's ready count |
+| A push is rejected with `lab remote: only refs/grade/* takes pushes, refused <ref>` | One of its refs lies outside `refs/grade/*`, which rejects the whole push | Push `HEAD:refs/grade/<task>` alone |
+| A grade push lands but prints a hook error in place of `lab grade:` | The remote container lacks the hook's settings | [Grade hook environment](#grade-hook-environment) |
+| A request answers `404` | The URL names a repository other than `agentihooks.git` | `AGENTIHOOKS_LAB_REMOTE` ends in `/agentihooks.git` |
+| The pod restarts with `the lab remote needs a non empty token` | The Secret holds an empty `CI_LAB_REMOTE_TOKEN` | The `token` property in OpenBao and the ExternalSecret's events |
+| The pod stays in `CreateContainerConfigError` | The Secret `ci-lab-remote` does not exist yet because the ExternalSecret has not synced | `kubectl -n ci-lab describe pushsecret ci-lab-remote-token` and `kubectl -n ci-lab describe externalsecret ci-lab-remote` |
+
+To replace the token, write the new value to the same OpenBao key and property. The PushSecret
+leaves an existing key alone and the ExternalSecret copies the value within five minutes. No reload
+annotation restarts the pod, so restart it with
+`kubectl -n ci-lab rollout restart statefulset/ci-lab-remote`, then give every host and hive the
+new value.
 
 ## Digest specification
 
