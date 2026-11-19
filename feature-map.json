@@ -58,7 +58,7 @@
       "behaviour": "The CI lab scheduler reads its live grades one at a time: a pass, the load that GET /capacity and every metrics scrape answer from, and the grades of a commit each hold at most one parsed live grade beside the one being read, however many grades are live, and admission keeps only the tier and run of each grade with held units and reads it again as it admits it, most urgent tier first, so the scheduler's memory no longer grows with the live set.",
       "seam": "scripts.ci_lab.scheduler.Scheduler.tick, Scheduler.load and Scheduler.grades_of over fakeredis and the local object store, counting the parsed grades alive at once through scripts.ci_lab.scheduler._parse",
       "tests": [
-        "tests/ci_lab/test_scheduler.py::test_a_pass_and_a_load_hold_one_parsed_live_grade_at_a_time_however_many_grades_hold_units"
+        "tests/ci_lab/test_scheduler_memory.py::test_a_pass_and_a_load_hold_one_parsed_live_grade_at_a_time_however_many_grades_hold_units"
       ]
     },
     {
