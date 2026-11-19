@@ -407,7 +407,9 @@ def forced_claude(isolated_hook, monkeypatch):
 
 
 class TestPreToolUseEnvelope:
-    def test_bypass_rewrite_rides_one_envelope(self, forced_claude, capsys):
+    def test_bypass_rewrite_rides_one_envelope(
+        self, forced_claude: tuple[Path, Path, Path], capsys: pytest.CaptureFixture[str]
+    ) -> None:
         _write(
             forced_claude[1],
             "pre-bash.ls-long.sh",
@@ -415,17 +417,33 @@ class TestPreToolUseEnvelope:
         )
         hm.on_pre_tool_use(_bash("ls"))
         out = _single_json(capsys.readouterr().out)["hookSpecificOutput"]
-        assert out["permissionDecision"] == "allow"
+        assert "permissionDecision" not in out
         assert out["updatedInput"] == {"command": "ls -la", "description": "probe"}
         assert "use long" in out["additionalContext"]
         assert "tool input rewritten by pre-bash.ls-long.sh" in out["additionalContext"]
 
-    def test_default_mode_drops_rewrite_without_decision(self, forced_claude, capsys):
+    @pytest.mark.parametrize("mode", ["default", "acceptEdits", "plan", "dontAsk"])
+    def test_rewrite_without_decision_carries_no_decision_outside_bypass(
+        self, forced_claude: tuple[Path, Path, Path], capsys: pytest.CaptureFixture[str], mode: str
+    ) -> None:
         _write(forced_claude[1], "pre-bash-long.sh", 'echo \'{"tool_input": {"command": "ls -la"}}\'')
-        hm.on_pre_tool_use(_bash("ls", mode="default"))
+        hm.on_pre_tool_use(_bash("ls", mode=mode))
         out = _single_json(capsys.readouterr().out)["hookSpecificOutput"]
-        assert "updatedInput" not in out and "permissionDecision" not in out
-        assert "outside bypassPermissions" in out["additionalContext"]
+        assert set(out) == {"hookEventName", "updatedInput", "additionalContext"}
+        assert out["updatedInput"] == {"command": "ls -la", "description": "probe"}
+        assert "tool input rewritten by pre-bash-long.sh" in out["additionalContext"]
+
+    def test_auto_mode_drops_rewrite_without_decision(
+        self, forced_claude: tuple[Path, Path, Path], capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _write(forced_claude[1], "pre-bash-long.sh", 'echo \'{"tool_input": {"command": "ls -la"}}\'')
+        hm.on_pre_tool_use(_bash("ls", mode="auto"))
+        out = _single_json(capsys.readouterr().out)["hookSpecificOutput"]
+        assert set(out) == {"hookEventName", "additionalContext"}
+        assert (
+            "[conditions] input rewrite by pre-bash-long.sh dropped: in auto mode "
+            'a rewriting condition must return "decision": "allow" or "ask"'
+        ) in out["additionalContext"]
 
     def test_default_mode_explicit_ask_applies_rewrite(self, forced_claude, capsys):
         _write(
