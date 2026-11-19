@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.1045 · 2026-11-19
+
+### 2026-11-18 · eedb119b1fff · #12206 · @agenticore-app
+
+**Lab workers fetch heads pushed only to the lab remote**
+
+This change lets a lab worker fetch commits that exist only on the lab remote before it builds a working tree, fixing jobs that failed when a requested head lived solely there. The worker now gets its lab remote, token, and repository name from `AGENTIHOOKS_LAB_REMOTE`, `AGENTIHOOKS_LAB_REMOTE_TOKEN`, and `CI_LAB_REPOSITORY`, and only queries the lab remote when that repository variable is explicitly set, so it never falls back to guessing from a node's path name. The token stays confined to git's environment config, keeping the unit test sandbox clean.
+
 ## v2.17.1044 · 2026-11-19
 
 ### 2026-11-18 · bee2f5b29ba2 · #12205 · @nestorcolt
