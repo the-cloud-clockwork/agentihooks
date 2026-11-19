@@ -65,7 +65,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     runs = stale(queued(args.repo), datetime.now(UTC))
     print(f"{len(runs)} stale queued runs")
-    for run_id in clear(args.repo, runs) if runs else []:
+    if not runs:
+        return 0
+    for run_id in clear(args.repo, runs):
         print(f"::warning::run {run_id} stays queued after cancel and force-cancel")
     return 0
 

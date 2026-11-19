@@ -216,3 +216,5 @@ def test_the_lost_runner_workflow_sweeps_stale_runs_with_its_app_token_before_th
         "GH_TOKEN": "${{ steps.app-token.outputs.token }}",
         "PYTHONUNBUFFERED": "1",
     }
+    assert "if" not in steps[runs.index(SWEEP)]
+    assert steps[runs.index(WATCH)]["if"] == "${{ !cancelled() && steps.app-token.outcome == 'success' }}"
