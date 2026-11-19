@@ -1,8 +1,12 @@
 import hashlib
 import json
 import signal
+import socket
 import subprocess
+import threading
 import time
+import urllib.error
+import urllib.request
 from collections.abc import Callable, Iterator
 from functools import partial
 from pathlib import Path
@@ -11,7 +15,7 @@ from typing import Any, cast
 import pytest
 
 from scripts import ci_wiring
-from scripts.ci_lab import contract, executors, run_static, run_tests, static_gates, venvs, worker
+from scripts.ci_lab import contract, executors, metrics, run_static, run_tests, static_gates, venvs, worker
 from scripts.ci_lab.outcomes import FAILED, PASSED
 from scripts.ci_lab.sandbox import CannotRun, Outcome, PortAllocator, PortRange
 from scripts.ci_lab.units import Unit
@@ -636,6 +640,7 @@ def test_main_runs_the_worker_over_the_adapters_until_sigterm_stops_it(
     monkeypatch.setattr(executors.socket, "gethostname", lambda: "pod-1")
     monkeypatch.setattr(executors.os, "cpu_count", lambda: cpus)
     monkeypatch.setattr(executors.ci_cpu_quota, "quota_cpus", lambda: 2.0)
+    monkeypatch.setattr(executors.contract, "METRICS_PORT", 0)
     environ = environ_of(tmp_path)
 
     assert executors.main([], environ) == 0
@@ -661,3 +666,39 @@ def test_main_runs_the_worker_over_the_adapters_until_sigterm_stops_it(
     assert capsys.readouterr().err == (
         "usage: agentihooks ci-lab-worker [-h]\nagentihooks ci-lab-worker: error: unrecognized arguments: --unknown\n"
     )
+
+
+@pytest.mark.feature("lab-worker-metrics")
+def test_main_serves_the_worker_metrics_on_the_contract_port_until_the_worker_drains(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    scraped: list[tuple[int, str, str]] = []
+
+    class Service:
+        def run(self) -> list[Lease]:
+            try:
+                with urllib.request.urlopen(f"http://127.0.0.1:{port}/metrics", timeout=5) as reply:
+                    scraped.append((reply.status, reply.headers["Content-Type"], reply.read().decode()))
+            except urllib.error.URLError as refused:
+                scraped.append((0, "", str(refused.reason)))
+            return []
+
+        def stop(self) -> None:
+            return None
+
+    before = set(threading.enumerate())
+    monkeypatch.setattr(executors.contract, "METRICS_PORT", port)
+    monkeypatch.setattr(executors.worker, "build", lambda *args: Service())
+    monkeypatch.setattr(executors.signal, "signal", lambda number, handler: None)
+
+    assert executors.main([], environ_of(tmp_path)) == 0
+
+    assert scraped == [(200, metrics.EXPOSITION, metrics.Registry().render())]
+    for thread in set(threading.enumerate()) - before:
+        thread.join(timeout=5)
+        assert not thread.is_alive()
+    with pytest.raises(ConnectionRefusedError):
+        socket.create_connection(("127.0.0.1", port), timeout=5)

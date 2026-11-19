@@ -9210,6 +9210,16 @@
       ]
     },
     {
+      "id": "lab-worker-metrics",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-worker-metrics",
+      "behaviour": "agentihooks ci-lab-worker binds the contract metrics port while the worker runs and answers GET /metrics with the Prometheus exposition of its own metrics registry, which observes no scheduler gauge and no unit sample; once the worker drains, the server thread ends and the port closes.",
+      "seam": "scripts.ci_lab.executors main and scripts.ci_lab.contract METRICS_PORT",
+      "tests": [
+        "tests/ci_lab/test_executors.py::test_main_serves_the_worker_metrics_on_the_contract_port_until_the_worker_drains"
+      ]
+    },
+    {
       "id": "lab-warm-mutant-runner",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/lab-run-mutation",
