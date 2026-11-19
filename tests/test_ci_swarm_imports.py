@@ -1,9 +1,9 @@
+import importlib
 from pathlib import Path
 
 import pytest
 
-from scripts import ci_swarm_imports
-
+ci_swarm_imports = importlib.import_module("scripts.ci_swarm_imports")
 pytestmark = pytest.mark.unit
 
 
