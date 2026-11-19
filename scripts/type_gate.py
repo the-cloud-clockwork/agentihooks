@@ -2,6 +2,7 @@
 
 import argparse
 import ast
+import hashlib
 import json
 import math
 import os
@@ -67,11 +68,17 @@ def sources(head: Path) -> list[str]:
 
 
 def runs(files: list[str]) -> list[list[str]]:
-    """Split sorted sources into contiguous runs of at most a hundred files, balanced in size."""
-    if not files:
-        return []
-    size = math.ceil(len(files) / math.ceil(len(files) / _RUN))
-    return [files[start : start + size] for start in range(0, len(files), size)]
+    """Split sorted sources into contiguous runs, each ending at a source whose path digest is a multiple of _RUN.
+
+    A boundary follows from one path alone, so adding or removing a source changes only the run it falls in, and a
+    run holds _RUN sources on average.
+    """
+    split: list[list[str]] = [[]]
+    for path in files:
+        split[-1].append(path)
+        if int.from_bytes(hashlib.blake2b(path.encode(), digest_size=8).digest()) % _RUN == 0:
+            split.append([])
+    return [run for run in split if run]
 
 
 def measure(head: Path, files: list[str] | None = None) -> dict[str, int]:
