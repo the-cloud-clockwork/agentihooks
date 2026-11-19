@@ -2404,7 +2404,11 @@ key; the builders are pure and read no file, clock or network.
    from the base, so a head never widens either list. Every other gate and `required` post as
    `lab-shadow/<gate>`, the runs the shadow comparison reads, and promotion and backfill grades
    list no gate. The grade state keeps the list, so a restarted scheduler names each check run as
-   it did before.
+   it did before. A gate's check run text shows, ahead of its unit keys, the last 4096 characters
+   of each failed static unit's stored log, `lab/static/<digest>/log.txt`, with secret patterns
+   redacted, in a fence under the unit key; the blocks together stay within half of GitHub's 65535
+   character text limit. A passing unit, a failed unit with no stored or an empty log, and the
+   required check show only unit keys.
 
 Expansion frames a head by its class (`scripts.ci_lab.scheduler.frame`): a pull request or hotfix grade
 keeps the lab gates the pull request rules require and names every other required job as a gate without

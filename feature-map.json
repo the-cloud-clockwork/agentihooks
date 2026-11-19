@@ -9281,7 +9281,11 @@
       "tests": [
         "tests/ci_lab/test_static_check_logs.py::test_a_failed_static_unit_s_gate_check_carries_the_tail_of_its_stored_log_with_secrets_redacted",
         "tests/ci_lab/test_static_check_logs.py::test_a_failed_static_unit_answered_from_the_store_carries_its_stored_log_tail",
-        "tests/ci_lab/test_static_check_logs.py::test_a_gate_whose_static_units_pass_or_keep_no_log_posts_only_its_unit_keys"
+        "tests/ci_lab/test_static_check_logs.py::test_a_gate_whose_static_units_pass_or_keep_no_log_posts_only_its_unit_keys",
+        "tests/ci_lab/test_checks.py::test_a_unit_log_shows_fenced_under_its_unit_key_ahead_of_the_unit_keys",
+        "tests/ci_lab/test_checks.py::test_a_unit_log_keeps_its_last_4096_characters_in_a_fence_longer_than_its_backtick_runs",
+        "tests/ci_lab/test_checks.py::test_unit_logs_show_while_they_fit_in_half_the_github_limit",
+        "tests/ci_lab/test_checks.py::test_unit_keys_after_a_unit_log_stop_at_the_github_limit_and_point_at_the_full_list"
       ]
     },
     {
