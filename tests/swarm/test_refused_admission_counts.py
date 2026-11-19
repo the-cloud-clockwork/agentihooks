@@ -6,7 +6,6 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-FEATURE = "autoscale-and-ledger-hives-name-each-refused-admission-count"
 REFUSED = "No permissions to access a key"
 NO_READING = "missing telemetry: no fresh headroom reading"
 
@@ -44,7 +43,7 @@ def _beat(store: Any, now: int, *hives: str) -> None:
         registry.beat(store.redis, hive, {"heartbeat_at": now, "beat_at": now})
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("autoscale-and-ledger-hives-name-each-refused-admission-count")
 def test_the_autoscale_command_names_the_hive_admission_count_the_redis_login_refuses_and_prints_the_rest(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -75,7 +74,7 @@ def test_the_autoscale_command_names_the_hive_admission_count_the_redis_login_re
     assert shown["binding"] == binding
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("autoscale-and-ledger-hives-name-each-refused-admission-count")
 def test_the_autoscale_command_names_every_refused_count_when_no_hive_count_is_readable(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
