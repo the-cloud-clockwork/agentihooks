@@ -3,9 +3,8 @@ from typing import Any
 
 import pytest
 
-pytestmark = pytest.mark.feature("swarm-progress-data")
 
-
+@pytest.mark.feature("swarm-progress-data")
 def test_progress_data_preserves_every_collection(monkeypatch: pytest.MonkeyPatch) -> None:
     progress_data = importlib.import_module("scripts.swarm.progress_data")
     names = ("tasks", "freezes", "plans", "phases", "followups", "alerts")
@@ -21,6 +20,7 @@ def test_progress_data_preserves_every_collection(monkeypatch: pytest.MonkeyPatc
     assert calls == [("example-swarm", name, True) for name in names]
 
 
+@pytest.mark.feature("swarm-progress-data")
 def test_progress_data_propagates_read_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     progress_data = importlib.import_module("scripts.swarm.progress_data")
     failure = RuntimeError("resource unavailable")
