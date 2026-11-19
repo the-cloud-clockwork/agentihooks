@@ -1737,6 +1737,20 @@
       ]
     },
     {
+      "id": "hub-admission-unlisted-retry",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-late-admission-reanswer",
+      "behaviour": "A same hive retry receives its kept admission when the live agents projection is absent but its matching current execution is still starting, has not launched and still holds the task claim. Another hive, an absent or replaced execution, an ended or launched execution and a released claim never receive that admission.",
+      "seam": "Admission.admit on a retry for a held offer without its live agents projection",
+      "rules": [
+        "hub-admission-retry-needs-live-projection"
+      ],
+      "tests": [
+        "tests/hub/test_admission.py::test_an_unlisted_kept_admission_requires_its_current_unlaunched_claimant",
+        "tests/hub/test_admission.py::test_another_hive_never_receives_an_unlisted_starting_admission"
+      ]
+    },
+    {
       "id": "hub-admission-hive-asks-again",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2542",
@@ -5198,6 +5212,19 @@
         "tests/test_ci_queue_supersede.py::test_a_run_whose_group_merged_is_kept_though_its_queue_branch_is_gone",
         "tests/test_ci_queue_supersede.py::test_older_runs_of_the_same_pull_request_and_older_runs_of_gone_branches_are_cancelled",
         "tests/test_ci_queue_supersede.py::test_the_sweep_reads_the_full_base_history_checked_out_before_it"
+      ]
+    },
+    {
+      "id": "artifact-lookups-past-the-first-page",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-select-artifact-page",
+      "behaviour": "The Tests select job finds the durations-merged artifact of the latest passed dev push run for a merge group, and the durations-merged and coverage-baseline artifacts of a dispatched base's dev push run, and the coverage ratchet finds its base's coverage-baseline artifact, however many artifacts that run holds, because a dev push run held 106 artifacts, a one page listing of 100 left durations-merged out, and every merge group based on it failed the select job.",
+      "seam": "The Find the latest passed dev push run and Find the dev push run of the dispatched base steps of the Tests workflow select job, and the coverage ratchet's Find the run that published the base baseline step",
+      "rules": [
+        "run-artifacts-read-one-page"
+      ],
+      "tests": [
+        "tests/test_ci_baseline_lookup.py::test_lookup_finds_the_artifacts_past_the_first_page_of_a_crowded_run"
       ]
     },
     {
@@ -10574,6 +10601,16 @@
       "tests": [
         "tests/hub/test_admission.py::test_a_hive_local_refusal_keeps_the_only_offer_for_an_eligible_second_hive",
         "tests/hub/test_admission.py::test_a_refusal_about_the_task_stays_terminal"
+      ]
+    },
+    {
+      "id": "focused-proofs-never-wait-on-a-lane",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-focused-proof-run-group",
+      "behaviour": "Every Proofs workflow dispatch, whatever its proof, runs in its own concurrency group named focused-proof and its run id, with queue max and no cancelling, so a short focused proof never queues on a shared hosted lane behind a full Tests dispatch.",
+      "seam": "Proofs workflow concurrency group",
+      "tests": [
+        "tests/test_ci_hosted_lanes.py::test_every_proof_dispatch_runs_in_its_own_focused_proof_group_and_never_waits_on_a_lane"
       ]
     }
   ],
