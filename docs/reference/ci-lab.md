@@ -1417,9 +1417,10 @@ run a reusable workflow from such a folder either.
   labels the steps of each job of that workflow `<job>/<reusable job>`. The Tests workflow's
   `semgrep` job calls `semgrep.yml`, whose jobs are `scan`, `feature-tests` and `charts`.
 
-A step is a gate step when it has a `run` that calls a tool `static_gates.TOOLS` names or a
-repository Python module. Its gate name is the label, a `/`, then the step's `id`, or else its
-name (or the first line of its run) in lower case words joined by `-`, such as
+A step is a gate step when it has a `run` that calls a tool `static_gates.TOOLS` names or runs
+`python` on any module or script other than `basedpyright`, `ruff` and `venv`
+(`static_gates.UNGATED_MODULES`). Its gate name is the label, a `/`, then the step's `id`, or
+else its name (or the first line of its run) in lower case words joined by `-`, such as
 `semgrep/scan/fail-on-findings-new-against-the-base`. Each unit names one gate step, and
 its key is `static_key` over the gate name, the head files under the gate's registry paths, the
 base files under its base paths, the grader revision and the toolchain (see
