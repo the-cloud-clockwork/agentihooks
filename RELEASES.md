@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.1057 · 2026-11-19
+
+### 2026-11-19 · c6a265a992b0 · #12307 · @agenticore-app
+
+**Document the hive master launch retry and the tick step profiler**
+
+This change adds documentation only, with no code modifications. It explains two previously undocumented behaviors already running in production: how hive master launches retry after a full account reservation (including the retry loop through `_placed`, `_master_selection`, and `place_master`, with a worked example and before/after measurements), and how to profile individual tick steps using `AGENTIHOOKS_TICK_PROFILE_STEPS`. It also adds troubleshooting guidance, configuration reference entries, and cross-links, closing a gap between what the system does and what operators could previously verify from the docs.
+
 ## v2.17.1055 · 2026-11-19
 
 ### 2026-11-19 · 54eda4ebff9d · #12300 · @agenticore-app
