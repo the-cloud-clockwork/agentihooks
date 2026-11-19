@@ -522,6 +522,17 @@
       ]
     },
     {
+      "id": "swarm-tasks-read-command",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-swarm-tasks-read-command",
+      "behaviour": "agentihooks swarm <slug> tasks prints one JSON document keyed tasks and freezes, holding every task row and every freeze and focus record the swarm's ledger client reads for that swarm, so a caller names only the swarm; an unreachable ledger exits 1 with the reason on stderr and nothing on stdout.",
+      "seam": "agentihooks swarm <slug> tasks through scripts.swarm.cli.main, reading LedgerClient.tasks and LedgerClient.freezes",
+      "tests": [
+        "tests/swarm/test_tasks_read.py::test_swarm_tasks_prints_every_task_row_and_freeze_of_the_swarm_as_one_json_document",
+        "tests/swarm/test_tasks_read.py::test_swarm_tasks_exits_one_and_prints_no_rows_when_the_ledger_is_unreachable"
+      ]
+    },
+    {
       "id": "swarm-seat-admission-race",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2680",
