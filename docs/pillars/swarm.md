@@ -1087,6 +1087,7 @@ time, in seconds from the retire request to the retirement. Both are written to 
 | `master-2@<id>` still answers after the step changed. | The cool off has not run ten minutes, the asked master has not handed off yet, the swarm is stopping or stopped and so never shrinks, or a `master-per` rule overrides the step (run `set master-per=off`). |
 | The front door seat never retires. | That is by design: scaling only retires backend seats, highest number first. |
 | The count rose but `master-2@<id>` and up never launch, failing with `account reservation is full` on every tick. | Backend seats picked the front door's native login on a hive; see [Backend master seats](hives.md#backend-master-seats) for the cause and the fix. |
+| `master scale` burns tens of CPU seconds a pass, the steps that take the placement lock wait on it (`spawn` is abandoned at its budget on releases that have it), and one seat's launches all end `account reservation is full` for the same account. | A release without pull request 10731 retries a refused master launch on the same native login until the tick lock goes stale; see [Retry after a full account reservation](hives.md#retry-after-a-full-account-reservation). To find where any step spends its time, see [Profile a step](../reference/tick-engine-steps.md#profile-a-step). |
 
 ### Master inbox pool
 
