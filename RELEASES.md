@@ -2,6 +2,26 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.1059 · 2026-11-19
+
+### 2026-11-19 · c40f80ba2ba0 · #12314 · @nestorcolt
+
+**Lint refuses changelog fragments named off the branch or opening without a section heading**
+
+This change adds a new CI check, scripts/ci_changelog_fragments.py, that enforces the existing changelog.d/README.md rules: every new changelog fragment must be named after the current branch and must begin with a recognized section heading (Added, Changed, Deprecated, Removed, Fixed, or Security). It runs as its own step in the lint job, catching the exact mistakes that recently let 12 of 60 merged fragments be misnamed and 13 ship unheaded, silently landing under the wrong release-notes section. It's cheap (under a second) and covered by fixtures, drift tests against the release-notes regex, and mutation testing, closing issue #12311.
+
+### 2026-11-19 · 4613f59adbcc · #12351 · @nestorcolt
+
+**Keep the lab route in the command a swarm publish refusal repeats**
+
+When a swarm publish is refused because of a missing lab remote, the suggested retry command shown after "Next:" now preserves the `--via lab` or `--via lab --direct` route that was originally requested, instead of silently dropping it and suggesting a plain publish that would push to origin without the lab. This matters because following the previous suggestion would have quietly bypassed the intended lab route, leading an agent to take an action it didn't mean to take; the fix ensures the retry command faithfully matches the refused request.
+
+### 2026-11-19 · 2a7fb78f41d3 · #12313 · @agenticore-app
+
+**Master launches take the swarm Claude and Codex model setting**
+
+Master launches started ignoring the swarm's model setting whenever a saved launch or a handoff carried no explicit model, silently falling back to the built-in defaults (opus, gpt-6.1-sol) instead of what the swarm had configured. This fix introduces a single shared function, model_pick.master, used by both the master-up and tick paths, so the swarm's claude-model and codex-model settings are honored consistently regardless of which launch path triggered the master. It's backed by a regression test covering both paths and both harnesses, plus a feature map entry and updated docs.
+
 ## v2.17.1057 · 2026-11-19
 
 ### 2026-11-19 · c6a265a992b0 · #12307 · @agenticore-app
