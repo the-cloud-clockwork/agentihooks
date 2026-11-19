@@ -10443,12 +10443,25 @@
       "id": "ci-stats-seed-download-retry",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2597",
-      "behaviour": "When a mutation stats artifact download fails during the dev push stats seed harvest, the harvest waits 5, 10 and then 20 seconds, each wait cut short at the seed's deadline, between up to four downloads of that artifact and copies its records once one succeeds; only when every download failed does it fail with an error naming the artifact, its id and the last download error. A download that times out and a failed pull request, run or artifact listing call are not retried, so the seed still skips a pull request past its budget.",
+      "behaviour": "When a mutation stats artifact download fails during the dev push stats seed harvest, the harvest waits 5, 10 and then 20 seconds, each wait cut short at the seed's deadline, between up to four downloads of that artifact and copies its records once one succeeds; only when every download failed does it fail with an error naming the artifact, its id and the last download error. A download that times out is made once, so the seed still skips a pull request past its budget, and a download answered HTTP 404 is made once and fails with that error.",
       "seam": "scripts.ci_stats_seed.download through scripts.ci_stats_seed.harvest",
       "tests": [
         "tests/test_ci_stats_seed.py::test_harvest_downloads_a_failed_artifact_again_after_a_wait",
         "tests/test_ci_stats_seed.py::test_harvest_fails_naming_the_artifact_once_every_download_failed",
-        "tests/test_ci_stats_seed.py::test_harvest_retries_neither_a_timed_out_download_nor_a_failed_listing"
+        "tests/test_ci_stats_seed.py::test_harvest_downloads_a_timed_out_or_missing_artifact_once"
+      ]
+    },
+    {
+      "id": "ci-stats-seed-listing-retry",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/promo-44592721366-1",
+      "behaviour": "When the pull request read, the Tests runs listing or an artifacts listing page of the dev push stats seed harvest fails, the harvest prints the path and gh's error, waits 5, 10 and then 20 seconds, each wait cut short at the seed's deadline, between up to four calls, and goes on with the first answer; when every call failed it raises the last failure. A listing call that times out or is answered HTTP 404 is made once, so the seed still skips a pull request past its budget and a number that is not a pull request at once.",
+      "seam": "scripts.ci_stats_seed.retried through scripts.ci_stats_seed.harvest",
+      "tests": [
+        "tests/test_ci_stats_seed.py::test_harvest_asks_again_for_a_listing_call_that_failed",
+        "tests/test_ci_stats_seed.py::test_harvest_raises_the_last_failure_once_every_call_of_a_listing_failed",
+        "tests/test_ci_stats_seed.py::test_harvest_asks_once_for_a_listing_that_timed_out_or_was_not_found",
+        "tests/test_ci_stats_seed.py::test_harvest_skips_a_number_that_is_not_a_pull_request"
       ]
     },
     {
