@@ -98,6 +98,7 @@ from scripts.swarm import (
     claim_lost,
     clearance,
     control_notifications,
+    create_config,
     default_models,
     delivery,
     dev_red,
@@ -173,14 +174,10 @@ from scripts.swarm.status import (
     wait_label,
 )
 from scripts.swarm.store import (
-    APP_SERVER_TRANSPORT,
     ASSIST,
     AUTO_SCALING,
     AUTONOMY,
-    DEFAULT_MASTERS_STEP,
-    DELEGATE,
     DISPATCH,
-    EVENTS_ENGINE,
     FULL,
     MASTER,
     AgentRecord,
@@ -998,26 +995,7 @@ def _create_config(args: argparse.Namespace) -> SwarmConfig:
         raise SwarmError(f"--repo takes a folder on this host, not the web address {args.repo}")
     repo = os.path.abspath(os.path.expanduser(args.repo))
     template = templates.load(args.template, os.environ) if args.template else templates.parse({"name": "none"})
-    caps = {key: value.cap for key, value in template.lanes.items()}
-    return SwarmConfig(
-        args.slug,
-        repo,
-        caps["eng"] if args.max_eng_agents is None else args.max_eng_agents,
-        caps["ci"] if args.max_ci_agents is None else args.max_ci_agents,
-        max_plan=caps["plan"] if args.max_plan_agents is None else args.max_plan_agents,
-        state="paused",
-        compact_limit=template.compact_limit,
-        template=args.template,
-        lanes=templates.lane_map(template),
-        links=template.links,
-        autonomy=template.autonomy or DELEGATE,
-        scratch=not ledger_creator.shared(os.environ),
-        caps_pinned=args.max_eng_agents is not None or args.max_ci_agents is not None,
-        codex_inbox_transport=APP_SERVER_TRANSPORT,
-        masters_step=DEFAULT_MASTERS_STEP,
-        engine=EVENTS_ENGINE,
-        repo_origin=_create_origin(repo),
-    )
+    return create_config.config(args, repo, template)
 
 
 def create_refusal(store: RedisStore, argv: list[str]) -> str:
@@ -1378,13 +1356,6 @@ def _engine_origin(config, changes):
     if not identity:
         raise SwarmError("events engine requires a checkout with a Git origin or a stored repository origin")
     return {**changes, "repo_origin": identity}
-
-
-def _create_origin(repo: str) -> str:
-    """The Git origin of the checkout a new swarm works in, empty when it has none."""
-    from scripts.hive.daemon import origin
-
-    return origin(Path(repo))
 
 
 def on_off(value):
