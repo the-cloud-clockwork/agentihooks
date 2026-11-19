@@ -37,6 +37,7 @@ from scripts.ci_lab import (
     relay,
     scheduler,
     static_gates,
+    webhooks,
     worktrees,
 )
 from scripts.ci_lab.capacity import Load
@@ -67,6 +68,7 @@ HEAD_B = "b" * 40
 BASE = "c" * 40
 TREE = "d" * 40
 OTHER_TREE = "e" * 40
+MERGE_BASE = "9" * 40
 
 Post = tuple[str, str, str, str | None, Output, bool]
 
@@ -136,10 +138,18 @@ class Inbox:
 class Expander:
     plans: dict[str, scheduler.Plan]
     seen: list[GradeRequest] = field(default_factory=list[GradeRequest])
+    bases: dict[str, str] = field(default_factory=dict[str, str])
+    resolved: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
 
     def expand(self, request: GradeRequest) -> scheduler.Plan:
         self.seen.append(request)
         return self.plans[request.head]
+
+    def merge_base(self, repo: str, head: str) -> str:
+        self.resolved.append((repo, head))
+        if head not in self.bases:
+            raise subprocess.CalledProcessError(1, ["git", "merge-base", head, "dev"])
+        return self.bases[head]
 
 
 @dataclass
@@ -210,8 +220,9 @@ class Run:
         action: str = "pushed",
         actor: str = ACTOR,
         ref: str = "",
+        base: str = BASE,
     ) -> None:
-        self.lab.inbox.pending.append(scheduler.Head(HeadEvent(event, REPO, head, BASE, actor, action), lane, ref))
+        self.lab.inbox.pending.append(scheduler.Head(HeadEvent(event, REPO, head, base, actor, action), lane, ref))
 
     def tick(self, at: int) -> list[str]:
         self.lab.now = at
@@ -781,6 +792,52 @@ def test_an_untrusted_head_is_never_held_or_graded(lab: Callable[..., Run]) -> N
     run.tick(1500)
     assert [request.head for request in run.lab.expander.seen] == [HEAD_B]
     assert run.lab.client.hgetall(scheduler.WAITING) == {}
+
+
+@pytest.mark.feature("lab-plant-push-intake")
+def test_a_plant_push_grades_in_the_pull_request_tier_on_its_dev_merge_base(lab: Callable[..., Run]) -> None:
+    run = lab({HEAD_A: scheduler.frame(Priority.PULL_REQUEST, TREE, MERGE_BASE, {"lint": (unit(1),)})})
+    run.lab.expander.bases[HEAD_A] = MERGE_BASE
+    run.push(HEAD_A, lane=HEAD_A, event=webhooks.PLANT, base="")
+    actions = run.tick(1000)
+    assert run.lab.expander.resolved == [(REPO, HEAD_A)]
+    assert run.lab.expander.seen == [GradeRequest(REPO, HEAD_A, MERGE_BASE, Priority.PULL_REQUEST, ACTOR, False)]
+    grade = run.grade(HEAD_A)
+    assert grade.run == grade_key(GradeInputs(REPO, HEAD_A, MERGE_BASE, CLASSES[Priority.PULL_REQUEST], MERGE_BASE))
+    assert (grade.base, grade.grader, grade.tier) == (MERGE_BASE, MERGE_BASE, Priority.PULL_REQUEST)
+    assert f"received {HEAD_A} on {HEAD_A}" in actions
+
+
+@pytest.mark.feature("lab-plant-push-intake")
+def test_an_ordinary_push_keeps_its_base_and_the_promotion_tier_and_resolves_nothing(lab: Callable[..., Run]) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)})})
+    run.push(HEAD_A)
+    run.tick(1000)
+    assert run.lab.expander.resolved == []
+    assert run.lab.expander.seen == [GradeRequest(REPO, HEAD_A, BASE, Priority.PROMOTION, ACTOR, False)]
+
+
+@pytest.mark.feature("lab-plant-push-intake")
+def test_an_untrusted_plant_push_is_refused_before_its_base_is_resolved(lab: Callable[..., Run]) -> None:
+    run = lab({})
+    run.lab.expander.bases[HEAD_A] = MERGE_BASE
+    run.push(HEAD_A, lane=HEAD_A, event=webhooks.PLANT, actor="stranger", base="")
+    assert run.tick(1000) == [f"untrusted stranger head {HEAD_A}"]
+    assert (run.lab.expander.resolved, run.lab.expander.seen) == ([], [])
+    assert run.lab.client.hgetall(scheduler.WAITING) == {}
+
+
+@pytest.mark.feature("lab-plant-push-intake")
+def test_a_plant_head_whose_dev_merge_base_fails_is_named_and_never_held(lab: Callable[..., Run]) -> None:
+    run = lab({HEAD_B: plan({"lint": (unit(1),)})}, quiet_ms=500)
+    run.push(HEAD_A, lane=HEAD_A, event=webhooks.PLANT, base="")
+    run.push(HEAD_B, lane="other")
+    failure = subprocess.CalledProcessError(1, ["git", "merge-base", HEAD_A, "dev"])
+    assert run.tick(1000) == [
+        f"cannot resolve the dev merge base of plant head {HEAD_A}: {failure}",
+        f"received {HEAD_B} on other",
+    ]
+    assert list(run.lab.client.hkeys(scheduler.WAITING)) == [f"{REPO}|other|{int(Priority.PROMOTION)}"]
 
 
 def test_check_runs_move_queued_on_receipt_in_progress_on_the_first_unit_and_completed_on_the_last(
@@ -1823,6 +1880,29 @@ def test_the_mirror_expander_trusts_the_runner_trust_list_on_dev(tmp_path: Path,
     _commit(repo, {"delivery.yaml": json.dumps({"lab": {**DELIVERY["lab"], "retry": {"lost": -1}}})})
     with pytest.raises(jsonschema.ValidationError):
         expander.retries(f"file://{repo}")
+
+
+@pytest.mark.feature("lab-plant-push-intake")
+def test_the_mirror_expander_bases_both_plant_twins_on_their_dev_merge_base(
+    tmp_path: Path, origin: tuple[Path, str, str]
+) -> None:
+    repo, _, fork = origin
+    twins: list[str] = []
+    for name in ("green", "red"):
+        _git(repo, "checkout", "-q", "-b", f"diffcheck/lab-plant-size-{name}", fork)
+        twins.append(_commit(repo, {"src/twin.py": f"{name} = 1\n"}))
+    _git(repo, "checkout", "-q", "dev")
+    _commit(repo, {"src/a.py": "a = 3\n"})
+    orphan = _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit-tree", f"{fork}^{{tree}}", "-m", "o")
+    _git(repo, "update-ref", "refs/heads/diffcheck/lab-plant-orphan", orphan.strip())
+    node = tmp_path / "node"
+    _git(tmp_path, "init", "-q", "--bare", str(node))
+    expander = scheduler.MirrorExpander(
+        node, tmp_path / "stores", Toolchain("3.12", {}, "", "", "", {}), _no_tests, _unknown
+    )
+    assert [expander.merge_base(f"file://{repo}", twin) for twin in twins] == [fork, fork]
+    with pytest.raises(subprocess.CalledProcessError):
+        expander.merge_base(f"file://{repo}", orphan.strip())
 
 
 def _drop(repo: Path, *names: str) -> str:
