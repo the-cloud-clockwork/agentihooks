@@ -259,13 +259,13 @@ def test_a_chart_check_refuses_a_grader_copy_that_ignores_the_root_instead_of_gr
     "job,graded",
     [
         (
-            "scan",
+            "own-rules",
             [
                 "Own rules hold on their fixtures and the code",
                 "Outage rules for tests hold on every test file",
-                "Fail on findings new against the base",
             ],
         ),
+        ("scan", ["Fail on findings new against the base"]),
         ("charts", sorted(CHART_STEPS.values())),
     ],
 )
@@ -286,7 +286,7 @@ def test_each_semgrep_job_checks_out_the_caller_base_as_the_grader(job: str, gra
 @pytest.mark.feature("lint-gates-grade-from-grader")
 def test_the_semgrep_scan_grades_the_code_with_the_grader_rules_and_the_head_rules() -> None:
     steps = _steps("semgrep.yml", "scan")
-    own = steps["Own rules hold on their fixtures and the code"]["run"].splitlines()[-1]
+    own = _steps("semgrep.yml", "own-rules")["Own rules hold on their fixtures and the code"]["run"].splitlines()[-1]
     assert (
         own
         == 'semgrep scan --error --strict --timeout 30 --metrics off --config "$RUNNER_TEMP/grader/$RULES" --config "$RULES" .'

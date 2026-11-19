@@ -66,6 +66,7 @@ MOVED = {
     ("proofs.yml", "tests"): STANDARD,
     ("semgrep.yml", "charts"): LIGHT,
     ("semgrep.yml", "feature-tests"): LIGHT,
+    ("semgrep.yml", "own-rules"): LIGHT,
     ("semgrep.yml", "scan"): LIGHT,
     ("docs-sanity.yml", "scan"): LIGHT,
     ("startup-stages.yml", "measure"): STANDARD,

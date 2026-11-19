@@ -26,8 +26,8 @@ def _workflow(name):
     return yaml.safe_load((_ROOT / ".github/workflows" / name).read_text())
 
 
-def test_wrapper_runs_the_inline_scan_feature_tests_and_chart_guard():
-    assert set(_jobs()) == {"scan", "feature-tests", "charts"}
+def test_wrapper_runs_the_inline_scan_feature_tests_and_chart_guard() -> None:
+    assert set(_jobs()) == {"scan", "own-rules", "feature-tests", "charts"}
 
 
 def test_scan_runs_inline_without_private_organization_workflow_calls():
@@ -41,22 +41,35 @@ def test_scan_runs_inline_without_private_organization_workflow_calls():
 
 
 def test_scan_keeps_the_reusable_workflow_steps() -> None:
-    steps = _jobs()["scan"]["steps"]
-    assert steps[0] == {"uses": "actions/checkout@v4", "with": {"ref": "${{ github.sha }}", "fetch-depth": 0}}
-    assert steps[1] == {"name": "Set up Python", "uses": "actions/setup-python@v5", "with": {"python-version": "3.12"}}
-    assert [step.get("name") for step in steps[2:]] == [
-        "Install Semgrep",
-        "Install PyYAML",
-        "Check out the protected grader",
-        "Own rules hold on their fixtures and the code",
-        "Outage rules for tests hold on every test file",
-        "Rule exceptions only shrink",
-        "Resolve the merge base of the head and the base",
-        "Fail on findings new against the base",
-    ]
-    assert steps[2]["env"] == {"SEMGREP_VERSION": "1.177.0"}
-    assert steps[3] == {"name": "Install PyYAML", "run": "python -m pip install pyyaml==6.0.2"}
-    assert _jobs()["scan"]["timeout-minutes"] == 5
+    jobs = _jobs()
+    expected = {
+        "own-rules": [
+            "Install Semgrep",
+            "Install PyYAML",
+            "Check out the protected grader",
+            "Own rules hold on their fixtures and the code",
+            "Outage rules for tests hold on every test file",
+            "Rule exceptions only shrink",
+        ],
+        "scan": [
+            "Install Semgrep",
+            "Check out the protected grader",
+            "Resolve the merge base of the head and the base",
+            "Fail on findings new against the base",
+        ],
+    }
+    for job, names in expected.items():
+        steps = jobs[job]["steps"]
+        assert steps[0] == {"uses": "actions/checkout@v4", "with": {"ref": "${{ github.sha }}", "fetch-depth": 0}}
+        assert steps[1] == {
+            "name": "Set up Python",
+            "uses": "actions/setup-python@v5",
+            "with": {"python-version": "3.12"},
+        }
+        assert [step.get("name") for step in steps[2:]] == names
+        assert steps[2]["env"] == {"SEMGREP_VERSION": "1.177.0"}
+        assert jobs[job]["timeout-minutes"] == 5
+    assert jobs["own-rules"]["steps"][3] == {"name": "Install PyYAML", "run": "python -m pip install pyyaml==6.0.2"}
 
 
 def test_strict_scans_run_in_independent_jobs() -> None:
@@ -114,7 +127,7 @@ SCAN_STUB = '#!/usr/bin/env bash\necho "$*" >> "$STUBS/calls"\nexit "$SCAN_EXIT"
 
 
 def _test_rules_step() -> dict[str, Any]:
-    return next(step for step in _jobs()["scan"]["steps"] if step.get("name") == TEST_RULES)
+    return next(step for step in _jobs()["own-rules"]["steps"] if step.get("name") == TEST_RULES)
 
 
 def _run_test_rules(tmp_path: Path, graded: bool, scan_exit: int = 0) -> tuple[int, list[str]]:
@@ -240,7 +253,7 @@ def test_source_control_rule_covers_swarm_calls_and_uses_explicit_exceptions() -
 
 @pytest.mark.feature("tick-unbounded-read-rule")
 def test_source_control_allowlist_is_graded_against_the_caller_base() -> None:
-    steps = _jobs()["scan"]["steps"]
+    steps = _jobs()["own-rules"]["steps"]
     step = next(step for step in steps if step.get("name") == "Rule exceptions only shrink")
     assert step["env"]["BASE"] == "${{ inputs.base }}"
     assert "for list in .semgrep/*-allowlist.json; do" in step["run"]
@@ -377,7 +390,7 @@ def _commit(repo: Path, files: dict[str, str | None], message: str) -> str:
 def _run_exceptions_step(
     tmp_path: Path, dev: dict[str, str | None], head: dict[str, str | None]
 ) -> subprocess.CompletedProcess[str]:
-    step = next(step for step in _jobs()["scan"]["steps"] if step.get("name") == "Rule exceptions only shrink")
+    step = next(step for step in _jobs()["own-rules"]["steps"] if step.get("name") == "Rule exceptions only shrink")
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init", "-q", "-b", "dev")
@@ -421,7 +434,9 @@ def test_scan_excludes_only_the_mutable_action_tag_rule():
 
 def test_scan_reads_the_domain_rules_folder_that_holds_rule_files() -> None:
     step = next(
-        step for step in _jobs()["scan"]["steps"] if step.get("name") == "Own rules hold on their fixtures and the code"
+        step
+        for step in _jobs()["own-rules"]["steps"]
+        if step.get("name") == "Own rules hold on their fixtures and the code"
     )
     rules_dir = _ROOT / step["env"]["RULES"]
     assert rules_dir == _ROOT / ".semgrep"
@@ -432,15 +447,17 @@ def test_scan_reads_the_domain_rules_folder_that_holds_rule_files() -> None:
 
 def test_own_rules_scan_gives_each_rule_thirty_seconds_on_a_file() -> None:
     step = next(
-        step for step in _jobs()["scan"]["steps"] if step.get("name") == "Own rules hold on their fixtures and the code"
+        step
+        for step in _jobs()["own-rules"]["steps"]
+        if step.get("name") == "Own rules hold on their fixtures and the code"
     )
     assert "semgrep scan --error --strict --timeout 30 --metrics off" in step["run"]
 
 
-def test_scan_and_charts_run_on_the_select_runner_expression():
+def test_scan_and_charts_run_on_the_select_runner_expression() -> None:
     jobs = _jobs()
     select = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["select"]
-    assert jobs["scan"]["runs-on"] == jobs["charts"]["runs-on"] == select["runs-on"]
+    assert jobs["scan"]["runs-on"] == jobs["own-rules"]["runs-on"] == jobs["charts"]["runs-on"] == select["runs-on"]
 
 
 def test_charts_run_the_chart_timer_guard() -> None:
@@ -563,11 +580,12 @@ def test_wrapper_holds_only_read_permission():
     assert _semgrep()["permissions"] == {"contents": "read"}
 
 
-def test_feature_tests_and_charts_have_runner_classes():
+def test_feature_tests_and_charts_have_runner_classes() -> None:
     classes = json.loads((_ROOT / ".github/runner-classes.json").read_text())
     assert {key for key in classes if key.startswith("semgrep.yml/")} == {
         "semgrep.yml/charts",
         "semgrep.yml/feature-tests",
+        "semgrep.yml/own-rules",
         "semgrep.yml/scan",
     }
 
