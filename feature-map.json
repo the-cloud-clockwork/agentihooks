@@ -10570,7 +10570,9 @@
         "tests/ci_lab/test_plant_grade.py::test_an_excessive_history_is_refused_after_one_hundred_pages",
         "tests/ci_lab/test_plant_grade.py::test_a_missing_required_check_keeps_the_grade_unfinished",
         "tests/ci_lab/test_plant_grade.py::test_two_required_checks_make_the_grade_ambiguous",
-        "tests/ci_lab/test_plant_grade.py::test_a_failed_twin_is_named_and_the_plant_is_never_pushed"
+        "tests/ci_lab/test_plant_grade.py::test_a_failed_twin_is_named_and_the_plant_is_never_pushed",
+        "tests/ci_lab/test_plant_grade.py::test_conflicting_gate_checks_cannot_hide_an_extra_failure",
+        "tests/ci_lab/test_plant_grade.py::test_the_default_fetch_respects_the_remaining_budget_on_rate_limits"
       ]
     },
     {

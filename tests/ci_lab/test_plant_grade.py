@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from scripts.ci_budget import rate_limit
 from scripts.ci_lab import __main__ as entrypoint
 from scripts.ci_lab import plant_grade
 from scripts.ci_lab.digests import GradeInputs, grade_key
@@ -219,6 +220,27 @@ def test_two_required_checks_make_the_grade_ambiguous(repository: Path) -> None:
 
 
 @pytest.mark.feature("lab-static-plant-proofs")
+def test_conflicting_gate_checks_cannot_hide_an_extra_failure(repository: Path) -> None:
+    lab = Lab(repository)
+
+    def conflict(path: str) -> Mapping[str, Any]:
+        rows = list(lab.fetch(path)["check_runs"])
+        head = path.split("/")[4]
+        if git(repository, "show", f"{head}:sample.py") == "after":
+            run = grade_key(GradeInputs(REPOSITORY, head, lab.base, "pull_request", lab.base))
+            rows.extend(
+                [
+                    lab.check("lab-shadow/type-gate", "failure", run),
+                    lab.check("lab/type-gate", "success", run),
+                ]
+            )
+        return {"check_runs": rows}
+
+    with pytest.raises(ValueError, match="ambiguous"):
+        plant_grade.prove(repository, "lint", "HEAD", REPOSITORY, plant_grade.Ports(conflict, lab.sleep, lab.clock))
+
+
+@pytest.mark.feature("lab-static-plant-proofs")
 def test_a_failed_twin_is_named_and_the_plant_is_never_pushed(repository: Path) -> None:
     lab = Lab(repository)
     lab.twin_required = "failure"
@@ -366,6 +388,42 @@ def test_the_command_uses_real_transport_adapters_and_normalizes_the_remote(
     assert json.loads(capsys.readouterr().out)["plant"] == "lint"
     assert len(lab.heads) == 2
     assert lab.now == 10
+
+
+@pytest.mark.feature("lab-static-plant-proofs")
+def test_the_default_fetch_respects_the_remaining_budget_on_rate_limits(
+    repository: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.chdir(repository)
+    lab = Lab(repository)
+    real_run = subprocess.run
+    timeouts: list[float] = []
+
+    def limited(arguments: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        if Path(arguments[0]).name == "git":
+            return real_run(arguments, **kwargs)
+        timeouts.append(kwargs["timeout"])
+        raise subprocess.CalledProcessError(1, arguments, stderr="secondary rate limit exceeded")
+
+    clock = SimpleNamespace(sleep=lab.sleep, monotonic=lab.clock)
+    monkeypatch.setattr(plant_grade, "time", clock)
+    monkeypatch.setattr(rate_limit, "time", clock)
+    monkeypatch.setattr(rate_limit, "deadline", None)
+    monkeypatch.setattr(rate_limit, "slept", 0)
+    monkeypatch.setattr(subprocess, "run", limited)
+    assert (
+        plant_grade.main(
+            ["--plant", "lint", "--base", "HEAD", "--repository", REPOSITORY, "--timeout", "2"],
+            {},
+        )
+        == 1
+    )
+    assert capsys.readouterr().out == ""
+    assert len(timeouts) == 1
+    assert 0 < timeouts[0] <= 2
+    assert lab.now <= 2
 
 
 @pytest.mark.feature("lab-static-plant-proofs")
