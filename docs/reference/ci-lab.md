@@ -2374,8 +2374,8 @@ key; the builders are pure and read no file, clock or network.
 4. The verdict store answers what it can. A newer head of the lane drops the older head's pending
    units, carries its leased and finished jobs and cancels its check runs. A push grade of a tree a
    merge group grade passed carries that grade's units for every gate both grades hold: the unit
-   suite, since the queue rules require lint, type-gate and semgrep to be skipped. The rest is held for
-   the budget.
+   suite and `test-count`, since the queue rules require lint, type-gate and semgrep to be skipped. The
+   rest is held for the budget.
 5. Held units are enqueued as `scripts.ci_lab.budget.admits` lets them in, the most urgent grade first.
    Every unit of a class the day's core budget does not shed is enqueued; a shed class enqueues nothing
    until the budget resets the next UTC day, though its units already in the queue still run. Backfill
@@ -2454,10 +2454,11 @@ rerequested grade reuses the finished jobs of its own head.
 ### Static units
 
 Expansion keys one `static` unit per gate step of the static jobs of the grader revision's Tests
-workflow: `lint`, `type-gate` and `semgrep`, the jobs `scripts.ci_lab.static_gates.STATIC_JOBS`
-names. The grader revision is the head of a promotion or backfill grade and the base of every
-other grade. `scripts.ci_lab.scheduler.MirrorExpander.expand` reads three inputs at that
-revision from the git mirror and passes them to `scripts.ci_lab.static_gates.discover`:
+workflow: `lint`, `type-gate`, `semgrep` and `test-count`, the jobs
+`scripts.ci_lab.static_gates.STATIC_JOBS` names. The grader revision is the head of a promotion or
+backfill grade and the base of every other grade. `scripts.ci_lab.scheduler.MirrorExpander.expand`
+reads three inputs at that revision from the git mirror and passes them to
+`scripts.ci_lab.static_gates.discover`:
 
 | Input | Read with | Passed to `discover` as |
 |---|---|---|
@@ -2475,6 +2476,9 @@ run a reusable workflow from such a folder either.
 - A job with `uses: ./.github/workflows/<file>` looks `<file>` up in the reusable workflows. It
   labels the steps of each job of that workflow `<job>/<reusable job>`. The Tests workflow's
   `semgrep` job calls `semgrep.yml`, whose jobs are `scan`, `feature-tests` and `charts`.
+- A job of that workflow that calls a further workflow with its own `uses:` has no steps to label.
+  `discover` skips it and grades the other jobs of the workflow, and
+  [Jobs the lab leaves to Actions](#jobs-the-lab-leaves-to-actions) names it.
 
 A step is a gate step when it has a `run` that calls a tool `static_gates.TOOLS` names or runs
 `python` on any module or script other than `basedpyright`, `ruff` and `venv`
@@ -2486,15 +2490,16 @@ base files under its base paths, the grader revision and the toolchain (see
 [Inputs per kind](#inputs-per-kind)). The plan groups units by label, so each label is one gate
 with its own check run.
 
-On dev, `python -m scripts.ci_lab.static_gates --root .` lists 38 gate steps:
+On dev, `python -m scripts.ci_lab.static_gates --root .` lists 43 gate steps:
 
 | Gate | Steps from | Gate steps |
 |---|---|---|
-| `lint` | The `lint` job of `test.yml` | 27 |
+| `lint` | The `lint` job of `test.yml` | 28 |
 | `type-gate` | The `type-gate` job of `test.yml` | 2 |
 | `semgrep/scan` | The `scan` job of `semgrep.yml` | 4 |
 | `semgrep/feature-tests` | The `feature-tests` job of `semgrep.yml` | 2 |
 | `semgrep/charts` | The `charts` job of `semgrep.yml` | 3 |
+| `test-count` | The `test-count` job of `test.yml` | 4 |
 
 Before pull request
 [#11978](https://github.com/the-cloud-clockwork/agentihooks/pull/11978), the expander passed only
@@ -2505,13 +2510,16 @@ was dropped as `cannot expand` and the lab graded none at any class.
 #### What a gate's steps read
 
 A step's `if` condition and the `${{ }}` expressions in its `env` read context names.
-`discover` records three things on each `StaticGate`:
+`discover` records four things on each `StaticGate`:
 
 - `producers`: the earlier steps of the gate's job whose `steps.<id>.outputs.<name>`,
   `steps.<id>.outcome` or `steps.<id>.conclusion` the gate reads, followed on through the names
   each such step with a `run` reads, in job order. A `uses` step can be a producer, but the lab
   never runs it, so its own `if` and `env` are never read.
 - `reads`: every name the gate and its producers with a `run` read, sorted.
+- `matrix`: each `matrix.<key>` in `reads` that the job's `strategy.matrix` holds at one value,
+  with that value. A key that lists one value qualifies. A matrix written as an expression, or
+  one with an `include`, gives none, since an `include` can add a combination with another value.
 - `missing`: the names in `reads` the static executor cannot supply.
 
 The static executor supplies these names:
@@ -2520,10 +2528,26 @@ The static executor supplies these names:
 |---|---|
 | `inputs.base`, `github.event.pull_request.base.sha` | The lease's base revision |
 | `github.sha`, `github.event.pull_request.head.sha` | The lease's head |
+| `github.event_name` | `pull_request`, at every class, since a static unit's key holds no class |
 | `github.run_id` | The lease's job id |
 | `github.run_attempt`, `github.run_number` | `1` |
+| `runner.temp` | The unit's run folder, the `$RUNNER_TEMP` its steps see |
+| `matrix.<key>` | The value the gate's `matrix` records |
 | `secrets.<NAME>` | The worker's `CI_LAB_SECRET_<NAME>`, or empty when the worker has no such variable. Only the secrets the gate reads join the context |
 | `steps.<id>.outcome`, `steps.<id>.conclusion`, `steps.<id>.outputs.<name>` | Set as each producer runs |
+
+Since the event is `pull_request` in every class, a lab unit runs or skips each step as a pull
+request run of Actions does. A merge group, promotion or backfill grade can therefore differ from
+that class's Actions run: a step whose `if` needs another event is skipped, and a step whose `if`
+needs `pull_request` runs. Three lab gradable gates read the event name on dev, and
+`tests/ci_lab/test_static_gates.py` pins that list, so a new one fails the test until someone
+checks the pull request event keeps its verdict:
+
+| Gate | In a lab unit |
+|---|---|
+| `lint/prove-the-mutation-gate-kills-with-the-real-test-and-fails-with-a-weakened-one` | Its `self-plant` producer runs, since it needs `pull_request` |
+| `test-count/fetch-the-base-suite-count-recorded-on-dev` | Skipped: it also needs the `app-token` producer, a `uses` step. Every failure path of the step exits 0, so it never changes the job's verdict, and the count floor collects the base suite itself |
+| `test-count/record-the-head-count-for-the-next-queue-group` | Skipped: it runs only on `merge_group`, with `continue-on-error`, so it never changes the job's verdict |
 
 `scripts.ci_lab.run_static.run` runs the producers before the gate, in job order, in the gate's
 sandbox and run folder, and gives each its own `GITHUB_OUTPUT` file. A `uses` producer, or one
@@ -2540,13 +2564,19 @@ summary the report carries.
 
 A gate with any missing name is not lab gradable. The expander leases no unit for it, so its
 verdict stays with Actions. `python -m scripts.ci_lab.static_gates --root .` prints each gate's
-producers by id, its `reads` and its `missing`. On dev three `lint` gates are not lab gradable:
+producers by id, its `reads`, its `matrix` and its `missing`. On dev two `lint` gates are not lab
+gradable:
 
 | Gate | Missing |
 |---|---|
 | `lint/refuse-changelog-fragments-named-off-the-branch-or-opening-without-a-section-heading` | `github.head_ref`, `github.ref_name` |
-| `lint/artifact-sanity-checks` | `github.base_ref`, `github.event.before`, `github.event.merge_group.base_sha`, `github.event_name` |
-| `lint/prove-the-mutation-gate-kills-with-the-real-test-and-fails-with-a-weakened-one` | `github.event_name` |
+| `lint/artifact-sanity-checks` | `github.base_ref`, `github.event.before`, `github.event.merge_group.base_sha` |
+
+Before pull request
+[#12486](https://github.com/the-cloud-clockwork/agentihooks/pull/12486), the executor supplied
+neither `github.event_name`, `runner.temp` nor any `matrix.<key>`. Three of the four `test-count`
+gate steps and `lint/prove-the-mutation-gate-kills-with-the-real-test-and-fails-with-a-weakened-one`
+were not lab gradable, and `test-count` was not a static job.
 
 Before pull request
 [#12422](https://github.com/the-cloud-clockwork/agentihooks/pull/12422), the context held only
@@ -2559,9 +2589,29 @@ before its step ran, so its unit was requeued once and then lost.
 
 | Class | Static gates with units |
 |---|---|
-| Pull request, hotfix | `lint` and `type-gate`. `semgrep` is framed as a gate without units, which passes. The pull request rules name the job `semgrep` (`scheduler.PULL_REQUIRED`), while its units sit under the `semgrep/scan`, `semgrep/feature-tests` and `semgrep/charts` labels |
-| Merge group | None: the queue rules require no static job |
-| Promotion, backfill | All five |
+| Pull request, hotfix | `lint`, `type-gate` and `test-count`. `semgrep` is framed as a gate without units, which passes. The pull request rules name the job `semgrep` (`scheduler.PULL_REQUIRED`), while its units sit under the `semgrep/scan`, `semgrep/feature-tests` and `semgrep/charts` labels |
+| Merge group | `test-count`, the one static job the queue rules require (`scheduler.QUEUE_REQUIRED`) |
+| Promotion, backfill | All six |
+
+#### Jobs the lab leaves to Actions
+
+The pull request rules also require `docs` and `writer-lock`. The lab frames both as gates without
+units, so their Actions jobs keep the verdict. `scripts.ci_lab.static_gates.CI_ONLY` names each
+with its reason, and `ci_only` lists them with one more kind of job:
+
+| Job | Reason |
+|---|---|
+| `docs` | It builds the pages with the Jekyll image under `docker run`, and lab units run with no Docker daemon |
+| `writer-lock` | It runs a Postgres container and calls nested reusable workflows, and lab units run with no Docker daemon or network |
+| `<static job>/<job>` | A job of a workflow a static job calls that calls a further workflow. Its reason names that workflow |
+
+`python -m scripts.ci_lab.static_gates --root . --ci-only` prints one JSON line per such job in
+workflow order. On dev it prints:
+
+```json
+{"job": "writer-lock", "reason": "runs a Postgres container and calls nested reusable workflows, and lab units run with no Docker daemon or network"}
+{"job": "docs", "reason": "builds the pages with the Jekyll image under docker run, and lab units run with no Docker daemon"}
+```
 
 #### A head that cannot expand
 
@@ -2581,7 +2631,7 @@ kubectl logs -n ci-lab deploy/ci-lab-scheduler | grep 'cannot expand'
 |---|---|
 | `<job> uses <uses>, which was not given` | A static job calls a workflow that is not a file directly in `.github/workflows` at the grader revision, such as a workflow of another repository (`<owner>/<repo>/.github/workflows/<file>@<ref>`), or the caller passed no reusable workflows |
 | `<gate> names two gate steps` | Two gate steps resolve to the same gate name |
-| `'steps'` or `'jobs'` | The called workflow has no `jobs`, or one of its jobs has no `steps`, such as a job that calls another workflow |
+| `'steps'` or `'jobs'` | The called workflow has no `jobs`, or one of its jobs has neither `steps` nor `uses` |
 | A YAML parse error | A workflow file directly in `.github/workflows` at the grader revision does not parse, even one that no static job calls |
 
 #### The worker reads the same workflows
@@ -2598,7 +2648,7 @@ so the unit follows the expired lease rule of step 6 of the [Scheduler loop](#sc
 - Only workflows directly in the grader's `.github/workflows` resolve. A static job that calls a
   workflow of another repository cannot expand.
 - A reusable workflow resolves one level deep. A job of the called workflow that calls a third
-  workflow has no `steps`, and its head cannot expand.
+  workflow gets no units, and its Actions job keeps the verdict; `--ci-only` names it.
 - Every expansion parses each workflow file directly in the folder, so one file that does not
   parse drops every head the lab grades at that grader revision.
 - Pull request and hotfix grades run no `semgrep` units, as the frame table above shows.
@@ -2613,8 +2663,9 @@ python -m scripts.ci_lab.static_gates --root . \
   | python -c 'import json,sys; print(sorted({json.loads(line)["job"] for line in sys.stdin}))'
 ```
 
-On dev it prints `['lint', 'semgrep/charts', 'semgrep/feature-tests', 'semgrep/scan', 'type-gate']`.
-The `checks` of a promotion grade hold one key per gate with units, so the five static gates
+On dev it prints
+`['lint', 'semgrep/charts', 'semgrep/feature-tests', 'semgrep/scan', 'test-count', 'type-gate']`.
+The `checks` of a promotion grade hold one key per gate with units, so the six static gates
 appear there beside `unit`, the mutation gates the head has units for and `required`:
 
 ```bash

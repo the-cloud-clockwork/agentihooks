@@ -1899,7 +1899,6 @@ def test_the_mirror_expander_expands_the_real_tests_workflow_with_its_reusable_w
     assert ungraded == [
         "lint/refuse-changelog-fragments-named-off-the-branch-or-opening-without-a-section-heading",
         "lint/artifact-sanity-checks",
-        "lint/prove-the-mutation-gate-kills-with-the-real-test-and-fails-with-a-weakened-one",
     ]
 
 
