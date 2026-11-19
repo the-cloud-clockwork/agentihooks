@@ -1,3 +1,4 @@
+import importlib
 import shlex
 from pathlib import Path
 from types import SimpleNamespace
@@ -25,10 +26,15 @@ def test_swarm_image_smoke_imports_every_discovered_lab_module_and_refuses_a_mis
     names = ["scripts.ci_lab.executors", "scripts.ci_lab.expand_mutation", "scripts.ci_lab.future_module"]
     imported: list[str] = []
 
-    def load(name: str) -> None:
+    real_import = importlib.import_module
+
+    def load(name: str, package: str | None = None) -> object:
+        if name not in names:
+            return real_import(name, package)
         if name == f"scripts.ci_lab.{missing}":
             raise ModuleNotFoundError(name)
         imported.append(name)
+        return None
 
     modules = [SimpleNamespace(name=name) for name in names]
     with patch("pkgutil.walk_packages", return_value=iter(modules)), patch("importlib.import_module", side_effect=load):

@@ -1837,9 +1837,9 @@ def on_pre_tool_use(payload: dict) -> None:
     _pretool_context = _fit_pretool(_pretool_blocks)
 
     _cond_decision = _conditions.decision if _conditions is not None else None
-    if _input_patch or _cond_decision in ("allow", "ask"):
+    _rewritten = bool(_input_patch) or (_conditions is not None and _conditions.rewrite is not None)
+    if _rewritten or _cond_decision in ("allow", "ask"):
         _updated, _note, _own = _input_patch or ({}, "", _cond_decision)
-        _rewritten = bool(_input_patch) or (_conditions is not None and _conditions.rewrite is not None)
         emit_permission_decision(
             "PreToolUse",
             _cond_decision if _cond_decision in ("allow", "ask") else _own,

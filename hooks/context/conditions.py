@@ -615,15 +615,14 @@ def pre_effect(payload: dict) -> PreEffect | None:
         writers = ", ".join(result.input_writers)
         if not applies_input_rewrite():
             effect.contexts.append(f"[conditions] input rewrite by {writers} dropped: this harness cannot apply it")
-        elif decision is None and payload.get("permission_mode") != "bypassPermissions":
+        elif decision is None and payload.get("permission_mode") == "auto":
             effect.contexts.append(
-                f"[conditions] input rewrite by {writers} dropped: outside bypassPermissions "
+                f"[conditions] input rewrite by {writers} dropped: in auto mode "
                 'a rewriting condition must return "decision": "allow" or "ask"'
             )
         else:
             effect.rewrite = {**(payload.get("tool_input") or {}), **result.input_patch}
             effect.contexts.append(f"[conditions] tool input rewritten by {writers}")
-            decision = decision or "allow"
     effect.decision = decision
     effect.reason = reason
     return effect
