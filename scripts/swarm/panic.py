@@ -15,6 +15,7 @@ recorded late; `count_pass` only takes the ``ok`` a caller computed, and that ca
 
 import json
 import math
+import os
 import re
 import subprocess
 import uuid
@@ -24,7 +25,7 @@ from pathlib import Path
 from threading import Lock, Thread
 from typing import Any, cast
 
-from scripts.swarm import naming
+from scripts.swarm import lab_control, naming
 from scripts.swarm.store import PREFIX, RedisStore, SwarmError
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.contracts import SourceControl
@@ -58,10 +59,11 @@ ACTIVE = frozenset({"queued", "in_progress", "waiting", "pending", "requested"})
 TOOL_SECONDS = 60.0
 MERGED_FIXES = "merged-fixes"
 LEGACY_REASON = re.compile(r"pressed on swarm (\S+)")
-FIXER_TASK = re.compile(r"promo-[0-9]+-[0-9]+|crew-[0-9]+-fix-[0-9]+")
+FIXER_TASK = re.compile(r"promo-[0-9]+-[0-9]+|crew-[0-9]+(?:-[0-9]+)?-fix-[0-9]+")
 FIXERS = "panic-fixers"
 FIXERS_MS = 15 * 60 * 1000
 DONE = "done"
+LAB = "lab"
 Ports = Callable[[str], SourceControl]
 SWEEP = Lock()
 
@@ -186,7 +188,8 @@ def alarm(store: RedisStore, slug: str, now_ms: int) -> str:
         engage(store, slug, f"{count} errors in the last hour", True, (), now_ms)
         return f"panic engaged: {count} errors in the last hour"
     if current.auto and release(store, slug, now_ms):
-        return "panic released: the fleet is back at business as usual"
+        resumed = lab_release(store, slug)
+        return f"panic released: the fleet is back at business as usual{f'; {resumed}' if resumed else ''}"
     return ""
 
 
@@ -307,6 +310,41 @@ def fixers(store: RedisStore) -> set[str]:
     for slug in cast(list[str], store.slugs()):  # pragma: no mutate
         found.update(json.loads(_client(store).get(store.key(slug, FIXERS)) or "[]"))
     return found
+
+
+def lab_heads(fixes: Iterable[str], kept: tuple[RedisStore, str]) -> list[str]:
+    """Return, sorted, the branch each fix grades on in the lab: a branch link's branch, else the fix pull request's
+    head branch, read through fix_state so a merged fix the swarm ``kept`` names already holds is not read again."""
+    return sorted({branch_fix(fix)[1] or fix_state(kept, fix).head_branch for fix in fixes})
+
+
+def lab_engage(store: RedisStore, slug: str, fixes: Iterable[str]) -> str:
+    """Tell the swarm's lab to grade the branches of ``fixes`` and of the fixer branches every swarm recorded first, in
+    the hotfix class, and to hold the rest of its pull request grading; mark the swarm's panic as holding the lab once
+    the lab took both orders. Return the action line; a lab that cannot be told is a line, never a raise."""
+    try:
+        target = lab_control.lab(store.config(slug).lab_url, os.environ)
+        heads = lab_heads((*fixes, *fixers(store)), (store, slug))
+        lab_control.priority(target, heads)
+        lab_control.pause(target, heads)
+    except (lab_control.LabError, subprocess.SubprocessError, OSError, ValueError, KeyError, SwarmError) as error:
+        return f"lab not told: {error}"
+    _client(store).set(_swarm_key(slug, LAB), target.url)
+    return f"lab paused pull request grading except {', '.join(heads) or 'no head'}"
+
+
+def lab_release(store: RedisStore, slug: str) -> str:
+    """Tell the swarm's lab to resume its paused grading and clear the swarm's mark of holding it, only while the
+    swarm's panic holds the lab. Return the action line, empty when its panic holds no lab pause; a lab that cannot be
+    told is a line, never a raise, and the mark stays."""
+    if not _client(store).exists(_swarm_key(slug, LAB)):
+        return ""
+    try:
+        lab_control.resume(lab_control.lab(store.config(slug).lab_url, os.environ))
+    except lab_control.LabError as error:
+        return f"lab not told: {error}"
+    _client(store).delete(_swarm_key(slug, LAB))
+    return "lab resumed pull request grading"
 
 
 def _fix_triggered(row: RepositoryRun, branches: set[str]) -> bool:

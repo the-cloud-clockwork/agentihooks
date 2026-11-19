@@ -1,6 +1,8 @@
+import os
 import re
 import threading
 from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock, call
@@ -35,7 +37,7 @@ def test_running_host_publishes_a_later_ledger_write_and_stops_its_relay(tmp_pat
     monkeypatch.setattr(factory, "open_bus", opening)
     monkeypatch.setenv("AGENTIHOOKS_BUS", "nats")
     with outbox_host.running(repository, interval=0.01):
-        repository.create("ledger", {"title": "Store", "phases": [{"title": "One"}]})
+        repository.create("ledger", {"title": "Store", "phases": [{"title": "One"}]}, "swarm")
         assert published.wait(2), "the host did not publish the committed ledger change"
     assert [subject for subject, _ in bus.events.entries] == ["swarm.ledger.phase.p1"]
     opening.assert_called_once_with(BusConfig(backend="nats"))
@@ -48,7 +50,7 @@ def test_memory_default_preserves_outbox_rows(tmp_path, monkeypatch):
     from scripts.swarm_ledger import outbox_host
 
     repository = sqlite.SQLiteLedgerRepository(tmp_path / "ledgers.sqlite3")
-    repository.create("ledger", {"title": "Store", "phases": [{"title": "One"}]})
+    repository.create("ledger", {"title": "Store", "phases": [{"title": "One"}]}, "swarm")
     monkeypatch.delenv("AGENTIHOOKS_BUS", raising=False)
     opening = Mock()
     monkeypatch.setattr(factory, "open_bus", opening)
@@ -175,7 +177,7 @@ def test_the_ledger_api_service_alone_drives_the_outbox_until_shutdown(
     monkeypatch.setattr(ledger_server, "ThreadingHTTPServer", Mock(return_value=server))
 
     def serving(poll_interval: float) -> None:
-        repository.create("ledger", {"title": "Store", "phases": [{"title": "One"}]})
+        repository.create("ledger", {"title": "Store", "phases": [{"title": "One"}]}, "swarm")
         assert published.wait(3), "only the running API service should drive publication"
         close.assert_not_called()
 
@@ -210,7 +212,7 @@ def test_a_disconnected_real_nats_client_is_reopened_and_the_row_reaches_a_consu
             consumer = observer.events.consumer("host-proof", "swarm.>")
             monkeypatch.setattr(factory, "open_bus", disconnect_first)
             with outbox_host.running(repository, interval=0.01):
-                repository.create("ledger", {"title": "Store", "phases": [{"title": "One"}]})
+                repository.create("ledger", {"title": "Store", "phases": [{"title": "One"}]}, "swarm")
                 deliveries = consumer.fetch(1, 3_000)
                 assert [(delivery.event.entity, delivery.event.key) for delivery in deliveries] == [("phase", "p1")]
             assert len(opened) == 2
@@ -302,6 +304,66 @@ def test_the_ledger_server_gives_the_projector_its_store_and_stops_it_before_clo
     ]
 
 
+def patched_serve(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, server: Mock) -> Path:
+    from scripts.swarm_ledger import ledger_server
+
+    pidfile = tmp_path / "server.pid"
+    monkeypatch.setattr(ledger_server, "PIDFILE", pidfile)
+    monkeypatch.setattr(ledger_server.core, "LEDGER_DIR", tmp_path)
+    monkeypatch.setattr(ledger_server.storage, "shared", lambda: None)
+    monkeypatch.setattr(ledger_server.threading, "Thread", Mock())
+    monkeypatch.setattr(ledger_server, "metrics_journal", Mock())
+    monkeypatch.setattr(ledger_server.server_code, "record", Mock())
+    monkeypatch.setattr(ledger_server.server_lifetime, "watch", Mock())
+    monkeypatch.setattr(ledger_server, "ThreadingHTTPServer", Mock(return_value=server))
+    return pidfile
+
+
+@pytest.mark.feature("ledger-server-pid-file-after-projector")
+def test_the_ledger_server_writes_its_pid_file_only_once_the_projector_runs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from scripts.swarm_ledger import ledger_server
+
+    seen: list[tuple[str, str | None]] = []
+    server = Mock()
+    server.drained.return_value = True
+    pidfile = patched_serve(monkeypatch, tmp_path, server)
+
+    def written() -> str | None:
+        return pidfile.read_text() if pidfile.exists() else None
+
+    @contextmanager
+    def projecting(repository: object, hub: object) -> Iterator[None]:
+        seen.append(("projector started", written()))
+        yield
+
+    def serving(poll_interval: float) -> None:
+        seen.append(("serving", written()))
+        raise ValueError("serving failed")
+
+    server.serve_forever.side_effect = serving
+    monkeypatch.setattr(projector, "running", projecting)
+    with pytest.raises(ValueError, match="serving failed"):
+        ledger_server.serve()
+    assert seen == [("projector started", None), ("serving", str(os.getpid()))]
+
+
+@pytest.mark.feature("ledger-server-pid-file-after-projector")
+def test_a_ledger_server_whose_projector_fails_to_start_writes_no_pid_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from scripts.swarm_ledger import ledger_server
+
+    server = Mock()
+    pidfile = patched_serve(monkeypatch, tmp_path, server)
+    monkeypatch.setattr(projector, "running", Mock(side_effect=RuntimeError("projector failed")))
+    with pytest.raises(RuntimeError, match="projector failed"):
+        ledger_server.serve()
+    assert not pidfile.exists()
+    server.serve_forever.assert_not_called()
+
+
 def test_a_relay_that_fails_to_start_releases_the_lease_without_serving(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -336,13 +398,13 @@ def test_the_host_prune_drops_sent_rows_outside_the_dedupe_window_and_keeps_the_
         with repository.connect() as connection:
             return {row[0] for row in connection.execute("SELECT id FROM outbox_sent").fetchall()}
 
-    repository.create("old", {"title": "Old", "phases": [{"title": "One"}]})
+    repository.create("old", {"title": "Old", "phases": [{"title": "One"}]}, "swarm")
     stale = ids()
     outbox.relay(repository, bus.events, clock=lambda: 1_000)
-    repository.create("recent", {"title": "Recent", "phases": [{"title": "One"}]})
+    repository.create("recent", {"title": "Recent", "phases": [{"title": "One"}]}, "swarm")
     recent = ids() - stale
     outbox.relay(repository, bus.events, clock=lambda: outbox.now_ms() - config.dedupe_window_ms // 2)
-    repository.create("unsent", {"title": "Unsent", "phases": [{"title": "One"}]})
+    repository.create("unsent", {"title": "Unsent", "phases": [{"title": "One"}]}, "swarm")
     unsent = ids() - stale - recent
     assert [len(stale), len(recent), len(unsent)] == [1, 1, 1]
     opening = Mock()
@@ -428,7 +490,7 @@ def test_the_outbox_stays_bounded_with_no_bus(tmp_path, monkeypatch, backend):
 
     repository = sqlite.SQLiteLedgerRepository(tmp_path / "ledgers.sqlite3")
     for slug in ("one", "two", "three"):
-        repository.create(slug, {"title": slug, "phases": [{"title": "One"}]})
+        repository.create(slug, {"title": slug, "phases": [{"title": "One"}]}, "swarm")
     assert _unsent(repository) == 3
     monkeypatch.setattr(outbox, "MAX_UNSENT", 1)
     monkeypatch.setenv("AGENTIHOOKS_BUS", backend)
@@ -448,7 +510,7 @@ def _reload_with_nats_unreachable(
     from scripts.swarm_ledger import outbox_host
 
     repository = sqlite.SQLiteLedgerRepository(tmp_path / "ledgers.sqlite3")
-    repository.create("ledger", {"title": "Store", "phases": [{"title": "One"}]})
+    repository.create("ledger", {"title": "Store", "phases": [{"title": "One"}]}, "swarm")
     monkeypatch.setenv("AGENTIHOOKS_BUS", "nats")
     monkeypatch.setenv("AGENTIHOOKS_BUS_URL", nats_server.closed_url())
     with outbox_host.running(repository, interval=0.01):

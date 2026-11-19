@@ -1,12 +1,15 @@
 import copy
+import hashlib
 import subprocess
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from scripts.ci_lab import expand_tests
-from tests import dep_manifest
+from scripts import dep_manifest
+from scripts.ci_lab import digests, executors, expand_tests
+from scripts.ci_lab.digests import Toolchain
+from scripts.ci_lab.units import Unit
 
 ALPHA = "def first():\n    return 1\n\n\ndef second():\n    return 2\n"
 FILES = {
@@ -174,6 +177,15 @@ def test_a_test_that_opened_files_outside_the_manifest_is_keyed_on_the_measured_
     }
 
 
+@pytest.mark.feature("packed-manifest-outside-files")
+def test_a_packed_then_unpacked_record_with_outside_files_stays_keyed_on_the_measured_tree(repository: Path) -> None:
+    manifest = copy.deepcopy(MANIFEST)
+    manifest["tests"][SECOND]["outside"] = ["docs/guide.md"]
+    unpacked = dep_manifest.unpack(dep_manifest.pack(copy.deepcopy(manifest)))
+    assert unpacked == manifest
+    assert _plant(repository, "scripts/data.json", b"[]\n", unpacked) == {SECOND, RUN, SPAWN}
+
+
 @pytest.mark.parametrize(
     ("record", "expected"),
     [
@@ -205,6 +217,62 @@ def test_fingerprints_are_golden() -> None:
         "tests/test_alpha.py::test_first": "50453d70f855a2c09ef48a172dee6f277fb53e9d727059b5eb3ff0ebfca4ea01",
         "tests/test_alpha.py::test_second": "9107747a4089126a323cbfc2a542aa9a339ad2254648c5c96fa651fb32e1a19f",
     }
+
+
+@pytest.mark.feature("lab-mutant-unit-unlisted-tests")
+def test_unlisted_hashes_each_test_module_that_holds_no_manifest_test_with_its_conftests_and_imports() -> None:
+    added = {
+        "tests/test_new.py": b"from tests.helpers import VALUE\n\n\ndef test_new():\n    assert VALUE\n",
+        "tests/inner/test_deep.py": b"",
+        "tests/inner/conftest.py": b"",
+        "conftest.py": b"ROOT = 1\n",
+    }
+    others = {
+        "tests/test_data.json": b"{}\n",
+        "scripts/test_tool.py": b"TOOL = 1\n",
+        "tests/unused.py": b"X = 1\n",
+        "tests/other/conftest.py": b"",
+    }
+    tree = {path: text.encode() for path, text in FILES.items()} | added | others
+    outside = ("pyproject.toml", "uv.lock", "docs/guide.md", "tool.py", ".github/workflows/test.yml")
+    assert expand_tests.unlisted_test_hashes(MANIFEST, tree) == {
+        path: hashlib.sha256(text).hexdigest() for path, text in tree.items() if path not in outside
+    }
+
+
+@pytest.mark.feature("lab-mutant-unit-unlisted-reads")
+def test_unlisted_hashes_every_measured_and_test_tree_file_only_while_a_test_module_holds_no_manifest_test() -> None:
+    tree = {path: text.encode() for path, text in FILES.items()}
+    assert expand_tests.unlisted_test_hashes(MANIFEST, tree) == {}
+    tree["tests/test_new.py"] = b"def test_new():\n    pass\n"
+    trees = [
+        "scripts/alpha.py",
+        "scripts/data.json",
+        "hooks/beta.py",
+        "tests/conftest.py",
+        "tests/helpers.py",
+        "tests/test_alpha.py",
+        "tests/test_beta.py",
+        "tests/test_group.py",
+        "tests/fixtures/sample.txt",
+        "tests/test_new.py",
+    ]
+    assert expand_tests.unlisted_test_hashes(MANIFEST, tree) == {
+        path: hashlib.sha256(tree[path]).hexdigest() for path in trees
+    }
+
+
+@pytest.mark.feature("lab-mutant-unit-unlisted-tests")
+def test_unlisted_keys_every_test_module_the_mutant_runner_runs(repository: Path) -> None:
+    extra = {"tests/inner/test_deep.py": "", "tests/test_data.json": "{}\n", "scripts/test_tool.py": "TOOL = 1\n"}
+    for path, text in extra.items():
+        (repository / path).parent.mkdir(parents=True, exist_ok=True)
+        (repository / path).write_text(text)
+    _git(repository, "add", "-A")
+    _git(repository, "commit", "-qm", "extra")
+    runs = executors._test_files(repository)  # pyright: ignore[reportPrivateUsage]
+    assert set(runs) <= set(expand_tests.unlisted_test_hashes({"tests": {}}, _tree(repository)))
+    assert "tests/inner/test_deep.py" in runs
 
 
 def _manifest(*tests: str) -> dict[str, Any]:
@@ -258,3 +326,75 @@ def test_a_test_without_a_duration_counts_zero_seconds() -> None:
     names = ["tests/test_new.py::test_known", "tests/test_new.py::test_unknown"]
     durations = {"tests/test_new.py::test_known": 5.0}
     assert expand_tests.batches(_manifest(*names), durations, 5.5) == [tuple(names)]
+
+
+@pytest.mark.feature("lab-scheduler-test-units")
+def test_each_batch_is_one_test_unit_keyed_by_its_fingerprints_opened_files_and_toolchain(repository: Path) -> None:
+    tree = _tree(repository)
+    manifest = copy.deepcopy(MANIFEST)
+    manifest["tests"][RUN]["outside"] = ["docs/guide.md", "gone.txt"]
+    blobs = {path: f"blob of {path}" for path in tree}
+    durations = {FIRST: 30.0, SECOND: 30.5, RUN: 30.0, SPAWN: 30.0}
+    toolchain = Toolchain("3.12", {"ruff": "1"}, "lock", "project", "image", {"TZ": "UTC"})
+    keys = expand_tests.fingerprints(manifest, tree)
+
+    def batch(tests: tuple[str, ...], opened: dict[str, str]) -> Unit:
+        found = {test: keys[test] for test in tests}
+        inputs = digests.TestInputs(found, opened, expand_tests.PYTEST_INVOCATION, toolchain)
+        return Unit("test", digests.test_key(inputs), tests)
+
+    assert expand_tests.BATCH_SECONDS == 60.0
+    assert expand_tests.units(manifest, tree, blobs, durations, toolchain) == (
+        batch((SECOND,), {}),
+        batch((FIRST,), {}),
+        batch((RUN, SPAWN), {"docs/guide.md": "blob of docs/guide.md"}),
+        batch((ONE,), {}),
+    )
+
+
+NEW = "tests/test_new.py"
+UNLISTED = [NEW, *(f"tests/inner/test_{letter}.py" for letter in "hgfedcba")]
+TOOLCHAIN = Toolchain("3.12", {"ruff": "1"}, "lock", "project", "image", {"TZ": "UTC"})
+
+
+def _unlisted(root: Path) -> tuple[Unit, ...]:
+    listed = [
+        "tests/test_alpha.py",
+        "tests/test_group.py",
+        "tests/helpers.py",
+        "tests/test_gone.py",
+        "scripts/alpha.py",
+        "docs/guide.md",
+    ]
+    return expand_tests.unlisted_units(MANIFEST, _tree(root), [*reversed(UNLISTED), NEW, *listed], TOOLCHAIN)
+
+
+@pytest.mark.feature("lab-scheduler-test-units")
+def test_unlisted_units_key_each_changed_test_module_the_manifest_lacks_as_a_broad_test(repository: Path) -> None:
+    for path in UNLISTED:
+        (repository / path).parent.mkdir(parents=True, exist_ok=True)
+        (repository / path).write_text("def test_one():\n    pass\n")
+    tree = _tree(repository)
+    keys = expand_tests.fingerprints({"units": [], "tests": {path: {"files": []} for path in UNLISTED}}, tree)
+
+    def unit(path: str) -> Unit:
+        inputs = digests.TestInputs({path: keys[path]}, {}, expand_tests.PYTEST_INVOCATION, TOOLCHAIN)
+        return Unit("test", digests.test_key(inputs), (path,))
+
+    assert _unlisted(repository) == tuple(unit(path) for path in sorted(UNLISTED))
+
+
+@pytest.mark.feature("lab-scheduler-test-units")
+@pytest.mark.parametrize(
+    ("path", "rekeyed"),
+    [("scripts/data.json", True), ("tests/fixtures/sample.txt", True), ("tool.py", True), ("docs/guide.md", False)],
+)
+def test_an_unlisted_test_module_unit_rekeys_on_every_measured_and_shared_file(
+    repository: Path, path: str, rekeyed: bool
+) -> None:
+    (repository / NEW).write_text("def test_new():\n    pass\n")
+    before = _unlisted(repository)
+    (repository / path).write_text("changed\n")
+    after = _unlisted(repository)
+    assert [unit.members for unit in after] == [(NEW,)]
+    assert (before != after) is rekeyed

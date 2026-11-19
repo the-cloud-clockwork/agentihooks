@@ -108,7 +108,7 @@ def test_the_swarm_image_lock_pins_the_nats_extra_with_hashes():
     assert all(line.startswith("    --hash=sha256:") for line in hashes)
 
 
-def test_the_swarm_image_installs_the_herdr_client_the_worker_lock_pins():
+def test_the_swarm_image_installs_the_herdr_client_the_worker_lock_pins() -> None:
     root = Path(__file__).parents[1]
     dockerfile = (root / "Dockerfile").read_text()
     ignored = (root / ".dockerignore").read_text().splitlines()
@@ -121,11 +121,26 @@ def test_the_swarm_image_installs_the_herdr_client_the_worker_lock_pins():
     assert "sha256:" not in dockerfile.split("AS herdr")[1]
     bases = [line.split()[1] for line in dockerfile.splitlines() if line.startswith("FROM ")]
     assert len(bases) >= 3
-    assert set(bases) == {"mirror.gcr.io/library/python:3.12-slim-bookworm"}
-    assert "worker_image.py shell-packages --package openssh-client)" in dockerfile
+    python = json.loads((root / "docker/swarm-node/versions.lock").read_text())["python"]
+    assert set(bases) == {f"mirror.gcr.io/library/python:{python}-slim-bookworm"}
+    assert "worker_image.py shell-packages --package openssh-client --package git)" in dockerfile
     assert '["debian_snapshot"]' in dockerfile
     keyed = json.loads((root / ".github/input-keys.json").read_text())["helm-kind"]["paths"]
     assert "docker/swarm-node" in keyed
+
+
+@pytest.mark.feature("lab-scheduler-service")
+def test_the_swarm_image_carries_the_locked_git_the_lab_mirror_expander_runs():
+    root = Path(__file__).parents[1]
+    dockerfile = (root / "Dockerfile").read_text()
+    final = dockerfile.split("AS gh")[1]
+    assert "worker_image.py shell-packages --package openssh-client --package git)" in final
+    lock = json.loads((root / "docker/swarm-node/versions.lock").read_text())
+    assert lock["shell_packages"]["git"]
+    smoke = (root / "scripts/packaging/swarm-image-clients.sh").read_text()
+    assert "locked shell_packages git" in smoke
+    assert "dpkg-query \"$image\" -W -f '${Version}' git" in smoke
+    assert '--entrypoint git "$image" --version' in smoke
 
 
 def test_the_swarm_image_carries_gh_behind_the_app_token_wrapper_for_hub_pull_polls():

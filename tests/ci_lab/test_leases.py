@@ -82,6 +82,25 @@ def test_lease_grants_fitting_jobs_in_order_with_distinct_tokens(jobs: queue.Que
     assert not lab.owns("h1:test:net", grants[1].token)
 
 
+@pytest.mark.feature("lab-worker-executors")
+def test_a_grant_carries_the_base_and_grader_revision_of_its_job(jobs: queue.Queue, lab: leases.Leases) -> None:
+    jobs.enqueue([unit("a")], "h1", {}, "b1", "g1")
+
+    [grant] = lab.lease("w1", 1, frozenset(), 0)
+
+    assert grant == leases.Grant("h1:test:a", grant.token, "h1", unit("a"), 1, 1500, "b1", "g1")
+
+
+@pytest.mark.feature("lab-scheduler-metrics")
+def test_a_grant_records_the_millisecond_its_lease_started(jobs: queue.Queue, lab: leases.Leases, clock: Clock) -> None:
+    jobs.enqueue([unit("a")], "h1", {})
+    clock.now = 1234
+
+    [grant] = lab.lease("w1", 1, frozenset(), 0)
+
+    assert (grant.expires_ms, found(jobs, "h1:test:a").leased_ms) == (1734, 1234)
+
+
 def test_lease_stops_at_free_slots(jobs: queue.Queue, lab: leases.Leases) -> None:
     jobs.enqueue([unit("a"), unit("b"), unit("c")], "h1", {})
 
@@ -272,3 +291,106 @@ def test_reap_skips_vanished_and_live_leases(
 
 def test_complete_of_an_unknown_job_is_refused(lab: leases.Leases) -> None:
     assert lab.complete("h1:test:none", "tok", "passed") is False
+
+
+@pytest.mark.feature("lab-scheduler-service")
+def test_a_lease_poll_offers_the_workers_free_slots_while_it_waits_and_what_its_grants_leave(
+    jobs: queue.Queue, clock: Clock
+) -> None:
+    seen: list[dict[str, tuple[int, int]]] = []
+
+    def wait(ms: int) -> None:
+        seen.append(jobs.offers(0))
+        clock.sleep(ms)
+
+    lab = leases.Leases(jobs, ttl_ms=500, clock=clock, sleep=wait, poll_ms=50)
+    assert lab.lease("w1", 3, frozenset(), 60) == []
+    assert seen == [{"w1": (3, 1000)}, {"w1": (3, 1000)}]
+    assert jobs.offers(0) == {"w1": (3, 1060)}
+    jobs.enqueue([unit("a"), unit("b")], "h1", {"b": queue.Requirement(slots=2)})
+    assert len(lab.lease("w1", 4, frozenset(), 0)) == 2
+    assert jobs.offers(0) == {"w1": (1, 1060)}
+
+
+class FakeKube:
+    def __init__(self) -> None:
+        self.patches: list[tuple[str, bool]] = []
+
+    def __call__(self, pod: str, busy: bool) -> bool:
+        self.patches.append((pod, busy))
+        return True
+
+
+def costed(jobs: queue.Queue, clock: Clock) -> tuple[leases.Leases, FakeKube]:
+    kube = FakeKube()
+    return leases.Leases(jobs, ttl_ms=500, clock=clock, sleep=clock.sleep, poll_ms=50, pods=kube), kube
+
+
+@pytest.mark.feature("lab-worker-deletion-cost")
+def test_a_granting_poll_marks_the_worker_pod_busy_and_a_poll_granting_nothing_patches_nothing(
+    jobs: queue.Queue, clock: Clock
+) -> None:
+    lab, kube = costed(jobs, clock)
+    assert lab.lease("w1", 2, frozenset(), 0) == []
+    assert kube.patches == []
+    jobs.enqueue([unit("a"), unit("b")], "h1", {})
+    assert len(lab.lease("w1", 2, frozenset(), 0)) == 2
+    assert kube.patches == [("w1", True)]
+
+
+@pytest.mark.feature("lab-worker-deletion-cost")
+def test_the_worker_pod_cost_clears_only_when_its_last_lease_completes(jobs: queue.Queue, clock: Clock) -> None:
+    lab, kube = costed(jobs, clock)
+    jobs.enqueue([unit("a"), unit("b"), unit("c")], "h1", {})
+    first, second = lab.lease("w1", 2, frozenset(), 0)
+    other = lab.lease("w2", 1, frozenset(), 0)[0]
+    kube.patches.clear()
+    assert lab.complete(first.job, "wrong", "passed") is False
+    assert lab.complete(first.job, first.token, "taken") is False
+    assert lab.complete(first.job, first.token, "passed") is True
+    assert kube.patches == []
+    assert lab.complete(second.job, second.token, "failed") is True
+    assert kube.patches == [("w1", False)]
+    assert lab.complete(other.job, other.token, "passed") is True
+    assert kube.patches == [("w1", False), ("w2", False)]
+
+
+@pytest.mark.feature("lab-worker-deletion-cost")
+def test_a_reaped_last_lease_clears_the_worker_pod_cost_whether_requeued_or_lost(
+    jobs: queue.Queue, clock: Clock
+) -> None:
+    lab, kube = costed(jobs, clock)
+    jobs.enqueue([unit("a")], "h1", {})
+    lab.lease("w1", 1, frozenset(), 0)
+    assert lab.reap(1500) == [("h1:test:a", "pending")]
+    lab.lease("w2", 1, frozenset(), 0)
+    assert lab.reap(2000) == [("h1:test:a", "lost")]
+    assert kube.patches == [("w1", True), ("w1", False), ("w2", True), ("w2", False)]
+
+
+class RacedKube(FakeKube):
+    def __init__(self, jobs: queue.Queue, job: str) -> None:
+        super().__init__()
+        self.jobs, self.job = jobs, job
+
+    def __call__(self, pod: str, busy: bool) -> bool:
+        if not busy and self.job:
+            raced = found(self.jobs, self.job)
+            assert self.jobs.claim(raced, pod, "raced", 9999, 0)
+            self.job = ""
+        return super().__call__(pod, busy)
+
+
+@pytest.mark.feature("lab-worker-deletion-cost")
+def test_a_grant_landing_while_the_last_lease_clears_its_cost_marks_the_worker_pod_busy_again(
+    jobs: queue.Queue, clock: Clock
+) -> None:
+    jobs.enqueue([unit("a"), unit("b")], "h1", {})
+    kube = RacedKube(jobs, "h1:test:b")
+    lab = leases.Leases(jobs, ttl_ms=500, clock=clock, sleep=clock.sleep, poll_ms=50, pods=kube)
+    grant = lab.lease("w1", 1, frozenset(), 0)[0]
+    assert lab.complete(grant.job, grant.token, "passed") is True
+    assert kube.patches == [("w1", True), ("w1", False), ("w1", True)]
+    assert lab.owns("h1:test:b", "raced")
+    assert lab.complete("h1:test:b", "raced", "passed") is True
+    assert kube.patches[3:] == [("w1", False)]

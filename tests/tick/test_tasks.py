@@ -18,7 +18,7 @@ from scripts.swarm import (
 from scripts.tick import engine, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
-from scripts.tick.steps import PASS, CallStep, actions, agents, budgets, tasks
+from scripts.tick.steps import PASS, CallStep, actions, agents, budgets, placed, tasks
 
 pytestmark = pytest.mark.unit
 
@@ -258,5 +258,8 @@ def test_a_placing_step_gets_the_tick_and_lookup_inside_the_host_placement_lock(
         seen.append((found, get("slug")))
         return ["placed"]
 
-    assert tasks.placing(call)(tick, {"slug": "sw"}.get) == ["placed"]
-    assert seen == ["locked", (tick, "sw"), "unlocked"]
+    with placed(tick, True):
+        assert call(tick, {"slug": "sw"}.get) == ["placed"]
+    with placed(tick, False):
+        seen.append("unheld")
+    assert seen == ["locked", (tick, "sw"), "unlocked", "unheld"]

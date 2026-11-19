@@ -12,7 +12,7 @@ export SWARM_REDIS_PASSWORD
 cleanup() {
   docker rm -f "$run-member" >/dev/null 2>&1 || true
   docker compose down --volumes >/dev/null 2>&1 || true
-  rm -r -- "$tls"
+  rm -r -- "$tls" || true
 }
 trap cleanup EXIT
 
@@ -59,7 +59,7 @@ PY
 printf 'seeded swarm %s with %s seated, in the compose Redis over TLS\n' "$slug" "$host_agent"
 docker compose restart controller >/dev/null
 held=""
-for _ in $(seq 60); do
+for _ in {1..60}; do
   held="$(docker compose exec -T swarm agentihooks swarm "$slug" controller || true)"
   if [[ $held == *'"owner": "compose-controller"'* ]]; then
     break
@@ -129,7 +129,7 @@ docker compose exec -T -e AGENTIHOOKS_AGENT_NAME="$host_agent" swarm agentihooks
 inbox="$(docker exec -e AGENTIHOOKS_AGENT_NAME="$member_agent" "$run-member" agentihooks msg inbox)"
 printf 'member inbox: %s\n' "$inbox"
 [[ $inbox == *"hello from the host"* ]]
-for _ in $(seq 30); do
+for _ in {1..30}; do
   state="$(docker inspect -f '{{.State.Running}} {{.RestartCount}} {{.State.Health.Status}}' "$(docker compose ps -q controller)")"
   if [[ $state != *starting ]]; then
     break
@@ -152,7 +152,7 @@ docker exec "$run-member" agentihooks hive refresh >/dev/null
 printf 'after a refresh through the join service, '
 docker exec "$run-member" python -c "$member_auth"
 docker compose restart redis >/dev/null
-for _ in $(seq 30); do
+for _ in {1..30}; do
   docker exec "$run-member" python -c "$member_auth" >/dev/null 2>&1 && break
   sleep 1
 done

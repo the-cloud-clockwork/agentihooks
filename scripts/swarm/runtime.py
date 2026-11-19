@@ -151,9 +151,9 @@ def preserves_effort(recorded: bool, lane: str) -> bool:
 
 
 def _lane_default(lane: str, agent: str, chosen: dict[str, Any], config: Any = None) -> model_pick.ModelPick:
-    model = default_models.model(config, agent)
     if lane == MASTER:
-        return model_pick.frontier(agent, model)
+        return model_pick.master(config, agent)
+    model = default_models.model(config, agent)
     return model_pick.ModelPick(
         model_pick.suited(agent, _set(chosen.get("model")) or model, model), chosen.get("effort")
     )
@@ -735,7 +735,8 @@ class HerdrRuntime:
         if master_claude_login.enabled(slug, task.get("seat", ""), lane, harness or "claude"):
             return "subscription" if self._master_account_spent() else "interactive"
         explicit = task.get("route_kind")
-        if explicit or lane != MASTER or harness not in ("", "claude"):
+        front = front_door.holds(slug, task.get("seat", ""))
+        if explicit or lane != MASTER or harness not in ("", "claude") or not front:
             return explicit or "subscription"
         try:
             native_login.check(os.environ, "native", self.run)

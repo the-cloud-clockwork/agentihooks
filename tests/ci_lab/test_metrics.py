@@ -127,6 +127,71 @@ def test_observe_load_sets_queue_slot_budget_and_shed_gauges() -> None:
     assert "\nci_lab_budget_fraction 0.25\n" in text
 
 
+@pytest.mark.feature("lab-scheduler-metrics")
+def test_observe_load_sets_the_slots_wanted_workers_ready_and_overdue_gauges() -> None:
+    registry = metrics.Registry()
+    load = Load(
+        pending={"pull_request": (180.0,), "backfill": (240.0,), "promotion": (300.0,)},
+        running={"queue": 1, "backfill": 1},
+        slots_total=6,
+        slots_busy=3,
+        shed=("backfill", "promotion"),
+        running_slots={"queue": 2, "backfill": 1},
+        pending_slots={"pull_request": 3, "backfill": 4, "promotion": 5},
+        workers_ready=2,
+        overdue=1,
+    )
+    metrics.observe_load(registry, load)
+    text = registry.render()
+    assert "\nci_lab_slots_wanted 5.0\n" in text
+    assert "\nci_lab_workers_ready 2.0\n" in text
+    assert "\nci_lab_units_overdue 1.0\n" in text
+    idle = metrics.Registry()
+    metrics.observe_load(idle, Load({}, {}, slots_total=0, slots_busy=0))
+    assert "\nci_lab_slots_wanted 0.0\n" in idle.render()
+    assert "\nci_lab_workers_ready 0.0\n" in idle.render()
+    assert "\nci_lab_units_overdue 0.0\n" in idle.render()
+
+
+@pytest.mark.feature("lab-scheduler-budget")
+def test_backfill_slots_never_raise_the_slots_wanted_gauge_and_a_shed_class_keeps_its_running_slots() -> None:
+    registry = metrics.Registry()
+    load = Load(
+        pending={"backfill": (240.0,), "pull_request": (180.0,), "queue": (60.0,)},
+        running={"backfill": 2, "promotion": 1},
+        slots_total=4,
+        slots_busy=3,
+        shed=("backfill", "promotion", "queue"),
+        running_slots={"backfill": 2, "promotion": 1},
+        pending_slots={"backfill": 6, "pull_request": 1, "queue": 4},
+    )
+    metrics.observe_load(registry, load)
+    assert "\nci_lab_slots_wanted 2.0\n" in registry.render()
+    unshed = metrics.Registry()
+    metrics.observe_load(unshed, replace(load, shed=()))
+    assert "\nci_lab_slots_wanted 6.0\n" in unshed.render()
+
+
+@pytest.mark.feature("lab-scheduler-metrics")
+def test_observe_unit_counts_core_seconds_its_duration_and_the_cache_lookups_its_report_carries() -> None:
+    registry = metrics.Registry()
+    lookups = {"git": {"hits": 2, "misses": 1}, "uv": {"hits": 0, "misses": 1}}
+    metrics.observe_unit(registry, "queue", "test", 2, {"seconds": 30.0, "caches": lookups})
+    metrics.observe_unit(registry, "queue", "static", 1, {"seconds": 4.5})
+    metrics.observe_unit(registry, "hotfix", "test", 1, {"seconds": 10.0, "caches": {"git": {"hits": 1, "misses": 0}}})
+    metrics.observe_unit(registry, "hotfix", "static", 3, {"error": "bwrap is not installed"})
+    text = registry.render()
+    assert 'ci_lab_core_seconds_total{class="queue"} 64.5' in text
+    assert 'ci_lab_core_seconds_total{class="hotfix"} 10.0' in text
+    assert 'ci_lab_unit_duration_seconds{kind="test"} 10.0' in text
+    assert 'ci_lab_unit_duration_seconds{kind="static"} 4.5' in text
+    assert 'ci_lab_cache_hits_total{cache="git"} 3.0' in text
+    assert 'ci_lab_cache_misses_total{cache="git"} 1.0' in text
+    assert 'ci_lab_cache_hits_total{cache="uv"} 0.0' in text
+    assert 'ci_lab_cache_misses_total{cache="uv"} 1.0' in text
+    assert 'cache="verdict"' not in text
+
+
 @pytest.mark.feature("lab-full-pool-wait")
 def test_the_queue_wait_gauge_predicts_a_full_pool_from_when_running_units_free_their_slots() -> None:
     registry = metrics.Registry()
@@ -365,6 +430,41 @@ def test_served_routes_reach_a_scraper_over_http() -> None:
             urllib.request.urlopen(urllib.request.Request(f"{base}/metrics", data=b"", method="POST"), timeout=5)
         assert posted.value.code == 405
         assert json.loads(posted.value.read()) == {"error": "method not allowed"}
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.feature("lab-worker-metrics")
+def test_a_registry_server_answers_only_the_metrics_route_over_http() -> None:
+    registry = metrics.Registry()
+    registry.inc(contract.UNITS_LOST_TOTAL)
+    server = metrics.serve_registry("127.0.0.1", 0, registry)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        with urllib.request.urlopen(f"{base}/metrics?scrape=1", timeout=5) as reply:
+            body = reply.read()
+            headers = dict(reply.headers.items())
+            assert (reply.status, headers["Content-Type"], headers["Content-Length"]) == (
+                200,
+                "text/plain; version=0.0.4; charset=utf-8",
+                str(len(body)),
+            )
+            assert body.decode() == registry.render()
+            assert "ci_lab_units_lost_total 1.0\n" in body.decode()
+        for path in ("/capacity", "/missing"):
+            with pytest.raises(urllib.error.HTTPError) as refused:
+                urllib.request.urlopen(f"{base}{path}", timeout=5)
+            assert (refused.value.code, refused.value.headers["Content-Type"], refused.value.read()) == (
+                404,
+                "application/json",
+                b'{"error": "not found"}',
+            )
+        with pytest.raises(urllib.error.HTTPError) as posted:
+            urllib.request.urlopen(urllib.request.Request(f"{base}/metrics", data=b"", method="POST"), timeout=5)
+        assert (posted.value.code, posted.value.read()) == (405, b'{"error": "method not allowed"}')
     finally:
         server.shutdown()
         server.server_close()

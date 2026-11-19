@@ -14,7 +14,7 @@ compose=(docker compose -f compose.yaml -f "$override")
 cleanup() {
   docker rm -f "$run-member" >/dev/null 2>&1 || true
   "${compose[@]}" down --volumes >/dev/null 2>&1 || true
-  rm -r -- "$tls"
+  rm -r -- "$tls" || true
 }
 trap cleanup EXIT
 
@@ -142,7 +142,7 @@ PY
 
 live=""
 live_row="$member_id"$'\t'live$'\t'
-for _ in $(seq 60); do
+for _ in {1..60}; do
   live="$(docker exec "$run-member" agentihooks hive list 2>/dev/null || true)"
   if [[ $live == *"$live_row"* ]]; then
     break

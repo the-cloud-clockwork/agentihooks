@@ -1,7 +1,8 @@
 """The CI lab service contract: entry points, environment names, ports and metric names.
 
 The scheduler and worker services, their platform manifests and their tests import these
-names instead of repeating the strings. `agentihooks ci-lab-scheduler --self-test` and
+names instead of repeating the strings. `agentihooks ci-lab-scheduler` runs the scheduler service
+and `agentihooks ci-lab-worker` the worker service; `agentihooks ci-lab-scheduler --self-test` and
 `agentihooks ci-lab-worker --self-test` check the contract offline and print it as JSON.
 """
 
@@ -13,18 +14,31 @@ import sys
 from collections.abc import Mapping, Sequence
 from typing import NamedTuple
 
+from scripts.ci_lab.remote import checkout
+
 SCHEDULER_PORT = 8800
 METRICS_PORT = 9108
+SELF_TEST = "--self-test"
 
 BUS_PREFIX = "AGENTIHOOKS_BUS"
 MINIO_PREFIX = "CI_LAB_MINIO_"
 GITHUB_APP_PREFIX = "GITHUB_APP_"
 REDIS_URL = "CI_LAB_REDIS_URL"
 RUNTIME_CONFIG = "CI_LAB_RUNTIME_CONFIG"
+LAB_URL = "CI_LAB_URL"
 SCHEDULER_URL = "CI_LAB_SCHEDULER_URL"
+CONTROL_TOKEN = "CI_LAB_CONTROL_TOKEN"
 SLOTS = "CI_LAB_SLOTS"
 GIT_MIRROR = "CI_LAB_GIT_MIRROR"
 UV_CACHE_DIR = "UV_CACHE_DIR"
+WORK_ROOT = "CI_LAB_WORK_ROOT"
+MANIFEST = "CI_LAB_MANIFEST"
+FLAKES = "CI_LAB_FLAKES"
+MUTATION_CACHE = "CI_LAB_MUTATION_CACHE"
+KILLERS = "CI_LAB_KILLERS"
+MUTATION_BUDGET = "CI_LAB_MUTATION_BUDGET"
+MUTATION_CAP = "CI_LAB_MUTATION_CAP"
+REPOSITORY = "CI_LAB_REPOSITORY"
 
 UNITS_QUEUED = "ci_lab_units_queued"
 UNITS_RUNNING = "ci_lab_units_running"
@@ -89,14 +103,29 @@ SCHEDULER = Service(
     name="scheduler",
     ports=(SCHEDULER_PORT, METRICS_PORT),
     prefixes=(BUS_PREFIX, MINIO_PREFIX, GITHUB_APP_PREFIX),
-    names=(REDIS_URL, RUNTIME_CONFIG),
+    names=(REDIS_URL, RUNTIME_CONFIG, LAB_URL),
     metrics=METRICS,
 )
 WORKER = Service(
     name="worker",
     ports=(METRICS_PORT,),
     prefixes=(BUS_PREFIX, MINIO_PREFIX),
-    names=(SCHEDULER_URL, SLOTS, GIT_MIRROR, UV_CACHE_DIR),
+    names=(
+        SCHEDULER_URL,
+        SLOTS,
+        GIT_MIRROR,
+        UV_CACHE_DIR,
+        WORK_ROOT,
+        MANIFEST,
+        FLAKES,
+        MUTATION_CACHE,
+        KILLERS,
+        MUTATION_BUDGET,
+        MUTATION_CAP,
+        REPOSITORY,
+        checkout.URL_ENV,
+        checkout.TOKEN_ENV,
+    ),
     metrics=METRICS,
 )
 
@@ -142,7 +171,7 @@ def run(service: Service, argv: Sequence[str], environ: Mapping[str, str]) -> in
         print(f"ci-lab {service.name} refuses to start: {', '.join(granted)} is set", file=sys.stderr)
         return 1
     parser = argparse.ArgumentParser(prog=f"agentihooks ci-lab-{service.name}")
-    parser.add_argument("--self-test", action="store_true")
+    parser.add_argument(SELF_TEST, action="store_true")
     if not parser.parse_args(argv).self_test:
         parser.error("only --self-test is available until the service loops land")
     problems = self_test(service)
@@ -154,10 +183,18 @@ def run(service: Service, argv: Sequence[str], environ: Mapping[str, str]) -> in
 
 
 def scheduler(argv: list[str]) -> int:
-    """Run the scheduler entry point against the process environment."""
-    return run(SCHEDULER, argv, os.environ)
+    """Run the scheduler service against the process environment, or its offline self test with --self-test."""
+    if SELF_TEST in argv:
+        return run(SCHEDULER, argv, os.environ)
+    from scripts.ci_lab import scheduler as service
+
+    return service.main(argv, os.environ)
 
 
 def worker(argv: list[str]) -> int:
-    """Run the worker entry point against the process environment."""
-    return run(WORKER, argv, os.environ)
+    """Run the worker service against the process environment, or its offline self test with --self-test."""
+    if SELF_TEST in argv:
+        return run(WORKER, argv, os.environ)
+    from scripts.ci_lab import executors
+
+    return executors.main(argv, os.environ)

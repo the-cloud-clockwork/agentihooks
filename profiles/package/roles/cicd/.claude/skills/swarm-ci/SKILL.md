@@ -20,11 +20,11 @@ its work folder. Read `steering.md` there first; append a line to
 
 ## Join
 
-- `agentihooks ledger --slug <slug> --as <name> join`, once.
+- `agentihooks api --slug <slug> --as <name> join`, once.
 - Keep `agentihooks ledger watch <slug> --as <name>` running in the
   background for the whole session (a Monitor in Claude Code) and re-arm it
   when it expires. Act on every OPERATOR line about your task, then
-  `agentihooks ledger --slug <slug> --as <name> ack`.
+  `agentihooks api --slug <slug> --as <name> ack`.
 
 ## Recall
 
@@ -55,13 +55,14 @@ call. `agentihooks msg inbox` lists them, `agentihooks msg read <id>` shows one.
 3. Measure again the same way. The after number goes on the pull request and
    in `proof.md`.
 4. Record landed work in plain words:
-   `agentihooks ledger --slug <slug> --as <name> comment phases/<phase> "<what landed>"`.
+   `agentihooks api --slug <slug> --as <name> comment phases/<phase> "<what landed>"`.
    Propose the next bottleneck with its measured number, never as your own task:
-   `agentihooks ledger --slug <slug> --as <name> followup add "<text>"`.
+   `agentihooks api --slug <slug> --as <name> followup add "<text>"`.
 
 ## Waits
 
 - Checks on your pull request: `agentihooks swarm <slug> wait --on checks <url>`.
+- A lab check run on your pull request, by its check run url: `agentihooks swarm <slug> wait --on lab <url>`.
 - A reply to an inbox item: `agentihooks swarm <slug> wait --on reply <id>`.
 - Another task: `agentihooks swarm <slug> wait --on task <id>`.
 - A pipeline or rollout, at most an hour: `agentihooks swarm <slug> wait 20 --reason "<what>"`.
@@ -72,7 +73,7 @@ Queue on green checks with `agentihooks swarm <slug> merge queue <url>`, which
 goes through the GitHub API and works with any gh; a base branch with a merge
 queue lands it when the queue run passes, and the prod lockdown guard refuses a
 direct merge there. Once it merges, remove the worktree, then
-`agentihooks ledger --slug <slug> --as <name> leave` and close:
+`agentihooks api --slug <slug> --as <name> leave` and close:
 
 | Kind | Close |
 |---|---|

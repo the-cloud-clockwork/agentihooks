@@ -6,7 +6,8 @@ if TYPE_CHECKING:
     from scripts.hive.orders import Consumer
 
 LIMIT = 32
-_workers: dict[tuple[str, str], subprocess.Popen] = {}
+_workers: dict[tuple[str, str], subprocess.Popen[bytes]] = {}
+_resumes: list[subprocess.Popen[bytes]] = []
 
 
 def poll(consumer: "Consumer") -> None:
@@ -26,6 +27,16 @@ def poll(consumer: "Consumer") -> None:
             stdout=subprocess.DEVNULL,
         )
         active += 1
+
+
+def busy() -> bool:
+    """Whether an order worker or resume order process this hive started is still running."""
+    return any(process.poll() is None for process in [*_workers.values(), *_resumes])
+
+
+def track(process: subprocess.Popen[bytes]) -> None:
+    """Keep a resume order process this hive started, dropping the ones that ended, so busy holds the restart."""
+    _resumes[:] = [*(running for running in _resumes if running.poll() is None), process]
 
 
 def run(hive: str, item: str, pod: str) -> None:

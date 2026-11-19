@@ -5,6 +5,7 @@ The guard now runs on every target, so they run in CI instead of by hand.
 """
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -12,10 +13,12 @@ from hooks.context.credential_guard import (
     ENV_NAMES_SAFE,
     GREP_EXCLUDES,
     KIND_ENVIRONMENT,
+    KIND_RECURSIVE,
     RG_EXCLUDES,
     block,
     decide,
     evaluate,
+    strip_heredocs,
 )
 
 pytestmark = pytest.mark.unit
@@ -315,6 +318,47 @@ CASES = [
     ("grep -r home", {"tool_name": "Bash", "tool_input": {"command": "grep -r X ~"}}, True),
     ("grep -f attached", {"tool_name": "Bash", "tool_input": {"command": "sed -n 1p -f.env x"}}, True),
     ("ssh sudo cat", {"tool_name": "Bash", "tool_input": {"command": "ssh host sudo cat /root/.netrc"}}, True),
+    (
+        "kubectl exec sh -c env grep sed",
+        {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": "H=$(kubectl get pods -n swarm-hive-001 -o name | grep worker-hive | head -1); "
+                'kubectl exec -n swarm-hive-001 $H -- sh -c \'env | grep -iE "ledger|swarm_url|8765|8766" | '
+                'sed -E "s/(TOKEN|KEY|SECRET|PASS)[^=]*=.*/\\1=<redacted>/"\' 2>&1 | '
+                'grep -viE "token|key|secret|pass" | head -10'
+            },
+        },
+        True,
+    ),
+    (
+        "kubectl exec sh -c env cut grep",
+        {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": 'kubectl -n swarm-hive-001 exec "$P" -c worker-hive -- sh -c '
+                "'env | cut -d= -f1 | grep -i -E \"ca|cert|ssl|ledger|swarm_url\" | sort' 2>&1 | head -30"
+            },
+        },
+        True,
+    ),
+    (
+        "awk ENVIRON value print",
+        {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": 'agentihooks hive list 2>&1 | head -30; echo "---"; hostname; '
+                "awk 'BEGIN{for(k in ENVIRON) if(k ~ /^(AGENTIHOOKS_(HIVE|SWARM|AGENT_NAME|SWARM_TASK|COMPACT_LIMIT)"
+                '[A-Z_]*)$/) print k"="ENVIRON[k]}\''
+            },
+        },
+        True,
+    ),
+    (
+        "kubectl exec sh -c ls",
+        {"tool_name": "Bash", "tool_input": {"command": "kubectl exec pod -- sh -c 'ls /app'"}},
+        False,
+    ),
 ]
 
 
@@ -340,6 +384,179 @@ def test_access_env_block_names_the_token_and_the_eval_form():
     assert reason.startswith("BLOCKED: printing the Cloudflare Access service token (agentihooks access env).\n")
     assert reason != block("printing the Cloudflare Access service token (agentihooks access env)", None) + (
         '\nEvaluate it instead:  eval "$(agentihooks access env)", then test each variable by name.'
+    )
+
+
+GET_SECRET_VALUE_RENDERERS = [
+    "kubectl get secret db --output yaml",
+    "kubectl get secret db --output=yaml",
+    "kubectl get secret db -o=json",
+    "kubectl get secret db -o 'yaml'",
+    'kubectl get secret db -o "json"',
+    "kubectl get secret db -o kyaml",
+    "kubectl get secret db -oyaml",
+    "kubectl get secrets -o json",
+    "kubectl get secret db -o jsonpath={.data}",
+    "kubectl get secret db -o jsonpath-as-json={.data}",
+    "kubectl get secret db -o=jsonpath={.data.password}",
+    "kubectl get secret db --output=jsonpath={.data.password}",
+    "kubectl get secret db -o go-template={{.data.password}}",
+    "kubectl get secret db -o template='{{.data.password}}'",
+    "kubectl get secret db --template='{{.data.password}}'",
+    "kubectl get secret db -o go-template --template '{{.data.password}}'",
+    "kubectl get secret db -o go-template='{{range $k,$v := .data}}{{$v}} {{end}}'",
+    "kubectl get secret db -o go-template='{{range $k := .data}}{{$k}} {{end}}'",
+    "kubectl get secret db -o go-template='{{range $k,$v := .data}}{{$k}}={{$v}} {{end}}'",
+    "kubectl get secret db -o go-template='{{range $k,$k := .data}}{{$k}} {{end}}'",
+    "kubectl get secret db -o go-template='{{.metadata.annotations}}'",
+    "kubectl get secret db -o go-template-file=values.tmpl",
+    "kubectl get secret db -o templatefile=values.tmpl",
+    "kubectl get secret db -o custom-columns=V:.data.password",
+    "kubectl get secret db -o custom-columns-file=columns.txt",
+    "kubectl get secret db -o $FORMAT",
+    "kubectl get -n prod secret db -o yaml",
+    "kubectl get --namespace=prod secrets -o json",
+    "kubectl get configmap,secret -o yaml",
+    "kubectl get -o yaml secret db",
+    "kubectl get Secret/db --output=json",
+    "kubectl get secrets.v1. db --output=yaml",
+    "kubectl get secret db \\\n  --output yaml",
+    "kubectl get secret db -o=json | jq .data",
+    'echo "$(kubectl get secret db -o=json)"',
+    "ssh hive-002 'kubectl get secret db --output=yaml'",
+    "kubectl get pods && kubectl get secret db -o=yaml",
+    "kubectl get sec\\\nret db -o yaml",
+    "kubectl get secret db -o yaml -o name",
+    "kubectl get secret db -o name -o yaml",
+    "kubectl get secret db -o go-template",
+    "kubectl get secret db -o go-template='{{range $k,$v := .metadata.annotations}}{{$k}}{{end}}'",
+    "kubectl get secret db -o 'go-template={{range $k,$v := .data}}{{$k}} {{end}}' --template='{{.data.password}}'",
+    "kubectl get secret db -o==yaml",
+    "kubectl get secrets -Ao yaml",
+    "kubectl -o yaml get secret db",
+    "kubectl get $(echo secret) db -o yaml",
+    "echo secret db | xargs kubectl get -o yaml",
+    "R=secret; kubectl get $R db -o yaml",
+    "kubectl get $'secret' db -o yaml",
+    "kubectl get -f manifests/ -o json",
+    "kubectl get --raw /api/v1/namespaces/prod/secrets/db",
+    "kubectl get --raw=/api/v1/secrets",
+    "kubectl get -w $R db -o yaml",
+    "R=secret; kubectl get --show-labels $R db -o yaml",
+    "kubectl get --ignore-not-found $'secret' db -o yaml",
+    "kubectl get -Ao yaml $R",
+    "kubectl get --client-key k $R db -o yaml",
+    "kubectl get --username u $R db -o yaml",
+    "kubectl get -An prod $R db -o yaml",
+    "kubectl get -L app $R db -o yaml",
+    "kubectl get --unknown-value v $R db -o yaml",
+]
+
+GET_SECRET_KEYS_AND_NAMES = [
+    "kubectl get secret db",
+    "kubectl get secrets -n prod",
+    "kubectl get secrets -o name",
+    "kubectl get secrets -o wide",
+    "kubectl get secrets -oname",
+    "kubectl get secrets -o \\\n  name",
+    "kubectl get secrets --output",
+    "kubectl get secret db -o go-template='{{range $k,$v := .data}}{{$k}} {{end}}'",
+    "kubectl get secret db --template='{{range $k,$v:=.data}}{{$k}} {{end}}'",
+    "kubectl get secret db -o template --template '{{range $key, $_ := .data}}{{$key}}{{\"\\n\"}}{{end}}'",
+    "kubectl get secrets -o name | xargs -n1 echo",
+    "echo $(kubectl get secrets -o name)",
+    "kubectl get pods -o yaml",
+    "kubectl get configmap app -o jsonpath={.data}",
+    "kubectl get pod secret-store-0 -o yaml",
+    "kubectl get pods -o name | grep -o secret",
+    "kubectl get pods -o name; echo secret -o yaml",
+    "kubectl -n secrets get pods -o yaml",
+    "kubectl get pods -l app=$APP -o yaml",
+    "kubectl get deploy/$NAME -o yaml",
+    "kubectl get --raw /healthz",
+    "kubectl get -w pods -o yaml",
+    "kubectl get pods -n $NS --selector $SEL -o yaml",
+    "kubectl get -n $NS pods -o yaml",
+    "kubectl get -oyaml pods",
+    "kubectl get --client-key k pods -o yaml",
+    "kubectl get pod/$POD -o yaml",
+    "kubectl get pods -n",
+]
+
+
+@pytest.mark.feature("credential-guard-refuses-get-secret-values")
+@pytest.mark.parametrize("command", GET_SECRET_VALUE_RENDERERS)
+def test_kubectl_get_secret_forms_that_print_a_value_are_refused(command: str) -> None:
+    reason = decide({"tool_name": "Bash", "tool_input": {"command": command}})
+
+    assert reason is not None and reason.startswith(
+        block("printing Secret data (kubectl get secret -o yaml/json)", KIND_ENVIRONMENT)
+    )
+
+
+@pytest.mark.feature("credential-guard-refuses-get-secret-values")
+@pytest.mark.parametrize("command", GET_SECRET_KEYS_AND_NAMES)
+def test_kubectl_get_secret_forms_that_print_no_value_pass(command: str) -> None:
+    assert decide({"tool_name": "Bash", "tool_input": {"command": command}}) is None
+
+
+GET_NON_SECRET_DIAGNOSTICS = [
+    "kubectl get pod mypod -n ns -o jsonpath='{.status.phase}'",
+    "kubectl get pods -n ns -o custom-columns=NAME:.metadata.name,STATUS:.status.phase",
+    "kubectl get priorityclass -o jsonpath='{.items[*].metadata.name}'",
+    "kubectl get pod \"$POD\" -n ns -o jsonpath='{.status.phase}'",
+    "kubectl get pod $POD -o jsonpath='{.status.phase}'",
+    "kubectl -n ns get pod \"$POD\" -o jsonpath='{.status.phase}'",
+    "kubectl get pods --namespace=$NS \"$POD\" -o jsonpath='{.status.phase}'",
+    "kubectl get priorityclass \"$PC\" -o jsonpath='{.value}'",
+    'kubectl get pods "$POD" -n ns -o custom-columns=NAME:.metadata.name,STATUS:.status.phase',
+    "kubectl get --unknown-value v pod $POD -o yaml",
+    "kubectl get -n ns pod \"$POD\" -o jsonpath='{.status.phase}'",
+    "kubectl get --chunk-size=50 pod \"$POD\" -o jsonpath='{.status.phase}'",
+    "kubectl get pod secret -o jsonpath='{.status.phase}'",
+    "kubectl get pods -n secret -o custom-columns=NAME:.metadata.name,STATUS:.status.phase",
+    "kubectl get pods --namespace=secrets -o jsonpath='{.items[*].metadata.name}'",
+    "kubectl get -A pods -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name",
+    "kubectl get pods -n get -o jsonpath='{.items[*].metadata.name}'",
+    "kubectl get pod get -o jsonpath='{.status.phase}'",
+    "kubectl get secrets -o name | grep -o yaml",
+    'kubectl get priorityclass -o jsonpath=\'{range .items[*]}{.metadata.name}{";"}{.value}{"\\n"}{end}\'',
+    'kubectl get pods -A -o jsonpath=\'{range .items[*]}{.metadata.name}{"|"}{.status.phase}{"\\n"}{end}\'',
+    "kubectl get pods -o jsonpath=\"{.items[?(@.status.phase=='Running')].metadata.name}{'&'}\"",
+    'ssh hive-002 \'kubectl get pod "$POD" -o jsonpath="{.status.phase}"\'',
+]
+
+GET_SECRET_TYPE_FORMS = [
+    "kubectl get secret \"$NAME\" -o jsonpath='{.data}'",
+    "kubectl get secrets -o jsonpath='{range .items[*]}{.data}{\";\"}{end}'",
+    "kubectl get pods,secrets -A -o jsonpath='{.items[*].data}'",
+    "kubectl get -n ns $R db -o jsonpath='{.data}'",
+    "kubectl get deploy/app $X -o yaml",
+    "kubectl get --unknown-flag secret db -o yaml",
+    "kubectl -n get get secret db -o jsonpath='{.data}'",
+    "kubectl -n get get $R db -o yaml",
+    "kubectl exec mypod -- kubectl get secret db -o yaml",
+    'kubectl exec mypod -- sh -c "kubectl get pods; kubectl get secret db -o yaml"',
+    "kubectl exec mypod -- sh -c 'kubectl get secret db -o yaml'",
+    "kubectl get --show-labels $R -o jsonpath='{.data}'",
+    "kubectl get secret db \\' -o yaml",
+    "kubectl get --unknown-value v $R db -o jsonpath='{.data}{\";\"}'",
+]
+
+
+@pytest.mark.feature("credential-guard-get-reads-the-type-operand")
+@pytest.mark.parametrize("command", GET_NON_SECRET_DIAGNOSTICS)
+def test_kubectl_get_of_a_named_non_secret_type_passes_with_any_output(command: str) -> None:
+    assert decide({"tool_name": "Bash", "tool_input": {"command": command}}) is None
+
+
+@pytest.mark.feature("credential-guard-get-reads-the-type-operand")
+@pytest.mark.parametrize("command", GET_SECRET_TYPE_FORMS)
+def test_kubectl_get_whose_type_operand_may_be_a_secret_is_refused(command: str) -> None:
+    reason = decide({"tool_name": "Bash", "tool_input": {"command": command}})
+
+    assert reason is not None and reason.startswith(
+        block("printing Secret data (kubectl get secret -o yaml/json)", KIND_ENVIRONMENT)
     )
 
 
@@ -489,8 +706,242 @@ def test_get_secret_refusal_offers_the_key_listing_and_not_describe() -> None:
     )
 
 
+DESCRIBE_FLAG_WORD_REFUSED_COMMANDS = [
+    "kubectl describe --show-events $RES db",
+    "kubectl describe --recursive $RES db",
+    "kubectl describe -R $RES db",
+    "kubectl describe -AR $RES db",
+    "kubectl describe --insecure-skip-tls-verify $RES db",
+    "kubectl describe -nprod $RES db",
+    "kubectl describe -An $NS $RES db",
+    "kubectl describe -Rn prod $RES db",
+    "kubectl describe --as admin $RES db",
+    "kubectl describe --chunk-size 500 $RES db",
+    "kubectl describe -v 6 $RES db",
+]
+
+DESCRIBE_FLAG_WORD_ALLOWED_COMMANDS = [
+    "kubectl describe --show-events pod $POD",
+    "kubectl describe -R pod $POD",
+    "kubectl describe --show-events=false pod web",
+    "kubectl describe -An $NS pods",
+    "kubectl describe -nprod pod web",
+]
+
+
+@pytest.mark.feature("credential-guard-describe-flag-words")
+@pytest.mark.parametrize("command", DESCRIBE_FLAG_WORD_REFUSED_COMMANDS)
+def test_a_hidden_describe_type_after_any_flag_is_refused(command: str) -> None:
+    reason = decide({"tool_name": "Bash", "tool_input": {"command": command}})
+
+    assert reason == (
+        block(
+            "describing a Secret or a resource the command does not name "
+            "(kubectl describe prints the token of a service account token Secret)",
+            KIND_ENVIRONMENT,
+        )
+        + SECRET_KEY_LISTING
+    )
+
+
+@pytest.mark.feature("credential-guard-describe-flag-words")
+@pytest.mark.parametrize("command", DESCRIBE_FLAG_WORD_ALLOWED_COMMANDS)
+def test_a_named_describe_type_after_any_flag_passes(command: str) -> None:
+    assert decide({"tool_name": "Bash", "tool_input": {"command": command}}) is None
+
+
 def _bash(command, cwd=""):
     return {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": cwd}
+
+
+SHELL_SCRIPT_DUMPS = [
+    ("sh -c 'env | sort'", "dumping the whole environment (env)"),
+    ("bash -lc 'printenv | grep REDIS'", "dumping the whole environment (printenv)"),
+    ("zsh -c 'export -p'", "dumping the whole environment (export)"),
+    ("dash -ec 'set'", "dumping the whole environment (set)"),
+    ("bash -ce 'env'", "dumping the whole environment (env)"),
+    ("sudo bash -euo pipefail -c 'env | cut -d= -f1'", "dumping the whole environment (env)"),
+    ("docker exec box bash -c 'printenv'", "dumping the whole environment (printenv)"),
+    ("ssh host sh -c 'env'", "dumping the whole environment (env)"),
+    (
+        "kubectl exec -n ns pod -- sh -c 'env | cut -d= -f1 | grep -i -E \"ca|cert\" | sort' 2>&1 | head -30",
+        "dumping the whole environment (env)",
+    ),
+    ("kubectl exec pod -- sh -c \"awk '{print ENVIRON[$1]}'\"", "printing environment values (awk ENVIRON[...])"),
+]
+
+SHELL_SCRIPTS_THAT_PRINT_NO_VALUE = [
+    "kubectl exec -n ns pod -- sh -c 'ls /app'",
+    "bash -c 'env | wc -l'",
+    "bash -c 'compgen -e'",
+    "bash script.sh",
+    "bash script.sh check env",
+    "bash --rcfile env",
+    "bash -c",
+    "grep -c env notes.txt",
+    "python3 -c 'env'",
+]
+
+
+@pytest.mark.feature("credential-guard-reads-shell-scripts")
+@pytest.mark.parametrize(("command", "what"), SHELL_SCRIPT_DUMPS)
+def test_an_environment_dump_inside_a_shell_script_is_refused(command: str, what: str) -> None:
+    assert decide(_bash(command)) == block(what, KIND_ENVIRONMENT)
+
+
+@pytest.mark.feature("credential-guard-reads-shell-scripts")
+@pytest.mark.parametrize("command", SHELL_SCRIPTS_THAT_PRINT_NO_VALUE)
+def test_a_shell_script_that_prints_no_value_passes(command: str) -> None:
+    assert decide(_bash(command)) is None
+
+
+@pytest.mark.feature("credential-guard-reads-shell-scripts")
+def test_a_shell_script_keeps_the_credential_tree_scan(tmp_path: Path) -> None:
+    (tmp_path / ".env").write_text("A=1\n")
+
+    verdict = evaluate(_bash(f"bash -c 'grep -r needle {tmp_path}'"))
+
+    assert verdict.block == block(f"searching a tree that holds {tmp_path / '.env'}", KIND_RECURSIVE)
+
+
+HEREDOC_DELIMITER_LINE_READS = [
+    ("cat <<EOF > out; cat ~/.env\nbody\nEOF", "cat ~/.env"),
+    ("cat <<'EOF' && cat .env\nbody\nEOF", "cat .env"),
+    ("cat <<-EOF > out || cat .env\n\tbody\n\tEOF", "cat .env"),
+    ('tee notes <<"EOF" | cat - .env\nbody\nEOF', "cat - .env"),
+]
+
+HEREDOCS_A_SHELL_RUNS = [
+    ("cat <<EOF | bash\ncat ~/.env\nEOF", "cat ~/.env"),
+    ("cat <<'EOF' | sh\ncat .env\nEOF", "cat .env"),
+    ("bash <<EOF\ncat .env\nEOF", "cat .env"),
+    ("sh -s <<'X'\nenv\nX", "env"),
+    ("sudo bash <<EOF\nsource ~/.bashrc\nEOF", "source ~/.bashrc"),
+    ("kubectl exec -i pod -- sh <<EOF\nprintenv\nEOF", "printenv"),
+    ("ssh host 'bash -s' <<'EOF'\ncat .env\nEOF", "cat .env"),
+    ("/bin/zsh <<EOF\necho ok\ncat .env\nEOF", "cat .env"),
+    ('out="$(dash <<EOF\ncat .env\nEOF\n)"', "cat .env"),
+    ('bash -c "sh <<EOF\ncat .env\nEOF\n"', "cat .env"),
+    ("source /dev/stdin <<EOF\ncat ~/.env\nEOF", "cat ~/.env"),
+    (". /dev/stdin <<'EOF'\nenv\nEOF", "env"),
+    ('eval "$(cat <<EOF\ncat ~/.env\nEOF\n)"', "cat ~/.env"),
+    ("ksh <<EOF\ncat .env\nEOF", "cat .env"),
+    ("mksh <<EOF\ncat .env\nEOF", "cat .env"),
+    ("ash <<EOF\ncat .env\nEOF", "cat .env"),
+    ("fish <<EOF\ncat .env\nEOF", "cat .env"),
+    ("csh <<EOF\ncat .env\nEOF", "cat .env"),
+    ("tcsh <<EOF\ncat .env\nEOF", "cat .env"),
+    ("su <<EOF\ncat .env\nEOF", "cat .env"),
+    ("cat <<EOF | sudo -u root bash\ncat .env\nEOF", "cat .env"),
+    ("doas -u root sh <<EOF\ncat .env\nEOF", "cat .env"),
+    ("cat <<EOF | /usr/bin/env bash\ncat .env\nEOF", "cat .env"),
+    ("env -i bash <<EOF\ncat .env\nEOF", "cat .env"),
+    ("command -p bash <<EOF\ncat .env\nEOF", "cat .env"),
+    ("exec bash <<EOF\ncat .env\nEOF", "cat .env"),
+    ("time bash <<EOF\ncat .env\nEOF", "cat .env"),
+    ("nohup bash <<EOF\ncat .env\nEOF", "cat .env"),
+    ("nice -n 5 bash <<EOF\ncat .env\nEOF", "cat .env"),
+    ("timeout 5 bash <<EOF\ncat .env\nEOF", "cat .env"),
+    ("xargs bash <<EOF\ncat .env\nEOF", "cat .env"),
+    ("stdbuf -o0 bash <<EOF\ncat .env\nEOF", "cat .env"),
+    ("setsid bash <<EOF\ncat .env\nEOF", "cat .env"),
+    ("busybox sh <<EOF\ncat .env\nEOF", "cat .env"),
+]
+
+HEREDOCS_THAT_READ_NO_CREDENTIAL = [
+    "cat <<'EOF' > notes.md\ncat .env\nEOF",
+    "cat <<EOF | grep x\ncat .env\nEOF",
+    "python3 - <<'PY'\nprint('read the .env file')\nPY",
+    "bash <<EOF\necho hi\nEOF",
+    "cat <<EOF > out && echo done\nbody\nEOF",
+    "git commit -F - <<'EOF'\nStop reading .env in the setup script\nEOF",
+    "grep bash <<'EOF'\ncat .env\nEOF",
+    "cat <<EOF | grep sh\ncat .env\nEOF",
+    'bash -c "bash <<EOF\necho hi\nEOF\n"',
+    "timeout 5 tee notes.md <<'EOF'\ncat .env\nEOF",
+    "sudo -u root tee notes.md <<'EOF'\ncat .env\nEOF",
+]
+
+
+@pytest.mark.feature("credential-guard-reads-heredoc-commands")
+@pytest.mark.parametrize(("command", "read"), HEREDOC_DELIMITER_LINE_READS)
+def test_a_credential_read_after_a_heredoc_delimiter_is_refused(command: str, read: str) -> None:
+    reason = decide(_bash(command))
+
+    assert reason is not None
+    assert reason == decide(_bash(read))
+
+
+@pytest.mark.feature("credential-guard-reads-heredoc-commands")
+@pytest.mark.parametrize(("command", "read"), HEREDOCS_A_SHELL_RUNS)
+def test_a_credential_read_in_a_heredoc_a_shell_runs_is_refused(command: str, read: str) -> None:
+    reason = decide(_bash(command))
+
+    assert reason is not None
+    assert reason == decide(_bash(read))
+
+
+@pytest.mark.feature("credential-guard-reads-heredoc-commands")
+@pytest.mark.parametrize("command", HEREDOCS_THAT_READ_NO_CREDENTIAL)
+def test_a_heredoc_that_reads_no_credential_passes(command: str) -> None:
+    assert decide(_bash(command)) is None
+
+
+@pytest.mark.feature("credential-guard-reads-heredoc-commands")
+def test_a_heredoc_a_shell_runs_keeps_the_credential_tree_scan(tmp_path: Path) -> None:
+    (tmp_path / ".env").write_text("A=1\n")
+
+    verdict = evaluate(_bash("bash <<'EOF'\ngrep -r needle .\nEOF", cwd=str(tmp_path)))
+
+    assert verdict.block == block(f"searching a tree that holds {tmp_path}/./.env", KIND_RECURSIVE)
+
+
+@pytest.mark.feature("credential-guard-reads-heredoc-commands")
+def test_a_rewrite_after_a_heredoc_delimiter_keeps_the_heredoc() -> None:
+    command = "cat <<'EOF' > out && grep -rn needle .\nbody\nEOF\necho done"
+
+    verdict = evaluate(_bash(command, cwd="/srv"), allow_rewrite=True)
+
+    assert verdict.rewrite == {
+        "command": "cat <<'EOF' > out && grep " + GREP_EXCLUDES + " -rn needle .\nbody\nEOF\necho done"
+    }
+
+
+@pytest.mark.feature("credential-guard-reads-heredoc-commands")
+def test_stripping_heredocs_keeps_the_rest_of_the_delimiter_line() -> None:
+    command = "cat <<'EOF' > out; git push\nbody\nEOF\nls"
+
+    assert strip_heredocs(command) == "cat <<HEREDOC > out; git push\nls"
+
+
+AWK_ENVIRON_VALUE_READS = [
+    "awk 'BEGIN{for(k in ENVIRON) if(k ~ /^AGENTIHOOKS_(HIVE|SWARM)/) print k\"=\"ENVIRON[k]}'",
+    "gawk 'BEGIN{print ENVIRON[\"DATABASE_URL\"]}'",
+    "mawk 'BEGIN { print ENVIRON [\"REDIS_URL\"] }'",
+    "nawk 'BEGIN{print ENVIRON[\"X\"]}'",
+    "compgen -e | /usr/bin/awk '{print $1\"=\"ENVIRON[$1]}'",
+    "kubectl exec pod -- awk 'BEGIN{print ENVIRON[\"DATABASE_URL\"]}'",
+]
+
+AWK_ENVIRON_NAME_ONLY = [
+    ENV_NAMES_SAFE,
+    "awk 'BEGIN{for(k in ENVIRON) if(k ~ /LEDGER/) print k}'",
+    "awk -F= '{print $1}' names.txt",
+    "awk '{print MYENVIRON[1]}' data.txt",
+    "grep -n 'ENVIRON[' notes.txt",
+]
+
+
+@pytest.mark.feature("credential-guard-refuses-awk-environ-values")
+@pytest.mark.parametrize("command", AWK_ENVIRON_VALUE_READS)
+def test_an_awk_read_of_an_environment_value_is_refused(command: str) -> None:
+    assert decide(_bash(command)) == block("printing environment values (awk ENVIRON[...])", KIND_ENVIRONMENT)
+
+
+@pytest.mark.feature("credential-guard-refuses-awk-environ-values")
+@pytest.mark.parametrize("command", AWK_ENVIRON_NAME_ONLY)
+def test_an_awk_listing_of_environment_names_passes(command: str) -> None:
+    assert decide(_bash(command)) is None
 
 
 class TestEnvironmentNames:

@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import coverage
+import pytest
 
 from scripts.ci_lab import retry, run_tests, sandbox
 
@@ -228,3 +229,15 @@ def test_outside_leaves_out_listed_shared_skipped_and_missing_files(tmp_path: Pa
     manifest = _manifest({"t::one": ["data/a.txt"], "t::two": []})
 
     assert run_tests.outside(opened, ("t::one", "t::two"), tmp_path, manifest) == ("data/b.txt",)
+
+
+@pytest.mark.feature("lab-scheduler-test-units")
+def test_outside_lists_every_unshared_file_a_test_module_the_manifest_lacks_opened(tmp_path: Path) -> None:
+    for path in ("data/a.txt", "data/b.txt", "uv.lock"):
+        (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / path).write_text("")
+    opened = {"data/a.txt", "data/b.txt", "uv.lock"}
+    manifest = _manifest({"t::one": ["data/a.txt"]})
+
+    assert run_tests.outside(opened, ("t::one", "tests/test_new.py"), tmp_path, manifest) == ("data/b.txt",)
+    assert run_tests.outside(opened, ("tests/test_new.py",), tmp_path, manifest) == ("data/a.txt", "data/b.txt")

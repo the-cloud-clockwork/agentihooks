@@ -9,12 +9,14 @@ outside the manifest, is keyed on every file under the measured trees and the te
 
 import hashlib
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import PurePosixPath
 from typing import Any
 
+from scripts import dep_manifest
+from scripts.ci_lab.digests import TestInputs, Toolchain, test_key
+from scripts.ci_lab.units import Unit
 from scripts.ci_mutation import scope
-from tests import dep_manifest
 
 PYTEST_INVOCATION = (
     "pytest",
@@ -27,6 +29,8 @@ PYTEST_INVOCATION = (
     "tests.flake_ledger",
 )
 BROAD_TREES = (*dep_manifest.MEASURED, "tests/")
+KIND = "test"
+BATCH_SECONDS = 60.0
 
 
 def _digest(record: object) -> str:
@@ -128,6 +132,36 @@ def fingerprints(
     return keys
 
 
+def unlisted_test_hashes(manifest: Mapping[str, Any], tree: Mapping[str, bytes]) -> dict[str, str]:
+    """Return the sha256 of every test module of the tree that holds no manifest test, of each conftest pytest loads
+    for such a module and of each test tree module either imports, and while there is such a module, of every file
+    under the measured and test trees, since the manifest records no file a test it never ran reads."""
+    listed = {test.partition("::")[0] for test in manifest["tests"]}
+    reached: set[str] = set()
+    for path in tree:
+        if _test_module(path) and path not in listed:
+            for parent in PurePosixPath(path).parents:
+                _reached(tree, (parent / "conftest.py").as_posix(), reached)
+            _reached(tree, path, reached)
+    if reached:
+        reached.update(path for path in tree if path.startswith(BROAD_TREES))
+    return {path: hashlib.sha256(tree[path]).hexdigest() for path in reached}
+
+
+def unlisted_units(
+    manifest: Mapping[str, Any], tree: Mapping[str, bytes], paths: Iterable[str], toolchain: Toolchain
+) -> tuple[Unit, ...]:
+    """Return one test unit per test module among the paths that the tree holds and that holds no manifest test, its
+    member the module's path, keyed as a broad test over the tree with the pytest invocation and the toolchain."""
+    listed = {test.partition("::")[0] for test in manifest["tests"]}
+    files = sorted({path for path in paths if _test_module(path) and path in tree and path not in listed})
+    keys = fingerprints({"units": [], "tests": {path: {"files": []} for path in files}}, tree)
+    return tuple(
+        Unit(KIND, test_key(TestInputs({path: keys[path]}, {}, PYTEST_INVOCATION, toolchain)), (path,))
+        for path in files
+    )
+
+
 def _parts(tests: list[str], seconds: Mapping[str, float], target: float) -> list[tuple[str, ...]]:
     """Return the fewest longest first balanced parts of one file's tests that each fit the target."""
     ordered = sorted(tests, key=lambda test: -seconds[test])
@@ -159,3 +193,22 @@ def batches(manifest: Mapping[str, Any], durations: Mapping[str, float], target:
         else:
             found.extend(_parts(tests, seconds, target))
     return found
+
+
+def units(
+    manifest: Mapping[str, Any],
+    tree: Mapping[str, bytes],
+    blobs: Mapping[str, str],
+    durations: Mapping[str, float],
+    toolchain: Toolchain,
+) -> tuple[Unit, ...]:
+    """Return one test unit per batch of the manifest's tests, keyed by its tests' fingerprints over the tree, the
+    blob ids of the files they opened outside the manifest, the pytest invocation and the toolchain."""
+    keys = fingerprints(manifest, tree)
+    found: list[Unit] = []
+    for batch in batches(manifest, durations, BATCH_SECONDS):
+        outside = {path for test in batch for path in manifest["tests"][test].get("outside", ())}
+        opened = {path: blobs[path] for path in outside if path in blobs}
+        inputs = TestInputs({test: keys[test] for test in batch}, opened, PYTEST_INVOCATION, toolchain)
+        found.append(Unit(KIND, test_key(inputs), batch))
+    return tuple(found)

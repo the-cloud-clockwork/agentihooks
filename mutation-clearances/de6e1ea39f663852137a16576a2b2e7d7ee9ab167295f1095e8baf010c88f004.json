@@ -1,0 +1,6 @@
+{
+  "scripts/dep_manifest.py:scripts.dep_manifest.x_invalidated:223da666785e221629dde8322d7721b2f082e31286a68ce45030d4d4a54845c5": {
+    "reader": "standards_reader",
+    "reason": "source_changed is read only in `source_changed and found[\"escapes\"]` under `or`; None and False give the same result in that expression."
+  }
+}

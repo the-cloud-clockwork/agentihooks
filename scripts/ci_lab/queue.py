@@ -32,6 +32,9 @@ class Job:
     attempts: int
     worker: str
     outcome: str
+    base: str = ""
+    grader: str = ""
+    leased_ms: int = 0
 
 
 ENQUEUE = """
@@ -51,10 +54,15 @@ return 1
 
 CLAIM = """
 if redis.call('ZREM', KEYS[2], ARGV[1]) == 0 then return 0 end
-redis.call('HSET', KEYS[1], 'state', 'leased', 'worker', ARGV[2], 'token', ARGV[3])
+redis.call('HSET', KEYS[1], 'state', 'leased', 'worker', ARGV[2], 'token', ARGV[3], 'leased_ms', ARGV[5])
 redis.call('ZADD', KEYS[3], ARGV[4], ARGV[1])
 redis.call('SMOVE', KEYS[4], KEYS[5], ARGV[1])
 return 1
+"""
+
+TALLY = """
+if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
+return redis.call('HSETNX', KEYS[1], 'tallied:' .. ARGV[1], 1)
 """
 
 EXTEND = """
@@ -91,6 +99,28 @@ redis.call('SMOVE', KEYS[6], KEYS[8], ARGV[1])
 return 'lost'
 """
 
+RETRY = """
+if redis.call('HGET', KEYS[1], 'state') ~= 'done' then return 0 end
+redis.call('HINCRBY', KEYS[1], 'attempts', 1)
+redis.call('HSET', KEYS[1], 'state', 'pending', 'worker', '', 'outcome', '')
+redis.call('SREM', KEYS[2], ARGV[1])
+redis.call('ZADD', KEYS[3], redis.call('INCR', KEYS[4]), ARGV[1])
+redis.call('SMOVE', KEYS[5], KEYS[6], ARGV[1])
+return 1
+"""
+
+PRUNE = """
+local fields = redis.call('HGETALL', KEYS[1])
+local dropped = 0
+for index = 1, #fields, 2 do
+  if tonumber(string.match(fields[index + 1], '(%-?%d+)$')) < tonumber(ARGV[1]) then
+    redis.call('HDEL', KEYS[1], fields[index])
+    dropped = dropped + 1
+  end
+end
+return dropped
+"""
+
 
 def _key(*parts: str) -> str:
     return PREFIX + ":".join(parts)
@@ -115,14 +145,27 @@ class Queue:
         self._extend = client.register_script(EXTEND)
         self._finish = client.register_script(FINISH)
         self._reap = client.register_script(REAP)
+        self._retry = client.register_script(RETRY)
+        self._prune = client.register_script(PRUNE)
+        self._tally = client.register_script(TALLY)
 
-    def enqueue(self, units: Sequence[Unit], head: str, requirements: Mapping[str, Requirement]) -> list[str]:
-        """Add each unit of the head as a pending job unless that job is already known."""
+    def enqueue(
+        self,
+        units: Sequence[Unit],
+        head: str,
+        requirements: Mapping[str, Requirement],
+        base: str = "",
+        grader: str = "",
+    ) -> list[str]:
+        """Add each unit of the head as a pending job, with the base and grader revision its grade reads, unless that
+        job is already known."""
         added: list[str] = []
         for unit in units:
             job = f"{head}:{unit.kind}:{unit.key}"
             need = requirements.get(unit.key, DEFAULT)
             record = {
+                "base": base,
+                "grader": grader,
                 "kind": unit.kind,
                 "key": unit.key,
                 "members": json.dumps(unit.members),
@@ -166,15 +209,22 @@ class Queue:
             attempts=int(record["attempts"]),
             worker=record["worker"],
             outcome=record["outcome"],
+            base=record["base"],
+            grader=record["grader"],
+            leased_ms=int(record.get("leased_ms", 0)),
         )
 
     def token(self, job: str) -> str:
         return str(self.client.hget(_job(job), "token") or "")
 
-    def claim(self, job: Job, worker: str, token: str, expires_ms: int) -> bool:
-        """Lease a pending job to the worker; only one caller ever wins it."""
+    def claim(self, job: Job, worker: str, token: str, expires_ms: int, leased_ms: int) -> bool:
+        """Lease a pending job to the worker from leased_ms; only one caller ever wins it."""
         keys = [_job(job.id), _key("pending"), _key("leased"), _head(job.head, "pending"), _head(job.head, "leased")]
-        return bool(self._claim(keys=keys, args=[job.id, worker, token, expires_ms]))
+        return bool(self._claim(keys=keys, args=[job.id, worker, token, expires_ms, leased_ms]))
+
+    def tally(self, job: Job) -> bool:
+        """Mark the job's finished attempt counted; True only for the first caller of that attempt."""
+        return bool(self._tally(keys=[_job(job.id)], args=[job.attempts]))
 
     def extend(self, job: str, token: str, expires_ms: int) -> bool:
         """Move the expiry of a lease the token holds."""
@@ -187,6 +237,33 @@ class Queue:
 
     def expired(self, now_ms: int) -> list[str]:
         return list(self.client.zrangebyscore(_key("leased"), 0, now_ms))
+
+    def leased(self) -> list[str]:
+        """Return every leased job, soonest expiry first."""
+        return list(self.client.zrange(_key("leased"), 0, -1))
+
+    def holds(self, worker: str) -> bool:
+        """Whether the worker holds a live lease on any job."""
+        return any(self.client.hget(_job(job), "worker") == worker for job in self.leased())
+
+    def offer(self, worker: str, free_slots: int, at_ms: int) -> None:
+        """Record the free slots a worker offered on its latest lease poll and when."""
+        self.client.hset(_key("offers"), worker, f"{free_slots} {at_ms}")
+
+    def offers(self, since_ms: int) -> dict[str, tuple[int, int]]:
+        """Return each worker's latest offered free slots and the millisecond it offered them, for offers made at or
+        after since_ms."""
+        offered: dict[str, tuple[int, int]] = {}
+        for worker, raw in self.client.hgetall(_key("offers")).items():
+            free_slots, at_ms = map(int, raw.split())
+            if at_ms >= since_ms:
+                offered[worker] = (free_slots, at_ms)
+        return offered
+
+    def prune(self, since_ms: int) -> int:
+        """Forget every offer made before since_ms and return how many; one script reads and deletes, so an offer a
+        worker renews meanwhile stays."""
+        return int(self._prune(keys=[_key("offers")], args=[since_ms]))
 
     def reap(self, job: Job, now_ms: int, requeues: int) -> str:
         """Requeue an expired lease while attempts remain, else mark it lost; empty when it no longer expired."""
@@ -201,3 +278,15 @@ class Queue:
             _head(job.head, "done"),
         ]
         return str(self._reap(keys=keys, args=[job.id, now_ms, requeues, LOST]))
+
+    def retry(self, job: Job) -> bool:
+        """Move a finished job back to pending with one more attempt; False when it is not finished."""
+        keys = [
+            _job(job.id),
+            _key("done"),
+            _key("pending"),
+            _key("seq"),
+            _head(job.head, "done"),
+            _head(job.head, "pending"),
+        ]
+        return bool(self._retry(keys=keys, args=[job.id]))

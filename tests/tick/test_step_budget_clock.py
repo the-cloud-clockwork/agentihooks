@@ -191,6 +191,7 @@ def test_a_kept_step_whose_start_the_pass_end_closed_is_skipped_and_never_runs()
 def test_a_step_is_skipped_and_never_runs_when_a_handed_off_step_of_an_earlier_group_it_needs_never_ends() -> None:
     ran: list[str] = []
     waiting = step("verify", 0.01, 5.0, ran)
+    waiting.needs = frozenset({"track outages"})
     with recording(), pool.running(workers=1, critical_s=5.0) as found:
         found.hand(("track outages",))
         found.end("track outages", True)

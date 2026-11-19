@@ -43,6 +43,10 @@ DEFAULT_URL = "nats://127.0.0.1:4222"
 EVENT_STREAM = "AGENTIHOOKS-EVENTS"
 LAB_STREAM = "AGENTIHOOKS-CI-LAB-HEADS"
 LAB_SUBJECT = "ci.lab.head.>"
+LAB_CONSUMER = "ci-lab-scheduler"
+RELAY_CONSUMER = "ci-lab-relay"
+RELAY_SUBJECT = "ci.lab.head.notice"
+LAB_DURABLES = ((LAB_CONSUMER, LAB_SUBJECT), (RELAY_CONSUMER, RELAY_SUBJECT))
 QUEUE_SUBJECT = "agentihooks.queue"
 MSG_ID = "Nats-Msg-Id"
 KV_HISTORY = 64
@@ -628,6 +632,9 @@ class NatsBus:
                             api.StreamConfig(subjects=[subject], duplicate_window=window),
                         )
                     )
+                for durable, subject in LAB_DURABLES:
+                    lab_consumer = _consumer_config(durable, subject, config.queue)
+                    self._loop.run(self._js.add_consumer(LAB_STREAM, config=lab_consumer))
         except BaseException:
             self._loop.close()
             raise

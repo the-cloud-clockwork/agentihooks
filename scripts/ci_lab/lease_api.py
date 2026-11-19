@@ -1,21 +1,40 @@
-"""The lease API the scheduler serves: the only interface a lab worker calls."""
+"""The lease API the scheduler serves: the only interface a lab worker calls, and the control routes a swarm calls with
+the lab's bearer token to mark heads hotfix, pause a class but its excepted heads and resume."""
 
+import hmac
 import json
 from collections.abc import Callable
+from dataclasses import dataclass
+from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Protocol, TypeGuard
 from urllib.parse import parse_qs, urlsplit
 
+from scripts.ci_lab import control
+from scripts.ci_lab.delivery import CLASSES
 from scripts.ci_lab.leases import Grant, Leases
 
-__all__ = ["MAX_WAIT_MS", "UploadSigner", "respond", "serve"]
+__all__ = [
+    "MAX_WAIT_MS",
+    "Answer",
+    "ControlRoutes",
+    "Reply",
+    "UploadSigner",
+    "answer",
+    "bind",
+    "command",
+    "respond",
+    "serve",
+]
 
 MAX_WAIT_MS = 30_000
 MAX_BODY_BYTES = 65_536
 LENGTH = "Content-Length"
+AUTHORIZATION = "Authorization"
 UPLOADS = frozenset({"report", "log"})
 
 Reply = tuple[int, dict[str, Any]]
+Answer = Callable[[str, str, bytes, str | None], Reply]
 
 
 class UploadSigner(Protocol):
@@ -24,6 +43,15 @@ class UploadSigner(Protocol):
 
 class BadRequest(Exception):
     pass
+
+
+@dataclass(frozen=True)
+class ControlRoutes:
+    """The control routes' lab Redis client, the bearer token they require and the millisecond clock."""
+
+    client: Any
+    token: str
+    clock: Callable[[], int]
 
 
 def _refused() -> Reply:
@@ -77,6 +105,8 @@ def _grant(grant: Grant) -> dict[str, Any]:
         "job": grant.job,
         "token": grant.token,
         "head": grant.head,
+        "base": grant.base,
+        "grader": grant.grader,
         "kind": grant.unit.kind,
         "key": grant.unit.key,
         "members": list(grant.unit.members),
@@ -140,13 +170,78 @@ def respond(leases: Leases, signer: UploadSigner, method: str, target: str, raw:
         return 400, {"error": "bad request"}
 
 
-def serve(host: str, port: int, leases: Leases, signer: UploadSigner) -> ThreadingHTTPServer:
-    """Bind the lease API on host and port; the caller runs serve_forever."""
+def _authorised(routes: ControlRoutes, authorization: str | None) -> bool:
+    """Return whether the Authorization header carries the lab's bearer token; a lab without a token and a request
+    without the header authorise none."""
+    expected = f"Bearer {routes.token}".encode()
+    return bool(routes.token) and authorization is not None and hmac.compare_digest(authorization.encode(), expected)
 
-    def answer(request: BaseHTTPRequestHandler) -> None:
+
+def _priority(routes: ControlRoutes, raw: bytes) -> Reply:
+    data = _body(raw)
+    if data.get("class") != control.HOTFIX:
+        raise BadRequest
+    heads = _texts(data, "heads")
+    now_ms = routes.clock()
+    named = control.prioritize(routes.client, heads, now_ms)
+    return 200, {"priority": named, "class": control.HOTFIX, "expires_ms": now_ms + control.PRIORITY_MS}
+
+
+def _pause(routes: ControlRoutes, raw: bytes) -> Reply:
+    data = _body(raw)
+    name = _text(data, "class")
+    excepted = _texts(data, "except")
+    if name not in CLASSES:
+        raise BadRequest
+    return 200, {"paused": name, "except": control.pause(routes.client, name, excepted)}
+
+
+def _resume(routes: ControlRoutes, raw: bytes) -> Reply:
+    return 200, {"resumed": control.resume(routes.client)}
+
+
+CONTROL: dict[str, Callable[[ControlRoutes, bytes], Reply]] = {
+    "/priority": _priority,
+    "/pause": _pause,
+    "/resume": _resume,
+}
+
+
+def command(routes: ControlRoutes, method: str, target: str, raw: bytes, authorization: str | None) -> Reply | None:
+    """Answer one control request with its status and JSON body, or None when the request is no control request."""
+    route = CONTROL.get(urlsplit(target).path) if method == "POST" else None
+    if route is None:
+        return None
+    if not _authorised(routes, authorization):
+        return 401, {"error": "control token refused"}
+    try:
+        return route(routes, raw)
+    except BadRequest:
+        return 400, {"error": "bad request"}
+
+
+def answer(
+    leases: Leases,
+    signer: UploadSigner,
+    routes: ControlRoutes,
+    method: str,
+    target: str,
+    raw: bytes,
+    authorization: str | None,
+) -> Reply:
+    """Answer one request: a control route with its bearer token, any other through the lease API."""
+    return command(routes, method, target, raw, authorization) or respond(leases, signer, method, target, raw)
+
+
+def bind(host: str, port: int, reply: Answer) -> ThreadingHTTPServer:
+    """Bind JSON routes on host and port, each request's method, target, body and Authorization header answered by
+    reply; the caller runs serve_forever."""
+
+    def handle(request: BaseHTTPRequestHandler) -> None:
         length = request.headers.get(LENGTH) or "0"
         if length.isascii() and length.isdigit() and int(length) <= MAX_BODY_BYTES:
-            status, payload = respond(leases, signer, request.command, request.path, request.rfile.read(int(length)))
+            raw = request.rfile.read(int(length))
+            status, payload = reply(request.command, request.path, raw, request.headers.get(AUTHORIZATION))
         else:
             status, payload = 400, {"error": "bad request"}
         data = json.dumps(payload).encode()
@@ -156,5 +251,10 @@ def serve(host: str, port: int, leases: Leases, signer: UploadSigner) -> Threadi
         request.end_headers()
         request.wfile.write(data)
 
-    handler = type(BaseHTTPRequestHandler.__name__, (BaseHTTPRequestHandler,), {"do_GET": answer, "do_POST": answer})
+    handler = type(BaseHTTPRequestHandler.__name__, (BaseHTTPRequestHandler,), {"do_GET": handle, "do_POST": handle})
     return ThreadingHTTPServer((host, port), handler)
+
+
+def serve(host: str, port: int, leases: Leases, signer: UploadSigner, routes: ControlRoutes) -> ThreadingHTTPServer:
+    """Bind the lease API and its control routes on host and port; the caller runs serve_forever."""
+    return bind(host, port, partial(answer, leases, signer, routes))

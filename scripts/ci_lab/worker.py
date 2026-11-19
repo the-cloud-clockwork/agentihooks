@@ -31,6 +31,7 @@ __all__ = [
     "CAPABILITIES",
     "GRACE_SECONDS",
     "HEARTBEAT_SECONDS",
+    "UNIT_TIMEOUT_SECONDS",
     "Client",
     "Executor",
     "Finished",
@@ -45,15 +46,18 @@ __all__ = [
 CAPABILITIES = frozenset({"net", "browser"})
 LEASE_WAIT_MS = 5_000
 HEARTBEAT_SECONDS = 10.0
-GRACE_SECONDS = 20.0
+UNIT_TIMEOUT_SECONDS = 1_800.0
 TIMEOUT_SECONDS = 60.0
+DELIVERY_CALLS = 5
+GRACE_SECONDS = UNIT_TIMEOUT_SECONDS + DELIVERY_CALLS * TIMEOUT_SECONDS
 REFUSED = 403
 REDIS = "REDIS"
 
 
 @dataclass(frozen=True)
 class Lease:
-    """One leased unit: its job, the lease token, the head it grades, the unit, its slots and the lease expiry."""
+    """One leased unit: its job, the lease token, the head it grades, the unit, its slots, the lease expiry and the base
+    and grader revision its grade reads."""
 
     job: str
     token: str
@@ -61,6 +65,8 @@ class Lease:
     unit: Unit
     slots: int
     expires_ms: int
+    base: str = ""
+    grader: str = ""
 
 
 @dataclass(frozen=True)
@@ -91,7 +97,16 @@ class Lost(RuntimeError):
 def _lease(grant: Mapping[str, Any]) -> Lease:
     """Read one grant of the lease API's POST /lease reply."""
     unit = Unit(kind=grant["kind"], key=grant["key"], members=tuple(grant["members"]))
-    return Lease(grant["job"], grant["token"], grant["head"], unit, grant["slots"], grant["expires_ms"])
+    return Lease(
+        grant["job"],
+        grant["token"],
+        grant["head"],
+        unit,
+        grant["slots"],
+        grant["expires_ms"],
+        grant["base"],
+        grant["grader"],
+    )
 
 
 @dataclass(frozen=True)

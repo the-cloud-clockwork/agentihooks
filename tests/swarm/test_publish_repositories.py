@@ -205,7 +205,9 @@ def test_cli_refusal_names_the_secondary_repositorys_branch(
     logged = []
     monkeypatch.setattr(syslog, "openlog", lambda ident: None)
     monkeypatch.setattr(syslog, "syslog", lambda priority, message: logged.append(json.loads(message)))
-    args = SimpleNamespace(slug="swarm", command=command, message="Continue", files=["chosen.txt"])
+    args = SimpleNamespace(
+        slug="swarm", command=command, message="Continue", files=["chosen.txt"], via="", direct=False
+    )
     with pytest.raises(publish.SwarmError) as refused:
         getattr(cli, f"cmd_{command}")(None, args)
     if mapped or recorded_branch != "dev":
@@ -238,7 +240,9 @@ def test_cli_refusal_keeps_an_unrecorded_secondary_branch_empty(repositories, mo
     logged = []
     monkeypatch.setattr(syslog, "openlog", lambda ident: None)
     monkeypatch.setattr(syslog, "syslog", lambda priority, message: logged.append(json.loads(message)))
-    args = SimpleNamespace(slug="swarm", command=command, message="Continue", files=["chosen.txt"])
+    args = SimpleNamespace(
+        slug="swarm", command=command, message="Continue", files=["chosen.txt"], via="", direct=False
+    )
     with pytest.raises(publish.PublicationRefusal) as refused:
         getattr(cli, f"cmd_{command}")(None, args)
     assert refused.value.repository == str(p.bundle)

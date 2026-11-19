@@ -9,11 +9,12 @@ from scripts.events.config import BusConfig
 
 
 @pytest.mark.parametrize("provision", [False, True])
-def test_bus_provisions_only_when_requested(monkeypatch, provision):
+def test_bus_provisions_only_when_requested(monkeypatch: pytest.MonkeyPatch, provision: bool) -> None:
     js = SimpleNamespace(
         stream_info=AsyncMock(side_effect=nats.NotFoundError()),
         streams_info=AsyncMock(return_value=[]),
         add_stream=AsyncMock(),
+        add_consumer=AsyncMock(),
         create_key_value=AsyncMock(),
         key_value=AsyncMock(),
     )
@@ -30,6 +31,21 @@ def test_bus_provisions_only_when_requested(monkeypatch, provision):
                 name="AGENTIHOOKS-CI-LAB-HEADS",
                 num_replicas=1,
             )
+        lab_consumer = nats._consumer_config("ci-lab-scheduler", "ci.lab.head.>", BusConfig().queue)
+        relay_consumer = nats._consumer_config("ci-lab-relay", "ci.lab.head.notice", BusConfig().queue)
+        wanted = (
+            [
+                call("AGENTIHOOKS-CI-LAB-HEADS", config=lab_consumer),
+                call("AGENTIHOOKS-CI-LAB-HEADS", config=relay_consumer),
+            ]
+            if provision
+            else []
+        )
+        assert js.add_consumer.await_args_list == wanted
+        configs = [found.kwargs["config"] for found in js.add_consumer.await_args_list]
+        made = [(config.durable_name, config.filter_subject) for config in configs]
+        lab_durables = [("ci-lab-scheduler", "ci.lab.head.>"), ("ci-lab-relay", "ci.lab.head.notice")]
+        assert made == (lab_durables if provision else [])
         state = bus.state("hub-github")
         assert bus.state("hub-github") is state
         if provision:

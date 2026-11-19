@@ -20,6 +20,14 @@ Each tier has a wall time budget. A check that does not fit the pull request or 
 
 How a green promotion run merges `dev` into `main` and creates the release is in [Promotion and releases](promotion.md).
 
+Removing the queue tier, so that a pull request merges on its pull request verdict and a red `dev` grade reverts its culprit, was evaluated with a no go verdict in [Post merge testing with automatic revert](../research/post-merge-testing.md).
+
+## Lab authority and back pressure
+
+The CI lab grades pull request heads from content addressed units and a verdict cache ([CI lab service contract](ci-lab.md)). A gate moves to the lab only when the base branch's `delivery.yaml` names it under `lab.authoritative`. On a `pull_request` run the `lab-verdict` job reads that list, the Actions job of each named gate is skipped, and `lab-verdict` waits for the lab's check run for that gate instead. An empty list keeps every pull request gate on Actions. `lab.queue.authoritative` names the gates the lab is to grade on merge groups. Each name must be a workflow job, and `scripts.ci_wiring` requires a `lab/<gate>` lab gate in `.github/gate-wiring.json` for it. `AGENTIHOOKS_LAB_OFF=true` empties the list, and `python -m scripts.ci_lab_verdict authority <grader root> merge_group` publishes it. An absent key is an empty list. `delivery.yaml` leaves the key out until the deployed lab scheduler runs a release whose delivery schema accepts it, because the scheduler validates dev's `delivery.yaml` against its own schema when it starts and the merge group base's on each merge group grade. No workflow reads that merge group output yet, so the queue and promotion tiers run on Actions whatever the list holds. The lab grades their heads too: a merge group head gets its [test units](ci-lab.md#test-units), and a promotion or backfill head its test units and [mutation units](ci-lab.md#mutation-units).
+
+A long lab wait is back pressure, never a red. Each tick pass reads the lab's capacity document. When its predicted pull request wait exceeds `AGENTIHOOKS_HEALTH_CI_BEHIND_MINUTES` (default 20), the swarm holds new claims of eng tasks outside the fix phase and raises the standing `lab_wait` finding. A reading older than ten minutes holds nothing, and the finding clears once the wait falls back. Nobody retries or dispatches to catch up. [Lab wait and capacity](../ci-timing.md#lab-wait-and-capacity) shows how to read the wait.
+
 ## Hierarchy CPU proof at promotion
 
 The Tests workflow calls `Hierarchy CPU proof` as `hierarchy-cpu` on a push to
@@ -367,9 +375,47 @@ agentihooks swarm <slug> merge queue https://github.com/the-cloud-clockwork/agen
 
 For agentibrain-kernel, whose `dev` rules require `Gate — Required` reported by GitHub Actions (`gh api repos/the-cloud-clockwork/agentibrain-kernel/rules/branches/dev` lists it with `integration_id` 15368), the command grades that check, not a Tests run, and enqueues into the kernel's `dev` merge queue. A repository with no merge queue on `dev`, such as antoncore, takes the squash merge described above. The checks wait accepts a pull request or an Actions run in another repository the same way: `agentihooks swarm <slug> wait --on checks https://github.com/<owner>/<repo>/actions/runs/<id>` reads only that repository's run and, when it is red, its jobs.
 
+### Merge priority
+
+The master or the operator moves a green critical pull request ahead of the waiting entries of the `dev` merge queue:
+
+```bash
+agentihooks swarm <slug> merge priority https://github.com/<owner>/<repo>/pull/<number>
+```
+
+The priority applies when the command runs, also while a merge group's Tests run is building. The swarm stores no deferred priority and replays none.
+
+The command:
+
+1. Refuses every caller but the swarm's master seat and the operator with `only the master or the operator prioritizes the merge queue`.
+2. Takes the swarm's priority lock, the `queue-priority-active` key, for at most an hour. A holder on the same hive whose process has ended is cleared first. While another priority or the refresh requeue holds the lock, the command fails with `another merge queue priority is running; try again when it ends`.
+3. Reads the pull request and refuses, in this order: `queue priority requires an open pull request into dev`, `queue priority requires a ready pull request`, `queue priority requires a dev merge queue`, `staged compatibility: <reason>`, and `required checks on the current pull request head must pass before queueing`. A refused priority moves nothing and writes no journal record.
+4. Dequeues, tail first, every waiting (`QUEUED`) entry ahead of the pull request, and every waiting entry behind it when it is already queued. Entries whose merge group is building stay in place.
+5. Queues the pull request at its head when it is not in the queue. After a failed dequeue it does so only for a pull request that was queued when the command started and that the queue ejected during the pass. It then queues each displaced entry again at the head it had, in its original order, after that entry's own staged compatibility check. Restoring stops at the first refused entry.
+6. Marks the pull request head hotfix in the swarm's [CI lab](ci-lab.md#control-routes), even when a queue step failed, and writes the `priority` record with the queue steps and the lab's reply to the [queue journal](#the-queue-journal).
+7. Sends an information only inbox notice to the owner of each restored entry still working its task ([Merge priority owner notices](../pillars/swarm.md#merge-priority-owner-notices)).
+8. When a step failed, requeues the entries still left out at once, as below, and fails with the step errors joined by `; `.
+
+`--lift` is the operator's only; any other caller gets `only the operator lifts a running merge group priority hold`. It writes a `priority-lift` journal record before taking the lock, so a busy or refused priority can still leave one, then runs the same steps. The reorder is the same as without it: no building group leaves the queue.
+
+#### Entries an interrupted priority left out
+
+An entry the priority dequeued and could not queue again stays in the swarm's displaced set, the `queue-priority-displaced` key. The command retries it at once after a failed step, and the swarm refresh job the tick starts retries it on every run under the same lock, earliest displacement first. Each retry reads the pull request:
+
+| Pull request | Result |
+|---|---|
+| Closed, merged, no longer into `dev`, or already back in the queue | Dropped from the set with no record |
+| A draft, a moved head or a conflict with `dev` | Left out: a `priority-requeue-skipped` record carrying `reason`, one inbox notice to its owner, and dropped from the set |
+| Anything else | Queued again at its recorded head once its staged compatibility check passes: a `priority-requeue` record |
+| The read, the check or the enqueue fails | The entry stays for the next run and its owner gets one inbox notice per displacement. The refresh job also raises the ledger alert `merge-priority-requeue:<url>` naming the error |
+
+While a priority holds the lock, the refresh job reports `merge queue priority waits: another merge queue priority is running; try again when it ends` and retries on its next run.
+
+`tests/swarm/test_merge_queue_priority.py` and `tests/swarm/test_queue_priority.py` pin this behaviour. [Pull request 11818](https://github.com/the-cloud-clockwork/agentihooks/pull/11818) made the priority move the waiting entries at once, and [pull request 12065](https://github.com/the-cloud-clockwork/agentihooks/pull/12065) retired the replay of deferred priorities from the refresh.
+
 ## Lab merge group interaction rule
 
-For a `merge_group` head, the lab scheduler calls `scripts.ci_lab.interaction.decide` to choose between the test units the group's entries invalidate and the whole suite. A test unit is a test id of the manifest. The rule is pure. It reads the group's diff against `dev`, each entry's changes from `dev` to its graded tree, the dependency manifest of `tests.dep_manifest`, the test units with a cached verdict, the entry limit and the `pyproject.toml` flag, which the caller computes with `scripts.ci_select.pyproject_reaches_tests`. It returns the unit set or `FULL`. `full_reason` names the clause that held, checked in this order:
+For a `merge_group` head, the lab scheduler calls `scripts.ci_lab.interaction.decide` to choose between the test units the group's entries invalidate and the whole suite. A test unit is a test id of the manifest. The rule is pure. It reads the group's diff against `dev`, each entry's changes, the dependency manifest of `scripts.dep_manifest`, the test units with a cached verdict, the entry limit and the `pyproject.toml` flag, which the caller computes with `scripts.ci_select.pyproject_reaches_tests`. It returns the unit set or `FULL`. `full_reason` names the clause that held, checked in this order:
 
 | Clause | `FULL` when | Read from |
 |---|---|---|
@@ -378,7 +424,15 @@ For a `merge_group` head, the lab scheduler calls `scripts.ci_lab.interaction.de
 | `overlap` | two entries change a common Python module; a shared file that is no module, such as `feature-map.json`, does not count | each entry's changes |
 | `cache` | more than half the manifest's test units have no cached verdict | the store lookups for the group head |
 
-When no clause holds, the result is the union of `tests.dep_manifest.invalidated` over the entries. An entry that changes a global input of the manifest, such as `uv.lock`, invalidates every unit, so the set is then the whole manifest. `tests/ci_lab/test_interaction.py` holds the property cases for each clause and its boundary.
+When no clause holds, the result is the union of `scripts.dep_manifest.invalidated` over the entries. An entry that changes a global input of the manifest, such as `uv.lock`, invalidates every unit, so the set is then the whole manifest. `tests/ci_lab/test_interaction.py` holds the property cases for each clause and its boundary.
+
+### How the scheduler derives each entry's changes
+
+`scripts.ci_lab.scheduler.MirrorExpander` builds the group from its git mirror. The merge queue stacks each pull request of a group as one commit on the first parent chain from `dev` to the group head, so the scheduler runs `git rev-list --first-parent <base>..<head>` and takes each listed commit as one entry. An entry's changes are `scripts.dep_manifest.changes` between that commit's first parent and the commit itself, so they hold only what that pull request changed, never the entries stacked below it. The group's diff is `scripts.dep_manifest.changes` between the base and the head.
+
+### Test files the manifest does not know
+
+The manifest lists only the tests of the `dev` commit it was stored for, so `scripts.dep_manifest.invalidated` never names a test module an entry adds. For a `merge_group` head the scheduler therefore also adds one test unit per test module in the entries' changes that the head tree holds and the manifest lists no test of, whether the rule chose a unit set or `FULL`. Each such unit's member is the module's path, and `scripts.ci_lab.expand_tests.unlisted_units` keys it as a broad test: on every file under `hooks/`, `scripts/` and `tests/`, the inputs every test shares, the invocation and the toolchain. `scripts.ci_lab.run_tests.outside` records no manifest files for such a member, so it reports every file the module opens except the inputs the executor treats as shared, a narrower set than the key's. `StoredManifests` merges an outside note only into a test the manifest lists, so until a `dev` manifest lists the module its key does not cover files it opened outside those trees and shared inputs.
 
 ## Queue shard sizing
 
@@ -721,7 +775,7 @@ The planner has no setting of its own. Its inputs are:
 | Stored durations | `.test_durations` at the repository root, which each unit job rewrites from the latest dev durations of its Python version (`tests.dev_durations.adopt`: the shared file overlaid with `.test_durations-<version>`) when a dev durations cache exists |
 | Shard count | `--shard N/M`: 20 for the 3.12 unit job, or the queue plan's `total` on merge groups |
 | Workers | 4 in the planner call in `tests/conftest.py` and `WORKERS` in `tests/queue_shards.py` |
-| Source size cost | `SECONDS_PER_SOURCE_BYTE` in `tests/shards.py` |
+| Source size cost | `SECONDS_PER_SOURCE_BYTE` in `scripts/shard_sizing.py` |
 
 To keep a set of tests together, put them in one file with one group:
 
@@ -741,7 +795,8 @@ The planner is plain Python and runs without pytest. From a checkout, this print
 python - tests/test_remote_control_mutation_baseline.py <<'EOF'
 import json, sys
 from pathlib import Path
-from tests.shards import FIRST_SHARD_FILES, assign_nodes, discover_test_files, grouped_files, source_sizes
+from scripts.shard_sizing import FIRST_SHARD_FILES, source_sizes
+from tests.shards import assign_nodes, discover_test_files, grouped_files
 
 root, target, shards = Path("."), sys.argv[1], 20
 durations = {**json.loads((root / ".test_durations").read_text()), **json.loads((root / ".test_durations-3.12").read_text())}
@@ -890,6 +945,8 @@ The early verifier also waits for the other required queue jobs, including `shar
 The workflow key remains `queue-fail-fast`, but its merge group Actions name is now `Gate — Required`. It starts after queue planning and holds a light runner while `Verify every queue gate while the units finish` runs `python3 -m scripts.ci_gate_queue`. The verifier waits only for the required queue jobs and the planned unit shards, so a red check outside them never holds a green group. It checks the queue ref and this attempt's job inventory every five seconds, with a forty minute verification deadline. It checks the ref again before accepting a complete inventory.
 
 This job now owns the required status. A lost or cancelled early gate cannot authorize a merge even if every unit passed. The later `Queue gate summary` still permits a failed or cancelled watcher with an empty `failed` output when its graded dependencies passed; that summary does not replace a successful `Gate — Required` check.
+
+A pull request cannot rewrite either job's name or the summary's needs: `Gate — Protected` pins both names and checks the needs against the reviewed inventory, which also admits the announced needs, as [Protected grading of the early gate pair](#protected-grading-of-the-early-gate-pair) describes.
 
 ### What the watcher reports
 
@@ -1050,6 +1107,165 @@ gh api "$R/contents/.github/workflows/test.yml?ref=b9a1dba09ae702b67f0372a7f9a27
 ```
 
 Issue 5456 also records two diagnostic gaps: the rebuild cause reader reported `unknown` because it missed the removed entry ahead, and the watcher drop counter classified by job names without excluding reported rebuilds. These are the investigation's filed findings, not evidence of a gate fix delivered by that task. An `unknown` rebuild cause requires queue history correlation; a watcher-only drop count requires checking the failure output before classifying it as runner loss.
+
+## Protected grading of the early gate pair
+
+`Gate — Protected` (`.github/workflows/gate-protected.yml`) grades every pull request into `dev` with the base branch's own `scripts.gate_protected`. It checks out the base branch, fetches the head only as git data, and runs `python -m scripts.gate_protected --head "$HEAD_SHA"` followed by `python -m scripts.ci_tests_start` in one step. It posts that step's outcome as the `Gate — Required` commit status on the head. The `dev` ruleset requires the `Gate — Required` context (see `.github/rulesets/README.md`), so a refused head cannot merge. Part of that grade covers the early queue gate pair described in [Lost unit shard rerun](#lost-unit-shard-rerun) and [Lost fail fast watcher](#lost-fail-fast-watcher). The grader pins the names of both jobs, then checks the required gate's needs against the reviewed inventory. A head therefore cannot change what the required gate depends on by rewriting the job names. [Pull request 11446](https://github.com/the-cloud-clockwork/agentihooks/pull/11446) delivered the name pin.
+
+### The pinned names
+
+`.github/workflows/test.yml` writes both names as expressions, so each job carries one name on `merge_group` and another on every other event:
+
+{% raw %}
+| Job key | `name:` in `test.yml` | Constant in `scripts.ci_gate_queue` | Name on `merge_group` | Name on other events |
+|---|---|---|---|---|
+| `queue-fail-fast` | `${{ github.event_name == 'merge_group' && 'Gate — Required' \|\| 'queue-fail-fast' }}` | `GATE_NAME` | `Gate — Required` | `queue-fail-fast` |
+| `gate-required` | `${{ github.event_name == 'merge_group' && 'Queue gate summary' \|\| 'Gate — Required' }}` | `SUMMARY_NAME` | `Queue gate summary` | `Gate — Required` |
+{% endraw %}
+
+`gate_protected.grade` first runs `_pinned_names`. For every base workflow job whose `name` equals `GATE_NAME` or `SUMMARY_NAME`, the head job with the same workflow file and job key must carry the same `name` string, character for character. Each job that differs adds one problem:
+
+```text
+The head changes or removes the reviewed name of test.yml/<job key>; the protected branch pins it.
+```
+
+A plain text name, an edited expression, a renamed job key, a deleted job and a deleted workflow file all count as a change. The pin reads the head as written, before normalization. It pins the base's own names, so a base that writes neither expression pins nothing. A pull request that renames either job is refused even when it also changes the constants, because the base's grader does the pinning.
+
+### The queue needs inventory check
+
+After the pin, `scripts.ci_gate_queue.normalize` checks the early gate in each workflow of the base and of the head. It selects a workflow by the expression form: a job whose name contains `Gate — Required` without being exactly `Gate — Required`. It does not check a workflow with no such job. In a selected workflow:
+
+| Check | Refusal |
+|---|---|
+| Exactly two jobs carry the expression form, `gate-required` is named `SUMMARY_NAME`, and `queue-fail-fast` equals `scripts.ci_gate_queue.watcher` rendered with `gate-required`'s `runs-on`, with or without `deferred=True` | `The early queue gate must use the exact reviewed context pair and verifier` |
+| The `reuse` job's `if` is `github.event_name != 'merge_group' && github.event_name != 'pull_request'` | `The early queue gate requires the existing whole queue reuse exclusion` |
+| `gate-required`'s `needs`, ignoring `lab-verdict`, equal the reviewed inventory, or the reviewed inventory plus `ANNOUNCED` | `The early queue gate must preserve the reviewed graded inventory` |
+
+The reviewed inventory joins `REQUIRED`, `SKIPPED` and four unit and watcher jobs:
+
+| Set | Jobs |
+|---|---|
+| `REQUIRED` | `select`, `split`, `test-count`, `shard-check` |
+| `SKIPPED` | `unit-selected`, `coverage-ratchet`, `lint`, `docs`, `sonar`, `mutation-plan`, `mutation-stats`, `mutation`, `swarm-image`, `worker-image`, `brain-smoke`, `writer-lock`, `install-smoke`, `kind-due`, `helm-kind`, `semgrep`, `ledger-load`, `stage-budget`, `reuse`, `dep-manifest` |
+| Unit and watcher jobs | `unit`, `unit-lost`, `unit-rerun`, `queue-fail-fast` |
+| `ANNOUNCED` | `install-smoke`, `dep-manifest`, `type-gate` |
+| `LAB_VERDICT` | `lab-verdict`, ignored in the comparison |
+
+The comparison is between sets, so need order does not matter, and a missing need is refused like an added one. `install-smoke` and `dep-manifest` already belong to the inventory, so `type-gate` is the one need that `ANNOUNCED` adds. `dev`'s `gate-required` already lists `type-gate` and grades green only because `ANNOUNCED` admits it.
+
+When every check passes, `normalize` renames the pair to plain `Gate — Required` and `queue-fail-fast` in its copy, so the rest of the grade sees one job named `Gate — Required`. A refusal from `normalize` ends the grade: the result is the pin problems followed by that refusal.
+
+### Why the names are pinned
+
+Before pull request 11446, `grade` started with `normalize`. If a head wrote both names as plain text, its workflow had no expression-named job, so `normalize` skipped it and never compared `gate-required`'s needs with the reviewed inventory. The normalized base carried the same plain names, and the rest of the grade did not compare the needs list. A head could therefore add any job to the required gate's needs and still grade green. The red [Tests run 43792558997](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/43792558997) on the pull request's tests only commit showed the old grader accepting such a head. The pin now refuses plain names, so a head passes only with the expression names, and with them `normalize` always runs the inventory check.
+
+### Examples
+
+These results come from calling `gate_protected.grade` against the `dev` workflows, with each head changed only as listed:
+
+| Head | Problems returned |
+|---|---|
+| Unchanged | none |
+| Expression names kept, `new-required-check` added to `gate-required`'s `needs` | `The early queue gate must preserve the reviewed graded inventory` |
+| Both names written as plain text, `new-required-check` added | The pin problem for `test.yml/queue-fail-fast`, then the one for `test.yml/gate-required` |
+| Both names written as plain text, `needs` unchanged | The same two pin problems |
+| Only `gate-required` written as plain text | The pin problem for `test.yml/gate-required`, then `The early queue gate must use the exact reviewed context pair and verifier` |
+
+Pin problems follow the base's job order, and `queue-fail-fast` comes before `gate-required` in `test.yml`. The third head returns only the two pin problems: the pin alone refuses it.
+
+The accepted form, as `dev` writes it:
+
+{% raw %}
+```yaml
+  queue-fail-fast:
+    name: ${{ github.event_name == 'merge_group' && 'Gate — Required' || 'queue-fail-fast' }}
+  gate-required:
+    name: ${{ github.event_name == 'merge_group' && 'Queue gate summary' || 'Gate — Required' }}
+```
+{% endraw %}
+
+A refused head, with the names as plain text and one need added:
+
+```yaml
+  queue-fail-fast:
+    name: queue-fail-fast
+  gate-required:
+    name: Gate — Required
+    needs: [select, split, test-count, shard-check, new-required-check]
+```
+
+The `needs` list is shortened here; the real list holds the whole inventory.
+
+To repeat the third example, save this as `grade_head.py` and run it from the root of a `dev` checkout with `PYTHONPATH=. python grade_head.py`:
+
+```python
+import copy
+import json
+from pathlib import Path
+
+from scripts import ci_runner_trust, ci_wiring, gate_protected
+
+root = Path(".")
+policy = json.loads((root / ci_runner_trust.ACTORS).read_text())
+workflows = ci_wiring.load(root)
+config = json.loads((root / ci_wiring.CONFIG).read_text())
+head = copy.deepcopy(workflows)
+jobs = head["test.yml"]["jobs"]
+jobs["gate-required"]["name"] = "Gate — Required"
+jobs["queue-fail-fast"]["name"] = "queue-fail-fast"
+jobs["gate-required"]["needs"].append("new-required-check")
+for problem in gate_protected.grade(workflows, config, head, config, policy):
+    print(problem)
+```
+
+It prints the two pin problems.
+
+### Running the grader by hand
+
+Grade a pull request head the way `Gate — Protected` does, from a checkout whose files match `dev`, such as a `wt.sh tmp` checkout, so the grader code is the same as CI's:
+
+```bash
+git fetch origin dev
+git fetch origin "refs/pull/<number>/head"
+python -m scripts.gate_protected --base origin/dev --head FETCH_HEAD
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--head` | required | The revision to grade |
+| `--base` | `HEAD` | The protected branch revision. The base workflows come from the merge base of `--base` and `--head`. The `not_gates` and `outside_gate` entries of `.github/gate-wiring.json` merge from that merge base and from `--base`, the `--base` entries winning. The runner trust policy comes from `--base`'s `.github/workflows/trusted-actors.json`; when that file is absent at `--base`, the runner trust check is skipped |
+| `--root` | `.` | The git checkout to read revisions from |
+
+The first output line is `graded <first 12 characters of --head> against merge base <first 12 characters>: <n> protected gate problems`, followed by one `::error::<problem>` line per problem. The exit code is 1 when there are problems and 0 otherwise. The command adds the workflow preflight, equivalence, frozen file, branch lane and runner trust checks to the `grade` result, so its count can exceed what `grade` returns. On the unchanged head:
+
+```text
+$ python -m scripts.gate_protected --base origin/dev --head HEAD
+graded HEAD against merge base fad7e9be3aac: 0 protected gate problems
+```
+
+The Tests `lint` job runs `python -m scripts.gate_protected --head <pull request head>` with no `--base`, from its grader checkout at the event base, so `--base` is that checkout's `HEAD`. [Protected gate step in lint](grader-gate-steps.md#protected-gate-step-in-lint) describes that step.
+
+### Changing the pinned names or the inventory
+
+There is no setting or environment variable. The pinned names are whatever the base writes for the jobs whose names equal `GATE_NAME` and `SUMMARY_NAME`. The inventory is `REQUIRED`, `SKIPPED`, `ANNOUNCED` and `LAB_VERDICT` in `scripts.ci_gate_queue`. Because `Gate — Protected` runs the base branch's grader, a need the base does not know is refused in the pull request that adds it. `ANNOUNCED` lists promotion gates that the base accepts before the pull request that adds them lands. To add a need, first land a grader pull request that adds the job to `ANNOUNCED`, then add the need to `gate-required` in a later pull request.
+
+The grader code comes from the base branch checkout, so a change to `scripts.gate_protected` or `scripts.ci_gate_queue` grades pull requests as soon as it merges into `dev`. The workflow file is different: GitHub runs `pull_request_target` from the default branch's copy of `gate-protected.yml`, so a change to that file acts only once a release carries it to `main`.
+
+### Troubleshooting the protected gate pair
+
+| Symptom | Cause | Action |
+|---|---|---|
+| `The head changes or removes the reviewed name of test.yml/<job key>; the protected branch pins it.` | The head's `name:` for that job differs from the base's: plain text, an edited expression, or a renamed or deleted job | Copy the line back from the base: `git show origin/dev:.github/workflows/test.yml \| grep -nE -A1 '^  (gate-required\|queue-fail-fast):'` |
+| `The early queue gate must preserve the reviewed graded inventory` | `gate-required`'s `needs` gained or lost a job | Restore the needs list, or announce the new job in a grader pull request first, as [Changing the pinned names or the inventory](#changing-the-pinned-names-or-the-inventory) describes |
+| `The early queue gate must use the exact reviewed context pair and verifier` | Only one of the pair carries the expression form, `gate-required` carries another expression, or `queue-fail-fast` differs from the `watcher` rendering | Restore both jobs from the base, and render `queue-fail-fast` from `scripts.ci_gate_queue.watcher` |
+| `The early queue gate requires the existing whole queue reuse exclusion` | The `reuse` job's `if` changed | Restore it from the base |
+| `The base holds <n> jobs named Gate — Required; nothing protected can grade.` or `The head holds <n> jobs named Gate — Required; exactly one must be.`, with no pin problem listed | These two refusals return without the pin problems | Fix the job count and push again; the next grade lists any pin problems |
+
+### Delivery evidence
+
+- [Pull request 11446](https://github.com/the-cloud-clockwork/agentihooks/pull/11446) merged on 16 November 2026 and closed issue 11445.
+- `tests/test_ci_gate_queue.py::test_protected_grading_refuses_an_added_gate_need_whatever_form_the_gate_names_take` runs in two parametrized cases, expression names and plain names. Each case checks that the canonical head grades green against itself, then adds `new-required-check` to `gate-required`'s `needs`. It expects an `inventory` problem in the expression names case and a `pins it` problem in the plain names case. Its feature map entry is `protected-grader-pins-gate-names`, with seam `gate_protected.grade`.
+- On 18 November 2026, `gate_protected.grade` was run on the `dev` workflows at commit `fad7e9be3a` and produced the examples table. `python -m scripts.gate_protected --base origin/dev --head HEAD` on that checkout printed the zero problem line above and exited 0.
 
 ## Lost runner requeue
 
@@ -1220,6 +1436,10 @@ Replace the example run ID with the intended run. Repeat `--run-id` to select se
 | `action: error` with timestamps | Recovery began and an API operation failed. Attempted cancel times and any observed completion survive the error, including a failed rerun request. Read `reason`; a request timestamp does not prove GitHub accepted it. |
 | No timing fields | Older records and decisions made before recovery, including early read errors, have no recovery timings. A run rerun meanwhile is also left alone without these fields. Do not fill gaps with zero or `updated_at`. |
 
+### Stale queued runs
+
+GitHub can leave a run queued for months with no jobs and no update: on 19 November agentihooks held 64 such runs, 61 of them created on 11 November between 20:28 and 20:52 UTC. They take no runner, because every ARC listener scaled on zero assigned jobs while they stayed queued, but they stay in every queued run listing until something removes them. GitHub refuses `cancel` and `force-cancel` on such a run with HTTP 409, "Cannot cancel a workflow run that has not been queued yet.", while `DELETE` of the run answers 204. Before its watch, the Lost runner workflow runs `python -m scripts.ci_stale_runs --repo <owner>/<repo>` with the same App token. A queued run is stale once its `updated_at` is at least 24 hours old, the time GitHub lets a job wait in the queue, so a rerun of an old run is never stale. For each stale run the sweep prints its workflow, branch, times and job states by runner labels, then deletes the run when it holds no job and posts `cancel` when it holds one. A stale run still queued thirty seconds later gets a `::warning::` annotation without failing the step. The watch step runs whenever the token minted, so a sweep that fails on a GitHub read still leaves the watch running.
+
 ## Queue rebuild records
 
 GitHub rebuilds a merge group whenever an entry ahead of it changes: an enqueue or priority insertion ahead, a dequeue, a requeue, a removal ahead or a push to the base. The rebuilt group gets a new head commit, and the Tests run still building the old head is cancelled. On 16 October a priority insertion rebuilt three group chains and cancelled 195.550 runner minutes, and no record named the action that caused it ([issue 4282](https://github.com/the-cloud-clockwork/agentihooks/issues/4282)). The **queue journal**, written on the machine running the swarm tooling for every queue mutation that tooling performs, keeps that link. It does not change what the queue does. It was delivered by [pull request 4355](https://github.com/the-cloud-clockwork/agentihooks/pull/4355).
@@ -1232,14 +1452,10 @@ Every record is one JSON line appended to `merge-queue-events.jsonl` in the Agen
 |---|---|---|
 | `queue` | `agentihooks swarm <slug> merge queue <url>`, the `ready` merge pass and the requeue sweep `python -m scripts.ci_requeue` | yes |
 | `dequeue` | `agentihooks swarm <slug> merge dequeue <url>` and the `ready` merge pass | yes |
-| `priority` | `agentihooks swarm <slug> merge priority <url>` when it reorders the queue, at once or when the tick replays a deferred request | yes |
-| `priority-deferred` | A priority request that waits because the head group's merge group run has not completed | no |
-| `priority-lift` | A priority request with `--lift`, which skips that wait | no |
-| `priority-applied` | The tick replaying a deferred priority that succeeded | no |
-| `priority-failed` | The tick replaying a deferred priority that failed | no |
-| `priority-dropped` | The tick dropping a deferred priority whose pull request closed, left `dev` or became a draft | no |
-| `priority-requeue` | The tick requeuing an entry an interrupted priority left out | no |
-| `priority-requeue-skipped` | The tick leaving such an entry out because it became a draft, its head moved or it conflicts with `dev` | no |
+| `priority` | `agentihooks swarm <slug> merge priority <url>` once the pull request passes every [refusal](#merge-priority), even when a queue step then fails | yes |
+| `priority-lift` | `merge priority --lift`, before the same reorder, which writes its own `priority` record | no |
+| `priority-requeue` | `merge priority` after a failed step, and the swarm refresh job the tick starts, requeuing an entry an interrupted priority left out | no |
+| `priority-requeue-skipped` | The same two writers leaving such an entry out because it became a draft, its head moved or it conflicts with `dev` | no |
 
 `merge state` writes nothing. A `queue` for a pull request already in the queue writes nothing, and neither does a `queue` into a repository with no `dev` merge queue, which squash merges instead.
 
@@ -1251,7 +1467,7 @@ Each record carries:
 | `action` | One of the actions above |
 | `token_actor` | The GitHub login of the token that read the queue, which is the actor GitHub records for the mutation; `null` when no queue read succeeded |
 | `agent` | `AGENTIHOOKS_AGENT_NAME` of the calling session; `null` outside a swarm session |
-| `pull`, `expected_head` | The pull request URL, always set, and the head it was queued or dequeued at; `expected_head` is empty for `priority-deferred`, `priority-lift`, `priority-applied`, `priority-failed` and `priority-dropped` |
+| `pull`, `expected_head` | The pull request URL, always set, and the head it was queued or dequeued at; `expected_head` is empty for `priority-lift` |
 | `old_groups`, `new_groups` | Every `dev` queue entry, all pages, in queue order, read just before and just after the mutation; `null` when not read or unreadable |
 | `observed_between` | The times of the first and last queue reads |
 | `rebuilt` | Each pull request in both reads whose group head changed, with `old_head`, `new_head`, `old_base` and `new_base` |
@@ -1259,8 +1475,9 @@ Each record carries:
 | `gaps` | Why a queue read failed, as `queue unreadable: <error>` |
 | `errors` | The GitHub errors the mutation returned; the after read still runs when the mutation fails |
 | `steps` | `priority` only: each `["dequeue", url]`, `["queue", url]` and `["restore", url]` in the order sent |
+| `lab` | `priority` only: the [CI lab](ci-lab.md#control-routes) reply to the hotfix mark on the pull request head, or `{"error": why}` when the lab could not be told |
 
-Each queue group lists `pull`, `pull_head`, `position`, `state`, `jump`, `enqueued_at`, `enqueuer`, `head` (the merge group commit) and `base`. An entry still waiting for its group has a `null` head. `rebuilt`, `removed` and `added` appear only when both reads succeeded. Records from the `ready` merge pass also carry `swarm`, `task`, `timer` (the tick process ID) and `by: "merge watcher"`. A `queue` the master seat makes carries `route` and `task`: `spawn stall` while a spawn stall finding is open for a focused urgent task, or `master freeze` for a pull request whose head branch starts with `master-`, the worktree name code gives a master session's sub agents, and whose task, not done, a master seat froze by name; without either route the master is refused. Deferred priority records carry the request's `repo`, `group_head`, `run_id`, `sender` and `order`; `priority-dropped` and `priority-requeue-skipped` carry `reason`.
+Each queue group lists `pull`, `pull_head`, `position`, `state`, `jump`, `enqueued_at`, `enqueuer`, `head` (the merge group commit) and `base`. An entry still waiting for its group has a `null` head. `rebuilt`, `removed` and `added` appear only when both reads succeeded. Records from the `ready` merge pass also carry `swarm`, `task`, `timer` (the tick process ID) and `by: "merge watcher"`. A `queue` the master seat makes carries `route` and `task`: `spawn stall` while a spawn stall finding is open for a focused urgent task, or `master freeze` for a pull request whose head branch starts with `master-`, the worktree name code gives a master session's sub agents, and whose task, not done, a master seat froze by name; without either route the master is refused. `priority-requeue-skipped` carries `reason`.
 
 `rebuilt` shows only what changed between two reads taken seconds apart. GitHub rebuilds groups after the mutation returns, so most records show no rebuild, and an entry that gained its first group head counts as rebuilt from `null`. To find the mutation behind a rebuild, search by time, as below.
 

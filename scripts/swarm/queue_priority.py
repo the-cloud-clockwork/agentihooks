@@ -7,11 +7,9 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from scripts.inbox.store import InboxError, InboxStore
-from scripts.swarm import merge_queue, queue_record, ready, staged_compatibility
-from scripts.swarm.ledger_client import LedgerClient
+from scripts.swarm import lab_control, merge_queue, queue_record, ready, staged_compatibility
 from scripts.swarm.store import RedisStore, SwarmError
 
-PENDING = "queue-priority"
 DISPLACED = "queue-priority-displaced"
 ACTIVE = "queue-priority-active"
 ACTIVE_S = 3600
@@ -147,34 +145,27 @@ def requeue(store: RedisStore, slug: str, tasks: list[dict], ledger=None) -> lis
     return actions
 
 
-def blocking(url: str, journal: queue_record.Journal, head: str) -> dict | None:
-    groups = journal.groups()
-    if groups is None:
-        raise SwarmError("queue priority waits until the head group can be read")
-    repo = "/".join(url.split("/")[3:5])
-    runs = merge_queue.rest(
-        f"repos/{repo}/actions/workflows/test.yml/runs?event=merge_group&head_sha={head}&per_page=100",
-        subprocess.run,
-    )["workflow_runs"]
-    if runs and runs[0]["status"] == "completed":
-        return None
-    if not runs and not any(group["head"] == head for group in groups):
-        return None
-    return {"repo": repo, "group_head": head, "run_id": runs[0]["id"] if runs else None}
-
-
 def apply(
-    store: RedisStore, slug: str, url: str, sender: str, tasks: list[dict], journal: queue_record.Journal, ahead=()
+    store: RedisStore, slug: str, url: str, sender: str, tasks: list[dict], journal: queue_record.Journal
 ) -> dict:
     with exclusive(store, slug):
-        return reorder(store, slug, url, sender, tasks, journal, ahead)
+        return reorder(store, slug, url, sender, tasks, journal)
 
 
 def reorder(
-    store: RedisStore, slug: str, url: str, sender: str, tasks: list[dict], journal: queue_record.Journal, ahead=()
+    store: RedisStore,
+    slug: str,
+    url: str,
+    sender: str,
+    tasks: list[dict],
+    journal: queue_record.Journal,
 ) -> dict:
+    lab_url = store.config(slug).lab_url
     result = merge_queue.prioritize(
-        url, journal=journal, displaced=Displaced(store, slug), **({"ahead": ahead} if ahead else {})
+        url,
+        journal=journal,
+        displaced=Displaced(store, slug),
+        lab=lambda head: lab_control.acknowledge(lab_url, head, os.environ),
     )
     for task in owners(tasks, result["displaced"]):
         InboxStore(store.redis).send(
@@ -186,7 +177,6 @@ def reorder(
     if result["errors"]:
         requeue(store, slug, tasks)
         raise SwarmError("; ".join(result["errors"]))
-    store.redis.hdel(store.key(slug, PENDING), url)
     return result
 
 
@@ -197,74 +187,9 @@ def request(store: RedisStore, slug: str, url: str, sender: str, tasks: list[dic
     return apply(store, slug, url, sender, tasks, journal)
 
 
-def drop_reason(url: str) -> str:
-    raw = merge_queue.graphql(merge_queue.STATE, {"url": url}, subprocess.run)["resource"]
-    if raw is None:
-        raise SwarmError("pull request could not be read")
-    if raw["state"] != "OPEN":
-        return f"pull request is {raw['state']}"
-    if raw["baseRefName"] != "dev":
-        return "pull request no longer targets dev"
-    if raw.get("isDraft"):
-        return "pull request is a draft"
-    return ""
-
-
-def replay(
-    store: RedisStore,
-    slug: str,
-    url: str,
-    record: dict,
-    tasks: list[dict],
-    journal: queue_record.Journal,
-    ledger: LedgerClient | None,
-) -> None:
-    try:
-        reorder(store, slug, url, record["sender"], tasks, journal, record.get("ahead"))
-    except SwarmError as exc:
-        journal.write("priority-failed", url, "", None, None, errors=[str(exc)], **record)
-        if ledger is not None:
-            ledger.raise_alert(slug, f"merge-priority:{url}", f"Deferred merge priority failed for {url}: {exc}")
-        raise
-
-
 def refresh(store: RedisStore, slug: str, tasks: list[dict], ledger=None) -> list[str]:
     try:
         with exclusive(store, slug):
-            return requeue(store, slug, tasks, ledger) + pending(store, slug, tasks, ledger)
+            return requeue(store, slug, tasks, ledger)
     except Busy as exc:
         return [f"merge queue priority waits: {exc}"]
-
-
-def pending(store: RedisStore, slug: str, tasks: list[dict], ledger) -> list[str]:
-    actions = []
-    records = [(url, json.loads(raw)) for url, raw in store.redis.hgetall(store.key(slug, PENDING)).items()]
-    records.sort(key=lambda item: item[1].get("order", 0))
-    while records:
-        url, record = records.pop(0)
-        try:
-            journal = queue_record.Journal(url)
-            reason = drop_reason(url)
-            if reason:
-                store.redis.hdel(store.key(slug, PENDING), url)
-                journal.write("priority-dropped", url, "", None, None, reason=reason, **record)
-                actions.append(f"dropped deferred merge queue priority for {url}: {reason}")
-                continue
-            if record["run_id"] is None:
-                held = blocking(url, journal, record["group_head"])
-                if held is not None:
-                    store.redis.hset(store.key(slug, PENDING), url, json.dumps({**record, **held}))
-                    continue
-            else:
-                run = merge_queue.rest(f"repos/{record['repo']}/actions/runs/{record['run_id']}", subprocess.run)
-                if run["status"] != "completed":
-                    continue
-            replay(store, slug, url, record, tasks, journal, ledger)
-            for later_url, later in records:
-                later["ahead"] = list(dict.fromkeys([*record.get("ahead", []), *later.get("ahead", []), url]))
-                store.redis.hset(store.key(slug, PENDING), later_url, json.dumps(later))
-            journal.write("priority-applied", url, "", None, None, **record)
-            actions.append(f"applied deferred merge queue priority for {url}")
-        except SwarmError as exc:
-            actions.append(f"merge queue priority for {url} waits: {exc}")
-    return actions

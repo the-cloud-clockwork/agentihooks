@@ -110,6 +110,7 @@ from scripts.swarm import (
     idle,
     launch_check,
     ledger_events,
+    linked_issues,
     master_launch,
     master_move,
     master_queue,
@@ -163,10 +164,13 @@ from scripts.swarm.status import (
     auto_snapshot,
     findings,
     live_agents,
+    readable_hives,
+    section_lines,
     status_report,
     task_counts,
     transport,
     verdict_store,
+    wait_label,
 )
 from scripts.swarm.store import (
     APP_SERVER_TRANSPORT,
@@ -1573,12 +1577,11 @@ def probe_command(store, args):
 
 
 def hive_admission(store: Any, slug: str) -> dict[str, Any]:
-    """Each live hive's admission room and limit, and the binding limit against quota seats and host room."""
+    """Each readable live hive's admission room and limit, and the binding limit against quota seats and host room."""
     from scripts.hive import admission
-    from scripts.hive.launch import live_hives
     from scripts.swarm import capacity
 
-    hives = live_hives(store)
+    hives, refused = readable_hives(store)
     record: dict[str, Any] = capacity.read(store, slug)
     host: dict[str, Any] = record.get("host") or {}
     environ = dict(os.environ)
@@ -1586,7 +1589,7 @@ def hive_admission(store: Any, slug: str) -> dict[str, Any]:
     seats = capacity.quota_seats(observed, capacity.warned_accounts(observed, environ))
     others: dict[str, int | None] = {"quota seats": seats, "host room": host.get("room")}
     rows = [{"hive": hive["id"], "room": hive["room"], "limit": hive["limit"]} for hive in hives]
-    return {"hives": rows, "lines": admission.view_lines(hives, others)}
+    return {"hives": rows, "lines": admission.view_lines(hives, others, refused)}
 
 
 def cmd_status(store: Any, args: Any) -> None:
@@ -1623,7 +1626,7 @@ def cmd_status(store: Any, args: Any) -> None:
 
     held += admission.status_lines(placement_waits.read(store, args.slug))
     held += master_refusals.status_lines(store, args.slug, now_ms())
-    held += hive_admission(store, config.slug)["lines"]
+    held += section_lines("hive admission", lambda: hive_admission(store, config.slug)["lines"])
     for line in ledger_freezes.lines(doc) + quota + held + outbox.status_lines():
         print(line)
     print(bottleneck.line(bottleneck.read(store, args.slug), now_ms()))
@@ -1635,7 +1638,7 @@ def cmd_status(store: Any, args: Any) -> None:
     if promotion := tick_master.status_line(tick_master.read(store, args.slug)):
         print(promotion)
     print(
-        "Agent\tLane\tHarness\tProfile\tModel\tAccount\tPane\tTask\tState\tConversation\tPush inbox\tNative terminal\tModel source\tConfidence\tHive"
+        "Agent\tLane\tHarness\tProfile\tModel\tAccount\tPane\tTask\tState\tConversation\tPush inbox\tNative terminal\tModel source\tConfidence\tHive\tWait"
     )
     for a in agents:
         model = " ".join(filter(None, (a.model, a.effort))) if a.model else "unknown"
@@ -1644,6 +1647,7 @@ def cmd_status(store: Any, args: Any) -> None:
         attach = "yes" if can["native_terminal_attach"] else "no"
         print(
             f"{a.name}\t{a.lane}\t{a.harness}\t{a.profile or 'unknown'}\t{model}\t{a.account or '-'}\t{a.pane_id}\t{a.task}\t{agent_status(a)}\t{a.conversation_id or '-'}\t{push}\t{attach}\t{a.model_source or '-'}\t{a.model_confidence if a.model_confidence is not None else '-'}\t{agent_hive(a) or '-'}"
+            f"\t{wait_label(store, args.slug, a)}"
         )
     from scripts.hive import join_report
 
@@ -1705,7 +1709,7 @@ def autoscale_lines(config, decision):
 
 
 def cmd_autoscale(store: RedisStore, args: argparse.Namespace) -> None:
-    from scripts.hive import admission, launch
+    from scripts.hive import admission
     from scripts.swarm import capacity, local_slots
 
     config = store.config(args.slug) if args.slug in store.slugs() else SwarmConfig(args.slug, "", max_eng=0, max_ci=0)
@@ -1717,11 +1721,11 @@ def cmd_autoscale(store: RedisStore, args: argparse.Namespace) -> None:
     known = args.slug in store.slugs()
     slots = {"local_slots": local_slots.maximum(store, args.slug, config.local_max_agents)} if known else {}
     host: dict[str, Any] = (decision or {})["host"]
-    hives: list[dict[str, Any]] = [] if args.fixture else launch.live_hives(store)
+    hives, refused = readable_hives(store) if not args.fixture else ([], {})
     admitted: list[str] = []
-    if hives:
+    if hives or refused:
         seats = capacity.inputs_seats(inputs)
-        admitted = admission.view_lines(hives, {"quota seats": seats, "host room": host["room"]})
+        admitted = admission.view_lines(hives, {"quota seats": seats, "host room": host["room"]}, refused)
     if args.json:
         rows = [{"hive": hive["id"], "room": hive["room"], "limit": hive["limit"]} for hive in hives]
         shown: dict[str, Any] = {"hive_admission": rows, "binding": admitted[-1]} if hives else {}
@@ -1732,7 +1736,7 @@ def cmd_autoscale(store: RedisStore, args: argparse.Namespace) -> None:
                     "applied": config.scaling == AUTO_SCALING,
                     **(decision or {}),
                     **slots,
-                    **shown,
+                    **shown | ({"admission_unreadable": refused} if refused else {}),
                 },
                 indent=2,
             )
@@ -1849,8 +1853,9 @@ def cmd_blockers(store: RedisStore, args: argparse.Namespace) -> None:
 
 
 def cmd_panic(store: RedisStore, args: argparse.Namespace) -> None:
-    """The panic button: on, pressed by the master or the operator, stops agent starts and cancels CI runs but the
-    checked fixes and the fixer branches every swarm recorded, off clears it once stable."""
+    """The panic button: on, pressed by the master or the operator, stops agent starts, cancels CI runs and pauses the
+    lab's pull request grading but the checked fixes and the fixer branches every swarm recorded; off clears it once
+    stable and resumes the lab."""
     now = now_ms()
     if args.action == "on":
         _master_or_operator(store, args, "only the master or the operator presses panic on")
@@ -1859,7 +1864,8 @@ def cmd_panic(store: RedisStore, args: argparse.Namespace) -> None:
         found = panic.engage(store, args.slug, f"pressed on swarm {args.slug}", False, args.fix, now)
         owns = panic.owner(store, args.slug)
         cancelled = panic.cancel_runs((*found.fixes, *panic.fixers(store)), panic.REPOS, panic.port, owns)
-        print(json.dumps({"panic": "on", "fixes": list(found.fixes), "cancelled": cancelled}))
+        lab = panic.lab_engage(store, args.slug, found.fixes)
+        print(json.dumps({"panic": "on", "fixes": list(found.fixes), "cancelled": cancelled, "lab": lab}))
         return
     if args.action == "off":
         if not panic.release(store, args.slug, now):
@@ -1868,7 +1874,7 @@ def cmd_panic(store: RedisStore, args: argparse.Namespace) -> None:
                 f"{panic.errors_since(store, args.slug, now - panic.WINDOW_MS)} errors in the last 15 minutes; it "
                 f"clears at {panic.RELEASE_LEVEL:.2f} with fewer than {panic.RELEASE_ERRORS}"
             )
-        print(json.dumps({"panic": "off"}))
+        print(json.dumps({"panic": "off", "lab": panic.lab_release(store, args.slug)}))
         return
     current = panic.state(store, args.slug)
     print(
@@ -2027,7 +2033,10 @@ def publication_command(store: RedisStore, args: argparse.Namespace) -> dict:
         task = ledger.task(args.slug, agent.task) or {}
         if args.command == "prepare":
             return publish.prepare(args.slug, agent, repo, ledger)
-        return publish.publish(args.slug, agent, repo, ledger, args.message, args.files)
+        if args.direct and args.via != publish.LAB:
+            raise SwarmError("publish --direct goes with --via lab")
+        lab = publish.LabRoute(agent.task, args.direct) if args.via == publish.LAB else None
+        return publish.publish(args.slug, agent, repo, ledger, args.message, args.files, lab)
     except SwarmError as exc:
         branch = exc.branch if isinstance(exc, publish.PublicationRefusal) else publish.refusal_branch(Path(repo), task)
         syslog.openlog("agentihooks-swarm")
@@ -2073,8 +2082,10 @@ def cmd_pr(store: RedisStore, args: argparse.Namespace) -> None:
     ledger = LedgerClient()
     doc, row = _stamp_scope(ledger, args.slug, agent.task)
     keeps_main = args.prerequisite is not None and (row.get("pr_url") or args.url) != args.url
-    head, repo, number, sha = PullHead(*pull_branch(args.url))
+    head, repo, number, sha, body = PullHead(*pull_branch(args.url))
     pull_head.refuse_other_branch(row, args, PullHead(head, repo))
+    if not keeps_main:
+        linked_issues.refuse_unnamed(args.url, body, row, lambda member: ledger.task(args.slug, member))
     branch = {"branch": head, "branch_repo": repo} if head and not keeps_main else {}
     confirmed = {"pr_number": number, "pr_head": sha} if number and not keeps_main else {}
     fields = {"state": "pr", "awaiting": awaiting, **branch, **confirmed} | ({} if keeps_main else {"pr_url": args.url})
@@ -2724,7 +2735,7 @@ def cmd_terminal(store, args):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    from scripts.swarm import master_drill, night_watch_drill, tick_report
+    from scripts.swarm import master_drill, night_watch_drill, tasks_read, tick_report
 
     parser = argparse.ArgumentParser(
         prog="agentihooks swarm", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -2740,7 +2751,7 @@ def build_parser() -> argparse.ArgumentParser:
     create.add_argument("--max-plan-agents", type=int, default=None)
     create.add_argument("--operator-asked")
     drills = {"night-watch-drill": night_watch_drill.command, "master-drill": master_drill.command}
-    for plain in ("start", "pause", "remove", "snapshot", "shutdown", "url", "reopen", "rename", *drills):
+    for plain in ("start", "pause", "remove", "snapshot", "shutdown", "url", "reopen", "rename", "exit", *drills):
         sub.add_parser(plain).set_defaults(handler=drills.get(plain))
     sub.add_parser("restore").add_argument("--from", dest="source", default="")
     sub.add_parser("stop").add_argument("--now", action="store_true")
@@ -2758,10 +2769,10 @@ def build_parser() -> argparse.ArgumentParser:
     pick.add_argument("--replace", dest="choice", action="store_const", const=master_launch.REPLACE)
     pick.add_argument("--forced", dest="choice", action="store_const", const=master_launch.FORCED)
     sub.add_parser("agent-up").add_argument("profile")
-    sub.add_parser("exit")
     sub.add_parser("set").add_argument("pairs", nargs="+")
     sub.add_parser("save-template").add_argument("template_name", metavar="name")
     sub.add_parser("status").add_argument("--json", action="store_true")
+    sub.add_parser("tasks").set_defaults(handler=tasks_read.command)
     sub.add_parser("probe").set_defaults(handler=probe_command)
     sub.add_parser("tick").set_defaults(handler=cmd_swarm_tick)
     report = sub.add_parser("tick-report")
@@ -2827,6 +2838,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("prepare")
     publish = sub.add_parser("publish")
     publish.add_argument("--message", "-m", required=True)
+    publish.add_argument("--via", choices=["lab"], default="", help="grade HEAD on the lab remote before origin")
+    publish.add_argument("--direct", action="store_true", help="with --via lab, push origin without the lab grade")
     publish.add_argument("files", nargs="*")
     sub.add_parser("branch")
     sub.add_parser("review")

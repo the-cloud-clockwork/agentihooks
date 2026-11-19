@@ -8,8 +8,7 @@ import zipfile
 import pytest
 from coverage import CoverageData
 
-from scripts import ci_branch_coverage, ci_test_plan
-from tests import coverage_check
+from scripts import ci_branch_coverage, ci_test_plan, coverage_check
 
 pytestmark = pytest.mark.unit
 

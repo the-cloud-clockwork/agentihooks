@@ -218,6 +218,20 @@ def test_the_cli_refuses_a_plan_the_remaining_budget_cannot_hold(tmp_path, monke
     assert capsys.readouterr().out.splitlines()[-1] == OVERRUN
 
 
+@pytest.mark.feature("mutation-replan-names-untested-functions")
+def test_the_cli_refusal_after_the_early_stage_names_the_functions_no_test_calls_in_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    folder = _stats(tmp_path, {**_plan(), "untested": ["scripts.a.x_g"]})
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "github-output"))
+    monkeypatch.setattr("sys.argv", ["probed", "--stats", str(folder), "--budget", "237"])
+    assert probed.main() == 1
+    assert capsys.readouterr().out.splitlines()[-1] == (
+        f"{OVERRUN} Functions no test calls in process hold 1 of the change's 5 mutants and 40 of its 281 worker"
+        " seconds: scripts.a.x_g."
+    )
+
+
 @pytest.mark.parametrize(("cost", "status"), [(2674.5, 1), (2673.0, 0)])
 def test_the_cli_grades_against_the_full_shard_budget_by_default(tmp_path, monkeypatch, cost, status):
     plan = _plan()

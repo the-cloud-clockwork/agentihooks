@@ -313,7 +313,7 @@ def test_a_changed_line_selects_only_the_tests_whose_recorded_coverage_reaches_i
 def _line_project(tmp_path, monkeypatch, mode):
     from coverage import CoverageData
 
-    from tests.dep_manifest import build
+    from scripts.dep_manifest import build
 
     _recorded_project(tmp_path, monkeypatch)
     source = "def f(value):\n    if value:\n        return value + 1\n    return value - 1\n"
@@ -529,7 +529,7 @@ def test_a_changed_file_without_recorded_direct_tests_names_the_test_modules_imp
 def test_a_changed_signature_adds_only_the_tests_reaching_its_function(tmp_path, monkeypatch):
     from coverage import CoverageData
 
-    from tests.dep_manifest import build
+    from scripts.dep_manifest import build
 
     _recorded_project(tmp_path, monkeypatch)
     source = (
@@ -566,7 +566,7 @@ def test_a_changed_signature_adds_only_the_tests_reaching_its_function(tmp_path,
 def test_a_changed_nested_signature_adds_the_tests_reaching_the_nested_function(tmp_path, monkeypatch):
     from coverage import CoverageData
 
-    from tests.dep_manifest import build
+    from scripts.dep_manifest import build
 
     _recorded_project(tmp_path, monkeypatch)
     source = (
@@ -620,7 +620,7 @@ def test_a_module_edit_that_only_binds_new_names_keeps_the_selection_narrow(
 ):
     from coverage import CoverageData
 
-    from tests.dep_manifest import build
+    from scripts.dep_manifest import build
 
     _recorded_project(tmp_path, monkeypatch)
     source = (
@@ -817,7 +817,7 @@ TABLE_SOURCE = (
 def test_a_new_handler_table_entry_selects_only_the_tests_that_reach_it(tmp_path, monkeypatch, mode, mention, expected):
     from coverage import CoverageData
 
-    from tests.dep_manifest import build
+    from scripts.dep_manifest import build
 
     _recorded_project(tmp_path, monkeypatch)
     (tmp_path / "scripts/core.py").write_text(TABLE_SOURCE)

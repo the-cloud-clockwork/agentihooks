@@ -1,9 +1,9 @@
 x-swarm-env: &swarm-env
-  AGENTIHOOKS_DEPLOYMENT: ${AGENTIHOOKS_DEPLOYMENT:-compose}
+  AGENTIHOOKS_DEPLOYMENT: ${SWARM_DEPLOYMENT:-compose}
   AGENTIHOOKS_SWARM_DATABASE_URL: ${AGENTIHOOKS_SWARM_DATABASE_URL:-}
   AGENTIHOOKS_BUS: ${SWARM_BUS:-nats}
   AGENTIHOOKS_BUS_URL: ${SWARM_BUS_URL:-nats://nats:4222}
-  AGENTIHOOKS_SCHEDULER_STATE_BACKEND: ${AGENTIHOOKS_SCHEDULER_STATE_BACKEND:-bus}
+  AGENTIHOOKS_SCHEDULER_STATE_BACKEND: ${SWARM_SCHEDULER_STATE_BACKEND:-bus}
   AGENTIHOOKS_SWARM_REDIS_URL: ${AGENTIHOOKS_SWARM_REDIS_URL:-${SWARM_REDIS_SCHEME:-redis}://swarm:${SWARM_REDIS_PASSWORD:?set SWARM_REDIS_PASSWORD, see deploy/compose/.env.example}@redis:6379/0}
   SSL_CERT_FILE: ${SWARM_CA_FILE:-/etc/ssl/certs/ca-certificates.crt}
 
@@ -65,6 +65,13 @@ services:
       SWARM_LEDGER_SCHEME: ${SWARM_LEDGER_SCHEME:-http}
     volumes:
       - ./deploy/compose/ledger-front.conf:/etc/nginx/templates/default.conf.template:ro
+    healthcheck:
+      test: [CMD, wget, -q, -O-, "http://127.0.0.1:8765/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+      start_interval: 1s
     depends_on:
       swarm:
         condition: service_healthy

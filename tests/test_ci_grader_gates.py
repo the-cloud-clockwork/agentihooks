@@ -26,6 +26,9 @@ CHART_STEPS = {
 UNWIRED = "on: pull_request\njobs:\n  planted:\n    runs-on: ubuntu-latest\n    steps:\n      - run: 'true'\n"
 STALE = 'import argparse\n\nparser = argparse.ArgumentParser()\nparser.add_argument("vectors", nargs="?")\nparser.parse_args()\n'
 PLANTED = 'print("planted head copy ran")\nraise SystemExit(0)\n'
+BASE_GRADED = "0 rendered CronJob objects and 0 failed renders across 11 renders of 1 charts."
+IGNORES_ROOT = f'print("{BASE_GRADED}")\nraise SystemExit(0)\n'
+REFUSED = "The protected grader's copy of tests/ci_charts/{} does not grade the tree --root names"
 
 
 def _steps(workflow: str, job: str) -> dict[str, dict[str, Any]]:
@@ -72,11 +75,11 @@ def _planted_module(head: Path, module: str) -> None:
     (head / f"scripts/{module}.py").write_text("raise SystemExit(0)\n")
 
 
-def _stale_grader(tmp_path: Path, script: str) -> Path:
+def _stale_grader(tmp_path: Path, script: str, source: str = STALE) -> Path:
     grader = tmp_path / "stale-grader"
     (grader / script).parent.mkdir(parents=True)
     (grader / script).parent.joinpath("__init__.py").write_text("")
-    (grader / script).write_text(STALE)
+    (grader / script).write_text(source)
     return grader
 
 
@@ -232,9 +235,23 @@ def test_a_stale_base_fails_a_chart_check_closed_and_a_planted_head_copy_never_r
     (head / "tests/ci_charts" / script).write_text(PLANTED)
     grader = _stale_grader(tmp_path, f"tests/ci_charts/{script}")
     graded = _run(_steps("semgrep.yml", "charts")[CHART_STEPS[script]]["run"], head, tmp_path / "runner", grader)
-    assert graded.returncode == 2, graded.stdout + graded.stderr
-    assert "unrecognized arguments: --root" in graded.stderr
+    assert graded.returncode == 1, graded.stdout + graded.stderr
+    assert REFUSED.format(script) in graded.stdout
     assert "planted head copy ran" not in graded.stdout
+
+
+@pytest.mark.feature("chart-checks-refuse-a-grader-that-ignores-root")
+@pytest.mark.parametrize("script", sorted(CHART_STEPS))
+def test_a_chart_check_refuses_a_grader_copy_that_ignores_the_root_instead_of_grading_the_base(
+    tmp_path: Path, script: str
+) -> None:
+    head = tmp_path / "head"
+    (head / "deploy").mkdir(parents=True)
+    grader = _stale_grader(tmp_path, f"tests/ci_charts/{script}", IGNORES_ROOT)
+    graded = _run(_steps("semgrep.yml", "charts")[CHART_STEPS[script]]["run"], head, tmp_path / "runner", grader)
+    assert graded.returncode == 1, graded.stdout + graded.stderr
+    assert REFUSED.format(script) in graded.stdout
+    assert BASE_GRADED not in graded.stdout
 
 
 @pytest.mark.feature("lint-gates-grade-from-grader")
@@ -271,7 +288,8 @@ def test_the_semgrep_scan_grades_the_code_with_the_grader_rules_and_the_head_rul
     steps = _steps("semgrep.yml", "scan")
     own = steps["Own rules hold on their fixtures and the code"]["run"].splitlines()[-1]
     assert (
-        own == 'semgrep scan --error --strict --metrics off --config "$RUNNER_TEMP/grader/$RULES" --config "$RULES" .'
+        own
+        == 'semgrep scan --error --strict --timeout 30 --metrics off --config "$RUNNER_TEMP/grader/$RULES" --config "$RULES" .'
     )
     findings = steps["Fail on findings new against the base"]
     assert ".semgrep-incidents" in findings["env"]["CONFIGS"].split()

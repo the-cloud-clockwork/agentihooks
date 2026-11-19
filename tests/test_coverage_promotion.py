@@ -1,3 +1,4 @@
+import json
 import subprocess
 from pathlib import Path
 
@@ -7,6 +8,7 @@ from coverage import CoverageData
 
 from tests import coverage_baseline as baseline
 from tests import coverage_ratchet as ratchet
+from tests.coverage_grade import measured_lines
 
 pytestmark = pytest.mark.timeout(30, method="signal")
 
@@ -36,7 +38,14 @@ def _publish(job, result):
     return process.returncode == 0
 
 
-def test_a_coverage_loss_stays_red_on_the_next_promotion_head(tmp_path, monkeypatch):
+def _summarize_database(shard: Path, summary: Path) -> None:
+    """Write the executed lines summary a unit shard uploads for its own database."""
+    summary.parent.mkdir(parents=True, exist_ok=True)
+    lines = {path: sorted(ran) for path, ran in measured_lines(shard).items()}
+    summary.write_text(json.dumps({baseline.OWN_DATABASE: lines}))
+
+
+def test_a_coverage_loss_stays_red_on_the_next_promotion_head(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
     monkeypatch.setattr(ratchet, "_cpus", lambda: 1)
     workflow = Path(__file__).parents[1] / ".github/workflows/test.yml"
@@ -52,8 +61,10 @@ def test_a_coverage_loss_stays_red_on_the_next_promotion_head(tmp_path, monkeypa
     data = CoverageData(basename=str(shard))
     data.add_lines({"hooks/example.py": {1, 2}})
     data.write()
+    summary = tmp_path / "summaries/executed-lines-3.12-1/executed-lines.json"
+    _summarize_database(shard, summary)
     stored = tmp_path / "baseline.json"
-    baseline.record(repo, [shard], stored)
+    baseline.record(repo, [summary], stored)
     statuses = []
     publications = []
     measured_bases = []
@@ -65,6 +76,7 @@ def test_a_coverage_loss_stays_red_on_the_next_promotion_head(tmp_path, monkeypa
         data.erase()
         data.add_lines({"hooks/example.py": lines})
         data.write()
+        _summarize_database(shard, summary)
         out = tmp_path / name
         status = ratchet.main(
             [
@@ -86,7 +98,7 @@ def test_a_coverage_loss_stays_red_on_the_next_promotion_head(tmp_path, monkeypa
         published = _publish(publisher, "success" if status == 0 else "failure")
         publications.append(published)
         if published:
-            baseline.record(repo, [shard], stored, stored)
+            baseline.record(repo, [summary], stored, stored)
         print(f"{name}: ratchet={status}, published={published}, measured_base={measured_base}")
     assert statuses == [0, 1, 1, 0]
     assert publications == [True, False, False, True]

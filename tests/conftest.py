@@ -22,19 +22,17 @@ for _redis_name in list(os.environ):
     if "REDIS" in _redis_name.upper():
         os.environ.pop(_redis_name)
 
+from scripts.shard_sizing import FIRST_SHARD_FILES, SECONDS_PER_SOURCE_BYTE, source_sizes
 from tests import installer_isolation, ledger_guard, mutation_trace, redis_key_guard, swarm_v2_isolation
 from tests.flake_ledger import WORKER_FILES
 from tests.shards import (
-    FIRST_SHARD_FILES,
     OWNER_COPIES,
-    SECONDS_PER_SOURCE_BYTE,
     assign_nodes,
     assign_owners,
     discover_test_files,
     grouped_files,
     setup_nodes_in_parallel,
     slowest_first,
-    source_sizes,
     warm_imports,
 )
 from tests.workflow_commands import refuse_commands

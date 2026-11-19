@@ -50,8 +50,19 @@ def test_enqueue_records_pending_jobs_in_order_per_head(jobs: queue.Queue) -> No
     assert found(jobs, "h1:test:a").requirement == queue.Requirement(slots=1, capabilities=frozenset())
 
 
-def take(jobs: queue.Queue, job: str, worker: str = "w1", token: str = "tok", expires_ms: int = 100) -> bool:
-    return jobs.claim(found(jobs, job), worker, token, expires_ms)
+@pytest.mark.feature("lab-worker-executors")
+def test_enqueue_stores_the_base_and_grader_revision_each_job_reads(jobs: queue.Queue) -> None:
+    jobs.enqueue([unit("a")], "h1", {}, "b1", "g1")
+    jobs.enqueue([unit("c")], "h2", {})
+
+    assert (found(jobs, "h1:test:a").base, found(jobs, "h1:test:a").grader) == ("b1", "g1")
+    assert (found(jobs, "h2:test:c").base, found(jobs, "h2:test:c").grader) == ("", "")
+
+
+def take(
+    jobs: queue.Queue, job: str, worker: str = "w1", token: str = "tok", expires_ms: int = 100, leased_ms: int = 0
+) -> bool:
+    return jobs.claim(found(jobs, job), worker, token, expires_ms, leased_ms)
 
 
 def test_enqueue_skips_jobs_already_known(jobs: queue.Queue) -> None:
@@ -91,8 +102,8 @@ def test_claim_is_won_once(jobs: queue.Queue) -> None:
     jobs.enqueue([unit("a")], "h1", {})
     record = found(jobs, "h1:test:a")
 
-    assert jobs.claim(record, "w1", "t1", 100) is True
-    assert jobs.claim(record, "w2", "t2", 100) is False
+    assert jobs.claim(record, "w1", "t1", 100, 0) is True
+    assert jobs.claim(record, "w2", "t2", 100, 0) is False
     assert jobs.pending() == []
     assert (found(jobs, "h1:test:a").worker, jobs.token("h1:test:a")) == ("w1", "t1")
 
@@ -108,6 +119,38 @@ def test_claim_records_the_lease(jobs: queue.Queue) -> None:
     assert jobs.members("h1", "pending") == {"h1:test:b"}
     assert jobs.expired(99) == []
     assert jobs.expired(100) == ["h1:test:a"]
+
+
+@pytest.mark.feature("lab-scheduler-metrics")
+def test_claim_records_when_the_lease_started_and_an_older_lease_reads_zero(jobs: queue.Queue, client) -> None:
+    jobs.enqueue([unit("a"), unit("b")], "h1", {})
+    assert found(jobs, "h1:test:a").leased_ms == 0
+    assert take(jobs, "h1:test:a", expires_ms=1100, leased_ms=1000)
+    assert found(jobs, "h1:test:a").leased_ms == 1000
+    assert take(jobs, "h1:test:b", expires_ms=1100, leased_ms=1000)
+    client.hdel("agentihooks-ci:queue:job:h1:test:b", "leased_ms")
+    assert found(jobs, "h1:test:b").leased_ms == 0
+
+
+@pytest.mark.feature("lab-scheduler-metrics")
+def test_tally_counts_each_finished_attempt_of_a_job_once(jobs: queue.Queue) -> None:
+    jobs.enqueue([unit("a"), unit("b")], "h1", {})
+    assert take(jobs, "h1:test:a")
+    assert jobs.finish(found(jobs, "h1:test:a"), "tok", "crash")
+    first = found(jobs, "h1:test:a")
+    assert jobs.tally(first) is True
+    assert jobs.tally(first) is False
+    assert jobs.retry(first)
+    assert take(jobs, "h1:test:a", "w2", "t2")
+    assert jobs.finish(found(jobs, "h1:test:a"), "t2", "passed")
+    second = found(jobs, "h1:test:a")
+    assert second.attempts == 1
+    assert jobs.tally(second) is True
+    assert jobs.tally(second) is False
+    assert jobs.tally(first) is False
+    assert take(jobs, "h1:test:b")
+    assert jobs.finish(found(jobs, "h1:test:b"), "tok", "passed")
+    assert jobs.tally(found(jobs, "h1:test:b")) is True
 
 
 def test_expired_includes_a_lease_at_time_zero(jobs: queue.Queue) -> None:
@@ -188,6 +231,30 @@ def test_reap_allows_more_attempts(jobs: queue.Queue) -> None:
     assert jobs.reap(record, 100, 2) == "lost"
 
 
+@pytest.mark.feature("lab-scheduler-test-units")
+def test_retry_moves_a_finished_job_back_to_pending_with_one_more_attempt(jobs: queue.Queue) -> None:
+    jobs.enqueue([unit("a"), unit("b")], "h1", {})
+    assert take(jobs, "h1:test:a")
+    record = found(jobs, "h1:test:a")
+    assert jobs.retry(record) is False
+    assert jobs.finish(record, "tok", "crash")
+
+    assert jobs.retry(record) is True
+    again = found(jobs, "h1:test:a")
+    assert (again.state, again.outcome, again.attempts, again.worker) == ("pending", "", 1, "")
+    assert jobs.token("h1:test:a") == ""
+    assert jobs.pending() == ["h1:test:b", "h1:test:a"]
+    assert jobs.members("h1", "pending") == {"h1:test:a", "h1:test:b"}
+    assert jobs.members("h1", "done") == set()
+    assert jobs.client.smembers("agentihooks-ci:queue:done") == set()
+    assert jobs.retry(record) is False
+
+    assert take(jobs, "h1:test:a", "w2", "t2")
+    assert jobs.finish(found(jobs, "h1:test:a"), "t2", "crash")
+    assert jobs.retry(record) is True
+    assert found(jobs, "h1:test:a").attempts == 2
+
+
 def test_every_key_carries_the_lab_prefix(jobs: queue.Queue, client) -> None:
     jobs.enqueue([unit("a"), unit("b")], "h1", {})
     assert take(jobs, "h1:test:a")
@@ -210,3 +277,28 @@ def test_every_key_carries_the_lab_prefix(jobs: queue.Queue, client) -> None:
 def test_missing_job_reads_none(jobs: queue.Queue) -> None:
     assert jobs.job("h1:test:none") is None
     assert jobs.token("h1:test:none") == ""
+
+
+@pytest.mark.feature("lab-scheduler-service")
+def test_leased_lists_each_leased_job_and_offers_keep_each_workers_latest_free_slots(jobs: queue.Queue) -> None:
+    ids = jobs.enqueue([unit("a"), unit("b"), unit("c")], "h1", {})
+    assert jobs.leased() == [] and jobs.offers(0) == {}
+    assert jobs.claim(found(jobs, ids[2]), "w1", "t1", 900, 0)
+    assert jobs.claim(found(jobs, ids[0]), "w1", "t2", 500, 0)
+    assert jobs.claim(found(jobs, ids[1]), "w2", "t3", 700, 0)
+    assert jobs.leased() == [ids[0], ids[1], ids[2]]
+    assert jobs.finish(found(jobs, ids[0]), "t2", "passed")
+    assert jobs.leased() == [ids[1], ids[2]]
+    jobs.offer("w1", 3, 1000)
+    jobs.offer("w2", 0, 1100)
+    jobs.offer("w1", 1, 1200)
+    assert jobs.offers(1100) == {"w1": (1, 1200), "w2": (0, 1100)}
+    assert jobs.offers(1101) == {"w1": (1, 1200)}
+    assert jobs.offers(0) == {"w1": (1, 1200), "w2": (0, 1100)}
+    assert jobs.prune(1100) == 0
+    assert jobs.prune(1101) == 1
+    assert jobs.offers(0) == {"w1": (1, 1200)}
+    jobs.offer("w3", 2, 900)
+    jobs.offer("w3", 5, 1300)
+    assert jobs.prune(1201) == 1
+    assert jobs.offers(0) == {"w3": (5, 1300)}

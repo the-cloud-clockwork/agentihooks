@@ -1,3 +1,4 @@
+import http.client
 import os
 import signal
 import subprocess
@@ -85,7 +86,7 @@ def test_a_reload_hands_over_without_a_failed_or_slow_request(tmp_path: Path, le
                     events.append(("child", child))
                 try:
                     status: int | str = healthy(ledger_port)
-                except OSError as exc:
+                except Exception as exc:
                     status = repr(exc)
                 events.append(("old" if (tmp_path / ".server.pid").read_text() == str(first.pid) else "new", status))
                 time.sleep(0.005)
@@ -142,3 +143,28 @@ def test_reload_waits_for_pid_publication_after_the_predecessor_exits(tmp_path, 
     monkeypatch.setitem(globals(), "pid_of", delayed_pid)
     test_a_reload_hands_over_without_a_failed_or_slow_request(tmp_path, ledger_port)
     assert stale == [processes[0].pid]
+
+
+@pytest.mark.wall_clock
+def test_a_malformed_answer_after_the_successor_is_named_fails_the_reload_test(
+    tmp_path: Path, ledger_port: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """urlopen raises BadStatusLine, which is no OSError, for a status line cut short such as HTTP/1.1 20."""
+    real_healthy, test_thread = healthy, threading.current_thread()
+    named_pids: list[int | None] = []
+    malformed_pids: list[int | None] = []
+
+    def malformed_once_the_successor_is_named(port: int, timeout: float = 30) -> int:
+        """Raise once on the hammer thread when the pid file names a server other than the first request's."""
+        pid = pid_of(tmp_path)
+        named_pids.append(pid)
+        successor_named = pid not in (None, named_pids[0])
+        if successor_named and not malformed_pids and threading.current_thread() is not test_thread:
+            malformed_pids.append(pid)
+            raise http.client.BadStatusLine("HTTP/1.1 20")
+        return real_healthy(port, timeout)
+
+    monkeypatch.setitem(globals(), "healthy", malformed_once_the_successor_is_named)
+    with pytest.raises(AssertionError, match="BadStatusLine"):
+        test_a_reload_hands_over_without_a_failed_or_slow_request(tmp_path, ledger_port)
+    assert malformed_pids

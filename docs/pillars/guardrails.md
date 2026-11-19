@@ -476,6 +476,14 @@ BLOCKED: /home/me/dev/worktrees/agentihooks/engineer-abc123-0041/pkg/mod.py is P
 
 Deleting non-Python files there, or a `.py` path that does not exist, is not checked.
 
+### Each agent's own Serena root
+
+The parent and every sub agent of one Claude session share a single MCP session on the Serena router. On `mcp__serena__*` calls, `PreToolUse` records the checkout root each agent activates in Redis, keyed by session id and agent id (empty for the parent), for seven days. On Claude it adds that root to the agent's later Serena calls as `agentihooks_root`. A sub agent that never activated gets its parent's root. The router routes a call that carries a root to that root's backend, applies the primary checkout refusal to it, names it in the `(applied in <root>)` line and strips it before forwarding. A carried root that is outside a git checkout or was removed is refused with the activation hint. A sub agent's activation therefore leaves the parent's and its siblings' edits in their own worktrees.
+
+The root goes out as `updatedInput` with no `permissionDecision` of its own, in `default`, `acceptEdits`, `plan`, `dontAsk` and `bypassPermissions` sessions alike. Claude applies that input and still runs its own permission rules on it, so every prompt you would have seen still shows. When a condition allows or asks, the root rides that decision. Auto mode carries no root, because its classifier reviewed the input Claude wrote and denies a call a hook changed.
+
+A call without a recorded root keeps the session's last activation, as before. That applies without Redis, with `AGENTIHOOKS_SERENA=false`, in auto mode, or on another harness.
+
 ### Configuration
 
 | Variable | Default | Description |
@@ -521,6 +529,21 @@ the refused forms, what still passes, configuration and troubleshooting.
 
 ---
 
+## Environment dumps in shell scripts and awk
+
+The credential guard reads the script a `sh`, `bash`, `zsh` or `dash` stage
+runs with `-c`, at the top level or as the command of a `kubectl`, `docker`,
+`podman`, `nerdctl` or `ssh` wrapper, and checks it like a command of its own.
+`kubectl exec pod -- sh -c 'env | cut -d= -f1'` is refused as an environment
+dump. An `awk`, `gawk`, `mawk` or `nawk` program that reads `ENVIRON[...]` is
+refused at the top level and inside a `-c` script; through a wrapper that runs
+it directly, only `awk` is read. The awk loop that prints only names passes. See
+[Environment dumps in shell scripts and awk](../reference/credential-guard-shell-scripts.md)
+for the refused and passing forms, the refusal, configuration, limits and
+troubleshooting.
+
+---
+
 ## Credential file names in commands
 
 The credential guard refuses a `Bash` command that reads a dotenv file, a shell
@@ -531,6 +554,31 @@ runs while `python3 -c "print(open('auth.env').read())"` is refused. See
 [Credential file names in commands](../reference/credential-guard-file-names.md)
 for the names, where the guard looks for them, examples, configuration and
 troubleshooting.
+
+---
+
+## Secret reads with kubectl get
+
+The credential guard refuses a `kubectl get` that may fetch a Secret whenever
+an output or template value can print a `data` or `stringData` value: `yaml`,
+`json`, every jsonpath, custom columns and go template format in any flag
+spelling, and a raw API path under `secrets`. The table, `-o name`, `-o wide`
+and a go template that prints only the key names pass, and so does a get of a
+literal non Secret type with any output. See
+[Secret reads with kubectl get](../reference/credential-guard-get-secret.md)
+for when a get counts as a Secret get, the refused and passing forms, the key
+listing rules, configuration, limits and troubleshooting.
+
+---
+
+## Secret reads with kubectl describe
+
+The credential guard refuses describe of every Secret and of resources whose
+type is missing or supplied by the shell. A service account token Secret's
+describe output prints the token in full. Use the get table or a Go template
+that lists only data key names. Literal non-Secret types still pass. See
+[Secret reads with kubectl describe](../reference/credential-guard-describe-secret.md)
+for examples, flag handling, configuration, limits and troubleshooting.
 
 ---
 

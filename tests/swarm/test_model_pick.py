@@ -374,6 +374,20 @@ def test_the_master_frontier_stays_on_opus_high():
     assert model_pick.frontier("codex") == ModelPick("gpt-6.1-sol", "high", "frontier")
 
 
+@pytest.mark.feature("master-launch-swarm-model")
+@pytest.mark.parametrize("harness,model", [("claude", "sonnet"), ("codex", "gpt-6-sol")])
+def test_the_master_model_is_the_frontier_pick_on_the_swarm_model_setting(harness, model):
+    config = SimpleNamespace(claude_model="sonnet", codex_model="gpt-6-sol")
+    assert model_pick.master(config, harness) == ModelPick(model, "high", "frontier")
+
+
+@pytest.mark.feature("master-launch-swarm-model")
+@pytest.mark.parametrize("harness", ["claude", "codex"])
+def test_an_empty_swarm_model_puts_the_master_on_its_harness_frontier_default(harness):
+    config = SimpleNamespace(claude_model="", codex_model="")
+    assert model_pick.master(config, harness) == ModelPick(MODEL_DEFAULTS[harness], "high", "frontier")
+
+
 TASK = {"id": "t1", "title": "Fix typo", "difficulty": "S", "rank": "normal"}
 
 
@@ -513,7 +527,7 @@ def test_status_shows_model_source_and_confidence(monkeypatch, capsys):
     saved.put_agent("sw", AgentRecord("old", "ci", "t"))
     cli.cmd_status(saved, SimpleNamespace(slug="sw", json=False))
     old = next(line for line in capsys.readouterr().out.splitlines() if line.startswith("old\t"))
-    assert old.split("\t")[-3:-1] == ["-", "-"]
+    assert old.split("\t")[-4:-2] == ["-", "-"]
     agent = next(a for a in status.status_report(saved, "sw", {"tasks": []})["agents"] if a["name"] == "a")
     assert (agent["model_source"], agent["model_confidence"]) == ("jev-1.13", 0.72)
 

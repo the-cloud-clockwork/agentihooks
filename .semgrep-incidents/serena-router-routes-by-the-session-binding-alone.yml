@@ -1,0 +1,43 @@
+rules:
+  - id: serena-router-routes-by-the-session-binding-alone
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The Serena router forwards a tool call to the backend of its MCP session's binding without reading the root
+      the call carries. The parent and every sub agent of one Claude session share one MCP session, so a sub agent's
+      activate_project rebound all of them and their edits landed in the last activated worktree. Resolve the call's
+      binding with carried_binding and strip ROOT_ARG from the arguments before the backend call.
+    paths:
+      include:
+        - /hooks/serena_router/server.py
+        - serena-router-routes-by-the-session-binding-alone.py
+    patterns:
+      - pattern: $BACKEND.call($NAME, $ARGS)
+      - pattern-inside: |
+          async def $F(...):
+              ...
+      - pattern-not-inside: |
+          async def $F(...):
+              ...
+              $BINDING = await carried_binding($BINDING, $ARGS)
+              ...
+              $ARGS = {$KEY: $VALUE for $KEY, $VALUE in $ARGS.items() if $KEY != ROOT_ARG}
+              ...
+              $BACKEND = await $POOL.get($BINDING.root)
+              ...
+      - pattern-not-inside: |
+          async def $F(...):
+              ...
+              try:
+                  $BINDING = await carried_binding($BINDING, $ARGS)
+              except $ERR as $EXC:
+                  ...
+              ...
+              $ARGS = {$KEY: $VALUE for $KEY, $VALUE in $ARGS.items() if $KEY != ROOT_ARG}
+              ...
+              try:
+                  $BACKEND = await $POOL.get($BINDING.root)
+                  ...
+              except $ERR2 as $EXC2:
+                  ...
+              ...

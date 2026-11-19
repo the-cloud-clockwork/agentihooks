@@ -24,8 +24,6 @@ jobs:
   image:
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss' || 'ubuntu-latest' }}
     timeout-minutes: 60
-    outputs:
-      latest: ${{ steps.main.outputs.latest }}
     permissions:
       contents: read
       packages: write
@@ -163,16 +161,6 @@ jobs:
         run: |
           digest="$(jq -r .digest "$RUNNER_TEMP/worker-image-attestation/candidate/promoted.json")"
           docker buildx imagetools create --tag "$REPOSITORY:dev" "$REPOSITORY@$digest"
-      - name: Tag the release version and move the release tag when it is the newest
-        if: github.event_name == 'release'
-        env:
-          RELEASE: ${{ github.event.release.tag_name }}
-          LATEST: ${{ steps.main.outputs.latest }}
-        run: |
-          digest="$(jq -r .digest "$RUNNER_TEMP/worker-image-attestation/candidate/promoted.json")"
-          tags=(--tag "$REPOSITORY:${RELEASE#v}")
-          if [[ "$LATEST" == true ]]; then tags+=(--tag "$REPOSITORY:release"); fi
-          docker buildx imagetools create "${tags[@]}" "$REPOSITORY@$digest"
       - name: Keep the qualified candidate layers
         if: steps.layers.outputs.cache-hit != 'true'
         run: |
@@ -196,6 +184,10 @@ jobs:
   hive:
     if: github.event_name == 'release'
     needs: image
+    concurrency:
+      group: hive-worker-release
+      queue: max
+      cancel-in-progress: false
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss' || 'ubuntu-latest' }}
     timeout-minutes: 30
     permissions:
@@ -203,6 +195,7 @@ jobs:
       packages: write
     env:
       IMAGE: ghcr.io/the-cloud-clockwork/agentihooks-hive-worker
+      WORKER: ghcr.io/the-cloud-clockwork/agentihooks-worker
       RELEASE: ${{ github.event.release.tag_name }}
     steps:
       - uses: actions/checkout@v4
@@ -213,8 +206,9 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Publish the hive worker once per release version
-        env:
-          LATEST: ${{ needs.image.outputs.latest }}
+      - name: Tag the worker release and move the release tag unless a newer release already published
         run: |
-          bash deploy/worker/release-hive.sh "$IMAGE" "$RELEASE" "$LATEST" "$GITHUB_SHA"
+          bash docker/swarm-node/release.sh "$WORKER" "$RELEASE" "$GITHUB_SHA"
+      - name: Publish the hive worker once per release version
+        run: |
+          bash deploy/worker/release-hive.sh "$IMAGE" "$RELEASE" "$GITHUB_SHA"

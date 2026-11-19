@@ -1,0 +1,6 @@
+{
+  "scripts/tick/engine.py:scripts.tick.engine.x__placing:8a94141cca940b3991fb495b85a16787c44b0868b6c32e8be78d264e888ed645": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: the mutant replaces the getattr default False with None inside bool(); both are falsy and bool() maps both to False, so _placing returns the same bool for every input. Its only caller, _eager, passes that value to pool.Pass.executor, which reads it only in if placing:, so no caller can observe the difference."
+  }
+}

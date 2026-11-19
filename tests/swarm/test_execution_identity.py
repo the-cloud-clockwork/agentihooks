@@ -137,6 +137,21 @@ def test_conflicts_refuse_without_changing_identity(store, agent, fault):
     assert str(error.value) == messages.get(fault, "stale or changed execution identity")
 
 
+@pytest.mark.feature("swarm-tick-step-conflict-detail")
+def test_a_step_refused_by_an_identity_conflict_records_the_conflict_message(
+    store: RedisStore, agent: AgentRecord, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.swarm import timing
+
+    first = store.start_execution("fixture", agent)
+    store.start_execution("fixture", replace(agent, started_at=456), first.execution_id)
+    with pytest.raises(SwarmError), timing.tick("fixture"), timing.step("session models"):
+        store.put_agent("fixture", replace(first, model="claude-opus-5-5"))
+    rows = [json.loads(line) for line in capsys.readouterr().err.splitlines() if line.startswith("{")]
+    finished = [row for row in rows if row.get("step") == "session models" and row["phase"] == "finished"]
+    assert [(row["outcome"], row["detail"]) for row in finished] == [("error", "stale or changed execution identity")]
+
+
 @pytest.mark.parametrize("repeat", range(2))
 def test_restart_replay_snapshot_and_rollback(store, agent, repeat):
     first = store.start_execution("fixture", agent)

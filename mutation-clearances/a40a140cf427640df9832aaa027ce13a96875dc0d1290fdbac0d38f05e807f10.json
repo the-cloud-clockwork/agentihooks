@@ -1,0 +1,6 @@
+{
+  "scripts/reused_coverage.py:scripts.reused_coverage.x__show:794e6f9d7af553ff4269f5247bf494d088459f0101f8c9be672feefd23f71cf9": {
+    "reader": "standards-reader",
+    "reason": "Python normalizes codec names case-insensitively, so decode(\"UTF-8\", \"replace\") and decode(\"utf-8\", \"replace\") use the same codec and error handler."
+  }
+}

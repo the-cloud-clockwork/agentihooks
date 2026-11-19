@@ -13,9 +13,11 @@ from typing import TYPE_CHECKING
 from hooks.context import account_sessions, broadcast, profile_chain
 from scripts import claude_quota_balancer as balancer
 from scripts import codex_router, github_app_cli, master_claude_login, session_bands, updater
+from scripts.ci_lab.remote import checkout
 from scripts.hive import bundle_refresh, dispatch, quota_refresh, registry
 from scripts.routing import claude_api, codex_api
 from scripts.scheduler.process_timer import wait as scheduled_wait
+from scripts.scheduler.service import revision
 from scripts.swarm.commands import hive_id
 
 if TYPE_CHECKING:
@@ -40,6 +42,7 @@ WAKE_SLACK_S = 2
 UNIT = "agentihooks-hive.service"
 ORIGIN = re.compile(r'\[remote "origin"\][^\[]*?\burl\s*=\s*(\S+)')
 REMOTE = re.compile(r"(?:[a-z+]+://)?(?:[^@/]+@)?([^/:]+)[:/](.+?)(?:\.git)?/?")
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def beat(redis: "Redis", local_id: str) -> None:
@@ -305,7 +308,9 @@ def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
     from redis.exceptions import ConnectionError, TimeoutError
 
     lost = (ConnectionError, TimeoutError)
+    loaded = revision(ROOT)
     fill_operator_env()
+    carry_lab(os.environ)
     quota_refresh.refresh(os.environ)
     worker, attempted_at = None, time.time()
     renewed = bundled = time.time()
@@ -325,6 +330,8 @@ def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
                 beat(redis, local_id)
                 if marker := os.environ.get("HIVE_READY_FILE"):
                     Path(marker).touch()
+                if not dispatch.busy() and _moved(loaded):
+                    return
                 elapsed = time.monotonic() - started
                 delay = max(0, BEAT_SECONDS - max(WAKE_SLACK_S, elapsed))
                 scheduled_wait(
@@ -337,6 +344,18 @@ def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
             failures += 1
         finally:
             stop.set()
+
+
+def _moved(loaded: str) -> bool:
+    """Say on stderr and return True when the checkout this hive loaded its code from now sits at another revision."""
+    current = revision(ROOT)
+    if not current or current == loaded:
+        return False
+    print(
+        f"the hive {os.getpid()} restarts on the new code: the checkout moved from {loaded} to {current}",
+        file=sys.stderr,
+    )
+    return True
 
 
 def _keep_helpers(helpers: dict, args: tuple) -> None:
@@ -555,6 +574,20 @@ def repositories() -> list[str]:
 def local_checkout(repo: str) -> str:
     matches = sorted(str(path) for path in _checkouts() if origin(path) == repo)
     return matches[0] if matches else repo
+
+
+def carry_lab(environ: Mapping[str, str]) -> list[Path]:
+    """Give each hive checkout whose origin the lab remote serves the lab remote; return the checkouts that carry it."""
+    return [path for path in _checkouts() if _carried(path, environ)]
+
+
+def _carried(path: Path, environ: Mapping[str, str]) -> bool:
+    """Give one checkout the lab remote; a git that fails or hangs there leaves it without one and is said on stderr."""
+    try:
+        return checkout.carry(checkout.at(path), environ)
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"hive: the lab remote was not set in {path}: {exc}", file=sys.stderr)
+        return False
 
 
 def _checkouts() -> list[Path]:

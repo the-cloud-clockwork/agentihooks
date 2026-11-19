@@ -13,7 +13,7 @@ from tests.swarm_ledger import legacy_page
 OBLIGATIONS = (
     "Master obligations: Troubleshoot with read only diagnostics, plan with the operator, "
     "configure the swarm, the ledger and the operator's environment with him through the agentihooks commands "
-    "and tools, handle operator inbox items, keep the ledger current and judge progress; "
+    "and tools, handle operator inbox items, keep progress current through agentihooks api and judge it; "
     "never edit code or config files in a repository, commit, merge or claim a task.\n"
 )
 
@@ -270,7 +270,7 @@ def test_master_block_carries_current_intent_phases_priorities_and_obligations()
     assert OBLIGATIONS in block
     assert f"Plan: {'x' * 299}…\n" in block
     assert f"\nPriorities: {'z' * 299}…\n" in block
-    assert block.endswith(f"Active phases: Active: {'y' * 178}…")
+    assert block.endswith(f"Active phases: Active: {'y' * 162}…")
     assert "=== SWARM REFOCUS: " + "t" * 299 + "… ===" in block
     ledger["title"] = "Continuity"
     ledger["overview"] = "Preserve current mission"

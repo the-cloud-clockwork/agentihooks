@@ -1,0 +1,6 @@
+{
+  "scripts/reused_coverage.py:scripts.reused_coverage.x_moved_lines:9a77ba3adcf9fb4e2c2539c75a2e269f7196b352b91a6d76843d642f59eb7f87": {
+    "reader": "standards-reader",
+    "reason": "git quotes numstat paths containing a tab, so each line has exactly two raw tabs and split(\"\\t\") returns the same third field as split(\"\\t\", 2)."
+  }
+}

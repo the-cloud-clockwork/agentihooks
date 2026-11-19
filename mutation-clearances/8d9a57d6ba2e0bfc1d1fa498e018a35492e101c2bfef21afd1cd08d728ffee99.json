@@ -1,0 +1,6 @@
+{
+  "scripts/dep_manifest.py:scripts.dep_manifest.x_line_units:4c12c6ea3a935327964ddcc420ca5e208468d99e2a55bf5bd6682a862e7c57ee": {
+    "reader": "standards_reader",
+    "reason": "sorting by first body line keeps each enclosing def before its nested defs (ties keep append order, parent first) and sibling spans do not overlap, so every line maps to the same innermost unit."
+  }
+}

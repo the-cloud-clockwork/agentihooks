@@ -22,7 +22,7 @@ cleanup() {
       kill "$job" 2>/dev/null || true
     fi
   done
-  rm -rf "$logs"
+  rm -rf "$logs" || true
 }
 trap cleanup EXIT
 values=(
@@ -97,7 +97,7 @@ apply_hive first
 
 old=""
 agent=""
-for _ in $(seq 60); do
+for _ in {1..60}; do
   old="$(redis GET "kind-drain:$slug:agent-hive" || true)"
   agent="$(redis GET "kind-drain:$slug:agent" || true)"
   [[ -n $old && -n $agent ]] && break
@@ -122,7 +122,7 @@ apply_hive second &
 rolled=$!
 
 samples=0
-for _ in $(seq $((drain + 90))); do
+for ((poll = 0; poll < drain + 90; poll++)); do
   if ! kubectl get pod "$old" >/dev/null 2>&1; then
     break
   fi
