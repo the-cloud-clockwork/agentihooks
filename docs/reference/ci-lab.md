@@ -190,6 +190,7 @@ per-node verification; a Ready cache pod alone does not prove either cache is wa
 |---|---|---|---|
 | `AGENTIHOOKS_BUS*` | yes | yes | Event bus connection settings |
 | `CI_LAB_MINIO_*` | yes | yes | Object store endpoint, bucket and credentials, passed by reference |
+| `CI_LAB_SECRET_*` | no | yes | A secret a static unit's step reads by name: `CI_LAB_SECRET_<NAME>` is `${{ secrets.<NAME> }}`, passed by reference and given only to a step whose env reads it (see [What a gate's steps read](#what-a-gates-steps-read)) |
 | `GITHUB_APP_*` | yes | never | GitHub App identity used to post check runs and read dev push manifest artifacts; the App needs checks write and actions read |
 | `CI_LAB_REDIS_URL` | yes | no | Queue, lease and verdict index store |
 | `CI_LAB_REINDEX_ON_START` | yes | no | Only the literal string `true` rebuilds missing verdict index entries from report objects before the listeners start and prints `reindexed N verdicts`; unset or any other value skips it. See [Recovery](#recovery) |
@@ -2407,6 +2408,57 @@ the workflow and the registry. The `semgrep` job's call to `semgrep.yml` then fa
 with `semgrep uses ./.github/workflows/semgrep.yml, which was not given`, so every agentihooks head
 was dropped as `cannot expand` and the lab graded none at any class.
 
+#### What a gate's steps read
+
+A step's `if` condition and the `${{ }}` expressions in its `env` read context names.
+`discover` records three things on each `StaticGate`:
+
+- `producers`: the earlier steps of the gate's job whose `steps.<id>.outputs.<name>`,
+  `steps.<id>.outcome` or `steps.<id>.conclusion` the gate reads, followed on through the names
+  each such step with a `run` reads, in job order. A `uses` step can be a producer, but the lab
+  never runs it, so its own `if` and `env` are never read.
+- `reads`: every name the gate and its producers with a `run` read, sorted.
+- `missing`: the names in `reads` the static executor cannot supply.
+
+The static executor supplies these names:
+
+| Name | Value |
+|---|---|
+| `inputs.base`, `github.event.pull_request.base.sha` | The lease's base revision |
+| `github.sha`, `github.event.pull_request.head.sha` | The lease's head |
+| `github.run_id` | The lease's job id |
+| `github.run_attempt`, `github.run_number` | `1` |
+| `secrets.<NAME>` | The worker's `CI_LAB_SECRET_<NAME>`, or empty when the worker has no such variable. Only the secrets the gate reads join the context |
+| `steps.<id>.outcome`, `steps.<id>.conclusion`, `steps.<id>.outputs.<name>` | Set as each producer runs |
+
+`scripts.ci_lab.run_static.run` runs the producers before the gate, in job order, in the gate's
+sandbox and run folder, and gives each its own `GITHUB_OUTPUT` file. A `uses` producer, or one
+whose `if` is false, has outcome and conclusion `skipped`. A producer that exits 0 has outcome and
+conclusion `success`, and its `name=value` output lines become its outputs. An output that no step
+wrote reads as empty. A producer that exits non zero, or runs out of time, ends the unit with its
+own code and log, and the gate never runs, as Actions ends the job. Any other output line,
+including a delimited multi line block, raises `<id> wrote an output line that is not name=value`
+without the line's text.
+
+The executor writes no secret value into the unit report or log. As Actions masks a secret, it
+replaces each non empty secret value the gate read with `***` in the unit log and in the step
+summary the report carries.
+
+A gate with any missing name is not lab gradable. The expander leases no unit for it, so its
+verdict stays with Actions. `python -m scripts.ci_lab.static_gates --root .` prints each gate's
+producers by id, its `reads` and its `missing`. On dev three `lint` gates are not lab gradable:
+
+| Gate | Missing |
+|---|---|
+| `lint/refuse-changelog-fragments-named-off-the-branch-or-opening-without-a-section-heading` | `github.head_ref`, `github.ref_name` |
+| `lint/artifact-sanity-checks` | `github.base_ref`, `github.event.before`, `github.event.merge_group.base_sha`, `github.event_name` |
+| `lint/prove-the-mutation-gate-kills-with-the-real-test-and-fails-with-a-weakened-one` | `github.event_name` |
+
+Before pull request
+[#12422](https://github.com/the-cloud-clockwork/agentihooks/pull/12422), the context held only
+`inputs.base`. A gate that read any other name raised `no value for '<name>' in the context`
+before its step ran, so its unit was requeued once and then lost.
+
 #### Which grades run static units
 
 [Expansion frames a head by its class](#scheduler-loop), and the frames keep these static gates:
@@ -2879,7 +2931,7 @@ scheduler enqueues a grade's misses with the grade's base and its plan's grader 
 
 | Kind | Trees | Executor inputs |
 |---|---|---|
-| `static` | head, base and grader, read only, shared by the pod's units | the gate the unit names from the grader tree's workflow, input registry and reusable workflows (see [The worker reads the same workflows](#the-worker-reads-the-same-workflows)), the venv of the head's `uv.lock` digest and `inputs.base` set to the base revision |
+| `static` | head, base and grader, read only, shared by the pod's units | the gate the unit names from the grader tree's workflow, input registry and reusable workflows (see [The worker reads the same workflows](#the-worker-reads-the-same-workflows)), the venv of the head's `uv.lock` digest and the lease fields and secrets its steps read (see [What a gate's steps read](#what-a-gates-steps-read)) |
 | `test` | head, read only | the batch, the venv of the head's `uv.lock` digest, `CI_LAB_MANIFEST`, `CI_LAB_FLAKES` and one pytest worker per slot |
 | `stats` | a private copy of the head with every file under the `[tool.mutmut]` source paths behind its trampolines | the tree as root and `CI_LAB_MUTATION_CACHE` |
 | `mutant` | the same private trampolined copy | `CI_LAB_KILLERS`, `CI_LAB_MUTATION_BUDGET`, `CI_LAB_MUTATION_CAP` and the tests that the stats records of every test module in the tree show reaching the mutant's function, with their seconds |
