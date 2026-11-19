@@ -169,7 +169,7 @@ class Admission:
             and not occupant.launched_at
             and (occupant.name, occupant.execution_id, occupant.generation)
             == (admitted["name"], task["execution_id"], task["execution_generation"])
-            and self.store.claimant(slug, task["id"]) == admitted["name"]
+            and cast(Any, self.store).claimant(slug, task["id"]) == admitted["name"]
         )
 
     def _kept(self, slug: str, request: dict[str, Any], offer: str) -> dict[str, Any] | None:
