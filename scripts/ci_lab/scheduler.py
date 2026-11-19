@@ -307,8 +307,9 @@ class Head:
 @dataclass(frozen=True)
 class Plan:
     """How to grade one head: the tree and grader revision it reads, the units of each gate, the jobs the tier skips,
-    the job outputs and flags the `Gate — Required` rules read, and the dev commit of the dependency manifest its test
-    units are keyed on, empty when it keys none."""
+    the job outputs and flags the `Gate — Required` rules read, the dev commit of the dependency manifest its test
+    units are keyed on, empty when it keys none, and the authoritative gates a hotfix or pull request grade runs no
+    unit of, each posted as a skipped check."""
 
     tree: str
     grader: str
@@ -317,6 +318,7 @@ class Plan:
     outputs: Mapping[str, Mapping[str, str]] = field(default_factory=dict[str, Mapping[str, str]])
     flags: Flags = Flags()
     manifest: str = ""
+    idle: frozenset[str] = frozenset()
 
 
 class Inbox(Protocol):
@@ -394,8 +396,8 @@ class Slot:
 @dataclass
 class State:
     """A grade's state: what it grades, its units by gate, whether a newer head superseded it, what it posted, the
-    id of each check run it posted, the grade ref a lab remote push wrote its head to, if any, and the dev commit of
-    the dependency manifest its test units are keyed on, if any."""
+    id of each check run it posted, the grade ref a lab remote push wrote its head to, if any, the dev commit of the
+    dependency manifest its test units are keyed on, if any, and the authoritative gates it runs no unit of."""
 
     run: str
     repo: str
@@ -416,6 +418,7 @@ class State:
     runs: dict[str, int] = field(default_factory=dict[str, int])
     ref: str = ""
     manifest: str = ""
+    idle: list[str] = field(default_factory=list[str])
 
 
 def _parse(raw: str | bytes) -> State:
@@ -478,8 +481,10 @@ def _needs(state: State) -> dict[str, dict[str, Any]]:
 
 
 def _checks(state: State) -> dict[str, tuple[str, str | None]]:
-    """Return each check run's target: one per gate with units and the required check folding the gates."""
+    """Return each check run's target: one per gate with units, one skipped per authoritative gate the grade runs no
+    unit of, and the required check folding the gates."""
     targets = {gate: _target(state, refs) for gate, refs in state.gates.items() if refs}
+    targets.update(dict.fromkeys(state.idle, ("completed", "skipped")))
     status, conclusion = _target(state, list(state.units))
     if status == "completed" and not state.superseded:
         conclusion = "success" if fold(EVENTS[state.tier], _needs(state), state.flags) else "failure"
@@ -709,6 +714,7 @@ class Scheduler:
             skipped=sorted(plan.skipped),
             ref=ref,
             manifest=plan.manifest,
+            idle=sorted(plan.idle),
         )
         source = self._merge_group(request, plan.tree)
         misses: list[Unit] = []
@@ -927,8 +933,9 @@ class Scheduler:
         return [f"posted {check} {status} on {state.head}" for check, status, _ in moved]
 
     def _output(self, state: State, check: str, status: str) -> Output:
-        """Return a check run's output: its units, the grade run, the grader revision and the head's commit page."""
-        refs = list(state.units) if check == REQUIRED else state.gates[check]
+        """Return a check run's output: its units, none for a skipped authoritative gate, the grade run, the grader
+        revision and the head's commit page."""
+        refs = list(state.units) if check == REQUIRED else state.gates.get(check, [])
         units = tuple(Unit(slot.kind, slot.key, tuple(slot.members)) for slot in (state.units[ref] for ref in refs))
         title = f"{CLASSES[state.tier]} grade {status}"
         summary = f"{len(units)} units of {check} on {state.head} against {state.base}"
@@ -979,13 +986,19 @@ def _lab_block(document: str) -> Mapping[str, Any]:
     return data["lab"]
 
 
-def frame(tier: Priority, tree: str, grader: str, gates: Mapping[str, tuple[Unit, ...]]) -> Plan:
+def frame(
+    tier: Priority,
+    tree: str,
+    grader: str,
+    gates: Mapping[str, tuple[Unit, ...]],
+    authoritative: Sequence[str] = (),
+) -> Plan:
     """Return a tier's plan: the lab's gates its `Gate — Required` rules require, and every other job they require as
     a gate without units, which passes, so only what the lab grades can turn the grade red.
 
-    A pull request or hotfix grade runs with no test scope and no mutation; a merge group grade runs only the queue
-    suite with no lost unit rerun; a promotion or backfill grade takes every lab gate, since those rules require no
-    job by name.
+    A pull request or hotfix grade runs with no test scope and no mutation, and names each authoritative gate it runs
+    no unit of, which it posts as skipped; a merge group grade runs only the queue suite with no lost unit rerun; a
+    promotion or backfill grade takes every lab gate, since those rules require no job by name.
     """
     if tier >= Priority.PROMOTION:
         return Plan(tree, grader, dict(gates))
@@ -993,7 +1006,8 @@ def frame(tier: Priority, tree: str, grader: str, gates: Mapping[str, tuple[Unit
         required = (*QUEUE_REQUIRED, FAIL_FAST, UNIT_JOBS[0])
         return Plan(tree, grader, {job: gates.get(job, ()) for job in required}, frozenset(UNIT_JOBS[1:]))
     framed = {job: gates.get(job, ()) for job in PULL_REQUIRED}
-    return Plan(tree, grader, framed, outputs={"select": {"scope": "none"}})
+    idle = frozenset(gate for gate in authoritative if not framed.get(gate))
+    return Plan(tree, grader, framed, outputs={"select": {"scope": "none"}}, idle=idle)
 
 
 @dataclass(frozen=True)
@@ -1123,8 +1137,9 @@ class MirrorExpander:
     def expand(self, request: GradeRequest) -> Plan:
         """Return one unit per static gate the grader's workflow runs, keyed by the files it reads at head and base,
         the unit job's test units of a merge group, promotion or backfill head and the mutation stats and mutant units
-        of a promotion or backfill head, framed by the request's tier, with the dev commit of the manifest its test units
-        are keyed on."""
+        of a promotion or backfill head, framed by the request's tier with the authoritative gates of the grader's
+        delivery.yaml for a hotfix or pull request head, with the dev commit of the manifest its test units are keyed
+        on."""
         mirror = self._mirror(request.repo)
         grader = request.head if request.tier >= Priority.PROMOTION else request.base
         for sha in dict.fromkeys((request.head, request.base, grader)):
@@ -1140,6 +1155,7 @@ class MirrorExpander:
             )
             gates.setdefault(gate.job, []).append(Unit(STATIC, static_key(inputs), (gate.name,)))
         commit = ""
+        authoritative: Sequence[str] = ()  # pragma: no mutate
         if request.tier >= Priority.QUEUE:
             manifest, contents = self._manifest(mirror, request), self._contents(mirror, head)
             commit = manifest["commit"]
@@ -1149,8 +1165,10 @@ class MirrorExpander:
             )
             if request.tier >= Priority.PROMOTION:
                 gates.update(self._mutation(mirror, request, manifest, contents))
+        else:
+            authoritative = _lab_block(self._git(mirror, "show", f"{grader}:{DELIVERY}"))["authoritative"]
         tree = self._git(mirror, "rev-parse", f"{request.head}^{{tree}}").strip()
-        plan = frame(request.tier, tree, grader, {job: tuple(units) for job, units in gates.items()})
+        plan = frame(request.tier, tree, grader, {job: tuple(units) for job, units in gates.items()}, authoritative)
         return replace(plan, manifest=commit)
 
     def _tests(

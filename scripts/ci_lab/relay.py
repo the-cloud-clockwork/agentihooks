@@ -158,8 +158,9 @@ def failed(state: State) -> list[str]:
 
 
 def output(state: State, check: str, lab: str) -> Output:
-    """Return a relayed check run's output: the check's units, the grade run, the grader revision and the grade page."""
-    refs = list(state.units) if check == REQUIRED else state.gates[check]
+    """Return a relayed check run's output: the check's units, none for a skipped authoritative gate, the grade run,
+    the grader revision and the grade page."""
+    refs = list(state.units) if check == REQUIRED else state.gates.get(check, [])
     units = tuple(Unit(slot.kind, slot.key, tuple(slot.members)) for slot in (state.units[ref] for ref in refs))
     summary = f"{len(units)} units of {check} on {state.head} against {state.base}, relayed from the lab grade"
     details = f"{lab}/grades/{state.head}"
