@@ -477,6 +477,17 @@ class TestPreToolUseEnvelope:
         assert "updatedInput" not in out
         assert "known safe" in out["permissionDecisionReason"]
 
+    @pytest.mark.feature("condition-rewrite-without-a-decision")
+    def test_explicit_ask_without_rewrite_is_emitted(
+        self, forced_claude: tuple[Path, Path, Path], capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _write(forced_claude[1], "pre-bash-check.sh", 'echo \'{"decision": "ask", "reason": "check first"}\'')
+        hm.on_pre_tool_use(_bash("ls", mode="default"))
+        out = _single_json(capsys.readouterr().out)["hookSpecificOutput"]
+        assert out["permissionDecision"] == "ask"
+        assert "updatedInput" not in out
+        assert "check first" in out["permissionDecisionReason"]
+
     def test_guards_judge_the_rewritten_input(self, forced_claude, monkeypatch):
         import hooks.context.branch_guard as branch_guard
 
