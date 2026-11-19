@@ -532,7 +532,7 @@ inhibit_rules:
 | `CILabQueueWaitHigh` | The predicted wait of the hotfix, pull request or queue class is over 1200 seconds, the 20 minute default past which the [lab behind claim hold](swarm-thresholds.md#lab-behind-claim-hold) holds new eng claims. A [wait the lab cannot predict](#a-wait-the-lab-cannot-predict) reads `+Inf` and fires it too, while the claim hold reads that wait as 0. Promotion and backfill never fire it | 10 minutes | class | Slots busy against slots total, and whether the worker pool sits at its maximum |
 | `CILabWorkersPending` | At least one `ci-lab-worker-*` pod in `ci-lab` is Pending | 15 minutes | the pool | The `cluster-autoscaler-oci-status` ConfigMap for the CI pool, and whether runners hold the CI nodes; every runner outranks a worker, see [Worker scheduling priority](#worker-scheduling-priority) |
 | `CILabBudgetShedding` | `ci_lab_class_shed` is 1 for a class: the day's core budget left fell below that class's shed fraction, so its units wait for the budget to reset. Only backfill, promotion and queue shed | 5 minutes | class | Budget left on the dashboard and the shed fractions in the runtime config at `CI_LAB_RUNTIME_CONFIG` |
-| `CILabPullRequestBlockedByCap` | Pull request units are queued, every slot is busy, and a HorizontalPodAutoscaler in `ci-lab`, in the deployed chart the one KEDA builds as `keda-hpa-ci-lab-worker`, wants at least its maximum replicas. An autoscaler at its maximum in another namespace does not count | 10 minutes | the pool; its value is the queued pull request units | The worker maximum and the CI node cap; raising either is the operator's elasticity budget |
+| `CILabPullRequestBlockedByCap` | Pull request units are queued, every slot is busy, and any HorizontalPodAutoscaler in `ci-lab`, which in the deployed chart is `keda-hpa-ci-lab-worker`, the one KEDA builds from the worker ScaledObject, wants at least its maximum replicas. An autoscaler at its maximum in another namespace does not count | 10 minutes | the pool; its value is the queued pull request units | The worker maximum and the CI node cap; raising either is the operator's elasticity budget |
 | `CILabSchedulerBlind` | Prometheus holds no `ci_lab_slots_wanted` series while the `ci-lab-scheduler` Deployment asks for at least one replica. A scheduler scaled to zero, or no Deployment, keeps it silent | 10 minutes | the scheduler | The scheduler's scrape target and port `9108`; the lab chart's KEDA ScaledObject sizes the worker pool from this gauge and holds its fallback floor while it is missing |
 | `CILabCacheMissRatioHigh` | The git or uv node cache missed more than half its lookups over 30 minutes, with at least 10 misses. A cache with misses and no hit series counts its hits as 0. The verdict cache never fires it | 15 minutes | cache | The node cache DaemonSet on the CI nodes and the age of its git mirror |
 | `CILabScaleFlapping` | Over the last hour, sampled every 5 minutes, the worker Deployment's replicas rose against 5 minutes earlier in at least 4 samples and fell in at least 4. One ramp up and down again does not fire it | no hold | the pool; its value is the rising samples | Lengthen the scale down stabilisation window of the lab chart's ScaledObject, `elasticity.scaleDownWindowSeconds`, since each swing churns CI nodes through the autoscaler |
@@ -1090,9 +1090,9 @@ ci_lab_units_redelivered_total
 ci_lab_units_lost_total
 ```
 
-`ci_lab_units_redelivered_total` reads at least one more than before the kill. A counter writes no
-sample until its first count, so before the scheduler's first reap since it started the series is
-absent, and its first sample is the count itself. `increase()` over a window that holds the series'
+`ci_lab_units_redelivered_total` rises by at least one. A counter writes no sample until its first
+count, so when the scheduler has reaped nothing since it started, the series is absent before the
+kill and its first sample after the reap is the count itself. `increase()` over a window that holds the series'
 first sample misses that count, so compare the raw values. `ci_lab_units_lost_total` keeps its
 value, or stays absent. Both counters live in the scheduler process and restart from zero with it,
 so a scheduler restart between the two reads voids the comparison.
@@ -1159,9 +1159,9 @@ The node count follows the floor through four steps:
    300 second window, then removes two workers a minute down to the new floor. A floor of `0` lets
    KEDA remove the last worker once nothing has been wanted for its cooldown period, the KEDA
    default of 300 seconds, since the ScaledObject sets no `cooldownPeriod`.
-2. After any worker not yet scheduled, pending or not ready, the ReplicaSet removes the workers
-   with the lowest deletion cost first, so idle workers go before busy ones, and each removed
-   worker drains as above.
+2. The ReplicaSet picks the workers to remove. It takes any worker not yet scheduled, pending or
+   not ready first, then the workers with the lowest deletion cost, so idle workers go before
+   busy ones. Each removed worker drains as above.
 3. Workers run only on the `oci-ci` node pool, placed by the `runner-binpack` scheduler. The
    deployment repository's OCI cluster autoscaler removes a CI node that stays below half its
    requested capacity for one minute.
