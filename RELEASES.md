@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.1066 · 2026-11-19
+
+### 2026-11-19 · 50cd86a766a9 · #12392 · @agenticore-app
+
+**Confine managed Codex process checks to the owning host**
+
+This change fixes a bug where managed Codex executions with empty runtime targets incorrectly checked a foreign server's process id against the local process table, producing false liveness results. Now, foreign connected transports correctly report unknown liveness instead of being checked locally, while local server identity checks continue to work as before. This matters because it prevents misleading or incorrect process-death detection for servers not owned by the observing host, improving correctness and safety of the binding logic. The fix is verified by mutation testing, focused regression tests, and passing CI checks.
+
 ## v2.17.1063 · 2026-11-19
 
 ### 2026-11-19 · 2783f2016a4c · #12238 · @nestorcolt
