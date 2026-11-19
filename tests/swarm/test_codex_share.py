@@ -113,3 +113,22 @@ def test_a_codex_plan_spawn_never_counts_toward_the_eng_share() -> None:
     agents = live("eng", "claude", 2) + live("eng", "codex", 1)
     decision = capacity.calculate(config, [account("a", sessions=1), account("cx", "codex")], agents)
     assert (harnesses(decision, "plan"), harnesses(decision, "eng")) == (["codex"], ["codex"])
+
+
+@pytest.mark.feature("codex-swarm-share")
+def test_a_short_share_leaves_a_codex_seat_reserved_for_pinned_codex_work() -> None:
+    config = SwarmConfig("sw", "/repo", max_eng=3, max_ci=0, max_plan=0)
+    requirements = {"eng": [("claude", "codex"), ("claude",), ("codex",)], "ci": [], "plan": []}
+    rows = [account("a", cap=1), account("cx", "codex", cap=1)]
+    decision = capacity.calculate(config, rows, [], {"eng": 3, "ci": 0, "plan": 0}, requirements)
+    assert [(slot["index"], slot["harness"]) for slot in decision["placements"]["eng"]] == [(0, "claude"), (2, "codex")]
+
+
+@pytest.mark.feature("codex-swarm-share")
+def test_a_met_share_still_leaves_a_claude_seat_reserved_for_pinned_claude_work() -> None:
+    config = SwarmConfig("sw", "/repo", max_eng=4, max_ci=0, max_plan=0)
+    requirements = {"eng": [("claude", "codex"), ("claude",)], "ci": [], "plan": []}
+    rows = [account("a", cap=2, sessions=1), account("cx", "codex", cap=2, sessions=1)]
+    agents = live("eng", "claude", 1) + live("eng", "codex", 1)
+    decision = capacity.calculate(config, rows, agents, {"eng": 2, "ci": 0, "plan": 0}, requirements)
+    assert [(slot["index"], slot["harness"]) for slot in decision["placements"]["eng"]] == [(0, "codex"), (1, "claude")]

@@ -408,10 +408,11 @@ def _shared(agents: Iterable[AgentRecord]) -> dict[str, int]:
     }
 
 
-def _share(lane: str, spare: list[str], shared: dict[str, int]) -> list[str]:
-    """Codex alone for an eng or ci slot while Codex holds under its share of those agents, else every spare harness."""
+def _share(lane: str, free: list[str], eligible: list[str], shared: dict[str, int]) -> list[str]:
+    """Codex alone for an eng or ci slot while Codex holds under its share and has an unreserved seat, else the free
+    harnesses, or every eligible one when pinned work reserves them all."""
     short = shared["codex"] < CODEX_SHARE * (shared["claude"] + shared["codex"] + 1)
-    return ["codex"] if lane in SHARED_LANES and "codex" in spare and short else spare
+    return ["codex"] if lane in SHARED_LANES and "codex" in free and short else free or eligible
 
 
 def _allocate(
@@ -447,7 +448,7 @@ def _allocate(
         cursors[lane] = index
         reserved = _reserved(limits, effective, options, cursors)
         eligible = [h for h in options[lane][index] if room(lane, index, h)]
-        spare = _share(lane, [h for h in eligible if remaining[h] > reserved[h]] or eligible, shared)
+        spare = _share(lane, [h for h in eligible if remaining[h] > reserved[h]], eligible, shared)
         seat = pick(held.values(), lambda s: s.harness in spare and usable(lane, index, s))
         held[(seat.harness, seat.account)] = replace(seat, sessions=seat.sessions + 1)
         allocation[lane][seat.harness] += 1
