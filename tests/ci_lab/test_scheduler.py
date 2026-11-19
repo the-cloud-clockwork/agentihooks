@@ -8,6 +8,7 @@ import threading
 import urllib.request
 import zipfile
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import wait
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,7 @@ from scripts.ci_lab import (
     expand_tests,
     interaction,
     lease_api,
+    manifests,
     queue,
     relay,
     scheduler,
@@ -1002,6 +1004,32 @@ def test_a_head_whose_manifest_fetch_github_answers_with_a_server_error_waits_un
     assert run.tick(2000)[-1] == f"cannot expand {HEAD_A}: no dependency manifest at or before {BASE}"
     assert run.lab.client.hgetall(scheduler.WAITING) == {}
     assert run.grades() == []
+
+
+@pytest.mark.feature("lab-manifest-fetch-off-pass")
+def test_a_head_whose_manifest_still_fetches_keeps_its_window_and_each_pass_reads_the_fetch_again(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)})}, quiet_ms=500)
+    run.cache(unit(1))
+    fetching = [manifests.FetchPending(f"{SLUG} manifest of {BASE} is still fetching")] * 2
+    planned = run.lab.expander.expand
+
+    def expand(request: GradeRequest) -> scheduler.Plan:
+        if fetching:
+            raise fetching.pop()
+        return planned(request)
+
+    monkeypatch.setattr(run.lab.expander, "expand", expand)
+    run.push(HEAD_A)
+    assert run.tick(1000) == [f"received {HEAD_A} on feature"]
+    held = run.lab.client.hgetall(scheduler.WAITING)
+    holding = f"holding {HEAD_A}: {SLUG} manifest of {BASE} is still fetching"
+    assert run.tick(1500) == [holding]
+    assert run.lab.client.hgetall(scheduler.WAITING) == held
+    assert run.tick(1501) == [holding]
+    assert run.tick(1502)[0] == f"grading {run.grade(HEAD_A).run} with 0 of 1 units held"
+    assert run.lab.client.hgetall(scheduler.WAITING) == {}
 
 
 def test_a_live_run_without_a_grade_is_forgotten(lab: Callable[..., Run]) -> None:
@@ -2423,6 +2451,54 @@ def test_a_head_whose_manifest_fetch_times_out_waits_out_its_window_again_and_a_
     assert get.call_count == 4
 
 
+@pytest.mark.wall_clock
+@pytest.mark.feature("lab-manifest-fetch-off-pass")
+@pytest.mark.usefixtures("staticless")
+def test_a_pass_reaps_leases_and_advances_grades_while_a_manifest_fetch_github_never_answers(
+    lab: Callable[..., Run], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    suite = _suite(tmp_path, DELIVERY["lab"])
+    answered = threading.Event()
+
+    def never_answers(fetcher: Fetcher, slug: str, commit: str) -> bytes | None:
+        answered.wait(2 * manifests.TIMEOUT)
+        return packed_file(STORED_MANIFEST, commit)
+
+    monkeypatch.setattr(Fetcher, "__call__", never_answers)
+    lost, done = unit(1), unit(2)
+    run = lab({HEAD_A: plan({"lint": (lost,)}), HEAD_B: plan({"lint": (done,)})})
+    run.push(HEAD_A, lane="lost")
+    run.push(HEAD_B, lane="done")
+    run.tick(1000)
+    grants = {grant.unit: grant for grant in run.lease(slots=2, ttl_ms=100)}
+    run.finish(grants[done], "passed", {})
+    node = tmp_path / "node"
+    _git(tmp_path, "init", "-q", "--bare", str(node))
+    toolchain = Toolchain("3.12", {}, "", "", "image", {})
+    stored = scheduler.StoredManifests(run.lab.objects)
+    expander = scheduler.MirrorExpander(node, tmp_path / "stores", toolchain, stored, Port().verdicts)
+    monkeypatch.setattr(run.lab.expander, "expand", expander.expand)
+    event = HeadEvent("push", suite.remote, suite.head, suite.base, ACTOR, "pushed")
+    run.lab.inbox.pending.append(scheduler.Head(event, "dev"))
+    passes: list[list[str]] = []
+    ticking = threading.Thread(target=lambda: passes.append(run.tick(1100)), daemon=True)
+    ticking.start()
+    ticking.join(manifests.TIMEOUT)
+    stalled = ticking.is_alive()
+    answered.set()
+    ticking.join()
+    assert not stalled
+    [actions] = passes
+    slug = str(suite.repo).removeprefix("/")
+    assert f"holding {suite.head}: {slug} manifest of {suite.base} is still fetching" in actions
+    assert f"reaped {grants[lost].job} pending" in actions
+    assert f"completed {run.grade(HEAD_B).run} success" in actions
+    assert isinstance(stored.fetch, manifests.Background)
+    wait([future for _, future in stored.fetch.fetches.values()])
+    assert run.tick(1200)[0].startswith("grading ")
+    assert run.grade(suite.head).base == suite.base
+
+
 @pytest.mark.feature("lab-control-routes")
 def test_the_hotfix_port_reads_the_heads_the_control_routes_marked() -> None:
     client = fake_redis()
@@ -2476,7 +2552,9 @@ def test_build_wires_the_service_ports_from_the_environment(tmp_path: Path, monk
     assert (expander.node, expander.root) == (tmp_path / "node", tmp_path / "stores")
     assert expander.toolchain == Toolchain(sys.version.split()[0], {}, "", "", "image", {})
     assert isinstance(expander.manifests, scheduler.StoredManifests) and expander.manifests.objects is objects
-    fetch = expander.manifests.fetch
+    background = expander.manifests.fetch
+    assert isinstance(background, manifests.Background)
+    fetch = background.fetch
     assert isinstance(fetch, Fetcher) and fetch.reader is Actions and fetch.readers == {}
     stored = Verdict("static", key("static", 9), True, False, 1.0)
     Store(client, objects).put(stored, {}, b"")
