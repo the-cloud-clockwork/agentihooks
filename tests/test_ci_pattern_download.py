@@ -1,4 +1,5 @@
 import base64
+import contextlib
 import hashlib
 import importlib.util
 import io
@@ -7,11 +8,13 @@ import os
 import subprocess
 import sys
 import threading
+import time
 import zipfile
 from collections.abc import Callable, Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import ModuleType
+from typing import cast
 
 import pytest
 import yaml
@@ -73,77 +76,105 @@ class Service:
         return kinds.pop(0) if kinds else "ok"
 
 
-def _handler(service: Service) -> type[BaseHTTPRequestHandler]:
-    class Handler(BaseHTTPRequestHandler):
-        protocol_version = "HTTP/1.1"
+class Handler(BaseHTTPRequestHandler):
+    """Answer the service calls and blob downloads from the Service its server holds."""
 
-        def log_message(self, format: str, *args: object) -> None:
+    protocol_version = "HTTP/1.1"
+
+    @property
+    def service(self) -> Service:
+        return cast("Server", self.server).service
+
+    def log_message(self, format: str, *args: object) -> None:
+        return
+
+    def answer(self, code: int, body: bytes, length: int | None = None) -> None:
+        self.send_response(code)
+        self.send_header("Content-Length", str(len(body) if length is None else length))
+        self.end_headers()
+        self.wfile.write(body)
+        self.wfile.flush()
+
+    def do_POST(self) -> None:
+        request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        method = self.path.rsplit("/", 1)[-1]
+        self.service.calls.append((method, request))
+        if method == "ListArtifacts" and self.service.listing_failures:
+            self.service.listing_failures -= 1
+            self.answer(500, b"{}")
+        elif method == "ListArtifacts":
+            self.answer(200, json.dumps({"artifacts": self.service.artifacts()}).encode())
+        else:
+            url = f"http://{self.headers['Host']}/blob/{request['name']}"
+            self.answer(200, json.dumps({"signed_url": url}).encode())
+
+    def do_GET(self) -> None:
+        name = self.path.rsplit("/", 1)[-1]
+        self.service.fetched.append(name)
+        kind, body = self.service.answer_for(name), _archive(name)
+        if kind == "busy":
+            self.answer(503, b"<Error><Code>ServerBusy</Code></Error>")
+            if self.rfile.read() == b"":
+                self.service.closed_by_client.set()
+        elif kind == "torn":
+            self.answer(200, body[: len(body) // 2])
+        elif kind == "trickle":
+            self.trickle(body)
+        elif kind == "hold":
+            self.service.released.wait(10)
+        elif kind in ("cut", "stall", "late"):
+            self.partial(body, kind)
+        else:
+            self.answer(200, body)
+        if kind != "ok":
+            self.close_connection = True
+
+    def partial(self, body: bytes, kind: str) -> None:
+        if kind == "late" and self.service.released.wait(1):
             return
+        self.answer(200, body[:10], length=len(body))
+        self.service.released.wait(0 if kind == "cut" else 10)
 
-        def answer(self, code: int, body: bytes, length: int | None = None) -> None:
-            self.send_response(code)
-            self.send_header("Content-Length", str(len(body) if length is None else length))
-            self.end_headers()
-            self.wfile.write(body)
-            self.wfile.flush()
+    def trickle(self, body: bytes) -> None:
+        self.answer(200, body[:1], length=len(body))
+        with contextlib.suppress(OSError):
+            for index in range(1, len(body)):
+                if self.service.released.wait(0.05):
+                    break
+                self.wfile.write(body[index : index + 1])
+                self.wfile.flush()
 
-        def do_POST(self) -> None:
-            request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-            method = self.path.rsplit("/", 1)[-1]
-            service.calls.append((method, request))
-            if method == "ListArtifacts" and service.listing_failures:
-                service.listing_failures -= 1
-                self.answer(500, b"{}")
-            elif method == "ListArtifacts":
-                self.answer(200, json.dumps({"artifacts": service.artifacts()}).encode())
-            else:
-                url = f"http://{self.headers['Host']}/blob/{request['name']}"
-                self.answer(200, json.dumps({"signed_url": url}).encode())
 
-        def do_GET(self) -> None:
-            name = self.path.rsplit("/", 1)[-1]
-            service.fetched.append(name)
-            kind, body = service.answer_for(name), _archive(name)
-            if kind == "busy":
-                self.answer(503, b"<Error><Code>ServerBusy</Code></Error>")
-                self.close_connection = True
-                if self.rfile.read() == b"":
-                    service.closed_by_client.set()
-            elif kind == "torn":
-                self.answer(200, body[: len(body) // 2])
-            elif kind == "cut":
-                self.answer(200, body[:10], length=len(body))
-                self.close_connection = True
-            elif kind == "stall":
-                self.answer(200, body[:10], length=len(body))
-                service.released.wait(10)
-                self.close_connection = True
-            else:
-                self.answer(200, body)
+class Server(ThreadingHTTPServer):
+    """A loopback server on a port of its own, holding the Service its handlers answer from."""
 
-    return Handler
+    daemon_threads = True
+
+    def __init__(self, service: Service) -> None:
+        super().__init__(("127.0.0.1", 0), Handler)
+        self.service = service
 
 
 @pytest.fixture
 def serve() -> Iterator[Serve]:
-    started: list[tuple[ThreadingHTTPServer, Service]] = []
+    started: list[Server] = []
 
     def start(service: Service) -> str:
-        server = ThreadingHTTPServer(("127.0.0.1", 0), _handler(service))
-        server.daemon_threads = True
+        server = Server(service)
         threading.Thread(target=server.serve_forever, daemon=True).start()
-        started.append((server, service))
+        started.append(server)
         return f"http://127.0.0.1:{server.server_port}/"
 
     yield start
-    for server, service in started:
-        service.released.set()
+    for server in started:
+        server.service.released.set()
         server.shutdown()
         server.server_close()
 
 
-def _download(base: str, folder: Path, pauses: list[float] | None = None) -> list[str]:
-    return fetch.download(fetch.Results(base, TOKEN), PATTERN, folder, (pauses if pauses is not None else []).append)
+def _download(base: str, folder: Path, pauses: list[float] | None = None, deadline: float | None = None) -> list[str]:
+    results = fetch.Results(base, TOKEN, time.monotonic() + 30 if deadline is None else deadline)
+    return fetch.download(results, PATTERN, folder, (pauses if pauses is not None else []).append)
 
 
 def _files(folder: Path) -> list[str]:
@@ -201,11 +232,24 @@ def test_a_torn_or_cut_archive_is_fetched_again(serve: Serve, tmp_path: Path, ki
 def test_a_stalled_blob_is_fetched_again_after_the_read_timeout(
     serve: Serve, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(fetch, "TIMEOUT", 0.3)
+    monkeypatch.setattr(fetch, "TIMEOUT", 2.0)
     service = Service([("mutation-stats-0", 1)], {"mutation-stats-0": ["stall"]})
     assert _download(serve(service), tmp_path) == []
     assert service.fetched == ["mutation-stats-0", "mutation-stats-0"]
     assert _files(tmp_path) == ["collected-mutation-stats-0"]
+
+
+@pytest.mark.parametrize("kind", ["hold", "stall", "trickle"])
+def test_a_blob_still_arriving_at_the_deadline_is_named_instead_of_outliving_it(
+    serve: Serve, tmp_path: Path, kind: str
+) -> None:
+    service = Service([("mutation-stats-0", 1)], {"mutation-stats-0": [kind]})
+    pauses: list[float] = []
+    started = time.monotonic()
+    assert _download(serve(service), tmp_path, pauses, deadline=started + 2) == ["mutation-stats-0"]
+    assert time.monotonic() - started < 5
+    assert service.fetched == ["mutation-stats-0"]
+    assert pauses == []
 
 
 @pytest.mark.parametrize(("failures", "missing"), [(fetch.TRIES - 1, []), (fetch.TRIES, [fetch.LISTING])])
@@ -235,7 +279,7 @@ def test_main_reads_the_runtime_token_and_names_every_part_that_never_arrived(
     assert fetch.main([PATTERN, str(tmp_path)]) == 1
     assert capsys.readouterr().out.endswith(
         f"Downloaded 1 of 2 artifacts matching {PATTERN} into {tmp_path}\n"
-        f"::error::Downloading mutation-stats-1 failed after {fetch.TRIES} tries.\n"
+        f"::error::mutation-stats-1 did not arrive within {fetch.TRIES} tries before the {fetch.DEADLINE:g} s deadline.\n"
     )
     assert _files(tmp_path) == ["collected-mutation-stats-0"]
 
@@ -253,6 +297,31 @@ def test_the_script_run_as_the_action_runs_it_downloads_and_exits(serve: Serve, 
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout == f"Downloaded 2 of 2 artifacts matching {PATTERN} into {tmp_path / 'stats'}\n"
     assert _files(tmp_path / "stats") == ["collected-mutation-stats-0", "collected-mutation-stats-1"]
+
+
+def test_the_watchdog_ends_the_script_when_one_socket_read_outlives_the_deadline(serve: Serve, tmp_path: Path) -> None:
+    service = Service([("mutation-stats-0", 1)], {"mutation-stats-0": ["late"]})
+    runner = (
+        "import importlib.util, sys\n"
+        "spec = importlib.util.spec_from_file_location('fetch', sys.argv[1])\n"
+        "fetch = importlib.util.module_from_spec(spec)\n"
+        "spec.loader.exec_module(fetch)\n"
+        "fetch.DEADLINE, fetch.GRACE = 2.0, 0.2\n"
+        "sys.exit(fetch.main(sys.argv[2:]))\n"
+    )
+    env = {**os.environ, "ACTIONS_RESULTS_URL": serve(service), "ACTIONS_RUNTIME_TOKEN": TOKEN}
+    started = time.monotonic()
+    result = subprocess.run(
+        [sys.executable, "-c", runner, str(ACTION / "fetch.py"), PATTERN, str(tmp_path)],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.stdout == f"::error::Downloading {PATTERN} ran past its 2 s deadline.\n"
+    assert time.monotonic() - started < 10
+    assert service.fetched == ["mutation-stats-0"]
 
 
 def test_the_action_runs_the_script_inside_github_script_without_a_workflow_token() -> None:
