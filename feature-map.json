@@ -8979,7 +8979,8 @@
       "seam": "The pattern download composite action and its fetch script, used by the shared mutation stats download steps of the Tests workflow",
       "tests": [
         "tests/test_ci_artifact_download_retry.py::test_every_shared_mutation_stats_download_runs_the_action_that_closes_each_blob_answer",
-        "tests/test_ci_pattern_download.py::test_a_kept_alive_error_answer_is_closed_before_the_retry_and_every_part_merges"
+        "tests/test_ci_pattern_download.py::test_a_kept_alive_error_answer_is_closed_before_the_retry_and_every_part_merges",
+        "tests/test_ci_pattern_download.py::test_a_client_that_resets_its_kept_alive_error_answer_has_closed_it"
       ]
     },
     {
