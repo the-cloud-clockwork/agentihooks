@@ -228,11 +228,14 @@ class Admission:
         return ""
 
     def _reserved(self, view: readiness.Snapshot, row: dict[str, Any], hive: str) -> int:
-        """The root slots kept for the asking swarm's waiting tasks only the root hive takes when this task could run
-        on any hive; none for another hive or a task only the root hive takes."""
+        """The root slots kept for the waiting tasks only the root hive takes of every events swarm, the asking swarm
+        read from its own view, when this task could run on any hive; none for another hive or a task only the root
+        hive takes."""
         if hive != readiness.ROOT or readiness.root_only(row):
             return 0
-        return readiness.root_waiting(view, readiness.declared(self.store, hive))
+        capabilities = readiness.declared(self.store, hive)
+        views = [view, *(self.source.snapshot(slug) for slug in self.source.slugs() if slug != view.slug)]
+        return sum(readiness.root_waiting(each, capabilities) for each in views)
 
     @contextmanager
     def _turn(self, hive: str, offer: str) -> Iterator[str]:
