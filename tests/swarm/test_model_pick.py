@@ -381,6 +381,13 @@ def test_the_master_model_is_the_frontier_pick_on_the_swarm_model_setting(harnes
     assert model_pick.master(config, harness) == ModelPick(model, "high", "frontier")
 
 
+@pytest.mark.feature("master-launch-swarm-model")
+@pytest.mark.parametrize("harness", ["claude", "codex"])
+def test_an_empty_swarm_model_puts_the_master_on_its_harness_frontier_default(harness):
+    config = SimpleNamespace(claude_model="", codex_model="")
+    assert model_pick.master(config, harness) == ModelPick(MODEL_DEFAULTS[harness], "high", "frontier")
+
+
 TASK = {"id": "t1", "title": "Fix typo", "difficulty": "S", "rank": "normal"}
 
 
