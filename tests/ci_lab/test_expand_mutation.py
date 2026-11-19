@@ -10,6 +10,7 @@ from scripts.ci_lab.units import Unit
 from scripts.ci_mutation.plan import MUTANT_SECONDS
 from scripts.ci_mutation.selection import selected_mutant_names
 from scripts.ci_mutation.stats_cache import collect_cached_stats
+from scripts.ci_mutation.stats_dependencies import digest  # pyright: ignore[reportUnknownVariableType]
 
 SAMPLE = """import functools
 
@@ -183,6 +184,7 @@ def test_a_unit_priced_over_the_timeout_splits_into_the_fewest_parts_that_each_p
     assert max(sizes) - min(sizes) <= 1
     assert [unit.kind for unit in parts] == ["mutant"] * len(parts)
     assert len({unit.key for unit in parts} | {whole.key}) == len(parts) + 1
+    assert [unit.key for unit in parts] == [digest([whole.key, list(unit.members)]) for unit in parts]
     assert parts == expand_mutation.mutant_units(root, {PATH: [12]}, {}, {}, timeout=timeout)
 
 

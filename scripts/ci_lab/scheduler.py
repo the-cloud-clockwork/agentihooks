@@ -1200,7 +1200,11 @@ class MirrorExpander:
                 return {}
             covering = expand_mutation.covering(root, manifest, expand_tests.fingerprints(manifest, contents), changes)
             mutants = expand_mutation.mutant_units(
-                root, changes, covering, expand_tests.unlisted_test_hashes(manifest, contents)
+                root,
+                changes,
+                covering,
+                expand_tests.unlisted_test_hashes(manifest, contents),
+                timeout=executors.UNIT_TIMEOUT_S,
             )
             owners = {executors.function_of(unit.members[0]) for unit in mutants}
             tests = {test.partition("::")[0] for name in owners for test in covering.get(name, {})}
