@@ -307,7 +307,8 @@ class Head:
 @dataclass(frozen=True)
 class Plan:
     """How to grade one head: the tree and grader revision it reads, the units of each gate, the jobs the tier skips,
-    and the job outputs and flags the `Gate — Required` rules read."""
+    the job outputs and flags the `Gate — Required` rules read, and the dev commit of the dependency manifest its test
+    units are keyed on, empty when it keys none."""
 
     tree: str
     grader: str
@@ -315,6 +316,7 @@ class Plan:
     skipped: frozenset[str] = frozenset()
     outputs: Mapping[str, Mapping[str, str]] = field(default_factory=dict[str, Mapping[str, str]])
     flags: Flags = Flags()
+    manifest: str = ""
 
 
 class Inbox(Protocol):

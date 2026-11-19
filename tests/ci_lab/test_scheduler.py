@@ -1999,7 +1999,8 @@ def test_a_merge_group_head_runs_only_the_batches_its_entries_invalidate(tmp_pat
     found = port.expander(tmp_path).expand(suite.request(Priority.QUEUE))
     every = _suite_units(suite, suite.head, SUITE_DURATIONS)
     assert [batch.members for batch in every] == [(FIRST_TEST,), (OTHER_TEST,), (SECOND_TEST,)]
-    assert found == scheduler.frame(Priority.QUEUE, _tree(suite, suite.head), suite.base, {"unit": every[2:]})
+    expected = scheduler.frame(Priority.QUEUE, _tree(suite, suite.head), suite.base, {"unit": every[2:]})
+    assert found == replace(expected, manifest="dev")
     assert port.asked == [(suite.remote, [suite.base, suite.seed])]
     assert port.looked == [(batch.kind, batch.key) for batch in every]
 
@@ -2012,7 +2013,9 @@ def test_a_merge_group_head_whose_entries_invalidate_no_test_runs_no_batch(tmp_p
     head = _commit(suite.repo, {"docs/q.md": "q\n"})
     port = Port(SUITE_MANIFEST)
     found = port.expander(tmp_path).expand(suite.request(Priority.QUEUE, head))
-    assert found == scheduler.frame(Priority.QUEUE, _tree(suite, head), suite.base, {"unit": ()})
+    assert found == replace(
+        scheduler.frame(Priority.QUEUE, _tree(suite, head), suite.base, {"unit": ()}), manifest="dev"
+    )
     assert port.asked == [(suite.remote, [suite.base, suite.seed])]
     assert port.looked == [(batch.kind, batch.key) for batch in _suite_units(suite, head, SUITE_DURATIONS)]
 
@@ -2029,7 +2032,8 @@ def test_a_merge_group_head_runs_every_batch_when_an_interaction_clause_holds(
     port = Port(SUITE_MANIFEST, known)
     found = port.expander(tmp_path).expand(suite.request(Priority.QUEUE))
     every = _suite_units(suite, suite.head, SUITE_DURATIONS)
-    assert found == scheduler.frame(Priority.QUEUE, _tree(suite, suite.head), suite.base, {"unit": every})
+    expected = scheduler.frame(Priority.QUEUE, _tree(suite, suite.head), suite.base, {"unit": every})
+    assert found == replace(expected, manifest="dev")
 
 
 @pytest.mark.feature("lab-scheduler-test-units")
@@ -2049,7 +2053,8 @@ def test_a_merge_group_entry_that_adds_a_test_file_the_manifest_lacks_runs_its_u
     chain = Toolchain("3.12", {}, blobs["uv.lock"], blobs["pyproject.toml"], "image", {})
     added = expand_tests.unlisted_units(SUITE_MANIFEST, _contents(suite, head), [GAMMA], chain)
     assert [unit.members for unit in added] == [(GAMMA,)]
-    assert found == scheduler.frame(Priority.QUEUE, _tree(suite, head), suite.base, {"unit": (*every[picked], *added)})
+    expected = scheduler.frame(Priority.QUEUE, _tree(suite, head), suite.base, {"unit": (*every[picked], *added)})
+    assert found == replace(expected, manifest="dev")
 
 
 @pytest.mark.feature("lab-scheduler-test-units")
@@ -2065,7 +2070,8 @@ def test_a_promotion_or_backfill_head_runs_every_batch_without_reading_the_cache
     mutation = _mutation_gates(
         suite, suite.head, {"scripts/alpha.py": [6]}, ["tests/test_beta.py"], {SECOND: [SECOND_TEST]}
     )
-    assert found == scheduler.frame(tier, _tree(suite, suite.head), suite.head, {"unit": every, **mutation})
+    expected = scheduler.frame(tier, _tree(suite, suite.head), suite.head, {"unit": every, **mutation})
+    assert found == replace(expected, manifest="dev")
     assert (port.asked, port.looked) == ([(suite.remote, [suite.base, suite.seed])], [])
 
 
@@ -2322,7 +2328,7 @@ def test_a_test_verdict_outside_list_reaches_the_stored_records_and_the_followin
         Unit(expand_tests.KIND, key(expand_tests.KIND, number), tests)
         for number, tests in ((1, members), (2, members), (3, (FIRST_TEST,)), (4, (FIRST_TEST,)))
     )
-    run = lab({HEAD_A: plan({"unit": (first, twin, failed, plain)})})
+    run = lab({HEAD_A: replace(plan({"unit": (first, twin, failed, plain)}), manifest="dev")})
     folder = manifest_folder(SLUG)
     packed = dep_manifest.pack(copy.deepcopy(SUITE_MANIFEST))
     run.lab.objects.write_once(f"{folder}dev.json", json.dumps(packed).encode())
@@ -2349,7 +2355,7 @@ def test_a_test_verdict_outside_list_reaches_the_stored_records_and_the_followin
         },
     }
     notes = [
-        f"{folder}outside/{digest({'tests': list(tests), 'outside': files})}.json"
+        f"{folder}outside/dev/{digest({'tests': list(tests), 'outside': files})}.json"
         for tests, files in ((members, both), ((FIRST_TEST,), ["docs/c.md"]))
     ]
     assert run.lab.objects.keys(folder) == sorted([f"{folder}dev.json", *notes])
@@ -2359,6 +2365,42 @@ def test_a_test_verdict_outside_list_reaches_the_stored_records_and_the_followin
     assert interaction.invalidated(after, change) == {OTHER_TEST, SECOND_TEST}
     assert _batch_keys(before, b"p\n") == _batch_keys(before, b"q\n")
     assert _batch_keys(after, b"p\n")[(FIRST_TEST, OTHER_TEST)] != _batch_keys(after, b"q\n")[(FIRST_TEST, OTHER_TEST)]
+
+
+@pytest.mark.feature("lab-outside-notes-per-commit")
+def test_a_note_of_an_older_manifest_commit_leaves_a_newer_commit_key_unchanged(tmp_path: Path) -> None:
+    objects = LocalObjects(tmp_path / "objects")
+    folder = manifest_folder(SLUG)
+    for commit in ("older", "newer"):
+        objects.write_once(f"{folder}{commit}.json", packed_file(SUITE_MANIFEST, commit))
+    note: dict[str, object] = {"tests": [FIRST_TEST, OTHER_TEST], "outside": ["docs/p.md"]}
+    objects.write_once(f"{folder}outside/older/{digest(note)}.json", json.dumps(note).encode())
+    stored = scheduler.StoredManifests(objects, unfetched)
+    newer, older = stored(REPO, ["newer", "older"]), stored(REPO, ["older"])
+    records = SUITE_MANIFEST["tests"]
+    widened = {test: {**records[test], "outside": ["docs/p.md"]} for test in (FIRST_TEST, OTHER_TEST)}
+    assert newer == {**SUITE_MANIFEST, "commit": "newer"}
+    assert older == {**SUITE_MANIFEST, "commit": "older", "tests": {**records, **widened}}
+    assert _batch_keys(newer, b"p\n") == _batch_keys(newer, b"q\n")
+    assert _batch_keys(older, b"p\n")[(FIRST_TEST, OTHER_TEST)] != _batch_keys(older, b"q\n")[(FIRST_TEST, OTHER_TEST)]
+
+
+@pytest.mark.feature("lab-outside-notes-per-commit")
+def test_a_manifest_read_removes_the_notes_of_commits_with_no_stored_manifest(tmp_path: Path) -> None:
+    objects = LocalObjects(tmp_path / "objects")
+    folder, other = manifest_folder(SLUG), manifest_folder("other/repo")
+    objects.write_once(f"{folder}kept.json", packed_file(STORED_MANIFEST, "kept"))
+    note = json.dumps({"tests": [FIRST_TEST], "outside": ["docs/p.md"]}).encode()
+    kept, gone, flat = f"{folder}outside/kept/n.json", f"{folder}outside/gone/n.json", f"{folder}outside/n.json"
+    for path in (kept, gone, flat, f"{other}outside/gone/n.json"):
+        objects.write_once(path, note)
+    found = scheduler.StoredManifests(objects, unfetched)(REPO, ["kept"])
+    first = {**STORED_MANIFEST["tests"][FIRST_TEST], "outside": ["docs/p.md"]}
+    assert found == {**STORED_MANIFEST, "commit": "kept", "tests": {FIRST_TEST: first}}
+    assert objects.keys(folder) == [f"{folder}kept.json", kept]
+    assert objects.keys(other) == [f"{other}outside/gone/n.json"]
+    assert scheduler.StoredManifests(objects, unfetched)(REPO, ["missing"]) is None
+    assert objects.keys(folder) == [f"{folder}kept.json", kept]
 
 
 @pytest.mark.feature("lab-dev-manifest-fetch")
@@ -2405,6 +2447,7 @@ def test_a_head_that_needs_test_units_expands_on_the_manifest_stored_from_its_ba
     expander = scheduler.MirrorExpander(node, tmp_path / "stores", toolchain, stored, port.verdicts)
     found = expander.expand(suite.request(Priority.PROMOTION))
     assert [batch.members for batch in found.gates["unit"]] == [(FIRST_TEST,)]
+    assert found.manifest == suite.base
     slug = str(suite.repo).removeprefix("/")
     assert fetches.asked == [(slug, suite.base)]
     assert objects.read(f"{manifest_folder(slug)}{suite.base}.json") == packed_file(STORED_MANIFEST, suite.base)
