@@ -28,9 +28,12 @@ def read(file: Path, generation: int) -> tuple[int, Entry] | None:
             held = int(stream.readline())
             if held > generation:
                 return None
-            fragments = document(json.loads(stream.read()))
+            state = json.loads(stream.read())
     except (OSError, ValueError):
         return None
+    if not isinstance(state, dict):
+        return None
+    fragments = document(state)
     return held, Entry(held, None, fragments.value, fragments)
 
 

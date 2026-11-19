@@ -57,7 +57,9 @@ def test_a_host_entry_at_the_stored_generation_is_served_as_it_is(tmp_path: Path
     stored = first.current("ledger")
     loads.clear()
     fresh = kept(tmp_path)
-    assert fresh.current("ledger").generation == stored.generation
+    adopted = fresh.current("ledger")
+    assert adopted.generation == stored.generation
+    assert fresh.current("ledger") is adopted
     assert fresh.get_document("ledger") == first.get_document("ledger")
     assert loads == []
 
@@ -74,7 +76,7 @@ def test_a_host_entry_newer_than_the_database_is_never_adopted(tmp_path: Path, l
 
 
 @pytest.mark.feature("ledger-cold-write")
-@pytest.mark.parametrize("text", [b"", b"not a generation\n{}", b"7\nnot json"])
+@pytest.mark.parametrize("text", [b"", b"not a generation\n{}", b"7\nnot json", b"7\n[]", b"7\nnull"])
 def test_an_unreadable_host_entry_falls_back_to_the_whole_load(tmp_path: Path, loads: list[str], text: bytes) -> None:
     first = kept(tmp_path)
     first.create("ledger", CONTENT)
@@ -111,6 +113,22 @@ def test_a_warm_repository_rewrites_the_host_entry_once_it_refreshed_far_enough_
     held = host_entries.read(host_copy(tmp_path), refreshed.generation)
     assert held is not None
     assert held[0] == refreshed.generation
+
+
+def test_a_copy_that_cannot_replace_its_target_leaves_no_staged_file(tmp_path: Path) -> None:
+    (tmp_path / "ledger.entry").mkdir()
+    host_entries.write(tmp_path / "ledger.entry", 1, "{}")
+    assert [file.name for file in tmp_path.iterdir()] == ["ledger.entry"]
+
+
+@pytest.mark.feature("ledger-cold-write")
+def test_a_purged_ledger_keeps_no_host_entry(tmp_path: Path) -> None:
+    first = kept(tmp_path)
+    first.create("ledger", CONTENT)
+    first.current("ledger")
+    with first.transaction() as transaction:
+        transaction.purge("ledger")
+    assert list((tmp_path / "home" / "entries").iterdir()) == []
 
 
 def test_a_host_that_cannot_store_the_entry_keeps_no_copy(tmp_path: Path) -> None:

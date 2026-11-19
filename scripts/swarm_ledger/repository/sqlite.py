@@ -517,9 +517,9 @@ class SQLiteLedgerRepository:
             fragments = document(state, None if whole else cached.fragments)
             entry = Entry(row[0], None, fragments.value, fragments, writer)
             self._remember(slug, entry)
+            self._keep(slug, entry, row[0], whole)
         if whole:
             heap.release()
-        self._keep(slug, entry, row[0], whole)
         return entry
 
     def _refreshed(self, connection, slug: str, cached: Entry | None, generation: int) -> tuple:
@@ -844,13 +844,15 @@ class SQLiteLedgerRepository:
     def list_summaries(self) -> list:
         return [{key: summary[key] for key in SUMMARY_KEYS} for summary in self.summaries()]
 
-    def purge(self, slug: str, connection) -> None:
+    def purge(self, slug: str, connection: sqlite3.Connection) -> None:
         if connection.execute(STORED, (slug,)).fetchone():
             before = self._entry(connection, slug).state
             outbox.write(connection, slug, before["_meta"]["rev"], before, {})
         for table in (*PER_LEDGER, artifact_files.TABLE, media_files.TABLE):
             connection.execute(f"DELETE FROM {table} WHERE slug=?", (slug,))
         self._cache.pop(self._key(slug), None)
+        if self.entries is not None:
+            host_entries.path(self.entries, self._key(slug)).unlink(missing_ok=True)
 
     def registry(self, name: str, connection) -> dict:
         return {key: json.loads(value) for key, value in connection.execute(REGISTRY, (name,))}
