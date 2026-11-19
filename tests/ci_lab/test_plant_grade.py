@@ -47,7 +47,9 @@ def repository(tmp_path: Path) -> Path:
             }
         )
     )
-    (catalog / "gate-script.json").write_text((catalog / "lint.json").read_text())
+    (catalog / "gate-script.json").write_text(
+        (catalog / "lint.json").read_text().replace('"I001"', '"forbidden comment"')
+    )
     git(root, "add", "sample.py", "tests/ci_lab/plants/lint.json", "tests/ci_lab/plants/gate-script.json")
     git(root, "commit", "-qm", "Seed")
     remote = tmp_path / "remote.git"
@@ -257,6 +259,7 @@ def test_conflicting_gate_checks_cannot_hide_an_extra_failure(repository: Path) 
         )
 
 
+@pytest.mark.parametrize("name", ["lint", "gate-script"])
 @pytest.mark.parametrize("diagnostic", [None, "", "F401 unused import", "ruff: command not found", "I0010"])
 @pytest.mark.feature("lab-static-plant-proofs")
 def test_a_named_gate_failure_requires_the_observed_plant_diagnostic(repository: Path, diagnostic: str | None) -> None:
@@ -393,7 +396,7 @@ def test_the_command_prints_links_and_appends_the_proof_summary(
     assert row["green"] == row["red"] == "https://github.com/acme/widgets/runs/required"
     text = summary.read_text()
     assert text.startswith("Earlier proof\n")
-    assert name in text and "I001" in text
+    assert name in text and ("I001" if name == "lint" else "forbidden comment") in text
     assert "[green](https://github.com/acme/widgets/runs/required)" in text
     assert "[red](https://github.com/acme/widgets/runs/required)" in text
 
