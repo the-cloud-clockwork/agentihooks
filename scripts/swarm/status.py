@@ -326,6 +326,15 @@ def transport(agent: AgentRecord) -> dict:
     return {"push_inbox": found.push_inbox, "native_terminal_attach": found.native_terminal_attach}
 
 
+def wait_label(store: RedisStore, slug: str, agent: AgentRecord) -> str:
+    """The agent's live declared wait as its kind and target, ``bare`` for a bare wait, or ``-`` without one."""
+    held = idle.wait(store.redis, slug, agent.name)
+    if not held:
+        return "-"
+    on = held.get("on")
+    return f"{on['kind']} {on['target']}" if on else "bare"
+
+
 def live_agents(agents: list[AgentRecord], runtime: Runtime) -> list[AgentRecord]:
     from scripts.swarm.commands import hive_id
 

@@ -170,6 +170,7 @@ from scripts.swarm.status import (
     task_counts,
     transport,
     verdict_store,
+    wait_label,
 )
 from scripts.swarm.store import (
     APP_SERVER_TRANSPORT,
@@ -1637,7 +1638,7 @@ def cmd_status(store: Any, args: Any) -> None:
     if promotion := tick_master.status_line(tick_master.read(store, args.slug)):
         print(promotion)
     print(
-        "Agent\tLane\tHarness\tProfile\tModel\tAccount\tPane\tTask\tState\tConversation\tPush inbox\tNative terminal\tModel source\tConfidence\tHive"
+        "Agent\tLane\tHarness\tProfile\tModel\tAccount\tPane\tTask\tState\tConversation\tPush inbox\tNative terminal\tModel source\tConfidence\tHive\tWait"
     )
     for a in agents:
         model = " ".join(filter(None, (a.model, a.effort))) if a.model else "unknown"
@@ -1646,6 +1647,7 @@ def cmd_status(store: Any, args: Any) -> None:
         attach = "yes" if can["native_terminal_attach"] else "no"
         print(
             f"{a.name}\t{a.lane}\t{a.harness}\t{a.profile or 'unknown'}\t{model}\t{a.account or '-'}\t{a.pane_id}\t{a.task}\t{agent_status(a)}\t{a.conversation_id or '-'}\t{push}\t{attach}\t{a.model_source or '-'}\t{a.model_confidence if a.model_confidence is not None else '-'}\t{agent_hive(a) or '-'}"
+            f"\t{wait_label(store, args.slug, a)}"
         )
     from scripts.hive import join_report
 

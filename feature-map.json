@@ -4589,6 +4589,16 @@
       ]
     },
     {
+      "id": "swarm-status-agent-wait",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-status-agent-wait-column",
+      "behaviour": "The swarm status agent table ends with a Wait column: an agent with a checked wait shows its kind and target, such as lab and the check run link, an agent with a bare wait shows bare, and an agent with no live wait shows a dash, so a master reads every agent's wait from swarm status.",
+      "seam": "The agentihooks swarm status agent table, cli.cmd_status through status.wait_label",
+      "tests": [
+        "tests/swarm/test_status_capabilities.py::test_status_text_prints_each_agents_declared_wait_kind_and_target"
+      ]
+    },
+    {
       "id": "artifact-storage",
       "origin": "inventory",
       "behaviour": "Markdown, JSON and SVG artifacts are stored once by content hash, SVG without scripts; any other file or an oversize file is refused.",
@@ -7791,6 +7801,18 @@
       ]
     },
     {
+      "id": "mutation-replan-names-untested-functions",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-replan-names-untested-functions",
+      "behaviour": "When the measured mutation plan or the replan after the early stage refuses a change as too large, the refusal names every changed function no test calls in process, with how many of the change's mutants they hold and how many of its worker seconds those mutants carry. The plan prices each such mutant at the slowest tested function's cost, and on the ledger cutover, pull request 11561, the measured plan of Tests run 43943313510 gave 58 such mutants 64698 of its 93282 worker seconds while the refusal named none of them.",
+      "seam": "scripts.ci_mutation.measured.measured_plan records the functions absent from every stats tests map as the plan's untested key, which merge_probes and probed_plan carry into the replan, and scripts.ci_mutation.measured.budget_overrun appends the sentence naming them after either refusal",
+      "tests": [
+        "tests/test_ci_mutation_plan.py::test_the_measured_plan_lists_each_function_no_test_calls_in_process_once_in_name_order",
+        "tests/test_ci_mutation_plan.py::test_a_refusal_names_the_functions_no_test_calls_in_process_with_their_mutants_and_worker_seconds",
+        "tests/test_ci_mutation_probed.py::test_the_cli_refusal_after_the_early_stage_names_the_functions_no_test_calls_in_process"
+      ]
+    },
+    {
       "id": "admission-outcome-totals",
       "origin": "inventory",
       "behaviour": "Placement waits count each hive admission refusal category once per task until it changes or clears, count each successful admission once, and metrics_service.admission_rows sums both the pending admission gate's totals and these hive outcome totals into one admission_samples row per outcome.",
@@ -8538,6 +8560,17 @@
       "seam": "The download-artifact uses lines in .github workflows and actions and in scripts/ci_gate_summary_steps.yml",
       "tests": [
         "tests/test_ci_artifact_download_retry.py::test_every_download_step_uses_the_release_that_retries_a_stalled_blob"
+      ]
+    },
+    {
+      "id": "shared-mutation-stats-download-ends-with-its-download",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2699",
+      "behaviour": "The mutation refine, probe and shard jobs download the shared mutation stats through the pattern download action, which asks the results service for this run's matching artifacts and closes every answer before it tries again, so the step ends with its download instead of waiting out the three minute socket timeout that an unread non-200 blob answer holds in download-artifact 8.0.2.",
+      "seam": "The pattern download composite action and its fetch script, used by the shared mutation stats download steps of the Tests workflow",
+      "tests": [
+        "tests/test_ci_artifact_download_retry.py::test_every_shared_mutation_stats_download_runs_the_action_that_closes_each_blob_answer",
+        "tests/test_ci_pattern_download.py::test_a_kept_alive_error_answer_is_closed_before_the_retry_and_every_part_merges"
       ]
     },
     {
