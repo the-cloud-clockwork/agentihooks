@@ -222,7 +222,7 @@ def fell(box: Mapping[str, Any], step: Step) -> bool:
     """Return whether ``step`` needs a fallen step of the pass ``box``, one that raised or one shut for needing one,
     naming ``step`` fallen in turn so the steps that need it stay shut too."""
     fallen: set[str] | None = box.get(FALLEN)
-    if fallen is None or fallen.isdisjoint(step.needs):
+    if fallen is None or fallen.isdisjoint(registry.failure_needs(step)):
         return False
     fallen.add(step.name)
     return True

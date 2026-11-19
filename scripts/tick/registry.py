@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from importlib import import_module
 from itertools import combinations
 from math import isfinite
+from typing import Any
 
 from scripts.tick.pool import RESERVES
 from scripts.tick.step import Domain, Step
@@ -206,6 +207,21 @@ def latest_start(name: str, steps: list[Step]) -> float:
     return starts[name]
 
 
+@dataclass(frozen=True)
+class _SiteStep:
+    step: Step
+    needs: frozenset[str]
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(object.__getattribute__(self, "step"), name)
+
+
+def failure_needs(step: Step) -> frozenset[str]:
+    if isinstance(step, _SiteStep):
+        return failure_needs(step.step)
+    return step.needs
+
+
 def _needing(step: Step, needs: frozenset[str]) -> Step:
     """Return a copy of ``step`` that needs exactly ``needs``."""
     edged = copy(step)
@@ -263,7 +279,7 @@ def site_edges(
             for other in early
             if order[other.group] < order[step.group] and uses.after(other, held(order[other.group]))
         )
-        edged.append(_needing(step, step.needs | needs))
+        edged.append(_SiteStep(step, step.needs | needs))
     return tuple(edged)
 
 
