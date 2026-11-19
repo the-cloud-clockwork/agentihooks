@@ -522,11 +522,19 @@ def load_or_collect_stats(runner, test_runner, paths: list[str], mode: str, stat
         if mode == "collect":
             output, key, index, total = Path(stats[0]), stats[1], int(stats[2]), int(stats[3])
             files = config.pytest_add_cli_args_test_selection
+            print(f"Mutation stats phase: collect only start at {__import__('time').time():.1f}", flush=True)
             if total > 1:
                 files = collect_test_ids(test_runner, files)
+                print(
+                    f"Mutation stats phase: collect only done {len(files)} ids at {__import__('time').time():.1f}",
+                    flush=True,
+                )
             split = split_files(Path.cwd(), files, total)
+            print(f"Mutation stats phase: split done at {__import__('time').time():.1f}", flush=True)
             results = collect_file_stats(runner, test_runner, split[index], workers, Path.cwd())
+            print(f"Mutation stats phase: file stats done at {__import__('time').time():.1f}", flush=True)
             write_part(output, key, (index, total), results, split_key(split))
+            print(f"Mutation stats phase: part written at {__import__('time').time():.1f}", flush=True)
             raise SystemExit(0)
         shards = stats_shards(Path.cwd(), config.pytest_add_cli_args_test_selection, workers)
         collect_parallel_stats(runner, test_runner, shards, Path.cwd())
