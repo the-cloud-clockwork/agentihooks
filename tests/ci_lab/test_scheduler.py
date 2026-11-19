@@ -1315,21 +1315,20 @@ def test_a_pass_and_a_load_hold_one_parsed_live_grade_at_a_time_however_many_gra
     run.tick(1000)
     assert [slot.held for grade in run.grades() for slot in grade.units.values()] == [True] * len(heads)
     alive: weakref.WeakSet[scheduler.State] = weakref.WeakSet()
-    most = 0
+    sizes: list[int] = []
     parse = scheduler._parse
 
     def counted(raw: str | bytes) -> scheduler.State:
-        nonlocal most
         state = parse(raw)
         alive.add(state)
-        most = max(most, len(alive))
+        sizes.append(len(alive))
         return state
 
     monkeypatch.setattr(scheduler, "_parse", counted)
     assert run.tick(1100) == []
     run.engine.load(1100)
     run.engine.grades_of(heads[0])
-    assert 0 < most <= 2
+    assert sizes and max(sizes) <= 2
 
 
 @pytest.mark.feature("lab-scheduler-budget-charge")
