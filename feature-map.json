@@ -5437,6 +5437,17 @@
       ]
     },
     {
+      "id": "publish-refusal-keeps-lab-route",
+      "origin": "regression",
+      "ordered_at": "2026-11-19",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-publish-refusal-keeps-flags",
+      "behaviour": "When a swarm publish through the lab refuses, the command its refusal names to repeat keeps the lab route: --via lab, and --direct when the refused publish was direct, so repeating it never pushes origin without the lab.",
+      "seam": "the Next command at the end of a swarm publish refusal, read back through the swarm publish argument parser",
+      "tests": [
+        "tests/swarm/test_publish.py::test_publish_via_lab_refusal_repeats_its_lab_route_in_the_next_command"
+      ]
+    },
+    {
       "id": "panic-holds-only-its-swarm",
       "origin": "regression",
       "ordered_at": "2026-11-17",
