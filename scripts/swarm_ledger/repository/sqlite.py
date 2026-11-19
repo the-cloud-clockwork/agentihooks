@@ -2,6 +2,7 @@ import json
 import re
 import secrets
 import sqlite3
+import sys
 import threading
 import time
 import weakref
@@ -407,10 +408,10 @@ def close_all(held: dict) -> None:
 
 
 class WalSwitch:
-    """Turns one connection's file to WAL. Every store open runs turn; only a switch SQLite refused reaches wait,
-    which retries within the busy timeout while another connection holds a new file's write lock, because SQLite
-    refuses that lock upgrade at once instead of calling the busy handler. The retry stays out of turn so its
-    mutants run only the tests that refuse a switch, never every test that opens a store."""
+    """Turns one connection's file to WAL. Every store open runs turn; only a refused switch reaches wait, which runs
+    inside turn's except clause, raises any refusal other than database is locked at once and otherwise retries
+    within the busy timeout while another connection holds a new file's write lock, because SQLite refuses that lock
+    upgrade at once instead of calling the busy handler."""
 
     def __init__(self, connection: sqlite3.Connection) -> None:
         self.connection = connection
@@ -422,6 +423,8 @@ class WalSwitch:
             self.wait()
 
     def wait(self) -> None:
+        if LOCKED not in str(sys.exception()):
+            raise
         deadline = time.monotonic() + BUSY_TIMEOUT_S
         while True:
             try:

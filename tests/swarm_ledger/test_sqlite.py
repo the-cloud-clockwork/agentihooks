@@ -487,7 +487,12 @@ def test_a_write_lock_held_past_the_busy_timeout_still_fails_the_wal_switch(
     holder.execute("BEGIN IMMEDIATE")
     clock = iter([0.0, 29.9, 30.0])
     pauses: list[float] = []
-    monkeypatch.setattr(sqlite, "time", SimpleNamespace(monotonic=lambda: next(clock), sleep=pauses.append))
+
+    def pause(seconds: float) -> None:
+        pauses.append(seconds)
+        assert len(pauses) == 1
+
+    monkeypatch.setattr(sqlite, "time", SimpleNamespace(monotonic=lambda: next(clock), sleep=pause))
     with closing(sqlite3.connect(path)) as connection:
         with pytest.raises(sqlite3.OperationalError, match="database is locked"):
             sqlite.WalSwitch(connection).turn()
@@ -497,8 +502,11 @@ def test_a_write_lock_held_past_the_busy_timeout_still_fails_the_wal_switch(
 
 @pytest.mark.feature("ledger-new-file-setup-waits-out-another-write-lock")
 def test_the_wal_switch_raises_an_error_other_than_a_held_lock_at_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    executed: list[str] = []
+
     class Failing:
         def execute(self, sql: str) -> None:
+            executed.append(sql)
             raise sqlite3.OperationalError("disk I/O error")
 
     def pause(seconds: float) -> None:
@@ -507,6 +515,7 @@ def test_the_wal_switch_raises_an_error_other_than_a_held_lock_at_once(monkeypat
     monkeypatch.setattr(sqlite, "time", SimpleNamespace(monotonic=lambda: 0.0, sleep=pause))
     with pytest.raises(sqlite3.OperationalError, match="disk I/O error"):
         sqlite.WalSwitch(cast(sqlite3.Connection, Failing())).turn()
+    assert executed == [sqlite.WAL]
 
 
 def test_one_thread_reads_existence_credential_and_task_rows_through_one_connection(tmp_path, monkeypatch):
