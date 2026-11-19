@@ -1,7 +1,5 @@
 lab:
   authoritative: []
-  queue:
-    authoritative: []
   mutation:
     run_on: every_push
     mutants_per_changed_line: all

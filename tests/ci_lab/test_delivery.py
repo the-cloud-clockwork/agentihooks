@@ -201,7 +201,6 @@ def test_load_runtime_reads_the_mounted_file(tmp_path: Path) -> None:
 def test_repository_file_has_an_empty_authoritative_list() -> None:
     assert delivery.authoritative(ROOT) == ()
     assert delivery.queue_cutover(ROOT, {}) == []
-    assert delivery.lab(ROOT)["queue"] == {"authoritative": []}
     assert delivery.lab(ROOT)["check_prefix"] == "lab"
 
 
