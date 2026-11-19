@@ -24,6 +24,16 @@ def every_waiting_head_but_the_quiet(scheduler: Any, waiting: list[tuple[str, st
     return actions
 
 
+def breaks_on_something_else(scheduler: Any, waiting: list[tuple[str, str]], now_ms: int) -> list[str]:
+    actions: list[str] = []
+    for name, raw in waiting:
+        # ruleid: lab-release-starts-every-waiting-head
+        actions.append(scheduler._start(name, raw, now_ms))
+        if name == "last":
+            break
+    return actions
+
+
 def stops_at_the_bound(scheduler: Any, waiting: list[tuple[str, str]], now_ms: int) -> list[str]:
     actions: list[str] = []
     started = 0

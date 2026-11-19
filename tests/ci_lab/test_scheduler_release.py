@@ -28,9 +28,10 @@ def test_each_pass_starts_eight_waiting_heads_in_class_order_and_admits_their_un
     lab: Callable[..., Run],
 ) -> None:
     run, heads = backlog(lab, 40)
-    classes: dict[str, list[str]] = {name: [] for name in EVENTS}
+    names = list(EVENTS)
+    classes: dict[str, list[str]] = {name: [] for name in names}
     for number, head in enumerate(reversed(heads)):
-        name = list(EVENTS)[number % len(EVENTS)]
+        name = names[number % len(names)]
         classes[name].append(head)
         run.push(head, lane=f"lane-{number:02}", event=EVENTS[name])
     run.lab.fixes.update(classes["hotfix"])
