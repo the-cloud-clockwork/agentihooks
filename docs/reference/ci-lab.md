@@ -1945,9 +1945,9 @@ for a test unit), which the scheduler stores with the verdict, and releases ever
 also when the executor raises. SIGTERM stops leasing and lets running units drain within the
 termination grace: 2100 seconds, the 30 minute unit time limit (`worker.UNIT_TIMEOUT_SECONDS`,
 which every executor's pod timeout reads) plus the five delivery calls of a unit (two upload
-URLs, two puts and the completion) at the 60 second HTTP timeout. The worker Deployment's
-`terminationGracePeriodSeconds` is the same 2100 seconds, so a rollout lets the longest unit
-finish and deliver before the pod is killed.
+URLs, two puts and the completion) at the 60 second HTTP timeout. The worker Deployment of the
+antoncore `ci-lab` chart sets `worker.terminationGracePeriodSeconds` to the same 2100 seconds, so
+a rollout lets the longest unit finish and deliver before the pod is killed.
 
 Check the wiring offline:
 
