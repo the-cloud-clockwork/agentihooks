@@ -351,6 +351,8 @@ def test_a_selector_target_is_known_only_with_a_value_and_split_at_its_first_col
     assert one(bare, "focus/lane:") is None
     assert focus_check.known("lane:eng:x", seen) is True
     assert focus_check.under("nope:x", seen) == []
+    split = doc(tasks=[task("t1", lane="eng:x"), task("t2")])
+    assert [row["id"] for row in focus_check.under("lane:eng:x", focus_check.view(split, ""))] == ["t1"]
 
 
 @pytest.mark.feature("swarm-focus-read")
