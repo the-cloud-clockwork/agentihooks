@@ -413,15 +413,18 @@ def test_the_direct_importers_setting_measures_only_changes_and_their_direct_imp
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     same = {"hooks/user.py": "from hooks import lib\n", "hooks/far.py": "from hooks import user\n"}
-    base = _tree(tmp_path / "base", {**same, "hooks/lib.py": "x = 1\n"}, {})
-    head = _tree(tmp_path / "head", {**same, "hooks/lib.py": "x = 2\n"}, {})
-    commands = _fake_checker(monkeypatch, [])
+    recorded = {"hooks/__init__.py": 5, "hooks/far.py": 5, "hooks/lib.py": 5, "hooks/user.py": 5}
+    base = _tree(tmp_path / "base", {**same, "hooks/lib.py": "x = 1\n"}, recorded)
+    head = _tree(tmp_path / "head", {**same, "hooks/lib.py": "x = 2\n"}, recorded)
+    _error_per_checked_source(monkeypatch, head)
+    measured = tmp_path / "out" / "TYPE_BASELINE.json"
+    command = ["--base", str(base), "--head", str(head), "--measured", str(measured)]
     monkeypatch.setenv(type_gate.DIRECT_IMPORTERS, "1")
-    assert type_gate.main(["--base", str(base), "--head", str(head)]) == 0
-    assert [command[command.index("--pythonpath") + 2 :] for command in commands] == [["hooks/lib.py", "hooks/user.py"]]
+    assert type_gate.main(command) == 0
+    assert json.loads(measured.read_text()) == {**recorded, "hooks/lib.py": 1, "hooks/user.py": 1}
     monkeypatch.delenv(type_gate.DIRECT_IMPORTERS)
-    assert type_gate.main(["--base", str(base), "--head", str(head)]) == 0
-    assert commands[-1][commands[-1].index("--pythonpath") + 2 :] == ["hooks/far.py", "hooks/lib.py", "hooks/user.py"]
+    assert type_gate.main(command) == 0
+    assert json.loads(measured.read_text()) == {**recorded, "hooks/far.py": 1, "hooks/lib.py": 1, "hooks/user.py": 1}
 
 
 def test_a_head_without_source_changes_runs_no_checker(
@@ -560,22 +563,37 @@ def test_measure_checks_the_sorted_sources(tmp_path: Path, monkeypatch: pytest.M
     ]
 
 
+def _test_sources(root: Path, count: int) -> list[str]:
+    files = [f"tests/test_{index:04}.py" for index in range(count)]
+    (root / "tests").mkdir()
+    for path in files:
+        (root / path).write_text("")
+    return files
+
+
+def _error_per_checked_source(monkeypatch: pytest.MonkeyPatch, root: Path) -> list[list[str]]:
+    runs: list[list[str]] = []
+
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if "--version" in command:
+            return subprocess.CompletedProcess(command, 0, f"basedpyright {type_gate.BASEDPYRIGHT_VERSION}\n", "")
+        checked = command[command.index("--pythonpath") + 2 :]
+        runs.append(checked)
+        diagnostics = [{"file": str(root / path), "severity": "error"} for path in checked]
+        report = {"generalDiagnostics": diagnostics, "summary": {"filesAnalyzed": len(checked)}}
+        return subprocess.CompletedProcess(command, 1, json.dumps(report), "")
+
+    monkeypatch.setattr(type_gate.subprocess, "run", run)
+    return runs
+
+
 @pytest.mark.feature("type-gate-repeatable-counts")
 @pytest.mark.parametrize(("count", "sizes"), [(1000, [1000]), (1001, [501, 500]), (2001, [667, 667, 667])])
 def test_measure_checks_at_most_a_thousand_sources_per_checker_process_and_sums_their_counts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, count: int, sizes: list[int]
 ) -> None:
-    files = [f"tests/test_{index:04}.py" for index in range(count)]
-    runs: list[list[str]] = []
-
-    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        checked = [part for part in command if part.startswith("tests/")]
-        runs.append(checked)
-        diagnostics = [{"file": str(tmp_path / path), "severity": "error"} for path in checked]
-        report = {"generalDiagnostics": diagnostics, "summary": {"filesAnalyzed": len(checked)}}
-        return subprocess.CompletedProcess(command, 1, json.dumps(report), "")
-
-    monkeypatch.setattr(type_gate.subprocess, "run", run)
+    files = _test_sources(tmp_path, count)
+    runs = _error_per_checked_source(monkeypatch, tmp_path)
     assert type_gate.measure(tmp_path, files[::-1]) == dict.fromkeys(files, 1)
     assert [len(checked) for checked in runs] == sizes
     assert [path for checked in runs for path in checked] == files
@@ -600,6 +618,16 @@ def test_a_file_counts_the_same_errors_whichever_other_files_the_gate_checks(
         for files in (["hooks/b.py"], ["hooks/b.py", "scripts/c.py"], ["hooks/a.py", "hooks/b.py"], None)
     ]
     assert counted == [3, 3, 3, 3]
+
+
+@pytest.mark.feature("type-gate-one-context")
+def test_the_gate_checks_a_run_of_the_every_source_layout_through_its_last_graded_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    files = _test_sources(tmp_path, 1001)
+    runs = _error_per_checked_source(monkeypatch, tmp_path)
+    assert type_gate.measure(tmp_path, [files[700], files[600]]) == {files[600]: 1, files[700]: 1}
+    assert runs == [files[501:701]]
 
 
 def _peak(monkeypatch: pytest.MonkeyPatch, kib: int) -> None:
