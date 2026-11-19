@@ -157,6 +157,19 @@ def test_rejected_exchange_reports_only_the_fixed_refusal(monkeypatch):
     assert str(refused.value) == module.REFUSED
 
 
+@pytest.mark.feature("lab-token-mint-status")
+@pytest.mark.parametrize("status", [403, 499, 500, 599])
+def test_rejected_exchange_preserves_the_http_status_without_changing_its_message(
+    monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    module, _, _, post = app(monkeypatch)
+    post.return_value.status_code = status
+    with pytest.raises(module.GitAuthRefused) as refused:
+        module.GitHubAppAuth().get_token()
+    assert refused.value.status_code == status
+    assert str(refused.value) == module.REFUSED
+
+
 def test_permission_tokens_request_only_those_permissions(monkeypatch: pytest.MonkeyPatch) -> None:
     module, post = scoped(monkeypatch, {"checks": "write", "metadata": "read"}, [])
     requested = {"checks": "write"}
