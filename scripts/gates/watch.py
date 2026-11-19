@@ -4,7 +4,7 @@ import os
 import time
 from pathlib import Path
 
-from scripts.gates.base import Decision
+from scripts.gates.base import Decision, Who
 from scripts.swarm import naming
 from scripts.swarm.health import activity, findings
 from scripts.swarm_ledger.ledger_gate import WATCH_STALE_SECONDS
@@ -24,7 +24,7 @@ def watcher_alive(who, ledger_dir, now=None):
     return False
 
 
-def refusal(who, after, least, ratio):
+def refusal(who: Who, after: dict[str, int], least: int, ratio: float) -> str:
     return (
         f"watch budget: {after['since'] - 1} watch calls since your last action (limit {least}) and "
         f"{after['watch'] - 1} watch calls for {after['act']} actions (limit {ratio} per action). Hand the waiting "
