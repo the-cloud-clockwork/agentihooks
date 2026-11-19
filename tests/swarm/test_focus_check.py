@@ -166,8 +166,9 @@ def test_the_fix_phase_comes_from_the_swarm_config_and_is_empty_without_a_swarm(
 
         return SimpleNamespace(swarm=SimpleNamespace(store=lambda: SimpleNamespace(config=read)))
 
-    assert routes.fix_phase(services(SwarmConfig("demo", "/repo", template=priming.TEMPLATE)), "demo") == loop.FIX_PHASE
-    assert routes.fix_phase(services(SwarmConfig("demo", "/repo")), "demo") == ""
+    doctor = SwarmConfig("demo", "/repo", max_eng=1, max_ci=1, template=priming.TEMPLATE)
+    assert routes.fix_phase(services(doctor), "demo") == loop.FIX_PHASE
+    assert routes.fix_phase(services(SwarmConfig("demo", "/repo", max_eng=1, max_ci=1)), "demo") == ""
     assert routes.fix_phase(services(None), "demo") == ""
 
 
