@@ -2,6 +2,26 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.1063 · 2026-11-19
+
+### 2026-11-19 · 2783f2016a4c · #12238 · @nestorcolt
+
+**Document CI lab static units and reusable workflow discovery**
+
+This change documents the fix that lets the CI lab scheduler correctly expand the Tests workflow's semgrep job into its three real sub-gates instead of dropping every head as "cannot expand." It adds a detailed Static units subsection to the CI lab reference doc covering the scheduler and worker code paths, gate counts, error cases, limitations, and verification steps, plus an index entry and changelog note, so operators understand and can troubleshoot the previously undocumented reusable-workflow discovery behavior delivered in #11978.
+
+### 2026-11-19 · 5c91b16ee07b · #12373 · @agenticore-app
+
+**Scope lab outside notes to the manifest commit their grade keyed on**
+
+This change ties each lab grade's outside note to the exact dependency manifest commit its test units were keyed on, writing notes under a per-commit path and skipping the write entirely when no manifest commit is recorded. StoredManifests now merges only notes matching the current manifest's commit and prunes any note folder lacking a stored manifest, including legacy notes with no commit tag, using a new Objects remove capability. This prevents stale or mismatched notes from bleeding into grades for a different manifest version, keeping outside notes accurate as manifests evolve.
+
+### 2026-11-19 · 075cbce3fe16 · #12322 · @agenticore-app
+
+**Read controller task folders from the admitted hive**
+
+This change fixes a bug where controller status checks and folder mirroring returned empty workspaces for live tasks lacking an explicit runtime target. Now, when a hub execution has no designated host, the system falls back to reading from the admitted hive instead of failing silently, while explicit host routing and current hive local folder behavior remain unchanged. Added regression tests, a feature map entry, and Semgrep fixtures confirm the fix; all 48 focused tests and full CI gates pass, closing issue #12315.
+
 ## v2.17.1062 · 2026-11-19
 
 ### 2026-11-19 · 3c858bc99950 · #12372 · @nestorcolt
