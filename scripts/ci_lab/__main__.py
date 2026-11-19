@@ -1,5 +1,5 @@
 """The CI lab command line: python -m scripts.ci_lab cutover --grader-root PATH, evidence --grade RUN,
-shadow report --since REVISION, shadow report --gate GATE [--heads N] [--event merge_group], scheduler
+grade --plant NAME, shadow report --since REVISION, shadow report --gate GATE [--heads N] [--event merge_group], scheduler
 [--interval S] [--passes N] to run the scheduler service, worker to run the worker service, or
 scheduler|worker --self-test."""
 
@@ -27,6 +27,10 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
         return contract.run(SERVICES[argv[0]], argv[1:], environ)
     if argv and argv[0] == "evidence":
         return evidence.main(argv[1:])
+    if argv and argv[0] == "grade":
+        from scripts.ci_lab import plant
+
+        return plant.main(argv[1:], environ)
     if argv and argv[0] == "shadow" and shadow_report.claims(argv[1:]):
         return shadow_report.main(argv[2:], environ)
     if argv and argv[0] == "shadow":
