@@ -1915,8 +1915,9 @@ with the rest of the suite.
 - The dispatcher's claim key does not order offers. At `delegate` and `full` autonomy the capacity decision's ready
   work and preemption sort by `scripts.swarm.dispatcher.claim_key`. That key puts the critical chain guard band
   first. It keeps only these ranks as bands: an operator rank, an `urgent` rank, a `low` rank the swarm set on any
-  task, and a documentation follow up with no rank. It orders every other task by its place in the dispatcher's queue. The dispatcher writes no rank to
-  the ledger. Offers take the stored rank of every task as its band, a rank a master or planner set included.
+  task, and a documentation follow up with no rank. It orders every other task by its place in the dispatcher's
+  queue. The dispatcher writes no rank to the ledger. Offers take the stored rank of every task as its band, a rank a
+  master or planner set included.
 - A task whose last launch failed keeps its place. The tick's launch order demotes it inside its band; offers do not.
 - None of the tie rules inside a rank band from [Queue rank](swarm.md#queue-rank) apply: no longer critical path, no S
   task that unblocks another and no resumed work goes first. Focus record position breaks ties inside a band, then
