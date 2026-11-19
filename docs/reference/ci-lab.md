@@ -12,7 +12,8 @@ exposes and reads: its entry point, environment, ports, metric names and capacit
 Every name lives in `scripts.ci_lab.contract`; the services and the platform tests are to
 import these constants by name, so a rename fails an import instead of dropping a series. The
 worker's PriorityClass is a cluster object outside that module;
-[Worker scheduling priority](#worker-scheduling-priority) covers it.
+[Worker scheduling priority](#worker-scheduling-priority) covers it, and
+[Worker Deployment](#worker-deployment) covers the chart objects that run the worker.
 
 ## Entry points
 
@@ -21,7 +22,7 @@ worker's PriorityClass is a cluster object outside that module;
 | `agentihooks ci-lab-scheduler --self-test` | `python -m scripts.ci_lab scheduler --self-test` | Checks the scheduler contract offline and prints it as JSON |
 | `agentihooks ci-lab-scheduler [--interval S] [--passes N]` | `python -m scripts.ci_lab scheduler [--interval S] [--passes N]` | Runs the scheduler service: reads the runtime config, serves the lease API, `/capacity` and `/grades/<sha>` on port 8800 and `/metrics` on 9108, and runs one grading pass every interval (2 seconds), forever unless `--passes` is set |
 | `agentihooks ci-lab-worker --self-test` | `python -m scripts.ci_lab worker --self-test` | Refuses any GitHub App variable, checks the worker contract offline and prints it as JSON |
-| `agentihooks ci-lab-worker` | `python -m scripts.ci_lab worker` | Runs the worker service: builds the pod from the worker environment, leases units from the scheduler and runs each through the adapter of its kind (see [Worker executors](#worker-executors)) until SIGTERM, then lets running units drain |
+| `agentihooks ci-lab-worker` | `python -m scripts.ci_lab worker` | Runs the worker service: builds the pod from the worker environment, leases units from the scheduler and runs each through the adapter of its kind (see [Worker executors](#worker-executors)) until SIGTERM, then lets running units drain; serves `/metrics` on 9108 from its own registry until the drain ends, and exits at start when it cannot bind 9108 |
 
 The self tests make no network, Redis, object store or GitHub calls. They exit 0 when the
 contract holds and 1 with the reason on standard error when it does not. A self test fails when
@@ -179,6 +180,10 @@ with `{"error": "a grade lookup names one full commit sha"}`. See
 | Capacity shows zero slots or an estimate differs from observed duration | Check worker lease polls and their free slot offers; the load discards stale offers and uses fixed unit estimates |
 | Grades returns an empty list | Confirm the full lowercase commit sha and that the lab received and graded that head |
 
+The [node cache DaemonSet](ci-lab-node-cache.md) prepares each CI node's bare mirror and uv
+cache. Its reference covers Helm values, placement, refresh stamps, lockfile warming and
+per-node verification; a Ready cache pod alone does not prove either cache is warm.
+
 ## Environment
 
 | Name | Scheduler | Worker | Meaning |
@@ -187,6 +192,7 @@ with `{"error": "a grade lookup names one full commit sha"}`. See
 | `CI_LAB_MINIO_*` | yes | yes | Object store endpoint, bucket and credentials, passed by reference |
 | `GITHUB_APP_*` | yes | never | GitHub App identity used to post check runs and read dev push manifest artifacts; the App needs checks write and actions read |
 | `CI_LAB_REDIS_URL` | yes | no | Queue, lease and verdict index store |
+| `CI_LAB_REINDEX_ON_START` | yes | no | Only the literal string `true` rebuilds missing verdict index entries from report objects before the listeners start and prints `reindexed N verdicts`; unset or any other value skips it. See [Recovery](#recovery) |
 | `CI_LAB_RUNTIME_CONFIG` | yes | no | Path of the mounted runtime config the scheduler reads at start, before it connects anywhere; its budget sets the budget fraction and shed classes of `/capacity` and `/metrics`; `python -m scripts.ci_lab runtime <path>` validates it |
 | `CI_LAB_URL` | yes | no | The lab scheduler address the relay builds each relayed check run's and draft pull request's grade link from, `<CI_LAB_URL>/grades/<sha>` |
 | `CI_LAB_SCHEDULER_URL` | no | yes | Base address of the scheduler lease API |
@@ -207,8 +213,8 @@ with `{"error": "a grade lookup names one full commit sha"}`. See
 | `CI_LAB_CONTROL_TOKEN` | yes | no | Bearer token the [control routes](#control-routes) require, passed by reference; unset, they refuse every request. The swarm host that presses panic or merge priority holds the same variable |
 | `UV_CACHE_DIR` | no | yes | Shared uv cache for virtual environments |
 
-A worker started with any `GITHUB_APP_*` variable in its environment refuses to start. It exits
-1 and names each variable it found. Only the scheduler holds the App key.
+A worker started with any `GITHUB_APP_*` variable, or any variable with `REDIS` in its name, in its
+environment refuses to start. It exits 1 and names each variable it found. Only the scheduler holds the App key.
 
 ## Ports
 
@@ -527,10 +533,10 @@ inhibit_rules:
 | `CILabQueueWaitHigh` | The predicted wait of the hotfix, pull request or queue class is over 1200 seconds, the 20 minute default past which the [lab behind claim hold](swarm-thresholds.md#lab-behind-claim-hold) holds new eng claims. A [wait the lab cannot predict](#a-wait-the-lab-cannot-predict) reads `+Inf` and fires it too, while the claim hold reads that wait as 0. Promotion and backfill never fire it | 10 minutes | class | Slots busy against slots total, and whether the worker pool sits at its maximum |
 | `CILabWorkersPending` | At least one `ci-lab-worker-*` pod in `ci-lab` is Pending | 15 minutes | the pool | The `cluster-autoscaler-oci-status` ConfigMap for the CI pool, and whether runners hold the CI nodes; every runner outranks a worker, see [Worker scheduling priority](#worker-scheduling-priority) |
 | `CILabBudgetShedding` | `ci_lab_class_shed` is 1 for a class: the day's core budget left fell below that class's shed fraction, so its units wait for the budget to reset. Only backfill, promotion and queue shed | 5 minutes | class | Budget left on the dashboard and the shed fractions in the runtime config at `CI_LAB_RUNTIME_CONFIG` |
-| `CILabPullRequestBlockedByCap` | Pull request units are queued, every slot is busy, and a HorizontalPodAutoscaler in `ci-lab`, the one KEDA is to build for the workers, wants at least its maximum replicas. An autoscaler at its maximum in another namespace does not count | 10 minutes | the pool; its value is the queued pull request units | The worker maximum and the CI node cap; raising either is the operator's elasticity budget |
-| `CILabSchedulerBlind` | Prometheus holds no `ci_lab_slots_wanted` series while the `ci-lab-scheduler` Deployment asks for at least one replica. A scheduler scaled to zero, or no Deployment, keeps it silent | 10 minutes | the scheduler | The scheduler's scrape target and port `9108`; the lab chart's planned KEDA scaler sizes the worker pool from this gauge and holds its fallback floor while it is missing |
+| `CILabPullRequestBlockedByCap` | Pull request units are queued, every slot is busy, and a HorizontalPodAutoscaler in `ci-lab`, the one KEDA builds from the [worker ScaledObject](#packing), wants at least its maximum replicas. An autoscaler at its maximum in another namespace does not count | 10 minutes | the pool; its value is the queued pull request units | The worker maximum and the CI node cap; raising either is the operator's elasticity budget |
+| `CILabSchedulerBlind` | Prometheus holds no `ci_lab_slots_wanted` series while the `ci-lab-scheduler` Deployment asks for at least one replica. A scheduler scaled to zero, or no Deployment, keeps it silent | 10 minutes | the scheduler | The scheduler's scrape target and port `9108`; the worker ScaledObject sizes the worker pool from this gauge and holds `elasticity.floorWorkers` while it is missing |
 | `CILabCacheMissRatioHigh` | The git or uv node cache missed more than half its lookups over 30 minutes, with at least 10 misses. A cache with misses and no hit series counts its hits as 0. The verdict cache never fires it | 15 minutes | cache | The node cache DaemonSet on the CI nodes and the age of its git mirror |
-| `CILabScaleFlapping` | Over the last hour, sampled every 5 minutes, the worker Deployment's replicas rose against 5 minutes earlier in at least 4 samples and fell in at least 4. One ramp up and down again does not fire it | no hold | the pool; its value is the rising samples | Lengthen the scale down stabilisation window of the lab chart's planned ScaledObject, since each swing churns CI nodes through the autoscaler |
+| `CILabScaleFlapping` | Over the last hour, sampled every 5 minutes, the worker Deployment's replicas rose against 5 minutes earlier in at least 4 samples and fell in at least 4. One ramp up and down again does not fire it | no hold | the pool; its value is the rising samples | Lengthen the scale down stabilisation window of the worker ScaledObject, `elasticity.scaleDownWindowSeconds`, since each swing churns CI nodes through the autoscaler |
 | `CILabUnitsOverdue` | At least one leased unit has run past its estimate | 15 minutes | the scheduler; its value is the overdue units | The worker holding the lease; an expired lease requeues the unit once and loses it on the second expiry, see [Retry policy](#retry-policy) |
 | `CILabVerdictMismatch` | A gate's shadow mismatch counter rose in the last hour, or its series first appeared in that hour above 0 | no hold | gate | The mismatch rows of the [shadow report](#report), before the lab grades that gate for merges. It clears an hour after the gate's last new mismatch |
 
@@ -597,7 +603,10 @@ description: The lab cannot add workers for pull request heads because the KEDA 
 
 ### Lab series the rules read
 
-Only the scheduler serves lab metrics; the worker serves none. `scripts.ci_lab.scheduler.listen`
+Only the scheduler sets lab series. The worker serves `/metrics` on 9108 through
+`metrics.serve_registry` from a registry of its own that observes nothing, so its exposition holds
+the `HELP` and `TYPE` lines and no sample: a worker scrape target reads up without doubling the
+scheduler's series, which already count every unit from its report. `scripts.ci_lab.scheduler.listen`
 binds the metrics port with a fresh `metrics.Registry`, and every `GET /metrics` sets these from
 the scheduler's load snapshot through `metrics.observe_load`:
 
@@ -611,21 +620,20 @@ them:
 
 | Series | Read by | Until a service sets it |
 |---|---|---|
-| `ci_lab_slots_wanted` | `CILabSchedulerBlind`, the slots panels, the lab chart's planned KEDA scaler | `CILabSchedulerBlind` fires 10 minutes after a `ci-lab-scheduler` Deployment with a replica appears, and the `wanted` lines stay empty. The scheduler sets it from `scripts.ci_lab.budget.slots_wanted` on every scrape |
+| `ci_lab_slots_wanted` | `CILabSchedulerBlind`, the slots panels, the worker ScaledObject | `CILabSchedulerBlind` fires 10 minutes after a `ci-lab-scheduler` Deployment with a replica appears, and the `wanted` lines stay empty. The scheduler sets it from `scripts.ci_lab.budget.slots_wanted` on every scrape |
 | `ci_lab_units_overdue` | `CILabUnitsOverdue` | The alert cannot fire |
 | `ci_lab_workers_ready` | Workers ready against desired | The `heartbeat` line stays empty |
 | `ci_lab_core_seconds_total`, `ci_lab_heads_graded_total` | Core minutes per merged pull request | The stat reads No data |
-| `ci_lab_cache_hits_total`, `ci_lab_cache_misses_total` | `CILabCacheMissRatioHigh`, Cache hit ratio | `metrics.observe_records` counts the `verdict` cache but has no live caller, and nothing counts `git` or `uv`, so the alert cannot fire and the panel stays empty |
+| `ci_lab_cache_hits_total`, `ci_lab_cache_misses_total` | `CILabCacheMissRatioHigh`, Cache hit ratio | `Scheduler._place` counts the `verdict` cache and `metrics.observe_unit` counts the `git` and `uv` lookups a unit report carries, so the alert and panel wait only on a running scheduler |
 | `ci_lab_verdict_mismatch_total` | `CILabVerdictMismatch`, Shadow mismatches per gate | `shadow.Shadow` counts it in a registry of its own and has no live caller, so the alert cannot fire |
 | `ci_lab_unit_duration_seconds`, `ci_lab_mirror_age_seconds`, `ci_lab_units_redelivered_total`, `ci_lab_units_lost_total`, `ci_lab_github_rate_remaining` | No alert or panel | Nothing, since no alert or panel reads them. `metrics.observe_records` sets the unit duration when a caller runs it; no code sets the other four |
 
 The kube-state-metrics series need the lab chart's objects in the `ci-lab` namespace: the
 `ci-lab-scheduler` and `ci-lab-worker` Deployments, the worker pods, and the KEDA ScaledObject
 with the HorizontalPodAutoscaler KEDA builds from it. Prometheus reaches port `9108` only through
-a ServiceMonitor for the scheduler. As of the deployment repository's pull request 1825, neither
-repository defines any of these objects. Until the lab chart ships them, every lab alert stays
-inactive, and only the spend estimate and the CI nodes panel show data, since both read node
-taints.
+a ServiceMonitor for the scheduler. The deployment repository's chart ships all of them: the
+scheduler Deployment since its pull request 1818, the worker Deployment since 1826, the
+ScaledObject since 1834 and the scheduler's ServiceMonitor since 1841.
 
 ### CI Lab dashboard
 
@@ -763,6 +771,365 @@ deployed the observability stack.
 | The promtool job fails after an annotation edit | promtool compares `summary` and `description` exactly | Update the case's `exp_annotations` in the same pull request |
 | A firing lab alert sends no second ntfy message | A group that keeps firing repeats only every 6 hours | Read the alert in the Alertmanager API above; a change to the group sends after 5 minutes |
 
+## Worker Deployment
+
+The deployment repository's `ci-lab` chart runs the [worker service](#worker-executors) as the
+`ci-lab-worker` Deployment in the `ci-lab` namespace, beside a NetworkPolicy of the same name.
+Both landed in that repository's pull request 1826 on 19 November 2026, in
+`k8s/charts/ci-lab/templates/worker-deployment.yaml` and `templates/worker-networkpolicy.yaml`,
+with the `worker` block of the chart's `values.yaml` and the `workersPerNode`, `nodeMax` and
+`nodeReserve` keys of its `elasticity` block. Pull request 1834 of the same day added the KEDA
+ScaledObject in `templates/scaledobject.yaml`, the other `elasticity` keys and the condition that
+drops `replicas` from the Deployment while elasticity is on. The `ci-lab` Argo CD Application
+syncs `k8s/charts/ci-lab` from that repository's `dev` branch with automated prune and self heal,
+so a chart change reaches the cluster when it merges into `dev`.
+
+A worker pod takes 5 of a CI node's 16 vCPUs and 8 GiB of its memory, runs only on the CI node
+pool, holds no credential, writes only to its own `emptyDir` folders and reaches only cluster
+DNS, the scheduler and the object store.
+
+### Placement
+
+| Pod spec field | Value | Effect |
+|---|---|---|
+| `schedulerName` | `runner-binpack` | The `runner-binpack-scheduler` Deployment in `kube-system` schedules the pod instead of the default scheduler. Its one profile scores `NodeResourcesFit` with the `MostAllocated` strategy over CPU and memory, weight 1 each, at plugin weight 10, and disables `NodeResourcesBalancedAllocation` and `PodTopologySpread` scoring, so a worker goes to the fullest CI node it fits and workers fill one node before the next |
+| `priorityClassName` | `ci-lab-worker` | Priority 150, behind every CI runner, with no preemption; see [Worker scheduling priority](#worker-scheduling-priority) |
+| `nodeSelector` | `<domain>/node-pool: oci-ci` and `<domain>/workload: ci` | Only nodes of the OCI CI pool; both labels must match |
+| `tolerations` | `<domain>/remote=oci` and `<domain>/workload=ci`, each with `operator: Equal` and `effect: NoSchedule` | Lets the pod onto the tainted CI pool nodes |
+| `affinity.podAntiAffinity` | `preferredDuringSchedulingIgnoredDuringExecution`, weight 100, `topologyKey: kubernetes.io/hostname`, `namespaceSelector: {}`, label key `actions.github.com/scale-set-name` with `operator: Exists` | Prefers a node with no Actions Runner Controller runner pod from any namespace. It is one score among the scheduler's, so a worker still lands beside runners when that node scores higher or no other node fits |
+
+`<domain>` stands for the deployment's label domain. The selector and the tolerations equal the
+[node cache DaemonSet](ci-lab-node-cache.md#placement-and-security)'s, so every node that can take
+a worker also runs a node cache pod. They are template settings, not Helm values; read the exact
+keys from the running Deployment:
+
+```bash
+kubectl -n ci-lab get deploy ci-lab-worker \
+  -o jsonpath='{.spec.template.spec.nodeSelector}{"\n"}{.spec.template.spec.tolerations}{"\n"}'
+```
+
+### Packing
+
+The pod's one container requests what it is limited to:
+
+| Resource | Request | Limit |
+|---|---|---|
+| `cpu` | `"5"` | `"5"` |
+| `memory` | `8Gi` | `8Gi` |
+| `ephemeral-storage` | `20Gi` | `20Gi` |
+
+Equal CPU and memory requests and limits give the pod the `Guaranteed` QoS class. The worker
+runs as many slots as its CPU quota has whole cores, at most `CI_LAB_SLOTS`; both are 5, one slot
+per core, so a worker runs at most five units at once.
+
+The CI node shape comes from the `ci` entry of the OCI runner pools in the deployment
+repository's Terraform, `stacks/terraform/modules/oci-arc-runners/variables.tf`: `ocpus = 8`,
+which is 16 vCPUs, and `memory_gbs = 28`, which the packing test counts as 28 GiB.
+`elasticity.workersPerNode` workers plus `elasticity.nodeReserve` fill that node, and one more
+worker would not fit:
+
+| On one CI node | CPU | Memory |
+|---|---|---|
+| Three workers | 15 | 24 GiB |
+| `elasticity.nodeReserve` | 1 | 2 GiB |
+| Total | 16 of 16 | 26 of 28 GiB |
+| Four workers and the reserve | 21, over 16 | 34 GiB, over 28 |
+
+The reserve holds the node's DaemonSets. Each node cache container requests 50m CPU and 128 MiB.
+Measured on a CI node in pull request 1826, the DaemonSet pods there requested 41m CPU and
+120 MiB; with the node cache's 50m and 128 MiB added, about 91m and 248 MiB. The node's
+allocatable equalled its capacity of 16 CPU and 27.4 GiB.
+
+The worker count:
+
+| `elasticity.enabled` | Replicas |
+|---|---|
+| `true`, the shipped value | The Deployment carries no `replicas`. The `ci-lab-worker` KEDA ScaledObject sizes it from `max_over_time(sum(ci_lab_slots_wanted)[2m:15s])` at a target of `worker.slots` per worker, between `elasticity.floorWorkers` (3) and `workersPerNode × nodeMax` (3 × 7 = 21), and holds `floorWorkers` after `elasticity.fallbackFailures` (3) failed reads of that query |
+| `false` | `worker.replicas` (3), one node of workers |
+
+`elasticity.nodeMax` (7) is the CI pool maximum of the OCI cluster autoscaler, the middle field
+of its `--nodes=0:7:$(OCI_INSTANCE_POOL_ID)` flag in
+`k8s/manifests/cluster-autoscaler-oci/deployment.yaml`, so the worker ceiling is three workers on
+every node the autoscaler may run. Each scale up step adds at most `workersPerNode` workers, one
+node of them, per `elasticity.scaleUpPeriodSeconds`. The other `elasticity` values tune the
+ScaledObject's polling and scale down.
+
+### Isolation
+
+The pod holds no credential:
+
+| Setting | Value | Keeps out |
+|---|---|---|
+| `automountServiceAccountToken` | `false` | A Kubernetes API token |
+| `enableServiceLinks` | `false` | The `*_SERVICE_HOST` and `*_PORT` variables of the namespace's Services |
+| `serviceAccountName`, `imagePullSecrets`, `initContainers` and `envFrom` | absent | A named account, a pull secret, init steps and bulk environment; the worker image pulls from GHCR without a secret |
+| `env` | literal `name` and `value` pairs only | Any `valueFrom` reference |
+| `volumes` | `emptyDir` and `hostPath` only | Secret, ConfigMap and projected volumes |
+
+On top of that, the worker refuses at start any variable with the `GITHUB_APP_` prefix or `REDIS`
+in its name: it raises `Refused` with `ci-lab worker refuses <names>` and exits 1. Its environment
+is exactly the worker contract:
+
+| Variable | Value |
+|---|---|
+| `CI_LAB_SCHEDULER_URL` | `http://ci-lab-scheduler:8800` |
+| `CI_LAB_SLOTS` | `worker.slots`, `5` |
+| `CI_LAB_GIT_MIRROR` | `/cache/git/agentihooks.git` |
+| `UV_CACHE_DIR` | `/cache/uv` |
+| `CI_LAB_WORK_ROOT` | `/work` |
+| `CI_LAB_MANIFEST` | `/work/manifest.json` |
+| `CI_LAB_FLAKES` | `/work/flakes.jsonl` |
+| `CI_LAB_MUTATION_CACHE` | `/work/mutation-cache` |
+| `CI_LAB_KILLERS` | `/work/killers` |
+| `CI_LAB_MUTATION_BUDGET` | `worker.mutation.budgetSeconds`, `1800` |
+| `CI_LAB_MUTATION_CAP` | `worker.mutation.cap`, `1` |
+
+`scripts.ci_lab.executors.settings` reads `CI_LAB_GIT_MIRROR` and the last seven without a
+default, and `scripts.ci_lab.worker.build` reads `CI_LAB_SCHEDULER_URL` the same way, so a pod
+missing one fails at start with a `KeyError`. A mutant unit leases one slot, and the cap of 1
+keeps its mutants inside it.
+[Environment](#environment) gives the meaning of each variable.
+
+| Level | Security setting |
+|---|---|
+| Pod | `runAsNonRoot: true`; `runAsUser` and `runAsGroup` from `worker.uid`, `1001`, the node cache's `nodeCache.uid` and the owner of the cache folders; `seccompProfile.type: Unconfined` |
+| Container | `allowPrivilegeEscalation: false`, `readOnlyRootFilesystem: true`, `capabilities.drop: ["ALL"]` |
+| Pod, unset | `hostNetwork`, `hostPID` and `hostIPC` |
+
+Seccomp stays `Unconfined` for the [unit sandbox](#unit-sandbox). containerd's default profile
+allows `unshare` and `setns` only to a process holding `CAP_SYS_ADMIN`, and `clone` only without
+namespace flags, while bubblewrap needs those calls to give each unit its own namespaces, so
+`RuntimeDefault` would refuse every sandboxed unit. The node cache DaemonSet keeps
+`RuntimeDefault`.
+
+The root filesystem is read only, so the worker writes only to its two `emptyDir` mounts:
+
+| Mount | Volume | Access | Holds |
+|---|---|---|---|
+| `/work` | `work`, `emptyDir` | read and write | The worker's private git store, trees, venvs, unit runs and reports, and the manifest, flake ledger, mutation cache and kill memory paths above |
+| `/tmp` | `temporary`, `emptyDir` | read and write | Temporary files |
+| `/cache/git` | `git`, hostPath `<nodeCache.path>/git` of type `Directory` | read only | The node's bare mirror; the private store under `/work` borrows its objects through `objects/info/alternates` |
+| `/cache/uv` | `uv`, hostPath `<nodeCache.path>/uv` of type `Directory` | read only | The node's uv cache |
+
+Neither `emptyDir` sets a `sizeLimit`, so their use counts against the pod's 20 GiB
+`ephemeral-storage` limit together with the container's logs, and the kubelet evicts the pod past
+it. Both start empty in every new pod. The `Directory` type makes the kubelet refuse a host folder
+that does not exist yet: on a node where the node cache `prepare` container has not created `git`
+and `uv`, the worker waits in `ContainerCreating` while the kubelet retries the mount.
+
+### Stop and rollout
+
+| Setting | Value | Effect |
+|---|---|---|
+| `cluster-autoscaler.kubernetes.io/safe-to-evict` | `"false"`, the pod template's only annotation | The cluster autoscaler never removes a node that runs a worker; a CI node goes only after its workers have. A scale down of the Deployment removes idle workers first, see [Worker pod deletion cost](#worker-pod-deletion-cost) |
+| `terminationGracePeriodSeconds` | `worker.terminationGracePeriodSeconds`, `2100` | How long the kubelet waits after SIGTERM before it kills the container. The worker's drain window is fixed in code, `worker.GRACE_SECONDS`, 2100 seconds: a stopping worker stops leasing and drains its running units for up to that long, see [Worker executors](#worker-executors). A Helm value below 2100 kills a worker mid drain |
+| `strategy` | `RollingUpdate` with `maxSurge: 0` and `maxUnavailable: 1` | A rollout adds no surge pod, so it asks the autoscaler for no extra node, and takes one worker down at a time; a busy worker holds its step for up to the grace |
+
+### Network
+
+The `ci-lab-worker` NetworkPolicy selects the worker pods by `app.kubernetes.io/name: ci-lab`,
+`app.kubernetes.io/instance: <release>` and `app.kubernetes.io/component: worker`, and lists both
+`Ingress` and `Egress` in `policyTypes`, so only these rules pass:
+
+| Direction | Peer | Port | For |
+|---|---|---|---|
+| Egress | `k8s-app: kube-dns` pods in `kube-system` | UDP and TCP 53 | Name lookups, such as `ci-lab-scheduler` |
+| Egress | The chart's scheduler pods in the release namespace | TCP 8800 | The lease API: lease polls, heartbeats, upload URLs and completions |
+| Egress | Pods matching `minio.pods`, `app: minio`, in the namespace `minio.namespace` | TCP `minio.port`, 9000 | The PUTs of each unit's report and log to the presigned URLs the scheduler hands out; see [Worker uploads](#worker-uploads) |
+| Ingress | `app.kubernetes.io/name: prometheus` pods in `monitoring` | TCP 9108 | The worker's `/metrics` |
+
+The policy has no `ipBlock`. GitHub, package indexes, the lab remote, the bus, Redis, the
+Kubernetes API server and every other private range get no route from a worker. Pull request 1826
+probed this shape live with a temporary pod on a CI node: under a policy allowing only DNS and the
+MinIO pods on 9000, MinIO's health endpoint answered 200 through its load balancer address,
+because that address is translated to the MinIO pod before the policy matches, while MinIO's
+console port and another LAN service were refused.
+
+### Configuration
+
+| Helm value | Shipped | Effect |
+|---|---|---|
+| `worker.image.repository` | `ghcr.io/the-cloud-clockwork/agentihooks-ci-lab-worker` | Worker image, pulled with `imagePullPolicy: Always`; the scheduler's `CI_LAB_IMAGE` names the same image |
+| `worker.image.tag` | `dev` | Image tag |
+| `worker.replicas` | `3` | Replicas when `elasticity.enabled` is `false` |
+| `worker.slots` | `5` | `CI_LAB_SLOTS` and the ScaledObject's target per worker |
+| `worker.uid` | `1001` | Pod UID and GID; keep it equal to `nodeCache.uid` |
+| `worker.terminationGracePeriodSeconds` | `2100` | The kubelet's stop grace; keep it at or above the worker's 2100 second drain |
+| `worker.mutation.budgetSeconds` | `1800` | `CI_LAB_MUTATION_BUDGET` |
+| `worker.mutation.cap` | `1` | `CI_LAB_MUTATION_CAP` |
+| `worker.resources` | 5 CPU, `8Gi` and `20Gi` ephemeral, requests equal to limits | Container resources, copied as written |
+| `elasticity.enabled` | `true` | Renders the ScaledObject and drops `replicas` from the Deployment |
+| `elasticity.floorWorkers` | `3` | ScaledObject minimum and fallback replicas |
+| `elasticity.workersPerNode` | `3` | Workers per CI node: a factor of the ScaledObject maximum and its scale up step |
+| `elasticity.nodeMax` | `7` | CI pool node maximum: the other factor of the ScaledObject maximum |
+| `elasticity.pollingInterval` | `15` | Seconds between the ScaledObject's trigger reads |
+| `elasticity.fallbackFailures` | `3` | Failed trigger reads before the ScaledObject holds `floorWorkers` |
+| `elasticity.scaleUpPeriodSeconds` | `60` | Period of the scale up step of `workersPerNode` workers, with no stabilisation window |
+| `elasticity.scaleDownWindowSeconds` | `300` | Scale down stabilisation window |
+| `elasticity.scaleDownPodsPerMinute` | `2` | Most workers removed per 60 seconds |
+| `elasticity.prometheusAddress` | `http://kube-prometheus-stack-prometheus.monitoring.svc:9090` | Prometheus the trigger queries |
+| `elasticity.nodeReserve.cpu`, `elasticity.nodeReserve.memory` | `"1"`, `2Gi` | Room left on a CI node for its DaemonSets; only the packing test reads it |
+| `nodeCache.path` | The deployment's host cache root | Root of the two hostPath mounts |
+| `minio.namespace`, `minio.pods`, `minio.port` | The object store's namespace, `app: minio`, `9000` | The MinIO egress rule |
+
+Change these through a pull request into the deployment repository's `dev`. Its tests hold these
+relations, so a change that breaks one fails there:
+
+- `worker.slots` equals the whole cores of `worker.resources.limits.cpu`, and requests equal limits.
+- `workersPerNode` is 3; `workersPerNode` workers plus the reserve fit the CI node's vCPUs and
+  memory, and one more worker does not fit its vCPUs.
+- `nodeMax` equals the autoscaler flag's maximum; change both in one pull request.
+- `worker.uid` equals `nodeCache.uid`.
+- `worker.terminationGracePeriodSeconds` is at least 1800 seconds of unit time plus 300 seconds
+  for the five delivery calls.
+
+For example, save this override as `ci-lab-workers.example.yaml` to render a fixed pool of three
+workers:
+
+```yaml
+elasticity:
+  enabled: false
+worker:
+  replicas: 3
+  slots: 5
+  uid: 1001
+  terminationGracePeriodSeconds: 2100
+  resources:
+    requests:
+      cpu: "5"
+      memory: 8Gi
+      ephemeral-storage: 20Gi
+    limits:
+      cpu: "5"
+      memory: 8Gi
+      ephemeral-storage: 20Gi
+```
+
+Render the worker objects from the deployment checkout:
+
+```bash
+helm template ci-lab k8s/charts/ci-lab --namespace ci-lab \
+  -f ci-lab-workers.example.yaml \
+  --show-only templates/worker-deployment.yaml \
+  --show-only templates/worker-networkpolicy.yaml
+```
+
+The output holds the Deployment, with `replicas: 3` because the override turns elasticity off,
+and the NetworkPolicy.
+
+### Guard tests
+
+The deployment repository's unit tests render the chart with Helm and read the manifests the
+values must match:
+
+| Test | Holds |
+|---|---|
+| `tests/unit/ci_lab/test_packing.py` | Requests equal limits at 5 CPU, `8Gi` and `20Gi`, whole cores and `CI_LAB_SLOTS` equal to them; three workers plus the reserve fit the Terraform `ci` node and a fourth does not, and the node cache requests fit inside the reserve; `nodeMax` equals the autoscaler's CI pool maximum, and with elasticity off the replicas equal `workersPerNode`; the scheduler name is a `runner-binpack` profile, the priority class is defined, the node selector equals the node cache's and the Terraform pool's labels, the tolerations equal the node cache's, and the anti affinity is exactly the one above |
+| `tests/unit/ci_lab/test_scaledobject.py` | Among its ScaledObject checks, `maxReplicaCount` equals `workersPerNode × nodeMax` |
+| `tests/unit/ci_lab/test_worker_isolation.py` | No token, service links, account, pull secret, init container or `envFrom`, only `emptyDir` and hostPath volumes; the environment equals the contract above; the image equals the scheduler's `CI_LAB_IMAGE`; the security contexts above with the node cache's UID and no host namespaces; the writable and read only mounts above; `safe-to-evict` as the only annotation, a grace of at least 1800 plus 300 seconds and the rollout strategy |
+| `tests/unit/ci_lab/test_network.py` | The policy selects the worker pod labels in both directions; exactly three egress rules, DNS, the scheduler on 8800 and MinIO on 9000, with no `ipBlock`; one ingress rule, the monitoring Prometheus on 9108, matching the container's `metrics` port |
+
+### Verify
+
+List the workers and their nodes:
+
+```bash
+kubectl -n ci-lab get pods -l app.kubernetes.io/component=worker -o wide
+```
+
+The binpack score sends each worker to the fullest CI node it fits, so at the floor of three
+workers with one CI node that has room, expect all three on the same `NODE`. The chart does not
+force it: a worker scheduled while that node was full goes elsewhere. Read the node's requests:
+
+```bash
+node=$(kubectl -n ci-lab get pods -l app.kubernetes.io/component=worker \
+  -o jsonpath='{.items[0].spec.nodeName}')
+kubectl describe node "$node" | sed -n '/^Allocated resources:/,/^Events:/p'
+```
+
+Computed from the requests, three workers put the `cpu` requests line at about 15.1 of the
+16 CPU, 94 percent: 15 from the workers and about 91m from the DaemonSets that pull request
+1826 measured. [Worker delivery evidence](#worker-delivery-evidence) lists what has been recorded live.
+
+Check each worker's scheduler, priority and QoS class:
+
+```bash
+kubectl -n ci-lab get pods -l app.kubernetes.io/component=worker \
+  -o custom-columns='NAME:.metadata.name,SCHEDULER:.spec.schedulerName,CLASS:.spec.priorityClassName,PRIORITY:.spec.priority,QOS:.status.qosClass'
+```
+
+Every row reads `runner-binpack`, `ci-lab-worker`, `150` and `Guaranteed`. Read the policy as the
+cluster holds it:
+
+```bash
+kubectl -n ci-lab describe networkpolicy ci-lab-worker
+```
+
+Each finished unit's report carries one git lookup per tree it leased, and the scheduler adds
+them to its counters. A lookup is a hit when the worker needed no fetch: the head's tree was
+already live in the pod, or the pod's store found the commit, its own or the node mirror's
+through `objects/info/alternates`. A miss is a fetch the worker made. From a client that reaches
+the scheduler, as in [Verify the running service](#verify-the-running-service):
+
+```bash
+curl -fsS http://lab:9108/metrics | grep -E '^ci_lab_cache_(hits|misses)_total\{cache="git"\}'
+```
+
+Hits that rise as units finish, with misses flat, show workers cutting trees from the node mirror
+or from trees they already hold.
+
+### Limitations
+
+- The worker's `/metrics` on 9108 serves its own empty registry, so a scrape holds no samples, and
+  the chart defines no PodMonitor or ServiceMonitor for the worker pods. The policy admits the
+  monitoring Prometheus to 9108 for when one exists.
+- No code sets `ci_lab_mirror_age_seconds`, so the scheduler exports no mirror age sample.
+- The worker fetches a head it lacks from the node mirror only. The chart sets neither
+  `AGENTIHOOKS_LAB_REMOTE` nor `CI_LAB_REPOSITORY`, and the policy reaches neither GitHub nor the
+  lab remote, so the executor of a head the node mirror does not hold yet raises at its fetch and
+  leaves the unit's lease for the scheduler to reap.
+- A head whose `uv.lock` digest differs from the image's baked venv builds its venv with
+  `uv sync` under `env -i`, which drops `UV_CACHE_DIR`, and the build needs a package index this
+  policy does not reach. See [Head venv builds](#head-venv-builds).
+- Nothing writes `/work/manifest.json`, so the test executor raises `FileNotFoundError` when it
+  reads its dependency manifest. The worker delivers nothing for the unit and the scheduler
+  reaps the lease; the [retry policy](#retry-policy) requeues it
+  once and marks it lost on the second expiry.
+- Seccomp is `Unconfined` for the whole pod; a `Localhost` profile that adds only the namespace
+  calls bubblewrap needs is not written.
+
+### Worker delivery evidence
+
+Pull request 1826 recorded its tests and its network probe; the live placement and cache results
+its done criteria name are not recorded:
+
+| Criterion | Evidence |
+|---|---|
+| The packing, isolation and network seams | Red on run 44496821882 of the deployment repository, 2 failed and 2588 passed, on the tests alone; green on run 44502133418 at the final head, 2599 passed |
+| Egress only to DNS, the scheduler and MinIO | The live probe on a CI node described under [Network](#network) |
+| Three workers on one node, with `kubectl describe node` near 15 of 16 CPU requested | Not recorded; the figure in the verify steps above is computed |
+| A worker git hit from the node mirror | Not recorded |
+| The scheduler exporting `ci_lab_mirror_age_seconds` | Not delivered: no code sets it |
+
+### Troubleshooting
+
+| Symptom | Cause | Check |
+|---|---|---|
+| Worker pods stay `Pending` with no scheduling events | The `runner-binpack` scheduler is not running, and the default scheduler ignores pods that name another | `kubectl -n kube-system get deploy runner-binpack-scheduler` and its pod logs |
+| `Pending` with `didn't match Pod's node affinity/selector` or `untolerated taint` | No CI pool node exists or none carries both labels | `kubectl get nodes -L <domain>/node-pool,<domain>/workload`; the autoscaler adds CI nodes up to its pool maximum |
+| `Pending` with `Insufficient cpu` or `Insufficient memory` | Every CI node is full, or the pool is at `nodeMax` | The autoscaler's pool maximum and the pending CI runners, which [outrank workers](#worker-scheduling-priority) |
+| `ContainerCreating` with `hostPath type check failed` for `git` or `uv` | The node cache has not prepared the node | `kubectl -n ci-lab get pods -l app.kubernetes.io/component=node-cache -o wide` and its `prepare` log; the kubelet mounts once the folders exist |
+| The worker exits at start with `ci-lab worker refuses` | Its environment holds a `GITHUB_APP_` or `REDIS` variable | Remove the variable from the chart |
+| The worker exits at start with a `KeyError` naming a `CI_LAB_` variable | A required work setting is missing from the pod environment | Compare the pod's `env` with the contract table above |
+| A head's units are reaped undelivered and the worker log shows a failed `git fetch` | The node mirror lacks the head and the worker has no other source | The node cache's `fetched-at` stamp and warm log, see [Verify every node](ci-lab-node-cache.md#verify-every-node) |
+| A venv build fails with `uv sync for <tree> ended with code` | The build needs the package index, which the policy refuses | The kept build log the error names; see Limitations |
+| Uploads time out or are refused | The MinIO egress rule does not match the object store's pods | `minio.namespace`, `minio.pods` and `minio.port` against `kubectl get pods -n <namespace> --show-labels` |
+| A sandboxed unit fails at bubblewrap with `Operation not permitted` | The pod runs under a seccomp profile that refuses namespace calls, or the node kernel restricts user namespaces | The pod's `seccompProfile`, then the namespace probe in the [sandbox verify](#unit-sandbox) steps on the node |
+| A worker pod is evicted for ephemeral storage | `/work`, `/tmp` and the logs passed 20 GiB | `kubectl -n ci-lab get events --field-selector reason=Evicted` |
+| A worker container is `OOMKilled` | Its units passed the 8 GiB limit | `kubectl -n ci-lab describe pod <worker pod>` for the last state |
+| A rollout takes long | Each step waits for one busy worker to drain, up to 2100 seconds | `kubectl -n ci-lab rollout status deploy/ci-lab-worker` |
+| An idle CI node is not scaled down | A worker still runs on it, and `safe-to-evict: "false"` keeps the node | `kubectl -n ci-lab get pods -l app.kubernetes.io/component=worker -o wide` |
+
 ## Worker scheduling priority
 
 The PriorityClass `ci-lab-worker` ranks lab worker pods below every CI runner
@@ -823,8 +1190,8 @@ which this class leaves untouched.
 
 ### Use it from a worker pod
 
-A pod gets the rank only by naming the class in its spec. The lab chart's worker Deployment is to
-carry this in its pod template:
+A pod gets the rank only by naming the class in its spec. The lab chart's
+[worker Deployment](#worker-deployment) carries this in its pod template:
 
 ```yaml
 spec:
@@ -834,9 +1201,9 @@ spec:
 ```
 
 Admission resolves the name to `spec.priority` when the pod is created, so a running pod keeps the
-priority it was created with. Admission refuses a pod that names a class the cluster does not hold. No
-chart sets `priorityClassName: ci-lab-worker` yet; until the lab chart's worker Deployment does,
-its pods run at priority 0.
+priority it was created with. Admission refuses a pod that names a class the cluster does not hold.
+The worker Deployment has named the class since the deployment repository's pull request 1826;
+worker pods created before that rollout ran at priority 0.
 
 ### Verify
 
@@ -856,8 +1223,8 @@ order, system classes included:
 kubectl get priorityclass --sort-by=.value
 ```
 
-The class and priority a running worker pod resolved to, with the output expected once the worker
-Deployment names the class:
+The class and priority a running worker pod resolved to, with the output expected now that the
+worker Deployment names the class:
 
 ```bash
 kubectl get pod <worker pod> -n <namespace> -o jsonpath='{.spec.priorityClassName} {.spec.priority}{"\n"}'
@@ -1062,7 +1429,8 @@ as `lab_notice`, or `0` when the send failed. Without all three settings nothing
 
 ### Push a head to the lab remote
 
-The lab remote is a git endpoint beside the scheduler. Its post receive hook,
+The lab remote is a git endpoint beside the scheduler; [Lab remote service](#lab-remote-service)
+covers where it runs, how it authenticates, its token and the client settings. Its post receive hook,
 `python -m scripts.ci_lab.remote.post_receive`, turns each pushed `refs/grade/*` head into a
 `ci.lab.head.notice` envelope on the same stream, and prints the head's grade url to the pusher:
 
@@ -1327,6 +1695,214 @@ and `ci.lab.head.push` at stream sequence 9 for an agentihooks head pushed by
 | A GitHub delivery answers `400` while its signature is valid | The body is not JSON, or the delivery lacks a field the receiver reads; [Heads it records](#heads-it-records) says what was recorded before the answer | `kubectl -n agentihooks-swarm logs deploy/agentihooks-swarm-github-webhook` for the delivery id, then the delivery's payload in the GitHub webhook settings |
 | A request answers `503` and the log shows `could not record the event` | The publish failed: the stream does not exist yet, or the NATS credential lacks `ci.lab.head.*` | `stream info` as above; the hub creates the stream on its next start. On `/github` the pull request observations were recorded before the failure, and a GitHub redelivery records the head |
 
+## Lab remote service
+
+The lab remote is the git endpoint that [Push a head to the lab remote](#push-a-head-to-the-lab-remote)
+pushes to. It serves one bare repository, `agentihooks.git`, over git's smart HTTP protocol to
+callers that hold the lab remote token. The deployment repository's `ci-lab` chart runs it beside
+the scheduler in the `ci-lab` namespace, and the `ci-lab` ArgoCD Application syncs that chart from
+the deployment repository's `dev` branch. Pull request 1829 of the deployment repository added it
+on 19 November 2026.
+That repository's `tests/unit/ci_lab/test_remote.py` renders every object below by name and runs
+`serve.py` against a real bare repository to check its authentication, push and error answers.
+
+### Where it runs
+
+| Object | What it does |
+|---|---|
+| StatefulSet `ci-lab-remote` | One replica on the scheduler's image, `ghcr.io/the-cloud-clockwork/agentihooks-swarm`, so the image updater that moves the scheduler moves the remote too. It runs as user 10001 with a read only root filesystem and no service account token, and takes the scheduler's node affinity, which keeps it off the pools in the chart value `scheduler.excludedPools`. It requests 100m of CPU and 256Mi of memory and may use up to 1Gi of memory. Its `reloader.stakater.com/auto` annotation makes Reloader restart the pod when the Secret `ci-lab-remote` changes |
+| Init container `init` | Runs `git init --bare /srv/git/agentihooks.git` on every start. On a repository that already exists git reinitializes it and keeps every ref and object |
+| Container `remote` | Runs `python /etc/ci-lab-remote/serve.py`, listening on port 8790, named `http`. A TCP readiness probe on that port runs every 10 seconds |
+| Claim `repo` | `local-path`, `ReadWriteOnce`, 20Gi, mounted at `/srv/git`. It holds the repository and the request bodies spooled during a push |
+| Volume `scratch` | An `emptyDir` of at most 2Gi mounted at `/tmp` |
+| ConfigMap `ci-lab-remote` | `serve.py`, `gitconfig`, `pre-receive` and `post-receive`, mounted read only at `/etc/ci-lab-remote`. The pod template carries a checksum of these files, so a change to one rolls the pod |
+| Service `ci-lab-remote` | Headless, port 8790. Pods reach the remote at `http://ci-lab-remote.ci-lab.svc:8790/agentihooks.git` |
+| Service `ci-lab-remote-lan` | `LoadBalancer` on the MetalLB address in the chart value `remote.lan.address`, port 80. LAN hosts reach the remote at `http://<lab remote address>/agentihooks.git`, and tailnet hosts reach the same URL through the tailnet's route to the LAN |
+| NetworkPolicy `ci-lab-remote` | Admits TCP 8790 only from the ranges in the chart values `lan.sources` (the LAN and the pod network) and `remote.tailnet` (the tailnet). Egress goes only to cluster DNS, the `kube-dns` pods in `kube-system` on port 53 over UDP and TCP, and to the bus, the NATS pods in the namespace in the chart value `bus.namespace` on `bus.port` (4222). The bus route is held for the grade hook; see [Grade hook environment](#grade-hook-environment) |
+
+The remote speaks plain HTTP on both addresses. On the LAN the token crosses the network in clear
+text; the tailnet encrypts its own traffic.
+
+### How it answers git
+
+`serve.py` runs `git http-backend` once per request, because the image has git but no web server.
+It answers one request per connection and ends a request whose client sends nothing for 300
+seconds.
+
+- **Authentication.** A request must carry the token as `Authorization: Bearer <token>`, or as
+  basic credentials with the user `lab` and the token as the password. The server compares the
+  header in constant time. Every other request gets `401` with an empty body and two challenges,
+  `WWW-Authenticate: Bearer realm="ci-lab"` and `WWW-Authenticate: Basic realm="ci-lab"`. Git then
+  asks its credential helpers, and with none that answers it stops with `could not read Username`.
+- **The token stays in the server.** The server takes `CI_LAB_REMOTE_TOKEN` out of its own
+  environment at start, so `git http-backend` and the hooks never receive it. An empty token stops
+  the server at start with `the lab remote needs a non empty token`.
+- **Reads.** A token holder lists and fetches every ref, over git protocol version 0 or 2.
+- **Pushes.** The `gitconfig` the container names in `GIT_CONFIG_GLOBAL` turns on
+  `http.receivepack`, advertises push options and points `core.hooksPath` at `/etc/ci-lab-remote`.
+  The `pre-receive` hook refuses the whole push when any ref it updates lies outside
+  `refs/grade/*`. It prints `lab remote: only refs/grade/* takes pushes, refused <ref>` for each
+  such ref; no ref of that push lands and `post-receive` does not run. Git's defaults hold for the
+  rest: a grade ref may be force updated or deleted, so an agent can push a rebased head to the same
+  ref.
+- **Push options.** Because push options are advertised, `git push -o branch=<name>` reaches the
+  hooks as `GIT_PUSH_OPTION_COUNT` and `GIT_PUSH_OPTION_0`, and hook output reaches the pusher as
+  `remote:` lines.
+- **Pack bodies.** Git sends a pack larger than its `http.postBuffer` in chunked encoding. The
+  server spools every request body to an unnamed file on the `repo` claim before it starts the
+  backend, so the backend reads the whole body with its length. A push needs room on the claim for
+  its spooled body as well as for the objects git keeps.
+- **Errors.** A URL that names a repository other than `agentihooks.git` gets the backend's `404`.
+  A backend that ends without writing its headers gets `500`.
+- **Logs.** The server logs each request line and its answer code on standard error, so the pod log
+  shows every `401`, `404` and `500`. Request lines carry no credentials.
+
+The first push into the empty repository carries the whole history of the pushed head. Later pushes
+leave out the objects reachable from the advertised refs the pushing clone already holds. A clone
+that holds none of the lab's grade heads sends its whole history again; `git config push.negotiate
+true` makes git find the commits it shares with the lab before it builds the pack.
+
+### Grade hook environment
+
+The `post-receive` hook runs `python -m scripts.ci_lab.remote.post_receive` from the image with the
+container's environment; [Push a head to the lab remote](#push-a-head-to-the-lab-remote) describes
+what it publishes and prints. It reads `CI_LAB_URL`, `CI_LAB_REPOSITORY`, `CI_LAB_REMOTE_ACTOR` and
+the `AGENTIHOOKS_BUS` settings from that environment, and needs a bus login allowed to publish
+`ci.lab.head.notice`. The chart gives the remote container only `CI_LAB_REMOTE_PORT`,
+`CI_LAB_REMOTE_ROOT`, `GIT_CONFIG_GLOBAL` and `CI_LAB_REMOTE_TOKEN`. The chart's only bus login,
+the Secret `ci-lab-nats` read from the OpenBao key in the chart value `openbao.nats`, belongs to the
+scheduler, so the remote does not share it; a follow up gives the remote its own login and the
+hook's settings. The
+NetworkPolicy already lets the pod reach the bus, and nothing on the remote uses that route yet.
+
+Until then the hook fails on every grade push after git has written the ref: the push lands, the
+pusher reads the hook's error in place of a grade url, and the lab records no head. Reads never run
+a hook, so `git ls-remote` and fetches answer as described above.
+
+### Token and client settings
+
+The chart generates the token and keeps it in OpenBao, as the deployment does for the
+[lab notice secret](#provisioning-in-the-deployment):
+
+1. A `Password` generator, `ci-lab-remote-token`, makes a 48 character value with 8 digits and no
+   symbols.
+2. A `PushSecret`, `ci-lab-remote-token`, writes that value to the OpenBao key `k8s/ci-lab-remote`
+   (`secret/k8s/ci-lab-remote`), property `token`, through the `openbao` ClusterSecretStore.
+   `updatePolicy: IfNotExists` writes only while the key is absent, so the value is generated once
+   and its hourly resync and every redeploy leave it alone. `deletionPolicy: None` keeps the key when
+   the PushSecret is deleted.
+3. The `ExternalSecret` `ci-lab-remote` reads the property every five minutes into the Secret
+   `ci-lab-remote` as `CI_LAB_REMOTE_TOKEN`, and the remote container takes that key as an
+   environment variable when it starts. When the Secret changes, Reloader restarts the pod, so the
+   server serves the new value without a hand restart.
+
+Every client uses two settings and passes the token by reference:
+
+| Name | Value |
+|---|---|
+| `AGENTIHOOKS_LAB_REMOTE` | The lab remote URL: `http://<lab remote address>/agentihooks.git` on a host on the LAN or the tailnet, or `http://ci-lab-remote.ci-lab.svc:8790/agentihooks.git` in a pod |
+| `AGENTIHOOKS_LAB_REMOTE_TOKEN` | The value of the `token` property of `k8s/ci-lab-remote` |
+
+The chart writes neither setting outside the `ci-lab` namespace. A host takes both from an
+agentihooks env file under `~/.agentihooks/`, which agentihooks loads into the sessions it
+launches. The deployment repository's hive template maps neither setting; a hive gets the pair only
+once both are mapped into its hive settings from the same OpenBao property, after the PushSecret has
+written it. The lab mirrors in the
+[Environment](#environment) table read the same pair.
+
+### Use it
+
+`wt.sh`, swarm v2 workspaces and the hive daemon add the `lab` remote and its credential helper
+themselves when both settings are set; [Workspaces that carry the lab remote](#workspaces-that-carry-the-lab-remote)
+says where and when. By hand, in an agentihooks checkout:
+
+```bash
+git remote add lab "$AGENTIHOOKS_LAB_REMOTE"
+git config credential."$AGENTIHOOKS_LAB_REMOTE".helper \
+  '!f() { if test "$1" = get; then printf "username=lab\npassword=%s\n" "$AGENTIHOOKS_LAB_REMOTE_TOKEN"; fi; }; f'
+git config push.negotiate true
+git ls-remote lab
+git push -o branch="$(git branch --show-current)" lab HEAD:refs/grade/<task>
+```
+
+The helper answers git's `get` request for the lab URL alone, with the user `lab` and the token
+read from the environment when git asks. Git config holds the variable's name, never its value, and
+the helper stores nothing. A shell without `AGENTIHOOKS_LAB_REMOTE_TOKEN` sends an empty password,
+which the lab answers `401`.
+
+### Verify
+
+```bash
+kubectl -n ci-lab get statefulset ci-lab-remote
+kubectl -n ci-lab get pushsecret ci-lab-remote-token
+kubectl -n ci-lab get externalsecret ci-lab-remote
+kubectl -n ci-lab get secret ci-lab-remote --template='{{range $k,$v:=.data}}{{$k}} {{end}}'
+kubectl -n ci-lab get service ci-lab-remote ci-lab-remote-lan
+```
+
+The StatefulSet shows `1/1` ready, the PushSecret `Synced`, the ExternalSecret ready, the key
+listing `CI_LAB_REMOTE_TOKEN` and the LAN Service its external address. The key listing prints key
+names only, never values.
+
+Without kubectl or the token, a request that carries no token shows whether the server is reachable
+and answering:
+
+```bash
+curl -s -D - -o /dev/null "$AGENTIHOOKS_LAB_REMOTE/info/refs?service=git-upload-pack"
+```
+
+The answer is `401` with both challenges. On 19 November 2026, with the `ci-lab` Application on the
+deployment repository's merge commit `c26d2c0c`, a hive pod asking
+`http://ci-lab-remote.ci-lab.svc:8790/agentihooks.git` this way got:
+
+```text
+HTTP/1.1 401 Unauthorized
+Server: BaseHTTP/0.6 Python/3.12.12
+WWW-Authenticate: Bearer realm="ci-lab"
+WWW-Authenticate: Basic realm="ci-lab"
+Content-Length: 0
+Connection: close
+```
+
+and `git ls-remote` of the same URL with no credential helper exited 128 with `could not read
+Username`. A timeout or a refused connection in place of the `401` points at the `Failed to connect`
+row of the troubleshooting table below. That hive carried neither client setting, and the hive
+template maps neither, so on that day the authenticated listing below had not yet run from a hive or
+from the workstation.
+
+From a hive and from the workstation, with the helper above set:
+
+```bash
+test -n "${AGENTIHOOKS_LAB_REMOTE_TOKEN:-}" && echo set || echo unset
+git ls-remote "$AGENTIHOOKS_LAB_REMOTE"; echo "exit $?"
+```
+
+An empty repository lists nothing and exits 0. Once heads are pushed, each line is a commit and its
+`refs/grade/<task>` ref. A missing or wrong token fails with `could not read Username` or
+`Authentication failed`, and the pod log shows the `401`:
+
+```bash
+kubectl -n ci-lab logs ci-lab-remote-0 -c remote --since=10m
+```
+
+### Troubleshooting
+
+| Symptom | Cause | Check |
+|---|---|---|
+| `git ls-remote` fails with `could not read Username` | The request carried no token, so the lab answered `401` and no credential helper answered git | The `test -n` line above, then the helper with `git config --get-regexp '^credential\..*\.helper$'` |
+| `Authentication failed` while the token is set | The value differs from the one the pod read at start: another copy, or a value replaced in OpenBao that the ExternalSecret has not copied yet, which takes up to five minutes before Reloader restarts the pod | Map the value again from `k8s/ci-lab-remote`; after a replacement, compare the ExternalSecret's last refresh with the pod's start time in `kubectl -n ci-lab get externalsecret ci-lab-remote` and `kubectl -n ci-lab get pod ci-lab-remote-0` |
+| `Failed to connect` or a timeout | The host is outside the NetworkPolicy's ranges, the LAN Service has no external address, or the pod is not ready | `kubectl -n ci-lab get service ci-lab-remote-lan` and the StatefulSet's ready count |
+| A push is rejected with `lab remote: only refs/grade/* takes pushes, refused <ref>` | One of its refs lies outside `refs/grade/*`, which rejects the whole push | Push `HEAD:refs/grade/<task>` alone |
+| A grade push lands but prints a hook error in place of `lab grade:` | The remote container lacks the hook's settings | [Grade hook environment](#grade-hook-environment) |
+| A request answers `404` | The URL names a repository other than `agentihooks.git` | `AGENTIHOOKS_LAB_REMOTE` ends in `/agentihooks.git` |
+| The pod restarts with `the lab remote needs a non empty token` | The Secret holds an empty `CI_LAB_REMOTE_TOKEN` | The `token` property in OpenBao and the ExternalSecret's events |
+| The pod stays in `CreateContainerConfigError` | The Secret `ci-lab-remote` does not exist yet because the ExternalSecret has not synced | `kubectl -n ci-lab describe pushsecret ci-lab-remote-token` and `kubectl -n ci-lab describe externalsecret ci-lab-remote` |
+
+To replace the token, write the new value to the same OpenBao key and property. The PushSecret
+leaves an existing key alone, the ExternalSecret copies the value within five minutes, and Reloader
+restarts the pod once the Secret changes. Then give every host and hive the new value; until a client
+has it, the lab answers its requests `401`.
+
 ## Digest specification
 
 A verdict is stored under the key of the inputs it judged. `scripts.ci_lab.digests` builds every
@@ -1452,7 +2028,9 @@ key; the builders are pure and read no file, clock or network.
    `failed`, `gate_failed`, `survived`, `crash` or `cannot_run`. Any other outcome is refused
    with `403`, records nothing and stores no verdict; the lease stays held until it expires.
 8. Check runs move `queued` on receipt, `in_progress` on the first unit a worker starts and
-   `completed` on the last, one per gate with units and `required` for the whole grade. A completed
+   `completed` on the last, one per gate with units and `required` for the whole grade. A pull
+   request or hotfix grade also posts one check run `completed` with conclusion `skipped` on its
+   first pass for every gate the base's `lab.authoritative` lists that it runs no unit of. A completed
    check run never moves again. The grade state keeps each check run's id, and the scheduler seeds
    its poster with that id and the last status it posted before the next move, so a restarted
    scheduler advances the same check run instead of opening a second one. A grade of a head pushed
@@ -1464,6 +2042,14 @@ keeps the lab gates the pull request rules require and names every other require
 units, with no test scope and no mutation; a merge group grade does the same for the queue suite; a
 promotion or backfill grade keeps every lab gate. A gate without units passes, so a grade turns red only
 through what the lab grades.
+
+A pull request or hotfix grade reads `lab.authoritative` from the `delivery.yaml` of its base, the
+grader revision, so the head cannot widen it. Each listed gate the frame gives no unit, such as `unit`,
+`unit-selected`, `shard-check` or `mutation`, which those classes never expand, lands in the grade
+state's `idle` list and gets its `skipped` check run on the first pass. The `lab-verdict` job then
+reads `skipped` for it instead of failing the gate when its 20 minute wait ends. `Gate — Required`
+accepts `skipped` only for a gate it does not require on that head, so a lab that skips a gate the
+head requires keeps the pull request red.
 
 A gate passes when every unit passed. The `required` conclusion is
 `scripts.ci_lab.scheduler.fold`, the rules of the `Gate — Required` step of the test workflow over
@@ -1731,7 +2317,7 @@ expansion still reads the mirror with `git ls-tree` and `git show`:
 
 | Job | Units |
 |---|---|
-| `mutation` | One `mutant` unit per function the head changes against its base, naming every mutant of that function |
+| `mutation` | One `mutant` unit per function the head changes against its base, naming every mutant of that function, or several when those mutants price over the sandbox timeout |
 | `mutation-stats` | One `stats` unit per test file present at the head that holds a test running such a function, with the worker's stats options |
 
 The changed lines are `scripts.ci_mutation.scope.changes_since` of the base and head, the lines the
@@ -1813,7 +2399,15 @@ A mutant unit's key is the sha256 of the JSON, object keys sorted, of a list hol
 6. the unlisted test hashes described above.
 
 Its members are `<name>__mutmut_1` to `<name>__mutmut_<n>`, one per mutation mutmut creates in the
-function. A stats unit's key is `StoredStats.identity` of its test file at the head, over the
+function. The worker grades a unit's mutants in one sandbox run after the unit's stats run, each run
+bounded by `executors.UNIT_TIMEOUT_S`, 1800 seconds, which `MirrorExpander._mutation` passes as the
+`timeout` of `expand_mutation.mutant_units`. A function whose mutants price over it, `n` times
+`scripts.ci_mutation.plan.MUTANT_SECONDS` (5.6 seconds a mutant, the fallback of
+`pricing.estimate`), gets the fewest near equal parts that each price within it, at most 321
+mutants a part, in mutant order; `expand_mutation.split_members` cuts them. Each part's key is the
+sha256 of the list of the function's key and the part's members, so every part has its own slot
+and verdict; a function priced within the timeout keeps one unit under the function's key.
+A stats unit's key is `StoredStats.identity` of its test file at the head, over the
 fields the `stats` rows of [Inputs per kind](#inputs-per-kind) list, with the worker's options
 `-q -p no:cacheprovider`. The expander builds both keys itself, without the `digests` builders, so
 they are bare 64 hex digests rather than the `<kind>-v<schema>-<digest>` form the
@@ -1943,7 +2537,11 @@ from the private tree. A mutant unit passes only when every mutant is killed; a 
 non zero fails its unit. Each adapter uploads a JSON report with the unit's `seconds` (and `flaky`
 for a test unit), which the scheduler stores with the verdict, and releases every tree it cut,
 also when the executor raises. SIGTERM stops leasing and lets running units drain within the
-termination grace.
+termination grace: 2100 seconds, the 30 minute unit time limit (`worker.UNIT_TIMEOUT_SECONDS`,
+which every executor's pod timeout reads) plus the five delivery calls of a unit (two upload
+URLs, two puts and the completion) at the 60 second HTTP timeout. The worker Deployment of the
+deployment repository's `ci-lab` chart sets `worker.terminationGracePeriodSeconds` to the same 2100 seconds, so
+a rollout lets the longest unit finish and deliver before the pod is killed.
 
 Check the wiring offline:
 
@@ -2096,6 +2694,9 @@ units differs from the cached verdict.
 
 ### Rebuild the index
 
+For a running deployment, [Recover the verdict index](#recover-the-verdict-index) explains how
+to request this operation at scheduler startup without writing code inside its pod.
+
 `reindex()` lists every object under `lab/`, keeps the paths `is_report` matches, reads each report
 and indexes its verdict with `SET NX`. It returns how many entries it added. Entries already present
 stay unchanged and are not counted, so a second run returns `0`. Grade, head and upload objects are
@@ -2195,6 +2796,179 @@ of lost objects runs on `LocalObjects` only.
 | `reindex()` returns `0` right after a flush | No report objects under `lab/` at this root, from a wrong directory, bucket or prefix; or every entry was already indexed | `verdicts.objects.keys("lab/")` lists the stored objects |
 | A unit folder holds `report.json` without `log.txt` | The writer stopped between the two writes; later puts never add a log | To run the unit again, delete its folder and its index entry; the next put stores a fresh verdict |
 | A worker gets `403` from `/upload-url` | The lease expired or the token belongs to another lease | Heartbeat before the lease expires; once it has expired, lease the job again |
+
+## Recovery
+
+The node mirror and uv cache can be rebuilt from the repository. The Redis verdict index can
+be rebuilt from report objects; a lost object bucket needs its backup restored first. The
+deployment repository owns the CI lab chart, node cache script and
+[bucket backup runbook](#deployment-recovery-runbook).
+Change chart values through that repository's delivery process. Pod recreation and scheduler
+restarts below retain the deployed code.
+
+The scheduler supports startup reindexing. The node recovery steps use the deployment's
+node-cache DaemonSet. The mirror age gauge still has no samples, as listed in
+[Metrics](#metrics); a successful fetch log alone does not prove the fresh-node metric requirement.
+
+### Deployment recovery runbook
+
+In the deployment repository, open `docs/2K-CI-LAB.md`, section `Recovery`, for the cluster's
+cache paths, bucket addresses and backup target. Chart overrides belong in
+`k8s/charts/ci-lab/values.yaml`; the refresh script is
+`k8s/charts/ci-lab/files/warm-node-cache.sh`. Keep deployment addresses in that repository.
+[Where they live and how they deploy](#where-they-live-and-how-they-deploy) also lists the
+deployment's lab monitoring resources.
+
+### Configure node recovery
+
+These chart overrides use an example host cache root. Keep the root consistent with worker
+mounts, and retain the chart's node selection and tolerations so a cache pod reaches each CI node:
+
+```yaml
+nodeCache:
+  path: /var/cache/example-ci-lab
+  uid: 1001
+mirror:
+  intervalSeconds: 60
+scheduler:
+  repository: https://github.com/the-cloud-clockwork/agentihooks.git
+  reindexOnStart: false
+```
+
+The chart's refresh interval defaults to 60 seconds. The `ci-lab-node-cache` DaemonSet mounts
+`nodeCache.path` as `/cache`; its `prepare` init container creates `git` and `uv` for
+`nodeCache.uid`. A cold autoscaled node needs no manual cache creation. Its first refresh:
+
+1. Creates the bare mirror at `git/agentihooks.git` under the cache root.
+2. Fetches all branches and pull request heads from `scheduler.repository`.
+3. Atomically updates the mirror's `fetched-at` stamp with the last successful fetch time in
+   epoch seconds.
+4. Warms `uv` from the dev branch's `.github/test-requirements.lock`, applying
+   `.github/test-excludes.txt` when present.
+
+The uv marker `uv/warmed-lock` records the lockfile blob. An unchanged blob skips another
+install; a repository without that dev lockfile logs a skip. This cache contains packages for
+venv creation, not the verdict index.
+
+Inspect the cache pods and their refresh output:
+
+```bash
+kubectl -n ci-lab get daemonset ci-lab-node-cache
+kubectl -n ci-lab get pods -l app.kubernetes.io/component=node-cache -o wide
+kubectl -n ci-lab logs -l app.kubernetes.io/component=node-cache -c warm --tail 20
+```
+
+A successful refresh logs `mirror fetched`, followed by `uv cache warmed for lock <blob>` or
+`uv cache current for lock <blob>`. The stamp advances before uv warming, so a failed package
+install can follow a successful git fetch. Once the worker exports `ci_lab_mirror_age_seconds`,
+verify that a fresh node's sample is below `mirror.intervalSeconds` after one completed loop.
+Until then, retain the fetch output as cache evidence and leave the metric acceptance unproven.
+
+### Recover an interrupted refresh or deleted cache
+
+Each refresh first acquires `git/.warm.lock` with `flock`. With that lock held, it removes
+stale `*.lock` files inside the mirror before fetching. A killed fetch therefore recovers on
+the next loop. A concurrent refresh logs
+`node cache refresh skipped: another run holds the cache lock` and tries again on the next loop.
+
+Deleting the host cache root leaves running pods mounted on the deleted directory. Deleting
+only its `git` directory also needs pod recreation: the root belongs to root, so the refresh
+user cannot recreate that directory. The refresh logs `node cache refresh failed` and the
+stamp stops advancing. Recreate the node-cache pod on the affected node so the kubelet and
+`prepare` init container recreate the directories:
+
+```bash
+NODE=example-ci-node
+kubectl -n ci-lab delete pod -l app.kubernetes.io/component=node-cache \
+  --field-selector "spec.nodeName=$NODE"
+```
+
+Restart affected worker pods as well when they retain the deleted mount. A replacement cache
+pod rebuilds the mirror and uv cache like a cold node; cache loss does not restore or remove
+the report objects in the bucket.
+
+### Recover the verdict index
+
+Restore access to Redis and the existing report bucket before starting the scheduler. Preserve
+the [scheduler startup prerequisites](#run-the-scheduler-service), including bus consumers,
+repository access and `CI_LAB_URL`; reindexing runs after dependency construction and before
+either HTTP listener starts.
+
+For a host service with that environment already configured, request one recovery startup:
+
+```bash
+CI_LAB_REINDEX_ON_START=true agentihooks ci-lab-scheduler
+```
+
+Only lowercase `true` requests recovery. Unset, `false`, `True` and `1` all skip reindexing.
+For the chart deployment, deliver this override through git instead:
+
+```yaml
+scheduler:
+  reindexOnStart: true
+```
+
+The chart injects `CI_LAB_REINDEX_ON_START=true` and rolls the scheduler. Read its startup output:
+
+```bash
+kubectl -n ci-lab logs deployment/ci-lab-scheduler \
+  | grep --line-buffered -E 'reindexed [0-9]+ verdicts'
+```
+
+The scheduler prints and flushes `reindexed N verdicts`, where N counts entries added, then
+starts serving. The line `reindexed 1 verdicts` is an example for one missing entry, not a
+deployed recovery result. Existing entries remain unchanged; another run can print
+`reindexed 0 verdicts`. The [store rebuild rules](#rebuild-the-index) explain the report scan.
+
+If another recovery pass is needed while the chart setting remains on, restart the scheduler:
+
+```bash
+kubectl -n ci-lab rollout restart deployment/ci-lab-scheduler
+kubectl -n ci-lab rollout status deployment/ci-lab-scheduler
+```
+
+After verification, deliver `scheduler.reindexOnStart: false` through git, or remove the
+environment override from the host service. Leaving it on reads every report on every start
+and delays readiness as the bucket grows. Reindexing restores verdict entries only: queued
+and leased units remain lost, and Redis-only disabled kinds become enabled after a Redis
+flush. Restore those disable decisions before resuming reuse; see [Disable and enable a kind](#disable-and-enable-a-kind).
+
+### Restore a lost bucket
+
+Use the [deployment recovery runbook](#deployment-recovery-runbook) to identify the backup
+endpoint and retained copy.
+The supplied deployment's nightly MinIO backup mirrors buckets without deleting objects from
+the backup. A restore cannot recover reports written after the last successful backup; their
+units miss the verdict cache and grade again.
+
+From a workstation with `mc`, inject the endpoints and credentials through the approved secret
+mechanism. Set `CI_LAB_RESTORE_ENDPOINT` and `CI_LAB_BACKUP_ENDPOINT` to the destination and
+backup addresses, and `CI_LAB_MINIO_BUCKET` to the bucket, for example `ci-lab-artifacts`.
+`MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD` below are environment references, never literal values:
+
+```bash
+mc alias set lab-restore "$CI_LAB_RESTORE_ENDPOINT" "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"
+mc alias set lab-backup "$CI_LAB_BACKUP_ENDPOINT" "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"
+mc mb --ignore-existing "lab-restore/$CI_LAB_MINIO_BUCKET"
+mc mirror --overwrite --preserve "lab-backup/$CI_LAB_MINIO_BUCKET" "lab-restore/$CI_LAB_MINIO_BUCKET"
+```
+
+Restore the bucket before recovering its Redis index. Retain both the fresh-node metric sample
+and the deployed scheduler's `reindexed N verdicts` line to prove full recovery.
+
+### Recovery troubleshooting
+
+| Symptom | Check and action |
+|---|---|
+| No cache pod on the new node | Check DaemonSet readiness, node selection, tolerations and the `prepare` init container before investigating the refresh script |
+| `mirror fetched` followed by `node cache refresh failed` | The stamp was already updated; inspect repository lockfile access, package downloads and uv cache permissions |
+| Refresh repeatedly skips | Another run holds `git/.warm.lock`; confirm that run's state before treating a stale mirror lock as the cause |
+| Refresh fails after cache directory deletion | Recreate the affected node-cache pod and workers holding deleted mounts |
+| Mirror age sample is absent | The gauge is not exported yet; the fetch stamp and logs do not satisfy the metric requirement |
+| No reindex line | Check the exact environment value and startup dependency errors; the chart's default `false` omits the variable |
+| Reindex prints zero | Existing entries are preserved, or no matching reports exist in the configured bucket; check the endpoint, bucket and report objects |
+| Scheduler readiness is delayed during recovery | Reindex reads every report before serving; inspect startup logs and object store access, then disable the startup setting after recovery |
+| Verdicts return but queued work or disabled kinds are missing | Reindex restores only verdict entries; reconstruct pending work and restore disable decisions separately |
 
 ## Reuse audit
 

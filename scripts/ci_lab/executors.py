@@ -6,7 +6,8 @@ read only. A test unit runs its batch on the venv of the head's lockfile digest 
 flake ledger. A stats or mutant unit runs the mutation runner in the sandbox from a private tree of the head whose
 mutated sources sit behind trampolines, with the pod's stats cache, kill memory, unit budget and lane cap; a mutant
 unit's tests are the ones the stats records of that tree show reaching its function. `agentihooks ci-lab-worker` builds
-the pod from the worker contract environment and runs the worker until SIGTERM.
+the pod from the worker contract environment and runs the worker until SIGTERM, serving its metrics registry on the
+contract metrics port.
 """
 
 import argparse
@@ -29,7 +30,7 @@ from types import FrameType
 from typing import Any
 
 from scripts import ci_cpu_quota, ci_wiring
-from scripts.ci_lab import caches, contract, run_mutation, run_static, run_tests, venvs, worker, worktrees
+from scripts.ci_lab import caches, contract, metrics, run_mutation, run_static, run_tests, venvs, worker, worktrees
 from scripts.ci_lab.outcomes import FAILED, PASSED
 from scripts.ci_lab.sandbox import PortAllocator, Sandbox
 from scripts.ci_lab.static_gates import REGISTRY, WORKFLOW, StaticGate, discover
@@ -76,7 +77,7 @@ TREES = 8
 FIRST_PORT = 20_000
 LAST_PORT = 29_999
 PORT_WIDTH = 10
-UNIT_TIMEOUT_S = 1_800.0
+UNIT_TIMEOUT_S = worker.UNIT_TIMEOUT_SECONDS
 
 
 @dataclass
@@ -314,7 +315,8 @@ def settings(environ: Mapping[str, str]) -> tuple[Pod, Suite, Mutation]:
 
 
 def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
-    """Run the worker over the adapters until SIGTERM stops it, then let its running units drain."""
+    """Run the worker over the adapters until SIGTERM stops it, then let its running units drain; the contract metrics
+    port serves the worker's registry until the drain ends."""
     argparse.ArgumentParser(prog="agentihooks ci-lab-worker").parse_args(argv)
     pod, suite, graded = settings(environ)
     cpus = os.cpu_count() or 1
@@ -327,5 +329,10 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
         service.stop()
 
     signal.signal(signal.SIGTERM, stop)
-    service.run()
+    with metrics.serve_registry("", contract.METRICS_PORT, metrics.Registry()) as exposition:
+        threading.Thread(target=exposition.serve_forever).start()
+        try:
+            service.run()
+        finally:
+            exposition.shutdown()
     return 0

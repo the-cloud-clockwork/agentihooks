@@ -2,12 +2,15 @@ import argparse
 import json
 import os
 from dataclasses import replace
+from pathlib import Path
+from typing import Any
 from unittest.mock import Mock, patch
 
 import pytest
 
 from scripts.swarm import cli, default_models, model_catalog, model_pick, runtime
 from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
+from tests.swarm.test_cli import env, home, run  # noqa: F401
 
 CATALOG = {
     "claude": [{"model": "opus"}, {"model": "sonnet"}],
@@ -216,3 +219,54 @@ def test_lane_model_validation_uses_the_store_cache_and_current_context(store: R
         store.update("sw", lanes={"eng": {"model": "sonnet"}})
     environ, cache, now = load.call_args.args
     assert (environ is os.environ, cache is store.redis, now) == (True, True, 123456.0)
+
+
+@pytest.mark.feature("template-lane-model-listed-in-a-harness-catalog")
+def test_create_refuses_a_lane_model_no_harness_catalog_lists_without_writing(store: RedisStore) -> None:
+    with pytest.raises(SwarmError) as refused:
+        store.create(SwarmConfig("new", "/repo", 2, 1, lanes={"eng": {"model": "sonnet"}, "ci": {"model": "opus-4"}}))
+    assert str(refused.value) == "ci-model must be auto or a model listed in a harness catalog, not opus-4"
+    assert store.slugs() == ["sw"] and store.redis.hgetall(store.key("new", "config")) == {}
+
+
+@pytest.mark.feature("template-lane-model-listed-in-a-harness-catalog")
+def test_create_accepts_lane_models_any_harness_catalog_lists(store: RedisStore) -> None:
+    store.create(SwarmConfig("new", "/repo", 2, 1, lanes={"eng": {"model": "sonnet"}, "ci": {"model": "gpt-6-sol"}}))
+    lanes = store.config("new").lanes
+    assert (lanes["eng"]["model"], lanes["ci"]["model"]) == ("sonnet", "gpt-6-sol")
+
+
+@pytest.mark.feature("template-lane-model-listed-in-a-harness-catalog")
+def test_a_create_that_fixes_no_lane_model_reads_no_catalog(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(model_catalog, "catalog", Mock(side_effect=AssertionError("the catalog was read")))
+    lanes = {"eng": {"model": "auto"}, "ci": {"model": ""}, "plan": {"agent": "codex"}}
+    store.create(SwarmConfig("new", "/repo", 2, 1, lanes=lanes))
+    assert store.config("new").lanes == lanes
+
+
+@pytest.mark.feature("template-lane-model-listed-in-a-harness-catalog")
+def test_create_reads_lane_models_through_the_store_cache_and_current_context(store: RedisStore) -> None:
+    with (
+        patch.object(model_catalog, "catalog", return_value=CATALOG) as load,
+        patch.object(runtime.time, "time", return_value=123456.0),
+    ):
+        store.create(SwarmConfig("new", "/repo", 2, 1, lanes={"eng": {"model": "sonnet"}}))
+    environ, cache, now = load.call_args.args
+    assert (environ is os.environ, cache is store.redis, now) == (True, True, 123456.0)
+
+
+@pytest.mark.feature("template-lane-model-listed-in-a-harness-catalog")
+def test_create_refuses_a_template_lane_model_no_harness_catalog_lists(
+    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    home: Path,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    store, _, _ = env
+    monkeypatch.setattr(model_catalog, "catalog", Mock(return_value={"claude": [{"model": "opus"}], "codex": []}))
+    (home / "swarm-templates").mkdir(parents=True)
+    typo = {"name": "typo", "lanes": {"eng": {"model": "opsu"}, "ci": {"model": "opus"}}}
+    (home / "swarm-templates" / "typo.json").write_text(json.dumps(typo))
+    assert run("sw", "create", "--repo", "/repo", "--template", "typo") == 1
+    assert "eng-model must be auto or a model listed in a harness catalog, not opsu" in capsys.readouterr().err
+    assert store.slugs() == []
