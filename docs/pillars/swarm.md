@@ -149,7 +149,10 @@ For an `events` swarm the tick spawns no lane agent, reaps no lane agent through
 acknowledgement: those moved to the hub and the hives. Its reap step still judges every agent the hub admitted. It
 sends the execution stop to the hive of an agent whose work ended, and the hive reaps the agent's session (see
 [Stopping an agent whose work ended](hives.md#stopping-an-agent-whose-work-ended)). An agent whose work has not
-ended and whose pane is live goes through the same idle and revoked seat watch as any other agent. The tick still
+ended and whose pane is live goes through the same idle and revoked seat watch as any other agent. A retirement
+from that watch, or from the `verify` step's binding mismatch check, refunds the agent's claim life and sends its
+hive the execution stop with the retirement reason (see
+[Retiring a hub admitted agent](hives.md#retiring-a-hub-admitted-agent)). The tick still
 runs master failover and recovery, the orphan pass that reopens a claimed task whose claimant has no agent record
 and no claim, pane evidence, exits, verification, the dispatcher, master
 scaling and the promotion and release watches for both engines. Master agents are reaped by the tick under either engine.
