@@ -7031,6 +7031,9 @@
       "tests": [
         "tests/hive/test_admission.py::test_an_empty_pod_hive_on_a_busy_node_gets_the_used_cpu_room",
         "tests/hive/test_admission.py::test_the_load_average_guard_binds_on_a_pod_hive_once_its_own_load_reaches_the_swarm_share"
+      ],
+      "rules": [
+        "hive-guard-reads-node-cpu-used"
       ]
     },
     {
