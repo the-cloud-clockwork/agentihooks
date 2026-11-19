@@ -94,6 +94,11 @@ class Broken(FakeSourceControl):
         pytest.fail("a failed listing reached the cancel")
 
 
+class Unread(FakeSourceControl):
+    def download(self, path: str, *, deadline: Deadline) -> bytes:
+        raise subprocess.CalledProcessError(1, ["gh", "api", path], stderr="HTTP 404\n")
+
+
 def _branches(monkeypatch: pytest.MonkeyPatch, branches: dict[str, str]) -> list[str]:
     from scripts.swarm import stack
     from scripts.tick.ports.source_control import ChangeRef, ChangeState
@@ -1290,6 +1295,56 @@ def test_the_master_drops_one_panic_fix_and_keeps_the_panic_and_its_other_fixes(
     assert runs.calls() == []
 
 
+@pytest.mark.feature("panic-drop-one-fix")
+def test_panic_drop_refuses_a_seat_that_is_neither_the_master_nor_the_operator(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm.store import AgentRecord
+
+    store.put_agent(SLUG, AgentRecord("engineer@a1b2c3-0001", "eng", "t1"))
+    panic.engage(store, SLUG, "pressed", False, [FIX], 0)
+    with pytest.raises(cli.SwarmError) as caught:
+        _press(store, monkeypatch, _busy(), "--as", "engineer@a1b2c3-0001", "panic", "drop", "--fix", FIX)
+    assert str(caught.value) == "only the master or the operator drops a panic fix"
+    assert panic.state(store, SLUG) == panic.Panic(0, "pressed", False, (FIX,))
+
+
+@pytest.mark.parametrize("named", [[], ["--fix", FIX, "--fix", BRANCH_FIX]])
+@pytest.mark.feature("panic-drop-one-fix")
+def test_panic_drop_takes_exactly_one_fix(store: RedisStore, monkeypatch: pytest.MonkeyPatch, named: list[str]) -> None:
+    from scripts.swarm.store import AgentRecord
+
+    store.put_agent(SLUG, AgentRecord("master@a1b2c3-0001", "master", "master"))
+    panic.engage(store, SLUG, "pressed", False, [FIX, BRANCH_FIX], 0)
+    with pytest.raises(cli.SwarmError) as caught:
+        _press(store, monkeypatch, _busy(), "--as", "master@a1b2c3-0001", "panic", "drop", *named)
+    assert str(caught.value) == "panic drop takes exactly one --fix"
+    assert panic.state(store, SLUG) == panic.Panic(0, "pressed", False, (FIX, BRANCH_FIX))
+
+
+@pytest.mark.feature("panic-drop-one-fix")
+def test_panic_drop_refuses_a_fix_the_panic_does_not_hold(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm.store import AgentRecord
+
+    store.put_agent(SLUG, AgentRecord("master@a1b2c3-0001", "master", "master"))
+    panic.engage(store, SLUG, "pressed", False, [BRANCH_FIX], 0)
+    with pytest.raises(cli.SwarmError) as caught:
+        _press(store, monkeypatch, _busy(), "--as", "master@a1b2c3-0001", "panic", "drop", "--fix", FIX)
+    assert str(caught.value) == f"the panic on swarm {SLUG} holds no fix {FIX}"
+    assert panic.state(store, SLUG) == panic.Panic(0, "pressed", False, (BRANCH_FIX,))
+
+
+@pytest.mark.feature("panic-drop-one-fix")
+def test_panic_drop_refuses_while_no_panic_holds_the_swarm(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm.store import AgentRecord
+
+    store.put_agent(SLUG, AgentRecord("master@a1b2c3-0001", "master", "master"))
+    with pytest.raises(cli.SwarmError) as caught:
+        _press(store, monkeypatch, _busy(), "--as", "master@a1b2c3-0001", "panic", "drop", "--fix", FIX)
+    assert str(caught.value) == f"no panic holds swarm {SLUG}"
+    assert panic.state(store, SLUG) is None
+
+
 SHAPE = (
     "{fix} is not a fix link: name a pull request https://github.com/OWNER/NAME/pull/NUMBER or a branch "
     "https://github.com/OWNER/NAME/tree/BRANCH"
@@ -1859,6 +1914,143 @@ def test_a_fix_branch_session_rerunning_a_dev_run_stays_frozen(
     assert read == ["repos/the-cloud-clockwork/agentihooks/actions/runs/7"]
 
 
+@pytest.mark.parametrize(
+    ("command", "resource"),
+    [
+        ("gh run rerun 7", "runs/7"),
+        ("gh run rerun 7 --failed", "runs/7"),
+        ("gh run rerun -d --failed 7", "runs/7"),
+        ("gh run rerun --debug 7", "runs/7"),
+        ("gh run rerun --job 9", "jobs/9"),
+        ("gh run rerun --job=9 -d", "jobs/9"),
+        ("gh run rerun -j 9", "jobs/9"),
+        ("gh run rerun -j9", "jobs/9"),
+        ("gh run rerun -j=9", "jobs/9"),
+    ],
+)
+@pytest.mark.feature("panic-rerun-reads-run-branch")
+def test_a_fix_branch_session_keeps_a_rerun_of_one_run_or_job_on_its_branch(
+    bound: None, store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, command: str, resource: str
+) -> None:
+    _branches(monkeypatch, {})
+    read = _heads(monkeypatch, "fix-branch")
+    panic.engage(store, SLUG, "reason", False, [BRANCH_FIX], 0)
+    cwd = _checkout(tmp_path / "fix", "fix-branch")
+    assert blocker_window.pretool("Bash", {"command": command}, "engineer-session", cwd) == (None, None)
+    assert read == [f"repos/the-cloud-clockwork/agentihooks/actions/{resource}"]
+
+
+@pytest.mark.feature("panic-rerun-reads-run-branch")
+def test_a_rerun_reads_its_run_from_the_repository_origin_names(
+    bound: None, store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _branches(monkeypatch, {})
+    read = _heads(monkeypatch, "fix-branch")
+    panic.engage(store, SLUG, "reason", False, ["https://github.com/the-cloud-clockwork/antoncore/tree/fix-branch"], 0)
+    cwd = _checkout(tmp_path / "fix", "fix-branch", "https://github.com/the-cloud-clockwork/antoncore.git")
+    assert blocker_window.pretool("Bash", {"command": "gh run rerun 7"}, "engineer-session", cwd) == (None, None)
+    assert read == ["repos/the-cloud-clockwork/antoncore/actions/runs/7"]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "gh run rerun",
+        "gh run rerun --failed",
+        "gh run rerun abc",
+        "gh run rerun 7 8",
+        "gh run rerun 7 --job 9",
+        "gh run rerun --yes 7",
+        "gh run rerun --job",
+        "gh run rerun -j x",
+    ],
+)
+@pytest.mark.feature("panic-rerun-reads-run-branch")
+def test_a_rerun_naming_no_single_run_or_job_stays_frozen_and_reads_no_run(
+    bound: None, store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, command: str
+) -> None:
+    _branches(monkeypatch, {})
+    read = _heads(monkeypatch, "fix-branch")
+    panic.engage(store, SLUG, "reason", False, [BRANCH_FIX], 0)
+    cwd = _checkout(tmp_path / "fix", "fix-branch")
+    block = blocker_window.pretool("Bash", {"command": command}, "engineer-session", cwd)[1]
+    assert block == blocker_window.FROZEN.format(slug=SLUG, reason="reason")
+    assert read == []
+
+
+@pytest.mark.feature("panic-rerun-reads-run-branch")
+def test_a_fix_branch_session_rerunning_another_fix_branchs_run_stays_frozen(
+    bound: None, store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _branches(monkeypatch, {})
+    read = _heads(monkeypatch, "other-fix")
+    other = "https://github.com/the-cloud-clockwork/agentihooks/tree/other-fix"
+    panic.engage(store, SLUG, "reason", False, [BRANCH_FIX, other], 0)
+    cwd = _checkout(tmp_path / "fix", "fix-branch")
+    block = blocker_window.pretool("Bash", {"command": "gh run rerun 7"}, "engineer-session", cwd)[1]
+    assert block == blocker_window.FROZEN.format(slug=SLUG, reason="reason")
+    assert read == ["repos/the-cloud-clockwork/agentihooks/actions/runs/7"]
+
+
+@pytest.mark.feature("panic-rerun-reads-run-branch")
+def test_a_rerun_from_a_branch_no_fix_registers_reads_no_run(
+    bound: None, store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _branches(monkeypatch, {})
+    read = _heads(monkeypatch, "fix-branch")
+    panic.engage(store, SLUG, "reason", False, [BRANCH_FIX], 0)
+    cwd = _checkout(tmp_path / "other", "other-branch")
+    block = blocker_window.pretool("Bash", {"command": "gh run rerun 7"}, "engineer-session", cwd)[1]
+    assert block == blocker_window.FROZEN.format(slug=SLUG, reason="reason")
+    assert read == []
+
+
+@pytest.mark.feature("panic-rerun-reads-run-branch")
+def test_a_rerun_of_a_run_that_cannot_be_read_stays_frozen(
+    bound: None, store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _branches(monkeypatch, {})
+    monkeypatch.setattr(panic, "port", lambda repository: Unread())
+    panic.engage(store, SLUG, "reason", False, [BRANCH_FIX], 0)
+    cwd = _checkout(tmp_path / "fix", "fix-branch")
+    block = blocker_window.pretool("Bash", {"command": "gh run rerun 7"}, "engineer-session", cwd)[1]
+    assert block == blocker_window.FROZEN.format(slug=SLUG, reason="reason")
+
+
+@pytest.mark.parametrize(("body", "head"), [({"head_branch": "fix-branch"}, "fix-branch"), ({"head_branch": None}, "")])
+@pytest.mark.feature("panic-rerun-reads-run-branch")
+def test_a_run_read_returns_its_head_branch_through_its_repository_port(
+    monkeypatch: pytest.MonkeyPatch, body: dict[str, str | None], head: str
+) -> None:
+    ported: list[str] = []
+    port = FakeSourceControl({"download": json.dumps(body).encode()})
+
+    def made(repository: str) -> FakeSourceControl:
+        ported.append(repository)
+        return port
+
+    monkeypatch.setattr(panic, "port", made)
+    assert panic.run_branch("the-cloud-clockwork/antoncore", "jobs/9") == head
+    assert ported == ["the-cloud-clockwork/antoncore"]
+    assert [(call.operation, call.args) for call in port.calls] == [
+        ("download", ("repos/the-cloud-clockwork/antoncore/actions/jobs/9",))
+    ]
+    assert panic.TOOL_SECONDS - 5 < port.calls[0].deadline.remaining <= panic.TOOL_SECONDS
+
+
+@pytest.mark.parametrize(
+    ("port", "why"), [(Unread(), "HTTP 404"), (FakeSourceControl({"download": b"{}"}), "'head_branch'")]
+)
+@pytest.mark.feature("panic-rerun-reads-run-branch")
+def test_a_run_read_that_fails_refuses_with_its_path_and_reason(
+    monkeypatch: pytest.MonkeyPatch, port: FakeSourceControl, why: str
+) -> None:
+    monkeypatch.setattr(panic, "port", lambda repository: port)
+    with pytest.raises(cli.SwarmError) as caught:
+        panic.run_branch("the-cloud-clockwork/agentihooks", "runs/7")
+    assert str(caught.value) == f"cannot read repos/the-cloud-clockwork/agentihooks/actions/runs/7: {why}"
+
+
 @pytest.mark.parametrize(("remote", "tracked"), [("origin", "fix-branch"), ("elsewhere", "")])
 @pytest.mark.feature("panic-spares-a-successor-of-a-fix")
 def test_a_branch_tracks_only_a_branch_on_origin(tmp_path: Path, remote: str, tracked: str) -> None:
@@ -1873,7 +2065,7 @@ def test_a_rerun_without_a_directory_or_a_fix_reads_no_git(
     monkeypatch: pytest.MonkeyPatch, cwd: str, fixes: tuple[str, ...]
 ) -> None:
     asked = _reads(monkeypatch, {})
-    assert blocker_window._works_on_fix(cwd, fixes) is False
+    assert blocker_window._works_on_fix(cwd, fixes, ["gh", "run", "rerun", "5"]) is False
     assert asked == []
 
 
