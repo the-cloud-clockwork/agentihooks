@@ -1092,10 +1092,11 @@ ci_lab_units_lost_total
 
 `ci_lab_units_redelivered_total` rises by at least one. A counter writes no sample until its first
 count, so when the scheduler has reaped nothing since it started, the series is absent before the
-kill and its first sample after the reap is the count itself. `increase()` over a window that holds the series'
-first sample misses that count, so compare the raw values. `ci_lab_units_lost_total` keeps its
-value, or stays absent. Both counters live in the scheduler process and restart from zero with it,
-so a scheduler restart between the two reads voids the comparison.
+kill and its first sample after the reap is the count itself. `increase()` over a window that
+holds the series' first sample misses that count, so compare the raw values.
+`ci_lab_units_lost_total` keeps its value, or stays absent. Both counters live in the scheduler
+process and restart from zero with it, so a scheduler restart between the two reads voids the
+comparison.
 
 The check runs of the graded head, one call:
 
