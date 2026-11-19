@@ -169,7 +169,7 @@ class Gate(unittest.TestCase):
     def test_owed_events_name_the_agentihooks_command(self):
         ask("where are we", 7)
         text = hook("UserPromptSubmit")["hookSpecificOutput"]["additionalContext"]
-        self.assertIn(f"agentihooks ledger --slug {SLUG} --as boss ack", text)
+        self.assertIn(f"agentihooks api --slug {SLUG} --as boss ack", text)
         self.assertNotIn("python3", text)
 
     def test_only_the_agent_cli_counts_as_a_ledger_command(self):
@@ -177,8 +177,10 @@ class Gate(unittest.TestCase):
 
         self.assertTrue(ledger_hook.is_ledger_cli(["python3", "/x/swarm_ledger/ledger.py", "say"]))
         self.assertTrue(ledger_hook.is_ledger_cli(["agentihooks", "ledger", "say"]))
+        self.assertTrue(ledger_hook.is_ledger_cli(["agentihooks", "api", "say"]))
         self.assertFalse(ledger_hook.is_ledger_cli(["pytest", "tests/test_ledger.py", "-k", "edit"]))
         self.assertFalse(ledger_hook.is_ledger_cli(["python3", "watch_ledger.py", "s"]))
+        self.assertFalse(ledger_hook.is_ledger_cli(["echo", "ledger", "say"]))
 
     def test_agentihooks_join_command_binds_the_session(self):
         (core.LEDGER_DIR / ".sessions" / f"{SID}.json").unlink()

@@ -18,7 +18,11 @@ Run a crew of Claude and Codex agents over the tasks of a swarm ledger, each in 
 ## What a swarm is
 
 A swarm is a herdr workspace named `<repo>-<code>`, after its repo folder and its swarm code. Its agents work the
-tasks of one swarm ledger (`agentihooks ledger`), and every task belongs to a lane:
+tasks of one swarm ledger, read on its page and through `agentihooks ledger`, and every task belongs to a lane:
+
+The ledger page is read only: a presentation layer for the operator. The one write path is the API route code, run
+in process by every agent, service and hive client and reachable as `agentihooks api`; `agentihooks ledger` stays
+for reads and page or infra operations (`new`, `serve`, `watch`, `chat`, `storage`). Nothing ever writes to the page.
 
 | Lane | Agent |
 |---|---|
@@ -280,7 +284,7 @@ A frozen task, a sub agent pull request, then the queue:
 
 ```bash
 agentihooks swarm <id> freeze tasks/<task> --quote "<the operator's words asking for it>"
-agentihooks ledger --slug <id> --as master@<code>-<n> task set <task> pr_url=<url>
+agentihooks api --slug <id> --as master@<code>-<n> task set <task> pr_url=<url>
 agentihooks swarm <id> merge queue <url>
 ```
 
@@ -855,7 +859,7 @@ agentihooks swarm my-swarm masters-channel say "Please ask the standalone task o
 
 # The owning master can record its ruling and message the claimant.
 # Replace t42 and engineer@my-swarm-0012 with the actual task and claimant.
-agentihooks ledger --slug my-swarm comment tasks/t42 "Use the agreed staged turnover."
+agentihooks api --slug my-swarm comment tasks/t42 "Use the agreed staged turnover."
 agentihooks msg send engineer@my-swarm-0012 "Keep the staged turnover; await its validation before cutover."
 ```
 
@@ -872,7 +876,7 @@ claiming another master's task.
 
 ##### Follow ups on a task
 
-A follow up an agent adds while it works a task belongs to the master that owns that task. `agentihooks ledger
+A follow up an agent adds while it works a task belongs to the master that owns that task. `agentihooks api
 followup add` reads `AGENTIHOOKS_SWARM_TASK`, which the tick sets for every agent it spawns
 on a task, and stores that task id on the new follow up as `task`. The owner is resolved in this order:
 
@@ -895,14 +899,14 @@ lane changes the follow up.
 ```bash
 # In an engineer session on task t42, which sits in a phase master-2@my-swarm owns.
 # The tick exported AGENTIHOOKS_SWARM_TASK=t42 at spawn; no flag is needed.
-agentihooks ledger --slug my-swarm followup add "Retry the notes build once the cache rebuild lands"
+agentihooks api --slug my-swarm followup add "Retry the notes build once the cache rebuild lands"
 
 # The added notice reaches master-2@my-swarm, which decides it directly.
-agentihooks ledger --slug my-swarm followup done <followup id>
-agentihooks ledger --slug my-swarm followup flag <followup id>
+agentihooks api --slug my-swarm followup done <followup id>
+agentihooks api --slug my-swarm followup flag <followup id>
 
 # Outside a task (AGENTIHOOKS_SWARM_TASK empty or unset) the follow up stays with the front door.
-AGENTIHOOKS_SWARM_TASK= agentihooks ledger --slug my-swarm followup add "Rename the notes cache key"
+AGENTIHOOKS_SWARM_TASK= agentihooks api --slug my-swarm followup add "Rename the notes cache key"
 ```
 
 The ledger accepts `task` only on an added follow up, holding a task id of 1 to 128 letters, digits, dots,
@@ -950,8 +954,8 @@ task. Outside a task session, or with the variable empty, the follow up has no t
 
 ```bash
 # Inside a swarm task session the tick has already set AGENTIHOOKS_SWARM_TASK=t42.
-agentihooks ledger --slug my-swarm --as engineer@my-swarm-0012 followup add "Retry the notes build"
-agentihooks ledger --slug my-swarm --as engineer@my-swarm-0012 followup add "Decide the port" --needs-operator
+agentihooks api --slug my-swarm --as engineer@my-swarm-0012 followup add "Retry the notes build"
+agentihooks api --slug my-swarm --as engineer@my-swarm-0012 followup add "Decide the port" --needs-operator
 # {"followup": "add"}
 ```
 
@@ -1406,7 +1410,7 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 | Command | Effect |
 |---|---|
 | `agentihooks swarm <id> issue URL` | Record the task's GitHub issue, where the repo has issues; without them the ledger task is the spec. |
-| `agentihooks swarm <id> pr URL` | Record the task's pull request, its head branch and that branch's repository (`branch_repo`); the task moves to `pr`. It refuses, with no ledger write, a pull request whose body closes an issue (`Closes`, `Fixes` or `Resolves #n`) that neither the task nor a group member records as its issue or names in its description as `#n` or the issue URL, because the swarm closes every issue the body names once the pull request merges. Drop the closing keyword from the body, or record the task's own issue with `swarm issue` first. A `--prerequisite` pull request that leaves the recorded pull request in place is not checked. `agentihooks ledger task set ID pr_url=URL` is a raw field edit that reads nothing from GitHub, so it records a pull request without this check. |
+| `agentihooks swarm <id> pr URL` | Record the task's pull request, its head branch and that branch's repository (`branch_repo`); the task moves to `pr`. It refuses, with no ledger write, a pull request whose body closes an issue (`Closes`, `Fixes` or `Resolves #n`) that neither the task nor a group member records as its issue or names in its description as `#n` or the issue URL, because the swarm closes every issue the body names once the pull request merges. Drop the closing keyword from the body, or record the task's own issue with `swarm issue` first. A `--prerequisite` pull request that leaves the recorded pull request in place is not checked. `agentihooks api task set ID pr_url=URL` is a raw field edit that reads nothing from GitHub, so it records a pull request without this check. |
 | `agentihooks swarm <id> merge queue\|dequeue\|state URL` | Queue a pull request into `dev` on the merge queue at its current head, take it out of the queue, or report its state, head and queue entry as JSON. `queue` reads the required checks of the pull request's own repository from its `dev` branch rules and protection and refuses unless every one passed on the current head (`required checks on the current pull request head must pass before queueing`); it then enqueues that exact head with `expectedHeadOid`. It never compares the branch with `dev`, merges `dev` into it or updates it, whatever changed on `dev` since the checks ran: the merge group runs the unit suite on the head merged with the newest `dev` ([Delivery tiers](../reference/delivery-tiers.md#entering-the-merge-queue)). A repository with no merge queue on `dev`, such as antoncore, gets a squash merge instead, only for a ready pull request with a review decision of none or approved: the command waits up to ten minutes, polling every fifteen seconds, for the required checks to pass, read from the check rollup where the token can read it and otherwise from the pull request merge state (`CLEAN`, `HAS_HOOKS` or `UNSTABLE`), because the hive GitHub App token cannot read check results on a private repository. It then squash merges the observed head through the same token and reports the `merge_commit`; a merge refused with `Resource not accessible by integration` names the pull requests write permission the GitHub App token needs. The direct squash merge appends no queue journal record. The tick's merge pass checks once and never waits, and its checks wait still reads the check rollup. A pull request already in the queue returns its state without another check or enqueue. The pull request can live in any repository the caller's `gh` reaches, such as agentibrain-kernel, and joins that repository's own queue ([Pull requests in other repositories](../reference/delivery-tiers.md#pull-requests-in-other-repositories)). It goes through `gh api graphql` and `gh api`, so any `gh` with `gh api` works; queue and dequeue run for a swarm worker on a pull request its task names (final, split half, `--stage` or `--prerequisite`) or on one no task names whose head is one of the worker's own worktree branches (`<agent>` or `<agent>-N`), read from GitHub only in that case; another task's pull request is refused, and refuse a pull request into any other base. The master seat may `queue` only through a route in [How the master queues a pull request](#how-the-master-queues-a-pull-request), and `dequeue` refuses it. Each queue and dequeue appends a record with the queue before and after to the [queue journal](../reference/delivery-tiers.md#the-queue-journal). A pull request whose body declares a staged pair is refused until its proof is complete on the exact heads ([Staged compatibility before admission](#staged-compatibility-before-admission)). |
 | `agentihooks swarm <id> prepare` | Set `--repositories /absolute/repo,/absolute/other` when adding a task, or `task set <task> repositories=/absolute/repo`. Use that explicit `repositories` list of local repository paths; without it, report that the swarm repository is the default. Prose repository names do not select repositories. Create or reuse one worktree per repository from its own `dev`, with a recorded continuation branch scoped to that repository. Return each worktree and branch. |
 | `agentihooks swarm <id> publish [--via lab [--direct]] --message TEXT -- FILE...` | Use the repository of the current task worktree; from a primary checkout, resolve the sole task repository or require a worktree selection when several are declared. Stage only explicit repository relative files, commit, run that repository’s `scripts.ci_prepush` gate, then push and retain its branch separately from other task repositories. When no listed file changed and the selected remote branch already matches `HEAD`, it skips the commit, gate and push; see [publishing unchanged files](#publishing-unchanged-files). Otherwise the result names the gate. A repository without that module uses the named [AgentiHooks touched Python fallback](#fallback-gate-for-repositories-without-their-own): lint and format on changed lines, size and complexity on touched functions and changed files, in changed Python files since its own `origin/dev` merge base, without agentihooks baseline files or local tests. Unrelated tracked changes are refused before staging; unrelated untracked files are preserved. A failed stage stops publication and names the next command. Repeat the command after fixing a failure; an already committed head is graded again without an empty commit. Protected branches and tasks owned by another agent are refused. While a panic holds the swarm, a due push is refused before the gate unless the branch it writes is a registered fix of the worktree's repository; see [publishing under panic mode](#publishing-under-panic-mode). `--via lab` grades the committed head on the CI lab's `refs/grade/<task>` before origin and pushes origin only on a green grade; `--direct` pushes origin as soon as the lab accepted the head; see [publishing through the lab](#publishing-through-the-lab). Tests run only in CI. |
@@ -4279,7 +4283,7 @@ The master or the Doctor changes a task's kind when the proof the work needs tur
 one it was filed with, for example a `code` repair whose real proof is a measurement:
 
 ```bash
-agentihooks ledger --slug <id> --as <name> task set <task> kind=tune
+agentihooks api --slug <id> --as <name> task set <task> kind=tune
 ```
 
 `task set` sends one `task_update` operation to the ledger API, run in process over the shared store ([Ledger write
@@ -4424,7 +4428,7 @@ agentihooks swarm <id> pr <second-pull-request-url> --half 2
 After the work is complete and review is closed, prepare a Handoff v2 document using the installed `handoff` skill, leave the ledger crew and release the seat:
 
 ```bash
-agentihooks ledger --slug <id> --as <agent> leave
+agentihooks api --slug <id> --as <agent> leave
 agentihooks swarm <id> ready <handoff-document>
 ```
 
@@ -4519,7 +4523,7 @@ A tune engineer has measured the value before, changed the setting through a pul
 ```bash
 agentihooks swarm example pr https://github.com/o/r/pull/812
 gh pr ready https://github.com/o/r/pull/812
-agentihooks ledger --slug example --as engineer@ab12cd-0042 leave
+agentihooks api --slug example --as engineer@ab12cd-0042 leave
 agentihooks swarm example ready ~/scratchpad/r/t31/handoff.md
 ```
 
@@ -4566,7 +4570,7 @@ with the recorded swarm, agent, pull request and handoff document:
 ```bash
 agentihooks swarm example pr https://github.com/o/r/pull/812
 gh pr ready https://github.com/o/r/pull/812
-agentihooks ledger --slug example --as engineer@ab12cd-0042 leave
+agentihooks api --slug example --as engineer@ab12cd-0042 leave
 agentihooks swarm example ready <handoff-document>
 ```
 
@@ -7769,7 +7773,7 @@ A green pull request kept unqueued on purpose, for example to ship with the next
 otherwise the watchdog reads it as green and not queued. Set the release it waits after on the task:
 
 ```bash
-agentihooks ledger --slug <slug> task set <task> after_release=v2.17.1
+agentihooks api --slug <slug> task set <task> after_release=v2.17.1
 ```
 
 While the task is not done, the watchdog skips it and no lane claims it, until the swarm repository's GitHub tags
@@ -8041,7 +8045,7 @@ agentihooks doctor <slug> stop [--quote WORDS]
 
 ### How the quote is checked
 
-The quote passes the same check as an `agentihooks ledger relay` quote, described in
+The quote passes the same check as an `agentihooks api relay` quote, described in
 [Relayed operator words](../reference/hosted-ledger-auth.md#relayed-operator-words). One rule is added: the matching
 words must have been recorded within the last 1800 seconds. The window is fixed in code as `RELAY_WINDOW_SEC` and has
 no setting.
@@ -8154,7 +8158,7 @@ For example, a master can create an after window task for an existing fix
 `t42` in phase `p2`. Replace these example identifiers with the ledger's own:
 
 ```bash
-agentihooks ledger --slug <doctor-ledger> --as <master-name> task add - \
+agentihooks api --slug <doctor-ledger> --as <master-name> task add - \
   'Measure the fix over an equal active hour' --phase p2 --kind tune \
   --depends-on t42 \
   --description 'Compare the same counter before and after application over equal active hours' \
@@ -8191,7 +8195,7 @@ in another repository, verify that action before recording its actual time by
 hand on the fix task in the Doctor ledger:
 
 ```bash
-agentihooks ledger --slug <doctor-ledger> --as <master-name> task set t42 \
+agentihooks api --slug <doctor-ledger> --as <master-name> task set t42 \
   applied_at=2026-10-18T16:26:29Z
 ```
 
@@ -8253,8 +8257,8 @@ no release after `v2.17.1` existed and their agents spent their seats on zero qu
 ### Set and clear the wait
 
 ```bash
-agentihooks ledger --slug <slug> task set <task> after_release=v2.17.1
-agentihooks ledger --slug <slug> task set <task> after_release=
+agentihooks api --slug <slug> task set <task> after_release=v2.17.1
+agentihooks api --slug <slug> task set <task> after_release=
 ```
 
 The value is three dotted numbers with or without a leading `v`, such as `v2.17.1` or `2.17.1`, or empty to clear
@@ -8346,7 +8350,7 @@ work and territory order, in the tick that reads the merge. The dispatcher then 
 seconds from the merge to the claim and logs a `chain-guard` row. The hub's offers do not apply this guard; see
 [Offer order limitations](hives.md#offer-order-limitations).
 
-Set it with `agentihooks ledger task add ... --rank R` or `task set ID rank=R`, or from the select on each task row
+Set it with `agentihooks api task add ... --rank R` or `task set ID rank=R`, or from the select on each task row
 of the ledger page, which lists open tasks in claim order. The master, a planner and the operator may set it; an
 engineer or CI agent is refused and proposes the change as a follow up. The queue rank is separate from the
 Priorities panel, which holds decisions waiting on the operator.
@@ -8453,8 +8457,8 @@ card. The swarm writes these values:
 The master can also set or clear the field by hand:
 
 ```bash
-agentihooks ledger --slug example --as master task set t12 awaiting=verify
-agentihooks ledger --slug example --as master task set t12 awaiting=
+agentihooks api --slug example --as master task set t12 awaiting=verify
+agentihooks api --slug example --as master task set t12 awaiting=
 ```
 
 ### On the ledger page
@@ -8603,8 +8607,8 @@ Two commands publish one:
 
 | Command | What it sends |
 |---|---|
-| `agentihooks ledger --slug <slug> --as <name> artifact <path> "<title>" [--task <id>] [--request <entry id>]` | One artifact. `--task` defaults to the session's swarm task (`AGENTIHOOKS_SWARM_TASK`). `--request` names the operator's chat line or comment that asked for the file. Prints `{"published": true}`. |
-| `agentihooks ledger --slug <slug> --as <name> publish-plan <path> --phase <ids> [--title <t>] [--repo <owner/name>]` | An accepted plan, marked as a plan. It opens or reuses a GitHub issue where the repository has issues, otherwise the ledger artifact is the published plan. It records the plan, links it on each named phase, comments each phase and adds the plan's slices. Prints `{"plan_url": …, "published_to": "issue"\|"artifact", "phases": […]}`. |
+| `agentihooks api --slug <slug> --as <name> artifact <path> "<title>" [--task <id>] [--request <entry id>]` | One artifact. `--task` defaults to the session's swarm task (`AGENTIHOOKS_SWARM_TASK`). `--request` names the operator's chat line or comment that asked for the file. Prints `{"published": true}`. |
+| `agentihooks api --slug <slug> --as <name> publish-plan <path> --phase <ids> [--title <t>] [--repo <owner/name>]` | An accepted plan, marked as a plan. It opens or reuses a GitHub issue where the repository has issues, otherwise the ledger artifact is the published plan. It records the plan, links it on each named phase, comments each phase and adds the plan's slices. Prints `{"plan_url": …, "published_to": "issue"\|"artifact", "phases": […]}`. |
 
 ### Where the artifact check runs
 
@@ -8688,28 +8692,28 @@ asked for: …` while a planner's passed. A master then had to open the plan iss
 A master publishes an accepted plan for phases `p4` and `p5`:
 
 ```bash
-agentihooks ledger --slug rig-grade-swarm --as master@d44a5a-0001 publish-plan plan.md --phase p4,p5
+agentihooks api --slug rig-grade-swarm --as master@d44a5a-0001 publish-plan plan.md --phase p4,p5
 # {"plan_url": "https://github.com/<owner>/<repo>/issues/<n>", "published_to": "issue", "phases": ["p4", "p5"]}
 ```
 
 A master publishes a diagram the operator asked for in chat entry `c-1a2b3c4d5e`:
 
 ```bash
-agentihooks ledger --slug rig-grade-swarm --as master@d44a5a-0001 artifact flow.svg "Inbox flow" --request c-1a2b3c4d5e
+agentihooks api --slug rig-grade-swarm --as master@d44a5a-0001 artifact flow.svg "Inbox flow" --request c-1a2b3c4d5e
 # {"published": true}
 ```
 
 An engineer publishes a file for a task the operator marked artifact requested:
 
 ```bash
-agentihooks ledger --slug rig-grade-swarm --as master@d44a5a-0001 task set t42 artifact=yes
-agentihooks ledger --slug rig-grade-swarm --as engineer@d44a5a-0002 artifact palette.json "Palette" --task t42
+agentihooks api --slug rig-grade-swarm --as master@d44a5a-0001 task set t42 artifact=yes
+agentihooks api --slug rig-grade-swarm --as engineer@d44a5a-0002 artifact palette.json "Palette" --task t42
 ```
 
 The same master without a plan mark or a request is refused:
 
 ```bash
-agentihooks ledger --slug rig-grade-swarm --as master@d44a5a-0001 artifact audit.md "Audit summary"
+agentihooks api --slug rig-grade-swarm --as master@d44a5a-0001 artifact audit.md "Audit summary"
 # server refused the file: 403 an artifact is only a file the operator asked for: …
 ```
 
@@ -8718,7 +8722,7 @@ agentihooks ledger --slug rig-grade-swarm --as master@d44a5a-0001 artifact audit
 - **`publish-plan` from a master exits with `403 an artifact is only a file the operator asked for`.** The ledger
   server runs code from before #4316. Pull dev and restart the ledger server, then publish again; do not open the plan
   issue by hand.
-- **`403 agent must join this ledger before uploading`.** Run `agentihooks ledger --slug <slug> --as <name> join`
+- **`403 agent must join this ledger before uploading`.** Run `agentihooks api --slug <slug> --as <name> join`
   first. A master joins as `orchestrator`; a master that joined as a plain member is judged as any other author and
   needs a plan mark, an artifact requested task or a request.
 - **`join the ledger first and name a task it holds`** after joining. `--task` names a task id the ledger does not
