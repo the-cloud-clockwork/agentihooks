@@ -35,7 +35,7 @@ def test_tick_tells_the_master_once_when_a_verification_hold_has_no_window_for_o
     assert items[0].text == (
         "Task t1 (Hive telemetry) awaits verification without a proof window "
         "for more than an hour. Set contract.after_at to its proof time, or reopen it with "
-        "agentihooks ledger --slug sw --as master task set t1 awaiting="
+        "agentihooks api --slug sw --as master task set t1 awaiting="
     )
     tick("sw", store, ledger, runtime, 90_000_001)
     assert len(notices(store)) == 1
