@@ -1824,7 +1824,7 @@ The offers are sorted by three keys, in this order:
 Ties keep the order of the task rows in the ledger export. The rank band decides before the focus position, so an
 `urgent` task inside a later focus goes out ahead of a `normal` task inside an earlier one.
 
-The sort applies to every task the claim holds let through. While a focus has open work, the tasks outside it are
+The sort applies to every task that passes the claim holds above. While a focus has open work, the tasks outside it are
 held and not offered, with two kinds of exception that are offered beside the focused tasks and go out after them,
 whatever their rank:
 
@@ -1860,7 +1860,7 @@ agentihooks swarm <slug> focus phases/<phase id> --top
 agentihooks swarm <slug> focus phases/<phase id> --only
 
 # Raise one task's rank band (master, planner or operator)
-agentihooks ledger --slug <slug> task set <task id> rank=urgent
+agentihooks ledger --slug <slug> --as <name> task set <task id> rank=urgent
 
 # Clear a focus or a freeze record
 agentihooks swarm <slug> unfreeze phases/<phase id>
@@ -1877,6 +1877,10 @@ names as stale: the task is gone, claimed, no longer `open`, at another claim ge
 or kept back by a wait. It then adds each fresh offer whose id is not already queued. The offer id is
 `ready:<slug>:<task id>:<claim generation>`, with `:root` appended for a workstation task, so the rank and focus of a
 task are not part of it.
+
+The bus also drops a published offer whose id it saw within its dedupe window, two minutes by default
+(`dedupe_window_ms` of the bus config). An offer withdrawn and published again under the same id inside that window is
+not queued; a pass after the window queues it.
 
 Two things follow:
 
@@ -1910,12 +1914,13 @@ with the rest of the suite.
 
 - The dispatcher's claim key does not order offers. At `delegate` and `full` autonomy the capacity decision's ready
   work and preemption still sort by `scripts.swarm.dispatcher.claim_key`, which puts the critical chain guard band
-  first and places other tasks by their dispatcher queue position. Offers read only the rank stored on the task row,
-  so a rank the dispatcher writes reaches them, while the chain guard band does not.
-- A task whose last launch failed is not moved behind its band. The tick's launch order demotes it; offers keep it in
-  place.
-- None of the in rank ties of [Queue rank](swarm.md#queue-rank) apply: no longer critical path, no S task that
-  unblocks another and no resumed work goes first. Ledger order alone breaks ties.
+  first, keeps only an operator rank, an `urgent` rank and a low rank on generated work as bands, and places every
+  other task by its dispatcher queue position. The dispatcher writes no rank, so offers see none of this: they count
+  every stored rank, a master's or a planner's included, as its band.
+- A task whose last launch failed keeps its place. The tick's launch order demotes it inside its band; offers do not.
+- None of the tie rules inside a rank band from [Queue rank](swarm.md#queue-rank) apply: no longer critical path, no S
+  task that unblocks another and no resumed work goes first. Focus record position breaks ties inside a band, then
+  ledger order.
 
 #### How the offer order reached the events engine
 
@@ -1924,10 +1929,10 @@ in ledger row order. Pull request
 [#11136](https://github.com/the-cloud-clockwork/agentihooks/pull/11136) gave the offers the same sort while it mapped
 every feature whose tests reached the legacy spawn to tests that would survive its removal. That mapping was the file
 `tests/LEGACY_SPAWN_COVERAGE.json`, checked by `tests/swarm/test_legacy_spawn_coverage.py` under the feature
-`legacy-spawn-events-coverage`. It listed 23 features, not the 31 first counted from file imports, because many of those
-test files imported the place or observe step only for helpers that stay. Each entry named feature mapped tests that
-reach none of the spawn (16 entries), clauses that retire with the spawn (10) or an events engine gap (3); an entry
-could name more than one.
+`legacy-spawn-events-coverage`. It listed 23 features, not the 31 the task first counted from file imports; as the pull
+request description notes, many of those test files import the place or observe step only for helpers that stay.
+16 entries named tests from the feature map that reach none of the spawn, 10 named clauses that retire with the spawn
+and 3 named an events engine gap; an entry could name more than one of these.
 
 Pull request [#11141](https://github.com/the-cloud-clockwork/agentihooks/pull/11141) removed the spawn, and the map
 and its detector with it. `legacy-spawn-events-coverage` is now a retired id in `feature-map.json`, and
@@ -1936,14 +1941,14 @@ and its detector with it. `legacy-spawn-events-coverage` is now a retired id in 
 | Gap named by the map | Now |
 |---|---|
 | The admission claim carried no handoff document text for a recovery successor | Closed by [#11139](https://github.com/the-cloud-clockwork/agentihooks/pull/11139): admission sets the handoff and its envelope on the claimed row and attaches the predecessor's transfer; see [Handoff continuity on admission](#handoff-continuity-on-admission) |
-| The admission claim resolved no continuation, so a reclaimed task did not continue from its recorded branch | Closed by #11139: admission resolves the continuation and stores the reclaim |
-| The dispatcher band over ledger rank and the demotion of a task whose launch failed | Open, as listed under [Offer order limitations](#offer-order-limitations) |
+| The admission claim resolved no continuation, so a reclaimed task did not continue from its recorded branch | Closed by [#11139](https://github.com/the-cloud-clockwork/agentihooks/pull/11139): admission resolves the continuation and stores the reclaim |
+| Ordering by the dispatcher's claim key over ledger rank, and the demotion of a task whose launch failed | Open, as listed under [Offer order limitations](#offer-order-limitations) |
 
 #### Offer order troubleshooting
 
 | Symptom | Check |
 |---|---|
-| An `urgent` task waits while `normal` tasks of the same lane start | Its offer is queued behind offers from earlier passes, or it was handed back. Read the hub `readiness` line: `placed=0` with `offers` above zero means every offer was already queued. |
+| An `urgent` task waits while `normal` tasks of the same lane start | Its offer is queued behind offers from earlier passes, or it was handed back. Read the hub `readiness` line: `placed=0` with `offers` above zero means every offer was already queued, or the bus dropped a repeat inside its dedupe window. |
 | A focused task starts after a task of a later focus record | The later task has a better rank band; the band decides before the focus position. |
 | A task on the critical chain does not start first at `delegate` or `full` autonomy | Offers ignore the chain guard band. Raise the task's rank, or focus it, before its next offer. |
 | A task outside the focus is offered while the focus has open work | It is a Doctor fix phase task, or a focused task waits on it. Read its `phase`, and the `depends_on` and `parked_on` of the focused tasks. |

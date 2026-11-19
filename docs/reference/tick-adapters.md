@@ -1082,8 +1082,9 @@ selectors into one ordered list. Each task then costs one lookup per node of its
 plus the merged chain, and one comparison per selector record, instead of a match of every focus record against every
 task. On 3 November 2026, with the 284 focus records `rig-grade-swarm` held, one call over 3000 tasks went from
 0.622 s to 0.006 s with the same ranks
-([pull request 9573](https://github.com/the-cloud-clockwork/agentihooks/pull/9573)). `readiness.offers` calls `ranks`
-once per swarm on each readiness pass. The legacy spawn order also called it once per lane inside
+([pull request 9573](https://github.com/the-cloud-clockwork/agentihooks/pull/9573)). `readiness.offers` runs
+twice per swarm on each readiness pass, once inside `publish` and once for the hub's log line, and calls `ranks` once
+each time. The legacy spawn order also called it once per lane inside
 `focus_budget.place`; that spawn order was removed with the spawn.
 
 The measurement below is the record of pull request 9573 on the legacy spawn step. That step no longer runs, so on a

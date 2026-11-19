@@ -8115,9 +8115,8 @@ The tick orders claimable tasks highest rank first. Within a rank, a task with a
 the longest chain of open tasks waiting on it. One exception: an S task that unblocks another open task (one whose
 other dependencies are all done), or is the last task of its phase not yet done, goes ahead of the rest of its rank.
 Phase order is never used, and ledger order breaks the remaining ties. Capacity placement reads the same order. The
-hub's offers on the `events` engine read the rank band and ledger order only, and none of these in rank ties; see
-[Offer order](hives.md#offer-order). The
-tick then applies the usual
+hub's offers on the `events` engine sort by focus, then rank band, then focus record position, with none of these
+tie rules; see [Offer order](hives.md#offer-order). The tick then applies the usual
 rules: lane, phase, open dependencies and live claims still decide whether a task is claimable, so an
 urgent task never skips a dependency that is not done and never takes a task another agent holds. A `tune` task never stacks on a `code` or `ci` dependency that is claimed or in pull request: it waits until that dependency is done. In a Doctor swarm it also waits until the dependency carries `applied_at`, which the Doctor's `pull-dev` intervention records on each merged fix an open tune task measures, or `ledger task set <id> applied_at=<UTC time>` records by hand; the dispatcher's queue head reads the same rule. A territory
 another agent holds moves a task back within its rank without blocking it (see
