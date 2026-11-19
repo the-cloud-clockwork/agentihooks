@@ -50,7 +50,7 @@ def _normalize(reason: str) -> str:
 def _documented_reasons(page: str) -> set[str]:
     section = page.split("#### Merge pass hold lines\n", 1)[1].split("\n#### ", 1)[0]
     table = section.split("| Reason | Written when | What to do |\n|---|---|---|\n", 1)[1].split("\n\n", 1)[0]
-    reasons = set(re.findall(r"^\| `([^`]+)` \|", table, re.MULTILINE))
+    reasons = {row.split("|")[1].strip().strip("`") for row in table.splitlines()}
     assert reasons, "No documented merge pass hold reasons found"
     return {_normalize(reason) for reason in reasons}
 
@@ -77,10 +77,11 @@ def test_every_missing_hold_reason_row_fails() -> None:
 
 
 @pytest.mark.feature("merge-pass-hold-reason-docs")
-def test_a_stale_hold_reason_row_fails() -> None:
+@pytest.mark.parametrize("reason_cell", ["`a removed reason`", "a removed reason"])
+def test_a_stale_hold_reason_row_fails(reason_cell: str) -> None:
     page = PAGE.read_text().replace(
         "| Reason | Written when | What to do |\n|---|---|---|\n",
-        "| Reason | Written when | What to do |\n|---|---|---|\n| `a removed reason` | Removed. | None. |\n",
+        f"| Reason | Written when | What to do |\n|---|---|---|\n| {reason_cell} | Removed. | None. |\n",
         1,
     )
     with pytest.raises(AssertionError, match="stale docs:"):
