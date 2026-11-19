@@ -62,6 +62,16 @@ def test_site_edges_keep_declared_needs_and_forward_the_step_contract() -> None:
     assert again[1].needs == edged[1].needs
     assert registry.failure_needs(again[1]) == frozenset({"declared"})
     assert again[1].name == "consumer"
+    assert again[1].group == later.group
+    assert again[1].lane == later.lane
+    assert again[1].budget_s == later.budget_s
+    assert again[1].interval_s == later.interval_s
+    assert again[1].reads == later.reads
+    assert again[1].writes == later.writes
+    assert again[1].effects == later.effects
+    assert again[1].feature == later.feature
+    setattr(later, "placing", True)
+    assert getattr(again[1], "placing") is True
     assert again[1].run(context()) == Result()
 
 
