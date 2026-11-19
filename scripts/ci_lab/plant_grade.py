@@ -139,7 +139,7 @@ def main(argv: Sequence[str], environ: Mapping[str, str], ports: Ports | None = 
                     f"| {row['plant']} | {row['gate']} | {row['reason']} | "
                     f"[green]({row['green']}) | [red]({row['red']}) |\n"
                 )
-        print(json.dumps(row, sort_keys=True))
+        print(json.dumps(row))
         return 0
     except (ValueError, OSError, subprocess.SubprocessError) as error:
         print(str(error), file=sys.stderr)

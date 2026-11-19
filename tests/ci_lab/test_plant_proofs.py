@@ -142,6 +142,8 @@ def test_git_failures_are_raised_and_every_git_process_has_a_deadline(repository
     def bounded(arguments: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         assert kwargs["timeout"] == 60
         assert kwargs["check"] is True
+        if index := kwargs.get("env", {}).get("GIT_INDEX_FILE"):
+            assert Path(index).parent.parent == repository / ".git"
         return real_run(arguments, **kwargs)
 
     with patch.object(plant_proofs.subprocess, "run", side_effect=bounded):

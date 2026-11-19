@@ -51,9 +51,9 @@ def prepare(root: Path, name: str, base: str) -> Pair:
         source = sources[path] if path in sources else _git(root, "show", f"{revision}:{path}")
         if source.count(edit["before"]) != 1:
             raise ValueError(f"{name}: {path} must match its edit exactly once")
-        sources[path] = source.replace(edit["before"], edit["after"], 1)
+        sources[path] = source.replace(edit["before"], edit["after"])
     directory = (root / _git(root, "rev-parse", "--git-path", "index").strip()).parent
-    with TemporaryDirectory(prefix="ci-lab-plant-", dir=directory) as temporary:
+    with TemporaryDirectory(dir=directory) as temporary:
         environ = {**os.environ, **IDENTITY, "GIT_INDEX_FILE": str(Path(temporary) / "index")}
         _git(root, "read-tree", revision, environ=environ)
         for path, source in sources.items():

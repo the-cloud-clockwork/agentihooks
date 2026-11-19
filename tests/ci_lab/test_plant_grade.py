@@ -1,13 +1,14 @@
 import json
 import subprocess
-import sys
 import urllib.request
 from collections.abc import Mapping
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+from scripts.ci_lab import __main__ as entrypoint
 from scripts.ci_lab import plant_grade
 from scripts.ci_lab.digests import GradeInputs, grade_key
 
@@ -43,7 +44,8 @@ def repository(tmp_path: Path) -> Path:
             }
         )
     )
-    git(root, "add", "sample.py", "tests/ci_lab/plants/lint.json")
+    (catalog / "gate-script.json").write_text((catalog / "lint.json").read_text())
+    git(root, "add", "sample.py", "tests/ci_lab/plants/lint.json", "tests/ci_lab/plants/gate-script.json")
     git(root, "commit", "-qm", "Seed")
     remote = tmp_path / "remote.git"
     remote.mkdir()
@@ -53,20 +55,24 @@ def repository(tmp_path: Path) -> Path:
 
 
 class Lab:
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, name: str = "lint") -> None:
         self.root = root
+        self.name = name
         self.base = git(root, "rev-parse", "HEAD")
         self.heads: list[str] = []
         self.now = 0.0
         self.failure = "lint"
         self.required = "failure"
         self.incomplete = False
+        self.pending_first = False
+        self.twin_required = "success"
+        self.seen: dict[str, int] = {}
         self.unrelated = False
         self.full_first_page = False
         self.pages: list[str] = []
 
     def published(self, head: str) -> bool:
-        tips = git(self.root, "ls-remote", "--heads", "origin", "refs/heads/diffcheck/lab-plant-lint-*")
+        tips = git(self.root, "ls-remote", "--heads", "origin", f"refs/heads/diffcheck/lab-plant-{self.name}-*")
         return any(
             subprocess.run(
                 ["git", "-C", str(self.root), "merge-base", "--is-ancestor", head, line.split()[0]],
@@ -94,11 +100,13 @@ class Lab:
             self.check("lab-shadow/required", "success", "other-grade"),
             self.check("lab-shadow/lint", "failure", "other-grade"),
             self.check("Gate — Required", "success", run),
-            self.check("lab-shadow/required", self.required if red else "success", run),
+            self.check("lab-shadow/required", self.required if red else self.twin_required, run),
             self.check("lab-shadow/" + (self.failure if red else "lint"), "failure" if red else "success", run),
         ]
-        if self.incomplete:
+        self.seen[head] = self.seen.get(head, 0) + 1
+        if self.incomplete or self.pending_first and self.seen[head] == 1:
             rows[-2]["status"] = "in_progress"
+        rows.append(self.check("lab-shadow/reusable/required", "success", run))
         if self.unrelated:
             for row in rows:
                 row["external_id"] = "other-grade"
@@ -180,6 +188,46 @@ def test_an_unrelated_grade_expires_without_pushing_the_plant(repository: Path) 
 
 
 @pytest.mark.feature("lab-static-plant-proofs")
+def test_a_missing_required_check_keeps_the_grade_unfinished(repository: Path) -> None:
+    lab = Lab(repository)
+
+    def missing(path: str) -> Mapping[str, Any]:
+        rows = lab.fetch(path)
+        return {"check_runs": [row for row in rows["check_runs"] if row["name"] != "lab-shadow/required"]}
+
+    with pytest.raises(TimeoutError, match="grade"):
+        plant_grade.prove(
+            repository, "lint", "HEAD", REPOSITORY, plant_grade.Ports(missing, lab.sleep, lab.clock), timeout_s=2
+        )
+    assert len(lab.heads) == 1
+
+
+@pytest.mark.feature("lab-static-plant-proofs")
+def test_two_required_checks_make_the_grade_ambiguous(repository: Path) -> None:
+    lab = Lab(repository)
+
+    def duplicate(path: str) -> Mapping[str, Any]:
+        rows = list(lab.fetch(path)["check_runs"])
+        required = next(
+            row for row in rows if row["name"] == "lab-shadow/required" and row["external_id"] != "other-grade"
+        )
+        return {"check_runs": [*rows, {**required, "name": "lab/required"}]}
+
+    with pytest.raises(ValueError, match="ambiguous"):
+        plant_grade.prove(repository, "lint", "HEAD", REPOSITORY, plant_grade.Ports(duplicate, lab.sleep, lab.clock))
+    assert len(lab.heads) == 1
+
+
+@pytest.mark.feature("lab-static-plant-proofs")
+def test_a_failed_twin_is_named_and_the_plant_is_never_pushed(repository: Path) -> None:
+    lab = Lab(repository)
+    lab.twin_required = "failure"
+    with pytest.raises(ValueError, match=r"\btwin\b"):
+        plant_grade.prove(repository, "lint", "HEAD", REPOSITORY, lab.ports())
+    assert len(lab.heads) == 1
+
+
+@pytest.mark.feature("lab-static-plant-proofs")
 def test_all_check_pages_are_read(repository: Path) -> None:
     lab = Lab(repository)
     lab.full_first_page = True
@@ -250,42 +298,40 @@ def test_different_bases_use_independent_plant_branches(repository: Path) -> Non
 
 
 @pytest.mark.feature("lab-static-plant-proofs")
-def test_the_module_dispatch_exposes_the_plant_command() -> None:
-    answer = subprocess.run(
-        [sys.executable, "-m", "scripts.ci_lab", "grade", "--help"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert answer.returncode == 0, answer.stdout + answer.stderr
-    assert "--plant" in answer.stdout
+def test_the_module_dispatch_exposes_the_plant_command(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as result:
+        entrypoint.main(["grade", "--help"], {})
+    assert result.value.code == 0
+    assert "--plant" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("name", ["lint", "gate-script"])
 @pytest.mark.feature("lab-static-plant-proofs")
 def test_the_command_prints_links_and_appends_the_proof_summary(
     repository: Path,
     tmp_path: Path,
+    name: str,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.chdir(repository)
-    lab = Lab(repository)
+    lab = Lab(repository, name)
     summary = tmp_path / "summary.md"
     summary.write_text("Earlier proof\n")
     assert (
         plant_grade.main(
-            ["--plant", "lint", "--base", "HEAD", "--repository", REPOSITORY],
+            ["--plant", name, "--base", "HEAD", "--repository", REPOSITORY],
             {"GITHUB_STEP_SUMMARY": str(summary)},
             lab.ports(),
         )
         == 0
     )
     row = json.loads(capsys.readouterr().out)
-    assert row["plant"] == "lint"
+    assert row["plant"] == name
     assert row["green"] == row["red"] == "https://github.com/acme/widgets/runs/required"
     text = summary.read_text()
     assert text.startswith("Earlier proof\n")
-    assert "lint" in text and "I001" in text
+    assert name in text and "I001" in text
     assert "[green](https://github.com/acme/widgets/runs/required)" in text
     assert "[red](https://github.com/acme/widgets/runs/required)" in text
 
@@ -312,11 +358,14 @@ def test_the_command_uses_real_transport_adapters_and_normalizes_the_remote(
     def no_http(*arguments: Any, **options: Any) -> None:
         raise AssertionError("the runner must not contact the lab receiver")
 
+    lab.pending_first = True
+    monkeypatch.setattr(plant_grade, "time", SimpleNamespace(sleep=lab.sleep, monotonic=lab.clock))
     monkeypatch.setattr(subprocess, "run", transport)
     monkeypatch.setattr(urllib.request, "urlopen", no_http)
     assert plant_grade.main(["--plant", "lint", "--base", "HEAD"], {}) == 0
     assert json.loads(capsys.readouterr().out)["plant"] == "lint"
     assert len(lab.heads) == 2
+    assert lab.now == 10
 
 
 @pytest.mark.feature("lab-static-plant-proofs")
