@@ -1780,7 +1780,7 @@ def test_agent_prompt_joins_the_ledger_reads_its_inbox_and_leaves_before_done():
     from scripts.swarm import prompt
 
     text = prompt.build("sw", "/repo", "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x", "phase": "p1"})
-    led = "agentihooks ledger --slug sw --as engineer@a1b2c3-0001"
+    led = "agentihooks api --slug sw --as engineer@a1b2c3-0001"
     assert f"{led} join" in text
     assert "ledger watch" not in text and "keep a Monitor" not in text
     assert "inbox" in text
@@ -1799,7 +1799,7 @@ def test_agent_prompt_ends_at_swarm_ready():
     assert merge == (
         "6. Once both reviews closed and the pull request is out of draft, write a short Handoff v2 document with "
         "the handoff skill: what the pull request delivers, how review closed and what a successor fixes if its "
-        "checks go red. Leave the crew with agentihooks ledger --slug sw --as engineer@a1b2c3-0001 leave, then "
+        "checks go red. Leave the crew with agentihooks api --slug sw --as engineer@a1b2c3-0001 leave, then "
         "release your seat: agentihooks swarm sw ready <handoff doc>. The swarm watches the checks, queues the "
         "pull request on green, waits for the merge, closes the task and removes your worktree; red checks reopen "
         "the task for the next engineer with your handoff. The swarm then closes this session; stop working."
@@ -1827,7 +1827,7 @@ def test_assist_asks_for_merge_approval_on_the_task_and_waits_through_the_swarm(
     ask = next(line for line in text.splitlines() if line.startswith("6. "))
     assert ask == (
         "6. This swarm runs at assist autonomy. Once checks are green, ask the operator to approve the merge: "
-        'agentihooks ledger --slug sw --as engineer@a1b2c3-0001 comment tasks/t1 "<plain words: what the pull '
+        'agentihooks api --slug sw --as engineer@a1b2c3-0001 comment tasks/t1 "<plain words: what the pull '
         'request does, checks green, waiting for your approval to merge>", then agentihooks swarm sw wait 60 '
         '--reason "operator merge approval"; his answer reaches you as an inbox message. Queue with agentihooks '
         "swarm sw merge queue <pr url> only after an OPERATOR line on the ledger approves it, then agentihooks "
@@ -1851,7 +1851,7 @@ def test_agent_prompt_runs_gates_and_review_before_the_merge_and_ends_with_leave
     assert review < merge
     assert "Standards and Spec" in steps[review] and "three rounds" in steps[review]
     last = steps[-1]
-    assert last.index("agentihooks ledger --slug sw --as engineer@a1b2c3-0001 leave") < last.index(
+    assert last.index("agentihooks api --slug sw --as engineer@a1b2c3-0001 leave") < last.index(
         "agentihooks swarm sw ready <handoff doc>"
     )
 
@@ -2192,7 +2192,7 @@ def test_master_prompt_runs_the_swarm_and_never_codes():
     from scripts.swarm import prompt
 
     text = prompt.build("sw", "/repo", "master", "master@a1b2c3-0002", {"id": "master", "handoff": "caps go to four"})
-    led = "agentihooks ledger --slug sw --as master@a1b2c3-0002"
+    led = "agentihooks api --slug sw --as master@a1b2c3-0002"
     for needle in (
         f"{led} join --role orchestrator",
         f"{led} ack",

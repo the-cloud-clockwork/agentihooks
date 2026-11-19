@@ -3128,6 +3128,16 @@ jobs:
             exit 1
           fi
 
+      # dev's copy grades once dev carries the grader; until then the head's copy measures the head,
+      # which still refuses a new ledger write doctrine line this very pull request adds.
+      - name: Hold ledger write doctrine out of skills, rules, docs and prompts
+        if: ${{ !cancelled() }}
+        run: |
+          if [[ -f "$RUNNER_TEMP/grader/scripts/no_ledger_write_doctrine.py" ]]; then
+            cd "$RUNNER_TEMP/grader"
+          fi
+          python -m scripts.no_ledger_write_doctrine --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
+
       - name: Hold the tick step pattern
         if: ${{ !cancelled() }}
         run: |

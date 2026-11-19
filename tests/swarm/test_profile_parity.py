@@ -18,7 +18,7 @@ pytestmark = pytest.mark.unit
 TASK = {"id": "t1", "title": "Restyle the ledger page header"}
 SHIPPED = launch.worker_profiles
 REMEDY = (
-    f"set it with agentihooks ledger --slug {SLUG} task set t1 profile=<frontend|engineer|qa>, "
+    f"set it with agentihooks api --slug {SLUG} task set t1 profile=<frontend|engineer|qa>, "
     "or split the task into one public responsibility each, then reopen it"
 )
 
