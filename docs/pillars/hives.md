@@ -2431,6 +2431,9 @@ The feature map entries `events-retirement-refunds-claim-life`, `events-retireme
 `events-smoke-mismatch-retire` and `events-smoke-idle-retire` the smoke tests on a real nats-server and Redis. The
 Semgrep incident rule `tick-free-skips-execution-stop` fails a tick path that retires an agent through
 `retire_unless_gone` and drops it with a refund without sending the hive stop.
+[Pull request #11211](https://github.com/the-cloud-clockwork/agentihooks/pull/11211) added that rule and the legacy
+no stop tests, and [pull request #12020](https://github.com/the-cloud-clockwork/agentihooks/pull/12020) added the
+mismatch and idle smoke tests.
 
 #### Troubleshooting retirements
 
