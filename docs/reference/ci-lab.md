@@ -21,7 +21,7 @@ worker's PriorityClass is a cluster object outside that module;
 | `agentihooks ci-lab-scheduler --self-test` | `python -m scripts.ci_lab scheduler --self-test` | Checks the scheduler contract offline and prints it as JSON |
 | `agentihooks ci-lab-scheduler [--interval S] [--passes N]` | `python -m scripts.ci_lab scheduler [--interval S] [--passes N]` | Runs the scheduler service: reads the runtime config, serves the lease API, `/capacity` and `/grades/<sha>` on port 8800 and `/metrics` on 9108, and runs one grading pass every interval (2 seconds), forever unless `--passes` is set |
 | `agentihooks ci-lab-worker --self-test` | `python -m scripts.ci_lab worker --self-test` | Refuses any GitHub App variable, checks the worker contract offline and prints it as JSON |
-| `agentihooks ci-lab-worker` | `python -m scripts.ci_lab worker` | Runs the worker service: builds the pod from the worker environment, leases units from the scheduler and runs each through the adapter of its kind (see [Worker executors](#worker-executors)) until SIGTERM, then lets running units drain |
+| `agentihooks ci-lab-worker` | `python -m scripts.ci_lab worker` | Runs the worker service: builds the pod from the worker environment, leases units from the scheduler and runs each through the adapter of its kind (see [Worker executors](#worker-executors)) until SIGTERM, then lets running units drain; serves `/metrics` on 9108 from its own registry until the drain ends, and exits at start when it cannot bind 9108 |
 
 The self tests make no network, Redis, object store or GitHub calls. They exit 0 when the
 contract holds and 1 with the reason on standard error when it does not. A self test fails when
@@ -602,7 +602,10 @@ description: The lab cannot add workers for pull request heads because the KEDA 
 
 ### Lab series the rules read
 
-Only the scheduler serves lab metrics; the worker serves none. `scripts.ci_lab.scheduler.listen`
+Only the scheduler sets lab series. The worker serves `/metrics` on 9108 through
+`metrics.serve_registry` from a registry of its own that observes nothing, so its exposition holds
+the `HELP` and `TYPE` lines and no sample: a worker scrape target reads up without doubling the
+scheduler's series, which already count every unit from its report. `scripts.ci_lab.scheduler.listen`
 binds the metrics port with a fresh `metrics.Registry`, and every `GET /metrics` sets these from
 the scheduler's load snapshot through `metrics.observe_load`:
 
@@ -1666,7 +1669,9 @@ key; the builders are pure and read no file, clock or network.
    `failed`, `gate_failed`, `survived`, `crash` or `cannot_run`. Any other outcome is refused
    with `403`, records nothing and stores no verdict; the lease stays held until it expires.
 8. Check runs move `queued` on receipt, `in_progress` on the first unit a worker starts and
-   `completed` on the last, one per gate with units and `required` for the whole grade. A completed
+   `completed` on the last, one per gate with units and `required` for the whole grade. A pull
+   request or hotfix grade also posts one check run `completed` with conclusion `skipped` on its
+   first pass for every gate the base's `lab.authoritative` lists that it runs no unit of. A completed
    check run never moves again. The grade state keeps each check run's id, and the scheduler seeds
    its poster with that id and the last status it posted before the next move, so a restarted
    scheduler advances the same check run instead of opening a second one. A grade of a head pushed
@@ -1678,6 +1683,14 @@ keeps the lab gates the pull request rules require and names every other require
 units, with no test scope and no mutation; a merge group grade does the same for the queue suite; a
 promotion or backfill grade keeps every lab gate. A gate without units passes, so a grade turns red only
 through what the lab grades.
+
+A pull request or hotfix grade reads `lab.authoritative` from the `delivery.yaml` of its base, the
+grader revision, so the head cannot widen it. Each listed gate the frame gives no unit, such as `unit`,
+`unit-selected`, `shard-check` or `mutation`, which those classes never expand, lands in the grade
+state's `idle` list and gets its `skipped` check run on the first pass. The `lab-verdict` job then
+reads `skipped` for it instead of failing the gate when its 20 minute wait ends. `Gate — Required`
+accepts `skipped` only for a gate it does not require on that head, so a lab that skips a gate the
+head requires keeps the pull request red.
 
 A gate passes when every unit passed. The `required` conclusion is
 `scripts.ci_lab.scheduler.fold`, the rules of the `Gate — Required` step of the test workflow over
@@ -1945,7 +1958,7 @@ expansion still reads the mirror with `git ls-tree` and `git show`:
 
 | Job | Units |
 |---|---|
-| `mutation` | One `mutant` unit per function the head changes against its base, naming every mutant of that function |
+| `mutation` | One `mutant` unit per function the head changes against its base, naming every mutant of that function, or several when those mutants price over the sandbox timeout |
 | `mutation-stats` | One `stats` unit per test file present at the head that holds a test running such a function, with the worker's stats options |
 
 The changed lines are `scripts.ci_mutation.scope.changes_since` of the base and head, the lines the
@@ -2027,7 +2040,15 @@ A mutant unit's key is the sha256 of the JSON, object keys sorted, of a list hol
 6. the unlisted test hashes described above.
 
 Its members are `<name>__mutmut_1` to `<name>__mutmut_<n>`, one per mutation mutmut creates in the
-function. A stats unit's key is `StoredStats.identity` of its test file at the head, over the
+function. The worker grades a unit's mutants in one sandbox run after the unit's stats run, each run
+bounded by `executors.UNIT_TIMEOUT_S`, 1800 seconds, which `MirrorExpander._mutation` passes as the
+`timeout` of `expand_mutation.mutant_units`. A function whose mutants price over it, `n` times
+`scripts.ci_mutation.plan.MUTANT_SECONDS` (5.6 seconds a mutant, the fallback of
+`pricing.estimate`), gets the fewest near equal parts that each price within it, at most 321
+mutants a part, in mutant order; `expand_mutation.split_members` cuts them. Each part's key is the
+sha256 of the list of the function's key and the part's members, so every part has its own slot
+and verdict; a function priced within the timeout keeps one unit under the function's key.
+A stats unit's key is `StoredStats.identity` of its test file at the head, over the
 fields the `stats` rows of [Inputs per kind](#inputs-per-kind) list, with the worker's options
 `-q -p no:cacheprovider`. The expander builds both keys itself, without the `digests` builders, so
 they are bare 64 hex digests rather than the `<kind>-v<schema>-<digest>` form the
