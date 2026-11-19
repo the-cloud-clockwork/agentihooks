@@ -22,6 +22,7 @@ RECORD = "supervisor.json"
 DRAIN_S = 30
 UNREACHABLE_S = 300
 UNREACHABLE = 3
+REFUSED = 4
 PASS_S = 1
 STARTER = "AGENTIHOOKS_SCHEDULER_STARTER"
 UNIT = "agentihooks-scheduler.service"
@@ -30,6 +31,17 @@ UNIT_ENV = "AGENTIHOOKS_SCHEDULER_UNIT"
 
 class AlreadyRunning(RuntimeError):
     pass
+
+
+class Refused(RuntimeError):
+    """The state store refused the runner's credential, which no later pass can clear."""
+
+
+def refusals() -> tuple[type[BaseException], ...]:
+    """The redis errors that refuse the runner's credential: a refused login and an ACL denial."""
+    from redis.exceptions import AuthenticationError, AuthenticationWrongNumberOfArgsError, NoPermissionError
+
+    return (AuthenticationError, AuthenticationWrongNumberOfArgsError, NoPermissionError)
 
 
 def runtime_dir(environ: Mapping[str, str] | None = None) -> Path:
