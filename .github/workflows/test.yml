@@ -961,7 +961,7 @@ jobs:
 
       - &venv
         name: Restore the test environment
-        if: env.UNIT_WHEELHOUSE != '1' || runner.environment != 'self-hosted'
+        if: runner.environment != 'self-hosted'
         id: venv
         uses: actions/cache/restore@v4
         env:
@@ -990,16 +990,17 @@ jobs:
         env:
           SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
           PYTHON_PATH: ${{ steps.python.outputs.python-path }}
+          BAKED_VENV: /opt/agentihooks-venv
         run: |
-          uv venv --python "$PYTHON_PATH" "$HOME/venv"
-          uv pip install --offline --no-index --find-links /opt/wheelhouse --constraint .github/test-requirements.lock --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]" && { echo "::notice title=Wheelhouse hit::The runner wheelhouse served the install offline"; exit 0; }
+          if [[ -x "$BAKED_VENV/bin/python" && "$("$BAKED_VENV/bin/python" -c 'import sys; print(sys.base_prefix)')" == "$pythonLocation" ]]; then ln -s "$BAKED_VENV" "$HOME/venv"; else uv venv --python "$PYTHON_PATH" "$HOME/venv"; fi
+          uv pip install --offline --no-index --find-links /opt/wheelhouse --exact --constraint .github/test-requirements.lock --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]" && { echo "::notice title=Wheelhouse hit::The runner wheelhouse served the install offline"; exit 0; }
           echo "::notice title=Wheelhouse miss::The runner wheelhouse cannot serve the install; fetching from PyPI"
-          bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --constraint .github/test-requirements.lock --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"
+          bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --exact --constraint .github/test-requirements.lock --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       # Queue refs cannot read dev's entries, so saving there only fills the store with copies.
       - &use-venv
         name: Use the test environment
-        run: echo "$HOME/venv/bin" >> "$GITHUB_PATH"
+        run: echo "$(readlink -f "$HOME/venv")/bin" >> "$GITHUB_PATH"
 
       - name: Check out the base revision
         env:
@@ -1277,7 +1278,7 @@ jobs:
 
       - &save-venv
         name: Save the test environment from dev
-        if: env.UNIT_SOURCE == '' && steps.venv.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref == 'refs/heads/dev'
+        if: env.UNIT_SOURCE == '' && steps.venv.outcome == 'success' && steps.venv.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref == 'refs/heads/dev'
         uses: actions/cache/save@v4
         with:
           path: ~/venv
@@ -1480,7 +1481,6 @@ jobs:
       GIT_CONFIG_VALUE_0: "false"
       CODEX_RELEASE: rust-v0.160.0
       UNIT_SOURCE: ${{ needs.split.outputs.source }}
-      UNIT_WHEELHOUSE: ${{ github.event_name == 'pull_request' && '1' || '' }}
       UV_CONSTRAINT: ${{ github.workspace }}/.github/test-constraints.txt
       LEG: ${{ matrix.shard }}
     strategy:
@@ -2024,7 +2024,6 @@ jobs:
       CODEX_RELEASE: rust-v0.160.0
       UV_CONSTRAINT: ${{ github.workspace }}/.github/test-constraints.txt
       UNIT_SOURCE: ""
-      UNIT_WHEELHOUSE: "1"
       LEG: ${{ matrix.leg }}
     strategy:
       fail-fast: false
