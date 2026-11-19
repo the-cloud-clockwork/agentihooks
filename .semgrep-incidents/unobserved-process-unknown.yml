@@ -1,0 +1,17 @@
+rules:
+  - id: unobserved-process-unknown
+    languages: [python]
+    severity: ERROR
+    message: Keep native model and effort observations unknown when process liveness is explicitly unknown.
+    paths:
+      include:
+        - /scripts/swarm/live_binding.py
+        - unobserved-process-unknown.py
+    patterns:
+      - pattern: |
+          return {$FIELD: $EXPECTED[$FIELD] for $FIELD in OBSERVED if $EXPECTED[$FIELD] and not $FACTS.get($FIELD)}
+      - pattern-not-inside: |
+          if "process" in $FACTS and $FACTS["process"] is None:
+              return {}
+          ...
+          return {$FIELD: $EXPECTED[$FIELD] for $FIELD in OBSERVED if $EXPECTED[$FIELD] and not $FACTS.get($FIELD)}

@@ -278,6 +278,8 @@ def unknown(agent: AgentRecord, facts: dict) -> list[str]:
 
 
 def unobserved(agent: AgentRecord, facts: dict) -> dict:
+    if "process" in facts and facts["process"] is None:
+        return {}
     expected = assignment(agent)
     return {field: expected[field] for field in OBSERVED if expected[field] and not facts.get(field)}
 
