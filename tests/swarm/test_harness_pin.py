@@ -151,3 +151,8 @@ def test_the_status_quota_lines_name_each_pinned_lane(store: RedisStore) -> None
     assert (
         shown[2] == "lane eng pinned to claude for 6d00h: codex has 6 free quota seats and 2 ready tasks wait: e1, e2"
     )
+    codex = replace(config, lanes={"eng": {"agent": "codex"}})
+    placed = apply(store, codex, [CLAUDE_FULL, CODEX_FREE], START + 7 * DAY)
+    assert quota_view.lines(placed, START + 7 * DAY, IDLE, MANUAL_SCALING)[2] == (
+        "lane eng pinned to codex for 0m: claude has 0 free quota seats and 0 ready tasks wait"
+    )
