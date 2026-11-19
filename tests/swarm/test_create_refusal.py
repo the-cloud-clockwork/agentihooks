@@ -14,3 +14,14 @@ def test_a_create_the_store_refuses_leaves_the_ledger_unmarked(env: tuple, capsy
     assert cli.main(["sw", "create", "--repo", "/repo"]) == 1
     assert capsys.readouterr().err == "swarm: swarm sw already exists\n"
     assert ledger.swarm_sized == []
+
+
+def test_create_refusal_names_what_create_would_refuse_before_a_ledger_is_marked(env: tuple) -> None:
+    swarms, ledger, _ = env
+    assert cli.create_refusal(swarms, ["sw", "create", "--repo", "/repo"]) == ""
+    assert cli.create_refusal(swarms, ["2026-q4", "create", "--repo", "/repo"]) == (
+        "a swarm id is lowercase letters, digits and dashes, starting with a letter, at most 48 long"
+    )
+    assert ledger.swarm_sized == [] and swarms.slugs() == []
+    assert cli.main(["sw", "create", "--repo", "/repo"]) == 0
+    assert cli.create_refusal(swarms, ["sw", "create", "--repo", "/repo"]) == "swarm sw already exists"

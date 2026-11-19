@@ -30,6 +30,9 @@ if name in store.slugs():
     print(json.dumps({"found": "swarm", "repo": store.config(name).repo}))
 elif repository.exists(name) and ledger_size.size_of(repository.get_document(name)) != "swarm":
     print(json.dumps({"found": "ledger"}))
+elif refused := cli.create_refusal(store, [name, "create", "--repo", order["repo"], *order["flags"]]):
+    print(f"swarm: {refused}", file=sys.stderr)
+    sys.exit(1)
 else:
     repository.create(name, order["content"], "swarm")
     with contextlib.redirect_stdout(io.StringIO()) as told:
