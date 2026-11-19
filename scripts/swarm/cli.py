@@ -98,7 +98,6 @@ from scripts.swarm import (
     claim_lost,
     clearance,
     control_notifications,
-    create_config,
     default_models,
     delivery,
     dev_red,
@@ -174,10 +173,14 @@ from scripts.swarm.status import (
     wait_label,
 )
 from scripts.swarm.store import (
+    APP_SERVER_TRANSPORT,
     ASSIST,
     AUTO_SCALING,
     AUTONOMY,
+    DEFAULT_MASTERS_STEP,
+    DELEGATE,
     DISPATCH,
+    EVENTS_ENGINE,
     FULL,
     MASTER,
     AgentRecord,
@@ -987,35 +990,45 @@ def cmd_tick_watch(store, args):
     tick_watch.run(store, now_ms, repair)
 
 
-def _create_config(args: argparse.Namespace) -> SwarmConfig:
-    """The paused swarm create ARGS asks for, refused when its id, repository or template is wrong."""
+def create_config(args: argparse.Namespace) -> SwarmConfig:
+    from scripts.hive.daemon import origin
+
     if not SLUG_RE.match(args.slug):
         raise SwarmError("a swarm id is lowercase letters, digits and dashes, starting with a letter, at most 48 long")
     if WEB_REPO.match(args.repo):
         raise SwarmError(f"--repo takes a folder on this host, not the web address {args.repo}")
     repo = os.path.abspath(os.path.expanduser(args.repo))
     template = templates.load(args.template, os.environ) if args.template else templates.parse({"name": "none"})
-    return create_config.config(args, repo, template)
-
-
-def create_refusal(store: RedisStore, argv: list[str]) -> str:
-    """Why create ARGV would refuse its swarm, empty when the store takes it; swarm init asks before it makes a ledger."""
-    try:
-        return store.refusal(_create_config(build_parser().parse_args(argv)))
-    except SwarmError as error:
-        return str(error)
+    caps = {key: value.cap for key, value in template.lanes.items()}
+    return SwarmConfig(
+        args.slug,
+        repo,
+        caps["eng"] if args.max_eng_agents is None else args.max_eng_agents,
+        caps["ci"] if args.max_ci_agents is None else args.max_ci_agents,
+        max_plan=caps["plan"] if args.max_plan_agents is None else args.max_plan_agents,
+        state="paused",
+        compact_limit=template.compact_limit,
+        template=args.template,
+        lanes=templates.lane_map(template),
+        links=template.links,
+        autonomy=template.autonomy or DELEGATE,
+        scratch=not ledger_creator.shared(os.environ),
+        caps_pinned=args.max_eng_agents is not None or args.max_ci_agents is not None,
+        codex_inbox_transport=APP_SERVER_TRANSPORT,
+        masters_step=DEFAULT_MASTERS_STEP,
+        engine=EVENTS_ENGINE,
+        repo_origin=origin(Path(repo)),
+    )
 
 
 def cmd_create(store: RedisStore, args: argparse.Namespace) -> None:
-    config = _create_config(args)
+    config = create_config(args)
     ledger = LedgerClient()
     tasks = ledger_creator.swarm_tasks(ledger.state(args.slug))
-    refused = (
-        ledger_creator.swarm_refusal(os.environ)
-        or (args.template != priming.TEMPLATE and ledger_creator.floor_refusal(os.environ, tasks, args.operator_asked))
-        or store.refusal(config)
+    refused = ledger_creator.swarm_refusal(os.environ) or (
+        args.template != priming.TEMPLATE and ledger_creator.floor_refusal(os.environ, tasks, args.operator_asked)
     )
-    if refused:
+    if refused := refused or store.refusal(config):
         raise SwarmError(refused)
     ledger.mark_swarm(args.slug)
     store.create(config)
