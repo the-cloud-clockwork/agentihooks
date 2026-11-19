@@ -613,7 +613,8 @@ class Scheduler:
         """Return the queue jobs of the ids whose records still exist."""
         return [job for job in map(self.queue.job, ids) if job is not None]
 
-    def _save(self, state: State) -> None:
+    def save(self, state: State) -> None:
+        """Store a grade's state, so the next pass and the relay read it back."""
         self.client.set(GRADES + state.run, json.dumps(asdict(state)))
 
     def _intake(self, now_ms: int) -> list[str]:
@@ -711,7 +712,7 @@ class Scheduler:
                 state.units.update({ref: replace(source.units[ref]) for ref in source.gates[gate]})
                 continue
             state.gates[gate] = [self._place(state, unit, request.bypass_negative, carried, misses) for unit in units]
-        self._save(state)
+        self.save(state)
         self.client.sadd(LIVE, run)
         self.client.set(f"{LANES}{request.repo}|{lane}|{int(request.tier)}", run)
         return f"grading {run} with {len(misses)} of {len(state.units)} units held"
@@ -734,7 +735,7 @@ class Scheduler:
         for slot in old.units.values():
             if slot.held:
                 slot.held, slot.outcome = False, DROPPED
-        self._save(old)
+        self.save(old)
         return {
             ref: slot.job
             for ref, slot in old.units.items()
@@ -796,7 +797,7 @@ class Scheduler:
                     waiting += DEFAULT.slots
             if admitted:
                 self.queue.enqueue(admitted, state.head, {}, state.base, state.grader)
-                self._save(state)
+                self.save(state)
                 actions.append(f"enqueued {len(admitted)} units of {state.run}")
         return actions
 
@@ -819,7 +820,7 @@ class Scheduler:
             graded = {"class": CLASSES[state.tier], "conclusion": state.conclusion}
             self.registry.inc(contract.HEADS_GRADED_TOTAL, 1.0, graded)
             actions.append(f"completed {run} {state.conclusion}")
-        self._save(state)
+        self.save(state)
         return actions
 
     def _collect(self, slot: Slot, tiers: Mapping[str, int], repo: str) -> None:

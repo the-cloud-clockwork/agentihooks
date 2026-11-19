@@ -1377,7 +1377,10 @@ prints the relay's actions after the pass's own. `main` builds the relay once at
 lab heads consumer, the `ci-lab-relay` durable filtered to `ci.lab.head.notice`, which bus
 provisioning creates beside the scheduler's `ci-lab-scheduler` durable. A green grade of a pushed
 `refs/grade/<task>` head with a `branch` option then reaches that branch, its check runs and its
-draft pull request.
+draft pull request. The relay keeps the id of each check run it creates on the grade's state as
+GitHub answers and seeds its poster with the stored ids before it posts, so a relay retried after
+the service restarts, such as one whose pull request call failed after its posts, creates no second
+completed check run.
 
 A grade's state is one JSON document at `agentihooks-ci:grade:<run>`, where `<run>` is the grade
 key of the repository, head, base, class and grader revision. Live grades sit in

@@ -88,6 +88,7 @@ class Calls:
         self.log: list[tuple[Any, ...]] = []
         self.outputs: list[Output] = []
         self.posted: dict[tuple[str, str, str], str] = {}
+        self.saved: list[dict[str, int]] = []
 
     def pusher(self, repo: str) -> "Calls":
         """Return the pusher of a repository."""
@@ -108,6 +109,10 @@ class Calls:
         """Keep the push."""
         self.log.append(("push", sha, branch))
 
+    def seed(self, head: str, gate: str, run: str, run_id: int, status: str, shadow: bool) -> None:
+        """Keep the seeded check run's status as posted."""
+        self.posted[(head, name(gate, shadow), run)] = status
+
     def status(self, key: tuple[str, str, str]) -> str | None:
         """Return the last status posted for a check run, or None before its first post."""
         return self.posted.get(key)
@@ -124,9 +129,13 @@ class Calls:
         self.log.append(("open", branch, title, body))
         return f"opened {PULL}"
 
+    def save(self, state: State) -> None:
+        """Keep the check run ids the saved state holds."""
+        self.saved.append(dict(state.runs))
+
     def ports(self) -> relay.Ports:
         """Return the relay ports over this recorder."""
-        return relay.Ports(self.pusher, self.checks, self.pulls)
+        return relay.Ports(self.pusher, self.checks, self.pulls, self.save)
 
 
 class Refusing(Calls):
@@ -226,6 +235,7 @@ def test_a_green_grade_pushes_then_posts_every_check_run_completed_then_opens_th
         f"posted lab/required success on {HEAD}",
         f"opened {PULL}",
     ]
+    assert calls.saved == [{"lint": 1}, {"lint": 1, "unit": 2}, {"lint": 1, "unit": 2, "required": 3}]
 
 
 def test_relayed_check_runs_carry_the_grade_run_its_units_and_the_lab_grade_page() -> None:
@@ -253,7 +263,7 @@ def test_a_relayed_green_grade_updates_the_open_pull_request_head_with_its_check
     calls = Calls()
     request = Mock(return_value=answer(200, [{"html_url": PULL, "number": 9}]))
     monkeypatch.setattr(requests, "request", request)
-    ports = relay.Ports(calls.pusher, calls.checks, lambda slug: relay.PullRequests(slug, Token()))
+    ports = relay.Ports(calls.pusher, calls.checks, lambda slug: relay.PullRequests(slug, Token()), calls.save)
     actions = relay.relay(grade("success"), BRANCH, ports, LAB)
     assert [call for call in calls.log if call[0] in ("push", "post")] == [
         ("push", HEAD, BRANCH),
