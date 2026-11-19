@@ -417,7 +417,7 @@ def test_the_direct_importers_setting_measures_only_changes_and_their_direct_imp
     recorded = {"hooks/__init__.py": 5, "hooks/far.py": 5, "hooks/lib.py": 5, "hooks/user.py": 5}
     base = _tree(tmp_path / "base", {**same, "hooks/lib.py": "x = 1\n"}, recorded)
     head = _tree(tmp_path / "head", {**same, "hooks/lib.py": "x = 2\n"}, recorded)
-    _error_per_checked_source(monkeypatch, head)
+    runs = _record_checks(monkeypatch, head)
     measured = tmp_path / "out" / "TYPE_BASELINE.json"
     command = ["--base", str(base), "--head", str(head), "--measured", str(measured)]
     monkeypatch.setenv(type_gate.DIRECT_IMPORTERS, "1")
@@ -426,6 +426,7 @@ def test_the_direct_importers_setting_measures_only_changes_and_their_direct_imp
     monkeypatch.delenv(type_gate.DIRECT_IMPORTERS)
     assert type_gate.main(command) == 0
     assert json.loads(measured.read_text()) == {**recorded, "hooks/far.py": 1, "hooks/lib.py": 1, "hooks/user.py": 1}
+    assert runs == [sorted(recorded)] * 2
 
 
 def test_a_head_without_source_changes_runs_no_checker(
@@ -572,7 +573,7 @@ def _test_sources(root: Path, count: int) -> list[str]:
     return files
 
 
-def _error_per_checked_source(monkeypatch: pytest.MonkeyPatch, root: Path) -> list[list[str]]:
+def _record_checks(monkeypatch: pytest.MonkeyPatch, root: Path) -> list[list[str]]:
     runs: list[list[str]] = []
 
     def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -594,7 +595,7 @@ def test_measure_checks_at_most_a_hundred_sources_per_checker_process_and_sums_t
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, count: int, sizes: list[int]
 ) -> None:
     files = _test_sources(tmp_path, count)
-    runs = _error_per_checked_source(monkeypatch, tmp_path)
+    runs = _record_checks(monkeypatch, tmp_path)
     assert type_gate.measure(tmp_path, files[::-1]) == dict.fromkeys(files, 1)
     assert [len(checked) for checked in sorted(runs)] == sizes
     assert [path for checked in sorted(runs) for path in checked] == files
@@ -626,7 +627,7 @@ def test_the_gate_checks_a_run_of_the_every_source_layout_through_its_last_grade
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     files = _test_sources(tmp_path, 201)
-    runs = _error_per_checked_source(monkeypatch, tmp_path)
+    runs = _record_checks(monkeypatch, tmp_path)
     assert type_gate.measure(tmp_path, [files[120], files[30], files[100]]) == dict.fromkeys(
         [files[30], files[100], files[120]], 1
     )
@@ -655,6 +656,17 @@ def test_the_gate_checks_four_runs_at_once(tmp_path: Path, monkeypatch: pytest.M
     monkeypatch.setattr(type_gate.subprocess, "run", run)
     assert type_gate.measure(tmp_path) == {}
     assert (peak, calls) == (4, 8)
+
+
+def test_measuring_a_path_the_head_has_no_source_for_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    head = _tree(tmp_path, {"hooks/a.py": ""})
+    runs = _record_checks(monkeypatch, head)
+    with pytest.raises(type_gate.GradeError) as refused:
+        type_gate.measure(head, ["hooks/a.py", "hooks/gone.py", "docs/notes.py"])
+    assert str(refused.value) == "the head has no source docs/notes.py, hooks/gone.py to measure"
+    assert runs == []
 
 
 def _peak(monkeypatch: pytest.MonkeyPatch, kib: int) -> None:
