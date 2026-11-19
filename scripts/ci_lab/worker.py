@@ -54,6 +54,7 @@ TIMEOUT_SECONDS = 60.0
 DELIVERY_CALLS = 5
 GRACE_SECONDS = UNIT_TIMEOUT_SECONDS + DELIVERY_CALLS * TIMEOUT_SECONDS
 REFUSED = 403
+SERVER_ERROR = 500
 REDIS = "REDIS"
 
 
@@ -192,8 +193,8 @@ class Worker:
 
     def run_once(self) -> list[Lease]:
         """Lease units into the free slots and start each on its executor, or wait for a running unit to end while
-        every slot is busy; return the leases started. A lease call the scheduler does not answer starts nothing and
-        waits out its backoff."""
+        every slot is busy; return the leases started. A lease call the scheduler does not answer, or answers with a
+        server error, starts nothing and waits out its backoff; any other error answer raises."""
         free = self.free()
         if free <= 0:
             wait(list(self.running), return_when=FIRST_COMPLETED)
@@ -201,6 +202,8 @@ class Worker:
         try:
             leases = self.client.lease(self.name, free, self.capabilities, self.wait_ms)
         except (OSError, http.client.HTTPException) as error:
+            if isinstance(error, urllib.error.HTTPError) and error.code < SERVER_ERROR:
+                raise
             self._back_off(error)
             return []
         self.backoff_s = BACKOFF_SECONDS

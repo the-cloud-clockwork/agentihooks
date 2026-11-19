@@ -9369,7 +9369,7 @@
       "id": "lab-worker-pod-loop",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/lab-worker",
-      "behaviour": "The CI lab worker leases units into its free slots over the scheduler's HTTP lease API with the capabilities net and browser, runs each on the executor its kind names side by side, heartbeats each lease while its executor runs, uploads the report and log through the presigned URLs and completes the lease; a unit whose executor raises stops heartbeating and is left for the scheduler to reap, a refused token ends a unit's heartbeats and delivery, a heartbeat that cannot reach the scheduler is skipped, a lease call the scheduler does not answer (refused, reset, cut short, timed out or answered with an HTTP error) is reported on stderr and retried after a backoff that doubles from one second up to ten seconds and resets on the next answered call, so a scheduler roll never ends the worker, stop lets running units finish within the termination grace (the unit time limit plus five delivery calls at the client timeout) and abandons the rest to reap, slots come from the CPU quota capped by CI_LAB_SLOTS, and the worker environment refuses every GitHub App or Redis variable.",
+      "behaviour": "The CI lab worker leases units into its free slots over the scheduler's HTTP lease API with the capabilities net and browser, runs each on the executor its kind names side by side, heartbeats each lease while its executor runs, uploads the report and log through the presigned URLs and completes the lease; a unit whose executor raises stops heartbeating and is left for the scheduler to reap, a refused token ends a unit's heartbeats and delivery, a heartbeat that cannot reach the scheduler is skipped, a lease call the scheduler does not answer (refused, reset, cut short or timed out) or answers with a server error is reported on stderr and retried after a backoff that doubles from one second up to ten seconds, resets on the next answered call and ends at once on stop, so a scheduler roll never ends the worker, while a client error answer still raises, stop lets running units finish within the termination grace (the unit time limit plus five delivery calls at the client timeout) and abandons the rest to reap, slots come from the CPU quota capped by CI_LAB_SLOTS, and the worker environment refuses every GitHub App or Redis variable.",
       "seam": "scripts.ci_lab.worker Worker.run_once, run, stop, drain and free, Client, environment, slots and build, against scripts.ci_lab.lease_api.serve",
       "tests": [
         "tests/ci_lab/test_worker.py::test_units_from_two_heads_run_concurrently_on_one_pod",
@@ -9385,6 +9385,8 @@
         "tests/ci_lab/test_worker.py::test_the_termination_grace_counts_every_delivery_call_of_a_unit",
         "tests/ci_lab/test_worker.py::test_run_leases_again_as_a_unit_frees_its_slot",
         "tests/ci_lab/test_worker.py::test_a_lease_call_the_scheduler_does_not_answer_backs_off_and_leases_again",
+        "tests/ci_lab/test_worker.py::test_a_lease_call_the_scheduler_answers_with_a_client_error_still_raises",
+        "tests/ci_lab/test_worker.py::test_stop_ends_a_lease_backoff_at_once",
         "tests/ci_lab/test_worker.py::test_the_pod_leases_only_units_its_net_and_browser_capabilities_and_free_slots_fit",
         "tests/ci_lab/test_worker.py::test_the_client_speaks_the_lease_api_and_reads_a_refused_token_as_none",
         "tests/ci_lab/test_worker.py::test_the_client_gives_up_on_a_scheduler_or_upload_that_does_not_answer",
