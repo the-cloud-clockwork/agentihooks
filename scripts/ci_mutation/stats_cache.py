@@ -210,6 +210,8 @@ class StatsInputs:
     records: dict = field(default_factory=lambda: {True: {}, False: {}})
     traced: dict = field(default_factory=dict)
     discovered: dict[str, set[str]] = field(default_factory=dict)
+    closures: dict[frozenset[str], dict[str, str]] = field(default_factory=dict)
+    digests: dict[frozenset[str], str] = field(default_factory=dict)
 
     def for_test(self, path: str, covered: list[str] | None, fresh: list[dict] | None = None) -> dict:
         measured = covered is not None
@@ -227,11 +229,12 @@ class StatsInputs:
             )
             inputs.update({name: value[0] for name, value in loaded.items()})
         if covered:
-            inputs.update(
-                test_inputs(
+            key = frozenset(covered)
+            if key not in self.closures:
+                self.closures[key] = test_inputs(
                     self.root, covered, self.modules, self.records[measured], self.resources, False, self.discovered
                 )
-            )
+            inputs.update(self.closures[key])
         if not any(not name.startswith("tests/") for name in inputs) and (
             changed := sorted(self.changes.keys() & self.resources)
         ):
@@ -244,6 +247,9 @@ class StatsInputs:
         return self.for_test(path, list(inputs) if measured else None) == inputs and self.discovery(inputs) == discovery
 
     def discovery(self, inputs: dict) -> str:
+        key = frozenset(inputs)
+        if key in self.digests:
+            return self.digests[key]
         paths = set()
         for source in inputs:
             if Path(source).suffix != ".py":
@@ -253,7 +259,8 @@ class StatsInputs:
                 names = set(imported_names(text, Path(source).parent.parts))
                 self.discovered[source] = discovery_inputs(list(ast.walk(ast.parse(text))), names, self.resources)
             paths.update(self.discovered[source])
-        return hashlib.sha256(encode(sorted(paths)).encode()).hexdigest()
+        self.digests[key] = hashlib.sha256(encode(sorted(paths)).encode()).hexdigest()
+        return self.digests[key]
 
 
 def per_test_stats(
@@ -347,8 +354,10 @@ def collect_cached_stats(
             for parent in Path(path).parents:
                 resources.setdefault(str(parent) + "/", set()).add(path)
     inputs = StatsInputs(root, modules, resources, changes)
+    print(f"Mutation stats phase: context done at {__import__('time').time():.1f}", flush=True)
     stored = StoredStats(root, folder, context, changes)
     stored.prune()
+    print(f"Mutation stats phase: prune done at {__import__('time').time():.1f}", flush=True)
     compatible = {
         path: record
         for path in files
@@ -356,10 +365,12 @@ def collect_cached_stats(
     }
     reused = list(compatible.values())
     missing = [path for path in files if path not in compatible]
+    print(f"Mutation stats phase: lookup done at {__import__('time').time():.1f}", flush=True)
     report(f"Mutation stats cache: reused {len(reused)} test files; collect {len(missing)}")
     if stored.misses:
         report(f"Mutation stats cache: misses {encode(stored.misses)}; changed inputs {stored.changed.most_common(5)}")
     fresh = collect(missing) if missing else []
+    print(f"Mutation stats phase: buckets done at {__import__('time').time():.1f}", flush=True)
     if any(result["status"] != 0 for result in fresh):
         raise SystemExit(1)
     functions = {function for result in fresh for function in result["tests"]}
@@ -369,7 +380,9 @@ def collect_cached_stats(
         if result is not None:
             dependencies = inputs.for_test(path, covered, fresh)
             stored.save(path, result, dependencies, covered is not None, inputs.discovery(dependencies))
+    print(f"Mutation stats phase: save done at {__import__('time').time():.1f}", flush=True)
     cap(folder)
+    print(f"Mutation stats phase: cap done at {__import__('time').time():.1f}", flush=True)
     return reused + [
         {name: value for name, value in result.items() if name not in ("files", "modules")} for result in fresh
     ]
