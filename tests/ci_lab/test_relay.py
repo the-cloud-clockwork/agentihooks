@@ -4,8 +4,9 @@ grade held with its failed units, and the GitHub adapters' scoped tokens."""
 import base64
 import json
 import subprocess
-from collections.abc import Mapping
-from dataclasses import replace
+from collections.abc import Callable, Mapping
+from dataclasses import asdict, replace
+from functools import partial
 from io import StringIO
 from pathlib import Path
 from typing import Any, cast
@@ -17,12 +18,12 @@ import requests
 from scripts import github_app
 from scripts.ci_lab import relay
 from scripts.ci_lab import scheduler as scheduler_module
-from scripts.ci_lab.checks import Output, name
+from scripts.ci_lab.checks import API, Checks, Output, name
 from scripts.ci_lab.evidence import head_prefix
 from scripts.ci_lab.objects import LocalObjects
 from scripts.ci_lab.outcomes import FAILED, PASSED
 from scripts.ci_lab.remote import post_receive
-from scripts.ci_lab.scheduler import Flags, Scheduler, Slot, State
+from scripts.ci_lab.scheduler import Flags, Scheduler, Settings, Slot, State
 from scripts.ci_lab.units import Unit
 from scripts.ci_lab.worktrees import Lab, Mirror
 from scripts.events.bus import Consumer
@@ -448,6 +449,63 @@ def test_a_retried_relay_posts_each_check_run_once_then_opens_the_pull_request()
     assert engine.tick()[-1] == f"retry {HEAD} for {BRANCH}: connection reset"
     assert engine.tick() == [f"pushed {HEAD} to {BRANCH}", f"opened {PULL}"]
     assert [call[2] for call in calls.log if call[0] == "post"] == ["lint", "unit", "required"]
+    assert client.hgetall(relay.PENDING) == {}
+
+
+CHECK_RUNS = f"{API}/repos/{SLUG}/check-runs"
+
+
+def github(sent: list[tuple[str, str]]) -> Callable[..., Mock]:
+    """Answer check run requests as GitHub does: a create gets the next id, an update keeps the id its url names."""
+
+    def request(method: str, url: str, **_: Any) -> Mock:
+        sent.append((method, url))
+        created = [verb for verb, _url in sent].count("POST")
+        run = created if method == "POST" else int(url.rsplit("/", 1)[1])
+        return answer(201 if method == "POST" else 200, {"id": run})
+
+    return request
+
+
+def started(environ: Mapping[str, str], lab: Scheduler, calls: Calls) -> relay.Relay:
+    """Return the relay a scheduler start builds, its pushes and pull requests going to the recorder."""
+    consumer = cast(Consumer, open_bus(BusConfig()).lab_heads.consumer(relay.DURABLE, relay.SUBJECT))
+    engine = relay.build(environ, lab, consumer)
+    engine.ports = replace(engine.ports, pusher=calls.pusher, pulls=calls.pulls)
+    return engine
+
+
+@pytest.mark.feature("lab-relay-check-run-restart")
+def test_a_restarted_relay_posts_no_second_completed_check_run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    sent: list[tuple[str, str]] = []
+    monkeypatch.setattr(requests, "request", github(sent))
+    monkeypatch.setattr(relay, "Checks", partial(Checks, auth=Token()))
+    client, calls = fake_redis(), Flaky()
+    lab = Scheduler(
+        client, LocalObjects(tmp_path / "objects"), cast(scheduler_module.Ports, Mock()), Settings(frozenset())
+    )
+    state = grade("success")
+    client.set(scheduler_module.GRADES + state.run, json.dumps(asdict(state)))
+    lab.objects.write_once(f"{head_prefix(HEAD)}{state.run}", b"")
+    client.hset(relay.PENDING, f"{HEAD} {BRANCH}", json.dumps(asdict(relay.Pending(REPO, HEAD, REF, BRANCH))))
+    environ = {
+        relay.contract.GIT_MIRROR: str(tmp_path / "node"),
+        relay.MIRROR_STORE: str(tmp_path / "stores"),
+        post_receive.LAB_URL: LAB,
+    }
+    assert started(environ, lab, calls).tick() == [f"retry {HEAD} for {BRANCH}: connection reset"]
+    again = started(environ, lab, calls)
+    actions = again.tick()
+    assert sent == [("POST", CHECK_RUNS)] * 3
+    assert actions == [f"pushed {HEAD} to {BRANCH}", f"opened {PULL}"]
+    stored = lab.grade(state.run)
+    assert stored is not None
+    assert stored.runs == {"lint": 1, "unit": 2, "required": 3}
+    assert cast(Checks, again.ports.checks(SLUG)).runs == {
+        (HEAD, "lab/lint", "run-7"): (1, "completed"),
+        (HEAD, "lab/unit", "run-7"): (2, "completed"),
+        (HEAD, "lab/required", "run-7"): (3, "completed"),
+    }
     assert client.hgetall(relay.PENDING) == {}
 
 

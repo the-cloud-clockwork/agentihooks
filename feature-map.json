@@ -8827,6 +8827,16 @@
       ]
     },
     {
+      "id": "lab-relay-check-run-restart",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-relay-run-id-seed",
+      "behaviour": "The CI lab relay posts each relayed check run of a grade ref head once across a restart of the scheduler process that hosts it: before it tests whether a check run was posted it seeds the repository's poster with every check run id the grade's state in Redis stores, and it saves the id of each check run it creates on that state as soon as GitHub answers, so a relay retried after a restart, such as one whose pull request call failed after its posts, opens no second completed check run.",
+      "seam": "scripts.ci_lab.relay.build over a real scripts.ci_lab.scheduler.Scheduler on fakeredis with a real scripts.ci_lab.checks.Checks on mocked requests, built again over the same Redis as a restart, ticked through scripts.ci_lab.relay.Relay.tick and scripts.ci_lab.relay.relay",
+      "tests": [
+        "tests/ci_lab/test_relay.py::test_a_restarted_relay_posts_no_second_completed_check_run"
+      ]
+    },
+    {
       "id": "lab-dev-manifest-fetch",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-dev-push-publishes-dep-manifest",
