@@ -239,6 +239,7 @@ def test_a_stalled_blob_is_fetched_again_after_the_read_timeout(
     assert _files(tmp_path / "stats") == ["collected-mutation-stats-0"]
 
 
+@pytest.mark.wall_clock
 @pytest.mark.parametrize("kind", ["hold", "stall", "trickle"])
 def test_a_blob_still_arriving_at_the_deadline_is_named_instead_of_outliving_it(
     serve: Serve, tmp_path: Path, kind: str
@@ -299,6 +300,7 @@ def test_the_script_run_as_the_action_runs_it_downloads_and_exits(serve: Serve, 
     assert _files(tmp_path / "stats") == ["collected-mutation-stats-0", "collected-mutation-stats-1"]
 
 
+@pytest.mark.wall_clock
 def test_the_watchdog_ends_the_script_when_one_socket_read_outlives_the_deadline(serve: Serve, tmp_path: Path) -> None:
     service = Service([("mutation-stats-0", 1)], {"mutation-stats-0": ["late"]})
     runner = (
