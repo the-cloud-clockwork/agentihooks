@@ -551,3 +551,61 @@ def test_the_binding_pass_keeps_a_record_from_another_host_or_with_unknown_liven
     from scripts.swarm import live_binding
 
     assert live_binding.settle(rig.store, rig.agent, None) is None
+
+
+@pytest.mark.feature("managed-process-owner-observation")
+def test_a_foreign_managed_server_has_unknown_process_liveness(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("socket.gethostname", lambda: "observer")
+    rig.bindings.put(SLUG, replace(rig.record, host_id="owner", state=CONNECTED))
+    local_start = Mock(side_effect=AssertionError("foreign process inspected locally"))
+    monkeypatch.setattr(supervisor, "start_time", local_start)
+    rig.runner.hive = SimpleNamespace(holder=lambda name: "owner")
+
+    facts = rig.runner.bindings([rig.agent])
+
+    assert rig.agent.runtime_target == {}
+    assert facts == {rig.agent.name: {"process": None}}
+    assert live_binding.record(rig.store, SLUG, rig.agent, facts[rig.agent.name], 1000) == {}
+    assert live_binding.findings(rig.store, SLUG) == []
+    local_start.assert_not_called()
+    live_binding.read.assert_not_called()
+    assert rig.bindings.get(SLUG, rig.agent.execution_id).state == CONNECTED
+
+
+@pytest.mark.feature("managed-process-owner-observation")
+def test_a_local_managed_server_keeps_its_matching_binding(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("socket.gethostname", lambda: "observer")
+    rig.bindings.put(SLUG, replace(rig.record, host_id="observer", state=CONNECTED))
+    observed = {**live_binding.assignment(rig.agent), "hooks": True}
+    live_binding.read.return_value = observed
+
+    facts = rig.runner.bindings([rig.agent])
+
+    assert facts == {rig.agent.name: observed}
+    live_binding.read.assert_called_once_with(rig.agent, 123)
+    assert live_binding.record(rig.store, SLUG, rig.agent, facts[rig.agent.name], 1000) == {}
+    assert live_binding.findings(rig.store, SLUG) == []
+
+
+@pytest.mark.feature("managed-process-owner-observation")
+def test_a_dead_local_managed_server_still_has_a_process_mismatch(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("socket.gethostname", lambda: "observer")
+    rig.bindings.put(SLUG, replace(rig.record, host_id="observer", state=CONNECTED))
+    monkeypatch.setattr(supervisor, "start_time", lambda pid: None)
+
+    facts = rig.runner.bindings([rig.agent])
+
+    assert facts == {rig.agent.name: {"process": False}}
+    assert live_binding.record(rig.store, SLUG, rig.agent, facts[rig.agent.name], 1000) == {
+        "process": {"expected": True, "actual": False}
+    }
+    assert [finding.id for finding in live_binding.findings(rig.store, SLUG)] == [
+        f"live-binding/{rig.agent.name}/process"
+    ]
+    live_binding.read.assert_not_called()
