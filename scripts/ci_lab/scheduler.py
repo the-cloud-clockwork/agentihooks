@@ -9,7 +9,8 @@ the first unit, completed on the last. A grade's state is the JSON document at `
 A newer head of a lane drops the older head's pending units, carries its leased and finished jobs and cancels its
 checks; a push grade of a tree a merge group grade passed carries that grade's gates. A head or lane the control
 routes marked hotfix grades in the hotfix class, and a paused class holds its heads but the excepted ones until
-resume. `agentihooks ci-lab-scheduler` runs the service: the lease API with its control routes, capacity and a
+resume. A plant head grades in the pull request class on its merge base with dev, resolved at intake once its actor
+is trusted. `agentihooks ci-lab-scheduler` runs the service: the lease API with its control routes, capacity and a
 commit's grades on the scheduler port, metrics on the metrics port, both from one load, and one pass every interval.
 """
 
@@ -65,7 +66,7 @@ from scripts.ci_lab.retry import Policy, UnitResult, decide, policy
 from scripts.ci_lab.static_gates import REGISTRY, WORKFLOW, discover
 from scripts.ci_lab.store import PREFIX, Store, Verdict
 from scripts.ci_lab.units import Priority, Unit
-from scripts.ci_lab.webhooks import HEAD_SUBJECT, HeadEvent
+from scripts.ci_lab.webhooks import HEAD_SUBJECT, PLANT, HeadEvent
 from scripts.ci_lab.worktrees import Lab, Mirror, lab
 from scripts.ci_mutation import scope
 from scripts.ci_runner_trust import ACTORS, validate_actors
@@ -131,6 +132,7 @@ SUBJECT = f"{HEAD_SUBJECT}.>"
 BATCH = 50
 FETCH_MS = 100
 QUIET_MS = 30_000
+STARTS_PER_PASS = 8
 INTERVAL_S = 2.0
 LEASE_TTL_MS = 120_000
 LEASE_POLL_MS = 500
@@ -333,10 +335,14 @@ class Inbox(Protocol):
 
 
 class Expander(Protocol):
-    """What expands a grade request into units."""
+    """What expands a grade request into units and bases a plant head on dev."""
 
     def expand(self, request: GradeRequest) -> Plan:
         """Return the plan of one grade request."""
+        ...
+
+    def merge_base(self, repo: str, head: str) -> str:
+        """Return the merge base of a head with the repository's dev branch head."""
         ...
 
 
@@ -450,6 +456,12 @@ def _request(data: Mapping[str, Any]) -> GradeRequest:
         actor=str(data["actor"]),
         bypass_negative=bool(data["bypass_negative"]),
     )
+
+
+def _urgency(entry: tuple[str, str]) -> tuple[int, int, str]:
+    """Return a waiting head's place in release order: its class, then when it began waiting, then its lane."""
+    held = json.loads(entry[1])
+    return held["request"]["tier"], held["since"], entry[0]
 
 
 def job_id(head: str, unit: Unit) -> str:
@@ -642,10 +654,23 @@ class Scheduler:
             if request is None:
                 actions.append(f"untrusted {head.event.actor} head {head.event.head}")
                 continue
+            if head.event.event == PLANT:
+                request = self._plant(request, actions)
+                if request is None:
+                    continue
             if head.lane in fixes or head.event.head in fixes:
                 request = replace(request, tier=Priority.HOTFIX)
             actions.append(self._hold(request, head.lane, head.ref, now_ms))
         return actions
+
+    def _plant(self, request: GradeRequest, actions: list[str]) -> GradeRequest | None:
+        """Return a plant head's request based on the head's merge base with dev, resolved before the head is held or
+        keyed, or none after naming in the actions why git could not resolve one."""
+        try:
+            return replace(request, base=self.ports.expander.merge_base(request.repo, request.head))
+        except subprocess.CalledProcessError as error:
+            actions.append(f"cannot resolve the dev merge base of plant head {request.head}: {error}")
+            return None
 
     def _hold(self, request: GradeRequest, lane: str, ref: str, now_ms: int) -> str:
         """Hold a head and its grade ref in its lane's quiet window; a new head of the lane restarts the window, and the
@@ -662,12 +687,16 @@ class Scheduler:
         return f"received {request.head} on {lane}"
 
     def _release(self, now_ms: int) -> list[str]:
-        """Start each held head whose quiet window ended, except one a pause of its class holds. A head whose manifest
-        fetch still runs off the pass keeps its place and window for the next pass; one whose fetch GitHub never
-        answered or answered with a server error waits out the window again; any other expansion failure drops it."""
+        """Start at most `STARTS_PER_PASS` held heads whose quiet window ended, except one a pause of its class holds:
+        the most urgent class first and the longest waiting first within a class. A head still quiet or paused takes no
+        place, and the rest wait for a later pass, so every pass reaches admission. A head whose manifest fetch still
+        runs off the pass keeps its place and window for the next pass; one whose fetch GitHub never answered or
+        answered with a server error waits out the window again; any other expansion failure drops it. Each of these
+        takes a place, since its expansion ran on the pass."""
         actions: list[str] = []
         pauses = control.paused(self.client)
-        for name, raw in sorted(self.client.hgetall(WAITING).items()):
+        started = 0
+        for name, raw in sorted(self.client.hgetall(WAITING).items(), key=_urgency):
             held = json.loads(raw)
             request = _request(held["request"])
             quiet = 0 if request.tier == Priority.HOTFIX else self.settings.quiet_ms
@@ -675,6 +704,7 @@ class Scheduler:
                 pauses, CLASSES[request.tier], request.head, held["lane"]
             ):
                 continue
+            started += 1
             self.client.hdel(WAITING, name)
             try:
                 actions.append(self._start(request, held["lane"], held.get("ref", ""), now_ms))
@@ -692,6 +722,8 @@ class Scheduler:
                 jsonschema.ValidationError,
             ) as error:
                 actions.append(f"cannot expand {request.head}: {error}")
+            if started == STARTS_PER_PASS:
+                break
         return actions
 
     def _start(self, request: GradeRequest, lane: str, ref: str, now_ms: int) -> str:
@@ -1135,15 +1167,28 @@ class MirrorExpander:
         }
         return {name: yaml.safe_load(text) or {} for name, text in self._contents(mirror, files).items()}
 
-    def _on_dev(self, repo: str, path: str) -> str:
-        """Return one file of the repository's dev branch head."""
-        mirror = self._mirror(repo)
+    def _dev_head(self, repo: str, mirror: Mirror) -> str:
+        """Return the repository's dev branch head as the remote lists it, fetched into the mirror; git fails when the
+        remote lists no dev branch."""
         listing = subprocess.run(
-            ["git", "ls-remote", repo, f"refs/heads/{DEV}"], capture_output=True, text=True, check=True
+            ["git", "ls-remote", "--exit-code", repo, f"refs/heads/{DEV}"], capture_output=True, text=True, check=True
         )
         head = listing.stdout.split()[0]
         mirror.fetch(head)
-        return self._git(mirror, "show", f"{head}:{path}")
+        return head
+
+    def _on_dev(self, repo: str, path: str) -> str:
+        """Return one file of the repository's dev branch head."""
+        mirror = self._mirror(repo)
+        return self._git(mirror, "show", f"{self._dev_head(repo, mirror)}:{path}")
+
+    def merge_base(self, repo: str, head: str) -> str:
+        """Return the merge base of a head with the repository's dev branch head, both fetched into the mirror; git
+        fails when the head shares no history with dev."""
+        mirror = self._mirror(repo)
+        dev = self._dev_head(repo, mirror)
+        mirror.fetch(head)
+        return self._git(mirror, "merge-base", head, dev).strip()
 
     def trusted(self, repo: str) -> frozenset[str]:
         """Return the runner trust list on the repository's dev branch."""

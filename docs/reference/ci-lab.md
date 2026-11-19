@@ -1126,6 +1126,8 @@ its done criteria name are not recorded:
 | `ContainerCreating` with `hostPath type check failed` for `git` or `uv` | The node cache has not prepared the node | `kubectl -n ci-lab get pods -l app.kubernetes.io/component=node-cache -o wide` and its `prepare` log; the kubelet mounts once the folders exist |
 | The worker exits at start with `ci-lab worker refuses` | Its environment holds a `GITHUB_APP_` or `REDIS` variable | Remove the variable from the chart |
 | The worker exits at start with a `KeyError` naming a `CI_LAB_` variable | A required work setting is missing from the pod environment | Compare the pod's `env` with the contract table above |
+| The worker log repeats `ci-lab worker: lease call failed, retrying in <n>s` | The scheduler is not answering on 8800, or answers with a server error: it is rolling, restarting or down. The worker keeps running, retries after a backoff that doubles from 1 up to 10 seconds, and leases again on the first answer | `kubectl -n ci-lab get deploy ci-lab-scheduler` and `kubectl -n ci-lab logs deploy/ci-lab-scheduler --since 10m` |
+| The worker exits with an `HTTPError` 4xx raised from `Client.lease` | The scheduler answered the lease call with a client error, such as a 404 when `CI_LAB_SCHEDULER_URL` names a wrong path; a retry cannot change that answer, so the process ends with the traceback without draining its running units, which are left to finish or reap | Compare the pod's `CI_LAB_SCHEDULER_URL` with the contract table above |
 | A head's units are reaped undelivered and the worker log shows a failed `git fetch` | The node mirror lacks the head and the worker has no other source | The node cache's `fetched-at` stamp and warm log, see [Verify every node](ci-lab-node-cache.md#verify-every-node) |
 | A venv build fails with `uv sync for <tree> ended with code` | The build needs the package index, which the policy refuses | The kept build log the error names; see Limitations |
 | Uploads time out or are refused | The MinIO egress rule does not match the object store's pods | `minio.namespace`, `minio.pods` and `minio.port` against `kubectl get pods -n <namespace> --show-labels` |
@@ -1671,7 +1673,8 @@ both of these hold:
 
 | Source | Recorded when | Subject | `head` and `base` | `actor` |
 |---|---|---|---|---|
-| `push` delivery on `/github` | A branch under `refs/heads/` moved; a deleted branch or a tag records nothing | `ci.lab.head.push` | `after` and `before` | The delivery's sender |
+| `push` delivery on `/github` | A branch under `refs/heads/` outside the plant prefix moved; a deleted branch, a new branch whose `before` is all zeros, or a tag records nothing | `ci.lab.head.push` | `after` and `before` | The delivery's sender |
+| `push` delivery on `/github` to a plant branch | A branch under `refs/heads/diffcheck/lab-plant-` (`scripts.ci_lab.webhooks.PLANT_PREFIX`) moved; a deleted branch records nothing | `ci.lab.head.plant` | `after`, and an empty base whatever `before` says | The delivery's sender |
 | `pull_request` delivery on `/github` | The action is `opened`, `synchronize` or `reopened` | `ci.lab.head.pull_request` | The pull request's head and base SHA | The pull request's author |
 | `merge_group` delivery on `/github` | The action is `checks_requested` | `ci.lab.head.merge_group` | The group's `head_sha` and `base_sha` | The delivery's sender |
 | `check_run` delivery on `/github` | The action is `rerequested` and the check's name starts with `lab` | `ci.lab.head.check_run` | The run's `head_sha`, and the base of its first pull request, empty when it has none | The delivery's sender |
@@ -2349,9 +2352,19 @@ key; the builders are pure and read no file, clock or network.
 
 1. Intake reads new heads from the `ci.lab.head.>` lab heads stream and admits only actors on the
    runner trust list of the repository's dev branch. A head on the fix branch of any swarm in
-   panic grades in the hotfix class.
+   panic grades in the hotfix class. An admitted plant head, a push to a branch under
+   `refs/heads/diffcheck/lab-plant-`, then takes as its base the merge base of the head with the
+   dev head the remote lists (`MirrorExpander.merge_base`), before it is held or keyed, and grades
+   in the pull request class with that commit as base and grader, so both twins of a plant cut
+   from one dev commit share it. When git cannot resolve one, the pass prints
+   `cannot resolve the dev merge base of plant head <head>: <error>` and never holds the head.
 2. Each head waits in its lane (repository, branch and class) for the quiet window, 30 seconds by
-   default; a newer head of the lane restarts it and a hotfix waits for none.
+   default; a newer head of the lane restarts it and a hotfix waits for none. A pass starts at most
+   eight heads whose window ended (`STARTS_PER_PASS`): the most urgent class first (hotfix, pull
+   request, queue, promotion, backfill) and, within a class, the head that has waited longest. A head
+   still quiet or held by a pause takes no place; a head put back for its manifest fetch takes one,
+   since its expansion ran on the pass. The other heads wait for a later pass, so every pass reaches
+   steps 5 to 8 however many heads wait.
 3. Expansion reads the grader's test workflow and input key registry and the head and base trees
    from the git mirror with `git ls-tree` and `git show`, never a checkout, and keys one static
    unit per gate step, described in [Static units](#static-units). A merge group, promotion or
