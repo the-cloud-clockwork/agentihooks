@@ -272,9 +272,14 @@ def test_harvest_fails_when_github_cannot_answer(tmp_path: Path, monkeypatch: py
 
 
 @pytest.mark.feature("ci-stats-seed-download-retry")
-@pytest.mark.parametrize(("now", "waited"), [(0.0, 5), (40.0, 2.0), (45.0, 0.0)])
+@pytest.mark.parametrize(("now", "waited", "shown"), [(0.0, 5, "5"), (40.0, 2.0, "2"), (45.0, 0.0, "0")])
 def test_harvest_downloads_a_failed_artifact_again_after_a_wait(
-    folder: Path, monkeypatch: pytest.MonkeyPatch, now: float, waited: float
+    folder: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    now: float,
+    waited: float,
+    shown: str,
 ) -> None:
     responses = {
         "pulls/7": {"head": {"sha": "abc"}},
@@ -301,6 +306,9 @@ def test_harvest_downloads_a_failed_artifact_again_after_a_wait(
     assert downloads == [("actions/artifacts/5/zip", 42.0)] * 2
     assert slept == [waited]
     assert sorted(path.name for path in folder.iterdir()) == [f"{KEEP}.json", "x.index"]
+    assert capsys.readouterr().out == (
+        f"Mutation stats seed: actions/artifacts/5/zip failed, asking again in {shown} s: gh: Bad Gateway (HTTP 502)\n"
+    )
 
 
 @pytest.mark.feature("ci-stats-seed-download-retry")
