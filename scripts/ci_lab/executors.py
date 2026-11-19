@@ -29,7 +29,7 @@ from types import FrameType
 from typing import Any
 
 from scripts import ci_cpu_quota, ci_wiring
-from scripts.ci_lab import caches, contract, run_mutation, run_static, run_tests, venvs, worker
+from scripts.ci_lab import caches, contract, run_mutation, run_static, run_tests, venvs, worker, worktrees
 from scripts.ci_lab.outcomes import FAILED, PASSED
 from scripts.ci_lab.sandbox import PortAllocator, Sandbox
 from scripts.ci_lab.static_gates import REGISTRY, WORKFLOW, StaticGate, discover
@@ -302,7 +302,7 @@ def settings(environ: Mapping[str, str]) -> tuple[Pod, Suite, Mutation]:
     allowed = worker.environment(environ)
     root = Path(allowed[contract.WORK_ROOT])
     node = Path(allowed[contract.GIT_MIRROR])
-    mirror = Mirror(node, root / "store", str(node))
+    mirror = Mirror(node, root / "store", str(node), worktrees.lab(allowed), allowed.get(contract.REPOSITORY, ""))
     trees = Trees(Worktrees(mirror, root / "trees", TREES))
     ports = PortAllocator(FIRST_PORT, LAST_PORT, PORT_WIDTH)
     pod = Pod(trees, root, ports, WHITELIST, UNIT_TIMEOUT_S)
