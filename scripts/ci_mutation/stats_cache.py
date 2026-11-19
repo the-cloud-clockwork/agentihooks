@@ -379,6 +379,9 @@ def collect_cached_stats(
     if any(result["status"] != 0 for result in fresh):
         raise SystemExit(1)
     report(f"Mutation stats cache: timing collect {time.monotonic() - clock:.1f}s"); clock = time.monotonic()
+    import cProfile, io, pstats
+    profiler = cProfile.Profile()
+    profiler.enable()
     functions = {function for result in fresh for function in result["tests"]}
     sliced = fresh_by_path(missing, fresh)
     for path in missing:
@@ -386,6 +389,14 @@ def collect_cached_stats(
         if result is not None:
             dependencies = inputs.for_test(path, covered, fresh)
             stored.save(path, result, dependencies, covered is not None, inputs.discovery(dependencies))
+    profiler.disable()
+    stream = io.StringIO()
+    profile = pstats.Stats(profiler, stream=stream)
+    profile.sort_stats("tottime").print_stats(35)
+    profile.sort_stats("cumulative").print_stats(35)
+    for line in stream.getvalue().splitlines():
+        if line.strip():
+            report(f"Mutation stats cache: profile {line}")
     report(f"Mutation stats cache: timing records {time.monotonic() - clock:.1f}s"); clock = time.monotonic()
     cap(folder)
     report(f"Mutation stats cache: timing cap {time.monotonic() - clock:.1f}s")
