@@ -60,6 +60,21 @@ def planted(run: Run, head: str, actor: str = ACTOR) -> None:
     run.lab.inbox.pending.append(scheduler.Head(HeadEvent(PLANT, REPO, head, "", actor, "pushed"), head))
 
 
+def mirrored(tmp_path: Path) -> tuple[scheduler.Scheduler, Inbox]:
+    node = tmp_path / "node"
+    _git(tmp_path, "init", "-q", "--bare", str(node))
+    toolchain = Toolchain("3.12", {}, "", "", "", {})
+    expander = scheduler.MirrorExpander(node, tmp_path / "stores", toolchain, _no_tests, _unknown)
+    inbox = Inbox()
+    ports = scheduler.Ports(inbox, expander, lambda _repo: Poster(), frozenset[str], FakeKube())
+    settings = scheduler.Settings(frozenset({ACTOR}), 0)
+    return scheduler.Scheduler(fake_redis(), LocalObjects(tmp_path / "objects"), ports, settings), inbox
+
+
+def planted_in(repo: Path, head: str) -> scheduler.Head:
+    return scheduler.Head(HeadEvent(PLANT, f"file://{repo}", head, "", ACTOR, "pushed"), head)
+
+
 @pytest.mark.feature("lab-plant-push-intake")
 def test_a_plant_push_grades_in_the_pull_request_tier_on_its_dev_merge_base(tmp_path: Path) -> None:
     bases = Bases({HEAD_A: scheduler.frame(Priority.PULL_REQUEST, TREE, MERGE_BASE, {"lint": (unit(1),)})})
@@ -124,16 +139,8 @@ def test_both_twins_of_a_plant_grade_on_their_dev_merge_base_and_an_unrelated_he
     monkeypatch.setattr(
         scheduler, "discover", lambda workflow, registry, reusable: [_gate("size", "lint", ("src",), ())]
     )
-    node = tmp_path / "node"
-    _git(tmp_path, "init", "-q", "--bare", str(node))
-    toolchain = Toolchain("3.12", {}, "", "", "", {})
-    expander = scheduler.MirrorExpander(node, tmp_path / "stores", toolchain, _no_tests, _unknown)
-    inbox = Inbox()
-    ports = scheduler.Ports(inbox, expander, lambda _repo: Poster(), frozenset[str], FakeKube())
-    settings = scheduler.Settings(frozenset({ACTOR}), 0)
-    engine = scheduler.Scheduler(fake_redis(), LocalObjects(tmp_path / "objects"), ports, settings)
-    for head in (*twins, orphan):
-        inbox.pending.append(scheduler.Head(HeadEvent(PLANT, f"file://{repo}", head, "", ACTOR, "pushed"), head))
+    engine, inbox = mirrored(tmp_path)
+    inbox.pending.extend(planted_in(repo, head) for head in (*twins, orphan))
     actions = engine.tick(1000)
     runs = [name.removeprefix(scheduler.GRADES) for name in engine.client.keys(scheduler.GRADES + "*")]
     grades = [grade for run in runs if (grade := engine.grade(run)) is not None]
@@ -142,3 +149,18 @@ def test_both_twins_of_a_plant_grade_on_their_dev_merge_base_and_an_unrelated_he
     }
     (refused,) = [action for action in actions if action.startswith("cannot resolve")]
     assert refused.startswith(f"cannot resolve the dev merge base of plant head {orphan}: Command ")
+
+
+@pytest.mark.feature("lab-plant-push-intake")
+def test_a_plant_head_of_a_remote_that_lists_no_dev_branch_is_named_and_never_held(
+    tmp_path: Path, origin: tuple[Path, str, str]
+) -> None:
+    repo, _, head = origin
+    _git(repo, "branch", "-m", "dev", "trunk")
+    engine, inbox = mirrored(tmp_path)
+    inbox.pending.append(planted_in(repo, head))
+    (refused,) = engine.tick(1000)
+    assert refused.startswith(f"cannot resolve the dev merge base of plant head {head}: Command ")
+    assert "'ls-remote', '--exit-code'" in refused
+    assert refused.endswith("returned non-zero exit status 2.")
+    assert engine.client.hgetall(scheduler.WAITING) == {}

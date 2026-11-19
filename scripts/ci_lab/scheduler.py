@@ -647,8 +647,10 @@ class Scheduler:
             if request is None:
                 actions.append(f"untrusted {head.event.actor} head {head.event.head}")
                 continue
-            if head.event.event == PLANT and (request := self._plant(request, actions)) is None:
-                continue
+            if head.event.event == PLANT:
+                request = self._plant(request, actions)
+                if request is None:
+                    continue
             if head.lane in fixes or head.event.head in fixes:
                 request = replace(request, tier=Priority.HOTFIX)
             actions.append(self._hold(request, head.lane, head.ref, now_ms))
@@ -1151,10 +1153,11 @@ class MirrorExpander:
         }
         return {name: yaml.safe_load(text) or {} for name, text in self._contents(mirror, files).items()}
 
-    def _dev(self, repo: str, mirror: Mirror) -> str:
-        """Return the repository's dev branch head as the remote lists it, fetched into the mirror."""
+    def _dev_head(self, repo: str, mirror: Mirror) -> str:
+        """Return the repository's dev branch head as the remote lists it, fetched into the mirror; git fails when the
+        remote lists no dev branch."""
         listing = subprocess.run(
-            ["git", "ls-remote", repo, f"refs/heads/{DEV}"], capture_output=True, text=True, check=True
+            ["git", "ls-remote", "--exit-code", repo, f"refs/heads/{DEV}"], capture_output=True, text=True, check=True
         )
         head = listing.stdout.split()[0]
         mirror.fetch(head)
@@ -1163,13 +1166,13 @@ class MirrorExpander:
     def _on_dev(self, repo: str, path: str) -> str:
         """Return one file of the repository's dev branch head."""
         mirror = self._mirror(repo)
-        return self._git(mirror, "show", f"{self._dev(repo, mirror)}:{path}")
+        return self._git(mirror, "show", f"{self._dev_head(repo, mirror)}:{path}")
 
     def merge_base(self, repo: str, head: str) -> str:
         """Return the merge base of a head with the repository's dev branch head, both fetched into the mirror; git
         fails when the head shares no history with dev."""
         mirror = self._mirror(repo)
-        dev = self._dev(repo, mirror)
+        dev = self._dev_head(repo, mirror)
         mirror.fetch(head)
         return self._git(mirror, "merge-base", head, dev).strip()
 

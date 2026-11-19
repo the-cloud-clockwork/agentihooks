@@ -25,7 +25,8 @@
         "tests/ci_lab/test_plant_intake.py::test_an_ordinary_push_keeps_its_base_and_the_promotion_tier_and_resolves_nothing",
         "tests/ci_lab/test_plant_intake.py::test_an_untrusted_plant_push_is_refused_before_its_base_is_resolved",
         "tests/ci_lab/test_plant_intake.py::test_a_plant_head_whose_dev_merge_base_fails_is_named_and_the_next_head_still_held",
-        "tests/ci_lab/test_plant_intake.py::test_both_twins_of_a_plant_grade_on_their_dev_merge_base_and_an_unrelated_head_is_named"
+        "tests/ci_lab/test_plant_intake.py::test_both_twins_of_a_plant_grade_on_their_dev_merge_base_and_an_unrelated_head_is_named",
+        "tests/ci_lab/test_plant_intake.py::test_a_plant_head_of_a_remote_that_lists_no_dev_branch_is_named_and_never_held"
       ]
     },
     {
