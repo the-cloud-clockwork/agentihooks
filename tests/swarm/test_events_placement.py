@@ -234,7 +234,9 @@ def ask(task_id: str, hive: str) -> dict:
 def test_the_hub_admits_a_workstation_task_only_from_the_root_hive(
     rig: SimpleNamespace, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert rig.admitter.admit(SLUG, ask("desk", "hive-a")) is None
+    assert rig.admitter.admit(SLUG, ask("desk", "hive-a")) == {
+        "held": "the task is workstation off the root hive, pinned to another hive or needs what the hive lacks"
+    }
     assert rig.store.claimant(SLUG, "desk") is None
     assert rig.store.agents(SLUG) == []
     assert capsys.readouterr().err.splitlines() == [
@@ -247,7 +249,9 @@ def test_the_hub_admits_a_workstation_task_only_from_the_root_hive(
 
 
 def test_the_hub_admits_a_hive_pinned_task_only_from_its_hive(rig: SimpleNamespace) -> None:
-    assert rig.admitter.admit(SLUG, ask("pinned", "hive-a")) is None
+    assert rig.admitter.admit(SLUG, ask("pinned", "hive-a")) == {
+        "held": "the task is workstation off the root hive, pinned to another hive or needs what the hive lacks"
+    }
     assert rig.store.claimant(SLUG, "pinned") is None
     admitted = rig.admitter.admit(SLUG, ask("pinned", "hive-b"))
     assert admitted["hive"] == "hive-b"
@@ -256,7 +260,9 @@ def test_the_hub_admits_a_hive_pinned_task_only_from_its_hive(rig: SimpleNamespa
 
 def test_the_hub_admits_a_needs_task_only_from_a_hive_declaring_every_need(rig: SimpleNamespace) -> None:
     registry.update(rig.redis, "hive-a", ["capabilities=headed"])
-    assert rig.admitter.admit(SLUG, ask("gpu", "hive-a")) is None
+    assert rig.admitter.admit(SLUG, ask("gpu", "hive-a")) == {
+        "held": "the task is workstation off the root hive, pinned to another hive or needs what the hive lacks"
+    }
     registry.update(rig.redis, "hive-c", ["capabilities=gpu"])
     assert rig.admitter.admit(SLUG, ask("gpu", "hive-c"))["hive"] == "hive-c"
 
