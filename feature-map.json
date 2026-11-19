@@ -1,6 +1,22 @@
 {
   "features": [
     {
+      "id": "credential-guard-reads-heredoc-commands",
+      "origin": "regression",
+      "ordered_at": "2026-11-19",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-credential-guard-heredoc-mask",
+      "behaviour": "The credential guard masks only a heredoc's body and its terminator line, so the rest of the delimiter line is judged as commands and a credential read placed after the delimiter is refused the same way as at the top level, for unquoted, quoted and dash heredocs. A heredoc whose segment names a shell, as the command itself, through sudo, a kubectl, docker or ssh wrapper, a pipe from the heredoc's stage or a command substitution, has its body checked as a command of its own, so a credential read, an environment dump or a recursive search of a tree that holds a credential file inside it is refused. A heredoc fed to a command that does not run it stays data, a recursive search rewritten after a delimiter keeps the heredoc intact, and stripping heredocs keeps the delimiter line for the tool matcher and the prompts gate.",
+      "seam": "hooks.context.credential_guard.decide and hooks.context.credential_guard.evaluate on Bash payloads, and hooks.context.credential_guard.strip_heredocs",
+      "tests": [
+        "tests/test_credential_guard.py::test_a_credential_read_after_a_heredoc_delimiter_is_refused",
+        "tests/test_credential_guard.py::test_a_credential_read_in_a_heredoc_a_shell_runs_is_refused",
+        "tests/test_credential_guard.py::test_a_heredoc_that_reads_no_credential_passes",
+        "tests/test_credential_guard.py::test_a_heredoc_a_shell_runs_keeps_the_credential_tree_scan",
+        "tests/test_credential_guard.py::test_a_rewrite_after_a_heredoc_delimiter_keeps_the_heredoc",
+        "tests/test_credential_guard.py::test_stripping_heredocs_keeps_the_rest_of_the_delimiter_line"
+      ]
+    },
+    {
       "id": "lab-scheduler-budget",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/lab-budget-live-proof",
