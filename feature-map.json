@@ -10502,7 +10502,7 @@
     },
     {
       "id": "lab-static-plant-proofs",
-      "origin": "spec",
+      "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/cut-plant-proofs",
       "behaviour": "Deterministic static plant twins preserve the checkout and index, send signed notices against one protected base, and report only that grade when its unplanted twin is green and its planted lint gate alone is red.",
       "seam": "scripts.ci_lab.plant_proofs.prepare over git objects and scripts.ci_lab.plant_grade.prove through signed HTTP notices and GitHub check runs",
