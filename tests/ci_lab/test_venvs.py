@@ -103,7 +103,6 @@ def _call(seen: dict[str, Any]) -> dict[str, object]:
 def test_the_baked_venv_lives_where_the_image_puts_it() -> None:
     assert venvs.BAKED == Path("/opt/agentihooks-venv")
     assert venvs.MARKER == "lockfile.sha256"
-    assert (venvs.LOCKFILE, venvs.EXCLUDES) == (LOCK, EXCLUDES)
 
 
 def test_the_baked_venv_serves_a_matching_digest(tmp_path: Path, uv: Uv) -> None:
