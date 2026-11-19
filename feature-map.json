@@ -10524,6 +10524,16 @@
         "tests/hub/test_admission.py::test_a_hive_local_refusal_keeps_the_only_offer_for_an_eligible_second_hive",
         "tests/hub/test_admission.py::test_a_refusal_about_the_task_stays_terminal"
       ]
+    },
+    {
+      "id": "focused-proofs-never-wait-on-a-lane",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-focused-proof-run-group",
+      "behaviour": "Every Proofs workflow dispatch, whatever its proof, runs in its own concurrency group named focused-proof and its run id, with queue max and no cancelling, so a short focused proof never queues on a shared hosted lane behind a full Tests dispatch.",
+      "seam": "Proofs workflow concurrency group",
+      "tests": [
+        "tests/test_ci_hosted_lanes.py::test_every_proof_dispatch_runs_in_its_own_focused_proof_group_and_never_waits_on_a_lane"
+      ]
     }
   ],
   "unmapped_rules": [
