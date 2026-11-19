@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/status.py:scripts.swarm.status.x_readable_hives:591663d89e93aca19c6f11ad3e9075e2d3807bd97662228b807882a7c43576ef": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: readable_hives drops every hive whose admission count the Redis role refused from the hives it returns and keeps only that hive's refusal text, and loaded_hives uses the returned count only for that same hive's room, refusal, limit and first room fields with no aggregate across hives, so the count returned for a refused hive never reaches a returned value."
+  }
+}
