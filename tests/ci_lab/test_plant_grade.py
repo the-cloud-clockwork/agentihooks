@@ -104,7 +104,7 @@ class Lab:
             self.check("lab-shadow/lint", "failure", "other-grade"),
             self.check("Gate — Required", "success", run),
             self.check("lab-shadow/required", self.required if red else "success", run),
-            self.check("lab-shadow/" + self.failure, "failure" if red else "success", run),
+            self.check("lab-shadow/" + (self.failure if red else "lint"), "failure" if red else "success", run),
         ]
         if self.incomplete:
             rows[-2]["status"] = "in_progress"
