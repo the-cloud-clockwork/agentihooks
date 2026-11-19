@@ -3,6 +3,7 @@ import subprocess
 from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -1551,6 +1552,114 @@ def test_a_measured_record_parses_each_closure_source_once(tmp_path: Path, monke
         stats_cache.collect_cached_stats(root, cache, {}, ["tests/test_measured.py"], [], collect)
         assert {path: parsed[text] for path, text in sources.items()} == dict.fromkeys(sources, 1)
     assert calls == [["tests/test_measured.py"]]
+
+
+def test_records_with_one_covered_set_walk_and_hash_it_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.ci_mutation import stats_cache
+
+    root = tmp_path / "repo"
+    _repository(
+        root,
+        {
+            "scripts/covered/source.py": "value = 1\n",
+            "scripts/covered/conftest.py": "from scripts.shared_helper import value\n",
+            "scripts/shared_helper.py": "value = 1\n",
+            "tests/test_measured.py": "def test_one():\n    pass\n\n\ndef test_two():\n    pass\n",
+        },
+    )
+    nodes = ["tests/test_measured.py::test_one", "tests/test_measured.py::test_two"]
+    sources = ["scripts/covered/source.py"]
+    traced: list[str | list[str]] = []
+    trace = stats_cache.test_inputs
+
+    def walked(root: Path, path: str | list[str], *rest: Any) -> dict[str, str]:
+        traced.append(path)
+        return trace(root, path, *rest)
+
+    hashed: list[list[str]] = []
+    encode = stats_cache.encode
+
+    def encoded(value: object) -> str:
+        if isinstance(value, list):
+            hashed.append(value)
+        return encode(value)
+
+    monkeypatch.setattr(stats_cache, "test_inputs", walked)
+    monkeypatch.setattr(stats_cache, "encode", encoded)
+    calls: list[list[str]] = []
+
+    def collect(chosen: list[str]) -> list[dict[str, object]]:
+        calls.append(chosen)
+        return [
+            {
+                "status": 0,
+                "tests": {},
+                "durations": dict.fromkeys(chosen, 1),
+                "cpu": 1,
+                "dependencies": dict.fromkeys(chosen, sources),
+            }
+        ]
+
+    cache = tmp_path / "cache"
+    stats_cache.collect_cached_stats(root, cache, {}, nodes, [], collect)
+    assert traced == ["tests/test_measured.py", sources]
+    assert hashed == [[]]
+    stats_cache.collect_cached_stats(root, cache, {}, nodes, [], collect)
+    assert calls == [nodes]
+    assert len(traced) == 4
+    (root / "scripts/shared_helper.py").write_text("value = 2\n")
+    stats_cache.collect_cached_stats(root, cache, {}, nodes, [], collect)
+    assert calls == [nodes, nodes]
+    assert len(traced) == 6
+
+
+def test_records_with_different_inputs_keep_their_own_discovery_digests(tmp_path: Path) -> None:
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    _repository(
+        root,
+        {
+            "tests/test_plain.py": "def test_plain():\n    pass\n",
+            "tests/test_scan.py": "from pathlib import Path\n\n\ndef test_scan():\n    assert sorted(Path('plugins').glob('*.py'))\n",
+            "plugins/__init__.py": "",
+            "plugins/a.py": "value = 1\n",
+        },
+    )
+    nodes = ["tests/test_plain.py::test_plain", "tests/test_scan.py::test_scan"]
+    calls: list[list[str]] = []
+
+    def collect(chosen: list[str]) -> list[dict[str, object]]:
+        calls.append(chosen)
+        return [
+            {
+                "status": 0,
+                "tests": {},
+                "durations": dict.fromkeys(chosen, 1),
+                "cpu": 1,
+                "dependencies": {node: [node.partition("::")[0]] for node in chosen},
+            }
+        ]
+
+    cache = tmp_path / "cache"
+    collect_cached_stats(root, cache, {}, nodes, [], collect)
+    collect_cached_stats(root, cache, {}, nodes, [], collect)
+    assert calls == [nodes]
+    (root / "plugins/b.py").write_text("value = 2\n")
+    subprocess.run(["git", "add", "--", "plugins/b.py"], cwd=root, check=True)
+    collect_cached_stats(root, cache, {}, nodes, [], collect)
+    assert calls == [nodes, [nodes[1]]]
+
+
+def test_conftest_candidates_name_every_parent_folder_conftest_nearest_first() -> None:
+    from scripts.ci_mutation.stats_cache import conftest_candidates
+
+    assert conftest_candidates("tests/swarm/test_cli.py") == (
+        "tests/swarm/conftest.py",
+        "tests/conftest.py",
+        "conftest.py",
+    )
+    assert conftest_candidates("conftest.py") == ("conftest.py",)
 
 
 def test_selected_test_ids_read_the_collected_stats_once_not_once_per_id(tmp_path):
