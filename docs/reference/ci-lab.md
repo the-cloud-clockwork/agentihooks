@@ -21,7 +21,7 @@ worker's PriorityClass is a cluster object outside that module;
 | `agentihooks ci-lab-scheduler --self-test` | `python -m scripts.ci_lab scheduler --self-test` | Checks the scheduler contract offline and prints it as JSON |
 | `agentihooks ci-lab-scheduler [--interval S] [--passes N]` | `python -m scripts.ci_lab scheduler [--interval S] [--passes N]` | Runs the scheduler service: reads the runtime config, serves the lease API, `/capacity` and `/grades/<sha>` on port 8800 and `/metrics` on 9108, and runs one grading pass every interval (2 seconds), forever unless `--passes` is set |
 | `agentihooks ci-lab-worker --self-test` | `python -m scripts.ci_lab worker --self-test` | Refuses any GitHub App variable, checks the worker contract offline and prints it as JSON |
-| `agentihooks ci-lab-worker` | `python -m scripts.ci_lab worker` | Runs the worker service: builds the pod from the worker environment, leases units from the scheduler and runs each through the adapter of its kind (see [Worker executors](#worker-executors)) until SIGTERM, then lets running units drain |
+| `agentihooks ci-lab-worker` | `python -m scripts.ci_lab worker` | Runs the worker service: builds the pod from the worker environment, leases units from the scheduler and runs each through the adapter of its kind (see [Worker executors](#worker-executors)) until SIGTERM, then lets running units drain; serves `/metrics` on 9108 from its own registry until the drain ends, and exits at start when it cannot bind 9108 |
 
 The self tests make no network, Redis, object store or GitHub calls. They exit 0 when the
 contract holds and 1 with the reason on standard error when it does not. A self test fails when
@@ -602,7 +602,10 @@ description: The lab cannot add workers for pull request heads because the KEDA 
 
 ### Lab series the rules read
 
-Only the scheduler serves lab metrics; the worker serves none. `scripts.ci_lab.scheduler.listen`
+Only the scheduler sets lab series. The worker serves `/metrics` on 9108 through
+`metrics.serve_registry` from a registry of its own that observes nothing, so its exposition holds
+the `HELP` and `TYPE` lines and no sample: a worker scrape target reads up without doubling the
+scheduler's series, which already count every unit from its report. `scripts.ci_lab.scheduler.listen`
 binds the metrics port with a fresh `metrics.Registry`, and every `GET /metrics` sets these from
 the scheduler's load snapshot through `metrics.observe_load`:
 
