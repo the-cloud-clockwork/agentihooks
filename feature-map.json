@@ -9131,6 +9131,16 @@
       ]
     },
     {
+      "id": "lab-mutation-verdict-key-prefix",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-verdict-key-prefix",
+      "behaviour": "Generated stats units and whole or split mutant units carry their kind and current lab schema before the existing digest, so the verdict store accepts completed mutation work without raising a key format error during a scheduler pass.",
+      "seam": "scripts.ci_lab.expand_mutation.stats_units and mutant_units through scripts.ci_lab.store.Store.put and get",
+      "tests": [
+        "tests/ci_lab/test_expand_mutation.py::test_generated_mutation_unit_keys_can_be_stored"
+      ]
+    },
+    {
       "id": "lab-mutant-unit-split",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-mutant-unit-split",

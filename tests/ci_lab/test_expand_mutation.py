@@ -5,7 +5,8 @@ from pathlib import Path
 import pytest
 from mutmut.mutation.pragma_handling import PragmaParseError
 
-from scripts.ci_lab import expand_mutation
+from scripts.ci_lab import digests, expand_mutation, store
+from scripts.ci_lab.objects import LocalObjects
 from scripts.ci_lab.units import Unit
 from scripts.ci_mutation.plan import MUTANT_SECONDS
 from scripts.ci_mutation.selection import selected_mutant_names
@@ -350,3 +351,30 @@ def test_stats_units_carry_the_stats_cache_identity(tmp_path: Path) -> None:
     assert [(unit.kind, unit.members) for unit in units] == [("stats", (path,)) for path in files]
     assert {unit.key for unit in units} == stored
     assert len(stored) == len(files)
+
+
+@pytest.mark.feature("lab-mutation-verdict-key-prefix")
+@pytest.mark.parametrize("schema_delta", [0, 1])
+@pytest.mark.parametrize(
+    ("kind", "timeout"),
+    [("stats", 1800.0), ("mutant", 1800.0), ("mutant", 1.0)],
+    ids=["stats", "whole-mutant", "split-mutant"],
+)
+def test_generated_mutation_unit_keys_can_be_stored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str, timeout: float, schema_delta: int
+) -> None:
+    import fakeredis
+
+    monkeypatch.setitem(digests.SCHEMAS, kind, digests.SCHEMAS[kind] + schema_delta)
+    root = repository(tmp_path / "repo", STATS_FILES if kind == "stats" else MUTANT_FILES)
+    if kind == "stats":
+        units = expand_mutation.stats_units(root, ["tests/test_a.py", "tests/test_b.py"])
+    else:
+        units = expand_mutation.mutant_units(root, {PATH: [12]}, {}, {}, timeout=timeout)
+    verdicts = store.Store(fakeredis.FakeRedis(), LocalObjects(tmp_path / "objects"))
+    assert units
+    for unit in units:
+        verdict = store.Verdict(unit.kind, unit.key, True, False, 1.0)
+        assert verdicts.put(verdict, {"members": list(unit.members)}, b"completed")
+        assert verdicts.get(unit.kind, unit.key) == verdict
+        assert unit.key.startswith(f"{kind}-v{digests.SCHEMAS[kind]}-")
