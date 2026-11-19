@@ -615,9 +615,11 @@ class Scheduler:
         runs.update(state.run for state in self._live() if state.head == head)
         return [summary(state) for run in sorted(runs) if (state := self.grade(run)) is not None]
 
-    def _live(self) -> list[State]:
-        """Return the state of every live grade that still has one."""
-        return [state for run in sorted(self.client.smembers(LIVE)) if (state := self.grade(run)) is not None]
+    def _live(self) -> Generator[State]:
+        """Yield the state of every live grade that still has one, reading one grade at a time."""
+        for run in sorted(self.client.smembers(LIVE)):
+            if (state := self.grade(run)) is not None:
+                yield state
 
     def _jobs(self, ids: Sequence[str]) -> list[Job]:
         """Return the queue jobs of the ids whose records still exist."""
@@ -790,17 +792,16 @@ class Scheduler:
         """Enqueue the held units the day's budget admits, the most urgent grade first: every unit of a class not shed,
         and backfill only into the slots workers offered free after every unit already waiting in the queue, backfill
         and those admitted in this pass included, since the queue leases in order. A class the budget newly sheds is
-        named first."""
+        named first. Each grade with held units is read again as it is admitted, so the pass holds one at a time."""
         actions = self._shedding()
-        grades = sorted(
-            (state for state in self._live() if any(slot.held for slot in state.units.values())),
-            key=lambda state: state.tier,
+        held = sorted(
+            (state.tier, state.run) for state in self._live() if any(slot.held for slot in state.units.values())
         )
-        if not grades:
+        if not held:
             return actions
         load = self.load(now_ms)
         waiting = sum(load.pending_slots.values())
-        for state in grades:
+        for state in filter(None, map(self.grade, (run for _, run in held))):
             admitted: list[Unit] = []
             for slot in state.units.values():
                 if slot.held and budget.admits(CLASSES[state.tier], DEFAULT.slots, load.slots_free, waiting, self.shed):
