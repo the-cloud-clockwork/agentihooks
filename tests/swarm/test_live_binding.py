@@ -882,14 +882,14 @@ def test_pending_relaunch_assignment_is_cleared_after_worker_launch(
     assert store.redis.hget(store.key("sw", "launch-assignments"), "one") is None
 
 
-def test_pending_master_relaunch_assignment_is_cleared_after_launch(ticking):
+def test_pending_master_relaunch_assignment_is_cleared_after_launch(ticking: Any) -> None:
     from scripts.swarm.tick import tick
 
     store, runtime, ledger = ticking
     saved = {"profile": "master", "harness": "claude", "model": "opus", "effort": "high", "account": "team"}
     store.redis.hset(store.key("sw", "launch-assignments"), "master", json.dumps(saved))
     tick("sw", store, ledger, runtime, 100)
-    assert runtime.masters[-1][1]["launch_assignment"] == saved
+    assert runtime.masters[-1][1]["launch_assignment"] == {**saved, "effort": "xhigh"}
     assert store.redis.hget(store.key("sw", "launch-assignments"), "master") is None
 
 

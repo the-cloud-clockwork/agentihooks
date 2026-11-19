@@ -83,9 +83,9 @@ def test_a_lane_effort_is_kept_and_a_codex_launch_names_its_own_level() -> None:
     assert successor_fill.filled(SAVED, held, "eng")["effort"] == "medium"
 
 
-def test_a_master_bound_lifts_a_lane_effort_below_high() -> None:
+def test_a_master_bound_lifts_a_lane_effort_below_xhigh() -> None:
     lifted = swarm({"master": {"effort": "medium"}}, "medium", "high").config("sw")
-    assert successor_fill.filled(SAVED, lifted, "master")["effort"] == "high"
+    assert successor_fill.filled(SAVED, lifted, "master")["effort"] == "xhigh"
 
 
 @pytest.mark.feature("launch-model-suits-harness")
