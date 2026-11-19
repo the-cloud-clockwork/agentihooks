@@ -1,0 +1,11 @@
+{
+  "gate": "lint",
+  "reason": "I001: import block is unsorted",
+  "edits": [
+    {
+      "path": "scripts/ci_lab/head_notice.py",
+      "before": "import hashlib\nimport hmac\n",
+      "after": "import hmac\nimport hashlib\n"
+    }
+  ]
+}
