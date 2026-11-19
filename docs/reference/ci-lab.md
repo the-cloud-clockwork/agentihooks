@@ -1151,9 +1151,9 @@ every pending runner. A pod gets this rank only when its spec names the class;
 |---|---|---|---|
 | `qitp-trading` | 1000 | `PreemptLowerPriority` | Trading workers |
 | `ci-lab-worker-preempt` | 250 | `PreemptLowerPriority` | Lab workers |
-| `arc-runners-oss-checks` | 200 | `Never` | Every runner of the deployment repository's `arc-runners-oss` chart: `anton-oss` pull request checks and image builds, `anton-oss-light`, `anton-oss-queue` merge queue groups, which inherit the `anton-oss` pod and its class, and `anton-oss-batch` mutation runners |
+| `arc-runners-oss-checks` | 200 | `Never` | Every runner set of the deployment repository's `arc-runners-oss` chart: the pull request check and image build runners, the light runners, the merge queue runners, which inherit the pull request runner pod and its class, and the batch mutation runners |
 | `arc-runners-oss-batch-priority` | 100 | `Never` | None; it stays defined in `runner-priority-classes.yaml` until no pod names it |
-| none | 0 | `PreemptLowerPriority`, the Kubernetes default | Every pod that names no class, such as the `anton` runners in the `arc-runners` namespace and the [node cache](ci-lab-node-cache.md) pods |
+| none | 0 | `PreemptLowerPriority`, the Kubernetes default | Every pod that names no class, such as the runners in the `arc-runners` namespace and the [node cache](ci-lab-node-cache.md) pods |
 
 The class is defined as:
 
@@ -1168,8 +1168,8 @@ globalDefault: false
 description: ci-lab workers schedule ahead of, and preempt, pull request, merge queue and batch runners in arc-runners-oss-checks (200)
 ```
 
-- `value: 250`: above all four `arc-runners-oss` runner sets, the merge queue's `anton-oss-queue`
-  included, and below `qitp-trading`.
+- `value: 250`: above all four `arc-runners-oss` runner sets, the merge queue runners included,
+  and below `qitp-trading`.
 - `preemptionPolicy: PreemptLowerPriority`: a pending worker that fits no node may evict running
   pods of lower priority to get one. Preemption only evicts pods of lower priority, so a runner can
   never evict a running worker, and a pending worker never evicts another worker. `qitp-trading`
@@ -1281,18 +1281,20 @@ This excerpt is the worker rollout that followed pull request 1917 on 19 Novembe
 
 ```text
 15:57:12.04  ci-lab           FailedScheduling  ci-lab-worker-8678fc4dbf-xh7zp      0/9 nodes are available: ... 3 Insufficient memory, ... 5 Insufficient cpu.
-15:57:12.16  arc-runners-oss  Preempted         anton-oss-ptczd-runner-qz8mn        Preempted by pod 3d3ca3ba-1909-44a3-b734-ed8de53f5408 on node anton-oci-hdgkgek2s2sq
-15:57:12.18  arc-runners-oss  Preempted         anton-oss-queue-fc9hz-runner-hb588  Preempted by pod 3d3ca3ba-1909-44a3-b734-ed8de53f5408 on node anton-oci-hdgkgek2s2sq
-15:57:12.28  arc-runners-oss  Preempted         anton-oss-ptczd-runner-kh79c        Preempted by pod 3d3ca3ba-1909-44a3-b734-ed8de53f5408 on node anton-oci-hdgkgek2s2sq
+15:57:12.16  arc-runners-oss  Preempted         <pull request runner pod 1>         Preempted by pod 3d3ca3ba-1909-44a3-b734-ed8de53f5408 on node <ci node>
+15:57:12.18  arc-runners-oss  Preempted         <merge queue runner pod>            Preempted by pod 3d3ca3ba-1909-44a3-b734-ed8de53f5408 on node <ci node>
+15:57:12.28  arc-runners-oss  Preempted         <pull request runner pod 2>         Preempted by pod 3d3ca3ba-1909-44a3-b734-ed8de53f5408 on node <ci node>
 15:57:14.71  ci-lab           FailedScheduling  ci-lab-worker-8678fc4dbf-xh7zp      0/9 nodes are available: ... preemption: not eligible due to a terminating pod on the nominated node.
-15:57:20.65  ci-lab           Scheduled         ci-lab-worker-8678fc4dbf-xh7zp      Successfully assigned ci-lab/ci-lab-worker-8678fc4dbf-xh7zp to anton-oci-hdgkgek2s2sq
+15:57:20.65  ci-lab           Scheduled         ci-lab-worker-8678fc4dbf-xh7zp      Successfully assigned ci-lab/ci-lab-worker-8678fc4dbf-xh7zp to <ci node>
 ```
 
-The pending worker preempted an `anton-oss-queue` merge queue runner and two `anton-oss` runners,
-then waited for them to terminate and was scheduled 8.6 seconds after its first `FailedScheduling`.
-The other two workers of that rollout were scheduled 5.5 and 4.5 seconds after theirs. The three
-evicted ten runner pods in all: four `anton-oss-queue`, three `anton-oss`, one `anton-oss-batch`
-and two `anton` runners from `arc-runners`. No node cache pod was evicted.
+`<ci node>` is one node of the CI pool, the same in every line, and the runner pod names are
+shown by the runner set they belong to. The pending worker preempted a merge queue runner and two
+pull request runners, then waited for them to terminate and was scheduled 8.6 seconds after its
+first `FailedScheduling`. The other two workers of that rollout were scheduled 5.5 and 4.5 seconds
+after theirs. The three evicted ten runner pods in all: four merge queue runners, three pull
+request runners, one batch runner and two runners from the `arc-runners` namespace. No node cache
+pod was evicted.
 
 ### What happens to a preempted runner's job
 
