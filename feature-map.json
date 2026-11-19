@@ -5230,6 +5230,20 @@
       ]
     },
     {
+      "id": "stats-seed-artifacts-past-the-first-page",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-pr-planner-artifact-page",
+      "behaviour": "The mutation stats seed lists every artifact page of a pull request run, up to ten pages of 100, so a stats artifact listed past the first 100 artifacts still seeds the cache, because the seed read one page of 100 artifacts per run, the same shape that made the test planner skip passed dev push runs whose coverage shards sat on page two.",
+      "seam": "scripts.ci_stats_seed.harvest and its per run artifact listing, run by the mutation-stats-seed job of the Tests workflow",
+      "rules": [
+        "run-artifacts-read-one-page-python"
+      ],
+      "tests": [
+        "tests/test_ci_stats_seed_pages.py::test_harvest_finds_a_stats_artifact_past_the_first_artifact_page_of_a_run",
+        "tests/test_ci_stats_seed_pages.py::test_harvest_lists_at_most_ten_artifact_pages_of_a_run"
+      ]
+    },
+    {
       "id": "ledger-artifacts-panel",
       "origin": "inventory",
       "behaviour": "The artifacts panel lists every artifact newest first, renders Markdown, JSON and SVG without running scripts, and offers delete and trash restore.",

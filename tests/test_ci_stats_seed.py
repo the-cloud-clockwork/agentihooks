@@ -195,7 +195,9 @@ def test_api_fails_when_gh_fails(tmp_path, monkeypatch):
         seed.api("pulls/7")
 
 
-def test_harvest_copies_records_from_the_newest_run_with_stats_artifacts(folder, monkeypatch):
+def test_harvest_copies_records_from_the_newest_run_with_stats_artifacts(
+    folder: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     archives = {
         5: _archive({"x.index": "old", "x.json": "{}"}),
         6: _archive(
@@ -205,10 +207,10 @@ def test_harvest_copies_records_from_the_newest_run_with_stats_artifacts(folder,
     responses = {
         "pulls/7": {"head": {"sha": "abc"}},
         f"{seed.TESTS}?event=pull_request&head_sha=abc&per_page=10": {"workflow_runs": [{"id": 2}, {"id": 1}]},
-        "actions/runs/2/artifacts?per_page=100": {
+        "actions/runs/2/artifacts?per_page=100&page=1": {
             "artifacts": [{"id": 9, "name": "mutation-report-0", "expired": False}]
         },
-        "actions/runs/1/artifacts?per_page=100": {
+        "actions/runs/1/artifacts?per_page=100&page=1": {
             "artifacts": [
                 {"id": 6, "name": "mutation-test-stats-cache-1", "expired": False},
                 {"id": 5, "name": "mutation-test-stats-cache-0", "expired": False},
@@ -261,7 +263,7 @@ def test_harvest_downloads_a_failed_artifact_again_after_a_wait(
     responses = {
         "pulls/7": {"head": {"sha": "abc"}},
         f"{seed.TESTS}?event=pull_request&head_sha=abc&per_page=10": {"workflow_runs": [{"id": 1}]},
-        "actions/runs/1/artifacts?per_page=100": {
+        "actions/runs/1/artifacts?per_page=100&page=1": {
             "artifacts": [{"id": 5, "name": "mutation-test-stats-cache-0", "expired": False}]
         },
     }
@@ -292,7 +294,7 @@ def test_harvest_fails_naming_the_artifact_once_every_download_failed(
     responses = {
         "pulls/7": {"head": {"sha": "abc"}},
         f"{seed.TESTS}?event=pull_request&head_sha=abc&per_page=10": {"workflow_runs": [{"id": 1}]},
-        "actions/runs/1/artifacts?per_page=100": {
+        "actions/runs/1/artifacts?per_page=100&page=1": {
             "artifacts": [
                 {"id": 6, "name": "mutation-test-stats-cache-1", "expired": False},
                 {"id": 5, "name": "mutation-test-stats-cache-0", "expired": False},
@@ -337,7 +339,7 @@ def test_harvest_fails_naming_the_artifact_once_every_download_failed(
             for path in (
                 "pulls/7",
                 f"{seed.TESTS}?event=pull_request&head_sha=abc&per_page=10",
-                "actions/runs/1/artifacts?per_page=100",
+                "actions/runs/1/artifacts?per_page=100&page=1",
             )
         ),
     ],
@@ -348,7 +350,7 @@ def test_harvest_retries_neither_a_timed_out_download_nor_a_failed_listing(
     responses = {
         "pulls/7": {"head": {"sha": "abc"}},
         f"{seed.TESTS}?event=pull_request&head_sha=abc&per_page=10": {"workflow_runs": [{"id": 1}]},
-        "actions/runs/1/artifacts?per_page=100": {
+        "actions/runs/1/artifacts?per_page=100&page=1": {
             "artifacts": [{"id": 5, "name": "mutation-test-stats-cache-0", "expired": False}]
         },
     }
@@ -456,11 +458,13 @@ def test_main_skips_a_pull_whose_github_call_timed_out(folder, monkeypatch, caps
     )
 
 
-def test_harvest_keeps_pointers_a_newer_pull_request_already_wrote(folder, monkeypatch):
+def test_harvest_keeps_pointers_a_newer_pull_request_already_wrote(
+    folder: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     responses = {
         "pulls/7": {"head": {"sha": "abc"}},
         f"{seed.TESTS}?event=pull_request&head_sha=abc&per_page=10": {"workflow_runs": [{"id": 1}]},
-        "actions/runs/1/artifacts?per_page=100": {
+        "actions/runs/1/artifacts?per_page=100&page=1": {
             "artifacts": [{"id": 5, "name": "mutation-test-stats-cache-0", "expired": False}]
         },
     }
@@ -476,11 +480,11 @@ def test_harvest_keeps_pointers_a_newer_pull_request_already_wrote(folder, monke
     assert taken == {"x.index", "y.index"}
 
 
-def test_harvest_passes_the_deadline_to_every_github_call(folder, monkeypatch):
+def test_harvest_passes_the_deadline_to_every_github_call(folder: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     responses = {
         "pulls/7": {"head": {"sha": "abc"}},
         f"{seed.TESTS}?event=pull_request&head_sha=abc&per_page=10": {"workflow_runs": [{"id": 1}]},
-        "actions/runs/1/artifacts?per_page=100": {
+        "actions/runs/1/artifacts?per_page=100&page=1": {
             "artifacts": [{"id": 5, "name": "mutation-test-stats-cache-0", "expired": False}]
         },
     }
@@ -496,11 +500,11 @@ def test_harvest_passes_the_deadline_to_every_github_call(folder, monkeypatch):
     assert deadlines == [42.0] * 4
 
 
-def test_harvest_keeps_pointers_it_wrote_before_a_timeout(folder, monkeypatch):
+def test_harvest_keeps_pointers_it_wrote_before_a_timeout(folder: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     responses = {
         "pulls/7": {"head": {"sha": "abc"}},
         f"{seed.TESTS}?event=pull_request&head_sha=abc&per_page=10": {"workflow_runs": [{"id": 1}]},
-        "actions/runs/1/artifacts?per_page=100": {
+        "actions/runs/1/artifacts?per_page=100&page=1": {
             "artifacts": [
                 {"id": 5, "name": "mutation-test-stats-cache-0", "expired": False},
                 {"id": 6, "name": "mutation-test-stats-cache-1", "expired": False},
