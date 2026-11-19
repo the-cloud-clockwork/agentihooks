@@ -110,7 +110,7 @@ SCHEDULER = Service(
 WORKER = Service(
     name="worker",
     ports=(METRICS_PORT,),
-    prefixes=(BUS_PREFIX, MINIO_PREFIX),
+    prefixes=(BUS_PREFIX, MINIO_PREFIX, SECRET_PREFIX),
     names=(
         SCHEDULER_URL,
         SLOTS,

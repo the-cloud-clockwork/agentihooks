@@ -1121,7 +1121,8 @@ class MirrorExpander:
         return policy(_lab_block(self._on_dev(repo, DELIVERY)))
 
     def expand(self, request: GradeRequest) -> Plan:
-        """Return one unit per static gate the grader's workflow runs, keyed by the files it reads at head and base,
+        """Return one unit per static gate the grader's workflow runs whose context names the lab supplies, so a gate
+        that reads a field the lease lacks keeps its verdict with Actions, keyed by the files it reads at head and base,
         the unit job's test units of a merge group, promotion or backfill head and the mutation stats and mutant units
         of a promotion or backfill head, framed by the request's tier, with the dev commit of the manifest its test units
         are keyed on."""
@@ -1135,6 +1136,8 @@ class MirrorExpander:
         toolchain = replace(self.toolchain, lockfile=head.get("uv.lock", ""), pyproject=head.get("pyproject.toml", ""))
         gates: dict[str, list[Unit]] = {}
         for gate in discover(workflow, registry, self._workflows(mirror, grader)):
+            if gate.missing:
+                continue
             inputs = StaticInputs(
                 gate.name, _within(head, gate.paths), _within(base, gate.base_paths), grader, toolchain
             )

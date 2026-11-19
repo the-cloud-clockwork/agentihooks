@@ -134,5 +134,10 @@ def holds(condition: str, context: Mapping[str, str]) -> bool:
 
 
 def reads(condition: str, texts: Iterable[str]) -> frozenset[str]:
-    """Return the context names a step's if condition and the ${{ }} expressions in texts read."""
-    return frozenset()
+    """Return the context names a step's if condition and the ${{ }} expressions in texts read.
+
+    It reads names without evaluating, so it never raises: a function call outside the subset reads as its name.
+    """
+    sources = [condition, *(match.group(1) for text in texts for match in EMBEDDED.finditer(text))]
+    tokens = (token for source in sources for token in TOKEN.findall(source))
+    return frozenset(token for token in tokens if NAME.fullmatch(token) and token not in LITERALS)

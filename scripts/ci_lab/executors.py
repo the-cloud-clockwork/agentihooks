@@ -32,7 +32,7 @@ from scripts import ci_cpu_quota, ci_wiring
 from scripts.ci_lab import caches, contract, run_mutation, run_static, run_tests, venvs, worker, worktrees
 from scripts.ci_lab.outcomes import FAILED, PASSED
 from scripts.ci_lab.sandbox import PortAllocator, Sandbox
-from scripts.ci_lab.static_gates import REGISTRY, WORKFLOW, StaticGate, discover
+from scripts.ci_lab.static_gates import REGISTRY, SECRETS, WORKFLOW, StaticGate, discover
 from scripts.ci_lab.venvs import Build
 from scripts.ci_lab.worker import Executor, Finished, Lease
 from scripts.ci_lab.worktrees import Mirror, Worktrees
@@ -122,7 +122,7 @@ class Trees:
 @dataclass(frozen=True)
 class Pod:
     """What every adapter reads: the trees, the folder units run, report and keep venvs in, the sandbox ports and
-    whitelist, the unit time limit and the clock that times a unit."""
+    whitelist, the unit time limit, the clock that times a unit and the secrets static steps read, by name."""
 
     trees: Trees
     root: Path
@@ -187,13 +187,30 @@ def gate(grader_tree: Path, name: str) -> StaticGate:
     return found[name]
 
 
+def _context(lease: Lease, found: StaticGate, secrets: Mapping[str, str]) -> dict[str, str]:
+    """The context a static unit's steps read: the head, base and job of the lease as their GitHub fields, attempt
+    and run number 1, and each secret the gate reads by its name, empty when the pod holds no secret of that name."""
+    named = {name: secrets.get(name.removeprefix(SECRETS), "") for name in found.reads if name.startswith(SECRETS)}
+    return {
+        INPUTS_BASE: lease.base,
+        "github.sha": lease.head,
+        "github.event.pull_request.head.sha": lease.head,
+        "github.event.pull_request.base.sha": lease.base,
+        "github.run_id": lease.job,
+        "github.run_attempt": "1",
+        "github.run_number": "1",
+        **named,
+    }
+
+
 def static(pod: Pod, lease: Lease) -> Finished:
-    """Run the static gate the lease names over its head, with its base and grader trees and its base revision as
-    inputs.base, on the venv of the head's lockfile; the report counts the git and uv cache lookups it made."""
+    """Run the static gate the lease names over its head, with its base and grader trees and the context of its lease
+    fields and the secrets its steps read, on the venv of the head's lockfile; the report counts the git and uv cache
+    lookups it made."""
     with pod.trees.shared(lease.head, lease.base, lease.grader) as ((head, base, grader), fetched):
         found = gate(grader, lease.unit.members[0])
         venv, built = venvs.venv_for(lockfile_digest(head), head, pod.venvs, pod.build)
-        context = {INPUTS_BASE: lease.base}
+        context = _context(lease, found, pod.secrets)
         options = run_static.Settings(pod.runs, venv, pod.ports, pod.whitelist, pod.timeout, context)
         started = pod.clock()
         result = run_static.run(found, head, base, grader, options)
@@ -306,7 +323,9 @@ def settings(environ: Mapping[str, str]) -> tuple[Pod, Suite, Mutation]:
     mirror = Mirror(node, root / "store", str(node), worktrees.lab(allowed), allowed.get(contract.REPOSITORY, ""))
     trees = Trees(Worktrees(mirror, root / "trees", TREES))
     ports = PortAllocator(FIRST_PORT, LAST_PORT, PORT_WIDTH)
-    pod = Pod(trees, root, ports, WHITELIST, UNIT_TIMEOUT_S)
+    prefix = contract.SECRET_PREFIX
+    secrets = {name.removeprefix(prefix): value for name, value in allowed.items() if name.startswith(prefix)}
+    pod = Pod(trees, root, ports, WHITELIST, UNIT_TIMEOUT_S, secrets=secrets)
     for folder in (pod.runs, pod.venvs):
         folder.mkdir(parents=True, exist_ok=True)
     suite = Suite(Path(allowed[contract.MANIFEST]), Path(allowed[contract.FLAKES]))
