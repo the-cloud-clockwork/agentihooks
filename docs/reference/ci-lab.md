@@ -1340,6 +1340,8 @@ pushes to. It serves one bare repository, `agentihooks.git`, over git's smart HT
 callers that hold the lab remote token. The deployment repository's `ci-lab` chart runs it beside
 the scheduler in the `ci-lab` namespace, and the `ci-lab` ArgoCD Application syncs that chart from
 the deployment repository's `dev` branch. Pull request 1829 of the deployment repository added it.
+That repository's `tests/unit/ci_lab/test_remote.py` renders every object below by name and runs
+`serve.py` against a real bare repository to check its authentication, push and error answers.
 
 ### Where it runs
 
@@ -1432,8 +1434,9 @@ Every client uses two settings and passes the token by reference:
 
 The chart writes neither setting outside the `ci-lab` namespace. A host takes both from an
 agentihooks env file under `~/.agentihooks/`, which agentihooks loads into the sessions it
-launches. A hive takes both from its hive settings in the deployment repository, mapped from the
-same OpenBao property once the PushSecret has written it. The lab mirrors in the
+launches. The deployment repository's hive template maps neither setting; a hive gets the pair only
+once both are mapped into its hive settings from the same OpenBao property, after the PushSecret has
+written it. The lab mirrors in the
 [Environment](#environment) table read the same pair.
 
 ### Use it
