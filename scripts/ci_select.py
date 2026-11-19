@@ -50,6 +50,8 @@ FAKEREDIS = "fakeredis"
 LOCKED_CHECK = f"{TESTS}/test_locked_tests.py"
 # Only the queue ran these whole tree checks, so a pull request adding, removing or moving a file passed its own tier.
 TREE_CHECKS = (f"{TESTS}/test_codeowners.py", f"{TESTS}/test_ci_pull_request_api.py")
+TICK_CATALOGUE = f"{TESTS}/test_docs_tick.py"
+TICK_STEPS = "scripts/tick/steps/"
 # Stored test seconds per leg up to the leg limit; a larger selection shares the legs and each runs longer.
 LEG_SECONDS = 180.0
 UNKNOWN_SECONDS = 10.0
@@ -193,6 +195,8 @@ def selected_tests(
     if any(path.endswith(DOC) for path in changed):
         tests |= markdown_tests(root)
     tests = {path for path in tests if SAFE.fullmatch(path) and (root / path).is_file()}
+    if tests and (root / TICK_CATALOGUE).is_file() and any(path.startswith(TICK_STEPS) for path in changed):
+        tests.add(TICK_CATALOGUE)
     if (
         tests
         and (root / SUITE_SPEED).is_file()
