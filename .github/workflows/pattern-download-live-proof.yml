@@ -1,0 +1,53 @@
+name: Pattern download live proof
+on:
+  push:
+    branches: [diffcheck/ci-323133-5688-live]
+permissions:
+  contents: read
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      matrix:
+        part: [0, 1, 2]
+    steps:
+      - name: Write one stats part
+        run: |
+          mkdir -p part
+          echo "${{ matrix.part }}" > "part/collected-${{ matrix.part }}"
+          head -c 4000000 /dev/urandom > "part/records-${{ matrix.part }}.bin"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mutation-stats-${{ matrix.part }}
+          path: part/
+  download:
+    needs: upload
+    runs-on: ${{ matrix.runner == 'routed' && (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-batch' || 'ubuntu-latest' || matrix.runner }}
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [routed, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Take the local actions from the workflow revision
+        run: |
+          mkdir -p .workflow-revision
+          git archive "$GITHUB_SHA" .github/actions | tar -x -C .workflow-revision
+      - name: Download the shared mutation stats
+        timeout-minutes: 1
+        uses: ./.workflow-revision/.github/actions/pattern-download
+        with:
+          pattern: mutation-stats-*
+          path: .mutation-stats
+      - name: Check every part arrived
+        run: |
+          ls -la .mutation-stats
+          for part in 0 1 2; do
+            [[ "$(cat ".mutation-stats/collected-$part")" == "$part" ]]
+            [[ "$(stat -c %s ".mutation-stats/records-$part.bin")" == 4000000 ]]
+          done
