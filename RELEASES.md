@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.1061 · 2026-11-19
+
+### 2026-11-19 · abda1f73752c · #12371 · @nestorcolt
+
+**Wrap the grader checkout table in raw tags so the docs build keeps its expressions**
+
+This change fixes a docs build warning on the grader gate steps reference page by wrapping the grader checkout table in `{% raw %}`/`{% endraw %}` tags, matching the pattern already used elsewhere, so Liquid stops trying to parse the `||` expressions inside the table cells as template syntax. Without this, the Jekyll build emitted a syntax warning and mangled the GRADER and BASE cell text on the published page; verified locally with the same builder image the Pages workflow uses, confirming the warning is gone and GitHub's table rendering stays correct. A changelog fragment is included.
+
+### 2026-11-19 · 9f8bd2692089 · #12267 · @nestorcolt
+
+**Journal the waits end pass phases in the tick steps stream**
+
+This change adds timing instrumentation to the `waits end` tick step, which was running far over its 3 second budget with no visibility into why. It journals each phase of `waits.end_pass`—per-wait resolution, required-green checks, dependency checks, save, and inbox send, plus the fresh reader's batched pull request read—into the controller's tick steps stream, tagging failed phases into the existing `failed_steps` list without altering control flow or return values. This gives the journal enough detail to show which phase is actually consuming the late time, so future optimization work can target the real cost instead of guessing.
+
 ## v2.17.1060 · 2026-11-19
 
 ### 2026-11-19 · 20d383dd7f9d · #12356 · @agenticore-app
