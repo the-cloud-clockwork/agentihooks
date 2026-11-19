@@ -126,22 +126,23 @@ def _run_test_rules(tmp_path: Path, graded: bool, scan_exit: int = 0) -> tuple[i
 
 
 def test_outage_rules_for_tests_scan_every_test_file_with_the_head_and_the_grader_copy(tmp_path: Path) -> None:
-    rule = _test_rules_step()["env"]["RULES"]
-    assert rule == ".semgrep-incidents/ledger-client-swapped-for-a-function.yml"
+    rules = _test_rules_step()["env"]["RULES"].split()
+    assert rules == [
+        ".semgrep-incidents/ledger-client-swapped-for-a-function.yml",
+        ".semgrep-incidents/parametrize-id-carries-interpreter-path.yml",
+    ]
+    configs = " ".join(f"--config {rule} --config {tmp_path}/grader/{rule}" for rule in rules)
     assert _run_test_rules(tmp_path, graded=True) == (
         0,
-        [
-            "scan --error --strict --timeout 30 --metrics off --x-ignore-semgrepignore-files "
-            f"--config {rule} --config {tmp_path}/grader/{rule} tests"
-        ],
+        [f"scan --error --strict --timeout 30 --metrics off --x-ignore-semgrepignore-files {configs} tests"],
     )
 
 
 def test_outage_rules_for_tests_grade_with_the_head_copy_on_a_base_without_the_rule(tmp_path: Path) -> None:
-    rule = _test_rules_step()["env"]["RULES"]
+    configs = " ".join(f"--config {rule}" for rule in _test_rules_step()["env"]["RULES"].split())
     assert _run_test_rules(tmp_path, graded=False) == (
         0,
-        [f"scan --error --strict --timeout 30 --metrics off --x-ignore-semgrepignore-files --config {rule} tests"],
+        [f"scan --error --strict --timeout 30 --metrics off --x-ignore-semgrepignore-files {configs} tests"],
     )
 
 
