@@ -10775,6 +10775,18 @@
       "tests": [
         "tests/test_ci_hosted_lanes.py::test_every_proof_dispatch_runs_in_its_own_focused_proof_group_and_never_waits_on_a_lane"
       ]
+    },
+    {
+      "id": "mutation-stats-shared-closure",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-mutation-stats-collect-budget",
+      "behaviour": "A mutation stats collection walks the import closure of each distinct measured dependency list once and computes each distinct discovery digest once, so test ids with equal dependency lists cost one closure walk when their cache records are saved and one when the next run checks them for reuse instead of one walk per test id, while test ids with different dependency lists keep their own closures.",
+      "seam": "scripts.ci_mutation.stats_cache.StatsInputs.for_test and scripts.ci_mutation.stats_cache.StatsInputs.discovery",
+      "tests": [
+        "tests/test_ci_mutation_stats_cache.py::test_test_ids_sharing_one_dependency_list_walk_its_closure_once_per_collection",
+        "tests/test_ci_mutation_stats_cache.py::test_distinct_dependency_lists_in_one_collection_keep_their_own_closures",
+        "tests/test_ci_mutation_stats_cache.py::test_the_discovery_digest_of_one_input_set_is_computed_once"
+      ]
     }
   ],
   "unmapped_rules": [
