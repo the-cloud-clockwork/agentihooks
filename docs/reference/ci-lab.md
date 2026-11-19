@@ -206,7 +206,7 @@ per-node verification; a Ready cache pod alone does not prove either cache is wa
 | `CI_LAB_MINIO_ENDPOINT`, `CI_LAB_MINIO_BUCKET`, `CI_LAB_MINIO_ACCESS_KEY`, `CI_LAB_MINIO_SECRET_KEY` | yes | no | The object store names the scheduler reads |
 | `CI_LAB_MIRROR_STORE` | yes | no | Folder of the scheduler's private git stores, one per repository, that borrow the mirror's objects |
 | `CI_LAB_REPOSITORY` | yes | yes | Repository URL whose dev runner trust list admits head actors; on the worker, the repository its node mirror holds, which the lab remote URL must name |
-| `AGENTIHOOKS_LAB_REMOTE`, `AGENTIHOOKS_LAB_REMOTE_TOKEN` | yes | yes | The lab remote URL a mirror fetches a sha GitHub or the node mirror lacks from, and its token, passed by reference; unset, the mirrors fetch from GitHub and the node mirror only |
+| `AGENTIHOOKS_LAB_REMOTE`, `AGENTIHOOKS_LAB_REMOTE_TOKEN` | yes | yes | The lab remote URL a mirror fetches a sha GitHub or the node mirror lacks from, and its token, passed by reference; unset, the mirrors fetch from GitHub and the node mirror only. On a workstation or hive the same pair gives workspaces the `lab` remote; see [Workspaces that carry the lab remote](#workspaces-that-carry-the-lab-remote) |
 | `CI_LAB_IMAGE` | yes | no | Worker image name keyed into static unit keys; empty when unset |
 | `CI_LAB_CONTROL_TOKEN` | yes | no | Bearer token the [control routes](#control-routes) require, passed by reference; unset, they refuse every request. The swarm host that presses panic or merge priority holds the same variable |
 | `UV_CACHE_DIR` | no | yes | Shared uv cache for virtual environments |
@@ -1075,6 +1075,11 @@ $ git push -o branch=<branch> lab HEAD:refs/grade/<task>
 remote: lab grade: <CI_LAB_URL>/grades/<sha>
 ```
 
+A swarm agent makes this push with `agentihooks swarm <slug> publish --via lab`, which then waits on
+the url before it pushes origin; see [Publishing through the lab](../pillars/swarm.md#publishing-through-the-lab).
+[Workspaces that carry the lab remote](#workspaces-that-carry-the-lab-remote) covers where the `lab`
+remote comes from.
+
 The url is the scheduler's [`/grades/<sha>`](#grades-of-a-commit) route. The envelope carries the
 pushed `ref` and the `branch` push option, which becomes the head's scheduler lane. Its id covers
 both, so the same head pushed again with another branch or to another grade ref is a new head
@@ -1103,6 +1108,101 @@ accepted.
 | `CI_LAB_REMOTE_ACTOR` | The actor every pushed head is recorded under. It must be on the trust list, or the scheduler records the head without grading it |
 | `CI_LAB_URL` | The lab scheduler address a hive and the workstation can reach, used as the base of the grade url |
 | `AGENTIHOOKS_BUS`, `AGENTIHOOKS_BUS_URL`, `AGENTIHOOKS_BUS_CREDENTIALS` | The bus the hook publishes on, opened with provisioning off |
+
+### Workspaces that carry the lab remote
+
+An agent pushes to the lab through a git remote named `lab`. The workstation, hives and swarm v2
+workspaces add that remote by themselves when two variables are set where the workspace is made:
+
+| Name | Meaning |
+|---|---|
+| `AGENTIHOOKS_LAB_REMOTE` | The lab remote URL, such as `http://<lab host>/agentihooks.git`. Unset or empty, no workspace gets the remote |
+| `AGENTIHOOKS_LAB_REMOTE_TOKEN` | The token git sends as the basic password of the user `lab`. Only the name is written to git config; git reads the value from its own environment each time the lab asks |
+
+`scripts.ci_lab.remote.checkout.carry` does the work, and `wt.sh` repeats the same steps in shell.
+For a repository the URL matches, it writes two git config entries:
+
+1. `remote.lab.url`: `git remote add lab <url>`, or `git remote set-url lab <url>` when a `lab`
+   remote already exists, so a moved lab URL replaces the old one on the next pass.
+2. `credential.<url>.helper`: a shell function for that URL alone. On git's `get` request it prints
+   the user `lab` and the value of `AGENTIHOOKS_LAB_REMOTE_TOKEN` as the password; it answers no
+   other request and stores nothing. A shell without the variable sends an empty password, which
+   the lab refuses.
+
+**Which repositories match.** The lab serves one repository per URL, so the remote goes only to the
+repository the URL names. Each URL is reduced to its repository name: the last part after a `/` or
+`:`, without a trailing `/` or `.git`, in lowercase. The remote is added only when the lab URL
+yields a name and that name equals the name of the checkout's `origin`. Host and owner are not
+compared.
+
+| `AGENTIHOOKS_LAB_REMOTE` | `origin` | Gets `lab` |
+|---|---|---|
+| `http://<lab host>/agentihooks.git` | `git@github.com:The-Cloud-Clockwork/agentihooks.git` | Yes, both name `agentihooks` |
+| `http://<lab host>/agentihooks.git` | `https://github.com/the-cloud-clockwork/agentihooks-bundle` | No, the origin names `agentihooks-bundle` |
+| unset or empty | any | No |
+
+**Where it runs.**
+
+| Workspace | When | Repository that gets the remote | When git fails |
+|---|---|---|---|
+| `wt.sh new` and `wt.sh tmp` (the `worktree` skill) | After the worktree is created, before it is leased | The primary checkout, so every worktree of that repository shares the remote and its helper | Prints `wt: the lab remote was not set in <repo>` on standard error; the worktree is still created and its path printed |
+| `agentihooks swarm <slug> publish --via lab` | Before the lab push | The task worktree's repository | Refuses the publish; see [Publishing through the lab](../pillars/swarm.md#publishing-through-the-lab) |
+| Swarm v2 workspace prepare (`scripts.swarm_v2.workspaces.prepare`) | When a prepare builds a new workspace, the first for a task or for a newer generation, after the bare mirror is cloned or verified and fetched. A prepare that replays the workspace already recorded for the same generation skips it | The bare mirror, so the workspace worktree cut from it shows the remote | A git that cannot start or does not finish fails the prepare with `git <command> did not finish`. A `git remote` or `git config` that exits with an error is not reported, and the mirror can lack the remote or its helper |
+| The hive daemon, `agentihooks hive run` | Once at start, after it loads the operator's env files and before its first quota refresh | Every checkout under `HIVE_REPO_ROOT` (default `~/dev`): its direct children and one level into a child that is not a checkout itself | A git that cannot start or runs past 60 seconds in one checkout prints `hive: the lab remote was not set in <path>: <error>`; the daemon goes on with the next checkout. A `git remote` or `git config` that exits with an error is not reported, and the checkout can lack the remote or its helper |
+
+The daemon carries its checkouts only at start. A checkout cloned while it runs gets the remote at
+the next daemon start, the next `wt.sh new` or `wt.sh tmp` from it, or the next
+`publish --via lab` in it. The daemon reads the two variables from its own environment once the
+operator env files are loaded; a hive whose daemon lacks `AGENTIHOOKS_LAB_REMOTE` carries nothing.
+
+#### Verify the lab remote
+
+```bash
+git -C <checkout> remote -v
+git -C <checkout> config --get-regexp '^credential\..*\.helper$'
+test -n "${AGENTIHOOKS_LAB_REMOTE_TOKEN:-}" && echo set || echo unset
+```
+
+A fresh worktree of a matching repository lists the lab beside origin:
+
+```text
+lab	http://<lab host>/agentihooks.git (fetch)
+lab	http://<lab host>/agentihooks.git (push)
+origin	git@github.com:The-Cloud-Clockwork/agentihooks.git (fetch)
+origin	git@github.com:The-Cloud-Clockwork/agentihooks.git (push)
+```
+
+The second command prints one `credential.<lab url>.helper` line whose function names
+`$AGENTIHOOKS_LAB_REMOTE_TOKEN` and holds no token. The third tells whether the shell that will push
+holds the token, without printing it.
+
+#### Troubleshooting the lab remote
+
+| Symptom | Cause | Check |
+|---|---|---|
+| `git remote -v` lists no `lab` | The process that made the workspace had no `AGENTIHOOKS_LAB_REMOTE`, or the URL names another repository | `test -n "${AGENTIHOOKS_LAB_REMOTE:-}" && echo set \|\| echo unset` in that process's environment, then compare the last part of the lab URL with `git remote get-url origin` |
+| A hive checkout lacks `lab` while a fresh worktree has it | The checkout was cloned after the daemon started, or the daemon started without the variable | Restart the daemon, or run `wt.sh new` against that checkout |
+| `lab` points at an old URL | The workspace was carried before the URL changed | The next `wt.sh new`, `publish --via lab` or daemon start sets the new URL; the old URL's helper entry stays and is unused |
+| A push to `lab` fails authentication | The pushing shell has no `AGENTIHOOKS_LAB_REMOTE_TOKEN`, so the helper sends an empty password, or it holds another value than the lab expects | The third verify command; set the variable in the environment the agent runs in |
+| A push to `lab` fails with `Failed to connect` | The lab host is not reachable from this machine | `git ls-remote lab` from the same host lists the lab's grade refs once the host reaches the lab; until then, publish without `--via lab` |
+| `wt: the lab remote was not set in <repo>` | `git remote` or `git config` failed in the primary checkout, for example on a locked config file | Run `git -C <repo> remote -v`; the next `wt.sh new` tries again |
+
+### Guards on a lab push
+
+A `git push` to `lab` is a push for every guard, and the guards read its `branch=` push options as
+the branches it writes, because the relay writes them on GitHub once the grade is green.
+
+| Guard | A push to `lab` |
+|---|---|
+| Prepush guard | Needs the committed `HEAD` to pass `python -m scripts.ci_prepush`, as a push to origin does, in a repository that has that module. The guard skips the value of `-o` and `--push-option` when it reads the remote |
+| [One push gate](../pillars/swarm.md#pushing-while-checks-run) | Held under the same conditions as a push to origin when one of its `branch=` options names the task's recorded branch, or any `branch=` option when the task records none. A lab push with no `branch=` option relays nothing and is never held |
+| [Panic](../pillars/swarm.md#publishing-under-panic-mode) | Spared only when every branch its `branch=` options name is a registered fix, or, with no such option, when the checked out branch it grades is one; git config must not route the push elsewhere, as for any spared push |
+| `push-stop` gate | Counts only `origin`: a commit is unpushed until an `origin` remote branch holds it, so a head pushed only to the lab still holds the session's stop |
+
+```bash
+git push -o branch=engineer-a lab HEAD:refs/grade/t1   # writes engineer-a once green: judged like a push of engineer-a
+git push lab HEAD:refs/grade/t1                         # relays nothing: one push gate passes it
+```
 
 ### Provisioning in the deployment
 
@@ -1332,9 +1432,10 @@ key; the builders are pure and read no file, clock or network.
    default; a newer head of the lane restarts it and a hotfix waits for none.
 3. Expansion reads the grader's test workflow and input key registry and the head and base trees
    from the git mirror with `git ls-tree` and `git show`, never a checkout, and keys one static
-   unit per gate step. A merge group, promotion or backfill head also gets the `unit` job's test
-   units, described in [Test units](#test-units), and a promotion or backfill head its mutation
-   units, described in [Mutation units](#mutation-units).
+   unit per gate step, described in [Static units](#static-units). A merge group, promotion or
+   backfill head also gets the `unit` job's test units, described in [Test units](#test-units),
+   and a promotion or backfill head its mutation units, described in
+   [Mutation units](#mutation-units).
 4. The verdict store answers what it can. A newer head of the lane drops the older head's pending
    units, carries its leased and finished jobs and cancels its check runs. A push grade of a tree a
    merge group grade passed carries that grade's units for every gate both grades hold: the unit
@@ -1381,7 +1482,11 @@ prints the relay's actions after the pass's own. `main` builds the relay once at
 lab heads consumer, the `ci-lab-relay` durable filtered to `ci.lab.head.notice`, which bus
 provisioning creates beside the scheduler's `ci-lab-scheduler` durable. A green grade of a pushed
 `refs/grade/<task>` head with a `branch` option then reaches that branch, its check runs and its
-draft pull request.
+draft pull request. The relay keeps the id of each check run it creates on the grade's state under
+the check run's name as GitHub answers and seeds its poster with those ids before it posts, so a
+relay retried after the service restarts, such as one whose pull request call failed after its
+posts, creates no second completed check run. The ids the scheduler keeps under gate names for its
+own posts, such as shadow check runs of the same grade, never seed the relay.
 
 A grade's state is one JSON document at `agentihooks-ci:grade:<run>`, where `<run>` is the grade
 key of the repository, head, base, class and grader revision. Live grades sit in
@@ -1394,6 +1499,148 @@ Known limits: a lab head event carries no branch yet, so a head's lane is its ow
 head supersedes nothing until intake records the branch; expansion keys static gates, test units
 and mutation units only, so the other jobs the lab does not run yet pass by their frame; a
 rerequested grade reuses the finished jobs of its own head.
+
+### Static units
+
+Expansion keys one `static` unit per gate step of the static jobs of the grader revision's Tests
+workflow: `lint`, `type-gate` and `semgrep`, the jobs `scripts.ci_lab.static_gates.STATIC_JOBS`
+names. The grader revision is the head of a promotion or backfill grade and the base of every
+other grade. `scripts.ci_lab.scheduler.MirrorExpander.expand` reads three inputs at that
+revision from the git mirror and passes them to `scripts.ci_lab.static_gates.discover`:
+
+| Input | Read with | Passed to `discover` as |
+|---|---|---|
+| `.github/workflows/test.yml` | `git show <grader>:.github/workflows/test.yml` | The workflow text |
+| `.github/input-keys.json` | `git show <grader>:.github/input-keys.json` | The input key registry |
+| Every `.yml` and `.yaml` file directly in `.github/workflows` | `MirrorExpander._workflows`: `git ls-tree -r` of the grader revision, then one `git cat-file --batch` for the matching blobs | The reusable workflows: each file parsed with `yaml.safe_load`, an empty file as `{}`, keyed by file name |
+
+The reusable workflows hold the same files, keys and values as `scripts.ci_wiring.load` returns
+for a checked out tree. A file in a folder below `.github/workflows` is not read. GitHub does not
+run a reusable workflow from such a folder either.
+
+`discover` walks the static jobs in that order and labels their steps:
+
+- A job with its own `steps` labels them with the job name, such as `lint`.
+- A job with `uses: ./.github/workflows/<file>` looks `<file>` up in the reusable workflows. It
+  labels the steps of each job of that workflow `<job>/<reusable job>`. The Tests workflow's
+  `semgrep` job calls `semgrep.yml`, whose jobs are `scan`, `feature-tests` and `charts`.
+
+A step is a gate step when it has a `run` that calls a tool `static_gates.TOOLS` names or runs
+`python` on any module or script other than `basedpyright`, `ruff` and `venv`
+(`static_gates.UNGATED_MODULES`). Its gate name is the label, a `/`, then the step's `id`, or
+else its name (or the first line of its run) in lower case words joined by `-`, such as
+`semgrep/scan/fail-on-findings-new-against-the-base`. Each unit names one gate step, and
+its key is `static_key` over the gate name, the head files under the gate's registry paths, the
+base files under its base paths, the grader revision and the toolchain (see
+[Inputs per kind](#inputs-per-kind)). The plan groups units by label, so each label is one gate
+with its own check run.
+
+On dev, `python -m scripts.ci_lab.static_gates --root .` lists 38 gate steps:
+
+| Gate | Steps from | Gate steps |
+|---|---|---|
+| `lint` | The `lint` job of `test.yml` | 27 |
+| `type-gate` | The `type-gate` job of `test.yml` | 2 |
+| `semgrep/scan` | The `scan` job of `semgrep.yml` | 4 |
+| `semgrep/feature-tests` | The `feature-tests` job of `semgrep.yml` | 2 |
+| `semgrep/charts` | The `charts` job of `semgrep.yml` | 3 |
+
+Before pull request
+[#11978](https://github.com/the-cloud-clockwork/agentihooks/pull/11978), the expander passed only
+the workflow and the registry. The `semgrep` job's call to `semgrep.yml` then failed discovery
+with `semgrep uses ./.github/workflows/semgrep.yml, which was not given`, so every agentihooks head
+was dropped as `cannot expand` and the lab graded none at any class.
+
+#### Which grades run static units
+
+[Expansion frames a head by its class](#scheduler-loop), and the frames keep these static gates:
+
+| Class | Static gates with units |
+|---|---|
+| Pull request, hotfix | `lint` and `type-gate`. `semgrep` is framed as a gate without units, which passes. The pull request rules name the job `semgrep` (`scheduler.PULL_REQUIRED`), while its units sit under the `semgrep/scan`, `semgrep/feature-tests` and `semgrep/charts` labels |
+| Merge group | None: the queue rules require no static job |
+| Promotion, backfill | All five |
+
+#### A head that cannot expand
+
+The pass that releases a head from its lane catches a `ValueError`, `KeyError`,
+`yaml.YAMLError`, `jsonschema.ValidationError` or failed git command from expansion. It records
+the action `cannot expand <head>: <error>` and drops the head: the head has already left
+`agentihooks-ci:waiting` and is not put back, so it gets no grade and no check runs. A manifest
+fetch that raises `FetchPending` or `FetchUnanswered` holds the head again instead, as
+`holding <head>: <error>`; [Test units](#test-units) describes both. The scheduler service prints
+each action on its own line:
+
+```bash
+kubectl logs -n ci-lab deploy/ci-lab-scheduler | grep 'cannot expand'
+```
+
+| Text after `cannot expand <head>:` | Cause |
+|---|---|
+| `<job> uses <uses>, which was not given` | A static job calls a workflow that is not a file directly in `.github/workflows` at the grader revision, such as a workflow of another repository (`<owner>/<repo>/.github/workflows/<file>@<ref>`), or the caller passed no reusable workflows |
+| `<gate> names two gate steps` | Two gate steps resolve to the same gate name |
+| `'steps'` or `'jobs'` | The called workflow has no `jobs`, or one of its jobs has no `steps`, such as a job that calls another workflow |
+| A YAML parse error | A workflow file directly in `.github/workflows` at the grader revision does not parse, even one that no static job calls |
+
+#### The worker reads the same workflows
+
+The static executor finds its gate again on the worker. `scripts.ci_lab.executors.gate(grader_tree,
+name)` runs `discover` over the grader tree it cut for the lease, with `ci_wiring.load(grader_tree)`
+as the reusable workflows, and returns the gate step the unit names. When that discovery raises,
+or the grader workflow has no gate step of that name, the unit ends with no outcome. The worker
+prints `ci-lab worker: unit <job> crashed: <error>` to its standard error and the lease expires,
+so the unit follows the expired lease rule of step 6 of the [Scheduler loop](#scheduler-loop).
+
+#### Limitations
+
+- Only workflows directly in the grader's `.github/workflows` resolve. A static job that calls a
+  workflow of another repository cannot expand.
+- A reusable workflow resolves one level deep. A job of the called workflow that calls a third
+  workflow has no `steps`, and its head cannot expand.
+- Every expansion parses each workflow file directly in the folder, so one file that does not
+  parse drops every head the lab grades at that grader revision.
+- Pull request and hotfix grades run no `semgrep` units, as the frame table above shows.
+
+#### Verify
+
+List the gate labels discovery finds in a checkout, which match the keys a promotion grade's plan
+holds:
+
+```bash
+python -m scripts.ci_lab.static_gates --root . \
+  | python -c 'import json,sys; print(sorted({json.loads(line)["job"] for line in sys.stdin}))'
+```
+
+On dev it prints `['lint', 'semgrep/charts', 'semgrep/feature-tests', 'semgrep/scan', 'type-gate']`.
+The `checks` of a promotion grade hold one key per gate with units, so the five static gates
+appear there beside `unit`, the mutation gates the head has units for and `required`:
+
+```bash
+curl -s http://lab:8800/grades/<sha> | jq '.grades[] | select(.class == "promotion") | .checks | keys'
+```
+
+| Guard | What it holds |
+|---|---|
+| `tests/ci_lab/test_scheduler.py::test_the_mirror_expander_expands_the_real_tests_workflow_with_its_reusable_workflows` | `MirrorExpander.expand` over a git origin holding the repository's real workflows and registry keys one unit per gate step that `discover` lists, under the same labels, `semgrep/scan`, `semgrep/feature-tests` and `semgrep/charts` included |
+| `tests/ci_lab/test_executors.py::test_gate_returns_a_gate_of_a_reusable_workflow_the_real_tests_workflow_calls` | `executors.gate` over the repository tree returns a `semgrep/` gate step equal to the one discovery lists |
+| `tests/ci_lab/test_scheduler.py::test_the_mirror_expander_keys_static_gates_from_git_objects_without_a_checkout` | The reusable workflows hold only the `.yml` and `.yaml` files directly in the folder, an empty file as `{}` |
+
+The first two tests map to the `lab-reusable-workflow-gates` entry of `feature-map.json`. Before
+the fix, both failed with `ValueError: semgrep uses ./.github/workflows/semgrep.yml, which was not
+given` in
+[Tests run 44270664482](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/44270664482/job/134686811797),
+and both passed in
+[Tests run 44272811567](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/44272811567).
+
+#### Troubleshooting
+
+| Symptom | Cause | Check |
+|---|---|---|
+| A head gets no grade and no check runs, and the scheduler log reads `cannot expand <head>: semgrep uses ./.github/workflows/semgrep.yml, which was not given` | The scheduler runs a release older than pull request #11978, so its expander passes no reusable workflows | `kubectl -n ci-lab get deploy ci-lab-scheduler -o jsonpath='{.spec.template.spec.containers[0].image}'` names a release that carries the fix |
+| The same text names a workflow you just added to a static job | The called file is in a folder below `.github/workflows`, or not on the grader revision yet. A pull request, hotfix or merge group grade reads the base, so a new workflow counts only once the base holds it | `git ls-tree --name-only <grader> .github/workflows/` lists the file |
+| Every head graded at one grader revision is dropped with a YAML error | A workflow file directly in `.github/workflows` at that revision does not parse | In a checkout of that revision, `python -c 'import pathlib,yaml; [print(p) or yaml.safe_load(p.read_text()) for p in sorted(pathlib.Path(".github/workflows").glob("*.y*ml"))]'` prints each file before parsing it, so the last name printed before the traceback is the file |
+| The worker's standard error reads `ci-lab worker: unit <job> crashed: ValueError('semgrep uses ./.github/workflows/semgrep.yml, which was not given')` | The worker runs a release older than the fix while the scheduler expands with it | The `ci-lab-worker` image, as for the scheduler; the unit's lease expires and follows step 6 of the [Scheduler loop](#scheduler-loop) |
+| A pull request grade passes `semgrep` with no units | The pull request frame names the job `semgrep` while its units sit under the `semgrep/` labels | Expected today; see [Which grades run static units](#which-grades-run-static-units) |
 
 ### Test units
 
@@ -1690,7 +1937,7 @@ scheduler enqueues a grade's misses with the grade's base and its plan's grader 
 
 | Kind | Trees | Executor inputs |
 |---|---|---|
-| `static` | head, base and grader, read only, shared by the pod's units | the gate the unit names from the grader tree's workflow and input registry, the venv of the head's `uv.lock` digest and `inputs.base` set to the base revision |
+| `static` | head, base and grader, read only, shared by the pod's units | the gate the unit names from the grader tree's workflow, input registry and reusable workflows (see [The worker reads the same workflows](#the-worker-reads-the-same-workflows)), the venv of the head's `uv.lock` digest and `inputs.base` set to the base revision |
 | `test` | head, read only | the batch, the venv of the head's `uv.lock` digest, `CI_LAB_MANIFEST`, `CI_LAB_FLAKES` and one pytest worker per slot |
 | `stats` | a private copy of the head with every file under the `[tool.mutmut]` source paths behind its trampolines | the tree as root and `CI_LAB_MUTATION_CACHE` |
 | `mutant` | the same private trampolined copy | `CI_LAB_KILLERS`, `CI_LAB_MUTATION_BUDGET`, `CI_LAB_MUTATION_CAP` and the tests that the stats records of every test module in the tree show reaching the mutant's function, with their seconds |

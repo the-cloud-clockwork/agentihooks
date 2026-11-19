@@ -118,11 +118,18 @@ refresh starts is the work duration plus this sleep. A failed script prints
 |---|---|
 | `/cache/git/agentihooks.git` | Bare repository; on the host, `git/agentihooks.git` under `nodeCache.path` |
 | `/cache/git/agentihooks.git/fetched-at` | Epoch seconds of the last successful fetch |
+| `/cache/git/.warm.lock` | Exclusive lock held during a refresh pass |
 | `/cache/uv` | uv cache; the script sets `UV_CACHE_DIR` to this directory |
 | `/cache/uv/warmed-lock` | Blob ID of the dev requirements lock whose uv installation last succeeded |
 | `/tmp/warm-uv` | Disposable venv and requirements used for warming; removed after a successful install |
 
-Each pass initializes the bare mirror only when its `HEAD` file is absent, sets
+Each pass first takes a nonblocking exclusive `flock` on `git/.warm.lock`. When another
+pass holds it, the script prints `node cache refresh skipped: another run holds the cache lock`
+and exits successfully. While holding the lock, it removes stale `*.lock` files inside the
+mirror before fetching. The cache lock stays outside the mirror and is retained throughout
+uv warming, so overlapping warmer runs cannot remove each other's active Git locks.
+
+The pass initializes the bare mirror only when its `HEAD` file is absent, sets
 `remote.origin.url` from `scheduler.repository`, then runs:
 
 ```bash
@@ -152,7 +159,7 @@ blob ID to `warmed-lock`.
 
 The lock blob is the only warm marker key. An excludes-only change or a worker image
 change with an unchanged lock does not trigger another install. The worker image must
-provide git, uv and a Python version compatible with the dev lock; the script sets no
+provide git, flock, uv and a Python version compatible with the dev lock; the script sets no
 Python version option and does not validate every cached artifact on a marker hit.
 
 ## Verify every node
