@@ -7791,6 +7791,18 @@
       ]
     },
     {
+      "id": "mutation-replan-names-untested-functions",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-replan-names-untested-functions",
+      "behaviour": "When the measured mutation plan or the replan after the early stage refuses a change as too large, the refusal names every changed function no test calls in process, with how many of the change's mutants they hold and how many of its worker seconds those mutants carry. The plan prices each such mutant at the slowest tested function's cost, and on the ledger cutover, pull request 11561, the measured plan of Tests run 43943313510 gave 58 such mutants 64698 of its 93282 worker seconds while the refusal named none of them.",
+      "seam": "scripts.ci_mutation.measured.measured_plan records the functions absent from every stats tests map as the plan's untested key, which merge_probes and probed_plan carry into the replan, and scripts.ci_mutation.measured.budget_overrun appends the sentence naming them after either refusal",
+      "tests": [
+        "tests/test_ci_mutation_plan.py::test_the_measured_plan_lists_each_function_no_test_calls_in_process_once_in_name_order",
+        "tests/test_ci_mutation_plan.py::test_a_refusal_names_the_functions_no_test_calls_in_process_with_their_mutants_and_worker_seconds",
+        "tests/test_ci_mutation_probed.py::test_the_cli_refusal_after_the_early_stage_names_the_functions_no_test_calls_in_process"
+      ]
+    },
+    {
       "id": "admission-outcome-totals",
       "origin": "inventory",
       "behaviour": "Placement waits count each hive admission refusal category once per task until it changes or clears, count each successful admission once, and metrics_service.admission_rows sums both the pending admission gate's totals and these hive outcome totals into one admission_samples row per outcome.",
