@@ -379,3 +379,25 @@ def test_the_wait_names_the_shards_it_gave_up_on(
     monkeypatch.setattr(arrivals, "OUT", tmp_path / "shards")
     assert arrivals.main() == 0
     assert "::warning::Shards 1, 2 had not ended" in capsys.readouterr().out
+
+
+@pytest.mark.feature("dev-push-sonar-waits-for-shards-that-queue-late")
+def test_the_wait_lasts_the_minutes_it_is_given(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("ACTIONS_RUNTIME_TOKEN", _token("run-1", "job-2"))
+    monkeypatch.setenv("ACTIONS_RESULTS_URL", "http://127.0.0.1:9/")
+    monkeypatch.setenv("SHARDS", "2")
+    monkeypatch.setenv("SCOPE", "full")
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
+    monkeypatch.setenv("WAIT_MINUTES", "89")
+    monkeypatch.setattr(arrivals, "OUT", tmp_path / "shards")
+    waits: list[float] = []
+
+    def arrive(
+        service: object, shards: int, scope: str, attempt: int, out: Path, seconds: float, timer: object
+    ) -> list[int]:
+        waits.append(seconds)
+        return []
+
+    monkeypatch.setattr(arrivals, "arrive", arrive)
+    assert arrivals.main() == 0
+    assert waits == [89 * 60]
