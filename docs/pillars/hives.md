@@ -2997,13 +2997,14 @@ was wrong.
 
 ### Headed hive checks: kubectl and git identity
 
-A headed hive is a hive whose registry record carries `ui=yes`. It takes masters and the `qa` and `frontend` roles
-(see [Placement by role](#placement-by-role)), and its agents work with the workstation's tools. Every hive runs the
-workstation's configuration, so an agent on a headed hive is also graded on two tools the workstation always has: a
-`kubectl` that reaches the cluster and a global git identity for its commits.
+A headed hive is a hive whose registry record carries `ui=yes`. Placement ranks headed hives first for masters, `qa`
+and `frontend`; a master falls back to a headless hive, while `qa` and `frontend` wait for a headed one (see
+[Placement by role](#placement-by-role)). Every hive runs agents with the workstation's configuration (see
+[Comparing hive configuration](#comparing-hive-configuration)), so an agent on a headed hive is also graded on two
+tools the workstation always has: a `kubectl` that reaches the cluster and a global git identity for its commits.
 
-When an agent's session starts, the join hook reads the hive's registry record. With `ui` set to `yes` it writes
-`"headed": true` into the join report's `context` and runs two more checks:
+When an agent's session starts, the join hook reads the hive's registry record and writes `headed` into the join
+report's `context`: `true` when `ui` is `yes`, `false` otherwise. A headed report runs two more checks:
 
 | Check | Command it runs as the agent's user | Passes when |
 |---|---|---|
@@ -3023,7 +3024,11 @@ On a headed hive both checks are required, like every other join check except `b
 
 The launch check reads the misses as `hive_kubectl` and `hive_git_identity`. Neither is report only, so the agent
 fails its launch check and is handled as an enforced miss, as described in
-[Launch check on a hive](#launch-check-on-a-hive).
+[Launch check on a hive](#launch-check-on-a-hive). The tick's check keeps an agent that its idle heartbeat shows
+working at the deadline and records the miss as held, so a working agent keeps running with the miss.
+
+In this section's examples the `hive list`, `hive join` and `hive compare` lines separate their fields with tabs,
+shown aligned here.
 
 ```bash
 agentihooks hive list
@@ -3036,8 +3041,6 @@ agentihooks swarm <slug> status
 #   hive_kubectl  enforced  expected available; observed missing
 #   hive_git_identity  enforced  expected available; observed missing
 ```
-
-The fields are separated by tabs, shown aligned here.
 
 #### Providing the tools on a headed hive
 
@@ -3093,8 +3096,8 @@ metadata:
   name: hive-reader-cluster
 rules:
 - apiGroups: [""]
-  resources: [nodes, namespaces, persistentvolumes]
-  verbs: [get, list, watch]
+  resources: [nodes]
+  verbs: [get, list]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -3143,7 +3146,8 @@ git config --global user.email >/dev/null || git config --global user.email agen
 #### Checking a headed hive
 
 ```bash
-# From any joined machine: the hive is headed
+# From any joined machine: mark the hive headed, then read it back
+agentihooks hive set <id> ui=yes
 agentihooks hive show <id>                       # "ui": "yes"
 
 # On the hive, as the user its agents run as
@@ -3184,16 +3188,16 @@ A healthy headed hive lists its agents as `complete misses=none` in `agentihooks
 | `kubectl (required)` on a headed hive, and `command -v kubectl` prints nothing on the hive | `agentihooks deps check` on the hive | Run `agentihooks deps ensure`, and put `~/.local/bin` on the hive user's `PATH` when the install says kubectl is not on it. |
 | `kubectl (required)`, kubectl installed, and `kubectl get nodes` says the connection to the server was refused or names `localhost:8080` | `ls -l ~/.kube/config` on the hive | The hive has no cluster config. Deliver it as in [Providing the tools on a headed hive](#providing-the-tools-on-a-headed-hive). |
 | `kubectl (required)`, and `kubectl get nodes` prints `Forbidden` | `kubectl auth can-i list nodes` on the hive | Bind the account to a ClusterRole with `get` and `list` on nodes, as in the example. |
-| `kubectl (required)`, and `kubectl get nodes` times out after 10 seconds | The route from the hive to the cluster API address in the config | Open the route, or point the config at an address the hive reaches. |
+| `kubectl (required)`, and `kubectl get nodes` answers `Unable to connect to the server` with a timeout | The route from the hive to the cluster API address in the config | Open the route, or point the config at an address the hive reaches. |
 | `git_identity (required)` | `git config --global user.name` and `git config --global user.email` on the hive | Set both in the hive's bootstrap, as in the example. |
-| A miss stays after the fix | The agent's session started before the fix | The checks run once per session; the next session on the hive grades them again. |
 | A headless hive's agents show no `kubectl` or `git_identity` | `agentihooks hive show <id>` reads `"ui": "no"` | Expected: only headed hives run the two checks. |
 | A `ui=yes` hive's join reports carry no `kubectl` or `git_identity` check | The hive's agentihooks version | The hive runs a release from before pull request #10581. Upgrade it and restart its hive service. |
 
 Before [pull request #10581](https://github.com/the-cloud-clockwork/agentihooks/pull/10581) a headed hive was
-graded like a headless one. The automation VM hive ran with `ui=yes` and took tasks that need the workstation's
-tools, but it had no kubectl, no cluster config and no global git identity. Its agents could not read the cluster
-and their commits carried no author, and their join reports checked neither.
+graded like a headless one. [Issue #10577](https://github.com/the-cloud-clockwork/agentihooks/issues/10577) records
+the case: the automation VM hive ran with `ui=yes` and took workstation tasks, but a read only probe as its user
+found no kubectl on `PATH`, no `~/.kube` and no global git `user.name` or `user.email`, and its agents' join reports
+checked neither.
 
 ### A worker that finishes before the tick collects its acknowledgement
 
