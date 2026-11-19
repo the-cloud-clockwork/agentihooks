@@ -9177,6 +9177,11 @@ deadlines so it continues from where it stopped. Idle and stale claim findings f
 outage evidence and send no finding notice to the master. Once the hold lifts, idle counting resumes from
 the held count.
 
+On the `events` engine the hub runs on another host and cannot read these local records, so the tick also
+publishes them to Redis on every pass. The hub holds the exits of the engineers it started and pauses their inbox
+wakes while a published record is open; see
+[Outage holds for agents the hub started](hives.md#outage-holds-for-agents-the-hub-started).
+
 When service returns, the tick sends one marked resume prompt to each stalled agent that still owns its
 task. The prompt tells it to read its task folder and inbox and continue the same work. Busy panes, typed
 input and permission prompts are left alone. A pane still showing the provider error gets at most three
