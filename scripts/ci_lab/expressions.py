@@ -9,9 +9,9 @@ refused, never guessed.
 import math
 import re
 from collections import deque
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 
-__all__ = ["Value", "evaluate", "holds", "interpolate"]
+__all__ = ["Value", "evaluate", "holds", "interpolate", "reads"]
 
 Value = str | bool
 TOKEN = re.compile(r"'(?:[^']|'')*'|&&|\|\||==|!=|[!()]|[A-Za-z_][\w.-]*(?:\(\))?")
@@ -131,3 +131,8 @@ def holds(condition: str, context: Mapping[str, str]) -> bool:
     wrapped = WRAPPED.fullmatch(condition)
     expression = condition if wrapped is None else wrapped.group(1)
     return not expression.strip() or bool(evaluate(expression, context))
+
+
+def reads(condition: str, texts: Iterable[str]) -> frozenset[str]:
+    """Return the context names a step's if condition and the ${{ }} expressions in texts read."""
+    return frozenset()

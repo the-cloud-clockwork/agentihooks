@@ -13,8 +13,9 @@ import yaml
 from scripts import ci_wiring
 from scripts.ci_lab import grader
 
-__all__ = ["STATIC_JOBS", "WHOLE_TREE", "StaticGate", "discover", "main"]
+__all__ = ["LEASE_FIELDS", "STATIC_JOBS", "WHOLE_TREE", "Producer", "StaticGate", "discover", "main"]
 
+LEASE_FIELDS: frozenset[str] = frozenset()
 STATIC_JOBS = ("lint", "type-gate", "semgrep")
 WHOLE_TREE = (".",)
 WORKFLOW = Path(".github/workflows/test.yml")
@@ -38,6 +39,17 @@ WORD = re.compile(r"[a-z0-9]+")
 
 
 @dataclass(frozen=True)
+class Producer:
+    """An earlier step of a gate's job whose outputs or outcome the gate reads: its id, its run text, empty for a uses
+    step, its env and its if condition."""
+
+    id: str
+    run: str
+    env: tuple[tuple[str, str], ...] = ()
+    condition: str = ""
+
+
+@dataclass(frozen=True)
 class StaticGate:
     """One gate step of a static job: the repository modules it runs, the input paths that key it, and its env values
     and if condition as the workflow writes them, an empty condition when the step has none."""
@@ -52,6 +64,13 @@ class StaticGate:
     base_paths: tuple[str, ...]
     env: tuple[tuple[str, str], ...] = ()
     condition: str = ""
+    producers: tuple[Producer, ...] = ()
+    reads: tuple[str, ...] = ()
+
+    @property
+    def missing(self) -> tuple[str, ...]:
+        """The context names the gate reads that the lab cannot supply."""
+        return ()
 
 
 def _module(value: str) -> str | None:

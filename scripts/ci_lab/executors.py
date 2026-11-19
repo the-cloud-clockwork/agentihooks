@@ -130,6 +130,7 @@ class Pod:
     whitelist: Mapping[str, str]
     timeout: float
     clock: Callable[[], float] = time.monotonic
+    secrets: Mapping[str, str] = field(default_factory=dict[str, str])
 
     @property
     def runs(self) -> Path:
