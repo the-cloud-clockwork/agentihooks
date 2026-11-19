@@ -25,12 +25,18 @@ def test_the_worker_hive_release_annotation_carries_no_image_digest() -> None:
 def test_a_leased_release_tag_hive_takes_the_chart_release_version_as_its_stamp() -> None:
     template = (CHART / "templates" / "worker-hive.yaml").read_text()
     smoke = (CHART / "ci" / "kind-smoke.sh").read_text()
+    rendered = (ROOT / "tests" / "chart_hive_rollout.py").read_text()
+    stamp = (
+        '{{- if and (not $release) (eq (toString $workers.image.tag) "release") '
+        '(regexMatch "^[0-9]+\\\\.[0-9]+\\\\.[0-9]+$" (toString $root.Chart.AppVersion)) }}'
+    )
 
-    assert 'eq (toString $workers.image.tag) "release"' in template
+    assert stamp in template
     assert "$release = toString $root.Chart.AppVersion" in template
     assert "{{- with $release }}" in template
     assert "{{- with $root.Values.workers.rollout.release }}" not in template
     assert "python3 tests/chart_hive_rollout.py" in smoke
+    assert "    test_each_released_chart_restamps_a_leased_release_tag_hive_with_its_own_version()\n" in rendered
 
 
 @pytest.mark.feature("hive-roll-hooks-run-the-chart-release-worker")

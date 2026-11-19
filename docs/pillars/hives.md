@@ -5027,8 +5027,8 @@ workers:
 ```
 
 ArgoCD syncs each release's chart. Pod templates carry no chart version label
-([#10072](https://github.com/the-cloud-clockwork/agentihooks/pull/10072)), but each hive's pod template carries the
-release chart's `appVersion` as its `release` stamp, so every release changes it once and rolls the hive
+([#10072](https://github.com/the-cloud-clockwork/agentihooks/pull/10072)), but each leased worker hive on the `release`
+tag carries the release chart's `appVersion` as its `release` stamp, so every release changes it once and rolls the hive
 ([#12360](https://github.com/the-cloud-clockwork/agentihooks/issues/12360)). A rolled pod pulls the current `:release`
 image. Each roll goes through the shared Lease `default/agentihooks-hive-rollout`, one hive at a time. The overlays
 set no `release` stamp and the Applications carry no image updater annotations, so no second writer changes the
