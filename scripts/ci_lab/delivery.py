@@ -132,8 +132,8 @@ def cutover(grader_root: Path, environ: Mapping[str, str]) -> list[str]:
 
 
 def queue_cutover(grader_root: Path, environ: Mapping[str, str]) -> list[str]:
-    """Return the gates Actions skips on merge groups: lab.queue.authoritative of the grader copy, or none while the
-    lab is switched off."""
+    """Return the gates the lab is to grade on merge groups: lab.queue.authoritative of the grader copy, or none while
+    the lab is switched off."""
     if environ.get(LAB_OFF) == "true":
         return []
     return list(lab(grader_root).get("queue", {}).get("authoritative", []))

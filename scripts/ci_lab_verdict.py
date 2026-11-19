@@ -2,10 +2,10 @@
 
 `authority` reads the gates the lab grades from the protected grader's delivery.yaml, so a pull request head can
 never widen them, and AGENTIHOOKS_LAB_OFF empties them: lab.authoritative on pull requests, lab.queue.authoritative on
-merge groups and nothing on any other event. `verdict` waits
-for the head's completed `lab/<gate>` check run from the lab App named by AGENTIHOOKS_LAB_APP and publishes
-`lab_<gate>` for each authoritative gate: success or skipped as posted, so the lab marks a gate this pull request does
-not run as skipped, and failure for any other conclusion or a verdict absent or pending at the deadline.
+merge groups and nothing on any other event. `verdict` waits for the head's completed `lab/<gate>` check run from the
+lab App named by AGENTIHOOKS_LAB_APP and publishes `lab_<gate>` for each authoritative gate: success or skipped as
+posted, so the lab marks a gate this pull request does not run as skipped, and failure for any other conclusion or a
+verdict absent or pending at the deadline.
 """
 
 import json
