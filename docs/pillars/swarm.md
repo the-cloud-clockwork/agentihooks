@@ -6995,7 +6995,7 @@ controller:
   api:
     enabled: true
   env:
-    AGENTIHOOKS_CONTROLLER_REDIS_GRACE_S: "240"
+    AGENTIHOOKS_CONTROLLER_REDIS_GRACE_S: "140"
 ```
 
 | Setting | Default | What it bounds in an outage |
@@ -7013,9 +7013,10 @@ container start instead of exiting again into a longer restart back off. It does
 leader, which ends when Redis answers. The container's probes bound the window at container start:
 
 - **API enabled.** The startup probe gives a new container 300 seconds (60 probes 5 seconds apart) to answer
-  `/v2/health/live`, so keep the grace window under 300 seconds.
+  `/v2/health/live`. The API starts only after the credential step and the startup connect of `controller run`, and
+  each of them can wait one whole grace window, so keep the grace window under 150 seconds.
 - **API disabled.** The exec liveness probe starts 60 seconds after the container and fails it after three failed
-  probes 10 seconds apart, about 90 seconds in while Redis refuses, whatever the grace window.
+  probes 10 seconds apart, about 80 seconds in while Redis refuses, whatever the grace window.
 
 #### Redis outage logs and troubleshooting
 
@@ -7035,7 +7036,8 @@ controller: the last pass before exit ended: <error>
 controller: releasing the replica lock failed, it lapses on its own: <error>
 ```
 
-The credential line repeats every 60 seconds on each replica that keeps its own controller credential. The `past the
+The credential line prints each time a replica's renewal of its own controller credential fails, every 60 seconds
+while Redis refuses. The `past the
 grace window` line ends a controller whose passes failed for the whole window, with exit status 1. The `last pass
 before exit` line comes from a pass a stop signal let finish.
 
@@ -7063,7 +7065,7 @@ kubectl logs <pod> -n <namespace> -c controller --previous | grep -E 'renewing t
 | `stands by through a Redis error` every 5 seconds on one replica | Redis refuses and the replica stands by. Expected. | Check Redis. The replica leads once Redis answers. |
 | A standby's container restarts about 30 seconds into an outage, with a failed liveness probe in `kubectl describe pod` | `controller.api.enabled` is false, so the liveness probe connects to Redis. | Enable the controller API. |
 | `renewing the replica lock failed` lines, then `another replica took the lead; exiting` and exit status 75 | The leader fenced itself about 20 seconds into an outage. Expected. | None; the standby takes the lead when Redis answers. |
-| `hive controller: Redis refused` lines, then a Redis error traceback, and the container in CrashLoopBackOff | Redis refused for longer than the grace window at container start. | Check Redis. With the API enabled, raise `AGENTIHOOKS_CONTROLLER_REDIS_GRACE_S`, under the startup probe's 300 seconds, to wait longer at container start. |
+| `hive controller: Redis refused` lines, then a Redis error traceback, and the container in CrashLoopBackOff | Redis refused for longer than the grace window at container start. | Check Redis. With the API enabled, raise `AGENTIHOOKS_CONTROLLER_REDIS_GRACE_S`, under 150 seconds, to wait longer at container start. |
 | `the scheduled wait failed, waiting on the local clock` | The scheduler timer is in Redis too, so the wait fell back to the local clock. Expected. | None. |
 | `releasing the replica lock failed, it lapses on its own` | The replica stopped during an outage. | None; the other replica takes the lead after Redis answers and the lock lapses. |
 | A standby prints `stands by while <leader pod> leads` for a Pod that is gone | The dead leader's lock has not lapsed yet. | Wait up to 30 seconds after the leader's last renewal; the standby takes the lock as it lapses. |
