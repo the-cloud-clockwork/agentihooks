@@ -75,7 +75,7 @@ def _legacy(action: list[str], folder: Path, environ: dict) -> tuple[list[str], 
         "LEDGER_UID": str(os.getuid()),
         "LEDGER_GID": str(os.getgid()),
     }
-    return ["docker", "compose", "-f", str(COMPOSE_FILE), *action, SERVICE], env
+    return ["docker", "compose", "-f", str(COMPOSE_FILE), *action, SERVICE, "api", "front"], env
 
 
 def start(folder: Path, environ: dict = os.environ, run: Run = subprocess.run) -> str:

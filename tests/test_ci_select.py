@@ -526,6 +526,57 @@ def test_a_source_change_does_not_select_the_tests_that_glob_markdown(repo: Path
     assert decide(repo, ["hooks/sample.py"]) == ("selected", [["tests/test_sample.py"]])
 
 
+CATALOGUE_TEST = "tests/test_docs_tick.py"
+CATALOGUE_IMPORTS = "from scripts.tick import catalogue, registry\n"
+
+
+@pytest.mark.feature("ci-select-tick-catalogue-page")
+def test_a_changed_tick_step_module_selects_the_catalogue_page_test(repo: Path) -> None:
+    write(
+        repo,
+        {
+            CATALOGUE_TEST: CATALOGUE_IMPORTS,
+            "scripts/tick/steps/report.py": "VALUE = 1\n",
+            "tests/tick/test_report.py": "import scripts.tick.steps.report\n",
+        },
+    )
+    assert decide(repo, ["scripts/tick/steps/report.py"]) == (
+        "selected",
+        [[CATALOGUE_TEST, "tests/tick/test_report.py"]],
+    )
+
+
+@pytest.mark.feature("ci-select-tick-catalogue-page")
+def test_a_tick_step_module_no_test_reaches_still_runs_the_full_suite(repo: Path) -> None:
+    write(repo, {CATALOGUE_TEST: CATALOGUE_IMPORTS, "scripts/tick/steps/lonely.py": "VALUE = 1\n"})
+    assert decide(repo, ["scripts/tick/steps/lonely.py"]) == ("full", [])
+
+
+@pytest.mark.feature("ci-select-tick-catalogue-page")
+def test_a_tick_change_outside_the_step_package_adds_no_catalogue_page_test(repo: Path) -> None:
+    write(
+        repo,
+        {
+            CATALOGUE_TEST: CATALOGUE_IMPORTS,
+            "scripts/tick/engine.py": "VALUE = 1\n",
+            "tests/tick/test_engine.py": "import scripts.tick.engine\n",
+        },
+    )
+    assert decide(repo, ["scripts/tick/engine.py"]) == ("selected", [["tests/tick/test_engine.py"]])
+
+
+@pytest.mark.feature("ci-select-tick-catalogue-page")
+def test_a_tree_without_the_catalogue_page_test_never_selects_it(repo: Path) -> None:
+    write(
+        repo,
+        {
+            "scripts/tick/steps/report.py": "VALUE = 1\n",
+            "tests/tick/test_report.py": "import scripts.tick.steps.report\n",
+        },
+    )
+    assert decide(repo, ["scripts/tick/steps/report.py"]) == ("selected", [["tests/tick/test_report.py"]])
+
+
 @pytest.mark.parametrize("name", ["hooks/new.py", "scripts/static/new.js"])
 def test_a_covered_source_no_test_reaches_runs_the_full_suite(repo, name):
     write(repo, {name: "x = 1\n"})

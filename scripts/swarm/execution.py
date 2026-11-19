@@ -89,10 +89,10 @@ class ExecutionRegistry:
         self.store = store
 
     def conflict(self, slug: str, message: str) -> NoReturn:
-        from scripts.swarm.store import SwarmError
+        from scripts.swarm.store import IdentityConflict
 
         fencing.bump(self.store, slug, fencing.IDENTITY_CONFLICTS)
-        raise SwarmError(message)
+        raise IdentityConflict(message)
 
     def _fenced(self, slug: str, change: Callable[[dict[str, Any]], Any], *, history: bool = False) -> Any:
         from scripts.swarm import lease
