@@ -1,0 +1,11 @@
+{
+  "gate": "lint/hold-the-size-and-complexity-limits",
+  "reason": "a function past seven parameters",
+  "edits": [
+    {
+      "path": "scripts/ci_lab/run_static.py",
+      "before": "grader_tree: Path, settings: Settings) -> Result:",
+      "after": "grader_tree: Path, settings: Settings, a: int = 0, b: int = 0, c: int = 0) -> Result:"
+    }
+  ]
+}

@@ -1,0 +1,58 @@
+{
+  "lint/refuse-marker-key-vector-drift-from-kernel-dev": {
+    "needs": ["checkout"],
+    "reason": "reads the agentibrain kernel dev checkout an earlier step clones into .marker-kernel"
+  },
+  "lint/keep-internal-addresses-identifiers-and-private-keywords-out-of-public-docs": {
+    "needs": ["secret"],
+    "reason": "its env reads secrets.DOCS_SANITY_KEYWORDS"
+  },
+  "lint/refuse-changelog-fragments-named-off-the-branch-or-opening-without-a-section-heading": {
+    "needs": ["step env"],
+    "reason": "its BRANCH env reads github.head_ref and github.ref_name, which the lab context does not supply"
+  },
+  "lint/require-trusted-actors-before-private-runner-admission": {
+    "needs": ["step env"],
+    "reason": "its HEAD_SHA env reads the github pull request event, which the lab context does not supply"
+  },
+  "lint/fail-on-known-vulnerabilities-new-against-the-base": {
+    "needs": ["network"],
+    "reason": "runs pip-audit through uvx against the online vulnerability database"
+  },
+  "lint/run-every-swarm-ledger-dashboard-query-against-this-head-s-metrics-tables": {
+    "needs": ["step env", "checkout", "docker", "earlier step"],
+    "reason": "starts a ClickHouse container and runs the antoncore dashboard checker that earlier steps check out and install; its env reads github.run_id"
+  },
+  "lint/hold-the-hive-member-nats-grants-equal-to-the-antoncore-hive-user": {
+    "needs": ["checkout", "network"],
+    "reason": "reads the antoncore checkout in .antoncore and pip installs cryptography"
+  },
+  "lint/hold-the-mutation-planner-s-batch-runner-ceiling-equal-to-the-antoncore-batch-runner-chart": {
+    "needs": ["checkout"],
+    "reason": "reads the antoncore checkout in .antoncore"
+  },
+  "lint/artifact-sanity-checks": {
+    "needs": ["step env", "earlier step"],
+    "reason": "its if reads steps.artifacts.outputs.browser and it drives the Playwright browser an earlier step installs"
+  },
+  "lint/prove-the-mutation-gate-kills-with-the-real-test-and-fails-with-a-weakened-one": {
+    "needs": ["step env", "earlier step"],
+    "reason": "its if reads steps.self-plant.outputs.changed and it runs tests under mutation in the dev extras an earlier step installs"
+  },
+  "type-gate/install-dependencies": {
+    "needs": ["step env", "network"],
+    "reason": "a setup step that grades nothing: its if reads steps.venv.outputs.cache-hit and its PyPI fallback needs the network"
+  },
+  "type-gate/hold-the-strict-type-checker-s-errors-per-file-to-the-base-baseline": {
+    "needs": ["earlier step"],
+    "reason": "reads the base measurement an earlier step of its job writes under the runner temp type baseline folder"
+  },
+  "semgrep/scan/fail-on-findings-new-against-the-base": {
+    "needs": ["step env", "network"],
+    "reason": "its BASE env reads steps.baseline.outputs.sha and its CONFIGS name Semgrep registry rule packs fetched online"
+  },
+  "semgrep/charts/guard-rules-hold-on-their-fixtures-and-at-their-computed-floors": {
+    "needs": ["network"],
+    "reason": "fetches the base branch from origin before it grades"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "gate": "lint/hold-swallowed-exceptions-in-hooks-and-gates",
+  "reason": "a new except clause in hooks that only passes",
+  "edits": [
+    {
+      "path": "hooks/context/_strip.py",
+      "before": "    check = command\n",
+      "after": "    try:\n        check = command\n    except OSError:\n        pass\n"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "gate": "semgrep/scan/rule-exceptions-only-shrink",
+  "reason": "a rule exception list grew",
+  "edits": [
+    {
+      "path": ".semgrep/source-control-allowlist.json",
+      "before": "[\n  \"/scripts/swarm/github_reads.py\",\n",
+      "after": "[\n  \"/scripts/swarm/planted.py\",\n  \"/scripts/swarm/github_reads.py\",\n"
+    }
+  ]
+}

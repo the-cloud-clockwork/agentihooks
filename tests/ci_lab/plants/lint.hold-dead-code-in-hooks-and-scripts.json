@@ -1,0 +1,11 @@
+{
+  "gate": "lint/hold-dead-code-in-hooks-and-scripts",
+  "reason": "a new function nothing calls",
+  "edits": [
+    {
+      "path": "scripts/ci_lab/run_static.py",
+      "before": "def run(gate: StaticGate,",
+      "after": "def planted() -> None:\n    \"\"\"Do nothing.\"\"\"\n\n\ndef run(gate: StaticGate,"
+    }
+  ]
+}

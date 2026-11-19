@@ -1,0 +1,11 @@
+{
+  "gate": "lint/hold-the-tick-step-pattern",
+  "reason": "a new top level function in the tick module",
+  "edits": [
+    {
+      "path": "scripts/swarm/tick.py",
+      "before": "def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -> list[str]:\n",
+      "after": "def planted() -> None:\n    \"\"\"Do nothing.\"\"\"\n\n\ndef tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -> list[str]:\n"
+    }
+  ]
+}

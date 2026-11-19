@@ -1,0 +1,11 @@
+{
+  "gate": "semgrep/scan/outage-rules-for-tests-hold-on-every-test-file",
+  "reason": "a test swaps the ledger client for a lambda",
+  "edits": [
+    {
+      "path": "tests/test_claude_md_sanity.py",
+      "before": "\n\nclass TestClaudeMdSanity:\n",
+      "after": "\n\ndef test_planted_swap(monkeypatch: pytest.MonkeyPatch) -> None:\n    \"\"\"Swap the ledger client for a lambda.\"\"\"\n    monkeypatch.setattr(\"scripts.swarm.ledger_client.LedgerClient\", lambda: None)\n\n\nclass TestClaudeMdSanity:\n"
+    }
+  ]
+}
