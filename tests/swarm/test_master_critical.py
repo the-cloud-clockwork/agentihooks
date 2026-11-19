@@ -240,7 +240,7 @@ def test_a_refused_forced_start_is_recorded_with_its_reason_and_time_and_raises_
 
     master_fallback.main(["force", "sw", str(CRITICAL_AT)])
 
-    assert [command[-5:] for command, _ in ran] == [["swarm", "sw", "master", "up", "--replace"]]
+    assert [command[-5:] for command, _ in ran] == [["swarm", "sw", "master", "up", "--forced"]]
     attempts = watched.report().get("master_critical", {}).get("attempts")
     assert attempts == [
         {"at": CRITICAL_AT, "outcome": "failed", "reason": REFUSED, "ended_at": START + 31 * MINUTE, "code": 1}
@@ -965,7 +965,7 @@ def test_the_forced_runner_runs_master_up_replace_bounded_with_the_launch_env(
     master_fallback.forced("sw", at, environ)
 
     [(command, options)] = ran
-    assert command == [sys.executable, "-m", "scripts.install", "swarm", "sw", "master", "up", "--replace"]
+    assert command == [sys.executable, "-m", "scripts.install", "swarm", "sw", "master", "up", "--forced"]
     assert options == {
         "capture_output": True,
         "text": True,
