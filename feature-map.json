@@ -4594,6 +4594,35 @@
       ]
     },
     {
+      "id": "lab-red-group-culprit",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/queue-culprit-comment",
+      "behaviour": "When the CI lab grades a merge group red, each entry is graded alone against dev from the verdict cache in queue order. The first entry red alone is the culprit; a group of two or more entries all green alone is an interaction naming every entry; a cache miss ahead of the first red entry, or a single entry green alone, leaves the group undecided. The lab comments through the GitHub App on each named pull request and dequeues the culprit, or the last entry of an interaction, so the queue re-forms without it, and the hub merge.dequeued event of that pull request carries culprit with the kind, group head, named urls and comment urls.",
+      "seam": "scripts.ci_lab.culprit.name over a verdict cache, scripts.ci_lab.culprit.body, scripts.ci_lab.culprit.Culprits.comment and Culprits.dequeue over the GitHub REST and GraphQL API, scripts.ci_lab.culprit.observation through scripts.hub.pulls.Pulls.observe, and scripts.ci_lab.culprit.remove, which comments, announces the dequeue on the hub, then dequeues",
+      "tests": [
+        "tests/ci_lab/test_culprit.py::test_the_first_entry_red_alone_is_the_culprit",
+        "tests/ci_lab/test_culprit.py::test_an_entry_is_red_alone_when_any_unit_fails_while_another_misses_the_cache",
+        "tests/ci_lab/test_culprit.py::test_a_red_group_green_entry_by_entry_is_an_interaction_naming_both",
+        "tests/ci_lab/test_culprit.py::test_an_entry_with_no_units_to_grade_is_green_alone",
+        "tests/ci_lab/test_culprit.py::test_a_miss_ahead_of_the_first_red_entry_leaves_the_group_undecided",
+        "tests/ci_lab/test_culprit.py::test_a_miss_behind_the_culprit_does_not_hold_the_finding",
+        "tests/ci_lab/test_culprit.py::test_a_group_of_fewer_than_two_entries_green_alone_names_nothing",
+        "tests/ci_lab/test_culprit.py::test_the_culprit_comment_names_the_group_and_that_it_leaves_the_queue",
+        "tests/ci_lab/test_culprit.py::test_the_interaction_comment_names_every_entry_and_the_one_that_leaves",
+        "tests/ci_lab/test_culprit.py::test_the_culprit_token_carries_only_pull_requests_and_contents_write",
+        "tests/ci_lab/test_culprit.py::test_comment_posts_the_body_on_the_pull_request_and_returns_its_url",
+        "tests/ci_lab/test_culprit.py::test_a_refused_comment_raises_naming_the_request",
+        "tests/ci_lab/test_culprit.py::test_dequeue_removes_the_pull_request_by_its_node_id",
+        "tests/ci_lab/test_culprit.py::test_a_graphql_error_refuses_the_dequeue",
+        "tests/ci_lab/test_culprit.py::test_a_url_that_names_no_pull_request_refuses_the_dequeue",
+        "tests/ci_lab/test_culprit.py::test_a_refused_graphql_answer_raises_naming_its_status",
+        "tests/ci_lab/test_culprit.py::test_the_dequeue_event_of_the_removed_entry_carries_its_culprit",
+        "tests/ci_lab/test_culprit.py::test_a_dequeue_seen_on_github_carries_no_culprit",
+        "tests/ci_lab/test_culprit.py::test_remove_comments_on_each_named_entry_then_announces_and_dequeues_the_removed_one",
+        "tests/ci_lab/test_culprit.py::test_remove_announces_the_culprit_before_the_dequeue_is_sent"
+      ]
+    },
+    {
       "id": "lab-worker-deletion-cost",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-worker-deletion-cost",
