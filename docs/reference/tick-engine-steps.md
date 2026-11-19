@@ -303,7 +303,7 @@ Each profiled run writes one JSON line to standard error when the step returns o
 function list cut to its first entries:
 
 ```json
-{"event": "swarm_tick_step_profile", "step": "master scale", "wall_s": 41.73, "top_cumulative": ["/app/scripts/hive/launch.py:665(_placed) calls=1 own_s=0.0011 cumulative_s=40.9102", "/app/scripts/hive/launch.py:685(_reselect) calls=78 own_s=0.0094 cumulative_s=38.2210"], "top_own": ["~:0(<method 'recv_into' of '_socket.socket' objects>) calls=9120 own_s=6.1043 cumulative_s=6.1043"], "pass_id": "9e0d10c4f2a14b7e8d3c5a6b7c8d9e0f"}
+{"event": "swarm_tick_step_profile", "step": "master scale", "wall_s": 41.73, "top_cumulative": ["/app/scripts/hive/launch.py:665(_placed) calls=1 own_s=0.0011 cumulative_s=40.9102", "/app/scripts/hive/launch.py:685(_reselect) calls=78 own_s=0.0094 cumulative_s=38.2210"], "top_own": ["~:0(<method 'recv_into' of '_socket.socket' objects>) calls=9120 own_s=6.1043 cumulative_s=6.1043"], "pass_id": "0f1e2d3c4b5a69788796a5b4c3d2e1f0"}
 ```
 
 | Field | Value |
