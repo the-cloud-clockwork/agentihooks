@@ -284,13 +284,61 @@ def tokens_of(text):
         return text.split()
 
 
-def verb_index(tokens):
-    for i, tok in enumerate(tokens):
-        if tok in ("sudo", "command", "env") and len(tokens) > i + 1:
+WRAPPER_VALUE_FLAGS = {
+    "sudo": {
+        "-u",
+        "--user",
+        "-g",
+        "--group",
+        "-h",
+        "--host",
+        "-p",
+        "--prompt",
+        "-C",
+        "--close-from",
+        "-D",
+        "--chdir",
+        "-R",
+        "--chroot",
+        "-T",
+        "--command-timeout",
+        "-r",
+        "--role",
+        "-t",
+        "--type",
+        "-U",
+        "--other-user",
+    },
+    "env": {"-u", "--unset", "-C", "--chdir"},
+}
+
+
+def wrapper_option_takes_value(wrapper: str, option: str) -> bool:
+    flags = WRAPPER_VALUE_FLAGS[wrapper]
+    if option.startswith("--"):
+        return option in flags
+    for i, char in enumerate(option[1:], 1):
+        if f"-{char}" in flags:
+            return i == len(option) - 1
+    return False
+
+
+def verb_index(tokens: list[str]) -> int:
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok in ("sudo", "command", "env") and i + 1 < len(tokens):
+            i += 1
+            if tok != "command":
+                while i < len(tokens) and tokens[i].startswith("-"):
+                    option = tokens[i]
+                    i += 1
+                    if option == "--":
+                        break
+                    i += int(wrapper_option_takes_value(tok, option) and i < len(tokens))
             continue
-        if ASSIGNMENT.match(tok) and len(tokens) > i + 1:
-            continue
-        if tok.startswith("-") and i > 0 and tokens[i - 1] == "sudo":
+        if ASSIGNMENT.match(tok) and i + 1 < len(tokens):
+            i += 1
             continue
         return i
     return len(tokens)
