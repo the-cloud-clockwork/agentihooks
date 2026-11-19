@@ -42,7 +42,7 @@ fetch = _fetch()
 def _archive(name: str) -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
-        archive.writestr(f"collected-{name}", name)
+        archive.writestr(zipfile.ZipInfo(f"collected-{name}", date_time=(2026, 11, 19, 0, 0, 0)), name)
     return buffer.getvalue()
 
 
