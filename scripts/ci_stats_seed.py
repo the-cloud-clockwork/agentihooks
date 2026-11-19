@@ -20,6 +20,8 @@ DEPTH = 50
 BUDGET = 300.0
 TIMEOUT = 120
 RETRY_DELAYS = (5, 10, 20)
+PAGE = 100
+PAGES = 10
 
 
 def api(path: str, binary: bool = False, deadline: float = math.inf) -> Any:
@@ -64,6 +66,16 @@ def download(item: dict[str, Any], deadline: float) -> bytes:
         ) from error
 
 
+def run_artifacts(run: int, deadline: float) -> list[dict[str, Any]]:
+    listed: list[dict[str, Any]] = []
+    for page in range(1, PAGES + 1):
+        found = api(f"actions/runs/{run}/artifacts?per_page={PAGE}&page={page}", deadline=deadline)["artifacts"]
+        listed += found
+        if len(found) < PAGE:
+            return listed
+    return listed
+
+
 def harvest(number: int, folder: Path, taken: set[str], deadline: float = math.inf) -> int:
     try:
         sha = api(f"pulls/{number}", deadline=deadline)["head"]["sha"]
@@ -74,7 +86,7 @@ def harvest(number: int, folder: Path, taken: set[str], deadline: float = math.i
         return 0
     runs = api(f"{TESTS}?event=pull_request&head_sha={sha}&per_page=10", deadline=deadline)["workflow_runs"]
     for row in runs:
-        artifacts = api(f"actions/runs/{row['id']}/artifacts?per_page=100", deadline=deadline)["artifacts"]
+        artifacts = run_artifacts(row["id"], deadline)
         found = [item for item in artifacts if item["name"].startswith(ARTIFACT) and not item["expired"]]
         written, pointers = 0, set[str]()
         try:
