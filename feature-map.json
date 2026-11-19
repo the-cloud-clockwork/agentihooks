@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "lab-zero-base-push",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-zero-base-push",
+      "behaviour": "A GitHub new branch push with an all zero before object id emits no lab head, so it never holds a promotion grade or fetches an invalid base. Ordinary branch pushes with real bases still emit heads; pull request events and signed head notices still grade new branch heads independently.",
+      "seam": "scripts.ci_lab.webhooks.head_events at push intake",
+      "rules": ["lab-push-zero-base-unchecked"],
+      "tests": [
+        "tests/ci_lab/test_intake.py::test_a_new_branch_push_with_a_zero_before_names_no_head"
+      ]
+    },
+    {
       "id": "lab-store-incremental-fetch",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-store-mirror-mount",

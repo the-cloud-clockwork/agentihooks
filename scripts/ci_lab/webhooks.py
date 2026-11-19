@@ -42,6 +42,8 @@ class HeadEvent:
 def _push(payload: Mapping[str, Any]) -> list[HeadEvent]:
     if payload["deleted"] or not str(payload["ref"]).startswith(BRANCHES):
         return []
+    if payload["before"] == "0" * 40:
+        return []
     repo, actor = payload["repository"]["html_url"], payload["sender"]["login"]
     return [HeadEvent("push", repo, payload["after"], payload["before"], actor, PUSHED)]
 
