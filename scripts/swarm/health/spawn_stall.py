@@ -10,7 +10,7 @@ from scripts.hive import admission, placement_waits
 from scripts.hive.placement import LOCAL_FULL
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import CLOSED, InboxStore
-from scripts.swarm import blockers, capacity, freeze, master_pin, panic, timing
+from scripts.swarm import blockers, capacity, freeze, master_pin, panic, tick_activity, timing
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.ledger_client import LedgerGone, pass_state
 from scripts.swarm.store import RedisStore
@@ -28,7 +28,7 @@ def read(store, slug: str) -> dict:
 
 
 def save(store, slug: str, state: dict) -> None:
-    timing.keep()
+    tick_activity.renew_now()
     store.redis.set(store.key(slug, KEY), json.dumps(state))
 
 
@@ -166,7 +166,7 @@ def deliver(store, slug: str, ledger, at: int) -> None:
     finding = found[0]
     text = f"Spawn stall on {slug}: {finding.summary}. " + "; ".join(finding.evidence)
     if "message" not in state:
-        timing.keep()
+        tick_activity.renew_now()
         item = inbox.send("swarm", seat_address(slug, "master"), text, ref=f"{REF}{slug}:{state['since']}")
         state.update(message=item.id, sent_at=at)
         save(store, slug, state)
@@ -192,7 +192,7 @@ def watch(store: RedisStore, slug: str, ledger: Any, clock: Callable[[], int], r
             return
         previous = error
         failure = {"step": step, "error": f"{type(error).__name__}: {error}", "at": clock()}
-        timing.keep()
+        tick_activity.renew_now()
         store.redis.set(store.key(slug, "tick-failure"), json.dumps(failure))
         blockers.record(store, slug, type(error).__name__, f"{step}: {error}", clock())
         panic.count_error(store, slug, type(error).__name__, clock())

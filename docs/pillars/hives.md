@@ -1883,6 +1883,168 @@ The hub creates the hive buckets; members are not allowed to create them:
 
 A hive beats `hive-presence` every 15 seconds. A beat expires after 45 seconds.
 
+### Offer order
+
+On each readiness pass the hub reads one snapshot of every `events` swarm and offers each task a lane may claim to
+that lane's work queue. `scripts.swarm.readiness.offers` builds the list in one order for the whole swarm, and
+`readiness.publish` adds the offers to the lane queues in that order.
+
+A task is offered when all of these hold:
+
+- It names a lane.
+- It is not a workstation task, or it is pinned to no hive or to the root hive.
+- It is `open`, in scope and not merged into another task, and no claim hold keeps it: an open dependency, its
+  phase, a freeze or a focus elsewhere, or its post merge proof window (see
+  [How a freeze hold is named](swarm.md#how-a-freeze-hold-is-named)).
+- No running agent and no recorded claimant holds it.
+- The swarm is `running`, and no release wait, apply wait, fleet red hold or lab wait holds the task.
+
+The offers are sorted by three keys, in this order:
+
+1. **Focused first.** A task one focus record covers goes ahead of every task none covers. A record covers a task
+   when its target is a node in the task's ancestry, or a `lane:` or `kind:` selector whose value equals the task's
+   lane or kind; see [Focus ranks in offer order](../reference/tick-adapters.md#focus-ranks-in-offer-order) for the
+   full rules.
+2. **Ledger rank band.** `urgent`, then `high`, then `normal`, then `low`, read from the rank stored on the task row
+   by `scripts.swarm_ledger.ledger_rank.order`. A task with no rank counts as `normal`, except a documentation follow
+   up (profile `documentation` with `follow_up` set), which counts as `low`. `next` is stored as `urgent`.
+3. **Focus record position.** The position of the first focus record that covers the task; a task no record covers
+   takes the count of focus records.
+
+Ties keep the order of the task rows in the ledger export. The rank band decides before the focus position, so an
+`urgent` task inside a later focus goes out ahead of a `normal` task inside an earlier one.
+
+The sort applies to every task that passes the claim holds above. While a focus has open work, the tasks outside it are
+held and not offered, with two kinds of exception that are offered beside the focused tasks and go out after them,
+whatever their rank:
+
+- A task of a Doctor swarm's fix phase, which no focus holds.
+- A task that joins the focus only because a focused task depends on it, is parked on it, or sits in a phase the
+  focused task's phase waits on. It is offered, but no focus record covers it, so it has no focus position.
+
+With no focus record on the ledger, every offer is unfocused and goes out by rank band, in ledger order inside a
+band.
+
+#### Offer order example
+
+A ledger holds these rows in this order, with three focus records, `tasks/old` first, then `tasks/hot`, then
+`tasks/new`, and a Doctor fix phase `p1`:
+
+```text
+row   rank     covered by           focus position   offer position
+old   normal   focus tasks/old      0                2
+hot   urgent   focus tasks/hot      1                1
+new   normal   focus tasks/new      2                3
+fix   urgent   none, phase p1       3 (outside)      4
+```
+
+`hot` goes first on its band, `old` and `new` follow on focus position, and the urgent `fix` task goes out last
+because no focus covers it. Clear the three focus records and the order becomes `hot`, `fix`, `old`, `new`: two
+urgent tasks and then two normal ones, each pair in ledger order.
+
+#### Changing the offer order
+
+```bash
+# Put a phase first in the focus queue, or make it the whole queue
+agentihooks swarm <slug> focus phases/<phase id> --top
+agentihooks swarm <slug> focus phases/<phase id> --only
+
+# Raise one task's rank band (master, planner or operator)
+agentihooks api --slug <slug> --as <name> task set <task id> rank=urgent
+
+# Clear a focus or a freeze record
+agentihooks swarm <slug> unfreeze phases/<phase id>
+```
+
+Who may write each record is in [Freeze and focus](swarm.md#freeze-and-focus) and [Queue rank](swarm.md#queue-rank).
+A change reaches the next readiness pass, which reads the ledger again when its revision moved.
+
+#### Offer delivery order
+
+Each lane of a swarm has one JetStream work queue, and a spoke takes one offer at a time from it, oldest first. The
+sort orders only the offers one pass adds. Before it adds them, `publish` withdraws every queued offer the snapshot
+names as stale: the task is gone, claimed, no longer `open`, at another claim generation, moved to another lane, held,
+or kept back by a wait. It then adds each fresh offer whose id is not already queued. The offer id is
+`ready:<slug>:<task id>:<claim generation>`, with `:root` appended for a workstation task, so the rank and focus of a
+task are not part of it.
+
+The bus also drops a published offer whose id it saw within its dedupe window, two minutes by default
+(`dedupe_window_ms` of the bus config). An offer withdrawn and published again under the same id inside that window is
+not queued; a pass after the window queues it.
+
+Two things follow:
+
+- An offer queued on an earlier pass stays ahead of the offers a later pass adds. Raising the rank of a task, or
+  focusing it, does not move an offer already queued; the new order applies to offers published after the change.
+- An offer a spoke hands back waits out a delay before any spoke can take it again, so offers queued after it can go
+  out first: five seconds for one whose hive pin or needs the hive cannot meet, and `ack_wait_ms` for an unanswered,
+  held or busy one (see [Launch failure limits](#launch-failure-limits)).
+
+Each pass logs one line per swarm on the hub, with the count of claimable offers it built and the count it newly
+queued:
+
+```bash
+kubectl -n <namespace> logs deployment/agentihooks-swarm-hub | grep 'hub: readiness swarm=<slug>'
+# hub: readiness swarm=<slug> offers=6 placed=2
+```
+
+#### Offer order tests
+
+| Test | Holds |
+|---|---|
+| `tests/swarm/test_events_placement.py::test_focused_offers_go_out_by_rank_band_then_focus_record_order` | Inside the focus, rank band decides before focus position |
+| `tests/swarm/test_events_placement.py::test_a_focused_offer_goes_out_before_an_urgent_doctor_fix_outside_the_focus` | A focused `normal` offer goes out before an `urgent` Doctor fix task outside the focus |
+| `tests/swarm/test_events_placement.py::test_offers_without_a_focus_go_out_by_rank_band_keeping_ledger_order_inside_a_band` | With no focus, rank band first and ledger order inside a band |
+| `tests/swarm/test_focus_budget.py::test_the_focus_sort_puts_focused_tasks_ahead_of_an_unfocused_task_in_a_better_band` | `focus_budget.ordered` puts a focused task ahead of an unfocused one in a better band |
+
+All four carry the `swarm-focus` feature mark and are listed under that feature in `feature-map.json`. They run in CI
+with the rest of the suite.
+
+#### Offer order limitations
+
+- The dispatcher's claim key does not order offers. At `delegate` and `full` autonomy the capacity decision's ready
+  work and preemption sort by `scripts.swarm.dispatcher.claim_key`. That key puts the critical chain guard band
+  first. It keeps only these ranks as bands: an operator rank, an `urgent` rank, a `low` rank the swarm set on any
+  task, and a documentation follow up with no rank. It orders every other task by its place in the dispatcher's
+  queue. The dispatcher writes no rank to the ledger. Offers take the stored rank of every task as its band, a rank a
+  master or planner set included.
+- A task whose last launch failed keeps its place. The tick's launch order demotes it inside its band; offers do not.
+- None of the tie rules inside a rank band from [Queue rank](swarm.md#queue-rank) apply: no longer critical path, no S
+  task that unblocks another and no resumed work goes first. Focus record position breaks ties inside a band, then
+  ledger order.
+
+#### How the offer order reached the events engine
+
+The legacy tick spawn sorted its launch queue with `focus_budget.ordered`, and `readiness.offers` published offers
+in ledger row order. Pull request
+[#11136](https://github.com/the-cloud-clockwork/agentihooks/pull/11136) gave the offers the same sort while it mapped
+every feature whose tests reached the legacy spawn to tests that would survive its removal. That mapping was the file
+`tests/LEGACY_SPAWN_COVERAGE.json`, checked by `tests/swarm/test_legacy_spawn_coverage.py` under the feature
+`legacy-spawn-events-coverage`. It listed 23 features. The task had counted 31 from file imports; the pull request
+description explains that many of those test files import the place or observe step only for helpers that stay.
+16 entries named tests from the feature map that reach none of the spawn, 10 named clauses that retire with the spawn
+and 3 named an events engine gap; an entry could name more than one of these.
+
+Pull request [#11141](https://github.com/the-cloud-clockwork/agentihooks/pull/11141) removed the spawn, and the map
+and its detector with it. `legacy-spawn-events-coverage` is now a retired id in `feature-map.json`, and
+`swarm-events-only-launch` holds the events only engine. The gaps the map named stand as follows:
+
+| Gap named by the map | Now |
+|---|---|
+| The admission claim carried no handoff document text for a recovery successor | Closed by [#11139](https://github.com/the-cloud-clockwork/agentihooks/pull/11139): admission sets the handoff and its envelope on the claimed row and attaches the predecessor's transfer; see [Handoff continuity on admission](#handoff-continuity-on-admission) |
+| The admission claim resolved no continuation, so a reclaimed task did not continue from its recorded branch | Closed by [#11139](https://github.com/the-cloud-clockwork/agentihooks/pull/11139): admission resolves the continuation and stores the reclaim |
+| Ordering by the dispatcher's claim key over ledger rank, and the demotion of a task whose launch failed | Open, as listed under [Offer order limitations](#offer-order-limitations) |
+
+#### Offer order troubleshooting
+
+| Symptom | Check |
+|---|---|
+| An `urgent` task waits while `normal` tasks of the same lane start | Its offer is queued behind offers from earlier passes, or it was handed back. Read the hub `readiness` line: `placed=0` with `offers` above zero means every offer was already queued, or the bus dropped a repeat inside its dedupe window. |
+| A focused task starts after a task of a later focus record | The later task has a better rank band; the band decides before the focus position. |
+| A task on the critical chain does not start first at `delegate` or `full` autonomy | Offers ignore the chain guard band. Raise the task's rank, or focus it, before its next offer. |
+| A task outside the focus is offered while the focus has open work | It is a Doctor fix phase task, or a focused task waits on it. Read its `phase`, and the `depends_on` and `parked_on` of the focused tasks. |
+| No offer for a task that looks ready | A claim hold, a recorded claimant or a wait holds it, or the swarm is not `running`; [Freeze and focus](swarm.md#freeze-and-focus) and `agentihooks swarm <slug> status` name the holds. |
+
 ### When a launch fails
 
 An admission claims the task, starts its execution, occupies a seat and marks the ledger row `claimed` before the

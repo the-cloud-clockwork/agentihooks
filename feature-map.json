@@ -94,6 +94,16 @@
       ]
     },
     {
+      "id": "tick-site-ordering-does-not-propagate-loss",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2732",
+      "behaviour": "A site barrier orders a tick step after earlier work without making added needs propagate drops. Only declared needs propagate abandoned, cut or raised predecessors, including slow handoff and transitive dependents.",
+      "seam": "registry.site_edges through engine.run_graph and the pass pool",
+      "tests": [
+        "tests/tick/test_site_failure_needs.py::test_abandoned_page_relay_does_not_drop_barrier_only_slow_work"
+      ]
+    },
+    {
       "id": "tick-status-publish-last-findings",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-status-publish-budget",
@@ -2991,6 +3001,24 @@
       ]
     },
     {
+      "id": "swarm-tick-lock-renewal-interval",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2735",
+      "behaviour": "A tick pass renews its tick lock and writes the activity mark at most once per renewal interval, or per lease tick when that is shorter, never before every step: every step still checks for a stop, the first step of a pass renews, a failed renewal is retried by the next step, a clock that went back renews at once, and a lease check before a write renews at once inside the interval.",
+      "seam": "The pass step hook scripts.swarm.tick_activity.Renewal that run_tick sets on timing.BEFORE_STEP, and scripts.swarm.tick_activity.renew_now, the forced lease check the health checks and the intent gate run before a write",
+      "tests": [
+        "tests/swarm/test_tick_activity.py::test_a_pass_renews_its_tick_lock_once_while_every_step_checks_for_a_stop",
+        "tests/swarm/test_tick_activity.py::test_the_step_hook_renews_again_once_its_interval_passed_or_the_clock_went_back",
+        "tests/swarm/test_tick_activity.py::test_a_stolen_tick_lock_stops_every_step_from_the_first_renewal_after_the_interval",
+        "tests/swarm/test_tick_activity.py::test_the_step_hook_renews_once_per_lease_tick_when_that_is_shorter_than_its_interval",
+        "tests/swarm/test_tick_activity.py::test_a_lease_another_controller_took_after_a_short_lease_tick_stops_the_next_step",
+        "tests/swarm/test_tick_activity.py::test_a_lease_check_before_a_write_renews_at_once_inside_the_interval"
+      ],
+      "rules": [
+        "pass-step-renewal-unthrottled"
+      ]
+    },
+    {
       "id": "swarm-tick-source-control-port",
       "origin": "inventory",
       "behaviour": "Swarm code reaches source control through the source control port: a gh list or the GitHub adapter's command builder outside the adapter is refused unless its file is on an exception list that only shrinks, and a change read names its state, head and head branch inside a deadline.",
@@ -4714,6 +4742,19 @@
         "tests/swarm_ledger/test_artifacts.py::TestStore::test_svg_is_stored_without_scripts_handlers_or_script_links",
         "tests/swarm_ledger/test_artifacts.py::TestStore::test_anything_else_is_refused",
         "tests/swarm_ledger/test_artifacts.py::TestStore::test_an_oversize_file_is_refused"
+      ]
+    },
+    {
+      "id": "stale-queued-run-sweep",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-zombie-queued-runs",
+      "behaviour": "The Lost runner workflow, before its watch, lists the repository's queued runs, logs the job states of each run whose last update is at least 24 hours old, deletes each such run that holds no job, cancels the others, and warns for any run still queued thirty seconds later; the watch runs even when the sweep step fails.",
+      "seam": "scripts.ci_stale_runs stale, clear and main, and the Lost runner workflow sweep step",
+      "tests": [
+        "tests/test_ci_stale_runs.py::test_a_run_untouched_for_a_day_is_stale_and_a_younger_one_is_not",
+        "tests/test_ci_stale_runs.py::test_clear_returns_the_stale_runs_still_queued_once_github_settles",
+        "tests/test_ci_stale_runs.py::test_main_sweeps_only_stale_runs_and_warns_for_each_one_left",
+        "tests/test_ci_stale_runs.py::test_the_lost_runner_workflow_sweeps_stale_runs_with_its_app_token_before_the_watch"
       ]
     },
     {
@@ -8986,6 +9027,16 @@
       ]
     },
     {
+      "id": "lab-worker-loss-redelivery",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/ops-chaos-worker-loss",
+      "behaviour": "A CI lab worker killed mid unit stops heartbeating, so its lease expires and the next scheduler pass requeues the unit once and counts it in ci_lab_units_redelivered_total; the dead worker's token can neither extend nor complete the unit; a second worker leases and finishes it, the grade concludes from that run with nothing counted in ci_lab_units_lost_total, its verdict is stored, and the gate's check run and Gate Required each post one completed result.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick and listen read through GET /metrics over fakeredis and the local object store, with two workers leasing, heartbeating and completing through scripts.ci_lab.leases.Leases",
+      "tests": [
+        "tests/ci_lab/test_redelivery.py::test_a_worker_killed_mid_unit_is_redelivered_once_and_its_verdict_posts_once"
+      ]
+    },
+    {
       "id": "lab-scheduler-reindex-on-start",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/ops-dr-rebuild",
@@ -10330,6 +10381,18 @@
         "tests/ci_lab/test_head_notice.py::test_a_configured_send_posts_one_notice_signed_over_its_exact_body",
         "tests/ci_lab/test_head_notice.py::test_without_a_receiver_a_secret_or_an_actor_nothing_is_sent",
         "tests/ci_lab/test_head_notice.py::test_a_failed_send_is_reported_once_and_never_raised"
+      ]
+    },
+    {
+      "id": "hub-admission-hive-local-held",
+      "rules": ["hub-hive-local-refusal-terminates-offer"],
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2740",
+      "behaviour": "An events admission refused for the asking hive being draining, on an old release, off the root for a workstation task, outside a task hive pin or missing required capabilities answers held so another eligible hive can receive the same offer; task refusals remain terminal.",
+      "seam": "Admission.admit through LaneTasks.request and Spoke.poll with two hives sharing one offer",
+      "tests": [
+        "tests/hub/test_admission.py::test_a_hive_local_refusal_keeps_the_only_offer_for_an_eligible_second_hive",
+        "tests/hub/test_admission.py::test_a_refusal_about_the_task_stays_terminal"
       ]
     }
   ],
