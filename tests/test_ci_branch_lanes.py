@@ -1208,9 +1208,12 @@ def _literal_group_holders() -> set[str]:
         if isinstance(target, ast.Name)
     }
     return {
-        function.name
+        function.name.removeprefix("x_").removesuffix("__mutmut_orig")
+        if function.name.endswith("__mutmut_orig")
+        else function.name
         for function in module.body
         if isinstance(function, ast.FunctionDef)
+        and ("__mutmut_" not in function.name or function.name.endswith("__mutmut_orig"))
         and any(
             isinstance(key, ast.Constant)
             and key.value == "group"
