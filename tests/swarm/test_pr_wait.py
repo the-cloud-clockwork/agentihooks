@@ -463,6 +463,36 @@ def test_a_grade_push_of_a_task_with_a_pull_request_waits_on_its_checks(store: R
     ]
 
 
+@pytest.mark.feature("swarm-push-wait")
+@pytest.mark.parametrize(
+    ("kind", "target", "until", "preserved"),
+    [
+        ("lab", GRADE, 5_001, True),
+        ("lab", GRADE, 5_000, False),
+        ("lab", GRADE.replace(SHA, "0" * 40), 5_001, False),
+        ("checks", "https://github.com/o/r/pull/99", 5_001, False),
+        ("lab", None, 5_001, False),
+    ],
+)
+def test_only_the_live_lab_wait_for_the_pushed_head_precedes_existing_pr_checks(
+    store: RedisStore, kind: str, target: str | None, until: int, preserved: bool
+) -> None:
+    grade_mark(store)
+    on = {"kind": kind, **({"target": target} if target is not None else {})}
+    idle.declare_wait(store.redis, "sw", ME, until, "accepted lab push", 100, on)
+    held = idle.wait(store.redis, "sw", ME)
+    rows = {"t1": {"id": "t1", "pr_url": URL}}
+    actions = enforce(store, rows, {URL: OPEN})
+    if preserved:
+        assert actions == []
+        assert idle.wait(store.redis, "sw", ME) == held
+        assert (pushed(store) or {})["pushed_head"] == SHA
+    else:
+        assert actions == [f"set the wait of {ME} on checks of {URL} from its push"]
+        assert (idle.wait(store.redis, "sw", ME) or {})["on"] == {"kind": "checks", "target": URL, "head": OPEN.head}
+        assert pushed(store) is None
+
+
 def test_a_pull_request_the_forge_finds_wins_over_the_lab_grade(store: RedisStore) -> None:
     grade_mark(store)
     assert enforce(store, UNPULLED, {URL: OPEN}, forge=lambda repo, branch: URL, grade=lambda head: GRADE) == [
