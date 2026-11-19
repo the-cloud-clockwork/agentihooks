@@ -52,7 +52,13 @@ def test_abandoned_page_relay_does_not_drop_barrier_only_slow_work() -> None:
 def test_site_edges_keep_declared_needs_and_forward_the_step_contract() -> None:
     values = frozenset({Domain("pass.agents")})
     first = Step("page relay", lambda ctx: Result(), group="relay", writes=values)
-    later = Step("consumer", lambda ctx: Result(), frozenset({"declared"}), group="report", reads=values)
+    seen: list[Context] = []
+
+    def call(ctx: Context) -> Result:
+        seen.append(ctx)
+        return Result()
+
+    later = Step("consumer", call, frozenset({"declared"}), group="report", reads=values)
     edged = registry.site_edges((first, later), ("relay", "report"))
     assert later.needs == frozenset({"declared"})
     assert edged[1].needs == frozenset({"declared", "page relay"})
@@ -72,7 +78,9 @@ def test_site_edges_keep_declared_needs_and_forward_the_step_contract() -> None:
     assert again[1].feature == later.feature
     setattr(later, "placing", True)
     assert getattr(again[1], "placing") is True
-    assert again[1].run(context()) == Result()
+    ctx = context()
+    assert again[1].run(ctx) == Result()
+    assert seen == [ctx]
 
 
 def test_only_declared_needs_propagate_dropped_cut_and_raised_steps() -> None:
