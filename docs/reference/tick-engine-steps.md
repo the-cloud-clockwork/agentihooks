@@ -286,10 +286,10 @@ The tick report counts these runs per step in its Late share, Abandoned, Held an
 ### Profile a step
 
 The tick report shows how long a step ran and how much CPU it used, but not where that time went. To find out, list
-the step in `AGENTIHOOKS_TICK_PROFILE_STEPS`, added by pull request 10512. `scripts.swarm.timing.within`, which runs every engine step at its
-budget, reads the variable on each step run and runs every listed step under `cProfile`. The value is a comma
-separated list of step names exactly as the [tick step catalogue](tick-step-catalogue.md) prints them. Spaces around
-each name are dropped, and an unset or empty value profiles nothing.
+the step in `AGENTIHOOKS_TICK_PROFILE_STEPS`, added by pull request 10512. `scripts.swarm.timing.within`, which runs
+every engine step at its budget, reads the variable on each step run and runs every listed step under `cProfile`. The
+value is a comma separated list of step names exactly as the [tick step catalogue](tick-step-catalogue.md) prints
+them. Spaces around each name are dropped, and an unset or empty value profiles nothing.
 
 Set it in the environment of the process that runs the tick, as for `AGENTIHOOKS_TICK_STAGE` (see
 [Configuration](configuration.md#swarm-tick)): one line in `~/.agentihooks/.env` on the machine whose scheduler
@@ -338,8 +338,9 @@ On a hosted controller, the lines are in the controller pod's log; replace the `
 
 A function called far more often than the step's work explains, or one whose cumulative time is most of `wall_s`,
 names the cost. The `master scale` profile that found the [master launch retry
-loop](../pillars/hives.md#retry-after-a-full-account-reservation) showed `HiveLaunch._reselect` called 78 times
-and `_admitted_selection` 79 times in one master launch, in an 83 second pass of controller release 2.17.806.
+loop](../pillars/hives.md#retry-after-a-full-account-reservation) showed `HiveLaunch._reselect` called 78 times and
+`_admitted_selection` 79 times in one master launch, in pass `9e0d10`, an 83 second pass of controller release
+2.17.806, as the pull request 10731 description records.
 
 The `profile` input of the `.github/actions/tick-scale` action sets the same variable for the
 [tick scale gate](delivery-tiers.md#tick-scale-gate-at-promotion); a push to `diffcheck/tick-scale-profile`

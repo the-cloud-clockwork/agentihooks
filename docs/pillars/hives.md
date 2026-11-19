@@ -1697,8 +1697,9 @@ This rule covers placement on hives. A master the controller leaves to the works
 
 Before the controller sends a master's launch order to a hive, `HiveLaunch.send_order` reserves one session on the
 chosen account. The native login reserves with a cap of 1; a subscription or api slot uses the cap the hive reports
-for the account, or the account's own cap when the hive reports none. When the reservations already reach the cap, no order is sent. The new execution record is ended,
-its reason is written to the swarm's `launch-endings` hash, and the launch is refused with:
+for the account, or the account's own cap when the hive reports none. When the reservations already reach the cap, no
+order is sent. The new execution record is ended, its reason is written to the swarm's `launch-endings` hash, and the
+launch is refused with:
 
 ```text
 account reservation is full: account=<harness>:<account> sessions=<count> cap=<cap> five_left=<pct> week_left=<pct>
@@ -1744,17 +1745,17 @@ redis-cli HGETALL agentihooks:swarm:<slug>:launch-endings
 Releases without pull request 10731 left the refused set out of `_master_selection`. Dropping the quota row kept a
 full subscription slot off the next try, but `place_master` builds the native login candidate from the hive's
 `interactive` field, and releases before pull request 11407 offered it to every master seat, ranked ahead of that
-hive's slots within the same UI or headless tier. Each retry therefore chose the same login and got the same
-refusal. The loop ran until the pass heartbeat found the tick lock stale and raised `SwarmError` with `the tick lock
-is stale: pass heartbeat expected token ...`. The `master scale` step holds the host placement lock (`tick.PLACING`)
-while it launches, so every other step that takes the lock waited on it, the `spawn` step of those releases among
-them. In the evidence for pull request 10731, one `master-2` launch ran `_reselect` 78 times, the seat held 35,141
-executions, its newest 400 all ended with the same `claude:unrouted` refusal, and 30 of 30 `master scale` passes in
-the tick history ended with that `SwarmError`. In three passes of the 10 November scale proof
-([#10553](https://github.com/the-cloud-clockwork/agentihooks/issues/10553)), `master scale` held the placement lock
-37 to 48 seconds while its failing launch used 27 to 35 seconds of CPU, and `spawn` waited past its 33 second
-budget. That loop predates the [front door rule](#backend-master-seats), which now keeps backend seats off the
-native login; the retry rule covers the front door and any account whose reservation is full.
+hive's slots within the same UI or headless tier. Each retry therefore chose the same login and got the same refusal.
+The loop ran until the pass heartbeat found the tick lock stale and raised `SwarmError` with `the tick lock is stale:
+pass heartbeat expected token ...`. The `master scale` step holds the host placement lock (`tick.PLACING`) while it
+launches, so every other step that takes the lock waited on it, the `spawn` step of those releases among them. In the
+evidence for pull request 10731, one `master-2` launch ran `_reselect` 78 times, the seat held 35,141 executions, its
+newest 400 all ended with the same `claude:unrouted` refusal, and 30 of 30 `master scale` passes in the tick history
+ended with that `SwarmError`. In three passes of the 10 November scale proof
+([#10553](https://github.com/the-cloud-clockwork/agentihooks/issues/10553)), `master scale` held the placement lock 37
+to 48 seconds while its failing launch used 27 to 35 seconds of CPU, and `spawn` ran past the 33 second budget it had
+then, which the issue records. That loop predates the [front door rule](#backend-master-seats), which now keeps
+backend seats off the native login; the retry rule covers the front door and any account whose reservation is full.
 
 Measured over the `tick:steps` stream (`own_cpu_s` of `master scale`) and the `spawn` records ended `abandoned`,
 before and after the fix:
@@ -1765,8 +1766,8 @@ before and after the fix:
 | After | 43 | 55.3 | 4.8 | 0 | 0 |
 
 The before window was read at 14:35 UTC and the after window runs from 15:20 to 16:46 UTC, on the day pull request
-10731 merged. Pull request 11141 later removed the `spawn` step. The after window also ran with `master-per` off from its start, so not every drop in the master scale
-runs comes from the retry fix alone.
+10731 merged. Pull request 11141 later removed the `spawn` step. The after window also ran with `master-per` off from
+its start, so not every drop in the master scale runs comes from the retry fix alone.
 
 The cause was found with the [tick step profiler](../reference/tick-engine-steps.md#profile-a-step). The regression
 test `test_a_front_door_master_retry_leaves_a_full_native_login_for_a_subscription_slot` fails when a launch calls
