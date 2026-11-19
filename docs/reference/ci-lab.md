@@ -1673,7 +1673,8 @@ both of these hold:
 
 | Source | Recorded when | Subject | `head` and `base` | `actor` |
 |---|---|---|---|---|
-| `push` delivery on `/github` | A branch under `refs/heads/` moved; a deleted branch or a tag records nothing | `ci.lab.head.push` | `after` and `before` | The delivery's sender |
+| `push` delivery on `/github` | A branch under `refs/heads/` outside the plant prefix moved; a deleted branch, a new branch whose `before` is all zeros, or a tag records nothing | `ci.lab.head.push` | `after` and `before` | The delivery's sender |
+| `push` delivery on `/github` to a plant branch | A branch under `refs/heads/diffcheck/lab-plant-` (`scripts.ci_lab.webhooks.PLANT_PREFIX`) moved; a deleted branch records nothing | `ci.lab.head.plant` | `after`, and an empty base whatever `before` says | The delivery's sender |
 | `pull_request` delivery on `/github` | The action is `opened`, `synchronize` or `reopened` | `ci.lab.head.pull_request` | The pull request's head and base SHA | The pull request's author |
 | `merge_group` delivery on `/github` | The action is `checks_requested` | `ci.lab.head.merge_group` | The group's `head_sha` and `base_sha` | The delivery's sender |
 | `check_run` delivery on `/github` | The action is `rerequested` and the check's name starts with `lab` | `ci.lab.head.check_run` | The run's `head_sha`, and the base of its first pull request, empty when it has none | The delivery's sender |
@@ -2351,7 +2352,12 @@ key; the builders are pure and read no file, clock or network.
 
 1. Intake reads new heads from the `ci.lab.head.>` lab heads stream and admits only actors on the
    runner trust list of the repository's dev branch. A head on the fix branch of any swarm in
-   panic grades in the hotfix class.
+   panic grades in the hotfix class. An admitted plant head, a push to a branch under
+   `refs/heads/diffcheck/lab-plant-`, then takes as its base the merge base of the head with the
+   dev head the remote lists (`MirrorExpander.merge_base`), before it is held or keyed, and grades
+   in the pull request class with that commit as base and grader, so both twins of a plant cut
+   from one dev commit share it. When git cannot resolve one, the pass prints
+   `cannot resolve the dev merge base of plant head <head>: <error>` and never holds the head.
 2. Each head waits in its lane (repository, branch and class) for the quiet window, 30 seconds by
    default; a newer head of the lane restarts it and a hotfix waits for none. A pass starts at most
    eight heads whose window ended (`STARTS_PER_PASS`): the most urgent class first (hotfix, pull
