@@ -565,7 +565,7 @@ def fresh_reader(
         known = getattr(earlier, "snapshots", {})
         shared = [target for target, pull in known.items() if pull is not None and pull.state == "OPEN"]
         if not read and shared and not run_wait.backing_off():
-            read.update(views(shared, cache=cache, ttl=0))
+            read.update(timing.timed(views, shared, cache=cache, ttl=0))
         pull = read.get(url)
         return pull if pull is not None else view(url)
 
