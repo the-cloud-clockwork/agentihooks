@@ -116,9 +116,10 @@ def test_a_warm_repository_rewrites_the_host_entry_once_it_refreshed_far_enough_
 
 
 def test_a_copy_that_cannot_replace_its_target_leaves_no_staged_file(tmp_path: Path) -> None:
-    (tmp_path / "ledger.entry").mkdir()
-    host_entries.write(tmp_path / "ledger.entry", 1, "{}")
-    assert [file.name for file in tmp_path.iterdir()] == ["ledger.entry"]
+    folder = tmp_path / "entries"
+    (folder / "ledger.entry").mkdir(parents=True)
+    host_entries.write(folder / "ledger.entry", 1, "{}")
+    assert [file.name for file in folder.iterdir()] == ["ledger.entry"]
 
 
 @pytest.mark.feature("ledger-cold-write")
@@ -132,10 +133,12 @@ def test_a_purged_ledger_keeps_no_host_entry(tmp_path: Path) -> None:
 
 
 def test_a_host_that_cannot_store_the_entry_keeps_no_copy(tmp_path: Path) -> None:
-    blocked = tmp_path / "blocked"
+    folder = tmp_path / "entries"
+    folder.mkdir()
+    blocked = folder / "blocked"
     blocked.write_text("")
     host_entries.write(blocked / "ledger.entry", 1, "{}")
-    assert [file.name for file in tmp_path.iterdir()] == ["blocked"]
+    assert [file.name for file in folder.iterdir()] == ["blocked"]
 
 
 @pytest.mark.feature("ledger-cold-write")
