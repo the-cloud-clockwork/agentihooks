@@ -4706,11 +4706,11 @@
       "id": "stale-queued-run-sweep",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-zombie-queued-runs",
-      "behaviour": "The Lost runner workflow, before its watch, lists the repository's queued runs, logs the job states of each run whose last update is at least 24 hours old, posts cancel to each, then force-cancel to the ones still queued, and warns for any run that stays queued.",
+      "behaviour": "The Lost runner workflow, before its watch, lists the repository's queued runs, logs the job states of each run whose last update is at least 24 hours old, deletes each such run that holds no job, cancels the others, and warns for any run still queued thirty seconds later; the watch runs even when the sweep step fails.",
       "seam": "scripts.ci_stale_runs stale, clear and main, and the Lost runner workflow sweep step",
       "tests": [
         "tests/test_ci_stale_runs.py::test_a_run_untouched_for_a_day_is_stale_and_a_younger_one_is_not",
-        "tests/test_ci_stale_runs.py::test_clear_force_cancels_only_the_runs_a_cancel_left_queued",
+        "tests/test_ci_stale_runs.py::test_clear_returns_the_stale_runs_still_queued_once_github_settles",
         "tests/test_ci_stale_runs.py::test_main_sweeps_only_stale_runs_and_warns_for_each_one_left",
         "tests/test_ci_stale_runs.py::test_the_lost_runner_workflow_sweeps_stale_runs_with_its_app_token_before_the_watch"
       ]

@@ -60,8 +60,8 @@ class Api:
         value = self.pages[args]
         return value.pop(0) if isinstance(value, list) else value
 
-    def posts(self) -> list[str]:
-        return [call[2] for call in self.calls if call[0] == "-X"]
+    def requests(self) -> list[tuple[str, ...]]:
+        return [call[1:] for call in self.calls if call[0] == "-X"]
 
 
 @pytest.fixture
@@ -103,74 +103,69 @@ def test_a_rerun_of_an_old_run_is_not_stale() -> None:
     assert ci_stale_runs.stale([rerun], NOW) == []
 
 
-def test_jobs_counts_job_states_by_runner_labels(monkeypatch: pytest.MonkeyPatch) -> None:
-    pair = job("queued", "self-hosted", "anton-oss")
-    found = lines(pair, job("completed", "ubuntu-latest"), pair)
-    api = Api({jobs_call(1): found, jobs_call(2): ""})
+def test_jobs_lists_every_job_of_a_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    found = [job("queued", "anton-oss"), job("completed", "ubuntu-latest")]
+    api = Api({jobs_call(1): lines(*found), jobs_call(2): ""})
     monkeypatch.setattr(ci_stale_runs, "_api", api)
-    assert ci_stale_runs.jobs("o/r", 1) == "1 completed on ubuntu-latest, 2 queued on self-hosted,anton-oss"
-    assert ci_stale_runs.jobs("o/r", 2) == "no jobs"
+    assert ci_stale_runs.jobs("o/r", 1) == found
+    assert ci_stale_runs.jobs("o/r", 2) == []
 
 
-def test_clear_logs_each_run_then_cancels_and_stops_once_none_is_queued(
+def test_states_counts_job_states_by_runner_labels() -> None:
+    pair = job("queued", "self-hosted", "anton-oss")
+    summary = ci_stale_runs.states([pair, job("completed", "ubuntu-latest"), pair])
+    assert summary == "1 completed on ubuntu-latest, 2 queued on self-hosted,anton-oss"
+    assert ci_stale_runs.states([]) == "no jobs"
+
+
+def test_clear_deletes_each_run_without_jobs_and_cancels_the_rest(
     monkeypatch: pytest.MonkeyPatch, no_sleep: list[float], capsys: pytest.CaptureFixture[str]
 ) -> None:
     runs = [run(1, NOW - timedelta(days=8)), run(2, NOW - timedelta(days=2))]
     api = Api({jobs_call(1): "", jobs_call(2): lines(job("queued", "anton-oss")), QUEUED: lines(run(9, NOW))})
     monkeypatch.setattr(ci_stale_runs, "_api", api)
     assert ci_stale_runs.clear("o/r", runs) == []
-    assert api.posts() == [f"{RUNS}/1/cancel", f"{RUNS}/2/cancel"]
+    assert api.requests() == [("DELETE", f"{RUNS}/1"), ("POST", f"{RUNS}/2/cancel")]
     assert no_sleep == [30]
     assert capsys.readouterr().out.splitlines() == [
         "run 1 Tests on engineer-1, created 2026-11-11T12:00:00Z, updated 2026-11-11T12:00:00Z: no jobs",
         "run 2 Tests on engineer-2, created 2026-11-17T12:00:00Z, updated 2026-11-17T12:00:00Z: 1 queued on anton-oss",
-        "0 of 2 stale runs still queued after cancel",
+        "0 of 2 stale runs still queued",
     ]
 
 
 @pytest.mark.feature("stale-queued-run-sweep")
-def test_clear_force_cancels_only_the_runs_a_cancel_left_queued(
+def test_clear_returns_the_stale_runs_still_queued_once_github_settles(
     monkeypatch: pytest.MonkeyPatch, no_sleep: list[float], capsys: pytest.CaptureFixture[str]
 ) -> None:
     runs = [run(run_id, NOW - timedelta(days=2)) for run_id in (3, 1, 2)]
-    fresh = run(9, NOW)
-    listings = [lines(runs[2], fresh), lines(fresh)]
-    api = Api({jobs_call(1): "", jobs_call(2): "", jobs_call(3): "", QUEUED: listings})
+    api = Api({jobs_call(1): "", jobs_call(2): "", jobs_call(3): "", QUEUED: lines(runs[2], run(9, NOW))})
     monkeypatch.setattr(ci_stale_runs, "_api", api)
-    assert ci_stale_runs.clear("o/r", runs) == []
-    assert api.posts() == [f"{RUNS}/1/cancel", f"{RUNS}/2/cancel", f"{RUNS}/3/cancel", f"{RUNS}/2/force-cancel"]
-    assert no_sleep == [30, 30]
-    assert capsys.readouterr().out.splitlines()[-2:] == [
-        "1 of 3 stale runs still queued after cancel",
-        "0 of 3 stale runs still queued after force-cancel",
-    ]
+    assert ci_stale_runs.clear("o/r", runs) == [2]
+    assert api.requests() == [("DELETE", f"{RUNS}/3"), ("DELETE", f"{RUNS}/1"), ("DELETE", f"{RUNS}/2")]
+    assert no_sleep == [30]
+    assert capsys.readouterr().out.splitlines()[-1] == "1 of 3 stale runs still queued"
 
 
-def test_clear_returns_the_runs_that_stay_queued_after_force_cancel(
-    monkeypatch: pytest.MonkeyPatch, no_sleep: list[float]
-) -> None:
-    stuck = run(1, NOW - timedelta(days=2))
-    api = Api({jobs_call(1): "", QUEUED: lines(stuck)})
-    monkeypatch.setattr(ci_stale_runs, "_api", api)
-    assert ci_stale_runs.clear("o/r", [stuck]) == [1]
-    assert api.posts() == [f"{RUNS}/1/cancel", f"{RUNS}/1/force-cancel"]
-    assert no_sleep == [30, 30]
-
-
-def test_a_refused_cancel_is_logged_and_the_sweep_goes_on(
+def test_a_refused_request_is_logged_and_the_sweep_goes_on(
     monkeypatch: pytest.MonkeyPatch, no_sleep: list[float], capsys: pytest.CaptureFixture[str]
 ) -> None:
-    runs = [run(1, NOW - timedelta(days=2)), run(2, NOW - timedelta(days=2))]
-    refusal = "HTTP 409: Cannot cancel a workflow run that is completed."
-    api = Api({jobs_call(1): "", jobs_call(2): "", QUEUED: ""}, refused={f"{RUNS}/1/cancel": refusal + "\n"})
+    runs = [run(run_id, NOW - timedelta(days=2)) for run_id in (1, 2, 3)]
+    forbidden = "gh: Could not delete the workflow run. (HTTP 403)"
+    conflict = "gh: Cannot cancel a workflow run that has not been queued yet. (HTTP 409)"
+    refused = {f"{RUNS}/1": forbidden + "\n", f"{RUNS}/2/cancel": conflict + "\n"}
+    queued_job = lines(job("queued", "anton-oss"))
+    api = Api({jobs_call(1): "", jobs_call(2): queued_job, jobs_call(3): "", QUEUED: lines(runs[0], runs[1])}, refused)
     monkeypatch.setattr(ci_stale_runs, "_api", api)
-    assert ci_stale_runs.clear("o/r", runs) == []
-    assert api.posts() == [f"{RUNS}/1/cancel", f"{RUNS}/2/cancel"]
+    assert ci_stale_runs.clear("o/r", runs) == [1, 2]
+    assert api.requests() == [("DELETE", f"{RUNS}/1"), ("POST", f"{RUNS}/2/cancel"), ("DELETE", f"{RUNS}/3")]
     assert capsys.readouterr().out.splitlines() == [
         "run 1 Tests on engineer-1, created 2026-11-17T12:00:00Z, updated 2026-11-17T12:00:00Z: no jobs",
-        "run 2 Tests on engineer-2, created 2026-11-17T12:00:00Z, updated 2026-11-17T12:00:00Z: no jobs",
-        f"run 1 refused cancel: {refusal}",
-        "0 of 2 stale runs still queued after cancel",
+        f"run 1 refused delete: {forbidden}",
+        "run 2 Tests on engineer-2, created 2026-11-17T12:00:00Z, updated 2026-11-17T12:00:00Z: 1 queued on anton-oss",
+        f"run 2 refused cancel: {conflict}",
+        "run 3 Tests on engineer-3, created 2026-11-17T12:00:00Z, updated 2026-11-17T12:00:00Z: no jobs",
+        "2 of 3 stale runs still queued",
     ]
 
 
@@ -180,11 +175,11 @@ def test_main_sweeps_only_stale_runs_and_warns_for_each_one_left(
 ) -> None:
     now = datetime.now(UTC)
     stuck, fresh = run(1, now - timedelta(days=2)), run(2, now - timedelta(minutes=1))
-    api = Api({jobs_call(1): "", QUEUED: [lines(stuck, fresh), lines(stuck, fresh), lines(stuck, fresh)]})
+    api = Api({jobs_call(1): "", QUEUED: lines(stuck, fresh)})
     monkeypatch.setattr(ci_stale_runs, "_api", api)
     assert ci_stale_runs.main(["--repo", "o/r"]) == 0
-    assert api.posts() == [f"{RUNS}/1/cancel", f"{RUNS}/1/force-cancel"]
-    assert capsys.readouterr().out.splitlines()[-1] == "::warning::run 1 stays queued after cancel and force-cancel"
+    assert api.requests() == [("DELETE", f"{RUNS}/1")]
+    assert capsys.readouterr().out.splitlines()[-1] == "::warning::run 1 stays queued after the stale run sweep"
 
 
 def test_main_makes_no_call_past_the_listing_when_nothing_is_stale(

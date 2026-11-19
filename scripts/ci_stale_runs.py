@@ -1,4 +1,4 @@
-"""Cancels the runs GitHub left queued with no update for a day, after logging the states of their jobs."""
+"""Clears the runs GitHub left queued with no update for a day, after logging the states of their jobs."""
 
 import argparse
 import json
@@ -13,7 +13,6 @@ from scripts.ci_budget import rate_limit
 
 AGE = timedelta(hours=24)
 SETTLE_SECONDS = 30
-STOPS = ("cancel", "force-cancel")
 
 gh_api = cast("Callable[..., subprocess.CompletedProcess[str]]", rate_limit.gh_api)
 
@@ -32,31 +31,35 @@ def stale(runs: list[dict[str, Any]], now: datetime) -> list[dict[str, Any]]:
     return [run for run in runs if now - datetime.fromisoformat(run["updated_at"]) >= AGE]
 
 
-def jobs(repo: str, run_id: int) -> str:
+def jobs(repo: str, run_id: int) -> list[dict[str, Any]]:
     url = f"repos/{repo}/actions/runs/{run_id}/jobs?filter=all&per_page=100"
-    found = [json.loads(line) for line in _api("--paginate", url, "--jq", ".jobs[]").splitlines()]
-    states = Counter(f"{job['status']} on {','.join(job['labels'])}" for job in found)
-    return ", ".join(f"{count} {state}" for state, count in sorted(states.items())) or "no jobs"
+    return [json.loads(line) for line in _api("--paginate", url, "--jq", ".jobs[]").splitlines()]
+
+
+def states(found: list[dict[str, Any]]) -> str:
+    counts = Counter(f"{job['status']} on {','.join(job['labels'])}" for job in found)
+    return ", ".join(f"{count} {state}" for state, count in sorted(counts.items())) or "no jobs"
 
 
 def clear(repo: str, runs: list[dict[str, Any]]) -> list[int]:
-    """Post cancel to every run, then force-cancel to the runs still queued, and return the ids that stay queued."""
+    """Delete each run that holds no job, cancel the others, and return the ids that stay queued.
+
+    GitHub refuses cancel and force-cancel on a queued run with no job, answering 409 that it has not been queued yet.
+    """
     for run in runs:
+        found = jobs(repo, run["id"])
         when = f"created {run['created_at']}, updated {run['updated_at']}"
-        print(f"run {run['id']} {run['name']} on {run['head_branch']}, {when}: {jobs(repo, run['id'])}")
-    left = {run["id"] for run in runs}
-    for action in STOPS:
-        for run_id in sorted(left):
-            try:
-                _api("-X", "POST", f"repos/{repo}/actions/runs/{run_id}/{action}")
-            except subprocess.CalledProcessError as error:
-                print(f"run {run_id} refused {action}: {str(error.stderr).strip()}")
-        time.sleep(SETTLE_SECONDS)
-        left &= {run["id"] for run in queued(repo)}
-        print(f"{len(left)} of {len(runs)} stale runs still queued after {action}")
-        if not left:
-            break
-    return sorted(left)
+        print(f"run {run['id']} {run['name']} on {run['head_branch']}, {when}: {states(found)}")
+        path = f"repos/{repo}/actions/runs/{run['id']}"
+        action, request = ("cancel", ("-X", "POST", f"{path}/cancel")) if found else ("delete", ("-X", "DELETE", path))
+        try:
+            _api(*request)
+        except subprocess.CalledProcessError as error:
+            print(f"run {run['id']} refused {action}: {str(error.stderr).strip()}")
+    time.sleep(SETTLE_SECONDS)
+    left = sorted({run["id"] for run in runs} & {run["id"] for run in queued(repo)})
+    print(f"{len(left)} of {len(runs)} stale runs still queued")
+    return left
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -68,7 +71,7 @@ def main(argv: list[str] | None = None) -> int:
     if not runs:
         return 0
     for run_id in clear(args.repo, runs):
-        print(f"::warning::run {run_id} stays queued after cancel and force-cancel")
+        print(f"::warning::run {run_id} stays queued after the stale run sweep")
     return 0
 
 
