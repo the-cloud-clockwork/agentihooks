@@ -244,7 +244,7 @@ def mask_heredocs(cmd: str) -> tuple[str, list[re.Match[str]]]:
 
 
 def unmask_heredocs(cmd: str, kept: list[re.Match[str]]) -> str:
-    """The masked command with each heredoc's opener and body put back around its, possibly rewritten, delimiter line."""
+    """The masked command with each heredoc's opener and body put back around its delimiter line."""
 
     def _restore(token: re.Match[str]) -> str:
         heredoc = kept[int(token.group(1))]
@@ -1091,7 +1091,7 @@ def script_verdict(stage_text: str, ctx: Context) -> Verdict:
 
 
 def runs_input_script(stage_text: str) -> bool:
-    """Whether the stage, a container or remote wrapper's command, or a command substitution in it is a shell, source or eval."""
+    """Whether the stage, its wrapped command or a command substitution in it runs a shell, source or eval."""
     for m in SUBSTITUTION.finditer(stage_text):
         if runs_input_script(next(g for g in m.groups() if g is not None)):
             return True
