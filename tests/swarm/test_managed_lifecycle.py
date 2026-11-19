@@ -554,7 +554,6 @@ def test_the_binding_pass_keeps_a_record_from_another_host_or_with_unknown_liven
 
 
 @pytest.mark.feature("managed-process-owner-observation")
-@pytest.mark.feature("unknown-process-binding-observation")
 def test_a_foreign_managed_server_has_unknown_process_liveness(
     rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -618,7 +617,7 @@ def test_a_dead_local_managed_server_still_has_a_process_mismatch(
     reader.assert_not_called()
 
 
-@pytest.mark.feature("unknown-process-binding-observation")
+@pytest.mark.feature("managed-process-owner-observation")
 @pytest.mark.parametrize(
     ("facts", "expected"),
     [

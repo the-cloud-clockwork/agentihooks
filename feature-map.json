@@ -1160,26 +1160,16 @@
       ]
     },
     {
-      "id": "unknown-process-binding-observation",
-      "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t-live-binding-process-false",
-      "behaviour": "Explicitly unknown process liveness does not report assigned model or effort as missing. Known and absent process facts retain native model and effort observation checks.",
-      "seam": "scripts.swarm.live_binding.unobserved through runtime bindings, record and findings",
-      "tests": [
-        "tests/swarm/test_managed_lifecycle.py::test_a_foreign_managed_server_has_unknown_process_liveness",
-        "tests/swarm/test_managed_lifecycle.py::test_model_observations_distinguish_unknown_and_missing_process_facts"
-      ]
-    },
-    {
       "id": "managed-process-owner-observation",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-live-binding-process-false",
-      "behaviour": "Managed Codex app server process liveness is inspected only on the owning host. A connected foreign transport with an empty runtime target remains unknown without a process mismatch or local process inspection, while local live bindings match and genuine local server death still reports a process mismatch.",
-      "seam": "scripts.swarm.runtime.HerdrRuntime.bindings through scripts.swarm.live_binding.server_alive, record and findings",
+      "behaviour": "Managed Codex app server process liveness is inspected only on the owning host. A connected foreign transport with an empty runtime target remains unknown without process mismatches, missing model or effort findings, or local process inspection. Known and absent process facts retain native flag checks, while local live bindings match and genuine local server death still reports a process mismatch.",
+      "seam": "scripts.swarm.runtime.HerdrRuntime.bindings through scripts.swarm.live_binding.server_alive, unobserved, record and findings",
       "tests": [
         "tests/swarm/test_managed_lifecycle.py::test_a_foreign_managed_server_has_unknown_process_liveness",
         "tests/swarm/test_managed_lifecycle.py::test_a_local_managed_server_keeps_its_matching_binding",
-        "tests/swarm/test_managed_lifecycle.py::test_a_dead_local_managed_server_still_has_a_process_mismatch"
+        "tests/swarm/test_managed_lifecycle.py::test_a_dead_local_managed_server_still_has_a_process_mismatch",
+        "tests/swarm/test_managed_lifecycle.py::test_model_observations_distinguish_unknown_and_missing_process_facts"
       ]
     },
     {
