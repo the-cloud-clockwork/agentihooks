@@ -10,8 +10,10 @@ import pytest
 
 from scripts.ci_budget import rate_limit
 from scripts.ci_lab import __main__ as entrypoint
-from scripts.ci_lab import plant_grade
+from scripts.ci_lab import plant_grade, plant_proofs, plant_publish
 from scripts.ci_lab.digests import GradeInputs, grade_key
+from scripts.ci_lab.webhooks import PLANT_PREFIX
+from tests.ci_lab.test_plant_publish import GitHub
 
 pytestmark = pytest.mark.unit
 
@@ -128,8 +130,14 @@ class Lab:
     def clock(self) -> float:
         return self.now
 
+    def push(self, root: Path, pair: plant_proofs.Pair, head: str, repository: str) -> None:
+        branch = f"{PLANT_PREFIX}{pair.name}-{pair.base}"
+        remote = git(root, "ls-remote", "--heads", "origin", branch).split()
+        if not remote or remote[0] not in {head, pair.red}:
+            git(root, "push", "origin", f"{head}:{branch}")
+
     def ports(self) -> plant_grade.Ports:
-        return plant_grade.Ports(self.fetch, self.sleep, self.clock)
+        return plant_grade.Ports(self.fetch, self.sleep, self.clock, self.push)
 
 
 @pytest.mark.feature("lab-static-plant-proofs")
@@ -198,7 +206,12 @@ def test_a_missing_required_check_keeps_the_grade_unfinished(repository: Path) -
 
     with pytest.raises(TimeoutError, match="grade"):
         plant_grade.prove(
-            repository, "lint", "HEAD", REPOSITORY, plant_grade.Ports(missing, lab.sleep, lab.clock), timeout_s=2
+            repository,
+            "lint",
+            "HEAD",
+            REPOSITORY,
+            plant_grade.Ports(missing, lab.sleep, lab.clock, lab.push),
+            timeout_s=2,
         )
     assert len(lab.heads) == 1
 
@@ -215,7 +228,9 @@ def test_two_required_checks_make_the_grade_ambiguous(repository: Path) -> None:
         return {"check_runs": [*rows, {**required, "name": "lab/required"}]}
 
     with pytest.raises(ValueError, match="ambiguous"):
-        plant_grade.prove(repository, "lint", "HEAD", REPOSITORY, plant_grade.Ports(duplicate, lab.sleep, lab.clock))
+        plant_grade.prove(
+            repository, "lint", "HEAD", REPOSITORY, plant_grade.Ports(duplicate, lab.sleep, lab.clock, lab.push)
+        )
     assert len(lab.heads) == 1
 
 
@@ -237,7 +252,9 @@ def test_conflicting_gate_checks_cannot_hide_an_extra_failure(repository: Path) 
         return {"check_runs": rows}
 
     with pytest.raises(ValueError, match="ambiguous"):
-        plant_grade.prove(repository, "lint", "HEAD", REPOSITORY, plant_grade.Ports(conflict, lab.sleep, lab.clock))
+        plant_grade.prove(
+            repository, "lint", "HEAD", REPOSITORY, plant_grade.Ports(conflict, lab.sleep, lab.clock, lab.push)
+        )
 
 
 @pytest.mark.feature("lab-static-plant-proofs")
@@ -269,7 +286,7 @@ def test_a_grade_arriving_at_its_deadline_is_refused(repository: Path) -> None:
 
     with pytest.raises(TimeoutError, match="grade"):
         plant_grade.prove(
-            repository, "lint", "HEAD", REPOSITORY, plant_grade.Ports(late, lab.sleep, lab.clock), timeout_s=2
+            repository, "lint", "HEAD", REPOSITORY, plant_grade.Ports(late, lab.sleep, lab.clock, lab.push), timeout_s=2
         )
     assert len(lab.heads) == 1
 
@@ -284,7 +301,9 @@ def test_an_excessive_history_is_refused_after_one_hundred_pages(repository: Pat
         return {"check_runs": [lab.check("lab-shadow/lint", "failure", "other-grade")] * 100}
 
     with pytest.raises(ValueError, match="history"):
-        plant_grade.prove(repository, "lint", "HEAD", REPOSITORY, plant_grade.Ports(full, lab.sleep, lab.clock))
+        plant_grade.prove(
+            repository, "lint", "HEAD", REPOSITORY, plant_grade.Ports(full, lab.sleep, lab.clock, lab.push)
+        )
     assert len(pages) == 100
 
 
@@ -366,6 +385,7 @@ def test_the_command_uses_real_transport_adapters_and_normalizes_the_remote(
 ) -> None:
     monkeypatch.chdir(repository)
     lab = Lab(repository)
+    api = GitHub(repository)
     real_run = subprocess.run
 
     def transport(arguments: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
@@ -375,7 +395,21 @@ def test_the_command_uses_real_transport_adapters_and_normalizes_the_remote(
             return real_run(arguments, **kwargs)
         assert "api" in arguments
         path = arguments[arguments.index("api") + 1]
-        return subprocess.CompletedProcess(arguments, 0, json.dumps(lab.fetch(path)), "")
+        if "/check-runs?" in path:
+            return subprocess.CompletedProcess(arguments, 0, json.dumps(lab.fetch(path)), "")
+        method = arguments[arguments.index("--method") + 1]
+        body = json.loads(kwargs["input"]) if kwargs.get("input") is not None else None
+        result = api(method, path, body)
+        if body and (path.endswith("/refs") or method == "PATCH"):
+            branch = body["ref"] if method == "POST" else "refs/" + path.split("/git/refs/", 1)[1]
+            real_run(
+                ["git", "-C", str(repository), "push", "origin", f"{body['sha']}:{branch}"],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=10,
+            )
+        return subprocess.CompletedProcess(arguments, 0, json.dumps(result), "")
 
     def no_http(*arguments: Any, **options: Any) -> None:
         raise AssertionError("the runner must not contact the lab receiver")
@@ -388,6 +422,7 @@ def test_the_command_uses_real_transport_adapters_and_normalizes_the_remote(
     assert json.loads(capsys.readouterr().out)["plant"] == "lint"
     assert len(lab.heads) == 2
     assert lab.now == 10
+    assert any(method == "PATCH" for method, _, _ in api.calls)
 
 
 @pytest.mark.feature("lab-static-plant-proofs")
@@ -412,6 +447,7 @@ def test_the_default_fetch_respects_the_remaining_budget_on_rate_limits(
     monkeypatch.setattr(rate_limit, "time", clock)
     monkeypatch.setattr(rate_limit, "deadline", None)
     monkeypatch.setattr(rate_limit, "slept", 0)
+    monkeypatch.setattr(plant_publish, "publish", lab.push)
     monkeypatch.setattr(subprocess, "run", limited)
     assert (
         plant_grade.main(

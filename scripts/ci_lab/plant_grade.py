@@ -9,11 +9,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from scripts.ci_lab import plant_proofs
+from scripts.ci_lab import plant_proofs, plant_publish
 from scripts.ci_lab.digests import GradeInputs, grade_key
 from scripts.ci_lab.remote.checkout import at
-
-BRANCH_PREFIX = "refs/heads/diffcheck/lab-plant-"
 
 
 @dataclass(frozen=True)
@@ -21,6 +19,7 @@ class Ports:
     fetch: Callable[[str, float], Mapping[str, Any]]
     sleep: Callable[[float], None]
     clock: Callable[[], float]
+    push: Callable[[Path, plant_proofs.Pair, str, str], None]
 
 
 def _fetch(path: str, timeout_s: float) -> Mapping[str, Any]:
@@ -79,17 +78,6 @@ def _verdict(rows: list[Mapping[str, Any]], pair: plant_proofs.Pair, planted: bo
     return str(required["html_url"])
 
 
-def _push(root: Path, pair: plant_proofs.Pair, head: str) -> None:
-    branch = f"{BRANCH_PREFIX}{pair.name}-{pair.base}"
-    git = at(root)
-    result = git("ls-remote", "--heads", "origin", branch)
-    result.check_returncode()
-    remote = result.stdout.split()
-    if remote and remote[0] in {head, pair.red}:
-        return
-    git("push", "origin", f"{head}:{branch}").check_returncode()
-
-
 def prove(
     root: Path,
     name: str,
@@ -103,7 +91,7 @@ def prove(
     pair = plant_proofs.prepare(root, name, base)
     links: list[str] = []
     for head, planted in ((pair.green, False), (pair.red, True)):
-        _push(root, pair, head)
+        ports.push(root, pair, head, repository)
         rows = _read(repository, head, pair.base, ports, timeout_s)
         links.append(_verdict(rows, pair, planted))
     return {
@@ -139,7 +127,7 @@ def main(argv: Sequence[str], environ: Mapping[str, str], ports: Ports | None = 
             arguments.plant,
             arguments.base,
             canonical,
-            ports or Ports(_fetch, time.sleep, time.monotonic),
+            ports or Ports(_fetch, time.sleep, time.monotonic, plant_publish.publish),
             arguments.timeout,
         )
         if summary := environ.get("GITHUB_STEP_SUMMARY"):
