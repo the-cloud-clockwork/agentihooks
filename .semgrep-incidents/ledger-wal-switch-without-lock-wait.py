@@ -37,7 +37,3 @@ class WalSwitch:
     def turn(self) -> None:
         # ok: ledger-wal-switch-without-lock-wait
         self.connection.execute(WAL)
-
-    def wait(self) -> None:
-        # ok: ledger-wal-switch-without-lock-wait
-        self.connection.execute(WAL)
