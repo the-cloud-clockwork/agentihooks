@@ -3523,7 +3523,7 @@ retire.
 
 The live binding check reads such a worker's facts from the same entry's `binding` when the worker runs on a local
 backend over the Codex app server transport, never from the controller's own server check: an app server's liveness
-can only be proven on the host that runs it, so the controller's own check stores no process fact and would record the
+can only be proven on the host that runs it, so the controller's own check stores an unknown process fact and would record the
 worker's model and effort as unobserved. An entry for another generation, an entry without a binding, or no entry at
 all gives the worker no facts, and the tick skips it that pass as it does a hosted worker whose hive reports no
 binding. Any other hub admitted worker keeps the controller's own session read, and an app server worker admitted to
