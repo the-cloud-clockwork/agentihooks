@@ -108,6 +108,7 @@ def scratch_stack(folder: Path, tls: bool) -> dict[str, Any]:
         }
         service["command"] = ["python", "-u", "-c", BACKEND, name, port]
         service["working_dir"] = str(folder)
+        service["user"] = f"{os.getuid()}:{os.getgid()}"
         service["volumes"] = [{"type": "bind", "source": str(folder), "target": str(folder), "read_only": True}]
     services["api"]["network_mode"] = "service:ledger"
     front = services["front"]
