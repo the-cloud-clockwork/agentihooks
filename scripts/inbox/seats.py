@@ -201,8 +201,19 @@ class SeatMemory:
         entry = {"occupant": occupant, "text": text, "at": at, "maturity": maturity}
         self.redis.rpush(self.key(address, "learned"), json.dumps(entry))
 
-    def learned(self, address):
+    def learned(self, address: str) -> list[dict[str, Any]]:
         return [_entry(raw) for raw in self.redis.lrange(self.key(address, "learned"), 0, -1)]
+
+    def scoped(self, slug: str, address: str, *, all_seats: bool = False) -> list[dict[str, Any]]:
+        selected: list[dict[str, Any]] = []
+        for key in SeatRegistry(self.redis).swarm_keys(slug):
+            seat, _, kind = key.removeprefix(f"{PREFIX}:").partition(":")
+            if kind != "learned":
+                continue
+            for number, note in enumerate(self.learned(seat), 1):
+                if "retired" not in note and (all_seats or seat == address or note["maturity"] in (CANON, "insight")):
+                    selected.append({**note, "seat": seat, "number": number})
+        return selected
 
     def promote(self, address, number, maturity, by, reason, at):
         """Raise learned note `number` (1 based) on the seat to a higher maturity, keeping who and why."""

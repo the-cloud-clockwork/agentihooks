@@ -74,6 +74,24 @@ def test_a_short_culture_line_is_withheld_by_its_key_only():
     assert [r["source"] for r in held["withheld"]] == ["culture:sw#3"]
 
 
+def test_shared_notes_keep_their_source_seat_and_number() -> None:
+    origin = "ci-1@sw"
+    _correct(f"learned:{origin}#7", "ok", {"seat": origin, "note": 7})
+    task = {
+        "id": "t1",
+        "seat": SEAT,
+        "learned": [
+            {"seat": SEAT, "number": 4, "maturity": "note", "text": "ok"},
+            {"seat": origin, "number": 7, "maturity": "canon", "text": "ok"},
+        ],
+    }
+    held = priming_trace.withhold("sw", task)
+    assert [note.get("withheld", False) for note in held["learned"]] == [False, True]
+    found = priming_trace.rows("sw", held)
+    assert next(row for row in found if row["layer"] == "learned")["locator"] == {"seat": SEAT, "note": 4}
+    assert next(row for row in found if row["layer"] == "withheld")["source"] == f"learned:{origin}#7"
+
+
 def test_a_withheld_note_is_not_counted_as_data():
     task = {"learned": [{"maturity": "data", "text": "x", "withheld": True}, {"maturity": "data", "text": "y"}]}
     assert prompt.learned_lines(task["learned"]) == [

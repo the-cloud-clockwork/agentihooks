@@ -2035,7 +2035,13 @@ key; the builders are pure and read no file, clock or network.
    its poster with that id and the last status it posted before the next move, so a restarted
    scheduler advances the same check run instead of opening a second one. A grade of a head pushed
    to a `refs/grade/*` ref records the same moves and posts none, leaving its check runs to the
-   relay.
+   relay. A gate that the grader revision's `delivery.yaml` lists as authoritative for the grade's
+   class posts as `lab/<gate>`, the check run the lab-verdict job waits for: `lab.authoritative`
+   for pull request and hotfix grades and `lab.queue.authoritative` for merge group grades, read
+   from the base, so a head never widens either list. Every other gate and `required` post as
+   `lab-shadow/<gate>`, the runs the shadow comparison reads, and promotion and backfill grades
+   list no gate. The grade state keeps the list, so a restarted scheduler names each check run as
+   it did before.
 
 Expansion frames a head by its class (`scripts.ci_lab.scheduler.frame`): a pull request or hotfix grade
 keeps the lab gates the pull request rules require and names every other required job as a gate without
@@ -2399,14 +2405,10 @@ A mutant unit's key is the sha256 of the JSON, object keys sorted, of a list hol
 6. the unlisted test hashes described above.
 
 Its members are `<name>__mutmut_1` to `<name>__mutmut_<n>`, one per mutation mutmut creates in the
-function. The worker grades a unit's mutants in one sandbox run after the unit's stats run, each run
-bounded by `executors.UNIT_TIMEOUT_S`, 1800 seconds, which `MirrorExpander._mutation` passes as the
-`timeout` of `expand_mutation.mutant_units`. A function whose mutants price over it, `n` times
-`scripts.ci_mutation.plan.MUTANT_SECONDS` (5.6 seconds a mutant, the fallback of
-`pricing.estimate`), gets the fewest near equal parts that each price within it, at most 321
-mutants a part, in mutant order; `expand_mutation.split_members` cuts them. Each part's key is the
-sha256 of the list of the function's key and the part's members, so every part has its own slot
-and verdict; a function priced within the timeout keeps one unit under the function's key.
+function. A function whose mutants price over the 1800 second sandbox timeout gets several units
+instead, each holding a part of its mutants under the sha256 of the list of the function's key and
+the part's members, as [Mutant units over the sandbox timeout](#mutant-units-over-the-sandbox-timeout)
+describes; a function priced within the timeout keeps one unit under the function's key.
 A stats unit's key is `StoredStats.identity` of its test file at the head, over the
 fields the `stats` rows of [Inputs per kind](#inputs-per-kind) list, with the worker's options
 `-q -p no:cacheprovider`. The expander builds both keys itself, without the `digests` builders, so
@@ -2441,6 +2443,75 @@ A mutant unit's uploaded report holds `collection_seconds`, the `rows` as `name`
 records in place of the rows. A runner that exits non zero, such as on a
 collection error in the chosen tests, uploads no rows and fails the unit.
 
+#### Mutant units over the sandbox timeout
+
+Each sandbox run of a mutant unit, its stats run and then its graded run, is bounded by
+`executors.UNIT_TIMEOUT_S`, the worker's 1800 second `worker.UNIT_TIMEOUT_SECONDS`. A run past it
+has its process group killed and writes no result, so the unit fails: its report holds no rows,
+and its log stops where the kill landed, with no line naming the timeout. To keep a changed function
+with many mutants under that limit, `MirrorExpander._mutation` passes the timeout to
+`expand_mutation.mutant_units`, which prices each changed function's mutants before it builds
+their units:
+
+| Step | Rule |
+|---|---|
+| Price | `n` mutants times `scripts.ci_mutation.plan.MUTANT_SECONDS`, 5.6 seconds a mutant |
+| Keep | A price at or under 1800 seconds, up to 321 mutants, keeps one unit of every mutant under the function's key |
+| Split | Over it, `expand_mutation.split_members` cuts the mutants, in mutant order, into the fewest parts whose largest prices within 1800 seconds; part sizes differ by at most one, and every mutant lands in exactly one part |
+| Key | Each part's key is the sha256 of the JSON of a list holding the function's key and the part's members, so each part gets its own slot, verdict, lease and worker run |
+
+The parts the scheduler cuts at 1800 seconds:
+
+| Mutants of the function | Units | Mutants per unit |
+|---|---|---|
+| 1 to 321 | 1 | all of them |
+| 322 | 2 | 161 and 161 |
+| 400 | 2 | 200 and 200 |
+| 642 | 2 | 321 and 321 |
+| 643 | 3 | 214, 214 and 215 |
+| 1000 | 4 | 250 each |
+
+The parts of one function share its `mutation-stats` units: the scheduler builds one stats unit
+per test file that runs a function the mutant units name, whatever the number of parts. Each
+part's worker run repeats the stats request over every test file, and that request reuses the
+`CI_LAB_MUTATION_CACHE` records whose inputs still match. Each part's graded request names the
+same covering tests, so every part grades its mutants against the same tests a single unit would.
+
+The price is a fixed 5.6 seconds a mutant. It reads neither the seconds the stats records give the
+covering tests nor the lanes `CI_LAB_MUTATION_BUDGET` and `CI_LAB_MUTATION_CAP` open in the graded
+run, so a unit of 321 or fewer mutants whose covering tests are slow can still reach the limit.
+
+No environment variable, `delivery.yaml` key or command line flag changes the split. Both inputs
+are constants changed by a pull request: `worker.UNIT_TIMEOUT_SECONDS` also sets the worker's 2100
+second termination grace, which the chart's `worker.terminationGracePeriodSeconds` matches, and
+`plan.MUTANT_SECONDS` also prices the pull request mutation planner's `plan.estimate` and the lab's
+`pricing.estimate` of a mutant unit with no measured duration. A caller of `expand_mutation.mutant_units` that passes no
+`timeout` gets the default of infinity and never splits.
+
+Print the parts a function of 400 mutants gets, from a checkout with the development environment:
+
+```bash
+python -c 'from scripts.ci_lab.executors import UNIT_TIMEOUT_S; from scripts.ci_lab.expand_mutation import split_members; members = tuple(f"scripts.alpha.x_second__mutmut_{i}" for i in range(1, 401)); print([(part[0], part[-1], len(part)) for part in split_members(members, UNIT_TIMEOUT_S)])'
+```
+
+```text
+[('scripts.alpha.x_second__mutmut_1', 'scripts.alpha.x_second__mutmut_200', 200), ('scripts.alpha.x_second__mutmut_201', 'scripts.alpha.x_second__mutmut_400', 200)]
+```
+
+Count the units a changed line of a real file gets, here line 19 of `scripts/ci_lab/pricing.py`, in
+`estimate`. The keys this prints differ from the lab's, since it passes no covering tests and no
+unlisted test hashes, but the members and the split are the same:
+
+```bash
+python -c 'from pathlib import Path; from scripts.ci_lab import expand_mutation; from scripts.ci_lab.executors import UNIT_TIMEOUT_S; units = expand_mutation.mutant_units(Path("."), {"scripts/ci_lab/pricing.py": [19]}, {}, {}, timeout=UNIT_TIMEOUT_S); print([(unit.members[0], len(unit.members)) for unit in units])'
+```
+
+```text
+[('scripts.ci_lab.pricing.x_estimate__mutmut_1', 20)]
+```
+
+One tuple per unit: 20 mutants price at 112 seconds and stay one unit.
+
 #### Example
 
 A promotion head changes line 6 of `scripts/alpha.py`:
@@ -2468,6 +2539,15 @@ would get no `mutation-stats` job and the same mutant members under a new key, s
 file changes the covering test's fingerprint; the unit's stats request then finds any test of the
 head that reaches `second`.
 
+Had mutmut created 400 mutants in `second`, they would price at 2240 seconds, over the 1800 second
+limit, and the grade would get the same `mutation-stats` unit and two units in place of the one
+mutant unit:
+
+| Job | Kind | Members | Key |
+|---|---|---|---|
+| `mutation` | `mutant` | `scripts.alpha.x_second__mutmut_1` to `scripts.alpha.x_second__mutmut_200` | sha256 of the function's key and these 200 members |
+| `mutation` | `mutant` | `scripts.alpha.x_second__mutmut_201` to `scripts.alpha.x_second__mutmut_400` | sha256 of the function's key and these 200 members |
+
 #### Read a grade's mutation gates
 
 ```bash
@@ -2479,6 +2559,8 @@ curl -s "http://lab:8800/grades/$SHA" | jq '.grades[]
 A check run is posted only for a gate with units, so a promotion or backfill grade without
 `mutation` and `mutation-stats` checks expanded no mutation unit. A `mutation` check that completes
 `failure` turns `required` red; the report its worker uploaded names each mutant and its status.
+A split function adds one unit per part to the grade's `units.total`. The `mutation` check
+completes when every part is final and fails when any part fails.
 
 #### Troubleshooting
 
@@ -2493,6 +2575,8 @@ A check run is posted only for a gate with units, so a promotion or backfill gra
 | Every row of a failed mutant unit reads `no tests` | No test of the head reaches the changed function | Add a test that calls the function |
 | Rows read `survived` | A test runs the function but none fails against the mutant | Assert on the behaviour the mutant changes |
 | Rows read `suspicious` | A mutant's child crashed or was killed | Read the unit's log |
+| One changed function shows as several `mutant` units of the `mutation` job | Its mutants price over the 1800 second limit: more than 321 of them | Nothing to fix; each part's report names its own mutants, and [Mutant units over the sandbox timeout](#mutant-units-over-the-sandbox-timeout) prints the parts |
+| A failed mutant unit's report holds no rows and its log stops mid run | A sandbox run passed the 1800 second limit and was killed, or the runner exited non zero | The report's `seconds` spans both runs: under 1800, no run hit the limit and the runner failed. At 1800 or more, a run may have hit it, and the unit's log is the output of its last run, the one that stopped. The price reads no test time, so slow covering tests let a unit of 321 or fewer mutants reach the limit: speed up those tests, or split the function in the code so it creates fewer mutants |
 | A folder with a random name stays under `CI_LAB_MIRROR_STORE` | The scheduler stopped during an expansion, before its cleanup ran | Remove the folder; the `git worktree prune` that ends the next promotion or backfill expansion of that repository drops its registration |
 
 ### Grades of a commit
@@ -2534,7 +2618,9 @@ scheduler enqueues a grade's misses with the grade's base and its plan's grader 
 
 The mutation runner runs in the sandbox as `python -m scripts.ci_lab.run_mutation REQUEST OUTPUT`
 from the private tree. A mutant unit passes only when every mutant is killed; a runner that exits
-non zero fails its unit. Each adapter uploads a JSON report with the unit's `seconds` (and `flaky`
+non zero fails its unit. The scheduler splits a function whose mutants price over the 30 minute
+unit time limit into several mutant units, as
+[Mutant units over the sandbox timeout](#mutant-units-over-the-sandbox-timeout) describes. Each adapter uploads a JSON report with the unit's `seconds` (and `flaky`
 for a test unit), which the scheduler stores with the verdict, and releases every tree it cut,
 also when the executor raises. SIGTERM stops leasing and lets running units drain within the
 termination grace: 2100 seconds, the 30 minute unit time limit (`worker.UNIT_TIMEOUT_SECONDS`,
