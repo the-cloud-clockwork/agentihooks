@@ -303,14 +303,16 @@ in parallel on the original input and can still block it.
 
 ## Rewrites and permissions
 
-Claude Code applies a rewritten input only together with a permission decision.
+Claude Code applies a rewritten input that carries no permission decision and
+still runs its own permission rules on it, so the session prompts as it would
+have without the hook.
 
 | Session mode | Condition returns `tool_input` and… | Result |
 |---|---|---|
-| `bypassPermissions` | no decision | rewrite applied, `allow` |
+| any but `auto` | no decision | rewrite applied, no decision: the session's own permission rules decide |
 | any | `"decision": "allow"` | rewrite applied and auto-approved |
 | any | `"decision": "ask"` | rewrite applied, user asked (denied in `-p`) |
-| not bypass | no decision | rewrite dropped, the agent is told why |
+| `auto` | no decision | rewrite dropped, the agent is told why: auto mode can deny a call a hook changed |
 
 A rewrite never widens permissions without the condition saying so. Deny and ask
 rules in settings still apply to the rewritten input.

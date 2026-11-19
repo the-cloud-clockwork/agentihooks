@@ -387,12 +387,13 @@ def test_unit_installs_extras_with_uv_and_no_uv_cache():
     assert install["env"] == {
         "SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS": "0.dev${{ github.run_number }}",
         "PYTHON_PATH": "${{ steps.python.outputs.python-path }}",
+        "BAKED_VENV": "/opt/agentihooks-venv",
     }
     assert install["run"].strip().splitlines() == [
-        'uv venv --python "$PYTHON_PATH" "$HOME/venv"',
-        'uv pip install --offline --no-index --find-links /opt/wheelhouse --constraint .github/test-requirements.lock --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]" && { echo "::notice title=Wheelhouse hit::The runner wheelhouse served the install offline"; exit 0; }',
+        'if [[ -x "$BAKED_VENV/bin/python" && "$("$BAKED_VENV/bin/python" -c \'import sys; print(sys.base_prefix)\')" == "$pythonLocation" ]]; then ln -s "$BAKED_VENV" "$HOME/venv"; else uv venv --python "$PYTHON_PATH" "$HOME/venv"; fi',
+        'uv pip install --offline --no-index --find-links /opt/wheelhouse --exact --constraint .github/test-requirements.lock --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]" && { echo "::notice title=Wheelhouse hit::The runner wheelhouse served the install offline"; exit 0; }',
         'echo "::notice title=Wheelhouse miss::The runner wheelhouse cannot serve the install; fetching from PyPI"',
-        'bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --constraint .github/test-requirements.lock --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"',
+        'bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --exact --constraint .github/test-requirements.lock --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"',
     ]
 
 
@@ -416,11 +417,12 @@ def test_unit_restores_one_venv_per_interpreter_and_dependency_files() -> None:
     ]
 
 
-def test_records_name_the_test_environment_when_the_wheelhouse_skips_its_restore() -> None:
+def test_records_name_the_test_environment_when_a_self_hosted_runner_skips_its_restore() -> None:
     workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
     jobs = workflow["jobs"]
-    assert jobs["unit"]["env"]["UNIT_WHEELHOUSE"] == "${{ github.event_name == 'pull_request' && '1' || '' }}"
-    assert jobs["unit-selected"]["env"]["UNIT_WHEELHOUSE"] == "1"
+    for name in ("test-count", "unit", "unit-selected"):
+        restore = next(step for step in jobs[name]["steps"] if step.get("id") == "venv")
+        assert restore["if"] == "runner.environment != 'self-hosted'"
     environments = [
         value
         for job in (jobs["test-count"], jobs["unit"], jobs["unit-selected"])
@@ -446,7 +448,7 @@ def test_a_restored_venv_skips_uv_and_the_install():
 def test_unit_tests_run_from_the_venv():
     path_index, path = _unit_step_index(lambda s: s.get("name") == "Use the test environment")
     run_index, _ = _unit_step_index(lambda s: s.get("name") == "Run tests")
-    assert path["run"].strip() == 'echo "$HOME/venv/bin" >> "$GITHUB_PATH"'
+    assert path["run"].strip() == 'echo "$(readlink -f "$HOME/venv")/bin" >> "$GITHUB_PATH"'
     assert path_index < run_index
 
 
@@ -619,7 +621,7 @@ def test_only_a_dev_push_saves_the_test_environment_after_installing_it() -> Non
         assert save["name"] == "Save the test environment from dev"
         assert save["with"] == {"path": restore["with"]["path"], "key": "${{ steps.venv.outputs.cache-primary-key }}"}
         assert save["if"] == (
-            "env.UNIT_SOURCE == '' && steps.venv.outputs.cache-hit != 'true'"
+            "env.UNIT_SOURCE == '' && steps.venv.outcome == 'success' && steps.venv.outputs.cache-hit != 'true'"
             " && github.event_name == 'push' && github.ref == 'refs/heads/dev'"
         )
         assert steps.index(restore) < steps.index(install) < steps.index(save)
