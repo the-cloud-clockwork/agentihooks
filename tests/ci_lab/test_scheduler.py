@@ -1699,7 +1699,7 @@ def _gate(name: str, job: str, paths: tuple[str, ...], base_paths: tuple[str, ..
 
 
 def _no_tests(repo: str, commits: Sequence[str]) -> dict[str, Any]:
-    return {"units": [], "tests": {}}
+    return {"commit": "dev", "units": [], "tests": {}}
 
 
 def _unknown(kind: str, key: str) -> Verdict | None:
