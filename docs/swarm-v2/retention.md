@@ -15,8 +15,9 @@ passes the exporter's integer `transcript_end` to `Renewer.acknowledge`.
 
 The renewer keeps the largest acknowledged end as `archived`; it starts at zero. A larger end makes a heartbeat due
 immediately, and that heartbeat and every later one carry `archive_watermark`. Repeating the same end, or reporting a
-smaller one, never lowers it or forces an extra heartbeat. `acknowledge` returns true only after a successful
-heartbeat response with matching execution and task generation has confirmed delivery of at least that end.
+smaller one, never lowers it or forces an extra heartbeat. For an end above the previously delivered watermark,
+`acknowledge` returns true only after a successful heartbeat response with matching execution and task generation
+has confirmed delivery of at least that end.
 
 A failed heartbeat keeps the pending watermark. Drain keeps calling `acknowledge` across the renewer's retry pause
 until the controller accepts it, the lease is lost or the checkpoint budget expires. Validation and acknowledgement
