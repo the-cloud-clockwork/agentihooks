@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.1053 · 2026-11-19
+
+### 2026-11-19 · d56dca503c0d · #12254 · @nestorcolt
+
+**Key mutation stats records only on the test modules each test runs**
+
+This change fixes mutation stats caching so each test's dependency record only lists test modules it actually runs or imports, instead of every test module loaded in its collection bucket. Previously, editing one test file could invalidate hundreds of unrelated cached stats records because all collected test modules got bundled into each node's input list, causing costly cache misses (one push lost 314-341 records and added ~3942 runner seconds). The fix also follows `pytest_plugins` assignments so legitimately shared fixtures still key correctly, keeping cache invalidation accurate and the stats stage fast.
+
 ## v2.17.1051 · 2026-11-19
 
 ### 2026-11-19 · b3b1ce5ba6db · #12260 · @nestorcolt
