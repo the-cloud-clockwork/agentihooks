@@ -29,7 +29,7 @@ def refusal(who, after, least, ratio):
         f"watch budget: {after['since'] - 1} watch calls since your last action (limit {least}) and "
         f"{after['watch'] - 1} watch calls for {after['act']} actions (limit {ratio} per action). Hand the waiting "
         f'to the tick: agentihooks swarm {who.swarm} wait <minutes> --reason "<what you wait on>", or act first: '
-        "commit, push or record progress on the ledger."
+        "commit, push or record progress through the swarm API."
     )
 
 

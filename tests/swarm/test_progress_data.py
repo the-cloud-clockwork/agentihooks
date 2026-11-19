@@ -3,6 +3,8 @@ from typing import Any
 
 import pytest
 
+pytestmark = pytest.mark.feature("swarm-progress-data")
+
 
 def test_progress_data_preserves_every_collection(monkeypatch: pytest.MonkeyPatch) -> None:
     progress_data = importlib.import_module("scripts.swarm.progress_data")
