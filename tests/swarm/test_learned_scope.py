@@ -115,3 +115,15 @@ def test_scoped_memory_without_matching_notes_is_empty(env: tuple[Any, Any, Any]
     memory = SeatMemory(store.redis)
     store.memory.learn("eng-1@another", "previous occupant", "other swarm canon", 1, "canon")
     assert memory.scoped("sw", "eng-1@sw") == []
+
+
+@pytest.mark.feature("swarm-learned-scope")
+def test_learned_help_explains_the_explicit_full_listing(capsys: pytest.CaptureFixture[str]) -> None:
+    from scripts.swarm.cli import build_parser
+
+    parser = build_parser()
+    with pytest.raises(SystemExit) as result:
+        parser.parse_args(["sw", "learned", "--help"])
+    assert result.value.code == 0
+    option_help = capsys.readouterr().out.split("\n  --all", 1)[1].split("\n  --", 1)[0]
+    assert " ".join(option_help.split()) == "list every seat instead of the caller and shared guidance"
