@@ -2999,9 +2999,11 @@ was wrong.
 
 A headed hive is a hive whose registry record carries `ui=yes`. Placement ranks headed hives first for masters, `qa`
 and `frontend`; a master falls back to a headless hive, while `qa` and `frontend` wait for a headed one (see
-[Placement by role](#placement-by-role)). Every hive runs agents with the workstation's configuration (see
-[Comparing hive configuration](#comparing-hive-configuration)), so an agent on a headed hive is also graded on two
-tools the workstation always has: a `kubectl` that reaches the cluster and a global git identity for its commits.
+[Placement by role](#placement-by-role)). Every hive is meant to run agents with the workstation's configuration,
+and `agentihooks hive compare` reports where one differs (see
+[Comparing hive configuration](#comparing-hive-configuration)). An agent on a headed hive is therefore also graded
+on two tools the workstation always has: a `kubectl` that reaches the cluster and a global git identity for its
+commits.
 
 When an agent's session starts, the join hook reads the hive's registry record and writes `headed` into the join
 report's `context`: `true` when `ui` is `yes`, `false` otherwise. A headed report runs two more checks:
