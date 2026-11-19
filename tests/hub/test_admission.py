@@ -1208,7 +1208,9 @@ def test_the_hub_admits_a_launch_for_a_hive_that_is_not_draining(rig, monkeypatc
 
 
 @pytest.mark.feature("hive-drain-events-admission")
-def test_the_hub_admits_no_launch_for_a_hive_draining_for_a_release(rig, monkeypatch, capsys):
+def test_the_hub_admits_no_launch_for_a_hive_draining_for_a_release(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     from scripts.hive import registry
 
     monkeypatch.setenv("AGENTIHOOKS_STATE_BACKEND", "redis")
@@ -1217,7 +1219,7 @@ def test_the_hub_admits_no_launch_for_a_hive_draining_for_a_release(rig, monkeyp
 
     admitted = rig.admitter.admit(SLUG, ask())
 
-    assert admitted is None
+    assert admitted == {"held": "the hive is draining"}
     assert rig.store.claimant(SLUG, "t1") is None
     assert rig.store.agents(SLUG) == []
     assert rig.ledger.writes == []
@@ -1249,7 +1251,6 @@ def test_a_hive_local_refusal_keeps_the_only_offer_for_an_eligible_second_hive(
 
     _released(rig, monkeypatch, member, "2.17.843")
     registry.update(rig.store.redis, "hive-a", [f"draining={draining}"])
-    rig.rows["t1"].update(fields)
     destination = readiness.ROOT if fields.get("workstation") else "hive-b"
     registry.beat(rig.store.redis, destination, {"heartbeat_at": 6_000, "capabilities": ["gpu"]})
     monkeypatch.setattr(serena_router_daemon, "ensure", lambda: True)
@@ -1283,6 +1284,7 @@ def test_a_hive_local_refusal_keeps_the_only_offer_for_an_eligible_second_hive(
     )
     try:
         readiness.publish(bus, rig.admitter.source.snapshot(SLUG), 1)
+        rig.rows["t1"].update(fields)
         assert spoke.poll() == "held"
         runtime.spawn.assert_not_called()
         assert rig.store.claimant(SLUG, "t1") is None
@@ -1482,7 +1484,7 @@ def test_the_hub_admits_no_launch_for_a_hive_on_an_older_release(
 
     admitted = rig.admitter.admit(SLUG, ask())
 
-    assert admitted is None
+    assert admitted == {"held": f"release {member} below hub release {hub}"}
     assert rig.store.claimant(SLUG, "t1") is None
     assert rig.store.agents(SLUG) == []
     assert rig.ledger.writes == []
@@ -1504,7 +1506,7 @@ def test_the_hub_refuses_a_held_admission_redelivered_to_a_hive_on_an_older_rele
 
     admitted = rig.admitter.admit(SLUG, ask())
 
-    assert admitted is None
+    assert admitted == {"held": "release 2.17.825 below hub release 2.17.843"}
     assert rig.ledger.writes == writes
     assert capsys.readouterr().err.splitlines() == [
         f"hub: events admission swarm={SLUG} task=t1 hive=hive-a refused: release 2.17.825 below hub release 2.17.843"

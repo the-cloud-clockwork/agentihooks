@@ -10295,6 +10295,7 @@
     },
     {
       "id": "hub-admission-hive-local-held",
+      "rules": ["hub-hive-local-refusal-terminates-offer"],
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2740",
       "behaviour": "An events admission refused for the asking hive being draining, on an old release, off the root for a workstation task, outside a task hive pin or missing required capabilities answers held so another eligible hive can receive the same offer; task refusals remain terminal.",

@@ -98,7 +98,7 @@ class Admission:
         timer = _StepTimer(self.clock, begun)
         if older := self._outdated(request["hive"]):
             refused(slug, request, older)
-            return None
+            return {hive_admission.HELD: older}
         timer.mark("release")
         offer = self._key(slug, request)
         admitted = self._held(offer)
@@ -127,7 +127,7 @@ class Admission:
                 f"hub: events placement swarm={slug} task={task_id} hive={request['hive']}: refused, {unplaceable}",
                 file=sys.stderr,
             )
-            return None
+            return {hive_admission.HELD: unplaceable}
         timer.mark("placement")
         from scripts.swarm import tick
 
