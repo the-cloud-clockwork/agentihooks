@@ -12,7 +12,8 @@ exposes and reads: its entry point, environment, ports, metric names and capacit
 Every name lives in `scripts.ci_lab.contract`; the services and the platform tests are to
 import these constants by name, so a rename fails an import instead of dropping a series. The
 worker's PriorityClass is a cluster object outside that module;
-[Worker scheduling priority](#worker-scheduling-priority) covers it.
+[Worker scheduling priority](#worker-scheduling-priority) covers it, and
+[Worker Deployment](#worker-deployment) covers the chart objects that run the worker.
 
 ## Entry points
 
@@ -771,6 +772,333 @@ deployed the observability stack.
 | The promtool job fails after an annotation edit | promtool compares `summary` and `description` exactly | Update the case's `exp_annotations` in the same pull request |
 | A firing lab alert sends no second ntfy message | A group that keeps firing repeats only every 6 hours | Read the alert in the Alertmanager API above; a change to the group sends after 5 minutes |
 
+## Worker Deployment
+
+The deployment repository's `ci-lab` chart runs the [worker service](#worker-executors) as the
+`ci-lab-worker` Deployment in the `ci-lab` namespace, beside a NetworkPolicy of the same name.
+Both landed in that repository's pull request 1826 on 19 November 2026:
+`k8s/charts/ci-lab/templates/worker-deployment.yaml`, `templates/worker-networkpolicy.yaml` and
+the `worker` and `elasticity` blocks of the chart's `values.yaml`. The `ci-lab` Argo CD
+Application syncs `k8s/charts/ci-lab` from that repository's `dev` branch with automated prune and
+self heal, so a chart change reaches the cluster when it merges into `dev`.
+
+A worker pod takes a third of a CI node, runs only on the CI node pool, holds no credential,
+writes only to its own `emptyDir` folders and reaches only cluster DNS, the scheduler and the
+object store.
+
+### Placement
+
+| Pod spec field | Value | Effect |
+|---|---|---|
+| `schedulerName` | `runner-binpack` | The `runner-binpack-scheduler` Deployment in `kube-system` schedules the pod instead of the default scheduler. Its one profile scores `NodeResourcesFit` with the `MostAllocated` strategy over CPU and memory, weight 1 each, at plugin weight 10, and disables `NodeResourcesBalancedAllocation` and `PodTopologySpread` scoring, so a worker goes to the fullest CI node it fits and workers fill one node before the next |
+| `priorityClassName` | `ci-lab-worker` | Priority 150, behind every CI runner, with no preemption; see [Worker scheduling priority](#worker-scheduling-priority) |
+| `nodeSelector` | `<domain>/node-pool: oci-ci` and `<domain>/workload: ci` | Only nodes of the OCI CI pool; both labels must match |
+| `tolerations` | `<domain>/remote=oci` and `<domain>/workload=ci`, each with `operator: Equal` and `effect: NoSchedule` | Lets the pod onto the tainted CI pool nodes |
+| `affinity.podAntiAffinity` | `preferredDuringSchedulingIgnoredDuringExecution`, weight 100, `topologyKey: kubernetes.io/hostname`, `namespaceSelector: {}`, label key `actions.github.com/scale-set-name` with `operator: Exists` | Prefers a node with no Actions Runner Controller runner pod from any namespace. It is one score among the scheduler's, so a worker still lands beside runners when that node scores higher or no other node fits |
+
+`<domain>` stands for the deployment's label domain. The selector and the tolerations equal the
+[node cache DaemonSet](ci-lab-node-cache.md#placement-and-security)'s, so every node that can take
+a worker also runs a node cache pod. They are template settings, not Helm values; read the exact
+keys from the running Deployment:
+
+```bash
+kubectl -n ci-lab get deploy ci-lab-worker \
+  -o jsonpath='{.spec.template.spec.nodeSelector}{"\n"}{.spec.template.spec.tolerations}{"\n"}'
+```
+
+### Packing
+
+The pod's one container requests what it is limited to:
+
+| Resource | Request | Limit |
+|---|---|---|
+| `cpu` | `"5"` | `"5"` |
+| `memory` | `8Gi` | `8Gi` |
+| `ephemeral-storage` | `20Gi` | `20Gi` |
+
+Equal CPU and memory requests and limits give the pod the `Guaranteed` QoS class. The CPU is a
+whole number of cores and `CI_LAB_SLOTS` is `5`, one slot per core, so a worker runs at most five
+units at once.
+
+The CI node shape comes from the `ci` entry of the OCI runner pools in the deployment
+repository's Terraform, `stacks/terraform/modules/oci-arc-runners/variables.tf`: 8 OCPUs, which is
+16 vCPUs, and 28 GB of memory. `elasticity.workersPerNode` workers plus `elasticity.nodeReserve`
+fill that node, and one more worker would not fit:
+
+| On one CI node | CPU | Memory |
+|---|---|---|
+| Three workers | 15 | 24 GiB |
+| `elasticity.nodeReserve` | 1 | 2 GiB |
+| Total | 16 of 16 | 26 of 28 GiB |
+| Four workers and the reserve | 21, over 16 | 34 GiB, over 28 |
+
+The reserve holds the node's DaemonSets. Each node cache container requests 50m CPU and 128 MiB.
+Measured on a CI node in pull request 1826, the DaemonSet pods there requested 41m CPU and
+120 MiB, about 91m and 248 MiB with the node cache, and the node's allocatable equalled its
+capacity of 16 CPU and 27.4 GiB.
+
+The worker count:
+
+| `elasticity.enabled` | Replicas |
+|---|---|
+| `true`, the shipped value | The Deployment carries no `replicas`. The `ci-lab-worker` KEDA ScaledObject sizes it from `max_over_time(sum(ci_lab_slots_wanted)[2m:15s])` at a target of `worker.slots` per worker, between `elasticity.floorWorkers` (3) and `workersPerNode × nodeMax` (3 × 7 = 21), and holds `floorWorkers` after `elasticity.fallbackFailures` (3) failed reads of that query |
+| `false` | `worker.replicas` (3), one node of workers |
+
+`elasticity.nodeMax` (7) is the CI pool maximum of the OCI cluster autoscaler, the middle field
+of its `--nodes=0:7:$(OCI_INSTANCE_POOL_ID)` flag in
+`k8s/manifests/cluster-autoscaler-oci/deployment.yaml`, so the worker ceiling is three workers on
+every node the autoscaler may run. Each scale up step adds at most `workersPerNode` workers, one
+node of them, per `elasticity.scaleUpPeriodSeconds`. The other `elasticity` values tune the
+ScaledObject's polling and scale down.
+
+### Isolation
+
+The pod holds no credential:
+
+| Setting | Value | Keeps out |
+|---|---|---|
+| `automountServiceAccountToken` | `false` | A Kubernetes API token |
+| `enableServiceLinks` | `false` | The `*_SERVICE_HOST` and `*_PORT` variables of the namespace's Services |
+| `serviceAccountName`, `imagePullSecrets`, `initContainers` and `envFrom` | absent | A named account, a pull secret, init steps and bulk environment; the worker image pulls from GHCR without a secret |
+| `env` | literal `name` and `value` pairs only | Any `valueFrom` reference |
+| `volumes` | `emptyDir` and `hostPath` only | Secret, ConfigMap and projected volumes |
+
+On top of that, the worker refuses at start any variable with the `GITHUB_APP_` prefix or `REDIS`
+in its name, exiting with `ci-lab worker refuses <names>`. Its environment is exactly the worker
+contract:
+
+| Variable | Value |
+|---|---|
+| `CI_LAB_SCHEDULER_URL` | `http://ci-lab-scheduler:8800` |
+| `CI_LAB_SLOTS` | `worker.slots`, `5` |
+| `CI_LAB_GIT_MIRROR` | `/cache/git/agentihooks.git` |
+| `UV_CACHE_DIR` | `/cache/uv` |
+| `CI_LAB_WORK_ROOT` | `/work` |
+| `CI_LAB_MANIFEST` | `/work/manifest.json` |
+| `CI_LAB_FLAKES` | `/work/flakes.jsonl` |
+| `CI_LAB_MUTATION_CACHE` | `/work/mutation-cache` |
+| `CI_LAB_KILLERS` | `/work/killers` |
+| `CI_LAB_MUTATION_BUDGET` | `worker.mutation.budgetSeconds`, `1800` |
+| `CI_LAB_MUTATION_CAP` | `worker.mutation.cap`, `1` |
+
+`scripts.ci_lab.executors.settings` reads the last seven without a default, so a pod missing one
+fails at start. A mutant unit leases one slot, and the cap of 1 keeps its mutants inside it.
+[Environment](#environment) gives the meaning of each variable.
+
+| Level | Security setting |
+|---|---|
+| Pod | `runAsNonRoot: true`; `runAsUser` and `runAsGroup` from `worker.uid`, `1001`, the node cache's `nodeCache.uid` and the owner of the cache folders; `seccompProfile.type: Unconfined` |
+| Container | `allowPrivilegeEscalation: false`, `readOnlyRootFilesystem: true`, `capabilities.drop: ["ALL"]` |
+| Pod, unset | `hostNetwork`, `hostPID` and `hostIPC` |
+
+Seccomp stays `Unconfined` for the [unit sandbox](#unit-sandbox). containerd's default profile
+allows `unshare` and `setns` only to a process holding `CAP_SYS_ADMIN`, and `clone` only without
+namespace flags, while bubblewrap needs those calls to give each unit its own namespaces, so
+`RuntimeDefault` would refuse every sandboxed unit. The node cache DaemonSet keeps
+`RuntimeDefault`.
+
+The root filesystem is read only, so the worker writes only to its two `emptyDir` mounts:
+
+| Mount | Volume | Access | Holds |
+|---|---|---|---|
+| `/work` | `work`, `emptyDir` | read and write | The worker's private git store, trees, venvs, unit runs and reports, and the manifest, flake ledger, mutation cache and kill memory paths above |
+| `/tmp` | `temporary`, `emptyDir` | read and write | Temporary files |
+| `/cache/git` | `git`, hostPath `<nodeCache.path>/git` of type `Directory` | read only | The node's bare mirror; the private store under `/work` borrows its objects through `objects/info/alternates` |
+| `/cache/uv` | `uv`, hostPath `<nodeCache.path>/uv` of type `Directory` | read only | The node's uv cache |
+
+Neither `emptyDir` sets a `sizeLimit`, so their use counts against the pod's 20 GiB
+`ephemeral-storage` limit together with the container's logs, and the kubelet evicts the pod past
+it. Both start empty in every new pod. The `Directory` type makes the kubelet refuse a host folder
+that does not exist yet: on a node where the node cache `prepare` container has not created `git`
+and `uv`, the worker waits in `ContainerCreating` while the kubelet retries the mount.
+
+### Stop and rollout
+
+| Setting | Value | Effect |
+|---|---|---|
+| `cluster-autoscaler.kubernetes.io/safe-to-evict` | `"false"`, the pod template's only annotation | The cluster autoscaler never removes a node that runs a worker; a CI node goes only after its workers have. A scale down of the Deployment removes idle workers first, see [Worker pod deletion cost](#worker-pod-deletion-cost) |
+| `terminationGracePeriodSeconds` | `worker.terminationGracePeriodSeconds`, `2100` | A stopping worker stops leasing and drains its running units for up to `GRACE_SECONDS`, the same 2100 seconds; see [Worker executors](#worker-executors) |
+| `strategy` | `RollingUpdate` with `maxSurge: 0` and `maxUnavailable: 1` | A rollout adds no surge pod, so it asks the autoscaler for no extra node, and takes one worker down at a time; a busy worker holds its step for up to the grace |
+
+### Network
+
+The `ci-lab-worker` NetworkPolicy selects the worker pods by `app.kubernetes.io/name: ci-lab`,
+`app.kubernetes.io/instance: <release>` and `app.kubernetes.io/component: worker`, and lists both
+`Ingress` and `Egress` in `policyTypes`, so only these rules pass:
+
+| Direction | Peer | Port | For |
+|---|---|---|---|
+| Egress | `k8s-app: kube-dns` pods in `kube-system` | UDP and TCP 53 | Name lookups, such as `ci-lab-scheduler` |
+| Egress | The chart's scheduler pods in the release namespace | TCP 8800 | The lease API: lease polls, heartbeats, upload URLs and completions |
+| Egress | Pods matching `minio.pods`, `app: minio`, in the namespace `minio.namespace` | TCP `minio.port`, 9000 | The PUTs of each unit's report and log to the presigned URLs the scheduler hands out; see [Worker uploads](#worker-uploads) |
+| Ingress | `app.kubernetes.io/name: prometheus` pods in `monitoring` | TCP 9108 | The worker's `/metrics` |
+
+The policy has no `ipBlock`. GitHub, package indexes, the lab remote, the bus, Redis, the
+Kubernetes API server and every other private range get no route from a worker. Pull request 1826
+probed this shape live with a temporary pod on a CI node: under a policy allowing only DNS and the
+MinIO pods on 9000, MinIO's health endpoint answered 200 through its load balancer address,
+because that address is translated to the MinIO pod before the policy matches, while MinIO's
+console port and another LAN service were refused.
+
+### Configuration
+
+| Helm value | Shipped | Effect |
+|---|---|---|
+| `worker.image.repository` | `ghcr.io/the-cloud-clockwork/agentihooks-ci-lab-worker` | Worker image, pulled with `imagePullPolicy: Always`; the scheduler's `CI_LAB_IMAGE` names the same image |
+| `worker.image.tag` | `dev` | Image tag |
+| `worker.replicas` | `3` | Replicas when `elasticity.enabled` is `false` |
+| `worker.slots` | `5` | `CI_LAB_SLOTS` and the ScaledObject's target per worker |
+| `worker.uid` | `1001` | Pod UID and GID; keep it equal to `nodeCache.uid` |
+| `worker.terminationGracePeriodSeconds` | `2100` | Stop grace |
+| `worker.mutation.budgetSeconds` | `1800` | `CI_LAB_MUTATION_BUDGET` |
+| `worker.mutation.cap` | `1` | `CI_LAB_MUTATION_CAP` |
+| `worker.resources` | 5 CPU, `8Gi` and `20Gi` ephemeral, requests equal to limits | Container resources, copied as written |
+| `elasticity.enabled` | `true` | Renders the ScaledObject and drops `replicas` from the Deployment |
+| `elasticity.floorWorkers` | `3` | ScaledObject minimum and fallback replicas |
+| `elasticity.workersPerNode` | `3` | Workers per CI node: a factor of the ScaledObject maximum and its scale up step |
+| `elasticity.nodeMax` | `7` | CI pool node maximum: the other factor of the ScaledObject maximum |
+| `elasticity.nodeReserve.cpu`, `elasticity.nodeReserve.memory` | `"1"`, `2Gi` | Room left on a CI node for its DaemonSets; only the packing test reads it |
+| `nodeCache.path` | The deployment's host cache root | Root of the two hostPath mounts |
+| `minio.namespace`, `minio.pods`, `minio.port` | The object store's namespace, `app: minio`, `9000` | The MinIO egress rule |
+
+Change these through a pull request into the deployment repository's `dev`. Its tests hold these
+relations, so a change that breaks one fails there:
+
+- `worker.slots` equals the whole cores of `worker.resources.limits.cpu`, and requests equal limits.
+- `workersPerNode` is 3; `workersPerNode` workers plus the reserve fit the CI node's vCPUs and
+  memory, and one more worker does not fit its vCPUs.
+- `nodeMax` equals the autoscaler flag's maximum; change both in one pull request.
+- `worker.uid` equals `nodeCache.uid`.
+- `worker.terminationGracePeriodSeconds` is at least 1800 seconds of unit time plus 300 seconds
+  for the five delivery calls.
+
+For example, save this override as `ci-lab-workers.example.yaml` to render a fixed pool of three
+workers:
+
+```yaml
+elasticity:
+  enabled: false
+worker:
+  replicas: 3
+  slots: 5
+  uid: 1001
+  terminationGracePeriodSeconds: 2100
+  resources:
+    requests:
+      cpu: "5"
+      memory: 8Gi
+      ephemeral-storage: 20Gi
+    limits:
+      cpu: "5"
+      memory: 8Gi
+      ephemeral-storage: 20Gi
+```
+
+Render the worker objects from the deployment checkout:
+
+```bash
+helm template ci-lab k8s/charts/ci-lab --namespace ci-lab \
+  -f ci-lab-workers.example.yaml \
+  --show-only templates/worker-deployment.yaml \
+  --show-only templates/worker-networkpolicy.yaml
+```
+
+The output holds the Deployment, with `replicas: 3` because the override turns elasticity off,
+and the NetworkPolicy.
+
+### Guard tests
+
+The deployment repository's unit tests render the chart with Helm and read the manifests the
+values must match:
+
+| Test | Holds |
+|---|---|
+| `tests/unit/ci_lab/test_packing.py` | Requests equal limits at 5 CPU, `8Gi` and `20Gi`, whole cores and `CI_LAB_SLOTS` equal to them; three workers plus the reserve fit the Terraform `ci` node and a fourth does not, and the node cache requests fit inside the reserve; `nodeMax` equals the autoscaler's CI pool maximum, and with elasticity off the replicas equal `workersPerNode`; the scheduler name is a `runner-binpack` profile, the priority class is defined, the node selector equals the node cache's and the Terraform pool's labels, the tolerations equal the node cache's, and the anti affinity is exactly the one above |
+| `tests/unit/ci_lab/test_scaledobject.py` | Among its ScaledObject checks, `maxReplicaCount` equals `workersPerNode × nodeMax` |
+| `tests/unit/ci_lab/test_worker_isolation.py` | No token, service links, account, pull secret, init container or `envFrom`, only `emptyDir` and hostPath volumes; the environment equals the contract above; the image equals the scheduler's `CI_LAB_IMAGE`; the security contexts above with the node cache's UID and no host namespaces; the writable and read only mounts above; `safe-to-evict` as the only annotation, a grace of at least 1800 plus 300 seconds and the rollout strategy |
+| `tests/unit/ci_lab/test_network.py` | The policy selects the worker pod labels in both directions; exactly three egress rules, DNS, the scheduler on 8800 and MinIO on 9000, with no `ipBlock`; one ingress rule, the monitoring Prometheus on 9108, matching the container's `metrics` port |
+
+### Verify
+
+List the workers and their nodes:
+
+```bash
+kubectl -n ci-lab get pods -l app.kubernetes.io/component=worker -o wide
+```
+
+At the floor of three workers with room on one CI node, all three show the same `NODE`. Read
+that node's requests:
+
+```bash
+node=$(kubectl -n ci-lab get pods -l app.kubernetes.io/component=worker \
+  -o jsonpath='{.items[0].spec.nodeName}')
+kubectl describe node "$node" | sed -n '/^Allocated resources:/,/^Events:/p'
+```
+
+With three workers, the `cpu` requests line shows about 15.1 of the 16 CPU, 94 percent: 15 from
+the workers and the rest from the node's DaemonSets.
+
+Check each worker's scheduler, priority and QoS class:
+
+```bash
+kubectl -n ci-lab get pods -l app.kubernetes.io/component=worker \
+  -o custom-columns='NAME:.metadata.name,SCHEDULER:.spec.schedulerName,CLASS:.spec.priorityClassName,PRIORITY:.spec.priority,QOS:.status.qosClass'
+```
+
+Every row reads `runner-binpack`, `ci-lab-worker`, `150` and `Guaranteed`. Read the policy as the
+cluster holds it:
+
+```bash
+kubectl -n ci-lab describe networkpolicy ci-lab-worker
+```
+
+A worker that cuts a tree from the node mirror without a fetch reports a git hit, which the
+scheduler adds to its counters. From a client that reaches the scheduler, as in
+[Verify the running service](#verify-the-running-service):
+
+```bash
+curl -fsS http://lab:9108/metrics | grep -E '^ci_lab_cache_(hits|misses)_total\{cache="git"\}'
+```
+
+A hits count that rises as units finish shows workers reading the node mirror.
+
+### Limitations
+
+- The worker's `/metrics` on 9108 serves its own empty registry, so a scrape holds no samples, and
+  the chart defines no PodMonitor or ServiceMonitor for the worker pods. The policy admits the
+  monitoring Prometheus to 9108 for when one exists.
+- No code sets `ci_lab_mirror_age_seconds`, so the scheduler exports no mirror age sample.
+- The worker fetches a head it lacks from the node mirror only. The chart sets neither
+  `AGENTIHOOKS_LAB_REMOTE` nor `CI_LAB_REPOSITORY`, and the policy reaches neither GitHub nor the
+  lab remote, so the executor of a head the node mirror does not hold yet raises at its fetch and
+  leaves the unit's lease for the scheduler to reap.
+- A head whose `uv.lock` digest differs from the image's baked venv builds its venv with
+  `uv sync` under `env -i`, which drops `UV_CACHE_DIR`, and the build needs a package index this
+  policy does not reach. See [Head venv builds](#head-venv-builds).
+- Nothing writes `/work/manifest.json`, so a test unit on these workers fails when it reads its
+  dependency manifest.
+- Seccomp is `Unconfined` for the whole pod; a `Localhost` profile that adds only the namespace
+  calls bubblewrap needs is not written.
+
+### Troubleshooting
+
+| Symptom | Cause | Check |
+|---|---|---|
+| Worker pods stay `Pending` with no scheduling events | The `runner-binpack` scheduler is not running, and the default scheduler ignores pods that name another | `kubectl -n kube-system get deploy runner-binpack-scheduler` and its pod logs |
+| `Pending` with `didn't match Pod's node affinity/selector` or `untolerated taint` | No CI pool node exists or none carries both labels | `kubectl get nodes -L <domain>/node-pool,<domain>/workload`; the autoscaler adds CI nodes up to its pool maximum |
+| `Pending` with `Insufficient cpu` or `Insufficient memory` | Every CI node is full, or the pool is at `nodeMax` | The autoscaler's pool maximum and the pending CI runners, which [outrank workers](#worker-scheduling-priority) |
+| `ContainerCreating` with `hostPath type check failed` for `git` or `uv` | The node cache has not prepared the node | `kubectl -n ci-lab get pods -l app.kubernetes.io/component=node-cache -o wide` and its `prepare` log; the kubelet mounts once the folders exist |
+| The worker exits at start with `ci-lab worker refuses` | Its environment holds a `GITHUB_APP_` or `REDIS` variable | Remove the variable from the chart |
+| The worker exits at start with a `KeyError` naming a `CI_LAB_` variable | A required work setting is missing from the pod environment | Compare the pod's `env` with the contract table above |
+| A head's units are reaped undelivered and the worker log shows a failed `git fetch` | The node mirror lacks the head and the worker has no other source | The node cache's `fetched-at` stamp and warm log, see [Verify every node](ci-lab-node-cache.md#verify-every-node) |
+| A venv build fails with `uv sync for <tree> ended with code` | The build needs the package index, which the policy refuses | The kept build log the error names; see Limitations |
+| Uploads time out or are refused | The MinIO egress rule does not match the object store's pods | `minio.namespace`, `minio.pods` and `minio.port` against `kubectl get pods -n <namespace> --show-labels` |
+| A sandboxed unit fails at bubblewrap with `Operation not permitted` | The pod runs under a seccomp profile that refuses namespace calls, or the node kernel restricts user namespaces | The pod's `seccompProfile`, then the namespace probe in the [sandbox verify](#unit-sandbox) steps on the node |
+| A worker pod is evicted for ephemeral storage | `/work`, `/tmp` and the logs passed 20 GiB | `kubectl -n ci-lab get events --field-selector reason=Evicted` |
+| A worker container is `OOMKilled` | Its units passed the 8 GiB limit | `kubectl -n ci-lab describe pod <worker pod>` for the last state |
+| A rollout takes long | Each step waits for one busy worker to drain, up to 2100 seconds | `kubectl -n ci-lab rollout status deploy/ci-lab-worker` |
+| An idle CI node is not scaled down | A worker still runs on it, and `safe-to-evict: "false"` keeps the node | `kubectl -n ci-lab get pods -l app.kubernetes.io/component=worker -o wide` |
+
 ## Worker scheduling priority
 
 The PriorityClass `ci-lab-worker` ranks lab worker pods below every CI runner
@@ -831,8 +1159,8 @@ which this class leaves untouched.
 
 ### Use it from a worker pod
 
-A pod gets the rank only by naming the class in its spec. The lab chart's worker Deployment is to
-carry this in its pod template:
+A pod gets the rank only by naming the class in its spec. The lab chart's
+[worker Deployment](#worker-deployment) carries this in its pod template:
 
 ```yaml
 spec:
@@ -842,9 +1170,9 @@ spec:
 ```
 
 Admission resolves the name to `spec.priority` when the pod is created, so a running pod keeps the
-priority it was created with. Admission refuses a pod that names a class the cluster does not hold. No
-chart sets `priorityClassName: ci-lab-worker` yet; until the lab chart's worker Deployment does,
-its pods run at priority 0.
+priority it was created with. Admission refuses a pod that names a class the cluster does not hold.
+The worker Deployment has named the class since the deployment repository's pull request 1826;
+worker pods created before that rollout ran at priority 0.
 
 ### Verify
 
@@ -864,8 +1192,8 @@ order, system classes included:
 kubectl get priorityclass --sort-by=.value
 ```
 
-The class and priority a running worker pod resolved to, with the output expected once the worker
-Deployment names the class:
+The class and priority a running worker pod resolved to, with the output expected now that the
+worker Deployment names the class:
 
 ```bash
 kubectl get pod <worker pod> -n <namespace> -o jsonpath='{.spec.priorityClassName} {.spec.priority}{"\n"}'
