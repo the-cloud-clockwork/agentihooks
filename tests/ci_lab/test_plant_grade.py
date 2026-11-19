@@ -262,8 +262,10 @@ def test_conflicting_gate_checks_cannot_hide_an_extra_failure(repository: Path) 
 @pytest.mark.parametrize("name", ["lint", "gate-script"])
 @pytest.mark.parametrize("diagnostic", [None, "", "F401 unused import", "ruff: command not found", "I0010"])
 @pytest.mark.feature("lab-static-plant-proofs")
-def test_a_named_gate_failure_requires_the_observed_plant_diagnostic(repository: Path, diagnostic: str | None) -> None:
-    lab = Lab(repository)
+def test_a_named_gate_failure_requires_the_observed_plant_diagnostic(
+    repository: Path, name: str, diagnostic: str | None
+) -> None:
+    lab = Lab(repository, name)
 
     def wrong(path: str, timeout_s: float) -> Mapping[str, Any]:
         result = lab.fetch(path, timeout_s)
@@ -277,7 +279,7 @@ def test_a_named_gate_failure_requires_the_observed_plant_diagnostic(repository:
 
     with pytest.raises(ValueError, match="diagnostic"):
         plant_grade.prove(
-            repository, "lint", "HEAD", REPOSITORY, plant_grade.Ports(wrong, lab.sleep, lab.clock, lab.push)
+            repository, name, "HEAD", REPOSITORY, plant_grade.Ports(wrong, lab.sleep, lab.clock, lab.push)
         )
 
 
