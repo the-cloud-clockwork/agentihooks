@@ -326,3 +326,17 @@ def test_a_logged_round_carries_the_wall_clock_in_milliseconds(tmp_path, monkeyp
     monkeypatch.setattr(review_rounds.time, "time", lambda: 1_800_000_000.25)
     start(ReviewLedger(), tmp_path)
     assert [line["at"] for line in _logged(tmp_path)] == [1_800_000_000_250]
+
+
+@pytest.mark.feature("review-round-metrics-from-ledger")
+def test_a_round_stamp_carries_the_wall_clock_in_milliseconds_ahead_of_its_unique_part(tmp_path, monkeypatch, stamps):
+    monkeypatch.setattr(review_rounds, "time", SimpleNamespace(time=lambda: 1_800_000_000.25))
+    ledger = ReviewLedger()
+    start(ledger, tmp_path)
+    assert ledger.rows["t1"]["review_rounds"] == {"rounds-before-pr": ["1800000000250-s1"]}
+
+
+@pytest.mark.feature("review-round-metrics-from-ledger")
+def test_a_stamp_carries_a_time_only_when_it_opens_with_digits_and_a_dash():
+    stamped = ("1800000000250-s1", "0-x", "12-", "a1b2", "12ab-c", "-c", "12", "")
+    assert [review_rounds.stamped_at(stamp) for stamp in stamped] == [1_800_000_000_250, 0, 12, *[None] * 5]

@@ -972,3 +972,48 @@ def test_record_pass_ships_each_swarm_review_round_once(tmp_path, monkeypatch):
         assert metrics_swarm.read_review_rounds(SLUG, box).rows == []
     finally:
         box.close()
+
+
+@pytest.mark.feature("review-round-metrics-from-ledger")
+def test_review_rounds_ship_from_the_round_stamps_on_each_ledger_task():
+    rounds = {"rounds": [f"{NOW + 1}-a", "b", f"{NOW + 3}-c"], "rounds-other": [f"{NOW + 4}-d"]}
+    ledger_doc = {"tasks": [{**TASK, "review_rounds": rounds}, {"id": "u"}], "_meta": {"events": []}}
+    rows = metrics_swarm.read_review_rounds(ledger_doc)
+    assert [(row["kind"], row["target"], row["at"], row["review_id"]) for row in rows] == [
+        ("review round", "tasks/t", NOW + 1, "swarm:t:rounds:1"),
+        ("review round", "tasks/t", NOW + 3, "swarm:t:rounds:3"),
+        ("review round", "tasks/t", NOW + 4, "swarm:t:rounds-other:1"),
+    ]
+    delivery = metrics_swarm.delivery_rows(SLUG, doc(rows), [AGENT], {})
+    assert [row["kind"] for row in delivery] == ["review_round"] * 3
+    assert len({row["event_id"] for row in delivery}) == 3
+
+
+@pytest.mark.feature("review-round-metrics-from-ledger")
+def test_record_pass_counts_the_rounds_two_hives_spent_on_one_ledger_task(tmp_path, monkeypatch):
+    import fakeredis
+
+    from scripts.gates import log as gate_log
+    from scripts.swarm import review_rounds
+    from tests.swarm.review_ledger import ReviewLedger
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig(SLUG, ".", 0, 0))
+    monkeypatch.setattr(metrics_swarm.host_budget, "read_host", lambda: HostSample(2.0, 2, 512, 1))
+    monkeypatch.setattr(metrics_swarm.gate_log, "since", lambda *args, **kwargs: [])
+    monkeypatch.setattr(metrics_swarm, "read_classifier_calls", lambda box: metrics_swarm.LogBatch("", 0, []))
+    monkeypatch.setattr(metrics_swarm, "read_review_events", lambda slug, box: metrics_swarm.LogBatch("", 0, []))
+    ledger = ReviewLedger({TASK["id"]: dict(TASK)}, slug=SLUG)
+    for hive, at in (("hive-a", NOW), ("hive-b", NOW + 500)):
+        monkeypatch.setattr(gate_log, "swarm_home", lambda hive=hive: tmp_path / hive)
+        monkeypatch.setattr(review_rounds, "time", SimpleNamespace(time=lambda at=at: at / 1000))
+        review_rounds.start(SLUG, TASK["id"], ledger, f"engineer@{hive}")
+    monkeypatch.setattr(gate_log, "swarm_home", lambda: tmp_path / "tick")
+    box = Outbox(tmp_path / "outbox.db", Settings("http://sink", "", ""))
+    try:
+        for _ in range(2):
+            metrics_swarm.record_pass(box, SLUG, NOW + 1_000, store, doc() | {"tasks": [ledger.rows["t"]]}, [], {})
+        rounds = [row for row in box.recent("delivery_events", NOW + 1_000) if row["kind"] == "review_round"]
+        assert [row["ts_ms"] for row in rounds] == [NOW, NOW + 500]
+    finally:
+        box.close()
