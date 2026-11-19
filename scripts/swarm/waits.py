@@ -234,8 +234,13 @@ def end_pass(
             outcome = timing.timed(
                 resolution, held["on"], rows, inbox, github, reread, now_ms - held["at"] < FRESH_MS, verdicts
             )
-            if outcome and agent.task in rows and timing.timed(dependency, held["on"], rows[agent.task], rows, reread):
-                outcome = ""
+            outcome = (
+                ""
+                if outcome
+                and agent.task in rows
+                and timing.timed(dependency, held["on"], rows[agent.task], rows, reread)
+                else outcome
+            )
             if (outcome or json.dumps(held) != previous) and not timing.timed(
                 _save_wait, store.redis, slug, agent.name, previous, held, outcome, now_ms
             ):
