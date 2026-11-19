@@ -6,6 +6,7 @@ into its injection trace, so a correction can name the seat and note.
 
 import json
 from pathlib import Path
+from typing import Any
 
 from scripts.swarm.prompt import OLDER_RECAPS
 
@@ -18,7 +19,7 @@ def _row(layer, source, locator, text):
     return {"layer": layer, "source": source, "locator": locator, "text": text}
 
 
-def rows(slug: str, task: dict) -> list[dict]:
+def rows(slug: str, task: dict[str, Any]) -> list[dict[str, Any]]:
     seat = task.get("seat", "")
     found = [
         _row("culture", f"culture:{slug}#{number}", {"swarm": slug, "line": number}, line)
@@ -39,7 +40,7 @@ def rows(slug: str, task: dict) -> list[dict]:
     return found + list(task.get("withheld") or [])
 
 
-def withhold(slug: str, task: dict) -> dict:
+def withhold(slug: str, task: dict[str, Any]) -> dict[str, Any]:
     """The task with culture lines and learned notes under a confirmed correction taken out, and a row for each."""
     from hooks.context import quarantine
 

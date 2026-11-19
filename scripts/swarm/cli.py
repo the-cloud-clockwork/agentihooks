@@ -1,53 +1,21 @@
-"""agentihooks swarm: run a swarm of Claude and Codex agents over a swarm ledger in herdr.
+"""Run a swarm of Claude and Codex agents over a swarm ledger in herdr.
 
 agentihooks swarm list | tick | templates
-agentihooks swarm init NAME [--plan FILE] [--content FILE] [--repo DIR]  the one way to create a swarm and its ledger, paused
-agentihooks swarm names check NAME [--plan FILE]                  valid or invalid against the swarm name rule, with suggestions
-agentihooks swarm <id> create --repo DIR [--template NAME]         proof and demo swarms only; init calls it for every other swarm
-agentihooks swarm <id> start | pause | stop [--now] | status
-agentihooks swarm <id> probe
-agentihooks swarm <id> names [--json]                              the swarm code, its herdr space and every agent name it gave
-agentihooks swarm <id> url                                        print the ledger page link (create and start print it last)
-agentihooks swarm <id> close [--note TEXT] [--now]                 a live master writes the note first; then summary, snapshot, all retired
-agentihooks swarm <id> reopen                                     keep the summary and settings, start a fresh master
-agentihooks swarm <id> take-master [--replace]                    this session becomes the master and prints its priming
-agentihooks swarm <id> master up [--last | --new | --replace]     from a terminal: bring back the last master's conversation or start a new one
-agentihooks swarm <id> master move --to HIVE                      order the live master to hand off so its successor starts on that hive
-agentihooks swarm <id> set master-move-grace=SECONDS              how long a quiet master hive may stay quiet before the master moves (default 300)
-agentihooks swarm <id> set hive-placement=on|off                  place this swarm's work on hives while a local machine stays local
-agentihooks swarm <id> set local-max-agents=N                     with hive placement on, workers no hive takes run locally below N (default 8)
-agentihooks swarm <id> <profile> up                               from a terminal: any role or overlay profile (planner, engineer, cicd, qa, frontend) in a pane for you, no task
-agentihooks swarm <id> agent-up <profile>                         the same launch in its parser form
-agentihooks swarm <id> remove                                     drop a swarm with no agents left, and its activity counts
-agentihooks swarm <id> snapshot | restore [--from FILE]           save the swarm's state to its folder (stop does too); restore the newest, paused
-agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N compact-limit=N   (or just: swarm <id> max-eng-agents=N)
-agentihooks swarm <id> set snapshot-minutes=N                      automatic snapshot interval while running (default 30, 0 off)
-agentihooks swarm <id> set eng-agent=claude|codex|auto eng-model=M eng-effort=E eng-kind=K eng-role=TEXT   (ci- likewise)
-agentihooks swarm <id> set effort-min=E effort-max=E               every lane launch effort stays in this range (default medium, xhigh)
-agentihooks swarm <id> set master-agent=claude|codex              master affinity; a change orders the live master to hand off to that harness
-agentihooks swarm <id> save-template NAME                         write this swarm's lanes, caps and compact limit as a template
-agentihooks swarm <id> send-message TEXT                          message to every live agent's inbox
-agentihooks swarm <id> verdict FINDING VERDICT [--note TEXT]     master or operator judges a health finding
-agentihooks swarm <id> classify EXECUTION lost|working --reason TEXT  master or operator classifies a suspect execution attempt
-agentihooks swarm <id> terminal EXECUTION                         operator opens the worker terminal of an execution in herdr
-agentihooks swarm <id> lift AGENT GATE                            operator or master lets one agent past a gate for one hour
-agentihooks swarm <id> freeze | focus | unfreeze TARGET [--reason TEXT] [--quote WORDS]   operator, or master with his words
-agentihooks swarm <id> cover STAGE ITEM --reason TEXT              operator, master or dispatcher marks a bottleneck stage owned by an open phases/ID or tasks/ID
-agentihooks swarm <id> learned [--all]                            list caller notes and shared guidance; --all lists every seat
-agentihooks swarm <id> promote SEAT NUMBER insight|canon --reason TEXT   raise a learned note; canon only by master or operator
-agentihooks swarm <id> retire SEAT NUMBER --reason TEXT           master or operator retires a learned note from every later prompt
-agentihooks swarm <id> culture set FILE | show                    the swarm's shared culture, read by every new occupant
-agent side (name from --as or AGENTIHOOKS_AGENT_NAME):
-agentihooks swarm <id> issue URL | pr URL | branch | done [--pr URL] | block NOTE | handoff DOC [--recap FILE] [--reason R] | say TEXT [--to NAME|eng|ci]
-agentihooks swarm <id> learned TEXT [--maturity data|note|insight|canon]   (default note; canon only by the master)
-agentihooks swarm <id> exit              an agent without a claim ends its own session
-agentihooks swarm <id> park DOC          hold a stacked task on its pushed branch until its open dependencies merge
-agentihooks swarm <id> restack           rebase parked task work onto dev after its dependencies merge
-agentihooks swarm <id> wait MINUTES [--reason TEXT]                 the tick counts no idle tick while it holds
-agentihooks swarm <id> trace-plan        trace plan.md in the task work folder to task, phase and project intent
-done carries the proof its task's kind needs: ops and tune --command C --output O; troubleshoot --root-cause R
---evidence E with --fix URL or --filed FOLLOWUP; research --finding URL; workflow reads workflow.json and
-verdict.json from the task workspace, and an exhausted workflow blocks the task with the last judge notes
+agentihooks swarm init NAME [--plan FILE] [--content FILE] [--repo DIR]
+agentihooks swarm <id> create --repo DIR [--template NAME]
+agentihooks swarm <id> start | pause | stop [--now] | status | probe | url
+agentihooks swarm <id> close [--note TEXT] [--now] | reopen | remove
+agentihooks swarm <id> snapshot | shutdown | restore [--from FILE]
+agentihooks swarm <id> take-master [--replace] | master up | master move --to HIVE
+agentihooks swarm <id> set KEY=VALUE | autoscale | verdict | freeze | focus | unfreeze
+agentihooks swarm <id> learned [--all]  caller notes and shared guidance; --all lists every seat
+agentihooks swarm <id> learned TEXT [--maturity data|note|insight|canon]
+agentihooks swarm <id> promote SEAT NUMBER insight|canon --reason TEXT | retire SEAT NUMBER --reason TEXT
+agentihooks swarm <id> culture set FILE | culture show
+Agent identity comes from --as or AGENTIHOOKS_AGENT_NAME.
+Agent work: issue URL | pr URL | branch | publish | review | done | block NOTE | progress | wait
+Continuity: handoff DOC | park DOC | ready DOC | restack | confirm-handoff | restore-decision
+Use each command's --help for its arguments.
 """
 
 import argparse

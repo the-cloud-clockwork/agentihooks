@@ -201,11 +201,11 @@ class SeatMemory:
         entry = {"occupant": occupant, "text": text, "at": at, "maturity": maturity}
         self.redis.rpush(self.key(address, "learned"), json.dumps(entry))
 
-    def learned(self, address):
+    def learned(self, address: str) -> list[dict[str, Any]]:
         return [_entry(raw) for raw in self.redis.lrange(self.key(address, "learned"), 0, -1)]
 
     def scoped(self, slug: str, address: str, *, all_seats: bool = False) -> list[dict[str, Any]]:
-        selected = []
+        selected: list[dict[str, Any]] = []
         for key in SeatRegistry(self.redis).swarm_keys(slug):
             seat, _, kind = key.removeprefix(f"{PREFIX}:").partition(":")
             if kind != "learned":
