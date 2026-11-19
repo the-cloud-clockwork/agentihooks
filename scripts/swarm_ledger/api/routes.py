@@ -117,7 +117,8 @@ def fix_phase(services: Services, slug: str) -> str:
 
     swarm = ports.swarm()
     try:
-        return swarm.freeze.fix_phase(cast(Any, services.swarm.store()).config(slug))
+        store: Any = services.swarm.store()
+        return swarm.freeze.fix_phase(store.config(slug))
     except (swarm.store.SwarmError, RedisError, ValueError, OSError):
         return ""
 
