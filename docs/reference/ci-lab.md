@@ -1339,7 +1339,8 @@ The lab remote is the git endpoint that [Push a head to the lab remote](#push-a-
 pushes to. It serves one bare repository, `agentihooks.git`, over git's smart HTTP protocol to
 callers that hold the lab remote token. The deployment repository's `ci-lab` chart runs it beside
 the scheduler in the `ci-lab` namespace, and the `ci-lab` ArgoCD Application syncs that chart from
-the deployment repository's `dev` branch. Pull request 1829 of the deployment repository added it.
+the deployment repository's `dev` branch. Pull request 1829 of the deployment repository added it
+on 19 November 2026.
 That repository's `tests/unit/ci_lab/test_remote.py` renders every object below by name and runs
 `serve.py` against a real bare repository to check its authentication, push and error answers.
 
@@ -1347,14 +1348,14 @@ That repository's `tests/unit/ci_lab/test_remote.py` renders every object below 
 
 | Object | What it does |
 |---|---|
-| StatefulSet `ci-lab-remote` | One replica on the scheduler's image, `ghcr.io/the-cloud-clockwork/agentihooks-swarm`, so the image updater that moves the scheduler moves the remote too. It runs as user 10001 with a read only root filesystem and no service account token, and takes the scheduler's node affinity, which keeps it off the pools in the chart value `scheduler.excludedPools`. It requests 100m of CPU and 256Mi of memory and may use up to 1Gi of memory |
+| StatefulSet `ci-lab-remote` | One replica on the scheduler's image, `ghcr.io/the-cloud-clockwork/agentihooks-swarm`, so the image updater that moves the scheduler moves the remote too. It runs as user 10001 with a read only root filesystem and no service account token, and takes the scheduler's node affinity, which keeps it off the pools in the chart value `scheduler.excludedPools`. It requests 100m of CPU and 256Mi of memory and may use up to 1Gi of memory. Its `reloader.stakater.com/auto` annotation makes Reloader restart the pod when the Secret `ci-lab-remote` changes |
 | Init container `init` | Runs `git init --bare /srv/git/agentihooks.git` on every start. On a repository that already exists git reinitializes it and keeps every ref and object |
 | Claim `repo` | `local-path`, `ReadWriteOnce`, 20Gi, mounted at `/srv/git`. It holds the repository and the request bodies spooled during a push |
 | Volume `scratch` | An `emptyDir` of at most 2Gi mounted at `/tmp` |
 | ConfigMap `ci-lab-remote` | `serve.py`, `gitconfig`, `pre-receive` and `post-receive`, mounted read only at `/etc/ci-lab-remote`. The pod template carries a checksum of these files, so a change to one rolls the pod |
 | Service `ci-lab-remote` | Headless, port 8790. Pods reach the remote at `http://ci-lab-remote.ci-lab.svc:8790/agentihooks.git` |
 | Service `ci-lab-remote-lan` | `LoadBalancer` on the MetalLB address in the chart value `remote.lan.address`, port 80. LAN hosts reach the remote at `http://<lab remote address>/agentihooks.git`, and tailnet hosts reach the same URL through the tailnet's route to the LAN |
-| NetworkPolicy `ci-lab-remote` | Admits TCP 8790 only from the ranges in the chart values `lan.sources` (the LAN and the pod network) and `remote.tailnet` (the tailnet). It restricts ingress only; egress stays open |
+| NetworkPolicy `ci-lab-remote` | Admits TCP 8790 only from the ranges in the chart values `lan.sources` (the LAN and the pod network) and `remote.tailnet` (the tailnet). Egress goes only to cluster DNS, the `kube-dns` pods in `kube-system` on port 53 over UDP and TCP, and to the bus, the NATS pods in the namespace in the chart value `bus.namespace` on `bus.port` (4222). The bus route is held for the grade hook; see [Grade hook environment](#grade-hook-environment) |
 
 The remote speaks plain HTTP on both addresses. On the LAN the token crosses the network in clear
 text; the tailnet encrypts its own traffic.
@@ -1403,11 +1404,16 @@ true` makes git find the commits it shares with the lab before it builds the pac
 The `post-receive` hook runs `python -m scripts.ci_lab.remote.post_receive` from the image with the
 container's environment; [Push a head to the lab remote](#push-a-head-to-the-lab-remote) describes
 what it publishes and prints. It reads `CI_LAB_URL`, `CI_LAB_REPOSITORY`, `CI_LAB_REMOTE_ACTOR` and
-the `AGENTIHOOKS_BUS` settings from that environment. The chart gives the remote container only
-`CI_LAB_REMOTE_PORT`, `CI_LAB_REMOTE_ROOT`, `GIT_CONFIG_GLOBAL` and `CI_LAB_REMOTE_TOKEN`. Until the
-chart adds the hook's settings, the hook fails on every grade push after git has written the ref:
-the push lands, the pusher reads the hook's error in place of a grade url, and the lab records no
-head.
+the `AGENTIHOOKS_BUS` settings from that environment, and needs a bus login allowed to publish
+`ci.lab.head.notice`. The chart gives the remote container only `CI_LAB_REMOTE_PORT`,
+`CI_LAB_REMOTE_ROOT`, `GIT_CONFIG_GLOBAL` and `CI_LAB_REMOTE_TOKEN`. The chart's only bus login
+belongs to the scheduler, which also holds the lab's key value bucket and both lab consumers, so the
+remote does not share it; a follow up gives the remote its own login and the hook's settings. The
+NetworkPolicy already lets the pod reach the bus, and nothing on the remote uses that route yet.
+
+Until then the hook fails on every grade push after git has written the ref: the push lands, the
+pusher reads the hook's error in place of a grade url, and the lab records no head. Reads never run
+a hook, so `git ls-remote` and fetches answer as described above.
 
 ### Token and client settings
 
@@ -1423,7 +1429,8 @@ The chart generates the token and keeps it in OpenBao, as the deployment does fo
    the PushSecret is deleted.
 3. The `ExternalSecret` `ci-lab-remote` reads the property every five minutes into the Secret
    `ci-lab-remote` as `CI_LAB_REMOTE_TOKEN`, and the remote container takes that key as an
-   environment variable when it starts.
+   environment variable when it starts. When the Secret changes, Reloader restarts the pod, so the
+   server serves the new value without a hand restart.
 
 Every client uses two settings and passes the token by reference:
 
@@ -1440,6 +1447,10 @@ written it. The lab mirrors in the
 [Environment](#environment) table read the same pair.
 
 ### Use it
+
+`wt.sh`, swarm v2 workspaces and the hive daemon add the `lab` remote and its credential helper
+themselves when both settings are set; [Workspaces that carry the lab remote](#workspaces-that-carry-the-lab-remote)
+says where and when. By hand, in an agentihooks checkout:
 
 ```bash
 git remote add lab "$AGENTIHOOKS_LAB_REMOTE"
@@ -1469,6 +1480,29 @@ The StatefulSet shows `1/1` ready, the PushSecret `Synced`, the ExternalSecret r
 listing `CI_LAB_REMOTE_TOKEN` and the LAN Service its external address. The key listing prints key
 names only, never values.
 
+Without kubectl or the token, a request that carries no token shows whether the server is reachable
+and answering:
+
+```bash
+curl -s -D - -o /dev/null "$AGENTIHOOKS_LAB_REMOTE/info/refs?service=git-upload-pack"
+```
+
+The answer is `401` with both challenges. On 19 November 2026, after the `ci-lab` Application
+synced, a hive pod asking `http://ci-lab-remote.ci-lab.svc:8790/agentihooks.git` this way got:
+
+```text
+HTTP/1.1 401 Unauthorized
+Server: BaseHTTP/0.6 Python/3.12.12
+WWW-Authenticate: Bearer realm="ci-lab"
+WWW-Authenticate: Basic realm="ci-lab"
+Content-Length: 0
+Connection: close
+```
+
+and `git ls-remote` of the same URL with no credential helper exited 128 with `could not read
+Username`. A timeout or a refused connection in place of the `401` points at the `Failed to connect`
+row of the troubleshooting table below.
+
 From a hive and from the workstation, with the helper above set:
 
 ```bash
@@ -1489,7 +1523,7 @@ kubectl -n ci-lab logs ci-lab-remote-0 -c remote --since=10m
 | Symptom | Cause | Check |
 |---|---|---|
 | `git ls-remote` fails with `could not read Username` | The request carried no token, so the lab answered `401` and no credential helper answered git | The `test -n` line above, then the helper with `git config --get-regexp '^credential\..*\.helper$'` |
-| `Authentication failed` while the token is set | The value differs from the one the pod read at start: another copy, or a value replaced in OpenBao without restarting the pod | Map the value again from `k8s/ci-lab-remote`; after a replacement, `kubectl -n ci-lab rollout restart statefulset/ci-lab-remote` |
+| `Authentication failed` while the token is set | The value differs from the one the pod read at start: another copy, or a value replaced in OpenBao that the ExternalSecret has not copied yet, which takes up to five minutes before Reloader restarts the pod | Map the value again from `k8s/ci-lab-remote`; after a replacement, compare the ExternalSecret's last refresh with the pod's start time in `kubectl -n ci-lab get externalsecret ci-lab-remote` and `kubectl -n ci-lab get pod ci-lab-remote-0` |
 | `Failed to connect` or a timeout | The host is outside the NetworkPolicy's ranges, the LAN Service has no external address, or the pod is not ready | `kubectl -n ci-lab get service ci-lab-remote-lan` and the StatefulSet's ready count |
 | A push is rejected with `lab remote: only refs/grade/* takes pushes, refused <ref>` | One of its refs lies outside `refs/grade/*`, which rejects the whole push | Push `HEAD:refs/grade/<task>` alone |
 | A grade push lands but prints a hook error in place of `lab grade:` | The remote container lacks the hook's settings | [Grade hook environment](#grade-hook-environment) |
@@ -1498,10 +1532,9 @@ kubectl -n ci-lab logs ci-lab-remote-0 -c remote --since=10m
 | The pod stays in `CreateContainerConfigError` | The Secret `ci-lab-remote` does not exist yet because the ExternalSecret has not synced | `kubectl -n ci-lab describe pushsecret ci-lab-remote-token` and `kubectl -n ci-lab describe externalsecret ci-lab-remote` |
 
 To replace the token, write the new value to the same OpenBao key and property. The PushSecret
-leaves an existing key alone and the ExternalSecret copies the value within five minutes. No reload
-annotation restarts the pod, so restart it with
-`kubectl -n ci-lab rollout restart statefulset/ci-lab-remote`, then give every host and hive the
-new value.
+leaves an existing key alone, the ExternalSecret copies the value within five minutes, and Reloader
+restarts the pod once the Secret changes. Then give every host and hive the new value; until a client
+has it, the lab answers its requests `401`.
 
 ## Digest specification
 
