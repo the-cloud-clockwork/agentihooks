@@ -523,6 +523,7 @@ class Scheduler:
         self.ports = ports
         self.settings = settings
         self.spending = spending
+        self.shed: tuple[str, ...] = ()
         self.registry = metrics.Registry()
 
     def tick(self, now_ms: int) -> list[str]:
@@ -776,21 +777,21 @@ class Scheduler:
     def _admit(self, now_ms: int) -> list[str]:
         """Enqueue the held units the day's budget admits, the most urgent grade first: every unit of a class not shed,
         and backfill only into the slots workers offered free after every unit already waiting in the queue, backfill
-        and those admitted in this pass included, since the queue leases in order."""
+        and those admitted in this pass included, since the queue leases in order. A class the budget newly sheds is
+        named first."""
+        actions = self._shedding()
         grades = sorted(
             (state for state in self._live() if any(slot.held for slot in state.units.values())),
             key=lambda state: state.tier,
         )
         if not grades:
-            return []
-        shed = () if self.spending is None else self.spending.status().shed
+            return actions
         load = self.load(now_ms)
         waiting = sum(load.pending_slots.values())
-        actions: list[str] = []
         for state in grades:
             admitted: list[Unit] = []
             for slot in state.units.values():
-                if slot.held and budget.admits(CLASSES[state.tier], DEFAULT.slots, load.slots_free, waiting, shed):
+                if slot.held and budget.admits(CLASSES[state.tier], DEFAULT.slots, load.slots_free, waiting, self.shed):
                     slot.held = False
                     admitted.append(Unit(slot.kind, slot.key, tuple(slot.members)))
                     waiting += DEFAULT.slots
@@ -799,6 +800,20 @@ class Scheduler:
                 self._save(state)
                 actions.append(f"enqueued {len(admitted)} units of {state.run}")
         return actions
+
+    def _shedding(self) -> list[str]:
+        """Read the classes the day's budget sheds and name each class shed since the last pass with the share of the
+        day's core minutes spent."""
+        if self.spending is None:
+            return []
+        spent = self.spending.spent()
+        shed = budget.assess(spent, self.spending.policy).shed
+        share = spent / self.spending.policy.core_minutes_per_day
+        newly = [
+            f"shed {name} with {share:.2f} of the day's core budget spent" for name in shed if name not in self.shed
+        ]
+        self.shed = shed
+        return newly
 
     def _advance(self, run: str, tiers: Mapping[str, int]) -> list[str]:
         """Collect a grade's finished jobs, each counted in its tier, post its check runs and close it once every unit
@@ -836,11 +851,13 @@ class Scheduler:
             slot.started = slot.started or job.state == "leased"
 
     def _finished(self, slot: Slot, job: Job, tier: int, repo: str) -> None:
-        """Count the finished attempt once in the tier's class from its report, then take its outcome into the slot,
-        storing its verdict, unless the retry policy runs it again."""
+        """Count the finished attempt once in the tier's class from its report and charge its core time to the day's
+        budget, then take its outcome into the slot, storing its verdict, unless the retry policy runs it again."""
         uploaded = self._uploaded(job)
         if uploaded is not None and self.queue.tally(job):
             metrics.observe_unit(self.registry, CLASSES[tier], job.unit.kind, job.requirement.slots, uploaded[0])
+            if self.spending is not None:
+                self.spending.charge(job.requirement.slots, float(uploaded[0].get("seconds") or 0.0))
         if not self._rerun(job):
             slot.outcome = job.outcome
             self._remember(job, uploaded, repo)

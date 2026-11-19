@@ -30,6 +30,17 @@
       ]
     },
     {
+      "id": "lab-scheduler-budget-charge",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2718",
+      "behaviour": "The CI lab scheduler charges the day's core budget for every finished unit whose worker uploaded a report: Scheduler.tick adds the unit's slots times the report's seconds to the day's core minute counter once per attempt, while a report without seconds and a unit with no report add nothing, so admission sheds a class once the spent share reaches its fraction from the next pass; the first pass of a scheduler process that finds a class newly shed returns one action naming the class and the spent share of the day's core budget, and later passes while it stays shed return none.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick with a scripts.ci_lab.budget.Budget on an injected clock over fakeredis and the local object store, read through scripts.ci_lab.budget.Budget.spent and the tick actions",
+      "tests": [
+        "tests/ci_lab/test_scheduler.py::test_a_finished_unit_charges_its_slots_times_its_report_seconds_once_and_no_seconds_charges_nothing",
+        "tests/ci_lab/test_scheduler.py::test_the_first_pass_after_finished_units_shed_a_class_names_it_with_the_spent_share_once"
+      ]
+    },
+    {
       "id": "doctor-lab-health",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/swarm-doctor-lab-detector",

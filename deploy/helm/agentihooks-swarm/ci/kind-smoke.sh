@@ -47,7 +47,7 @@ finish() {
   if [[ -n $terminal ]]; then
     wait "$terminal" || true
   fi
-  rm -f "$load_lock" "${ledger_values:-}"
+  rm -f "$load_lock" "${ledger_values:-}" || true
   if [[ -n $route ]]; then
     wait "$route" || true
   fi
@@ -55,7 +55,7 @@ finish() {
     wait "$drain_proof" || true
   fi
   if [[ -n $ca_dir ]]; then
-    rm -rf "$ca_dir"
+    rm -rf "$ca_dir" || true
   fi
   if [[ $status -ne 0 ]]; then
     kubectl get pods -o wide || true
