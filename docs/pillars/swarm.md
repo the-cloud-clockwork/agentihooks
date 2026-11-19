@@ -2345,8 +2345,9 @@ merge queue check run first, as for any publish. Then publish:
 2. Runs `git -c push.negotiate=true push -o branch=<branch> lab HEAD:refs/grade/<task>`, where
    `<branch>` is the [delivery branch](#publishing-after-a-successor-prepares-a-branch) and `<task>`
    the agent's task. Push negotiation makes git find the commits it shares with the lab first, so a
-   worktree behind the lab's history sends only the objects the lab lacks. Git's output is copied to standard error, so the publish log shows the lab's
-   `remote: lab grade: <url>` line before any push to origin. A failed push, or one whose output
+   worktree behind the lab's history sends only the objects the lab lacks. Git's output is copied
+   to standard error, so the publish log shows the lab's `remote: lab grade: <url>` line before any
+   push to origin. A failed push, or one whose output
    names no grade url, refuses.
 3. Without `--direct`, reads the grade url at once and then every 15 seconds, each read with a 10
    second timeout, until the newest grade it lists has a conclusion. The wait gives up after 1800
