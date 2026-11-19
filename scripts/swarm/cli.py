@@ -153,7 +153,7 @@ from scripts.swarm import (
 from scripts.swarm import ledger_client as ledger_client
 from scripts.swarm import refresh_job as refresh_job
 from scripts.swarm import snapshot_job as snapshot_job
-from scripts.swarm.health import activity, report
+from scripts.swarm.health import activity, focus_check, report
 from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import FreezeWords, LedgerClient, LedgerGone, LedgerRefused
 from scripts.swarm.pull_head import PULL_SECONDS as PULL_SECONDS
@@ -1690,7 +1690,7 @@ def cmd_cover(store, args):
     print(json.dumps(stage_cover.cover(store, args.slug, doc, request, now_ms())))
 
 
-cmd_focus = cmd_unfreeze = cmd_freeze
+cmd_focus = cmd_unfreeze = focus_check.checked(cmd_freeze, lambda: LedgerClient())
 
 
 def autoscale_lines(config, decision):

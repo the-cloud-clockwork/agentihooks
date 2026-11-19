@@ -5,6 +5,7 @@ import logging
 import operator
 import os
 import re
+import time
 from collections.abc import Callable
 from typing import Any, cast
 from urllib.parse import parse_qs, unquote, urlsplit
@@ -86,6 +87,8 @@ def ledger_get(handler: object, services: Services, slug: str, path: str) -> dic
 def ledger_read(services: Services, slug: str, path: str, query: dict) -> dict:
     if path.split("/")[0] == "hierarchy":
         return resources.hierarchy_read(services.repository, slug, path, query)
+    if path.split("/")[0] == "focus":
+        return focus_read(services, slug, path)
     if path == "architecture":
         from . import architecture
 
@@ -96,6 +99,27 @@ def ledger_read(services: Services, slug: str, path: str, query: dict) -> dict:
         return resources.read(services.repository.read(slug, path), path)
     entry = services.repository.current(slug)
     return resources.read(entry.state, path, query, entry.views)
+
+
+def focus_read(services: Services, slug: str, path: str) -> dict[str, Any]:
+    """Every focus record, or one target, with the claim gate verdict on each task under it."""
+    state = services.repository.current(slug).state
+    found = ports.swarm().focus_check.read(state, path, fix_phase(services, slug), int(time.time() * 1000))
+    if found is None:
+        raise APIError(404, "resource_missing", "No such target")
+    reply = {"data": found, "revision": resources.revision(found)}
+    return resources.bounded({**reply, "next_cursor": None} if path == "focus" else reply)
+
+
+def fix_phase(services: Services, slug: str) -> str:
+    """The doctor fix phase of the ledger's swarm, empty when the swarm store cannot name one."""
+    from redis import RedisError
+
+    swarm = ports.swarm()
+    try:
+        return swarm.freeze.fix_phase(services.swarm.store().config(slug))
+    except (swarm.store.SwarmError, RedisError, ValueError, OSError):
+        return ""
 
 
 def record_path(path: str) -> bool:

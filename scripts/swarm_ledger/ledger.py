@@ -140,7 +140,7 @@ TASK_LISTS = {"group": ("task_group", "members", "group_members"), "split": ("ta
 CREDENTIAL_REFUSED = '"Missing or wrong ledger credential"'
 AUTH_FAILURES = collections.Counter()
 SHOW_JSON = functools.partial(json.dumps, indent=1, ensure_ascii=False)
-LEDGER_ITEM = re.compile(r"tasks|freezes|(?:tasks|phases|followups|priorities)/[A-Za-z0-9][A-Za-z0-9._-]*")
+LEDGER_ITEM = re.compile(r"tasks|freezes|focus|(?:tasks|phases|followups|priorities)/[A-Za-z0-9][A-Za-z0-9._-]*")
 OBJECT_FORMS = {
     "proof": (ledger_kinds.PROOF_KEYS, "proof.evidence=E proof.output=O"),
     "contract": (
@@ -749,7 +749,7 @@ def _duration(value):
 def _ledger_item(value: str) -> str:
     if not LEDGER_ITEM.fullmatch(value):
         raise argparse.ArgumentTypeError(
-            "name tasks/<id>, phases/<id>, followups/<id>, priorities/<id>, tasks or freezes"
+            "name tasks/<id>, phases/<id>, followups/<id>, priorities/<id>, tasks, freezes or focus"
         )
     return value
 
@@ -1030,9 +1030,12 @@ def build_parser():
         "node", nargs="?", help="plans/<id>, phases/<id>, slices/<id> or tasks/<id>; default the whole ledger"
     )
     sub.add_parser(
-        "get", help="print one task, phase, follow up or priority, or every task or freeze, through the ledger API"
+        "get",
+        help="print one task, phase, follow up or priority, or every task, freeze or focus, through the ledger API",
     ).add_argument(
-        "item", type=_ledger_item, help="tasks/<id>, phases/<id>, followups/<id>, priorities/<id>, tasks or freezes"
+        "item",
+        type=_ledger_item,
+        help="tasks/<id>, phases/<id>, followups/<id>, priorities/<id>, tasks, freezes or focus",
     )
     tasks = sub.add_parser("tasks", help="list open tasks, one line each, filtered by state, lane or title text")
     for flag in ("--state", "--lane", "--text"):

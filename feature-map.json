@@ -10206,6 +10206,60 @@
         "tests/ci_lab/test_head_notice.py::test_without_a_receiver_a_secret_or_an_actor_nothing_is_sent",
         "tests/ci_lab/test_head_notice.py::test_a_failed_send_is_reported_once_and_never_raised"
       ]
+    },
+    {
+      "id": "swarm-focus-verdict",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-focus-sanity-check",
+      "behaviour": "swarm focus and swarm unfreeze, after their write, print on standard error the claim gate verdict on every task under the target that is not done: claimable, or the freeze record that holds it, the dependency it waits on, its phase state, a focus elsewhere, its claimant, its pull request or out of scope, with a NOTHING CLAIMABLE head when none is claimable and no such target for a target that does not exist; freeze prints none, and the ledger refuses an unfreeze whose target is no plan node, no lane or kind selector and no record.",
+      "seam": "scripts.swarm.health.focus_check.checked wrapping cmd_focus and cmd_unfreeze, focus_check.read and lines, LedgerClient.focus_verdicts, and ledger_freezes._clear",
+      "tests": [
+        "tests/swarm/test_focus_check.py::test_every_task_under_a_focus_gets_its_claim_gate_verdict",
+        "tests/swarm/test_focus_check.py::test_a_task_outside_the_focus_is_named_as_held_by_it",
+        "tests/swarm/test_focus_check.py::test_a_target_that_does_not_exist_has_no_verdict",
+        "tests/swarm/test_focus_check.py::test_a_focus_with_nothing_claimable_prints_a_loud_head",
+        "tests/swarm/test_focus_check.py::test_focus_and_unfreeze_print_the_verdict_after_the_write",
+        "tests/swarm/test_focus_check.py::test_freeze_prints_no_verdict",
+        "tests/swarm/test_focus_check.py::test_unfreeze_of_a_target_that_does_not_exist_is_refused"
+      ]
+    },
+    {
+      "id": "swarm-focus-read",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-focus-sanity-check",
+      "behaviour": "One ledger API read, GET focus or agentihooks api get focus, lists every focus record with its target, author, time and reason, the ids of the done tasks under it, every other task under it with its lane, state and claim gate verdict, the claimable count, and the minutes since the focus while a task under it is open and none is claimed or in a pull request; GET focus/<target> answers one target the same way and a target that does not exist reads 404 resource_missing.",
+      "seam": "scripts.swarm_ledger.api.routes.focus_read through the ledger swarm port focus_check.read, ledger get focus, and LedgerClient.focus_verdicts",
+      "tests": [
+        "tests/swarm/test_focus_check.py::test_the_focus_read_lists_every_focus_with_verdicts_and_unclaimed_minutes",
+        "tests/swarm/test_focus_check.py::test_a_lane_focus_covers_every_task_of_its_lane",
+        "tests/swarm/test_focus_check.py::test_ledger_get_takes_the_focus_read",
+        "tests/swarm/test_focus_check.py::test_the_client_reads_one_target_and_answers_none_for_a_missing_one",
+        "tests/swarm_ledger/test_api_v1.py::test_the_focus_read_serves_every_focus_and_one_target"
+      ]
+    },
+    {
+      "id": "swarm-focus-unclaimed-finding",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-focus-sanity-check",
+      "behaviour": "The focus unclaimed tick step counts, for every task under a focus record whose claim gate verdict is claimable, the consecutive ticks it stays so, and any other verdict drops the count; past three ticks a focus unclaimed health finding names the task and the focus, and the findings pass sends it to the master inbox.",
+      "seam": "scripts.tick.steps.host._focus_unclaimed registered as tick step focus unclaimed, scripts.swarm.health.focus_unclaimed.observe and findings, read by swarm status findings and ledger_events.findings_pass",
+      "tests": [
+        "tests/tick/steps/test_focus_unclaimed.py::test_focus_unclaimed",
+        "tests/tick/steps/test_focus_unclaimed.py::test_a_focused_claimable_task_unclaimed_past_three_ticks_is_a_finding",
+        "tests/tick/steps/test_focus_unclaimed.py::test_a_claim_or_a_hold_drops_the_count",
+        "tests/tick/steps/test_focus_unclaimed.py::test_no_focus_raises_no_finding",
+        "tests/tick/steps/test_focus_unclaimed.py::test_the_finding_goes_to_the_master_inbox"
+      ]
+    },
+    {
+      "id": "swarm-master-focus-read",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-focus-sanity-check",
+      "behaviour": "The master refocus block and the swarm master skill require the master to run agentihooks api get focus every loop and clear or fix each focus with nothing claimable; a worker refocus block carries no such line.",
+      "seam": "hooks.context.swarm_refocus._master_block FOCUS_READ and the swarm-master skill Focus and freeze section",
+      "tests": [
+        "tests/context/test_swarm_refocus.py::test_the_master_block_and_skill_require_the_focus_read_every_loop"
+      ]
     }
   ],
   "unmapped_rules": [
