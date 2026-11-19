@@ -505,7 +505,7 @@ def test_a_live_lab_wait_on_the_grade_covers_the_push(store: RedisStore) -> None
     grade_mark(store)
     assert enforce(store, UNPULLED, {}, grade=lambda head: GRADE) == []
     assert (idle.wait(store.redis, "sw", ME) or {})["until"] == 10_000_000
-    assert pr_wait.read(store.redis, "sw", ME) is None
+    assert (pr_wait.read(store.redis, "sw", ME) or {})["pushed_head"] == SHA
 
 
 def test_a_push_without_a_grade_head_never_asks_the_lab(store: RedisStore) -> None:
