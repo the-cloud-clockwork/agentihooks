@@ -7,14 +7,17 @@ import stat
 import subprocess
 import sys
 import time
+import uuid
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import pytest
 
 from scripts.ci_lab import sandbox
+from tests.ci_lab import fake_bwrap
 
-BWRAP = ["--dev-bind", "/", "/", "--unshare-net", "--die-with-parent", "--"]
+PRIVATE_PID = ["--unshare-pid", "--proc", "/proc"]
+BWRAP = ["--dev-bind", "/", "/", *PRIVATE_PID, "--unshare-net", "--die-with-parent", "--"]
 SHOW_ENV = "import json, os; print(json.dumps({'cwd': os.getcwd(), 'env': dict(os.environ)}))"
 NETWORK = """
 import os, socket
@@ -47,6 +50,18 @@ for tree in sys.argv[1:]:
             print(name, "landed")
 open("unit.txt", "w").close()
 """
+WORKER = """
+import os, sys
+pid, secret = sys.argv[1], sys.argv[2].encode()
+leaked = False
+for name in os.listdir("/proc"):
+    try:
+        with open(os.path.join("/proc", name, "environ"), "rb") as stream:
+            leaked = leaked or secret in stream.read()
+    except OSError:
+        pass
+print("seen" if os.path.exists(os.path.join("/proc", pid)) else "hidden", "leaked" if leaked else "sealed")
+"""
 
 
 def _gone(pid: int) -> bool:
@@ -69,17 +84,17 @@ def _bwrap_isolates() -> bool:
     path = shutil.which("bwrap")
     if path is None:
         return False
-    probe = subprocess.run([path, "--dev-bind", "/", "/", "--unshare-net", "true"], capture_output=True, check=False)
+    probe = subprocess.run(
+        [path, "--dev-bind", "/", "/", *PRIVATE_PID, "--unshare-net", "true"], capture_output=True, check=False
+    )
     return probe.returncode == 0
 
 
-def _fake_bwrap(folder: Path, record: Path) -> None:
-    folder.mkdir()
-    script = folder / "bwrap"
-    script.write_text(
-        f'#!/bin/sh\nprintf \'%s\\n\' "$@" > \'{record}\'\nwhile [ "$1" != "--" ]; do shift; done\nshift\nexec "$@"\n'
-    )
-    script.chmod(0o755)
+def _fake_bwrap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    record = tmp_path / "args"
+    fake_bwrap.install(tmp_path / "bin", record)
+    monkeypatch.setenv("PATH", f"{tmp_path / 'bin'}{os.pathsep}{os.environ['PATH']}")
+    return record
 
 
 def _sandbox(root: Path, ports: sandbox.PortAllocator, whitelist: dict[str, str]) -> sandbox.Sandbox:
@@ -92,8 +107,11 @@ def test_the_argv_wraps_the_unit_in_bubblewrap_with_a_cleared_environment() -> N
     assert argv == ["env", "-i", "A=1", "B=2", "/usr/bin/bwrap", *BWRAP, "python", "-c", "x"]
 
 
-def test_the_argv_without_bubblewrap_keeps_the_host_network() -> None:
-    assert sandbox.argv_for(["python"], {"A": "1"}, None) == ["env", "-i", "A=1", "python"]
+@pytest.mark.feature("lab-sandbox-private-pid")
+def test_the_argv_of_a_networked_unit_keeps_the_host_network_in_a_private_process_namespace() -> None:
+    argv = sandbox.argv_for(["python"], {"A": "1"}, "/usr/bin/bwrap", net=True)
+    isolation = ["/usr/bin/bwrap", "--dev-bind", "/", "/", *PRIVATE_PID, "--die-with-parent", "--"]
+    assert argv == ["env", "-i", "A=1", *isolation, "python"]
 
 
 def test_the_environment_is_private_and_whitelisted(tmp_path: Path) -> None:
@@ -153,7 +171,8 @@ def test_a_returned_range_is_handed_out_again() -> None:
     assert ports.take() == taken
 
 
-def test_a_timeout_kills_the_whole_process_tree(tmp_path: Path) -> None:
+def test_a_timeout_kills_the_whole_process_tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _fake_bwrap(tmp_path, monkeypatch)
     whitelist = {"PATH": os.environ["PATH"]}
     unit = _sandbox(tmp_path / "root", sandbox.PortAllocator(first=20000, last=20099, width=100), whitelist)
     outcome = unit.run(["/bin/sh", "-c", "sleep 60 & echo $!; wait"], timeout=3, net=True)
@@ -164,6 +183,7 @@ def test_a_timeout_kills_the_whole_process_tree(tmp_path: Path) -> None:
 def test_the_unit_sees_only_the_whitelist_and_its_private_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    _fake_bwrap(tmp_path, monkeypatch)
     monkeypatch.setenv("CI_LAB_HOST_SECRET", "leak")
     root = tmp_path / "root"
     unit = _sandbox(root, sandbox.PortAllocator(first=20000, last=20099, width=100), {"KEEP": "1"})
@@ -179,27 +199,34 @@ def test_the_unit_sees_only_the_whitelist_and_its_private_environment(
         assert stat.S_IMODE((directory / name).stat().st_mode) == 0o700
 
 
-def test_the_port_range_returns_to_the_allocator_after_each_run(tmp_path: Path) -> None:
+def test_the_port_range_returns_to_the_allocator_after_each_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _fake_bwrap(tmp_path, monkeypatch)
     unit = _sandbox(tmp_path / "root", sandbox.PortAllocator(first=20000, last=20099, width=100), {})
     assert unit.run(["/bin/true"], timeout=30, net=True).code == 0
     assert unit.run(["/bin/true"], timeout=30, net=True).code == 0
 
 
-def test_a_missing_bwrap_is_cannot_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.feature("lab-sandbox-private-pid")
+@pytest.mark.parametrize("net", [False, True])
+def test_a_missing_bwrap_is_cannot_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, net: bool) -> None:
     monkeypatch.setenv("PATH", str(tmp_path))
     unit = _sandbox(tmp_path / "root", sandbox.PortAllocator(first=20000, last=20099, width=100), {})
-    message = "^bwrap is not installed, so a unit without network cannot run$"
-    with pytest.raises(sandbox.CannotRun, match=message):
-        unit.run(["/bin/true"], timeout=30)
+    with pytest.raises(sandbox.CannotRun, match="^bwrap is not installed, so no unit can run$"):
+        unit.run(["/bin/true"], timeout=30, net=net)
 
 
-def test_a_unit_without_network_runs_inside_bwrap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    record = tmp_path / "args"
-    _fake_bwrap(tmp_path / "bin", record)
-    monkeypatch.setenv("PATH", f"{tmp_path / 'bin'}{os.pathsep}{os.environ['PATH']}")
+@pytest.mark.feature("lab-sandbox-private-pid")
+@pytest.mark.parametrize(("net", "network"), [(False, ["--unshare-net"]), (True, [])])
+def test_every_unit_runs_inside_bwrap_in_a_private_process_namespace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, net: bool, network: list[str]
+) -> None:
+    record = _fake_bwrap(tmp_path, monkeypatch)
     unit = _sandbox(tmp_path / "root", sandbox.PortAllocator(first=20000, last=20099, width=100), {})
-    assert unit.run(["/bin/true"], timeout=30).code == 0
-    assert record.read_text().splitlines() == [*BWRAP, "/bin/true"]
+    assert unit.run(["/bin/true"], timeout=30, net=net).code == 0
+    isolation = ["--dev-bind", "/", "/", *PRIVATE_PID, *network, "--die-with-parent", "--"]
+    assert record.read_text().splitlines() == [*isolation, "/bin/true"]
 
 
 def test_loopback_works_and_egress_is_refused_without_network(tmp_path: Path) -> None:
@@ -210,21 +237,35 @@ def test_loopback_works_and_egress_is_refused_without_network(tmp_path: Path) ->
     assert (outcome.code, outcome.log.read_text().strip()) == (0, "egress refused")
 
 
+@pytest.mark.parametrize("net", [False, True])
+def test_a_unit_cannot_see_the_worker_process_or_read_its_environment(tmp_path: Path, net: bool) -> None:
+    if not _bwrap_isolates():
+        pytest.skip("bubblewrap cannot create a process namespace on this runner")
+    secret = uuid.uuid4().hex
+    sleeper = [sys.executable, "-c", "import time; time.sleep(60)"]
+    worker = subprocess.Popen(sleeper, env={**os.environ, "CI_LAB_WORKER_SECRET": secret})
+    try:
+        unit = _sandbox(tmp_path / "root", sandbox.PortAllocator(first=20000, last=20099, width=100), {})
+        outcome = unit.run([sys.executable, "-c", WORKER, str(worker.pid), secret], timeout=30, net=net)
+    finally:
+        worker.kill()
+        worker.wait()
+    assert (outcome.code, outcome.log.read_text().split()) == (0, ["hidden", "sealed"])
+
+
 @pytest.mark.feature("lab-sandbox-read-only-trees")
 @pytest.mark.parametrize(("net", "network"), [(False, ["--unshare-net"]), (True, [])])
 def test_a_unit_with_read_only_trees_runs_inside_bwrap_with_each_tree_bound_read_only(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, net: bool, network: list[str]
 ) -> None:
-    record = tmp_path / "args"
-    _fake_bwrap(tmp_path / "bin", record)
-    monkeypatch.setenv("PATH", f"{tmp_path / 'bin'}{os.pathsep}{os.environ['PATH']}")
+    record = _fake_bwrap(tmp_path, monkeypatch)
     grader, base, root = tmp_path / "grader", tmp_path / "base", tmp_path / "root"
     root.mkdir()
     ports = sandbox.PortAllocator(first=20000, last=20099, width=100)
     unit = sandbox.Sandbox(root=root, cwd=root, ports=ports, whitelist={}, readonly=[grader, base])
     assert unit.run(["/bin/true"], timeout=30, net=net).code == 0
     binds = ["--ro-bind", str(grader), str(grader), "--ro-bind", str(base), str(base)]
-    isolation = ["--dev-bind", "/", "/", *binds, *network, "--die-with-parent", "--"]
+    isolation = ["--dev-bind", "/", "/", *binds, *PRIVATE_PID, *network, "--die-with-parent", "--"]
     assert record.read_text().splitlines() == [*isolation, "/bin/true"]
 
 
@@ -237,8 +278,7 @@ def test_a_unit_with_network_and_read_only_trees_cannot_run_without_bwrap(
     root.mkdir()
     ports = sandbox.PortAllocator(first=20000, last=20099, width=100)
     unit = sandbox.Sandbox(root=root, cwd=root, ports=ports, whitelist={}, readonly=[tmp_path / "grader"])
-    message = "^bwrap is not installed, so a unit with read only trees cannot run$"
-    with pytest.raises(sandbox.CannotRun, match=message):
+    with pytest.raises(sandbox.CannotRun, match="^bwrap is not installed, so no unit can run$"):
         unit.run(["/bin/true"], timeout=30, net=True)
 
 

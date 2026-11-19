@@ -160,7 +160,8 @@ def test_the_step_runs_with_the_grader_and_base_trees_bound_read_only(
     assert run_static.run(_step("true\n"), head, base, grader, settings).green
     args = (tmp_path / "bwrap.args").read_text().splitlines()
     binds = ["--ro-bind", str(grader), str(grader), "--ro-bind", str(base), str(base)]
-    assert args[: args.index("--")] == ["--dev-bind", "/", "/", *binds, "--unshare-net", "--die-with-parent"]
+    isolation = ["--dev-bind", "/", "/", *binds, "--unshare-pid", "--proc", "/proc", "--unshare-net"]
+    assert args[: args.index("--")] == [*isolation, "--die-with-parent"]
 
 
 def test_a_step_cannot_write_into_the_grader_or_base_tree(
@@ -169,7 +170,7 @@ def test_a_step_cannot_write_into_the_grader_or_base_tree(
     folders = os.environ["PATH"].split(os.pathsep)
     monkeypatch.setenv("PATH", os.pathsep.join(folder for folder in folders if folder != str(tmp_path / "bin")))
     bwrap = shutil.which("bwrap")
-    probe = [str(bwrap), "--dev-bind", "/", "/", "--unshare-net", "true"]
+    probe = [str(bwrap), "--dev-bind", "/", "/", "--unshare-pid", "--proc", "/proc", "--unshare-net", "true"]
     if bwrap is None or subprocess.run(probe, capture_output=True, check=False).returncode != 0:
         pytest.skip("bubblewrap cannot create namespaces on this runner")
     head, base, grader = _folders(tmp_path)
