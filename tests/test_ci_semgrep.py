@@ -59,6 +59,21 @@ def test_scan_keeps_the_reusable_workflow_steps() -> None:
     assert _jobs()["scan"]["timeout-minutes"] == 5
 
 
+def test_strict_scans_run_in_independent_jobs() -> None:
+    jobs = _jobs()
+    own = jobs["own-rules"]
+    findings = jobs["scan"]
+    assert "needs" not in own and "needs" not in findings
+    assert "concurrency" not in own and "concurrency" not in findings
+    assert own["timeout-minutes"] == findings["timeout-minutes"] == 5
+    names = {job: {step.get("name") for step in body["steps"]} for job, body in jobs.items()}
+    assert "Own rules hold on their fixtures and the code" in names["own-rules"]
+    assert "Outage rules for tests hold on every test file" in names["own-rules"]
+    assert "Fail on findings new against the base" in names["scan"]
+    assert "Fail on findings new against the base" not in names["own-rules"]
+    assert "Own rules hold on their fixtures and the code" not in names["scan"]
+
+
 def test_scan_grades_new_findings_against_the_caller_base():
     document = _semgrep()
     base = document[True]["workflow_call"]["inputs"]["base"]
