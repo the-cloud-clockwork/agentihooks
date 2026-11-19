@@ -1360,20 +1360,42 @@ def _check_shell_guards(payload: dict[str, Any]) -> None:
     if payload.get("tool_name") != "Bash":
         return
     try:
-        from hooks.context.branch_guard import check_branch_guard, check_commit_on_main
-        from hooks.context.master_coding import protection_refusal
-        from hooks.context.venv_guard import check_venv_guard
+        from hooks.context.branch_guard import check_branch_guard
 
         check_branch_guard(payload)
-        check_commit_on_main(payload)
-        if refusal := protection_refusal(payload):
-            raise BlockAction(refusal)
-        check_venv_guard(payload)
     except BlockAction:
         raise
     except Exception as e:
         log("branch_guard check failed", {"error": str(e)})
         print(f"WARNING: branch_guard check failed ({e}) — guard bypassed", file=sys.stderr, flush=True)
+    try:
+        from hooks.context.branch_guard import check_commit_on_main
+
+        check_commit_on_main(payload)
+    except BlockAction:
+        raise
+    except Exception as e:
+        log("commit_on_main check failed", {"error": str(e)})
+        print(f"WARNING: commit_on_main check failed ({e}) — guard bypassed", file=sys.stderr, flush=True)
+    try:
+        from hooks.context.master_coding import protection_refusal
+
+        if refusal := protection_refusal(payload):
+            raise BlockAction(refusal)
+    except BlockAction:
+        raise
+    except Exception as e:
+        log("master_coding check failed", {"error": str(e)})
+        print(f"WARNING: master_coding check failed ({e}) — guard bypassed", file=sys.stderr, flush=True)
+    try:
+        from hooks.context.venv_guard import check_venv_guard
+
+        check_venv_guard(payload)
+    except BlockAction:
+        raise
+    except Exception as e:
+        log("venv_guard check failed", {"error": str(e)})
+        print(f"WARNING: venv_guard check failed ({e}) — guard bypassed", file=sys.stderr, flush=True)
 
 
 def _fit_pretool(blocks: list[tuple[str, str]]) -> str:
