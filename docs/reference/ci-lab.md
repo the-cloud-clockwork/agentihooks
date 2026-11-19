@@ -1189,9 +1189,10 @@ key; the builders are pure and read no file, clock or network.
    default; a newer head of the lane restarts it and a hotfix waits for none.
 3. Expansion reads the grader's test workflow and input key registry and the head and base trees
    from the git mirror with `git ls-tree` and `git show`, never a checkout, and keys one static
-   unit per gate step, described in [Static units](#static-units). A merge group, promotion or backfill head also gets the `unit` job's test
-   units, described in [Test units](#test-units), and a promotion or backfill head its mutation
-   units, described in [Mutation units](#mutation-units).
+   unit per gate step, described in [Static units](#static-units). A merge group, promotion or
+   backfill head also gets the `unit` job's test units, described in [Test units](#test-units),
+   and a promotion or backfill head its mutation units, described in
+   [Mutation units](#mutation-units).
 4. The verdict store answers what it can. A newer head of the lane drops the older head's pending
    units, carries its leased and finished jobs and cancels its check runs. A push grade of a tree a
    merge group grade passed carries that grade's units for every gate both grades hold: the unit
@@ -1388,7 +1389,7 @@ and both passed in
 |---|---|---|
 | A head gets no grade and no check runs, and the scheduler log reads `cannot expand <head>: semgrep uses ./.github/workflows/semgrep.yml, which was not given` | The scheduler runs a release older than pull request #11978, so its expander passes no reusable workflows | `kubectl -n ci-lab get deploy ci-lab-scheduler -o jsonpath='{.spec.template.spec.containers[0].image}'` names a release that carries the fix |
 | The same text names a workflow you just added to a static job | The called file is in a folder below `.github/workflows`, or not on the grader revision yet. A pull request, hotfix or merge group grade reads the base, so a new workflow counts only once the base holds it | `git ls-tree --name-only <grader> .github/workflows/` lists the file |
-| Every head graded at one grader revision is dropped with a YAML error | A workflow file directly in `.github/workflows` at that revision does not parse In a checkout of that revision, `python -c 'import pathlib,yaml; [print(p) or yaml.safe_load(p.read_text()) for p in sorted(pathlib.Path(".github/workflows").glob("*.y*ml"))]'` prints each file before parsing it, so the last name printed before the traceback is the file |
+| Every head graded at one grader revision is dropped with a YAML error | A workflow file directly in `.github/workflows` at that revision does not parse | In a checkout of that revision, `python -c 'import pathlib,yaml; [print(p) or yaml.safe_load(p.read_text()) for p in sorted(pathlib.Path(".github/workflows").glob("*.y*ml"))]'` prints each file before parsing it, so the last name printed before the traceback is the file |
 | The worker's standard error reads `ci-lab worker: unit <job> crashed: ValueError('semgrep uses ./.github/workflows/semgrep.yml, which was not given')` | The worker runs a release older than the fix while the scheduler expands with it | The `ci-lab-worker` image, as for the scheduler; the unit's lease expires and follows step 6 of the [Scheduler loop](#scheduler-loop) |
 | A pull request grade passes `semgrep` with no units | The pull request frame names the job `semgrep` while its units sit under the `semgrep/` labels | Expected today; see [Which grades run static units](#which-grades-run-static-units) |
 
