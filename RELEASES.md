@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.1054 · 2026-11-19
+
+### 2026-11-19 · c1ef72fab3de · #12240 · @agenticore-app
+
+**Match local Compose front and healthcheck to service TLS**
+
+This change fixes a local Compose setup where TLS certificates were configured for the ledger and API but the front proxy and healthcheck were still defaulting to HTTP, causing 502 errors and connection resets on GET, HEAD, POST, and PUT requests. Now the front proxy derives its upstream scheme from the same certificate and key settings as the ledger and API, and the API healthcheck uses the existing scheme and trust helpers with CA file and PEM settings forwarded through Compose, so HTTPS requests route correctly end to end while HTTP setups continue working unchanged.
+
+### 2026-11-19 · 2b054405c540 · #12294 · @agenticore-app
+
+**Document admission seat setup for swarm tests**
+
+This change adds documentation for the admission seat helper used in waits and pull request confirmation swarm tests, covering fixture imports, direct calls, launch defaults and overrides, hive and clock options, execution state, and refusal diagnostics, plus reference navigation and a contributor guide link. It matters because it gives contributors a clear, validated reference for using this helper correctly, clarifies which fixture migrations from pull request 11167 are relevant versus excluded outage recovery work, and reduces onboarding friction for writing and reviewing swarm tests going forward.
+
 ## v2.17.1053 · 2026-11-19
 
 ### 2026-11-19 · d56dca503c0d · #12254 · @nestorcolt
