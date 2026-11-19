@@ -2053,6 +2053,27 @@
       ]
     },
     {
+      "id": "ledger-cold-write",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-cold-write-full-load",
+      "behaviour": "A ledger write from a fresh process never loads every ledger row: a repository over the shared database adopts this host's copy of the ledger entry and refreshes it from the recorded row changes, falling back to the whole load only when the copy is missing, unreadable, newer than the database or past the kept changes, and rewrites the copy after a whole load or once the adopted copy is far enough behind; the ack revision comes from the metadata rows and a members, metadata or record thread read, the guard of a write, reads only that path's rows with the same data and revision as the whole read.",
+      "seam": "scripts.swarm_ledger.repository.host_entries and SQLiteLedgerRepository._entry, scripts.swarm_ledger.storage.build, scripts.swarm_ledger.api.routes.ledger_read and own_rows, scripts.swarm_ledger.ledger.cmd_ack",
+      "rules": [
+        "whole-ledger-read-for-revision"
+      ],
+      "tests": [
+        "tests/swarm_ledger/test_host_entries.py::test_a_fresh_repository_writes_from_the_host_entry_without_a_whole_load",
+        "tests/swarm_ledger/test_host_entries.py::test_a_host_entry_at_the_stored_generation_is_served_as_it_is",
+        "tests/swarm_ledger/test_host_entries.py::test_a_host_entry_newer_than_the_database_is_never_adopted",
+        "tests/swarm_ledger/test_host_entries.py::test_an_unreadable_host_entry_falls_back_to_the_whole_load",
+        "tests/swarm_ledger/test_host_entries.py::test_a_whole_load_writes_the_host_entry",
+        "tests/swarm_ledger/test_host_entries.py::test_the_host_entry_is_rewritten_only_once_the_adopted_copy_is_far_enough_behind",
+        "tests/swarm_ledger/test_host_entries.py::test_a_repository_over_the_shared_database_keeps_host_entries",
+        "tests/swarm_ledger/test_revision_reads.py::test_a_revision_read_of_a_non_record_path_reads_only_its_rows",
+        "tests/swarm_ledger/test_revision_reads.py::test_ack_reads_the_revision_from_the_metadata_rows_alone"
+      ]
+    },
+    {
       "id": "ledger-export-cost",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1871-export-cost",
