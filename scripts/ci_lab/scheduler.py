@@ -691,8 +691,8 @@ class Scheduler:
         the most urgent class first and the longest waiting first within a class. A head still quiet or paused takes no
         place, and the rest wait for a later pass, so every pass reaches admission. A head whose manifest fetch still
         runs off the pass keeps its place and window for the next pass; one whose fetch GitHub never answered or
-        answered with a server error waits out the window again; any other expansion failure drops it. Each of these
-        takes a place, since its expansion ran on the pass."""
+        answered with a server error waits out the window again; any other expansion failure drops it and posts its
+        failed required check run. Each of these takes a place, since its expansion ran on the pass."""
         actions: list[str] = []
         pauses = control.paused(self.client)
         started = 0
@@ -706,8 +706,9 @@ class Scheduler:
                 continue
             started += 1
             self.client.hdel(WAITING, name)
+            ref = held.get("ref", "")
             try:
-                actions.append(self._start(request, held["lane"], held.get("ref", ""), now_ms))
+                actions.append(self._start(request, held["lane"], ref, now_ms))
             except FetchPending as error:
                 self.client.hset(WAITING, name, raw)
                 actions.append(f"holding {request.head}: {error}")
@@ -722,9 +723,21 @@ class Scheduler:
                 jsonschema.ValidationError,
             ) as error:
                 actions.append(f"cannot expand {request.head}: {error}")
+                self._refuse(request, ref, error, now_ms)
             if started == STARTS_PER_PASS:
                 break
         return actions
+
+    def _refuse(self, request: GradeRequest, ref: str, error: Exception, now_ms: int) -> None:
+        """Post a completed required check run with conclusion failure on a head that cannot expand, naming the error,
+        so the head shows a lab status. A head with no plan has no authoritative gates, so the check posts as
+        lab-shadow/required; a head pushed to a grade ref posts nothing, since GitHub does not hold it."""
+        if ref.startswith(GRADE_REFS):
+            return
+        reason = f"cannot expand {request.head} against {request.base}: {error}"
+        title = f"{CLASSES[request.tier]} grade cannot expand"
+        output = Output(title, reason, (), f"unexpanded-{now_ms}", "unknown", f"{request.repo}/commit/{request.head}")
+        self.ports.checks(_slug(request.repo)).post(request.head, REQUIRED, "completed", "failure", output, True)
 
     def _start(self, request: GradeRequest, lane: str, ref: str, now_ms: int) -> str:
         """Open a grade of a head and the grade ref it was pushed to: supersede the lane's older head, place every unit
