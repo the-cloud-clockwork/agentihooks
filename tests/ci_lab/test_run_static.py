@@ -222,6 +222,104 @@ def test_the_step_reads_its_env_with_expressions_resolved_from_the_context(
     assert settings.root in Path(lines[4]).parents
 
 
+PRODUCING = r"""
+jobs:
+  lint:
+    steps:
+      - name: Mint a token
+        id: token
+        uses: actions/create-github-app-token@v3
+      - name: Fetch with the token
+        id: fetch
+        if: ${{ steps.token.outcome == 'success' }}
+        run: touch "$RUNNER_TEMP/fetched"
+      - name: Pick the pages
+        id: pick
+        env:
+          CHOICE: ${{ inputs.base }}
+        run: |
+          echo picking
+          printf 'browser=%s\n\nnote=a=b\n' "$CHOICE" >> "$GITHUB_OUTPUT"
+      - name: Check the pages
+        if: ${{ !cancelled() && steps.pick.outputs.browser == 'true' }}
+        env:
+          SEEN: ${{ steps.pick.outputs.browser }} ${{ steps.pick.outcome }} ${{ steps.pick.conclusion }} ${{ steps.pick.outputs.note }}
+          UNSET: x${{ steps.pick.outputs.unset }}x
+          TOKEN: ${{ steps.token.outcome }} ${{ steps.token.conclusion }} x${{ steps.token.outputs.token }}x ${{ steps.fetch.outcome }}
+        run: python -m scripts.check_pages
+"""
+
+FAILING = r"""
+jobs:
+  lint:
+    steps:
+      - name: Break
+        id: broken
+        run: |
+          echo "half=1" >> "$GITHUB_OUTPUT"
+          echo "the earlier step failed"
+          exit 3
+      - name: Check
+        env:
+          HALF: ${{ steps.broken.outputs.half }}
+        run: python -m scripts.check
+"""
+
+UNREADABLE = r"""
+jobs:
+  lint:
+    steps:
+      - name: Write a block
+        id: block
+        run: printf 'text<<EOF\nsecret line\nEOF\n' >> "$GITHUB_OUTPUT"
+      - name: Check
+        env:
+          TEXT: ${{ steps.block.outputs.text }}
+        run: python -m scripts.check
+"""
+
+
+@pytest.mark.feature("lab-static-step-env")
+def test_earlier_steps_run_first_and_their_outputs_outcome_and_conclusion_reach_the_gate(
+    tmp_path: Path, settings: run_static.Settings
+) -> None:
+    (gate,) = static_gates.discover(PRODUCING)
+    probe = dataclasses.replace(gate, run='echo "$SEEN"\necho "$UNSET"\necho "$TOKEN"\n')
+    head, base, grader = _folders(tmp_path)
+    graded = run_static.run(probe, head, base, grader, dataclasses.replace(settings, context={"inputs.base": "true"}))
+    assert (graded.code, graded.skipped) == (0, False)
+    assert graded.log.read_text().splitlines() == ["true success success a=b", "xx", "skipped skipped xx skipped"]
+    assert not list(settings.root.rglob("fetched"))
+    unpicked = dataclasses.replace(settings, context={"inputs.base": "false"})
+    skipped = run_static.run(probe, head, base, grader, unpicked)
+    assert (skipped.code, skipped.skipped, skipped.green) == (None, True, True)
+
+
+@pytest.mark.feature("lab-static-step-env")
+def test_a_failing_earlier_step_fails_the_gate_without_running_it(
+    tmp_path: Path, settings: run_static.Settings
+) -> None:
+    (gate,) = static_gates.discover(FAILING)
+    head, base, grader = _folders(tmp_path)
+    graded = run_static.run(
+        dataclasses.replace(gate, run='touch "$GITHUB_WORKSPACE/ran"'), head, base, grader, settings
+    )
+    assert (graded.gate, graded.code, graded.skipped, graded.green) == ("lint/check", 3, False, False)
+    assert graded.log.read_text() == "the earlier step failed\n"
+    assert graded.report.name == run_static.SUMMARY
+    assert not (head / "ran").exists()
+
+
+@pytest.mark.feature("lab-static-step-env")
+def test_an_earlier_step_output_line_outside_name_equals_value_is_refused_without_its_text(
+    tmp_path: Path, settings: run_static.Settings
+) -> None:
+    (gate,) = static_gates.discover(UNREADABLE)
+    with pytest.raises(ValueError) as refused:
+        run_static.run(gate, *_folders(tmp_path), settings)
+    assert str(refused.value) == "block wrote an output line that is not name=value"
+
+
 def test_a_condition_outside_the_expression_subset_is_refused_before_the_step_runs(
     tmp_path: Path, settings: run_static.Settings
 ) -> None:

@@ -1,9 +1,11 @@
+import dataclasses
 import hashlib
 import json
+import os
 import signal
 import subprocess
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from functools import partial
 from pathlib import Path
 from typing import Any, cast
@@ -14,6 +16,7 @@ from scripts import ci_wiring
 from scripts.ci_lab import contract, executors, run_static, run_tests, static_gates, venvs, worker
 from scripts.ci_lab.outcomes import FAILED, PASSED
 from scripts.ci_lab.sandbox import CannotRun, Outcome, PortAllocator, PortRange
+from scripts.ci_lab.static_gates import StaticGate
 from scripts.ci_lab.units import Unit
 from scripts.ci_lab.worker import Finished, Lease
 from scripts.ci_lab.worktrees import Mirror, Worktrees
@@ -37,6 +40,35 @@ GIT = ("git", "-c", "user.name=lab", "-c", "user.email=lab@example.invalid")
 
 
 CACHED = {"git": {"hits": 1, "misses": 0}, "uv": {"hits": 1, "misses": 0}}
+ROOT = Path(__file__).resolve().parents[2]
+LEASE_CONTEXT = {
+    "inputs.base": "b1",
+    "github.sha": "h1",
+    "github.event.pull_request.head.sha": "h1",
+    "github.event.pull_request.base.sha": "b1",
+    "github.run_id": "job",
+    "github.run_attempt": "1",
+    "github.run_number": "1",
+}
+REFUSED = {
+    "lint/refuse-changelog-fragments-named-off-the-branch-or-opening-without-a-section-heading": (
+        "no value for 'github.head_ref' in the context"
+    ),
+    "lint/artifact-sanity-checks": "no value for 'github.event_name' in the context",
+    "lint/prove-the-mutation-gate-kills-with-the-real-test-and-fails-with-a-weakened-one": (
+        "no value for 'github.event_name' in the context"
+    ),
+}
+SECRET_WORKFLOW = r"""
+jobs:
+  lint:
+    steps:
+      - name: Keep keywords out of the docs
+        env:
+          KEYWORDS: ${{ secrets.KEYWORDS }}
+          ABSENT: x${{ secrets.ABSENT }}x
+        run: python -m scripts.docs_sanity
+"""
 
 
 class FakeWorktrees:
@@ -171,8 +203,9 @@ def test_static_runs_the_gate_the_grader_tree_names_over_the_head_with_its_base_
     assert venv.calls == [
         (hashlib.sha256(b"lock-h").hexdigest(), head, pod.root / "venvs", venvs.Build(pod.ports, WHITELIST, 30.0))
     ]
-    settings = run_static.Settings(pod.runs, tmp_path / "venv", pod.ports, WHITELIST, 30.0, {"inputs.base": "b1"})
+    settings = run_static.Settings(pod.runs, tmp_path / "venv", pod.ports, WHITELIST, 30.0, LEASE_CONTEXT)
     assert ran.calls == [(gates[name], head, base, grader, settings)]
+    assert set(LEASE_CONTEXT) == static_gates.LEASE_FIELDS
     assert finished == Finished(PASSED, finished.report, tmp_path / "log.txt")
     assert report(finished, pod) == {
         "gate": name,
@@ -235,6 +268,89 @@ def test_static_releases_every_tree_it_leased_when_a_lease_or_the_gate_raises(
     with pytest.raises(RuntimeError, match="^b1$"):
         executors.static(pod, lease("static", "k", ("lint/lint-check",)))
     assert static_trees.calls == [("lease", "h1"), ("release", "h1")]
+
+
+@pytest.fixture
+def bwrap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    folder = tmp_path / "bin"
+    folder.mkdir()
+    script = folder / "bwrap"
+    script.write_text('#!/bin/sh\nwhile [ "$1" != "--" ]; do shift; done\nshift\nexec "$@"\n')
+    script.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{folder}{os.pathsep}{os.environ['PATH']}")
+
+
+def live_pod(tmp_path: Path, trees: FakeWorktrees, secrets: dict[str, str]) -> executors.Pod:
+    pod = executors.Pod(
+        executors.Trees(cast("Worktrees", trees)),
+        tmp_path / "pod",
+        PortAllocator(41100, 41999, 10),
+        WHITELIST,
+        30.0,
+        secrets=secrets,
+    )
+    pod.runs.mkdir(parents=True)
+    return pod
+
+
+@pytest.mark.feature("lab-static-step-env")
+def test_static_grades_every_lint_gate_of_the_real_workflow_on_a_clean_tree(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, venv: Recorder, bwrap: None
+) -> None:
+    registry = json.loads((ROOT / static_gates.REGISTRY).read_text())
+    workflow = (ROOT / static_gates.WORKFLOW).read_text()
+    discovered = static_gates.discover(workflow, registry, ci_wiring.load(ROOT))
+    lint = {gate.name: dataclasses.replace(gate, run="true") for gate in discovered if gate.job == "lint"}
+
+    def found(grader: Path, name: str) -> StaticGate:
+        return lint[name]
+
+    monkeypatch.setattr(executors, "gate", found)
+    clean = {"uv.lock": "lock\n"}
+    trees = FakeWorktrees({"h1": folder(tmp_path, "head", clean), "b1": folder(tmp_path, "base", clean), "g1": ROOT})
+    pod = live_pod(tmp_path, trees, {})
+    graded: dict[str, str] = {}
+    for name in lint:
+        try:
+            graded[name] = executors.static(pod, lease("static", "k", (name,))).outcome
+        except ValueError as refused:
+            graded[name] = str(refused)
+    assert graded == {**dict.fromkeys(lint, PASSED), **REFUSED}
+
+
+@pytest.mark.feature("lab-static-step-env")
+def test_static_gives_a_step_each_secret_it_reads_by_name_and_writes_no_value_to_its_report_or_log(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, venv: Recorder, bwrap: None
+) -> None:
+    (keywords,) = static_gates.discover(SECRET_WORKFLOW)
+    probe = dataclasses.replace(
+        keywords, run='printf "%s %s" "$KEYWORDS" "$ABSENT" > "$GITHUB_WORKSPACE/seen"\necho ok\n'
+    )
+    contexts: list[Mapping[str, str]] = []
+    real = run_static.run
+
+    def found(grader: Path, name: str) -> StaticGate:
+        return probe
+
+    def spied(
+        gate: StaticGate, head: Path, base: Path, grader: Path, settings: run_static.Settings
+    ) -> run_static.Result:
+        contexts.append(settings.context)
+        return real(gate, head, base, grader, settings)
+
+    monkeypatch.setattr(executors, "gate", found)
+    monkeypatch.setattr(executors.run_static, "run", spied)
+    head = folder(tmp_path, "head", {"uv.lock": "lock\n"})
+    trees = FakeWorktrees({"h1": head, "b1": folder(tmp_path, "base", {}), "g1": folder(tmp_path, "grader", {})})
+    pod = live_pod(tmp_path, trees, {"KEYWORDS": "s3cr3t-alpha,s3cr3t-beta", "UNREAD": "s3cr3t-gamma"})
+
+    finished = executors.static(pod, lease("static", "k", (probe.name,)))
+
+    assert finished.outcome == PASSED
+    assert (head / "seen").read_text() == "s3cr3t-alpha,s3cr3t-beta xx"
+    assert contexts == [{**LEASE_CONTEXT, "secrets.ABSENT": "", "secrets.KEYWORDS": "s3cr3t-alpha,s3cr3t-beta"}]
+    assert finished.log.read_text() == "ok\n"
+    assert "s3cr3t" not in finished.report.read_text()
 
 
 def test_gate_refuses_a_name_the_grader_workflow_does_not_run(static_trees: FakeWorktrees) -> None:
@@ -549,6 +665,18 @@ def test_settings_read_the_worker_contract_environment(tmp_path: Path) -> None:
         while True:
             ranges.append(pod.ports.take())
     assert (len(ranges), ranges[0], ranges[-1]) == (1000, PortRange(20000, 20009), PortRange(29990, 29999))
+
+
+@pytest.mark.feature("lab-static-step-env")
+def test_settings_keep_each_step_secret_by_its_name_under_the_scoped_prefix(tmp_path: Path) -> None:
+    environ = {
+        **environ_of(tmp_path),
+        "CI_LAB_SECRET_DOCS_SANITY_KEYWORDS": "s3cr3t",
+        "DOCS_SANITY_KEYWORDS": "bare",
+        "CI_LAB_SECRETS": "other",
+    }
+    assert executors.settings(environ)[0].secrets == {"DOCS_SANITY_KEYWORDS": "s3cr3t"}
+    assert executors.settings(environ_of(tmp_path))[0].secrets == {}
 
 
 def test_settings_refuse_a_redis_variable(tmp_path: Path) -> None:
