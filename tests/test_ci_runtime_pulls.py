@@ -6,6 +6,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests.test_ci_smoke_image_reuse import runtime_images
+
 ROOT = Path(__file__).resolve().parents[1]
 CASES = [
     (script, missing)
@@ -432,10 +434,10 @@ def test_swarm_smoke_loads_saved_runtime_images_before_any_pull_reuses_them() ->
     assert save["with"]["key"] == steps[names.index("Restore the runtime images saved on dev")]["with"]["key"]
 
 
-@pytest.mark.parametrize(
-    "failure", ["", "redis:7", "redis:7-alpine", "nats:2.15.1-alpine", "nginx:1.27-alpine", "build"]
-)
+@pytest.mark.parametrize("failure", ["", *runtime_images(), "build"])
 def test_the_smoke_build_overlaps_runtime_pulls_and_preserves_failures(tmp_path: Path, failure: str) -> None:
+    images = runtime_images()
+    assert images
     log = tmp_path / "docker.log"
     tools = tools_with(
         tmp_path,
@@ -458,11 +460,14 @@ if [[ "$1" == pull ]]; then
   if [[ -n "$FAILURE" && "$image" == *"$FAILURE" ]]; then exit 17; fi
 elif [[ "$1" == build ]]; then
   touch "$SYNC/build"
+  pulls_started() {
+    for runtime in $RUNTIME_IMAGES; do [[ -e "$SYNC/$runtime" ]] || return 1; done
+  }
   for _ in {1..200}; do
-    if [[ -e "$SYNC/redis:7" && -e "$SYNC/redis:7-alpine" ]]; then break; fi
+    if pulls_started; then break; fi
     /bin/sleep 0.01
   done
-  [[ -e "$SYNC/redis:7" && -e "$SYNC/redis:7-alpine" ]] || exit 19
+  pulls_started || exit 19
   if [[ "$FAILURE" == build ]]; then exit 23; fi
 fi
 """,
@@ -481,6 +486,7 @@ fi
             "WAITS": str(tmp_path / "waits.log"),
             "SYNC": str(sync),
             "FAILURE": failure,
+            "RUNTIME_IMAGES": " ".join(images),
         },
         text=True,
         capture_output=True,
@@ -489,14 +495,10 @@ fi
     assert result.returncode == (23 if failure == "build" else 17 if failure else 0), result.stderr
     calls = log.read_text().splitlines()
     assert sum(call.startswith("build ") for call in calls) == 1
-    assert (sync / "redis:7").exists()
-    assert (sync / "redis:7-alpine").exists()
-    assert (sync / "nats:2.15.1-alpine").exists()
-    assert (sync / "nginx:1.27-alpine").exists()
+    for image in images:
+        assert (sync / image).exists()
     assert {call.split()[1] for call in calls if call.startswith("tag ")} == {
-        f"public.ecr.aws/docker/library/{image}"
-        for image in ("redis:7", "redis:7-alpine", "nats:2.15.1-alpine", "nginx:1.27-alpine")
-        if image != failure
+        f"public.ecr.aws/docker/library/{image}" for image in images if image != failure
     }
 
 
