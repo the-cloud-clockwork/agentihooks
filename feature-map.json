@@ -7023,6 +7023,17 @@
       ]
     },
     {
+      "id": "hive-admission-guard-own-cpu",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-empty-hive-admission",
+      "behaviour": "The host CPU line's five minute load guard refuses a hive only while the hive's own CPU, its pod load when the reading carries one and otherwise the node's CPU used, is at or above the swarm share, so an empty pod hive on a node whose other pods raise the load average and CPU used gets the used CPU line's room instead of none.",
+      "seam": "admission.room over a headroom reading with node used_cpus and the pod's pod_load",
+      "tests": [
+        "tests/hive/test_admission.py::test_an_empty_pod_hive_on_a_busy_node_gets_the_used_cpu_room",
+        "tests/hive/test_admission.py::test_the_load_average_guard_binds_on_a_pod_hive_once_its_own_load_reaches_the_swarm_share"
+      ]
+    },
+    {
       "id": "hive-member-reads-every-hive-pending-admission",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2555",
