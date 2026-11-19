@@ -151,9 +151,9 @@ def preserves_effort(recorded: bool, lane: str) -> bool:
 
 
 def _lane_default(lane: str, agent: str, chosen: dict[str, Any], config: Any = None) -> model_pick.ModelPick:
-    model = default_models.model(config, agent)
     if lane == MASTER:
-        return model_pick.frontier(agent, model)
+        return model_pick.master(config, agent)
+    model = default_models.model(config, agent)
     return model_pick.ModelPick(
         model_pick.suited(agent, _set(chosen.get("model")) or model, model), chosen.get("effort")
     )
