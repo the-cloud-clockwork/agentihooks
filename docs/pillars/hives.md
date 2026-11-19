@@ -1389,6 +1389,7 @@ ram: 2000 of 10000 MB available, 80 percent used, at or above the 80 percent lin
 ram: pod 3900 of 19600 MB available, 81 percent used, at or above the 80 percent line
 ram: 2100 of 10000 MB available, 79 percent used, 850 MB per agent with 2 pending launches, fits 0 more under the 80 percent line
 cpu: 15.20 of 16 CPUs used, five minute load 28.70 on 16 CPUs with CPU used at or above the 40 percent swarm share, fits 0 more
+cpu: 15.20 of 16 CPUs used, five minute load 28.70 on 16 CPUs with pod load 6.80 at or above the 40 percent swarm share, fits 0 more
 max agents: 6 of 6 agents on the hive, fits 0 more
 missing telemetry: no memory reading
 ```
@@ -3999,9 +4000,9 @@ These two share limits apply only to local spawns on the workstation. The refusa
 `with CPU used at or above the 40 percent swarm share, fits 0 more` is a different check, part of the host CPU line
 every hive room reads: it refuses while the five minute load is above 80 percent of the CPUs and the hive's own CPU
 is at or above 40 percent of them, and the ceiling never removes it. A hive in a pod reads both the five minute load
-and CPU used for its whole node, which includes other pods, so on a pod the check counts its own pod load and the
-refusal reads `with pod load <n> at or above the 40 percent swarm share`. An empty hive on a node shared with other
-pods then gets the room of the CPU used line.
+and CPU used for its whole node, which includes other pods, so when the reading carries the pod load the check counts
+it and the refusal reads `with pod load <n> at or above the 40 percent swarm share`. An empty hive on a node shared
+with other pods then gets the room of the CPU used line.
 
 The room found this way is then held under `local-max-agents` and the hive `max-agents`, as in the table above.
 
