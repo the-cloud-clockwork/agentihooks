@@ -4,9 +4,12 @@ import subprocess
 from pathlib import Path
 
 from coverage.exceptions import NotPython
+from coverage.python import get_python_source
 
 from tests.coverage_grade import statements_of
 from tests.coverage_summary import NAME as SUMMARY
+from tests.coverage_summary import STATEMENTS, digest
+from tests.coverage_summary import statements as statement_summaries
 
 OWN_DATABASE = ".coverage"
 
@@ -40,10 +43,24 @@ def _executed(summaries: list[Path]) -> dict[str, list[int]]:
     return {path: sorted(ran) for path, ran in lines.items()}
 
 
+def _statements(source: Path, lines: list[int], known: dict | None) -> dict[int, int]:
+    """Map executed lines to their statement's first line, reading the shard's statement summary when it parsed this
+    exact text and holds every executed line; coverage exclusions only remove statements, so the parse then agrees.
+    """
+    text = source.read_text()
+    if known and digest(source.read_bytes()) == known["digest"] and text == get_python_source(str(source)):
+        first = known["first"]
+        mapped = {line: first.get(str(line), line) for line in lines}
+        if set(mapped.values()) <= set(known["statements"]):
+            return mapped
+    return statements_of(text, lines)
+
+
 def record(repo: Path, shards: list[Path], target: Path, previous: Path | None = None) -> None:
     executed = _executed(shards)
+    known = statement_summaries([path for path in (shard.parent / STATEMENTS for shard in shards) if path.is_file()])
     for path, lines in executed.items():
-        statements = statements_of((repo / path).read_text(), lines)
+        statements = _statements(repo / path, lines, known.get(path))
         for line in sorted(set(lines) - set(statements)):
             print(f"::warning::{path}:{line} is not executable in the current source; dropped from baseline")
         executed[path] = sorted(set(statements.values()))
