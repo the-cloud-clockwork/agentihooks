@@ -7,8 +7,8 @@ import pytest
 
 from scripts.swarm import capacity, quota_view
 from scripts.swarm.health import harness_pin
-from scripts.swarm.store import MANUAL_SCALING, RedisStore, SwarmConfig
-from tests.swarm.test_tick import FakeLedger, FakeRuntime
+from scripts.swarm.store import MANUAL_SCALING, AgentRecord, RedisStore, SwarmConfig
+from tests.swarm.test_tick import FakeLedger
 
 SLUG = "sw"
 START = 1_794_000_000_000
@@ -24,6 +24,21 @@ CLAUDE_FULL = seat("claude", "a", 2, 2)
 CLAUDE_FREE = seat("claude", "a", 3, 0)
 CODEX_FULL = seat("codex", "x", 6, 6)
 CODEX_FREE = seat("codex", "x", 6, 0)
+
+
+class QuotaRuntime:
+    def __init__(self, rows: list[capacity.Account]) -> None:
+        self.rows = rows
+
+    def quota_capacity(
+        self,
+        config: SwarmConfig,
+        agents: list[AgentRecord],
+        now: float,
+        demand: dict[str, int] | None,
+        requirements: dict[str, list[tuple[str, ...]]] | None,
+    ) -> dict:
+        return capacity.calculate(config, self.rows, agents, demand)
 
 
 @pytest.fixture
@@ -48,11 +63,7 @@ def apply(
 ) -> dict:
     ledger = FakeLedger([{"id": task} for task in tasks])
     ledger.comment = lambda *args, **kwargs: None
-    runtime = FakeRuntime()
-    runtime.quota_capacity = lambda cfg, agents, now, demand, requirements: capacity.calculate(
-        cfg, rows, agents, demand
-    )
-    capacity.apply(SLUG, config, store, ledger, runtime, now_ms)
+    capacity.apply(SLUG, config, store, ledger, QuotaRuntime(rows), now_ms)
     return capacity.read(store, SLUG)
 
 
