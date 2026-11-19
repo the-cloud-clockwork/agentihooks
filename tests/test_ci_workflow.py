@@ -448,7 +448,7 @@ def test_a_restored_venv_skips_uv_and_the_install():
 def test_unit_tests_run_from_the_venv():
     path_index, path = _unit_step_index(lambda s: s.get("name") == "Use the test environment")
     run_index, _ = _unit_step_index(lambda s: s.get("name") == "Run tests")
-    assert path["run"].strip() == 'echo "$HOME/venv/bin" >> "$GITHUB_PATH"'
+    assert path["run"].strip() == 'echo "$(readlink -f "$HOME/venv")/bin" >> "$GITHUB_PATH"'
     assert path_index < run_index
 
 

@@ -994,7 +994,7 @@ jobs:
       # Queue refs cannot read dev's entries, so saving there only fills the store with copies.
       - &use-venv
         name: Use the test environment
-        run: echo "$HOME/venv/bin" >> "$GITHUB_PATH"
+        run: echo "$(readlink -f "$HOME/venv")/bin" >> "$GITHUB_PATH"
 
       - name: Check out the base revision
         env:
