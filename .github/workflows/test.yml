@@ -789,7 +789,13 @@ jobs:
 
       - name: Install admission ruff
         if: github.event_name == 'pull_request'
-        run: python -m pip install ruff==0.15.12
+        run: |
+          if [[ "$(python -I -m ruff --version 2>/dev/null)" == "ruff 0.15.12" ]]; then
+            echo "ruff 0.15.12 comes from the runner image"
+          else
+            python -m pip install ruff==0.15.12
+          fi
+          test "$(python -I -m ruff --version)" = "ruff 0.15.12"
 
       - name: Check out the admission base
         if: github.event_name == 'pull_request'

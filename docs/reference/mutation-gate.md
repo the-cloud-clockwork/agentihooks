@@ -12,6 +12,8 @@ Open the draft pull request into `dev` at the first push; for a stacked branch, 
 
 When the base branch's `delivery.yaml` names `mutation` under `lab.authoritative`, the Tests `mutation` job is skipped on pull request runs and the `lab-verdict` job waits for the lab's mutation check run instead ([Lab authority and back pressure](delivery-tiers.md#lab-authority-and-back-pressure)).
 
+The lab builds mutation units only for promotion and backfill heads: one unit per function the head changes on the lines this gate grades, and one stats unit per test file that runs such a function ([CI lab mutation units](ci-lab.md#mutation-units)).
+
 ## Required gate proof
 
 `mutation-plan`, `mutation-stats` and `mutation` are needs of `Gate — Required`
