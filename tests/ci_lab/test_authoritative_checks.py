@@ -10,6 +10,7 @@ import requests
 from scripts.ci_lab import checks, scheduler
 from scripts.ci_lab.digests import Toolchain
 from scripts.ci_lab.objects import LocalObjects
+from scripts.ci_lab.units import Priority
 from scripts.ci_lab.webhooks import HeadEvent
 from scripts.dep_manifest import _git
 from tests.ci_lab.test_scheduler import (
@@ -115,3 +116,14 @@ def test_a_restarted_scheduler_seeds_each_check_run_under_the_name_the_grade_ope
         (HEAD_A, "lint", grade.run, 1, "queued", False),
         (HEAD_A, scheduler.REQUIRED, grade.run, 2, "queued", True),
     ]
+
+
+@pytest.mark.feature("lab-authoritative-check-names")
+def test_a_merge_group_grade_takes_the_queue_list_and_a_pull_request_or_hotfix_grade_the_lab_list() -> None:
+    block = {"authoritative": ["lint"], "queue": {"full_suite_entries": 5, "authoritative": ["unit"]}}
+    for tier in (Priority.HOTFIX, Priority.PULL_REQUEST):
+        assert scheduler.authoritative_gates(block, tier) == frozenset({"lint"})
+    assert scheduler.authoritative_gates(block, Priority.QUEUE) == frozenset({"unit"})
+    unlisted = {"authoritative": ["lint"], "queue": {"full_suite_entries": 5}}
+    assert scheduler.authoritative_gates(unlisted, Priority.QUEUE) == frozenset()
+    assert scheduler.authoritative_gates({"authoritative": ["lint"]}, Priority.QUEUE) == frozenset()

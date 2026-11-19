@@ -1462,7 +1462,13 @@ key; the builders are pure and read no file, clock or network.
    its poster with that id and the last status it posted before the next move, so a restarted
    scheduler advances the same check run instead of opening a second one. A grade of a head pushed
    to a `refs/grade/*` ref records the same moves and posts none, leaving its check runs to the
-   relay.
+   relay. A gate that the grader revision's `delivery.yaml` lists as authoritative for the grade's
+   class posts as `lab/<gate>`, the check run the lab-verdict job waits for: `lab.authoritative`
+   for pull request and hotfix grades and `lab.queue.authoritative` for merge group grades, read
+   from the base, so a head never widens either list. Every other gate and `required` post as
+   `lab-shadow/<gate>`, the runs the shadow comparison reads, and promotion and backfill grades
+   list no gate. The grade state keeps the list, so a restarted scheduler names each check run as
+   it did before.
 
 Expansion frames a head by its class (`scripts.ci_lab.scheduler.frame`): a pull request or hotfix grade
 keeps the lab gates the pull request rules require and names every other required job as a gate without
