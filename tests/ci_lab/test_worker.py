@@ -620,6 +620,7 @@ def test_a_lease_call_the_scheduler_answers_with_a_client_error_still_raises(
     assert "lease call failed" not in capsys.readouterr().err
 
 
+@pytest.mark.wall_clock
 @pytest.mark.feature("lab-worker-pod-loop")
 def test_stop_ends_a_lease_backoff_at_once() -> None:
     class Down(worker.Client):

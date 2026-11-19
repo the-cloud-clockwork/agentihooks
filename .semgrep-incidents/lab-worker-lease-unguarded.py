@@ -1,8 +1,12 @@
 import http.client
-from typing import Any
+from typing import Any, Protocol
 
 
-class Unsafe:
+class Leasing(Protocol):
+    def run_once(self) -> list[Any]: ...
+
+
+class Unsafe(Leasing):
     def run_once(self) -> list[Any]:
         self: Any
         # ruleid: lab-worker-lease-unguarded
@@ -10,7 +14,7 @@ class Unsafe:
         return list(leases)
 
 
-class Safe:
+class Safe(Leasing):
     def run_once(self) -> list[Any]:
         self: Any
         try:
