@@ -6,7 +6,10 @@ import io
 import json
 import threading
 import urllib.error
+import urllib.request
 import zipfile
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -81,12 +84,14 @@ def test_every_push_leg_is_laid_out_from_the_queue_leg_it_maps_onto(tmp_path: Pa
         assert _files(out / f"executed-lines-3.12-{leg}") == {}
 
 
+@pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
 def test_a_leg_above_the_queue_count_needs_no_elapsed_time_in_its_queue_leg(tmp_path: Path) -> None:
     out = tmp_path / "out"
     ci_unit_copy.layout(_queue(tmp_path, 4, timed=False), _mapped(4), out)
     assert _files(out / "durations-3.12-5") == {"durations.json": "{}\n", "durations.sha256": "sha 1\n"}
 
 
+@pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
 def test_a_missing_queue_leg_stops_the_layout(tmp_path: Path) -> None:
     queue = _queue(tmp_path, 3)
     (queue / "coverage-3.12-2" / ".coverage").unlink()
@@ -97,7 +102,8 @@ def test_a_missing_queue_leg_stops_the_layout(tmp_path: Path) -> None:
         ci_unit_copy.layout(queue, _mapped(3), tmp_path / "out")
 
 
-def test_an_archive_holds_every_file_under_the_folder_by_its_path_inside_it(tmp_path):
+@pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
+def test_an_archive_holds_every_file_under_the_folder_by_its_path_inside_it(tmp_path: Path) -> None:
     folder = tmp_path / "coverage-3.12-1"
     (folder / "js-coverage").mkdir(parents=True)
     (folder / "empty").mkdir()
@@ -110,6 +116,7 @@ def test_an_archive_holds_every_file_under_the_folder_by_its_path_inside_it(tmp_
         assert {info.compress_type for info in zipped.infolist()} == {zipfile.ZIP_DEFLATED}
 
 
+@pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
 def test_a_folder_without_files_is_never_uploaded(tmp_path: Path) -> None:
     folder = tmp_path / "flakes-3.12-1"
     (folder / "empty").mkdir(parents=True)
@@ -117,6 +124,7 @@ def test_a_folder_without_files_is_never_uploaded(tmp_path: Path) -> None:
         ci_unit_copy.archive(folder)
 
 
+@pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
 @pytest.mark.parametrize(
     ("longest", "expected"),
     [
@@ -127,7 +135,9 @@ def test_a_folder_without_files_is_never_uploaded(tmp_path: Path) -> None:
     ],
     ids=["unset", "empty", "longer", "shorter"],
 )
-def test_the_expiry_holds_the_retention_days_inside_the_repository_longest_retention(monkeypatch, longest, expected):
+def test_the_expiry_holds_the_retention_days_inside_the_repository_longest_retention(
+    monkeypatch: pytest.MonkeyPatch, longest: str | None, expected: str
+) -> None:
     if longest is None:
         monkeypatch.delenv("GITHUB_RETENTION_DAYS", raising=False)
     else:
@@ -135,7 +145,8 @@ def test_the_expiry_holds_the_retention_days_inside_the_repository_longest_reten
     assert ci_unit_copy.expiry(14, datetime(2026, 11, 18, 13, 45, 12, 123456, tzinfo=UTC)) == expected
 
 
-def test_the_backend_ids_come_from_the_runtime_token_scope():
+@pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
+def test_the_backend_ids_come_from_the_runtime_token_scope() -> None:
     assert ci_unit_copy.backend_ids(_token()) == IDS
 
 
@@ -157,10 +168,11 @@ def _http(code: int) -> urllib.error.HTTPError:
     return urllib.error.HTTPError("https://results.example/", code, "refused", email.message.Message(), None)
 
 
-def test_a_service_call_posts_this_jobs_request_and_reads_the_answer(monkeypatch):
+@pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
+def test_a_service_call_posts_this_jobs_request_and_reads_the_answer(monkeypatch: pytest.MonkeyPatch) -> None:
     sent = []
 
-    def urlopen(request, timeout):
+    def urlopen(request: urllib.request.Request, timeout: float) -> _Answer:
         sent.append((request, timeout))
         return _Answer(b'{"ok": true}')
 
@@ -178,7 +190,8 @@ def test_a_service_call_posts_this_jobs_request_and_reads_the_answer(monkeypatch
     assert timeout == 120
 
 
-def test_an_empty_service_answer_reads_as_an_empty_object(monkeypatch):
+@pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
+def test_an_empty_service_answer_reads_as_an_empty_object(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ci_unit_copy.urllib.request, "urlopen", lambda request, timeout: _Answer(b""))
     assert ci_unit_copy.Results("https://results.example/", _token()).call("DeleteArtifact", {}) == {}
 
@@ -186,7 +199,7 @@ def test_an_empty_service_answer_reads_as_an_empty_object(monkeypatch):
 def _scripted(monkeypatch: pytest.MonkeyPatch, answers: list[object]) -> list[tuple[str, dict]]:
     calls: list[tuple[str, dict]] = []
 
-    def call(self, method, body):
+    def call(self: ci_unit_copy.Results, method: str, body: dict) -> object:
         calls.append((method, body))
         answer = answers.pop(0)
         if isinstance(answer, Exception):
@@ -197,7 +210,8 @@ def _scripted(monkeypatch: pytest.MonkeyPatch, answers: list[object]) -> list[tu
     return calls
 
 
-def test_a_created_artifact_answers_its_upload_address(monkeypatch):
+@pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
+def test_a_created_artifact_answers_its_upload_address(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ci_unit_copy, "expiry", lambda days, now: f"in {days} days")
     calls = _scripted(monkeypatch, [{"ok": True, "signed_upload_url": "https://blob/a"}])
     results = ci_unit_copy.Results("https://results.example/", _token())
@@ -205,7 +219,8 @@ def test_a_created_artifact_answers_its_upload_address(monkeypatch):
     assert calls == [("CreateArtifact", {"name": "durations-3.12-1", "version": 4, "expires_at": "in 14 days"})]
 
 
-def test_a_name_an_earlier_attempt_left_unfinalized_is_freed_and_created_again(monkeypatch):
+@pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
+def test_a_name_an_earlier_attempt_left_unfinalized_is_freed_and_created_again(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ci_unit_copy, "expiry", lambda days, now: f"in {days} days")
     calls = _scripted(monkeypatch, [_http(409), {}, {}, {"ok": True, "signed_upload_url": "https://blob/b"}])
     results = ci_unit_copy.Results("https://results.example/", _token())
@@ -219,7 +234,8 @@ def test_a_name_an_earlier_attempt_left_unfinalized_is_freed_and_created_again(m
     ]
 
 
-def test_a_create_refused_for_another_reason_raises_that_refusal(monkeypatch):
+@pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
+def test_a_create_refused_for_another_reason_raises_that_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
     refusal = _http(500)
     calls = _scripted(monkeypatch, [refusal])
     with pytest.raises(urllib.error.HTTPError) as raised:
@@ -228,7 +244,8 @@ def test_a_create_refused_for_another_reason_raises_that_refusal(monkeypatch):
     assert [method for method, _ in calls] == ["CreateArtifact"]
 
 
-def test_a_create_the_service_did_not_confirm_raises(monkeypatch):
+@pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
+def test_a_create_the_service_did_not_confirm_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     _scripted(monkeypatch, [{"ok": False, "signed_upload_url": "https://blob/c"}])
     with pytest.raises(RuntimeError, match=r"^the results service did not create coverage-3\.12-3$"):
         ci_unit_copy.Results("https://results.example/", _token()).create("coverage-3.12-3", 7)
@@ -242,7 +259,7 @@ def _uploaded(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, answers: list[obj
     monkeypatch.setattr(ci_unit_copy.Results, "create", lambda self, name, days: f"https://blob/{name}?days={days}")
     puts = []
 
-    def urlopen(request, timeout):
+    def urlopen(request: urllib.request.Request, timeout: float) -> _Answer:
         puts.append((request, timeout))
         return _Answer(b"")
 
@@ -252,7 +269,9 @@ def _uploaded(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, answers: list[obj
 
 
 @pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
-def test_an_upload_replaces_the_name_puts_the_zip_and_finalizes_it_with_its_digest(monkeypatch, tmp_path):
+def test_an_upload_replaces_the_name_puts_the_zip_and_finalizes_it_with_its_digest(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     held = {"workflow_run_backend_id": "run-0", "workflow_job_run_backend_id": "job-9", "database_id": 7}
     calls, puts, data = _uploaded(monkeypatch, tmp_path, [{"artifacts": [held]}, {}, {"ok": True}])
     assert calls == [
@@ -275,20 +294,25 @@ def test_an_upload_replaces_the_name_puts_the_zip_and_finalizes_it_with_its_dige
     assert timeout == 120
 
 
-def test_an_upload_of_a_free_name_deletes_nothing(monkeypatch, tmp_path):
+@pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
+def test_an_upload_of_a_free_name_deletes_nothing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     calls, _, _ = _uploaded(monkeypatch, tmp_path, [{}, {"ok": True}])
     assert [method for method, _ in calls] == ["ListArtifacts", "FinalizeArtifact"]
 
 
-def test_an_upload_the_service_did_not_finalize_raises(monkeypatch, tmp_path):
+@pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
+def test_an_upload_the_service_did_not_finalize_raises(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     with pytest.raises(RuntimeError, match=r"^the results service did not finalize flakes-3\.12-4$"):
         _uploaded(monkeypatch, tmp_path, [{}, {"ok": False}])
 
 
-def test_an_upload_is_retried_in_place_until_it_lands(monkeypatch, capsys):
+@pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
+def test_an_upload_is_retried_in_place_until_it_lands(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     attempts, pauses = [], []
 
-    def upload(self, name, folder, days):
+    def upload(self: ci_unit_copy.Results, name: str, folder: Path, days: int) -> None:
         attempts.append((name, folder, days))
         if len(attempts) < 3:
             raise OSError("reset")
@@ -304,6 +328,7 @@ def test_an_upload_is_retried_in_place_until_it_lands(monkeypatch, capsys):
     )
 
 
+@pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
 @pytest.mark.parametrize(
     "failure",
     [
@@ -315,10 +340,12 @@ def test_an_upload_is_retried_in_place_until_it_lands(monkeypatch, capsys):
     ],
     ids=["transport", "answer", "address", "service", "read"],
 )
-def test_an_upload_that_fails_every_attempt_raises_its_last_failure(monkeypatch, failure):
+def test_an_upload_that_fails_every_attempt_raises_its_last_failure(
+    monkeypatch: pytest.MonkeyPatch, failure: Exception
+) -> None:
     attempts, pauses = [], []
 
-    def upload(self, name, folder, days):
+    def upload(self: ci_unit_copy.Results, name: str, folder: Path, days: int) -> None:
         attempts.append(name)
         raise failure
 
@@ -331,18 +358,22 @@ def test_an_upload_that_fails_every_attempt_raises_its_last_failure(monkeypatch,
 
 
 @pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
-def test_every_leg_uploads_its_artifacts_in_the_unit_job_order_with_their_retention(monkeypatch, tmp_path):
+def test_every_leg_uploads_its_artifacts_in_the_unit_job_order_with_their_retention(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     sent: list[tuple[str, Path, int, object]] = []
     guard = threading.Lock()
 
-    def retried(results, name, folder, days, pause):
+    def retried(
+        results: ci_unit_copy.Results, name: str, folder: Path, days: int, pause: Callable[[float], None]
+    ) -> None:
         with guard:
             sent.append((name, folder, days, pause))
 
     sizes = []
     pool = ci_unit_copy.ThreadPoolExecutor
 
-    def sized(max_workers):
+    def sized(max_workers: int) -> ThreadPoolExecutor:
         sizes.append(max_workers)
         return pool(max_workers=max_workers)
 
@@ -368,7 +399,9 @@ def test_the_layout_command_reads_the_queue_leg_map(monkeypatch: pytest.MonkeyPa
 
 
 @pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
-def test_the_upload_command_reaches_the_results_service_with_the_runtime_token(monkeypatch, tmp_path):
+def test_the_upload_command_reaches_the_results_service_with_the_runtime_token(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     seen = []
     monkeypatch.setenv("ACTIONS_RESULTS_URL", "https://results.example/")
     monkeypatch.setenv("ACTIONS_RUNTIME_TOKEN", _token())
@@ -379,6 +412,7 @@ def test_the_upload_command_reaches_the_results_service_with_the_runtime_token(m
     assert seen == [(tmp_path, "https://results.example/", _token(), IDS)]
 
 
+@pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
 @pytest.mark.parametrize(
     "argv",
     [
@@ -390,7 +424,7 @@ def test_the_upload_command_reaches_the_results_service_with_the_runtime_token(m
     ],
     ids=["command", "queue", "legs", "out", "upload-out"],
 )
-def test_each_command_requires_its_inputs(argv):
+def test_each_command_requires_its_inputs(argv: list[str]) -> None:
     with pytest.raises(SystemExit) as exited:
         ci_unit_copy.main(argv)
     assert exited.value.code == 2

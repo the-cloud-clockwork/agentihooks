@@ -114,7 +114,7 @@ def test_workflow_keeps_xdist_groups_on_one_worker():
     assert "--dist loadgroup" in _pytest_command()
 
 
-def test_unit_shards_measure_no_coverage():
+def test_unit_shards_measure_no_coverage() -> None:
     command = _pytest_command()
     assert "--cov" not in command
     assert "matrix.cov" not in command
@@ -633,7 +633,7 @@ def test_only_a_dev_push_saves_the_test_environment_after_installing_it() -> Non
     )
 
 
-def test_unit_matrix_runs_one_shard_per_split():
+def test_unit_matrix_runs_one_shard_per_split() -> None:
     command = _pytest_command()
     assert '--shard "$SHARD"' in command
     _, step = _unit_step_index(lambda s: s.get("name") == "Run tests")
@@ -1654,6 +1654,7 @@ def test_a_queue_restore_that_stopped_before_it_finished_is_restored_again(resto
     assert "queue leg" in result.stdout
 
 
+@pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
 def test_the_copy_job_restores_every_queue_leg_in_one_download() -> None:
     steps = _workflow()["jobs"]["unit"]["steps"]
     restores = [step for step in steps if step.get("with", {}).get("run-id") == "${{ needs.split.outputs.source }}"]
@@ -1672,7 +1673,7 @@ def test_the_copy_job_restores_every_queue_leg_in_one_download() -> None:
     }
 
 
-def test_unit_shards_retry_coverage_upload_without_changing_the_artifact():
+def test_unit_shards_retry_coverage_upload_without_changing_the_artifact() -> None:
     _, upload = _unit_step_index(lambda s: s.get("name") == "Upload coverage")
     assert upload["uses"] == "./.github/actions/retry-upload"
     assert upload["if"] == "needs.split.outputs.source == '' && matrix.python-version == '3.12'"

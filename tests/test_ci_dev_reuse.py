@@ -299,7 +299,10 @@ def test_workflow_preserves_downstream_artifacts() -> None:
     assert sent["uses"] == "actions/github-script@v7"
     assert sent["env"] == {"PUSH_LEGS": "${{ runner.temp }}/push-legs"}
     assert sent["with"]["github-token"] == "none"
-    assert "'-m', 'scripts.ci_unit_copy', 'upload', '--out', process.env.PUSH_LEGS" in sent["with"]["script"]
+    assert (
+        "'-m', 'scripts.ci_unit_copy', 'upload', '--out', process.env.PUSH_LEGS], "
+        "{stdio: 'inherit', cwd: process.env.GITHUB_WORKSPACE}"
+    ) in sent["with"]["script"]
     assert "queue_legs" not in jobs["select"]["outputs"]
     producer = "durations" if "durations" in jobs else "select"
     assert jobs["split"]["outputs"]["source"] == "${{ needs." + producer + ".outputs.source }}"

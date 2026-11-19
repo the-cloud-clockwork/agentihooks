@@ -608,7 +608,7 @@ def test_sonar_takes_this_runs_coverage_through_the_runtime_token_as_the_shards_
     assert not API_CALL.search((ROOT / ".github/coverage/arrivals.py").read_text())
 
 
-def test_every_reader_of_the_unit_shard_count_matches_the_matrix():
+def test_every_reader_of_the_unit_shard_count_matches_the_matrix() -> None:
     jobs = _jobs()
     shards = jobs["unit"]["strategy"]["matrix"]["shard"]
     count = len(shards)

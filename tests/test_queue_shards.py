@@ -155,7 +155,7 @@ def test_a_single_test_that_cannot_fit_reports_the_queue_budget(tmp_path, capsys
         assert "::warning::" in capsys.readouterr().out
 
 
-def test_the_unit_command_uses_the_computed_queue_partition(tmp_path):
+def test_the_unit_command_uses_the_computed_queue_partition(tmp_path: Path) -> None:
     import os
     import subprocess
     from pathlib import Path
@@ -450,7 +450,7 @@ def test_an_uncapped_plan_at_half_the_step_timeout_refuses(seconds):
         main(["combine", "--plans", json.dumps(plan)[1:-1]])
 
 
-def test_merge_group_runs_unit_shards_on_python_312_only():
+def test_merge_group_runs_unit_shards_on_python_312_only() -> None:
     from pathlib import Path
 
     import yaml

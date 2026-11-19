@@ -1783,7 +1783,7 @@ jobs:
         with:
           github-token: none
           script: |
-            require('child_process').execFileSync('python', ['-m', 'scripts.ci_unit_copy', 'upload', '--out', process.env.PUSH_LEGS], {stdio: 'inherit'})
+            require('child_process').execFileSync('python', ['-m', 'scripts.ci_unit_copy', 'upload', '--out', process.env.PUSH_LEGS], {stdio: 'inherit', cwd: process.env.GITHUB_WORKSPACE})
 
       # Shards balance on these: per-test times here differ from a local run.
       - name: Upload durations

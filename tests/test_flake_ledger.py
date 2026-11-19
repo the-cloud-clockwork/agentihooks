@@ -427,7 +427,7 @@ def test_a_run_without_retries_writes_no_ledger(tmp_path):
     assert not (tmp_path / "flakes.jsonl").exists()
 
 
-def test_unit_shards_retry_on_the_command_line_and_upload_the_ledger():
+def test_unit_shards_retry_on_the_command_line_and_upload_the_ledger() -> None:
     workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
     for scope in (workflow, workflow["jobs"]["unit"]):
         assert "reruns" not in str(scope.get("env", {}))
