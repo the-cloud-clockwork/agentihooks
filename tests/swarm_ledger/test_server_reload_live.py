@@ -86,7 +86,7 @@ def test_a_reload_hands_over_without_a_failed_or_slow_request(tmp_path: Path, le
                     events.append(("child", child))
                 try:
                     status: int | str = healthy(ledger_port)
-                except Exception as exc:
+                except OSError as exc:
                     status = repr(exc)
                 events.append(("old" if (tmp_path / ".server.pid").read_text() == str(first.pid) else "new", status))
                 time.sleep(0.005)
@@ -150,18 +150,20 @@ def test_a_malformed_answer_after_the_successor_is_named_fails_the_reload_test(
     tmp_path: Path, ledger_port: int, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """urlopen raises BadStatusLine, which is no OSError, for a status line cut short such as HTTP/1.1 20."""
-    answer, caller = healthy, threading.current_thread()
-    named: list[int | None] = []
-    planted: list[int | None] = []
+    real_healthy, test_thread = healthy, threading.current_thread()
+    named_pids: list[int | None] = []
+    malformed: list[int | None] = []
 
     def malformed_once_the_successor_is_named(port: int, timeout: float = 30) -> int:
-        named.append(pid_of(tmp_path))
-        if planted or threading.current_thread() is caller or named[-1] in (None, named[0]):
-            return answer(port, timeout)
-        planted.append(named[-1])
-        raise http.client.BadStatusLine("HTTP/1.1 20")
+        """Raise once on the hammer thread when the pid file names a server other than the first request's."""
+        named_pids.append(pid_of(tmp_path))
+        successor_named = named_pids[-1] not in (None, named_pids[0])
+        if successor_named and not malformed and threading.current_thread() is not test_thread:
+            malformed.append(named_pids[-1])
+            raise http.client.BadStatusLine("HTTP/1.1 20")
+        return real_healthy(port, timeout)
 
     monkeypatch.setitem(globals(), "healthy", malformed_once_the_successor_is_named)
     with pytest.raises(AssertionError, match="BadStatusLine"):
         test_a_reload_hands_over_without_a_failed_or_slow_request(tmp_path, ledger_port)
-    assert planted
+    assert malformed
