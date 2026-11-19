@@ -872,7 +872,7 @@ Set them with `agentihooks hive set <id> key=value ...`, or on the ledger page's
 | Setting | Values | Default | Meaning |
 |---|---|---|---|
 | `name` | text | the hive id | Display name. A hive with `ui=yes`, where the masters run, is always named `swarm-master`. |
-| `ui` | `yes`, `no` | `no` | The machine has a screen and a person at it. |
+| `ui` | `yes`, `no` | `no` | The machine has a screen and a person at it. Agents on a `ui=yes` hive are also graded on kubectl and a global git identity; see [Headed hive checks](#headed-hive-checks-kubectl-and-git-identity). |
 | `ephemeral` | `yes`, `no` | `no` | The machine can disappear, such as a pod. Placement prefers lasting hives on a tie. |
 | `excluded` | comma list of lane roles or profiles, such as `master,frontend,qa` | `master` on `ui=no`, none on `ui=yes` | Work the hive never takes. An empty value excludes nothing. |
 | `master-swarms` | comma list of swarm slugs | none | Swarms whose masters the hive takes although it excludes `master`. Every other swarm still sees masters excluded. |
@@ -2964,7 +2964,9 @@ An agent on a hive is graded by its session join report instead of process obser
 and the `late` check do not run for it. Every check the join report names is required except `brain`, which is
 report only: a hive without the brain connector reports the `hive_brain` miss and keeps its agent running. Join
 report grading for hive agents arrived after this change, in
-[pull request #5481](https://github.com/the-cloud-clockwork/agentihooks/pull/5481).
+[pull request #5481](https://github.com/the-cloud-clockwork/agentihooks/pull/5481). A headed hive's join report
+also names `kubectl` and `git_identity`; see
+[Headed hive checks](#headed-hive-checks-kubectl-and-git-identity).
 
 Check a fresh hive launch:
 
@@ -2992,6 +2994,206 @@ was wrong.
 |---|---|---|
 | A hive engineer fails `overlay` and is retired soon after start | The hive runs a release older than pull request #5319, so its acknowledgement carries no `host_overlays`. | Upgrade the hive to a release carrying the change and roll its pod. |
 | A hive agent's execution record shows `launched_at` 0 | The same older release. | The same upgrade. |
+
+### Headed hive checks: kubectl and git identity
+
+A headed hive is a hive whose registry record carries `ui=yes`. It takes masters and the `qa` and `frontend` roles
+(see [Placement by role](#placement-by-role)), and its agents work with the workstation's tools. Every hive runs the
+workstation's configuration, so an agent on a headed hive is also graded on two tools the workstation always has: a
+`kubectl` that reaches the cluster and a global git identity for its commits.
+
+When an agent's session starts, the join hook reads the hive's registry record. With `ui` set to `yes` it writes
+`"headed": true` into the join report's `context` and runs two more checks:
+
+| Check | Command it runs as the agent's user | Passes when |
+|---|---|---|
+| `kubectl` | `kubectl get nodes --request-timeout=10s -o name` | The command exits 0 and prints at least one node. |
+| `git_identity` | `git config --global user.name`, then `git config --global user.email` | Both commands exit 0 and print a value that is not blank. |
+
+Each command has a 20 second timeout. A binary missing from `PATH`, a timeout and a nonzero exit all count as a
+miss. The join report records no reason for these two checks, so a miss reads `kubectl (required)` with no error
+text after it.
+
+On a headed hive both checks are required, like every other join check except `brain`:
+
+| Hive | `kubectl` and `git_identity` | Grade with both passing | Grade when either one misses |
+|---|---|---|---|
+| `ui=yes` | Run and required | `complete`, or `partial` when only `brain` misses | `failed` |
+| `ui=no`, or no registry record | Not run and not graded | Unchanged | Not applicable |
+
+The launch check reads the misses as `hive_kubectl` and `hive_git_identity`. Neither is report only, so the agent
+fails its launch check and is handled as an enforced miss, as described in
+[Launch check on a hive](#launch-check-on-a-hive).
+
+```bash
+agentihooks hive list
+# <id>  name=swarm-master  live  ui=yes  workers=1 of 6  ...
+#   engineer@<code>-<n>  failed  misses=kubectl (required), git_identity (required)  heartbeat=<ms>
+
+agentihooks swarm <slug> status
+# hive join  engineer@<code>-<n>  failed  misses=kubectl (required), git_identity (required)  heartbeat=<ms>
+# launch  engineer@<code>-<n>  failed  60412ms
+#   hive_kubectl  enforced  expected available; observed missing
+#   hive_git_identity  enforced  expected available; observed missing
+```
+
+The fields are separated by tabs, shown aligned here.
+
+#### Providing the tools on a headed hive
+
+A headed hive needs three things, the same as the workstation:
+
+1. **kubectl.** The linked bundle declares `kubectl` in its `deps.json`, so `agentihooks deps ensure` installs it
+   on every hive that links the bundle. The bundle entry accepts kubectl 1.33.12 or newer. To install, it downloads
+   the 1.33.12 release binary for Linux amd64 or arm64, checks it against the SHA256 pinned in the entry and writes
+   `~/.local/bin/kubectl`. The install fails when `~/.local/bin` is not on `PATH`.
+2. **A read only cluster config.** kubectl reads `~/.kube/config` for the hive's user, or the file `KUBECONFIG`
+   names. Build it from a read only service account token held in the deployment's secret store, write it with
+   mode `600`, and never commit it. The `view` ClusterRole does not cover nodes, so the account also needs
+   `get` and `list` on nodes for the check to pass.
+3. **A global git identity.** Set `user.name` and `user.email` in the hive user's global git config from the
+   hive's bootstrap, keeping an identity already set. Worker hive pods do this in their start script with the name
+   `agentihooks hive` and the email `agentihooks-hive@users.noreply.github.com`.
+
+A read only account the check accepts, applied to the cluster by the deployment's GitOps repository:
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hive-reader
+  namespace: <swarm namespace>
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: hive-reader-token
+  namespace: <swarm namespace>
+  annotations:
+    kubernetes.io/service-account.name: hive-reader
+type: kubernetes.io/service-account-token
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hive-reader-view
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view
+subjects:
+- kind: ServiceAccount
+  name: hive-reader
+  namespace: <swarm namespace>
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: hive-reader-cluster
+rules:
+- apiGroups: [""]
+  resources: [nodes, namespaces, persistentvolumes]
+  verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hive-reader-cluster
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hive-reader-cluster
+subjects:
+- kind: ServiceAccount
+  name: hive-reader
+  namespace: <swarm namespace>
+```
+
+The cluster config the hive's provisioning writes from that token and the cluster CA, both read from the secret
+store at write time:
+
+```yaml
+apiVersion: v1
+kind: Config
+clusters:
+- name: swarm
+  cluster:
+    server: https://<cluster API address>:6443
+    certificate-authority-data: <base64 CA from the secret store>
+users:
+- name: hive-reader
+  user:
+    token: <token from the secret store>
+contexts:
+- name: hive-reader
+  context:
+    cluster: swarm
+    user: hive-reader
+current-context: hive-reader
+```
+
+The git identity lines a bootstrap runs, which keep an identity already set:
+
+```bash
+git config --global user.name >/dev/null || git config --global user.name "agentihooks hive"
+git config --global user.email >/dev/null || git config --global user.email agentihooks-hive@users.noreply.github.com
+```
+
+#### Checking a headed hive
+
+```bash
+# From any joined machine: the hive is headed
+agentihooks hive show <id>                       # "ui": "yes"
+
+# On the hive, as the user its agents run as
+agentihooks deps check                           # exit 0: nothing missing, kubectl included
+kubectl get nodes --request-timeout=10s -o name  # one node/<name> line per node
+kubectl auth can-i list nodes                    # yes
+git config --global user.name                    # a name
+git config --global user.email                   # an email
+
+# From the workstation: kubectl is installed on the hive like on the workstation
+agentihooks hive compare
+# <id>  differs  ...
+#   deps missing kubectl                         # only while the hive lacks it
+
+# The checks each running agent on the hive recorded at join
+P=${AGENTIHOOKS_SWARM_KEY_PREFIX:-agentihooks}
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" HVALS "$P:hive:<id>:join-reports" \
+  | jq -c 'select(.status == "running" and .context.headed) | {agent, grade, kubectl: .checks.kubectl, git_identity: .checks.git_identity}'
+```
+
+A healthy headed hive lists its agents as `complete misses=none` in `agentihooks hive list`.
+
+#### Limitations
+
+- The two checks run once, when the session joins. The heartbeat refresh probes again only the Redis, transcript,
+  profile, settings, pane, start time and `brain` checks, and the ledger retry probes only `ledger_join` and
+  `ledger_write`, so a running agent keeps its `kubectl` or `git_identity` miss after the hive is fixed. The next
+  session on the hive runs both checks again.
+- The `kubectl` check proves that the config reaches the cluster and can list nodes. It does not prove any other
+  permission an agent's task needs.
+- A hive's `ui` setting is read when the session joins. Changing it with `agentihooks hive set <id> ui=...` grades
+  only the sessions that start afterwards.
+
+#### Troubleshooting
+
+| Symptom | Check | Fix |
+|---|---|---|
+| `kubectl (required)` on a headed hive, and `command -v kubectl` prints nothing on the hive | `agentihooks deps check` on the hive | Run `agentihooks deps ensure`, and put `~/.local/bin` on the hive user's `PATH` when the install says kubectl is not on it. |
+| `kubectl (required)`, kubectl installed, and `kubectl get nodes` says the connection to the server was refused or names `localhost:8080` | `ls -l ~/.kube/config` on the hive | The hive has no cluster config. Deliver it as in [Providing the tools on a headed hive](#providing-the-tools-on-a-headed-hive). |
+| `kubectl (required)`, and `kubectl get nodes` prints `Forbidden` | `kubectl auth can-i list nodes` on the hive | Bind the account to a ClusterRole with `get` and `list` on nodes, as in the example. |
+| `kubectl (required)`, and `kubectl get nodes` times out after 10 seconds | The route from the hive to the cluster API address in the config | Open the route, or point the config at an address the hive reaches. |
+| `git_identity (required)` | `git config --global user.name` and `git config --global user.email` on the hive | Set both in the hive's bootstrap, as in the example. |
+| A miss stays after the fix | The agent's session started before the fix | The checks run once per session; the next session on the hive grades them again. |
+| A headless hive's agents show no `kubectl` or `git_identity` | `agentihooks hive show <id>` reads `"ui": "no"` | Expected: only headed hives run the two checks. |
+| A `ui=yes` hive's join reports carry no `kubectl` or `git_identity` check | The hive's agentihooks version | The hive runs a release from before pull request #10581. Upgrade it and restart its hive service. |
+
+Before [pull request #10581](https://github.com/the-cloud-clockwork/agentihooks/pull/10581) a headed hive was
+graded like a headless one. The automation VM hive ran with `ui=yes` and took tasks that need the workstation's
+tools, but it had no kubectl, no cluster config and no global git identity. Its agents could not read the cluster
+and their commits carried no author, and their join reports checked neither.
 
 ### A worker that finishes before the tick collects its acknowledgement
 
