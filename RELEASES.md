@@ -10,6 +10,14 @@ One entry per change merged into dev, newest release first. Each entry names its
 
 This change moves lab manifest fetching off the scheduler's main pass so a slow or unresponsive manifest fetch no longer blocks grading. A background pool runs up to four fetches at once, caches a finished result for 300 seconds so repeatedly-missing manifests aren't refetched every pass, and surfaces a pending status so the scheduler simply keeps waiting without restarting its quiet window. This fixes a real stall case where a never-answering manifest request could hold up an entire pass; the fix is wired in by default while still allowing synchronous fetching for callers that need it.
 
+## v2.17.1049 · 2026-11-19
+
+### 2026-11-19 · 5fa2993050fb · #12256 · @nestorcolt
+
+**Announce the grader merge group lab verdict rendering**
+
+This change updates the FROZEN_GATES file to pin the exact grader blob hash that will be authorized to accept the reviewed merge group lab verdict rendering, ahead of that grader itself landing in a follow-up pull request. No workflow logic changes here; it simply records which grader commit is trusted so CI can validate the upcoming grader against this announced reference once merged, keeping the rollout auditable and reversible with low blast radius confined to CI.
+
 ## v2.17.1047 · 2026-11-19
 
 ### 2026-11-19 · f1dc699fc89c · #12222 · @nestorcolt
