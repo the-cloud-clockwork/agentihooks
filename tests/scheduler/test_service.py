@@ -1114,6 +1114,137 @@ def test_a_supervisor_ends_without_a_new_runner_once_its_runner_stopped_on_silen
     ]
 
 
+REFUSALS = [
+    ("AuthenticationError", "invalid username-password pair or user is disabled."),
+    ("AuthenticationWrongNumberOfArgsError", "wrong number of arguments for 'auth' command"),
+    ("NoPermissionError", "this user has no permissions to run the 'hello' command"),
+]
+
+
+@pytest.mark.feature("scheduler-credential-refusal-stop")
+@pytest.mark.parametrize(("refusal", "text"), REFUSALS)
+@pytest.mark.parametrize("swarm", ["rig-grade-swarm", "proof-323133-t1749-2"])
+async def test_a_refused_credential_stops_the_runner_on_its_first_pass(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    refusal: str,
+    text: str,
+    swarm: str,
+) -> None:
+    from redis import exceptions
+
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", swarm)
+    stop, passes = asyncio.Event(), []
+
+    def drain() -> None:
+        passes.append(1)
+        if len(passes) == 2:
+            stop.set()
+        raise getattr(exceptions, refusal)(text)
+
+    with pytest.raises(service.Refused, match=f"^{refusal}: "):
+        await service.run(cast("Scheduler", SimpleNamespace(run_due=drain, collect_runs=Mock())), stop)
+    assert passes == [1]
+    assert capsys.readouterr().err == f"scheduler stops: the state store refused its credential ({refusal}: {text})\n"
+
+
+@pytest.mark.feature("scheduler-credential-refusal-stop")
+@pytest.mark.parametrize(
+    ("failure", "text"),
+    [
+        ("ConnectionError", "Connection refused"),
+        ("TimeoutError", "Timeout reading from socket"),
+        ("ResponseError", "held"),
+    ],
+)
+async def test_a_store_that_times_out_drops_or_answers_an_error_still_gets_a_new_pass(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str], failure: str, text: str
+) -> None:
+    from redis import exceptions
+
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "rig-grade-swarm")
+    stop, passes = asyncio.Event(), []
+
+    def drain() -> None:
+        passes.append(1)
+        if len(passes) == 2:
+            stop.set()
+            return
+        raise getattr(exceptions, failure)(text)
+
+    assert await service.run(cast("Scheduler", SimpleNamespace(run_due=drain, collect_runs=Mock())), stop) is False
+    assert passes == [1, 1]
+    assert capsys.readouterr().err == "scheduler pass skipped: the state store did not answer\n"
+
+
+@pytest.mark.feature("scheduler-credential-refusal-stop")
+def test_only_a_refused_login_or_acl_counts_as_a_refused_credential() -> None:
+    from redis import exceptions
+
+    from scripts.scheduler import service
+
+    assert service.refusals() == (
+        exceptions.AuthenticationError,
+        exceptions.AuthenticationWrongNumberOfArgsError,
+        exceptions.NoPermissionError,
+    )
+
+
+@pytest.mark.feature("scheduler-credential-refusal-stop")
+def test_the_runner_entrypoint_exits_with_the_refused_code_when_its_credential_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.scheduler import service
+
+    async def run(scheduler: object) -> bool:
+        raise service.Refused("AuthenticationError: invalid username-password pair or user is disabled.")
+
+    monkeypatch.setattr(service, "Scheduler", Mock())
+    monkeypatch.setattr(service, "run", run)
+    assert service.main(["run"]) == 4
+
+
+@pytest.mark.feature("scheduler-credential-refusal-stop")
+def test_a_supervisor_ends_without_a_new_runner_once_its_runner_was_refused(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    monkeypatch.setattr(service, "revision", lambda root: "loaded")
+    child = Mock(pid=101, returncode=4)
+    child.poll.return_value = 4
+    spawn = Mock(side_effect=[child, AssertionError("a refused credential got a new runner")])
+    monkeypatch.setattr(service, "subprocess", SimpleNamespace(Popen=spawn))
+    stop = Mock(spec=Event)
+    stop.is_set.return_value = False
+    stop.wait.return_value = False
+    assert service.supervise(stop) == 4
+    spawn.assert_called_once()
+    assert capsys.readouterr().err.splitlines() == [
+        "the scheduler runner 101 exited with code 4",
+        f"the scheduler supervisor {os.getpid()} stops: its state store refused its credential",
+    ]
+
+
+@pytest.mark.feature("scheduler-credential-refusal-stop")
+@pytest.mark.parametrize("code", [4, 0])
+def test_the_supervisor_entrypoint_exits_with_the_code_its_supervisor_stopped_on(
+    monkeypatch: pytest.MonkeyPatch, code: int
+) -> None:
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "supervise", lambda stop: code)
+    assert service.main(["supervise"]) == code
+
+
 def test_a_takeover_whose_old_supervisor_will_not_drain_says_so(monkeypatch, tmp_path, capsys):
     from scripts.scheduler import service
 
