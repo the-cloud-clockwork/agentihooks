@@ -31,7 +31,11 @@ def rows(slug: str, task: dict) -> list[dict]:
         found.append(_row("recap", f"recap:{seat}#{number}", {"seat": seat, "recap": number}, recap["text"]))
     for number, note in enumerate(task.get("learned") or [], 1):
         if note["maturity"] != "data" and not note.get("withheld"):
-            found.append(_row("learned", f"learned:{seat}#{number}", {"seat": seat, "note": number}, note["text"]))
+            origin = note.get("seat", seat)
+            ordinal = note.get("number", number)
+            found.append(
+                _row("learned", f"learned:{origin}#{ordinal}", {"seat": origin, "note": ordinal}, note["text"])
+            )
     return found + list(task.get("withheld") or [])
 
 
@@ -56,7 +60,9 @@ def withhold(slug: str, task: dict) -> dict:
         for number, line in enumerate((task.get("culture") or "").splitlines(keepends=True), 1)
     )
     learned = [
-        {**note, "withheld": True} if hit("learned", f"learned:{seat}#{number}", note["text"]) else note
+        {**note, "withheld": True}
+        if hit("learned", f"learned:{note.get('seat', seat)}#{note.get('number', number)}", note["text"])
+        else note
         for number, note in enumerate(task.get("learned") or [], 1)
     ]
     return {**task, "culture": culture, "learned": learned, "withheld": logged}

@@ -3075,7 +3075,8 @@
     },
     {
       "id": "swarm-learned-scope",
-      "origin": "t-learned-notes-scope",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-learned-notes-scope",
       "behaviour": "A seat start and the default learned command return only the caller seat notes and shared canon and insight; explicit all returns every seat while preserving note numbers.",
       "seam": "agentihooks swarm learned and the seat launch prompt",
       "tests": [

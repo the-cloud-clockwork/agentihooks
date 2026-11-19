@@ -33,7 +33,7 @@ agentihooks swarm <id> terminal EXECUTION                         operator opens
 agentihooks swarm <id> lift AGENT GATE                            operator or master lets one agent past a gate for one hour
 agentihooks swarm <id> freeze | focus | unfreeze TARGET [--reason TEXT] [--quote WORDS]   operator, or master with his words
 agentihooks swarm <id> cover STAGE ITEM --reason TEXT              operator, master or dispatcher marks a bottleneck stage owned by an open phases/ID or tasks/ID
-agentihooks swarm <id> learned                                    list every seat's learned notes with seat and number
+agentihooks swarm <id> learned [--all]                            list caller notes and shared guidance; --all lists every seat
 agentihooks swarm <id> promote SEAT NUMBER insight|canon --reason TEXT   raise a learned note; canon only by master or operator
 agentihooks swarm <id> retire SEAT NUMBER --reason TEXT           master or operator retires a learned note from every later prompt
 agentihooks swarm <id> culture set FILE | show                    the swarm's shared culture, read by every new occupant
@@ -87,7 +87,6 @@ from scripts.inbox import exits, outbox
 from scripts.inbox import relay as relay
 from scripts.inbox import wake as wake
 from scripts.inbox.seats import CANON, DEFAULT_MATURITY, MATURITIES, SeatError, is_seat, seat_address
-from scripts.inbox.seats import PREFIX as SEAT_PREFIX
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import (
     affinity,
@@ -2596,9 +2595,10 @@ def _own_rows(ledger, slug, task_id):
     return [row] if row else []
 
 
-def cmd_learned(store, args):
+def cmd_learned(store: Any, args: argparse.Namespace) -> None:
     if not args.text:
-        _list_learned(store, args.slug)
+        seat = "" if args.all else _seat(_me(store, args))
+        _list_learned(store, args.slug, seat, all_seats=args.all)
         return
     agent = _me(store, args)
     if args.maturity == CANON and agent.lane != MASTER:
@@ -2611,16 +2611,10 @@ def cmd_learned(store, args):
     print(json.dumps({"seat": agent.seat, "learned": args.text, "maturity": args.maturity}))
 
 
-def _list_learned(store, slug):
+def _list_learned(store: Any, slug: str, seat: str, *, all_seats: bool) -> None:
     store.config(slug)
-    for key in store.seats.swarm_keys(slug):
-        seat, _, kind = key.removeprefix(f"{SEAT_PREFIX}:").partition(":")
-        if kind != "learned":
-            continue
-        for number, note in enumerate(store.memory.learned(seat), 1):
-            if "retired" in note:
-                continue
-            print(f"{seat}\t{number}\t{note['maturity']}\t{note['text']}")
+    for note in store.memory.scoped(slug, seat, all_seats=all_seats):
+        print(f"{note['seat']}\t{note['number']}\t{note['maturity']}\t{note['text']}")
 
 
 def cmd_promote(store, args):
@@ -2889,6 +2883,7 @@ def build_parser() -> argparse.ArgumentParser:
     decision.add_argument("choice", choices=("resume", "native", "context", "fresh"))
     learned = sub.add_parser("learned")
     learned.add_argument("text", nargs="?", default="")
+    learned.add_argument("--all", action="store_true", help="list every seat instead of the caller and shared guidance")
     learned.add_argument("--maturity", choices=MATURITIES, default=DEFAULT_MATURITY)
     promote = sub.add_parser("promote")
     promote.add_argument("seat")

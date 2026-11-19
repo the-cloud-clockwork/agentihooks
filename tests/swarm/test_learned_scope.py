@@ -2,7 +2,7 @@ from typing import Any
 
 import pytest
 
-from scripts.swarm import prompt
+from scripts.swarm import priming_trace, prompt
 from scripts.tick.steps.place import primed
 from tests.helpers.seat import seat_agent
 from tests.swarm.test_cli import env, run  # noqa: F401
@@ -35,6 +35,9 @@ def test_returned_notes_stay_with_the_caller_and_shared_guidance(
             store.memory.learn(seat, "previous occupant", text, 1, maturity)
     store.memory.learn("eng-1@another", "other swarm", "other swarm canon", 1, "canon")
     store.memory.add_recap("ci-1@sw", "previous occupant", "old task", "unrelated recap", at=1)
+    for seat in (agent.seat, "ci-1@sw"):
+        store.memory.learn(seat, "previous occupant", "retired canon", 1, "canon")
+        store.memory.retire(seat, 5, "master", "obsolete", 2)
     selected = own + (foreign if entrypoint == "all" else foreign[2:])
     if entrypoint == "start":
         task = primed(store, "sw", agent.seat, {"id": "t1"})
@@ -42,6 +45,10 @@ def test_returned_notes_stay_with_the_caller_and_shared_guidance(
         returned = "\n".join(prompt.learned_lines(task["learned"]))
         assert "shared canon" in returned and "shared insight" in returned
         assert "own data" not in returned
+        rows = {row["text"]: row for row in priming_trace.rows("sw", task)}
+        assert rows["shared canon"]["source"] == "learned:ci-1@sw#3"
+        assert rows["shared insight"]["locator"] == {"seat": "ci-1@sw", "note": 4}
+        assert "unrelated recap" not in rows
     else:
         capsys.readouterr()
         arguments = ("--all",) if entrypoint == "all" else ()
