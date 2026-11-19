@@ -117,6 +117,7 @@ def test_scoped_memory_without_matching_notes_is_empty(env: tuple[Any, Any, Any]
     assert memory.scoped("sw", "eng-1@sw") == []
 
 
+@pytest.mark.feature("swarm-learned-scope")
 def test_scoped_memory_reads_learned_lists_without_listing_agent_pointers(
     env: tuple[Any, Any, Any],  # noqa: F811
     monkeypatch: pytest.MonkeyPatch,
