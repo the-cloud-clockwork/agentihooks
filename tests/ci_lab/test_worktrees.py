@@ -181,8 +181,26 @@ def test_a_lab_fetch_sends_the_token_as_the_lab_user_s_basic_password_for_the_la
     assert mirror.fetch("1" * 40) is True
     store = str(mirror.store)
     assert [argv for argv, _ in calls[1:]] == [
-        ["git", "-C", store, "fetch", "--no-write-fetch-head", f"file://{origin}", "1" * 40],
-        ["git", "-C", store, "fetch", "--no-write-fetch-head", "https://lab.example/git/origin.git", "1" * 40],
+        [
+            "git",
+            "-C",
+            store,
+            "fetch",
+            "--quiet",
+            "--no-write-fetch-head",
+            f"file://{origin}",
+            f"{'1' * 40}:refs/lab/{'1' * 40}",
+        ],
+        [
+            "git",
+            "-C",
+            store,
+            "fetch",
+            "--quiet",
+            "--no-write-fetch-head",
+            "https://lab.example/git/origin.git",
+            f"{'1' * 40}:refs/lab/{'1' * 40}",
+        ],
     ]
     assert calls[1][1] is None
     assert calls[2][1] == {

@@ -86,12 +86,12 @@ class Mirror:
             return False
         ref = f"{sha}:refs/lab/{sha}"
         try:
-            _git(self.store, "fetch", "--no-write-fetch-head", self.remote, ref)
+            _git(self.store, "fetch", "--quiet", "--no-write-fetch-head", self.remote, ref)
         except subprocess.CalledProcessError:
             origin = self.remote if self.repository is None else self.repository
             if self.lab is None or not checkout.serves(self.lab.url, origin):
                 raise
-            _git(self.store, "fetch", "--no-write-fetch-head", self.lab.url, ref, env=self.lab.environ())
+            _git(self.store, "fetch", "--quiet", "--no-write-fetch-head", self.lab.url, ref, env=self.lab.environ())
         return True
 
 
