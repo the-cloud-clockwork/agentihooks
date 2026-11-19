@@ -685,7 +685,7 @@ def _lead(
 
     servers = control_service.stand_by(environ, store)
     try:
-        while not _took_the_lead(lock, wait):
+        while not _took_the_lead_2(lock, wait):
             pass
     finally:
         control_service.close(servers)
@@ -693,7 +693,7 @@ def _lead(
     lock.beat(_lost, STOPPING)
 
 
-def _took_the_lead(lock: replica.ReplicaLock, wait: Callable[[float], None]) -> bool:
+def _took_the_lead_2(lock: replica.ReplicaLock, wait: Callable[[float], None]) -> bool:
     """Stand by until this replica takes the lock; on a Redis error wait one stand by poll and answer False, so a Redis
     outage keeps the standby standing by instead of ending it into restart back off while no replica leads."""
     try:
