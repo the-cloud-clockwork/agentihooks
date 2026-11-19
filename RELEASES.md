@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.1043 · 2026-11-19
+
+### 2026-11-18 · cb7e456de7c2 · #12197 · @agenticore-app
+
+**Skip only the hive admission counts a hive member may not read in swarm status**
+
+This fixes swarm status on a hive member so that one hive's Redis role refusing its admission count no longer blanks the entire admission section. Status now reads each hive's count individually, keeps the ones the member can read, and prints a per-hive "admission count unreadable" line only for the refused ones. This matters because members previously lost visibility into every hive's admission status, including their own, whenever any single hive's count was unreadable, which this change corrects while leaving placement and other callers unaffected.
+
 ## v2.17.1042 · 2026-11-18
 
 ### 2026-11-18 · 6beaea992663 · #12200 · @nestorcolt
