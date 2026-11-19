@@ -170,6 +170,7 @@ from scripts.swarm.status import (
     task_counts,
     transport,
     verdict_store,
+    wait_label,
 )
 from scripts.swarm.store import (
     APP_SERVER_TRANSPORT,
@@ -1637,7 +1638,7 @@ def cmd_status(store: Any, args: Any) -> None:
     if promotion := tick_master.status_line(tick_master.read(store, args.slug)):
         print(promotion)
     print(
-        "Agent\tLane\tHarness\tProfile\tModel\tAccount\tPane\tTask\tState\tConversation\tPush inbox\tNative terminal\tModel source\tConfidence\tHive"
+        "Agent\tLane\tHarness\tProfile\tModel\tAccount\tPane\tTask\tState\tConversation\tPush inbox\tNative terminal\tModel source\tConfidence\tHive\tWait"
     )
     for a in agents:
         model = " ".join(filter(None, (a.model, a.effort))) if a.model else "unknown"
@@ -1646,6 +1647,7 @@ def cmd_status(store: Any, args: Any) -> None:
         attach = "yes" if can["native_terminal_attach"] else "no"
         print(
             f"{a.name}\t{a.lane}\t{a.harness}\t{a.profile or 'unknown'}\t{model}\t{a.account or '-'}\t{a.pane_id}\t{a.task}\t{agent_status(a)}\t{a.conversation_id or '-'}\t{push}\t{attach}\t{a.model_source or '-'}\t{a.model_confidence if a.model_confidence is not None else '-'}\t{agent_hive(a) or '-'}"
+            f"\t{wait_label(store, args.slug, a)}"
         )
     from scripts.hive import join_report
 
@@ -1707,7 +1709,7 @@ def autoscale_lines(config, decision):
 
 
 def cmd_autoscale(store: RedisStore, args: argparse.Namespace) -> None:
-    from scripts.hive import admission, launch
+    from scripts.hive import admission
     from scripts.swarm import capacity, local_slots
 
     config = store.config(args.slug) if args.slug in store.slugs() else SwarmConfig(args.slug, "", max_eng=0, max_ci=0)
@@ -1719,11 +1721,11 @@ def cmd_autoscale(store: RedisStore, args: argparse.Namespace) -> None:
     known = args.slug in store.slugs()
     slots = {"local_slots": local_slots.maximum(store, args.slug, config.local_max_agents)} if known else {}
     host: dict[str, Any] = (decision or {})["host"]
-    hives: list[dict[str, Any]] = [] if args.fixture else launch.live_hives(store)
+    hives, refused = readable_hives(store) if not args.fixture else ([], {})
     admitted: list[str] = []
-    if hives:
+    if hives or refused:
         seats = capacity.inputs_seats(inputs)
-        admitted = admission.view_lines(hives, {"quota seats": seats, "host room": host["room"]})
+        admitted = admission.view_lines(hives, {"quota seats": seats, "host room": host["room"]}, refused)
     if args.json:
         rows = [{"hive": hive["id"], "room": hive["room"], "limit": hive["limit"]} for hive in hives]
         shown: dict[str, Any] = {"hive_admission": rows, "binding": admitted[-1]} if hives else {}
@@ -1734,7 +1736,7 @@ def cmd_autoscale(store: RedisStore, args: argparse.Namespace) -> None:
                     "applied": config.scaling == AUTO_SCALING,
                     **(decision or {}),
                     **slots,
-                    **shown,
+                    **shown | ({"admission_unreadable": refused} if refused else {}),
                 },
                 indent=2,
             )

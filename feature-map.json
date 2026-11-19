@@ -30,6 +30,17 @@
       ]
     },
     {
+      "id": "lab-scheduler-budget-charge",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2718",
+      "behaviour": "The CI lab scheduler charges the day's core budget for every finished unit whose worker uploaded a report: Scheduler.tick adds the unit's slots times the report's seconds to the day's core minute counter once per attempt, while a report without seconds and a unit with no report add nothing, so admission sheds a class once the spent share reaches its fraction from the next pass; the first pass of a scheduler process that finds a class newly shed returns one action naming the class and the spent share of the day's core budget, and later passes while it stays shed return none.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick with a scripts.ci_lab.budget.Budget on an injected clock over fakeredis and the local object store, read through scripts.ci_lab.budget.Budget.spent and the tick actions",
+      "tests": [
+        "tests/ci_lab/test_scheduler.py::test_a_finished_unit_charges_its_slots_times_its_report_seconds_once_and_no_seconds_charges_nothing",
+        "tests/ci_lab/test_scheduler.py::test_the_first_pass_after_finished_units_shed_a_class_names_it_with_the_spent_share_once"
+      ]
+    },
+    {
       "id": "doctor-lab-health",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/swarm-doctor-lab-detector",
@@ -628,6 +639,17 @@
       ]
     },
     {
+      "id": "controller-work-folder-admitted-hive",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-folder-mirror-hive",
+      "behaviour": "Controller status publication and task folder mirroring read the synced copy from the hive the hub admitted when an execution has no runtime target. An explicit host target keeps precedence, and executions admitted or explicitly targeted to the controller keep their local work folders.",
+      "seam": "command_runner.publish, ledger_workspace.published and ledger_workspace.mirror",
+      "tests": [
+        "tests/hive/test_prompt_transport.py::test_controller_status_publishes_the_execution_hives_work_folder",
+        "tests/hive/test_prompt_transport.py::test_controller_mirrors_the_execution_hives_work_folder"
+      ]
+    },
+    {
       "id": "work-folder-follows-the-task-across-hives",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-work-folder-sync-across-hives",
@@ -1172,6 +1194,17 @@
       "seam": "scripts.tick.engine._journal through scripts.swarm.timing.step_ended, and scripts.swarm.waits.end_pass through mark_ended, read by scripts.tick.steps.agents._holding_wait",
       "tests": [
         "tests/tick/steps/test_waits_end.py::test_waits_end_records_its_end_on_every_run_so_a_checked_wait_holds"
+      ]
+    },
+    {
+      "id": "swarm-waits-end-journals-its-phases",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2625",
+      "behaviour": "The waits end pass journals its phases in the tick steps stream so the controller step journal shows where its time goes: one row for the push wait pass; for each checked wait, rows carrying the holder agent for its resolution, its required checks read, its dependency check, its saved wait and the notice sent to its holder; and one row for the fresh reader's batched reread of the open pull requests.",
+      "seam": "scripts.swarm.waits.end_pass and scripts.swarm.ledger_events.fresh_reader through scripts.swarm.timing.timed and timing.acting, read from the tick steps stream",
+      "tests": [
+        "tests/swarm/test_waits.py::test_the_waits_end_pass_journals_its_push_pass_each_resolution_with_its_holder_and_the_required_read",
+        "tests/swarm/test_fresh_reader.py::test_the_batched_reread_is_journaled_as_one_views_row"
       ]
     },
     {
@@ -1724,6 +1757,18 @@
         "-m",
         "scripts.swarm.safety_nudge",
         "check"
+      ]
+    },
+    {
+      "id": "master-launch-swarm-model",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2711",
+      "behaviour": "A master launch from agentihooks swarm SLUG master up or from the tick master step puts a saved launch or handoff launch with no model of its own on the swarm's model setting for its harness, set with claude-model and codex-model, through the same master model choice the runtime uses for a master with no saved launch.",
+      "seam": "model_pick.master through master_launch.fill and runtime master lane default",
+      "tests": [
+        "tests/swarm/test_master_launch.py::test_both_master_launch_paths_put_a_saved_launch_on_the_swarm_model_setting",
+        "tests/swarm/test_model_pick.py::test_the_master_model_is_the_frontier_pick_on_the_swarm_model_setting",
+        "tests/swarm/test_model_pick.py::test_an_empty_swarm_model_puts_the_master_on_its_harness_frontier_default"
       ]
     },
     {
@@ -4459,12 +4504,25 @@
       "id": "lab-verdict-outside-to-manifest",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-verdict-outside-to-manifest",
-      "behaviour": "A graded lab job whose uploaded report lists files its batch opened outside the manifest writes one note per batch tests and sorted list into its repository's manifest folder, whatever its graded outcome. The next stored manifest read that finds or fetches a packed manifest merges every note into the outside list of each test record it names, sorted and without duplicates, skipping tests the manifest lacks, so the following test unit key changes when one of those files changes, and a change to one of those files invalidates the tests whose records list it. A report without the list or with an empty list writes no note.",
+      "behaviour": "A graded lab job whose uploaded report lists files its batch opened outside the manifest writes one note per batch tests and sorted list into its repository's manifest folder under the manifest commit its grade keyed on, whatever its graded outcome. The next stored manifest read of that commit merges each of its notes into the outside list of each test record it names, sorted and without duplicates, skipping tests the manifest lacks, so the following test unit key changes when one of those files changes, and a change to one of those files invalidates the tests whose records list it. A report without the list or with an empty list writes no note.",
       "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis and the local object store, scripts.ci_lab.scheduler.StoredManifests, scripts.ci_lab.expand_tests.units, scripts.ci_lab.interaction.invalidated and tests.dep_manifest.invalidated",
       "tests": [
         "tests/ci_lab/test_scheduler.py::test_a_test_verdict_outside_list_reaches_the_stored_records_and_the_following_key",
         "tests/ci_lab/test_scheduler.py::test_a_note_joins_the_outside_list_a_stored_or_fetched_record_already_holds",
         "tests/test_dep_manifest.py::test_a_change_to_a_file_a_test_opened_outside_its_record_invalidates_that_test"
+      ]
+    },
+    {
+      "id": "lab-outside-notes-per-commit",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-outside-notes-per-commit",
+      "behaviour": "A lab grade keeps the dev commit of the dependency manifest its test units were keyed on, and a graded job's outside note is stored under that commit in its repository's manifest folder. A stored manifest read merges only the notes of the returned manifest's commit, so a note written while grades keyed on an older manifest leaves the outside lists and test unit keys of a newer commit unchanged. Every read removes the notes of commits with no stored manifest, including notes written before notes carried a commit, and keeps the notes of stored commits and of other repositories.",
+      "seam": "scripts.ci_lab.scheduler.MirrorExpander.expand, scripts.ci_lab.scheduler.Scheduler.tick over fakeredis and the local object store, scripts.ci_lab.scheduler.StoredManifests and scripts.ci_lab.expand_tests.units",
+      "tests": [
+        "tests/ci_lab/test_scheduler.py::test_a_note_of_an_older_manifest_commit_leaves_a_newer_commit_key_unchanged",
+        "tests/ci_lab/test_scheduler.py::test_a_manifest_read_removes_the_notes_of_commits_with_no_stored_manifest",
+        "tests/ci_lab/test_scheduler.py::test_a_grade_that_keyed_no_manifest_writes_no_outside_note",
+        "tests/ci_lab/test_store.py::test_objects_remove_one_path_and_take_a_missing_one_as_gone"
       ]
     },
     {
@@ -4586,6 +4644,16 @@
       "seam": "status.status_report and the agentihooks swarm status agent table, through status.live_agents",
       "tests": [
         "tests/swarm/test_status_rows.py::test_status_keeps_a_hub_admitted_agent_on_a_remote_hive_without_a_runtime_target"
+      ]
+    },
+    {
+      "id": "swarm-status-agent-wait",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-status-agent-wait-column",
+      "behaviour": "The swarm status agent table ends with a Wait column: an agent with a checked wait shows its kind and target, such as lab and the check run link, an agent with a bare wait shows bare, and an agent with no live wait shows a dash, so a master reads every agent's wait from swarm status.",
+      "seam": "The agentihooks swarm status agent table, cli.cmd_status through status.wait_label",
+      "tests": [
+        "tests/swarm/test_status_capabilities.py::test_status_text_prints_each_agents_declared_wait_kind_and_target"
       ]
     },
     {
@@ -5437,6 +5505,17 @@
       ]
     },
     {
+      "id": "publish-refusal-keeps-lab-route",
+      "origin": "regression",
+      "ordered_at": "2026-11-19",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-publish-refusal-keeps-flags",
+      "behaviour": "When a swarm publish through the lab refuses, the command its refusal names to repeat keeps the lab route: --via lab, and --direct when the refused publish was direct, so repeating it never pushes origin without the lab.",
+      "seam": "the Next command at the end of a swarm publish refusal, read back through the swarm publish argument parser",
+      "tests": [
+        "tests/swarm/test_publish.py::test_publish_via_lab_refusal_repeats_its_lab_route_in_the_next_command"
+      ]
+    },
+    {
       "id": "panic-holds-only-its-swarm",
       "origin": "regression",
       "ordered_at": "2026-11-17",
@@ -6094,10 +6173,20 @@
       "id": "hive-pods-not-rolled-by-release-image-digest",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-roll-every-release",
-      "behaviour": "The chart release workflow no longer stamps the hive worker image digest into the Helm chart, so the worker hive pod template carries no per release digest annotation and a release never rolls the worker hives on its own; an explicit workers.rollout.release value still rolls them on request.",
+      "behaviour": "The chart release workflow no longer stamps the hive worker image digest into the Helm chart, so the worker hive pod template carries no per release image digest annotation.",
       "seam": "worker-hive.yaml pod template metadata.annotations and the chart release build",
       "tests": [
-        "tests/test_swarm_chart_hive_rollout_release.py::test_the_release_annotation_only_follows_an_explicit_rollout_release"
+        "tests/test_swarm_chart_hive_rollout_release.py::test_the_worker_hive_release_annotation_carries_no_image_digest"
+      ]
+    },
+    {
+      "id": "hive-pods-roll-onto-each-chart-release",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2709",
+      "behaviour": "A packaged release chart stamps its own appVersion into the agentihooks.io/release annotation of every leased worker hive whose image tag is the floating release tag, so each chart release changes the pod template once and ArgoCD rolls the hives one at a time under the rollout lease; an explicit workers.rollout.release wins, and a pinned or dev tag, an unreleased chart or rollout disabled gets no stamp.",
+      "seam": "worker-hive.yaml pod template metadata.annotations and the chart release package appVersion",
+      "tests": [
+        "tests/test_swarm_chart_hive_rollout_release.py::test_a_leased_release_tag_hive_takes_the_chart_release_version_as_its_stamp"
       ]
     },
     {
@@ -6650,6 +6739,18 @@
       "tests": [
         "tests/swarm/test_capacity.py::test_status_names_each_hive_admission_count_a_restricted_redis_user_may_not_read_and_prints_the_rest",
         "tests/hive/test_admission.py::test_view_lines_name_each_refused_count_and_bind_only_over_the_hives_read"
+      ]
+    },
+    {
+      "id": "autoscale-and-ledger-hives-name-each-refused-admission-count",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-autoscale-hive-count-reader",
+      "behaviour": "The swarm autoscale command and the ledger hives listing, read through a Redis login that refuses some hives' pending admission counts, skip only those counts: autoscale prints the admission room of every live hive it can read, one line per other live hive naming its admission count unreadable with the refusal and the binding limit over the hives it read, and names the refused hives in its JSON; the ledger hives listing still lists every hive and names the refusal on each refused hive's row.",
+      "seam": "cli.cmd_autoscale through status.readable_hives, and GET /api/v1/hives through swarm_ledger.api.hives.view and launch.loaded_hives with the refusal recording admission count reader, under a restricted Redis ACL user",
+      "tests": [
+        "tests/swarm/test_refused_admission_counts.py::test_the_autoscale_command_names_the_hive_admission_count_the_redis_login_refuses_and_prints_the_rest",
+        "tests/swarm/test_refused_admission_counts.py::test_the_autoscale_command_names_every_refused_count_when_no_hive_count_is_readable",
+        "tests/swarm_ledger/test_hives_api.py::test_the_hives_listing_lists_every_hive_and_names_the_admission_count_the_redis_login_refuses"
       ]
     },
     {
@@ -7791,6 +7892,18 @@
       ]
     },
     {
+      "id": "mutation-replan-names-untested-functions",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-replan-names-untested-functions",
+      "behaviour": "When the measured mutation plan or the replan after the early stage refuses a change as too large, the refusal names every changed function no test calls in process, with how many of the change's mutants they hold and how many of its worker seconds those mutants carry. The plan prices each such mutant at the slowest tested function's cost, and on the ledger cutover, pull request 11561, the measured plan of Tests run 43943313510 gave 58 such mutants 64698 of its 93282 worker seconds while the refusal named none of them.",
+      "seam": "scripts.ci_mutation.measured.measured_plan records the functions absent from every stats tests map as the plan's untested key, which merge_probes and probed_plan carry into the replan, and scripts.ci_mutation.measured.budget_overrun appends the sentence naming them after either refusal",
+      "tests": [
+        "tests/test_ci_mutation_plan.py::test_the_measured_plan_lists_each_function_no_test_calls_in_process_once_in_name_order",
+        "tests/test_ci_mutation_plan.py::test_a_refusal_names_the_functions_no_test_calls_in_process_with_their_mutants_and_worker_seconds",
+        "tests/test_ci_mutation_probed.py::test_the_cli_refusal_after_the_early_stage_names_the_functions_no_test_calls_in_process"
+      ]
+    },
+    {
       "id": "admission-outcome-totals",
       "origin": "inventory",
       "behaviour": "Placement waits count each hive admission refusal category once per task until it changes or clears, count each successful admission once, and metrics_service.admission_rows sums both the pending admission gate's totals and these hive outcome totals into one admission_samples row per outcome.",
@@ -8538,6 +8651,17 @@
       "seam": "The download-artifact uses lines in .github workflows and actions and in scripts/ci_gate_summary_steps.yml",
       "tests": [
         "tests/test_ci_artifact_download_retry.py::test_every_download_step_uses_the_release_that_retries_a_stalled_blob"
+      ]
+    },
+    {
+      "id": "shared-mutation-stats-download-ends-with-its-download",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2699",
+      "behaviour": "The mutation refine, probe and shard jobs download the shared mutation stats through the pattern download action, which asks the results service for this run's matching artifacts and closes every answer before it tries again, so the step ends with its download instead of waiting out the three minute socket timeout that an unread non-200 blob answer holds in download-artifact 8.0.2.",
+      "seam": "The pattern download composite action and its fetch script, used by the shared mutation stats download steps of the Tests workflow",
+      "tests": [
+        "tests/test_ci_artifact_download_retry.py::test_every_shared_mutation_stats_download_runs_the_action_that_closes_each_blob_answer",
+        "tests/test_ci_pattern_download.py::test_a_kept_alive_error_answer_is_closed_before_the_retry_and_every_part_merges"
       ]
     },
     {

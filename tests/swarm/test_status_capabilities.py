@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.swarm import cli, status
+from scripts.swarm import cli, idle, status
 from scripts.swarm.store import APP_SERVER_TRANSPORT, LEGACY_TRANSPORT, AgentRecord, RedisStore, SwarmConfig
 from tests.swarm.test_tick import FakeLedger
 
@@ -151,4 +151,30 @@ def test_status_text_prints_push_inbox_and_native_terminal_per_agent(saved, caps
         "push": ("yes", "yes"),
         "legacy": ("no", "no"),
         "unknown": ("no", "no"),
+    }
+
+
+@pytest.mark.feature("swarm-status-agent-wait")
+def test_status_text_prints_each_agents_declared_wait_kind_and_target(
+    saved: tuple[RedisStore, dict[str, str]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    store, names = saved
+    lab = "https://github.com/the-cloud-clockwork/agentihooks/runs/123"
+    at = status.now_ms()
+    held = {"kind": "lab", "target": lab}
+    idle.declare_wait(store.redis, "sw", names["claude"], at + 600_000, "lab grade", at, on=held)
+    idle.declare_wait(store.redis, "sw", names["push"], at + 600_000, "a short pause", at)
+
+    cli.cmd_status(store, SimpleNamespace(slug="sw", json=False))
+
+    lines = capsys.readouterr().out.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith("Agent\t"))
+    head, *rows = [line.split("\t") for line in lines[start : start + len(names) + 1]]
+    assert head[-1] == "Wait"
+    shown = {row[0]: row[-1] for row in rows}
+    assert {key: shown[name] for key, name in names.items()} == {
+        "claude": f"lab {lab}",
+        "push": "bare",
+        "legacy": "-",
+        "unknown": "-",
     }

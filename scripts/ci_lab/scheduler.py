@@ -23,7 +23,7 @@ import sys
 import tempfile
 import time
 from collections import Counter
-from collections.abc import Callable, Generator, Iterable, Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field, fields, replace
 from functools import partial
@@ -307,7 +307,8 @@ class Head:
 @dataclass(frozen=True)
 class Plan:
     """How to grade one head: the tree and grader revision it reads, the units of each gate, the jobs the tier skips,
-    and the job outputs and flags the `Gate — Required` rules read."""
+    the job outputs and flags the `Gate — Required` rules read, and the dev commit of the dependency manifest its test
+    units are keyed on, empty when it keys none."""
 
     tree: str
     grader: str
@@ -315,6 +316,7 @@ class Plan:
     skipped: frozenset[str] = frozenset()
     outputs: Mapping[str, Mapping[str, str]] = field(default_factory=dict[str, Mapping[str, str]])
     flags: Flags = Flags()
+    manifest: str = ""
 
 
 class Inbox(Protocol):
@@ -392,7 +394,8 @@ class Slot:
 @dataclass
 class State:
     """A grade's state: what it grades, its units by gate, whether a newer head superseded it, what it posted, the
-    id of each check run it posted and the grade ref a lab remote push wrote its head to, if any."""
+    id of each check run it posted, the grade ref a lab remote push wrote its head to, if any, and the dev commit of
+    the dependency manifest its test units are keyed on, if any."""
 
     run: str
     repo: str
@@ -412,6 +415,7 @@ class State:
     posted: dict[str, list[str | None]] = field(default_factory=dict[str, list[str | None]])
     runs: dict[str, int] = field(default_factory=dict[str, int])
     ref: str = ""
+    manifest: str = ""
 
 
 def _parse(raw: str | bytes) -> State:
@@ -523,6 +527,7 @@ class Scheduler:
         self.ports = ports
         self.settings = settings
         self.spending = spending
+        self.shed: tuple[str, ...] = ()
         self.registry = metrics.Registry()
 
     def tick(self, now_ms: int) -> list[str]:
@@ -702,6 +707,7 @@ class Scheduler:
             outputs={job: dict(values) for job, values in plan.outputs.items()},
             skipped=sorted(plan.skipped),
             ref=ref,
+            manifest=plan.manifest,
         )
         source = self._merge_group(request, plan.tree)
         misses: list[Unit] = []
@@ -776,21 +782,21 @@ class Scheduler:
     def _admit(self, now_ms: int) -> list[str]:
         """Enqueue the held units the day's budget admits, the most urgent grade first: every unit of a class not shed,
         and backfill only into the slots workers offered free after every unit already waiting in the queue, backfill
-        and those admitted in this pass included, since the queue leases in order."""
+        and those admitted in this pass included, since the queue leases in order. A class the budget newly sheds is
+        named first."""
+        actions = self._shedding()
         grades = sorted(
             (state for state in self._live() if any(slot.held for slot in state.units.values())),
             key=lambda state: state.tier,
         )
         if not grades:
-            return []
-        shed = () if self.spending is None else self.spending.status().shed
+            return actions
         load = self.load(now_ms)
         waiting = sum(load.pending_slots.values())
-        actions: list[str] = []
         for state in grades:
             admitted: list[Unit] = []
             for slot in state.units.values():
-                if slot.held and budget.admits(CLASSES[state.tier], DEFAULT.slots, load.slots_free, waiting, shed):
+                if slot.held and budget.admits(CLASSES[state.tier], DEFAULT.slots, load.slots_free, waiting, self.shed):
                     slot.held = False
                     admitted.append(Unit(slot.kind, slot.key, tuple(slot.members)))
                     waiting += DEFAULT.slots
@@ -800,6 +806,20 @@ class Scheduler:
                 actions.append(f"enqueued {len(admitted)} units of {state.run}")
         return actions
 
+    def _shedding(self) -> list[str]:
+        """Read the classes the day's budget sheds and name each class shed since the last pass with the share of the
+        day's core minutes spent."""
+        if self.spending is None:
+            return []
+        spent = self.spending.spent()
+        shed = budget.assess(spent, self.spending.policy).shed
+        share = spent / self.spending.policy.core_minutes_per_day
+        newly = [
+            f"shed {name} with {share:.2f} of the day's core budget spent" for name in shed if name not in self.shed
+        ]
+        self.shed = shed
+        return newly
+
     def _advance(self, run: str, tiers: Mapping[str, int]) -> list[str]:
         """Collect a grade's finished jobs, each counted in its tier, post its check runs and close it once every unit
         is final, counting the closed grade."""
@@ -808,7 +828,7 @@ class Scheduler:
             self.client.srem(LIVE, run)
             return [f"forgot {run}"]
         for slot in state.units.values():
-            self._collect(slot, tiers, state.repo)
+            self._collect(slot, tiers, state)
         actions = self._post(state)
         if all(slot.outcome for slot in state.units.values()):
             self.client.srem(LIVE, run)
@@ -822,7 +842,7 @@ class Scheduler:
         self._save(state)
         return actions
 
-    def _collect(self, slot: Slot, tiers: Mapping[str, int], repo: str) -> None:
+    def _collect(self, slot: Slot, tiers: Mapping[str, int], state: State) -> None:
         """Take a finished job into its slot in the class of its tier; a vanished job was dropped and a held one waits
         for the budget."""
         if slot.outcome or slot.held or not slot.job:
@@ -831,19 +851,21 @@ class Scheduler:
         if job is None:
             slot.outcome = DROPPED
         elif job.state in FINISHED:
-            self._finished(slot, job, tiers[job.id], repo)
+            self._finished(slot, job, tiers[job.id], state)
         else:
             slot.started = slot.started or job.state == "leased"
 
-    def _finished(self, slot: Slot, job: Job, tier: int, repo: str) -> None:
-        """Count the finished attempt once in the tier's class from its report, then take its outcome into the slot,
-        storing its verdict, unless the retry policy runs it again."""
+    def _finished(self, slot: Slot, job: Job, tier: int, state: State) -> None:
+        """Count the finished attempt once in the tier's class from its report and charge its core time to the day's
+        budget, then take its outcome into the slot, storing its verdict, unless the retry policy runs it again."""
         uploaded = self._uploaded(job)
         if uploaded is not None and self.queue.tally(job):
             metrics.observe_unit(self.registry, CLASSES[tier], job.unit.kind, job.requirement.slots, uploaded[0])
+            if self.spending is not None:
+                self.spending.charge(job.requirement.slots, float(uploaded[0].get("seconds") or 0.0))
         if not self._rerun(job):
             slot.outcome = job.outcome
-            self._remember(job, uploaded, repo)
+            self._remember(job, uploaded, state)
 
     def _rerun(self, job: Job) -> bool:
         """Move a finished job back to pending when the retry policy allows its outcome a rerun; return whether it
@@ -851,9 +873,10 @@ class Scheduler:
         result = UnitResult(job.outcome, job.attempts)
         return decide(result, self.settings.retries) == "retry" and self.queue.retry(job)
 
-    def _remember(self, job: Job, uploaded: tuple[dict[str, Any], bytes] | None, repo: str) -> None:
+    def _remember(self, job: Job, uploaded: tuple[dict[str, Any], bytes] | None, state: State) -> None:
         """Store the verdict of a graded job from the report and log its worker uploaded, and note the files its batch
-        opened outside the repository's manifest; a lost or unrun job is no verdict."""
+        opened outside the repository's manifest under the manifest commit the grade keyed on; a lost or unrun job is
+        no verdict."""
         if job.outcome in UNGRADED or uploaded is None:
             return
         report, log = uploaded
@@ -862,8 +885,8 @@ class Scheduler:
             job.unit.kind, job.unit.key, passed, passed and bool(report.get("flaky")), float(report.get("seconds", 0.0))
         )
         self.store.put(verdict, report, log)
-        if report.get("outside"):
-            note_outside(self.objects, repo, job.unit.members, report["outside"])
+        if report.get("outside") and state.manifest:
+            note_outside(self.objects, state.repo, state.manifest, job.unit.members, report["outside"])
 
     def _uploaded(self, job: Job) -> tuple[dict[str, Any], bytes] | None:
         """Return the report and log a finished job's worker uploaded, the log empty when it uploaded none; None
@@ -977,32 +1000,43 @@ class StoredManifests:
     """Packed dependency manifests in the lab object store, one per dev commit under `objects.manifest_folder`; one of
     the newest `MANIFEST_DEPTH` commits with none stored is fetched from its dev push Tests run, off the scheduler pass
     unless another fetch is given, and stored once. The notes of the files test batches opened outside them sit under
-    its `outside/` folder."""
+    its `outside/<commit>/` folder, by the manifest commit their grade keyed on."""
 
     objects: Objects
     fetch: Fetch = field(default_factory=lambda: Background(Fetcher()))
 
     def __call__(self, repo: str, commits: Sequence[str]) -> dict[str, Any] | None:
-        """Return the manifest of the first commit that has one stored or, among the newest, fetched, with every note of
-        the repository merged into its test records; None when none has."""
+        """Return the manifest of the first commit that has one stored, with the notes of its commit merged into its
+        test records, or among the newest one fetched, which no note names yet; None when none has. Every call first
+        removes the notes of commits with no stored manifest."""
         slug = _slug(repo)
         folder = manifest_folder(slug)
         stored = frozenset(self.objects.keys(folder))
-        notes = (name for name in stored if name.startswith(folder + NOTES))
+        self._prune(folder, stored)
         for index, commit in enumerate(commits):
             path = f"{folder}{commit}.json"
             if path in stored:
-                return self._merged(UNPACK(json.loads(self.objects.read(path))), notes)
+                return self._merged(UNPACK(json.loads(self.objects.read(path))), folder, stored)
             packed = self.fetch(slug, commit) if index < MANIFEST_DEPTH else None
             if packed is not None:
                 self.objects.write_once(path, packed)
-                return self._merged(UNPACK(json.loads(packed)), notes)
+                return UNPACK(json.loads(packed))
         return None
 
-    def _merged(self, manifest: dict[str, Any], notes: Iterable[str]) -> dict[str, Any]:
-        """Return the manifest with each note's files added to the outside list of every test record it names."""
+    def _prune(self, folder: str, stored: frozenset[str]) -> None:
+        """Remove each note whose commit folder names no stored manifest, a note written without a commit folder
+        included."""
+        notes = folder + NOTES
+        for name in [path for path in stored if path.startswith(notes)]:
+            if f"{folder}{PurePosixPath(name).parent.name}.json" not in stored:
+                self.objects.remove(name)
+
+    def _merged(self, manifest: dict[str, Any], folder: str, stored: frozenset[str]) -> dict[str, Any]:
+        """Return the manifest with the files of each note of its commit added to the outside list of every test record
+        the note names."""
         records: dict[str, dict[str, Any]] = manifest["tests"]
-        for name in notes:
+        notes = f"{folder}{NOTES}{manifest['commit']}/"
+        for name in sorted(path for path in stored if path.startswith(notes)):
             note = json.loads(self.objects.read(name))
             for test in note["tests"]:
                 if test in records:
@@ -1010,11 +1044,12 @@ class StoredManifests:
         return manifest
 
 
-def note_outside(objects: Objects, repo: str, tests: Sequence[str], outside: Sequence[str]) -> None:
-    """Write a batch's tests and the files it opened outside the manifest as one note of the repository, named by its
-    content so the same batch and files write it once."""
+def note_outside(objects: Objects, repo: str, commit: str, tests: Sequence[str], outside: Sequence[str]) -> None:
+    """Write a batch's tests and the files it opened outside the manifest as one note of the repository's manifest
+    commit, named by its content so the same batch and files write it once."""
     record: dict[str, object] = {"tests": tests, "outside": sorted(outside)}
-    objects.write_once(f"{manifest_folder(_slug(repo))}{NOTES}{digest(record)}.json", json.dumps(record).encode())
+    path = f"{manifest_folder(_slug(repo))}{NOTES}{commit}/{digest(record)}.json"
+    objects.write_once(path, json.dumps(record).encode())
 
 
 class MirrorExpander:
@@ -1087,7 +1122,8 @@ class MirrorExpander:
     def expand(self, request: GradeRequest) -> Plan:
         """Return one unit per static gate the grader's workflow runs, keyed by the files it reads at head and base,
         the unit job's test units of a merge group, promotion or backfill head and the mutation stats and mutant units
-        of a promotion or backfill head, framed by the request's tier."""
+        of a promotion or backfill head, framed by the request's tier, with the dev commit of the manifest its test units
+        are keyed on."""
         mirror = self._mirror(request.repo)
         grader = request.head if request.tier >= Priority.PROMOTION else request.base
         for sha in dict.fromkeys((request.head, request.base, grader)):
@@ -1102,8 +1138,10 @@ class MirrorExpander:
                 gate.name, _within(head, gate.paths), _within(base, gate.base_paths), grader, toolchain
             )
             gates.setdefault(gate.job, []).append(Unit(STATIC, static_key(inputs), (gate.name,)))
+        commit = ""
         if request.tier >= Priority.QUEUE:
             manifest, contents = self._manifest(mirror, request), self._contents(mirror, head)
+            commit = manifest["commit"]
             suite = expand_tests.units(manifest, contents, head, json.loads(contents.get(DURATIONS, b"{}")), toolchain)
             gates.setdefault(UNIT_JOBS[0], []).extend(
                 self._tests(mirror, request, grader, manifest, suite, contents, toolchain)
@@ -1111,7 +1149,8 @@ class MirrorExpander:
             if request.tier >= Priority.PROMOTION:
                 gates.update(self._mutation(mirror, request, manifest, contents))
         tree = self._git(mirror, "rev-parse", f"{request.head}^{{tree}}").strip()
-        return frame(request.tier, tree, grader, {job: tuple(units) for job, units in gates.items()})
+        plan = frame(request.tier, tree, grader, {job: tuple(units) for job, units in gates.items()})
+        return replace(plan, manifest=commit)
 
     def _tests(
         self,
