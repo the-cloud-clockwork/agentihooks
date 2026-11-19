@@ -12,7 +12,7 @@ import pytest
 from scripts.hub import admission
 from scripts.inbox.dispatch import Dispatcher
 from scripts.inbox.store import InboxStore
-from scripts.swarm import cli, commands, name_state, readiness, resume, snapshot
+from scripts.swarm import cli, commands, model_catalog, name_state, readiness, resume, snapshot
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import tick
 from tests.helpers.seat import seat_agent
@@ -25,9 +25,10 @@ import ledger_core as core  # noqa: E402
 
 
 @pytest.fixture
-def store():
+def store(monkeypatch: pytest.MonkeyPatch) -> RedisStore:
     import fakeredis
 
+    monkeypatch.setattr(model_catalog, "catalog", lambda *args: {"claude": [{"model": "opus"}], "codex": []})
     return RedisStore(fakeredis.FakeRedis(decode_responses=True))
 
 
