@@ -1863,10 +1863,13 @@ hive gets none. After a failed admit ask or launch, the spoke sends `reopen`, wh
 and drops one that waited there as long as the hive waits for its answer, so an admission the hive gave up on never
 claims the task; see
 [How the hub serves requests](../reference/swarm-bus-scope.md#how-the-hub-serves-requests).
-Unlike a tick launch, a hub admission scaffolds no task work folder on the hub. It resolves the task's continuation,
-stack base, overlaps and group on the claimed row and attaches the handoff transfer the predecessor left (see
-[Handoff continuity on admission](#handoff-continuity-on-admission)); the spawn task carries the seat's handoff,
-recaps and learned notes.
+A hub admission sets on its claim what a tick launch sets. The ledger claim write names the task's work folder,
+clears a recorded protected branch and writes the lane kind. The spawn task carries the continuation, stack base,
+territory overlaps, group and work folder files, and the handoff transfer the predecessor left (see
+[What the claim sets](#what-the-claim-sets) and
+[Handoff continuity on admission](#handoff-continuity-on-admission)). The hub writes no folder itself: the hive lane
+spoke writes it on its own host before the spawn. The spawn task also carries the seat's handoff, recaps and learned
+notes.
 
 The hub creates the hive buckets; members are not allowed to create them:
 
@@ -2045,6 +2048,169 @@ semgrep --test --config .semgrep-incidents/hub-admission-late-answer-releases-cl
 | The hive logs `poll failed (Unanswered: ...)` and the task stays claimed by an agent that has not launched | The hub finished the admission after the hive stopped waiting and kept it | Nothing to undo: the hive's next poll asks again and launches that admission. Find what slowed the hub in its `late:` lines. |
 | A task launches again on the harness that just failed | The runtime answered `unavailable`, which sends no `failed`, or its refusal named no harness | Expected: only a refusal that names its harness steers the next admission. |
 
+### What the claim sets
+
+Since pull request [#11139](https://github.com/the-cloud-clockwork/agentihooks/pull/11139), an eng, ci or plan
+admission sets everything the tick sets when it places a task, so an `events` swarm loses none of it: the work
+folder, the reclaim of a recorded branch, the protected branch clear, the lane kind, the territory overlaps and the
+group. Every admission does this; no setting turns it on or off. A master spoke admits nothing on the hub and is
+outside this path.
+
+#### The ledger claim write
+
+The admission marks the row claimed in one conditional write, applied only while the row is `open` with the offer's
+claimant and claim generation:
+
+| Field | Written value | When |
+|---|---|---|
+| `state` | `claimed`, or `pr` when the row has a `pr_url` | Always |
+| `claimed_by` | The admitted agent's name | Always |
+| `workspace` | `~/.agentihooks/swarm/<slug>/tasks/<task id>`, the same text on every host | Always |
+| `branch` | Empty | The row's branch is `dev`, `main`, `master` or `v1` |
+| `kind` | The lane's `kind` from the swarm's lane settings (see [Templates](swarm.md#templates)) | The lane's `kind` is set and is not `auto`, and the row has no kind |
+
+A row that already has a kind keeps it, and a branch that is not protected stays as recorded.
+
+The work folder path needs a plain slug and task id: each starts with an ASCII letter or digit and holds at most 128
+word characters, `.` or `-`. For any other name the admission writes nothing to the ledger, releases the task's
+claim, drops the agent it started and answers the hive's `admit` ask with
+`work folder needs a plain slug and task id, not '<slug>' and '<task id>'`. The task stays `open` with no claimant.
+The spoke handles the error as any refused `admit` (see
+[What the spoke does after a failure](#what-the-spoke-does-after-a-failure)); its `reopen` finds no admission and
+changes nothing.
+
+#### The work folder on the hive
+
+The hub holds no task folders. It carries the folder's files in the spawn task's `hive_seeds` field, the same field
+a legacy hive launch order carries:
+
+- `steering.md`, built on the hub from the claimed task: its title, description, plan pointer or plan link and proof
+  contract, and for a plan task its phase evidence from the ledger document the offer was checked against.
+- The other files of the task's folder, as one hive last synced them (see
+  [Work folder files on any host](#work-folder-files-on-any-host) for what travels). The admission reads the copy of
+  the hive that last launched the task, recorded when that hive reports `launched`, else the copy of the hive that
+  ran the task's most recently started earlier agent. Each copy sits under
+  `<root>:hive:<hive id>:workspaces:files:<slug>:<task id>` for a day after the hive last synced it, so a predecessor
+  that ended before this admission still hands over its `progress.md`, `proof.md` and added files.
+
+Before the spawn, the lane spoke writes those files to `~/.agentihooks/swarm/<slug>/tasks/<task id>` below its own
+home, with the rules of a legacy hive launch: `steering.md` is replaced, any other file is written unless the hive's
+copy already contains the sent text, and a symbolic link is never written (see
+[What the hive does with it](#what-the-hive-does-with-it)). The spawn task's `workspace` becomes that absolute path,
+which the opening prompt names as `Your work folder is <path>`. A spawn task without `workspace` is spawned as it is.
+
+#### Continuation and branch heads
+
+The admission resolves the continuation after the claim write, on the claimed row:
+
+1. A task with no stored handoff, no earlier life and no recorded branch gets no `reclaim`, and no branch head is
+   read.
+2. The candidates are the recorded branch, else the branch of each earlier life, latest ended first. An earlier life
+   that was retired while still `starting` with no pane is left out: no hive ran it, so it pushed nothing. A branch
+   that another task's pull request in the same repository holds is never a candidate.
+3. The admission reads each candidate's head on the remote.
+4. The first candidate with a head is the continuation: `continue_from` is `origin/<branch>`, and the opening tells the
+   agent `Your predecessor's branch <branch> is on the remote at <head>: continue it.` Otherwise the agent starts
+   fresh, and the opening reads `Start your worktree fresh from dev: <fresh_reason>.`
+
+The hub holds no checkout of the swarm repository, so where it reads the heads depends on the swarm's stored
+repository origin:
+
+| Swarm | Where the heads come from | When the read fails |
+|---|---|---|
+| A `repo_origin` is stored | One GitHub GraphQL query naming every candidate, bounded to 3 seconds, well inside the hub's 8,000 millisecond answer budget | A slow, failed or empty answer marks every candidate `unknown`. The admission goes on and the agent starts fresh. |
+| No `repo_origin` | `git ls-remote --heads origin` in the swarm's checkout on the hub host, with a 20 second timeout; when that listing fails, one `git ls-remote` per candidate | A candidate whose head cannot be read is `unknown`. |
+
+A head read never holds the admission past its answer budget. The `fresh_reason` says why no branch was continued:
+
+| `fresh_reason` | Cause |
+|---|---|
+| `the remote heads of <branches> could not be read` | At least one candidate's head was `unknown` and none had a head |
+| `no earlier life pushed a branch: checked <branches> on the remote` | Every candidate was read and none exists on the remote |
+| `no branch is recorded for this task outside another task's pull request` | No candidate is left once branches held by other tasks' pull requests are dropped |
+| `the task branch belongs to another repository` | The row's `branch_repo` names a repository other than the swarm's |
+
+The result lands in the spawn task's `reclaim`, and is stored for the admitted agent in
+`<root>:swarm:<slug>:reclaims`; with a stored handoff it lands in `handoff_envelope` instead (see
+[What the admission adds](#what-the-admission-adds)).
+
+The protected branch clear comes first on purpose. The tick resolves the continuation before its claim write, so a
+task recorded on `dev` can be told to continue `origin/dev`. The hub resolves it on the row it has just written, so
+the same task continues from an earlier life's branch, or starts fresh when none was pushed.
+
+#### Overlaps and group
+
+The spawn task carries `overlaps`, one entry for each other task in `claimed` or `pr` whose territory shares an area
+with this task's territory. Two areas are shared when they are equal or one is a folder that holds the other, after a
+leading `./` and a trailing `/` are dropped.
+
+| Key | Value |
+|---|---|
+| `task` | The other task's id |
+| `claimant` | The agent working it: any agent record of the swarm that has not ended. Empty when none. |
+| `areas` | The shared areas, sorted, each the narrower of the pair |
+| `checks` | Only when `claimant` is empty: `true` for a `pr` task waiting on its checks, `false` for a `claimed` one |
+
+The hub has no runtime report of which agents still run, so every agent record that has not ended counts as a
+claimant. The opening lists each entry as `Task <id>, claimed by <agent>, shares <areas>.` and tells the agent to
+coordinate through the inbox.
+
+`group` holds the `id`, `title` and `description` of each task named in the row's `group_members` that the ledger
+still holds; a member missing from the ledger is left out. The opening then tells the agent its task leads a group
+and lists the members, which it delivers in the same pull request.
+
+```json
+{
+  "workspace": "/home/agent/.agentihooks/swarm/rig/tasks/t1",
+  "reclaim": {"remote_branch": "engineer-old", "remote_head": "abc123",
+              "continue_from": "origin/engineer-old", "fresh_reason": "none"},
+  "overlaps": [{"task": "t2", "claimant": "", "areas": ["scripts/hub/admission.py"], "checks": true}],
+  "group": [{"id": "t3", "title": "Document the claim", "description": "the docs task"}]
+}
+```
+
+#### Checking the claim on a live swarm
+
+```bash
+# The claim write on the ledger row
+agentihooks ledger --slug <slug> get tasks/<task id> | jq '{state, claimed_by, workspace, branch, kind}'
+
+# What the hub kept for the admission: folder, continuation, overlaps, group and the files it carried
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" GET agentihooks:swarm:<slug>:spoke-admission:<task id>:<generation> \
+  | jq '.task | {workspace, reclaim, handoff_envelope, overlaps, group, seeds: (.hive_seeds | keys)}'
+
+# The reclaim stored for the admitted agent
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" HGET agentihooks:swarm:<slug>:reclaims <agent>
+
+# The hive that last launched the task, and the copy the next admission seeds from
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" GET agentihooks:swarm:<slug>:work-folder:<task id>
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" GET agentihooks:hive:<hive id>:workspaces:files:<slug>:<task id> \
+  | jq -r 'keys[]'
+```
+
+The keys start with `AGENTIHOOKS_SWARM_KEY_PREFIX`, default `agentihooks`. The admission key holds its value for a
+day, until `reopen` releases it.
+
+#### Claim guards
+
+Feature `hub-admission-claim-context` in `feature-map.json`. Its tests in `tests/hub/test_admission.py` cover a
+recorded branch read through GitHub, a handed off task's resolved envelope, the claim write's work folder, protected
+branch clear and lane kind, a kept branch and task kind, an `auto` lane kind, overlaps and group, the seeds and the
+hive they follow, the work folder refusal, a first life that reads no heads, the cleared protected branch that
+continues from an earlier life, and a branch another pull request holds. `tests/hive/test_lanes.py` covers the lane
+spoke writing the folder before the spawn. `tests/hub/test_branch_heads.py` covers the one query, the 3 second bound
+and the `unknown` answer.
+
+#### Claim troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| An events agent's opening reads `Start your worktree fresh from dev: the remote heads of <branch> could not be read` although the branch is on GitHub | GitHub did not answer the hub's heads query within 3 seconds, or refused it | The agent can continue the branch by hand: `git fetch origin <branch>` and `wt.sh new <name> --from origin/<branch>`. Check the hub's GitHub credential and the API rate limit. |
+| A task recorded on `dev`, `main`, `master` or `v1` continues from an older branch or starts fresh | Expected: the claim write clears a protected branch before the continuation resolves | Nothing to fix. |
+| An events successor's work folder holds only `steering.md` although its predecessor wrote `progress.md` | No hive copy of the task's folder was left: the last hive synced it more than a day ago, or the files do not travel | Read the `work-folder` and `workspaces:files` keys above. Recover the file from the predecessor hive's own folder while that host is up. |
+| The hive's `admit` ask is answered `work folder needs a plain slug and task id` | The slug or task id holds a character a folder name may not hold | Give the task a plain id; the admission refuses it every time otherwise. |
+| An events task of a lane with a `kind` keeps an empty kind after admission | The hub runs a release from before #11139, or the lane's kind is `auto` | Roll the hub to the newest release, or set the lane's kind. |
+
 ### Handoff continuity on admission
 
 An eng, ci or plan successor the hub admits continues from what its predecessor left: the handoff text, its runtime
@@ -2059,7 +2225,7 @@ taken gives way to the lowest free seat of the lane. After it occupies the seat,
 | Stored for the task | The spawn task carries |
 |---|---|
 | A handoff text: one written by `agentihooks swarm <slug> handoff`, `ready` or `park`, or the recovery handoff `agentihooks hive remove` stores for each agent that did not hand off within its wait | `handoff`, the text, and `handoff_envelope`, the stored envelope resolved on the claimed row so a cleared protected branch is never continued |
-| No handoff, but earlier lives or a recorded branch | `reclaim`, the branch the task continues from, or the decision to start fresh, and why; also stored for the admitted agent |
+| No handoff, but earlier lives or a recorded branch | `reclaim`, the branch the task continues from, or the decision to start fresh, and why; also stored for the admitted agent. See [Continuation and branch heads](#continuation-and-branch-heads) |
 | Neither, on a first life | Nothing |
 
 The admission then attaches the transfer. It takes the latest row of the task in the swarm's transfers hash that has
