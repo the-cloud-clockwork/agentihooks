@@ -45,10 +45,12 @@ outside that gate.
 Each job fetches one revision and adds it as a detached worktree at
 `$RUNNER_TEMP/grader`. The head stays checked out in `$GITHUB_WORKSPACE`.
 
+{% raw %}
 | Job | Revision | Source |
 | --- | --- | --- |
 | Tests `lint` | `GRADER: ${{ github.event.pull_request.base.sha \|\| needs.reuse.outputs.grader }}` | A pull request uses the base sha its event carries. A manual dispatch uses the revision the `reuse` job records in `Record the protected grader revision`, which is the `dev` tip that job checked out |
 | Semgrep `scan` and `charts` | `BASE: ${{ inputs.base }}`, fetched as `${BASE#origin/}` | The caller's `base` input. The Tests workflow passes `origin/dev` for a pull request into `dev`, so the grader is the `dev` tip when the job runs. Otherwise it passes the pull request base sha, the merge group base sha, the push `before` sha or its own `base` input, in that order. The Proofs workflow's `semgrep` proof passes its `base` input |
+{% endraw %}
 
 The grader checkout step in both workflows:
 
