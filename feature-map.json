@@ -10178,8 +10178,8 @@
       "id": "lab-venv-build-sandbox",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2644",
-      "behaviour": "A lab worker builds a head's venv by running the worker's uv sync with the worker's Python from the head tree through the lab sandbox with network, so the environment of uv and every build hook it starts holds only the sandbox whitelist, its private folders, PATH and UV_PROJECT_ENVIRONMENT, never a pod variable; a build the sandbox ends with a nonzero code or its time limit is CannotRun, keeps its log and writes no marker, so the next call builds again.",
-      "seam": "scripts.ci_lab.venvs venv_for with its Build, the environment and outcome of the sandboxed uv sync",
+      "behaviour": "A lab worker builds a head's venv by running the worker's uv venv on the worker's Python and then uv pip install from the head tree through the lab sandbox with network, so the environment of uv and every build hook it starts holds only the sandbox whitelist, its private folders and PATH, never a pod variable; a build step the sandbox ends with a nonzero code or its time limit is CannotRun, keeps its log and writes no marker, so the next call builds again.",
+      "seam": "scripts.ci_lab.venvs venv_for with its Build, the environment and outcome of the sandboxed uv venv and uv pip install",
       "tests": [
         "tests/ci_lab/test_venvs.py::test_a_build_hook_sees_only_the_whitelist_and_the_sandbox_environment",
         "tests/ci_lab/test_venvs.py::test_a_failed_build_leaves_no_marker_and_builds_again",
