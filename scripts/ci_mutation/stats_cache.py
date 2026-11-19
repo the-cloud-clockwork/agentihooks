@@ -228,7 +228,7 @@ class StatsInputs:
     records: dict = field(default_factory=lambda: {True: {}, False: {}})
     traced: dict = field(default_factory=dict)
     discovered: dict[str, set[str]] = field(default_factory=dict)
-    closures: dict[frozenset[str], dict[str, str]] = field(default_factory=dict)
+    closures: dict[tuple[bool, frozenset[str]], dict[str, str]] = field(default_factory=dict)
     digests: dict[frozenset[str], str] = field(default_factory=dict)
 
     def for_test(self, path: str, covered: list[str] | None, fresh: list[dict] | None = None) -> dict:
@@ -247,7 +247,7 @@ class StatsInputs:
             )
             inputs.update({name: value[0] for name, value in loaded.items()})
         if covered:
-            closure = frozenset(covered)
+            closure = (measured, frozenset(covered))
             if closure not in self.closures:
                 self.closures[closure] = test_inputs(
                     self.root, covered, self.modules, self.records[measured], self.resources, False, self.discovered
@@ -277,8 +277,9 @@ class StatsInputs:
                 names = set(imported_names(text, Path(source).parent.parts))
                 self.discovered[source] = discovery_inputs(list(ast.walk(ast.parse(text))), names, self.resources)
             paths.update(self.discovered[source])
-        self.digests[sources] = hashlib.sha256(encode(sorted(paths)).encode()).hexdigest()
-        return self.digests[sources]
+        digest = hashlib.sha256(encode(sorted(paths)).encode()).hexdigest()
+        self.digests[sources] = digest
+        return digest
 
 
 def per_test_stats(

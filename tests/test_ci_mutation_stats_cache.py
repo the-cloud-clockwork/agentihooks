@@ -1603,12 +1603,14 @@ def test_records_with_one_covered_set_walk_and_hash_it_once(tmp_path: Path, monk
     cache = tmp_path / "cache"
     stats_cache.collect_cached_stats(root, cache, {}, nodes, [], collect)
     assert traced == ["tests/test_measured.py", sources]
-    assert len(hashed) == 1
+    assert hashed == [[]]
     stats_cache.collect_cached_stats(root, cache, {}, nodes, [], collect)
     assert calls == [nodes]
+    assert len(traced) == 4
     (root / "scripts/shared_helper.py").write_text("value = 2\n")
     stats_cache.collect_cached_stats(root, cache, {}, nodes, [], collect)
     assert calls == [nodes, nodes]
+    assert len(traced) == 6
 
 
 def test_conftest_candidates_name_every_parent_folder_conftest_nearest_first() -> None:
