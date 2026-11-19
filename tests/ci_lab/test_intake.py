@@ -94,6 +94,13 @@ def test_a_push_to_a_branch_outside_the_plant_prefix_stays_an_ordinary_push(ref:
     assert webhooks.head_events("push", push(ref=ref)) == [head("push", "nestorcolt", "pushed")]
 
 
+@pytest.mark.feature("lab-zero-base-push")
+def test_a_new_branch_push_with_a_zero_before_names_no_head() -> None:
+    payload = push(ref="refs/heads/new-branch")
+    payload["before"] = "0" * 40
+    assert webhooks.head_events("push", payload) == []
+
+
 @pytest.mark.parametrize(
     "payload",
     [

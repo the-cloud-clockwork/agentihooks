@@ -1126,6 +1126,8 @@ its done criteria name are not recorded:
 | `ContainerCreating` with `hostPath type check failed` for `git` or `uv` | The node cache has not prepared the node | `kubectl -n ci-lab get pods -l app.kubernetes.io/component=node-cache -o wide` and its `prepare` log; the kubelet mounts once the folders exist |
 | The worker exits at start with `ci-lab worker refuses` | Its environment holds a `GITHUB_APP_` or `REDIS` variable | Remove the variable from the chart |
 | The worker exits at start with a `KeyError` naming a `CI_LAB_` variable | A required work setting is missing from the pod environment | Compare the pod's `env` with the contract table above |
+| The worker log repeats `ci-lab worker: lease call failed, retrying in <n>s` | The scheduler is not answering on 8800, or answers with a server error: it is rolling, restarting or down. The worker keeps running, retries after a backoff that doubles from 1 up to 10 seconds, and leases again on the first answer | `kubectl -n ci-lab get deploy ci-lab-scheduler` and `kubectl -n ci-lab logs deploy/ci-lab-scheduler --since 10m` |
+| The worker exits with an `HTTPError` 4xx raised from `Client.lease` | The scheduler answered the lease call with a client error, such as a 404 when `CI_LAB_SCHEDULER_URL` names a wrong path; a retry cannot change that answer, so the process ends with the traceback without draining its running units, which are left to finish or reap | Compare the pod's `CI_LAB_SCHEDULER_URL` with the contract table above |
 | A head's units are reaped undelivered and the worker log shows a failed `git fetch` | The node mirror lacks the head and the worker has no other source | The node cache's `fetched-at` stamp and warm log, see [Verify every node](ci-lab-node-cache.md#verify-every-node) |
 | A venv build fails with `uv sync for <tree> ended with code` | The build needs the package index, which the policy refuses | The kept build log the error names; see Limitations |
 | Uploads time out or are refused | The MinIO egress rule does not match the object store's pods | `minio.namespace`, `minio.pods` and `minio.port` against `kubectl get pods -n <namespace> --show-labels` |
@@ -1671,7 +1673,7 @@ both of these hold:
 
 | Source | Recorded when | Subject | `head` and `base` | `actor` |
 |---|---|---|---|---|
-| `push` delivery on `/github` | A branch under `refs/heads/` outside the plant prefix moved; a deleted branch or a tag records nothing | `ci.lab.head.push` | `after` and `before` | The delivery's sender |
+| `push` delivery on `/github` | A branch under `refs/heads/` outside the plant prefix moved; a deleted branch, a new branch whose `before` is all zeros, or a tag records nothing | `ci.lab.head.push` | `after` and `before` | The delivery's sender |
 | `push` delivery on `/github` to a plant branch | A branch under `refs/heads/diffcheck/lab-plant-` (`scripts.ci_lab.webhooks.PLANT_PREFIX`) moved; a deleted branch records nothing | `ci.lab.head.plant` | `after`, and an empty base whatever `before` says | The delivery's sender |
 | `pull_request` delivery on `/github` | The action is `opened`, `synchronize` or `reopened` | `ci.lab.head.pull_request` | The pull request's head and base SHA | The pull request's author |
 | `merge_group` delivery on `/github` | The action is `checks_requested` | `ci.lab.head.merge_group` | The group's `head_sha` and `base_sha` | The delivery's sender |

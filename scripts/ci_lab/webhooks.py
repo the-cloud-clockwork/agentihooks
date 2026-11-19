@@ -47,6 +47,8 @@ def _push(payload: Mapping[str, Any]) -> list[HeadEvent]:
     repo, actor = payload["repository"]["html_url"], payload["sender"]["login"]
     if str(payload["ref"]).startswith(PLANT_PREFIX):
         return [HeadEvent(PLANT, repo, payload["after"], "", actor, PUSHED)]
+    if payload["before"] == "0" * 40:
+        return []
     return [HeadEvent("push", repo, payload["after"], payload["before"], actor, PUSHED)]
 
 

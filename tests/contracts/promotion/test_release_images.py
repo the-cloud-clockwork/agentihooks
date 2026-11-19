@@ -12,7 +12,7 @@ pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[3]
 WORKFLOWS = ROOT / ".github/workflows"
-IMAGES = ("swarm-image.yml", "swarm-node-image.yml")
+IMAGES = ("swarm-image.yml", "swarm-node-image.yml", "ci-lab-image.yml")
 TAG = {"event_name": "release", "ref": "refs/tags/v2.9.1", "run_id": 1000}
 WORKER = "registry/agentihooks-worker"
 COMMITS = {"v2.1.7": "aaa", "v2.1.7rc1": "aaa", "v2.1.8": "bbb"}
