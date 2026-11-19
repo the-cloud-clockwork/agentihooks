@@ -395,16 +395,6 @@ jobs:
             exit 1
           fi
 
-      - name: Mint a checks read token
-        id: app-token
-        if: steps.authority.outputs.authoritative != '{}'
-        uses: actions/create-github-app-token@v3.2.0
-        with:
-          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
-          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
-          repositories: ${{ github.event.repository.name }}
-          permission-checks: read
-
       - name: Plant the lab checks on the head
         env:
           GH_TOKEN: ${{ github.token }}
@@ -419,7 +409,7 @@ jobs:
         if: steps.authority.outputs.authoritative != '{}'
         working-directory: ${{ github.workspace }}/grader
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
           AUTHORITATIVE: ${{ steps.authority.outputs.authoritative }}
           HEAD: ${{ github.event.pull_request.head.sha }}
           LAB_APP: github-actions
