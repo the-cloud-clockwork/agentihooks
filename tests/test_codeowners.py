@@ -3,6 +3,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.count_floor import code_owners
+
 ROOT = Path(__file__).resolve().parents[1]
 GATE_ROOTS = [".github", "scripts/gates", "scripts/ci_mutation", "mutation-clearances"]
 GATE_FILES = [
@@ -37,17 +39,8 @@ def _rules():
     return rules
 
 
-def _matches(pattern, path):
-    body = re.escape(pattern.strip("/")).replace(r"\*", "[^/]*")
-    return re.fullmatch(body + ("/.*" if pattern.endswith("/") else ""), path) is not None
-
-
-def _owners(path):
-    found = []
-    for pattern, owners in _rules():
-        if _matches(pattern, path):
-            found = owners
-    return found
+def _owners(path: str) -> list[str]:
+    return code_owners(ROOT, path)
 
 
 def _workflow_modules():
