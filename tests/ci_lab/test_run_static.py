@@ -248,8 +248,8 @@ def test_the_step_reads_runner_temp_as_its_run_folder_and_each_matrix_value_its_
     context = dataclasses.replace(settings, context={"github.event_name": "pull_request"})
     result = run_static.run(probe, head, base, grader, context)
     assert (result.code, result.skipped) == (0, False)
-    counts, folder, python = result.log.read_text().splitlines()
-    assert counts == folder
+    counts, temp, python = result.log.read_text().splitlines()
+    assert counts == temp
     assert settings.root in Path(counts).parents
     assert python == "3.12"
 

@@ -296,7 +296,9 @@ def live_pod(tmp_path: Path, trees: FakeWorktrees, secrets: dict[str, str]) -> e
     return pod
 
 
-def _graded_on_a_clean_tree(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, job: str) -> dict[str, str]:
+def _graded_on_a_clean_tree(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, job: str
+) -> tuple[dict[str, str], set[str]]:
     registry = json.loads((ROOT / static_gates.REGISTRY).read_text())
     workflow = (ROOT / static_gates.WORKFLOW).read_text()
     discovered = static_gates.discover(workflow, registry, ci_wiring.load(ROOT))
@@ -314,19 +316,24 @@ def _graded_on_a_clean_tree(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, job
     trees = FakeWorktrees({"h1": head, "b1": tmp_path / "base", "g1": ROOT})
     pod = live_pod(tmp_path, trees, {})
     graded: dict[str, str] = {}
+    skipped: set[str] = set()
     for name in gates:
         try:
-            graded[name] = executors.static(pod, lease("static", "k", (name,))).outcome
+            finished = executors.static(pod, lease("static", "k", (name,)))
         except ValueError as refused:
             graded[name] = str(refused)
-    return graded
+            continue
+        graded[name] = finished.outcome
+        if report(finished, pod)["skipped"]:
+            skipped.add(name)
+    return graded, skipped
 
 
 @pytest.mark.feature("lab-static-step-env")
 def test_static_grades_every_lint_gate_of_the_real_workflow_on_a_clean_tree(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, venv: Recorder, bwrap: None
 ) -> None:
-    graded = _graded_on_a_clean_tree(monkeypatch, tmp_path, "lint")
+    graded, _ = _graded_on_a_clean_tree(monkeypatch, tmp_path, "lint")
     assert graded == {**dict.fromkeys(graded, PASSED), **REFUSED}
 
 
@@ -334,11 +341,16 @@ def test_static_grades_every_lint_gate_of_the_real_workflow_on_a_clean_tree(
 def test_static_grades_every_test_count_gate_of_the_real_workflow_on_a_clean_tree(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, venv: Recorder, bwrap: None
 ) -> None:
-    assert _graded_on_a_clean_tree(monkeypatch, tmp_path, "test-count") == {
+    graded, skipped = _graded_on_a_clean_tree(monkeypatch, tmp_path, "test-count")
+    assert graded == {
         "test-count/install-dependencies": PASSED,
         "test-count/fetch-the-base-suite-count-recorded-on-dev": PASSED,
         "test-count/hold-the-base-revision-s-test-count": PASSED,
         "test-count/record-the-head-count-for-the-next-queue-group": PASSED,
+    }
+    assert skipped == {
+        "test-count/fetch-the-base-suite-count-recorded-on-dev",
+        "test-count/record-the-head-count-for-the-next-queue-group",
     }
 
 

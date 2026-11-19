@@ -8,7 +8,7 @@ from pathlib import Path
 
 from scripts.ci_lab import expressions
 from scripts.ci_lab.sandbox import Outcome, PortAllocator, Sandbox
-from scripts.ci_lab.static_gates import RUNNER_TEMP, Producer, StaticGate
+from scripts.ci_lab.static_gates import RUN_FOLDER, Producer, StaticGate
 
 __all__ = ["SHELL", "SUMMARY", "Result", "Settings", "run"]
 
@@ -127,7 +127,7 @@ def run(gate: StaticGate, head_tree: Path, base_tree: Path, grader_tree: Path, s
     """
     folder = _folder(settings.root, base_tree, grader_tree)
     trees = (head_tree, base_tree, grader_tree)
-    context = {**settings.context, **dict(gate.matrix), RUNNER_TEMP: str(folder)}
+    context = {**settings.context, **dict(gate.matrix), RUN_FOLDER: str(folder)}
     for producer in gate.producers:
         given, failed = _produce(producer, trees, folder, settings, context)
         if failed is not None:

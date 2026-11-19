@@ -19,7 +19,7 @@ from scripts.ci_lab import expressions, grader
 __all__ = [
     "CI_ONLY",
     "LEASE_FIELDS",
-    "RUNNER_TEMP",
+    "RUN_FOLDER",
     "STATIC_JOBS",
     "WHOLE_TREE",
     "CiOnly",
@@ -42,7 +42,7 @@ LEASE_FIELDS: frozenset[str] = frozenset(
         "github.run_number",
     }
 )
-RUNNER_TEMP = "runner.temp"
+RUN_FOLDER = "runner.temp"
 SECRETS = "secrets."
 STEP_READ = re.compile(r"steps\.([A-Za-z_][\w-]*)\.(?:outputs\.[\w-]+|outcome|conclusion)")
 STATIC_JOBS = ("lint", "type-gate", "semgrep", "test-count")
@@ -117,7 +117,7 @@ class StaticGate:
             name
             for name in self.reads
             if name not in LEASE_FIELDS
-            and name != RUNNER_TEMP
+            and name != RUN_FOLDER
             and name not in fixed
             and not name.startswith(SECRETS)
             and _step(name) not in produced
@@ -204,14 +204,7 @@ def _matrix(body: Mapping[str, Any]) -> dict[str, str]:
     matrix = body.get("strategy", {}).get("matrix", {})
     if isinstance(matrix, str) or "include" in matrix:
         return {}
-    fixed: dict[str, str] = {}
-    for key, values in matrix.items():
-        match values:
-            case [value]:
-                fixed[f"matrix.{key}"] = _text(value)
-            case _:
-                pass
-    return fixed
+    return {f"matrix.{key}": _text(values[0]) for key, values in matrix.items() if len(values) == 1}
 
 
 def _gate(

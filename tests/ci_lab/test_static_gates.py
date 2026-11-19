@@ -720,7 +720,20 @@ def test_the_real_test_count_job_yields_runnable_gates_while_docs_and_writer_loc
     }
     assert static_gates.main(["--root", str(ROOT), "--ci-only"]) == 0
     lines = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
-    assert lines == [{"job": "writer-lock", "reason": WRITER_LOCK_REASON}, {"job": "docs", "reason": DOCS_REASON}]
+    assert {line["job"]: line["reason"] for line in lines} == {"docs": DOCS_REASON, "writer-lock": WRITER_LOCK_REASON}
+    assert len(lines) == 2
+
+
+@pytest.mark.feature("lab-static-test-count-units")
+def test_every_lab_gradable_gate_that_reads_the_event_name_is_one_whose_verdict_the_pull_request_event_keeps() -> None:
+    registry = json.loads((ROOT / static_gates.REGISTRY).read_text())
+    workflow = (ROOT / static_gates.WORKFLOW).read_text()
+    gates = static_gates.discover(workflow, registry, ci_wiring.load(ROOT))
+    assert sorted(gate.name for gate in gates if not gate.missing and "github.event_name" in gate.reads) == [
+        "lint/prove-the-mutation-gate-kills-with-the-real-test-and-fails-with-a-weakened-one",
+        "test-count/fetch-the-base-suite-count-recorded-on-dev",
+        "test-count/record-the-head-count-for-the-next-queue-group",
+    ]
 
 
 def test_the_command_adds_each_gate_closure_digest_at_the_grader_tree(

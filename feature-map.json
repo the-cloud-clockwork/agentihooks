@@ -10162,6 +10162,7 @@
         "tests/ci_lab/test_static_gates.py::test_discovery_grades_the_steps_of_a_reusable_workflow_past_a_job_that_calls_another",
         "tests/ci_lab/test_static_gates.py::test_the_command_names_each_job_the_lab_leaves_to_actions_with_its_reason",
         "tests/ci_lab/test_static_gates.py::test_the_real_test_count_job_yields_runnable_gates_while_docs_and_writer_lock_stay_ci_only",
+        "tests/ci_lab/test_static_gates.py::test_every_lab_gradable_gate_that_reads_the_event_name_is_one_whose_verdict_the_pull_request_event_keeps",
         "tests/ci_lab/test_run_static.py::test_the_step_reads_runner_temp_as_its_run_folder_and_each_matrix_value_its_job_holds",
         "tests/ci_lab/test_executors.py::test_static_grades_every_test_count_gate_of_the_real_workflow_on_a_clean_tree"
       ]
