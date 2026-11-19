@@ -67,8 +67,7 @@ def test_a_host_entry_newer_than_the_database_is_never_adopted(tmp_path: Path, l
     first = kept(tmp_path)
     first.create("ledger", CONTENT)
     stored = first.current("ledger")
-    forged = sqlite.Entry(stored.generation + 1, json.dumps({**stored.state, "title": "Forged"}), stored.state)
-    host_entries.write(host_copy(tmp_path), forged)
+    host_entries.write(host_copy(tmp_path), stored.generation + 1, json.dumps({**stored.state, "title": "Forged"}))
     loads.clear()
     assert kept(tmp_path).current("ledger").state["title"] == "Store"
     assert loads == ["ledger"]
@@ -144,7 +143,9 @@ def test_a_repository_over_the_shared_database_keeps_host_entries(
     built = storage.build()
     assert isinstance(built, postgres.PostgresLedgerRepository)
     assert built.entries == tmp_path / "ledger-entries"
-    assert storage.build(tmp_path / sqlite.DATABASE).entries is None
+    local = storage.build(tmp_path / sqlite.DATABASE)
+    assert isinstance(local, sqlite.SQLiteLedgerRepository)
+    assert local.entries is None
 
 
 def test_a_bound_twin_keeps_the_host_folder_of_its_repository(tmp_path: Path) -> None:

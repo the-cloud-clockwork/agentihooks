@@ -4,15 +4,21 @@ only that path's rows, never the whole ledger."""
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
 from scripts.swarm_ledger import ledger
 from scripts.swarm_ledger.api import resources, routes
+from scripts.swarm_ledger.api.services import Services
 from scripts.swarm_ledger.repository import sqlite
 from tests.swarm_ledger.test_sqlite import CONTENT, store
 
 PATHS = ("members", "metadata", "phases/p1/comments", "tasks/t1/comments")
+
+
+def over(repository: sqlite.SQLiteLedgerRepository) -> Services:
+    return cast(Services, SimpleNamespace(repository=repository))
 
 
 @pytest.fixture
@@ -41,7 +47,7 @@ def test_a_revision_read_of_a_non_record_path_reads_only_its_rows(
         raise AssertionError(f"{path} read the whole ledger {slug}")
 
     monkeypatch.setattr(stored, "current", refused)
-    assert routes.ledger_read(SimpleNamespace(repository=stored), "ledger", path, {}) == whole
+    assert routes.ledger_read(over(stored), "ledger", path, {}) == whole
 
 
 def test_a_paged_members_read_still_reads_the_whole_ledger(
@@ -50,13 +56,13 @@ def test_a_paged_members_read_still_reads_the_whole_ledger(
     reads: list[str] = []
     current = stored.current
     monkeypatch.setattr(stored, "current", lambda slug: reads.append(slug) or current(slug))
-    routes.ledger_read(SimpleNamespace(repository=stored), "ledger", "members", {"limit": 1})
+    routes.ledger_read(over(stored), "ledger", "members", {"limit": 1})
     assert reads == ["ledger"]
 
 
 def test_a_thread_read_of_a_missing_record_is_missing(stored: sqlite.SQLiteLedgerRepository) -> None:
     with pytest.raises(routes.APIError) as refused:
-        routes.ledger_read(SimpleNamespace(repository=stored), "ledger", "tasks/t9/comments", {})
+        routes.ledger_read(over(stored), "ledger", "tasks/t9/comments", {})
     assert refused.value.status == 404
 
 

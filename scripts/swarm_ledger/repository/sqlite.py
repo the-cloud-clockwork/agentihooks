@@ -406,13 +406,15 @@ class SQLiteLedgerRepository:
 
     adopts = True
 
-    def __init__(self, path: Path | None = None, domain=None):
+    def __init__(self, path: Path | None = None, domain: Any = None, entries: Path | None = None) -> None:
         self._path = None if path is None else Path(path)
         self._domain = domain
+        self.entries = entries
         self.trace = None
         self._ready = set()
         self._cache = {}
         self._loads = {}
+        self._files = {}
         self._guard = threading.Lock()
         self._readers = threading.local()
         self._held = {}
@@ -434,12 +436,13 @@ class SQLiteLedgerRepository:
     def directory(self) -> Path:
         return self.path.parent
 
-    def bound(self, domain) -> "SQLiteLedgerRepository":
+    def bound(self, domain: Any) -> "SQLiteLedgerRepository":
         """This repository, or one sharing its cache that reads its folder and rules from another copy of the domain."""
         if domain is self.domain or self._path is not None:
             return self
-        twin = SQLiteLedgerRepository(domain=domain)
+        twin = SQLiteLedgerRepository(domain=domain, entries=self.entries)
         twin._cache, twin._loads, twin._ready, twin._guard = self._cache, self._loads, self._ready, self._guard
+        twin._files = self._files
         return twin
 
     @contextmanager

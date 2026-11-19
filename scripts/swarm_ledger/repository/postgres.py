@@ -389,15 +389,16 @@ class Database:
 class PostgresLedgerRepository(SQLiteLedgerRepository):
     adopts = False
 
-    def __init__(self, address: str, domain=None):
-        super().__init__(None, domain)
+    def __init__(self, address: str, domain: Any = None, entries: Path | None = None) -> None:
+        super().__init__(None, domain, entries)
         self.address = address
 
-    def bound(self, domain) -> "PostgresLedgerRepository":
+    def bound(self, domain: Any) -> "PostgresLedgerRepository":
         if domain is self.domain:
             return self
-        twin = PostgresLedgerRepository(self.address, domain)
+        twin = PostgresLedgerRepository(self.address, domain, self.entries)
         twin._cache, twin._loads, twin._ready, twin._guard = self._cache, self._loads, self._ready, self._guard
+        twin._files = self._files
         return twin
 
     def _key(self, slug):
