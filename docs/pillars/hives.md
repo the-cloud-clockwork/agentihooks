@@ -1860,7 +1860,7 @@ agentihooks swarm <slug> focus phases/<phase id> --top
 agentihooks swarm <slug> focus phases/<phase id> --only
 
 # Raise one task's rank band (master, planner or operator)
-agentihooks ledger --slug <slug> --as <name> task set <task id> rank=urgent
+agentihooks api --slug <slug> --as <name> task set <task id> rank=urgent
 
 # Clear a focus or a freeze record
 agentihooks swarm <slug> unfreeze phases/<phase id>
