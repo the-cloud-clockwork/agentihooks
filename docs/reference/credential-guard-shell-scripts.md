@@ -13,11 +13,8 @@ a tree that holds one. It also refuses an awk program that reads a value out of
 agent only meant to list variable names.
 
 On 17 November three hive agent sessions printed credential values into their
-transcripts while listing environment names: the swarm ledger app's Postgres
-password inside a database address, part of the hive GitHub App private key,
-and the hive and swarm Redis addresses together with the hive ledger
-credential. The guard was on in those pods and refused plain `env | grep`
-forms in the same sessions. These three commands, shortened here, passed:
+transcripts while listing environment names. The delivering pull request
+records that the guard was on in those pods and refused plain `env | grep` forms in the same sessions. These three commands, shortened here, passed:
 
 ```bash
 kubectl exec -n swarm-hive-001 $H -- sh -c 'env | grep -iE "ledger|swarm_url" | sed -E "s/(TOKEN|KEY|SECRET|PASS)[^=]*=.*/\1=<redacted>/"'
@@ -71,10 +68,11 @@ on a top level `Bash` command:
 
 - environment dumps (`env`, `printenv`, `export`, `export -p`, `declare -x`,
   `set`) that do not end in a count
-- `printenv` of a name that looks secret, and `echo` or `printf` of such a
-  variable; a name looks secret when it contains `PASSWORD`, `PASSWD`,
-  `SECRET`, `TOKEN`, `API_KEY`, `APIKEY`, `CREDENTIAL`, `PRIVATE_KEY`,
-  `ACCESS_KEY`, `SESSION_KEY` or `AUTH`, in any case
+- `printenv` of a name that looks secret, and any part of the command that
+  runs `echo` or `printf` and names such a variable with `$` anywhere in it; a
+  name looks secret when it contains `PASSWORD`, `PASSWD`, `SECRET`, `TOKEN`,
+  `API_KEY`, `APIKEY`, `CREDENTIAL`, `PRIVATE_KEY`, `ACCESS_KEY`,
+  `SESSION_KEY` or `AUTH`, in any case
 - awk reads of `ENVIRON` values, described below
 - reads of `/proc/<pid>/environ`
 - reads of dotenv, shell startup and credential store files
@@ -107,10 +105,12 @@ were names. Only a count ends the dump: `wc`, or `grep` with `-c`.
 ## awk reads of ENVIRON values
 
 An `awk`, `gawk`, `mawk` or `nawk` stage is refused when its text contains
-`ENVIRON` followed by `[`, with any spaces or new lines between them. The awk
-can be any stage of a pipeline, a path such as `/usr/bin/awk`, the command a
-`kubectl`, `docker`, `podman`, `nerdctl` or `ssh` wrapper runs, or the command
-inside a shell `-c` script.
+`ENVIRON` followed by `[`, with any spaces or new lines between them. Any of
+the four can be any stage of a pipeline, a path such as `/usr/bin/awk`, or the
+command inside a shell `-c` script. Through a `kubectl`, `docker`, `podman`,
+`nerdctl` or `ssh` wrapper that runs it directly, only `awk` is read, because
+the wrapper's command starts at a reader word and `gawk`, `mawk` and `nawk`
+are not reader words.
 
 ```bash
 awk 'BEGIN{for(k in ENVIRON) if(k ~ /^AGENTIHOOKS_(HIVE|SWARM)/) print k"="ENVIRON[k]}'
@@ -248,13 +248,12 @@ safe for listing the environment; use the name listing above.
 
 Delivered by pull request
 [#12032](https://github.com/the-cloud-clockwork/agentihooks/pull/12032). The
-cause was proven before the change by running the three 17 November commands
-through the guard on dev: each returned no refusal. The Proofs run on the red
-test head failed the 18 new cases and passed every pass control (run
-44318050064); the tests run on the merged head was green (run 44328058746).
-The exposed values were not rotated, under the operator rule of 21 October
-that holds every rotation until release, except for a credential leaked to
-GitHub.
+cause was proven before the change: a replay of the three 17 November commands
+through the guard's `evaluate` on dev at `1b19d6f0ef` returned no refusal for
+each, as recorded in the pull request. The Proofs workflow run on the red test
+head `0dc0d5e58` failed 18 cases, all new seams, and passed every pass control
+(run 44318050064). The Tests workflow run on the pull request head `2c156cd2b`
+was green (run 44328058746).
 
 In `hooks.context.credential_guard`, `shell_scripts` returns the scripts a
 shell stage runs with `-c`, through `unwrapped` for a wrapper's command, and
@@ -262,7 +261,7 @@ shell stage runs with `-c`, through `unwrapped` for a wrapper's command, and
 check. `awk_environ_verdict` is the awk check, run with the other top level
 checks in `decide_bash`.
 
-The three 17 November commands, as typed, are rows of the guard case table in
+The three 17 November commands, in full, are rows of the guard case table in
 `tests/test_credential_guard.py`. Regression tests:
 `test_an_environment_dump_inside_a_shell_script_is_refused`,
 `test_a_shell_script_that_prints_no_value_passes`,
