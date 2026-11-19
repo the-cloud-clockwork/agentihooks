@@ -4782,7 +4782,7 @@ kubectl -n agentihooks-swarm logs deploy/agentihooks-swarm-controller -c control
   | sort | uniq -c | sort -rn
 ```
 
-When more than one controller pod is running, `deploy/` picks one of them. Read each pod by name from `kubectl -n agentihooks-swarm get pods` when the line you expect is missing. A tick run by the `agentihooks-swarm.service` user unit writes the same lines to its journal; read them with `journalctl --user -u agentihooks-swarm.service`.
+When more than one controller pod is running, `deploy/` picks one of them. Read each pod by name from `kubectl -n agentihooks-swarm get pods` when the line you expect is missing. A tick run by the `agentihooks-swarm.service` user unit writes the same lines to its journal; read them with `TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-1h" --until now`.
 
 | Symptom | Check and action |
 |---|---|
