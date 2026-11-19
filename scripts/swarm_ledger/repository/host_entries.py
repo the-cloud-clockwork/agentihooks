@@ -3,6 +3,7 @@ import json
 import os
 import uuid
 from collections.abc import Mapping
+from contextlib import suppress
 from pathlib import Path
 
 from .entry import Entry
@@ -21,7 +22,7 @@ def path(held: Path, key: tuple[str, str]) -> Path:
     return held / (hashlib.sha256(json.dumps(key).encode()).hexdigest()[:32] + ".entry")
 
 
-def read(file: Path, generation: int) -> Entry | None:
+def read(file: Path, generation: int) -> tuple[int, Entry] | None:
     try:
         with file.open("rb") as stream:
             held = int(stream.readline())
@@ -30,11 +31,11 @@ def read(file: Path, generation: int) -> Entry | None:
             fragments = document(json.loads(stream.read()))
     except (OSError, ValueError):
         return None
-    return Entry(held, None, fragments.value, fragments)
+    return held, Entry(held, None, fragments.value, fragments)
 
 
 def write(file: Path, generation: int, text: str) -> None:
-    staged = file.with_name(file.name + "." + uuid.uuid4().hex)
+    staged = file.with_name(file.name + uuid.uuid4().hex)
     try:
         file.parent.mkdir(parents=True, exist_ok=True)
         with os.fdopen(os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w", encoding="utf-8") as stream:
@@ -42,4 +43,5 @@ def write(file: Path, generation: int, text: str) -> None:
             stream.write(text)
         os.replace(staged, file)
     except OSError:
-        staged.unlink(missing_ok=True)
+        with suppress(OSError):
+            staged.unlink()

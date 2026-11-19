@@ -107,7 +107,16 @@ def record_path(path: str) -> bool:
 
 def own_rows(path: str) -> tuple[str, ...]:
     """The stored parts a read of path needs when it needs only some of the ledger, else none."""
-    return (path,) if record_path(path) else ()
+    record, _, thread = path.rpartition("/")
+    if record_path(path):
+        return (path,)
+    if record_path(record) and thread in models.THREADS.get(record.split("/")[0], ()):
+        return (record,)
+    if path == "members":
+        return ("_meta.members",)
+    if path == "metadata":
+        return resources.METADATA_KEYS
+    return ()
 
 
 def context_evidence(services: Services, slug: str, task: str, ref: str) -> dict:

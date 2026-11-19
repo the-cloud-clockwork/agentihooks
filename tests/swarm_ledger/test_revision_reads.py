@@ -1,6 +1,7 @@
 """Tests for revision reads: the ack revision and the guard read of a members, metadata or record thread path read
 only that path's rows, never the whole ledger."""
 
+import argparse
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -74,6 +75,7 @@ def test_a_thread_read_of_a_missing_record_is_missing(stored: sqlite.SQLiteLedge
         ("tasks/t1/comments", ("tasks/t1",)),
         ("phases/p1/comments", ("phases/p1",)),
         ("tasks/t1/title", ()),
+        ("alerts/a1/comments", ()),
         ("tasks", ()),
         ("chat", ()),
         ("members/reader", ()),
@@ -108,7 +110,7 @@ def test_ack_reads_the_revision_from_the_metadata_rows_alone(
 
     monkeypatch.setattr(ledger, "resource", resource)
     monkeypatch.setattr(ledger, "call", call)
-    ledger.cmd_ack(SimpleNamespace(slug="ledger", name="reader", rev=None))
+    ledger.cmd_ack(argparse.Namespace(slug="ledger", name="reader", rev=None))
     assert reads == ["metadata"]
     assert [[(op["op"], op["rev"]) for op in ops or []] for ops in writes] == [[("ack", 7)]]
     assert json.loads(capsys.readouterr().out) == {"acked": 7}

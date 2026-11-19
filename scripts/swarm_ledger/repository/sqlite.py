@@ -11,7 +11,7 @@ from typing import Any
 
 from scripts.swarm_ledger import request_metrics
 
-from . import artifact_files, heap, hierarchy, live_rows, media_files, outbox, refresh, writer_copy
+from . import artifact_files, heap, hierarchy, host_entries, live_rows, media_files, outbox, refresh, writer_copy
 from .entry import Entry
 from .events import append_events, read_events, trim_events, write_events
 from .fragments import document
@@ -414,7 +414,7 @@ class SQLiteLedgerRepository:
         self._ready = set()
         self._cache = {}
         self._loads = {}
-        self._files = {}
+        self._files: dict[tuple[str, str], int] = {}
         self._guard = threading.Lock()
         self._readers = threading.local()
         self._held = {}
@@ -490,10 +490,10 @@ class SQLiteLedgerRepository:
             outbox.migrate(connection)
             self._ready.add(path)
 
-    def _key(self, slug):
+    def _key(self, slug: str) -> tuple[str, str]:
         return str(self.path), slug
 
-    def _entry(self, connection, slug: str) -> Entry:
+    def _entry(self, connection: sqlite3.Connection, slug: str) -> Entry:
         """The stored ledger; a reader whose snapshot predates a cached write gets that newer committed copy."""
         row = connection.execute(GENERATION, (slug,)).fetchone()
         if row is None:
@@ -504,8 +504,9 @@ class SQLiteLedgerRepository:
         with self._guard:
             loading = self._loads.setdefault(self._key(slug), threading.Lock())
         with request_metrics.locked(loading):
-            cached = self._cache.get(self._key(slug))
+            cached = self._cache.get(self._key(slug)) or self._host_entry(slug, row[0])
             if cached is not None and cached.generation >= row[0]:
+                self._remember(slug, cached)
                 return cached
             state, writer = self._refreshed(connection, slug, cached, row[0])
             whole = state is None
@@ -518,6 +519,7 @@ class SQLiteLedgerRepository:
             self._remember(slug, entry)
         if whole:
             heap.release()
+        self._keep(slug, entry, row[0], whole)
         return entry
 
     def _refreshed(self, connection, slug: str, cached: Entry | None, generation: int) -> tuple:
@@ -525,6 +527,25 @@ class SQLiteLedgerRepository:
             return None, None
         paths = refresh.changed_paths(connection, slug, cached.generation, generation, CHANGES_KEPT)
         return (None, None) if paths is None else writer_copy.refreshed(connection, slug, cached, paths)
+
+    def _host_entry(self, slug: str, generation: int) -> Entry | None:
+        """This host's copy of the ledger when it is no newer than generation."""
+        if self.entries is None:
+            return None
+        key = self._key(slug)
+        held = host_entries.read(host_entries.path(self.entries, key), generation)
+        if held is None:
+            return None
+        self._files[key] = held[0]
+        return held[1]
+
+    def _keep(self, slug: str, entry: Entry, generation: int, whole: bool) -> None:
+        """Store the built entry as this host's copy after a whole load or once the copy is BEHIND generations old."""
+        key = self._key(slug)
+        if self.entries is None or (not whole and generation - self._files.get(key, generation) < host_entries.BEHIND):
+            return
+        host_entries.write(host_entries.path(self.entries, key), generation, entry.text)
+        self._files[key] = generation
 
     def _remember(self, slug: str, entry: Entry) -> None:
         with self._guard:
