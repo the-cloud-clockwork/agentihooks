@@ -57,6 +57,7 @@ FIX_LINK = re.compile(
 )
 ACTIVE = frozenset({"queued", "in_progress", "waiting", "pending", "requested"})
 TOOL_SECONDS = 60.0
+RUN_READ_SECONDS = 10.0
 MERGED_FIXES = "merged-fixes"
 LEGACY_REASON = re.compile(r"pressed on swarm (\S+)")
 FIXER_TASK = re.compile(r"promo-[0-9]+-[0-9]+|crew-[0-9]+(?:-[0-9]+)?-fix-[0-9]+")
@@ -262,12 +263,15 @@ def fix_branch(url: str) -> str:
 
 def run_branch(repository: str, resource: str) -> str:
     """Return the head branch of one Actions run or job of ``repository``, ``resource`` being runs/ID or jobs/ID, read
-    through the source control port; one without a head branch reads as an empty name, and a failed read refuses."""
+    through the source control port within RUN_READ_SECONDS, short enough that the PreToolUse hook asking it refuses a
+    stalled read before its own timeout lets the command through; one without a head branch reads as an empty name,
+    and a failed read refuses."""
     from scripts.swarm.stack import PORT_ERRORS, refusal
 
     path = f"repos/{repository}/actions/{resource}"
     try:
-        return json.loads(port(repository).download(path, deadline=Deadline.after(TOOL_SECONDS)))["head_branch"] or ""
+        deadline = Deadline.after(RUN_READ_SECONDS)
+        return json.loads(port(repository).download(path, deadline=deadline))["head_branch"] or ""
     except PORT_ERRORS as error:
         raise SwarmError(f"cannot read {path}: {refusal(error)}") from error
 

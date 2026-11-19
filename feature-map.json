@@ -5945,7 +5945,8 @@
         "tests/swarm/test_panic.py::test_a_fix_branch_session_keeps_a_rerun_of_one_run_or_job_on_its_branch",
         "tests/swarm/test_panic.py::test_a_rerun_reads_its_run_from_the_repository_origin_names",
         "tests/swarm/test_panic.py::test_a_rerun_naming_no_single_run_or_job_stays_frozen_and_reads_no_run",
-        "tests/swarm/test_panic.py::test_a_fix_branch_session_rerunning_another_fix_branchs_run_stays_frozen",
+        "tests/swarm/test_panic.py::test_a_fix_branch_session_rerunning_another_fix_branch_run_stays_frozen",
+        "tests/swarm/test_panic.py::test_a_successor_rerun_is_spared_only_for_a_run_on_the_fix_branch_it_tracks",
         "tests/swarm/test_panic.py::test_a_rerun_from_a_branch_no_fix_registers_reads_no_run",
         "tests/swarm/test_panic.py::test_a_rerun_of_a_run_that_cannot_be_read_stays_frozen",
         "tests/swarm/test_panic.py::test_a_run_read_returns_its_head_branch_through_its_repository_port",
@@ -5965,7 +5966,7 @@
         "tests/swarm/test_panic.py::test_panic_drop_takes_exactly_one_fix",
         "tests/swarm/test_panic.py::test_panic_drop_refuses_a_fix_the_panic_does_not_hold",
         "tests/swarm/test_panic.py::test_panic_drop_refuses_while_no_panic_holds_the_swarm",
-        "tests/swarm/test_panic_lab.py::test_panic_drop_grades_only_the_fixes_left_first_in_the_lab"
+        "tests/swarm/test_panic_lab.py::test_the_operator_drops_a_panic_fix_and_the_lab_grades_only_the_fixes_left_first"
       ]
     },
     {

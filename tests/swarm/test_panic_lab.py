@@ -137,7 +137,7 @@ def test_panic_on_without_a_fix_pauses_every_pull_request_grade(
 
 
 @pytest.mark.feature("panic-drop-one-fix")
-def test_panic_drop_grades_only_the_fixes_left_first_in_the_lab(
+def test_the_operator_drops_a_panic_fix_and_the_lab_grades_only_the_fixes_left_first(
     store: RedisStore,
     lab: list[tuple[str, str, dict[str, Any]]],
     heads: list[str],

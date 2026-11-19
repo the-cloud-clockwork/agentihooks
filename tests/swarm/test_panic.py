@@ -1962,6 +1962,8 @@ def test_a_rerun_reads_its_run_from_the_repository_origin_names(
         "gh run rerun 7 --job 9",
         "gh run rerun --yes 7",
         "gh run rerun --job",
+        "gh run rerun 7 --job",
+        "gh run rerun 7 -j",
         "gh run rerun -j x",
     ],
 )
@@ -1979,7 +1981,7 @@ def test_a_rerun_naming_no_single_run_or_job_stays_frozen_and_reads_no_run(
 
 
 @pytest.mark.feature("panic-rerun-reads-run-branch")
-def test_a_fix_branch_session_rerunning_another_fix_branchs_run_stays_frozen(
+def test_a_fix_branch_session_rerunning_another_fix_branch_run_stays_frozen(
     bound: None, store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     _branches(monkeypatch, {})
@@ -1989,6 +1991,20 @@ def test_a_fix_branch_session_rerunning_another_fix_branchs_run_stays_frozen(
     cwd = _checkout(tmp_path / "fix", "fix-branch")
     block = blocker_window.pretool("Bash", {"command": "gh run rerun 7"}, "engineer-session", cwd)[1]
     assert block == blocker_window.FROZEN.format(slug=SLUG, reason="reason")
+    assert read == ["repos/the-cloud-clockwork/agentihooks/actions/runs/7"]
+
+
+@pytest.mark.parametrize(("head", "spared"), [("fix-branch", True), ("engineer-successor", False)])
+@pytest.mark.feature("panic-rerun-reads-run-branch")
+def test_a_successor_rerun_is_spared_only_for_a_run_on_the_fix_branch_it_tracks(
+    bound: None, store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, head: str, spared: bool
+) -> None:
+    _branches(monkeypatch, {})
+    read = _heads(monkeypatch, head)
+    panic.engage(store, SLUG, "reason", False, [BRANCH_FIX], 0)
+    cwd = _successor(tmp_path / "successor")
+    block = blocker_window.pretool("Bash", {"command": "gh run rerun 7"}, "engineer-session", cwd)[1]
+    assert block == (None if spared else blocker_window.FROZEN.format(slug=SLUG, reason="reason"))
     assert read == ["repos/the-cloud-clockwork/agentihooks/actions/runs/7"]
 
 
@@ -2035,7 +2051,7 @@ def test_a_run_read_returns_its_head_branch_through_its_repository_port(
     assert [(call.operation, call.args) for call in port.calls] == [
         ("download", ("repos/the-cloud-clockwork/antoncore/actions/jobs/9",))
     ]
-    assert panic.TOOL_SECONDS - 5 < port.calls[0].deadline.remaining <= panic.TOOL_SECONDS
+    assert panic.RUN_READ_SECONDS - 5 < port.calls[0].deadline.remaining <= panic.RUN_READ_SECONDS == 10.0
 
 
 @pytest.mark.parametrize(

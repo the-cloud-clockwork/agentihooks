@@ -160,7 +160,7 @@ _API_VALUES = frozenset(
 )
 _GH_REPO = re.compile(r"-R.*|--repo(=.*)?")
 _RERUN_JOB_FLAGS = frozenset({"--job", "-j"})
-_RERUN_FLAGS = _RERUN_JOB_FLAGS | {"--failed", "-d", "--debug"}
+_RERUN_FLAGS = frozenset({"--failed", "-d", "--debug"})
 _RERUN_JOB = re.compile(r"(?:--job=|-j=?)(.+)")
 _RERUN_ID = re.compile(r"(?:runs|jobs)/[0-9]+")
 _GIT_ENVIRONMENT = re.compile(r"\bGIT_(DIR|WORK_TREE|COMMON_DIR|NAMESPACE|CONFIG\w*)=")
@@ -505,7 +505,9 @@ def _rerun(words: list[str]) -> str:
     for before, word in pairwise(words[2:]):
         job = _RERUN_JOB.fullmatch(word)
         if before in _RERUN_JOB_FLAGS:
-            named.append(f"jobs/{word}")
+            named[-1] += word
+        elif word in _RERUN_JOB_FLAGS:
+            named.append("jobs/")
         elif job is not None:
             named.append(f"jobs/{job[1]}")
         elif word not in _RERUN_FLAGS:
