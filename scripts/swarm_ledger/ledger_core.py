@@ -314,7 +314,7 @@ def warnings(doc):
     return found
 
 
-def size_warning(text):
+def size_warning(text: str) -> bool:
     return re.fullmatch(r"(overview|phase \S+ description) has \d+ words, limit \d+", text) is not None
 
 
