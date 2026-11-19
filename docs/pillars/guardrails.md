@@ -556,6 +556,17 @@ listing rules, configuration, limits and troubleshooting.
 
 ---
 
+## Secret reads with kubectl describe
+
+The credential guard refuses describe of every Secret and of resources whose
+type is missing or supplied by the shell. A service account token Secret's
+describe output prints the token in full. Use the get table or a Go template
+that lists only data key names. Literal non-Secret types still pass. See
+[Secret reads with kubectl describe](../reference/credential-guard-describe-secret.md)
+for examples, flag handling, configuration, limits and troubleshooting.
+
+---
+
 ## All guardrails at a glance
 
 | # | Guardrail | Hook event | Default | Block or warn | Config key |
