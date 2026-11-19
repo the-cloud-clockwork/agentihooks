@@ -1,0 +1,12 @@
+# ruleid: master-effort-below-xhigh
+MASTER_FLOOR = "off"
+# ruleid: master-effort-below-xhigh
+MASTER_FLOOR = "low"
+# ruleid: master-effort-below-xhigh
+MASTER_FLOOR = "medium"
+# ruleid: master-effort-below-xhigh
+MASTER_FLOOR = "high"
+# ok: master-effort-below-xhigh
+MASTER_FLOOR = "xhigh"
+# ok: master-effort-below-xhigh
+MASTER_FLOOR = "max"

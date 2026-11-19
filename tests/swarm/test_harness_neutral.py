@@ -117,12 +117,12 @@ def test_a_full_codex_only_swarm_refuses_the_spawn_without_guessing(codex_only):
     assert error.value.status == "unavailable"
 
 
-def test_fill_takes_the_rotation_harness_when_nothing_is_saved(monkeypatch):
+def test_fill_takes_the_rotation_harness_when_nothing_is_saved(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         agent_choice, "choose", lambda requested, environ: ("codex", "rotation") if requested == "" else 0
     )
     filled = master_launch.fill({}, SwarmConfig("sw", "/repo", 0, 0))
-    assert filled == {"profile": "master", "harness": "codex", "model": "gpt-6.1-sol", "effort": "high"}
+    assert filled == {"profile": "master", "harness": "codex", "model": "gpt-6.1-sol", "effort": "xhigh"}
 
 
 def test_fill_leaves_the_harness_empty_when_no_harness_has_an_account(monkeypatch):
