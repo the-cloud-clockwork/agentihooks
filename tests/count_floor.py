@@ -811,23 +811,42 @@ def retirements(base: Path, head: Path) -> dict[str, str]:
             continue
         retired[entry[0]] = entry[1]["reader"]
     reviewed = os.environ.get("TEST_COUNT_REVIEWED_HEAD")
-    return _approved(base, retired, reviewed) if reviewed and retired else retired
+    reviews = Path(os.environ.get("TEST_COUNT_REVIEWS", ""))
+    return _approved(base, retired, reviews, reviewed) if reviewed and retired else retired
 
 
 def code_owners(root: Path, path: str) -> list[str]:
-    """Return the owners named by the last rule of the tree's CODEOWNERS that matches a repository path."""
+    """Return the owners named by the last rule of the tree's CODEOWNERS that matches a repository path.
+
+    Rules are read as anchored paths with a star inside one segment and a trailing slash for a folder; one rule
+    outside that grammar leaves every path without a known owner.
+    """
     rules = root / ".github" / "CODEOWNERS"
     owners: list[str] = []
     for line in rules.read_text().splitlines() if rules.is_file() else []:
-        pattern, *named = line.split() or [""]
-        body = re.escape(pattern.strip("/")).replace(r"\*", "[^/]*") + ("/.*" if pattern.endswith("/") else "")
-        if pattern[:1] not in ("", "#") and re.fullmatch(body, path):
+        pattern, *named = line.split() or ["#"]
+        if pattern.startswith("#"):
+            continue
+        folder = pattern.endswith("/")
+        if (
+            not pattern.startswith("/")
+            or "**" in pattern
+            or "?" in pattern
+            or (not folder and (root / pattern.strip("/")).is_dir())
+        ):
+            print(f"CODEOWNERS rule {pattern} is outside the grammar the floor matches, so no code owner is known")
+            return []
+        body = re.escape(pattern.strip("/")).replace(r"\*", "[^/]*") + ("/.*" if folder else "")
+        if re.fullmatch(body, path):
             owners = named
     return owners
 
 
-def approvers(reviews: Path, head: str) -> set[str]:
-    """Return each reviewer, as a lower case @login, whose last approval, change request or dismissal approves head."""
+def approvers(reviews: Path, commit: str) -> set[str]:
+    """Return each reviewer, as a lower case @login, whose last deciding review is an approval of the commit.
+
+    Approvals, change requests and dismissals decide; a comment leaves the previous decision standing.
+    """
     deciding = {}
     try:
         for line in reviews.read_text().splitlines():
@@ -840,13 +859,13 @@ def approvers(reviews: Path, head: str) -> set[str]:
     return {
         f"@{user}"
         for user, review in deciding.items()
-        if review["state"] == "APPROVED" and review.get("commit_id") == head
+        if review["state"] == "APPROVED" and review.get("commit_id") == commit
     }
 
 
-def _approved(base: Path, retired: dict[str, str], head: str) -> dict[str, str]:
-    """Keep each retirement a code owner of its file approved on the pull request head, naming that owner."""
-    approved = approvers(Path(os.environ.get("TEST_COUNT_REVIEWS", "")), head)
+def _approved(base: Path, retired: dict[str, str], reviews: Path, commit: str) -> dict[str, str]:
+    """Keep each retirement a code owner of its file approved on the commit, naming that owner beside its reader."""
+    approved = approvers(reviews, commit)
     kept = {}
     for nodeid, reader in retired.items():
         name = retirement_path(base, nodeid).relative_to(base).as_posix()

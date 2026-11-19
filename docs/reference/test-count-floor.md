@@ -247,11 +247,11 @@ An entry admits its lost test only when all of these hold:
 3. The base has no file of that name, so the pull request itself retires the test.
 4. On a pull request, a code owner of the retirement file approved the pull request head the run grades.
 
-Any other file under `test-retirements/`, a symbolic link included, is named in the log and admits nothing; a `test-retirements` folder that is itself a symbolic link admits nothing, and `--retire` refuses to write through one. A lost test without an entry still counts against the floor.
+Any other file under `test-retirements/`, a symbolic link included, is named in the log and admits nothing; a `test-retirements` folder that is itself a symbolic link admits nothing, and `--retire` refuses to write through one. A lost test without an entry still counts against the floor. `/test-retirements/` is code-owned, so every retirement goes through owner review, which the floor checks on a pull request through [Code owner approval](#code-owner-approval).
 
 ```text
 test-retirements/0000….json is not a new retirement signed by a Standards reader, so it admits nothing
-tests/test_ci_workflow.py::test_nightly_report_uploads_its_summary is admitted: the pull request retires it, signed by Standards reader and approved by @nestorcolt
+tests/test_ci_workflow.py::test_nightly_report_uploads_its_summary is admitted: the pull request retires it, signed by Standards reader and approved by @code-owner
 ```
 
 #### Code owner approval
@@ -263,10 +263,10 @@ The reader is text the pull request writes, so on a pull request the floor also 
 | `TEST_COUNT_REVIEWED_HEAD` | The pull request head commit. While it is set, a retirement is admitted only with a code owner's approval of this commit. |
 | `TEST_COUNT_REVIEWS` | The reviews file. A missing or unreadable file admits no retirement while the head is set. |
 
-The owners of a retirement file are those the last matching rule of the base revision's `.github/CODEOWNERS` names, so a pull request cannot name its own approver. Each reviewer's last approval, request for changes or dismissal decides; a later comment leaves it standing, as on GitHub. An approval of an earlier head does not count, so every push after the approval needs a new one. Team owners are not matched, since a review names only its user.
+The owners of a retirement file are those the last matching rule of the base revision's `.github/CODEOWNERS` names, so a pull request cannot name its own approver. The floor reads anchored rules with a star inside one segment and a trailing slash for a folder, the grammar `tests/test_codeowners.py` holds the file to and matches with the same `tests.count_floor.code_owners`; one rule outside it leaves no known owner, so no retirement is admitted. Each reviewer's last approval, request for changes or dismissal decides; a later comment leaves it standing, as on GitHub. An approval of an earlier head does not count, so every push after the approval needs a new one. Team owners are not matched, since a review names only its user.
 
 ```text
-test-retirements/1f0f….json is not approved on the pull request head by a code owner (@nestorcolt), so it admits nothing
+test-retirements/1f0f….json is not approved on the pull request head by a code owner (@code-owner), so it admits nothing
 The pull request reviews could not be read, so no retirement is admitted
 ```
 

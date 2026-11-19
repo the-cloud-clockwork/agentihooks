@@ -1440,6 +1440,34 @@ def test_a_signed_retirement_is_admitted_only_with_a_code_owner_approval_of_the_
     assert (unread in result.stdout) == (reviews is None or isinstance(reviews, str))
 
 
+@pytest.mark.parametrize(
+    "rule",
+    ["* @engineer", "/test-retirements/** @engineer", "/test-retirements/?.json @engineer", "/tests @engineer"],
+    ids=["unanchored", "double-star", "question-mark", "folder-without-slash"],
+)
+@pytest.mark.feature("count-floor-retirement-needs-code-owner-approval")
+def test_a_code_owner_rule_the_floor_cannot_match_admits_no_retirement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rule: str
+) -> None:
+    file = tmp_path / "reviews.jsonl"
+    file.write_text(json.dumps(_review("retirement-owner", "APPROVED")) + "\n")
+    monkeypatch.setenv("TEST_COUNT_REVIEWS", str(file))
+    monkeypatch.setenv("TEST_COUNT_REVIEWED_HEAD", REVIEWED)
+    retirement = _retirement(RETIRED_NODE, SIGNED)
+    result = _floor(
+        tmp_path,
+        {"test_mod.py": RETIRING},
+        {"test_mod.py": "def test_kept():\n    assert True\n"},
+        {"base": {".github/CODEOWNERS": f"/test-retirements/ @Retirement-Owner\n{rule}\n"}, "head": retirement},
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    unknown = f"CODEOWNERS rule {rule.split()[0]} is outside the grammar the floor matches, so no code owner is known\n"
+    assert unknown in result.stdout
+    refusal = "is not approved on the pull request head by a code owner (none), so it admits nothing\n"
+    assert f"{next(iter(retirement))} {refusal}" in result.stdout
+    assert f"{RETIRED_NODE} is admitted" not in result.stdout
+
+
 @pytest.mark.feature("count-floor-retirement-needs-code-owner-approval")
 def test_reviews_without_a_reviewed_head_leave_a_signed_retirement_graded_as_before(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
