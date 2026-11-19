@@ -61,6 +61,18 @@ def test_refusal_names_what_create_refuses_and_writes_nothing(store: RedisStore)
     assert store.refusal(config()) == "swarm smoke already exists"
 
 
+def test_create_refuses_a_swarm_made_after_its_refusal_check(store: RedisStore) -> None:
+    from unittest.mock import patch
+
+    store.create(config(max_eng=3))
+    with (
+        patch.object(store, "refusal", return_value=""),
+        pytest.raises(SwarmError, match="^swarm smoke already exists$"),
+    ):
+        store.create(config())
+    assert store.config("smoke").max_eng == 3
+
+
 def test_set_updates_caps_and_state(store):
     store.create(config())
     store.update("smoke", max_eng=3, state="paused")
