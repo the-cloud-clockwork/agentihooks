@@ -1,0 +1,11 @@
+rules:
+  - id: lab-push-zero-base-unchecked
+    languages: [python]
+    severity: ERROR
+    message: Reject a new branch push with a zero before id before constructing its lab head, so expansion never fetches the zero object id.
+    patterns:
+      - pattern: HeadEvent("push", $REPO, $PAYLOAD["after"], $PAYLOAD["before"], ...)
+      - pattern-not-inside: |
+          if $PAYLOAD["before"] == "0" * 40:
+              return []
+          ...

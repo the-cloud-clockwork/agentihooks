@@ -135,3 +135,22 @@ def test_the_batch_forwards_its_cache_and_a_zero_ttl(monkeypatch: pytest.MonkeyP
     reread = ledger_events.fresh_reader(held(URLS[0], URLS[1]), "cache")
     assert reread(URLS[1]) is pull
     assert seen == [([URLS[0], URLS[1]], "cache", 0)]
+
+
+@pytest.mark.feature("swarm-waits-end-journals-its-phases")
+def test_the_batched_reread_is_journaled_as_one_views_row(port: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    from scripts.swarm import timing
+
+    reread = ledger_events.fresh_reader(held(*URLS))
+    with timing.tick("sw"):
+        assert head(reread(URLS[0])) == "fresh0"
+        assert head(reread(URLS[1])) == "fresh1"
+    lines = [json.loads(line) for line in capsys.readouterr().err.splitlines() if line.startswith("{")]
+    journaled = [
+        line["step"]
+        for line in lines
+        if line.get("event") == "swarm_tick_step"
+        and line.get("phase") == "finished"
+        and line["step"].startswith("scripts.swarm.ledger_events.")
+    ]
+    assert journaled == ["scripts.swarm.ledger_events.views"]

@@ -15,11 +15,12 @@ def fixed(monkeypatch):
     monkeypatch.setattr(stack_env, "free_port", lambda preferred: preferred + 1)
 
 
+@pytest.mark.feature("compose-stack-own-modes")
 def test_first_settings_are_generated_private(tmp_path, fixed):
     env = tmp_path / ".env"
     values = stack_env.settings(env)
     assert env.read_text() == (
-        "AGENTIHOOKS_DEPLOYMENT=compose\n"
+        "SWARM_DEPLOYMENT=compose\n"
         "SWARM_BIND=127.0.0.1\n"
         "SWARM_HIVE_ID=compose-controller\n"
         "SWARM_IMAGE_TAG=release\n"
@@ -51,7 +52,7 @@ def test_missing_settings_are_filled_in(tmp_path, fixed):
         "SWARM_PORT=9200\n"
         "SWARM_HIVE_ID=a=b\n"
         f"SWARM_REDIS_PASSWORD={PASSWORD}\n"
-        "AGENTIHOOKS_DEPLOYMENT=compose\n"
+        "SWARM_DEPLOYMENT=compose\n"
         "SWARM_BIND=127.0.0.1\n"
         "SWARM_IMAGE_TAG=release\n"
         "SWARM_REDIS_PORT=6380\n"

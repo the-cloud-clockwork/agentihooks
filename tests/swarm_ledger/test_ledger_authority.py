@@ -220,7 +220,9 @@ def test_the_swarm_client_keeps_service_authority_inside_a_pinned_session(crew):
     assert (OTHER, "Tick relay") in said
 
 
-def test_the_swarm_client_binds_agent_authored_writes_to_the_session(crew):
+def test_the_swarm_client_binds_agent_authored_writes_to_the_session(
+    crew: dict[str, str | int], capsys: pytest.CaptureFixture[str]
+) -> None:
     with pinned():
         LedgerClient().comment_phase(SLUG, "p1", "Own swarm line", by=WORKER)
         with pytest.raises(SwarmError) as refused:
@@ -228,9 +230,10 @@ def test_the_swarm_client_binds_agent_authored_writes_to_the_session(crew):
     said = [(entry.get("by"), entry["text"]) for entry in first_phase_comments()]
     assert (WORKER, "Own swarm line") in said
     assert "Forged swarm line" not in [text for _, text in said]
-    assert str(refused.value).endswith(
-        f"refused: phase p1 description has 101 words, limit 100; {WORKER} cannot write as {MASTER}"
-    )
+    assert str(refused.value).endswith(f"refused: {WORKER} cannot write as {MASTER}")
+    assert capsys.readouterr().err.splitlines() == [
+        f"ledger {SLUG} warning: phase p1 description has 101 words, limit 100"
+    ]
 
 
 def test_a_credential_for_one_name_refuses_another_agent_header(crew):

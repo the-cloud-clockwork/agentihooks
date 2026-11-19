@@ -1,13 +1,15 @@
 import threading
-from typing import TYPE_CHECKING
+from fnmatch import fnmatchcase
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
-from scripts.hive import admission
+from scripts.hive import admission, auth
 from tests.swarm.test_cli import env as env
 
 if TYPE_CHECKING:
     import fakeredis
+    from redis import Redis
 
 pytestmark = pytest.mark.unit
 
@@ -196,6 +198,55 @@ def test_a_reservation_expires_after_its_lifetime(redis):
     assert admission.reserve(redis, "anton", "s/two", 1) == (True, 0)
 
 
+class _Granted:
+    """A Redis client logged in under a hive member's key patterns. It refuses a key as Redis 7.4 does: EVAL declares
+    every key it names read and written and ZCOUNT only read, so a key the member may only read refuses EVAL."""
+
+    def __init__(self, redis: "fakeredis.FakeRedis", patterns: tuple[str, ...]) -> None:
+        self.redis = redis
+        self.written = [pattern[1:] for pattern in patterns if pattern.startswith("~")]
+        self.read = self.written + [pattern[3:] for pattern in patterns if pattern.startswith("%R~")]
+
+    def _reach(self, key: str, patterns: list[str]) -> None:
+        from redis.exceptions import NoPermissionError
+
+        if not any(fnmatchcase(key, pattern) for pattern in patterns):
+            raise NoPermissionError("No permissions to access a key")
+
+    def eval(self, script: str, numkeys: int, *keys_and_args: str) -> Any:
+        for key in keys_and_args[:numkeys]:
+            self._reach(key, self.written)
+        return self.redis.eval(script, numkeys, *keys_and_args)
+
+    def time(self) -> Any:
+        return self.redis.time()
+
+    def zcount(self, name: str, low: str, high: str) -> Any:
+        self._reach(name, self.read)
+        return self.redis.zcount(name, low, high)
+
+
+@pytest.mark.feature("hive-member-reads-every-hive-pending-admission")
+def test_a_hive_member_reads_every_hives_pending_admission_through_its_read_only_grant(
+    redis: "fakeredis.FakeRedis",
+) -> None:
+    admission.reserve(redis, "hive-two", "s/one", 2)
+    admission.reserve(redis, "hive-one", "s/own", 2)
+    admission.reserve(redis, "hive-one", "s/next", 2)
+    member = cast("Redis", _Granted(redis, auth._acl_keys("hive-one")))
+    assert admission.pending(member, "hive-two") == 1
+    assert admission.pending(member, "hive-one") == 2
+
+
+def test_pending_counts_the_reservations_that_expire_after_the_server_clock_millisecond(
+    redis: "fakeredis.FakeRedis", monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(redis, "time", lambda: (1_000, 900_400))
+    now = 1_000_900
+    redis.zadd(admission.key("anton"), {"s/gone": now - 1, "s/edge": now, "s/late": now + 0.25, "s/live": now + 1})
+    assert admission.pending(redis, "anton") == 2
+
+
 def test_a_reservation_key_lives_in_the_swarm_keyspace():
     from scripts.swarm.keyspace import ROOT
 
@@ -310,6 +361,20 @@ def test_view_lines_join_hive_lines_and_the_binding_line_and_stay_empty_without_
         "binding limit hive admission, room 0: hive vm cpu: busy",
     ]
     assert admission.view_lines([], {"host room": 3}) == []
+
+
+@pytest.mark.feature("status-names-each-hive-admission-count-a-member-may-not-read")
+def test_view_lines_name_each_refused_count_and_bind_only_over_the_hives_read() -> None:
+    hives = [hive_row("vm", 0, "cpu: busy", "cpu: busy")]
+    refused = {"far": "No permissions to access a key"}
+    assert admission.view_lines(hives, {"host room": 3}, refused) == [
+        "hive vm  admission room 0  cpu: busy",
+        "hive far  admission count unreadable: No permissions to access a key",
+        "binding limit hive admission, room 0: hive vm cpu: busy",
+    ]
+    assert admission.view_lines([], {"host room": 3}, refused) == [
+        "hive far  admission count unreadable: No permissions to access a key"
+    ]
 
 
 def test_status_report_carries_refusal_counts_for_the_ledger_page(env):

@@ -22,6 +22,7 @@ RECORD = "supervisor.json"
 DRAIN_S = 30
 UNREACHABLE_S = 300
 UNREACHABLE = 3
+PASS_S = 1
 STARTER = "AGENTIHOOKS_SCHEDULER_STARTER"
 UNIT = "agentihooks-scheduler.service"
 UNIT_ENV = "AGENTIHOOKS_SCHEDULER_UNIT"
@@ -114,7 +115,7 @@ async def run(scheduler: Scheduler, stop: asyncio.Event | None = None) -> bool:
                 silent_since = None
                 print("scheduler pass skipped: the state store did not answer", file=sys.stderr)
             try:
-                await asyncio.wait_for(stopped.wait(), timeout=1)
+                await asyncio.wait_for(stopped.wait(), timeout=PASS_S)
             except TimeoutError:
                 pass
     return False

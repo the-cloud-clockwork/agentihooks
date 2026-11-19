@@ -50,7 +50,7 @@ Each swarm picks its engine with its `engine` setting, `legacy` or `events`; see
 | Mode | Engine | Bus | Hub |
 |---|---|---|---|
 | `local` | `legacy`; `events` only with a hub on the same bus | `memory` unless the bus settings name NATS | None runs by default. The hub's `readiness` reactor offers nothing on the `memory` bus, so an `events` swarm needs a hub on a NATS bus. |
-| `compose` | `legacy`; `events` only with a hub on the same bus | The stack's `nats` service: `AGENTIHOOKS_BUS=nats` at `nats://nats:4222`, changed only through the stack settings `SWARM_BUS` and `SWARM_BUS_URL` | No hub service. The Compose task smoke runs `agentihooks hub run --once` in the `swarm` service to settle a task end to end. |
+| `compose` | `legacy`; `events` only with a hub on the same bus | The stack's `nats` service: `AGENTIHOOKS_BUS=nats` at `nats://nats:4222`, changed only through the stack settings `SWARM_BUS` and `SWARM_BUS_URL`; the `controller` and `hive` services take their mode only from `SWARM_DEPLOYMENT`, and the base stack services their scheduler state backend only from `SWARM_SCHEDULER_STATE_BACKEND` | No hub service. The Compose task smoke runs `agentihooks hub run --once` in the `swarm` service to settle a task end to end. |
 | `distributed` | `events` through the hub; a `legacy` swarm is ticked by the chart's controller, never by the workstation | NATS with JetStream from the `agentihooks-swarm` chart (`nats.enabled`, JetStream on) | The chart's `<release>-hub` Deployment, with `hub.enabled: true` and 2 replicas by default. It runs `agentihooks hub run`, scheduled only on nodes without the `anton.io/capacity-type` label. |
 
 ### Hub reactors
@@ -65,7 +65,7 @@ With a remote ledger, `agentihooks hub run` first issues the replica its own ser
 |---|---|---|
 | `timers` | `swarm.*.deadline.*` | Keeps scheduled deadlines and publishes `deadline.expired` when one is due. |
 | `inbox-wake` | `swarm.*.inbox-wake.requested` and a poll | Schedules the wake deadline for an inbox item and relays queued wake items onto the seat inbox. |
-| `inbox-wake-expiry` | `swarm.*.deadline.expired` | When the deadline expires, redelivers or wakes the item and schedules its next deadline. |
+| `inbox-wake-expiry` | `swarm.*.deadline.expired` | When the deadline expires, redelivers or wakes the item and schedules its next deadline. Sends no wake while an outage the tick published is open (see [Outage holds for agents the hub started](../pillars/hives.md#outage-holds-for-agents-the-hub-started)). |
 | `hive-loss` | `swarm.*.execution.started` | Publishes `execution.exited` for executions on a lost hive. |
 | `claim-lives` | `swarm.*.execution.started` | Counts each successful spoke launch once toward the task's three started lives cap. |
 | `lifecycle` | `swarm.*.execution.exited` | Orders the hive of an agent whose pane died to reopen its own conversation in its seat, up to three times, before it drops the agent (see [Resuming a dead agent the hub started](../pillars/hives.md#resuming-a-dead-agent-the-hub-started)). Refunds a started life on a park, quota handoff or operator preemption, releases the slot and claim, and settles the task. An exit a hive reports after an execution stop carries reason `stopped` and the stop's `stop_reason`, such as `ended` for an agent whose work ended (see [Stopping an agent whose work ended](../pillars/hives.md#stopping-an-agent-whose-work-ended)). |
@@ -804,7 +804,7 @@ of [master placement](../pillars/hives.md#master-placement).
 In `.env` next to `compose.yaml`:
 
 ```bash
-AGENTIHOOKS_DEPLOYMENT=compose
+SWARM_DEPLOYMENT=compose
 SWARM_BIND=198.51.100.5                               # the private interface, never 0.0.0.0 on a public host
 SWARM_PUBLIC_URL=http://swarm.example.internal:8765
 SWARM_ALLOWED_HOSTS=swarm.example.internal:8765

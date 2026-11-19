@@ -85,6 +85,7 @@ def wake(crew, at):
     return wake_pass(inbox, "sw", store.agents("sw"), herdr, ledger, at, 300_000)
 
 
+@pytest.mark.feature("ledger-event-notices-pass-the-seen-claim")
 def test_a_followup_closed_before_the_wake_never_reaches_the_master(crew):
     _, inbox, ledger, herdr = crew
     item = queue_event(crew)

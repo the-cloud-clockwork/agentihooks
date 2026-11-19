@@ -1,3 +1,4 @@
+import importlib
 import json
 import subprocess
 import sys
@@ -7,9 +8,11 @@ from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
+from scripts.scheduler import service
 from tests.ledger_load import streams
 
 
@@ -102,6 +105,16 @@ def test_the_delivery_check_waits_for_a_patch_published_after_the_measurement_wi
     assert [consumer["patches"] for consumer in result["consumers"]] == [result["writes"]] == [2]
     assert result["last_write_s"] < streams.SECONDS < result["delivered_s"] < streams.SECONDS + LAG_S
     assert result["delivered_s"] - result["last_write_s"] < streams.FOLLOW_PASS_S
+
+
+def test_the_follow_pass_bound_follows_the_scheduler_pass_period() -> None:
+    try:
+        with patch.object(service, "PASS_S", 7):
+            importlib.reload(streams)
+            assert streams.FOLLOW_PASS_S == 7 + streams.FOLLOW_S + streams.POLL_S + streams.PUBLISH_MARGIN_S
+    finally:
+        importlib.reload(streams)
+    assert streams.FOLLOW_PASS_S == service.PASS_S + streams.FOLLOW_S + streams.POLL_S + streams.PUBLISH_MARGIN_S
 
 
 def listener(variable: str) -> str:
