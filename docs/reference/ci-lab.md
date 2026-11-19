@@ -532,7 +532,7 @@ inhibit_rules:
 | Alert | Fires when | Holds for | One alert per | First check |
 |---|---|---|---|---|
 | `CILabQueueWaitHigh` | The predicted wait of the hotfix, pull request or queue class is over 1200 seconds, the 20 minute default past which the [lab behind claim hold](swarm-thresholds.md#lab-behind-claim-hold) holds new eng claims. A [wait the lab cannot predict](#a-wait-the-lab-cannot-predict) reads `+Inf` and fires it too, while the claim hold reads that wait as 0. Promotion and backfill never fire it | 10 minutes | class | Slots busy against slots total, and whether the worker pool sits at its maximum |
-| `CILabWorkersPending` | At least one `ci-lab-worker-*` pod in `ci-lab` is Pending | 15 minutes | the pool | The `cluster-autoscaler-oci-status` ConfigMap for the CI pool, and whether runners hold the CI nodes; every runner outranks a worker, see [Worker scheduling priority](#worker-scheduling-priority) |
+| `CILabWorkersPending` | At least one `ci-lab-worker-*` pod in `ci-lab` is Pending | 15 minutes | the pool | The `cluster-autoscaler-oci-status` ConfigMap for the CI pool, and whether no CI node can make room by preempting pods below a worker's priority, see [Worker scheduling priority](#worker-scheduling-priority) |
 | `CILabBudgetShedding` | `ci_lab_class_shed` is 1 for a class: the day's core budget left fell below that class's shed fraction, so its units wait for the budget to reset. Only backfill, promotion and queue shed | 5 minutes | class | Budget left on the dashboard and the shed fractions in the runtime config at `CI_LAB_RUNTIME_CONFIG` |
 | `CILabPullRequestBlockedByCap` | Pull request units are queued, every slot is busy, and any HorizontalPodAutoscaler in `ci-lab`, in the deployed chart the one KEDA builds from the [worker ScaledObject](#packing), wants at least its maximum replicas. An autoscaler at its maximum in another namespace does not count | 10 minutes | the pool; its value is the queued pull request units | The worker maximum and the CI node cap; raising either is the operator's elasticity budget |
 | `CILabSchedulerBlind` | Prometheus holds no `ci_lab_slots_wanted` series while the `ci-lab-scheduler` Deployment asks for at least one replica. A scheduler scaled to zero, or no Deployment, keeps it silent | 10 minutes | the scheduler | The scheduler's scrape target and port `9108`; the worker ScaledObject sizes the worker pool from this gauge and holds `elasticity.floorWorkers` while it is missing |
@@ -798,7 +798,7 @@ DNS, the scheduler and the object store.
 | Pod spec field | Value | Effect |
 |---|---|---|
 | `schedulerName` | `runner-binpack` | The `runner-binpack-scheduler` Deployment in `kube-system` schedules the pod instead of the default scheduler. Its one profile scores `NodeResourcesFit` with the `MostAllocated` strategy over CPU and memory, weight 1 each, at plugin weight 10, and disables `NodeResourcesBalancedAllocation` and `PodTopologySpread` scoring, so a worker goes to the fullest CI node it fits and workers fill one node before the next |
-| `priorityClassName` | `ci-lab-worker` | Priority 150, behind every CI runner, with no preemption; see [Worker scheduling priority](#worker-scheduling-priority) |
+| `priorityClassName` | `ci-lab-worker-preempt` | Priority 250, ahead of every CI runner, and a pending worker may preempt lower priority pods such as runners; see [Worker scheduling priority](#worker-scheduling-priority) |
 | `nodeSelector` | `<domain>/node-pool: oci-ci` and `<domain>/workload: ci` | Only nodes of the OCI CI pool; both labels must match |
 | `tolerations` | `<domain>/remote=oci` and `<domain>/workload=ci`, each with `operator: Equal` and `effect: NoSchedule` | Lets the pod onto the tainted CI pool nodes |
 | `affinity.podAntiAffinity` | `preferredDuringSchedulingIgnoredDuringExecution`, weight 100, `topologyKey: kubernetes.io/hostname`, `namespaceSelector: {}`, label key `actions.github.com/scale-set-name` with `operator: Exists` | Prefers a node with no Actions Runner Controller runner pod from any namespace. It is one score among the scheduler's, so a worker still lands beside runners when that node scores higher or no other node fits |
@@ -1063,8 +1063,8 @@ kubectl -n ci-lab get pods -l app.kubernetes.io/component=worker \
   -o custom-columns='NAME:.metadata.name,SCHEDULER:.spec.schedulerName,CLASS:.spec.priorityClassName,PRIORITY:.spec.priority,QOS:.status.qosClass'
 ```
 
-Every row reads `runner-binpack`, `ci-lab-worker`, `150` and `Guaranteed`. Read the policy as the
-cluster holds it:
+Every row reads `runner-binpack`, `ci-lab-worker-preempt`, `250` and `Guaranteed`. Read the policy
+as the cluster holds it:
 
 ```bash
 kubectl -n ci-lab describe networkpolicy ci-lab-worker
@@ -1122,10 +1122,12 @@ its done criteria name are not recorded:
 |---|---|---|
 | Worker pods stay `Pending` with no scheduling events | The `runner-binpack` scheduler is not running, and the default scheduler ignores pods that name another | `kubectl -n kube-system get deploy runner-binpack-scheduler` and its pod logs |
 | `Pending` with `didn't match Pod's node affinity/selector` or `untolerated taint` | No CI pool node exists or none carries both labels | `kubectl get nodes -L <domain>/node-pool,<domain>/workload`; the autoscaler adds CI nodes up to its pool maximum |
-| `Pending` with `Insufficient cpu` or `Insufficient memory` | Every CI node is full, or the pool is at `nodeMax` | The autoscaler's pool maximum and the pending CI runners, which [outrank workers](#worker-scheduling-priority) |
+| `Pending` with `Insufficient cpu` or `Insufficient memory` | Every CI node is full of pods a worker cannot preempt, or the pool is at `nodeMax` | The autoscaler's pool maximum and the `Preempted` events that name the worker, as in [Worker scheduling priority](#worker-scheduling-priority) |
 | `ContainerCreating` with `hostPath type check failed` for `git` or `uv` | The node cache has not prepared the node | `kubectl -n ci-lab get pods -l app.kubernetes.io/component=node-cache -o wide` and its `prepare` log; the kubelet mounts once the folders exist |
 | The worker exits at start with `ci-lab worker refuses` | Its environment holds a `GITHUB_APP_` or `REDIS` variable | Remove the variable from the chart |
 | The worker exits at start with a `KeyError` naming a `CI_LAB_` variable | A required work setting is missing from the pod environment | Compare the pod's `env` with the contract table above |
+| The worker log repeats `ci-lab worker: lease call failed, retrying in <n>s` | The scheduler is not answering on 8800, or answers with a server error: it is rolling, restarting or down. The worker keeps running, retries after a backoff that doubles from 1 up to 10 seconds, and leases again on the first answer | `kubectl -n ci-lab get deploy ci-lab-scheduler` and `kubectl -n ci-lab logs deploy/ci-lab-scheduler --since 10m` |
+| The worker exits with an `HTTPError` 4xx raised from `Client.lease` | The scheduler answered the lease call with a client error, such as a 404 when `CI_LAB_SCHEDULER_URL` names a wrong path; a retry cannot change that answer, so the process ends with the traceback without draining its running units, which are left to finish or reap | Compare the pod's `CI_LAB_SCHEDULER_URL` with the contract table above |
 | A head's units are reaped undelivered and the worker log shows a failed `git fetch` | The node mirror lacks the head and the worker has no other source | The node cache's `fetched-at` stamp and warm log, see [Verify every node](ci-lab-node-cache.md#verify-every-node) |
 | A venv build fails with `uv sync for <tree> ended with code` | The build needs the package index, which the policy refuses | The kept build log the error names; see Limitations |
 | Uploads time out or are refused | The MinIO egress rule does not match the object store's pods | `minio.namespace`, `minio.pods` and `minio.port` against `kubectl get pods -n <namespace> --show-labels` |
@@ -1137,23 +1139,24 @@ its done criteria name are not recorded:
 
 ## Worker scheduling priority
 
-The PriorityClass `ci-lab-worker` ranks lab worker pods below every CI runner
-(`arc-runners-oss-checks`, 200) and above the unused `arc-runners-oss-batch-priority` class (100).
-When the nodes are full, new pods wait in Pending and the scheduler tries them in priority order as
-capacity frees, so a pending pull request check or merge queue runner gets each freed node it fits
-before a pending lab worker does. A worker can still take a node too small for the waiting runner.
-`ci-lab-worker` and `arc-runners-oss-checks` do not preempt, so a running worker keeps its node
-until it ends, and a check can still wait for a node a worker took first. A pod gets this rank only
-when its spec names the class;
+The PriorityClass `ci-lab-worker-preempt` ranks lab worker pods at 250, above every CI runner
+(`arc-runners-oss-checks`, 200) and below `qitp-trading` (1000), and lets a pending worker preempt
+pods of lower priority. When the CI nodes are full, a pending worker does not wait for a node to
+free by itself. The scheduler picks a node where evicting lower priority pods makes room for the
+worker, deletes those pods, and schedules the worker there once they have terminated. On the CI
+pool the pods below a worker are the Actions Runner Controller runners at 200 and pods that name no
+class at 0, such as the node cache pods; in the rollout of 19 November 2026 the scheduler evicted
+only runner pods. When a node frees on its own, the scheduler also tries a pending worker before
+every pending runner. A pod gets this rank only when its spec names the class;
 [Use it from a worker pod](#use-it-from-a-worker-pod) shows how.
 
 | PriorityClass | Value | `preemptionPolicy` | Pods that name it |
 |---|---|---|---|
-| `qitp-trading` | 1000 | can preempt lower priority pods | Trading workers |
-| `arc-runners-oss-checks` | 200 | `Never` | Every CI runner: pull request checks, image builds, merge queue groups and batch mutation runners |
-| `ci-lab-worker` | 150 | `Never` | Lab workers |
+| `qitp-trading` | 1000 | `PreemptLowerPriority` | Trading workers |
+| `ci-lab-worker-preempt` | 250 | `PreemptLowerPriority` | Lab workers |
+| `arc-runners-oss-checks` | 200 | `Never` | Every runner set of the deployment repository's `arc-runners-oss` chart: the pull request check and image build runners, the light runners, the merge queue runners, which inherit the pull request runner pod and its class, and the batch mutation runners |
 | `arc-runners-oss-batch-priority` | 100 | `Never` | None; it stays defined in `runner-priority-classes.yaml` until no pod names it |
-| none | 0 | `PreemptLowerPriority`, the Kubernetes default | Every pod that names no class |
+| none | 0 | `PreemptLowerPriority`, the Kubernetes default | Every pod that names no class, such as the runners in the `arc-runners` namespace and the [node cache](ci-lab-node-cache.md) pods |
 
 The class is defined as:
 
@@ -1161,37 +1164,52 @@ The class is defined as:
 apiVersion: scheduling.k8s.io/v1
 kind: PriorityClass
 metadata:
-  name: ci-lab-worker
-value: 150
-preemptionPolicy: Never
+  name: ci-lab-worker-preempt
+value: 250
+preemptionPolicy: PreemptLowerPriority
 globalDefault: false
-description: ci-lab workers schedule after pull request and merge queue runners and ahead of batch runners
+description: ci-lab workers schedule ahead of, and preempt, pull request, merge queue and batch runners in arc-runners-oss-checks (200)
 ```
 
-- `preemptionPolicy: Never`: a pending worker never evicts a running pod to get a node; only its
-  place in the queue changes. A higher class that preempts, such as `qitp-trading`, can still evict
-  a running worker.
+- `value: 250`: above all four `arc-runners-oss` runner sets, the merge queue runners included,
+  and below `qitp-trading`.
+- `preemptionPolicy: PreemptLowerPriority`: a pending worker that fits no node may evict running
+  pods of lower priority to get one. Preemption only evicts pods of lower priority, so a runner can
+  never evict a running worker, and a pending worker never evicts another worker. `qitp-trading`
+  also preempts and can still evict a running worker.
 - `globalDefault: false`: the class applies only to pods that name it. A pod that names no class
   keeps priority 0.
-- The `description` and the manifest's header comment say lab workers rank ahead of batch runners
-  at 100. No pod names that class; batch runners name `arc-runners-oss-checks`, so a lab worker
-  waits behind them too.
 
 ### Where it lives and how it reaches the cluster
 
 The class sits alone in `k8s/manifests/cluster/ci-lab-priority-classes.yaml` in the deployment
-repository, apart from the runner classes in `runner-priority-classes.yaml` beside it. It landed in
-that repository's pull request 1740 on 15 November 2026. The `cluster-rbac` Argo CD Application
-syncs `k8s/manifests/cluster` recursively from that repository's `dev` branch with automated prune
-and self heal, so a change to the class reaches the cluster when it merges into `dev`, with no
-promotion step.
+repository, apart from the runner classes in `runner-priority-classes.yaml` beside it. The
+`cluster-rbac` Argo CD Application syncs `k8s/manifests/cluster` recursively from that
+repository's `dev` branch with automated prune and self heal, so a change to the class reaches the
+cluster when it merges into `dev`, with no promotion step.
 
-The deployment repository's `tests/unit/ci_lab/test_priority.py` holds the file to this one class.
-It holds the value to 150, between the batch class (100) and the checks class (200) read from the
-runner file, and below `qitp-trading` (1000, pinned as a constant). It also holds the class to
-`scheduling.k8s.io/v1`, `Never` and `globalDefault: false`. A re-rank changes that test in the same
-pull request. The runner classes keep their own test, `tests/unit/arc_runners_oss/test_priority.py`,
-which this class leaves untouched.
+The class reached its current form in three of that repository's pull requests:
+
+| Pull request | Date | Class | Value | `preemptionPolicy` | Why |
+|---|---|---|---|---|---|
+| 1740 | 15 November 2026 | `ci-lab-worker` | 150 | `Never` | First class: workers behind every CI runner, ahead of the unused batch class |
+| 1913 | 19 November 2026, 14:18 UTC | `ci-lab-worker-priority` | 250 | `Never` | The worker Deployment had been 0 of 3 available since 10:57 UTC: every worker pod lost `FailedScheduling` on `Insufficient cpu` while pending runner pods at 200 took the freed room |
+| 1917 | 19 November 2026, 15:56 UTC | `ci-lab-worker-preempt` | 250 | `PreemptLowerPriority` | At 250 with `Never` the workers still waited: at 14:33 UTC `ci_lab_workers_ready` read 0 and three worker pods had been Pending for 10 minutes while pending runner pods took every freed slot |
+
+Pull requests 1913 and 1917 each replaced the class document under a new name and pointed the
+worker template at it in the same pull request. `cluster-rbac` pruned the old class, and
+`kubectl get priorityclass` on 19 November at 16:07 UTC listed `ci-lab-worker-preempt` and no
+older lab class.
+
+Two of the deployment repository's tests guard the class:
+
+| Test | Holds |
+|---|---|
+| `tests/unit/ci_lab/test_priority.py` | The lab file defines `ci-lab-worker-preempt` and no other class; its value is 250, above the batch class (100) and the checks class (200) read from the runner file and below `qitp-trading` (1000, pinned as a constant); `scheduling.k8s.io/v1`, `PreemptLowerPriority` and `globalDefault: false` |
+| `tests/unit/ci_lab/test_packing.py` | The rendered worker Deployment names `schedulerName: runner-binpack` and `priorityClassName: ci-lab-worker-preempt`, and that name is a class the lab file defines |
+
+A re-rank or a policy change updates both in the same pull request. The runner classes keep their
+own test, `tests/unit/arc_runners_oss/test_priority.py`, which this class leaves untouched.
 
 ### Use it from a worker pod
 
@@ -1202,66 +1220,131 @@ A pod gets the rank only by naming the class in its spec. The lab chart's
 spec:
   template:
     spec:
-      priorityClassName: ci-lab-worker
+      schedulerName: runner-binpack
+      priorityClassName: ci-lab-worker-preempt
 ```
 
 Admission resolves the name to `spec.priority` when the pod is created, so a running pod keeps the
 priority it was created with. Admission refuses a pod that names a class the cluster does not hold.
-The worker Deployment has named the class since the deployment repository's pull request 1826;
-worker pods created before that rollout ran at priority 0.
+The `runner-binpack` scheduler runs the preemption; its `Preempted` events name it as the reporting
+controller. The worker Deployment named `ci-lab-worker` from the deployment
+repository's pull request 1826, `ci-lab-worker-priority` from 1913, and `ci-lab-worker-preempt`
+from 1917.
 
 ### Verify
 
+The class as the cluster holds it:
+
 ```bash
-kubectl get priorityclass ci-lab-worker
+kubectl get priorityclass ci-lab-worker-preempt
 ```
 
 ```text
-NAME            VALUE   GLOBAL-DEFAULT   AGE   PREEMPTIONPOLICY
-ci-lab-worker   150     false            42s   Never
+NAME                    VALUE   GLOBAL-DEFAULT   AGE   PREEMPTIONPOLICY
+ci-lab-worker-preempt   250     false            10m   PreemptLowerPriority
 ```
 
-That output is the proof recorded on pull request 1740 after `cluster-rbac` synced it. The full
-order, system classes included:
+The full order, system classes included:
 
 ```bash
 kubectl get priorityclass --sort-by=.value
 ```
 
-The class and priority a running worker pod resolved to, with the output expected now that the
-worker Deployment names the class:
+The class, priority and uid each worker pod resolved to:
 
 ```bash
-kubectl get pod <worker pod> -n <namespace> -o jsonpath='{.spec.priorityClassName} {.spec.priority}{"\n"}'
+kubectl -n ci-lab get pods -l app.kubernetes.io/component=worker \
+  -o custom-columns='NAME:.metadata.name,UID:.metadata.uid,NODE:.spec.nodeName,CLASS:.spec.priorityClassName,PRIORITY:.spec.priority'
 ```
+
+Every row reads `ci-lab-worker-preempt` and `250`.
+
+The scheduler records preemption as `events.k8s.io/v1` events with `eventTime` set and
+`lastTimestamp` empty, so read them through that API. Each `Preempted` event names the evicted
+runner pod and, in its note, the uid of the worker that evicted it:
+
+```bash
+kubectl get events.events.k8s.io -A --field-selector reason=Preempted \
+  -o custom-columns='TIME:.eventTime,NAMESPACE:.metadata.namespace,POD:.regarding.name,NOTE:.note'
+```
+
+One worker's own timeline, from its first `FailedScheduling` to `Scheduled`:
+
+```bash
+kubectl get events.events.k8s.io -n ci-lab --field-selector regarding.name=<worker pod> \
+  -o custom-columns='TIME:.eventTime,REASON:.reason,NOTE:.note'
+```
+
+The API server drops events after its event TTL, one hour by default, so read them soon after a
+rollout or scale up.
+
+This excerpt is the worker rollout that followed pull request 1917 on 19 November 2026, for worker
+`ci-lab-worker-8678fc4dbf-xh7zp` (uid `3d3ca3ba-1909-44a3-b734-ed8de53f5408`), with the
+`FailedScheduling` notes shortened:
 
 ```text
-ci-lab-worker 150
+15:57:12.04  ci-lab           FailedScheduling  ci-lab-worker-8678fc4dbf-xh7zp      0/9 nodes are available: ... 3 Insufficient memory, ... 5 Insufficient cpu.
+15:57:12.16  arc-runners-oss  Preempted         <pull request runner pod 1>         Preempted by pod 3d3ca3ba-1909-44a3-b734-ed8de53f5408 on node <ci node>
+15:57:12.18  arc-runners-oss  Preempted         <merge queue runner pod>            Preempted by pod 3d3ca3ba-1909-44a3-b734-ed8de53f5408 on node <ci node>
+15:57:12.28  arc-runners-oss  Preempted         <pull request runner pod 2>         Preempted by pod 3d3ca3ba-1909-44a3-b734-ed8de53f5408 on node <ci node>
+15:57:14.71  ci-lab           FailedScheduling  ci-lab-worker-8678fc4dbf-xh7zp      0/9 nodes are available: ... preemption: not eligible due to a terminating pod on the nominated node.
+15:57:20.65  ci-lab           Scheduled         ci-lab-worker-8678fc4dbf-xh7zp      Successfully assigned ci-lab/ci-lab-worker-8678fc4dbf-xh7zp to <ci node>
 ```
 
-### Re-rank
+`<ci node>` is one node of the CI pool, the same in every line, and each runner pod is shown as a
+placeholder that names its runner set. The pending worker preempted a merge queue runner and two
+pull request runners, then waited for them to terminate and was scheduled 8.6 seconds after its
+first `FailedScheduling`. The other two workers of that rollout were scheduled 5.5 and 4.5 seconds
+after theirs. The three workers evicted ten runner pods in all: four merge queue runners, three pull
+request runners, one batch runner and two runners from the `arc-runners` namespace. No node cache
+pod was evicted.
 
-`value` is immutable on an existing PriorityClass, so an edit of it in place fails the
-`cluster-rbac` sync. To move the lab workers:
+### What happens to a preempted runner's job
 
-1. Add a class with a new name and the new value in `ci-lab-priority-classes.yaml`, and update
-   `tests/unit/ci_lab/test_priority.py` to the new name, value and order.
-2. Point the worker Deployment's `priorityClassName` at the new class; pods pick it up as they are
-   recreated.
-3. Once no pod names the old class, delete its document from the file. `cluster-rbac` prunes, so
-   the next sync after the merge into `dev` removes the class from the cluster; a pod still naming
-   it keeps running, but no new pod naming it is admitted.
+Kubernetes deletes the runner pod, and GitHub ends the job it was running with conclusion
+`failure`. Of the four preempted merge queue jobs of 19 November, three carry the annotation
+`The operation was canceled.` and one `Process completed with exit code 130.`
+
+- In the merge queue, a preempted `unit` shard is recovered inside the same Tests run by the
+  [lost unit shard rerun](delivery-tiers.md#lost-unit-shard-rerun). In the 19 November rollout
+  the four preempted queue runners held `unit (3.12, 2)`, `(3.12, 4)`, `(3.12, 8)` and `(3.12, 10)`
+  of one merge group run. `unit-lost` classified all four as runner loss, each
+  `unit rerun (3.12, <shard>)` passed on a new runner, and `Gate — Required` passed.
+- On other events nothing reruns the job by itself. `unit-lost` runs only on `merge_group`, and
+  the Lost runner workflow's `scripts.ci_lost_runner` reads only jobs still `in_progress`, so it
+  skips a job that already ended `failure`. Re-run the failed jobs.
+
+### Re-rank or change the policy
+
+`value` and `preemptionPolicy` are both immutable on an existing PriorityClass, so an edit of
+either in place fails the `cluster-rbac` sync. To move the lab workers or change what they may
+evict, do what pull requests 1913 and 1917 did, in one pull request in the deployment repository:
+
+1. Replace the class document in `ci-lab-priority-classes.yaml` with one under a new name that
+   carries the new value or policy.
+2. Point the worker template's `priorityClassName` at the new name.
+3. Update `WORKER`, the value bounds and the policy in `tests/unit/ci_lab/test_priority.py`, and
+   the `priorityClassName` assertion in `tests/unit/ci_lab/test_packing.py`.
+
+After the merge into `dev`, `cluster-rbac` creates the new class and prunes the old one, and the
+`ci-lab` Application rolls the worker Deployment onto the new name. A running pod that still names
+the pruned class keeps running until the rollout replaces it. If `ci-lab` syncs before
+`cluster-rbac`, the new ReplicaSet reports `FailedCreate` until the class exists, and retries by
+itself.
 
 ### Troubleshooting
 
 | Symptom | Cause | Check |
 |---|---|---|
-| `kubectl get priorityclass ci-lab-worker` answers `NotFound` | `cluster-rbac` has not synced the commit that adds it, or its sync failed | `kubectl -n argocd get application cluster-rbac -o jsonpath='{.status.sync.status} {.status.sync.revision}{"\n"}'`; the revision must be a `dev` commit whose tree holds the class |
-| The worker ReplicaSet reports `FailedCreate` with `no PriorityClass with name ci-lab-worker was found` | The pod template names the class before the cluster holds it | Sync `cluster-rbac` first, as above; the ReplicaSet retries pod creation by itself |
-| Worker pods stay Pending while runner pods take the nodes that free up | The intended order when capacity is contested: every CI runner outranks a lab worker | `kubectl get pods -A --field-selector=status.phase=Pending -o custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name,CLASS:.spec.priorityClassName,PRIORITY:.spec.priority --sort-by=.spec.priority` |
-| A worker pod shows priority 0 | Its pod template names no class | The jsonpath check above prints an empty class name |
-| A running worker pod was evicted | A higher class that preempts took its node | `kubectl get events -n <namespace> --field-selector reason=Preempted` |
-| `cluster-rbac` sync fails after the value was edited | `value` is immutable | Re-rank by name as above |
+| `kubectl get priorityclass ci-lab-worker-preempt` answers `NotFound` | `cluster-rbac` has not synced the commit that adds it, or its sync failed | `kubectl -n argocd get application cluster-rbac -o jsonpath='{.status.sync.status} {.status.sync.revision}{"\n"}'`; the revision must be a `dev` commit whose tree holds the class |
+| The worker ReplicaSet reports `FailedCreate` with `no PriorityClass with name ci-lab-worker-preempt was found` | The pod template names the class before the cluster holds it | Sync `cluster-rbac` first, as above; the ReplicaSet retries pod creation by itself |
+| A pending worker's `FailedScheduling` note ends `preemption: not eligible due to a terminating pod on the nominated node` | The worker has already preempted pods on that node and waits for them to terminate | Nothing to do; the worker's timeline above shows `Scheduled` once the victims are gone |
+| Worker pods stay Pending and no `Preempted` event names their uid | No CI node can make room for a worker by evicting pods below 250: other workers, which a worker never evicts, or pods above 250 hold it. The worker waits for a node to free or for a new CI node | `kubectl get pods -A --field-selector=status.phase=Pending -o custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name,CLASS:.spec.priorityClassName,PRIORITY:.spec.priority --sort-by=.spec.priority`, then the worker's `FailedScheduling` notes |
+| A check job failed with `The operation was canceled.` or exit code 130 while workers rolled out or scaled up | A worker preempted its runner pod | `kubectl get events.events.k8s.io -A --field-selector reason=Preempted` and match the evicted pod against the job's runner name; outside the merge queue, re-run the failed jobs |
+| `kubectl get events` shows no time for a `Preempted` or `Scheduled` event | The scheduler sets `eventTime` and leaves `lastTimestamp` empty | Read them through `events.events.k8s.io` with `.eventTime`, as the Verify commands above do |
+| A worker pod shows priority 0 | Its pod template names no class | The worker listing above prints an empty class |
+| A running worker pod was evicted | A higher class that preempts, such as `qitp-trading`, took its node | `kubectl get events.events.k8s.io -n ci-lab --field-selector reason=Preempted` |
+| `cluster-rbac` sync fails after the value or the policy was edited | Both are immutable | Re-rank or change the policy by name, as above |
 
 ## Worker pod deletion cost
 

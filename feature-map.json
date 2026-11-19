@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "lab-zero-base-push",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-zero-base-push",
+      "behaviour": "A GitHub new branch push with an all zero before object id emits no lab head, so it never holds a promotion grade or fetches an invalid base. Ordinary branch pushes with real bases still emit heads; pull request events and signed head notices still grade new branch heads independently.",
+      "seam": "scripts.ci_lab.webhooks.head_events at push intake",
+      "rules": ["lab-push-zero-base-unchecked"],
+      "tests": [
+        "tests/ci_lab/test_intake.py::test_a_new_branch_push_with_a_zero_before_names_no_head"
+      ]
+    },
+    {
       "id": "lab-store-incremental-fetch",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-store-mirror-mount",
@@ -1734,6 +1745,20 @@
         "tests/hub/test_admission.py::test_an_admission_finished_just_inside_the_hive_wait_is_kept",
         "tests/hive/test_spoke.py::test_an_admit_ask_that_times_out_asks_again_without_reopening_the_offer",
         "tests/hive/test_lanes.py::test_an_admit_ask_the_hub_never_answers_raises_unanswered_and_spawns_nothing"
+      ]
+    },
+    {
+      "id": "hub-admission-unlisted-retry",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-late-admission-reanswer",
+      "behaviour": "A same hive retry receives its kept admission when the live agents projection is absent but its matching current execution is still starting, has not launched and still holds the task claim. Another hive, an absent or replaced execution, an ended or launched execution and a released claim never receive that admission.",
+      "seam": "Admission.admit on a retry for a held offer without its live agents projection",
+      "rules": [
+        "hub-admission-retry-needs-live-projection"
+      ],
+      "tests": [
+        "tests/hub/test_admission.py::test_an_unlisted_kept_admission_requires_its_current_unlaunched_claimant",
+        "tests/hub/test_admission.py::test_another_hive_never_receives_an_unlisted_starting_admission"
       ]
     },
     {
@@ -5198,6 +5223,19 @@
         "tests/test_ci_queue_supersede.py::test_a_run_whose_group_merged_is_kept_though_its_queue_branch_is_gone",
         "tests/test_ci_queue_supersede.py::test_older_runs_of_the_same_pull_request_and_older_runs_of_gone_branches_are_cancelled",
         "tests/test_ci_queue_supersede.py::test_the_sweep_reads_the_full_base_history_checked_out_before_it"
+      ]
+    },
+    {
+      "id": "artifact-lookups-past-the-first-page",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-select-artifact-page",
+      "behaviour": "The Tests select job finds the durations-merged artifact of the latest passed dev push run for a merge group, and the durations-merged and coverage-baseline artifacts of a dispatched base's dev push run, and the coverage ratchet finds its base's coverage-baseline artifact, however many artifacts that run holds, because a dev push run held 106 artifacts, a one page listing of 100 left durations-merged out, and every merge group based on it failed the select job.",
+      "seam": "The Find the latest passed dev push run and Find the dev push run of the dispatched base steps of the Tests workflow select job, and the coverage ratchet's Find the run that published the base baseline step",
+      "rules": [
+        "run-artifacts-read-one-page"
+      ],
+      "tests": [
+        "tests/test_ci_baseline_lookup.py::test_lookup_finds_the_artifacts_past_the_first_page_of_a_crowded_run"
       ]
     },
     {
@@ -9356,7 +9394,7 @@
       "id": "lab-worker-pod-loop",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/lab-worker",
-      "behaviour": "The CI lab worker leases units into its free slots over the scheduler's HTTP lease API with the capabilities net and browser, runs each on the executor its kind names side by side, heartbeats each lease while its executor runs, uploads the report and log through the presigned URLs and completes the lease; a unit whose executor raises stops heartbeating and is left for the scheduler to reap, a refused token ends a unit's heartbeats and delivery, a heartbeat that cannot reach the scheduler is skipped, stop lets running units finish within the termination grace (the unit time limit plus five delivery calls at the client timeout) and abandons the rest to reap, slots come from the CPU quota capped by CI_LAB_SLOTS, and the worker environment refuses every GitHub App or Redis variable.",
+      "behaviour": "The CI lab worker leases units into its free slots over the scheduler's HTTP lease API with the capabilities net and browser, runs each on the executor its kind names side by side, heartbeats each lease while its executor runs, uploads the report and log through the presigned URLs and completes the lease; a unit whose executor raises stops heartbeating and is left for the scheduler to reap, a refused token ends a unit's heartbeats and delivery, a heartbeat that cannot reach the scheduler or whose reply is cut short is skipped, a lease call the scheduler does not answer (refused, reset, cut short or timed out) or answers with a server error is reported on stderr and retried after a backoff that doubles from one second up to ten seconds, resets on the next answered call and ends at once on stop, so a scheduler roll never ends the worker, while a client error answer still raises, stop lets running units finish within the termination grace (the unit time limit plus five delivery calls at the client timeout) and abandons the rest to reap, slots come from the CPU quota capped by CI_LAB_SLOTS, and the worker environment refuses every GitHub App or Redis variable.",
       "seam": "scripts.ci_lab.worker Worker.run_once, run, stop, drain and free, Client, environment, slots and build, against scripts.ci_lab.lease_api.serve",
       "tests": [
         "tests/ci_lab/test_worker.py::test_units_from_two_heads_run_concurrently_on_one_pod",
@@ -9365,12 +9403,16 @@
         "tests/ci_lab/test_worker.py::test_a_crash_stops_the_heartbeat_and_the_lease_reaps",
         "tests/ci_lab/test_worker.py::test_a_refused_heartbeat_ends_the_units_heartbeats_and_its_delivery",
         "tests/ci_lab/test_worker.py::test_a_heartbeat_that_cannot_reach_the_scheduler_is_skipped_and_the_unit_delivered",
+        "tests/ci_lab/test_worker.py::test_a_heartbeat_whose_reply_is_cut_short_is_skipped_and_the_unit_delivered",
         "tests/ci_lab/test_worker.py::test_a_refused_upload_url_ends_the_units_delivery",
         "tests/ci_lab/test_worker.py::test_stop_lets_running_units_finish_within_the_termination_grace",
         "tests/ci_lab/test_worker.py::test_a_unit_past_the_termination_grace_is_left_to_reap",
         "tests/ci_lab/test_worker.py::test_a_built_worker_waits_out_its_longest_unit_and_its_delivery_after_stop",
         "tests/ci_lab/test_worker.py::test_the_termination_grace_counts_every_delivery_call_of_a_unit",
         "tests/ci_lab/test_worker.py::test_run_leases_again_as_a_unit_frees_its_slot",
+        "tests/ci_lab/test_worker.py::test_a_lease_call_the_scheduler_does_not_answer_backs_off_and_leases_again",
+        "tests/ci_lab/test_worker.py::test_a_lease_call_the_scheduler_answers_with_a_client_error_still_raises",
+        "tests/ci_lab/test_worker.py::test_stop_ends_a_lease_backoff_at_once",
         "tests/ci_lab/test_worker.py::test_the_pod_leases_only_units_its_net_and_browser_capabilities_and_free_slots_fit",
         "tests/ci_lab/test_worker.py::test_the_client_speaks_the_lease_api_and_reads_a_refused_token_as_none",
         "tests/ci_lab/test_worker.py::test_the_client_gives_up_on_a_scheduler_or_upload_that_does_not_answer",
@@ -10541,6 +10583,16 @@
       "tests": [
         "tests/hub/test_admission.py::test_a_hive_local_refusal_keeps_the_only_offer_for_an_eligible_second_hive",
         "tests/hub/test_admission.py::test_a_refusal_about_the_task_stays_terminal"
+      ]
+    },
+    {
+      "id": "focused-proofs-never-wait-on-a-lane",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-focused-proof-run-group",
+      "behaviour": "Every Proofs workflow dispatch, whatever its proof, runs in its own concurrency group named focused-proof and its run id, with queue max and no cancelling, so a short focused proof never queues on a shared hosted lane behind a full Tests dispatch.",
+      "seam": "Proofs workflow concurrency group",
+      "tests": [
+        "tests/test_ci_hosted_lanes.py::test_every_proof_dispatch_runs_in_its_own_focused_proof_group_and_never_waits_on_a_lane"
       ]
     }
   ],
