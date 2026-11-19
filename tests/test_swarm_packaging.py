@@ -72,19 +72,21 @@ def _image_third_party_imports(root: Path, entry_points: list[str]) -> set[str]:
 
 
 @pytest.mark.skipif("MUTANT_UNDER_TEST" in os.environ, reason="the mutated copy imports mutmut at module level")
+@pytest.mark.feature("swarm-image-lab-dependencies")
 def test_swarm_image_lock_pins_every_distribution_its_entry_points_import() -> None:
     root = Path(__file__).parents[1]
     lock = (root / "docker/swarm/requirements.lock").read_text()
     pinned = {line.split("==")[0].lower() for line in lock.splitlines() if "==" in line and not line.startswith(" ")}
     hub = sorted(f"scripts.hub.{source.stem}" for source in (root / "scripts/hub").glob("*.py"))
-    third_party = _image_third_party_imports(root, ["scripts.install", "scripts.swarm_ledger", *hub])
+    lab = sorted(f"scripts.ci_lab.{source.stem}" for source in (root / "scripts/ci_lab").glob("*.py"))
+    third_party = _image_third_party_imports(root, ["scripts.install", "scripts.swarm_ledger", *hub, *lab])
     distributions = importlib.metadata.packages_distributions()
     missing = sorted(
         module
         for module in third_party
         if not {name.lower().replace("_", "-") for name in distributions.get(module, [module])} & pinned
     )
-    assert {"packaging", "yaml"} <= third_party
+    assert {"packaging", "yaml", "pytest", "mutmut", "libcst"} <= third_party
     assert missing == []
 
 
