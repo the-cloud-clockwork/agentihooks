@@ -1435,21 +1435,26 @@ than that is answered only from the store. A head that needs test units and find
 `no dependency manifest at or before <base>` and is dropped with that reason, so a merge group
 never folds green on an empty unit job.
 
-A batch verdict lists the files the batch opened outside its tests' manifest records. When the
+A batch verdict lists the files the batch opened outside its tests' manifest records. The expander
+puts the `commit` of the manifest it keyed a head's test units on in the plan's `manifest`, and the
+grade's state keeps it; a pull request or hotfix grade keys no test units and keeps none. When the
 scheduler stores the verdict of a graded job whose uploaded report carries a non empty `outside`
-list, whatever its graded outcome, `note_outside` writes it as a note of the repository at
-`lab/manifests/<owner>--<name>/outside/<digest>.json`, holding the unit's tests and the sorted list,
-where `<digest>` is `digests.digest` of that note. The object store is write once, so the packed
-`<commit>.json` manifests are never rewritten, and the same tests and list write one note. A
-`StoredManifests` read that finds or fetches a packed manifest merges each note of the repository
-into the `outside` list of each test record the note names, sorted and without duplicates, and skips
-a test the manifest lacks; the next expansion keys those tests on the measured tree and the batch on the
-noted files' blob ids. `scripts.dep_manifest.invalidated`, pull request test selection in
-`scripts.ci_select.recorded_tests` and mutation test selection in
+list, whatever its graded outcome, `note_outside` writes it as a note of that manifest commit at
+`lab/manifests/<owner>--<name>/outside/<commit>/<digest>.json`, holding the unit's tests and the
+sorted list, where `<digest>` is `digests.digest` of that note. A grade with no manifest commit writes
+no note. The object store is write once, so the packed `<commit>.json` manifests are never rewritten,
+and the same tests and list write one note per commit. A `StoredManifests` read that finds a stored
+manifest merges each note of that manifest's commit into the `outside` list of each test record the
+note names, sorted and without duplicates, and skips a test the manifest lacks; the next expansion
+keys those tests on the measured tree and the batch on the noted files' blob ids. A note written
+while grades keyed on an older commit's manifest never reaches a newer commit's records or keys. A
+manifest the read fetches has no note yet. Every read first removes, through `Objects.remove`, each
+note of the repository whose commit has no stored `<commit>.json`, which includes the notes at
+`outside/<digest>.json` written before notes carried a commit. `scripts.dep_manifest.invalidated`,
+pull request test selection in `scripts.ci_select.recorded_tests` and mutation test selection in
 `scripts.ci_mutation.plan.covering_tests` and `line_covering_tests` count a change to a file in a
 record's `outside` list as a change to that test, as they do for a file in its `files` list. The
-list is per batch, so every test of the batch takes it, and notes are per repository rather than
-per manifest commit.
+list is per batch, so every test of the batch takes it.
 
 For a merge group head the expander builds `interaction.Group` from the mirror: the group's
 changes against the base, one entry per first parent commit between base and head with that
@@ -1774,7 +1779,9 @@ it. `unit_path(kind, key, name)` builds a unit path and raises `ValueError: not 
 `is_report(path)` matches only `lab/<kind>/<64 hex>/report.json`, so grade, head and upload objects
 are never read as verdicts.
 
-Two backends implement the `Objects` protocol of `write_once`, `read`, `keys` and `upload_url`:
+Two backends implement the `Objects` protocol of `write_once`, `read`, `keys`, `remove` and
+`upload_url`. `remove(path)` deletes one object, unlinking the file or calling `delete_object`, and
+takes a missing path as already gone:
 
 | Backend | Construct | `write_once(path, data)` | `upload_url(path, expires_s)` |
 |---|---|---|---|
