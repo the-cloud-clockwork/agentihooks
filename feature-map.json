@@ -23,6 +23,24 @@
       ]
     },
     {
+      "id": "lab-plant-push-intake",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-plant-push-intake",
+      "behaviour": "A trusted push to a branch under refs/heads/diffcheck/lab-plant- is graded in the pull request tier on the head's merge base with the dev head, whatever the payload before says, so both twins of a plant share one base and that base is the grader. The base is resolved after the trust check and before the head is held or keyed; an untrusted plant push is never resolved, a resolution failure is named as a pass action and the head is not held, and every other push keeps its payload base and the promotion tier.",
+      "seam": "scripts.ci_lab.webhooks.head_events for push deliveries, scripts.ci_lab.intake.request_from, Scheduler.tick intake over a fake expander, and Scheduler.tick with a real MirrorExpander over a file protocol origin holding two twins and an orphan",
+      "tests": [
+        "tests/ci_lab/test_intake.py::test_a_push_to_a_plant_branch_names_a_plant_head_with_no_base_whatever_its_before",
+        "tests/ci_lab/test_intake.py::test_a_push_to_a_branch_outside_the_plant_prefix_stays_an_ordinary_push",
+        "tests/ci_lab/test_intake.py::test_a_plant_head_asks_for_a_pull_request_grade_before_its_base_is_resolved",
+        "tests/ci_lab/test_plant_intake.py::test_a_plant_push_grades_in_the_pull_request_tier_on_its_dev_merge_base",
+        "tests/ci_lab/test_plant_intake.py::test_an_ordinary_push_keeps_its_base_and_the_promotion_tier_and_resolves_nothing",
+        "tests/ci_lab/test_plant_intake.py::test_an_untrusted_plant_push_is_refused_before_its_base_is_resolved",
+        "tests/ci_lab/test_plant_intake.py::test_a_plant_head_whose_dev_merge_base_fails_is_named_and_the_next_head_still_held",
+        "tests/ci_lab/test_plant_intake.py::test_both_twins_of_a_plant_grade_on_their_dev_merge_base_and_an_unrelated_head_is_named",
+        "tests/ci_lab/test_plant_intake.py::test_a_plant_head_of_a_remote_that_lists_no_dev_branch_is_named_and_never_held"
+      ]
+    },
+    {
       "id": "master-effort-xhigh",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-effort-xhigh",
@@ -108,6 +126,19 @@
       "seam": "scripts.ci_lab.scheduler.Scheduler.tick, Scheduler.load and Scheduler.grades_of over fakeredis and the local object store, counting the parsed grades alive at once through scripts.ci_lab.scheduler._parse",
       "tests": [
         "tests/ci_lab/test_scheduler_memory.py::test_a_pass_and_a_load_hold_one_parsed_live_grade_at_a_time_however_many_grades_hold_units"
+      ]
+    },
+    {
+      "id": "lab-scheduler-release-bound",
+      "rules": ["lab-release-starts-every-waiting-head"],
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2761",
+      "behaviour": "One CI lab scheduler pass starts at most eight waiting heads: the most urgent class first (hotfix, pull request, queue, promotion, backfill) and the longest waiting first within a class. A head still in its quiet window or held by a pause takes no place among the eight; a head put back for its manifest fetch takes one, since its expansion ran on the pass. The other heads keep waiting for a later pass, so the same pass still admits the started heads' held units to the queue however many heads wait.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis and the local object store with a fake expander, holding more waiting heads than one pass starts",
+      "tests": [
+        "tests/ci_lab/test_scheduler_release.py::test_each_pass_starts_eight_waiting_heads_in_class_order_and_admits_their_units_in_the_same_pass",
+        "tests/ci_lab/test_scheduler_release.py::test_the_eight_heads_a_pass_starts_are_the_longest_waiting_and_quiet_or_paused_heads_take_no_place",
+        "tests/ci_lab/test_scheduler_release.py::test_a_head_put_back_for_its_manifest_fetch_still_takes_one_of_the_eight_places"
       ]
     },
     {
@@ -5239,6 +5270,36 @@
       ]
     },
     {
+      "id": "test-planner-artifacts-past-the-first-page",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-pr-planner-artifact-page",
+      "behaviour": "The test planner lists every artifact page of each candidate dev push run, up to two pages of 100, and counts every page against its request budget, so a passed dev push run whose coverage shards are listed past the first 100 artifacts is still the record, because two passed dev push runs each held 106 artifacts with coverage shards on page two and pull request runs reused tests from a dev run four commits behind.",
+      "seam": "scripts.ci_test_plan.find_record and its per run artifact listing, run by the Plan the tests whose inputs did not change step of the Tests workflow test-count job",
+      "rules": [
+        "run-artifacts-read-one-page-python"
+      ],
+      "tests": [
+        "tests/test_ci_test_plan_pages.py::test_a_dev_run_whose_coverage_shards_spill_onto_the_second_artifact_page_is_the_record",
+        "tests/test_ci_test_plan_pages.py::test_a_dev_run_whose_first_artifact_page_is_short_lists_no_second_page",
+        "tests/test_ci_test_plan_pages.py::test_a_dev_run_is_listed_to_its_second_artifact_page_and_no_further",
+        "tests/test_ci_test_plan_pages.py::test_every_artifact_page_counts_against_the_request_budget"
+      ]
+    },
+    {
+      "id": "stats-seed-artifacts-past-the-first-page",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-pr-planner-artifact-page",
+      "behaviour": "The mutation stats seed lists every artifact page of a pull request run, up to ten pages of 100, so a stats artifact listed past the first 100 artifacts still seeds the cache, because the seed read one page of 100 artifacts per run, the same shape that made the test planner skip passed dev push runs whose coverage shards sat on page two.",
+      "seam": "scripts.ci_stats_seed.harvest and its per run artifact listing, run by the mutation-stats-seed job of the Tests workflow",
+      "rules": [
+        "run-artifacts-read-one-page-python"
+      ],
+      "tests": [
+        "tests/test_ci_stats_seed_pages.py::test_harvest_finds_a_stats_artifact_past_the_first_artifact_page_of_a_run",
+        "tests/test_ci_stats_seed_pages.py::test_harvest_lists_at_most_ten_artifact_pages_of_a_run"
+      ]
+    },
+    {
       "id": "ledger-artifacts-panel",
       "origin": "inventory",
       "behaviour": "The artifacts panel lists every artifact newest first, renders Markdown, JSON and SVG without running scripts, and offers delete and trash restore.",
@@ -10180,6 +10241,23 @@
       ]
     },
     {
+      "id": "lab-static-test-count-units",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-units-missing",
+      "behaviour": "The CI lab grades the Tests workflow's test-count job with static units: the static executor supplies runner.temp as the unit's run folder, github.event_name as pull_request and each matrix value the gate's job holds at one value, so the four test-count gate steps discover with nothing missing; static gate discovery names the docs and writer-lock jobs CI only with the reason the lab sandbox cannot run them, names CI only each job of a static job's reusable workflow that calls another reusable workflow instead of raising on it, and the discovery command prints those jobs with their reasons under --ci-only.",
+      "seam": "scripts.ci_lab.static_gates discover, ci_only and main with the StaticGate matrix and missing, scripts.ci_lab.run_static run with its run folder and the gate's matrix in the context, and scripts.ci_lab.executors static with the event name in the lease context",
+      "tests": [
+        "tests/ci_lab/test_static_gates.py::test_a_gate_misses_no_run_folder_event_name_or_matrix_value_its_job_holds_at_one_value",
+        "tests/ci_lab/test_static_gates.py::test_the_command_prints_the_matrix_values_each_gate_reads",
+        "tests/ci_lab/test_static_gates.py::test_discovery_grades_the_steps_of_a_reusable_workflow_past_a_job_that_calls_another",
+        "tests/ci_lab/test_static_gates.py::test_the_command_names_each_job_the_lab_leaves_to_actions_with_its_reason",
+        "tests/ci_lab/test_static_gates.py::test_the_real_test_count_job_yields_runnable_gates_while_docs_and_writer_lock_stay_ci_only",
+        "tests/ci_lab/test_static_gates.py::test_every_lab_gradable_gate_that_reads_the_event_name_is_one_whose_verdict_the_pull_request_event_keeps",
+        "tests/ci_lab/test_run_static.py::test_the_step_reads_runner_temp_as_its_run_folder_and_each_matrix_value_its_job_holds",
+        "tests/ci_lab/test_executors.py::test_static_grades_every_test_count_gate_of_the_real_workflow_on_a_clean_tree"
+      ]
+    },
+    {
       "id": "lab-head-own-stream",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-head-own-stream",
@@ -10365,12 +10443,25 @@
       "id": "ci-stats-seed-download-retry",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2597",
-      "behaviour": "When a mutation stats artifact download fails during the dev push stats seed harvest, the harvest waits 5, 10 and then 20 seconds, each wait cut short at the seed's deadline, between up to four downloads of that artifact and copies its records once one succeeds; only when every download failed does it fail with an error naming the artifact, its id and the last download error. A download that times out and a failed pull request, run or artifact listing call are not retried, so the seed still skips a pull request past its budget.",
+      "behaviour": "When a mutation stats artifact download fails during the dev push stats seed harvest, the harvest waits 5, 10 and then 20 seconds, each wait cut short at the seed's deadline, between up to four downloads of that artifact and copies its records once one succeeds; only when every download failed does it fail with an error naming the artifact, its id and the last download error. A download that times out is made once, so the seed still skips a pull request past its budget, and a download answered HTTP 404 is made once and fails with that error.",
       "seam": "scripts.ci_stats_seed.download through scripts.ci_stats_seed.harvest",
       "tests": [
         "tests/test_ci_stats_seed.py::test_harvest_downloads_a_failed_artifact_again_after_a_wait",
         "tests/test_ci_stats_seed.py::test_harvest_fails_naming_the_artifact_once_every_download_failed",
-        "tests/test_ci_stats_seed.py::test_harvest_retries_neither_a_timed_out_download_nor_a_failed_listing"
+        "tests/test_ci_stats_seed.py::test_harvest_downloads_a_timed_out_or_missing_artifact_once"
+      ]
+    },
+    {
+      "id": "ci-stats-seed-listing-retry",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/promo-44592721366-1",
+      "behaviour": "When the pull request read, the Tests runs listing or an artifacts listing page of the dev push stats seed harvest fails, the harvest prints the path and gh's error, waits 5, 10 and then 20 seconds, each wait cut short at the seed's deadline, between up to four calls, and goes on with the first answer; when every call failed it raises the last failure. A listing call that times out or is answered HTTP 404 is made once, so the seed still skips a pull request past its budget and a number that is not a pull request at once.",
+      "seam": "scripts.ci_stats_seed.retried through scripts.ci_stats_seed.harvest",
+      "tests": [
+        "tests/test_ci_stats_seed.py::test_harvest_asks_again_for_a_listing_call_that_failed",
+        "tests/test_ci_stats_seed.py::test_harvest_raises_the_last_failure_once_every_call_of_a_listing_failed",
+        "tests/test_ci_stats_seed.py::test_harvest_asks_once_for_a_listing_that_timed_out_or_was_not_found",
+        "tests/test_ci_stats_seed.py::test_harvest_skips_a_number_that_is_not_a_pull_request"
       ]
     },
     {
