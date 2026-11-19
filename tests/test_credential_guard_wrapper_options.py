@@ -110,3 +110,18 @@ def test_wrapper_value_flags_preserve_the_credential_verdict(prefix: str) -> Non
 def test_wrapper_option_values_do_not_become_commands_or_operands(command: str) -> None:
     payload = {"tool_name": "Bash", "tool_input": {"command": command}}
     assert decide(payload) is None
+
+
+@pytest.mark.feature("credential-guard-wrapper-option-values")
+@pytest.mark.parametrize(
+    "command",
+    [
+        "sudo --prompt .env bash -c 'printf message'",
+        "sudo -p .env bash -c 'cat README.md'",
+        "env --unset .env bash -c 'printf message'",
+        "env -u .env python -c 'print(1)'",
+    ],
+)
+def test_wrapper_options_do_not_turn_safe_scripts_into_credential_reads(command: str) -> None:
+    payload = {"tool_name": "Bash", "tool_input": {"command": command}}
+    assert decide(payload) is None
