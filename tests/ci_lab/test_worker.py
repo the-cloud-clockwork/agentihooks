@@ -367,6 +367,34 @@ def test_a_heartbeat_that_cannot_reach_the_scheduler_is_skipped_and_the_unit_del
 
 
 @pytest.mark.feature("lab-worker-pod-loop")
+def test_a_heartbeat_whose_reply_is_cut_short_is_skipped_and_the_unit_delivered(
+    scheduler: str, lab: Counted, jobs: queue.Queue, sink: Sink, tmp_path: Path
+) -> None:
+    jobs.enqueue([UNIT_A], "h1", {})
+    failed: list[str] = []
+
+    class Cut(worker.Client):
+        def heartbeat(self, job: str, token: str) -> int | None:
+            if not failed:
+                failed.append(job)
+                raise http.client.IncompleteRead(b"{")
+            return super().heartbeat(job, token)
+
+    def held(lease: worker.Lease) -> worker.Finished:
+        beating(lab, 1)
+        return finished(tmp_path, lease)
+
+    cut = worker.Worker(Cut(scheduler), {"test": held}, "pod-1", 1, wait_ms=0, heartbeat_s=0.01)
+    cut.run_once()
+
+    assert cut.drain() == []
+    assert failed == ["h1:test:a"]
+    assert len(lab.beats) >= 1
+    assert found(jobs, "h1:test:a").outcome == "passed"
+    assert sink.bodies == {"/h1:test:a/report": b'{"key": "a"}', "/h1:test:a/log": b"log of h1"}
+
+
+@pytest.mark.feature("lab-worker-pod-loop")
 def test_a_refused_upload_url_ends_the_units_delivery(
     scheduler: str, jobs: queue.Queue, sink: Sink, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
