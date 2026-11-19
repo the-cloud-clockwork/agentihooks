@@ -1737,6 +1737,20 @@
       ]
     },
     {
+      "id": "hub-admission-unlisted-retry",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-late-admission-reanswer",
+      "behaviour": "A same hive retry receives its kept admission when the live agents projection is absent but its matching current execution is still starting, has not launched and still holds the task claim. Another hive, an absent or replaced execution, an ended or launched execution and a released claim never receive that admission.",
+      "seam": "Admission.admit on a retry for a held offer without its live agents projection",
+      "rules": [
+        "hub-admission-retry-needs-live-projection"
+      ],
+      "tests": [
+        "tests/hub/test_admission.py::test_an_unlisted_kept_admission_requires_its_current_unlaunched_claimant",
+        "tests/hub/test_admission.py::test_another_hive_never_receives_an_unlisted_starting_admission"
+      ]
+    },
+    {
       "id": "hub-admission-hive-asks-again",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2542",
