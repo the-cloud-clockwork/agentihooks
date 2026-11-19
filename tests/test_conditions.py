@@ -448,6 +448,18 @@ class TestPreToolUseEnvelope:
             'a rewriting condition must return "decision": "allow" or "ask"'
         ) in out["additionalContext"]
 
+    @pytest.mark.feature("condition-rewrite-without-a-decision")
+    def test_auto_mode_explicit_allow_applies_rewrite(
+        self, forced_claude: tuple[Path, Path, Path], capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _write(
+            forced_claude[1], "pre-bash-long.sh", 'echo \'{"tool_input": {"command": "ls -la"}, "decision": "allow"}\''
+        )
+        hm.on_pre_tool_use(_bash("ls", mode="auto"))
+        out = _single_json(capsys.readouterr().out)["hookSpecificOutput"]
+        assert out["permissionDecision"] == "allow"
+        assert out["updatedInput"] == {"command": "ls -la", "description": "probe"}
+
     def test_default_mode_explicit_ask_applies_rewrite(self, forced_claude, capsys):
         _write(
             forced_claude[1], "pre-bash-long.sh", 'echo \'{"tool_input": {"command": "ls -la"}, "decision": "ask"}\''

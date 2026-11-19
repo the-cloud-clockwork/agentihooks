@@ -263,7 +263,8 @@
       "tests": [
         "tests/test_conditions.py::TestPreToolUseEnvelope::test_bypass_rewrite_rides_one_envelope",
         "tests/test_conditions.py::TestPreToolUseEnvelope::test_rewrite_without_decision_carries_no_decision_outside_bypass",
-        "tests/test_conditions.py::TestPreToolUseEnvelope::test_auto_mode_drops_rewrite_without_decision"
+        "tests/test_conditions.py::TestPreToolUseEnvelope::test_auto_mode_drops_rewrite_without_decision",
+        "tests/test_conditions.py::TestPreToolUseEnvelope::test_auto_mode_explicit_allow_applies_rewrite"
       ]
     },
     {
