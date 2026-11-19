@@ -270,6 +270,27 @@ def test_actions_classifies_the_real_token_mint_refusal_by_its_http_status(
     assert mint.call_count == 1
 
 
+@pytest.mark.feature("lab-token-mint-status")
+def test_actions_keeps_a_mint_scope_refusal_permanent(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GITHUB_APP_ID", "123")
+    monkeypatch.setenv("GITHUB_APP_INSTALLATION_ID", "456")
+    monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "fixture")
+    monkeypatch.setattr(github_app.jwt, "encode", Mock(return_value="signed"))
+    mint = Mock(
+        return_value=answer(201, {"repositories": [{"full_name": "example/repo"}], "permissions": {"actions": "write"}})
+    )
+    monkeypatch.setattr(requests, "post", mint)
+    get = Mock()
+    monkeypatch.setattr(requests, "get", get)
+    with pytest.raises(FetchRefused) as refused:
+        Actions("example/repo").json(COMMIT_RUNS_PATH)
+    assert type(refused.value) is FetchRefused
+    assert str(refused.value) == f"GET {COMMIT_RUNS_PATH} token mint failed: {github_app.REFUSED}"
+    assert isinstance(refused.value.__cause__, github_app.GitAuthRefused)
+    assert refused.value.__cause__.status_code is None
+    get.assert_not_called()
+
+
 @pytest.mark.feature("lab-dev-manifest-fetch")
 def test_the_fetcher_reads_each_repository_through_one_reader_of_its_own() -> None:
     made: list[str] = []

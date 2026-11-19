@@ -8752,6 +8752,20 @@
       ]
     },
     {
+      "id": "lab-token-mint-status",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2702",
+      "behaviour": "A GitHub App token mint refusal preserves the HTTP response status and its fixed message. The lab manifest reader treats mint server errors and unanswered mint requests as transient, keeps the head through the existing quiet window and grades it after recovery. Client refusals drop the head. The same waiting envelope survives repeated transient failures and no retry runs before the window ends.",
+      "seam": "scripts.github_app.GitHubAppAuth.get_token and scripts.ci_lab.manifests.Actions over mocked HTTP, then Scheduler.tick through MirrorExpander, StoredManifests and the real token mint",
+      "tests": [
+        "tests/test_github_app.py::test_rejected_exchange_preserves_the_http_status_without_changing_its_message",
+        "tests/test_github_app.py::test_a_refusal_without_an_http_status_keeps_its_message",
+        "tests/ci_lab/test_manifests.py::test_actions_classifies_the_real_token_mint_refusal_by_its_http_status",
+        "tests/ci_lab/test_manifests.py::test_actions_keeps_a_mint_scope_refusal_permanent",
+        "tests/ci_lab/test_scheduler.py::test_manifest_token_mint_failures_hold_only_transient_heads_and_grade_after_recovery"
+      ]
+    },
+    {
       "id": "lab-control-routes",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/swarm-panic-and-priority",
