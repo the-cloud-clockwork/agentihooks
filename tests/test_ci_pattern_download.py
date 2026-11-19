@@ -1,0 +1,273 @@
+import base64
+import hashlib
+import importlib.util
+import io
+import json
+import os
+import subprocess
+import sys
+import threading
+import zipfile
+from collections.abc import Callable, Iterator
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from types import ModuleType
+
+import pytest
+import yaml
+
+pytestmark = pytest.mark.unit
+ROOT = Path(__file__).resolve().parents[1]
+ACTION = ROOT / ".github/actions/pattern-download"
+CLAIMS = base64.urlsafe_b64encode(json.dumps({"scp": "Actions.Results:run-1:job-2"}).encode()).decode()
+TOKEN = f"e30.{CLAIMS.rstrip('=')}.signature"
+PATTERN = "mutation-stats-*"
+Serve = Callable[["Service"], str]
+
+
+def _fetch() -> ModuleType:
+    spec = importlib.util.spec_from_file_location("pattern_download_fetch", ACTION / "fetch.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+fetch = _fetch()
+
+
+def _archive(name: str) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr(f"collected-{name}", name)
+    return buffer.getvalue()
+
+
+class Service:
+    """A results service listing named archives, each blob answer following the script given for its name."""
+
+    def __init__(self, listed: list[tuple[str, int]], answers: dict[str, list[str]] | None = None) -> None:
+        self.listed = listed
+        self.answers = {name: list(kinds) for name, kinds in (answers or {}).items()}
+        self.digests = True
+        self.listing_failures = 0
+        self.calls: list[tuple[str, dict[str, str]]] = []
+        self.fetched: list[str] = []
+        self.closed_by_client = threading.Event()
+        self.released = threading.Event()
+
+    def artifacts(self) -> list[dict[str, str]]:
+        return [
+            {
+                "name": name,
+                "database_id": str(ident),
+                "workflow_run_backend_id": f"run-{ident}",
+                "workflow_job_run_backend_id": f"job-{ident}",
+                **({"digest": f"sha256:{hashlib.sha256(_archive(name)).hexdigest()}"} if self.digests else {}),
+            }
+            for name, ident in self.listed
+        ]
+
+    def answer_for(self, name: str) -> str:
+        kinds = self.answers.get(name)
+        return kinds.pop(0) if kinds else "ok"
+
+
+def _handler(service: Service) -> type[BaseHTTPRequestHandler]:
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+        def answer(self, code: int, body: bytes, length: int | None = None) -> None:
+            self.send_response(code)
+            self.send_header("Content-Length", str(len(body) if length is None else length))
+            self.end_headers()
+            self.wfile.write(body)
+            self.wfile.flush()
+
+        def do_POST(self) -> None:
+            request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            method = self.path.rsplit("/", 1)[-1]
+            service.calls.append((method, request))
+            if method == "ListArtifacts" and service.listing_failures:
+                service.listing_failures -= 1
+                self.answer(500, b"{}")
+            elif method == "ListArtifacts":
+                self.answer(200, json.dumps({"artifacts": service.artifacts()}).encode())
+            else:
+                url = f"http://{self.headers['Host']}/blob/{request['name']}"
+                self.answer(200, json.dumps({"signed_url": url}).encode())
+
+        def do_GET(self) -> None:
+            name = self.path.rsplit("/", 1)[-1]
+            service.fetched.append(name)
+            kind, body = service.answer_for(name), _archive(name)
+            if kind == "busy":
+                self.answer(503, b"<Error><Code>ServerBusy</Code></Error>")
+                self.close_connection = True
+                if self.rfile.read() == b"":
+                    service.closed_by_client.set()
+            elif kind == "torn":
+                self.answer(200, body[: len(body) // 2])
+            elif kind == "cut":
+                self.answer(200, body[:10], length=len(body))
+                self.close_connection = True
+            elif kind == "stall":
+                self.answer(200, body[:10], length=len(body))
+                service.released.wait(10)
+                self.close_connection = True
+            else:
+                self.answer(200, body)
+
+    return Handler
+
+
+@pytest.fixture
+def serve() -> Iterator[Serve]:
+    started: list[tuple[ThreadingHTTPServer, Service]] = []
+
+    def start(service: Service) -> str:
+        server = ThreadingHTTPServer(("127.0.0.1", 0), _handler(service))
+        server.daemon_threads = True
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        started.append((server, service))
+        return f"http://127.0.0.1:{server.server_port}/"
+
+    yield start
+    for server, service in started:
+        service.released.set()
+        server.shutdown()
+        server.server_close()
+
+
+def _download(base: str, folder: Path, pauses: list[float] | None = None) -> list[str]:
+    return fetch.download(fetch.Results(base, TOKEN), PATTERN, folder, (pauses if pauses is not None else []).append)
+
+
+def _files(folder: Path) -> list[str]:
+    return sorted(path.name for path in folder.iterdir())
+
+
+@pytest.mark.feature("shared-mutation-stats-download-ends-with-its-download")
+def test_a_kept_alive_error_answer_is_closed_before_the_retry_and_every_part_merges(
+    serve: Serve, tmp_path: Path
+) -> None:
+    service = Service([("mutation-stats-0", 1), ("mutation-stats-1", 2)], {"mutation-stats-1": ["busy"]})
+    pauses: list[float] = []
+    assert _download(serve(service), tmp_path / "stats", pauses) == []
+    assert service.closed_by_client.wait(5)
+    assert _files(tmp_path / "stats") == ["collected-mutation-stats-0", "collected-mutation-stats-1"]
+    assert sorted(service.fetched) == ["mutation-stats-0", "mutation-stats-1", "mutation-stats-1"]
+    assert pauses == [fetch.PAUSE]
+
+
+def test_only_the_newest_artifact_of_each_matching_name_is_signed_for_its_uploader(
+    serve: Serve, tmp_path: Path
+) -> None:
+    listed = [("mutation-stats-0", 5), ("mutation-stats-0", 9), ("mutation-evidence-0", 7), ("mutation-stats-1", 3)]
+    service = Service(listed)
+    assert _download(serve(service), tmp_path) == []
+    signed = sorted(
+        (request["name"], request["workflow_run_backend_id"], request["workflow_job_run_backend_id"])
+        for method, request in service.calls
+        if method == "GetSignedArtifactURL"
+    )
+    assert signed == [("mutation-stats-0", "run-9", "job-9"), ("mutation-stats-1", "run-3", "job-3")]
+    listing = [request for method, request in service.calls if method == "ListArtifacts"]
+    assert listing == [{"workflow_run_backend_id": "run-1", "workflow_job_run_backend_id": "job-2"}]
+    assert sorted(service.fetched) == ["mutation-stats-0", "mutation-stats-1"]
+
+
+def test_a_part_that_never_answers_200_is_named_after_every_try(serve: Serve, tmp_path: Path) -> None:
+    service = Service([("mutation-stats-0", 1)], {"mutation-stats-0": ["busy"] * fetch.TRIES})
+    pauses: list[float] = []
+    assert _download(serve(service), tmp_path, pauses) == ["mutation-stats-0"]
+    assert service.fetched == ["mutation-stats-0"] * fetch.TRIES
+    assert pauses == [fetch.PAUSE] * (fetch.TRIES - 1)
+    assert _files(tmp_path) == []
+
+
+@pytest.mark.parametrize(("kind", "digests"), [("torn", True), ("torn", False), ("cut", True)])
+def test_a_torn_or_cut_archive_is_fetched_again(serve: Serve, tmp_path: Path, kind: str, digests: bool) -> None:
+    service = Service([("mutation-stats-0", 1)], {"mutation-stats-0": [kind]})
+    service.digests = digests
+    assert _download(serve(service), tmp_path) == []
+    assert service.fetched == ["mutation-stats-0", "mutation-stats-0"]
+    assert (tmp_path / "collected-mutation-stats-0").read_text() == "mutation-stats-0"
+
+
+def test_a_stalled_blob_is_fetched_again_after_the_read_timeout(
+    serve: Serve, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(fetch, "TIMEOUT", 0.3)
+    service = Service([("mutation-stats-0", 1)], {"mutation-stats-0": ["stall"]})
+    assert _download(serve(service), tmp_path) == []
+    assert service.fetched == ["mutation-stats-0", "mutation-stats-0"]
+    assert _files(tmp_path) == ["collected-mutation-stats-0"]
+
+
+@pytest.mark.parametrize(("failures", "missing"), [(fetch.TRIES - 1, []), (fetch.TRIES, [fetch.LISTING])])
+def test_a_listing_outage_is_tried_again_and_named_when_it_outlasts_every_try(
+    serve: Serve, tmp_path: Path, failures: int, missing: list[str]
+) -> None:
+    service = Service([("mutation-stats-0", 1)])
+    service.listing_failures = failures
+    assert _download(serve(service), tmp_path / "stats") == missing
+    assert service.fetched == ([] if missing else ["mutation-stats-0"])
+
+
+def test_no_matching_artifact_downloads_nothing_and_passes(serve: Serve, tmp_path: Path) -> None:
+    service = Service([("mutation-evidence-0", 1)])
+    assert _download(serve(service), tmp_path / "stats") == []
+    assert _files(tmp_path / "stats") == []
+    assert service.fetched == []
+
+
+def test_main_reads_the_runtime_token_and_names_every_part_that_never_arrived(
+    serve: Serve, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(fetch, "PAUSE", 0)
+    service = Service([("mutation-stats-0", 1), ("mutation-stats-1", 2)], {"mutation-stats-1": ["busy"] * fetch.TRIES})
+    monkeypatch.setenv("ACTIONS_RESULTS_URL", serve(service))
+    monkeypatch.setenv("ACTIONS_RUNTIME_TOKEN", TOKEN)
+    assert fetch.main([PATTERN, str(tmp_path)]) == 1
+    assert capsys.readouterr().out.endswith(
+        f"Downloaded 1 of 2 artifacts matching {PATTERN} into {tmp_path}\n"
+        f"::error::Downloading mutation-stats-1 failed after {fetch.TRIES} tries.\n"
+    )
+    assert _files(tmp_path) == ["collected-mutation-stats-0"]
+
+
+def test_the_script_run_as_the_action_runs_it_downloads_and_exits(serve: Serve, tmp_path: Path) -> None:
+    service = Service([("mutation-stats-0", 1), ("mutation-stats-1", 2)])
+    env = {**os.environ, "ACTIONS_RESULTS_URL": serve(service), "ACTIONS_RUNTIME_TOKEN": TOKEN}
+    result = subprocess.run(
+        [sys.executable, str(ACTION / "fetch.py"), PATTERN, str(tmp_path / "stats")],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == f"Downloaded 2 of 2 artifacts matching {PATTERN} into {tmp_path / 'stats'}\n"
+    assert _files(tmp_path / "stats") == ["collected-mutation-stats-0", "collected-mutation-stats-1"]
+
+
+def test_the_action_runs_the_script_inside_github_script_without_a_workflow_token() -> None:
+    action = yaml.safe_load((ACTION / "action.yml").read_text())
+    assert set(action["inputs"]) == {"pattern", "path"}
+    assert all(spec["required"] is True for spec in action["inputs"].values())
+    (step,) = action["runs"]["steps"]
+    assert step["uses"] == "actions/github-script@v7"
+    assert step["with"]["github-token"] == "none"
+    assert step["env"] == {
+        "FETCH_SCRIPT": "${{ github.action_path }}/fetch.py",
+        "PATTERN": "${{ inputs.pattern }}",
+        "DESTINATION": "${{ inputs.path }}",
+    }
+    assert step["with"]["script"] == (
+        "require('child_process').execFileSync('python3', [process.env.FETCH_SCRIPT, process.env.PATTERN,"
+        " process.env.DESTINATION], {stdio: 'inherit'})\n"
+    )
