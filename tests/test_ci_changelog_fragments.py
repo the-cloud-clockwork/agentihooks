@@ -40,6 +40,10 @@ def test_a_fragment_without_a_written_line_has_no_section_heading(text: str) -> 
     assert heading_problems(text) == [UNHEADED]
 
 
+def test_a_section_heading_with_trailing_spaces_names_its_section() -> None:
+    assert heading_problems("### Fixed  \n\n- An entry.\n") == []
+
+
 def test_the_branch_names_the_fragment_with_every_slash_as_a_dash() -> None:
     assert expected_name("team/eng/1") == "changelog.d/team-eng-1.md"
 
@@ -93,6 +97,17 @@ def test_a_tree_without_the_changelog_folder_grades_nothing_and_is_red(
     assert main([*(word for flag, path in trees.items() for word in (flag, path)), "--branch", "eng-1"]) == 1
     assert capsys.readouterr().out.splitlines() == [
         f"::error::{tmp_path / 'elsewhere'} carries no changelog.d folder, so the check graded no fragment"
+    ]
+
+
+def test_a_fragment_that_is_not_utf8_is_red_with_its_decode_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    base, head = _trees(tmp_path, {})
+    (Path(head) / "changelog.d/eng-1.md").write_bytes(b"### Fixed\n\n- \xff\n")
+    assert main(["--base", base, "--head", head, "--branch", "eng-1"]) == 1
+    assert capsys.readouterr().out.splitlines() == [
+        "::error::'utf-8' codec can't decode byte 0xff in position 13: invalid start byte"
     ]
 
 
