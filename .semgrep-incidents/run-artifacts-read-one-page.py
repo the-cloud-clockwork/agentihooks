@@ -31,3 +31,10 @@ def by_name_after_the_page_size(api: Callable[[str], bytes], actions: str, run: 
 def endpoint_for_a_pager(actions: str, run: dict[str, Any]) -> str:
     # ok: run-artifacts-read-one-page-python
     return f"{actions}/runs/{run['id']}/artifacts"
+
+
+def every_page_through_gh_paginate(
+    rows: Callable[[str, str], list[dict[str, Any]]], repo: str, run: dict[str, Any]
+) -> list[dict[str, Any]]:
+    # ok: run-artifacts-read-one-page-python
+    return rows(f"repos/{repo}/actions/runs/{run['id']}/artifacts?per_page=100", "artifacts")

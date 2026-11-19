@@ -34,4 +34,6 @@ rules:
         - /scripts/**/*.py
         - /hooks/**/*.py
         - '**/run-artifacts-read-one-page.py'
-    pattern-regex: '/runs/[^/\s]+/artifacts(?=\?)(?![^"''\s]*[?&](?:page|name)=)'
+    patterns:
+      - pattern-regex: '/runs/[^/\s]+/artifacts(?=\?)(?![^"''\s]*[?&](?:page|name)=)'
+      - pattern-not-inside: rows(...)

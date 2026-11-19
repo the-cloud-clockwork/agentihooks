@@ -32,7 +32,9 @@ def test_a_dev_run_whose_first_artifact_page_is_short_lists_no_second_page(monke
 
 
 @pytest.mark.feature("test-planner-artifacts-past-the-first-page")
-def test_a_dev_run_is_listed_to_its_second_artifact_page_and_no_further(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_dev_run_is_listed_to_its_second_artifact_page_and_no_further(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     _github(monkeypatch, [_run(2), _run(1)], manifests={2: _manifest(2), 1: _manifest(1)}, fillers={2: 250})
     requests = _counted(monkeypatch)
     found = ci_test_plan.find_record(REPOSITORY, LATER)
@@ -42,6 +44,7 @@ def test_a_dev_run_is_listed_to_its_second_artifact_page_and_no_further(monkeypa
         f"{ACTIONS}/runs/2/artifacts?per_page=100&page=1",
         f"{ACTIONS}/runs/2/artifacts?per_page=100&page=2",
     ]
+    assert capsys.readouterr().out == "Dev run 2 fills the 2 artifact pages the planner reads\n"
 
 
 @pytest.mark.feature("test-planner-artifacts-past-the-first-page")

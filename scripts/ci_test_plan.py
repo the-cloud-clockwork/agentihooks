@@ -143,6 +143,8 @@ def _usable(
         live = {item["name"]: item for item in artifacts if not item["expired"]}
         kept = [live[name] for name in (PACKED, "dep-manifest") if name in live]
         if not kept or any(name not in live for name in COVERAGE):
+            if len(artifacts) == ARTIFACT_PAGES * ARTIFACT_PAGE:
+                print(f"Dev run {run['id']} fills the {ARTIFACT_PAGES} artifact pages the planner reads")
             tally["unavailable"] += 1
             continue
         jobs = pool.submit(read_jobs, f"{actions}/runs/{run['id']}/attempts/{run['run_attempt']}/jobs", JOB_PAGE)
