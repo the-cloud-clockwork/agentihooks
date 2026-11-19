@@ -7,6 +7,7 @@ changed line scope and clearances apply at grade time.
 
 import ast
 import hashlib
+import math
 import re
 import subprocess
 import sys
@@ -143,6 +144,8 @@ def mutant_units(
     changes: Mapping[str, Iterable[int]],
     covering: Mapping[str, Mapping[str, str]],
     unlisted: Mapping[str, str],
+    *,
+    timeout: float = math.inf,
 ) -> tuple[Unit, ...]:
     """Name every mutant of each changed function and key it by the inputs that decide its verdicts.
 
