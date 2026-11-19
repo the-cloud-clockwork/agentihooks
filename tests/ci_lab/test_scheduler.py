@@ -67,6 +67,7 @@ HEAD_B = "b" * 40
 BASE = "c" * 40
 TREE = "d" * 40
 OTHER_TREE = "e" * 40
+LOCK = ".github/test-requirements.lock"
 
 Post = tuple[str, str, str, str | None, Output, bool]
 
@@ -1732,14 +1733,14 @@ def origin(tmp_path: Path) -> tuple[Path, str, str]:
             ".github/workflows/nested/deep.yml": "jobs: {}\n",
             ".github/workflows/empty.yml": "",
             "delivery.yaml": json.dumps(DELIVERY),
-            "uv.lock": "lock",
+            LOCK: "lock",
             "pyproject.toml": "[project]\n",
             "src/a.py": "a = 1\n",
             "srcx/b.py": "b = 1\n",
             "docs/c.md": "c\n",
         },
     )
-    head = _commit(repo, {"src/a.py": "a = 2\n", "uv.lock": "lock 2", "docs/tab\tname.md": "t\n"})
+    head = _commit(repo, {"src/a.py": "a = 2\n", LOCK: "lock 2", "docs/tab\tname.md": "t\n"})
     return repo, base, head
 
 
@@ -1780,7 +1781,7 @@ def test_the_mirror_expander_keys_static_gates_from_git_objects_without_a_checko
     request = GradeRequest(remote, head, base, Priority.PULL_REQUEST, ACTOR, False)
     found = expander.expand(request)
     assert [store.name for store in root.iterdir()] == [str(repo).removeprefix("/").replace("/", "--")]
-    chain = Toolchain("3.12", {}, _blob(repo, head, "uv.lock"), _blob(repo, head, "pyproject.toml"), "image", {})
+    chain = Toolchain("3.12", {}, _blob(repo, head, LOCK), _blob(repo, head, "pyproject.toml"), "image", {})
     paths = filter(None, _git(repo, "ls-tree", "-r", "-z", "--name-only", head).split("\0"))
     head_files = {path: _blob(repo, head, path) for path in paths}
     assert "docs/tab\tname.md" in head_files
@@ -1838,7 +1839,7 @@ def test_a_head_without_a_lockfile_or_pyproject_keys_its_units_with_neither(
     tmp_path: Path, origin: tuple[Path, str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo, base, _ = origin
-    bare = _drop(repo, "uv.lock", "pyproject.toml")
+    bare = _drop(repo, LOCK, "pyproject.toml")
     monkeypatch.setattr(
         scheduler, "discover", lambda workflow, registry, reusable: [_gate("format", "lint", ("src/",), ())]
     )
@@ -1878,7 +1879,7 @@ def test_the_mirror_expander_expands_the_real_tests_workflow_with_its_reusable_w
     workflows = ROOT / ".github" / "workflows"
     registry = ROOT / ".github" / "input-keys.json"
     tree = {f".github/workflows/{path.name}": path.read_text() for path in workflows.iterdir() if path.is_file()}
-    base = _commit(repo, {**tree, ".github/input-keys.json": registry.read_text(), "uv.lock": "lock"})
+    base = _commit(repo, {**tree, ".github/input-keys.json": registry.read_text(), LOCK: "lock"})
     head = _commit(repo, {"src/a.py": "a = 1\n"})
     node = tmp_path / "node"
     _git(tmp_path, "init", "-q", "--bare", str(node))
@@ -1975,7 +1976,7 @@ def _suite(tmp_path: Path, lab: dict[str, Any]) -> Suite:
             ".github/workflows/test.yml": "jobs: {}\n",
             ".github/input-keys.json": '{"gates": {}}',
             "delivery.yaml": json.dumps({"lab": lab}),
-            "uv.lock": "lock",
+            LOCK: "lock",
             "pyproject.toml": PINNED,
             ".test_durations": json.dumps(SUITE_DURATIONS),
             "scripts/alpha.py": ALPHA,
@@ -2001,7 +2002,7 @@ def _merged(repo: Path, branch: str, *changes: dict[str, str]) -> str:
 def _suite_units(suite: Suite, head: str, durations: dict[str, float]) -> tuple[Unit, ...]:
     paths = filter(None, _git(suite.repo, "ls-tree", "-r", "-z", "--name-only", head).split("\0"))
     blobs = {path: _blob(suite.repo, head, path) for path in paths}
-    chain = Toolchain("3.12", {}, blobs["uv.lock"], blobs["pyproject.toml"], "image", {})
+    chain = Toolchain("3.12", {}, blobs[LOCK], blobs["pyproject.toml"], "image", {})
     return expand_tests.units(SUITE_MANIFEST, _contents(suite, head), blobs, durations, chain)
 
 
@@ -2107,7 +2108,7 @@ def test_a_merge_group_entry_that_adds_a_test_file_the_manifest_lacks_runs_its_u
     every = _suite_units(suite, head, SUITE_DURATIONS)
     paths = filter(None, _git(suite.repo, "ls-tree", "-r", "-z", "--name-only", head).split("\0"))
     blobs = {path: _blob(suite.repo, head, path) for path in paths}
-    chain = Toolchain("3.12", {}, blobs["uv.lock"], blobs["pyproject.toml"], "image", {})
+    chain = Toolchain("3.12", {}, blobs[LOCK], blobs["pyproject.toml"], "image", {})
     added = expand_tests.unlisted_units(SUITE_MANIFEST, _contents(suite, head), [GAMMA], chain)
     assert [unit.members for unit in added] == [(GAMMA,)]
     expected = scheduler.frame(Priority.QUEUE, _tree(suite, head), suite.base, {"unit": (*every[picked], *added)})

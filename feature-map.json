@@ -10187,6 +10187,16 @@
       ]
     },
     {
+      "id": "lab-venv-tracked-test-lock",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2782",
+      "behaviour": "A lab unit keys its venv on the sha256 of the head's tracked .github/test-requirements.lock, the lock the worker image bakes its venv marker from, never on the untracked uv.lock, so a head without uv.lock still runs its unit; a head whose lock the baked venv lacks builds its own venv in the build sandbox with uv venv on the worker's Python, then uv pip install of the project's dev and all extras constrained by that lock less .github/test-excludes.txt, and the scheduler keys each unit's toolchain on the blob of the same lock.",
+      "seam": "scripts.ci_lab.executors lockfile_digest and static, scripts.ci_lab.venvs LOCKFILE, EXCLUDES and venv_for, scripts.ci_lab.scheduler MirrorExpander.expand",
+      "tests": [
+        "tests/ci_lab/test_executors.py::test_a_head_without_a_uv_lock_builds_its_venv_from_the_tracked_test_lock_and_runs_its_unit"
+      ]
+    },
+    {
       "id": "lab-sandbox-bwrap-pull-request-tier",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-sandbox-bwrap-ci",
