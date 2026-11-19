@@ -163,7 +163,7 @@ class Admission:
             return True
         task = admitted["task"]
         occupant = self.store.execution_occupants(slug).get(task["seat"])
-        return (
+        return bool(
             occupant is not None
             and occupant.state == "starting"
             and not occupant.launched_at
