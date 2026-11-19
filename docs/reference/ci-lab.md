@@ -532,10 +532,10 @@ inhibit_rules:
 | `CILabQueueWaitHigh` | The predicted wait of the hotfix, pull request or queue class is over 1200 seconds, the 20 minute default past which the [lab behind claim hold](swarm-thresholds.md#lab-behind-claim-hold) holds new eng claims. A [wait the lab cannot predict](#a-wait-the-lab-cannot-predict) reads `+Inf` and fires it too, while the claim hold reads that wait as 0. Promotion and backfill never fire it | 10 minutes | class | Slots busy against slots total, and whether the worker pool sits at its maximum |
 | `CILabWorkersPending` | At least one `ci-lab-worker-*` pod in `ci-lab` is Pending | 15 minutes | the pool | The `cluster-autoscaler-oci-status` ConfigMap for the CI pool, and whether runners hold the CI nodes; every runner outranks a worker, see [Worker scheduling priority](#worker-scheduling-priority) |
 | `CILabBudgetShedding` | `ci_lab_class_shed` is 1 for a class: the day's core budget left fell below that class's shed fraction, so its units wait for the budget to reset. Only backfill, promotion and queue shed | 5 minutes | class | Budget left on the dashboard and the shed fractions in the runtime config at `CI_LAB_RUNTIME_CONFIG` |
-| `CILabPullRequestBlockedByCap` | Pull request units are queued, every slot is busy, and a HorizontalPodAutoscaler in `ci-lab`, the one KEDA is to build for the workers, wants at least its maximum replicas. An autoscaler at its maximum in another namespace does not count | 10 minutes | the pool; its value is the queued pull request units | The worker maximum and the CI node cap; raising either is the operator's elasticity budget |
-| `CILabSchedulerBlind` | Prometheus holds no `ci_lab_slots_wanted` series while the `ci-lab-scheduler` Deployment asks for at least one replica. A scheduler scaled to zero, or no Deployment, keeps it silent | 10 minutes | the scheduler | The scheduler's scrape target and port `9108`; the lab chart's planned KEDA scaler sizes the worker pool from this gauge and holds its fallback floor while it is missing |
+| `CILabPullRequestBlockedByCap` | Pull request units are queued, every slot is busy, and a HorizontalPodAutoscaler in `ci-lab`, the one KEDA builds from the worker ScaledObject, wants at least its maximum replicas. An autoscaler at its maximum in another namespace does not count | 10 minutes | the pool; its value is the queued pull request units | The worker maximum and the CI node cap; raising either is the operator's elasticity budget |
+| `CILabSchedulerBlind` | Prometheus holds no `ci_lab_slots_wanted` series while the `ci-lab-scheduler` Deployment asks for at least one replica. A scheduler scaled to zero, or no Deployment, keeps it silent | 10 minutes | the scheduler | The scheduler's scrape target and port `9108`; the lab chart's KEDA ScaledObject sizes the worker pool from this gauge and holds its fallback floor while it is missing |
 | `CILabCacheMissRatioHigh` | The git or uv node cache missed more than half its lookups over 30 minutes, with at least 10 misses. A cache with misses and no hit series counts its hits as 0. The verdict cache never fires it | 15 minutes | cache | The node cache DaemonSet on the CI nodes and the age of its git mirror |
-| `CILabScaleFlapping` | Over the last hour, sampled every 5 minutes, the worker Deployment's replicas rose against 5 minutes earlier in at least 4 samples and fell in at least 4. One ramp up and down again does not fire it | no hold | the pool; its value is the rising samples | Lengthen the scale down stabilisation window of the lab chart's planned ScaledObject, since each swing churns CI nodes through the autoscaler |
+| `CILabScaleFlapping` | Over the last hour, sampled every 5 minutes, the worker Deployment's replicas rose against 5 minutes earlier in at least 4 samples and fell in at least 4. One ramp up and down again does not fire it | no hold | the pool; its value is the rising samples | Lengthen the scale down stabilisation window of the lab chart's ScaledObject, `elasticity.scaleDownWindowSeconds`, since each swing churns CI nodes through the autoscaler |
 | `CILabUnitsOverdue` | At least one leased unit has run past its estimate | 15 minutes | the scheduler; its value is the overdue units | The worker holding the lease; an expired lease requeues the unit once and loses it on the second expiry, see [Retry policy](#retry-policy) |
 | `CILabVerdictMismatch` | A gate's shadow mismatch counter rose in the last hour, or its series first appeared in that hour above 0 | no hold | gate | The mismatch rows of the [shadow report](#report), before the lab grades that gate for merges. It clears an hour after the gate's last new mismatch |
 
@@ -619,13 +619,17 @@ them:
 
 | Series | Read by | Until a service sets it |
 |---|---|---|
-| `ci_lab_slots_wanted` | `CILabSchedulerBlind`, the slots panels, the lab chart's planned KEDA scaler | `CILabSchedulerBlind` fires 10 minutes after a `ci-lab-scheduler` Deployment with a replica appears, and the `wanted` lines stay empty. The scheduler sets it from `scripts.ci_lab.budget.slots_wanted` on every scrape |
+| `ci_lab_slots_wanted` | `CILabSchedulerBlind`, the slots panels, the lab chart's KEDA ScaledObject | `CILabSchedulerBlind` fires 10 minutes after a `ci-lab-scheduler` Deployment with a replica appears, and the `wanted` lines stay empty. The scheduler sets it from `scripts.ci_lab.budget.slots_wanted` on every scrape |
 | `ci_lab_units_overdue` | `CILabUnitsOverdue` | The alert cannot fire |
 | `ci_lab_workers_ready` | Workers ready against desired | The `heartbeat` line stays empty |
 | `ci_lab_core_seconds_total`, `ci_lab_heads_graded_total` | Core minutes per merged pull request | The stat reads No data |
 | `ci_lab_cache_hits_total`, `ci_lab_cache_misses_total` | `CILabCacheMissRatioHigh`, Cache hit ratio | `metrics.observe_records` counts the `verdict` cache but has no live caller, and nothing counts `git` or `uv`, so the alert cannot fire and the panel stays empty |
 | `ci_lab_verdict_mismatch_total` | `CILabVerdictMismatch`, Shadow mismatches per gate | `shadow.Shadow` counts it in a registry of its own and has no live caller, so the alert cannot fire |
-| `ci_lab_unit_duration_seconds`, `ci_lab_mirror_age_seconds`, `ci_lab_units_redelivered_total`, `ci_lab_units_lost_total`, `ci_lab_github_rate_remaining` | No alert or panel | Nothing, since no alert or panel reads them. `metrics.observe_records` sets the unit duration when a caller runs it; no code sets the other four |
+| `ci_lab_unit_duration_seconds`, `ci_lab_mirror_age_seconds`, `ci_lab_github_rate_remaining` | No alert or panel | Nothing, since no alert or panel reads them. `metrics.observe_records` sets the unit duration when a caller runs it; no code sets the other two |
+
+`Scheduler._reap` counts `ci_lab_units_redelivered_total` and `ci_lab_units_lost_total` on the
+registry the metrics port serves, one for each expired lease it requeues or marks lost. No alert or
+panel reads them; the [Worker loss drill](#worker-loss-drill) does.
 
 The kube-state-metrics series need the lab chart's objects in the `ci-lab` namespace: the
 `ci-lab-scheduler` and `ci-lab-worker` Deployments, the worker pods, and the KEDA ScaledObject
@@ -940,6 +944,271 @@ A worker running a unit shows `1000`; an idle one shows `<none>`.
 | Grants and completions slow by about five seconds each | The API server does not answer the patches | The check above; the patch timeout bounds each patch at five seconds, and a completion that raced a grant sends two |
 | A busy worker shows `<none>` after a grant raced a clear | The busy patch of the re-check was refused or timed out | The `kubectl auth can-i` check above; the cost stays cleared until the raced lease ends, and the worker's next poll that grants sets it again |
 | An idle worker shows `1000` | A grant marked it busy again during a clear, and that lease ended before the re-check's patch landed | Its next lease poll that grants and the end of that lease reset it |
+
+## Worker loss drill
+
+The deployment repository's `ci-lab` chart carries a drill that kills one lab worker in the middle
+of its units, so the lease expiry, the redelivery and the single verdict post can be read on the
+deployed lab. It is off by default under `chaos.enabled`. The second half of the exercise needs no
+drill objects: a values pull request that lowers `elasticity.floorWorkers` shrinks the worker pool,
+and the CI node count falls once a node holds no worker. An ordinary pod delete or node drain
+redelivers nothing, as [Drain a node without a redelivery](#drain-a-node-without-a-redelivery)
+describes.
+
+### Drill objects
+
+With `chaos.enabled: true` the chart renders six objects, each named `ci-lab-chaos` and labelled
+`app.kubernetes.io/component: chaos`. With it false, the default, it renders none of them.
+
+| Kind | What it holds |
+|---|---|
+| ServiceAccount | The account the Job runs as |
+| Role and RoleBinding | `list` and `delete` on `pods` in the lab namespace, bound to that account alone; no other workload runs as it |
+| ValidatingAdmissionPolicy | Matches a `DELETE` of a pod in the lab namespace sent by `system:serviceaccount:<namespace>:ci-lab-chaos`, and admits it only when the pod carries every worker selector label with its value: `app.kubernetes.io/name: ci-lab`, `app.kubernetes.io/instance: <release>` and `app.kubernetes.io/component: worker`. `failurePolicy` is `Fail` |
+| ValidatingAdmissionPolicyBinding | Binds the policy with `validationActions: [Deny]`, so a refused delete answers `Forbidden` with `the chaos account deletes only lab worker pods` |
+| Job | Sync wave `1`, so Argo CD applies it after the account, the Role and the policy; `backoffLimit: 0`, `activeDeadlineSeconds: 120` and no `ttlSecondsAfterFinished` |
+
+The Role allows any pod; the admission policy keeps the drill from deleting the scheduler, the lab
+remote or a node cache pod. The policy needs Kubernetes 1.30 or newer, which serves
+ValidatingAdmissionPolicy under `admissionregistration.k8s.io/v1`. `<release>` is the Helm release
+name, `ci-lab` for the deployed Argo CD Application.
+
+The Job's pod runs `alpine/k8s:1.33.5` (`chaos.image`) as user and group 65532 on a read only root,
+with every capability dropped, privilege escalation off, the `RuntimeDefault` seccomp profile and
+an emptyDir at `/tmp`, which is also its `HOME`. It requests 50m CPU and 128Mi memory with a 128Mi
+memory limit (`chaos.resources`). It runs this script under `/bin/sh -ec`:
+
+```sh
+pods=$(kubectl get pods --selector "$WORKERS" --field-selector status.phase=Running --output json)
+pod=$(printf '%s' "$pods" | jq -r '[.items[] | select(.metadata.annotations["controller.kubernetes.io/pod-deletion-cost"])][0].metadata.name // empty')
+test -n "$pod" || { echo "no lab worker holds a lease" >&2; exit 1; }
+kubectl delete pod "$pod" --grace-period=1 --wait=false
+```
+
+`WORKERS` holds the worker selector labels joined by commas. The script deletes the first Running
+worker in the list that carries the deletion cost annotation, which the scheduler sets while a
+worker holds a lease (see [Worker pod deletion cost](#worker-pod-deletion-cost)). The one second
+grace ends the pod before the worker's SIGTERM drain (see [Worker executors](#worker-executors))
+can finish its units, so their leases expire instead of completing. The Job fails when no worker
+carries the annotation, since an idle worker has no lease to expire, and when the pod list fails.
+
+The drill runs once per enable. `backoffLimit: 0` starts no second pod after a failure. The Job has
+no TTL because the `ci-lab` Application runs with self heal: a Job the TTL controller deleted would
+be created again and would kill another worker.
+
+### Run the drill
+
+1. Pick a time when the lab grades a head with several units, such as a merge group or promotion
+   grade, and check that a worker holds a lease:
+
+   ```bash
+   kubectl get pods -n ci-lab -l app.kubernetes.io/component=worker \
+     -o custom-columns='NAME:.metadata.name,COST:.metadata.annotations.controller\.kubernetes\.io/pod-deletion-cost'
+   ```
+
+   A worker running a unit shows `1000`.
+2. Open a pull request into the deployment repository's `dev` that sets, in
+   `k8s/charts/ci-lab/values.yaml`:
+
+   ```yaml
+   chaos:
+     enabled: true
+   ```
+
+3. Merge it while units still run. The `ci-lab` Application syncs `k8s/charts/ci-lab` from `dev`
+   with automated prune and self heal, so the sync applies the account, the Role and the policy,
+   then the Job, which lists the workers at once.
+4. Read what the Job did and follow the units as
+   [Verify a redelivery](#verify-a-redelivery) shows.
+5. Open a second pull request that sets `chaos.enabled: false`. Prune deletes the Job, the
+   account, the Role, the RoleBinding and the policy. Running the drill again takes another
+   pull request that sets it back to `true`.
+
+Leave the finished Job in place until that second pull request syncs. Deleting it by hand makes
+self heal create it again, and the new Job kills another worker.
+
+### What happens to a killed worker's units
+
+Each unit the killed worker held goes through these steps:
+
+1. Its lease expires. The worker heartbeats each lease every 10 seconds
+   (`worker.HEARTBEAT_SECONDS`), and each heartbeat moves the lease's expiry 120 seconds ahead
+   (`scheduler.LEASE_TTL_MS`), so the lease expires between 110 and 120 seconds after the kill.
+2. The first scheduler pass after the expiry, at most 2 seconds later, reaps it in
+   `Scheduler._reap`. `queue.Queue.reap` moves the job back to pending with one more attempt while
+   its attempts are below `lab.retry.lost`, one by default (see
+   [Configure the counts](#configure-the-counts)). The pass counts the job in
+   `ci_lab_units_redelivered_total` and the service prints `reaped <job> pending`. A job that
+   already spent its lost retry, after an earlier crash or loss, becomes `lost` instead: the pass
+   counts `ci_lab_units_lost_total`, prints `reaped <job> lost`, and the grade turns red.
+3. The dead worker's lease token is refused. A heartbeat or completion that carries it answers
+   `403` with `lease token refused`, so a late call from the old pod changes nothing.
+4. Another worker leases the requeued job, such as the pod the Deployment started in place of the
+   killed one, runs it and completes it. Its report becomes the unit's verdict in the store.
+5. The gate's check run, `lab/<gate>`, and the grade's `lab/required` each move `queued`,
+   `in_progress` and `completed` once. The redelivery opens no second check run, and a completed
+   check run never moves again (step 8 of the [Scheduler loop](#scheduler-loop)).
+
+`ci_lab_units_redelivered_total` therefore rises by the number of units the killed worker held, up
+to its `worker.slots` (5), and `ci_lab_units_lost_total` stays where it was.
+
+`tests/ci_lab/test_redelivery.py`, under the feature `lab-worker-loss-redelivery`, runs these steps
+against the scheduler over fakeredis and the local object store with a 100 millisecond lease and two
+workers, and reads both counters through `GET /metrics`. The deployment repository's
+`tests/unit/ci_lab/test_chaos.py` pins the rendered drill: nothing by default, the Role rules and
+binding, the policy's match and label checks, and the Job's single run, script, selector and
+security context.
+
+### Verify a redelivery
+
+The Job:
+
+```bash
+kubectl -n ci-lab get job ci-lab-chaos
+kubectl -n ci-lab logs job/ci-lab-chaos
+```
+
+A Job that killed a worker completes and logs the deletion of one worker pod. A failed Job's log
+names its cause, as the [troubleshooting table](#worker-loss-troubleshooting) lists.
+
+The scheduler's reaps, two minutes after the kill:
+
+```bash
+kubectl -n ci-lab logs deploy/ci-lab-scheduler --since 10m | grep --line-buffered -E '^reaped '
+```
+
+The counters, in Prometheus once the ServiceMonitor's 30 second scrape follows the reap:
+
+```promql
+increase(ci_lab_units_redelivered_total[15m])
+increase(ci_lab_units_lost_total[15m])
+```
+
+The first reads at least 1. The second reads 0, or no data while the scheduler has marked no unit
+lost since it started, since the counter writes no sample until its first count. Both counters live
+in the scheduler process and restart from zero with it, so read them through `increase()`.
+
+The check runs of the graded head, one call:
+
+```bash
+gh api "repos/<owner>/<repo>/commits/<sha>/check-runs" --paginate \
+  --jq '.check_runs[] | select(.name | startswith("lab/")) | "\(.name) \(.status) \(.conclusion)"'
+```
+
+Each `lab/<gate>` name and `lab/required` appears once, `completed`, with the grade's conclusion.
+
+### Drain a node without a redelivery
+
+Every other way a worker pod ends drains its units: a rollout, a KEDA scale down, a
+`kubectl delete pod` without `--grace-period`, or a node drain. Each sends SIGTERM and waits for the
+pod's termination grace, 2100 seconds (`worker.terminationGracePeriodSeconds`). The worker stops
+leasing, keeps heartbeating its running units, delivers each one and exits, so no lease expires and
+`ci_lab_units_redelivered_total` stays flat. A unit still running when the grace ends is abandoned;
+its lease expires and it is redelivered as the drill's units are.
+
+```bash
+kubectl drain <node> --ignore-daemonsets --delete-emptydir-data
+```
+
+`--ignore-daemonsets` leaves the node cache pod, and `--delete-emptydir-data` lets the drain evict
+workers, whose `work` and `temporary` volumes are emptyDir. The chart defines no
+PodDisruptionBudget, so the drain evicts every worker on the node at once and returns when the last
+one has delivered its units. The Deployment starts replacements on another CI node, or on a node
+the autoscaler adds. `kubectl uncordon <node>` makes the node schedulable again.
+
+### Lower the worker floor
+
+With `elasticity.enabled: true` the KEDA ScaledObject `ci-lab-worker` sizes the worker Deployment,
+and the Deployment omits `replicas`. Its Prometheus trigger reads
+`max_over_time(sum(ci_lab_slots_wanted)[2m:15s])` as an `AverageValue` against `worker.slots`, so
+KEDA asks for one worker per five wanted slots, at the highest value of the last two minutes.
+`ignoreNullValues` is `"false"`, so a missing series counts as a failed poll.
+
+| Value | Default | What it sets |
+|---|---|---|
+| `elasticity.floorWorkers` | `3` | `minReplicaCount`, and the `fallback` replicas KEDA holds after `fallbackFailures` failed polls |
+| `elasticity.workersPerNode` | `3` | The scale up step, in pods per `scaleUpPeriodSeconds`; times `nodeMax`, the maximum |
+| `elasticity.nodeMax` | `7` | `maxReplicaCount` is `workersPerNode` times `nodeMax`: 21 workers |
+| `elasticity.pollingInterval` | `15` | Seconds between KEDA polls |
+| `elasticity.fallbackFailures` | `3` | Failed polls before the fallback |
+| `elasticity.scaleUpPeriodSeconds` | `60` | The period of the scale up step |
+| `elasticity.scaleDownWindowSeconds` | `300` | The scale down stabilisation window |
+| `elasticity.scaleDownPodsPerMinute` | `2` | Workers removed per 60 seconds |
+| `elasticity.prometheusAddress` | the `kube-prometheus-stack` Prometheus in `monitoring` | The Prometheus the trigger queries |
+
+A values pull request into the deployment repository's `dev` changes the floor:
+
+```yaml
+elasticity:
+  floorWorkers: 0
+```
+
+The node count follows the floor through four steps:
+
+1. Argo CD syncs the ScaledObject. While the wanted slots ask for fewer workers than the old
+   floor, the HorizontalPodAutoscaler KEDA builds from it, `keda-hpa-ci-lab-worker`, waits out the
+   300 second window, then removes two workers a minute down to the new floor. A floor of `0` lets
+   KEDA remove the last worker once nothing has been wanted for its cooldown period, the KEDA
+   default of 300 seconds, since the ScaledObject sets no `cooldownPeriod`.
+2. The ReplicaSet removes the workers with the lowest deletion cost first, so idle workers go
+   before busy ones, and each removed worker drains as above.
+3. Workers run only on the `oci-ci` node pool, placed by the `runner-binpack` scheduler. The
+   deployment repository's OCI cluster autoscaler removes a CI node that stays below half its
+   requested capacity for one minute.
+4. Workers carry `cluster-autoscaler.kubernetes.io/safe-to-evict: "false"`, so the autoscaler
+   never drains a node out from under a worker. A CI node goes only once KEDA has removed every
+   worker on it.
+
+Read the floor, the autoscaler and the CI nodes:
+
+```bash
+kubectl -n ci-lab get scaledobject ci-lab-worker -o jsonpath='{.spec.minReplicaCount}{"\n"}'
+kubectl -n ci-lab get hpa keda-hpa-ci-lab-worker
+kubectl -n kube-system get configmap cluster-autoscaler-oci-status -o jsonpath='{.data.status}'
+```
+
+The `CI nodes against the cap` panel of the [CI Lab dashboard](#ci-lab-dashboard) plots the node
+count. The same count in Prometheus:
+
+```promql
+count(kube_node_spec_taint{key="<label domain>/workload", value="ci"} and on (node) kube_node_spec_taint{key="<label domain>/remote", value="oci"})
+```
+
+A floor of `0` also makes the fallback `0`, so a Prometheus outage of three polls scales the pool to
+no workers and the lab grades nothing until the series returns.
+
+### Worker loss limitations
+
+- The drill deletes the first leased worker the API server lists, never a chosen one, and every
+  unit that worker holds expires with it.
+- The Job lists the workers when Argo CD syncs the enabling merge. A merge that lands while no
+  worker holds a lease fails it, and a second run needs the disable and enable pull requests.
+- The drill deletes a pod. It never cordons or drains a node; the drain path redelivers nothing.
+- Both counters reset when the scheduler restarts, so a restart between the kill and the read
+  loses the count. The scheduler log keeps the `reaped` lines.
+- On a tie in deletion cost the ReplicaSet removes workers from the nodes running the most of them
+  first, so a scale down can leave one idle worker on each of several nodes. Those nodes stay until
+  the pool falls far enough to empty one.
+
+#### Worker loss delivery evidence
+
+The deployment repository's pull request 1907 delivered the drill and `test_chaos.py`. Pull request
+[#12445](https://github.com/the-cloud-clockwork/agentihooks/pull/12445) added
+`test_redelivery.py`. The live run the source task names, a counter rise on the deployed lab after
+the drill and a node count fall after a floor change, has no recorded evidence on this page.
+
+### Worker loss troubleshooting
+
+| Symptom | Cause | Check |
+|---|---|---|
+| The Job fails and logs `no lab worker holds a lease` | No Running worker carried the deletion cost annotation when the Job ran | The custom columns query in [Run the drill](#run-the-drill); disable the drill, then enable it again while units run |
+| The Job fails with `Forbidden` and `the chaos account deletes only lab worker pods` | The pod the Job chose lacks a worker selector label, or one differs | `kubectl -n ci-lab get pod <pod> --show-labels` against the three worker labels |
+| The Job fails with `cannot list resource "pods"` or `cannot delete resource "pods"` | The Role or RoleBinding is missing, or the Job ran before its sync wave applied them | `kubectl -n ci-lab get role,rolebinding ci-lab-chaos`; the Application's sync status |
+| Argo CD cannot apply the ValidatingAdmissionPolicy | The cluster serves no `admissionregistration.k8s.io/v1` ValidatingAdmissionPolicy | `kubectl api-resources --api-group=admissionregistration.k8s.io` lists `validatingadmissionpolicies` on Kubernetes 1.30 or newer |
+| `ci_lab_units_redelivered_total` stays flat after the kill | The lease has not expired yet, the scrape has not run since, or the worker held no lease | Wait two and a half minutes; then the `reaped` lines in the scheduler log |
+| `ci_lab_units_lost_total` rises and the grade is red | The killed unit had already spent its lost retry on an earlier crash or loss | `lab.retry.lost` in `delivery.yaml`; rerequest the check run to grade the head again |
+| A second worker dies after the drill | The finished Job was deleted by hand, and self heal created it again | Disable the drill by pull request; never delete the Job |
+| The CI node count stays after a lower floor | Wanted slots still ask for more workers, the 300 second window has not passed, or each node still runs a worker | `kubectl -n ci-lab get hpa keda-hpa-ci-lab-worker`; the worker pods with `-o wide`; the autoscaler status ConfigMap |
 
 ## Lab head intake
 
