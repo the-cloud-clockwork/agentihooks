@@ -84,7 +84,7 @@ def test_the_finding_goes_to_the_master_inbox(store: Any) -> None:
     [found] = ticks(store, doc(record("tasks/t1", "focus"), tasks=[task("t1")]), 4)
     inbox = InboxStore(store.redis)
     shown = {"phases": [{"id": "p1", "title": "Build"}], "tasks": [], "_meta": {"rev": 1, "events": []}}
-    ledger_events.findings_pass(inbox, store, SLUG, [found.as_dict()], shown)
+    ledger_events.findings_pass(inbox, store, SLUG, [{"id": found.id, **found.as_dict()}], shown)
     [item] = inbox.pending_items(lead)
     assert "(focus unclaimed)" in item.text
     assert "claimable but unclaimed for 4 ticks" in item.text
