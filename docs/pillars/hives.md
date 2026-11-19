@@ -903,8 +903,8 @@ A hive declares what it offers with `capabilities`, and a task names what it req
 
 ```bash
 agentihooks hive set desk capabilities=headed
-agentihooks api --slug <slug> --as <name> task add browse "Check the logged in page" --lane eng --needs headed
-agentihooks api --slug <slug> --as <name> task set browse needs=headed
+agentihooks ledger --slug <slug> --as <name> task add browse "Check the logged in page" --lane eng --needs headed
+agentihooks ledger --slug <slug> --as <name> task set browse needs=headed
 ```
 
 Placement keeps only the live hives whose capabilities cover every name in the task's `needs`. When none does, the

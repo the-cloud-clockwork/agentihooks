@@ -3,7 +3,7 @@
 A master or planner declares required post merge evidence on a code or CI task:
 
 ```bash
-agentihooks api --slug example --as master task set task-name contract.after=yes
+agentihooks ledger --slug example --as master task set task-name contract.after=yes
 ```
 
 Set `contract.must`, `contract.check` and `contract.judge` to name the target,

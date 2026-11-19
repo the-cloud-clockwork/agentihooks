@@ -302,7 +302,7 @@ def test_the_dispatcher_naming_type_and_profile():
 
 
 NAME = "dispatcher@a1b2c3-0001"
-LED = f"agentihooks api --slug {SLUG} --as {NAME}"
+LED = f"agentihooks ledger --slug {SLUG} --as {NAME}"
 PROMPT = f"""You are {NAME}, the dispatcher of swarm {SLUG}, working beside its master in the repo /repo. \
 The swarm runs at full autonomy.
 The tick woke you because its deterministic passes could not settle these triggers:

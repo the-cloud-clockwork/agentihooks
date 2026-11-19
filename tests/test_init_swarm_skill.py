@@ -37,7 +37,7 @@ def test_every_command_exists():
     swarm_help = _help("swarm")
     ledger_help = _help("ledger")
     swarm = set(re.findall(r"agentihooks swarm <slug> (\w[\w-]*)", text))
-    ledger = set(re.findall(r"agentihooks (?:ledger|api)(?: --slug <slug>)? (\w[\w-]*)", text))
+    ledger = set(re.findall(r"agentihooks ledger(?: --slug <slug>)? (\w[\w-]*)", text))
     assert {"start", "status"} <= swarm and "create" not in swarm
     assert "task" in ledger and "new" not in ledger
     assert all(re.search(rf"\b{c}\b", swarm_help) for c in swarm)
@@ -65,11 +65,11 @@ def test_manual_phase_tasks_come_from_a_published_plan_with_slice_anchors():
     from scripts.swarm_ledger import ledger
 
     text = SKILL.read_text()
-    [publish] = re.findall(r"^agentihooks api (--slug <slug> --as <name> publish-plan \S+ --phase \S+)$", text, re.M)
+    [publish] = re.findall(r"^agentihooks ledger (--slug <slug> --as <name> publish-plan \S+ --phase \S+)$", text, re.M)
     args = ledger.build_parser().parse_args(publish.split())
     assert (args.command, args.path, args.phase) == ("publish-plan", "<plan-file>", "<phase-ids>")
     assert "<!-- slice: <id> -->" in text
-    assert re.search(r"^agentihooks api --slug <slug> task add .*--plan-slice <id>", text, re.M)
+    assert re.search(r"^agentihooks ledger --slug <slug> task add .*--plan-slice <id>", text, re.M)
 
 
 def test_the_sweep_template_uses_flags_the_sweep_parser_accepts():

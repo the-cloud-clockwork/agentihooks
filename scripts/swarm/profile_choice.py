@@ -179,6 +179,6 @@ def _ledger(slug: str) -> dict:
 
 def _remedy(slug: str, task: dict) -> str:
     return (
-        f"set it with agentihooks api --slug {slug} task set {task.get('id')} profile=<{'|'.join(RESPONSIBILITIES)}>"
+        f"set it with agentihooks ledger --slug {slug} task set {task.get('id')} profile=<{'|'.join(RESPONSIBILITIES)}>"
         ", or split the task into one public responsibility each, then reopen it"
     )

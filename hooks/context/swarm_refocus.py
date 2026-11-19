@@ -44,7 +44,7 @@ def _master_block(ledger: dict, cap: int) -> str:
         f"=== SWARM REFOCUS: {_clip(ledger.get('title', ''), share)} ===\n"
         "Master obligations: Troubleshoot with read only diagnostics, plan with the operator, "
         "configure the swarm, the ledger and the operator's environment with him through the agentihooks commands "
-        "and tools, handle operator inbox items, keep progress current through agentihooks api and judge it; "
+        "and tools, handle operator inbox items, keep the ledger current and judge progress; "
         "never edit code or config files in a repository, commit, merge or claim a task.\n"
         f"Plan: {_clip(ledger.get('overview', ''), share)}\n"
         f"Priorities: {_clip(priorities, share)}\n"
