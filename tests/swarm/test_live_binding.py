@@ -1391,7 +1391,9 @@ def test_legacy_reader_prefers_registered_assigned_harness(monkeypatch, proof_ha
     "lanes, expected",
     [({"master": {"profile": "master"}}, "master"), ({}, "master"), ({"master": {"profile": "qa"}}, "qa")],
 )
-def test_legacy_master_relaunch_uses_its_declared_profile(ticking, monkeypatch, lanes, expected):
+def test_legacy_master_relaunch_uses_its_declared_profile(
+    ticking: Any, monkeypatch: pytest.MonkeyPatch, lanes: dict[str, dict[str, str]], expected: str
+) -> None:
     from scripts.swarm.tick import tick
 
     monkeypatch.setenv("AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES", "0")
@@ -1407,7 +1409,7 @@ def test_legacy_master_relaunch_uses_its_declared_profile(ticking, monkeypatch, 
     saved = runtime.masters[-1][1]["launch_assignment"]
     assert saved["profile"] == expected
     assert saved["model"] == "opus"
-    assert saved["effort"] == "high"
+    assert saved["effort"] == "xhigh"
 
 
 def test_legacy_worker_relaunch_prefers_explicit_task_profile(
