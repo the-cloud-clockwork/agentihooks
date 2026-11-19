@@ -210,6 +210,8 @@ class StatsInputs:
     records: dict = field(default_factory=lambda: {True: {}, False: {}})
     traced: dict = field(default_factory=dict)
     discovered: dict[str, set[str]] = field(default_factory=dict)
+    closures: dict[frozenset[str], dict[str, str]] = field(default_factory=dict)
+    digests: dict[frozenset[str], str] = field(default_factory=dict)
 
     def for_test(self, path: str, covered: list[str] | None, fresh: list[dict] | None = None) -> dict:
         measured = covered is not None
@@ -227,11 +229,12 @@ class StatsInputs:
             )
             inputs.update({name: value[0] for name, value in loaded.items()})
         if covered:
-            inputs.update(
-                test_inputs(
+            key = frozenset(covered)
+            if key not in self.closures:
+                self.closures[key] = test_inputs(
                     self.root, covered, self.modules, self.records[measured], self.resources, False, self.discovered
                 )
-            )
+            inputs.update(self.closures[key])
         if not any(not name.startswith("tests/") for name in inputs) and (
             changed := sorted(self.changes.keys() & self.resources)
         ):
@@ -244,6 +247,9 @@ class StatsInputs:
         return self.for_test(path, list(inputs) if measured else None) == inputs and self.discovery(inputs) == discovery
 
     def discovery(self, inputs: dict) -> str:
+        key = frozenset(inputs)
+        if key in self.digests:
+            return self.digests[key]
         paths = set()
         for source in inputs:
             if Path(source).suffix != ".py":
@@ -253,7 +259,8 @@ class StatsInputs:
                 names = set(imported_names(text, Path(source).parent.parts))
                 self.discovered[source] = discovery_inputs(list(ast.walk(ast.parse(text))), names, self.resources)
             paths.update(self.discovered[source])
-        return hashlib.sha256(encode(sorted(paths)).encode()).hexdigest()
+        self.digests[key] = hashlib.sha256(encode(sorted(paths)).encode()).hexdigest()
+        return self.digests[key]
 
 
 def per_test_stats(
