@@ -9,6 +9,7 @@ from collections.abc import Callable, Iterator
 from functools import partial
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -682,6 +683,11 @@ def test_main_serves_the_worker_metrics_on_the_contract_port_until_the_worker_dr
         served.append((host, port, server))
         return server
 
+    def thread(target: Callable[[], None]) -> threading.Thread:
+        if target != served[0][2].serve_forever:
+            pytest.fail(f"main ran {target!r} on its thread instead of the metrics server")
+        return threading.Thread(target=target)
+
     class Service:
         def run(self) -> list[Lease]:
             address = f"http://127.0.0.1:{served[0][2].server_address[1]}/metrics"
@@ -695,6 +701,7 @@ def test_main_serves_the_worker_metrics_on_the_contract_port_until_the_worker_dr
 
     before = set(threading.enumerate())
     monkeypatch.setattr(metrics, "serve_registry", serve_registry)
+    monkeypatch.setattr(executors, "threading", SimpleNamespace(Thread=thread))
     monkeypatch.setattr(executors.worker, "build", lambda *args: Service())
     monkeypatch.setattr(executors.signal, "signal", lambda number, handler: handlers.__setitem__(number, handler))
 
