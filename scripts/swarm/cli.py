@@ -164,6 +164,7 @@ from scripts.swarm.status import (
     auto_snapshot,
     findings,
     live_agents,
+    readable_hives,
     section_lines,
     status_report,
     task_counts,
@@ -1575,12 +1576,11 @@ def probe_command(store, args):
 
 
 def hive_admission(store: Any, slug: str) -> dict[str, Any]:
-    """Each live hive's admission room and limit, and the binding limit against quota seats and host room."""
+    """Each readable live hive's admission room and limit, and the binding limit against quota seats and host room."""
     from scripts.hive import admission
-    from scripts.hive.launch import live_hives
     from scripts.swarm import capacity
 
-    hives = live_hives(store)
+    hives, refused = readable_hives(store)
     record: dict[str, Any] = capacity.read(store, slug)
     host: dict[str, Any] = record.get("host") or {}
     environ = dict(os.environ)
@@ -1588,7 +1588,7 @@ def hive_admission(store: Any, slug: str) -> dict[str, Any]:
     seats = capacity.quota_seats(observed, capacity.warned_accounts(observed, environ))
     others: dict[str, int | None] = {"quota seats": seats, "host room": host.get("room")}
     rows = [{"hive": hive["id"], "room": hive["room"], "limit": hive["limit"]} for hive in hives]
-    return {"hives": rows, "lines": admission.view_lines(hives, others)}
+    return {"hives": rows, "lines": admission.view_lines(hives, others, refused)}
 
 
 def cmd_status(store: Any, args: Any) -> None:
