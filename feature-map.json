@@ -4549,6 +4549,16 @@
       ]
     },
     {
+      "id": "swarm-status-agent-wait",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-status-agent-wait-column",
+      "behaviour": "The swarm status agent table ends with a Wait column: an agent with a checked wait shows its kind and target, such as lab and the check run link, an agent with a bare wait shows bare, and an agent with no live wait shows a dash, so a master reads every agent's wait from swarm status.",
+      "seam": "The agentihooks swarm status agent table, cli.cmd_status through status.wait_label",
+      "tests": [
+        "tests/swarm/test_status_capabilities.py::test_status_text_prints_each_agents_declared_wait_kind_and_target"
+      ]
+    },
+    {
       "id": "artifact-storage",
       "origin": "inventory",
       "behaviour": "Markdown, JSON and SVG artifacts are stored once by content hash, SVG without scripts; any other file or an oversize file is refused.",
