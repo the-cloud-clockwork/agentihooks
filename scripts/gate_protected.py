@@ -234,7 +234,7 @@ def _merge_group_lab_job(job: dict[str, Any] | None) -> dict[str, Any] | None:
             and step.get("with", {}).get("ref") == "${{ github.event.pull_request.base.sha }}"
         ):
             step["with"]["ref"] = "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}"
-            changes.append("authority")
+            changes.append("checkout")
         elif step.get("id") == "authority" and "python -m scripts.ci_lab_verdict authority . pull_request" in step.get(
             "run", ""
         ):
@@ -243,7 +243,7 @@ def _merge_group_lab_job(job: dict[str, Any] | None) -> dict[str, Any] | None:
                 "python -m scripts.ci_lab_verdict authority . pull_request",
                 'python -m scripts.ci_lab_verdict authority . "$EVENT"',
             )
-            changes.append("checkout")
+            changes.append("authority")
         elif (
             step.get("id") == "verdict"
             and step.get("env", {}).get("HEAD") == "${{ github.event.pull_request.head.sha }}"
