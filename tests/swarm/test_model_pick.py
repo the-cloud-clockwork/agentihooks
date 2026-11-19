@@ -374,6 +374,13 @@ def test_the_master_frontier_stays_on_opus_high():
     assert model_pick.frontier("codex") == ModelPick("gpt-6.1-sol", "high", "frontier")
 
 
+@pytest.mark.feature("master-launch-swarm-model")
+@pytest.mark.parametrize("harness,model", [("claude", "sonnet"), ("codex", "gpt-6-sol")])
+def test_the_master_model_is_the_frontier_pick_on_the_swarm_model_setting(harness, model):
+    config = SimpleNamespace(claude_model="sonnet", codex_model="gpt-6-sol")
+    assert model_pick.master(config, harness) == ModelPick(model, "high", "frontier")
+
+
 TASK = {"id": "t1", "title": "Fix typo", "difficulty": "S", "rank": "normal"}
 
 
