@@ -235,6 +235,18 @@ class LedgerClient:
         """The ledger's freeze and focus records, read without its tasks."""
         return self._resource(slug, "freezes", collection=True)
 
+    def focus_verdicts(self, slug: str, target: str) -> dict[str, Any] | None:
+        """The claim gate verdict on every task under a focus or freeze target, or None when no such target exists."""
+        try:
+            return self._resource(slug, f"focus/{target}")
+        except urllib.error.HTTPError as exc:
+            from scripts.swarm_ledger.api.client import failure
+
+            replay, error = failure(exc)
+            if exc.code != 404 or error.get("code") != "resource_missing":
+                raise replay from None
+            return None
+
     def alerts(self, slug: str) -> list[dict[str, Any]]:
         """The ledger's alerts, read without the rest of the ledger."""
         return self._resource(slug, "alerts", collection=True)

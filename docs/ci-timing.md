@@ -1955,6 +1955,14 @@ A branch only job with no accepted job or workflow level lane group is refused
 with `job <name> has no shared hosted lane concurrency group`. Give it an
 accepted shared hosted lane, using an existing hosted workflow as the model.
 
+A Proofs job may run on its per run `focused-proof-<run id>` group instead of a
+hosted lane. The grader admits any job of the Proofs workflow whose own or
+workflow level block is that group with `queue: max` and
+`cancel-in-progress: false`, when the dev copy and the head copy are both the
+Proofs workflow triggered only by `workflow_dispatch`. A new proof job and its
+new `proof` option need no grader change. A head that adds another trigger to
+Proofs, or renames it, is graded like any other workflow.
+
 To diagnose the branch grade, inspect its push run:
 
 ```bash
