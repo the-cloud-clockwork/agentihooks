@@ -15,9 +15,9 @@ its own cache; this is neither a shared volume nor a backup.
 This delivery prepares the caches and records the last successful fetch. The
 [worker Deployment](ci-lab.md#worker-deployment) mounts `git` and `uv` read only, and its pod
 store borrows the node mirror's objects, so a worker reports a git hit for a head the node mirror
-holds without fetching it. No code sets the scheduler's
-`ci_lab_mirror_age_seconds` yet. The [metric contract](ci-lab.md#metrics) names that series;
-the DaemonSet itself exposes no metrics endpoint.
+holds without fetching it. No code sets the scheduler's `ci_lab_mirror_age_seconds` yet. The
+[metric contract](ci-lab.md#metrics) names that series; the DaemonSet itself exposes no metrics
+endpoint.
 
 ## Placement and security
 

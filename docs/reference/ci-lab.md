@@ -624,7 +624,7 @@ them:
 | `ci_lab_units_overdue` | `CILabUnitsOverdue` | The alert cannot fire |
 | `ci_lab_workers_ready` | Workers ready against desired | The `heartbeat` line stays empty |
 | `ci_lab_core_seconds_total`, `ci_lab_heads_graded_total` | Core minutes per merged pull request | The stat reads No data |
-| `ci_lab_cache_hits_total`, `ci_lab_cache_misses_total` | `CILabCacheMissRatioHigh`, Cache hit ratio | `metrics.observe_records` counts the `verdict` cache but has no live caller, and nothing counts `git` or `uv`, so the alert cannot fire and the panel stays empty |
+| `ci_lab_cache_hits_total`, `ci_lab_cache_misses_total` | `CILabCacheMissRatioHigh`, Cache hit ratio | `Scheduler._place` counts the `verdict` cache and `metrics.observe_unit` counts the `git` and `uv` lookups a unit report carries, so the alert and panel wait only on a running scheduler |
 | `ci_lab_verdict_mismatch_total` | `CILabVerdictMismatch`, Shadow mismatches per gate | `shadow.Shadow` counts it in a registry of its own and has no live caller, so the alert cannot fire |
 | `ci_lab_unit_duration_seconds`, `ci_lab_mirror_age_seconds`, `ci_lab_units_redelivered_total`, `ci_lab_units_lost_total`, `ci_lab_github_rate_remaining` | No alert or panel | Nothing, since no alert or panel reads them. `metrics.observe_records` sets the unit duration when a caller runs it; no code sets the other four |
 
@@ -1048,8 +1048,8 @@ kubectl describe node "$node" | sed -n '/^Allocated resources:/,/^Events:/p'
 ```
 
 Computed from the requests, three workers put the `cpu` requests line at about 15.1 of the
-16 CPU, 94 percent: 15 from the workers and about 91m from the DaemonSets pull request 1826
-measured. [Worker delivery evidence](#worker-delivery-evidence) lists what has been recorded live.
+16 CPU, 94 percent: 15 from the workers and about 91m from the DaemonSets that pull request
+1826 measured. [Worker delivery evidence](#worker-delivery-evidence) lists what has been recorded live.
 
 Check each worker's scheduler, priority and QoS class:
 
