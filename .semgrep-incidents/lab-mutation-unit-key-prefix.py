@@ -1,3 +1,5 @@
+from typing import Protocol
+
 from scripts.ci_lab import digests
 from scripts.ci_lab.units import Unit
 
@@ -6,9 +8,8 @@ def digest(value: object) -> str:
     return str(value)
 
 
-class Cache:
-    def identity(self) -> str:
-        return "a" * 64
+class Cache(Protocol):
+    def identity(self) -> str: ...
 
 
 def bare_stats(cache: Cache) -> Unit:
