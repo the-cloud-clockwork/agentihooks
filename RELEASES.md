@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.1044 · 2026-11-19
+
+### 2026-11-18 · bee2f5b29ba2 · #12205 · @nestorcolt
+
+**Read the swarm smoke build step from the workflow in its pinned tests**
+
+This change removes the duplicated copy of the swarm smoke "Build the swarm image" workflow step that had been pasted into two pinned tests, so now those tests read the step's actual run text directly from the workflow and check it via shared helpers. This means future edits to runtime image pulls only need to happen once in the workflow, not in three places, while the tests still fail correctly if any runtime image pull or retag line is lost or commented out.
+
 ## v2.17.1043 · 2026-11-19
 
 ### 2026-11-18 · cb7e456de7c2 · #12197 · @agenticore-app
