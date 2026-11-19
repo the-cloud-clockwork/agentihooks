@@ -745,8 +745,9 @@ class Scheduler:
     def _refuse(self, request: GradeRequest, ref: str, error: Exception, now_ms: int) -> list[str]:
         """Post a completed required check run with conclusion failure on a head that cannot expand, naming the error,
         so the head shows a lab status. A head with no plan has no authoritative gates, so the check posts as
-        lab-shadow/required; a head pushed to a grade ref posts nothing, since GitHub does not hold it. A post the App
-        token, GitHub or the network refuses is recorded and not retried, since the dropped head keeps no grade."""
+        lab-shadow/required; a head pushed to a grade ref posts nothing, since GitHub does not hold it. The post is tried
+        once, outside the post holds, and a post the App token, GitHub or the network refuses is recorded and not
+        retried, since the dropped head keeps no grade."""
         if ref.startswith(GRADE_REFS):
             return []
         reason = f"cannot expand {request.head} against {request.base}: {error}"

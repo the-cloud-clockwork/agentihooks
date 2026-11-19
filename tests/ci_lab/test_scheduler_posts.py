@@ -170,7 +170,7 @@ def test_a_post_github_refuses_holds_only_its_grade_across_a_restart_while_other
     run.push(HEAD_B, lane="second")
     assert f"held lint queued on {HEAD_A} for a later pass: {refusal}" in run.tick(1000)
     assert run.grade(HEAD_A).hold == 1000 + HOLD_MS
-    grant = next(grant for grant in run.lease(slots=2, ttl_ms=10 * HOLD_MS) if grant.job.startswith(HEAD_B))
+    grant = next(leased for leased in run.lease(slots=2, ttl_ms=10 * HOLD_MS) if leased.job.startswith(HEAD_B))
     run.finish(grant, "passed", {})
     restarted = Run(run.lab, run.lab.build(0, Policy(), None))
     actions = restarted.tick(1000 + HOLD_MS - 1)
@@ -204,14 +204,15 @@ def test_the_check_poster_s_refused_app_token_is_held_by_the_pass_and_tried_agai
 
 
 @pytest.mark.feature("lab-scheduler-post-refusal")
+@pytest.mark.parametrize("refusal", REFUSALS)
 def test_a_refused_failed_check_of_a_head_that_cannot_expand_is_recorded_and_the_pass_goes_on(
-    lab: Callable[..., Run],
+    lab: Callable[..., Run], refusal: Exception
 ) -> None:
     run = lab({HEAD_B: plan({"lint": (unit(2),)})})
-    poster = refusing(run, GitAuthRefused(REFUSED), heads=frozenset({HEAD_A}))
+    poster = refusing(run, refusal, heads=frozenset({HEAD_A}))
     run.push(HEAD_A, lane="first")
     run.push(HEAD_B, lane="second")
     actions = run.tick(1000)
-    assert f"cannot post the failed {scheduler.REQUIRED} check on {HEAD_A}: {REFUSED}" in actions
+    assert f"cannot post the failed {scheduler.REQUIRED} check on {HEAD_A}: {refusal}" in actions
     assert poster.moves(HEAD_A, scheduler.REQUIRED) == []
     assert poster.moves(HEAD_B, "lint") == [("queued", None)]

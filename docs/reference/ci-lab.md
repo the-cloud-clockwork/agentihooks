@@ -2407,12 +2407,15 @@ key; the builders are pure and read no file, clock or network.
    it did before. A refused post ends nothing: the pass records
    `held <check> <status> on <head> for a later pass: <error>` and goes on grading, and the first
    pass after a one minute hold (`POST_HOLD_MS`) posts the check run again. A refusal of the App
-   token (`GitAuthRefused`) or of the network (`OSError`) holds every post of that repository; a
-   refusal GitHub answers (`PostRefused`) holds only that grade's posts, kept in the grade state as
-   `hold`, so the other grades keep posting and a restarted scheduler keeps the hold. A grade whose
-   units are all final closes only once every one of its check runs is posted. The refusal text `GitHub App cannot supply scoped contents write credentials` is the
-   one message `GitHubAppAuth.get_token` raises for any refused token, so for the check runs token,
-   which asks for checks write only, read the App installation's `permissions.checks` in the org
+   token (`GitAuthRefused`) or of the network (`OSError`) holds the grade posts of that repository;
+   a refusal GitHub answers (`PostRefused`) holds only that grade's posts, kept in the grade state
+   as `hold`, so the other grades keep posting and a restarted scheduler keeps the hold. A grade
+   whose units are all final closes only once every one of its check runs is posted. The failed
+   check of a head that cannot expand is outside these holds: it is tried once, since its dropped
+   head keeps no grade to retry from. The refusal text
+   `GitHub App cannot supply scoped contents write credentials` is the one message
+   `GitHubAppAuth.get_token` raises for any refused token, so for the check runs token, which asks
+   for checks write only, read the App installation's `permissions.checks` in the org
    installations listing.
 
 Expansion frames a head by its class (`scripts.ci_lab.scheduler.frame`): a pull request or hotfix grade
@@ -2633,8 +2636,9 @@ reads `cannot expand <head> against <base>: <error>`, so the head still shows a 
 with no plan has no authoritative gates, so the check posts under the shadow name. A post of that
 check that the App token, GitHub or the network refuses is recorded as
 `cannot post the failed required check on <head>: <error>` and not retried, since the dropped head
-keeps no grade, and the pass goes on. A head pushed to
-a grade ref gets no check run, since GitHub does not hold that head. A manifest fetch that raises `FetchPending` or `FetchUnanswered` holds the head again instead, as
+keeps no grade, and the pass goes on. A head pushed to a grade ref gets no check run, since
+GitHub does not hold that head. A manifest fetch that raises `FetchPending` or
+`FetchUnanswered` holds the head again instead, as
 `holding <head>: <error>`; [Test units](#test-units) describes both. The scheduler service prints
 each action on its own line:
 
