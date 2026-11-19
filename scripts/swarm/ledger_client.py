@@ -117,6 +117,18 @@ def _ledger():
     return ledger
 
 
+def _refusal_detail(slug: str, state: dict[str, Any]) -> str:
+    from scripts.swarm_ledger.ledger import core
+
+    reasons: list[str] = []
+    for warning in state.get("_meta", {}).get("warnings", []):
+        if core.size_warning(warning):
+            print(f"ledger {slug} warning: {warning}", file=sys.stderr)
+        else:
+            reasons.append(warning)
+    return "; ".join(reasons) or str(state["rejected"])
+
+
 @dataclass(frozen=True)
 class FreezeWords:
     """The words and focus queue place a freeze write carries."""
@@ -170,8 +182,7 @@ class LedgerClient:
             error = LedgerRefused if refused else LedgerUnreachable if unreachable else SwarmError
             raise error(f"ledger {slug}: {exc}") from exc
         if state.get("rejected"):
-            detail = "; ".join(state.get("_meta", {}).get("warnings", [])) or str(state["rejected"])
-            raise LedgerRefused(f"ledger {slug} refused: {detail}")
+            raise LedgerRefused(f"ledger {slug} refused: {_refusal_detail(slug, state)}")
         if ops:
             from scripts.tick import view
 
@@ -196,7 +207,7 @@ class LedgerClient:
     def metadata(self, slug):
         return self._resource(slug, "metadata")
 
-    def tasks(self, slug):
+    def tasks(self, slug: str) -> list[dict[str, Any]]:
         return self._resource(slug, "tasks", collection=True)
 
     def tasks_targeting(self, slug: str, url: str) -> list[dict[str, Any]]:
