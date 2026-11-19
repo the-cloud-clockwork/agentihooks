@@ -532,7 +532,7 @@ inhibit_rules:
 | `CILabQueueWaitHigh` | The predicted wait of the hotfix, pull request or queue class is over 1200 seconds, the 20 minute default past which the [lab behind claim hold](swarm-thresholds.md#lab-behind-claim-hold) holds new eng claims. A [wait the lab cannot predict](#a-wait-the-lab-cannot-predict) reads `+Inf` and fires it too, while the claim hold reads that wait as 0. Promotion and backfill never fire it | 10 minutes | class | Slots busy against slots total, and whether the worker pool sits at its maximum |
 | `CILabWorkersPending` | At least one `ci-lab-worker-*` pod in `ci-lab` is Pending | 15 minutes | the pool | The `cluster-autoscaler-oci-status` ConfigMap for the CI pool, and whether runners hold the CI nodes; every runner outranks a worker, see [Worker scheduling priority](#worker-scheduling-priority) |
 | `CILabBudgetShedding` | `ci_lab_class_shed` is 1 for a class: the day's core budget left fell below that class's shed fraction, so its units wait for the budget to reset. Only backfill, promotion and queue shed | 5 minutes | class | Budget left on the dashboard and the shed fractions in the runtime config at `CI_LAB_RUNTIME_CONFIG` |
-| `CILabPullRequestBlockedByCap` | Pull request units are queued, every slot is busy, and a HorizontalPodAutoscaler in `ci-lab`, the one KEDA builds from the worker ScaledObject, wants at least its maximum replicas. An autoscaler at its maximum in another namespace does not count | 10 minutes | the pool; its value is the queued pull request units | The worker maximum and the CI node cap; raising either is the operator's elasticity budget |
+| `CILabPullRequestBlockedByCap` | Pull request units are queued, every slot is busy, and a HorizontalPodAutoscaler in `ci-lab`, in the deployed chart the one KEDA builds as `keda-hpa-ci-lab-worker`, wants at least its maximum replicas. An autoscaler at its maximum in another namespace does not count | 10 minutes | the pool; its value is the queued pull request units | The worker maximum and the CI node cap; raising either is the operator's elasticity budget |
 | `CILabSchedulerBlind` | Prometheus holds no `ci_lab_slots_wanted` series while the `ci-lab-scheduler` Deployment asks for at least one replica. A scheduler scaled to zero, or no Deployment, keeps it silent | 10 minutes | the scheduler | The scheduler's scrape target and port `9108`; the lab chart's KEDA ScaledObject sizes the worker pool from this gauge and holds its fallback floor while it is missing |
 | `CILabCacheMissRatioHigh` | The git or uv node cache missed more than half its lookups over 30 minutes, with at least 10 misses. A cache with misses and no hit series counts its hits as 0. The verdict cache never fires it | 15 minutes | cache | The node cache DaemonSet on the CI nodes and the age of its git mirror |
 | `CILabScaleFlapping` | Over the last hour, sampled every 5 minutes, the worker Deployment's replicas rose against 5 minutes earlier in at least 4 samples and fell in at least 4. One ramp up and down again does not fire it | no hold | the pool; its value is the rising samples | Lengthen the scale down stabilisation window of the lab chart's ScaledObject, `elasticity.scaleDownWindowSeconds`, since each swing churns CI nodes through the autoscaler |
@@ -629,7 +629,7 @@ them:
 
 `Scheduler._reap` counts `ci_lab_units_redelivered_total` and `ci_lab_units_lost_total` on the
 registry the metrics port serves, one for each expired lease it requeues or marks lost. No alert or
-panel reads them; the [Worker loss drill](#worker-loss-drill) does.
+panel reads them; the [Worker loss drill](#worker-loss-drill) reads them.
 
 The kube-state-metrics series need the lab chart's objects in the `ci-lab` namespace: the
 `ci-lab-scheduler` and `ci-lab-worker` Deployments, the worker pods, and the KEDA ScaledObject
@@ -949,9 +949,9 @@ A worker running a unit shows `1000`; an idle one shows `<none>`.
 
 The deployment repository's `ci-lab` chart carries a drill that kills one lab worker in the middle
 of its units, so the lease expiry, the redelivery and the single verdict post can be read on the
-deployed lab. It is off by default under `chaos.enabled`. The second half of the exercise needs no
-drill objects: a values pull request that lowers `elasticity.floorWorkers` shrinks the worker pool,
-and the CI node count falls once a node holds no worker. An ordinary pod delete or node drain
+deployed lab. It is off by default under `chaos.enabled`. Lowering the worker floor needs no drill
+objects: a values pull request that lowers `elasticity.floorWorkers` shrinks the worker pool, and
+the CI node count falls once a node holds no worker. An ordinary pod delete or node drain
 redelivers nothing, as [Drain a node without a redelivery](#drain-a-node-without-a-redelivery)
 describes.
 
@@ -1046,8 +1046,9 @@ Each unit the killed worker held goes through these steps:
 4. Another worker leases the requeued job, such as the pod the Deployment started in place of the
    killed one, runs it and completes it. Its report becomes the unit's verdict in the store.
 5. The gate's check run, `lab/<gate>`, and the grade's `lab/required` each move `queued`,
-   `in_progress` and `completed` once. The redelivery opens no second check run, and a completed
-   check run never moves again (step 8 of the [Scheduler loop](#scheduler-loop)).
+   `in_progress` and `completed` once. The redelivery opens no second check run, and
+   `Scheduler._post` never moves a completed check run again (step 8 of the
+   [Scheduler loop](#scheduler-loop)).
 
 `ci_lab_units_redelivered_total` therefore rises by the number of units the killed worker held, up
 to its `worker.slots` (5), and `ci_lab_units_lost_total` stays where it was.
@@ -1077,16 +1078,24 @@ The scheduler's reaps, two minutes after the kill:
 kubectl -n ci-lab logs deploy/ci-lab-scheduler --since 10m | grep --line-buffered -E '^reaped '
 ```
 
-The counters, in Prometheus once the ServiceMonitor's 30 second scrape follows the reap:
+The counters, read once before the merge and again after the reap, from the scheduler or from
+Prometheus once the ServiceMonitor's 30 second scrape follows it:
 
-```promql
-increase(ci_lab_units_redelivered_total[15m])
-increase(ci_lab_units_lost_total[15m])
+```bash
+curl -fsS http://<scheduler>:9108/metrics | grep -E '^ci_lab_units_(redelivered|lost)_total '
 ```
 
-The first reads at least 1. The second reads 0, or no data while the scheduler has marked no unit
-lost since it started, since the counter writes no sample until its first count. Both counters live
-in the scheduler process and restart from zero with it, so read them through `increase()`.
+```promql
+ci_lab_units_redelivered_total
+ci_lab_units_lost_total
+```
+
+`ci_lab_units_redelivered_total` reads at least one more than before the kill. A counter writes no
+sample until its first count, so before the scheduler's first reap since it started the series is
+absent, and its first sample is the count itself. `increase()` over a window that holds the series'
+first sample misses that count, so compare the raw values. `ci_lab_units_lost_total` keeps its
+value, or stays absent. Both counters live in the scheduler process and restart from zero with it,
+so a scheduler restart between the two reads voids the comparison.
 
 The check runs of the graded head, one call:
 
@@ -1150,8 +1159,9 @@ The node count follows the floor through four steps:
    300 second window, then removes two workers a minute down to the new floor. A floor of `0` lets
    KEDA remove the last worker once nothing has been wanted for its cooldown period, the KEDA
    default of 300 seconds, since the ScaledObject sets no `cooldownPeriod`.
-2. The ReplicaSet removes the workers with the lowest deletion cost first, so idle workers go
-   before busy ones, and each removed worker drains as above.
+2. After any worker not yet scheduled, pending or not ready, the ReplicaSet removes the workers
+   with the lowest deletion cost first, so idle workers go before busy ones, and each removed
+   worker drains as above.
 3. Workers run only on the `oci-ci` node pool, placed by the `runner-binpack` scheduler. The
    deployment repository's OCI cluster autoscaler removes a CI node that stays below half its
    requested capacity for one minute.
@@ -1190,12 +1200,12 @@ no workers and the lab grades nothing until the series returns.
   first, so a scale down can leave one idle worker on each of several nodes. Those nodes stay until
   the pool falls far enough to empty one.
 
-#### Worker loss delivery evidence
+### Worker loss delivery evidence
 
 The deployment repository's pull request 1907 delivered the drill and `test_chaos.py`. Pull request
 [#12445](https://github.com/the-cloud-clockwork/agentihooks/pull/12445) added
-`test_redelivery.py`. The live run the source task names, a counter rise on the deployed lab after
-the drill and a node count fall after a floor change, has no recorded evidence on this page.
+`test_redelivery.py`. A live run on the deployed lab, with a counter rise after the drill and a node
+count fall after a floor change, has no recorded evidence on this page.
 
 ### Worker loss troubleshooting
 
@@ -1206,7 +1216,7 @@ the drill and a node count fall after a floor change, has no recorded evidence o
 | The Job fails with `cannot list resource "pods"` or `cannot delete resource "pods"` | The Role or RoleBinding is missing, or the Job ran before its sync wave applied them | `kubectl -n ci-lab get role,rolebinding ci-lab-chaos`; the Application's sync status |
 | Argo CD cannot apply the ValidatingAdmissionPolicy | The cluster serves no `admissionregistration.k8s.io/v1` ValidatingAdmissionPolicy | `kubectl api-resources --api-group=admissionregistration.k8s.io` lists `validatingadmissionpolicies` on Kubernetes 1.30 or newer |
 | `ci_lab_units_redelivered_total` stays flat after the kill | The lease has not expired yet, the scrape has not run since, or the worker held no lease | Wait two and a half minutes; then the `reaped` lines in the scheduler log |
-| `ci_lab_units_lost_total` rises and the grade is red | The killed unit had already spent its lost retry on an earlier crash or loss | `lab.retry.lost` in `delivery.yaml`; rerequest the check run to grade the head again |
+| `ci_lab_units_lost_total` rises and the grade is red | The killed unit had already spent its lost retry on an earlier crash or loss | `lab.retry.lost` in `delivery.yaml`; rerequest a check run of the head on GitHub to grade it again, as the [Scheduler loop](#scheduler-loop) describes |
 | A second worker dies after the drill | The finished Job was deleted by hand, and self heal created it again | Disable the drill by pull request; never delete the Job |
 | The CI node count stays after a lower floor | Wanted slots still ask for more workers, the 300 second window has not passed, or each node still runs a worker | `kubectl -n ci-lab get hpa keda-hpa-ci-lab-worker`; the worker pods with `-o wide`; the autoscaler status ConfigMap |
 
