@@ -283,6 +283,77 @@ the next pass.
 The tick report counts these runs per step in its Late share, Abandoned, Held and Dropped columns; see
 [Outcome columns](tick-report.md#outcome-columns).
 
+### Profile a step
+
+The tick report shows how long a step ran and how much CPU it used, but not where that time went. To find out, list
+the step in `AGENTIHOOKS_TICK_PROFILE_STEPS`, added by pull request 10512. `scripts.swarm.timing.within`, which runs
+every engine step at its budget, reads the variable on each step run and runs every listed step under `cProfile`. The
+value is a comma separated list of step names exactly as the [tick step catalogue](tick-step-catalogue.md) prints
+them. Spaces around each name are dropped, and an unset or empty value profiles nothing.
+
+Set it in the environment of the process that runs the tick, as for `AGENTIHOOKS_TICK_STAGE` (see
+[Configuration](configuration.md#swarm-tick)): one line in `~/.agentihooks/.env` on the machine whose scheduler
+ticks, or the controller's deployment environment for a hosted controller.
+
+```bash
+AGENTIHOOKS_TICK_PROFILE_STEPS="master scale,reap"
+```
+
+Each profiled run writes one JSON line to standard error when the step returns or raises. An example, with each
+function list cut to its first entries:
+
+```json
+{"event": "swarm_tick_step_profile", "step": "master scale", "wall_s": 41.73, "top_cumulative": ["/app/scripts/hive/launch.py:665(_placed) calls=1 own_s=0.0011 cumulative_s=40.9102", "/app/scripts/hive/launch.py:685(_reselect) calls=78 own_s=0.0094 cumulative_s=38.2210"], "top_own": ["~:0(<method 'recv_into' of '_socket.socket' objects>) calls=9120 own_s=6.1043 cumulative_s=6.1043"], "pass_id": "0f1e2d3c4b5a69788796a5b4c3d2e1f0"}
+```
+
+| Field | Value |
+| --- | --- |
+| `event` | Always `swarm_tick_step_profile` |
+| `step` | The step name as listed |
+| `wall_s` | Wall seconds of the profiled call, profiler overhead included |
+| `top_cumulative` | Up to 25 functions (`timing.PROFILE_TOP_N`) sorted by time spent in them and everything they called |
+| `top_own` | Up to 25 functions sorted by time spent in their own code |
+| `pass_id` | The running pass, present only while a pass record is open |
+
+Each function line reads `<file>:<line>(<function>) calls=<n> own_s=<seconds> cumulative_s=<seconds>`; a recursive
+function shows its calls as `<total>/<primitive>`. `cProfile` sees only the thread that runs the step, so work the
+step hands to other threads does not appear. It also slows every call it records: the step's `tick:steps` and
+`tick:records` walls rise while it is listed, so treat profiled walls as evidence only and empty the variable once
+the lines are read.
+
+Read the lines of the last hour from the tick journal:
+
+```bash
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-1h" --until now \
+  | grep '"event": "swarm_tick_step_profile"' \
+  | sed 's/^[^{]*//' \
+  | python3 -c 'import sys, json
+for r in map(json.loads, sys.stdin):
+    print(r["step"], round(r["wall_s"], 1), r.get("pass_id", "-"))
+    for line in r["top_cumulative"][:10]: print("   ", line)'
+```
+
+On a hosted controller, the lines are in the controller pod's log; replace the `journalctl` line with
+`kubectl logs deployment/<controller> -n <namespace> --since=1h` and keep the rest of the pipe.
+
+A function called far more often than the step's work explains, or one whose cumulative time is most of `wall_s`,
+names the cost. The `master scale` profile that found the [master launch retry
+loop](../pillars/hives.md#retry-after-a-full-account-reservation) showed `HiveLaunch._reselect` called 78 times and
+`_admitted_selection` 79 times in one master launch, in pass `9e0d10`, an 83 second pass of controller release
+2.17.806, as the pull request 10731 description records.
+
+The `profile` input of the `.github/actions/tick-scale` action sets the same variable for the
+[tick scale gate](delivery-tiers.md#tick-scale-gate-at-promotion); a push to `diffcheck/tick-scale-profile`
+sets it to `track outages,reap,spawn,tick view`. No step is named `spawn` since pull request 11141 removed it, so
+that push profiles the other three. The tests under the feature map entry
+`tick-step-profiler`, in `tests/swarm/test_timing.py`, hold the behavior.
+
+| Symptom | Check | Fix |
+| --- | --- | --- |
+| No `swarm_tick_step_profile` line appears | The step name against the catalogue, letter for letter; the variable in the environment of the ticking process | Use the catalogue name, such as `master scale` rather than `master_scale`, and set the variable where the tick runs. |
+| A step held or skipped this pass writes no line | `tick:records` for the step: `held`, `skipped`, `rested` or `dropped` | Only a step that runs is profiled; read a pass where it ran. |
+| A profiled step reads `late` or is abandoned | Its wall with the variable empty | The profiler's overhead pushed it over its budget. Empty the variable and compare the plain wall. |
+
 ### Lanes
 
 A parallel pass gives each lane its own deadline: 60 seconds for the critical
@@ -1156,7 +1227,9 @@ working with no import change.
 | `skip_refused(function, *args)` | Calls `function` through `timing.call`. A `LedgerRefused` or a Redis read timeout prints the reason to stderr and returns the single action `skipped <module>.<name>: the ledger refused its write` or `skipped <module>.<name>: its Redis read timed out` instead of raising |
 | `skip_dropped(function, *args)` | Calls `function` through `timing.call` up to twice on a Redis connection drop or timeout, returning its actions or `[]`. Two failures return `skipped <module>.<name>: its Redis connection dropped or timed out twice` |
 | `_operator_line(item)` | True for an inbox item from `operator` that is not an fyi control notice (a ref starting with `control_notifications.CONTROL_REF`); the tick wakes a swarm on such a line |
-| `_drop(slug, store, ledger, rows, agent, refund=False)` | Releases the agent's claim and drops the agent. While the agent still holds an active task that is not awaiting merge, it reopens the task guarded on the claimant and claim generation it read, and with `refund=True` gives back the held life when the task has a claim to refund and the ledger row still matches. Settles the agent's inbox as `stopped`, moving its items to the seat only when the task reopened. Returns `, task <id> reopened` or an empty string |
+| `_drop(slug, store, ledger, rows, agent, refund=False)` | Releases the agent's claim and drops the agent. While the agent still holds an active task that is not awaiting merge, it reopens the task guarded on the claimant and claim generation it read, and with `refund=True` gives back the held life when the task has a claim to refund and the ledger row still matches. Settles the agent's inbox as `stopped`, moving its items to the seat only when the task reopened. Returns `, task <id> reopened`, `, task <id> left to the merge of <url>` when the agent waited on its own pull request's merge, `DROP_REFUSED` when the store refused the drop, or an empty string |
+| `_stop_hive(slug, store, agent, reason, dropped)` | Unless `dropped`, the text `_drop` returned, is `DROP_REFUSED` (`, the store refused its drop, retrying next pass`), sends the execution stop naming `reason` to the hive that recorded the agent's start through `scripts.hub.reconciler.stop_dropped`, which keeps a stop the bus refused for the next `reap` pass. Returns `dropped`. See [Retiring a hub admitted agent](../pillars/hives.md#retiring-a-hub-admitted-agent) |
+| `_retire_or_stop(slug, runtime, agent, reason)` | True when the runtime retires the agent with its task's scratch homes, or, when it cannot, when the execution stop naming `reason` answers `sent` or `pending`. The `reap` step's idle retirement and the `verify` step's mismatch retirement call it before `_drop` |
 | `_collected(slug, store, ledger, rows, agent)` | For a master, saves the task ids of `rows` under the swarm's `master-retired-tasks` key, then calls `_drop` |
 | `_still_held(row, expected)` | True when the row is active and its `claimed_by` and `claim_generation` (missing counts as 0) match `expected`; a missing row is not held |
 | `_follow(slug, store, runtime, agent, pid)` | Returns an `(agent, actions)` tuple. With no process id: `(agent, [])`. Otherwise it calls `_rebind`: when that finds the pane, `(rebound agent, ["rebound <agent> to its resumed process <pid> in pane <pane>"])`; when it does not, `(None, ["held <agent> until one pane holds its resumed process <pid>"])` |

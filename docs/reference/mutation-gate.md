@@ -12,6 +12,8 @@ Open the draft pull request into `dev` at the first push; for a stacked branch, 
 
 When the base branch's `delivery.yaml` names `mutation` under `lab.authoritative`, the Tests `mutation` job is skipped on pull request runs and the `lab-verdict` job waits for the lab's mutation check run instead ([Lab authority and back pressure](delivery-tiers.md#lab-authority-and-back-pressure)).
 
+The lab builds mutation units only for promotion and backfill heads: one unit per function the head changes on the lines this gate grades, and one stats unit per test file that runs such a function ([CI lab mutation units](ci-lab.md#mutation-units)).
+
 ## Required gate proof
 
 `mutation-plan`, `mutation-stats` and `mutation` are needs of `Gate — Required`
@@ -784,6 +786,8 @@ variable can lower the planned workers but never raise them above four.
 The batch pool holds twelve runners (`BATCH_RUNNERS` in `scripts.ci_mutation.plan`), and the planners may ask for twice that, twenty four shards (`SHARD_CEILING`, two `RUNNER_WAVES`). Shards past the twelfth queue on the pool and start as the first wave finishes, so a change whose work exceeds twelve shards is still graded whole; it takes about two shard budgets of wall time instead of one. The measured planner raises the shard count until the slowest shard fits its budget less setup, up to that ceiling.
 
 Only a plan whose slowest shard still overruns at the ceiling fails at plan time with **Mutation plan over budget**. When one mutant, or one unit of a split mutant, alone needs more than a shard holds, the message names that mutant and asks for its covering tests to be shortened or split, since no shard count or pull request split can grade it. Otherwise the message names the twenty four shards in two waves of twelve runners and asks for at least the change's worker seconds divided by what those twenty four shards hold, and never fewer than two, pull requests.
+
+When the plan holds mutants of changed functions no test calls in process, either over budget message, at plan time or after the early stage, ends by naming those functions with how many of the change's mutants they hold and how many of its worker seconds those mutants carry. The measured plan prices each such mutant as if it ran the slowest tested function's tests, or sixty seconds of tests when those take less, while mutmut grades it `no tests` without running a test. On the ledger cutover, [pull request 11561](https://github.com/the-cloud-clockwork/agentihooks/pull/11561), the `mutation-measured-plan` artifact of Tests run 43943313510 priced 58 such mutants, in three functions, at 64698 of its 93282 worker seconds. The plan records the functions under its `untested` key, which the replan keeps.
 
 | Measured worker seconds at three workers | Shards | Result |
 |---|---|---|

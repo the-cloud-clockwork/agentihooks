@@ -58,6 +58,8 @@ See [hive endpoint limits](hives.md#hive-endpoint-limits) for the hive endpoint 
 
 See [handoff continuity on admission](hives.md#handoff-continuity-on-admission) for the handoff text, envelope and transfer an events hub admission hands its successor, when the transfer binds, how a reopen or a refused attach hands it back, and how to check it on a live swarm.
 
+See [retiring a hub admitted agent](hives.md#retiring-a-hub-admitted-agent) for the idle, revoked, refused, stuck and mismatch retirements of a hub admitted agent, the order of retire, drop and hive stop, the claim life refund, what holds an idle agent, resent stops and troubleshooting.
+
 See [headroom](hives.md#headroom) for what a hive's headroom reading holds, how it stays fresh while a launch runs, and why a hive with no fresh reading has no room.
 
 See [workstation admission room and the swarm share](hives.md#workstation-admission-room-and-the-swarm-share) for the limits a local spawn on the workstation meets, how the forty percent swarm share yields to the hive's agent ceiling, and how to run twenty local workers.

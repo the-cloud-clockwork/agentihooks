@@ -149,7 +149,7 @@ def refusal(who, outside, areas, plan):
     return (
         f"build gate: outside your traced plan: {shown}. Kept areas and territory: {', '.join(areas) or 'none'}. "
         f"If the task needs it, append a piece to {plan}, {trace_plan.FORMAT}, and run "
-        f"agentihooks swarm {who.swarm} trace-plan; otherwise propose it: agentihooks ledger --slug {who.swarm} "
+        f"agentihooks swarm {who.swarm} trace-plan; otherwise propose it: agentihooks api --slug {who.swarm} "
         f'--as {who.name} followup add "<text>"'
     )
 

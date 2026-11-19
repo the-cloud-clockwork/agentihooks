@@ -1351,3 +1351,143 @@ def test_the_retire_command_writes_only_a_signed_retirement_the_floor_admits(
         {"head": files},
     )
     assert result.returncode == (0 if written else 1), result.stdout + result.stderr
+
+
+REVIEWED = "c" * 40
+OWNERS = {".github/CODEOWNERS": "/tests/ @engineer\n/test-retirements/ @Retirement-Owner\n"}
+
+
+def _review(user: str, state: str, commit: str = REVIEWED) -> dict[str, str]:
+    return {"user": user, "state": state, "commit_id": commit}
+
+
+@pytest.mark.parametrize(
+    ("reviews", "owners", "approver"),
+    [
+        ([_review("retirement-owner", "APPROVED")], OWNERS, "@Retirement-Owner"),
+        (
+            [_review("Retirement-Owner", "APPROVED"), _review("retirement-owner", "COMMENTED")],
+            OWNERS,
+            "@Retirement-Owner",
+        ),
+        (
+            [_review("retirement-owner", "CHANGES_REQUESTED"), _review("retirement-owner", "APPROVED")],
+            OWNERS,
+            "@Retirement-Owner",
+        ),
+        ([], OWNERS, None),
+        ([_review("engineer", "APPROVED")], OWNERS, None),
+        ([_review("retirement-owner", "APPROVED", "d" * 40)], OWNERS, None),
+        (
+            [_review("retirement-owner", "APPROVED"), _review("retirement-owner", "CHANGES_REQUESTED")],
+            OWNERS,
+            None,
+        ),
+        ([_review("retirement-owner", "DISMISSED")], OWNERS, None),
+        (
+            [_review("engineer", "APPROVED")],
+            {".github/CODEOWNERS": "/test-retirements/ @engineer\n/test-retirements/ @Retirement-Owner\n"},
+            None,
+        ),
+        ([_review("retirement-owner", "APPROVED")], {}, None),
+        (None, OWNERS, None),
+        ("{not json\n", OWNERS, None),
+    ],
+    ids=[
+        "approved",
+        "commented-after",
+        "approved-after-changes",
+        "no-review",
+        "not-an-owner",
+        "earlier-head",
+        "withdrawn",
+        "dismissed",
+        "overridden-owner",
+        "no-owner",
+        "missing",
+        "malformed",
+    ],
+)
+@pytest.mark.feature("count-floor-retirement-needs-code-owner-approval")
+def test_a_signed_retirement_is_admitted_only_with_a_code_owner_approval_of_the_head(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    reviews: list[dict[str, str]] | str | None,
+    owners: dict[str, str],
+    approver: str | None,
+) -> None:
+    file = tmp_path / "reviews.jsonl"
+    if reviews is not None:
+        file.write_text(reviews if isinstance(reviews, str) else "".join(json.dumps(r) + "\n" for r in reviews))
+    monkeypatch.setenv("TEST_COUNT_REVIEWS", str(file))
+    monkeypatch.setenv("TEST_COUNT_REVIEWED_HEAD", REVIEWED)
+    retirement = _retirement(RETIRED_NODE, SIGNED)
+    result = _floor(
+        tmp_path,
+        {"test_mod.py": RETIRING},
+        {"test_mod.py": "def test_kept():\n    assert True\n"},
+        {"base": owners, "head": {**retirement, ".github/CODEOWNERS": "/test-retirements/ @engineer\n"}},
+    )
+    assert result.returncode == (0 if approver else 1), result.stdout + result.stderr
+    admitted = f"{RETIRED_NODE} is admitted: the pull request retires it, signed by Standards reader"
+    assert (f"{admitted} and approved by {approver}\n" in result.stdout) == bool(approver)
+    assert (f"{RETIRED_NODE} is admitted" in result.stdout) == bool(approver)
+    named = next(iter(retirement))
+    listed = "@Retirement-Owner" if owners else "none"
+    refusal = f"{named} is not approved on the pull request head by a code owner ({listed}), so it admits nothing\n"
+    assert (refusal in result.stdout) == (approver is None)
+    unread = "The pull request reviews could not be read, so no retirement is admitted\n"
+    assert (unread in result.stdout) == (reviews is None or isinstance(reviews, str))
+
+
+@pytest.mark.parametrize(
+    "rule",
+    [
+        "* @engineer",
+        "/test-retirements/** @engineer",
+        "/test-retirements/?.json @engineer",
+        "/test-retirements/[0-9a-f]*.json @engineer",
+        "/test-retirements/!kept.json @engineer",
+        "/test-retirements/\\#kept.json @engineer",
+        "/tests @engineer",
+    ],
+    ids=["unanchored", "double-star", "question-mark", "range", "negation", "escape", "folder-without-slash"],
+)
+@pytest.mark.feature("count-floor-retirement-needs-code-owner-approval")
+def test_a_code_owner_rule_the_floor_cannot_match_admits_no_retirement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rule: str
+) -> None:
+    file = tmp_path / "reviews.jsonl"
+    file.write_text(json.dumps(_review("retirement-owner", "APPROVED")) + "\n")
+    monkeypatch.setenv("TEST_COUNT_REVIEWS", str(file))
+    monkeypatch.setenv("TEST_COUNT_REVIEWED_HEAD", REVIEWED)
+    retirement = _retirement(RETIRED_NODE, SIGNED)
+    result = _floor(
+        tmp_path,
+        {"test_mod.py": RETIRING},
+        {"test_mod.py": "def test_kept():\n    assert True\n"},
+        {"base": {".github/CODEOWNERS": f"/test-retirements/ @Retirement-Owner\n{rule}\n"}, "head": retirement},
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    unknown = f"CODEOWNERS rule {rule.split()[0]} is outside the grammar the floor matches, so no code owner is known\n"
+    assert unknown in result.stdout
+    refusal = "is not approved on the pull request head by a code owner (none), so it admits nothing\n"
+    assert f"{next(iter(retirement))} {refusal}" in result.stdout
+    assert f"{RETIRED_NODE} is admitted" not in result.stdout
+
+
+@pytest.mark.feature("count-floor-retirement-needs-code-owner-approval")
+def test_reviews_without_a_reviewed_head_leave_a_signed_retirement_graded_as_before(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TEST_COUNT_REVIEWS", str(tmp_path / "absent.jsonl"))
+    monkeypatch.setenv("TEST_COUNT_REVIEWED_HEAD", "")
+    result = _floor(
+        tmp_path,
+        {"test_mod.py": RETIRING},
+        {"test_mod.py": "def test_kept():\n    assert True\n"},
+        {"base": OWNERS, "head": _retirement(RETIRED_NODE, SIGNED)},
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"{RETIRED_NODE} is admitted: the pull request retires it, signed by Standards reader\n" in result.stdout
+    assert "could not be read" not in result.stdout

@@ -903,8 +903,8 @@ A hive declares what it offers with `capabilities`, and a task names what it req
 
 ```bash
 agentihooks hive set desk capabilities=headed
-agentihooks ledger --slug <slug> --as <name> task add browse "Check the logged in page" --lane eng --needs headed
-agentihooks ledger --slug <slug> --as <name> task set browse needs=headed
+agentihooks api --slug <slug> --as <name> task add browse "Check the logged in page" --lane eng --needs headed
+agentihooks api --slug <slug> --as <name> task set browse needs=headed
 ```
 
 Placement keeps only the live hives whose capabilities cover every name in the task's `needs`. When none does, the
@@ -1669,7 +1669,8 @@ seats place as:
 
 `master-2` and `master-3` each reserve one of the four `ops` sessions, beside the worker already on that account.
 When the front door's own launch is refused because the native login's single reservation is still held, it moves to
-the next account with a free seat and never retries the refused login in that launch.
+the next account with a free seat and never retries the refused login in that launch; see [Retry after a full account
+reservation](#retry-after-a-full-account-reservation).
 
 Releases without pull request 11407 offer the native login to every master seat and rank it above the slots. There,
 each backend seat chooses the login the front door already holds, hive admission refuses it on every tick, and a
@@ -1691,6 +1692,95 @@ This rule covers placement on hives. A master the controller leaves to the works
 |---|---|---|
 | Every tick pass reports `master spawn failed in seat master-2@<id>: account reservation is full: account=claude:<login> sessions=1 cap=1 ...` in its actions, and `swarm status` shows one master while `masters-step` wants more | The controller runs a release from before the front door rule, so backend seats pick the native login the front door holds. | Roll the controller onto a release that carries pull request 11407. |
 | A backend seat waits with `no hive for master advertises a claude slot` while the front door runs | No live hive that takes `master` and lists the repo has a Claude subscription or api slot whose account has a free seat and is not closed. The native login does not count for a backend seat. | Give a UI hive an `AH_CC_TOKEN_<slug>` with quota left, then read `slots` and each `cap` in `agentihooks hive show <hive>`. |
+
+#### Retry after a full account reservation
+
+Before the controller sends a master's launch order to a hive, `HiveLaunch.send_order` reserves one session on the
+chosen account. The native login reserves with a cap of 1; a subscription or api slot uses the cap the hive reports
+for the account, or the account's own cap when the hive reports none. When the reservations already reach the cap, no
+order is sent. The new execution record is ended, its reason is written to the swarm's `launch-endings` hash, and the
+launch is refused with:
+
+```text
+account reservation is full: account=<harness>:<account> sessions=<count> cap=<cap> five_left=<pct> week_left=<pct>
+```
+
+`HiveLaunch._placed` then retries inside the same launch:
+
+1. It releases the hive room the refused try held and adds the account's `harness:account` key, such as
+   `claude:unrouted`, to the launch's refused set.
+2. It selects again with that set. Selection drops the refused accounts' quota rows, and `_master_selection` adds
+   each refused key to the closed accounts it passes to `placement.place_master`. A closed account is offered neither
+   as the native interactive login nor as a subscription or api slot.
+3. When placement finds another account, the launch orders it there. Another full reservation repeats from step 1
+   with one more refused account.
+4. When no account is left, selection returns a wait and the launch ends with the last `account reservation is full`
+   refusal. The tick's actions then read `master spawn failed in seat <seat>: account reservation is full: ...`;
+   see [Master scaling troubleshooting](swarm.md#master-scaling-troubleshooting).
+
+Each account is tried at most once per launch, so a launch makes no more tries than the master has candidate
+accounts, and every try adds one execution record to the seat. A forced start is not refused at reservation, and a
+[master claude ai login](../reference/account-login.md#master-claude-ai-login) launch takes no reservation, so neither
+retries. The same retry runs for a worker launch on a hive; only the master lane passes the refused set into
+`_master_selection`, and a worker lane drops the refused accounts' quota rows alone.
+
+With the `desk` hive above, suppose the front door relaunches while the previous lead's reservation on the native
+login has not yet been released:
+
+| Try | Refused set | Placement | Result |
+|---|---|---|---|
+| 1 | empty | `desk`, `unrouted`, `interactive` | `account reservation is full: account=claude:unrouted sessions=1 cap=1 five_left=None week_left=None`; the record ends |
+| 2 | `claude:unrouted` | `desk`, `ops`, `subscription` | The order is sent; the record is `launching` |
+
+Read the reasons of the ended tries from the endings hash, keyed by execution id:
+
+```bash
+redis-cli HGETALL agentihooks:swarm:<slug>:launch-endings
+```
+
+```json
+{"reason": "account reservation is full: account=claude:unrouted sessions=1 cap=1 five_left=None week_left=None", "generation": 41}
+```
+
+Releases without pull request 10731 left the refused set out of `_master_selection`. Dropping the quota row kept a
+full subscription slot off the next try, but `place_master` builds the native login candidate from the hive's
+`interactive` field, and releases before pull request 11407 offered it to every master seat, ranked ahead of that
+hive's slots within the same UI or headless tier. Each retry therefore chose the same login and got the same refusal.
+The loop ran until the pass heartbeat found the tick lock stale and raised `SwarmError` with `the tick lock is stale:
+pass heartbeat expected token ...`. The `master scale` step holds the host placement lock (`tick.PLACING`) while it
+launches, so every other step that takes the lock waited on it, the `spawn` step of those releases among them. In the
+evidence for pull request 10731, one `master-2` launch ran `_reselect` 78 times, the seat held 35,141 executions, its
+newest 400 all ended with the same `claude:unrouted` refusal, and 30 of 30 `master scale` passes in the tick history
+ended with that `SwarmError`. In three passes of the 10 November scale proof
+([#10553](https://github.com/the-cloud-clockwork/agentihooks/issues/10553)), `master scale` held the placement lock 37
+to 48 seconds while its failing launch used 27 to 35 seconds of CPU, and `spawn` ran past the 33 second budget it had
+then, which the issue records. That loop predates the [front door rule](#backend-master-seats), which now keeps
+backend seats off the native login; the retry rule covers the front door and any account whose reservation is full.
+
+Measured over the `tick:steps` stream (`own_cpu_s` of `master scale`) and the `spawn` records ended `abandoned`,
+before and after the fix:
+
+| Window | `master scale` runs | CPU seconds, sum | CPU seconds, max | Runs at 5 s or more | Abandoned `spawn` runs |
+|---|---|---|---|---|---|
+| Before | 24 | 392.7 | 45.0 | 11 | 1 |
+| After | 43 | 55.3 | 4.8 | 0 | 0 |
+
+The before window was read at 14:35 UTC and the after window runs from 15:20 to 16:46 UTC, on the day pull request
+10731 merged. Pull request 11141 later removed the `spawn` step. The after window also ran with `master-per` off from
+its start, so not every drop in the master scale runs comes from the retry fix alone.
+
+The cause was found with the [tick step profiler](../reference/tick-engine-steps.md#profile-a-step). The regression
+test `test_a_front_door_master_retry_leaves_a_full_native_login_for_a_subscription_slot` fails when a launch calls
+`_reselect` more than twice, or when its one retry does not end the native try with the full reservation reason
+and order the subscription slot, under the feature map entry `hive-master-refused-account-retry`. The Semgrep incident
+rule `master-retry-drops-refused-accounts` flags a `_master_selection` call inside `_select` that does not pass the
+refused accounts.
+
+| Symptom | Check | Fix |
+|---|---|---|
+| `master scale` runs tens of seconds of CPU every pass, the steps that take the placement lock run late (`spawn` is abandoned at its budget on releases that have it), and one master seat gains thousands of executions ended `account reservation is full` for the same login | `HGETALL agentihooks:swarm:<slug>:launch-endings`: the reasons name one account again and again. Then check that the controller's release carries pull request 10731 | Roll the controller onto a release that carries pull request 10731. |
+| A pass fails with `the tick lock is stale: pass heartbeat expected token ...` while `master scale` runs long | The `master scale` wall in `agentihooks swarm <slug> tick-report --passes 10` | The step outran the tick lock. With pull request 10731, profile the step as in [Profile a step](../reference/tick-engine-steps.md#profile-a-step) to find the cost. |
+| A master launch ends `account reservation is full` after more than one try | `agentihooks hive show <hive>`: `sessions` against each slot's `cap`, for every hive that takes `master` | Every candidate account was full. End a session on one of them, give the hive another `AH_CC_TOKEN_<slug>`, or, when `sessions` counts more than run on the account, wait for the hive's next beat to correct it. |
 
 ### Who writes placement
 
@@ -2267,6 +2357,185 @@ whose work ended.
 | The hive logs `hive execution stops for swarm <slug> failed (<error>)` | The error type and message it prints | Fix the cause the error names. A NATS permission error means the hive's bus credential lacks the stop grants: on the workstation root hive, restart the hive service: `hive run` compares the stored root credential's publish and subscribe grant with a fresh mint at start and re-mints it when they differ, logging `hive re-minted the root bus credential in <path>`; a `hive kept the stored root bus credential (<reason>)` line names why it could not, and `agentihooks hive root-bus` mints it by hand. On a member hive, run `agentihooks hive refresh`. |
 | The tick prints `could not send the stop for <agent>, retrying next tick: failed (<error>)` | The error, NATS from the controller and the controller's bus credentials | Fix the bus; the next pass sends the stop again. |
 
+### Retiring a hub admitted agent
+
+The tick also retires a hub admitted agent whose work has not ended: when it sits idle, its account is revoked,
+it repeats content refusals, it stays stuck on a provider error or its live binding no longer matches its record.
+The tick drops the agent, refunds its claim life, reopens its task, and sends the agent's hive the execution stop
+naming the retirement reason. The hive then ends the execution as in
+[How the hive honors the stop](#how-the-hive-honors-the-stop), with `stop_reason` set to that reason.
+
+Before [pull request #11209](https://github.com/the-cloud-clockwork/agentihooks/pull/11209) the `verify` and `reap`
+steps judged only the agents on the hub reconciler's legacy list, which leaves out every agent whose hive recorded
+its `execution.started` on a real bus. Nothing on the hub or hive side retired such an agent for a mismatch or
+idling, so it kept its seat and its claim life never came back. Pull request #11209 put hub admitted agents into
+both steps with a refund.
+[Pull request #11250](https://github.com/the-cloud-clockwork/agentihooks/pull/11250) made the `reap` step's
+retirements send the hive stop,
+[pull request #11293](https://github.com/the-cloud-clockwork/agentihooks/pull/11293) did the same for the `verify`
+step's mismatch, and [pull request #11296](https://github.com/the-cloud-clockwork/agentihooks/pull/11296) resends a
+stop the bus refused.
+
+#### Which retirements send the stop
+
+| Stop reason | Step and trigger | Tick action |
+|---|---|---|
+| `idle` | `reap`: the idle watch counted 20 idle passes (`IDLE_KILL_TICKS`, from `IDLE_KILL_MS`, nineteen one minute passes) | `stalled <agent>` |
+| `revoked` | `reap`: the agent's harness account is revoked | `freed the seat of <agent>: <harness> account <account> was revoked` |
+| `refused` | `reap`: the pane shows repeated content refusals while the task row names the agent | `freed <agent> after repeated content refusals` |
+| `stuck` | `reap`: the pane shows a provider error and either the agent's outage recovery is exhausted, or the agent is idle and its pane has been held on the error for 30 minutes (`HOLD_LIMIT_MS`) | `freed the seat of <agent>, stuck on a provider error` |
+| `mismatch` | `verify`: the agent's live binding differs from its record in the fields the action names | `retired <agent> after mismatched <fields>` |
+
+The drop appends `, task <task> reopened` when it reopened the task, and `, task <task> left to the merge of <url>`
+when the agent was waiting on its own pull request's merge. An `idle` action adds
+`; outage recovery could not proceed: <blocker>` when an outage recovery of the agent was still pending.
+
+The `reap` step watches a hub admitted agent only while the controller lists its pane as live and its work has not
+ended. It skips an agent in `awaiting-decision` or `retiring`, a master still `starting` and an agent whose launch
+acknowledgement is still being collected. The `verify` step judges a hub admitted agent only when the runtime
+returned binding facts for it. Masters are never retired for idling or a stuck provider error. A master on a
+revoked account is recycled in its seat instead, and a master's mismatch first passes the master retirement hold,
+which can keep it seated.
+
+#### Retire, drop, then stop
+
+For `idle` and `mismatch` the tick reaps the agent first:
+
+1. The tick asks its own runtime to retire the agent, which reaps the session with the task's scratch homes. A
+   `mismatch` skips this when the hive's latest report already shows the agent gone.
+2. When the runtime cannot reach the agent, as from the controller pod while the pane lives on the hive, the tick
+   sends the execution stop to the agent's hive instead. A `sent` or `pending` answer counts as retired.
+3. With neither, the agent stays seated. An `idle` agent is judged again on the next pass. A `mismatch` agent is
+   marked `retiring`, with the action `could not retire <agent> after mismatched <fields>, retrying next tick`.
+4. The tick drops the agent with the refund below.
+5. Once the store took the drop, the tick sends the stop naming the reason. For an agent its runtime reaped this is
+   the only stop. For an agent stopped in step 2 it is the same stop inside the 120 second bus dedupe window, so it
+   answers `pending` and nothing new reaches the hive.
+
+For `revoked`, `refused` and `stuck` the agent counts as retired when its hive's latest report shows it gone or the
+tick's runtime retires it. Otherwise the agent stays seated, and the action reads
+`could not retire <agent> on revoked <harness> account <account>, retrying next tick`,
+`could not retire <agent> after repeated content refusals, retrying next tick` or
+`could not retire <agent>, stuck on a provider error, retrying next tick`. A retired agent is dropped with the
+refund, then the stop goes out as in step 5.
+
+The stop goes out only after a drop the store took. When the store refuses the drop, no stop follows and the next
+pass judges the agent again. The `reap` step then reports
+`kept <agent>, the store refused its drop, retrying next pass`, and a `verify` mismatch action ends
+`, the store refused its drop, retrying next pass`. An unreachable `idle` or `mismatch` agent was already stopped in
+step 2, so it stays seated with its execution stopped when the store refuses its drop.
+
+An agent with no recorded start, a legacy launch, gets no stop: no started event on the bus matches it, so the
+stop answers `unknown`. On the memory bus the stop answers `unknown` without opening a bus.
+
+#### The claim life refund
+
+Every one of these drops refunds. The drop gives the task back one claim life when all of these hold:
+
+- the task row is `claimed` or `pr`, names the agent as claimant and does not await merge;
+- the agent declared no wait on the merge of the task's own pull request;
+- the task's started lives count is above zero, and a fresh ledger read still names the agent at the claim
+  generation the pass read;
+- the task claim still names the agent at that generation, no refund is recorded for that generation and the
+  task's claim authority is not held.
+
+The refund lowers the task's count in `agentihooks:swarm:<slug>:started-lives`, or cancels the life still pending
+for it, and records the generation in `agentihooks:swarm:<slug>:claim:<task>:refunded`, so a generation is refunded
+at most once. The drop then releases the claim, removes the agent record, reopens the task guarded on the claimant
+and claim generation it read and, when the task reopened, keeps the agent's seat for it. In `deny` mode the
+`claims` gate blocks an open task once it has spent three lives (`CAP` in `scripts.gates.claims`), so without the
+refund three such retirements would block the task.
+
+When the hive later publishes the agent's exit, the hub's `lifecycle` reactor releases the launch slot and marks the
+spoke claim `exited`, and refunds no second life.
+
+#### What holds an idle agent
+
+A hub admitted agent counts idle passes under the same watch as an agent the tick launched. None of these count
+toward its retirement:
+
+- the pane waits on an input prompt, which also resets the idle count;
+- a declared wait (`agentihooks swarm <slug> wait`) or a working heartbeat; a checked wait holds only while the last
+  waits pass ran within the idle retirement window;
+- text in the pane's input line, or an operator prompt to the pane within the quiet window;
+- a ledger probe hold, or an automated gc run that owns the agent;
+- an outage hold whose recovery is not exhausted, or an outage recovery still pending.
+
+A held agent keeps its seat and claim, and the tick sends its hive no stop.
+
+#### The stop line and resent stops
+
+Every stop prints one line on the tick's stderr, the controller log in a cluster install, with the answers listed
+in [The stop and what the tick reports](#the-stop-and-what-the-tick-reports):
+
+```text
+hub execution stop for engineer@<code>-<n> in swarm <slug> after idle: sent
+```
+
+When the stop sent after the drop answers `failed (<error>)` and the agent has an execution id, the tick keeps it
+in the hash `agentihooks:swarm:<slug>:pending-stops`, keyed by execution id, with the agent record and the reason.
+At the start of every `reap` pass the tick sends each kept stop again and reports one action for each:
+
+```text
+sent the idle stop for engineer@<code>-<n> again: sent
+```
+
+Any answer other than `failed` removes the stop from the hash. The first `failed` answer ends that pass's resends
+and leaves the rest for the next pass. A kept stop whose execution the swarm still seats is removed unsent, because
+the next judgement of that agent sends a fresh one. On the memory bus nothing is kept or resent. A stop sent before
+the drop in step 2 is never kept: a failed one leaves the agent seated for the next pass.
+
+#### Retirement stop limitations
+
+- `agentihooks swarm <slug> stop now` retires each agent through the runtime and refunds its claim life, but sends
+  no execution stop to any hive.
+- A hive that predates the execution stop reader ignores the stop, so an agent the tick's runtime could not reach
+  keeps its session running on that hive after the swarm dropped it.
+
+#### Upgrading for the retirement stop
+
+The controller, or the workstation tick in local mode, needs a release carrying pull requests #11209, #11250,
+#11293 and #11296. Each hive needs the execution stop reader, as in [Upgrade](#upgrade).
+
+#### Checking a retirement on a live swarm
+
+```bash
+# Retirement stops the controller sent in the last hour
+kubectl -n <namespace> logs deploy/agentihooks-swarm-controller --since=1h \
+  | grep -E 'hub execution stop for .* after (idle|revoked|refused|stuck|mismatch):'
+# hub execution stop for engineer@<code>-<n> in swarm <slug> after mismatch: sent
+
+# Stops the bus refused, waiting for the next reap pass
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" HGETALL 'agentihooks:swarm:<slug>:pending-stops'
+
+# The task's started lives after the refund, and the generation refunded
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" HGET 'agentihooks:swarm:<slug>:started-lives' <task>
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" GET 'agentihooks:swarm:<slug>:claim:<task>:refunded'
+
+# The task reopened with no claimant
+agentihooks ledger --slug <slug> get tasks/<task>
+```
+
+The feature map entries `events-retirement-refunds-claim-life`, `events-retirement-stops-the-execution`,
+`events-refused-stop-resent` and `events-legacy-free-sends-no-stop` list the regression tests for this path, and
+`events-smoke-mismatch-retire` and `events-smoke-idle-retire` the smoke tests on a real nats-server and Redis. The
+Semgrep incident rule `tick-free-skips-execution-stop` fails a tick path that retires an agent through
+`retire_unless_gone` and drops it with a refund without sending the hive stop.
+[Pull request #11211](https://github.com/the-cloud-clockwork/agentihooks/pull/11211) added that rule and the legacy
+no stop tests, and [pull request #12020](https://github.com/the-cloud-clockwork/agentihooks/pull/12020) added the
+mismatch and idle smoke tests.
+
+#### Troubleshooting retirements
+
+| Symptom | Check | Fix |
+|---|---|---|
+| An idle hub admitted agent is never retired | `agentihooks swarm <slug> status`, the agent's declared wait and its pane | Expected while a hold in [What holds an idle agent](#what-holds-an-idle-agent) applies, or while the controller cannot list its pane. With none of those, the controller predates pull request #11209; roll it onto a release that carries it. |
+| `could not retire <agent> after mismatched <fields>, retrying next tick` on every pass | The controller log for `hub execution stop for <agent>` | `unknown`: no started event matches the agent's current execution. `ended`: its execution already ended, and the hub reconciler settles it. `failed (<error>)`: fix the bus the error names. |
+| The tick reports `kept <agent>, the store refused its drop, retrying next pass`, or a mismatch action ends with that text | The agent record and the swarm Redis | No stop went out unless step 2 already stopped the agent. The next pass judges the agent again. |
+| `sent the <reason> stop for <agent> again: failed (<error>)` on every pass | NATS from the controller and the controller's bus credentials | Fix the bus; the stop stays in `pending-stops` until the bus takes it. |
+| The controller logs `sent`, and the retired agent's session still runs on its hive | The hive's log for `hive execution stop` | As in [Troubleshooting ended agents](#troubleshooting-ended-agents). |
+| A task blocks at the claim cap after its agents were retired for these reasons | `started-lives` and `claim:<task>:refunded` for the task | No refund was recorded: the controller predates pull request #11209, or the task row no longer named the agent when it was dropped. |
+
 ### Resuming a dead agent the hub started
 
 When the pane of a hub started agent dies before its work ends, its hive reopens the agent's own conversation in the
@@ -2292,9 +2561,9 @@ Other exits carry a `reason`: the hub's `hive-loss` reactor publishes `hive-lost
 execution on a lost hive, and the hive publishes `stopped` after it honors an execution stop.
 
 The reactor first matches the exit to the spoke claim and the execution record. It holds the exit while an outage
-holds the agent or the tick's outage recovery of the agent is still pending (see
-[Outage holds and recovery](swarm.md#outage-holds-and-recovery)). For an execution whose spoke claim is still
-`started`, it then orders a resume only when every one of these holds:
+the tick shared is open or the tick's outage recovery of the agent is still pending (see
+[Outage holds for agents the hub started](#outage-holds-for-agents-the-hub-started)). For an execution whose spoke
+claim is still `started`, it then orders a resume only when every one of these holds:
 
 | Check | When it fails |
 |---|---|
@@ -2426,6 +2695,190 @@ this path.
 | Notice `resume failed: identity` | The task's claimant and the agent record | The record or claim changed between the hub's order and the hive's resume: a successor took the task or a newer launch replaced the record. Expected: the old agent is dropped, and the task stays with its successor or reopens for a fresh agent. |
 | Notice `resume failed: a process carrying <agent> still runs` | herdr on that hive | The old session could not be reaped. Close it on the hive; the next death of a later agent resumes normally. |
 | Notice `resume failed: <runtime detail>` or `resume failed: error: <exception type>` | The detail it names | Fix the cause it names: a missing conversation, the hive's checkout of the repository, or the error type in the hive log. |
+
+### Outage holds for agents the hub started
+
+On the `events` engine a hub started engineer leaves the swarm through the hub's `lifecycle` reactor, and its inbox
+wakes come from the hub's `inbox-wake-expiry` reactor. The tick keeps its outage records in files under its own swarm
+home, which the hub, running on another host, cannot read. So on every pass the tick also publishes those records to
+Redis, and both reactors read that copy. While a Redis, ledger or provider outage is open, a hub started engineer
+keeps its record, seat, task claim, launch slot and task, and gets no inbox wake. After recovery it gets the resume
+prompt the tick gives its own agents (see [Outage holds and recovery](swarm.md#outage-holds-and-recovery)).
+
+Before [pull request #11245](https://github.com/the-cloud-clockwork/agentihooks/pull/11245) the hub had no outage
+check. An exit the hub read during an outage dropped the engineer, released its claim and slot and reopened its
+task. The hub's inbox wake looked for outage records in a home the hub does not have, so it woke engineers during
+outages and counted outage time toward each wake window.
+
+A hub started engineer is one whose hive recorded its start on the bus. On any bus but the in-memory test bus, the
+hub reconciler's `admitted_agents` lists it, and the tick's reap step judges it by the hub admitted rules in
+[Stopping an agent whose work ended](#stopping-an-agent-whose-work-ended).
+
+#### How the hub reads the tick's outages
+
+The tick's `outage probes` step (group `wrapper probes`, every pass; see the
+[tick step catalogue](../reference/tick-step-catalogue.md)) runs the provider probes, then publishes every outage
+record of the swarm, open and closed, to one Redis string. The publish runs even when the probes raise.
+
+```text
+agentihooks:swarm:<slug>:open-outages
+```
+
+`agentihooks` is the default keyspace root; `AGENTIHOOKS_SWARM_KEY_PREFIX` moves it. The value is the swarm's
+`outages.json` from the tick's swarm home, wrapped with the publish time in milliseconds:
+
+```json
+{
+  "at": 1795035600000,
+  "records": {
+    "provider": {
+      "kind": "provider",
+      "started_at": 1795035000000,
+      "ended_at": null,
+      "evidence": ["engineer@<code>-<n> (codex, account <account>): stream disconnected before completion"]
+    },
+    "ledger": {
+      "kind": "ledger",
+      "started_at": 1795030000000,
+      "ended_at": 1795030120000,
+      "evidence": ["Ledger health probe failed"]
+    }
+  }
+}
+```
+
+A record whose `ended_at` is `null` is open. Every kind the tick records counts: `redis`, `ledger`, `hive-ledger`
+and `provider`. A record's `past` list holds the earlier closed spans of its kind, which the inbox wake uses, and a
+provider record also carries its affected agents and probe state.
+
+The share follows these rules:
+
+- It never expires. A tick that stops publishing, because it crashed or its host is down, leaves the last published
+  state standing, open outages included, and the hub keeps holding on it.
+- A share older than ten minutes (`SHARED_STALE_MS`, 600000 ms) that still holds an open record still holds, and
+  every hub read of it prints one line to the hub's log. A share exactly ten minutes old is not logged, and a stale
+  share with no open record is read without a line.
+
+  ```text
+  outage share of <slug> is stale since <publish time in ms>, still holding provider, ledger
+  ```
+
+- When the tick finishes a stopped swarm, the same step that closes it deletes the share.
+- The hub sees each record as the tick last published it, at most one pass behind the tick's own view.
+- A Redis outage reaches the share only after Redis answers again. While Redis is down, every tick pass ends at its
+  Redis check and publishes nothing, and the hub cannot drop an agent without Redis either. The first pass that finds
+  Redis back publishes the `redis` record still open; it closes at the end of that pass, and the next pass publishes
+  it closed. An engineer that stalled across the outage stays held through its pending outage resume, described in
+  [After the outage](#after-the-outage).
+
+#### Which exits the hub holds
+
+The `lifecycle` reactor reads an exit from a hive's `execution.exited` or from its own reconciler pass (see
+[Which exits are resumed](#which-exits-are-resumed)). It first matches the exit to the spoke claim and the
+execution record. It then checks the outage hold before it judges a resume, in this order; the first check that
+decides ends the judgement:
+
+| Order | Check | Result |
+|---|---|---|
+| 1 | The exit already returned the engineer's slot and claim (`returned` on the spoke claim) | Not held: the exit finishes settling. |
+| 2 | The tick has an outage resume pending for the engineer: state `pending` in `outage-resumes`, fewer than three attempts, the same task, seat, execution, generation and claim generation, and no deliberate exit | Held, even after every shared record closed. |
+| 3 | The engineer's record is `finished`, as after a handoff | Not held. |
+| 4 | No shared record is open | Not held. |
+| 5 | The ledger task row is done: `done` true or state `done` | Not held. |
+| 6 | A deliberate exit is recorded for the engineer, as `agentihooks terminate-agent` records | Not held. |
+| 7 | None of the above | Held. |
+
+A held exit changes nothing. The engineer keeps its record, seat, task claim and launch slot, its task row stays as
+it was, no life is refunded and no resume is ordered. The hub reconciler reads the exit again on each five minute
+pass while the hive's report still shows the pane ended or the engineer gone. Once nothing holds it, the exit goes
+on as in [Which exits are resumed](#which-exits-are-resumed): a hub resume when every resume check passes, else the
+engineer is dropped, its slot and claim return and its task reopens.
+
+#### Inbox wakes during an outage
+
+The hub's `inbox-wake-expiry` reactor reads the same share each time a wake deadline expires:
+
+- While any shared record is open it sends no wake and sets the next deadline one retry window later
+  (`AGENTIHOOKS_INBOX_RETRY_WINDOW_S`, 300 seconds by default).
+- Once every record is closed, the next deadline starts from the later of the receiver's seat clock and the item's
+  last recorded event, and adds the retry window plus the outage time since that start. Overlapping records count
+  once. An outage therefore never uses up an item's
+  window or one of its three wakes.
+
+#### After the outage
+
+The tick recovers hub started engineers the way it recovers its own:
+
+1. The tick's `track outages` step records an outage resume, state `pending`, for each engineer that owns its task
+   and stalled during the outage. Owning means: the engineer is `working`, its task row is `claimed` or `pr` and
+   names it, and it holds the task claim, its seat and a live claim lease. Stalled means its pane is gone, shows a
+   provider error or is idle. The record lives in the Redis hash `agentihooks:swarm:<slug>:outage-resumes`, one
+   field per engineer.
+2. Once every outage record in the tick's home is closed, the `recover outages` step sends each pending engineer
+   this prompt, through a nudge to a live pane, or by reopening the engineer's own conversation in its seat when its
+   process died:
+
+   ```text
+   Service is back after the outage. As <engineer>, re-read your task folder <folder> (steering.md, progress.md, proof.md), then run agentihooks msg inbox and continue your own task <task>. Keep your existing claim; do not claim new work.
+   ```
+
+   A busy pane, typed input or a permission prompt makes it wait, and the record's `blocked` field names why. A dead
+   process the runtime cannot resume restarts from an outage handoff. After three attempts the resume is
+   `exhausted`.
+3. While the resume is `pending`, the hub holds the engineer's exit (check 2). Once it is `done` or `exhausted`, the
+   next reading of the exit settles it.
+
+#### Limits of the hub outage hold
+
+- The hold has no time limit: an exit stays held as long as a shared record stays open or a resume stays pending.
+- The share is only as fresh as the tick. With the tick down, the last published state stands, and an outage that
+  opens after the tick stopped never reaches the hub.
+- A stale open record holds until a tick publishes again or the stop of the swarm deletes the share.
+- The stale age compares the hub's clock with the tick's publish time, so clock skew between the two hosts moves
+  the point where the stale line starts.
+- The hold covers an exit only until its slot returned. An exit already past that point finishes settling during
+  an outage.
+- An outage never holds a finished engineer, a done task or a deliberate exit.
+
+#### Upgrading for the hub outage hold
+
+Both sides need a release carrying pull request #11245:
+
+- The tick, which is the controller, or the workstation tick in local mode, publishes the share. With an older tick
+  no share exists and the hub holds nothing.
+- The hub reads the share. An older hub holds no exit during an outage, and its inbox wake reads only its own empty
+  outage home.
+
+The tick publishes on its first pass with the new code. A hub process loads its code when it starts, so roll the
+hub deployment onto the release.
+
+#### Checking the outage hold on a live swarm
+
+```bash
+# The share the hub reads: publish time and every record
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" GET 'agentihooks:swarm:<slug>:open-outages'
+
+# The tick's own open outages, and the held engineer still in its seat
+agentihooks swarm <slug> status
+
+# Outage resumes the hub waits for
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" HGET 'agentihooks:swarm:<slug>:outage-resumes' 'engineer@<code>-<n>'
+# {"identity": ["<task>", "<seat>", "<execution>", 1, 7], "episodes": [["provider", 1795035000000]], "attempts": 0, "state": "pending", "last_at": 0}
+
+# Stale shares the hub read
+kubectl -n <namespace> logs deployment/agentihooks-swarm-hub | grep 'outage share of'
+```
+
+The feature map entry `events-outage-hold-hub-agents` lists the regression tests for this path.
+
+#### Troubleshooting the hub outage hold
+
+| Symptom | Check | Fix |
+|---|---|---|
+| A hub started engineer was dropped and its task reopened during an outage | The share: does the key exist, is `at` recent, was a record open? The engineer's record and task row at the time | No key: the tick predates pull request #11245 or has run no pass since; upgrade it. Every record closed: the tick never recorded the outage, so only its recorded kinds hold. A finished engineer, a done task or a deliberate exit: expected. With an open record and none of those, the hub predates pull request #11245; roll it onto a release that carries it. |
+| The hub logs `outage share of <slug> is stale since <ms>, still holding <kinds>` | Whether the tick still runs passes for the swarm | The tick stopped publishing, and the hub keeps holding on its last state. Bring the tick back; its next pass publishes again. A swarm that is stopping deletes the share when its stop completes. |
+| Engineers stay seated long after the outage ended | The engineer's field in `outage-resumes` | `pending` below three attempts: `recover outages` has not run yet or waits, and `blocked` names why, such as `its pane holds input`. Clear what it names. After three attempts the resume is `exhausted` and the next reconciler pass settles the exit. |
+| No inbox wakes reach hub started engineers | The share for an open record | Expected while an outage is open. Wakes start again one retry window after it closes. A stale open record: as for the stale line above. |
 
 ### Running a spoke
 

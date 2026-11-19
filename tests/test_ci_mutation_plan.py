@@ -626,6 +626,23 @@ def test_a_change_with_fewer_mutants_than_the_limit_plans_no_more_shards_than_mu
     assert measured_plan([])["shards"] == 1
 
 
+@pytest.mark.feature("mutation-replan-names-untested-functions")
+def test_the_measured_plan_lists_each_function_no_test_calls_in_process_once_in_name_order() -> None:
+    from scripts.ci_mutation.measured import measured_plan
+
+    sample = [{"tests": {"scripts.sample.x_f": ["tests/test_sample.py::t"]}, "durations": {}}]
+    other = [{"tests": {"scripts.other.x_g": ["tests/test_other.py::t"]}, "durations": {}}]
+    names = [
+        "scripts.sample.x_z__mutmut_1",
+        "scripts.sample.x_f__mutmut_1",
+        "scripts.sample.x_a__mutmut_2",
+        "scripts.sample.x_a__mutmut_1",
+    ]
+    groups = [(names, sample), (["scripts.other.x_h__mutmut_1", "scripts.other.x_g__mutmut_1"], other)]
+    assert measured_plan(groups)["untested"] == ["scripts.other.x_h", "scripts.sample.x_a", "scripts.sample.x_z"]
+    assert measured_plan([(names[1:2], sample)])["untested"] == []
+
+
 def test_each_unit_runs_the_head_and_its_own_slice_and_only_on_its_shard(tmp_path, monkeypatch):
     from scripts.ci_mutation.mutant_shards import (
         shard_names,
@@ -827,6 +844,37 @@ def test_a_split_mutant_overruns_alone_only_when_one_of_its_units_outgrows_a_sha
     whole = budget_overrun({**planned, "unit_costs": {"scripts.sample.x__mutmut_1": [2701.0, 299.0]}}, 1080)
     assert whole.startswith("Mutant scripts.sample.x__mutmut_1 alone needs 2701 worker seconds on one shard")
     assert budget_overrun(planned, 1080).startswith("Mutant scripts.sample.x__mutmut_1 alone needs 3000")
+
+
+@pytest.mark.feature("mutation-replan-names-untested-functions")
+def test_a_refusal_names_the_functions_no_test_calls_in_process_with_their_mutants_and_worker_seconds() -> None:
+    from scripts.ci_mutation.measured import budget_overrun
+
+    planned = {
+        "costs": {
+            "scripts.sample.x__mutmut_1": 3000.0,
+            "scripts.sample.y__mutmut_1": 100.0,
+            "scripts.sample.y__mutmut_2": 50.4,
+            "scripts.sample.z__mutmut_1": 25.0,
+            "scripts.sample.w__mutmut_1": 5.0,
+        },
+        "estimated_worker_seconds": 3180.4,
+        "shard_worker_seconds": [2800.0, 380.4],
+        "workers": 3,
+        "untested": ["scripts.sample.y", "scripts.sample.z"],
+    }
+    named = (
+        " Functions no test calls in process hold 3 of the change's 5 mutants and 175 of its 3180 worker seconds:"
+        " scripts.sample.y, scripts.sample.z."
+    )
+    alone = budget_overrun(planned, 1080)
+    assert alone.startswith("Mutant scripts.sample.x__mutmut_1 alone needs 3000 worker seconds on one shard")
+    assert alone.endswith("shorten or split the tests that cover it." + named)
+    split = budget_overrun({**planned, "unit_costs": {"scripts.sample.x__mutmut_1": [2000.0, 1000.0]}}, 1080)
+    assert split.startswith("The slowest mutation shard needs 2800 worker seconds")
+    assert split.endswith("so split it into at least 2 pull requests." + named)
+    assert budget_overrun({**planned, "untested": []}, 1080).endswith("shorten or split the tests that cover it.")
+    assert budget_overrun({**planned, "shard_worker_seconds": [2700.0, 480.4]}, 1080) == ""
 
 
 @pytest.mark.feature("mutation-replan-all-killed-plan")
