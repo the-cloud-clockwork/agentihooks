@@ -6995,7 +6995,7 @@ controller:
   api:
     enabled: true
   env:
-    AGENTIHOOKS_CONTROLLER_REDIS_GRACE_S: "140"
+    AGENTIHOOKS_CONTROLLER_REDIS_GRACE_S: "120"
 ```
 
 | Setting | Default | What it bounds in an outage |
@@ -7008,13 +7008,18 @@ change only through a reviewed pull request. The leader fences at the first refu
 lock lifetime minus one renewal interval after its last successful renewal: 30 minus 10, so 20 seconds with the
 defaults.
 
-A longer grace window, as in the example, lets a container restarted during a long Redis restart keep waiting at
-container start instead of exiting again into a longer restart back off. It does not shorten the time with no
-leader, which ends when Redis answers. The container's probes bound the window at container start:
+The example writes out the default window. The grace window decides how long a container restarted during a Redis
+restart keeps waiting at container start before it exits into another restart back off. It does not shorten the time
+with no leader, which ends when Redis answers.
+
+Two waits run at container start before the API answers: the credential step and the startup connect of
+`controller run`. Each tries one tick apart and gives up at its first failed attempt at or after the window ends, so
+it lasts a whole number of ticks: 120 seconds with the defaults, and 180 seconds for a window of 121 to 180 seconds
+at the default tick. The container's probes bound both waits together:
 
 - **API enabled.** The startup probe gives a new container 300 seconds (60 probes 5 seconds apart) to answer
-  `/v2/health/live`. The API starts only after the credential step and the startup connect of `controller run`, and
-  each of them can wait one whole grace window, so keep the grace window under 150 seconds.
+  `/v2/health/live`. At the default tick the default window of 120 seconds is the longest whose two waits fit inside
+  it; a longer window can outlast the probe when Redis refuses through both waits.
 - **API disabled.** The exec liveness probe starts 60 seconds after the container and fails it after three failed
   probes 10 seconds apart, about 80 seconds in while Redis refuses, whatever the grace window.
 
@@ -7065,7 +7070,7 @@ kubectl logs <pod> -n <namespace> -c controller --previous | grep -E 'renewing t
 | `stands by through a Redis error` every 5 seconds on one replica | Redis refuses and the replica stands by. Expected. | Check Redis. The replica leads once Redis answers. |
 | A standby's container restarts about 30 seconds into an outage, with a failed liveness probe in `kubectl describe pod` | `controller.api.enabled` is false, so the liveness probe connects to Redis. | Enable the controller API. |
 | `renewing the replica lock failed` lines, then `another replica took the lead; exiting` and exit status 75 | The leader fenced itself about 20 seconds into an outage. Expected. | None; the standby takes the lead when Redis answers. |
-| `hive controller: Redis refused` lines, then a Redis error traceback, and the container in CrashLoopBackOff | Redis refused for longer than the grace window at container start. | Check Redis. With the API enabled, raise `AGENTIHOOKS_CONTROLLER_REDIS_GRACE_S`, under 150 seconds, to wait longer at container start. |
+| `hive controller: Redis refused` lines, then a Redis error traceback, and the container in CrashLoopBackOff | Redis refused for longer than the grace window at container start. | Check Redis. At the default tick, `AGENTIHOOKS_CONTROLLER_REDIS_GRACE_S` above its default of 120 seconds can outlast the startup probe, so bring Redis back rather than raise the window. |
 | `the scheduled wait failed, waiting on the local clock` | The scheduler timer is in Redis too, so the wait fell back to the local clock. Expected. | None. |
 | `releasing the replica lock failed, it lapses on its own` | The replica stopped during an outage. | None; the other replica takes the lead after Redis answers and the lock lapses. |
 | A standby prints `stands by while <leader pod> leads` for a Pod that is gone | The dead leader's lock has not lapsed yet. | Wait up to 30 seconds after the leader's last renewal; the standby takes the lock as it lapses. |
