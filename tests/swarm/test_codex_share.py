@@ -105,3 +105,11 @@ def test_a_claude_task_requirement_wins_over_a_short_share() -> None:
         config, [account("a"), account("cx", "codex")], [], {"eng": 1, "ci": 0, "plan": 0}, requirements
     )
     assert harnesses(decision, "eng") == ["claude"]
+
+
+@pytest.mark.feature("codex-swarm-share")
+def test_a_codex_plan_spawn_never_counts_toward_the_eng_share() -> None:
+    config = SwarmConfig("sw", "/repo", max_eng=4, max_ci=0, max_plan=1)
+    agents = live("eng", "claude", 2) + live("eng", "codex", 1)
+    decision = capacity.calculate(config, [account("a", sessions=1), account("cx", "codex")], agents)
+    assert (harnesses(decision, "plan"), harnesses(decision, "eng")) == (["codex"], ["codex"])

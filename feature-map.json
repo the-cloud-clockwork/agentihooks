@@ -15,7 +15,8 @@
         "tests/swarm/test_codex_share.py::test_the_plan_lane_keeps_the_fewest_sessions_pick",
         "tests/swarm/test_codex_share.py::test_a_short_share_falls_back_to_claude_without_a_codex_seat",
         "tests/swarm/test_codex_share.py::test_a_claude_lane_pin_wins_over_a_short_share",
-        "tests/swarm/test_codex_share.py::test_a_claude_task_requirement_wins_over_a_short_share"
+        "tests/swarm/test_codex_share.py::test_a_claude_task_requirement_wins_over_a_short_share",
+        "tests/swarm/test_codex_share.py::test_a_codex_plan_spawn_never_counts_toward_the_eng_share"
       ]
     },
     {
