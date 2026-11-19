@@ -675,7 +675,7 @@ def _run(args: argparse.Namespace) -> int:
         elif args.command == "compare":
             return _compare(args.base)
         elif args.command == "controller":
-            path = auth.write_controller_env(registry.home(), _issued_controller(args.holder))
+            path = auth.write_controller_env(registry.home(), _issued_controller_2(args.holder))
             print(f"issued a controller credential; it is in {path}")
         elif args.command in ("set", "show", "list"):
             _registry(args)
@@ -691,7 +691,7 @@ def _run(args: argparse.Namespace) -> int:
     return 0
 
 
-def _issued_controller(holder: str) -> str:
+def _issued_controller_2(holder: str) -> str:
     """Issue the controller credential, retrying one tick apart while Redis refuses inside the controller's Redis grace
     window, so a Redis outage at controller start ends the container no sooner than it would end the controller."""
     from scripts.swarm import lease, redis_grace
