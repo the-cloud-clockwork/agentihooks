@@ -2204,13 +2204,23 @@ of lost objects runs on `LocalObjects` only.
 
 The node mirror and uv cache can be rebuilt from the repository. The Redis verdict index can
 be rebuilt from report objects; a lost object bucket needs its backup restored first. The
-deployment repository owns the CI lab chart, node cache script and bucket backup runbook.
+deployment repository owns the CI lab chart, node cache script and
+[bucket backup runbook](#deployment-recovery-runbook).
 Change chart values through that repository's delivery process. Pod recreation and scheduler
 restarts below retain the deployed code.
 
-The scheduler supports startup reindexing. The node recovery steps require the deployment
-chart's node-cache recovery change. The mirror age gauge still has no samples, as listed in
+The scheduler supports startup reindexing. The node recovery steps use the deployment's
+node-cache DaemonSet. The mirror age gauge still has no samples, as listed in
 [Metrics](#metrics); a successful fetch log alone does not prove the fresh-node metric requirement.
+
+### Deployment recovery runbook
+
+In the deployment repository, open `docs/2K-CI-LAB.md`, section `Recovery`, for the cluster's
+cache paths, bucket addresses and backup target. Chart overrides belong in
+`k8s/charts/ci-lab/values.yaml`; the refresh script is
+`k8s/charts/ci-lab/files/warm-node-cache.sh`. Keep deployment addresses in that repository.
+[Where they live and how they deploy](#where-they-live-and-how-they-deploy) also lists the
+deployment's lab monitoring resources.
 
 ### Configure node recovery
 
@@ -2328,7 +2338,8 @@ flush. Restore those disable decisions before resuming reuse; see [Disable and e
 
 ### Restore a lost bucket
 
-Use the deployment's bucket backup runbook to identify the backup endpoint and retained copy.
+Use the [deployment recovery runbook](#deployment-recovery-runbook) to identify the backup
+endpoint and retained copy.
 The supplied deployment's nightly MinIO backup mirrors buckets without deleting objects from
 the backup. A restore cannot recover reports written after the last successful backup; their
 units miss the verdict cache and grade again.
@@ -2346,8 +2357,7 @@ mc mirror --overwrite --preserve "lab-backup/$CI_LAB_MINIO_BUCKET" "lab-restore/
 ```
 
 Restore the bucket before recovering its Redis index. Retain both the fresh-node metric sample
-and the deployed scheduler's `reindexed N verdicts` line to prove full recovery; neither output
-is supplied by the source delivery evidence yet.
+and the deployed scheduler's `reindexed N verdicts` line to prove full recovery.
 
 ### Recovery troubleshooting
 
