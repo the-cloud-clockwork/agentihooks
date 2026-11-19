@@ -1613,6 +1613,44 @@ def test_records_with_one_covered_set_walk_and_hash_it_once(tmp_path: Path, monk
     assert len(traced) == 6
 
 
+def test_records_with_different_inputs_keep_their_own_discovery_digests(tmp_path: Path) -> None:
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    _repository(
+        root,
+        {
+            "tests/test_plain.py": "def test_plain():\n    pass\n",
+            "tests/test_scan.py": "from pathlib import Path\n\n\ndef test_scan():\n    assert sorted(Path('plugins').glob('*.py'))\n",
+            "plugins/__init__.py": "",
+            "plugins/a.py": "value = 1\n",
+        },
+    )
+    nodes = ["tests/test_plain.py::test_plain", "tests/test_scan.py::test_scan"]
+    calls: list[list[str]] = []
+
+    def collect(chosen: list[str]) -> list[dict[str, object]]:
+        calls.append(chosen)
+        return [
+            {
+                "status": 0,
+                "tests": {},
+                "durations": dict.fromkeys(chosen, 1),
+                "cpu": 1,
+                "dependencies": {node: [node.partition("::")[0]] for node in chosen},
+            }
+        ]
+
+    cache = tmp_path / "cache"
+    collect_cached_stats(root, cache, {}, nodes, [], collect)
+    collect_cached_stats(root, cache, {}, nodes, [], collect)
+    assert calls == [nodes]
+    (root / "plugins/b.py").write_text("value = 2\n")
+    subprocess.run(["git", "add", "--", "plugins/b.py"], cwd=root, check=True)
+    collect_cached_stats(root, cache, {}, nodes, [], collect)
+    assert calls == [nodes, [nodes[1]]]
+
+
 def test_conftest_candidates_name_every_parent_folder_conftest_nearest_first() -> None:
     from scripts.ci_mutation.stats_cache import conftest_candidates
 
