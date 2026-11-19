@@ -7336,6 +7336,16 @@
       ]
     },
     {
+      "id": "promotion-reference-timings",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2663",
+      "behaviour": "The promotion reference states the job timeout and mergeability wait read from the promotion workflow and script, distinguishing the reporting budget from the job timeout.",
+      "seam": "Promotion reference timing claims against the reusable promotion workflow timeout and promote script deadline",
+      "tests": [
+        "tests/contracts/promotion/test_reference.py::test_promotion_reference_timings_match_the_workflow_and_script"
+      ]
+    },
+    {
       "id": "promotion-graded-jobs-gate-or-exempt",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-promo-side-job-contract",
