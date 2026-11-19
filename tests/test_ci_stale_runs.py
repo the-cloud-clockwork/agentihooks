@@ -104,10 +104,11 @@ def test_a_rerun_of_an_old_run_is_not_stale() -> None:
 
 
 def test_jobs_counts_job_states_by_runner_labels(monkeypatch: pytest.MonkeyPatch) -> None:
-    found = lines(job("queued", "anton-oss"), job("completed", "ubuntu-latest"), job("queued", "anton-oss"))
+    pair = job("queued", "self-hosted", "anton-oss")
+    found = lines(pair, job("completed", "ubuntu-latest"), pair)
     api = Api({jobs_call(1): found, jobs_call(2): ""})
     monkeypatch.setattr(ci_stale_runs, "_api", api)
-    assert ci_stale_runs.jobs("o/r", 1) == "1 completed on ubuntu-latest, 2 queued on anton-oss"
+    assert ci_stale_runs.jobs("o/r", 1) == "1 completed on ubuntu-latest, 2 queued on self-hosted,anton-oss"
     assert ci_stale_runs.jobs("o/r", 2) == "no jobs"
 
 
@@ -197,7 +198,8 @@ def test_main_makes_no_call_past_the_listing_when_nothing_is_stale(
     assert capsys.readouterr().out == "0 stale queued runs\n"
 
 
-def test_main_needs_a_repository() -> None:
+def test_main_needs_a_repository(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ci_stale_runs, "_api", Api({}))
     with pytest.raises(SystemExit):
         ci_stale_runs.main([])
 
