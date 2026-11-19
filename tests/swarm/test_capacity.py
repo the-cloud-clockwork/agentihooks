@@ -2294,6 +2294,7 @@ def test_the_live_autoscale_command_names_quota_seats_or_host_room_when_hives_ha
     cli.main(["new", "autoscale", "--json"])
     shown = json.loads(capsys.readouterr().out)
     assert (shown["host"]["room"], shown["binding"]) == (0, "binding limit host room, room 0")
+    assert "admission_unreadable" not in shown
 
 
 def test_status_hive_admission_names_the_refusing_hive_limit_while_quota_and_host_room_are_free(monkeypatch):

@@ -101,21 +101,3 @@ def test_the_autoscale_command_names_every_refused_count_when_no_hive_count_is_r
     assert shown["admission_unreadable"] == {"far": REFUSED}
     assert "hive_admission" not in shown
     assert "binding" not in shown
-
-
-@pytest.mark.feature(FEATURE)
-def test_the_ledger_hives_listing_lists_every_hive_and_names_the_admission_count_the_redis_login_refuses() -> None:
-    from scripts.hive import headroom
-    from scripts.swarm_ledger.api import hives
-
-    store = _member_store("near")
-    now = int(time.time() * 1000)
-    _beat(store, now, "near", "far")
-    reading = {"measured_at": now, "cpus": 8, "load5": 0.0, "available_mb": 64000, "total_mb": 64000}
-    for hive in ("near", "far"):
-        store.redis.set(headroom.key(hive), json.dumps(reading))
-    rows = {row["id"]: row for row in hives.view(store, now)}
-    assert sorted(rows) == ["far", "near"]
-    assert (rows["near"]["admission_unreadable"], rows["far"]["admission_unreadable"]) == ("", REFUSED)
-    assert (rows["near"]["room"], rows["far"]["room"]) == (12, 12)
-    assert all(row["live"] for row in rows.values())

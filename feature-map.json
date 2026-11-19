@@ -6667,11 +6667,11 @@
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-autoscale-hive-count-reader",
       "behaviour": "The swarm autoscale command and the ledger hives listing, read through a Redis login that refuses some hives' pending admission counts, skip only those counts: autoscale prints the admission room of every live hive it can read, one line per other live hive naming its admission count unreadable with the refusal and the binding limit over the hives it read, and names the refused hives in its JSON; the ledger hives listing still lists every hive and names the refusal on each refused hive's row.",
-      "seam": "cli.cmd_autoscale through status.readable_hives, and swarm_ledger.api.hives.view through launch.loaded_hives with the refusal recording admission count reader, under a restricted Redis ACL user",
+      "seam": "cli.cmd_autoscale through status.readable_hives, and GET /api/v1/hives through swarm_ledger.api.hives.view and launch.loaded_hives with the refusal recording admission count reader, under a restricted Redis ACL user",
       "tests": [
         "tests/swarm/test_refused_admission_counts.py::test_the_autoscale_command_names_the_hive_admission_count_the_redis_login_refuses_and_prints_the_rest",
         "tests/swarm/test_refused_admission_counts.py::test_the_autoscale_command_names_every_refused_count_when_no_hive_count_is_readable",
-        "tests/swarm/test_refused_admission_counts.py::test_the_ledger_hives_listing_lists_every_hive_and_names_the_admission_count_the_redis_login_refuses"
+        "tests/swarm_ledger/test_hives_api.py::test_the_hives_listing_lists_every_hive_and_names_the_admission_count_the_redis_login_refuses"
       ]
     },
     {
