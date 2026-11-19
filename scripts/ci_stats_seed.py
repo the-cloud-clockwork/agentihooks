@@ -48,7 +48,7 @@ def merged_pulls(folder: Path, head: str, before: str) -> list[int]:
 
 
 def retried(path: str, deadline: float, binary: bool = False) -> Any:
-    """Return gh's answer for path, printing each failed call and asking again after each wait in RETRY_DELAYS, cut
+    """Return api's answer for path, printing each failed call and asking again after each wait in RETRY_DELAYS, cut
     short at the deadline, and raise the final call's failure when it fails too; a timeout or an HTTP 404 answer is
     never asked again."""
     for wait in RETRY_DELAYS:
