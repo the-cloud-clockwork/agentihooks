@@ -185,8 +185,8 @@ class Worker:
         self.pool = ThreadPoolExecutor(max_workers=self.slots)
 
     def free(self) -> int:
-        """Return the slots no running unit holds, after reporting each unit that crashed since the last look with the
-        exception's traceback, whose last line names the file a missing file crash could not open."""
+        """Return the slots no running unit holds, after reporting each unit that crashed since the last look with
+        the exception's traceback."""
         for future in [future for future in self.running if future.done()]:
             lease = self.running.pop(future)
             if (error := future.exception()) is not None:

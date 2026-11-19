@@ -2640,8 +2640,9 @@ The static executor finds its gate again on the worker. `scripts.ci_lab.executor
 name)` runs `discover` over the grader tree it cut for the lease, with `ci_wiring.load(grader_tree)`
 as the reusable workflows, and returns the gate step the unit names. When that discovery raises,
 or the grader workflow has no gate step of that name, the unit ends with no outcome. The worker
-prints `ci-lab worker: unit <job> crashed: <error>` to its standard error and the lease expires,
-so the unit follows the expired lease rule of step 6 of the [Scheduler loop](#scheduler-loop).
+prints `ci-lab worker: unit <job> crashed: <error>` and its traceback to its standard error and the
+lease expires, so the unit follows the expired lease rule of step 6 of the
+[Scheduler loop](#scheduler-loop).
 
 #### Limitations
 
@@ -3901,7 +3902,7 @@ Each scheduler pass applies the counts on two paths:
 |---|---|
 | A lease expires | `queue.Queue.reap` moves the job back to pending with one more `attempts` while `attempts` is below `lab.retry.lost`, else sets its state and outcome to `lost` |
 | A worker completes a lease | `decide` reads the job's outcome and `attempts`; on `retry`, `queue.Queue.retry` moves the job back to pending with one more `attempts` and the unit stays open, else the outcome is final |
-| A unit's executor raises | The unit stops heartbeating and its lease is never completed, so it reaches the scheduler as an expired lease. The worker prints `ci-lab worker: unit <job> crashed: <repr of the error>` to standard error on its next lease cycle |
+| A unit's executor raises | The unit stops heartbeating and its lease is never completed, so it reaches the scheduler as an expired lease. The worker prints `ci-lab worker: unit <job> crashed: <repr of the error>` to standard error on its next lease cycle, followed by the error's traceback, whose last line names the path a missing file error could not open |
 
 A worker that completes a lease with `crash` therefore runs once more under the default
 `lost: 1`, and a second `crash` is final and red. `tests/ci_lab/test_retry.py` covers the decision
