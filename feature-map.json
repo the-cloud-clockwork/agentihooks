@@ -1135,6 +1135,17 @@
       ]
     },
     {
+      "id": "swarm-waits-end-journals-its-phases",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2625",
+      "behaviour": "The waits end pass journals its phases in the tick steps stream so the controller step journal shows where its time goes: one row for the push wait pass, one row per checked wait resolution carrying the holder agent, one row for each required checks read, and one row for the fresh reader's batched reread of the open pull requests.",
+      "seam": "scripts.swarm.waits.end_pass, scripts.swarm.waits.checks_resolution and scripts.swarm.ledger_events.fresh_reader through scripts.swarm.timing.timed and timing.acting",
+      "tests": [
+        "tests/swarm/test_waits.py::test_the_waits_end_pass_journals_its_push_pass_each_resolution_with_its_holder_and_the_required_read",
+        "tests/swarm/test_fresh_reader.py::test_the_batched_reread_is_journaled_as_one_views_row"
+      ]
+    },
+    {
       "id": "tick-failing-waits-end-lets-checked-waits-lapse",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2564",
