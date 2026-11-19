@@ -3,6 +3,7 @@
 import argparse
 import os
 from pathlib import Path
+from typing import Any, cast
 
 from scripts.swarm import templates
 from scripts.swarm.store import APP_SERVER_TRANSPORT, DEFAULT_MASTERS_STEP, DELEGATE, EVENTS_ENGINE, SwarmConfig
@@ -13,7 +14,9 @@ def config(args: argparse.Namespace, repo: str, template: templates.Template) ->
     """The paused swarm create ARGS asks for in REPO, with caps from TEMPLATE unless a flag pins them."""
     from scripts.hive.daemon import origin
 
-    caps = {key: value.cap for key, value in template.lanes.items()}
+    lanes = cast(dict[str, templates.Lane], template.lanes)  # pragma: no mutate
+    lane_fields: dict[str, dict[str, Any]] = templates.lane_map(template)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    caps = {key: lane.cap for key, lane in lanes.items()}
     return SwarmConfig(
         args.slug,
         repo,
@@ -23,10 +26,10 @@ def config(args: argparse.Namespace, repo: str, template: templates.Template) ->
         state="paused",
         compact_limit=template.compact_limit,
         template=args.template,
-        lanes=templates.lane_map(template),
-        links=template.links,
+        lanes=lane_fields,
+        links=cast(list[Any], template.links),  # pragma: no mutate
         autonomy=template.autonomy or DELEGATE,
-        scratch=not ledger_creator.shared(os.environ),
+        scratch=not ledger_creator.shared(os.environ),  # pyright: ignore[reportUnknownMemberType]
         caps_pinned=args.max_eng_agents is not None or args.max_ci_agents is not None,
         codex_inbox_transport=APP_SERVER_TRANSPORT,
         masters_step=DEFAULT_MASTERS_STEP,
