@@ -1314,14 +1314,14 @@ def test_a_pass_and_a_load_hold_one_parsed_live_grade_at_a_time_however_many_gra
         run.push(head, lane=f"sweep-{head[0]}", event="backfill")
     run.tick(1000)
     assert [slot.held for grade in run.grades() for slot in grade.units.values()] == [True] * len(heads)
-    alive: weakref.WeakSet[scheduler.State] = weakref.WeakSet()
+    alive: list[weakref.ref[scheduler.State]] = []
     sizes: list[int] = []
     parse = scheduler._parse
 
     def counted(raw: str | bytes) -> scheduler.State:
         state = parse(raw)
-        alive.add(state)
-        sizes.append(len(alive))
+        alive.append(weakref.ref(state))
+        sizes.append(sum(ref() is not None for ref in alive))
         return state
 
     monkeypatch.setattr(scheduler, "_parse", counted)
