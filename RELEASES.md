@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.1055 · 2026-11-19
+
+### 2026-11-19 · 54eda4ebff9d · #12300 · @agenticore-app
+
+**Document the outage hold for agents the hub started**
+
+This change adds documentation for the outage hold mechanism covering agents the hub started over the bus, explaining how the tick publishes outage records to Redis, the lifecycle reactor's hold checks, paused hub inbox wakes, and recovery via `track outages` and `recover outages`. It also cross-links related sections in `swarm.md` and `deployment-modes.md` and includes a changelog entry. This matters because it makes previously undocumented but already-shipped behavior (from #11245) discoverable and verifiable, helping operators understand outage handling, troubleshoot issues, and follow correct upgrade order without needing to read source code.
+
 ## v2.17.1054 · 2026-11-19
 
 ### 2026-11-19 · c1ef72fab3de · #12240 · @agenticore-app
