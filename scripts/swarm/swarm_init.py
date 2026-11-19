@@ -16,11 +16,10 @@ from typing import NamedTuple, TextIO
 
 from scripts.swarm import naming, stack_init
 from scripts.swarm.stack_env import BIND, read_env
-from scripts.swarm.store import RedisStore, SwarmError
 
 CREATE = """
 import contextlib, io, json, sys
-from scripts.swarm import cli, swarm_init
+from scripts.swarm import cli
 from scripts.swarm_ledger import ledger_size
 from scripts.swarm_ledger import storage
 
@@ -31,13 +30,18 @@ if name in store.slugs():
     print(json.dumps({"found": "swarm", "repo": store.config(name).repo}))
 elif repository.exists(name) and ledger_size.size_of(repository.get_document(name)) != "swarm":
     print(json.dumps({"found": "ledger"}))
-elif refused := swarm_init.create_refusal(store, [name, "create", "--repo", order["repo"], *order["flags"]]):
-    print(f"swarm: {refused}", file=sys.stderr)
-    sys.exit(1)
 else:
+    argv = [name, "create", "--repo", order["repo"], *order["flags"]]
+    try:
+        refused = store.refusal(cli.create_config(cli.build_parser().parse_args(argv)))
+    except cli.SwarmError as error:
+        refused = str(error)
+    if refused:
+        print(f"swarm: {refused}", file=sys.stderr)
+        sys.exit(1)
     repository.create(name, order["content"], "swarm")
     with contextlib.redirect_stdout(io.StringIO()) as told:
-        code = cli.main([name, "create", "--repo", order["repo"], *order["flags"]])
+        code = cli.main(argv)
     print("\\n".join(told.getvalue().splitlines()[:1]))
     sys.exit(code)
 """
@@ -113,16 +117,6 @@ def taken(run: stack_init.Run, environ: Mapping[str, str]) -> set[str] | None:
     """The names the stack holds, or None when it does not answer."""
     done = in_stack(run, environ, TAKEN, {})
     return set(json.loads(done.stdout)) if done.returncode == 0 else None
-
-
-def create_refusal(store: RedisStore, argv: list[str]) -> str:
-    """Why swarm create ARGV would refuse its swarm, empty when the store takes it; asked before the ledger is made."""
-    from scripts.swarm import cli
-
-    try:
-        return store.refusal(cli.create_config(cli.build_parser().parse_args(argv)))
-    except SwarmError as error:
-        return str(error)
 
 
 def ledger_page(environ: Mapping[str, str], name: str) -> str:

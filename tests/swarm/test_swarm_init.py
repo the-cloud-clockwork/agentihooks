@@ -253,6 +253,15 @@ def test_init_the_store_refuses_makes_no_ledger(
     assert not new_ledger.storage.default().exists("demo-swarm")
 
 
+def test_init_a_create_refuses_names_the_refusal_and_makes_no_ledger(
+    scratch: RedisStore, plan: Path, tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    code, _ = init("demo-swarm", "--plan", str(plan), "--repo", str(tmp_path), "--template", "nope")
+    assert code == 1 and scratch.slugs() == []
+    assert "swarm: no swarm template nope; agentihooks swarm templates lists them\n" in capsys.readouterr().err
+    assert not new_ledger.storage.default().exists("demo-swarm")
+
+
 def test_a_typed_create_is_refused_and_names_swarm_init(monkeypatch, capsys):
     seen = []
     monkeypatch.setattr(cli, "main", lambda argv: seen.append(argv) or 0)
