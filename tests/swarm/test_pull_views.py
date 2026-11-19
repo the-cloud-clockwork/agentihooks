@@ -927,9 +927,11 @@ def gated_pull(head: str, tree: str) -> dict[str, Any]:
 
 
 @pytest.mark.feature("tick-view-side-by-side-batches")
-@pytest.mark.parametrize(("cached", "tree_reads"), [(True, 1), (False, 2)])
-def test_batches_sharing_an_unread_workflow_tree_make_the_sequential_github_calls(
-    cached: bool, tree_reads: int, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+@pytest.mark.parametrize(
+    ("shared", "cached", "tree_reads"), [(True, True, 1), (True, False, 2), (False, True, 2), (False, False, 2)]
+)
+def test_batches_make_the_sequential_github_calls_for_their_workflow_trees(
+    shared: bool, cached: bool, tree_reads: int, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     import fakeredis
 
@@ -942,11 +944,15 @@ def test_batches_sharing_an_unread_workflow_tree_make_the_sequential_github_call
         query = command[-1]
         queries.append(query)
         if "nodes(ids:" in query:
+            trees = [tree for tree in ("tree1", "tree2") if f'"{tree}"' in query]
             answer: dict[str, Any] = {
-                "nodes": [{"id": "tree1", "entries": [{"object": {"text": f"  gate:\n    name: {GATE}"}}]}]
+                "nodes": [
+                    {"id": tree, "entries": [{"object": {"text": f"  gate:\n    name: {GATE}"}}]} for tree in trees
+                ]
             }
         else:
-            answer = {f"p{i}": gated_pull(f"h{i}", "tree1") for i in range(query.count("resource(url:"))}
+            tree = "tree1" if shared or json.dumps(urls[0]) in query else "tree2"
+            answer = {f"p{i}": gated_pull(f"h{i}", tree) for i in range(query.count("resource(url:"))}
         return SimpleNamespace(returncode=0, stdout=json.dumps({"data": answer}))
 
     found = views(urls, run, cache)
@@ -954,6 +960,24 @@ def test_batches_sharing_an_unread_workflow_tree_make_the_sequential_github_call
     assert len(queries) == 2 + tree_reads
     assert sum("nodes(ids:" in query for query in queries) == tree_reads
     assert all(found[url] is not None and found[url].gate_passed for url in urls)
+
+
+@pytest.mark.feature("tick-view-side-by-side-batches")
+def test_a_failed_batch_read_leaves_the_other_batch_read_once() -> None:
+    urls = [f"https://github.com/o/r/pull/{n}" for n in range(25)]
+    queries: list[str] = []
+
+    def run(command: list[str], **kwargs: Any) -> SimpleNamespace:
+        queries.append(command[-1])
+        if json.dumps(urls[0]) in command[-1]:
+            return SimpleNamespace(returncode=1, stdout="", stderr="")
+        return batch_reply(command)
+
+    found = views(urls, run)
+
+    assert len(queries) == 2
+    assert [found[url] for url in urls[:20]] == [None] * 20
+    assert all(found[url] is not None for url in urls[20:])
 
 
 READER: contextvars.ContextVar[str] = contextvars.ContextVar("reader", default="none")
