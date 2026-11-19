@@ -58,7 +58,7 @@ cleanup() {
     if [[ -n "${profile_pid:-}" ]]; then wait "$profile_pid" || true; fi
     docker rm -f "worker-profile-positive-$fixture" "worker-profile-positive-second-$fixture" >/dev/null 2>&1 || true
     docker image rm "$image" "$rebuild" "$rejected" >/dev/null 2>&1 || true
-    python3 - "$context" <<'PY'
+    python3 - "$context" <<'PY' || true
 import shutil, sys
 shutil.rmtree(sys.argv[1])
 PY

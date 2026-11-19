@@ -41,6 +41,20 @@ TESTS_GROUPS = tuple(
 PATH_FILTERS = ("paths", "paths-ignore")
 DEV_PUSH = "github.event_name == 'push' && github.ref == 'refs/heads/dev'"
 OWN = r"[a-z0-9-]+"
+FOCUSED_PROOFS = (
+    "brain-smoke",
+    "github-access",
+    "helm-kind",
+    "mutation-deadlines",
+    "mutation-replay",
+    "operations-cpu",
+    "operations-receipts",
+    "row-memory",
+    "semgrep",
+    "swarm-image",
+    "tests",
+    "worker-image",
+)
 
 
 def git(*args: str) -> str:
@@ -163,6 +177,16 @@ def hive_release_group(name: str, block: object, job: dict[str, Any], trusted: d
     )
 
 
+def focused_proof_group(name: str, block: object, job: dict[str, Any], trusted: dict[Any, Any]) -> bool:
+    return (
+        trusted.get("name") == "Proofs"
+        and name in FOCUSED_PROOFS
+        and only_concurrency_changed(name, job, trusted)
+        and block
+        == {"group": "${{ format('focused-proof-{0}', github.run_id) }}", "queue": "max", "cancel-in-progress": False}
+    )
+
+
 def mapping(value: object) -> dict[Any, Any]:
     return cast(dict[Any, Any], value) if isinstance(value, dict) else {}  # pragma: no mutate
 
@@ -232,6 +256,7 @@ def problems(workflow: object, baseline: object = None, ancestor: object = None)
             dedicated_chart_group(name, block, job, trusted)
             or flake_history_group(name, block, job, trusted)
             or hive_release_group(name, block, job, trusted)
+            or focused_proof_group(name, block, job, trusted)
         ):
             continue
         if dev_push_group(block, cast(dict[Any, Any], workflow)):  # pragma: no mutate

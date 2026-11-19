@@ -283,7 +283,7 @@ def test_the_context_recycle_gate_skips_an_operator_launched_agent(lane, slug):
 
 def test_the_planner_prompt_plans_with_the_operator_then_registers_the_plan_and_exits():
     text = prompt.build_operator("sw", "/repo", "planner@a1b2c3-0001", "planner", "planner")
-    led = "agentihooks ledger --slug sw --as planner@a1b2c3-0001"
+    led = "agentihooks api --slug sw --as planner@a1b2c3-0001"
     assert text.splitlines() == [
         "You are planner@a1b2c3-0001, a planner profile agent the operator launched on swarm sw over the repo /repo "
         "with agentihooks swarm sw planner up. You hold no task and no lane slot, and the swarm never nudges or "
@@ -329,6 +329,6 @@ def test_another_role_works_with_the_operator_and_exits_when_he_says_so():
     assert lines[4:] == [
         "Work with the operator on what he asks in this pane. Make any code change in your own worktree (wt.sh new, "
         "the worktree skill) and a pull request into dev. Never join the ledger crew or claim a task. Propose other "
-        'work with agentihooks ledger --slug sw --as engineer@a1b2c3-0002 followup add "<plain words>".',
+        'work with agentihooks api --slug sw --as engineer@a1b2c3-0002 followup add "<plain words>".',
         "When he says you are done, end this session with agentihooks swarm sw --as engineer@a1b2c3-0002 exit.",
     ]

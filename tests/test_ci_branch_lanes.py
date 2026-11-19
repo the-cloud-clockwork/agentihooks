@@ -1125,6 +1125,25 @@ def test_dedicated_chart_group_without_a_trusted_jobs_mapping_does_not_crash() -
 DEDICATED_GROUPS = {
     "dedicated_chart_group": ("chart-release.yml", ("package", "kind", "publish"), "chart-release", True),
     "flake_history_group": ("test.yml", ("flake-budget",), "flake-history", False),
+    "focused_proof_group": (
+        "proofs.yml",
+        (
+            "brain-smoke",
+            "github-access",
+            "helm-kind",
+            "mutation-deadlines",
+            "mutation-replay",
+            "operations-cpu",
+            "operations-receipts",
+            "row-memory",
+            "semgrep",
+            "swarm-image",
+            "tests",
+            "worker-image",
+        ),
+        "${{ format('focused-proof-{0}', github.run_id) }}",
+        True,
+    ),
     "hive_release_group": ("swarm-node-image.yml", ("hive",), "hive-worker-release", False),
 }
 LANE_RULE_EXCEPTIONS = {
@@ -1189,9 +1208,12 @@ def _literal_group_holders() -> set[str]:
         if isinstance(target, ast.Name)
     }
     return {
-        function.name
+        function.name.removeprefix("x_").removesuffix("__mutmut_orig")
+        if function.name.endswith("__mutmut_orig")
+        else function.name
         for function in module.body
         if isinstance(function, ast.FunctionDef)
+        and ("__mutmut_" not in function.name or function.name.endswith("__mutmut_orig"))
         and any(
             isinstance(key, ast.Constant)
             and key.value == "group"

@@ -11,7 +11,7 @@ limit="${PYPI_RETRY_ATTEMPT_SECONDS:-60}"
 cap=$((limit * 4))
 out=$(mktemp)
 err=$(mktemp)
-trap 'rm -f "$out" "$err"' EXIT
+trap 'rm -f "$out" "$err" || true' EXIT
 waited=0
 wait=5
 attempt=0
