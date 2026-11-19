@@ -271,6 +271,19 @@ def test_relayed_check_runs_carry_the_grade_run_its_units_and_the_lab_grade_page
     assert required.summary == f"2 units of required on {HEAD} against {BASE}, relayed from the lab grade"
 
 
+@pytest.mark.feature("lab-skipped-authoritative-gates")
+def test_a_relayed_grade_posts_each_authoritative_gate_it_ran_no_unit_of_as_skipped() -> None:
+    calls = Calls()
+    state = grade("success")
+    state.posted["unit-selected"] = ["completed", "skipped"]
+    actions = relay.relay(state, BRANCH, calls.ports(), LAB)
+    posts = [call for call in calls.log if call[0] == "post"]
+    skipped = calls.outputs[posts.index(("post", HEAD, "unit-selected", "completed", "skipped", False))]
+    assert f"posted lab/unit-selected skipped on {HEAD}" in actions
+    assert skipped.units == ()
+    assert skipped.summary == f"0 units of unit-selected on {HEAD} against {BASE}, relayed from the lab grade"
+
+
 def test_a_relayed_green_grade_updates_the_open_pull_request_head_with_its_check_runs_in_the_same_grade(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

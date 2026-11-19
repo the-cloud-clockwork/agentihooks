@@ -1,6 +1,20 @@
 {
   "features": [
     {
+      "id": "lab-skipped-authoritative-gates",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2516",
+      "behaviour": "A hotfix or pull request grade reads lab.authoritative from its base revision's delivery.yaml, never from the head, and on its first pass posts a lab check completed with conclusion skipped for every authoritative gate it grades with no unit, so the lab-verdict job reads skipped instead of waiting out its deadline. A head pushed to a grade ref leaves that skipped check to the relay, which posts it with no units. Gate Required takes the skipped lab result for a gate it does not require on that head, and stays red when the lab check is absent or skips a gate it requires.",
+      "seam": "scripts.ci_lab.scheduler.frame and MirrorExpander.expand over the base delivery.yaml, Scheduler.tick posting through the check poster or leaving the moves for the relay, relay.relay posting a check with no units, and the Gate Required step and scheduler.fold over the recorded cases in tests/fixtures/ci_lab/gate_required.json",
+      "tests": [
+        "tests/ci_lab/test_skipped_gates.py::test_a_pull_request_frame_names_each_authoritative_gate_it_grades_with_no_unit",
+        "tests/ci_lab/test_skipped_gates.py::test_a_pull_request_head_posts_each_authoritative_gate_it_runs_no_unit_of_skipped_on_its_first_pass",
+        "tests/ci_lab/test_skipped_gates.py::test_a_grade_ref_head_leaves_each_skipped_authoritative_gate_to_the_relay",
+        "tests/ci_lab/test_skipped_gates.py::test_a_pull_request_or_hotfix_head_takes_its_authoritative_gates_from_its_base",
+        "tests/ci_lab/test_relay.py::test_a_relayed_grade_posts_each_authoritative_gate_it_ran_no_unit_of_as_skipped"
+      ]
+    },
+    {
       "id": "swarm-refusal-size-warnings",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-phase-limit-scope",
@@ -8888,6 +8902,18 @@
       ]
     },
     {
+      "id": "lab-mutant-unit-split",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-mutant-unit-split",
+      "behaviour": "A CI lab mutant unit whose priced mutant time, its mutant count times the mutation planner's seconds per mutant, exceeds the worker sandbox timeout is split into the fewest near equal parts that each price within it, in mutant order and covering every mutant once, each keyed by the whole function's key with its own mutants, because the worker grades all mutants of a unit in one sandbox run and a run past the timeout is killed and reported failed. A unit priced within the timeout keeps its members and key, and the scheduler expansion passes the executors unit timeout.",
+      "seam": "scripts.ci_lab.expand_mutation.mutant_units over a fixture repository and scripts.ci_lab.scheduler.MirrorExpander.expand over a git origin fixture",
+      "tests": [
+        "tests/ci_lab/test_expand_mutation.py::test_a_unit_priced_over_the_timeout_splits_into_the_fewest_parts_that_each_price_within_it",
+        "tests/ci_lab/test_expand_mutation.py::test_a_unit_priced_at_the_timeout_keeps_its_members_and_key",
+        "tests/ci_lab/test_scheduler.py::test_a_promotion_head_splits_a_mutant_unit_priced_over_the_executors_unit_timeout"
+      ]
+    },
+    {
       "id": "lab-mutant-unit-unlisted-reads",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-mutant-key-data-reads",
@@ -8957,6 +8983,16 @@
         "tests/ci_lab/test_worktrees.py::test_a_lease_and_an_own_copy_report_whether_the_store_fetched_their_head",
         "tests/ci_lab/test_caches.py::test_a_report_counts_git_hits_and_misses_per_revision_and_uv_per_venv",
         "tests/ci_lab/test_caches.py::test_read_takes_each_cache_a_unit_report_carries_and_nothing_from_an_older_worker"
+      ]
+    },
+    {
+      "id": "lab-worker-loss-redelivery",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/ops-chaos-worker-loss",
+      "behaviour": "A CI lab worker killed mid unit stops heartbeating, so its lease expires and the next scheduler pass requeues the unit once and counts it in ci_lab_units_redelivered_total; the dead worker's token can neither extend nor complete the unit; a second worker leases and finishes it, the grade concludes from that run with nothing counted in ci_lab_units_lost_total, its verdict is stored, and the gate's check run and Gate Required each post one completed result.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick and listen read through GET /metrics over fakeredis and the local object store, with two workers leasing, heartbeating and completing through scripts.ci_lab.leases.Leases",
+      "tests": [
+        "tests/ci_lab/test_redelivery.py::test_a_worker_killed_mid_unit_is_redelivered_once_and_its_verdict_posts_once"
       ]
     },
     {
@@ -9174,7 +9210,7 @@
       "id": "lab-worker-pod-loop",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/lab-worker",
-      "behaviour": "The CI lab worker leases units into its free slots over the scheduler's HTTP lease API with the capabilities net and browser, runs each on the executor its kind names side by side, heartbeats each lease while its executor runs, uploads the report and log through the presigned URLs and completes the lease; a unit whose executor raises stops heartbeating and is left for the scheduler to reap, a refused token ends a unit's heartbeats and delivery, a heartbeat that cannot reach the scheduler is skipped, stop lets running units finish within the termination grace and abandons the rest to reap, slots come from the CPU quota capped by CI_LAB_SLOTS, and the worker environment refuses every GitHub App or Redis variable.",
+      "behaviour": "The CI lab worker leases units into its free slots over the scheduler's HTTP lease API with the capabilities net and browser, runs each on the executor its kind names side by side, heartbeats each lease while its executor runs, uploads the report and log through the presigned URLs and completes the lease; a unit whose executor raises stops heartbeating and is left for the scheduler to reap, a refused token ends a unit's heartbeats and delivery, a heartbeat that cannot reach the scheduler is skipped, stop lets running units finish within the termination grace (the unit time limit plus five delivery calls at the client timeout) and abandons the rest to reap, slots come from the CPU quota capped by CI_LAB_SLOTS, and the worker environment refuses every GitHub App or Redis variable.",
       "seam": "scripts.ci_lab.worker Worker.run_once, run, stop, drain and free, Client, environment, slots and build, against scripts.ci_lab.lease_api.serve",
       "tests": [
         "tests/ci_lab/test_worker.py::test_units_from_two_heads_run_concurrently_on_one_pod",
@@ -9186,6 +9222,8 @@
         "tests/ci_lab/test_worker.py::test_a_refused_upload_url_ends_the_units_delivery",
         "tests/ci_lab/test_worker.py::test_stop_lets_running_units_finish_within_the_termination_grace",
         "tests/ci_lab/test_worker.py::test_a_unit_past_the_termination_grace_is_left_to_reap",
+        "tests/ci_lab/test_worker.py::test_a_built_worker_waits_out_its_longest_unit_and_its_delivery_after_stop",
+        "tests/ci_lab/test_worker.py::test_the_termination_grace_counts_every_delivery_call_of_a_unit",
         "tests/ci_lab/test_worker.py::test_run_leases_again_as_a_unit_frees_its_slot",
         "tests/ci_lab/test_worker.py::test_the_pod_leases_only_units_its_net_and_browser_capabilities_and_free_slots_fit",
         "tests/ci_lab/test_worker.py::test_the_client_speaks_the_lease_api_and_reads_a_refused_token_as_none",
@@ -9221,6 +9259,17 @@
         "tests/ci_lab/test_executors.py::test_executors_name_the_adapter_of_every_unit_kind",
         "tests/ci_lab/test_executors.py::test_settings_read_the_worker_contract_environment",
         "tests/ci_lab/test_executors.py::test_main_runs_the_worker_over_the_adapters_until_sigterm_stops_it"
+      ]
+    },
+    {
+      "id": "lab-worker-metrics",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-worker-metrics",
+      "behaviour": "agentihooks ci-lab-worker binds the contract metrics port while the worker runs and answers GET /metrics with the Prometheus exposition of its own metrics registry, which observes no scheduler gauge and no unit sample; any other path answers 404 and a POST 405; once SIGTERM drains the worker, the server thread ends and the port closes.",
+      "seam": "scripts.ci_lab.executors main, scripts.ci_lab.metrics serve_registry and expose, and scripts.ci_lab.contract METRICS_PORT",
+      "tests": [
+        "tests/ci_lab/test_executors.py::test_main_serves_the_worker_metrics_on_the_contract_port_until_the_worker_drains",
+        "tests/ci_lab/test_metrics.py::test_a_registry_server_answers_only_the_metrics_route_over_http"
       ]
     },
     {
