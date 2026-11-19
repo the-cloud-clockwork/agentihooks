@@ -77,7 +77,7 @@ def test_a_push_to_a_branch_is_a_head_event() -> None:
 @pytest.mark.parametrize("before", ["0" * 40, BASE])
 def test_a_push_to_a_plant_branch_names_a_plant_head_with_no_base_whatever_its_before(before: str) -> None:
     (event,) = webhooks.head_events("push", {**push(ref=PLANT_REF), "before": before})
-    assert event == HeadEvent(webhooks.PLANT, REPO, HEAD, "", "nestorcolt", "pushed")
+    assert event == HeadEvent("plant", REPO, HEAD, "", "nestorcolt", "pushed")
     assert webhooks.envelope(event).type == "ci.lab.head.plant"
 
 
@@ -259,7 +259,7 @@ def test_a_grade_request_carries_the_head_its_tier_and_whether_it_bypasses_a_neg
 
 @pytest.mark.feature("lab-plant-push-intake")
 def test_a_plant_head_asks_for_a_pull_request_grade_before_its_base_is_resolved() -> None:
-    request = intake.request_from(head(webhooks.PLANT, "nestorcolt", "pushed", base=""))
+    request = intake.request_from(head("plant", "nestorcolt", "pushed", base=""))
     assert request == GradeRequest(
         repo=REPO, head=HEAD, base="", tier=Priority.PULL_REQUEST, actor="nestorcolt", bypass_negative=False
     )

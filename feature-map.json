@@ -16,16 +16,16 @@
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-plant-push-intake",
       "behaviour": "A trusted push to a branch under refs/heads/diffcheck/lab-plant- is graded in the pull request tier on the head's merge base with the dev head, whatever the payload before says, so both twins of a plant share one base and that base is the grader. The base is resolved after the trust check and before the head is held or keyed; an untrusted plant push is never resolved, a resolution failure is named as a pass action and the head is not held, and every other push keeps its payload base and the promotion tier.",
-      "seam": "scripts.ci_lab.webhooks.head_events for push deliveries, scripts.ci_lab.intake.request_from, Scheduler._intake over a fake expander, and MirrorExpander.merge_base over a real file protocol origin",
+      "seam": "scripts.ci_lab.webhooks.head_events for push deliveries, scripts.ci_lab.intake.request_from, Scheduler.tick intake over a fake expander, and Scheduler.tick with a real MirrorExpander over a file protocol origin holding two twins and an orphan",
       "tests": [
         "tests/ci_lab/test_intake.py::test_a_push_to_a_plant_branch_names_a_plant_head_with_no_base_whatever_its_before",
         "tests/ci_lab/test_intake.py::test_a_push_to_a_branch_outside_the_plant_prefix_stays_an_ordinary_push",
         "tests/ci_lab/test_intake.py::test_a_plant_head_asks_for_a_pull_request_grade_before_its_base_is_resolved",
-        "tests/ci_lab/test_scheduler.py::test_a_plant_push_grades_in_the_pull_request_tier_on_its_dev_merge_base",
-        "tests/ci_lab/test_scheduler.py::test_an_ordinary_push_keeps_its_base_and_the_promotion_tier_and_resolves_nothing",
-        "tests/ci_lab/test_scheduler.py::test_an_untrusted_plant_push_is_refused_before_its_base_is_resolved",
-        "tests/ci_lab/test_scheduler.py::test_a_plant_head_whose_dev_merge_base_fails_is_named_and_never_held",
-        "tests/ci_lab/test_scheduler.py::test_the_mirror_expander_bases_both_plant_twins_on_their_dev_merge_base"
+        "tests/ci_lab/test_plant_intake.py::test_a_plant_push_grades_in_the_pull_request_tier_on_its_dev_merge_base",
+        "tests/ci_lab/test_plant_intake.py::test_an_ordinary_push_keeps_its_base_and_the_promotion_tier_and_resolves_nothing",
+        "tests/ci_lab/test_plant_intake.py::test_an_untrusted_plant_push_is_refused_before_its_base_is_resolved",
+        "tests/ci_lab/test_plant_intake.py::test_a_plant_head_whose_dev_merge_base_fails_is_named_and_the_next_head_still_held",
+        "tests/ci_lab/test_plant_intake.py::test_both_twins_of_a_plant_grade_on_their_dev_merge_base_and_an_unrelated_head_is_named"
       ]
     },
     {
