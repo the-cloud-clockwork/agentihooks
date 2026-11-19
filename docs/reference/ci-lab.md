@@ -2040,16 +2040,10 @@ A mutant unit's key is the sha256 of the JSON, object keys sorted, of a list hol
 6. the unlisted test hashes described above.
 
 Its members are `<name>__mutmut_1` to `<name>__mutmut_<n>`, one per mutation mutmut creates in the
-function. The worker grades a unit's mutants in one sandbox run after the unit's stats run, each run
-bounded by `executors.UNIT_TIMEOUT_S`, 1800 seconds, which `MirrorExpander._mutation` passes as the
-`timeout` of `expand_mutation.mutant_units`. A function whose mutants price over it, `n` times
-`scripts.ci_mutation.plan.MUTANT_SECONDS` (5.6 seconds a mutant, the fallback of
-`pricing.estimate`), gets the fewest near equal parts that each price within it, at most 321
-mutants a part, in mutant order; `expand_mutation.split_members` cuts them. Each part's key is the
-sha256 of the list of the function's key and the part's members, so every part has its own slot
-and verdict; a function priced within the timeout keeps one unit under the function's key.
-[Mutant units over the sandbox timeout](#mutant-units-over-the-sandbox-timeout) gives the part
-sizes, an example and the checks.
+function. A function whose mutants price over the 1800 second sandbox timeout gets several units
+instead, each holding a part of its mutants under the sha256 of the list of the function's key and
+the part's members, as [Mutant units over the sandbox timeout](#mutant-units-over-the-sandbox-timeout)
+describes; a function priced within the timeout keeps one unit under the function's key.
 A stats unit's key is `StoredStats.identity` of its test file at the head, over the
 fields the `stats` rows of [Inputs per kind](#inputs-per-kind) list, with the worker's options
 `-q -p no:cacheprovider`. The expander builds both keys itself, without the `digests` builders, so
