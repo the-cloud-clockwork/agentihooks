@@ -2977,6 +2977,21 @@
       ]
     },
     {
+      "id": "swarm-tick-lock-renewal-interval",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2735",
+      "behaviour": "A tick pass renews its tick lock and writes the activity mark at most once per renewal interval, never before every step: every step still checks for a stop, the first step of a pass renews, a failed renewal is retried by the next step, and a clock that went back renews at once.",
+      "seam": "The pass step hook scripts.swarm.tick_activity.Renewal that run_tick sets on timing.BEFORE_STEP",
+      "tests": [
+        "tests/swarm/test_tick_activity.py::test_a_pass_renews_its_tick_lock_once_while_every_step_checks_for_a_stop",
+        "tests/swarm/test_tick_activity.py::test_the_step_hook_renews_again_once_its_interval_passed_or_the_clock_went_back",
+        "tests/swarm/test_tick_activity.py::test_a_stolen_tick_lock_stops_every_step_from_the_first_renewal_after_the_interval"
+      ],
+      "rules": [
+        "pass-step-renewal-unthrottled"
+      ]
+    },
+    {
       "id": "swarm-tick-source-control-port",
       "origin": "inventory",
       "behaviour": "Swarm code reaches source control through the source control port: a gh list or the GitHub adapter's command builder outside the adapter is refused unless its file is on an exception list that only shrinks, and a change read names its state, head and head branch inside a deadline.",

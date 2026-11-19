@@ -1,0 +1,29 @@
+rules:
+  - id: pass-step-renewal-unthrottled
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A pass step hook runs before every tick step, and every step thread of the pass waits on its lock. Renewing the
+      tick lock there on each call queued every step behind about six Redis round trips, so step bodies started late
+      and were cut at their budget. Keep the stop check on every call and renew only once tick_activity.RENEW_MS has
+      passed since the last renewal.
+    paths:
+      include:
+        - /scripts/
+        - pass-step-renewal-unthrottled.py
+    patterns:
+      - pattern-either:
+          - pattern: keep(...)
+          - pattern: tick_activity.keep(...)
+          - pattern: controller.keep_tick(...)
+      - pattern-inside: |
+          def __call__(self, ...):
+              ...
+      - pattern-not-inside: |
+          if <... RENEW_MS ...>:
+              ...
+          ...
+      - pattern-not-inside: |
+          if <... $MODULE.RENEW_MS ...>:
+              ...
+          ...

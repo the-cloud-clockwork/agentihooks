@@ -1,7 +1,11 @@
+from types import SimpleNamespace
+from typing import Any
+
 import pytest
 
-from scripts.swarm import cli, commands
+from scripts.swarm import cli, commands, controller, lease, tick_activity
 from scripts.swarm.status import status_report
+from scripts.swarm.store import RedisStore, SwarmError
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_delivery import FakeHerdr
 
@@ -71,3 +75,84 @@ def test_lost_fencing_cannot_publish_fresh_activity(env):  # noqa: F811
     with pytest.raises(RuntimeError, match="stale owner"):
         tick_activity.keep(store, "sw", lost, lambda: 999)
     assert tick_activity.read(store, "sw") == 123
+
+
+@pytest.mark.feature("swarm-tick-lock-renewal-interval")
+def test_a_pass_renews_its_tick_lock_once_while_every_step_checks_for_a_stop(
+    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store, ledger, runtime = env
+    run("sw", "create", "--repo", "/repo")
+    store.update("sw", state="running")
+    keep = controller.keep_tick
+    callers: list[str] = []
+    checks: list[int] = []
+
+    def keeping(*args: Any) -> None:
+        callers.append(args[5])
+        keep(*args)
+
+    monkeypatch.setattr(controller, "keep_tick", keeping)
+    monkeypatch.setattr(tick_activity, "tick_stop", SimpleNamespace(check=lambda: checks.append(len(callers))))
+    monkeypatch.setattr(cli, "now_ms", lambda: 1_000_000)
+    cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
+    assert callers.count("pass step") == 1
+    assert len(checks) > 1
+
+
+@pytest.mark.feature("swarm-tick-lock-renewal-interval")
+def test_the_step_hook_renews_again_once_its_interval_passed_or_the_clock_went_back(
+    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = env[0]
+    start, interval = 1_000, tick_activity.RENEW_MS
+    clock: list[int] = [start]
+    events: list[tuple[str, int]] = []
+    monkeypatch.setattr(tick_activity, "tick_stop", SimpleNamespace(check=lambda: events.append(("stop", clock[0]))))
+    renewal = tick_activity.Renewal(store, "sw", lambda: events.append(("renew", clock[0])), lambda: clock[0])
+    readings = [start, start, start + interval - 1, start + interval, start + interval + 1, start]
+    for at in readings:
+        clock[0] = at
+        renewal()
+    assert events == [
+        ("stop", start),
+        ("renew", start),
+        ("stop", start),
+        ("stop", start + interval - 1),
+        ("stop", start + interval),
+        ("renew", start + interval),
+        ("stop", start + interval + 1),
+        ("stop", start),
+        ("renew", start),
+    ]
+    assert tick_activity.read(store, "sw") == start
+
+
+@pytest.mark.feature("swarm-tick-lock-renewal-interval")
+def test_a_stolen_tick_lock_stops_every_step_from_the_first_renewal_after_the_interval(
+    env: tuple[RedisStore, Any, Any],  # noqa: F811
+) -> None:
+    store = env[0]
+    run("sw", "create", "--repo", "/repo")
+    held = lease.acquire(store, "sw", commands.hive_id())
+    assert held is not None
+    token = controller.take_tick_lock(store, "sw", held, cli.TICK_LOCK_MS, "pass")
+    assert token is not None
+    clock = [1_000]
+    renewal = tick_activity.Renewal(
+        store,
+        "sw",
+        lambda: controller.keep_tick(store, "sw", held, token, cli.TICK_LOCK_MS, "pass step"),
+        lambda: clock[0],
+    )
+    renewal()
+    store.redis.set(store.key("sw", "tick-lock"), "another owner")
+    renewal()
+    clock[0] += tick_activity.RENEW_MS
+    for _ in range(2):
+        with pytest.raises(SwarmError, match="the tick lock is stale"):
+            renewal()
+    assert tick_activity.read(store, "sw") == 1_000
+    assert tick_activity.RENEW_MS * 10 <= cli.TICK_LOCK_MS
