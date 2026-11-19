@@ -406,18 +406,31 @@ def close_all(held: dict) -> None:
         closing()
 
 
-def wal(connection: sqlite3.Connection) -> None:
-    """Turn the file to WAL, retrying within the busy timeout while another connection holds a new file's write
-    lock, because SQLite refuses that lock upgrade at once instead of calling the busy handler."""
-    deadline = time.monotonic() + BUSY_TIMEOUT_S
-    while True:
+class WalSwitch:
+    """Turns one connection's file to WAL. Every store open runs turn; only a switch SQLite refused reaches wait,
+    which retries within the busy timeout while another connection holds a new file's write lock, because SQLite
+    refuses that lock upgrade at once instead of calling the busy handler. The retry stays out of turn so its
+    mutants run only the tests that refuse a switch, never every test that opens a store."""
+
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self.connection = connection
+
+    def turn(self) -> None:
         try:
-            connection.execute(WAL)
-            return
-        except sqlite3.OperationalError as error:
-            if LOCKED not in str(error) or time.monotonic() >= deadline:
-                raise
-        time.sleep(WAL_RETRY_S)
+            self.connection.execute(WAL)
+        except sqlite3.OperationalError:
+            self.wait()
+
+    def wait(self) -> None:
+        deadline = time.monotonic() + BUSY_TIMEOUT_S
+        while True:
+            try:
+                self.connection.execute(WAL)
+                return
+            except sqlite3.OperationalError as error:
+                if LOCKED not in str(error) or time.monotonic() >= deadline:
+                    raise
+            time.sleep(WAL_RETRY_S)
 
 
 class SQLiteLedgerRepository:
@@ -498,7 +511,7 @@ class SQLiteLedgerRepository:
         with self._guard:
             if path in self._ready:
                 return
-            wal(connection)
+            WalSwitch(connection).turn()
             connection.executescript(SCHEMA)
             connection.executescript(hierarchy.SCHEMA)
             connection.executescript(ROWS_SCHEMA)

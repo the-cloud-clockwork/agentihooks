@@ -17,5 +17,27 @@ def set_up(connection: sqlite3.Connection) -> None:
 
 
 def wal(connection: sqlite3.Connection) -> None:
-    # ok: ledger-wal-switch-without-lock-wait
+    # ruleid: ledger-wal-switch-without-lock-wait
     connection.execute(WAL)
+
+
+class Store:
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self.connection = connection
+
+    def set_up(self) -> None:
+        # ruleid: ledger-wal-switch-without-lock-wait
+        self.connection.execute(WAL)
+
+
+class WalSwitch:
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self.connection = connection
+
+    def turn(self) -> None:
+        # ok: ledger-wal-switch-without-lock-wait
+        self.connection.execute(WAL)
+
+    def wait(self) -> None:
+        # ok: ledger-wal-switch-without-lock-wait
+        self.connection.execute(WAL)

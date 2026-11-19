@@ -490,7 +490,7 @@ def test_a_write_lock_held_past_the_busy_timeout_still_fails_the_wal_switch(
     monkeypatch.setattr(sqlite, "time", SimpleNamespace(monotonic=lambda: next(clock), sleep=pauses.append))
     with closing(sqlite3.connect(path)) as connection:
         with pytest.raises(sqlite3.OperationalError, match="database is locked"):
-            sqlite.wal(connection)
+            sqlite.WalSwitch(connection).turn()
     holder.close()
     assert pauses == [0.05]
 
@@ -506,7 +506,7 @@ def test_the_wal_switch_raises_an_error_other_than_a_held_lock_at_once(monkeypat
 
     monkeypatch.setattr(sqlite, "time", SimpleNamespace(monotonic=lambda: 0.0, sleep=pause))
     with pytest.raises(sqlite3.OperationalError, match="disk I/O error"):
-        sqlite.wal(cast(sqlite3.Connection, Failing()))
+        sqlite.WalSwitch(cast(sqlite3.Connection, Failing())).turn()
 
 
 def test_one_thread_reads_existence_credential_and_task_rows_through_one_connection(tmp_path, monkeypatch):
