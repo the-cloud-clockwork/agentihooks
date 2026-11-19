@@ -123,9 +123,7 @@ def _recorded(run: dict[str, Any], repository: str) -> bool:
 def _artifacts(endpoint: str) -> tuple[list[dict[str, Any]], int]:
     found: list[dict[str, Any]] = []
     for page in range(1, ARTIFACT_PAGES + 1):
-        listed = cast(
-            list[dict[str, Any]], json.loads(_api(f"{endpoint}?per_page={ARTIFACT_PAGE}&page={page}"))["artifacts"]
-        )
+        listed = json.loads(_api(f"{endpoint}?per_page={ARTIFACT_PAGE}&page={page}"))["artifacts"]
         found += listed
         if len(listed) < ARTIFACT_PAGE:
             return found, page
