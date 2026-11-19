@@ -1302,6 +1302,48 @@ def test_a_newer_backfill_head_drops_the_held_units_of_the_older_one(lab: Callab
     assert run.engine.queue.pending() == [scheduler.job_id(HEAD_B, newer)]
 
 
+@pytest.mark.feature("lab-scheduler-budget-charge")
+def test_a_finished_unit_charges_its_slots_times_its_report_seconds_once_and_no_seconds_charges_nothing(
+    lab: Callable[..., Run],
+) -> None:
+    timed, untimed, unreported = unit(1), unit(2), unit(3)
+    run = lab({HEAD_B: plan({"lint": (timed, untimed, unreported)})}, spend=LOW_BUDGET)
+    run.engine.queue.enqueue([timed], HEAD_B, {timed.key: queue.Requirement(slots=2)})
+    run.push(HEAD_B, lane="pr-2", event="pull_request", action="synchronize")
+    run.tick(1000)
+    first, second, third = run.lease(slots=4)
+    assert (first.slots, second.slots, third.slots) == (2, 1, 1)
+    run.finish(first, "passed", {"seconds": 1500.0})
+    run.finish(second, "passed", {})
+    run.finish(third, "passed")
+    run.tick(1100)
+    spending = run.engine.spending
+    assert spending is not None
+    assert spending.spent() == 50.0
+    run.tick(1200)
+    assert spending.spent() == 50.0
+
+
+@pytest.mark.feature("lab-scheduler-budget-charge")
+def test_the_first_pass_after_finished_units_shed_a_class_names_it_with_the_spent_share_once(
+    lab: Callable[..., Run],
+) -> None:
+    pulled, swept = unit(1), unit(2)
+    run = lab({HEAD_B: plan({"lint": (pulled,)}), HEAD_A: plan({"lint": (swept,)})}, spend=LOW_BUDGET)
+    run.engine.queue.offer("worker", 8, 1000)
+    run.push(HEAD_B, lane="pr-2", event="pull_request", action="synchronize")
+    run.tick(1000)
+    (grant,) = run.lease()
+    run.finish(grant, "passed", {"seconds": 3600.0})
+    assert not any(action.startswith("shed ") for action in run.tick(1100))
+    line = "shed backfill with 0.60 of the day's core budget spent"
+    assert line in run.tick(1200)
+    run.push(HEAD_A, lane="sweep", event="backfill")
+    assert line not in run.tick(1300)
+    assert [slot.held for slot in run.grade(HEAD_A).units.values()] == [True]
+    assert run.engine.queue.pending() == []
+
+
 @pytest.mark.feature("lab-scheduler-metrics")
 def test_the_exposition_counts_the_workers_that_polled_within_the_ready_window_after_a_pass(
     lab: Callable[..., Run],
@@ -1339,7 +1381,7 @@ def test_the_exposition_counts_each_finished_attempts_core_seconds_once_in_its_m
     lab: Callable[..., Run],
 ) -> None:
     shared, solo = unit(1), unit(2)
-    run = lab({HEAD_A: plan({"lint": (shared, solo)})}, retries=Policy(failed=1))
+    run = lab({HEAD_A: plan({"lint": (shared, solo)})}, retries=Policy(failed=1), spend=LOW_BUDGET)
     run.push(HEAD_A)
     run.tick(1000)
     run.lab.expander.plans[HEAD_A] = plan({"lint": (shared,)})
@@ -1361,6 +1403,9 @@ def test_the_exposition_counts_each_finished_attempts_core_seconds_once_in_its_m
     assert 'ci_lab_core_seconds_total{class="queue"} 60.0' in text
     assert 'ci_lab_core_seconds_total{class="promotion"} 10.0' in text
     assert run.lab.client.smembers(scheduler.LIVE) == set()
+    spending = run.engine.spending
+    assert spending is not None
+    assert spending.spent() == pytest.approx(70.0 / 60)
 
 
 @pytest.mark.feature("lab-scheduler-metrics")
