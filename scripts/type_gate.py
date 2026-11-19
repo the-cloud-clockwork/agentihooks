@@ -63,27 +63,43 @@ def sources(head: Path) -> list[str]:
     )
 
 
-def measure(head: Path, files: list[str] | None = None) -> dict[str, int]:
-    """Run basedpyright over the given sources, every source when None, in sorted order and count its errors per file.
-
-    An empty list measures nothing. The Node heap limit keeps the checker inside the 6 GiB memory limit of the anton-oss
-    runner container. Once its heap use, plus the five percent it adds, passes ninety percent of that limit, 4388 MB,
-    basedpyright empties its whole type cache at points garbage collection decides and can count other errors on another
-    runner. So the sources are checked in contiguous runs of at most a thousand files, one process each, and a
-    measurement whose checker processes reached that line in resident memory, which bounds heap use from above, is
-    refused.
-    """
-    files = sources(head) if files is None else sorted(files)
+def runs(head: Path) -> list[list[str]]:
+    """Split every source of the head into contiguous sorted runs of at most a thousand files, balanced in size."""
+    files = sources(head)
     if not files:
-        return {}
+        return []
     size = math.ceil(len(files) / math.ceil(len(files) / _RUN))
+    return [files[start : start + size] for start in range(0, len(files), size)]
+
+
+def measure(head: Path, files: list[str] | None = None) -> dict[str, int]:
+    """Count the type errors of the given sources, every source when None, each in the run ``runs`` gives it.
+
+    basedpyright keeps the types it infers across the files of one process, so the files it checks before a source
+    can change what it counts there, while the files after it cannot. A source is therefore counted in its run of the
+    head's every source layout whichever sources are graded: each run holding a graded source is checked from its
+    first source through its last graded one. An empty list measures nothing. The Node heap limit keeps the checker
+    inside the 6 GiB memory limit of the anton-oss runner container. Once its heap use, plus the five percent it adds,
+    passes ninety percent of that limit, 4388 MB, basedpyright empties its whole type cache at points garbage
+    collection decides and can count other errors on another runner, so a measurement whose checker processes reached
+    that line in resident memory, which bounds heap use from above, is refused.
+    """
+    wanted = None if files is None else set(files)
+    checks: list[list[str]] = []
+    for run in runs(head):
+        graded = [index for index, path in enumerate(run) if wanted is None or path in wanted]
+        if graded:
+            checks.append(run[: graded[-1] + 1])
+    if not checks:
+        return {}
     root = head.resolve()
     counts: dict[str, int] = {}
-    for start in range(0, len(files), size):
-        for diagnostic in _check(head, files[start : start + size]):
+    for check in checks:
+        for diagnostic in _check(head, check):
             if diagnostic["severity"] == "error":
                 path = Path(diagnostic["file"]).resolve().relative_to(root).as_posix()
-                counts[path] = counts.get(path, 0) + 1
+                if wanted is None or path in wanted:
+                    counts[path] = counts.get(path, 0) + 1
     peak = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
     if peak >= _PEAK_KIB:
         raise GradeError(
