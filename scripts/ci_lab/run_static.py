@@ -8,7 +8,7 @@ from pathlib import Path
 
 from scripts.ci_lab import expressions
 from scripts.ci_lab.sandbox import Outcome, PortAllocator, Sandbox
-from scripts.ci_lab.static_gates import Producer, StaticGate
+from scripts.ci_lab.static_gates import RUNNER_TEMP, Producer, StaticGate
 
 __all__ = ["SHELL", "SUMMARY", "Result", "Settings", "run"]
 
@@ -122,11 +122,12 @@ def run(gate: StaticGate, head_tree: Path, base_tree: Path, grader_tree: Path, s
     The earlier steps the gate reads run first, in job order and in the same way and run folder, each writing its
     own $GITHUB_OUTPUT; their outcome, conclusion and outputs join the context. A uses step or one whose if condition
     is false is skipped, an output nobody wrote reads as empty, and an earlier step that fails ends the run with its
-    own code and log before the gate runs, as CI ends the job.
+    own code and log before the gate runs, as CI ends the job. runner.temp reads as the run folder, the
+    $RUNNER_TEMP of every step, and each matrix value the gate carries joins the context.
     """
     folder = _folder(settings.root, base_tree, grader_tree)
     trees = (head_tree, base_tree, grader_tree)
-    context = dict(settings.context)
+    context = {**settings.context, **dict(gate.matrix), RUNNER_TEMP: str(folder)}
     for producer in gate.producers:
         given, failed = _produce(producer, trees, folder, settings, context)
         if failed is not None:
