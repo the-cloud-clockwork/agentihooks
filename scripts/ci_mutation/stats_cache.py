@@ -270,8 +270,9 @@ class StatsInputs:
                 names = set(imported_names(text, Path(source).parent.parts))
                 self.discovered[source] = discovery_inputs(list(ast.walk(ast.parse(text))), names, self.resources)
             paths.update(self.discovered[source])
-        self.digests[key] = hashlib.sha256(encode(sorted(paths)).encode()).hexdigest()
-        return self.digests[key]
+        digest = hashlib.sha256(encode(sorted(paths)).encode()).hexdigest()
+        self.digests[key] = digest
+        return digest
 
 
 def per_test_stats(
