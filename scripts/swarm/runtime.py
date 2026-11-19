@@ -1201,6 +1201,9 @@ class HerdrRuntime:
     def _hosted(self, agent: AgentRecord) -> dict:
         return (self.hive.execution(agent) or {}) if self.hive is not None else {}
 
+    def _admitted_binding(self, agent: AgentRecord) -> dict[str, Any] | None:
+        return self.hive.admitted_binding(agent) if self.hive is not None else None
+
     def _order(self, host: str, order, name: str) -> bool:
         from scripts.hive.orders import Orders
 
@@ -1230,7 +1233,8 @@ class HerdrRuntime:
         session = live_binding.bound_session(agent, sessions())
         return session is not None and session.status == "alive"
 
-    def bindings(self, agents: list[AgentRecord]) -> dict:
+    def bindings(self, agents: list[AgentRecord]) -> dict[str, Any]:
+        from scripts.hive import reports
         from scripts.terminate_agent import sessions
 
         items, facts = sessions(), {}
@@ -1238,8 +1242,9 @@ class HerdrRuntime:
         for agent in agents:
             if agent.runtime_backend != "local":
                 continue
-            if self.remote(agent):
-                found = self._hosted(agent).get("binding")
+            remote = self.remote(agent)
+            if remote or (live_binding.managed(agent) and reports.admitted(agent)):
+                found = self._hosted(agent).get("binding") if remote else self._admitted_binding(agent)
                 if found is not None:
                     facts[agent.name] = {field: value for field, value in found.items() if field != "rebound"}
                 continue

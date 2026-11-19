@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -408,10 +409,12 @@ def test_a_codex_pick_launches_sol_with_the_picked_effort(tmp_path, monkeypatch)
     assert launched == ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="xhigh"']
 
 
-def test_masters_keep_opus_high_and_planners_take_the_medium_default(tmp_path, monkeypatch):
+def test_masters_keep_opus_xhigh_and_planners_take_the_medium_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(model_pick, "decide", lambda *a, **kw: pytest.fail("an unclassified lane asked"))
     master = _launched(tmp_path, monkeypatch, "master", {"id": "master", "peer": ""})
-    assert master == ["--model", "opus", "--effort", "high"]
+    assert master == ["--model", "opus", "--effort", "xhigh"]
     assert _launched(tmp_path, monkeypatch, "plan", TASK) == ["--model", "opus", "--effort", "medium"]
 
 
