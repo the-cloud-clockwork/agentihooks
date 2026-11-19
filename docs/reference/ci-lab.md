@@ -2404,7 +2404,15 @@ key; the builders are pure and read no file, clock or network.
    from the base, so a head never widens either list. Every other gate and `required` post as
    `lab-shadow/<gate>`, the runs the shadow comparison reads, and promotion and backfill grades
    list no gate. The grade state keeps the list, so a restarted scheduler names each check run as
-   it did before.
+   it did before. A post that the App token, GitHub or the network refuses (`GitAuthRefused`,
+   `PostRefused` or `OSError`) ends nothing: the pass records
+   `held <check> <status> on <head> for a later pass: <error>`, holds every post of that repository
+   for one minute (`POST_HOLD_MS`) and goes on grading, and the first pass after the hold posts the
+   check run again. A grade whose units are all final closes only once every one of its check runs
+   is posted. The refusal text `GitHub App cannot supply scoped contents write credentials` is the
+   one message `GitHubAppAuth.get_token` raises for any refused token, so for the check runs token,
+   which asks for checks write only, read the App installation's `permissions.checks` in the org
+   installations listing.
 
 Expansion frames a head by its class (`scripts.ci_lab.scheduler.frame`): a pull request or hotfix grade
 keeps the lab gates the pull request rules require and names every other required job as a gate without
