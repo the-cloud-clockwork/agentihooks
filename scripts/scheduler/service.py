@@ -351,7 +351,7 @@ def main(argv: list[str] | None = None) -> int:
             if asyncio.run(run(Scheduler())):
                 return UNREACHABLE
         else:
-            return _supervised() or 0
+            return _supervised()
     except AlreadyRunning as exc:
         print(str(exc), file=sys.stderr)
         return 2

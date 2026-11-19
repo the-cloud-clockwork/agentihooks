@@ -366,6 +366,7 @@ def test_supervisor_entrypoint_stops_on_signals_and_restores_handlers(monkeypatc
         handlers[2](2, None)
         assert stop.is_set() is True
         calls.append("supervised")
+        return 0
 
     monkeypatch.setattr(service, "supervise", supervise)
     assert service.main(["supervise"]) == 0
@@ -926,6 +927,7 @@ def test_a_signalled_supervisor_names_the_signal_and_its_unit(monkeypatch, capsy
         os.kill(os.getpid(), signal.SIGTERM)
         os.kill(os.getpid(), signal.SIGINT)
         assert stop.is_set() is True
+        return 0
 
     monkeypatch.setattr(service, "supervise", supervise)
     assert service.main(["supervise"]) == 0
@@ -1106,7 +1108,7 @@ def test_a_supervisor_ends_without_a_new_runner_once_its_runner_stopped_on_silen
     stop = Mock(spec=Event)
     stop.is_set.return_value = False
     stop.wait.return_value = False
-    service.supervise(stop)
+    assert service.supervise(stop) == 3
     spawn.assert_called_once()
     assert capsys.readouterr().err.splitlines() == [
         "the scheduler runner 101 exited with code 3",
