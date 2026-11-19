@@ -872,8 +872,9 @@ def test_a_repeat_ask_that_read_the_offer_claimed_by_its_own_finished_admission_
 
 
 @pytest.mark.feature("hub-admission-hive-asks-again")
+@pytest.mark.parametrize("listed", [True, False])
 def test_a_late_kept_admission_launches_on_the_hives_next_ask_after_readiness_withdrew_its_offer(
-    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], listed: bool
 ) -> None:
     from unittest.mock import Mock
 
@@ -917,6 +918,8 @@ def test_a_late_kept_admission_launches_on_the_hives_next_ask_after_readiness_wi
         readiness.publish(bus, rig.admitter.source.snapshot(SLUG), 1)
         assert spoke.poll() == "asked"
         name = rig.store.claimant(SLUG, "t1")
+        if not listed:
+            rig.store.redis.hdel(rig.store.key(SLUG, "agents"), name)
         queue.withdraw(unsettled)
         readiness.publish(bus, rig.admitter.source.snapshot(SLUG), 2)
         queue.withdraw(unsettled)
