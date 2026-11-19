@@ -2,6 +2,26 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.1062 · 2026-11-19
+
+### 2026-11-19 · 3c858bc99950 · #12372 · @nestorcolt
+
+**Skip and name a refused hive admission count in swarm autoscale and the ledger hives listing**
+
+This change makes swarm autoscale and the ledger hives listing handle Redis permission failures gracefully when reading a hive's pending admission count. Both now use the same refusal-recording reader that swarm status already relies on, so a hive whose admission count is refused by Redis login is skipped and clearly named (via `admission_unreadable`) rather than causing the autoscale command to fail outright or the hives API to return a 503 error, improving resilience and visibility into partial permission issues.
+
+### 2026-11-19 · 11249072b98a · #12367 · @agenticore-app
+
+**Stamp the release chart version into leased release tag worker hives**
+
+This change fixes worker hives stuck on the floating `release` tag so they actually roll forward each release instead of staying pinned to stale pods: when a leased hive uses the `release` image tag with no explicit rollout release set, the chart now stamps its own `appVersion` into the `agentihooks.io/release` annotation, forcing the pod template to change once per release chart. ArgoCD then rolls each hive through the shared rollout Lease one at a time, restoring the per-release restart behavior lost when earlier changes removed the chart version and digest stamps from pod templates.
+
+### 2026-11-19 · 61661bd53d3b · #12378 · @nestorcolt
+
+**Derive the runtime pulls overlap test cases from the pull script image list**
+
+This change updates the runtime pulls overlap test so it derives its list of smoke runtime images directly from the pull script's ready clause via `runtime_images()`, rather than hard-coding image names like `redis:7` and `redis:7-alpine` in test cases, the fake docker build wait, and expected tags. This matches the approach already used by pinned smoke tests, so renaming or changing the runtime image list only requires editing the script, preventing the test from silently drifting out of sync and masking real pull failures.
+
 ## v2.17.1061 · 2026-11-19
 
 ### 2026-11-19 · abda1f73752c · #12371 · @nestorcolt
