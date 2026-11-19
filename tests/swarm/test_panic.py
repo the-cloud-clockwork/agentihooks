@@ -2407,3 +2407,7 @@ def test_only_a_pending_launch_or_a_full_reservation_waits(status: str, detail: 
 
 def test_the_panic_module_offers_its_engage_call() -> None:
     assert callable(panic.engage)
+
+
+def test_the_panic_module_offers_its_fix_check() -> None:
+    assert callable(panic.check_fix)
