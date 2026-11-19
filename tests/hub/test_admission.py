@@ -554,6 +554,57 @@ def test_a_repeat_from_the_same_hive_returns_its_admission_and_another_hive_gets
     assert len(rig.ledger.writes) == 1
 
 
+@pytest.mark.feature("hub-admission-unlisted-retry")
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("missing", None),
+        ("name", "another-agent"),
+        ("execution_id", "another-execution"),
+        ("generation", 99),
+        ("state", "done"),
+        ("launched_at", 1_500),
+        ("claim", None),
+    ],
+)
+def test_an_unlisted_kept_admission_requires_its_current_unlaunched_claimant(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, field: str, value: Any
+) -> None:
+    from dataclasses import replace
+
+    first = rig.admitter.admit(SLUG, ask())
+    assert first is not None
+    name = first["name"]
+    task = first["task"]
+    agent = rig.store.execution_occupants(SLUG)[task["seat"]]
+    rig.store.redis.hdel(rig.store.key(SLUG, "agents"), name)
+    if field == "claim":
+        rig.store.release(SLUG, "t1", name)
+    else:
+        occupants = {} if field == "missing" else {task["seat"]: replace(agent, **{field: value})}
+
+        def current(slug: str) -> dict[str, Any]:
+            assert slug == SLUG
+            return occupants
+
+        monkeypatch.setattr(rig.store, "execution_occupants", current)
+
+    assert rig.admitter.admit(SLUG, ask()) is None
+    assert len(rig.ledger.writes) == 1
+
+
+@pytest.mark.feature("hub-admission-unlisted-retry")
+def test_another_hive_never_receives_an_unlisted_starting_admission(rig: SimpleNamespace) -> None:
+    first = rig.admitter.admit(SLUG, ask())
+    assert first is not None
+    rig.store.redis.hdel(rig.store.key(SLUG, "agents"), first["name"])
+
+    assert rig.admitter.admit(SLUG, ask(hive="hive-b")) is None
+    assert rig.store.claimant(SLUG, "t1") == first["name"]
+    assert rig.admitter.admit(SLUG, ask()) == first
+    assert len(rig.ledger.writes) == 1
+
+
 @pytest.mark.parametrize(
     "fields",
     [{"lane": "ci"}, {"generation": 1}, {"task": "gone"}],
@@ -852,14 +903,18 @@ def test_a_repeat_ask_waiting_on_the_hives_turn_answers_its_own_admission_once_i
 
 
 @pytest.mark.feature("hub-admission-hive-asks-again")
+@pytest.mark.feature("hub-admission-unlisted-retry")
+@pytest.mark.parametrize("listed", [True, False])
 def test_a_repeat_ask_that_read_the_offer_claimed_by_its_own_finished_admission_answers_that_admission(
-    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, listed: bool
 ) -> None:
     other = admission.Admission(rig.store, rig.ledger, rig.admitter.source, clock=lambda: 7_000)
     kept: list[dict[str, Any] | None] = []
 
     def snapshot(slug: str) -> Any:
         kept.append(rig.admitter.admit(SLUG, ask()))
+        if not listed:
+            rig.store.redis.hdel(rig.store.key(SLUG, "agents"), rig.store.claimant(SLUG, "t1"))
         return rig.admitter.source.snapshot(slug)
 
     monkeypatch.setattr(other, "source", SimpleNamespace(snapshot=snapshot))
@@ -872,6 +927,7 @@ def test_a_repeat_ask_that_read_the_offer_claimed_by_its_own_finished_admission_
 
 
 @pytest.mark.feature("hub-admission-hive-asks-again")
+@pytest.mark.feature("hub-admission-unlisted-retry")
 @pytest.mark.parametrize("listed", [True, False])
 def test_a_late_kept_admission_launches_on_the_hives_next_ask_after_readiness_withdrew_its_offer(
     rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], listed: bool

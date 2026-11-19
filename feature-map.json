@@ -1726,6 +1726,22 @@
       ]
     },
     {
+      "id": "hub-admission-unlisted-retry",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-late-admission-reanswer",
+      "behaviour": "A same hive retry receives its kept admission when the live agents projection is absent but its matching current execution is still starting, has not launched and still holds the task claim. Another hive, an absent or replaced execution, an ended or launched execution and a released claim never receive that admission. A late unanswered spoke ask launches the admitted agent on its next poll even after readiness withdrew its offer, without another ledger claim write.",
+      "seam": "Admission.admit on the hub and the late admission retry through Spoke.poll",
+      "rules": [
+        "hub-admission-retry-needs-live-projection"
+      ],
+      "tests": [
+        "tests/hub/test_admission.py::test_a_late_kept_admission_launches_on_the_hives_next_ask_after_readiness_withdrew_its_offer",
+        "tests/hub/test_admission.py::test_a_repeat_ask_that_read_the_offer_claimed_by_its_own_finished_admission_answers_that_admission",
+        "tests/hub/test_admission.py::test_an_unlisted_kept_admission_requires_its_current_unlaunched_claimant",
+        "tests/hub/test_admission.py::test_another_hive_never_receives_an_unlisted_starting_admission"
+      ]
+    },
+    {
       "id": "hub-admission-hive-asks-again",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2542",
