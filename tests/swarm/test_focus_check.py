@@ -4,15 +4,18 @@ focus with those verdicts and the minutes it has gone without a claim."""
 import io
 import json
 import urllib.error
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+from scripts.doctor import loop, priming
 from scripts.swarm import cli
 from scripts.swarm.health import focus_check
-from scripts.swarm.ledger_client import LedgerClient
-from scripts.swarm.store import RedisStore
+from scripts.swarm.ledger_client import LedgerClient, LedgerOffline
+from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_ledger import ledger, ledger_freezes
+from scripts.swarm_ledger.api import routes
 from tests.swarm.test_freeze import doc, record, task
 from tests.swarm.test_swarm_freeze_cli import acting, swarm  # noqa: F401
 
@@ -67,6 +70,7 @@ def test_every_task_under_a_focus_gets_its_claim_gate_verdict() -> None:
         "t8": "it is in a pull request",
     }
     assert (found["target"], found["claimable"], found["done"]) == ("phases/p1", 1, ["t4"])
+    assert focus_check.lines("focus", "phases/p1", found)[-1] == "  t4  it is already done"
 
 
 @pytest.mark.feature("swarm-focus-verdict")
@@ -128,6 +132,43 @@ def test_freeze_prints_no_verdict(
     fake.focus_verdicts = lambda slug, target: pytest.fail("freeze asked for a verdict")
     assert cli.main(["demo", "freeze", "tasks/t2"]) == 0
     assert capsys.readouterr().err == ""
+
+
+@pytest.mark.feature("swarm-focus-verdict")
+@pytest.mark.parametrize("failure", ["offline", "server error"])
+def test_a_written_focus_says_so_when_the_ledger_gives_no_verdict(
+    swarm: tuple[RedisStore, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    failure: str,
+) -> None:
+    _, fake = swarm
+    acting(monkeypatch)
+
+    def unavailable(slug: str, target: str) -> None:
+        raise LedgerOffline(f"ledger {slug}: offline") if failure == "offline" else missing(500, "internal")
+
+    fake.focus_verdicts = unavailable
+    assert cli.main(["demo", "focus", "tasks/t2"]) == 0
+    out, err = capsys.readouterr()
+    assert json.loads(out) == {"focus": "tasks/t2", "by": "operator"}
+    assert err.startswith("focus tasks/t2: written, but the ledger gave no verdict: ")
+    assert [entry[:3] for entry in fake.freezes] == [("demo", "focus", "tasks/t2")]
+
+
+@pytest.mark.feature("swarm-focus-read")
+def test_the_fix_phase_comes_from_the_swarm_config_and_is_empty_without_a_swarm() -> None:
+    def services(config: Any) -> Any:
+        def read(slug: str) -> SwarmConfig:
+            if config is None:
+                raise SwarmError(f"no swarm {slug}")
+            return config
+
+        return SimpleNamespace(swarm=SimpleNamespace(store=lambda: SimpleNamespace(config=read)))
+
+    assert routes.fix_phase(services(SwarmConfig("demo", "/repo", template=priming.TEMPLATE)), "demo") == loop.FIX_PHASE
+    assert routes.fix_phase(services(SwarmConfig("demo", "/repo")), "demo") == ""
+    assert routes.fix_phase(services(None), "demo") == ""
 
 
 class Context:

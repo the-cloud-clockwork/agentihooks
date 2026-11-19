@@ -1,5 +1,6 @@
 import json
 import uuid
+from typing import Any
 
 from scripts.swarm_ledger import api_service
 from tests.swarm_ledger.test_ledger_authority import SLUG, send, server
@@ -769,7 +770,7 @@ def test_item_revision_uses_canonical_utf8_content(live, monkeypatch):
 
 
 @pytest.mark.feature("swarm-focus-read")
-def test_the_focus_read_serves_every_focus_and_one_target(live, monkeypatch):
+def test_the_focus_read_serves_every_focus_and_one_target(live: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     focus = {"id": "f1", "verb": "focus", "target": "tasks/t1", "by": "operator", "at": 0, "reason": ""}
     tasks = [{"id": "t1", "lane": "eng", "state": "open"}, {"id": "t2", "lane": "eng", "state": "done"}]
     stored(monkeypatch, {"tasks": tasks, "phases": [], "freezes": [focus], "_meta": {"rev": 1}})

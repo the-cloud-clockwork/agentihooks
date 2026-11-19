@@ -6,16 +6,19 @@ claimable task waits for a seat.
 """
 
 import sys
+import urllib.error
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import IO, Any
 
 from scripts.swarm import claim_hold, freeze
+from scripts.swarm.store import SwarmError
 from scripts.swarm_ledger.repository import hierarchy
 
 CLAIMABLE = "claimable"
 OUT_OF_SCOPE = "it is out of scope"
 NO_TARGET = "no such target"
+DONE = "it is already done"
 STATES = {"pr": "in a pull request"}
 BUSY = frozenset({"claimed", "pr"})
 MINUTE_MS = 60_000
@@ -131,12 +134,18 @@ def lines(verb: str, name: str, found: dict[str, Any] | None) -> list[str]:
     head = f"{verb} {name}: {found['claimable']} claimable, {counts}"
     if not found["claimable"]:
         head = f"{verb} {name}: NOTHING CLAIMABLE, no agent will start work from it; {counts}"
-    return [head, *(f"  {row['id']}  {row['lane']}  {row['verdict']}" for row in found["tasks"])]
+    rows = [f"  {row['id']}  {row['lane']}  {row['verdict']}" for row in found["tasks"]]
+    return [head, *rows, *(f"  {task_id}  {DONE}" for task_id in found["done"])]
 
 
 def answer(client: Any, slug: str, verb: str, name: str, out: IO[str]) -> None:
-    """Write the claim gate verdict on every task under a focused or unfrozen target."""
-    for line in lines(verb, name, client.focus_verdicts(slug, name)):
+    """Write the claim gate verdict on every task under a focused or unfrozen target, or why the ledger gave none."""
+    try:
+        found = client.focus_verdicts(slug, name)
+    except (SwarmError, urllib.error.HTTPError) as exc:
+        out.write(f"{verb} {name}: written, but the ledger gave no verdict: {exc}\n")
+        return
+    for line in lines(verb, name, found):
         out.write(f"{line}\n")
 
 

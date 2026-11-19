@@ -295,11 +295,11 @@ def test_master_sparse_ledger_keeps_obligations_without_invented_intent(ledger):
 
 
 @pytest.mark.feature("swarm-master-focus-read")
-def test_the_master_block_and_skill_require_the_focus_read_every_loop():
+def test_the_master_block_and_skill_require_the_focus_read_every_loop() -> None:
     from pathlib import Path
 
     read = "agentihooks api --slug <slug> get focus"
-    assert read in refocus.build_block({"title": "T"}, "master", 1500).splitlines()[2]
+    assert read in refocus.build_block({"title": "T"}, "master", 1500).partition("\nPlan: ")[0]
     assert read not in refocus.build_block(LEDGER, "i1", 1500)
     skill = Path(refocus.__file__).parents[2] / "profiles/package/roles/master/.claude/skills/swarm-master/SKILL.md"
     assert f"Every loop, read every focus: `{read}`" in skill.read_text().replace("\n  ", " ")
