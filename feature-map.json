@@ -5214,6 +5214,22 @@
       ]
     },
     {
+      "id": "test-planner-artifacts-past-the-first-page",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-pr-planner-artifact-page",
+      "behaviour": "The test planner lists every artifact page of each candidate dev push run, up to two pages of 100, and counts every page against its request budget, so a passed dev push run whose coverage shards are listed past the first 100 artifacts is still the record, because two passed dev push runs each held 106 artifacts with coverage shards on page two and pull request runs reused tests from a dev run four commits behind.",
+      "seam": "scripts.ci_test_plan.find_record and its per run artifact listing, run by the Plan the tests whose inputs did not change step of the Tests workflow test-count job",
+      "rules": [
+        "run-artifacts-read-one-page-python"
+      ],
+      "tests": [
+        "tests/test_ci_test_plan_pages.py::test_a_dev_run_whose_coverage_shards_spill_onto_the_second_artifact_page_is_the_record",
+        "tests/test_ci_test_plan_pages.py::test_a_dev_run_whose_first_artifact_page_is_short_lists_no_second_page",
+        "tests/test_ci_test_plan_pages.py::test_a_dev_run_is_listed_to_its_second_artifact_page_and_no_further",
+        "tests/test_ci_test_plan_pages.py::test_every_artifact_page_counts_against_the_request_budget"
+      ]
+    },
+    {
       "id": "ledger-artifacts-panel",
       "origin": "inventory",
       "behaviour": "The artifacts panel lists every artifact newest first, renders Markdown, JSON and SVG without running scripts, and offers delete and trash restore.",
