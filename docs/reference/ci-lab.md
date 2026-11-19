@@ -1669,7 +1669,9 @@ key; the builders are pure and read no file, clock or network.
    `failed`, `gate_failed`, `survived`, `crash` or `cannot_run`. Any other outcome is refused
    with `403`, records nothing and stores no verdict; the lease stays held until it expires.
 8. Check runs move `queued` on receipt, `in_progress` on the first unit a worker starts and
-   `completed` on the last, one per gate with units and `required` for the whole grade. A completed
+   `completed` on the last, one per gate with units and `required` for the whole grade. A pull
+   request or hotfix grade also posts one check run `completed` with conclusion `skipped` on its
+   first pass for every gate the base's `lab.authoritative` lists that it runs no unit of. A completed
    check run never moves again. The grade state keeps each check run's id, and the scheduler seeds
    its poster with that id and the last status it posted before the next move, so a restarted
    scheduler advances the same check run instead of opening a second one. A grade of a head pushed
@@ -1681,6 +1683,14 @@ keeps the lab gates the pull request rules require and names every other require
 units, with no test scope and no mutation; a merge group grade does the same for the queue suite; a
 promotion or backfill grade keeps every lab gate. A gate without units passes, so a grade turns red only
 through what the lab grades.
+
+A pull request or hotfix grade reads `lab.authoritative` from the `delivery.yaml` of its base, the
+grader revision, so the head cannot widen it. Each listed gate the frame gives no unit, such as `unit`,
+`unit-selected`, `shard-check` or `mutation`, which those classes never expand, lands in the grade
+state's `idle` list and gets its `skipped` check run on the first pass. The `lab-verdict` job then
+reads `skipped` for it instead of failing the gate when its 20 minute wait ends. `Gate — Required`
+accepts `skipped` only for a gate it does not require on that head, so a lab that skips a gate the
+head requires keeps the pull request red.
 
 A gate passes when every unit passed. The `required` conclusion is
 `scripts.ci_lab.scheduler.fold`, the rules of the `Gate — Required` step of the test workflow over

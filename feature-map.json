@@ -1,6 +1,20 @@
 {
   "features": [
     {
+      "id": "lab-skipped-authoritative-gates",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2516",
+      "behaviour": "A hotfix or pull request grade reads lab.authoritative from its base revision's delivery.yaml, never from the head, and on its first pass posts a lab check completed with conclusion skipped for every authoritative gate it grades with no unit, so the lab-verdict job reads skipped instead of waiting out its deadline. A head pushed to a grade ref leaves that skipped check to the relay, which posts it with no units. Gate Required takes the skipped lab result for a gate it does not require on that head, and stays red when the lab check is absent or skips a gate it requires.",
+      "seam": "scripts.ci_lab.scheduler.frame and MirrorExpander.expand over the base delivery.yaml, Scheduler.tick posting through the check poster or leaving the moves for the relay, relay.relay posting a check with no units, and the Gate Required step and scheduler.fold over the recorded cases in tests/fixtures/ci_lab/gate_required.json",
+      "tests": [
+        "tests/ci_lab/test_skipped_gates.py::test_a_pull_request_frame_names_each_authoritative_gate_it_grades_with_no_unit",
+        "tests/ci_lab/test_skipped_gates.py::test_a_pull_request_head_posts_each_authoritative_gate_it_runs_no_unit_of_skipped_on_its_first_pass",
+        "tests/ci_lab/test_skipped_gates.py::test_a_grade_ref_head_leaves_each_skipped_authoritative_gate_to_the_relay",
+        "tests/ci_lab/test_skipped_gates.py::test_a_pull_request_or_hotfix_head_takes_its_authoritative_gates_from_its_base",
+        "tests/ci_lab/test_relay.py::test_a_relayed_grade_posts_each_authoritative_gate_it_ran_no_unit_of_as_skipped"
+      ]
+    },
+    {
       "id": "swarm-refusal-size-warnings",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-phase-limit-scope",
