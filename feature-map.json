@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "swarm-refusal-size-warnings",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-phase-limit-scope",
+      "behaviour": "A refused swarm write prints each overview or phase size warning on its own warning line and keeps those diagnostics out of its refusal reason. The client preserves the missing focus target refusal and falls back to rejected operation identifiers when no refusal reason remains. Accepted replies remain accepted and unchanged.",
+      "seam": "LedgerClient.freeze and LedgerClient._call receiving a rejected or accepted ledger operation reply",
+      "tests": [
+        "tests/swarm/test_ledger_refusals.py::test_a_refused_focus_reports_size_warnings_separately",
+        "tests/swarm/test_ledger_refusals.py::test_size_warnings_do_not_refuse_an_accepted_swarm_write"
+      ]
+    },
+    {
       "id": "credential-guard-reads-heredoc-commands",
       "origin": "regression",
       "ordered_at": "2026-11-19",
