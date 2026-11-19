@@ -19,14 +19,17 @@ from tests.ci_lab.test_scheduler import (
     DELIVERY,
     HEAD_A,
     SLUG,
+    SUITE_MANIFEST,
     FakeKube,
     FixtureToken,
     Inbox,
+    Port,
     Poster,
     Run,
     _commit,
     _gate,
     _no_tests,
+    _suite,
     _unknown,
     fake_redis,
     github,
@@ -36,6 +39,7 @@ from tests.ci_lab.test_scheduler import (
 )
 from tests.ci_lab.test_scheduler import lab as lab
 from tests.ci_lab.test_scheduler import origin as origin
+from tests.ci_lab.test_scheduler import staticless as staticless
 
 LISTING = json.dumps({"lab": {**DELIVERY["lab"], "authoritative": ["lint"]}})
 
@@ -144,3 +148,12 @@ def test_a_merge_group_grade_takes_the_queue_list_and_a_pull_request_or_hotfix_g
     unlisted = {"authoritative": ["lint"], "queue": {"full_suite_entries": 5}}
     assert scheduler.authoritative_gates(unlisted, Priority.QUEUE) == frozenset()
     assert scheduler.authoritative_gates({"authoritative": ["lint"]}, Priority.QUEUE) == frozenset()
+
+
+@pytest.mark.feature("lab-authoritative-check-names")
+@pytest.mark.usefixtures("staticless")
+def test_a_merge_group_grade_takes_no_gate_from_the_pull_request_list(tmp_path: Path) -> None:
+    suite = _suite(tmp_path, {**DELIVERY["lab"], "authoritative": ["lint"]})
+    expander = Port(SUITE_MANIFEST).expander(tmp_path)
+    assert expander.expand(suite.request(Priority.PULL_REQUEST)).authoritative == frozenset({"lint"})
+    assert expander.expand(suite.request(Priority.QUEUE)).authoritative == frozenset()
