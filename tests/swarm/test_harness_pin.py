@@ -1,6 +1,7 @@
 """A lane pinned to one harness while the other harness has free quota seats and ready lane tasks wait raises a health
 finding and shows in the swarm status quota lines."""
 
+import json
 from dataclasses import replace
 
 import pytest
@@ -69,14 +70,14 @@ def apply(
 
 @pytest.mark.feature("swarm-harness-pin-guard")
 def test_a_claude_pin_with_free_codex_seats_and_waiting_tasks_raises_the_finding(store: RedisStore) -> None:
-    """The six day Claude pin of 12 November: Codex has free seats, two engineer tasks wait, the finding names it all."""
+    """A Claude pin with free Codex seats and two waiting engineer tasks raises the finding, naming all of it."""
     config = swarm(store, {"eng": {"agent": "claude"}})
     apply(store, config, [CLAUDE_FULL, CODEX_FREE], START)
     apply(store, config, [CLAUDE_FULL, CODEX_FREE], START + 6 * DAY)
     [found] = harness_pin.findings(store, SLUG, START + 6 * DAY)
     assert found.id == "harness-pin/eng"
     assert found.summary == (
-        "Lane eng is pinned to Claude for 6d00h while Codex has 6 free quota seats and 2 ready tasks wait"
+        "Lane eng is pinned to Claude, first seen 6d00h ago, while Codex has 6 free quota seats and 2 ready tasks wait"
     )
     assert found.evidence == (
         "The eng lane agent is claude, so capacity offers its tasks only Claude seats",
@@ -94,7 +95,7 @@ def test_a_codex_pin_with_free_claude_seats_raises_the_reverse_finding(store: Re
     apply(store, config, [CLAUDE_FREE, CODEX_FULL], START)
     [found] = harness_pin.findings(store, SLUG, START + 5 * 60_000)
     assert found.summary == (
-        "Lane eng is pinned to Codex for 5m while Claude has 3 free quota seats and 2 ready tasks wait"
+        "Lane eng is pinned to Codex, first seen 5m ago, while Claude has 3 free quota seats and 2 ready tasks wait"
     )
     assert found.evidence[0] == "The eng lane agent is codex, so capacity offers its tasks only Codex seats"
 
@@ -127,6 +128,23 @@ def test_no_finding_without_a_pin_free_other_seats_or_waiting_work(
 
 
 @pytest.mark.feature("swarm-harness-pin-guard")
+@pytest.mark.parametrize(("effective", "waiting"), [(2, []), (1, ["e2"])], ids=["busy-at-ceiling", "one-below-ceiling"])
+def test_a_lane_whose_busy_agents_fill_its_ceiling_lists_no_waiting_tasks(effective: int, waiting: list[str]) -> None:
+    """Busy agents at a ceiling above zero leave unplaced tasks waiting on the ceiling, never on the pin."""
+    config = SwarmConfig(SLUG, "/repo", max_eng=2, max_ci=0, max_plan=0, lanes={"eng": {"agent": "claude"}})
+    decision = {
+        "effective": {"eng": effective, "ci": 0, "plan": 0},
+        "configured": {"eng": 2, "ci": 0, "plan": 0},
+        "placeable": {"claude": 0, "codex": 4},
+        "tasks": {"e1": "claude"},
+    }
+    ready = {"eng": [{"id": "e1"}, {"id": "e2"}], "ci": [], "plan": []}
+    assert capacity.pins(config, decision, ready, {}, START) == {
+        "pins": {"eng": {"agent": "claude", "since": START, "other": "codex", "free": 4, "waiting": waiting}}
+    }
+
+
+@pytest.mark.feature("swarm-harness-pin-guard")
 def test_the_pin_age_holds_while_the_pin_stands_and_restarts_when_it_changes(store: RedisStore) -> None:
     """The capacity pass keeps the time it first saw a pin until the pin changes or clears; no pin stores no key."""
     config = swarm(store, {"eng": {"agent": "claude"}})
@@ -149,10 +167,41 @@ def test_the_status_quota_lines_name_each_pinned_lane(store: RedisStore) -> None
     decision = apply(store, config, [CLAUDE_FULL, CODEX_FREE], START + 6 * DAY)
     shown = quota_view.lines(decision, START + 6 * DAY, IDLE, MANUAL_SCALING)
     assert (
-        shown[2] == "lane eng pinned to claude for 6d00h: codex has 6 free quota seats and 2 ready tasks wait: e1, e2"
+        shown[2]
+        == "lane eng pinned to claude, first seen 6d00h ago: codex has 6 free quota seats and 2 ready tasks wait: e1, e2"
     )
     codex = replace(config, lanes={"eng": {"agent": "codex"}})
     placed = apply(store, codex, [CLAUDE_FULL, CODEX_FREE], START + 7 * DAY)
     assert quota_view.lines(placed, START + 7 * DAY, IDLE, MANUAL_SCALING)[2] == (
-        "lane eng pinned to codex for 0m: claude has 0 free quota seats and 0 ready tasks wait"
+        "lane eng pinned to codex, first seen 0m ago: claude has 0 free quota seats and 0 ready tasks wait"
     )
+
+
+@pytest.mark.feature("swarm-harness-pin-guard")
+def test_findings_and_quota_lines_list_pinned_lanes_in_lane_name_order(store: RedisStore) -> None:
+    """Pins stored eng first come back ci first in the findings and in the quota lines."""
+    decision = apply(store, swarm(store, {}), [CLAUDE_FULL, CODEX_FREE], START)
+    decision["pins"] = {
+        "eng": {"agent": "claude", "since": START, "other": "codex", "free": 6, "waiting": ["e1"]},
+        "ci": {"agent": "codex", "since": START, "other": "claude", "free": 1, "waiting": ["c1"]},
+    }
+    store.redis.set(store.key(SLUG, "quota-capacity"), json.dumps(decision))
+    assert [found.subject for found in harness_pin.findings(store, SLUG, START)] == ["ci", "eng"]
+    assert quota_view.lines(decision, START, IDLE, MANUAL_SCALING)[2:4] == [
+        "lane ci pinned to codex, first seen 0m ago: claude has 1 free quota seats and 1 ready tasks wait: c1",
+        "lane eng pinned to claude, first seen 0m ago: codex has 6 free quota seats and 1 ready tasks wait: e1",
+    ]
+
+
+@pytest.mark.feature("swarm-harness-pin-guard")
+def test_swarm_status_lists_the_harness_pin_finding(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The swarm status findings carry the harness pin finding, aged at the status clock."""
+    from scripts.swarm import status
+
+    apply(store, swarm(store, {"eng": {"agent": "claude"}}), [CLAUDE_FULL, CODEX_FREE], START)
+    monkeypatch.setattr(status, "now_ms", lambda: START + DAY)
+    rows = status.findings(store, SLUG, store.config(SLUG), [], [])
+    summary = (
+        "Lane eng is pinned to Claude, first seen 1d00h ago, while Codex has 6 free quota seats and 2 ready tasks wait"
+    )
+    assert [(row["subject"], row["summary"]) for row in rows if row["kind"] == "harness pin"] == [("eng", summary)]

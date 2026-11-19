@@ -4,9 +4,8 @@ rules:
     severity: ERROR
     message: >-
       Swarm status gathers the health findings without harness_pin.findings, so a lane pinned to one harness while
-      the other harness has free quota seats and ready lane tasks wait is reported by nothing (an engineer lane pin to
-      Claude kept Codex at zero agents for six days from 12 November). Add harness_pin.findings(store, slug, now) to
-      the same findings sum.
+      the other harness has free quota seats and ready lane tasks wait is reported by nothing. Add
+      harness_pin.findings(store, slug, now) to the same findings sum.
     paths:
       include:
         - /scripts/swarm/status.py

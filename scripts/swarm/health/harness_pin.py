@@ -20,27 +20,11 @@ def age(pin: Mapping[str, Any], now_ms: int) -> str:
     return quota_freshness.age(pin["since"] / 1000, now_ms / 1000)
 
 
-def line(lane: str, pin: Mapping[str, Any], now_ms: int) -> str:
-    """The swarm status quota line for one pinned lane: the pin and its age, the other harness's free seats and the
-    ready lane tasks waiting."""
-    waiting = pin["waiting"]
-    names = f": {', '.join(waiting)}" if waiting else ""
-    return (
-        f"lane {lane} pinned to {pin['agent']} for {age(pin, now_ms)}: {pin['other']} has {pin['free']} free quota "
-        f"seats and {len(waiting)} ready tasks wait{names}"
-    )
-
-
-def lines(decision: Mapping[str, Any], now_ms: int) -> list[str]:
-    """One quota line per lane the stored decision records as pinned."""
-    return [line(lane, pin, now_ms) for lane, pin in sorted(decision.get("pins", {}).items())]
-
-
 def _finding(lane: str, pin: Mapping[str, Any], now_ms: int) -> Finding:
     agent, other, waiting = capacity.LABELS[pin["agent"]], capacity.LABELS[pin["other"]], pin["waiting"]
     summary = (
-        f"Lane {lane} is pinned to {agent} for {age(pin, now_ms)} while {other} has {pin['free']} free quota seats "
-        f"and {len(waiting)} ready tasks wait"
+        f"Lane {lane} is pinned to {agent}, first seen {age(pin, now_ms)} ago, while {other} has {pin['free']} free "
+        f"quota seats and {len(waiting)} ready tasks wait"
     )
     evidence = (
         f"The {lane} lane agent is {pin['agent']}, so capacity offers its tasks only {agent} seats",
