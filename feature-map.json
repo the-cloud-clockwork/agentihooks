@@ -334,6 +334,16 @@
       ]
     },
     {
+      "id": "compose-ledger-ensure-starts-front-and-api",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2695",
+      "behaviour": "Legacy local Compose ledger ensure pulls and starts the ledger, write API and front together, so the published front port can answer. Stopping the legacy ledger stops all three services. Adopted stacks keep their swarm service commands.",
+      "seam": "server_compose.start and stop, the docker compose command list",
+      "tests": [
+        "tests/swarm_ledger/test_server_compose.py::test_compose_runs_with_the_folder_the_code_and_this_user"
+      ]
+    },
+    {
       "id": "compose-api-health-and-front-proxy",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/promo-43992907244-10",
@@ -447,6 +457,27 @@
         "tests/swarm/test_resume.py::test_a_restored_execution_keeps_its_identity_and_start_and_records_the_resume_as_launch",
         "tests/swarm/test_outage_resume.py::test_a_reopened_owner_keeps_its_execution_and_start_and_records_the_resume_as_launch",
         "tests/swarm/test_outage_resume.py::test_an_owner_restarted_from_its_handoff_keeps_its_execution_and_records_the_restart_as_launch"
+      ]
+    },
+    {
+      "id": "swarm-seat-admission-race",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2680",
+      "behaviour": "Two admissions racing for one seat on a records layout swarm, such as two hub replicas claiming two tasks at once, never both commit: the second commit is refused on the seat index, retried, and refused as a replacement that does not match the current execution, so the seat holds one current execution and no twin is left whose every write conflicts.",
+      "seam": "RedisStore.start_execution through ExecutionRegistry admission and the fencing records seat index",
+      "tests": [
+        "tests/swarm/test_execution_concurrency.py::test_an_admission_that_loses_its_seat_to_another_admission_is_refused",
+        "tests/swarm/test_fencing_records.py::test_the_seat_index_follows_the_newest_execution_of_each_seat"
+      ]
+    },
+    {
+      "id": "swarm-tick-step-conflict-detail",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2680",
+      "behaviour": "A tick step that fails on an execution identity conflict records the conflict message as the detail of its step record, so the controller log names the refused identity check instead of only the error class.",
+      "seam": "scripts.swarm.timing.step around a write the execution registry refuses",
+      "tests": [
+        "tests/swarm/test_execution_identity.py::test_a_step_refused_by_an_identity_conflict_records_the_conflict_message"
       ]
     },
     {
@@ -746,6 +777,19 @@
         "tests/test_ci_select.py::test_a_markdown_only_change_selects_the_tests_that_glob_markdown",
         "tests/test_ci_select.py::test_a_markdown_change_skips_tests_that_glob_other_files",
         "tests/test_ci_select.py::test_a_source_change_does_not_select_the_tests_that_glob_markdown"
+      ]
+    },
+    {
+      "id": "ci-select-tick-catalogue-page",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2607",
+      "behaviour": "A pull request that changes a tick step module, whose selection otherwise names tests, also selects the tick step catalogue page test, which loads every step module at runtime so no import or name reaches it, and a stale catalogue page fails the pull request instead of the merge queue. A step module no test reaches still runs the full suite, a tree without the page test never selects it, and a tick change outside the step package selects the page test only through the modules it imports.",
+      "seam": "scripts.ci_select.selected_tests through scripts.ci_select.decide",
+      "tests": [
+        "tests/test_ci_select.py::test_a_changed_tick_step_module_selects_the_catalogue_page_test",
+        "tests/test_ci_select.py::test_a_tick_step_module_no_test_reaches_still_runs_the_full_suite",
+        "tests/test_ci_select.py::test_a_tick_change_outside_the_step_package_adds_no_catalogue_page_test",
+        "tests/test_ci_select.py::test_a_tree_without_the_catalogue_page_test_never_selects_it"
       ]
     },
     {

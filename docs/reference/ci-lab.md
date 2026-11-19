@@ -44,6 +44,141 @@ Both services run from the installed wheel, which ships `hooks`, `scripts` and `
 `docker/ci-lab/smoke.sh` also imports the worker's executors, test runner and pricing inside the
 built CI lab image.
 
+## Run the scheduler service
+
+`agentihooks ci-lab-scheduler` starts both HTTP listeners and the grading loop. Before starting
+it, provision the lab heads bus and its scheduler and relay consumers, Redis, the object store,
+and a readable shared git mirror. The scheduler also needs a writable private mirror store and
+access to the repository's `dev` branch to read its runner trust list and retry policy. Startup
+binds the listeners only after these clients and the scheduler have been built.
+
+The swarm image includes the locked `git` package. A different image or a host running the
+installed wheel must provide `git` on `PATH`: the mirror expander invokes it during startup.
+The offline `--self-test` checks the contract without starting either listener or checking these
+dependencies. Run it separately from service options such as `--interval` and `--passes`.
+
+### Runtime configuration
+
+Mount a YAML file and set `CI_LAB_RUNTIME_CONFIG` to its path. This complete example allocates
+600 core minutes per UTC day:
+
+```yaml
+classes:
+  - hotfix
+  - pull_request
+  - queue
+  - promotion
+  - backfill
+budget:
+  coreMinutesPerDay: 600
+  shed:
+    backfill: 0.5
+    promotion: 0.75
+    queue: 0.9
+backfill:
+  auditShare: 0.1
+  moduleSweeps: false
+```
+
+All three top level fields, `classes`, `budget` and `backfill`, are required; unknown fields
+are refused. Classes must be unique names from the list above, and the daily budget must be
+positive. Shed fractions and `auditShare` range from 0 to 1; `moduleSweeps` is a boolean. Only
+`backfill`, `promotion` and `queue` may have shed thresholds. Each threshold is the fraction of
+the daily budget spent; reaching it sheds that class and every less urgent class. In this
+example, backfill is shed at half the daily budget remaining, promotion at a quarter and queue
+at a tenth; each stays shed as the remaining budget falls further.
+Hotfix and pull request work remain admitted. The budget resets on the next UTC day; work
+already queued still runs. See [Scheduler loop](#scheduler-loop) for admission rules.
+
+Validate the mounted file without connecting to the service dependencies:
+
+```bash
+export CI_LAB_RUNTIME_CONFIG=/etc/ci-lab/runtime.yaml
+python -m scripts.ci_lab runtime "$CI_LAB_RUNTIME_CONFIG"
+```
+
+Valid input exits 0 without output. A schema error exits 1 and names the failing field on
+standard error, for example `runtime budget: 'shed' is a required property`. An unreadable file
+or invalid YAML also prevents startup. The service reads and validates the file once, before
+creating its Redis, object store or bus clients; restart the service to apply a changed file.
+
+### Environment and launch
+
+Set the nonsecret addresses and mounted paths for your deployment, for example:
+
+```bash
+export CI_LAB_RUNTIME_CONFIG=/etc/ci-lab/runtime.yaml
+export CI_LAB_REDIS_URL=redis://redis:6379/0
+export CI_LAB_URL=http://lab:8800
+export CI_LAB_MINIO_ENDPOINT=http://minio:9000
+export CI_LAB_MINIO_BUCKET=ci-lab
+export AGENTIHOOKS_BUS=nats
+export AGENTIHOOKS_BUS_URL=nats://nats:4222
+export CI_LAB_GIT_MIRROR=/data/git-mirror.git
+export CI_LAB_MIRROR_STORE=/data/scheduler-mirrors
+export CI_LAB_REPOSITORY=https://github.com/the-cloud-clockwork/agentihooks.git
+
+agentihooks ci-lab-scheduler
+```
+
+`CI_LAB_URL` is the address consumers can reach; the relay uses it in grade links. It is
+required at startup and does not change the listener's bind address.
+
+The deployment must also inject `CI_LAB_MINIO_ACCESS_KEY`, `CI_LAB_MINIO_SECRET_KEY`, the
+scheduler's `GITHUB_APP_*` identity and any bus or repository authentication. Keep their values
+in the deployment's secret mechanism. Set `CI_LAB_CONTROL_TOKEN` there when the swarm needs the
+[control routes](#control-routes); without it those routes refuse requests. The
+[Environment](#environment) table lists the other service settings.
+
+The default loop runs indefinitely with a two second sleep after each pass. To run three real
+grading passes with a half second sleep, then exit:
+
+```bash
+agentihooks ci-lab-scheduler --interval 0.5 --passes 3
+```
+
+`--passes 0` also runs indefinitely. A finite run starts both listeners, consumes heads, grades
+work and ticks the relay just like the service; use `--self-test` for an offline check. Each
+pass prints its scheduler and relay actions to standard output. The CLI has no host or port
+options: it binds all interfaces on 8800 and 9108. The chart or container network controls
+which clients can reach them.
+
+### Verify the running service
+
+Run these requests from a client that can reach the scheduler. Replace `lab` with its service
+address and the sample sha with the full commit you want to inspect:
+
+```bash
+curl -fsS http://lab:8800/capacity \
+  | jq '{slots, budget_fraction, shed, pull_request: .classes.pull_request}'
+curl -fsS http://lab:8800/grades/0123456789abcdef0123456789abcdef01234567 \
+  | jq '{head, grades}'
+curl -fsS http://lab:9108/metrics \
+  | grep --line-buffered -E '^ci_lab_(slots_total|slots_busy|queue_wait_seconds|budget_fraction|class_shed)'
+```
+
+`/capacity` returns the [capacity document](#capacity-document). Each capacity request and
+metrics scrape builds a fresh load from queue, lease, live grade, recent worker offer and
+daily budget state; separate requests can observe different instants. Without recent worker
+offers and leased jobs, a running scheduler can report zero total slots. Offers expire after
+60 seconds, and unit estimates remain fixed at 60 seconds per slot.
+
+The grades reply is `{"head": "<sha>", "grades": [...]}`. An ungraded commit returns 200 with
+`grades: []`; an unfinished grade has a null conclusion. A short or uppercase sha returns 400
+with `{"error": "a grade lookup names one full commit sha"}`. See
+[Grades of a commit](#grades-of-a-commit) for open and closed grade lookup and fields.
+
+### Scheduler startup troubleshooting
+
+| Symptom | Check and action |
+|---|---|
+| Startup fails before either listener appears | Check that `CI_LAB_RUNTIME_CONFIG` names a readable YAML file and run the runtime validator; missing required environment names also prevent startup |
+| Startup fails while reading the repository | Check `git` on `PATH`, the shared mirror mount, private mirror store permissions, repository authentication and access to `dev` |
+| Startup cannot reach a dependency | Check the Redis and object store settings and bus authentication; provision the lab heads stream and consumers before starting the scheduler |
+| The scheduler port is reachable but metrics are not | Route port 9108 separately and request `/metrics`; port 8800 serves the scheduler API |
+| Capacity shows zero slots or an estimate differs from observed duration | Check worker lease polls and their free slot offers; the load discards stale offers and uses fixed unit estimates |
+| Grades returns an empty list | Confirm the full lowercase commit sha and that the lab received and graded that head |
+
 ## Environment
 
 | Name | Scheduler | Worker | Meaning |
@@ -1271,6 +1406,9 @@ list), the pytest invocation and the toolchain. The expander reads every head fi
 | Merge group | The batches that hold a test the group's entries invalidate, or every batch when `interaction.decide` returns `FULL` |
 | Promotion, backfill | Every batch; the verdict store is not consulted for the choice |
 
+The [mutation units](#mutation-units) of a promotion or backfill head are built from the same
+manifest and test fingerprints.
+
 The manifest comes from `scheduler.StoredManifests`: the packed manifest at
 `lab/manifests/<owner>--<name>/<commit>.json` (`objects.manifest_folder`) of the first commit on
 the first parent chain of the head's base that has one. Runners cannot reach the lab store, so the
@@ -1327,7 +1465,10 @@ Since a push grade folds only the static gates,
 ### Mutation units
 
 A promotion or backfill head gets two more jobs, built by `scripts.ci_lab.expand_mutation` in a
-temporary worktree of the head cut from the mirror store and removed after expansion:
+temporary worktree of the head. `MirrorExpander._mutation` cuts it with `tempfile.mkdtemp` under
+`CI_LAB_MIRROR_STORE` and `git worktree add` from the repository's store, and removes it with
+`shutil.rmtree` and `git worktree prune` when expansion ends, also when it raises; the rest of
+expansion still reads the mirror with `git ls-tree` and `git show`:
 
 | Job | Units |
 |---|---|
@@ -1349,12 +1490,157 @@ fixture it reads rekeys the mutant units as well.
 
 | Head | Mutation jobs |
 |---|---|
-| Pull request, hotfix, merge group | None: their frames and `Gate — Required` rules hold no mutation job, and the test workflow runs none on `merge_group` |
+| Pull request, hotfix, merge group | None: these heads get no mutation units. The merge group `Gate — Required` rules require no mutation job and the test workflow runs none on `merge_group`; a pull request's mutation jobs run on Actions, as [Pull request mutation gate](mutation-gate.md) describes |
 | Promotion, backfill | Both, unless the head changes no Python line under `hooks/` or `scripts/` |
 
 A mutant unit passes only when every mutant is killed, so a surviving mutant fails the `mutation`
 gate and the promotion grade folds red. A changed function no recorded test ran still gets its unit;
 the runner finds no test reaching it, grades its mutants `no tests` and fails the unit.
+
+#### Measured lines
+
+`scripts.ci_mutation.scope.changes_since(root, base, head)` diffs the head against its merge base
+with the base (`git diff <base>...<head>`) under `hooks/` and `scripts/`, and keeps:
+
+- `.py` files the head still holds;
+- files whose syntax tree still differs once docstrings, and the annotations of undecorated
+  functions, are stripped, so a change to only those mutates nothing;
+- lines the whole diff does not colour as moved unchanged (`--color-moved=blocks`, indentation
+  changes allowed), so code moved between files mutates nothing.
+
+A kept line selects the function or method mutmut trampolines whose span holds it, a nested
+function selecting the function that holds it. A line of module level code selects no function.
+A head with no kept line gets neither mutation job, and its grade folds on its other gates.
+
+#### What a head needs
+
+| Input | Where | Without it |
+|---|---|---|
+| `[tool.mutmut]` `source_paths` | The head's `pyproject.toml` | The worker cannot trampoline its copy of the head, so the executor raises a `KeyError` before the runner starts |
+| A quoted `mutmut==<version>` requirement | The head's `pyproject.toml`, such as the `dev` extra of `[project.optional-dependencies]` | Expansion raises `<checkout>/pyproject.toml pins no mutmut version` |
+| A dependency manifest stored at or before the base | The lab store, fetched as [Test units](#test-units) describes | Expansion raises `no dependency manifest at or before <base>` before any mutation unit is built |
+| `CI_LAB_MIRROR_STORE` | The scheduler's [environment](#environment) | The scheduler does not start |
+| `CI_LAB_MUTATION_CACHE`, `CI_LAB_KILLERS`, `CI_LAB_MUTATION_BUDGET`, `CI_LAB_MUTATION_CAP` | The worker's [environment](#environment) | The worker does not start |
+
+This repository's `pyproject.toml` holds both:
+
+```toml
+[project.optional-dependencies]
+dev = [
+    # the other development requirements
+    "mutmut==3.6.0",
+]
+
+[tool.mutmut]
+source_paths = ["hooks/", "scripts/"]
+```
+
+A `ValueError`, `KeyError`, failed git command, YAML error or schema validation error raised in
+expansion makes the scheduler print
+`cannot expand <head>: <error>` and drop the head; nothing of it is graded.
+
+#### Unit keys
+
+A mutant unit's key is the sha256 of the JSON, object keys sorted, of a list holding:
+
+1. the function's mutmut name, such as `scripts.alpha.x_second`, or `scripts.sample.xǁBoxǁgrow`
+   for the method `grow` of the class `Box`;
+2. the function's source text, without the blank lines and comments above it;
+3. `expand_mutation.module_digest`: the syntax tree of the module's code outside its functions and
+   methods, so whitespace and comments do not count;
+4. `expand_mutation.runner_digest`: the mutmut pin and the sha256 of every tracked file under
+   `scripts/ci_mutation/`;
+5. the function's entry of `expand_mutation.covering`: test id to fingerprint;
+6. the unlisted test hashes described above.
+
+Its members are `<name>__mutmut_1` to `<name>__mutmut_<n>`, one per mutation mutmut creates in the
+function. A stats unit's key is `StoredStats.identity` of its test file at the head, over the
+fields the `stats` rows of [Inputs per kind](#inputs-per-kind) list, with the worker's options
+`-q -p no:cacheprovider`. The expander builds both keys itself, without the `digests` builders, so
+they are bare 64 hex digests rather than the `<kind>-v<schema>-<digest>` form the
+[digest specification](#digest-specification) describes. `scripts.ci_lab.objects.unit_path`
+refuses a key of that form with `ValueError: not a <kind> unit key: <key>`, so the
+[verdict store](#verdict-store) cannot hold a stats or mutant verdict yet.
+
+#### How a worker runs them
+
+Both kinds run through `scripts.ci_lab.executors.mutation` in the private trampolined copy,
+as [Worker executors](#worker-executors) describes:
+
+| Kind | Runner requests | Passes when |
+|---|---|---|
+| `stats` | One stats request over the unit's test file, with the copy as root and `CI_LAB_MUTATION_CACHE` | The runner exits 0 |
+| `mutant` | A stats request over every tracked `test_*.py` under `tests/` of the copy with the same cache, then a mutant request with the unit's mutant names, the tests those stats records show reaching its function with their seconds, `CI_LAB_KILLERS`, `CI_LAB_MUTATION_BUDGET` and `CI_LAB_MUTATION_CAP` | The runner exits 0 and every row reads `killed` |
+
+The stats request of a mutant unit reuses every record in `CI_LAB_MUTATION_CACHE` whose inputs
+still match, such as those the grade's stats units stored, and measures only the other test files.
+Each mutant row has a status:
+
+| Status | Meaning |
+|---|---|
+| `killed` | A test failed against the mutant |
+| `survived` | Every test the unit runs passed against the mutant |
+| `suspicious` | The mutant's child process exited with a code other than 0 or 1 |
+| `no tests` | No stats record shows a test reaching the function; every mutant of the unit reads it, at 0 seconds |
+
+A mutant unit's uploaded report holds `collection_seconds`, the `rows` as `name`, `status` and
+`seconds`, the unit's `seconds` and its cache lookups; a stats unit's report holds its `stats`
+records in place of the rows. A runner that exits non zero, such as on a
+collection error in the chosen tests, uploads no rows and fails the unit.
+
+#### Example
+
+A promotion head changes line 6 of `scripts/alpha.py`:
+
+```python
+def first():
+    return 1
+
+
+def second():
+    return 2
+```
+
+The base's manifest records `tests/test_beta.py::test_second` running `scripts/alpha.py::second`
+and the tests of `tests/test_alpha.py` running `first`. Beside its `unit` job the grade gets:
+
+| Job | Kind | Members |
+|---|---|---|
+| `mutation-stats` | `stats` | `tests/test_beta.py` |
+| `mutation` | `mutant` | `scripts.alpha.x_second__mutmut_1` to `scripts.alpha.x_second__mutmut_<n>` |
+
+`first` gets no unit because none of its lines changed, and `tests/test_alpha.py` no stats unit
+because none of its tests runs `second`. Had the head also deleted `tests/test_beta.py`, the grade
+would get no `mutation-stats` job and the same mutant members under a new key, since the deleted
+file changes the covering test's fingerprint; the unit's stats request then finds any test of the
+head that reaches `second`.
+
+#### Read a grade's mutation gates
+
+```bash
+curl -s "http://lab:8800/grades/$SHA" | jq '.grades[]
+  | select(.class == "promotion" or .class == "backfill")
+  | {run, conclusion, mutation: .checks.mutation, stats: .checks["mutation-stats"]}'
+```
+
+A check run is posted only for a gate with units, so a promotion or backfill grade without
+`mutation` and `mutation-stats` checks expanded no mutation unit. A `mutation` check that completes
+`failure` turns `required` red; the report its worker uploaded names each mutant and its status.
+
+#### Troubleshooting
+
+| Symptom | Cause | Check |
+|---|---|---|
+| A promotion grade has no `mutation` check | The head changes no kept line: only tests, docs, files outside `hooks/` and `scripts/`, docstrings, annotations or moved code | `git diff <base>...<head> -- hooks/ scripts/` |
+| A pull request or hotfix grade has no `mutation` check | Those classes never expand mutation units | The Actions mutation jobs grade a pull request into `dev`, as [Pull request mutation gate](mutation-gate.md) describes |
+| A merge group grade has no `mutation` check | Merge group grades hold no mutation gate, and the test workflow runs no mutation on `merge_group` | Nothing to fix |
+| `cannot expand <head>: <checkout>/pyproject.toml pins no mutmut version` | The head's `pyproject.toml` holds no quoted `mutmut==<version>` | Pin mutmut in the head's `pyproject.toml` |
+| `cannot expand <head>: no dependency manifest at or before <base>` | No manifest is stored or fetchable on the base's first parent chain | Read [Test units](#test-units) for how the lab fetches manifests |
+| `cannot expand <head>:` naming a failed `git worktree add` | The repository's store lacks the head commit, or `CI_LAB_MIRROR_STORE` is not writable | `git -C <store> cat-file -t <head>` and the folder's permissions |
+| Every row of a failed mutant unit reads `no tests` | No test of the head reaches the changed function | Add a test that calls the function |
+| Rows read `survived` | A test runs the function but none fails against the mutant | Assert on the behaviour the mutant changes |
+| Rows read `suspicious` | A mutant's child crashed or was killed | Read the unit's log |
+| A folder with a random name stays under `CI_LAB_MIRROR_STORE` | The scheduler stopped during an expansion, before its cleanup ran | Remove the folder; the `git worktree prune` that ends the next promotion or backfill expansion of that repository drops its registration |
 
 ### Grades of a commit
 
