@@ -2196,13 +2196,20 @@ def test_lab_publication_records_its_head_and_wait_before_polling(
     from scripts.swarm import cli, idle, pr_wait, publish, waits
 
     redis = fakeredis.FakeRedis(decode_responses=True)
-    store: Any = SimpleNamespace(redis=redis)
+    store: Any = SimpleNamespace(redis=redis, agents=lambda slug: [publication.agent])
     monkeypatch.setattr(pr_wait, "time", SimpleNamespace(time=lambda: 0.125))
     monkeypatch.setattr(cli, "_worker", lambda store, args: publication.agent)
     monkeypatch.setattr(cli, "_local_repo", lambda store, slug: str(publication.repo))
     monkeypatch.setattr(cli, "LedgerClient", lambda: publication.ledger)
 
     def recorded() -> None:
+        rows = {"t1": {"id": "t1", "pr_url": "https://github.com/o/r/pull/1"}}
+        assert (
+            pr_wait.enforce_pass(
+                store, "swarm", rows, lambda url: pytest.fail("read old origin PR during an active lab wait"), 126
+            )
+            == []
+        )
         head = git(lab, "rev-parse", "refs/grade/t1")
         marked = pr_wait.read(redis, "swarm", publication.agent.name) or {}
         assert marked["pushed_head"] == head
@@ -2365,7 +2372,7 @@ def test_publish_command_hands_the_lab_route_to_publish(
     from scripts.swarm import cli, publish
 
     called = []
-    store: Any = None
+    store: Any = SimpleNamespace(redis=object())
     monkeypatch.setattr(cli, "_worker", lambda store, args: SimpleNamespace(task="t1", name="engineer@test"))
     monkeypatch.setattr(cli, "_local_repo", lambda store, slug: "/repo")
     monkeypatch.setattr(cli, "LedgerClient", lambda: SimpleNamespace(task=lambda slug, task: {}))
