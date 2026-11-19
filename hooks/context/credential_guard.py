@@ -1047,7 +1047,7 @@ def rewrite_stage(stage_text, verb):
     return VERB_PREFIX.sub(lambda m: m.group(1) + " " + excludes, stage_text, count=1)
 
 
-def stage_verdict(stage_text, ctx):
+def stage_verdict(stage_text: str, ctx: Context) -> Verdict:
     for m in SUBSTITUTION.finditer(stage_text):
         inner = next(g for g in m.groups() if g is not None).strip()
         if inner.startswith("<"):
@@ -1094,7 +1094,7 @@ def stage_verdict(stage_text, ctx):
     if verb in INTERPRETERS:
         tok, kind = first_sensitive(operands_of(toks, verb))
         if not kind:
-            tok, kind = first_sensitive(SENSITIVE_FRAGMENT.findall(stage_text))
+            tok, kind = first_sensitive(SENSITIVE_FRAGMENT.findall(" ".join(toks[verb_index(toks) :])))
         return read_block(tok, kind) if kind else ALLOW
 
     if verb not in READER_VERBS:
