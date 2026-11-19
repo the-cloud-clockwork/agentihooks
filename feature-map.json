@@ -3265,7 +3265,8 @@
         "tests/swarm/test_pr_wait.py::test_an_agent_that_never_runs_swarm_wait_is_woken_on_merge",
         "tests/swarm/test_pr_wait.py::test_the_hook_marks_a_grade_push_with_its_head",
         "tests/swarm/test_pr_wait.py::test_the_tick_sets_a_lab_wait_on_the_grade_of_a_grade_push",
-        "tests/swarm/test_pr_wait.py::test_an_agent_that_pushes_to_the_lab_is_woken_when_its_grade_closes"
+        "tests/swarm/test_pr_wait.py::test_an_agent_that_pushes_to_the_lab_is_woken_when_its_grade_closes",
+        "tests/swarm/test_publish.py::test_lab_publication_records_its_head_and_wait_before_polling"
       ]
     },
     {

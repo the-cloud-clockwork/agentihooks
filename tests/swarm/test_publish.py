@@ -2183,6 +2183,59 @@ def test_publish_via_lab_direct_pushes_origin_after_the_lab_without_waiting(
     assert _origin(publication).split()[0] == head
 
 
+@pytest.mark.feature("swarm-push-wait")
+@pytest.mark.parametrize("direct", [False, True])
+def test_lab_publication_records_its_head_and_wait_before_polling(
+    publication: SimpleNamespace, lab: Path, monkeypatch: pytest.MonkeyPatch, direct: bool
+) -> None:
+    import fakeredis
+
+    from hooks.context import swarm_heartbeat
+    from scripts.swarm import cli, idle, pr_wait, publish, waits
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    store = SimpleNamespace(redis=redis)
+    monkeypatch.setattr(cli, "_worker", lambda store, args: publication.agent)
+    monkeypatch.setattr(cli, "_local_repo", lambda store, slug: str(publication.repo))
+    monkeypatch.setattr(cli, "LedgerClient", lambda: publication.ledger)
+
+    def recorded() -> None:
+        head = git(lab, "rev-parse", "refs/grade/t1")
+        marked = pr_wait.read(redis, "swarm", publication.agent.name) or {}
+        assert marked["pushed_head"] == head
+        assert marked["pushed_branch"] == "refs/grade/t1"
+        assert marked["pushed_repo"] == ""
+        held = idle.wait(redis, "swarm", publication.agent.name) or {}
+        assert held["on"] == {"kind": "lab", "target": f"http://lab.invalid/grades/{head}"}
+        assert held["reason"] == pr_wait.REASON
+        assert held["until"] - held["at"] == waits.CHECKED_MINUTES * 60_000
+
+    def grade(url: str) -> dict:
+        recorded()
+        return {"grades": [{"conclusion": "success"}]}
+
+    monkeypatch.setattr(publish, "read_grade", grade)
+    flags = ["--direct"] if direct else []
+    args = cli.build_parser().parse_args(
+        ["swarm", "publish", "--via", "lab", *flags, "-m", "Change chosen", "chosen.txt"]
+    )
+    result = cli.publication_command(store, args)
+    recorded()
+    env = {
+        "AGENTIHOOKS_SWARM": "swarm",
+        "AGENTIHOOKS_AGENT_NAME": publication.agent.name,
+        "AGENTIHOOKS_SWARM_TASK": "t1",
+    }
+    payload = {
+        "tool_name": "Bash",
+        "tool_input": {"command": "agentihooks swarm swarm publish --via lab -m change -- chosen.txt"},
+        "cwd": str(publication.repo),
+    }
+    assert swarm_heartbeat.push_mark(payload, env, redis) is True
+    recorded()
+    assert result["head"] == git(lab, "rev-parse", "refs/grade/t1")
+
+
 @pytest.mark.feature("lab-remote-in-workspaces")
 def test_publish_via_lab_refuses_without_a_lab_remote_for_the_repository(
     publication: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
