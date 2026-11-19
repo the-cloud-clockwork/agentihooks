@@ -3074,6 +3074,15 @@
       ]
     },
     {
+      "id": "swarm-learned-scope",
+      "origin": "t-learned-notes-scope",
+      "behaviour": "A seat start and the default learned command return only the caller seat notes and shared canon and insight; explicit all returns every seat while preserving note numbers.",
+      "seam": "agentihooks swarm learned and the seat launch prompt",
+      "tests": [
+        "tests/swarm/test_learned_scope.py::test_returned_notes_stay_with_the_caller_and_shared_guidance"
+      ]
+    },
+    {
       "id": "swarm-learned-notes",
       "origin": "inventory",
       "behaviour": "A learned note needs a reason, takes a maturity, and only the master or operator writes canon.",

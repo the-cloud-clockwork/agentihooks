@@ -47,10 +47,7 @@ def test_returned_notes_stay_with_the_caller_and_shared_guidance(
         arguments = ("--all",) if entrypoint == "all" else ()
         assert run("sw", "--as", agent.name, "learned", *arguments) == 0
         returned = capsys.readouterr().out
-        expected = {
-            f"{agent.seat}\t{number}\t{maturity}\t{text}"
-            for number, (text, maturity) in enumerate(own, 1)
-        }
+        expected = {f"{agent.seat}\t{number}\t{maturity}\t{text}" for number, (text, maturity) in enumerate(own, 1)}
         expected.update(
             f"ci-1@sw\t{number}\t{maturity}\t{text}"
             for number, (text, maturity) in enumerate(foreign, 1)
