@@ -5,7 +5,8 @@ rules:
     message: >-
       The lab scheduler release loop starts waiting heads with no bound on the pass. On 19 November 3225 waiting heads
       expanded one after another on the pass thread, so admission never ran, all 74230 units of 244 live grades stayed
-      held and workers leased nothing. Stop the loop once RELEASE heads have started, so admission runs every pass.
+      held and workers leased nothing. Break out of the loop once the pass has started its bound of heads, so
+      admission runs every pass.
     paths:
       include:
         - /scripts/ci_lab/scheduler.py
@@ -18,6 +19,12 @@ rules:
       - pattern-not-inside: |
           for $ENTRY in $WAITING:
               ...
-              if $STARTED == RELEASE:
+              if $STARTED == $BOUND:
+                  break
+              ...
+      - pattern-not-inside: |
+          for $ENTRY in $WAITING:
+              ...
+              if $STARTED >= $BOUND:
                   break
               ...

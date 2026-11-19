@@ -1,6 +1,6 @@
 from typing import Any
 
-RELEASE = 8
+STARTS_PER_PASS = 8
 
 
 def every_waiting_head(scheduler: Any, waiting: list[tuple[str, str]], now_ms: int) -> list[str]:
@@ -24,12 +24,10 @@ def every_waiting_head_but_the_quiet(scheduler: Any, waiting: list[tuple[str, st
     return actions
 
 
-def at_most_the_bound(scheduler: Any, waiting: list[tuple[str, str]], now_ms: int) -> list[str]:
+def stops_at_the_bound(scheduler: Any, waiting: list[tuple[str, str]], now_ms: int) -> list[str]:
     actions: list[str] = []
     started = 0
     for name, raw in waiting:
-        if started == RELEASE:
-            break
         if not raw:
             continue
         started += 1
@@ -38,4 +36,18 @@ def at_most_the_bound(scheduler: Any, waiting: list[tuple[str, str]], now_ms: in
             actions.append(scheduler._start(name, raw, now_ms))
         except ValueError as error:
             actions.append(f"cannot expand {name}: {error}")
+        if started == STARTS_PER_PASS:
+            break
+    return actions
+
+
+def checks_the_bound_first(scheduler: Any, waiting: list[tuple[str, str]], now_ms: int) -> list[str]:
+    actions: list[str] = []
+    started = 0
+    for name, raw in waiting:
+        if started >= 8:
+            break
+        started += 1
+        # ok: lab-release-starts-every-waiting-head
+        actions.append(scheduler._start(name, raw, now_ms))
     return actions
