@@ -199,7 +199,7 @@ def test_only_the_newest_artifact_of_each_matching_name_is_signed_for_its_upload
 ) -> None:
     listed = [("mutation-stats-0", 5), ("mutation-stats-0", 9), ("mutation-evidence-0", 7), ("mutation-stats-1", 3)]
     service = Service(listed)
-    assert _download(serve(service), tmp_path) == []
+    assert _download(serve(service), tmp_path / "stats") == []
     signed = sorted(
         (request["name"], request["workflow_run_backend_id"], request["workflow_job_run_backend_id"])
         for method, request in service.calls
@@ -214,19 +214,19 @@ def test_only_the_newest_artifact_of_each_matching_name_is_signed_for_its_upload
 def test_a_part_that_never_answers_200_is_named_after_every_try(serve: Serve, tmp_path: Path) -> None:
     service = Service([("mutation-stats-0", 1)], {"mutation-stats-0": ["busy"] * fetch.TRIES})
     pauses: list[float] = []
-    assert _download(serve(service), tmp_path, pauses) == ["mutation-stats-0"]
+    assert _download(serve(service), tmp_path / "stats", pauses) == ["mutation-stats-0"]
     assert service.fetched == ["mutation-stats-0"] * fetch.TRIES
     assert pauses == [fetch.PAUSE] * (fetch.TRIES - 1)
-    assert _files(tmp_path) == []
+    assert _files(tmp_path / "stats") == []
 
 
 @pytest.mark.parametrize(("kind", "digests"), [("torn", True), ("torn", False), ("cut", True)])
 def test_a_torn_or_cut_archive_is_fetched_again(serve: Serve, tmp_path: Path, kind: str, digests: bool) -> None:
     service = Service([("mutation-stats-0", 1)], {"mutation-stats-0": [kind]})
     service.digests = digests
-    assert _download(serve(service), tmp_path) == []
+    assert _download(serve(service), tmp_path / "stats") == []
     assert service.fetched == ["mutation-stats-0", "mutation-stats-0"]
-    assert (tmp_path / "collected-mutation-stats-0").read_text() == "mutation-stats-0"
+    assert (tmp_path / "stats" / "collected-mutation-stats-0").read_text() == "mutation-stats-0"
 
 
 def test_a_stalled_blob_is_fetched_again_after_the_read_timeout(
@@ -234,9 +234,9 @@ def test_a_stalled_blob_is_fetched_again_after_the_read_timeout(
 ) -> None:
     monkeypatch.setattr(fetch, "TIMEOUT", 2.0)
     service = Service([("mutation-stats-0", 1)], {"mutation-stats-0": ["stall"]})
-    assert _download(serve(service), tmp_path) == []
+    assert _download(serve(service), tmp_path / "stats") == []
     assert service.fetched == ["mutation-stats-0", "mutation-stats-0"]
-    assert _files(tmp_path) == ["collected-mutation-stats-0"]
+    assert _files(tmp_path / "stats") == ["collected-mutation-stats-0"]
 
 
 @pytest.mark.parametrize("kind", ["hold", "stall", "trickle"])
@@ -246,7 +246,7 @@ def test_a_blob_still_arriving_at_the_deadline_is_named_instead_of_outliving_it(
     service = Service([("mutation-stats-0", 1)], {"mutation-stats-0": [kind]})
     pauses: list[float] = []
     started = time.monotonic()
-    assert _download(serve(service), tmp_path, pauses, deadline=started + 2) == ["mutation-stats-0"]
+    assert _download(serve(service), tmp_path / "stats", pauses, deadline=started + 2) == ["mutation-stats-0"]
     assert time.monotonic() - started < 5
     assert service.fetched == ["mutation-stats-0"]
     assert pauses == []
@@ -276,12 +276,12 @@ def test_main_reads_the_runtime_token_and_names_every_part_that_never_arrived(
     service = Service([("mutation-stats-0", 1), ("mutation-stats-1", 2)], {"mutation-stats-1": ["busy"] * fetch.TRIES})
     monkeypatch.setenv("ACTIONS_RESULTS_URL", serve(service))
     monkeypatch.setenv("ACTIONS_RUNTIME_TOKEN", TOKEN)
-    assert fetch.main([PATTERN, str(tmp_path)]) == 1
+    assert fetch.main([PATTERN, str(tmp_path / "stats")]) == 1
     assert capsys.readouterr().out.endswith(
-        f"Downloaded 1 of 2 artifacts matching {PATTERN} into {tmp_path}\n"
+        f"Downloaded 1 of 2 artifacts matching {PATTERN} into {tmp_path / 'stats'}\n"
         f"::error::mutation-stats-1 did not arrive within {fetch.TRIES} tries before the {fetch.DEADLINE:g} s deadline.\n"
     )
-    assert _files(tmp_path) == ["collected-mutation-stats-0"]
+    assert _files(tmp_path / "stats") == ["collected-mutation-stats-0"]
 
 
 def test_the_script_run_as_the_action_runs_it_downloads_and_exits(serve: Serve, tmp_path: Path) -> None:
@@ -312,7 +312,7 @@ def test_the_watchdog_ends_the_script_when_one_socket_read_outlives_the_deadline
     env = {**os.environ, "ACTIONS_RESULTS_URL": serve(service), "ACTIONS_RUNTIME_TOKEN": TOKEN}
     started = time.monotonic()
     result = subprocess.run(
-        [sys.executable, "-c", runner, str(ACTION / "fetch.py"), PATTERN, str(tmp_path)],
+        [sys.executable, "-c", runner, str(ACTION / "fetch.py"), PATTERN, str(tmp_path / "stats")],
         env=env,
         capture_output=True,
         text=True,
