@@ -3,6 +3,7 @@ import shlex
 import subprocess
 import urllib.error
 import urllib.request
+from email.message import Message
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -90,7 +91,11 @@ def test_kind_probe_keeps_the_failed_http_response_body(
     command = shlex.split(smoke[start:end])
     program = command[command.index("python") + 2]
     error = urllib.error.HTTPError(
-        "http://127.0.0.1:8780/v2/health/ready", 503, "Service Unavailable", {}, io.BytesIO(b"readiness check busy")
+        "http://127.0.0.1:8780/v2/health/ready",
+        503,
+        "Service Unavailable",
+        Message(),
+        io.BytesIO(b"readiness check busy"),
     )
     monkeypatch.setenv("PROBE_URL", error.url)
     monkeypatch.setenv("PROBE_HOST", "127.0.0.1:8780")
