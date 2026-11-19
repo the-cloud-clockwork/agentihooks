@@ -207,7 +207,7 @@ class SeatMemory:
     def scoped(self, slug: str, address: str, *, all_seats: bool = False) -> list[dict[str, Any]]:
         selected: list[dict[str, Any]] = []
         learned = re.compile(rf"{re.escape(PREFIX)}:([^:@]+@{re.escape(slug)}):learned")
-        found = self.redis.scan_iter(match=f"{PREFIX}:*@{slug}:learned", count=SCAN_PAGE)
+        found: list[str] = list(self.redis.scan_iter(match=f"{PREFIX}:*@{slug}:learned", count=SCAN_PAGE))  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
         for seat in sorted(match.group(1) for key in found if (match := learned.fullmatch(key))):
             for number, note in enumerate(self.learned(seat), 1):
                 if "retired" not in note and (all_seats or seat == address or note["maturity"] in (CANON, "insight")):
