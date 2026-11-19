@@ -121,7 +121,8 @@ def test_unit_shards_measure_no_coverage():
     include = _workflow()["jobs"]["unit"]["strategy"]["matrix"].get("include", [])
     assert include in (
         [],
-        "${{ fromJSON(github.event_name == 'merge_group' && format('[{0}]', needs.split.outputs.queue_312) || '[]') }}",
+        "${{ fromJSON(github.event_name == 'merge_group' && format('[{0}]', needs.split.outputs.queue_312)"
+        ' || needs.split.outputs.source != \'\' && \'[{"python-version":"3.12","shard":"copy"}]\' || \'[]\') }}',
     )
     _, step = _unit_step_index(lambda s: s.get("name") == "Run tests")
     assert "COVERAGE_CORE" not in step.get("env", {})
@@ -640,7 +641,7 @@ def test_unit_matrix_runs_one_shard_per_split():
     coverage_shards, plain_shards = (int(count) for count in re.search(split, step["env"]["SHARD"]).groups())
     workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
     matrix = workflow["jobs"]["unit"]["strategy"]["matrix"]
-    excluded = {(entry["python-version"], entry["shard"]) for entry in matrix.get("exclude", [])}
+    excluded = {(entry["python-version"], entry["shard"]) for entry in matrix.get("exclude", []) if "shard" in entry}
     assert matrix["python-version"] == ["3.12"]
     assert [shard for shard in matrix["shard"] if ("3.12", shard) not in excluded] == list(
         range(1, coverage_shards + 1)
@@ -1588,6 +1589,7 @@ def test_unit_shards_upload_their_durations_for_the_refresh() -> None:
         "Restore torn queue legs again",
         "Check the queue legs restored again",
         "Lay out every push leg from its queue leg",
+        "Check and summarize every push leg's coverage",
         "Upload every push leg",
     ]
     torn = ("Restore torn queue legs again", "Check the queue legs restored again")
@@ -1673,7 +1675,7 @@ def test_the_copy_job_restores_every_queue_leg_in_one_download() -> None:
 def test_unit_shards_retry_coverage_upload_without_changing_the_artifact():
     _, upload = _unit_step_index(lambda s: s.get("name") == "Upload coverage")
     assert upload["uses"] == "./.github/actions/retry-upload"
-    assert upload["if"] == "matrix.python-version == '3.12'"
+    assert upload["if"] == "needs.split.outputs.source == '' && matrix.python-version == '3.12'"
     assert upload["with"] == {
         "name": "coverage-${{ matrix.python-version }}-${{ matrix.shard }}",
         "path": ".coverage\njs-coverage/\ndep-inputs/\nreused-coverage/\n",

@@ -1757,6 +1757,24 @@ jobs:
           QUEUE_LEGS: ${{ needs.split.outputs.queue_legs }}
         run: python -m scripts.ci_unit_copy layout --queue "$RUNNER_TEMP/queue-legs" --legs "$QUEUE_LEGS" --out "$RUNNER_TEMP/push-legs"
 
+      - name: Check and summarize every push leg's coverage
+        if: needs.split.outputs.source != ''
+        env:
+          PUSH_LEGS: ${{ runner.temp }}/push-legs
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          summarize() {
+            cd "$PUSH_LEGS/coverage-3.12-$1"
+            databases=(.coverage)
+            if [[ -f reused-coverage/.coverage ]]; then databases+=(reused-coverage/.coverage); fi
+            python -m scripts.coverage_check "${databases[@]}"
+            lines="$PUSH_LEGS/executed-lines-3.12-$1"
+            python -m tests.coverage_summary --out "$lines/executed-lines.json" "${databases[@]}" \
+              --statements "$lines/statement-lines.json" --slice "$1/20" --head "$GITHUB_WORKSPACE"
+          }
+          export -f summarize
+          seq 1 20 | xargs -P "$(python -m scripts.ci_cpu_quota)" -I {} bash -e -c 'summarize {}'
+
       - name: Upload every push leg
         if: needs.split.outputs.source != ''
         uses: actions/github-script@v7

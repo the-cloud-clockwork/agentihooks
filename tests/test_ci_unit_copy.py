@@ -57,30 +57,11 @@ def _files(folder: Path) -> dict[str, str]:
     }
 
 
-@pytest.fixture
-def tools(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, Path, list[str]]]:
-    calls: list[tuple[str, Path, list[str]]] = []
-
-    def check(argv: list[str]) -> int:
-        calls.append(("check", Path.cwd(), list(argv)))
-        return 0
-
-    def summary(argv: list[str]) -> int:
-        calls.append(("summary", Path.cwd(), list(argv)))
-        Path(argv[argv.index("--out") + 1]).write_text(json.dumps({".coverage": {}}))
-        Path(argv[argv.index("--statements") + 1]).write_text("{}")
-        return 0
-
-    monkeypatch.setattr(ci_unit_copy.coverage_check, "main", check)
-    monkeypatch.setattr(ci_unit_copy.coverage_summary, "main", summary)
-    return calls
-
-
 @pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
-def test_every_push_leg_is_laid_out_from_the_queue_leg_it_maps_onto(tmp_path, tools):
-    queue = _queue(tmp_path, 16)
+def test_every_push_leg_is_laid_out_from_the_queue_leg_it_maps_onto(tmp_path: Path) -> None:
+    queue = _queue(tmp_path, 16, reused=True)
     out = tmp_path / "out"
-    ci_unit_copy.layout(queue, _mapped(16), out, tmp_path)
+    ci_unit_copy.layout(queue, _mapped(16), out)
     assert sorted(path.name for path in out.iterdir()) == sorted(
         f"{kind}-3.12-{leg}" for kind, _ in KINDS for leg in range(1, 21)
     )
@@ -96,62 +77,24 @@ def test_every_push_leg_is_laid_out_from_the_queue_leg_it_maps_onto(tmp_path, to
         }
         assert _files(out / f"flakes-3.12-{leg}") == {"flakes.jsonl": ""}
     for leg in range(1, 21):
-        assert _files(out / f"executed-lines-3.12-{leg}") == {
-            "executed-lines.json": '{".coverage": {}}',
-            "statement-lines.json": "{}",
-        }
+        assert (out / f"executed-lines-3.12-{leg}").is_dir()
+        assert _files(out / f"executed-lines-3.12-{leg}") == {}
 
 
-@pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
-@pytest.mark.parametrize("reused", [False, True], ids=["own", "reused"])
-def test_each_push_leg_checks_and_summarizes_its_coverage_inside_its_coverage_folder(tmp_path, tools, reused):
-    out, head = tmp_path / "out", tmp_path / "head"
-    ci_unit_copy.layout(_queue(tmp_path, 12, reused=reused), _mapped(12), out, head)
-    databases = [".coverage", "reused-coverage/.coverage"] if reused else [".coverage"]
-    expected: list[tuple[str, Path, list[str]]] = []
-    for leg in range(1, 21):
-        coverage, lines = (out / f"coverage-3.12-{leg}").resolve(), out / f"executed-lines-3.12-{leg}"
-        expected.append(("check", coverage, databases))
-        expected.append(
-            (
-                "summary",
-                coverage,
-                [
-                    "--out",
-                    str(lines / "executed-lines.json"),
-                    *databases,
-                    "--statements",
-                    str(lines / "statement-lines.json"),
-                    "--slice",
-                    f"{leg}/20",
-                    "--head",
-                    str(head),
-                ],
-            )
-        )
-    assert tools == expected
-
-
-def test_a_leg_above_the_queue_count_needs_no_elapsed_time_in_its_queue_leg(tmp_path, tools):
+def test_a_leg_above_the_queue_count_needs_no_elapsed_time_in_its_queue_leg(tmp_path: Path) -> None:
     out = tmp_path / "out"
-    ci_unit_copy.layout(_queue(tmp_path, 4, timed=False), _mapped(4), out, tmp_path)
+    ci_unit_copy.layout(_queue(tmp_path, 4, timed=False), _mapped(4), out)
     assert _files(out / "durations-3.12-5") == {"durations.json": "{}\n", "durations.sha256": "sha 1\n"}
 
 
-def test_an_unusable_restored_coverage_database_stops_the_layout(tmp_path, tools, monkeypatch):
-    monkeypatch.setattr(ci_unit_copy.coverage_check, "main", lambda argv: 1)
-    with pytest.raises(SystemExit, match=r"^Push leg 1 restored an unusable coverage database from queue leg 1\.$"):
-        ci_unit_copy.layout(_queue(tmp_path, 3), _mapped(3), tmp_path / "out", tmp_path)
-
-
-def test_a_missing_queue_leg_stops_the_layout(tmp_path, tools):
+def test_a_missing_queue_leg_stops_the_layout(tmp_path: Path) -> None:
     queue = _queue(tmp_path, 3)
     (queue / "coverage-3.12-2" / ".coverage").unlink()
     (queue / "coverage-3.12-2" / "js-coverage" / "page.json").unlink()
     (queue / "coverage-3.12-2" / "js-coverage").rmdir()
     (queue / "coverage-3.12-2").rmdir()
     with pytest.raises(FileNotFoundError):
-        ci_unit_copy.layout(queue, _mapped(3), tmp_path / "out", tmp_path)
+        ci_unit_copy.layout(queue, _mapped(3), tmp_path / "out")
 
 
 def test_an_archive_holds_every_file_under_the_folder_by_its_path_inside_it(tmp_path):
@@ -167,10 +110,11 @@ def test_an_archive_holds_every_file_under_the_folder_by_its_path_inside_it(tmp_
         assert {info.compress_type for info in zipped.infolist()} == {zipfile.ZIP_DEFLATED}
 
 
-def test_a_folder_without_files_is_never_uploaded(tmp_path):
-    (tmp_path / "empty").mkdir()
+def test_a_folder_without_files_is_never_uploaded(tmp_path: Path) -> None:
+    folder = tmp_path / "flakes-3.12-1"
+    (folder / "empty").mkdir(parents=True)
     with pytest.raises(ValueError, match=r" holds no file to upload$"):
-        ci_unit_copy.archive(tmp_path)
+        ci_unit_copy.archive(folder)
 
 
 @pytest.mark.parametrize(
@@ -416,20 +360,11 @@ def test_every_leg_uploads_its_artifacts_in_the_unit_job_order_with_their_retent
 
 
 @pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
-def test_the_layout_command_reads_the_queue_leg_map(monkeypatch, tmp_path):
-    seen = []
-    monkeypatch.setattr(ci_unit_copy, "layout", lambda queue, legs, out, head: seen.append((queue, legs, out, head)))
-    monkeypatch.chdir(tmp_path)
-    assert ci_unit_copy.main(["layout", "--queue", "q", "--legs", '{"1": 1, "2": 1}', "--out", "o", "--head", "h"]) == 0
-    assert seen == [(Path("q"), {"1": 1, "2": 1}, Path("o"), tmp_path.resolve() / "h")]
-
-
-def test_the_layout_command_reads_the_checkout_it_runs_in_by_default(monkeypatch, tmp_path):
-    seen = []
-    monkeypatch.setattr(ci_unit_copy, "layout", lambda queue, legs, out, head: seen.append(head))
-    monkeypatch.chdir(tmp_path)
-    assert ci_unit_copy.main(["layout", "--queue", "q", "--legs", "{}", "--out", "o"]) == 0
-    assert seen == [tmp_path.resolve()]
+def test_the_layout_command_reads_the_queue_leg_map(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[tuple[Path, dict[str, int], Path]] = []
+    monkeypatch.setattr(ci_unit_copy, "layout", lambda queue, legs, out: seen.append((queue, legs, out)))
+    assert ci_unit_copy.main(["layout", "--queue", "q", "--legs", '{"1": 1, "2": 1}', "--out", "o"]) == 0
+    assert seen == [(Path("q"), {"1": 1, "2": 1}, Path("o"))]
 
 
 @pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")

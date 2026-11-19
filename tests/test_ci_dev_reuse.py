@@ -328,7 +328,11 @@ def test_the_copy_job_sets_up_the_python_its_layout_runs_and_skips_every_leg_upl
         assert "UNIT_SOURCE" not in steps[name].get("if", "")
         assert "outputs.source" not in steps[name].get("if", "")
     assert names.index("Use the test environment") < names.index("Lay out every push leg from its queue leg")
-    assert names.index("Lay out every push leg from its queue leg") < names.index("Upload every push leg")
+    assert (
+        names.index("Lay out every push leg from its queue leg")
+        < names.index("Check and summarize every push leg's coverage")
+        < names.index("Upload every push leg")
+    )
     for name in (
         "Check the coverage database",
         "Upload coverage",
@@ -339,6 +343,75 @@ def test_the_copy_job_sets_up_the_python_its_layout_runs_and_skips_every_leg_upl
     for name in ("Record flaky tests", "Upload the flake report"):
         assert steps[name]["if"] == "${{ !cancelled() && needs.split.outputs.source == '' }}"
     assert steps["Upload durations"]["if"] == "${{ !cancelled() && hashFiles('durations.json') != '' }}"
+
+
+def _summarized(tmp_path: Path, *, reused: bool, failing: int | None = None) -> tuple[int, list[str], Path, Path]:
+    """Run the copy job's coverage step over twenty laid out legs with a python that records each call."""
+    import yaml
+
+    jobs = yaml.safe_load((Path(__file__).parents[1] / ".github/workflows/test.yml").read_text())["jobs"]
+    step = next(
+        step for step in jobs["unit"]["steps"] if step.get("name") == "Check and summarize every push leg's coverage"
+    )
+    assert step["if"] == "needs.split.outputs.source != ''"
+    assert step["env"] == {"PUSH_LEGS": "${{ runner.temp }}/push-legs", "PYTHONPATH": "${{ github.workspace }}"}
+    legs, workspace, tools = tmp_path / "push-legs", tmp_path / "workspace", tmp_path / "bin"
+    for leg in range(1, 21):
+        coverage = legs / f"coverage-3.12-{leg}"
+        coverage.mkdir(parents=True)
+        (coverage / ".coverage").touch()
+        if reused:
+            (coverage / "reused-coverage").mkdir()
+            (coverage / "reused-coverage" / ".coverage").touch()
+        (legs / f"executed-lines-3.12-{leg}").mkdir()
+    workspace.mkdir()
+    tools.mkdir()
+    (tools / "python").write_text(
+        "#!/usr/bin/env bash\n"
+        'if [[ "$*" == "-m scripts.ci_cpu_quota" ]]; then echo 3; exit 0; fi\n'
+        'echo "$PWD|$*" >> "$CALLS"\n'
+        'if [[ "$1 $2" == "-m scripts.coverage_check" && "$PWD" == */coverage-3.12-"$FAILING" ]]; then exit 1; fi\n'
+    )
+    (tools / "python").chmod(0o755)
+    calls = tmp_path / "calls"
+    env = {
+        **os.environ,
+        "PATH": f"{tools}:{os.environ['PATH']}",
+        "CALLS": str(calls),
+        "FAILING": str(failing or ""),
+        "PUSH_LEGS": str(legs),
+        "GITHUB_WORKSPACE": str(workspace),
+    }
+    result = subprocess.run(
+        ["bash", "-e", "-o", "pipefail", "-c", step["run"]], env=env, capture_output=True, check=False
+    )
+    return result.returncode, calls.read_text().splitlines(), legs, workspace
+
+
+@pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
+@pytest.mark.parametrize("reused", [False, True], ids=["own", "reused"])
+def test_the_copy_job_checks_and_summarizes_each_push_leg_as_its_unit_leg_does(tmp_path: Path, reused: bool) -> None:
+    code, calls, legs, workspace = _summarized(tmp_path, reused=reused)
+    assert code == 0
+    databases = ".coverage reused-coverage/.coverage" if reused else ".coverage"
+    for leg in range(1, 21):
+        here, lines = legs / f"coverage-3.12-{leg}", legs / f"executed-lines-3.12-{leg}"
+        check = f"{here}|-m scripts.coverage_check {databases}"
+        summary = (
+            f"{here}|-m tests.coverage_summary --out {lines}/executed-lines.json {databases}"
+            f" --statements {lines}/statement-lines.json --slice {leg}/20 --head {workspace}"
+        )
+        assert calls.count(check) == calls.count(summary) == 1
+        assert calls.index(check) < calls.index(summary)
+    assert len(calls) == 40
+
+
+@pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
+def test_an_unusable_push_leg_coverage_database_fails_the_copy_job(tmp_path: Path) -> None:
+    code, calls, legs, _ = _summarized(tmp_path, reused=False, failing=7)
+    assert code != 0
+    assert f"{legs}/coverage-3.12-7|-m scripts.coverage_check .coverage" in calls
+    assert not [call for call in calls if call.startswith(f"{legs}/coverage-3.12-7|-m tests.coverage_summary")]
 
 
 class _Context(dict):

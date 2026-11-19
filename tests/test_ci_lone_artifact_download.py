@@ -27,6 +27,8 @@ UNAFFECTED = {
     ("workflows/hierarchy-cpu.yml", "grade", "hierarchy-pair-*"),
     ("workflows/ledger-load.yml", "compare-grade", "compare-pair-*"),
     ("workflows/test.yml", "shard-check", "{durations,flakes}-${{ matrix.python-version }}-*"),
+    ("workflows/test.yml", "unit", "{durations,flakes,coverage}-${{ matrix.python-version }}-*"),
+    ("workflows/test.yml", "unit-rerun", "{durations,flakes,coverage}-${{ matrix.python-version }}-*"),
     ("workflows/test.yml", "sonar", "{reused-branch,reused}-3.12"),
     ("workflows/test.yml", "dep-manifest", "coverage-3.12-*"),
     ("workflows/test.yml", "coverage-ratchet", "executed-lines-3.12-*"),

@@ -1,15 +1,15 @@
 """Copy a passed queue run's unit results into the twenty legs a reusing dev push uploads, in one job.
 
 A dev push whose queue run passed on the same commit reuses that run's unit results. Its one unit
-job restores every queue leg, lays out each push leg as a reusing unit leg would, and uploads every
-leg's durations, coverage, flakes and executed lines in that order, legs side by side. The upload
-runs inside an actions/github-script step, which hands it the job's runtime token for the results
-service upload-artifact uses.
+job restores every queue leg, lays out each push leg as a reusing unit leg would, checks and
+summarizes each leg's coverage with the unit legs' own commands, and uploads every leg's durations,
+coverage, flakes and executed lines in that order, legs side by side. The upload runs inside an
+actions/github-script step, which hands it the job's runtime token for the results service
+upload-artifact uses.
 """
 
 import argparse
 import base64
-import contextlib
 import hashlib
 import http.client
 import io
@@ -28,12 +28,9 @@ from http import HTTPStatus
 from pathlib import Path
 from typing import Any
 
-from tests import coverage_check, coverage_summary
-
 LEGS = 20
 VERSION = "3.12"
 KINDS = {"durations": 14, "coverage": 7, "flakes": 14, "executed-lines": 7}
-REUSED = "reused-coverage/.coverage"
 SERVICE = "twirp/github.actions.results.api.v1.ArtifactService/"
 OWNER = ("workflow_run_backend_id", "workflow_job_run_backend_id")
 TIMEOUT = 120
@@ -48,12 +45,12 @@ def artifact(kind: str, leg: int) -> str:
     return f"{kind}-{VERSION}-{leg}"
 
 
-def layout(queue: Path, legs: dict[str, int], out: Path, head: Path) -> None:
+def layout(queue: Path, legs: dict[str, int], out: Path) -> None:
     """Lay out every push leg from the queue leg it maps onto, as a reusing unit leg leaves it before its uploads."""
     for leg in range(1, LEGS + 1):
         source = legs[str(leg)]
         durations = shutil.copytree(queue / artifact("durations", source), out / artifact("durations", leg))
-        coverage = shutil.copytree(queue / artifact("coverage", source), out / artifact("coverage", leg))
+        shutil.copytree(queue / artifact("coverage", source), out / artifact("coverage", leg))
         flakes = out / artifact("flakes", leg)
         if source == leg:
             shutil.copytree(queue / artifact("flakes", leg), flakes)
@@ -62,25 +59,7 @@ def layout(queue: Path, legs: dict[str, int], out: Path, head: Path) -> None:
             (durations / "elapsed.json").unlink(missing_ok=True)
             flakes.mkdir()
         (flakes / "flakes.jsonl").touch()
-        lines = out / artifact("executed-lines", leg)
-        lines.mkdir()
-        databases = [".coverage", *([REUSED] if (coverage / REUSED).is_file() else [])]
-        with contextlib.chdir(coverage):
-            if coverage_check.main(databases):
-                raise SystemExit(f"Push leg {leg} restored an unusable coverage database from queue leg {source}.")
-            coverage_summary.main(
-                [
-                    "--out",
-                    str(lines / "executed-lines.json"),
-                    *databases,
-                    "--statements",
-                    str(lines / "statement-lines.json"),
-                    "--slice",
-                    f"{leg}/{LEGS}",
-                    "--head",
-                    str(head),
-                ]
-            )
+        (out / artifact("executed-lines", leg)).mkdir()
 
 
 def archive(folder: Path) -> bytes:
@@ -197,12 +176,11 @@ def main(argv: list[str] | None = None) -> int:
     laying.add_argument("--queue", type=Path, required=True)
     laying.add_argument("--legs", required=True)
     laying.add_argument("--out", type=Path, required=True)
-    laying.add_argument("--head", type=Path, default=Path.cwd())
     sending = commands.add_parser("upload")
     sending.add_argument("--out", type=Path, required=True)
     args = parser.parse_args(argv)
     if args.command == "layout":
-        layout(args.queue, json.loads(args.legs), args.out, args.head.resolve())
+        layout(args.queue, json.loads(args.legs), args.out)
     else:
         upload(args.out, Results(os.environ["ACTIONS_RESULTS_URL"], os.environ["ACTIONS_RUNTIME_TOKEN"]))
     return 0
