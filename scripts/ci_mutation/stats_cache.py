@@ -44,6 +44,11 @@ def plugin_names(nodes: list[ast.AST]) -> set[str]:
     }
 
 
+@functools.cache
+def file_name(path: str) -> str:
+    return Path(path).name
+
+
 def discovery_inputs(nodes: list[ast.AST], names: set[str], resources: dict[str, set[str]]) -> set[str]:
     scanners = {
         name: name
@@ -92,10 +97,15 @@ def discovery_inputs(nodes: list[ast.AST], names: set[str], resources: dict[str,
             candidates = {
                 path
                 for path in candidates
-                if fnmatch.fnmatchcase(path, pattern) or fnmatch.fnmatchcase(Path(path).name, pattern)
+                if fnmatch.fnmatchcase(path, pattern) or fnmatch.fnmatchcase(file_name(path), pattern)
             }
         inputs.update(candidates)
     return inputs
+
+
+@functools.cache
+def conftest_candidates(start: str) -> tuple[str, ...]:
+    return tuple(str(parent / "conftest.py") for parent in Path(start).parents)
 
 
 def test_inputs(
@@ -111,10 +121,7 @@ def test_inputs(
     starts = [path] if isinstance(path, str) else path
     known = set(modules.values())
     pending = set(starts) | {
-        str(parent / "conftest.py")
-        for start in starts
-        for parent in Path(start).parents
-        if str(parent / "conftest.py") in known
+        conftest for start in starts for conftest in conftest_candidates(start) if conftest in known
     }
     inputs = {}
     while pending:
@@ -221,6 +228,8 @@ class StatsInputs:
     records: dict = field(default_factory=lambda: {True: {}, False: {}})
     traced: dict = field(default_factory=dict)
     discovered: dict[str, set[str]] = field(default_factory=dict)
+    closures: dict[frozenset[str], dict[str, str]] = field(default_factory=dict)
+    digests: dict[frozenset[str], str] = field(default_factory=dict)
 
     def for_test(self, path: str, covered: list[str] | None, fresh: list[dict] | None = None) -> dict:
         measured = covered is not None
@@ -238,11 +247,12 @@ class StatsInputs:
             )
             inputs.update({name: value[0] for name, value in loaded.items()})
         if covered:
-            inputs.update(
-                test_inputs(
+            closure = frozenset(covered)
+            if closure not in self.closures:
+                self.closures[closure] = test_inputs(
                     self.root, covered, self.modules, self.records[measured], self.resources, False, self.discovered
                 )
-            )
+            inputs.update(self.closures[closure])
         if not any(not name.startswith("tests/") for name in inputs) and (
             changed := sorted(self.changes.keys() & self.resources)
         ):
@@ -255,6 +265,9 @@ class StatsInputs:
         return self.for_test(path, list(inputs) if measured else None) == inputs and self.discovery(inputs) == discovery
 
     def discovery(self, inputs: dict) -> str:
+        sources = frozenset(inputs)
+        if sources in self.digests:
+            return self.digests[sources]
         paths = set()
         for source in inputs:
             if Path(source).suffix != ".py":
@@ -264,7 +277,8 @@ class StatsInputs:
                 names = set(imported_names(text, Path(source).parent.parts))
                 self.discovered[source] = discovery_inputs(list(ast.walk(ast.parse(text))), names, self.resources)
             paths.update(self.discovered[source])
-        return hashlib.sha256(encode(sorted(paths)).encode()).hexdigest()
+        self.digests[sources] = hashlib.sha256(encode(sorted(paths)).encode()).hexdigest()
+        return self.digests[sources]
 
 
 def per_test_stats(
