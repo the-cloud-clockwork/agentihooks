@@ -137,6 +137,7 @@ def test_each_argument_is_required(dropped: str) -> None:
         "### ",
         "###  ",
         "##\t ",
+        "##\t\t ",
         "- An entry.",
     ],
 )
