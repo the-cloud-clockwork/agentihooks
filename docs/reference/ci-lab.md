@@ -1151,7 +1151,7 @@ every pending runner. A pod gets this rank only when its spec names the class;
 |---|---|---|---|
 | `qitp-trading` | 1000 | `PreemptLowerPriority` | Trading workers |
 | `ci-lab-worker-preempt` | 250 | `PreemptLowerPriority` | Lab workers |
-| `arc-runners-oss-checks` | 200 | `Never` | Every runner of the deployment repository's `arc-runners-oss` chart: `anton-oss` pull request checks and image builds, `anton-oss-light` gate jobs, `anton-oss-queue` merge queue groups, which inherit the `anton-oss` pod and its class, and `anton-oss-batch` mutation runners |
+| `arc-runners-oss-checks` | 200 | `Never` | Every runner of the deployment repository's `arc-runners-oss` chart: `anton-oss` pull request checks and image builds, `anton-oss-light`, `anton-oss-queue` merge queue groups, which inherit the `anton-oss` pod and its class, and `anton-oss-batch` mutation runners |
 | `arc-runners-oss-batch-priority` | 100 | `Never` | None; it stays defined in `runner-priority-classes.yaml` until no pod names it |
 | none | 0 | `PreemptLowerPriority`, the Kubernetes default | Every pod that names no class, such as the `anton` runners in the `arc-runners` namespace and the [node cache](ci-lab-node-cache.md) pods |
 
@@ -1194,8 +1194,9 @@ The class reached its current form in three of that repository's pull requests:
 | 1917 | 19 November 2026, 15:56 UTC | `ci-lab-worker-preempt` | 250 | `PreemptLowerPriority` | At 250 with `Never` the workers still waited: at 14:33 UTC `ci_lab_workers_ready` read 0 and three worker pods had been Pending for 10 minutes while pending runner pods took every freed slot |
 
 Pull requests 1913 and 1917 each replaced the class document under a new name and pointed the
-worker template at it in the same pull request. `cluster-rbac` pruned the old class, and `kubectl get priorityclass` on 19
-November at 16:07 UTC listed `ci-lab-worker-preempt` and no older lab class.
+worker template at it in the same pull request. `cluster-rbac` pruned the old class, and
+`kubectl get priorityclass` on 19 November at 16:07 UTC listed `ci-lab-worker-preempt` and no
+older lab class.
 
 Two of the deployment repository's tests guard the class:
 
@@ -1273,6 +1274,7 @@ kubectl get events.events.k8s.io -n ci-lab --field-selector regarding.name=<work
 
 The API server drops events after its event TTL, one hour by default, so read them soon after a
 rollout or scale up.
+
 This excerpt is the worker rollout that followed pull request 1917 on 19 November 2026, for worker
 `ci-lab-worker-8678fc4dbf-xh7zp` (uid `3d3ca3ba-1909-44a3-b734-ed8de53f5408`), with the
 `FailedScheduling` notes shortened:
