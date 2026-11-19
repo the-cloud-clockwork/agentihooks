@@ -698,6 +698,16 @@
       ]
     },
     {
+      "id": "hub-slot-request-queue-timing",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2575",
+      "behaviour": "Each request starting on a hub serve worker reports its monotonic queue wait, subject, running handlers across all subscriptions sharing the pool and pool size, including an expired request whose handler is never called; running counts recover after successful and failed handlers.",
+      "seam": "NatsBus.serve and its shared serve timing counter",
+      "tests": [
+        "tests/events/test_scoped_nats.py::test_every_slot_request_reports_queue_wait_and_shared_running_handlers"
+      ]
+    },
+    {
       "id": "hub-admission-relaunch-assignment",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-relaunch-assignment",
