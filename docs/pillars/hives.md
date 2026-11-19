@@ -3521,12 +3521,14 @@ hive the tick runs on is read from that hive's own herdr. Both the controller an
 carries this report field; until then the worker reads `unknown`, which counts as working and never reaches the idle
 retire.
 
-The live binding check reads such a worker's facts from the same entry's `binding` when the worker is a Codex app
-server worker, never from the controller's own server check: an app server's liveness can only be proven on the host
-that runs it, so the controller's own check answers unknown and would record the worker's model and effort as
-unobserved. An entry for another generation, an entry without a binding, or no entry at all gives the worker no facts,
-and the tick skips it that pass as it does a hosted worker whose hive reports no binding. Any other hub admitted
-worker keeps the controller's own session read.
+The live binding check reads such a worker's facts from the same entry's `binding` when the worker runs on a local
+backend over the Codex app server transport, never from the controller's own server check: an app server's liveness
+can only be proven on the host that runs it, so the controller's own check stores no process fact and would record the
+worker's model and effort as unobserved. An entry for another generation, an entry without a binding, or no entry at
+all gives the worker no facts, and the tick skips it that pass as it does a hosted worker whose hive reports no
+binding. Any other hub admitted worker keeps the controller's own session read, and an app server worker admitted to
+the hive the tick runs on is read from that host. The hive reads each admitted binding the way it reads a hosted one,
+so it also settles a dead app server of an admitted execution as failed, which frees its account slot.
 
 A worker's execution record names its hive in its runtime target (`host_id`). The tick counts the worker gone,
 and retires it with `its hive pane is gone`, when the report is no older than the worker's launch and one of these

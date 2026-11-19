@@ -297,6 +297,47 @@ def test_a_hub_admitted_worker_its_hive_reports_no_binding_for_gets_no_facts_fro
     assert remote.runtime.bindings([agent]) == {}
 
 
+@pytest.mark.feature("live-binding-reads-hub-admitted-bindings-from-their-hive")
+@pytest.mark.parametrize("remote", [{"target": {}}], indirect=True)
+def test_a_hub_admitted_worker_without_an_app_server_keeps_the_controllers_session_read(
+    remote: SimpleNamespace,
+) -> None:
+    agent = remote.agent
+    entry = {"generation": agent.generation, "pane": {"state": "working"}, "binding": BINDING}
+    report = {"names": [], "executions": {}, "admitted": {agent.execution_id: entry}}
+    remote.redis.set(remote.reports.key(HIVE), json.dumps(report), ex=45)
+
+    assert remote.runtime.bindings([agent]) == {agent.name: {"process": False}}
+
+
+@pytest.mark.feature("live-binding-reads-hub-admitted-bindings-from-their-hive")
+@pytest.mark.parametrize("remote", [{"target": {}}], indirect=True)
+def test_an_app_server_worker_the_hub_admitted_to_this_hive_is_read_from_this_host(
+    remote: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import runtime as runtime_module
+    from scripts.swarm.store import APP_SERVER_TRANSPORT, AgentRecord
+
+    connected = Mock(return_value=remote.store)
+    monkeypatch.setattr(runtime_module, "connect", connected)
+    codex = AgentRecord(
+        remote.store.next_name("fixture", "eng"),
+        "eng",
+        "codex",
+        seat="eng-2@fixture",
+        harness="codex",
+        hive="controller",
+        transport=APP_SERVER_TRANSPORT,
+    )
+    agent = remote.store.start_execution("fixture", codex)
+    entry = {"generation": agent.generation, "pane": {"state": "working"}, "binding": CODEX_BINDING}
+    report = {"names": [agent.name], "executions": {}, "admitted": {agent.execution_id: entry}}
+    remote.redis.set(remote.reports.key("controller"), json.dumps(report), ex=45)
+
+    assert remote.runtime.bindings([agent]) == {agent.name: {"process": None}}
+    assert connected.called
+
+
 def test_the_tick_records_a_remote_conversation_when_the_local_listing_fails(remote):
     from scripts.swarm.store import AgentRecord
     from scripts.tick.steps import agents as agent_steps

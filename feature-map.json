@@ -957,7 +957,9 @@
       "seam": "scripts.hive.daemon.execution_report writes the admitted bindings, read through scripts.hive.reports.Reports.admitted_binding by scripts.swarm.runtime.HerdrRuntime.bindings for scripts.swarm.live_binding.record",
       "tests": [
         "tests/hive/test_reports.py::test_the_controller_reads_a_hub_admitted_codex_workers_binding_from_the_hive_that_runs_it",
-        "tests/hive/test_reports.py::test_a_hub_admitted_worker_its_hive_reports_no_binding_for_gets_no_facts_from_this_host"
+        "tests/hive/test_reports.py::test_a_hub_admitted_worker_its_hive_reports_no_binding_for_gets_no_facts_from_this_host",
+        "tests/hive/test_reports.py::test_a_hub_admitted_worker_without_an_app_server_keeps_the_controllers_session_read",
+        "tests/hive/test_reports.py::test_an_app_server_worker_the_hub_admitted_to_this_hive_is_read_from_this_host"
       ]
     },
     {
