@@ -8783,6 +8783,12 @@ engineer@ed7448-0004  eng     codex    ...  yes         yes              ...
 ci@ed7448-0002        ci      codex    ...  no          no               ...
 ```
 
+The table ends with a `Wait` column read from each agent's declared wait:
+`<kind> <target>` for a checked wait, such as
+`lab https://github.com/<owner>/<repo>/runs/<id>` or
+`checks https://github.com/<owner>/<repo>/pull/<n>`, `bare` for a bare wait,
+and `-` for an agent with no live wait. A wait that ended or expired shows `-`.
+
 `status --json` carries the same pair on each agent:
 
 ```json
