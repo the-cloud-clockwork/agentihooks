@@ -141,6 +141,9 @@ class Expander:
         self.seen.append(request)
         return self.plans[request.head]
 
+    def merge_base(self, repo: str, head: str) -> str:
+        return self.plans[head].grader
+
 
 @dataclass
 class Poster:
