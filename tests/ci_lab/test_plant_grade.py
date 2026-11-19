@@ -84,7 +84,7 @@ class Lab:
             for line in tips.splitlines()
         )
 
-    def fetch(self, path: str) -> Mapping[str, Any]:
+    def fetch(self, path: str, timeout_s: float = 900) -> Mapping[str, Any]:
         self.pages.append(path)
         assert len(self.pages) <= 8
         assert path.startswith("repos/acme/widgets/commits/")
@@ -192,7 +192,7 @@ def test_an_unrelated_grade_expires_without_pushing_the_plant(repository: Path) 
 def test_a_missing_required_check_keeps_the_grade_unfinished(repository: Path) -> None:
     lab = Lab(repository)
 
-    def missing(path: str) -> Mapping[str, Any]:
+    def missing(path: str, timeout_s: float) -> Mapping[str, Any]:
         rows = lab.fetch(path)
         return {"check_runs": [row for row in rows["check_runs"] if row["name"] != "lab-shadow/required"]}
 
@@ -207,7 +207,7 @@ def test_a_missing_required_check_keeps_the_grade_unfinished(repository: Path) -
 def test_two_required_checks_make_the_grade_ambiguous(repository: Path) -> None:
     lab = Lab(repository)
 
-    def duplicate(path: str) -> Mapping[str, Any]:
+    def duplicate(path: str, timeout_s: float) -> Mapping[str, Any]:
         rows = list(lab.fetch(path)["check_runs"])
         required = next(
             row for row in rows if row["name"] == "lab-shadow/required" and row["external_id"] != "other-grade"
@@ -223,7 +223,7 @@ def test_two_required_checks_make_the_grade_ambiguous(repository: Path) -> None:
 def test_conflicting_gate_checks_cannot_hide_an_extra_failure(repository: Path) -> None:
     lab = Lab(repository)
 
-    def conflict(path: str) -> Mapping[str, Any]:
+    def conflict(path: str, timeout_s: float) -> Mapping[str, Any]:
         rows = list(lab.fetch(path)["check_runs"])
         head = path.split("/")[4]
         if git(repository, "show", f"{head}:sample.py") == "after":
@@ -262,7 +262,7 @@ def test_all_check_pages_are_read(repository: Path) -> None:
 def test_a_grade_arriving_at_its_deadline_is_refused(repository: Path) -> None:
     lab = Lab(repository)
 
-    def late(path: str) -> Mapping[str, Any]:
+    def late(path: str, timeout_s: float) -> Mapping[str, Any]:
         rows = lab.fetch(path)
         lab.now = 2
         return rows
@@ -279,7 +279,7 @@ def test_an_excessive_history_is_refused_after_one_hundred_pages(repository: Pat
     lab = Lab(repository)
     pages: list[str] = []
 
-    def full(path: str) -> Mapping[str, Any]:
+    def full(path: str, timeout_s: float) -> Mapping[str, Any]:
         pages.append(path)
         return {"check_runs": [lab.check("lab-shadow/lint", "failure", "other-grade")] * 100}
 

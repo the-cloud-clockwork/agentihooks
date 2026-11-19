@@ -12,16 +12,20 @@ from urllib.parse import urlsplit
 from scripts.ci_lab import plant_proofs
 from scripts.ci_lab.digests import GradeInputs, grade_key
 from scripts.ci_lab.remote.checkout import at
-from scripts.ci_lab.shadow_report import api
 
 BRANCH_PREFIX = "refs/heads/diffcheck/lab-plant-"
 
 
 @dataclass(frozen=True)
 class Ports:
-    fetch: Callable[[str], Mapping[str, Any]]
+    fetch: Callable[[str, float], Mapping[str, Any]]
     sleep: Callable[[float], None]
     clock: Callable[[], float]
+
+
+def _fetch(path: str, timeout_s: float) -> Mapping[str, Any]:
+    result = subprocess.run(["gh", "api", path], capture_output=True, text=True, check=True, timeout=min(30, timeout_s))
+    return json.loads(result.stdout)
 
 
 def _matching(repository: str, head: str, run: str, ports: Ports, deadline: float) -> list[Mapping[str, Any]]:
@@ -29,7 +33,10 @@ def _matching(repository: str, head: str, run: str, ports: Ports, deadline: floa
     matching: list[Mapping[str, Any]] = []
     for page in range(1, 101):
         path = f"repos/{slug}/commits/{head}/check-runs?filter=all&per_page=100&page={page}"
-        rows = ports.fetch(path)["check_runs"]
+        remaining = deadline - ports.clock()
+        if remaining <= 0:
+            raise TimeoutError(f"grade {run} expired while reading checks")
+        rows = ports.fetch(path, remaining)["check_runs"]
         if ports.clock() >= deadline:
             raise TimeoutError(f"grade {run} expired while reading checks")
         matching.extend(
@@ -56,6 +63,8 @@ def _read(repository: str, head: str, base: str, ports: Ports, timeout_s: float)
 
 def _verdict(rows: list[Mapping[str, Any]], pair: plant_proofs.Pair, planted: bool) -> str:
     checks = {row["name"].split("/", 1)[1]: row for row in rows}
+    if len(checks) != len(rows):
+        raise ValueError(f"{pair.name} grade has ambiguous gate checks")
     required = checks.pop("required")
     expected = "failure" if planted else "success"
     failed = {gate for gate, check in checks.items() if check["conclusion"] != "success"}
@@ -130,7 +139,7 @@ def main(argv: Sequence[str], environ: Mapping[str, str], ports: Ports | None = 
             arguments.plant,
             arguments.base,
             canonical,
-            ports or Ports(api, time.sleep, time.monotonic),
+            ports or Ports(_fetch, time.sleep, time.monotonic),
             arguments.timeout,
         )
         if summary := environ.get("GITHUB_STEP_SUMMARY"):
