@@ -2220,6 +2220,27 @@ def test_publish_via_lab_refuses_without_a_lab_remote_for_the_repository(
     assert _origin(publication) == ""
 
 
+@pytest.mark.feature("publish-refusal-keeps-lab-route")
+@pytest.mark.parametrize(("direct", "flags"), [(False, ["--via", "lab"]), (True, ["--via", "lab", "--direct"])])
+def test_publish_via_lab_refusal_repeats_its_lab_route_in_the_next_command(
+    publication: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, direct: bool, flags: list[str]
+) -> None:
+    import shlex
+
+    from scripts.swarm import cli
+    from scripts.swarm.store import SwarmError
+
+    monkeypatch.delenv("AGENTIHOOKS_LAB_REMOTE", raising=False)
+    with pytest.raises(SwarmError) as refused:
+        _publish_via_lab(publication, direct=direct)
+    repeated = str(refused.value).split("; Next: ", 1)[1]
+    assert repeated == shlex.join(
+        ["agentihooks", "swarm", "swarm", "publish", "--message", "Change chosen", *flags, "--", "chosen.txt"]
+    )
+    args = cli.build_parser().parse_args(shlex.split(repeated)[2:])
+    assert (args.via, args.direct, args.files) == ("lab", direct, ["chosen.txt"])
+
+
 @pytest.mark.feature("lab-remote-in-workspaces")
 @pytest.mark.parametrize(
     ("hook", "code"),

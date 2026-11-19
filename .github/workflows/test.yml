@@ -628,7 +628,7 @@ jobs:
             echo "::error::No dev push Tests run passed, so the queue run has no dev durations."
             exit 1
           fi
-          kept=" $(read_api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?per_page=100" --jq '[.artifacts[] | select(.expired | not) | .name] | join(" ")') "
+          kept=" $(read_api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?name=durations-merged" --jq '[.artifacts[] | select(.expired | not) | .name] | join(" ")') "
           if [[ "$kept" != *" durations-merged "* ]]; then
             echo "::error::Dev push run $run kept no live durations-merged artifact."
             exit 1
@@ -656,7 +656,10 @@ jobs:
           runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?branch=dev&event=push&$filter&per_page=20" --jq '.workflow_runs[] | "\(.id) \(.head_sha)"')
           while read -r run head; do
             [[ -n "$run" ]] || continue
-            kept=" $(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?per_page=100" --jq '[.artifacts[] | select(.expired | not) | .name] | join(" ")') "
+            kept=" "
+            for name in durations-merged coverage-baseline; do
+              kept+="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?name=$name" --jq '[.artifacts[] | select(.expired | not) | .name] | join(" ")') "
+            done
             if [[ "$kept" == *" durations-merged "* && "$kept" == *" coverage-baseline "* ]]; then
               ancestry=$(gh api "repos/$GITHUB_REPOSITORY/compare/$head...dev" --jq .status)
               [[ "$ancestry" == ahead || "$ancestry" == identical ]] || continue
@@ -3094,6 +3097,16 @@ jobs:
             cd "$RUNNER_TEMP/grader"
           fi
           python -m scripts.ci_for_substitution --root "$GITHUB_WORKSPACE"
+
+      - name: Refuse changelog fragments named off the branch or opening without a section heading
+        if: ${{ !cancelled() }}
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          if [[ -f "$RUNNER_TEMP/grader/scripts/ci_changelog_fragments.py" ]]; then
+            cd "$RUNNER_TEMP/grader"
+          fi
+          python -m scripts.ci_changelog_fragments --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE" --branch "$BRANCH"
 
       - name: Require trusted actors before private runner admission
         if: ${{ !cancelled() }}

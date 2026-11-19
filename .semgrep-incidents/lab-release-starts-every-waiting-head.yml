@@ -1,0 +1,34 @@
+rules:
+  - id: lab-release-starts-every-waiting-head
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The lab scheduler release loop starts waiting heads with no bound on the pass. On 19 November 3225 waiting heads
+      expanded one after another on the pass thread, so admission never ran, all 74230 units of 244 live grades stayed
+      held and workers leased nothing. Count each start and break out of the loop once the count reaches the pass's
+      bound, so admission runs every pass.
+    paths:
+      include:
+        - /scripts/ci_lab/scheduler.py
+        - lab-release-starts-every-waiting-head.py
+    patterns:
+      - pattern-inside: |
+          for $ENTRY in $WAITING:
+              ...
+      - pattern: $SCHEDULER._start(...)
+      - pattern-not-inside: |
+          for $ENTRY in $WAITING:
+              ...
+              $STARTED += 1
+              ...
+              if <... $STARTED ...>:
+                  break
+              ...
+      - pattern-not-inside: |
+          for $ENTRY in $WAITING:
+              ...
+              if <... $STARTED ...>:
+                  break
+              ...
+              $STARTED += 1
+              ...

@@ -79,7 +79,7 @@ server_pid=""
 cleanup() {
     [[ -n "$server_pid" ]] && kill "$server_pid" 2>/dev/null || true
     [[ -n "$sshd_pid" ]] && kill "$sshd_pid" 2>/dev/null || true
-    rm -f "$proof_root/sshd/host_key" "$proof_root/client/id"
+    rm -f "$proof_root/sshd/host_key" "$proof_root/client/id" || true
 }
 trap cleanup EXIT
 

@@ -2,6 +2,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from hooks.classifier import ClassifierUnavailable, decide, definitions, runner
+from scripts.swarm import default_models
 from scripts.swarm.effort_range import DEFAULT as DEFAULT_RANGE
 from scripts.swarm.effort_range import EFFORTS, clamp
 
@@ -41,6 +42,11 @@ def frontier(harness: str, default_model: str = "") -> ModelPick:
     from scripts.init_agent import MODEL_DEFAULTS
 
     return ModelPick(default_model or MODEL_DEFAULTS[harness], FRONTIER_EFFORT, "frontier")
+
+
+def master(config: Any, harness: str) -> ModelPick:
+    """The master launch model: the frontier pick on the swarm's model setting for the harness."""
+    return frontier(harness, default_models.model(config, harness))
 
 
 def band(harness: str, difficulty: str | None, rank: str | None) -> tuple[ModelPick, ...]:

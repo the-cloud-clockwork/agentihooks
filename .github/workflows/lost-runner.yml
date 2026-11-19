@@ -39,7 +39,14 @@ jobs:
           permission-actions: write
           permission-organization-self-hosted-runners: read
 
+      - name: Cancel queued runs that GitHub left untouched for a day
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PYTHONUNBUFFERED: "1"
+        run: python -m scripts.ci_stale_runs --repo "$GITHUB_REPOSITORY"
+
       - name: Cancel stalled Tests runs and rerun their failed jobs once
+        if: ${{ !cancelled() && steps.app-token.outcome == 'success' }}
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           PYTHONUNBUFFERED: "1"

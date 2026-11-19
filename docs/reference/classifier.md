@@ -206,7 +206,7 @@ Sonnet step and takes the picked effort; otherwise the Opus or Sol steps use the
 harness default model, which `AGENTIHOOKS_CLAUDE_MODEL` or `AGENTIHOOKS_CODEX_MODEL`
 can name.
 Explicit lane efforts never consult the classifier, planners launch the medium
-default, and a master always launches on the frontier model at high effort for its
+default, and a master always launches on the frontier model at xhigh effort for its
 harness, whatever its lane or the environment names, and records `frontier`.
 Each decision it asks for uses purpose `model-pick` in the classifier log.
 
