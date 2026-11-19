@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -o errexit -o nounset -o pipefail
+set -o nounset -o pipefail -o errexit
 
 cleanup() {
   # ruleid: exit-trap-unguarded-command

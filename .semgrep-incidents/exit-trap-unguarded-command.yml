@@ -12,7 +12,7 @@ rules:
         - '*.sh'
         - '*.bash'
     patterns:
-      - pattern-regex: (?ms)\A(?=.*^[ \t]*set[ \t]+(?:-[a-zA-Z]*e[a-zA-Z]*|-o[ \t]+errexit)\b).*
+      - pattern-regex: (?ms)\A(?=.*^[ \t]*set[ \t]+(?!--)(?:[^\n;#]*?[ \t])?(?:-[a-zA-Z]*e[a-zA-Z]*|-o[ \t]+errexit)\b).*
       - pattern-either:
           - pattern-regex: (?ms)^([ \t]*)(?|function[ \t]+(\w+)(?:[ \t]*\(\))?|(\w+)[ \t]*\(\))\s*\{(?P<HANDLER>(?:[ \t]*$.*?^\1)|[^\n]*)\}(?=.*^[ \t]*trap[ \t]+(?:--[ \t]+)?(['"]?)\2\4[ \t]+(?:\w+[ \t]+)*EXIT\b)
           - pattern-regex: (?ms)^[ \t]*trap[ \t]+(?:--[ \t]+)?(['"]?)(\w+)\1[ \t]+(?:\w+[ \t]+)*EXIT\b.*?^([ \t]*)(?:function[ \t]+\2(?:[ \t]*\(\))?|\2[ \t]*\(\))\s*\{(?P<HANDLER>(?:[ \t]*$.*?^\3)|[^\n]*)\}
