@@ -2,6 +2,7 @@ import json
 import os
 import resource
 import subprocess
+import threading
 import tomllib
 from pathlib import Path
 from types import SimpleNamespace
@@ -588,15 +589,15 @@ def _error_per_checked_source(monkeypatch: pytest.MonkeyPatch, root: Path) -> li
 
 
 @pytest.mark.feature("type-gate-repeatable-counts")
-@pytest.mark.parametrize(("count", "sizes"), [(1000, [1000]), (1001, [501, 500]), (2001, [667, 667, 667])])
-def test_measure_checks_at_most_a_thousand_sources_per_checker_process_and_sums_their_counts(
+@pytest.mark.parametrize(("count", "sizes"), [(100, [100]), (101, [51, 50]), (201, [67, 67, 67])])
+def test_measure_checks_at_most_a_hundred_sources_per_checker_process_and_sums_their_counts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, count: int, sizes: list[int]
 ) -> None:
     files = _test_sources(tmp_path, count)
     runs = _error_per_checked_source(monkeypatch, tmp_path)
     assert type_gate.measure(tmp_path, files[::-1]) == dict.fromkeys(files, 1)
-    assert [len(checked) for checked in runs] == sizes
-    assert [path for checked in runs for path in checked] == files
+    assert [len(checked) for checked in sorted(runs)] == sizes
+    assert [path for checked in sorted(runs) for path in checked] == files
 
 
 @pytest.mark.feature("type-gate-one-context")
@@ -624,10 +625,36 @@ def test_a_file_counts_the_same_errors_whichever_other_files_the_gate_checks(
 def test_the_gate_checks_a_run_of_the_every_source_layout_through_its_last_graded_source(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    files = _test_sources(tmp_path, 1001)
+    files = _test_sources(tmp_path, 201)
     runs = _error_per_checked_source(monkeypatch, tmp_path)
-    assert type_gate.measure(tmp_path, [files[700], files[600]]) == {files[600]: 1, files[700]: 1}
-    assert runs == [files[501:701]]
+    assert type_gate.measure(tmp_path, [files[120], files[30], files[100]]) == dict.fromkeys(
+        [files[30], files[100], files[120]], 1
+    )
+    assert sorted(runs) == [files[:31], files[67:121]]
+
+
+@pytest.mark.feature("type-gate-one-context")
+def test_the_gate_checks_four_runs_at_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _test_sources(tmp_path, 800)
+    barrier = threading.Barrier(4, timeout=5)
+    lock = threading.Lock()
+    active = peak = calls = 0
+
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        nonlocal active, peak, calls
+        with lock:
+            active += 1
+            calls += 1
+            peak = max(peak, active)
+        barrier.wait()
+        with lock:
+            active -= 1
+        report = {"generalDiagnostics": [], "summary": {"filesAnalyzed": 1}}
+        return subprocess.CompletedProcess(command, 0, json.dumps(report), "")
+
+    monkeypatch.setattr(type_gate.subprocess, "run", run)
+    assert type_gate.measure(tmp_path) == {}
+    assert (peak, calls) == (4, 8)
 
 
 def _peak(monkeypatch: pytest.MonkeyPatch, kib: int) -> None:

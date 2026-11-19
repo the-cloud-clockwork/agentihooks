@@ -9,6 +9,8 @@ import resource
 import subprocess
 import sys
 import tomllib
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from itertools import accumulate
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -26,7 +28,8 @@ CONFIG = {
 _BASEDPYRIGHT = (sys.executable, "-I", "-m", "basedpyright")
 _HEAP_MB = 5120
 _NODE_OPTIONS = f"--max-old-space-size={_HEAP_MB}"
-_RUN = 1000
+_RUN = 100
+_WORKERS = 4
 _PEAK_KIB = int(_HEAP_MB * 1024 * 0.9 / 1.05)
 
 
@@ -64,7 +67,7 @@ def sources(head: Path) -> list[str]:
 
 
 def runs(head: Path) -> list[list[str]]:
-    """Split every source of the head into contiguous sorted runs of at most a thousand files, balanced in size."""
+    """Split every source of the head into contiguous sorted runs of at most a hundred files, balanced in size."""
     files = sources(head)
     if not files:
         return []
@@ -78,11 +81,11 @@ def measure(head: Path, files: list[str] | None = None) -> dict[str, int]:
     basedpyright keeps the types it infers across the files of one process, so the files it checks before a source
     can change what it counts there, while the files after it cannot. A source is therefore counted in its run of the
     head's every source layout whichever sources are graded: each run holding a graded source is checked from its
-    first source through its last graded one. An empty list measures nothing. The Node heap limit keeps the checker
-    inside the 6 GiB memory limit of the anton-oss runner container. Once its heap use, plus the five percent it adds,
-    passes ninety percent of that limit, 4388 MB, basedpyright empties its whole type cache at points garbage
-    collection decides and can count other errors on another runner, so a measurement whose checker processes reached
-    that line in resident memory, which bounds heap use from above, is refused.
+    first source through its last graded one, four runs at a time, one process each. An empty list measures nothing.
+    Each checker's Node heap is limited to 5120 MB. Once its heap use, plus the five percent it adds, passes ninety
+    percent of that limit, 4388 MB, basedpyright empties its whole type cache at points garbage collection decides and
+    can count other errors on another runner, so a measurement whose checker processes reached that line in resident
+    memory, which bounds heap use from above, is refused.
     """
     wanted = None if files is None else set(files)
     checks: list[list[str]] = []
@@ -92,10 +95,12 @@ def measure(head: Path, files: list[str] | None = None) -> dict[str, int]:
             checks.append(run[: graded[-1] + 1])
     if not checks:
         return {}
+    with ThreadPoolExecutor(_WORKERS) as pool:
+        reports = list(pool.map(partial(_check, head), checks))
     root = head.resolve()
     counts: dict[str, int] = {}
-    for check in checks:
-        for diagnostic in _check(head, check):
+    for diagnostics in reports:
+        for diagnostic in diagnostics:
             if diagnostic["severity"] == "error":
                 path = Path(diagnostic["file"]).resolve().relative_to(root).as_posix()
                 if wanted is None or path in wanted:

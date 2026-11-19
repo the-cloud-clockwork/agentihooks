@@ -6418,10 +6418,10 @@
       "id": "type-gate-repeatable-counts",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-strict-type-gate-flake",
-      "behaviour": "The strict type gate checks its sorted sources in contiguous runs of at most a thousand files, one basedpyright process each, and refuses a measurement whose checker reached the memory line where basedpyright empties its type cache, so one commit counts the same type errors on every run.",
+      "behaviour": "The strict type gate checks its sorted sources in contiguous runs of at most a hundred files, one basedpyright process each, and refuses a measurement whose checker reached the memory line where basedpyright empties its type cache, so one commit counts the same type errors on every run.",
       "seam": "scripts.type_gate.measure through its basedpyright subprocess runs and the peak resident memory of its child processes",
       "tests": [
-        "tests/test_type_gate.py::test_measure_checks_at_most_a_thousand_sources_per_checker_process_and_sums_their_counts",
+        "tests/test_type_gate.py::test_measure_checks_at_most_a_hundred_sources_per_checker_process_and_sums_their_counts",
         "tests/test_type_gate.py::test_a_checker_peak_at_the_line_where_basedpyright_empties_its_type_cache_is_refused",
         "tests/test_type_gate.py::test_a_checker_peak_under_the_line_where_basedpyright_empties_its_type_cache_is_kept"
       ]
@@ -9932,11 +9932,12 @@
       "id": "type-gate-one-context",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2611",
-      "behaviour": "The strict type gate counts each source in its run of the head's every source layout, checked from the run's first source through its last graded one, so a pull request, prepush and a baseline refresh count a file the same type errors at one commit whichever other files they grade.",
+      "behaviour": "The strict type gate counts each source in its run of the head's every source layout, checked from the run's first source through its last graded one with four runs checked at once, so a pull request, prepush and a baseline refresh count a file the same type errors at one commit whichever other files they grade.",
       "seam": "scripts.type_gate.measure through the source lists of its basedpyright runs",
       "tests": [
         "tests/test_type_gate.py::test_a_file_counts_the_same_errors_whichever_other_files_the_gate_checks",
-        "tests/test_type_gate.py::test_the_gate_checks_a_run_of_the_every_source_layout_through_its_last_graded_source"
+        "tests/test_type_gate.py::test_the_gate_checks_a_run_of_the_every_source_layout_through_its_last_graded_source",
+        "tests/test_type_gate.py::test_the_gate_checks_four_runs_at_once"
       ]
     }
   ],
