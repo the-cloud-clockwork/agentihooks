@@ -119,7 +119,7 @@ def space(repo, code, slug=""):
 
 def plain(name: str) -> str:
     """The name for places that refuse an at sign: git branches, worktree folders and herdr agent names."""
-    return name.replace("@", "-")
+    return "-".join(name.split("@"))
 
 
 def _clean(text):
