@@ -2,6 +2,8 @@ import json
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -55,3 +57,90 @@ def test_a_plant_has_reproducible_commits_and_preserves_the_checkout(repository:
     assert git(repository, "rev-parse", "HEAD") == base
     assert git(repository, "ls-files", "--stage") == original_index
     assert (repository / path).read_text() == original_source
+
+
+@pytest.mark.parametrize("name", ["lint", "gate-script"])
+def test_a_pair_names_its_gate_reason_and_fixed_commit_metadata(repository: Path, name: str) -> None:
+    pair = plant_proofs.prepare(repository, name, "HEAD")
+    assert pair.name == name
+    assert pair.gate == "lint"
+    assert (
+        pair.reason
+        == {
+            "lint": "I001: import block is unsorted",
+            "gate-script": "new comment: the base grader refuses the head's invented directive",
+        }[name]
+    )
+    for revision, subject in [(pair.green, f"CI lab {name} twin"), (pair.red, f"CI lab {name} plant")]:
+        assert git(repository, "show", "-s", "--format=%an|%ae|%cn|%ce|%aI|%cI|%s", revision) == (
+            "CI lab plant|ci-lab@example.invalid|CI lab plant|ci-lab@example.invalid|"
+            f"2000-01-01T00:00:00+00:00|2000-01-01T00:00:00+00:00|{subject}"
+        )
+
+
+@pytest.mark.parametrize("name", ["", "Lint", "../lint", "lint/other", "lint\n"])
+def test_a_plant_name_cannot_escape_its_catalog(repository: Path, name: str) -> None:
+    with pytest.raises(ValueError, match="^a plant name contains lowercase words and hyphens$"):
+        plant_proofs.prepare(repository, name, "HEAD")
+
+
+@pytest.mark.parametrize("source", ["missing\n", "before\nbefore\n"])
+def test_an_edit_with_zero_or_two_matches_is_refused(repository: Path, source: str) -> None:
+    target = repository / "sample.py"
+    target.write_text(source)
+    git(repository, "add", "sample.py")
+    git(repository, "commit", "-qm", "Seed exact edit")
+    fixture = repository / "tests/ci_lab/plants/lint.json"
+    fixture.write_text(
+        json.dumps(
+            {
+                "gate": "lint",
+                "reason": "exact edit",
+                "edits": [
+                    {"path": "sample.py", "before": "before", "after": "after"},
+                ],
+            }
+        )
+    )
+    with pytest.raises(ValueError, match="^lint: sample.py must match its edit exactly once$"):
+        plant_proofs.prepare(repository, "lint", "HEAD")
+
+
+def test_ordered_edits_preserve_all_other_bytes_and_the_executable_mode(repository: Path) -> None:
+    target = repository / "sample.py"
+    target.write_text("before\nuntouched\n")
+    target.chmod(0o755)
+    git(repository, "add", "sample.py")
+    git(repository, "commit", "-qm", "Seed executable")
+    fixture = repository / "tests/ci_lab/plants/lint.json"
+    fixture.write_text(
+        json.dumps(
+            {
+                "gate": "lint",
+                "reason": "exact edit",
+                "edits": [
+                    {"path": "sample.py", "before": "before", "after": "middle"},
+                    {"path": "sample.py", "before": "middle", "after": "after"},
+                ],
+            }
+        )
+    )
+    pair = plant_proofs.prepare(repository, "lint", "HEAD")
+    assert git(repository, "show", f"{pair.red}:sample.py") == "after\nuntouched"
+    assert git(repository, "ls-tree", pair.red, "sample.py").startswith("100755 blob ")
+    assert target.read_text() == "before\nuntouched\n"
+    assert not (repository / "None").exists()
+
+
+def test_git_failures_are_raised_and_every_git_process_has_a_deadline(repository: Path) -> None:
+    real_run = subprocess.run
+
+    def bounded(arguments: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        assert kwargs["timeout"] == 60
+        assert kwargs["check"] is True
+        return real_run(arguments, **kwargs)
+
+    with patch.object(plant_proofs.subprocess, "run", side_effect=bounded):
+        plant_proofs.prepare(repository, "lint", "HEAD")
+        with pytest.raises(subprocess.CalledProcessError):
+            plant_proofs.prepare(repository, "lint", "missing-revision")
