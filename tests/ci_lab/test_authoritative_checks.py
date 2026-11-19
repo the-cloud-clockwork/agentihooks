@@ -119,6 +119,23 @@ def test_a_restarted_scheduler_seeds_each_check_run_under_the_name_the_grade_ope
 
 
 @pytest.mark.feature("lab-authoritative-check-names")
+def test_a_grade_state_stored_before_the_list_was_kept_loads_with_none_and_keeps_posting_shadow(
+    lab: Callable[..., Run],
+) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)})})
+    run.push(HEAD_A, event="pull_request", action="synchronize")
+    run.tick(1000)
+    key = scheduler.GRADES + run.grade(HEAD_A).run
+    stored = json.loads(run.lab.client.get(key))
+    del stored["authoritative"]
+    run.lab.client.set(key, json.dumps(stored))
+    run.lease()
+    run.tick(1100)
+    assert run.grade(HEAD_A).authoritative == []
+    assert [shadow for *_, shadow in run.lab.poster.posts] == [True, True, True, True]
+
+
+@pytest.mark.feature("lab-authoritative-check-names")
 def test_a_merge_group_grade_takes_the_queue_list_and_a_pull_request_or_hotfix_grade_the_lab_list() -> None:
     block = {"authoritative": ["lint"], "queue": {"full_suite_entries": 5, "authoritative": ["unit"]}}
     for tier in (Priority.HOTFIX, Priority.PULL_REQUEST):

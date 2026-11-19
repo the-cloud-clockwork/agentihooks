@@ -8990,6 +8990,7 @@
         "tests/ci_lab/test_authoritative_checks.py::test_a_pull_request_grade_posts_the_gates_its_base_lists_as_authoritative_as_lab_and_the_rest_as_lab_shadow",
         "tests/ci_lab/test_authoritative_checks.py::test_a_head_listing_a_gate_itself_and_a_dev_push_grade_post_every_check_as_lab_shadow",
         "tests/ci_lab/test_authoritative_checks.py::test_a_restarted_scheduler_seeds_each_check_run_under_the_name_the_grade_opened_it_with",
+        "tests/ci_lab/test_authoritative_checks.py::test_a_grade_state_stored_before_the_list_was_kept_loads_with_none_and_keeps_posting_shadow",
         "tests/ci_lab/test_authoritative_checks.py::test_a_merge_group_grade_takes_the_queue_list_and_a_pull_request_or_hotfix_grade_the_lab_list"
       ]
     },
