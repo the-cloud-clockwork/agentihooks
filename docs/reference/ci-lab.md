@@ -1288,11 +1288,11 @@ This excerpt is the worker rollout that followed pull request 1917 on 19 Novembe
 15:57:20.65  ci-lab           Scheduled         ci-lab-worker-8678fc4dbf-xh7zp      Successfully assigned ci-lab/ci-lab-worker-8678fc4dbf-xh7zp to <ci node>
 ```
 
-`<ci node>` is one node of the CI pool, the same in every line, and the runner pod names are
-shown by the runner set they belong to. The pending worker preempted a merge queue runner and two
+`<ci node>` is one node of the CI pool, the same in every line, and each runner pod is shown as a
+placeholder that names its runner set. The pending worker preempted a merge queue runner and two
 pull request runners, then waited for them to terminate and was scheduled 8.6 seconds after its
 first `FailedScheduling`. The other two workers of that rollout were scheduled 5.5 and 4.5 seconds
-after theirs. The three evicted ten runner pods in all: four merge queue runners, three pull
+after theirs. The three workers evicted ten runner pods in all: four merge queue runners, three pull
 request runners, one batch runner and two runners from the `arc-runners` namespace. No node cache
 pod was evicted.
 
