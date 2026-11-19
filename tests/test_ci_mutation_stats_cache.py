@@ -1592,11 +1592,11 @@ def test_the_discovery_digest_of_one_input_set_is_computed_once(tmp_path: Path) 
 
     resources = {"data/": {"data/a.json"}, "data/a.json": {"data/a.json"}, "a.json": {"data/a.json"}}
     inputs = StatsInputs(root, {}, resources, {}, discovered=Counted())
-    shared = {"scripts/scan.py": "scan", "scripts/plain.py": "plain"}
+    shared = {"scripts/scan.py": "same", "scripts/plain.py": "same"}
     digest = inputs.discovery(shared)
     assert inputs.discovery(dict(reversed(shared.items()))) == digest
     assert reads == {"scripts/scan.py": 1, "scripts/plain.py": 1}
-    assert inputs.discovery({"scripts/plain.py": "plain"}) != digest
+    assert inputs.discovery({"scripts/plain.py": "same"}) != digest
     assert reads == {"scripts/scan.py": 1, "scripts/plain.py": 2}
 
 
