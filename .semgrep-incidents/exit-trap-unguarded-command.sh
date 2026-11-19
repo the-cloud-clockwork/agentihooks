@@ -15,9 +15,21 @@ cleanup() {
     kill "$pid"
   fi
   # ok: exit-trap-unguarded-command
+  if kill -0 "$pid" 2>/dev/null
+  then
+    # ruleid: exit-trap-unguarded-command
+    kill "$pid"
+  fi
+  # ok: exit-trap-unguarded-command
   while kill -0 "$pid" 2>/dev/null; do
     # ok: exit-trap-unguarded-command
     sleep 1 || true
+  done
+  # ok: exit-trap-unguarded-command
+  until docker info >/dev/null 2>&1; do
+    # ok: exit-trap-unguarded-command
+    sleep 1 || true
+  # ok: exit-trap-unguarded-command
   done
   # ok: exit-trap-unguarded-command
   kill "${pid:-}" 2>/dev/null || true
@@ -70,6 +82,13 @@ quiet() {
 }
 trap 'quiet' EXIT
 
+relaxed() {
+  set +o errexit
+  # ok: exit-trap-unguarded-command
+  docker compose down --volumes
+}
+trap relaxed EXIT
+
 guarded() {
   # ok: exit-trap-unguarded-command
   rm -r -- "$tls"
@@ -118,7 +137,7 @@ trap 'docker compose down --volumes' EXIT
 # ruleid: exit-trap-unguarded-command
 trap 'rm -f "$out" "$err"' EXIT
 # ruleid: exit-trap-unguarded-command
-trap "rm -f $tmp" EXIT
+trap "rm -f \"$tmp\"" EXIT
 # ruleid: exit-trap-unguarded-command
 trap -- 'docker logout ghcr.io' EXIT
 # ok: exit-trap-unguarded-command
