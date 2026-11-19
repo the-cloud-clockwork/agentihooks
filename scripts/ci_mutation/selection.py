@@ -10,6 +10,7 @@ import tempfile
 import traceback
 from collections import Counter
 from pathlib import Path
+import time
 from time import process_time
 from types import ModuleType, SimpleNamespace
 from typing import TYPE_CHECKING
@@ -38,6 +39,17 @@ if TYPE_CHECKING:
 GROUP = re.compile(r"xdist_group\(\s*(?:name\s*=\s*)?[\"']([^\"']+)[\"']")
 # This group only loads fakeredis once per xdist worker; it guards no shared resource.
 IMPORT_GROUPS = {"fakeredis"}
+
+
+def timing(name, start):
+    now = time.monotonic()
+    print(f"Mutation stats cache: timing {name} {now - start:.1f}s", flush=True)
+    return now
+
+
+def process_age():
+    fields = Path("/proc/self/stat").read_text().rpartition(")")[2].split()
+    return float(Path("/proc/uptime").read_text().split()[0]) - int(fields[19]) / os.sysconf("SC_CLK_TCK")
 
 
 def changed_mutations(filename: str, source: str, changed: set[int]) -> tuple[Module, list[Mutation]]:
@@ -368,6 +380,17 @@ def collect_shard_stats(runner, test_runner, tests: list[str], output: Path, bas
         "not wall_clock",
         f"--basetemp={basetemp}",
     ]
+    marks = {"start": time.monotonic()}
+    import _pytest.main
+
+    original = _pytest.main.Session.perform_collect
+
+    def perform_collect(self, *args, **kwargs):
+        items = original(self, *args, **kwargs)
+        marks.setdefault("collected", time.monotonic())
+        return items
+
+    _pytest.main.Session.perform_collect = perform_collect
     measured = bool(os.environ.get("MUTATION_STATS_CACHE"))
     coverage_file = output.with_suffix(".coverage")
     if measured:
@@ -388,6 +411,7 @@ def collect_shard_stats(runner, test_runner, tests: list[str], output: Path, bas
     status = test_runner.run_stats(tests=tests)
     # A bucket of only wall clock tests deselects everything, and pytest reports that as no tests collected.
     status = 0 if status == pytest.ExitCode.NO_TESTS_COLLECTED else status
+    marks["run"] = time.monotonic()
     dependencies = {}
     if measured:
         from subprocess import check_output
@@ -399,6 +423,7 @@ def collect_shard_stats(runner, test_runner, tests: list[str], output: Path, bas
         dependencies["dependencies"] = measured_dependencies(
             coverage_file, Path.cwd() / "mutants", root, list(runner.mutmut.duration_by_test), tracked
         )
+    marks["dependencies"] = time.monotonic()
     tests_by_function = {name: sorted(names) for name, names in runner.mutmut.tests_by_mangled_function_name.items()}
     output.write_text(
         json.dumps(
@@ -410,6 +435,11 @@ def collect_shard_stats(runner, test_runner, tests: list[str], output: Path, bas
                 "durations": runner.mutmut.duration_by_test,
                 "files": tests,
                 "modules": loaded_files(bases),
+                "timing": {
+                    "collect": marks.get("collected", marks["run"]) - marks["start"],
+                    "tests": marks["run"] - marks.get("collected", marks["run"]),
+                    "dependencies": marks["dependencies"] - marks["run"],
+                },
             }
         )
     )
@@ -438,10 +468,22 @@ def run_stats_buckets(runner, test_runner, shards: list[list[str]], work: Path) 
         process = context.Process(target=collect_and_exit, args=(runner, test_runner, tests, output, basetemp))
         process.start()
         processes.append((process, output))
+    started = time.monotonic()
     results = []
     for process, output in processes:
         process.join()
         results.append(json.loads(output.read_text()) if process.exitcode == 0 else {"status": process.exitcode})
+    for index, result in enumerate(results):
+        spent = result.get("timing", {})
+        durations = result.get("durations", {})
+        print(
+            f"Mutation stats cache: timing bucket {index} collect {spent.get('collect', 0):.1f}s"
+            f" tests {spent.get('tests', 0):.1f}s dependencies {spent.get('dependencies', 0):.1f}s"
+            f" cpu {result.get('cpu', 0):.1f}s count {len(durations)} durations {sum(durations.values()):.1f}s"
+            f" files {len({test_file(test) for test in durations})}",
+            flush=True,
+        )
+    timing(f"buckets {len(processes)}", started)
     if failed := [result["status"] for result in results if result["status"] != 0]:
         print(f"failed to collect stats. runner returned {failed}", flush=True)
         raise SystemExit(1)
@@ -499,6 +541,8 @@ def collect_file_stats(runner, test_runner, files: list[str], workers: int, work
 
 
 def load_or_collect_stats(runner, test_runner, paths: list[str], mode: str, stats: tuple[str, ...]) -> None:
+    print(f"Mutation stats cache: timing before stats {process_age():.1f}s", flush=True)
+    clock = time.monotonic()
     if mode not in ("", "collect", "reuse"):
         raise ValueError(f"unknown mutation stats mode {mode!r}")
     for path in paths:
@@ -518,15 +562,22 @@ def load_or_collect_stats(runner, test_runner, paths: list[str], mode: str, stat
     relative = config.source_paths
     config.source_paths = [(Path("mutants") / path).resolve() for path in relative]
     workers = worker_count(len(os.sched_getaffinity(0)))
+    print(f"Mutation stats cache: timing workers {workers} quota {quota_cpus()} affinity {len(os.sched_getaffinity(0))}", flush=True)
+    clock = timing("mutation data", clock)
     try:
         if mode == "collect":
             output, key, index, total = Path(stats[0]), stats[1], int(stats[2]), int(stats[3])
             files = config.pytest_add_cli_args_test_selection
+            print(f"Mutation stats cache: timing selected entries {len(files)}", flush=True)
             if total > 1:
                 files = collect_test_ids(test_runner, files)
+                clock = timing(f"collect test ids {len(files)}", clock)
             split = split_files(Path.cwd(), files, total)
+            clock = timing("split", clock)
             results = collect_file_stats(runner, test_runner, split[index], workers, Path.cwd())
+            clock = timing("cached stats", clock)
             write_part(output, key, (index, total), results, split_key(split))
+            clock = timing("write part", clock)
             raise SystemExit(0)
         shards = stats_shards(Path.cwd(), config.pytest_add_cli_args_test_selection, workers)
         collect_parallel_stats(runner, test_runner, shards, Path.cwd())

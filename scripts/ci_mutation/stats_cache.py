@@ -5,6 +5,7 @@ import hashlib
 import json
 import subprocess
 import sys
+import time
 import tomllib
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -338,6 +339,7 @@ def collect_cached_stats(
 ) -> list[dict]:
     from scripts.ci_mutation.stats_dependencies import StoredStats, cap
 
+    clock = time.monotonic()
     tracked = subprocess.check_output(TRACKED, cwd=root, text=True).split("\0")
     sources = {
         path: hashlib.sha256((root / path).read_bytes()).hexdigest()
@@ -359,12 +361,15 @@ def collect_cached_stats(
                 resources.setdefault(str(parent) + "/", set()).add(path)
     inputs = StatsInputs(root, modules, resources, changes)
     stored = StoredStats(root, folder, context, changes)
+    report(f"Mutation stats cache: timing inventory {time.monotonic() - clock:.1f}s"); clock = time.monotonic()
     stored.prune()
+    report(f"Mutation stats cache: timing prune {time.monotonic() - clock:.1f}s"); clock = time.monotonic()
     compatible = {
         path: record
         for path in files
         if (record := stored.load(path, functools.partial(inputs.matches, path))) is not None
     }
+    report(f"Mutation stats cache: timing load {time.monotonic() - clock:.1f}s"); clock = time.monotonic()
     reused = list(compatible.values())
     missing = [path for path in files if path not in compatible]
     report(f"Mutation stats cache: reused {len(reused)} test files; collect {len(missing)}")
@@ -373,6 +378,7 @@ def collect_cached_stats(
     fresh = collect(missing) if missing else []
     if any(result["status"] != 0 for result in fresh):
         raise SystemExit(1)
+    report(f"Mutation stats cache: timing collect {time.monotonic() - clock:.1f}s"); clock = time.monotonic()
     functions = {function for result in fresh for function in result["tests"]}
     sliced = fresh_by_path(missing, fresh)
     for path in missing:
@@ -380,7 +386,9 @@ def collect_cached_stats(
         if result is not None:
             dependencies = inputs.for_test(path, covered, fresh)
             stored.save(path, result, dependencies, covered is not None, inputs.discovery(dependencies))
+    report(f"Mutation stats cache: timing records {time.monotonic() - clock:.1f}s"); clock = time.monotonic()
     cap(folder)
+    report(f"Mutation stats cache: timing cap {time.monotonic() - clock:.1f}s")
     return reused + [
         {name: value for name, value in result.items() if name not in ("files", "modules")} for result in fresh
     ]
