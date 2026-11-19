@@ -1024,11 +1024,11 @@ class StoredManifests:
         return None
 
     def _prune(self, folder: str, stored: frozenset[str]) -> None:
-        """Remove each note whose commit has no stored manifest, a note written without a commit included."""
+        """Remove each note whose commit folder names no stored manifest, a note written without a commit folder
+        included."""
         notes = folder + NOTES
         for name in [path for path in stored if path.startswith(notes)]:
-            commit, _, rest = name.removeprefix(notes).partition("/")
-            if not (rest and f"{folder}{commit}.json" in stored):
+            if f"{folder}{PurePosixPath(name).parent.name}.json" not in stored:
                 self.objects.remove(name)
 
     def _merged(self, manifest: dict[str, Any], folder: str, stored: frozenset[str]) -> dict[str, Any]:
