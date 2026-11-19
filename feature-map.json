@@ -1,19 +1,6 @@
 {
   "features": [
     {
-      "id": "master-effort-xhigh",
-      "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-effort-xhigh",
-      "behaviour": "Masters start at effort xhigh by default and never below it, including handoff successors and restored sessions with a saved lower effort. Other lanes retain their configured swarm effort range.",
-      "seam": "master_launch.fill, HerdrRuntime.spawn and HerdrRuntime.resume at the harness arguments, and effort_range.bounds for worker lanes",
-      "tests": [
-        "tests/swarm/test_master_effort_xhigh.py::test_master_defaults_and_saved_lower_efforts_start_at_xhigh",
-        "tests/swarm/test_master_effort_xhigh.py::test_new_and_handoff_master_launches_pass_xhigh_to_the_harness",
-        "tests/swarm/test_master_effort_xhigh.py::test_restored_masters_raise_saved_effort_to_xhigh",
-        "tests/swarm/test_master_effort_xhigh.py::test_worker_lanes_keep_the_swarm_effort_range"
-      ]
-    },
-    {
       "id": "lab-skipped-authoritative-gates",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2516",
@@ -10448,6 +10435,19 @@
       "id": "swarm-tick-spawn",
       "reason": "The legacy tick launch engine is removed; every swarm launches through hub events only, covered by swarm-events-only-launch.",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-legacy-events-only"
+    },
+    {
+      "id": "master-effort-xhigh",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-effort-xhigh",
+      "behaviour": "Masters start at effort xhigh by default and never below it, including handoff successors and restored sessions with a saved lower effort. Other lanes retain their configured swarm effort range.",
+      "seam": "master_launch.fill, HerdrRuntime.spawn and HerdrRuntime.resume at the harness arguments, and effort_range.bounds for worker lanes",
+      "tests": [
+        "tests/swarm/test_master_effort_xhigh.py::test_master_defaults_and_saved_lower_efforts_start_at_xhigh",
+        "tests/swarm/test_master_effort_xhigh.py::test_new_and_handoff_master_launches_pass_xhigh_to_the_harness",
+        "tests/swarm/test_master_effort_xhigh.py::test_restored_masters_raise_saved_effort_to_xhigh",
+        "tests/swarm/test_master_effort_xhigh.py::test_worker_lanes_keep_the_swarm_effort_range"
+      ]
     }
   ]
 }
