@@ -4740,7 +4740,6 @@ The reasons, in the order of the pass stages that write them: the pull request r
 
 | Reason | Written when | What to do |
 |---|---|---|
-| `GitHub did not answer a read of its pull request` | The tick's read of the pull request returned nothing. A checks wait also writes it when its fresh read returned nothing or carried no head, which happens when the newest commit in the reading is not the head. The unmergeable and `recover` paths write it when their fresh read fails. | Nothing when it clears on a later tick. On every tick, check that the tick process reaches GitHub and holds a working token; see [Signed GitHub calls in the merge pass](#signed-github-calls-in-the-merge-pass). |
 | `the done gate refuses its split pull requests` | The pull request merged, but the task is split and the done gate refuses to close it. | See [Ready handoffs for split tasks](#ready-handoffs-for-split-tasks). |
 | `it waits on its dependency <target>` | The engineer had a declared wait on another task or pull request when it ran `swarm ready`. The ready record keeps that wait, and the pass holds until the task ends or the pull request is no longer open. | Follow the named task or pull request. |
 | `its owner was told to restack it: <cause>` | GitHub marks the pull request unmergeable while an agent of the task is still running. That agent gets the restack inbox item. | The owner restacks and publishes. |
