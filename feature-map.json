@@ -8960,6 +8960,16 @@
       ]
     },
     {
+      "id": "lab-worker-loss-redelivery",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/ops-chaos-worker-loss",
+      "behaviour": "A CI lab worker killed mid unit stops heartbeating, so its lease expires and the next scheduler pass requeues the unit once and counts it in ci_lab_units_redelivered_total; the dead worker's token can neither extend nor complete the unit; a second worker leases and finishes it, the grade concludes from that run with nothing counted in ci_lab_units_lost_total, its verdict is stored, and the gate's check run and Gate Required each post one completed result.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick and listen read through GET /metrics over fakeredis and the local object store, with two workers leasing, heartbeating and completing through scripts.ci_lab.leases.Leases",
+      "tests": [
+        "tests/ci_lab/test_redelivery.py::test_a_worker_killed_mid_unit_is_redelivered_once_and_its_verdict_posts_once"
+      ]
+    },
+    {
       "id": "lab-scheduler-reindex-on-start",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/ops-dr-rebuild",
