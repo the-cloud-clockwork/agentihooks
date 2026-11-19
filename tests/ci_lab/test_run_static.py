@@ -222,6 +222,38 @@ def test_the_step_reads_its_env_with_expressions_resolved_from_the_context(
     assert settings.root in Path(lines[4]).parents
 
 
+MATRIX = r"""
+jobs:
+  lint:
+    strategy:
+      matrix:
+        python-version: ["3.12"]
+    steps:
+      - name: Read the run
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          COUNTS: ${{ runner.temp }}/counts
+          PYTHON: ${{ matrix.python-version }}
+        run: python -m scripts.read_the_run
+"""
+
+
+@pytest.mark.feature("lab-static-test-count-units")
+def test_the_step_reads_runner_temp_as_its_run_folder_and_each_matrix_value_its_job_holds(
+    tmp_path: Path, settings: run_static.Settings
+) -> None:
+    (gate,) = static_gates.discover(MATRIX)
+    probe = dataclasses.replace(gate, run='echo "$COUNTS"\necho "$RUNNER_TEMP/counts"\necho "$PYTHON"\n')
+    head, base, grader = _folders(tmp_path)
+    context = dataclasses.replace(settings, context={"github.event_name": "pull_request"})
+    result = run_static.run(probe, head, base, grader, context)
+    assert (result.code, result.skipped) == (0, False)
+    counts, folder, python = result.log.read_text().splitlines()
+    assert counts == folder
+    assert settings.root in Path(counts).parents
+    assert python == "3.12"
+
+
 PRODUCING = r"""
 jobs:
   lint:

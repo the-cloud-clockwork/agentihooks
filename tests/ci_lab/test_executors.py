@@ -50,6 +50,7 @@ LEASE_CONTEXT = {
     "github.sha": "h1",
     "github.event.pull_request.head.sha": "h1",
     "github.event.pull_request.base.sha": "b1",
+    "github.event_name": "pull_request",
     "github.run_id": "job",
     "github.run_attempt": "1",
     "github.run_number": "1",
@@ -58,10 +59,7 @@ REFUSED = {
     "lint/refuse-changelog-fragments-named-off-the-branch-or-opening-without-a-section-heading": (
         "no value for 'github.head_ref' in the context"
     ),
-    "lint/artifact-sanity-checks": "no value for 'github.event_name' in the context",
-    "lint/prove-the-mutation-gate-kills-with-the-real-test-and-fails-with-a-weakened-one": (
-        "no value for 'github.event_name' in the context"
-    ),
+    "lint/artifact-sanity-checks": "no value for 'github.base_ref' in the context",
 }
 SECRET_WORKFLOW = r"""
 jobs:
@@ -298,29 +296,50 @@ def live_pod(tmp_path: Path, trees: FakeWorktrees, secrets: dict[str, str]) -> e
     return pod
 
 
-@pytest.mark.feature("lab-static-step-env")
-def test_static_grades_every_lint_gate_of_the_real_workflow_on_a_clean_tree(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, venv: Recorder, bwrap: None
-) -> None:
+def _graded_on_a_clean_tree(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, job: str) -> dict[str, str]:
     registry = json.loads((ROOT / static_gates.REGISTRY).read_text())
     workflow = (ROOT / static_gates.WORKFLOW).read_text()
     discovered = static_gates.discover(workflow, registry, ci_wiring.load(ROOT))
-    lint = {gate.name: dataclasses.replace(gate, run="true") for gate in discovered if gate.job == "lint"}
+    gates = {gate.name: dataclasses.replace(gate, run="true") for gate in discovered if gate.job == job}
 
     def found(grader: Path, name: str) -> StaticGate:
-        return lint[name]
+        return gates[name]
 
     monkeypatch.setattr(executors, "gate", found)
-    clean = {"uv.lock": "lock\n"}
-    trees = FakeWorktrees({"h1": folder(tmp_path, "head", clean), "b1": folder(tmp_path, "base", clean), "g1": ROOT})
+    head = folder(tmp_path, "head", {"uv.lock": "lock\n"})
+    subprocess.run([*GIT, "init", "-q", str(head)], check=True)
+    subprocess.run([*GIT, "-C", str(head), "add", "."], check=True)
+    subprocess.run([*GIT, "-C", str(head), "commit", "-q", "-m", "tree"], check=True)
+    subprocess.run([*GIT, "-C", str(head), "worktree", "add", "-q", "--detach", str(tmp_path / "base")], check=True)
+    trees = FakeWorktrees({"h1": head, "b1": tmp_path / "base", "g1": ROOT})
     pod = live_pod(tmp_path, trees, {})
     graded: dict[str, str] = {}
-    for name in lint:
+    for name in gates:
         try:
             graded[name] = executors.static(pod, lease("static", "k", (name,))).outcome
         except ValueError as refused:
             graded[name] = str(refused)
-    assert graded == {**dict.fromkeys(lint, PASSED), **REFUSED}
+    return graded
+
+
+@pytest.mark.feature("lab-static-step-env")
+def test_static_grades_every_lint_gate_of_the_real_workflow_on_a_clean_tree(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, venv: Recorder, bwrap: None
+) -> None:
+    graded = _graded_on_a_clean_tree(monkeypatch, tmp_path, "lint")
+    assert graded == {**dict.fromkeys(graded, PASSED), **REFUSED}
+
+
+@pytest.mark.feature("lab-static-test-count-units")
+def test_static_grades_every_test_count_gate_of_the_real_workflow_on_a_clean_tree(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, venv: Recorder, bwrap: None
+) -> None:
+    assert _graded_on_a_clean_tree(monkeypatch, tmp_path, "test-count") == {
+        "test-count/install-dependencies": PASSED,
+        "test-count/fetch-the-base-suite-count-recorded-on-dev": PASSED,
+        "test-count/hold-the-base-revision-s-test-count": PASSED,
+        "test-count/record-the-head-count-for-the-next-queue-group": PASSED,
+    }
 
 
 @pytest.mark.feature("lab-static-step-env")
