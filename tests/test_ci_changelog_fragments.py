@@ -1,10 +1,11 @@
 import json
+import re
 from pathlib import Path
 
 import pytest
 import yaml
 
-from scripts.ci_changelog_fragments import HEADING, SECTIONS, expected_name, heading_problems, main
+from scripts.ci_changelog_fragments import SECTIONS, expected_name, heading_problems, main, section
 
 ROOT = Path(__file__).resolve().parents[1]
 RED_FIXTURE = ROOT / "tests/fixtures/ci_changelog_fragments/red.md"
@@ -119,9 +120,35 @@ def test_each_argument_is_required(dropped: str) -> None:
     assert exit_info.value.code == 2
 
 
-def test_the_heading_rule_is_the_one_the_release_notes_group_by() -> None:
+@pytest.mark.parametrize(
+    "line",
+    [
+        "### Added",
+        "## Fixed",
+        "###\tChanged",
+        "### Fixed  ",
+        "###   Security",
+        "#### Fixed",
+        "# Fixed",
+        "###Fixed",
+        "  ### Fixed",
+        "##X Fixed",
+        "##",
+        "### ",
+        "###  ",
+        "##\t ",
+        "- An entry.",
+    ],
+)
+def test_a_line_reads_as_the_heading_the_release_notes_read(line: str) -> None:
+    found = re.search(r're\.fullmatch\(r"([^"]+)", line\)', (ROOT / "scripts/ci_release.sh").read_text())
+    assert found
+    match = re.fullmatch(found.group(1), line)
+    assert section(line) == (match.group(1) if match else None)
+
+
+def test_the_sections_are_the_ones_the_release_notes_order() -> None:
     notes = (ROOT / "scripts/ci_release.sh").read_text()
-    assert f're.fullmatch(r"{HEADING.pattern}", line)' in notes
     assert f"order = {json.dumps(list(SECTIONS))}" in notes
 
 

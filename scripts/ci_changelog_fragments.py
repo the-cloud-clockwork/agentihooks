@@ -1,13 +1,11 @@
 """Refuse a changelog fragment a pull request adds unless it is named from the branch and opens with a section heading."""
 
 import argparse
-import re
 from collections.abc import Sequence
 from pathlib import Path
 
 FOLDER = "changelog.d"
 SECTIONS = ("Added", "Changed", "Deprecated", "Removed", "Fixed", "Security")
-HEADING = re.compile(r"#{2,3}\s+(.+?)\s*")
 
 
 def expected_name(branch: str) -> str:
@@ -15,16 +13,24 @@ def expected_name(branch: str) -> str:
     return f"{FOLDER}/{branch.replace('/', '-')}.md"
 
 
+def section(line: str) -> str | None:
+    """Return the section a heading line names as the release notes read it, or None for an entry line."""
+    rest = line.lstrip("#")
+    if len(line) - len(rest) not in (2, 3) or not rest[:1].isspace():
+        return None
+    return rest.strip() or (rest[-1] if len(rest) > 1 else None)
+
+
 def heading_problems(text: str) -> list[str]:
     """List why a fragment's entries would ship outside a Keep a Changelog section, in line order."""
     lines = [line for line in text.splitlines() if line.strip()]
     problems: list[str] = []
-    if not lines or not HEADING.fullmatch(lines[0]):
+    if not lines or section(lines[0]) is None:
         problems.append("its first line is no section heading, so the release notes file its entries under Changed")
     for line in lines:
-        match = HEADING.fullmatch(line)
-        if match and match.group(1) not in SECTIONS:
-            problems.append(f"the heading {match.group(1)} names none of the sections {', '.join(SECTIONS)}")
+        name = section(line)
+        if name is not None and name not in SECTIONS:
+            problems.append(f"the heading {name} names none of the sections {', '.join(SECTIONS)}")
     return problems
 
 
