@@ -24,11 +24,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "swarm_
 import ledger_core as core  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def catalog(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(model_catalog, "catalog", lambda *args: {"claude": [{"model": "opus"}], "codex": []})
+
+
 @pytest.fixture
-def store(monkeypatch: pytest.MonkeyPatch) -> RedisStore:
+def store():
     import fakeredis
 
-    monkeypatch.setattr(model_catalog, "catalog", lambda *args: {"claude": [{"model": "opus"}], "codex": []})
     return RedisStore(fakeredis.FakeRedis(decode_responses=True))
 
 
