@@ -829,6 +829,28 @@ def test_no_saved_assignment_leaves_the_launch_to_the_profile_choice(up, monkeyp
     assert "launch_assignment" not in task and not (task.get("handoff_envelope") or {}).get("launch")
 
 
+@pytest.mark.feature("master-launch-swarm-model")
+@pytest.mark.parametrize("path", ["master-up", "tick"])
+@pytest.mark.parametrize("harness,model", [("claude", "sonnet"), ("codex", "gpt-6-sol")])
+def test_both_master_launch_paths_put_a_saved_launch_on_the_swarm_model_setting(up, monkeypatch, path, harness, model):
+    from scripts.swarm import model_catalog
+    from scripts.tick.steps import masters
+
+    store, _, rt = up
+    catalog = {"claude": [{"model": "sonnet"}], "codex": [{"model": "gpt-6-sol"}]}
+    monkeypatch.setattr(model_catalog, "catalog", lambda *args: catalog)
+    store.update("sw", claude_model="sonnet", codex_model="gpt-6-sol")
+    saved = {"profile": "master", "harness": harness, "model": "", "effort": ""}
+    store.redis.hset(store.key("sw", "launch-assignments"), MASTER, json.dumps(saved))
+    if path == "tick":
+        masters._master("sw", store.config("sw"), store, rt, int(time.time() * 1000))
+    else:
+        answers(monkeypatch)
+        assert run("sw", "master", "up", "--new") == 0
+    [(_, task)] = rt.masters
+    assert (task["launch_assignment"]["harness"], task["launch_assignment"]["model"]) == (harness, model)
+
+
 def test_a_resumed_master_without_a_recorded_profile_takes_the_swarm_master_profile(up, monkeypatch):
     store, _, rt = up
     run("sw", "set", "master-profile=boss")

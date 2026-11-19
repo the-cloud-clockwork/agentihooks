@@ -46,6 +46,13 @@ class LabRoute:
     direct: bool
 
 
+def route_flags(lab: LabRoute | None) -> list[str]:
+    """The publish flags that repeat a lab route, empty for a publish straight to origin."""
+    if lab is None:
+        return []
+    return ["--via", LAB, "--direct"] if lab.direct else ["--via", LAB]
+
+
 def read_grade(url: str) -> dict[str, Any]:
     """Return the lab's answer for one head's grades, as GET /grades/<sha> gives it."""
     with urllib.request.urlopen(url, timeout=LAB_READ_TIMEOUT_S) as answer:
@@ -536,7 +543,9 @@ def publish(
             raise SwarmError(f"task worktree missing; Next: agentihooks swarm {shlex.quote(slug)} prepare")
         fields = checkout_fields(root)
         selected = selected_files(root, files)
-        retry = shlex.join(["agentihooks", "swarm", slug, "publish", "--message", message, "--", *files])
+        retry = shlex.join(
+            ["agentihooks", "swarm", slug, "publish", "--message", message, *route_flags(lab), "--", *files]
+        )
         fields["branch"] = delivery_branch(root, scoped, fields["branch"])
         ledger.update_task(
             slug, agent.task, branch_record(fields, primary, drop_repository(task, primary)), by=agent.name
