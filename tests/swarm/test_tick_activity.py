@@ -1,9 +1,10 @@
+from contextvars import ContextVar
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from scripts.swarm import cli, commands, controller, lease, tick_activity
+from scripts.swarm import cli, commands, controller, lease, tick_activity, timing
 from scripts.swarm.status import status_report
 from scripts.swarm.store import RedisStore, SwarmError
 from tests.swarm.test_cli import env, run  # noqa: F401
@@ -202,3 +203,32 @@ def test_a_lease_another_controller_took_after_a_short_lease_tick_stops_the_next
     assert lease.acquire(store, "sw", "other") is not None
     with pytest.raises(SwarmError, match="the controller lease is stale"):
         renewal()
+
+
+@pytest.mark.feature("swarm-tick-lock-renewal-interval")
+def test_a_lease_check_before_a_write_renews_at_once_inside_the_interval(
+    env: tuple[RedisStore, Any, Any],  # noqa: F811
+) -> None:
+    hooks: ContextVar[Any] = timing.BEFORE_STEP
+    clock: list[int] = [1_000]
+    renewals: list[int] = []
+    renewal = tick_activity.Renewal(env[0], "sw", lambda: renewals.append(clock[0]), lambda: clock[0])
+    tick_activity.renew_now()
+    keeping = hooks.set(renewal)
+    try:
+        renewal()
+        renewal()
+        tick_activity.renew_now()
+        clock[0] += 1
+        renewal()
+        tick_activity.renew_now()
+    finally:
+        hooks.reset(keeping)
+    assert renewals == [1_000, 1_000, 1_001]
+    calls: list[str] = []
+    plain = hooks.set(lambda: calls.append("hook"))
+    try:
+        tick_activity.renew_now()
+    finally:
+        hooks.reset(plain)
+    assert calls == ["hook"]

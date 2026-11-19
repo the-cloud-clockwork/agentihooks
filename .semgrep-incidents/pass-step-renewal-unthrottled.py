@@ -45,6 +45,22 @@ class EveryStepLock:
 
 
 @dataclass
+class EveryStepThroughHelper:
+    store: RedisStore
+    slug: str
+    renew: Callable[[], None]
+    clock: Callable[[], int]
+
+    def __call__(self) -> None:
+        self._keep()
+
+    def _keep(self) -> None:
+        tick_stop.check()
+        # ruleid: pass-step-renewal-unthrottled
+        keep(self.store, self.slug, self.renew, self.clock)
+
+
+@dataclass
 class OncePerInterval:
     store: RedisStore
     slug: str
@@ -53,9 +69,15 @@ class OncePerInterval:
     renewed: int | None = None
 
     def __call__(self) -> None:
+        self._keep(RENEW_MS)
+
+    def now(self) -> None:
+        self._keep(0)
+
+    def _keep(self, interval_ms: int) -> None:
         tick_stop.check()
         at = self.clock()
-        if self.renewed is not None and 0 <= at - self.renewed < RENEW_MS:
+        if self.renewed is not None and 0 <= at - self.renewed < interval_ms:
             return
         # ok: pass-step-renewal-unthrottled
         keep(self.store, self.slug, self.renew, self.clock)
