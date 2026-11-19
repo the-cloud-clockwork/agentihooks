@@ -44,7 +44,7 @@ def counts(row: dict[str, Any]) -> dict[str, int]:
 def stamped_at(stamp: str) -> int | None:
     """The wall clock milliseconds a round stamp opens with, or None for a stamp that carries no time."""
     clock, dash, _ = stamp.partition("-")
-    return int(clock) if dash and clock.isdigit() else None
+    return int(clock) if dash and clock.isascii() and clock.isdigit() else None
 
 
 def readers(row: dict[str, Any]) -> list[str]:
