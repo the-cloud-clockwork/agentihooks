@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "swarm-refusal-size-warnings",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-phase-limit-scope",
+      "behaviour": "A refused swarm write prints each overview or phase size warning on its own warning line and keeps those diagnostics out of its refusal reason. The client preserves the missing focus target refusal and falls back to rejected operation identifiers when no refusal reason remains. Accepted replies remain accepted and unchanged.",
+      "seam": "LedgerClient.freeze and LedgerClient._call receiving a rejected or accepted ledger operation reply",
+      "tests": [
+        "tests/swarm/test_ledger_refusals.py::test_a_refused_focus_reports_size_warnings_separately",
+        "tests/swarm/test_ledger_refusals.py::test_size_warnings_do_not_refuse_an_accepted_swarm_write"
+      ]
+    },
+    {
       "id": "credential-guard-reads-heredoc-commands",
       "origin": "regression",
       "ordered_at": "2026-11-19",
@@ -6461,6 +6472,17 @@
       ]
     },
     {
+      "id": "kind-controller-readiness",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/promo-44456673338-0",
+      "behaviour": "The kind proof waits within a deadline for transient controller readiness failures, fails persistent unavailability and fails startup or liveness errors immediately.",
+      "seam": "The deployed controller HTTP probe loop in the kind chart proof",
+      "tests": [
+        "tests/test_kind_controller_readiness.py::test_kind_probe_waits_only_for_readiness",
+        "tests/test_kind_controller_readiness.py::test_kind_probe_keeps_the_failed_http_response_body"
+      ]
+    },
+    {
       "id": "controller-busy-node-probes",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2429",
@@ -8207,6 +8229,22 @@
       ]
     },
     {
+      "id": "hive-set-drain-stops-lane-spokes",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-offer-single-hive",
+      "behaviour": "A hive whose record says draining, as agentihooks hive set draining=yes writes it, takes no new agents through its lane spokes, just as a hive whose pod member is draining: the lane loop beats presence and polls no spoke, so the hub never refuses it an offer as draining and the spoke never terms the only offer copy before a hive with room sees it; a hive drained neither way, or with only another pod's member draining, keeps polling.",
+      "seam": "scripts.hive.lanes.draining read by scripts.hive.lanes.run",
+      "tests": [
+        "tests/hive/test_lanes.py::test_a_hive_drained_as_a_whole_or_by_this_pods_member_takes_no_new_agents",
+        "tests/hive/test_lanes.py::test_a_store_without_redis_reads_no_hive_record_and_is_not_draining",
+        "tests/hive/test_lanes.py::test_the_lane_loop_beats_and_polls_no_spoke_on_a_hive_drained_with_hive_set",
+        "tests/hive/test_lanes.py::test_the_lane_loop_polls_its_spokes_while_only_another_pods_member_drains"
+      ],
+      "rules": [
+        "lane-drain-reads-member-only"
+      ]
+    },
+    {
       "id": "monitor-counts-registered-seats",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2506",
@@ -8903,6 +8941,17 @@
       "tests": [
         "tests/ci_lab/test_scheduler.py::test_a_restarted_scheduler_advances_the_stored_check_runs_with_no_new_create",
         "tests/ci_lab/test_checks.py::test_a_seeded_check_run_is_advanced_in_place_from_its_seeded_status"
+      ]
+    },
+    {
+      "id": "lab-relay-check-run-restart",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-relay-run-id-seed",
+      "behaviour": "The CI lab relay posts each relayed check run of a grade ref head once across a restart of the scheduler process that hosts it: it saves the id of each check run it creates on the grade's state in Redis under that check run's name as soon as GitHub answers, and before it tests whether a check run was posted it seeds the repository's poster with the id it saved under that name, so a relay retried after a restart, such as one whose pull request call failed after its posts, opens no second completed check run; the ids the scheduler stores under gate names for its own posts never seed it, so a grade the scheduler posted shadow check runs for still gets every lab check run.",
+      "seam": "scripts.ci_lab.relay.build over a real scripts.ci_lab.scheduler.Scheduler on fakeredis with a real scripts.ci_lab.checks.Checks on mocked requests, built again over the same Redis as a restart, ticked through scripts.ci_lab.relay.Relay.tick, and scripts.ci_lab.relay.relay over recording ports",
+      "tests": [
+        "tests/ci_lab/test_relay.py::test_a_restarted_relay_posts_no_second_completed_check_run",
+        "tests/ci_lab/test_relay.py::test_a_relayed_grade_holding_the_scheduler_s_own_check_run_ids_still_posts_every_lab_check_run"
       ]
     },
     {
