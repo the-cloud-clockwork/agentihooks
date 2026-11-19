@@ -8158,7 +8158,8 @@
       "tests": [
         "tests/hive/test_lanes.py::test_a_hive_drained_as_a_whole_or_by_this_pods_member_takes_no_new_agents",
         "tests/hive/test_lanes.py::test_a_store_without_redis_reads_no_hive_record_and_is_not_draining",
-        "tests/hive/test_lanes.py::test_the_lane_loop_beats_and_polls_no_spoke_on_a_hive_drained_with_hive_set"
+        "tests/hive/test_lanes.py::test_the_lane_loop_beats_and_polls_no_spoke_on_a_hive_drained_with_hive_set",
+        "tests/hive/test_lanes.py::test_the_lane_loop_polls_its_spokes_while_only_another_pods_member_drains"
       ],
       "rules": [
         "lane-drain-reads-member-only"

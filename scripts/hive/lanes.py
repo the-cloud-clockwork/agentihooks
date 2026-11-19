@@ -128,8 +128,8 @@ def stop_once(store: Any, bus: Any, runtime: Any, hive: str, held: dict[str, exe
 
 
 def draining(store: Any, hive: str) -> bool:
-    """True while the hive record says draining, as hive set writes it, or this pod's member of the hive takes no new
-    agents; a store without Redis has no hive record."""
+    """True while the hive record or this pod's member of the hive says draining; a store without Redis has no hive
+    record."""
     redis = getattr(store, "redis", None)
     if redis is None:
         return False

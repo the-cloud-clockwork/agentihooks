@@ -466,6 +466,28 @@ def test_the_lane_loop_beats_and_polls_no_spoke_on_a_hive_drained_with_hive_set(
     assert waits == [lanes.IDLE_S]
 
 
+@pytest.mark.feature("hive-set-drain-stops-lane-spokes")
+def test_the_lane_loop_polls_its_spokes_while_only_another_pods_member_drains(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.hive import registry
+
+    serving = {"draining": "no", "members": {"pod-a": {"draining": "no"}, "pod-b": {"draining": "yes"}}}
+    monkeypatch.setattr(registry, "show", lambda client, hive: serving)
+    monkeypatch.setattr(registry, "member_name", lambda: "pod-a")
+    monkeypatch.setattr(lanes, "stop_once", lambda *args: [])
+    beats: list[tuple[object, ...]] = []
+    polls: list[tuple[object, ...]] = []
+    waits: list[float] = []
+    monkeypatch.setattr(lanes, "beat", lambda *args: beats.append(args))
+    monkeypatch.setattr(lanes, "run_once", lambda *args: polls.append(args) or ["empty"])
+    store = SimpleNamespace(redis="redis")
+
+    lanes.run(store, "bus", "runtime", "hive-a", ("ci",), waits.append, passes=range(1))
+
+    assert beats == []
+    assert [args[:6] for args in polls] == [(store, "bus", "runtime", "hive-a", ("ci",), lanes.TAKE_MS)]
+    assert waits == [lanes.IDLE_S]
+
+
 def test_a_hive_event_launch_resolves_the_origin_to_its_own_checkout(hub, tmp_path, monkeypatch):
     from scripts.hive.daemon import local_checkout
     from scripts.swarm.store import SwarmConfig
