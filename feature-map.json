@@ -94,6 +94,16 @@
       ]
     },
     {
+      "id": "tick-site-ordering-does-not-propagate-loss",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2732",
+      "behaviour": "A site barrier orders a tick step after earlier work without making added needs propagate drops. Only declared needs propagate abandoned, cut or raised predecessors, including slow handoff and transitive dependents.",
+      "seam": "registry.site_edges through engine.run_graph and the pass pool",
+      "tests": [
+        "tests/tick/test_site_failure_needs.py::test_abandoned_page_relay_does_not_drop_barrier_only_slow_work"
+      ]
+    },
+    {
       "id": "tick-status-publish-last-findings",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-status-publish-budget",
