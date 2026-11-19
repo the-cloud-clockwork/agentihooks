@@ -4504,12 +4504,25 @@
       "id": "lab-verdict-outside-to-manifest",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-verdict-outside-to-manifest",
-      "behaviour": "A graded lab job whose uploaded report lists files its batch opened outside the manifest writes one note per batch tests and sorted list into its repository's manifest folder, whatever its graded outcome. The next stored manifest read that finds or fetches a packed manifest merges every note into the outside list of each test record it names, sorted and without duplicates, skipping tests the manifest lacks, so the following test unit key changes when one of those files changes, and a change to one of those files invalidates the tests whose records list it. A report without the list or with an empty list writes no note.",
+      "behaviour": "A graded lab job whose uploaded report lists files its batch opened outside the manifest writes one note per batch tests and sorted list into its repository's manifest folder under the manifest commit its grade keyed on, whatever its graded outcome. The next stored manifest read of that commit merges each of its notes into the outside list of each test record it names, sorted and without duplicates, skipping tests the manifest lacks, so the following test unit key changes when one of those files changes, and a change to one of those files invalidates the tests whose records list it. A report without the list or with an empty list writes no note.",
       "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis and the local object store, scripts.ci_lab.scheduler.StoredManifests, scripts.ci_lab.expand_tests.units, scripts.ci_lab.interaction.invalidated and tests.dep_manifest.invalidated",
       "tests": [
         "tests/ci_lab/test_scheduler.py::test_a_test_verdict_outside_list_reaches_the_stored_records_and_the_following_key",
         "tests/ci_lab/test_scheduler.py::test_a_note_joins_the_outside_list_a_stored_or_fetched_record_already_holds",
         "tests/test_dep_manifest.py::test_a_change_to_a_file_a_test_opened_outside_its_record_invalidates_that_test"
+      ]
+    },
+    {
+      "id": "lab-outside-notes-per-commit",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-outside-notes-per-commit",
+      "behaviour": "A lab grade keeps the dev commit of the dependency manifest its test units were keyed on, and a graded job's outside note is stored under that commit in its repository's manifest folder. A stored manifest read merges only the notes of the returned manifest's commit, so a note written while grades keyed on an older manifest leaves the outside lists and test unit keys of a newer commit unchanged. Every read removes the notes of commits with no stored manifest, including notes written before notes carried a commit, and keeps the notes of stored commits and of other repositories.",
+      "seam": "scripts.ci_lab.scheduler.MirrorExpander.expand, scripts.ci_lab.scheduler.Scheduler.tick over fakeredis and the local object store, scripts.ci_lab.scheduler.StoredManifests and scripts.ci_lab.expand_tests.units",
+      "tests": [
+        "tests/ci_lab/test_scheduler.py::test_a_note_of_an_older_manifest_commit_leaves_a_newer_commit_key_unchanged",
+        "tests/ci_lab/test_scheduler.py::test_a_manifest_read_removes_the_notes_of_commits_with_no_stored_manifest",
+        "tests/ci_lab/test_scheduler.py::test_a_grade_that_keyed_no_manifest_writes_no_outside_note",
+        "tests/ci_lab/test_store.py::test_objects_remove_one_path_and_take_a_missing_one_as_gone"
       ]
     },
     {
