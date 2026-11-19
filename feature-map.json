@@ -10241,6 +10241,23 @@
       ]
     },
     {
+      "id": "lab-static-test-count-units",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-units-missing",
+      "behaviour": "The CI lab grades the Tests workflow's test-count job with static units: the static executor supplies runner.temp as the unit's run folder, github.event_name as pull_request and each matrix value the gate's job holds at one value, so the four test-count gate steps discover with nothing missing; static gate discovery names the docs and writer-lock jobs CI only with the reason the lab sandbox cannot run them, names CI only each job of a static job's reusable workflow that calls another reusable workflow instead of raising on it, and the discovery command prints those jobs with their reasons under --ci-only.",
+      "seam": "scripts.ci_lab.static_gates discover, ci_only and main with the StaticGate matrix and missing, scripts.ci_lab.run_static run with its run folder and the gate's matrix in the context, and scripts.ci_lab.executors static with the event name in the lease context",
+      "tests": [
+        "tests/ci_lab/test_static_gates.py::test_a_gate_misses_no_run_folder_event_name_or_matrix_value_its_job_holds_at_one_value",
+        "tests/ci_lab/test_static_gates.py::test_the_command_prints_the_matrix_values_each_gate_reads",
+        "tests/ci_lab/test_static_gates.py::test_discovery_grades_the_steps_of_a_reusable_workflow_past_a_job_that_calls_another",
+        "tests/ci_lab/test_static_gates.py::test_the_command_names_each_job_the_lab_leaves_to_actions_with_its_reason",
+        "tests/ci_lab/test_static_gates.py::test_the_real_test_count_job_yields_runnable_gates_while_docs_and_writer_lock_stay_ci_only",
+        "tests/ci_lab/test_static_gates.py::test_every_lab_gradable_gate_that_reads_the_event_name_is_one_whose_verdict_the_pull_request_event_keeps",
+        "tests/ci_lab/test_run_static.py::test_the_step_reads_runner_temp_as_its_run_folder_and_each_matrix_value_its_job_holds",
+        "tests/ci_lab/test_executors.py::test_static_grades_every_test_count_gate_of_the_real_workflow_on_a_clean_tree"
+      ]
+    },
+    {
       "id": "lab-head-own-stream",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-head-own-stream",
@@ -10426,12 +10443,25 @@
       "id": "ci-stats-seed-download-retry",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2597",
-      "behaviour": "When a mutation stats artifact download fails during the dev push stats seed harvest, the harvest waits 5, 10 and then 20 seconds, each wait cut short at the seed's deadline, between up to four downloads of that artifact and copies its records once one succeeds; only when every download failed does it fail with an error naming the artifact, its id and the last download error. A download that times out and a failed pull request, run or artifact listing call are not retried, so the seed still skips a pull request past its budget.",
+      "behaviour": "When a mutation stats artifact download fails during the dev push stats seed harvest, the harvest waits 5, 10 and then 20 seconds, each wait cut short at the seed's deadline, between up to four downloads of that artifact and copies its records once one succeeds; only when every download failed does it fail with an error naming the artifact, its id and the last download error. A download that times out is made once, so the seed still skips a pull request past its budget, and a download answered HTTP 404 is made once and fails with that error.",
       "seam": "scripts.ci_stats_seed.download through scripts.ci_stats_seed.harvest",
       "tests": [
         "tests/test_ci_stats_seed.py::test_harvest_downloads_a_failed_artifact_again_after_a_wait",
         "tests/test_ci_stats_seed.py::test_harvest_fails_naming_the_artifact_once_every_download_failed",
-        "tests/test_ci_stats_seed.py::test_harvest_retries_neither_a_timed_out_download_nor_a_failed_listing"
+        "tests/test_ci_stats_seed.py::test_harvest_downloads_a_timed_out_or_missing_artifact_once"
+      ]
+    },
+    {
+      "id": "ci-stats-seed-listing-retry",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/promo-44592721366-1",
+      "behaviour": "When the pull request read, the Tests runs listing or an artifacts listing page of the dev push stats seed harvest fails, the harvest prints the path and gh's error, waits 5, 10 and then 20 seconds, each wait cut short at the seed's deadline, between up to four calls, and goes on with the first answer; when every call failed it raises the last failure. A listing call that times out or is answered HTTP 404 is made once, so the seed still skips a pull request past its budget and a number that is not a pull request at once.",
+      "seam": "scripts.ci_stats_seed.retried through scripts.ci_stats_seed.harvest",
+      "tests": [
+        "tests/test_ci_stats_seed.py::test_harvest_asks_again_for_a_listing_call_that_failed",
+        "tests/test_ci_stats_seed.py::test_harvest_raises_the_last_failure_once_every_call_of_a_listing_failed",
+        "tests/test_ci_stats_seed.py::test_harvest_asks_once_for_a_listing_that_timed_out_or_was_not_found",
+        "tests/test_ci_stats_seed.py::test_harvest_skips_a_number_that_is_not_a_pull_request"
       ]
     },
     {
@@ -10601,6 +10631,78 @@
         "tests/ci_lab/test_head_notice.py::test_a_configured_send_posts_one_notice_signed_over_its_exact_body",
         "tests/ci_lab/test_head_notice.py::test_without_a_receiver_a_secret_or_an_actor_nothing_is_sent",
         "tests/ci_lab/test_head_notice.py::test_a_failed_send_is_reported_once_and_never_raised"
+      ]
+    },
+    {
+      "id": "swarm-focus-verdict",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-focus-sanity-check",
+      "behaviour": "swarm focus and swarm unfreeze, after their write, print on standard error the claim gate verdict on every task under the target: claimable, or the freeze record that holds it, the dependency it waits on, its phase state, a focus elsewhere, its claimant, its pull request, out of scope or already done, with a NOTHING CLAIMABLE head when none is claimable, no such target for a target that does not exist, and a written but no verdict line when the ledger read fails after the write; freeze prints none, and the ledger refuses an unfreeze whose target is no plan node, no lane or kind selector and no record.",
+      "seam": "scripts.swarm.health.focus_check.checked wrapping cmd_focus and cmd_unfreeze, focus_check.read and lines, LedgerClient.focus_verdicts, and ledger_freezes._clear",
+      "tests": [
+        "tests/swarm/test_focus_check.py::test_every_task_under_a_focus_gets_its_claim_gate_verdict",
+        "tests/swarm/test_focus_check.py::test_a_task_outside_the_focus_is_named_as_held_by_it",
+        "tests/swarm/test_focus_check.py::test_a_target_that_does_not_exist_has_no_verdict",
+        "tests/swarm/test_focus_check.py::test_a_focus_with_nothing_claimable_prints_a_loud_head",
+        "tests/swarm/test_focus_check.py::test_focus_and_unfreeze_print_the_verdict_after_the_write",
+        "tests/swarm/test_focus_check.py::test_freeze_prints_no_verdict",
+        "tests/swarm/test_focus_check.py::test_a_written_focus_says_so_when_the_ledger_gives_no_verdict",
+        "tests/swarm/test_focus_check.py::test_checked_runs_the_command_then_writes_the_verdict_on_its_target",
+        "tests/swarm/test_focus_check.py::test_unfreeze_of_a_target_that_does_not_exist_is_refused",
+        "tests/swarm/test_focus_check.py::test_a_task_with_no_state_lane_or_claimant_reads_as_open_unlaned_and_claimed_by_an_agent",
+        "tests/swarm/test_focus_check.py::test_the_fix_phase_passes_a_doctor_fix_through_a_focus_elsewhere",
+        "tests/swarm/test_focus_check.py::test_a_selector_target_is_known_only_with_a_value_and_split_at_its_first_colon"
+      ]
+    },
+    {
+      "id": "swarm-focus-read",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-focus-sanity-check",
+      "behaviour": "One ledger API read, GET focus or agentihooks api get focus, lists every focus record with its target, author, time and reason, the ids of the done tasks under it, every other task under it with its lane, state and claim gate verdict, the claimable count, and the minutes since the focus while a task under it is open and none is claimed or in a pull request; GET focus/<target> answers one target the same way and a target that does not exist reads 404 resource_missing.",
+      "seam": "scripts.swarm_ledger.api.routes.focus_read through the ledger swarm port focus_check.read, ledger get focus, and LedgerClient.focus_verdicts",
+      "tests": [
+        "tests/swarm/test_focus_check.py::test_the_focus_read_lists_every_focus_with_verdicts_and_unclaimed_minutes",
+        "tests/swarm/test_focus_check.py::test_a_lane_focus_covers_every_task_of_its_lane",
+        "tests/swarm/test_focus_check.py::test_ledger_get_takes_the_focus_read",
+        "tests/swarm/test_focus_check.py::test_the_client_reads_one_target_and_answers_none_for_a_missing_one",
+        "tests/swarm/test_focus_check.py::test_the_fix_phase_comes_from_the_swarm_config_and_is_empty_without_a_swarm",
+        "tests/swarm_ledger/test_api_v1.py::test_the_focus_read_serves_every_focus_and_one_target",
+        "tests/swarm/test_focus_check.py::test_the_client_raises_a_failure_other_than_a_missing_target",
+        "tests/swarm/test_focus_check.py::test_unclaimed_minutes_count_whole_minutes_and_never_go_below_zero",
+        "tests/swarm/test_focus_check.py::test_the_focus_route_reads_the_slug_state_fix_phase_and_clock",
+        "tests/swarm/test_focus_check.py::test_the_focus_route_answers_404_for_a_target_that_does_not_exist",
+        "tests/swarm/test_focus_check.py::test_a_ledger_with_no_tasks_reads_each_focus_with_no_tasks",
+        "tests/swarm/test_focus_check.py::test_the_ledger_read_sends_a_focus_path_to_the_focus_read_with_its_slug"
+      ]
+    },
+    {
+      "id": "swarm-focus-unclaimed-finding",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-focus-sanity-check",
+      "behaviour": "The focus unclaimed tick step counts, for every task under a focus record whose claim gate verdict is claimable, the consecutive ticks it stays so, and any other verdict drops the count; past three ticks a focus unclaimed health finding names the task and the focus, and the findings pass sends it to the master inbox.",
+      "seam": "scripts.tick.steps.host._focus_unclaimed registered as tick step focus unclaimed, scripts.swarm.health.focus_unclaimed.observe and findings, read by swarm status findings and ledger_events.findings_pass",
+      "tests": [
+        "tests/tick/steps/test_focus_unclaimed.py::test_focus_unclaimed",
+        "tests/tick/steps/test_focus_unclaimed.py::test_a_focused_claimable_task_unclaimed_past_three_ticks_is_a_finding",
+        "tests/tick/steps/test_focus_unclaimed.py::test_a_claim_or_a_hold_drops_the_count",
+        "tests/tick/steps/test_focus_unclaimed.py::test_no_focus_raises_no_finding",
+        "tests/tick/steps/test_focus_unclaimed.py::test_the_finding_goes_to_the_master_inbox",
+        "tests/tick/steps/test_focus_unclaimed.py::test_each_tick_stores_its_time_and_keeps_the_first_unclaimed_time",
+        "tests/tick/steps/test_focus_unclaimed.py::test_a_freeze_record_before_the_focus_does_not_stop_the_count",
+        "tests/tick/steps/test_focus_unclaimed.py::test_a_task_the_gate_holds_does_not_stop_the_count_of_the_next_one",
+        "tests/tick/steps/test_focus_unclaimed.py::test_a_task_below_three_ticks_does_not_stop_the_finding_of_the_next_one",
+        "tests/tick/steps/test_focus_unclaimed.py::test_no_stored_count_is_no_finding",
+        "tests/tick/steps/test_focus_unclaimed.py::test_the_doctor_fix_phase_comes_from_the_swarm_config"
+      ]
+    },
+    {
+      "id": "swarm-master-focus-read",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-focus-sanity-check",
+      "behaviour": "The master refocus block and the swarm master skill require the master to run agentihooks api get focus every loop and clear or fix each focus with nothing claimable; a worker refocus block carries no such line.",
+      "seam": "hooks.context.swarm_refocus._master_block FOCUS_READ and the swarm-master skill Focus and freeze section",
+      "tests": [
+        "tests/context/test_swarm_refocus.py::test_the_master_block_and_skill_require_the_focus_read_every_loop"
       ]
     },
     {
