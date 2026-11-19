@@ -179,6 +179,10 @@ with `{"error": "a grade lookup names one full commit sha"}`. See
 | Capacity shows zero slots or an estimate differs from observed duration | Check worker lease polls and their free slot offers; the load discards stale offers and uses fixed unit estimates |
 | Grades returns an empty list | Confirm the full lowercase commit sha and that the lab received and graded that head |
 
+The [node cache DaemonSet](ci-lab-node-cache.md) prepares each CI node's bare mirror and uv
+cache. Its reference covers Helm values, placement, refresh stamps, lockfile warming and
+per-node verification; a Ready cache pod alone does not prove either cache is warm.
+
 ## Environment
 
 | Name | Scheduler | Worker | Meaning |
