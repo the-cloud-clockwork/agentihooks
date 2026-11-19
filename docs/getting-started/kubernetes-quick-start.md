@@ -86,7 +86,7 @@ kubectl rollout status deployment/agentihooks-swarm-hub -n agentihooks
 helm test agentihooks-swarm --namespace agentihooks
 ```
 
-Each rollout reports `successfully rolled out` and `helm test` runs the ledger health pod to `Succeeded`. A hub pod counts as ready only once it answers slot requests from hives, so the hub rollout finishes after both replicas serve; see [Hub readiness and rollouts](../reference/deployment-modes.md#hub-readiness-and-rollouts). Reach the ledger page locally:
+Each rollout reports `successfully rolled out` and `helm test` runs the ledger health pod to `Succeeded`. A hub pod counts as ready only once it has subscribed to slot requests from hives, so the hub rollout finishes after both replicas serve; see [Hub readiness and rollouts](../reference/deployment-modes.md#hub-readiness-and-rollouts). Reach the ledger page locally:
 
 ```bash
 kubectl -n agentihooks port-forward service/agentihooks-swarm-ledger 8765:8765

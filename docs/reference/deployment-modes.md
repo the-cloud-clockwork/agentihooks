@@ -51,7 +51,7 @@ Each swarm picks its engine with its `engine` setting, `legacy` or `events`; see
 |---|---|---|---|
 | `local` | `legacy`; `events` only with a hub on the same bus | `memory` unless the bus settings name NATS | None runs by default. The hub's `readiness` reactor offers nothing on the `memory` bus, so an `events` swarm needs a hub on a NATS bus. |
 | `compose` | `legacy`; `events` only with a hub on the same bus | The stack's `nats` service: `AGENTIHOOKS_BUS=nats` at `nats://nats:4222`, changed only through the stack settings `SWARM_BUS` and `SWARM_BUS_URL`; the `controller` and `hive` services take their mode only from `SWARM_DEPLOYMENT`, and the base stack services their scheduler state backend only from `SWARM_SCHEDULER_STATE_BACKEND` | No hub service. The Compose task smoke runs `agentihooks hub run --once` in the `swarm` service to settle a task end to end. |
-| `distributed` | `events` through the hub; a `legacy` swarm is ticked by the chart's controller, never by the workstation | NATS with JetStream from the `agentihooks-swarm` chart (`nats.enabled`, JetStream on) | The chart's `<release>-hub` Deployment, with `hub.enabled: true` and 2 replicas by default. It runs `agentihooks hub run`, scheduled only on nodes without the `anton.io/capacity-type` label. Each pod turns ready only once it answers slot requests (see [Hub readiness and rollouts](#hub-readiness-and-rollouts)). |
+| `distributed` | `events` through the hub; a `legacy` swarm is ticked by the chart's controller, never by the workstation | NATS with JetStream from the `agentihooks-swarm` chart (`nats.enabled`, JetStream on) | The chart's `<release>-hub` Deployment, with `hub.enabled: true` and 2 replicas by default. It runs `agentihooks hub run`, scheduled only on nodes without the `anton.io/capacity-type` label. Each pod turns ready only once it has subscribed to slot requests (see [Hub readiness and rollouts](#hub-readiness-and-rollouts)). |
 
 ### Hub reactors
 
@@ -77,12 +77,13 @@ With a remote ledger, `agentihooks hub run` first issues the replica its own ser
 
 ### Hub readiness and rollouts
 
-A chart hub pod turns ready only once its replica answers slot requests. Every hive asks the hub for an account slot
+A chart hub pod turns ready only once its replica has subscribed to slot requests. Every hive asks the hub for an account slot
 on `slots.<swarm>.<hive>`, and the hub answers in queue group `hub-slots` (see
 [Hub slot requests and the hive binding](swarm-bus-scope.md#hub-slot-requests-and-the-hive-binding)). A request
-that reaches NATS while no hub replica subscribes gets no answer, and the hive's call times out. Before the readiness
-probe, Kubernetes counted a hub pod ready as soon as its container started, so a rollout could end the last old hub
-pod before the new one had subscribed, leaving the swarm with no slots responder.
+that reaches NATS while no hub replica subscribes fails at once on the hive with
+`TimeoutError: no responders for 'slots.<swarm>.<hive>'`. Without a readiness
+probe, Kubernetes counts a hub pod ready as soon as its container starts, so a rollout could end the last old hub
+pod before the new one subscribes and leave the swarm with no slots responder.
 
 #### How the hub marks itself serving
 
@@ -96,7 +97,8 @@ pod before the new one had subscribed, leaving the swarm with no slots responder
 
 The hub never deletes the file while it runs or when it stops. With the variable unset or empty, the hub creates no
 file and runs the same way. A hosted hub that refuses to start for want of the shared database exits before step 2,
-so its file stays absent.
+so its file stays absent. Readiness reports only that the hub subscribed once: the file stays while the process
+runs, so a replica that later loses NATS stays ready.
 
 #### What the chart sets
 
@@ -105,7 +107,8 @@ so its file stays absent.
 | `hub.servingFile` | `/tmp/hub.serving` | The path the chart sets as `AGENTIHOOKS_HUB_SERVING_FILE` on the hub container and the file its readiness probe tests. Required: an empty value fails the render. Its folder must exist and be writable by the hub, because the hub creates only the file. |
 | `hub.replicas` | `2` | Above 1, the hub Deployment rolls with `maxSurge: 0` and `maxUnavailable: 1`. At 1 the chart sets no strategy and the Kubernetes default applies, which starts the new pod beside the old one and ends the old one once the new one is ready. |
 
-The rendered hub container carries the variable and the probe on the same path:
+The chart renders the hub Deployment, and with it the variable and the probe, only when `hub.enabled` is true and
+`hiveOnly` is false. The rendered hub container carries the variable and the probe on the same path:
 
 ```yaml
 env:
@@ -153,12 +156,11 @@ Helm exits with an error carrying the chart's message:
 hub.servingFile is required: the hub creates that file once it answers slots requests, and its readiness probe waits for it
 ```
 
-#### Hub readiness upgrade order
+#### Hub readiness and image tags
 
-The chart and the image of one release carry both halves: the hub creates the file in the same release that first
-adds the probe, and in every later one. A release whose chart has the probe, run with `image.tag` pinned to an image
-from before the hub created the file, gives hub pods that never turn ready. Run the hub on the image of its chart's
-release.
+The hub change that creates the file merged into dev before the chart change that adds the probe, so every release
+whose chart has the probe ships a hub image that creates the file. A chart with the probe, run with `image.tag`
+pinned to an older image, gives hub pods that never turn ready. Run the hub on the image of its chart's release.
 
 #### Checking hub readiness
 
@@ -173,20 +175,17 @@ kubectl -n agentihooks exec <hub pod> -- test -f /tmp/hub.serving && echo servin
 ```
 
 The rollout reports `successfully rolled out` once every hub pod serves. Each serving pod shows `1/1` in the `READY`
-column, the probe command prints `["test","-f","/tmp/hub.serving"]`, and the last command prints `serving`.
+column, the probe command names `test -f /tmp/hub.serving`, and the last command prints `serving`.
 
 #### Hub readiness troubleshooting
 
 | Symptom | Cause and fix |
 |---|---|
 | A new hub pod stays `Running` at `0/1` ready and the rollout does not finish | The hub has not subscribed its slot responders. Read `kubectl -n agentihooks logs <hub pod>`: a bus connection error points at `hub.bus.url` or the NATS server, as in [Bus settings](#bus-settings). The old pod keeps serving meanwhile. |
-| A new hub pod restarts in `CrashLoopBackOff` | The hub exited before it served. Its log names the cause: a hosted hub without the shared database, or a missing folder for `hub.servingFile`. |
+| A new hub pod restarts in `CrashLoopBackOff` | The hub exited before it served. A hosted hub without the shared database logs `hub: a hosted hub writes task claims in process over the shared database and needs AGENTIHOOKS_SWARM_DATABASE_URL`; give the hub that setting. A missing folder for `hub.servingFile` logs a traceback ending in `FileNotFoundError` on that path; point `hub.servingFile` at a folder that exists. |
 | `helm upgrade` fails with `hub.servingFile is required` | The values set `hub.servingFile` empty or null. Remove that override or set a path. |
-| Every new hub pod stays `0/1` and `test -f` on the serving file keeps failing | `image.tag` pins an image older than the chart, whose hub never creates the file. Compare `kubectl -n agentihooks get deployment agentihooks-swarm-hub -o jsonpath='{.spec.template.spec.containers[0].image}'` with the chart version and run the image of the chart's release, as in [Hub readiness upgrade order](#hub-readiness-upgrade-order). |
+| Every new hub pod stays `0/1` and `test -f` on the serving file keeps failing | `image.tag` pins an image older than the chart, whose hub never creates the file. Compare `kubectl -n agentihooks get deployment agentihooks-swarm-hub -o jsonpath='{.spec.template.spec.containers[0].image}'` with the chart version and run the image of the chart's release, as in [Hub readiness and image tags](#hub-readiness-and-image-tags). |
 | Hives time out on slot requests while every hub pod is ready | Look in the hub log for requests dropped after waiting in the serve queue; see [How the hub serves requests](swarm-bus-scope.md#how-the-hub-serves-requests) for the log line and the limits. |
-
-Readiness reports only that the hub subscribed once: the file stays while the process runs, so a replica that later
-loses NATS stays ready.
 
 #### Hub readiness regression guards
 
