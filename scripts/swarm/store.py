@@ -270,6 +270,11 @@ class RedisStore:
             refused := default_models.refusal(changes, model_catalog.catalog(os.environ, self.redis, time.time()))
         ):
             return refused
+        if models := default_models.lane_models(config.lanes, {}):
+            if refused := default_models.lane_refusal(
+                models, model_catalog.catalog(os.environ, self.redis, time.time())
+            ):
+                return refused
         refused = effort_range.refusal((config.effort_min, config.effort_max), config.lanes) or scaling_refusal(config)
         if refused:
             return refused

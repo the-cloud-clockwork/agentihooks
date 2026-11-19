@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from scripts.swarm import fencing
+from scripts.swarm import fencing, model_catalog
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from tests.helpers import store_seed
 
@@ -753,7 +753,10 @@ def test_compact_limit_round_trips_and_an_old_config_reads_as_unset(store):
     assert store.config("smoke").compact_limit == 0
 
 
-def test_template_and_lane_map_round_trip_and_an_old_config_reads_as_none(store):
+def test_template_and_lane_map_round_trip_and_an_old_config_reads_as_none(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(model_catalog, "catalog", lambda *_: {"codex": [{"model": "m"}]})
     lanes = {"eng": {"role": "r", "agent": "codex", "model": "m", "effort": "high", "kind": "code"}}
     store.create(config(template="t", lanes=lanes))
     assert (store.config("smoke").template, store.config("smoke").lanes) == ("t", lanes)

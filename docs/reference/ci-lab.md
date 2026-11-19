@@ -179,6 +179,10 @@ with `{"error": "a grade lookup names one full commit sha"}`. See
 | Capacity shows zero slots or an estimate differs from observed duration | Check worker lease polls and their free slot offers; the load discards stale offers and uses fixed unit estimates |
 | Grades returns an empty list | Confirm the full lowercase commit sha and that the lab received and graded that head |
 
+The [node cache DaemonSet](ci-lab-node-cache.md) prepares each CI node's bare mirror and uv
+cache. Its reference covers Helm values, placement, refresh stamps, lockfile warming and
+per-node verification; a Ready cache pod alone does not prove either cache is warm.
+
 ## Environment
 
 | Name | Scheduler | Worker | Meaning |
@@ -187,6 +191,7 @@ with `{"error": "a grade lookup names one full commit sha"}`. See
 | `CI_LAB_MINIO_*` | yes | yes | Object store endpoint, bucket and credentials, passed by reference |
 | `GITHUB_APP_*` | yes | never | GitHub App identity used to post check runs and read dev push manifest artifacts; the App needs checks write and actions read |
 | `CI_LAB_REDIS_URL` | yes | no | Queue, lease and verdict index store |
+| `CI_LAB_REINDEX_ON_START` | yes | no | Only the literal string `true` rebuilds missing verdict index entries from report objects before the listeners start and prints `reindexed N verdicts`; unset or any other value skips it. See [Recovery](#recovery) |
 | `CI_LAB_RUNTIME_CONFIG` | yes | no | Path of the mounted runtime config the scheduler reads at start, before it connects anywhere; its budget sets the budget fraction and shed classes of `/capacity` and `/metrics`; `python -m scripts.ci_lab runtime <path>` validates it |
 | `CI_LAB_URL` | yes | no | The lab scheduler address the relay builds each relayed check run's and draft pull request's grade link from, `<CI_LAB_URL>/grades/<sha>` |
 | `CI_LAB_SCHEDULER_URL` | no | yes | Base address of the scheduler lease API |
@@ -2096,6 +2101,9 @@ units differs from the cached verdict.
 
 ### Rebuild the index
 
+For a running deployment, [Recover the verdict index](#recover-the-verdict-index) explains how
+to request this operation at scheduler startup without writing code inside its pod.
+
 `reindex()` lists every object under `lab/`, keeps the paths `is_report` matches, reads each report
 and indexes its verdict with `SET NX`. It returns how many entries it added. Entries already present
 stay unchanged and are not counted, so a second run returns `0`. Grade, head and upload objects are
@@ -2195,6 +2203,179 @@ of lost objects runs on `LocalObjects` only.
 | `reindex()` returns `0` right after a flush | No report objects under `lab/` at this root, from a wrong directory, bucket or prefix; or every entry was already indexed | `verdicts.objects.keys("lab/")` lists the stored objects |
 | A unit folder holds `report.json` without `log.txt` | The writer stopped between the two writes; later puts never add a log | To run the unit again, delete its folder and its index entry; the next put stores a fresh verdict |
 | A worker gets `403` from `/upload-url` | The lease expired or the token belongs to another lease | Heartbeat before the lease expires; once it has expired, lease the job again |
+
+## Recovery
+
+The node mirror and uv cache can be rebuilt from the repository. The Redis verdict index can
+be rebuilt from report objects; a lost object bucket needs its backup restored first. The
+deployment repository owns the CI lab chart, node cache script and
+[bucket backup runbook](#deployment-recovery-runbook).
+Change chart values through that repository's delivery process. Pod recreation and scheduler
+restarts below retain the deployed code.
+
+The scheduler supports startup reindexing. The node recovery steps use the deployment's
+node-cache DaemonSet. The mirror age gauge still has no samples, as listed in
+[Metrics](#metrics); a successful fetch log alone does not prove the fresh-node metric requirement.
+
+### Deployment recovery runbook
+
+In the deployment repository, open `docs/2K-CI-LAB.md`, section `Recovery`, for the cluster's
+cache paths, bucket addresses and backup target. Chart overrides belong in
+`k8s/charts/ci-lab/values.yaml`; the refresh script is
+`k8s/charts/ci-lab/files/warm-node-cache.sh`. Keep deployment addresses in that repository.
+[Where they live and how they deploy](#where-they-live-and-how-they-deploy) also lists the
+deployment's lab monitoring resources.
+
+### Configure node recovery
+
+These chart overrides use an example host cache root. Keep the root consistent with worker
+mounts, and retain the chart's node selection and tolerations so a cache pod reaches each CI node:
+
+```yaml
+nodeCache:
+  path: /var/cache/example-ci-lab
+  uid: 1001
+mirror:
+  intervalSeconds: 60
+scheduler:
+  repository: https://github.com/the-cloud-clockwork/agentihooks.git
+  reindexOnStart: false
+```
+
+The chart's refresh interval defaults to 60 seconds. The `ci-lab-node-cache` DaemonSet mounts
+`nodeCache.path` as `/cache`; its `prepare` init container creates `git` and `uv` for
+`nodeCache.uid`. A cold autoscaled node needs no manual cache creation. Its first refresh:
+
+1. Creates the bare mirror at `git/agentihooks.git` under the cache root.
+2. Fetches all branches and pull request heads from `scheduler.repository`.
+3. Atomically updates the mirror's `fetched-at` stamp with the last successful fetch time in
+   epoch seconds.
+4. Warms `uv` from the dev branch's `.github/test-requirements.lock`, applying
+   `.github/test-excludes.txt` when present.
+
+The uv marker `uv/warmed-lock` records the lockfile blob. An unchanged blob skips another
+install; a repository without that dev lockfile logs a skip. This cache contains packages for
+venv creation, not the verdict index.
+
+Inspect the cache pods and their refresh output:
+
+```bash
+kubectl -n ci-lab get daemonset ci-lab-node-cache
+kubectl -n ci-lab get pods -l app.kubernetes.io/component=node-cache -o wide
+kubectl -n ci-lab logs -l app.kubernetes.io/component=node-cache -c warm --tail 20
+```
+
+A successful refresh logs `mirror fetched`, followed by `uv cache warmed for lock <blob>` or
+`uv cache current for lock <blob>`. The stamp advances before uv warming, so a failed package
+install can follow a successful git fetch. Once the worker exports `ci_lab_mirror_age_seconds`,
+verify that a fresh node's sample is below `mirror.intervalSeconds` after one completed loop.
+Until then, retain the fetch output as cache evidence and leave the metric acceptance unproven.
+
+### Recover an interrupted refresh or deleted cache
+
+Each refresh first acquires `git/.warm.lock` with `flock`. With that lock held, it removes
+stale `*.lock` files inside the mirror before fetching. A killed fetch therefore recovers on
+the next loop. A concurrent refresh logs
+`node cache refresh skipped: another run holds the cache lock` and tries again on the next loop.
+
+Deleting the host cache root leaves running pods mounted on the deleted directory. Deleting
+only its `git` directory also needs pod recreation: the root belongs to root, so the refresh
+user cannot recreate that directory. The refresh logs `node cache refresh failed` and the
+stamp stops advancing. Recreate the node-cache pod on the affected node so the kubelet and
+`prepare` init container recreate the directories:
+
+```bash
+NODE=example-ci-node
+kubectl -n ci-lab delete pod -l app.kubernetes.io/component=node-cache \
+  --field-selector "spec.nodeName=$NODE"
+```
+
+Restart affected worker pods as well when they retain the deleted mount. A replacement cache
+pod rebuilds the mirror and uv cache like a cold node; cache loss does not restore or remove
+the report objects in the bucket.
+
+### Recover the verdict index
+
+Restore access to Redis and the existing report bucket before starting the scheduler. Preserve
+the [scheduler startup prerequisites](#run-the-scheduler-service), including bus consumers,
+repository access and `CI_LAB_URL`; reindexing runs after dependency construction and before
+either HTTP listener starts.
+
+For a host service with that environment already configured, request one recovery startup:
+
+```bash
+CI_LAB_REINDEX_ON_START=true agentihooks ci-lab-scheduler
+```
+
+Only lowercase `true` requests recovery. Unset, `false`, `True` and `1` all skip reindexing.
+For the chart deployment, deliver this override through git instead:
+
+```yaml
+scheduler:
+  reindexOnStart: true
+```
+
+The chart injects `CI_LAB_REINDEX_ON_START=true` and rolls the scheduler. Read its startup output:
+
+```bash
+kubectl -n ci-lab logs deployment/ci-lab-scheduler \
+  | grep --line-buffered -E 'reindexed [0-9]+ verdicts'
+```
+
+The scheduler prints and flushes `reindexed N verdicts`, where N counts entries added, then
+starts serving. The line `reindexed 1 verdicts` is an example for one missing entry, not a
+deployed recovery result. Existing entries remain unchanged; another run can print
+`reindexed 0 verdicts`. The [store rebuild rules](#rebuild-the-index) explain the report scan.
+
+If another recovery pass is needed while the chart setting remains on, restart the scheduler:
+
+```bash
+kubectl -n ci-lab rollout restart deployment/ci-lab-scheduler
+kubectl -n ci-lab rollout status deployment/ci-lab-scheduler
+```
+
+After verification, deliver `scheduler.reindexOnStart: false` through git, or remove the
+environment override from the host service. Leaving it on reads every report on every start
+and delays readiness as the bucket grows. Reindexing restores verdict entries only: queued
+and leased units remain lost, and Redis-only disabled kinds become enabled after a Redis
+flush. Restore those disable decisions before resuming reuse; see [Disable and enable a kind](#disable-and-enable-a-kind).
+
+### Restore a lost bucket
+
+Use the [deployment recovery runbook](#deployment-recovery-runbook) to identify the backup
+endpoint and retained copy.
+The supplied deployment's nightly MinIO backup mirrors buckets without deleting objects from
+the backup. A restore cannot recover reports written after the last successful backup; their
+units miss the verdict cache and grade again.
+
+From a workstation with `mc`, inject the endpoints and credentials through the approved secret
+mechanism. Set `CI_LAB_RESTORE_ENDPOINT` and `CI_LAB_BACKUP_ENDPOINT` to the destination and
+backup addresses, and `CI_LAB_MINIO_BUCKET` to the bucket, for example `ci-lab-artifacts`.
+`MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD` below are environment references, never literal values:
+
+```bash
+mc alias set lab-restore "$CI_LAB_RESTORE_ENDPOINT" "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"
+mc alias set lab-backup "$CI_LAB_BACKUP_ENDPOINT" "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"
+mc mb --ignore-existing "lab-restore/$CI_LAB_MINIO_BUCKET"
+mc mirror --overwrite --preserve "lab-backup/$CI_LAB_MINIO_BUCKET" "lab-restore/$CI_LAB_MINIO_BUCKET"
+```
+
+Restore the bucket before recovering its Redis index. Retain both the fresh-node metric sample
+and the deployed scheduler's `reindexed N verdicts` line to prove full recovery.
+
+### Recovery troubleshooting
+
+| Symptom | Check and action |
+|---|---|
+| No cache pod on the new node | Check DaemonSet readiness, node selection, tolerations and the `prepare` init container before investigating the refresh script |
+| `mirror fetched` followed by `node cache refresh failed` | The stamp was already updated; inspect repository lockfile access, package downloads and uv cache permissions |
+| Refresh repeatedly skips | Another run holds `git/.warm.lock`; confirm that run's state before treating a stale mirror lock as the cause |
+| Refresh fails after cache directory deletion | Recreate the affected node-cache pod and workers holding deleted mounts |
+| Mirror age sample is absent | The gauge is not exported yet; the fetch stamp and logs do not satisfy the metric requirement |
+| No reindex line | Check the exact environment value and startup dependency errors; the chart's default `false` omits the variable |
+| Reindex prints zero | Existing entries are preserved, or no matching reports exist in the configured bucket; check the endpoint, bucket and report objects |
+| Scheduler readiness is delayed during recovery | Reindex reads every report before serving; inspect startup logs and object store access, then disable the startup setting after recovery |
+| Verdicts return but queued work or disabled kinds are missing | Reindex restores only verdict entries; reconstruct pending work and restore disable decisions separately |
 
 ## Reuse audit
 
