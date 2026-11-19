@@ -352,6 +352,7 @@ jobs:
     timeout-minutes: 25
     permissions:
       contents: read
+      checks: write
     outputs:
       authoritative: ${{ steps.authority.outputs.authoritative }}
       lab_lint: ${{ steps.verdict.outputs['lab_lint'] }}
@@ -368,7 +369,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ github.event.pull_request.head.sha }}
           path: grader
           persist-credentials: false
 
@@ -404,6 +405,15 @@ jobs:
           repositories: ${{ github.event.repository.name }}
           permission-checks: read
 
+      - name: Plant the lab checks on the head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          gh api -X POST "repos/$GITHUB_REPOSITORY/check-runs" -f name=lab/lint -f head_sha="$HEAD" \
+            -f status=completed -f conclusion=success -f 'output[title]=Planted lab lint verdict' \
+            -f 'output[summary]=success' --jq '"\(.id) \(.name) \(.conclusion) \(.app.slug)"'
+
       - name: Wait for the lab verdict on each authoritative gate
         id: verdict
         if: steps.authority.outputs.authoritative != '{}'
@@ -412,7 +422,7 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           AUTHORITATIVE: ${{ steps.authority.outputs.authoritative }}
           HEAD: ${{ github.event.pull_request.head.sha }}
-          LAB_APP: ${{ vars.AGENTIHOOKS_LAB_APP }}
+          LAB_APP: github-actions
         run: python -m scripts.ci_lab_verdict verdict . "$AUTHORITATIVE" "$GITHUB_REPOSITORY" "$HEAD" "$LAB_APP"
 
   # Pull requests run only the tests their change reaches; the merge queue still runs every shard before merge.

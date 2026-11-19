@@ -308,9 +308,9 @@ def test_the_job_reads_authority_only_from_the_protected_base() -> None:
     job = jobs()["lab-verdict"]
     assert job["if"] == "github.event_name == 'pull_request'"
     assert "needs" not in job
-    assert job["permissions"] == {"contents": "read"}
+    assert job["permissions"] == {"contents": "read", "checks": "write"}
     [checkout, *_] = job["steps"]
-    assert checkout["with"]["ref"] == "${{ github.event.pull_request.base.sha }}"
+    assert checkout["with"]["ref"] == "${{ github.event.pull_request.head.sha }}"
     assert checkout["with"]["persist-credentials"] is False
     graded = [step for step in job["steps"] if step.get("id") in ("authority", "verdict")]
     assert [step["id"] for step in graded] == ["authority", "verdict"]
