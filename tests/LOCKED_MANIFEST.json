@@ -1005,7 +1005,7 @@
  "tests/test_credential_guard.py::test_a_credential_read_in_a_heredoc_a_shell_runs_is_refused": {
   "assertions": 2,
   "calls": 4,
-  "cases": 9,
+  "cases": 14,
   "texts": [
    "5f14a71b0f82deae",
    "c8255937adffc2e6"
@@ -1016,13 +1016,13 @@
   "calls": 5,
   "cases": 1,
   "texts": [
-   "98d8b50d408a306a"
+   "92cabe404cef90f9"
   ]
  },
  "tests/test_credential_guard.py::test_a_heredoc_that_reads_no_credential_passes": {
   "assertions": 1,
   "calls": 2,
-  "cases": 6,
+  "cases": 9,
   "texts": [
    "a76f47343f702669"
   ]

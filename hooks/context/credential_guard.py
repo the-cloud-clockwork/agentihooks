@@ -192,7 +192,7 @@ NEUTRAL_STAGE = re.compile(r"^\s*(sort|uniq|column|tr)\b")
 
 HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1([^\n]*)\n(.*?)^\s*\2\s*$", re.S | re.M)
 HEREDOC_TOKEN = re.compile(r"<<AHHEREDOC(\d+)([^\n]*)")
-COMMAND_WORD = re.compile(r"[^\s'\"`$();|&<>]+")
+SCRIPT_RUNNERS = SHELLS | SOURCERS | {"eval", "ksh", "mksh", "ash", "fish", "csh", "tcsh"}
 SEGMENT_DELIM = re.compile(r"&&|\|\||;|\n")
 STAGE_DELIM = re.compile(r"(?<!\|)\|(?!\|)")
 SUBSTITUTION = re.compile(r"\$\(([^()]*)\)|`([^`]*)`|<\(([^()]*)\)")
@@ -1090,12 +1090,25 @@ def script_verdict(stage_text: str, ctx: Context) -> Verdict:
     return stage_verdict(stage_text, ctx)
 
 
+def runs_input_script(stage_text: str) -> bool:
+    """Whether the stage, a container or remote wrapper's command, or a command substitution in it is a shell, source or eval."""
+    for m in SUBSTITUTION.finditer(stage_text):
+        if runs_input_script(next(g for g in m.groups() if g is not None)):
+            return True
+    toks = tokens_of(stage_text)
+    if verb_of(toks) in WRAPPERS:
+        toks = inner_command([word for tok in toks for word in tok.split()]) or []
+    return verb_of(toks) in SCRIPT_RUNNERS
+
+
 def heredoc_verdict(segment: str, heredocs: list[re.Match[str]], ctx: Context) -> Verdict:
-    """The verdict on each heredoc body of the segment, checked as a command once the segment names a shell."""
-    if not any(word.split("/")[-1] in SHELLS for word in COMMAND_WORD.findall(segment)):
+    """The verdict on each heredoc body of the segment, checked as a command once a stage of it runs a shell."""
+    if not any(runs_input_script(stage) for stage in split_outside_quotes(STAGE_DELIM, segment)[::2]):
         return ALLOW
     for token in HEREDOC_TOKEN.finditer(segment):
-        v = decide_bash({"command": heredocs[int(token.group(1))].group(4)}, Context(ctx.cwd, ctx.recursive))
+        index = int(token.group(1))
+        body = {"command": heredocs[index].group(4)} if index < len(heredocs) else {}
+        v = decide_bash(body, Context(ctx.cwd, ctx.recursive))
         if v.block:
             return v
     return ALLOW

@@ -821,6 +821,11 @@ HEREDOCS_A_SHELL_RUNS = [
     ("ssh host 'bash -s' <<'EOF'\ncat .env\nEOF", "cat .env"),
     ("/bin/zsh <<EOF\necho ok\ncat .env\nEOF", "cat .env"),
     ('out="$(dash <<EOF\ncat .env\nEOF\n)"', "cat .env"),
+    ('bash -c "sh <<EOF\ncat .env\nEOF\n"', "cat .env"),
+    ("source /dev/stdin <<EOF\ncat ~/.env\nEOF", "cat ~/.env"),
+    (". /dev/stdin <<'EOF'\nenv\nEOF", "env"),
+    ('eval "$(cat <<EOF\ncat ~/.env\nEOF\n)"', "cat ~/.env"),
+    ("ksh <<EOF\ncat .env\nEOF", "cat .env"),
 ]
 
 HEREDOCS_THAT_READ_NO_CREDENTIAL = [
@@ -830,6 +835,9 @@ HEREDOCS_THAT_READ_NO_CREDENTIAL = [
     "bash <<EOF\necho hi\nEOF",
     "cat <<EOF > out && echo done\nbody\nEOF",
     "git commit -F - <<'EOF'\nStop reading .env in the setup script\nEOF",
+    "grep bash <<'EOF'\ncat .env\nEOF",
+    "cat <<EOF | grep sh\ncat .env\nEOF",
+    'bash -c "bash <<EOF\necho hi\nEOF\n"',
 ]
 
 
@@ -863,7 +871,7 @@ def test_a_heredoc_a_shell_runs_keeps_the_credential_tree_scan(tmp_path: Path) -
 
     verdict = evaluate(_bash("bash <<'EOF'\ngrep -r needle .\nEOF", cwd=str(tmp_path)))
 
-    assert verdict.block == block(f"searching a tree that holds {tmp_path / '.env'}", KIND_RECURSIVE)
+    assert verdict.block == block(f"searching a tree that holds {tmp_path}/./.env", KIND_RECURSIVE)
 
 
 @pytest.mark.feature("credential-guard-reads-heredoc-commands")
