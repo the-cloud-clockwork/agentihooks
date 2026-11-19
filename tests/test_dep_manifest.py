@@ -743,12 +743,20 @@ def test_the_split_deselects_the_same_tests_when_the_head_keeps_the_manifest_cod
     )
 
 
-@pytest.mark.feature("lab-wheel-imports")
-def test_the_split_deselects_with_a_grader_that_keeps_the_manifest_under_tests(tmp_path: Path) -> None:
+@pytest.mark.feature("deselect-scripts-manifest")
+def test_the_split_deselects_with_the_scripts_manifest_alone_and_never_the_tests_package(tmp_path: Path) -> None:
     manifest = (ROOT / "scripts" / "dep_manifest.py").read_text()
-    chosen, expected = _deselect_in_test_count(tmp_path, manifest, "tests")
+    shipped = tmp_path / "shipped" / "runner" / "planner"
+    shipped.mkdir(parents=True)
+    (shipped / "tests.py").write_text("raise ModuleNotFoundError(\"No module named 'tests'\", name='tests')\n")
+    chosen, expected = _deselect_in_test_count(tmp_path / "shipped", manifest)
     assert chosen == expected
-    assert not (tmp_path / "runner" / "planner" / "scripts").exists()
+    legacy = tmp_path / "legacy" / "runner" / "planner" / "scripts"
+    legacy.mkdir(parents=True)
+    (legacy / "__init__.py").write_text("")
+    with pytest.raises(subprocess.CalledProcessError):
+        _deselect_in_test_count(tmp_path / "legacy", manifest, "tests")
+    assert not (tmp_path / "legacy" / "runner" / "reused.json").exists()
 
 
 def test_the_reused_plan_reaches_workers_but_never_nested_pytest_runs(tmp_path, monkeypatch):
