@@ -3080,7 +3080,9 @@
       "behaviour": "A seat start and the default learned command return only the caller seat notes and shared canon and insight; explicit all returns every seat while preserving note numbers.",
       "seam": "agentihooks swarm learned and the seat launch prompt",
       "tests": [
-        "tests/swarm/test_learned_scope.py::test_returned_notes_stay_with_the_caller_and_shared_guidance"
+        "tests/swarm/test_learned_scope.py::test_returned_notes_stay_with_the_caller_and_shared_guidance",
+        "tests/swarm/test_learned_scope.py::test_scoped_memory_preserves_live_notes_and_source_ordinals",
+        "tests/swarm/test_learned_scope.py::test_scoped_memory_without_matching_notes_is_empty"
       ]
     },
     {

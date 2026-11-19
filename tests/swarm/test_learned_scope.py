@@ -65,3 +65,53 @@ def test_returned_notes_stay_with_the_caller_and_shared_guidance(
         assert len(returned.encode()) > 32768
     else:
         assert len(returned.encode()) < 1000
+
+
+@pytest.mark.feature("swarm-learned-scope")
+@pytest.mark.parametrize("all_seats", [False, True])
+def test_scoped_memory_preserves_live_notes_and_source_ordinals(
+    env: tuple[Any, Any, Any],  # noqa: F811
+    all_seats: bool,
+) -> None:
+    from scripts.inbox.seats import SeatMemory
+
+    store, _, _ = env
+    memory = SeatMemory(store.redis)
+    own = [("own note", "note"), ("own data", "data"), ("own canon", "canon"), ("own insight", "insight")]
+    foreign = [
+        ("foreign note", "note"),
+        ("foreign data", "data"),
+        ("shared canon", "canon"),
+        ("shared insight", "insight"),
+    ]
+    for seat, notes in (("eng-1@sw", own), ("ci-1@sw", foreign)):
+        store.memory.add_recap(seat, "previous occupant", "old task", "unrelated recap", at=1)
+        for text, maturity in notes:
+            store.memory.learn(seat, "previous occupant", text, 1, maturity)
+        store.memory.learn(seat, "previous occupant", "retired canon", 1, "canon")
+        store.memory.retire(seat, 5, "master", "obsolete", 2)
+    store.memory.learn("eng-1@another", "previous occupant", "other swarm canon", 1, "canon")
+    rows = memory.scoped("sw", "eng-1@sw", all_seats=all_seats)
+    expected = {
+        ("eng-1@sw", 1, "own note", "note"),
+        ("eng-1@sw", 2, "own data", "data"),
+        ("eng-1@sw", 3, "own canon", "canon"),
+        ("eng-1@sw", 4, "own insight", "insight"),
+        ("ci-1@sw", 3, "shared canon", "canon"),
+        ("ci-1@sw", 4, "shared insight", "insight"),
+    }
+    if all_seats:
+        expected.update({("ci-1@sw", 1, "foreign note", "note"), ("ci-1@sw", 2, "foreign data", "data")})
+    assert {(row["seat"], row["number"], row["text"], row["maturity"]) for row in rows} == expected
+    assert len(rows) == len(expected)
+    assert all(row["occupant"] == "previous occupant" and row["at"] == 1 for row in rows)
+
+
+@pytest.mark.feature("swarm-learned-scope")
+def test_scoped_memory_without_matching_notes_is_empty(env: tuple[Any, Any, Any]) -> None:  # noqa: F811
+    from scripts.inbox.seats import SeatMemory
+
+    store, _, _ = env
+    memory = SeatMemory(store.redis)
+    store.memory.learn("eng-1@another", "previous occupant", "other swarm canon", 1, "canon")
+    assert memory.scoped("sw", "eng-1@sw") == []
