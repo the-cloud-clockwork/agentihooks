@@ -554,9 +554,11 @@ def test_the_binding_pass_keeps_a_record_from_another_host_or_with_unknown_liven
 
 
 @pytest.mark.feature("managed-process-owner-observation")
+@pytest.mark.feature("unknown-process-binding-observation")
 def test_a_foreign_managed_server_has_unknown_process_liveness(
     rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    rig.agent = replace(rig.agent, model="gpt-6.1-sol", effort="xhigh")
     monkeypatch.setattr("socket.gethostname", lambda: "observer")
     rig.bindings.put(SLUG, replace(rig.record, host_id="owner", state=CONNECTED))
     local_start = Mock(side_effect=AssertionError("foreign process inspected locally"))
@@ -614,3 +616,21 @@ def test_a_dead_local_managed_server_still_has_a_process_mismatch(
         f"live-binding/{rig.agent.name}/process"
     ]
     reader.assert_not_called()
+
+
+@pytest.mark.feature("unknown-process-binding-observation")
+@pytest.mark.parametrize(
+    ("facts", "expected"),
+    [
+        ({"process": None}, {}),
+        ({"process": True}, {"model": "gpt-6.1-sol", "effort": "xhigh"}),
+        ({"process": False}, {"model": "gpt-6.1-sol", "effort": "xhigh"}),
+        ({}, {"model": "gpt-6.1-sol", "effort": "xhigh"}),
+    ],
+)
+def test_model_observations_distinguish_unknown_and_missing_process_facts(
+    rig: SimpleNamespace, facts: dict[str, bool | None], expected: dict[str, str]
+) -> None:
+    agent = replace(rig.agent, model="gpt-6.1-sol", effort="xhigh")
+
+    assert live_binding.unobserved(agent, facts) == expected

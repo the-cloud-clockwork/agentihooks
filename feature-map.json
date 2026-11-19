@@ -1160,6 +1160,17 @@
       ]
     },
     {
+      "id": "unknown-process-binding-observation",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-live-binding-process-false",
+      "behaviour": "Explicitly unknown process liveness does not report assigned model or effort as missing. Known and absent process facts retain native model and effort observation checks.",
+      "seam": "scripts.swarm.live_binding.unobserved through runtime bindings, record and findings",
+      "tests": [
+        "tests/swarm/test_managed_lifecycle.py::test_a_foreign_managed_server_has_unknown_process_liveness",
+        "tests/swarm/test_managed_lifecycle.py::test_model_observations_distinguish_unknown_and_missing_process_facts"
+      ]
+    },
+    {
       "id": "managed-process-owner-observation",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-live-binding-process-false",
