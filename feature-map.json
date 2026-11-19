@@ -1,6 +1,16 @@
 {
   "features": [
     {
+      "id": "lab-remote-repository-owner",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2713",
+      "behaviour": "A lab remote URL with an owner serves a checkout only when both its owner and repository name match the origin, ignoring case and transport. Ownerless lab mirrors and local repository paths retain their existing name match.",
+      "seam": "scripts.ci_lab.remote.checkout.serves",
+      "tests": [
+        "tests/ci_lab/test_remote_repository_owner.py::test_lab_remote_matches_repository_owner"
+      ]
+    },
+    {
       "id": "credential-guard-reads-heredoc-commands",
       "origin": "regression",
       "ordered_at": "2026-11-19",
