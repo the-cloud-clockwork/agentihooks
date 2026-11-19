@@ -15,6 +15,12 @@ jobs:
         # ruleid: run-artifacts-read-one-page
         run: gh api "repos/$GITHUB_REPOSITORY/actions/runs/${{ github.run_id }}/artifacts" --jq '.artifacts[].name'
 
+      - name: Read one page of a run's artifacts over two lines
+        # ruleid: run-artifacts-read-one-page
+        run: |
+          gh api \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?per_page=100" --jq '.artifacts[]' > artifacts.jsonl
+
       - name: Ask for the artifact by name
         # ok: run-artifacts-read-one-page
         run: |
@@ -29,3 +35,9 @@ jobs:
         # ok: run-artifacts-read-one-page
         run: |
           gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?per_page=100" --jq '.artifacts[]' > artifacts.jsonl
+
+      - name: Read every page of a run's artifacts over two lines
+        # ok: run-artifacts-read-one-page
+        run: |
+          gh api --paginate \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?per_page=100" --jq '.artifacts[]' > artifacts.jsonl

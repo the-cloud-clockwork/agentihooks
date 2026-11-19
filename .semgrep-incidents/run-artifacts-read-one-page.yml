@@ -20,4 +20,4 @@ rules:
           run: $SCRIPT
       - metavariable-regex:
           metavariable: $SCRIPT
-          regex: (?ms)\A.*?^(?![^\n]*--paginate)[^\n]*actions/runs/[^/\n]+/artifacts(?![^\s"']*[?&]name=)
+          regex: (?ms)\A.*?^(?<!\\\n)(?!(?:[^\n]*\\\n)*[^\n]*--paginate)(?:[^\n]*\\\n)*[^\n]*actions/runs/[^/\n]+/artifacts(?![^\s"']*[?&]name=)

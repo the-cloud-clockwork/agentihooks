@@ -14,10 +14,11 @@ _SELECTORS = [
     ("coverage-ratchet", "Find the run that published the base baseline"),
     ("select", "Find the dev push run of the dispatched base"),
 ]
+_LookupResult = tuple[subprocess.CompletedProcess[str], str, str]
 
 
 @pytest.fixture
-def lookup(tmp_path: Path) -> Callable[..., tuple[subprocess.CompletedProcess[str], str, str]]:
+def lookup(tmp_path: Path) -> Callable[..., _LookupResult]:
     tools = tmp_path / "bin"
     tools.mkdir()
     gh = tools / "gh"
@@ -36,7 +37,7 @@ def lookup(tmp_path: Path) -> Callable[..., tuple[subprocess.CompletedProcess[st
         "elif '/commits/' in path: body = {'sha': 'base', 'commit': {'tree': {'sha': 'tree'}}, 'parents': [{'sha': 'base'}]}\n"
         "elif path.endswith('/jobs'): body = {'jobs': data['jobs']}\n"
         "elif path.endswith('/artifacts'):\n"
-        "    names = [name for name in data['artifacts'] if name == query.get('name', [name])[0]]\n"
+        "    names = [name for name in data['artifacts'] if 'name' not in query or name == query['name'][0]]\n"
         "    size = min(int(query.get('per_page', ['30'])[0]), 100)\n"
         "    start = (int(query.get('page', ['1'])[0]) - 1) * size\n"
         "    body = {'total_count': len(names), 'artifacts': [{'name': name, 'expired': False} for name in names[start:start + size]]}\n"
@@ -63,7 +64,7 @@ def lookup(tmp_path: Path) -> Callable[..., tuple[subprocess.CompletedProcess[st
         queue_ancestry: str = "diverged",
         crowd: int = 0,
         conclusion: str = "failure",
-    ) -> tuple[subprocess.CompletedProcess[str], str, str]:
+    ) -> _LookupResult:
         publisher, measure, publish = (
             ("coverage-baseline", "Compute the coverage baseline", "Publish the passed dev coverage baseline")
             if event == "push"
@@ -192,7 +193,7 @@ def test_lookup_accepts_the_twenty_shard_plan_of_a_dev_push_run(lookup, selector
     ids=["merge-group", "coverage-ratchet", "dispatch"],
 )
 def test_lookup_finds_the_artifacts_past_the_first_page_of_a_crowded_run(
-    lookup: Callable[..., tuple[subprocess.CompletedProcess[str], str, str]], selector: tuple[str, str]
+    lookup: Callable[..., _LookupResult], selector: tuple[str, str]
 ) -> None:
     result, output, _ = lookup(selector, crowd=104, conclusion="success")
     assert result.returncode == 0, result.stdout + result.stderr
