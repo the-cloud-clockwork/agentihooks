@@ -1306,13 +1306,16 @@ def test_a_newer_backfill_head_drops_the_held_units_of_the_older_one(lab: Callab
 def test_a_finished_unit_charges_its_slots_times_its_report_seconds_once_and_no_seconds_charges_nothing(
     lab: Callable[..., Run],
 ) -> None:
-    timed, untimed = unit(1), unit(2)
-    run = lab({HEAD_B: plan({"lint": (timed, untimed)})}, spend=LOW_BUDGET)
+    timed, untimed, unreported = unit(1), unit(2), unit(3)
+    run = lab({HEAD_B: plan({"lint": (timed, untimed, unreported)})}, spend=LOW_BUDGET)
+    run.engine.queue.enqueue([timed], HEAD_B, {timed.key: queue.Requirement(slots=2)})
     run.push(HEAD_B, lane="pr-2", event="pull_request", action="synchronize")
     run.tick(1000)
-    first, second = run.lease(slots=2)
-    run.finish(first, "passed", {"seconds": 3000.0})
+    first, second, third = run.lease(slots=4)
+    assert (first.slots, second.slots, third.slots) == (2, 1, 1)
+    run.finish(first, "passed", {"seconds": 1500.0})
     run.finish(second, "passed", {})
+    run.finish(third, "passed")
     run.tick(1100)
     spending = run.engine.spending
     assert spending is not None
