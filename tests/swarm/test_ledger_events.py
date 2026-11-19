@@ -374,13 +374,13 @@ def open_followup(added_at, **fields):
             1,
             "sw-eng-1 added a follow-up f1 on ledger sw: Retries need a cap\n"
             "Decide it: turn it into a task, close it with a status, or flag it for the operator.\n"
-            "Close it: agentihooks api --slug sw followup done f1",
+            "Close it: agentihooks ledger --slug sw followup done f1",
         ),
         (
             15 * MINUTE,
             "A follow-up f1 on ledger sw is still open fifteen minutes after sw-eng-1 added it: "
             "Retries need a cap\nDecide it now, or it goes to the operator's Priorities.\n"
-            "Close it: agentihooks api --slug sw followup done f1",
+            "Close it: agentihooks ledger --slug sw followup done f1",
         ),
     ],
 )
@@ -402,7 +402,7 @@ def test_follow_up_notices_name_each_item_and_its_completion_command(store, now_
     assert first == expected_first
     assert "follow-up f2 on ledger sw" in second
     assert "Queue needs a limit" in second
-    assert second.endswith("Close it: agentihooks api --slug sw followup done f2")
+    assert second.endswith("Close it: agentihooks ledger --slug sw followup done f2")
 
 
 def test_a_follow_up_event_without_text_keeps_its_identifier_and_completion_command(store):
@@ -411,7 +411,7 @@ def test_a_follow_up_event_without_text_keeps_its_identifier_and_completion_comm
     assert texts(store, MASTER_SEAT) == [
         "sw-eng-1 added a follow-up f1 on ledger sw: \n"
         "Decide it: turn it into a task, close it with a status, or flag it for the operator.\n"
-        "Close it: agentihooks api --slug sw followup done f1"
+        "Close it: agentihooks ledger --slug sw followup done f1"
     ]
 
 

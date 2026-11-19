@@ -47,7 +47,7 @@ _ALLOWED = (
     " Until the handoff every tool call is denied except reading files (cat, head, tail, ls, wc, grep and git status, "
     "log, diff, show in the shell), writing the handoff document under "
     "~/scratchpad, `agentihooks swarm {slug} handoff <doc> [--recap <recap>]`, `agentihooks swarm {slug} learned` "
-    "and `agentihooks api` comment, say, leave and ack, "
+    "and `agentihooks ledger` comment, say, leave and ack, "
     "each as one command."
 )
 

@@ -2,8 +2,7 @@
 """Hook that keeps a crew member bound to its ledger, run on every harness by hooks.context.swarm_ledger.
 
 Handles SessionStart, UserPromptSubmit, PostToolUse and Stop. A session is bound by
-`agentihooks api join` (also `agentihooks ledger join` or `ledger.py join`, learned from the Bash
-command). Unbound sessions exit at once. Every error fails open.
+`agentihooks ledger join` or `ledger.py join` (learned from the Bash command). Unbound sessions exit at once. Every error fails open.
 """
 
 import json
@@ -24,7 +23,7 @@ LEDGER_DIR = Path(os.environ.get("LEDGER_DIR", Path.home() / "development-ledger
 SESSIONS = LEDGER_DIR / ".sessions"
 GATE_READS = ("_meta.members", "_meta.events", "tasks", "phases", "followups", "policy")
 SHOWN = 5
-CLI = "agentihooks api"
+CLI = "agentihooks ledger"
 
 
 def log(message):
@@ -59,7 +58,7 @@ def tokens_of(command):
 
 def is_ledger_cli(tokens):
     return any(Path(t).name == "ledger.py" for t in tokens) or any(
-        a.endswith("agentihooks") and b in ("ledger", "api") for a, b in zip(tokens, tokens[1:])
+        a.endswith("agentihooks") and b == "ledger" for a, b in zip(tokens, tokens[1:])
     )
 
 

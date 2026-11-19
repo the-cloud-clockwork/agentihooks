@@ -23,13 +23,8 @@ Monitor resolves it without shell state:
 agentihooks ledger new …                               # build a ledger
 agentihooks ledger serve …                             # the local server
 agentihooks ledger watch …                             # the Monitor feed
-agentihooks api --slug <slug> --as <name> <command>    # the write API: the agent CLI
+agentihooks ledger --slug <slug> --as <name> <command> # the agent CLI
 ```
-
-The ledger page (`new`, `serve`, `watch`, `chat`, `storage`) is read only, a presentation layer for the
-operator. Every write — every command above the line, from any agent, service or hive — runs the same
-API route code in process over the shared database; `agentihooks ledger --slug ... --as ...` still works
-as a compatibility alias of `agentihooks api`, but every skill, rule and prompt names `agentihooks api`.
 
 A ledger `<slug>` is a record in the SQLite database `ledgers.sqlite3` in
 `~/development-ledger/` (`$LEDGER_DIR`); no per ledger JSON or HTML file is
@@ -133,7 +128,7 @@ Done when `agentihooks ledger --slug <slug> --as <name> status` lists every memb
 
 ## Part B — Work a plan that has a ledger (every crew member)
 
-All agent commands are `agentihooks api --slug <slug> --as <name> <command>`.
+All commands are `agentihooks ledger --slug <slug> --as <name> <command>`.
 
 ### B1. Join, watch
 
@@ -249,7 +244,7 @@ process runs between ticks.
 1. `agentihooks swarm init <name> --plan <plan-file> --content <content.json> --repo <dir>` creates the swarm
    and its ledger under the name, paused; `agentihooks swarm names check <name>` checks a name first.
 2. Tasks: put them in the content's `tasks` list (`title`, `description`, `phase`, `lane` eng or ci), or add
-   them later with `agentihooks api --slug <slug> --as <name> task add <id> <title> --lane eng --phase p1`.
+   them later with `agentihooks ledger --slug <slug> --as <name> task add <id> <title> --lane eng --phase p1`.
 3. `agentihooks swarm <slug> start`: scales up at once; `pause` stops new spawns, `stop` drains, `stop --now`
    kills every agent and reopens its task. Change caps with `agentihooks swarm <slug> max-eng-agents=3`.
 4. `agentihooks swarm <slug> status` and `agentihooks swarm list` show agents, tasks and state.

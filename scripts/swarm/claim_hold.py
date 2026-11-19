@@ -73,7 +73,7 @@ def verification_notices(slug: str, store: object, doc: dict, at: int) -> list[s
         text = (
             f"Task {task_id} ({task.get('title') or task_id}) awaits verification without a proof window "
             "for more than an hour. Set contract.after_at to its proof time, or reopen it with "
-            f"agentihooks api --slug {slug} --as master task set {task_id} awaiting="
+            f"agentihooks ledger --slug {slug} --as master task set {task_id} awaiting="
         )
         InboxStore(store.redis).send("swarm", seat_address(slug, MASTER), text)
         store.redis.set(notice_key, at)

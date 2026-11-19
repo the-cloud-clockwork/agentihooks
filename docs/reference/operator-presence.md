@@ -30,7 +30,7 @@ A session is gated when any of these holds:
 | Binding | How it is set |
 |---|---|
 | `AGENTIHOOKS_SWARM` is set in the session environment | The tick launches every swarm agent with it, on any hive or the workstation |
-| A ledger session binding exists for the session id | A successful `agentihooks api --slug <slug> --as <name> join` writes it under the ledger folder's `.sessions` directory (`LEDGER_DIR`, default `~/development-ledger`), so a session that joins a ledger is gated even outside a swarm |
+| A ledger session binding exists for the session id | A successful `agentihooks ledger --slug <slug> --as <name> join` writes it under the ledger folder's `.sessions` directory (`LEDGER_DIR`, default `~/development-ledger`), so a session that joins a ledger is gated even outside a swarm |
 | A master seat record exists for the session id | The `take-master` skill records it under `master_seats` in the AgentiHooks home, so a master opened by hand is gated without swarm environment |
 
 A session with none of these is standalone: it is always treated as present,
