@@ -780,6 +780,7 @@ def test_a_test_module_its_test_file_loads_as_a_pytest_plugin_keys_its_stats(tmp
     collect_cached_stats(root, cache, {}, files, [], collect)
     (root / "tests/test_other.py").write_text("value = 2\n")
     collect_cached_stats(root, cache, {}, files, [], collect)
+    assert calls == [files]
     (root / "tests/test_plugin.py").write_text("value = 2\n")
     collect_cached_stats(root, cache, {}, files, [], collect)
     assert calls == [files, files]
