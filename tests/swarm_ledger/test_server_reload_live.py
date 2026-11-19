@@ -152,18 +152,19 @@ def test_a_malformed_answer_after_the_successor_is_named_fails_the_reload_test(
     """urlopen raises BadStatusLine, which is no OSError, for a status line cut short such as HTTP/1.1 20."""
     real_healthy, test_thread = healthy, threading.current_thread()
     named_pids: list[int | None] = []
-    malformed: list[int | None] = []
+    malformed_pids: list[int | None] = []
 
     def malformed_once_the_successor_is_named(port: int, timeout: float = 30) -> int:
         """Raise once on the hammer thread when the pid file names a server other than the first request's."""
-        named_pids.append(pid_of(tmp_path))
-        successor_named = named_pids[-1] not in (None, named_pids[0])
-        if successor_named and not malformed and threading.current_thread() is not test_thread:
-            malformed.append(named_pids[-1])
+        pid = pid_of(tmp_path)
+        named_pids.append(pid)
+        successor_named = pid not in (None, named_pids[0])
+        if successor_named and not malformed_pids and threading.current_thread() is not test_thread:
+            malformed_pids.append(pid)
             raise http.client.BadStatusLine("HTTP/1.1 20")
         return real_healthy(port, timeout)
 
     monkeypatch.setitem(globals(), "healthy", malformed_once_the_successor_is_named)
     with pytest.raises(AssertionError, match="BadStatusLine"):
         test_a_reload_hands_over_without_a_failed_or_slow_request(tmp_path, ledger_port)
-    assert malformed
+    assert malformed_pids
