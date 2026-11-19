@@ -1028,7 +1028,8 @@ def cmd_create(store: RedisStore, args: argparse.Namespace) -> None:
     refused = ledger_creator.swarm_refusal(os.environ) or (
         args.template != priming.TEMPLATE and ledger_creator.floor_refusal(os.environ, tasks, args.operator_asked)
     )
-    if refused := refused or store.refusal(config):
+    refused = refused or store.refusal(config)
+    if refused:
         raise SwarmError(refused)
     ledger.mark_swarm(args.slug)
     store.create(config)
