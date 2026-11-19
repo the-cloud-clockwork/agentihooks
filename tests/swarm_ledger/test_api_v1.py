@@ -1,5 +1,6 @@
 import json
 import uuid
+from typing import Any
 
 from scripts.swarm_ledger import api_service
 from tests.swarm_ledger.test_ledger_authority import SLUG, send, server
@@ -766,6 +767,24 @@ def test_item_revision_uses_canonical_utf8_content(live, monkeypatch):
             "revision": "e483879a300a6dae1421b8afa9f16094b2dec361357e663177417d89574b158f",
         },
     )
+
+
+@pytest.mark.feature("swarm-focus-read")
+def test_the_focus_read_serves_every_focus_and_one_target(live: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    focus = {"id": "f1", "verb": "focus", "target": "tasks/t1", "by": "operator", "at": 0, "reason": ""}
+    tasks = [{"id": "t1", "lane": "eng", "state": "open"}, {"id": "t2", "lane": "eng", "state": "done"}]
+    stored(monkeypatch, {"tasks": tasks, "phases": [], "freezes": [focus], "_meta": {"rev": 1}})
+    monkeypatch.setattr(routes, "fix_phase", lambda services, slug: "")
+    status, reply = request(live, "GET", "focus")
+    assert status == 200 and reply["next_cursor"] is None
+    [row] = reply["data"]
+    assert (row["target"], row["claimable"], row["done"]) == ("tasks/t1", 1, [])
+    assert row["tasks"] == [{"id": "t1", "lane": "eng", "state": "open", "verdict": "claimable"}]
+    assert row["unclaimed_minutes"] >= 0
+    status, reply = request(live, "GET", "focus/tasks/t2")
+    assert (status, reply["data"]["done"], reply["data"]["tasks"]) == (200, ["t2"], [])
+    status, reply = request(live, "GET", "focus/tasks/nope")
+    assert (status, reply["error"]["code"]) == (404, "resource_missing")
 
 
 def test_metadata_resource_reports_its_named_fields(live, monkeypatch):
