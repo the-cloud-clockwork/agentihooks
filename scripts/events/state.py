@@ -61,3 +61,14 @@ def unanswered(environ: Mapping[str, str] = os.environ) -> tuple[type[BaseExcept
     from redis.exceptions import TimeoutError as RedisTimeout
 
     return (Refused, RedisTimeout, OSError)
+
+
+def refused(environ: Mapping[str, str] = os.environ) -> tuple[type[BaseException], ...]:
+    """The errors that mean the state store refused the caller's credential, which no later call can clear."""
+    if backend(environ) == "bus":
+        from nats.errors import AuthorizationError
+
+        return (AuthorizationError,)
+    from redis.exceptions import AuthenticationError, AuthenticationWrongNumberOfArgsError, NoPermissionError
+
+    return (AuthenticationError, AuthenticationWrongNumberOfArgsError, NoPermissionError)

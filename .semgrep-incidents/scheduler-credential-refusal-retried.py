@@ -1,14 +1,6 @@
 import sys
 
-
-class state:
-    @staticmethod
-    def unanswered() -> tuple[type[BaseException], ...]:
-        return (ConnectionError, TimeoutError, OSError)
-
-    @staticmethod
-    def unavailable() -> tuple[type[BaseException], ...]:
-        return (RuntimeError, OSError)
+from scripts.events import state
 
 
 class Refused(RuntimeError):
@@ -17,10 +9,6 @@ class Refused(RuntimeError):
 
 class LostLock(RuntimeError):
     pass
-
-
-def refusals() -> tuple[type[BaseException], ...]:
-    return (PermissionError,)
 
 
 def run_due() -> None:
@@ -44,7 +32,7 @@ async def run_retries_a_refused_login(stopped: list[int]) -> bool:
 
 
 async def run_logs_a_refused_login_and_retries(stopped: list[int]) -> bool:
-    refused = refusals()
+    refused = state.refused()
     silence = state.unanswered()
     while not stopped:
         # ruleid: scheduler-credential-refusal-retried
@@ -59,7 +47,7 @@ async def run_logs_a_refused_login_and_retries(stopped: list[int]) -> bool:
 
 async def run_stops_on_a_refused_login(stopped: list[int]) -> bool:
     transient = state.unavailable()
-    refused = refusals()
+    refused = state.refused()
     silence = state.unanswered()
     while not stopped:
         # ok: scheduler-credential-refusal-retried

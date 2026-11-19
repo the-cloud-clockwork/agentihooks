@@ -1186,15 +1186,17 @@ async def test_a_store_that_times_out_drops_or_answers_an_error_still_gets_a_new
 
 @pytest.mark.feature("scheduler-credential-refusal-stop")
 def test_only_a_refused_login_or_acl_counts_as_a_refused_credential() -> None:
+    from nats import errors
     from redis import exceptions
 
-    from scripts.scheduler import service
+    from scripts.events import state
 
-    assert service.refusals() == (
+    assert state.refused({}) == (
         exceptions.AuthenticationError,
         exceptions.AuthenticationWrongNumberOfArgsError,
         exceptions.NoPermissionError,
     )
+    assert state.refused({"AGENTIHOOKS_STATE_BACKEND": "bus"}) == (errors.AuthorizationError,)
 
 
 @pytest.mark.feature("scheduler-credential-refusal-stop")
