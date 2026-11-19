@@ -22,6 +22,7 @@ class Handler(BaseHTTPRequestHandler):
         body = (sys.argv[1] + ':' + self.command).encode()
         self.send_response(200)
         self.send_header('Content-Length', str(len(body)))
+        self.send_header('X-Proof-Service', sys.argv[1])
         self.end_headers()
         if self.command != 'HEAD':
             self.wfile.write(body)
@@ -48,7 +49,7 @@ for method in ('GET', 'HEAD', 'POST', 'PUT'):
     while True:
         try:
             with urllib.request.urlopen(request, timeout=2) as response:
-                results[method] = [response.status, response.read().decode()]
+                results[method] = [response.status, response.headers.get('X-Proof-Service'), response.read().decode()]
             break
         except urllib.error.HTTPError as error:
             results[method] = [error.code, 'upstream error']
@@ -65,7 +66,7 @@ def compose(command: list[str], *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run([*command, *args], capture_output=True, text=True, timeout=180)
 
 
-def scratch_stack(folder: Path, tls: bool) -> dict[str, Any]:
+def scratch_stack(folder: Path, tls: bool, ca_source: str) -> dict[str, Any]:
     env = dict(os.environ)
     env.update(
         HOME=str(folder),
@@ -76,6 +77,8 @@ def scratch_stack(folder: Path, tls: bool) -> dict[str, Any]:
         LEDGER_API_PORT="8766",
         LEDGER_TLS_CERT=str(folder / "cert.pem") if tls else "",
         LEDGER_TLS_KEY=str(folder / "key.pem") if tls else "",
+        LEDGER_CA_FILE=str(folder / "cert.pem") if ca_source == "file" else "",
+        LEDGER_CA_PEM=(folder / "cert.pem").read_text() if ca_source == "pem" else "",
         AGENTIHOOKS_SWARM_DATABASE_URL="",
         AGENTIHOOKS_SWARM_REDIS_URL="",
     )
@@ -94,7 +97,6 @@ def scratch_stack(folder: Path, tls: bool) -> dict[str, Any]:
         service = services[name]
         for key in ("network_mode", "pid", "user", "healthcheck", "restart"):
             service.pop(key, None)
-        service["environment"]["LEDGER_CA_FILE"] = str(folder / "cert.pem") if tls else ""
         service["healthcheck"] = {
             "test": [
                 "CMD",
@@ -128,8 +130,10 @@ def scratch_stack(folder: Path, tls: bool) -> dict[str, Any]:
 
 
 @pytest.mark.feature("local-compose-front-service-tls")
-@pytest.mark.parametrize("tls", [False, True], ids=["http", "https"])
-def test_local_compose_front_reads_and_writes_with_service_tls(tmp_path: Path, tls: bool) -> None:
+@pytest.mark.parametrize(
+    "tls,ca_source", [(False, ""), (True, "file"), (True, "pem")], ids=["http", "https-ca-file", "https-ca-pem"]
+)
+def test_local_compose_front_reads_and_writes_with_service_tls(tmp_path: Path, tls: bool, ca_source: str) -> None:
     with tempfile.TemporaryDirectory(
         prefix="ledger-tls-", dir=os.environ.get("RUNNER_TEMP", str(tmp_path))
     ) as directory:
@@ -157,7 +161,7 @@ def test_local_compose_front_reads_and_writes_with_service_tls(tmp_path: Path, t
             capture_output=True,
             timeout=30,
         )
-        stack = scratch_stack(folder, tls)
+        stack = scratch_stack(folder, tls, ca_source)
         compose_file = folder / "compose.json"
         compose_file.write_text(json.dumps(stack))
         command = ["docker", "compose", "-p", f"ledger-tls-{uuid4().hex[:12]}", "-f", str(compose_file)]
@@ -187,10 +191,10 @@ def test_local_compose_front_reads_and_writes_with_service_tls(tmp_path: Path, t
             print(f"TLS={tls}: front={probe.stdout.strip()} api_health_exit={health.returncode} {health.stderr}")
             assert probe.returncode == 0, probe.stderr
             assert json.loads(probe.stdout) == {
-                "GET": [200, "ledger:GET"],
-                "HEAD": [200, ""],
-                "POST": [200, "api:POST"],
-                "PUT": [200, "api:PUT"],
+                "GET": [200, "ledger", "ledger:GET"],
+                "HEAD": [200, "ledger", ""],
+                "POST": [200, "api", "api:POST"],
+                "PUT": [200, "api", "api:PUT"],
             }
             assert health.returncode == 0, health.stderr
         finally:
