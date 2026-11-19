@@ -1948,7 +1948,7 @@ expansion still reads the mirror with `git ls-tree` and `git show`:
 
 | Job | Units |
 |---|---|
-| `mutation` | One `mutant` unit per function the head changes against its base, naming every mutant of that function |
+| `mutation` | One `mutant` unit per function the head changes against its base, naming every mutant of that function, or several when those mutants price over the sandbox timeout |
 | `mutation-stats` | One `stats` unit per test file present at the head that holds a test running such a function, with the worker's stats options |
 
 The changed lines are `scripts.ci_mutation.scope.changes_since` of the base and head, the lines the
@@ -2030,7 +2030,15 @@ A mutant unit's key is the sha256 of the JSON, object keys sorted, of a list hol
 6. the unlisted test hashes described above.
 
 Its members are `<name>__mutmut_1` to `<name>__mutmut_<n>`, one per mutation mutmut creates in the
-function. A stats unit's key is `StoredStats.identity` of its test file at the head, over the
+function. The worker grades a unit's mutants in one sandbox run after the unit's stats run, each run
+bounded by `executors.UNIT_TIMEOUT_S`, 1800 seconds, which `MirrorExpander._mutation` passes as the
+`timeout` of `expand_mutation.mutant_units`. A function whose mutants price over it, `n` times
+`scripts.ci_mutation.plan.MUTANT_SECONDS` (5.6 seconds a mutant, the fallback of
+`pricing.estimate`), gets the fewest near equal parts that each price within it, at most 321
+mutants a part, in mutant order; `expand_mutation.split_members` cuts them. Each part's key is the
+sha256 of the list of the function's key and the part's members, so every part has its own slot
+and verdict; a function priced within the timeout keeps one unit under the function's key.
+A stats unit's key is `StoredStats.identity` of its test file at the head, over the
 fields the `stats` rows of [Inputs per kind](#inputs-per-kind) list, with the worker's options
 `-q -p no:cacheprovider`. The expander builds both keys itself, without the `digests` builders, so
 they are bare 64 hex digests rather than the `<kind>-v<schema>-<digest>` form the

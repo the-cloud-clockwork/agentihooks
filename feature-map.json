@@ -8888,6 +8888,18 @@
       ]
     },
     {
+      "id": "lab-mutant-unit-split",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-mutant-unit-split",
+      "behaviour": "A CI lab mutant unit whose priced mutant time, its mutant count times the mutation planner's seconds per mutant, exceeds the worker sandbox timeout is split into the fewest near equal parts that each price within it, in mutant order and covering every mutant once, each keyed by the whole function's key with its own mutants, because the worker grades all mutants of a unit in one sandbox run and a run past the timeout is killed and reported failed. A unit priced within the timeout keeps its members and key, and the scheduler expansion passes the executors unit timeout.",
+      "seam": "scripts.ci_lab.expand_mutation.mutant_units over a fixture repository and scripts.ci_lab.scheduler.MirrorExpander.expand over a git origin fixture",
+      "tests": [
+        "tests/ci_lab/test_expand_mutation.py::test_a_unit_priced_over_the_timeout_splits_into_the_fewest_parts_that_each_price_within_it",
+        "tests/ci_lab/test_expand_mutation.py::test_a_unit_priced_at_the_timeout_keeps_its_members_and_key",
+        "tests/ci_lab/test_scheduler.py::test_a_promotion_head_splits_a_mutant_unit_priced_over_the_executors_unit_timeout"
+      ]
+    },
+    {
       "id": "lab-mutant-unit-unlisted-reads",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-mutant-key-data-reads",
