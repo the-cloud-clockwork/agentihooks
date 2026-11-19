@@ -14,10 +14,9 @@ rules:
         - fake-server-close-read-ignores-reset.py
     patterns:
       - pattern-either:
-          - pattern: $HANDLER.rfile.read(...) == b""
-          - pattern: b"" == $HANDLER.rfile.read(...)
-          - pattern: not $HANDLER.rfile.read(...)
-      - pattern-not-inside: assert $CHECK
+          - pattern: self.rfile.read(...) == b""
+          - pattern: b"" == self.rfile.read(...)
+          - pattern: not self.rfile.read(...)
       - pattern-not-inside: |
           try:
               ...

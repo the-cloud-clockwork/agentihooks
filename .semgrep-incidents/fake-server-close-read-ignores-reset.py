@@ -19,6 +19,12 @@ class EmptyReadOnly(BaseHTTPRequestHandler):
         if not self.rfile.read(1):
             closed.set()
 
+    def do_POST(self) -> None:
+        self.send_response(503)
+        self.end_headers()
+        # ruleid: fake-server-close-read-ignores-reset
+        assert self.rfile.read() == b""
+
 
 class ResetCountsAsClosed(BaseHTTPRequestHandler):
     def closed_by_client(self) -> bool:
@@ -34,10 +40,6 @@ class ResetCountsAsClosed(BaseHTTPRequestHandler):
             return not self.rfile.read(1)
         except OSError:
             return True
-
-    def do_POST(self) -> None:
-        # ok: fake-server-close-read-ignores-reset
-        assert self.rfile.read(int(self.headers["Content-Length"])) == b"GET /next HTTP/1.1\r\n\r\n"
 
 
 def test_a_bodiless_request_reaches_the_route_code(exchange: BaseHTTPRequestHandler) -> None:
