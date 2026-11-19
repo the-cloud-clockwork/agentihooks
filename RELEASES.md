@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.1060 · 2026-11-19
+
+### 2026-11-19 · 20d383dd7f9d · #12356 · @agenticore-app
+
+**Refuse unguarded commands in errexit shell EXIT traps**
+
+This change adds a Semgrep rule, exit-trap-unguarded-command, that flags any cleanup command inside a trap-based EXIT handler that could fail and abort the script early under errexit, then applies `|| true` to every flagged line across 18 CI and smoke scripts. It fixes the root cause of the incident where a failed `kind delete cluster` inside a trap turned three already-passed worker hive proofs red, by ensuring cleanup command failures no longer override the script's real exit status while still letting their own error output reach the job log.
+
+### 2026-11-19 · c816a0cdc803 · #12350 · @nestorcolt
+
+**Lab scheduler charges the daily budget when a unit finishes and logs each shed**
+
+This fix closes a gap where the lab scheduler never actually enforced the daily core-minute budget: finishing a unit now charges its slots and report seconds to the budget at the same point metrics counts them, so spending is tracked accurately and each attempt is charged exactly once. Admission logic now checks spending each pass and logs a one-time message when a class gets shed for exceeding its share, instead of silently repeating or saying nothing. Together these changes make budget enforcement actually work and give visibility into when and why classes are shed.
+
 ## v2.17.1059 · 2026-11-19
 
 ### 2026-11-19 · c40f80ba2ba0 · #12314 · @nestorcolt
