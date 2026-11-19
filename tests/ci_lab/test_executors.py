@@ -537,7 +537,7 @@ def test_settings_read_the_worker_contract_environment(tmp_path: Path) -> None:
     pod, suite, graded = executors.settings({**environ_of(tmp_path), "OTHER": "x"})
 
     work = tmp_path / "work"
-    assert pod.trees.worktrees.mirror == Mirror(tmp_path / "node", work / "store", str(tmp_path / "node"))
+    assert pod.trees.worktrees.mirror == Mirror(tmp_path / "node", work / "store", str(tmp_path / "node"), None, "")
     assert (pod.trees.worktrees.root, pod.trees.worktrees.capacity) == (work / "trees", 8)
     assert (pod.root, pod.whitelist, pod.timeout, pod.clock) == (work, {"LANG": "C.UTF-8"}, 1800.0, time.monotonic)
     assert (work / "runs").is_dir() and (work / "venvs").is_dir()
@@ -554,6 +554,56 @@ def test_settings_read_the_worker_contract_environment(tmp_path: Path) -> None:
 def test_settings_refuse_a_redis_variable(tmp_path: Path) -> None:
     with pytest.raises(worker.Refused):
         executors.settings({**environ_of(tmp_path), "CI_LAB_REDIS_URL": "redis://x"})
+
+
+def graded_on_the_lab_only(tmp_path: Path, node: Path) -> tuple[str, Path]:
+    source, lab = tmp_path / "source", tmp_path / "lab" / "agentihooks.git"
+    subprocess.run([*GIT, "init", "-q", "-b", "main", str(source)], check=True)
+    (source / "a").write_text("a")
+    subprocess.run([*GIT, "-C", str(source), "add", "a"], check=True)
+    subprocess.run([*GIT, "-C", str(source), "commit", "-q", "-m", "a"], check=True)
+    head = subprocess.run([*GIT, "-C", str(source), "rev-parse", "HEAD"], capture_output=True, text=True, check=True)
+    for bare in (node, lab):
+        subprocess.run([*GIT, "init", "-q", "--bare", str(bare)], check=True)
+    subprocess.run([*GIT, "-C", str(source), "push", "-q", f"file://{lab}", "HEAD:refs/grade/t1"], check=True)
+    return head.stdout.strip(), lab
+
+
+def lab_environ(tmp_path: Path, node: Path, lab: Path, repository: str | None) -> dict[str, str]:
+    environ = {
+        **environ_of(tmp_path),
+        contract.GIT_MIRROR: str(node),
+        "AGENTIHOOKS_LAB_REMOTE": f"file://{lab}",
+        "AGENTIHOOKS_LAB_REMOTE_TOKEN": "lab-token",
+    }
+    return environ if repository is None else {**environ, "CI_LAB_REPOSITORY": repository}
+
+
+@pytest.mark.feature("lab-remote-heads")
+def test_a_worker_cuts_the_tree_of_a_head_only_the_lab_remote_holds(tmp_path: Path) -> None:
+    node = tmp_path / "node"
+    head, lab = graded_on_the_lab_only(tmp_path, node)
+    environ = lab_environ(tmp_path, node, lab, "https://github.com/the-cloud-clockwork/agentihooks.git")
+
+    tree, fetched = executors.settings(environ)[0].trees.worktrees.lease(head)
+
+    assert fetched is True
+    assert (tree / "a").read_text() == "a"
+
+
+@pytest.mark.feature("lab-remote-heads")
+@pytest.mark.parametrize(
+    ("repository", "node"),
+    [("https://github.com/the-cloud-clockwork/widgets.git", "node"), (None, "agentihooks.git")],
+    ids=["another-repository", "no-repository-on-a-node-named-like-the-lab"],
+)
+def test_a_worker_never_asks_a_lab_remote_its_repository_does_not_name(
+    tmp_path: Path, repository: str | None, node: str
+) -> None:
+    head, lab = graded_on_the_lab_only(tmp_path, tmp_path / node)
+
+    with pytest.raises(subprocess.CalledProcessError):
+        executors.settings(lab_environ(tmp_path, tmp_path / node, lab, repository))[0].trees.worktrees.lease(head)
 
 
 @pytest.mark.feature("lab-worker-executors")
