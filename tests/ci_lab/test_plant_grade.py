@@ -257,6 +257,27 @@ def test_conflicting_gate_checks_cannot_hide_an_extra_failure(repository: Path) 
         )
 
 
+@pytest.mark.parametrize("diagnostic", [None, "", "F401 unused import", "ruff: command not found", "I0010"])
+@pytest.mark.feature("lab-static-plant-proofs")
+def test_a_named_gate_failure_requires_the_observed_plant_diagnostic(repository: Path, diagnostic: str | None) -> None:
+    lab = Lab(repository)
+
+    def wrong(path: str, timeout_s: float) -> Mapping[str, Any]:
+        result = lab.fetch(path, timeout_s)
+        for row in result["check_runs"]:
+            if row["name"] == "lab-shadow/lint":
+                if diagnostic is None:
+                    row.pop("output", None)
+                else:
+                    row["output"] = {"title": "lint", "summary": diagnostic, "text": ""}
+        return result
+
+    with pytest.raises(ValueError, match="diagnostic"):
+        plant_grade.prove(
+            repository, "lint", "HEAD", REPOSITORY, plant_grade.Ports(wrong, lab.sleep, lab.clock, lab.push)
+        )
+
+
 @pytest.mark.feature("lab-static-plant-proofs")
 def test_a_failed_twin_is_named_and_the_plant_is_never_pushed(repository: Path) -> None:
     lab = Lab(repository)
