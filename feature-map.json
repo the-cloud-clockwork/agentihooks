@@ -9401,6 +9401,17 @@
       ]
     },
     {
+      "id": "lab-audit-refiles-refused-mismatches",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2628",
+      "behaviour": "The CI lab reuse audit records every differing kind's mismatches in the verdict store as unfiled before it files that kind's ci task and clears the record once the ledger takes the task, so a ledger that refuses the task leaves the units, their cached runs and the audit run recorded; the next promotion audit or sample adds the unfiled mismatches to its own, files the kind's task again with the same units although the disabled kind is no longer compared, and raises CILabVerdictMismatch naming them.",
+      "seam": "scripts.ci_lab.audit.promotion_audit and scripts.ci_lab.audit.unfiled over a fakeredis verdict store, a fake lab port and a ledger fake that refuses every write while down",
+      "tests": [
+        "tests/ci_lab/test_audit.py::test_a_refused_mismatch_task_leaves_its_units_recorded_as_unfiled",
+        "tests/ci_lab/test_audit.py::test_the_audit_after_a_refused_mismatch_task_files_it_with_the_same_units"
+      ]
+    },
+    {
       "id": "swarm-lab-behind-hold",
       "origin": "inventory",
       "behaviour": "While a fresh lab reading predicts pull request grading more than AGENTIHOOKS_HEALTH_CI_BEHIND_MINUTES behind, the tick and the events readiness hold every eng task outside the fix phase from a claim, the urgent hold names the lab, claim wait in those stretches is lab wait, and the standing finding bottleneck-stage/lab_wait carries the hold until the reading falls back, when claims resume and the finding clears; its remedy proposes one ci task titled Lab capacity.",

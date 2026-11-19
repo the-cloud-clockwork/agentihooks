@@ -61,6 +61,7 @@ class Lab:
     days: dict[str, list[audit.Cached]] = field(default_factory=dict[str, list[audit.Cached]])
     fresh: dict[str, bool] = field(default_factory=dict[str, bool])
     graded: list[tuple[list[audit.Cached], Priority]] = field(default_factory=list[tuple[list[audit.Cached], Priority]])
+    run: str = AUDIT_RUN
 
     def suite(self, head: str) -> list[audit.Cached]:
         return [unit for unit in self.units if unit.head == head]
@@ -73,7 +74,7 @@ class Lab:
         verdicts = tuple(
             Verdict(unit.kind, unit.key, self.fresh[unit.key], False, 1.0) for unit in units if unit.key in self.fresh
         )
-        return audit.Regrade(AUDIT_RUN, verdicts)
+        return audit.Regrade(self.run, verdicts)
 
 
 class LedgerDown(Exception):
@@ -255,6 +256,51 @@ def test_a_ledger_that_refuses_the_task_still_leaves_every_differing_kind_disabl
         audit.promotion_audit(audit.Ports(store, lab, Ledger(down=True), SLUG), HEAD)
 
     assert client.smembers(DISABLED) == {"static", "test"}
+
+
+@pytest.mark.feature("lab-audit-refiles-refused-mismatches")
+def test_a_refused_mismatch_task_leaves_its_units_recorded_as_unfiled(store: Store) -> None:
+    cached = _cache(store, "static", LINT, True)
+    lab = Lab(units=[_unit("static", LINT, "grade-v1-cached")], fresh={LINT: False})
+
+    with pytest.raises(LedgerDown):
+        audit.promotion_audit(audit.Ports(store, lab, Ledger(down=True), SLUG), HEAD)
+
+    fresh = Verdict("static", LINT, False, False, 1.0)
+    assert audit.unfiled(store) == [audit.Mismatch(cached, fresh, "grade-v1-cached", AUDIT_RUN)]
+
+
+@pytest.mark.feature("lab-audit-refiles-refused-mismatches")
+def test_the_audit_after_a_refused_mismatch_task_files_it_with_the_same_units(store: Store) -> None:
+    cached = _cache(store, "static", LINT, True)
+    _cache(store, "test", ONE, True)
+    units = [_unit("static", LINT, "grade-v1-cached"), _unit("test", ONE, "grade-v1-cached")]
+    lab = Lab(units=units, fresh={LINT: False, ONE: True})
+    ledger = Ledger(down=True)
+    ports = audit.Ports(store, lab, ledger, SLUG)
+    with pytest.raises(LedgerDown):
+        audit.promotion_audit(ports, HEAD)
+    ledger.down = False
+    lab.run = "grade-v1-retry"
+
+    with pytest.raises(audit.CILabVerdictMismatch) as raised:
+        audit.promotion_audit(ports, HEAD)
+
+    fresh = Verdict("static", LINT, False, False, 1.0)
+    assert raised.value.mismatches == (audit.Mismatch(cached, fresh, "grade-v1-cached", AUDIT_RUN),)
+    assert [(fields["task"], fields["title"]) for _, fields, _ in ledger.added] == [
+        (
+            f"lab-mismatch-static-{digest({'kind': 'static', 'run': 'grade-v1-retry'})[:16]}",
+            "Lab verdict mismatch: static reuse disabled",
+        )
+    ]
+    assert (
+        f"{LINT} cached passed by run grade-v1-cached, regraded failed by run {AUDIT_RUN}. "
+        in ledger.added[0][1]["description"]
+    )
+    assert audit.unfiled(store) == []
+    assert audit.promotion_audit(ports, HEAD).run == "grade-v1-retry"
+    assert len(ledger.added) == 1
 
 
 @pytest.mark.feature("lab-reuse-audit")
