@@ -44,6 +44,141 @@ Both services run from the installed wheel, which ships `hooks`, `scripts` and `
 `docker/ci-lab/smoke.sh` also imports the worker's executors, test runner and pricing inside the
 built CI lab image.
 
+## Run the scheduler service
+
+`agentihooks ci-lab-scheduler` starts both HTTP listeners and the grading loop. Before starting
+it, provision the lab heads bus and its scheduler and relay consumers, Redis, the object store,
+and a readable shared git mirror. The scheduler also needs a writable private mirror store and
+access to the repository's `dev` branch to read its runner trust list and retry policy. Startup
+binds the listeners only after these clients and the scheduler have been built.
+
+The swarm image includes the locked `git` package. A different image or a host running the
+installed wheel must provide `git` on `PATH`: the mirror expander invokes it during startup.
+The offline `--self-test` checks the contract without starting either listener or checking these
+dependencies. Run it separately from service options such as `--interval` and `--passes`.
+
+### Runtime configuration
+
+Mount a YAML file and set `CI_LAB_RUNTIME_CONFIG` to its path. This complete example allocates
+600 core minutes per UTC day:
+
+```yaml
+classes:
+  - hotfix
+  - pull_request
+  - queue
+  - promotion
+  - backfill
+budget:
+  coreMinutesPerDay: 600
+  shed:
+    backfill: 0.5
+    promotion: 0.75
+    queue: 0.9
+backfill:
+  auditShare: 0.1
+  moduleSweeps: false
+```
+
+All three top level fields, `classes`, `budget` and `backfill`, are required; unknown fields
+are refused. Classes must be unique names from the list above, and the daily budget must be
+positive. Shed fractions and `auditShare` range from 0 to 1; `moduleSweeps` is a boolean. Only
+`backfill`, `promotion` and `queue` may have shed thresholds. Each threshold is the fraction of
+the daily budget spent; reaching it sheds that class and every less urgent class. In this
+example, backfill is shed at half the daily budget remaining, promotion at a quarter and queue
+at a tenth; each stays shed as the remaining budget falls further.
+Hotfix and pull request work remain admitted. The budget resets on the next UTC day; work
+already queued still runs. See [Scheduler loop](#scheduler-loop) for admission rules.
+
+Validate the mounted file without connecting to the service dependencies:
+
+```bash
+export CI_LAB_RUNTIME_CONFIG=/etc/ci-lab/runtime.yaml
+python -m scripts.ci_lab runtime "$CI_LAB_RUNTIME_CONFIG"
+```
+
+Valid input exits 0 without output. A schema error exits 1 and names the failing field on
+standard error, for example `runtime budget: 'shed' is a required property`. An unreadable file
+or invalid YAML also prevents startup. The service reads and validates the file once, before
+creating its Redis, object store or bus clients; restart the service to apply a changed file.
+
+### Environment and launch
+
+Set the nonsecret addresses and mounted paths for your deployment, for example:
+
+```bash
+export CI_LAB_RUNTIME_CONFIG=/etc/ci-lab/runtime.yaml
+export CI_LAB_REDIS_URL=redis://redis:6379/0
+export CI_LAB_URL=http://lab:8800
+export CI_LAB_MINIO_ENDPOINT=http://minio:9000
+export CI_LAB_MINIO_BUCKET=ci-lab
+export AGENTIHOOKS_BUS=nats
+export AGENTIHOOKS_BUS_URL=nats://nats:4222
+export CI_LAB_GIT_MIRROR=/data/git-mirror.git
+export CI_LAB_MIRROR_STORE=/data/scheduler-mirrors
+export CI_LAB_REPOSITORY=https://github.com/the-cloud-clockwork/agentihooks.git
+
+agentihooks ci-lab-scheduler
+```
+
+`CI_LAB_URL` is the address consumers can reach; the relay uses it in grade links. It is
+required at startup and does not change the listener's bind address.
+
+The deployment must also inject `CI_LAB_MINIO_ACCESS_KEY`, `CI_LAB_MINIO_SECRET_KEY`, the
+scheduler's `GITHUB_APP_*` identity and any bus or repository authentication. Keep their values
+in the deployment's secret mechanism. Set `CI_LAB_CONTROL_TOKEN` there when the swarm needs the
+[control routes](#control-routes); without it those routes refuse requests. The
+[Environment](#environment) table lists the other service settings.
+
+The default loop runs indefinitely with a two second sleep after each pass. To run three real
+grading passes with a half second sleep, then exit:
+
+```bash
+agentihooks ci-lab-scheduler --interval 0.5 --passes 3
+```
+
+`--passes 0` also runs indefinitely. A finite run starts both listeners, consumes heads, grades
+work and ticks the relay just like the service; use `--self-test` for an offline check. Each
+pass prints its scheduler and relay actions to standard output. The CLI has no host or port
+options: it binds all interfaces on 8800 and 9108. The chart or container network controls
+which clients can reach them.
+
+### Verify the running service
+
+Run these requests from a client that can reach the scheduler. Replace `lab` with its service
+address and the sample sha with the full commit you want to inspect:
+
+```bash
+curl -fsS http://lab:8800/capacity \
+  | jq '{slots, budget_fraction, shed, pull_request: .classes.pull_request}'
+curl -fsS http://lab:8800/grades/0123456789abcdef0123456789abcdef01234567 \
+  | jq '{head, grades}'
+curl -fsS http://lab:9108/metrics \
+  | grep --line-buffered -E '^ci_lab_(slots_total|slots_busy|queue_wait_seconds|budget_fraction|class_shed)'
+```
+
+`/capacity` returns the [capacity document](#capacity-document). Each capacity request and
+metrics scrape builds a fresh load from queue, lease, live grade, recent worker offer and
+daily budget state; separate requests can observe different instants. Without recent worker
+offers and leased jobs, a running scheduler can report zero total slots. Offers expire after
+60 seconds, and unit estimates remain fixed at 60 seconds per slot.
+
+The grades reply is `{"head": "<sha>", "grades": [...]}`. An ungraded commit returns 200 with
+`grades: []`; an unfinished grade has a null conclusion. A short or uppercase sha returns 400
+with `{"error": "a grade lookup names one full commit sha"}`. See
+[Grades of a commit](#grades-of-a-commit) for open and closed grade lookup and fields.
+
+### Scheduler startup troubleshooting
+
+| Symptom | Check and action |
+|---|---|
+| Startup fails before either listener appears | Check that `CI_LAB_RUNTIME_CONFIG` names a readable YAML file and run the runtime validator; missing required environment names also prevent startup |
+| Startup fails while reading the repository | Check `git` on `PATH`, the shared mirror mount, private mirror store permissions, repository authentication and access to `dev` |
+| Startup cannot reach a dependency | Check the Redis and object store settings and bus authentication; provision the lab heads stream and consumers before starting the scheduler |
+| The scheduler port is reachable but metrics are not | Route port 9108 separately and request `/metrics`; port 8800 serves the scheduler API |
+| Capacity shows zero slots or an estimate differs from observed duration | Check worker lease polls and their free slot offers; the load discards stale offers and uses fixed unit estimates |
+| Grades returns an empty list | Confirm the full lowercase commit sha and that the lab received and graded that head |
+
 ## Environment
 
 | Name | Scheduler | Worker | Meaning |

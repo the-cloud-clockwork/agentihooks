@@ -334,6 +334,16 @@
       ]
     },
     {
+      "id": "compose-ledger-ensure-starts-front-and-api",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2695",
+      "behaviour": "Legacy local Compose ledger ensure pulls and starts the ledger, write API and front together, so the published front port can answer. Stopping the legacy ledger stops all three services. Adopted stacks keep their swarm service commands.",
+      "seam": "server_compose.start and stop, the docker compose command list",
+      "tests": [
+        "tests/swarm_ledger/test_server_compose.py::test_compose_runs_with_the_folder_the_code_and_this_user"
+      ]
+    },
+    {
       "id": "compose-api-health-and-front-proxy",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/promo-43992907244-10",
@@ -363,6 +373,17 @@
       "seam": "ledger_server.serve, the hub projector import against server_handoff.announce",
       "tests": [
         "tests/swarm_ledger/test_server_compose.py::test_a_successor_that_cannot_import_the_hub_never_reports_ready"
+      ]
+    },
+    {
+      "id": "ledger-server-pid-file-after-projector",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2689",
+      "behaviour": "A ledger server writes its process id file only once its hub projector is running, just before it serves requests, so the pid file never names a server whose projector has not started.",
+      "seam": "ledger_server.serve, the pid file write against projector.running and server.serve_forever",
+      "tests": [
+        "tests/swarm_ledger/test_outbox_host.py::test_the_ledger_server_writes_its_pid_file_only_once_the_projector_runs",
+        "tests/swarm_ledger/test_outbox_host.py::test_a_ledger_server_whose_projector_fails_to_start_writes_no_pid_file"
       ]
     },
     {
@@ -436,6 +457,27 @@
         "tests/swarm/test_resume.py::test_a_restored_execution_keeps_its_identity_and_start_and_records_the_resume_as_launch",
         "tests/swarm/test_outage_resume.py::test_a_reopened_owner_keeps_its_execution_and_start_and_records_the_resume_as_launch",
         "tests/swarm/test_outage_resume.py::test_an_owner_restarted_from_its_handoff_keeps_its_execution_and_records_the_restart_as_launch"
+      ]
+    },
+    {
+      "id": "swarm-seat-admission-race",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2680",
+      "behaviour": "Two admissions racing for one seat on a records layout swarm, such as two hub replicas claiming two tasks at once, never both commit: the second commit is refused on the seat index, retried, and refused as a replacement that does not match the current execution, so the seat holds one current execution and no twin is left whose every write conflicts.",
+      "seam": "RedisStore.start_execution through ExecutionRegistry admission and the fencing records seat index",
+      "tests": [
+        "tests/swarm/test_execution_concurrency.py::test_an_admission_that_loses_its_seat_to_another_admission_is_refused",
+        "tests/swarm/test_fencing_records.py::test_the_seat_index_follows_the_newest_execution_of_each_seat"
+      ]
+    },
+    {
+      "id": "swarm-tick-step-conflict-detail",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2680",
+      "behaviour": "A tick step that fails on an execution identity conflict records the conflict message as the detail of its step record, so the controller log names the refused identity check instead of only the error class.",
+      "seam": "scripts.swarm.timing.step around a write the execution registry refuses",
+      "tests": [
+        "tests/swarm/test_execution_identity.py::test_a_step_refused_by_an_identity_conflict_records_the_conflict_message"
       ]
     },
     {
