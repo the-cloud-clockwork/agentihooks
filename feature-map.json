@@ -9186,6 +9186,7 @@
         "tests/ci_lab/test_worker.py::test_a_refused_upload_url_ends_the_units_delivery",
         "tests/ci_lab/test_worker.py::test_stop_lets_running_units_finish_within_the_termination_grace",
         "tests/ci_lab/test_worker.py::test_a_unit_past_the_termination_grace_is_left_to_reap",
+        "tests/ci_lab/test_worker.py::test_a_built_worker_waits_out_its_longest_unit_and_its_delivery_after_stop",
         "tests/ci_lab/test_worker.py::test_run_leases_again_as_a_unit_frees_its_slot",
         "tests/ci_lab/test_worker.py::test_the_pod_leases_only_units_its_net_and_browser_capabilities_and_free_slots_fit",
         "tests/ci_lab/test_worker.py::test_the_client_speaks_the_lease_api_and_reads_a_refused_token_as_none",

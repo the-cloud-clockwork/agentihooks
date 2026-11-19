@@ -4,6 +4,7 @@ import threading
 import time
 import urllib.error
 from collections.abc import Iterator
+from concurrent.futures import Future, wait
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -16,6 +17,7 @@ from scripts.ci_lab.units import Unit
 CAPABILITIES = frozenset({"net", "browser"})
 UNIT_A = Unit(kind="test", key="a", members=("tests/a.py::t",))
 UNIT_B = Unit(kind="test", key="b", members=("tests/b.py::t",))
+CHART_GRACE_SECONDS = 2_100.0
 
 
 class Clock:
@@ -410,6 +412,38 @@ def test_a_unit_past_the_termination_grace_is_left_to_reap(
     assert found(jobs, "h1:test:a").state == "leased"
     clock.now += lab.ttl_ms + 1
     assert lab.reap(clock.now) == [("h1:test:a", "pending")]
+
+
+@pytest.mark.feature("lab-worker-pod-loop")
+def test_a_built_worker_waits_out_its_longest_unit_and_its_delivery_after_stop(
+    scheduler: str, jobs: queue.Queue, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    jobs.enqueue([UNIT_A], "h1", {})
+    release = threading.Event()
+    waits: list[float | None] = []
+
+    def held(lease: worker.Lease) -> worker.Finished:
+        release.wait(10)
+        return finished(tmp_path, lease)
+
+    def virtual(futures: list[Future[None]], timeout: float | None = None) -> object:
+        waits.append(timeout)
+        if timeout is not None and timeout >= CHART_GRACE_SECONDS:
+            release.set()
+            return wait(futures, timeout=10)
+        return wait(futures, timeout=0)
+
+    monkeypatch.setattr(worker, "wait", virtual)
+    built = worker.build({"CI_LAB_SCHEDULER_URL": scheduler}, {"test": held}, "pod-1", 1, None)
+
+    assert len(built.run_once()) == 1
+    built.stop()
+    left = built.run()
+    release.set()
+
+    assert left == []
+    assert waits == [CHART_GRACE_SECONDS]
+    assert found(jobs, "h1:test:a").outcome == "passed"
 
 
 @pytest.mark.feature("lab-worker-pod-loop")
