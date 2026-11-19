@@ -69,3 +69,5 @@ When the operator explicitly asks to work on the base branch directly, skip this
 ## Settings
 
 `WT_BASE_BRANCH` names the base branch every worktree is cut from, compared against and synced back into; default `dev`. `WORKTREE_ROOT` overrides `~/dev/worktrees`; `"$WT" root` prints the active value.
+
+With `AGENTIHOOKS_LAB_REMOTE` set to a CI lab URL that names the same repository as `origin`, `new` and `tmp` give the primary checkout a `lab` remote at that URL and a credential helper that reads `AGENTIHOOKS_LAB_REMOTE_TOKEN` when git asks, so every worktree of the repository can push to the lab. A failure prints `wt: the lab remote was not set in <repo>` and the worktree is still created. See "Workspaces that carry the lab remote" in the CI lab reference.
