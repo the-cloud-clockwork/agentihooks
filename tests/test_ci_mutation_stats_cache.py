@@ -58,6 +58,62 @@ def test_unchanged_test_stats_are_reused_and_only_the_changed_file_is_collected(
     assert calls == [files, ["tests/test_b.py"]]
 
 
+def test_an_edited_sibling_test_file_keeps_the_stats_of_a_test_that_never_imports_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sys
+
+    from coverage import CoverageData
+
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+    from scripts.ci_mutation.stats_dependencies import measured_dependencies
+
+    root = tmp_path / "repo"
+    (root / "scripts").mkdir(parents=True)
+    (root / "tests").mkdir()
+    (root / "scripts/sample.py").write_text("def sample():\n    return 1\n")
+    files = ["tests/test_a.py", "tests/test_b.py"]
+    for path in files:
+        (root / path).write_text(
+            "from scripts.sample import sample\n\n\ndef test_sample():\n    assert sample() == 1\n"
+        )
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(["git", "add", "scripts/sample.py", *files], cwd=root, check=True)
+    tracked = {"scripts/sample.py", *files}
+    calls: list[list[str]] = []
+
+    def collect(chosen: list[str]) -> list[dict[str, object]]:
+        calls.append(chosen)
+        nodes = [f"{path}::test_sample" for path in chosen]
+        coverage_file = tmp_path / f"coverage-{len(calls)}"
+        data = CoverageData(basename=str(coverage_file))
+        data.set_context("")
+        data.add_lines({**{str(root / path): {1, 4} for path in chosen}, str(root / "scripts/sample.py"): {1}})
+        for node, path in zip(nodes, chosen, strict=True):
+            data.set_context(f"{node}|run")
+            data.add_lines({str(root / path): {5}, str(root / "scripts/sample.py"): {2}})
+            monkeypatch.setitem(
+                sys.modules, f"stats_probe_{Path(path).stem}", SimpleNamespace(__file__=str(root / path))
+            )
+        data.write()
+        return [
+            {
+                "status": 0,
+                "tests": {"scripts.sample.x_sample": nodes},
+                "durations": dict.fromkeys(nodes, 1),
+                "cpu": 2,
+                "dependencies": measured_dependencies(coverage_file, root, root, nodes, tracked),
+            }
+        ]
+
+    cache = tmp_path / "cache"
+    changes = {"scripts/sample.py": {"lines": [2]}}
+    collect_cached_stats(root, cache, changes, files, ["-q"], collect)
+    (root / "tests/test_b.py").write_text((root / "tests/test_b.py").read_text() + "\n\ndef test_more():\n    pass\n")
+    collect_cached_stats(root, cache, changes, files, ["-q"], collect)
+    assert calls == [files, ["tests/test_b.py"]]
+
+
 def test_selectors_of_one_test_file_trace_its_dependencies_once(tmp_path, monkeypatch):
     from scripts.ci_mutation import stats_cache
 
