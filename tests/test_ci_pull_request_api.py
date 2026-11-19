@@ -177,6 +177,7 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "scripts/ci_budget/__main__.py",
         "scripts/ci_budget/jobs.py",
         "scripts/ci_budget/rate_limit.py",
+        "scripts/ci_changelog_fragments.py",
         "scripts/ci_cpu_quota.py",
         "scripts/ci_dependency_audit.py",
         "scripts/ci_dev_reuse.py",
