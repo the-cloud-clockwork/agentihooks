@@ -1,0 +1,11 @@
+{
+  "gate": "lint/hold-whole-ledger-state-reads-in-the-swarm-and-tick-packages",
+  "reason": "a new whole ledger state read in the tick package",
+  "edits": [
+    {
+      "path": "scripts/tick/catalogue.py",
+      "before": "def step_modules() -> list[str]:\n",
+      "after": "def planted(ledger: object) -> object:\n    \"\"\"Read the whole ledger.\"\"\"\n    return ledger.state\n\n\ndef step_modules() -> list[str]:\n"
+    }
+  ]
+}

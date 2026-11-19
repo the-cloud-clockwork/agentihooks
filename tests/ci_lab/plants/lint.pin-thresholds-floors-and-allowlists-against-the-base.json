@@ -1,0 +1,11 @@
+{
+  "gate": "lint/pin-thresholds-floors-and-allowlists-against-the-base",
+  "reason": "the function length limit was raised",
+  "edits": [
+    {
+      "path": "scripts/size_limits.py",
+      "before": "FUNCTION_LINES = 300\n",
+      "after": "FUNCTION_LINES = 301\n"
+    }
+  ]
+}
