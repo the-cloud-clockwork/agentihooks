@@ -100,6 +100,7 @@ def test_a_pass_renews_its_tick_lock_once_while_every_step_checks_for_a_stop(
 
     monkeypatch.setattr(controller, "keep_tick", keeping)
     monkeypatch.setattr(tick_activity, "tick_stop", SimpleNamespace(check=lambda: checks.append(len(callers))))
+    monkeypatch.setattr(tick_activity, "renew_now", lambda: None, raising=False)
     monkeypatch.setattr(cli, "now_ms", lambda: 1_000_000)
     cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
     assert callers.count("pass step") == 1
