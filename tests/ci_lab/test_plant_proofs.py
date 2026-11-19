@@ -72,10 +72,10 @@ def test_a_pair_names_its_gate_reason_and_fixed_commit_metadata(repository: Path
         }[name]
     )
     for revision, subject in [(pair.green, f"CI lab {name} twin"), (pair.red, f"CI lab {name} plant")]:
-        assert git(repository, "show", "-s", "--format=%an|%ae|%cn|%ce|%aI|%cI|%s", revision) == (
-            "CI lab plant|ci-lab@example.invalid|CI lab plant|ci-lab@example.invalid|"
-            f"2000-01-01T00:00:00+00:00|2000-01-01T00:00:00+00:00|{subject}"
-        )
+        commit = git(repository, "cat-file", "-p", revision)
+        assert "author CI lab plant <ci-lab@example.invalid> 946684800 +0000\n" in commit
+        assert "committer CI lab plant <ci-lab@example.invalid> 946684800 +0000\n" in commit
+        assert commit.split("\n\n", 1)[1] == subject
 
 
 @pytest.mark.parametrize("name", ["", "Lint", "../lint", "lint/other", "lint\n"])
