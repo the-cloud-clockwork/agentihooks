@@ -9948,6 +9948,7 @@
         "tests/ci_lab/test_static_gates.py::test_the_command_prints_each_gate_producers_reads_and_missing_names",
         "tests/ci_lab/test_run_static.py::test_earlier_steps_run_first_and_their_outputs_outcome_and_conclusion_reach_the_gate",
         "tests/ci_lab/test_run_static.py::test_a_failing_earlier_step_fails_the_gate_without_running_it",
+        "tests/ci_lab/test_run_static.py::test_an_earlier_step_past_its_time_limit_ends_the_gate_red_with_no_code",
         "tests/ci_lab/test_run_static.py::test_an_earlier_step_output_line_outside_name_equals_value_is_refused_without_its_text",
         "tests/ci_lab/test_executors.py::test_static_grades_every_lint_gate_of_the_real_workflow_on_a_clean_tree",
         "tests/ci_lab/test_executors.py::test_static_gives_a_step_each_secret_it_reads_by_name_and_writes_no_value_to_its_report_or_log",

@@ -70,7 +70,7 @@ jobs:
       - name: Keep keywords out of the docs
         env:
           KEYWORDS: ${{ secrets.KEYWORDS }}
-          ALPHA: ${{ secrets.ALPHA }}
+          BETA: ${{ secrets.BETA }}
           ABSENT: x${{ secrets.ABSENT }}x
         run: python -m scripts.docs_sanity
 """
@@ -353,14 +353,14 @@ def test_static_gives_a_step_each_secret_it_reads_by_name_and_writes_no_value_to
     monkeypatch.setattr(executors.run_static, "run", spied)
     head = folder(tmp_path, "head", {"uv.lock": "lock\n"})
     trees = FakeWorktrees({"h1": head, "b1": folder(tmp_path, "base", {}), "g1": folder(tmp_path, "grader", {})})
-    secrets = {"KEYWORDS": "s3cr3t-alpha,s3cr3t-beta", "ALPHA": "s3cr3t-alpha", "UNREAD": "s3cr3t-gamma"}
+    secrets = {"KEYWORDS": "s3cr3t-alpha,s3cr3t-beta", "BETA": "s3cr3t-beta", "UNREAD": "s3cr3t-gamma"}
     pod = live_pod(tmp_path, trees, secrets)
 
     finished = executors.static(pod, lease("static", "k", (probe.name,)))
 
     assert finished.outcome == PASSED
     assert (head / "seen").read_text() == "s3cr3t-alpha,s3cr3t-beta xx"
-    read = {"secrets.ABSENT": "", "secrets.ALPHA": "s3cr3t-alpha", "secrets.KEYWORDS": "s3cr3t-alpha,s3cr3t-beta"}
+    read = {"secrets.ABSENT": "", "secrets.BETA": "s3cr3t-beta", "secrets.KEYWORDS": "s3cr3t-alpha,s3cr3t-beta"}
     assert contexts == [{**LEASE_CONTEXT, **read}]
     assert finished.log.read_text() == "keywords ***\nok\n"
     assert report(finished, pod)["summary"] == "summary ***\n"

@@ -144,8 +144,8 @@ def _producers(earlier: Sequence[Mapping[str, Any]], names: Iterable[str]) -> tu
     positions = {str(step["id"]): position for position, step in enumerate(earlier) if "id" in step}
     found: dict[int, Producer] = {}
     pending = list(names)
-    while pending:
-        step = _step(pending.pop())
+    for name in pending:
+        step = _step(name)
         position = None if step is None else positions.get(step)
         if position is None or position in found:
             continue

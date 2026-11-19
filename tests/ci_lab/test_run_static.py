@@ -265,29 +265,29 @@ jobs:
         run: python -m scripts.check
 """
 
-UNREADABLE = r"""
+WRITTEN = r"""
 jobs:
   lint:
     steps:
-      - name: Write a block
+      - name: Write the lines
         id: block
-        run: printf 'text<<EOF\nsecret line\nEOF\n' >> "$GITHUB_OUTPUT"
+        run: printf 'LINES' >> "$GITHUB_OUTPUT"
       - name: Check
         env:
           TEXT: ${{ steps.block.outputs.text }}
         run: python -m scripts.check
 """
 
-BARE = r"""
+SLOW = r"""
 jobs:
   lint:
     steps:
-      - name: Write a bare line
-        id: block
-        run: printf 'secret line\n' >> "$GITHUB_OUTPUT"
+      - name: Hang
+        id: slow
+        run: sleep 30
       - name: Check
         env:
-          TEXT: ${{ steps.block.outputs.text }}
+          DONE: ${{ steps.slow.outputs.done }}
         run: python -m scripts.check
 """
 
@@ -324,11 +324,27 @@ def test_a_failing_earlier_step_fails_the_gate_without_running_it(
 
 
 @pytest.mark.feature("lab-static-step-env")
-@pytest.mark.parametrize("workflow", [UNREADABLE, BARE], ids=["delimited", "bare"])
-def test_an_earlier_step_output_line_outside_name_equals_value_is_refused_without_its_text(
-    tmp_path: Path, settings: run_static.Settings, workflow: str
+def test_an_earlier_step_past_its_time_limit_ends_the_gate_red_with_no_code(
+    tmp_path: Path, settings: run_static.Settings
 ) -> None:
-    (gate,) = static_gates.discover(workflow)
+    (gate,) = static_gates.discover(SLOW)
+    head, base, grader = _folders(tmp_path)
+    probe = dataclasses.replace(gate, run='touch "$GITHUB_WORKSPACE/ran"')
+    graded = run_static.run(probe, head, base, grader, dataclasses.replace(settings, timeout=0.5))
+    assert (graded.code, graded.skipped, graded.green) == (None, False, False)
+    assert not (head / "ran").exists()
+
+
+@pytest.mark.feature("lab-static-step-env")
+@pytest.mark.parametrize(
+    "lines",
+    [r"text<<EOF\nhidden line\nEOF\n", r"hidden line\n", r"text<<EOF=\nnote=held\nEOF=\n"],
+    ids=["delimited", "bare", "delimiter-with-equals"],
+)
+def test_an_earlier_step_output_line_outside_name_equals_value_is_refused_without_its_text(
+    tmp_path: Path, settings: run_static.Settings, lines: str
+) -> None:
+    (gate,) = static_gates.discover(WRITTEN.replace("LINES", lines))
     with pytest.raises(ValueError) as refused:
         run_static.run(gate, *_folders(tmp_path), settings)
     assert str(refused.value) == "block wrote an output line that is not name=value"
