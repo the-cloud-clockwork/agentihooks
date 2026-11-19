@@ -33,15 +33,19 @@ def test_status_separates_current_tick_activity_from_old_completion(env, monkeyp
     assert commands.view(store, "sw")["last_tick"] == 1_000_000
 
 
-def test_a_failed_tick_records_activity_without_claiming_completion(env, monkeypatch):  # noqa: F811
+def test_a_failed_tick_records_activity_without_claiming_completion(
+    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     store, ledger, runtime = env
     run("sw", "create", "--repo", "/repo")
     store.redis.set(store.key("sw", "last-tick"), 100)
     clock = [200]
+    failed_at = 200 + tick_activity.RENEW_MS
     monkeypatch.setattr(cli, "now_ms", lambda: clock[0])
 
-    def fail(slug):
-        clock[0] = 300
+    def fail(slug: str) -> None:
+        clock[0] = failed_at
         cli.timing.keep()
         raise RuntimeError("ledger unavailable")
 
@@ -49,7 +53,7 @@ def test_a_failed_tick_records_activity_without_claiming_completion(env, monkeyp
     with pytest.raises(RuntimeError, match="ledger unavailable"):
         cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
     row = commands.view(store, "sw")
-    assert row["last_tick_activity"] == 300
+    assert row["last_tick_activity"] == failed_at
     assert int(store.redis.get(store.key("sw", "last-tick"))) == 100
 
 
@@ -156,3 +160,18 @@ def test_a_stolen_tick_lock_stops_every_step_from_the_first_renewal_after_the_in
             renewal()
     assert tick_activity.read(store, "sw") == 1_000
     assert tick_activity.RENEW_MS * 10 <= cli.TICK_LOCK_MS
+
+
+@pytest.mark.feature("swarm-tick-lock-renewal-interval")
+def test_the_step_hook_renews_once_per_lease_tick_when_that_is_shorter_than_its_interval(
+    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", "5")
+    clock: list[int] = [1_000]
+    renewals: list[int] = []
+    renewal = tick_activity.Renewal(env[0], "sw", lambda: renewals.append(clock[0]), lambda: clock[0])
+    for at in (1_000, 5_999, 6_000, 10_999):
+        clock[0] = at
+        renewal()
+    assert renewals == [1_000, 6_000]
