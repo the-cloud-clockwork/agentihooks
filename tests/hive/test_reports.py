@@ -1094,7 +1094,7 @@ def test_a_nudge_for_a_hub_admitted_worker_whose_hive_is_lost_is_refused_without
 
 @pytest.mark.feature("swarm-nudges-hub-admitted-workers-through-their-hive")
 @pytest.mark.parametrize(
-    ("hive", "target", "accepted"),
+    ("record_hive", "target", "accepted"),
     [
         (HIVE, {}, True),
         ("other", {}, False),
@@ -1105,7 +1105,7 @@ def test_a_nudge_for_a_hub_admitted_worker_whose_hive_is_lost_is_refused_without
     ],
 )
 def test_a_hive_takes_a_nudge_order_exactly_when_the_controller_sends_it_there(
-    remote: SimpleNamespace, hive: str, target: dict[str, str | int], accepted: bool
+    remote: SimpleNamespace, record_hive: str, target: dict[str, str | int], accepted: bool
 ) -> None:
     from scripts.hive.orders import FOREIGN, Consumer
     from scripts.swarm.runtime import _command
@@ -1120,7 +1120,7 @@ def test_a_hive_takes_a_nudge_order_exactly_when_the_controller_sends_it_there(
             "other",
             pane_id=PANE,
             seat="eng-2@fixture",
-            hive=hive,
+            hive=record_hive,
             runtime_target=target,
         ),
     )
