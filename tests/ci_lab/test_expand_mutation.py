@@ -189,7 +189,10 @@ def test_a_unit_priced_over_the_timeout_splits_into_the_fewest_parts_that_each_p
     assert [member for unit in parts for member in unit.members] == list(whole.members)
     assert [unit.kind for unit in parts] == ["mutant"] * len(parts)
     assert len({unit.key for unit in parts} | {whole.key}) == len(parts) + 1
-    assert [unit.key for unit in parts] == [digest([whole.key, list(unit.members)]) for unit in parts]
+    assert [unit.key for unit in parts] == [
+        f"mutant-v{digests.SCHEMAS['mutant']}-{digest([whole.key.split('-', 2)[2], list(unit.members)])}"
+        for unit in parts
+    ]
     assert parts == expand_mutation.mutant_units(root, {PATH: [12]}, {}, {}, timeout=timeout)
 
 
@@ -349,7 +352,7 @@ def test_stats_units_carry_the_stats_cache_identity(tmp_path: Path) -> None:
     stored = {json.loads(record.read_text())["key"] for record in cache.glob("*.json")}
     units = expand_mutation.stats_units(root, files, ["-q"])
     assert [(unit.kind, unit.members) for unit in units] == [("stats", (path,)) for path in files]
-    assert {unit.key for unit in units} == stored
+    assert {unit.key for unit in units} == {f"stats-v{digests.SCHEMAS['stats']}-{key}" for key in stored}
     assert len(stored) == len(files)
 
 
