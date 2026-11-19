@@ -9898,7 +9898,7 @@
       "id": "deselect-scripts-manifest",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2654",
-      "behaviour": "The test count job's Deselect the reused tests step runs the grader checkout's scripts.dep_manifest alone. A grader checkout whose interpreter cannot import the tests package deselects exactly the tests scripts.dep_manifest.deselect picks, and a grader checkout that keeps the manifest only under the tests package fails the step instead of deselecting with it.",
+      "behaviour": "The test count job's Deselect the reused tests step runs the grader checkout's scripts.dep_manifest alone. A grader checkout whose interpreter cannot import the tests package deselects exactly the tests scripts.dep_manifest.deselect picks, and a grader checkout that keeps the manifest only under the tests package never runs that manifest.",
       "seam": "the Deselect the reused tests step run text executed in a fake grader checkout",
       "tests": [
         "tests/test_dep_manifest.py::test_the_split_deselects_with_the_scripts_manifest_alone_and_never_the_tests_package"

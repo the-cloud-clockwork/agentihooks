@@ -748,12 +748,17 @@ def test_the_split_deselects_with_the_scripts_manifest_alone_and_never_the_tests
     (shipped / "tests.py").write_text("raise ModuleNotFoundError(\"No module named 'tests'\", name='tests')\n")
     chosen, expected = _deselect_in_test_count(tmp_path / "shipped", manifest)
     assert chosen == expected
-    legacy = tmp_path / "legacy" / "runner" / "planner" / "scripts"
-    legacy.mkdir(parents=True)
-    (legacy / "__init__.py").write_text("")
-    with pytest.raises(subprocess.CalledProcessError):
-        _deselect_in_test_count(tmp_path / "legacy", manifest, "tests")
-    assert not (tmp_path / "legacy" / "runner" / "reused.json").exists()
+    legacy = tmp_path / "legacy" / "planner"
+    for package in ("scripts", "tests"):
+        (legacy / package).mkdir(parents=True)
+        (legacy / package / "__init__.py").write_text("")
+    (legacy / "tests" / "dep_manifest.py").write_text("raise SystemExit('the tests package manifest ran')\n")
+    env = {**os.environ, "RUNNER_TEMP": str(legacy.parent), "PYTHON_PATH": sys.executable}
+    run = _step("test-count", "Deselect the reused tests")["run"]
+    result = subprocess.run(
+        ["bash", "-eo", "pipefail", "-c", run], env=env, capture_output=True, text=True, check=False
+    )
+    assert "the tests package manifest ran" not in result.stderr
 
 
 def test_the_reused_plan_reaches_workers_but_never_nested_pytest_runs(tmp_path, monkeypatch):
