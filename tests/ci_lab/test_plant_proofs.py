@@ -109,11 +109,12 @@ def test_an_edit_with_zero_or_two_matches_is_refused(repository: Path, source: s
         plant_proofs.prepare(repository, "lint", "HEAD")
 
 
-def test_ordered_edits_preserve_all_other_bytes_and_the_executable_mode(repository: Path) -> None:
-    target = repository / "sample.py"
+@pytest.mark.parametrize("path", ["sample.py", "-sample.py"])
+def test_ordered_edits_preserve_all_other_bytes_and_the_executable_mode(repository: Path, path: str) -> None:
+    target = repository / path
     target.write_text("before\nuntouched\n")
     target.chmod(0o755)
-    git(repository, "add", "sample.py")
+    git(repository, "add", "--", path)
     git(repository, "commit", "-qm", "Seed executable")
     fixture = repository / "tests/ci_lab/plants/lint.json"
     fixture.write_text(
@@ -122,15 +123,15 @@ def test_ordered_edits_preserve_all_other_bytes_and_the_executable_mode(reposito
                 "gate": "lint",
                 "reason": "exact edit",
                 "edits": [
-                    {"path": "sample.py", "before": "before", "after": "middle"},
-                    {"path": "sample.py", "before": "middle", "after": "after"},
+                    {"path": path, "before": "before", "after": "middle"},
+                    {"path": path, "before": "middle", "after": "after"},
                 ],
             }
         )
     )
     pair = plant_proofs.prepare(repository, "lint", "HEAD")
-    assert git(repository, "show", f"{pair.red}:sample.py") == "after\nuntouched"
-    assert git(repository, "ls-tree", pair.red, "sample.py").startswith("100755 blob ")
+    assert git(repository, "show", f"{pair.red}:{path}") == "after\nuntouched"
+    assert git(repository, "ls-tree", pair.red, "--", path).startswith("100755 blob ")
     assert target.read_text() == "before\nuntouched\n"
     assert not (repository / "None").exists()
 

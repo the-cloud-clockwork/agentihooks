@@ -10521,7 +10521,11 @@
         "tests/ci_lab/test_plant_grade.py::test_the_module_dispatch_exposes_the_plant_command",
         "tests/ci_lab/test_plant_grade.py::test_the_command_prints_links_and_appends_the_proof_summary",
         "tests/ci_lab/test_plant_grade.py::test_the_command_uses_real_transport_adapters_and_normalizes_the_remote",
-        "tests/ci_lab/test_plant_grade.py::test_a_refused_command_prints_no_success_row_or_summary"
+        "tests/ci_lab/test_plant_grade.py::test_a_refused_command_prints_no_success_row_or_summary",
+        "tests/ci_lab/test_plant_grade.py::test_a_command_for_another_host_is_refused_before_pushing",
+        "tests/ci_lab/test_plant_grade.py::test_a_grade_arriving_at_its_deadline_is_refused",
+        "tests/ci_lab/test_plant_grade.py::test_a_nonpositive_grade_deadline_is_refused_before_pushing",
+        "tests/ci_lab/test_plant_grade.py::test_an_excessive_history_is_refused_after_one_hundred_pages"
       ]
     },
     {

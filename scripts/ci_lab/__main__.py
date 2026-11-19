@@ -25,6 +25,10 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
         return executors.main(argv[1:], environ)
     if argv and argv[0] in SERVICES:
         return contract.run(SERVICES[argv[0]], argv[1:], environ)
+    if argv and argv[0] == "grade":
+        from scripts.ci_lab import plant_grade
+
+        return plant_grade.main(argv[1:], environ)
     if argv and argv[0] == "evidence":
         return evidence.main(argv[1:])
     if argv and argv[0] == "shadow" and shadow_report.claims(argv[1:]):

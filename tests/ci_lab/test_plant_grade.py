@@ -79,6 +79,7 @@ class Lab:
 
     def fetch(self, path: str) -> Mapping[str, Any]:
         self.pages.append(path)
+        assert len(self.pages) <= 8
         assert path.startswith("repos/acme/widgets/commits/")
         assert "filter=all" in path
         head = path.split("/")[4]
@@ -185,6 +186,45 @@ def test_all_check_pages_are_read(repository: Path) -> None:
     row = plant_grade.prove(repository, "lint", "HEAD", REPOSITORY, lab.ports())
     assert row["plant"] == "lint"
     assert sum(path.endswith("page=2") for path in lab.pages) == 2
+
+
+@pytest.mark.feature("lab-static-plant-proofs")
+def test_a_grade_arriving_at_its_deadline_is_refused(repository: Path) -> None:
+    lab = Lab(repository)
+
+    def late(path: str) -> Mapping[str, Any]:
+        rows = lab.fetch(path)
+        lab.now = 2
+        return rows
+
+    with pytest.raises(TimeoutError, match="grade"):
+        plant_grade.prove(
+            repository, "lint", "HEAD", REPOSITORY, plant_grade.Ports(late, lab.sleep, lab.clock), timeout_s=2
+        )
+    assert len(lab.heads) == 1
+
+
+@pytest.mark.feature("lab-static-plant-proofs")
+def test_an_excessive_history_is_refused_after_one_hundred_pages(repository: Path) -> None:
+    lab = Lab(repository)
+    pages: list[str] = []
+
+    def full(path: str) -> Mapping[str, Any]:
+        pages.append(path)
+        return {"check_runs": [lab.check("lab-shadow/lint", "failure", "other-grade")] * 100}
+
+    with pytest.raises(ValueError, match="history"):
+        plant_grade.prove(repository, "lint", "HEAD", REPOSITORY, plant_grade.Ports(full, lab.sleep, lab.clock))
+    assert len(pages) == 100
+
+
+@pytest.mark.parametrize("timeout_s", [0, -1])
+@pytest.mark.feature("lab-static-plant-proofs")
+def test_a_nonpositive_grade_deadline_is_refused_before_pushing(repository: Path, timeout_s: float) -> None:
+    lab = Lab(repository)
+    with pytest.raises(ValueError, match="positive"):
+        plant_grade.prove(repository, "lint", "HEAD", REPOSITORY, lab.ports(), timeout_s=timeout_s)
+    assert git(repository, "ls-remote", "--heads", "origin") == ""
 
 
 @pytest.mark.feature("lab-static-plant-proofs")
@@ -302,3 +342,25 @@ def test_a_refused_command_prints_no_success_row_or_summary(
     assert output.out == ""
     assert "plant" in output.err
     assert not summary.exists()
+
+
+@pytest.mark.feature("lab-static-plant-proofs")
+def test_a_command_for_another_host_is_refused_before_pushing(
+    repository: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.chdir(repository)
+    lab = Lab(repository)
+    assert (
+        plant_grade.main(
+            ["--plant", "lint", "--repository", "https://elsewhere.invalid/widgets"],
+            {},
+            lab.ports(),
+        )
+        == 1
+    )
+    answer = capsys.readouterr()
+    assert answer.out == ""
+    assert "GitHub" in answer.err
+    assert git(repository, "ls-remote", "--heads", "origin") == ""
