@@ -83,6 +83,9 @@ WORKER_DESCRIPTION = {
             "CI_LAB_KILLERS",
             "CI_LAB_MUTATION_BUDGET",
             "CI_LAB_MUTATION_CAP",
+            "CI_LAB_REPOSITORY",
+            "AGENTIHOOKS_LAB_REMOTE",
+            "AGENTIHOOKS_LAB_REMOTE_TOKEN",
         ],
     },
     "metrics": sorted(EXPECTED_METRICS),
@@ -107,6 +110,9 @@ ENVIRONMENT_NAMES = (
     "CI_LAB_KILLERS",
     "CI_LAB_MUTATION_BUDGET",
     "CI_LAB_MUTATION_CAP",
+    "CI_LAB_REPOSITORY",
+    "AGENTIHOOKS_LAB_REMOTE",
+    "AGENTIHOOKS_LAB_REMOTE_TOKEN",
 )
 
 

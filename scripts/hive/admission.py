@@ -273,6 +273,10 @@ def binding(hives: list[dict[str, Any]], others: dict[str, int | None]) -> str:
     return line + ": " + "; ".join(f"hive {hive['id']} {hive['refusal']}" for hive in hives)
 
 
-def view_lines(hives: list[dict[str, Any]], others: dict[str, int | None]) -> list[str]:
-    """The hive admission lines and the binding limit line, none when no hive is live."""
-    return [*hive_lines(hives), binding(hives, others)] if hives else []
+def view_lines(
+    hives: list[dict[str, Any]], others: dict[str, int | None], refused: dict[str, str] | None = None
+) -> list[str]:
+    """The hive admission lines, a line naming each live hive whose pending admission count the Redis role refused,
+    and the binding limit line over the hives read; none when no hive is live."""
+    named = [f"hive {hive}  admission count unreadable: {reason}" for hive, reason in (refused or {}).items()]
+    return [*hive_lines(hives), *named, binding(hives, others)] if hives else named
