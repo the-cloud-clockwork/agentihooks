@@ -1,3 +1,4 @@
+import ast
 import copy
 import io
 import json
@@ -2241,6 +2242,30 @@ def test_a_promotion_head_that_changes_no_measured_python_expands_no_mutation_un
     head = _commit(suite.repo, {"docs/q.md": "q\n", "tests/test_beta.py": "def test_second():\n    assert True\n"})
     found = Port(SUITE_MANIFEST).expander(tmp_path).expand(suite.request(Priority.PROMOTION, head))
     assert found.gates == {"unit": _suite_units(suite, head, SUITE_DURATIONS)}
+
+
+@pytest.mark.feature("lab-unparsable-head-dropped")
+@pytest.mark.usefixtures("staticless")
+def test_a_promotion_head_whose_changed_python_does_not_parse_is_dropped_and_the_pass_starts_the_next_head(
+    tmp_path: Path,
+) -> None:
+    suite = _suite(tmp_path, DELIVERY["lab"])
+    source = ALPHA.replace("return 2", "return (2")
+    broken = _commit(suite.repo, {"scripts/alpha.py": source})
+    with pytest.raises(SyntaxError) as unparsable:
+        ast.parse(source.encode())
+    state = Lab(fake_redis(), LocalObjects(tmp_path / "objects"), Inbox(), Expander({}))
+    expander = Port(SUITE_MANIFEST).expander(tmp_path)
+    ports = scheduler.Ports(state.inbox, expander, state.checks, state.hotfixes, state.kube)
+    settings = scheduler.Settings(frozenset({ACTOR}), 0, Policy())
+    run = Run(state, scheduler.Scheduler(state.client, state.objects, ports, settings))
+    for lane, head in (("a", broken), ("b", suite.head)):
+        event = HeadEvent("push", suite.remote, head, suite.base, ACTOR, "pushed")
+        state.inbox.pending.append(scheduler.Head(event, lane, ""))
+    actions = run.tick(1000)
+    assert f"cannot expand {broken}: {unparsable.value}" in actions
+    assert state.client.hgetall(scheduler.WAITING) == {}
+    assert [grade.head for grade in run.grades()] == [suite.head]
 
 
 @pytest.mark.feature("lab-scheduler-test-units")
