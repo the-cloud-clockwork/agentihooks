@@ -1281,6 +1281,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> status [--json]` | Config, task counts, when the last automatic snapshot was taken (`snapshots  last automatic snapshot 2026-10-05 13:15 UTC  every 30 min  kept 4`), one row per agent with its [transport capabilities](#transport-capabilities), and the health findings. An agent's model and effort are what its running session last reported (the Claude status line, a Codex hook) once that differs from the launch, with model source `session`, so a manual `/model` or `/effort` switch shows on the next tick. It also prints the host room (`host room 3: <reason>`, or `host room None: <reason>` when capacity is unavailable; see [Local host room](#local-host-room) and [Deployed host capacity](#deployed-host-capacity)) and, when the last spawn pass stopped at that room, the hold (`holding spawns: host memory room 3, 3 spawned since it was granted: <reason>`). The host room gates every spawn in manual and auto scaling after the quota seat check; master seats pass it, as they pass workstation admission, though each master launch still counts against the room. Spawns from every swarm on the host count against the room from thirty seconds before it was granted, since a new agent takes that long to show in a reading; a room held between the load watermarks keeps its first grant time, so spawns made under it keep counting. An unknown host lets spawns pass and keeps the last known room for the next reading. An operator's own master start and restore relaunches after a reboot are not gated. |
 | `agentihooks swarm <id> autoscale [--fixture <file>] [--json]` | Read only: the autoscale decision (lane ceilings, pending raise, host room and reason) and the local slots, the smaller of `local-max-agents` and this machine's hive `max-agents` (`local_slots` in `--json`), for the live swarm, or for a fixture of accounts and host readings. It never refreshes quota or writes the stored decision; `applied` is false when the swarm runs manual scaling. `swarm create` stores `scaling=auto` and prints it, caps given at create included, so a new swarm's lane ceilings follow free quota seats, host room and ready work; a master keeps it on and reads this preview with `agentihooks balance` before stating capacity. In deployed mode it reads the Kubernetes worker namespace or reports why host room is off; see [Deployed host capacity](#deployed-host-capacity). |
 | `agentihooks swarm <id> names [--json]` | The swarm code, its herdr space and every agent name the swarm gave, each with its type, number, session id and spawn and retire times. |
+| `agentihooks swarm <id> tasks` | Read only: one JSON document, `{"tasks": [...], "freezes": [...]}`, with every task row of the swarm and every freeze and focus record, as the swarm's ledger reads them. A tool outside agentihooks reads tasks and freezes through this command and names only the swarm. An unreachable ledger exits 1 with the reason on stderr and prints nothing on stdout. |
 | `agentihooks swarm <id> merge-path [--hours N] [--json] [--post ITEM]` | The merge path into dev of the swarm's repository over the last N hours (default 24): merges an hour, Tests runs per merge by event, cancelled head runs, reruns, enqueues, queue removals by cause, head failure rate, failed queue runs, queue cycle, standard jobs per queue run, open ready pull requests and lead time. A window GitHub cannot list in full is refused, never undercounted. `--post` writes the plain line as a ledger comment on ITEM. |
 | `agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N max-plan-agents=N` | Change the caps; `swarm <id> max-eng-agents=N` also works. |
 | `agentihooks swarm <id> set masters=N` | The master seat count: `master@<id>` is the lead and answers the operator, `master-2@<id>` and up each own phases assigned by code. The tick launches a master in every empty seat after the lead. |
@@ -1412,7 +1413,7 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 | `agentihooks swarm <id> pr URL` | Record the task's pull request, its head branch and that branch's repository (`branch_repo`); the task moves to `pr`. It refuses, with no ledger write, a pull request whose body closes an issue (`Closes`, `Fixes` or `Resolves #n`) that neither the task nor a group member records as its issue or names in its description as `#n` or the issue URL, because the swarm closes every issue the body names once the pull request merges. Drop the closing keyword from the body, or record the task's own issue with `swarm issue` first. A `--prerequisite` pull request that leaves the recorded pull request in place is not checked. `agentihooks api task set ID pr_url=URL` is a raw field edit that reads nothing from GitHub, so it records a pull request without this check. |
 | `agentihooks swarm <id> merge queue\|dequeue\|state URL` | Queue a pull request into `dev` on the merge queue at its current head, take it out of the queue, or report its state, head and queue entry as JSON. `queue` reads the required checks of the pull request's own repository from its `dev` branch rules and protection and refuses unless every one passed on the current head (`required checks on the current pull request head must pass before queueing`); it then enqueues that exact head with `expectedHeadOid`. It never compares the branch with `dev`, merges `dev` into it or updates it, whatever changed on `dev` since the checks ran: the merge group runs the unit suite on the head merged with the newest `dev` ([Delivery tiers](../reference/delivery-tiers.md#entering-the-merge-queue)). A repository with no merge queue on `dev`, such as antoncore, gets a squash merge instead, only for a ready pull request with a review decision of none or approved: the command waits up to ten minutes, polling every fifteen seconds, for the required checks to pass, read from the check rollup where the token can read it and otherwise from the pull request merge state (`CLEAN`, `HAS_HOOKS` or `UNSTABLE`), because the hive GitHub App token cannot read check results on a private repository. It then squash merges the observed head through the same token and reports the `merge_commit`; a merge refused with `Resource not accessible by integration` names the pull requests write permission the GitHub App token needs. The direct squash merge appends no queue journal record. The tick's merge pass checks once and never waits, and its checks wait still reads the check rollup. A pull request already in the queue returns its state without another check or enqueue. The pull request can live in any repository the caller's `gh` reaches, such as agentibrain-kernel, and joins that repository's own queue ([Pull requests in other repositories](../reference/delivery-tiers.md#pull-requests-in-other-repositories)). It goes through `gh api graphql` and `gh api`, so any `gh` with `gh api` works; queue and dequeue run for a swarm worker on a pull request its task names (final, split half, `--stage` or `--prerequisite`) or on one no task names whose head is one of the worker's own worktree branches (`<agent>` or `<agent>-N`), read from GitHub only in that case; another task's pull request is refused, and refuse a pull request into any other base. The master seat may `queue` only through a route in [How the master queues a pull request](#how-the-master-queues-a-pull-request), and `dequeue` refuses it. Each queue and dequeue appends a record with the queue before and after to the [queue journal](../reference/delivery-tiers.md#the-queue-journal). A pull request whose body declares a staged pair is refused until its proof is complete on the exact heads ([Staged compatibility before admission](#staged-compatibility-before-admission)). |
 | `agentihooks swarm <id> prepare` | Set `--repositories /absolute/repo,/absolute/other` when adding a task, or `task set <task> repositories=/absolute/repo`. Use that explicit `repositories` list of local repository paths; without it, report that the swarm repository is the default. Prose repository names do not select repositories. Create or reuse one worktree per repository from its own `dev`, with a recorded continuation branch scoped to that repository. Return each worktree and branch. |
-| `agentihooks swarm <id> publish --message TEXT -- FILE...` | Use the repository of the current task worktree; from a primary checkout, resolve the sole task repository or require a worktree selection when several are declared. Stage only explicit repository relative files, commit, run that repository’s `scripts.ci_prepush` gate, then push and retain its branch separately from other task repositories. When no listed file changed and the selected remote branch already matches `HEAD`, it skips the commit, gate and push; see [publishing unchanged files](#publishing-unchanged-files). Otherwise the result names the gate. A repository without that module uses the named [AgentiHooks touched Python fallback](#fallback-gate-for-repositories-without-their-own): lint and format on changed lines, size and complexity on touched functions and changed files, in changed Python files since its own `origin/dev` merge base, without agentihooks baseline files or local tests. Unrelated tracked changes are refused before staging; unrelated untracked files are preserved. A failed stage stops publication and names the next command. Repeat the command after fixing a failure; an already committed head is graded again without an empty commit. Protected branches and tasks owned by another agent are refused. While a panic holds the swarm, a due push is refused before the gate unless the branch it writes is a registered fix of the worktree's repository; see [publishing under panic mode](#publishing-under-panic-mode). Tests run only in CI. |
+| `agentihooks swarm <id> publish [--via lab [--direct]] --message TEXT -- FILE...` | Use the repository of the current task worktree; from a primary checkout, resolve the sole task repository or require a worktree selection when several are declared. Stage only explicit repository relative files, commit, run that repository’s `scripts.ci_prepush` gate, then push and retain its branch separately from other task repositories. When no listed file changed and the selected remote branch already matches `HEAD`, it skips the commit, gate and push; see [publishing unchanged files](#publishing-unchanged-files). Otherwise the result names the gate. A repository without that module uses the named [AgentiHooks touched Python fallback](#fallback-gate-for-repositories-without-their-own): lint and format on changed lines, size and complexity on touched functions and changed files, in changed Python files since its own `origin/dev` merge base, without agentihooks baseline files or local tests. Unrelated tracked changes are refused before staging; unrelated untracked files are preserved. A failed stage stops publication and names the next command. Repeat the command after fixing a failure; an already committed head is graded again without an empty commit. Protected branches and tasks owned by another agent are refused. While a panic holds the swarm, a due push is refused before the gate unless the branch it writes is a registered fix of the worktree's repository; see [publishing under panic mode](#publishing-under-panic-mode). `--via lab` grades the committed head on the CI lab's `refs/grade/<task>` before origin and pushes origin only on a green grade; `--direct` pushes origin as soon as the lab accepted the head; see [publishing through the lab](#publishing-through-the-lab). Tests run only in CI. |
 | `agentihooks swarm <id> branch` | Record the published branch and its repository (`branch_repo`, the origin remote without credentials). When the local branch tracks `origin/<task branch>`, retain that recorded task branch even when the local name differs; otherwise use the local branch. The selected branch must exist on origin. See [recording a published upstream branch](#recording-a-published-upstream-branch). |
 | `agentihooks swarm <id> resolve attempt\|critic\|escalate\|status ITEM` | The blocker protocol on a ledger item, each step recorded and counted on the item by code: two attempts (`--tried`, `--command`, `--output`), then `critic`, which launches a read only headless critic with only the item, the autonomy and the recorded attempts, then one attempt applying its resolution, then `escalate` (`--reason`, `--evidence`), which lands the priority and one comment listing every attempt, the critic resolution and the blocker reason. If critic routing refuses because no Claude account has a free session under its quota band, code records the capacity refusal and proceeds directly to escalation; other critic failures keep the critic requirement. At delegate or full autonomy the ledger refuses a priority, a flagged follow up or a new question from an agent until the item's record has escalated; manual and assist keep the old path. Prints the next step. |
 | `agentihooks swarm <id> review` | Start a review round on the task. The third round answers that review is closed: any finding still open gets one ruling from the other reader, then the merge proceeds. A fourth is refused with that text. Rounds spent before the task records a pull request, on its first pull request and on each later one, count on separate counters ([Review round counters](#review-round-counters)). |
@@ -2322,6 +2323,90 @@ The tests mapped to feature `panic-publish-holds` in `feature-map.json` cover
 the refused publish that pushes nothing, the check of the pushed branch from
 another checkout branch, the routing config refusal and the unreachable store.
 
+### Publishing through the lab
+
+`--via lab` grades the committed head on the CI lab before origin sees it, so the task branch on
+GitHub moves only after a green lab grade. `--direct` keeps the lab push but does not wait for its
+grade.
+
+```bash
+agentihooks swarm <id> publish --via lab --message "Fix the stale tick" -- scripts/swarm/tick.py
+agentihooks swarm <id> publish --via lab --direct --message "Fix the stale tick" -- scripts/swarm/tick.py
+```
+
+The publish needs `AGENTIHOOKS_LAB_REMOTE` naming the lab remote of the worktree's repository, and
+`AGENTIHOOKS_LAB_REMOTE_TOKEN` in the same environment for the push to authenticate.
+[Workspaces that carry the lab remote](../reference/ci-lab.md#workspaces-that-carry-the-lab-remote)
+describes both and the repository name rule. The commit, the panic check, the prepush gate and the
+merge queue check run first, as for any publish. Then publish:
+
+1. Gives the worktree's repository the `lab` remote, or points it at the current URL, and refuses
+   when the URL names another repository or is unset.
+2. Runs `git push -o branch=<branch> lab HEAD:refs/grade/<task>`, where `<branch>` is the
+   [delivery branch](#publishing-after-a-successor-prepares-a-branch) and `<task>` the agent's task.
+   Git's output is copied to standard error, so the publish log shows the lab's
+   `remote: lab grade: <url>` line before any push to origin. A failed push, or one whose output
+   names no grade url, refuses.
+3. Without `--direct`, reads the grade url at once and then every 15 seconds, each read with a 10
+   second timeout, until the newest grade it lists has a conclusion. The wait gives up after 1800
+   seconds. Only `success` lets publish continue.
+4. Pushes `HEAD` to `origin` and sends the [lab head notice](../reference/ci-lab.md#send-a-head-notice)
+   as any publish does.
+
+With `--direct`, step 3 is skipped: origin is pushed as soon as the lab accepted the head and named
+its grade url. The lab still grades the head, and the relay acts on that grade as for any pushed
+`refs/grade/*` head.
+
+A publish log through the lab, with the result's lab field:
+
+```text
+remote: lab grade: <CI_LAB_URL>/grades/<sha>
+To http://<lab host>/agentihooks.git
+ * [new reference]   HEAD -> refs/grade/<task>
+```
+
+```json
+{
+  "lab_grade": "<CI_LAB_URL>/grades/<sha>"
+}
+```
+
+The result carries `branch`, `gate` and `head` as usual, and `lab_grade`, the url publish waited on
+or, with `--direct`, the url the lab named. When nothing new is due, the
+[unchanged result](#publishing-unchanged-files) pushes neither the lab nor origin.
+
+Every refusal exits 1 with `swarm: ` and the reason, and leaves origin untouched:
+
+| Situation | Reason printed |
+|---|---|
+| `--direct` without `--via lab` | `publish --direct goes with --via lab`. Nothing is committed |
+| `AGENTIHOOKS_LAB_REMOTE` unset, or naming another repository | `publish --via lab needs AGENTIHOOKS_LAB_REMOTE naming the lab remote of this repository` |
+| The lab push fails, or names no grade url | `the lab push named no grade url; origin was not pushed: <git output>` |
+| A grade read fails: unreachable, not JSON, or no `grades` field | `the lab grade <url> could not be read, so origin was not pushed: <error>`. A single failed read refuses; there is no retry |
+| No conclusion within 1800 seconds | `the lab grade <url> has not concluded after 1800 s; origin was not pushed` |
+| The newest grade concludes other than `success` | `the lab grade <url> concluded <conclusion>; origin was not pushed` |
+
+Every refusal after the commit keeps the commit in the worktree, and one after the lab push keeps
+the head on the lab's `refs/grade/<task>` ref. A red grade relays nothing, so the branch on GitHub
+stays where it was. Fix the cause, then run the `Next:` command the refusal prints: it repeats
+`--message`, the same `--via lab` and `--direct` flags and the files, so the retry takes the same
+lab route.
+
+The lab grades a head when the push moves its grade ref. A head the lab already holds on
+`refs/grade/<task>` moves nothing: git answers `Everything up-to-date`, the lab prints no grade url,
+and publish refuses with `the lab push named no grade url`. After a refusal that left the head on
+the lab, such as a wait that ran out or an unreadable grade, read the url from the log until it
+concludes, then either publish the same head without `--via lab` or commit the next change and
+publish it through the lab.
+
+A plain `git push` to `lab` meets the same guards as a push to origin; see
+[Guards on a lab push](../reference/ci-lab.md#guards-on-a-lab-push).
+
+Delivered in [pull request 11983](https://github.com/the-cloud-clockwork/agentihooks/pull/11983).
+The tests mapped to feature `lab-remote-in-workspaces` in `feature-map.json` cover the grade before
+origin on green, origin left alone on red, `--direct`, the missing remote, a push with no grade
+url, the wait running out, an unreadable grade and the refused `--direct` alone.
+
 ### Fallback gate for repositories without their own
 
 When publication requires a push, `publish` runs the repository's own gate
@@ -2579,7 +2664,10 @@ A `git push` from a task session is refused when all of these hold:
    GitHub URL is treated like the pull request's repository.
 3. The push writes the task's recorded branch. Each refspec's destination
    counts; no refspec, or `HEAD`, means the current branch. A task with no
-   recorded branch skips this test.
+   recorded branch skips this test. A push to the `lab` remote writes the
+   branches its `-o branch=<name>` push options name, which the lab relays to
+   GitHub on a green grade; a lab push without one writes no branch and always
+   passes. See [Guards on a lab push](../reference/ci-lab.md#guards-on-a-lab-push).
 4. The pull request is open and nothing is red: no required check failed, and
    the required gate job did not end skipped with nothing left running.
 5. The pull request waits in the merge queue, or its checks are running. Checks
