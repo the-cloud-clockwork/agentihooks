@@ -10511,7 +10511,14 @@
         "tests/ci_lab/test_plant_grade.py::test_two_signed_heads_grade_against_one_base_and_ignore_other_grades",
         "tests/ci_lab/test_plant_grade.py::test_a_refused_notice_cannot_be_used_as_a_proof",
         "tests/ci_lab/test_plant_grade.py::test_a_wrong_red_gate_or_a_green_plant_is_refused",
-        "tests/ci_lab/test_plant_grade.py::test_an_incomplete_grade_expires_without_pushing_the_plant"
+        "tests/ci_lab/test_plant_grade.py::test_an_incomplete_grade_expires_without_pushing_the_plant",
+        "tests/ci_lab/test_plant_proofs.py::test_the_lint_fixture_turns_only_import_sorting_red",
+        "tests/ci_lab/test_plant_proofs.py::test_the_base_comment_grader_refuses_the_heads_invented_directive",
+        "tests/ci_lab/test_plant_grade.py::test_a_completed_pair_can_be_proven_again_without_rewinding_its_remote",
+        "tests/ci_lab/test_plant_grade.py::test_the_module_dispatch_exposes_the_plant_command",
+        "tests/ci_lab/test_plant_grade.py::test_the_command_prints_links_and_appends_the_proof_summary",
+        "tests/ci_lab/test_plant_grade.py::test_the_command_uses_real_transport_adapters_and_normalizes_the_remote",
+        "tests/ci_lab/test_plant_grade.py::test_a_refused_command_prints_no_success_row_or_summary"
       ]
     },
     {

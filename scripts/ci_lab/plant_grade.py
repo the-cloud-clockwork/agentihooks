@@ -1,4 +1,4 @@
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -103,3 +103,7 @@ def prove(
         "green": links[0],
         "red": links[1],
     }
+
+
+def main(argv: Sequence[str], environ: Mapping[str, str], ports: Ports | None = None) -> int:
+    raise NotImplementedError

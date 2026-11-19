@@ -1,12 +1,14 @@
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 import pytest
 
+from scripts import no_comments
 from scripts.ci_lab import plant_proofs
 
 pytestmark = [pytest.mark.unit, pytest.mark.feature("lab-static-plant-proofs")]
@@ -144,3 +146,35 @@ def test_git_failures_are_raised_and_every_git_process_has_a_deadline(repository
         plant_proofs.prepare(repository, "lint", "HEAD")
         with pytest.raises(subprocess.CalledProcessError):
             plant_proofs.prepare(repository, "lint", "missing-revision")
+
+
+def test_the_lint_fixture_turns_only_import_sorting_red(repository: Path) -> None:
+    pair = plant_proofs.prepare(repository, "lint", "HEAD")
+    target = repository / "scripts/ci_lab/head_notice.py"
+    command = [sys.executable, "-m", "ruff", "check", "--select", "I001", str(target)]
+    green = subprocess.run(command, capture_output=True, text=True, check=False)
+    assert green.returncode == 0, green.stdout + green.stderr
+    target.write_text(git(repository, "show", f"{pair.red}:scripts/ci_lab/head_notice.py") + "\n")
+    red = subprocess.run(command, capture_output=True, text=True, check=False)
+    assert red.returncode == 1, red.stdout + red.stderr
+    assert "I001" in red.stdout
+
+
+def test_the_base_comment_grader_refuses_the_heads_invented_directive(repository: Path, tmp_path: Path) -> None:
+    pair = plant_proofs.prepare(repository, "gate-script", "HEAD")
+    assert no_comments.grade(repository, repository, False) == []
+    head = tmp_path / "planted"
+    shutil.copytree(repository, head)
+    path = head / "scripts/no_comments.py"
+    path.write_text(git(repository, "show", f"{pair.red}:scripts/no_comments.py") + "\n")
+    errors = no_comments.grade(repository, head, False)
+    assert len(errors) == 1
+    assert errors[0].startswith("scripts/no_comments.py:")
+    assert errors[0].endswith(": forbidden comment")
+    answer = subprocess.run(
+        [sys.executable, str(path), "--base", str(repository), "--head", str(head)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert answer.returncode == 0, answer.stdout + answer.stderr

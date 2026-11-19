@@ -3,6 +3,8 @@ import hmac
 import io
 import json
 import subprocess
+import sys
+import urllib.request
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -176,3 +178,101 @@ def test_an_incomplete_grade_expires_without_pushing_the_plant(repository: Path)
         plant_grade.prove(repository, "lint", "HEAD", REPOSITORY, ENVIRON, lab.ports(), timeout_s=2)
     assert len(lab.notices) == 1
     assert lab.now == 2
+
+
+def test_a_completed_pair_can_be_proven_again_without_rewinding_its_remote(repository: Path) -> None:
+    first, second = Lab(repository), Lab(repository)
+    a = plant_grade.prove(repository, "lint", "HEAD", REPOSITORY, ENVIRON, first.ports())
+    b = plant_grade.prove(repository, "lint", "HEAD", REPOSITORY, ENVIRON, second.ports())
+    assert a == b
+    assert first.notices == second.notices
+
+
+def test_the_module_dispatch_exposes_the_plant_command() -> None:
+    answer = subprocess.run(
+        [sys.executable, "-m", "scripts.ci_lab", "grade", "--help"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert answer.returncode == 0, answer.stdout + answer.stderr
+    assert "--plant" in answer.stdout
+
+
+def test_the_command_prints_links_and_appends_the_proof_summary(
+    repository: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.chdir(repository)
+    lab = Lab(repository)
+    summary = tmp_path / "summary.md"
+    summary.write_text("Earlier proof\n")
+    environ = {**ENVIRON, "GITHUB_STEP_SUMMARY": str(summary)}
+    assert (
+        plant_grade.main(
+            ["--plant", "lint", "--base", "HEAD", "--repository", REPOSITORY],
+            environ,
+            lab.ports(),
+        )
+        == 0
+    )
+    row = json.loads(capsys.readouterr().out)
+    assert row["plant"] == "lint"
+    assert row["green"] == row["red"] == "https://github.com/acme/widgets/runs/required"
+    text = summary.read_text()
+    assert text.startswith("Earlier proof\n")
+    assert "lint" in text and "I001" in text
+    assert "[green](https://github.com/acme/widgets/runs/required)" in text
+    assert "[red](https://github.com/acme/widgets/runs/required)" in text
+
+
+def test_the_command_uses_real_transport_adapters_and_normalizes_the_remote(
+    repository: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.chdir(repository)
+    lab = Lab(repository)
+    real_run = subprocess.run
+
+    def transport(arguments: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        if arguments[3:] == ["remote", "get-url", "origin"]:
+            return subprocess.CompletedProcess(arguments, 0, "git@github.com:Acme/widgets.git\n", "")
+        if Path(arguments[0]).name == "git":
+            return real_run(arguments, **kwargs)
+        assert "api" in arguments
+        path = arguments[arguments.index("api") + 1]
+        return subprocess.CompletedProcess(arguments, 0, json.dumps(lab.fetch(path)), "")
+
+    monkeypatch.setattr(subprocess, "run", transport)
+    monkeypatch.setattr(urllib.request, "urlopen", lab.open)
+    assert plant_grade.main(["--plant", "lint", "--base", "HEAD"], ENVIRON) == 0
+    assert json.loads(capsys.readouterr().out)["plant"] == "lint"
+    assert len(lab.notices) == 2
+    assert all(notice["repo"] == REPOSITORY for notice in lab.notices)
+
+
+def test_a_refused_command_prints_no_success_row_or_summary(
+    repository: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.chdir(repository)
+    lab = Lab(repository)
+    lab.answer = 403
+    summary = tmp_path / "summary.md"
+    assert (
+        plant_grade.main(
+            ["--plant", "lint", "--base", "HEAD", "--repository", REPOSITORY],
+            {**ENVIRON, "GITHUB_STEP_SUMMARY": str(summary)},
+            lab.ports(),
+        )
+        == 1
+    )
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert "notice" in output.err
+    assert not summary.exists()
