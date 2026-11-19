@@ -2222,6 +2222,9 @@ JOURNALED = (
     "scripts.swarm.pr_wait.enforce_pass",
     "scripts.swarm.waits.resolution",
     "scripts.swarm.waits.required_green",
+    "scripts.swarm.waits.dependency",
+    "scripts.swarm.waits._save_wait",
+    "scripts.inbox.store.InboxStore.send",
 )
 
 
@@ -2239,7 +2242,9 @@ def test_the_waits_end_pass_journals_its_push_pass_each_resolution_with_its_hold
     with timing.tick("sw", tick.store):
         token = timing.PASS.set({"pass_id": "p0", "start_ms": 0})
         try:
-            assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now green"]
+            assert tick.end({"t1": {"id": "t1", "state": "claimed"}}) == [
+                f"ended the wait of {ME}: checks on {URL}, now green"
+            ]
         finally:
             timing.PASS.reset(token)
     rows = [json.loads(fields["record"]) for _, fields in tick.store.redis.xrange(tick.store.key("sw", "tick:steps"))]
@@ -2247,4 +2252,7 @@ def test_the_waits_end_pass_journals_its_push_pass_each_resolution_with_its_hold
         ("scripts.swarm.pr_wait.enforce_pass", None, "p0"),
         ("scripts.swarm.waits.required_green", ME, "p0"),
         ("scripts.swarm.waits.resolution", ME, "p0"),
+        ("scripts.swarm.waits.dependency", ME, "p0"),
+        ("scripts.swarm.waits._save_wait", ME, "p0"),
+        ("scripts.inbox.store.InboxStore.send", ME, "p0"),
     ]

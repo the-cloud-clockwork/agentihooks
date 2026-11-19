@@ -234,19 +234,19 @@ def end_pass(
             outcome = timing.timed(
                 resolution, held["on"], rows, inbox, github, reread, now_ms - held["at"] < FRESH_MS, verdicts
             )
-        if outcome and agent.task in rows and dependency(held["on"], rows[agent.task], rows, reread):
-            outcome = ""
-        if (outcome or json.dumps(held) != previous) and not _save_wait(
-            store.redis, slug, agent.name, previous, held, outcome, now_ms
-        ):
-            continue
-        if not outcome:
-            continue
-        text = (
-            f"Your wait on {outcome} has ended.{_pick_up(agent.task)} agentihooks swarm {slug} done, block, "
-            "or wait on the next thing."
-        )
-        inbox.send(SENDER, agent.seat or agent.name, text)
+            if outcome and agent.task in rows and timing.timed(dependency, held["on"], rows[agent.task], rows, reread):
+                outcome = ""
+            if (outcome or json.dumps(held) != previous) and not timing.timed(
+                _save_wait, store.redis, slug, agent.name, previous, held, outcome, now_ms
+            ):
+                continue
+            if not outcome:
+                continue
+            text = (
+                f"Your wait on {outcome} has ended.{_pick_up(agent.task)} agentihooks swarm {slug} done, block, "
+                "or wait on the next thing."
+            )
+            timing.timed(inbox.send, SENDER, agent.seat or agent.name, text)
         ended.append(f"ended the wait of {agent.name}: {outcome}")
     mark_ended(store, slug, now_ms)
     return ended
