@@ -66,7 +66,6 @@ return redis.call('HSETNX', KEYS[1], 'tallied:' .. ARGV[1], 1)
 """
 
 EXTEND = """
-if ARGV[2] == '' or redis.call('HGET', KEYS[1], 'token') ~= ARGV[2] then return 0 end
 if not redis.call('ZSCORE', KEYS[2], ARGV[1]) then return 0 end
 redis.call('ZADD', KEYS[2], ARGV[3], ARGV[1])
 return 1
