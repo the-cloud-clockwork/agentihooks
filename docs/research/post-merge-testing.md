@@ -518,7 +518,7 @@ The commands depend on each other:
 - C4 and C9 run in one Python session, because C9 reads C4's `pos`, `ctime`, `pairs`, `span` and `pct`. Append C9 to the C4 file and run it with `python3`.
 - C7b reads the `c7-ids.txt` and `c7-jobs.jsonl` that C7 writes, and `dev-commits.txt` from C3. Run it in the same window as C7, so it needs no rebuilt `c7-ids.txt` and skips the rebuild command under its output.
 - C8 reads the `c7-jobs.jsonl` that C7 writes, and the `mg-failure.jsonl` and `mg-cancelled.jsonl` downloads.
-- C10 runs on its own over `dev-commits.txt` and `dev-push.jsonl`. It calls `git merge-tree` once per window merge for each of the four distances and once per green to red candidate, 3,860 merges in this window, all local.
+- C10 runs on its own over `dev-commits.txt` and `dev-push.jsonl`. It calls `git merge-tree` once per window merge for each of the four distances and once per green to red candidate, 3,860 `git merge-tree` calls in this window, all local.
 - C11 reads `origin/dev` and has no window.
 
 The GitHub reads cost about 170 REST calls at this window's run counts: 24 download pages of 100 runs, 9 counts in C1, one jobs read per sampled run in C5, C7 and C7b, and two reads per reject in C8. Every agent on a swarm hive shares one GitHub API limit, so read the remaining budget first and, on a rate limit error, wait for the reset it reports instead of retrying:
