@@ -131,6 +131,7 @@ class Lab:
         return plant_grade.Ports(self.fetch, self.open, self.sleep, self.clock)
 
 
+@pytest.mark.feature("lab-static-plant-proofs")
 def test_two_signed_heads_grade_against_one_base_and_ignore_other_grades(repository: Path) -> None:
     lab = Lab(repository)
     base = git(repository, "rev-parse", "HEAD")
@@ -154,6 +155,7 @@ def test_two_signed_heads_grade_against_one_base_and_ignore_other_grades(reposit
 
 
 @pytest.mark.parametrize("answer", [0, 200, 403, 500])
+@pytest.mark.feature("lab-static-plant-proofs")
 def test_a_refused_notice_cannot_be_used_as_a_proof(repository: Path, answer: int) -> None:
     lab = Lab(repository)
     lab.answer = answer
@@ -164,6 +166,7 @@ def test_a_refused_notice_cannot_be_used_as_a_proof(repository: Path, answer: in
 
 
 @pytest.mark.parametrize("failure,required", [("type-gate", "failure"), ("lint", "success")])
+@pytest.mark.feature("lab-static-plant-proofs")
 def test_a_wrong_red_gate_or_a_green_plant_is_refused(repository: Path, failure: str, required: str) -> None:
     lab = Lab(repository)
     lab.failure, lab.required = failure, required
@@ -171,6 +174,7 @@ def test_a_wrong_red_gate_or_a_green_plant_is_refused(repository: Path, failure:
         plant_grade.prove(repository, "lint", "HEAD", REPOSITORY, ENVIRON, lab.ports())
 
 
+@pytest.mark.feature("lab-static-plant-proofs")
 def test_an_incomplete_grade_expires_without_pushing_the_plant(repository: Path) -> None:
     lab = Lab(repository)
     lab.incomplete = True
@@ -180,6 +184,7 @@ def test_an_incomplete_grade_expires_without_pushing_the_plant(repository: Path)
     assert lab.now == 2
 
 
+@pytest.mark.feature("lab-static-plant-proofs")
 def test_a_completed_pair_can_be_proven_again_without_rewinding_its_remote(repository: Path) -> None:
     first, second = Lab(repository), Lab(repository)
     a = plant_grade.prove(repository, "lint", "HEAD", REPOSITORY, ENVIRON, first.ports())
@@ -188,6 +193,7 @@ def test_a_completed_pair_can_be_proven_again_without_rewinding_its_remote(repos
     assert first.notices == second.notices
 
 
+@pytest.mark.feature("lab-static-plant-proofs")
 def test_the_module_dispatch_exposes_the_plant_command() -> None:
     answer = subprocess.run(
         [sys.executable, "-m", "scripts.ci_lab", "grade", "--help"],
@@ -199,6 +205,7 @@ def test_the_module_dispatch_exposes_the_plant_command() -> None:
     assert "--plant" in answer.stdout
 
 
+@pytest.mark.feature("lab-static-plant-proofs")
 def test_the_command_prints_links_and_appends_the_proof_summary(
     repository: Path,
     tmp_path: Path,
@@ -228,6 +235,7 @@ def test_the_command_prints_links_and_appends_the_proof_summary(
     assert "[red](https://github.com/acme/widgets/runs/required)" in text
 
 
+@pytest.mark.feature("lab-static-plant-proofs")
 def test_the_command_uses_real_transport_adapters_and_normalizes_the_remote(
     repository: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -254,6 +262,7 @@ def test_the_command_uses_real_transport_adapters_and_normalizes_the_remote(
     assert all(notice["repo"] == REPOSITORY for notice in lab.notices)
 
 
+@pytest.mark.feature("lab-static-plant-proofs")
 def test_a_refused_command_prints_no_success_row_or_summary(
     repository: Path,
     tmp_path: Path,

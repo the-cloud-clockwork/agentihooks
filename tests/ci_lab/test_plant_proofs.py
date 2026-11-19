@@ -44,6 +44,7 @@ def repository(tmp_path: Path) -> Path:
 @pytest.mark.parametrize(
     "name,path", [("lint", "scripts/ci_lab/head_notice.py"), ("gate-script", "scripts/no_comments.py")]
 )
+@pytest.mark.feature("lab-static-plant-proofs")
 def test_a_plant_has_reproducible_commits_and_preserves_the_checkout(repository: Path, name: str, path: str) -> None:
     base = git(repository, "rev-parse", "HEAD")
     original_index = git(repository, "ls-files", "--stage")
@@ -148,6 +149,7 @@ def test_git_failures_are_raised_and_every_git_process_has_a_deadline(repository
             plant_proofs.prepare(repository, "lint", "missing-revision")
 
 
+@pytest.mark.feature("lab-static-plant-proofs")
 def test_the_lint_fixture_turns_only_import_sorting_red(repository: Path) -> None:
     pair = plant_proofs.prepare(repository, "lint", "HEAD")
     target = repository / "scripts/ci_lab/head_notice.py"
@@ -160,6 +162,7 @@ def test_the_lint_fixture_turns_only_import_sorting_red(repository: Path) -> Non
     assert "I001" in red.stdout
 
 
+@pytest.mark.feature("lab-static-plant-proofs")
 def test_the_base_comment_grader_refuses_the_heads_invented_directive(repository: Path, tmp_path: Path) -> None:
     pair = plant_proofs.prepare(repository, "gate-script", "HEAD")
     assert no_comments.grade(repository, repository, False) == []
