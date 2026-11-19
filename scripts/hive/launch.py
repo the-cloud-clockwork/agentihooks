@@ -134,6 +134,21 @@ def live_hives(store: RedisStore, reservations: Callable[[Any, str], int] = admi
     return [hive for hive in loaded if registry.live(hive, now)]
 
 
+def pending_reader(refused: dict[str, str]) -> Callable[[Any, str], int]:
+    """A pending admission count reader that reads zero for each hive whose count the Redis role refuses and records
+    that hive's refusal in ``refused``, so one refused count never fails a reader of every hive."""
+    from redis.exceptions import NoPermissionError
+
+    def count(redis: Any, machine: str) -> int:
+        try:
+            return admission.pending(redis, machine)
+        except NoPermissionError as exc:
+            refused[machine] = str(exc)
+            return 0
+
+    return count
+
+
 def hosted_profiles(redis: Any, hives: list[dict[str, Any]]) -> dict[str, frozenset[str]]:
     """The profiles each given hive advertises in its configuration snapshot, bundle profiles included."""
     advertised: dict[str, frozenset[str]] = {}

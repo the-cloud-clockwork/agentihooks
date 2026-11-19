@@ -1709,7 +1709,7 @@ def autoscale_lines(config, decision):
 
 
 def cmd_autoscale(store: RedisStore, args: argparse.Namespace) -> None:
-    from scripts.hive import admission, launch
+    from scripts.hive import admission
     from scripts.swarm import capacity, local_slots
 
     config = store.config(args.slug) if args.slug in store.slugs() else SwarmConfig(args.slug, "", max_eng=0, max_ci=0)
@@ -1721,14 +1721,18 @@ def cmd_autoscale(store: RedisStore, args: argparse.Namespace) -> None:
     known = args.slug in store.slugs()
     slots = {"local_slots": local_slots.maximum(store, args.slug, config.local_max_agents)} if known else {}
     host: dict[str, Any] = (decision or {})["host"]
-    hives: list[dict[str, Any]] = [] if args.fixture else launch.live_hives(store)
+    hives: list[dict[str, Any]] = []
+    refused: dict[str, str] = {}
+    if not args.fixture:
+        hives, refused = readable_hives(store)
     admitted: list[str] = []
-    if hives:
+    if hives or refused:
         seats = capacity.inputs_seats(inputs)
-        admitted = admission.view_lines(hives, {"quota seats": seats, "host room": host["room"]})
+        admitted = admission.view_lines(hives, {"quota seats": seats, "host room": host["room"]}, refused)
     if args.json:
         rows = [{"hive": hive["id"], "room": hive["room"], "limit": hive["limit"]} for hive in hives]
         shown: dict[str, Any] = {"hive_admission": rows, "binding": admitted[-1]} if hives else {}
+        unread: dict[str, Any] = {"admission_unreadable": refused} if refused else {}
         print(
             json.dumps(
                 {
@@ -1737,6 +1741,7 @@ def cmd_autoscale(store: RedisStore, args: argparse.Namespace) -> None:
                     **(decision or {}),
                     **slots,
                     **shown,
+                    **unread,
                 },
                 indent=2,
             )
