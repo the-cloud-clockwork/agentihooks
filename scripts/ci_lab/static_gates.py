@@ -112,13 +112,13 @@ class StaticGate:
         folder, the gate's matrix values, the secrets and the outputs, outcome and conclusion of the gate's earlier
         steps."""
         produced = {producer.id for producer in self.producers}
-        fixed = dict(self.matrix)
+        held = dict(self.matrix)
         return tuple(
             name
             for name in self.reads
             if name not in LEASE_FIELDS
             and name != RUN_FOLDER
-            and name not in fixed
+            and name not in held
             and not name.startswith(SECRETS)
             and _step(name) not in produced
         )
@@ -212,7 +212,7 @@ def _gate(
     step: Mapping[str, Any],
     registry: Mapping[str, Any],
     earlier: Sequence[Mapping[str, Any]],
-    fixed: Mapping[str, str],
+    held: Mapping[str, str],
 ) -> StaticGate | None:
     if "run" not in step:
         return None
@@ -231,7 +231,7 @@ def _gate(
     reads = tuple(
         sorted(own.union(*(_reads(producer.condition, producer.env) for producer in producers if producer.run)))
     )
-    matrix = tuple((read, fixed[read]) for read in reads if read in fixed)
+    matrix = tuple((read, held[read]) for read in reads if read in held)
     return StaticGate(
         name, job, title, tools, modules, run, paths, base_paths, env, condition, producers, reads, matrix
     )
@@ -263,9 +263,9 @@ def discover(
         for label, body in _jobs(job, jobs[job], reusable or {}):
             if "uses" in body:
                 continue
-            steps, fixed = body["steps"], _matrix(body)
+            steps, held = body["steps"], _matrix(body)
             for index, step in enumerate(steps):
-                gate = _gate(label, step, registry or {}, steps[:index], fixed)
+                gate = _gate(label, step, registry or {}, steps[:index], held)
                 if gate is None:
                     continue
                 if gate.name in gates:

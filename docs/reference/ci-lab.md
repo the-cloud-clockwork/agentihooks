@@ -2442,9 +2442,10 @@ rerequested grade reuses the finished jobs of its own head.
 
 Expansion keys one `static` unit per gate step of the static jobs of the grader revision's Tests
 workflow: `lint`, `type-gate`, `semgrep` and `test-count`, the jobs
-`scripts.ci_lab.static_gates.STATIC_JOBS` names. The grader revision is the head of a promotion or backfill grade and the base of every
-other grade. `scripts.ci_lab.scheduler.MirrorExpander.expand` reads three inputs at that
-revision from the git mirror and passes them to `scripts.ci_lab.static_gates.discover`:
+`scripts.ci_lab.static_gates.STATIC_JOBS` names. The grader revision is the head of a promotion or
+backfill grade and the base of every other grade. `scripts.ci_lab.scheduler.MirrorExpander.expand`
+reads three inputs at that revision from the git mirror and passes them to
+`scripts.ci_lab.static_gates.discover`:
 
 | Input | Read with | Passed to `discover` as |
 |---|---|---|
@@ -2519,19 +2520,21 @@ The static executor supplies these names:
 | `github.run_attempt`, `github.run_number` | `1` |
 | `runner.temp` | The unit's run folder, the `$RUNNER_TEMP` its steps see |
 | `matrix.<key>` | The value the gate's `matrix` records |
+| `secrets.<NAME>` | The worker's `CI_LAB_SECRET_<NAME>`, or empty when the worker has no such variable. Only the secrets the gate reads join the context |
+| `steps.<id>.outcome`, `steps.<id>.conclusion`, `steps.<id>.outputs.<name>` | Set as each producer runs |
 
-Since the event is `pull_request` in every class, a step whose `if` needs another event is skipped
-in every class, as Actions skips it on a pull request. Three lab gradable gates read the event name
-on dev, and `tests/ci_lab/test_static_gates.py` pins that list, so a new one fails the test until
-someone checks the pull request event keeps its verdict:
+Since the event is `pull_request` in every class, a lab unit runs or skips each step as a pull
+request run of Actions does. A merge group, promotion or backfill grade can therefore differ from
+that class's Actions run: a step whose `if` needs another event is skipped, and a step whose `if`
+needs `pull_request` runs. Three lab gradable gates read the event name on dev, and
+`tests/ci_lab/test_static_gates.py` pins that list, so a new one fails the test until someone
+checks the pull request event keeps its verdict:
 
 | Gate | In a lab unit |
 |---|---|
 | `lint/prove-the-mutation-gate-kills-with-the-real-test-and-fails-with-a-weakened-one` | Its `self-plant` producer runs, since it needs `pull_request` |
 | `test-count/fetch-the-base-suite-count-recorded-on-dev` | Skipped: it also needs the `app-token` producer, a `uses` step. Every failure path of the step exits 0, so it never changes the job's verdict, and the count floor collects the base suite itself |
 | `test-count/record-the-head-count-for-the-next-queue-group` | Skipped: it runs only on `merge_group`, with `continue-on-error`, so it never changes the job's verdict |
-| `secrets.<NAME>` | The worker's `CI_LAB_SECRET_<NAME>`, or empty when the worker has no such variable. Only the secrets the gate reads join the context |
-| `steps.<id>.outcome`, `steps.<id>.conclusion`, `steps.<id>.outputs.<name>` | Set as each producer runs |
 
 `scripts.ci_lab.run_static.run` runs the producers before the gate, in job order, in the gate's
 sandbox and run folder, and gives each its own `GITHUB_OUTPUT` file. A `uses` producer, or one
