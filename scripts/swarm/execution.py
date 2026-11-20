@@ -181,13 +181,13 @@ class ExecutionRegistry:
             timing.timed(self._put, slug, agent, managed)
 
     def _unchanged(self, slug: str, agent: AgentRecord) -> bool:
+        if _invalid(slug, agent):
+            return False
         from scripts.swarm import lease
         from scripts.swarm.store import SwarmError
 
         if (held := lease.EPOCH.get()) is not None and lease.stale(self.store, slug, held):
             raise SwarmError(lease.STALE)
-        if _invalid(slug, agent):
-            return False
         port = fencing.records(self.store, slug)
         head = port.record(slug, fencing.BY_SEAT, agent.seat)
         if head is None or head.value != agent.execution_id:
@@ -195,14 +195,20 @@ class ExecutionRegistry:
         row = port.record(slug, "executions", agent.execution_id)
         if row is None:
             return False
-        moved = port.record(slug, fencing.BY_SEAT, agent.seat)
-        if moved is None or moved.value != head.value:
-            return False
         current = _record(cast(dict[str, Any], row.value))
         if any(getattr(agent, field) != getattr(current, field) for field in IMMUTABLE):
             return False
         written, conflict = _resolve(current, agent)
         if conflict or cast(dict[str, Any], written.runtime_target).get("pod_uid"):
+            return False
+        checked_head = port.record(slug, fencing.BY_SEAT, agent.seat)
+        checked_row = port.record(slug, "executions", agent.execution_id)
+        if (
+            checked_head is None
+            or checked_head.revision != head.revision
+            or checked_row is None
+            or checked_row.revision != row.revision
+        ):
             return False
         return written == current
 

@@ -11154,7 +11154,7 @@
       "id": "execution-put-unchanged-skips-lock",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2797",
-      "behaviour": "ExecutionRegistry.put reads the one execution record a managed agent's seat already occupies through the records port, re-reading the seat's head to confirm no concurrent admission moved it, and, while the held controller epoch (if any) is still the live lease, when the write would apply every transform _update applies (finished state retention, the read before ack launch binding carry, the binding and Pod UID checks) and still leave the record unchanged, returns without taking the swarm's write lock or running the fenced whole document read-modify-write; a put that changes the record, finds the occupant moved, carries a non-dict runtime target, cannot be read cheaply, is not managed, is refused, or runs under a stale controller epoch still takes the locked fenced path unchanged (a stale epoch raises the same way on both paths).",
+      "behaviour": "ExecutionRegistry.put, once the agent is valid and any held controller epoch is still the live lease, reads the one execution record a managed agent's seat already occupies through the records port (a per-record Redis read once a swarm has migrated to the records layout, three whole-document decodes in the still-default document layout) and re-reads the seat's head and its row at the end to confirm neither moved during the check; when the write would apply every transform _update applies (finished state retention, the read before ack launch binding carry, the binding and Pod UID checks) and still leave the record unchanged, returns without taking the swarm's write lock or running the fenced whole document read-modify-write. A put that changes the record, finds the head or the row moved, carries a non-dict runtime target, cannot be read cheaply, is not managed, is refused, or runs under a stale controller epoch still takes the locked fenced path unchanged; an invalid agent is refused the same way on both paths, and a stale epoch raises the same way on both paths once the agent itself is valid.",
       "seam": "scripts.swarm.execution.ExecutionRegistry.put over fencing.records and fencing.write",
       "tests": [
         "tests/swarm/test_execution_unchanged_put.py::test_an_unchanged_put_skips_the_write_lock_and_the_fenced_document_read",
@@ -11172,7 +11172,9 @@
         "tests/swarm/test_execution_unchanged_put.py::test_a_fenced_head_with_no_matching_execution_row_still_takes_the_locked_path",
         "tests/swarm/test_execution_unchanged_put.py::test_invalid_rejects_a_non_dict_runtime_target",
         "tests/swarm/test_execution_unchanged_put.py::test_a_stale_controller_epoch_raises_the_same_way_on_both_paths",
-        "tests/swarm/test_execution_unchanged_put.py::test_an_occupant_that_moves_between_the_check_reads_still_takes_the_locked_path"
+        "tests/swarm/test_execution_unchanged_put.py::test_an_occupant_that_moves_between_the_check_reads_still_takes_the_locked_path",
+        "tests/swarm/test_execution_unchanged_put.py::test_an_invalid_put_under_a_stale_epoch_raises_the_locked_paths_error",
+        "tests/swarm/test_execution_unchanged_put.py::test_a_row_that_changes_between_the_check_reads_still_takes_the_locked_path"
       ]
     },
     {

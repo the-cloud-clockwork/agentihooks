@@ -271,10 +271,46 @@ def test_an_occupant_that_moves_between_the_check_reads_still_takes_the_locked_p
         def record(self, slug: str, section: str, key: str) -> Any:
             if section == fencing.BY_SEAT:
                 seen.append(1)
-                return SimpleNamespace(value=current.execution_id if len(seen) == 1 else moved.execution_id)
-            return SimpleNamespace(value=asdict(current if key == current.execution_id else moved))
+                value = current.execution_id if len(seen) == 1 else moved.execution_id
+                return SimpleNamespace(value=value, revision=len(seen))
+            return SimpleNamespace(value=asdict(current if key == current.execution_id else moved), revision=1)
 
     monkeypatch.setattr(execution.fencing, "records", lambda store_arg, slug: _MovingHead())
+    acquires, _ = _watched(monkeypatch)
+
+    store.put_agent("fixture", current)
+
+    assert len(acquires) >= 1
+
+
+@pytest.mark.feature("execution-put-unchanged-skips-lock")
+def test_an_invalid_put_under_a_stale_epoch_raises_the_locked_paths_error(
+    store: RedisStore, agent: AgentRecord, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    current = store.start_execution("fixture", agent)
+    token = lease.EPOCH.set(5)  # pyright: ignore[reportArgumentType]
+    try:
+        with pytest.raises(SwarmError, match="unsupported runtime backend"):
+            store.put_agent("fixture", replace(current, runtime_backend="docker"))
+    finally:
+        lease.EPOCH.reset(token)
+
+
+@pytest.mark.feature("execution-put-unchanged-skips-lock")
+def test_a_row_that_changes_between_the_check_reads_still_takes_the_locked_path(
+    store: RedisStore, agent: AgentRecord, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    current = store.start_execution("fixture", agent)
+    calls = {"row": 0}
+
+    class _ChangingRow:
+        def record(self, slug: str, section: str, key: str) -> Any:
+            if section == fencing.BY_SEAT:
+                return SimpleNamespace(value=current.execution_id, revision=1)
+            calls["row"] += 1
+            return SimpleNamespace(value=asdict(current), revision=calls["row"])
+
+    monkeypatch.setattr(execution.fencing, "records", lambda store_arg, slug: _ChangingRow())
     acquires, _ = _watched(monkeypatch)
 
     store.put_agent("fixture", current)
