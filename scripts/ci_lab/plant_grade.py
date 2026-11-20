@@ -78,7 +78,7 @@ def _verdict(rows: list[Mapping[str, Any]], pair: plant_proofs.Pair, planted: bo
         raise ValueError(f"{pair.name} {'plant' if planted else 'twin'} grade has the wrong verdict: {failed}")
     if planted:
         diagnostic = pair.reason.partition(":")[0]
-        output = checks[pair.gate].get("output") or {}
+        output = checks[pair.gate].get("output") or {"text": ""}
         if not re.search(rf"\b{re.escape(diagnostic)}\b", output.get("text") or ""):
             raise ValueError(f"{pair.name} plant grade lacks the expected diagnostic: {diagnostic}")
     return str(required["html_url"])
