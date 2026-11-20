@@ -1,6 +1,16 @@
 {
   "features": [
     {
+      "id": "merge-queue-single-github-slot",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-merge-queue-nested-github-slot",
+      "behaviour": "Four concurrent merge queue GraphQL calls complete through the real four slot GitHub pool because the GitHub read owns each request's only slot.",
+      "seam": "scripts.swarm.merge_queue.graphql through GitHubSourceControl.graph and github_reads.rest",
+      "tests": [
+        "tests/swarm/test_merge_queue_pool.py::test_four_graphql_calls_complete_with_the_real_github_pool"
+      ]
+    },
+    {
       "id": "kind-terminal-snapshot-base",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2647",
