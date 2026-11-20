@@ -1,9 +1,10 @@
+import importlib
 import json
 from typing import Any
 
 import pytest
 
-from scripts.swarm import cli
+from scripts.swarm import cli, ledger_client, tasks_read
 from scripts.swarm.ledger_client import LedgerClient, LedgerUnreachable
 from scripts.swarm.store import RedisStore, SwarmConfig
 
@@ -56,3 +57,25 @@ def test_swarm_tasks_exits_one_and_prints_no_rows_when_the_ledger_is_unreachable
     assert cli.main(["sw", "tasks"]) == 1
     out = capsys.readouterr()
     assert (out.out, out.err) == ("", "swarm: ledger sw: unreachable\n")
+
+
+@pytest.mark.feature("swarm-tasks-read-command")
+def test_swarm_tasks_resolves_the_ledger_client_through_the_module_so_a_class_bound_at_an_earlier_import_cannot_persist(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    class StaleFromAnEarlierImport:
+        def __new__(cls, *args: object, **kwargs: object) -> Any:
+            raise AssertionError("tasks command kept the ledger client class bound at an earlier import")
+
+    with monkeypatch.context() as earlier_import:
+        earlier_import.setattr(ledger_client, "LedgerClient", StaleFromAnEarlierImport)
+        importlib.reload(tasks_read)
+
+    try:
+        monkeypatch.setattr(LedgerClient, "tasks", lambda _, slug: TASKS if slug == "sw" else [])
+        monkeypatch.setattr(LedgerClient, "freezes", lambda _, slug: FREEZES if slug == "sw" else [])
+        monkeypatch.setattr(cli, "connect", lambda: object())
+        assert cli.main(["sw", "tasks"]) == 0
+        assert json.loads(capsys.readouterr().out) == {"tasks": TASKS, "freezes": FREEZES}
+    finally:
+        importlib.reload(tasks_read)
