@@ -132,12 +132,15 @@ class ExecutionRegistry:
             rows = {key: row for key, row in doc["executions"].items() if _archivable(row)}
             heads: dict[str, dict[str, Any]] = latest(rows.values(), "seat")
             old = [key for key, row in rows.items() if _stale(row, heads[row["seat"]], listed)]
-            if not old and "archive_ref" in doc:
+            current = doc["executions"].keys() - set(old)
+            stale = [key for key in doc["intents"] if key not in current]
+            if not old and not stale and "archive_ref" in doc:
                 return 0
             fencing.hydrate_archive(self.store, doc)
             for key in old:
                 doc["archive"][key] = doc["executions"].pop(key)
-                doc["intents"].pop(key, None)
+            for key in stale:
+                doc["intents"].pop(key)
             for row in doc["archive"].values():
                 row.get("profile_decision", {}).get("validation", {}).pop("source_blobs", None)
             return len(old)
