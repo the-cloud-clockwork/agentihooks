@@ -57,6 +57,8 @@ def test_prod_lockdown_refuses_a_release_run_after_the_delimiter(opener: str, bo
         "echo $((1<<git))\ngit push origin main\ngit status",
         "echo $((1 << x))\ngit push origin main\nx",
         "echo $(( 1 << x ))\ngit push origin main\nx",
+        "echo $((1 << x; 2))\ngit push origin main\nx",
+        "echo $((\n1 << x\n))\ngit push origin main\nx",
         "cat <<EOF > out.txt\ngit push origin main",
     ],
 )
