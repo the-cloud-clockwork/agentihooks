@@ -12,6 +12,7 @@ import pytest
 
 from scripts.codex_session import protocol, supervisor
 from scripts.codex_session.binding import CONNECTED, ENDPOINTS, EXITED, FAILED, BindingStore, decode
+from scripts.swarm.launch_endings import terminal
 from scripts.swarm.store import APP_SERVER_TRANSPORT, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from tests.codex_session.fakes import FIRST_PID, OWN_START, SERVER_START, Clock, Process, Server, hooks
 
@@ -1489,7 +1490,7 @@ def test_adoption_refusal_names_an_atomic_bind_refusal_when_the_snapshot_matches
 
 
 @pytest.mark.feature("codex-adopt-refusal-fields")
-@pytest.mark.parametrize("diagnostic", [True, False])
+@pytest.mark.parametrize("case", [(True, False), (False, True)], ids=["diagnostic", "terminal"])
 def test_adoption_refusal_preserves_existing_ending_authority(
     store: RedisStore,
     server: Server,
@@ -1497,10 +1498,11 @@ def test_adoption_refusal_preserves_existing_ending_authority(
     root: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    diagnostic: bool,
+    case: tuple[bool, bool],
 ) -> None:
     from scripts.swarm import commands
 
+    diagnostic, expected_terminal = case
     monkeypatch.setattr(commands, "hive_id", lambda: "m1")
     spec = launch_spec(store, server, tmp_path)
     admitted = hive_admitted(store, spec, state="working")
@@ -1513,5 +1515,6 @@ def test_adoption_refusal_preserves_existing_ending_authority(
 
     ending = json.loads(store.redis.hget(store.key(SLUG, "launch-endings"), admitted.execution_id))
     assert ending == {"reason": str(failure), "generation": admitted.generation, "diagnostic": diagnostic}
+    assert terminal(store, SLUG, admitted.execution_id) is expected_terminal
     assert store.execution(SLUG, admitted.execution_id) == admitted
     assert server.commands == []
