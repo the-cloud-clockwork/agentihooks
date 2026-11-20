@@ -222,6 +222,7 @@ def test_run_tick_slower_than_the_lease_finishes(env, clock, monkeypatch):  # no
     store, ledger, rt = env
     run("sw", "create", "--repo", "/repo")
     started = clock[0]
+    monkeypatch.setattr(cli, "now_ms", lambda: clock[0])
 
     def slow(*args):
         clock[0] += 120000
@@ -298,6 +299,7 @@ def test_run_tick_with_slow_steps_that_never_touch_the_ledger_finishes(env, cloc
     store, ledger, rt = env
     run("sw", "create", "--repo", "/repo")
     started = clock[0]
+    monkeypatch.setattr(cli, "now_ms", lambda: clock[0])
 
     def slow(*args):
         clock[0] += 120000
@@ -316,6 +318,7 @@ def test_run_tick_stops_between_steps_when_another_controller_took_the_lease(env
     store, ledger, rt = env
     run("sw", "create", "--repo", "/repo")
     later = []
+    monkeypatch.setattr(cli, "now_ms", lambda: clock[0])
 
     def stolen(*args):
         clock[0] += lease.ttl_ms()

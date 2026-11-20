@@ -87,7 +87,10 @@ The alternatives answer the usual questions without printing a value:
 | How do I pass a value to a command? | reference it, as in `curl -H "Authorization: Bearer $API_TOKEN" …` |
 
 These commands describe the environment of the shell that runs them. The guard
-offers no way to read the values of another process.
+offers no way to read the values of another process. The same environment
+refusal applies inside a shell `-c` script and to an awk program that reads
+`ENVIRON[...]`; see
+[Environment dumps in shell scripts and awk](credential-guard-shell-scripts.md).
 
 ## Configuration
 

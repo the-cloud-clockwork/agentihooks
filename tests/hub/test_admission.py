@@ -42,7 +42,8 @@ def rig():
 
     ledger.update_task = update_task
     source = SimpleNamespace(
-        snapshot=lambda slug: snapshot(found, claimed=[t for t in rows if store.claimant(slug, t)])
+        slugs=lambda: [SLUG],
+        snapshot=lambda slug: snapshot(found, claimed=[t for t in rows if store.claimant(slug, t)]),
     )
     admitter = admission.Admission(store, ledger, source, clock=lambda: 7_000)
     yield SimpleNamespace(store=store, ledger=ledger, rows=rows, admitter=admitter, found=found)
@@ -554,6 +555,57 @@ def test_a_repeat_from_the_same_hive_returns_its_admission_and_another_hive_gets
     assert len(rig.ledger.writes) == 1
 
 
+@pytest.mark.feature("hub-admission-unlisted-retry")
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("missing", None),
+        ("name", "another-agent"),
+        ("execution_id", "another-execution"),
+        ("generation", 99),
+        ("state", "done"),
+        ("launched_at", 1_500),
+        ("claim", None),
+    ],
+)
+def test_an_unlisted_kept_admission_requires_its_current_unlaunched_claimant(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, field: str, value: Any
+) -> None:
+    from dataclasses import replace
+
+    first = rig.admitter.admit(SLUG, ask())
+    assert first is not None
+    name = first["name"]
+    task = first["task"]
+    agent = rig.store.execution_occupants(SLUG)[task["seat"]]
+    rig.store.redis.hdel(rig.store.key(SLUG, "agents"), name)
+    if field == "claim":
+        rig.store.release(SLUG, "t1", name)
+    else:
+        occupants = {} if field == "missing" else {task["seat"]: replace(agent, **{field: value})}
+
+        def current(slug: str) -> dict[str, Any]:
+            assert slug == SLUG
+            return occupants
+
+        monkeypatch.setattr(rig.store, "execution_occupants", current)
+
+    assert rig.admitter.admit(SLUG, ask()) is None
+    assert len(rig.ledger.writes) == 1
+
+
+@pytest.mark.feature("hub-admission-unlisted-retry")
+def test_another_hive_never_receives_an_unlisted_starting_admission(rig: SimpleNamespace) -> None:
+    first = rig.admitter.admit(SLUG, ask())
+    assert first is not None
+    rig.store.redis.hdel(rig.store.key(SLUG, "agents"), first["name"])
+
+    assert rig.admitter.admit(SLUG, ask(hive="hive-b")) is None
+    assert rig.store.claimant(SLUG, "t1") == first["name"]
+    assert rig.admitter.admit(SLUG, ask()) == first
+    assert len(rig.ledger.writes) == 1
+
+
 @pytest.mark.parametrize(
     "fields",
     [{"lane": "ci"}, {"generation": 1}, {"task": "gone"}],
@@ -852,14 +904,17 @@ def test_a_repeat_ask_waiting_on_the_hives_turn_answers_its_own_admission_once_i
 
 
 @pytest.mark.feature("hub-admission-hive-asks-again")
+@pytest.mark.parametrize("listed", [True, False])
 def test_a_repeat_ask_that_read_the_offer_claimed_by_its_own_finished_admission_answers_that_admission(
-    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, listed: bool
 ) -> None:
     other = admission.Admission(rig.store, rig.ledger, rig.admitter.source, clock=lambda: 7_000)
     kept: list[dict[str, Any] | None] = []
 
     def snapshot(slug: str) -> Any:
         kept.append(rig.admitter.admit(SLUG, ask()))
+        if not listed:
+            rig.store.redis.hdel(rig.store.key(SLUG, "agents"), rig.store.claimant(SLUG, "t1"))
         return rig.admitter.source.snapshot(slug)
 
     monkeypatch.setattr(other, "source", SimpleNamespace(snapshot=snapshot))
@@ -872,8 +927,9 @@ def test_a_repeat_ask_that_read_the_offer_claimed_by_its_own_finished_admission_
 
 
 @pytest.mark.feature("hub-admission-hive-asks-again")
+@pytest.mark.parametrize("listed", [True, False])
 def test_a_late_kept_admission_launches_on_the_hives_next_ask_after_readiness_withdrew_its_offer(
-    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], listed: bool
 ) -> None:
     from unittest.mock import Mock
 
@@ -917,6 +973,8 @@ def test_a_late_kept_admission_launches_on_the_hives_next_ask_after_readiness_wi
         readiness.publish(bus, rig.admitter.source.snapshot(SLUG), 1)
         assert spoke.poll() == "asked"
         name = rig.store.claimant(SLUG, "t1")
+        if not listed:
+            rig.store.redis.hdel(rig.store.key(SLUG, "agents"), name)
         queue.withdraw(unsettled)
         readiness.publish(bus, rig.admitter.source.snapshot(SLUG), 2)
         queue.withdraw(unsettled)
@@ -1208,7 +1266,9 @@ def test_the_hub_admits_a_launch_for_a_hive_that_is_not_draining(rig, monkeypatc
 
 
 @pytest.mark.feature("hive-drain-events-admission")
-def test_the_hub_admits_no_launch_for_a_hive_draining_for_a_release(rig, monkeypatch, capsys):
+def test_the_hub_admits_no_launch_for_a_hive_draining_for_a_release(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     from scripts.hive import registry
 
     monkeypatch.setenv("AGENTIHOOKS_STATE_BACKEND", "redis")
@@ -1217,7 +1277,7 @@ def test_the_hub_admits_no_launch_for_a_hive_draining_for_a_release(rig, monkeyp
 
     admitted = rig.admitter.admit(SLUG, ask())
 
-    assert admitted is None
+    assert admitted == {"held": "the hive is draining"}
     assert rig.store.claimant(SLUG, "t1") is None
     assert rig.store.agents(SLUG) == []
     assert rig.ledger.writes == []
@@ -1225,6 +1285,88 @@ def test_the_hub_admits_no_launch_for_a_hive_draining_for_a_release(rig, monkeyp
     assert capsys.readouterr().err.splitlines() == [
         f"hub: events placement swarm={SLUG} task=t1 hive=hive-a: refused, the hive is draining"
     ]
+
+
+@pytest.mark.feature("hub-admission-hive-local-held")
+@pytest.mark.parametrize(
+    "member, draining, fields",
+    [
+        ("2.17.843", "yes", {}),
+        ("2.17.825", "no", {}),
+        ("2.17.843", "no", {"workstation": True}),
+        ("2.17.843", "no", {"hive": "hive-b"}),
+        ("2.17.843", "no", {"needs": ["gpu"]}),
+    ],
+)
+def test_a_hive_local_refusal_keeps_the_only_offer_for_an_eligible_second_hive(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, member: str, draining: str, fields: dict[str, Any]
+) -> None:
+    from scripts import serena_router_daemon
+    from scripts.hive import lanes, registry
+    from scripts.hive.spoke import Spoke, SpokeConfig
+    from scripts.swarm import readiness
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    _released(rig, monkeypatch, member, "2.17.843")
+    registry.update(rig.store.redis, "hive-a", [f"draining={draining}"])
+    destination = readiness.ROOT if fields.get("workstation") else "hive-b"
+    registry.beat(rig.store.redis, destination, {"heartbeat_at": 6_000, "capabilities": ["gpu"]})
+    monkeypatch.setattr(serena_router_daemon, "ensure", lambda: True)
+    clock = SimpleNamespace(now=1_000)
+    bus: Any = open_bus(BusConfig(), clock=lambda: clock.now)
+    slots.serve(bus, admitter=rig.admitter)
+    runtime, other_runtime = Mock(), Mock()
+    other_runtime.spawn.return_value = Outcome(
+        "spawn",
+        Status.OK,
+        "local",
+        SimpleNamespace(pane_id="pane-b", harness="claude", account="slot-b", launched_at=1_500),
+    )
+    reading = {"cpus": 32, "load5": 0, "available_mb": 60_000, "total_mb": 64_000}
+    config = SpokeConfig(rig.store.config(SLUG), "eng", "hive-a")
+    spoke = Spoke(
+        config,
+        bus,
+        runtime,
+        lanes.LaneTasks(bus, "hive-a", rig.store.config),
+        lambda: reading,
+        view=Mock(return_value=None),
+    )
+    other = Spoke(
+        SpokeConfig(config.swarm, "eng", destination),
+        bus,
+        other_runtime,
+        lanes.LaneTasks(bus, destination, rig.store.config),
+        lambda: reading,
+        view=Mock(return_value=None),
+    )
+    try:
+        readiness.publish(bus, rig.admitter.source.snapshot(SLUG), 1)
+        rig.rows["t1"].update(fields)
+        assert spoke.poll() == "held"
+        runtime.spawn.assert_not_called()
+        assert rig.store.claimant(SLUG, "t1") is None
+        assert rig.ledger.writes == []
+        clock.now += config.policy.ack_wait_ms
+        assert other.poll() == "started"
+        other_runtime.spawn.assert_called_once()
+        launched = other_runtime.spawn.call_args.args[0]
+        assert launched.task["id"] == "t1"
+        assert rig.store.claimant(SLUG, "t1") == launched.name
+        assert rig.rows["t1"]["state"] == "claimed"
+    finally:
+        bus.close()
+
+
+@pytest.mark.feature("hub-admission-hive-local-held")
+@pytest.mark.parametrize("fields", [{"state": "done"}, {"claim_generation": 1}, {"lane": "ci"}])
+def test_a_refusal_about_the_task_stays_terminal(rig: SimpleNamespace, fields: dict[str, Any]) -> None:
+    rig.rows["t1"].update(fields)
+
+    assert rig.admitter.admit(SLUG, ask()) is None
+    assert rig.store.claimant(SLUG, "t1") is None
+    assert rig.store.agents(SLUG) == []
+    assert rig.ledger.writes == []
 
 
 def _hive_holding(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, cap: str, live: int) -> None:
@@ -1400,7 +1542,7 @@ def test_the_hub_admits_no_launch_for_a_hive_on_an_older_release(
 
     admitted = rig.admitter.admit(SLUG, ask())
 
-    assert admitted is None
+    assert admitted == {"held": f"release {member} below hub release {hub}"}
     assert rig.store.claimant(SLUG, "t1") is None
     assert rig.store.agents(SLUG) == []
     assert rig.ledger.writes == []
@@ -1422,7 +1564,7 @@ def test_the_hub_refuses_a_held_admission_redelivered_to_a_hive_on_an_older_rele
 
     admitted = rig.admitter.admit(SLUG, ask())
 
-    assert admitted is None
+    assert admitted == {"held": "release 2.17.825 below hub release 2.17.843"}
     assert rig.ledger.writes == writes
     assert capsys.readouterr().err.splitlines() == [
         f"hub: events admission swarm={SLUG} task=t1 hive=hive-a refused: release 2.17.825 below hub release 2.17.843"

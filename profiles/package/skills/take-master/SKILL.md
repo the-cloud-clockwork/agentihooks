@@ -53,7 +53,7 @@ Every plan you publish puts each phase under a heading with its exact title,
 each task under a heading one level deeper, and one unique
 `<!-- slice: <id> -->` anchor naming the task immediately before its heading.
 Publish it with
-`agentihooks ledger --slug <slug> --as <name> publish-plan <plan-file> --phase <phase-ids>`
+`agentihooks api --slug <slug> --as <name> publish-plan <plan-file> --phase <phase-ids>`
 and add every task built from it with `--plan-slice <id>`, so its agent reads
 only its chunk.
 

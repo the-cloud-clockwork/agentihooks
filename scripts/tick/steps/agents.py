@@ -307,7 +307,8 @@ def _reap_agent(judging: _Reaping, agent: AgentRecord) -> list[str]:
 def _reap_admitted(judging: _Reaping, agent: AgentRecord) -> list[str]:
     """Return the actions the reap step takes on one agent whose hive recorded its start: an agent whose work ended
     gets that hive's execution stop through ``_stop_ended``, and a settled agent is watched while its pane is live;
-    its exit, its recovery and its lease stay with the hub lifecycle and reconciler."""
+    its exit, its recovery and its lease stay with the hub lifecycle and reconciler until the lifecycle can no longer
+    settle that exit."""
     slug, store = judging.slug, judging.store
     if (
         agent.state in {"awaiting-decision", "retiring"}
@@ -316,7 +317,7 @@ def _reap_admitted(judging: _Reaping, agent: AgentRecord) -> list[str]:
     ):
         return []
     if tick._ended(agent, judging.rows):
-        return tick.timing.timed(_stop_ended, slug, agent)
+        return tick.timing.timed(_stop_ended, judging, agent)
     if agent.name not in judging.live:
         return []
     return tick.timing.timed(
@@ -324,19 +325,29 @@ def _reap_admitted(judging: _Reaping, agent: AgentRecord) -> list[str]:
     )
 
 
-def _stop_ended(slug: str, agent: AgentRecord) -> list[str]:
+def _stop_ended(judging: _Reaping, agent: AgentRecord) -> list[str]:
     """Send the execution stop for ``agent``, whose work ended, to the hive that recorded its start, so that hive
     reaps it and the hub lifecycle settles its exit; one action when the stop went out or the bus refused it, none
-    while the same stop is inside the bus dedupe window, once the execution ended or where no hive recorded its
-    start."""
+    while the same stop is inside the bus dedupe window. Once the stop answers that the execution ended or that no
+    hive recorded its start, and the hub lifecycle can no longer settle its exit, the agent is retired and dropped as
+    an ended legacy agent is, and a drop the store took returns its hive slot as the lifecycle would."""
     from scripts.hive import execution_stop
-    from scripts.hub.reconciler import stop_admitted
+    from scripts.hub.reconciler import settled_admitted, stop_admitted
 
+    slug = judging.slug
     outcome = stop_admitted(slug, agent, ENDED)
     if outcome == execution_stop.SENT:
         return [f"sent the stop for {agent.name} to its hive: its work {ENDED}"]
     if outcome.startswith(execution_stop.FAILED):
         return [f"could not send the stop for {agent.name}, retrying next tick: {outcome}"]
+    if outcome in {execution_stop.ENDED, execution_stop.UNKNOWN} and settled_admitted(slug, agent):
+        from scripts.hive.launch import release
+
+        store, ledger, runtime, rows = judging.store, judging.ledger, judging.runtime, judging.rows
+        retired = tick.timing.timed(tick._retire_ended, slug, store, ledger, runtime, rows, agent, judging.now_ms)
+        if retired == [f"retired {agent.name}"]:
+            release(store, slug, agent)
+        return retired
     return []
 
 

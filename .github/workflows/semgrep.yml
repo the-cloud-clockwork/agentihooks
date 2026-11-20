@@ -182,7 +182,7 @@ jobs:
 
       - name: Outage rules for tests hold on every test file
         env:
-          RULES: .semgrep-incidents/ledger-client-swapped-for-a-function.yml
+          RULES: .semgrep-incidents/ledger-client-swapped-for-a-function.yml .semgrep-incidents/parametrize-id-carries-interpreter-path.yml .semgrep-incidents/fake-server-close-read-ignores-reset.yml
         run: |
           args=()
           for rule in $RULES; do
@@ -190,6 +190,16 @@ jobs:
             if [[ -e "$RUNNER_TEMP/grader/$rule" ]]; then args+=(--config "$RUNNER_TEMP/grader/$rule"); fi
           done
           semgrep scan --error --strict --timeout 30 --metrics off --x-ignore-semgrepignore-files "${args[@]}" tests
+
+      - name: New test waits keep a bound of ten seconds or more
+        env:
+          BASE: ${{ inputs.base }}
+          RULE: .semgrep-incidents/test-wait-bound-under-ten-seconds.yml
+        run: |
+          args=(--config "$RULE")
+          if [[ -e "$RUNNER_TEMP/grader/$RULE" ]]; then args+=(--config "$RUNNER_TEMP/grader/$RULE"); fi
+          baseline="$(git merge-base "$BASE" HEAD)"
+          semgrep scan --error --strict --timeout 30 --metrics off --x-ignore-semgrepignore-files "${args[@]}" --baseline-commit "$baseline" tests
 
   scan:
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}

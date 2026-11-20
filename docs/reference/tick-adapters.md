@@ -956,8 +956,11 @@ the cache counts live workers from its one scan.
 
 ### Timed rows inside a fenced spawn
 
-`FencedRuntime._spawn` records two timed rows through `timing.step` for every launch, inside the spawn step's own
-row:
+`FencedRuntime._spawn` records two timed rows through `timing.step` for every launch it makes, inside the row of the
+tick step that asked for the launch, such as a master start. Lane agents no longer launch here: pull request
+[#11141](https://github.com/the-cloud-clockwork/agentihooks/pull/11141) removed the tick `spawn` step, whose row these
+two rows once split, and a hive spoke now launches lane agents after hub admission; see
+[Pulling work from the hub](../pillars/hives.md#pulling-work-from-the-hub).
 
 | Step row | Times |
 |---|---|
@@ -970,40 +973,48 @@ called the spawn. The rows show in `swarm <id> tick-report` as their own step ro
 [Tick report](tick-report.md#output).
 
 ```bash
-agentihooks swarm <swarm slug> tick-report --passes 60 | grep -E 'spawn|FencedRuntime'
+agentihooks swarm <swarm slug> tick-report --passes 60 | grep FencedRuntime
 ```
 
-When `runtime_spawn` takes most of a slow `spawn` row, the wrapped runtime is the slow part; when `_refusal` does,
-look at the placement reads in the table above.
+When `runtime_spawn` takes most of the launching step's slow row, the wrapped runtime is the slow part; when
+`_refusal` does, look at the placement reads in the table above.
 
-### Timed rows inside spawn order
+### Timed rows inside the removed spawn order
 
-`_spawn_order` in `scripts.swarm.tick` builds the queue the spawn step launches from, and records its own row,
-`scripts.tick.steps.place._spawn_order`. Its parts are timed through `timing.timed`, so each has a row of its own recorded
-while `_spawn_order` runs. It first times `scripts.swarm.capacity.read`, `scripts.swarm.capacity.caps`, `scripts.swarm.dispatcher.claim_key`,
-`scripts.swarm.preempt.yielding` and `scripts.swarm.tick.claim_view`. Then, for each lane in the caps, it times four
-parts in this order:
+This section records the spawn order timing that pull request
+[#9673](https://github.com/the-cloud-clockwork/agentihooks/pull/9673) completed. Pull request
+[#11141](https://github.com/the-cloud-clockwork/agentihooks/pull/11141) removed the tick `spawn` step and the spawn
+order it launched from, so a tick report read after the removal shows none of the rows below. Lane agents now launch
+through hub admission, where a hive spoke pulls an offer and launches it once the hub admits it; see
+[Pulling work from the hub](../pillars/hives.md#pulling-work-from-the-hub). The hub orders those offers by focus rank;
+see [Focus ranks in offer order](#focus-ranks-in-offer-order).
 
-| Step row | Runs | Times |
+`_spawn_order` in `scripts.swarm.tick` built the queue the spawn step launched from, and recorded its own row,
+`scripts.tick.steps.place._spawn_order`. Its parts were timed through `timing.timed`, so each had a row of its own
+recorded while `_spawn_order` ran. It first timed `scripts.swarm.capacity.read`, `scripts.swarm.capacity.caps`,
+`scripts.swarm.dispatcher.claim_key`, `scripts.swarm.preempt.yielding` and `scripts.swarm.tick.claim_view`. Then, for
+each lane in the caps, it timed four parts in this order:
+
+| Step row | Ran | Timed |
 |---|---|---|
-| `scripts.swarm.tick._running` | Once per lane | The running agent filter: the task rows of the lane's agents that have not ended and still own their task. Its length is the lane's busy count, which offsets the rank of every task queued for the lane |
+| `scripts.swarm.tick._running` | Once per lane | The running agent filter: the task rows of the lane's agents that had not ended and still owned their task. Its length was the lane's busy count, which offset the rank of every task queued for the lane |
 | `scripts.swarm.tick.ready_in_order` | Once per lane | The lane's ready tasks in ledger or dispatched order |
-| `scripts.swarm.readiness.launchable` | Once per lane | The ready tasks the tick launches under the swarm engine, narrowed to the capacity decision's tasks when it names any |
-| `scripts.swarm.focus_budget.place` | Once per lane | Focus budget placement: which ready tasks fit the lane cap after the running ones, and which wait. It includes its two `profile_first.placeable` rows |
+| `scripts.swarm.readiness.launchable` | Once per lane | The ready tasks the tick launched under the swarm engine, narrowed to the capacity decision's tasks when it named any |
+| `scripts.swarm.focus_budget.place` | Once per lane | Focus budget placement: which ready tasks fit the lane cap after the running ones, and which waited. It included its two `profile_first.placeable` rows |
 
-`focus_budget.place` locates tasks through `scripts.swarm.profile_first.placeable` twice per lane: once for the ready
-tasks outside the focus queue, once for the focused ones. Each `placeable` row in turn holds one
+`focus_budget.place` located tasks through `scripts.swarm.profile_first.placeable` twice per lane: once for the ready
+tasks outside the focus queue, once for the focused ones. Each `placeable` row in turn held one
 `scripts.swarm.profile_first.decided` row and one `scripts.swarm.seat_spawn.placed_elsewhere` row for every task it
-checks, until the lane's free room is filled. After the lanes, `scripts.tick.steps.place._ranked` sorts the whole queue
-once, `scripts.swarm.focus_budget.ranks` reads each task's focus rank and `scripts.swarm.focus_budget.ordered` sorts
-the queue by that rank. Every call in spawn order that reads the store, the runtime or the ledger document has a row;
-only the local queue and wait list bookkeeping between them is untimed.
+checked, until the lane's free room was filled. After the lanes, `scripts.tick.steps.place._ranked` sorted the whole
+queue once, `scripts.swarm.focus_budget.ranks` read each task's focus rank and `scripts.swarm.focus_budget.ordered`
+sorted the queue by that rank. Every call in spawn order that read the store, the runtime or the ledger document had a
+row; only the local queue and wait list bookkeeping between them was untimed.
 
-The code fixes the counts: `_running`, `ready_in_order`, `scripts.swarm.readiness.launchable` and
-`focus_budget.place` each run once per lane per spawn order, and `placeable` twice, so over a window recorded entirely
-after this change merged the first four have equal counts and `placeable` has twice that.
+The code fixed the counts: `_running`, `ready_in_order`, `scripts.swarm.readiness.launchable` and
+`focus_budget.place` each ran once per lane per spawn order, and `placeable` twice, so over a window recorded entirely
+after pull request 9673 merged the first four had equal counts and `placeable` had twice that.
 
-Read the rows with:
+On a release before the removal, the rows were read with:
 
 ```bash
 agentihooks swarm <swarm slug> tick-report --passes 60 \
@@ -1025,30 +1036,34 @@ scripts.swarm.tick.ready_in_order  213  0.111s  2.357s  0.80%
 
 The columns are count, median, p95 and CPU share; see [Tick report](tick-report.md#output). The window began before
 the merge: its 71 spawn orders over three lanes gave 213 `ready_in_order` and 426 `placeable` rows, while `_running`
-and `focus_budget.place`, which the merge added, have rows only from the passes after it. Rows nest, so a part's time
-also counts in `_spawn_order`, and `placeable` time also counts in `focus_budget.place`.
+and `focus_budget.place`, which the merge added, had rows only from the passes after it. Rows nested, so a part's time
+also counted in `_spawn_order`, and `placeable` time also counted in `focus_budget.place`.
 
-The report prints no sum per row, so estimate each row's total as count times median, all from the same window;
-percentiles do not add, and the estimate runs low for a row with a long tail, so check its p95 too.
+The report prints no sum per row, so each row's total was estimated as count times median, all from the same window;
+percentiles do not add, and the estimate ran low for a row with a long tail, so its p95 was checked too.
 
-| What the report shows | Where the time goes |
+| What the report showed | Where the time went |
 |---|---|
-| The `launchable`, `ranks` or `ordered` estimate close to the `_spawn_order` estimate | That part is the slow one: the engine and capacity decision filters, the focus record selection over the ledger hierarchy, or the final focus sort |
-| The `focus_budget.place` estimate close to the `_spawn_order` estimate | Placement is the slow part; compare it with the `placeable` estimate. When `placeable` is small, the time is in focus placement itself |
-| `_running` above a few milliseconds | The lane holds many agent records or task rows; the filter makes no store or network call, so it grows only with those |
-| The `ready_in_order` or `claim_view` estimate close to the `_spawn_order` estimate | Their swarm store reads, such as claims, launch failures and agent records, or their readiness checks are the slow part |
+| The `launchable`, `ranks` or `ordered` estimate close to the `_spawn_order` estimate | That part was the slow one: the engine and capacity decision filters, the focus record selection over the ledger hierarchy, or the final focus sort |
+| The `focus_budget.place` estimate close to the `_spawn_order` estimate | Placement was the slow part, compared with the `placeable` estimate. When `placeable` was small, the time was in focus placement itself |
+| `_running` above a few milliseconds | The lane held many agent records or task rows; the filter made no store or network call, so it grew only with those |
+| The `ready_in_order` or `claim_view` estimate close to the `_spawn_order` estimate | Their swarm store reads, such as claims, launch failures and agent records, or their readiness checks were the slow part |
 
-`tests/swarm/test_spawn_timing.py` holds the contract. A spawn pass records a row for each part before the spawn step
-row ends. Spawn order records one `_running` and one `focus_budget.place` row per lane, each starting and ending
+`tests/swarm/test_spawn_timing.py` held the contract: a spawn pass recorded a row for each part before the spawn step
+row ended, and spawn order recorded one `_running` and one `focus_budget.place` row per lane, each starting and ending
 inside the `_spawn_order` row, and inside it one `launchable` row per lane and one `ranks` and `ordered` row per spawn
-order. The running filter keeps only the lane's agents that have not ended and still own their
-task, with a placeholder row for an agent whose task row is missing.
+order. Since the removal the module keeps only the running filter test among its spawn order tests: `_running` keeps
+the lane's agents that have not ended and still own their task, with a placeholder row for an agent whose task row
+is missing.
 
-### Focus ranks in spawn order
+### Focus ranks in offer order
 
 `scripts.swarm.focus_budget.ranks(doc)` gives every task in the ledger document its focus rank, the position of the
-first focus record that covers it; `focus_budget.ordered` then sorts the spawn queue focused tasks first, by rank band,
-then by that rank. Only `focus` records count: freeze records in the same `freezes` collection take no position.
+first focus record that covers it; `focus_budget.ordered` then sorts the hub's readiness offers focused tasks first,
+by ledger rank band, then by that rank (see [Offer order](../pillars/hives.md#offer-order)). The legacy tick spawn
+sorted its launch queue the same way until pull request
+[#11141](https://github.com/the-cloud-clockwork/agentihooks/pull/11141) removed it. Only `focus` records count:
+freeze records in the same `freezes` collection take no position.
 
 | Focus record target | Covers a task when | Example |
 |---|---|---|
@@ -1079,12 +1094,14 @@ selectors into one ordered list. Each task then costs one lookup per node of its
 plus the merged chain, and one comparison per selector record, instead of a match of every focus record against every
 task. On 3 November 2026, with the 284 focus records `rig-grade-swarm` held, one call over 3000 tasks went from
 0.622 s to 0.006 s with the same ranks
-([pull request 9573](https://github.com/the-cloud-clockwork/agentihooks/pull/9573)). Spawn order calls `ranks` once
-per lane inside `focus_budget.place`, which orders the lane's ready tasks with it, and once more after the lanes to sort
-the whole queue. Only that last call has its own `scripts.swarm.focus_budget.ranks` row; the per lane calls count in
-each lane's `focus_budget.place` row.
+([pull request 9573](https://github.com/the-cloud-clockwork/agentihooks/pull/9573)). `readiness.offers` runs
+twice per swarm on each readiness pass, once inside `publish` and once for the hub's log line, and calls `ranks` once
+each time. The legacy spawn order also called it once per lane inside
+`focus_budget.place`; that spawn order was removed with the spawn.
 
-Measure the spawn step over a thirty minute UTC window from its `swarm_tick_step` finished records:
+The measurement below is the record of pull request 9573 on the legacy spawn step. That step no longer runs, so on a
+swarm after the removal the command finds no `spawn` records. It measures the spawn step over a thirty minute UTC
+window from its `swarm_tick_step` finished records:
 
 ```bash
 SLUG=rig-grade-swarm
@@ -1105,13 +1122,14 @@ in other parts of spawn order or in the launch itself; split them with the rows 
 
 `tests/swarm/test_focus_budget.py` holds the contract: ranks by node address and selector, first position wins,
 duplicate targets, an empty selector value, colons inside task ids and selector values, and a test that ranks twenty
-node address focuses without calling `freeze.covers` once.
+node address focuses without calling `freeze.covers` once. The offer order tests in
+`tests/swarm/test_events_placement.py` hold the sort on the readiness offers; see
+[Offer order tests](../pillars/hives.md#offer-order-tests).
 
 | Symptom | Check |
 |---|---|
-| A task inside a focused phase launches after tasks of a later focus | An earlier `lane:` or `kind:` record covers the later tasks, or the task's `phase`, `slice` or `merged_into` link does not reach the focused node; read the task record and the ancestry its links give |
+| A task inside a focused phase is offered after tasks of a later focus in the same rank band | An earlier `lane:` or `kind:` record covers the later tasks, or the task's `phase`, `slice` or `merged_into` link does not reach the focused node; read the task record and the ancestry its links give |
 | A focus record never ranks any task | Its target is a selector with no value, such as `lane:`, or names a node that no task's ancestry holds; clear it with `unfreeze TARGET` |
-| The `focus_budget.ranks` row, times one more than the lane count, is close to the `_spawn_order` row | Ranking is the slow part, since every lane's `focus_budget.place` row holds one more `ranks` call; the ledger document holds many tasks or selector records, and each selector record costs one comparison per task |
 
 ## One lease heartbeat per tick pass
 
@@ -1459,8 +1477,8 @@ and call the port from the step.
 | `Outcome(..., Status.UNAVAILABLE, "", detail="no agent named <handle>")` from `runtime.inspect` or `runtime.stop` | The `agents` lookup found no record for that name. | Check the name against the swarm's agent records; the router was not called. |
 | `TypeError` from `runtime.launch` | The request mapping lacks one of `config`, `lane`, `name`, `task`, or carries another key. | Pass exactly those four keys. |
 | `runtime.panes` returns `[]` | herdr answered without a `panes` list. | Run `herdr pane list` on the host and check the herdr server is up. |
-| The `spawn` step row is slow and its `FencedRuntime._refusal` row carries most of it | A placement read runs outside a placement pass, so each launch scans `/proc` and reads the host again, or a new read is not routed through `PassCache.once`. | Route a repeated read through `PassCache.once`, as under [One placement scan per placement pass](#one-placement-scan-per-placement-pass). |
-| The `spawn` step row is slow and its `FencedRuntime.runtime_spawn` row carries most of it | The wrapped runtime's launch is slow: a herdr pane, a Kubernetes worker or a hive launch. | Read that runtime's own rows in the same tick report; the pass cache does not cover it. |
+| The launching step's row, such as a master start, is slow and its `FencedRuntime._refusal` row carries most of it | A placement read runs outside a placement pass, so each launch scans `/proc` and reads the host again, or a new read is not routed through `PassCache.once`. | Route a repeated read through `PassCache.once`, as under [One placement scan per placement pass](#one-placement-scan-per-placement-pass). |
+| The launching step's row, such as a master start, is slow and its `FencedRuntime.runtime_spawn` row carries most of it | The wrapped runtime's launch is slow: a herdr pane, a Kubernetes worker or a hive launch. | Read that runtime's own rows in the same tick report; the pass cache does not cover it. |
 | Two launches in one pass are refused as local full although a session ended during the pass | The pass reads the live session scan once, so the ended session still counts until the pass ends. | No action; the next pass scans again. |
 | A reaped or retired process was not found in a tick pass | The process exited before selection, so its `/proc` entry was gone and the snapshot was kept. | No action; the process is already gone. |
 | A step in a tick pass sees an agent as live after it was stopped, or misses one that started | The change went through the wrapped runtime, such as `original_runtime` or `herdr_runtime`, or through a forwarded method outside `AGENT_CHANGES`, so the pass listing was kept. | Make the change through the `FencedRuntime` with one of the listed operations, or add the operation to `AGENT_CHANGES`, as under [One live names listing per tick pass](#one-live-names-listing-per-tick-pass). |

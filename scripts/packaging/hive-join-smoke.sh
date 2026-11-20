@@ -9,7 +9,7 @@ cleanup() {
   docker rm -f "$run-redis" "$run-hive" "$run-member" >/dev/null 2>&1 || true
   docker network rm "$run" >/dev/null 2>&1 || true
   docker image rm "$image" >/dev/null 2>&1 || true
-  rm -r -- "$tls"
+  rm -r -- "$tls" || true
 }
 trap cleanup EXIT
 hive=(python -c "import sys; from scripts.hive.cli import main; sys.exit(main(sys.argv[1:]))")

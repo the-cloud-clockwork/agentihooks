@@ -22,7 +22,7 @@ finish() {
     fi
     kind delete cluster --name "$cluster" || true
   fi
-  rm -rf "$pulled" "$ledger_tls"
+  rm -rf "$pulled" "$ledger_tls" || true
   exit "$status"
 }
 trap finish EXIT

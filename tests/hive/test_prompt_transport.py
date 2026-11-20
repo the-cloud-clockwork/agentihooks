@@ -240,6 +240,84 @@ def test_a_hive_task_folder_reaches_the_controller(setup, homes):
     assert (folder / "steering.md").read_text(encoding="utf-8").startswith("# task: Carry the opening to the hive")
 
 
+@pytest.mark.feature("controller-work-folder-admitted-hive")
+@pytest.mark.parametrize(
+    ("target", "hive", "source"),
+    [
+        ({}, "host", "host"),
+        ({"host_id": "target"}, "host", "target"),
+        ({}, "controller", "controller"),
+        ({"host_id": "controller"}, "host", "controller"),
+    ],
+    ids=["admitted-remote", "explicit-remote", "admitted-local", "explicit-local"],
+)
+def test_controller_status_publishes_the_execution_hives_work_folder(
+    setup: SimpleNamespace,
+    homes: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    target: dict[str, str],
+    hive: str,
+    source: str,
+) -> None:
+    from dataclasses import replace
+
+    agent = replace(setup.agent, runtime_target=target, hive=hive)
+    monkeypatch.setattr(setup.store, "agents", lambda slug: [agent])
+    for remote in ("host", "target"):
+        setup.redis.set(
+            ledger_workspace.synced_key(remote),
+            json.dumps({"fixture": {"task": {"latest_progress": f"{remote} progress"}}}),
+        )
+    ledger = {"tasks": [{"id": "task", "workspace": TASK["workspace"]}]}
+    with at(homes.controller), patch.object(commands, "hive_id", return_value="controller"):
+        ledger_workspace.materialize("fixture", "task", {"progress.md": "controller progress\n"})
+        tails = ledger_workspace.published(setup.store, "fixture", ledger)
+        with patch.object(command_runner, "status_report", return_value={}):
+            command_runner.publish(setup.store, "fixture", ledger)
+    expected = {"task": {"latest_progress": f"{source} progress"}}
+    assert tails == expected
+    assert commands.workspaces(setup.store, "fixture") == expected
+
+
+@pytest.mark.feature("controller-work-folder-admitted-hive")
+@pytest.mark.parametrize(
+    ("target", "hive", "source"),
+    [
+        ({}, "host", "host"),
+        ({"host_id": "target"}, "host", "target"),
+        ({}, "controller", "controller"),
+        ({"host_id": "controller"}, "host", "controller"),
+    ],
+    ids=["admitted-remote", "explicit-remote", "admitted-local", "explicit-local"],
+)
+def test_controller_mirrors_the_execution_hives_work_folder(
+    setup: SimpleNamespace,
+    homes: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    target: dict[str, str],
+    hive: str,
+    source: str,
+) -> None:
+    from dataclasses import replace
+
+    agent = replace(setup.agent, runtime_target=target, hive=hive)
+    monkeypatch.setattr(setup.store, "agents", lambda slug: [agent])
+    for remote in ("host", "target"):
+        setup.redis.set(
+            ledger_workspace.files_key(remote),
+            json.dumps({"fixture": {"task": {"progress.md": f"{remote} progress\n", "proof.md": f"{remote} proof\n"}}}),
+        )
+    ledger = {"tasks": [{"id": "task", "workspace": TASK["workspace"]}]}
+    with at(homes.controller), patch.object(commands, "hive_id", return_value="controller"):
+        ledger_workspace.materialize(
+            "fixture", "task", {"progress.md": "controller progress\n", "proof.md": "controller proof\n"}
+        )
+        ledger_workspace.mirror(setup.store, "fixture", ledger)
+        folder = ledger_workspace.folder("fixture", "task")
+        assert (folder / "progress.md").read_text(encoding="utf-8") == f"{source} progress\n"
+        assert (folder / "proof.md").read_text(encoding="utf-8") == f"{source} proof\n"
+
+
 def test_a_dead_hive_folder_still_reaches_the_controller(setup, homes):
     carry(setup, homes)
     with at(homes.hive):

@@ -433,3 +433,38 @@ def test_served_routes_reach_a_scraper_over_http() -> None:
     finally:
         server.shutdown()
         server.server_close()
+
+
+@pytest.mark.feature("lab-worker-metrics")
+def test_a_registry_server_answers_only_the_metrics_route_over_http() -> None:
+    registry = metrics.Registry()
+    registry.inc(contract.UNITS_LOST_TOTAL)
+    server = metrics.serve_registry("127.0.0.1", 0, registry)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        with urllib.request.urlopen(f"{base}/metrics?scrape=1", timeout=5) as reply:
+            body = reply.read()
+            headers = dict(reply.headers.items())
+            assert (reply.status, headers["Content-Type"], headers["Content-Length"]) == (
+                200,
+                "text/plain; version=0.0.4; charset=utf-8",
+                str(len(body)),
+            )
+            assert body.decode() == registry.render()
+            assert "ci_lab_units_lost_total 1.0\n" in body.decode()
+        for path in ("/capacity", "/missing"):
+            with pytest.raises(urllib.error.HTTPError) as refused:
+                urllib.request.urlopen(f"{base}{path}", timeout=5)
+            assert (refused.value.code, refused.value.headers["Content-Type"], refused.value.read()) == (
+                404,
+                "application/json",
+                b'{"error": "not found"}',
+            )
+        with pytest.raises(urllib.error.HTTPError) as posted:
+            urllib.request.urlopen(urllib.request.Request(f"{base}/metrics", data=b"", method="POST"), timeout=5)
+        assert (posted.value.code, posted.value.read()) == (405, b'{"error": "method not allowed"}')
+    finally:
+        server.shutdown()
+        server.server_close()

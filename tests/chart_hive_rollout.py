@@ -184,6 +184,34 @@ def test_a_chart_whose_app_version_is_neither_a_release_nor_dev_is_refused() -> 
         raise AssertionError("a malformed appVersion must not fall back to the floating worker tag")
 
 
+def release_stamps(objects: list[dict]) -> list[str | None]:
+    """Name the release stamp on every worker hive pod template."""
+    return [
+        item["spec"]["template"]["metadata"]["annotations"].get("agentihooks.io/release")
+        for item in objects
+        if item["kind"] == "Deployment"
+    ]
+
+
+def test_each_released_chart_restamps_a_leased_release_tag_hive_with_its_own_version() -> None:
+    second = (
+        "workers.hives[0].name=second",
+        "workers.hives[0].credentialSecret.name=second",
+        "workers.hives[0].credentialSecret.key=credential",
+    )
+    assert release_stamps(render_released("2.17.467", "workers.image.tag=release")) == ["2.17.467"]
+    assert release_stamps(render_released("2.17.468", "workers.image.tag=release", *second)) == ["2.17.468"] * 2
+    explicit = render_released("2.17.467", "workers.image.tag=release", "workers.rollout.release=by-hand")
+    assert release_stamps(explicit) == ["by-hand"]
+    for settings in (
+        ("workers.image.tag=2.17.400",),
+        ("workers.image.tag=dev",),
+        ("workers.image.tag=release", "workers.rollout.enabled=false"),
+    ):
+        assert release_stamps(render_released("2.17.467", *settings)) == [None]
+    assert release_stamps(render_released("dev", "workers.image.tag=release")) == [None]
+
+
 if __name__ == "__main__":
     test_every_roll_acquires_before_sync_and_releases_after_serving()
     test_hives_in_one_release_have_distinct_sync_waves()
@@ -194,4 +222,5 @@ if __name__ == "__main__":
     test_a_release_tag_worker_is_not_rolled_by_a_release_image_digest()
     test_a_released_chart_runs_its_hooks_on_the_hive_worker_of_its_own_version()
     test_a_chart_whose_app_version_is_neither_a_release_nor_dev_is_refused()
+    test_each_released_chart_restamps_a_leased_release_tag_hive_with_its_own_version()
     print("Shared rollout hooks, sequential hive waves, readiness and bounded drain: passed")

@@ -2,6 +2,7 @@
 
 from collections.abc import Iterator
 from copy import deepcopy
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import Mock
@@ -22,6 +23,8 @@ from tests.swarm.test_readiness import NOW, SLUG, Clock, bus, clock, doc, snapsh
 from tests.swarm.test_tick import FakeRuntime, store, tasks  # noqa: F401
 
 pytestmark = pytest.mark.unit
+
+OTHER = "sw-b"
 
 PINNED = [
     task("plain"),
@@ -217,7 +220,8 @@ def rig() -> Iterator[SimpleNamespace]:
 
     ledger = SimpleNamespace(update_task=update_task)
     source = SimpleNamespace(
-        snapshot=lambda slug: snapshot(found, claimed=[t for t in rows if swarm.claimant(slug, t)])
+        slugs=lambda: [SLUG],
+        snapshot=lambda slug: snapshot(found, claimed=[t for t in rows if swarm.claimant(slug, t)]),
     )
     yield SimpleNamespace(
         store=swarm,
@@ -234,7 +238,9 @@ def ask(task_id: str, hive: str) -> dict:
 def test_the_hub_admits_a_workstation_task_only_from_the_root_hive(
     rig: SimpleNamespace, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert rig.admitter.admit(SLUG, ask("desk", "hive-a")) is None
+    assert rig.admitter.admit(SLUG, ask("desk", "hive-a")) == {
+        "held": "the task is workstation off the root hive, pinned to another hive or needs what the hive lacks"
+    }
     assert rig.store.claimant(SLUG, "desk") is None
     assert rig.store.agents(SLUG) == []
     assert capsys.readouterr().err.splitlines() == [
@@ -247,7 +253,9 @@ def test_the_hub_admits_a_workstation_task_only_from_the_root_hive(
 
 
 def test_the_hub_admits_a_hive_pinned_task_only_from_its_hive(rig: SimpleNamespace) -> None:
-    assert rig.admitter.admit(SLUG, ask("pinned", "hive-a")) is None
+    assert rig.admitter.admit(SLUG, ask("pinned", "hive-a")) == {
+        "held": "the task is workstation off the root hive, pinned to another hive or needs what the hive lacks"
+    }
     assert rig.store.claimant(SLUG, "pinned") is None
     admitted = rig.admitter.admit(SLUG, ask("pinned", "hive-b"))
     assert admitted["hive"] == "hive-b"
@@ -256,7 +264,9 @@ def test_the_hub_admits_a_hive_pinned_task_only_from_its_hive(rig: SimpleNamespa
 
 def test_the_hub_admits_a_needs_task_only_from_a_hive_declaring_every_need(rig: SimpleNamespace) -> None:
     registry.update(rig.redis, "hive-a", ["capabilities=headed"])
-    assert rig.admitter.admit(SLUG, ask("gpu", "hive-a")) is None
+    assert rig.admitter.admit(SLUG, ask("gpu", "hive-a")) == {
+        "held": "the task is workstation off the root hive, pinned to another hive or needs what the hive lacks"
+    }
     registry.update(rig.redis, "hive-c", ["capabilities=gpu"])
     assert rig.admitter.admit(SLUG, ask("gpu", "hive-c"))["hive"] == "hive-c"
 
@@ -330,7 +340,9 @@ def test_root_keeps_a_slot_only_for_a_workstation_task_it_can_place(
     if capabilities:
         registry.update(rig.redis, ROOT, [f"capabilities={','.join(capabilities)}"])
     found = doc([task("plain"), task("desk", workstation=True, needs=["gpu"])])
-    monkeypatch.setattr(rig.admitter, "source", SimpleNamespace(snapshot=lambda slug: snapshot(found)))
+    monkeypatch.setattr(
+        rig.admitter, "source", SimpleNamespace(slugs=lambda: [SLUG], snapshot=lambda slug: snapshot(found))
+    )
 
     admitted = rig.admitter.admit(SLUG, ask("plain", ROOT))
 
@@ -353,6 +365,50 @@ def test_root_admits_unpinned_work_only_into_slots_beyond_the_waiting_workstatio
     assert rig.admitter.admit(SLUG, ask("gpu", ROOT)) == {
         "held": "1 of 2 agents on the hive with 1 kept for tasks only the root hive takes"
     }
+
+
+@pytest.mark.feature("root-keeps-slots-for-pinned-tasks")
+def test_root_keeps_a_slot_for_a_workstation_task_another_events_swarm_holds_waiting(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _capped(rig, monkeypatch, {ROOT: 1})
+    claimed: list[str] = []
+    views = {
+        SLUG: snapshot(doc([task("plain")])),
+        OTHER: replace(snapshot(doc([task("desk", workstation=True)]), claimed=claimed), slug=OTHER),
+    }
+    monkeypatch.setattr(
+        rig.admitter, "source", SimpleNamespace(slugs=lambda: [SLUG, OTHER], snapshot=views.__getitem__)
+    )
+
+    assert rig.admitter.admit(SLUG, ask("plain", ROOT)) == {"held": KEPT}
+    assert rig.store.claimant(SLUG, "plain") is None
+    claimed.append("desk")
+    admitted = rig.admitter.admit(SLUG, ask("plain", ROOT))
+    assert admitted["hive"] == ROOT
+    assert rig.store.claimant(SLUG, "plain") == admitted["name"]
+    assert capsys.readouterr().err.splitlines() == [
+        f"hub: events admission swarm={SLUG} task=plain hive={ROOT} refused: {KEPT}"
+    ]
+
+
+@pytest.mark.feature("root-keeps-slots-for-pinned-tasks")
+def test_root_keeps_one_slot_for_each_waiting_workstation_task_of_every_events_swarm(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _capped(rig, monkeypatch, {ROOT: 2})
+    views = {
+        SLUG: snapshot(doc([task("plain"), task("desk", workstation=True)])),
+        OTHER: replace(snapshot(doc([task("desk", workstation=True)])), slug=OTHER),
+    }
+    monkeypatch.setattr(
+        rig.admitter, "source", SimpleNamespace(slugs=lambda: [OTHER, SLUG], snapshot=views.__getitem__)
+    )
+
+    assert rig.admitter.admit(SLUG, ask("plain", ROOT)) == {
+        "held": "0 of 2 agents on the hive with 2 kept for tasks only the root hive takes"
+    }
+    assert rig.store.claimant(SLUG, "plain") is None
 
 
 def test_hub_admission_keeps_shared_placement_rows_open(rig: SimpleNamespace) -> None:

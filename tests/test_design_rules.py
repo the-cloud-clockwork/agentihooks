@@ -54,9 +54,53 @@ def test_an_unchanged_untyped_function_is_not_graded(tmp_path):
     assert _grade(tmp_path, {"scripts/job.py": UNTYPED}, {"scripts/job.py": UNTYPED + "\nY = 2\n"}) == (0, [])
 
 
-def test_a_body_change_keeps_an_untyped_signature_ungraded(tmp_path):
+@pytest.mark.feature("design-rules-body-change-graded")
+def test_a_body_change_grades_an_untyped_function_for_hints(tmp_path: Path) -> None:
     changed = UNTYPED.replace("path * count", "path * count * 2")
-    assert _grade(tmp_path, {"scripts/job.py": UNTYPED}, {"scripts/job.py": changed}) == (0, [])
+    assert _grade(tmp_path, {"scripts/job.py": UNTYPED}, {"scripts/job.py": changed}) == (
+        1,
+        ["untyped: scripts/job.py::load lacks type hints on path, return"],
+    )
+
+
+@pytest.mark.feature("design-rules-body-change-graded")
+def test_only_the_untyped_function_whose_body_changed_is_graded(tmp_path: Path) -> None:
+    before = UNTYPED + "\n\ndef _run(path):\n    return path\n"
+    after = before.replace("path * count", "path * count * 2")
+    assert _grade(tmp_path, {"scripts/job.py": before}, {"scripts/job.py": after}) == (
+        1,
+        ["untyped: scripts/job.py::load lacks type hints on path, return"],
+    )
+
+
+@pytest.mark.feature("design-rules-body-change-graded")
+def test_a_method_body_change_grades_the_method_but_not_its_class(tmp_path: Path) -> None:
+    before = "class Store:\n    def put(self, key):\n        self.key = key\n"
+    after = before.replace("self.key = key", "self.key = key * 2")
+    assert _grade(tmp_path, {"scripts/store.py": before}, {"scripts/store.py": after}) == (
+        1,
+        ["untyped: scripts/store.py::Store.put lacks type hints on key, return"],
+    )
+
+
+@pytest.mark.feature("design-rules-body-change-graded")
+def test_an_async_function_whose_body_changed_is_graded_for_hints(tmp_path: Path) -> None:
+    before = "async def load(path):\n    return path\n"
+    after = before.replace("return path", "return path * 2")
+    assert _grade(tmp_path, {"scripts/job.py": before}, {"scripts/job.py": after}) == (
+        1,
+        ["untyped: scripts/job.py::load lacks type hints on path, return"],
+    )
+
+
+@pytest.mark.feature("design-rules-body-change-graded")
+def test_a_nested_function_edit_grades_the_function_that_encloses_it(tmp_path: Path) -> None:
+    before = "def load(path):\n    def inner(x: int) -> int:\n        return x\n    return inner(path)\n"
+    after = before.replace("return x\n", "return x * 2\n")
+    assert _grade(tmp_path, {"scripts/job.py": before}, {"scripts/job.py": after}) == (
+        2,
+        ["untyped: scripts/job.py::load lacks type hints on path, return"],
+    )
 
 
 def test_a_changed_signature_is_graded(tmp_path):
@@ -108,10 +152,14 @@ def test_a_fully_typed_private_function_is_green(tmp_path):
     assert _grade(tmp_path, KEEP, {"scripts/job.py": source}) == (1, [])
 
 
-def test_a_body_change_keeps_an_untyped_private_signature_ungraded(tmp_path):
+@pytest.mark.feature("design-rules-body-change-graded")
+def test_a_body_change_grades_an_untyped_private_function_for_hints(tmp_path: Path) -> None:
     before = "def _run(path):\n    return path\n"
     after = "def _run(path):\n    return path * 2\n"
-    assert _grade(tmp_path, {"scripts/job.py": before}, {"scripts/job.py": after}) == (0, [])
+    assert _grade(tmp_path, {"scripts/job.py": before}, {"scripts/job.py": after}) == (
+        1,
+        ["untyped: scripts/job.py::_run lacks type hints on path, return"],
+    )
 
 
 def test_an_annotation_only_edit_is_not_graded_by_the_config_rule(tmp_path):

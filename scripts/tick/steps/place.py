@@ -167,7 +167,7 @@ def _claim_cap(slug: str, store: Any, ledger: Any, rows: dict[str, Any], task: d
 def primed(store: Any, slug: str, seat: str, task: dict[str, Any]) -> dict[str, Any]:
     priming_trace: Any = import_module("scripts.swarm.priming_trace")
 
-    memory = {"recaps": store.memory.recaps(seat), "learned": store.memory.learned(seat)}
+    memory = {"recaps": store.memory.recaps(seat), "learned": store.memory.scoped(slug, seat)}
     envelope = task.get("handoff_envelope", store.handoff_envelope(slug, task["id"]))
     previous = store.execution_occupants(slug).get(seat)
     task = {

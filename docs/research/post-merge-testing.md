@@ -50,11 +50,11 @@ Today's `dev` already runs its slow checks after the merge: the promotion tier g
 |---|---|---|
 | `Tests` runs on `merge_group` | 1211: 942 success, 4 failure, 265 cancelled | C2 |
 | Green merge group run, created to completed | p50 13 min, p90 21 min | C6 |
-| Cancelled merge group runs that hid a failed job | 15 of 36 sampled: 14 with a failed unit shard, 1 with a failed `select`; in the other 21 only the summary failed after an outside cancel | C7 |
+| Cancelled merge group runs that hid a failed job | 15 of 36 sampled: 14 with a failed unit shard, 1 with a failed `select`; in the other 21 no job other than the summary failed, and the verifier's cancel step did not run, so something other than the verifier cancelled them | C7, C7b |
 | Estimated queue rejects in the window | 4 + 265 × 15 / 36 ≈ **114**, or 12.1 per 100 merges | C2, C7 |
 | Rejects in C7 and C2 whose pull request changed before merging | 13 of 19 rejects (18 pull requests) were followed by a new commit; after 6 the pull request merged with no new commit | C8 |
 
-On a rejected merge group the queue verifier, named `Gate — Required` on `merge_group`, cancels its own run, so most rejects show as `cancelled` rather than `failure`.
+On a rejected merge group the queue verifier, named `Gate — Required` on `merge_group`, cancels its own run with its `Cancel a rejected queue run` step, so most rejects show as `cancelled` rather than `failure` (C2). Of the 12 sampled rejects that GitHub still served on 19 November, that step ran in 9. The other 3 were cancelled before the verifier started (C7b).
 
 ### Predicted red dev rate under post merge testing
 
@@ -98,7 +98,7 @@ Each gate is measured with the same commands, so the master can recheck it in a 
 | Confirmed red | a red unit fails again on one lab rerun before it names a culprit, and single grade red streaks are at most 10 % of red streaks | 51 % | C4 |
 | Culprit by merge | every `dev` merge graded alone, or the red range bisected from the lab cache by the queue culprit rule extended to `dev` pushes | 33 % of red ranges hold more than one merge | C9 |
 | Detection within the queue budget | dev push verdict p90 at most 21 min, today's merge group p90; at the p90 busy hour of 6 merges per hour that leaves 6 × 21 / 60 = 2.1 merges on a culprit, where a revert conflicts about 4 % of the time | p90 100 min | C4, C6, C10 |
-| Revert safe shared registries | the feature map, the type baseline and the frozen gate registry merge without a textual conflict on revert, by a merge driver or one file per entry | 123 of 171 conflicts at 7 merges | C10 |
+| Revert safe shared registries | the feature map, the type baseline and the frozen gate registry merge without a textual conflict on revert, by a merge driver or one file per entry | 118 of 171 conflicting reverts at 7 merges, 83 of them only in a registry | C10 |
 | Revert path | the App opens the revert as a pull request graded by the lab, reopens the culprit's task, and holds merges while a revert conflicts | absent: no revert or culprit code on `dev` | C11 |
 
 ## Reversible first step
@@ -273,6 +273,80 @@ python3 -c 'import collections,json; k=collections.Counter(); [k.update(["unit s
 1 other job failed: select
 ```
 
+C7b, how each C7 run was cancelled. It reads the queue verifier job of each sampled run with its steps. A verifier that never started is listed under its unevaluated name expression, which contains `queue-fail-fast`, and has no steps:
+
+```bash
+while read -r id; do
+  gh api "repos/the-cloud-clockwork/agentihooks/actions/runs/$id/jobs?filter=latest&per_page=100" \
+    --jq "{run: $id, verifier: [.jobs[] | select(.name == \"Gate — Required\" or (.name | contains(\"queue-fail-fast\"))) | {name, steps: [.steps[] | {name, conclusion, started_at}]}]}"
+done < c7-ids.txt > c7-verifier.jsonl
+```
+
+```python
+import collections
+import json
+
+failed = {j["run"]: [n for n in j["failed"] if n != "Queue gate summary"] for j in map(json.loads, open("c7-jobs.jsonl"))}
+kinds = collections.Counter()
+for v in map(json.loads, open("c7-verifier.jsonl")):
+    step = {s["name"]: s for j in v["verifier"] for s in j["steps"]}.get("Cancel a rejected queue run")
+    if step and step["started_at"]:
+        state = "own cancel step ran, ended " + step["conclusion"]
+    elif any(j["name"] == "Gate — Required" for j in v["verifier"]):
+        state = "verifier started, own cancel step did not run"
+    else:
+        state = "verifier never started"
+    kinds[("a job failed" if failed[v["run"]] else "no other job failed") + ": " + state] += 1
+for kind, n in sorted(kinds.items()):
+    print(n, kind)
+```
+
+```text
+5 a job failed: own cancel step ran, ended cancelled
+4 a job failed: own cancel step ran, ended success
+3 a job failed: verifier never started
+20 no other job failed: verifier never started
+1 no other job failed: verifier started, own cancel step did not run
+```
+
+A cancel step ran when it has a start time. At the first and the last window merge, the workflow file calls the cancel API in two steps, and its concurrency group cancels only `pull_request` runs. The verifier's `Cancel a rejected queue run` step cancels its own run. The `Cancel superseded and dead merge queue runs` step cancels only queue runs with a lower id than its own. C7b does not show what cancelled a run whose verifier did not run its cancel step:
+
+```bash
+for c in $(tail -1 dev-commits.txt | cut -d" " -f1) $(head -1 dev-commits.txt | cut -d" " -f1); do
+  git show "$c:.github/workflows/test.yml" | grep -n -E 'cancel-in-progress|name: Cancel|gh run cancel|runs/\$id/cancel|-lt "\$RUN"'
+done
+```
+
+```text
+29:  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+391:      - name: Cancel superseded and dead merge queue runs
+416:            [[ -n "$id" && "$id" -lt "$RUN" ]] || continue
+424:            if gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/cancel" --silent; then
+3359:      - name: Cancel a rejected queue run
+3363:        run: gh run cancel "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY"
+29:  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+531:      - name: Cancel superseded and dead merge queue runs
+556:            [[ -n "$id" && "$id" -lt "$RUN" ]] || continue
+564:            if gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/cancel" --silent; then
+3730:      - name: Cancel a rejected queue run
+3734:        run: gh run cancel "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY"
+```
+
+C7b ran on 19 November 2026 in its own working folder, so the C7 and C8 files of 18 November stayed as they were. GitHub no longer served the 18 earliest of the 265 cancelled merge group runs by then, so that folder's `c7-ids.txt` was rebuilt from a fresh `mg-cancelled.jsonl` with the C7 rule shifted by those 18 runs, and C7's jobs loop ran again over it there. That keeps 33 of the 36 runs. The first three runs in C8 were created before the earliest run still served, so they are the 3 missing, each with a failed job, and all 21 runs where no other job failed are included:
+
+```bash
+wc -l < mg-cancelled.jsonl
+python3 -c 'import json; print(min(json.loads(l)["created_at"] for l in open("mg-cancelled.jsonl")))'
+python3 -c 'import json; r=sorted(map(json.loads, open("mg-cancelled.jsonl")), key=lambda r: r["created_at"]); off=265-len(r); [print(r[int(i*265/36)-off]["id"]) for i in range(36) if int(i*265/36) >= off]' > c7-ids.txt
+wc -l < c7-ids.txt
+```
+
+```text
+247
+2026-11-04T21:12:06Z
+33
+```
+
 C8, for the 15 failed C7 runs and the 4 `failure` runs, the pull request named in the queue branch `gh-readonly-queue/dev/pr-<n>-<sha>`, its merge time and its commits after the red group:
 
 ```bash
@@ -353,6 +427,7 @@ sha = [c[0] for c in commits]
 ctime = [at(c[1]) for c in commits]
 pos = {s: i for i, s in enumerate(sha)}
 HEADS = "changed in both|removed in remote|removed in local|added in both|added in remote|added in local|merged"
+REGISTRIES = {"feature-map.json", "tests/TYPE_BASELINE.json", "tests/registry/FROZEN_GATES.json"}
 
 
 def conflicts(i, j):
@@ -376,10 +451,13 @@ for k in (1, 2, 7, 20):
     bad = sum(1 for h in hits if h)
     print("%d later: %d/%d conflict (%.1f%%)" % (k, bad, len(hits), 100 * bad / len(hits)))
     if k == 7:
+        at7 = [set(h) for h in hits if h]
         for h in hits:
             for f in h:
                 hot[f] = hot.get(f, 0) + 1
 print("at 7:", ", ".join("%s %d" % kv for kv in sorted(hot.items(), key=lambda kv: -kv[1])[:6]))
+reg = [h for h in at7 if h & REGISTRIES]
+print("at 7: %d of %d conflicting reverts hit a registry, %d hit only registries, %d hit two or more" % (len(reg), len(at7), sum(h <= REGISTRIES for h in reg), sum(len(h & REGISTRIES) >= 2 for h in reg)))
 runs = [json.loads(line) for line in open("dev-push.jsonl")]
 graded = sorted((r for r in runs if r["conclusion"] in ("success", "failure")), key=lambda r: pos[r["head_sha"]])
 candidates = bad = 0
@@ -398,8 +476,11 @@ print("candidates %d, conflicting at verdict time %d (%.1f%%)" % (candidates, ba
 7 later: 171/936 conflict (18.3%)
 20 later: 340/923 conflict (36.8%)
 at 7: feature-map.json 98, tests/TYPE_BASELINE.json 18, tests/registry/FROZEN_GATES.json 7, tests/swarm/tick_scenarios/goldens.json 5, docs/reference/index.md 5, scripts/swarm/tick.py 5
+at 7: 118 of 171 conflicting reverts hit a registry, 83 hit only registries, 5 hit two or more
 candidates 118, conflicting at verdict time 11 (9.3%)
 ```
+
+The per file line counts a revert once for each file it conflicts in. The three registry counts add up to 123, five more than the 118 reverts behind them, because each of the 5 reverts that hit two or more registries counts once per registry. The `hit a registry` line was added on 19 November 2026. That rerun printed the four distance lines and the per file line above unchanged. Its last line read 106 candidates from a fresh `dev-push.jsonl` of 842 runs, against the 903 of C1, so the line above keeps the 18 November value.
 
 C11, revert or culprit code on `dev`:
 
@@ -435,11 +516,12 @@ The commands depend on each other:
 
 - The downloads and C3 come first. C1 and C2 are counts that need nothing else.
 - C4 and C9 run in one Python session, because C9 reads C4's `pos`, `ctime`, `pairs`, `span` and `pct`. Append C9 to the C4 file and run it with `python3`.
+- C7b reads the `c7-ids.txt` and `c7-jobs.jsonl` that C7 writes, and `dev-commits.txt` from C3. Run it in the same window as C7, so it needs no rebuilt `c7-ids.txt` and skips the rebuild command under its output.
 - C8 reads the `c7-jobs.jsonl` that C7 writes, and the `mg-failure.jsonl` and `mg-cancelled.jsonl` downloads.
-- C10 runs on its own over `dev-commits.txt` and `dev-push.jsonl`. It calls `git merge-tree` once per window merge for each of the four distances and once per green to red candidate, 3,860 merges in this window, all local.
+- C10 runs on its own over `dev-commits.txt` and `dev-push.jsonl`. It calls `git merge-tree` once per window merge for each of the four distances and once per green to red candidate, 3,860 `git merge-tree` calls in this window, all local.
 - C11 reads `origin/dev` and has no window.
 
-The GitHub reads cost about 130 REST calls at this window's run counts: 24 download pages of 100 runs, 9 counts in C1, one jobs read per sampled run in C5 and C7, and two reads per reject in C8. Every agent on a swarm hive shares one GitHub API limit, so read the remaining budget first and, on a rate limit error, wait for the reset it reports instead of retrying:
+The GitHub reads cost about 170 REST calls at this window's run counts: 24 download pages of 100 runs, 9 counts in C1, one jobs read per sampled run in C5, C7 and C7b, and two reads per reject in C8. Every agent on a swarm hive shares one GitHub API limit, so read the remaining budget first and, on a rate limit error, wait for the reset it reports instead of retrying:
 
 ```bash
 gh api rate_limit --jq '.resources.core | {remaining, reset}'

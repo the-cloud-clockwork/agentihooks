@@ -1,5 +1,6 @@
 """Venv selection for the lab worker: the baked image venv when its lockfile matches, else one venv per lockfile,
-built by uv sync inside the lab sandbox with only its whitelisted environment."""
+built by uv from the head's tracked test requirements lock inside the lab sandbox with only its whitelisted
+environment."""
 
 import fcntl
 import os
@@ -11,11 +12,13 @@ from pathlib import Path
 
 from scripts.ci_lab.sandbox import CannotRun, PortAllocator, Sandbox
 
-__all__ = ["BAKED", "BUILDS", "MARKER", "Build", "venv_for"]
+__all__ = ["BAKED", "BUILDS", "EXCLUDES", "LOCKFILE", "MARKER", "Build", "venv_for"]
 
 BAKED = Path("/opt/agentihooks-venv")
 MARKER = "lockfile.sha256"
 BUILDS = "builds"
+LOCKFILE = ".github/test-requirements.lock"
+EXCLUDES = ".github/test-excludes.txt"
 
 
 @dataclass(frozen=True)
@@ -33,10 +36,11 @@ def _marked(venv: Path, digest: str) -> bool:
 
 
 def _sync(tree: Path, venv: Path, root: Path, build: Build) -> None:
-    """Run the worker's uv sync of tree into venv from tree, in the sandbox with network, the whitelist, PATH and the
-    venv, then remove its run folder.
+    """Build venv from tree in the sandbox with network, the whitelist and PATH: uv venv on the worker's Python, then
+    uv pip install of the project's dev and all extras constrained by tree's tracked test lock, less its excluded
+    packages, removing each step's run folder.
 
-    Raises CannotRun when uv is not installed, or when the build ends with a nonzero code or its time limit, keeping
+    Raises CannotRun when uv is not installed, or when a step ends with a nonzero code or its time limit, keeping
     its log.
     """
     uv = shutil.which("uv")
@@ -44,12 +48,18 @@ def _sync(tree: Path, venv: Path, root: Path, build: Build) -> None:
         raise CannotRun("uv is not installed, so a venv cannot be built")
     runs = root / BUILDS
     runs.mkdir(exist_ok=True)
-    whitelist = {"PATH": os.defpath, **build.whitelist, "UV_PROJECT_ENVIRONMENT": str(venv)}
-    argv = [uv, "sync", "--frozen", "--no-install-project", "--all-extras", "--python", sys.executable]
-    outcome = Sandbox(runs, tree, build.ports, whitelist).run([*argv, "--project", str(tree)], build.timeout, net=True)
-    if outcome.code != 0:
-        raise CannotRun(f"uv sync for {tree} ended with code {outcome.code}; its log is {outcome.log}")
-    shutil.rmtree(outcome.log.parent)
+    whitelist = {"PATH": os.defpath, **build.whitelist}
+    constraints = ["--constraint", str(tree / LOCKFILE), "--excludes", str(tree / EXCLUDES)]
+    project = ["-r", str(tree / "pyproject.toml"), "--extra", "dev", "--extra", "all"]
+    steps = {
+        "venv": [uv, "venv", "--clear", "--python", sys.executable, str(venv)],
+        "pip install": [uv, "pip", "install", "--python", str(venv / "bin" / "python"), *constraints, *project],
+    }
+    for step, argv in steps.items():
+        outcome = Sandbox(runs, tree, build.ports, whitelist).run(argv, build.timeout, net=True)
+        if outcome.code != 0:
+            raise CannotRun(f"uv {step} for {tree} ended with code {outcome.code}; its log is {outcome.log}")
+        shutil.rmtree(outcome.log.parent)
 
 
 def venv_for(lockfile_digest: str, tree: Path, root: Path, build: Build, baked: Path = BAKED) -> tuple[Path, bool]:

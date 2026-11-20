@@ -376,7 +376,7 @@ def test_the_refusal_names_the_files_the_areas_and_both_ways_forward():
     assert "f0.py, f1.py, f2.py, f3.py, f4.py and 2 more" in text
     assert "Kept areas and territory: a, b" in text
     assert f"agentihooks swarm {SLUG} trace-plan" in text
-    assert f"agentihooks ledger --slug {SLUG} --as {ME} followup add" in text
+    assert f"agentihooks api --slug {SLUG} --as {ME} followup add" in text
 
 
 def test_the_refusal_lists_up_to_five_files_whole_and_says_none_for_no_areas():

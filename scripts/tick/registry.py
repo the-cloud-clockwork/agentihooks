@@ -4,9 +4,10 @@ from dataclasses import dataclass
 from importlib import import_module
 from itertools import combinations
 from math import isfinite
+from typing import Any
 
 from scripts.tick.pool import RESERVES
-from scripts.tick.step import Domain, Step
+from scripts.tick.step import Context, Domain, Lane, Result, Step
 
 __all__ = [
     "Catalogue",
@@ -206,6 +207,60 @@ def latest_start(name: str, steps: list[Step]) -> float:
     return starts[name]
 
 
+@dataclass(frozen=True)
+class _SiteStep:
+    step: Step
+    needs: frozenset[str]
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(object.__getattribute__(self, "step"), name)
+
+    @property
+    def name(self) -> str:
+        return self.step.name
+
+    @property
+    def group(self) -> str:
+        return self.step.group
+
+    @property
+    def lane(self) -> Lane:
+        return self.step.lane
+
+    @property
+    def budget_s(self) -> float:
+        return self.step.budget_s
+
+    @property
+    def interval_s(self) -> float:
+        return self.step.interval_s
+
+    @property
+    def reads(self) -> frozenset[Domain]:
+        return self.step.reads
+
+    @property
+    def writes(self) -> frozenset[Domain]:
+        return self.step.writes
+
+    @property
+    def effects(self) -> frozenset[str]:
+        return self.step.effects
+
+    @property
+    def feature(self) -> str:
+        return self.step.feature
+
+    def run(self, ctx: Context) -> Result:
+        return self.step.run(ctx)
+
+
+def failure_needs(step: Step) -> frozenset[str]:
+    if isinstance(step, _SiteStep):
+        return failure_needs(step.step)
+    return step.needs
+
+
 def _needing(step: Step, needs: frozenset[str]) -> Step:
     """Return a copy of ``step`` that needs exactly ``needs``."""
     edged = copy(step)
@@ -263,7 +318,7 @@ def site_edges(
             for other in early
             if order[other.group] < order[step.group] and uses.after(other, held(order[other.group]))
         )
-        edged.append(_needing(step, step.needs | needs))
+        edged.append(_SiteStep(step, step.needs | needs))
     return tuple(edged)
 
 

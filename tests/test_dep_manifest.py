@@ -640,10 +640,7 @@ def test_queue_shards_split_on_the_tests_the_planner_did_not_reuse():
     assert _step("test-count", "Wait for the test plan")["id"] == "plan"
     assert _step("split", "Adopt the test plan")["id"] == "plan"
     deselected = _step("test-count", "Deselect the reused tests")
-    assert deselected["run"].startswith(
-        'cd "$RUNNER_TEMP/planner"\npackage=scripts\nif [[ ! -f scripts/dep_manifest.py ]]; then package=tests; fi\n'
-        '"$PYTHON_PATH" -m "$package.dep_manifest" deselect'
-    )
+    assert deselected["run"].startswith('cd "$RUNNER_TEMP/planner"\n"$PYTHON_PATH" -m scripts.dep_manifest deselect')
     assert deselected["env"]["PYTHON_PATH"] == plan["env"]["PYTHON_PATH"]
     assert _step("unit", "Run tests")["env"]["CI_REUSED"] == "${{ github.workspace }}/reused.json"
     check = _step("shard-check", "Check every collected test ran in exactly one shard")
@@ -695,7 +692,7 @@ def test_every_bare_interpreter_call_into_the_manifest_code_installs_pyyaml_firs
         steps = job.get("steps", [])
         for index, step in enumerate(steps):
             run = step.get("run", "")
-            for call in ("-m scripts.ci_test_plan", "-m scripts.dep_manifest", '-m "$package.dep_manifest"'):
+            for call in ("-m scripts.ci_test_plan", "-m scripts.dep_manifest"):
                 if call in run:
                     calls.add((name, step["name"]))
                     earlier = [s.get("run", "") for s in steps[:index]]
@@ -743,12 +740,25 @@ def test_the_split_deselects_the_same_tests_when_the_head_keeps_the_manifest_cod
     )
 
 
-@pytest.mark.feature("lab-wheel-imports")
-def test_the_split_deselects_with_a_grader_that_keeps_the_manifest_under_tests(tmp_path: Path) -> None:
+@pytest.mark.feature("deselect-scripts-manifest")
+def test_the_split_deselects_with_the_scripts_manifest_alone_and_never_the_tests_package(tmp_path: Path) -> None:
     manifest = (ROOT / "scripts" / "dep_manifest.py").read_text()
-    chosen, expected = _deselect_in_test_count(tmp_path, manifest, "tests")
+    shipped = tmp_path / "shipped" / "runner" / "planner"
+    shipped.mkdir(parents=True)
+    (shipped / "tests.py").write_text("raise ModuleNotFoundError(\"No module named 'tests'\", name='tests')\n")
+    chosen, expected = _deselect_in_test_count(tmp_path / "shipped", manifest)
     assert chosen == expected
-    assert not (tmp_path / "runner" / "planner" / "scripts").exists()
+    legacy = tmp_path / "legacy" / "planner"
+    for package in ("scripts", "tests"):
+        (legacy / package).mkdir(parents=True)
+        (legacy / package / "__init__.py").write_text("")
+    (legacy / "tests" / "dep_manifest.py").write_text("raise SystemExit('the tests package manifest ran')\n")
+    env = {**os.environ, "RUNNER_TEMP": str(legacy.parent), "PYTHON_PATH": sys.executable}
+    run = _step("test-count", "Deselect the reused tests")["run"]
+    result = subprocess.run(
+        ["bash", "-eo", "pipefail", "-c", run], env=env, capture_output=True, text=True, check=False
+    )
+    assert "the tests package manifest ran" not in result.stderr
 
 
 def test_the_reused_plan_reaches_workers_but_never_nested_pytest_runs(tmp_path, monkeypatch):

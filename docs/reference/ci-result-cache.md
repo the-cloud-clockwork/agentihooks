@@ -334,7 +334,7 @@ The planner runs from the grader, never from the head, so a pull request cannot 
 
 ### Record
 
-`scripts/ci_test_plan.py` keeps the slice 5 rule and adds one condition: the dev push run must also keep all twenty `coverage-3.12-1` to `coverage-3.12-20` artifacts unexpired, beside its `dep-manifest`. A run missing any of them is skipped and the next older candidate is tried, up to 10. With no record the planner raises the `No test record` notice and every test runs.
+`scripts/ci_test_plan.py` keeps the slice 5 rule and adds one condition: the dev push run must also keep all twenty `coverage-3.12-1` to `coverage-3.12-20` artifacts unexpired, beside its `dep-manifest`. A run missing any of them is skipped and the next older candidate is tried, up to 10. It lists every artifact page of a candidate run, 100 artifacts a page and at most two pages, so a run whose shards are listed past its first 100 artifacts still counts, and a run that fills both pages without them is named in the plan log. A page of ten candidates reserves 41 of the planner's 100 GitHub requests, the run listing plus two artifact pages, the jobs and the download for each candidate, so a search with no usable record covers at most 60 dev push runs. With no record the planner raises the `No test record` notice and every test runs.
 
 Besides `reused`, the planner writes `run` and `commit` to the step output: the dev run that holds the record and the commit its manifest was measured on. `split` passes both to `unit`.
 

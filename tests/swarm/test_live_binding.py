@@ -882,14 +882,14 @@ def test_pending_relaunch_assignment_is_cleared_after_worker_launch(
     assert store.redis.hget(store.key("sw", "launch-assignments"), "one") is None
 
 
-def test_pending_master_relaunch_assignment_is_cleared_after_launch(ticking):
+def test_pending_master_relaunch_assignment_is_cleared_after_launch(ticking: Any) -> None:
     from scripts.swarm.tick import tick
 
     store, runtime, ledger = ticking
     saved = {"profile": "master", "harness": "claude", "model": "opus", "effort": "high", "account": "team"}
     store.redis.hset(store.key("sw", "launch-assignments"), "master", json.dumps(saved))
     tick("sw", store, ledger, runtime, 100)
-    assert runtime.masters[-1][1]["launch_assignment"] == saved
+    assert runtime.masters[-1][1]["launch_assignment"] == {**saved, "effort": "xhigh"}
     assert store.redis.hget(store.key("sw", "launch-assignments"), "master") is None
 
 
@@ -1391,7 +1391,9 @@ def test_legacy_reader_prefers_registered_assigned_harness(monkeypatch, proof_ha
     "lanes, expected",
     [({"master": {"profile": "master"}}, "master"), ({}, "master"), ({"master": {"profile": "qa"}}, "qa")],
 )
-def test_legacy_master_relaunch_uses_its_declared_profile(ticking, monkeypatch, lanes, expected):
+def test_legacy_master_relaunch_uses_its_declared_profile(
+    ticking: Any, monkeypatch: pytest.MonkeyPatch, lanes: dict[str, dict[str, str]], expected: str
+) -> None:
     from scripts.swarm.tick import tick
 
     monkeypatch.setenv("AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES", "0")
@@ -1407,7 +1409,7 @@ def test_legacy_master_relaunch_uses_its_declared_profile(ticking, monkeypatch, 
     saved = runtime.masters[-1][1]["launch_assignment"]
     assert saved["profile"] == expected
     assert saved["model"] == "opus"
-    assert saved["effort"] == "high"
+    assert saved["effort"] == "xhigh"
 
 
 def test_legacy_worker_relaunch_prefers_explicit_task_profile(

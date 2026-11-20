@@ -132,6 +132,44 @@ def test_measured_dependencies_include_collection_phases_and_preloaded_modules(t
     assert measured_dependencies(coverage_file, work, root, ["tests/test_missing.py::test_missing"], tracked) == {}
 
 
+def test_measured_dependencies_keep_only_the_test_modules_a_node_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sys
+    from types import SimpleNamespace
+
+    from coverage import CoverageData
+
+    from scripts.ci_mutation.stats_dependencies import measured_dependencies
+
+    root = tmp_path / "source"
+    work = tmp_path / "mutants"
+    collected = ["tests/test_a.py", "tests/test_b.py", "tests/test_c.py", "tests/helpers.py"]
+    loaded = ["tests/test_imported.py", "scripts/test_names.py"]
+    for path in collected + loaded:
+        for prefix in (root, work):
+            (prefix / path).parent.mkdir(parents=True, exist_ok=True)
+            (prefix / path).write_text("value = 1\n")
+    coverage_file = tmp_path / "coverage"
+    data = CoverageData(basename=str(coverage_file))
+    data.set_context("")
+    data.add_lines({str(work / path): {1} for path in collected})
+    first = "tests/test_a.py::test_a"
+    second = "tests/test_b.py::test_b"
+    data.set_context(first + "|run")
+    data.add_lines({str(work / "tests/test_a.py"): {1}, str(work / "tests/test_c.py"): {1}})
+    data.set_context(second + "|run")
+    data.add_lines({str(work / "tests/test_b.py"): {1}})
+    data.write()
+    for path in loaded:
+        monkeypatch.setitem(sys.modules, f"stats_probe_{Path(path).stem}", SimpleNamespace(__file__=str(root / path)))
+    found = measured_dependencies(coverage_file, work, root, [first, second], set(collected + loaded))
+    assert found == {
+        first: ["scripts/test_names.py", "tests/helpers.py", "tests/test_a.py", "tests/test_c.py"],
+        second: ["scripts/test_names.py", "tests/helpers.py", "tests/test_b.py"],
+    }
+
+
 @pytest.mark.parametrize("inherited", ["before", None])
 def test_statistics_collect_runtime_dependencies_with_plugin_discovery_disabled(tmp_path, monkeypatch, inherited):
     import os

@@ -3,6 +3,7 @@ import json
 import os
 import time
 from collections.abc import Callable
+from typing import Any
 
 import pytest
 
@@ -790,7 +791,7 @@ def test_a_front_door_that_will_not_retire_starts_no_replacement(up, monkeypatch
     assert rt.masters == [] and [a.name for a in masters(store)] == [live.name]
 
 
-def test_an_empty_saved_assignment_launches_from_the_swarm_config(up, monkeypatch):
+def test_an_empty_saved_assignment_launches_from_the_swarm_config(up: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     store, _, rt = up
     store.redis.hset(store.key("sw", "launch-assignments"), MASTER, json.dumps({"profile": "", "harness": ""}))
     store.put_handoff("sw", MASTER, "# Handoff v2\n## Next\nGo on.\n")
@@ -798,13 +799,15 @@ def test_an_empty_saved_assignment_launches_from_the_swarm_config(up, monkeypatc
     monkeypatch.setattr(master_launch.agent_choice, "choose", lambda requested, environ: ("claude", "rotation"))
     assert run("sw", "master", "up", "--new") == 0
     [(_, task)] = rt.masters
-    launch = {"profile": "master", "harness": "claude", "model": "opus", "effort": "high"}
+    launch = {"profile": "master", "harness": "claude", "model": "opus", "effort": "xhigh"}
     assert {k: task["launch_assignment"][k] for k in launch} == launch
     assert {k: task["handoff_envelope"]["launch"][k] for k in launch} == launch
     assert runtime.profile_choice.transfer(task)["harness"] == "claude"
 
 
-def test_an_incomplete_saved_assignment_keeps_what_it_has_and_fills_the_rest(up, monkeypatch):
+def test_an_incomplete_saved_assignment_keeps_what_it_has_and_fills_the_rest(
+    up: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
     store, _, rt = up
     run("sw", "set", "master-agent=codex", "effort-max=medium")
     saved = {"profile": "master", "harness": "", "model": "", "effort": "", "account": "acct-3"}
@@ -816,7 +819,7 @@ def test_an_incomplete_saved_assignment_keeps_what_it_has_and_fills_the_rest(up,
         "profile": "master",
         "harness": "codex",
         "model": "gpt-6.1-sol",
-        "effort": "high",
+        "effort": "xhigh",
         "account": "acct-3",
     }
 
@@ -827,6 +830,28 @@ def test_no_saved_assignment_leaves_the_launch_to_the_profile_choice(up, monkeyp
     assert run("sw", "master", "up", "--new") == 0
     [(_, task)] = rt.masters
     assert "launch_assignment" not in task and not (task.get("handoff_envelope") or {}).get("launch")
+
+
+@pytest.mark.feature("master-launch-swarm-model")
+@pytest.mark.parametrize("path", ["master-up", "tick"])
+@pytest.mark.parametrize("harness,model", [("claude", "sonnet"), ("codex", "gpt-6-sol")])
+def test_both_master_launch_paths_put_a_saved_launch_on_the_swarm_model_setting(up, monkeypatch, path, harness, model):
+    from scripts.swarm import model_catalog
+    from scripts.tick.steps import masters
+
+    store, _, rt = up
+    catalog = {"claude": [{"model": "sonnet"}], "codex": [{"model": "gpt-6-sol"}]}
+    monkeypatch.setattr(model_catalog, "catalog", lambda *args: catalog)
+    store.update("sw", claude_model="sonnet", codex_model="gpt-6-sol")
+    saved = {"profile": "master", "harness": harness, "model": "", "effort": ""}
+    store.redis.hset(store.key("sw", "launch-assignments"), MASTER, json.dumps(saved))
+    if path == "tick":
+        masters._master("sw", store.config("sw"), store, rt, int(time.time() * 1000))
+    else:
+        answers(monkeypatch)
+        assert run("sw", "master", "up", "--new") == 0
+    [(_, task)] = rt.masters
+    assert (task["launch_assignment"]["harness"], task["launch_assignment"]["model"]) == (harness, model)
 
 
 def test_a_resumed_master_without_a_recorded_profile_takes_the_swarm_master_profile(up, monkeypatch):
@@ -979,12 +1004,17 @@ def test_the_refusals_read_exactly(up, monkeypatch, capsys):
     assert capsys.readouterr().err.strip() == "swarm: no master started"
 
 
-def test_fill_takes_every_empty_key_from_a_bare_config(monkeypatch):
+def test_fill_takes_every_empty_key_from_a_bare_config(monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts import agent_choice
 
     monkeypatch.setattr(agent_choice, "choose", lambda requested, environ: ("claude", "rotation"))
     bare = SwarmConfig("sw", "/repo", 0, 0)
-    assert master_launch.fill({}, bare) == {"profile": "master", "harness": "claude", "model": "opus", "effort": "high"}
+    assert master_launch.fill({}, bare) == {
+        "profile": "master",
+        "harness": "claude",
+        "model": "opus",
+        "effort": "xhigh",
+    }
 
 
 def test_fill_keeps_a_saved_harness_and_picks_its_frontier_model():
@@ -1000,9 +1030,11 @@ def test_fill_leaves_a_saved_launch_on_an_unknown_harness_unclamped():
 @pytest.mark.parametrize("bounds", [("medium", "xhigh"), ("low", "medium")])
 @pytest.mark.parametrize("harness", ["claude", "codex"])
 @pytest.mark.parametrize("saved", ["", "low", "medium"])
-def test_fill_never_leaves_a_master_launch_below_high_whatever_the_saved_launch_or_range_says(harness, bounds, saved):
+def test_fill_never_leaves_a_master_launch_below_xhigh_whatever_the_saved_launch_or_range_says(
+    harness: str, bounds: tuple[str, str], saved: str
+) -> None:
     config = SwarmConfig("sw", "/repo", 0, 0, effort_min=bounds[0], effort_max=bounds[1])
-    assert master_launch.fill({"harness": harness, "effort": saved}, config)["effort"] == "high"
+    assert master_launch.fill({"harness": harness, "effort": saved}, config)["effort"] == "xhigh"
 
 
 @pytest.mark.parametrize("bounds,launched", [(("medium", "xhigh"), "xhigh"), (("medium", "max"), "max")])
@@ -1021,13 +1053,13 @@ def test_a_master_saved_on_an_unknown_harness_is_refused_cleanly(tmp_path):
     assert (str(error.value), error.value.status) == ("unsupported handoff harness: copilot", "unsupported")
 
 
-def test_a_partial_handoff_launch_keeps_its_values_and_the_envelope():
+def test_a_partial_handoff_launch_keeps_its_values_and_the_envelope() -> None:
     config = SwarmConfig("sw", "/repo", 0, 0)
     task = {"id": MASTER, "handoff_envelope": {"reason": "recycle", "launch": {"harness": "codex", "account": "a9"}}}
     filled = master_launch._filled(task, config)
     assert filled["handoff_envelope"] == {
         "reason": "recycle",
-        "launch": {"profile": "master", "harness": "codex", "model": "gpt-6.1-sol", "effort": "high", "account": "a9"},
+        "launch": {"profile": "master", "harness": "codex", "model": "gpt-6.1-sol", "effort": "xhigh", "account": "a9"},
     }
 
 

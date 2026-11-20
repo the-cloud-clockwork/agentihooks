@@ -72,7 +72,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--event", default="pull_request")
     parser.add_argument("--waits", type=int, default=36)
     args = parser.parse_args(argv)
-    problem = verify(args.repository, args.head, event=args.event, waits=args.waits)
+    problem = verify(args.repository, args.head, attempts=args.waits, event=args.event, waits=args.waits)
     if problem:
         print(f"::error::{problem}")
         return 1

@@ -69,6 +69,13 @@ The suite-wide autouse fixture in `tests/conftest.py` already does all of this a
 asserts nothing still resolves under the real home. Use it; don't hand-roll
 per-file isolation — that is exactly how the gap reopened twice.
 
+## Swarm task owners in tests
+
+Use the [admission seat helper](docs/reference/test-seat-helper.md) when a test
+needs an agent before exercising waits, pull request confirmation or another
+feature. The guide covers fixture imports, direct calls, launch options and
+the execution state supplied without starting the swarm or spawning a session.
+
 ## Environment variables in tests
 
 Tests run in parallel xdist workers, and each worker keeps one process

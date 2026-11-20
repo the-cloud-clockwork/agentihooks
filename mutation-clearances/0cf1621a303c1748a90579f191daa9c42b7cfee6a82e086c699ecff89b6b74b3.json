@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/seats.py:scripts.inbox.seats.xǁSeatMemoryǁscoped:301f07867f03155e550ae19f109731ed36ce9cb9d967c2881513f3ba832ca475": {
+    "reader": "standards_reader",
+    "reason": "SeatRegistry.swarm_keys accepts memory keys only with a seat component excluding colon, and valid swarm slugs also exclude colon. After removing PREFIX each valid memory key has exactly one colon, so partition and rpartition return identical seat and kind. Bare occupancy keys are skipped in both cases. Source identity, original ordinals and returned notes are unchanged."
+  }
+}
