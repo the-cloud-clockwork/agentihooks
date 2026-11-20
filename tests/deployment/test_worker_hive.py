@@ -203,6 +203,30 @@ def test_a_pod_from_a_chart_without_the_setting_keeps_the_stored_capabilities(
     assert not any("capabilities=" in line for line in commands.splitlines())
 
 
+@pytest.mark.feature("hub-admission-pinned-hive")
+@pytest.mark.parametrize("pinned", ["yes", "no"])
+def test_the_charted_pin_is_registered_on_every_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pinned: str
+) -> None:
+    monkeypatch.setenv("HIVE_PINNED", pinned)
+    result, commands, _, _ = startup(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert (
+        "hive set --keep --reason the worker started worker-member ui=no ephemeral=yes draining=no excluded=master master-swarms= "
+        f"prefer= pinned={pinned}"
+    ) in commands.splitlines()
+
+
+@pytest.mark.feature("hub-admission-pinned-hive")
+def test_a_pod_from_a_chart_without_the_pin_setting_writes_no_pin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("HIVE_PINNED", raising=False)
+    result, commands, _, _ = startup(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert not any("pinned=" in line for line in commands.splitlines())
+
+
 def test_the_charted_release_name_is_registered_on_every_start(tmp_path, monkeypatch):
     monkeypatch.setenv("HIVE_NAME", "swarm-hive-002")
     result, commands, _, _ = startup(tmp_path)

@@ -1889,6 +1889,20 @@
       ]
     },
     {
+      "id": "hub-admission-pinned-hive",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/crew-261120-204605-fix-3",
+      "behaviour": "A hive whose chart sets workers.pinned renders HIVE_PINNED yes, its worker start registers pinned yes on the hive record with hive set on every start, and the hub release floor then admits that hive's events admission requests whatever release it reports, so a hive pinned to one release keeps taking launches after the hub moves to a newer release; a record with pinned no, any other value or none keeps the release floor, hive set refuses a pinned value other than yes or no, and a pod from a chart without the setting writes no pin.",
+      "seam": "Admission.admit for a hive spoke request, fed by the pinned field the worker start writes with hive set from HIVE_PINNED",
+      "tests": [
+        "tests/hub/test_admission.py::test_the_hub_admits_a_launch_for_a_pinned_hive_on_an_older_release",
+        "tests/hub/test_admission.py::test_the_hub_refuses_a_hive_not_marked_pinned_yes_on_an_older_release",
+        "tests/hive/test_registry.py::test_hive_set_records_whether_the_hive_is_pinned",
+        "tests/deployment/test_worker_hive.py::test_the_charted_pin_is_registered_on_every_start",
+        "tests/deployment/test_worker_hive.py::test_a_pod_from_a_chart_without_the_pin_setting_writes_no_pin"
+      ]
+    },
+    {
       "id": "hub-admission-carries-ledger-intent",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-claim-churn",
