@@ -20,6 +20,9 @@ class Signer:
     def upload_url(self, job: str, name: str) -> str:
         return f"https://objects.test/{job}/{name}"
 
+    def manifest_url(self, path: str) -> str:
+        return f"https://objects.test/{path}"
+
 
 @pytest.fixture
 def jobs() -> queue.Queue:

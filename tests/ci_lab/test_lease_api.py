@@ -16,10 +16,15 @@ BEARER = f"Bearer {TOKEN}"
 class Signer:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
+        self.signed: list[str] = []
 
     def upload_url(self, job: str, name: str) -> str:
         self.calls.append((job, name))
         return f"https://objects.test/{job}/{name}?signed"
+
+    def manifest_url(self, path: str) -> str:
+        self.signed.append(path)
+        return f"https://objects.test/{path}?signed-get"
 
 
 class Clock:
@@ -101,7 +106,25 @@ def test_lease_returns_the_grant_payload(lab: leases.Leases, signer: Signer, job
         "members": ["tests/a.py::t"],
         "slots": 1,
         "expires_ms": 1500,
+        "manifest": "",
+        "manifest_url": "",
     }
+    assert signer.signed == []
+
+
+@pytest.mark.feature("lab-worker-lease-manifest")
+def test_lease_signs_a_get_url_for_the_manifest_its_job_names(
+    lab: leases.Leases, signer: Signer, jobs: queue.Queue
+) -> None:
+    manifest = "lab/manifests/o--r/c1.json"
+    jobs.enqueue([Unit(kind="test", key="a", members=("tests/a.py::t",))], "h1", {}, "b1", "g1", manifest)
+
+    status, body = post(lab, signer, "/lease", {"worker": "w1", "free_slots": 1, "capabilities": [], "wait_ms": 0})
+
+    assert status == 200
+    [grant] = body["leases"]
+    assert (grant["manifest"], grant["manifest_url"]) == (manifest, f"https://objects.test/{manifest}?signed-get")
+    assert signer.signed == [manifest]
 
 
 def test_lease_passes_capabilities_and_caps_the_wait(

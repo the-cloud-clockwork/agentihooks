@@ -91,6 +91,19 @@ def test_a_grant_carries_the_base_and_grader_revision_of_its_job(jobs: queue.Que
     assert grant == leases.Grant("h1:test:a", grant.token, "h1", unit("a"), 1, 1500, "b1", "g1")
 
 
+@pytest.mark.feature("lab-worker-lease-manifest")
+def test_a_grant_carries_the_manifest_its_job_names(jobs: queue.Queue, lab: leases.Leases) -> None:
+    jobs.enqueue([unit("a")], "h1", {}, "b1", "g1", "lab/manifests/o--r/c1.json")
+    jobs.enqueue([unit("b")], "h2", {})
+
+    grants = lab.lease("w1", 2, frozenset(), 0)
+
+    assert [(grant.job, grant.manifest) for grant in grants] == [
+        ("h1:test:a", "lab/manifests/o--r/c1.json"),
+        ("h2:test:b", ""),
+    ]
+
+
 @pytest.mark.feature("lab-scheduler-metrics")
 def test_a_grant_records_the_millisecond_its_lease_started(jobs: queue.Queue, lab: leases.Leases, clock: Clock) -> None:
     jobs.enqueue([unit("a")], "h1", {})

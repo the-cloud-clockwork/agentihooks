@@ -72,6 +72,8 @@ class Lease:
     expires_ms: int
     base: str = ""
     grader: str = ""
+    manifest: str = ""
+    manifest_url: str = ""
 
 
 @dataclass(frozen=True)
