@@ -6689,6 +6689,19 @@
       ]
     },
     {
+      "id": "protected-grader-accepts-equivalence-scm-pin",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-protected-equivalence-install-pin",
+      "behaviour": "The protected grader admits a head whose ledger equivalence install step gains exactly SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS set to the run number dev version, so that install skips the setuptools-scm git scan like every other CI editable install, and refuses any other pin value, any other env key, and the pin on another step or on the job.",
+      "seam": "gate_protected._equivalence_problems over the pinned install form of the dev prefix",
+      "tests": [
+        "tests/test_gate_protected_scm_pin.py::test_the_required_grader_accepts_the_scm_version_pin_on_the_equivalence_install",
+        "tests/test_gate_protected_scm_pin.py::test_the_required_grader_keeps_accepting_the_pinned_install_once_dev_carries_it",
+        "tests/test_gate_protected_scm_pin.py::test_the_required_grader_refuses_any_other_equivalence_pin",
+        "tests/test_gate_protected_scm_pin.py::test_a_small_equivalence_form_admits_only_the_exact_scm_pin"
+      ]
+    },
+    {
       "id": "gate-declarations-never-expire",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-gate-never-deadlock",
