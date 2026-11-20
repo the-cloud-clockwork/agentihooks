@@ -262,6 +262,8 @@ class ExecutionRegistry:
             current = occupants_of(doc).get(agent.seat)
             if not current or any(getattr(agent, field) != getattr(current, field) for field in IMMUTABLE):
                 self.conflict(slug, "stale or changed execution identity")
+            if current.state == "ended":
+                return current, current
             written = agent
             if current.state == "finished" and written.state != "ended":
                 written = replace(written, state="finished")
