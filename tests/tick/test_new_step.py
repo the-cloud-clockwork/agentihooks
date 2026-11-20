@@ -316,7 +316,7 @@ def test_the_scaffold_lists_the_step_under_the_scenario_given(tree: Path) -> Non
 
 def test_a_mapped_feature_without_tests_gains_the_new_test_and_keeps_its_text(tree: Path) -> None:
     entry = {"id": "tick-step-widgets", "behaviour": "Widgets counted"}
-    (tree / "feature-map.json").write_text(json.dumps({"features": [entry]}))
+    (tree / "feature-map.json").write_text(json.dumps({"features": [entry]}, indent=2) + "\n")
     assert scaffold(tree, STEP) == 0
     mapped = {"features": [{**entry, "tests": ["tests/tick/steps/test_probe_widgets.py::test_probe_widgets"]}]}
     assert (tree / "feature-map.json").read_text() == json.dumps(mapped, indent=2) + "\n"

@@ -37,6 +37,52 @@ def load(map_path: Path) -> dict[str, Any]:
     return data
 
 
+def _skip(text: str, index: int) -> int:
+    """The offset of the first character at or after ``index`` in ``text`` that is not JSON whitespace."""
+    while text[index] in " \t\n\r":
+        index += 1
+    return index
+
+
+def _features_start(text: str) -> int:
+    """The offset of the opening bracket of the ``features`` array in feature map ``text``."""
+    decoder = json.JSONDecoder()
+    index = _skip(text, _skip(text, 0) + 1)
+    while True:
+        key, index = decoder.raw_decode(text, index)
+        index = _skip(text, _skip(text, index) + 1)
+        if key == "features":
+            return index
+        index = _skip(text, _skip(text, decoder.raw_decode(text, index)[1]) + 1)
+
+
+def _entries(text: str, start: int) -> list[tuple[int, int, Any]]:
+    """The start offset, end offset and parsed value of each entry of the array opened at ``start`` in ``text``."""
+    decoder = json.JSONDecoder()
+    found: list[tuple[int, int, Any]] = []
+    index = _skip(text, start + 1)
+    while text[index] != "]":
+        value, end = decoder.raw_decode(text, index)
+        found.append((index, end, value))
+        index = _skip(text, end)
+        index = _skip(text, index + 1) if text[index] == "," else index
+    return found
+
+
+def with_entry(text: str, entry: dict[str, Any]) -> str:
+    """Feature map ``text`` with ``entry`` in place of the entry sharing its id, or first when its id is new, and
+    every other byte unchanged."""
+    start = _features_start(text)
+    found = _entries(text, start)
+    body = json.dumps(entry, indent=2).replace("\n", "\n    ")
+    for first, last, value in found:
+        if value["id"] == entry["id"]:
+            return text[:first] + body + text[last:]
+    if found:
+        return text[: found[0][0]] + body + ",\n    " + text[found[0][0] :]
+    return text[:start] + "[\n    " + body + "\n  ]" + text[_skip(text, start + 1) + 1 :]
+
+
 def _tests(root: Path) -> dict[str, str | None]:
     marked = {}
     for path in sorted((root / "tests").rglob("*.py")):
