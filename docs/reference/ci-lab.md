@@ -1067,9 +1067,13 @@ The lab remote is a git endpoint beside the scheduler. Its post receive hook,
 `ci.lab.head.notice` envelope on the same stream, and prints the head's grade url to the pusher:
 
 ```text
-$ git push -o branch=<branch> lab HEAD:refs/grade/<task>
+$ git -c push.negotiate=true push -o branch=<branch> lab HEAD:refs/grade/<task>
 remote: lab grade: <CI_LAB_URL>/grades/<sha>
 ```
+
+`swarm publish --via lab` sets `push.negotiate=true` on every grade push, so a client behind the
+lab remote's history sends only the objects the remote lacks. Without it, a client fifty commits
+behind the seeded `dev` sent its whole history, 88 MiB, where the negotiated push sent 297 bytes.
 
 The url is the scheduler's [`/grades/<sha>`](#grades-of-a-commit) route. The envelope carries the
 pushed `ref` and the `branch` push option, which becomes the head's scheduler lane. Its id covers
