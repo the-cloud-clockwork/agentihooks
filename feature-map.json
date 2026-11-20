@@ -15,7 +15,7 @@
       "id": "stop-gate-ledger-variable",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2745",
-      "behaviour": "A ledger write command reached through a shell variable, assigned earlier in the same command or set in the environment, restarts the stop gate's tool call count like the literal command; a variable naming another program still counts as a plain call.",
+      "behaviour": "A ledger write command reached through a shell variable, assigned in the same command or set in the agent's environment, restarts the stop gate's tool call count like the literal command; a variable naming another program still counts as a plain call.",
       "seam": "scripts.swarm_ledger.ledger_hook.on_tool over a Bash payload",
       "tests": [
         "tests/swarm_ledger/test_hook_progress.py::test_a_ledger_write_through_a_shell_variable_restarts_the_count",
