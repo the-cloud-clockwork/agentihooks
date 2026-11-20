@@ -953,8 +953,10 @@ SET_TESTS_IN_SCRIPTS = [
     "sh -c 'test -n \"${GITHUB_TOKEN:-}\" && echo set || echo unset'",
 ]
 
-SET_TESTS_THAT_PRINT_THE_VALUE = [
+SCRIPTS_THAT_PRINT_THE_VALUE = [
     ("kubectl exec pod-0 -- sh -c 'echo $GITHUB_TOKEN'", "GITHUB_TOKEN"),
+    ("kubectl exec pod-0 -- sh -xc 'test -n \"${GITHUB_TOKEN:-}\" && echo set || echo unset'", "GITHUB_TOKEN"),
+    ("kubectl exec pod-0 -- bash -c 'set -o xtrace; [ -n \"$API_KEY\" ] && echo set'", "API_KEY"),
     ('kubectl exec pod-0 -- sh -c \'test -n "${GITHUB_TOKEN:-}" && echo "$GITHUB_TOKEN"\'', "GITHUB_TOKEN"),
     ('kubectl exec pod-0 -- sh -c \'test -n "$API_KEY" && echo set; printf %s "$API_KEY"\'', "API_KEY"),
     ('kubectl exec pod-0 -- sh -c \'test -n "${GITHUB_TOKEN:-}" && echo "$1"\' _ "$GITHUB_TOKEN"', "GITHUB_TOKEN"),
@@ -970,8 +972,8 @@ def test_a_set_test_inside_a_shell_script_passes(command: str) -> None:
 
 
 @pytest.mark.feature("credential-guard-passes-set-tests-in-scripts")
-@pytest.mark.parametrize(("command", "name"), SET_TESTS_THAT_PRINT_THE_VALUE)
-def test_a_shell_script_that_prints_a_tested_value_is_refused(command: str, name: str) -> None:
+@pytest.mark.parametrize(("command", "name"), SCRIPTS_THAT_PRINT_THE_VALUE)
+def test_a_shell_script_that_prints_the_value_is_refused(command: str, name: str) -> None:
     assert decide(_bash(command)) == block(f"printing ${name} to stdout", KIND_ENVIRONMENT)
 
 

@@ -153,12 +153,22 @@ kubectl exec pod-0 -- sh -c 'test -n "$GITHUB_TOKEN" -a "$GITHUB_TOKEN" -eq 0 &&
 ```
 
 The last one prints the value in the shell's `integer expression expected`
-error. An unquoted operand, another expansion such as `"${VAR:+x}"` or an
+error. With xtrace on, the shell prints each expanded command to stderr,
+`test -n` and its value included, so a command that holds a flag word with an
+`x`, such as `sh -xc` or `set -ex`, or the word `xtrace` keeps every name it
+holds counted:
+
+```bash
+kubectl exec pod-0 -- sh -xc 'test -n "${GITHUB_TOKEN:-}" && echo set || echo unset'
+kubectl exec pod-0 -- bash -c 'set -o xtrace; [ -n "$API_KEY" ] && echo set'
+```
+
+An unquoted operand, another expansion such as `"${VAR:+x}"` or an
 escaped quote is not read as a set test, so the script is refused as before.
 Delivered by pull request
 [#12604](https://github.com/the-cloud-clockwork/agentihooks/pull/12604), with
 the regression tests `test_a_set_test_inside_a_shell_script_passes` and
-`test_a_shell_script_that_prints_a_tested_value_is_refused` and the feature map
+`test_a_shell_script_that_prints_the_value_is_refused` and the feature map
 entry `credential-guard-passes-set-tests-in-scripts`.
 
 ## What still passes

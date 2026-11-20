@@ -93,6 +93,7 @@ SET_TEST = re.compile(
     r"(?:^|(?<=[\s'\"(;&|]))(?:test|\[\[?)\s+-[nz]\s+"
     r"\"\$(?:\{[A-Za-z_][A-Za-z0-9_]*(?::?-)?\}|[A-Za-z_][A-Za-z0-9_]*)\"(?:\s+\]\]?)?(?=[\s'\";&|)]|$)"
 )
+XTRACE = re.compile(r"(?:^|\s)-[A-Za-z]*x|\bxtrace\b")
 
 QUOTING = re.compile(r"[\"'\\]")
 PROC_DIR = re.compile(r"/proc\b")
@@ -502,13 +503,11 @@ def leaf_names_environ(leaf):
 def echo_secret_verdict(command: str) -> str | None:
     if not re.search(r"\b(echo|printf)\b", command):
         return None
-    for part in SET_TEST.split(command):
+    parts = [command] if XTRACE.search(command) else SET_TEST.split(command)
+    for part in parts:
         for name in re.findall(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)", part):
             if SECRETISH_NAME.search(name):
-                return block(
-                    "printing ${} to stdout".format(name),
-                    KIND_ENVIRONMENT,
-                )
+                return block(f"printing ${name} to stdout", KIND_ENVIRONMENT)
     return None
 
 
