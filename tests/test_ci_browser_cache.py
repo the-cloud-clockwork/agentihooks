@@ -16,15 +16,16 @@ HOSTED = READY + " && runner.environment == 'github-hosted'"
 
 
 def _setup(
-    tmp_path,
-    monkeypatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
     *,
-    cached,
-    ready,
-    recovery=True,
-    stall_once=False,
-    attempt_seconds=None,
-):
+    cached: bool,
+    ready: bool,
+    recovery: bool = True,
+    stall_once: bool = False,
+    attempt_seconds: int | None = None,
+    apt_seconds: int | None = None,
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     executable = tmp_path / "python"
     calls = tmp_path / "calls"
     marker = tmp_path / "ready"
@@ -40,7 +41,16 @@ def _setup(
         "#!/usr/bin/env bash\nset -euo pipefail\n"
         'if [[ "$*" == *"install --with-deps chromium"* ]]; then\n'
         '  echo install >> "$CALLS"\n'
-        '  if [[ -f "$STALL" ]]; then rm "$STALL"; sleep 30; fi\n'
+        '  [[ ! -e "$APT_LOCK" ]] || { echo "E: Could not get lock $APT_LOCK" >&2; exit 100; }\n'
+        '  if [[ -f "$STALL" ]]; then\n'
+        '    rm "$STALL"\n'
+        '    if [[ -n "$APT_SECONDS" ]]; then\n'
+        '      touch "$APT_LOCK"\n'
+        '      setsid bash -c \'sleep "$APT_SECONDS"; echo released >> "$CALLS"; rm "$APT_LOCK"\''
+        " < /dev/null > /dev/null 2>&1 &\n"
+        "    fi\n"
+        "    sleep 30\n"
+        "  fi\n"
         '  [[ "$RECOVERY" == true ]] || exit 1\n'
         '  touch "$READY"\n'
         "else\n"
@@ -54,10 +64,15 @@ def _setup(
     sudo = tmp_path / "sudo"
     sudo.write_text('#!/usr/bin/env bash\nset -euo pipefail\necho mirror >> "$CALLS"\n')
     sudo.chmod(0o755)
+    pgrep = tmp_path / "pgrep"
+    pgrep.write_text('#!/usr/bin/env bash\n[[ "$*" == "-f apt-get" && -e "$APT_LOCK" ]]\n')
+    pgrep.chmod(0o755)
     monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
     monkeypatch.setenv("CALLS", str(calls))
     monkeypatch.setenv("READY", str(marker))
     monkeypatch.setenv("STALL", str(stall))
+    monkeypatch.setenv("APT_LOCK", str(tmp_path / "apt_lock"))
+    monkeypatch.setenv("APT_SECONDS", "" if apt_seconds is None else str(apt_seconds))
     monkeypatch.setenv("RECOVERY", str(recovery).lower())
     monkeypatch.setenv("LAUNCH_STALL", str(launch_stall))
     monkeypatch.setenv("LAUNCH_FAILS", str(os.environ.get("BROWSER_CACHE_TEST_LAUNCH") == "fail").lower())
@@ -122,6 +137,26 @@ def test_a_stalled_download_is_killed_at_its_attempt_timeout_and_retried_green(t
     assert result.returncode == 0, result.stderr
     assert calls == ["mirror", "install", "install", "launch"]
     assert time.monotonic() - started < 20
+
+
+def test_a_retry_after_a_timeout_waits_for_the_left_over_apt_get_to_release_its_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    result, calls = _setup(
+        tmp_path, monkeypatch, cached=False, ready=False, stall_once=True, attempt_seconds=6, apt_seconds=8
+    )
+    assert result.returncode == 0, result.stderr
+    assert calls == ["mirror", "install", "released", "install", "launch"]
+
+
+def test_a_retry_never_installs_while_the_lock_is_held_and_ends_within_its_attempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    result, calls = _setup(
+        tmp_path, monkeypatch, cached=False, ready=False, stall_once=True, attempt_seconds=2, apt_seconds=8
+    )
+    assert result.returncode != 0
+    assert calls == ["mirror", "install"]
 
 
 def test_a_stalled_installed_browser_launch_is_retried_green(tmp_path, monkeypatch):
