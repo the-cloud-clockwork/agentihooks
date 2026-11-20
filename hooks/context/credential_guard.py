@@ -435,11 +435,19 @@ def counts_only(stage):
     return False
 
 
+def pod_command(toks: list[str]) -> list[str]:
+    """The words after -- of a kubectl exec stage, the command the pod runs; the tokens themselves otherwise."""
+    if verb_of(toks) != "kubectl" or "--" not in toks:
+        return toks
+    end = toks.index("--")
+    return toks[end + 1 :] if "exec" in toks[:end] else toks
+
+
 def env_dump_verdict(command):
     stages = split_stages(command)
     if not stages:
         return None
-    toks = tokens_of(stages[0])
+    toks = pod_command(tokens_of(stages[0]))
     if not toks:
         return None
     verb = verb_of(toks)
