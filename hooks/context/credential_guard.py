@@ -443,7 +443,7 @@ def pod_command(toks: list[str]) -> list[str]:
     return toks[end + 1 :] if "exec" in toks[:end] else toks
 
 
-def env_dump_verdict(command):
+def env_dump_verdict(command: str) -> str | None:
     stages = split_stages(command)
     if not stages:
         return None
