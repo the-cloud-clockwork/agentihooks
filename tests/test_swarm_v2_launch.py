@@ -750,7 +750,7 @@ def test_an_adoption_refusal_does_not_allow_a_tick_to_replace_a_live_execution(w
 
     assert world.tick(FIRST).ok
     admitted = world.store.execution_occupants(SLUG)[FIRST]
-    current = replace(admitted, state="working", harness="codex", transport=APP_SERVER_TRANSPORT, hive="m1")
+    current = replace(admitted, state="working")
     world.store.put_agent(SLUG, current)
     spec = supervisor.Launch(SLUG, current, ".", "fixture", {}, execution_id=current.execution_id)
 

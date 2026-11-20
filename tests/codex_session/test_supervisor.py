@@ -1319,7 +1319,10 @@ def test_a_hive_member_refuses_a_hub_admitted_execution_whose_agent_left(
     admitted = hub_admitted(store, spec)
     store.redis.hdel(store.key(SLUG, "agents"), admitted.name)
     failure = failed(store, server, clock, root, replace(spec, execution_id=admitted.execution_id), "execution")
-    assert str(failure) == supervisor.NOT_ADMITTED.format(admitted.execution_id)
+    assert str(failure) == (
+        supervisor.NOT_ADMITTED.format(admitted.execution_id)
+        + ": atomic bind refused with no differing field in the refreshed snapshot"
+    )
     assert store.execution(SLUG, admitted.execution_id).transport == ""
     assert server.commands == []
 
@@ -1386,7 +1389,7 @@ def test_adoption_refusal_names_changed_fields_and_keeps_the_launch_ending(
     failure = failed(store, server, clock, root, replace(spec, execution_id=admitted.execution_id), "execution")
     assert str(failure) == supervisor.NOT_ADMITTED.format(admitted.execution_id) + ": " + "; ".join(details)
     ending = json.loads(store.redis.hget(store.key(SLUG, "launch-endings"), admitted.execution_id))
-    assert ending == {"reason": str(failure), "generation": admitted.generation}
+    assert ending == {"reason": str(failure), "generation": admitted.generation, "diagnostic": True}
     assert store.execution(SLUG, admitted.execution_id) == admitted
     assert server.commands == []
 
@@ -1404,7 +1407,7 @@ def test_adoption_refusal_records_the_replacement_execution_without_ending_it(
     failure = failed(store, server, clock, root, replace(spec, execution_id=admitted.execution_id), "execution")
     assert f"execution_id: seat={successor.execution_id!r}, launch={admitted.execution_id!r}" in str(failure)
     ending = json.loads(store.redis.hget(store.key(SLUG, "launch-endings"), admitted.execution_id))
-    assert ending == {"reason": str(failure), "generation": admitted.generation}
+    assert ending == {"reason": str(failure), "generation": admitted.generation, "diagnostic": True}
     assert store.execution(SLUG, successor.execution_id) == successor
     assert server.commands == []
 
@@ -1413,16 +1416,26 @@ def test_adoption_refusal_records_the_replacement_execution_without_ending_it(
 def test_adoption_refusal_keeps_a_missing_seat_in_the_launch_ending(
     store: RedisStore, server: Server, clock: Clock, root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from scripts.swarm import commands
+    from dataclasses import asdict
+
+    from scripts.swarm import commands, fencing
 
     monkeypatch.setattr(commands, "hive_id", lambda: "m1")
     spec = launch_spec(store, server, tmp_path)
-    admitted = hive_admitted(store, spec)
-    store.drop_agent(SLUG, admitted.name, 1000)
+    admitted = replace(
+        spec.agent,
+        execution_id="exe-archived",
+        generation=1,
+        state="launching",
+        harness="codex",
+        transport=APP_SERVER_TRANSPORT,
+        hive="m1",
+    )
+    fencing.write(store, SLUG, lambda doc: doc["archive"].update({admitted.execution_id: asdict(admitted)}))
     failure = failed(store, server, clock, root, replace(spec, execution_id=admitted.execution_id), "execution")
     assert f"execution_id: seat=None, launch={admitted.execution_id!r}" in str(failure)
     ending = json.loads(store.redis.hget(store.key(SLUG, "launch-endings"), admitted.execution_id))
-    assert ending == {"reason": str(failure), "generation": admitted.generation}
+    assert ending == {"reason": str(failure), "generation": admitted.generation, "diagnostic": True}
     assert store.execution_occupants(SLUG) == {}
     assert server.commands == []
 
@@ -1448,7 +1461,7 @@ def test_adoption_refusal_rereads_the_state_after_an_atomic_bind_refusal(
         supervisor.NOT_ADMITTED.format(admitted.execution_id) + ": state: seat='working', launch='starting'"
     )
     ending = json.loads(store.redis.hget(store.key(SLUG, "launch-endings"), admitted.execution_id))
-    assert ending == {"reason": str(failure), "generation": admitted.generation}
+    assert ending == {"reason": str(failure), "generation": admitted.generation, "diagnostic": True}
     current = store.execution(SLUG, admitted.execution_id)
     assert (current.state, current.harness, current.transport) == ("working", "", "")
     assert server.commands == []
@@ -1470,6 +1483,35 @@ def test_adoption_refusal_names_an_atomic_bind_refusal_when_the_snapshot_matches
         + ": atomic bind refused with no differing field in the refreshed snapshot"
     )
     ending = json.loads(store.redis.hget(store.key(SLUG, "launch-endings"), admitted.execution_id))
-    assert ending == {"reason": str(failure), "generation": admitted.generation}
+    assert ending == {"reason": str(failure), "generation": admitted.generation, "diagnostic": True}
+    assert store.execution(SLUG, admitted.execution_id) == admitted
+    assert server.commands == []
+
+
+@pytest.mark.feature("codex-adopt-refusal-fields")
+@pytest.mark.parametrize("diagnostic", [True, False])
+def test_adoption_refusal_preserves_existing_ending_authority(
+    store: RedisStore,
+    server: Server,
+    clock: Clock,
+    root: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    diagnostic: bool,
+) -> None:
+    from scripts.swarm import commands
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "m1")
+    spec = launch_spec(store, server, tmp_path)
+    admitted = hive_admitted(store, spec, state="working")
+    previous = {"reason": "previous", "generation": admitted.generation}
+    if diagnostic:
+        previous["diagnostic"] = True
+    store.redis.hset(store.key(SLUG, "launch-endings"), admitted.execution_id, json.dumps(previous))
+
+    failure = failed(store, server, clock, root, replace(spec, execution_id=admitted.execution_id), "execution")
+
+    ending = json.loads(store.redis.hget(store.key(SLUG, "launch-endings"), admitted.execution_id))
+    assert ending == {"reason": str(failure), "generation": admitted.generation, "diagnostic": diagnostic}
     assert store.execution(SLUG, admitted.execution_id) == admitted
     assert server.commands == []

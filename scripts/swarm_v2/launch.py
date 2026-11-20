@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from hooks.context import profile_chain
-from scripts.swarm import live_binding, profile_choice, prompt
+from scripts.swarm import launch_endings, live_binding, profile_choice, prompt
 from scripts.swarm.store import AgentRecord, SwarmError
 from scripts.swarm_ledger import hosted_probe
 from scripts.swarm_v2 import broadcast_bridge, worker_home
@@ -259,8 +259,7 @@ class DistributedLaunch:
         store = self.controller.store
         occupant = store.execution_occupants(self.slug).get(agent.seat)
         refused = occupant and (
-            occupant.state in ("ended", "finished")
-            or store.redis.hexists(store.key(self.slug, ENDINGS), occupant.execution_id)
+            occupant.state in ("ended", "finished") or launch_endings.terminal(store, self.slug, occupant.execution_id)
         )
         previous = occupant.execution_id if refused else ""
         return self.spawn(request, agent, replace(terms, api_url=api_url), previous, self.opening(request)).outcome

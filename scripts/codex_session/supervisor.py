@@ -20,6 +20,7 @@ from scripts.codex_session import protocol
 from scripts.codex_session.binding import CONNECTED, EXITED, FAILED, RECORDS, BindingStore, TransportRecord, decode
 from scripts.profiles import binding
 from scripts.routing import envs
+from scripts.swarm import launch_endings
 from scripts.swarm.store import APP_SERVER_TRANSPORT, MASTER, AgentRecord, RedisStore
 from scripts.swarm_v2 import masters
 
@@ -215,11 +216,7 @@ def _adoption_failure(
         + ": "
         + (details or "atomic bind refused with no differing field in the refreshed snapshot")
     )
-    store.redis.hset(
-        store.key(launch.slug, "launch-endings"),
-        launch.execution_id,
-        json.dumps({"reason": reason, "generation": agent.generation}),
-    )
+    launch_endings.record_refusal(store, launch.slug, launch.execution_id, reason, agent.generation)
     return LaunchFailure("execution", reason)
 
 
