@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from scripts.swarm import fencing
+from scripts.swarm import fencing, model_catalog
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from tests.helpers import store_seed
 
@@ -51,6 +51,26 @@ def test_create_twice_is_refused(store):
     store.create(config())
     with pytest.raises(SwarmError):
         store.create(config())
+
+
+def test_refusal_names_what_create_refuses_and_writes_nothing(store: RedisStore) -> None:
+    assert store.refusal(config()) == ""
+    assert store.refusal(config(swap_full_share=1.5)) == "swap full share must be above 0 and at most 1"
+    assert store.slugs() == [] and not store.redis.exists(store.key("smoke", "config"))
+    store.create(config())
+    assert store.refusal(config()) == "swarm smoke already exists"
+
+
+def test_create_refuses_a_swarm_made_after_its_refusal_check(store: RedisStore) -> None:
+    from unittest.mock import patch
+
+    store.create(config(max_eng=3))
+    with (
+        patch.object(store, "refusal", return_value=""),
+        pytest.raises(SwarmError, match="^swarm smoke already exists$"),
+    ):
+        store.create(config())
+    assert store.config("smoke").max_eng == 3
 
 
 def test_set_updates_caps_and_state(store):
@@ -745,7 +765,10 @@ def test_compact_limit_round_trips_and_an_old_config_reads_as_unset(store):
     assert store.config("smoke").compact_limit == 0
 
 
-def test_template_and_lane_map_round_trip_and_an_old_config_reads_as_none(store):
+def test_template_and_lane_map_round_trip_and_an_old_config_reads_as_none(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(model_catalog, "catalog", lambda *_: {"codex": [{"model": "m"}]})
     lanes = {"eng": {"role": "r", "agent": "codex", "model": "m", "effort": "high", "kind": "code"}}
     store.create(config(template="t", lanes=lanes))
     assert (store.config("smoke").template, store.config("smoke").lanes) == ("t", lanes)

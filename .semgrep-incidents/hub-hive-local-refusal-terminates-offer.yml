@@ -1,0 +1,23 @@
+rules:
+  - id: hub-hive-local-refusal-terminates-offer
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A refusal about the asking hive must answer held. Returning no admission
+      terminates the only offer on that hive and prevents an eligible hive taking it.
+    patterns:
+      - pattern-inside: |
+          class Admission:
+              ...
+      - pattern-inside: |
+          def admit(self, ...):
+              ...
+      - pattern-either:
+          - pattern: |
+              if <... self._outdated(...) ...>:
+                  ...
+                  return None
+          - pattern: |
+              if <... self._unplaceable(...) ...>:
+                  ...
+                  return None

@@ -2,7 +2,9 @@ import json
 import re
 import secrets
 import sqlite3
+import sys
 import threading
+import time
 import weakref
 from collections.abc import Callable
 from contextlib import contextmanager, nullcontext, suppress
@@ -48,6 +50,10 @@ GENERATION_SHIFT = 20
 CHANGES_KEPT = 256
 VIEW_BUILD = threading.Lock()
 BEGIN_IMMEDIATE = "BEGIN IMMEDIATE"
+WAL = "PRAGMA journal_mode=WAL"
+LOCKED = "database is locked"
+BUSY_TIMEOUT_S = 30
+WAL_RETRY_S = 0.05
 STORED = "SELECT 1 FROM ledgers WHERE slug=?"
 GENERATION = "SELECT generation FROM ledgers WHERE slug=?"
 TOKEN = "SELECT token FROM ledgers WHERE slug=?"
@@ -401,6 +407,35 @@ def close_all(held: dict) -> None:
         closing()
 
 
+class WalSwitch:
+    """Turns one connection's file to WAL. Every store open runs turn; only a refused switch reaches wait, which runs
+    inside turn's except clause, raises any refusal other than database is locked at once and otherwise retries
+    within the busy timeout while another connection holds a new file's write lock, because SQLite refuses that lock
+    upgrade at once instead of calling the busy handler."""
+
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self.connection = connection
+
+    def turn(self) -> None:
+        try:
+            self.connection.execute(WAL)
+        except sqlite3.OperationalError:
+            self.wait()
+
+    def wait(self) -> None:
+        if LOCKED not in str(sys.exception()):
+            raise
+        deadline = time.monotonic() + BUSY_TIMEOUT_S
+        while True:
+            try:
+                self.connection.execute(WAL)
+                return
+            except sqlite3.OperationalError as error:
+                if LOCKED not in str(error) or time.monotonic() >= deadline:
+                    raise
+            time.sleep(WAL_RETRY_S)
+
+
 class SQLiteLedgerRepository:
     """The durable ledger record: one row per JSON value, written only where a mutation changed it."""
 
@@ -479,7 +514,7 @@ class SQLiteLedgerRepository:
         with self._guard:
             if path in self._ready:
                 return
-            connection.execute("PRAGMA journal_mode=WAL")
+            WalSwitch(connection).turn()
             connection.executescript(SCHEMA)
             connection.executescript(hierarchy.SCHEMA)
             connection.executescript(ROWS_SCHEMA)

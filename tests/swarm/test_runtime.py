@@ -821,13 +821,15 @@ def test_a_codex_launch_must_start_its_harness_inside_the_start_timeout(tmp_path
 @pytest.mark.parametrize(
     "lane,harness,launch,source",
     [
-        ("master", "claude", ["--model", "opus", "--effort", "high"], "frontier"),
-        ("master", "codex", ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="high"'], "frontier"),
+        ("master", "claude", ["--model", "opus", "--effort", "xhigh"], "frontier"),
+        ("master", "codex", ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="xhigh"'], "frontier"),
         ("eng", "claude", ["--model", "opus", "--effort", "medium"], "lane-default"),
         ("eng", "codex", ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="medium"'], "lane-default"),
     ],
 )
-def test_resume_uses_defaults_when_no_resolved_model_was_recorded(tmp_path, monkeypatch, lane, harness, launch, source):
+def test_resume_uses_defaults_when_no_resolved_model_was_recorded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lane: str, harness: str, launch: list[str], source: str
+) -> None:
     from dataclasses import replace
 
     for key in ("CLAUDE_MODEL", "CLAUDE_EFFORT", "CODEX_MODEL", "CODEX_EFFORT"):
@@ -1089,7 +1091,9 @@ SEAT_TASKS = {
 
 @pytest.mark.parametrize("lane", sorted(SEAT_TASKS))
 @pytest.mark.parametrize("handoff", [None, "# Handoff\n<!-- handoff complete -->"])
-def test_every_seat_launch_carries_opus_and_its_lane_effort_for_claude(tmp_path, monkeypatch, lane, handoff):
+def test_every_seat_launch_carries_opus_and_its_lane_effort_for_claude(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lane: str, handoff: str | None
+) -> None:
     from scripts.swarm.templates import DEFAULT_PROFILES
 
     transfer = (
@@ -1108,43 +1112,50 @@ def test_every_seat_launch_carries_opus_and_its_lane_effort_for_claude(tmp_path,
         else {}
     )
     task = {**SEAT_TASKS[lane], **transfer}
-    effort = "high" if handoff or lane == "master" else "medium"
+    effort = "xhigh" if lane == "master" else "high" if handoff else "medium"
     assert _launched(tmp_path, monkeypatch, lane, task) == ["--model", "opus", "--effort", effort]
 
 
 @pytest.mark.parametrize("lane", ["master", "plan"])
-def test_master_and_plan_seats_never_take_the_task_classifier_pick(tmp_path, monkeypatch, lane):
+def test_master_and_plan_seats_never_take_the_task_classifier_pick(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lane: str
+) -> None:
     from scripts.swarm import model_pick
 
     monkeypatch.setattr(model_pick, "pick", lambda *a, **kw: pytest.fail(f"{lane} seat consulted the classifier"))
     task = {**SEAT_TASKS[lane], "handoff": "# Handoff\n<!-- handoff complete -->"}
-    assert _launched(tmp_path, monkeypatch, lane, task) == ["--model", "opus", "--effort", "high"]
+    assert _launched(tmp_path, monkeypatch, lane, task) == [
+        "--model",
+        "opus",
+        "--effort",
+        "xhigh" if lane == "master" else "high",
+    ]
 
 
 @pytest.mark.parametrize("handoff", [None, "# Handoff\n<!-- handoff complete -->"])
 @pytest.mark.parametrize(
     "harness,launch",
     [
-        ("claude", ["--model", "opus", "--effort", "high"]),
-        ("codex", ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="high"']),
+        ("claude", ["--model", "opus", "--effort", "xhigh"]),
+        ("codex", ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="xhigh"']),
     ],
 )
-def test_a_master_launches_on_the_frontier_model_at_high_effort_whatever_the_lane_or_environment_names(
-    tmp_path, monkeypatch, harness, launch, handoff
-):
+def test_a_master_launches_on_the_frontier_model_at_xhigh_effort_whatever_the_lane_or_environment_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, harness: str, launch: list[str], handoff: str | None
+) -> None:
     lanes = {"master": {"agent": harness, "model": "sonnet", "effort": "low"}}
     env = {f"AGENTIHOOKS_{harness.upper()}_MODEL": "haiku", f"AGENTIHOOKS_{harness.upper()}_EFFORT": "low"}
     task = {**SEAT_TASKS["master"], **({"handoff": handoff} if handoff else {})}
     assert _launched(tmp_path, monkeypatch, "master", task, lanes, harness=harness, env=env) == launch
 
 
-MASTER_RANGES = [(("medium", "xhigh"), "high:xhigh"), (("low", "medium"), "high:high")]
+MASTER_RANGES = [(("medium", "xhigh"), "xhigh:xhigh"), (("low", "medium"), "xhigh:xhigh")]
 
 
 @pytest.mark.parametrize("bounds,handed", MASTER_RANGES)
-def test_a_master_handoff_successor_launches_at_high_effort_whatever_its_saved_launch_or_the_range_names(
-    tmp_path, monkeypatch, bounds, handed
-):
+def test_a_master_handoff_successor_launches_at_xhigh_effort_whatever_its_saved_launch_or_the_range_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bounds: tuple[str, str], handed: str
+) -> None:
     monkeypatch.delenv("AGENTIHOOKS_CLAUDE_EFFORT", raising=False)
     seen = {}
 
@@ -1172,14 +1183,14 @@ def test_a_master_handoff_successor_launches_at_high_effort_whatever_its_saved_l
         "handoff_envelope": {"launch": launch},
     }
     runtime.spawn(config, "master", "master@a1b2c3-0002", task)
-    assert _passed(seen["argv"]) == ["--model", "opus", "--effort", "high"]
+    assert _passed(seen["argv"]) == ["--model", "opus", "--effort", "xhigh"]
     assert seen["env"]["AGENTIHOOKS_SWARM_EFFORT_RANGE"] == handed
 
 
 @pytest.mark.parametrize("bounds,handed", MASTER_RANGES)
-def test_a_resumed_master_launches_at_high_effort_whatever_its_previous_agent_or_the_range_names(
-    tmp_path, bounds, handed
-):
+def test_a_resumed_master_launches_at_xhigh_effort_whatever_its_previous_agent_or_the_range_names(
+    tmp_path: Path, bounds: tuple[str, str], handed: str
+) -> None:
     from dataclasses import replace
 
     runtime, config, agent, seen = _resuming(tmp_path, "c0ffee")
@@ -1194,7 +1205,7 @@ def test_a_resumed_master_launches_at_high_effort_whatever_its_previous_agent_or
         effort="medium",
     )
     runtime.resume(config, master, "you were restored")
-    assert _passed(seen["runs"][0]) == ["--route", "a1", "--model", "opus", "--effort", "high"]
+    assert _passed(seen["runs"][0]) == ["--route", "a1", "--model", "opus", "--effort", "xhigh"]
     assert seen["env"]["AGENTIHOOKS_SWARM_EFFORT_RANGE"] == handed
 
 
@@ -1204,11 +1215,11 @@ def _lowest_pick(*args, **kwargs):
     return DecisionResult({"option": Answer("choice", choice="lower", confidence=0.95)}, "luna")
 
 
-@pytest.mark.parametrize("lane,effort", [("eng", "medium"), ("ci", "medium"), ("plan", "medium"), ("master", "high")])
+@pytest.mark.parametrize("lane,effort", [("eng", "medium"), ("ci", "medium"), ("plan", "medium"), ("master", "xhigh")])
 @pytest.mark.parametrize("harness,model", [("claude", "opus"), ("codex", "gpt-6.1-sol")])
 def test_a_live_classifier_never_launches_a_seat_below_the_default_model_and_its_lane_floor(
-    tmp_path, monkeypatch, lane, effort, harness, model
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lane: str, effort: str, harness: str, model: str
+) -> None:
     from scripts.init_agent import model_flags
     from scripts.swarm import model_pick
 
@@ -1232,7 +1243,9 @@ def test_a_swarm_config_model_launches_as_named_with_the_classifier_live(tmp_pat
 
 @pytest.mark.parametrize("harness,model", [("claude", "sonnet"), ("codex", "gpt-6-sol")])
 @pytest.mark.parametrize("lane", ["eng", "ci", "plan", "master"])
-def test_configured_models_reach_each_launch_lane(tmp_path, monkeypatch, harness, model, lane):
+def test_configured_models_reach_each_launch_lane(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, harness: str, model: str, lane: str
+) -> None:
     for agent in ("CLAUDE", "CODEX"):
         for field in ("MODEL", "EFFORT"):
             monkeypatch.delenv(f"AGENTIHOOKS_{agent}_{field}", raising=False)
@@ -1250,7 +1263,7 @@ def test_configured_models_reach_each_launch_lane(tmp_path, monkeypatch, harness
     passed = _passed(_spawn_seen(tmp_path, lanes, lane, config)["argv"])
     model_flag = "-m" if harness == "codex" else "--model"
     assert passed[passed.index(model_flag) + 1] == model
-    effort = "high" if lane == "master" else "xhigh" if harness == "claude" and lane in ("eng", "ci") else "medium"
+    effort = "xhigh" if lane == "master" else "xhigh" if harness == "claude" and lane in ("eng", "ci") else "medium"
     if harness == "codex":
         assert f'model_reasoning_effort="{effort}"' in passed
     else:

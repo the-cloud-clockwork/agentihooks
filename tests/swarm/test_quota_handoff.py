@@ -1,6 +1,7 @@
 import json
 import os
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -484,7 +485,9 @@ def test_a_quota_transfer_continues_its_saved_effort_at_the_equal_rank(tmp_path,
     assert model[model.index(flags[0]) : model.index(flags[0]) + 2] == flags
 
 
-def test_a_master_quota_transfer_to_codex_starts_its_saved_effort_inside_the_range(tmp_path, monkeypatch):
+def test_a_master_quota_transfer_to_codex_starts_its_saved_effort_inside_the_range(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     rt = runtime.HerdrRuntime(home=tmp_path, choose=lambda *_: ("claude", "priority"))
     rt._quota_accounts = [account("old", state="DRAIN"), account("best", "codex", five=10, week=20)]
     seen = []
@@ -502,7 +505,7 @@ def test_a_master_quota_transfer_to_codex_starts_its_saved_effort_inside_the_ran
         "handoff_envelope": {"reason": "quota", "launch": {**LAUNCH, "effort": "max"}},
     }
     rt.spawn(config, "master", "master@a1b2c3-0002", task)
-    assert 'model_reasoning_effort="high"' in seen[0][seen[0].index("--") + 1 :]
+    assert 'model_reasoning_effort="xhigh"' in seen[0][seen[0].index("--") + 1 :]
 
 
 def test_a_lane_quota_transfer_to_codex_outside_the_range_is_refused(tmp_path, monkeypatch):

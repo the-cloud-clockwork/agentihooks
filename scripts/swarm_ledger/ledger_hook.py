@@ -2,7 +2,8 @@
 """Hook that keeps a crew member bound to its ledger, run on every harness by hooks.context.swarm_ledger.
 
 Handles SessionStart, UserPromptSubmit, PostToolUse and Stop. A session is bound by
-`agentihooks ledger join` or `ledger.py join` (learned from the Bash command). Unbound sessions exit at once. Every error fails open.
+`agentihooks api join` (also `agentihooks ledger join` or `ledger.py join`, learned from the Bash
+command). Unbound sessions exit at once. Every error fails open.
 """
 
 import json
@@ -23,7 +24,7 @@ LEDGER_DIR = Path(os.environ.get("LEDGER_DIR", Path.home() / "development-ledger
 SESSIONS = LEDGER_DIR / ".sessions"
 GATE_READS = ("_meta.members", "_meta.events", "tasks", "phases", "followups", "policy")
 SHOWN = 5
-CLI = "agentihooks ledger"
+CLI = "agentihooks api"
 
 
 def log(message):
@@ -58,7 +59,7 @@ def tokens_of(command):
 
 def is_ledger_cli(tokens):
     return any(Path(t).name == "ledger.py" for t in tokens) or any(
-        a.endswith("agentihooks") and b == "ledger" for a, b in zip(tokens, tokens[1:])
+        a.endswith("agentihooks") and b in ("ledger", "api") for a, b in zip(tokens, tokens[1:])
     )
 
 
@@ -240,7 +241,7 @@ def on_prompt(payload, session, state, sfile):
         emit("UserPromptSubmit", context_text(session, owed))
 
 
-def stop_reasons(session, state):
+def stop_reasons(session: dict[str, Any], state: dict[str, Any]) -> tuple[list[str], int, dict[str, Any]]:
     import ledger_gate
 
     pol = ledger_gate.policy(state)
@@ -249,7 +250,7 @@ def stop_reasons(session, state):
     if owed:
         reasons.append(f"{len(owed)} operator event(s) are unhandled")
     if session["calls"] >= pol["stop_after_calls"] and not wait_seen(session) and not outcome_seen(session):
-        reasons.append(f"{session['calls']} tool calls since you last recorded progress in the ledger")
+        reasons.append(f"{session['calls']} tool calls since you last recorded progress through the swarm API")
     return reasons, len(owed), pol
 
 
