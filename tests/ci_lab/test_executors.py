@@ -679,6 +679,60 @@ def test_mutation_drops_its_private_tree_when_the_runner_raises(
     assert trees.calls == [("own", "h1"), ("drop", mutation_tree)]
 
 
+@pytest.mark.feature("lab-mutation-grader-runner")
+@pytest.mark.usefixtures("bwrap", "trampolines")
+@pytest.mark.parametrize("kind", ["stats", "mutant"])
+@pytest.mark.parametrize("head_code", [0, 17])
+@pytest.mark.parametrize(("grader_code", "status"), [(0, "killed"), (0, "survived"), (23, "killed")])
+def test_mutation_uses_the_protected_runner_despite_an_opposing_head_runner(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    mutation_tree: Path,
+    kind: str,
+    head_code: int,
+    grader_code: int,
+    status: str,
+) -> None:
+    runner = Path("scripts/ci_lab/run_mutation.py")
+    grader = folder(tmp_path, "grader", {})
+    for tree, origin, code, row_status in (
+        (mutation_tree, "head", head_code, "killed"),
+        (grader, "grader", grader_code, status),
+    ):
+        target = tree / runner
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            "import json, sys\nfrom pathlib import Path\n"
+            "request = json.loads(Path(sys.argv[1]).read_text())\n"
+            f"result = {{'origin': {origin!r}, 'stats': []}}\n"
+            "if request['kind'] == 'mutant':\n"
+            f"    result['rows'] = [{{'name': 'm', 'status': {row_status!r}, 'seconds': 0.1}}]\n"
+            "Path(sys.argv[2]).write_text(json.dumps(result))\n"
+            f"sys.exit({code})\n"
+        )
+    for package in ("scripts", "scripts/ci_lab"):
+        (mutation_tree / package / "__init__.py").write_text("")
+    binary = tmp_path / "venv" / "bin" / "python"
+    binary.parent.mkdir(parents=True)
+    binary.symlink_to(sys.executable)
+    monkeypatch.setattr(executors.venvs, "venv_for", Recorder((binary.parent.parent, False)))
+    trees = FakeWorktrees({"h1": mutation_tree, "g1": grader})
+    pod = pod_of(tmp_path, trees)
+    member = "tests/test_alpha.py" if kind == "stats" else "scripts.alpha.x_first__mutmut_1"
+    protected = (grader / runner).read_bytes()
+
+    finished = executors.mutation(pod, mutation_settings(tmp_path), lease(kind, "k", (member,)))
+
+    expected = PASSED if grader_code == 0 and (kind == "stats" or status == "killed") else FAILED
+    assert finished.status == expected
+    result = report(finished, pod)
+    if grader_code == 0:
+        assert result["origin"] == "grader"
+    else:
+        assert "origin" not in result
+    assert (grader / runner).read_bytes() == protected
+
+
 @pytest.mark.feature("lab-worker-executors")
 def test_covering_takes_each_test_a_stats_record_shows_reaching_the_function_with_its_seconds() -> None:
     records = [
