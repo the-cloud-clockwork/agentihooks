@@ -263,11 +263,36 @@ class ExecutionRegistry:
             if not current or any(getattr(agent, field) != getattr(current, field) for field in IMMUTABLE):
                 self.conflict(slug, "stale or changed execution identity")
             if current.state == "ended":
-                if agent.pane_id == current.pane_id:
-                    return current, current
+                return current, current
             written = agent
             if current.state == "finished" and written.state != "ended":
                 written = replace(written, state="finished")
+            if _read_before_ack(written.runtime_target, current.runtime_target):
+                written = replace(written, **{field: getattr(current, field) for field in LAUNCH_BINDING})
+            _check_binding(current.runtime_target, written.runtime_target, lambda message: self.conflict(slug, message))
+            self.check_uid(slug, written, doc)
+            if written != current:
+                doc["executions"][written.execution_id] = asdict(written)
+            return written, current
+
+        written, current = self._fenced(slug, change)
+        if written != current:
+            self._project(slug, (written.name,), written, current)
+
+    def revive(self, slug: str, agent: AgentRecord) -> None:
+        """Land an explicit resume onto its own execution even when that execution is ``ended``; a stale write has
+        no path to this method, only the deliberate revival a seat's own resume constructs."""
+        with _writes(slug):
+            timing.timed(self._revive, slug, agent)
+
+    def _revive(self, slug: str, agent: AgentRecord) -> None:
+        self.validate(slug, agent)
+
+        def change(doc: dict) -> tuple[AgentRecord, AgentRecord]:
+            current = occupants_of(doc).get(agent.seat)
+            if not current or any(getattr(agent, field) != getattr(current, field) for field in IMMUTABLE):
+                self.conflict(slug, "stale or changed execution identity")
+            written = agent
             if _read_before_ack(written.runtime_target, current.runtime_target):
                 written = replace(written, **{field: getattr(current, field) for field in LAUNCH_BINDING})
             _check_binding(current.runtime_target, written.runtime_target, lambda message: self.conflict(slug, message))

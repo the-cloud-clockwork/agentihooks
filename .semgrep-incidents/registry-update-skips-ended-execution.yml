@@ -5,7 +5,8 @@ rules:
     message: >-
       A write onto a seat's current execution guards the "finished" terminal state but never refuses one onto
       "ended", so a write a drop or exit already ended still applies and the agents projection relists the dropped
-      agent. Return the current record unchanged once its state is "ended", after the identity check.
+      agent. Return the current record unchanged once its state is "ended", after the identity check. Every
+      ordinary write stays skipped this way; only ExecutionRegistry.revive lands a write onto an ended execution.
     paths:
       include:
         - /scripts/swarm/execution.py
