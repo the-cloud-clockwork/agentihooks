@@ -9273,6 +9273,16 @@
       ]
     },
     {
+      "id": "mutation-merge-defaults-to-the-prefix-the-tests-workflow-passes",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2701",
+      "behaviour": "The --prefix default of the mutation shard merge reads the shard report folders that the --prefix of the Tests workflow's Merge the shard reports step names, so a merge run without --prefix finds the shard reports the workflow downloads. A default left on another job's folder name, as the deleted branch preflight's was until it was fixed, fails the check even while the workflow's own literal and the merge's own folder tests stay green.",
+      "seam": "The --prefix argument of the Merge the shard reports step in the Tests workflow mutation job and the --prefix default of scripts.ci_mutation.merge main",
+      "tests": [
+        "tests/test_ci_lone_artifact_download.py::test_the_mutation_merge_defaults_to_the_prefix_the_tests_workflow_passes"
+      ]
+    },
+    {
       "id": "test-summary-downloads-every-report-in-one-step",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-test-summary-single-download",
