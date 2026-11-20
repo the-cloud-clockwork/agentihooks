@@ -14,7 +14,19 @@ from tests.test_ci_anton_runners import resolve
 ROOT = Path(__file__).resolve().parents[3]
 
 
-NON_GATING: dict[str, str] = {}
+NON_GATING = {
+    "access-audit.yml": "audits collaborators and installed apps and notifies the operator; it grades no revision",
+    "chart-release.yml": "follows each worker image run and packages and publishes a chart only after a release",
+    "ci-lab-image.yml": "builds, smokes and publishes the CI lab image",
+    "count-record.yml": "records the dev suite test count that later pull request bases read",
+    "coverage-stability.yml": "compares the measured lines of the newest dev commit's finished runs",
+    "gate-required.yml": "follows every Tests run and reports Gate Required only for pull request runs",
+    "github-access-audit.yml": "reads back the effective GitHub access controls",
+    "hive-worker.yml": "proves the worker hive chart and image in kind and publishes the image",
+    "swarm-image.yml": "builds and pushes the dev swarm image",
+    "swarm-node-base.yml": "copies the locked worker base into the org registry",
+    "swarm-node-image.yml": "builds and qualifies the worker image and tags and publishes it only for a release",
+}
 
 
 def test_promotion_requires_all_push_checks_and_never_runs_for_a_red_grade():
