@@ -1068,6 +1068,16 @@
       ]
     },
     {
+      "id": "ci-select-tick-catalogue-page-edit",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2716",
+      "behaviour": "A hand edit of the tick step catalogue page selects the committed page test in pull request checks through its literal page dependency, so a stale page fails before the merge queue.",
+      "seam": "scripts.ci_select.decide with the committed catalogue page test source",
+      "tests": [
+        "tests/test_ci_select.py::test_a_hand_edited_catalogue_page_selects_its_page_test"
+      ]
+    },
+    {
       "id": "ci-local-action-checkout-first",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/promo-43587437500-0",
