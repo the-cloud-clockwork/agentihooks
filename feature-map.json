@@ -516,6 +516,19 @@
       ]
     },
     {
+      "id": "hive-startup-recovers-stuck-gc",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2764",
+      "behaviour": "Worker startup recovers configured existing primary checkouts with a stale garbage collection log by pruning unreachable objects older than two weeks, removing the log only after successful pruning, then running full garbage collection with cruft packs that preserve younger unreachable objects. Checkouts without a log and unconfigured repositories remain untouched.",
+      "seam": "configured repository startup loop through scripts.hive.repo_maintenance.recover",
+      "rules": ["hive-prune-needs-expiry"],
+      "tests": [
+        "tests/hive/test_repo_maintenance.py::test_startup_recovers_only_configured_existing_checkouts_with_a_gc_log",
+        "tests/hive/test_repo_maintenance.py::test_failed_pruning_keeps_the_gc_log_and_does_not_start_gc",
+        "tests/hive/test_repo_maintenance.py::test_recovery_retains_young_unreachable_objects_without_another_gc_warning"
+      ]
+    },
+    {
       "id": "hive-spoke-launch-waits-for-serena-router",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-serena-before-launch",
@@ -6814,6 +6827,19 @@
       ]
     },
     {
+      "id": "protected-grader-accepts-equivalence-scm-pin",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-protected-equivalence-install-pin",
+      "behaviour": "The protected grader admits the ledger equivalence prefix of dev with or without SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS set to the run number dev version on each of its pip install steps, so the install can skip the setuptools-scm git scan and heads branched before dev took the pin keep passing, and refuses any other pin value, any other env change, and the pin on another step or on the job.",
+      "seam": "gate_protected._equivalence_problems over the pinned and unpinned install forms of the dev prefix",
+      "tests": [
+        "tests/test_gate_protected_scm_pin.py::test_the_required_grader_accepts_a_tuned_equivalence_install_with_or_without_the_scm_pin",
+        "tests/test_gate_protected_scm_pin.py::test_the_required_grader_refuses_any_other_equivalence_pin",
+        "tests/test_gate_protected_scm_pin.py::test_a_small_equivalence_form_admits_the_install_with_or_without_the_exact_scm_pin",
+        "tests/test_gate_protected_scm_pin.py::test_the_scm_pin_form_sets_or_drops_the_pin_on_every_pip_install_step_of_a_copy"
+      ]
+    },
+    {
       "id": "gate-declarations-never-expire",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-gate-never-deadlock",
@@ -7096,7 +7122,7 @@
       "behaviour": "The strict type gate checks its sorted sources in contiguous runs of at most a thousand files, one basedpyright process each, and refuses a measurement whose checker reached the memory line where basedpyright empties its type cache, so one commit counts the same type errors on every run.",
       "seam": "scripts.type_gate.measure through its basedpyright subprocess runs and the peak resident memory of its child processes",
       "tests": [
-        "tests/test_type_gate.py::test_measure_checks_at_most_a_thousand_sources_per_checker_process_and_sums_their_counts",
+        "tests/test_type_gate.py::test_measure_checks_at_most_a_hundred_sources_per_checker_process_and_sums_their_counts",
         "tests/test_type_gate.py::test_a_checker_peak_at_the_line_where_basedpyright_empties_its_type_cache_is_refused",
         "tests/test_type_gate.py::test_a_checker_peak_under_the_line_where_basedpyright_empties_its_type_cache_is_kept"
       ]
@@ -9582,6 +9608,20 @@
       ]
     },
     {
+      "id": "lab-token-mint-status",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2702",
+      "behaviour": "A GitHub App token mint refusal preserves the HTTP response status and its fixed message. The lab manifest reader treats mint server errors and unanswered mint requests as transient, keeps the head through the existing quiet window and grades it after recovery. Client refusals drop the head. The same waiting envelope survives repeated transient failures and no retry runs before the window ends.",
+      "seam": "scripts.github_app.GitHubAppAuth.get_token and scripts.ci_lab.manifests.Actions over mocked HTTP, then Scheduler.tick through MirrorExpander, StoredManifests and the real token mint",
+      "tests": [
+        "tests/test_github_app.py::test_rejected_exchange_preserves_the_http_status_without_changing_its_message",
+        "tests/test_github_app.py::test_a_refusal_without_an_http_status_keeps_its_message",
+        "tests/ci_lab/test_manifests.py::test_actions_classifies_the_real_token_mint_refusal_by_its_http_status",
+        "tests/ci_lab/test_manifests.py::test_actions_keeps_a_mint_scope_refusal_permanent",
+        "tests/ci_lab/test_scheduler.py::test_manifest_token_mint_failures_hold_only_transient_heads_and_grade_after_recovery"
+      ]
+    },
+    {
       "id": "lab-manifest-fetch-off-pass",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2703",
@@ -11124,16 +11164,15 @@
       ]
     },
     {
-      "id": "hive-startup-recovers-stuck-gc",
+      "id": "type-gate-one-context",
       "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t2764",
-      "behaviour": "Worker startup recovers configured existing primary checkouts with a stale garbage collection log by pruning unreachable objects older than two weeks, removing the log only after successful pruning, then running full garbage collection with cruft packs that preserve younger unreachable objects. Checkouts without a log and unconfigured repositories remain untouched.",
-      "seam": "configured repository startup loop through scripts.hive.repo_maintenance.recover",
-      "rules": ["hive-prune-needs-expiry"],
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-type-gate-cross-file-baseline",
+      "behaviour": "The strict type gate counts each source in its run of the head's every source layout, checked from the run's first source through its last graded one with four runs checked at once, so a pull request, prepush and a baseline refresh count a file the same type errors at one commit whichever other files they grade.",
+      "seam": "scripts.type_gate.measure through the source lists of its basedpyright runs",
       "tests": [
-        "tests/hive/test_repo_maintenance.py::test_startup_recovers_only_configured_existing_checkouts_with_a_gc_log",
-        "tests/hive/test_repo_maintenance.py::test_failed_pruning_keeps_the_gc_log_and_does_not_start_gc",
-        "tests/hive/test_repo_maintenance.py::test_recovery_retains_young_unreachable_objects_without_another_gc_warning"
+        "tests/test_type_gate.py::test_a_file_counts_the_same_errors_whichever_other_files_the_gate_checks",
+        "tests/test_type_gate.py::test_the_gate_checks_a_run_of_the_every_source_layout_through_its_last_graded_source",
+        "tests/test_type_gate.py::test_the_gate_checks_four_runs_at_once"
       ]
     }
   ],
