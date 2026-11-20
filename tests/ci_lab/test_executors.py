@@ -724,7 +724,7 @@ def test_mutation_uses_the_protected_runner_despite_an_opposing_head_runner(
     finished = executors.mutation(pod, mutation_settings(tmp_path), lease(kind, "k", (member,)))
 
     expected = PASSED if grader_code == 0 and (kind == "stats" or status == "killed") else FAILED
-    assert finished.status == expected
+    assert finished.outcome == expected
     result = report(finished, pod)
     if grader_code == 0:
         assert result["origin"] == "grader"
