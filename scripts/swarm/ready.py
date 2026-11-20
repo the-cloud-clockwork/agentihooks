@@ -428,7 +428,7 @@ def _priority(run: Pass, url: str) -> Callable[[], dict[str, Any] | None]:
     return lambda: queue_priority.automatic(cast(RedisStore, run.store), run.slug, url, run.ledger)
 
 
-def _queue(run, row, found):
+def _queue(run: Pass, row: dict[str, Any], found: dict[str, Any]) -> list[str]:
     task_id, url = row["id"], found["url"]
     try:
         run.queue("queue", url, journal=_journal(run, task_id, url), priority=_priority(run, url))
