@@ -77,7 +77,10 @@ def test_swarm_image_lock_pins_every_distribution_its_entry_points_import() -> N
     lock = (root / "docker/swarm/requirements.lock").read_text()
     pinned = {line.split("==")[0].lower() for line in lock.splitlines() if "==" in line and not line.startswith(" ")}
     hub = sorted(f"scripts.hub.{source.stem}" for source in (root / "scripts/hub").glob("*.py"))
-    lab = sorted(f"scripts.ci_lab.{source.stem}" for source in (root / "scripts/ci_lab").glob("*.py"))
+    lab = sorted(
+        ".".join(source.relative_to(root).with_suffix("").parts).removesuffix(".__init__")
+        for source in (root / "scripts/ci_lab").rglob("*.py")
+    )
     third_party = _image_third_party_imports(root, ["scripts.install", "scripts.swarm_ledger", *hub, *lab])
     distributions = importlib.metadata.packages_distributions()
     missing = sorted(

@@ -7,13 +7,11 @@ from unittest.mock import patch
 import pytest
 import yaml
 
+import scripts.ci_lab
 
-@pytest.mark.feature("swarm-image-lab-dependencies")
-@pytest.mark.parametrize("missing", [None, "executors", "expand_mutation", "future_module"])
-def test_swarm_image_smoke_imports_every_discovered_lab_module_and_refuses_a_missing_dependency(
-    missing: str | None,
-) -> None:
-    root = Path(__file__).parents[1]
+
+def _smoke_code(root: Path) -> str:
+    """Return the Python program the swarm image smoke step runs inside the built image."""
     workflow = yaml.safe_load((root / ".github/workflows/swarm-smoke.yml").read_text())
     step = next(
         step
@@ -22,7 +20,15 @@ def test_swarm_image_smoke_imports_every_discovered_lab_module_and_refuses_a_mis
     )
     argv = shlex.split(step["run"])
     assert argv[:7] == ["docker", "run", "--rm", "--network", "none", "--entrypoint", "python"]
-    code = argv[argv.index("-c") + 1]
+    return argv[argv.index("-c") + 1]
+
+
+@pytest.mark.feature("swarm-image-lab-dependencies")
+@pytest.mark.parametrize("missing", [None, "executors", "expand_mutation", "future_module"])
+def test_swarm_image_smoke_imports_every_discovered_lab_module_and_refuses_a_missing_dependency(
+    missing: str | None,
+) -> None:
+    code = _smoke_code(Path(__file__).parents[1])
     names = ["scripts.ci_lab.executors", "scripts.ci_lab.expand_mutation", "scripts.ci_lab.future_module"]
     imported: list[str] = []
 
@@ -44,3 +50,26 @@ def test_swarm_image_smoke_imports_every_discovered_lab_module_and_refuses_a_mis
         else:
             exec(code)
             assert imported == sorted(names)
+
+
+@pytest.mark.feature("swarm-image-lab-dependencies")
+def test_swarm_image_smoke_reaches_every_lab_module_on_disk() -> None:
+    lab = Path(scripts.ci_lab.__file__).parent
+    expected = sorted(
+        ".".join((scripts.ci_lab.__name__, *source.relative_to(lab).with_suffix("").parts)).removesuffix(".__init__")
+        for source in lab.rglob("*.py")
+        if source != lab / "__init__.py"
+    )
+    imported: list[str] = []
+    real_import = importlib.import_module
+
+    def load(name: str, package: str | None = None) -> object:
+        if not name.startswith(f"{scripts.ci_lab.__name__}."):
+            return real_import(name, package)
+        imported.append(name)
+        return None
+
+    with patch("importlib.import_module", side_effect=load):
+        exec(_smoke_code(Path(__file__).parents[1]))
+    assert {"scripts.ci_lab.executors", "scripts.ci_lab.expand_mutation"} <= set(imported)
+    assert imported == expected
