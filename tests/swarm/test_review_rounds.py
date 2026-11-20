@@ -34,24 +34,24 @@ def stamps(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     return made
 
 
-def start(ledger, task="t1", slug="sw"):
+def start(ledger: ReviewLedger, task: str = "t1", slug: str = "sw") -> dict[str, str | int]:
     return review_rounds.start(slug, task, ledger, ME)
 
 
-def test_the_first_two_rounds_carry_no_notice():
+def test_the_first_two_rounds_carry_no_notice() -> None:
     ledger = ReviewLedger()
     assert start(ledger) == {"task": "t1", "round": 1}
     assert start(ledger) == {"task": "t1", "round": 2}
 
 
-def test_a_task_at_three_rounds_gets_the_close_notice():
+def test_a_task_at_three_rounds_gets_the_close_notice() -> None:
     ledger = ReviewLedger()
     start(ledger)
     start(ledger)
     assert start(ledger) == {"task": "t1", "round": 3, "notice": CLOSED}
 
 
-def test_a_fourth_round_is_refused_with_the_close_text_and_writes_nothing(stamps):
+def test_a_fourth_round_is_refused_with_the_close_text_and_writes_nothing(stamps: list[str]) -> None:
     ledger = ReviewLedger()
     for _ in range(3):
         start(ledger)
@@ -64,7 +64,7 @@ def test_a_fourth_round_is_refused_with_the_close_text_and_writes_nothing(stamps
     assert ledger.rows["t1"]["review_rounds"] == {"rounds-before-pr": [f"{AT}-s1", f"{AT}-s2", f"{AT}-s3"]}
 
 
-def test_rounds_count_per_task_and_per_swarm():
+def test_rounds_count_per_task_and_per_swarm() -> None:
     ledger = ReviewLedger({"t1": {"id": "t1"}, "t2": {"id": "t2"}})
     for _ in range(3):
         start(ledger)
@@ -73,7 +73,7 @@ def test_rounds_count_per_task_and_per_swarm():
 
 
 @pytest.mark.feature("review-state-on-ledger")
-def test_a_successor_on_a_fresh_home_spends_the_rounds_its_predecessor_left_on_the_ledger():
+def test_a_successor_on_a_fresh_home_spends_the_rounds_its_predecessor_left_on_the_ledger() -> None:
     ledger = ReviewLedger({"t1": {"id": "t1", "review_rounds": {"rounds-before-pr": ["a", "b"]}}})
     assert start(ledger) == {"task": "t1", "round": 3, "notice": CLOSED}
     with pytest.raises(SwarmError, match="no fourth review round"):
@@ -100,7 +100,7 @@ def test_a_round_is_written_on_the_ledger_task_by_the_agent_and_nothing_counts_o
     assert not home.exists()
 
 
-def test_each_round_carries_a_stamp_of_its_own():
+def test_each_round_carries_a_stamp_of_its_own() -> None:
     ledger = ReviewLedger()
     start(ledger)
     start(ledger)
@@ -116,7 +116,7 @@ def test_the_counter_is_one_before_any_pull_request_then_one_per_pull_request_ur
 
 
 @pytest.mark.feature("review-state-on-ledger")
-def test_rounds_before_a_pull_request_and_on_each_pull_request_count_apart():
+def test_rounds_before_a_pull_request_and_on_each_pull_request_count_apart() -> None:
     ledger = ReviewLedger()
     for _ in range(3):
         start(ledger)
@@ -147,7 +147,7 @@ class Unlisted(ReviewLedger):
         return None if self.reads in self.missed else super().task(slug, task_id)
 
 
-def test_a_task_the_ledger_does_not_hold_is_refused_before_any_review_write():
+def test_a_task_the_ledger_does_not_hold_is_refused_before_any_review_write() -> None:
     rounds_ledger, readers_ledger = Unlisted(missed={1}), Unlisted(missed={1})
     with pytest.raises(SwarmError) as refused:
         start(rounds_ledger, task="t9")
@@ -157,7 +157,7 @@ def test_a_task_the_ledger_does_not_hold_is_refused_before_any_review_write():
     assert (rounds_ledger.reads, rounds_ledger.writes, readers_ledger.writes) == (1, [], [])
 
 
-def test_a_reread_that_misses_the_task_does_not_count_the_round_twice():
+def test_a_reread_that_misses_the_task_does_not_count_the_round_twice() -> None:
     ledger = Unlisted(missed={2})
     assert start(ledger, task="t9") == {"task": "t9", "round": 1}
     assert (len(ledger.writes), review_rounds.counts(ledger.rows["t9"])) == (2, {"rounds-before-pr": 1})
@@ -259,7 +259,7 @@ class RacingRounds(ReviewLedger):
 
 
 @pytest.mark.feature("review-state-on-ledger")
-def test_a_round_racing_another_on_the_same_counter_counts_after_it(stamps):
+def test_a_round_racing_another_on_the_same_counter_counts_after_it(stamps: list[str]) -> None:
     ledger = RacingRounds(races=1)
     assert start(ledger) == {"task": "t1", "round": 2}
     assert ledger.rows["t1"]["review_rounds"] == {"rounds-before-pr": ["other-0", f"{AT}-s1"]}
@@ -270,14 +270,14 @@ def test_a_round_racing_another_on_the_same_counter_counts_after_it(stamps):
 
 
 @pytest.mark.feature("review-state-on-ledger")
-def test_a_round_that_loses_the_third_round_to_a_race_is_refused():
+def test_a_round_that_loses_the_third_round_to_a_race_is_refused() -> None:
     ledger = RacingRounds(races=1, rows={"t1": {"id": "t1", "review_rounds": {"rounds-before-pr": ["a", "b"]}}})
     with pytest.raises(SwarmError, match="no fourth review round"):
         start(ledger)
     assert (ledger.rows["t1"]["review_rounds"], len(ledger.writes)) == ({"rounds-before-pr": ["a", "b", "other-0"]}, 1)
 
 
-def test_a_round_that_lands_on_the_last_write_counts():
+def test_a_round_that_lands_on_the_last_write_counts() -> None:
     ledger = RacingRounds(races=review_rounds.WRITES - 1, name="rounds-other")
     assert start(ledger) == {"task": "t1", "round": 1}
     assert (len(ledger.writes), review_rounds.counts(ledger.rows["t1"])) == (
@@ -286,7 +286,7 @@ def test_a_round_that_lands_on_the_last_write_counts():
     )
 
 
-def test_a_round_the_guard_keeps_refusing_is_refused_after_five_writes():
+def test_a_round_the_guard_keeps_refusing_is_refused_after_five_writes() -> None:
     ledger = RacingRounds(races=99, name="rounds-other")
     with pytest.raises(SwarmError) as refused:
         start(ledger)
@@ -295,7 +295,7 @@ def test_a_round_the_guard_keeps_refusing_is_refused_after_five_writes():
 
 
 @pytest.mark.feature("review-round-metrics-from-ledger")
-def test_a_round_stamp_carries_the_wall_clock_in_milliseconds_ahead_of_its_unique_part(stamps):
+def test_a_round_stamp_carries_the_wall_clock_in_milliseconds_ahead_of_its_unique_part(stamps: list[str]) -> None:
     ledger = ReviewLedger()
     start(ledger)
     assert ledger.rows["t1"]["review_rounds"] == {"rounds-before-pr": ["1800000000250-s1"]}

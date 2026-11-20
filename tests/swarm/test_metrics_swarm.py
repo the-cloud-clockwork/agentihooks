@@ -929,7 +929,7 @@ def test_host_sample_counts_agents_on_headed_hives_wherever_the_sampler_runs(mon
 
 
 @pytest.mark.feature("review-round-metrics-from-ledger")
-def test_review_rounds_ship_from_the_round_stamps_on_each_ledger_task():
+def test_review_rounds_ship_from_the_round_stamps_on_each_ledger_task() -> None:
     rounds = {"rounds": [f"{NOW + 1}-a", "b", f"{NOW + 3}-c"], "rounds-other": [f"{NOW + 4}-d"]}
     ledger_doc = {"tasks": [{**TASK, "review_rounds": rounds}, {"id": "u"}], "_meta": {"events": []}}
     rows = metrics_swarm.read_review_rounds(ledger_doc)
@@ -951,7 +951,9 @@ def test_rounds_stamped_before_the_clock_prefix_add_no_metrics_round() -> None:
 
 
 @pytest.mark.feature("review-round-metrics-from-ledger")
-def test_record_pass_counts_the_rounds_two_hives_spent_on_one_ledger_task(tmp_path, monkeypatch):
+def test_record_pass_counts_the_rounds_two_hives_spent_on_one_ledger_task(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import fakeredis
 
     from scripts.gates import log as gate_log
