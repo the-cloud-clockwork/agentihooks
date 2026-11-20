@@ -3160,9 +3160,10 @@ or a report that breaks the rule.
 |---|---|---|
 | `agentihooks-ci:verdict:<kind>:<key>` | string | The verdict as JSON with sorted keys, no expiry |
 | `agentihooks-ci:disabled` | set | The kinds `get` never returns a verdict for |
+| `agentihooks-ci:unfiled` | hash | Per kind, the JSON list of the reuse audit's mismatches whose ledger task is not filed yet; see [What a mismatch does](#what-a-mismatch-does) |
 
-The constants are `PREFIX` (`agentihooks-ci:`), `INDEX` (`agentihooks-ci:verdict:`) and
-`DISABLED`. Other lab keys share the prefix, such as the daily CI budget at
+The constants are `PREFIX` (`agentihooks-ci:`), `INDEX` (`agentihooks-ci:verdict:`),
+`DISABLED` and `UNFILED`. Other lab keys share the prefix, such as the daily CI budget at
 `agentihooks-ci:budget:<YYYY-MM-DD>`, so a pattern that targets verdicts is
 `agentihooks-ci:verdict:*`, never `agentihooks-ci:*`. An index value reads:
 
@@ -3569,7 +3570,7 @@ caller supplies its own ports.
 
 | Field | Type | What the audit does with it |
 |---|---|---|
-| `store` | `store.Store` | Reads each cached verdict with `get` and stops reuse with `disable` |
+| `store` | `store.Store` | Reads each cached verdict with `get`, stops reuse with `disable` and keeps each kind's mismatches with `keep_unfiled` until `filed` |
 | `lab` | `audit.Lab` | Lists the units to compare and grades them |
 | `tasks` | `audit.Tasks` | Files one task per differing kind with `add_task(slug, fields, by)`; `scripts.swarm.ledger_client.LedgerClient` has that method |
 | `slug` | `str` | The ledger the tasks go to |
@@ -3646,12 +3647,15 @@ comparison, so each later audit spends a grade on a disabled kind for nothing.
 
 ### What a mismatch does
 
-When any unit differs, the audit:
+The audit first reads the mismatches an earlier audit could not file with `audit.unfiled(store)`
+and puts them ahead of the ones it finds itself. When any mismatch remains, the audit:
 
-1. Disables every differing kind with `Store.disable`, all of them before it files any task. The
-   whole kind stops hitting, its agreeing units included; other kinds keep hitting.
-2. Files one task per kind, in sorted kind order, with `tasks.add_task(slug, fields, "swarm")`.
-   `"swarm"` is `audit.SENDER`.
+1. Disables every differing kind with `Store.disable` and records its mismatches with
+   `Store.keep_unfiled`, all of them before it files any task. The whole kind stops hitting, its
+   agreeing units included; other kinds keep hitting.
+2. Files one task per kind, in sorted kind order, with `tasks.add_task(slug, fields, "swarm")`,
+   and drops the kind's record with `Store.filed` once the ledger takes the task. `"swarm"` is
+   `audit.SENDER`.
 3. Raises `CILabVerdictMismatch`.
 
 Each task carries these fields:
@@ -3681,9 +3685,13 @@ regraded verdicts differ from the cached ones for static, test
 ```
 
 When the ledger refuses a task, the exception `add_task` raised propagates and
-`CILabVerdictMismatch` is not raised. Every differing kind is already disabled, so none is reused,
-but the refused kind and every later kind in sorted order have no task. The audit keeps no copy of
-its mismatches, so on this path the differing units and their runs are lost with the exception.
+`CILabVerdictMismatch` is not raised. Every differing kind is already disabled, so none is reused.
+The refused kind and every later kind in sorted order have no task, and their mismatches stay in
+`agentihooks-ci:unfiled` with each cached verdict, regraded verdict, cached run and audit run. The
+next `promotion_audit` or `sample` files those tasks again with the same units, under its own audit
+run's task id, although it no longer compares the disabled kind, and raises `CILabVerdictMismatch`
+naming them. `audit.unfiled(store)` returns the recorded mismatches as `audit.Mismatch` values,
+ordered by kind.
 
 ### Enable reuse again
 
@@ -3697,6 +3705,10 @@ verdicts.enable("test")
 
 It removes the kind from `agentihooks-ci:disabled`. A Redis flush empties that set too, which
 enables every kind again; see [Disable and enable a kind](#disable-and-enable-a-kind).
+
+`enable` leaves the kind's entry in `agentihooks-ci:unfiled`. A kind enabled before its task is
+filed is disabled again by the next audit, which files the recorded units; a recorded unit that
+differs again in that audit is listed twice in the task.
 
 ### Use it
 
