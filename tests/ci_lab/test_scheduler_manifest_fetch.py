@@ -194,9 +194,11 @@ def test_manifest_token_mint_failures_hold_only_transient_heads_and_grade_after_
         assert run.tick(61_000) == []
         assert mint.call_count == 1
     else:
-        for when in (31_000, 61_000):
+        for when, fetches in ((31_000, 1), (61_000, 2)):
             waiting = {name: json.loads(raw) for name, raw in run.lab.client.hgetall(scheduler.WAITING).items()}
-            assert waiting == {name: {**value, "since": when} for name, value in original.items()}
+            assert waiting == {
+                name: {**value, "since": when, "unanswered": fetches} for name, value in original.items()
+            }
             assert run.tick(when + 29_999) == []
             assert mint.call_count == (1 if when == 31_000 else 2)
             if when == 31_000:
