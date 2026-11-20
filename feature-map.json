@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "wt-lab-remote-repository-owner",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-wt-lab-remote-owner",
+      "behaviour": "wt.sh new and tmp give a repository the lab remote and its token helper only when a lab URL that names an owner names the origin's owner and repository, ignoring case and transport. Ownerless lab mirrors, local paths and file URLs keep the repository name match.",
+      "seam": "wt.sh lab remote step",
+      "tests": [
+        "tests/test_worktree_skill.py::TestLabRemote::test_new_adds_no_lab_remote_for_the_same_repository_under_another_owner",
+        "tests/test_worktree_skill.py::TestLabRemote::test_new_gives_the_lab_remote_for_the_same_owner_or_an_ownerless_mirror"
+      ]
+    },
+    {
       "id": "kind-terminal-snapshot-base",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2647",

@@ -835,6 +835,36 @@ class TestLabRemote(WtBase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertNotIn("lab\t", self.remotes(Path(result.stdout.strip())))
 
+    def owned_origin(self, url: str) -> None:
+        _git(self.primary, "config", f"url.{self.origin}.insteadOf", url, env=self.gitenv)
+        _git(self.primary, "remote", "set-url", "origin", url, env=self.gitenv)
+
+    @pytest.mark.feature("wt-lab-remote-repository-owner")
+    def test_new_adds_no_lab_remote_for_the_same_repository_under_another_owner(self) -> None:
+        self.owned_origin("https://github.com/the-cloud-clockwork/origin.git")
+        labs = (
+            "http://lab.invalid/other-owner/origin.git",
+            "ssh://git@lab.invalid/other-owner/origin.git",
+            "git@lab.invalid:other-owner/origin.git",
+        )
+        for index, lab in enumerate(labs):
+            with self.subTest(lab=lab):
+                self.env["AGENTIHOOKS_LAB_REMOTE"] = lab
+                result = self.run_wt("new", f"feature-{index}", "--repo", str(self.primary))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertNotIn("lab\t", self.remotes(Path(result.stdout.strip())))
+                self.assertEqual(self.config(f"credential.{lab}.helper"), "")
+
+    @pytest.mark.feature("wt-lab-remote-repository-owner")
+    def test_new_gives_the_lab_remote_for_the_same_owner_or_an_ownerless_mirror(self) -> None:
+        self.owned_origin("git@github.com:The-Cloud-Clockwork/origin.git")
+        for index, lab in enumerate(("http://lab.invalid/the-cloud-clockwork/Origin.git", self.LAB)):
+            with self.subTest(lab=lab):
+                self.env["AGENTIHOOKS_LAB_REMOTE"] = lab
+                result = self.run_wt("new", f"feature-{index}", "--repo", str(self.primary))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(f"lab\t{lab} (push)", self.remotes(Path(result.stdout.strip())))
+
 
 class FromRef(WtBase):
     def setUp(self):
