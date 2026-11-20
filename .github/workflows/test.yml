@@ -4491,6 +4491,10 @@ jobs:
           [[ -f "$grader/scripts/ci_mutation/regrade.py" ]] || grader="$GITHUB_WORKSPACE"
           PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade report .mutation-gate/report.json . "$BASES"
 
+      - name: Keep only this shard's own mutation evidence
+        if: always() && job.status != 'success' && steps.mutate.outcome != 'skipped'
+        run: python -I "$RUNNER_TEMP/workflow/.github/scripts/mutation_evidence.py" .mutation-gate
+
       - name: Upload complete inline mutation evidence
         if: always() && steps.mutate.outcome != 'skipped'
         uses: ./.workflow-revision/.github/actions/retry-upload
@@ -4753,6 +4757,10 @@ jobs:
           [[ -d "$grader" ]] || { echo "::error::The protected mutation grader is not checked out."; exit 1; }
           [[ -f "$grader/scripts/ci_mutation/regrade.py" ]] || grader="$GITHUB_WORKSPACE"
           PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade report .mutation-gate/report.json . "$BASES"
+
+      - name: Keep only this shard's own mutation evidence
+        if: always() && job.status != 'success' && steps.mutate.outcome != 'skipped'
+        run: python -I "$RUNNER_TEMP/workflow/.github/scripts/mutation_evidence.py" .mutation-gate
 
       - name: Upload complete inline mutation evidence
         if: always() && steps.mutate.outcome != 'skipped'
@@ -5431,6 +5439,10 @@ jobs:
           [[ -d "$grader" ]] || { echo "::error::The protected mutation grader is not checked out."; exit 1; }
           [[ -f "$grader/scripts/ci_mutation/regrade.py" ]] || grader="$GITHUB_WORKSPACE"
           PYTHONPATH="$grader" python -P -m scripts.ci_mutation.regrade report .mutation-gate/report.json . "$BASES"
+
+      - name: Keep only this shard's own mutation evidence
+        if: always() && job.status != 'success' && needs.mutation-plan.outputs.forwarded != 'true'
+        run: python -I "$RUNNER_TEMP/workflow/.github/scripts/mutation_evidence.py" .mutation-gate
 
       - name: Upload complete mutation evidence
         if: always() && needs.mutation-plan.outputs.forwarded != 'true'

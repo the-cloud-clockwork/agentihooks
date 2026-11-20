@@ -911,9 +911,10 @@ It is the command a `mutation` shard runs, with the shard fixed at 0 of 1 and
 the statistics read from the part the job just collected, so the job downloads
 no `mutation-stats-*` artifact. **Upload complete inline mutation evidence**
 then uploads `mutation-report-0`, as `mutation (0)` would: only `report.json`
-when the job succeeded, the whole `.mutation-gate/` folder otherwise. Both
-steps share the statistics job's 26 minute timeout, and the 1080 second budget
-is the same as a shard's.
+when the job succeeded, otherwise the `.mutation-gate/` folder holding the
+shard's own evidence (see [Reading the names from a run](#reading-the-names-from-a-run)).
+Both steps share the statistics job's 26 minute timeout, and the 1080 second
+budget is the same as a shard's.
 
 ### Gate Required and graded bases
 
@@ -976,7 +977,7 @@ jq '{failed, not_mutated}' mutation-report/report.json
 |---|---|
 | `mutation (0)` ran for a plan that printed one shard | The plan printed more than one `Stats parts`, or the run used a workflow revision older than pull request 5186. |
 | `mutation` skipped and no `mutation-report-0` | Read `mutation-plan`: a forwarded run uploads the report there, not in the statistics job. |
-| `mutation-stats (0)` failed after its stats part uploaded | The inline step failed; download `mutation-report-0`, which then holds the whole `.mutation-gate/` folder, and read [Clean baseline failures](#clean-baseline-failures) when no mutant was graded. |
+| `mutation-stats (0)` failed after its stats part uploaded | The inline step failed; download `mutation-report-0`, which then holds the shard's own evidence in its `.mutation-gate/` folder, and read [Clean baseline failures](#clean-baseline-failures) when no mutant was graded. |
 | Gate Required fails with `mutation` skipped | The plan had more than one shard or part, or `mutation-stats` did not succeed; the gate accepts a skipped `mutation` only when both outputs are `[0]`. |
 | A later push regrades lines of an inline graded head | That head's statistics job did not succeed, or its run was not a pull request Tests run for that commit. |
 
@@ -1867,7 +1868,7 @@ Nothing is appended when `failing_tests` is absent or empty, so a run with no cl
 
 ### Reading the names from a run
 
-Open the run page to read the job summary, or download the evidence. Every artifact below holds the complete `.mutation-gate/` folder on failure, including each group's `run.log`:
+Open the run page to read the job summary, or download the evidence. On failure, every artifact below holds its job's mutation output folder, including each group's `run.log`. A statistics part keeps the complete folder. A `mutation-report-<shard>` keeps only what the shard's own run wrote: `report.json`, and in each group folder `run.log`, `report.log`, `results.json`, `killers/`, `mutants/mutmut-stats.json` and the `mutants/**/*.py.meta` exit codes. Before the upload, **Keep only this shard's own mutation evidence** runs `.github/scripts/mutation_evidence.py` from the workflow revision to remove the workspace each group ran in, which every shard copies from the same commit; `prepare_workspace` in `scripts/ci_mutation/runner.py` rebuilds it from that commit. Before that step, the ten failed shards of pull request run 44667229715 uploaded 434.9 MB, 97 percent of it identical between shards, and the `mutation` job spent 117 s downloading it to merge reports that read only each `report.json`.
 
 | Workflow | Failed job | Artifact |
 |---|---|---|
@@ -1888,7 +1889,7 @@ The `see` path at the end of the reason is the absolute path on the runner, show
 
 | Symptom | Cause | What to do |
 |---|---|---|
-| A file is not mutated with `mutmut failed with exit N; failing tests: ...` | A selected test fails on the unmutated code inside the mutation workspace | Fix that test or the code it exercises; when the test passes in the unit shards, compare the isolated copy with the checkout, such as a fixture file the workspace does not copy, and remember the baseline runs serially |
+| A file is not mutated with `mutmut failed with exit N; failing tests: ...` | A selected test fails on the unmutated code inside the mutation workspace | Fix that test or the code it exercises; when the test passes in the unit shards, compare the isolated copy `prepare_workspace` builds with the checkout, such as a fixture file the workspace does not copy, and remember the baseline runs serially |
 | The reason ends `mutmut failed with exit N; see .../run.log` with no test named | The log has no `FAILED` or `ERROR` summary line, for example a collection or import error, or a crash before pytest's summary | Read `run.log` from the evidence artifact |
 | The job summary has no `Mutation clean baseline failed` heading on a red mutation job | The job failed for another reason: survivors, `over budget`, `report failed`, or a missing statistics part | Read the step log and `report.json` |
 | The same failing test is listed for several files | All files in one mutation group share one clean baseline run | Expected; one fix clears every file in the group |
