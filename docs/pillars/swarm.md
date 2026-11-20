@@ -7531,6 +7531,19 @@ at one, and a full pass clears it. Once the count reaches `AGENTIHOOKS_HEALTH_EA
 <id> status` shows one `early end` finding that names the value and the count. The finding is information only and
 stops nothing.
 
+### Harness pin findings
+
+A lane whose `agent` is `claude` or `codex` gets seats from that harness only, however many free seats the other
+harness has. Each capacity pass stores every pinned lane with its quota decision: the pin, the time a pass first saw
+it, the other harness's free quota seats, and the ready lane tasks the pass placed nowhere while the lane sat below its
+ceiling. The swarm config keeps no time for a pin, so its age counts from the first pass that saw it; changing or
+clearing the pin starts the age again.
+
+`agentihooks swarm <id> status` shows one quota line per pinned lane under quota capacity, and raises one `harness
+pin` finding for a pinned lane whose other harness has free seats while ready tasks wait. The finding names the lane,
+the pin and its age, the free seats and the waiting tasks. It reports only: the pin stays until someone sets the lane
+agent back to `auto`.
+
 ### Spawn stall findings
 
 A `spawn stall` health finding means the swarm could have launched an agent for ten minutes and launched none. The

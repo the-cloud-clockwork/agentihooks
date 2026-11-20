@@ -175,6 +175,7 @@ with `{"error": "a grade lookup names one full commit sha"}`. See
 |---|---|
 | Startup fails before either listener appears | Check that `CI_LAB_RUNTIME_CONFIG` names a readable YAML file and run the runtime validator; missing required environment names also prevent startup |
 | Startup fails while reading the repository | Check `git` on `PATH`, the shared mirror mount, private mirror store permissions, repository authentication and access to `dev` |
+| Startup fails with a `jsonschema.ValidationError` | Dev's `delivery.yaml` breaks its schema; the retry policy read validates it. See the troubleshooting table of [Retry policy](#retry-policy) |
 | Startup cannot reach a dependency | Check the Redis and object store settings and bus authentication; provision the lab heads stream and consumers before starting the scheduler |
 | The scheduler port is reachable but metrics are not | Route port 9108 separately and request `/metrics`; port 8800 serves the scheduler API |
 | Capacity shows zero slots or an estimate differs from observed duration | Check worker lease polls and their free slot offers; the load discards stale offers and uses fixed unit estimates |
@@ -2049,6 +2050,7 @@ and `ci.lab.head.push` at stream sequence 9 for an agentihooks head pushed by
 | A notice answers `400` | A field is missing, empty or not a string, or the body is not JSON | [Send a head notice](#send-a-head-notice) |
 | A GitHub delivery answers `400` while its signature is valid | The body is not JSON, or the delivery lacks a field the receiver reads; [Heads it records](#heads-it-records) says what was recorded before the answer | `kubectl -n agentihooks-swarm logs deploy/agentihooks-swarm-github-webhook` for the delivery id, then the delivery's payload in the GitHub webhook settings |
 | A request answers `503` and the log shows `could not record the event` | The publish failed: the stream does not exist yet, or the NATS credential lacks `ci.lab.head.*` | `stream info` as above; the hub creates the stream on its next start. On `/github` the pull request observations were recorded before the failure, and a GitHub redelivery records the head |
+| A `pull_request` delivery, merge queue actions included, or a completed `check_suite` delivery answers `503` with `nats: no response from stream` in its traceback | The receiver's NATS credential allows the logical `swarm.*.pull.*`, `swarm.*.merge.*` and `swarm.*.checks.completed` subjects but not their `legacy.swarm.*` form, so its unscoped events log keeps the logical subject, which no stream holds ([Existing swarms through the subject change](swarm-bus-scope.md#existing-swarms-through-the-subject-change)). The pull request observation fails first, so the lab head of the same delivery is lost too. This was the cause on 19 November 2026 (#12458) | `/connz?auth=true` on each bus node's monitoring endpoint lists the receiver connection's publish allow list, which must name the `legacy.swarm.*` form of its eight pull, merge and checks subjects; `/subsz?test=swarm.<swarm>.pull.pushed` matches nothing. Grant them to `swarm-github-webhook` in the deployment repository's `users.yaml`, as its pull request 1911 did, then redeliver from GitHub |
 
 ## Lab remote service
 
@@ -2654,6 +2656,8 @@ kubectl logs -n ci-lab deploy/ci-lab-scheduler | grep 'cannot expand'
 | `<gate> names two gate steps` | Two gate steps resolve to the same gate name |
 | `'steps'` or `'jobs'` | The called workflow has no `jobs`, or one of its jobs has neither `steps` nor `uses` |
 | A YAML parse error | A workflow file directly in `.github/workflows` at the grader revision does not parse, even one that no static job calls |
+| `no dependency manifest at or before <base>` | A merge group, promotion or backfill head needs [test units](#test-units) and no commit on the base's first parent chain has a stored or fetchable manifest |
+| A `jsonschema` message, such as `0 is less than the minimum of 1` or `Additional properties are not allowed ('max' was unexpected)` | The grader revision's `delivery.yaml` breaks its schema. A hotfix, pull request or merge group head reads it for its authoritative gates and a merge group head also for its [entry limit](#configure-the-entry-limit), so every such head graded at that revision is dropped. The lines after the message name the schema rule and the instance path, such as `On instance['lab']['queue']['full_suite_entries']` |
 
 #### A head no node mirror can hold
 
@@ -2686,6 +2690,15 @@ or the grader workflow has no gate step of that name, the unit ends with no outc
 prints `ci-lab worker: unit <job> crashed: <error>` and its traceback to its standard error and the
 lease expires, so the unit follows the expired lease rule of step 6 of the
 [Scheduler loop](#scheduler-loop).
+
+#### What a failed static unit's check run shows
+
+A gate's check run text shows, ahead of its unit keys, the last 4096 characters of each failed
+static unit's stored log, `lab/static/<digest>/log.txt`, with secret patterns redacted, in a fence
+under the unit key, so a reader of the check run alone sees which diagnostic failed the gate. The
+blocks together stay within half of GitHub's 65535 character text limit; past it the blocks that
+fit end with a note that the later ones are left out. A passing unit, a failed unit with no stored
+or an empty log, and the required check show only unit keys.
 
 #### Limitations
 
@@ -2748,6 +2761,13 @@ tree, the blob ids of the files its tests opened outside the manifest (their rec
 list), the pytest invocation and the toolchain. The expander reads every head file in one
 `git cat-file --batch` for the fingerprints.
 
+A batch starts as one test file. A file is split only when its tests' summed durations pass 60
+seconds and none of its tests carries an xdist group. `expand_tests._parts` then deals its tests,
+longest first, each to the lightest part, and keeps the smallest part count from two up whose
+parts each fit 60 seconds; when no count below the file's test count fits, every test is its own
+batch. A test that `.test_durations` does not list counts 0 seconds, and a head with no
+`.test_durations` file expands with no durations, so each of its test files is one batch.
+
 | Head | Unit job |
 |---|---|
 | Pull request, hotfix | No test units; the manifest is not read |
@@ -2768,8 +2788,8 @@ the lab's GitHub App scopes to actions read (`manifests.Actions`, one per reposi
 never fetched again. A commit without such a run or artifact, an expired artifact, an archive
 GitHub answers is gone (410) and a manifest recorded for another commit fetch nothing; a refused
 or unanswered request or an archive without a readable `packed.json` raises `manifests.FetchRefused`.
-A request GitHub never answered, a token mint without an answer included, or answered with a server
-error raises its subclass `manifests.FetchUnanswered`, and the scheduler puts the head back in its
+A request GitHub never answered or answered with a server error, including token mint requests,
+raises its subclass `manifests.FetchUnanswered`, and the scheduler puts the head back in its
 lane with the quiet window restarted, so the first pass after that window fetches again; any other
 refusal drops the head with its reason. The service runs each fetch off the scheduler pass through
 `manifests.Background`, at most `WORKERS` (4) at once: while a fetch runs the call raises
@@ -2821,6 +2841,128 @@ describes.
 Since a push grade folds only the static gates,
 [Post merge testing with automatic revert](../research/post-merge-testing.md) measures the red
 `dev` rate from the Tests workflow's runs on GitHub, not from lab push grades.
+
+#### Configure the entry limit
+
+`lab.queue.full_suite_entries` in `delivery.yaml` is the most entries a merge group may hold before
+the `entries` clause sends it to the whole suite. The `queue` block and the key are optional:
+`interaction.entry_limit` returns `FULL_SUITE_ENTRIES` (5), the merge queue's largest group, when
+either is left out. Dev's `delivery.yaml` sets neither, so dev merge groups run at a limit of 5.
+
+```yaml
+lab:
+  authoritative: []
+  mutation:
+    run_on: every_push
+    mutants_per_changed_line: all
+    arid: []
+  check_prefix: lab
+  queue:
+    authoritative: []
+    full_suite_entries: 3
+```
+
+With `full_suite_entries: 3`, a group of four or five entries runs every batch, and a group of one
+to three runs only the batches its entries invalidate unless another clause holds. The expander
+reads the key from the grader revision on every expansion, and a merge group's grader is its base,
+so a change applies to the first merge group whose base holds it, with no scheduler restart.
+
+`queue` accepts only `authoritative` and `full_suite_entries`, and `full_suite_entries` is an
+integer of at least 1. Expansion validates the whole document against `delivery.DELIVERY_SCHEMA`
+with `jsonschema` directly, so its error carries no `delivery.yaml` path prefix, while
+`delivery.lab(root)` reports the same refusal with one:
+
+| `queue` value | First line of the expansion error | `delivery.lab(root)` error |
+|---|---|---|
+| `{full_suite_entries: 0}` | `0 is less than the minimum of 1` | `delivery.yaml lab.queue.full_suite_entries: 0 is less than the minimum of 1` |
+| `{full_suite_entries: 2.5}` | `2.5 is not of type 'integer'` | `delivery.yaml lab.queue.full_suite_entries: 2.5 is not of type 'integer'` |
+| `{max: 2}` | `Additional properties are not allowed ('max' was unexpected)` | `delivery.yaml lab.queue: Additional properties are not allowed ('max' was unexpected)` |
+| `[]` | `[] is not of type 'object'` | `delivery.yaml lab.queue: [] is not of type 'object'` |
+
+A refused document drops the head as [a head that cannot expand](#a-head-that-cannot-expand): the
+action is `cannot expand <head>: ` followed by the whole `jsonschema` message, whose next lines name
+the schema rule and `On instance['lab']['queue']['full_suite_entries']`. Validate the file in a
+checkout before it reaches dev:
+
+```bash
+python -c 'from pathlib import Path; from scripts.ci_lab import delivery; delivery.lab(Path("."))'
+```
+
+#### Check which clause a merge group took
+
+The scheduler records the chosen batches, not the clause. The script below rebuilds the group from
+a checkout that holds both commits, the way `MirrorExpander` does, and prints the clause
+`interaction.full_reason` returns for the `harness`, `entries` and `overlap` clauses, or `None`.
+It passes an empty manifest, so the `cache` clause never holds here:
+
+```bash
+cat > clause.sh <<'OUTER'
+python - "$1" "$2" <<'EOF'
+import subprocess
+import sys
+from pathlib import Path
+
+import yaml
+
+from scripts import ci_select, dep_manifest
+from scripts.ci_lab import interaction
+
+base, head = sys.argv[1:3]
+root = Path(".")
+commits = subprocess.check_output(["git", "rev-list", "--first-parent", f"{base}..{head}"], text=True).split()
+entries = tuple(tuple(dep_manifest.changes(root, f"{commit}^", commit)) for commit in commits)
+changes = tuple(dep_manifest.changes(root, base, head))
+group = interaction.Group(changes, entries, ci_select.pyproject_reaches_tests(root, base, head))
+lab = yaml.safe_load(subprocess.check_output(["git", "show", f"{base}:delivery.yaml"], text=True))["lab"]
+limit = interaction.entry_limit(lab)
+print(f"entries {len(entries)} of limit {limit}")
+print("clause", interaction.full_reason(group, {"tests": {}}, (), limit))
+EOF
+OUTER
+bash clause.sh <base> <head>
+```
+
+Run against dev's own first parent chain, three squash merges stay under the default limit and
+seven do not:
+
+```text
+$ bash clause.sh "$(git rev-parse dev~3)" "$(git rev-parse dev)"
+entries 3 of limit 5
+clause None
+$ bash clause.sh "$(git rev-parse dev~7)" "$(git rev-parse dev)"
+entries 7 of limit 5
+clause entries
+```
+
+A group that merged has its head on dev, so its base and head are both on dev's first parent
+chain. An ejected group's commits leave with its `gh-readonly-queue` branch, so check it while it
+runs.
+
+| Guard | What it holds |
+|---|---|
+| `test_a_pull_request_or_hotfix_head_expands_no_test_units` | A pull request or hotfix head gets no test units |
+| `test_a_merge_group_head_runs_only_the_batches_its_entries_invalidate` | A merge group runs only the batches holding an invalidated test |
+| `test_a_merge_group_head_whose_entries_invalidate_no_test_runs_no_batch` | A group whose entries invalidate no test holds an empty `unit` job |
+| `test_a_merge_group_head_runs_every_batch_when_an_interaction_clause_holds` | Every batch runs when a clause holds |
+| `test_a_promotion_or_backfill_head_runs_every_batch_without_reading_the_cache` | Promotion and backfill heads run every batch and read no verdict |
+| `test_a_head_without_stored_durations_keeps_each_test_file_whole` | No `.test_durations` keeps each test file one batch |
+| `test_a_head_that_needs_test_units_without_a_manifest_cannot_expand` | A head that needs test units and has no manifest cannot expand |
+| `test_a_merge_group_head_refuses_an_entry_limit_the_delivery_schema_refuses` | `full_suite_entries: 0` raises `0 is less than the minimum of 1` |
+| `test_a_head_whose_grader_delivery_breaks_its_schema_is_dropped_with_its_reason` | A schema refusal drops the head with its reason and no grade |
+
+The tests are in `tests/ci_lab/test_scheduler.py` and map to the `lab-scheduler-test-units` entry
+of `feature-map.json`.
+
+#### Troubleshooting
+
+| Symptom | Cause | Check |
+|---|---|---|
+| A merge group, promotion or backfill head gets no grade and the log reads `cannot expand <head>: no dependency manifest at or before <base>` | No commit on the base's first parent chain has a manifest stored, and none of its newest 10 commits has a fetchable `dep-manifest-packed` artifact from a dev push run of the Tests workflow | `gh run list --workflow test.yml --branch dev --event push --limit 10` lists those runs; an artifact older than 7 days has expired |
+| `cannot expand <head>: 0 is less than the minimum of 1`, or another `jsonschema` message | The grader revision's `delivery.yaml` breaks its schema | [Configure the entry limit](#configure-the-entry-limit); run `delivery.lab` in a checkout of `<base>` |
+| A merge group runs every batch | A clause of `interaction.full_reason` holds, or the entries' changes invalidate every test | Run the [clause check](#check-which-clause-a-merge-group-took). When it prints `None`, either the `cache` clause held, which the script does not evaluate, or an entry changes a global input `dep_manifest.global_input` names, such as `pyproject.toml`, `uv.lock`, `.test_durations` or a `.py` file outside `hooks/`, `scripts/` and `tests/`, or a `tests/` module whose name does not start with `test_`; `git diff --name-only <base> <head>` names the files. The `cache` clause holds when more than half the manifest's tests sit in batches whose key has no stored verdict, as on a new or emptied store |
+| A merge group's `unit` job holds no test units and passes | No entry changes a file a manifest test reads, as in a group of documentation changes, and no entry adds a test module the manifest does not list | `git diff --name-only <base> <head>`; the result is expected |
+| A merge group runs tests no entry touches | A batch runs whole when it holds one invalidated test, and an entry that changes a global input of the manifest, such as `uv.lock`, invalidates every test | The batch's members in the unit, and each entry's changes |
+| The log repeats `holding <head>: <error>` | A manifest fetch is still running or GitHub did not answer it | The manifest paragraph above describes both holds |
 
 ### Mutation units
 
@@ -3965,6 +4107,19 @@ A worker that completes a lease with `crash` therefore runs once more under the 
 `lost: 1`, and a second `crash` is final and red. `tests/ci_lab/test_retry.py` covers the decision
 table, and the `lab-scheduler-test-units` feature tests cover the scheduler's retry path.
 
+`queue.Queue.retry` moves only a job whose state is `done`: it adds one to `attempts`, clears the
+job's worker and outcome and adds it back to the pending set under the same job id with a new
+sequence number; a job in any other state is left as it is and the call returns `False`. A job
+reaping marked `lost` never reaches it, since reaping marks a job `lost` only once its `attempts`
+reached `lab.retry.lost`, where `decide` is `final`.
+
+An attempt that is run again leaves no trace in the verdict store: the scheduler stores a verdict,
+report and log only for the final attempt, and only when that attempt is graded and uploaded a
+report. Each finished attempt with an uploaded report is still counted once in the unit metrics of
+its class and charged to the day's budget, because `queue.Queue.tally` marks the attempt by its
+`attempts` number. With `retry: {failed: 1}`, a unit that fails and then passes stores one passing
+verdict, and both attempts count when both uploaded a report.
+
 ### Troubleshooting
 
 | Symptom | Cause | Check |
@@ -3976,6 +4131,8 @@ table, and the `lab-scheduler-test-units` feature tests cover the scheduler's re
 | `DeliveryError` naming `lab.retry` | A count is negative, not an integer, a boolean, or the block holds another key or is not a mapping | Match the message to the error table in [Configure the counts](#configure-the-counts) |
 | `TypeError` from `retry.policy` | The block was not validated and holds an unknown key | Read the block with `delivery.lab(root)` first |
 | Changing `lab.retry` leaves reruns unchanged | The scheduler reads the counts only when it starts | Restart the scheduler service after the change reaches dev |
+| The scheduler exits at start with a `jsonschema.ValidationError`, such as `-1 is less than the minimum of 0` | Dev's `delivery.yaml` breaks its schema; `build` reads the counts through `MirrorExpander.retries`, which validates the whole document before any listener binds | Run `delivery.lab` in a checkout of dev, as in [Configure the entry limit](#configure-the-entry-limit), and fix the file by pull request |
+| A unit ran twice but the store holds one verdict | The first attempt was run again, so only the final attempt's verdict is stored | Expected; the unit metrics count each attempt that uploaded a report |
 
 ## Shadow comparison
 
