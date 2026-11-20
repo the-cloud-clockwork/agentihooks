@@ -1,5 +1,7 @@
 import json
 import subprocess
+import sys
+from importlib import metadata
 from pathlib import Path
 
 import pytest
@@ -89,6 +91,7 @@ STATS_FILES = {
     "tests/test_a.py": TEST_A,
     "tests/test_b.py": "def test_alone():\n    assert True\n",
 }
+LOCKFILE = ".github/test-requirements.lock"
 
 
 def repository(root: Path, files: dict[str, str]) -> Path:
@@ -354,6 +357,37 @@ def test_stats_units_carry_the_stats_cache_identity(tmp_path: Path) -> None:
     assert [(unit.kind, unit.members) for unit in units] == [("stats", (path,)) for path in files]
     assert {unit.key for unit in units} == {f"stats-v{digests.SCHEMAS['stats']}-{key}" for key in stored}
     assert len(stored) == len(files)
+
+
+@pytest.mark.feature("lab-stats-unit-key-head-lockfile")
+def test_a_scheduler_on_another_interpreter_and_package_set_keys_the_stats_the_worker_stores(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = repository(tmp_path / "repo", {**STATS_FILES, LOCKFILE: "pytest==8.3.4\n"})
+    files = ["tests/test_a.py", "tests/test_b.py"]
+    cache = tmp_path / "cache"
+
+    def collect(chosen: list[str]) -> list[dict]:
+        return [{"status": 0, "tests": {}, "durations": {f"{path}::test": 1.0 for path in chosen}, "cpu": 1.0}]
+
+    collect_cached_stats(root, cache, {}, files, ["-q"], collect)
+    stored = {json.loads(record.read_text())["key"] for record in cache.glob("*.json")}
+    monkeypatch.setattr(sys, "version", "3.13.0 (scheduler image)")
+    monkeypatch.setattr(metadata, "distributions", lambda: iter(()))
+    units = expand_mutation.stats_units(root, files, ["-q"])
+    assert len(stored) == len(files)
+    assert {unit.key for unit in units} == {f"stats-v{digests.SCHEMAS['stats']}-{key}" for key in stored}
+
+
+@pytest.mark.feature("lab-stats-unit-key-head-lockfile")
+def test_a_change_to_the_head_lockfile_rekeys_every_stats_unit(tmp_path: Path) -> None:
+    root = repository(tmp_path / "repo", {**STATS_FILES, LOCKFILE: "pytest==8.3.4\n"})
+    files = ["tests/test_a.py", "tests/test_b.py"]
+    before = {unit.members: unit.key for unit in expand_mutation.stats_units(root, files)}
+    (root / LOCKFILE).write_text("pytest==8.3.5\n")
+    after = {unit.members: unit.key for unit in expand_mutation.stats_units(root, files)}
+    assert before.keys() == after.keys()
+    assert all(before[members] != after[members] for members in before)
 
 
 @pytest.mark.feature("lab-mutation-verdict-key-prefix")
