@@ -16,5 +16,6 @@ rules:
       - pattern-either:
           - pattern: $FACTORY.client("s3", ...)
           - pattern: $FACTORY.create_client("s3", ...)
+          - pattern: $FACTORY.resource("s3", ...)
       - pattern-not: $FACTORY.$MAKE("s3", ..., config=Config(..., signature_version="s3v4", ...), ...)
       - pattern-not: $FACTORY.$MAKE("s3", ..., config=botocore.config.Config(..., signature_version="s3v4", ...), ...)

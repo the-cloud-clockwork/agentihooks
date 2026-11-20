@@ -35,6 +35,11 @@ def session_default(environ: Mapping[str, str]) -> Any:
     return session.create_client("s3", endpoint_url=environ["CI_LAB_MINIO_ENDPOINT"])
 
 
+def resource_default(environ: Mapping[str, str]) -> Any:
+    # ruleid: lab-presign-without-sigv4
+    return boto3.resource("s3", endpoint_url=environ["CI_LAB_MINIO_ENDPOINT"])
+
+
 def sigv4(environ: Mapping[str, str]) -> Any:
     # ok: lab-presign-without-sigv4
     return boto3.client(
@@ -55,6 +60,11 @@ def session_sigv4(environ: Mapping[str, str]) -> Any:
         endpoint_url=environ["CI_LAB_MINIO_ENDPOINT"],
         config=botocore.config.Config(signature_version="s3v4"),
     )
+
+
+def resource_sigv4(environ: Mapping[str, str]) -> Any:
+    # ok: lab-presign-without-sigv4
+    return boto3.resource("s3", endpoint_url=environ["CI_LAB_MINIO_ENDPOINT"], config=Config(signature_version="s3v4"))
 
 
 def another_service() -> Any:

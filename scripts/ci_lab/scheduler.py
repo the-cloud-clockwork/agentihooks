@@ -1498,9 +1498,8 @@ def _sleep_ms(ms: int) -> None:
 
 
 def storage(environ: Mapping[str, str]) -> S3Objects:
-    """Return the lab objects in the MinIO bucket the environment names, through the S3 client that also signs the
-    upload URLs workers put unit results to. The client signs with SigV4, which covers only the host, because SigV2
-    also signs the Content-Type and urllib adds a form Content-Type to every worker PUT."""
+    """Return the lab objects in the MinIO bucket the environment names, through an S3 client that signs worker
+    upload URLs with SigV4 over the host alone, so a worker PUT may carry any Content-Type."""
     import boto3  # pyright: ignore[reportMissingTypeStubs]
     from botocore.config import Config  # pyright: ignore[reportMissingTypeStubs]
 
