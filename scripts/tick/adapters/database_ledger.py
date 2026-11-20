@@ -4,6 +4,8 @@ path every swarm, agent and service client reads and writes a ledger through; th
 import io
 import json
 import logging
+import sys
+import time
 import urllib.error
 from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
@@ -13,6 +15,7 @@ from email.message import Message
 from typing import Any, cast
 from urllib.parse import urlsplit
 
+from scripts.swarm import timing
 from scripts.swarm_ledger.api import client as api_client
 from scripts.swarm_ledger.api import resources as api_resources
 from scripts.swarm_ledger.api import routes as api_routes
@@ -149,8 +152,33 @@ def request(slug: str, path: str, payload: dict[str, Any] | None = None) -> dict
 
 
 def client(base: str, timeout: float) -> ResourceClient:
-    """A ledger API client whose requests run the ledger server's route code in this process."""
-    return ResourceClient(base, {}, timeout, transport=request)
+    """A ledger API client whose requests run the ledger server's route code in this process, each journaled with its
+    wall time when the client is built inside a tick pass."""
+    return ResourceClient(base, {}, timeout, transport=request if timing.SWARM.get() is None else timed)
+
+
+def timed(slug: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Answer one ledger API request as ``request`` does and journal one ``swarm_tick_ledger_call`` line with its
+    ledger, method, route path, outcome and wall time."""
+    started = time.monotonic()
+    outcome = "error"
+    try:
+        reply = request(slug, path, payload)
+        outcome = "success"
+        return reply
+    finally:
+        line: dict[str, Any] = {
+            "event": "swarm_tick_ledger_call",
+            "slug": timing.SWARM.get(),
+            "ledger": slug,
+            "method": "GET" if payload is None else "POST",
+            "path": urlsplit(path).path,
+            "outcome": outcome,
+            "wall_s": time.monotonic() - started,
+        }
+        if (current := timing.PASS.get()) is not None:
+            line["pass_id"] = current["pass_id"]
+        timing.emit(sys.stderr, json.dumps(line))  # pyright: ignore[reportUnknownMemberType]
 
 
 def upload(slug: str, route: str, data: bytes, headers: Mapping[str, str]) -> dict[str, Any]:

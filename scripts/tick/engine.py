@@ -110,7 +110,8 @@ def _run_once(step: Step, ctx: Context) -> StepRecord:
     While that earlier run is alive, a new run of the same step for the same swarm is held: no thread starts and the
     record reads held. Another swarm's run of that step is never held by it.
     """
-    deadline = ctx.deadline.child(step.budget_s)
+    budget_s = step.budget_s
+    deadline = ctx.deadline.child(budget_s)
     clock = deadline.clock
     started = clock()
     outcome: list[Result | BaseException] = []
@@ -123,11 +124,13 @@ def _run_once(step: Step, ctx: Context) -> StepRecord:
         tools = None if ctx.tools is None else ctx.tools.for_effects(step.effects)
         run = _Run()
         worker = Thread(
-            target=_record, args=(outcome, caller, step, Context(ctx.view, deadline, tools), run), daemon=True
+            target=_record,
+            args=(outcome, caller, step, budget_s, Context(ctx.view, deadline, tools), run),
+            daemon=True,
         )
         _RUNNING[key] = worker
         worker.start()
-    worker.join(step.budget_s)
+    worker.join(budget_s)
     if run.give_up():
         return _left(step, outcome, clock() - started)
     worker.join(END_GRACE_S)
@@ -223,12 +226,15 @@ def _finished(step: Step, outcome: list[Result | BaseException], wall_s: float) 
     return StepRecord(step.name, wall_s, step.budget_s, result=found)
 
 
-def _record(outcome: list[Result | BaseException], caller: ContextCopy, step: Step, ctx: Context, run: _Run) -> None:
-    """Run ``step`` in the caller's copied context, recorded under its registered name, and append its result or the
-    error it raised; the run reads abandoned when ``run`` was given up at its budget before it ended."""
+def _record(
+    outcome: list[Result | BaseException], caller: ContextCopy, step: Step, budget_s: float, ctx: Context, run: _Run
+) -> None:
+    """Run ``step`` in the caller's copied context, recorded under its registered name with ``budget_s``, the budget
+    the engine joins it on, and append its result or the error it raised; the run reads abandoned when ``run`` was
+    given up at its budget before it ended."""
     try:
         outcome.append(
-            caller.run(timing.within, step.budget_s, step.run, ctx, lane=step.lane, name=step.name, on_end=run.end)
+            caller.run(timing.within, budget_s, step.run, ctx, lane=step.lane, name=step.name, on_end=run.end)
         )
     except BaseException as exc:
         outcome.append(exc)

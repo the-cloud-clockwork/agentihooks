@@ -1,6 +1,10 @@
+import json
+import sys
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from threading import Lock
+from typing import Any
 
 from scripts.swarm import lease, tick_stop, timing
 from scripts.swarm.store import RedisStore
@@ -41,21 +45,54 @@ class Renewal:
 
     def _keep(self, interval_ms: int) -> None:
         """Check for a stop and renew the tick lock unless its last renewal is under ``interval_ms`` old or the pass
-        already revoked the hook; a failed renewal leaves the next call to renew again."""
-        with self.lock:
+        already revoked the hook; a failed renewal leaves the next call to renew again. A call that renews, or finds
+        another call holding the hook, journals its wait, its hold and its renewal's Redis time."""
+        asked = time.monotonic()
+        blocked = not self.lock.acquire(blocking=False)
+        if blocked:
+            self.lock.acquire()
+        held = time.monotonic()
+        renewing: float | None = None
+        try:
             if self.revoked:
                 return
             tick_stop.check()
             at = self.clock()
             if self.renewed is not None and 0 <= at - self.renewed < interval_ms:
                 return
+            renewing = time.monotonic()
             keep(self.store, self.slug, self.renew, self.clock)
             self.renewed = at
+        finally:
+            ended = time.monotonic()
+            self.lock.release()
+            if blocked or renewing is not None:
+                _journal(self.slug, blocked, (asked, held, ended), renewing)
 
     def revoke(self) -> None:
         """Stop every later call, from the pass or any worker holding a copy of the hook, from renewing."""
         with self.lock:
             self.revoked = True
+
+
+def _journal(slug: str, blocked: bool, times: tuple[float, float, float], renewing: float | None) -> None:
+    """Journal one ``swarm_tick_lock_renewal`` line for a step hook call that asked for the hook, held it and let it
+    go at ``times``: whether another call held it, its wait for it, how long it held it and, when it renewed from
+    ``renewing``, the renewal's Redis round trips."""
+    asked, held, ended = times
+    line: dict[str, Any] = {
+        "event": "swarm_tick_lock_renewal",
+        "slug": slug,
+        "blocked": blocked,
+        "renewed": renewing is not None,
+        "wait_s": held - asked,
+        "wall_s": ended - held,
+    }
+    if renewing is not None:
+        line["redis_s"] = ended - renewing
+    if (current := timing.PASS.get()) is not None:
+        line["pass_id"] = current["pass_id"]
+    timing.emit(sys.stderr, json.dumps(line))  # pyright: ignore[reportUnknownMemberType]
 
 
 def renew_now() -> None:

@@ -3286,6 +3286,37 @@
       ]
     },
     {
+      "id": "swarm-tick-lock-renewal-timing",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2785",
+      "behaviour": "Each tick lock renewal, and each step hook call that found another call holding the hook, journals one swarm_tick_lock_renewal line with its wait for the hook, how long it held it, whether it renewed and, when it did, the renewal's Redis time, so time spent behind a renewal outside a step's wall shows in the log.",
+      "seam": "The pass step hook scripts.swarm.tick_activity.Renewal that run_tick sets on timing.BEFORE_STEP",
+      "tests": [
+        "tests/swarm/test_tick_activity.py::test_each_renewal_journals_its_wait_its_hold_and_its_redis_time",
+        "tests/swarm/test_tick_activity.py::test_a_step_blocked_behind_a_renewal_journals_its_wait"
+      ]
+    },
+    {
+      "id": "swarm-tick-ledger-call-timing",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2785",
+      "behaviour": "Inside a tick pass every ledger request the tick makes journals one swarm_tick_ledger_call line naming its ledger, method, route path, outcome and wall time; outside a pass a ledger request journals nothing.",
+      "seam": "The in process ledger API client scripts.tick.adapters.database_ledger.client that every ledger client the tick builds goes through",
+      "tests": [
+        "tests/tick/test_database_ledger.py::test_each_ledger_request_of_a_tick_pass_journals_its_route_outcome_and_wall_time"
+      ]
+    },
+    {
+      "id": "swarm-tick-step-joined-budget",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2785",
+      "behaviour": "A step's finished line and steps stream record carry the live budget the engine joined the step on, read once in the pass context, and read late only past that budget, never the bare floor a worker thread without the pass context reads.",
+      "seam": "The tick engine step run scripts.tick.engine._run_once and its worker scripts.tick.engine._record",
+      "tests": [
+        "tests/tick/test_engine_records.py::test_step_finished_line_carries_the_live_budget_the_engine_joined_on"
+      ]
+    },
+    {
       "id": "swarm-tick-source-control-port",
       "origin": "inventory",
       "behaviour": "Swarm code reaches source control through the source control port: a gh list or the GitHub adapter's command builder outside the adapter is refused unless its file is on an exception list that only shrinks, and a change read names its state, head and head branch inside a deadline.",
