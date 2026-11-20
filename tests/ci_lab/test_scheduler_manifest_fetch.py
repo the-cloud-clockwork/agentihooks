@@ -36,8 +36,10 @@ from tests.ci_lab.test_scheduler import (
     unit,
 )
 from tests.ci_lab.test_scheduler import lab as _lab
+from tests.ci_lab.test_scheduler import staticless as _staticless
 
 lab = _lab
+staticless = _staticless
 
 
 @pytest.mark.feature("lab-dev-manifest-fetch")
