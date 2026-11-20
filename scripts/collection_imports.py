@@ -6,7 +6,7 @@ from pathlib import Path
 
 HEAVY = "mcp"
 _COMMENTS_STRINGS_CONTINUATIONS = re.compile(
-    r"#[^\n]*|(\"\"\"|''')(?:\\.|[\s\S])*?\1|\"(?:\\.|[^\"\\\n])*\"|'(?:\\.|[^'\\\n])*'|\\\n"
+    r"#[^\n]*|(\"\"\"|''')(?:\\[\s\S]|[^\\])*?\1|\"(?:\\.|[^\"\\\n])*\"|'(?:\\.|[^'\\\n])*'|\\\n"
 )
 _IMPORT_BODY = (
     r"(?:import\s+(?P<modules>[^\n;]+)|from\s+(?P<module>\w[\w.]*)\s+import\s*(?P<members>\([^)]*\)|[^\n;]+))"

@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 
 import pytest
@@ -109,6 +110,17 @@ from m3 import (
 
 def test_the_import_scan_keeps_every_letter_of_a_member_name() -> None:
     assert _import_names("from m import X\n") == {"m", "m.X"}
+
+
+def test_the_import_scan_keeps_an_escaped_triple_quote_inside_its_string() -> None:
+    assert _import_names('x = """a\n\\"""\nimport mcp\n"""\nimport os\n') == {"os"}
+
+
+@pytest.mark.wall_clock
+def test_the_import_scan_reads_an_unterminated_string_of_escapes_in_linear_time() -> None:
+    started = time.perf_counter()
+    _import_names('"""' + "\\x" * 26)
+    assert time.perf_counter() - started < 0.5
 
 
 def test_no_test_module_loads_the_mcp_sdk_while_collecting() -> None:
