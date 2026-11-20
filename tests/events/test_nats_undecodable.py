@@ -114,7 +114,7 @@ def test_an_undecodable_head_has_one_retained_letter_when_termination_is_lost(
         raise OSError("termination lost")
 
     with nats_server.running(tmp_path / "jetstream") as url:
-        bus = nats.open_bus(BusConfig(url=url, queue=QueuePolicy(max_deliver=1, ack_wait_ms=20), dedupe_window_ms=20))
+        bus = nats.open_bus(BusConfig(url=url, queue=QueuePolicy(max_deliver=1, ack_wait_ms=20), dedupe_window_ms=100))
         try:
             consumer = bus.lab_heads.consumer(scheduler.DURABLE, scheduler.SUBJECT)
             published = bus._loop.run(bus._js.publish("ci.lab.head.push", b"\xff", stream=nats.LAB_STREAM))
@@ -125,7 +125,7 @@ def test_an_undecodable_head_has_one_retained_letter_when_termination_is_lost(
             info = bus._loop.run(bus._js.consumer_info(nats.LAB_STREAM, nats.consumer_name(scheduler.DURABLE)))
             assert info.num_ack_pending == 1
             assert bus._loop.run(bus._js.stream_info(nats.DEAD_STREAM)).state.messages == 1
-            time.sleep(0.06)
+            time.sleep(0.15)
             assert consumer.fetch(1, 100) == []
             info = bus._loop.run(bus._js.consumer_info(nats.LAB_STREAM, nats.consumer_name(scheduler.DURABLE)))
             assert info.num_ack_pending == 0

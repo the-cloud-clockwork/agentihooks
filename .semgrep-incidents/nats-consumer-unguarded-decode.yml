@@ -3,7 +3,7 @@ rules:
     languages: [python]
     severity: ERROR
     message: >-
-      Consumer decoding must catch ValueError and retain a dead letter before terminating an undecodable delivery.
+      Consumer decoding must catch ValueError and RecursionError and retain a dead letter before terminating an undecodable delivery.
     paths:
       include:
         - /scripts/events/nats.py
@@ -24,12 +24,12 @@ rules:
       - pattern-not-inside: |
           try:
               ...
-          except ValueError:
+          except (ValueError, RecursionError):
               ...
       - pattern-not-inside: |
           try:
               ...
-          except ValueError:
+          except (ValueError, RecursionError):
               ...
           else:
               ...

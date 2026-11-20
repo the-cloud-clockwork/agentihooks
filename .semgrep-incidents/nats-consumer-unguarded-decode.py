@@ -12,8 +12,11 @@ class Unsafe:
         self.loop = loop
 
     def _fetch(self) -> Envelope:
-        # ruleid: nats-consumer-unguarded-decode
-        return Envelope.decode(self.message.data)
+        try:
+            # ruleid: nats-consumer-unguarded-decode
+            return Envelope.decode(self.message.data)
+        except ValueError:
+            return _undecodable(self.message)
 
     def fetch(self) -> NatsDelivery:
         # ruleid: nats-consumer-unguarded-decode
@@ -28,7 +31,7 @@ class Safe:
         try:
             # ok: nats-consumer-unguarded-decode
             return Envelope.decode(self.message.data)
-        except ValueError:
+        except (ValueError, RecursionError):
             return _undecodable(self.message)
 
 
@@ -37,11 +40,11 @@ class SafeDelivery:
         self.message = message
         self.loop = loop
 
-    def fetch(self) -> list[NatsDelivery]:
+    def fetch(self, message: Msg) -> list[NatsDelivery]:
         try:
             # ok: nats-consumer-unguarded-decode
-            delivery = NatsDelivery(self.loop, self.message)
-        except ValueError:
+            delivery = NatsDelivery(self.loop, message)
+        except (ValueError, RecursionError):
             return []
         else:
             return [delivery]

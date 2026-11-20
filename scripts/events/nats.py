@@ -273,7 +273,7 @@ class NatsConsumer:
         for msg in messages:
             try:
                 delivery = NatsDelivery(self._loop, msg)
-            except ValueError:
+            except (ValueError, RecursionError):
                 event = _undecodable(msg)
                 attempts = _attempt(msg)
             else:
