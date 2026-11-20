@@ -944,6 +944,37 @@ def test_an_awk_listing_of_environment_names_passes(command: str) -> None:
     assert decide(_bash(command)) is None
 
 
+SET_TESTS_IN_SCRIPTS = [
+    "kubectl exec -n ns pod-0 -- sh -c 'test -n \"${GITHUB_TOKEN:-}\" && echo set || echo unset'",
+    "kubectl exec pod-0 -- bash -c '[ -n \"$GITHUB_TOKEN\" ] && echo set || echo unset'",
+    "kubectl exec pod-0 -c worker -- sh -c 'test -z \"${API_KEY}\" && echo unset || echo set'",
+    "kubectl exec pod-0 -- bash -c '[[ -n \"${LEDGER_TOKEN-}\" ]] && echo set || echo unset'",
+    "docker exec box sh -c 'test -n \"${GITHUB_TOKEN:-}\" && echo set || echo unset'",
+    "sh -c 'test -n \"${GITHUB_TOKEN:-}\" && echo set || echo unset'",
+]
+
+SET_TESTS_THAT_PRINT_THE_VALUE = [
+    ("kubectl exec pod-0 -- sh -c 'echo $GITHUB_TOKEN'", "GITHUB_TOKEN"),
+    ('kubectl exec pod-0 -- sh -c \'test -n "${GITHUB_TOKEN:-}" && echo "$GITHUB_TOKEN"\'', "GITHUB_TOKEN"),
+    ('kubectl exec pod-0 -- sh -c \'test -n "$API_KEY" && echo set; printf %s "$API_KEY"\'', "API_KEY"),
+    ('kubectl exec pod-0 -- sh -c \'test -n "${GITHUB_TOKEN:-}" && echo "$1"\' _ "$GITHUB_TOKEN"', "GITHUB_TOKEN"),
+    ('kubectl exec pod-0 -- sh -c \'test -n "$GITHUB_TOKEN" -a "$GITHUB_TOKEN" -eq 0 && echo set\'', "GITHUB_TOKEN"),
+    ('test -n "${GITHUB_TOKEN:-}" && echo "$GITHUB_TOKEN"', "GITHUB_TOKEN"),
+]
+
+
+@pytest.mark.feature("credential-guard-passes-set-tests-in-scripts")
+@pytest.mark.parametrize("command", SET_TESTS_IN_SCRIPTS)
+def test_a_set_test_inside_a_shell_script_passes(command: str) -> None:
+    assert decide(_bash(command)) is None
+
+
+@pytest.mark.feature("credential-guard-passes-set-tests-in-scripts")
+@pytest.mark.parametrize(("command", "name"), SET_TESTS_THAT_PRINT_THE_VALUE)
+def test_a_shell_script_that_prints_a_tested_value_is_refused(command: str, name: str) -> None:
+    assert decide(_bash(command)) == block(f"printing ${name} to stdout", KIND_ENVIRONMENT)
+
+
 class TestEnvironmentNames:
     """A malformed variable name can hold a secret, so a name listing must drop it."""
 
