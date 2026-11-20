@@ -3048,6 +3048,10 @@ jobs:
           python -P -m ruff check --config "$RUNNER_TEMP/grader/pyproject.toml" hooks/ scripts/ tests/
           python -P -m ruff check hooks/ scripts/ tests/
 
+      - name: Require swarm image pins for every third party module import
+        if: ${{ !cancelled() }}
+        run: python -m scripts.ci_swarm_imports --root "$GITHUB_WORKSPACE"
+
       - name: Format check
         if: ${{ !cancelled() }}
         run: python -P -m ruff format --check --config "$RUNNER_TEMP/grader/pyproject.toml" hooks/ scripts/ tests/
