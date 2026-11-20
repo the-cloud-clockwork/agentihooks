@@ -77,8 +77,8 @@ or acknowledgement probe reports only refused and unreachable faults.
 The ledger command runs the route code in process. Reads and writes look the same as before the change:
 
 ```bash
-agentihooks ledger --slug my-swarm get tasks/t-docs
-agentihooks ledger --slug my-swarm --as engineer@host-1 comment tasks/t-docs "The reference page landed"
+agentihooks api --slug my-swarm get tasks/t-docs
+agentihooks api --slug my-swarm --as engineer@host-1 comment tasks/t-docs "The reference page landed"
 ```
 
 Python code takes the same client. A tick, hub or other service caller wraps its calls in `acting("")`:

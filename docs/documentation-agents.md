@@ -15,7 +15,7 @@ Playwright browser. A bundle profile or selected overlay can add capabilities.
 Assign the role to a task in an existing swarm:
 
 ```bash
-agentihooks ledger --slug example task add - "Document retry behavior" \
+agentihooks api --slug example task add - "Document retry behavior" \
   --profile documentation \
   --description "Explain the delivered retry setting, examples and failure handling"
 ```
