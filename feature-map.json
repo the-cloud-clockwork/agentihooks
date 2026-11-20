@@ -10922,6 +10922,18 @@
         "tests/test_ci_mutation_stats_cache.py::test_distinct_dependency_lists_in_one_collection_keep_their_own_closures",
         "tests/test_ci_mutation_stats_cache.py::test_the_discovery_digest_of_one_input_set_is_computed_once"
       ]
+    },
+    {
+      "id": "swarm-status-hourly-spawns",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2779",
+      "behaviour": "Every placed spawn records its harness and launch time once per agent name: the hub claim lives reactor records the harness and launch time of each counted execution started event, and a placed agent record written through the store, with a harness and a launch time, records its own; swarm status reports the spawns launched in the last hour per harness and the text status prints them on one line, so a redelivered start, a rewritten placed agent and a spawn older than one hour add nothing.",
+      "seam": "scripts.hub.claims.Claims.handle and scripts.swarm.store.RedisStore.put_agent recording through RedisStore.record_spawn, read by RedisStore.spawns into status_report and cmd_status",
+      "tests": [
+        "tests/swarm/test_spawn_counts.py::test_status_counts_one_claude_and_one_codex_spawn_placed_in_the_last_hour",
+        "tests/swarm/test_spawn_counts.py::test_a_redelivered_start_and_a_rewritten_placed_agent_count_one_spawn_each",
+        "tests/swarm/test_spawn_counts.py::test_text_status_prints_the_last_hour_spawns_per_harness"
+      ]
     }
   ],
   "unmapped_rules": [
