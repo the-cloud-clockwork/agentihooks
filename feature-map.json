@@ -7055,6 +7055,21 @@
       ]
     },
     {
+      "id": "design-rules-body-change-graded",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-design-rules-body-change-types",
+      "behaviour": "The design rules gate grades a function or method whose body differs from its base version, a nested function's edit included, so an untyped function edited only in its body is red for its missing hints, while unchanged functions stay ungraded and a class is not regraded for a body change alone.",
+      "seam": "scripts.design_rules.grade through its changed unit selection",
+      "tests": [
+        "tests/test_design_rules.py::test_a_body_change_grades_an_untyped_function_for_hints",
+        "tests/test_design_rules.py::test_only_the_untyped_function_whose_body_changed_is_graded",
+        "tests/test_design_rules.py::test_a_method_body_change_grades_the_method_but_not_its_class",
+        "tests/test_design_rules.py::test_an_async_function_whose_body_changed_is_graded_for_hints",
+        "tests/test_design_rules.py::test_a_nested_function_edit_grades_the_function_that_encloses_it",
+        "tests/test_design_rules.py::test_a_body_change_grades_an_untyped_private_function_for_hints"
+      ]
+    },
+    {
       "id": "hive-master-refused-account-retry",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-scale-cpu",
