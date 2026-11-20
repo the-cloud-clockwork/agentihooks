@@ -944,6 +944,36 @@ def test_an_awk_listing_of_environment_names_passes(command: str) -> None:
     assert decide(_bash(command)) is None
 
 
+POD_ENVIRONMENT_DUMPS = [
+    ("kubectl exec mypod -- printenv GITHUB_TOKEN", "printing the value of GITHUB_TOKEN"),
+    ("kubectl exec -n ns mypod -c app -- printenv API_KEY", "printing the value of API_KEY"),
+    ("kubectl exec mypod -- env", "dumping the whole environment (env)"),
+    ("kubectl exec -it mypod -- printenv", "dumping the whole environment (printenv)"),
+    ("sudo kubectl -n ns exec mypod -- env | sort", "dumping the whole environment (env)"),
+]
+
+POD_ENVIRONMENT_NAME_ONLY = [
+    "kubectl exec mypod -- " + ENV_NAMES_SAFE,
+    "kubectl exec mypod -- env | wc -l",
+    "kubectl exec mypod -- printenv HOME",
+    "kubectl exec mypod -- ls env",
+    "kubectl -n env exec mypod -- ls",
+    "kubectl create job probe --image=busybox -- env",
+]
+
+
+@pytest.mark.feature("credential-guard-refuses-pod-environment-dumps")
+@pytest.mark.parametrize(("command", "what"), POD_ENVIRONMENT_DUMPS)
+def test_a_pod_environment_dump_without_a_shell_is_refused(command: str, what: str) -> None:
+    assert decide(_bash(command)) == block(what, KIND_ENVIRONMENT)
+
+
+@pytest.mark.feature("credential-guard-refuses-pod-environment-dumps")
+@pytest.mark.parametrize("command", POD_ENVIRONMENT_NAME_ONLY)
+def test_a_pod_environment_name_listing_passes(command: str) -> None:
+    assert decide(_bash(command)) is None
+
+
 SET_TESTS_IN_SCRIPTS = [
     "kubectl exec -n ns pod-0 -- sh -c 'test -n \"${GITHUB_TOKEN:-}\" && echo set || echo unset'",
     "kubectl exec pod-0 -- bash -c '[ -n \"$GITHUB_TOKEN\" ] && echo set || echo unset'",
