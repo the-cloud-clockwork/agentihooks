@@ -5738,6 +5738,18 @@
       ]
     },
     {
+      "id": "credential-guard-proc-environ-path-shape",
+      "origin": "regression",
+      "ordered_at": "2026-11-20",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2759",
+      "behaviour": "The credential guard refuses a Bash word as a process environment read only when a segment matching proc is followed by the shape of a process environment path: one pid segment then a leaf naming environ, or a pid, task, tid and that leaf, where a pid segment is digits, self, thread-self or a glob, and a variable, command substitution, brace, dot, dot dot or globstar segment after the proc segment keeps the read refused at any depth. A shell case pattern holding a GitHub address with star globs and a glob listing such as src star tests star pass, while every real proc environ path stays refused, including glob, task, mounted, relative and file URL forms.",
+      "seam": "hooks.context.credential_guard.path_reads_environ, read by hooks.context.credential_guard.proc_environ_verdict and hooks.context.credential_guard.decide on Bash payloads",
+      "tests": [
+        "tests/test_credential_guard.py::test_a_glob_shaped_unlike_a_proc_environ_path_passes",
+        "tests/test_credential_guard.py::test_a_proc_environ_path_shape_stays_refused"
+      ]
+    },
+    {
       "id": "swarm-outage-recovery-hub-admitted",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-outage-recovery",

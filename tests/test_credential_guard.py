@@ -1309,3 +1309,45 @@ class TestProcEnvironReads:
         assert verdict.splitlines()[0] == "BLOCKED: searching the contents of /proc/1/environ."
         assert 'test -n "${VAR:-}"' in verdict
         assert ENV_NAMES_SAFE in verdict
+
+
+GLOBS_SHAPED_UNLIKE_PROC_ENVIRON = [
+    'case "$url" in https://github.com/*/*/issues/*) echo issue ;; esac',
+    'case "$url" in https://github.com/*/*/pull/*|https://github.com/*/*/issues/*) echo item ;; esac',
+    "ls src/*/tests/*",
+    "ls out/*/1/2/*",
+    "ls build/*/2/logs/3/*",
+    "cat /proc/self/fd/../status",
+]
+
+PROC_ENVIRON_SHAPES = [
+    "cat /*/self/environ",
+    "cat /p*c/thread-self/environ",
+    "cat /pr?c/*/environ",
+    "cat /proc/1/task/1/env*",
+    "cat /p*c/self/task/*/environ",
+    "cat /p*/*/*/*/environ",
+    "cat /proc/self/fd/../env*",
+    "cat /proc/./1/env*",
+    "cat /proc/**/1/env*",
+    "cat /proc/{1,self}/env*",
+    "cat /proc/$p/1/$f",
+    "cat /proc/`pgrep`/1/env*",
+    "cat /host/p*c/1/environ",
+    "cat //p*c//1//environ",
+    "cd / && cat proc/1/env*",
+    "cat ../../pr?c/1/environ",
+    "cat file:///proc/1/env*",
+]
+
+
+@pytest.mark.feature("credential-guard-proc-environ-path-shape")
+@pytest.mark.parametrize("command", GLOBS_SHAPED_UNLIKE_PROC_ENVIRON)
+def test_a_glob_shaped_unlike_a_proc_environ_path_passes(command: str) -> None:
+    assert decide(_bash(command)) is None
+
+
+@pytest.mark.feature("credential-guard-proc-environ-path-shape")
+@pytest.mark.parametrize("command", PROC_ENVIRON_SHAPES)
+def test_a_proc_environ_path_shape_stays_refused(command: str) -> None:
+    assert decide(_bash(command)) == block("reading a process environment file under /proc", KIND_ENVIRONMENT)
