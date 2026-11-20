@@ -1864,8 +1864,8 @@ and drops one that waited there as long as the hive waits for its answer, so an 
 claims the task; see
 [How the hub serves requests](../reference/swarm-bus-scope.md#how-the-hub-serves-requests).
 A hub admission sets on its claim what the removed tick launch set. The ledger claim write names the task's work
-folder, clears a recorded protected branch and writes the lane kind. The spawn task carries the continuation, stack base,
-territory overlaps, group and work folder files, and the handoff transfer the predecessor left (see
+folder, clears a recorded protected branch and writes the lane kind. The spawn task carries the continuation, stack
+base, territory overlaps, group and work folder files, and the handoff transfer the predecessor left (see
 [What the claim sets](#what-the-claim-sets) and
 [Handoff continuity on admission](#handoff-continuity-on-admission)). The hub writes no folder itself: the hive lane
 spoke writes it on its own host before the spawn. The spawn task also carries the seat's handoff, recaps and learned
@@ -2050,12 +2050,9 @@ semgrep --test --config .semgrep-incidents/hub-admission-late-answer-releases-cl
 
 ### What the claim sets
 
-Since pull request [#11139](https://github.com/the-cloud-clockwork/agentihooks/pull/11139), an eng, ci or plan
-admission sets everything the tick set when it placed a task, before pull request
-[#11141](https://github.com/the-cloud-clockwork/agentihooks/pull/11141) removed the tick spawn: the work
-folder, the reclaim of a recorded branch, the protected branch clear, the lane kind, the territory overlaps and the
-group. Every admission does this; no setting turns it on or off. A master spoke admits nothing on the hub and is
-outside this path.
+Every eng, ci or plan admission sets what the removed tick spawn set when it placed a task: the work folder, the
+reclaim of a recorded branch, the protected branch clear, the lane kind, the territory overlaps and the group. No
+setting turns it on or off. A master spoke admits nothing on the hub and is outside this path.
 
 #### The ledger claim write
 
@@ -2104,8 +2101,9 @@ which the opening prompt names as `Your work folder is <path>`. A spawn task wit
 
 The admission resolves the continuation after the claim write, on the claimed row:
 
-1. A task with no stored handoff, no earlier life and no recorded branch gets no `reclaim`, and no branch head is
-   read.
+1. A task with no stored handoff, no earlier life and no recorded branch gets no `reclaim`, no branch head is read,
+   and the opening carries no continuation line. This includes a first life whose protected branch the claim write
+   just cleared.
 2. The candidates are the recorded branch, else the branch of each earlier life, latest ended first. An earlier life
    that was retired while still `starting` with no pane is left out: no hive ran it, so it pushed nothing. A branch
    that another task's pull request in the same repository holds is never a candidate.
@@ -2160,7 +2158,7 @@ An agent record has ended when its state is `finished`, or, for a non-master age
 or `handoff`, awaits verification with no claimant, or no longer names the agent as its claimant while a hive runs
 the agent. The
 opening tells the agent to coordinate with each claimant through the inbox and lists each entry as
-`Task <id>, claimed by <agent>, shares <area> and <area>.` An entry with no claimant reads
+`Task <id>, claimed by <agent>, shares <areas>.`, the areas joined with ` and `. An entry with no claimant reads
 `waiting on checks with no agent; no coordination note needed` in place of `claimed by <agent>` when `checks` is
 `true`, and `no live agent; no coordination note needed` when it is `false`.
 
@@ -2216,7 +2214,7 @@ and the `unknown` answer.
 |---|---|---|
 | An events agent's opening reads `Start your worktree fresh from dev: the remote heads of <branch> could not be read` although the branch is on GitHub | GitHub did not answer the hub's heads query within 3 seconds, or refused it | The agent can continue the branch by hand: `git fetch origin <branch>` and `wt.sh new <name> --from origin/<branch>`. Check the hub's GitHub credential and the API rate limit. |
 | A task recorded on `dev`, `main`, `master` or `v1` continues from an older branch or starts fresh | Expected: the claim write clears a protected branch before the continuation resolves | Nothing to fix. |
-| An events successor's work folder holds only `steering.md` although its predecessor wrote `progress.md` | No hive copy of the task's folder was left: the last hive synced it more than a day ago, or the files do not travel | Read the `work-folder` and `workspaces:files` keys above. Recover the file from the predecessor hive's own folder while that host is up. |
+| An events successor's work folder holds only `steering.md` although its predecessor wrote `progress.md` | No hive copy of the task's folder was left because the last hive synced it more than a day ago. A file other than `progress.md` and `proof.md` also stays behind when it is a symbolic link, is over 65,536 bytes, is not UTF-8 text, has a name outside the plain pattern, or comes after the first 32 extra files in name order | Read the `work-folder` and `workspaces:files` keys above. Recover the file from the predecessor hive's own folder while that host is up. |
 | The hive's `admit` ask is answered `work folder needs a plain slug and task id` | The slug or task id holds a character a folder name may not hold | Give the task a plain id; the admission refuses it every time otherwise. |
 | An events task of a lane with a `kind` keeps an empty kind after admission | The hub runs a release from before #11139, or the lane's kind is `auto` | Roll the hub to the newest release, or set the lane's kind. |
 
