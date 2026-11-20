@@ -31,8 +31,9 @@ for _ in range(200):
 time.sleep(config["sleep"])
 if sys.argv[1] == "venv":
     pathlib.Path(sys.argv[-1]).mkdir(parents=True, exist_ok=True)
-print("uv answered", config["code"])
-sys.exit(config["code"])
+code = config["code"] if config["step"] in ("", sys.argv[1]) else 0
+print("uv answered", code)
+sys.exit(code)
 """
 
 
@@ -41,9 +42,9 @@ class Uv:
     folder: Path
     record: Path
 
-    def answer(self, code: int = 0, sleep: float = 0.0, hold: Path | None = None) -> None:
+    def answer(self, code: int = 0, sleep: float = 0.0, hold: Path | None = None, step: str = "") -> None:
         config = {"record": str(self.record), "code": code, "sleep": sleep, "hold": "" if hold is None else str(hold)}
-        (self.folder / "uv.json").write_text(json.dumps(config))
+        (self.folder / "uv.json").write_text(json.dumps({**config, "step": step}))
 
     def seen(self) -> list[dict[str, Any]]:
         if not self.record.exists():
@@ -167,6 +168,21 @@ def test_a_failed_build_leaves_no_marker_and_builds_again(tmp_path: Path, uv: Uv
     assert venvs.venv_for(DIGEST, tree, root, _build(), baked) == (root / DIGEST, True)
     steps = _built(tree, root / DIGEST)
     assert [_call(seen) for seen in uv.seen()] == [steps[0], *steps]
+
+
+@pytest.mark.feature("lab-venv-build-sandbox")
+def test_a_failed_install_names_its_step_and_keeps_only_its_log(tmp_path: Path, uv: Uv) -> None:
+    baked, tree, root = _baked(tmp_path, None), _tree(tmp_path), tmp_path / "venvs"
+    uv.answer(code=4, step="pip")
+    message = (
+        f"^uv pip install for {re.escape(str(tree))} ended with code 4; its log is {re.escape(str(root / 'builds'))}/"
+    )
+    with pytest.raises(sandbox.CannotRun, match=message):
+        venvs.venv_for(DIGEST, tree, root, _build(), baked)
+    assert not (root / DIGEST / "lockfile.sha256").exists()
+    (kept,) = (root / "builds").iterdir()
+    assert (kept / "log.txt").read_text() == "uv answered 4\n"
+    assert [_call(seen) for seen in uv.seen()] == _built(tree, root / DIGEST)
 
 
 @pytest.mark.feature("lab-venv-build-sandbox")

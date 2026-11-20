@@ -10183,6 +10183,7 @@
       "tests": [
         "tests/ci_lab/test_venvs.py::test_a_build_hook_sees_only_the_whitelist_and_the_sandbox_environment",
         "tests/ci_lab/test_venvs.py::test_a_failed_build_leaves_no_marker_and_builds_again",
+        "tests/ci_lab/test_venvs.py::test_a_failed_install_names_its_step_and_keeps_only_its_log",
         "tests/ci_lab/test_venvs.py::test_a_build_past_its_time_limit_is_cannot_run"
       ]
     },
