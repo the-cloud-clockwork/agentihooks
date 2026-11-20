@@ -1306,6 +1306,16 @@ def test_every_dedicated_group_admission_refuses_another_job_block_or_workflow(a
     assert [case for case, admitted in cases.items() if admitted] == []
 
 
+@pytest.mark.feature("focused-proofs-never-wait-on-a-lane")
+def test_a_new_proof_job_joins_the_focused_proof_group_by_its_own_proof_condition() -> None:
+    trusted, head, _ = _dedicated_fixture("focused_proof_group")
+    lab = {"if": "inputs.proof == 'lab'", "runs-on": "ubuntu-latest", "steps": [{"run": "true"}]}
+    stray = {**lab, "if": "inputs.proof == 'tests'"}
+    for job, found in ((lab, []), (stray, ["job lab has no shared hosted lane concurrency group"])):
+        jobs = {**trusted["jobs"], "lab": job}
+        assert lanes.problems({**head, "jobs": jobs}, {**trusted, "jobs": jobs}) == found
+
+
 @pytest.mark.parametrize(
     "path", sorted(file.name for file in (ROOT / lanes.WORKFLOWS).iterdir() if file.suffix in (".yml", ".yaml"))
 )

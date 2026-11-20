@@ -10260,10 +10260,11 @@
       "id": "focused-proofs-never-wait-on-a-lane",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-focused-proof-run-group",
-      "behaviour": "Every Proofs workflow dispatch, whatever its proof, runs in its own concurrency group named focused-proof and its run id, with queue max and no cancelling, so a short focused proof never queues on a shared hosted lane behind a full Tests dispatch.",
+      "behaviour": "Every Proofs workflow dispatch, whatever its proof, runs in its own concurrency group named focused-proof and its run id, with queue max and no cancelling, so a short focused proof never queues on a shared hosted lane behind a full Tests dispatch; the branch lane grader admits a Proofs job onto that group by its own if condition on its proof option, so a new proof needs no grader edit.",
       "seam": "Proofs workflow concurrency group",
       "tests": [
-        "tests/test_ci_hosted_lanes.py::test_every_proof_dispatch_runs_in_its_own_focused_proof_group_and_never_waits_on_a_lane"
+        "tests/test_ci_hosted_lanes.py::test_every_proof_dispatch_runs_in_its_own_focused_proof_group_and_never_waits_on_a_lane",
+        "tests/test_ci_branch_lanes.py::test_a_new_proof_job_joins_the_focused_proof_group_by_its_own_proof_condition"
       ]
     }
   ],

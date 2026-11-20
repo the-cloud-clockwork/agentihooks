@@ -1910,7 +1910,7 @@ fifteen minute target.
 
 Browser jobs share the [verified Chromium cache](reference/browser-cache.md): restore is attempted on every ref when no verified baked browser is available, while only `dev` pushes save after a miss and successful installation. The guide covers workflow setup, GitHub cache scope, recovery and cache inventory checks.
 
-Proof dispatches share three hosted lanes, the concurrency groups `hosted-lane-a`, `hosted-lane-b` and `hosted-lane-c`. A run picks its lane from the last digit of its run id: 0 to 2 is lane a, 3 to 5 lane b and 6 to 9 lane c. Each lane runs one run at a time and queues the rest (`queue: max`), so at most three such runs hold hosted runners at once. The lanes are used by every `proofs.yml` dispatch except `proof=tests` (that one gets its own `focused-proof-<run id>` group), by every Mutation refinement proof run, by `workflow_dispatch` runs of the Tests, Swarm worker image and Test leaks workflows, by Worker hive pod runs other than a push to `dev`, and by the brain smoke, Helm chart in kind, CI templates, Swarm container smoke, Swarm worker image smoke and Ledger server load workflows when they run under their own name.
+Dispatches share three hosted lanes, the concurrency groups `hosted-lane-a`, `hosted-lane-b` and `hosted-lane-c`. A run picks its lane from the last digit of its run id: 0 to 2 is lane a, 3 to 5 lane b and 6 to 9 lane c. Each lane runs one run at a time and queues the rest (`queue: max`), so at most three such runs hold hosted runners at once. The lanes are used by every Mutation refinement proof run, by `workflow_dispatch` runs of the Tests, Swarm worker image and Test leaks workflows, by Worker hive pod runs other than a push to `dev`, and by the brain smoke, Helm chart in kind, CI templates, Swarm container smoke, Swarm worker image smoke and Ledger server load workflows when they run under their own name. Every `proofs.yml` dispatch, whatever its proof, gets its own `focused-proof-<run id>` group instead, so a focused proof never waits behind a full Tests dispatch on a lane.
 
 Branch pushes of the Startup stages and Worker resources workflows stay off the lanes. Each push resolves to a per-branch group, `startup-stages-refs/heads/<branch>` or `worker-resources-refs/heads/<branch>`, with `queue: single`: a newer push to the same branch replaces the pending one, and the push never waits behind or blocks a proof dispatch. A `workflow_dispatch` of either workflow still queues on a lane. When another workflow calls either one, the call runs under the caller's name and gets its own `startup-stages-<run id>` or `worker-resources-<run id>` group with `queue: single`.
 
@@ -1921,10 +1921,11 @@ Branch pushes of the Startup stages and Worker resources workflows stay off the 
 | Worker resources, branch push | `worker-resources-refs/heads/<branch>` | single |
 | Either workflow, called by another workflow | `startup-stages-<run id>` or `worker-resources-<run id>` | single |
 | Worker resources, dispatch | `hosted-lane-<a, b or c>` | max |
-| `proofs.yml`, any proof but `tests` | `hosted-lane-<a, b or c>` | max |
-| `proofs.yml`, `proof=tests` | `focused-proof-<run id>` | max |
+| `proofs.yml`, any proof | `focused-proof-<run id>` | max |
 
 Before this split, a Startup stages push measurement held a lane for minutes and every proof dispatch hashed to that lane waited behind it: a push created at 03:55:26 queued on lane a until 04:21:36 and held it until 04:27:39, and a swarm worker image dispatch on the same lane, created at 04:06:34, never got a job and was cancelled after 20 minutes in the queue. After it, on lane c, a Startup stages push created at 08:47:30 ran from 08:47:43 to 08:52:00, and a worker image proof dispatch created at 08:50:49, while that push was still running, started its first jobs at 08:50:50 and passed at 08:53:58 (runs 39018691198 and 39018894036, pull request #3956).
+
+Before every proof had its own group, a Semgrep proof dispatch created at 04:29:06 on 19 November hashed to lane c behind a full Tests dispatch that held the lane from 04:17:55 to 05:11:01. Its jobs started at 05:12:00, 42.5 minutes after the dispatch, and ran for 2 minutes 10 seconds (runs 44458633369 and 44457346447, issue #12395).
 
 Dispatch a worker image proof on a branch:
 
