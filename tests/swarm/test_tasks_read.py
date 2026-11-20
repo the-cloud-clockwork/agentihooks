@@ -61,7 +61,7 @@ def test_swarm_tasks_exits_one_and_prints_no_rows_when_the_ledger_is_unreachable
 
 @pytest.mark.feature("swarm-tasks-read-command")
 def test_swarm_tasks_resolves_the_ledger_client_through_the_module_so_a_class_bound_at_an_earlier_import_cannot_persist(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    reads: list[tuple[str, str]], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     class StaleFromAnEarlierImport:
         def __new__(cls, *args: object, **kwargs: object) -> Any:
@@ -72,13 +72,6 @@ def test_swarm_tasks_resolves_the_ledger_client_through_the_module_so_a_class_bo
         importlib.reload(tasks_read)
 
     try:
-        import fakeredis
-
-        store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-        store.create(SwarmConfig("sw", "/home/x/dev/agentihooks", 2, 1))
-        monkeypatch.setattr(LedgerClient, "tasks", lambda _, slug: TASKS if slug == "sw" else [])
-        monkeypatch.setattr(LedgerClient, "freezes", lambda _, slug: FREEZES if slug == "sw" else [])
-        monkeypatch.setattr(cli, "connect", lambda: store)
         assert cli.main(["sw", "tasks"]) == 0
         assert json.loads(capsys.readouterr().out) == {"tasks": TASKS, "freezes": FREEZES}
     finally:
