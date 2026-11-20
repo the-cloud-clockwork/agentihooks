@@ -36,9 +36,12 @@ run. A run refuses without the sink settings and fails when the sink takes fewer
 rows than the run built. It prints the window and the row counts on one JSON
 line and the headline numbers on a second.
 
-Each run ships through a fresh outbox that is removed when the run ends, and the
-outbox gives a flush five seconds. A sink that refuses or answers slowly fails
-the run, and its hour has no rows until it is measured again:
+Each run ships through a fresh outbox that is removed when the run ends. A flush
+gets five seconds and stops at the first statement the sink refuses; while rows
+still wait, the run flushes the same outbox again, at most three flushes in all,
+so the rows one flush left behind ship on the next. A sink that still refuses or
+answers slowly on the third flush fails the run, and the rows it did not take
+are missing until the hour is measured again:
 
 ```bash
 kubectl -n agentihooks-swarm create job --from=cronjob/agentihooks-swarm-ci-metrics ci-metrics-rerun
@@ -193,7 +196,7 @@ WHERE ts > now() - INTERVAL 1 DAY;
 | `ci metrics refused: the metrics sink settings are not set` | `AGENTIHOOKS_METRICS_URL` or `AGENTIHOOKS_METRICS_USER` is empty | Check the `agentihooks-swarm-metrics` ExternalSecret's sync status |
 | `<n> job reads would leave fewer than 1000 of <m> API calls; refusing to start` | The shared GitHub limit is low | Rerun after the reset, before the next hour starts |
 | `ci metrics refused: 10 pages of closed pull requests did not reach <time>` | More than a thousand closed pull requests into dev were updated after the window began | An hour this far back cannot be measured with `--until`; the page cap is in code |
-| `ci metrics failed: shipped <n> of <m> rows to the metrics sink` | ClickHouse refused a statement, a request ran past its 3 seconds, or the 5 second flush ran out | Check the sink, then rerun before the next hour starts |
+| `ci metrics failed: shipped <n> of <m> rows to the metrics sink` | Rows still waited after three flushes: ClickHouse refused a statement, a request ran past its 3 seconds, or each 5 second flush ran out | Check the sink, then rerun before the next hour starts |
 | `RuntimeError: <start>..<end> listed <n> runs, the most GitHub returns` | The hour listed 1000 runs or more, the most one GitHub run listing returns | The hour cannot be measured by this module; raise the case as a follow up |
 | A `CalledProcessError` or `TimeoutExpired` traceback from `gh` | A GitHub read failed: listed reads give up after three attempts, the closed pull request pages and the rate limit read on the first error | Rerun before the next hour starts |
 | A `URLError` or `TimeoutError` traceback from the Prometheus query | Prometheus refused the query or did not answer within 60 seconds | Rerun before the next hour starts |

@@ -328,13 +328,13 @@ The `split` job's plan step runs on `merge_group`, on `workflow_dispatch`, and o
 
 - the base branch is `dev` and the head branch lives in this repository; a fork pull request plans nothing;
 - the grader, a detached worktree of `origin/dev`, has `scripts/ci_test_plan.py`;
-- the grader also has `scripts/reused_coverage.py`, or `tests/reused_coverage.py` when the grader predates the move into `scripts`. A grader without either cannot carry reused coverage, so the step prints `The grader cannot carry reused tests' coverage into Sonar; every test runs.` and plans no reuse. Merge group runs skip this check. A dispatch's grader is its own head, so it runs the check and the coverage filter from the head.
+- the grader also has `scripts/reused_coverage.py`. The check also accepts `tests/reused_coverage.py`, but no grader of this workflow carries it, and `Keep the reused tests' dev coverage` runs only the scripts copy. A grader without either cannot carry reused coverage, so the step prints `The grader cannot carry reused tests' coverage into Sonar; every test runs.` and plans no reuse. Merge group runs skip this check. A dispatch's grader is its own head, so it runs the check and the coverage filter from the head.
 
 The planner runs from the grader, never from the head, so a pull request cannot widen what it reuses. It mints the CI App token with `actions: read` to read dev's runs and artifacts.
 
 ### Record
 
-`scripts/ci_test_plan.py` keeps the slice 5 rule and adds one condition: the dev push run must also keep all twenty `coverage-3.12-1` to `coverage-3.12-20` artifacts unexpired, beside its `dep-manifest`. A run missing any of them is skipped and the next older candidate is tried, up to 10. With no record the planner raises the `No test record` notice and every test runs.
+`scripts/ci_test_plan.py` keeps the slice 5 rule and adds one condition: the dev push run must also keep all twenty `coverage-3.12-1` to `coverage-3.12-20` artifacts unexpired, beside its `dep-manifest`. A run missing any of them is skipped and the next older candidate is tried, up to 10. It lists every artifact page of a candidate run, 100 artifacts a page and at most two pages, so a run whose shards are listed past its first 100 artifacts still counts, and a run that fills both pages without them is named in the plan log. A page of ten candidates reserves 41 of the planner's 100 GitHub requests, the run listing plus two artifact pages, the jobs and the download for each candidate, so a search with no usable record covers at most 60 dev push runs. With no record the planner raises the `No test record` notice and every test runs.
 
 Besides `reused`, the planner writes `run` and `commit` to the step output: the dev run that holds the record and the commit its manifest was measured on. `split` passes both to `unit`.
 
@@ -344,7 +344,7 @@ On every 3.12 unit shard of a full scope run that reuses at least one test, outs
 
 1. **Token.** `Mint the token that reads the dev coverage` mints the CI App token with `actions: read`.
 2. **Download.** `Download this shard's dev coverage` downloads the same shard's `coverage-3.12-<shard>` artifact from the record run into the runner's temporary folder.
-3. **Filter and remap.** `Keep the reused tests' dev coverage` adds the grader as a worktree (`origin/dev` for a pull request, the head for a dispatch) and runs `python -m scripts.reused_coverage` from it (`tests.reused_coverage` when the grader predates the move into `scripts`), so the filter that moves dev coverage is protected code.
+3. **Filter and remap.** `Keep the reused tests' dev coverage` adds the grader as a worktree (`origin/dev` for a pull request, the head for a dispatch) and runs `python -m scripts.reused_coverage` from it, so the filter that moves dev coverage is protected code.
 
 `scripts.reused_coverage` writes `reused-coverage/.coverage` and adds page captures to the shard's `js-coverage/`:
 

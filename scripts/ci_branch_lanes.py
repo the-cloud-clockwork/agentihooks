@@ -163,6 +163,23 @@ def hive_release_group(name: str, block: object, job: dict[str, Any], trusted: d
     )
 
 
+def dispatched_proofs(workflow: object) -> bool:
+    found = events(mapping(workflow))
+    return (
+        mapping(workflow).get("name") == "Proofs"
+        and len(found) == 1
+        and set(mapping(found[0])) == {"workflow_dispatch"}
+    )
+
+
+def focused_proof_group(name: str, block: object, job: dict[str, Any], trusted: dict[Any, Any]) -> bool:
+    return dispatched_proofs(trusted) and block == {
+        "group": "${{ format('focused-proof-{0}', github.run_id) }}",
+        "queue": "max",
+        "cancel-in-progress": False,
+    }
+
+
 def mapping(value: object) -> dict[Any, Any]:
     return cast(dict[Any, Any], value) if isinstance(value, dict) else {}  # pragma: no mutate
 
@@ -200,6 +217,7 @@ def dev_push_group(block: object, workflow: object) -> bool:
 
 
 def problems(workflow: object, baseline: object = None, ancestor: object = None) -> list[str]:
+    proofs: dict[Any, Any] = mapping(baseline) if dispatched_proofs(workflow) else {}
     if not isinstance(workflow, dict):
         return ["is not a workflow mapping"]
     jobs = cast(dict[Any, Any], workflow).get("jobs") or cast(dict[Any, Any], {})
@@ -232,6 +250,7 @@ def problems(workflow: object, baseline: object = None, ancestor: object = None)
             dedicated_chart_group(name, block, job, trusted)
             or flake_history_group(name, block, job, trusted)
             or hive_release_group(name, block, job, trusted)
+            or focused_proof_group(name, block, job, proofs)
         ):
             continue
         if dev_push_group(block, cast(dict[Any, Any], workflow)):  # pragma: no mutate

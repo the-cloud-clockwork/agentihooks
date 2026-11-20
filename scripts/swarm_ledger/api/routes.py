@@ -5,6 +5,7 @@ import logging
 import operator
 import os
 import re
+import time
 from collections.abc import Callable
 from typing import Any, cast
 from urllib.parse import parse_qs, unquote, urlsplit
@@ -86,22 +87,61 @@ def ledger_get(handler: object, services: Services, slug: str, path: str) -> dic
 def ledger_read(services: Services, slug: str, path: str, query: dict) -> dict:
     if path.split("/")[0] == "hierarchy":
         return resources.hierarchy_read(services.repository, slug, path, query)
+    if path.split("/")[0] == "focus":
+        return focus_read(services, slug, path)
     if path == "architecture":
         from . import architecture
 
         return architecture.view(os.environ)
     if path == "tasks" and not query.keys() & {"state", "offset", "q"}:
         return task_list.read(services.repository, slug, query)
-    if record_path(path) and not query:
-        return resources.read(services.repository.read(slug, path), path)
+    keys = own_rows(path)
+    if keys and not query:
+        return resources.read(services.repository.read(slug, *keys), path)
     entry = services.repository.current(slug)
     return resources.read(entry.state, path, query, entry.views)
+
+
+def focus_read(services: Services, slug: str, path: str) -> dict[str, Any]:
+    """Every focus record, or one target, with the claim gate verdict on each task under it."""
+    state = services.repository.current(slug).state
+    found = ports.swarm().focus_check.read(state, path, fix_phase(services, slug), int(time.time() * 1000))
+    if found is None:
+        raise APIError(404, "resource_missing", "No such target")
+    reply: dict[str, Any] = {"data": found, "revision": resources.revision(found)}
+    return resources.bounded({**reply, "next_cursor": None} if path == "focus" else reply)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+
+
+def fix_phase(services: Services, slug: str) -> str:
+    """The doctor fix phase of the ledger's swarm, empty when the swarm store cannot name one."""
+    from redis import RedisError
+
+    swarm = ports.swarm()
+    try:
+        store: Any = services.swarm.store()
+        return swarm.freeze.fix_phase(store.config(slug))
+    except (swarm.store.SwarmError, RedisError, ValueError, OSError):
+        return ""
 
 
 def record_path(path: str) -> bool:
     """Whether path names one record of a record collection, such as `tasks/t1`, which reads its own rows alone."""
     parts = path.split("/")
     return len(parts) == 2 and parts[0] in models.RECORD_COLLECTIONS and bool(parts[1])
+
+
+def own_rows(path: str) -> tuple[str, ...]:
+    """The stored parts a read of path needs when it needs only some of the ledger, else none."""
+    record, _, thread = path.rpartition("/")
+    if record_path(path):
+        return (path,)
+    if record_path(record) and thread in models.THREADS.get(record.split("/")[0], ()):
+        return (record,)
+    if path == "members":
+        return ("_meta.members",)
+    if path == "metadata":
+        return resources.METADATA_KEYS
+    return ()
 
 
 def context_evidence(services: Services, slug: str, task: str, ref: str) -> dict:

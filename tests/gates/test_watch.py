@@ -91,14 +91,14 @@ class TestMatches:
 
 
 class TestDecide:
-    def test_the_twenty_first_watch_with_no_action_is_refused(self, gate):
+    def test_the_twenty_first_watch_with_no_action_is_refused(self, gate: WatchBudget) -> None:
         made(gate, watch=20)
         decision = decide(gate)
         assert not decision.allowed
         assert decision.reason == (
             "watch budget: 20 watch calls since your last action (limit 20) and 20 watch calls for 0 actions "
             "(limit 5 per action). Hand the waiting to the tick: agentihooks swarm sw wait <minutes> --reason "
-            '"<what you wait on>", or act first: commit, push or record progress on the ledger.'
+            '"<what you wait on>", or act first: commit, push or record progress through the swarm API.'
         )
 
     def test_the_twentieth_watch_passes(self, gate):

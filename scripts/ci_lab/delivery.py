@@ -20,12 +20,13 @@ PROG = "python -m scripts.ci_lab"
 CLASSES = ("hotfix", "pull_request", "queue", "promotion", "backfill")
 SHEDDABLE = ("backfill", "promotion", "queue")
 FRACTION = {"type": "number", "minimum": 0, "maximum": 1}
+GATE_NAMES = {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": True}
 LAB_SCHEMA = {
     "type": "object",
     "required": ["authoritative", "mutation", "check_prefix"],
     "additionalProperties": False,
     "properties": {
-        "authoritative": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": True},
+        "authoritative": GATE_NAMES,
         "mutation": {
             "type": "object",
             "required": ["run_on", "mutants_per_changed_line", "arid"],
@@ -45,7 +46,7 @@ LAB_SCHEMA = {
         "queue": {
             "type": "object",
             "additionalProperties": False,
-            "properties": {"full_suite_entries": {"type": "integer", "minimum": 1}},
+            "properties": {"authoritative": GATE_NAMES, "full_suite_entries": {"type": "integer", "minimum": 1}},
         },
     },
 }
@@ -106,9 +107,15 @@ def lab(root: Path) -> Mapping[str, Any]:
     document = yaml.safe_load((root / DELIVERY).read_text())
     _validate(document, DELIVERY_SCHEMA, DELIVERY)
     block = document["lab"]
-    unknown = sorted(set(block["authoritative"]) - gates(root))
-    if unknown:
-        raise DeliveryError(f"lab.authoritative names unknown gates: {', '.join(unknown)}")
+    known = gates(root)
+    listed = {
+        "lab.authoritative": block["authoritative"],
+        "lab.queue.authoritative": block.get("queue", {}).get("authoritative", []),
+    }
+    for key, names in listed.items():
+        unknown = sorted(set(names) - known)
+        if unknown:
+            raise DeliveryError(f"{key} names unknown gates: {', '.join(unknown)}")
     return block
 
 
@@ -122,6 +129,14 @@ def cutover(grader_root: Path, environ: Mapping[str, str]) -> list[str]:
     if environ.get(LAB_OFF) == "true":
         return []
     return list(authoritative(grader_root))
+
+
+def queue_cutover(grader_root: Path, environ: Mapping[str, str]) -> list[str]:
+    """Return the gates the lab is to grade on merge groups: lab.queue.authoritative of the grader copy, or none while
+    the lab is switched off."""
+    if environ.get(LAB_OFF) == "true":
+        return []
+    return list(lab(grader_root).get("queue", {}).get("authoritative", []))
 
 
 def runtime(document: Mapping[str, object]) -> Mapping[str, object]:

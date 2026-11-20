@@ -24,7 +24,7 @@ python -m scripts.ci_lab shadow report --gate <gate> [--heads 50] [--event merge
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--gate` | required | The gate id: `tests`, `mutation`, or a static gate id. On dev the static ids are `lint`, `type-gate`, `semgrep/scan`, `semgrep/feature-tests` and `semgrep/charts` |
+| `--gate` | required | The gate id: `tests`, `mutation`, or a static gate id. On dev the static ids are `lint`, `type-gate`, `semgrep/scan`, `semgrep/feature-tests`, `semgrep/charts` and `test-count` |
 | `--heads` | `50` | How many heads the window holds; at least 1 |
 | `--event` | `pull_request` | Read pull request heads, or merge group heads with `merge_group` |
 | `--app` | `AGENTIHOOKS_LAB_APP` | The slug of the lab's GitHub App; the command exits 2 when neither names one |

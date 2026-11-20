@@ -179,8 +179,12 @@ def test_the_image_job_smokes_the_candidate_before_it_publishes_dev_and_the_shor
     job = _workflow()["jobs"]["image"]
     assert job["if"] == "github.event_name != 'schedule'"
     assert job["permissions"] == {"contents": "read", "packages": "write"}
-    checkout, login, build, smoke, publish = job["steps"]
-    assert checkout == {"uses": "actions/checkout@v4", "with": {"persist-credentials": False}}
+    checkout, guard, login, build, smoke, publish, release = job["steps"]
+    assert checkout == {
+        "uses": "actions/checkout@v4",
+        "with": {"fetch-depth": "${{ github.event_name == 'release' && '0' || '1' }}", "persist-credentials": False},
+    }
+    assert guard["if"] == release["if"] == "github.event_name == 'release'"
     assert login["uses"] == "docker/login-action@v3"
     assert '--file docker/ci-lab/Dockerfile --tag "$CANDIDATE" .' in build["run"]
     digest = "$(sha256sum .github/test-requirements.lock | cut -d ' ' -f 1)"
@@ -195,6 +199,30 @@ def test_the_image_job_smokes_the_candidate_before_it_publishes_dev_and_the_shor
         f"push {image}:dev-1234567",
         f"tag candidate {image}:dev",
         f"push {image}:dev",
+    ]
+
+
+def test_a_release_publishes_the_qualified_candidate_before_the_release_script_moves_its_tags(tmp_path: Path) -> None:
+    job = _workflow()["jobs"]["image"]
+    release = job["steps"][-1]
+    assert release["if"] == "github.event_name == 'release'"
+    assert release["env"] == {"RELEASE": "${{ github.event.release.tag_name }}"}
+    script = tmp_path / "docker/swarm-node/release.sh"
+    script.parent.mkdir(parents=True)
+    script.write_text('printf "release.sh %s\\n" "$*" >> "$DOCKER_LOG"\n')
+    env = {
+        **_fake_docker(tmp_path),
+        **job["env"],
+        "CANDIDATE": "candidate",
+        "GITHUB_SHA": "123456789abcdef",
+        "RELEASE": "v2.17.1071",
+    }
+    subprocess.run(["bash", "-e", "-c", release["run"]], env=env, cwd=tmp_path, check=True)
+    image = "ghcr.io/the-cloud-clockwork/agentihooks-ci-lab-worker"
+    assert (tmp_path / "docker.log").read_text().splitlines() == [
+        f"tag candidate {image}:sha-123456789abcdef",
+        f"push {image}:sha-123456789abcdef",
+        f"release.sh {image} v2.17.1071 123456789abcdef",
     ]
 
 

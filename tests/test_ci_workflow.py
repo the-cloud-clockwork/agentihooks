@@ -2479,8 +2479,8 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
     names = [step.get("name") for step in mutation["steps"]]
     download = mutation["steps"][names.index("Download the shared mutation stats")]
     assert names.index("Download the shared mutation stats") < names.index("Mutate changed Python files")
-    assert download["uses"] == "actions/download-artifact@v8.0.2"
-    assert download["with"] == {"pattern": "mutation-stats-*", "path": ".mutation-stats", "merge-multiple": True}
+    assert download["uses"] == "./.workflow-revision/.github/actions/pattern-download"
+    assert download["with"] == {"pattern": "mutation-stats-*", "path": ".mutation-stats"}
 
 
 def test_a_one_part_one_shard_plan_mutates_inside_the_statistics_job():
@@ -2768,12 +2768,25 @@ def test_jobs_on_the_pull_request_head_run_local_actions_from_the_workflow_revis
         "mutation-shard",
         "mutation",
     } == set(local)
-    for name in ("mutation-refine", "mutation"):
+    upload = "./.workflow-revision/.github/actions/retry-upload"
+    download = "./.workflow-revision/.github/actions/pattern-download"
+    for name, taken, used in (
+        ("mutation-refine", "Take the upload and download actions from the workflow revision", {upload, download}),
+        ("mutation", "Take the upload action from the workflow revision", {upload}),
+    ):
         steps = jobs[name]["steps"]
         names = [step.get("name") for step in steps]
-        take = steps[names.index("Take the upload action from the workflow revision")]
-        assert {step["uses"] for step in local[name]} == {"./.workflow-revision/.github/actions/retry-upload"}
+        take = steps[names.index(taken)]
+        assert {step["uses"] for step in local[name]} == used
         assert all(steps.index(take) < steps.index(step) for step in local[name])
+    refine = jobs["mutation-refine"]["steps"]
+    take = next(
+        step for step in refine if step.get("name") == "Take the upload and download actions from the workflow revision"
+    )
+    assert take["run"].splitlines() == [
+        "mkdir -p .workflow-revision",
+        'git archive "$GITHUB_SHA" .github/actions/retry-upload .github/actions/pattern-download | tar -x -C .workflow-revision',
+    ]
     plan = jobs["mutation-plan"]["steps"]
     take = next(step for step in plan if step.get("name") == "Take the upload action from the workflow revision")
     assert take["run"].splitlines() == [
@@ -2795,7 +2808,8 @@ def test_jobs_on_the_pull_request_head_run_local_actions_from_the_workflow_revis
         assert {step["uses"] for step in local[name]} == {
             "./.workflow-revision/.github/actions/nats-server",
             "./.workflow-revision/.github/actions/browser-cache",
-            "./.workflow-revision/.github/actions/retry-upload",
+            upload,
+            *([download] if name == "mutation-shard" else []),
         }
         assert all(steps.index(take) < steps.index(step) for step in local[name])
         assert all("hashFiles" not in step.get("if", "") for step in local[name])

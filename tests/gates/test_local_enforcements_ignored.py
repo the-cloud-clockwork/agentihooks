@@ -1,7 +1,6 @@
 """A checkout holding only the project local enforcements store reads clean to the stop gate and the dev sync."""
 
 import re
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -29,7 +28,7 @@ def checkout(tmp_path: Path) -> Path:
     tree = tmp_path / BRANCH
     tree.mkdir()
     git(tree, "init", "-q", "-b", BRANCH)
-    shutil.copy(REPO / ".gitignore", tree / ".gitignore")
+    (tree / ".gitignore").write_text(git(REPO, "show", "HEAD:.gitignore") + "\n")
     git(tree, "add", ".gitignore")
     git(tree, "commit", "-q", "-m", "seed")
     assert enforcement.add_enforcement("stay on task", 5, local=True, cwd=tree)

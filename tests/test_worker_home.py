@@ -374,44 +374,48 @@ def hook(command: str) -> dict:
     return {"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": command}]}]}}
 
 
+def with_prefix(text: str) -> str:
+    return text.replace("{prefix}", sys.prefix)
+
+
 @pytest.mark.parametrize(
     ("command", "offending"),
     [
-        (f"PYTHONPATH={sys.prefix}:/etc/shadow python -m hooks", "/etc/shadow"),
+        ("PYTHONPATH={prefix}:/etc/shadow python -m hooks", "/etc/shadow"),
         ("/usr/bin/env:/root/.ssh/id_rsa python -m hooks", "/root/.ssh/id_rsa"),
         ("../../../../home/operator/.venv/bin/python -m hooks", "../../../../home/operator/.venv/bin/python"),
         ("python -c 'import sys' https://brain.svc/x /etc/passwd", "/etc/passwd"),
-        (f"PYTHONPATH={sys.prefix}:file:///etc/shadow python -m hooks", "/etc/shadow"),
+        ("PYTHONPATH={prefix}:file:///etc/shadow python -m hooks", "/etc/shadow"),
         ("python -m hooks --config=file:///etc/x", "/etc/x"),
         ("~/.venv/bin/python -m hooks", "~/.venv/bin/python"),
         ("$HOME/.venv/bin/python -m hooks", "$HOME/.venv/bin/python"),
-        (f"x={sys.prefix}:///etc/shadow python -m hooks", "/etc/shadow"),
-        (f"PYTHONPATH={sys.prefix}://etc/shadow python -m hooks", "/etc/shadow"),
-        (f"{sys.prefix}/$X/etc/shadow -m hooks", f"{sys.prefix}/$X/etc/shadow"),
+        ("x={prefix}:///etc/shadow python -m hooks", "/etc/shadow"),
+        ("PYTHONPATH={prefix}://etc/shadow python -m hooks", "/etc/shadow"),
+        ("{prefix}/$X/etc/shadow -m hooks", "{prefix}/$X/etc/shadow"),
         ("$AGENTIHOOKS_PYTHON -m hooks", "$AGENTIHOOKS_PYTHON"),
         ("~ -m hooks", "~"),
         ("python -m hooks --config=git+file:///etc/x", "/etc/x"),
         ("python -m hooks 'unbalanced /etc/y", "/etc/y"),
     ],
 )
-def test_hidden_or_relative_paths_in_a_hook_are_refused(tmp_path, command, offending):
-    claude_home(tmp_path, hook(command))
+def test_hidden_or_relative_paths_in_a_hook_are_refused(tmp_path: Path, command: str, offending: str) -> None:
+    claude_home(tmp_path, hook(with_prefix(command)))
     with pytest.raises(worker_home.BootstrapError) as error:
         check(tmp_path, "claude")
-    assert str(error.value) == f"claude setting hooks leaves the execution root: {offending}"
+    assert str(error.value) == f"claude setting hooks leaves the execution root: {with_prefix(offending)}"
 
 
 @pytest.mark.parametrize(
     "command",
     [
         "python bin/probe.py https://brain.svc/x/y",
-        f"cd {sys.prefix} && {sys.prefix}/bin/python -m hooks",
-        f"{sys.prefix}/./bin/python",
+        "cd {prefix} && {prefix}/bin/python -m hooks",
+        "{prefix}/./bin/python",
         "python -m hooks --url=http://ledger.svc:8765/x",
     ],
 )
-def test_url_arguments_and_contained_paths_are_admitted(tmp_path, command):
-    claude_home(tmp_path, hook(command) | {"permissions": {"deny": ["Read(~/.ssh/**)", "Read(/etc/**)"]}})
+def test_url_arguments_and_contained_paths_are_admitted(tmp_path: Path, command: str) -> None:
+    claude_home(tmp_path, hook(with_prefix(command)) | {"permissions": {"deny": ["Read(~/.ssh/**)", "Read(/etc/**)"]}})
     check(tmp_path, "claude")
 
 

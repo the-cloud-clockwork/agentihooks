@@ -73,6 +73,12 @@ class Reports:
         found: dict[str, Any] = report.get("admitted", {}).get(agent.execution_id, {})
         return found["pane"] if found.get("generation") == agent.generation else {}
 
+    def admitted_binding(self, agent: "AgentRecord") -> dict[str, Any] | None:
+        """The binding the hive that runs hub admitted ``agent`` reports for its execution and generation, else None."""
+        report = self.read(admitted(agent)) or {}
+        found: dict[str, Any] = report.get("admitted", {}).get(agent.execution_id, {})
+        return found.get("binding") if found.get("generation") == agent.generation else None
+
     def gone(self, agent: "AgentRecord") -> bool:
         report = self.read(host(agent))
         if report is None:

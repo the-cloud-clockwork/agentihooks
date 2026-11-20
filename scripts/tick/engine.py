@@ -305,7 +305,7 @@ def _gone(later: tuple[Step, ...], dropped: frozenset[str]) -> frozenset[str]:
     them ended and dropped as soon as their group returns."""
     gone = set(dropped)
     for step in later:
-        if step.needs & gone:
+        if registry.failure_needs(step) & gone:
             gone.add(step.name)
     return frozenset(gone - dropped)
 
@@ -548,7 +548,7 @@ def _lane_of(step: Step, found: pool.Pass, held: Mapping[str, float]) -> Deadlin
 def _drops(step: Step, dropped: set[str], found: pool.Pass) -> bool:
     """Return whether ``step``, cut before it ended, drops its dependents: a need was dropped or its whole lane ran out,
     never a reserve it left to a step that needs it."""
-    return bool(step.needs & dropped) or found.lane(step.lane).expired
+    return bool(registry.failure_needs(step) & dropped) or found.lane(step.lane).expired
 
 
 def _cut_off(
@@ -563,7 +563,7 @@ def _cut_off(
     dropped, cut = lost
     if _drops(step, dropped, found):
         return dropped
-    if lane.expired or (step.needs & cut and step.name not in found.reserves):
+    if lane.expired or (registry.failure_needs(step) & cut and step.name not in found.reserves):
         return cut if step.name in held else dropped
     return None
 
@@ -578,7 +578,7 @@ def _after(earlier: frozenset[str], step: Step, ctx: Context, found: pool.Pass, 
     """Run ``step`` once every handed off step of an earlier group in ``earlier`` has ended or was held, dropping it
     when one of them was dropped or its lane ran out before it started."""
     lane = found.lane(step.lane)
-    if earlier and not found.ended(earlier, lane.remaining):
+    if earlier and not found.ended(earlier, lane.remaining, required=registry.failure_needs(step)):
         return StepRecord(step.name, 0.0, step.budget_s, abandoned=True, skipped=True)
     if lane.expired or not start.begin():
         return StepRecord(step.name, 0.0, step.budget_s, abandoned=True, skipped=True)

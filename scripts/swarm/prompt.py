@@ -91,7 +91,7 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
     if codex:
         task = codex_master.handoff(task, slug, push)
     me = f"agentihooks swarm {slug} --as {name}"
-    led = f"agentihooks ledger --slug {slug} --as {name}"
+    led = f"agentihooks api --slug {slug} --as {name}"
     summary = summary_lines(slug)
     lines = [
         f"You are {name}, the master of swarm {slug}, working over the repo {repo}. The operator talks to the swarm "
@@ -134,7 +134,7 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
         f'{me} say "<text>" --to <agent name> --fyi. Information closes on read or confirmed receipt. '
         "After handling a confirmed work item, explicitly reply or close it with where the work went; "
         "keep unresolved work and proof checks open.",
-        f'- Keep the ledger current: {led} phase <phase id> done|open, {led} comment phases/<phase id> "<status>", '
+        f'- Record progress through the api: {led} phase <phase id> done|open, {led} comment phases/<phase id> "<status>", '
         f'{led} followup add "<text>", and {led} time-left "<duration>" whenever progress or blockers change it.',
         f"- {artifact_line(led)} When the operator asks for a file to review, add or set its task with --artifact "
         "or artifact=yes so its agent may publish it.",
@@ -177,7 +177,7 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
         f"(the ledger page link {me} url prints) with the playwright-cmd tools, tell the operator what you "
         "saw, then close the shared browser with browser_close.",
         f'- Record a lesson the next master should know with {me} learned "<lesson because reason>".',
-        f"- Raise a learned note that has held up: {me} learned lists every seat's notes with their numbers, and "
+        f"- Raise a learned note that has held up: {me} learned --all lists every seat's notes with their numbers, and "
         f'{me} promote <seat> <number> insight|canon --reason "<why>" raises one. Only you and the operator make '
         "a note canon.",
         f"- Keep the swarm culture current: {me} culture show prints it, {me} culture set <file> replaces it. Every "
@@ -216,7 +216,7 @@ def summary_lines(slug):
 
 
 def build_operator(slug, repo, name, role, profile):
-    led = f"agentihooks ledger --slug {slug} --as {name}"
+    led = f"agentihooks api --slug {slug} --as {name}"
     leave = f"end this session with agentihooks swarm {slug} --as {name} exit."
     planner = role == "planner"
     lines = [
@@ -267,7 +267,7 @@ def build_dispatcher(slug: str, repo: str, name: str, task: dict, autonomy: str 
     from scripts.swarm import dispatch_seat
 
     me = f"agentihooks swarm {slug}"
-    led = f"agentihooks ledger --slug {slug} --as {name}"
+    led = f"agentihooks api --slug {slug} --as {name}"
     lines = [
         f"You are {name}, the dispatcher of swarm {slug}, working beside its master in the repo {repo}. "
         f"The swarm runs at {autonomy} autonomy.",
@@ -300,7 +300,7 @@ def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
     if lane == DISPATCH:
         return build_dispatcher(slug, repo, name, task, autonomy)
     me = f"agentihooks swarm {slug}"
-    led = f"agentihooks ledger --slug {slug} --as {name}"
+    led = f"agentihooks api --slug {slug} --as {name}"
     phase = task.get("phase") or "<phase id>"
     lines = [
         f"You are {name}, {role or LANE_ROLE[lane]} in swarm {slug}, working in the repo {repo}.",
@@ -332,9 +332,9 @@ def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
         f"then its phase with agentihooks ledger --slug {slug} get phases/{phase}. "
         "Read another item only when your task or inbox names it; take only your own task.",
         "Page chat is for the master: act on a chat line only when it starts with @ and your name.",
-        f'Keep the ledger current as you go: {led} comment phases/{phase} "<what you did>" when your work lands, '
+        f'Record progress through the api as you go: {led} comment phases/{phase} "<what you did>" when your work lands, '
         f'{led} followup add "<text>" for a blocker or follow up you find. A hook blocks your stop while operator '
-        "events are unhandled or you have gone many tool calls without a ledger command.",
+        "events are unhandled or you have gone many tool calls without an api command.",
         NO_ASKS.format(slug=slug),
         artifact_line(led),
         f'Record a lesson the next occupant of your seat should know with {me} learned "<lesson because reason>" (a note; add '

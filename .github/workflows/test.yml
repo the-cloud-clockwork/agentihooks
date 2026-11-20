@@ -628,7 +628,7 @@ jobs:
             echo "::error::No dev push Tests run passed, so the queue run has no dev durations."
             exit 1
           fi
-          kept=" $(read_api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?per_page=100" --jq '[.artifacts[] | select(.expired | not) | .name] | join(" ")') "
+          kept=" $(read_api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?name=durations-merged" --jq '[.artifacts[] | select(.expired | not) | .name] | join(" ")') "
           if [[ "$kept" != *" durations-merged "* ]]; then
             echo "::error::Dev push run $run kept no live durations-merged artifact."
             exit 1
@@ -656,7 +656,10 @@ jobs:
           runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?branch=dev&event=push&$filter&per_page=20" --jq '.workflow_runs[] | "\(.id) \(.head_sha)"')
           while read -r run head; do
             [[ -n "$run" ]] || continue
-            kept=" $(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?per_page=100" --jq '[.artifacts[] | select(.expired | not) | .name] | join(" ")') "
+            kept=" "
+            for name in durations-merged coverage-baseline; do
+              kept+="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?name=$name" --jq '[.artifacts[] | select(.expired | not) | .name] | join(" ")') "
+            done
             if [[ "$kept" == *" durations-merged "* && "$kept" == *" coverage-baseline "* ]]; then
               ancestry=$(gh api "repos/$GITHUB_REPOSITORY/compare/$head...dev" --jq .status)
               [[ "$ancestry" == ahead || "$ancestry" == identical ]] || continue
@@ -1637,9 +1640,7 @@ jobs:
         run: |
           git worktree add --detach "$RUNNER_TEMP/grader" "$GRADER"
           cd "$RUNNER_TEMP/grader"
-          package=scripts
-          if [[ ! -f scripts/reused_coverage.py ]]; then package=tests; fi
-          python -m "$package.reused_coverage" --repo "$GITHUB_WORKSPACE" --head HEAD \
+          python -m scripts.reused_coverage --repo "$GITHUB_WORKSPACE" --head HEAD \
             --coverage "$RUNNER_TEMP/dev-coverage/.coverage" --commit "$COMMIT" \
             --reused "$GITHUB_WORKSPACE/reused.json" --out "$GITHUB_WORKSPACE/reused-coverage/.coverage" \
             --captures "$RUNNER_TEMP/dev-coverage/js-coverage" --captures-out "$GITHUB_WORKSPACE/js-coverage"
@@ -2450,7 +2451,7 @@ jobs:
     if: ${{ !cancelled() && needs.select.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' && needs.select.outputs.sonar != 'skip' && fromJSON(needs.lab-verdict.outputs.authoritative || '{}')['sonar'] != true }}
     needs: [select, reuse, admission, lab-verdict]
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
-    timeout-minutes: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && 75 || 60 }}
+    timeout-minutes: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && 90 || 60 }}
     outputs:
       analysis: ${{ steps.gate.outputs.analysis }}
     env:
@@ -2509,6 +2510,26 @@ jobs:
           repositories: ${{ github.event.repository.name }}
           permission-actions: read
 
+      - name: Mint the token that reads this run's job states
+        id: jobs-token
+        if: &jobs-token github.event_name == 'push' && github.ref == 'refs/heads/dev' && needs.select.outputs.scope != 'none' && steps.source.outputs.test_only != 'true'
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: read
+
+      - name: Watch whether this run's shard jobs have started
+        id: queue-watch
+        if: *jobs-token
+        env:
+          GH_APP_TOKEN: ${{ steps.jobs-token.outputs.token }}
+          PREFIX: ${{ needs.select.outputs.scope == 'selected' && 'unit-selected (' || 'unit (' }}
+        run: |
+          python .github/coverage/queue_watch.py "$PREFIX" > queue-watch.log 2>&1 &
+          echo "pid=$!" >> "$GITHUB_OUTPUT"
+
       - name: Download the pull request runs' test plan
         id: download-the-pull-request-runs-test-plan
         if: *branch-carry
@@ -2551,7 +2572,7 @@ jobs:
       - name: Take each shard's coverage as it lands
         if: needs.select.outputs.scope != 'none' && steps.source.outputs.test_only != 'true'
         continue-on-error: true
-        timeout-minutes: 45
+        timeout-minutes: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && 75 || 45 }}
         uses: actions/github-script@v7
         env:
           SHARDS: ${{ needs.select.outputs.scope == 'selected' && needs.select.outputs.count || 20 }}
@@ -2561,6 +2582,12 @@ jobs:
           github-token: none
           script: |
             require('child_process').execFileSync('python', [process.env.ARRIVALS], {stdio: 'inherit'})
+
+      - name: Stop the queue watch
+        if: always() && steps.queue-watch.outputs.pid != ''
+        env:
+          PID: ${{ steps.queue-watch.outputs.pid }}
+        run: kill "$PID" 2> /dev/null || true
 
       - name: Take each selected leg's latest branch coverage
         if: needs.select.outputs.scope == 'selected'
@@ -3095,6 +3122,14 @@ jobs:
           fi
           python -m scripts.ci_for_substitution --root "$GITHUB_WORKSPACE"
 
+      - name: Refuse changelog fragments named off the branch or opening without a section heading
+        if: ${{ !cancelled() }}
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          cd "$RUNNER_TEMP/grader"
+          python -m scripts.ci_changelog_fragments --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE" --branch "$BRANCH"
+
       - name: Require trusted actors before private runner admission
         if: ${{ !cancelled() }}
         env:
@@ -3151,6 +3186,16 @@ jobs:
             echo "::error::dev carries no scripts/no_whole_ledger.py, so nothing trusted can grade."
             exit 1
           fi
+
+      # dev's copy grades once dev carries the grader; until then the head's copy measures the head,
+      # which still refuses a new ledger write doctrine line this very pull request adds.
+      - name: Hold ledger write doctrine out of skills, rules, docs and prompts
+        if: ${{ !cancelled() }}
+        run: |
+          if [[ -f "$RUNNER_TEMP/grader/scripts/no_ledger_write_doctrine.py" ]]; then
+            cd "$RUNNER_TEMP/grader"
+          fi
+          python -m scripts.no_ledger_write_doctrine --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
 
       - name: Hold the tick step pattern
         if: ${{ !cancelled() }}
@@ -3225,6 +3270,8 @@ jobs:
           python -m scripts.threshold_pins --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
 
       # The base revision's copy grades, so a pull request cannot loosen its own audit.
+      # The constraint protects this head's own run against a broken pip-audit dependency release;
+      # a fixed base's script carries the same pin and needs no constraint file.
       - name: Fail on known vulnerabilities new against the base
         if: ${{ !cancelled() }}
         run: |
@@ -3232,6 +3279,8 @@ jobs:
             echo "::error::The base carries no scripts/ci_dependency_audit.py, so nothing trusted can grade."
             exit 1
           fi
+          echo "platformdirs!=4.14.8" > "$RUNNER_TEMP/pip-audit-constraints.txt"
+          export UV_CONSTRAINT="$RUNNER_TEMP/pip-audit-constraints.txt"
           cd "$RUNNER_TEMP/base"
           python -m scripts.ci_dependency_audit --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
 
@@ -4774,10 +4823,10 @@ jobs:
           mkdir -p "$RUNNER_TEMP/workflow"
           git archive "$GITHUB_SHA" .github/scripts .github/test-requirements.lock | tar -x -C "$RUNNER_TEMP/workflow"
 
-      - name: Take the upload action from the workflow revision
+      - name: Take the upload and download actions from the workflow revision
         run: |
           mkdir -p .workflow-revision
-          git archive "$GITHUB_SHA" .github/actions/retry-upload | tar -x -C .workflow-revision
+          git archive "$GITHUB_SHA" .github/actions/retry-upload .github/actions/pattern-download | tar -x -C .workflow-revision
 
       - *mutation-planning-install
 
@@ -4805,11 +4854,10 @@ jobs:
         timeout-minutes: 1
         id: download-refine-shared-mutation-stats
         continue-on-error: true
-        uses: actions/download-artifact@v8.0.2
+        uses: ./.workflow-revision/.github/actions/pattern-download
         with: &mutation-refine-download-the-shared-mutation-stats
           pattern: mutation-stats-*
           path: .mutation-stats
-          merge-multiple: true
 
       - name: Download the shared mutation stats, wait before attempt 2
         if: steps.download-refine-shared-mutation-stats.outcome == 'failure'
@@ -4821,7 +4869,7 @@ jobs:
       - name: Download the shared mutation stats, attempt 2
         timeout-minutes: 1
         if: steps.download-refine-shared-mutation-stats.outcome == 'failure'
-        uses: actions/download-artifact@v8.0.2
+        uses: ./.workflow-revision/.github/actions/pattern-download
         with: *mutation-refine-download-the-shared-mutation-stats
 
       - name: Restore the tests that killed this branch's earlier mutants
@@ -4939,11 +4987,10 @@ jobs:
         timeout-minutes: 1
         id: download-probe-shared-mutation-stats
         continue-on-error: true
-        uses: actions/download-artifact@v8.0.2
+        uses: ./.workflow-revision/.github/actions/pattern-download
         with: &mutation-probe-download-the-shared-mutation-stats
           pattern: mutation-stats-*
           path: .mutation-stats
-          merge-multiple: true
 
       - name: Download the shared mutation stats, wait before attempt 2
         if: steps.download-probe-shared-mutation-stats.outcome == 'failure'
@@ -4955,7 +5002,7 @@ jobs:
       - name: Download the shared mutation stats, attempt 2
         timeout-minutes: 1
         if: steps.download-probe-shared-mutation-stats.outcome == 'failure'
-        uses: actions/download-artifact@v8.0.2
+        uses: ./.workflow-revision/.github/actions/pattern-download
         with: *mutation-probe-download-the-shared-mutation-stats
 
       - name: Restore the tests that killed this branch's earlier mutants
@@ -5270,11 +5317,10 @@ jobs:
         if: needs.mutation-plan.outputs.forwarded != 'true'
         id: download-the-shared-mutation-stats
         continue-on-error: true
-        uses: actions/download-artifact@v8.0.2
+        uses: ./.workflow-revision/.github/actions/pattern-download
         with: &mutation-download-the-shared-mutation-stats
           pattern: mutation-stats-*
           path: .mutation-stats
-          merge-multiple: true
 
       - name: Download the shared mutation stats, wait before attempt 2
         if: steps.download-the-shared-mutation-stats.outcome == 'failure'
@@ -5286,7 +5332,7 @@ jobs:
       - name: Download the shared mutation stats, attempt 2
         timeout-minutes: 1
         if: steps.download-the-shared-mutation-stats.outcome == 'failure'
-        uses: actions/download-artifact@v8.0.2
+        uses: ./.workflow-revision/.github/actions/pattern-download
         with: *mutation-download-the-shared-mutation-stats
 
       - name: Check every mutation stats producer's part arrived
@@ -5301,7 +5347,7 @@ jobs:
         if: steps.stats-arrival.outputs.missing != ''
         id: download-the-missing-mutation-stats-parts
         continue-on-error: true
-        uses: actions/download-artifact@v8.0.2
+        uses: ./.workflow-revision/.github/actions/pattern-download
         with: *mutation-download-the-shared-mutation-stats
 
       - name: Download the missing mutation stats parts, wait before attempt 2
@@ -5314,7 +5360,7 @@ jobs:
       - name: Download the missing mutation stats parts, attempt 2
         timeout-minutes: 1
         if: steps.download-the-missing-mutation-stats-parts.outcome == 'failure'
-        uses: actions/download-artifact@v8.0.2
+        uses: ./.workflow-revision/.github/actions/pattern-download
         with: *mutation-download-the-shared-mutation-stats
 
       - name: Fail on a mutation stats producer whose part never arrived

@@ -9,9 +9,11 @@ lease and requeues it once.
 
 import contextlib
 import functools
+import http.client
 import json
 import sys
 import threading
+import traceback
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping
@@ -31,6 +33,7 @@ __all__ = [
     "CAPABILITIES",
     "GRACE_SECONDS",
     "HEARTBEAT_SECONDS",
+    "UNIT_TIMEOUT_SECONDS",
     "Client",
     "Executor",
     "Finished",
@@ -44,10 +47,15 @@ __all__ = [
 
 CAPABILITIES = frozenset({"net", "browser"})
 LEASE_WAIT_MS = 5_000
+BACKOFF_SECONDS = 1.0
+BACKOFF_CAP_SECONDS = 10.0
 HEARTBEAT_SECONDS = 10.0
-GRACE_SECONDS = 20.0
+UNIT_TIMEOUT_SECONDS = 1_800.0
 TIMEOUT_SECONDS = 60.0
+DELIVERY_CALLS = 5
+GRACE_SECONDS = UNIT_TIMEOUT_SECONDS + DELIVERY_CALLS * TIMEOUT_SECONDS
 REFUSED = 403
+SERVER_ERROR = 500
 REDIS = "REDIS"
 
 
@@ -170,30 +178,49 @@ class Worker:
     abandoned: threading.Event = field(default_factory=threading.Event)
     running: dict[Future[None], Lease] = field(default_factory=dict[Future[None], Lease])
     pool: ThreadPoolExecutor = field(init=False)
+    backoff_s: float = field(default=BACKOFF_SECONDS, init=False)
 
     def __post_init__(self) -> None:
         """Give every slot a thread to run a unit on."""
         self.pool = ThreadPoolExecutor(max_workers=self.slots)
 
     def free(self) -> int:
-        """Return the slots no running unit holds, after reporting each unit that crashed since the last look."""
+        """Return the slots no running unit holds, after reporting each unit that crashed since the last look with
+        the exception's traceback."""
         for future in [future for future in self.running if future.done()]:
             lease = self.running.pop(future)
             if (error := future.exception()) is not None:
                 print(f"ci-lab worker: unit {lease.job} crashed: {error!r}", file=sys.stderr)
+                traceback.print_exception(error)
         return self.slots - sum(lease.slots for lease in self.running.values())
 
     def run_once(self) -> list[Lease]:
         """Lease units into the free slots and start each on its executor, or wait for a running unit to end while
-        every slot is busy; return the leases started."""
+        every slot is busy; return the leases started. A lease call the scheduler does not answer, or answers with a
+        server error, starts nothing and waits out its backoff; any other error answer raises."""
         free = self.free()
         if free <= 0:
             wait(list(self.running), return_when=FIRST_COMPLETED)
             return []
-        leases = self.client.lease(self.name, free, self.capabilities, self.wait_ms)
+        try:
+            leases = self.client.lease(self.name, free, self.capabilities, self.wait_ms)
+        except (OSError, http.client.HTTPException) as error:
+            if isinstance(error, urllib.error.HTTPError) and error.code < SERVER_ERROR:
+                raise
+            self._back_off(error)
+            return []
+        self.backoff_s = BACKOFF_SECONDS
         for lease in leases:
             self.running[self.pool.submit(self._unit, lease)] = lease
         return leases
+
+    def _back_off(self, error: OSError | http.client.HTTPException) -> None:
+        """Report a lease call the scheduler did not answer and wait out its backoff, which doubles with each such call
+        in a row up to BACKOFF_CAP_SECONDS; stop ends the wait at once."""
+        delay = self.backoff_s
+        self.backoff_s = min(delay * 2, BACKOFF_CAP_SECONDS)
+        print(f"ci-lab worker: lease call failed, retrying in {delay:g}s: {error!r}", file=sys.stderr)
+        self.stopping.wait(delay)
 
     def stop(self) -> None:
         """Lease no more units; run then lets the running ones finish within the termination grace."""
@@ -229,11 +256,12 @@ class Worker:
             self._deliver(lease, finished)
 
     def _beat(self, lease: Lease, lost: threading.Event) -> None:
-        """Heartbeat the lease, skipping a beat that cannot reach the scheduler; raise Lost to end its heartbeats once
-        run abandoned the unit, or mark the lease lost first when the scheduler refuses the token."""
+        """Heartbeat the lease, skipping a beat that cannot reach the scheduler or whose reply is cut short; raise Lost
+        to end its heartbeats once run abandoned the unit, or mark the lease lost first when the scheduler refuses the
+        token."""
         if self.abandoned.is_set():
             raise Lost
-        with contextlib.suppress(OSError):
+        with contextlib.suppress(OSError, http.client.HTTPException):
             if self.client.heartbeat(lease.job, lease.token) is None:
                 lost.set()
                 raise Lost

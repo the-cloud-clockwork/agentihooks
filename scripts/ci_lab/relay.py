@@ -5,9 +5,10 @@
 head and branch, until a grade of that head closes. A green grade pushes the sha, fetched from the lab remote when
 GitHub lacks it, to `origin refs/heads/<branch>` with an App token holding contents and workflows write, never forced,
 posts the `lab/<gate>` check run of every gate and the required check, completed, with the grade's run and verdicts,
-and opens the branch's draft pull request into dev with a token holding pull requests write, or names the open one the
-push updated. A red grade relays nothing and names its failed units. A head whose grades were all superseded is
-dropped, and a relay GitHub refuses is named and dropped.
+once across restarts by keeping each check run's id on the grade's state, and opens the branch's draft pull request
+into dev with a token holding pull requests write, or names the open one the push updated. A red grade relays nothing
+and names its failed units. A head whose grades were all superseded is dropped, and a relay GitHub refuses is named
+and dropped.
 """
 
 import base64
@@ -102,7 +103,12 @@ class Pulls(Protocol):
 
 
 class CheckRuns(Protocol):
-    """Where relayed check runs go: `Checks`, which remembers the last status of each run it posted."""
+    """Where relayed check runs go: `Checks`, which remembers the last status of each run it posted or was seeded
+    with."""
+
+    def seed(self, head: str, gate: str, run: str, run_id: int, status: str, shadow: bool) -> None:
+        """Remember a check run posted before this poster existed, so it is not created again."""
+        ...
 
     def status(self, key: Key) -> str | None:
         """Return the last status posted for a check run, or None before its first post."""
@@ -123,11 +129,13 @@ class Notices(Protocol):
 
 @dataclass(frozen=True)
 class Ports:
-    """The relay's outside world: a pusher per repository URL, and check runs and pull requests per owner/name."""
+    """The relay's outside world: a pusher per repository URL, check runs and pull requests per owner/name, and where
+    a grade's state is saved."""
 
     pusher: Callable[[str], Pusher]
     checks: Callable[[str], CheckRuns]
     pulls: Callable[[str], Pulls]
+    save: Callable[[State], None]
 
 
 def _slug(repo: str) -> str:
@@ -150,8 +158,9 @@ def failed(state: State) -> list[str]:
 
 
 def output(state: State, check: str, lab: str) -> Output:
-    """Return a relayed check run's output: the check's units, the grade run, the grader revision and the grade page."""
-    refs = list(state.units) if check == REQUIRED else state.gates[check]
+    """Return a relayed check run's output: the check's units, none for a skipped authoritative gate, the grade run,
+    the grader revision and the grade page."""
+    refs = list(state.units) if check == REQUIRED else state.gates.get(check, [])
     units = tuple(Unit(slot.kind, slot.key, tuple(slot.members)) for slot in (state.units[ref] for ref in refs))
     summary = f"{len(units)} units of {check} on {state.head} against {state.base}, relayed from the lab grade"
     details = f"{lab}/grades/{state.head}"
@@ -160,7 +169,10 @@ def output(state: State, check: str, lab: str) -> Output:
 
 def relay(state: State, branch: str, ports: Ports, lab: str) -> list[str]:
     """Relay a closed grade: a green one pushes the sha to the branch, posts every check run completed that is not
-    already, and opens the draft pull request, in that order; a red one relays nothing and names its failed units."""
+    already, and opens the draft pull request, in that order; a red one relays nothing and names its failed units. Each
+    check run the relay posts is saved on the grade's state under its check run name as GitHub answers, and seeds the
+    poster before the next relay of the grade, so a relay retried after a restart creates no second check run; the ids
+    the scheduler stores under gate names for its own posts never seed it."""
     if state.conclusion != SUCCESS:
         units = ", ".join(failed(state)) or "none"
         return [f"held {state.head} for {branch}: grade {state.run} is {state.conclusion}, failed units {units}"]
@@ -169,9 +181,15 @@ def relay(state: State, branch: str, ports: Ports, lab: str) -> list[str]:
     actions = [f"pushed {state.head} to {branch}"]
     poster = ports.checks(slug)
     for check, (_, conclusion) in state.posted.items():
-        if poster.status((state.head, name(check, False), state.run)) is None:
-            poster.post(state.head, check, "completed", conclusion, output(state, check, lab), False)
-            actions.append(f"posted {name(check, False)} {conclusion} on {state.head}")
+        relayed = name(check, False)
+        if relayed in state.runs:
+            poster.seed(state.head, check, state.run, state.runs[relayed], "completed", False)
+        if poster.status((state.head, relayed, state.run)) is None:
+            state.runs[relayed] = poster.post(
+                state.head, check, "completed", conclusion, output(state, check, lab), False
+            )
+            ports.save(state)
+            actions.append(f"posted {relayed} {conclusion} on {state.head}")
     body = f"Relayed by the CI lab from grade {state.run}: {lab}/grades/{state.head}"
     actions.append(ports.pulls(slug).open(branch, branch, body))
     return actions
@@ -325,7 +343,7 @@ def build(environ: Mapping[str, str], scheduler: Scheduler, consumer: Consumer) 
             posters[slug] = Checks(slug)
         return posters[slug]
 
-    ports = Ports(pusher, checks, PullRequests)
+    ports = Ports(pusher, checks, PullRequests, scheduler.save)
     lab = environ[LAB_URL].rstrip("/")
     notices = BusNotices(consumer, scheduler.settings.trusted)
     return Relay(scheduler.client, notices, partial(closed, scheduler), ports, lab)

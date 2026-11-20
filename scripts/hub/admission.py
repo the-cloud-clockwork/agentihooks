@@ -98,12 +98,12 @@ class Admission:
         timer = _StepTimer(self.clock, begun)
         if older := self._outdated(request["hive"]):
             refused(slug, request, older)
-            return None
+            return {hive_admission.HELD: older}
         timer.mark("release")
         offer = self._key(slug, request)
         admitted = self._held(offer)
         if admitted:
-            live = admitted["name"] in self.store.listed(slug)
+            live = self._active(slug, admitted)
             if live and admitted["hive"] == request["hive"]:
                 return admitted
             if live:
@@ -127,7 +127,7 @@ class Admission:
                 f"hub: events placement swarm={slug} task={task_id} hive={request['hive']}: refused, {unplaceable}",
                 file=sys.stderr,
             )
-            return None
+            return {hive_admission.HELD: unplaceable}
         timer.mark("placement")
         from scripts.swarm import tick
 
@@ -158,10 +158,24 @@ class Admission:
         held: str | None = self.store.redis.get(offer)  # pyright: ignore[reportUnknownMemberType]
         return json.loads(held) if held else None
 
+    def _active(self, slug: str, admitted: dict[str, Any]) -> bool:
+        if admitted["name"] in self.store.listed(slug):
+            return True
+        task = admitted["task"]
+        occupant = self.store.execution_occupants(slug).get(task["seat"])
+        return bool(
+            occupant is not None
+            and occupant.state == "starting"
+            and not occupant.launched_at
+            and (occupant.name, occupant.execution_id, occupant.generation)
+            == (admitted["name"], task["execution_id"], task["execution_generation"])
+            and cast(Any, self.store).claimant(slug, task["id"]) == admitted["name"]
+        )
+
     def _kept(self, slug: str, request: dict[str, Any], offer: str) -> dict[str, Any] | None:
-        """The admission the asking hive's own ask of the offer kept while its agent is still listed; None otherwise."""
+        """The asking hive's kept admission while its agent is listed or its unlaunched execution still holds the claim."""
         admitted = self._held(offer)
-        if admitted and admitted["hive"] == request["hive"] and admitted["name"] in self.store.listed(slug):
+        if admitted and admitted["hive"] == request["hive"] and self._active(slug, admitted):
             return admitted
         return None
 
@@ -214,11 +228,14 @@ class Admission:
         return ""
 
     def _reserved(self, view: readiness.Snapshot, row: dict[str, Any], hive: str) -> int:
-        """The root slots kept for the asking swarm's waiting tasks only the root hive takes when this task could run
-        on any hive; none for another hive or a task only the root hive takes."""
+        """The root slots kept for the waiting tasks only the root hive takes of every events swarm, the asking swarm
+        read from its own view, when this task could run on any hive; none for another hive or a task only the root
+        hive takes."""
         if hive != readiness.ROOT or readiness.root_only(row):
             return 0
-        return readiness.root_waiting(view, readiness.declared(self.store, hive))
+        capabilities = readiness.declared(self.store, hive)
+        views = [view, *(self.source.snapshot(slug) for slug in self.source.slugs() if slug != view.slug)]
+        return sum(readiness.root_waiting(each, capabilities) for each in views)
 
     @contextmanager
     def _turn(self, hive: str, offer: str) -> Iterator[str]:

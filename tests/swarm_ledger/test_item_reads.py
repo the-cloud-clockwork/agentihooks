@@ -147,7 +147,9 @@ def test_get_names_the_item_forms_when_it_refuses_one(capsys):
     with pytest.raises(SystemExit):
         ledger.build_parser().parse_args(["--slug", SLUG, "get", "chat/c1"])
     err = capsys.readouterr().err
-    assert "argument item: name tasks/<id>, phases/<id>, followups/<id>, priorities/<id>, tasks or freezes\n" in err
+    assert (
+        "argument item: name tasks/<id>, phases/<id>, followups/<id>, priorities/<id>, tasks, freezes or focus\n" in err
+    )
 
 
 def test_get_and_tasks_document_their_forms(capsys):
@@ -156,6 +158,9 @@ def test_get_and_tasks_document_their_forms(capsys):
         with pytest.raises(SystemExit):
             parser.parse_args(argv)
     out = " ".join(capsys.readouterr().out.split())
-    assert "get print one task, phase, follow up or priority, or every task or freeze, through the ledger API" in out
-    assert "item tasks/<id>, phases/<id>, followups/<id>, priorities/<id>, tasks or freezes" in out
+    assert (
+        "get print one task, phase, follow up or priority, or every task, freeze or focus, through the ledger API"
+        in out
+    )
+    assert "item tasks/<id>, phases/<id>, followups/<id>, priorities/<id>, tasks, freezes or focus" in out
     assert "tasks list open tasks, one line each, filtered by state, lane or title text" in out
