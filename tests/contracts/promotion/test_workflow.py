@@ -96,6 +96,31 @@ def test_each_dev_push_runs_the_tick_scale_gate_before_promotion_and_never_on_pu
     assert called["with"]["plant"] == "${{ github.ref == 'refs/heads/diffcheck/tick-scale-plant' }}"
 
 
+@pytest.mark.feature("tick-scale-gate-wiring")
+def test_tick_scale_profiles_registered_steps_including_the_agent_launcher() -> None:
+    from scripts.tick.registry import steps
+
+    proofs = yaml.safe_load((ROOT / ".github/workflows/tick-scale.yml").read_text())
+    called = proofs["jobs"]["tick-scale"]["steps"][-1]
+    names = set(called["with"]["profile"].split(" && ")[1].split(" || ")[0].strip("'").split(","))
+    registered = {step.name for step in steps()}
+    assert not names - registered, f"Unregistered profiled tick steps: {sorted(names - registered)}"
+    assert "master scale" in names
+
+
+@pytest.mark.feature("tick-scale-gate-wiring")
+def test_tick_scale_promotion_page_lists_the_profiled_steps() -> None:
+    import re
+
+    proofs = yaml.safe_load((ROOT / ".github/workflows/tick-scale.yml").read_text())
+    called = proofs["jobs"]["tick-scale"]["steps"][-1]
+    names = set(called["with"]["profile"].split(" && ")[1].split(" || ")[0].strip("'").split(","))
+    page = (ROOT / "docs/reference/delivery-tiers.md").read_text()
+    described = page.split("On `diffcheck/tick-scale-profile`", 1)[1].split("with cProfile.", 1)[0]
+    assert set(re.findall(r"`([^`]+)`", described)) == names
+    assert "master scale" in names
+
+
 def _graded_needs(promote: dict[str, Any], analysis: str = "A1") -> dict[str, SimpleNamespace]:
     return {
         name: SimpleNamespace(result="success", outputs=SimpleNamespace(analysis=analysis, promote="false"))
