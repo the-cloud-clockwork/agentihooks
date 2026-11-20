@@ -9026,6 +9026,21 @@
       ]
     },
     {
+      "id": "review-round-metrics-from-ledger",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-review-metrics-from-ledger-stamps",
+      "behaviour": "Each review round stamp carries the wall clock time of the round ahead of its unique part, and the swarm metrics count one review round per timed stamp on every ledger task, dated by that stamp, so rounds spent on any hive reach the metrics once each; a stamp without a time adds no round.",
+      "seam": "scripts.swarm.metrics_swarm.read_review_rounds over the ledger document scripts.swarm.metrics_swarm.record_pass receives, with round stamps written by scripts.swarm.review_rounds.start and read by scripts.swarm.review_rounds.stamped_at",
+      "tests": [
+        "tests/swarm/test_metrics_swarm.py::test_review_rounds_ship_from_the_round_stamps_on_each_ledger_task",
+        "tests/swarm/test_metrics_swarm.py::test_record_pass_counts_the_rounds_two_hives_spent_on_one_ledger_task",
+        "tests/swarm/test_metrics_swarm.py::test_rounds_stamped_before_the_clock_prefix_add_no_metrics_round",
+        "tests/swarm/test_metrics_swarm.py::test_record_pass_ships_a_round_once_while_later_passes_read_its_stamp_again",
+        "tests/swarm/test_review_rounds.py::test_a_round_stamp_carries_the_wall_clock_in_milliseconds_ahead_of_its_unique_part",
+        "tests/swarm/test_review_rounds.py::test_a_stamp_carries_a_time_only_when_it_opens_with_digits_and_a_dash"
+      ]
+    },
+    {
       "id": "ledger-task-update-takes-confirmed-pull-request",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-swarm-pr-confirmed-fields",
