@@ -754,7 +754,8 @@
       "seam": "agentihooks swarm <slug> tasks through scripts.swarm.cli.main, reading LedgerClient.tasks and LedgerClient.freezes",
       "tests": [
         "tests/swarm/test_tasks_read.py::test_swarm_tasks_prints_every_task_row_and_freeze_of_the_swarm_as_one_json_document",
-        "tests/swarm/test_tasks_read.py::test_swarm_tasks_exits_one_and_prints_no_rows_when_the_ledger_is_unreachable"
+        "tests/swarm/test_tasks_read.py::test_swarm_tasks_exits_one_and_prints_no_rows_when_the_ledger_is_unreachable",
+        "tests/swarm/test_tasks_read.py::test_swarm_tasks_resolves_the_ledger_client_through_the_module_so_a_class_bound_at_an_earlier_import_cannot_persist"
       ]
     },
     {
@@ -4295,6 +4296,20 @@
       ]
     },
     {
+      "id": "hive-remove-drain-withdraws-orders",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-remove-drain-withdraw",
+      "behaviour": "When a hive remove drain stops waiting, every hand off order it sent and its agent left unanswered is cancelled in every inbox world with a reason naming the removed hive, so a later occupant of the seat on another hive reads no stale order.",
+      "seam": "scripts.hive.remove.drain when it stops waiting",
+      "tests": [
+        "tests/hive/test_remove.py::test_a_hive_remove_drain_withdraws_every_unanswered_order_when_it_ends_so_a_later_occupant_reads_none",
+        "tests/hive/test_remove.py::test_a_hive_remove_drain_keeps_the_outcome_of_an_order_its_agent_answered"
+      ],
+      "rules": [
+        "hive-order-never-withdrawn"
+      ]
+    },
+    {
       "id": "reply-wait-reads-every-inbox-world",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2152",
@@ -5752,6 +5767,18 @@
       "tests": [
         "tests/test_credential_guard.py::test_an_awk_read_of_an_environment_value_is_refused",
         "tests/test_credential_guard.py::test_an_awk_listing_of_environment_names_passes"
+      ]
+    },
+    {
+      "id": "credential-guard-refuses-pod-environment-dumps",
+      "origin": "regression",
+      "ordered_at": "2026-11-20",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-cred-guard-kubectl-printenv",
+      "behaviour": "The credential guard judges the words after -- of a kubectl exec as the command the pod runs, with no shell around it, so a printenv of a secret looking name and an env or a bare printenv that dumps the whole pod environment are refused with the environment alternative the same way as a local command, while the pod name only listing, a count of its lines, printenv of a name that does not look like a secret, an env word that is only an operand or a flag value, and a kubectl command that sets a container command after -- without exec pass.",
+      "seam": "hooks.context.credential_guard.env_dump_verdict, read by hooks.context.credential_guard.decide",
+      "tests": [
+        "tests/test_credential_guard.py::test_a_pod_environment_dump_without_a_shell_is_refused",
+        "tests/test_credential_guard.py::test_a_pod_environment_name_listing_passes"
       ]
     },
     {
@@ -10917,6 +10944,16 @@
       ]
     },
     {
+      "id": "reused-coverage-scripts-module",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-coverage-step-drop-fallback",
+      "behaviour": "The unit job's Keep the reused tests' dev coverage step runs the grader checkout's scripts.reused_coverage alone. A grader checkout whose interpreter cannot import the tests package keeps the reused tests' dev coverage moved onto the head's lines, and a grader checkout that keeps the filter only under the tests package never runs that copy.",
+      "seam": "the Keep the reused tests' dev coverage step run text executed in a fake grader checkout",
+      "tests": [
+        "tests/test_reused_coverage.py::test_the_unit_shards_keep_reused_coverage_with_the_scripts_filter_alone_and_never_the_tests_package"
+      ]
+    },
+    {
       "id": "lab-remote-heads",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2645",
@@ -11254,6 +11291,20 @@
         "tests/test_type_gate.py::test_a_file_counts_the_same_errors_whichever_other_files_the_gate_checks",
         "tests/test_type_gate.py::test_the_gate_checks_a_run_of_the_every_source_layout_through_its_last_graded_source",
         "tests/test_type_gate.py::test_the_gate_checks_four_runs_at_once"
+      ]
+    },
+    {
+      "id": "registry-update-skips-ended-execution",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-registry-update-ended-guard",
+      "behaviour": "A write through ExecutionRegistry.update onto a seat head a drop or exit already ended leaves the execution and the agents projection untouched, so a pass-start copy a concurrent drop outran never relists the agent; the tick reap step, which puts back the copy it read at pass start on a hub admitted agent's working or waiting verdict, never resurrects one the hub lifecycle dropped mid pass. Every ordinary write stays skipped this way whatever pane it carries; only ExecutionRegistry.revive, reached only through store.revive_agent from master_launch._resume, lands a write onto an ended execution, so a retired master's own resume still lands, routed through the same managed/legacy check store.put_agent uses so a legacy agent with no execution identity still lands through the plain projection write. The shared _land write both _update and revive call still keeps a finished head finished.",
+      "seam": "scripts.swarm.execution.ExecutionRegistry._update over an ended seat head, reached through store.put_agent and the tick reap step's _reap_admitted/_watch_idle, and ExecutionRegistry.revive, reached only through store.revive_agent from master_launch._resume",
+      "tests": [
+        "tests/swarm/test_execution_identity.py::test_a_write_onto_a_dropped_execution_leaves_it_ended_and_unlisted",
+        "tests/swarm/test_execution_identity.py::test_an_explicit_revival_lands_on_an_ended_execution",
+        "tests/swarm/test_execution_identity.py::test_a_revival_onto_a_finished_head_keeps_finished",
+        "tests/swarm/test_execution_identity.py::test_an_ordinary_write_with_a_different_pane_onto_an_ended_execution_stays_skipped",
+        "tests/tick/test_agents.py::test_a_hub_admitted_agent_dropped_while_the_reap_holds_its_pass_start_copy_is_not_relisted"
       ]
     },
     {
