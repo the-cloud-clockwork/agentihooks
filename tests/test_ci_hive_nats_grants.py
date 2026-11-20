@@ -1,6 +1,7 @@
 import os
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -16,6 +17,30 @@ SUBSCRIBE = ["_INBOX.>"]
 CONTROLLER_PUBLISH = ["swarm.>", "$KV.hub-leases.>"]
 CONTROLLER = {"publish": {"allow": CONTROLLER_PUBLISH}, "subscribe": {"allow": SUBSCRIBE}}
 LEDGER = {"publish": {"allow": list(grants.LEDGER_PUBLISH)}, "subscribe": {"allow": list(grants.LEDGER_SUBSCRIBE)}}
+LAB_USER = "swarm-ci-lab-scheduler"
+LAB_STREAM = "AGENTIHOOKS-CI-LAB-HEADS"
+LAB_DURABLE = "ci-lab-scheduler"
+LAB_HEADS = f"{LAB_STREAM}.{LAB_DURABLE}"
+LAB_SOURCES = {"scripts/events/nats.py": "LAB_STREAM", "scripts/ci_lab/scheduler.py": "DURABLE"}
+LAB_FROM = "the agentihooks lab scheduler (scripts/events/nats.py LAB_STREAM, scripts/ci_lab/scheduler.py DURABLE)"
+
+
+def _lab_publish(stream: str = LAB_STREAM, durable: str = LAB_DURABLE) -> list[str]:
+    return [
+        f"$JS.API.CONSUMER.INFO.{stream}.{durable}",
+        f"$JS.API.CONSUMER.MSG.NEXT.{stream}.{durable}",
+        f"$JS.ACK.{stream}.{durable}.>",
+    ]
+
+
+LAB = {"publish": {"allow": _lab_publish()}, "subscribe": {"allow": SUBSCRIBE}}
+
+
+def _lab_sources(root: Path, stream: str = LAB_STREAM, durable: str = LAB_DURABLE) -> None:
+    for (source, name), value in zip(LAB_SOURCES.items(), (stream, durable), strict=True):
+        path = root / source
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"{name} = {value!r}\nraise RuntimeError('the grant check ran {source}')\n")
 
 
 def _agentihooks(tmp_path: Path, pub: dict, sub: dict, body: str | None = None, controller: dict | None = None) -> Path:
@@ -30,6 +55,7 @@ def _agentihooks(tmp_path: Path, pub: dict, sub: dict, body: str | None = None, 
         or f"def member_claims(user):\n    return {{'pub': {pub!r}, 'sub': {sub!r}}}\n\n\n"
         f"def controller_claims():\n    return {controller!r}\n"
     )
+    _lab_sources(root)
     return root
 
 
@@ -41,7 +67,8 @@ def _users(hive: dict, controller: dict | None, password: str | None) -> list[di
         user["openbao"] = "k8s/c"
     if controller is not None:
         user["permissions"] = controller
-    return [user, hive, {"user": grants.LEDGER_USER, "openbao": "k8s/l", "permissions": LEDGER}]
+    ledger = {"user": grants.LEDGER_USER, "openbao": "k8s/l", "permissions": LEDGER}
+    return [user, hive, ledger, {"user": LAB_USER, "openbao": "k8s/s", "permissions": LAB}]
 
 
 def _antoncore(
@@ -62,6 +89,7 @@ MATCH = [
     "The hive member NATS grants match antoncore: 2 publish and 1 subscribe subjects.",
     "The controller NATS grants match antoncore: 2 publish and 1 subscribe subjects.",
     "The ledger NATS grants match antoncore: 10 publish and 2 subscribe subjects.",
+    "The lab scheduler NATS grants are in antoncore: 3 publish and 1 subscribe subjects.",
 ]
 
 
@@ -527,3 +555,213 @@ def test_the_ledger_grant_covers_the_inbox_bucket_the_seat_inbox_writes_and_purg
     assert {f"$KV.{bucket}.>" for bucket in opened} <= publish
     assert {f"$JS.API.STREAM.PURGE.KV_{bucket}" for bucket in opened} <= publish
     assert not {">", "$JS.API.>", "$KV.>", "$JS.API.STREAM.PURGE.*"} & publish
+
+
+def _lab_antoncore(tmp_path: Path, permissions: dict[str, Any] | None) -> Path:
+    root = _operator_antoncore(tmp_path, {"publish": {"allow": PUBLISH}, "subscribe": {"allow": SUBSCRIBE}})
+    path = root / grants.SERVICE_USERS
+    users = yaml.safe_load(path.read_text())["users"]
+    lab: list[dict[str, Any]] = [] if permissions is None else [{**users[3], "permissions": permissions}]
+    path.write_text(yaml.safe_dump({"users": [*users[:3], *lab]}))
+    return root
+
+
+def _unnamed(direction: str, subject: str) -> str:
+    return (
+        f"::error::{direction} allow {subject} is required by {LAB_FROM} and not named by the antoncore"
+        f" {LAB_USER} user ({grants.SERVICE_USERS})."
+    )
+
+
+def _blocked(direction: str, denied: str, subject: str) -> str:
+    return (
+        f"::error::{direction} deny {denied} on the antoncore {LAB_USER} user ({grants.SERVICE_USERS}) blocks"
+        f" {subject}, which the agentihooks lab scheduler needs."
+    )
+
+
+@pytest.mark.feature("lab-scheduler-nats-grants")
+def test_the_lab_scheduler_grant_passes_beside_other_subjects_without_running_the_sources(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    agentihooks, _ = _matching(tmp_path)
+    publish = ["ci.lab.>", *_lab_publish(durable="ci-lab-relay"), *_lab_publish()]
+    antoncore = _lab_antoncore(tmp_path, {"publish": {"allow": publish}, "subscribe": {"allow": SUBSCRIBE}})
+    assert _run(capsys, agentihooks, antoncore) == (0, MATCH)
+
+
+@pytest.mark.feature("lab-scheduler-nats-grants")
+@pytest.mark.parametrize("lacked", range(3), ids=["info", "next", "ack"])
+def test_each_lab_consumer_subject_the_antoncore_user_lacks_is_red(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], lacked: int
+) -> None:
+    agentihooks, _ = _matching(tmp_path)
+    publish = _lab_publish()
+    subject = publish.pop(lacked)
+    antoncore = _lab_antoncore(tmp_path, {"publish": {"allow": publish}, "subscribe": {"allow": SUBSCRIBE}})
+    assert _run(capsys, agentihooks, antoncore) == (1, [_unnamed("publish", subject)])
+
+
+@pytest.mark.feature("lab-scheduler-nats-grants")
+def test_a_lab_scheduler_user_without_the_reply_inbox_is_red(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    agentihooks, _ = _matching(tmp_path)
+    antoncore = _lab_antoncore(tmp_path, {"publish": {"allow": _lab_publish()}, "subscribe": {"allow": ["ci.lab.>"]}})
+    assert _run(capsys, agentihooks, antoncore) == (1, [_unnamed("subscribe", "_INBOX.>")])
+
+
+@pytest.mark.feature("lab-scheduler-nats-grants")
+@pytest.mark.parametrize(
+    "stream,durable", [("CI-LAB-HEADS-2", LAB_DURABLE), (LAB_STREAM, "ci-lab-scheduler-2")], ids=["stream", "durable"]
+)
+def test_a_renamed_lab_stream_or_durable_is_red_until_antoncore_grants_the_new_name(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], stream: str, durable: str
+) -> None:
+    agentihooks, _ = _matching(tmp_path)
+    _lab_sources(agentihooks, stream, durable)
+    renamed = _lab_publish(stream, durable)
+    stale = _lab_antoncore(tmp_path / "stale", LAB)
+    assert _run(capsys, agentihooks, stale) == (1, [_unnamed("publish", subject) for subject in sorted(renamed)])
+    granted = _lab_antoncore(tmp_path / "granted", {"publish": {"allow": renamed}, "subscribe": {"allow": SUBSCRIBE}})
+    assert _run(capsys, agentihooks, granted) == (0, MATCH)
+
+
+@pytest.mark.feature("lab-scheduler-nats-grants")
+def test_a_missing_lab_scheduler_user_is_red(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    agentihooks, _ = _matching(tmp_path)
+    assert _run(capsys, agentihooks, _lab_antoncore(tmp_path, None)) == (
+        1,
+        [f"::error::The swarm NATS grants cannot be read (ValueError: the SWARM account has no {LAB_USER} user)."],
+    )
+
+
+@pytest.mark.feature("lab-scheduler-nats-grants")
+@pytest.mark.parametrize("source", list(LAB_SOURCES))
+@pytest.mark.parametrize(
+    "body",
+    ["OTHER = 'x'\n", "{name} = 7\n", "{name} = ''\n", "{name} = 'x'\n{name} = 'x'.upper()\n", "{name}: str\n"],
+    ids=["absent", "number", "empty", "computed-last", "unassigned"],
+)
+def test_a_lab_name_without_a_string_literal_fails_closed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], source: str, body: str
+) -> None:
+    agentihooks, antoncore = _matching(tmp_path)
+    name = LAB_SOURCES[source]
+    (agentihooks / source).write_text(body.replace("{name}", name))
+    error = f"{source} does not set {name} to a non-empty string literal"
+    assert _run(capsys, agentihooks, antoncore) == (
+        1,
+        [f"::error::The swarm NATS grants cannot be read (ValueError: {error})."],
+    )
+
+
+@pytest.mark.feature("lab-scheduler-nats-grants")
+@pytest.mark.parametrize("source", list(LAB_SOURCES))
+@pytest.mark.parametrize("body,error", [(None, "FileNotFoundError"), ("{name} = (\n", "SyntaxError")])
+def test_an_unreadable_lab_source_fails_closed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], source: str, body: str | None, error: str
+) -> None:
+    agentihooks, antoncore = _matching(tmp_path)
+    path = agentihooks / source
+    if body is None:
+        path.unlink()
+    else:
+        path.write_text(body.replace("{name}", LAB_SOURCES[source]))
+    status, lines = _run(capsys, agentihooks, antoncore)
+    assert status == 1
+    assert len(lines) == 1
+    assert lines[0].startswith(f"::error::The swarm NATS grants cannot be read ({error}: ")
+    assert source in lines[0]
+
+
+@pytest.mark.feature("lab-scheduler-nats-grants")
+@pytest.mark.parametrize(
+    "source,kept,stream,durable",
+    [
+        ("scripts/events/nats.py", LAB_STREAM, "renamed", LAB_DURABLE),
+        ("scripts/ci_lab/scheduler.py", LAB_DURABLE, LAB_STREAM, "renamed"),
+    ],
+    ids=["stream", "durable"],
+)
+def test_the_last_assignment_of_a_lab_name_is_the_one_graded(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], source: str, kept: str, stream: str, durable: str
+) -> None:
+    agentihooks, antoncore = _matching(tmp_path)
+    name, path = LAB_SOURCES[source], agentihooks / source
+    path.write_text(f"{name} = 'renamed'\n{name}: str = {kept!r}\n")
+    assert _run(capsys, agentihooks, antoncore) == (0, MATCH)
+    path.write_text(f"{name}: str = {kept!r}\nOTHER = 1\n{name} = 'renamed'\n")
+    expected = [_unnamed("publish", subject) for subject in sorted(_lab_publish(stream, durable))]
+    assert _run(capsys, agentihooks, antoncore) == (1, expected)
+
+
+@pytest.mark.feature("lab-scheduler-nats-grants")
+def test_an_unrestricted_lab_scheduler_user_is_red(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    agentihooks, _ = _matching(tmp_path)
+    publish = [_unnamed("publish", subject) for subject in sorted(_lab_publish())]
+    assert _run(capsys, agentihooks, _lab_antoncore(tmp_path, {})) == (
+        1,
+        [*publish, _unnamed("subscribe", "_INBOX.>")],
+    )
+
+
+@pytest.mark.feature("lab-scheduler-nats-grants")
+@pytest.mark.parametrize(
+    "direction,denied,blocked",
+    [
+        ("publish", ">", sorted(_lab_publish())),
+        ("publish", "$JS.ACK.>", [f"$JS.ACK.{LAB_HEADS}.>"]),
+        ("publish", f"$JS.API.CONSUMER.INFO.{LAB_HEADS}", [f"$JS.API.CONSUMER.INFO.{LAB_HEADS}"]),
+        ("publish", f"$JS.API.CONSUMER.*.{LAB_HEADS}", [f"$JS.API.CONSUMER.INFO.{LAB_HEADS}"]),
+        ("publish", f"$JS.API.CONSUMER.*.{LAB_STREAM}.other", []),
+        ("publish", f"$JS.API.CONSUMER.INFO.{LAB_STREAM}", []),
+        ("publish", f"$JS.API.CONSUMER.INFO.{LAB_HEADS}.*", []),
+        ("publish", f"$JS.ACK.{LAB_HEADS}", []),
+        ("subscribe", "_INBOX.*.>", ["_INBOX.>"]),
+        ("subscribe", "ci.lab.>", []),
+    ],
+    ids=[
+        "everything",
+        "acks",
+        "exact",
+        "wildcard",
+        "wildcard-other",
+        "shorter",
+        "longer",
+        "ack-prefix",
+        "inboxes",
+        "unrelated",
+    ],
+)
+def test_a_deny_on_the_lab_scheduler_user_is_red_where_it_overlaps_a_lab_subject(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], direction: str, denied: str, blocked: list[str]
+) -> None:
+    agentihooks, _ = _matching(tmp_path)
+    permissions: dict[str, Any] = {"publish": {"allow": _lab_publish()}, "subscribe": {"allow": SUBSCRIBE}}
+    permissions[direction]["deny"] = [denied]
+    expected = [_blocked(direction, denied, subject) for subject in blocked]
+    outcome = (1, expected) if expected else (0, MATCH)
+    assert _run(capsys, agentihooks, _lab_antoncore(tmp_path, permissions)) == outcome
+
+
+@pytest.mark.feature("lab-scheduler-nats-grants")
+def test_the_grant_check_reads_from_this_repository_the_names_the_scheduler_binds(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.ci_lab import scheduler
+    from scripts.events import nats
+
+    claims = nats_grant.controller_claims()
+    controller = {"publish": claims["pub"], "subscribe": claims["sub"]}
+    root = _operator_antoncore(tmp_path, {}, user="swarm-other", controller=controller)
+    path = root / grants.SERVICE_USERS
+    users = yaml.safe_load(path.read_text())["users"]
+    users[3]["permissions"] = {
+        "publish": {"allow": _lab_publish(nats.LAB_STREAM, scheduler.DURABLE)},
+        "subscribe": {"allow": SUBSCRIBE},
+    }
+    path.write_text(yaml.safe_dump({"users": users}))
+    status, lines = _run(capsys, ROOT, root)
+    assert status == 0
+    assert lines[-1] == MATCH[-1]
