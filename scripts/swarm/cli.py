@@ -2165,6 +2165,7 @@ def cmd_merge(store: Any, args: argparse.Namespace) -> None:
                 ),
                 journal=queue_record.Journal(args.url, context=stalled or (agent and {"task": agent.task})),
                 attempts=merge_queue.ATTEMPTS,
+                priority=lambda: queue_priority.automatic(store, args.slug, args.url, LedgerClient()),
             )
         else:
             result = merge_queue.operate(args.action, args.url, journal=queue_record.Journal(args.url))

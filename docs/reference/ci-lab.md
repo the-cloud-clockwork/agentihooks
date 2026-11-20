@@ -3472,6 +3472,11 @@ says otherwise; on `LocalObjects` it is a `file://` URI. An upload is not write 
 to the same URL replaces the object. A presigned URL grants a write to that one object until it
 expires, so keep it out of logs.
 
+The scheduler builds its `S3Objects` with `scheduler.storage`, whose client signs SigV4 URLs over
+the host alone, region `us-east-1` and path style, so a worker's PUT may carry any `Content-Type`.
+A SigV2 URL, which botocore signs when no signature version is set, also signs the `Content-Type`:
+the form type urllib adds to every worker PUT then makes MinIO answer 403 `SignatureDoesNotMatch`.
+
 Workers ask the scheduler's lease API on port `8800`:
 
 ```http
@@ -4227,8 +4232,9 @@ not these rows. See [CI lab shadow acceptance report](lab-shadow.md).
   variables. A private variable replaces a whitelisted variable of the same name.
 - A port range from its `PortAllocator`, given back when the run ends.
 - No network unless the caller passes `net=True`.
-- Its own session. A timeout sends `SIGKILL` to the whole process group, and the outcome's code is
-  `None`.
+- Its own session. When the unit exits, cleanly, with a failure or at its timeout, the sandbox sends
+  `SIGKILL` to the whole process group, so no child it left behind outlives the run. A timeout's
+  outcome code is `None`.
 
 | Variable | Value |
 |---|---|

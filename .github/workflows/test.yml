@@ -1640,9 +1640,7 @@ jobs:
         run: |
           git worktree add --detach "$RUNNER_TEMP/grader" "$GRADER"
           cd "$RUNNER_TEMP/grader"
-          package=scripts
-          if [[ ! -f scripts/reused_coverage.py ]]; then package=tests; fi
-          python -m "$package.reused_coverage" --repo "$GITHUB_WORKSPACE" --head HEAD \
+          python -m scripts.reused_coverage --repo "$GITHUB_WORKSPACE" --head HEAD \
             --coverage "$RUNNER_TEMP/dev-coverage/.coverage" --commit "$COMMIT" \
             --reused "$GITHUB_WORKSPACE/reused.json" --out "$GITHUB_WORKSPACE/reused-coverage/.coverage" \
             --captures "$RUNNER_TEMP/dev-coverage/js-coverage" --captures-out "$GITHUB_WORKSPACE/js-coverage"

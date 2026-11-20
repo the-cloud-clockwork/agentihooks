@@ -161,6 +161,16 @@ def test_a_timeout_kills_the_whole_process_tree(tmp_path: Path) -> None:
     assert _gone_within(int(outcome.log.read_text().split()[0]), 5)
 
 
+@pytest.mark.feature("lab-sandbox-group-killed-at-exit")
+@pytest.mark.parametrize("code", [0, 3])
+def test_a_child_left_after_the_unit_exits_is_killed_when_the_run_returns(tmp_path: Path, code: int) -> None:
+    whitelist = {"PATH": os.environ["PATH"]}
+    unit = _sandbox(tmp_path / "root", sandbox.PortAllocator(first=20000, last=20099, width=100), whitelist)
+    outcome = unit.run(["/bin/sh", "-c", f"sleep 60 & echo $!; exit {code}"], timeout=30, net=True)
+    assert outcome.code == code
+    assert _gone_within(int(outcome.log.read_text().split()[0]), 5)
+
+
 def test_the_unit_sees_only_the_whitelist_and_its_private_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

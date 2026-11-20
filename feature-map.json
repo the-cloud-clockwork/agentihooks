@@ -11,6 +11,27 @@
       ]
     },
     {
+      "id": "codex-swarm-share",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-load-share",
+      "behaviour": "A new eng or ci spawn that may run on either harness goes to Codex while Codex holds under thirty percent of the live and already placed eng and ci agents and a Codex seat is placeable, so four open Claude accounts no longer leave Codex one spawn in five. With no placeable Codex seat, or only Codex seats that pinned Codex work reserves, the slot goes to Claude; a lane agent pin or a task harness requirement keeps its harness, the plan lane keeps the fewest sessions pick, and a met share leaves the fewest sessions pick unchanged.",
+      "seam": "scripts.swarm.capacity.calculate through _allocate, whose placements every launch path takes as the planned harness",
+      "tests": [
+        "tests/swarm/test_codex_share.py::test_codex_takes_thirty_percent_of_new_eng_spawns_beside_four_claude_accounts",
+        "tests/swarm/test_codex_share.py::test_the_share_counts_live_eng_and_ci_agents_and_nothing_else",
+        "tests/swarm/test_codex_share.py::test_a_met_share_leaves_the_fewest_sessions_pick",
+        "tests/swarm/test_codex_share.py::test_a_short_share_with_two_codex_of_seven_sends_the_next_spawn_to_codex",
+        "tests/swarm/test_codex_share.py::test_ci_spawns_share_with_codex_too",
+        "tests/swarm/test_codex_share.py::test_the_plan_lane_keeps_the_fewest_sessions_pick",
+        "tests/swarm/test_codex_share.py::test_a_short_share_falls_back_to_claude_without_a_codex_seat",
+        "tests/swarm/test_codex_share.py::test_a_claude_lane_pin_wins_over_a_short_share",
+        "tests/swarm/test_codex_share.py::test_a_claude_task_requirement_wins_over_a_short_share",
+        "tests/swarm/test_codex_share.py::test_a_codex_plan_spawn_never_counts_toward_the_eng_share",
+        "tests/swarm/test_codex_share.py::test_a_short_share_leaves_a_codex_seat_reserved_for_pinned_codex_work",
+        "tests/swarm/test_codex_share.py::test_a_met_share_still_leaves_a_claude_seat_reserved_for_pinned_claude_work"
+      ]
+    },
+    {
       "id": "kind-terminal-snapshot-base",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2647",
@@ -125,6 +146,23 @@
       "tests": [
         "tests/swarm/test_ledger_refusals.py::test_a_refused_focus_reports_size_warnings_separately",
         "tests/swarm/test_ledger_refusals.py::test_size_warnings_do_not_refuse_an_accepted_swarm_write"
+      ]
+    },
+    {
+      "id": "credential-guard-heredoc-substitutions",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-credential-guard-heredoc-substitution",
+      "behaviour": "The credential guard judges executable dollar and backtick command substitutions in unquoted heredoc bodies like stages, refusing credential reads and preserving recursive tree scans. Quoted delimiters keep their bodies literal for ordinary consumers. Literal body commands, process substitution text, escaped substitution markers and safe substitutions pass. Existing shell consumer checks still apply.",
+      "seam": "hooks.context.credential_guard.decide and evaluate on Bash heredoc payloads",
+      "rules": [
+        "credential-guard-heredoc-substitution"
+      ],
+      "tests": [
+        "tests/test_credential_guard.py::test_an_unquoted_heredoc_credential_substitution_is_refused",
+        "tests/test_credential_guard.py::test_a_quoted_heredoc_credential_substitution_stays_literal",
+        "tests/test_credential_guard.py::test_an_unquoted_heredoc_without_a_credential_substitution_passes",
+        "tests/test_credential_guard.py::test_a_heredoc_substitution_keeps_the_credential_tree_scan",
+        "tests/test_credential_guard.py::test_a_spelled_heredoc_token_hides_no_later_heredoc_body"
       ]
     },
     {
@@ -728,6 +766,17 @@
       ]
     },
     {
+      "id": "hive-join-heartbeat-ends-departed-member-reports",
+      "rules": ["hive-restart-check-ignores-departed-members"],
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-roll-ghost-agents",
+      "behaviour": "After a pod replacement expires its old hive member, the replacement heartbeat ends the departed members running join reports without refreshing them; current and concurrent live members and reports with unknown ownership keep their heartbeats.",
+      "seam": "registry.join and join_report.heartbeat through join_report.listing and join_report.live",
+      "tests": [
+        "tests/hive/test_join_report_restart.py::test_a_replacement_member_ends_reports_of_the_departed_pod_after_its_live_window"
+      ]
+    },
+    {
       "id": "swarm-resume-keeps-execution-identity",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-resume-started-at-sites",
@@ -747,7 +796,8 @@
       "seam": "agentihooks swarm <slug> tasks through scripts.swarm.cli.main, reading LedgerClient.tasks and LedgerClient.freezes",
       "tests": [
         "tests/swarm/test_tasks_read.py::test_swarm_tasks_prints_every_task_row_and_freeze_of_the_swarm_as_one_json_document",
-        "tests/swarm/test_tasks_read.py::test_swarm_tasks_exits_one_and_prints_no_rows_when_the_ledger_is_unreachable"
+        "tests/swarm/test_tasks_read.py::test_swarm_tasks_exits_one_and_prints_no_rows_when_the_ledger_is_unreachable",
+        "tests/swarm/test_tasks_read.py::test_swarm_tasks_resolves_the_ledger_client_through_the_module_so_a_class_bound_at_an_earlier_import_cannot_persist"
       ]
     },
     {
@@ -4288,6 +4338,20 @@
       ]
     },
     {
+      "id": "hive-remove-drain-withdraws-orders",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-remove-drain-withdraw",
+      "behaviour": "When a hive remove drain stops waiting, every hand off order it sent and its agent left unanswered is cancelled in every inbox world with a reason naming the removed hive, so a later occupant of the seat on another hive reads no stale order.",
+      "seam": "scripts.hive.remove.drain when it stops waiting",
+      "tests": [
+        "tests/hive/test_remove.py::test_a_hive_remove_drain_withdraws_every_unanswered_order_when_it_ends_so_a_later_occupant_reads_none",
+        "tests/hive/test_remove.py::test_a_hive_remove_drain_keeps_the_outcome_of_an_order_its_agent_answered"
+      ],
+      "rules": [
+        "hive-order-never-withdrawn"
+      ]
+    },
+    {
       "id": "reply-wait-reads-every-inbox-world",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2152",
@@ -4498,6 +4562,20 @@
         "tests/inbox/test_store.py::test_a_fresh_reply_on_a_refused_slot_the_item_no_longer_names_says_it_was_refused",
         "tests/inbox/test_store.py::test_a_fresh_reply_on_an_answer_its_recipient_cancelled_reopens_nothing",
         "tests/inbox/test_wake.py::test_a_refused_message_whose_operator_item_cannot_reopen_yet_is_reported_held"
+      ]
+    },
+    {
+      "id": "pooled-claimant-reply",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2807",
+      "behaviour": "A backend master answers a claimant item the master inbox pool gave it: msg reply skips the task owner fence only for an item still at the seat that claimed it from the pool when the replier acts for that seat, so the answer reaches the claimant and closes the item done. A new msg send from that master to a foreign task's claimant, or to the claimant it just answered, is still refused by the fence, and an item the pool gave another master stays fenced.",
+      "seam": "msg reply through scripts.inbox.cli._apply_reply, InboxStore.reached_through_pool and master_fence.check_send",
+      "tests": [
+        "tests/test_swarm_v2_task_owner.py::test_a_backend_master_replies_to_a_claimant_item_it_took_from_the_master_pool",
+        "tests/test_swarm_v2_task_owner.py::test_a_pooled_reply_leaves_a_new_message_to_a_foreign_task_claimant_fenced",
+        "tests/test_swarm_v2_task_owner.py::test_a_pooled_reply_grants_no_unsolicited_message_to_the_claimant_it_answered",
+        "tests/test_swarm_v2_task_owner.py::test_a_backend_master_cannot_answer_a_claimant_item_the_pool_gave_the_front_door",
+        "tests/test_swarm_v2_task_owner.py::test_a_replayed_pooled_reply_is_a_duplicate_and_never_a_fence_refusal"
       ]
     },
     {
@@ -5165,6 +5243,35 @@
       ]
     },
     {
+      "id": "merge-priority-automatic-entry",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-merge-priority-doctrine",
+      "behaviour": "Focused or urgent tasks receive deferred priority when newly queued from the command or merge watcher, including recovery; testing entries stay in place, ordinary tasks keep FIFO order, existing entries and repositories without a queue receive no automatic move.",
+      "seam": "scripts.swarm.merge_queue.operate queue entry through cli.cmd_merge and ready initial and recovery queue paths",
+      "tests": [
+        "tests/swarm/test_queue_entry_priority.py::test_queue_entry_applies_focus_or_urgency_without_interrupting_tests",
+        "tests/swarm/test_queue_entry_priority.py::test_a_freeze_nearer_than_the_focus_keeps_the_queue_order",
+        "tests/swarm/test_queue_entry_priority.py::test_automatic_priority_tells_a_displaced_split_pull_owner_as_the_swarm",
+        "tests/swarm/test_queue_entry_priority.py::test_an_existing_queue_entry_does_not_repeat_automatic_priority",
+        "tests/swarm/test_queue_entry_priority.py::test_a_busy_priority_leaves_the_new_entry_queued_and_names_the_refusal",
+        "tests/swarm/test_queue_entry_priority.py::test_a_repository_without_a_queue_does_not_apply_automatic_priority",
+        "tests/swarm/test_queue_entry_priority.py::test_cli_queue_entry_supplies_automatic_priority",
+        "tests/swarm/test_queue_entry_priority.py::test_watcher_queue_entry_supplies_automatic_priority"
+      ],
+      "rules": ["merge-priority-missing-entry-callback"]
+    },
+    {
+      "id": "merge-priority-operator-lift",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-merge-priority-doctrine",
+      "behaviour": "An operator lift removes merge queue entries already under test and restores them behind the priority target in their original order; ordinary priority preserves those entries.",
+      "seam": "scripts.swarm.cli.cmd_merge through queue_priority.request and merge_queue.prioritize",
+      "tests": [
+        "tests/swarm/test_queue_priority.py::test_operator_lift_is_journaled"
+      ],
+      "rules": ["merge-priority-swallowed-lift"]
+    },
+    {
       "id": "merge-priority-moves-waiting-entries-at-once",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2604",
@@ -5498,6 +5605,24 @@
       ]
     },
     {
+      "id": "credential-guard-wrapper-option-values",
+      "origin": "regression",
+      "ordered_at": "2026-11-19",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-credential-guard-wrapper-options",
+      "behaviour": "The credential guard skips sudo and env option values before judging the wrapped command, so credential file reads directly or in shell scripts remain refused through nested wrappers.",
+      "seam": "hooks.context.credential_guard.decide on Bash payloads through verb_index",
+      "tests": [
+        "tests/test_credential_guard_wrapper_options.py::test_a_credential_read_after_wrapper_option_values_is_refused",
+        "tests/test_credential_guard_wrapper_options.py::test_wrapper_value_flags_preserve_the_credential_verdict",
+        "tests/test_credential_guard_wrapper_options.py::test_wrapper_option_values_do_not_become_commands_or_operands",
+        "tests/test_credential_guard_wrapper_options.py::test_wrapper_options_do_not_turn_safe_scripts_into_credential_reads",
+        "tests/test_credential_guard_wrapper_options.py::test_wrapper_parser_preserves_command_boundaries"
+      ],
+      "rules": [
+        "credential-guard-wrapper-option-values"
+      ]
+    },
+    {
       "id": "ledger-hives-panel",
       "origin": "inventory",
       "behaviour": "The hives panel shows each hive's requested columns and writes max agents, exclusion and flags as the operator, naming the reason for a refused write.",
@@ -5711,6 +5836,32 @@
       ]
     },
     {
+      "id": "bundle-layer-manifest",
+      "origin": "inventory",
+      "behaviour": "A bundle root's committed bundle.yml names the directory it ships from with layer; an absent file or key keeps the root. Every reader of bundle content (rules, skills, agents, commands, settings and MCP for each harness, shared doctrine, manifestos, deps.json, enforcements, conditions, workflows, lifecycle roots, classifiers and the Serena context) reads the layer, while profiles are still found under the root. A named layer never falls back to the root CLAUDE.md, a layer outside the bundle is refused with a warning and the root ships, a chain profile that is the layer adds only its persona so every hook group, doctrine row and persona lands once, the condition index rebuilds when a bundle.yml changes, and agentihooks bundle layer prints the resolved directory.",
+      "seam": "hooks.context.profile_chain.layer_root, unlayered and doctrine read through scripts.install.install_global for claude, codex and copilot, scripts.profiles.render, scripts.swarm_v2.worker_home.materialize, hooks.context.conditions.load_index and layer_dirs, hooks.context.enforcement.load_all_enforcements, scripts.workflows.loader.layer_dirs, hooks.lifecycle.config.load_roots and scripts.profiles.bundles.cmd_bundle",
+      "tests": [
+        "tests/test_bundle_layer.py::test_a_bundle_without_a_named_layer_ships_from_its_root",
+        "tests/test_bundle_layer.py::test_a_named_layer_resolves_to_its_directory_inside_the_bundle",
+        "tests/test_bundle_layer.py::test_a_layer_outside_the_bundle_is_refused_and_the_root_ships",
+        "tests/test_bundle_layer.py::test_a_named_layer_keeps_the_root_claude_md_out_of_the_shared_doctrine",
+        "tests/test_bundle_layer.py::test_a_named_layer_ships_rules_skills_agents_and_commands_and_the_root_dot_claude_stays_behind",
+        "tests/test_bundle_layer.py::test_a_named_layer_ships_settings_mcp_and_doctrine_and_no_root_development_file",
+        "tests/test_bundle_layer.py::test_compiled_personas_take_the_layer_doctrine_and_rules_and_never_the_root_ones",
+        "tests/test_bundle_layer.py::test_codex_applies_the_layer_config_and_not_the_root_one",
+        "tests/test_bundle_layer.py::test_a_chain_profile_that_is_the_layer_adds_only_its_persona_and_each_hook_once",
+        "tests/test_bundle_layer.py::test_a_chain_profile_that_is_the_layer_compiles_its_doctrine_and_persona_once",
+        "tests/test_bundle_layer.py::test_doctrine_rows_name_the_layer_doctrine_once_and_the_layer_persona_once",
+        "tests/test_bundle_layer.py::test_profile_renders_read_features_settings_and_mcp_from_the_layer_once",
+        "tests/test_bundle_layer.py::test_manifestos_and_dependencies_come_from_the_layer",
+        "tests/test_bundle_layer.py::test_runtime_conditions_enforcements_workflows_and_lifecycle_read_the_layer_once",
+        "tests/test_bundle_layer.py::test_links_into_a_profile_layer_are_managed_and_reaped_when_their_source_goes",
+        "tests/test_bundle_layer.py::test_bundle_help_names_the_layer_action_and_it_prints_the_resolved_layer",
+        "tests/test_conditions.py::TestIndexCache::test_a_bundle_layer_change_invalidates",
+        "tests/test_worker_home.py::test_a_bundle_naming_a_layer_renders_the_worker_home_from_it_once"
+      ]
+    },
+    {
       "id": "credential-guard-describe-flag-words",
       "origin": "regression",
       "ordered_at": "2026-11-18",
@@ -5745,6 +5896,18 @@
       "tests": [
         "tests/test_credential_guard.py::test_an_awk_read_of_an_environment_value_is_refused",
         "tests/test_credential_guard.py::test_an_awk_listing_of_environment_names_passes"
+      ]
+    },
+    {
+      "id": "credential-guard-refuses-pod-environment-dumps",
+      "origin": "regression",
+      "ordered_at": "2026-11-20",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-cred-guard-kubectl-printenv",
+      "behaviour": "The credential guard judges the words after -- of a kubectl exec as the command the pod runs, with no shell around it, so a printenv of a secret looking name and an env or a bare printenv that dumps the whole pod environment are refused with the environment alternative the same way as a local command, while the pod name only listing, a count of its lines, printenv of a name that does not look like a secret, an env word that is only an operand or a flag value, and a kubectl command that sets a container command after -- without exec pass.",
+      "seam": "hooks.context.credential_guard.env_dump_verdict, read by hooks.context.credential_guard.decide",
+      "tests": [
+        "tests/test_credential_guard.py::test_a_pod_environment_dump_without_a_shell_is_refused",
+        "tests/test_credential_guard.py::test_a_pod_environment_name_listing_passes"
       ]
     },
     {
@@ -7373,6 +7536,17 @@
       ]
     },
     {
+      "id": "kept-placing-steps-first-on-the-placement-worker",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-master-late",
+      "rules": ["kept-step-queues-behind-ready-sibling"],
+      "behaviour": "A sweep of the pass scheduler submits its ready kept steps before its other ready steps, so the kept critical steps master down and tick master, ready in the same sweep as quota notice, run first on the pass's one placement worker instead of queueing behind quota notice's whole body and starting twenty to ninety seconds late.",
+      "seam": "engine._eager submission order through engine._kept_first, pool.Pass.placer",
+      "tests": [
+        "tests/tick/test_placement_worker.py::test_a_kept_lock_taking_step_ready_beside_a_slower_one_ahead_of_it_runs_first_on_the_placement_worker"
+      ]
+    },
+    {
       "id": "tick-step-budget-from-start",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-step-abandon-before-run",
@@ -7641,6 +7815,17 @@
       "tests": [
         "tests/swarm/test_execution_archive.py::test_archive_prunes_intents_for_the_rows_it_archives",
         "tests/swarm/test_execution_archive.py::test_reconcile_archives_dead_rows"
+      ]
+    },
+    {
+      "id": "swarm-archive-prunes-stale-intents",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-archive-stale-intents",
+      "behaviour": "ExecutionRegistry.archive drops every controller-intents row whose execution is no longer current, including rows left by executions archived before intents were pruned, so every fenced registry write stops reading, decoding and copying that backlog; an intents row that never carried an execution_id matching its own key is never an execution admission and survives.",
+      "seam": "ExecutionRegistry.archive prunes intents whose execution left the executions section",
+      "tests": [
+        "tests/swarm/test_execution_archive.py::test_archive_prunes_intents_left_by_executions_archived_before_the_prune",
+        "tests/swarm/test_execution_archive.py::test_archive_keeps_an_intents_entry_that_is_not_an_execution_admission"
       ]
     },
     {
@@ -9832,6 +10017,18 @@
       ]
     },
     {
+      "id": "lab-result-upload-signing",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-worker-upload-forbidden",
+      "behaviour": "The CI lab scheduler's storage client presigns each worker result upload with SigV4 query auth over the host alone, so the worker's PUT of a unit's report, which carries the form Content-Type that urllib adds, is accepted and the report lands under lab/uploads/<job>/, while a URL changed to name another object is refused. A SigV2 URL signs the Content-Type, so the same PUT is refused with 403 SignatureDoesNotMatch, as MinIO refused 362 static unit results on 20 November.",
+      "seam": "scripts.ci_lab.scheduler.storage signing through scripts.ci_lab.objects.Uploads, put by scripts.ci_lab.worker.Client.put to a local bucket that checks presigned SigV2 and SigV4 signatures over the request it received; the client settings observed through scripts.ci_lab.scheduler.main",
+      "tests": [
+        "tests/ci_lab/test_result_upload.py::test_a_worker_put_of_a_report_lands_through_the_upload_url_the_scheduler_storage_signs",
+        "tests/ci_lab/test_result_upload.py::test_an_upload_url_the_scheduler_storage_signs_writes_only_the_object_it_names",
+        "tests/ci_lab/test_result_upload.py::test_the_bucket_refuses_a_sigv2_upload_url_for_the_content_type_urllib_adds_to_the_worker_put"
+      ]
+    },
+    {
       "id": "lab-worker-executors",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2533",
@@ -10541,6 +10738,16 @@
       ]
     },
     {
+      "id": "lab-sandbox-group-killed-at-exit",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2651",
+      "behaviour": "A lab unit's process group is killed after every exit, clean, failed or timed out, so a child the unit leaves behind, such as one started by a build hook, is gone when Sandbox.run returns and never outlives its run folder; the unit's exit code is kept and a timeout still returns no code.",
+      "seam": "scripts.ci_lab.sandbox Sandbox.run, the sandbox run boundary, through run_process in scripts.ci_mutation.runner",
+      "tests": [
+        "tests/ci_lab/test_sandbox.py::test_a_child_left_after_the_unit_exits_is_killed_when_the_run_returns"
+      ]
+    },
+    {
       "id": "lab-venv-build-sandbox",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2644",
@@ -10889,6 +11096,19 @@
       ]
     },
     {
+      "id": "tick-view-side-by-side-batches",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2621",
+      "behaviour": "A pull request views read of two or more batches of twenty has every batch document in flight at the same time, each read in the caller's context, then resolves the workflow gates batch by batch in batch order through the shared cache, so it makes the same GitHub calls as reading the batches one after another and a tick view of two batches waits for its slowest batch instead of their sum.",
+      "seam": "views in scripts.swarm.ledger_events over a source control port, with and without the swarm Redis as its cache",
+      "tests": [
+        "tests/swarm/test_pull_views.py::test_a_views_call_reads_its_batch_documents_at_the_same_time",
+        "tests/swarm/test_pull_views.py::test_batches_make_the_sequential_github_calls_for_their_workflow_trees",
+        "tests/swarm/test_pull_views.py::test_a_failed_batch_read_leaves_the_other_batch_read_once",
+        "tests/swarm/test_pull_views.py::test_each_views_batch_reads_in_the_callers_context"
+      ]
+    },
+    {
       "id": "lab-wheel-imports",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2646",
@@ -10907,6 +11127,16 @@
       "seam": "the Deselect the reused tests step run text executed in a fake grader checkout",
       "tests": [
         "tests/test_dep_manifest.py::test_the_split_deselects_with_the_scripts_manifest_alone_and_never_the_tests_package"
+      ]
+    },
+    {
+      "id": "reused-coverage-scripts-module",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-coverage-step-drop-fallback",
+      "behaviour": "The unit job's Keep the reused tests' dev coverage step runs the grader checkout's scripts.reused_coverage alone. A grader checkout whose interpreter cannot import the tests package keeps the reused tests' dev coverage moved onto the head's lines, and a grader checkout that keeps the filter only under the tests package never runs that copy.",
+      "seam": "the Keep the reused tests' dev coverage step run text executed in a fake grader checkout",
+      "tests": [
+        "tests/test_reused_coverage.py::test_the_unit_shards_keep_reused_coverage_with_the_scripts_filter_alone_and_never_the_tests_package"
       ]
     },
     {
@@ -11250,6 +11480,20 @@
       ]
     },
     {
+      "id": "registry-update-skips-ended-execution",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-registry-update-ended-guard",
+      "behaviour": "A write through ExecutionRegistry.update onto a seat head a drop or exit already ended leaves the execution and the agents projection untouched, so a pass-start copy a concurrent drop outran never relists the agent; the tick reap step, which puts back the copy it read at pass start on a hub admitted agent's working or waiting verdict, never resurrects one the hub lifecycle dropped mid pass. Every ordinary write stays skipped this way whatever pane it carries; only ExecutionRegistry.revive, reached only through store.revive_agent from master_launch._resume, lands a write onto an ended execution, so a retired master's own resume still lands, routed through the same managed/legacy check store.put_agent uses so a legacy agent with no execution identity still lands through the plain projection write. The shared _land write both _update and revive call still keeps a finished head finished.",
+      "seam": "scripts.swarm.execution.ExecutionRegistry._update over an ended seat head, reached through store.put_agent and the tick reap step's _reap_admitted/_watch_idle, and ExecutionRegistry.revive, reached only through store.revive_agent from master_launch._resume",
+      "tests": [
+        "tests/swarm/test_execution_identity.py::test_a_write_onto_a_dropped_execution_leaves_it_ended_and_unlisted",
+        "tests/swarm/test_execution_identity.py::test_an_explicit_revival_lands_on_an_ended_execution",
+        "tests/swarm/test_execution_identity.py::test_a_revival_onto_a_finished_head_keeps_finished",
+        "tests/swarm/test_execution_identity.py::test_an_ordinary_write_with_a_different_pane_onto_an_ended_execution_stays_skipped",
+        "tests/tick/test_agents.py::test_a_hub_admitted_agent_dropped_while_the_reap_holds_its_pass_start_copy_is_not_relisted"
+      ]
+    },
+    {
       "id": "ci-dependency-audit-platformdirs-pin",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2801",
@@ -11257,6 +11501,60 @@
       "seam": "scripts.ci_dependency_audit.audit's pip-audit command and the lint job's dependency audit step",
       "tests": [
         "tests/test_ci_dependency_audit.py::test_audit_excludes_the_platformdirs_release_that_refuses_the_runner_home"
+      ]
+    },
+    {
+      "id": "guard-stripping-keeps-heredoc-delimiter-line",
+      "origin": "regression",
+      "ordered_at": "2026-11-20",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2721",
+      "behaviour": "The shared command stripping drops only the body of a terminated heredoc and keeps the rest of its delimiter line, for unquoted, single quoted and dash heredocs. The terminator is a whole line holding only the delimiter word, which may be indented and may close a command substitution; an unterminated opener hides nothing, and a << inside an arithmetic expansion or command, spaced or not and on one line or several, opens no heredoc. Branch guard therefore refuses a guarded command chained after the delimiter, on a line after an indented terminator, after an unterminated opener or after a shift operator the same way as at the top level, even when a later line starts with the shift operand; prod lockdown, which reads tree-sitter command nodes, keeps refusing a command chained after the delimiter; and a guarded command inside a terminated body, including one closed with its command substitution, stays data.",
+      "seam": "hooks.context._strip.strip_non_command_content, observed through hooks.context.branch_guard.check_branch_guard and hooks.context.prod_lockdown.check_prod_lockdown on Bash payloads",
+      "tests": [
+        "tests/context/test_strip_heredoc_delimiter_line.py::test_stripping_keeps_the_delimiter_line_and_drops_the_body",
+        "tests/context/test_strip_heredoc_delimiter_line.py::test_stripping_blanks_a_shift_inside_arithmetic",
+        "tests/context/test_strip_heredoc_delimiter_line.py::test_branch_guard_refuses_a_push_to_main_after_the_delimiter",
+        "tests/context/test_strip_heredoc_delimiter_line.py::test_prod_lockdown_refuses_a_release_run_after_the_delimiter",
+        "tests/context/test_strip_heredoc_delimiter_line.py::test_branch_guard_refuses_a_push_on_a_line_after_an_opener",
+        "tests/context/test_strip_heredoc_delimiter_line.py::test_a_guarded_command_inside_the_body_stays_data",
+        "tests/context/test_strip_heredoc_delimiter_line.py::test_a_body_closed_with_its_command_substitution_stays_data"
+      ]
+    },
+    {
+      "id": "swarm-tick-lock-renewal-journal",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2785",
+      "behaviour": "Each tick lock renewal the pass step hook tries, and each hook call that found another call holding the hook, journals one swarm_tick_lock_renewal line with the seconds it waited for the hook lock, the seconds it held it, the seconds the renewal's Redis calls took whether they succeeded or raised (null without a renewal), whether it was blocked and whether the renewal succeeded, and the pass id; a failed renewal still raises, and a free call inside the renewal interval, or after the pass revoked the hook, journals nothing.",
+      "seam": "The pass step hook scripts.swarm.tick_activity.Renewal and its journal function",
+      "tests": [
+        "tests/swarm/test_tick_lock_renewal_journal.py::test_a_renewal_journals_its_wait_hold_and_redis_seconds_under_its_pass",
+        "tests/swarm/test_tick_lock_renewal_journal.py::test_a_failed_renewal_journals_its_redis_seconds_and_still_raises",
+        "tests/swarm/test_tick_lock_renewal_journal.py::test_a_call_inside_the_interval_that_found_the_hook_free_journals_nothing",
+        "tests/swarm/test_tick_lock_renewal_journal.py::test_a_call_that_found_the_hook_held_journals_its_wait_even_without_a_renewal",
+        "tests/swarm/test_tick_lock_renewal_journal.py::test_a_revoked_hook_that_found_itself_free_journals_nothing"
+      ]
+    },
+    {
+      "id": "swarm-tick-ledger-call-journal",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2785",
+      "behaviour": "Inside a tick pass every request the in process ledger client makes journals one swarm_tick_ledger_call line naming the swarm, pass id, ledger, method, path without its query and outcome (ok, the refusal's HTTP status, or error) with its wall seconds, and a refused or failed request still raises; outside a pass a request journals nothing.",
+      "seam": "scripts.tick.adapters.database_ledger.client and its journaled transport",
+      "tests": [
+        "tests/tick/test_ledger_call_journal.py::test_a_read_inside_a_pass_journals_its_ledger_route_outcome_and_wall_seconds",
+        "tests/tick/test_ledger_call_journal.py::test_a_refused_write_inside_a_pass_journals_its_status_and_still_raises",
+        "tests/tick/test_ledger_call_journal.py::test_a_failure_other_than_a_refusal_inside_a_pass_journals_an_error",
+        "tests/tick/test_ledger_call_journal.py::test_a_request_outside_a_pass_journals_nothing"
+      ]
+    },
+    {
+      "id": "swarm-tick-joined-budget",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2785",
+      "behaviour": "The engine reads a step's budget once in the pass's own context and uses that value for the step deadline, the join and the step's timed record, so the step finished line logs the live budget the engine joined on, never the floor a worker thread's empty context reads.",
+      "seam": "scripts.tick.engine._run_once and the worker it starts",
+      "tests": [
+        "tests/tick/test_engine_joined_budget.py::test_the_step_finished_line_logs_the_live_budget_the_engine_joined_on"
       ]
     }
   ],
