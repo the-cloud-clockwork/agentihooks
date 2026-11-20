@@ -11166,11 +11166,12 @@
       "id": "registry-update-skips-ended-execution",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-registry-update-ended-guard",
-      "behaviour": "A write through ExecutionRegistry.update onto a seat head a drop or exit already ended leaves the execution and the agents projection untouched, so a pass-start copy a concurrent drop outran never relists the agent; the tick reap step, which puts back the copy it read at pass start on a hub admitted agent's working or waiting verdict, never resurrects one the hub lifecycle dropped mid pass. Every ordinary write stays skipped this way whatever pane it carries; only ExecutionRegistry.revive, reached only through store.revive_agent from master_launch._resume, lands a write onto an ended execution, so a retired master's own resume still lands.",
+      "behaviour": "A write through ExecutionRegistry.update onto a seat head a drop or exit already ended leaves the execution and the agents projection untouched, so a pass-start copy a concurrent drop outran never relists the agent; the tick reap step, which puts back the copy it read at pass start on a hub admitted agent's working or waiting verdict, never resurrects one the hub lifecycle dropped mid pass. Every ordinary write stays skipped this way whatever pane it carries; only ExecutionRegistry.revive, reached only through store.revive_agent from master_launch._resume, lands a write onto an ended execution, so a retired master's own resume still lands, routed through the same managed/legacy check store.put_agent uses so a legacy agent with no execution identity still lands through the plain projection write. The shared _land write both _update and revive call still keeps a finished head finished.",
       "seam": "scripts.swarm.execution.ExecutionRegistry._update over an ended seat head, reached through store.put_agent and the tick reap step's _reap_admitted/_watch_idle, and ExecutionRegistry.revive, reached only through store.revive_agent from master_launch._resume",
       "tests": [
         "tests/swarm/test_execution_identity.py::test_a_write_onto_a_dropped_execution_leaves_it_ended_and_unlisted",
         "tests/swarm/test_execution_identity.py::test_an_explicit_revival_lands_on_an_ended_execution",
+        "tests/swarm/test_execution_identity.py::test_a_revival_onto_a_finished_head_keeps_finished",
         "tests/swarm/test_execution_identity.py::test_an_ordinary_write_with_a_different_pane_onto_an_ended_execution_stays_skipped",
         "tests/tick/test_agents.py::test_a_hub_admitted_agent_dropped_while_the_reap_holds_its_pass_start_copy_is_not_relisted"
       ]

@@ -392,6 +392,16 @@ def test_an_explicit_revival_lands_on_an_ended_execution(store: RedisStore, agen
 
 
 @pytest.mark.feature("registry-update-skips-ended-execution")
+def test_a_revival_onto_a_finished_head_keeps_finished(store: RedisStore, agent: AgentRecord) -> None:
+    current = store.start_execution("fixture", agent)
+    store.execution_registry.update("fixture", replace(current, state="finished"))
+    store.revive_agent("fixture", replace(current, pane_id="w9:p1", state="working"))
+    landed = store.execution("fixture", current.execution_id)
+    assert landed.state == "finished"
+    assert landed.pane_id == "w9:p1"
+
+
+@pytest.mark.feature("registry-update-skips-ended-execution")
 def test_an_ordinary_write_with_a_different_pane_onto_an_ended_execution_stays_skipped(
     store: RedisStore, agent: AgentRecord
 ) -> None:
