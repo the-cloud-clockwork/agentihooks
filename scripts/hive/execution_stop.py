@@ -30,6 +30,7 @@ BATCH = 10
 PENDING = "pending"
 RETRY_MS = 30_000
 POLICY = QueuePolicy(max_deliver=100_000, ack_wait_ms=RETRY_MS)
+SETTLING = frozenset({"launching", "started", "exiting"})
 
 
 def stop_subject(swarm: str, hive: str) -> str:
@@ -67,6 +68,17 @@ def ended(bus: Bus, event: Envelope) -> bool:
         return True
     claim = json.loads(entry.value)
     return claim.get("state") != "started" or claim.get("claim_revision") != _fields(event)["claim_revision"]
+
+
+def settled(bus: Bus, event: Envelope) -> bool:
+    """True once the hub lifecycle can no longer settle the execution's exit: its claim is gone, holds another launch's
+    revision or left the launching, started and exiting states."""
+    entry = bus.for_swarm(event.swarm).state(CLAIMS).get(_fields(event)["claim_key"])
+    if entry is None:
+        return True
+    claim = json.loads(entry.value)
+    launch = claim.get("claim_revision", entry.revision)
+    return launch != _fields(event)["claim_revision"] or claim.get("state") not in SETTLING
 
 
 def request(event: Envelope, reason: str) -> Envelope:

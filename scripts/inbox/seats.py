@@ -206,10 +206,11 @@ class SeatMemory:
 
     def scoped(self, slug: str, address: str, *, all_seats: bool = False) -> list[dict[str, Any]]:
         selected: list[dict[str, Any]] = []
-        for key in SeatRegistry(self.redis).swarm_keys(slug):
-            seat, _, kind = key.removeprefix(f"{PREFIX}:").partition(":")
-            if kind != "learned":
-                continue
+        learned = re.compile(rf"{re.escape(PREFIX)}:([^:@]+@{re.escape(slug)}):learned")
+        pattern = f"{PREFIX}:*@{slug}:learned"
+        found: list[str] = list(self.redis.scan_iter(match=pattern, count=SCAN_PAGE))  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+        seats = {match.group(1) for key in found if (match := learned.fullmatch(key))}
+        for seat in sorted(seats):
             for number, note in enumerate(self.learned(seat), 1):
                 if "retired" not in note and (all_seats or seat == address or note["maturity"] in (CANON, "insight")):
                     selected.append({**note, "seat": seat, "number": number})

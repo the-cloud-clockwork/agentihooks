@@ -64,7 +64,6 @@ TEST = "test"
 STATS = run_mutation.STATS
 MUTANT = "mutant"
 KILLED = "killed"
-LOCKFILE = "uv.lock"
 PYPROJECT = "pyproject.toml"
 INPUTS_BASE = "inputs.base"
 MASK = b"***"
@@ -171,7 +170,7 @@ class Mutation:
 
 def lockfile_digest(tree: Path) -> str:
     """Return the sha256 of the tree's lockfile, the key of its venv."""
-    return hashlib.sha256((tree / LOCKFILE).read_bytes()).hexdigest()
+    return hashlib.sha256((tree / venvs.LOCKFILE).read_bytes()).hexdigest()
 
 
 def _report(pod: Pod, record: Mapping[str, Any]) -> Path:
@@ -190,14 +189,16 @@ def gate(grader_tree: Path, name: str) -> StaticGate:
 
 
 def _context(lease: Lease, found: StaticGate, secrets: Mapping[str, str]) -> dict[str, str]:
-    """The context a static unit's steps read: the head, base and job of the lease as their GitHub fields, attempt
-    and run number 1, and each secret the gate reads by its name, empty when the pod holds no secret of that name."""
+    """The context a static unit's steps read: the head, base and job of the lease as their GitHub fields, the pull
+    request event name, attempt and run number 1, and each secret the gate reads by its name, empty when the pod holds
+    no secret of that name."""
     named = {name: secrets.get(name.removeprefix(SECRETS), "") for name in found.reads if name.startswith(SECRETS)}
     return {
         INPUTS_BASE: lease.base,
         "github.sha": lease.head,
         "github.event.pull_request.head.sha": lease.head,
         "github.event.pull_request.base.sha": lease.base,
+        "github.event_name": "pull_request",
         "github.run_id": lease.job,
         "github.run_attempt": "1",
         "github.run_number": "1",

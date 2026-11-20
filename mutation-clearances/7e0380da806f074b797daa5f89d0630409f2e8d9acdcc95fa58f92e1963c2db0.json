@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/progress_data.py:scripts.swarm.progress_data.x_read:a74d1a4b6d88ab312bc2cbf1bf48c0c5fc3a6eb1bbea568a259f3018195d870c": {
+    "reader": "standards-reader",
+    "reason": "Equivalent at runtime: typing.cast returns its second argument unchanged and performs no type check. Replacing only its first argument with None leaves every resource call and returned collection object unchanged."
+  }
+}
