@@ -124,6 +124,7 @@ def test_a_worker_put_of_a_report_lands_through_the_upload_url_the_scheduler_sto
     assert bucket.bodies == {f"/{BUCKET}/lab/uploads/{JOB}/report.json": REPORT}
 
 
+@pytest.mark.feature("lab-result-upload-signing")
 def test_an_upload_url_the_scheduler_storage_signs_writes_only_the_object_it_names(
     bucket: Bucket, tmp_path: Path
 ) -> None:
