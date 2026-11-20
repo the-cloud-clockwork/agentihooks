@@ -199,9 +199,10 @@ never delete them as caches during a rollback.
 - A spawn superseded as a legacy specification is replaced fresh without a choice while automation is on and not
   paused, because it never started and holds no conversation. With automation off or paused it waits like any other
   failure. This is an approved exception to the rule that only the master or operator chooses fresh. A legacy
-  specification spawn is a Kubernetes spawn operation journalled with no spec digest, which only releases before
-  pull request #2591 wrote; it is unrelated to the tick `spawn` step that pull request #11141 removed, after which
-  lane agents launch through hub admission (see
+  specification spawn is a Kubernetes spawn operation journaled with no spec digest, which releases before pull
+  request [#2591](https://github.com/the-cloud-clockwork/agentihooks/pull/2591) wrote; it is unrelated to the tick
+  `spawn` step that pull request [#11141](https://github.com/the-cloud-clockwork/agentihooks/pull/11141) removed,
+  after which lane agents launch through hub admission (see
   [Pulling work from the hub](../pillars/hives.md#pulling-work-from-the-hub)).
 - Transcript written after the archive watermark is lost and its length is unknown; the fence names it.
 - The live capture and restore proof on Anton is pending. The evidence record `evidence/SV2-CKP-05/result.json`

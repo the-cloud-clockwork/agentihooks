@@ -1052,8 +1052,9 @@ percentiles do not add, and the estimate ran low for a row with a long tail, so 
 `tests/swarm/test_spawn_timing.py` held the contract: a spawn pass recorded a row for each part before the spawn step
 row ended, and spawn order recorded one `_running` and one `focus_budget.place` row per lane, each starting and ending
 inside the `_spawn_order` row, and inside it one `launchable` row per lane and one `ranks` and `ordered` row per spawn
-order. Since the removal the module keeps only the running filter test: `_running` keeps the lane's agents that have
-not ended and still own their task, with a placeholder row for an agent whose task row is missing.
+order. Since the removal the module keeps only the running filter test among its spawn order tests: `_running` keeps
+the lane's agents that have not ended and still own their task, with a placeholder row for an agent whose task row
+is missing.
 
 ### Focus ranks in offer order
 
@@ -1476,8 +1477,8 @@ and call the port from the step.
 | `Outcome(..., Status.UNAVAILABLE, "", detail="no agent named <handle>")` from `runtime.inspect` or `runtime.stop` | The `agents` lookup found no record for that name. | Check the name against the swarm's agent records; the router was not called. |
 | `TypeError` from `runtime.launch` | The request mapping lacks one of `config`, `lane`, `name`, `task`, or carries another key. | Pass exactly those four keys. |
 | `runtime.panes` returns `[]` | herdr answered without a `panes` list. | Run `herdr pane list` on the host and check the herdr server is up. |
-| The `spawn` step row is slow and its `FencedRuntime._refusal` row carries most of it | A placement read runs outside a placement pass, so each launch scans `/proc` and reads the host again, or a new read is not routed through `PassCache.once`. | Route a repeated read through `PassCache.once`, as under [One placement scan per placement pass](#one-placement-scan-per-placement-pass). |
-| The `spawn` step row is slow and its `FencedRuntime.runtime_spawn` row carries most of it | The wrapped runtime's launch is slow: a herdr pane, a Kubernetes worker or a hive launch. | Read that runtime's own rows in the same tick report; the pass cache does not cover it. |
+| The launching step's row, such as a master start, is slow and its `FencedRuntime._refusal` row carries most of it | A placement read runs outside a placement pass, so each launch scans `/proc` and reads the host again, or a new read is not routed through `PassCache.once`. | Route a repeated read through `PassCache.once`, as under [One placement scan per placement pass](#one-placement-scan-per-placement-pass). |
+| The launching step's row, such as a master start, is slow and its `FencedRuntime.runtime_spawn` row carries most of it | The wrapped runtime's launch is slow: a herdr pane, a Kubernetes worker or a hive launch. | Read that runtime's own rows in the same tick report; the pass cache does not cover it. |
 | Two launches in one pass are refused as local full although a session ended during the pass | The pass reads the live session scan once, so the ended session still counts until the pass ends. | No action; the next pass scans again. |
 | A reaped or retired process was not found in a tick pass | The process exited before selection, so its `/proc` entry was gone and the snapshot was kept. | No action; the process is already gone. |
 | A step in a tick pass sees an agent as live after it was stopped, or misses one that started | The change went through the wrapped runtime, such as `original_runtime` or `herdr_runtime`, or through a forwarded method outside `AGENT_CHANGES`, so the pass listing was kept. | Make the change through the `FencedRuntime` with one of the listed operations, or add the operation to `AGENT_CHANGES`, as under [One live names listing per tick pass](#one-live-names-listing-per-tick-pass). |
