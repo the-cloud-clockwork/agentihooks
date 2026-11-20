@@ -922,6 +922,19 @@ def test_selection_keeps_whole_files_where_recorded_coverage_cannot_speak(tmp_pa
     assert selection == {"scripts/core.py": WHOLE}
 
 
+@pytest.mark.feature("tracked-test-lock-cache-keys")
+def test_record_drift_treats_a_test_requirements_lock_change_as_global(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = _recorded_project(tmp_path, monkeypatch)
+    assert plan.record_drift(tmp_path, manifest) is not None
+    lock = tmp_path / ".github/test-requirements.lock"
+    lock.parent.mkdir()
+    lock.write_text("pytest==8.4.2\n")
+    _commit(tmp_path, "lock")
+    assert plan.record_drift(tmp_path, manifest) is None
+
+
 def test_a_changed_tests_data_file_adds_only_the_tests_that_read_it(tmp_path, monkeypatch):
     manifest = _recorded_project(tmp_path, monkeypatch)
     manifest["tests"]["tests/test_core.py::test_other"]["files"] = ["tests/data/rules.json"]
