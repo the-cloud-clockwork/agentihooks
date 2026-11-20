@@ -141,7 +141,7 @@ def test_main_keeps_the_state_file_current_until_its_bound_runs_out(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("GH_TOKEN", "token-x")
+    monkeypatch.setenv("GH_APP_TOKEN", "token-x")
     monkeypatch.setenv("GITHUB_REPOSITORY", "o/r")
     monkeypatch.setenv("GITHUB_RUN_ID", "9")
     monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
@@ -157,7 +157,7 @@ def test_main_keeps_the_state_file_current_until_its_bound_runs_out(
 @pytest.mark.feature("queue-watch-main-state-file")
 def test_an_unread_poll_leaves_the_state_file_as_it_was(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("GH_TOKEN", "token-x")
+    monkeypatch.setenv("GH_APP_TOKEN", "token-x")
     monkeypatch.setenv("GITHUB_REPOSITORY", "o/r")
     monkeypatch.setenv("GITHUB_RUN_ID", "9")
     monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
