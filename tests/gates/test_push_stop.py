@@ -113,10 +113,10 @@ def test_it_is_a_stop_gate_that_ships_enforcing():
     assert not gate.matches(Call("Bash"))
 
 
-def test_the_template_is_the_operator_text():
+def test_the_template_is_the_operator_text() -> None:
     assert TEMPLATE == (
         "You cannot leave uncommitted or unpushed changes. Commit them now. If the task is done, open the pull "
-        "request. If not, update the issue and the pull request and record progress on the ledger."
+        "request. If not, update the issue and the pull request and record progress through the swarm API."
     )
 
 

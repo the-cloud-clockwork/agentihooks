@@ -806,7 +806,7 @@ def refresh_streams(slugs: list[str]) -> None:
         if HUB.has(slug):
             try:
                 publish_ledger(slug, repository.get_document(slug))
-            except Exception as exc:  # the next write to the ledger publishes its view anyway
+            except Exception as exc:
                 sys.stderr.write(f"refresh stream {slug}: {exc}\n")
 
 

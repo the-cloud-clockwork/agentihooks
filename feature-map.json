@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "swarm-progress-data",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-bundle-ledger-leftovers",
+      "behaviour": "Progress report consumers receive tasks, freezes, plans, phases, followups and alerts from the built-in swarm reader without owning storage access; failed reads propagate to the caller.",
+      "seam": "scripts.swarm.progress_data.read over the built-in resource reader",
+      "tests": [
+        "tests/swarm/test_progress_data.py::test_progress_data_preserves_every_collection",
+        "tests/swarm/test_progress_data.py::test_progress_data_propagates_read_failure"
+      ]
+    },
+    {
       "id": "lab-zero-base-push",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-zero-base-push",
@@ -549,6 +560,18 @@
       ]
     },
     {
+      "id": "ledger-new-file-setup-waits-out-another-write-lock",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2567",
+      "behaviour": "A ledger store that turns a new file to WAL while another connection holds the file's write lock waits for that lock within the busy timeout instead of failing at once, so a reload successor that sets up a new ledger file beside another process still reports ready.",
+      "seam": "SQLiteLedgerRepository._set_up reached through summaries, the WAL switch against another connection's write lock",
+      "tests": [
+        "tests/swarm_ledger/test_sqlite.py::test_a_new_store_waits_out_another_connections_write_lock_before_it_turns_on_wal",
+        "tests/swarm_ledger/test_sqlite.py::test_a_write_lock_held_past_the_busy_timeout_still_fails_the_wal_switch",
+        "tests/swarm_ledger/test_sqlite.py::test_the_wal_switch_raises_an_error_other_than_a_held_lock_at_once"
+      ]
+    },
+    {
       "id": "ledger-server-pid-file-after-projector",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2689",
@@ -1071,6 +1094,18 @@
         "tests/hive/test_reports.py::test_a_hub_admitted_worker_its_hive_reports_no_binding_for_gets_no_facts_from_this_host",
         "tests/hive/test_reports.py::test_a_hub_admitted_worker_without_an_app_server_keeps_the_controllers_session_read",
         "tests/hive/test_reports.py::test_an_app_server_worker_the_hub_admitted_to_this_hive_is_read_from_this_host"
+      ]
+    },
+    {
+      "id": "swarm-nudges-hub-admitted-workers-through-their-hive",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2569",
+      "behaviour": "A nudge for a worker the hub admitted to another hive, such as an outage resume prompt, goes to that hive as a nudge order and that hive types it into the worker's pane instead of the controller's own herdr; it is refused while that hive is not reporting, and a hive takes a nudge order only for an execution the controller sends there.",
+      "seam": "scripts.swarm.runtime.HerdrRuntime.nudge resolves the hive through scripts.hive.reports.admitted and sends the order through scripts.hive.orders.Orders.command; scripts.hive.orders.Consumer.command takes it when the host target names this hive, or the runtime target is empty and the record's hive does",
+      "tests": [
+        "tests/hive/test_reports.py::test_a_nudge_for_a_hub_admitted_worker_is_typed_into_its_pane_by_the_hive_that_runs_it",
+        "tests/hive/test_reports.py::test_a_nudge_for_a_hub_admitted_worker_whose_hive_is_lost_is_refused_without_the_controller_herdr",
+        "tests/hive/test_reports.py::test_a_hive_takes_a_nudge_order_exactly_when_the_controller_sends_it_there"
       ]
     },
     {
@@ -9158,6 +9193,16 @@
       ]
     },
     {
+      "id": "lab-mutation-verdict-key-prefix",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-verdict-key-prefix",
+      "behaviour": "Generated stats units and whole or split mutant units carry their kind and current lab schema before the existing digest, so the verdict store accepts completed mutation work without raising a key format error during a scheduler pass.",
+      "seam": "scripts.ci_lab.expand_mutation.stats_units and mutant_units through scripts.ci_lab.store.Store.put and get",
+      "tests": [
+        "tests/ci_lab/test_expand_mutation.py::test_generated_mutation_unit_keys_can_be_stored"
+      ]
+    },
+    {
       "id": "lab-mutant-unit-split",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-mutant-unit-split",
@@ -10752,6 +10797,18 @@
       "seam": "Proofs workflow concurrency group",
       "tests": [
         "tests/test_ci_hosted_lanes.py::test_every_proof_dispatch_runs_in_its_own_focused_proof_group_and_never_waits_on_a_lane"
+      ]
+    },
+    {
+      "id": "mutation-stats-shared-closure",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-mutation-stats-collect-budget",
+      "behaviour": "A mutation stats collection walks the import closure of each distinct measured dependency list once and computes each distinct discovery digest once, so test ids with equal dependency lists cost one closure walk when their cache records are saved and one when the next run checks them for reuse instead of one walk per test id, while test ids with different dependency lists keep their own closures.",
+      "seam": "scripts.ci_mutation.stats_cache.StatsInputs.for_test and scripts.ci_mutation.stats_cache.StatsInputs.discovery",
+      "tests": [
+        "tests/test_ci_mutation_stats_cache.py::test_test_ids_sharing_one_dependency_list_walk_its_closure_once_per_collection",
+        "tests/test_ci_mutation_stats_cache.py::test_distinct_dependency_lists_in_one_collection_keep_their_own_closures",
+        "tests/test_ci_mutation_stats_cache.py::test_the_discovery_digest_of_one_input_set_is_computed_once"
       ]
     },
     {
