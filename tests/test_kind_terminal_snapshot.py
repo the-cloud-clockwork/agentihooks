@@ -37,7 +37,11 @@ def _snapshot_bases(source: str) -> list[str]:
                 stages[stage.lower()] = base
                 count += 1
             if instruction in {"RUN", "COPY", "ADD"}:
-                heredocs = [match[1] for match in re.findall(r"<<-?\s*(['\"]?)(\w+)\1", value)]
+                heredocs = [
+                    match[2]
+                    for match in re.finditer(r"""'[^']*'|"(?:\\.|[^"\\])*"|\\.|<<-?\s*(['"]?)(\w+)\1""", value)
+                    if match[2]
+                ]
         if count and re.search(r"snapshot\.debian\.org|debian_snapshot", line, re.I):
             pinned = re.search(r"@sha256:[a-f0-9]{64}$|:\d+\.\d+\.\d+[-+._a-z0-9]*$", base, re.I)
             if not pinned and stage not in failures:

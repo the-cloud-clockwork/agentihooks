@@ -23,5 +23,9 @@
   {"name": "clean eager default", "source": "ARG VERSION=3.12.12\nARG BASE=python:${VERSION}-slim-bookworm\nARG VERSION=3.12\nFROM ${BASE}\nRUN echo debian_snapshot\n", "failures": []},
   {"name": "red Python heredoc", "source": "FROM python:latest\nRUN python <<'PY'\nfrom pathlib import Path\nsnapshot=\"https://snapshot.debian.org/archive/debian/\"\nPY\n", "failures": ["0"]},
   {"name": "clean Python heredoc", "source": "FROM python:3.12.12-slim-bookworm\nRUN python <<'PY'\nfrom pathlib import Path\nsnapshot=\"https://snapshot.debian.org/archive/debian/\"\nPY\n", "failures": []},
-  {"name": "red embedded Dockerfile", "source": "FROM python:latest\nRUN cat <<EOF\nFROM python:3.12.12-slim-bookworm\nRUN echo debian_snapshot\nEOF\n", "failures": ["0"]}
+  {"name": "red embedded Dockerfile", "source": "FROM python:latest\nRUN cat <<EOF\nFROM python:3.12.12-slim-bookworm\nRUN echo debian_snapshot\nEOF\n", "failures": ["0"]},
+  {"name": "red quoted heredoc operator", "source": "FROM python:3.12.12-slim-bookworm AS pinned\nRUN echo \"<<EOF\"\nFROM python:latest AS packages\nRUN echo debian_snapshot\n", "failures": ["packages"]},
+  {"name": "clean quoted heredoc operator", "source": "FROM python:3.12.12-slim-bookworm AS pinned\nRUN echo \"<<EOF\"\nFROM python:3.12.12-slim-bookworm AS packages\nRUN echo debian_snapshot\n", "failures": []},
+  {"name": "red escaped heredoc operator", "source": "FROM python:3.12.12-slim-bookworm AS pinned\nRUN echo \\<\\<EOF\nFROM python:latest AS packages\nRUN echo debian_snapshot\n", "failures": ["packages"]},
+  {"name": "clean tabbed heredoc", "source": "FROM python:3.12.12-slim-bookworm\nRUN cat <<-'EOF'\n\tFROM python:latest\n\techo debian_snapshot\n\tEOF\n", "failures": []}
 ]
