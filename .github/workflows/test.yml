@@ -2453,7 +2453,7 @@ jobs:
     if: ${{ !cancelled() && needs.select.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' && needs.select.outputs.sonar != 'skip' && fromJSON(needs.lab-verdict.outputs.authoritative || '{}')['sonar'] != true }}
     needs: [select, reuse, admission, lab-verdict]
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
-    timeout-minutes: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && 75 || 60 }}
+    timeout-minutes: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && 90 || 60 }}
     outputs:
       analysis: ${{ steps.gate.outputs.analysis }}
     env:
@@ -2512,6 +2512,26 @@ jobs:
           repositories: ${{ github.event.repository.name }}
           permission-actions: read
 
+      - name: Mint the token that reads this run's job states
+        id: jobs-token
+        if: &jobs-token github.event_name == 'push' && github.ref == 'refs/heads/dev' && needs.select.outputs.scope != 'none' && steps.source.outputs.test_only != 'true'
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: read
+
+      - name: Watch whether this run's shard jobs have started
+        id: queue-watch
+        if: *jobs-token
+        env:
+          GH_APP_TOKEN: ${{ steps.jobs-token.outputs.token }}
+          PREFIX: ${{ needs.select.outputs.scope == 'selected' && 'unit-selected (' || 'unit (' }}
+        run: |
+          python .github/coverage/queue_watch.py "$PREFIX" > queue-watch.log 2>&1 &
+          echo "pid=$!" >> "$GITHUB_OUTPUT"
+
       - name: Download the pull request runs' test plan
         id: download-the-pull-request-runs-test-plan
         if: *branch-carry
@@ -2554,7 +2574,7 @@ jobs:
       - name: Take each shard's coverage as it lands
         if: needs.select.outputs.scope != 'none' && steps.source.outputs.test_only != 'true'
         continue-on-error: true
-        timeout-minutes: 45
+        timeout-minutes: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && 75 || 45 }}
         uses: actions/github-script@v7
         env:
           SHARDS: ${{ needs.select.outputs.scope == 'selected' && needs.select.outputs.count || 20 }}
@@ -2564,6 +2584,12 @@ jobs:
           github-token: none
           script: |
             require('child_process').execFileSync('python', [process.env.ARRIVALS], {stdio: 'inherit'})
+
+      - name: Stop the queue watch
+        if: always() && steps.queue-watch.outputs.pid != ''
+        env:
+          PID: ${{ steps.queue-watch.outputs.pid }}
+        run: kill "$PID" 2> /dev/null || true
 
       - name: Take each selected leg's latest branch coverage
         if: needs.select.outputs.scope == 'selected'

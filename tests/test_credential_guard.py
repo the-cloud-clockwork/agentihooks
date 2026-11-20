@@ -974,6 +974,65 @@ def test_a_pod_environment_name_listing_passes(command: str) -> None:
     assert decide(_bash(command)) is None
 
 
+SET_TESTS_IN_SCRIPTS = [
+    "kubectl exec -n ns pod-0 -- sh -c 'test -n \"${GITHUB_TOKEN:-}\" && echo set || echo unset'",
+    "kubectl exec pod-0 -- bash -c '[ -n \"$GITHUB_TOKEN\" ] && echo set || echo unset'",
+    "kubectl exec pod-0 -c worker -- sh -c 'test -z \"${API_KEY}\" && echo unset || echo set'",
+    "kubectl exec pod-0 -- bash -c '[[ -n \"${LEDGER_TOKEN-}\" ]] && echo set || echo unset'",
+    "kubectl exec pod-0 -- sh -c 'cd /app; test -n \"${GITHUB_TOKEN:-}\" && echo set || echo unset'",
+    "cat /dev/null | kubectl exec -i pod-0 -- sh -c 'test -n \"${GITHUB_TOKEN:-}\" && echo set || echo unset'",
+    "kubectl exec pod-0 -- sh -c 'test -n \"${GITHUB_TOKEN:-}\" && echo set || echo unset'"
+    " | kubectl exec -i pod-1 -- sh -c 'test -n \"${GITHUB_TOKEN:-}\" && echo set || echo unset'",
+    "docker exec box sh -c 'test -n \"${GITHUB_TOKEN:-}\" && echo set || echo unset'",
+    "sh -c 'test -n \"${GITHUB_TOKEN:-}\" && echo set || echo unset'",
+]
+
+SCRIPTS_THAT_PRINT_THE_VALUE = [
+    ("kubectl exec pod-0 -- sh -c 'echo $GITHUB_TOKEN'", "GITHUB_TOKEN"),
+    ("kubectl exec pod-0 -- sh -c 'echo $github_token'", "github_token"),
+    ("kubectl exec pod-0 -- sh -c 'echo test -n \"$GITHUB_TOKEN\"'", "GITHUB_TOKEN"),
+    ("kubectl exec pod-0 -- sh -c 'printf %s test -n \"$GITHUB_TOKEN\"'", "GITHUB_TOKEN"),
+    ("kubectl exec pod-0 -- sh -c 'echo [ -n \"$GITHUB_TOKEN\" ]'", "GITHUB_TOKEN"),
+    ("kubectl exec pod-0 -- sh -c 'cd /app; echo x test -n \"$GITHUB_TOKEN\"'", "GITHUB_TOKEN"),
+    ("V=\"$GITHUB_TOKEN\" sh -c 'echo \"$V\"' | sh -c 'wc -c'", "GITHUB_TOKEN"),
+    ("kubectl exec pod-0 -- sh -c 'echo 'x' test -n \"$GITHUB_TOKEN\"'", "GITHUB_TOKEN"),
+    ('echo test -n "$GITHUB_TOKEN"', "GITHUB_TOKEN"),
+    ('echo "x;test -n "$GITHUB_TOKEN"\'"', "GITHUB_TOKEN"),
+    ('kubectl exec pod-0 -- sh -c \'test -n "${GITHUB_TOKEN:-}" && echo "$GITHUB_TOKEN"\'', "GITHUB_TOKEN"),
+    ('kubectl exec pod-0 -- sh -c \'test -n "$API_KEY" && echo set; printf %s "$API_KEY"\'', "API_KEY"),
+    ('kubectl exec pod-0 -- sh -c \'test -n "${GITHUB_TOKEN:-}" && echo "$1"\' _ "$GITHUB_TOKEN"', "GITHUB_TOKEN"),
+    ('kubectl exec pod-0 -- sh -c \'test -n "$GITHUB_TOKEN" -a "$GITHUB_TOKEN" -eq 0 && echo set\'', "GITHUB_TOKEN"),
+    ("kubectl exec pod-0 -- sh -c 'test -n \"$GITHUB_TOKEN\" -eq 0 && echo set'", "GITHUB_TOKEN"),
+    ("kubectl exec pod-0 -- sh -xc 'test -n \"${GITHUB_TOKEN:-}\" && echo set || echo unset'", "GITHUB_TOKEN"),
+    ("kubectl exec pod-0 -- bash -c 'set -o xtrace; [ -n \"$API_KEY\" ] && echo set'", "API_KEY"),
+    ('test -n "${GITHUB_TOKEN:-}" && echo "$GITHUB_TOKEN"', "GITHUB_TOKEN"),
+]
+
+SET_TESTS_OF_ANOTHER_FORM = [
+    "kubectl exec pod-0 -- sh -c 'test -n $GITHUB_TOKEN && echo set'",
+    "kubectl exec pod-0 -- sh -c 'test -n \"${GITHUB_TOKEN:+x}\" && echo set'",
+    r'kubectl exec pod-0 -- sh -c "test -n \"\$GITHUB_TOKEN\" && echo set"',
+]
+
+
+@pytest.mark.feature("credential-guard-passes-set-tests-in-scripts")
+@pytest.mark.parametrize("command", SET_TESTS_IN_SCRIPTS)
+def test_a_set_test_inside_a_shell_script_passes(command: str) -> None:
+    assert decide(_bash(command)) is None
+
+
+@pytest.mark.feature("credential-guard-passes-set-tests-in-scripts")
+@pytest.mark.parametrize(("command", "name"), SCRIPTS_THAT_PRINT_THE_VALUE)
+def test_a_shell_script_that_prints_the_value_is_refused(command: str, name: str) -> None:
+    assert decide(_bash(command)) == block(f"printing ${name} to stdout", KIND_ENVIRONMENT)
+
+
+@pytest.mark.feature("credential-guard-passes-set-tests-in-scripts")
+@pytest.mark.parametrize("command", SET_TESTS_OF_ANOTHER_FORM)
+def test_a_set_test_of_another_form_is_refused(command: str) -> None:
+    assert decide(_bash(command)) == block("printing $GITHUB_TOKEN to stdout", KIND_ENVIRONMENT)
+
+
 class TestEnvironmentNames:
     """A malformed variable name can hold a secret, so a name listing must drop it."""
 

@@ -5750,6 +5750,19 @@
       ]
     },
     {
+      "id": "credential-guard-passes-set-tests-in-scripts",
+      "origin": "regression",
+      "ordered_at": "2026-11-20",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2766",
+      "behaviour": "The credential guard passes the set or unset test its own refusal recommends when that test is a whole part, split at &&, ||, ; or a new line, of a single quoted shell -c script, as the shell command itself, in any pipeline stage or as the command a kubectl or docker wrapper runs: test -n, test -z, [ -n ] or [[ -n ]] on a double quoted $VAR, ${VAR}, ${VAR-} or ${VAR:-} of a secret looking name, with echo or printf printing only fixed words. A test printed by echo or printf, a test with more operands, a script that echoes or printfs the value or gets it as an argument, a script that runs with xtrace on through an x shell flag, set -x or xtrace, and a set test of another form, unquoted, with another expansion or in a double quoted script, are still refused as printing the variable to stdout.",
+      "seam": "hooks.context.credential_guard.echo_secret_verdict and hooks.context.credential_guard.untested_pieces, read by hooks.context.credential_guard.decide",
+      "tests": [
+        "tests/test_credential_guard.py::test_a_set_test_inside_a_shell_script_passes",
+        "tests/test_credential_guard.py::test_a_shell_script_that_prints_the_value_is_refused",
+        "tests/test_credential_guard.py::test_a_set_test_of_another_form_is_refused"
+      ]
+    },
+    {
       "id": "swarm-outage-recovery-hub-admitted",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-outage-recovery",
@@ -11160,6 +11173,59 @@
         "tests/test_ci_semgrep.py::test_a_scan_finding_fails_the_new_test_waits_step",
         "tests/test_ci_semgrep.py::test_new_test_waits_fail_without_scanning_when_the_base_is_unknown",
         "tests/test_ci_semgrep.py::test_the_wait_bound_rule_reaches_the_tests_and_its_fixture_under_ten_seconds"
+      ]
+    },
+    {
+      "id": "sonar-wait-skips-queued-shard-time",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-sonar-wait-shard-queue",
+      "behaviour": "The sonar job's coverage wait only spends its bounded window while a run's remaining unit shard jobs are actually running; a shard job still queued for a runner, read from a sibling watcher's on disk answer rather than any API call of arrivals.py's own, does not count against the wait.",
+      "seam": ".github/coverage/arrivals.arrive reading shard job states through the Jobs protocol, kept current on disk by queue_watch.py",
+      "tests": [
+        "tests/test_sonar_arrivals.py::test_a_shard_still_queued_for_a_runner_does_not_spend_the_wait"
+      ]
+    },
+    {
+      "id": "queue-watch-job-states",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-sonar-wait-shard-queue",
+      "behaviour": "queue_watch.py answers queued from a shard job's own status rather than a runner-name and timestamp guess, excludes a shard already completed before asking whether any of the rest is still queued, and answers started once no shard of the scope remains anything but completed. FileJobs.started reads that on disk answer back for arrivals.py only while it is fresh, folding its file stat and read into one try so a transient OSError leaves it unknown instead of raising.",
+      "seam": ".github/coverage/queue_watch.queued/completed/started against the run attempt's jobs endpoint, and arrivals.FileJobs.started reading the state file queue_watch.py keeps current",
+      "tests": [
+        "tests/test_queue_watch.py::test_a_job_is_queued_only_when_its_status_is_queued",
+        "tests/test_queue_watch.py::test_a_running_or_completed_shard_job_says_the_scope_has_started",
+        "tests/test_queue_watch.py::test_every_matching_shard_job_still_queued_says_the_scope_has_not_started",
+        "tests/test_queue_watch.py::test_a_completed_shard_among_queued_ones_still_reports_not_started",
+        "tests/test_queue_watch.py::test_every_matching_shard_job_completed_reports_started",
+        "tests/test_queue_watch.py::test_a_selected_legs_job_name_is_matched_with_its_own_prefix",
+        "tests/test_queue_watch.py::test_no_matching_shard_job_name_reads_as_unknown",
+        "tests/test_queue_watch.py::test_an_unreachable_jobs_api_reads_as_unknown",
+        "tests/test_sonar_arrivals.py::test_a_missing_queue_state_file_reads_as_unknown",
+        "tests/test_sonar_arrivals.py::test_a_fresh_started_state_reads_as_started",
+        "tests/test_sonar_arrivals.py::test_a_fresh_queued_state_reads_as_not_started",
+        "tests/test_sonar_arrivals.py::test_a_stale_queue_state_file_reads_as_unknown",
+        "tests/test_sonar_arrivals.py::test_an_unrecognised_queue_state_reads_as_unknown"
+      ]
+    },
+    {
+      "id": "queue-watch-main-state-file",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-sonar-wait-shard-queue",
+      "behaviour": "queue_watch.py's main polls this run attempt's shard jobs on its own interval until its bound runs out, writing a fresh queued or started answer to STATE each time a poll reads one, and leaving STATE exactly as it was on a poll that could not read a fresh answer.",
+      "seam": ".github/coverage/queue_watch.main writing STATE from repeated started() polls",
+      "tests": [
+        "tests/test_queue_watch.py::test_main_keeps_the_state_file_current_until_its_bound_runs_out",
+        "tests/test_queue_watch.py::test_an_unread_poll_leaves_the_state_file_as_it_was"
+      ]
+    },
+    {
+      "id": "sonar-queue-watch-dev-push-bound-token",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-sonar-wait-shard-queue",
+      "behaviour": "The sonar job stays on contents: read alone and reads this run's job states with the App token its own jobs-token step mints, never the workflow's default token. Both that mint step and the Watch whether this run's shard jobs have started step that runs queue_watch.py in the background are gated on github.event_name == 'push' && github.ref == 'refs/heads/dev', matching the arrivals step they feed. queue_watch.py's BOUND stays under the minted token's one hour lifetime, so its poll never spends the dev push wait on a token already expired.",
+      "seam": "the sonar job's permissions block, its Mint the token that reads this run's job states and Watch whether this run's shard jobs have started steps, and queue_watch.BOUND",
+      "tests": [
+        "tests/test_sonar_coverage.py::test_the_queue_watch_token_stays_under_its_one_hour_lifetime"
       ]
     },
     {
