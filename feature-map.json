@@ -153,6 +153,22 @@
       ]
     },
     {
+      "id": "lab-scheduler-uncarried-head",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-mirror-missing-head-fallback",
+      "behaviour": "A head no node mirror can hold is retired instead of graded: before Scheduler.tick expands a released head it asks the expander whether a ref every node mirror fetches carries the head, which MirrorExpander.carried answers true when a refs/heads or refs/pull/<n>/head ref of the repository names the head or the head is an ancestor of the dev branch head; a head no such ref carries places no unit, so no worker leases one, and a hotfix or pull request class head posts one completed lab-shadow/required check run with conclusion failure whose summary names the repository and the head, while a merge group, promotion or backfill head posts nothing; a head pushed to a grade ref is never asked, since the lab remote serves it.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis with an expander reporting which heads a mirror ref carries, read through the leases, the recording Poster behind scripts.ci_lab.scheduler.Ports.checks and the grades; scripts.ci_lab.scheduler.MirrorExpander.carried over a local repository with a live and a deleted merge queue branch and pull request head and merge refs",
+      "tests": [
+        "tests/ci_lab/test_scheduler_uncarried.py::test_a_pull_request_head_no_mirror_ref_carries_leases_no_unit_and_posts_one_failure",
+        "tests/ci_lab/test_scheduler_uncarried.py::test_a_hotfix_head_no_mirror_ref_carries_posts_one_failure_in_its_class",
+        "tests/ci_lab/test_scheduler_uncarried.py::test_a_merge_group_head_no_mirror_ref_carries_leases_no_unit_and_posts_nothing",
+        "tests/ci_lab/test_scheduler_uncarried.py::test_a_head_a_mirror_ref_carries_is_asked_once_and_grades_its_units",
+        "tests/ci_lab/test_scheduler_uncarried.py::test_a_grade_ref_head_grades_without_asking_whether_a_mirror_ref_carries_it",
+        "tests/ci_lab/test_scheduler_uncarried.py::test_the_mirror_expander_carries_only_heads_a_branch_a_pull_request_head_or_dev_reaches",
+        "tests/ci_lab/test_scheduler_uncarried.py::test_a_remote_the_mirror_expander_cannot_list_fails_the_check_instead_of_retiring_the_head"
+      ]
+    },
+    {
       "id": "doctor-lab-health",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/swarm-doctor-lab-detector",
