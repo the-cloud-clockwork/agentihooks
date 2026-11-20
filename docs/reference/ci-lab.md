@@ -2950,7 +2950,7 @@ of `feature-map.json`.
 |---|---|---|
 | A merge group, promotion or backfill head gets no grade and the log reads `cannot expand <head>: no dependency manifest at or before <base>` | No commit on the base's first parent chain has a manifest stored, and none of its newest 10 commits has a fetchable `dep-manifest-packed` artifact from a dev push run of the Tests workflow | `gh run list --workflow test.yml --branch dev --event push --limit 10` lists those runs; an artifact older than 7 days has expired |
 | `cannot expand <head>: 0 is less than the minimum of 1`, or another `jsonschema` message | The grader revision's `delivery.yaml` breaks its schema | [Configure the entry limit](#configure-the-entry-limit); run `delivery.lab` in a checkout of `<base>` |
-| A merge group runs every batch | A clause of `interaction.full_reason` holds | Run the [clause check](#check-which-clause-a-merge-group-took). When it prints `None`, the `cache` clause held: more than half the manifest's tests sit in batches whose key has no verdict in the store, as on a new or emptied store or after a change to a file most tests read |
+| A merge group runs every batch | A clause of `interaction.full_reason` holds, or the entries' changes invalidate every test | Run the [clause check](#check-which-clause-a-merge-group-took). When it prints `None`, either the `cache` clause held, which the script does not evaluate, or an entry changes a global input `dep_manifest.global_input` names, such as `pyproject.toml`, `uv.lock`, `.test_durations` or a `.py` file outside `hooks/`, `scripts/` and `tests/`, or a `tests/` module whose name does not start with `test_`; `git diff --name-only <base> <head>` names the files. The `cache` clause holds when more than half the manifest's tests sit in batches whose key has no stored verdict, as on a new or emptied store |
 | A merge group's `unit` job holds no test units and passes | No entry changes a file a manifest test reads, as in a group of documentation changes, and no entry adds a test module the manifest does not list | `git diff --name-only <base> <head>`; the result is expected |
 | A merge group runs tests no entry touches | A batch runs whole when it holds one invalidated test, and an entry that changes a global input of the manifest, such as `uv.lock`, invalidates every test | The batch's members in the unit, and each entry's changes |
 | The log repeats `holding <head>: <error>` | A manifest fetch is still running or GitHub did not answer it | The manifest paragraph above describes both holds |
@@ -4100,9 +4100,9 @@ table, and the `lab-scheduler-test-units` feature tests cover the scheduler's re
 
 `queue.Queue.retry` moves only a job whose state is `done`: it adds one to `attempts`, clears the
 job's worker and outcome and adds it back to the pending set under the same job id with a new
-sequence number; a job in any other state is left as it is and the call returns `False`. A job reaping marked `lost` never
-reaches it, since reaping marks a job `lost` only once its `attempts` reached `lab.retry.lost`,
-where `decide` is `final`.
+sequence number; a job in any other state is left as it is and the call returns `False`. A job
+reaping marked `lost` never reaches it, since reaping marks a job `lost` only once its `attempts`
+reached `lab.retry.lost`, where `decide` is `final`.
 
 An attempt that is run again leaves no trace in the verdict store: the scheduler stores a verdict,
 report and log only for the final attempt, and only when that attempt is graded and uploaded a
@@ -4123,7 +4123,7 @@ verdict, and both attempts count when both uploaded a report.
 | `TypeError` from `retry.policy` | The block was not validated and holds an unknown key | Read the block with `delivery.lab(root)` first |
 | Changing `lab.retry` leaves reruns unchanged | The scheduler reads the counts only when it starts | Restart the scheduler service after the change reaches dev |
 | The scheduler exits at start with a `jsonschema.ValidationError`, such as `-1 is less than the minimum of 0` | Dev's `delivery.yaml` breaks its schema; `build` reads the counts through `MirrorExpander.retries`, which validates the whole document before any listener binds | Run `delivery.lab` in a checkout of dev, as in [Configure the entry limit](#configure-the-entry-limit), and fix the file by pull request |
-| A unit ran twice but the store holds one verdict | The first attempt was run again, so only the final attempt's verdict is stored | Expected; the unit metrics count both attempts |
+| A unit ran twice but the store holds one verdict | The first attempt was run again, so only the final attempt's verdict is stored | Expected; the unit metrics count each attempt that uploaded a report |
 
 ## Shadow comparison
 
