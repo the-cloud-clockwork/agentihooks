@@ -11182,6 +11182,20 @@
       "tests": [
         "tests/test_ci_dependency_audit.py::test_audit_excludes_the_platformdirs_release_that_refuses_the_runner_home"
       ]
+    },
+    {
+      "id": "guard-stripping-keeps-heredoc-delimiter-line",
+      "origin": "regression",
+      "ordered_at": "2026-11-20",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2721",
+      "behaviour": "The shared command stripping drops only a heredoc's body and keeps the rest of its delimiter line, for terminated and unterminated, unquoted, quoted and dash heredocs, so a guarded command chained after the delimiter is refused by branch guard and prod lockdown the same way as at the top level, while a guarded command inside the body stays data.",
+      "seam": "hooks.context._strip.strip_non_command_content, observed through hooks.context.branch_guard.check_branch_guard and hooks.context.prod_lockdown.check_prod_lockdown on Bash payloads",
+      "tests": [
+        "tests/context/test_strip_heredoc_delimiter_line.py::test_stripping_keeps_the_delimiter_line_and_drops_the_body",
+        "tests/context/test_strip_heredoc_delimiter_line.py::test_branch_guard_refuses_a_push_to_main_after_the_delimiter",
+        "tests/context/test_strip_heredoc_delimiter_line.py::test_prod_lockdown_refuses_a_release_run_after_the_delimiter",
+        "tests/context/test_strip_heredoc_delimiter_line.py::test_a_guarded_command_inside_the_body_stays_data"
+      ]
     }
   ],
   "unmapped_rules": [
