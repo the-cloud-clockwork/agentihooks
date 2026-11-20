@@ -250,8 +250,96 @@ jobs:
     if: inputs.proof == 'helm-kind'
     uses: ./.github/workflows/helm-kind.yml
 
-  tests:
+  stats-part:
     if: inputs.proof == 'tests'
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-batch' || 'ubuntu-latest' }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: dev
+            head: d9f35a20281073bcc65fc41ed3ac402d9e3ca98f
+            base: 98798e596b08d7bc85a6129caa01cd96718632bf
+          - variant: fix
+            head: b59398d346767a447daebf4725ed9a94a9fc4a79
+            base: 48da15fd7b1e6629d2c77d26597d346f0a70c009
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
+      MUTATION_STATS_CACHE: ${{ github.workspace }}/.mutation-stats-cache
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: maintenance.auto
+      GIT_CONFIG_VALUE_0: "false"
+      BASES: ${{ matrix.base }}
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ matrix.head }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.23"
+          checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
+          enable-cache: false
+      - name: Install dependencies
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
+        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e ".[dev,all]"
+      - name: Download the failed part seven work folder
+        uses: actions/download-artifact@v8.0.2
+        with:
+          artifact-ids: 14465064482
+          run-id: 44372993627
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/evidence
+      - name: Adopt the durations part seven split on
+        run: |
+          cp "$RUNNER_TEMP/evidence/0-s176e3ut/.test_durations" .test_durations
+          python -c 'import json, sys; from pathlib import Path; data = json.loads(Path(sys.argv[1]).read_text()); Path(".mutation-selection.json").write_text(json.dumps({path: value["tests"] for path, value in data.items()})); Path(".mutation-direct.json").write_text(json.dumps({path: value["direct"] for path, value in data.items()})); tests = {test for value in data.values() for test in value["tests"]}; print("selection of", len(data), "changed files and", len(tests), "test files")' "$RUNNER_TEMP/evidence/0-s176e3ut/changed-lines.json"
+          ls -l .mutation-selection.json .mutation-direct.json .test_durations
+          git diff --stat "$BASES" HEAD -- hooks/ scripts/ | tail -1
+      - name: Install the pinned nats server for the bus backend tests
+        timeout-minutes: 3
+        uses: ./.github/actions/nats-server
+      - name: Install the browser that page tests drive
+        timeout-minutes: 6
+        uses: ./.github/actions/browser-cache
+      - name: Collect stats part seven of ten on an empty cache
+        env:
+          OUTPUT: .mutation-gate-cold
+        run: mkdir -p .mutation-stats && touch ".mutation-stats/collected-6" && python -m scripts.ci_mutation --bases "$BASES" --budget 2400 --stats .mutation-stats --stats-part 6 --stats-parts 10 --output "$OUTPUT"
+      - name: Phase times on the empty cache
+        if: always()
+        env:
+          OUTPUT: .mutation-gate-cold
+        run: grep -h -E "Mutation stats (phase|cache)|done in" "$OUTPUT"/*/run.log || true; for file in "$OUTPUT"/*/stats-*; do echo "$(stat -c %Y "$file") $file"; done
+      - name: Distinct dependency lists and cache records after the empty cache pass
+        if: always()
+        env:
+          OUTPUT: .mutation-gate-cold
+        run: python -c 'import json, os, sys; from collections import Counter; from pathlib import Path; records = [r for r in (json.loads(p.read_text()) for p in Path(os.environ["MUTATION_STATS_CACHE"]).rglob("*.json")) if isinstance(r, dict) and "inputs" in r]; print("cache records", len(records), "distinct inputs", len(set(map(str, (r["inputs"] for r in records)))), "distinct discovery digests", len({r.get("discovery", "") for r in records})); buckets = [(p, json.loads(p.read_text())) for p in sorted(Path(sys.argv[1]).glob("*/stats-*.json"))]; [print(p.name, "tests", len(deps), "distinct dependency lists", len(Counter(tuple(v) for v in deps.values())), "mean paths", round(sum(map(len, deps.values())) / max(len(deps), 1))) for p, data in buckets for result in (data["results"] if isinstance(data, dict) and "results" in data else [data]) for deps in [result.get("dependencies") or {}]]' "$OUTPUT"
+      - name: Collect stats part seven of ten again on the cache the first pass wrote
+        if: always()
+        env:
+          OUTPUT: .mutation-gate-warm
+        run: mkdir -p .mutation-stats && touch ".mutation-stats/collected-6" && python -m scripts.ci_mutation --bases "$BASES" --budget 2400 --stats .mutation-stats --stats-part 6 --stats-parts 10 --output "$OUTPUT"
+      - name: Phase times on the warm cache
+        if: always()
+        env:
+          OUTPUT: .mutation-gate-warm
+        run: grep -h -E "Mutation stats (phase|cache)|done in" "$OUTPUT"/*/run.log || true; for file in "$OUTPUT"/*/stats-*; do echo "$(stat -c %Y "$file") $file"; done
+      - name: Distinct dependency lists and cache records after the warm cache pass
+        if: always()
+        env:
+          OUTPUT: .mutation-gate-warm
+        run: python -c 'import json, os, sys; from collections import Counter; from pathlib import Path; records = [r for r in (json.loads(p.read_text()) for p in Path(os.environ["MUTATION_STATS_CACHE"]).rglob("*.json")) if isinstance(r, dict) and "inputs" in r]; print("cache records", len(records), "distinct inputs", len(set(map(str, (r["inputs"] for r in records)))), "distinct discovery digests", len({r.get("discovery", "") for r in records})); buckets = [(p, json.loads(p.read_text())) for p in sorted(Path(sys.argv[1]).glob("*/stats-*.json"))]; [print(p.name, "tests", len(deps), "distinct dependency lists", len(Counter(tuple(v) for v in deps.values())), "mean paths", round(sum(map(len, deps.values())) / max(len(deps), 1))) for p, data in buckets for result in (data["results"] if isinstance(data, dict) and "results" in data else [data]) for deps in [result.get("dependencies") or {}]]' "$OUTPUT"
+
+  tests:
+    if: false
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss' || 'ubuntu-latest' }}
     timeout-minutes: 15
     env:
