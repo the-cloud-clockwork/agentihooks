@@ -11364,6 +11364,7 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-swarm-tracks-session-until-killed",
       "behaviour": "Starting a successor execution on a seat keeps a predecessor whose execution has not ended listed with its placement, and the tick reap then ends that predecessor's process through the runtime and drops it with a history row and a retired name, so a handed off session never leaves tracking while it runs.",
       "seam": "scripts.swarm.execution.ExecutionRegistry start and archive, observed through RedisStore.agents and the tick reap judge scripts.tick.steps.agents._reap_agent",
+      "rules": ["successor-start-drops-live-predecessor"],
       "tests": [
         "tests/swarm/test_successor_keeps_predecessor_tracked.py::test_a_successor_start_keeps_its_finished_predecessor_listed",
         "tests/swarm/test_successor_keeps_predecessor_tracked.py::test_archiving_keeps_the_placement_of_a_listed_predecessor",

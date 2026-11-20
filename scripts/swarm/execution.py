@@ -77,10 +77,10 @@ def _archivable(row: dict) -> bool:
     )
 
 
-def _stale(row: dict[str, Any], head: dict[str, Any], listed: set[str]) -> bool:
+def _stale(row: dict[str, Any], head: dict[str, Any], newest: dict[str, Any], listed: set[str]) -> bool:
     current = row["generation"] >= head["generation"] and row["name"] in listed
     if row.get("state") in TERMINAL_STATES:
-        return not current
+        return not current and not (row["name"] in listed and newest is row)
     return row["generation"] < head["generation"] and row["name"] not in listed
 
 
@@ -131,7 +131,8 @@ class ExecutionRegistry:
         def move(doc: dict[str, Any]) -> Any:
             rows = {key: row for key, row in doc["executions"].items() if _archivable(row)}
             heads: dict[str, dict[str, Any]] = latest(rows.values(), "seat")
-            old = [key for key, row in rows.items() if _stale(row, heads[row["seat"]], listed)]
+            named: dict[str, dict[str, Any]] = latest(rows.values(), "name")
+            old = [key for key, row in rows.items() if _stale(row, heads[row["seat"]], named[row["name"]], listed)]
             current = doc["executions"].keys() - set(old)
             stale = [
                 key
@@ -244,7 +245,7 @@ class ExecutionRegistry:
             return current, previous
 
         current, previous = self._fenced(slug, admit, history=True)
-        removed = previous.name if previous and previous.name != current.name else ""
+        removed = previous.name if previous and previous.state == "ended" and previous.name != current.name else ""
         self._project(slug, (current.name, *((previous.name,) if previous else ())), current, removed=removed)
         return current
 
