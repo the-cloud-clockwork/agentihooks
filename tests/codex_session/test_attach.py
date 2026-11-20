@@ -326,8 +326,7 @@ def test_recorded_waits_for_starting_capability_classification(monkeypatch: pyte
 
     assert read() is None
     transport.assert_not_called()
-    agent.harness = "codex"
-    agent.transport = APP_SERVER_TRANSPORT
+    store.agents.return_value = [replace(agent, harness="codex", transport=APP_SERVER_TRANSPORT)]
     assert read() == RECORD
 
 
