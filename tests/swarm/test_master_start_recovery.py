@@ -5,6 +5,7 @@ import pytest
 from scripts.swarm import master_start
 from scripts.swarm.store import MASTER
 from scripts.swarm.tick import tick
+from tests.helpers.outage_ports import outage_ports
 from tests.swarm.test_master_start import StartupRuntime, startup_inside_the_down_window  # noqa: F401
 from tests.swarm.test_tick import store, tasks  # noqa: F401
 
@@ -149,7 +150,8 @@ def test_forced_recovery_replaces_an_unalerted_stale_start(store, monkeypatch): 
     swarm, runtime = direct()
     master_start.save(swarm, "sw", {"name": "master@a1b2c3-0098", "task": {"id": MASTER}, "attempt": 1, "at": 0})
     config, ledger = swarm.config("sw"), tasks()
-    tick_master.run("sw", swarm, ledger, runtime, 300_001, lambda: _master("sw", config, swarm, runtime, 300_001), {})
+    ports = outage_ports(swarm, "sw", ledger)
+    tick_master.run("sw", ports, runtime, 300_001, lambda: _master("sw", config, swarm, runtime, 300_001), {})
     assert len(runtime.masters) == 1
     assert runtime.masters[0][0] != "master@a1b2c3-0098"
     assert master_start.read(swarm, "sw") == {}

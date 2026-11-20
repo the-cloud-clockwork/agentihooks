@@ -3,6 +3,7 @@
 
 import os
 from collections.abc import Callable, Mapping
+from contextlib import AbstractContextManager
 from dataclasses import replace
 from functools import partial
 from importlib import import_module
@@ -24,6 +25,8 @@ from scripts.swarm.ledger_client import LedgerOffline
 from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm_v2 import master_scale, master_seat_alarm
 from scripts.tick import engine, registry, steps
+from scripts.tick.adapters.calls import SpawnStoreCalls
+from scripts.tick.adapters.coordination import StoreCoordination
 from scripts.tick.deadline import Deadline
 from scripts.tick.engine import SLOW
 from scripts.tick.ports.contracts import Coordination
@@ -129,15 +132,23 @@ def _master_down_step(tick: Any, get: Get) -> Any:
 
 
 def _tick_master(tick: Any, get: Get) -> Any:
+    """Run the outage pass over ports bound to one lease's life, renewed when the master launch returns, because a
+    master launch outlives the step budget and the writes after it must still land."""
+    tools: Tools = get("tools")
+    deadline = _lease_deadline()
+    ports = SEAT.tick_master.Ports(
+        SpawnStoreCalls(tools.coordination, deadline, tools.inbox), tools.inbox, tools.ledger, deadline
+    )
+
+    def launch() -> list[str]:
+        launched: list[str] = tick._master(
+            get("slug"), get("config"), get("store"), get("runtime"), get("now_ms"), coordination=tools.coordination
+        )
+        deadline.expires_at = _lease_deadline().expires_at
+        return launched
+
     return tick.skip_refused(
-        SEAT.tick_master.run,
-        get("slug"),
-        get("store"),
-        get("ledger"),
-        get("runtime"),
-        get("now_ms"),
-        lambda: tick._master(get("slug"), get("config"), get("store"), get("runtime"), get("now_ms")),
-        get("doc"),
+        SEAT.tick_master.run, get("slug"), ports, get("runtime"), get("now_ms"), launch, get("doc")
     )
 
 
@@ -304,6 +315,9 @@ STEPS = (
         _held(_tick_master),
         RESUMED,
         pass_domains("config", "doc"),
+        writes=frozenset(),
+        lane=CallStep.lane,
+        effects=frozenset({"coordination", "inbox", "ledger"}),
         kept=True,
         placing=True,
         feature="master-launch-lock",
@@ -372,10 +386,28 @@ def _recover_master(slug: Any, config: Any, store: Any, runtime: Any, now_ms: An
     return [f"adopted live master {name}"]
 
 
-def _master(slug: Any, config: Any, store: Any, runtime: Any, now_ms: Any, forced: bool = False) -> Any:
-    """Start the front door master under the swarm's master launch lock, so no other starter launches one at once."""
-    with master_lock.held(store, slug, STARTER) as refused:
+def _master(
+    slug: Any,
+    config: Any,
+    store: Any,
+    runtime: Any,
+    now_ms: Any,
+    forced: bool = False,
+    coordination: Coordination | None = None,
+) -> Any:
+    """Start the front door master under the swarm's master launch lock, taken through ``coordination``, so no other
+    starter launches one at once."""
+    with _launch_lock(coordination or StoreCoordination(store, slug, STARTER)) as refused:
         return [refused] if refused else _launch_master(slug, config, store, runtime, now_ms, forced)
+
+
+def _launch_lock(coordination: Coordination) -> AbstractContextManager[str]:
+    """Hold the swarm's master launch lock through ``coordination`` while the block runs, the take and the release
+    each bound to a fresh lease deadline."""
+    return master_lock.holding(
+        lambda: coordination.take_master_lock(STARTER, deadline=_lease_deadline()),
+        lambda token: coordination.release_master_lock(token, deadline=_lease_deadline()),
+    )
 
 
 def _launch_master(slug: Any, config: Any, store: Any, runtime: Any, now_ms: Any, forced: bool) -> Any:

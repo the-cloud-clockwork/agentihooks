@@ -13,6 +13,7 @@ from scripts.swarm.tick import MASTER_DOWN, SpawnError, tick
 from scripts.swarm_v2 import master_fill
 from scripts.swarm_v2.masters import MasterSeats
 from scripts.tick.steps import masters as master_steps
+from tests.helpers.outage_ports import outage_ports
 from tests.hive.test_controller_launch import setup  # noqa: F401
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_tick import FakeRuntime, masters, store, tasks  # noqa: F401
@@ -140,7 +141,7 @@ def test_a_forced_launch_that_starts_nothing_names_the_kept_refusal_with_its_age
     master_refusals.record(store, "sw", MASTER, REFUSED, 4 * MINUTE)
     tick_master._save(store, "sw", {"since": 1})
 
-    actions = tick_master.run("sw", store, tasks(), FakeRuntime(), 5 * MINUTE + 1, lambda: [], {})
+    actions = tick_master.run("sw", outage_ports(store, "sw", tasks()), FakeRuntime(), 5 * MINUTE + 1, lambda: [], {})
 
     failure = f"master placement last refused 1 minutes ago, at 00:04 UTC: {REFUSED}"
     assert actions == ["master down 5 minutes, forced a master launch", failure, "no live engineer to promote"]

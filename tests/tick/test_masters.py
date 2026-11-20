@@ -18,6 +18,7 @@ from scripts.swarm import (
 )
 from scripts.swarm_v2 import master_scale, master_seat_alarm
 from scripts.tick import engine, registry
+from scripts.tick.adapters.fakes import fake_tools
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
 from scripts.tick.steps import PASS, actions, masters, placed, tasks
@@ -45,6 +46,7 @@ def _pass(state: str = "running") -> dict[str, Any]:
         "doc": "doc",
         "rows": "rows",
         "sleeping": False,
+        "tools": fake_tools(),
     }
 
 
@@ -63,8 +65,8 @@ def _tick(calls: list[tuple[Any, ...]]) -> SimpleNamespace:
     )
 
 
-def _master(*args: Any) -> tuple[Any, ...]:
-    return ("master", *args)
+def _master(*args: Any, **kwargs: Any) -> tuple[Any, ...]:
+    return ("master", *args, *kwargs.items())
 
 
 def _step(name: str) -> Any:
@@ -126,10 +128,18 @@ def test_master_wake_skips_a_stopped_or_stopping_swarm() -> None:
 
 def test_tick_master_hands_the_master_start_to_its_call() -> None:
     state = _pass()
+    tools = state["tools"]
     calls, found = _call("tick master", state)
-    function, *args, start, doc = calls[0]
-    assert (function, args, doc) == (tick_master.run, ["sw", "store", "ledger", "runtime", 7], "doc")
-    assert start() == ("master", "sw", state["config"], "store", "runtime", 7)
+    function, slug, ports, *args, start, doc = calls[0]
+    assert (function, slug, args, doc) == (tick_master.run, "sw", ["runtime", 7], "doc")
+    assert (ports.store.port, ports.store.inbox, ports.inbox, ports.ledger) == (
+        tools.coordination,
+        tools.inbox,
+        tools.inbox,
+        tools.ledger,
+    )
+    coordination = ("coordination", tools.coordination)
+    assert start() == ("master", "sw", state["config"], "store", "runtime", 7, coordination)
     assert found == ["ran 1"]
 
 

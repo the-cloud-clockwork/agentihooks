@@ -29,9 +29,10 @@ class StoreInbox:
         deadline.live()
         return self.store.inbox(address)
 
-    def send(self, address: str, body: str, *, deadline: Deadline) -> object:
+    def send(self, address: str, body: str, *, sender: str = "", fyi: bool = False, deadline: Deadline) -> object:
+        """Send ``body`` to ``address`` as ``sender``, this port's own sender when none, with the fyi mark."""
         deadline.live()
-        return self.store.send(self.sender, address, body)
+        return self.store.send(sender or self.sender, address, body, fyi=fyi)
 
     def close(self, item_id: str, outcome: str, detail: str = "", *, deadline: Deadline) -> object:
         """Close an item with the outcome kind and its detail; the store refuses a bare done on a work item."""

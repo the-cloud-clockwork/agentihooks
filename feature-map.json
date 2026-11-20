@@ -10768,13 +10768,14 @@
       "id": "tick-master-effect-ports",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-master-effect-ports",
-      "behaviour": "The tick master step declares the coordination, inbox and ledger ports as its effects and writes only its actions in the pass view. Its master outage pass saves and ends its outage state, finishes dead leads, writes seat notes, sends the promoted prompt, the hand back and the master back notice as swarm, the notice as fyi, and tells the ledger chat, all through those ports bound to the master placement lease, and the pattern gate grades the step with no exception.",
+      "behaviour": "The tick master step declares the coordination, inbox and ledger ports as its effects and writes only its actions in the pass view. Its master outage pass saves and ends its outage state, finishes dead leads, writes seat notes, sends the promoted prompt, the hand back and the master back notice as swarm, the notice as fyi, and tells the ledger chat, all through those ports bound to one master placement lease life that starts again when the master launch returns, so a slow launch never drops the writes after it, and the pattern gate grades the step with no exception.",
       "seam": "scripts.tick.steps.masters._tick_master registered as tick step tick master, over scripts.swarm.tick_master.run with scripts.swarm.tick_master.Ports, and the inbox port send with its sender and fyi mark",
       "tests": [
         "tests/tick/steps/test_tick_master_ports.py::test_the_inbox_port_sends_as_the_named_sender_with_its_fyi_mark",
         "tests/tick/steps/test_tick_master_ports.py::test_the_outage_pass_saves_its_first_observation_through_the_coordination_port",
         "tests/tick/steps/test_tick_master_ports.py::test_the_outage_pass_promotes_through_the_coordination_inbox_and_ledger_ports",
-        "tests/tick/steps/test_tick_master_ports.py::test_the_tick_master_step_declares_its_ports_and_writes_only_its_actions"
+        "tests/tick/steps/test_tick_master_ports.py::test_the_tick_master_step_declares_its_ports_and_writes_only_its_actions",
+        "tests/tick/steps/test_tick_master_ports.py::test_the_outage_pass_ports_get_a_fresh_lease_life_when_the_master_launch_returns"
       ]
     },
     {

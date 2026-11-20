@@ -36,7 +36,7 @@ class _Store:
         self.calls.append(("inbox", address))
         return [f"item for {address}"]
 
-    def send(self, sender: str, address: str, text: str) -> str:
+    def send(self, sender: str, address: str, text: str, fyi: bool = False) -> str:
         self.calls.append(("send", sender, address, text))
         return "sent"
 

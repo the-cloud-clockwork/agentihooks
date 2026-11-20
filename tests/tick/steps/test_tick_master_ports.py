@@ -3,6 +3,7 @@ port, and the outage pass's store writes, inbox items and ledger notices through
 ports."""
 
 import json
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -12,7 +13,7 @@ from scripts.swarm import master_lock, tick_master
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.tick.adapters.calls import SpawnStoreCalls
 from scripts.tick.adapters.coordination import StoreCoordination
-from scripts.tick.adapters.fakes import FakeCoordination, FakeInbox, FakeLedger
+from scripts.tick.adapters.fakes import FakeCoordination, FakeInbox, FakeLedger, fake_tools
 from scripts.tick.adapters.inbox import StoreInbox
 from scripts.tick.deadline import Deadline
 from scripts.tick.steps import CallStep, actions_of, masters
@@ -101,7 +102,9 @@ def test_the_inbox_port_sends_as_the_named_sender_with_its_fyi_mark(store: Redis
 
 @pytest.mark.feature("tick-master-effect-ports")
 def test_the_outage_pass_saves_its_first_observation_through_the_coordination_port() -> None:
-    port = FakeCoordination(answers={"store:config": SwarmConfig("sw", "/repo"), "store:agents": []})
+    port = FakeCoordination(
+        answers={"store:config": SwarmConfig("sw", "/repo", max_eng=0, max_ci=0), "store:agents": []}
+    )
     inbox, ledger = FakeInbox(), FakeLedger()
     calls = SpawnStoreCalls(port, DEADLINE, inbox)
     ports = tick_master.Ports(calls, inbox, ledger, DEADLINE)
@@ -140,3 +143,27 @@ def test_the_tick_master_step_declares_its_ports_and_writes_only_its_actions() -
         frozenset({actions_of("tick master")}),
         CallStep.lane,
     )
+
+
+@pytest.mark.feature("tick-master-effect-ports")
+def test_the_outage_pass_ports_get_a_fresh_lease_life_when_the_master_launch_returns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = [0.0]
+    monkeypatch.setattr(masters, "_lease_deadline", lambda: Deadline(clock[0] + 10, lambda: clock[0]))
+    seen: list[tuple[Any, ...]] = []
+
+    def skip_refused(function: Any, *args: Any) -> list[str]:
+        seen.append(args)
+        return []
+
+    def slow_master(*args: Any, **kwargs: Any) -> list[str]:
+        clock[0] = 30.0
+        return ["spawned master m1"]
+
+    tick = SimpleNamespace(skip_refused=skip_refused, _master=slow_master)
+    state: dict[str, Any] = {"tools": fake_tools(), "slug": "sw", "now_ms": NOW, "doc": {}}
+    masters._tick_master(tick, state.get)
+    _, ports, _, _, launch, _ = seen[0]
+    assert launch() == ["spawned master m1"]
+    assert (ports.deadline.expired, ports.store.deadline.expired) == (False, False)
