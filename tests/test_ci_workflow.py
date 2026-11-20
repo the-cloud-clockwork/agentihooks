@@ -1787,12 +1787,14 @@ def test_selected_legs_size_workers_by_the_container_cpu_quota():
     assert "-n auto" not in run
 
 
-def test_selected_legs_check_out_only_the_graded_commit_and_fetch_dev_on_every_leg() -> None:
+def test_selected_legs_check_out_only_the_graded_commit_and_fetch_the_event_base_on_every_leg() -> None:
     steps = _workflow()["jobs"]["unit-selected"]["steps"]
     checkouts = [step for step in steps if step.get("uses", "").startswith("actions/checkout")]
     assert [checkout["with"] for checkout in checkouts] == [{"ref": "${{ github.sha }}", "fetch-depth": 1}]
-    fetch = _selected_step("Fetch the protected grader's dev head")
+    fetch = _selected_step("Fetch the protected grader's event base")
     assert "if" not in fetch
+    assert fetch["env"] == {"GRADER": "${{ github.event.pull_request.base.sha }}"}
+    assert _selected_step("Adopt the reused tests from the protected grader")["env"]["GRADER"] == fetch["env"]["GRADER"]
     names = [step.get("name") for step in steps]
     assert (
         names.index("Wait for the early collection")
@@ -1802,31 +1804,35 @@ def test_selected_legs_check_out_only_the_graded_commit_and_fetch_dev_on_every_l
     )
 
 
-def test_the_grader_fetch_gives_a_shallow_leg_the_dev_head(tmp_path):
+def test_the_grader_fetch_gives_a_shallow_leg_the_event_base_and_never_the_dev_head(tmp_path: Path) -> None:
     git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "protocol.file.allow=always"]
     upstream = tmp_path / "upstream"
     subprocess.run([*git, "init", "-q", "-b", "dev", str(upstream)], check=True)
-    for message in ("one", "two"):
-        subprocess.run([*git, "-C", str(upstream), "commit", "-q", "--allow-empty", "-m", message], check=True)
-    subprocess.run([*git, "-C", str(upstream), "branch", "head"], check=True)
+    commit = [*git, "-C", str(upstream), "commit", "-q", "--allow-empty", "-m"]
+    subprocess.run([*commit, "event base"], check=True)
+    subprocess.run([*git, "-C", str(upstream), "checkout", "-q", "-b", "head"], check=True)
+    subprocess.run([*commit, "head"], check=True)
+    subprocess.run([*git, "-C", str(upstream), "checkout", "-q", "dev"], check=True)
+    subprocess.run([*commit, "dev moved after the push"], check=True)
+    base, tip = subprocess.run(
+        ["git", "-C", str(upstream), "rev-parse", "dev~1", "dev"], check=True, capture_output=True, text=True
+    ).stdout.split()
     leg = tmp_path / "leg"
     url = upstream.as_uri()
     subprocess.run(
         [*git, "clone", "-q", "--depth=1", "--no-tags", "-b", "head", "--single-branch", url, str(leg)], check=True
     )
-    run = _selected_step("Fetch the protected grader's dev head")["run"]
-    subprocess.run(["bash", "-e", "-c", run], cwd=leg, check=True, capture_output=True)
-    rev = ["git", "-C", str(leg), "rev-parse"]
-    dev = subprocess.run([*rev, "origin/dev"], check=True, capture_output=True, text=True).stdout
-    assert (
-        dev
-        == subprocess.run(
-            ["git", "-C", str(upstream), "rev-parse", "dev"], check=True, capture_output=True, text=True
-        ).stdout
-    )
-    assert (
-        subprocess.run([*rev, "--is-shallow-repository"], check=True, capture_output=True, text=True).stdout == "true\n"
-    )
+    run = _selected_step("Fetch the protected grader's event base")["run"]
+    env = {**os.environ, "GRADER": base}
+    subprocess.run(["bash", "-e", "-c", run], cwd=leg, env=env, check=True, capture_output=True)
+    git_leg = ["git", "-C", str(leg)]
+    exists = [*git_leg, "cat-file", "-e"]
+    assert subprocess.run([*exists, f"{base}^{{commit}}"], capture_output=True).returncode == 0
+    assert subprocess.run([*exists, f"{tip}^{{commit}}"], capture_output=True).returncode != 0
+    dev = subprocess.run([*git_leg, "rev-parse", "-q", "--verify", "refs/remotes/origin/dev"], capture_output=True)
+    assert dev.returncode != 0
+    shallow = subprocess.run([*git_leg, "rev-parse", "--is-shallow-repository"], capture_output=True, text=True)
+    assert shallow.stdout == "true\n"
 
 
 def test_selected_legs_download_the_nats_server_while_setup_runs_and_fall_back_to_the_action():

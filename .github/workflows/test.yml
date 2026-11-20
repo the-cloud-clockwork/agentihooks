@@ -1065,7 +1065,7 @@ jobs:
         if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository)
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          GRADER: ${{ github.event.merge_group.base_sha || github.event_name == 'pull_request' && 'origin/dev' || github.sha }}
+          GRADER: ${{ github.event.merge_group.base_sha || github.event.pull_request.base.sha || github.sha }}
           PYTHON_PATH: ${{ steps.python.outputs.python-path }}
           PULL: ${{ github.event.pull_request.number }}
           HEAD_REF: ${{ github.head_ref }}
@@ -1636,7 +1636,7 @@ jobs:
         env:
           ARTIFACT: coverage-${{ matrix.python-version }}-${{ matrix.shard }}
           COMMIT: ${{ needs.split.outputs.commit }}
-          GRADER: ${{ github.event_name == 'pull_request' && 'origin/dev' || github.sha }}
+          GRADER: ${{ github.event.pull_request.base.sha || github.sha }}
         run: |
           git worktree add --detach "$RUNNER_TEMP/grader" "$GRADER"
           cd "$RUNNER_TEMP/grader"
@@ -2190,8 +2190,10 @@ jobs:
         with:
           name: early-collected-${{ matrix.python-version }}
 
-      - name: Fetch the protected grader's dev head
-        run: git fetch --no-tags --depth=1 origin +refs/heads/dev:refs/remotes/origin/dev
+      - name: Fetch the protected grader's event base
+        env:
+          GRADER: ${{ github.event.pull_request.base.sha }}
+        run: git fetch --no-tags --depth=1 origin "$GRADER"
 
       # Grader code decides and grades the reuse, but head code shares this runner, so a hostile head can still forge it.
       - name: Adopt the reused tests from the protected grader
@@ -2199,12 +2201,13 @@ jobs:
         if: *leg-reuse
         env:
           COLLECTION: ${{ steps.collection.outcome }}
+          GRADER: ${{ github.event.pull_request.base.sha }}
         run: |
           if [[ "$COLLECTION" != success ]]; then
             echo "::notice title=No reuse on a selected leg::The early collection never landed; every selected test runs and the leg is not graded."
             exit 0
           fi
-          git worktree add --detach "$RUNNER_TEMP/grader" origin/dev
+          git worktree add --detach "$RUNNER_TEMP/grader" "$GRADER"
           if [[ ! -f "$RUNNER_TEMP/grader/scripts/ci_branch_plan.py" ]]; then
             echo "::notice title=No reuse on a selected leg::The grader cannot grade reused tests on a selected leg; every selected test runs."
             exit 0
@@ -2319,7 +2322,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.base_ref || github.event.merge_group.base_sha || github.event_name == 'push' && github.sha || github.event.before || (inputs.base == 'origin/dev' && 'dev' || inputs.base) }}
+          ref: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event_name == 'push' && github.sha || github.event.before || (inputs.base == 'origin/dev' && 'dev' || inputs.base) }}
           persist-credentials: false
 
       - *python

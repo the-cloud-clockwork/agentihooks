@@ -411,7 +411,7 @@ def test_a_dev_plan_file_in_the_head_is_ignored_when_the_dev_planner_reused_noth
     assert chosen["tests"] == chosen["branch"] == ["tests/test_b.py::one"]
 
 
-def _adopt(tmp_path: Path, planner: bool, outputs: str, collection: str = "success") -> dict:
+def _adopt(tmp_path: Path, planner: bool, outputs: str, collection: str = "success") -> dict[str, str]:
     workspace = tmp_path / "workspace"
     (workspace / "scripts").mkdir(parents=True)
     if planner:
@@ -420,7 +420,14 @@ def _adopt(tmp_path: Path, planner: bool, outputs: str, collection: str = "succe
     git = ["git", "-C", str(workspace), "-c", "user.name=t", "-c", "user.email=t@t"]
     subprocess.run([*git, "init", "-q"], check=True)
     subprocess.run([*git, "add", "."], check=True)
-    subprocess.run([*git, "commit", "-qm", "dev"], check=True)
+    subprocess.run([*git, "commit", "-qm", "event base"], check=True)
+    base = subprocess.run([*git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+    if planner:
+        (workspace / "scripts/ci_branch_plan.py").unlink()
+    else:
+        (workspace / "scripts/ci_branch_plan.py").write_text("")
+    subprocess.run([*git, "add", "-A"], check=True)
+    subprocess.run([*git, "commit", "-qm", "dev moved after the push"], check=True)
     subprocess.run([*git, "update-ref", "refs/remotes/origin/dev", "HEAD"], check=True)
     (workspace / "plan-outputs.txt").write_text(outputs)
     runner = tmp_path / "runner"
@@ -433,6 +440,7 @@ def _adopt(tmp_path: Path, planner: bool, outputs: str, collection: str = "succe
         "GITHUB_WORKSPACE": str(workspace),
         "GITHUB_OUTPUT": str(output),
         "COLLECTION": collection,
+        "GRADER": base,
     }
     run = _step("unit-selected", "Adopt the reused tests from the protected grader")["run"]
     result = subprocess.run(["bash", "-e", "-c", run], cwd=workspace, env=env, capture_output=True, text=True)

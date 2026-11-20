@@ -258,16 +258,16 @@ def test_a_partial_clone_fetches_every_changed_file_old_text_in_one_batch(tmp_pa
     assert len(fetches) == 1
 
 
-def test_pull_requests_into_dev_plan_reuse_from_the_protected_dev_grader():
+def test_pull_requests_into_dev_plan_reuse_from_the_protected_dev_grader() -> None:
     plan = _steps("test-count")["Plan the tests whose inputs did not change"]
     assert "github.event.pull_request.head.repo.full_name == github.repository" in plan["if"]
-    assert "'origin/dev'" in plan["env"]["GRADER"]
+    assert "github.event.pull_request.base.sha" in plan["env"]["GRADER"]
     outputs = yaml.safe_load(WORKFLOW.read_text())["jobs"]["split"]["outputs"]
     assert outputs["run"] == "${{ steps.plan.outputs.run }}"
     assert outputs["commit"] == "${{ steps.plan.outputs.commit }}"
 
 
-def test_coverage_shards_ship_the_reused_tests_dev_coverage_to_sonar_and_the_ratchet():
+def test_coverage_shards_ship_the_reused_tests_dev_coverage_to_sonar_and_the_ratchet() -> None:
     steps = _steps("unit")
     names = list(steps)
     kept = steps["Keep the reused tests' dev coverage"]
@@ -275,7 +275,7 @@ def test_coverage_shards_ship_the_reused_tests_dev_coverage_to_sonar_and_the_rat
     assert "if [[ ! -f scripts/reused_coverage.py ]]; then package=tests; fi\n" in kept["run"]
     assert 'python -m "$package.reused_coverage"' in kept["run"]
     assert 'cd "$RUNNER_TEMP/grader"' in kept["run"]
-    assert kept["env"]["GRADER"] == "${{ github.event_name == 'pull_request' && 'origin/dev' || github.sha }}"
+    assert kept["env"]["GRADER"] == "${{ github.event.pull_request.base.sha || github.sha }}"
     assert '--out "$GITHUB_WORKSPACE/reused-coverage/.coverage"' in kept["run"]
     assert '--captures-out "$GITHUB_WORKSPACE/js-coverage"' in kept["run"]
     assert "github.event_name != 'merge_group'" in kept["if"]

@@ -16,12 +16,12 @@ def _jobs():
     return yaml.safe_load((root / ".github/workflows/test.yml").read_text())["jobs"]
 
 
-def test_shard_graders_check_out_event_base_before_installing():
+def test_shard_graders_check_out_event_base_before_installing() -> None:
     steps = _jobs()["shard-check"]["steps"]
     checkout = steps[0]
     assert checkout["uses"] == "actions/checkout@v4"
     assert checkout["with"]["ref"] == (
-        "${{ github.event_name == 'pull_request' && github.base_ref || github.event.merge_group.base_sha || "
+        "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || "
         "github.event_name == 'push' && github.sha || github.event.before || "
         "(inputs.base == 'origin/dev' && 'dev' || inputs.base) }}"
     )

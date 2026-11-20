@@ -629,10 +629,10 @@ def test_deselection_keeps_new_tests_and_skips_only_wholly_reused_files(tmp_path
     assert json.loads(out.read_text())["files"] == ["tests/test_a.py"]
 
 
-def test_queue_shards_split_on_the_tests_the_planner_did_not_reuse():
+def test_queue_shards_split_on_the_tests_the_planner_did_not_reuse() -> None:
     plan = _step("test-count", "Plan the tests whose inputs did not change")
     assert plan["env"]["GRADER"] == (
-        "${{ github.event.merge_group.base_sha || github.event_name == 'pull_request' && 'origin/dev' || github.sha }}"
+        "${{ github.event.merge_group.base_sha || github.event.pull_request.base.sha || github.sha }}"
     )
     assert 'cd "$RUNNER_TEMP/planner"' in plan["run"]
     assert _job("split")["outputs"]["reused"] == "${{ steps.plan.outputs.reused }}"

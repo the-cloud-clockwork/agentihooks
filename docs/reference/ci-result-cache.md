@@ -327,7 +327,7 @@ Pull requests into dev from a branch of this repository plan reuse the same way 
 The `split` job's plan step runs on `merge_group`, on `workflow_dispatch`, and on a `pull_request` event when all of these hold:
 
 - the base branch is `dev` and the head branch lives in this repository; a fork pull request plans nothing;
-- the grader, a detached worktree of `origin/dev`, has `scripts/ci_test_plan.py`;
+- the grader, a detached worktree of the event base (`github.event.pull_request.base.sha`, the dev commit the run's merge was built on), has `scripts/ci_test_plan.py`;
 - the grader also has `scripts/reused_coverage.py`, or `tests/reused_coverage.py` when the grader predates the move into `scripts`. A grader without either cannot carry reused coverage, so the step prints `The grader cannot carry reused tests' coverage into Sonar; every test runs.` and plans no reuse. Merge group runs skip this check. A dispatch's grader is its own head, so it runs the check and the coverage filter from the head.
 
 The planner runs from the grader, never from the head, so a pull request cannot widen what it reuses. It mints the CI App token with `actions: read` to read dev's runs and artifacts.
@@ -344,7 +344,7 @@ On every 3.12 unit shard of a full scope run that reuses at least one test, outs
 
 1. **Token.** `Mint the token that reads the dev coverage` mints the CI App token with `actions: read`.
 2. **Download.** `Download this shard's dev coverage` downloads the same shard's `coverage-3.12-<shard>` artifact from the record run into the runner's temporary folder.
-3. **Filter and remap.** `Keep the reused tests' dev coverage` adds the grader as a worktree (`origin/dev` for a pull request, the head for a dispatch) and runs `python -m scripts.reused_coverage` from it (`tests.reused_coverage` when the grader predates the move into `scripts`), so the filter that moves dev coverage is protected code.
+3. **Filter and remap.** `Keep the reused tests' dev coverage` adds the grader as a worktree (the event base for a pull request, the head for a dispatch) and runs `python -m scripts.reused_coverage` from it (`tests.reused_coverage` when the grader predates the move into `scripts`), so the filter that moves dev coverage is protected code.
 
 `scripts.reused_coverage` writes `reused-coverage/.coverage` and adds page captures to the shard's `js-coverage/`:
 
@@ -373,7 +373,7 @@ Before [pull request 4828](https://github.com/the-cloud-clockwork/agentihooks/pu
 | Pull request run [39251854559](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39251854559), attempt 1, before | 408 on unit (3.12, 1) | 230 to 256 s on every 3.12 shard, 256 s on unit (3.12, 1) | 1205 s, over the 900 s Doctor threshold |
 | Pull request run [39304815170](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39304815170), attempt 1, after | 9 | at most 9 s | 717 s |
 
-The fix lives in the grader's copy of `scripts/reused_coverage.py`: `origin/dev` for a pull request, the head for a dispatch. Every pull request run created after the merge, 2026-10-19 18:06 UTC, uses it, whatever its branch holds. A dispatch from a head older than the merge still fetches one file at a time.
+The fix lives in the grader's copy of `scripts/reused_coverage.py`: the event base for a pull request, the head for a dispatch. Every pull request run created after the merge, 2026-10-19 18:06 UTC, uses it, whatever its branch holds. A dispatch from a head older than the merge still fetches one file at a time.
 
 #### Proof
 
@@ -406,7 +406,7 @@ The first command prints each 3.12 shard's remap step time; the second prints ho
 
 | Symptom | Read | Action |
 |---|---|---|
-| The remap step takes minutes and its time grows with `<k> changed files remapped` | The run's event and the grader: `origin/dev` for a pull request, the head for a dispatch | A dispatch from a head older than pull request 4828 lists files with `--name-only`; merge `origin/dev` into the branch and dispatch again |
+| The remap step takes minutes and its time grows with `<k> changed files remapped` | The run's event and the grader: the event base for a pull request, the head for a dispatch | A dispatch from a head older than pull request 4828 lists files with `--name-only`; merge `origin/dev` into the branch and dispatch again |
 | The remap step takes minutes with few changed files | The step log for a stalled fetch | The batch fetch itself is slow or stalled; see [Unit checkout](../ci-timing.md#unit-checkout) for the checkout's fetch behavior |
 
 ### Unusable coverage databases
@@ -459,7 +459,7 @@ It prints nothing and exits 0 when every file is usable. A file that is not give
 | `Keep the reused tests' dev coverage` fails with `The dev coverage ... is unusable` | The named artifact in the record run from `split` | Rerun the whole Tests run after the next dev push records a new run, or download the artifact and run the check by hand to confirm the problem |
 | `Check the coverage database` fails on a dev push | The problem text for `.coverage` or `reused-coverage/.coverage` | Rerun the job; the run is not used as a record while that shard is red |
 | `Check the coverage database` reports `missing` for `.coverage` | The `Run tests` step of the same shard | The shard wrote no coverage data; fix the earlier failure first |
-| `shard-check` reports tests that ran zero times or twice after a coverage warning, not an error | The grader of the run: `origin/dev` for a pull request, the head for a dispatch | A dispatch from a head older than pull request 5245 still deletes `reused.json`; merge `origin/dev` into the branch and dispatch again |
+| `shard-check` reports tests that ran zero times or twice after a coverage warning, not an error | The grader of the run: the event base for a pull request, the head for a dispatch | A dispatch from a head older than pull request 5245 still deletes `reused.json`; merge `origin/dev` into the branch and dispatch again |
 
 ### Combine and grade
 
@@ -565,7 +565,7 @@ A Tests run of a pull request into dev from a branch of this repository skips ev
 | `unit`, `unit-selected` | `Run tests`, `Run the selected tests` | head | Runs pytest with `--cov-context=test -p tests.dep_inputs -p tests.pass_record` on the command line, `DEP_INPUTS_DIR=dep-inputs` and `CI_RESULTS=ci-results` |
 | `unit`, `unit-selected` | `Record this leg's passed tests` | head | Builds `branch-record/record.json` with `python -m tests.branch_record` |
 | `unit`, `unit-selected` | `Upload this leg's branch record`, `Upload this leg's branch coverage` | none | Publish `branch-record-3.12-<leg>-<attempt>` and `branch-coverage-3.12-<leg>-<attempt>` |
-| `test-count` | `Plan the tests whose inputs did not change` | grader, `origin/dev` | Runs `scripts.ci_branch_plan` after `scripts.ci_test_plan` |
+| `test-count` | `Plan the tests whose inputs did not change` | grader, the event base | Runs `scripts.ci_branch_plan` after `scripts.ci_test_plan` |
 | `test-count` | `Upload the pull request runs' test plan` | none | Publishes `reused-branch-3.12` when the plan reuses at least one test |
 | `test-count` | `Deselect the reused tests` | grader | Deselects the dev plan and the branch plan together |
 | `unit-selected` | `Wait for the early collection`, `Adopt the reused tests from the protected grader` | grader | Hands the leg the deselected tests as `CI_REUSED` |
@@ -601,7 +601,7 @@ It writes `$RUNNER_TEMP/reused-branch.json` and `branch=<n>` and `branch_runs=<i
 `scripts.dep_manifest deselect` takes `--plan` once for each plan that reuses a test and adds a `branch` list of the tests only the branch plan reused. The output is `reused-3.12` and part of `early-collected-3.12`.
 
 - Full scope shards download `reused-3.12` when either plan reuses a test, and `conftest` deselects it as before.
-- Selected legs wait up to 4 minutes for `early-collected-3.12` with `await-download`. If it never lands, the leg prints a notice, runs every selected test and skips its check; `test-count` failing still fails the gate. Otherwise the leg adds `origin/dev` as the grader. If the grader lacks `scripts/ci_branch_plan.py`, the leg prints the `No reuse on a selected leg` notice and runs every selected test. Otherwise it passes `reused.json` as `CI_REUSED` when the early collection's plan outputs report reuse. Selected legs therefore also skip tests the dev plan reuses.
+- Selected legs wait up to 4 minutes for `early-collected-3.12` with `await-download`. If it never lands, the leg prints a notice, runs every selected test and skips its check; `test-count` failing still fails the gate. Otherwise the leg fetches the event base and adds it as the grader. If the grader lacks `scripts/ci_branch_plan.py`, the leg prints the `No reuse on a selected leg` notice and runs every selected test. Otherwise it passes `reused.json` as `CI_REUSED` when the early collection's plan outputs report reuse. Selected legs therefore also skip tests the dev plan reuses.
 
 ### Grade
 
@@ -614,7 +614,7 @@ On a pull request run from this repository that is not test only, `sonar` mints 
 
 ### Trust
 
-- The planner, the deselect, the selected leg's check and the coverage carry run from protected code: `origin/dev`, or in `sonar`, where no step may read the dev head, the pull request's base commit. The head supplies only records, and the planner checks each against the API's view of its run.
+- The planner, the deselect, the selected leg's check and the coverage carry run from protected code: the event base, the dev commit the run's merge and its step commands came from, so a dev push during the run never pairs a newer grader with older commands. Shard check also checks out the event base on a pull request. The head supplies only records, and the planner checks each against the API's view of its run.
 - The planner cannot tell a forged record from a real one. Head code writes the records and runs on the same runner as the grader steps, so a pull request can make its own later runs skip tests at the pull request tier. The merge queue never reads records and runs the unit suite in full, so it is unaffected.
 - Merge group, push and dispatch runs never run the branch planner: the plan step checks the event, and `ci_branch_plan` returns an empty plan for any other event. Fork pull requests write no records, and the planner refuses a head repository other than this one.
 - `scripts/ci_reuse.py` and `scripts/ci_dev_reuse.py` refuse any run that published a `reused-branch-` artifact, so neither queue reuse nor dev unit reuse adopts a run that skipped tests on branch records.
@@ -645,7 +645,6 @@ gh api "repos/the-cloud-clockwork/agentihooks/actions/runs/$RUN/artifacts?per_pa
 - The venv cache key carries the UTC day, so a record from an earlier day never matches. Records expire after 7 days.
 - Selected legs now wait for `test-count`'s early collection, up to 4 minutes, before running tests.
 - Selected legs carry no dev coverage for tests the dev plan reuses. Those tests depend on no changed unit, so coverage on changed lines is unaffected; the run's overall coverage figure drops.
-- A selected leg's grader is `origin/dev` when the leg checks out, which can be newer than the planner's.
 
 ## A crashed xdist worker and coverage data
 
