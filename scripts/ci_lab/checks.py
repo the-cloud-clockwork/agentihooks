@@ -114,7 +114,7 @@ def _logs(output: Output) -> str:
     """Return a block per unit log holding its last LOG_TAIL characters, within LOGS_LIMIT so the unit key listing
     keeps the rest of GitHub's limit; past it, the blocks that fit and a note that the later ones are left out."""
     blocks = [_block(unit, log[-LOG_TAIL:]) for unit, log in output.logs]
-    note = f"Log tails of {len(blocks)} failed units pass half of GitHub's limit; the later ones are left out.\n"
+    note = f"Log tails of {len(blocks)} failed units exceed half of GitHub's limit; the later ones are left out.\n"
     return _fitting(blocks, LOGS_LIMIT, note)[0]
 
 

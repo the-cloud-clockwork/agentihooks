@@ -20,7 +20,9 @@ LOG = b"".join(
         b"x" * 5000,
         f"\ngithub {GITHUB}\nslack {SLACK}\n{PASSWORD}\n".encode(),
         b"bad byte \xff\n",
-        b"scripts/alpha.py:1:1: I001 Import block is un-sorted or un-formatted\n",
+        b"I001 [*] Import block is un-sorted or un-formatted\n --> scripts/ci_lab/head_notice.py:1:1\n  |\n",
+        b"1 | / import hmac\n2 | | import hashlib\n  | |______________^\n  |\nhelp: Organize imports\n\n",
+        b"Found 1 error.\n[*] 1 fixable with the `--fix` option.\n",
     ]
 )
 TAIL = (

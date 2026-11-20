@@ -253,7 +253,7 @@ def test_unit_logs_that_fill_half_the_github_limit_exactly_all_show() -> None:
 
 @pytest.mark.feature("lab-static-check-log-tail")
 def test_unit_logs_past_half_the_github_limit_show_those_that_fit_and_a_note() -> None:
-    note = "Log tails of 9 failed units pass half of GitHub's limit; the later ones are left out.\n"
+    note = "Log tails of 9 failed units exceed half of GitHub's limit; the later ones are left out.\n"
     half, frame = 65535 // 2, len("Log tail of static `ruff-1f2e`:\n```\n\n```\n")
     full = (half - len(note) - frame) // (frame + 4096)
     last = "w" * (half - len(note) - full * (frame + 4096) - frame)
