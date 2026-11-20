@@ -335,7 +335,8 @@ class Inbox(Protocol):
 
 
 class Expander(Protocol):
-    """What expands a grade request into units and bases a plant head on dev."""
+    """What expands a grade request into units, bases a plant head on dev and says whether a node mirror can hold a
+    head."""
 
     def expand(self, request: GradeRequest) -> Plan:
         """Return the plan of one grade request."""
@@ -343,6 +344,10 @@ class Expander(Protocol):
 
     def merge_base(self, repo: str, head: str) -> str:
         """Return the merge base of a head with the repository's dev branch head."""
+        ...
+
+    def carried(self, repo: str, head: str) -> bool:
+        """Return whether a ref every node mirror fetches carries the head."""
         ...
 
 
@@ -739,10 +744,26 @@ class Scheduler:
         output = Output(title, reason, (), f"unexpanded-{now_ms}", "unknown", f"{request.repo}/commit/{request.head}")
         self.ports.checks(_slug(request.repo)).post(request.head, REQUIRED, "completed", "failure", output, True)
 
+    def _retire(self, request: GradeRequest, now_ms: int) -> str:
+        """Retire a head no ref every node mirror fetches carries, placing none of its units since no worker could
+        fetch it. A hotfix or pull request class head posts a completed required check run with conclusion failure
+        naming that reason, under the lab-shadow name since a head with no plan has no authoritative gates."""
+        reason = f"no branch or pull request head ref of {request.repo} carries {request.head}"
+        if request.tier <= Priority.PULL_REQUEST:
+            title = f"{CLASSES[request.tier]} grade retired"
+            output = Output(
+                title, reason, (), f"uncarried-{now_ms}", "unknown", f"{request.repo}/commit/{request.head}"
+            )
+            self.ports.checks(_slug(request.repo)).post(request.head, REQUIRED, "completed", "failure", output, True)
+        return f"retiring {request.head}: {reason}"
+
     def _start(self, request: GradeRequest, lane: str, ref: str, now_ms: int) -> str:
         """Open a grade of a head and the grade ref it was pushed to: supersede the lane's older head, place every unit
         and hold the store's misses for the budget; a request that bypasses negative verdicts grades again under a run
-        of its own."""
+        of its own. A head no ref every node mirror fetches carries is retired before expansion, unless it was pushed
+        to a grade ref, which the lab remote serves."""
+        if not ref.startswith(GRADE_REFS) and not self.ports.expander.carried(request.repo, request.head):
+            return self._retire(request, now_ms)
         plan = self.ports.expander.expand(request)
         inputs = GradeInputs(request.repo, request.head, request.base, CLASSES[request.tier], plan.grader)
         run = grade_key(inputs)
@@ -1202,6 +1223,14 @@ class MirrorExpander:
         dev = self._dev_head(repo, mirror)
         mirror.fetch(head)
         return self._git(mirror, "merge-base", head, dev).strip()
+
+    def carried(self, repo: str, head: str) -> bool:
+        """Return whether a ref every node mirror fetches carries the head: a branch or pull request head ref of the
+        repository names it, or it is an ancestor of the repository's dev branch head."""
+        listing = subprocess.run(
+            ["git", "ls-remote", repo, "refs/heads/*", "refs/pull/*/head"], capture_output=True, text=True, check=True
+        )
+        return head in {line.split()[0] for line in listing.stdout.splitlines()} or self.merge_base(repo, head) == head
 
     def trusted(self, repo: str) -> frozenset[str]:
         """Return the runner trust list on the repository's dev branch."""

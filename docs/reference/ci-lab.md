@@ -2637,6 +2637,19 @@ kubectl logs -n ci-lab deploy/ci-lab-scheduler | grep 'cannot expand'
 | `'steps'` or `'jobs'` | The called workflow has no `jobs`, or one of its jobs has neither `steps` nor `uses` |
 | A YAML parse error | A workflow file directly in `.github/workflows` at the grader revision does not parse, even one that no static job calls |
 
+#### A head no node mirror can hold
+
+Each CI node's cache mirrors only the repository's `refs/heads/*` and `refs/pull/*/head` refs, so a
+worker cannot fetch a commit no such ref reaches, such as the head of an ejected merge group whose
+`gh-readonly-queue` branch is gone. Before the scheduler expands a released head it asks
+`MirrorExpander.carried`, which lists those refs with `git ls-remote` and accepts the head when a
+ref names it or when it is an ancestor of the dev branch head. A head that check refuses is retired
+with the action `retiring <head>: no branch or pull request head ref of <repo> carries <head>`: it
+gets no grade and no unit, so no worker leases one. A hotfix or pull request class head also gets
+one completed `lab-shadow/required` check run with conclusion `failure` and that summary; a merge
+group, promotion or backfill head gets none. A head pushed to a grade ref skips the check, since the
+lab remote serves it.
+
 #### The worker reads the same workflows
 
 The static executor finds its gate again on the worker. `scripts.ci_lab.executors.gate(grader_tree,
