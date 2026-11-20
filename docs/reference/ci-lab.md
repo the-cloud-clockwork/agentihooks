@@ -191,7 +191,7 @@ per-node verification; a Ready cache pod alone does not prove either cache is wa
 | `AGENTIHOOKS_BUS*` | yes | yes | Event bus connection settings |
 | `CI_LAB_MINIO_*` | yes | yes | Object store endpoint, bucket and credentials, passed by reference |
 | `CI_LAB_SECRET_*` | no | yes | A secret a static unit's step reads by name: `CI_LAB_SECRET_<NAME>` is `${{ secrets.<NAME> }}`, passed by reference and given only to a step whose env reads it (see [What a gate's steps read](#what-a-gates-steps-read)) |
-| `GITHUB_APP_*` | yes | never | GitHub App identity used to post check runs and read dev push manifest artifacts; the App needs checks write and actions read |
+| `GITHUB_APP_*` | yes | never | GitHub App identity used to post check runs, send the relay's `lab-check` repository dispatches and read dev push manifest artifacts; the App needs checks write, contents write and actions read |
 | `CI_LAB_REDIS_URL` | yes | no | Queue, lease and verdict index store |
 | `CI_LAB_REINDEX_ON_START` | yes | no | Only the literal string `true` rebuilds missing verdict index entries from report objects before the listeners start and prints `reindexed N verdicts`; unset or any other value skips it. See [Recovery](#recovery) |
 | `CI_LAB_RUNTIME_CONFIG` | yes | no | Path of the mounted runtime config the scheduler reads at start, before it connects anywhere; its budget sets the budget fraction and shed classes of `/capacity` and `/metrics`; `python -m scripts.ci_lab runtime <path>` validates it |
@@ -1817,9 +1817,28 @@ Git gets `AGENTIHOOKS_LAB_REMOTE_TOKEN` as the basic password of the user `lab` 
 through its environment config, and no store or log keeps it. Worker units run with the sandbox
 whitelist alone, so no unit sees the token. A grade of a head pushed
 to a `refs/grade/*` ref keeps the ref and records each check's status and conclusion. It posts no
-GitHub check run; the relay posts them once it has pushed the head. The relay's push token asks
+GitHub check run; the relay has them posted once it has pushed the head. The relay's push token asks
 for contents write and workflows write, so a relayed branch that changes workflow files is
 accepted.
+
+The relay sends each check run as a `lab-check` repository dispatch with an App token holding
+contents write, because the lab's App holds no checks write. The dispatch carries the head sha, the
+check run name, its status, conclusion, details link and output. The `Lab check` workflow
+(`.github/workflows/lab-check.yml`) runs on that dispatch with `checks: write` and `contents: read`
+and runs `python -m scripts.ci_lab.checks`. That entry reads the dispatch from the event file,
+refuses a head that is not a full sha, a name outside `lab/` and `lab-shadow/` and a bad status or
+conclusion, and posts with the workflow token. `Checks` takes `GITHUB_TOKEN` whenever
+`GITHUB_ACTIONS` is `true` and keeps the App token everywhere else. The post is an upsert: it lists
+the head's check runs of that name and advances the one whose external id is `lab:<sha>`, else
+creates it, stamping a completed run with its completed time. Every dispatch and every rerun for one
+head and name therefore leaves one check run, and the workflow's concurrency group per head sha
+queues runs of that head behind each other without cancelling any. GitHub runs a repository
+dispatch workflow only from the default branch, so a change to the workflow or the entry takes
+effect once promotion carries it to `main`.
+
+```bash
+gh api "repos/<owner>/<repo>/commits/<sha>/check-runs?check_name=lab/<gate>" --jq '.total_count'
+```
 
 | Name | Meaning |
 |---|---|
@@ -2448,10 +2467,10 @@ prints the relay's actions after the pass's own. `main` builds the relay once at
 lab heads consumer, the `ci-lab-relay` durable filtered to `ci.lab.head.notice`, which bus
 provisioning creates beside the scheduler's `ci-lab-scheduler` durable. A green grade of a pushed
 `refs/grade/<task>` head with a `branch` option then reaches that branch, its check runs and its
-draft pull request. The relay keeps the id of each check run it creates on the grade's state under
-the check run's name as GitHub answers and seeds its poster with those ids before it posts, so a
-relay retried after the service restarts, such as one whose pull request call failed after its
-posts, creates no second completed check run. The ids the scheduler keeps under gate names for its
+draft pull request. The relay keeps a mark for each check run it dispatches on the grade's state
+under the check run's name as GitHub accepts the dispatch and seeds its poster with those marks
+before it posts, so a relay retried after the service restarts, such as one whose pull request call
+failed after its posts, sends no second dispatch. The ids the scheduler keeps under gate names for its
 own posts, such as shadow check runs of the same grade, never seed the relay.
 
 A grade's state is one JSON document at `agentihooks-ci:grade:<run>`, where `<run>` is the grade
