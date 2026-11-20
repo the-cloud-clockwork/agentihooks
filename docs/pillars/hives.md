@@ -1863,8 +1863,8 @@ hive gets none. After a failed admit ask or launch, the spoke sends `reopen`, wh
 and drops one that waited there as long as the hive waits for its answer, so an admission the hive gave up on never
 claims the task; see
 [How the hub serves requests](../reference/swarm-bus-scope.md#how-the-hub-serves-requests).
-A hub admission sets on its claim what a tick launch sets. The ledger claim write names the task's work folder,
-clears a recorded protected branch and writes the lane kind. The spawn task carries the continuation, stack base,
+A hub admission sets on its claim what the removed tick launch set. The ledger claim write names the task's work
+folder, clears a recorded protected branch and writes the lane kind. The spawn task carries the continuation, stack base,
 territory overlaps, group and work folder files, and the handoff transfer the predecessor left (see
 [What the claim sets](#what-the-claim-sets) and
 [Handoff continuity on admission](#handoff-continuity-on-admission)). The hub writes no folder itself: the hive lane
@@ -2051,7 +2051,8 @@ semgrep --test --config .semgrep-incidents/hub-admission-late-answer-releases-cl
 ### What the claim sets
 
 Since pull request [#11139](https://github.com/the-cloud-clockwork/agentihooks/pull/11139), an eng, ci or plan
-admission sets everything the tick sets when it places a task, so an `events` swarm loses none of it: the work
+admission sets everything the tick set when it placed a task, before pull request
+[#11141](https://github.com/the-cloud-clockwork/agentihooks/pull/11141) removed the tick spawn: the work
 folder, the reclaim of a recorded branch, the protected branch clear, the lane kind, the territory overlaps and the
 group. Every admission does this; no setting turns it on or off. A master spoke admits nothing on the hub and is
 outside this path.
@@ -2119,24 +2120,28 @@ repository origin:
 | Swarm | Where the heads come from | When the read fails |
 |---|---|---|
 | A `repo_origin` is stored | One GitHub GraphQL query naming every candidate, bounded to 3 seconds, well inside the hub's 8,000 millisecond answer budget | A slow, failed or empty answer marks every candidate `unknown`. The admission goes on and the agent starts fresh. |
-| No `repo_origin` | `git ls-remote --heads origin` in the swarm's checkout on the hub host, with a 20 second timeout; when that listing fails, one `git ls-remote` per candidate | A candidate whose head cannot be read is `unknown`. |
+| No `repo_origin` | `git ls-remote --heads origin` in the swarm's checkout on the hub host, with a 20 second timeout; when that listing fails, one `git ls-remote` per candidate, each with a 20 second timeout | A candidate whose head cannot be read is `unknown`. |
 
-A head read never holds the admission past its answer budget. The `fresh_reason` says why no branch was continued:
+The GitHub read ends inside the answer budget. The `git ls-remote` read has no such bound: a slow listing can finish
+the admission after the hive stopped waiting, and the hub keeps that admission for the hive's next poll (see
+[Launch failure troubleshooting](#launch-failure-troubleshooting)).
+
+The `fresh_reason` says why no branch was continued:
 
 | `fresh_reason` | Cause |
 |---|---|
 | `the remote heads of <branches> could not be read` | At least one candidate's head was `unknown` and none had a head |
 | `no earlier life pushed a branch: checked <branches> on the remote` | Every candidate was read and none exists on the remote |
-| `no branch is recorded for this task outside another task's pull request` | No candidate is left once branches held by other tasks' pull requests are dropped |
+| `no branch is recorded for this task outside another task's pull request` | No candidate is left: a handed off task has no recorded branch and no earlier life, or every candidate is held by another task's pull request |
 | `the task branch belongs to another repository` | The row's `branch_repo` names a repository other than the swarm's |
 
 The result lands in the spawn task's `reclaim`, and is stored for the admitted agent in
 `<root>:swarm:<slug>:reclaims`; with a stored handoff it lands in `handoff_envelope` instead (see
 [What the admission adds](#what-the-admission-adds)).
 
-The protected branch clear comes first on purpose. The tick resolves the continuation before its claim write, so a
-task recorded on `dev` can be told to continue `origin/dev`. The hub resolves it on the row it has just written, so
-the same task continues from an earlier life's branch, or starts fresh when none was pushed.
+The protected branch clear comes first on purpose. The removed tick placement resolved the continuation before its
+claim write, so a task recorded on `dev` could be told to continue `origin/dev`. The hub resolves it on the row it has
+just written, so the same task continues from an earlier life's branch, or starts fresh when none was pushed.
 
 #### Overlaps and group
 
@@ -2151,9 +2156,13 @@ leading `./` and a trailing `/` are dropped.
 | `areas` | The shared areas, sorted, each the narrower of the pair |
 | `checks` | Only when `claimant` is empty: `true` for a `pr` task waiting on its checks, `false` for a `claimed` one |
 
-The hub has no runtime report of which agents still run, so every agent record that has not ended counts as a
-claimant. The opening lists each entry as `Task <id>, claimed by <agent>, shares <areas>.` and tells the agent to
-coordinate through the inbox.
+An agent record has ended when its state is `finished`, or, for a non-master agent, when its task is done, `blocked`
+or `handoff`, awaits verification with no claimant, or no longer names the agent as its claimant while a hive runs
+the agent. The
+opening tells the agent to coordinate with each claimant through the inbox and lists each entry as
+`Task <id>, claimed by <agent>, shares <area> and <area>.` An entry with no claimant reads
+`waiting on checks with no agent; no coordination note needed` in place of `claimed by <agent>` when `checks` is
+`true`, and `no live agent; no coordination note needed` when it is `false`.
 
 `group` holds the `id`, `title` and `description` of each task named in the row's `group_members` that the ledger
 still holds; a member missing from the ledger is left out. The opening then tells the agent its task leads a group
