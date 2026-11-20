@@ -2703,9 +2703,11 @@ mismatch and idle smoke tests.
 
 When the pane of a hub started agent dies before its work ends, its hive reopens the agent's own conversation in the
 same seat, under the same task claim. This is the dead resume the tick gives agents it launched itself (see
-[Outage holds and recovery](swarm.md#outage-holds-and-recovery)). The tick's reap step leaves hub admitted agents
-to the hub, so on the `events` engine the hub's `lifecycle` reactor decides the resume and sends the agent's hive a
-`resume` command order. When the resume cannot run, the agent is dropped and its task reopens for a fresh agent.
+[Outage holds and recovery](swarm.md#outage-holds-and-recovery)). The tick's reap step watches a hub admitted agent
+only while the controller lists its pane as live and sends its hive an execution stop once its work ends (see
+[Stopping an agent whose work ended](#stopping-an-agent-whose-work-ended)). It never resumes a dead one, so on the
+`events` engine the hub's `lifecycle` reactor decides the resume and sends the agent's hive a `resume` command order.
+When the resume cannot run, the agent is dropped and its task reopens for a fresh agent.
 
 Before [pull request #11246](https://github.com/the-cloud-clockwork/agentihooks/pull/11246) the reactor had no
 resume. It dropped every dead hub started agent and reopened its task, so the next agent started without the dead
