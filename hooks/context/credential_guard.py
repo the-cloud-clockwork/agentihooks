@@ -100,6 +100,9 @@ PROC_DIR = re.compile(r"/proc\b")
 SHELL_WORD_BREAK = re.compile(r"[\s;|&()<>]+")
 CD_OPERAND = re.compile(r"\b(?:cd|pushd)(?:\s+-\S*)*\s+(\S+)")
 BARE_ENVIRON = re.compile(r"(?<![\w.])environ\b")
+PID_NAMES = frozenset({"self", "thread-self"})
+DEPTH_SHIFTING_SEGMENTS = frozenset({".", "..", "**"})
+EXPANDING_SEGMENT = re.compile(r"[$`{]")
 
 
 READER_VERBS = {
@@ -546,11 +549,27 @@ def proc_environ_verdict(command, cwd):
     return None
 
 
-def path_reads_environ(word):
+def path_reads_environ(word: str) -> bool:
     *dirs, leaf = word.split("/")
-    if any(fnmatch.fnmatchcase("proc", d) for d in dirs[:-1]):
-        return leaf_names_environ(leaf)
-    return any("$" in d for d in dirs) and fnmatch.fnmatchcase("environ", leaf)
+    if any("$" in d for d in dirs) and fnmatch.fnmatchcase("environ", leaf):
+        return True
+    parts = [p for p in word.split("/") if p]
+    return any(fnmatch.fnmatchcase("proc", p) and proc_tail_reads_environ(parts[i + 1 :]) for i, p in enumerate(parts))
+
+
+def proc_tail_reads_environ(tail: list[str]) -> bool:
+    if not tail or not leaf_names_environ(tail[-1]):
+        return False
+    middle = tail[:-1]
+    if any(s in DEPTH_SHIFTING_SEGMENTS or EXPANDING_SEGMENT.search(s) for s in middle):
+        return True
+    if len(middle) == 3:
+        return names_pid(middle[0]) and fnmatch.fnmatchcase("task", middle[1]) and names_pid(middle[2])
+    return len(middle) == 1 and names_pid(middle[0])
+
+
+def names_pid(segment: str) -> bool:
+    return segment.isdigit() or segment in PID_NAMES or bool(GLOB_CHARS.search(segment))
 
 
 def leaf_names_environ(leaf: str) -> bool:
