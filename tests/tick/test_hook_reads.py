@@ -20,6 +20,24 @@ class _Store:
         return f"config of {slug}"
 
 
+class _Redis:
+    def delete(self, *keys: str) -> int:
+        return len(keys)
+
+
+class _PhasesStore(_Store):
+    def __init__(self) -> None:
+        self.redis = _Redis()
+
+    def key(self, slug: str, name: str) -> str:
+        return f"{slug}:{name}"
+
+
+class _Ledger:
+    def binned(self, slug: str) -> bool:
+        return False
+
+
 def _lines(caplog: pytest.LogCaptureFixture) -> list[tuple[str, int, str]]:
     return [(r.name, r.levelno, r.getMessage()) for r in caplog.records if r.name == LOGGER]
 
@@ -84,9 +102,24 @@ def test_the_real_hook_bodies_read_only_their_declared_keys_in_enforce_mode(monk
 
 
 @pytest.mark.feature("swarm-tick-hook-reads")
+def test_the_phases_hook_reads_back_the_pass_state_it_stores_in_enforce_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(ENV, "enforce")
+    doc = {"tasks": [{"id": "t1"}]}
+    kept: list[object] = []
+    monkeypatch.setattr(cli.ledger_client, "pass_state", lambda ledger, slug: doc)
+    monkeypatch.setattr(cli.panic, "keep_fixers", lambda store, slug, tasks: kept.append(tasks))
+    wrapper = _wrapper(PassBox(), PassBox())
+    wrapper.state = {"store": _PhasesStore(), "slug": "sw", "ledger": _Ledger()}
+    assert wrapper.hooks()["wrapper phases"]() is True
+    assert kept == [doc["tasks"]]
+    assert dict(wrapper.box) == {"doc": doc}
+
+
+@pytest.mark.feature("swarm-tick-hook-reads")
 def test_each_site_hook_declares_exactly_the_box_keys_it_reads() -> None:
     assert sites.TICK_HOOK_READS == {"agents": frozenset({"config", "doc", "rows"}), "tasks": frozenset({"config"})}
     assert cli.WRAPPER_HOOK_READS == {
+        "wrapper phases": frozenset({"doc"}),
         "wrapper relay": frozenset({"judged"}),
         "wrapper view": frozenset({"agents"}),
     }
