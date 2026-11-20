@@ -35,7 +35,7 @@ def journal(slug: str, blocked: bool, renewed: bool, wait_s: float, wall_s: floa
         "wall_s": wall_s,
         "redis_s": redis_s,
     }
-    print(json.dumps(line), file=sys.stderr, flush=True)
+    print(json.dumps(line), file=sys.stderr)
 
 
 @dataclass

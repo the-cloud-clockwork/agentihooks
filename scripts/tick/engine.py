@@ -121,7 +121,7 @@ def _run_once(step: Step, ctx: Context) -> StepRecord:
     with _RUNNING_LOCK:
         earlier = _RUNNING.get(key)
         if earlier is not None and earlier.is_alive():
-            return StepRecord(step.name, 0.0, budget_s, held=True)
+            return StepRecord(step.name, 0.0, step.budget_s, held=True)
         tools = None if ctx.tools is None else ctx.tools.for_effects(step.effects)
         run = _Run()
         worker = Thread(
@@ -137,7 +137,7 @@ def _run_once(step: Step, ctx: Context) -> StepRecord:
     worker.join(END_GRACE_S)
     if not outcome:
         _lost_writes(step, CUT_EVENT)
-        return StepRecord(step.name, clock() - started, budget_s, cut=True)
+        return StepRecord(step.name, clock() - started, step.budget_s, cut=True)
     return _finished(step, outcome, clock() - started)
 
 

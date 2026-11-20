@@ -177,7 +177,7 @@ def request(slug: str, path: str, payload: dict[str, Any] | None = None) -> dict
             "outcome": outcome,
             "wall_s": time.monotonic() - started,
         }
-        print(json.dumps(line), file=sys.stderr, flush=True)
+        print(json.dumps(line), file=sys.stderr)
 
 
 def client(base: str, timeout: float) -> ResourceClient:
