@@ -83,7 +83,7 @@ holds an authoritative verdict for it.
 
 The ruff steps run `python -P`, which keeps the current directory off the
 import path. A head that ships its own `ruff` package therefore cannot stand in
-for the installed one. Every lint gate step carries `if: ${{ !cancelled() }}`,
+for the installed one. Every lint gate step carries {% raw %}`if: ${{ !cancelled() }}`{% endraw %},
 so each one reports even after an earlier step turns red.
 
 The marker vector step compares the head's fixture byte for byte with
