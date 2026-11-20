@@ -112,9 +112,14 @@ def test_the_import_scan_keeps_every_letter_of_a_member_name() -> None:
 
 
 def test_no_test_module_loads_the_mcp_sdk_while_collecting() -> None:
-    offenders = [
-        f for f in discover_test_files(_ROOT) if loads_heavy(_ROOT, f.removesuffix(".py").replace("/", "."), set())
-    ]
+    clean: set[str] = set()
+    offenders: list[str] = []
+    for f in discover_test_files(_ROOT):
+        walked = set(clean)
+        if loads_heavy(_ROOT, f.removesuffix(".py").replace("/", "."), walked):
+            offenders.append(f)
+        else:
+            clean = walked
     assert offenders == []
 
 
@@ -158,6 +163,13 @@ def test_function_imports_read_past_a_signature_split_over_lines(tmp_path: Path)
 
 
 def test_test_modules_that_load_the_mcp_sdk_when_run_share_one_worker() -> None:
-    sources = {f: (_ROOT / f).read_text() for f in discover_test_files(_ROOT)}
-    offenders = [f for f, source in sources.items() if loads_sdk_when_run(_ROOT, source) and SDK_GROUP not in source]
+    clean: set[str] = set()
+    offenders: list[str] = []
+    for f in discover_test_files(_ROOT):
+        source = (_ROOT / f).read_text()
+        walked = set(clean)
+        if not loads_sdk_when_run(_ROOT, source, walked):
+            clean = walked
+        elif SDK_GROUP not in source:
+            offenders.append(f)
     assert offenders == []
