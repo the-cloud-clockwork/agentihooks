@@ -388,7 +388,7 @@ def test_the_wait_lasts_the_minutes_it_is_given(monkeypatch: pytest.MonkeyPatch,
     monkeypatch.setenv("SHARDS", "2")
     monkeypatch.setenv("SCOPE", "full")
     monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
-    monkeypatch.setenv("WAIT_MINUTES", "89")
+    monkeypatch.setenv("WAIT_MINUTES", "59")
     monkeypatch.setattr(arrivals, "OUT", tmp_path / "shards")
     waits: list[float] = []
 
@@ -400,4 +400,4 @@ def test_the_wait_lasts_the_minutes_it_is_given(monkeypatch: pytest.MonkeyPatch,
 
     monkeypatch.setattr(arrivals, "arrive", arrive)
     assert arrivals.main() == 0
-    assert waits == [89 * 60]
+    assert waits == [59 * 60]

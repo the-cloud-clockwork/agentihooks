@@ -147,9 +147,10 @@ wait's first listing. Coverage that an earlier attempt left counts at once. A
 shard that leaves neither coverage nor a flake report, such as one that lost
 its runner or ran past its job timeout, holds the wait to its deadline, and so
 does listed coverage that never downloads. The wait gives up after
-`WAIT_MINUTES`: 89 minutes on a dev push, inside a 90 minute step and a 120
-minute job, and 44 minutes on every other event, inside a 45 minute step and a
-60 minute job. Dev push shards queue for runners behind pull request and queue
+`WAIT_MINUTES`: 59 minutes on a dev push, inside a 60 minute step and the 75
+minute job, and 44 minutes on every other event, inside a 45 minute step and
+the 60 minute job, so both keep 15 minutes for the merge, the scan and the
+quality gate. Dev push shards queue for runners behind pull request and queue
 work: on 19 November the last shard of a dev push ended up to 54 minutes after
 sonar started, and three dev push runs lost a green shard's coverage to a 44
 minute wait.

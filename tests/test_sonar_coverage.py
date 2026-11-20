@@ -17,6 +17,8 @@ import pytest
 import yaml
 from coverage import CoverageData
 
+from tests.test_sonar_arrivals import Clock, Service
+
 pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -70,7 +72,7 @@ def test_sonar_starts_beside_the_shards_and_takes_each_shards_coverage_as_it_lan
         "SHARDS": merge["env"]["SHARDS"],
         "SCOPE": merge["env"]["SCOPE"],
         "ARRIVALS": "${{ github.workspace }}/.github/coverage/arrivals.py",
-        "WAIT_MINUTES": "${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && 89 || 44 }}",
+        "WAIT_MINUTES": "${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && 59 || 44 }}",
     }
     order = [
         "Install coverage",
@@ -91,31 +93,9 @@ def test_the_coverage_wait_outlasts_its_own_deadline_inside_the_sonar_budget() -
     step = steps[names.index("Take each shard's coverage as it lands")]
     waits = _dev_push_or_other(step["env"]["WAIT_MINUTES"])
     minutes = _dev_push_or_other(step["timeout-minutes"])
-    assert waits == (89, 44)
+    assert waits == (59, 44)
     assert waits[0] < minutes[0] and waits[1] < minutes[1]
-    assert _dev_push_or_other(jobs["sonar"]["timeout-minutes"]) == (minutes[0] + 30, minutes[1] + 15)
-
-
-class _LateShard:
-    """List no artifact until the wait reaches the landing second, then the one shard's coverage."""
-
-    def __init__(self, landing: float) -> None:
-        self.landing = landing
-        self.moment = 0.0
-
-    def now(self) -> float:
-        return self.moment
-
-    def pause(self, seconds: float) -> None:
-        self.moment += seconds
-
-    def listed(self) -> dict[str, str]:
-        return {"coverage-3.12-1": "1"} if self.moment >= self.landing else {}
-
-    def fetch(self, name: str, folder: Path) -> bool:
-        folder.mkdir(parents=True)
-        (folder / ".coverage").write_text(name)
-        return True
+    assert _dev_push_or_other(jobs["sonar"]["timeout-minutes"]) == (minutes[0] + 15, minutes[1] + 15)
 
 
 @pytest.mark.feature("dev-push-sonar-waits-for-shards-that-queue-late")
@@ -128,10 +108,9 @@ def test_a_dev_push_takes_a_shard_that_ends_54_minutes_into_the_wait(tmp_path: P
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    late = _LateShard(54.1 * 60)
-    assert module.arrive(late, 1, "full", 1, tmp_path / "push", push * 60, late) == []
-    early = _LateShard(54.1 * 60)
-    assert module.arrive(early, 1, "full", 1, tmp_path / "other", other * 60, early) == [1]
+    rounds: list[dict[str, str] | None] = [{}] * round(54.1 * 60 / module.INTERVAL) + [{"coverage-3.12-1": "1"}]
+    assert module.arrive(Service(rounds), 1, "full", 1, tmp_path / "push", push * 60, Clock()) == []
+    assert module.arrive(Service(rounds), 1, "full", 1, tmp_path / "other", other * 60, Clock()) == [1]
 
 
 def test_sonar_waits_for_the_shards_on_a_standard_runner_so_its_scan_keeps_its_cpu() -> None:
