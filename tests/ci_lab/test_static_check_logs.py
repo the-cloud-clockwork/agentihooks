@@ -60,6 +60,7 @@ def test_a_failed_static_unit_s_gate_check_carries_the_tail_of_its_stored_log_wi
     finish(run, {failed: (scheduler.FAILED, LOG), passed: (scheduler.PASSED, b"passed unit log\n")})
     run.tick(1100)
     assert run.lab.poster.moves(HEAD_A, "lint")[-1] == ("completed", "failure")
+    assert [item for item, _ in output(run, "lint").logs] == [failed]
     text = checks.render(output(run, "lint"))["text"]
     listing = f"- static `{failed.key}`\n- static `{passed.key}`\n"
     assert text == f"Log tail of static `{failed.key}`:\n```\n{TAIL}\n```\n{listing}"
