@@ -111,11 +111,11 @@ def render(output: Output) -> dict[str, str]:
 
 
 def _logs(output: Output) -> str:
-    """Return a block per unit log holding its last LOG_TAIL characters, in order while the blocks fit in LOGS_LIMIT,
-    so the unit key listing keeps the rest of GitHub's limit."""
+    """Return a block per unit log holding its last LOG_TAIL characters, within LOGS_LIMIT so the unit key listing
+    keeps the rest of GitHub's limit; past it, the blocks that fit and a note that the later ones are left out."""
     blocks = [_block(unit, log[-LOG_TAIL:]) for unit, log in output.logs]
-    fits = sum(1 for size in accumulate(map(len, blocks)) if size <= LOGS_LIMIT)
-    return "".join(blocks[:fits])
+    note = f"Log tails of {len(blocks)} failed units pass half of GitHub's limit; the later ones are left out.\n"
+    return _fitting(blocks, LOGS_LIMIT, note)[0]
 
 
 def _block(unit: Unit, tail: str) -> str:
@@ -127,11 +127,16 @@ def _block(unit: Unit, tail: str) -> str:
 def _listing(output: Output, limit: int) -> tuple[str, int]:
     """Return a line per unit key and the count listed; past the limit, the lines that fit and a pointer."""
     lines = [f"- {unit.kind} `{unit.key}`\n" for unit in output.units]
-    if sum(map(len, lines)) <= limit:
-        return "".join(lines), len(lines)
-    tail = f"The full list of {len(lines)} unit keys is at {output.details}"
-    fits = sum(1 for size in accumulate(map(len, lines)) if size + len(tail) <= limit)
-    return "".join(lines[:fits]) + tail, fits
+    return _fitting(lines, limit, f"The full list of {len(lines)} unit keys is at {output.details}")
+
+
+def _fitting(parts: list[str], limit: int, note: str) -> tuple[str, int]:
+    """Return every part and their count when all fit in the limit; past it, the leading parts that fit beside the
+    note, then the note, and their count."""
+    if sum(map(len, parts)) <= limit:
+        return "".join(parts), len(parts)
+    fits = sum(1 for size in accumulate(map(len, parts)) if size + len(note) <= limit)
+    return "".join(parts[:fits]) + note, fits
 
 
 def _advance(before: str | None, status: str, conclusion: str | None) -> None:

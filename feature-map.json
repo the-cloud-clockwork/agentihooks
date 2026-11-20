@@ -9276,7 +9276,7 @@
       "id": "lab-static-check-log-tail",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-check-diagnostics",
-      "behaviour": "The CI lab scheduler puts the stored log of each failed static unit of a gate, secret patterns redacted, on that gate's check run, and the check run text shows the last 4096 characters of each such log in a fenced block under its unit key ahead of the unit key listing, the blocks together within half of GitHub's 65535 character limit, so a plant proof that reads only the check run sees which diagnostic failed the gate. A passing unit, a failed unit with no stored or an empty log and the required check add no log, and their text is the unit key listing alone.",
+      "behaviour": "The CI lab scheduler puts the stored log of each failed static unit of a gate, secret patterns redacted, on that gate's check run, and the check run text shows the last 4096 characters of each such log in a fenced block under its unit key ahead of the unit key listing, the blocks together within half of GitHub's 65535 character limit and, past it, the blocks that fit and a note that the later ones are left out, so a plant proof that reads only the check run sees which diagnostic failed the gate. A passing unit, a failed unit with no stored or an empty log and the required check add no log, and their text is the unit key listing alone.",
       "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis, the local object store and a recording poster, and scripts.ci_lab.checks.render over outputs",
       "tests": [
         "tests/ci_lab/test_static_check_logs.py::test_a_failed_static_unit_s_gate_check_carries_the_tail_of_its_stored_log_with_secrets_redacted",
@@ -9284,7 +9284,8 @@
         "tests/ci_lab/test_static_check_logs.py::test_a_gate_whose_static_units_pass_or_keep_no_log_posts_only_its_unit_keys",
         "tests/ci_lab/test_checks.py::test_a_unit_log_shows_fenced_under_its_unit_key_ahead_of_the_unit_keys",
         "tests/ci_lab/test_checks.py::test_a_unit_log_keeps_its_last_4096_characters_in_a_fence_longer_than_its_backtick_runs",
-        "tests/ci_lab/test_checks.py::test_unit_logs_show_while_they_fit_in_half_the_github_limit",
+        "tests/ci_lab/test_checks.py::test_unit_logs_that_fill_half_the_github_limit_exactly_all_show",
+        "tests/ci_lab/test_checks.py::test_unit_logs_past_half_the_github_limit_show_those_that_fit_and_a_note",
         "tests/ci_lab/test_checks.py::test_unit_keys_after_a_unit_log_stop_at_the_github_limit_and_point_at_the_full_list"
       ]
     },

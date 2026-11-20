@@ -241,13 +241,27 @@ def test_a_unit_log_keeps_its_last_4096_characters_in_a_fence_longer_than_its_ba
 
 
 @pytest.mark.feature("lab-static-check-log-tail")
-def test_unit_logs_show_while_they_fit_in_half_the_github_limit() -> None:
-    frame = len("Log tail of static `ruff-1f2e`:\n```\n\n```\n")
-    last = "w" * (32767 - 7 * (frame + 4096) - frame)
-    logs = (*((UNITS[0], "z" * 4096) for _ in range(7)), (UNITS[0], last), (UNITS[0], "v"))
+def test_unit_logs_that_fill_half_the_github_limit_exactly_all_show() -> None:
+    half, frame = 65535 // 2, len("Log tail of static `ruff-1f2e`:\n```\n\n```\n")
+    full = (half - frame) // (frame + 4096)
+    logs = (*((UNITS[0], "z" * 4096) for _ in range(full)), (UNITS[0], "w" * (half - full * (frame + 4096) - frame)))
     rendered = checks.render(replace(OUTPUT, units=UNITS[:1], logs=logs))
-    shown = "".join(f"Log tail of static `ruff-1f2e`:\n```\n{log}\n```\n" for _, log in logs[:8])
-    assert len(shown) == 32767
+    shown = "".join(f"Log tail of static `ruff-1f2e`:\n```\n{log}\n```\n" for _, log in logs)
+    assert len(shown) == half
+    assert rendered["text"] == shown + "- static `ruff-1f2e`\n"
+
+
+@pytest.mark.feature("lab-static-check-log-tail")
+def test_unit_logs_past_half_the_github_limit_show_those_that_fit_and_a_note() -> None:
+    note = "Log tails of 9 failed units pass half of GitHub's limit; the later ones are left out.\n"
+    half, frame = 65535 // 2, len("Log tail of static `ruff-1f2e`:\n```\n\n```\n")
+    full = (half - len(note) - frame) // (frame + 4096)
+    last = "w" * (half - len(note) - full * (frame + 4096) - frame)
+    logs = (*((UNITS[0], "z" * 4096) for _ in range(full)), (UNITS[0], last), (UNITS[0], "v" * 100))
+    rendered = checks.render(replace(OUTPUT, units=UNITS[:1], logs=logs))
+    shown = "".join(f"Log tail of static `ruff-1f2e`:\n```\n{log}\n```\n" for _, log in logs[:-1]) + note
+    assert len(logs) == 9
+    assert len(shown) == half
     assert rendered["text"] == shown + "- static `ruff-1f2e`\n"
 
 
