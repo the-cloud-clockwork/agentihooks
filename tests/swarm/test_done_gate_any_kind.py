@@ -17,7 +17,7 @@ REFUSED = f"pull request {URL} is open, not merged; {THEN}"
 READY = (
     "If this work opens a pull request, record it with agentihooks swarm sw pr <pr url>. Once its review closed "
     "and it is out of draft, write a Handoff v2 document, leave the crew with "
-    f"agentihooks api --slug sw --as {NAME} leave and release your seat with agentihooks swarm sw ready "
+    f"agentihooks ledger --slug sw --as {NAME} leave and release your seat with agentihooks swarm sw ready "
     "<handoff doc> instead of done: the swarm merges it and reopens the task for its proof. Done refuses while a "
     "recorded pull request is open, unless the proof gives --filed for a fix proposed instead of made."
 )

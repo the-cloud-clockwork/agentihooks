@@ -20,25 +20,11 @@ step and to `proof.md` per piece of evidence.
 
 ## Join
 
-- `agentihooks api --slug <slug> --as <name> join`, once.
+- `agentihooks ledger --slug <slug> --as <name> join`, once.
 - Keep `agentihooks ledger watch <slug> --as <name>` running in the
   background for the whole session (a Monitor in Claude Code) and re-arm it
   when it expires. Act on every OPERATOR line about your task, then
-  `agentihooks api --slug <slug> --as <name> ack`.
-
-## Plan
-
-Before your first edit, a planner sub-agent writes `plan.md` in your task
-work folder, one piece per line: `- what | area, area | why`, each area a
-repo-relative path prefix the piece touches. With no sub-agent tool (Codex),
-write it yourself. Run `agentihooks swarm <slug> trace-plan`: it keeps the
-pieces your task needs and files the cut ones as follow-ups through
-the api. The build gate refuses an edit or a commit outside the
-kept areas and your task's territory, and before a passing verdict for the
-current `plan.md`. A piece you find later is appended to `plan.md` and traced
-again; a plan it fails is revised and traced once more, then the task blocks.
-Done when `plan-verdict.json` reads `pass`, or `unchecked` when the
-classifier did not answer.
+  `agentihooks ledger --slug <slug> --as <name> ack`.
 
 ## Recall
 
@@ -78,16 +64,9 @@ tick-step skill first and follows it for the step's artefacts and checks.
 3. Record the pull request with `agentihooks swarm <slug> pr <url>` and mark
    it ready once its checks are green.
 4. Record landed work in plain words:
-   `agentihooks api --slug <slug> --as <name> comment phases/<phase> "<what landed>"`.
+   `agentihooks ledger --slug <slug> --as <name> comment phases/<phase> "<what landed>"`.
    A follow up you find is proposed, never queued as your own task:
-   `agentihooks api --slug <slug> --as <name> followup add "<text>"`.
-
-## Review
-
-Every sub-agent you launch or continue in this task, whatever its name,
-counts against the task's sub-agent budget. When the `subagents` gate
-refuses, merge with the ruled findings, file the open Spec finding as a
-follow-up through the api, or block the task.
+   `agentihooks ledger --slug <slug> --as <name> followup add "<text>"`.
 
 ## CI proofs
 
@@ -151,7 +130,7 @@ fix a queued pull request, dequeue it first with
 checks pass queue it again with `agentihooks swarm <slug> merge queue <url>`.
 
 Once merged, remove the worktree, then
-`agentihooks api --slug <slug> --as <name> leave` and close with the proof
+`agentihooks ledger --slug <slug> --as <name> leave` and close with the proof
 your task kind needs. The ledger refuses `done` without it.
 
 | Kind | Close |

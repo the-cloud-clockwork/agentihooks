@@ -219,7 +219,7 @@ and its feature map id, so the engineer can run the scaffold from the spec
 alone:
 
 ```bash
-agentihooks api --slug <slug> --as <name> task add <id> "Reap stale waits" --lane eng --phase <phase> --kind code \
+agentihooks ledger --slug <slug> --as <name> task add <id> "Reap stale waits" --lane eng --phase <phase> --kind code \
   --description "Add tick step reap_stale_waits in group observe, lane tick, every 60 seconds, effects inbox, feature swarm-tick-characterisation, module observe. Done when new_step --check reports five true and the three checks pass." \
   --territory scripts/tick
 ```

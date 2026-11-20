@@ -771,7 +771,7 @@ _GATE_TTL_SEC = 3600
 GATE_MESSAGE = (
     "BLOCKED: conditions are created, changed or removed only when the operator asks: the operator's own prompt "
     "this turn (e.g. 'set a condition ...'), his comment on this agent's ledger task, or the master's "
-    "'agentihooks api relay' onto that task of words he typed in the master pane; either holds until that "
+    "'agentihooks ledger relay' onto that task of words he typed in the master pane; either holds until that "
     "task is done or cancelled. "
     "Never create one on your own initiative."
 )

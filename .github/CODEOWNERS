@@ -25,9 +25,6 @@
 /scripts/no_whole_ledger.py @nestorcolt
 /tests/WHOLE_LEDGER_ALLOWLIST.json @nestorcolt
 /tests/test_no_whole_ledger.py @nestorcolt
-/scripts/no_ledger_write_doctrine.py @nestorcolt
-/tests/LEDGER_WRITE_DOCTRINE_ALLOWLIST.json @nestorcolt
-/tests/test_no_ledger_write_doctrine.py @nestorcolt
 /scripts/tick_pattern.py @nestorcolt
 /scripts/tick/catalogue.py @nestorcolt
 /scripts/tick/new_step.py @nestorcolt

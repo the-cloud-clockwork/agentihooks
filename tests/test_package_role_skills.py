@@ -16,9 +16,9 @@ world = render_world
 ROLES = Path(__file__).resolve().parents[1] / "profiles" / "package" / "roles"
 ROLE_SKILLS = {"master": "swarm-master", "engineer": "swarm-engineer", "cicd": "swarm-ci", "planner": "swarm-planner"}
 COMMON = (
-    "agentihooks api --slug <slug> --as <name> join",
+    "agentihooks ledger --slug <slug> --as <name> join",
     "agentihooks ledger watch <slug> --as <name>",
-    "agentihooks api --slug <slug> --as <name> ack",
+    "agentihooks ledger --slug <slug> --as <name> ack",
     "agentihooks msg reply <id>",
     "agentihooks msg close <id>",
     "agentihooks swarm <slug> handoff <doc>",
@@ -33,7 +33,7 @@ LOOP = {
         "--must",
         "agentihooks swarm <slug> restore-decision",
         "<!-- slice: <id> -->",
-        "agentihooks api --slug <slug> --as <name> publish-plan",
+        "agentihooks ledger --slug <slug> --as <name> publish-plan",
         "--plan-slice <id>",
     ),
     "engineer": (*WORKER, "agentihooks swarm <slug> issue <url>", "agentihooks swarm <slug> pr <url>", "--pr <url>"),
@@ -41,7 +41,7 @@ LOOP = {
     "planner": (*WORKER, "publish-plan", "--slice <ids>", "--must", "--check", "--judge"),
 }
 PARSERS = {"swarm": lambda argv: swarm_parser().parse_args(argv), "msg": lambda argv: msg_parser().parse_args(argv)}
-PARSERS["ledger"] = PARSERS["api"] = lambda argv: ledger_parser().parse_args(argv)
+PARSERS["ledger"] = lambda argv: ledger_parser().parse_args(argv)
 
 
 def _skill(role: str) -> Path:

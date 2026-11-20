@@ -16,13 +16,6 @@ def test_a_task_without_a_kind_gets_the_code_prompt():
     assert "agentihooks swarm sw ready <handoff doc>" in build()
 
 
-def test_the_prompt_names_the_api_command_in_the_stop_hook_warning():
-    assert (
-        "A hook blocks your stop while operator events are unhandled or you have gone many "
-        "tool calls without an api command."
-    ) in build()
-
-
 def test_each_kind_gets_its_own_prompt():
     texts = {kind: build(kind=kind) for kind in KINDS}
     assert len(set(texts.values())) == len(KINDS)
@@ -38,7 +31,7 @@ def test_each_kind_gets_its_own_prompt():
     assert "--finding <link>" in texts["research"]
     for kind, text in texts.items():
         close = "agentihooks swarm sw ready" if kind in ("code", "ci") else "agentihooks swarm sw done"
-        assert text.index("agentihooks api --slug sw --as engineer@a1b2c3-0001 leave") < text.index(close)
+        assert text.index("agentihooks ledger --slug sw --as engineer@a1b2c3-0001 leave") < text.index(close)
 
 
 def test_the_prompt_carries_the_proof_contract():
@@ -142,7 +135,7 @@ def test_code_kinds_activate_serena_on_the_worktree(kind):
 def test_a_ci_agent_proposes_a_further_bottleneck_as_a_follow_up_and_never_queues_a_task(kind):
     text = prompt.build("sw", "/repo", "ci", "ci@a1b2c3-0001", {"id": "t1", "title": "x", "phase": "p1", "kind": kind})
     assert (
-        "Propose a further bottleneck as a follow up: agentihooks api --slug sw --as ci@a1b2c3-0001 followup add"
+        "Propose a further bottleneck as a follow up: agentihooks ledger --slug sw --as ci@a1b2c3-0001 followup add"
         in text
     )
     assert "task add" not in text
