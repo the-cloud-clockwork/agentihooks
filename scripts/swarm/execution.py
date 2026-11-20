@@ -263,7 +263,8 @@ class ExecutionRegistry:
             if not current or any(getattr(agent, field) != getattr(current, field) for field in IMMUTABLE):
                 self.conflict(slug, "stale or changed execution identity")
             if current.state == "ended":
-                return current, current
+                if agent.pane_id == current.pane_id:
+                    return current, current
             written = agent
             if current.state == "finished" and written.state != "ended":
                 written = replace(written, state="finished")
