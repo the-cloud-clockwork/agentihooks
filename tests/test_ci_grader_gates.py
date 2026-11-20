@@ -29,6 +29,9 @@ PLANTED = 'print("planted head copy ran")\nraise SystemExit(0)\n'
 BASE_GRADED = "0 rendered CronJob objects and 0 failed renders across 11 renders of 1 charts."
 IGNORES_ROOT = f'print("{BASE_GRADED}")\nraise SystemExit(0)\n'
 REFUSED = "The protected grader's copy of tests/ci_charts/{} does not grade the tree --root names"
+OWN_RULES = "Own rules hold on their fixtures and the code"
+RULE = "rules: []\n"
+SEMGREP_STUB = '#!/usr/bin/env bash\necho "$*" >> "$RUNNER_TEMP/calls"\n'
 
 
 def _steps(workflow: str, job: str) -> dict[str, dict[str, Any]]:
@@ -81,6 +84,46 @@ def _stale_grader(tmp_path: Path, script: str, source: str = STALE) -> Path:
     (grader / script).parent.joinpath("__init__.py").write_text("")
     (grader / script).write_text(source)
     return grader
+
+
+def _git(repo: Path, *args: str) -> None:
+    command = ["git", "-c", "user.name=planted", "-c", "user.email=planted@example.com", "-C", str(repo), *args]
+    subprocess.run(command, check=True, capture_output=True, timeout=60)
+
+
+def _rules_repo(tmp_path: Path) -> Path:
+    head = tmp_path / "head"
+    (head / ".semgrep/features").mkdir(parents=True)
+    for name in ("kept.yml", "edited.yml", "removed.yml", "retyped.yml", "features/nested.yml"):
+        (head / ".semgrep" / name).write_text(RULE)
+    (head / ".semgrep/features/nested.test.yaml").write_text("base: true\n")
+    _git(head, "init")
+    _git(head, "add", "--all")
+    _git(head, "commit", "--message", "base")
+    (tmp_path / "runner").mkdir()
+    _git(head, "worktree", "add", "--detach", str(tmp_path / "runner/grader"), "HEAD")
+    return head
+
+
+def _own_rules_calls(tmp_path: Path) -> list[str]:
+    head, tools = tmp_path / "head", tmp_path / "runner/bin"
+    _git(head, "add", "--all")
+    _git(head, "commit", "--message", "head")
+    tools.mkdir()
+    (tools / "semgrep").write_text(SEMGREP_STUB)
+    (tools / "semgrep").chmod(0o755)
+    step = _steps("semgrep.yml", "scan")[OWN_RULES]
+    env = {
+        **os.environ,
+        **step["env"],
+        "RUNNER_TEMP": str(tmp_path / "runner"),
+        "PATH": f"{tools}{os.pathsep}{os.environ['PATH']}",
+    }
+    done = subprocess.run(
+        ["bash", "-e", "-c", step["run"]], cwd=head, env=env, capture_output=True, text=True, timeout=300
+    )
+    assert done.returncode == 0, done.stdout + done.stderr
+    return (tmp_path / "runner/calls").read_text().splitlines()
 
 
 @pytest.mark.feature("lint-gates-grade-from-grader")
@@ -288,10 +331,37 @@ def test_each_semgrep_job_checks_out_the_caller_base_as_the_grader(job: str, gra
 def test_the_semgrep_scan_grades_the_code_with_the_grader_rules_and_the_head_rules() -> None:
     steps = _steps("semgrep.yml", "scan")
     own = steps["Own rules hold on their fixtures and the code"]["run"].splitlines()[-1]
-    assert (
-        own
-        == 'semgrep scan --error --strict --timeout 30 --metrics off --config "$RUNNER_TEMP/grader/$RULES" --config "$RULES" .'
-    )
+    assert own == 'semgrep scan --error --strict --timeout 30 --metrics off "${args[@]}" .'
     findings = steps["Fail on findings new against the base"]
     assert ".semgrep-incidents" in findings["env"]["CONFIGS"].split()
     assert 'args+=(--config "$RUNNER_TEMP/grader/.semgrep-incidents")' in findings["run"].splitlines()
+
+
+@pytest.mark.feature("lint-gates-grade-from-grader")
+def test_the_own_rules_scan_loads_the_grader_copy_of_each_rule_file_the_head_edits_removes_or_retypes(
+    tmp_path: Path,
+) -> None:
+    rules = _rules_repo(tmp_path) / ".semgrep"
+    (rules / "edited.yml").write_text("rules: [{}]\n")
+    (rules / "removed.yml").unlink()
+    (rules / "retyped.yml").unlink()
+    (rules / "retyped.yml").symlink_to("kept.yml")
+    (rules / "added.yml").write_text(RULE)
+    (rules / "features/nested.test.yaml").write_text("head: true\n")
+    grader = tmp_path / "runner/grader/.semgrep"
+    configs = " ".join(f"--config {grader}/{name}" for name in ("edited.yml", "removed.yml", "retyped.yml"))
+    assert _own_rules_calls(tmp_path) == [
+        "--metrics off --test --config rules rules",
+        f"scan --error --strict --timeout 30 --metrics off --config .semgrep {configs} .",
+    ]
+
+
+@pytest.mark.feature("lint-gates-grade-from-grader")
+def test_the_own_rules_scan_loads_only_the_head_rules_when_the_head_keeps_every_rule_file(tmp_path: Path) -> None:
+    rules = _rules_repo(tmp_path) / ".semgrep"
+    (rules / "added.yml").write_text(RULE)
+    (rules / "features/nested.test.yaml").write_text("head: true\n")
+    assert _own_rules_calls(tmp_path) == [
+        "--metrics off --test --config rules rules",
+        "scan --error --strict --timeout 30 --metrics off --config .semgrep .",
+    ]

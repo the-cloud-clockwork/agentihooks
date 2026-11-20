@@ -509,7 +509,7 @@ def test_scan_reads_the_domain_rules_folder_that_holds_rule_files() -> None:
     assert rules_dir == _ROOT / ".semgrep"
     assert any(_ROOT.glob(".semgrep/*.yml"))
     assert "semgrep --metrics off --test --config rules rules" in step["run"]
-    assert '--config "$RUNNER_TEMP/grader/$RULES" --config "$RULES" .' in step["run"]
+    assert 'args=(--config "$RULES")' in step["run"]
 
 
 def test_own_rules_scan_gives_each_rule_thirty_seconds_on_a_file() -> None:
