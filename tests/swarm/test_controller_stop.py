@@ -44,7 +44,12 @@ def test_controller_run_turns_sigterm_into_exit_so_its_cleanup_runs(monkeypatch)
     assert stopped.value.code == 143
     assert service.stopped == 1
     assert installed[1][0] == signal.SIGINT
-    assert installed[2:] == [(signal.SIGTERM, "previous"), (signal.SIGINT, "previous")]
+    assert installed[2:] == [
+        (signal.SIGUSR1, controller._woken),
+        (signal.SIGTERM, "previous"),
+        (signal.SIGINT, "previous"),
+        (signal.SIGUSR1, "previous"),
+    ]
 
 
 def test_controller_run_releases_held_tick_locks_on_sigterm_before_exiting(monkeypatch):

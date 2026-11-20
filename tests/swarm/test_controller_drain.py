@@ -97,8 +97,9 @@ def test_the_interrupt_and_terminate_signals_share_one_stop_handler_restored_on_
     numbers = [number for number, _ in rig.installed[:2]]
     assert sorted(numbers) == sorted([signal.SIGINT, signal.SIGTERM])
     assert rig.installed[0][1] is rig.installed[1][1]
-    assert sorted(rig.installed[2:]) == sorted(
-        [(signal.SIGINT, f"previous {int(signal.SIGINT)}"), (signal.SIGTERM, f"previous {int(signal.SIGTERM)}")]
+    assert rig.installed[2] == (signal.SIGUSR1, controller._woken)
+    assert sorted(rig.installed[3:]) == sorted(
+        [(number, f"previous {int(number)}") for number in (signal.SIGINT, signal.SIGTERM, signal.SIGUSR1)]
     )
 
 

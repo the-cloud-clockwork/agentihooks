@@ -204,6 +204,21 @@ def test_interruption_cancels_the_timer(state, monkeypatch):
     assert Scheduler(state).run_due(now=timer.entry.record["due"]) == 0
 
 
+@pytest.mark.feature("controller-wake-signal-runs-next-pass")
+def test_a_woken_check_ends_the_wait_before_the_scheduler_fires(
+    state: RedisStateStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    checks: list[int] = []
+
+    def woken() -> bool:
+        checks.append(len(checks))
+        return len(checks) == 3
+
+    monkeypatch.setattr(process_timer.service, "ensure_running", _starts())
+    process_timer.wait(3600, state=state, woken=woken)
+    assert checks == [0, 1, 2]
+
+
 def test_a_timer_without_a_store_opens_the_scheduler_bucket(state, monkeypatch):
     from scripts.events import scheduler_state
     from scripts.swarm import store

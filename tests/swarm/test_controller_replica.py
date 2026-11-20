@@ -745,7 +745,10 @@ def test_controller_run_finishes_its_shutdown_when_redis_refuses_the_lock_releas
 
     monkeypatch.setattr(controller, "_passes", passes)
     assert controller.main(["run", "--once"]) == 0
-    assert (closed, handlers) == ([1], [controller._stopped, controller._stopped, "previous", "previous"])
+    assert (closed, handlers) == (
+        [1],
+        [controller._stopped, controller._stopped, controller._woken, "previous", "previous", "previous"],
+    )
     assert (
         capsys.readouterr().err == f"controller: releasing the replica lock failed, it lapses on its own: {REFUSED}\n"
     )

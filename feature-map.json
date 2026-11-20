@@ -4425,6 +4425,18 @@
       ]
     },
     {
+      "id": "controller-wake-signal-runs-next-pass",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2723",
+      "behaviour": "SIGUSR1 starts the controller's next pass at once instead of at the end of its tick: a wake received during a pass or a wait ends the next tick wait and that wait consumes it, the controller run holds the wake handler until it exits and then restores the previous handler, and a scheduler process timer wait ends at its next poll once its woken check returns true.",
+      "seam": "scripts.swarm.controller._woken, _tick_wait and main, and scripts.scheduler.process_timer.wait with a woken check",
+      "tests": [
+        "tests/swarm/test_controller_wake.py::test_a_wake_signal_ends_the_next_tick_wait_once",
+        "tests/swarm/test_controller_wake.py::test_the_controller_run_holds_the_wake_handler_until_it_exits",
+        "tests/scheduler/test_process_timer.py::test_a_woken_check_ends_the_wait_before_the_scheduler_fires"
+      ]
+    },
+    {
       "id": "swarm-reopened-claim-loss",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2433",
