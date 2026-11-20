@@ -1,0 +1,17 @@
+rules:
+  - id: merge-priority-missing-entry-callback
+    languages: [python]
+    severity: ERROR
+    message: Queue entry must supply automatic focused or urgent priority while preserving groups already testing.
+    paths:
+      include:
+        - /scripts/swarm/cli.py
+        - /scripts/swarm/ready.py
+        - merge-priority-missing-entry-callback.py
+    pattern-either:
+      - patterns:
+          - pattern: $RUN.queue("queue", ...)
+          - pattern-not: $RUN.queue("queue", ..., priority=$CALLBACK, ...)
+      - patterns:
+          - pattern: $QUEUE.operate(..., admit=$ADMIT, ...)
+          - pattern-not: $QUEUE.operate(..., priority=$CALLBACK, ...)

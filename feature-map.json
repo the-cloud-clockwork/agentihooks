@@ -4693,6 +4693,9 @@
         "tests/swarm/test_queue_entry_priority.py::test_a_repository_without_a_queue_does_not_apply_automatic_priority",
         "tests/swarm/test_queue_entry_priority.py::test_cli_queue_entry_supplies_automatic_priority",
         "tests/swarm/test_queue_entry_priority.py::test_watcher_queue_entry_supplies_automatic_priority"
+      ],
+      "rules": [
+        ".semgrep-incidents/merge-priority-missing-entry-callback.yml"
       ]
     },
     {
