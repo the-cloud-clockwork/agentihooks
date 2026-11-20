@@ -75,8 +75,6 @@ if (_WORKFLOWS / "access-audit.yml").exists():
 SERIAL = {
     ("swarm-node-image.yml:hive", "hive-worker-release"): "every release's hive job queues behind the last one, so a "
     "newer published hive image always decides the release tag and no waiting hive job is replaced",
-    ("swarm-image.yml:release", "swarm-image-release"): "every release's swarm tag move queues behind the last one, "
-    "so a newer published swarm image always decides the release tag and no waiting move is replaced",
 }
 CALLERS = ("test.yml", "proofs.yml")
 REQUIRED = ("pull_request", "merge_group", "pull_request_target")

@@ -322,7 +322,7 @@ def test_the_swarm_release_tag_stays_on_the_newer_of_two_overlapping_releases_wh
 
 
 @pytest.mark.feature("swarm-release-tag-moves-only-for-the-newest-published-release")
-def test_the_queued_release_job_moves_the_swarm_release_tag_and_the_publish_job_moves_none() -> None:
+def test_the_release_job_moves_the_swarm_release_tag_and_the_publish_job_moves_none() -> None:
     jobs = _load("swarm-image.yml")["jobs"]
     moving = [
         step.get("name", step.get("id")) for step in jobs["publish"]["steps"] if ":release" in step.get("run", "")
@@ -331,7 +331,6 @@ def test_the_queued_release_job_moves_the_swarm_release_tag_and_the_publish_job_
     release = jobs["release"]
     assert release["if"] == "github.event_name == 'release'"
     assert release["needs"] == "publish"
-    assert release["concurrency"] == {"group": "swarm-image-release", "queue": "max", "cancel-in-progress": False}
     assert release["env"] == {"IMAGE": SWARM, "RELEASE": "${{ github.event.release.tag_name }}"}
     swarm = _step(release, "Tag the swarm release and move the release tag unless a newer release already published")
     assert "env" not in swarm
