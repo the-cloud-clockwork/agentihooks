@@ -935,7 +935,7 @@
       "id": "controller-standby-replica",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-standby",
-      "behaviour": "Controller replicas of one hive take a Redis replica lock before running passes, so two replicas never run a pass at the same time; a standby serves health and forwards the control API to the leader, takes the lock once the leader releases it or it expires, and each replica holds its own controller credential so a second replica never retires the leader's.",
+      "behaviour": "Controller replicas of one hive take a Redis replica lock before running passes, so two replicas never run a pass at the same time; a standby serves health and forwards the control API to the leader, takes the lock once the leader releases it or it expires, and each replica holds its own controller credential so a second replica never retires the leader's. Multiple chart replicas roll with zero surge and at most one unavailable controller, so a release needs no extra pod capacity.",
       "seam": "replica.ReplicaLock, standby.Standby, control_service.stand_by, controller._lead, auth.issue_controller with a holder, and the controller chart replicas, rolling update and disruption budget",
       "tests": [
         "tests/swarm/test_controller_replica.py::test_two_replicas_never_run_a_pass_at_the_same_time",
