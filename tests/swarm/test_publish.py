@@ -6,6 +6,7 @@ from collections.abc import Callable, Iterator
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -537,7 +538,7 @@ def test_prepare_cuts_fresh_dev_when_the_recorded_branch_was_never_pushed(
     }
     if hint:
         task[hint] = {"continue_from": "origin/never-pushed"}
-    ledger = SimpleNamespace(
+    ledger: Any = SimpleNamespace(
         task=_by_id(task), tasks=_no_collection, update_task=lambda slug, task_id, fields, by: task.update(fields)
     )
     agent = AgentRecord("engineer@test", "ci", "t1")
