@@ -10745,7 +10745,7 @@
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/crew-1116073743-fix-7",
       "behaviour": "Every starter of a new front door master takes the swarm's one master launch lock, a Redis set if absent key with a five minute lease, before it reads who holds the master seats and keeps it through the launch: the tick master step, which the night watch respawn and the respawn and place master commands also run, and master up --new and --replace, which the master fallback and the critical watchdog run in their detached processes. A fallback starter racing the tick master step in one pass launches exactly one master; a starter that finds the lock held launches nothing and names the holder, or says its lease just ended; the lock is released after a launch and after a failed one and never by a holder that lost it, even when it changes hands during the release. Under the lock master up --replace retires a front door master that is still starting before it starts another, and master up never takes the front door seat from a live occupant.",
-      "seam": "scripts.swarm.master_lock.held, taken by scripts.tick.steps.masters._master and scripts.swarm.master_launch._fresh",
+      "seam": "scripts.swarm.master_lock.held, taken by scripts.swarm.master_launch._fresh, and the coordination port's take_master_lock and release_master_lock over scripts.swarm.master_lock.take and release, taken by scripts.tick.steps.masters._master through the tick master step's coordination port",
       "tests": [
         "tests/swarm/test_master_starters_race.py::test_a_fallback_starter_racing_the_tick_master_step_launches_exactly_one_master",
         "tests/swarm/test_master_starters_race.py::test_the_tick_master_step_waits_while_master_up_launches",
@@ -10758,7 +10758,23 @@
         "tests/swarm/test_master_lock.py::test_a_held_lock_refuses_master_up",
         "tests/swarm/test_master_lock.py::test_the_tick_master_step_and_master_up_release_the_lock_after_their_launch",
         "tests/swarm/test_master_replace.py::test_master_up_replace_retires_a_starting_front_door_master_before_it_starts_one",
-        "tests/swarm/test_master_replace.py::test_master_up_never_takes_the_front_door_seat_from_a_live_occupant"
+        "tests/swarm/test_master_replace.py::test_master_up_never_takes_the_front_door_seat_from_a_live_occupant",
+        "tests/tick/steps/test_tick_master_ports.py::test_the_coordination_port_takes_and_releases_the_master_launch_lock",
+        "tests/tick/steps/test_tick_master_ports.py::test_a_master_start_refused_through_the_coordination_port_launches_nothing",
+        "tests/tick/steps/test_tick_master_ports.py::test_the_master_launch_lock_taken_through_the_port_is_released_through_it"
+      ]
+    },
+    {
+      "id": "tick-master-effect-ports",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-master-effect-ports",
+      "behaviour": "The tick master step declares the coordination, inbox and ledger ports as its effects and writes only its actions in the pass view. Its master outage pass saves and ends its outage state, finishes dead leads, writes seat notes, sends the promoted prompt, the hand back and the master back notice as swarm, the notice as fyi, and tells the ledger chat, all through those ports bound to the master placement lease, and the pattern gate grades the step with no exception.",
+      "seam": "scripts.tick.steps.masters._tick_master registered as tick step tick master, over scripts.swarm.tick_master.run with scripts.swarm.tick_master.Ports, and the inbox port send with its sender and fyi mark",
+      "tests": [
+        "tests/tick/steps/test_tick_master_ports.py::test_the_inbox_port_sends_as_the_named_sender_with_its_fyi_mark",
+        "tests/tick/steps/test_tick_master_ports.py::test_the_outage_pass_saves_its_first_observation_through_the_coordination_port",
+        "tests/tick/steps/test_tick_master_ports.py::test_the_outage_pass_promotes_through_the_coordination_inbox_and_ledger_ports",
+        "tests/tick/steps/test_tick_master_ports.py::test_the_tick_master_step_declares_its_ports_and_writes_only_its_actions"
       ]
     },
     {
