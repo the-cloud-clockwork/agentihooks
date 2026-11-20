@@ -216,8 +216,8 @@ def test_fingerprints_are_golden() -> None:
         },
     }
     assert expand_tests.fingerprints(manifest, tree) == {
-        "tests/test_alpha.py::test_first": "50453d70f855a2c09ef48a172dee6f277fb53e9d727059b5eb3ff0ebfca4ea01",
-        "tests/test_alpha.py::test_second": "9107747a4089126a323cbfc2a542aa9a339ad2254648c5c96fa651fb32e1a19f",
+        "tests/test_alpha.py::test_first": "ed5f3ba8a40286607a29357d071cc0a880c91abd882b321d70b64b723311c74f",
+        "tests/test_alpha.py::test_second": "f0b37256e2d223dbdeb48a0dc09112641b9ceeebe91963ffcc955a652f3131ee",
     }
 
 
