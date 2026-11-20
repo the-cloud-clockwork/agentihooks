@@ -10702,6 +10702,7 @@
         "tests/swarm/test_publish.py::test_publish_via_lab_grades_head_on_the_lab_before_origin_and_pushes_origin_on_green",
         "tests/swarm/test_publish.py::test_publish_via_lab_leaves_origin_untouched_on_a_red_grade",
         "tests/swarm/test_publish.py::test_publish_via_lab_direct_pushes_origin_after_the_lab_without_waiting",
+        "tests/swarm/test_publish.py::test_publish_via_lab_pushes_the_grade_ref_with_push_negotiation",
         "tests/swarm/test_publish.py::test_publish_via_lab_refuses_without_a_lab_remote_for_the_repository",
         "tests/swarm/test_publish.py::test_publish_via_lab_refuses_a_lab_push_without_a_landed_grade",
         "tests/swarm/test_publish.py::test_lab_conclusion_refuses_once_the_wait_runs_out",

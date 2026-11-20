@@ -82,7 +82,10 @@ def lab_push(root: Path, task: str, branch: str) -> str:
     return the grade url it names."""
     if not checkout.carry(checkout.at(root), os.environ):
         raise SwarmError(f"publish --via {LAB} needs {checkout.URL_ENV} naming the lab remote of this repository")
-    done = git_https.run(["git", "push", "-o", f"branch={branch}", LAB, f"HEAD:{GRADE_REFS}{task}"], cwd=root)
+    done = git_https.run(
+        ["git", "-c", "push.negotiate=true", "push", "-o", f"branch={branch}", LAB, f"HEAD:{GRADE_REFS}{task}"],
+        cwd=root,
+    )
     sys.stderr.write(done.stderr)
     found = GRADE_URL.search(done.stderr)
     if done.returncode or not found:
