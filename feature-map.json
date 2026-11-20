@@ -8021,7 +8021,7 @@
     {
       "id": "tick-scale-gate-wiring",
       "origin": "inventory",
-      "behaviour": "The tick-scale job on the Tests workflow runs the tick-scale action only on a dev push, never on a pull request, merge queue or manual dispatch, is required by promotion-ready and promote without blocking the pull request gate, and the tick-scale workflow plants the whole hash fault only on its diffcheck plant branch.",
+      "behaviour": "The tick-scale job on the Tests workflow runs the tick-scale action only on a dev push, never on a pull request, merge queue or manual dispatch, is required by promotion-ready and promote without blocking the pull request gate, and the tick-scale workflow plants the whole hash fault only on its diffcheck plant branch. Its profile input names only registered tick steps, includes the master scale launcher and matches the promotion documentation.",
       "seam": "tests/contracts/promotion/test_workflow.py reading .github/workflows/test.yml, .github/actions/tick-scale/action.yml and .github/workflows/tick-scale.yml",
       "tests": [
         "tests/contracts/promotion/test_workflow.py::test_each_dev_push_runs_the_tick_scale_gate_before_promotion_and_never_on_pull_requests_or_the_queue",
