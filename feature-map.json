@@ -4515,7 +4515,8 @@
         "tests/test_swarm_v2_task_owner.py::test_a_backend_master_replies_to_a_claimant_item_it_took_from_the_master_pool",
         "tests/test_swarm_v2_task_owner.py::test_a_pooled_reply_leaves_a_new_message_to_a_foreign_task_claimant_fenced",
         "tests/test_swarm_v2_task_owner.py::test_a_pooled_reply_grants_no_unsolicited_message_to_the_claimant_it_answered",
-        "tests/test_swarm_v2_task_owner.py::test_a_backend_master_cannot_answer_a_claimant_item_the_pool_gave_the_front_door"
+        "tests/test_swarm_v2_task_owner.py::test_a_backend_master_cannot_answer_a_claimant_item_the_pool_gave_the_front_door",
+        "tests/test_swarm_v2_task_owner.py::test_a_replayed_pooled_reply_is_a_duplicate_and_never_a_fence_refusal"
       ]
     },
     {

@@ -4,7 +4,7 @@ import pytest
 
 import scripts.swarm_ledger.repository  # noqa: F401  puts the ledger folder on sys.path before ledger_core loads
 from scripts.inbox import cli as inbox_cli
-from scripts.inbox.store import InboxError, InboxStore, Item, now_ms
+from scripts.inbox.store import DuplicateItem, InboxError, InboxStore, Item, now_ms
 from scripts.swarm import delivery, master_retire
 from scripts.swarm.store import AgentRecord, SwarmConfig
 from scripts.swarm_ledger import ledger_core as core
@@ -464,6 +464,19 @@ def test_a_backend_master_cannot_answer_a_claimant_item_the_pool_gave_the_front_
     with pytest.raises(InboxError, match=f"^tasks/{LOOSE} belongs to {LEAD}, so {SECOND} cannot message its claimant"):
         reply(world, SECOND_NAME, first.id)
     assert inbox(world).get(first.id).state != "done"
+
+
+@pytest.mark.feature("pooled-claimant-reply")
+def test_a_replayed_pooled_reply_is_a_duplicate_and_never_a_fence_refusal(
+    world: cases.World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, asked = pooled_to_the_backend_master(world, monkeypatch)
+    reply(world, SECOND_NAME, asked.id)
+
+    with pytest.raises(DuplicateItem, match=f"^message {asked.id} was already answered with message i-reply-pooled"):
+        reply(world, SECOND_NAME, asked.id)
+    assert [item.text for item in inbox(world).mailbox(ENGINEER)] == ["Yes, cut over"]
+    assert world.refusals() == 0
 
 
 def waiting_on_the_backend_master(world, age_s, state="pending", fyi=False):
