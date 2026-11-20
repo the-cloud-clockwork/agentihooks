@@ -4,11 +4,10 @@ rules:
     severity: ERROR
     message: >-
       A service entry point starts agentihooks by bare name, or starts scripts.install through an interpreter
-      without -P. In the master
-      outage the workstation master fallback service ran agentihooks by bare name while its systemd PATH had no user
-      bin folder, so every start failed and was only logged; without -P a scripts folder in the service working folder
-      shadows the installed package. Run the command through this interpreter, [sys.executable, "-P", "-m",
-      "scripts.install", ...], so no service PATH or working folder can miss it.
+      without -P. In the master outage the workstation master fallback service ran agentihooks by bare name while
+      its systemd PATH had no user bin folder, so every start failed and was only logged; without -P a scripts folder
+      in the service working folder shadows the installed package. Run the command through this interpreter,
+      [sys.executable, "-P", "-m", "scripts.install", ...], so no service PATH or working folder can miss it.
     paths:
       include:
         - /scripts/hive/
