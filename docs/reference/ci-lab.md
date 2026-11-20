@@ -2578,7 +2578,43 @@ The executor writes no secret value into the unit report or log. As Actions mask
 replaces each non empty secret value the gate read with `***` in the unit log and in the step
 summary the report carries.
 
-##### Secrets on the worker
+`python -m scripts.ci_lab.static_gates --root .` prints one JSON line per gate: its `StaticGate`
+fields except `run`, that is `name`, `job`, `step`, `tools`, `modules`, `paths`, `base_paths`, `env`
+as an object, `condition`, `producers` as a list of step ids, `reads`, `matrix` as an object and
+`missing`, plus `digest` when `--grader` names a grader tree. Print the step context of one gate by
+its name:
+
+```bash
+python -m scripts.ci_lab.static_gates --root . | python -c '
+import json, sys
+for line in sys.stdin:
+    gate = json.loads(line)
+    if gate["name"] == sys.argv[1]:
+        print(json.dumps({key: gate[key] for key in ("name", "producers", "reads", "missing")}))
+' semgrep/scan/fail-on-findings-new-against-the-base
+```
+
+On dev it prints:
+
+```json
+{"name": "semgrep/scan/fail-on-findings-new-against-the-base", "producers": ["baseline"], "reads": ["inputs.base", "steps.baseline.outputs.sha"], "missing": []}
+```
+
+The `baseline` step runs first in the unit, and the gate reads the `sha` it writes to
+`$GITHUB_OUTPUT`.
+
+Before pull request
+[#12486](https://github.com/the-cloud-clockwork/agentihooks/pull/12486), the executor supplied
+neither `github.event_name`, `runner.temp` nor any `matrix.<key>`. Three of the four `test-count`
+gate steps and `lint/prove-the-mutation-gate-kills-with-the-real-test-and-fails-with-a-weakened-one`
+were not lab gradable, and `test-count` was not a static job.
+
+Before pull request
+[#12422](https://github.com/the-cloud-clockwork/agentihooks/pull/12422), the context held only
+`inputs.base`. A gate that read any other name raised `no value for '<name>' in the context`
+before its step ran, so its unit was requeued once and then lost.
+
+#### Secrets on the worker
 
 `scripts.ci_lab.executors.settings` turns each worker variable whose name starts with
 `CI_LAB_SECRET_` into a secret named by the rest of that name, so
@@ -2596,10 +2632,20 @@ masks every place the same text appears in the log.
 On dev one lab gradable gate reads a secret. It is
 `lint/keep-internal-addresses-identifiers-and-private-keywords-out-of-public-docs`, whose step
 passes `secrets.DOCS_SANITY_KEYWORDS` to `scripts/docs_sanity.py` through
-`--keywords-env DOCS_SANITY_KEYWORDS`. On 20 November 2026 the deployment repository's
-`ci-lab-worker` Deployment sets no `CI_LAB_SECRET_` variable. A lab unit of that gate therefore
-reads an empty keyword list and checks internal addresses and identifiers only, while its Actions
-job also checks the private keywords.
+`--keywords-env DOCS_SANITY_KEYWORDS`. As of 20 November 2026, the deployment repository's
+`ci-lab` chart on its `dev` branch sets no `CI_LAB_SECRET_` variable on the `ci-lab-worker`
+Deployment. A lab unit of that gate therefore reads an empty keyword list and checks internal
+addresses and identifiers only, while its Actions job also checks the private keywords. Check it
+from the root of a checkout of the deployment repository. `git ls-tree` must print
+`k8s/charts/ci-lab/templates/worker-deployment.yaml`; if it prints nothing, the branch or path is
+wrong. `git grep` then prints nothing while the chart sets no such variable:
+
+```bash
+git fetch origin dev
+git ls-tree --name-only origin/dev k8s/charts/ci-lab/templates/ \
+  | grep -Fx k8s/charts/ci-lab/templates/worker-deployment.yaml
+git grep -n CI_LAB_SECRET_ origin/dev -- k8s/charts/ci-lab
+```
 
 To give workers the keyword list, add the variable to the worker container through a pull request
 into the deployment repository's `dev`, read from a Kubernetes Secret so the value stays out of
@@ -2642,7 +2688,7 @@ for line in sys.stdin:
 On dev it prints
 `lint/keep-internal-addresses-identifiers-and-private-keywords-out-of-public-docs secrets.DOCS_SANITY_KEYWORDS`.
 
-##### Gates the lab leaves to Actions for a missing name
+#### Gates the lab leaves to Actions for a missing name
 
 A gate with any missing name is not lab gradable. The expander leases no unit for it, so its
 verdict stays with Actions. `python -m scripts.ci_lab.static_gates --root .` prints each gate's
@@ -2654,29 +2700,7 @@ gradable:
 | `lint/refuse-changelog-fragments-named-off-the-branch-or-opening-without-a-section-heading` | `github.head_ref`, `github.ref_name` |
 | `lint/artifact-sanity-checks` | `github.base_ref`, `github.event.before`, `github.event.merge_group.base_sha` |
 
-Each line the command prints is one gate's `StaticGate` fields except `run`: `name`, `job`,
-`step`, `tools`, `modules`, `paths`, `base_paths`, `env` as an object, `condition`, `producers` as
-a list of step ids, `reads`, `matrix` as an object and `missing`, plus `digest` when `--grader`
-names a grader tree. Print the step context of one gate by its name:
-
-```bash
-python -m scripts.ci_lab.static_gates --root . | python -c '
-import json, sys
-for line in sys.stdin:
-    gate = json.loads(line)
-    if gate["name"] == sys.argv[1]:
-        print(json.dumps({key: gate[key] for key in ("name", "producers", "reads", "missing")}))
-' semgrep/scan/fail-on-findings-new-against-the-base
-```
-
-On dev it prints:
-
-```json
-{"name": "semgrep/scan/fail-on-findings-new-against-the-base", "producers": ["baseline"], "reads": ["inputs.base", "steps.baseline.outputs.sha"], "missing": []}
-```
-
-The `baseline` step runs first in the unit, and the gate reads the `sha` it writes to
-`$GITHUB_OUTPUT`. List every gate the lab leaves to Actions for a missing name:
+List every gate the lab leaves to Actions for a missing name:
 
 ```bash
 python -m scripts.ci_lab.static_gates --root . | python -c '
@@ -2689,17 +2713,6 @@ for line in sys.stdin:
 ```
 
 On dev it prints the two gates of the table above, each followed by its missing names.
-
-Before pull request
-[#12486](https://github.com/the-cloud-clockwork/agentihooks/pull/12486), the executor supplied
-neither `github.event_name`, `runner.temp` nor any `matrix.<key>`. Three of the four `test-count`
-gate steps and `lint/prove-the-mutation-gate-kills-with-the-real-test-and-fails-with-a-weakened-one`
-were not lab gradable, and `test-count` was not a static job.
-
-Before pull request
-[#12422](https://github.com/the-cloud-clockwork/agentihooks/pull/12422), the context held only
-`inputs.base`. A gate that read any other name raised `no value for '<name>' in the context`
-before its step ran, so its unit was requeued once and then lost.
 
 #### Which grades run static units
 
@@ -2868,7 +2881,7 @@ The `lab-static-step-env` entry of `feature-map.json` maps the step context guar
 Pull request [#12422](https://github.com/the-cloud-clockwork/agentihooks/pull/12422) added these
 tests. They failed on the missing name errors in
 [Tests run 44506744428](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/44506744428),
-on a head that held only the tests, and passed in
+on the head that added them with stubs of the new functions, and passed in
 [Tests run 44547023276](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/44547023276).
 
 #### Troubleshooting
