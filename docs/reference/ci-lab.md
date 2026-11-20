@@ -4227,8 +4227,9 @@ not these rows. See [CI lab shadow acceptance report](lab-shadow.md).
   variables. A private variable replaces a whitelisted variable of the same name.
 - A port range from its `PortAllocator`, given back when the run ends.
 - No network unless the caller passes `net=True`.
-- Its own session. A timeout sends `SIGKILL` to the whole process group, and the outcome's code is
-  `None`.
+- Its own session. When the unit exits, cleanly, with a failure or at its timeout, the sandbox sends
+  `SIGKILL` to the whole process group, so no child it left behind outlives the run. A timeout's
+  outcome code is `None`.
 
 | Variable | Value |
 |---|---|

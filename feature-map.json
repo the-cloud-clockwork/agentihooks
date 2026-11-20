@@ -10684,6 +10684,16 @@
       ]
     },
     {
+      "id": "lab-sandbox-group-killed-at-exit",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2651",
+      "behaviour": "A lab unit's process group is killed after every exit, clean, failed or timed out, so a child the unit leaves behind, such as one started by a build hook, is gone when Sandbox.run returns and never outlives its run folder; the unit's exit code is kept and a timeout still returns no code.",
+      "seam": "scripts.ci_lab.sandbox Sandbox.run, the sandbox run boundary, through run_process in scripts.ci_mutation.runner",
+      "tests": [
+        "tests/ci_lab/test_sandbox.py::test_a_child_left_after_the_unit_exits_is_killed_when_the_run_returns"
+      ]
+    },
+    {
       "id": "lab-venv-build-sandbox",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2644",
