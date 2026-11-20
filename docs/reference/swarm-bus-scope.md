@@ -408,7 +408,8 @@ users files and compares the grants agentihooks renders with the antoncore users
 
 It also holds the antoncore `swarm-ci-lab-scheduler` user to the names the lab scheduler binds. It reads `LAB_STREAM`
 from `scripts/events/nats.py` and `DURABLE` from `scripts/ci_lab/scheduler.py` without running either file. Every
-binding of each name must be a top level non-empty string literal assignment, and the last one is graded.
+binding of each name must be a top level non-empty string literal assignment, and the last one is graded; a
+binding made only at run time, through `globals()`, `exec` or `setattr` on the module, is outside what this read sees.
 The user must name `$JS.API.CONSUMER.INFO.<stream>.<durable>`, `$JS.API.CONSUMER.MSG.NEXT.<stream>.<durable>`,
 `$JS.ACK.<stream>.<durable>.>` and `_INBOX.>`, with no deny that overlaps one of them. Other subjects on the user stay
 allowed. A missing user, or a name bound any other way, fails with

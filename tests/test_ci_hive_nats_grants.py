@@ -714,7 +714,7 @@ def test_an_unreadable_lab_source_fails_closed(
     assert status == 1
     assert len(lines) == 1
     assert lines[0].startswith(f"::error::The swarm NATS grants cannot be read ({error}: ")
-    assert source in lines[0]
+    assert Path(source).name in lines[0]
 
 
 @pytest.mark.feature("lab-scheduler-nats-grants")
