@@ -1499,12 +1499,16 @@ def _sleep_ms(ms: int) -> None:
 
 def storage(environ: Mapping[str, str]) -> S3Objects:
     """Return the lab objects in the MinIO bucket the environment names, through the S3 client that also signs the
-    upload URLs workers put unit results to."""
+    upload URLs workers put unit results to. The client signs with SigV4, which covers only the host, because SigV2
+    also signs the Content-Type and urllib adds a form Content-Type to every worker PUT."""
     import boto3  # pyright: ignore[reportMissingTypeStubs]
+    from botocore.config import Config  # pyright: ignore[reportMissingTypeStubs]
 
     s3: Any = boto3.client(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
         "s3",
         endpoint_url=environ[MINIO_ENDPOINT],
+        region_name="us-east-1",
+        config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
         aws_access_key_id=environ[MINIO_ACCESS_KEY],
         aws_secret_access_key=environ[MINIO_SECRET_KEY],
     )
