@@ -330,7 +330,7 @@ def _stop_ended(judging: _Reaping, agent: AgentRecord) -> list[str]:
     reaps it and the hub lifecycle settles its exit; one action when the stop went out or the bus refused it, none
     while the same stop is inside the bus dedupe window. Once the stop answers that the execution ended or that no
     hive recorded its start, and the hub lifecycle can no longer settle its exit, the agent is retired and dropped as
-    an ended legacy agent is."""
+    an ended legacy agent is, and a drop the store took returns its hive slot as the lifecycle would."""
     from scripts.hive import execution_stop
     from scripts.hub.reconciler import settled_admitted, stop_admitted
 
@@ -341,8 +341,13 @@ def _stop_ended(judging: _Reaping, agent: AgentRecord) -> list[str]:
     if outcome.startswith(execution_stop.FAILED):
         return [f"could not send the stop for {agent.name}, retrying next tick: {outcome}"]
     if outcome in {execution_stop.ENDED, execution_stop.UNKNOWN} and settled_admitted(slug, agent):
+        from scripts.hive.launch import release
+
         store, ledger, runtime, rows = judging.store, judging.ledger, judging.runtime, judging.rows
-        return tick.timing.timed(tick._retire_ended, slug, store, ledger, runtime, rows, agent, judging.now_ms)
+        retired = tick.timing.timed(tick._retire_ended, slug, store, ledger, runtime, rows, agent, judging.now_ms)
+        if retired == [f"retired {agent.name}"]:
+            release(store, slug, agent)
+        return retired
     return []
 
 

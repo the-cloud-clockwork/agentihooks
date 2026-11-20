@@ -565,45 +565,56 @@ def test_an_admitted_agent_on_a_done_task_whose_stop_answers_ended_leaves_its_se
     claim: dict[str, Any] | None,
     dropped: bool,
 ) -> None:
+    from scripts.swarm import local_slots
+
     store, _, rt = env
     agent, _ = launched(env, bus, seat)
     settle_claim(bus, claim)
     finish(env, agent, "task done")
     rt.live.discard(agent.name)
+    slot = f"{SLUG}/{agent.name}"
+    store.redis.hset(local_slots.key(agent.hive), slot, NOW)
     assert reconciler.stop_admitted(SLUG, agent, "ended") == execution_stop.ENDED
 
     actions = reap_pass(env, NOW + 1)
 
     assert actions == ([f"retired {agent.name}"] if dropped else [])
     assert [seated.name for seated in store.agents(SLUG)] == ([] if dropped else [agent.name])
+    assert store.redis.hget(local_slots.key(agent.hive), slot) == (None if dropped else str(NOW))
     assert sent_stops(bus, agent) == []
 
 
 @pytest.mark.feature("events-ended-agent-dropped-once-settled")
 @pytest.mark.parametrize(
-    ("outcome", "settled", "retired"),
+    ("outcome", "settled", "answer", "retired", "released"),
     [
-        (execution_stop.ENDED, True, True),
-        (execution_stop.UNKNOWN, True, True),
-        (execution_stop.ENDED, False, False),
-        (execution_stop.UNKNOWN, False, False),
-        (execution_stop.PENDING, True, False),
+        (execution_stop.ENDED, True, "retired a1", True, True),
+        (execution_stop.UNKNOWN, True, "retired a1", True, True),
+        (execution_stop.ENDED, True, f"kept a1{DROP_REFUSED}", True, False),
+        (execution_stop.ENDED, True, "could not retire a1, retrying next tick", True, False),
+        (execution_stop.ENDED, False, "retired a1", False, False),
+        (execution_stop.UNKNOWN, False, "retired a1", False, False),
+        (execution_stop.PENDING, True, "retired a1", False, False),
     ],
 )
 def test_an_ended_admitted_agent_is_retired_only_once_its_stop_answers_ended_or_unknown_and_its_claim_settled(
-    monkeypatch: pytest.MonkeyPatch, outcome: str, settled: bool, retired: bool
+    monkeypatch: pytest.MonkeyPatch, outcome: str, settled: bool, answer: str, retired: bool, released: bool
 ) -> None:
+    from scripts.hive import launch
+
     tick = agent_steps.tick
     agent = AgentRecord(name="a1", lane="eng", task="t1", state="working")
     asked: list[tuple[str, str]] = []
     calls: list[tuple[Any, ...]] = []
+    returned: list[tuple[Any, ...]] = []
     monkeypatch.setattr(tick, "_acknowledging", lambda *_args: False)
     monkeypatch.setattr(tick, "_ended", lambda *_args: True)
     monkeypatch.setattr(reconciler, "stop_admitted", lambda _slug, _agent, _reason: outcome)
     monkeypatch.setattr(
         reconciler, "settled_admitted", lambda slug, checked: asked.append((slug, checked.name)) or settled
     )
-    monkeypatch.setattr(tick, "_retire_ended", lambda *args: calls.append(args) or [f"retired {args[5].name}"])
+    monkeypatch.setattr(tick, "_retire_ended", lambda *args: calls.append(args) or [answer])
+    monkeypatch.setattr(launch, "release", lambda *args: returned.append(args))
     rows = {"t1": {"id": "t1", "done": True}}
     judging = SimpleNamespace(
         slug=SLUG, store="store", ledger="ledger", runtime="runtime", rows=rows, live=set(), now_ms=NOW
@@ -611,9 +622,10 @@ def test_an_ended_admitted_agent_is_retired_only_once_its_stop_answers_ended_or_
 
     actions = agent_steps._reap_admitted(cast(Any, judging), agent)
 
-    assert actions == (["retired a1"] if retired else [])
+    assert actions == ([answer] if retired else [])
     assert asked == ([] if outcome == execution_stop.PENDING else [(SLUG, "a1")])
     assert calls == ([(SLUG, "store", "ledger", "runtime", rows, agent, NOW)] if retired else [])
+    assert returned == ([("store", SLUG, agent)] if released else [])
 
 
 @pytest.mark.feature("events-ended-agent-dropped-once-settled")
