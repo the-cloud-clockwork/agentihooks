@@ -615,8 +615,8 @@ binds the metrics port over `Scheduler.registry`, the registry the scheduler's p
 every `GET /metrics` first sets the load gauges on it: `metrics.respond` runs
 `metrics.observe_load` on the scheduler's load snapshot.
 
-Each contract series and its setter on agentihooks `dev` of 20 November 2026. A series with no
-setter keeps only its `HELP` and `TYPE` lines, so Prometheus stores no series for it:
+The table names each contract series and its setter on agentihooks `dev` of 20 November 2026. A
+series with no setter keeps only its `HELP` and `TYPE` lines, so Prometheus stores no series for it:
 
 | Series | Set by | Read by |
 |---|---|---|
@@ -629,12 +629,12 @@ setter keeps only its `HELP` and `TYPE` lines, so Prometheus stores no series fo
 | `ci_lab_slots_wanted` | `metrics.observe_load` on each scrape, from `scripts.ci_lab.budget.slots_wanted` | `CILabSchedulerBlind`, the Slots busy, total and wanted panel, the worker ScaledObject |
 | `ci_lab_units_overdue` | `metrics.observe_load` on each scrape, from the overdue leases `Scheduler.load` counts | `CILabUnitsOverdue` |
 | `ci_lab_workers_ready` | `metrics.observe_load` on each scrape, from the offering workers `Scheduler.load` counts | The `heartbeat` line of the Workers ready against desired panel |
-| `ci_lab_core_seconds_total` | `metrics.observe_unit`, which `Scheduler._finished` runs once for each finished attempt with a report | The Core minutes per merged pull request panel |
+| `ci_lab_core_seconds_total` | `metrics.observe_unit`, which `Scheduler._finished` runs once for each finished attempt with a report that `Queue.tally` counts | The Core minutes per merged pull request panel |
 | `ci_lab_heads_graded_total` | `Scheduler._advance`, once for each grade it closes | The Core minutes per merged pull request panel |
-| `ci_lab_cache_hits_total`, `ci_lab_cache_misses_total` | `Scheduler._place` for the `verdict` cache; `metrics.observe_unit` for the `git` and `uv` lookups a unit report carries | `CILabCacheMissRatioHigh`, the Cache hit ratio panel |
+| `ci_lab_cache_hits_total`, `ci_lab_cache_misses_total` | `Scheduler._place` for the `verdict` cache; `metrics.observe_unit` for the `git` and `uv` lookups a unit report carries | `CILabCacheMissRatioHigh`, the Cache hit ratio (git, uv, verdict) panel |
 | `ci_lab_unit_duration_seconds` | `metrics.observe_unit`, for a report that carries `seconds` | No alert or panel |
 | `ci_lab_units_redelivered_total`, `ci_lab_units_lost_total` | `Scheduler._reap`, once for each expired lease it requeues or marks lost | No alert or panel; the [Worker loss drill](#worker-loss-drill) reads them |
-| `ci_lab_verdict_mismatch_total` | None. `shadow.Shadow` counts it in a registry of its own and has no live caller | `CILabVerdictMismatch`, the Shadow mismatches per gate panel; the alert cannot fire |
+| `ci_lab_verdict_mismatch_total` | None. `shadow.Shadow` counts it on the registry its caller passes, and no code constructs `Shadow` | `CILabVerdictMismatch`, the Shadow mismatches per gate panel; the alert cannot fire |
 | `ci_lab_mirror_age_seconds`, `ci_lab_github_rate_remaining` | None | No alert or panel |
 
 `metrics.observe_records` would also set the unit duration, the `verdict` cache counters and the
@@ -778,7 +778,7 @@ deployed the observability stack.
 | Every lab alert stays inactive and the lab panels read No data | Prometheus holds no lab series: the lab chart's objects and the scheduler's ServiceMonitor are not in the cluster | `count by (__name__) ({__name__=~"ci_lab_.+"})` in Prometheus lists the lab series it holds |
 | `CILabSchedulerBlind` fires 10 minutes after a `ci-lab-scheduler` replica exists | The scheduler's scrape target is down, or Prometheus does not scrape it | `up` for the scheduler target. With the target up, `curl -fsS http://<scheduler>:9108/metrics \| grep '^ci_lab_slots_wanted'` prints the gauge, which `metrics.observe_load` sets on every scrape |
 | Spend estimate reads No data | No node carries both CI taints, and `count` over no series is empty rather than 0 | Expected while the CI pool has no node |
-| Core minutes per merged pull request reads No data or Infinity | The scheduler counted no finished attempt with a report, or graded no queue head green, in the range | See [Lab series the rules read](#lab-series-the-rules-read); widen the range |
+| Core minutes per merged pull request reads No data or Infinity | No data: the scheduler counted no finished attempt with a report in the range. Infinity: it counted core time but graded no queue head green in the range | See [Lab series the rules read](#lab-series-the-rules-read); widen the range |
 | `CILabVerdictMismatch` keeps firing after the gate agrees again | It looks back one hour | Expected; it clears an hour after the last new mismatch of that gate |
 | The promtool job fails after an annotation edit | promtool compares `summary` and `description` exactly | Update the case's `exp_annotations` in the same pull request |
 | A firing lab alert sends no second ntfy message | A group that keeps firing repeats only every 6 hours | Read the alert in the Alertmanager API above; a change to the group sends after 5 minutes |
