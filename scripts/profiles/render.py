@@ -207,13 +207,8 @@ def stamp(name: str) -> dict[str, Any]:
 
 
 def _roots(bundle: Path | None, dirs: list[tuple[str, Path]]) -> list[Path]:
-    shared, user = _shared(), _user()
-    return (
-        ([bundle] if bundle is not None else [])
-        + ([shared] if shared is not None else [])
-        + ([user] if user is not None else [])
-        + [d for _, d in dirs]
-    )
+    roots = [root for root in (bundle, _shared(), _user()) if root is not None]
+    return [profile_chain.layer_root(root) for root in roots] + [d for _, d in profile_chain.unlayered(dirs, roots)]
 
 
 def _features(

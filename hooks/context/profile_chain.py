@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Callable, Mapping
+import sys
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
+from typing import Any, cast
 
 import yaml
 
@@ -13,6 +15,7 @@ BUILT_IN_PROFILES = Path(__file__).resolve().parents[2] / "profiles"
 PACKAGE_ROLES = BUILT_IN_PROFILES / "package" / "roles"
 PACKAGE_PREFIX = "package:"
 BUNDLE_PROFILES = "profiles"
+BUNDLE_MANIFEST = "bundle.yml"
 RENDER_STAMP = ".agentihooks-render.json"
 OVERLAY_CAP = 3
 HIVE_CAPABILITIES = "AGENTIHOOKS_HIVE_CAPABILITIES"
@@ -64,9 +67,36 @@ def registered_user_bundle(state: dict, environ: Mapping[str, str]) -> Path | No
     return Path(raw).expanduser() if raw else None
 
 
-def bundle_roots(state: dict) -> list[tuple[str, Path]]:
+def bundle_roots(state: dict[str, Any], layer: bool = False) -> list[tuple[str, Path]]:
     found = [("root", bundle_path(state)), ("shared", shared_bundle_path(state)), ("user", user_bundle_path(state))]
-    return [(kind, path) for kind, path in found if path is not None]
+    return [(kind, layer_root(path) if layer else path) for kind, path in found if path is not None]
+
+
+def layer_root(root: Path) -> Path:
+    manifest = root / BUNDLE_MANIFEST
+    loaded: object = yaml.safe_load(manifest.read_text()) if manifest.is_file() else None
+    data: dict[str, object] = cast("dict[str, object]", loaded) if isinstance(loaded, dict) else {}
+    raw = data.get("layer")
+    if raw is None:
+        return root
+    layer = Path(os.path.normpath(root / str(raw)))
+    if not isinstance(raw, str) or not layer.resolve().is_relative_to(root.resolve()):
+        print(f"agentihooks: {manifest} layer {raw!r} is not inside the bundle; using the bundle root", file=sys.stderr)
+        return root
+    return layer
+
+
+def unlayered(dirs: list[tuple[str, Path]], roots: Iterable[Path | None]) -> list[tuple[str, Path]]:
+    """The chain's profile dirs less any one a bundle ships as its layer, whose content already arrives through it."""
+    shipped = {layer_root(root).resolve() for root in roots if root is not None}
+    return [(name, path) for name, path in dirs if path.resolve() not in shipped]
+
+
+def doctrine(root: Path) -> Path:
+    """A bundle's shared doctrine; a bundle naming a layer keeps its root ``CLAUDE.md`` for its own development."""
+    layer = layer_root(root)
+    directive = layer / ".claude" / "CLAUDE.md"
+    return directive if directive.exists() or layer != root else root / "CLAUDE.md"
 
 
 def missing_bundle_roots(state: dict) -> list[tuple[str, Path]]:
