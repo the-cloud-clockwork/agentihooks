@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "credential-guard-refuses-brace-environ-leaves",
+      "origin": "regression",
+      "ordered_at": "2026-11-20",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-credential-guard-last-word-brace",
+      "behaviour": "The credential guard refuses a Bash command whose process environment path under proc carries a brace expansion in its last segment, either a whole group in that segment or a group opened in an earlier segment that closes there, and a brace word read from a proc working directory, the same way as the literal environ name.",
+      "seam": "hooks.context.credential_guard.leaf_names_environ, read by hooks.context.credential_guard.decide",
+      "tests": [
+        "tests/test_credential_guard.py::test_a_brace_in_the_last_segment_of_a_proc_environ_path_is_refused"
+      ]
+    },
+    {
       "id": "kind-terminal-snapshot-base",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2647",

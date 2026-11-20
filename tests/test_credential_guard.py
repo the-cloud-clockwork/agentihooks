@@ -1475,3 +1475,17 @@ class TestProcEnvironReads:
         assert verdict.splitlines()[0] == "BLOCKED: searching the contents of /proc/1/environ."
         assert 'test -n "${VAR:-}"' in verdict
         assert ENV_NAMES_SAFE in verdict
+
+
+PROC_ENVIRON_BRACE_LEAVES = [
+    "cat /proc/1/env{iron,}",
+    "cat /proc/self/envi{ron,x}",
+    "cat /proc/{1/envi,}ron",
+    "cd /proc/1 && cat env{iron,}",
+]
+
+
+@pytest.mark.feature("credential-guard-refuses-brace-environ-leaves")
+@pytest.mark.parametrize("command", PROC_ENVIRON_BRACE_LEAVES)
+def test_a_brace_in_the_last_segment_of_a_proc_environ_path_is_refused(command: str) -> None:
+    assert decide(_bash(command)) == block("reading a process environment file under /proc", KIND_ENVIRONMENT)
