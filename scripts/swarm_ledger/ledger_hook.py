@@ -160,7 +160,7 @@ def expanded(command: str) -> str:
         return assigned.get(name, os.environ.get(name, ""))
 
     lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
-    lexer.whitespace_split = True
+    setattr(lexer, "whitespace_split", True)
     try:
         words = list(lexer)
     except ValueError:
