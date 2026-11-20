@@ -24,7 +24,6 @@ def _setup(
     recovery: bool = True,
     stall_once: bool = False,
     attempt_seconds: int | None = None,
-    apt_seconds: int | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     executable = tmp_path / "python"
     calls = tmp_path / "calls"
@@ -44,9 +43,9 @@ def _setup(
         '  [[ ! -e "$APT_LOCK" ]] || { echo "E: Could not get lock $APT_LOCK" >&2; exit 100; }\n'
         '  if [[ -f "$STALL" ]]; then\n'
         '    rm "$STALL"\n'
-        '    if [[ -n "$APT_SECONDS" ]]; then\n'
+        '    if [[ -n "${BROWSER_CACHE_TEST_APT_SECONDS:-}" ]]; then\n'
         '      touch "$APT_LOCK"\n'
-        '      setsid bash -c \'sleep "$APT_SECONDS"; echo released >> "$CALLS"; rm "$APT_LOCK"\''
+        '      setsid bash -c \'sleep "$BROWSER_CACHE_TEST_APT_SECONDS"; echo released >> "$CALLS"; rm "$APT_LOCK"\''
         " < /dev/null > /dev/null 2>&1 &\n"
         "    fi\n"
         "    sleep 30\n"
@@ -72,7 +71,6 @@ def _setup(
     monkeypatch.setenv("READY", str(marker))
     monkeypatch.setenv("STALL", str(stall))
     monkeypatch.setenv("APT_LOCK", str(tmp_path / "apt_lock"))
-    monkeypatch.setenv("APT_SECONDS", "" if apt_seconds is None else str(apt_seconds))
     monkeypatch.setenv("RECOVERY", str(recovery).lower())
     monkeypatch.setenv("LAUNCH_STALL", str(launch_stall))
     monkeypatch.setenv("LAUNCH_FAILS", str(os.environ.get("BROWSER_CACHE_TEST_LAUNCH") == "fail").lower())
@@ -142,9 +140,8 @@ def test_a_stalled_download_is_killed_at_its_attempt_timeout_and_retried_green(t
 def test_a_retry_after_a_timeout_waits_for_the_left_over_apt_get_to_release_its_lock(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    result, calls = _setup(
-        tmp_path, monkeypatch, cached=False, ready=False, stall_once=True, attempt_seconds=6, apt_seconds=8
-    )
+    monkeypatch.setenv("BROWSER_CACHE_TEST_APT_SECONDS", "8")
+    result, calls = _setup(tmp_path, monkeypatch, cached=False, ready=False, stall_once=True, attempt_seconds=6)
     assert result.returncode == 0, result.stderr
     assert calls == ["mirror", "install", "released", "install", "launch"]
 
@@ -152,9 +149,8 @@ def test_a_retry_after_a_timeout_waits_for_the_left_over_apt_get_to_release_its_
 def test_a_retry_never_installs_while_the_lock_is_held_and_ends_within_its_attempt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    result, calls = _setup(
-        tmp_path, monkeypatch, cached=False, ready=False, stall_once=True, attempt_seconds=2, apt_seconds=8
-    )
+    monkeypatch.setenv("BROWSER_CACHE_TEST_APT_SECONDS", "8")
+    result, calls = _setup(tmp_path, monkeypatch, cached=False, ready=False, stall_once=True, attempt_seconds=2)
     assert result.returncode != 0
     assert calls == ["mirror", "install"]
 
