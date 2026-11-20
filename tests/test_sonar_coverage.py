@@ -102,6 +102,7 @@ def test_the_coverage_wait_outlasts_its_own_deadline_inside_the_sonar_budget() -
     assert sonar_pull - pull_minutes >= 10
 
 
+@pytest.mark.feature("sonar-queue-watch-job-scoped-token")
 def test_the_queue_watch_token_outlives_the_dev_push_wait() -> None:
     spec = importlib.util.spec_from_file_location("queue_watch", ROOT / ".github/coverage/queue_watch.py")
     assert spec is not None and spec.loader is not None
