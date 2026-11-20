@@ -536,7 +536,7 @@ inhibit_rules:
 |---|---|---|---|---|
 | `CILabQueueWaitHigh` | The predicted wait of the hotfix, pull request or queue class is over 1200 seconds, the 20 minute default past which the [lab behind claim hold](swarm-thresholds.md#lab-behind-claim-hold) holds new eng claims. A [wait the lab cannot predict](#a-wait-the-lab-cannot-predict) reads `+Inf` and fires it too, while the claim hold reads that wait as 0. Promotion and backfill never fire it | 10 minutes | class | Slots busy against slots total, and whether the worker pool sits at its maximum |
 | `CILabWorkersPending` | At least one `ci-lab-worker-*` pod in `ci-lab` is Pending | 15 minutes | the pool | The `cluster-autoscaler-oci-status` ConfigMap for the CI pool, and whether no CI node can make room by preempting pods below a worker's priority, see [Worker scheduling priority](#worker-scheduling-priority) |
-| `CILabBudgetShedding` | `ci_lab_class_shed` is 1 for a class: the day's core budget left fell below that class's shed fraction, so its units wait for the budget to reset. Only backfill, promotion and queue shed | 5 minutes | class | Budget left on the dashboard and the shed fractions in the runtime config at `CI_LAB_RUNTIME_CONFIG` |
+| `CILabBudgetShedding` | `ci_lab_class_shed` is 1 for a class: the share of the day's core budget spent reached that class's shed fraction or a more urgent class's, so its units wait for the budget to reset. Only backfill, promotion and queue shed | 5 minutes | class | Budget left on the dashboard and the shed fractions in the runtime config at `CI_LAB_RUNTIME_CONFIG` |
 | `CILabPullRequestBlockedByCap` | Pull request units are queued, every slot is busy, and any HorizontalPodAutoscaler in `ci-lab`, in the deployed chart the one KEDA builds from the [worker ScaledObject](#packing), wants at least its maximum replicas. An autoscaler at its maximum in another namespace does not count | 10 minutes | the pool; its value is the queued pull request units | The worker maximum and the CI node cap; raising either is the operator's elasticity budget |
 | `CILabSchedulerBlind` | Prometheus holds no `ci_lab_slots_wanted` series while the `ci-lab-scheduler` Deployment asks for at least one replica. A scheduler scaled to zero, or no Deployment, keeps it silent | 10 minutes | the scheduler | The scheduler's scrape target and port `9108`; the worker ScaledObject sizes the worker pool from this gauge and holds `elasticity.floorWorkers` while it is missing |
 | `CILabCacheMissRatioHigh` | The git or uv node cache missed more than half its lookups over 30 minutes, with at least 10 misses. A cache with misses and no hit series counts its hits as 0. The verdict cache never fires it | 15 minutes | cache | The node cache DaemonSet on the CI nodes and the age of its git mirror |
@@ -3466,6 +3466,11 @@ returns the URL for `lab/uploads/<job>/report.json` with `name="report"` or `log
 says otherwise; on `LocalObjects` it is a `file://` URI. An upload is not write once: a second PUT
 to the same URL replaces the object. A presigned URL grants a write to that one object until it
 expires, so keep it out of logs.
+
+The scheduler builds its `S3Objects` with `scheduler.storage`, whose client signs SigV4 URLs over
+the host alone, region `us-east-1` and path style, so a worker's PUT may carry any `Content-Type`.
+A SigV2 URL, which botocore signs when no signature version is set, also signs the `Content-Type`:
+the form type urllib adds to every worker PUT then makes MinIO answer 403 `SignatureDoesNotMatch`.
 
 Workers ask the scheduler's lease API on port `8800`:
 

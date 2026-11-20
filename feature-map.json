@@ -118,6 +118,23 @@
       ]
     },
     {
+      "id": "credential-guard-heredoc-substitutions",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-credential-guard-heredoc-substitution",
+      "behaviour": "The credential guard judges executable dollar and backtick command substitutions in unquoted heredoc bodies like stages, refusing credential reads and preserving recursive tree scans. Quoted delimiters keep their bodies literal for ordinary consumers. Literal body commands, process substitution text, escaped substitution markers and safe substitutions pass. Existing shell consumer checks still apply.",
+      "seam": "hooks.context.credential_guard.decide and evaluate on Bash heredoc payloads",
+      "rules": [
+        "credential-guard-heredoc-substitution"
+      ],
+      "tests": [
+        "tests/test_credential_guard.py::test_an_unquoted_heredoc_credential_substitution_is_refused",
+        "tests/test_credential_guard.py::test_a_quoted_heredoc_credential_substitution_stays_literal",
+        "tests/test_credential_guard.py::test_an_unquoted_heredoc_without_a_credential_substitution_passes",
+        "tests/test_credential_guard.py::test_a_heredoc_substitution_keeps_the_credential_tree_scan",
+        "tests/test_credential_guard.py::test_a_spelled_heredoc_token_hides_no_later_heredoc_body"
+      ]
+    },
+    {
       "id": "credential-guard-reads-heredoc-commands",
       "origin": "regression",
       "ordered_at": "2026-11-19",
@@ -737,7 +754,8 @@
       "seam": "agentihooks swarm <slug> tasks through scripts.swarm.cli.main, reading LedgerClient.tasks and LedgerClient.freezes",
       "tests": [
         "tests/swarm/test_tasks_read.py::test_swarm_tasks_prints_every_task_row_and_freeze_of_the_swarm_as_one_json_document",
-        "tests/swarm/test_tasks_read.py::test_swarm_tasks_exits_one_and_prints_no_rows_when_the_ledger_is_unreachable"
+        "tests/swarm/test_tasks_read.py::test_swarm_tasks_exits_one_and_prints_no_rows_when_the_ledger_is_unreachable",
+        "tests/swarm/test_tasks_read.py::test_swarm_tasks_resolves_the_ledger_client_through_the_module_so_a_class_bound_at_an_earlier_import_cannot_persist"
       ]
     },
     {
@@ -4278,6 +4296,20 @@
       ]
     },
     {
+      "id": "hive-remove-drain-withdraws-orders",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-remove-drain-withdraw",
+      "behaviour": "When a hive remove drain stops waiting, every hand off order it sent and its agent left unanswered is cancelled in every inbox world with a reason naming the removed hive, so a later occupant of the seat on another hive reads no stale order.",
+      "seam": "scripts.hive.remove.drain when it stops waiting",
+      "tests": [
+        "tests/hive/test_remove.py::test_a_hive_remove_drain_withdraws_every_unanswered_order_when_it_ends_so_a_later_occupant_reads_none",
+        "tests/hive/test_remove.py::test_a_hive_remove_drain_keeps_the_outcome_of_an_order_its_agent_answered"
+      ],
+      "rules": [
+        "hive-order-never-withdrawn"
+      ]
+    },
+    {
       "id": "reply-wait-reads-every-inbox-world",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2152",
@@ -5735,6 +5767,31 @@
       "tests": [
         "tests/test_credential_guard.py::test_an_awk_read_of_an_environment_value_is_refused",
         "tests/test_credential_guard.py::test_an_awk_listing_of_environment_names_passes"
+      ]
+    },
+    {
+      "id": "credential-guard-refuses-pod-environment-dumps",
+      "origin": "regression",
+      "ordered_at": "2026-11-20",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-cred-guard-kubectl-printenv",
+      "behaviour": "The credential guard judges the words after -- of a kubectl exec as the command the pod runs, with no shell around it, so a printenv of a secret looking name and an env or a bare printenv that dumps the whole pod environment are refused with the environment alternative the same way as a local command, while the pod name only listing, a count of its lines, printenv of a name that does not look like a secret, an env word that is only an operand or a flag value, and a kubectl command that sets a container command after -- without exec pass.",
+      "seam": "hooks.context.credential_guard.env_dump_verdict, read by hooks.context.credential_guard.decide",
+      "tests": [
+        "tests/test_credential_guard.py::test_a_pod_environment_dump_without_a_shell_is_refused",
+        "tests/test_credential_guard.py::test_a_pod_environment_name_listing_passes"
+      ]
+    },
+    {
+      "id": "credential-guard-passes-set-tests-in-scripts",
+      "origin": "regression",
+      "ordered_at": "2026-11-20",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2766",
+      "behaviour": "The credential guard passes the set or unset test its own refusal recommends when that test is a whole part, split at &&, ||, ; or a new line, of a single quoted shell -c script, as the shell command itself, in any pipeline stage or as the command a kubectl or docker wrapper runs: test -n, test -z, [ -n ] or [[ -n ]] on a double quoted $VAR, ${VAR}, ${VAR-} or ${VAR:-} of a secret looking name, with echo or printf printing only fixed words. A test printed by echo or printf, a test with more operands, a script that echoes or printfs the value or gets it as an argument, a script that runs with xtrace on through an x shell flag, set -x or xtrace, and a set test of another form, unquoted, with another expansion or in a double quoted script, are still refused as printing the variable to stdout.",
+      "seam": "hooks.context.credential_guard.echo_secret_verdict and hooks.context.credential_guard.untested_pieces, read by hooks.context.credential_guard.decide",
+      "tests": [
+        "tests/test_credential_guard.py::test_a_set_test_inside_a_shell_script_passes",
+        "tests/test_credential_guard.py::test_a_shell_script_that_prints_the_value_is_refused",
+        "tests/test_credential_guard.py::test_a_set_test_of_another_form_is_refused"
       ]
     },
     {
@@ -7618,6 +7675,17 @@
       "tests": [
         "tests/swarm/test_execution_archive.py::test_archive_prunes_intents_for_the_rows_it_archives",
         "tests/swarm/test_execution_archive.py::test_reconcile_archives_dead_rows"
+      ]
+    },
+    {
+      "id": "swarm-archive-prunes-stale-intents",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-archive-stale-intents",
+      "behaviour": "ExecutionRegistry.archive drops every controller-intents row whose execution is no longer current, including rows left by executions archived before intents were pruned, so every fenced registry write stops reading, decoding and copying that backlog; an intents row that never carried an execution_id matching its own key is never an execution admission and survives.",
+      "seam": "ExecutionRegistry.archive prunes intents whose execution left the executions section",
+      "tests": [
+        "tests/swarm/test_execution_archive.py::test_archive_prunes_intents_left_by_executions_archived_before_the_prune",
+        "tests/swarm/test_execution_archive.py::test_archive_keeps_an_intents_entry_that_is_not_an_execution_admission"
       ]
     },
     {
@@ -9809,6 +9877,18 @@
       ]
     },
     {
+      "id": "lab-result-upload-signing",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-worker-upload-forbidden",
+      "behaviour": "The CI lab scheduler's storage client presigns each worker result upload with SigV4 query auth over the host alone, so the worker's PUT of a unit's report, which carries the form Content-Type that urllib adds, is accepted and the report lands under lab/uploads/<job>/, while a URL changed to name another object is refused. A SigV2 URL signs the Content-Type, so the same PUT is refused with 403 SignatureDoesNotMatch, as MinIO refused 362 static unit results on 20 November.",
+      "seam": "scripts.ci_lab.scheduler.storage signing through scripts.ci_lab.objects.Uploads, put by scripts.ci_lab.worker.Client.put to a local bucket that checks presigned SigV2 and SigV4 signatures over the request it received; the client settings observed through scripts.ci_lab.scheduler.main",
+      "tests": [
+        "tests/ci_lab/test_result_upload.py::test_a_worker_put_of_a_report_lands_through_the_upload_url_the_scheduler_storage_signs",
+        "tests/ci_lab/test_result_upload.py::test_an_upload_url_the_scheduler_storage_signs_writes_only_the_object_it_names",
+        "tests/ci_lab/test_result_upload.py::test_the_bucket_refuses_a_sigv2_upload_url_for_the_content_type_urllib_adds_to_the_worker_put"
+      ]
+    },
+    {
       "id": "lab-worker-executors",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2533",
@@ -10887,6 +10967,16 @@
       ]
     },
     {
+      "id": "reused-coverage-scripts-module",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-coverage-step-drop-fallback",
+      "behaviour": "The unit job's Keep the reused tests' dev coverage step runs the grader checkout's scripts.reused_coverage alone. A grader checkout whose interpreter cannot import the tests package keeps the reused tests' dev coverage moved onto the head's lines, and a grader checkout that keeps the filter only under the tests package never runs that copy.",
+      "seam": "the Keep the reused tests' dev coverage step run text executed in a fake grader checkout",
+      "tests": [
+        "tests/test_reused_coverage.py::test_the_unit_shards_keep_reused_coverage_with_the_scripts_filter_alone_and_never_the_tests_package"
+      ]
+    },
+    {
       "id": "lab-remote-heads",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2645",
@@ -11227,6 +11317,20 @@
       ]
     },
     {
+      "id": "registry-update-skips-ended-execution",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-registry-update-ended-guard",
+      "behaviour": "A write through ExecutionRegistry.update onto a seat head a drop or exit already ended leaves the execution and the agents projection untouched, so a pass-start copy a concurrent drop outran never relists the agent; the tick reap step, which puts back the copy it read at pass start on a hub admitted agent's working or waiting verdict, never resurrects one the hub lifecycle dropped mid pass. Every ordinary write stays skipped this way whatever pane it carries; only ExecutionRegistry.revive, reached only through store.revive_agent from master_launch._resume, lands a write onto an ended execution, so a retired master's own resume still lands, routed through the same managed/legacy check store.put_agent uses so a legacy agent with no execution identity still lands through the plain projection write. The shared _land write both _update and revive call still keeps a finished head finished.",
+      "seam": "scripts.swarm.execution.ExecutionRegistry._update over an ended seat head, reached through store.put_agent and the tick reap step's _reap_admitted/_watch_idle, and ExecutionRegistry.revive, reached only through store.revive_agent from master_launch._resume",
+      "tests": [
+        "tests/swarm/test_execution_identity.py::test_a_write_onto_a_dropped_execution_leaves_it_ended_and_unlisted",
+        "tests/swarm/test_execution_identity.py::test_an_explicit_revival_lands_on_an_ended_execution",
+        "tests/swarm/test_execution_identity.py::test_a_revival_onto_a_finished_head_keeps_finished",
+        "tests/swarm/test_execution_identity.py::test_an_ordinary_write_with_a_different_pane_onto_an_ended_execution_stays_skipped",
+        "tests/tick/test_agents.py::test_a_hub_admitted_agent_dropped_while_the_reap_holds_its_pass_start_copy_is_not_relisted"
+      ]
+    },
+    {
       "id": "ci-dependency-audit-platformdirs-pin",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2801",
@@ -11234,6 +11338,23 @@
       "seam": "scripts.ci_dependency_audit.audit's pip-audit command and the lint job's dependency audit step",
       "tests": [
         "tests/test_ci_dependency_audit.py::test_audit_excludes_the_platformdirs_release_that_refuses_the_runner_home"
+      ]
+    },
+    {
+      "id": "guard-stripping-keeps-heredoc-delimiter-line",
+      "origin": "regression",
+      "ordered_at": "2026-11-20",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2721",
+      "behaviour": "The shared command stripping drops only the body of a terminated heredoc and keeps the rest of its delimiter line, for unquoted, single quoted and dash heredocs. The terminator is a whole line holding only the delimiter word, which may be indented and may close a command substitution; an unterminated opener hides nothing, and a << inside an arithmetic expansion or command, spaced or not and on one line or several, opens no heredoc. Branch guard therefore refuses a guarded command chained after the delimiter, on a line after an indented terminator, after an unterminated opener or after a shift operator the same way as at the top level, even when a later line starts with the shift operand; prod lockdown, which reads tree-sitter command nodes, keeps refusing a command chained after the delimiter; and a guarded command inside a terminated body, including one closed with its command substitution, stays data.",
+      "seam": "hooks.context._strip.strip_non_command_content, observed through hooks.context.branch_guard.check_branch_guard and hooks.context.prod_lockdown.check_prod_lockdown on Bash payloads",
+      "tests": [
+        "tests/context/test_strip_heredoc_delimiter_line.py::test_stripping_keeps_the_delimiter_line_and_drops_the_body",
+        "tests/context/test_strip_heredoc_delimiter_line.py::test_stripping_blanks_a_shift_inside_arithmetic",
+        "tests/context/test_strip_heredoc_delimiter_line.py::test_branch_guard_refuses_a_push_to_main_after_the_delimiter",
+        "tests/context/test_strip_heredoc_delimiter_line.py::test_prod_lockdown_refuses_a_release_run_after_the_delimiter",
+        "tests/context/test_strip_heredoc_delimiter_line.py::test_branch_guard_refuses_a_push_on_a_line_after_an_opener",
+        "tests/context/test_strip_heredoc_delimiter_line.py::test_a_guarded_command_inside_the_body_stays_data",
+        "tests/context/test_strip_heredoc_delimiter_line.py::test_a_body_closed_with_its_command_substitution_stays_data"
       ]
     },
     {
