@@ -1141,7 +1141,7 @@ def heredoc_body_verdict(heredoc: re.Match[str], runs_script: bool, ctx: Context
         return ALLOW
     for m in BODY_SUBSTITUTION.finditer(heredoc.group(4)):
         if m.group(1):
-            v = stage_verdict(m.group(1), Context(ctx.cwd, ctx.recursive, False))
+            v = stage_verdict(m.group(1), Context(ctx.cwd, ctx.recursive))
             if v.block:
                 return v
     return ALLOW

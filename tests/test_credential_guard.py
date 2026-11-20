@@ -983,6 +983,14 @@ def test_a_heredoc_substitution_keeps_the_credential_tree_scan(tmp_path: Path) -
     assert verdict.rewrite is None
 
 
+@pytest.mark.feature("credential-guard-heredoc-substitutions")
+def test_a_spelled_heredoc_token_hides_no_later_heredoc_body() -> None:
+    reason = decide(_bash('cat <<AHHEREDOC9 "\n" <<EOF\n$(cat .env)\nEOF'))
+
+    assert reason is not None
+    assert reason == decide(_bash("cat .env"))
+
+
 AWK_ENVIRON_VALUE_READS = [
     "awk 'BEGIN{for(k in ENVIRON) if(k ~ /^AGENTIHOOKS_(HIVE|SWARM)/) print k\"=\"ENVIRON[k]}'",
     "gawk 'BEGIN{print ENVIRON[\"DATABASE_URL\"]}'",

@@ -91,7 +91,8 @@
         "tests/test_credential_guard.py::test_an_unquoted_heredoc_credential_substitution_is_refused",
         "tests/test_credential_guard.py::test_a_quoted_heredoc_credential_substitution_stays_literal",
         "tests/test_credential_guard.py::test_an_unquoted_heredoc_without_a_credential_substitution_passes",
-        "tests/test_credential_guard.py::test_a_heredoc_substitution_keeps_the_credential_tree_scan"
+        "tests/test_credential_guard.py::test_a_heredoc_substitution_keeps_the_credential_tree_scan",
+        "tests/test_credential_guard.py::test_a_spelled_heredoc_token_hides_no_later_heredoc_body"
       ]
     },
     {
