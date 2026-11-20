@@ -34,6 +34,7 @@ EQUIVALENCE_DEV_PARENT = {
     "run": 'echo "sha=$(git -C head rev-parse HEAD^1)" >> "$GITHUB_OUTPUT"',
 }
 EQUIVALENCE_DEV_PARENT_REF = "${{ steps.comparison-base.outputs.sha }}"
+EQUIVALENCE_SCM_PIN = {"SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS": "0.dev${{ github.run_number }}"}
 PREFLIGHT_PATHS = [".github/workflows/**"]
 EQUIVALENCE_PATHS = ["scripts/swarm_ledger/**", "tests/swarm_ledger/**", ".github/workflows/equivalence.yml"]
 UNUSED_SELECT_OUTPUTS = ("files_1", "files_2", "files_3")
@@ -487,6 +488,15 @@ def _dev_parent_form(steps: list[dict]) -> list[dict]:
     return form
 
 
+def _scm_pin_form(steps: list[dict[str, Any]], pin: dict[str, str]) -> list[dict[str, Any]]:
+    form = deepcopy(steps)
+    for step in form:
+        if "pip install" in str(step.get("run")):
+            kept = {key: value for key, value in step.get("env", {}).items() if key not in EQUIVALENCE_SCM_PIN}
+            step["env"] = {**kept, **pin}
+    return form
+
+
 def _equivalence_problems(
     base_workflows: dict[str, dict[Any, Any]], head_workflows: dict[str, dict[Any, Any]]
 ) -> list[str]:
@@ -498,7 +508,12 @@ def _equivalence_problems(
     if not graded:
         return []
     end = graded[-1] + 1
-    forms = [base_steps[:end], _dev_parent_form(base_steps[:end])]
+    forms = [
+        base_steps[:end],
+        _dev_parent_form(base_steps[:end]),
+        _scm_pin_form(base_steps[:end], EQUIVALENCE_SCM_PIN),
+        _scm_pin_form(base_steps[:end], {}),
+    ]
     accepted = next((form for form in forms if head_steps[: len(form)] == form), None)
     if (
         accepted is None

@@ -37,6 +37,7 @@ from urllib.parse import urlsplit
 import jsonschema
 import yaml
 
+from hooks.secrets import redact
 from scripts import ci_select, dep_manifest
 from scripts.ci_lab import (
     budget,
@@ -49,16 +50,15 @@ from scripts.ci_lab import (
     lease_api,
     metrics,
     service,
-    venvs,
 )
 from scripts.ci_lab.capacity import Load
 from scripts.ci_lab.checks import Checks, Output, PostRefused
 from scripts.ci_lab.delivery import CLASSES, DELIVERY, DELIVERY_SCHEMA, load_runtime
-from scripts.ci_lab.digests import GradeInputs, StaticInputs, Toolchain, digest, grade_key, static_key
+from scripts.ci_lab.digests import LOCKFILE, GradeInputs, StaticInputs, Toolchain, digest, grade_key, static_key
 from scripts.ci_lab.intake import GradeRequest, admit
 from scripts.ci_lab.leases import Leases, release
 from scripts.ci_lab.manifests import Background, Fetcher, FetchPending, FetchUnanswered
-from scripts.ci_lab.objects import Objects, S3Objects, Uploads, manifest_folder, upload_path
+from scripts.ci_lab.objects import Objects, S3Objects, Uploads, manifest_folder, unit_path, upload_path
 from scripts.ci_lab.outcomes import CANNOT_RUN, DROPPED, FAILED, LOSSES, PASSED
 from scripts.ci_lab.pods import Pods, unmanaged, worker_pods
 from scripts.ci_lab.queue import DEFAULT, Job, Queue
@@ -1034,12 +1034,24 @@ class Scheduler:
 
     def _output(self, state: State, check: str, status: str) -> Output:
         """Return a check run's output: its units, none for a skipped authoritative gate, the grade run, the grader
-        revision and the head's commit page."""
+        revision, the head's commit page and, on a gate's check run, the stored log of each failed static unit."""
         refs = list(state.units) if check == REQUIRED else state.gates.get(check, [])
         units = tuple(Unit(slot.kind, slot.key, tuple(slot.members)) for slot in (state.units[ref] for ref in refs))
         title = f"{CLASSES[state.tier]} grade {status}"
         summary = f"{len(units)} units of {check} on {state.head} against {state.base}"
-        return Output(title, summary, units, state.run, state.grader, f"{state.repo}/commit/{state.head}")
+        logs = () if check == REQUIRED else self._logs([state.units[ref] for ref in refs])
+        return Output(title, summary, units, state.run, state.grader, f"{state.repo}/commit/{state.head}", logs)
+
+    def _logs(self, slots: Sequence[Slot]) -> tuple[tuple[Unit, str], ...]:
+        """Return each failed static slot's unit with its stored log, secret patterns redacted; a unit whose log is
+        empty or not stored adds none."""
+        logs: list[tuple[Unit, str]] = []
+        for slot in [slot for slot in slots if slot.kind == STATIC and slot.outcome == FAILED]:
+            path = unit_path(slot.kind, slot.key, "log")
+            if path in self.objects.keys(str(PurePosixPath(path).parent) + "/") and (log := self.objects.read(path)):
+                text = redact(log.decode(errors="replace"), mode="strict")
+                logs.append((Unit(slot.kind, slot.key, tuple(slot.members)), text))
+        return tuple(logs)
 
 
 class BusInbox:
@@ -1289,9 +1301,7 @@ class MirrorExpander:
         head, base = self._files(mirror, request.head), self._files(mirror, request.base)
         workflow = self._git(mirror, "show", f"{grader}:{WORKFLOW.as_posix()}")
         registry = json.loads(self._git(mirror, "show", f"{grader}:{REGISTRY.as_posix()}"))
-        toolchain = replace(
-            self.toolchain, lockfile=head.get(venvs.LOCKFILE, ""), pyproject=head.get("pyproject.toml", "")
-        )
+        toolchain = replace(self.toolchain, lockfile=head.get(LOCKFILE, ""), pyproject=head.get("pyproject.toml", ""))
         gates: dict[str, list[Unit]] = {}
         for gate in discover(workflow, registry, self._workflows(mirror, grader)):
             if gate.missing:

@@ -12,7 +12,6 @@ import pytest
 
 from scripts.codex_session import protocol, supervisor
 from scripts.codex_session.binding import CONNECTED, ENDPOINTS, EXITED, FAILED, BindingStore, decode
-from scripts.swarm.launch_endings import terminal
 from scripts.swarm.store import APP_SERVER_TRANSPORT, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from tests.codex_session.fakes import FIRST_PID, OWN_START, SERVER_START, Clock, Process, Server, hooks
 
@@ -1501,6 +1500,7 @@ def test_adoption_refusal_preserves_existing_ending_authority(
     case: tuple[bool, bool],
 ) -> None:
     from scripts.swarm import commands
+    from scripts.swarm.launch_endings import terminal
 
     diagnostic, expected_terminal = case
     monkeypatch.setattr(commands, "hive_id", lambda: "m1")
