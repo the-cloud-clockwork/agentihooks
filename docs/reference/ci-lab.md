@@ -2578,6 +2578,72 @@ The executor writes no secret value into the unit report or log. As Actions mask
 replaces each non empty secret value the gate read with `***` in the unit log and in the step
 summary the report carries.
 
+##### Secrets on the worker
+
+`scripts.ci_lab.executors.settings` turns each worker variable whose name starts with
+`CI_LAB_SECRET_` into a secret named by the rest of that name, so
+`CI_LAB_SECRET_DOCS_SANITY_KEYWORDS` answers `${{ secrets.DOCS_SANITY_KEYWORDS }}`. The rest must
+match the workflow's spelling exactly: Actions matches a secret name in any case, the lab only in
+the case the variable is written. Only the static executor reads these secrets; test and mutation
+units never see them.
+
+A secret reaches a step only through a `${{ secrets.<NAME> }}` in the `env` of that step, the gate
+or a producer with a `run`. The sandbox passes no other worker variable to a step, and a `${{ }}`
+written in `run` text is neither read nor resolved. The mask is a literal replacement of each
+value, longest first, made after the unit ends. An empty secret masks nothing, and a short value
+masks every place the same text appears in the log.
+
+On dev one lab gradable gate reads a secret. It is
+`lint/keep-internal-addresses-identifiers-and-private-keywords-out-of-public-docs`, whose step
+passes `secrets.DOCS_SANITY_KEYWORDS` to `scripts/docs_sanity.py` through
+`--keywords-env DOCS_SANITY_KEYWORDS`. On 20 November 2026 the deployment repository's
+`ci-lab-worker` Deployment sets no `CI_LAB_SECRET_` variable. A lab unit of that gate therefore
+reads an empty keyword list and checks internal addresses and identifiers only, while its Actions
+job also checks the private keywords.
+
+To give workers the keyword list, add the variable to the worker container through a pull request
+into the deployment repository's `dev`, read from a Kubernetes Secret so the value stays out of
+the chart. `ci-lab-worker-step-secrets` is an example Secret name:
+
+```yaml
+env:
+  - name: CI_LAB_SECRET_DOCS_SANITY_KEYWORDS
+    valueFrom:
+      secretKeyRef:
+        name: ci-lab-worker-step-secrets
+        key: DOCS_SANITY_KEYWORDS
+```
+
+A worker refuses to start when any variable name holds `REDIS` in any case. A secret named such as
+`CI_LAB_SECRET_REDIS_PASSWORD` stops every worker with exit 1 and
+`ci-lab worker refuses CI_LAB_SECRET_REDIS_PASSWORD`, so give such a secret another name in the
+workflow and on the worker together.
+
+Check which secret names a running worker holds, without their values:
+
+```bash
+kubectl -n ci-lab exec deploy/ci-lab-worker -- \
+  python -c 'import os; print(sorted(n for n in os.environ if n.startswith("CI_LAB_SECRET_")))'
+```
+
+List the secrets each gate reads at a checkout:
+
+```bash
+python -m scripts.ci_lab.static_gates --root . | python -c '
+import json, sys
+for line in sys.stdin:
+    gate = json.loads(line)
+    secrets = [name for name in gate["reads"] if name.startswith("secrets.")]
+    if secrets:
+        print(gate["name"], *secrets)
+'
+```
+
+On dev it prints
+`lint/keep-internal-addresses-identifiers-and-private-keywords-out-of-public-docs secrets.DOCS_SANITY_KEYWORDS`.
+
+##### Gates the lab leaves to Actions for a missing name
+
 A gate with any missing name is not lab gradable. The expander leases no unit for it, so its
 verdict stays with Actions. `python -m scripts.ci_lab.static_gates --root .` prints each gate's
 producers by id, its `reads`, its `matrix` and its `missing`. On dev two `lint` gates are not lab
@@ -2587,6 +2653,42 @@ gradable:
 |---|---|
 | `lint/refuse-changelog-fragments-named-off-the-branch-or-opening-without-a-section-heading` | `github.head_ref`, `github.ref_name` |
 | `lint/artifact-sanity-checks` | `github.base_ref`, `github.event.before`, `github.event.merge_group.base_sha` |
+
+Each line the command prints is one gate's `StaticGate` fields except `run`: `name`, `job`,
+`step`, `tools`, `modules`, `paths`, `base_paths`, `env` as an object, `condition`, `producers` as
+a list of step ids, `reads`, `matrix` as an object and `missing`, plus `digest` when `--grader`
+names a grader tree. Print the step context of one gate by its name:
+
+```bash
+python -m scripts.ci_lab.static_gates --root . | python -c '
+import json, sys
+for line in sys.stdin:
+    gate = json.loads(line)
+    if gate["name"] == sys.argv[1]:
+        print(json.dumps({key: gate[key] for key in ("name", "producers", "reads", "missing")}))
+' semgrep/scan/fail-on-findings-new-against-the-base
+```
+
+On dev it prints:
+
+```json
+{"name": "semgrep/scan/fail-on-findings-new-against-the-base", "producers": ["baseline"], "reads": ["inputs.base", "steps.baseline.outputs.sha"], "missing": []}
+```
+
+The `baseline` step runs first in the unit, and the gate reads the `sha` it writes to
+`$GITHUB_OUTPUT`. List every gate the lab leaves to Actions for a missing name:
+
+```bash
+python -m scripts.ci_lab.static_gates --root . | python -c '
+import json, sys
+for line in sys.stdin:
+    gate = json.loads(line)
+    if gate["missing"]:
+        print(gate["name"], *gate["missing"])
+'
+```
+
+On dev it prints the two gates of the table above, each followed by its missing names.
 
 Before pull request
 [#12486](https://github.com/the-cloud-clockwork/agentihooks/pull/12486), the executor supplied
@@ -2709,6 +2811,14 @@ or an empty log, and the required check show only unit keys.
 - Every expansion parses each workflow file directly in the folder, so one file that does not
   parse drops every head the lab grades at that grader revision.
 - Pull request and hotfix grades run no `semgrep` units, as the frame table above shows.
+- A gate that reads a field the lease lacks, such as `github.head_ref` or `github.base_ref`, gets
+  no unit, and its Actions job keeps the verdict.
+- The lab runs no `uses` step. A producer that is one reads as skipped with empty outputs, so a
+  gate that reads the token such a step mints runs with an empty value.
+- A `${{ }}` in a step's `run` text is not read: it is missing from `reads` and the shell gets the
+  text as written.
+- A secret name matches only in the case its `CI_LAB_SECRET_` variable is written, and the mask
+  replaces only the literal value. A value a step prints encoded or split up is not masked.
 
 #### Verify
 
@@ -2742,6 +2852,25 @@ given` in
 and both passed in
 [Tests run 44272811567](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/44272811567).
 
+The `lab-static-step-env` entry of `feature-map.json` maps the step context guards, among them:
+
+| Guard | What it holds |
+|---|---|
+| `tests/ci_lab/test_executors.py::test_static_grades_every_lint_gate_of_the_real_workflow_on_a_clean_tree` | The static executor passes every lab gradable `lint` gate of the repository's real workflow on a clean tree, and each of the two gates with a missing name, run anyway, raises `no value for '<name>' in the context` for its first missing name |
+| `tests/ci_lab/test_executors.py::test_static_gives_a_step_each_secret_it_reads_by_name_and_writes_no_value_to_its_report_or_log` | A step gets each secret it reads, empty when the worker has none of that name, and its value reads `***` in the unit log and report |
+| `tests/ci_lab/test_executors.py::test_settings_keep_each_step_secret_by_its_name_under_the_scoped_prefix` | `executors.settings` keeps each `CI_LAB_SECRET_<NAME>` variable as the secret `<NAME>` |
+| `tests/ci_lab/test_run_static.py::test_earlier_steps_run_first_and_their_outputs_outcome_and_conclusion_reach_the_gate` | Producers run in job order before the gate, and their outputs, outcome and conclusion join the context |
+| `tests/ci_lab/test_run_static.py::test_a_failing_earlier_step_fails_the_gate_without_running_it` | A producer that exits non zero ends the unit with its own code before the gate runs |
+| `tests/ci_lab/test_run_static.py::test_an_earlier_step_output_line_outside_name_equals_value_is_refused_without_its_text` | An output line outside `name=value` raises without the line's text |
+| `tests/ci_lab/test_static_gates.py::test_a_gate_misses_every_name_outside_the_lease_fields_its_secrets_and_its_earlier_steps` | `StaticGate.missing` holds every name the executor cannot supply |
+| `tests/ci_lab/test_static_gates.py::test_the_command_prints_each_gate_producers_reads_and_missing_names` | The command's JSON lines carry `producers`, `reads` and `missing` |
+
+Pull request [#12422](https://github.com/the-cloud-clockwork/agentihooks/pull/12422) added these
+tests. They failed on the missing name errors in
+[Tests run 44506744428](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/44506744428),
+on a head that held only the tests, and passed in
+[Tests run 44547023276](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/44547023276).
+
 #### Troubleshooting
 
 | Symptom | Cause | Check |
@@ -2751,6 +2880,12 @@ and both passed in
 | Every head graded at one grader revision is dropped with a YAML error | A workflow file directly in `.github/workflows` at that revision does not parse | In a checkout of that revision, `python -c 'import pathlib,yaml; [print(p) or yaml.safe_load(p.read_text()) for p in sorted(pathlib.Path(".github/workflows").glob("*.y*ml"))]'` prints each file before parsing it, so the last name printed before the traceback is the file |
 | The worker's standard error reads `ci-lab worker: unit <job> crashed: ValueError('semgrep uses ./.github/workflows/semgrep.yml, which was not given')` | The worker runs a release older than the fix while the scheduler expands with it | The `ci-lab-worker` image, as for the scheduler; the unit's lease expires and follows step 6 of the [Scheduler loop](#scheduler-loop) |
 | A pull request grade passes `semgrep` with no units | The pull request frame names the job `semgrep` while its units sit under the `semgrep/` labels | Expected today; see [Which grades run static units](#which-grades-run-static-units) |
+| The worker's standard error reads `ci-lab worker: unit <job> crashed: ValueError("no value for '<name>' in the context")` | The scheduler leased a unit for a gate that reads a name the worker cannot supply. One of the two services runs a release older than the fix that added the name: pull request #12422 for the lease fields, earlier step names and secrets, pull request #12486 for `github.event_name`, `runner.temp` and `matrix.<key>` | Both images, as in the rows above. At the grader revision, the [missing name listing](#gates-the-lab-leaves-to-actions-for-a-missing-name) shows whether the current release leaves the gate to Actions |
+| The worker's standard error reads `ci-lab worker: unit <job> crashed: ValueError('<id> wrote an output line that is not name=value')` | The producer `<id>` wrote a line to `$GITHUB_OUTPUT` that is not `name=value`, such as a `name<<EOF` block. The unit ends with no outcome and its lease expires | Change that step to write one `name=value` line per output, a form Actions also reads |
+| A lab unit of `lint/keep-internal-addresses-identifiers-and-private-keywords-out-of-public-docs` passes while its Actions job fails on a private keyword | The worker has no `CI_LAB_SECRET_DOCS_SANITY_KEYWORDS`, so the lab ran the scan with an empty keyword list | The names only check in [Secrets on the worker](#secrets-on-the-worker) |
+| A static unit's log shows `***` where no secret was printed | A secret's value is short or common text, and the mask replaces every place that text appears | Expected: the mask is a literal replacement |
+| Every worker exits 1 at start with `ci-lab worker refuses CI_LAB_SECRET_<NAME>` | The secret's variable name holds `REDIS` | Give the secret another name in the workflow and on the worker |
+| A gate never gets a lab unit, and only its Actions job reports it | Its `missing` is not empty | The [missing name listing](#gates-the-lab-leaves-to-actions-for-a-missing-name) names the gate and its missing names |
 
 ### Test units
 
