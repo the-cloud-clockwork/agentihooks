@@ -9,12 +9,20 @@ ALIASES = {
     "jwt": "pyjwt",
     "nats": "nats-py",
     "opentelemetry": "opentelemetry-api",
+    "opentelemetry.sdk": "opentelemetry-sdk",
+    "opentelemetry.exporter.otlp.proto.http": "opentelemetry-exporter-otlp-proto-http",
+    "opentelemetry.exporter.otlp.proto.grpc": "opentelemetry-exporter-otlp-proto-grpc",
     "yaml": "pyyaml",
 }
 
 
 def distribution(module: str) -> str:
-    return ALIASES.get(module, module).lower().replace("_", "-")
+    parts = module.split(".")
+    for length in range(len(parts), 0, -1):
+        prefix = ".".join(parts[:length])
+        if prefix in ALIASES:
+            return ALIASES[prefix]
+    return parts[0].lower().replace("_", "-")
 
 
 def local_module(root: Path, path: Path, module: str) -> bool:
@@ -28,30 +36,35 @@ def module_imports(path: Path) -> list[tuple[str, int]]:
     imported: list[tuple[str, int]] = []
     for node in ast.parse(path.read_text(), filename=str(path)).body:
         if isinstance(node, ast.Import):
-            imported.extend((alias.name.split(".")[0], node.lineno) for alias in node.names)
+            imported.extend((alias.name, node.lineno) for alias in node.names)
         elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-            imported.append((node.module.split(".")[0], node.lineno))
+            imported.extend((f"{node.module}.{alias.name}", node.lineno) for alias in node.names)
     return imported
 
 
 def check(root: Path) -> tuple[dict[str, list[str]], set[str]]:
     imported: dict[str, list[str]] = {}
+    required: dict[str, set[str]] = {}
     for package in ("hooks", "scripts"):
         folder = root / package
         paths = sorted(folder.rglob("*.py"))
         if not paths:
             raise ValueError(f"No Python sources under {folder}")
         for path in paths:
-            for module, line in module_imports(path):
+            for qualified, line in module_imports(path):
+                module = qualified.split(".")[0]
                 if module not in sys.stdlib_module_names and not local_module(root, path, module):
-                    imported.setdefault(module, []).append(f"{path.relative_to(root)}:{line}")
+                    location = f"{path.relative_to(root)}:{line}"
+                    if location not in imported.setdefault(module, []):
+                        imported[module].append(location)
+                    required.setdefault(module, set()).add(distribution(qualified))
     lock = root / "docker" / "swarm" / "requirements.lock"
     pinned = {
         match.group(1).lower().replace("_", "-")
         for line in lock.read_text().splitlines()
         if (match := re.match(r"^([A-Za-z0-9_.-]+)==([^\s;*]+)(?:\s|$)", line))
     }
-    return imported, {module for module in imported if distribution(module) not in pinned}
+    return imported, {module for module, distributions in required.items() if not distributions <= pinned}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -61,7 +74,7 @@ def main(argv: list[str] | None = None) -> int:
     imported, missing = check(args.root)
     for module, locations in sorted(imported.items()):
         status = "UNPINNED" if module in missing else "PINNED"
-        print(f"{status} {module} ({distribution(module)}): {', '.join(locations)}")
+        print(f"{status} {module}: {', '.join(locations)}")
     print(f"{len(imported)} third party imports; {len(missing)} unpinned")
     return int(bool(missing))
 

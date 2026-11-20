@@ -24,11 +24,11 @@ def source_tree(tmp_path: Path, source: str, lock: str = "packaging==26.3\n") ->
 def test_unpinned_module_import_turns_the_check_red(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root = source_tree(tmp_path, "import packaging\nimport unpinned_dependency\n")
     assert ci_swarm_imports.main(["--root", str(root)]) == 1
-    output = capsys.readouterr().out
-    assert "packaging" in output
-    assert "unpinned_dependency" in output
-    assert "hooks/probe.py:2" in output
-    assert "UNPINNED" in output
+    assert capsys.readouterr().out == (
+        "PINNED packaging: hooks/probe.py:1\n"
+        "UNPINNED unpinned_dependency: hooks/probe.py:2\n"
+        "2 third party imports; 1 unpinned\n"
+    )
 
 
 def test_pinned_imports_include_aliases_and_dotted_names(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -94,3 +94,24 @@ def test_current_repository_imports_are_all_pinned() -> None:
     imported, missing = ci_swarm_imports.check(root)
     assert "packaging" in imported
     assert missing == set(), missing
+
+
+@pytest.mark.parametrize(
+    "module",
+    [
+        "opentelemetry.sdk.metrics",
+        "opentelemetry.exporter.otlp.proto.http.metric_exporter",
+    ],
+)
+def test_namespace_import_requires_its_own_distribution(tmp_path: Path, module: str) -> None:
+    root = source_tree(tmp_path, f"import {module}\n", "opentelemetry-api==1.45.1\n")
+    assert ci_swarm_imports.check(root)[1] == {"opentelemetry"}
+
+
+def test_namespace_imports_accept_their_own_pins(tmp_path: Path) -> None:
+    root = source_tree(
+        tmp_path,
+        "from opentelemetry import sdk\nfrom opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter\n",
+        "opentelemetry-sdk==1.45.1\nopentelemetry-exporter-otlp-proto-http==1.45.1\n",
+    )
+    assert ci_swarm_imports.check(root)[1] == set()

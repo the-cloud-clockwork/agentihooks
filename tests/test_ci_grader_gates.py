@@ -135,6 +135,20 @@ def test_a_head_formatter_config_stays_red_under_the_grader_config(tmp_path: Pat
 
 
 @pytest.mark.feature("lint-gates-grade-from-grader")
+def test_a_head_swarm_import_checker_cannot_pass_itself(tmp_path: Path) -> None:
+    head = _python_head(tmp_path)
+    (head / "hooks/probe.py").write_text("import unpinned_dependency\n")
+    (head / "docker/swarm").mkdir(parents=True)
+    (head / "docker/swarm/requirements.lock").write_text("")
+    _planted_module(head, "ci_swarm_imports")
+    own = _run("python -m scripts.ci_swarm_imports", head, tmp_path / "runner")
+    graded = _run(_lint("Require swarm image pins for every third party module import"), head, tmp_path / "runner")
+    assert own.returncode == 0, own.stdout + own.stderr
+    assert graded.returncode == 1, graded.stdout + graded.stderr
+    assert "UNPINNED unpinned_dependency" in graded.stdout
+
+
+@pytest.mark.feature("lint-gates-grade-from-grader")
 def test_a_head_wiring_check_that_passes_itself_stays_red_under_the_grader_copy(tmp_path: Path) -> None:
     head = _python_head(tmp_path)
     shutil.copytree(ROOT / ".github/workflows", head / ".github/workflows")

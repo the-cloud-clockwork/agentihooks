@@ -6754,6 +6754,7 @@
         "tests/test_ci_grader_gates.py::test_the_lint_check_also_holds_a_rule_the_head_adds",
         "tests/test_ci_grader_gates.py::test_a_head_formatter_config_stays_red_under_the_grader_config",
         "tests/test_ci_grader_gates.py::test_a_head_wiring_check_that_passes_itself_stays_red_under_the_grader_copy",
+        "tests/test_ci_grader_gates.py::test_a_head_swarm_import_checker_cannot_pass_itself",
         "tests/test_ci_grader_gates.py::test_a_head_marker_check_that_passes_itself_stays_red_under_the_grader_copy",
         "tests/test_ci_grader_gates.py::test_the_marker_check_reads_the_vectors_under_the_root_it_names",
         "tests/test_ci_grader_gates.py::test_the_marker_check_runs_after_the_grader_checkout",
