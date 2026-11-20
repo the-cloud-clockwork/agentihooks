@@ -1,5 +1,7 @@
 import json
 
+from redis import Redis
+
 from scripts.swarm.store import RedisStore
 
 ENDINGS = "launch-endings"
@@ -11,11 +13,17 @@ return redis.call('HSET', KEYS[1], ARGV[1], cjson.encode(ending))
 """
 
 
+def _client(store: RedisStore) -> Redis:
+    return store.redis  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+
+
 def record_refusal(store: RedisStore, slug: str, execution_id: str, reason: str, generation: int) -> None:
     ending = json.dumps({"reason": reason, "generation": generation})
-    store.redis.eval(RECORD_REFUSAL, 1, store.key(slug, ENDINGS), execution_id, ending)
+    client = _client(store)
+    client.eval(RECORD_REFUSAL, 1, store.key(slug, ENDINGS), execution_id, ending)
 
 
 def terminal(store: RedisStore, slug: str, execution_id: str) -> bool:
-    raw = store.redis.hget(store.key(slug, ENDINGS), execution_id)
+    client = _client(store)
+    raw = client.hget(store.key(slug, ENDINGS), execution_id)
     return raw is not None and json.loads(raw).get("diagnostic") is not True
