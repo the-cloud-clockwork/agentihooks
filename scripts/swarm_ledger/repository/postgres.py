@@ -12,7 +12,7 @@ from typing import Any
 
 from scripts.swarm_ledger import request_metrics
 
-from . import hierarchy, refresh
+from . import hierarchy, host_entries, refresh
 from .entry import Entry
 from .sqlite import BEGIN, BEGIN_IMMEDIATE, ROWS_SCHEMA, SCHEMA, TABLES_SQL, TOKEN, Snapshot, SQLiteLedgerRepository
 
@@ -389,14 +389,15 @@ class Database:
 class PostgresLedgerRepository(SQLiteLedgerRepository):
     adopts = False
 
-    def __init__(self, address: str, domain=None):
+    def __init__(self, address: str, domain: Any = None, copies: host_entries.Copies | None = None) -> None:
         super().__init__(None, domain)
         self.address = address
+        self.copies = copies
 
-    def bound(self, domain) -> "PostgresLedgerRepository":
+    def bound(self, domain: Any) -> "PostgresLedgerRepository":
         if domain is self.domain:
             return self
-        twin = PostgresLedgerRepository(self.address, domain)
+        twin = PostgresLedgerRepository(self.address, domain, self.copies)
         twin._cache, twin._loads, twin._ready, twin._guard = self._cache, self._loads, self._ready, self._guard
         return twin
 

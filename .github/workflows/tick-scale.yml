@@ -21,4 +21,4 @@ jobs:
       - uses: ./.github/actions/tick-scale
         with:
           plant: ${{ github.ref == 'refs/heads/diffcheck/tick-scale-plant' }}
-          profile: ${{ github.ref == 'refs/heads/diffcheck/tick-scale-profile' && 'track outages,reap,spawn,tick view' || '' }}
+          profile: ${{ github.ref == 'refs/heads/diffcheck/tick-scale-profile' && 'track outages,reap,master scale,tick view' || '' }}

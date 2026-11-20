@@ -670,7 +670,7 @@ def calculate(
     }
 
 
-def read(store, slug: str) -> dict:
+def read(store: Any, slug: str) -> dict[str, Any]:
     value = store.redis.get(store.key(slug, "quota-capacity"))
     return json.loads(value) if value else {}
 
@@ -717,7 +717,36 @@ def placement_ready(
     return eligible, actions
 
 
-def apply(slug: str, config, store, ledger, runtime, now_ms: int) -> list[str]:
+def pins(
+    config: SwarmConfig,
+    decision: Mapping[str, Any],
+    ready: Mapping[str, list[dict[str, Any]]],
+    previous: Mapping[str, Any],
+    now_ms: int,
+) -> dict[str, Any]:
+    """Each lane offered only one harness, under the decision's ``pins`` key: the pin, when a capacity pass first saw
+    it, the other harness's free quota seats and the ready lane tasks this pass placed nowhere while the lane sat below
+    its ceiling. No key when no lane is pinned, so a pin that clears or changes starts its age again."""
+    seen = previous.get("pins", {})
+    found = {}
+    for lane in LANES:
+        offered = _harnesses(config, lane)
+        if len(offered) != 1:
+            continue
+        pin, other = offered[0], next(harness for harness in LABELS if harness not in offered)
+        before = seen.get(lane, {})
+        room = decision["effective"][lane] < decision["configured"][lane]
+        found[lane] = {
+            "agent": pin,
+            "since": before["since"] if before.get("agent") == pin else now_ms,
+            "other": other,
+            "free": decision["placeable"][other],
+            "waiting": [task["id"] for task in ready.get(lane, []) if room and task["id"] not in decision["tasks"]],
+        }
+    return {"pins": found} if found else {}
+
+
+def apply(slug: str, config: Any, store: Any, ledger: Any, runtime: Any, now_ms: int) -> list[str]:
     reader = getattr(runtime, "quota_capacity", None)
     if reader is None:
         return []
@@ -742,6 +771,7 @@ def apply(slug: str, config, store, ledger, runtime, now_ms: int) -> list[str]:
         for lane, slots in decision["placements"].items()
         for slot in slots
     }
+    decision |= pins(config, decision, ready, previous, now_ms)
     changed = any(previous.get(key) != decision[key] for key in ("configured", "effective", "reason"))
     decision["at"] = now_ms if changed else previous["at"]
     decision["observed_at"] = now_ms
