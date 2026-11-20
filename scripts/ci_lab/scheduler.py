@@ -23,7 +23,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections import Counter
+from collections import Counter, defaultdict
 from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field, fields, replace
@@ -51,7 +51,7 @@ from scripts.ci_lab import (
     service,
 )
 from scripts.ci_lab.capacity import Load
-from scripts.ci_lab.checks import Checks, Output
+from scripts.ci_lab.checks import Checks, Output, PostRefused
 from scripts.ci_lab.delivery import CLASSES, DELIVERY, DELIVERY_SCHEMA, load_runtime
 from scripts.ci_lab.digests import GradeInputs, StaticInputs, Toolchain, digest, grade_key, static_key
 from scripts.ci_lab.intake import GradeRequest, admit
@@ -71,6 +71,7 @@ from scripts.ci_lab.worktrees import Lab, Mirror, lab
 from scripts.ci_mutation import scope
 from scripts.ci_runner_trust import ACTORS, validate_actors
 from scripts.events.bus import Consumer
+from scripts.github_app import GitAuthRefused
 
 __all__ = [
     "GRADES",
@@ -133,6 +134,7 @@ BATCH = 50
 FETCH_MS = 100
 QUIET_MS = 30_000
 STARTS_PER_PASS = 8
+POST_HOLD_MS = 60_000
 INTERVAL_S = 2.0
 LEASE_TTL_MS = 120_000
 LEASE_POLL_MS = 500
@@ -405,8 +407,9 @@ class Slot:
 class State:
     """A grade's state: what it grades, its units by gate, whether a newer head superseded it, what it posted, the
     id of each check run it posted, the grade ref a lab remote push wrote its head to, if any, the dev commit of the
-    dependency manifest its test units are keyed on, if any, the authoritative gates it runs no unit of, and the gates
-    it posts as lab/<gate> rather than lab-shadow/<gate>."""
+    dependency manifest its test units are keyed on, if any, the authoritative gates it runs no unit of, the gates it
+    posts as lab/<gate> rather than lab-shadow/<gate>, and the clock before which it posts nothing after GitHub refused
+    one of its posts."""
 
     run: str
     repo: str
@@ -429,6 +432,7 @@ class State:
     manifest: str = ""
     idle: list[str] = field(default_factory=list[str])
     authoritative: list[str] = field(default_factory=list[str])
+    hold: int = 0
 
 
 def _parse(raw: str | bytes) -> State:
@@ -508,6 +512,15 @@ def _checks(state: State) -> dict[str, tuple[str, str | None]]:
     return targets
 
 
+def _moved(state: State) -> list[tuple[str, str, str | None]]:
+    """Return each check run whose target moved since its last post; a completed check run never moves again."""
+    return [
+        (check, status, conclusion)
+        for check, (status, conclusion) in _checks(state).items()
+        if (posted := state.posted.get(check)) != [status, conclusion] and (posted is None or posted[0] != "completed")
+    ]
+
+
 def _slug(repo: str) -> str:
     """Return owner/name of a repository URL."""
     return urlsplit(repo).path.removeprefix("/")
@@ -550,6 +563,7 @@ class Scheduler:
         self.spending = spending
         self.shed: tuple[str, ...] = ()
         self.registry = metrics.Registry()
+        self.held: defaultdict[str, int] = defaultdict(int)
 
     def tick(self, now_ms: int) -> list[str]:
         """Run one pass: intake, release quiet lanes, reap expired leases, enqueue the held units the budget admits,
@@ -558,7 +572,7 @@ class Scheduler:
         actions = [*self._intake(now_ms), *self._release(now_ms), *self._reap(now_ms), *self._admit(now_ms)]
         tiers, _, _ = self._demand()
         for run in sorted(self.client.smembers(LIVE)):
-            actions.extend(self._advance(run, tiers))
+            actions.extend(self._advance(run, tiers, now_ms))
         return actions
 
     def grade(self, run: str) -> State | None:
@@ -723,21 +737,27 @@ class Scheduler:
                 jsonschema.ValidationError,
             ) as error:
                 actions.append(f"cannot expand {request.head}: {error}")
-                self._refuse(request, ref, error, now_ms)
+                actions.extend(self._refuse(request, ref, error, now_ms))
             if started == STARTS_PER_PASS:
                 break
         return actions
 
-    def _refuse(self, request: GradeRequest, ref: str, error: Exception, now_ms: int) -> None:
+    def _refuse(self, request: GradeRequest, ref: str, error: Exception, now_ms: int) -> list[str]:
         """Post a completed required check run with conclusion failure on a head that cannot expand, naming the error,
         so the head shows a lab status. A head with no plan has no authoritative gates, so the check posts as
-        lab-shadow/required; a head pushed to a grade ref posts nothing, since GitHub does not hold it."""
+        lab-shadow/required; a head pushed to a grade ref posts nothing, since GitHub does not hold it. The post is tried
+        once, outside the post holds, and a post the App token, GitHub or the network refuses is recorded and not
+        retried, since the dropped head keeps no grade."""
         if ref.startswith(GRADE_REFS):
-            return
+            return []
         reason = f"cannot expand {request.head} against {request.base}: {error}"
         title = f"{CLASSES[request.tier]} grade cannot expand"
         output = Output(title, reason, (), f"unexpanded-{now_ms}", "unknown", f"{request.repo}/commit/{request.head}")
-        self.ports.checks(_slug(request.repo)).post(request.head, REQUIRED, "completed", "failure", output, True)
+        try:
+            self.ports.checks(_slug(request.repo)).post(request.head, REQUIRED, "completed", "failure", output, True)
+        except (GitAuthRefused, PostRefused, OSError) as refusal:
+            return [f"cannot post the failed {REQUIRED} check on {request.head}: {refusal}"]
+        return []
 
     def _start(self, request: GradeRequest, lane: str, ref: str, now_ms: int) -> str:
         """Open a grade of a head and the grade ref it was pushed to: supersede the lane's older head, place every unit
@@ -878,17 +898,17 @@ class Scheduler:
         self.shed = shed
         return newly
 
-    def _advance(self, run: str, tiers: Mapping[str, int]) -> list[str]:
+    def _advance(self, run: str, tiers: Mapping[str, int], now_ms: int) -> list[str]:
         """Collect a grade's finished jobs, each counted in its tier, post its check runs and close it once every unit
-        is final, counting the closed grade."""
+        is final and every check run is posted, counting the closed grade."""
         state = self.grade(run)
         if state is None:
             self.client.srem(LIVE, run)
             return [f"forgot {run}"]
         for slot in state.units.values():
             self._collect(slot, tiers, state)
-        actions = self._post(state)
-        if all(slot.outcome for slot in state.units.values()):
+        actions = self._post(state, now_ms)
+        if all(slot.outcome for slot in state.units.values()) and not _moved(state):
             self.client.srem(LIVE, run)
             state.conclusion = str(state.posted[REQUIRED][1])
             if state.tier == Priority.QUEUE and state.conclusion == "success":
@@ -956,33 +976,43 @@ class Scheduler:
         log = self.objects.read(log_path) if log_path in present else b""
         return json.loads(self.objects.read(report_path)), log
 
-    def _post(self, state: State) -> list[str]:
+    def _post(self, state: State, now_ms: int) -> list[str]:
         """Post each check run whose target moved since its last post; a completed check run never moves again. A gate
         the grade lists as authoritative posts as lab/<gate> and every other check as lab-shadow/<gate>. A check run
         the grade already holds seeds the poster first, so a restarted scheduler advances it in place. A grade of a
         head pushed to a grade ref records each move for the relay and posts nothing, since GitHub does not hold the
-        head before the relay pushes it."""
-        moved = [
-            (check, status, conclusion)
-            for check, (status, conclusion) in _checks(state).items()
-            if (posted := state.posted.get(check)) != [status, conclusion]
-            and (posted is None or posted[0] != "completed")
-        ]
+        head before the relay pushes it. A post the App token or the network refuses holds every post of the
+        repository for POST_HOLD_MS, and a post GitHub refuses holds the grade's posts for POST_HOLD_MS; either is
+        recorded and its check run waits for the first pass after the hold."""
+        moved = _moved(state)
         if not moved:
             return []
         if state.ref.startswith(GRADE_REFS):
             for check, status, conclusion in moved:
                 state.posted[check] = [status, conclusion]
             return [f"left {check} {status} on {state.head} to the relay" for check, status, _ in moved]
+        if now_ms < max(state.hold, self.held[state.repo]):
+            return []
         poster = self.ports.checks(_slug(state.repo))
+        actions: list[str] = []
         for check, status, conclusion in moved:
             shadow = check not in state.authoritative
             if check in state.runs:
                 poster.seed(state.head, check, state.run, state.runs[check], str(state.posted[check][0]), shadow)
             output = self._output(state, check, status)
-            state.runs[check] = poster.post(state.head, check, status, conclusion, output, shadow)
+            try:
+                state.runs[check] = poster.post(state.head, check, status, conclusion, output, shadow)
+            except (GitAuthRefused, PostRefused, OSError) as error:
+                until = now_ms + POST_HOLD_MS
+                if isinstance(error, PostRefused):
+                    state.hold = until
+                else:
+                    self.held[state.repo] = until
+                actions.append(f"held {check} {status} on {state.head} for a later pass: {error}")
+                break
             state.posted[check] = [status, conclusion]
-        return [f"posted {check} {status} on {state.head}" for check, status, _ in moved]
+            actions.append(f"posted {check} {status} on {state.head}")
+        return actions
 
     def _output(self, state: State, check: str, status: str) -> Output:
         """Return a check run's output: its units, none for a skipped authoritative gate, the grade run, the grader
