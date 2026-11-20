@@ -15,7 +15,11 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.mark.feature("lab-head-undecodable-dead-letter")
-@pytest.mark.parametrize("payload", [b"{", b"\xff", b"[]", b"{}"], ids=["json", "utf8", "array", "fields"])
+@pytest.mark.parametrize(
+    "payload",
+    [b"{", b"\xff", b"[]", b"{}", b"[" * 10000 + b"]" * 10000],
+    ids=["json", "utf8", "array", "fields", "depth"],
+)
 def test_an_undecodable_head_is_dead_lettered_and_the_next_head_is_read(payload: bytes, tmp_path: Path) -> None:
     policy = QueuePolicy(max_deliver=1, ack_wait_ms=20)
     good = HeadEvent("push", "https://github.com/o/r", "a" * 40, "b" * 40, "dev", "pushed")
@@ -31,7 +35,7 @@ def test_an_undecodable_head_is_dead_lettered_and_the_next_head_is_read(payload:
             for _ in range(3):
                 try:
                     heads.extend(inbox.heads())
-                except ValueError as error:
+                except (ValueError, RecursionError) as error:
                     errors.append(type(error).__name__)
                     time.sleep(0.04)
             info = bus._loop.run(bus._js.consumer_info(nats.LAB_STREAM, nats.consumer_name(scheduler.DURABLE)))
