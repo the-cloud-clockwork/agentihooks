@@ -16,16 +16,19 @@ pytestmark = pytest.mark.unit
 
 
 class HeldLock:
-    """A hook lock another call holds when first asked, then granted."""
+    """A hook lock another call holds when a call first looks at it, entered at once afterwards."""
 
     def __init__(self) -> None:
-        self.asked: list[bool] = []
+        self.entered = 0
 
-    def acquire(self, blocking: bool = True) -> bool:
-        self.asked.append(blocking)
-        return blocking
+    def locked(self) -> bool:
+        return True
 
-    def release(self) -> None:
+    def __enter__(self) -> bool:
+        self.entered += 1
+        return True
+
+    def __exit__(self, *exc: object) -> None:
         return None
 
 
@@ -47,11 +50,27 @@ def renewal(renewed: list[int], clock: list[int], lock: Lock | None = None) -> t
     return tick_activity.Renewal(store, "sw", lambda: renewed.append(clock[0]), lambda: clock[0], lock=held)
 
 
+def line(
+    blocked: bool, renewed: bool, timed: tuple[float, float, float | None], pass_id: str | None = None
+) -> dict[str, object]:
+    wait_s, wall_s, redis_s = timed
+    return {
+        "event": "swarm_tick_lock_renewal",
+        "slug": "sw",
+        "pass_id": pass_id,
+        "blocked": blocked,
+        "renewed": renewed,
+        "wait_s": wait_s,
+        "wall_s": wall_s,
+        "redis_s": redis_s,
+    }
+
+
 @pytest.mark.feature("swarm-tick-lock-renewal-journal")
 def test_a_renewal_journals_its_wait_hold_and_redis_seconds_under_its_pass(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    clocked(monkeypatch, [10.0, 13.0, 14.0, 16.5, 17.0])
+    clocked(monkeypatch, [10.0, 13.0, 14.0, 16.5])
     renewed: list[int] = []
     hook = renewal(renewed, [1_000])
     token = timing.PASS.set({"pass_id": "p1", "failed_steps": []})
@@ -60,18 +79,24 @@ def test_a_renewal_journals_its_wait_hold_and_redis_seconds_under_its_pass(
     finally:
         timing.PASS.reset(token)
     assert renewed == [1_000]
-    assert journaled(capsys.readouterr().err) == [
-        {
-            "event": "swarm_tick_lock_renewal",
-            "slug": "sw",
-            "pass_id": "p1",
-            "blocked": False,
-            "renewed": True,
-            "wait_s": 3.0,
-            "wall_s": 4.0,
-            "redis_s": 2.5,
-        }
-    ]
+    assert journaled(capsys.readouterr().err) == [line(False, True, (3.0, 3.5, 2.5), "p1")]
+
+
+@pytest.mark.feature("swarm-tick-lock-renewal-journal")
+def test_a_failed_renewal_journals_its_redis_seconds_and_still_raises(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    clocked(monkeypatch, [10.0, 11.0, 12.0, 15.0])
+
+    def lost() -> None:
+        raise RuntimeError("stale owner")
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    hook = tick_activity.Renewal(store, "sw", lost, lambda: 1_000)
+    with pytest.raises(RuntimeError, match="stale owner"):
+        hook()
+    assert hook.renewed is None
+    assert journaled(capsys.readouterr().err) == [line(False, False, (1.0, 4.0, 3.0))]
 
 
 @pytest.mark.feature("swarm-tick-lock-renewal-journal")
@@ -94,7 +119,7 @@ def test_a_call_inside_the_interval_that_found_the_hook_free_journals_nothing(
 def test_a_call_that_found_the_hook_held_journals_its_wait_even_without_a_renewal(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    clocked(monkeypatch, [20.0, 20.5, 21.0, 22.0, 22.0, 30.0, 34.0, 34.25])
+    clocked(monkeypatch, [20.0, 20.5, 21.0, 22.0, 30.0, 34.0, 34.25])
     renewed: list[int] = []
     clock = [1_000]
     held = HeldLock()
@@ -102,29 +127,11 @@ def test_a_call_that_found_the_hook_held_journals_its_wait_even_without_a_renewa
     hook()
     clock[0] = 1_001
     hook()
-    assert held.asked == [False, True, False, True]
+    assert held.entered == 2
     assert renewed == [1_000]
     assert journaled(capsys.readouterr().err) == [
-        {
-            "event": "swarm_tick_lock_renewal",
-            "slug": "sw",
-            "pass_id": None,
-            "blocked": True,
-            "renewed": True,
-            "wait_s": 0.5,
-            "wall_s": 1.5,
-            "redis_s": 1.0,
-        },
-        {
-            "event": "swarm_tick_lock_renewal",
-            "slug": "sw",
-            "pass_id": None,
-            "blocked": True,
-            "renewed": False,
-            "wait_s": 4.0,
-            "wall_s": 0.25,
-            "redis_s": None,
-        },
+        line(True, True, (0.5, 1.5, 1.0)),
+        line(True, False, (4.0, 0.25, None)),
     ]
 
 

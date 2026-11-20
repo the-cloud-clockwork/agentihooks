@@ -109,7 +109,7 @@ def _run_once(step: Step, ctx: Context) -> StepRecord:
     A step still running at its budget is recorded late and left running in its daemon thread; its result is dropped.
     While that earlier run is alive, a new run of the same step for the same swarm is held: no thread starts and the
     record reads held. Another swarm's run of that step is never held by it. The budget is read once, in the pass's
-    context, and the deadline, the join and the step's own record all use that one value.
+    context, and the deadline, the join and the worker's timed step record use that value.
     """
     budget_s = step.budget_s
     deadline = ctx.deadline.child(budget_s)

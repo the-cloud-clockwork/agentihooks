@@ -11240,10 +11240,11 @@
       "id": "swarm-tick-lock-renewal-journal",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2785",
-      "behaviour": "Each tick lock renewal the pass step hook makes, and each hook call that found another call holding the hook, journals one swarm_tick_lock_renewal line with the seconds it waited for the hook lock, the seconds it held it, the seconds the renewal's Redis calls took (null without a renewal), whether it was blocked and renewed, and the pass id; a free call inside the renewal interval, or after the pass revoked the hook, journals nothing.",
+      "behaviour": "Each tick lock renewal the pass step hook tries, and each hook call that found another call holding the hook, journals one swarm_tick_lock_renewal line with the seconds it waited for the hook lock, the seconds it held it, the seconds the renewal's Redis calls took whether they succeeded or raised (null without a renewal), whether it was blocked and whether the renewal succeeded, and the pass id; a failed renewal still raises, and a free call inside the renewal interval, or after the pass revoked the hook, journals nothing.",
       "seam": "The pass step hook scripts.swarm.tick_activity.Renewal and its journal function",
       "tests": [
         "tests/swarm/test_tick_lock_renewal_journal.py::test_a_renewal_journals_its_wait_hold_and_redis_seconds_under_its_pass",
+        "tests/swarm/test_tick_lock_renewal_journal.py::test_a_failed_renewal_journals_its_redis_seconds_and_still_raises",
         "tests/swarm/test_tick_lock_renewal_journal.py::test_a_call_inside_the_interval_that_found_the_hook_free_journals_nothing",
         "tests/swarm/test_tick_lock_renewal_journal.py::test_a_call_that_found_the_hook_held_journals_its_wait_even_without_a_renewal",
         "tests/swarm/test_tick_lock_renewal_journal.py::test_a_revoked_hook_that_found_itself_free_journals_nothing"
