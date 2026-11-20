@@ -6,8 +6,8 @@ const settled = (job, hotfix) => EXEMPT.includes(job.name) ||
   (job.status === 'completed' && (hotfix || ['success', 'skipped'].includes(job.conclusion)));
 
 async function snapshotGradeComplete(github, context, api, triggering = context, hotfix = false) {
-  const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun,
-    { ...api, run_id: context.runId, filter: 'latest', per_page: 100 });
+  const jobs = (await github.rest.actions.listJobsForWorkflowRun(
+    { ...api, run_id: context.runId, filter: 'latest', per_page: 100 })).data.jobs;
   const selected = context.runId !== triggering.runId;
   if (selected && !jobs.some(job => job.run_id === context.runId && job.name === 'Promotion ready' &&
       job.status === 'completed' && job.conclusion === 'success')) throw new Error('Selected promotion grade is no longer ready');
@@ -44,7 +44,7 @@ async function snapshotChecksComplete(github, api, snapshot, number) {
       if (!pending && !passed) throw new Error(`Required snapshot check failed: ${check.context || check.name}`);
       if (pending) complete = false;
     }
-    cursor = contexts?.pageInfo.hasNextPage ? contexts.pageInfo.endCursor : null;
+    cursor = null;
   } while (cursor);
   return complete;
 }
@@ -163,7 +163,7 @@ module.exports = async ({ github, context, core, sleep = ms => new Promise(resol
         reported = true;
       }
       const statuses = await github.paginate(github.rest.repos.listCommitStatusesForRef,
-        { ...api, ref: snapshot, per_page: 100 });
+        { ...api, ref: snapshot, per_page: 100 }, (response, done) => { done(); return response.data; });
       const visible = statuses.find(check => check.context === status.context)?.state === 'success';
       const complete = reported && visible && await snapshotChecksComplete(github, api, snapshot, pull.number);
       if (complete && latest.mergeable === true && ['clean', 'unstable'].includes(latest.mergeable_state)) {
