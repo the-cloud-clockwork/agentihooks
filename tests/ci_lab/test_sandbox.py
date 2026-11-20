@@ -6,13 +6,19 @@ import shutil
 import stat
 import subprocess
 import sys
+import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import FrozenInstanceError
+from functools import partial
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from zipfile import ZipFile
 
 import pytest
 
-from scripts.ci_lab import sandbox
+from scripts.ci_lab import sandbox, venvs
 
 BWRAP = ["--dev-bind", "/", "/", "--unshare-net", "--die-with-parent", "--"]
 SHOW_ENV = "import json, os; print(json.dumps({'cwd': os.getcwd(), 'env': dict(os.environ)}))"
@@ -274,3 +280,106 @@ def test_a_unit_cannot_restore_write_bits_or_write_into_a_read_only_tree(tmp_pat
         assert (tree / "gate.py").read_text() == "graded\n"
         assert stat.S_IMODE((tree / "gate.py").stat().st_mode) == 0o444
     assert (worktree / "unit.txt").is_file()
+
+
+@contextmanager
+def _package_index(folder: Path) -> Iterator[tuple[str, list[str]]]:
+    requests: list[str] = []
+
+    class Index(SimpleHTTPRequestHandler):
+        def do_GET(self) -> None:
+            requests.append(self.path)
+            super().do_GET()
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), partial(Index, directory=str(folder)))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}", requests
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+
+def _cached_wheel(folder: Path) -> None:
+    folder.mkdir()
+    name = "cached_dependency-1.0-py3-none-any.whl"
+    files = {
+        "cached_dependency.py": "VALUE = 42\n",
+        "cached_dependency-1.0.dist-info/METADATA": "Metadata-Version: 2.1\nName: cached-dependency\nVersion: 1.0\n",
+        "cached_dependency-1.0.dist-info/WHEEL": "Wheel-Version: 1.0\nGenerator: fixture\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+    }
+    files["cached_dependency-1.0.dist-info/RECORD"] = "".join(f"{path},,\n" for path in files)
+    with ZipFile(folder / name, "w") as wheel:
+        for path, content in files.items():
+            wheel.writestr(path, content)
+    package = folder / "cached-dependency"
+    package.mkdir()
+    (package / "index.html").write_text(f'<a href="../{name}">{name}</a>')
+
+
+@pytest.mark.feature("lab-venv-offline-cache")
+@pytest.mark.parametrize("missing", [False, True], ids=["warm", "missing"])
+def test_a_real_uv_build_uses_the_read_only_node_cache_without_network(tmp_path: Path, missing: bool) -> None:
+    if not _bwrap_isolates():
+        pytest.skip("bubblewrap cannot create a network namespace on this runner")
+    uv = shutil.which("uv")
+    assert uv is not None
+    index, source, tree = tmp_path / "index", tmp_path / "node-cache", tmp_path / "tree"
+    _cached_wheel(index)
+    tree.mkdir()
+    (tree / ".github").mkdir()
+    (tree / venvs.LOCKFILE).write_text("cached-dependency==1.0\nuncached-dependency==1.0\n")
+    (tree / venvs.EXCLUDES).write_text("")
+    dependencies = ["cached-dependency==1.0", *(["uncached-dependency==1.0"] if missing else [])]
+    (tree / "pyproject.toml").write_text(
+        '[project]\nname = "offline-fixture"\nversion = "1.0"\n'
+        f"dependencies = {json.dumps(dependencies)}\n"
+        "[project.optional-dependencies]\ndev = []\nall = []\n"
+    )
+    with _package_index(index) as (url, requests):
+        warm = tmp_path / "warm"
+        subprocess.run([uv, "venv", "--python", sys.executable, str(warm)], check=True, capture_output=True)
+        subprocess.run(
+            [
+                uv,
+                "pip",
+                "install",
+                "--cache-dir",
+                str(source),
+                "--python",
+                str(warm / "bin/python"),
+                "--index-url",
+                url,
+                "cached-dependency==1.0",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        before = {str(path.relative_to(source)): path.read_bytes() for path in source.rglob("*") if path.is_file()}
+        source.chmod(0o555)
+        count = len(requests)
+        root = tmp_path / "venvs"
+        root.mkdir()
+        build = venvs.Build(sandbox.PortAllocator(20000, 20099, 100), {"UV_DEFAULT_INDEX": url}, 30.0, source)
+        try:
+            if missing:
+                with pytest.raises(sandbox.CannotRun, match="uv cache miss.*uncached-dependency"):
+                    venvs.venv_for("missing", tree, root, build, tmp_path / "no-baked")
+                assert not (root / "missing" / venvs.MARKER).exists()
+            else:
+                built, created = venvs.venv_for("warm", tree, root, build, tmp_path / "no-baked")
+                assert created
+                result = subprocess.run(
+                    [str(built / "bin/python"), "-c", "import cached_dependency; print(cached_dependency.VALUE)"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                assert result.stdout.strip() == "42"
+        finally:
+            source.chmod(0o755)
+        assert len(requests) == count
+        after = {str(path.relative_to(source)): path.read_bytes() for path in source.rglob("*") if path.is_file()}
+        assert after == before

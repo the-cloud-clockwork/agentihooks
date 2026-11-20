@@ -760,6 +760,14 @@ def test_settings_read_the_worker_contract_environment(tmp_path: Path) -> None:
     assert (len(ranges), ranges[0], ranges[-1]) == (1000, PortRange(20000, 20009), PortRange(29990, 29999))
 
 
+@pytest.mark.feature("lab-venv-offline-cache")
+def test_the_node_cache_reaches_only_the_venv_build(tmp_path: Path) -> None:
+    source = tmp_path / "node-cache"
+    pod, _, _ = executors.settings({**environ_of(tmp_path), "UV_CACHE_DIR": str(source)})
+    assert pod.build.node_cache == source
+    assert "UV_CACHE_DIR" not in pod.whitelist
+
+
 @pytest.mark.feature("lab-static-step-env")
 def test_settings_keep_each_step_secret_by_its_name_under_the_scoped_prefix(tmp_path: Path) -> None:
     environ = {

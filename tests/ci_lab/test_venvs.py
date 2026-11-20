@@ -224,3 +224,19 @@ def test_a_second_caller_waits_for_the_running_build(tmp_path: Path, uv: Uv) -> 
     second.join(10)
     assert sorted(built) == [(tmp_path / "venvs" / DIGEST, False), (tmp_path / "venvs" / DIGEST, True)]
     assert [_call(seen) for seen in uv.seen()] == _built(tree, tmp_path / "venvs" / DIGEST)
+
+
+@pytest.mark.feature("lab-venv-offline-cache")
+def test_venv_builds_use_one_private_offline_cache_without_network(tmp_path: Path, uv: Uv) -> None:
+    root = tmp_path / "venvs"
+    venvs.venv_for(DIGEST, _tree(tmp_path), root, _build(), _baked(tmp_path, None))
+    calls = uv.seen()
+    assert len(calls) == 2
+    caches = {call["env"]["UV_CACHE_DIR"] for call in calls}
+    assert len(caches) == 1
+    assert Path(caches.pop()).is_relative_to(root)
+    for call in calls:
+        assert call["env"]["UV_OFFLINE"] == "1"
+        assert call["env"]["UV_PYTHON_DOWNLOADS"] == "never"
+        assert call["env"]["UV_LINK_MODE"] == "copy"
+    assert len((uv.folder / "bwrap.calls").read_text().splitlines()) == 2

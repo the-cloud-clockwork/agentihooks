@@ -11681,6 +11681,21 @@
       "tests": [
         "tests/tick/test_engine_joined_budget.py::test_the_step_finished_line_logs_the_live_budget_the_engine_joined_on"
       ]
+    },
+    {
+      "id": "lab-venv-offline-cache",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2751",
+      "behaviour": "Fallback worker venv builds use a writable worker snapshot of the read only node uv cache, reuse snapshots until node warming changes, disable network and Python downloads, and name an uncached dependency as a cache miss without requesting the package index.",
+      "seam": "executors.settings and Pod.build, uv_cache.cache_for, venvs._sync and the real uv build sandbox",
+      "tests": [
+        "tests/ci_lab/test_executors.py::test_the_node_cache_reaches_only_the_venv_build",
+        "tests/ci_lab/test_venvs.py::test_venv_builds_use_one_private_offline_cache_without_network",
+        "tests/ci_lab/test_uv_cache.py::test_the_worker_cache_is_writable_and_reused_until_the_node_warms_again",
+        "tests/ci_lab/test_uv_cache.py::test_an_unconfigured_node_cache_uses_one_empty_writable_worker_cache",
+        "tests/ci_lab/test_uv_cache.py::test_a_missing_node_cache_fails_by_name",
+        "tests/ci_lab/test_sandbox.py::test_a_real_uv_build_uses_the_read_only_node_cache_without_network"
+      ]
     }
   ],
   "unmapped_rules": [

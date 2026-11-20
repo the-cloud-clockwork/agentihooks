@@ -28,6 +28,7 @@ class Build:
     ports: PortAllocator
     whitelist: Mapping[str, str]
     timeout: float
+    node_cache: Path | None = None
 
 
 def _marked(venv: Path, digest: str) -> bool:
