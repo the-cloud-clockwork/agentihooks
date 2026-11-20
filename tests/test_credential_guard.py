@@ -1317,6 +1317,10 @@ GLOBS_SHAPED_UNLIKE_PROC_ENVIRON = [
     "ls src/*/tests/*",
     "ls out/*/1/2/*",
     "ls build/*/2/logs/3/*",
+    "ls src/*/x/task/1/*",
+    "ls src/*/1/task/x/*",
+    "ls src/*/1/task/2/logs/*",
+    "ls docs/*/*",
     "cat /proc/self/fd/../status",
 ]
 
@@ -1331,6 +1335,7 @@ PROC_ENVIRON_SHAPES = [
     "cat /proc/./1/env*",
     "cat /proc/**/1/env*",
     "cat /proc/{1,self}/env*",
+    "cat /proc/1/ta{s,}k/1/env*",
     "cat /proc/$p/1/$f",
     "cat /proc/`pgrep`/1/env*",
     "cat /host/p*c/1/environ",
