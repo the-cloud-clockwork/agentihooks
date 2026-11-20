@@ -202,6 +202,46 @@ def test_the_hub_answers_unknown_for_an_execution_no_hive_started(rig: SimpleNam
     assert execution_stop.stop(rig.bus, SLUG, stranger, "late") == execution_stop.UNKNOWN
 
 
+@pytest.mark.feature("events-ended-agent-dropped-once-settled")
+@pytest.mark.parametrize(
+    ("state", "revision", "settled"),
+    [
+        ("launching", 1, False),
+        ("started", 1, False),
+        ("exiting", 1, False),
+        ("exited", 1, True),
+        ("claimed", 1, True),
+        ("started", 2, True),
+    ],
+)
+def test_the_hub_lifecycle_can_settle_an_exit_only_while_the_claim_holds_its_launch(
+    rig: SimpleNamespace, state: str, revision: int, settled: bool
+) -> None:
+    claims = rig.bus.for_swarm(SLUG).state("spoke-work")
+    entry = claims.get("claim")
+    claims.update("claim", json.dumps({"state": state, "claim_revision": revision}).encode(), entry.revision)
+
+    assert execution_stop.settled(rig.bus, rig.started) is settled
+
+
+@pytest.mark.feature("events-ended-agent-dropped-once-settled")
+def test_an_execution_whose_claim_is_gone_is_settled(rig: SimpleNamespace) -> None:
+    gone = replace(rig.started, data={**rig.started.data, "claim_key": "gone"})
+
+    assert execution_stop.settled(rig.bus, gone) is True
+
+
+@pytest.mark.feature("events-ended-agent-dropped-once-settled")
+@pytest.mark.parametrize(("offset", "settled"), [(0, False), (1, True)])
+def test_a_claim_with_no_launch_revision_holds_the_launch_written_at_its_own_revision(
+    rig: SimpleNamespace, offset: int, settled: bool
+) -> None:
+    revision = rig.bus.for_swarm(SLUG).state("spoke-work").create("fresh", json.dumps({"state": "launching"}).encode())
+    fresh = replace(rig.started, data={**rig.started.data, "claim_key": "fresh", "claim_revision": revision + offset})
+
+    assert execution_stop.settled(rig.bus, fresh) is settled
+
+
 @pytest.mark.feature("events-execution-stop")
 def test_each_swarm_and_hive_reads_its_stops_through_its_own_durable() -> None:
     names = {execution_stop.durable(swarm, hive) for swarm in ("rig", "other") for hive in ("hive-a", "hive-b")}

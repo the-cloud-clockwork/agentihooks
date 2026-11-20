@@ -252,7 +252,10 @@ hive's account slots for the chosen login, as every routed launch does. A hive
 with no free slot or a failed admission ends the launch with an uncaught
 `Unavailable` error, `No account slot available` or `Account slot admission
 failed`. The `[agenti] account=` line has already printed and the route
-report already says `status=routed`.
+report already says `status=routed`. A swarm successor launched from a hive
+spoke passes its saved account as `--route` only while that account has a free
+worker seat, so a full saved account leaves the choice to the routing above;
+see [saved account on a hive launch](../pillars/hives.md#saved-account-on-a-hive-launch).
 
 ### Refusal messages
 
