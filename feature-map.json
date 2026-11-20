@@ -256,6 +256,21 @@
       ]
     },
     {
+      "id": "lab-scheduler-nats-grants",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2641",
+      "behaviour": "The protected NATS grant check reads the candidate lab head stream and scheduler durable names without executing candidate source, requires the scheduler user and its consumer info, next, acknowledgement and reply inbox grants in antoncore, preserves its other grants, and fails closed when either source name cannot be read.",
+      "seam": "scripts.ci_hive_nats_grants.main with scripts.events.nats.LAB_STREAM and scripts.ci_lab.scheduler.DURABLE",
+      "tests": [
+        "tests/test_ci_lab_nats_grants.py::test_scheduler_grants_accept_matching_source_without_executing_it",
+        "tests/test_ci_lab_nats_grants.py::test_scheduler_grants_reject_each_missing_durable_subject",
+        "tests/test_ci_lab_nats_grants.py::test_scheduler_grants_follow_candidate_stream_and_durable_names",
+        "tests/test_ci_lab_nats_grants.py::test_scheduler_grants_require_the_scheduler_user",
+        "tests/test_ci_lab_nats_grants.py::test_scheduler_grants_fail_closed_on_unreadable_source_names",
+        "tests/test_ci_lab_nats_grants.py::test_scheduler_grants_reject_missing_inbox_or_denied_permissions"
+      ]
+    },
+    {
       "id": "lab-scheduler-runs-relay",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-relay-in-scheduler",
