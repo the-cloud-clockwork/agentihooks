@@ -36,7 +36,7 @@ def test_a_leased_batch_carries_its_manifest_to_an_empty_worker_volume(
         )
         plans[head] = scheduler.Plan(TREE, BASE, {"unit": units})
         expected[head] = {"tests": {} if unlisted else {test: record}}
-        trees[head] = support.folder(tmp_path, name, {"uv.lock": "lock", path: tree[path].decode()})
+        trees[head] = support.folder(tmp_path, name, {executors.venvs.LOCKFILE: "lock", path: tree[path].decode()})
     run = lab(plans)
     for head in plans:
         run.push(head, lane=head)
