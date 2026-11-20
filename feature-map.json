@@ -5212,6 +5212,35 @@
       ]
     },
     {
+      "id": "merge-priority-automatic-entry",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-merge-priority-doctrine",
+      "behaviour": "Focused or urgent tasks receive deferred priority when newly queued from the command or merge watcher, including recovery; testing entries stay in place, ordinary tasks keep FIFO order, existing entries and repositories without a queue receive no automatic move.",
+      "seam": "scripts.swarm.merge_queue.operate queue entry through cli.cmd_merge and ready initial and recovery queue paths",
+      "tests": [
+        "tests/swarm/test_queue_entry_priority.py::test_queue_entry_applies_focus_or_urgency_without_interrupting_tests",
+        "tests/swarm/test_queue_entry_priority.py::test_a_freeze_nearer_than_the_focus_keeps_the_queue_order",
+        "tests/swarm/test_queue_entry_priority.py::test_automatic_priority_tells_a_displaced_split_pull_owner_as_the_swarm",
+        "tests/swarm/test_queue_entry_priority.py::test_an_existing_queue_entry_does_not_repeat_automatic_priority",
+        "tests/swarm/test_queue_entry_priority.py::test_a_busy_priority_leaves_the_new_entry_queued_and_names_the_refusal",
+        "tests/swarm/test_queue_entry_priority.py::test_a_repository_without_a_queue_does_not_apply_automatic_priority",
+        "tests/swarm/test_queue_entry_priority.py::test_cli_queue_entry_supplies_automatic_priority",
+        "tests/swarm/test_queue_entry_priority.py::test_watcher_queue_entry_supplies_automatic_priority"
+      ],
+      "rules": ["merge-priority-missing-entry-callback"]
+    },
+    {
+      "id": "merge-priority-operator-lift",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-merge-priority-doctrine",
+      "behaviour": "An operator lift removes merge queue entries already under test and restores them behind the priority target in their original order; ordinary priority preserves those entries.",
+      "seam": "scripts.swarm.cli.cmd_merge through queue_priority.request and merge_queue.prioritize",
+      "tests": [
+        "tests/swarm/test_queue_priority.py::test_operator_lift_is_journaled"
+      ],
+      "rules": ["merge-priority-swallowed-lift"]
+    },
+    {
       "id": "merge-priority-moves-waiting-entries-at-once",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2604",
