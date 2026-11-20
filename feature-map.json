@@ -1,6 +1,16 @@
 {
   "features": [
     {
+      "id": "lab-worker-manifest",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2808",
+      "behaviour": "Each leased test batch carries the dependency records selected for its key through persisted scheduler state, the job queue and the lease API. A worker with an empty work volume executes the batch using those records without a shared local manifest or another batch's records. Unlisted test modules carry an empty test record map.",
+      "seam": "expand_tests units through Scheduler, Queue, lease API, worker Client and test executor",
+      "tests": [
+        "tests/ci_lab/test_worker_manifest.py::test_a_leased_batch_carries_its_manifest_to_an_empty_worker_volume"
+      ]
+    },
+    {
       "id": "kind-terminal-snapshot-base",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2647",
