@@ -5742,7 +5742,7 @@
       "origin": "regression",
       "ordered_at": "2026-11-20",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2759",
-      "behaviour": "The credential guard refuses a Bash word as a process environment read only when a segment matching proc is followed by a pid then the leaf, or a pid, task and tid then the leaf, or by a segment that can expand to another depth, so a shell case pattern holding a GitHub address with star globs and a listing such as src star tests star pass while every real proc environ read, a proc mount below another folder and a globbed proc segment stay refused.",
+      "behaviour": "The credential guard refuses a Bash word as a process environment read only when a segment matching proc is followed by a pid then the leaf, or a pid, task and tid then the leaf, or by a pid and a later cwd, root or fd link, or by a segment that can expand to another depth, so a shell case pattern holding a GitHub address with star globs and a listing such as src star tests star pass while every real proc environ read, a proc mount below another folder and a globbed proc segment stay refused.",
       "seam": "hooks.context.credential_guard.path_reads_environ, read by hooks.context.credential_guard.decide",
       "tests": [
         "tests/test_credential_guard.py::test_a_glob_shaped_unlike_a_proc_environ_path_passes",

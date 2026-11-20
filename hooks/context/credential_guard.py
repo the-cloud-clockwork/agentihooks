@@ -97,6 +97,7 @@ CD_OPERAND = re.compile(r"\b(?:cd|pushd)(?:\s+-\S*)*\s+(\S+)")
 BARE_ENVIRON = re.compile(r"(?<![\w.])environ\b")
 PID_NAMES = frozenset({"self", "thread-self"})
 DEPTH_SHIFTING_SEGMENTS = frozenset({".", "..", "**"})
+LINK_SEGMENTS = ("cwd", "root", "fd")
 EXPANDING_SEGMENT = re.compile(r"[$`{]")
 
 
@@ -488,10 +489,11 @@ def proc_environ_verdict(command, cwd):
 
 
 def path_reads_environ(word: str) -> bool:
-    *dirs, leaf = word.split("/")
+    segments = word.split("/")
+    *dirs, leaf = segments
     if any("$" in d for d in dirs) and fnmatch.fnmatchcase("environ", leaf):
         return True
-    parts = [p for p in word.split("/") if p]
+    parts = [p for p in segments if p]
     return any(fnmatch.fnmatchcase("proc", p) and proc_tail_reads_environ(parts[i + 1 :]) for i, p in enumerate(parts))
 
 
@@ -501,9 +503,15 @@ def proc_tail_reads_environ(tail: list[str]) -> bool:
     middle = tail[:-1]
     if any(s in DEPTH_SHIFTING_SEGMENTS or EXPANDING_SEGMENT.search(s) for s in middle):
         return True
+    if middle and names_pid(middle[0]) and any(names_link(s) for s in middle[1:]):
+        return True
     if len(middle) == 3:
         return names_pid(middle[0]) and fnmatch.fnmatchcase("task", middle[1]) and names_pid(middle[2])
     return len(middle) == 1 and names_pid(middle[0])
+
+
+def names_link(segment: str) -> bool:
+    return any(fnmatch.fnmatchcase(link, segment) for link in LINK_SEGMENTS)
 
 
 def names_pid(segment: str) -> bool:
