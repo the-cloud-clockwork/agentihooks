@@ -12,6 +12,22 @@
       ]
     },
     {
+      "id": "stop-gate-ledger-variable",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2745",
+      "behaviour": "A ledger write command reached through a shell variable, assigned in the same command or set in the agent's environment, restarts the stop gate's tool call count like the literal command; a variable naming another program still counts as a plain call.",
+      "seam": "scripts.swarm_ledger.ledger_hook.on_tool over a Bash payload",
+      "tests": [
+        "tests/swarm_ledger/test_hook_progress.py::test_a_ledger_write_through_a_shell_variable_restarts_the_count",
+        "tests/swarm_ledger/test_hook_progress.py::test_a_ledger_write_through_an_environment_variable_restarts_the_count",
+        "tests/swarm_ledger/test_hook_progress.py::test_a_variable_naming_another_program_still_counts",
+        "tests/swarm_ledger/test_hook_progress.py::test_an_unset_variable_expands_to_nothing",
+        "tests/swarm_ledger/test_hook_progress.py::test_an_assignment_built_from_another_variable_restarts_the_count",
+        "tests/swarm_ledger/test_hook_progress.py::test_a_literal_write_counts_when_its_expansion_breaks_the_quoting",
+        "tests/swarm_ledger/test_hook_progress.py::test_an_unparsable_command_counts_as_a_plain_call"
+      ]
+    },
+    {
       "id": "lab-zero-base-push",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-zero-base-push",
