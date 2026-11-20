@@ -8,4 +8,6 @@ def recover(checkout: Path) -> None:
         return
     subprocess.run(["git", "-C", str(checkout), "prune", "--expire=2.weeks.ago"], check=True, timeout=180)
     log.unlink()
-    subprocess.run(["git", "-C", str(checkout), "gc", "--auto", "--quiet"], check=True, timeout=180)
+    subprocess.run(
+        ["git", "-C", str(checkout), "gc", "--cruft", "--prune=2.weeks.ago", "--quiet"], check=True, timeout=180
+    )
