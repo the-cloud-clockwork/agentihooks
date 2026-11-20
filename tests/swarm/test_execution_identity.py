@@ -370,7 +370,7 @@ def test_uuid_collision_preserves_all_attempts(store, agent, monkeypatch):
 
 
 @pytest.mark.feature("registry-update-skips-ended-execution")
-def test_a_write_onto_a_dropped_execution_leaves_it_ended_and_unlisted(store, agent):
+def test_a_write_onto_a_dropped_execution_leaves_it_ended_and_unlisted(store: RedisStore, agent: AgentRecord) -> None:
     current = store.start_execution("fixture", agent)
     store.drop_agent("fixture", agent.name, at=10)
     dropped = store.execution("fixture", current.execution_id)

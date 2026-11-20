@@ -5,9 +5,7 @@ rules:
     message: >-
       A write onto a seat's current execution guards the "finished" terminal state but never refuses one onto
       "ended", so a write a drop or exit already ended still applies and the agents projection relists the dropped
-      agent. On 19 November a hub admitted Codex engineer the lifecycle had dropped and ended came back working
-      because the tick reap step put back its pass-start copy and the write under the "finished" guard went
-      through. Return the current record unchanged once its state is "ended", before any other guard runs.
+      agent. Return the current record unchanged once its state is "ended", after the identity check.
     paths:
       include:
         - /scripts/swarm/execution.py
