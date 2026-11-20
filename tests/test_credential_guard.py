@@ -1269,6 +1269,47 @@ PROC_ALLOWED = [
     "cat build/environ",
 ]
 
+PROC_ENVIRON_SHAPES = [
+    "cat /*/self/environ",
+    "cat /*/1/environ",
+    "cat /proc/*/environ",
+    "cat /proc/1/task/1/environ",
+    "cat /proc/self/task/*/environ",
+    "cat /p*/thread-self/env*",
+    "cat /proc/self/fd/../environ",
+    "cat /proc/1/./environ",
+    "cat /proc/**/environ",
+    "cat /proc/{1,self}/environ",
+    "cat /proc/1/$(echo task)/1/environ",
+    "cat /host/proc/1/environ",
+    "cat /mnt/host/proc/self/environ",
+    "cd / && cat proc/1/environ",
+    "cd / && cat */*/*/*/*",
+    "cat $x/../environ",
+    "cat file:///proc/1/environ",
+]
+
+GLOBS_SHAPED_UNLIKE_PROC_ENVIRON = [
+    'case "$url" in https://github.com/*/*/issues/*) echo issue ;; esac',
+    'case "$url" in https://github.com/*/*/pull/*) echo pull ;; esac',
+    "ls src/*/tests/*",
+    "ls tests/*/fixtures/*",
+    "grep -rn TODO */src/e*",
+    "ls docs/*/guide/*",
+]
+
+
+@pytest.mark.feature("credential-guard-proc-environ-path-shape")
+@pytest.mark.parametrize("command", PROC_ENVIRON_SHAPES)
+def test_a_proc_environ_path_shape_is_refused(command: str) -> None:
+    assert decide(_bash(command)) == block("reading a process environment file under /proc", KIND_ENVIRONMENT)
+
+
+@pytest.mark.feature("credential-guard-proc-environ-path-shape")
+@pytest.mark.parametrize("command", GLOBS_SHAPED_UNLIKE_PROC_ENVIRON)
+def test_a_glob_shaped_unlike_a_proc_environ_path_passes(command: str) -> None:
+    assert decide(_bash(command)) is None
+
 
 class TestProcEnvironReads:
     @pytest.mark.parametrize("command", PROC_ENVIRON_READS)
