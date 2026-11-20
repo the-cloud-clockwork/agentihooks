@@ -1,8 +1,12 @@
 """The stored quota capacity decision as swarm status lines and as the ledger page reads it."""
 
+from collections.abc import Mapping
+from typing import Any
+
 from scripts import quota_freshness, quota_state
 from scripts.routing.slots import API
 from scripts.swarm import capacity
+from scripts.swarm.health import harness_pin
 from scripts.swarm.health.findings import MINUTE_MS
 from scripts.swarm.store import AUTO_SCALING
 
@@ -59,7 +63,7 @@ def scaling_line(decision: dict, counts: dict[str, int], scaling: str) -> str:
     return line + (f", because {scaled['reason'].removesuffix('.')}" if scaled else "")
 
 
-def lines(decision: dict, now_ms: int, counts: dict[str, int], scaling: str) -> list[str]:
+def lines(decision: dict[str, Any], now_ms: int, counts: dict[str, int], scaling: str) -> list[str]:
     if not decision:
         return [capacity.status_line(decision)]
     caps = ", ".join(
@@ -68,7 +72,19 @@ def lines(decision: dict, now_ms: int, counts: dict[str, int], scaling: str) -> 
     head = f"quota capacity {caps}, {_changed(decision['at'], now_ms)}, because {decision['reason']}"
     host = [host_line(decision["host"])] if "host" in decision else []
     accounts = [_account_line(row, decision["accounts"], now_ms) for row in decision["accounts"]]
-    return [head, scaling_line(decision, counts, scaling)] + host + accounts
+    pins = [pin_line(lane, pin, now_ms) for lane, pin in sorted(decision.get("pins", {}).items())]
+    return [head, scaling_line(decision, counts, scaling)] + pins + host + accounts
+
+
+def pin_line(lane: str, pin: Mapping[str, Any], now_ms: int) -> str:
+    """The quota line for one pinned lane: the pin and its age, the other harness's free seats and the ready lane tasks
+    waiting."""
+    waiting = pin["waiting"]
+    names = f": {', '.join(waiting)}" if waiting else ""
+    return (
+        f"lane {lane} pinned to {pin['agent']}, first seen {harness_pin.age(pin, now_ms)} ago: {pin['other']} has "
+        f"{pin['free']} free quota seats and {len(waiting)} ready tasks wait{names}"
+    )
 
 
 def host_line(host: dict) -> str:

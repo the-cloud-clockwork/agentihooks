@@ -24,24 +24,24 @@ def bounded(reply: dict) -> dict:
     return reply
 
 
+METADATA_FIELDS = (
+    "size",
+    "title",
+    "overview",
+    "orchestrator",
+    "chat_instructions",
+    "policy",
+    "time_left_minutes",
+    "closed_at",
+    "summary",
+)
+METADATA_META = ("rev", "updated_at", "created_at", "size", "seed_error")
+METADATA_KEYS = (*METADATA_FIELDS, *(f"_meta.{key}" for key in METADATA_META))
+
+
 def metadata(doc: dict) -> dict:
-    fields = (
-        "size",
-        "title",
-        "overview",
-        "orchestrator",
-        "chat_instructions",
-        "policy",
-        "time_left_minutes",
-        "closed_at",
-        "summary",
-    )
-    result = {key: doc[key] for key in fields if key in doc}
-    result["_meta"] = {
-        key: doc["_meta"][key]
-        for key in ("rev", "updated_at", "created_at", "size", "seed_error")
-        if key in doc["_meta"]
-    }
+    result = {key: doc[key] for key in METADATA_FIELDS if key in doc}
+    result["_meta"] = {key: doc["_meta"][key] for key in METADATA_META if key in doc["_meta"]}
     return result
 
 

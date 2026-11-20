@@ -100,13 +100,12 @@ keep_layers() {
   touch "$KIND_LAYER_CACHE/complete"
 }
 (
-  bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12-slim-bookworm >/dev/null
+  bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12.12-slim-bookworm >/dev/null
   mapfile -t terminal_layers < <(layers terminal)
   docker build -q "${terminal_layers[@]}" --build-arg IMAGE="$image" --target packages \
     -f "$chart/ci/terminal-worker.Dockerfile" . >/dev/null &
   packages=$!
   trap 'status=$?; wait "$packages" || true; exit "$status"' EXIT
-  bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12.12-slim-bookworm >/dev/null
   mapfile -t swarm_layers < <(layers swarm)
   docker build -q -t "$image" "${swarm_layers[@]}" . >/dev/null
   printf 'main fixture image built\n'
