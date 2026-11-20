@@ -178,7 +178,7 @@ class TestInstructions:
     OLD = "Publish plans, screenshots, reports and proof files as they are produced"
     LINE = (
         "Publish an artifact only when the operator asked for that file: a plan, an image, a logo, an SVG, markdown "
-        'or JSON he wants to review. Publish it with agentihooks ledger --slug demo --as agent artifact <file> "<title '
+        'or JSON he wants to review. Publish it with agentihooks api --slug demo --as agent artifact <file> "<title '
         'in plain words>" from a task marked artifact requested, or add --request <id of his message that asked>. '
         "Never publish test runs, logs, review notes or proofs: proofs go on the task proof and the pull request, raw "
         "output stays in the task work folder."

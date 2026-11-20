@@ -32,11 +32,11 @@ first: the project intent, the phase intent and any send back note.
 
 ## Join
 
-- `agentihooks ledger --slug <slug> --as <name> join`, once.
+- `agentihooks api --slug <slug> --as <name> join`, once.
 - Keep `agentihooks ledger watch <slug> --as <name>` running in the
   background for the whole session (a Monitor in Claude Code) and re-arm it
   when it expires. Act on every OPERATOR line about your phase, then
-  `agentihooks ledger --slug <slug> --as <name> ack`.
+  `agentihooks api --slug <slug> --as <name> ack`.
 
 ## Recall
 
@@ -70,11 +70,11 @@ in step 3. Never publish that plan again.
    same or higher level. Done when every task has an anchor and a section
    stating its complete scope and proof.
 2. Publish it before adding tasks:
-   `agentihooks ledger --slug <slug> --as <name> publish-plan <file> --phase <phase>`.
+   `agentihooks api --slug <slug> --as <name> publish-plan <file> --phase <phase>`.
    Publication stores a plan artifact and computes the phase range. Done when
    the phase carries its plan artifact and computed range.
 3. One task per pull request, at most twelve tasks and six territory areas each:
-   `agentihooks ledger --slug <slug> --as <name> task add <id> "<title>" --phase <phase> --plan-slice <id> --lane eng --kind code --description "<seams and done when>" --depends-on <ids> --territory <areas>`.
+   `agentihooks api --slug <slug> --as <name> task add <id> "<title>" --phase <phase> --plan-slice <id> --lane eng --kind code --description "<seams and done when>" --depends-on <ids> --territory <areas>`.
    Depends on names the tasks that finish first; territory names the files or
    areas a task touches. Work across two repositories is two tasks, one
    depending on the other. Code computes each task's line range from its
@@ -82,11 +82,11 @@ in step 3. Never publish that plan again.
    reference and computed range matching its section.
 4. Work beyond code carries its proof contract, what must be true, how it is
    checked and who judges it:
-   `agentihooks ledger --slug <slug> --as <name> task add <id> "<title>" --phase <phase> --plan-slice <id> --lane eng --kind ops --description "<scope>" --must "<what must be true>" --check "<how it is checked>" --judge "<who judges>"`.
+   `agentihooks api --slug <slug> --as <name> task add <id> "<title>" --phase <phase> --plan-slice <id> --lane eng --kind ops --description "<scope>" --must "<what must be true>" --check "<how it is checked>" --judge "<who judges>"`.
    Kinds: code, ci, ops, tune, troubleshoot, research. Done when each task has
    both its computed plan range and proof contract.
 5. Work outside the phase is a follow up:
-   `agentihooks ledger --slug <slug> --as <name> followup add "<text>"`.
+   `agentihooks api --slug <slug> --as <name> followup add "<text>"`.
 6. A task or follow up add may be refused as a duplicate. The refusal names the
    item it repeats with its state, rank and phase, or only its title when that
    item landed while the check ran. It will be built or is already built, so
@@ -102,7 +102,7 @@ in step 3. Never publish that plan again.
 
 ## Close with the slice
 
-`agentihooks ledger --slug <slug> --as <name> leave`, then
+`agentihooks api --slug <slug> --as <name> leave`, then
 `agentihooks swarm <slug> done --slice <ids>` with the comma separated ids of
 the tasks you added. The ledger refuses unknown ids and tasks without the plan
 reference, computed range and unique anchor. A review approves the slice or
