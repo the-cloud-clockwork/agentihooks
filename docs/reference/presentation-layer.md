@@ -382,7 +382,7 @@ stats.sort_stats("cumulative").print_stats(r"writer_copy|fragments", 6)
 ```
 
 Two runs of each on one host gave, Before on dev at `157164982`, the parent of
-the merge commit of pull request 12050, and After on dev at `848f98e4d`:
+the commit that merged pull request 12050, and After on dev at `848f98e4d`:
 
 | Code | Calls | `detached` calls | `written`, s |
 |---|---|---|---|
