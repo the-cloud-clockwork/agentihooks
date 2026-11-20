@@ -1,0 +1,12 @@
+rules:
+  - id: hive-prune-needs-expiry
+    languages: [python]
+    severity: ERROR
+    message: Worker repository maintenance must retain the two week pruning expiry.
+    paths:
+      include:
+        - /scripts/hive/*.py
+        - hive-prune-needs-expiry.py
+    patterns:
+      - pattern: subprocess.run(["git", ..., "prune", ...], ...)
+      - pattern-not: subprocess.run(["git", ..., "prune", ..., "--expire=2.weeks.ago", ...], ...)

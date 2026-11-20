@@ -6,6 +6,7 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2764",
       "behaviour": "Worker startup recovers configured existing primary checkouts with a stale garbage collection log by pruning unreachable objects older than two weeks, removing the log only after successful pruning, then retrying automatic garbage collection. Checkouts without a log and unconfigured repositories remain untouched.",
       "seam": "configured repository startup loop through scripts.hive.repo_maintenance.recover",
+      "rules": ["hive-prune-needs-expiry"],
       "tests": [
         "tests/hive/test_repo_maintenance.py::test_startup_recovers_only_configured_existing_checkouts_with_a_gc_log",
         "tests/hive/test_repo_maintenance.py::test_failed_pruning_keeps_the_gc_log_and_does_not_start_gc"
