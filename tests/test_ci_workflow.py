@@ -2434,6 +2434,7 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
                 "Check for merged test stats",
                 "Check out the protected mutation grader",
                 "Grade the shard report from the protected grader",
+                "Keep only this shard's own mutation evidence",
                 "Restore the tests that killed this branch's earlier mutants",
                 "Collect the tests that killed mutants",
             )
@@ -2721,6 +2722,7 @@ def test_pull_request_mutation_plans_its_own_head_with_no_reuse_verdict() -> Non
         f"github.event_name == 'pull_request' && {skipped} && needs.mutation-plan.outputs.durations != ''",
         f"github.event_name == 'workflow_dispatch' && {skipped}",
         f"always() && {skipped}",
+        f"always() && job.status != 'success' && {skipped}",
         f"{skipped} && needs.mutation-plan.outputs.selection == 'true'",
         f"strategy.job-total == 1 && {skipped}",
         f"strategy.job-total != 1 && {skipped}",
@@ -2729,6 +2731,7 @@ def test_pull_request_mutation_plans_its_own_head_with_no_reuse_verdict() -> Non
         " && steps.merged-stats.outputs.found == 'true'",
         f"needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]' && {skipped}",
         "always() && steps.mutate.outcome != 'skipped'",
+        "always() && job.status != 'success' && steps.mutate.outcome != 'skipped'",
         "needs.mutation-refine.result == 'success'",
         "needs.mutation-refine.result == 'success' || (needs.mutation-plan.outputs.collected == 'true'"
         " && needs.mutation-plan.outputs.stats_parts != '[0]')",
