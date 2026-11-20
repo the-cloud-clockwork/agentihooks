@@ -322,6 +322,41 @@ def test_a_mapped_feature_without_tests_gains_the_new_test_and_keeps_its_text(tr
     assert (tree / "feature-map.json").read_text() == json.dumps(mapped, indent=2) + "\n"
 
 
+@pytest.mark.feature("feature-map-stable-write")
+def test_a_new_feature_entry_leaves_every_line_of_the_real_map_unchanged(tree: Path) -> None:
+    map_path = tree / "feature-map.json"
+    before = (ROOT / "feature-map.json").read_text()
+    map_path.write_text(before)
+    assert scaffold(tree, STEP) == 0
+    old, new = before.splitlines(), map_path.read_text().splitlines()
+    first = next((index for index, (was, now) in enumerate(zip(old, new)) if was != now), len(old))
+    assert new[first + len(new) - len(old) :] == old[first:]
+    entries = json.loads(map_path.read_text())["features"]
+    assert [entry for entry in entries if entry["id"] != "tick-step-widgets"] == json.loads(before)["features"]
+    assert len(entries) == len(json.loads(before)["features"]) + 1
+
+
+@pytest.mark.feature("feature-map-stable-write")
+@pytest.mark.parametrize(
+    "document",
+    [
+        {"features": []},
+        {"features": [{"id": "tick-step-gadgets", "rules": ["gadget-rule"], "tests": ["previous"]}], "retired": []},
+        {"retired": [{"id": "old"}], "unmapped_rules": [], "features": [{"id": "tick-step-gadgets"}]},
+    ],
+)
+def test_the_scaffold_keeps_a_canonical_map_canonical(tree: Path, document: dict[str, Any]) -> None:
+    map_path = tree / "feature-map.json"
+    map_path.write_text(json.dumps(document, indent=2) + "\n")
+    assert scaffold(tree, STEP) == 0
+    text = map_path.read_text()
+    assert text == json.dumps(json.loads(text), indent=2) + "\n"
+    assert {entry["id"] for entry in json.loads(text)["features"]} == {
+        "tick-step-widgets",
+        *(entry["id"] for entry in document["features"]),
+    }
+
+
 def test_the_command_names_itself_and_what_a_step_needs(tree: Path, capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit):
         new_step().main(["--root", str(tree)])
