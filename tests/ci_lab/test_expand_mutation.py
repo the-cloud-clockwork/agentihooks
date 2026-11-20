@@ -92,6 +92,7 @@ STATS_FILES = {
     "tests/test_b.py": "def test_alone():\n    assert True\n",
 }
 LOCKFILE = ".github/test-requirements.lock"
+EXCLUDES = ".github/test-excludes.txt"
 
 
 def repository(root: Path, files: dict[str, str]) -> Path:
@@ -380,11 +381,17 @@ def test_a_scheduler_on_another_interpreter_and_package_set_keys_the_stats_the_w
 
 
 @pytest.mark.feature("lab-stats-unit-key-head-lockfile")
-def test_a_change_to_the_head_lockfile_rekeys_every_stats_unit(tmp_path: Path) -> None:
-    root = repository(tmp_path / "repo", {**STATS_FILES, LOCKFILE: "pytest==8.3.4\n"})
+@pytest.mark.parametrize(
+    ("path", "edit"), [(LOCKFILE, "pytest==8.3.5\n"), (EXCLUDES, "opentelemetry-exporter-otlp-proto-http\n")]
+)
+def test_a_change_to_the_head_lockfile_or_install_excludes_rekeys_every_stats_unit(
+    tmp_path: Path, path: str, edit: str
+) -> None:
+    head = {LOCKFILE: "pytest==8.3.4\n", EXCLUDES: "opentelemetry-exporter-otlp-proto-grpc\n"}
+    root = repository(tmp_path / "repo", {**STATS_FILES, **head})
     files = ["tests/test_a.py", "tests/test_b.py"]
     before = {unit.members: unit.key for unit in expand_mutation.stats_units(root, files)}
-    (root / LOCKFILE).write_text("pytest==8.3.5\n")
+    (root / path).write_text(edit)
     after = {unit.members: unit.key for unit in expand_mutation.stats_units(root, files)}
     assert before.keys() == after.keys()
     assert all(before[members] != after[members] for members in before)

@@ -224,9 +224,12 @@ def test_collection_parts_reuse_stats_and_keep_the_new_head_identity(tmp_path, m
         "imported_fixture_through_helper",
         "options",
         "lockfile",
+        "excludes",
     ],
 )
-def test_incompatible_source_fixture_and_runtime_stats_are_recollected(tmp_path, monkeypatch, changed):
+def test_incompatible_source_fixture_and_runtime_stats_are_recollected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, changed: str
+) -> None:
     from scripts.ci_mutation.stats_cache import LOCKFILE, collect_cached_stats
 
     root = tmp_path / "repo"
@@ -236,6 +239,8 @@ def test_incompatible_source_fixture_and_runtime_stats_are_recollected(tmp_path,
     lockfile = root / LOCKFILE
     lockfile.parent.mkdir()
     lockfile.write_text("pytest==8.3.4\n")
+    excludes = root / ".github/test-excludes.txt"
+    excludes.write_text("opentelemetry-exporter-otlp-proto-grpc\n")
     source = root / "scripts/sample.py"
     source.write_text("def sample():\n    return 1\n")
     test = root / "tests/test_sample.py"
@@ -249,7 +254,15 @@ def test_incompatible_source_fixture_and_runtime_stats_are_recollected(tmp_path,
         test.write_text("from tests.helper import value\ndef test_sample():\n    assert value == 1\n")
     subprocess.run(["git", "init", "-q", str(root)], check=True)
     subprocess.run(
-        ["git", "add", "scripts/sample.py", "tests/test_sample.py", "tests/conftest.py", "tests/test_shared.py"],
+        [
+            "git",
+            "add",
+            "scripts/sample.py",
+            "tests/test_sample.py",
+            "tests/conftest.py",
+            "tests/test_shared.py",
+            ".github/test-excludes.txt",
+        ],
         cwd=root,
         check=True,
     )
@@ -283,6 +296,8 @@ def test_incompatible_source_fixture_and_runtime_stats_are_recollected(tmp_path,
         shared.write_text("value = 2\n")
     elif changed == "options":
         options = ["-x"]
+    elif changed == "excludes":
+        excludes.write_text("opentelemetry-exporter-otlp-proto-http\n")
     else:
         lockfile.write_text("pytest==8.3.5\n")
     collect_cached_stats(root, cache, changes, files, options, collect)
@@ -298,7 +313,9 @@ def test_incompatible_source_fixture_and_runtime_stats_are_recollected(tmp_path,
         ("dependency", "1.2", "1.3"),
     ],
 )
-def test_the_interpreter_and_installed_packages_alone_keep_stats(tmp_path, monkeypatch, package, before, after):
+def test_the_interpreter_and_installed_packages_alone_keep_stats(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, package: str, before: str, after: str
+) -> None:
     import sys
     from importlib import metadata
     from types import SimpleNamespace
