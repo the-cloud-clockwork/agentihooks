@@ -7461,6 +7461,17 @@
       ]
     },
     {
+      "id": "kept-placing-steps-first-on-the-placement-worker",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-master-late",
+      "rules": ["kept-step-queues-behind-ready-sibling"],
+      "behaviour": "A sweep of the pass scheduler submits its ready kept steps before its other ready steps, so the kept critical steps master down and tick master, ready in the same sweep as quota notice, run first on the pass's one placement worker instead of queueing behind quota notice's whole body and starting twenty to ninety seconds late.",
+      "seam": "engine._eager submission order through engine._kept_first, pool.Pass.placer",
+      "tests": [
+        "tests/tick/test_placement_worker.py::test_a_kept_lock_taking_step_ready_beside_a_slower_one_ahead_of_it_runs_first_on_the_placement_worker"
+      ]
+    },
+    {
       "id": "tick-step-budget-from-start",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-step-abandon-before-run",
