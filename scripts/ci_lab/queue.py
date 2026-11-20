@@ -169,6 +169,7 @@ class Queue:
                 "kind": unit.kind,
                 "key": unit.key,
                 "members": json.dumps(unit.members),
+                "manifest": unit.manifest,
                 "slots": need.slots,
                 "capabilities": json.dumps(sorted(need.capabilities)),
                 "state": "pending",
@@ -201,7 +202,12 @@ class Queue:
         return Job(
             id=job,
             head=record["head"],
-            unit=Unit(kind=record["kind"], key=record["key"], members=tuple(json.loads(record["members"]))),
+            unit=Unit(
+                kind=record["kind"],
+                key=record["key"],
+                members=tuple(json.loads(record["members"])),
+                manifest=record.get("manifest", ""),
+            ),
             requirement=Requirement(
                 slots=int(record["slots"]), capabilities=frozenset(json.loads(record["capabilities"]))
             ),
