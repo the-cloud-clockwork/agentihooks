@@ -70,17 +70,24 @@ def _reads(monkeypatch: pytest.MonkeyPatch) -> list[int]:
 
 
 @pytest.mark.parametrize("layout", ["document", "records"])
+@pytest.mark.parametrize("holding", [False, True])
 @pytest.mark.feature("execution-put-unchanged-skips-lock")
 def test_an_unchanged_put_skips_the_write_lock_and_the_fenced_document_read(
-    store: RedisStore, agent: AgentRecord, monkeypatch: pytest.MonkeyPatch, layout: str
+    store: RedisStore, agent: AgentRecord, monkeypatch: pytest.MonkeyPatch, layout: str, holding: bool
 ) -> None:
     current = store.start_execution("fixture", agent)
     if layout == "records":
         fencing.migrate_records(store, "fixture", writers_upgraded=True)
+    held = lease.acquire(store, "fixture", "controller") if holding else None
+    if holding:
+        assert held is not None
     reads = _reads(monkeypatch)
     acquires, writes = _watched(monkeypatch)
-
-    store.put_agent("fixture", current)
+    token = lease.EPOCH.set(held)  # pyright: ignore[reportArgumentType]
+    try:
+        store.put_agent("fixture", current)
+    finally:
+        lease.EPOCH.reset(token)
 
     assert len(acquires) == (2 if layout == "document" else 0)
     assert len(writes) == (1 if layout == "document" else 0)
@@ -242,16 +249,59 @@ def test_a_fenced_head_with_no_matching_execution_row_still_takes_the_locked_pat
     assert len(acquires) >= 1
 
 
+@pytest.mark.parametrize("head", [None, "exe-moved"])
+@pytest.mark.feature("execution-put-unchanged-skips-lock")
+def test_an_initial_seat_head_mismatch_takes_the_locked_path(
+    store: RedisStore, agent: AgentRecord, monkeypatch: pytest.MonkeyPatch, head: str | None
+) -> None:
+    current = store.start_execution("fixture", agent)
+    fencing.migrate_records(store, "fixture", writers_upgraded=True)
+    port = fencing.records(store, "fixture")
+
+    def read_record(slug: str, section: str, key: str) -> Any:
+        if section == fencing.BY_SEAT:
+            return None if head is None else SimpleNamespace(value=head, revision=1)
+        return port.record(slug, section, key)
+
+    monkeypatch.setattr(execution.fencing, "records", lambda store_arg, slug: SimpleNamespace(record=read_record))
+    acquires, writes = _watched(monkeypatch)
+
+    store.put_agent("fixture", current)
+
+    assert acquires == [1, 1]
+    assert writes == [1]
+    assert store.execution("fixture", current.execution_id) == current
+
+
+@pytest.mark.feature("execution-put-unchanged-skips-lock")
+def test_an_immutable_record_change_takes_the_locked_path(
+    store: RedisStore, agent: AgentRecord, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    current = store.start_execution("fixture", agent)
+    fencing.migrate_records(store, "fixture", writers_upgraded=True)
+    acquires, writes = _watched(monkeypatch)
+
+    with pytest.raises(SwarmError):
+        store.put_agent("fixture", replace(current, task="other"))
+
+    assert acquires == [1, 1]
+    assert writes == [1]
+    assert store.execution("fixture", current.execution_id) == current
+
+
 @pytest.mark.feature("execution-put-unchanged-skips-lock")
 def test_invalid_rejects_a_non_dict_runtime_target(agent: AgentRecord) -> None:
     assert execution._invalid("fixture", replace(agent, runtime_target="bad")) is True
 
 
+@pytest.mark.parametrize("layout", ["document", "records"])
 @pytest.mark.feature("execution-put-unchanged-skips-lock")
 def test_a_stale_controller_epoch_raises_the_same_way_on_both_paths(
-    store: RedisStore, agent: AgentRecord, monkeypatch: pytest.MonkeyPatch
+    store: RedisStore, agent: AgentRecord, monkeypatch: pytest.MonkeyPatch, layout: str
 ) -> None:
     current = store.start_execution("fixture", agent)
+    if layout == "records":
+        fencing.migrate_records(store, "fixture", writers_upgraded=True)
     token = lease.EPOCH.set(5)  # pyright: ignore[reportArgumentType]
     try:
         with pytest.raises(SwarmError, match=lease.STALE):
@@ -286,11 +336,14 @@ def test_an_occupant_that_moves_between_the_check_reads_still_takes_the_locked_p
     assert len(acquires) >= 1
 
 
+@pytest.mark.parametrize("layout", ["document", "records"])
 @pytest.mark.feature("execution-put-unchanged-skips-lock")
 def test_an_invalid_put_under_a_stale_epoch_raises_the_locked_paths_error(
-    store: RedisStore, agent: AgentRecord, monkeypatch: pytest.MonkeyPatch
+    store: RedisStore, agent: AgentRecord, monkeypatch: pytest.MonkeyPatch, layout: str
 ) -> None:
     current = store.start_execution("fixture", agent)
+    if layout == "records":
+        fencing.migrate_records(store, "fixture", writers_upgraded=True)
     token = lease.EPOCH.set(5)  # pyright: ignore[reportArgumentType]
     try:
         with pytest.raises(SwarmError, match="unsupported runtime backend"):
