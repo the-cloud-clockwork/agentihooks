@@ -12,6 +12,22 @@
       ]
     },
     {
+      "id": "stop-gate-ledger-variable",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2745",
+      "behaviour": "A ledger write command reached through a shell variable, assigned in the same command or set in the agent's environment, restarts the stop gate's tool call count like the literal command; a variable naming another program still counts as a plain call.",
+      "seam": "scripts.swarm_ledger.ledger_hook.on_tool over a Bash payload",
+      "tests": [
+        "tests/swarm_ledger/test_hook_progress.py::test_a_ledger_write_through_a_shell_variable_restarts_the_count",
+        "tests/swarm_ledger/test_hook_progress.py::test_a_ledger_write_through_an_environment_variable_restarts_the_count",
+        "tests/swarm_ledger/test_hook_progress.py::test_a_variable_naming_another_program_still_counts",
+        "tests/swarm_ledger/test_hook_progress.py::test_an_unset_variable_expands_to_nothing",
+        "tests/swarm_ledger/test_hook_progress.py::test_an_assignment_built_from_another_variable_restarts_the_count",
+        "tests/swarm_ledger/test_hook_progress.py::test_a_literal_write_counts_when_its_expansion_breaks_the_quoting",
+        "tests/swarm_ledger/test_hook_progress.py::test_an_unparsable_command_counts_as_a_plain_call"
+      ]
+    },
+    {
       "id": "lab-zero-base-push",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-zero-base-push",
@@ -1089,6 +1105,16 @@
         "tests/test_ci_select.py::test_selected_definitions_of_a_splittable_file_run_apart_and_count_their_seconds",
         "tests/test_ci_select.py::test_a_definition_runs_alone_only_when_its_file_runs_its_definitions_apart",
         "tests/test_ci_select.py::test_main_selects_the_readers_of_the_jobs_a_pull_request_changed"
+      ]
+    },
+    {
+      "id": "ci-select-tick-catalogue-page-edit",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2716",
+      "behaviour": "A hand edit of the tick step catalogue page selects the committed page test in pull request checks through its literal page dependency, so a stale page fails before the merge queue.",
+      "seam": "scripts.ci_select.decide with the committed catalogue page test source",
+      "tests": [
+        "tests/test_ci_select.py::test_a_hand_edited_catalogue_page_selects_its_page_test"
       ]
     },
     {
@@ -6661,6 +6687,18 @@
       ]
     },
     {
+      "id": "swarm-release-tag-moves-only-for-the-newest-published-release",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2694",
+      "behaviour": "A Swarm image release build pushes only its commit image, and a release job that runs after the build moves the swarm image release tag at move time onto that image unless a newer release has already published its swarm version image, then tags the version, so of two overlapping releases that both read themselves as newest at checkout the release tag ends on the newer whichever finishes last, and no publish step moves the release tag from its checkout time newest flag.",
+      "seam": "Swarm image workflow tags step and its release job that runs docker/swarm-node/release.sh",
+      "tests": [
+        "tests/contracts/promotion/test_release_images.py::test_the_swarm_release_build_pushes_only_its_commit_image",
+        "tests/contracts/promotion/test_release_images.py::test_the_swarm_release_tag_stays_on_the_newer_of_two_overlapping_releases_whichever_finishes_last",
+        "tests/contracts/promotion/test_release_images.py::test_the_release_job_moves_the_swarm_release_tag_and_the_publish_job_moves_none"
+      ]
+    },
+    {
       "id": "hive-retire-absence",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1772",
@@ -7050,6 +7088,21 @@
         "tests/test_type_gate.py::test_measure_checks_at_most_a_thousand_sources_per_checker_process_and_sums_their_counts",
         "tests/test_type_gate.py::test_a_checker_peak_at_the_line_where_basedpyright_empties_its_type_cache_is_refused",
         "tests/test_type_gate.py::test_a_checker_peak_under_the_line_where_basedpyright_empties_its_type_cache_is_kept"
+      ]
+    },
+    {
+      "id": "design-rules-body-change-graded",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-design-rules-body-change-types",
+      "behaviour": "The design rules gate grades a function or method whose body differs from its base version, a nested function's edit included, so an untyped function edited only in its body is red for its missing hints, while unchanged functions stay ungraded and a class is not regraded for a body change alone.",
+      "seam": "scripts.design_rules.grade through its changed unit selection",
+      "tests": [
+        "tests/test_design_rules.py::test_a_body_change_grades_an_untyped_function_for_hints",
+        "tests/test_design_rules.py::test_only_the_untyped_function_whose_body_changed_is_graded",
+        "tests/test_design_rules.py::test_a_method_body_change_grades_the_method_but_not_its_class",
+        "tests/test_design_rules.py::test_an_async_function_whose_body_changed_is_graded_for_hints",
+        "tests/test_design_rules.py::test_a_nested_function_edit_grades_the_function_that_encloses_it",
+        "tests/test_design_rules.py::test_a_body_change_grades_an_untyped_private_function_for_hints"
       ]
     },
     {
@@ -8045,10 +8098,12 @@
     {
       "id": "tick-scale-gate-wiring",
       "origin": "inventory",
-      "behaviour": "The tick-scale job on the Tests workflow runs the tick-scale action only on a dev push, never on a pull request, merge queue or manual dispatch, is required by promotion-ready and promote without blocking the pull request gate, and the tick-scale workflow plants the whole hash fault only on its diffcheck plant branch.",
+      "behaviour": "The tick-scale job on the Tests workflow runs the tick-scale action only on a dev push, never on a pull request, merge queue or manual dispatch, is required by promotion-ready and promote without blocking the pull request gate, and the tick-scale workflow plants the whole hash fault only on its diffcheck plant branch. Its profile input names only registered tick steps, includes the master scale launcher and matches the promotion documentation.",
       "seam": "tests/contracts/promotion/test_workflow.py reading .github/workflows/test.yml, .github/actions/tick-scale/action.yml and .github/workflows/tick-scale.yml",
       "tests": [
-        "tests/contracts/promotion/test_workflow.py::test_each_dev_push_runs_the_tick_scale_gate_before_promotion_and_never_on_pull_requests_or_the_queue"
+        "tests/contracts/promotion/test_workflow.py::test_each_dev_push_runs_the_tick_scale_gate_before_promotion_and_never_on_pull_requests_or_the_queue",
+        "tests/contracts/promotion/test_workflow.py::test_tick_scale_profiles_registered_steps_including_the_agent_launcher",
+        "tests/contracts/promotion/test_workflow.py::test_tick_scale_promotion_page_lists_the_profiled_steps"
       ]
     },
     {
@@ -9441,6 +9496,23 @@
         "tests/ci_lab/test_authoritative_checks.py::test_a_merge_group_grade_takes_the_queue_list_and_a_pull_request_or_hotfix_grade_the_lab_list",
         "tests/ci_lab/test_authoritative_checks.py::test_a_merge_group_grade_takes_no_gate_from_the_pull_request_list",
         "tests/ci_lab/test_authoritative_checks.py::test_a_frame_keeps_the_authoritative_gates_of_every_grade_but_a_promotion_or_backfill_one"
+      ]
+    },
+    {
+      "id": "lab-static-check-log-tail",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-check-diagnostics",
+      "behaviour": "The CI lab scheduler puts the stored log of each failed static unit of a gate, secret patterns redacted, on that gate's check run, and the check run text shows the last 4096 characters of each such log in a fenced block under its unit key ahead of the unit key listing, the blocks together within half of GitHub's 65535 character limit and, past it, the blocks that fit and a note that the later ones are left out, so a plant proof that reads only the check run sees which diagnostic failed the gate. A passing unit, a failed unit with no stored or an empty log and the required check add no log, and their text is the unit key listing alone.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis, the local object store and a recording poster, and scripts.ci_lab.checks.render over outputs",
+      "tests": [
+        "tests/ci_lab/test_static_check_logs.py::test_a_failed_static_unit_s_gate_check_carries_the_tail_of_its_stored_log_with_secrets_redacted",
+        "tests/ci_lab/test_static_check_logs.py::test_a_failed_static_unit_answered_from_the_store_carries_its_stored_log_tail",
+        "tests/ci_lab/test_static_check_logs.py::test_a_gate_whose_static_units_pass_or_keep_no_log_posts_only_its_unit_keys",
+        "tests/ci_lab/test_checks.py::test_a_unit_log_shows_fenced_under_its_unit_key_ahead_of_the_unit_keys",
+        "tests/ci_lab/test_checks.py::test_a_unit_log_keeps_its_last_4096_characters_in_a_fence_longer_than_its_backtick_runs",
+        "tests/ci_lab/test_checks.py::test_unit_logs_that_fill_half_the_github_limit_exactly_all_show",
+        "tests/ci_lab/test_checks.py::test_unit_logs_past_half_the_github_limit_show_those_that_fit_and_a_note",
+        "tests/ci_lab/test_checks.py::test_unit_keys_after_a_unit_log_stop_at_the_github_limit_and_point_at_the_full_list"
       ]
     },
     {
@@ -10983,6 +11055,27 @@
       ]
     },
     {
+      "id": "swarm-harness-pin-guard",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-harness-pin-guard",
+      "behaviour": "Each capacity pass stores every lane pinned to one harness with the time it first saw the pin, the other harness's free quota seats and the ready lane tasks it placed nowhere while the lane sat below its ceiling; swarm status raises a harness pin health finding for a pinned lane whose other harness has free seats while ready tasks wait, naming the lane, the pin and its age, the free seats and the waiting tasks, and its quota lines show every pin.",
+      "seam": "scripts.swarm.capacity.pins in the capacity pass, scripts.swarm.health.harness_pin.findings in swarm status and scripts.swarm.quota_view.lines",
+      "rules": [
+        "status-without-harness-pin"
+      ],
+      "tests": [
+        "tests/swarm/test_harness_pin.py::test_a_claude_pin_with_free_codex_seats_and_waiting_tasks_raises_the_finding",
+        "tests/swarm/test_harness_pin.py::test_a_codex_pin_with_free_claude_seats_raises_the_reverse_finding",
+        "tests/swarm/test_harness_pin.py::test_no_finding_without_a_pin_free_other_seats_or_waiting_work",
+        "tests/swarm/test_harness_pin.py::test_waiting_tasks_list_only_below_the_lane_ceiling",
+        "tests/swarm/test_harness_pin.py::test_an_unpinned_lane_before_a_pinned_lane_with_no_ready_entry_still_stores_the_pin",
+        "tests/swarm/test_harness_pin.py::test_the_pin_age_holds_while_the_pin_stands_and_restarts_when_it_changes",
+        "tests/swarm/test_harness_pin.py::test_the_status_quota_lines_name_each_pinned_lane",
+        "tests/swarm/test_harness_pin.py::test_findings_and_quota_lines_list_pinned_lanes_in_lane_name_order",
+        "tests/swarm/test_harness_pin.py::test_swarm_status_lists_the_harness_pin_finding"
+      ]
+    },
+    {
       "id": "mutation-stats-shared-closure",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-mutation-stats-collect-budget",
@@ -10992,6 +11085,20 @@
         "tests/test_ci_mutation_stats_cache.py::test_test_ids_sharing_one_dependency_list_walk_its_closure_once_per_collection",
         "tests/test_ci_mutation_stats_cache.py::test_distinct_dependency_lists_in_one_collection_keep_their_own_closures",
         "tests/test_ci_mutation_stats_cache.py::test_the_discovery_digest_of_one_input_set_is_computed_once"
+      ]
+    },
+    {
+      "id": "test-wait-bound-ratchet",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-test-wait-bound-ratchet",
+      "behaviour": "The Semgrep scan step New test waits keep a bound of ten seconds or more scans the test files a pull request changes, past .semgrepignore, with the head's copy of the test wait bound rule and the grader's copy when the base holds one, against the merge base of the head and the base, so a new wait, wait_for, join, result, queue get, acquire or communicate call in a test bounded above zero and under ten seconds fails the step and Gate Required, the existing sites stay on the merge base, and a base that cannot be read fails the step before any scan.",
+      "seam": "The Semgrep scan step New test waits keep a bound of ten seconds or more run text, executed with a stub semgrep in a planted repository whose base moved past the merge base, and the test wait bound rule file the step names",
+      "tests": [
+        "tests/test_ci_semgrep.py::test_new_test_waits_scan_the_tests_against_the_merge_base_with_the_head_and_the_grader_rule",
+        "tests/test_ci_semgrep.py::test_new_test_waits_grade_with_the_head_rule_on_a_base_without_it",
+        "tests/test_ci_semgrep.py::test_a_scan_finding_fails_the_new_test_waits_step",
+        "tests/test_ci_semgrep.py::test_new_test_waits_fail_without_scanning_when_the_base_is_unknown",
+        "tests/test_ci_semgrep.py::test_the_wait_bound_rule_reaches_the_tests_and_its_fixture_under_ten_seconds"
       ]
     }
   ],

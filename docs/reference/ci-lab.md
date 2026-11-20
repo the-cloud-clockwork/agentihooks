@@ -2049,6 +2049,7 @@ and `ci.lab.head.push` at stream sequence 9 for an agentihooks head pushed by
 | A notice answers `400` | A field is missing, empty or not a string, or the body is not JSON | [Send a head notice](#send-a-head-notice) |
 | A GitHub delivery answers `400` while its signature is valid | The body is not JSON, or the delivery lacks a field the receiver reads; [Heads it records](#heads-it-records) says what was recorded before the answer | `kubectl -n agentihooks-swarm logs deploy/agentihooks-swarm-github-webhook` for the delivery id, then the delivery's payload in the GitHub webhook settings |
 | A request answers `503` and the log shows `could not record the event` | The publish failed: the stream does not exist yet, or the NATS credential lacks `ci.lab.head.*` | `stream info` as above; the hub creates the stream on its next start. On `/github` the pull request observations were recorded before the failure, and a GitHub redelivery records the head |
+| A `pull_request` delivery, merge queue actions included, or a completed `check_suite` delivery answers `503` with `nats: no response from stream` in its traceback | The receiver's NATS credential allows the logical `swarm.*.pull.*`, `swarm.*.merge.*` and `swarm.*.checks.completed` subjects but not their `legacy.swarm.*` form, so its unscoped events log keeps the logical subject, which no stream holds ([Existing swarms through the subject change](swarm-bus-scope.md#existing-swarms-through-the-subject-change)). The pull request observation fails first, so the lab head of the same delivery is lost too. This was the cause on 19 November 2026 (#12458) | `/connz?auth=true` on each bus node's monitoring endpoint lists the receiver connection's publish allow list, which must name the `legacy.swarm.*` form of its eight pull, merge and checks subjects; `/subsz?test=swarm.<swarm>.pull.pushed` matches nothing. Grant them to `swarm-github-webhook` in the deployment repository's `users.yaml`, as its pull request 1911 did, then redeliver from GitHub |
 
 ## Lab remote service
 
@@ -2686,6 +2687,15 @@ or the grader workflow has no gate step of that name, the unit ends with no outc
 prints `ci-lab worker: unit <job> crashed: <error>` and its traceback to its standard error and the
 lease expires, so the unit follows the expired lease rule of step 6 of the
 [Scheduler loop](#scheduler-loop).
+
+#### What a failed static unit's check run shows
+
+A gate's check run text shows, ahead of its unit keys, the last 4096 characters of each failed
+static unit's stored log, `lab/static/<digest>/log.txt`, with secret patterns redacted, in a fence
+under the unit key, so a reader of the check run alone sees which diagnostic failed the gate. The
+blocks together stay within half of GitHub's 65535 character text limit; past it the blocks that
+fit end with a note that the later ones are left out. A passing unit, a failed unit with no stored
+or an empty log, and the required check show only unit keys.
 
 #### Limitations
 

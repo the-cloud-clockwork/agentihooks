@@ -339,6 +339,12 @@ def _reshaped(previous: Unit | None, unit: Unit) -> bool:
     return _shape(previous.node) != _shape(unit.node)
 
 
+def _edited(previous: Unit | None, unit: Unit) -> bool:
+    if previous is None or previous.signature != unit.signature:
+        return True
+    return not isinstance(unit.node, ast.ClassDef) and ast.dump(previous.node) != ast.dump(unit.node)
+
+
 def _file_errors(
     index: Index, rel: str, old: str | None, classes: list[tuple[str, str, ast.ClassDef]]
 ) -> tuple[int, list[str]]:
@@ -347,7 +353,7 @@ def _file_errors(
     changed, errors = 0, []
     for key, unit in units(syntax, rel).items():
         previous = before.get(key)
-        if previous is None or previous.signature != unit.signature:
+        if _edited(previous, unit):
             changed += 1
             errors += violations(index, module.name, key, unit, previous)
         if isinstance(unit.node, ast.ClassDef) and _reshaped(previous, unit):
