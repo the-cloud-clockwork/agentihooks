@@ -1,6 +1,6 @@
 import argparse
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any
 
 import pytest
 
@@ -17,10 +17,14 @@ def ledger_for(rank: str, targets: list[str]) -> SimpleNamespace:
     return SimpleNamespace(
         tasks_targeting=lambda slug, url: [task],
         freezes=lambda slug: [{"verb": "focus", "target": target} for target in targets],
-        hierarchy=lambda slug: [
-            {"node": "phases/p", "kind": "phase", "parent": "missions/m"},
-            {"node": "missions/m", "kind": "mission", "parent": None},
-        ],
+        hierarchy=lambda slug: (
+            [
+                {"node": "phases/p", "kind": "phase", "parent": "missions/m"},
+                {"node": "missions/m", "kind": "mission", "parent": None},
+            ]
+            if targets
+            else pytest.fail("the hierarchy is read without a focus")
+        ),
         notice=lambda *args: None,
     )
 
@@ -42,11 +46,11 @@ def test_queue_entry_applies_focus_or_urgency_without_interrupting_tests(
     priority: SimpleNamespace, rank: str, targets: list[str], prioritized: bool
 ) -> None:
     ledger = ledger_for(rank, targets)
-    result = cast(Any, merge_queue.operate)(
+    result = merge_queue.operate(
         "queue",
         URL,
         run=priority.queue.run,
-        priority=lambda: cast(Any, queue_priority).automatic(priority.store, "sw", URL, ledger),
+        priority=lambda: queue_priority.automatic(priority.store, "sw", URL, ledger),
     )
     assert result["queued"] is True
     expected = ["P1", "P9", "P2", "P3"] if prioritized else ["P1", "P2", "P3", "P9"]
@@ -58,12 +62,27 @@ def test_queue_entry_applies_focus_or_urgency_without_interrupting_tests(
 def test_an_existing_queue_entry_does_not_repeat_automatic_priority(priority: SimpleNamespace) -> None:
     priority.queue.entries.append(priority.queue.entry(9))
     callbacks = []
-    result = cast(Any, merge_queue.operate)(
-        "queue", URL, run=priority.queue.run, priority=lambda: callbacks.append(URL)
-    )
+    result = merge_queue.operate("queue", URL, run=priority.queue.run, priority=lambda: callbacks.append(URL))
     assert result["queued"] is True
     assert callbacks == []
     assert priority.queue.mutations == []
+
+
+@pytest.mark.feature("merge-priority-automatic-entry")
+def test_a_busy_priority_leaves_the_new_entry_queued_and_names_the_refusal(priority: SimpleNamespace) -> None:
+    priority.store.redis.set(priority.store.key("sw", queue_priority.ACTIVE), "elsewhere:1:x")
+    result = merge_queue.operate(
+        "queue",
+        URL,
+        run=priority.queue.run,
+        priority=lambda: queue_priority.automatic(priority.store, "sw", URL, ledger_for("urgent", [])),
+    )
+    assert result["queued"] is True
+    assert result["priority"] == {
+        "url": URL,
+        "errors": ["another merge queue priority is running; try again when it ends"],
+    }
+    assert [entry["pullRequest"]["id"] for entry in priority.queue.entries] == ["P1", "P2", "P3", "P9"]
 
 
 @pytest.mark.feature("merge-priority-automatic-entry")
@@ -83,7 +102,7 @@ def test_a_repository_without_a_queue_does_not_apply_automatic_priority(monkeypa
     monkeypatch.setattr(merge_queue, "settle", lambda *args: None)
     monkeypatch.setattr(merge_queue, "squash", lambda *args: "merge-head")
     callbacks = []
-    result = cast(Any, merge_queue.operate)("queue", URL, priority=lambda: callbacks.append(URL))
+    result = merge_queue.operate("queue", URL, priority=lambda: callbacks.append(URL))
     assert result["queued"] is False
     assert result["merge_commit"] == "merge-head"
     assert callbacks == []

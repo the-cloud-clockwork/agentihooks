@@ -5,10 +5,12 @@ import uuid
 from collections.abc import Collection
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import lab_control, merge_queue, queue_record, ready, staged_compatibility
 from scripts.swarm.store import RedisStore, SwarmError
+from scripts.swarm_ledger.repository.live_rows import ancestry, covers
 
 DISPLACED = "queue-priority-displaced"
 ACTIVE = "queue-priority-active"
@@ -193,6 +195,29 @@ def request(store: RedisStore, slug: str, url: str, sender: str, tasks: list[dic
     if lift:
         journal.write("priority-lift", url, "", None, None)
     return apply(store, slug, url, sender, tasks, journal, lift=lift)
+
+
+def entitled(ledger: Any, slug: str, tasks: list[dict[str, Any]]) -> bool:
+    """Whether a task naming the pull request is urgent or sits under a focus on the ledger."""
+    if any(task.get("rank") == "urgent" for task in tasks):
+        return True
+    focus = [record["target"] for record in ledger.freezes(slug) if record.get("verb") == "focus"]
+    if not focus:
+        return False
+    graph = {row["node"]: (row["kind"], row["parent"]) for row in ledger.hierarchy(slug)}
+    return any(covers(target, task, ancestry(task, graph)) for task in tasks for target in focus)
+
+
+def automatic(store: RedisStore, slug: str, url: str, ledger: Any) -> dict[str, Any] | None:
+    """Move a pull request that just entered the merge queue ahead of the waiting entries when its task is urgent or
+    focused, leaving the groups under test in place; None when no such task names it."""
+    tasks: list[dict[str, Any]] = ledger.tasks_targeting(slug, url)
+    if not entitled(ledger, slug, tasks):
+        return None
+    try:
+        return apply(store, slug, url, "swarm", tasks, queue_record.Journal(url))
+    except SwarmError as exc:
+        return {"url": url, "errors": [str(exc)]}
 
 
 def refresh(store: RedisStore, slug: str, tasks: list[dict], ledger=None) -> list[str]:

@@ -192,7 +192,15 @@ def journaled(journal, action: str, url: str, head: str, call: Callable[[], dict
         journal.write(action, url, head, before, journal.groups(), errors)
 
 
-def operate(action: str, url: str, run=subprocess.run, admit=None, journal=None, attempts: int = 1) -> dict:
+def operate(
+    action: str,
+    url: str,
+    run=subprocess.run,
+    admit=None,
+    journal=None,
+    attempts: int = 1,
+    priority: Callable[[], Any] | None = None,
+) -> dict:
     raw = graphql(STATE, {"url": url}, run)["resource"]
     if not raw:
         raise SwarmError("GitHub URL does not identify a pull request")
@@ -212,6 +220,8 @@ def operate(action: str, url: str, run=subprocess.run, admit=None, journal=None,
             require_green(url, raw["headRefOid"], run)
             variables = {"id": raw["id"], "head": raw["headRefOid"]}
             journaled(journal, "queue", url, raw["headRefOid"], lambda: graphql(QUEUE, variables, run))
+            if priority is not None:
+                merged = {"priority": priority()}
         raw = graphql(STATE, {"url": url}, run)["resource"]
     if action == "dequeue":
         journaled(journal, "dequeue", url, raw["headRefOid"], lambda: graphql(DEQUEUE, {"id": raw["id"]}, run))
