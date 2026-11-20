@@ -4030,7 +4030,15 @@ An `admitted` entry for a live Codex app server worker, with the facts the hive 
   "admitted": {
     "<execution-id>": {
       "generation": 1,
-      "pane": {"state": "working"},
+      "pane": {
+        "state": "working",
+        "prompt_title": "",
+        "typed": "",
+        "provider_error": "",
+        "provider_checked": false,
+        "provider_error_id": "",
+        "content_refusal": false
+      },
       "binding": {
         "harness": "codex",
         "home": "<agent home>/codex",
@@ -4038,24 +4046,25 @@ An `admitted` entry for a live Codex app server worker, with the facts the hive 
         "model": "gpt-6.1-sol",
         "effort": "xhigh",
         "account": "<account>",
-        "hooks": true
+        "hooks": true,
+        "chain": ["engineer"],
+        "overlays": []
       }
     }
   }
 }
 ```
 
-The controller records that worker as `matching` with nothing unobserved. A `binding` of `{"process": false}` records
-a `process` difference and retires the worker; `{"process": null}` means the hive could not prove the server alive on
-its own host, and the worker's model and effort are recorded as unobserved. Read the entry with:
+A binding read from a live process carries no `process` field, and the controller records that worker as `matching`
+with nothing unobserved. Read the entry with:
 
 ```bash
 redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" GET agentihooks:hive:<id>:executions \
   | jq '.admitted["<execution-id>"]'
 ```
 
-[Live binding findings](swarm.md#live-binding-findings) describes the stored report, the findings and their
-troubleshooting.
+[Live binding findings](swarm.md#live-binding-findings) describes how the controller records a `binding` of
+`{"process": false}` or `{"process": null}`, the stored report, the findings and their troubleshooting.
 
 A worker's execution record names its hive in its runtime target (`host_id`). The tick counts the worker gone,
 and retires it with `its hive pane is gone`, when the report is no older than the worker's launch and one of these
