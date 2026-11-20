@@ -1,6 +1,27 @@
 {
   "features": [
     {
+      "id": "codex-swarm-share",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-load-share",
+      "behaviour": "A new eng or ci spawn that may run on either harness goes to Codex while Codex holds under thirty percent of the live and already placed eng and ci agents and a Codex seat is placeable, so four open Claude accounts no longer leave Codex one spawn in five. With no placeable Codex seat, or only Codex seats that pinned Codex work reserves, the slot goes to Claude; a lane agent pin or a task harness requirement keeps its harness, the plan lane keeps the fewest sessions pick, and a met share leaves the fewest sessions pick unchanged.",
+      "seam": "scripts.swarm.capacity.calculate through _allocate, whose placements every launch path takes as the planned harness",
+      "tests": [
+        "tests/swarm/test_codex_share.py::test_codex_takes_thirty_percent_of_new_eng_spawns_beside_four_claude_accounts",
+        "tests/swarm/test_codex_share.py::test_the_share_counts_live_eng_and_ci_agents_and_nothing_else",
+        "tests/swarm/test_codex_share.py::test_a_met_share_leaves_the_fewest_sessions_pick",
+        "tests/swarm/test_codex_share.py::test_a_short_share_with_two_codex_of_seven_sends_the_next_spawn_to_codex",
+        "tests/swarm/test_codex_share.py::test_ci_spawns_share_with_codex_too",
+        "tests/swarm/test_codex_share.py::test_the_plan_lane_keeps_the_fewest_sessions_pick",
+        "tests/swarm/test_codex_share.py::test_a_short_share_falls_back_to_claude_without_a_codex_seat",
+        "tests/swarm/test_codex_share.py::test_a_claude_lane_pin_wins_over_a_short_share",
+        "tests/swarm/test_codex_share.py::test_a_claude_task_requirement_wins_over_a_short_share",
+        "tests/swarm/test_codex_share.py::test_a_codex_plan_spawn_never_counts_toward_the_eng_share",
+        "tests/swarm/test_codex_share.py::test_a_short_share_leaves_a_codex_seat_reserved_for_pinned_codex_work",
+        "tests/swarm/test_codex_share.py::test_a_met_share_still_leaves_a_claude_seat_reserved_for_pinned_claude_work"
+      ]
+    },
+    {
       "id": "kind-terminal-snapshot-base",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2647",
