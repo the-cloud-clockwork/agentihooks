@@ -85,7 +85,23 @@ def settled_admitted(slug: str, agent: AgentRecord) -> bool:
     """True when the hub lifecycle can no longer settle the exit of ``agent``: no hive recorded its start, or the start
     its hive recorded for its execution is ``execution_stop.settled``; false on the memory bus, for a start of another
     execution and when the bus cannot be read, which is said on stderr."""
-    raise NotImplementedError
+    config = BusConfig.from_environ()
+    if config.backend == "memory":
+        return False
+    try:
+        bus = open_bus(config)
+        try:
+            event = execution_stop.started(bus, slug, agent.name, agent.generation)
+            if event is None:
+                return True
+            return event.key == agent.execution_id and execution_stop.settled(bus, event)
+        finally:
+            bus.close()
+    except Exception as exc:
+        print(
+            f"hub settled check for {agent.name} in swarm {slug} failed ({type(exc).__name__}: {exc})", file=sys.stderr
+        )
+        return False
 
 
 def stop_dropped(store: Any, slug: str, agent: AgentRecord, reason: str) -> str:
