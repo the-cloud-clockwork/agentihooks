@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from scripts.swarm import fencing
+from scripts.swarm import execution, fencing
 from scripts.swarm.execution import ExecutionRegistry
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 
@@ -411,6 +411,42 @@ def test_an_ordinary_write_with_a_different_pane_onto_an_ended_execution_stays_s
     store.put_agent("fixture", replace(current, pane_id="w9:p1"))
     assert store.execution("fixture", current.execution_id) == dropped
     assert store.agents("fixture") == []
+
+
+def test_a_revival_of_a_name_moved_to_archive_is_refused_through_revive(store: RedisStore, agent: AgentRecord) -> None:
+    first = store.start_execution("fixture", agent)
+    store.drop_agent("fixture", agent.name)
+    store.start_execution("fixture", replace(agent, name=store.next_name("fixture", "eng")), first.execution_id)
+    store.execution_registry.archive("fixture")
+    assert not store.execution_registry.named("fixture", agent.name)
+    assert store.execution_registry.managed("fixture", agent.name)
+    with pytest.raises(SwarmError) as error:
+        store.revive_agent("fixture", agent)
+    assert str(error.value) == "stale or changed execution identity"
+
+
+def test_revive_dispatch_declines_a_legacy_write_while_the_name_is_live(store: RedisStore, agent: AgentRecord) -> None:
+    store.start_execution("fixture", agent)
+    with pytest.raises(SwarmError) as error:
+        store.execution_registry._revive_dispatch("fixture", agent, False)
+    assert str(error.value) == "stale or changed execution identity"
+
+
+def test_revive_locks_writes_under_the_swarm_slug(store: RedisStore, agent: AgentRecord) -> None:
+    execution.WRITES.pop(None, None)
+    store.revive_agent("fixture", agent)
+    assert "fixture" in execution.WRITES
+    assert None not in execution.WRITES
+
+
+def test_an_explicit_revival_with_a_changed_identity_is_refused(store: RedisStore, agent: AgentRecord) -> None:
+    current = store.start_execution("fixture", agent)
+    before = protected(store)
+    with pytest.raises(SwarmError) as error:
+        store.revive_agent("fixture", replace(current, generation=99))
+    assert str(error.value) == "stale or changed execution identity"
+    assert protected(store) == before
+    assert store.execution_identity_conflicts_total("fixture") == 1
 
 
 def test_updates_preserve_status_timestamp_until_status_changes(store, agent, monkeypatch):
