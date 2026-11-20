@@ -175,8 +175,35 @@ class ExecutionRegistry:
 
     def put(self, slug: str, agent: AgentRecord) -> None:
         managed = _has_identity(agent) or self.managed(slug, agent.name)
+        if managed and self._unchanged(slug, agent):
+            return
         with _writes(slug):
             timing.timed(self._put, slug, agent, managed)
+
+    def _unchanged(self, slug: str, agent: AgentRecord) -> bool:
+        if _invalid(slug, agent):
+            return False
+        port = fencing.records(self.store, slug)
+        head = port.record(slug, fencing.BY_SEAT, agent.seat)
+        if head is None or head.value != agent.execution_id:
+            return False
+        row = port.record(slug, "executions", agent.execution_id)
+        if row is None:
+            return False
+        current = _record(cast(dict[str, Any], row.value))
+        if any(getattr(agent, field) != getattr(current, field) for field in IMMUTABLE):
+            return False
+        written = agent
+        if current.state == "finished" and written.state != "ended":
+            written = replace(written, state="finished")
+        written_target = cast(dict[str, Any], written.runtime_target)
+        current_target = cast(dict[str, Any], current.runtime_target)
+        if _read_before_ack(written_target, current_target):
+            written = replace(written, **{field: getattr(current, field) for field in LAUNCH_BINDING})
+            written_target = cast(dict[str, Any], written.runtime_target)
+        if written_target.get("pod_uid") or _binding_conflict(current_target, written_target):
+            return False
+        return written == current
 
     def _put(self, slug: str, agent: AgentRecord, managed: bool) -> None:
         if managed or not self.store.project_legacy(slug, agent, lambda: self.named(slug, agent.name)):
@@ -383,6 +410,16 @@ def _validate_target(backend, target, refuse):
             refuse("runtime target identity must be a string")
 
 
+def _invalid(slug: str, agent: AgentRecord) -> bool:
+    if agent.runtime_backend not in ("local", "kubernetes"):
+        return True
+    if not is_seat(agent.seat) or not agent.seat.endswith(f"@{slug}"):
+        return True
+    reasons: list[str] = []
+    _validate_target(agent.runtime_backend, cast(dict[str, Any], agent.runtime_target), reasons.append)
+    return bool(reasons)
+
+
 def _check_binding(previous, current, refuse):
     if set(previous) == {"host_id"} and set(current) == {"host_id", "process_namespace", "pid", "pid_start"}:
         if previous["host_id"] == current["host_id"]:
@@ -392,6 +429,12 @@ def _check_binding(previous, current, refuse):
             continue
         if previous.get(field) != current.get(field):
             refuse("runtime target identity is immutable after binding")
+
+
+def _binding_conflict(previous: dict[str, Any], current: dict[str, Any]) -> bool:
+    reasons: list[str] = []
+    _check_binding(previous, current, reasons.append)
+    return bool(reasons)
 
 
 def _read_before_ack(written, stored):
