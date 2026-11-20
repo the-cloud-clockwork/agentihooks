@@ -1902,7 +1902,8 @@ git merge-base diffcheck/lab-plant-size-green origin/dev
 
 Both twins show `"class": "pull_request"`, and `base` and `grader` both equal the merge base the
 last command prints, the `fork` commit above. `lane` is the head itself, since a push delivery
-carries no branch. `conclusion` stays `null` until every unit is final and every check run is posted.
+carries no branch. `conclusion` stays `null` until every unit is final and every check run is
+posted.
 [Grades of a commit](#grades-of-a-commit) describes every field.
 
 The scheduler log names each step of intake:
@@ -1939,11 +1940,12 @@ scheduler.
   and opens no second grade.
 - A rerequested lab check run of a plant head arrives as a `check_run` head, whose base is the base
   of its first pull request. A plant head has no pull request, so that head carries an empty base,
-  and intake resolves the dev merge base only for `plant` heads. While a ref still names the head,
-  expansion has no base to read, so the pass prints `cannot expand <head>: <error>` and posts a
-  failed `lab-shadow/required` check run, as for [a head that cannot expand](#a-head-that-cannot-expand);
-  otherwise the pass prints `retiring <head>: ...` and posts the same failed check run. Push a new
-  commit to grade a plant head again.
+  and intake resolves the dev merge base only for `plant` heads. While a ref names the head or dev
+  descends from it, expansion has no base to read, so the pass prints
+  `cannot expand <head>: <error>` and posts a failed `lab-shadow/required` check run, as for
+  [a head that cannot expand](#a-head-that-cannot-expand); otherwise the pass prints
+  `retiring <head>: ...` and posts the same failed check run. Push a new commit to grade a plant
+  head again.
 
 #### Plant push troubleshooting
 
