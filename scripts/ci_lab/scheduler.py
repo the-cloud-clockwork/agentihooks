@@ -24,7 +24,7 @@ import sys
 import tempfile
 import time
 from collections import Counter, defaultdict
-from collections.abc import Callable, Generator, Mapping, Sequence
+from collections.abc import Callable, Generator, Iterable, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field, fields, replace
 from functools import partial
@@ -73,6 +73,8 @@ from scripts.ci_mutation import scope
 from scripts.ci_runner_trust import ACTORS, validate_actors
 from scripts.events.bus import Consumer
 from scripts.github_app import GitAuthRefused
+
+from .queue import _job as queue_job
 
 __all__ = [
     "GRADES",
@@ -450,6 +452,31 @@ def _parse(raw: str | bytes) -> State:
     return State(**data)
 
 
+def restore_manifests(client: Any, objects: Objects, states: Iterable[State]) -> None:
+    for state in states:
+        missing = [slot for slot in state.units.values() if slot.kind == "test" and not slot.manifest and slot.job]
+        if state.manifest and missing:
+            _restore_manifest(client, objects, state, missing)
+
+
+def _restore_manifest(client: Any, objects: Objects, state: State, missing: list[Slot]) -> None:
+    path = f"{manifest_folder(_slug(state.repo))}{state.manifest}.json"
+    records = UNPACK(json.loads(objects.read(path)))["tests"]
+    with client.pipeline(transaction=False) as reading:
+        for slot in missing:
+            reading.hmget(queue_job(slot.job), "head", "manifest")
+        found = reading.execute()
+    with client.pipeline() as writing:
+        for slot, (head, existing) in zip(missing, found):
+            slot.manifest = existing or json.dumps(
+                {"tests": {test: records[test] for test in slot.members if test in records}}
+            )
+            if head is not None and not existing:
+                writing.hset(queue_job(slot.job), "manifest", slot.manifest)
+        writing.set(GRADES + state.run, json.dumps(asdict(state)))
+        writing.execute()
+
+
 def _evidence(state: State) -> evidence.GradeEvidence:
     """Return a closed grade's evidence: its inputs and each of its units with the grade run that used its verdict."""
     inputs = GradeInputs(state.repo, state.head, state.base, CLASSES[state.tier], state.grader)
@@ -571,6 +598,7 @@ class Scheduler:
         self.shed: tuple[str, ...] = ()
         self.registry = metrics.Registry()
         self.held: defaultdict[str, int] = defaultdict(int)
+        restore_manifests(self.client, self.objects, self._live())
 
     def tick(self, now_ms: int) -> list[str]:
         """Run one pass: intake, release quiet lanes, reap expired leases, enqueue the held units the budget admits,

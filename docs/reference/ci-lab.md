@@ -2803,6 +2803,11 @@ than that is answered only from the store. A head that needs test units and find
 `no dependency manifest at or before <base>` and is dropped with that reason, so a merge group
 never folds green on an empty unit job.
 
+Before serving leases, scheduler startup restores missing batch records in older live grade slots
+and queued jobs from the packed manifest at the grade's recorded manifest commit. Existing job
+records are kept, and held slots receive their records before admission. A missing manifest object
+fails startup. This upgrade runs under the scheduler Deployment's single replica and Recreate strategy.
+
 A batch verdict lists the files the batch opened outside its tests' manifest records. The expander
 puts the `commit` of the manifest it keyed a head's test units on in the plan's `manifest`, and the
 grade's state keeps it; a pull request or hotfix grade keys no test units and keeps none. When the
