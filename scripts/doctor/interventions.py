@@ -45,7 +45,7 @@ class Context:
     python: str = sys.executable
 
 
-def _call(ctx, argv):
+def _call(ctx: Context, argv: list[str]) -> str:
     done = ctx.run(argv, capture_output=True, text=True, timeout=120)
     if done.returncode:
         raise SwarmError(f"{' '.join(argv)} failed: {(done.stderr or done.stdout).strip()}")
@@ -160,7 +160,7 @@ def restart_ledger_server(ctx, args):
     return f"The Doctor restarted the ledger server on its new code: {why}."
 
 
-def refresh_rules(ctx, args):
+def refresh_rules(ctx: Context, args: object) -> str:
     _call(ctx, ["agentihooks", "refresh-rules"])
     return "The Doctor refreshed the installed rules for every running session."
 

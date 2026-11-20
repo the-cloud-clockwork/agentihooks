@@ -68,8 +68,8 @@ def surge_problems(chart: str, label: str, *extra: str) -> list[str]:
         found.append(f"{label} renders {spec['replicas']} controller replicas, expected 2")
     strategy = spec.get("strategy", {})
     rolling = strategy.get("rollingUpdate", {})
-    if strategy.get("type") != "RollingUpdate" or rolling.get("maxUnavailable") != 0 or rolling.get("maxSurge") != 1:
-        found.append(f"{label} can roll out with no ready controller: {strategy}")
+    if strategy.get("type") != "RollingUpdate" or rolling.get("maxUnavailable") != 1 or rolling.get("maxSurge") != 0:
+        found.append(f"{label} must replace one controller at a time without a surge pod: {strategy}")
     budget = docs.get("PodDisruptionBudget", {}).get("spec", {})
     if budget.get("minAvailable") != 1:
         found.append(f"{label} renders no disruption budget that keeps one controller up: {budget}")

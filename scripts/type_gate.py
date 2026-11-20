@@ -9,6 +9,8 @@ import resource
 import subprocess
 import sys
 import tomllib
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from itertools import accumulate
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -26,7 +28,8 @@ CONFIG = {
 _BASEDPYRIGHT = (sys.executable, "-I", "-m", "basedpyright")
 _HEAP_MB = 5120
 _NODE_OPTIONS = f"--max-old-space-size={_HEAP_MB}"
-_RUN = 1000
+_RUN = 100
+_WORKERS = 4
 _PEAK_KIB = int(_HEAP_MB * 1024 * 0.9 / 1.05)
 
 
@@ -63,27 +66,47 @@ def sources(head: Path) -> list[str]:
     )
 
 
-def measure(head: Path, files: list[str] | None = None) -> dict[str, int]:
-    """Run basedpyright over the given sources, every source when None, in sorted order and count its errors per file.
-
-    An empty list measures nothing. The Node heap limit keeps the checker inside the 6 GiB memory limit of the anton-oss
-    runner container. Once its heap use, plus the five percent it adds, passes ninety percent of that limit, 4388 MB,
-    basedpyright empties its whole type cache at points garbage collection decides and can count other errors on another
-    runner. So the sources are checked in contiguous runs of at most a thousand files, one process each, and a
-    measurement whose checker processes reached that line in resident memory, which bounds heap use from above, is
-    refused.
-    """
-    files = sources(head) if files is None else sorted(files)
+def runs(files: list[str]) -> list[list[str]]:
+    """Split sorted sources into contiguous runs of at most a hundred files, balanced in size."""
     if not files:
-        return {}
+        return []
     size = math.ceil(len(files) / math.ceil(len(files) / _RUN))
+    return [files[start : start + size] for start in range(0, len(files), size)]
+
+
+def measure(head: Path, files: list[str] | None = None) -> dict[str, int]:
+    """Count the type errors of the given sources, every source when None, each in its run of the head's sources.
+
+    basedpyright keeps the types it infers across the files of one process, so the files it checks before a source
+    can change what it counts there, while the files after it cannot. A source is therefore counted in its run of the
+    head's every source layout whichever sources are graded: each run holding a graded source is checked from its
+    first source through its last graded one, four runs at a time, one process each. An empty list measures nothing,
+    and a path the head has no source for is refused. Each checker's Node heap is limited to 5120 MB. Once its heap
+    use, plus the five percent it adds, passes ninety percent of that limit, 4388 MB, basedpyright empties its whole
+    type cache at points garbage collection decides and can count other errors on another runner, so a measurement
+    whose checker processes reached that line in resident memory, which bounds heap use from above, is refused.
+    """
+    every = sources(head)
+    wanted = set(every if files is None else files)
+    if unknown := sorted(wanted.difference(every)):
+        raise GradeError(f"the head has no source {', '.join(unknown)} to measure")
+    checks: list[list[str]] = []
+    for run in runs(every):
+        graded = [index for index, path in enumerate(run) if path in wanted]
+        if graded:
+            checks.append(run[: graded[-1] + 1])
+    if not checks:
+        return {}
+    with ThreadPoolExecutor(_WORKERS) as pool:
+        reports = list(pool.map(partial(_check, head), checks))
     root = head.resolve()
     counts: dict[str, int] = {}
-    for start in range(0, len(files), size):
-        for diagnostic in _check(head, files[start : start + size]):
+    for diagnostics in reports:
+        for diagnostic in diagnostics:
             if diagnostic["severity"] == "error":
                 path = Path(diagnostic["file"]).resolve().relative_to(root).as_posix()
-                counts[path] = counts.get(path, 0) + 1
+                if path in wanted:
+                    counts[path] = counts.get(path, 0) + 1
     peak = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
     if peak >= _PEAK_KIB:
         raise GradeError(

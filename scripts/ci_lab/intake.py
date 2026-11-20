@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from scripts.ci_lab.units import Priority, priority_of
-from scripts.ci_lab.webhooks import NOTICE, HeadEvent
+from scripts.ci_lab.webhooks import NOTICE, PLANT, HeadEvent
 from scripts.ci_runner_trust import ACTORS, validate_actors
 
 __all__ = ["GradeRequest", "admit", "answered", "reconcile", "request_from", "trusted_actors"]
@@ -19,7 +19,7 @@ __all__ = ["GradeRequest", "admit", "answered", "reconcile", "request_from", "tr
 RERUN = "rerequested"
 RECONCILE = "reconcile"
 PULL_REQUEST = "pull_request"
-TIER_EVENTS = {"check_run": PULL_REQUEST, NOTICE: PULL_REQUEST}
+TIER_EVENTS = {"check_run": PULL_REQUEST, NOTICE: PULL_REQUEST, PLANT: PULL_REQUEST}
 
 
 @dataclass(frozen=True)

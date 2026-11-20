@@ -53,6 +53,8 @@ services:
       AGENTIHOOKS_SWARM_REDIS_URL: ${AGENTIHOOKS_SWARM_REDIS_URL:-}
       LEDGER_TLS_CERT: ${LEDGER_TLS_CERT:-}
       LEDGER_TLS_KEY: ${LEDGER_TLS_KEY:-}
+      LEDGER_CA_FILE: ${LEDGER_CA_FILE:-}
+      LEDGER_CA_PEM: ${LEDGER_CA_PEM:-}
       MALLOC_ARENA_MAX: "2"
     volumes:
       - ${LEDGER_DIR}:${LEDGER_DIR}
@@ -64,7 +66,7 @@ services:
     pids_limit: 200
     restart: unless-stopped
     healthcheck:
-      test: [CMD, python, -c, "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ['LEDGER_API_PORT'] + '/healthz', timeout=2).read()"]
+      test: [CMD, python, -c, "import os, urllib.request; from scripts.swarm_ledger.ledger_link import scheme, transport; urllib.request.urlopen(scheme() + '://127.0.0.1:' + os.environ['LEDGER_API_PORT'] + '/healthz', timeout=2, **transport()).read()"]
       interval: 20s
       timeout: 10s
       retries: 3
@@ -72,11 +74,21 @@ services:
   front:
     image: mirror.gcr.io/library/nginx:1.27-alpine
     network_mode: host
+    entrypoint: [/bin/sh, -ec]
+    command:
+      - |
+        export LEDGER_SCHEME=http
+        if [ -n "$$LEDGER_TLS_CERT" ] && [ -n "$$LEDGER_TLS_KEY" ]; then
+          export LEDGER_SCHEME=https
+        fi
+        exec /docker-entrypoint.sh nginx -g 'daemon off;'
     environment:
       LEDGER_PORT: ${LEDGER_PORT:-8765}
       LEDGER_READ_PORT: ${LEDGER_READ_PORT:-18765}
       LEDGER_API_PORT: ${LEDGER_API_PORT:-8766}
-      NGINX_ENVSUBST_FILTER: ^LEDGER_(PORT|READ_PORT|API_PORT)$$
+      LEDGER_TLS_CERT: ${LEDGER_TLS_CERT:-}
+      LEDGER_TLS_KEY: ${LEDGER_TLS_KEY:-}
+      NGINX_ENVSUBST_FILTER: ^LEDGER_(PORT|READ_PORT|API_PORT|SCHEME)$$
     volumes:
       - ${LEDGER_CODE}/deploy/compose/ledger-local-front.conf.template:/etc/nginx/templates/default.conf.template:ro
     restart: unless-stopped

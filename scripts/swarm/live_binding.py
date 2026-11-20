@@ -131,6 +131,8 @@ def transport(store: RedisStore, agent: AgentRecord) -> TransportRecord | None:
 
 
 def server_alive(record: TransportRecord | None) -> bool | None:
+    import socket
+
     from scripts.codex_session import supervisor
     from scripts.codex_session.binding import EXITED, FAILED
 
@@ -138,6 +140,8 @@ def server_alive(record: TransportRecord | None) -> bool | None:
         return None
     if record.state in {EXITED, FAILED}:
         return False
+    if record.host_id and record.host_id != socket.gethostname():
+        return None
     if not record.server_pid or not record.server_start_identity:
         return None
     return supervisor.owns(record, supervisor.start_time)
@@ -279,6 +283,8 @@ def unobserved(agent: AgentRecord, facts: dict) -> dict:
 
 
 def compare(agent: AgentRecord, facts: dict) -> dict:
+    if "process" in facts and facts["process"] is None:
+        return {}
     if facts.get("process") is False:
         return {"process": {"expected": True, "actual": False}}
     expected: dict[str, object] = {**assignment(agent), "hooks": True}

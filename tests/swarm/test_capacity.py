@@ -804,12 +804,14 @@ def test_status_command_prints_the_capacity_reason(monkeypatch, capsys):
     assert "scaling auto, live of ceiling eng 0 of 2, ci 0 of 1, plan 0 of 1" in out
 
 
-def test_status_names_the_hive_admission_section_a_hive_redis_role_cannot_read(monkeypatch, capsys):
+def test_status_names_the_hive_admission_section_a_hive_redis_role_cannot_read(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     from types import SimpleNamespace
 
     from redis.exceptions import NoPermissionError
 
-    from scripts.hive import admission, registry
+    from scripts.hive import headroom, registry
     from scripts.swarm import cli
 
     store = _store()
@@ -819,7 +821,7 @@ def test_status_names_the_hive_admission_section_a_hive_redis_role_cannot_read(m
     allowed = store.redis.execute_command
 
     def refused(*args: Any, **options: Any) -> Any:
-        if any(str(arg).startswith(admission.key("")) for arg in args[1:]):
+        if any(str(arg) == headroom.key("other") for arg in args[1:]):
             raise NoPermissionError("No permissions to access a key")
         return allowed(*args, **options)
 
@@ -827,6 +829,51 @@ def test_status_names_the_hive_admission_section_a_hive_redis_role_cannot_read(m
     cli.cmd_status(store, SimpleNamespace(slug="sw", json=False))
     out = capsys.readouterr().out.splitlines()
     assert "hive admission unreadable: No permissions to access a key" in out
+    assert any(line.startswith("Agent\tLane\tHarness\tProfile") for line in out)
+
+
+@pytest.mark.feature("status-names-each-hive-admission-count-a-member-may-not-read")
+def test_status_names_each_hive_admission_count_a_restricted_redis_user_may_not_read_and_prints_the_rest(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import time
+    from types import SimpleNamespace
+
+    import fakeredis
+
+    from scripts.hive import admission, registry
+    from scripts.swarm import cli
+
+    server = fakeredis.FakeServer()
+    admin = fakeredis.FakeRedis(server=server, decode_responses=True)
+    admin.acl_setuser("hive-near", enabled=True, nopass=True, categories=["+@all"], keys=[f"~{admission.key('near')}"])
+    member = fakeredis.FakeRedis(server=server, decode_responses=True, username="hive-near")
+    member.auth("", username="hive-near")
+    assert member.acl_whoami() == "hive-near"
+
+    class Counted(fakeredis.FakeRedis):
+        """The status login: hive admission counts run under the hive member's restricted Redis user, and every other
+        key reads as the member's read only grant on the swarm keyspace would, which fakeredis does not model."""
+
+        def zcount(self, name: Any, min: Any, max: Any) -> Any:
+            if str(name).startswith(admission.key("")):
+                return member.zcount(name, min, max)
+            return super().zcount(name, min, max)
+
+    store = RedisStore(Counted(server=server, decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", max_eng=2, max_ci=1))
+    now = int(time.time() * 1000)
+    for hive in ("near", "far"):
+        registry.register(admin, hive, hive, [])
+        registry.beat(admin, hive, {"heartbeat_at": now, "beat_at": now})
+    monkeypatch.setattr(cli, "LedgerClient", lambda: FakeLedger([]))
+    monkeypatch.setattr(capacity, "accounts", lambda env, now, refresh=True: [account(cap=6)])
+    cli.cmd_status(store, SimpleNamespace(slug="sw", json=False))
+    out = capsys.readouterr().out.splitlines()
+    assert "hive near  admission room 0  missing telemetry: no fresh headroom reading" in out
+    assert "hive far  admission count unreadable: No permissions to access a key" in out
+    assert "binding limit hive admission, room 0: hive near missing telemetry: no fresh headroom reading" in out
+    assert not [line for line in out if line.startswith("hive admission unreadable")]
     assert any(line.startswith("Agent\tLane\tHarness\tProfile") for line in out)
 
 
@@ -846,7 +893,7 @@ def test_status_binds_hive_admission_to_the_host_room_of_its_own_swarm(monkeypat
     monkeypatch.setattr(cli, "LedgerClient", lambda: FakeLedger([]))
     monkeypatch.setattr(capacity, "accounts", lambda env, now, refresh=True: [account(cap=6)])
     hives = [{"id": "workstation", "room": 9, "limit": "max agents: 3 of 12", "refusal": ""}]
-    monkeypatch.setattr(launch, "live_hives", lambda found: hives if found is store else [])
+    monkeypatch.setattr(launch, "live_hives", lambda found, reservations=None: hives if found is store else [])
     cli.cmd_status(store, SimpleNamespace(slug="sw", json=False))
     out = capsys.readouterr().out.splitlines()
     assert "hive workstation  admission room 9  max agents: 3 of 12" in out
@@ -2207,7 +2254,7 @@ def test_the_live_autoscale_command_names_hive_admission_as_the_binding_limit(ca
         {"id": "anton", "room": 0, "limit": "cpu: load high", "refusal": "cpu: load high"},
         {"id": "workstation", "room": 0, "limit": "max agents: 6 of 6", "refusal": "max agents: 6 of 6"},
     ]
-    monkeypatch.setattr(launch, "live_hives", lambda found: hives if found is store else [])
+    monkeypatch.setattr(launch, "live_hives", lambda found, reservations=None: hives if found is store else [])
     assert capacity.quota_seats(inputs.observations, {}) == 10
     assert capacity.quota_seats(inputs.observations, {("codex", "cx"): "week"}) == 6
     unknown = SwarmConfig("new", "", max_eng=0, max_ci=0)
@@ -2237,7 +2284,7 @@ def test_the_live_autoscale_command_names_quota_seats_or_host_room_when_hives_ha
     monkeypatch.setattr(cli, "connect", lambda: store)
     monkeypatch.setattr(cli, "LedgerClient", lambda: None)
     hives = [{"id": "anton", "room": 20, "limit": "ram: fits 20 more", "refusal": ""}]
-    monkeypatch.setattr(launch, "live_hives", lambda found: hives if found is store else [])
+    monkeypatch.setattr(launch, "live_hives", lambda found, reservations=None: hives if found is store else [])
     roomy = {**_readings(), "host": {"load1": 0, "cpus": 8, "available_mb": 64000, "agents": 0}}
     monkeypatch.setattr(capacity, "live_inputs", lambda slug, found, ledger, environ, now: inputs)
     inputs = capacity.fixture_inputs(roomy)
@@ -2247,6 +2294,7 @@ def test_the_live_autoscale_command_names_quota_seats_or_host_room_when_hives_ha
     cli.main(["new", "autoscale", "--json"])
     shown = json.loads(capsys.readouterr().out)
     assert (shown["host"]["room"], shown["binding"]) == (0, "binding limit host room, room 0")
+    assert "admission_unreadable" not in shown
 
 
 def test_status_hive_admission_names_the_refusing_hive_limit_while_quota_and_host_room_are_free(monkeypatch):
@@ -2260,7 +2308,7 @@ def test_status_hive_admission_names_the_refusing_hive_limit_while_quota_and_hos
         capacity, "accounts", lambda env, now, refresh=True: observed if refresh is False and now > 0 else []
     )
     hives = [{"id": "workstation", "room": 0, "limit": "max agents: 6 of 6", "refusal": "max agents: 6 of 6"}]
-    monkeypatch.setattr(launch, "live_hives", lambda found: hives if found is store else [])
+    monkeypatch.setattr(launch, "live_hives", lambda found, reservations=None: hives if found is store else [])
     assert cli.hive_admission(store, "sw") == {
         "hives": [{"hive": "workstation", "room": 0, "limit": "max agents: 6 of 6"}],
         "lines": [
