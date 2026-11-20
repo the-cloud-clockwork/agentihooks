@@ -1,6 +1,18 @@
 {
   "features": [
     {
+      "id": "kind-terminal-snapshot-base",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2647",
+      "behaviour": "The kind terminal package stage shares one prefetch of the worker lock's Python patch tag with the swarm image. CI refuses tracked Dockerfile stages that use a Debian snapshot with a floating or unresolved base, resolving global argument defaults and inherited stages before grading them.",
+      "seam": "kind terminal package base and image prefetch",
+      "tests": [
+        "tests/test_kind_terminal_snapshot.py::test_terminal_packages_and_prefetch_use_the_locked_python",
+        "tests/test_kind_terminal_snapshot.py::test_snapshot_stage_guard_fixtures",
+        "tests/test_kind_terminal_snapshot.py::test_every_dockerfile_snapshot_stage_has_a_pinned_base"
+      ]
+    },
+    {
       "id": "swarm-progress-data",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-bundle-ledger-leftovers",
