@@ -101,8 +101,6 @@ The `engine` setting takes only `events`, its default; any other value is refuse
 agentihooks swarm <slug> set engine=events
 ```
 
-Setting it stores the swarm's repository origin when it has none, and is refused for a checkout with no Git origin.
-
 ### The life of a task
 
 1. **Ledger write.** Every task and phase change goes through the ledger outbox, which relays it within a second as a
