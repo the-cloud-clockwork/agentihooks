@@ -18,7 +18,12 @@ def strip_non_command_content(command: str) -> str:
     """
     check = command
 
-    check = re.sub(r"<<-?\s*'?(\w+)'?([^\n]*)\n.*?^[ \t]*\1\b", r"\2", check, flags=re.DOTALL | re.MULTILINE)
+    check = re.sub(
+        r"<<-?\s*'?(\w+)'?(?![\w)])([^\n]*)\n.*?^[ \t]*\1(?=[ \t]*(?:\)|$))",
+        r"\2",
+        check,
+        flags=re.DOTALL | re.MULTILINE,
+    )
 
     check = re.sub(r'-m\s+"[^"]*"', "-m MSG", check)
     check = re.sub(r"-m\s+'[^']*'", "-m MSG", check)

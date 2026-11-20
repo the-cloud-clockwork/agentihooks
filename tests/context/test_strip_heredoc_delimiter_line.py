@@ -52,6 +52,8 @@ def test_prod_lockdown_refuses_a_release_run_after_the_delimiter(opener: str, bo
     [
         "cat <<-EOF > out.txt\n\tbody line\n\tEOF\ngit push origin main",
         "echo $((1 << 2))\ngit push origin main",
+        "echo $((1<<git))\ngit push origin main\ngit status",
+        "echo $((1 << x))\ngit push origin main\nx",
         "cat <<EOF > out.txt\ngit push origin main",
     ],
 )
@@ -70,3 +72,8 @@ def test_a_guarded_command_inside_the_body_stays_data(
     guard: Callable[[dict], None], operation: str, opener: str
 ) -> None:
     guard(_payload(f"cat {opener} > notes.md\n{operation}\nEOF"))
+
+
+@pytest.mark.feature("guard-stripping-keeps-heredoc-delimiter-line")
+def test_a_body_closed_with_its_command_substitution_stays_data() -> None:
+    check_branch_guard(_payload("notes=$(cat <<EOF\ngit push origin main\nEOF)"))
