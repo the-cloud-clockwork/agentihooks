@@ -95,6 +95,97 @@ with database_ledger.acting(""):
 Never build a `ResourceClient` without `transport=`: the `ledger-client-in-process` rule refuses it (see
 [Guards](#guards)).
 
+## Refusals and size warnings
+
+A write is refused only for a reason that belongs to one of its own operations, such as a focus target the ledger
+does not hold or an agent writing in another agent's name. The overview and phase description word counts are
+warnings about the whole document: every write recomputes them, none of them rejects an operation, and the swarm
+ledger client prints them apart from the refusal reason. Pull request 12385 delivered that split on 19 November 2026.
+
+### Where size warnings come from
+
+After a write's operations are applied, the route code runs `ledger_core.warnings(doc)` over the whole ledger:
+
+| Warning | Raised when |
+|---|---|
+| `overview has <n> words, limit 200` | The overview, counted up to its `Summary` heading (`ledger_close.intro`), has more than 200 words |
+| `phase <id> description has <n> words, limit 100` | A phase description has more than 100 words |
+
+Every phase is checked on every write, including phases the write never touched, so an older phase whose
+description is over the limit adds its line to the reply of every later write. The route stores the
+size lines first and the refusal texts of the write's own operations after them in the reply's `_meta.warnings`,
+and each new size line raises one `size` alert for the master.
+
+`ledger_core.size_warning(text)` matches exactly those two shapes. Both clients below use it to tell a warning from
+a refusal reason.
+
+### What a refused write prints
+
+`LedgerClient._call` raises `LedgerRefused` when the reply's `rejected` list is not empty. It builds the message from
+`_meta.warnings` in stored order:
+
+1. Each size warning prints to standard error as `ledger <slug> warning: <text>`, one line per warning.
+2. The other lines are the refusal reasons. They are joined with `; ` into `ledger <slug> refused: <reasons>`.
+3. When no refusal reason remains, the message names the rejected operation identifiers instead, printed as a Python
+   list: `ledger <slug> refused: ['freeze_set-3f9c2a1b7e']`.
+
+The reply itself is left unchanged, so `_meta.warnings` still holds every line.
+
+Focusing a task the ledger does not hold, on a ledger whose overview and phase `p113` are over their limits:
+
+```bash
+agentihooks swarm my-swarm focus tasks/t-missing
+```
+
+The command exits with status 1 and writes three lines to standard error:
+
+```text
+ledger my-swarm warning: overview has 201 words, limit 200
+ledger my-swarm warning: phase p113 description has 117 words, limit 100
+swarm: ledger my-swarm refused: freeze_set refused: target tasks/t-missing does not exist
+```
+
+Only the last line is the refusal: `freeze_set` refused the focus because `tasks/t-missing` is not on the ledger.
+Correct the target, or add the task first, and run the command again. The two warning lines describe the document;
+shorten the overview or the named phase description to clear them.
+
+Python callers catch the same error. The size warnings reach standard error before the exception is raised:
+
+```python
+from scripts.swarm.ledger_client import LedgerClient, LedgerRefused
+
+try:
+    LedgerClient().freeze("my-swarm", "focus", "tasks/t-missing")
+except LedgerRefused as exc:
+    print(exc)  # ledger my-swarm refused: freeze_set refused: target tasks/t-missing does not exist
+```
+
+A reply with an empty `rejected` list is returned unchanged and prints nothing, whatever size warnings it carries.
+The warnings stay in `_meta.warnings` and in the master's `size` alerts.
+
+### The ledger command
+
+The write commands of `agentihooks api` and `agentihooks ledger` apply the same rule in `ledger.refused`. They exit
+with only the refusal reasons, joined with `; `; size warnings are left out and not printed. A command that reports
+its post, such as `say`, prints `{"posted": false}` first. When no refusal reason remains, each rejected operation
+the command sent is named instead:
+
+```text
+<op> on <item> refused without a reason from the server: check that the entry exists, that you may change it and that its text is not empty
+```
+
+### Refusals printed by older releases
+
+Before pull request 12385, `LedgerClient` joined every `_meta.warnings` line into the refusal. The focus example
+above then printed a single line that put the size warnings first:
+
+```text
+swarm: ledger my-swarm refused: overview has 201 words, limit 200; phase p113 description has 117 words, limit 100; freeze_set refused: target tasks/t-missing does not exist
+```
+
+In such a line, or in a log written by an older client, skip every part that matches a size warning shape. The
+remaining part is the refusal.
+
 ## The ledger API service
 
 `scripts.swarm_ledger.api_service` is the one process that takes ledger writes over HTTP. It serves the ledger page's
@@ -323,6 +414,7 @@ resolution](deployment-modes.md#client-mode-resolution)).
 | Rule `ledger-server-reads-only` | No `do_POST`, `do_PUT`, `do_PATCH` or `do_DELETE` in the ledger server module, whether defined, assigned or set with `setattr`, and no `setattr` under a computed name there |
 | Rule `ledger-client-in-process` | No `ResourceClient` anywhere in the tree without an in-process transport, by keyword or position, and none with `transport=None` |
 | Incident rule `ledger-write-switch` | No `database_ledger.serving()` or `database_ledger.scoped(...)` under `scripts/` or `hooks/`: no switch between paths |
+| Feature map entry `swarm-refusal-size-warnings` | A refused swarm write prints each size warning on its own `ledger <slug> warning:` line and keeps it out of the refusal reason, the missing focus target refusal and the rejected identifier fallback hold, and an accepted reply comes back unchanged with nothing printed. Its tests are `test_a_refused_focus_reports_size_warnings_separately` and `test_size_warnings_do_not_refuse_an_accepted_swarm_write` in `tests/swarm/test_ledger_refusals.py`; `test_the_swarm_client_binds_agent_authored_writes_to_the_session` in `tests/swarm_ledger/test_ledger_authority.py` also checks an authorization refusal and its separate warning line |
 
 `ledger-server-reads-only` and `ledger-client-in-process` run in the whole tree scan from
 `.semgrep/ledger-server-writes.yml`, with red and clean fixtures in `.semgrep/ledger-server-writes.test.py`.
@@ -353,6 +445,9 @@ These no longer exist; an older page or note that names them describes the previ
 | The API service exits at start with `already has an active writer` | Another process holds the SQLite folder's writer lease. Stop that writer by its process id, or move both onto the shared database |
 | A controller, hub or worker gets `404 ledger_missing` (`No such ledger`) for a ledger the page shows | Its process writes a different store: it has no database URL and opens an empty SQLite folder of its own, or the shared schema was never migrated. Give it the shared URL and start the API service against that database first, since only the API service creates the schema |
 | `server refused: 500` with `storage_error` and `Resource could not be read or written` | The route code could not read or write the store. Check that the process's database URL or `LEDGER_DIR` names the shared store and that the database answers |
+| `ledger <slug> warning: overview has <n> words, limit 200` or `phase <id> description has <n> words, limit 100` printed before a refusal | Expected: these are document size warnings, printed apart from the refusal. Act on the `refused:` line. Shorten the named overview or phase description to clear the warnings; see [Refusals and size warnings](#refusals-and-size-warnings) |
+| A refusal names `overview has <n> words, limit 200` or `phase <id> description has <n> words, limit 100` next to another reason | The client runs a release from before pull request 12385, which joined size warnings into the refusal. The other reason is the refusal. Roll the client or hive onto a current release |
+| `ledger <slug> refused: ['<op>-<id>']` | The ledger rejected the operation and gave no reason beyond size warnings. Check that the target exists, that the writer may change it and that its text is not empty |
 | Compose `swarm init` stops with `api is <state>` | Read `docker compose --project-name agentihooks-swarm logs api`; the API service starts once Redis and NATS are healthy |
 
 ## Related pages
