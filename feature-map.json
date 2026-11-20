@@ -84,6 +84,9 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-credential-guard-heredoc-substitution",
       "behaviour": "The credential guard judges executable dollar and backtick command substitutions in unquoted heredoc bodies like stages, refusing credential reads and preserving recursive tree scans. Quoted delimiters keep their bodies literal for ordinary consumers. Literal body commands, process substitution text, escaped substitution markers and safe substitutions pass. Existing shell consumer checks still apply.",
       "seam": "hooks.context.credential_guard.decide and evaluate on Bash heredoc payloads",
+      "rules": [
+        "credential-guard-heredoc-substitution"
+      ],
       "tests": [
         "tests/test_credential_guard.py::test_an_unquoted_heredoc_credential_substitution_is_refused",
         "tests/test_credential_guard.py::test_a_quoted_heredoc_credential_substitution_stays_literal",
