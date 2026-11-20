@@ -1,6 +1,18 @@
 {
   "features": [
     {
+      "id": "kind-terminal-snapshot-base",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2647",
+      "behaviour": "The kind terminal package stage shares one prefetch of the worker lock's Python patch tag with the swarm image. CI refuses tracked Dockerfile stages that use a Debian snapshot with a floating or unresolved base, resolving global argument defaults and inherited stages before grading them.",
+      "seam": "kind terminal package base and image prefetch",
+      "tests": [
+        "tests/test_kind_terminal_snapshot.py::test_terminal_packages_and_prefetch_use_the_locked_python",
+        "tests/test_kind_terminal_snapshot.py::test_snapshot_stage_guard_fixtures",
+        "tests/test_kind_terminal_snapshot.py::test_every_dockerfile_snapshot_stage_has_a_pinned_base"
+      ]
+    },
+    {
       "id": "swarm-progress-data",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-bundle-ledger-leftovers",
@@ -9,6 +21,22 @@
       "tests": [
         "tests/swarm/test_progress_data.py::test_progress_data_preserves_every_collection",
         "tests/swarm/test_progress_data.py::test_progress_data_propagates_read_failure"
+      ]
+    },
+    {
+      "id": "stop-gate-ledger-variable",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2745",
+      "behaviour": "A ledger write command reached through a shell variable, assigned in the same command or set in the agent's environment, restarts the stop gate's tool call count like the literal command; a variable naming another program still counts as a plain call.",
+      "seam": "scripts.swarm_ledger.ledger_hook.on_tool over a Bash payload",
+      "tests": [
+        "tests/swarm_ledger/test_hook_progress.py::test_a_ledger_write_through_a_shell_variable_restarts_the_count",
+        "tests/swarm_ledger/test_hook_progress.py::test_a_ledger_write_through_an_environment_variable_restarts_the_count",
+        "tests/swarm_ledger/test_hook_progress.py::test_a_variable_naming_another_program_still_counts",
+        "tests/swarm_ledger/test_hook_progress.py::test_an_unset_variable_expands_to_nothing",
+        "tests/swarm_ledger/test_hook_progress.py::test_an_assignment_built_from_another_variable_restarts_the_count",
+        "tests/swarm_ledger/test_hook_progress.py::test_a_literal_write_counts_when_its_expansion_breaks_the_quoting",
+        "tests/swarm_ledger/test_hook_progress.py::test_an_unparsable_command_counts_as_a_plain_call"
       ]
     },
     {
@@ -6647,6 +6675,18 @@
       ]
     },
     {
+      "id": "swarm-release-tag-moves-only-for-the-newest-published-release",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2694",
+      "behaviour": "A Swarm image release build pushes only its commit image, and a release job that runs after the build moves the swarm image release tag at move time onto that image unless a newer release has already published its swarm version image, then tags the version, so of two overlapping releases that both read themselves as newest at checkout the release tag ends on the newer whichever finishes last, and no publish step moves the release tag from its checkout time newest flag.",
+      "seam": "Swarm image workflow tags step and its release job that runs docker/swarm-node/release.sh",
+      "tests": [
+        "tests/contracts/promotion/test_release_images.py::test_the_swarm_release_build_pushes_only_its_commit_image",
+        "tests/contracts/promotion/test_release_images.py::test_the_swarm_release_tag_stays_on_the_newer_of_two_overlapping_releases_whichever_finishes_last",
+        "tests/contracts/promotion/test_release_images.py::test_the_release_job_moves_the_swarm_release_tag_and_the_publish_job_moves_none"
+      ]
+    },
+    {
       "id": "hive-retire-absence",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1772",
@@ -7036,6 +7076,21 @@
         "tests/test_type_gate.py::test_measure_checks_at_most_a_thousand_sources_per_checker_process_and_sums_their_counts",
         "tests/test_type_gate.py::test_a_checker_peak_at_the_line_where_basedpyright_empties_its_type_cache_is_refused",
         "tests/test_type_gate.py::test_a_checker_peak_under_the_line_where_basedpyright_empties_its_type_cache_is_kept"
+      ]
+    },
+    {
+      "id": "design-rules-body-change-graded",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-design-rules-body-change-types",
+      "behaviour": "The design rules gate grades a function or method whose body differs from its base version, a nested function's edit included, so an untyped function edited only in its body is red for its missing hints, while unchanged functions stay ungraded and a class is not regraded for a body change alone.",
+      "seam": "scripts.design_rules.grade through its changed unit selection",
+      "tests": [
+        "tests/test_design_rules.py::test_a_body_change_grades_an_untyped_function_for_hints",
+        "tests/test_design_rules.py::test_only_the_untyped_function_whose_body_changed_is_graded",
+        "tests/test_design_rules.py::test_a_method_body_change_grades_the_method_but_not_its_class",
+        "tests/test_design_rules.py::test_an_async_function_whose_body_changed_is_graded_for_hints",
+        "tests/test_design_rules.py::test_a_nested_function_edit_grades_the_function_that_encloses_it",
+        "tests/test_design_rules.py::test_a_body_change_grades_an_untyped_private_function_for_hints"
       ]
     },
     {
@@ -8031,10 +8086,12 @@
     {
       "id": "tick-scale-gate-wiring",
       "origin": "inventory",
-      "behaviour": "The tick-scale job on the Tests workflow runs the tick-scale action only on a dev push, never on a pull request, merge queue or manual dispatch, is required by promotion-ready and promote without blocking the pull request gate, and the tick-scale workflow plants the whole hash fault only on its diffcheck plant branch.",
+      "behaviour": "The tick-scale job on the Tests workflow runs the tick-scale action only on a dev push, never on a pull request, merge queue or manual dispatch, is required by promotion-ready and promote without blocking the pull request gate, and the tick-scale workflow plants the whole hash fault only on its diffcheck plant branch. Its profile input names only registered tick steps, includes the master scale launcher and matches the promotion documentation.",
       "seam": "tests/contracts/promotion/test_workflow.py reading .github/workflows/test.yml, .github/actions/tick-scale/action.yml and .github/workflows/tick-scale.yml",
       "tests": [
-        "tests/contracts/promotion/test_workflow.py::test_each_dev_push_runs_the_tick_scale_gate_before_promotion_and_never_on_pull_requests_or_the_queue"
+        "tests/contracts/promotion/test_workflow.py::test_each_dev_push_runs_the_tick_scale_gate_before_promotion_and_never_on_pull_requests_or_the_queue",
+        "tests/contracts/promotion/test_workflow.py::test_tick_scale_profiles_registered_steps_including_the_agent_launcher",
+        "tests/contracts/promotion/test_workflow.py::test_tick_scale_promotion_page_lists_the_profiled_steps"
       ]
     },
     {
@@ -8298,6 +8355,17 @@
       "seam": "scripts.swarm.metrics_swarm.record_pass through scripts.gates.log.since",
       "tests": [
         "tests/swarm/test_metrics_swarm.py::test_record_pass_counts_gate_denies_and_reruns_older_than_the_log_tail"
+      ]
+    },
+    {
+      "id": "ci-metrics-partial-flush",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ci-metrics-partial-flush",
+      "behaviour": "A CI metrics run flushes its fresh outbox again while rows still wait, at most three flushes each with the outbox's own five second budget, so rows that a refused statement or a spent budget left behind reach the sink once and the run succeeds; rows still waiting after the third flush fail the run with its shipped and built counts.",
+      "seam": "scripts.ci_metrics.__main__.ship through scripts.ci_metrics.__main__.main with a sink that refuses a statement or outlasts one flush budget",
+      "tests": [
+        "tests/ci_metrics/test_main.py::test_a_run_ships_the_rows_a_partial_flush_left_waiting",
+        "tests/ci_metrics/test_main.py::test_a_run_that_cannot_ship_every_row_fails_after_three_flushes"
       ]
     },
     {
@@ -10997,6 +11065,27 @@
       "seam": "Proofs workflow concurrency group",
       "tests": [
         "tests/test_ci_hosted_lanes.py::test_every_proof_dispatch_runs_in_its_own_focused_proof_group_and_never_waits_on_a_lane"
+      ]
+    },
+    {
+      "id": "swarm-harness-pin-guard",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-harness-pin-guard",
+      "behaviour": "Each capacity pass stores every lane pinned to one harness with the time it first saw the pin, the other harness's free quota seats and the ready lane tasks it placed nowhere while the lane sat below its ceiling; swarm status raises a harness pin health finding for a pinned lane whose other harness has free seats while ready tasks wait, naming the lane, the pin and its age, the free seats and the waiting tasks, and its quota lines show every pin.",
+      "seam": "scripts.swarm.capacity.pins in the capacity pass, scripts.swarm.health.harness_pin.findings in swarm status and scripts.swarm.quota_view.lines",
+      "rules": [
+        "status-without-harness-pin"
+      ],
+      "tests": [
+        "tests/swarm/test_harness_pin.py::test_a_claude_pin_with_free_codex_seats_and_waiting_tasks_raises_the_finding",
+        "tests/swarm/test_harness_pin.py::test_a_codex_pin_with_free_claude_seats_raises_the_reverse_finding",
+        "tests/swarm/test_harness_pin.py::test_no_finding_without_a_pin_free_other_seats_or_waiting_work",
+        "tests/swarm/test_harness_pin.py::test_waiting_tasks_list_only_below_the_lane_ceiling",
+        "tests/swarm/test_harness_pin.py::test_an_unpinned_lane_before_a_pinned_lane_with_no_ready_entry_still_stores_the_pin",
+        "tests/swarm/test_harness_pin.py::test_the_pin_age_holds_while_the_pin_stands_and_restarts_when_it_changes",
+        "tests/swarm/test_harness_pin.py::test_the_status_quota_lines_name_each_pinned_lane",
+        "tests/swarm/test_harness_pin.py::test_findings_and_quota_lines_list_pinned_lanes_in_lane_name_order",
+        "tests/swarm/test_harness_pin.py::test_swarm_status_lists_the_harness_pin_finding"
       ]
     },
     {
