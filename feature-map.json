@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "codex-attach-waits-for-classification",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-pane-attach-refused",
+      "behaviour": "A native Codex viewer waits while a starting hive execution has not published its harness and transport, then attaches once the app server is classified; unsupported classified executions still refuse native attachment.",
+      "seam": "scripts.codex_session.attach.recorded",
+      "tests": [
+        "tests/codex_session/test_attach.py::test_recorded_waits_for_starting_capability_classification",
+        "tests/codex_session/test_attach.py::test_recorded_still_refuses_unsupported_classified_agents"
+      ]
+    },
+    {
       "id": "kind-terminal-snapshot-base",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2647",

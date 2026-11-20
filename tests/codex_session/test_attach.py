@@ -311,6 +311,42 @@ def test_recorded_reads_the_named_agents_current_transport(monkeypatch):
         assert str(refused.value) == f"{name} runs no app-server a native terminal can attach to"
 
 
+@pytest.mark.feature("codex-attach-waits-for-classification")
+@pytest.mark.parametrize("harness", ["", "codex"])
+def test_recorded_waits_for_starting_capability_classification(monkeypatch: pytest.MonkeyPatch, harness: str) -> None:
+    from scripts.swarm.store import APP_SERVER_TRANSPORT, AgentRecord
+
+    agent = AgentRecord("managed", "eng", "task", state="starting", harness=harness, execution_id="exe-1")
+    store = Mock()
+    store.agents.return_value = [agent]
+    transport = Mock(return_value=RECORD)
+    monkeypatch.setattr("scripts.swarm.store.connect", lambda: store)
+    monkeypatch.setattr("scripts.swarm.live_binding.transport", transport)
+    read = attach.recorded("sw", agent.name)
+
+    assert read() is None
+    transport.assert_not_called()
+    agent.harness = "codex"
+    agent.transport = APP_SERVER_TRANSPORT
+    assert read() == RECORD
+
+
+@pytest.mark.feature("codex-attach-waits-for-classification")
+@pytest.mark.parametrize(("harness", "state"), [("codex", "working"), ("", "working"), ("claude", "starting")])
+def test_recorded_still_refuses_unsupported_classified_agents(
+    monkeypatch: pytest.MonkeyPatch, harness: str, state: str
+) -> None:
+    from scripts.swarm.store import AgentRecord
+
+    agent = AgentRecord("unsupported", "eng", "task", state=state, harness=harness, execution_id="exe-1")
+    store = Mock()
+    store.agents.return_value = [agent]
+    monkeypatch.setattr("scripts.swarm.store.connect", lambda: store)
+
+    with pytest.raises(attach.AttachError, match="unsupported runs no app-server a native terminal can attach to"):
+        attach.recorded("sw", agent.name)()
+
+
 def test_the_app_server_pane_runs_the_server_in_its_own_session_and_the_viewer_in_front(tmp_path):
     spec = init_agent.AgentSpec(agent="codex", profile="engineer", transport=init_agent.APP_SERVER, seat="master@sw")
     launcher, opening = init_agent._write_launcher(

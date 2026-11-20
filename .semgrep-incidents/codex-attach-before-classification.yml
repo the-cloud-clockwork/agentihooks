@@ -1,0 +1,23 @@
+rules:
+  - id: codex-attach-before-classification
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A starting hive execution has an execution identifier before its harness and transport are classified.
+      Wait for that classification before refusing native attachment.
+    paths:
+      include:
+        - /scripts/codex_session/attach.py
+        - codex-attach-before-classification.py
+    patterns:
+      - pattern: |
+          if not capabilities.of_agent($AGENT).native_terminal_attach:
+              ...
+              raise AttachError(...)
+      - pattern-not: |
+          if not capabilities.of_agent($AGENT).native_terminal_attach:
+              ...
+              if $AGENT.state == "starting" and $AGENT.harness in LAUNCHING_HARNESSES:
+                  return None
+              ...
+              raise AttachError(...)
