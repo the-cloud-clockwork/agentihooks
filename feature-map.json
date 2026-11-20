@@ -118,6 +118,23 @@
       ]
     },
     {
+      "id": "credential-guard-heredoc-substitutions",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-credential-guard-heredoc-substitution",
+      "behaviour": "The credential guard judges executable dollar and backtick command substitutions in unquoted heredoc bodies like stages, refusing credential reads and preserving recursive tree scans. Quoted delimiters keep their bodies literal for ordinary consumers. Literal body commands, process substitution text, escaped substitution markers and safe substitutions pass. Existing shell consumer checks still apply.",
+      "seam": "hooks.context.credential_guard.decide and evaluate on Bash heredoc payloads",
+      "rules": [
+        "credential-guard-heredoc-substitution"
+      ],
+      "tests": [
+        "tests/test_credential_guard.py::test_an_unquoted_heredoc_credential_substitution_is_refused",
+        "tests/test_credential_guard.py::test_a_quoted_heredoc_credential_substitution_stays_literal",
+        "tests/test_credential_guard.py::test_an_unquoted_heredoc_without_a_credential_substitution_passes",
+        "tests/test_credential_guard.py::test_a_heredoc_substitution_keeps_the_credential_tree_scan",
+        "tests/test_credential_guard.py::test_a_spelled_heredoc_token_hides_no_later_heredoc_body"
+      ]
+    },
+    {
       "id": "credential-guard-reads-heredoc-commands",
       "origin": "regression",
       "ordered_at": "2026-11-19",
@@ -9846,6 +9863,18 @@
       "seam": "scripts.ci_lab.worker Worker.free, reached through Worker.run_once and drain, observed on stderr against scripts.ci_lab.lease_api.serve",
       "tests": [
         "tests/ci_lab/test_worker.py::test_a_crash_logs_the_traceback_naming_the_missing_path"
+      ]
+    },
+    {
+      "id": "lab-result-upload-signing",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-worker-upload-forbidden",
+      "behaviour": "The CI lab scheduler's storage client presigns each worker result upload with SigV4 query auth over the host alone, so the worker's PUT of a unit's report, which carries the form Content-Type that urllib adds, is accepted and the report lands under lab/uploads/<job>/, while a URL changed to name another object is refused. A SigV2 URL signs the Content-Type, so the same PUT is refused with 403 SignatureDoesNotMatch, as MinIO refused 362 static unit results on 20 November.",
+      "seam": "scripts.ci_lab.scheduler.storage signing through scripts.ci_lab.objects.Uploads, put by scripts.ci_lab.worker.Client.put to a local bucket that checks presigned SigV2 and SigV4 signatures over the request it received; the client settings observed through scripts.ci_lab.scheduler.main",
+      "tests": [
+        "tests/ci_lab/test_result_upload.py::test_a_worker_put_of_a_report_lands_through_the_upload_url_the_scheduler_storage_signs",
+        "tests/ci_lab/test_result_upload.py::test_an_upload_url_the_scheduler_storage_signs_writes_only_the_object_it_names",
+        "tests/ci_lab/test_result_upload.py::test_the_bucket_refuses_a_sigv2_upload_url_for_the_content_type_urllib_adds_to_the_worker_put"
       ]
     },
     {
