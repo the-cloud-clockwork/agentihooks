@@ -872,7 +872,7 @@ Set them with `agentihooks hive set <id> key=value ...`, or on the ledger page's
 | Setting | Values | Default | Meaning |
 |---|---|---|---|
 | `name` | text | the hive id | Display name. A hive with `ui=yes`, where the masters run, is always named `swarm-master`. |
-| `ui` | `yes`, `no` | `no` | The machine has a screen and a person at it. |
+| `ui` | `yes`, `no` | `no` | The machine has a screen and a person at it. Agents on a `ui=yes` hive are also graded on kubectl and a global git identity; see [Headed hive checks](#headed-hive-checks-kubectl-and-git-identity). |
 | `ephemeral` | `yes`, `no` | `no` | The machine can disappear, such as a pod. Placement prefers lasting hives on a tie. |
 | `excluded` | comma list of lane roles or profiles, such as `master,frontend,qa` | `master` on `ui=no`, none on `ui=yes` | Work the hive never takes. An empty value excludes nothing. |
 | `master-swarms` | comma list of swarm slugs | none | Swarms whose masters the hive takes although it excludes `master`. Every other swarm still sees masters excluded. |
@@ -2338,6 +2338,126 @@ semgrep --test --config .semgrep-incidents/admission-claim-skips-continuity.yml 
 | The hive's admit ask is answered `The transfer changed; retry the command` | Another writer changed the swarm's transfers while the admission attached | Nothing to fix: the admission released its claim, agent and ledger row, and the next ask for the offer admits again. |
 | A transfer names a successor that never launched | The admission is kept, because it finished late or the hive's launch is still running | The hive asks again and launches it. Otherwise `reopen` or the launch check free hands the transfer back; see [Handing the transfer back](#handing-the-transfer-back). |
 
+### Saved account on a hive launch
+
+A successor can carry a saved account. It is the `account` of the task's relaunch assignment (`launch_assignment`)
+or, when the task has none, the `account` in the `launch` block of the predecessor's handoff envelope. On a launch
+from a hive spoke the saved account is only a preference. The launch passes `--route <account>` only while the hub's
+account slot holds or takes a worker seat on that account for the launching execution. When the account has no free
+worker seat, the launch passes no `--route` and the agent's router picks the account the usual way (see
+[Launch routing](load-balancing.md#launch-routing)). A full account therefore never pins a successor. Every launch
+from a hive spoke does this unless it takes a route listed below, and no setting turns it off.
+
+The check runs in the swarm runtime's spawn, before any process starts. The spoke writes its own hive into every
+spawn task it launches (`account_slot_hive`), next to the execution the hub started for it. For such a task the
+runtime sends the hub one `take` on the hive's slot subject, with that execution, the harness and the saved account
+as `preferred` (see
+[Hub slot requests and the hive binding](../reference/swarm-bus-scope.md#hub-slot-requests-and-the-hive-binding)).
+The hub considers only the saved account:
+
+| What the hub finds for the saved account | Hub answer | The launch |
+|---|---|---|
+| The execution already holds one of its slots | The account | `--route <account>` |
+| A free worker seat | The account, after it adds a hold for the execution | `--route <account>`. The launched agent's own slot take for the same execution finds that hold, so the launch uses one seat, not two. |
+| No free worker seat: its worker holds plus the sessions no hold accounts for have reached the smallest cap any hive reports for it, or that cap is 0 | `null` | No `--route` |
+| The hive's sessions report lists no slot for that harness and account | `null` | No `--route` |
+| The request fails, for example on a timeout or with no responders | An error | Refused as `unavailable` with `Account slot admission failed`; see [When the hub cannot answer](#when-the-hub-cannot-answer) |
+
+A master's hold is not counted against the worker seats.
+
+#### Which launches check the saved account
+
+| Launch | Route it passes |
+|---|---|
+| A front door master or a launch on the interactive route | That route. The saved account is not checked. |
+| A quota repick: the runtime holds the swarm's quota account rows, or the hub admitted a relaunch whose handoff reason is `quota` | `--route` with the account the repick chose. No `take` is sent for the saved account. |
+| A task without `account_slot_hive`, such as a tick launch | `--route <saved account>` with no slot check, as before |
+| A hive spoke launch with a saved account | Decided by the table above |
+| A launch with no saved account | No `--route` |
+
+For a quota handoff the hub did not admit with an account, the runtime first replaces the saved account with the
+successor account it selects (see [Successor account selection](load-balancing.md#successor-account-selection)).
+That account then goes through the same check.
+
+With no `--route`, `agenti` picks a Claude account and the Codex router a Codex account by the rules in
+[Launch routing](load-balancing.md#launch-routing). Because the launch runs with `AGENTIHOOKS_SLOT_HIVE` set, it then
+takes a hive account slot on the account it picked, as every routed launch on a hive does (see
+[Hives in the account login reference](../reference/account-login.md#hives)).
+
+#### When the hub cannot answer
+
+Any failure of the slot request is raised as `Unavailable("Account slot admission failed")`, and the runtime refuses
+the spawn with status `unavailable` before it starts a process. The spoke then acts as for every `unavailable`
+answer (see [What the spoke does after a failure](#what-the-spoke-does-after-a-failure)). The claim goes back to
+`ready`, the launch slot is freed and the spoke sends `reopen` but no `failed`. The harness is therefore not steered,
+and no launch failure is recorded for the task. The hive logs:
+
+```text
+hive spoke for swarm <slug> lane eng poll failed (RuntimeError: spawn unavailable: Account slot admission failed)
+```
+
+#### Before the saved account check
+
+Before pull request [#11264](https://github.com/the-cloud-clockwork/agentihooks/pull/11264), a hive launch passed
+the saved account as `--route` whenever the saved launch named one. On 14 November one task's exit handoff saved the
+account reserved for the master, which was already at 6 of 6 sessions. Every successor launched with that route. The
+hive account slot refused it with `No account slot available` within seconds, and `init-agent` waited out its 270
+second profile canary deadline before the task passed to the next owner with the same saved account. The task used
+up seven owners in 40 minutes.
+
+#### Checking the saved account on a live swarm
+
+```bash
+# The launch the predecessor saved, and its account
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" GET agentihooks:swarm:<slug>:handoff-envelope:<task id> | jq '.launch'
+# {"profile": "engineer", "harness": "claude", "account": "<account>", ...}
+
+# The slots and caps of the hive that launched the successor
+agentihooks hive show <hive-id>
+
+# Launches refused because the hub did not answer the slot request: a worker hive pod, then a workstation or VM hive
+kubectl logs deployment/<release>-worker-hive -n <namespace> | grep 'spawn unavailable: Account slot admission failed'
+journalctl --user -u agentihooks-hive --since "1 hour ago" | grep 'spawn unavailable: Account slot admission failed'
+```
+
+The keys start with `AGENTIHOOKS_SWARM_KEY_PREFIX`, default `agentihooks`. A successor that runs on another account
+than the envelope names had no free worker seat on the saved account, or was placed by a quota repick.
+
+#### Saved account guards
+
+- Feature `hive-saved-account-slot-preference` in `feature-map.json`. Its tests in
+  `tests/swarm/test_runtime_account_slots.py` cover a saved account that routes only while its slot has a worker
+  seat, a quota repick that sends no `take` for the saved account, an admitted relaunch outside a quota handoff that
+  still needs a worker seat, and a slot request the hub cannot answer, which refuses the launch as `unavailable`
+  before any process starts. Its tests in `tests/hive/test_account_slots.py` cover the hub's answer from the
+  account's cap and sessions, a failed request raised as `Unavailable`, and the request going to the hub of the bound
+  swarm on the hive's own subject.
+- Semgrep incident rule `hive-saved-account-route-unchecked`, scoped to `scripts/swarm/`: inside a function named
+  `spawn`, a route built as `["--route", saved["account"]] if saved.get("account") else ...` is an error. The Semgrep
+  workflow runs every rule in `.semgrep-incidents/`. Run it by hand with:
+
+```bash
+semgrep scan --config .semgrep-incidents/hive-saved-account-route-unchecked.yml scripts/swarm/
+semgrep --test --config .semgrep-incidents/hive-saved-account-route-unchecked.yml \
+  .semgrep-incidents/hive-saved-account-route-unchecked.py
+```
+
+#### Saved account limitations
+
+- Only the saved account is checked before the launch. When the account the router then picks has no free hive slot
+  either, the launch still ends with `No account slot available`.
+- The spawn does not release the hold it took when the launch fails before the agent starts. The hold lapses after
+  45 seconds, or sooner once the hive's heartbeat reports the execution exited or dead.
+
+#### Saved account troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Each successor of one task ends within seconds with `No account slot available`, `init-agent` waits out the profile canary deadline each time, and the handoff envelope names the same account | The hive runs a release from before #11264, which routed the saved account with no slot check | Roll the hive to the hub's release. |
+| A successor runs on an account other than the one its predecessor saved | The saved account had no free worker seat, or a quota repick chose another account | Expected. Compare the account's sessions and cap in `agentihooks hive show <hive-id>`. |
+| The hive logs `spawn unavailable: Account slot admission failed` | The hub did not answer the slot request | Check that the hub runs and serves the swarm's account slots; see the slot request rows in [Hub slot requests and the hive binding](../reference/swarm-bus-scope.md#hub-slot-requests-and-the-hive-binding). The `reopen` offers the task again. |
+| A successor skipped its saved account and still ends with `No account slot available` | The account the router picked has no free hive slot either | Wait for a session on the account to end, or add another account to the hive; see [Account caps on every hive](#account-caps-on-every-hive). |
+
 ### When a hive is lost
 
 The hub's `hive-loss` reactor keeps an index of every started execution, by hive. A hive counts as lost when both of
@@ -2703,9 +2823,12 @@ mismatch and idle smoke tests.
 
 When the pane of a hub started agent dies before its work ends, its hive reopens the agent's own conversation in the
 same seat, under the same task claim. This is the dead resume the tick gives agents it launched itself (see
-[Outage holds and recovery](swarm.md#outage-holds-and-recovery)). The tick's reap step leaves hub admitted agents
-to the hub, so on the `events` engine the hub's `lifecycle` reactor decides the resume and sends the agent's hive a
-`resume` command order. When the resume cannot run, the agent is dropped and its task reopens for a fresh agent.
+[Outage holds and recovery](swarm.md#outage-holds-and-recovery)). The tick's reap step sends a hub admitted agent's
+hive an execution stop once the agent's work ends (see [Stopping an agent whose work
+ended](#stopping-an-agent-whose-work-ended)), and until then watches the agent only while the controller lists its
+pane as live. It never resumes a dead one, so on the `events` engine the hub's `lifecycle` reactor decides the resume
+and sends the agent's hive a `resume` command order. When the resume cannot run, the agent is dropped and its task
+reopens for a fresh agent.
 
 Before [pull request #11246](https://github.com/the-cloud-clockwork/agentihooks/pull/11246) the reactor had no
 resume. It dropped every dead hub started agent and reopened its task, so the next agent started without the dead
@@ -3580,7 +3703,9 @@ An agent on a hive is graded by its session join report instead of process obser
 and the `late` check do not run for it. Every check the join report names is required except `brain`, which is
 report only: a hive without the brain connector reports the `hive_brain` miss and keeps its agent running. Join
 report grading for hive agents arrived after this change, in
-[pull request #5481](https://github.com/the-cloud-clockwork/agentihooks/pull/5481).
+[pull request #5481](https://github.com/the-cloud-clockwork/agentihooks/pull/5481). A headed hive's join report
+also names `kubectl` and `git_identity`; see
+[Headed hive checks](#headed-hive-checks-kubectl-and-git-identity).
 
 Check a fresh hive launch:
 
@@ -3608,6 +3733,211 @@ was wrong.
 |---|---|---|
 | A hive engineer fails `overlay` and is retired soon after start | The hive runs a release older than pull request #5319, so its acknowledgement carries no `host_overlays`. | Upgrade the hive to a release carrying the change and roll its pod. |
 | A hive agent's execution record shows `launched_at` 0 | The same older release. | The same upgrade. |
+
+### Headed hive checks: kubectl and git identity
+
+A headed hive is a hive whose registry record carries `ui=yes`. Placement ranks headed hives first for masters, `qa`
+and `frontend`; a master falls back to a headless hive, while `qa` and `frontend` wait for a headed one (see
+[Placement by role](#placement-by-role)). Every hive is meant to run agents with the workstation's configuration,
+and `agentihooks hive compare` reports where one differs (see
+[Comparing hive configuration](#comparing-hive-configuration)). An agent on a headed hive is also graded on two
+tools the workstation always has: a `kubectl` that reaches the cluster and a global git identity for its commits.
+
+When an agent's session starts, the join hook reads the hive's registry record and writes `headed` into the join
+report's `context`: `true` when `ui` is `yes`, `false` otherwise. A headed report runs two more checks:
+
+| Check | Command it runs as the agent's user | Passes when |
+|---|---|---|
+| `kubectl` | `kubectl get nodes --request-timeout=10s -o name` | The command exits 0 and prints at least one node. |
+| `git_identity` | `git config --global user.name`, then `git config --global user.email` | Both commands exit 0 and print a value that is not blank. |
+
+Each command has a 20 second timeout. A binary missing from `PATH`, a timeout and a nonzero exit all count as a
+miss. The join report records no reason for these two checks, so a miss reads `kubectl (required)` with no error
+text after it.
+
+On a headed hive both checks are required, like every other join check except `brain`:
+
+| Hive | `kubectl` and `git_identity` | Grade with both passing | Grade when either one misses |
+|---|---|---|---|
+| `ui=yes` | Run and required | `complete`, or `partial` when only `brain` misses | `failed` |
+| `ui=no`, or no registry record | Not run and not graded | Unchanged | Not applicable |
+
+The launch check reads the misses as `hive_kubectl` and `hive_git_identity`. Neither is report only, so the agent
+fails its launch check and is handled as an enforced miss, as described in
+[Launch check on a hive](#launch-check-on-a-hive). The tick's check keeps an agent that its idle heartbeat shows
+working at the deadline and records the miss as held, so a working agent keeps running with the miss.
+
+In this section's examples the `hive list`, `hive join` and `hive compare` lines separate their fields with tabs,
+shown aligned here.
+
+```bash
+agentihooks hive list
+# <id>  name=swarm-master  live  ui=yes  workers=1 of 6  ...
+#   engineer@<code>-<n>  failed  misses=kubectl (required), git_identity (required)  heartbeat=<ms>
+
+agentihooks swarm <slug> status
+# hive join  engineer@<code>-<n>  failed  misses=kubectl (required), git_identity (required)  heartbeat=<ms>
+# launch  engineer@<code>-<n>  failed  60412ms
+#   hive_kubectl  enforced  expected available; observed missing
+#   hive_git_identity  enforced  expected available; observed missing
+```
+
+#### Providing the tools on a headed hive
+
+A headed hive needs three things, the same as the workstation:
+
+1. **kubectl.** The linked bundle declares `kubectl` in its `deps.json`, so `agentihooks deps ensure` installs it
+   on every hive that links the bundle. The bundle entry accepts kubectl 1.33.12 or newer. To install, it downloads
+   the 1.33.12 release binary for Linux amd64 or arm64, checks it against the SHA256 pinned in the entry and writes
+   `~/.local/bin/kubectl`. The install fails when `~/.local/bin` is not on `PATH`.
+2. **A read only cluster config.** kubectl reads `~/.kube/config` for the hive's user, or the file `KUBECONFIG`
+   names. Build it from a read only service account token held in the deployment's secret store, write it with
+   mode `600`, and never commit it. The `view` ClusterRole does not cover nodes, so the account also needs
+   `get` and `list` on nodes for the check to pass.
+3. **A global git identity.** Set `user.name` and `user.email` in the hive user's global git config from the
+   hive's bootstrap, keeping an identity already set. Worker hive pods do this in their start script with the name
+   `agentihooks hive` and the email `agentihooks-hive@users.noreply.github.com`.
+
+A read only account the check accepts, applied to the cluster by the deployment's GitOps repository:
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hive-reader
+  namespace: <swarm namespace>
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: hive-reader-token
+  namespace: <swarm namespace>
+  annotations:
+    kubernetes.io/service-account.name: hive-reader
+type: kubernetes.io/service-account-token
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hive-reader-view
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view
+subjects:
+- kind: ServiceAccount
+  name: hive-reader
+  namespace: <swarm namespace>
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: hive-reader-cluster
+rules:
+- apiGroups: [""]
+  resources: [nodes]
+  verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hive-reader-cluster
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hive-reader-cluster
+subjects:
+- kind: ServiceAccount
+  name: hive-reader
+  namespace: <swarm namespace>
+```
+
+The cluster config the hive's provisioning writes from that token and the cluster CA, both read from the secret
+store at write time:
+
+```yaml
+apiVersion: v1
+kind: Config
+clusters:
+- name: swarm
+  cluster:
+    server: https://<cluster API address>:6443
+    certificate-authority-data: <base64 CA from the secret store>
+users:
+- name: hive-reader
+  user:
+    token: <token from the secret store>
+contexts:
+- name: hive-reader
+  context:
+    cluster: swarm
+    user: hive-reader
+current-context: hive-reader
+```
+
+The git identity lines a bootstrap runs, which keep an identity already set:
+
+```bash
+git config --global user.name >/dev/null || git config --global user.name "agentihooks hive"
+git config --global user.email >/dev/null || git config --global user.email agentihooks-hive@users.noreply.github.com
+```
+
+#### Checking a headed hive
+
+```bash
+# From any joined machine: mark the hive headed, then read it back
+agentihooks hive set <id> ui=yes
+agentihooks hive show <id>                       # "ui": "yes"
+
+# On the hive, as the user its agents run as
+agentihooks deps check                           # exit 0: nothing missing, kubectl included
+kubectl get nodes --request-timeout=10s -o name  # one node/<name> line per node
+kubectl auth can-i list nodes                    # yes
+git config --global user.name                    # a name
+git config --global user.email                   # an email
+
+# From the workstation: kubectl is installed on the hive like on the workstation
+agentihooks hive compare
+# <id>  differs  ...
+#   deps missing kubectl                         # only while the hive lacks it
+
+# The checks each running agent on the hive recorded at join
+P=${AGENTIHOOKS_SWARM_KEY_PREFIX:-agentihooks}
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" HVALS "$P:hive:<id>:join-reports" \
+  | jq -c 'select(.status == "running" and .context.headed) | {agent, grade, kubectl: .checks.kubectl, git_identity: .checks.git_identity}'
+```
+
+A healthy headed hive lists its agents as `complete misses=none` in `agentihooks hive list`.
+
+#### Limitations
+
+- The two checks run once, when the session joins. The heartbeat refresh probes again only the Redis, transcript,
+  profile, settings, pane, start time and `brain` checks, and the ledger retry probes only `ledger_join` and
+  `ledger_write`, so a running agent keeps its `kubectl` or `git_identity` miss after the hive is fixed. The next
+  session on the hive runs both checks again.
+- The `kubectl` check proves that the config reaches the cluster and can list nodes. It does not prove any other
+  permission an agent's task needs.
+- A hive's `ui` setting is read when the session joins. Changing it with `agentihooks hive set <id> ui=...` grades
+  only the sessions that start afterwards.
+
+#### Troubleshooting
+
+| Symptom | Check | Fix |
+|---|---|---|
+| `kubectl (required)` on a headed hive, and `command -v kubectl` prints nothing on the hive | `agentihooks deps check` on the hive | Run `agentihooks deps ensure`, and put `~/.local/bin` on the hive user's `PATH` when the install says kubectl is not on it. |
+| `kubectl (required)`, kubectl installed, and `kubectl get nodes` says the connection to the server was refused or names `localhost:8080` | `ls -l ~/.kube/config` on the hive | The hive has no cluster config. Deliver it as in [Providing the tools on a headed hive](#providing-the-tools-on-a-headed-hive). |
+| `kubectl (required)`, and `kubectl get nodes` prints `Forbidden` | `kubectl auth can-i list nodes` on the hive | Bind the account to a ClusterRole with `get` and `list` on nodes, as in the example. |
+| `kubectl (required)`, and `kubectl get nodes` answers `Unable to connect to the server` with a timeout | The route from the hive to the cluster API address in the config | Open the route, or point the config at an address the hive reaches. |
+| `git_identity (required)` | `git config --global user.name` and `git config --global user.email` on the hive | Set both in the hive's bootstrap, as in the example. |
+| A headless hive's agents show no `kubectl` or `git_identity` | `agentihooks hive show <id>` reads `"ui": "no"` | Expected: only headed hives run the two checks. |
+| A `ui=yes` hive's join reports carry no `kubectl` or `git_identity` check | The hive's agentihooks version | The hive runs a release from before pull request #10581. Upgrade it and restart its hive service. |
+
+Before [pull request #10581](https://github.com/the-cloud-clockwork/agentihooks/pull/10581) a headed hive was
+graded like a headless one. [Issue #10577](https://github.com/the-cloud-clockwork/agentihooks/issues/10577) records
+the case: the automation VM hive ran with `ui=yes` and took workstation tasks, but a read only probe as its user
+found no kubectl on `PATH`, no `~/.kube` and no global git `user.name` or `user.email`, and its agents' join reports
+checked neither.
 
 ### A worker that finishes before the tick collects its acknowledgement
 

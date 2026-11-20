@@ -1,0 +1,19 @@
+rules:
+  - id: ledger-wal-switch-without-lock-wait
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Incident 18 November: a ledger server reload successor turned a new ledger file to WAL while another process
+      held the file's write lock. SQLite refused that lock upgrade at once with database is locked instead of
+      waiting out the busy timeout, the successor died before it reported ready and the reload silently never
+      happened. Turn a ledger file to WAL only through WalSwitch in scripts.swarm_ledger.repository.sqlite, whose
+      wait method waits out that lock within the busy timeout.
+    paths:
+      include:
+        - /scripts/swarm_ledger/
+        - ledger-wal-switch-without-lock-wait.py
+    patterns:
+      - pattern: $CONNECTION.execute("=~/(?i)pragma\s+journal_mode\s*=\s*\W*wal/", ...)
+      - pattern-not-inside: |
+          class WalSwitch:
+              ...

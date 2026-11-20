@@ -1,0 +1,6 @@
+{
+  "scripts/collection_imports.py:scripts.collection_imports.x_loads_heavy:bd6d66b39fe8fa589073903e15e40a70ff517abb688767a68645e93109635775": {
+    "reader": "standards_reader",
+    "reason": "Extends the parents range by one step. A split limit above the dot count returns the first component, already produced at the dot count step, or the name itself when there is no dot, which is already in seen, so the result is unchanged."
+  }
+}

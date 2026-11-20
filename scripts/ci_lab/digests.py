@@ -14,6 +14,7 @@ from scripts.ci_mutation import stats_cache
 from scripts.profiles.sources import blob as blob_id
 
 __all__ = [
+    "LOCKFILE",
     "SCHEMAS",
     "GradeInputs",
     "MutantInputs",
@@ -30,6 +31,7 @@ __all__ = [
     "test_key",
 ]
 
+LOCKFILE = ".github/test-requirements.lock"
 SCHEMAS: dict[str, int] = {"static": 1, "test": 1, "stats": stats_cache.SCHEMA, "mutant": 1, "grade": 1}
 
 
