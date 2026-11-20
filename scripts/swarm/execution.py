@@ -181,6 +181,9 @@ class ExecutionRegistry:
             timing.timed(self._put, slug, agent, managed)
 
     def _unchanged(self, slug: str, agent: AgentRecord) -> bool:
+        port = fencing.records(self.store, slug)
+        if isinstance(port, fencing.WholeDocumentRecords):
+            return False
         if _invalid(slug, agent):
             return False
         from scripts.swarm import lease
@@ -188,7 +191,6 @@ class ExecutionRegistry:
 
         if (held := lease.EPOCH.get()) is not None and lease.stale(self.store, slug, held):
             raise SwarmError(lease.STALE)
-        port = fencing.records(self.store, slug)
         head = port.record(slug, fencing.BY_SEAT, agent.seat)
         if head is None or head.value != agent.execution_id:
             return False
@@ -208,6 +210,7 @@ class ExecutionRegistry:
             or checked_head.revision != head.revision
             or checked_row is None
             or checked_row.revision != row.revision
+            or (held is not None and lease.stale(self.store, slug, held))
         ):
             return False
         return written == current

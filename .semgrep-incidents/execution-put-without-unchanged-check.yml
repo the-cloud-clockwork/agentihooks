@@ -1,0 +1,25 @@
+rules:
+  - id: execution-put-without-unchanged-check
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Execution puts must check for an unchanged managed record before taking the per swarm write lock.
+      Unchanged puts otherwise queue behind fenced document reads and stall the controller.
+    paths:
+      include:
+        - /scripts/swarm/execution.py
+        - execution-put-without-unchanged-check.py
+    patterns:
+      - pattern: |
+          def put(...):
+              ...
+              with _writes(...):
+                  ...
+      - pattern-not: |
+          def put(...):
+              ...
+              if $MANAGED and $SELF._unchanged(...):
+                  return
+              ...
+              with _writes(...):
+                  ...
