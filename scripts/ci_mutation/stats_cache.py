@@ -368,10 +368,11 @@ def collect_cached_stats(
     inputs = StatsInputs(root, modules, resources, changes)
     stored = StoredStats(root, folder, context, changes)
     stored.prune()
+    digests: dict[str, str | None] = {}
     compatible = {
         path: record
         for path in files
-        if (record := stored.load(path, functools.partial(inputs.matches, path))) is not None
+        if (record := stored.load(path, functools.partial(inputs.matches, path), digests)) is not None
     }
     reused = list(compatible.values())
     missing = [path for path in files if path not in compatible]
