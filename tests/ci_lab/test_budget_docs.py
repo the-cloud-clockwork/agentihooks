@@ -15,14 +15,15 @@ RULE = re.compile(r"Each threshold is [^.]*\.")
 ALERT = re.compile(r"\| `CILabBudgetShedding` \| ([^|]*) \|")
 
 
-def check(text: str) -> None:
-    _, heading, section = text.partition(SECTION)
+def assert_docs_match_shed_thresholds(text: str) -> None:
+    _, found, rest = text.partition(SECTION)
+    section = re.split(r"\n#{2,3} ", rest, maxsplit=1)[0]
     flat = " ".join(section.split())
     config = re.search(r"```yaml\n(.*?)```", section, re.DOTALL)
     prose = re.search(r"In this example, ([^;.]*)", flat)
     rule = RULE.search(flat)
     alert = ALERT.search(" ".join(text.split()))
-    assert heading and config and prose and rule and alert
+    assert found and config and prose and rule and alert
     policy = budget.policy(runtime(yaml.safe_load(config[1])))
     points = [(name, LEFT[word]) for name, word in POINT.findall(prose[1])]
     assert [name for name, _ in points] == list(SHEDDABLE)
@@ -39,7 +40,7 @@ def check(text: str) -> None:
 
 @pytest.mark.feature("lab-budget-docs")
 def test_the_published_lab_budget_docs_match_the_shed_thresholds_in_code() -> None:
-    check(DOC.read_text())
+    assert_docs_match_shed_thresholds(DOC.read_text())
 
 
 @pytest.mark.feature("lab-budget-docs")
@@ -60,4 +61,4 @@ def test_a_docs_copy_with_the_thresholds_swapped_fails_the_check(published: str,
     text = DOC.read_text()
     assert published in text
     with pytest.raises(AssertionError):
-        check(text.replace(published, planted))
+        assert_docs_match_shed_thresholds(text.replace(published, planted))
