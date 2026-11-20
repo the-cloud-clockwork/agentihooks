@@ -7130,6 +7130,20 @@
       ]
     },
     {
+      "id": "design-rules-duplicate-pairing",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-design-rules-duplicate-pairing",
+      "behaviour": "The design rules gate pairs same named definitions in one scope with their base versions by identical content first and by position only among the rest, so a new definition added above an unchanged namesake is the only one graded, the unchanged namesake and its nested functions stay ungraded, and an edited namesake is still graded against its own base version.",
+      "seam": "scripts.design_rules.grade through its base to head unit pairing",
+      "tests": [
+        "tests/test_design_rules.py::test_a_new_definition_above_an_unchanged_namesake_grades_only_the_new_one",
+        "tests/test_design_rules.py::test_an_unchanged_namesake_below_a_new_one_keeps_its_nested_functions_ungraded",
+        "tests/test_design_rules.py::test_removing_the_first_of_two_namesakes_grades_nothing",
+        "tests/test_design_rules.py::test_a_copy_of_an_unchanged_function_is_graded_as_new",
+        "tests/test_design_rules.py::test_an_edited_namesake_is_graded_against_its_base_by_position"
+      ]
+    },
+    {
       "id": "hive-master-refused-account-retry",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-scale-cpu",
