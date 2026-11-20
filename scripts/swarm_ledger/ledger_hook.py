@@ -241,7 +241,7 @@ def on_prompt(payload, session, state, sfile):
         emit("UserPromptSubmit", context_text(session, owed))
 
 
-def stop_reasons(session, state):
+def stop_reasons(session: dict[str, Any], state: dict[str, Any]) -> tuple[list[str], int, dict[str, Any]]:
     import ledger_gate
 
     pol = ledger_gate.policy(state)
@@ -250,7 +250,7 @@ def stop_reasons(session, state):
     if owed:
         reasons.append(f"{len(owed)} operator event(s) are unhandled")
     if session["calls"] >= pol["stop_after_calls"] and not wait_seen(session) and not outcome_seen(session):
-        reasons.append(f"{session['calls']} tool calls since you last recorded progress in the ledger")
+        reasons.append(f"{session['calls']} tool calls since you last recorded progress through the swarm API")
     return reasons, len(owed), pol
 
 

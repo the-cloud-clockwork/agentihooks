@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "swarm-progress-data",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-bundle-ledger-leftovers",
+      "behaviour": "Progress report consumers receive tasks, freezes, plans, phases, followups and alerts from the built-in swarm reader without owning storage access; failed reads propagate to the caller.",
+      "seam": "scripts.swarm.progress_data.read over the built-in resource reader",
+      "tests": [
+        "tests/swarm/test_progress_data.py::test_progress_data_preserves_every_collection",
+        "tests/swarm/test_progress_data.py::test_progress_data_propagates_read_failure"
+      ]
+    },
+    {
       "id": "lab-zero-base-push",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-zero-base-push",
@@ -129,6 +140,16 @@
       ]
     },
     {
+      "id": "lab-scheduler-load-reads",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-scheduler-load-slots-only",
+      "behaviour": "The load that every CI lab metrics scrape and GET /capacity answer from, and that admission reads each pass, reads only the slots and lease start of each pending and leased job, with HMGET in pipelines that open no transaction, and builds no job; a job whose record is gone counts nowhere. A queue of tens of thousands of jobs no longer costs a full parsed job per id on every scrape.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.load over fakeredis and the local object store, counting every job built, every direct Redis command that names a job record and every pipeline opened",
+      "tests": [
+        "tests/ci_lab/test_scheduler_memory.py::test_a_load_reads_each_queued_job_s_slots_and_lease_start_through_pipelines_and_builds_no_job"
+      ]
+    },
+    {
       "id": "lab-scheduler-release-bound",
       "rules": ["lab-release-starts-every-waiting-head"],
       "origin": "regression",
@@ -156,8 +177,8 @@
       "id": "lab-scheduler-uncarried-head",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-mirror-missing-head-fallback",
-      "behaviour": "A head no node mirror can hold is retired instead of graded: before Scheduler.tick expands a released head it asks the expander whether a ref every node mirror fetches reaches the head, which MirrorExpander.reachable answers true when a refs/heads or refs/pull/<n>/head ref of the repository names the head or the dev branch head, fetched into the mirror, descends from it, never fetching the head itself; a head no such ref reaches places no unit, so no worker leases one, its retirement is an action naming the repository and the head, and a pull request head also posts one completed lab-shadow/required check run with conclusion failure carrying that reason, while a hotfix, merge group, promotion or backfill head posts nothing; a head pushed to a grade ref is never asked, since the lab remote serves it.",
-      "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis with a recording reachable check, read through the leases, the recording Poster behind scripts.ci_lab.scheduler.Ports.checks and the grades; scripts.ci_lab.scheduler.MirrorExpander.reachable over a local repository with a live and a deleted and pruned merge queue branch and pull request head and merge refs; Scheduler.tick through a real MirrorExpander over that repository",
+      "behaviour": "A head no node mirror can hold is retired instead of graded: before Scheduler.tick expands a released head it asks the expander whether a ref every node mirror fetches reaches the head, which MirrorExpander.reachable answers true when a refs/heads or refs/pull/<n>/head ref of the repository names the head or the dev branch head, fetched into the mirror, descends from it, never fetching the head itself; a head no such ref reaches places no unit, so no worker leases one, its retirement is an action naming the repository and the head, and a pull request head also posts one completed lab-shadow/required check run with conclusion failure carrying that reason, tried once, its refusal by the App token, GitHub or the network recorded in the retirement action and never retried while the pass goes on, while a hotfix, merge group, promotion or backfill head posts nothing; a head pushed to a grade ref is never asked, since the lab remote serves it.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis with a recording reachable check, read through the leases, the recording Poster behind scripts.ci_lab.scheduler.Ports.checks, a poster that raises GitAuthRefused, PostRefused or a requests connection error on the retired head, and the grades; scripts.ci_lab.scheduler.MirrorExpander.reachable over a local repository with a live and a deleted and pruned merge queue branch and pull request head and merge refs; Scheduler.tick through a real MirrorExpander over that repository",
       "tests": [
         "tests/ci_lab/test_scheduler_uncarried.py::test_a_pull_request_head_no_mirror_ref_reaches_leases_no_unit_and_posts_one_failure",
         "tests/ci_lab/test_scheduler_uncarried.py::test_a_hotfix_head_no_mirror_ref_reaches_is_retired_without_a_post",
@@ -166,7 +187,26 @@
         "tests/ci_lab/test_scheduler_uncarried.py::test_a_grade_ref_head_grades_without_asking_whether_a_mirror_ref_reaches_it",
         "tests/ci_lab/test_scheduler_uncarried.py::test_the_mirror_expander_reaches_only_heads_a_branch_a_pull_request_head_or_dev_holds",
         "tests/ci_lab/test_scheduler_uncarried.py::test_a_remote_the_mirror_expander_cannot_list_raises_the_listing_error",
-        "tests/ci_lab/test_scheduler_uncarried.py::test_a_pull_request_head_gone_from_every_ref_and_the_remote_is_retired_through_the_mirror_expander"
+        "tests/ci_lab/test_scheduler_uncarried.py::test_a_pull_request_head_gone_from_every_ref_and_the_remote_is_retired_through_the_mirror_expander",
+        "tests/ci_lab/test_scheduler_uncarried.py::test_a_refused_failure_post_of_a_retired_pull_request_head_is_recorded_and_the_pass_goes_on"
+      ]
+    },
+    {
+      "id": "lab-scheduler-post-refusal",
+      "rules": ["lab-check-post-uncaught-refusal"],
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-check-post-auth-crash",
+      "behaviour": "A CI lab scheduler pass whose check run post is refused, by the GitHub App token, by GitHub or by the network, keeps running: it records the refusal as a pass action and keeps grading, and the first pass after a one minute hold posts the check run again. A refused App token or network failure holds the posts of every grade of that repository and of no other repository; a refusal GitHub answers holds only that grade's posts, kept in the grade state so a restarted scheduler keeps the hold, while the other grades keep posting. A grade whose units are all final stays live until every one of its check runs is posted, so a refused completed post closes the grade on the later pass that posts it, and a check run already posted completed is never posted twice. The failed required check of a head that cannot expand is tried once outside the holds, and its refusal is recorded and never retried, since the dropped head keeps no grade.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis and the local object store with a fake poster that raises GitAuthRefused, PostRefused or a requests connection error on chosen posts",
+      "tests": [
+        "tests/ci_lab/test_scheduler_posts.py::test_a_refused_check_run_post_is_recorded_and_the_pass_keeps_grading",
+        "tests/ci_lab/test_scheduler_posts.py::test_a_grade_whose_completed_post_is_refused_stays_live_until_a_later_pass_posts_it",
+        "tests/ci_lab/test_scheduler_posts.py::test_a_refused_required_post_keeps_the_posted_gate_and_closes_the_grade_on_the_next_post",
+        "tests/ci_lab/test_scheduler_posts.py::test_a_refused_post_holds_the_posts_of_every_grade_of_the_repository_until_the_hold_ends",
+        "tests/ci_lab/test_scheduler_posts.py::test_a_refused_post_holds_only_its_own_repository_and_another_repository_keeps_posting",
+        "tests/ci_lab/test_scheduler_posts.py::test_a_post_github_refuses_holds_only_its_grade_across_a_restart_while_other_grades_keep_posting",
+        "tests/ci_lab/test_scheduler_posts.py::test_the_check_poster_s_refused_app_token_is_held_by_the_pass_and_tried_again_after_the_hold",
+        "tests/ci_lab/test_scheduler_posts.py::test_a_refused_failed_check_of_a_head_that_cannot_expand_is_recorded_and_the_pass_goes_on"
       ]
     },
     {
@@ -563,6 +603,18 @@
       "seam": "ledger_server.serve, the hub projector import against server_handoff.announce",
       "tests": [
         "tests/swarm_ledger/test_server_compose.py::test_a_successor_that_cannot_import_the_hub_never_reports_ready"
+      ]
+    },
+    {
+      "id": "ledger-new-file-setup-waits-out-another-write-lock",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2567",
+      "behaviour": "A ledger store that turns a new file to WAL while another connection holds the file's write lock waits for that lock within the busy timeout instead of failing at once, so a reload successor that sets up a new ledger file beside another process still reports ready.",
+      "seam": "SQLiteLedgerRepository._set_up reached through summaries, the WAL switch against another connection's write lock",
+      "tests": [
+        "tests/swarm_ledger/test_sqlite.py::test_a_new_store_waits_out_another_connections_write_lock_before_it_turns_on_wal",
+        "tests/swarm_ledger/test_sqlite.py::test_a_write_lock_held_past_the_busy_timeout_still_fails_the_wal_switch",
+        "tests/swarm_ledger/test_sqlite.py::test_the_wal_switch_raises_an_error_other_than_a_held_lock_at_once"
       ]
     },
     {
@@ -1088,6 +1140,18 @@
         "tests/hive/test_reports.py::test_a_hub_admitted_worker_its_hive_reports_no_binding_for_gets_no_facts_from_this_host",
         "tests/hive/test_reports.py::test_a_hub_admitted_worker_without_an_app_server_keeps_the_controllers_session_read",
         "tests/hive/test_reports.py::test_an_app_server_worker_the_hub_admitted_to_this_hive_is_read_from_this_host"
+      ]
+    },
+    {
+      "id": "swarm-nudges-hub-admitted-workers-through-their-hive",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2569",
+      "behaviour": "A nudge for a worker the hub admitted to another hive, such as an outage resume prompt, goes to that hive as a nudge order and that hive types it into the worker's pane instead of the controller's own herdr; it is refused while that hive is not reporting, and a hive takes a nudge order only for an execution the controller sends there.",
+      "seam": "scripts.swarm.runtime.HerdrRuntime.nudge resolves the hive through scripts.hive.reports.admitted and sends the order through scripts.hive.orders.Orders.command; scripts.hive.orders.Consumer.command takes it when the host target names this hive, or the runtime target is empty and the record's hive does",
+      "tests": [
+        "tests/hive/test_reports.py::test_a_nudge_for_a_hub_admitted_worker_is_typed_into_its_pane_by_the_hive_that_runs_it",
+        "tests/hive/test_reports.py::test_a_nudge_for_a_hub_admitted_worker_whose_hive_is_lost_is_refused_without_the_controller_herdr",
+        "tests/hive/test_reports.py::test_a_hive_takes_a_nudge_order_exactly_when_the_controller_sends_it_there"
       ]
     },
     {
@@ -3335,6 +3399,8 @@
         "tests/swarm/test_learned_scope.py::test_returned_notes_stay_with_the_caller_and_shared_guidance",
         "tests/swarm/test_learned_scope.py::test_scoped_memory_preserves_live_notes_and_source_ordinals",
         "tests/swarm/test_learned_scope.py::test_scoped_memory_without_matching_notes_is_empty",
+        "tests/swarm/test_learned_scope.py::test_scoped_memory_reads_learned_lists_without_listing_agent_pointers",
+        "tests/swarm/test_learned_scope.py::test_scoped_memory_asks_redis_only_for_the_swarm_learned_keys",
         "tests/swarm/test_learned_scope.py::test_learned_help_explains_the_explicit_full_listing"
       ]
     },
@@ -8978,6 +9044,21 @@
       ]
     },
     {
+      "id": "review-round-metrics-from-ledger",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-review-metrics-from-ledger-stamps",
+      "behaviour": "Each review round stamp carries the wall clock time of the round ahead of its unique part, and the swarm metrics count one review round per timed stamp on every ledger task, dated by that stamp, so rounds spent on any hive reach the metrics once each; a stamp without a time adds no round.",
+      "seam": "scripts.swarm.metrics_swarm.read_review_rounds over the ledger document scripts.swarm.metrics_swarm.record_pass receives, with round stamps written by scripts.swarm.review_rounds.start and read by scripts.swarm.review_rounds.stamped_at",
+      "tests": [
+        "tests/swarm/test_metrics_swarm.py::test_review_rounds_ship_from_the_round_stamps_on_each_ledger_task",
+        "tests/swarm/test_metrics_swarm.py::test_record_pass_counts_the_rounds_two_hives_spent_on_one_ledger_task",
+        "tests/swarm/test_metrics_swarm.py::test_rounds_stamped_before_the_clock_prefix_add_no_metrics_round",
+        "tests/swarm/test_metrics_swarm.py::test_record_pass_ships_a_round_once_while_later_passes_read_its_stamp_again",
+        "tests/swarm/test_review_rounds.py::test_a_round_stamp_carries_the_wall_clock_in_milliseconds_ahead_of_its_unique_part",
+        "tests/swarm/test_review_rounds.py::test_a_stamp_carries_a_time_only_when_it_opens_with_digits_and_a_dash"
+      ]
+    },
+    {
       "id": "ledger-task-update-takes-confirmed-pull-request",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-swarm-pr-confirmed-fields",
@@ -9023,7 +9104,8 @@
       "seam": "The pattern download composite action and its fetch script, used by the shared mutation stats download steps of the Tests workflow",
       "tests": [
         "tests/test_ci_artifact_download_retry.py::test_every_shared_mutation_stats_download_runs_the_action_that_closes_each_blob_answer",
-        "tests/test_ci_pattern_download.py::test_a_kept_alive_error_answer_is_closed_before_the_retry_and_every_part_merges"
+        "tests/test_ci_pattern_download.py::test_a_kept_alive_error_answer_is_closed_before_the_retry_and_every_part_merges",
+        "tests/test_ci_pattern_download.py::test_a_client_that_resets_its_kept_alive_error_answer_has_closed_it"
       ]
     },
     {
@@ -9172,6 +9254,16 @@
         "tests/ci_lab/test_expand_tests.py::test_unlisted_hashes_each_test_module_that_holds_no_manifest_test_with_its_conftests_and_imports",
         "tests/ci_lab/test_expand_tests.py::test_unlisted_keys_every_test_module_the_mutant_runner_runs",
         "tests/ci_lab/test_expand_mutation.py::test_an_unlisted_test_module_enters_the_key_of_every_function"
+      ]
+    },
+    {
+      "id": "lab-mutation-verdict-key-prefix",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-verdict-key-prefix",
+      "behaviour": "Generated stats units and whole or split mutant units carry their kind and current lab schema before the existing digest, so the verdict store accepts completed mutation work without raising a key format error during a scheduler pass.",
+      "seam": "scripts.ci_lab.expand_mutation.stats_units and mutant_units through scripts.ci_lab.store.Store.put and get",
+      "tests": [
+        "tests/ci_lab/test_expand_mutation.py::test_generated_mutation_unit_keys_can_be_stored"
       ]
     },
     {
@@ -9442,6 +9534,18 @@
         "tests/ci_lab/test_audit.py::test_a_sampled_mismatch_disables_the_kind_and_files_the_task",
         "tests/ci_lab/test_audit.py::test_the_sample_is_deterministic_from_the_day_digest",
         "tests/ci_lab/test_audit.py::test_the_same_unit_hit_on_two_heads_ranks_by_its_head"
+      ]
+    },
+    {
+      "id": "lab-audit-refiles-refused-mismatches",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2628",
+      "behaviour": "The CI lab reuse audit records every differing kind's mismatches in the verdict store as unfiled before it files that kind's ci task and clears the record once the ledger takes the task, so a ledger that refuses the task leaves the units, their cached runs and the audit run recorded; the next promotion audit or sample adds the unfiled mismatches to its own, files the kind's task again with the same units although the disabled kind is no longer compared, and raises CILabVerdictMismatch naming them.",
+      "seam": "scripts.ci_lab.audit.promotion_audit and scripts.ci_lab.audit.unfiled over a fakeredis verdict store, a fake lab port and a ledger fake that refuses every write while down",
+      "tests": [
+        "tests/ci_lab/test_audit.py::test_a_refused_mismatch_task_leaves_its_units_recorded_as_unfiled",
+        "tests/ci_lab/test_audit.py::test_the_audit_after_a_refused_mismatch_task_files_it_with_the_same_units",
+        "tests/ci_lab/test_audit.py::test_a_kind_filed_before_a_refused_kind_stays_filed_and_only_the_refused_kind_is_filed_again"
       ]
     },
     {
@@ -10643,6 +10747,7 @@
         "tests/swarm/test_publish.py::test_publish_via_lab_grades_head_on_the_lab_before_origin_and_pushes_origin_on_green",
         "tests/swarm/test_publish.py::test_publish_via_lab_leaves_origin_untouched_on_a_red_grade",
         "tests/swarm/test_publish.py::test_publish_via_lab_direct_pushes_origin_after_the_lab_without_waiting",
+        "tests/swarm/test_publish.py::test_publish_via_lab_pushes_the_grade_ref_with_push_negotiation",
         "tests/swarm/test_publish.py::test_publish_via_lab_refuses_without_a_lab_remote_for_the_repository",
         "tests/swarm/test_publish.py::test_publish_via_lab_refuses_a_lab_push_without_a_landed_grade",
         "tests/swarm/test_publish.py::test_lab_conclusion_refuses_once_the_wait_runs_out",
@@ -10769,6 +10874,18 @@
       "seam": "Proofs workflow concurrency group",
       "tests": [
         "tests/test_ci_hosted_lanes.py::test_every_proof_dispatch_runs_in_its_own_focused_proof_group_and_never_waits_on_a_lane"
+      ]
+    },
+    {
+      "id": "mutation-stats-shared-closure",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-mutation-stats-collect-budget",
+      "behaviour": "A mutation stats collection walks the import closure of each distinct measured dependency list once and computes each distinct discovery digest once, so test ids with equal dependency lists cost one closure walk when their cache records are saved and one when the next run checks them for reuse instead of one walk per test id, while test ids with different dependency lists keep their own closures.",
+      "seam": "scripts.ci_mutation.stats_cache.StatsInputs.for_test and scripts.ci_mutation.stats_cache.StatsInputs.discovery",
+      "tests": [
+        "tests/test_ci_mutation_stats_cache.py::test_test_ids_sharing_one_dependency_list_walk_its_closure_once_per_collection",
+        "tests/test_ci_mutation_stats_cache.py::test_distinct_dependency_lists_in_one_collection_keep_their_own_closures",
+        "tests/test_ci_mutation_stats_cache.py::test_the_discovery_digest_of_one_input_set_is_computed_once"
       ]
     }
   ],

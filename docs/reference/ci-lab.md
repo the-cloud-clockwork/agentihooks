@@ -327,7 +327,9 @@ The scheduler service builds the snapshot on every request with
 A worker's lease poll records its free slots when the poll starts and what its grants leave when
 it returns (`Queue.offer`); each load forgets the offers older than the ready window with
 `Queue.prune`, one script that reads and deletes, so an offer a worker renews meanwhile stays.
-A queue job no live grade holds counts toward the busy slots only.
+A queue job no live grade holds counts toward the busy slots only. The load reads only the slots
+and lease start of each pending and leased job, with `Queue.slots`: HMGET in one pipeline that
+opens no transaction, so it builds no job record however long the queue grows.
 Until the lab records measured unit durations, every estimate is the fixed `UNIT_ESTIMATE_S`.
 
 ### Load snapshot
@@ -2404,7 +2406,19 @@ key; the builders are pure and read no file, clock or network.
    from the base, so a head never widens either list. Every other gate and `required` post as
    `lab-shadow/<gate>`, the runs the shadow comparison reads, and promotion and backfill grades
    list no gate. The grade state keeps the list, so a restarted scheduler names each check run as
-   it did before.
+   it did before. A refused post ends nothing: the pass records
+   `held <check> <status> on <head> for a later pass: <error>` and goes on grading, and the first
+   pass after a one minute hold (`POST_HOLD_MS`) posts the check run again. A refusal of the App
+   token (`GitAuthRefused`) or of the network (`OSError`) holds the grade posts of that repository;
+   a refusal GitHub answers (`PostRefused`) holds only that grade's posts, kept in the grade state
+   as `hold`, so the other grades keep posting and a restarted scheduler keeps the hold. A grade
+   whose units are all final closes only once every one of its check runs is posted. The failed
+   check of a head that cannot expand is outside these holds: it is tried once, since its dropped
+   head keeps no grade to retry from. The refusal text
+   `GitHub App cannot supply scoped contents write credentials` is the one message
+   `GitHubAppAuth.get_token` raises for any refused token, so for the check runs token, which asks
+   for checks write only, read the App installation's `permissions.checks` in the org
+   installations listing.
 
 Expansion frames a head by its class (`scripts.ci_lab.scheduler.frame`): a pull request or hotfix grade
 keeps the lab gates the pull request rules require and names every other required job as a gate without
@@ -2621,8 +2635,12 @@ the action `cannot expand <head>: <error>` and drops the head: the head has alre
 `agentihooks-ci:waiting` and is not put back, so it gets no grade. `Scheduler._refuse` then posts
 one completed `lab-shadow/required` check run with conclusion `failure` on the head, whose summary
 reads `cannot expand <head> against <base>: <error>`, so the head still shows a lab status. A head
-with no plan has no authoritative gates, so the check posts under the shadow name. A head pushed to
-a grade ref gets no check run, since GitHub does not hold that head. A manifest fetch that raises `FetchPending` or `FetchUnanswered` holds the head again instead, as
+with no plan has no authoritative gates, so the check posts under the shadow name. A post of that
+check that the App token, GitHub or the network refuses is recorded as
+`cannot post the failed required check on <head>: <error>` and not retried, since the dropped head
+keeps no grade, and the pass goes on. A head pushed to a grade ref gets no check run, since
+GitHub does not hold that head. A manifest fetch that raises `FetchPending` or
+`FetchUnanswered` holds the head again instead, as
 `holding <head>: <error>`; [Test units](#test-units) describes both. The scheduler service prints
 each action on its own line:
 
@@ -2648,7 +2666,10 @@ never fetches the head itself, since GitHub may no longer serve it. A head that 
 retired with the action `retiring <head>: no branch or pull request head ref of <repo> carries
 <head>`: it gets no grade and no unit, so no worker leases one. A pull request head also gets one
 completed `lab-shadow/required` check run with conclusion `failure` and that summary; a hotfix,
-merge group, promotion or backfill head gets none. A head pushed to a grade ref skips the check,
+merge group, promotion or backfill head gets none. That post is tried once, like the cannot expand
+post: a refusal by the App token, GitHub or the network ends the same action with
+`; cannot post the failed required check on <head>: <error>`, is not retried, and the pass goes
+on. A head pushed to a grade ref skips the check,
 since the lab remote serves it. A failed `git ls-remote` raises like any other failed git command,
 so the head takes the [cannot expand](#a-head-that-cannot-expand) path.
 
@@ -3157,9 +3178,10 @@ or a report that breaks the rule.
 |---|---|---|
 | `agentihooks-ci:verdict:<kind>:<key>` | string | The verdict as JSON with sorted keys, no expiry |
 | `agentihooks-ci:disabled` | set | The kinds `get` never returns a verdict for |
+| `agentihooks-ci:unfiled` | hash | Per kind, the JSON list of the reuse audit's mismatches whose ledger task is not filed yet; see [What a mismatch does](#what-a-mismatch-does) |
 
-The constants are `PREFIX` (`agentihooks-ci:`), `INDEX` (`agentihooks-ci:verdict:`) and
-`DISABLED`. Other lab keys share the prefix, such as the daily CI budget at
+The constants are `PREFIX` (`agentihooks-ci:`), `INDEX` (`agentihooks-ci:verdict:`),
+`DISABLED` and `UNFILED`. Other lab keys share the prefix, such as the daily CI budget at
 `agentihooks-ci:budget:<YYYY-MM-DD>`, so a pattern that targets verdicts is
 `agentihooks-ci:verdict:*`, never `agentihooks-ci:*`. An index value reads:
 
@@ -3566,7 +3588,7 @@ caller supplies its own ports.
 
 | Field | Type | What the audit does with it |
 |---|---|---|
-| `store` | `store.Store` | Reads each cached verdict with `get` and stops reuse with `disable` |
+| `store` | `store.Store` | Reads each cached verdict with `get`, stops reuse with `disable` and keeps each kind's mismatches with `keep_unfiled` until `filed` |
 | `lab` | `audit.Lab` | Lists the units to compare and grades them |
 | `tasks` | `audit.Tasks` | Files one task per differing kind with `add_task(slug, fields, by)`; `scripts.swarm.ledger_client.LedgerClient` has that method |
 | `slug` | `str` | The ledger the tasks go to |
@@ -3643,12 +3665,15 @@ comparison, so each later audit spends a grade on a disabled kind for nothing.
 
 ### What a mismatch does
 
-When any unit differs, the audit:
+The audit first reads the mismatches an earlier audit could not file with `audit.unfiled(store)`
+and puts them ahead of the ones it finds itself. When any mismatch remains, the audit:
 
-1. Disables every differing kind with `Store.disable`, all of them before it files any task. The
-   whole kind stops hitting, its agreeing units included; other kinds keep hitting.
-2. Files one task per kind, in sorted kind order, with `tasks.add_task(slug, fields, "swarm")`.
-   `"swarm"` is `audit.SENDER`.
+1. Disables every differing kind with `Store.disable` and records its mismatches with
+   `Store.keep_unfiled`, all of them before it files any task. The whole kind stops hitting, its
+   agreeing units included; other kinds keep hitting.
+2. Files one task per kind, in sorted kind order, with `tasks.add_task(slug, fields, "swarm")`,
+   and drops the kind's record with `Store.filed` once the ledger takes the task. `"swarm"` is
+   `audit.SENDER`.
 3. Raises `CILabVerdictMismatch`.
 
 Each task carries these fields:
@@ -3678,9 +3703,13 @@ regraded verdicts differ from the cached ones for static, test
 ```
 
 When the ledger refuses a task, the exception `add_task` raised propagates and
-`CILabVerdictMismatch` is not raised. Every differing kind is already disabled, so none is reused,
-but the refused kind and every later kind in sorted order have no task. The audit keeps no copy of
-its mismatches, so on this path the differing units and their runs are lost with the exception.
+`CILabVerdictMismatch` is not raised. Every differing kind is already disabled, so none is reused.
+The refused kind and every later kind in sorted order have no task, and their mismatches stay in
+`agentihooks-ci:unfiled` with each cached verdict, regraded verdict, cached run and audit run. The
+next `promotion_audit` or `sample` files those tasks again with the same units, under its own audit
+run's task id, although it no longer compares the disabled kind, and raises `CILabVerdictMismatch`
+naming them. `audit.unfiled(store)` returns the recorded mismatches as `audit.Mismatch` values,
+ordered by kind.
 
 ### Enable reuse again
 
@@ -3694,6 +3723,10 @@ verdicts.enable("test")
 
 It removes the kind from `agentihooks-ci:disabled`. A Redis flush empties that set too, which
 enables every kind again; see [Disable and enable a kind](#disable-and-enable-a-kind).
+
+`enable` leaves the kind's entry in `agentihooks-ci:unfiled`. A kind enabled before its task is
+filed is disabled again by the next audit, which files the recorded units; a recorded unit that
+differs again in that audit is listed twice in the task.
 
 ### Use it
 

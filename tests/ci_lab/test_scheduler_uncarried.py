@@ -14,6 +14,7 @@ from scripts.dep_manifest import _git
 from tests.ci_lab.test_scheduler import (
     ACTOR,
     HEAD_A,
+    HEAD_B,
     REPO,
     SLUG,
     FakeKube,
@@ -30,6 +31,7 @@ from tests.ci_lab.test_scheduler import (
 )
 from tests.ci_lab.test_scheduler import lab as _lab
 from tests.ci_lab.test_scheduler import origin as _origin
+from tests.ci_lab.test_scheduler_posts import REFUSALS, refusing
 
 lab = _lab
 origin = _origin
@@ -91,6 +93,23 @@ def test_a_pull_request_head_no_mirror_ref_reaches_leases_no_unit_and_posts_one_
     assert run.lab.expander.seen == []
     assert run.lab.client.hgetall(scheduler.WAITING) == {}
     assert run.grades() == []
+
+
+@pytest.mark.feature("lab-scheduler-uncarried-head")
+@pytest.mark.parametrize("refusal", REFUSALS)
+def test_a_refused_failure_post_of_a_retired_pull_request_head_is_recorded_and_the_pass_goes_on(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch, refusal: Exception
+) -> None:
+    run = lab({HEAD_A: pull_plan({"lint": (unit(1),)}), HEAD_B: plan({"lint": (unit(2),)})})
+    reaching(run, monkeypatch, HEAD_A)
+    poster = refusing(run, refusal, heads=frozenset({HEAD_A}))
+    run.push(HEAD_A, lane="first", event="pull_request", action="synchronize")
+    run.push(HEAD_B, lane="second")
+    actions = run.tick(1000)
+    retiring = f"retiring {HEAD_A}: {REASON}"
+    assert f"{retiring}; cannot post the failed {scheduler.REQUIRED} check on {HEAD_A}: {refusal}" in actions
+    assert poster.moves(HEAD_A, scheduler.REQUIRED) == []
+    assert poster.moves(HEAD_B, "lint") == [("queued", None)]
 
 
 @pytest.mark.feature("lab-scheduler-uncarried-head")
