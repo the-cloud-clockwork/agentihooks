@@ -2688,6 +2688,15 @@ prints `ci-lab worker: unit <job> crashed: <error>` and its traceback to its sta
 lease expires, so the unit follows the expired lease rule of step 6 of the
 [Scheduler loop](#scheduler-loop).
 
+#### What a failed static unit's check run shows
+
+A gate's check run text shows, ahead of its unit keys, the last 4096 characters of each failed
+static unit's stored log, `lab/static/<digest>/log.txt`, with secret patterns redacted, in a fence
+under the unit key, so a reader of the check run alone sees which diagnostic failed the gate. The
+blocks together stay within half of GitHub's 65535 character text limit; past it the blocks that
+fit end with a note that the later ones are left out. A passing unit, a failed unit with no stored
+or an empty log, and the required check show only unit keys.
+
 #### Limitations
 
 - Only workflows directly in the grader's `.github/workflows` resolve. A static job that calls a
