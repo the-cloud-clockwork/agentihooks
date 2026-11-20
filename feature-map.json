@@ -10717,6 +10717,27 @@
       ]
     },
     {
+      "id": "planner-wheel-imports",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2664",
+      "behaviour": "The mutation planner checks each selected test module's collection and worker group contracts with the collection import helpers in scripts.collection_imports, resolved against the checkout root it is given, so planning runs and refuses an offending test module where the tests package cannot be imported.",
+      "seam": "scripts.ci_mutation.plan.validate_tests over a scratch checkout root, in a fresh interpreter whose import system cannot find the tests package",
+      "tests": [
+        "tests/ci_lab/test_wheel_imports.py::test_the_mutation_planner_checks_test_collection_without_the_tests_package"
+      ]
+    },
+    {
+      "id": "scripts-import-shipped-packages",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2664",
+      "behaviour": "No module under scripts imports the tests package, at module level or inside a function, class or try body, because the wheel and the swarm image ship only hooks, scripts and profiles.",
+      "seam": "a syntax tree scan of every Python file under scripts for import and from import statements naming the tests package",
+      "tests": [
+        "tests/test_scripts_shipped_imports.py::test_no_scripts_module_imports_the_tests_package",
+        "tests/test_scripts_shipped_imports.py::test_the_scan_finds_a_tests_import_in_every_place_and_form"
+      ]
+    },
+    {
       "id": "preparse-plugins-import-no-graded-module",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/promo-44318348402-0",

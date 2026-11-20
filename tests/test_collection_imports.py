@@ -1,110 +1,54 @@
-import re
-import sys
-from functools import cache
+import time
 from pathlib import Path
 
 import pytest
 
+from scripts import collection_imports
+from scripts.collection_imports import (
+    SDK_GROUP,
+    _function_imports,
+    _import_names,
+    calls_heavy,
+    loads_heavy,
+    loads_sdk_when_run,
+)
 from tests.shards import discover_test_files
 
 pytestmark = pytest.mark.unit
 
 _ROOT = Path(__file__).parent.parent
-HEAVY = "mcp"
-_COMMENTS_STRINGS_CONTINUATIONS = re.compile(
-    r"#[^\n]*|(\"\"\"|''')(?:\\.|[\s\S])*?\1|\"(?:\\.|[^\"\\\n])*\"|'(?:\\.|[^'\\\n])*'|\\\n"
-)
-_IMPORT_BODY = (
-    r"(?:import\s+(?P<modules>[^\n;]+)|from\s+(?P<module>\w[\w.]*)\s+import\s*(?P<members>\([^)]*\)|[^\n;]+))"
-)
-_IMPORT = re.compile(r"(?:^|;[ \t]*)" + _IMPORT_BODY, re.MULTILINE)
-_ANY_IMPORT = re.compile(r"(?:^[ \t]*|;[ \t]*)" + _IMPORT_BODY, re.MULTILINE)
-_FUNCTION = re.compile(r"([ \t]*)(?:async[ \t]+)?def[ \t]+(\w+)\b")
-SDK_GROUP = 'xdist_group("mcp-sdk")'
 
 
-@cache
-def _module_file(name: str) -> Path | None:
-    base = _ROOT.joinpath(*name.split("."))
-    for path in (base.with_suffix(".py"), base / "__init__.py"):
-        if path.is_file():
-            return path
-    return None
+def test_the_check_follows_a_package_init_to_a_heavy_module(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(collection_imports, "HEAVY", "importlib")
+    assert loads_heavy(_ROOT, "hooks.mcp._session", set())
+    assert not loads_heavy(_ROOT, "hooks.common", set())
 
 
-def _import_names(source: str, pattern: re.Pattern = _IMPORT) -> set[str]:
-    names = set()
-    for match in pattern.finditer(_COMMENTS_STRINGS_CONTINUATIONS.sub(" ", source)):
-        if match["modules"]:
-            names |= {alias.split()[0] for alias in match["modules"].split(",")}
-        else:
-            module = match["module"]
-            names.add(module)
-            members = match["members"].strip("() \t").replace("\n", " ").split(",")
-            names |= {f"{module}.{alias.split()[0]}" for alias in members if alias.strip()}
-    return names
+def test_the_mcp_tables_load_without_the_sdk() -> None:
+    assert not loads_heavy(_ROOT, "hooks.mcp._session", set())
+    assert not loads_heavy(_ROOT, "hooks.mcp._registry", set())
 
 
-@cache
-def _module_level_imports(path: Path) -> frozenset[str]:
-    names = _import_names(path.read_text())
-    return frozenset(".".join(parts[:i]) for parts in (n.split(".") for n in names) for i in range(1, len(parts) + 1))
+def test_the_check_follows_a_dotted_import_to_its_submodule(tmp_path: Path) -> None:
+    (tmp_path / "plain").mkdir()
+    (tmp_path / "plain/__init__.py").write_text("")
+    (tmp_path / "plain/heavy.py").write_text("import mcp\n")
+    (tmp_path / "direct.py").write_text("import plain.heavy\n")
+    assert loads_heavy(tmp_path, "direct", set())
 
 
-def loads_heavy(name: str, seen: set[str]) -> bool:
-    if name in seen:
-        return False
-    seen.add(name)
-    if name.split(".")[0] == HEAVY:
-        return True
-    path = _module_file(name)
-    parents = {name.rsplit(".", i)[0] for i in range(1, name.count(".") + 1)}
-    return path is not None and any(loads_heavy(dep, seen) for dep in parents | _module_level_imports(path))
+def test_the_check_loads_the_package_of_a_missing_submodule(tmp_path: Path) -> None:
+    (tmp_path / "eager").mkdir()
+    (tmp_path / "eager/__init__.py").write_text("import mcp\n")
+    (tmp_path / "missing.py").write_text("from eager.absent import thing\n")
+    assert loads_heavy(tmp_path, "missing", set())
 
 
-@cache
-def _function_sources(path: Path) -> dict[str, str]:
-    lines = path.read_text().splitlines(keepends=True)
-    bodies = {}
-    for i, line in enumerate(lines):
-        if (match := _FUNCTION.match(line)) and match[2] not in bodies:
-            body = []
-            for rest in lines[i + 1 :]:
-                stripped = rest.lstrip()
-                if stripped and len(rest) - len(stripped) <= len(match[1]) and not stripped.startswith(")"):
-                    break
-                body.append(rest)
-            bodies[match[2]] = "".join(body)
-    return bodies
-
-
-@cache
-def _function_imports(path: Path, function: str) -> frozenset[str]:
-    return frozenset(_import_names(_function_sources(path).get(function, ""), _ANY_IMPORT))
-
-
-def calls_heavy(name: str, seen: set[str]) -> bool:
-    module, _, function = name.rpartition(".")
-    path = _module_file(module) if module else None
-    if path is None or _module_file(name) is not None:
-        return False
-    return any(loads_heavy(dep, seen) for dep in _function_imports(path, function))
-
-
-def loads_sdk_when_run(source: str, seen: set[str] | None = None) -> bool:
-    seen = set() if seen is None else seen
-    return any(loads_heavy(name, seen) or calls_heavy(name, seen) for name in _import_names(source, _ANY_IMPORT))
-
-
-def test_the_check_follows_a_package_init_to_a_heavy_module(monkeypatch):
-    monkeypatch.setattr(sys.modules[__name__], "HEAVY", "importlib")
-    assert loads_heavy("hooks.mcp._session", set())
-    assert not loads_heavy("hooks.common", set())
-
-
-def test_the_mcp_tables_load_without_the_sdk():
-    assert not loads_heavy("hooks.mcp._session", set())
-    assert not loads_heavy("hooks.mcp._registry", set())
+def test_an_import_never_reads_the_package_at_the_root(tmp_path: Path) -> None:
+    (tmp_path / "__init__.py").write_text("import mcp\n")
+    (tmp_path / "light.py").write_text("import os\n")
+    assert not loads_heavy(tmp_path, "light", set())
 
 
 def test_the_import_scan_reads_only_module_level_absolute_imports():
@@ -164,16 +108,47 @@ from m3 import (
     }
 
 
-def test_no_test_module_loads_the_mcp_sdk_while_collecting():
-    offenders = [f for f in discover_test_files(_ROOT) if loads_heavy(f.removesuffix(".py").replace("/", "."), set())]
+def test_the_import_scan_keeps_every_letter_of_a_member_name() -> None:
+    assert _import_names("from m import X\n") == {"m", "m.X"}
+
+
+def test_the_import_scan_keeps_an_escaped_triple_quote_inside_its_string() -> None:
+    assert _import_names('x = """a\n\\"""\nimport mcp\n"""\nimport os\n') == {"os"}
+
+
+@pytest.mark.wall_clock
+def test_the_import_scan_reads_an_unterminated_string_of_escapes_in_linear_time() -> None:
+    started = time.perf_counter()
+    _import_names('"""' + "\\x" * 26)
+    assert time.perf_counter() - started < 0.5
+
+
+def test_no_test_module_loads_the_mcp_sdk_while_collecting() -> None:
+    clean: set[str] = set()
+    offenders: list[str] = []
+    for f in discover_test_files(_ROOT):
+        walked = set(clean)
+        if loads_heavy(_ROOT, f.removesuffix(".py").replace("/", "."), walked):
+            offenders.append(f)
+        else:
+            clean = walked
     assert offenders == []
 
 
-def test_the_run_check_reads_imports_inside_functions():
-    assert loads_sdk_when_run("def f():\n    from mcp.types import Tool\n")
-    assert loads_sdk_when_run("def f():\n    from hooks.mcp import build_server\n")
-    assert not loads_sdk_when_run("def f():\n    from hooks.mcp._session import resolve_session_id\n")
-    assert not loads_sdk_when_run("def f():\n    from hooks.mcp import resolve_transport\n")
+def test_the_run_check_reads_imports_inside_functions() -> None:
+    assert loads_sdk_when_run(_ROOT, "def f():\n    from mcp.types import Tool\n")
+    assert loads_sdk_when_run(_ROOT, "def f():\n    from hooks.mcp import build_server\n")
+    assert not loads_sdk_when_run(_ROOT, "def f():\n    from hooks.mcp._session import resolve_session_id\n")
+    assert not loads_sdk_when_run(_ROOT, "def f():\n    from hooks.mcp import resolve_transport\n")
+
+
+def test_a_bare_name_calls_no_function_of_the_root_package(tmp_path: Path) -> None:
+    (tmp_path / "__init__.py").write_text("def run():\n    import mcp\n")
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg/__init__.py").write_text("def run():\n    import mcp\n")
+    assert calls_heavy(tmp_path, "pkg.run", set())
+    assert not calls_heavy(tmp_path, "run", set())
+    assert not loads_sdk_when_run(tmp_path, "import run\n")
 
 
 def test_function_imports_read_each_module_once(tmp_path, monkeypatch):
@@ -193,7 +168,20 @@ def test_function_imports_read_each_module_once(tmp_path, monkeypatch):
     assert reads == [path]
 
 
-def test_test_modules_that_load_the_mcp_sdk_when_run_share_one_worker():
-    sources = {f: (_ROOT / f).read_text() for f in discover_test_files(_ROOT)}
-    offenders = [f for f, source in sources.items() if loads_sdk_when_run(source) and SDK_GROUP not in source]
+def test_function_imports_read_past_a_signature_split_over_lines(tmp_path: Path) -> None:
+    path = tmp_path / "functions.py"
+    path.write_text("def run(\n    value: int,\n) -> None:\n    import mcp\n")
+    assert _function_imports(path, "run") == {"mcp"}
+
+
+def test_test_modules_that_load_the_mcp_sdk_when_run_share_one_worker() -> None:
+    clean: set[str] = set()
+    offenders: list[str] = []
+    for f in discover_test_files(_ROOT):
+        source = (_ROOT / f).read_text()
+        walked = set(clean)
+        if not loads_sdk_when_run(_ROOT, source, walked):
+            clean = walked
+        elif SDK_GROUP not in source:
+            offenders.append(f)
     assert offenders == []
