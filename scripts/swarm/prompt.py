@@ -177,7 +177,7 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
         f"(the ledger page link {me} url prints) with the playwright-cmd tools, tell the operator what you "
         "saw, then close the shared browser with browser_close.",
         f'- Record a lesson the next master should know with {me} learned "<lesson because reason>".',
-        f"- Raise a learned note that has held up: {me} learned lists every seat's notes with their numbers, and "
+        f"- Raise a learned note that has held up: {me} learned --all lists every seat's notes with their numbers, and "
         f'{me} promote <seat> <number> insight|canon --reason "<why>" raises one. Only you and the operator make '
         "a note canon.",
         f"- Keep the swarm culture current: {me} culture show prints it, {me} culture set <file> replaces it. Every "

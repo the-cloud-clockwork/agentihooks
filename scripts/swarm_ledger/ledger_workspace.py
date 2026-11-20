@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from scripts.swarm_ledger import plan_read, ports
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
 
     from redis import Redis
 
@@ -205,7 +205,7 @@ def mirror(store, slug, ledger):
                 (path / name).write_text(text, encoding="utf-8")
 
 
-def _synced(store, slug, ledger, key):
+def _synced(store: Any, slug: str, ledger: dict[str, Any], key: "Callable[[str], str]") -> dict[str, Any]:
     """Each work folder task's copy from the hive that runs, or last ran, its execution; None for one run here."""
     ran = latest(store.agents(slug))
     copies = {}
@@ -213,7 +213,11 @@ def _synced(store, slug, ledger, key):
     for task in ledger.get("tasks", []):
         if not task.get("workspace"):
             continue
-        host = ports.hive().reports.host(ran[task["id"]]) if task["id"] in ran else ""
+        host = (
+            ports.hive().reports.host(ran[task["id"]]) or ports.hive().reports.admitted(ran[task["id"]])
+            if task["id"] in ran
+            else ""
+        )
         if not host:
             found[task["id"]] = None
             continue

@@ -2486,8 +2486,9 @@ def test_assist_still_reports_idle_when_checks_are_failed_or_unknown(
 
 
 @pytest.fixture
-def home(monkeypatch, tmp_path):
+def home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(model_catalog, "catalog", lambda *_: {"claude": [{"model": "opus"}, {"model": "sonnet"}]})
     return tmp_path / "home"
 
 
@@ -2529,7 +2530,6 @@ def test_save_then_create_round_trips(
     env: tuple[RedisStore, Any, FakeRuntime], home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     store, _, _ = env
-    monkeypatch.setattr(model_catalog, "catalog", Mock(return_value={"claude": [{"model": "sonnet"}], "codex": []}))
     run("sw", "create", "--repo", "/repo", "--template", "codex-ci", "--max-eng-agents", "3")
     run("sw", "set", "eng-model=sonnet", "eng-role=a reviewer", "compact-limit=300")
     assert run("sw", "save-template", "mine") == 0
@@ -2581,7 +2581,7 @@ def test_status_shows_each_agent_conversation_id_or_a_dash(env, capsys):
     env[2].live.update({"engineer@a1b2c3-0001", "engineer@a1b2c3-0002"})
     run("sw", "status")
     lines = {line.split("\t")[0]: line.split("\t") for line in capsys.readouterr().out.splitlines() if "\t" in line}
-    assert lines["engineer@a1b2c3-0001"][-6] == "5c90d80c" and lines["engineer@a1b2c3-0002"][-6] == "-"
+    assert lines["engineer@a1b2c3-0001"][-7] == "5c90d80c" and lines["engineer@a1b2c3-0002"][-7] == "-"
     run("sw", "status", "--json")
     agents = {a["name"]: a for a in json.loads(capsys.readouterr().out.splitlines()[-1])["agents"]}
     assert (agents["engineer@a1b2c3-0001"]["conversation_id"], agents["engineer@a1b2c3-0002"]["conversation_id"]) == (

@@ -6,7 +6,7 @@ Each tick also records the urgent tasks under claim with their claimant, which t
 import json
 from typing import Any
 
-from scripts.swarm import claim_hold, freeze, release_wait, timing
+from scripts.swarm import claim_hold, freeze, release_wait, tick_activity
 from scripts.swarm.health.findings import MINUTE_MS, Finding
 from scripts.swarm.store import RedisStore
 from scripts.swarm_ledger.repository import hierarchy
@@ -49,7 +49,7 @@ def observe(store: RedisStore, slug: str, doc: dict[str, Any], at: int) -> dict[
     state: dict[str, Any] = {"at": at, "tasks": held}
     if claimed := _claimed(rows):
         state[CLAIMED] = claimed
-    timing.keep()
+    tick_activity.renew_now()
     store.redis.set(store.key(slug, KEY), json.dumps(state))
     return held
 

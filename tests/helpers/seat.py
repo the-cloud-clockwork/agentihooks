@@ -73,7 +73,7 @@ def seat_agent(
     row = ledger.task(slug, task_id)
     request = {"hive": hive, "task": task_id, "lane": row["lane"], "generation": readiness.generation(row)}
     decision = {**LAUNCH, "profile": PROFILES.get(row["lane"], "engineer"), **(launch or {})}
-    source = SimpleNamespace(snapshot=lambda name: view(store, ledger, name))
+    source = SimpleNamespace(slugs=lambda: [slug], snapshot=lambda name: view(store, ledger, name))
     admitter = admission.Admission(store, ledger, source, clock)  # pyright: ignore[reportArgumentType]
     admitted = admitter.admit(slug, request)
     if not admitted or "name" not in admitted:

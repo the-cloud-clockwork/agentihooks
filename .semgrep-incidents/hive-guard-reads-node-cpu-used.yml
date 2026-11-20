@@ -1,0 +1,17 @@
+rules:
+  - id: hive-guard-reads-node-cpu-used
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The hive admission load average guard compares the node's CPU used with the swarm share, so a hive in a pod on a
+      node shared with other pods is refused for their load even with no agents of its own. Compare the hive's own CPU:
+      its pod load when the reading carries one, and the node's CPU used only when it does not.
+    paths:
+      include:
+        - /scripts/hive/
+        - hive-guard-reads-node-cpu-used.py
+    pattern-either:
+      - pattern: $SCALE * used >= SWARM_PERCENT * $CPUS
+      - pattern: $SCALE * used_cpus >= SWARM_PERCENT * $CPUS
+      - pattern: $SCALE * $READING["used_cpus"] >= SWARM_PERCENT * $CPUS
+      - pattern: $SCALE * $READING.get("used_cpus", ...) >= SWARM_PERCENT * $CPUS
