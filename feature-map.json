@@ -11042,6 +11042,19 @@
       ]
     },
     {
+      "id": "tick-view-side-by-side-batches",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2621",
+      "behaviour": "A pull request views read of two or more batches of twenty has every batch document in flight at the same time, each read in the caller's context, then resolves the workflow gates batch by batch in batch order through the shared cache, so it makes the same GitHub calls as reading the batches one after another and a tick view of two batches waits for its slowest batch instead of their sum.",
+      "seam": "views in scripts.swarm.ledger_events over a source control port, with and without the swarm Redis as its cache",
+      "tests": [
+        "tests/swarm/test_pull_views.py::test_a_views_call_reads_its_batch_documents_at_the_same_time",
+        "tests/swarm/test_pull_views.py::test_batches_make_the_sequential_github_calls_for_their_workflow_trees",
+        "tests/swarm/test_pull_views.py::test_a_failed_batch_read_leaves_the_other_batch_read_once",
+        "tests/swarm/test_pull_views.py::test_each_views_batch_reads_in_the_callers_context"
+      ]
+    },
+    {
       "id": "lab-wheel-imports",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2646",
