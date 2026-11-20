@@ -11004,6 +11004,27 @@
       ]
     },
     {
+      "id": "swarm-harness-pin-guard",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-harness-pin-guard",
+      "behaviour": "Each capacity pass stores every lane pinned to one harness with the time it first saw the pin, the other harness's free quota seats and the ready lane tasks it placed nowhere while the lane sat below its ceiling; swarm status raises a harness pin health finding for a pinned lane whose other harness has free seats while ready tasks wait, naming the lane, the pin and its age, the free seats and the waiting tasks, and its quota lines show every pin.",
+      "seam": "scripts.swarm.capacity.pins in the capacity pass, scripts.swarm.health.harness_pin.findings in swarm status and scripts.swarm.quota_view.lines",
+      "rules": [
+        "status-without-harness-pin"
+      ],
+      "tests": [
+        "tests/swarm/test_harness_pin.py::test_a_claude_pin_with_free_codex_seats_and_waiting_tasks_raises_the_finding",
+        "tests/swarm/test_harness_pin.py::test_a_codex_pin_with_free_claude_seats_raises_the_reverse_finding",
+        "tests/swarm/test_harness_pin.py::test_no_finding_without_a_pin_free_other_seats_or_waiting_work",
+        "tests/swarm/test_harness_pin.py::test_waiting_tasks_list_only_below_the_lane_ceiling",
+        "tests/swarm/test_harness_pin.py::test_an_unpinned_lane_before_a_pinned_lane_with_no_ready_entry_still_stores_the_pin",
+        "tests/swarm/test_harness_pin.py::test_the_pin_age_holds_while_the_pin_stands_and_restarts_when_it_changes",
+        "tests/swarm/test_harness_pin.py::test_the_status_quota_lines_name_each_pinned_lane",
+        "tests/swarm/test_harness_pin.py::test_findings_and_quota_lines_list_pinned_lanes_in_lane_name_order",
+        "tests/swarm/test_harness_pin.py::test_swarm_status_lists_the_harness_pin_finding"
+      ]
+    },
+    {
       "id": "mutation-stats-shared-closure",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-mutation-stats-collect-budget",
