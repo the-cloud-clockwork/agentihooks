@@ -961,6 +961,7 @@ SCRIPTS_THAT_PRINT_THE_VALUE = [
     ("kubectl exec pod-0 -- sh -c 'echo test -n \"$GITHUB_TOKEN\"'", "GITHUB_TOKEN"),
     ("kubectl exec pod-0 -- sh -c 'printf %s test -n \"$GITHUB_TOKEN\"'", "GITHUB_TOKEN"),
     ("kubectl exec pod-0 -- sh -c 'echo [ -n \"$GITHUB_TOKEN\" ]'", "GITHUB_TOKEN"),
+    ("kubectl exec pod-0 -- sh -c 'cd /app; echo x test -n \"$GITHUB_TOKEN\"'", "GITHUB_TOKEN"),
     ("kubectl exec pod-0 -- sh -c 'echo 'x' test -n \"$GITHUB_TOKEN\"'", "GITHUB_TOKEN"),
     ('echo test -n "$GITHUB_TOKEN"', "GITHUB_TOKEN"),
     ('echo "x;test -n "$GITHUB_TOKEN"\'"', "GITHUB_TOKEN"),

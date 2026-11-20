@@ -1086,7 +1086,7 @@
  "tests/test_credential_guard.py::test_a_shell_script_that_prints_the_value_is_refused": {
   "assertions": 1,
   "calls": 3,
-  "cases": 16,
+  "cases": 17,
   "texts": [
    "f47e01a44b139db3"
   ]
