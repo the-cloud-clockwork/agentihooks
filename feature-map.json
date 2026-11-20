@@ -5595,6 +5595,24 @@
       ]
     },
     {
+      "id": "credential-guard-wrapper-option-values",
+      "origin": "regression",
+      "ordered_at": "2026-11-19",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-credential-guard-wrapper-options",
+      "behaviour": "The credential guard skips sudo and env option values before judging the wrapped command, so credential file reads directly or in shell scripts remain refused through nested wrappers.",
+      "seam": "hooks.context.credential_guard.decide on Bash payloads through verb_index",
+      "tests": [
+        "tests/test_credential_guard_wrapper_options.py::test_a_credential_read_after_wrapper_option_values_is_refused",
+        "tests/test_credential_guard_wrapper_options.py::test_wrapper_value_flags_preserve_the_credential_verdict",
+        "tests/test_credential_guard_wrapper_options.py::test_wrapper_option_values_do_not_become_commands_or_operands",
+        "tests/test_credential_guard_wrapper_options.py::test_wrapper_options_do_not_turn_safe_scripts_into_credential_reads",
+        "tests/test_credential_guard_wrapper_options.py::test_wrapper_parser_preserves_command_boundaries"
+      ],
+      "rules": [
+        "credential-guard-wrapper-option-values"
+      ]
+    },
+    {
       "id": "ledger-hives-panel",
       "origin": "inventory",
       "behaviour": "The hives panel shows each hive's requested columns and writes max agents, exclusion and flags as the operator, naming the reason for a refused write.",
