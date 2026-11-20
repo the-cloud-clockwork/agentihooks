@@ -735,6 +735,17 @@
       ]
     },
     {
+      "id": "hive-join-heartbeat-ends-departed-member-reports",
+      "rules": ["hive-restart-check-ignores-departed-members"],
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-roll-ghost-agents",
+      "behaviour": "After a pod replacement expires its old hive member, the replacement heartbeat ends the departed members running join reports without refreshing them; current and concurrent live members and reports with unknown ownership keep their heartbeats.",
+      "seam": "registry.join and join_report.heartbeat through join_report.listing and join_report.live",
+      "tests": [
+        "tests/hive/test_join_report_restart.py::test_a_replacement_member_ends_reports_of_the_departed_pod_after_its_live_window"
+      ]
+    },
+    {
       "id": "swarm-resume-keeps-execution-identity",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-resume-started-at-sites",
