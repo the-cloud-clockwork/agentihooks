@@ -118,6 +118,7 @@ def test_a_ledger_write_restarts_the_count(hook):
         f"AH=agentihooks; $AH api --slug {SLUG} --as {ME} comment phases/p1 done",
         f'L="agentihooks api --slug {SLUG} --as {ME}"; $L comment phases/p1 done',
         f'AH=agentihooks && "${{AH}}" ledger --slug {SLUG} --as {ME} comment phases/p1 done',
+        f'AH=agentihooks; "$AH" api --slug {SLUG} --as {ME} comment phases/p1 done',
     ],
 )
 def test_a_ledger_write_through_a_shell_variable_restarts_the_count(hook, command):
