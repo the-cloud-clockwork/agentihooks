@@ -494,6 +494,61 @@ def test_fetching_the_dev_count_record_never_fails_and_writes_only_a_dev_record(
         assert json.loads(record.read_text())["nodeids"] == ["t"]
 
 
+@pytest.mark.parametrize("answer", ["reviews", "fail"])
+@pytest.mark.feature("count-floor-retirement-needs-code-owner-approval")
+def test_a_pull_request_count_floor_reads_its_reviews_on_the_app_token(tmp_path: Path, answer: str) -> None:
+    from tests.test_ci_hosted_lanes import _evaluate
+
+    count = _workflow()["jobs"]["test-count"]["steps"]
+    names = [step.get("name") for step in count]
+    mint = count[names.index("Mint the token that reads the dev count record")]
+    fetch = count[names.index("Read the pull request reviews")]
+    floor = count[names.index("Hold the base revision's test count")]
+    assert names.index(mint["name"]) < names.index(fetch["name"]) < names.index(floor["name"])
+    assert mint["with"]["permission-pull-requests"] == "read"
+    assert fetch["env"] == {
+        "GH_TOKEN": "${{ steps.app-token.outputs.token }}",
+        "PULL": "${{ github.event.pull_request.number }}",
+    }
+    condition = "${{ " + fetch["if"].replace("steps.app-token.outcome", "'success'") + " }}"
+    assert _evaluate(condition, event_name="pull_request") is True
+    assert _evaluate(condition, event_name="merge_group") is False
+    assert _evaluate(condition, event_name="workflow_dispatch") is False
+    assert floor["env"]["TEST_COUNT_REVIEWS"] == "${{ runner.temp }}/pull-reviews.jsonl"
+    assert floor["env"]["TEST_COUNT_REVIEWED_HEAD"] == "${{ github.event.pull_request.head.sha }}"
+    runner = tmp_path / "runner"
+    runner.mkdir()
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    calls = tmp_path / "calls"
+    review = '{"user":"owner","state":"APPROVED","commit_id":"c"}'
+    gh = bin_dir / "gh"
+    gh.write_text(
+        "#!/usr/bin/env bash\n"
+        f'printf "%s\\n" "$@" > "{calls}"\n'
+        f"echo '{review}'\n"
+        f'[[ "{answer}" == fail ]] && exit 1\n'
+        "exit 0\n"
+    )
+    gh.chmod(0o755)
+    env = dict(
+        os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}", RUNNER_TEMP=str(runner), GITHUB_REPOSITORY="o/r", PULL="7"
+    )
+    result = subprocess.run(["bash", "-e", "-c", fetch["run"]], cwd=tmp_path, env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert calls.read_text().splitlines() == [
+        "api",
+        "--paginate",
+        "repos/o/r/pulls/7/reviews?per_page=100",
+        "--jq",
+        ".[] | {user: .user.login, state, commit_id}",
+    ]
+    reviews = runner / "pull-reviews.jsonl"
+    assert reviews.is_file() == (answer == "reviews")
+    if answer == "reviews":
+        assert reviews.read_text() == review + "\n"
+
+
 def test_lint_and_test_count_grade_a_pull_request_that_merged_dev_from_the_current_merge_base(tmp_path):
     from tests.test_ci_hosted_lanes import _evaluate
 

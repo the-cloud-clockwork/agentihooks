@@ -15,7 +15,7 @@ argument-hint: "<plan-file> --repo DIR [--template NAME]"
 
 The plan is accepted before this skill runs. This session names the swarm,
 creates it with its ledger and starts it, then hands the operator to the swarm's **master**: the
-agent the swarm keeps online to answer the operator, keep the ledger current
+agent the swarm keeps online to answer the operator, keep progress current through `agentihooks api`
 and steer the swarm. This session never claims a task and does not join the
 ledger as orchestrator; the master does.
 
@@ -145,13 +145,13 @@ immediately before each task heading; the section ends at the next anchor or hea
 level. Publish it for the manual phases before adding their tasks:
 
 ```bash
-agentihooks ledger --slug <slug> --as <name> publish-plan <plan-file> --phase <phase-ids>
+agentihooks api --slug <slug> --as <name> publish-plan <plan-file> --phase <phase-ids>
 ```
 
 Then add each task with its anchor; the ledger computes its plan lines:
 
 ```bash
-agentihooks ledger --slug <slug> task add <id> "<title>" --lane eng|ci --phase <phase> --plan-slice <id> --description "<seam and done condition>" \
+agentihooks api --slug <slug> task add <id> "<title>" --lane eng|ci --phase <phase> --plan-slice <id> --description "<seam and done condition>" \
   [--depends-on <id>,<id>] [--territory <path or area>,<path or area>] \
   [--kind ci] [--kind ops|troubleshoot|tune|research --must "<true when done>" --check "<how>" --judge "<who>"]
 ```

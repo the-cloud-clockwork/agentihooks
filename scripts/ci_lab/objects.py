@@ -37,6 +37,8 @@ class Objects(Protocol):
 
     def keys(self, prefix: str) -> list[str]: ...
 
+    def remove(self, path: str) -> None: ...
+
     def upload_url(self, path: str, expires_s: int) -> str: ...
 
 
@@ -95,6 +97,10 @@ class LocalObjects:
         """Return the sorted paths under a prefix."""
         return self.backend.keys(prefix)
 
+    def remove(self, path: str) -> None:
+        """Remove an object; a missing one is already gone."""
+        self.backend.remove(path)
+
     def upload_url(self, path: str, expires_s: int) -> str:
         """Return the file URL a local worker writes the object to; a local file never expires."""
         return contain(self.root, path).as_uri()
@@ -120,6 +126,10 @@ class S3Objects:
     def keys(self, prefix: str) -> list[str]:
         """Return the sorted paths under a prefix."""
         return self.backend.keys(prefix)
+
+    def remove(self, path: str) -> None:
+        """Remove an object; a missing one is already gone."""
+        self.backend.remove(path)
 
     def upload_url(self, path: str, expires_s: int) -> str:
         """Return a presigned PUT URL for the object."""

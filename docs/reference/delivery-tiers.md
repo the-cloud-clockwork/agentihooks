@@ -24,7 +24,7 @@ Removing the queue tier, so that a pull request merges on its pull request verdi
 
 ## Lab authority and back pressure
 
-The CI lab grades pull request heads from content addressed units and a verdict cache ([CI lab service contract](ci-lab.md)). A gate moves to the lab only when the base branch's `delivery.yaml` names it under `lab.authoritative`. On a `pull_request` run the `lab-verdict` job reads that list, the Actions job of each named gate is skipped, and `lab-verdict` waits for the lab's check run for that gate instead. An empty list keeps every pull request gate on Actions. The queue and promotion tiers still run on Actions.
+The CI lab grades pull request heads from content addressed units and a verdict cache ([CI lab service contract](ci-lab.md)). A gate moves to the lab only when the base branch's `delivery.yaml` names it under `lab.authoritative`. On a `pull_request` run the `lab-verdict` job reads that list, the Actions job of each named gate is skipped, and `lab-verdict` waits for the lab's check run for that gate instead. An empty list keeps every pull request gate on Actions. `lab.queue.authoritative` names the gates the lab is to grade on merge groups. Each name must be a workflow job, and `scripts.ci_wiring` requires a `lab/<gate>` lab gate in `.github/gate-wiring.json` for it. `AGENTIHOOKS_LAB_OFF=true` empties the list, and `python -m scripts.ci_lab_verdict authority <grader root> merge_group` publishes it. An absent key is an empty list. `delivery.yaml` leaves the key out until the deployed lab scheduler runs a release whose delivery schema accepts it, because the scheduler validates dev's `delivery.yaml` against its own schema when it starts and the merge group base's on each merge group grade. No workflow reads that merge group output yet, so the queue and promotion tiers run on Actions whatever the list holds. The lab grades their heads too: a merge group head gets its [test units](ci-lab.md#test-units), and a promotion or backfill head its test units and [mutation units](ci-lab.md#mutation-units).
 
 A long lab wait is back pressure, never a red. Each tick pass reads the lab's capacity document. When its predicted pull request wait exceeds `AGENTIHOOKS_HEALTH_CI_BEHIND_MINUTES` (default 20), the swarm holds new claims of eng tasks outside the fix phase and raises the standing `lab_wait` finding. A reading older than ten minutes holds nothing, and the finding clears once the wait falls back. Nobody retries or dispatches to catch up. [Lab wait and capacity](../ci-timing.md#lab-wait-and-capacity) shows how to read the wait.
 
@@ -415,7 +415,7 @@ While a priority holds the lock, the refresh job reports `merge queue priority w
 
 ## Lab merge group interaction rule
 
-For a `merge_group` head, the lab scheduler calls `scripts.ci_lab.interaction.decide` to choose between the test units the group's entries invalidate and the whole suite. A test unit is a test id of the manifest. The rule is pure. It reads the group's diff against `dev`, each entry's changes from `dev` to its graded tree, the dependency manifest of `scripts.dep_manifest`, the test units with a cached verdict, the entry limit and the `pyproject.toml` flag, which the caller computes with `scripts.ci_select.pyproject_reaches_tests`. It returns the unit set or `FULL`. `full_reason` names the clause that held, checked in this order:
+For a `merge_group` head, the lab scheduler calls `scripts.ci_lab.interaction.decide` to choose between the test units the group's entries invalidate and the whole suite. A test unit is a test id of the manifest. The rule is pure. It reads the group's diff against `dev`, each entry's changes, the dependency manifest of `scripts.dep_manifest`, the test units with a cached verdict, the entry limit and the `pyproject.toml` flag, which the caller computes with `scripts.ci_select.pyproject_reaches_tests`. It returns the unit set or `FULL`. `full_reason` names the clause that held, checked in this order:
 
 | Clause | `FULL` when | Read from |
 |---|---|---|
@@ -425,6 +425,14 @@ For a `merge_group` head, the lab scheduler calls `scripts.ci_lab.interaction.de
 | `cache` | more than half the manifest's test units have no cached verdict | the store lookups for the group head |
 
 When no clause holds, the result is the union of `scripts.dep_manifest.invalidated` over the entries. An entry that changes a global input of the manifest, such as `uv.lock`, invalidates every unit, so the set is then the whole manifest. `tests/ci_lab/test_interaction.py` holds the property cases for each clause and its boundary.
+
+### How the scheduler derives each entry's changes
+
+`scripts.ci_lab.scheduler.MirrorExpander` builds the group from its git mirror. The merge queue stacks each pull request of a group as one commit on the first parent chain from `dev` to the group head, so the scheduler runs `git rev-list --first-parent <base>..<head>` and takes each listed commit as one entry. An entry's changes are `scripts.dep_manifest.changes` between that commit's first parent and the commit itself, so they hold only what that pull request changed, never the entries stacked below it. The group's diff is `scripts.dep_manifest.changes` between the base and the head.
+
+### Test files the manifest does not know
+
+The manifest lists only the tests of the `dev` commit it was stored for, so `scripts.dep_manifest.invalidated` never names a test module an entry adds. For a `merge_group` head the scheduler therefore also adds one test unit per test module in the entries' changes that the head tree holds and the manifest lists no test of, whether the rule chose a unit set or `FULL`. Each such unit's member is the module's path, and `scripts.ci_lab.expand_tests.unlisted_units` keys it as a broad test: on every file under `hooks/`, `scripts/` and `tests/`, the inputs every test shares, the invocation and the toolchain. `scripts.ci_lab.run_tests.outside` records no manifest files for such a member, so it reports every file the module opens except the inputs the executor treats as shared, a narrower set than the key's. `StoredManifests` merges an outside note only into a test the manifest lists, so until a `dev` manifest lists the module its key does not cover files it opened outside those trees and shared inputs.
 
 ## Queue shard sizing
 
@@ -1235,6 +1243,8 @@ $ python -m scripts.gate_protected --base origin/dev --head HEAD
 graded HEAD against merge base fad7e9be3aac: 0 protected gate problems
 ```
 
+The Tests `lint` job runs `python -m scripts.gate_protected --head <pull request head>` with no `--base`, from its grader checkout at the event base, so `--base` is that checkout's `HEAD`. [Protected gate step in lint](grader-gate-steps.md#protected-gate-step-in-lint) describes that step.
+
 ### Changing the pinned names or the inventory
 
 There is no setting or environment variable. The pinned names are whatever the base writes for the jobs whose names equal `GATE_NAME` and `SUMMARY_NAME`. The inventory is `REQUIRED`, `SKIPPED`, `ANNOUNCED` and `LAB_VERDICT` in `scripts.ci_gate_queue`. Because `Gate — Protected` runs the base branch's grader, a need the base does not know is refused in the pull request that adds it. `ANNOUNCED` lists promotion gates that the base accepts before the pull request that adds them lands. To add a need, first land a grader pull request that adds the job to `ANNOUNCED`, then add the need to `gate-required` in a later pull request.
@@ -1425,6 +1435,10 @@ Replace the example run ID with the intended run. Repeat `--run-id` to select se
 | Completion is `null`, reason says the run did not end after force cancel | Both polling budgets expired without observing completion. Read the run's current status before treating it as freed. |
 | `action: error` with timestamps | Recovery began and an API operation failed. Attempted cancel times and any observed completion survive the error, including a failed rerun request. Read `reason`; a request timestamp does not prove GitHub accepted it. |
 | No timing fields | Older records and decisions made before recovery, including early read errors, have no recovery timings. A run rerun meanwhile is also left alone without these fields. Do not fill gaps with zero or `updated_at`. |
+
+### Stale queued runs
+
+GitHub can leave a run queued for months with no jobs and no update: on 19 November agentihooks held 64 such runs, 61 of them created on 11 November between 20:28 and 20:52 UTC. They take no runner, because every ARC listener scaled on zero assigned jobs while they stayed queued, but they stay in every queued run listing until something removes them. GitHub refuses `cancel` and `force-cancel` on such a run with HTTP 409, "Cannot cancel a workflow run that has not been queued yet.", while `DELETE` of the run answers 204. Before its watch, the Lost runner workflow runs `python -m scripts.ci_stale_runs --repo <owner>/<repo>` with the same App token. A queued run is stale once its `updated_at` is at least 24 hours old, the time GitHub lets a job wait in the queue, so a rerun of an old run is never stale. For each stale run the sweep prints its workflow, branch, times and job states by runner labels, then deletes the run when it holds no job and posts `cancel` when it holds one. A stale run still queued thirty seconds later gets a `::warning::` annotation without failing the step. The watch step runs whenever the token minted, so a sweep that fails on a GitHub read still leaves the watch running.
 
 ## Queue rebuild records
 

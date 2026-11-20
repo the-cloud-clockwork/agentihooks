@@ -186,10 +186,11 @@ def test_an_adopted_ledger_restart_never_restores_the_old_service(tmp_path, monk
     assert not any(str(server_compose.COMPOSE_FILE) in argv or "ledger" in argv for argv in calls)
 
 
-def test_compose_runs_with_the_folder_the_code_and_this_user(tmp_path, monkeypatch):
+@pytest.mark.feature("compose-ledger-ensure-starts-front-and-api")
+def test_compose_runs_with_the_folder_the_code_and_this_user(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     calls = []
 
-    def run(argv, **kw):
+    def run(argv: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
         calls.append((argv, kw))
         return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
 
@@ -199,9 +200,9 @@ def test_compose_runs_with_the_folder_the_code_and_this_user(tmp_path, monkeypat
     assert server_compose.stop(tmp_path, {"HOME": "/h"}, run) == ""
     compose = ["docker", "compose", "-f", str(server_compose.COMPOSE_FILE)]
     assert [argv for argv, _ in calls] == [
-        [*compose, "pull", "ledger"],
-        [*compose, "up", "-d", "ledger"],
-        [*compose, "stop", "ledger"],
+        [*compose, "pull", "ledger", "api", "front"],
+        [*compose, "up", "-d", "ledger", "api", "front"],
+        [*compose, "stop", "ledger", "api", "front"],
     ]
     first = calls[0][1]
     assert first["env"] == {
@@ -249,7 +250,7 @@ def test_a_failed_pull_still_starts_the_service_on_its_local_image(tmp_path: Pat
 
     assert server_compose.start(tmp_path, {}, run) == ""
     compose = ["docker", "compose", "-f", str(server_compose.COMPOSE_FILE)]
-    assert calls == [[*compose, "pull", "ledger"], [*compose, "up", "-d", "ledger"]]
+    assert calls == [[*compose, "pull", "ledger", "api", "front"], [*compose, "up", "-d", "ledger", "api", "front"]]
 
 
 def test_compose_defaults_reach_the_real_environment_docker_and_runner():

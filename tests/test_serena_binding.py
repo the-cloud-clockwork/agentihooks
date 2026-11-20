@@ -159,38 +159,75 @@ def test_a_redis_error_records_and_carries_nothing(repo: dict[str, Path]) -> Non
     broken.hgetall.assert_called_once_with(redis_key("serena_root", SESSION))
 
 
-@pytest.mark.feature("serena-hook-carries-each-agent-activated-root")
-def test_pre_tool_use_injects_the_calling_agent_root_under_bypass(
-    store: fakeredis.FakeRedis, repo: dict[str, Path], forced_claude: None, capsys: pytest.CaptureFixture[str]
+@pytest.mark.feature("serena-hook-carries-each-agent-root-without-a-decision")
+@pytest.mark.parametrize("mode", ["default", "acceptEdits", "plan", "dontAsk", "bypassPermissions"])
+def test_pre_tool_use_carries_each_agent_root_without_a_permission_decision(
+    store: fakeredis.FakeRedis,
+    repo: dict[str, Path],
+    forced_claude: None,
+    capsys: pytest.CaptureFixture[str],
+    mode: str,
 ) -> None:
-    hm.on_pre_tool_use(_payload("activate_project", {"project": str(repo["a"])}))
-    hm.on_pre_tool_use(_payload("activate_project", {"project": str(repo["b"])}, agent_id="sub-1"))
+    hm.on_pre_tool_use(_payload("activate_project", {"project": str(repo["a"])}, mode=mode))
+    hm.on_pre_tool_use(_payload("activate_project", {"project": str(repo["b"])}, agent_id="sub-1", mode=mode))
     capsys.readouterr()
-    hm.on_pre_tool_use(_payload("replace_content", {"relative_path": "f.txt", "repl": "x"}))
+    hm.on_pre_tool_use(_payload("replace_content", {"relative_path": "f.txt", "repl": "x"}, mode=mode))
     parent = json.loads(capsys.readouterr().out.strip())["hookSpecificOutput"]
-    hm.on_pre_tool_use(_payload("find_symbol", {"name_path_pattern": "Binding"}, agent_id="sub-1"))
+    hm.on_pre_tool_use(_payload("find_symbol", {"name_path_pattern": "Binding"}, agent_id="sub-1", mode=mode))
     child = json.loads(capsys.readouterr().out.strip())["hookSpecificOutput"]
-    assert parent["permissionDecision"] == "allow"
-    assert parent.get("permissionDecisionReason", "") == ""
-    assert parent["updatedInput"] == {"relative_path": "f.txt", "repl": "x", ROOT_ARG: str(repo["a"])}
-    assert child["updatedInput"] == {"name_path_pattern": "Binding", ROOT_ARG: str(repo["b"])}
+    parent.pop("additionalContext", None)
+    child.pop("additionalContext", None)
+    assert parent == {
+        "hookEventName": "PreToolUse",
+        "updatedInput": {"relative_path": "f.txt", "repl": "x", ROOT_ARG: str(repo["a"])},
+    }
+    assert child == {
+        "hookEventName": "PreToolUse",
+        "updatedInput": {"name_path_pattern": "Binding", ROOT_ARG: str(repo["b"])},
+    }
 
 
-@pytest.mark.feature("serena-hook-carries-each-agent-activated-root")
-def test_pre_tool_use_never_injects_outside_bypass_or_on_other_targets(
+@pytest.mark.feature("serena-hook-carries-each-agent-root-without-a-decision")
+def test_pre_tool_use_carries_no_root_in_auto_mode_or_on_other_targets(
     store: fakeredis.FakeRedis,
     repo: dict[str, Path],
     forced_claude: None,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    hm.on_pre_tool_use(_payload("activate_project", {"project": str(repo["a"])}, mode="default"))
-    hm.on_pre_tool_use(_payload("find_symbol", {}, mode="default"))
+    hm.on_pre_tool_use(_payload("activate_project", {"project": str(repo["a"])}, mode="auto"))
+    hm.on_pre_tool_use(_payload("find_symbol", {}, mode="auto"))
     assert ROOT_ARG not in capsys.readouterr().out
     monkeypatch.setenv("AGENTIHOOKS_TARGET", "copilot")
-    hm.on_pre_tool_use(_payload("find_symbol", {}))
+    hm.on_pre_tool_use(_payload("find_symbol", {}, mode="default"))
     assert ROOT_ARG not in capsys.readouterr().out
+    assert hm._input_rewrite(_payload("find_symbol", {}, mode="default"), "mcp__serena__find_symbol") is None
     assert store.hgetall(redis_key("serena_root", SESSION)) == {"": str(repo["a"])}
+
+
+@pytest.mark.feature("serena-hook-carries-each-agent-root-without-a-decision")
+@pytest.mark.parametrize("decision", ["allow", "ask"])
+def test_a_condition_decision_carries_the_root_on_its_own_decision(
+    store: fakeredis.FakeRedis,
+    repo: dict[str, Path],
+    forced_claude: None,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    decision: str,
+) -> None:
+    from hooks.context import conditions
+
+    def decide(_given: dict[str, Any]) -> conditions.PreEffect:
+        return conditions.PreEffect(contexts=[], decision=decision)
+
+    monkeypatch.setattr(conditions, "pre_effect", decide)
+    hm.on_pre_tool_use(_payload("activate_project", {"project": str(repo["a"])}, mode="default"))
+    capsys.readouterr()
+    hm.on_pre_tool_use(_payload("find_symbol", {"name_path_pattern": "Binding"}, mode="default"))
+    out = json.loads(capsys.readouterr().out.strip())["hookSpecificOutput"]
+    assert out["permissionDecision"] == decision
+    assert out.get("permissionDecisionReason", "") == ""
+    assert out["updatedInput"] == {"name_path_pattern": "Binding", ROOT_ARG: str(repo["a"])}
 
 
 @pytest.mark.feature("serena-hook-carries-each-agent-activated-root")

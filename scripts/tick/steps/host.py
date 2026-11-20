@@ -348,3 +348,26 @@ registry.register(
         feature="hive-quiet-sweep",
     )
 )
+
+
+def _focus_unclaimed(cli: Any, get: Get) -> list[str]:
+    """Count the ticks each focused task whose claim gate verdict is claimable stays unclaimed."""
+    from scripts.swarm.health import focus_unclaimed
+
+    timing.call(focus_unclaimed.observe, get("store"), get("slug"), get("doc"), cli.now_ms())  # pyright: ignore[reportUnknownMemberType]
+    return []
+
+
+registry.register(
+    CallStep(
+        "focus unclaimed",
+        "wrapper phases",
+        held(_focus_unclaimed),
+        needs=frozenset(),
+        reads=hook_domains("doc"),
+        writes=frozenset(),
+        lane=Lane("tick"),
+        effects=frozenset({"coordination"}),
+        feature="swarm-focus-unclaimed-finding",
+    )
+)

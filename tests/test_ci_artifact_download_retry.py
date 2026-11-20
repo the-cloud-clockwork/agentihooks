@@ -9,6 +9,7 @@ import yaml
 pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[1]
+PATTERN_DOWNLOAD = "./.workflow-revision/.github/actions/pattern-download"
 
 
 def _jobs():
@@ -19,9 +20,9 @@ def _first_attempts():
     for job, spec in _jobs().items():
         steps = spec.get("steps") or []
         for index, step in enumerate(steps):
-            if step.get("uses", "").startswith("actions/download-artifact@") and not step["name"].endswith(
-                ", attempt 2"
-            ):
+            if step.get("uses", "").startswith(("actions/download-artifact@", PATTERN_DOWNLOAD)) and not step[
+                "name"
+            ].endswith(", attempt 2"):
                 yield job, steps, index
 
 
@@ -86,6 +87,25 @@ def test_each_retried_shared_mutation_stats_download_gives_up_after_one_minute()
     ]
     assert len(attempts) == 6
     assert {step.get("timeout-minutes") for step in attempts} == {1}
+
+
+@pytest.mark.feature("shared-mutation-stats-download-ends-with-its-download")
+def test_every_shared_mutation_stats_download_runs_the_action_that_closes_each_blob_answer() -> None:
+    downloads = {
+        (job, step["name"]): (step["uses"], step["with"])
+        for job, spec in _jobs().items()
+        for step in spec.get("steps") or []
+        if step.get("name", "").startswith(
+            ("Download the shared mutation stats", "Download the missing mutation stats")
+        )
+        and "uses" in step
+    }
+    assert {job for job, _ in downloads} == {"mutation-refine", "mutation-probe", "mutation-shard"}
+    assert len(downloads) == 8
+    assert all(
+        found == (PATTERN_DOWNLOAD, {"pattern": "mutation-stats-*", "path": ".mutation-stats"})
+        for found in downloads.values()
+    )
 
 
 def _download_steps(node: object) -> list[str]:

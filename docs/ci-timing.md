@@ -1910,7 +1910,7 @@ fifteen minute target.
 
 Browser jobs share the [verified Chromium cache](reference/browser-cache.md): restore is attempted on every ref when no verified baked browser is available, while only `dev` pushes save after a miss and successful installation. The guide covers workflow setup, GitHub cache scope, recovery and cache inventory checks.
 
-Proof dispatches share three hosted lanes, the concurrency groups `hosted-lane-a`, `hosted-lane-b` and `hosted-lane-c`. A run picks its lane from the last digit of its run id: 0 to 2 is lane a, 3 to 5 lane b and 6 to 9 lane c. Each lane runs one run at a time and queues the rest (`queue: max`), so at most three such runs hold hosted runners at once. The lanes are used by every `proofs.yml` dispatch except `proof=tests` (that one gets its own `focused-proof-<run id>` group), by every Mutation refinement proof run, by `workflow_dispatch` runs of the Tests, Swarm worker image and Test leaks workflows, by Worker hive pod runs other than a push to `dev`, and by the brain smoke, Helm chart in kind, CI templates, Swarm container smoke, Swarm worker image smoke and Ledger server load workflows when they run under their own name.
+Hosted lane users share three lanes, the concurrency groups `hosted-lane-a`, `hosted-lane-b` and `hosted-lane-c`. A run picks its lane from the last digit of its run id: 0 to 2 is lane a, 3 to 5 lane b and 6 to 9 lane c. Each lane runs one run at a time and queues the rest (`queue: max`), so at most three such runs hold hosted runners at once. The lanes are used by every Mutation refinement proof run, by `workflow_dispatch` runs of the Tests, Swarm worker image and Test leaks workflows, by Worker hive pod runs other than a push to `dev`, and by the brain smoke, Helm chart in kind, CI templates, Swarm container smoke, Swarm worker image smoke and Ledger server load workflows when they run under their own name. Every `proofs.yml` dispatch, whatever its proof, stays off the lanes in its own `focused-proof-<run id>` group, so a short proof never waits behind a full Tests dispatch on its lane.
 
 Branch pushes of the Startup stages and Worker resources workflows stay off the lanes. Each push resolves to a per-branch group, `startup-stages-refs/heads/<branch>` or `worker-resources-refs/heads/<branch>`, with `queue: single`: a newer push to the same branch replaces the pending one, and the push never waits behind or blocks a proof dispatch. A `workflow_dispatch` of either workflow still queues on a lane. When another workflow calls either one, the call runs under the caller's name and gets its own `startup-stages-<run id>` or `worker-resources-<run id>` group with `queue: single`.
 
@@ -1921,8 +1921,7 @@ Branch pushes of the Startup stages and Worker resources workflows stay off the 
 | Worker resources, branch push | `worker-resources-refs/heads/<branch>` | single |
 | Either workflow, called by another workflow | `startup-stages-<run id>` or `worker-resources-<run id>` | single |
 | Worker resources, dispatch | `hosted-lane-<a, b or c>` | max |
-| `proofs.yml`, any proof but `tests` | `hosted-lane-<a, b or c>` | max |
-| `proofs.yml`, `proof=tests` | `focused-proof-<run id>` | max |
+| `proofs.yml`, every proof | `focused-proof-<run id>` | max |
 
 Before this split, a Startup stages push measurement held a lane for minutes and every proof dispatch hashed to that lane waited behind it: a push created at 03:55:26 queued on lane a until 04:21:36 and held it until 04:27:39, and a swarm worker image dispatch on the same lane, created at 04:06:34, never got a job and was cancelled after 20 minutes in the queue. After it, on lane c, a Startup stages push created at 08:47:30 ran from 08:47:43 to 08:52:00, and a worker image proof dispatch created at 08:50:49, while that push was still running, started its first jobs at 08:50:50 and passed at 08:53:58 (runs 39018691198 and 39018894036, pull request #3956).
 
@@ -1955,6 +1954,14 @@ older branch can be refused even when `Gate Required` passes. Read both checks.
 A branch only job with no accepted job or workflow level lane group is refused
 with `job <name> has no shared hosted lane concurrency group`. Give it an
 accepted shared hosted lane, using an existing hosted workflow as the model.
+
+A Proofs job may run on its per run `focused-proof-<run id>` group instead of a
+hosted lane. The grader admits any job of the Proofs workflow whose own or
+workflow level block is that group with `queue: max` and
+`cancel-in-progress: false`, when the dev copy and the head copy are both the
+Proofs workflow triggered only by `workflow_dispatch`. A new proof job and its
+new `proof` option need no grader change. A head that adds another trigger to
+Proofs, or renames it, is graded like any other workflow.
 
 To diagnose the branch grade, inspect its push run:
 

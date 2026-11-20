@@ -29,7 +29,7 @@ def test_controller_reads_unhealthy_once_a_swarm_lease_goes_stale():
 def test_the_controller_and_hive_keep_scheduler_state_in_the_nats_bucket():
     for name in ("controller", "hive"):
         environment = SERVICES[name]["environment"]
-        assert environment["AGENTIHOOKS_SCHEDULER_STATE_BACKEND"] == "${AGENTIHOOKS_SCHEDULER_STATE_BACKEND:-bus}"
+        assert environment["AGENTIHOOKS_SCHEDULER_STATE_BACKEND"] == "${SWARM_SCHEDULER_STATE_BACKEND:-bus}"
         assert environment["AGENTIHOOKS_BUS_URL"] == "${SWARM_BUS_URL:-nats://nats:4222}"
         assert SERVICES[name]["depends_on"]["nats"]["condition"] == "service_healthy"
     assert "--jetstream" in SERVICES["nats"]["command"]
@@ -56,7 +56,7 @@ def test_swarm_auth_mode_is_removed():
 
 def test_env_example_selects_compose_deployment():
     lines = (ROOT / "deploy/compose/.env.example").read_text().splitlines()
-    assert "AGENTIHOOKS_DEPLOYMENT=compose" in lines
+    assert "SWARM_DEPLOYMENT=compose" in lines
 
 
 def test_swarm_smoke_runs_the_compose_hive_proof():
@@ -159,6 +159,39 @@ def test_an_agent_shell_on_the_anton_bus_leaves_the_controller_on_the_stack_nats
     resolved = {key: _interpolate(str(environment[key]), shell) for key in ("AGENTIHOOKS_BUS", "AGENTIHOOKS_BUS_URL")}
     assert resolved == {"AGENTIHOOKS_BUS": "nats", "AGENTIHOOKS_BUS_URL": "nats://nats:4222"}
     assert "AGENTIHOOKS_BUS_CREDENTIALS" not in environment
+
+
+@pytest.mark.feature("compose-stack-own-modes")
+@pytest.mark.parametrize(
+    "compose_file",
+    sorted(
+        str(path.relative_to(ROOT))
+        for path in [ROOT / "compose.yaml", *(ROOT / "scripts/swarm/stack").rglob("*.yaml")]
+        if path.is_file()
+    ),
+)
+def test_the_stack_never_reads_the_deployment_or_scheduler_backend_of_the_shell(compose_file: str) -> None:
+    text = (ROOT / compose_file).read_text()
+    assert not re.search(r"(?<!\$)\$\{?AGENTIHOOKS_(DEPLOYMENT|SCHEDULER_STATE_BACKEND)\b", text), compose_file
+
+
+@pytest.mark.feature("compose-stack-own-modes")
+@pytest.mark.parametrize(
+    ("service", "deployment"),
+    [("swarm", "local"), ("api", "local"), ("controller", "compose"), ("hive", "compose")],
+)
+def test_the_stack_renders_one_deployment_and_scheduler_backend_from_any_shell(service: str, deployment: str) -> None:
+    keys = ("AGENTIHOOKS_DEPLOYMENT", "AGENTIHOOKS_SCHEDULER_STATE_BACKEND")
+    environment = SERVICES[service]["environment"]
+    agent = {"AGENTIHOOKS_DEPLOYMENT": "distributed", "AGENTIHOOKS_SCHEDULER_STATE_BACKEND": "redis"}
+    unset = {key: _interpolate(str(environment[key]), {}) for key in keys}
+    from_agent = {key: _interpolate(str(environment[key]), agent) for key in keys}
+    assert unset == from_agent == {"AGENTIHOOKS_DEPLOYMENT": deployment, "AGENTIHOOKS_SCHEDULER_STATE_BACKEND": "bus"}
+    stack = {"SWARM_DEPLOYMENT": "local", "SWARM_SCHEDULER_STATE_BACKEND": "redis"}
+    assert {key: _interpolate(str(environment[key]), stack) for key in keys} == {
+        "AGENTIHOOKS_DEPLOYMENT": "local",
+        "AGENTIHOOKS_SCHEDULER_STATE_BACKEND": "redis",
+    }
 
 
 def _interpolate(value: str, shell: dict[str, str]) -> str:
