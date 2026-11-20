@@ -6,8 +6,8 @@ rules:
       Ordered 2026-11-18 (#12195) after the controller mirror and the page tails skipped hub admitted and hive started
       tasks and controller orders and Codex sessions a hive starts recorded no launch hive, so their successors got only
       steering. ledger_workspace._synced must name a task's hive with reports.workspace_host, the host target else the
-      hive on the record; ledger_workspace.launched_on must write the WORK_FOLDER key with no expiry; HiveLaunch.complete
-      and codex.admit_legacy must record the launching hive through ledger_workspace.launched_on.
+      hive on the record; ledger_workspace.launched_on must write the WORK_FOLDER key with no expiry; HiveLaunch.complete,
+      supervisor.admit and codex.admit_legacy must record the launching hive through ledger_workspace.launched_on.
     patterns:
       - pattern-either:
           - patterns:
@@ -44,8 +44,21 @@ rules:
                     ...
                     ledger_workspace.launched_on(...)
                     ...
+          - patterns:
+              - pattern: |
+                  def admit(...):
+                    ...
+              - pattern-not-inside: |
+                  class $CLASS:
+                    ...
+              - pattern-not: |
+                  def admit(...):
+                    ...
+                    ledger_workspace.launched_on(...)
+                    ...
     paths:
       include:
+        - /scripts/codex_session/supervisor.py
         - /scripts/hive/launch.py
         - /scripts/swarm_ledger/ledger_workspace.py
         - /scripts/swarm_v2/runtime/codex.py

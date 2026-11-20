@@ -79,3 +79,25 @@ def admit_legacy(store, slug, agent, runtime, table=None):
         raise SpawnError(str(exc), pane_id=agent.pane_id) from exc
     ledger_workspace.launched_on(store, slug, started.task, started.hive)
     return started
+
+
+# ruleid: feature-work-folder-readers-and-launch-pointers
+def admit(store, launch, deps):
+    agent = replace(launch.agent, harness="codex", transport=chosen, hive=hive_id(), runtime_target=target)
+    return store.start_execution(launch.slug, agent, launch.previous_execution_id)
+
+
+# ok: feature-work-folder-readers-and-launch-pointers
+def admit(store, launch, deps):
+    if launch.execution_id:
+        return adopt(store, launch, chosen, hive_id())
+    agent = replace(launch.agent, harness="codex", transport=chosen, hive=hive_id(), runtime_target=target)
+    started = store.start_execution(launch.slug, agent, launch.previous_execution_id)
+    ledger_workspace.launched_on(store, launch.slug, started.task, started.hive)
+    return started
+
+
+class HiveLaunch:
+    # ok: feature-work-folder-readers-and-launch-pointers
+    def admit(self, request, selected):
+        return self.store.start_execution(self.slug, request.agent, "")
