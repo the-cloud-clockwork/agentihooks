@@ -50,6 +50,7 @@ def test_scan_keeps_the_reusable_workflow_steps() -> None:
         "Check out the protected grader",
         "Own rules hold on their fixtures and the code",
         "Outage rules for tests hold on every test file",
+        "New test waits keep a bound of ten seconds or more",
         "Rule exceptions only shrink",
         "Resolve the merge base of the head and the base",
         "Fail on findings new against the base",
@@ -177,6 +178,100 @@ def test_each_outage_rule_for_tests_reaches_the_tests_and_its_fixture() -> None:
         assert f"# ruleid: {rule['id']}" in text
         assert f"# ok: {rule['id']}" in text
     assert "tests/" in (_ROOT / ".semgrepignore").read_text().splitlines()
+
+
+WAIT_BOUNDS = "New test waits keep a bound of ten seconds or more"
+WAIT_SCAN = "scan --error --strict --timeout 30 --metrics off --x-ignore-semgrepignore-files"
+
+
+def _wait_bounds_step() -> dict[str, Any]:
+    return next(step for step in _jobs()["scan"]["steps"] if step.get("name") == WAIT_BOUNDS)
+
+
+def _run_wait_bounds(
+    tmp_path: Path, graded: bool, scan_exit: int = 0, base: str | None = None
+) -> tuple[int, list[str], str]:
+    step = _wait_bounds_step()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "dev")
+    merge_base = _commit(repo, {"tests/test_kept.py": "def test_kept() -> None:\n    assert True\n"}, "base")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    _commit(repo, {"tests/test_new.py": "def test_new() -> None:\n    assert True\n"}, "head")
+    _git(repo, "checkout", "-q", "dev")
+    moved = _commit(repo, {"tests/test_later.py": "def test_later() -> None:\n    assert True\n"}, "dev")
+    _git(repo, "checkout", "-q", "pr")
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    (tools / "semgrep").write_text(SCAN_STUB)
+    (tools / "semgrep").chmod(0o755)
+    runner = tmp_path / "runner"
+    rule = step["env"]["RULE"]
+    if graded:
+        (runner / "grader" / rule).parent.mkdir(parents=True)
+        (runner / "grader" / rule).write_text("rules: []\n")
+    env = {
+        **os.environ,
+        **step["env"],
+        "BASE": base or moved,
+        "PATH": f"{tools}{os.pathsep}{os.environ['PATH']}",
+        "RUNNER_TEMP": str(runner),
+        "STUBS": str(tmp_path),
+        "SCAN_EXIT": str(scan_exit),
+    }
+    done = subprocess.run(
+        ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", step["run"]],
+        cwd=repo,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    calls = tmp_path / "calls"
+    return done.returncode, calls.read_text().splitlines() if calls.exists() else [], merge_base
+
+
+@pytest.mark.feature("test-wait-bound-ratchet")
+def test_new_test_waits_scan_the_tests_against_the_merge_base_with_the_head_and_the_grader_rule(
+    tmp_path: Path,
+) -> None:
+    rule = _wait_bounds_step()["env"]["RULE"]
+    code, calls, merge_base = _run_wait_bounds(tmp_path, graded=True)
+    configs = f"--config {rule} --config {tmp_path}/runner/grader/{rule}"
+    assert (code, calls) == (0, [f"{WAIT_SCAN} {configs} --baseline-commit {merge_base} tests"])
+
+
+@pytest.mark.feature("test-wait-bound-ratchet")
+def test_new_test_waits_grade_with_the_head_rule_on_a_base_without_it(tmp_path: Path) -> None:
+    rule = _wait_bounds_step()["env"]["RULE"]
+    code, calls, merge_base = _run_wait_bounds(tmp_path, graded=False)
+    assert (code, calls) == (0, [f"{WAIT_SCAN} --config {rule} --baseline-commit {merge_base} tests"])
+
+
+@pytest.mark.feature("test-wait-bound-ratchet")
+def test_a_scan_finding_fails_the_new_test_waits_step(tmp_path: Path) -> None:
+    assert _run_wait_bounds(tmp_path, graded=True, scan_exit=1)[0] == 1
+
+
+@pytest.mark.feature("test-wait-bound-ratchet")
+def test_new_test_waits_fail_without_scanning_when_the_base_is_unknown(tmp_path: Path) -> None:
+    code, calls, _ = _run_wait_bounds(tmp_path, graded=True, base="0" * 40)
+    assert code != 0
+    assert calls == []
+
+
+@pytest.mark.feature("test-wait-bound-ratchet")
+def test_the_wait_bound_rule_reaches_the_tests_and_its_fixture_under_ten_seconds() -> None:
+    path = _ROOT / _wait_bounds_step()["env"]["RULE"]
+    (rule,) = yaml.safe_load(path.read_text())["rules"]
+    fixture = path.with_suffix(".py")
+    assert rule["id"] == path.stem
+    assert rule["paths"]["include"] == ["/tests/", fixture.name]
+    comparisons = [entry["metavariable-comparison"] for entry in rule["patterns"] if "metavariable-comparison" in entry]
+    assert comparisons == [{"metavariable": "$BOUND", "comparison": "$BOUND > 0 and $BOUND < 10"}]
+    text = fixture.read_text()
+    assert f"# ruleid: {rule['id']}" in text
+    assert f"# ok: {rule['id']}" in text
 
 
 @pytest.mark.feature("semgrep-feature-tests")
@@ -567,6 +662,7 @@ def test_exactly_one_step_per_ratchet_grades_against_the_base():
         if "check --base FETCH_HEAD" in step.get("run", "") or "--baseline-commit" in step.get("run", "")
     ]
     assert [(job, step["name"]) for job, step in ratchets] == [
+        ("scan", "New test waits keep a bound of ten seconds or more"),
         ("scan", "Fail on findings new against the base"),
         ("charts", "Guard rules hold on their fixtures and at their computed floors"),
     ]

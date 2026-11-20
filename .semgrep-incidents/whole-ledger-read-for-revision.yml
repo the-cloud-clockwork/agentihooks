@@ -1,0 +1,20 @@
+rules:
+  - id: whole-ledger-read-for-revision
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A whole ledger read used only for its revision builds every stored row of the ledger before the write starts,
+      about thirty seconds on the shared database from a fresh process. Read the revision from the metadata resource,
+      which reads only the metadata rows.
+    paths:
+      include:
+        - /scripts/
+        - whole-ledger-read-for-revision.py
+    pattern-either:
+      - pattern: call($SLUG)["_meta"]["rev"]
+      - pattern: $LEDGER.call($SLUG)["_meta"]["rev"]
+      - pattern: request($SLUG)["_meta"]["rev"]
+      - pattern: $LEDGER.request($SLUG)["_meta"]["rev"]
+      - pattern: $CLIENT.snapshot($SLUG)["_meta"]["rev"]
+      - pattern: $REPOSITORY.current($SLUG).state["_meta"]["rev"]
+      - pattern: $REPOSITORY.get_document($SLUG)["_meta"]["rev"]
