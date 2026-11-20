@@ -112,7 +112,6 @@ def test_the_agents_group_runs_its_calls_with_the_pass_state(monkeypatch: pytest
 
 
 @pytest.mark.feature("registry-update-skips-ended-execution")
-
 def test_a_hub_admitted_agent_dropped_while_the_reap_holds_its_pass_start_copy_is_not_relisted() -> None:
     import fakeredis
 
