@@ -167,7 +167,7 @@ def reorder(
     sender: str,
     tasks: list[dict],
     journal: queue_record.Journal,
-    lift: bool = False,
+    lift: bool,
 ) -> dict:
     lab_url = store.config(slug).lab_url
     result = merge_queue.prioritize(

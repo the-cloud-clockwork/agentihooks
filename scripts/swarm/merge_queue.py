@@ -236,7 +236,7 @@ def operate(
     }
 
 
-def waiting_around(url: str, target: str, run: Callable[..., Any], lift: bool = False) -> tuple[list[dict], list[dict]]:
+def waiting_around(url: str, target: str, run: Callable[..., Any], lift: bool) -> tuple[list[dict], list[dict]]:
     query = """query($url: URI!, $after: String) { resource(url: $url) { ... on PullRequest {
       repository { mergeQueue(branch: "dev") { entries(first: 100, after: $after) {
         nodes { state pullRequest { id url headRefOid } }
@@ -272,7 +272,7 @@ def displace(
     displaced: Any,
     removed: list[dict],
     steps: list,
-    lift: bool = False,
+    lift: bool,
 ) -> None:
     for pull in waiting:
         displaced.add(pull)
