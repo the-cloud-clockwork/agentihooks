@@ -1095,9 +1095,9 @@ or from trees they already hold.
   `AGENTIHOOKS_LAB_REMOTE` nor `CI_LAB_REPOSITORY`, and the policy reaches neither GitHub nor the
   lab remote, so the executor of a head the node mirror does not hold yet raises at its fetch and
   leaves the unit's lease for the scheduler to reap.
-- A head whose `uv.lock` digest differs from the image's baked venv builds its venv with
-  `uv sync` under `env -i`, which drops `UV_CACHE_DIR`, and the build needs a package index this
-  policy does not reach. See [Head venv builds](#head-venv-builds).
+- A head whose `.github/test-requirements.lock` digest differs from the image's baked venv builds
+  its venv with `uv venv` and `uv pip install` under `env -i`, which drops `UV_CACHE_DIR`, and the
+  build needs a package index this policy does not reach. See [Head venv builds](#head-venv-builds).
 - Nothing writes `/work/manifest.json`, so the test executor raises `FileNotFoundError` when it
   reads its dependency manifest. The worker delivers nothing for the unit and the scheduler
   reaps the lease; the [retry policy](#retry-policy) requeues it
@@ -1131,7 +1131,7 @@ its done criteria name are not recorded:
 | The worker log repeats `ci-lab worker: lease call failed, retrying in <n>s` | The scheduler is not answering on 8800, or answers with a server error: it is rolling, restarting or down. The worker keeps running, retries after a backoff that doubles from 1 up to 10 seconds, and leases again on the first answer | `kubectl -n ci-lab get deploy ci-lab-scheduler` and `kubectl -n ci-lab logs deploy/ci-lab-scheduler --since 10m` |
 | The worker exits with an `HTTPError` 4xx raised from `Client.lease` | The scheduler answered the lease call with a client error, such as a 404 when `CI_LAB_SCHEDULER_URL` names a wrong path; a retry cannot change that answer, so the process ends with the traceback without draining its running units, which are left to finish or reap | Compare the pod's `CI_LAB_SCHEDULER_URL` with the contract table above |
 | A head's units are reaped undelivered and the worker log shows a failed `git fetch` | The node mirror lacks the head and the worker has no other source | The node cache's `fetched-at` stamp and warm log, see [Verify every node](ci-lab-node-cache.md#verify-every-node) |
-| A venv build fails with `uv sync for <tree> ended with code` | The build needs the package index, which the policy refuses | The kept build log the error names; see Limitations |
+| A venv build fails with `uv venv for <tree> ended with code` or `uv pip install for <tree> ended with code` | The build needs the package index, which the policy refuses | The kept build log the error names; see Limitations |
 | Uploads time out or are refused | The MinIO egress rule does not match the object store's pods | `minio.namespace`, `minio.pods` and `minio.port` against `kubectl get pods -n <namespace> --show-labels` |
 | A sandboxed unit fails at bubblewrap with `Operation not permitted` | The pod runs under a seccomp profile that refuses namespace calls, or the node kernel restricts user namespaces | The pod's `seccompProfile`, then the namespace probe in the [sandbox verify](#unit-sandbox) steps on the node |
 | A worker pod is evicted for ephemeral storage | `/work`, `/tmp` and the logs passed 20 GiB | `kubectl -n ci-lab get events --field-selector reason=Evicted` |
@@ -2049,6 +2049,7 @@ and `ci.lab.head.push` at stream sequence 9 for an agentihooks head pushed by
 | A notice answers `400` | A field is missing, empty or not a string, or the body is not JSON | [Send a head notice](#send-a-head-notice) |
 | A GitHub delivery answers `400` while its signature is valid | The body is not JSON, or the delivery lacks a field the receiver reads; [Heads it records](#heads-it-records) says what was recorded before the answer | `kubectl -n agentihooks-swarm logs deploy/agentihooks-swarm-github-webhook` for the delivery id, then the delivery's payload in the GitHub webhook settings |
 | A request answers `503` and the log shows `could not record the event` | The publish failed: the stream does not exist yet, or the NATS credential lacks `ci.lab.head.*` | `stream info` as above; the hub creates the stream on its next start. On `/github` the pull request observations were recorded before the failure, and a GitHub redelivery records the head |
+| A `pull_request` delivery, merge queue actions included, or a completed `check_suite` delivery answers `503` with `nats: no response from stream` in its traceback | The receiver's NATS credential allows the logical `swarm.*.pull.*`, `swarm.*.merge.*` and `swarm.*.checks.completed` subjects but not their `legacy.swarm.*` form, so its unscoped events log keeps the logical subject, which no stream holds ([Existing swarms through the subject change](swarm-bus-scope.md#existing-swarms-through-the-subject-change)). The pull request observation fails first, so the lab head of the same delivery is lost too. This was the cause on 19 November 2026 (#12458) | `/connz?auth=true` on each bus node's monitoring endpoint lists the receiver connection's publish allow list, which must name the `legacy.swarm.*` form of its eight pull, merge and checks subjects; `/subsz?test=swarm.<swarm>.pull.pushed` matches nothing. Grant them to `swarm-github-webhook` in the deployment repository's `users.yaml`, as its pull request 1911 did, then redeliver from GitHub |
 
 ## Lab remote service
 
@@ -2287,7 +2288,7 @@ key; the builders are pure and read no file, clock or network.
 |---|---|---|
 | `toolchain` | `interpreter` | Python version the unit runs on |
 | `toolchain` | `tools` | Tool name to version, such as ruff, basedpyright, semgrep |
-| `toolchain` | `lockfile` | Blob id of `uv.lock` |
+| `toolchain` | `lockfile` | Blob id of `.github/test-requirements.lock` |
 | `toolchain` | `pyproject` | Blob id of `pyproject.toml`, which holds the tool and pytest configuration |
 | `toolchain` | `image` | Digest of the worker image |
 | `toolchain` | `environment` | The environment key: each variable the unit reads, with its value |
@@ -2655,14 +2656,46 @@ kubectl logs -n ci-lab deploy/ci-lab-scheduler | grep 'cannot expand'
 | `'steps'` or `'jobs'` | The called workflow has no `jobs`, or one of its jobs has neither `steps` nor `uses` |
 | A YAML parse error | A workflow file directly in `.github/workflows` at the grader revision does not parse, even one that no static job calls |
 
+#### A head no node mirror can hold
+
+Each CI node's cache mirrors only the repository's `refs/heads/*` and `refs/pull/*/head` refs, so a
+worker cannot fetch a commit no such ref reaches, such as the head of an ejected merge group whose
+`gh-readonly-queue` branch is gone. Before the scheduler expands a released head it asks
+`MirrorExpander.reachable`, which lists those refs with `git ls-remote` and accepts the head when a
+ref names it or when the dev branch head, fetched into the scheduler's mirror, descends from it. It
+never fetches the head itself, since GitHub may no longer serve it. Any non-zero exit of the
+ancestor check reads as not reachable, including the exit 128 git gives for a head the scheduler's
+mirror does not hold. A head that check refuses is retired with the action
+`retiring <head>: no branch or pull request head ref of <repo> carries <head>`: it gets no grade and
+no unit, so no worker leases one. A pull request head also gets one completed `lab-shadow/required`
+check run with conclusion `failure` and that summary; a hotfix, merge group, promotion or backfill
+head gets none. Such a pull request head is never the current head of a pull request, since GitHub
+keeps `refs/pull/<n>/head` on each pull request's last head, so the post marks a superseded commit
+and holds no merge. That post is tried once, like the cannot expand post: a refusal by the App
+token, GitHub or the network ends the same action with
+`; cannot post the failed required check on <head>: <error>`, is not retried, and the pass goes
+on. A head pushed to a grade ref skips the reachability check, since the lab remote serves it. A
+failed `git ls-remote` raises like any other failed git command, so the head takes the
+[cannot expand](#a-head-that-cannot-expand) path.
+
 #### The worker reads the same workflows
 
 The static executor finds its gate again on the worker. `scripts.ci_lab.executors.gate(grader_tree,
 name)` runs `discover` over the grader tree it cut for the lease, with `ci_wiring.load(grader_tree)`
 as the reusable workflows, and returns the gate step the unit names. When that discovery raises,
 or the grader workflow has no gate step of that name, the unit ends with no outcome. The worker
-prints `ci-lab worker: unit <job> crashed: <error>` to its standard error and the lease expires,
-so the unit follows the expired lease rule of step 6 of the [Scheduler loop](#scheduler-loop).
+prints `ci-lab worker: unit <job> crashed: <error>` and its traceback to its standard error and the
+lease expires, so the unit follows the expired lease rule of step 6 of the
+[Scheduler loop](#scheduler-loop).
+
+#### What a failed static unit's check run shows
+
+A gate's check run text shows, ahead of its unit keys, the last 4096 characters of each failed
+static unit's stored log, `lab/static/<digest>/log.txt`, with secret patterns redacted, in a fence
+under the unit key, so a reader of the check run alone sees which diagnostic failed the gate. The
+blocks together stay within half of GitHub's 65535 character text limit; past it the blocks that
+fit end with a note that the later ones are left out. A passing unit, a failed unit with no stored
+or an empty log, and the required check show only unit keys.
 
 #### Limitations
 
@@ -3936,7 +3969,7 @@ Each scheduler pass applies the counts on two paths:
 |---|---|
 | A lease expires | `queue.Queue.reap` moves the job back to pending with one more `attempts` while `attempts` is below `lab.retry.lost`, else sets its state and outcome to `lost` |
 | A worker completes a lease | `decide` reads the job's outcome and `attempts`; on `retry`, `queue.Queue.retry` moves the job back to pending with one more `attempts` and the unit stays open, else the outcome is final |
-| A unit's executor raises | The unit stops heartbeating and its lease is never completed, so it reaches the scheduler as an expired lease. The worker prints `ci-lab worker: unit <job> crashed: <repr of the error>` to standard error on its next lease cycle |
+| A unit's executor raises | The unit stops heartbeating and its lease is never completed, so it reaches the scheduler as an expired lease. The worker prints `ci-lab worker: unit <job> crashed: <repr of the error>` to standard error on its next lease cycle, followed by the error's traceback, whose last line names the path a missing file error could not open |
 
 A worker that completes a lease with `crash` therefore runs once more under the default
 `lost: 1`, and a second `crash` is final and red. `tests/ci_lab/test_retry.py` covers the decision
@@ -4133,16 +4166,18 @@ Limitations:
 ### Head venv builds
 
 `venvs.venv_for(lockfile_digest, tree, root, build)` returns the baked image venv when its
-marker holds the digest. Otherwise it builds `root/<digest>` once, under a lock per digest, by
-running uv in a `Sandbox` from `build` (`venvs.Build`: ports, whitelist and time limit). The
-executors pass `Pod.build`, the pod's ports, whitelist and unit time limit.
+marker holds the digest. The executors pass the sha256 of the head's tracked
+`.github/test-requirements.lock` (`venvs.LOCKFILE`), the file the image hashes into that marker;
+`uv.lock` is not tracked and is never read. Otherwise it builds `root/<digest>` once, under a lock
+per digest, by running uv in a `Sandbox` from `build` (`venvs.Build`: ports, whitelist and time
+limit). The executors pass `Pod.build`, the pod's ports, whitelist and unit time limit.
 
 | Part | Value |
 |---|---|
-| Command | the worker's `uv` with `sync --frozen --no-install-project --all-extras --python <worker python> --project <tree>` |
+| Commands | the worker's `uv` with `venv --clear --python <worker python> root/<digest>`, then `pip install --python root/<digest>/bin/python --constraint <tree>/.github/test-requirements.lock --excludes <tree>/.github/test-excludes.txt -r <tree>/pyproject.toml --extra dev --extra all` |
 | Runs from | the head tree, with network, under `env -i` and no bubblewrap |
-| Environment | `build.whitelist`, `PATH` (the whitelist's, else `/bin:/usr/bin`), `UV_PROJECT_ENVIRONMENT=root/<digest>` and the sandbox's private folders |
-| Run folder | under `root/builds`, removed after a build that ends with code 0 |
+| Environment | `build.whitelist`, `PATH` (the whitelist's, else `/bin:/usr/bin`) and the sandbox's private folders |
+| Run folder | one per command under `root/builds`, removed after the command ends with code 0 |
 
 uv and every build hook it starts get no other worker variable in their environment. A build
 that runs past the unit time limit or ends with a
