@@ -18,6 +18,12 @@ def start_dropping_directly(store: Any, slug: str, current: Any, previous: Any) 
     store.project_agent(slug, current, removed=previous.name)
 
 
+def start_dropping_behind_an_or(registry: Any, slug: str, current: Any, previous: Any) -> None:
+    # ruleid: successor-start-drops-live-predecessor
+    removed = previous.name if previous and (previous.state == "ended" or previous.name != current.name) else ""
+    registry._project(slug, (current.name,), current, removed=removed)
+
+
 def start_keeping(registry: Any, slug: str, current: Any, previous: Any) -> None:
     # ok: successor-start-drops-live-predecessor
     removed = previous.name if previous and previous.state == "ended" and previous.name != current.name else ""
