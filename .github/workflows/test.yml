@@ -2574,7 +2574,7 @@ jobs:
       - name: Take each shard's coverage as it lands
         if: needs.select.outputs.scope != 'none' && steps.source.outputs.test_only != 'true'
         continue-on-error: true
-        timeout-minutes: ${{ github.event_name == 'push' && 58 || 45 }}
+        timeout-minutes: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && 58 || 45 }}
         uses: actions/github-script@v7
         env:
           SHARDS: ${{ needs.select.outputs.scope == 'selected' && needs.select.outputs.count || 20 }}

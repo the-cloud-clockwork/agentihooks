@@ -23,19 +23,17 @@ def _queue_watch() -> ModuleType:
 queue_watch = _queue_watch()
 
 
+@pytest.mark.feature("queue-watch-job-states")
 @pytest.mark.parametrize(
     ("job", "is_queued"),
     [
-        ({"runner_name": None, "started_at": "2026-01-01T00:00:00Z", "created_at": "2026-01-01T00:00:00Z"}, True),
-        ({"runner_name": "", "started_at": "2026-01-01T00:00:00Z", "created_at": "2026-01-01T00:00:00Z"}, True),
-        (
-            {"runner_name": "anton-oss-7", "started_at": "2026-01-01T00:00:00Z", "created_at": "2026-01-01T00:00:00Z"},
-            False,
-        ),
-        ({"runner_name": None, "started_at": "2026-01-01T00:00:03Z", "created_at": "2026-01-01T00:00:00Z"}, False),
+        ({"status": "queued"}, True),
+        ({"status": "in_progress"}, False),
+        ({"status": "completed"}, False),
+        ({"status": "waiting"}, False),
     ],
 )
-def test_a_job_is_queued_only_without_a_runner_and_an_unmoved_start_time(job: dict, is_queued: bool) -> None:
+def test_a_job_is_queued_only_when_its_status_is_queued(job: dict, is_queued: bool) -> None:
     assert queue_watch.queued(job) == is_queued
 
 
@@ -72,8 +70,8 @@ def test_a_running_or_completed_shard_job_says_the_scope_has_started(
     api, jobs, calls = jobs_api
     jobs.extend(
         [
-            {"name": "unit (3.12, 1)", "runner_name": None, "started_at": "t", "created_at": "t"},
-            {"name": "unit (3.12, 2)", "runner_name": "anton-oss-1", "started_at": "t2", "created_at": "t"},
+            {"name": "unit (3.12, 1)", "status": "queued"},
+            {"name": "unit (3.12, 2)", "status": "in_progress"},
         ]
     )
     assert queue_watch.started(api, "o/r", "9", "1", "token-x", "unit (") is True
@@ -82,21 +80,43 @@ def test_a_running_or_completed_shard_job_says_the_scope_has_started(
     assert authorization == "Bearer token-x"
 
 
+@pytest.mark.feature("queue-watch-job-states")
 def test_every_matching_shard_job_still_queued_says_the_scope_has_not_started(
     jobs_api: tuple[str, list[dict[str, object]], list[tuple[str, str]]],
 ) -> None:
     api, jobs, _ = jobs_api
-    jobs.append({"name": "unit (3.12, 1)", "runner_name": None, "started_at": "t", "created_at": "t"})
+    jobs.append({"name": "unit (3.12, 1)", "status": "queued"})
     assert queue_watch.started(api, "o/r", "9", "1", "token-x", "unit (") is False
+
+
+@pytest.mark.feature("queue-watch-job-states")
+def test_a_completed_shard_among_queued_ones_still_reports_not_started(
+    jobs_api: tuple[str, list[dict[str, object]], list[tuple[str, str]]],
+) -> None:
+    api, jobs, _ = jobs_api
+    jobs.extend(
+        [
+            {"name": "unit (3.12, 1)", "status": "completed"},
+            {"name": "unit (3.12, 2)", "status": "queued"},
+        ]
+    )
+    assert queue_watch.started(api, "o/r", "9", "1", "token-x", "unit (") is False
+
+
+@pytest.mark.feature("queue-watch-job-states")
+def test_every_matching_shard_job_completed_reports_started(
+    jobs_api: tuple[str, list[dict[str, object]], list[tuple[str, str]]],
+) -> None:
+    api, jobs, _ = jobs_api
+    jobs.append({"name": "unit (3.12, 1)", "status": "completed"})
+    assert queue_watch.started(api, "o/r", "9", "1", "token-x", "unit (") is True
 
 
 def test_a_selected_legs_job_name_is_matched_with_its_own_prefix(
     jobs_api: tuple[str, list[dict[str, object]], list[tuple[str, str]]],
 ) -> None:
     api, jobs, _ = jobs_api
-    jobs.append(
-        {"name": "unit-selected (3.12, 1)", "runner_name": "anton-oss-1", "started_at": "t2", "created_at": "t"}
-    )
+    jobs.append({"name": "unit-selected (3.12, 1)", "status": "in_progress"})
     assert queue_watch.started(api, "o/r", "9", "1", "token-x", "unit-selected (") is True
 
 
@@ -104,7 +124,7 @@ def test_no_matching_shard_job_name_reads_as_unknown(
     jobs_api: tuple[str, list[dict[str, object]], list[tuple[str, str]]],
 ) -> None:
     api, jobs, _ = jobs_api
-    jobs.append({"name": "lint", "runner_name": "anton-oss-1", "started_at": "t2", "created_at": "t"})
+    jobs.append({"name": "lint", "status": "in_progress"})
     assert queue_watch.started(api, "o/r", "9", "1", "token-x", "unit (") is None
 
 

@@ -2,8 +2,9 @@
 
 arrivals.py takes no GitHub token and makes no API call, so it cannot read job states itself. This
 runs beside it, with the App token the "Mint the token" step readies, and leaves its answer in
-STATE as plain text for arrivals.py to read with a file stat. A job is still queued when GitHub has
-not yet handed it a runner: its runner_name is empty and started_at still equals created_at.
+STATE as plain text for arrivals.py to read with a file stat. A shard already completed never holds
+the answer back; among the rest, a job is queued when the API reports its status so, and the scope
+has started once none of them is.
 """
 
 import json
@@ -21,7 +22,12 @@ STATE = ".sonar-shard-queue-state"
 
 def queued(job: dict) -> bool:
     """Say whether GitHub has not yet handed this job a runner."""
-    return not job.get("runner_name") and job.get("started_at") == job.get("created_at")
+    return job.get("status") == "queued"
+
+
+def completed(job: dict) -> bool:
+    """Say whether GitHub has finished running this job."""
+    return job.get("status") == "completed"
 
 
 def started(api: str, repo: str, run_id: str, attempt: str, token: str, prefix: str) -> bool | None:
@@ -38,7 +44,8 @@ def started(api: str, repo: str, run_id: str, attempt: str, token: str, prefix: 
     shards = [job for job in payload.get("jobs") or [] if str(job.get("name", "")).startswith(prefix)]
     if not shards:
         return None
-    return any(not queued(job) for job in shards)
+    remaining = [job for job in shards if not completed(job)]
+    return True if not remaining else any(not queued(job) for job in remaining)
 
 
 def main() -> int:

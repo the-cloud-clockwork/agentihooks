@@ -386,22 +386,26 @@ def test_an_unreachable_service_answers_no_listing() -> None:
     assert arrivals.Results("http://127.0.0.1:9/", _token("run-1", "job-2")).listed() is None
 
 
+@pytest.mark.feature("queue-watch-job-states")
 def test_a_missing_queue_state_file_reads_as_unknown(tmp_path: Path) -> None:
     assert arrivals.FileJobs(tmp_path / "state").started() is None
 
 
+@pytest.mark.feature("queue-watch-job-states")
 def test_a_fresh_started_state_reads_as_started(tmp_path: Path) -> None:
     path = tmp_path / "state"
     path.write_text("started")
     assert arrivals.FileJobs(path).started() is True
 
 
+@pytest.mark.feature("queue-watch-job-states")
 def test_a_fresh_queued_state_reads_as_not_started(tmp_path: Path) -> None:
     path = tmp_path / "state"
     path.write_text("queued")
     assert arrivals.FileJobs(path).started() is False
 
 
+@pytest.mark.feature("queue-watch-job-states")
 def test_a_stale_queue_state_file_reads_as_unknown(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path = tmp_path / "state"
     path.write_text("queued")
@@ -410,6 +414,7 @@ def test_a_stale_queue_state_file_reads_as_unknown(tmp_path: Path, monkeypatch: 
     assert arrivals.FileJobs(path).started() is None
 
 
+@pytest.mark.feature("queue-watch-job-states")
 def test_an_unrecognised_queue_state_reads_as_unknown(tmp_path: Path) -> None:
     path = tmp_path / "state"
     path.write_text("garbled")

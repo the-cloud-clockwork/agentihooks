@@ -172,11 +172,11 @@ class FileJobs:
         """Say whether the watcher's last fresh answer was started, or None when it is missing or stale."""
         try:
             stat = self.path.stat()
+            content = self.path.read_text().strip()
         except OSError:
             return None
         if time.time() - stat.st_mtime > STALE:
             return None
-        content = self.path.read_text().strip()
         return True if content == "started" else False if content == "queued" else None
 
 

@@ -11161,6 +11161,24 @@
       ]
     },
     {
+      "id": "queue-watch-job-states",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-sonar-wait-shard-queue",
+      "behaviour": "queue_watch.py answers queued from a shard job's own status rather than a runner-name and timestamp guess, excludes a shard already completed before asking whether any of the rest is still queued, and answers started once no shard of the scope remains anything but completed. FileJobs.started reads that on disk answer back for arrivals.py only while it is fresh, folding its file stat and read into one try so a transient OSError leaves it unknown instead of raising.",
+      "seam": ".github/coverage/queue_watch.queued/completed/started against the run attempt's jobs endpoint, and arrivals.FileJobs.started reading the state file queue_watch.py keeps current",
+      "tests": [
+        "tests/test_queue_watch.py::test_a_job_is_queued_only_when_its_status_is_queued",
+        "tests/test_queue_watch.py::test_every_matching_shard_job_still_queued_says_the_scope_has_not_started",
+        "tests/test_queue_watch.py::test_a_completed_shard_among_queued_ones_still_reports_not_started",
+        "tests/test_queue_watch.py::test_every_matching_shard_job_completed_reports_started",
+        "tests/test_sonar_arrivals.py::test_a_missing_queue_state_file_reads_as_unknown",
+        "tests/test_sonar_arrivals.py::test_a_fresh_started_state_reads_as_started",
+        "tests/test_sonar_arrivals.py::test_a_fresh_queued_state_reads_as_not_started",
+        "tests/test_sonar_arrivals.py::test_a_stale_queue_state_file_reads_as_unknown",
+        "tests/test_sonar_arrivals.py::test_an_unrecognised_queue_state_reads_as_unknown"
+      ]
+    },
+    {
       "id": "type-gate-one-context",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-type-gate-cross-file-baseline",
