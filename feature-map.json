@@ -6663,6 +6663,18 @@
       ]
     },
     {
+      "id": "swarm-release-tag-moves-only-for-the-newest-published-release",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2694",
+      "behaviour": "A Swarm image release build pushes only its commit image, and a release job that runs after the build moves the swarm image release tag at move time onto that image unless a newer release has already published its swarm version image, then tags the version, so of two overlapping releases that both read themselves as newest at checkout the release tag ends on the newer whichever finishes last, and no publish step moves the release tag from its checkout time newest flag.",
+      "seam": "Swarm image workflow tags step and its release job that runs docker/swarm-node/release.sh",
+      "tests": [
+        "tests/contracts/promotion/test_release_images.py::test_the_swarm_release_build_pushes_only_its_commit_image",
+        "tests/contracts/promotion/test_release_images.py::test_the_swarm_release_tag_stays_on_the_newer_of_two_overlapping_releases_whichever_finishes_last",
+        "tests/contracts/promotion/test_release_images.py::test_the_release_job_moves_the_swarm_release_tag_and_the_publish_job_moves_none"
+      ]
+    },
+    {
       "id": "hive-retire-absence",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1772",

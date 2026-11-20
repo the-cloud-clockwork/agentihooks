@@ -15,6 +15,7 @@ WORKFLOWS = ROOT / ".github/workflows"
 IMAGES = ("swarm-image.yml", "swarm-node-image.yml", "ci-lab-image.yml")
 TAG = {"event_name": "release", "ref": "refs/tags/v2.9.1", "run_id": 1000}
 WORKER = "registry/agentihooks-worker"
+SWARM = "ghcr.io/the-cloud-clockwork/agentihooks-swarm"
 COMMITS = {"v2.1.7": "aaa", "v2.1.7rc1": "aaa", "v2.1.8": "bbb"}
 SEEDED = {"2.1.6": "d6", "release": "d6", "sha-aaa": "d7", "sha-bbb": "d8"}
 
@@ -94,44 +95,27 @@ def test_a_release_tag_off_main_publishes_nothing(tmp_path):
     assert output == ""
 
 
-def test_the_swarm_release_tags_the_version_and_release(tmp_path):
+@pytest.mark.feature("swarm-release-tag-moves-only-for-the-newest-published-release")
+def test_the_swarm_release_build_pushes_only_its_commit_image(tmp_path: Path) -> None:
     job = _job("swarm-image.yml")
     assert "github.event_name == 'release'" in job["if"]
     tags = next(step for step in job["steps"] if step.get("id") == "tags")
-    assert tags["env"]["RELEASE"] == "${{ github.event.release.tag_name }}"
+    assert tags["env"] == {"IMAGE": SWARM, "RELEASE": "${{ github.event.release.tag_name }}"}
 
-    assert tags["env"]["LATEST"] == "${{ steps.main.outputs.latest }}"
-
-    def run(release, latest=""):
-        output = tmp_path / f"output-{release or 'dev'}-{latest}"
+    def run(release: str) -> list[str]:
+        output = tmp_path / f"output-{release or 'dev'}"
         env = {
             **os.environ,
             **tags["env"],
             "RELEASE": release,
-            "LATEST": latest,
             "GITHUB_SHA": "123456789abcdef",
             "GITHUB_OUTPUT": str(output),
         }
         subprocess.run(["bash", "-e", "-c", tags["run"]], env=env, check=True)
         return output.read_text().splitlines()
 
-    assert run("v2.9.1", "true") == [
-        "tags<<EOF",
-        "ghcr.io/the-cloud-clockwork/agentihooks-swarm:2.9.1",
-        "ghcr.io/the-cloud-clockwork/agentihooks-swarm:release",
-        "EOF",
-    ]
-    assert run("v2.9.0", "false") == [
-        "tags<<EOF",
-        "ghcr.io/the-cloud-clockwork/agentihooks-swarm:2.9.0",
-        "EOF",
-    ]
-    assert run("") == [
-        "tags<<EOF",
-        "ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev",
-        "ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev-1234567",
-        "EOF",
-    ]
+    assert run("v2.9.1") == ["tags<<EOF", f"{SWARM}:sha-123456789abcdef", "EOF"]
+    assert run("") == ["tags<<EOF", f"{SWARM}:dev", f"{SWARM}:dev-1234567", "EOF"]
 
 
 def test_the_worker_release_publishes_the_qualified_candidate_but_never_moves_dev() -> None:
@@ -142,14 +126,14 @@ def test_the_worker_release_publishes_the_qualified_candidate_but_never_moves_de
     assert "github.ref == 'refs/heads/dev'" in dev["if"]
 
 
-def _worker_release(
-    tmp_path: Path, tags: str, error: str = "", unreachable: bool = False
-) -> tuple[Path, Callable[[str], subprocess.CompletedProcess[str]]]:
+def _fakes(
+    tmp_path: Path, tags: str, seeded: dict[str, str], error: str = "", unreachable: bool = False
+) -> tuple[Path, dict[str, str]]:
     tools = tmp_path / "bin"
     tools.mkdir()
     registry = tmp_path / "registry"
     registry.mkdir()
-    for tag, digest in SEEDED.items():
+    for tag, digest in seeded.items():
         (registry / tag).write_text(digest)
     (tools / "docker").write_text(
         "#!/usr/bin/env bash\n"
@@ -186,6 +170,13 @@ def _worker_release(
         "FAKE_UNREACHABLE": "yes" if unreachable else "",
         "FAKE_TAGS": str(tmp_path / "tags"),
     }
+    return registry, env
+
+
+def _worker_release(
+    tmp_path: Path, tags: str, error: str = "", unreachable: bool = False
+) -> tuple[Path, Callable[[str], subprocess.CompletedProcess[str]]]:
+    registry, env = _fakes(tmp_path, tags, SEEDED, error, unreachable)
 
     def release(tag: str) -> subprocess.CompletedProcess[str]:
         argv = ["bash", str(ROOT / "docker/swarm-node/release.sh"), WORKER, tag, COMMITS[tag]]
@@ -273,3 +264,77 @@ def test_the_queued_hive_job_moves_the_worker_release_tag_and_the_image_job_move
     names = [step.get("name", step.get("uses")) for step in hive["steps"]]
     assert names.index("docker/login-action@v3") < names.index(worker["name"])
     assert names.index(worker["name"]) < names.index("Publish the hive worker once per release version")
+
+
+def _resolved(block: dict[str, str], tag: str) -> dict[str, str]:
+    values = {"${{ github.event.release.tag_name }}": tag, "${{ steps.main.outputs.latest }}": "true"}
+    assert [value for value in block.values() if value.startswith("${{") and value not in values] == []
+    return {key: values.get(value, value) for key, value in block.items()}
+
+
+def _swarm_release_run(env: dict[str, str], registry: Path, tag: str) -> None:
+    jobs = _load("swarm-image.yml")["jobs"]
+    publish = jobs["publish"]["steps"]
+    tags = next(step for step in publish if step.get("id") == "tags")
+    build = next(step for step in publish if "build-push-action" in step.get("uses", ""))
+    assert build["with"]["tags"] == "${{ steps.tags.outputs.tags }}"
+    output = registry.parent / f"tags-{tag}"
+    built = {**env, **_resolved(tags["env"], tag), "GITHUB_SHA": COMMITS[tag], "GITHUB_OUTPUT": str(output)}
+    subprocess.run(["bash", "-e", "-c", tags["run"]], env=built, check=True)
+    head, *images, tail = output.read_text().splitlines()
+    assert (head, tail) == ("tags<<EOF", "EOF")
+    for image in images:
+        (registry / image.rsplit(":", 1)[1]).write_text(SEEDED[f"sha-{COMMITS[tag]}"])
+    moves = [(job, step) for job in jobs.values() if job.get("needs") == "publish" for step in job["steps"]]
+    for job, step in moves:
+        if "run" in step:
+            moved = {**env, **_resolved(job.get("env", {}), tag), **_resolved(step.get("env", {}), tag)}
+            argv = ["bash", "-e", "-c", step["run"]]
+            done = subprocess.run(
+                argv, env={**moved, "GITHUB_SHA": COMMITS[tag]}, cwd=ROOT, capture_output=True, text=True
+            )
+            assert done.returncode == 0, done.stderr
+
+
+@pytest.mark.feature("swarm-release-tag-moves-only-for-the-newest-published-release")
+@pytest.mark.parametrize(
+    "order",
+    [
+        pytest.param(("v2.1.8", "v2.1.7"), id="older-finishes-last"),
+        pytest.param(("v2.1.7", "v2.1.8"), id="newer-finishes-last"),
+    ],
+)
+def test_the_swarm_release_tag_stays_on_the_newer_of_two_overlapping_releases_whichever_finishes_last(
+    tmp_path: Path, order: tuple[str, str]
+) -> None:
+    registry, env = _fakes(tmp_path, "v2.1.6 v2.1.7 v2.1.8", {"2.1.6": "d6", "release": "d6"})
+    for tag in order:
+        _swarm_release_run(env, registry, tag)
+    assert _tags(registry)["release"] == "d8"
+    assert _tags(registry) == {
+        "2.1.6": "d6",
+        "2.1.7": "d7",
+        "2.1.8": "d8",
+        "release": "d8",
+        "sha-aaa": "d7",
+        "sha-bbb": "d8",
+    }
+
+
+@pytest.mark.feature("swarm-release-tag-moves-only-for-the-newest-published-release")
+def test_the_release_job_moves_the_swarm_release_tag_and_the_publish_job_moves_none() -> None:
+    jobs = _load("swarm-image.yml")["jobs"]
+    moving = [
+        step.get("name", step.get("id")) for step in jobs["publish"]["steps"] if ":release" in step.get("run", "")
+    ]
+    assert moving == []
+    release = jobs["release"]
+    assert release["if"] == "github.event_name == 'release'"
+    assert release["needs"] == "publish"
+    assert release["env"] == {"IMAGE": SWARM, "RELEASE": "${{ github.event.release.tag_name }}"}
+    swarm = _step(release, "Tag the swarm release and move the release tag unless a newer release already published")
+    assert "env" not in swarm
+    assert swarm["run"] == 'bash docker/swarm-node/release.sh "$IMAGE" "$RELEASE" "$GITHUB_SHA"\n'
+    names = [step.get("name", step.get("uses")) for step in release["steps"]]
+    assert names.index("actions/checkout@v4") < names.index(swarm["name"])
+    assert names.index("docker/login-action@v3") < names.index(swarm["name"])
