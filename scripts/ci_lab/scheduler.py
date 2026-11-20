@@ -589,22 +589,22 @@ class Scheduler:
         classes, hits, misses = self._demand()
         pending: dict[str, list[float]] = {}
         pending_slots: Counter[str] = Counter()
-        for job in self._jobs(self.queue.pending()):
-            if job.id in classes:
-                name = CLASSES[classes[job.id]]
-                pending.setdefault(name, []).append(UNIT_ESTIMATE_S * job.requirement.slots)
-                pending_slots[name] += job.requirement.slots
+        for job, (slots, _) in self.queue.slots(self.queue.pending()).items():
+            if job in classes:
+                name = CLASSES[classes[job]]
+                pending.setdefault(name, []).append(UNIT_ESTIMATE_S * slots)
+                pending_slots[name] += slots
         running: Counter[str] = Counter()
         running_slots: Counter[str] = Counter()
         busy = overdue = 0
         since = now_ms - int(UNIT_ESTIMATE_S * 1000)
-        for job in self._jobs(self.queue.leased()):
-            busy += job.requirement.slots
-            overdue += bool(job.leased_ms) and job.leased_ms < since
-            if job.id in classes:
-                name = CLASSES[classes[job.id]]
+        for job, (slots, leased_ms) in self.queue.slots(self.queue.leased()).items():
+            busy += slots
+            overdue += bool(leased_ms) and leased_ms < since
+            if job in classes:
+                name = CLASSES[classes[job]]
                 running[name] += 1
-                running_slots[name] += job.requirement.slots
+                running_slots[name] += slots
         ready = now_ms - READY_MS
         self.queue.prune(ready)
         offers = self.queue.offers(ready)
@@ -650,10 +650,6 @@ class Scheduler:
         for run in sorted(self.client.smembers(LIVE)):
             if (state := self.grade(run)) is not None:
                 yield state
-
-    def _jobs(self, ids: Sequence[str]) -> list[Job]:
-        """Return the queue jobs of the ids whose records still exist."""
-        return [job for job in map(self.queue.job, ids) if job is not None]
 
     def save(self, state: State) -> None:
         """Store a grade's state, so the next pass and the relay read it back."""

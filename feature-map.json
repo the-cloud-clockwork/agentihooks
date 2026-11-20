@@ -140,6 +140,16 @@
       ]
     },
     {
+      "id": "lab-scheduler-load-reads",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-scheduler-load-slots-only",
+      "behaviour": "The load that every CI lab metrics scrape and GET /capacity answer from, and that admission reads each pass, reads only the slots and lease start of each pending and leased job, with HMGET in pipelines that open no transaction, and builds no job; a job whose record is gone counts nowhere. A queue of tens of thousands of jobs no longer costs a full parsed job per id on every scrape.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.load over fakeredis and the local object store, counting every job built, every direct Redis command that names a job record and every pipeline opened",
+      "tests": [
+        "tests/ci_lab/test_scheduler_memory.py::test_a_load_reads_each_queued_job_s_slots_and_lease_start_through_pipelines_and_builds_no_job"
+      ]
+    },
+    {
       "id": "lab-scheduler-release-bound",
       "rules": ["lab-release-starts-every-waiting-head"],
       "origin": "regression",
