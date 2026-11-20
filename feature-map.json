@@ -5852,6 +5852,17 @@
       ]
     },
     {
+      "id": "config-import-without-yaml",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/ci-outage-config-yaml-import",
+      "behaviour": "Importing hooks.config never requires pyyaml at module import time: its module level CI_MANIFESTO_PATHS computation reaches hooks.context.profile_chain.layer_root, whose yaml.safe_load call imports yaml inside the function body, so a caller without pyyaml installed, such as the merge queue early collection step, can still import hooks.config and every module that imports it.",
+      "seam": "hooks.config._resolve_manifesto_paths through hooks.context.profile_chain.layer_root, parents, _manifest, overlays, wears and require_capabilities, each importing yaml locally instead of at module scope",
+      "tests": [
+        "tests/test_config_import_no_yaml.py::test_hooks_config_imports_without_pyyaml_installed",
+        "tests/test_shard_check.py::test_shard_check_installs_pyyaml_before_the_import_chain_that_needs_it"
+      ]
+    },
+    {
       "id": "credential-guard-describe-flag-words",
       "origin": "regression",
       "ordered_at": "2026-11-18",
