@@ -2306,7 +2306,7 @@ key; the builders are pure and read no file, clock or network.
 | `stats` | `scope` | Source to changed lines, for the sources the test file reaches |
 | `stats` | `measured` | Whether the inputs come from measured coverage |
 | `stats` | `discovery` | Digest of the discovery inputs |
-| `stats` | `sources` | Path to sha256 of each configuration file, `uv.lock` among them, and each `scripts/ci_mutation/` file |
+| `stats` | `sources` | Path to sha256 of each configuration file, `.github/test-requirements.lock` among them, and each `scripts/ci_mutation/` file |
 | `stats` | `options` | The pytest options, in order |
 | `stats` | `interpreter` | `sys.version` |
 | `stats` | `platform` | `sys.platform` |
@@ -2332,9 +2332,10 @@ key; the builders are pure and read no file, clock or network.
   (default JSON separators), so its digest equals `StoredStats.identity` for the same inputs and
   the lab reuses the stats the cache already holds. Its file inputs are sha256 digests of the file
   bytes, the one exception to blob ids, because the stats cache identity hashes them that way.
-  Its lockfile and pyproject inputs are the `uv.lock` and `pyproject.toml` entries of `sources`.
-- A change to `uv.lock` or `pyproject.toml` rekeys every unit kind. A grade is keyed by its head,
-  which names both files.
+  Its lockfile and pyproject inputs are the `.github/test-requirements.lock` and `pyproject.toml`
+  entries of `sources`.
+- A change to `.github/test-requirements.lock` or `pyproject.toml` rekeys every unit kind. A grade
+  is keyed by its head, which names both files.
 - The lab runs pytest itself, so no workflow file under `.github/` changes a test verdict. The
   pytest invocation, which a workflow used to define, is the test input instead. This replaces the
   manifest's `.github/` prefix invalidation, as the lab's test expansion design specifies; the

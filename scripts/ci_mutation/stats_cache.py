@@ -17,7 +17,14 @@ SCHEMA = 4
 CONTEXT_FIELDS = ("schema", "sources", "options", "runtime")
 KEY_FIELDS = ("path", "tests")
 DYNAMIC_IMPORTS = ("import_module", "__import__", "spec_from_file_location", "module_from_spec")
-CONFIGURATION = {"pyproject.toml", "pytest.ini", "setup.cfg", "tox.ini", "uv.lock", ".coveragerc"}
+CONFIGURATION = {
+    "pyproject.toml",
+    "pytest.ini",
+    "setup.cfg",
+    "tox.ini",
+    ".github/test-requirements.lock",
+    ".coveragerc",
+}
 # CI rewrites the durations from dev each run; they only order and split tests, and records keep their own durations.
 UNKEYED = {".test_durations"}
 TRACKED = ("git", "ls-files", "-z")
