@@ -5738,6 +5738,18 @@
       ]
     },
     {
+      "id": "credential-guard-refuses-pod-environment-dumps",
+      "origin": "regression",
+      "ordered_at": "2026-11-20",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-cred-guard-kubectl-printenv",
+      "behaviour": "The credential guard judges the words after -- of a kubectl exec as the command the pod runs, with no shell around it, so a printenv of a secret looking name and an env or a bare printenv that dumps the whole pod environment are refused with the environment alternative the same way as a local command, while the pod name only listing, a count of its lines, printenv of a name that does not look like a secret, an env word that is only an operand or a flag value, and a kubectl command that sets a container command after -- without exec pass.",
+      "seam": "hooks.context.credential_guard.env_dump_verdict, read by hooks.context.credential_guard.decide",
+      "tests": [
+        "tests/test_credential_guard.py::test_a_pod_environment_dump_without_a_shell_is_refused",
+        "tests/test_credential_guard.py::test_a_pod_environment_name_listing_passes"
+      ]
+    },
+    {
       "id": "swarm-outage-recovery-hub-admitted",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-outage-recovery",
