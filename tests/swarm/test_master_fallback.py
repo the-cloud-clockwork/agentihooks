@@ -187,7 +187,7 @@ def test_the_service_runs_the_loop_with_the_watched_swarms_and_minutes():
         "WorkingDirectory=/repo\n"
         "Environment=AGENTIHOOKS_MASTER_FALLBACK_SWARMS=sw\n"
         "Environment=AGENTIHOOKS_MASTER_FALLBACK_MINUTES=20\n"
-        'ExecStart="/py" -m scripts.swarm.master_fallback run\n'
+        'ExecStart="/py" -P -m scripts.swarm.master_fallback run\n'
         "Restart=always\nRestartSec=10\n\n"
         "[Install]\nWantedBy=default.target\n"
     )
@@ -241,7 +241,7 @@ def test_a_forced_master_up_runs_its_own_runner_in_its_own_session(monkeypatch: 
     monkeypatch.setattr(master_fallback, "subprocess", SimpleNamespace(Popen=popen))
 
     assert master_fallback.force("sw", 1_801_000) == 77
-    assert calls == [([sys.executable, "-m", "scripts.swarm.master_fallback", "force", "sw", "1801000"], True)]
+    assert calls == [([sys.executable, "-P", "-m", "scripts.swarm.master_fallback", "force", "sw", "1801000"], True)]
 
 
 def test_a_launch_keeps_an_empty_service_path_after_the_user_folders(
@@ -382,7 +382,7 @@ def test_run_makes_each_pass_in_its_own_bounded_process_and_waits_a_minute(monke
     with pytest.raises(Done):
         master_fallback.run({})
 
-    assert runs == [([sys.executable, "-m", "scripts.swarm.master_fallback", "pass"], False, 50)]
+    assert runs == [([sys.executable, "-P", "-m", "scripts.swarm.master_fallback", "pass"], False, 50)]
     assert waits == [(60, 120)]
 
 

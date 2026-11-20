@@ -6074,7 +6074,7 @@
       "origin": "regression",
       "ordered_at": "2026-11-06",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2401",
-      "behaviour": "The master fallback service starts exactly one master for a watched swarm left without a live master past its window, resets the wait while a master lives, skips stopped swarms without ending the pass, runs each pass in its own process bounded by a timeout, writes its systemd unit with every systemctl call bounded, and launches master up in a detached session through the interpreter's absolute path with -P and the user's bin folder on PATH, so the start command runs under the systemd default PATH and a scripts folder in the working folder never shadows the installed package.",
+      "behaviour": "The master fallback service starts exactly one master for a watched swarm left without a live master past its window, resets the wait while a master lives, skips stopped swarms without ending the pass, runs each pass in its own process bounded by a timeout, writes its systemd unit with every systemctl call bounded, and launches master up in a detached session through the interpreter's absolute path with the user's bin folder on PATH, so the start command runs under the systemd default PATH; the unit, each pass, the forced start and master up run the interpreter with -P, so a scripts folder in the working folder never shadows the installed package.",
       "seam": "python -m scripts.swarm.master_fallback run, pass and install",
       "tests": [
         "tests/swarm/test_master_fallback.py::test_no_master_for_the_window_starts_exactly_one_master",
