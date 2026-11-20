@@ -1,4 +1,4 @@
-"""Refuse new prose that teaches an agent to write to the ledger, against a shrink only allowlist.
+"""Refuse new prose that treats the ledger as writable, against a shrink only allowlist.
 
 The ledger web page is read only, a presentation layer for the operator (agentihooks PR #11561).
 The one write path is the API route code, reachable as `agentihooks api` or, kept for

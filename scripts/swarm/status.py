@@ -48,6 +48,7 @@ from scripts.swarm.health import (
     checks,
     early_ends,
     focus_unclaimed,
+    harness_pin,
     merge_stall,
     night_watch,
     ordering_dependencies,
@@ -174,6 +175,7 @@ def findings(
         + drain_watch.findings(store, slug, limits, now_ms())
         + launch_check.findings(store, slug)
         + spawn_stall.findings(store, slug)
+        + harness_pin.findings(store, slug, now_ms())
         + step_starvation.findings(store, slug, now_ms())
         + night_watch.findings(store, slug)
         + master_critical.findings(store, slug, now_ms())

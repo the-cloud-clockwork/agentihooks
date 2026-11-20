@@ -64,7 +64,6 @@ TEST = "test"
 STATS = run_mutation.STATS
 MUTANT = "mutant"
 KILLED = "killed"
-LOCKFILE = "uv.lock"
 PYPROJECT = "pyproject.toml"
 INPUTS_BASE = "inputs.base"
 MASK = b"***"
@@ -171,7 +170,7 @@ class Mutation:
 
 def lockfile_digest(tree: Path) -> str:
     """Return the sha256 of the tree's lockfile, the key of its venv."""
-    return hashlib.sha256((tree / LOCKFILE).read_bytes()).hexdigest()
+    return hashlib.sha256((tree / venvs.LOCKFILE).read_bytes()).hexdigest()
 
 
 def _report(pod: Pod, record: Mapping[str, Any]) -> Path:

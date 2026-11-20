@@ -301,7 +301,7 @@ The values are constants in the Postgres repository module (`LOCK_WAIT`, `LOCK_T
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Writes fail with `the ledger writer lock was not granted in 3 waits of 10 seconds` | Writers queued for over 30 seconds: a long write, a schema setup building indexes, or many writers at once | Run the holder query to see who holds the lock and for how long; retry the command once the queue drains |
+| Writes fail with `the ledger writer lock was not granted in 3 waits of 10 seconds` | Writers queued for over 30 seconds: a long write, a schema setup building indexes, or many writers at once | Run the holder query to see who holds the lock and for how long; retry the command once the queue drains. When task writes on a ledger with many stamp records each hold the lock for about a second, check that every writer runs code with the [writer copy rebuild](presentation-layer.md#writer-copy-rebuild) |
 | `cannot start a transaction within a transaction` | Code asked for the writer lock after its transaction had already run a statement | Take the writer lock as the transaction's first statement |
 | A holder shows `idle in transaction` for minutes | The session did not receive the settings, for example through a pooler that drops startup options, or the process predates this change | Run the `SHOW` check; restart the ledger server on current code; end the backend with `SELECT pg_terminate_backend(<pid>)` only as a stopgap |
 | `canceling statement due to statement timeout` in the server log | One statement ran past 60 seconds | Find the statement in `pg_stat_activity.query` while it runs and fix the query or its index in code |

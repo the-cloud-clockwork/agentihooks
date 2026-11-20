@@ -1,0 +1,34 @@
+rules:
+  - id: admitted-ended-stop-keeps-settled-agent
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A stop step for a hub admitted agent whose work ended returns no action when the execution stop answers ended or
+      unknown. Once the spoke claim has left its launch the hub lifecycle refuses every later exit, so nothing ever
+      drops the agent: on 20 November a Codex engineer on a done task held seat eng one and a root hive slot for ten
+      hours after the lifecycle had dropped it once and its record came back. Retire and drop the agent when
+      settled_admitted says the lifecycle can no longer settle its exit.
+    patterns:
+      - pattern: |
+          def $F(...):
+              ...
+              $OUT = $STOP(...)
+              ...
+      - metavariable-regex:
+          metavariable: $F
+          regex: .*stop.*ended.*
+      - metavariable-regex:
+          metavariable: $STOP
+          regex: (.*\.)?stop_admitted$
+      - pattern-not: |
+          def $F(...):
+              ...
+              if <... settled_admitted(...) ...>:
+                  ...
+              ...
+      - pattern-not: |
+          def $F(...):
+              ...
+              if <... $HUB.settled_admitted(...) ...>:
+                  ...
+              ...

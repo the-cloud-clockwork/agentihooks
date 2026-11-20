@@ -47,7 +47,7 @@ It prints `valid: <name>`, or `invalid:` with the reason, the rule and two
 free suggestions from the plan title. Never pick a name without the operator.
 Done when the operator's chosen name checks valid.
 
-## 2. Write the ledger content
+## 2. Define the swarm content
 
 Write `content.json` under `~/scratchpad/<repo>/<task>/`
 (`agentihooks scratch new`, which prints the folder it built):

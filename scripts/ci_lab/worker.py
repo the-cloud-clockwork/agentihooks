@@ -13,6 +13,7 @@ import http.client
 import json
 import sys
 import threading
+import traceback
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping
@@ -184,11 +185,13 @@ class Worker:
         self.pool = ThreadPoolExecutor(max_workers=self.slots)
 
     def free(self) -> int:
-        """Return the slots no running unit holds, after reporting each unit that crashed since the last look."""
+        """Return the slots no running unit holds, after reporting each unit that crashed since the last look with
+        the exception's traceback."""
         for future in [future for future in self.running if future.done()]:
             lease = self.running.pop(future)
             if (error := future.exception()) is not None:
                 print(f"ci-lab worker: unit {lease.job} crashed: {error!r}", file=sys.stderr)
+                traceback.print_exception(error)
         return self.slots - sum(lease.slots for lease in self.running.values())
 
     def run_once(self) -> list[Lease]:

@@ -1068,6 +1068,22 @@
    "c7f501cce4cdddbe"
   ]
  },
+ "tests/test_credential_guard.py::test_a_set_test_inside_a_shell_script_passes": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 9,
+  "texts": [
+   "a76f47343f702669"
+  ]
+ },
+ "tests/test_credential_guard.py::test_a_set_test_of_another_form_is_refused": {
+  "assertions": 1,
+  "calls": 3,
+  "cases": 3,
+  "texts": [
+   "b238e950a52a96f5"
+  ]
+ },
  "tests/test_credential_guard.py::test_a_shell_script_keeps_the_credential_tree_scan": {
   "assertions": 1,
   "calls": 4,
@@ -1082,6 +1098,14 @@
   "cases": 9,
   "texts": [
    "a76f47343f702669"
+  ]
+ },
+ "tests/test_credential_guard.py::test_a_shell_script_that_prints_the_value_is_refused": {
+  "assertions": 1,
+  "calls": 3,
+  "cases": 18,
+  "texts": [
+   "f47e01a44b139db3"
   ]
  },
  "tests/test_credential_guard.py::test_a_spelled_heredoc_token_hides_no_later_heredoc_body": {
