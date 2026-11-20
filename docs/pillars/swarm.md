@@ -7602,8 +7602,10 @@ of those agents and of every app server agent; an agent on a runtime backend oth
 
 An agent with no facts is skipped for that pass and keeps its last stored report. The one exception is an agent in
 the `retiring` state whose start no hive recorded on the swarm bus: it is recorded with `{"process": false}`, a
-`process` difference. The tick drops `rebound` from a binding a hive reports, so it never rebinds an agent from
-another hive's facts.
+`process` difference. A local agent with no host target whose facts are `{"process": false}` and whose name herdr
+does not list is skipped the same way unless it is retiring: once its startup grace has passed, the tick's lost agent
+path resumes it (`resumed <agent>`) or retires it (`lost <agent>`). The tick drops `rebound` from a binding a hive
+reports, so it never rebinds an agent from another hive's facts.
 
 #### Inspect a live binding finding
 
