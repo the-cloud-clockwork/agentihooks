@@ -142,6 +142,8 @@ def recorded(slug: str, name: str) -> Read:
         if agent is None or (not agent.execution_id and agent.harness in LAUNCHING_HARNESSES):
             return None
         if not capabilities.of_agent(agent).native_terminal_attach:
+            if agent.state == "starting" and agent.harness in LAUNCHING_HARNESSES:
+                return None
             raise AttachError(NO_ATTACH.format(name))
         return live_binding.transport(store, agent)
 
