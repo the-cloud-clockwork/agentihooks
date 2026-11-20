@@ -2057,7 +2057,7 @@
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-cold-write-full-load",
       "behaviour": "A ledger write from a fresh process never loads every ledger row: a repository over the shared database adopts this host's copy of the ledger entry and refreshes it from the recorded row changes, falling back to the whole load only when the copy is missing, unreadable, newer than the database or past the kept changes, and rewrites the copy after a whole load or once the adopted copy is far enough behind; the ack revision comes from the metadata rows and a members, metadata or record thread read, the guard of a write, reads only that path's rows with the same data and revision as the whole read.",
-      "seam": "scripts.swarm_ledger.repository.host_entries and SQLiteLedgerRepository._entry, scripts.swarm_ledger.storage.build, scripts.swarm_ledger.api.routes.ledger_read and own_rows, scripts.swarm_ledger.ledger.cmd_ack",
+      "seam": "scripts.swarm_ledger.repository.host_entries.Copies and SQLiteLedgerRepository._entry, scripts.swarm_ledger.storage.build, scripts.swarm_ledger.api.routes.ledger_read and own_rows, scripts.swarm_ledger.ledger.cmd_ack",
       "rules": [
         "whole-ledger-read-for-revision"
       ],

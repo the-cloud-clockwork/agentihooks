@@ -8,18 +8,29 @@ import pytest
 
 from scripts.swarm_ledger import storage
 from scripts.swarm_ledger.repository import host_entries, postgres, sqlite
+from scripts.swarm_ledger.repository.entry import Entry
 from tests.swarm_ledger.test_sqlite import CONTENT, chat
 
 ADDRESS = "postgresql://db.example/ledgers"
+STATE = {"title": "Store", "_meta": {"rev": 1}}
 
 
 def kept(tmp_path: Path) -> sqlite.SQLiteLedgerRepository:
-    return sqlite.SQLiteLedgerRepository(tmp_path / "ledgers" / sqlite.DATABASE, entries=tmp_path / "home" / "entries")
+    repository = sqlite.SQLiteLedgerRepository(tmp_path / "ledgers" / sqlite.DATABASE)
+    repository.copies = host_entries.Copies(tmp_path / "home" / "entries", str(repository.path))
+    return repository
 
 
 def host_copy(tmp_path: Path) -> Path:
     [copy] = (tmp_path / "home" / "entries").iterdir()
     return copy
+
+
+def held(tmp_path: Path, generation: int) -> Entry:
+    copy = host_entries.read(host_copy(tmp_path), generation)
+    assert copy is not None
+    assert copy[0] == copy[1].generation
+    return copy[1]
 
 
 @pytest.fixture
@@ -92,9 +103,8 @@ def test_a_whole_load_writes_the_host_entry(tmp_path: Path) -> None:
     first = kept(tmp_path)
     first.create("ledger", CONTENT)
     stored = first.current("ledger")
-    adopted = host_entries.read(host_copy(tmp_path), stored.generation)
-    assert adopted is not None
-    assert (adopted[0], adopted[1].state) == (stored.generation, stored.state)
+    adopted = held(tmp_path, stored.generation)
+    assert (adopted.generation, adopted.state) == (stored.generation, stored.state)
     assert host_copy(tmp_path).stat().st_mode & 0o777 == 0o600
 
 
@@ -110,9 +120,7 @@ def test_a_warm_repository_rewrites_the_host_entry_once_it_refreshed_far_enough_
     other.apply_ops("ledger", ops=[chat(1)])
     other.apply_ops("ledger", ops=[chat(2)])
     refreshed = first.current("ledger")
-    held = host_entries.read(host_copy(tmp_path), refreshed.generation)
-    assert held is not None
-    assert held[0] == refreshed.generation
+    assert held(tmp_path, refreshed.generation).generation == refreshed.generation
 
 
 def test_a_copy_that_cannot_replace_its_target_leaves_no_staged_file(tmp_path: Path) -> None:
@@ -130,6 +138,11 @@ def test_a_purged_ledger_keeps_no_host_entry(tmp_path: Path) -> None:
     with first.transaction() as transaction:
         transaction.purge("ledger")
     assert list((tmp_path / "home" / "entries").iterdir()) == []
+
+
+def test_dropping_a_ledger_with_no_host_copy_succeeds(tmp_path: Path) -> None:
+    host_entries.Copies(tmp_path / "entries", ADDRESS).drop("ledger")
+    assert not (tmp_path / "entries").exists()
 
 
 def test_a_host_that_cannot_store_the_entry_keeps_no_copy(tmp_path: Path) -> None:
@@ -153,18 +166,32 @@ def test_the_host_entry_is_rewritten_only_once_the_adopted_copy_is_far_enough_be
     first.apply_ops("ledger", ops=[chat(1)])
     first.apply_ops("ledger", ops=[chat(2)])
     refreshed = kept(tmp_path).current("ledger")
-    held = host_entries.read(host_copy(tmp_path), refreshed.generation)
-    assert held is not None
-    assert held[0] == (refreshed.generation if rewritten else start)
+    assert held(tmp_path, refreshed.generation).generation == (refreshed.generation if rewritten else start)
 
 
-def test_a_repository_without_a_host_folder_keeps_no_host_entry(tmp_path: Path, loads: list[str]) -> None:
+def test_a_repository_without_host_copies_keeps_no_host_entry(tmp_path: Path, loads: list[str]) -> None:
     first = sqlite.SQLiteLedgerRepository(tmp_path / "ledgers" / sqlite.DATABASE)
     first.create("ledger", CONTENT)
     first.current("ledger")
     sqlite.SQLiteLedgerRepository(first.path).current("ledger")
+    assert first.copies is None
     assert loads == ["ledger", "ledger"]
+
+
+def test_a_refreshed_entry_never_kept_by_this_process_is_not_written(tmp_path: Path) -> None:
+    copies = host_entries.Copies(tmp_path / "entries", ADDRESS)
+    copies.keep("ledger", Entry(host_entries.BEHIND, json.dumps(STATE), STATE), False)
     assert not (tmp_path / "entries").exists()
+
+
+def test_a_copy_is_adopted_only_by_its_own_database_and_ledger(tmp_path: Path) -> None:
+    copies = host_entries.Copies(tmp_path, ADDRESS)
+    copies.keep("ledger", Entry(3, json.dumps(STATE), STATE), True)
+    adopted = copies.adopt("ledger", 3)
+    assert adopted is not None
+    assert (adopted.generation, adopted.mutable()) == (3, STATE)
+    assert host_entries.Copies(tmp_path, "postgresql://other/ledgers").adopt("ledger", 3) is None
+    assert copies.adopt("other", 3) is None
 
 
 def test_a_host_entry_is_named_by_a_hash_of_its_database_address_and_slug(tmp_path: Path) -> None:
@@ -189,19 +216,16 @@ def test_a_repository_over_the_shared_database_keeps_host_entries(
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
     built = storage.build()
     assert isinstance(built, postgres.PostgresLedgerRepository)
-    assert built.entries == tmp_path / "ledger-entries"
+    assert built.copies is not None
+    assert (built.copies.held, built.copies.database) == (tmp_path / "ledger-entries", ADDRESS)
     local = storage.build(tmp_path / sqlite.DATABASE)
     assert isinstance(local, sqlite.SQLiteLedgerRepository)
-    assert local.entries is None
+    assert local.copies is None
 
 
-def test_a_bound_twin_keeps_the_host_folder_of_its_repository(tmp_path: Path) -> None:
-    other = object()
-    for repository in (
-        postgres.PostgresLedgerRepository(ADDRESS, None, tmp_path),
-        sqlite.SQLiteLedgerRepository(None, None, tmp_path),
-    ):
-        twin = repository.bound(other)
-        assert twin is not repository
-        assert twin.entries == tmp_path
-        assert twin._files is repository._files
+def test_a_bound_twin_shares_the_host_copies_of_its_repository(tmp_path: Path) -> None:
+    copies = host_entries.Copies(tmp_path, ADDRESS)
+    repository = postgres.PostgresLedgerRepository(ADDRESS, None, copies)
+    twin = repository.bound(object())
+    assert twin is not repository
+    assert twin.copies is copies

@@ -405,16 +405,15 @@ class SQLiteLedgerRepository:
     """The durable ledger record: one row per JSON value, written only where a mutation changed it."""
 
     adopts = True
+    copies: host_entries.Copies | None = None
 
-    def __init__(self, path: Path | None = None, domain: Any = None, entries: Path | None = None) -> None:
+    def __init__(self, path: Path | None = None, domain=None):
         self._path = None if path is None else Path(path)
         self._domain = domain
-        self.entries = entries
         self.trace = None
         self._ready = set()
         self._cache = {}
         self._loads = {}
-        self._files: dict[tuple[str, str], int] = {}
         self._guard = threading.Lock()
         self._readers = threading.local()
         self._held = {}
@@ -436,13 +435,12 @@ class SQLiteLedgerRepository:
     def directory(self) -> Path:
         return self.path.parent
 
-    def bound(self, domain: Any) -> "SQLiteLedgerRepository":
+    def bound(self, domain) -> "SQLiteLedgerRepository":
         """This repository, or one sharing its cache that reads its folder and rules from another copy of the domain."""
         if domain is self.domain or self._path is not None:
             return self
-        twin = SQLiteLedgerRepository(domain=domain, entries=self.entries)
+        twin = SQLiteLedgerRepository(domain=domain)
         twin._cache, twin._loads, twin._ready, twin._guard = self._cache, self._loads, self._ready, self._guard
-        twin._files = self._files
         return twin
 
     @contextmanager
@@ -490,7 +488,7 @@ class SQLiteLedgerRepository:
             outbox.migrate(connection)
             self._ready.add(path)
 
-    def _key(self, slug: str) -> tuple[str, str]:
+    def _key(self, slug):
         return str(self.path), slug
 
     def _entry(self, connection: sqlite3.Connection, slug: str) -> Entry:
@@ -504,10 +502,11 @@ class SQLiteLedgerRepository:
         with self._guard:
             loading = self._loads.setdefault(self._key(slug), threading.Lock())
         with request_metrics.locked(loading):
-            cached = self._cache.get(self._key(slug)) or self._host_entry(slug, row[0])
+            cached = self._cache.get(self._key(slug))
             if cached is not None and cached.generation >= row[0]:
-                self._remember(slug, cached)
                 return cached
+            if cached is None and self.copies is not None:
+                cached = self.copies.adopt(slug, row[0])
             state, writer = self._refreshed(connection, slug, cached, row[0])
             whole = state is None
             if whole:
@@ -517,7 +516,8 @@ class SQLiteLedgerRepository:
             fragments = document(state, None if whole else cached.fragments)
             entry = Entry(row[0], None, fragments.value, fragments, writer)
             self._remember(slug, entry)
-            self._keep(slug, entry, row[0], whole)
+            if self.copies is not None:
+                self.copies.keep(slug, entry, whole)
         if whole:
             heap.release()
         return entry
@@ -527,25 +527,6 @@ class SQLiteLedgerRepository:
             return None, None
         paths = refresh.changed_paths(connection, slug, cached.generation, generation, CHANGES_KEPT)
         return (None, None) if paths is None else writer_copy.refreshed(connection, slug, cached, paths)
-
-    def _host_entry(self, slug: str, generation: int) -> Entry | None:
-        """This host's copy of the ledger when it is no newer than generation."""
-        if self.entries is None:
-            return None
-        key = self._key(slug)
-        held = host_entries.read(host_entries.path(self.entries, key), generation)
-        if held is None:
-            return None
-        self._files[key] = held[0]
-        return held[1]
-
-    def _keep(self, slug: str, entry: Entry, generation: int, whole: bool) -> None:
-        """Store the built entry as this host's copy after a whole load or once the copy is BEHIND generations old."""
-        key = self._key(slug)
-        if self.entries is None or (not whole and generation - self._files.get(key, generation) < host_entries.BEHIND):
-            return
-        host_entries.write(host_entries.path(self.entries, key), generation, entry.text)
-        self._files[key] = generation
 
     def _remember(self, slug: str, entry: Entry) -> None:
         with self._guard:
@@ -851,8 +832,8 @@ class SQLiteLedgerRepository:
         for table in (*PER_LEDGER, artifact_files.TABLE, media_files.TABLE):
             connection.execute(f"DELETE FROM {table} WHERE slug=?", (slug,))
         self._cache.pop(self._key(slug), None)
-        if self.entries is not None:
-            host_entries.path(self.entries, self._key(slug)).unlink(missing_ok=True)
+        if self.copies is not None:
+            self.copies.drop(slug)
 
     def registry(self, name: str, connection) -> dict:
         return {key: json.loads(value) for key, value in connection.execute(REGISTRY, (name,))}
