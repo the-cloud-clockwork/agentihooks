@@ -382,7 +382,9 @@ def test_a_scheduler_on_another_interpreter_and_package_set_keys_the_stats_the_w
 
 @pytest.mark.feature("lab-stats-unit-key-head-lockfile")
 @pytest.mark.parametrize(
-    ("path", "edit"), [(LOCKFILE, "pytest==8.3.5\n"), (EXCLUDES, "opentelemetry-exporter-otlp-proto-http\n")]
+    ("path", "edit"),
+    [(LOCKFILE, "pytest==8.3.5\n"), (EXCLUDES, "opentelemetry-exporter-otlp-proto-http\n")],
+    ids=["lockfile", "excludes"],
 )
 def test_a_change_to_the_head_lockfile_or_install_excludes_rekeys_every_stats_unit(
     tmp_path: Path, path: str, edit: str

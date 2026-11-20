@@ -310,6 +310,7 @@ def test_incompatible_source_fixture_and_runtime_stats_are_recollected(
         ("sample-project", "1.2.dev3+gabc", "1.3.dev1+gdef"),
         ("sample-project", "1.2", "1.3"),
         ("dependency", "1.2.dev3", "1.2.dev4"),
+        ("dependency", "1.2+gabc", "1.2+gdef"),
         ("dependency", "1.2", "1.3"),
     ],
 )

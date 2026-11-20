@@ -14,8 +14,9 @@ SCHEMA = 4
 CONTEXT_FIELDS = ("schema", "sources", "options", "runtime")
 KEY_FIELDS = ("path", "tests")
 DYNAMIC_IMPORTS = ("import_module", "__import__", "spec_from_file_location", "module_from_spec")
-CONFIGURATION = {"pyproject.toml", "pytest.ini", "setup.cfg", "tox.ini", "uv.lock", ".coveragerc"}
 LOCKFILE = ".github/test-requirements.lock"
+EXCLUDES = ".github/test-excludes.txt"
+CONFIGURATION = {"pyproject.toml", "pytest.ini", "setup.cfg", "tox.ini", "uv.lock", ".coveragerc", EXCLUDES}
 # CI rewrites the durations from dev each run; they only order and split tests, and records keep their own durations.
 UNKEYED = {".test_durations"}
 TRACKED = ("git", "ls-files", "-z")
@@ -181,11 +182,7 @@ def current_input(root: Path, changes: dict, digests: dict[str, str | None], nam
 
 
 def runtime_digest(root: Path) -> str | None:
-    """Return the sha256 of root's dependency lockfile, the runtime a stats record is keyed on, or None without one.
-
-    Every test venv installs from that lockfile, so the lab scheduler and worker derive the same runtime for one head
-    whatever interpreter and packages their own processes run.
-    """
+    """Return the sha256 of root's dependency lockfile, the runtime a stats record is keyed on, or None without one."""
     lockfile = root / LOCKFILE
     return hashlib.sha256(lockfile.read_bytes()).hexdigest() if lockfile.is_file() else None
 
