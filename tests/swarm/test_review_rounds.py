@@ -303,5 +303,6 @@ def test_a_round_stamp_carries_the_wall_clock_in_milliseconds_ahead_of_its_uniqu
 
 @pytest.mark.feature("review-round-metrics-from-ledger")
 def test_a_stamp_carries_a_time_only_when_it_opens_with_digits_and_a_dash() -> None:
-    stamped = ("1800000000250-s1", "0-x", "12-", "a1b2", "12ab-c", "-c", "12", "", "²-x")
-    assert [review_rounds.stamped_at(stamp) for stamp in stamped] == [1_800_000_000_250, 0, 12, *[None] * 6]
+    stamped = ("1800000000250-s1", "1800000000750-s-2", "0-x", "12-", "a1b2", "12ab-c", "-c", "12", "", "²-x")
+    clocks = [1_800_000_000_250, 1_800_000_000_750, 0, 12, *[None] * 6]
+    assert [review_rounds.stamped_at(stamp) for stamp in stamped] == clocks
