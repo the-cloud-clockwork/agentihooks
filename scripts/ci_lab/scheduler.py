@@ -136,6 +136,7 @@ BATCH = 50
 FETCH_MS = 100
 QUIET_MS = 30_000
 STARTS_PER_PASS = 8
+UNANSWERED_FETCHES = 10
 POST_HOLD_MS = 60_000
 INTERVAL_S = 2.0
 LEASE_TTL_MS = 120_000
@@ -708,8 +709,9 @@ class Scheduler:
         the most urgent class first and the longest waiting first within a class. A head still quiet or paused takes no
         place, and the rest wait for a later pass, so every pass reaches admission. A head whose manifest fetch still
         runs off the pass keeps its place and window for the next pass; one whose fetch GitHub never answered or
-        answered with a server error waits out the window again; any other expansion failure drops it and posts its
-        failed required check run. Each of these takes a place, since its expansion ran on the pass."""
+        answered with a server error waits out the window again, until the `UNANSWERED_FETCHES`th such fetch in a row,
+        counted in its waiting entry; that fetch and any other expansion failure drop the head and post its failed
+        required check run. Each of these takes a place, since its expansion ran on the pass."""
         actions: list[str] = []
         pauses = control.paused(self.client)
         started = 0
@@ -730,8 +732,16 @@ class Scheduler:
                 self.client.hset(WAITING, name, raw)
                 actions.append(f"holding {request.head}: {error}")
             except FetchUnanswered as error:
-                self.client.hset(WAITING, name, json.dumps({**held, "since": now_ms}))
-                actions.append(f"holding {request.head}: {error}")
+                fetches = held.get("unanswered", 0) + 1
+                if fetches < UNANSWERED_FETCHES:
+                    self.client.hset(WAITING, name, json.dumps({**held, "since": now_ms, "unanswered": fetches}))
+                    actions.append(f"holding {request.head}: {error}")
+                else:
+                    refusal = FetchUnanswered(
+                        f"{fetches} manifest fetches in a row got no answer or a server error, the last: {error}"
+                    )
+                    actions.append(f"cannot expand {request.head}: {refusal}")
+                    actions.extend(self._refuse(request, ref, refusal, now_ms))
             except (
                 subprocess.CalledProcessError,
                 ValueError,

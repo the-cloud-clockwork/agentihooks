@@ -2643,7 +2643,8 @@ check that the App token, GitHub or the network refuses is recorded as
 keeps no grade, and the pass goes on. A head pushed to a grade ref gets no check run, since
 GitHub does not hold that head. A manifest fetch that raises `FetchPending` or
 `FetchUnanswered` holds the head again instead, as
-`holding <head>: <error>`; [Test units](#test-units) describes both. The scheduler service prints
+`holding <head>: <error>`, until the tenth `FetchUnanswered` in a row drops the head with this
+check run; [Test units](#test-units) describes both. The scheduler service prints
 each action on its own line:
 
 ```bash
@@ -2790,8 +2791,12 @@ GitHub answers is gone (410) and a manifest recorded for another commit fetch no
 or unanswered request or an archive without a readable `packed.json` raises `manifests.FetchRefused`.
 A request GitHub never answered or answered with a server error, including token mint requests,
 raises its subclass `manifests.FetchUnanswered`, and the scheduler puts the head back in its
-lane with the quiet window restarted, so the first pass after that window fetches again; any other
-refusal drops the head with its reason. The service runs each fetch off the scheduler pass through
+lane with the quiet window restarted, so the first pass after that window fetches again. The
+head's waiting entry counts these fetches in a row, and the `UNANSWERED_FETCHES`th (10) drops the
+head as `cannot expand <head>: 10 manifest fetches in a row got no answer or a server error, the
+last: <error>` and posts its failed `lab-shadow/required` check run naming them, so a head GitHub
+keeps failing ends with a lab status. Any other refusal drops the head with its reason. The service
+runs each fetch off the scheduler pass through
 `manifests.Background`, at most `WORKERS` (4) at once: while a fetch runs the call raises
 `manifests.FetchPending`, and the scheduler puts the head back in its lane with its quiet window
 unchanged, so the next pass reads the finished fetch and a manifest request GitHub never answers
