@@ -30,3 +30,18 @@ class Safe:
             return Envelope.decode(self.message.data)
         except ValueError:
             return _undecodable(self.message)
+
+
+class SafeDelivery:
+    def __init__(self, message: Msg, loop: Any) -> None:
+        self.message = message
+        self.loop = loop
+
+    def fetch(self) -> list[NatsDelivery]:
+        try:
+            # ok: nats-consumer-unguarded-decode
+            delivery = NatsDelivery(self.loop, self.message)
+        except ValueError:
+            return []
+        else:
+            return [delivery]
