@@ -268,6 +268,8 @@
         "tests/test_ci_hive_nats_grants.py::test_a_renamed_lab_stream_or_durable_is_red_until_antoncore_grants_the_new_name",
         "tests/test_ci_hive_nats_grants.py::test_a_missing_lab_scheduler_user_is_red",
         "tests/test_ci_hive_nats_grants.py::test_a_lab_name_without_a_string_literal_fails_closed",
+        "tests/test_ci_hive_nats_grants.py::test_any_other_binding_of_a_lab_name_fails_closed",
+        "tests/test_ci_hive_nats_grants.py::test_bindings_of_other_names_leave_a_lab_name_readable",
         "tests/test_ci_hive_nats_grants.py::test_an_unreadable_lab_source_fails_closed",
         "tests/test_ci_hive_nats_grants.py::test_the_last_assignment_of_a_lab_name_is_the_one_graded",
         "tests/test_ci_hive_nats_grants.py::test_an_unrestricted_lab_scheduler_user_is_red",

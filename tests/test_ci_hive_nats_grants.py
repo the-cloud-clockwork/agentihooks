@@ -642,36 +642,8 @@ def test_a_missing_lab_scheduler_user_is_red(tmp_path: Path, capsys: pytest.Capt
 @pytest.mark.parametrize("source", list(LAB_SOURCES))
 @pytest.mark.parametrize(
     "body",
-    [
-        "OTHER = 'x'\n",
-        "{name} = 7\n",
-        "{name} = ''\n",
-        "{name} = 'x'\n{name} = 'x'.upper()\n",
-        "{name} = 'x'.upper()\n{name} = 'x'\n",
-        "{name}: str\n",
-        "{name} = 'x'\nif True:\n    {name} = 'y'\n",
-        "{name} = 'x'\n{name} += 'y'\n",
-        "{name}, OTHER = 'x', 'y'\n",
-        "{name} = 'x'\n\n\ndef rename() -> None:\n    global {name}\n    {name} = 'y'\n",
-        "{name} = 'x'\nfrom os import sep as {name}\n",
-        "{name} = 'x'\n\n\nclass {name}:\n    pass\n",
-        "{name} = 'x'\ndel {name}\n",
-    ],
-    ids=[
-        "absent",
-        "number",
-        "empty",
-        "computed-last",
-        "computed-first",
-        "unassigned",
-        "branch",
-        "augmented",
-        "tuple",
-        "global",
-        "import",
-        "class",
-        "deleted",
-    ],
+    ["OTHER = 'x'\n", "{name} = 7\n", "{name} = ''\n", "{name} = 'x'\n{name} = 'x'.upper()\n"],
+    ids=["absent", "number", "empty", "computed-last"],
 )
 def test_a_lab_name_without_a_string_literal_fails_closed(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], source: str, body: str
@@ -684,6 +656,46 @@ def test_a_lab_name_without_a_string_literal_fails_closed(
         1,
         [f"::error::The swarm NATS grants cannot be read (ValueError: {error})."],
     )
+
+
+BINDINGS = {
+    "computed-first": "{name} = 'x'.upper()\n{name} = 'x'\n",
+    "unassigned": "{name}: str\n",
+    "branch": "{name} = 'x'\nif True:\n    {name} = 'y'\n",
+    "augmented": "{name} = 'x'\n{name} += 'y'\n",
+    "tuple": "{name}, OTHER = 'x', 'y'\n",
+    "global": "{name} = 'x'\n\n\ndef rename() -> None:\n    global {name}\n    {name} = 'y'\n",
+    "import": "{name} = 'x'\nfrom os import sep as {name}\n",
+    "dotted-import": "{name} = 'x'\nimport {name}.sub\n",
+    "star-import": "{name} = 'x'\nfrom os import *\n",
+    "class": "{name} = 'x'\n\n\nclass {name}:\n    pass\n",
+    "def": "{name} = 'x'\n\n\ndef {name}() -> None:\n    pass\n",
+    "deleted": "{name} = 'x'\ndel {name}\n",
+    "except": "{name} = 'x'\ntry:\n    pass\nexcept Exception as {name}:\n    pass\n",
+    "match-capture": "{name} = 'x'\nmatch 1:\n    case {name}:\n        pass\n",
+    "match-star": "{name} = 'x'\nmatch []:\n    case [*{name}]:\n        pass\n",
+    "match-rest": "{name} = 'x'\nmatch {}:\n    case {**{name}}:\n        pass\n",
+}
+
+
+@pytest.mark.feature("lab-scheduler-nats-grants")
+@pytest.mark.parametrize("body", list(BINDINGS.values()), ids=list(BINDINGS))
+def test_any_other_binding_of_a_lab_name_fails_closed(tmp_path: Path, body: str) -> None:
+    (tmp_path / "durable.py").write_text(body.replace("{name}", "DURABLE"))
+    with pytest.raises(ValueError) as raised:
+        grants.source_name(str(tmp_path), "durable.py", "DURABLE")
+    assert str(raised.value) == "durable.py must set DURABLE only by top level non-empty string literal assignments"
+
+
+@pytest.mark.feature("lab-scheduler-nats-grants")
+def test_bindings_of_other_names_leave_a_lab_name_readable(tmp_path: Path) -> None:
+    (tmp_path / "durable.py").write_text(
+        "import os.path\nfrom os import sep as SEP\nDURABLE = 'first'\nDURABLE: str = 'ci-lab-scheduler'\n"
+        "print(DURABLE)\n\n\nclass Holder:\n    pass\n\n\ndef helper(name: str) -> None:\n    other = name\n\n\n"
+        "try:\n    pass\nexcept Exception as error:\n    pass\nmatch {}:\n    case {**rest}:\n        pass\n"
+        "match []:\n    case [*items]:\n        pass\n"
+    )
+    assert grants.source_name(str(tmp_path), "durable.py", "DURABLE") == "ci-lab-scheduler"
 
 
 @pytest.mark.feature("lab-scheduler-nats-grants")

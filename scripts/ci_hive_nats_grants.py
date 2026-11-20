@@ -105,7 +105,11 @@ def _rebinds(node: ast.AST, name: str) -> bool:
     if isinstance(node, ast.Name):
         return node.id == name and not isinstance(node.ctx, ast.Load)
     if isinstance(node, ast.alias):
-        return name in (node.name, node.asname)
+        return node.name == "*" or name in (node.asname, node.name.split(".")[0])
+    if isinstance(node, ast.MatchMapping):
+        return node.rest == name
+    if isinstance(node, ast.ExceptHandler | ast.MatchAs | ast.MatchStar):
+        return node.name == name
     return isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) and node.name == name
 
 
