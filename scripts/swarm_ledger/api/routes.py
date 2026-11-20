@@ -95,8 +95,9 @@ def ledger_read(services: Services, slug: str, path: str, query: dict) -> dict:
         return architecture.view(os.environ)
     if path == "tasks" and not query.keys() & {"state", "offset", "q"}:
         return task_list.read(services.repository, slug, query)
-    if record_path(path) and not query:
-        return resources.read(services.repository.read(slug, path), path)
+    keys = own_rows(path)
+    if keys and not query:
+        return resources.read(services.repository.read(slug, *keys), path)
     entry = services.repository.current(slug)
     return resources.read(entry.state, path, query, entry.views)
 
@@ -127,6 +128,20 @@ def record_path(path: str) -> bool:
     """Whether path names one record of a record collection, such as `tasks/t1`, which reads its own rows alone."""
     parts = path.split("/")
     return len(parts) == 2 and parts[0] in models.RECORD_COLLECTIONS and bool(parts[1])
+
+
+def own_rows(path: str) -> tuple[str, ...]:
+    """The stored parts a read of path needs when it needs only some of the ledger, else none."""
+    record, _, thread = path.rpartition("/")
+    if record_path(path):
+        return (path,)
+    if record_path(record) and thread in models.THREADS.get(record.split("/")[0], ()):
+        return (record,)
+    if path == "members":
+        return ("_meta.members",)
+    if path == "metadata":
+        return resources.METADATA_KEYS
+    return ()
 
 
 def context_evidence(services: Services, slug: str, task: str, ref: str) -> dict:
