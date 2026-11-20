@@ -1889,7 +1889,7 @@ The `see` path at the end of the reason is the absolute path on the runner, show
 
 | Symptom | Cause | What to do |
 |---|---|---|
-| A file is not mutated with `mutmut failed with exit N; failing tests: ...` | A selected test fails on the unmutated code inside the mutation workspace | Fix that test or the code it exercises; when the test passes in the unit shards, compare the isolated copy `prepare_workspace` builds with the checkout, such as a fixture file the workspace does not copy, and remember the baseline runs serially |
+| A file is not mutated with `mutmut failed with exit N; failing tests: ...` | A selected test fails on the unmutated code inside the mutation workspace | Fix that test or the code it exercises; when the test passes in the unit shards, compare what `prepare_workspace` copies into the isolated workspace, which the evidence no longer holds, with the checkout, such as a fixture file the workspace does not copy, and remember the baseline runs serially |
 | The reason ends `mutmut failed with exit N; see .../run.log` with no test named | The log has no `FAILED` or `ERROR` summary line, for example a collection or import error, or a crash before pytest's summary | Read `run.log` from the evidence artifact |
 | The job summary has no `Mutation clean baseline failed` heading on a red mutation job | The job failed for another reason: survivors, `over budget`, `report failed`, or a missing statistics part | Read the step log and `report.json` |
 | The same failing test is listed for several files | All files in one mutation group share one clean baseline run | Expected; one fix clears every file in the group |

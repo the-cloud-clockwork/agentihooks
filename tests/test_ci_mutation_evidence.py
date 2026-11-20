@@ -95,20 +95,42 @@ def test_a_link_in_a_group_folder_is_removed_and_never_followed(tmp_path: Path) 
     checkout = tmp_path / "checkout"
     (checkout / "hooks").mkdir(parents=True)
     (checkout / "hooks/sample.py").write_text("source\n")
-    (group / "tests").symlink_to(checkout, target_is_directory=True)
-    (group / "killers/7a1f").symlink_to(checkout / "hooks/sample.py")
-    (group / "run.log").symlink_to(checkout / "hooks/sample.py")
-    (group / "results.json").symlink_to(tmp_path / "missing.json")
+    (group / "tests").symlink_to("../../checkout", target_is_directory=True)
+    (group / "killers/7a1f").symlink_to("../../../checkout/hooks/sample.py")
+    (group / "run.log").symlink_to("../../checkout/hooks/sample.py")
+    (group / "results.json").symlink_to("../../missing.json")
     done = _run(str(gate))
     assert done.returncode == 0
     assert _files(gate) == []
     assert _files(checkout) == ["hooks/sample.py"]
     assert (checkout / "hooks/sample.py").read_text() == "source\n"
-    targets = (checkout, checkout / "hooks/sample.py", checkout / "hooks/sample.py", tmp_path / "missing.json")
     assert done.stdout == (
-        "Mutation evidence: kept 0 files (0 bytes) and removed 4 workspace files"
-        f" ({sum(len(str(target)) for target in targets)} bytes) in 1 group folders\n"
+        "Mutation evidence: kept 0 files (0 bytes) and removed 4 workspace files (95 bytes) in 1 group folders\n"
     )
+
+
+def test_a_file_named_like_the_kill_memory_folder_is_workspace(tmp_path: Path) -> None:
+    gate = tmp_path / ".mutation-gate"
+    (gate / "0-abc").mkdir(parents=True)
+    (gate / "0-abc/killers").write_text("not a folder\n")
+    done = _run(str(gate))
+    assert done.returncode == 0
+    assert _files(gate) == []
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root bypasses file modes")
+def test_a_folder_the_walk_cannot_read_fails_the_run(tmp_path: Path) -> None:
+    gate = tmp_path / ".mutation-gate"
+    _group(gate, "0-abc")
+    locked = gate / "0-abc/docs"
+    locked.chmod(0)
+    try:
+        done = _run(str(gate))
+    finally:
+        locked.chmod(0o700)
+    assert done.returncode == 1
+    assert "PermissionError" in done.stderr
+    assert (locked / "results.json").is_file()
 
 
 def test_a_missing_folder_keeps_and_removes_nothing(tmp_path: Path) -> None:

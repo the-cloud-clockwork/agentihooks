@@ -17,23 +17,28 @@ import sys
 from pathlib import Path
 
 GROUP = re.compile(r"\d+-.+")
-OWN = frozenset({"run.log", "report.log", "results.json", "mutants/mutmut-stats.json"})
+OWN_FILES = frozenset({"run.log", "report.log", "results.json", "mutants/mutmut-stats.json"})
 
 
 def owned(relative: Path) -> bool:
     """Return whether a path inside a group folder names a file the group's own run wrote."""
     return (
-        relative.as_posix() in OWN
-        or relative.parts[0] == "killers"
+        relative.as_posix() in OWN_FILES
+        or (relative.parts[0] == "killers" and len(relative.parts) > 1)
         or (relative.parts[0] == "mutants" and relative.name.endswith(".py.meta"))
     )
+
+
+def fail(error: OSError) -> None:
+    """Raise what the walk could not read, so an unread folder never stays in the upload unreported."""
+    raise error
 
 
 def keep_own(group: Path) -> tuple[list[int], list[int]]:
     """Remove every workspace file and link in group, returning the sizes of the kept and the removed entries."""
     kept: list[int] = []
     removed: list[int] = []
-    for folder, folders, files in os.walk(group, topdown=False):
+    for folder, folders, files in os.walk(group, topdown=False, onerror=fail):
         here = Path(folder)
         for path in [here / name for name in files] + [here / name for name in folders if (here / name).is_symlink()]:
             size = path.lstat().st_size
@@ -59,9 +64,9 @@ def main(argv: list[str]) -> int:
     kept: list[int] = []
     removed: list[int] = []
     for group in groups:
-        own, workspace = keep_own(group)
-        kept += own
-        removed += workspace
+        kept_here, removed_here = keep_own(group)
+        kept += kept_here
+        removed += removed_here
     print(
         f"Mutation evidence: kept {len(kept)} files ({sum(kept)} bytes) and removed {len(removed)} workspace files"
         f" ({sum(removed)} bytes) in {len(groups)} group folders"
