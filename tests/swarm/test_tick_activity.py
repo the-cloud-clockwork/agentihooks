@@ -1,6 +1,9 @@
+import json
+import time
 from contextvars import ContextVar
+from threading import Event, Lock, Thread
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -233,3 +236,78 @@ def test_a_lease_check_before_a_write_renews_at_once_inside_the_interval(
     finally:
         hooks.reset(plain)
     assert calls == ["hook"]
+
+
+class WatchedLock:
+    """A lock that signals when a caller found it held by another."""
+
+    def __init__(self) -> None:
+        self.lock = Lock()
+        self.refused = Event()
+
+    def acquire(self, blocking: bool = True) -> bool:
+        taken = self.lock.acquire(blocking)
+        if not taken:
+            self.refused.set()
+        return taken
+
+    def release(self) -> None:
+        self.lock.release()
+
+
+def renewal_lines(capsys: pytest.CaptureFixture[str]) -> list[dict[str, Any]]:
+    rows = [json.loads(line) for line in capsys.readouterr().err.splitlines() if line.startswith('{"event"')]
+    return [row for row in rows if row["event"] == "swarm_tick_lock_renewal" and row["slug"] == "sw"]
+
+
+@pytest.mark.feature("swarm-tick-lock-renewal-timing")
+def test_each_renewal_journals_its_wait_its_hold_and_its_redis_time(
+    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    renewal = tick_activity.Renewal(env[0], "sw", lambda: time.sleep(0.05), lambda: 1_000)
+    passing = timing.PASS.set({"pass_id": "p1"})
+    try:
+        capsys.readouterr()
+        renewal()
+        renewal()
+    finally:
+        timing.PASS.reset(passing)
+    (line,) = renewal_lines(capsys)
+    assert (line["pass_id"], line["blocked"], line["renewed"]) == ("p1", False, True)
+    assert line["redis_s"] >= 0.05
+    assert line["wall_s"] >= line["redis_s"]
+    assert 0 <= line["wait_s"] < line["redis_s"]
+
+
+@pytest.mark.feature("swarm-tick-lock-renewal-timing")
+def test_a_step_blocked_behind_a_renewal_journals_its_wait(
+    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    entered, release = Event(), Event()
+
+    def renew() -> None:
+        entered.set()
+        release.wait(5)
+
+    lock = WatchedLock()
+    renewal = tick_activity.Renewal(env[0], "sw", renew, lambda: 1_000, lock=cast(Lock, lock))
+    capsys.readouterr()
+    first, second = Thread(target=renewal), Thread(target=renewal)
+    first.start()
+    assert entered.wait(5)
+    second.start()
+    assert lock.refused.wait(5)
+    time.sleep(0.05)
+    release.set()
+    first.join(5)
+    second.join(5)
+    lines = renewal_lines(capsys)
+    renewed, blocked = sorted(lines, key=lambda line: line["blocked"])
+    assert len(lines) == 2
+    assert (renewed["blocked"], renewed["renewed"]) == (False, True)
+    assert (blocked["blocked"], blocked["renewed"]) == (True, False)
+    assert "redis_s" not in blocked
+    assert blocked["wait_s"] >= 0.05
+    assert renewed["redis_s"] >= 0.05

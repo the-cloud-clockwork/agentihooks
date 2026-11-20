@@ -5,6 +5,7 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from threading import Event
+from types import MappingProxyType
 from typing import Any
 
 import pytest
@@ -13,6 +14,7 @@ from scripts.swarm import tick_report, timing
 from scripts.tick import engine, pool
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
+from scripts.tick.steps import budgets
 from scripts.tick.steps.tasks import WriteStep
 
 pytestmark = pytest.mark.unit
@@ -276,6 +278,24 @@ def test_step_cut_at_its_lane_end_keeps_the_start_of_its_queued_run() -> None:
     rows = {row["step"]: row for row in store.records()}
     assert rows["queued cut"]["cut"]
     assert rows["queued cut"]["start_s"] - rows["queued cut"]["ready_s"] >= 0.1
+
+
+@pytest.mark.feature("swarm-tick-step-joined-budget")
+def test_step_finished_line_carries_the_live_budget_the_engine_joined_on() -> None:
+    store = Store()
+    step = WriteStep("size pass", "planted", lambda tick, get: time.sleep(0.2) or [])
+    step.floor_s = 0.05
+    live = budgets.LIVE.set(MappingProxyType({"size pass": 5.0}))
+    try:
+        with recording(store):
+            (record,) = engine.run_group("planted", Context(View(), Deadline.after(60.0)), [step])
+    finally:
+        budgets.LIVE.reset(live)
+    finished = [row for key, row in store.redis.rows if key == "sw:tick:steps" and row["phase"] == "finished"]
+    assert (record.budget_s, record.outcome) == (5.0, engine.OK)
+    assert [(row["step"], row["budget_s"], row["late"], row["outcome"]) for row in finished] == [
+        ("size pass", 5.0, False, "success")
+    ]
 
 
 def ok_step() -> WriteStep:
