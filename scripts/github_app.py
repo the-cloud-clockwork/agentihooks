@@ -13,7 +13,9 @@ REFUSED = "GitHub App cannot supply scoped contents write credentials"
 
 
 class GitAuthRefused(ValueError):
-    pass
+    def __init__(self, message: str, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class GitHubAppAuth:
@@ -39,7 +41,7 @@ class GitHubAppAuth:
             timeout=10,
         )
         if response.status_code != 201:
-            raise GitAuthRefused(REFUSED)
+            raise GitAuthRefused(REFUSED, status_code=response.status_code)
         data = response.json()
         if not self.granted(data):
             raise GitAuthRefused(REFUSED)
