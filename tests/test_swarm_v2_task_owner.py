@@ -4,7 +4,7 @@ import pytest
 
 import scripts.swarm_ledger.repository  # noqa: F401  puts the ledger folder on sys.path before ledger_core loads
 from scripts.inbox import cli as inbox_cli
-from scripts.inbox.store import InboxError, InboxStore, now_ms
+from scripts.inbox.store import InboxError, InboxStore, Item, now_ms
 from scripts.swarm import delivery, master_retire
 from scripts.swarm.store import AgentRecord, SwarmConfig
 from scripts.swarm_ledger import ledger_core as core
@@ -18,6 +18,8 @@ LOOSE = "t3"
 CLAIMANT = f"eng-1@{SLUG}"
 OWN_CLAIMANT = f"eng-2@{SLUG}"
 OTHER_ENGINEER = "engineer@abcdef-0006"
+FOREIGN = f"eng-3@{SLUG}"
+FOREIGN_ENGINEER = "engineer@abcdef-0007"
 
 
 @pytest.fixture
@@ -386,6 +388,82 @@ def test_the_front_door_replies_to_the_claimant(world):
     record = {"op": "reply", "by": LEAD_NAME, "item": "i-reply-lead", "args": {"id": asked.id, "text": "Stage it"}}
 
     assert inbox_cli.apply(inbox(world), record | {"args": record["args"] | {"fyi": False}})["closed"] == asked.id
+
+
+def pooled_to_the_backend_master(world: cases.World, monkeypatch: pytest.MonkeyPatch) -> tuple[Item, Item]:
+    monkeypatch.setenv("MASTER_INBOX_CLASSIFIER_WITH_FALLBACKS", "false")
+    first = inbox(world).send(CLAIMANT, LEAD, "Which spare port?")
+    asked = inbox(world).send(CLAIMANT, LEAD, "Replicate without auth?")
+    claimed = [(inbox(world).get(item.id).address, inbox(world).get(item.id).reason) for item in (first, asked)]
+    assert claimed == [(seat, f"claimed from the master pool by {seat}") for seat in (LEAD, SECOND)]
+    return first, asked
+
+
+def reply(world: cases.World, by: str, item_id: str) -> dict:
+    record = {"op": "reply", "by": by, "item": "i-reply-pooled", "args": {"id": item_id, "text": "Yes, cut over"}}
+    return inbox_cli.apply(inbox(world), record | {"args": record["args"] | {"fyi": False}})
+
+
+def send(world: cases.World, by: str, address: str) -> dict:
+    record = {"op": "send", "by": by, "item": "i-send-new", "args": {"address": address, "text": "One more thing"}}
+    return inbox_cli.apply(inbox(world), record | {"args": record["args"] | {"fyi": False}})
+
+
+@pytest.mark.feature("pooled-claimant-reply")
+def test_a_backend_master_replies_to_a_claimant_item_it_took_from_the_master_pool(
+    world: cases.World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, asked = pooled_to_the_backend_master(world, monkeypatch)
+
+    answered = reply(world, SECOND_NAME, asked.id)
+
+    answer = inbox(world).get(answered["id"])
+    assert (answered["to"], answered["closed"]) == (CLAIMANT, asked.id)
+    assert (answer.sender, answer.address, answer.ref, answer.text) == (
+        SECOND_NAME,
+        CLAIMANT,
+        asked.id,
+        "Yes, cut over",
+    )
+    assert inbox(world).get(asked.id).state == "done"
+    assert world.refusals() == 0
+
+
+@pytest.mark.feature("pooled-claimant-reply")
+def test_a_pooled_reply_leaves_a_new_message_to_a_foreign_task_claimant_fenced(
+    world: cases.World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    world.store.put_agent(SLUG, AgentRecord(FOREIGN_ENGINEER, "eng", "t1", pane_id="p-foreign", seat=FOREIGN))
+    world.store.seats.occupy(FOREIGN, FOREIGN_ENGINEER, 1)
+    reply(world, SECOND_NAME, pooled_to_the_backend_master(world, monkeypatch)[1].id)
+
+    with pytest.raises(InboxError, match=f"^tasks/t1 belongs to {LEAD}, so {SECOND} cannot message its claimant"):
+        send(world, SECOND_NAME, FOREIGN)
+    assert inbox(world).mailbox(FOREIGN_ENGINEER) == []
+    assert world.refusals() == 1
+
+
+@pytest.mark.feature("pooled-claimant-reply")
+def test_a_pooled_reply_grants_no_unsolicited_message_to_the_claimant_it_answered(
+    world: cases.World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reply(world, SECOND_NAME, pooled_to_the_backend_master(world, monkeypatch)[1].id)
+
+    with pytest.raises(InboxError, match=f"^tasks/{LOOSE} belongs to {LEAD}, so {SECOND} cannot message its claimant"):
+        send(world, SECOND_NAME, CLAIMANT)
+    assert [item.text for item in inbox(world).mailbox(ENGINEER)] == ["Yes, cut over"]
+    assert world.refusals() == 1
+
+
+@pytest.mark.feature("pooled-claimant-reply")
+def test_a_backend_master_cannot_answer_a_claimant_item_the_pool_gave_the_front_door(
+    world: cases.World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first, _ = pooled_to_the_backend_master(world, monkeypatch)
+
+    with pytest.raises(InboxError, match=f"^tasks/{LOOSE} belongs to {LEAD}, so {SECOND} cannot message its claimant"):
+        reply(world, SECOND_NAME, first.id)
+    assert inbox(world).get(first.id).state != "done"
 
 
 def waiting_on_the_backend_master(world, age_s, state="pending", fyi=False):
