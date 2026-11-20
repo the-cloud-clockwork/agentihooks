@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 import pytest
 
-from scripts.swarm import lease
+from scripts.swarm import lease, timing
 from scripts.swarm import ledger_client as ledger_client_module
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import SwarmError
@@ -112,6 +112,35 @@ def test_the_pass_ledger_reads_and_writes_with_the_ledger_server_down(stored: li
     assert [row["id"] for row in state["tasks"]] == ["t1"]
     assert task is not None
     assert task["state"] == "claimed"
+
+
+def ledger_calls(capsys: pytest.CaptureFixture[str]) -> list[dict[str, Any]]:
+    rows = [json.loads(line) for line in capsys.readouterr().err.splitlines() if line.startswith('{"event"')]
+    return [row for row in rows if row["event"] == "swarm_tick_ledger_call"]
+
+
+@pytest.mark.feature("swarm-tick-ledger-call-timing")
+def test_each_ledger_request_of_a_tick_pass_journals_its_route_outcome_and_wall_time(
+    stored: list[tuple[str, int]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    client = LedgerClient(service=True)
+    client.add_task(SLUG, {"task": "t1", "title": "Task one", "lane": "eng", "phase": "p1"}, "swarm")
+    client.tasks(SLUG)
+    assert ledger_calls(capsys) == []
+    passing = timing.PASS.set({"pass_id": "p1"})
+    try:
+        with timing.tick("sw"):
+            client.tasks(SLUG)
+            with pytest.raises(urllib.error.HTTPError):
+                database_ledger.client(cli_ledger.base(SLUG), 5).request("no-such-ledger", "metadata")
+    finally:
+        timing.PASS.reset(passing)
+    calls = ledger_calls(capsys)
+    assert [(call["ledger"], call["method"], call["path"], call["outcome"]) for call in calls] == [
+        (SLUG, "GET", "tasks", "success"),
+        ("no-such-ledger", "GET", "metadata", "error"),
+    ]
+    assert all(call["slug"] == "sw" and call["pass_id"] == "p1" and call["wall_s"] >= 0 for call in calls)
 
 
 def naming(agent: str | None) -> database_ledger.Exchange:
