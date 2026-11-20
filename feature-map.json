@@ -10829,6 +10829,20 @@
         "tests/test_ci_mutation_stats_cache.py::test_distinct_dependency_lists_in_one_collection_keep_their_own_closures",
         "tests/test_ci_mutation_stats_cache.py::test_the_discovery_digest_of_one_input_set_is_computed_once"
       ]
+    },
+    {
+      "id": "test-wait-bound-ratchet",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-test-wait-bound-ratchet",
+      "behaviour": "The Semgrep scan step New test waits keep a bound of ten seconds or more scans the test files a pull request changes, past .semgrepignore, with the head's copy of the test wait bound rule and the grader's copy when the base holds one, against the merge base of the head and the base, so a new wait, wait_for, join, result, queue get, acquire or communicate call in a test bounded above zero and under ten seconds fails the step and Gate Required, the existing sites stay on the merge base, and a base that cannot be read fails the step before any scan.",
+      "seam": "The Semgrep scan step New test waits keep a bound of ten seconds or more run text, executed with a stub semgrep in a planted repository whose base moved past the merge base, and the test wait bound rule file the step names",
+      "tests": [
+        "tests/test_ci_semgrep.py::test_new_test_waits_scan_the_tests_against_the_merge_base_with_the_head_and_the_grader_rule",
+        "tests/test_ci_semgrep.py::test_new_test_waits_grade_with_the_head_rule_on_a_base_without_it",
+        "tests/test_ci_semgrep.py::test_a_new_short_test_wait_fails_the_step",
+        "tests/test_ci_semgrep.py::test_new_test_waits_fail_without_scanning_when_the_base_is_unknown",
+        "tests/test_ci_semgrep.py::test_the_wait_bound_rule_reaches_the_tests_and_its_fixture_under_ten_seconds"
+      ]
     }
   ],
   "unmapped_rules": [
