@@ -736,6 +736,7 @@ class Scheduler:
                 subprocess.CalledProcessError,
                 ValueError,
                 KeyError,
+                SyntaxError,
                 yaml.YAMLError,
                 jsonschema.ValidationError,
             ) as error:
