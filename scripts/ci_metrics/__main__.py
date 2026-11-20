@@ -26,13 +26,14 @@ FLUSHES = 3
 def ship(
     sink: metrics_outbox.Settings, batches: Mapping[metrics_outbox.Table, list[dict[str, Any]]], now_ms: int
 ) -> int:
-    """Ship every row through a fresh outbox, flushing it again while rows wait, and return how many reached the sink."""
+    """Ship every row through a fresh outbox, flushing again while rows wait, and return how many reached the sink."""
     with tempfile.TemporaryDirectory() as folder:
         box = metrics_outbox.Outbox(Path(folder) / metrics_outbox.spool_path().name, sink)
         try:
             for table, found in batches.items():
                 box.append(table, found)  # pyright: ignore[reportUnknownMemberType]
-            built, shipped = sum(len(found) for found in batches.values()), 0
+            built = sum(len(found) for found in batches.values())
+            shipped = 0
             for _ in range(FLUSHES):
                 shipped += box.flush(now_ms)  # pyright: ignore[reportUnknownMemberType]
                 if shipped == built:

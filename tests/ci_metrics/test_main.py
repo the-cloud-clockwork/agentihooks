@@ -91,9 +91,11 @@ def table_rows(table: metrics_outbox.Table, count: int) -> list[dict[str, Any]]:
 
 
 class Sink:
-    def __init__(self, refusals: int, stall: float) -> None:
+    def __init__(self, refuse: str, refusals: int, stall: float) -> None:
+        self.refuse = refuse
         self.refusals = refusals
         self.stall = stall
+        self.stalled = False
         self.clock = 0.0
         self.refused: list[str] = []
         self.taken: list[tuple[str, bytes]] = []
@@ -104,11 +106,12 @@ class Sink:
 
     def post(self, settings: metrics_outbox.Settings, query: str, body: bytes) -> bool:
         assert settings == SETTINGS
-        if report.LEAD.name in query and len(self.refused) < self.refusals:
+        if report.LEAD.name in query and query.startswith(self.refuse) and len(self.refused) < self.refusals:
             self.refused.append(query)
             return False
-        if query.startswith("INSERT") and not self.event_ids():
+        if query.startswith("INSERT") and not self.stalled:
             self.clock += self.stall
+            self.stalled = True
         self.taken.append((query, body))
         return True
 
@@ -121,8 +124,8 @@ class Sink:
         ]
 
 
-def flaky_sink(monkeypatch: pytest.MonkeyPatch, refusals: int, stall: float) -> Sink:
-    sink = Sink(refusals, stall)
+def flaky_sink(monkeypatch: pytest.MonkeyPatch, refuse: str, refusals: int, stall: float) -> Sink:
+    sink = Sink(refuse, refusals, stall)
 
     class Counted(metrics_outbox.Outbox):
         def flush(self, now_ms: int) -> int:
@@ -273,11 +276,15 @@ def test_the_temporary_outbox_takes_the_spool_file_name(monkeypatch: pytest.Monk
 
 
 @pytest.mark.feature("ci-metrics-partial-flush")
-@pytest.mark.parametrize(("refusals", "stall"), [(1, 0.0), (0, 5.0)], ids=["refused", "deadline"])
+@pytest.mark.parametrize(
+    ("refuse", "refusals", "stall"),
+    [("CREATE", 1, 0.0), ("INSERT", 1, 0.0), ("", 0, 5.0)],
+    ids=["create-refused", "insert-refused", "deadline"],
+)
 def test_a_run_ships_the_rows_a_partial_flush_left_waiting(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], refusals: int, stall: float
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], refuse: str, refusals: int, stall: float
 ) -> None:
-    sink = flaky_sink(monkeypatch, refusals, stall)
+    sink = flaky_sink(monkeypatch, refuse, refusals, stall)
     assert entry.main(ARGS) == 0
     printed = json.loads(capsys.readouterr().out.splitlines()[0])
     assert (printed["rows"], printed["shipped"]) == (20, 20)
@@ -287,7 +294,7 @@ def test_a_run_ships_the_rows_a_partial_flush_left_waiting(
 
 @pytest.mark.feature("ci-metrics-partial-flush")
 def test_a_run_that_cannot_ship_every_row_fails_after_three_flushes(monkeypatch: pytest.MonkeyPatch) -> None:
-    sink = flaky_sink(monkeypatch, 100, 0.0)
+    sink = flaky_sink(monkeypatch, "", 100, 0.0)
     with pytest.raises(SystemExit) as failed:
         entry.main(ARGS)
     assert failed.value.code == "ci metrics failed: shipped 14 of 20 rows to the metrics sink"
