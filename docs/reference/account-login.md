@@ -64,7 +64,9 @@ With it on, the Claude front door master of every swarm, seat
 `master@<slug>` (or a master with no seat, which predates seats), launches
 and resumes on route `master-login` from one private home,
 `$AGENTIHOOKS_HOME/master-login/claude`, copied from its rendered master
-profile without the shared credential link. Pool master seats
+profile without the shared credential link. See
+[Claude login credential links](profile-launch-home.md#claude-login-credential-links)
+for the master-only render exception, worker cleanup and safe link checks. Pool master seats
 (`master-2@<slug>` and up) keep their routed quota tokens. A front door
 launched from an order on an explicit subscription or API route takes the
 login too, so every swarm's front door, the Doctor's included, registers

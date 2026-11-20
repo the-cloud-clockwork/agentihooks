@@ -289,6 +289,135 @@ $ echo $?
 variable is internal: neither `init-agent` nor `select-profile` reads it from
 the caller's environment, so only an explicit `--home` skips the render.
 
+## Claude login credential links
+
+Rendered Claude worker homes share session data with the operator's Claude
+home, while keeping the operator's login credentials out of those shared
+links. Engineer, CI and planner profiles must not inherit the master's
+claude.ai login through their rendered home.
+
+| Entry in a rendered Claude home | Link to the shared Claude home |
+|---|---|
+| `projects`, `sessions`, `todos`, `plugins`, `keybindings.json` | Every profile |
+| `.credentials.json` | Only a resolved profile chain containing `master` or `package:master` |
+
+The master exception depends on the resolved profile chain, including inherited
+profiles and overlays. A worker chain must not extend or overlay `master`.
+There is no switch to enable the credentials link for a worker. The
+`AGENTIHOOKS_MASTER_CLAUDE_LOGIN` setting selects the separate
+[master login route](account-login.md#master-claude-ai-login); it does not change
+this render rule. That route copies the rendered master profile into a private
+login home while excluding its shared credentials link.
+
+### Home configuration
+
+The rendered root is `$AGENTIHOOKS_HOME/profiles`, defaulting to
+`$HOME/.agentihooks/profiles`. Its profile key is the profile name followed by
+sorted, distinct overlay names separated by `+`. For example, `engineer` with
+the `brain` overlay uses `engineer+brain`.
+
+The shared Claude home is resolved from the global environment in this order:
+
+| Setting | Shared Claude home |
+|---|---|
+| `CLAUDE_CODE_HOME_DIR` | `<value>/.claude` |
+| `AGENTIHOOKS_CLAUDE_HOME` | The named directory, when `CLAUDE_CODE_HOME_DIR` is unset |
+| Neither set | `$HOME/.claude` |
+
+The renderer ignores `CLAUDE_CONFIG_DIR` when choosing this shared home. A
+session already running in a rendered home therefore still shares data with
+the operator's home, rather than linking back to its own home.
+
+For example, with `CLAUDE_CODE_HOME_DIR` unset, choose a rendered-state root
+and a shared Claude home explicitly:
+
+```bash
+export AGENTIHOOKS_HOME="$HOME/.agentihooks"
+export AGENTIHOOKS_CLAUDE_HOME="$HOME/.claude"
+agentihooks profile render engineer \
+  --target claude \
+  --overlay brain
+```
+
+These settings contain directory paths only. They do not copy or configure a
+login credential. Normal `init-agent --profile` preparation also renders the
+selected profile; [mounting a recorded home](#using-select-profile-directly)
+with `select-profile --home` skips rendering.
+
+### Repairing older worker homes
+
+The freshness check requires the credentials symlink only for a master chain
+and requires its absence for every other chain. A worker home holding that
+link is stale even when the profile stamp matches, including when the link's
+target is missing. The next render creates and promotes a new home, then
+removes credentials symlinks from the current alias and every retained older
+Claude home under the same profile and overlay key. This also removes the
+link from an older home that a running worker still holds.
+
+Run the installed command for the affected key to force this cleanup:
+
+```bash
+agentihooks profile render engineer \
+  --target claude \
+  --force
+```
+
+Add the same `--overlay` flags used by the worker when it has overlays. A
+fresh cached home returns before cleanup, so `--force` is needed when only an
+older generation still has the link. Other profile keys are not swept.
+
+### Checking link presence safely
+
+After rendering, check the current engineer home without opening the
+credentials file or printing its target:
+
+```bash
+profile_home="${AGENTIHOOKS_HOME:-$HOME/.agentihooks}/profiles/.homes/engineer/current/claude"
+if [[ ! -d "$profile_home" ]]; then
+  exit 1
+fi
+if [[ -L "$profile_home/.credentials.json" ]]; then
+  printf 'present\n'
+else
+  printf 'absent\n'
+fi
+```
+
+The expected worker result is `absent`; a rendered master home reports
+`present`. Use the actual overlay key, such as `engineer+brain`, or set
+`profile_home` to the exact generation from the launch report. Inside a Claude
+worker session, `profile_home="$CLAUDE_CONFIG_DIR"` checks the mounted home.
+The command exits 1 without a result when the chosen home is missing.
+`absent` means only that the named entry is not a symlink.
+
+The renderer removes symlinks only. It leaves regular credentials files
+untouched and does not revoke a login or clear credentials already loaded into
+a running process. This rule prevents login inheritance through rendered
+links; it does not provide operating system isolation between processes that
+can access the same files. It applies to Claude homes and does not change
+Codex authentication.
+
+### Regression guards
+
+`tests/test_profile_render_login.py` covers a new worker home without the
+link, replacement of a stale home, cleanup of older generations, and master
+chains with and without the package prefix. The master login isolation test
+also checks that engineer, CI and planner homes have no shared credentials
+link while the master keeps its link. These tests are tracked by feature map
+entry `render-no-login-credentials`. The Semgrep incident rule
+`render-links-login-credentials` rejects the old shared tuple and direct
+credentials symlink shapes, with red and clean fixtures.
+
+### Credential link troubleshooting
+
+| Symptom | Cause and action |
+|---|---|
+| A worker check reports `present` | Verify that the resolved chain has no master profile, then force a Claude render for that exact profile and overlay key. Recheck both the current and recorded worker home. |
+| An older generation still reports `present` | A cached render returned before cleanup, another key was rendered, or only a recorded home was mounted. Force rendering for the affected key. |
+| A rendered master reports `present` | Expected for a master chain. The separate master login home excludes this shared link when it is rebuilt. |
+| A check reports `absent` but login is still available | This check establishes symlink absence only. A regular credentials file, another authentication route or credentials already held by a process are outside this cleanup. Never read or print a credential value to diagnose it. |
+| Rendering refuses because the live profile belongs to another checkout | Use the installed command from its owning checkout. For an isolated render, use `--out <directory>`; it does not repair the live homes. |
+
 ## Limits
 
 - The Codex app-server transport (`--codex-transport app_server`) launches
