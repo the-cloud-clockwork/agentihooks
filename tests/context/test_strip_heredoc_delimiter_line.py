@@ -1,5 +1,7 @@
 """Shared command stripping keeps the rest of a heredoc delimiter line for the guards."""
 
+from collections.abc import Callable
+
 import pytest
 
 from hooks.context._strip import strip_non_command_content
@@ -10,7 +12,8 @@ from hooks.hook_manager import BlockAction
 pytestmark = pytest.mark.usefixtures("outside_a_guarded_repository")
 
 OPENERS = ["<<EOF", "<<'EOF'", "<<-EOF"]
-BODIES = ["\nbody line\nEOF", "\nbody line"]
+TERMINATED = ["\nbody line\nEOF", "\n\tbody line\n\tEOF"]
+BODIES = [*TERMINATED, "\nbody line"]
 
 
 def _payload(command: str) -> dict:
@@ -18,7 +21,7 @@ def _payload(command: str) -> dict:
 
 
 @pytest.mark.feature("guard-stripping-keeps-heredoc-delimiter-line")
-@pytest.mark.parametrize("body", BODIES)
+@pytest.mark.parametrize("body", TERMINATED)
 @pytest.mark.parametrize("opener", OPENERS)
 def test_stripping_keeps_the_delimiter_line_and_drops_the_body(opener: str, body: str) -> None:
     stripped = strip_non_command_content(f"cat {opener} > out.txt && git status{body}")
@@ -44,6 +47,26 @@ def test_prod_lockdown_refuses_a_release_run_after_the_delimiter(opener: str, bo
 
 
 @pytest.mark.feature("guard-stripping-keeps-heredoc-delimiter-line")
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat <<-EOF > out.txt\n\tbody line\n\tEOF\ngit push origin main",
+        "echo $((1 << 2))\ngit push origin main",
+        "cat <<EOF > out.txt\ngit push origin main",
+    ],
+)
+def test_branch_guard_refuses_a_push_on_a_line_after_an_opener(command: str) -> None:
+    with pytest.raises(BlockAction):
+        check_branch_guard(_payload(command))
+
+
+@pytest.mark.feature("guard-stripping-keeps-heredoc-delimiter-line")
 @pytest.mark.parametrize("opener", OPENERS)
-def test_a_guarded_command_inside_the_body_stays_data(opener: str) -> None:
-    check_branch_guard(_payload(f"cat {opener} > notes.md\ngit push origin main\nEOF"))
+@pytest.mark.parametrize(
+    ("guard", "operation"),
+    [(check_branch_guard, "git push origin main"), (check_prod_lockdown, "gh workflow run release.yml")],
+)
+def test_a_guarded_command_inside_the_body_stays_data(
+    guard: Callable[[dict], None], operation: str, opener: str
+) -> None:
+    guard(_payload(f"cat {opener} > notes.md\n{operation}\nEOF"))
