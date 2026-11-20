@@ -611,30 +611,32 @@ Only the scheduler sets lab series. The worker serves `/metrics` on 9108 through
 `metrics.serve_registry` from a registry of its own that observes nothing, so its exposition holds
 the `HELP` and `TYPE` lines and no sample: a worker scrape target reads up without doubling the
 scheduler's series, which already count every unit from its report. `scripts.ci_lab.scheduler.listen`
-binds the metrics port with a fresh `metrics.Registry`, and every `GET /metrics` sets these from
-the scheduler's load snapshot through `metrics.observe_load`:
+serves the `Scheduler`'s own `metrics.Registry` on the metrics port, so one exposition carries the
+gauges each scrape sets and the counters the scheduler's passes keep. Every `GET /metrics` sets
+these from the scheduler's load snapshot through `metrics.observe_load`:
 
 - `ci_lab_units_queued`, `ci_lab_units_running`, `ci_lab_class_shed` and
   `ci_lab_queue_wait_seconds`, once for each of the five classes
-- `ci_lab_slots_total`, `ci_lab_slots_busy` and `ci_lab_budget_fraction`
+- `ci_lab_slots_total`, `ci_lab_slots_busy`, `ci_lab_slots_wanted` and `ci_lab_budget_fraction`
+- `ci_lab_workers_ready` and `ci_lab_units_overdue`
 
-On agentihooks `dev` of 18 November 2026, no service code sets the other contract metrics. The
-registry writes their `HELP` and `TYPE` lines with no sample, so Prometheus stores no series for
-them:
+These gauges hold a sample from the first scrape of a running scheduler. Every other series has
+none until the scheduler first sets or counts it: the registry writes only the `HELP` and `TYPE`
+lines of a metric with no sample, so Prometheus stores no series for it until then.
+[Metrics](#metrics) gives what each value counts.
 
-| Series | Read by | Until a service sets it |
+| Series | Read by | Set by |
 |---|---|---|
-| `ci_lab_slots_wanted` | `CILabSchedulerBlind`, the slots panels, the worker ScaledObject | `CILabSchedulerBlind` fires 10 minutes after a `ci-lab-scheduler` Deployment with a replica appears, and the `wanted` lines stay empty. The scheduler sets it from `scripts.ci_lab.budget.slots_wanted` on every scrape |
-| `ci_lab_units_overdue` | `CILabUnitsOverdue` | The alert cannot fire |
-| `ci_lab_workers_ready` | Workers ready against desired | The `heartbeat` line stays empty |
-| `ci_lab_core_seconds_total`, `ci_lab_heads_graded_total` | Core minutes per merged pull request | The stat reads No data |
-| `ci_lab_cache_hits_total`, `ci_lab_cache_misses_total` | `CILabCacheMissRatioHigh`, Cache hit ratio | `Scheduler._place` counts the `verdict` cache and `metrics.observe_unit` counts the `git` and `uv` lookups a unit report carries, so the alert and panel wait only on a running scheduler |
-| `ci_lab_verdict_mismatch_total` | `CILabVerdictMismatch`, Shadow mismatches per gate | `shadow.Shadow` counts it in a registry of its own and has no live caller, so the alert cannot fire |
-| `ci_lab_unit_duration_seconds`, `ci_lab_mirror_age_seconds`, `ci_lab_github_rate_remaining` | No alert or panel | Nothing, since no alert or panel reads them. `metrics.observe_records` sets the unit duration when a caller runs it; no code sets the other two |
-
-`Scheduler._reap` counts `ci_lab_units_redelivered_total` and `ci_lab_units_lost_total` on the
-registry the metrics port serves, one for each expired lease it requeues or marks lost. No alert or
-panel reads them; the [Worker loss drill](#worker-loss-drill) reads them.
+| `ci_lab_slots_wanted` | `CILabSchedulerBlind`, the slots panels, the worker ScaledObject | `metrics.observe_load`, from `scripts.ci_lab.budget.slots_wanted` on every scrape, so `CILabSchedulerBlind` fires only while Prometheus scrapes no running scheduler |
+| `ci_lab_units_overdue` | `CILabUnitsOverdue` | `metrics.observe_load`, on every scrape |
+| `ci_lab_workers_ready` | Workers ready against desired, as its `heartbeat` line | `metrics.observe_load`, on every scrape |
+| `ci_lab_core_seconds_total` | Core minutes per merged pull request | `metrics.observe_unit`, which `Scheduler._finished` calls once for each finished attempt whose worker uploaded a report |
+| `ci_lab_heads_graded_total` | Core minutes per merged pull request | `Scheduler._advance`, once for each grade it closes |
+| `ci_lab_cache_hits_total`, `ci_lab_cache_misses_total` | `CILabCacheMissRatioHigh`, Cache hit ratio | `Scheduler._place` counts the `verdict` cache and `metrics.observe_unit` counts the `git` and `uv` lookups a unit report carries |
+| `ci_lab_unit_duration_seconds` | No alert or panel | `metrics.observe_unit`, from the report's `seconds` |
+| `ci_lab_units_redelivered_total`, `ci_lab_units_lost_total` | No alert or panel; the [Worker loss drill](#worker-loss-drill) reads them | `Scheduler._reap`, one for each expired lease it requeues or marks lost |
+| `ci_lab_verdict_mismatch_total` | `CILabVerdictMismatch`, Shadow mismatches per gate | No service. `shadow.Shadow` counts it on the registry its caller passes, and no service builds a `Shadow`, so the alert cannot fire and the panel stays empty |
+| `ci_lab_mirror_age_seconds`, `ci_lab_github_rate_remaining` | No alert or panel | No code sets them |
 
 The kube-state-metrics series need the lab chart's objects in the `ci-lab` namespace: the
 `ci-lab-scheduler` and `ci-lab-worker` Deployments, the worker pods, and the KEDA ScaledObject
@@ -772,9 +774,9 @@ deployed the observability stack.
 | `kubectl get prometheusrule` lists no `ci-lab` | `ops-config` has not synced the merge, or its sync failed | `kubectl -n argocd get application ops-config -o jsonpath='{.status.sync.status} {.status.sync.revision}{"\n"}'`; the revision must be a `dev` commit holding the rule file |
 | The object exists but the rules API has no `ci-lab` group | The `release: kube-prometheus-stack` label is missing or changed, so the Prometheus rule selector skips the object | Restore the label; `test_the_rule_file_holds_exactly_the_nine_lab_alerts` pins it |
 | Every lab alert stays inactive and the lab panels read No data | Prometheus holds no lab series: the lab chart's objects and the scheduler's ServiceMonitor are not in the cluster | `count by (__name__) ({__name__=~"ci_lab_.+"})` in Prometheus lists the lab series it holds |
-| `CILabSchedulerBlind` fires 10 minutes after a `ci-lab-scheduler` replica exists | No service code sets `ci_lab_slots_wanted`, or the scrape target is down | `up` for the scheduler target. With the target up, `curl -fsS http://<scheduler>:9108/metrics \| grep '^ci_lab_slots_wanted'` prints nothing until a service sets the gauge |
+| `CILabSchedulerBlind` fires 10 minutes after a `ci-lab-scheduler` replica exists | Prometheus scrapes no running scheduler: its target is down, or no ServiceMonitor selects its metrics port. A running scheduler sets `ci_lab_slots_wanted` on every scrape | `up` for the scheduler target; with no target, check the scheduler's ServiceMonitor. `curl -fsS http://<scheduler>:9108/metrics \| grep '^ci_lab_slots_wanted'` prints one sample from a running scheduler |
 | Spend estimate reads No data | No node carries both CI taints, and `count` over no series is empty rather than 0 | Expected while the CI pool has no node |
-| Core minutes per merged pull request reads No data or Infinity | The core and graded head counters are not exported, or no queue head was graded green in the range | See [Lab series the rules read](#lab-series-the-rules-read); widen the range |
+| Core minutes per merged pull request reads No data or Infinity | Since it started, the scheduler has counted no finished attempt or no green queue grade, so a counter has no series yet, or no queue head was graded green in the range | See [Lab series the rules read](#lab-series-the-rules-read); widen the range |
 | `CILabVerdictMismatch` keeps firing after the gate agrees again | It looks back one hour | Expected; it clears an hour after the last new mismatch of that gate |
 | The promtool job fails after an annotation edit | promtool compares `summary` and `description` exactly | Update the case's `exp_annotations` in the same pull request |
 | A firing lab alert sends no second ntfy message | A group that keeps firing repeats only every 6 hours | Read the alert in the Alertmanager API above; a change to the group sends after 5 minutes |
