@@ -8,10 +8,12 @@ import subprocess
 import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, NotRequired, TypedDict, cast
+from typing import Any, NamedTuple, NotRequired, TypedDict, cast
+
+import yaml
 
 from scripts import locked_tests
-from scripts.ci_mutation.scope import select_tests
+from scripts.ci_mutation.scope import select_tests, test_file
 from scripts.ci_test_plan import find_record
 from scripts.shard_sizing import FIRST_SHARD_FILES, SECONDS_PER_SOURCE_BYTE, assign_work, source_sizes
 
@@ -52,6 +54,9 @@ LOCKED_CHECK = f"{TESTS}/test_locked_tests.py"
 TREE_CHECKS = (f"{TESTS}/test_codeowners.py", f"{TESTS}/test_ci_pull_request_api.py")
 TICK_CATALOGUE = f"{TESTS}/test_docs_tick.py"
 TICK_STEPS = "scripts/tick/steps/"
+WORKFLOW = ".github/workflows/test.yml"
+DEFINITIONS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef)
 # Stored test seconds per leg up to the leg limit; a larger selection shares the legs and each runs longer.
 LEG_SECONDS = 180.0
 UNKNOWN_SECONDS = 10.0
@@ -61,6 +66,15 @@ class Record(TypedDict):
     units: list[int]
     files: NotRequired[list[str]]
     outside: NotRequired[list[str]]
+    escapes: NotRequired[bool]
+
+
+class Change(NamedTuple):
+    """What the history shows about a pull request's change beyond the paths it touches."""
+
+    reshaped: bool = False
+    pyproject: bool = True
+    jobs: set[str] | None = None
 
 
 def changed_files(root: Path, base: str, head: str) -> list[str]:
@@ -107,6 +121,25 @@ def pyproject_reaches_tests(root: Path, base: str, head: str) -> bool:
     return harness_tables(root, fork) != harness_tables(root, head)
 
 
+def changed_jobs(root: Path, base: str, head: str) -> set[str] | None:
+    """The Tests workflow jobs whose parsed definition differs between the merge base and the head, None when the
+    workflow differs outside its jobs or either side does not parse."""
+    fork = subprocess.check_output(["git", "merge-base", base, head], cwd=root, text=True).strip()
+    shown = [
+        subprocess.run(["git", "show", f"{revision}:{WORKFLOW}"], cwd=root, capture_output=True).stdout
+        for revision in (fork, head)
+    ]
+    try:
+        before, after = (cast(dict[Any, Any], yaml.safe_load(text)) for text in shown)
+        if {**before, "jobs": None} != {**after, "jobs": None}:
+            return None
+        return {
+            name for name in {*before["jobs"], *after["jobs"]} if before["jobs"].get(name) != after["jobs"].get(name)
+        }
+    except (AttributeError, KeyError, TypeError, yaml.YAMLError):
+        return None
+
+
 def needs_full_suite(changed: list[str], pyproject: bool) -> bool:
     return any(
         path in HARNESS
@@ -138,6 +171,160 @@ def markdown_tests(root: Path) -> set[str]:
     }
 
 
+def constant(node: ast.AST | None) -> str | None:
+    """The text of a string constant node, None for any other node."""
+    return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
+
+
+def takes_jobs(node: ast.AST) -> bool:
+    """Whether the node reads a mapping's jobs by their key: an index, or a method such as get or pop."""
+    if isinstance(node, ast.Subscript):
+        return constant(node.slice) == "jobs"
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and constant(next(iter(node.args), None)) == "jobs"
+    )
+
+
+def job_key(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> str | None:
+    """The job a use of a jobs mapping names by a constant: an index, the first argument of a method such as get or
+    pop, or a membership test; None for any other use."""
+    parent = parents.get(node)
+    if isinstance(parent, ast.Subscript):
+        return constant(parent.slice)
+    if isinstance(parent, ast.Attribute) and isinstance(call := parents.get(parent), ast.Call) and call.func is parent:
+        return constant(next(iter(call.args), None))
+    if isinstance(parent, ast.Compare) and parent.comparators == [node]:
+        return constant(parent.left)
+    return None
+
+
+def enclosing(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
+    """The innermost function around a node."""
+    chain = [node]
+    for item in chain:
+        if item in parents:
+            chain.append(parents[item])
+    return next((item for item in chain if isinstance(item, FUNCTIONS)), None)
+
+
+def holders(node: ast.AST, parents: dict[ast.AST, ast.AST], nodes: list[ast.AST]) -> list[ast.AST]:
+    """The expressions holding the jobs mapping a use hands on: the reads of each name it is assigned to, or the calls
+    of the function returning it when that function is only ever called; empty for any other use."""
+    parent, scope = parents.get(node), enclosing(node, parents)
+    if isinstance(parent, ast.Assign):
+        names = {target.id for target in parent.targets if isinstance(target, ast.Name)}
+        reads: list[ast.AST] = [
+            read for read in (ast.walk(scope) if scope else nodes) if isinstance(read, ast.Name) and read.id in names
+        ]
+        return reads if len(names) == len(parent.targets) else []
+    if isinstance(parent, ast.Return) and scope:
+        reads = [read for read in nodes if isinstance(read, ast.Name) and read.id == scope.name]
+        calls: list[ast.AST] = [
+            call for read in reads if isinstance(call := parents.get(read), ast.Call) and call.func is read
+        ]
+        return calls if len(calls) == len(reads) else []
+    return []
+
+
+def read_jobs(nodes: list[ast.AST], parents: dict[ast.AST, ast.AST]) -> set[str] | None:
+    """The jobs the nodes index by constant name, following every name and function result holding a jobs mapping;
+    None when they take one any other way or index none, so they read every job."""
+    pending = [node for node in nodes if takes_jobs(node)]
+    jobs: set[str] = set()
+    for node in pending:
+        if (job := job_key(node, parents)) is not None:
+            jobs.add(job)
+        elif held := holders(node, parents, nodes):
+            pending.extend(item for item in held if item not in pending)
+        else:
+            return None
+    return jobs or None
+
+
+def bindings(tree: ast.Module) -> dict[str, list[ast.stmt]]:
+    """The module level statements binding each name: its definitions and the statements assigning it."""
+    bound: dict[str, list[ast.stmt]] = {}
+    for statement in tree.body:
+        if isinstance(statement, DEFINITIONS):
+            names = [statement.name]
+        else:
+            names = [
+                node.id
+                for node in ast.walk(statement)
+                if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)
+            ]
+        for name in names:
+            bound.setdefault(name, []).append(statement)
+    return bound
+
+
+def reached(definition: ast.stmt, bound: dict[str, list[ast.stmt]], uses: dict[ast.stmt, set[str]]) -> list[ast.stmt]:
+    """A top level definition and every module level statement it reaches through the names and fixture arguments it
+    uses."""
+    found = [definition]
+    for statement in found:
+        found.extend(item for name in uses[statement] for item in bound.get(name, []) if item not in found)
+    return found
+
+
+def definition_jobs(source: str) -> dict[str, set[str] | None]:
+    """The Tests workflow jobs each top level test definition reads by constant name, None for one reading every job."""
+    tree = ast.parse(source)
+    walked: dict[ast.stmt, list[ast.AST]] = {}
+    parents: dict[ast.AST, ast.AST] = {}
+    for statement in tree.body:
+        nodes: list[ast.AST] = [statement]
+        walked[statement] = nodes
+        for node in nodes:
+            children = list(ast.iter_child_nodes(node))
+            parents.update(dict.fromkeys(children, node))
+            nodes.extend(children)
+    uses = {
+        statement: {node.id for node in nodes if isinstance(node, ast.Name)}
+        | {node.arg for node in nodes if isinstance(node, ast.arg)}
+        for statement, nodes in walked.items()
+    }
+    bound = bindings(tree)
+    return {
+        statement.name: read_jobs([node for item in reached(statement, bound, uses) for node in walked[item]], parents)
+        for statement in tree.body
+        if isinstance(statement, DEFINITIONS)
+        and statement.name.startswith("Test" if isinstance(statement, ast.ClassDef) else "test")
+    }
+
+
+def definition(test: str) -> tuple[str, str]:
+    """The file and top level definition of a recorded test node."""
+    path, _, rest = test.partition("::")
+    return path, rest.partition("::")[0].partition("[")[0]
+
+
+def workflow_tests(root: Path, jobs: set[str], manifest: dict[str, Any] | None) -> set[str]:
+    """The top level test definitions, as file::name, that read a changed Tests workflow job or every job. A test file
+    naming the workflow offers each definition its dev record does not clear by recording it without opening the
+    workflow or starting a process the record cannot follow; another file offers the definitions its record shows
+    opening the workflow."""
+    records = cast(dict[str, Record], manifest["tests"]) if manifest is not None else {}
+    opened = {
+        definition(test)
+        for test, found in records.items()
+        if WORKFLOW in [*found.get("files", []), *found.get("outside", [])]
+    }
+    escaped = {definition(test) for test, found in records.items() if found.get("escapes")}
+    cleared = {definition(test) for test in records} - opened - escaped
+    named = naming_tests(root, {WORKFLOW, Path(WORKFLOW).name})
+    tests: set[str] = set()
+    for path in sorted(named | {path for path, _ in opened}):
+        if (root / path).is_file():
+            for name, read in definition_jobs((root / path).read_text()).items():
+                offered = (path, name) not in cleared if path in named else (path, name) in opened
+                if offered and (read is None or read & jobs):
+                    tests.add(f"{path}::{name}")
+    return tests
+
+
 def reshaped(root: Path, base: str, head: str) -> bool:
     command = ["git", "diff", "--quiet", "--no-renames", "--diff-filter=AD", f"{base}...{head}"]
     result = subprocess.run(command, cwd=root)
@@ -162,16 +349,23 @@ def recorded_tests(manifest: dict[str, Any], changed: list[str]) -> set[str]:
 
 
 def selected_tests(
-    root: Path, changed: list[str], tree_reshaped: bool, manifest: dict[str, Any] | None = None
+    root: Path,
+    changed: list[str],
+    tree_reshaped: bool,
+    manifest: dict[str, Any] | None = None,
+    jobs: set[str] | None = None,
 ) -> set[str]:
+    others = [path for path in changed if jobs is None or path != WORKFLOW]
     tests = {path for path in changed if is_test(path)}
     if manifest is not None:
-        tests.update(recorded_tests(manifest, changed))
+        tests.update(recorded_tests(manifest, others))
+    if jobs is not None:
+        tests.update(workflow_tests(root, jobs, manifest))
     if tree_reshaped:
         tests.update(TREE_CHECKS)
     tests.update(conftest_tests(root, changed))
     needles: set[str] = set()
-    for path in changed:
+    for path in others:
         needles.add(path)
         if Path(path).suffix == ".js" or Path(path).suffix == ".py" and Path(path).parts[0] in (*SOURCES, TESTS):
             tests.update(select_tests(root, Path(path)))
@@ -194,13 +388,16 @@ def selected_tests(
     tests |= naming_tests(root, needles)
     if any(path.endswith(DOC) for path in changed):
         tests |= markdown_tests(root)
-    tests = {path for path in tests if SAFE.fullmatch(path) and (root / path).is_file()}
+    tests = {test for test in tests if SAFE.fullmatch(test_file(test)) and (root / test_file(test)).is_file()}
     if tests and (root / TICK_CATALOGUE).is_file() and any(path.startswith(TICK_STEPS) for path in changed):
         tests.add(TICK_CATALOGUE)
     if (
         tests
         and (root / SUITE_SPEED).is_file()
-        and (any(is_test(path) for path in changed) or any(FAKEREDIS in (root / path).read_text() for path in tests))
+        and (
+            any(is_test(path) for path in changed)
+            or any(FAKEREDIS in (root / test_file(test)).read_text() for test in tests)
+        )
     ):
         tests.add(SUITE_SPEED)
     return tests
@@ -269,9 +466,22 @@ def file_units(root: Path, path: str, durations: dict[str, float]) -> dict[str, 
     return {f"{path}::{name}": seconds for name, seconds in units.items()}
 
 
+def offered_units(root: Path, tests: set[str], durations: dict[str, float]) -> dict[str, float]:
+    """The stored seconds of the definitions selected by name, for each file selected only through them that runs its
+    definitions apart; such a file that cannot runs whole."""
+    units: dict[str, float] = {}
+    for path in {test_file(test) for test in tests} - tests - FIRST_SHARD_FILES:
+        named = {test for test in tests if test_file(test) == path}
+        if named <= (split := file_units(root, path, durations)).keys():
+            units.update({unit: split[unit] for unit in named})
+    return units
+
+
 def legs_for(root: Path, tests: set[str], durations: dict[str, float], limit: int) -> list[list[str]]:
+    offered = offered_units(root, tests, durations)
+    tests = {test_file(test) for test in tests} - {test_file(unit) for unit in offered}
     seconds = file_seconds(durations, tests)
-    total = sum(seconds.values())
+    total = sum(seconds.values()) + sum(offered.values())
     count = min(limit, max(1, math.ceil(total / LEG_SECONDS)))
     files = sorted(tests - FIRST_SHARD_FILES)
     sizes = source_sizes(root, files)
@@ -284,6 +494,8 @@ def legs_for(root: Path, tests: set[str], durations: dict[str, float], limit: in
             del work[path]
             work.update(units)
             sizes.update(dict.fromkeys(units, sizes.pop(path)))
+    work.update(offered)
+    sizes.update({unit: (root / test_file(unit)).stat().st_size for unit in offered})
     collection = {unit: sizes[unit] * SECONDS_PER_SOURCE_BYTE for unit in work}
     files_of = {unit: unit.partition("::")[0] for unit in work}
     legs = assign_work(work, work, collection, count, 1, None, files_of)
@@ -296,13 +508,12 @@ def decide(
     changed: list[str],
     durations: dict[str, float],
     limit: int,
-    tree_reshaped: bool = False,
+    change: Change = Change(),
     manifest: dict[str, Any] | None = None,
-    pyproject: bool = True,
 ) -> tuple[str, list[list[str]]]:
-    if needs_full_suite(changed, pyproject):
+    if needs_full_suite(changed, change.pyproject):
         return FULL, []
-    tests = selected_tests(root, changed, tree_reshaped, manifest)
+    tests = selected_tests(root, changed, change.reshaped, manifest, change.jobs)
     if not tests:
         return (NONE if all(is_doc(path) for path in changed) else FULL), []
     return SELECTED, legs_for(root, tests, durations, limit)
@@ -330,9 +541,9 @@ def main(argv: list[str] | None = None) -> int:
             if found := find_record(args.repository, datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")):
                 run, manifest = found
                 print(f"Recorded coverage from dev run {run['id']} adds runtime dependent tests.")
-        scope, legs = decide(
-            args.root, changed, durations, args.legs, reshaped(args.root, args.base, args.head), manifest, pyproject
-        )
+        jobs = changed_jobs(args.root, args.base, args.head) if WORKFLOW in changed else None
+        change = Change(reshaped(args.root, args.base, args.head), pyproject, jobs)
+        scope, legs = decide(args.root, changed, durations, args.legs, change, manifest)
     outputs = {"scope": scope, "legs": json.dumps(list(range(1, len(legs) + 1))), "count": str(len(legs))}
     outputs.update({f"files_{index}": " ".join(leg) for index, leg in enumerate(legs, 1)})
     for key, value in outputs.items():
