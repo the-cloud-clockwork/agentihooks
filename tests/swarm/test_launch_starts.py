@@ -3,6 +3,7 @@ import json
 from collections.abc import Iterator
 from dataclasses import replace
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import Mock, call
 
 import pytest
@@ -18,7 +19,7 @@ def rig(monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNamespace]:
     from scripts.hive import execution_events, execution_stop
     from scripts.swarm.store import AgentRecord
 
-    bus = memory.open_bus(BusConfig())
+    bus: Any = memory.open_bus(BusConfig())
     agent = AgentRecord(name="engineer", lane="eng", task="task", execution_id="execution", generation=3)
     missing = replace(agent, name="missing", execution_id="not-started")
     store = SimpleNamespace(agents=Mock(return_value=[missing, agent]))
