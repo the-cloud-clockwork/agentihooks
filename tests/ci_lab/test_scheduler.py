@@ -144,7 +144,7 @@ class Expander:
     def merge_base(self, repo: str, head: str) -> str:
         return self.plans[head].grader
 
-    def carried(self, repo: str, head: str) -> bool:
+    def reachable(self, repo: str, head: str) -> bool:
         return True
 
 

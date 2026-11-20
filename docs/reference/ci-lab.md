@@ -2642,13 +2642,15 @@ kubectl logs -n ci-lab deploy/ci-lab-scheduler | grep 'cannot expand'
 Each CI node's cache mirrors only the repository's `refs/heads/*` and `refs/pull/*/head` refs, so a
 worker cannot fetch a commit no such ref reaches, such as the head of an ejected merge group whose
 `gh-readonly-queue` branch is gone. Before the scheduler expands a released head it asks
-`MirrorExpander.carried`, which lists those refs with `git ls-remote` and accepts the head when a
-ref names it or when it is an ancestor of the dev branch head. A head that check refuses is retired
-with the action `retiring <head>: no branch or pull request head ref of <repo> carries <head>`: it
-gets no grade and no unit, so no worker leases one. A hotfix or pull request class head also gets
-one completed `lab-shadow/required` check run with conclusion `failure` and that summary; a merge
-group, promotion or backfill head gets none. A head pushed to a grade ref skips the check, since the
-lab remote serves it.
+`MirrorExpander.reachable`, which lists those refs with `git ls-remote` and accepts the head when a
+ref names it or when the dev branch head, fetched into the scheduler's mirror, descends from it. It
+never fetches the head itself, since GitHub may no longer serve it. A head that check refuses is
+retired with the action `retiring <head>: no branch or pull request head ref of <repo> carries
+<head>`: it gets no grade and no unit, so no worker leases one. A pull request head also gets one
+completed `lab-shadow/required` check run with conclusion `failure` and that summary; a hotfix,
+merge group, promotion or backfill head gets none. A head pushed to a grade ref skips the check,
+since the lab remote serves it. A failed `git ls-remote` raises like any other failed git command,
+so the head takes the [cannot expand](#a-head-that-cannot-expand) path.
 
 #### The worker reads the same workflows
 
