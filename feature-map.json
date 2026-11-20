@@ -4894,8 +4894,8 @@
       "behaviour": "A graded lab job whose uploaded report lists files its batch opened outside the manifest writes one note per batch tests and sorted list into its repository's manifest folder under the manifest commit its grade keyed on, whatever its graded outcome. The next stored manifest read of that commit merges each of its notes into the outside list of each test record it names, sorted and without duplicates, skipping tests the manifest lacks, so the following test unit key changes when one of those files changes, and a change to one of those files invalidates the tests whose records list it. A report without the list or with an empty list writes no note.",
       "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis and the local object store, scripts.ci_lab.scheduler.StoredManifests, scripts.ci_lab.expand_tests.units, scripts.ci_lab.interaction.invalidated and tests.dep_manifest.invalidated",
       "tests": [
-        "tests/ci_lab/test_scheduler_manifests.py::test_a_test_verdict_outside_list_reaches_the_stored_records_and_the_following_key",
-        "tests/ci_lab/test_scheduler_manifests.py::test_a_note_joins_the_outside_list_a_stored_or_fetched_record_already_holds",
+        "tests/ci_lab/test_scheduler.py::test_a_test_verdict_outside_list_reaches_the_stored_records_and_the_following_key",
+        "tests/ci_lab/test_scheduler.py::test_a_note_joins_the_outside_list_a_stored_or_fetched_record_already_holds",
         "tests/test_dep_manifest.py::test_a_change_to_a_file_a_test_opened_outside_its_record_invalidates_that_test"
       ]
     },
@@ -4906,9 +4906,9 @@
       "behaviour": "A lab grade keeps the dev commit of the dependency manifest its test units were keyed on, and a graded job's outside note is stored under that commit in its repository's manifest folder. A stored manifest read merges only the notes of the returned manifest's commit, so a note written while grades keyed on an older manifest leaves the outside lists and test unit keys of a newer commit unchanged. Every read removes the notes of commits with no stored manifest, including notes written before notes carried a commit, and keeps the notes of stored commits and of other repositories.",
       "seam": "scripts.ci_lab.scheduler.MirrorExpander.expand, scripts.ci_lab.scheduler.Scheduler.tick over fakeredis and the local object store, scripts.ci_lab.scheduler.StoredManifests and scripts.ci_lab.expand_tests.units",
       "tests": [
-        "tests/ci_lab/test_scheduler_manifests.py::test_a_note_of_an_older_manifest_commit_leaves_a_newer_commit_key_unchanged",
-        "tests/ci_lab/test_scheduler_manifests.py::test_a_manifest_read_removes_the_notes_of_commits_with_no_stored_manifest",
-        "tests/ci_lab/test_scheduler_manifests.py::test_a_grade_that_keyed_no_manifest_writes_no_outside_note",
+        "tests/ci_lab/test_scheduler.py::test_a_note_of_an_older_manifest_commit_leaves_a_newer_commit_key_unchanged",
+        "tests/ci_lab/test_scheduler.py::test_a_manifest_read_removes_the_notes_of_commits_with_no_stored_manifest",
+        "tests/ci_lab/test_scheduler.py::test_a_grade_that_keyed_no_manifest_writes_no_outside_note",
         "tests/ci_lab/test_store.py::test_objects_remove_one_path_and_take_a_missing_one_as_gone"
       ]
     },
@@ -9359,7 +9359,7 @@
         "tests/ci_lab/test_scheduler.py::test_a_head_that_needs_test_units_without_a_manifest_cannot_expand",
         "tests/ci_lab/test_scheduler.py::test_a_merge_group_head_refuses_an_entry_limit_the_delivery_schema_refuses",
         "tests/ci_lab/test_scheduler.py::test_a_head_whose_grader_delivery_breaks_its_schema_is_dropped_with_its_reason",
-        "tests/ci_lab/test_scheduler_manifests.py::test_stored_manifests_read_the_packed_manifest_of_the_nearest_stored_ancestor"
+        "tests/ci_lab/test_scheduler.py::test_stored_manifests_read_the_packed_manifest_of_the_nearest_stored_ancestor"
       ]
     },
     {
@@ -9576,9 +9576,9 @@
         "tests/ci_lab/test_manifests.py::test_the_lab_reads_the_actions_api_with_a_token_that_carries_only_actions_read",
         "tests/ci_lab/test_manifests.py::test_actions_answers_none_for_a_gone_archive_and_names_any_other_refused_request",
         "tests/ci_lab/test_manifests.py::test_the_fetcher_reads_each_repository_through_one_reader_of_its_own",
-        "tests/ci_lab/test_scheduler_manifests.py::test_stored_manifests_fetch_a_newest_commit_stored_nowhere_and_keep_it_by_repository_and_commit",
-        "tests/ci_lab/test_scheduler_manifests.py::test_stored_manifests_fetch_only_the_newest_commits_of_the_chain",
-        "tests/ci_lab/test_scheduler_manifests.py::test_a_head_that_needs_test_units_expands_on_the_manifest_stored_from_its_base_dev_push_run",
+        "tests/ci_lab/test_scheduler.py::test_stored_manifests_fetch_a_newest_commit_stored_nowhere_and_keep_it_by_repository_and_commit",
+        "tests/ci_lab/test_scheduler.py::test_stored_manifests_fetch_only_the_newest_commits_of_the_chain",
+        "tests/ci_lab/test_scheduler.py::test_a_head_that_needs_test_units_expands_on_the_manifest_stored_from_its_base_dev_push_run",
         "tests/ci_lab/test_scheduler.py::test_a_head_whose_manifest_fetch_github_refuses_is_dropped_with_its_reason"
       ]
     },
@@ -9590,7 +9590,7 @@
       "seam": "scripts.ci_lab.manifests.Actions over mocked requests and token minting, and scripts.ci_lab.scheduler.Scheduler.tick over fakeredis, with a scheduler.MirrorExpander over a git origin fixture reading scheduler.StoredManifests through manifests.Fetcher and Actions over mocked requests, and with an expander that raises an unanswered fetch and then a missing manifest",
       "tests": [
         "tests/ci_lab/test_manifests.py::test_actions_marks_a_request_github_never_answered_or_answered_with_a_server_error_unanswered",
-        "tests/ci_lab/test_scheduler_manifests.py::test_a_head_whose_manifest_fetch_times_out_waits_out_its_window_again_and_a_later_pass_grades_it",
+        "tests/ci_lab/test_scheduler.py::test_a_head_whose_manifest_fetch_times_out_waits_out_its_window_again_and_a_later_pass_grades_it",
         "tests/ci_lab/test_scheduler.py::test_a_head_whose_manifest_fetch_github_answers_with_a_server_error_waits_until_a_pass_finds_no_manifest"
       ]
     },
@@ -9605,7 +9605,7 @@
         "tests/test_github_app.py::test_a_refusal_without_an_http_status_keeps_its_message",
         "tests/ci_lab/test_manifests.py::test_actions_classifies_the_real_token_mint_refusal_by_its_http_status",
         "tests/ci_lab/test_manifests.py::test_actions_keeps_a_mint_scope_refusal_permanent",
-        "tests/ci_lab/test_scheduler_manifests.py::test_manifest_token_mint_failures_hold_only_transient_heads_and_grade_after_recovery"
+        "tests/ci_lab/test_scheduler.py::test_manifest_token_mint_failures_hold_only_transient_heads_and_grade_after_recovery"
       ]
     },
     {
@@ -9619,7 +9619,7 @@
         "tests/ci_lab/test_manifests.py::test_background_answers_a_failed_fetch_once_and_fetches_it_again_on_the_next_call",
         "tests/ci_lab/test_manifests.py::test_background_runs_at_most_four_fetches_at_once",
         "tests/ci_lab/test_scheduler.py::test_a_head_whose_manifest_still_fetches_keeps_its_window_and_each_pass_reads_the_fetch_again",
-        "tests/ci_lab/test_scheduler_manifests.py::test_a_pass_reaps_leases_and_advances_grades_while_a_manifest_fetch_github_never_answers"
+        "tests/ci_lab/test_scheduler.py::test_a_pass_reaps_leases_and_advances_grades_while_a_manifest_fetch_github_never_answers"
       ]
     },
     {
