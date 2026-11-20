@@ -406,6 +406,15 @@ users files and compares the grants agentihooks renders with the antoncore users
 | `member_claims`, with its `_INBOX.<user>.>` read as `_INBOX.>` | `swarm-hive` | Compared while the user exists; skipped with a notice once it is gone |
 | `controller_claims` | `swarm-controller` | Always compared; a missing user fails the check |
 
+It also holds the antoncore `swarm-ci-lab-scheduler` user to the names the lab scheduler binds. It reads `LAB_STREAM`
+from `scripts/events/nats.py` and `DURABLE` from `scripts/ci_lab/scheduler.py`, taking the last string literal
+assigned to each name without running either file, and requires the user to name
+`$JS.API.CONSUMER.INFO.<stream>.<durable>`, `$JS.API.CONSUMER.MSG.NEXT.<stream>.<durable>`,
+`$JS.ACK.<stream>.<durable>.>` and `_INBOX.>`, with no deny that overlaps one of them. Other subjects on the user stay
+allowed. A missing user, or a name that is not a non-empty string literal, fails with
+`::error::The swarm NATS grants cannot be read (...)`, so renaming the stream or the durable fails the check until
+antoncore grants the new name.
+
 Run it from an agentihooks checkout beside an antoncore checkout:
 
 ```bash
@@ -418,11 +427,17 @@ With the hive user retired the check prints:
 ```text
 The antoncore swarm-hive user is retired, so hives connect only with minted member credentials.
 The controller NATS grants match antoncore: <n> publish and <m> subscribe subjects.
+The ledger NATS grants match antoncore: <n> publish and <m> subscribe subjects.
+The lab scheduler NATS grants are in antoncore: 3 publish and 1 subscribe subjects.
 ```
 
 and exits 0. A subject granted on one side only prints one `::error::` line naming the side that grants it, for
 example `publish allow <subject> is granted only by the antoncore swarm-controller user
-(k8s/values-overlays/agentihooks-swarm-nats/values.yaml).`, and exits 1. The
+(k8s/values-overlays/agentihooks-swarm-nats/values.yaml).`, and exits 1. A lab scheduler subject the user does not
+name prints `publish allow <subject> is required by the agentihooks lab scheduler (...) and not named by the antoncore
+swarm-ci-lab-scheduler user (k8s/values-overlays/agentihooks-swarm-nats/users.yaml).`, and an overlapping deny prints
+`<direction> deny <pattern> on the antoncore swarm-ci-lab-scheduler user (...) blocks <subject>, which the agentihooks
+lab scheduler needs.`; both exit 1. The
 missing hive user is accepted only in operator mode, where the values file has no `accounts` block and users come from
 `users.yaml`; a values file that still defines the `SWARM` account without `swarm-hive` fails with
 `::error::The swarm NATS grants cannot be read (ValueError: the SWARM account has no swarm-hive user).`
