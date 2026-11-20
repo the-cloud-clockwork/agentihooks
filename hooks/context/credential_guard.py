@@ -563,7 +563,7 @@ def proc_tail_reads_environ(tail: list[str]) -> bool:
     if not tail or not leaf_names_environ(tail[-1]):
         return False
     middle = tail[:-1]
-    if any(s in DEPTH_SHIFTING_SEGMENTS or EXPANDING_SEGMENT.search(s) for s in middle):
+    if middle and any(s in DEPTH_SHIFTING_SEGMENTS or EXPANDING_SEGMENT.search(s) for s in tail):
         return True
     if middle and names_pid(middle[0]) and any(names_link(s) for s in middle[1:]):
         return True
