@@ -4495,16 +4495,9 @@ promotion grade cannot satisfy this proof: its grade identity and grader differ.
 
 Only checks carrying the exact grade key are read. The twin's required check must pass;
 the plant's required check must fail with `lint` as its only failing static gate. Failed
-pushes, expired or incomplete grades and other failing gates fail the command.
+pushes, expired or incomplete grades and other failing gates fail the command. The failing
+gate must carry its expected diagnostic in the trusted check output text: Ruff `I001` or
+`forbidden comment`. A check title or summary cannot satisfy that requirement.
 
 Success prints a JSON row. When `GITHUB_STEP_SUMMARY` is set, the command also appends a row
-with green and red GitHub check links, which remain usable outside the cluster. The Proofs
-`lab` option runs both static plants in sequence against the deployed lab.
-
-| Plant | Static gate | Expected diagnostic | Green lab check | Red lab check |
-|---|---|---|---|---|
-| `lint` | `lint` | Ruff `I001` for unsorted used imports | Pending deployed grade | Pending deployed grade |
-| `gate-script` | `lint` | `forbidden comment` from the protected grader | Pending deployed grade | Pending deployed grade |
-
-The pending rows require the plant push intake change to be deployed. Command unit tests
-and fixture diagnostics establish different evidence from these deployed grades.
+with green and red GitHub check links, which remain usable outside the cluster.
