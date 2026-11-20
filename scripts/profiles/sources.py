@@ -53,13 +53,10 @@ def row(layer: str, file: Path) -> dict[str, Any]:
 def doctrine_files(
     bundle: Path | None, dirs: list[tuple[str, Path]], user: Path | None = None, shared: Path | None = None
 ) -> list[Path]:
+    from hooks.context.profile_chain import doctrine
     from scripts.profiles import manifestos
 
-    files: list[Path] = []
-    for root in (bundle, shared, user):
-        if root is not None:
-            directive = root / ".claude" / "CLAUDE.md"
-            files.append(directive if directive.exists() else root / "CLAUDE.md")
+    files = [doctrine(root) for root in (bundle, shared, user) if root is not None]
     files += [directory / "CLAUDE.md" for _, directory in dirs]
     files += manifestos.paths(bundle, dirs, user, shared)
     return [file for file in files if file.is_file() and file.read_text().strip()]

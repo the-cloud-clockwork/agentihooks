@@ -2,6 +2,7 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
+from hooks.context.profile_chain import layer_root, unlayered
 from scripts.targets._common import _install_module
 
 
@@ -20,12 +21,13 @@ def native_settings(
     # --- 1a. Bundle-global native overrides: root, shared, then user ---
     # Settings gain the bundle rung that MCP already had; without it a bundle
     # can only express fleet-wide settings by repeating them in every profile.
-    for kind, bundle_root in _i._bundle_roots():
+    bundles = _i._bundle_roots()
+    for kind, bundle_root in bundles:
         label = f"Applied {_i._BUNDLE_LABELS[kind]} overrides: {{path}}"
-        rendered = _apply_layer(rendered, install_target, bundle_root, label, say)
+        rendered = _apply_layer(rendered, install_target, layer_root(bundle_root), label, say)
 
     # --- 1b. Apply per-profile overrides (chained: each profile merges on top) ---
-    for _, pdir in profile_dirs:
+    for _, pdir in unlayered(profile_dirs, (root for _, root in bundles)):
         rendered = _apply_layer(rendered, install_target, pdir, "Applied profile overrides: {path}", say)
 
     # --- 1b2. Apply settings-profile overlay (settings.json + MCP only, not rules/CLAUDE.md) ---
