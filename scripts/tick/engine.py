@@ -625,6 +625,12 @@ def _placing(step: Step) -> bool:
     return bool(getattr(step, "placing", False))
 
 
+def _kept_first(steps: Iterable[Step]) -> list[Step]:
+    """Return ``steps`` with the kept ones first, each part in its given order, so a kept placing step never queues on
+    the pass's one placement worker behind a sibling that became ready in the same sweep."""
+    return sorted(steps, key=lambda step: not _kept(step))
+
+
 def _kept_after(earlier: frozenset[str], step: Step, ctx: Context, found: pool.Pass, start: _Start) -> StepRecord:
     """Run the kept ``step`` once every handed off step of an earlier group in ``earlier`` ended, waiting at most its
     own budget for them, and run it even when one of them was dropped, unless the pass ended before it started."""
@@ -675,6 +681,8 @@ def _eager(
     that another schedule of the pass runs included.
 
     Each finished step's writes are applied through ``apply`` on this scheduling thread before its dependents start.
+    The kept steps ready in one sweep are submitted before its other ready steps, so a kept placing step never waits
+    on the one placement worker for a sibling that became ready with it.
     A step in ``rest`` starts no thread and ends at once for its dependents. A kept step starts even after its lane
     expired or a step it needs was dropped, bounded by its own budget and the pass deadline. A sweep that ends a step
     without a thread sweeps again at once, so a step whose needs that ended starts before the running steps end.
@@ -691,11 +699,11 @@ def _eager(
     held_back = _held_back(ordered, found.reserves)
     try:
         while pending or running:
-            ready = [
+            ready = _kept_first(
                 step
                 for step in pending
                 if step.needs & names <= records.keys() and not _waiting(step, names, found, awaited)
-            ]
+            )
             for step in ready:
                 pending.remove(step)
                 lane = _lane_of(step, found, held_back)
