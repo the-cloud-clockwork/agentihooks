@@ -220,7 +220,7 @@ def test_start_launches_master_up_new_in_its_own_session(monkeypatch: pytest.Mon
 
     assert master_fallback.start("sw") == 4321
     [(command, session, env)] = calls
-    assert command == [sys.executable, "-m", "scripts.install", "swarm", "sw", "master", "up", "--new"]
+    assert command == [sys.executable, "-P", "-m", "scripts.install", "swarm", "sw", "master", "up", "--new"]
     assert session is True
     assert env["PATH"] == os.pathsep.join(
         [str(tmp_path / ".local" / "bin"), str(Path(sys.executable).parent), "/usr/bin:/bin"]
@@ -291,6 +291,26 @@ def test_the_installed_unit_starts_master_up_under_the_systemd_default_path(
     assert done.returncode == 0, done.stderr
     assert "--replace" in done.stdout
     assert command[-5:] == ["swarm", "sw", "master", "up", "--new"]
+
+
+@pytest.mark.feature("master-fallback-tick")
+def test_master_up_runs_the_installed_package_past_a_scripts_folder_in_the_working_folder(tmp_path: Path) -> None:
+    shadow = tmp_path / "scripts"
+    shadow.mkdir()
+    (shadow / "__init__.py").write_text("")
+    (shadow / "install.py").write_text('raise SystemExit("shadowed")\n')
+
+    done = subprocess.run(
+        [*master_fallback.master_up("sw", "--new")[:-1], "--help"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert "--replace" in done.stdout
 
 
 @pytest.mark.feature("master-fallback-tick")
