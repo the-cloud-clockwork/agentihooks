@@ -11161,6 +11161,16 @@
         "tests/test_type_gate.py::test_the_gate_checks_a_run_of_the_every_source_layout_through_its_last_graded_source",
         "tests/test_type_gate.py::test_the_gate_checks_four_runs_at_once"
       ]
+    },
+    {
+      "id": "ci-dependency-audit-platformdirs-pin",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2801",
+      "behaviour": "The dependency audit's pip-audit invocation excludes platformdirs 4.14.8 from its own resolution with a uv --with constraint, so a runner whose home directory is world-writable does not hit that release's refusal to create a cache directory there; the lint job's own grading step also writes a UV_CONSTRAINT file before calling the base's copy of the script, so a pull request's own audit stays green while the fix has not yet reached the base.",
+      "seam": "scripts.ci_dependency_audit.audit's pip-audit command and the lint job's dependency audit step",
+      "tests": [
+        "tests/test_ci_dependency_audit.py::test_audit_excludes_the_platformdirs_release_that_refuses_the_runner_home"
+      ]
     }
   ],
   "unmapped_rules": [
