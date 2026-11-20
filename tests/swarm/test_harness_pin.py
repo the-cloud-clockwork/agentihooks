@@ -145,6 +145,22 @@ def test_waiting_tasks_list_only_below_the_lane_ceiling(effective: int, waiting:
 
 
 @pytest.mark.feature("swarm-harness-pin-guard")
+def test_an_unpinned_lane_before_a_pinned_lane_with_no_ready_entry_still_stores_the_pin() -> None:
+    """The scan passes an unpinned eng lane and stores the later ci pin; a lane absent from the ready work waits on
+    nothing."""
+    config = SwarmConfig(SLUG, "/repo", max_eng=2, max_ci=1, max_plan=0, lanes={"ci": {"agent": "codex"}})
+    decision = {
+        "effective": {"eng": 0, "ci": 0, "plan": 0},
+        "configured": {"eng": 2, "ci": 1, "plan": 0},
+        "placeable": {"claude": 3, "codex": 0},
+        "tasks": {},
+    }
+    assert capacity.pins(config, decision, {"eng": [{"id": "e1"}]}, {}, START) == {
+        "pins": {"ci": {"agent": "codex", "since": START, "other": "claude", "free": 3, "waiting": []}}
+    }
+
+
+@pytest.mark.feature("swarm-harness-pin-guard")
 def test_the_pin_age_holds_while_the_pin_stands_and_restarts_when_it_changes(store: RedisStore) -> None:
     """The capacity pass keeps the time it first saw a pin until the pin changes or clears; no pin stores no key."""
     config = swarm(store, {"eng": {"agent": "claude"}})
