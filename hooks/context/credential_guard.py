@@ -90,10 +90,10 @@ SECRETISH_NAME = re.compile(
     r"|PRIVATE_?KEY|ACCESS_?KEY|SESSION_?KEY|AUTH)"
 )
 SET_TEST = re.compile(
-    r"(?:^|(?<=[\s'\"(;&|]))(?:test|\[\[?)\s+-[nz]\s+"
-    r"\"\$(?:\{[A-Za-z_][A-Za-z0-9_]*(?::?-)?\}|[A-Za-z_][A-Za-z0-9_]*)\"(?:\s+\]\]?)?(?=[\s'\";&|)]|$)"
+    r"\s*(?:test|\[\[?)\s+-[nz]\s+"
+    r"\"\$(?:\{[A-Za-z_][A-Za-z0-9_]*(?::?-)?\}|[A-Za-z_][A-Za-z0-9_]*)\"(?:\s+\]\]?)?\s*"
 )
-XTRACE = re.compile(r"(?:^|\s)-[A-Za-z]*x|\bxtrace\b")
+XTRACE = re.compile(r"\s-[A-Za-z]*x|\bxtrace\b")
 
 QUOTING = re.compile(r"[\"'\\]")
 PROC_DIR = re.compile(r"/proc\b")
@@ -503,12 +503,25 @@ def leaf_names_environ(leaf):
 def echo_secret_verdict(command: str) -> str | None:
     if not re.search(r"\b(echo|printf)\b", command):
         return None
-    parts = [command] if XTRACE.search(command) else SET_TEST.split(command)
-    for part in parts:
-        for name in re.findall(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)", part):
+    for piece in [command] if XTRACE.search(command) else untested_pieces(command):
+        for name in re.findall(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)", piece):
             if SECRETISH_NAME.search(name):
                 return block(f"printing ${name} to stdout", KIND_ENVIRONMENT)
     return None
+
+
+def untested_pieces(command: str) -> list[str]:
+    """The command's text with every part of a single quoted -c script that is only a set test left out."""
+    pieces: list[str] = []
+    rest = command
+    for stage in split_outside_quotes(STAGE_DELIM, command)[::2]:
+        for script in shell_scripts(tokens_of(stage)):
+            head, quoted, tail = rest.partition(f"'{script}'")
+            if quoted:
+                parts = split_outside_quotes(SEGMENT_DELIM, script)
+                pieces += [head, *(part for part in parts if not SET_TEST.fullmatch(part))]
+                rest = tail
+    return [*pieces, rest]
 
 
 def awk_environ_verdict(command: str) -> str | None:

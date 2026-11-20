@@ -140,36 +140,41 @@ kubectl exec pod-0 -- bash -c '[[ -n "${LEDGER_TOKEN-}" ]] && echo set || echo u
 docker exec box sh -c 'test -z "${API_KEY}" && echo unset || echo set'
 ```
 
-A set test is `test`, `[` or `[[` with `-n` or `-z` and one double quoted
-operand: `"$VAR"`, `"${VAR}"`, `"${VAR-}"` or `"${VAR:-}"`. The guard
-ignores the variable in that operand when it looks for an `echo` or `printf`
-of a secret looking name. Every other use of the name still counts, so these
-are refused with `BLOCKED: printing $GITHUB_TOKEN to stdout.`:
+A set test is a whole part of a single quoted `-c` script, split at `&&`,
+`||`, `;` or a new line, that is `test`, `[` or `[[` with `-n` or `-z` and one
+double quoted operand: `"$VAR"`, `"${VAR}"`, `"${VAR-}"` or `"${VAR:-}"`.
+The `echo` and `printf` check leaves those parts out when it looks for a
+secret looking name. Every other use of the name still counts, so these are
+refused with `BLOCKED: printing $GITHUB_TOKEN to stdout.`:
 
 ```bash
+kubectl exec pod-0 -- sh -c 'echo test -n "$GITHUB_TOKEN"'
+kubectl exec pod-0 -- sh -c 'echo [ -n "$GITHUB_TOKEN" ]'
 kubectl exec pod-0 -- sh -c 'test -n "${GITHUB_TOKEN:-}" && echo "$GITHUB_TOKEN"'
 kubectl exec pod-0 -- sh -c 'test -n "${GITHUB_TOKEN:-}" && echo "$1"' _ "$GITHUB_TOKEN"
 kubectl exec pod-0 -- sh -c 'test -n "$GITHUB_TOKEN" -a "$GITHUB_TOKEN" -eq 0 && echo set'
 ```
 
-The last one prints the value in the shell's `integer expression expected`
-error. With xtrace on, the shell prints each expanded command to stderr,
-`test -n` and its value included, so a command that holds a flag word with an
-`x`, such as `sh -xc` or `set -ex`, or the word `xtrace` keeps every name it
-holds counted:
+The first two print the test as text with the value in it. The last prints
+the value in the shell's `integer expression expected` error. With xtrace on,
+the shell prints each expanded command to stderr, `test -n` and its value
+included, so the `echo` and `printf` check counts every name in a command that
+holds a flag word with an `x`, such as `sh -xc` or `set -ex`, or the word
+`xtrace`:
 
 ```bash
 kubectl exec pod-0 -- sh -xc 'test -n "${GITHUB_TOKEN:-}" && echo set || echo unset'
 kubectl exec pod-0 -- bash -c 'set -o xtrace; [ -n "$API_KEY" ] && echo set'
 ```
 
-An unquoted operand, another expansion such as `"${VAR:+x}"` or an
-escaped quote is not read as a set test, so the script is refused as before.
-Delivered by pull request
-[#12604](https://github.com/the-cloud-clockwork/agentihooks/pull/12604), with
-the regression tests `test_a_set_test_inside_a_shell_script_passes` and
-`test_a_shell_script_that_prints_the_value_is_refused` and the feature map
-entry `credential-guard-passes-set-tests-in-scripts`.
+An unquoted operand, another expansion such as `"${VAR:+x}"` and a script in
+double quotes are not read as a set test, so these are refused too:
+
+```bash
+kubectl exec pod-0 -- sh -c 'test -n $GITHUB_TOKEN && echo set'
+kubectl exec pod-0 -- sh -c 'test -n "${GITHUB_TOKEN:+x}" && echo set'
+kubectl exec pod-0 -- sh -c "test -n \"\$GITHUB_TOKEN\" && echo set"
+```
 
 ## What still passes
 
@@ -260,6 +265,7 @@ safe for listing the environment; use the name listing above.
 | A `sudo` option that takes a value | `sudo -u root bash -c 'env'` |
 | `gawk`, `mawk` or `nawk` run directly by a wrapper | `kubectl exec pod -- gawk 'BEGIN{print ENVIRON["X"]}'`; `awk` is read there, and the others are read at the top level and inside a shell script |
 | An environment dump with no shell | `kubectl exec pod -- env` |
+| A traced script with no `echo` or `printf` | `kubectl exec pod -- sh -xc 'test -n "$API_TOKEN"'` prints the value in its trace |
 | A container inspection that formats its environment | `docker inspect --format '…Env…' box` |
 | An interpreter one-liner that prints the environment | `python3 -c 'import os; print(os.environ)'` |
 | `printenv` of a name that does not look secret | `printenv DATABASE_URL`, which can hold a password inside the address |
@@ -318,3 +324,12 @@ The three 17 November commands, in full, are rows of the guard case table in
 `credential-guard-reads-shell-scripts` and
 `credential-guard-refuses-awk-environ-values` record the behaviour. See
 [Feature map](feature-map.md).
+
+Set tests inside a script were delivered by pull request
+[#12604](https://github.com/the-cloud-clockwork/agentihooks/pull/12604).
+`untested_pieces` leaves the set test parts of each single quoted `-c` script
+out of the text `echo_secret_verdict` reads. Regression tests:
+`test_a_set_test_inside_a_shell_script_passes`,
+`test_a_shell_script_that_prints_the_value_is_refused` and
+`test_a_set_test_of_another_form_is_refused`, recorded by the feature map
+entry `credential-guard-passes-set-tests-in-scripts`.
