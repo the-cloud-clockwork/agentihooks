@@ -20,7 +20,7 @@ def strip_non_command_content(command: str) -> str:
 
     check = re.sub(r"\(\((?:[^()]|\([^()]*\))*?\)\)", lambda arithmetic: arithmetic.group(0).replace("<<", "  "), check)
     check = re.sub(
-        r"<<-?\s*'?(\w+)'?([^\n]*)\n.*?^[ \t]*\1(?=[ \t]*(?:\)|$))",
+        r"<<-?\s*'?(\w++)'?([^\n]*+)\n.*?^[ \t]*+\1(?=[ \t]*+(?:\)|$))",
         r"\2",
         check,
         flags=re.DOTALL | re.MULTILINE,
