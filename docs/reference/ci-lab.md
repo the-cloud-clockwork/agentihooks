@@ -722,14 +722,15 @@ docker run --rm -v "$work:/w" -w /w --entrypoint promtool prom/prometheus:v3.4.1
 The test file names `ci-lab.rules.yml`, so the rule groups are written there first. promtool
 prints `SUCCESS` for the file, or `FAILED:` with each case that missed and the alerts it got.
 
-List the series the scheduler's metrics port sets, with no service, from an agentihooks checkout:
+List the series every scrape of the scheduler's metrics port sets, with no service, from an
+agentihooks checkout:
 
 ```bash
 python -c 'from scripts.ci_lab import metrics; from scripts.ci_lab.capacity import Load; r = metrics.Registry(); metrics.observe_load(r, Load(pending={"pull_request": (120.0,)}, running={"queue": 1}, slots_total=4, slots_busy=1, frees_in=(60.0,))); print(sorted({line.split("{")[0].split(" ")[0] for line in r.render().splitlines() if not line.startswith("#")}))'
 ```
 
 ```text
-['ci_lab_budget_fraction', 'ci_lab_class_shed', 'ci_lab_queue_wait_seconds', 'ci_lab_slots_busy', 'ci_lab_slots_total', 'ci_lab_units_queued', 'ci_lab_units_running']
+['ci_lab_budget_fraction', 'ci_lab_class_shed', 'ci_lab_queue_wait_seconds', 'ci_lab_slots_busy', 'ci_lab_slots_total', 'ci_lab_slots_wanted', 'ci_lab_units_overdue', 'ci_lab_units_queued', 'ci_lab_units_running', 'ci_lab_workers_ready']
 ```
 
 ### Verify
