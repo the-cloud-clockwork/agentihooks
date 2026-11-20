@@ -10915,6 +10915,16 @@
       ]
     },
     {
+      "id": "reused-coverage-scripts-module",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-coverage-step-drop-fallback",
+      "behaviour": "The unit job's Keep the reused tests' dev coverage step runs the grader checkout's scripts.reused_coverage alone. A grader checkout whose interpreter cannot import the tests package keeps the reused tests' dev coverage moved onto the head's lines, and a grader checkout that keeps the filter only under the tests package never runs that copy.",
+      "seam": "the Keep the reused tests' dev coverage step run text executed in a fake grader checkout",
+      "tests": [
+        "tests/test_reused_coverage.py::test_the_unit_shards_keep_reused_coverage_with_the_scripts_filter_alone_and_never_the_tests_package"
+      ]
+    },
+    {
       "id": "lab-remote-heads",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2645",
