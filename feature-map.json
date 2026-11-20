@@ -142,6 +142,17 @@
       ]
     },
     {
+      "id": "lab-scheduler-unexpanded-head",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2614",
+      "behaviour": "A head the CI lab scheduler cannot expand shows a lab status: when Scheduler.tick releases a held head and its expander raises a ValueError, KeyError, YAML error, schema validation error or failed git command, the scheduler drops the head as before and posts one completed required check run with conclusion failure on that head, named lab-shadow/required since a head with no plan has no authoritative gates, whose summary names the head, its base and the expansion error; a head pushed to a grade ref posts no check run, because GitHub does not hold that head.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis with a raising expander and a recording Poster behind scripts.ci_lab.scheduler.Ports.checks, read through the posts and the repositories the poster was asked for",
+      "tests": [
+        "tests/ci_lab/test_scheduler_unexpanded.py::test_a_head_that_cannot_expand_posts_a_failed_required_check_naming_its_reason",
+        "tests/ci_lab/test_scheduler_unexpanded.py::test_a_grade_ref_head_that_cannot_expand_posts_no_check_run"
+      ]
+    },
+    {
       "id": "doctor-lab-health",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/swarm-doctor-lab-detector",
@@ -7023,6 +7034,20 @@
       ]
     },
     {
+      "id": "hive-admission-guard-own-cpu",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-empty-hive-admission",
+      "behaviour": "The host CPU line's five minute load guard refuses a hive only while the hive's own CPU, its pod load when the reading carries one and otherwise the node's CPU used, is at or above the swarm share, so an empty pod hive on a node whose other pods raise the load average and CPU used gets the used CPU line's room instead of none.",
+      "seam": "admission.room over a headroom reading with node used_cpus and the pod's pod_load",
+      "tests": [
+        "tests/hive/test_admission.py::test_an_empty_pod_hive_on_a_busy_node_gets_the_used_cpu_room",
+        "tests/hive/test_admission.py::test_the_load_average_guard_binds_on_a_pod_hive_once_its_own_load_reaches_the_swarm_share"
+      ],
+      "rules": [
+        "hive-guard-reads-node-cpu-used"
+      ]
+    },
+    {
       "id": "hive-member-reads-every-hive-pending-admission",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2555",
@@ -8467,7 +8492,7 @@
       "id": "root-keeps-slots-for-pinned-tasks",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-root-prefers-workstation-tasks",
-      "behaviour": "Under the events engine the root hive keeps one free slot for each claimable task of the asking swarm that only root takes and can place, a workstation task pinned to no other hive or a task pinned to root: the hub answers a root admission for work any hive can run with a held answer once root's live workers plus those waiting tasks reach its max agents, so the root lane spoke launches the pinned task on its next poll and the unpinned offer stays queued for another hive, while a pinned task and every other hive are admitted as before.",
+      "behaviour": "Under the events engine the root hive keeps one free slot for each claimable task of every events swarm that only root takes and can place, a workstation task pinned to no other hive or a task pinned to root: the hub answers a root admission for work any hive can run with a held answer once root's live workers plus those waiting tasks reach its max agents, so the root lane spoke launches the pinned task on its next poll and the unpinned offer stays queued for another hive, while a pinned task and every other hive are admitted as before.",
       "seam": "scripts.swarm.readiness root_only and root_waiting through scripts.hub.admission Admission.admit, Admission._reserved and Admission._full, observed at scripts.hive.lanes.run_once",
       "tests": [
         "tests/swarm/test_events_placement.py::test_root_only_names_the_tasks_only_the_root_hive_takes",
@@ -8475,6 +8500,8 @@
         "tests/swarm/test_events_placement.py::test_root_with_one_free_slot_holds_the_unpinned_task_for_another_hive_and_admits_the_workstation_task",
         "tests/swarm/test_events_placement.py::test_root_keeps_a_slot_only_for_a_workstation_task_it_can_place",
         "tests/swarm/test_events_placement.py::test_root_admits_unpinned_work_only_into_slots_beyond_the_waiting_workstation_tasks",
+        "tests/swarm/test_events_placement.py::test_root_keeps_a_slot_for_a_workstation_task_another_events_swarm_holds_waiting",
+        "tests/swarm/test_events_placement.py::test_root_keeps_one_slot_for_each_waiting_workstation_task_of_every_events_swarm",
         "tests/swarm/test_events_placement.py::test_root_with_one_free_slot_launches_the_workstation_task_on_the_poll_after_holding_the_unpinned_one"
       ]
     },
