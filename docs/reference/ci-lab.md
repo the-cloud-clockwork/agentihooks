@@ -327,7 +327,9 @@ The scheduler service builds the snapshot on every request with
 A worker's lease poll records its free slots when the poll starts and what its grants leave when
 it returns (`Queue.offer`); each load forgets the offers older than the ready window with
 `Queue.prune`, one script that reads and deletes, so an offer a worker renews meanwhile stays.
-A queue job no live grade holds counts toward the busy slots only.
+A queue job no live grade holds counts toward the busy slots only. The load reads only the slots
+and lease start of each pending and leased job, with `Queue.slots`: HMGET in one pipeline that
+opens no transaction, so it builds no job record however long the queue grows.
 Until the lab records measured unit durations, every estimate is the fixed `UNIT_ESTIMATE_S`.
 
 ### Load snapshot
