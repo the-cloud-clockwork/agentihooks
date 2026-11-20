@@ -181,6 +181,11 @@ class ExecutionRegistry:
             timing.timed(self._put, slug, agent, managed)
 
     def _unchanged(self, slug: str, agent: AgentRecord) -> bool:
+        from scripts.swarm import lease
+        from scripts.swarm.store import SwarmError
+
+        if (held := lease.EPOCH.get()) is not None and lease.stale(self.store, slug, held):
+            raise SwarmError(lease.STALE)
         if _invalid(slug, agent):
             return False
         port = fencing.records(self.store, slug)
@@ -190,18 +195,14 @@ class ExecutionRegistry:
         row = port.record(slug, "executions", agent.execution_id)
         if row is None:
             return False
+        moved = port.record(slug, fencing.BY_SEAT, agent.seat)
+        if moved is None or moved.value != head.value:
+            return False
         current = _record(cast(dict[str, Any], row.value))
         if any(getattr(agent, field) != getattr(current, field) for field in IMMUTABLE):
             return False
-        written = agent
-        if current.state == "finished" and written.state != "ended":
-            written = replace(written, state="finished")
-        written_target = cast(dict[str, Any], written.runtime_target)
-        current_target = cast(dict[str, Any], current.runtime_target)
-        if _read_before_ack(written_target, current_target):
-            written = replace(written, **{field: getattr(current, field) for field in LAUNCH_BINDING})
-            written_target = cast(dict[str, Any], written.runtime_target)
-        if written_target.get("pod_uid") or _binding_conflict(current_target, written_target):
+        written, conflict = _resolve(current, agent)
+        if conflict or cast(dict[str, Any], written.runtime_target).get("pod_uid"):
             return False
         return written == current
 
@@ -289,12 +290,9 @@ class ExecutionRegistry:
             current = occupants_of(doc).get(agent.seat)
             if not current or any(getattr(agent, field) != getattr(current, field) for field in IMMUTABLE):
                 self.conflict(slug, "stale or changed execution identity")
-            written = agent
-            if current.state == "finished" and written.state != "ended":
-                written = replace(written, state="finished")
-            if _read_before_ack(written.runtime_target, current.runtime_target):
-                written = replace(written, **{field: getattr(current, field) for field in LAUNCH_BINDING})
-            _check_binding(current.runtime_target, written.runtime_target, lambda message: self.conflict(slug, message))
+            written, conflict = _resolve(current, agent)
+            if conflict:
+                self.conflict(slug, "runtime target identity is immutable after binding")
             self.check_uid(slug, written, doc)
             if written != current:
                 doc["executions"][written.execution_id] = asdict(written)
@@ -415,6 +413,8 @@ def _invalid(slug: str, agent: AgentRecord) -> bool:
         return True
     if not is_seat(agent.seat) or not agent.seat.endswith(f"@{slug}"):
         return True
+    if not isinstance(agent.runtime_target, dict):
+        return True
     reasons: list[str] = []
     _validate_target(agent.runtime_backend, cast(dict[str, Any], agent.runtime_target), reasons.append)
     return bool(reasons)
@@ -435,6 +435,19 @@ def _binding_conflict(previous: dict[str, Any], current: dict[str, Any]) -> bool
     reasons: list[str] = []
     _check_binding(previous, current, reasons.append)
     return bool(reasons)
+
+
+def _resolve(current: AgentRecord, agent: AgentRecord) -> tuple[AgentRecord, bool]:
+    """The record _update would write for agent against current, and whether their binding now conflicts."""
+    written = agent
+    if current.state == "finished" and written.state != "ended":
+        written = replace(written, state="finished")
+    if _read_before_ack(written.runtime_target, current.runtime_target):
+        written = replace(written, **{field: getattr(current, field) for field in LAUNCH_BINDING})
+    conflict = _binding_conflict(
+        cast(dict[str, Any], current.runtime_target), cast(dict[str, Any], written.runtime_target)
+    )
+    return written, conflict
 
 
 def _read_before_ack(written, stored):

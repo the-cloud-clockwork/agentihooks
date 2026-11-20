@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import asdict, replace
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from scripts.swarm import execution, fencing
+from scripts.swarm import execution, fencing, lease
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 
 pytestmark = pytest.mark.unit
@@ -57,6 +57,18 @@ def _watched(monkeypatch: pytest.MonkeyPatch) -> tuple[list[int], list[int]]:
     return acquires, writes
 
 
+def _reads(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    reads: list[int] = []
+    real_sections = fencing.WholeDocumentRecords.sections
+
+    def counting_sections(self: Any, slug: str, names: Any) -> Any:
+        reads.append(1)
+        return real_sections(self, slug, names)
+
+    monkeypatch.setattr(fencing.WholeDocumentRecords, "sections", counting_sections)
+    return reads
+
+
 @pytest.mark.parametrize("layout", ["document", "records"])
 @pytest.mark.feature("execution-put-unchanged-skips-lock")
 def test_an_unchanged_put_skips_the_write_lock_and_the_fenced_document_read(
@@ -65,12 +77,14 @@ def test_an_unchanged_put_skips_the_write_lock_and_the_fenced_document_read(
     current = store.start_execution("fixture", agent)
     if layout == "records":
         fencing.migrate_records(store, "fixture", writers_upgraded=True)
+    reads = _reads(monkeypatch)
     acquires, writes = _watched(monkeypatch)
 
     store.put_agent("fixture", current)
 
     assert acquires == []
     assert writes == []
+    assert len(reads) == (3 if layout == "document" else 0)
     assert store.execution("fixture", current.execution_id) == current
 
 
@@ -222,4 +236,47 @@ def test_a_fenced_head_with_no_matching_execution_row_still_takes_the_locked_pat
     store.put_agent("fixture", current)
 
     assert calls == ["fixture"]
+    assert len(acquires) >= 1
+
+
+@pytest.mark.feature("execution-put-unchanged-skips-lock")
+def test_invalid_rejects_a_non_dict_runtime_target(agent: AgentRecord) -> None:
+    assert execution._invalid("fixture", replace(agent, runtime_target="bad")) is True
+
+
+@pytest.mark.feature("execution-put-unchanged-skips-lock")
+def test_a_stale_controller_epoch_raises_the_same_way_on_both_paths(
+    store: RedisStore, agent: AgentRecord, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    current = store.start_execution("fixture", agent)
+    token = lease.EPOCH.set(5)
+    try:
+        with pytest.raises(SwarmError, match=lease.STALE):
+            store.put_agent("fixture", current)
+        with pytest.raises(SwarmError, match=lease.STALE):
+            store.put_agent("fixture", replace(current, idle_ticks=2))
+    finally:
+        lease.EPOCH.reset(token)
+
+
+@pytest.mark.feature("execution-put-unchanged-skips-lock")
+def test_an_occupant_that_moves_between_the_check_reads_still_takes_the_locked_path(
+    store: RedisStore, agent: AgentRecord, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    current = store.start_execution("fixture", agent)
+    moved = replace(current, execution_id="exe-moved")
+    seen: list[int] = []
+
+    class _MovingHead:
+        def record(self, slug: str, section: str, key: str) -> Any:
+            if section == fencing.BY_SEAT:
+                seen.append(1)
+                return SimpleNamespace(value=current.execution_id if len(seen) == 1 else moved.execution_id)
+            return SimpleNamespace(value=asdict(current if key == current.execution_id else moved))
+
+    monkeypatch.setattr(execution.fencing, "records", lambda store_arg, slug: _MovingHead())
+    acquires, _ = _watched(monkeypatch)
+
+    store.put_agent("fixture", current)
+
     assert len(acquires) >= 1

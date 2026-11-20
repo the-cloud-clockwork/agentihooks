@@ -11154,7 +11154,7 @@
       "id": "execution-put-unchanged-skips-lock",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2797",
-      "behaviour": "ExecutionRegistry.put reads the one execution record a managed agent's seat already occupies through the records port and, when the write would apply every transform _update applies (finished state retention, the read before ack launch binding carry, the binding and Pod UID checks) and still leave the record unchanged, returns without taking the swarm's write lock or running the fenced whole document read; a put that changes the record, cannot be read cheaply, is not managed, or would be refused still takes the locked fenced path unchanged.",
+      "behaviour": "ExecutionRegistry.put reads the one execution record a managed agent's seat already occupies through the records port, re-reading the seat's head to confirm no concurrent admission moved it, and, while the held controller epoch (if any) is still the live lease, when the write would apply every transform _update applies (finished state retention, the read before ack launch binding carry, the binding and Pod UID checks) and still leave the record unchanged, returns without taking the swarm's write lock or running the fenced whole document read-modify-write; a put that changes the record, finds the occupant moved, carries a non-dict runtime target, cannot be read cheaply, is not managed, is refused, or runs under a stale controller epoch still takes the locked fenced path unchanged (a stale epoch raises the same way on both paths).",
       "seam": "scripts.swarm.execution.ExecutionRegistry.put over fencing.records and fencing.write",
       "tests": [
         "tests/swarm/test_execution_unchanged_put.py::test_an_unchanged_put_skips_the_write_lock_and_the_fenced_document_read",
@@ -11169,7 +11169,10 @@
         "tests/swarm/test_execution_unchanged_put.py::test_an_unchanged_put_forces_a_locally_finished_record_through_the_fast_path",
         "tests/swarm/test_execution_unchanged_put.py::test_an_unchanged_put_syncs_launch_binding_fields_on_a_read_before_ack",
         "tests/swarm/test_execution_unchanged_put.py::test_an_unchanged_put_with_a_bound_pod_uid_still_takes_the_locked_path",
-        "tests/swarm/test_execution_unchanged_put.py::test_a_fenced_head_with_no_matching_execution_row_still_takes_the_locked_path"
+        "tests/swarm/test_execution_unchanged_put.py::test_a_fenced_head_with_no_matching_execution_row_still_takes_the_locked_path",
+        "tests/swarm/test_execution_unchanged_put.py::test_invalid_rejects_a_non_dict_runtime_target",
+        "tests/swarm/test_execution_unchanged_put.py::test_a_stale_controller_epoch_raises_the_same_way_on_both_paths",
+        "tests/swarm/test_execution_unchanged_put.py::test_an_occupant_that_moves_between_the_check_reads_still_takes_the_locked_path"
       ]
     },
     {
