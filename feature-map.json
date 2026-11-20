@@ -8,7 +8,8 @@
       "seam": "scripts.swarm.health.urgent_hold.observe over the hive admission rooms scripts.swarm.status.readable_hives reads, then urgent_hold.read and urgent_hold.findings",
       "tests": [
         "tests/swarm/test_urgent_hold.py::test_an_urgent_task_while_no_live_hive_has_admission_room_names_the_hive_and_raises_no_finding",
-        "tests/swarm/test_urgent_hold.py::test_the_hive_admission_hold_stands_only_while_every_live_hive_is_read_at_zero_room"
+        "tests/swarm/test_urgent_hold.py::test_the_hive_admission_hold_stands_only_while_every_live_hive_is_read_at_zero_room",
+        "tests/swarm/test_urgent_hold.py::test_a_release_wait_is_named_ahead_of_the_hive_admission_hold"
       ]
     },
     {
