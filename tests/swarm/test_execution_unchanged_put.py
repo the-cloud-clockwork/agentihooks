@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -113,3 +114,112 @@ def test_a_binding_or_uid_conflict_still_takes_the_locked_path(
 
     assert len(acquires) >= 1
     assert len(writes) >= 1
+
+
+@pytest.mark.feature("execution-put-unchanged-skips-lock")
+def test_invalid_rejects_an_unknown_runtime_backend(agent: AgentRecord) -> None:
+    assert execution._invalid("fixture", replace(agent, runtime_backend="docker")) is True
+
+
+@pytest.mark.feature("execution-put-unchanged-skips-lock")
+def test_invalid_accepts_a_valid_kubernetes_target(agent: AgentRecord) -> None:
+    pod = replace(agent, runtime_backend="kubernetes", runtime_target={"pod_namespace": "ns", "pod_name": "pod"})
+
+    assert execution._invalid("fixture", pod) is False
+
+
+@pytest.mark.feature("execution-put-unchanged-skips-lock")
+def test_invalid_rejects_an_incomplete_kubernetes_target(agent: AgentRecord) -> None:
+    pod = replace(agent, runtime_backend="kubernetes", runtime_target={"pod_namespace": "ns"})
+
+    assert execution._invalid("fixture", pod) is True
+
+
+@pytest.mark.feature("execution-put-unchanged-skips-lock")
+def test_invalid_rejects_a_seat_outside_the_swarm(agent: AgentRecord) -> None:
+    assert execution._invalid("fixture", replace(agent, seat="eng-1@other")) is True
+
+
+@pytest.mark.feature("execution-put-unchanged-skips-lock")
+def test_binding_conflict_flags_a_changed_identity_field() -> None:
+    assert execution._binding_conflict({"host_id": "host"}, {"host_id": "host", "pid": 1}) is True
+
+
+@pytest.mark.feature("execution-put-unchanged-skips-lock")
+def test_an_unchanged_put_forces_a_locally_finished_record_through_the_fast_path(
+    store: RedisStore, agent: AgentRecord, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    current = store.start_execution("fixture", agent)
+    fencing.write(store, "fixture", lambda doc: doc["executions"][current.execution_id].update(state="finished"))
+    acquires, writes = _watched(monkeypatch)
+
+    store.put_agent("fixture", current)
+
+    assert acquires == []
+    assert writes == []
+    assert store.execution("fixture", current.execution_id).state == "finished"
+
+
+@pytest.mark.feature("execution-put-unchanged-skips-lock")
+def test_an_unchanged_put_syncs_launch_binding_fields_on_a_read_before_ack(
+    store: RedisStore, agent: AgentRecord, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    current = store.start_execution("fixture", agent)
+    bound_target = {"host_id": "host", "process_namespace": "ns", "pid": 5, "pid_start": 1000}
+    fencing.write(
+        store, "fixture", lambda doc: doc["executions"][current.execution_id].update(runtime_target=bound_target)
+    )
+    acquires, writes = _watched(monkeypatch)
+
+    store.put_agent("fixture", replace(current, runtime_target={"host_id": "host"}))
+
+    assert acquires == []
+    assert writes == []
+    assert store.execution("fixture", current.execution_id).runtime_target == bound_target
+
+
+@pytest.mark.feature("execution-put-unchanged-skips-lock")
+def test_an_unchanged_put_with_a_bound_pod_uid_still_takes_the_locked_path(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pod_agent = AgentRecord(
+        store.next_name("fixture", "eng"),
+        "eng",
+        "task",
+        seat="eng-1@fixture",
+        started_at=123,
+        runtime_backend="kubernetes",
+        runtime_target={"pod_namespace": "ns", "pod_name": "pod", "pod_uid": "uid-1"},
+    )
+    current = store.start_execution("fixture", pod_agent)
+    acquires, _ = _watched(monkeypatch)
+
+    store.put_agent("fixture", current)
+
+    assert len(acquires) >= 1
+
+
+@pytest.mark.feature("execution-put-unchanged-skips-lock")
+def test_a_fenced_head_with_no_matching_execution_row_still_takes_the_locked_path(
+    store: RedisStore, agent: AgentRecord, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    current = store.start_execution("fixture", agent)
+    calls: list[str] = []
+
+    class _MissingRow:
+        def record(self, slug: str, section: str, key: str) -> Any:
+            if section == fencing.BY_SEAT:
+                return SimpleNamespace(value=current.execution_id)
+            return None
+
+    def fake_records(store_arg: Any, slug: str) -> Any:
+        calls.append(slug)
+        return _MissingRow()
+
+    monkeypatch.setattr(execution.fencing, "records", fake_records)
+    acquires, _ = _watched(monkeypatch)
+
+    store.put_agent("fixture", current)
+
+    assert calls == ["fixture"]
+    assert len(acquires) >= 1

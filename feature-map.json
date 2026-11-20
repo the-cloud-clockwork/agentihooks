@@ -11160,7 +11160,16 @@
         "tests/swarm/test_execution_unchanged_put.py::test_an_unchanged_put_skips_the_write_lock_and_the_fenced_document_read",
         "tests/swarm/test_execution_unchanged_put.py::test_a_changed_put_still_takes_the_locked_path",
         "tests/swarm/test_execution_unchanged_put.py::test_an_unmanaged_legacy_put_still_takes_the_locked_path",
-        "tests/swarm/test_execution_unchanged_put.py::test_a_binding_or_uid_conflict_still_takes_the_locked_path"
+        "tests/swarm/test_execution_unchanged_put.py::test_a_binding_or_uid_conflict_still_takes_the_locked_path",
+        "tests/swarm/test_execution_unchanged_put.py::test_invalid_rejects_an_unknown_runtime_backend",
+        "tests/swarm/test_execution_unchanged_put.py::test_invalid_accepts_a_valid_kubernetes_target",
+        "tests/swarm/test_execution_unchanged_put.py::test_invalid_rejects_an_incomplete_kubernetes_target",
+        "tests/swarm/test_execution_unchanged_put.py::test_invalid_rejects_a_seat_outside_the_swarm",
+        "tests/swarm/test_execution_unchanged_put.py::test_binding_conflict_flags_a_changed_identity_field",
+        "tests/swarm/test_execution_unchanged_put.py::test_an_unchanged_put_forces_a_locally_finished_record_through_the_fast_path",
+        "tests/swarm/test_execution_unchanged_put.py::test_an_unchanged_put_syncs_launch_binding_fields_on_a_read_before_ack",
+        "tests/swarm/test_execution_unchanged_put.py::test_an_unchanged_put_with_a_bound_pod_uid_still_takes_the_locked_path",
+        "tests/swarm/test_execution_unchanged_put.py::test_a_fenced_head_with_no_matching_execution_row_still_takes_the_locked_path"
       ]
     },
     {
