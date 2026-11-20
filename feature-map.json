@@ -5960,7 +5960,7 @@
       "origin": "regression",
       "ordered_at": "2026-11-17",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-publish-honours-panic",
-      "behaviour": "While fleet panic is on, swarm publish refuses with the panic message and pushes nothing unless the branch it pushes is a registered fix of its repository, the same rule the panic guard applies to a plain git push.",
+      "behaviour": "While panic is on for the swarm named by the publish command, swarm publish refuses with the panic message and pushes nothing unless the branch it pushes is a registered fix of its repository, the same rule the panic guard applies to a plain git push.",
       "seam": "swarm publish before it grades and pushes, and the panic guard's push check it asks",
       "tests": [
         "tests/swarm/test_publish.py::test_publish_under_panic_refuses_an_unregistered_branch_and_pushes_nothing",
@@ -11148,6 +11148,17 @@
         "tests/test_ci_semgrep.py::test_a_scan_finding_fails_the_new_test_waits_step",
         "tests/test_ci_semgrep.py::test_new_test_waits_fail_without_scanning_when_the_base_is_unknown",
         "tests/test_ci_semgrep.py::test_the_wait_bound_rule_reaches_the_tests_and_its_fixture_under_ten_seconds"
+      ]
+    },
+    {
+      "id": "lab-scheduler-swarm-image-imports",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-promo-swarm-smoke-lab-import",
+      "behaviour": "The lab scheduler and the modules the swarm image smoke imports with it load with only the distributions the swarm image lock pins, so the scheduler reads the tracked test lock path from the unit digests module and never reaches the worker venv, sandbox or mutation runner modules that import pytest, and it starts in the swarm image.",
+      "seam": "a fresh interpreter that refuses the tests package and every installed distribution docker/swarm/requirements.lock leaves out imports scripts.ci_lab.scheduler, scripts.ci_lab.interaction, scripts.ci_lab.expand_tests and scripts.ci_test_plan",
+      "tests": [
+        "tests/ci_lab/test_wheel_imports.py::test_the_swarm_smoke_modules_import_with_the_swarm_image_lock_alone",
+        "tests/ci_lab/test_wheel_imports.py::test_a_distribution_the_lock_leaves_out_fails_to_import"
       ]
     },
     {
