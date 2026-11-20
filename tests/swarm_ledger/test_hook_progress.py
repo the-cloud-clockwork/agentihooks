@@ -142,6 +142,34 @@ def test_a_variable_naming_another_program_still_counts(hook):
     assert hook.session["calls"] == 1
 
 
+@pytest.mark.feature("stop-gate-ledger-variable")
+def test_an_unset_variable_expands_to_nothing(hook, monkeypatch):
+    monkeypatch.delenv("UNSET_TAIL", raising=False)
+    hook()
+    hook(f"AH=agentihooks; $AH$UNSET_TAIL api --slug {SLUG} --as {ME} comment phases/p1 done")
+    assert hook.session["calls"] == 0
+
+
+@pytest.mark.feature("stop-gate-ledger-variable")
+def test_an_assignment_built_from_another_variable_restarts_the_count(hook):
+    hook()
+    hook(f"BIN=/opt/venv/bin; AH=$BIN/agentihooks; $AH api --slug {SLUG} --as {ME} comment phases/p1 done")
+    assert hook.session["calls"] == 0
+
+
+@pytest.mark.feature("stop-gate-ledger-variable")
+def test_a_literal_write_counts_when_its_expansion_breaks_the_quoting(hook):
+    hook()
+    hook(f"""MSG="it's"; agentihooks api --slug {SLUG} --as {ME} comment phases/p1 $MSG""")
+    assert hook.session["calls"] == 0
+
+
+@pytest.mark.feature("stop-gate-ledger-variable")
+def test_an_unparsable_command_counts_as_a_plain_call(hook):
+    hook('echo "it')
+    assert hook.session["calls"] == 1
+
+
 def test_the_nudge_fires_once_per_window(hook, capsys):
     for _ in range(25):
         hook()

@@ -20,7 +20,11 @@
       "tests": [
         "tests/swarm_ledger/test_hook_progress.py::test_a_ledger_write_through_a_shell_variable_restarts_the_count",
         "tests/swarm_ledger/test_hook_progress.py::test_a_ledger_write_through_an_environment_variable_restarts_the_count",
-        "tests/swarm_ledger/test_hook_progress.py::test_a_variable_naming_another_program_still_counts"
+        "tests/swarm_ledger/test_hook_progress.py::test_a_variable_naming_another_program_still_counts",
+        "tests/swarm_ledger/test_hook_progress.py::test_an_unset_variable_expands_to_nothing",
+        "tests/swarm_ledger/test_hook_progress.py::test_an_assignment_built_from_another_variable_restarts_the_count",
+        "tests/swarm_ledger/test_hook_progress.py::test_a_literal_write_counts_when_its_expansion_breaks_the_quoting",
+        "tests/swarm_ledger/test_hook_progress.py::test_an_unparsable_command_counts_as_a_plain_call"
       ]
     },
     {
