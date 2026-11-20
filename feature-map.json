@@ -4877,6 +4877,17 @@
       ]
     },
     {
+      "id": "gate-protected-waits-for-a-late-created-tests-run",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-gate-tests-run-wait",
+      "behaviour": "Gate Protected waits for GitHub to create a pull request head's Tests run for the same --waits budget it gives that run to list its first job, 120 polls five seconds apart inside a 25 minute grade job. A clean head whose Tests run GitHub creates six minutes after the push therefore passes the gate instead of turning red, and a head that never gets a Tests run still turns red before the job times out.",
+      "seam": "ci_tests_start.main passing --waits to verify as the wait for the Tests run to exist",
+      "tests": [
+        "tests/test_ci_tests_start.py::test_the_grade_job_waits_for_a_tests_run_github_creates_late",
+        "tests/test_ci_tests_start.py::test_the_grade_job_reports_a_tests_run_never_created_inside_its_timeout"
+      ]
+    },
+    {
       "id": "trace-plan-per-repository-size",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t447",
