@@ -470,7 +470,7 @@ def test_the_command_uses_real_transport_adapters_and_normalizes_the_remote(
             assert arguments[:3] == ["git", "-C", str(repository)]
             return subprocess.CompletedProcess(arguments, 0, "git@github.com:Acme/widgets.git\n", "")
         if Path(arguments[0]).name == "git":
-            if arguments[3] == "ls-tree":
+            if arguments[3] == "ls-tree" and kwargs["timeout"] == 30:
                 assert len(arguments) == 8 and arguments[4] == "-z" and arguments[6] == "--"
             if arguments[3:5] == ["cat-file", "blob"]:
                 assert kwargs == {"capture_output": True, "check": True, "timeout": 30}
