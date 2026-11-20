@@ -47,6 +47,7 @@ from scripts.swarm.health import (
     activity,
     checks,
     early_ends,
+    focus_unclaimed,
     merge_stall,
     night_watch,
     ordering_dependencies,
@@ -96,6 +97,17 @@ def section_lines(name: str, read: Callable[[], list[str]]) -> list[str]:
         return read()
     except NoPermissionError as exc:
         return [f"{name} unreadable: {exc}"]
+
+
+def readable_hives(store: Any) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    """The live hives whose pending admission count the Redis role may read, and each live hive it may not read with
+    the refusal, so a hive member lists the admission rooms it can read and names the counts it cannot."""
+    from scripts.hive.launch import live_hives, pending_reader
+
+    refused: dict[str, str] = {}
+    live = live_hives(store, pending_reader(refused))
+    unreadable = {hive["id"]: refused[hive["id"]] for hive in live if hive["id"] in refused}
+    return [hive for hive in live if hive["id"] not in unreadable], unreadable
 
 
 def auto_snapshot(config):
@@ -168,6 +180,7 @@ def findings(
         + timing.call(merge_stall.findings, store, slug, config.repo, now_ms())
         + prompt_backlog.findings(store, slug)
         + urgent_hold.findings(store, slug)
+        + focus_unclaimed.findings(store, slug)
         + ordering_dependencies.findings(store, slug)  # pyright: ignore[reportUnknownArgumentType]
         + placement_waits.findings(store, slug, now_ms())
         + standing.findings(store.redis, slug, now_ms())
@@ -303,6 +316,15 @@ def observation(store, slug, agent):
 def transport(agent: AgentRecord) -> dict:
     found = capabilities.of_agent(agent)
     return {"push_inbox": found.push_inbox, "native_terminal_attach": found.native_terminal_attach}
+
+
+def wait_label(store: RedisStore, slug: str, agent: AgentRecord) -> str:
+    """The agent's live declared wait as its kind and target, ``bare`` for a bare wait, or ``-`` without one."""
+    held = idle.wait(store.redis, slug, agent.name)
+    if not held:
+        return "-"
+    on = held.get("on")
+    return f"{on['kind']} {on['target']}" if on else "bare"
 
 
 def live_agents(agents: list[AgentRecord], runtime: Runtime) -> list[AgentRecord]:

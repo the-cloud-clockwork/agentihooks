@@ -363,6 +363,20 @@ def test_view_lines_join_hive_lines_and_the_binding_line_and_stay_empty_without_
     assert admission.view_lines([], {"host room": 3}) == []
 
 
+@pytest.mark.feature("status-names-each-hive-admission-count-a-member-may-not-read")
+def test_view_lines_name_each_refused_count_and_bind_only_over_the_hives_read() -> None:
+    hives = [hive_row("vm", 0, "cpu: busy", "cpu: busy")]
+    refused = {"far": "No permissions to access a key"}
+    assert admission.view_lines(hives, {"host room": 3}, refused) == [
+        "hive vm  admission room 0  cpu: busy",
+        "hive far  admission count unreadable: No permissions to access a key",
+        "binding limit hive admission, room 0: hive vm cpu: busy",
+    ]
+    assert admission.view_lines([], {"host room": 3}, refused) == [
+        "hive far  admission count unreadable: No permissions to access a key"
+    ]
+
+
 def test_status_report_carries_refusal_counts_for_the_ledger_page(env):
     from scripts.hive import placement_waits
     from scripts.swarm import cli, status
@@ -669,3 +683,26 @@ def test_the_load_average_guard_binds_only_once_used_cpu_reaches_the_swarm_share
     )
     assert admission.room(reading(cpus=16, load5=12.8, used_cpus=6.4)).room == 12
     assert admission.room(reading(cpus=16, load5=12.81, used_cpus=6.39)).room == 12
+
+
+@pytest.mark.feature("hive-admission-guard-own-cpu")
+def test_an_empty_pod_hive_on_a_busy_node_gets_the_used_cpu_room() -> None:
+    found = admission.room(reading(cpus=16, load5=20.84, used_cpus=8.96, pod_cpus=7.0, pod_load=0.27))
+    assert found == admission.Room(
+        7,
+        admission.CPU,
+        "8.96 of 16 CPUs used, five minute load 20.84 on 16 CPUs, 0.5 CPU per agent, "
+        "fits 7 more under the 80 percent line",
+    )
+
+
+@pytest.mark.feature("hive-admission-guard-own-cpu")
+def test_the_load_average_guard_binds_on_a_pod_hive_once_its_own_load_reaches_the_swarm_share() -> None:
+    found = admission.room(reading(cpus=16, load5=13.0, used_cpus=9.0, pod_cpus=16.0, pod_load=6.4))
+    assert found == admission.Room(
+        0,
+        admission.CPU,
+        "9.00 of 16 CPUs used, five minute load 13.00 on 16 CPUs with pod load 6.40 at or above the 40 percent "
+        "swarm share, fits 0 more",
+    )
+    assert admission.room(reading(cpus=16, load5=13.0, used_cpus=9.0, pod_cpus=16.0, pod_load=6.39)).room == 7

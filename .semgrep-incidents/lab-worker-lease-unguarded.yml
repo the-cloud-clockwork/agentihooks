@@ -1,0 +1,22 @@
+rules:
+  - id: lab-worker-lease-unguarded
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A lease call the scheduler does not answer raises out of the lab worker loop and ends the worker process, so
+      every scheduler roll restarts every worker container and drops its running units. Catch OSError and
+      HTTPException around the lease call and back off.
+    paths:
+      include:
+        - /scripts/ci_lab/worker.py
+        - lab-worker-lease-unguarded.py
+    patterns:
+      - pattern-inside: |
+          def run_once(...):
+              ...
+      - pattern: $WORKER.client.lease(...)
+      - pattern-not-inside: |
+          try:
+              ...
+          except (OSError, http.client.HTTPException) as $ERROR:
+              ...

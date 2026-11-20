@@ -125,10 +125,13 @@ def _above(node: str, graph: dict[str, Any], below: tuple[str, ...] = ()) -> tup
     return _above(up, graph, (*below, up))
 
 
-def _clear(doc, op, ctx, by):
-    target = op["target"]
-    rows = doc.get("freezes", [])
+def _clear(doc: dict[str, Any], op: dict[str, Any], ctx: Any, by: str) -> bool:
+    target: str = op["target"]
+    rows: list[dict[str, Any]] = doc.get("freezes", [])
     gone = [row for row in rows if row["target"] == target]
+    if not gone and not selector(target) and target not in project(doc)[0]:
+        ctx.refused.append(f"{op['op']} refused: target {target} does not exist")
+        return False
     if gone:
         doc["freezes"] = [row for row in rows if row["target"] != target]
         cleared = [row["target"] for row in gone]

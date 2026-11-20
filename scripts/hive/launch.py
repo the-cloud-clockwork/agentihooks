@@ -67,11 +67,14 @@ class _Placing:
 ROOM_DETAILS = {"reason": "", "detail": ""}
 
 
-def loaded_hives(store: RedisStore) -> list[dict[str, Any]]:
+def loaded_hives(
+    store: RedisStore, reservations: Callable[[Any, str], int] = admission.pending
+) -> list[dict[str, Any]]:
     """Every registered hive with the worker agents it runs or is launching.
 
     A hive counts a running agent in its slot's processes even when it lists no execution for it, and never fewer
-    agents than the live worker records any swarm places on it."""
+    agents than the live worker records any swarm places on it. ``reservations`` reads a hive's pending admission
+    count."""
     agents = [agent for slug in store.slugs() for agent in store.agents(slug)]
     hives, now = registry.hives(store.redis), lease.now_ms(store)
     for hive in hives:
@@ -103,7 +106,7 @@ def loaded_hives(store: RedisStore) -> list[dict[str, Any]]:
         from scripts.swarm import local_slots
         from scripts.swarm.commands import hive_id
 
-        held = admission.pending(store.redis, hive["id"])
+        held = reservations(store.redis, hive["id"])
         used = hive["agents"]
         if hive["id"] == hive_id():
             running, taken = local_slots.occupancy(store, hive["id"])
@@ -125,11 +128,26 @@ def loaded_hives(store: RedisStore) -> list[dict[str, Any]]:
     return hives
 
 
-def live_hives(store: RedisStore) -> list[dict[str, Any]]:
+def live_hives(store: RedisStore, reservations: Callable[[Any, str], int] = admission.pending) -> list[dict[str, Any]]:
     """The loaded hives whose heartbeat is live."""
-    loaded = loaded_hives(store)
+    loaded = loaded_hives(store, reservations)
     now = lease.now_ms(store)
     return [hive for hive in loaded if registry.live(hive, now)]
+
+
+def pending_reader(refused: dict[str, str]) -> Callable[[Any, str], int]:
+    """A pending admission count reader that reads zero for each hive whose count the Redis role refuses and records
+    that hive's refusal in ``refused``, so one refused count never fails a reader of every hive."""
+    from redis.exceptions import NoPermissionError
+
+    def count(redis: Any, machine: str) -> int:
+        try:
+            return admission.pending(redis, machine)
+        except NoPermissionError as exc:
+            refused[machine] = str(exc)
+            return 0
+
+    return count
 
 
 def hosted_profiles(redis: Any, hives: list[dict[str, Any]]) -> dict[str, frozenset[str]]:

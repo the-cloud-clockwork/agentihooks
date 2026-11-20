@@ -806,7 +806,7 @@ def refresh_streams(slugs: list[str]) -> None:
         if HUB.has(slug):
             try:
                 publish_ledger(slug, repository.get_document(slug))
-            except Exception as exc:  # the next write to the ledger publishes its view anyway
+            except Exception as exc:
                 sys.stderr.write(f"refresh stream {slug}: {exc}\n")
 
 
@@ -1005,12 +1005,12 @@ def serve() -> None:
     stopped = server_lifetime.watch(server, core.LEDGER_DIR, PORT)
     LOADED_CODE.capture()
     server_code.record(PIDFILE.parent, os.getpid(), LOADED_STAMP, digest=LOADED_DIGEST, files=LOADED_CODE.files)
-    PIDFILE.write_text(str(os.getpid()))
     print(f"ledger server on {BASE}, dir {core.LEDGER_DIR}", flush=True)
     drained = True
     try:
         with projector.running(repository, HUB):
             try:
+                PIDFILE.write_text(str(os.getpid()))
                 server.serve_forever(POLL_S)
             finally:
                 stopped.set()

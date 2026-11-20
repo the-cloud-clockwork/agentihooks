@@ -75,7 +75,7 @@ class Unanswered(TimeoutError):
 def _host(measured: dict[str, Any], pending: int) -> list[tuple[int, str, str]]:
     cpus, load5 = measured["cpus"], measured["load5"]
     held = _held(pending)
-    limits = [_host_cpu(cpus, load5, measured.get("used_cpus"), pending)]
+    limits = [_host_cpu(cpus, load5, measured.get("used_cpus"), measured.get("pod_load"), pending)]
     if all(field in measured for field in RAM_FIELDS):
         available, total = measured["available_mb"], measured["total_mb"]
         limits.append(
@@ -88,9 +88,12 @@ def _host(measured: dict[str, Any], pending: int) -> list[tuple[int, str, str]]:
     return limits
 
 
-def _host_cpu(cpus: float, load5: float, used: float | None, pending: int) -> tuple[int, str, str]:
+def _host_cpu(
+    cpus: float, load5: float, used: float | None, pod_load: float | None, pending: int
+) -> tuple[int, str, str]:
     """The node CPU line: CPU used when the hive reads it, the five minute load only as a fallback and a guard that
-    binds while used CPU is at or above the swarm share."""
+    binds while the hive's own CPU, its pod load when it runs in a pod and else the node's CPU used, is at or above
+    the swarm share."""
     held = _held(pending)
     loaded = f"five minute load {load5:.2f} on {cpus} CPUs"
     if used is None:
@@ -100,8 +103,9 @@ def _host_cpu(cpus: float, load5: float, used: float | None, pending: int) -> tu
             f"{loaded}, {AGENT_CPU:g} CPU per agent{held}, fits {{}} more {LINE}",
         )
     shown = f"{used:.2f} of {cpus} CPUs used, {loaded}"
-    if 100 * load5 > HOST_PERCENT * cpus and 100 * used >= SWARM_PERCENT * cpus:
-        return 0, CPU, f"{shown} with CPU used at or above the {SWARM_PERCENT} percent swarm share, fits {{}} more"
+    own, measure = (used, "CPU used") if pod_load is None else (pod_load, f"pod load {pod_load:.2f}")
+    if 100 * load5 > HOST_PERCENT * cpus and 100 * own >= SWARM_PERCENT * cpus:
+        return 0, CPU, f"{shown} with {measure} at or above the {SWARM_PERCENT} percent swarm share, fits {{}} more"
     return _cpu_room(cpus, used, pending), CPU, f"{shown}, {AGENT_CPU:g} CPU per agent{held}, fits {{}} more {LINE}"
 
 
@@ -273,6 +277,10 @@ def binding(hives: list[dict[str, Any]], others: dict[str, int | None]) -> str:
     return line + ": " + "; ".join(f"hive {hive['id']} {hive['refusal']}" for hive in hives)
 
 
-def view_lines(hives: list[dict[str, Any]], others: dict[str, int | None]) -> list[str]:
-    """The hive admission lines and the binding limit line, none when no hive is live."""
-    return [*hive_lines(hives), binding(hives, others)] if hives else []
+def view_lines(
+    hives: list[dict[str, Any]], others: dict[str, int | None], refused: dict[str, str] | None = None
+) -> list[str]:
+    """The hive admission lines, a line naming each live hive whose pending admission count the Redis role refused,
+    and the binding limit line over the hives read; none when no hive is live."""
+    named = [f"hive {hive}  admission count unreadable: {reason}" for hive, reason in (refused or {}).items()]
+    return [*hive_lines(hives), *named, binding(hives, others)] if hives else named

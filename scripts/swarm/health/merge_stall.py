@@ -7,7 +7,7 @@ from collections import Counter
 from contextvars import ContextVar
 from datetime import datetime
 
-from scripts.swarm import github_reads, holder_pod, timing
+from scripts.swarm import github_reads, holder_pod, tick_activity, timing
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.store import SwarmError
 
@@ -34,7 +34,7 @@ query($owner:String!,$name:String!,$cursor:String){
 
 
 def request(repo: str, args: list[str]) -> dict:
-    timing.keep()
+    tick_activity.renew_now()
     remaining = 20 if DEADLINE.get() is None else DEADLINE.get() - time.monotonic()
     if remaining <= 0:
         raise SwarmError("GitHub merge observation exhausted its read budget")

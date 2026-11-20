@@ -17,12 +17,10 @@ def _workflow():
     return yaml.safe_load((_ROOT / ".github/workflows/proofs.yml").read_text())
 
 
-def test_proofs_dispatch_cannot_satisfy_required_tests():
+def test_proofs_dispatch_cannot_satisfy_required_tests() -> None:
     workflow = _workflow()
     assert set(workflow[True]) == {"workflow_dispatch"}
-    assert workflow["concurrency"]["group"].startswith(
-        "${{ inputs.proof == 'tests' && format('focused-proof-{0}', github.run_id) || format('hosted-lane-{0}', "
-    )
+    assert workflow["concurrency"]["group"] == "${{ format('focused-proof-{0}', github.run_id) }}"
     assert (workflow["concurrency"]["queue"], workflow["concurrency"]["cancel-in-progress"]) == ("max", False)
     assert workflow["permissions"] == {"contents": "read", "pull-requests": "read", "actions": "read"}
     inputs = workflow[True]["workflow_dispatch"]["inputs"]

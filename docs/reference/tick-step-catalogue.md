@@ -99,6 +99,7 @@ How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step
 | metrics record | wrapper metrics | slow | 29 | 600 | health findings | none | none |
 | snapshot job | wrapper metrics | tick | 2 | 60 | none | none | none |
 | dependency audit | wrapper phases | tick | 2 | 60 | none | none | swarm-ordering-dependency-audit |
+| focus unclaimed | wrapper phases | tick | 2 | 60 | none | coordination | swarm-focus-unclaimed-finding |
 | planning after phase | wrapper phases | tick | 12 | 60 | planning and phase pass | none | none |
 | planning and phase pass | wrapper phases | tick | 12 | 60 | none | none | none |
 | urgent hold | wrapper phases | tick | 2 | 60 | none | none | none |
