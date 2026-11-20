@@ -5647,7 +5647,7 @@ Only the operator can edit. An agent's credential gets
 
 The button sends the swarm control `master_move` with the hive id. The server runs
 `agentihooks swarm <slug> master move --to <hive>`, so the move behaves as described in
-[Headless fallback](#headless-fallback) and in the [swarm commands](swarm.md): the live master hands off and its
+[Workstation fallback](#workstation-fallback) and in the [swarm commands](swarm.md): the live master hands off and its
 successor starts on that hive.
 
 The button is off when:
