@@ -4278,6 +4278,19 @@
       ]
     },
     {
+      "id": "hive-remove-drain-withdraws-orders",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-remove-drain-withdraw",
+      "behaviour": "When a hive remove drain stops waiting, every hand off order it sent and its agent left unanswered is cancelled in every inbox world with a reason naming the removed hive, so a later occupant of the seat on another hive reads no stale order.",
+      "seam": "hive remove drain end",
+      "tests": [
+        "tests/hive/test_remove.py::test_a_hive_remove_drain_withdraws_every_unanswered_order_when_it_ends_so_a_later_occupant_reads_none"
+      ],
+      "rules": [
+        "hive-order-never-withdrawn"
+      ]
+    },
+    {
       "id": "reply-wait-reads-every-inbox-world",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2152",
