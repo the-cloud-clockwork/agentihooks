@@ -9,16 +9,23 @@ import yaml
 from tests.test_ci_smoke_image_reuse import runtime_images
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def smoke_pulls(script: str) -> list[str]:
+    pull = re.compile(r"(?:bash scripts/packaging/pull-runtime-image\.sh|require_image) (\S+)")
+    lines = (ROOT / f"scripts/packaging/{script}.sh").read_text().splitlines()
+    return [found[1] for line in lines if (found := pull.fullmatch(line.strip()))]
+
+
 CASES = [
     (script, missing)
     for script in ("compose-hive-smoke", "swarm-smoke", "hive-launch-smoke")
-    for missing in ("", "redis", "swarm")
-    if script != "hive-launch-smoke" or missing != "swarm"
+    for missing in ("", *smoke_pulls(script))
 ]
 
 
 @pytest.mark.parametrize("script,missing", CASES)
-def test_smoke_pulls_runtime_images_before_startup(tmp_path, script, missing):
+def test_smoke_pulls_runtime_images_before_startup(tmp_path: Path, script: str, missing: str) -> None:
     tools = tmp_path / "bin"
     tools.mkdir()
     log = tmp_path / "docker.log"
@@ -37,7 +44,7 @@ if [[ "$1" == pull ]]; then
     echo 'registry descriptor: not found' >&2
     exit 1
   fi
-  if [[ -n "$MISSING_IMAGE" && "$2" == *"$MISSING_IMAGE"* ]]; then
+  if [[ -n "$MISSING_IMAGE" && "${2%@*}" == */"${MISSING_IMAGE##*/}" ]]; then
     echo 'runtime image: not found' >&2
     exit 1
   fi
@@ -82,15 +89,9 @@ fi
         assert "runtime images ready for startup" in result.stdout, result.stderr
         assert len(starts) == 1
         pulls = [call for call in calls if " pull " in f" {call} "]
-        assert len(pulls) == {"compose-hive-smoke": 4, "swarm-smoke": 4, "hive-launch-smoke": 2}[script]
-        assert all("@sha256:runtime" in call for call in pulls)
-        if script != "hive-launch-smoke":
-            assert any("nginx:1.27-alpine@sha256:runtime" in call for call in pulls)
-        assert any("redis:7@sha256:runtime" in call for call in pulls)
-        if script != "hive-launch-smoke":
-            assert any("nats:2.15.1-alpine@sha256:runtime" in call for call in pulls)
-        if script != "hive-launch-smoke":
-            assert any("agentihooks-swarm:dev@sha256:runtime" in call for call in pulls)
+        images = smoke_pulls(script)
+        assert images
+        assert [pull.split()[-1] for pull in pulls] == [f"{image}@sha256:runtime" for image in images]
         for pull in pulls:
             image = pull.split()[-1].split("@")[0]
             assert any(call.endswith(f"tag {image}@sha256:runtime {image}") for call in calls)
