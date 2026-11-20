@@ -38,7 +38,7 @@ function fixture(options = {}) {
       listWorkflowRuns: async () => ({ data: { workflow_runs: [] } }),
       listJobsForWorkflowRun: async args => ({ data: { jobs: onPage(jobs, args) } }),
     },
-    checks: { listForRef: async args => ({ data: { check_runs: onPage(checks, args) } }) },
+    checks: { listForRef: async () => ({ data: { check_runs: checks.slice(0, 100) } }) },
     git: {
       getRef: async ({ ref }) => {
         if (ref === 'heads/dev') return { data: { object: { sha: ++reads === 1 ? options.dev || 'graded' : options.moved || 'graded' } } };
@@ -83,6 +83,7 @@ function fixture(options = {}) {
     let items = [];
     let done = false;
     for (let page = 1; !done; page++) {
+      if (page > 100) throw new Error('Paginated endpoint did not stop');
       const response = await method({ ...args, page });
       const data = Array.isArray(response.data) ? response.data : Object.values(response.data).find(Array.isArray);
       done = data.length < (args.per_page || 30);
@@ -148,7 +149,7 @@ for (const conclusion of ['failure', 'cancelled', 'timed_out', 'neutral', 'actio
 
 test('fails at once on a red job of its graded run past the first page of jobs', async () => {
   const f = fixture();
-  f.jobs.push(...Array.from({ length: 98 }, (_, id) => ({ id: 100 + id, run_id: 42, name: `green-${id}`, status: 'completed', conclusion: 'success' })),
+  f.jobs.push(...Array.from({ length: 100 - f.jobs.length }, (_, id) => ({ id: 100 + id, run_id: 42, name: `green-${id}`, status: 'completed', conclusion: 'success' })),
     { id: 300, run_id: 42, name: 'lint', status: 'completed', conclusion: 'failure' });
   await assert.rejects(promote(f), /Graded run jobs did not pass: lint failure$/);
   assert.equal(f.now(), 0);
