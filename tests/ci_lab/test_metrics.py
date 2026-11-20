@@ -25,6 +25,7 @@ CONTRACT_NAMES = (
     "ci_lab_cache_hits_total",
     "ci_lab_cache_misses_total",
     "ci_lab_mirror_age_seconds",
+    "ci_lab_node_mirror_age_seconds",
     "ci_lab_core_seconds_total",
     "ci_lab_heads_graded_total",
     "ci_lab_budget_fraction",
@@ -468,3 +469,61 @@ def test_a_registry_server_answers_only_the_metrics_route_over_http() -> None:
     finally:
         server.shutdown()
         server.server_close()
+
+
+@pytest.mark.feature("lab-worker-node-mirror-age")
+def test_the_node_mirror_age_is_the_clock_less_the_node_cache_stamp(tmp_path: Path) -> None:
+    registry = metrics.Registry()
+    stamp = tmp_path / "fetched-at"
+    stamp.write_text("1000000\n")
+
+    metrics.observe_mirror(registry, stamp, "ci-node-1", lambda: 1000030.5)
+
+    assert 'ci_lab_node_mirror_age_seconds{node="ci-node-1"} 30.5\n' in registry.render()
+
+
+@pytest.mark.feature("lab-worker-node-mirror-age")
+@pytest.mark.parametrize("text", [None, "", "never\n", "1.5\n"])
+def test_a_stamp_that_does_not_read_as_epoch_seconds_ages_the_node_mirror_to_infinity(
+    tmp_path: Path, text: str | None
+) -> None:
+    registry = metrics.Registry()
+    stamp = tmp_path / "fetched-at"
+    if text is not None:
+        stamp.write_text(text)
+
+    metrics.observe_mirror(registry, stamp, "ci-node-1", lambda: 1000030.0)
+
+    assert 'ci_lab_node_mirror_age_seconds{node="ci-node-1"} +Inf\n' in registry.render()
+
+
+@pytest.mark.feature("lab-worker-node-mirror-age")
+def test_a_worker_without_a_node_name_sets_no_node_mirror_age(tmp_path: Path) -> None:
+    registry = metrics.Registry()
+    stamp = tmp_path / "fetched-at"
+    stamp.write_text("1000000\n")
+
+    metrics.observe_mirror(registry, stamp, "", lambda: 1000030.0)
+
+    assert registry.render() == metrics.Registry().render()
+
+
+@pytest.mark.feature("lab-worker-node-mirror-age")
+def test_the_metrics_route_alone_runs_the_observer_before_it_renders() -> None:
+    registry = metrics.Registry()
+    seen: list[str] = []
+
+    def observe() -> None:
+        seen.append(registry.render())
+        registry.set(contract.NODE_MIRROR_AGE_SECONDS, 5.0, {"node": "ci-node-1"})
+
+    refused = [
+        metrics.expose(registry, "GET", "/capacity", observe),
+        metrics.expose(registry, "POST", "/metrics", observe),
+    ]
+    status, _, body = metrics.expose(registry, "GET", "/metrics", observe)
+
+    assert [code for code, _, _ in refused] == [404, 405]
+    assert seen == [metrics.Registry().render()]
+    assert (status, body.decode()) == (200, registry.render())
+    assert 'ci_lab_node_mirror_age_seconds{node="ci-node-1"} 5.0\n' in body.decode()
