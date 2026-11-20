@@ -6,8 +6,8 @@ collected.
 ## Completed worker cleanup
 
 A completed worker's Pod stays protected until the controller has both its outcome reference and an archive
-watermark covering its final transcript end. Publishing a checkpoint alone does not clear that guard. The worker
-must report the durably archived end to the controller on its lease heartbeat.
+watermark covering its final transcript end. Publishing a checkpoint alone does not clear that guard. If the end
+exceeds the controller's current watermark, the worker must report the durably archived end on its lease heartbeat.
 
 During a clean drain, `Supervisor.drain` waits for the exporter's final checkpoint. If checkpoint storage is
 configured, it validates the checkpoint and its artifacts in that store within the checkpoint time budget, then
@@ -83,6 +83,9 @@ For a completed attempt whose recorded `transcript_end` is `10`, the retention g
 Passing those guards permits the cleanup path to proceed. `Cleanup.run` must still be enabled, hold controller
 authority and finish its runtime object removals and retained record. The acknowledgement itself deletes no Pod or
 checkpoint object. The corpus collection policy below governs stored objects separately.
+
+A final transcript end of `0` is already covered by the initial archive watermark of `0`. That archive guard can
+pass without another accepted heartbeat; the outcome reference is still required.
 
 ### Limits and troubleshooting
 
