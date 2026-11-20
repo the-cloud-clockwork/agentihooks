@@ -100,7 +100,7 @@ def test_command_reports_startup_result(monkeypatch, capsys, problem, code, outp
     calls = []
     monkeypatch.setattr(ci_tests_start, "verify", lambda *args, **kwargs: calls.append((args, kwargs)) or problem)
     assert ci_tests_start.main(["--repository", "owner/repo", "--head", "head"]) == code
-    assert calls == [(("owner/repo", "head"), {"event": "pull_request", "waits": 36})]
+    assert calls == [(("owner/repo", "head"), {"attempts": 36, "event": "pull_request", "waits": 36})]
     assert capsys.readouterr().out == output
 
 
@@ -277,7 +277,22 @@ def test_command_passes_the_started_run_wait(monkeypatch: pytest.MonkeyPatch) ->
 
     monkeypatch.setattr(ci_tests_start, "verify", verify)
     assert ci_tests_start.main(["--repository", "owner/repo", "--head", "head", "--waits", "120"]) == 0
-    assert calls == [(("owner/repo", "head"), {"event": "pull_request", "waits": 120})]
+    assert calls == [(("owner/repo", "head"), {"attempts": 120, "event": "pull_request", "waits": 120})]
+
+
+def _grade_job() -> tuple[list[str], int]:
+    """Return the arguments the Gate Protected grade job passes to ci_tests_start and the job's timeout in seconds."""
+    workflow = Path(__file__).resolve().parents[1] / ".github/workflows/gate-protected.yml"
+    grade = yaml.safe_load(workflow.read_text())["jobs"]["grade"]
+    line = next(
+        text for step in grade["steps"] for text in step.get("run", "").splitlines() if "scripts.ci_tests_start" in text
+    )
+    names = {"$GITHUB_REPOSITORY": "owner/repo", "$HEAD_SHA": "head"}
+    words = shlex.split(line)
+    arguments = [
+        names[word] if word.startswith("$") else word for word in words[words.index("scripts.ci_tests_start") + 1 :]
+    ]
+    return arguments, grade["timeout-minutes"] * 60
 
 
 @pytest.mark.feature("gate-protected-waits-out-a-held-tests-run")
@@ -288,12 +303,7 @@ def test_the_grade_job_waits_out_a_tests_run_held_behind_a_cancelled_run(
     """Polling from 21 s into the grade job, a Tests run that lists its first job at 328 s passes before the timeout."""
     from scripts import ci_tests_start
 
-    workflow = Path(__file__).resolve().parents[1] / ".github/workflows/gate-protected.yml"
-    grade = yaml.safe_load(workflow.read_text())["jobs"]["grade"]
-    line = next(
-        text for step in grade["steps"] for text in step.get("run", "").splitlines() if "scripts.ci_tests_start" in text
-    )
-    names = {"$GITHUB_REPOSITORY": "owner/repo", "$HEAD_SHA": "head"}
+    arguments, timeout = _grade_job()
     now = 21.0
 
     def api(endpoint: str) -> dict[str, Any]:
@@ -307,12 +317,8 @@ def test_the_grade_job_waits_out_a_tests_run_held_behind_a_cancelled_run(
 
     monkeypatch.setattr(ci_tests_start, "_api", api)
     monkeypatch.setattr(ci_tests_start.time, "sleep", sleep)
-    words = shlex.split(line)
-    arguments = [
-        names[word] if word.startswith("$") else word for word in words[words.index("scripts.ci_tests_start") + 1 :]
-    ]
     assert ci_tests_start.main(arguments) == 0
-    assert now <= grade["timeout-minutes"] * 60
+    assert now <= timeout
 
 
 def _run(run_id: int, path: str, event: str, head: str = "head") -> dict[str, Any]:
@@ -469,3 +475,43 @@ def test_the_newest_tests_run_named_by_check_runs_is_read_first(monkeypatch: pyt
     assert module.verify("owner/repo", "head") == ""
     assert calls == [LISTING, CHECKS, f"repos/owner/repo/actions/runs/{newest}", jobs]
     assert sleeps == []
+
+
+@pytest.mark.feature("gate-protected-waits-for-a-late-created-tests-run")
+@pytest.mark.parametrize(
+    "start,created", [(17.0, 250.0), (37.0, 255.0), (16.0, 372.0)], ids=["44382072721", "44382391118", "44381971975"]
+)
+def test_the_grade_job_waits_for_a_tests_run_github_creates_late(
+    monkeypatch: pytest.MonkeyPatch, start: float, created: float
+) -> None:
+    """18 November gate runs gave up at 36 polls before GitHub created their Tests run ``created`` s after the push."""
+    from scripts import ci_tests_start
+
+    arguments, timeout = _grade_job()
+    now = start
+
+    def api(endpoint: str) -> dict[str, Any]:
+        if "/jobs?" in endpoint:
+            return {"total_count": 1}
+        runs = [{"id": 11, "head_sha": "head", "status": "queued", "conclusion": None}]
+        return {"workflow_runs": runs if now >= created else [], "check_runs": []}
+
+    def sleep(seconds: float) -> None:
+        nonlocal now
+        now += seconds
+
+    monkeypatch.setattr(ci_tests_start, "_api", api)
+    monkeypatch.setattr(ci_tests_start.time, "sleep", sleep)
+    assert ci_tests_start.main(arguments) == 0
+    assert now <= timeout
+
+
+@pytest.mark.feature("gate-protected-waits-for-a-late-created-tests-run")
+def test_the_grade_job_reports_a_tests_run_never_created_inside_its_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A head GitHub never creates a Tests run for is red after the grade job's 120 polls, before the job times out."""
+    arguments, timeout = _grade_job()
+    module, calls, sleeps = _answer(monkeypatch, {LISTING: [{"workflow_runs": []}], CHECKS: [{"check_runs": []}]})
+    assert module.main(arguments) == 1
+    assert calls == [LISTING, CHECKS] * 120
+    assert sleeps == [5] * 119
+    assert sum(sleeps) <= timeout
