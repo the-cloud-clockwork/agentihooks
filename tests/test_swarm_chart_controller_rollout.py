@@ -25,5 +25,6 @@ def test_the_chart_defaults_to_one_controller_and_rolls_more_out_with_one_always
     assert yaml.safe_load((CHART / "values.yaml").read_text())["controller"]["replicas"] == 1
     assert "replicas: {{ $replicas }}" in template
     assert "kind: PodDisruptionBudget" in template
-    assert "maxUnavailable: 0" in template
+    assert "maxSurge: 0" in template
+    assert "maxUnavailable: 1" in template
     assert "minAvailable: 1" in template

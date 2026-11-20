@@ -1543,13 +1543,9 @@ def test_planning_refuses_an_unmatched_module_before_publishing_statistics(tmp_p
     ],
 )
 def test_planning_checks_selected_test_collection_and_worker_contracts(
-    tmp_path, monkeypatch, imports, grouped, refused
-):
-    from tests import test_collection_imports as contracts
-
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, imports: str, grouped: bool, refused: bool
+) -> None:
     _project(tmp_path, {})
-    monkeypatch.setattr(contracts, "_ROOT", tmp_path)
-    monkeypatch.setattr(contracts, "_module_file", contracts._module_file.__wrapped__)
     group = 'pytestmark = pytest.mark.xdist_group("mcp-sdk")\n' if grouped else ""
     (tmp_path / "tests/test_sample.py").write_text("from scripts.sample import f\n" + group + imports)
     (tmp_path / "tests/test_unrelated.py").write_text("import mcp\n")
@@ -1569,11 +1565,7 @@ def test_planning_checks_selected_test_collection_and_worker_contracts(
         assert "stats_parts=" in output.read_text()
 
 
-def test_a_grouped_sdk_walk_leaves_no_module_marked_clean_for_a_later_test(tmp_path, monkeypatch):
-    from tests import test_collection_imports as contracts
-
-    monkeypatch.setattr(contracts, "_ROOT", tmp_path)
-    monkeypatch.setattr(contracts, "_module_file", contracts._module_file.__wrapped__)
+def test_a_grouped_sdk_walk_leaves_no_module_marked_clean_for_a_later_test(tmp_path: Path) -> None:
     (tmp_path / "scripts").mkdir()
     (tmp_path / "tests").mkdir()
     (tmp_path / "scripts/lazy.py").write_text("def load():\n    import mcp\n")
@@ -1585,11 +1577,11 @@ def test_a_grouped_sdk_walk_leaves_no_module_marked_clean_for_a_later_test(tmp_p
         plan.validate_tests(tmp_path, ["tests/test_a.py::test_one", "tests/test_b.py::test_two"])
 
 
-def test_a_module_a_clean_run_walk_visited_is_not_walked_again_for_a_later_test(tmp_path, monkeypatch):
-    from tests import test_collection_imports as contracts
+def test_a_module_a_clean_run_walk_visited_is_not_walked_again_for_a_later_test(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts import collection_imports
 
-    monkeypatch.setattr(contracts, "_ROOT", tmp_path)
-    monkeypatch.setattr(contracts, "_module_file", contracts._module_file.__wrapped__)
     (tmp_path / "scripts").mkdir()
     (tmp_path / "tests").mkdir()
     (tmp_path / "scripts/leaf.py").write_text("")
@@ -1597,25 +1589,22 @@ def test_a_module_a_clean_run_walk_visited_is_not_walked_again_for_a_later_test(
     (tmp_path / "tests/test_a.py").write_text("from scripts.clean import run\n")
     (tmp_path / "tests/test_b.py").write_text("from scripts.clean import run\n")
     walks = []
-    loads_heavy = contracts.loads_heavy
+    loads_heavy = collection_imports.loads_heavy
 
-    def counted(name, seen):
+    def counted(root: Path, name: str, seen: set[str]) -> bool:
         if name not in seen:
             walks.append(name)
-        return loads_heavy(name, seen)
+        return loads_heavy(root, name, seen)
 
-    monkeypatch.setattr(contracts, "loads_heavy", counted)
+    monkeypatch.setattr(collection_imports, "loads_heavy", counted)
+    monkeypatch.setattr(plan, "loads_heavy", counted)
     plan.validate_tests(tmp_path, ["tests/test_a.py::test_one", "tests/test_b.py::test_two"])
     assert walks.count("scripts.leaf") == 1
 
 
-def test_planning_follows_selected_test_package_imports(tmp_path, monkeypatch):
-    from tests import test_collection_imports as contracts
-
+def test_planning_follows_selected_test_package_imports(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _project(tmp_path, {})
     (tmp_path / "tests/__init__.py").write_text("import mcp\n")
-    monkeypatch.setattr(contracts, "_ROOT", tmp_path)
-    monkeypatch.setattr(contracts, "_module_file", contracts._module_file.__wrapped__)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("sys.argv", ["plan"])
     monkeypatch.setattr(plan, "own_bases", lambda *args: ["base"])

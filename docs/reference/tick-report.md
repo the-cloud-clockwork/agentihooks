@@ -44,7 +44,7 @@ CPU share uses summed own and reaped child CPU of retained steps, excluding the 
 | Pass p95 | The 95th percentile of pass wall time over the window. |
 | Gap p95, largest gap | The idle time between the end of one pass and the start of the next. A gap well above the cadence means the scheduler fired late or a pass was refused. |
 | Passes without retained steps | Passes in the window whose step records were already trimmed from `tick:steps`. |
-| Step rows | One per step name, sorted by name: how many times it ran in the window, its median and p95 wall time, and its share of the CPU all retained steps used. Registered engine steps appear under their registered name, such as `spawn`; other rows name the function they time. Each fenced launch adds `scripts.swarm.controller.FencedRuntime._refusal` and `scripts.swarm.controller.FencedRuntime.runtime_spawn`, which split a slow `spawn` row into its placement refusal and its runtime launch; see [Timed rows inside a fenced spawn](tick-adapters.md#timed-rows-inside-a-fenced-spawn). Spawn order adds `scripts.tick.steps.place._spawn_order` and, once per lane inside it, `scripts.swarm.tick._running` and `scripts.swarm.focus_budget.place`, which name the running agent filter and focus budget placement; see [Timed rows inside spawn order](tick-adapters.md#timed-rows-inside-spawn-order). The whole pass measurement, `run_tick`, is left out. |
+| Step rows | One per step name, sorted by name: how many times it ran in the window, its median and p95 wall time, and its share of the CPU all retained steps used. Registered engine steps appear under their registered name, such as `reap`; other rows name the function they time. Each launch the tick makes through the fenced runtime, such as a master start, adds `scripts.swarm.controller.FencedRuntime._refusal` and `scripts.swarm.controller.FencedRuntime.runtime_spawn`, which split the launching step's row into its placement refusal and its runtime launch; see [Timed rows inside a fenced spawn](tick-adapters.md#timed-rows-inside-a-fenced-spawn). Releases before pull request [#11141](https://github.com/the-cloud-clockwork/agentihooks/pull/11141) also recorded a `spawn` row and, from its spawn order, `scripts.tick.steps.place._spawn_order`, `scripts.swarm.tick._running` and `scripts.swarm.focus_budget.place`; see [Timed rows inside the removed spawn order](tick-adapters.md#timed-rows-inside-the-removed-spawn-order). That pull request removed the `spawn` step, and lane agents now launch through hub admission; see [Pulling work from the hub](../pillars/hives.md#pulling-work-from-the-hub). The whole pass measurement, `run_tick`, is left out. |
 
 Times print with three decimals and CPU share with two; `n/a` means the window held no value. CPU share sums each step's own thread CPU
 and the CPU of child processes it reaped. Step measurements can nest, so their shares can overlap.
@@ -126,12 +126,12 @@ agentihooks swarm <id> tick-report --passes 60 | sed -n '/^Critical lane end/,/^
 Critical lane end p95: 38.402s
 Step  Records  Late share  Abandoned  Held  Skipped  Dropped
 fleet red notice  60  8.33%  5  0  0  15
-spawn  60  0.00%  0  0  0  0
+reap  60  0.00%  0  0  0  0
 CPU share uses summed own and reaped child CPU of retained steps, excluding the whole pass.
 ```
 
 The figures are illustrative. Here the fleet red notice step was left running at its budget in 5 of 60 passes, and
-those runs lost 15 declared write domains between them. `spawn` finished in budget on every pass. A step with Held
+those runs lost 15 declared write domains between them. `reap` finished in budget on every pass. A step with Held
 above zero overlapped its own earlier run; with Skipped above zero, its lane ran out, a step it needs was dropped, or
 its interval had not elapsed.
 Critical lane end p95 shows how late in a pass the critical lane steps finish, apart from the slow lane steps that
