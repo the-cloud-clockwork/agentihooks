@@ -62,7 +62,7 @@ records, a ledger view of 6 thousand tasks and 30 live Kubernetes executions
 holding claimed tasks. It then runs three scheduled passes of the tick
 command against it. The ledger view is served from memory, so the gate
 measures the tick's cost of using the view, not the ledger server's read. Every step on the spawn chain (the steps `SPAWN_NEEDS`
-names, then `spawn`) and the `tick view` must end ok within its
+names) and the `tick view` must end ok within its
 `budgets.FLOORS` floor on every pass it runs. A step that is cut off,
 abandoned, does not end ok or never runs fails the gate. Unit fixtures hold a
 few rows, so they cannot catch a step whose cost grows with stored data.
@@ -74,7 +74,9 @@ On `diffcheck/tick-scale-plant` it first applies the planted fault in
 execution archive and rewrites every record it loaded. This planted fault must
 turn the gate red. In the reference proof run it drove `reap` to 25 seconds
 against its 22 second floor. On `diffcheck/tick-scale-profile` the gate profiles
-`track outages`, `reap`, `spawn` and `tick view` with cProfile. The profiled
+`track outages`, `reap`, `master scale` and `tick view` with cProfile. The
+`master scale` step launches agents into empty master seats. A workflow contract
+checks that every profiled name is registered and includes that launcher. The profiled
 walls are evidence only. The action takes the same choices as its `plant`
 and `profile` inputs.
 
