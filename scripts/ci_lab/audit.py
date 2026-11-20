@@ -183,7 +183,7 @@ def _audit(ports: Ports, units: Sequence[Cached], tier: Priority) -> Regrade:
     kinds = {kind: [m for m in found if m.cached.kind == kind] for kind in sorted({m.cached.kind for m in found})}
     for kind, kept in kinds.items():
         ports.store.disable(kind)
-        ports.store.keep_unfiled(kind, json.dumps([asdict(mismatch) for mismatch in kept], sort_keys=True))
+        ports.store.keep_unfiled(kind, json.dumps([asdict(mismatch) for mismatch in kept]))
     for kind, kept in kinds.items():
         _file(ports, kind, kept, regrade.run)
         ports.store.filed(kind)
