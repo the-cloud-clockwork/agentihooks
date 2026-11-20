@@ -1243,7 +1243,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 
 | Command | Effect |
 |---|---|
-| `agentihooks swarm init NAME [--plan FILE] [--content FILE] [--repo DIR] [--template NAME] [--operator-asked WORDS] [--timeout SECONDS]` | The one way to create a swarm. NAME is one or two lowercase words joined by a dash and ending in `swarm`, such as `rig-grade-swarm`; it names both the swarm and its ledger. A missing, invalid or taken name is refused with the rule and two suggestions built from the plan title, before anything starts. It then brings up the local swarm stack, Redis with its password, the ledger server and the controller, from the Compose files packaged with agentihooks into `$AGENTIHOOKS_HOME/swarm-stack`. The first run writes `.env` there with a random Redis password, free ledger and Redis ports and `SWARM_IMAGE_TAG=release`, so the stack runs the released swarm image; later runs keep them and the data. `SWARM_COMPOSE_PROJECT` in that `.env` names the Compose project (default `agentihooks-swarm`), so a second stack home, such as a scratch proof, never touches the first. It waits until every service is healthy (default 300 seconds) and the ledger home page answers. A missing Docker, daemon or Compose plugin, an unhealthy service or a silent ledger page is named with its fix and exits 1. Then it creates the ledger and the swarm inside the stack, with the stack's own code, ledger folder and Redis, so the stack's ledger page serves it: the ledger comes from `--content`, or one automatic phase titled after `--plan` when there is no content, and `sources`, being host paths, stay out of it. In the shared ledger folder only a master seat or the operator may run it, and content with fewer than three phases or tasks needs `--operator-asked` quoting the operator. It never starts the swarm. Running it again for the same swarm prints its ledger page and changes nothing; a name held by a swarm on another repository, or by a ledger that is not a swarm's, is refused with the rule and suggestions. Output is coloured on a terminal, plain when piped or with `NO_COLOR`. |
+| `agentihooks swarm init NAME [--plan FILE] [--content FILE] [--repo DIR] [--template NAME] [--operator-asked WORDS] [--timeout SECONDS]` | The one way to create a swarm. NAME is one or two lowercase words joined by a dash and ending in `swarm`, such as `rig-grade-swarm`; it names both the swarm and its ledger. A missing, invalid or taken name is refused with the rule and two suggestions built from the plan title, before anything starts. It then brings up the local swarm stack, Redis with its password, the ledger server and the controller, from the Compose files packaged with agentihooks into `$AGENTIHOOKS_HOME/swarm-stack`. The first run writes `.env` there with a random Redis password, free ledger and Redis ports and `SWARM_IMAGE_TAG=release`, so the stack runs the released swarm image; later runs keep them and the data. `SWARM_COMPOSE_PROJECT` in that `.env` names the Compose project (default `agentihooks-swarm`), so a second stack home, such as a scratch proof, never touches the first. It waits until every service is healthy (default 300 seconds) and the ledger home page answers. A missing Docker, daemon or Compose plugin, an unhealthy service or a silent ledger page is named with its fix and exits 1. Then it creates the ledger and the swarm inside the stack, with the stack's own code, ledger folder and Redis, so the stack's ledger page serves it: the ledger comes from `--content`, or one automatic phase titled after `--plan` when there is no content, and `sources`, being host paths, stay out of it. In the shared ledger folder only a master seat or the operator may run it, and content with fewer than three phases or tasks needs `--operator-asked` quoting the operator. A `--template` lane model that no harness catalog lists ends it with `Swarm not created: the stack refused it:` and the refusal, before the ledger exists ([Lane models checked at creation](#lane-models-checked-at-creation)). It never starts the swarm. Running it again for the same swarm prints its ledger page and changes nothing; a name held by a swarm on another repository, or by a ledger that is not a swarm's, is refused with the rule and suggestions. Output is coloured on a terminal, plain when piped or with `NO_COLOR`. |
 | `agentihooks swarm names check NAME [--plan FILE]` | Prints `valid: NAME`, or `invalid:` with the reason, the name rule and two free suggestions from the plan title. A name the stack already uses for a swarm, or for a ledger that is not a swarm's, is taken; a swarm ledger left without its swarm stays free so init can finish it. With the stack down only the rule is checked, and the output says so. Exits 1 when invalid. |
 | `agentihooks swarm init --prepare-clients` | Stage named authentication before moving an existing local swarm into the bundle. First deploy the bundle's named Redis user and persistent ACL configuration through the source service's repository, retaining existing clients, and verify authentication after a source restart. Preparation checks the bundle credential against the current localhost Redis, its named user and configured ACL file, then atomically writes the private `swarm-client.env` companion for existing environment loaders. It changes no Redis users, data, services, deployment mode, ledger address or ports. Existing sessions keep their connections; new processes use named authentication on the same source. Keep that source as the sole writer until the master completes seat turnover and verifies client counts before the final data and port cutover. |
 | `agentihooks swarm init --adopt [--no-start]` | Hand the existing shared ledger folder, user and home to the bundle. Requires an earlier `--prepare-clients` run and refuses without its `swarm-client.env`. It records `SWARM_ADOPT_LEDGER_DIR`, `SWARM_ADOPT_HOME`, `SWARM_ADOPT_UID`, `SWARM_ADOPT_GID`, `SWARM_ADOPT_CODE` (this agentihooks checkout), `SWARM_ADOPT_REDIS_URL` (the Redis the prepared clients use) and `SWARM_PORT=8765` in the stack `.env`; later runs without `--adopt` keep them, and each `--adopt` run writes all seven again. While recorded, every stack Compose call adds `deploy/compose/adopt.yaml`, so the `swarm` service runs as that user on the host PID and network namespaces, bound to 127.0.0.1:8765, from that checkout with reload on, against that Redis, and serves the folder at its own path, so every swarm keeps its ledger, inbox items and seats; `ledger serve --ensure` and `--stop` for that folder, and the Doctor and watchdog restarts, go to the bundle `swarm` service and never restore the legacy `ledger` service of the `agentihooks-ledger` Compose project; another shared folder is refused by name; and the stack Redis `swarm` user is denied `FLUSHALL` and `FLUSHDB`. It moves no data or seats and activates no hive. Cannot be combined with `--prepare-clients`. Rollback: stop the bundle `swarm` service, move the adoption lines out of the stack `.env`, and run `ledger serve --ensure` to start the legacy service again. Details: [Docker Compose quick start](../getting-started/compose-quick-start.md#adopt-an-existing-workstation-ledger). |
@@ -1257,7 +1257,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> controller release` | Release this hive's lease so another controller can take over at a higher epoch. |
 | `agentihooks controller run [--once]` | Reconcile every registered swarm each minute; `--once` runs one pass. `AGENTIHOOKS_DEPLOYMENT=local` permits spawning; `compose` reconciles without spawning; `distributed` spawns only engineer and CI work its Kubernetes runtime places, and leaves master, planner, dispatcher and frontend work to the workstation hive. |
 | `agentihooks swarm templates` | One line per swarm template, built-in or user: per lane its cap, agent, model, effort and default kind, then the compact limit. |
-| `agentihooks swarm <id> create --repo DIR [--template NAME] [--max-eng-agents N] [--max-ci-agents N] [--max-plan-agents N]` | The step `swarm init` runs to register a swarm, paused. Typed, it is refused and names `swarm init`, except for proof and demo swarms named by code. Defaults: 2 eng, 1 ci, 1 planner. `--template` takes the caps, compact limit and lane map from a template; a cap flag still wins. Ends with the `Ledger page: <link>` line. |
+| `agentihooks swarm <id> create --repo DIR [--template NAME] [--max-eng-agents N] [--max-ci-agents N] [--max-plan-agents N]` | The step `swarm init` runs to register a swarm, paused. Typed, it is refused and names `swarm init`, except for proof and demo swarms named by code. Defaults: 2 eng, 1 ci, 1 planner. `--template` takes the caps, compact limit and lane map from a template; a cap flag still wins. A lane model that is not `auto` and that no harness catalog lists is refused before the ledger is marked or the swarm stored ([Lane models checked at creation](#lane-models-checked-at-creation)). Ends with the `Ledger page: <link>` line. |
 | `agentihooks swarm <id> start` | Run: enable the timer and scale up at once. Starting a swarm not served in Anton brings back the scheduled tick and the waits, tick watch and inbox waker units on a workstation that had retired them. Ends with the `Ledger page: <link>` line. |
 | `agentihooks swarm <id> url` | Print the `Ledger page: <link>` line, built from `LEDGER_HOST` and `LEDGER_PORT`; when the ledger server is not answering, the line names `agentihooks ledger serve --ensure`; when the server on that port serves another ledger folder, it prints no link and names both folders. |
 | `agentihooks swarm <id> pause` | Stop new spawns; running agents continue. |
@@ -1307,8 +1307,8 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> set master-move-grace=SECONDS` | How long the hive running the master may stay without a heartbeat before the tick moves the master. Default 300. Past it, and while the runtime does not see the master live, the tick records a recovery handoff that names its unknowns, bumps the master seat generation, fences the old execution on that hive and starts the successor on a live hive chosen by hive placement, or unpinned when no hive qualifies. A hive that never beat, or whose record is gone, never moves its master. A returning hive terminates each fenced execution by its recorded process group before it writes its heartbeat, and takes no launch orders while one still runs. See [Automatic failover](hives.md#automatic-failover). |
 | `agentihooks swarm <id> set snapshot-minutes=N` | While the swarm runs, a background job the tick starts writes an automatic snapshot every N minutes to `~/.agentihooks/swarm/<id>/snapshots/auto-<ms>.json` and removes the oldest past ten ([Automatic snapshot job](#automatic-snapshot-job)). Default 30; a swarm without the setting takes `AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES`; 0 turns automatic snapshots off. `snapshot.json` from `snapshot` and `stop` is separate and never pruned. |
 | `agentihooks swarm <id> shutdown` | Before a planned workstation shutdown: takes `snapshot.json`, writes `reboot.json` beside it naming every local agent of this machine with its seat, task, conversation, profile, overlays, harness, model, effort and account, and asks each master to save its Handoff v2 to `master-shutdown-handoff.md` without stopping. The first tick of the next boot (a new kernel boot id for this swarm and hive) starts the herdr server and reopens each agent named by the newest of `reboot.json` and the automatic snapshots in its own conversation and seat, on its account when the last quota reading shows room (a reading past the freshness window counts until one of its windows resets), else on the account the router picks. An agent whose own conversation does not reopen awaits a resume or fresh decision (`restore-decision`). Hive agents are never relaunched. An unplanned power loss recovers the same way from the newest automatic snapshot. |
-| `agentihooks swarm <id> set eng-agent=codex eng-model=M eng-effort=E eng-kind=K eng-role=TEXT` | Change one lane field (`ci-` likewise); the next spawn in that lane uses it. |
-| `agentihooks swarm <id> save-template NAME` | Write this swarm's caps, compact limit and lane map as the user template NAME. |
+| `agentihooks swarm <id> set eng-agent=codex eng-model=M eng-effort=E eng-kind=K eng-role=TEXT` | Change one lane field (`ci-` likewise); the next spawn in that lane uses it. A lane model the command changes to a value other than `auto` or empty must be listed in the claude or codex catalog, else it is refused with `eng-model must be auto or a model listed in a harness catalog, not M`; creation runs the same check ([Lane models checked at creation](#lane-models-checked-at-creation)). |
+| `agentihooks swarm <id> save-template NAME` | Write this swarm's caps, compact limit and lane map as the user template NAME. It reads no model catalog; a swarm created from the template is checked then. |
 | `agentihooks swarm <id> send-message TEXT` | Message to every live agent's inbox; never posts to chat. |
 | `agentihooks swarm <id> verdict FINDING VERDICT [--note TEXT]` | The master or the operator judges a health finding: `false-positive`, `early-real`, `established`, `insufficient-evidence` or `resolved`. The finding hides for `AGENTIHOOKS_HEALTH_COOLDOWN_MINUTES` (60); after that it shows again, with its earlier verdict attached, only when its measure is above the measure recorded at the verdict. A standing `bottleneck-stage/<stage>` finding measures the stage's latest value in the unit of the writer that owns it, not how many times it fired: task hours for the stage detector, task hours in the window for Grafana alerts, minutes from push to `Gate Required` for the ci budget pass, which counts pull request Tests runs over fifteen minutes, and for a `bottleneck-stage/langfuse_account_<account>` finding the highest value to threshold ratio across that account's error rate breaches. A stage that keeps firing while its value holds or falls stays hidden after its verdict and returns once the value rises past the one judged. For example, `bottleneck-stage/merge_queue` judged `established` at 1.5 task hours stays hidden when it fires again at 1.2 and returns when it fires at 2.0. The `Fired N times` evidence line on the finding counts firings and never brings it back. Over monitoring fires past `AGENTIHOOKS_HEALTH_WATCH_MIN` (20) watch calls since the agent's last action and over `AGENTIHOOKS_HEALTH_WATCH_RATIO` (5) per action; the master, whose job is mostly watching, gets `AGENTIHOOKS_HEALTH_MASTER_WATCH_MIN` (60) and `AGENTIHOOKS_HEALTH_MASTER_WATCH_RATIO` (15). Working on drain fires when a working agent that is not idle stays on an account the quota capacity decision marks closed, or one at or under `AGENTIHOOKS_HEALTH_DRAIN_LEFT` (10) percent routing left, the quota balancer's drain line where the tick may still place work, over `AGENTIHOOKS_HEALTH_DRAIN_MINUTES` (10) after its early quota handoff warning. The `watch` gate (`python -m scripts.gates watch`) refuses the watch call that would cross the same limits, so this finding means the gate leaked; a ledger watch re-arm with no live watcher always passes. |
 | `agentihooks swarm <id> blockers [list]`, `agentihooks swarm <id> blockers clear CATEGORY` | Lists this swarm's active blocker categories (error or stall kind, first and last seen, count, detail), or clears one. Fed from the tick-pass failure callback and the stale-tick watcher with no new polling; a category stuck an hour or more, still recurring in the last fifteen minutes, is sustained and opens the master's hotfix window automatically until each sustained category is cleared. |
@@ -1385,7 +1385,8 @@ refused rather than defaulting to Claude. A task whose profile is `frontend` tak
 first and a Codex seat only when no Claude seat is open, both in the quota plan and in the spawn rotation;
 a pinned lane or a saved harness still wins. User templates live in
 `$AGENTIHOOKS_HOME/swarm-templates/` and win over a built-in of the same name. `create --template` stores
-the template name and lane map in the swarm config.
+the template name and lane map in the swarm config ([Lane models checked at creation](#lane-models-checked-at-creation)).
+Of the built-ins only `codex-ci` fixes a lane model, `opus` on its eng lane.
 
 A profile is Claude only when a layer of its own chain enables a Claude plugin that has no Codex
 replacement; role default plugins and the bundle global layer never count. The replacements are:
@@ -1430,6 +1431,117 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 | `agentihooks swarm <id> restack` | After the parked blockers finish, fetch origin and rebase task work from `stacked_base` onto `origin/dev`. Run in a clean branch cut from the parked branch. Success clears `parked_on`; a conflict lists the files and retains the parked list. Resolve the files, run `git rebase --continue`, then run restack again to finish. |
 | `agentihooks swarm <id> learned TEXT [--maturity data\|note\|insight\|canon]` | Add a lesson to your seat's learned notes, kept for every later occupant. The maturity defaults to `note`; only the master writes `canon`. |
 | `agentihooks swarm <id> say TEXT [--to NAME\|eng\|ci]` | Post to the swarm chat. |
+
+### Lane models checked at creation
+
+Creating a swarm refuses a lane model that no harness model catalog lists, with the message `swarm set` gives
+for the same model. A mistyped model in a template stops at creation and never reaches an agent launch.
+`RedisStore.refusal` runs the check. `swarm <id> create` calls it before it marks the ledger and writes the
+swarm config. `swarm init` calls it inside the swarm stack before it creates the ledger. A refused creation
+stores no ledger, no swarm config and no swarm index entry.
+
+Each lane of the lane map is judged by its `model`:
+
+| Lane `model` | At creation |
+|---|---|
+| missing, empty or `auto` | Accepted. A creation whose lanes fix no model reads no catalog. |
+| a model the claude or the codex catalog lists | Accepted, whichever harness the lane's `agent` names. `opus` on a Codex lane passes and launches as [Lane models on the other harness](../reference/classifier.md#lane-models-on-the-other-harness) describes. |
+| anything else | Refused with `<lane>-model must be auto or a model listed in a harness catalog, not <model>`. The first such lane in the lane map is named. |
+
+The lane map holds the `eng`, `ci`, `plan` and `master` lanes, so a fixed `master` model is checked too, even
+though a master launch ignores it. Lane models are checked before the effort range, scaling and whether the
+swarm already exists.
+
+The catalogs are the lists `model_catalog.catalog` builds for the harness model pickers:
+
+- **claude**: one entry per model line from the Anthropic models API, such as `opus` or `sonnet`, read with
+  the process's single `AH_CC_TOKEN_<slug>` or with `CLAUDE_CODE_OAUTH_TOKEN`; two or more `AH_CC_TOKEN_*`
+  variables count as none. With no token, or no answer, it takes the `--model` aliases `claude --help` prints.
+- **codex**: the slug of each entry with visibility `list` in `models_cache.json` under `CODEX_HOME`, by
+  default `~/.codex`, such as `gpt-6.1-sol`.
+
+Each list that is not empty is cached in the swarm Redis for one hour under `<root>:swarm:models:<harness>`.
+Within that hour creation and `swarm set` read the same lists. An empty list is never cached and is read again
+on the next check. When both lists are empty every fixed lane model is refused, and `auto` still passes.
+
+#### Example: a mistyped template model
+
+`$AGENTIHOOKS_HOME/swarm-templates/typo.json` (by default under `~/.agentihooks`) pins the eng lane to
+`opsu` instead of `opus`:
+
+```json
+{
+  "name": "typo",
+  "compact_limit": 0,
+  "lanes": {
+    "eng": {"cap": 2, "agent": "claude", "model": "opsu", "effort": "high"},
+    "ci": {"cap": 1, "agent": "codex", "model": "auto", "effort": "auto"}
+  }
+}
+```
+
+`swarm init` brings the stack up, then refuses the swarm. Its last line is:
+
+```console
+$ agentihooks swarm init typo-swarm --plan plan.md --template typo
+...
+Swarm not created: the stack refused it: swarm: eng-model must be auto or a model listed in a harness catalog, not opsu.
+```
+
+The `swarm` command line prints a refusal as `swarm: <message>` on stderr. `swarm init` prints its
+`Swarm not created: ...` line on stdout and quotes the stack's `swarm: <message>` line inside it. It exits 1.
+The stack stays up, and neither the ledger nor the swarm exists. A proof or demo swarm that runs the `create`
+step directly gets `swarm: eng-model must be auto or a model listed in a harness catalog, not opsu` on stderr
+from the `swarm` command line, exits 1 and stores nothing.
+Fix the model, or set it to `auto`, and run the same command again:
+
+```json
+"eng": {"cap": 2, "agent": "claude", "model": "opus", "effort": "high"}
+```
+
+`swarm set` refuses the same typo on a swarm that already runs, and checks only a lane model the command
+changes:
+
+```console
+$ agentihooks swarm <id> set eng-model=opsu
+swarm: eng-model must be auto or a model listed in a harness catalog, not opsu
+```
+
+#### What the check does not cover
+
+- `save-template NAME` writes the swarm's lane map without reading a catalog, and `swarm templates` prints each
+  lane's model unchecked. A saved template meets the check when a swarm is created from it.
+- `restore` writes a snapshot's stored swarm config back without the check.
+- A lane model stored before the check, or one a catalog stopped listing later, stays as stored until
+  `swarm set` changes it.
+
+#### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `<lane>-model must be auto or a model listed in a harness catalog, not <model>` on `swarm init` or `create` | The template fixes a model neither catalog lists, often a typo or a full model id where the catalog lists a line name. | Correct the lane's `model` in the template file, or set it to `auto`, then run `swarm init` again. |
+| A model you expect, such as `opus`, is refused | The process that ran the check read an empty or older list, or a list cached in the last hour lacks the model. For `swarm init` that process is the stack's `swarm` service, with its own environment. | Print the lists that process reads, shown below, and give it the missing token or Codex home, or use `auto` until the catalog lists the model. |
+| Every fixed lane model is refused, `auto` passes | Both lists are empty: no Claude token and no `claude` on the path, and no readable `models_cache.json`. | As above. |
+| `lane <lane> has unknown fields [...]` or `template <name> names lanes [...]` | The template file itself is malformed; the model check never ran. | Fix the field or lane name. |
+
+Print the lists a host process reads. Run it from the root of an agentihooks checkout, or with the Python that has
+agentihooks installed, where the swarm Redis is reachable:
+
+```bash
+python -c 'import os, time; from scripts.swarm import model_catalog; from scripts.swarm.store import connect; print(model_catalog.catalog(os.environ, connect().redis, time.time()))'
+```
+
+For `swarm init`, run the same command inside the stack's `swarm` service. Replace
+`agentihooks-swarm` with the `SWARM_COMPOSE_PROJECT` the stack's `.env` names, when it names one:
+
+```bash
+home="${AGENTIHOOKS_HOME:-$HOME/.agentihooks}/swarm-stack"
+docker compose --project-name agentihooks-swarm --project-directory "$home" --file "$home/compose.yaml" \
+  --env-file "$home/.env" exec -T swarm python -c 'import os, time; from scripts.swarm import model_catalog; from scripts.swarm.store import connect; print(model_catalog.catalog(os.environ, connect().redis, time.time()))'
+```
+
+Tests: `tests/swarm/test_default_models.py` (feature `template-lane-model-listed-in-a-harness-catalog`),
+delivered by pull request [#12347](https://github.com/the-cloud-clockwork/agentihooks/pull/12347).
 
 ## Retrace a plan after rewriting a task
 
