@@ -58,6 +58,12 @@ pytestmark = pytest.mark.unit
             "git@github.com:the-cloud-clockwork/agentihooks.git",
             True,
         ),
+        (
+            "http://lab.example/the-cloud-clockwork/other.git",
+            "git@github.com:the-cloud-clockwork/agentihooks.git",
+            False,
+        ),
+        ("", "", False),
     ],
 )
 @pytest.mark.feature("lab-remote-repository-owner")

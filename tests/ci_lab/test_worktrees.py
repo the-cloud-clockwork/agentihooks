@@ -165,9 +165,7 @@ def test_a_lab_fetch_sends_the_token_as_the_lab_user_s_basic_password_for_the_la
     tmp_path: Path, origin: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     base = _commit(origin, "a", "a")
-    mirror = replace(
-        _mirror(tmp_path, origin, base), lab=worktrees.Lab("https://lab.example/git/origin.git", "lab-token")
-    )
+    mirror = replace(_mirror(tmp_path, origin, base), lab=worktrees.Lab("https://lab.example/origin.git", "lab-token"))
     assert mirror.fetch(base) is False
     calls: list[tuple[list[str], dict[str, str] | None]] = []
 
@@ -198,7 +196,7 @@ def test_a_lab_fetch_sends_the_token_as_the_lab_user_s_basic_password_for_the_la
             "fetch",
             "--quiet",
             "--no-write-fetch-head",
-            "https://lab.example/git/origin.git",
+            "https://lab.example/origin.git",
             f"{'1' * 40}:refs/lab/{'1' * 40}",
         ],
     ]
@@ -206,7 +204,7 @@ def test_a_lab_fetch_sends_the_token_as_the_lab_user_s_basic_password_for_the_la
     assert calls[2][1] == {
         **os.environ,
         "GIT_CONFIG_COUNT": "1",
-        "GIT_CONFIG_KEY_0": "http.https://lab.example/git/origin.git.extraheader",
+        "GIT_CONFIG_KEY_0": "http.https://lab.example/origin.git.extraheader",
         "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {base64.b64encode(b'lab:lab-token').decode()}",
         "GIT_TERMINAL_PROMPT": "0",
     }
