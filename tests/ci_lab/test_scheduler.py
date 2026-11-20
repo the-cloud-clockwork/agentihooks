@@ -136,8 +136,6 @@ class Inbox:
 class Expander:
     plans: dict[str, scheduler.Plan]
     seen: list[GradeRequest] = field(default_factory=list[GradeRequest])
-    uncarried: set[str] = field(default_factory=set[str])
-    checked: list[str] = field(default_factory=list[str])
 
     def expand(self, request: GradeRequest) -> scheduler.Plan:
         self.seen.append(request)
@@ -147,8 +145,7 @@ class Expander:
         return self.plans[head].grader
 
     def carried(self, repo: str, head: str) -> bool:
-        self.checked.append(head)
-        return head not in self.uncarried
+        return True
 
 
 @dataclass

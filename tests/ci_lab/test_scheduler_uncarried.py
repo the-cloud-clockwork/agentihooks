@@ -1,5 +1,6 @@
 import subprocess
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,22 @@ origin = _origin
 REASON = f"no branch or pull request head ref of {REPO} carries {HEAD_A}"
 
 
+@dataclass
+class Carried:
+    refused: frozenset[str]
+    asked: list[str] = field(default_factory=list[str])
+
+    def __call__(self, repo: str, head: str) -> bool:
+        self.asked.append(head)
+        return head not in self.refused
+
+
+def carrying(run: Run, monkeypatch: pytest.MonkeyPatch, *refused: str) -> Carried:
+    check = Carried(frozenset(refused))
+    monkeypatch.setattr(run.lab.expander, "carried", check)
+    return check
+
+
 def retired(title: str) -> tuple[str, str, str, str, Output, bool]:
     output = Output(title, REASON, (), "uncarried-1000", "unknown", f"{REPO}/commit/{HEAD_A}")
     return (HEAD_A, scheduler.REQUIRED, "completed", "failure", output, True)
@@ -32,10 +49,10 @@ def expanding(tmp_path: Path) -> scheduler.MirrorExpander:
 
 @pytest.mark.feature("lab-scheduler-uncarried-head")
 def test_a_pull_request_head_no_mirror_ref_carries_leases_no_unit_and_posts_one_failure(
-    lab: Callable[..., Run],
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     run = lab({HEAD_A: pull_plan({"lint": (unit(1),)})})
-    run.lab.expander.uncarried.add(HEAD_A)
+    carrying(run, monkeypatch, HEAD_A)
     run.push(HEAD_A, event="pull_request", action="synchronize")
     assert run.tick(1000)[-1] == f"retiring {HEAD_A}: {REASON}"
     assert run.lease(slots=5) == []
@@ -47,10 +64,12 @@ def test_a_pull_request_head_no_mirror_ref_carries_leases_no_unit_and_posts_one_
 
 
 @pytest.mark.feature("lab-scheduler-uncarried-head")
-def test_a_hotfix_head_no_mirror_ref_carries_posts_one_failure_in_its_class(lab: Callable[..., Run]) -> None:
+def test_a_hotfix_head_no_mirror_ref_carries_posts_one_failure_in_its_class(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
     run = lab({HEAD_A: pull_plan({"lint": (unit(1),)})})
     run.lab.fixes.add("fix-branch")
-    run.lab.expander.uncarried.add(HEAD_A)
+    carrying(run, monkeypatch, HEAD_A)
     run.push(HEAD_A, lane="fix-branch", event="pull_request", action="synchronize")
     assert run.tick(1000)[-1] == f"retiring {HEAD_A}: {REASON}"
     assert run.lease(slots=5) == []
@@ -58,9 +77,11 @@ def test_a_hotfix_head_no_mirror_ref_carries_posts_one_failure_in_its_class(lab:
 
 
 @pytest.mark.feature("lab-scheduler-uncarried-head")
-def test_a_merge_group_head_no_mirror_ref_carries_leases_no_unit_and_posts_nothing(lab: Callable[..., Run]) -> None:
+def test_a_merge_group_head_no_mirror_ref_carries_leases_no_unit_and_posts_nothing(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
     run = lab({HEAD_A: plan({"unit": (unit(1, "test"),)})})
-    run.lab.expander.uncarried.add(HEAD_A)
+    carrying(run, monkeypatch, HEAD_A)
     run.push(HEAD_A, lane="queue", event="merge_group", action="checks_requested")
     assert run.tick(1000)[-1] == f"retiring {HEAD_A}: {REASON}"
     assert run.lease(slots=5) == []
@@ -69,21 +90,26 @@ def test_a_merge_group_head_no_mirror_ref_carries_leases_no_unit_and_posts_nothi
 
 
 @pytest.mark.feature("lab-scheduler-uncarried-head")
-def test_a_head_a_mirror_ref_carries_is_asked_once_and_grades_its_units(lab: Callable[..., Run]) -> None:
+def test_a_head_a_mirror_ref_carries_is_asked_once_and_grades_its_units(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
     run = lab({HEAD_A: pull_plan({"lint": (unit(1),)})})
+    check = carrying(run, monkeypatch)
     run.push(HEAD_A, event="pull_request", action="synchronize")
     assert run.tick(1000)[-1].startswith("grading ")
-    assert run.lab.expander.checked == [HEAD_A]
+    assert check.asked == [HEAD_A]
     assert len(run.lease(slots=5)) == 1
 
 
 @pytest.mark.feature("lab-scheduler-uncarried-head")
-def test_a_grade_ref_head_grades_without_asking_whether_a_mirror_ref_carries_it(lab: Callable[..., Run]) -> None:
+def test_a_grade_ref_head_grades_without_asking_whether_a_mirror_ref_carries_it(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
     run = lab({HEAD_A: plan({"lint": (unit(1),)})})
-    run.lab.expander.uncarried.add(HEAD_A)
+    check = carrying(run, monkeypatch, HEAD_A)
     run.push(HEAD_A, lane="engineer-1", ref="refs/grade/t1")
     assert run.tick(1000)[-1].startswith("grading ")
-    assert run.lab.expander.checked == []
+    assert check.asked == []
     assert run.grade(HEAD_A).ref == "refs/grade/t1"
 
 
