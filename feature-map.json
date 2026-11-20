@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "swarm-progress-data",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-bundle-ledger-leftovers",
+      "behaviour": "Progress report consumers receive tasks, freezes, plans, phases, followups and alerts from the built-in swarm reader without owning storage access; failed reads propagate to the caller.",
+      "seam": "scripts.swarm.progress_data.read over the built-in resource reader",
+      "tests": [
+        "tests/swarm/test_progress_data.py::test_progress_data_preserves_every_collection",
+        "tests/swarm/test_progress_data.py::test_progress_data_propagates_read_failure"
+      ]
+    },
+    {
       "id": "lab-zero-base-push",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-zero-base-push",

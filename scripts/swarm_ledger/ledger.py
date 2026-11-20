@@ -239,7 +239,7 @@ def resource(
     collection: bool = False,
     timeout: float = REQUEST_TIMEOUT,
     attempts: int = REMOTE_READ_ATTEMPTS,
-) -> dict | list:
+) -> dict[str, Any] | list[Any]:
     """One resource or collection of ledger slug, read again while the database answers a storage failure."""
 
     def read() -> Any:
