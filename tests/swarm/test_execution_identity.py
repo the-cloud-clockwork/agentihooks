@@ -449,6 +449,17 @@ def test_an_explicit_revival_with_a_changed_identity_is_refused(store: RedisStor
     assert store.execution_identity_conflicts_total("fixture") == 1
 
 
+def test_a_revived_runtime_target_conflict_bumps_the_revived_slugs_counter(
+    store: RedisStore, agent: AgentRecord
+) -> None:
+    current = store.start_execution(
+        "fixture", replace(agent, runtime_backend="kubernetes", runtime_target=target("pod-one"))
+    )
+    with pytest.raises(SwarmError, match="immutable after binding"):
+        store.revive_agent("fixture", replace(current, runtime_target=target("pod-two")))
+    assert store.execution_identity_conflicts_total("fixture") == 1
+
+
 def test_updates_preserve_status_timestamp_until_status_changes(store, agent, monkeypatch):
     monkeypatch.setattr(time, "time", lambda: 10)
     current = store.start_execution("fixture", agent)
