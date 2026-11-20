@@ -169,11 +169,11 @@ class StoredStats:
         if not inputs.keys() <= set(self.context["inventory"]) or self.scope(inputs) not in ({}, scope):
             self.misses["scope"] += 1
             return None
-        known: dict[str, str | None] = {} if digests is None else digests
+        digests = {} if digests is None else digests
         changed = [
             name
             for name, fingerprint in inputs.items()
-            if (current := self.current_digest(name, known)) is None or current != fingerprint
+            if (current := self.current_digest(name, digests)) is None or current != fingerprint
         ]
         if changed:
             self.misses["inputs"] += 1
