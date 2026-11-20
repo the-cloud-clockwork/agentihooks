@@ -30,6 +30,7 @@ def swarm(monkeypatch):
     ledger = FakeLedger([])
     ledger.freezes = []
     ledger.freeze = lambda slug, verb, target, by, words: ledger.freezes.append((slug, verb, target, flat(by, words)))
+    ledger.focus_verdicts = lambda slug, target: None  # pyright: ignore[reportAttributeAccessIssue]
     monkeypatch.setattr(cli, "connect", lambda: store)
     monkeypatch.setattr(cli, "LedgerClient", lambda: ledger)
     return store, ledger

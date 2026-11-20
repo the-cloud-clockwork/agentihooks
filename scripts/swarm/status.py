@@ -47,6 +47,7 @@ from scripts.swarm.health import (
     activity,
     checks,
     early_ends,
+    focus_unclaimed,
     merge_stall,
     night_watch,
     ordering_dependencies,
@@ -179,6 +180,7 @@ def findings(
         + timing.call(merge_stall.findings, store, slug, config.repo, now_ms())
         + prompt_backlog.findings(store, slug)
         + urgent_hold.findings(store, slug)
+        + focus_unclaimed.findings(store, slug)
         + ordering_dependencies.findings(store, slug)  # pyright: ignore[reportUnknownArgumentType]
         + placement_waits.findings(store, slug, now_ms())
         + standing.findings(store.redis, slug, now_ms())

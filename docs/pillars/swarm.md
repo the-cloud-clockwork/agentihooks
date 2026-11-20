@@ -2342,10 +2342,12 @@ merge queue check run first, as for any publish. Then publish:
 
 1. Gives the worktree's repository the `lab` remote, or points it at the current URL, and refuses
    when the URL names another repository or is unset.
-2. Runs `git push -o branch=<branch> lab HEAD:refs/grade/<task>`, where `<branch>` is the
-   [delivery branch](#publishing-after-a-successor-prepares-a-branch) and `<task>` the agent's task.
-   Git's output is copied to standard error, so the publish log shows the lab's
-   `remote: lab grade: <url>` line before any push to origin. A failed push, or one whose output
+2. Runs `git -c push.negotiate=true push -o branch=<branch> lab HEAD:refs/grade/<task>`, where
+   `<branch>` is the [delivery branch](#publishing-after-a-successor-prepares-a-branch) and `<task>`
+   the agent's task. Push negotiation makes git find the commits it shares with the lab first, so a
+   worktree behind the lab's history sends only the objects the lab lacks. Git's output is copied
+   to standard error, so the publish log shows the lab's `remote: lab grade: <url>` line before any
+   push to origin. A failed push, or one whose output
    names no grade url, refuses.
 3. Without `--direct`, reads the grade url at once and then every 15 seconds, each read with a 10
    second timeout, until the newest grade it lists has a conclusion. The wait gives up after 1800
@@ -8389,6 +8391,40 @@ marks the swarm drained and posts a ledger notice. It names how many open tasks 
 example `The swarm has no task it may start: 3 open tasks are held by the focus on phase Documentation agents`, and
 says only `The swarm has no task left to start` when none is held. The ledger page's time left leaves held tasks out
 and says so: `with 3 frozen tasks holding 90m of work left out`.
+
+### Focus sanity check
+
+A focus on done or out of scope work, or on tasks that all wait on open dependencies, starts nothing. Three checks
+make that visible.
+
+- **Focus and unfreeze answer with verdicts.** After its write, `swarm focus` and `swarm unfreeze` print on standard
+  error the claim gate verdict on every task under the target that is not done: `claimable`, or the reason the tick
+  may not claim it (`the freeze on phase Docs holds it`, `it waits on task t2`, `its phase Build is waiting on an
+  earlier phase`, `a focus elsewhere holds it`, `it is claimed by engineer@...`, `it is in a pull request`, `it is
+  out of scope`). The head line counts the claimable, open and done tasks, and reads `NOTHING CLAIMABLE` when none
+  is claimable. Standard output keeps its one JSON line. The ledger refuses a focus, freeze or unfreeze whose target
+  is no plan node, no `lane:` or `kind:` selector and, for unfreeze, no record:
+
+  ```
+  {"focus": "phases/p116", "by": "operator"}
+  focus phases/p116: NOTHING CLAIMABLE, no agent will start work from it; 7 open, 33 done
+    cut-flip-static-gates  ci  it waits on tasks cut-plant-proofs, t2516
+    t-gate-authority-fast-job  ci  it waits on task cut-flip-static-gates
+  ```
+
+- **One focus read.** `agentihooks api --slug <id> get focus` (ledger API `GET /api/v1/ledgers/<id>/focus`) lists
+  every focus record with `target`, `by`, `at`, `reason`, `claimable`, `done` (the ids of done tasks under it),
+  `tasks` (every other task under it with its `lane`, `state` and `verdict`) and `unclaimed_minutes`: the minutes
+  since the focus while a task under it is open and none is claimed or in a pull request, otherwise null.
+  `GET .../focus/<target>` answers one target in the same shape, or `404 resource_missing` when the target does not
+  exist. The swarm's Doctor fix phase is read from the swarm store; without one the read uses no fix phase.
+- **Focus unclaimed finding.** Each tick the `focus unclaimed` step counts, for every task under a focus record
+  whose verdict is `claimable`, the consecutive ticks it stays so; any other verdict drops the count. Past three
+  ticks a `focus unclaimed` health finding names the task and the focus, and the findings pass sends it to the
+  master inbox for a verdict.
+
+The master reads the focus read every loop; the master refocus block and the swarm master skill carry that
+obligation.
 
 ### How a freeze hold is named
 

@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "swarm-progress-data",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-bundle-ledger-leftovers",
+      "behaviour": "Progress report consumers receive tasks, freezes, plans, phases, followups and alerts from the built-in swarm reader without owning storage access; failed reads propagate to the caller.",
+      "seam": "scripts.swarm.progress_data.read over the built-in resource reader",
+      "tests": [
+        "tests/swarm/test_progress_data.py::test_progress_data_preserves_every_collection",
+        "tests/swarm/test_progress_data.py::test_progress_data_propagates_read_failure"
+      ]
+    },
+    {
       "id": "lab-zero-base-push",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-zero-base-push",
@@ -129,6 +140,16 @@
       ]
     },
     {
+      "id": "lab-scheduler-load-reads",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-scheduler-load-slots-only",
+      "behaviour": "The load that every CI lab metrics scrape and GET /capacity answer from, and that admission reads each pass, reads only the slots and lease start of each pending and leased job, with HMGET in pipelines that open no transaction, and builds no job; a job whose record is gone counts nowhere. A queue of tens of thousands of jobs no longer costs a full parsed job per id on every scrape.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.load over fakeredis and the local object store, counting every job built, every direct Redis command that names a job record and every pipeline opened",
+      "tests": [
+        "tests/ci_lab/test_scheduler_memory.py::test_a_load_reads_each_queued_job_s_slots_and_lease_start_through_pipelines_and_builds_no_job"
+      ]
+    },
+    {
       "id": "lab-scheduler-release-bound",
       "rules": ["lab-release-starts-every-waiting-head"],
       "origin": "regression",
@@ -139,6 +160,35 @@
         "tests/ci_lab/test_scheduler_release.py::test_each_pass_starts_eight_waiting_heads_in_class_order_and_admits_their_units_in_the_same_pass",
         "tests/ci_lab/test_scheduler_release.py::test_the_eight_heads_a_pass_starts_are_the_longest_waiting_and_quiet_or_paused_heads_take_no_place",
         "tests/ci_lab/test_scheduler_release.py::test_a_head_put_back_for_its_manifest_fetch_still_takes_one_of_the_eight_places"
+      ]
+    },
+    {
+      "id": "lab-scheduler-unexpanded-head",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2614",
+      "behaviour": "A head the CI lab scheduler cannot expand shows a lab status: when Scheduler.tick releases a held head and its expander raises a ValueError, KeyError, YAML error, schema validation error or failed git command, the scheduler drops the head as before and posts one completed required check run with conclusion failure on that head, named lab-shadow/required since a head with no plan has no authoritative gates, whose summary names the head, its base and the expansion error; a head pushed to a grade ref posts no check run, because GitHub does not hold that head.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis with a raising expander and a recording Poster behind scripts.ci_lab.scheduler.Ports.checks, read through the posts and the repositories the poster was asked for",
+      "tests": [
+        "tests/ci_lab/test_scheduler_unexpanded.py::test_a_head_that_cannot_expand_posts_a_failed_required_check_naming_its_reason",
+        "tests/ci_lab/test_scheduler_unexpanded.py::test_a_grade_ref_head_that_cannot_expand_posts_no_check_run"
+      ]
+    },
+    {
+      "id": "lab-scheduler-post-refusal",
+      "rules": ["lab-check-post-uncaught-refusal"],
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-check-post-auth-crash",
+      "behaviour": "A CI lab scheduler pass whose check run post is refused, by the GitHub App token, by GitHub or by the network, keeps running: it records the refusal as a pass action and keeps grading, and the first pass after a one minute hold posts the check run again. A refused App token or network failure holds the posts of every grade of that repository and of no other repository; a refusal GitHub answers holds only that grade's posts, kept in the grade state so a restarted scheduler keeps the hold, while the other grades keep posting. A grade whose units are all final stays live until every one of its check runs is posted, so a refused completed post closes the grade on the later pass that posts it, and a check run already posted completed is never posted twice. The failed required check of a head that cannot expand is tried once outside the holds, and its refusal is recorded and never retried, since the dropped head keeps no grade.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis and the local object store with a fake poster that raises GitAuthRefused, PostRefused or a requests connection error on chosen posts",
+      "tests": [
+        "tests/ci_lab/test_scheduler_posts.py::test_a_refused_check_run_post_is_recorded_and_the_pass_keeps_grading",
+        "tests/ci_lab/test_scheduler_posts.py::test_a_grade_whose_completed_post_is_refused_stays_live_until_a_later_pass_posts_it",
+        "tests/ci_lab/test_scheduler_posts.py::test_a_refused_required_post_keeps_the_posted_gate_and_closes_the_grade_on_the_next_post",
+        "tests/ci_lab/test_scheduler_posts.py::test_a_refused_post_holds_the_posts_of_every_grade_of_the_repository_until_the_hold_ends",
+        "tests/ci_lab/test_scheduler_posts.py::test_a_refused_post_holds_only_its_own_repository_and_another_repository_keeps_posting",
+        "tests/ci_lab/test_scheduler_posts.py::test_a_post_github_refuses_holds_only_its_grade_across_a_restart_while_other_grades_keep_posting",
+        "tests/ci_lab/test_scheduler_posts.py::test_the_check_poster_s_refused_app_token_is_held_by_the_pass_and_tried_again_after_the_hold",
+        "tests/ci_lab/test_scheduler_posts.py::test_a_refused_failed_check_of_a_head_that_cannot_expand_is_recorded_and_the_pass_goes_on"
       ]
     },
     {
@@ -538,6 +588,18 @@
       ]
     },
     {
+      "id": "ledger-new-file-setup-waits-out-another-write-lock",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2567",
+      "behaviour": "A ledger store that turns a new file to WAL while another connection holds the file's write lock waits for that lock within the busy timeout instead of failing at once, so a reload successor that sets up a new ledger file beside another process still reports ready.",
+      "seam": "SQLiteLedgerRepository._set_up reached through summaries, the WAL switch against another connection's write lock",
+      "tests": [
+        "tests/swarm_ledger/test_sqlite.py::test_a_new_store_waits_out_another_connections_write_lock_before_it_turns_on_wal",
+        "tests/swarm_ledger/test_sqlite.py::test_a_write_lock_held_past_the_busy_timeout_still_fails_the_wal_switch",
+        "tests/swarm_ledger/test_sqlite.py::test_the_wal_switch_raises_an_error_other_than_a_held_lock_at_once"
+      ]
+    },
+    {
       "id": "ledger-server-pid-file-after-projector",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2689",
@@ -853,7 +915,7 @@
       "id": "controller-standby-replica",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-standby",
-      "behaviour": "Controller replicas of one hive take a Redis replica lock before running passes, so two replicas never run a pass at the same time; a standby serves health and forwards the control API to the leader, takes the lock once the leader releases it or it expires, and each replica holds its own controller credential so a second replica never retires the leader's.",
+      "behaviour": "Controller replicas of one hive take a Redis replica lock before running passes, so two replicas never run a pass at the same time; a standby serves health and forwards the control API to the leader, takes the lock once the leader releases it or it expires, and each replica holds its own controller credential so a second replica never retires the leader's. Multiple chart replicas roll with zero surge and at most one unavailable controller, so a release needs no extra pod capacity.",
       "seam": "replica.ReplicaLock, standby.Standby, control_service.stand_by, controller._lead, auth.issue_controller with a holder, and the controller chart replicas, rolling update and disruption budget",
       "tests": [
         "tests/swarm/test_controller_replica.py::test_two_replicas_never_run_a_pass_at_the_same_time",
@@ -1060,6 +1122,18 @@
         "tests/hive/test_reports.py::test_a_hub_admitted_worker_its_hive_reports_no_binding_for_gets_no_facts_from_this_host",
         "tests/hive/test_reports.py::test_a_hub_admitted_worker_without_an_app_server_keeps_the_controllers_session_read",
         "tests/hive/test_reports.py::test_an_app_server_worker_the_hub_admitted_to_this_hive_is_read_from_this_host"
+      ]
+    },
+    {
+      "id": "swarm-nudges-hub-admitted-workers-through-their-hive",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2569",
+      "behaviour": "A nudge for a worker the hub admitted to another hive, such as an outage resume prompt, goes to that hive as a nudge order and that hive types it into the worker's pane instead of the controller's own herdr; it is refused while that hive is not reporting, and a hive takes a nudge order only for an execution the controller sends there.",
+      "seam": "scripts.swarm.runtime.HerdrRuntime.nudge resolves the hive through scripts.hive.reports.admitted and sends the order through scripts.hive.orders.Orders.command; scripts.hive.orders.Consumer.command takes it when the host target names this hive, or the runtime target is empty and the record's hive does",
+      "tests": [
+        "tests/hive/test_reports.py::test_a_nudge_for_a_hub_admitted_worker_is_typed_into_its_pane_by_the_hive_that_runs_it",
+        "tests/hive/test_reports.py::test_a_nudge_for_a_hub_admitted_worker_whose_hive_is_lost_is_refused_without_the_controller_herdr",
+        "tests/hive/test_reports.py::test_a_hive_takes_a_nudge_order_exactly_when_the_controller_sends_it_there"
       ]
     },
     {
@@ -3307,6 +3381,8 @@
         "tests/swarm/test_learned_scope.py::test_returned_notes_stay_with_the_caller_and_shared_guidance",
         "tests/swarm/test_learned_scope.py::test_scoped_memory_preserves_live_notes_and_source_ordinals",
         "tests/swarm/test_learned_scope.py::test_scoped_memory_without_matching_notes_is_empty",
+        "tests/swarm/test_learned_scope.py::test_scoped_memory_reads_learned_lists_without_listing_agent_pointers",
+        "tests/swarm/test_learned_scope.py::test_scoped_memory_asks_redis_only_for_the_swarm_learned_keys",
         "tests/swarm/test_learned_scope.py::test_learned_help_explains_the_explicit_full_listing"
       ]
     },
@@ -7023,6 +7099,20 @@
       ]
     },
     {
+      "id": "hive-admission-guard-own-cpu",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-empty-hive-admission",
+      "behaviour": "The host CPU line's five minute load guard refuses a hive only while the hive's own CPU, its pod load when the reading carries one and otherwise the node's CPU used, is at or above the swarm share, so an empty pod hive on a node whose other pods raise the load average and CPU used gets the used CPU line's room instead of none.",
+      "seam": "admission.room over a headroom reading with node used_cpus and the pod's pod_load",
+      "tests": [
+        "tests/hive/test_admission.py::test_an_empty_pod_hive_on_a_busy_node_gets_the_used_cpu_room",
+        "tests/hive/test_admission.py::test_the_load_average_guard_binds_on_a_pod_hive_once_its_own_load_reaches_the_swarm_share"
+      ],
+      "rules": [
+        "hive-guard-reads-node-cpu-used"
+      ]
+    },
+    {
       "id": "hive-member-reads-every-hive-pending-admission",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2555",
@@ -8467,7 +8557,7 @@
       "id": "root-keeps-slots-for-pinned-tasks",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-root-prefers-workstation-tasks",
-      "behaviour": "Under the events engine the root hive keeps one free slot for each claimable task of the asking swarm that only root takes and can place, a workstation task pinned to no other hive or a task pinned to root: the hub answers a root admission for work any hive can run with a held answer once root's live workers plus those waiting tasks reach its max agents, so the root lane spoke launches the pinned task on its next poll and the unpinned offer stays queued for another hive, while a pinned task and every other hive are admitted as before.",
+      "behaviour": "Under the events engine the root hive keeps one free slot for each claimable task of every events swarm that only root takes and can place, a workstation task pinned to no other hive or a task pinned to root: the hub answers a root admission for work any hive can run with a held answer once root's live workers plus those waiting tasks reach its max agents, so the root lane spoke launches the pinned task on its next poll and the unpinned offer stays queued for another hive, while a pinned task and every other hive are admitted as before.",
       "seam": "scripts.swarm.readiness root_only and root_waiting through scripts.hub.admission Admission.admit, Admission._reserved and Admission._full, observed at scripts.hive.lanes.run_once",
       "tests": [
         "tests/swarm/test_events_placement.py::test_root_only_names_the_tasks_only_the_root_hive_takes",
@@ -8475,6 +8565,8 @@
         "tests/swarm/test_events_placement.py::test_root_with_one_free_slot_holds_the_unpinned_task_for_another_hive_and_admits_the_workstation_task",
         "tests/swarm/test_events_placement.py::test_root_keeps_a_slot_only_for_a_workstation_task_it_can_place",
         "tests/swarm/test_events_placement.py::test_root_admits_unpinned_work_only_into_slots_beyond_the_waiting_workstation_tasks",
+        "tests/swarm/test_events_placement.py::test_root_keeps_a_slot_for_a_workstation_task_another_events_swarm_holds_waiting",
+        "tests/swarm/test_events_placement.py::test_root_keeps_one_slot_for_each_waiting_workstation_task_of_every_events_swarm",
         "tests/swarm/test_events_placement.py::test_root_with_one_free_slot_launches_the_workstation_task_on_the_poll_after_holding_the_unpinned_one"
       ]
     },
@@ -8934,6 +9026,21 @@
       ]
     },
     {
+      "id": "review-round-metrics-from-ledger",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-review-metrics-from-ledger-stamps",
+      "behaviour": "Each review round stamp carries the wall clock time of the round ahead of its unique part, and the swarm metrics count one review round per timed stamp on every ledger task, dated by that stamp, so rounds spent on any hive reach the metrics once each; a stamp without a time adds no round.",
+      "seam": "scripts.swarm.metrics_swarm.read_review_rounds over the ledger document scripts.swarm.metrics_swarm.record_pass receives, with round stamps written by scripts.swarm.review_rounds.start and read by scripts.swarm.review_rounds.stamped_at",
+      "tests": [
+        "tests/swarm/test_metrics_swarm.py::test_review_rounds_ship_from_the_round_stamps_on_each_ledger_task",
+        "tests/swarm/test_metrics_swarm.py::test_record_pass_counts_the_rounds_two_hives_spent_on_one_ledger_task",
+        "tests/swarm/test_metrics_swarm.py::test_rounds_stamped_before_the_clock_prefix_add_no_metrics_round",
+        "tests/swarm/test_metrics_swarm.py::test_record_pass_ships_a_round_once_while_later_passes_read_its_stamp_again",
+        "tests/swarm/test_review_rounds.py::test_a_round_stamp_carries_the_wall_clock_in_milliseconds_ahead_of_its_unique_part",
+        "tests/swarm/test_review_rounds.py::test_a_stamp_carries_a_time_only_when_it_opens_with_digits_and_a_dash"
+      ]
+    },
+    {
       "id": "ledger-task-update-takes-confirmed-pull-request",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-swarm-pr-confirmed-fields",
@@ -8979,7 +9086,8 @@
       "seam": "The pattern download composite action and its fetch script, used by the shared mutation stats download steps of the Tests workflow",
       "tests": [
         "tests/test_ci_artifact_download_retry.py::test_every_shared_mutation_stats_download_runs_the_action_that_closes_each_blob_answer",
-        "tests/test_ci_pattern_download.py::test_a_kept_alive_error_answer_is_closed_before_the_retry_and_every_part_merges"
+        "tests/test_ci_pattern_download.py::test_a_kept_alive_error_answer_is_closed_before_the_retry_and_every_part_merges",
+        "tests/test_ci_pattern_download.py::test_a_client_that_resets_its_kept_alive_error_answer_has_closed_it"
       ]
     },
     {
@@ -9128,6 +9236,16 @@
         "tests/ci_lab/test_expand_tests.py::test_unlisted_hashes_each_test_module_that_holds_no_manifest_test_with_its_conftests_and_imports",
         "tests/ci_lab/test_expand_tests.py::test_unlisted_keys_every_test_module_the_mutant_runner_runs",
         "tests/ci_lab/test_expand_mutation.py::test_an_unlisted_test_module_enters_the_key_of_every_function"
+      ]
+    },
+    {
+      "id": "lab-mutation-verdict-key-prefix",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-verdict-key-prefix",
+      "behaviour": "Generated stats units and whole or split mutant units carry their kind and current lab schema before the existing digest, so the verdict store accepts completed mutation work without raising a key format error during a scheduler pass.",
+      "seam": "scripts.ci_lab.expand_mutation.stats_units and mutant_units through scripts.ci_lab.store.Store.put and get",
+      "tests": [
+        "tests/ci_lab/test_expand_mutation.py::test_generated_mutation_unit_keys_can_be_stored"
       ]
     },
     {
@@ -9398,6 +9516,18 @@
         "tests/ci_lab/test_audit.py::test_a_sampled_mismatch_disables_the_kind_and_files_the_task",
         "tests/ci_lab/test_audit.py::test_the_sample_is_deterministic_from_the_day_digest",
         "tests/ci_lab/test_audit.py::test_the_same_unit_hit_on_two_heads_ranks_by_its_head"
+      ]
+    },
+    {
+      "id": "lab-audit-refiles-refused-mismatches",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2628",
+      "behaviour": "The CI lab reuse audit records every differing kind's mismatches in the verdict store as unfiled before it files that kind's ci task and clears the record once the ledger takes the task, so a ledger that refuses the task leaves the units, their cached runs and the audit run recorded; the next promotion audit or sample adds the unfiled mismatches to its own, files the kind's task again with the same units although the disabled kind is no longer compared, and raises CILabVerdictMismatch naming them.",
+      "seam": "scripts.ci_lab.audit.promotion_audit and scripts.ci_lab.audit.unfiled over a fakeredis verdict store, a fake lab port and a ledger fake that refuses every write while down",
+      "tests": [
+        "tests/ci_lab/test_audit.py::test_a_refused_mismatch_task_leaves_its_units_recorded_as_unfiled",
+        "tests/ci_lab/test_audit.py::test_the_audit_after_a_refused_mismatch_task_files_it_with_the_same_units",
+        "tests/ci_lab/test_audit.py::test_a_kind_filed_before_a_refused_kind_stays_filed_and_only_the_refused_kind_is_filed_again"
       ]
     },
     {
@@ -10253,6 +10383,23 @@
       ]
     },
     {
+      "id": "lab-static-test-count-units",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-units-missing",
+      "behaviour": "The CI lab grades the Tests workflow's test-count job with static units: the static executor supplies runner.temp as the unit's run folder, github.event_name as pull_request and each matrix value the gate's job holds at one value, so the four test-count gate steps discover with nothing missing; static gate discovery names the docs and writer-lock jobs CI only with the reason the lab sandbox cannot run them, names CI only each job of a static job's reusable workflow that calls another reusable workflow instead of raising on it, and the discovery command prints those jobs with their reasons under --ci-only.",
+      "seam": "scripts.ci_lab.static_gates discover, ci_only and main with the StaticGate matrix and missing, scripts.ci_lab.run_static run with its run folder and the gate's matrix in the context, and scripts.ci_lab.executors static with the event name in the lease context",
+      "tests": [
+        "tests/ci_lab/test_static_gates.py::test_a_gate_misses_no_run_folder_event_name_or_matrix_value_its_job_holds_at_one_value",
+        "tests/ci_lab/test_static_gates.py::test_the_command_prints_the_matrix_values_each_gate_reads",
+        "tests/ci_lab/test_static_gates.py::test_discovery_grades_the_steps_of_a_reusable_workflow_past_a_job_that_calls_another",
+        "tests/ci_lab/test_static_gates.py::test_the_command_names_each_job_the_lab_leaves_to_actions_with_its_reason",
+        "tests/ci_lab/test_static_gates.py::test_the_real_test_count_job_yields_runnable_gates_while_docs_and_writer_lock_stay_ci_only",
+        "tests/ci_lab/test_static_gates.py::test_every_lab_gradable_gate_that_reads_the_event_name_is_one_whose_verdict_the_pull_request_event_keeps",
+        "tests/ci_lab/test_run_static.py::test_the_step_reads_runner_temp_as_its_run_folder_and_each_matrix_value_its_job_holds",
+        "tests/ci_lab/test_executors.py::test_static_grades_every_test_count_gate_of_the_real_workflow_on_a_clean_tree"
+      ]
+    },
+    {
       "id": "lab-head-own-stream",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-head-own-stream",
@@ -10438,12 +10585,25 @@
       "id": "ci-stats-seed-download-retry",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2597",
-      "behaviour": "When a mutation stats artifact download fails during the dev push stats seed harvest, the harvest waits 5, 10 and then 20 seconds, each wait cut short at the seed's deadline, between up to four downloads of that artifact and copies its records once one succeeds; only when every download failed does it fail with an error naming the artifact, its id and the last download error. A download that times out and a failed pull request, run or artifact listing call are not retried, so the seed still skips a pull request past its budget.",
+      "behaviour": "When a mutation stats artifact download fails during the dev push stats seed harvest, the harvest waits 5, 10 and then 20 seconds, each wait cut short at the seed's deadline, between up to four downloads of that artifact and copies its records once one succeeds; only when every download failed does it fail with an error naming the artifact, its id and the last download error. A download that times out is made once, so the seed still skips a pull request past its budget, and a download answered HTTP 404 is made once and fails with that error.",
       "seam": "scripts.ci_stats_seed.download through scripts.ci_stats_seed.harvest",
       "tests": [
         "tests/test_ci_stats_seed.py::test_harvest_downloads_a_failed_artifact_again_after_a_wait",
         "tests/test_ci_stats_seed.py::test_harvest_fails_naming_the_artifact_once_every_download_failed",
-        "tests/test_ci_stats_seed.py::test_harvest_retries_neither_a_timed_out_download_nor_a_failed_listing"
+        "tests/test_ci_stats_seed.py::test_harvest_downloads_a_timed_out_or_missing_artifact_once"
+      ]
+    },
+    {
+      "id": "ci-stats-seed-listing-retry",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/promo-44592721366-1",
+      "behaviour": "When the pull request read, the Tests runs listing or an artifacts listing page of the dev push stats seed harvest fails, the harvest prints the path and gh's error, waits 5, 10 and then 20 seconds, each wait cut short at the seed's deadline, between up to four calls, and goes on with the first answer; when every call failed it raises the last failure. A listing call that times out or is answered HTTP 404 is made once, so the seed still skips a pull request past its budget and a number that is not a pull request at once.",
+      "seam": "scripts.ci_stats_seed.retried through scripts.ci_stats_seed.harvest",
+      "tests": [
+        "tests/test_ci_stats_seed.py::test_harvest_asks_again_for_a_listing_call_that_failed",
+        "tests/test_ci_stats_seed.py::test_harvest_raises_the_last_failure_once_every_call_of_a_listing_failed",
+        "tests/test_ci_stats_seed.py::test_harvest_asks_once_for_a_listing_that_timed_out_or_was_not_found",
+        "tests/test_ci_stats_seed.py::test_harvest_skips_a_number_that_is_not_a_pull_request"
       ]
     },
     {
@@ -10581,6 +10741,7 @@
         "tests/swarm/test_publish.py::test_publish_via_lab_grades_head_on_the_lab_before_origin_and_pushes_origin_on_green",
         "tests/swarm/test_publish.py::test_publish_via_lab_leaves_origin_untouched_on_a_red_grade",
         "tests/swarm/test_publish.py::test_publish_via_lab_direct_pushes_origin_after_the_lab_without_waiting",
+        "tests/swarm/test_publish.py::test_publish_via_lab_pushes_the_grade_ref_with_push_negotiation",
         "tests/swarm/test_publish.py::test_publish_via_lab_refuses_without_a_lab_remote_for_the_repository",
         "tests/swarm/test_publish.py::test_publish_via_lab_refuses_a_lab_push_without_a_landed_grade",
         "tests/swarm/test_publish.py::test_lab_conclusion_refuses_once_the_wait_runs_out",
@@ -10616,6 +10777,78 @@
       ]
     },
     {
+      "id": "swarm-focus-verdict",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-focus-sanity-check",
+      "behaviour": "swarm focus and swarm unfreeze, after their write, print on standard error the claim gate verdict on every task under the target: claimable, or the freeze record that holds it, the dependency it waits on, its phase state, a focus elsewhere, its claimant, its pull request, out of scope or already done, with a NOTHING CLAIMABLE head when none is claimable, no such target for a target that does not exist, and a written but no verdict line when the ledger read fails after the write; freeze prints none, and the ledger refuses an unfreeze whose target is no plan node, no lane or kind selector and no record.",
+      "seam": "scripts.swarm.health.focus_check.checked wrapping cmd_focus and cmd_unfreeze, focus_check.read and lines, LedgerClient.focus_verdicts, and ledger_freezes._clear",
+      "tests": [
+        "tests/swarm/test_focus_check.py::test_every_task_under_a_focus_gets_its_claim_gate_verdict",
+        "tests/swarm/test_focus_check.py::test_a_task_outside_the_focus_is_named_as_held_by_it",
+        "tests/swarm/test_focus_check.py::test_a_target_that_does_not_exist_has_no_verdict",
+        "tests/swarm/test_focus_check.py::test_a_focus_with_nothing_claimable_prints_a_loud_head",
+        "tests/swarm/test_focus_check.py::test_focus_and_unfreeze_print_the_verdict_after_the_write",
+        "tests/swarm/test_focus_check.py::test_freeze_prints_no_verdict",
+        "tests/swarm/test_focus_check.py::test_a_written_focus_says_so_when_the_ledger_gives_no_verdict",
+        "tests/swarm/test_focus_check.py::test_checked_runs_the_command_then_writes_the_verdict_on_its_target",
+        "tests/swarm/test_focus_check.py::test_unfreeze_of_a_target_that_does_not_exist_is_refused",
+        "tests/swarm/test_focus_check.py::test_a_task_with_no_state_lane_or_claimant_reads_as_open_unlaned_and_claimed_by_an_agent",
+        "tests/swarm/test_focus_check.py::test_the_fix_phase_passes_a_doctor_fix_through_a_focus_elsewhere",
+        "tests/swarm/test_focus_check.py::test_a_selector_target_is_known_only_with_a_value_and_split_at_its_first_colon"
+      ]
+    },
+    {
+      "id": "swarm-focus-read",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-focus-sanity-check",
+      "behaviour": "One ledger API read, GET focus or agentihooks api get focus, lists every focus record with its target, author, time and reason, the ids of the done tasks under it, every other task under it with its lane, state and claim gate verdict, the claimable count, and the minutes since the focus while a task under it is open and none is claimed or in a pull request; GET focus/<target> answers one target the same way and a target that does not exist reads 404 resource_missing.",
+      "seam": "scripts.swarm_ledger.api.routes.focus_read through the ledger swarm port focus_check.read, ledger get focus, and LedgerClient.focus_verdicts",
+      "tests": [
+        "tests/swarm/test_focus_check.py::test_the_focus_read_lists_every_focus_with_verdicts_and_unclaimed_minutes",
+        "tests/swarm/test_focus_check.py::test_a_lane_focus_covers_every_task_of_its_lane",
+        "tests/swarm/test_focus_check.py::test_ledger_get_takes_the_focus_read",
+        "tests/swarm/test_focus_check.py::test_the_client_reads_one_target_and_answers_none_for_a_missing_one",
+        "tests/swarm/test_focus_check.py::test_the_fix_phase_comes_from_the_swarm_config_and_is_empty_without_a_swarm",
+        "tests/swarm_ledger/test_api_v1.py::test_the_focus_read_serves_every_focus_and_one_target",
+        "tests/swarm/test_focus_check.py::test_the_client_raises_a_failure_other_than_a_missing_target",
+        "tests/swarm/test_focus_check.py::test_unclaimed_minutes_count_whole_minutes_and_never_go_below_zero",
+        "tests/swarm/test_focus_check.py::test_the_focus_route_reads_the_slug_state_fix_phase_and_clock",
+        "tests/swarm/test_focus_check.py::test_the_focus_route_answers_404_for_a_target_that_does_not_exist",
+        "tests/swarm/test_focus_check.py::test_a_ledger_with_no_tasks_reads_each_focus_with_no_tasks",
+        "tests/swarm/test_focus_check.py::test_the_ledger_read_sends_a_focus_path_to_the_focus_read_with_its_slug"
+      ]
+    },
+    {
+      "id": "swarm-focus-unclaimed-finding",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-focus-sanity-check",
+      "behaviour": "The focus unclaimed tick step counts, for every task under a focus record whose claim gate verdict is claimable, the consecutive ticks it stays so, and any other verdict drops the count; past three ticks a focus unclaimed health finding names the task and the focus, and the findings pass sends it to the master inbox.",
+      "seam": "scripts.tick.steps.host._focus_unclaimed registered as tick step focus unclaimed, scripts.swarm.health.focus_unclaimed.observe and findings, read by swarm status findings and ledger_events.findings_pass",
+      "tests": [
+        "tests/tick/steps/test_focus_unclaimed.py::test_focus_unclaimed",
+        "tests/tick/steps/test_focus_unclaimed.py::test_a_focused_claimable_task_unclaimed_past_three_ticks_is_a_finding",
+        "tests/tick/steps/test_focus_unclaimed.py::test_a_claim_or_a_hold_drops_the_count",
+        "tests/tick/steps/test_focus_unclaimed.py::test_no_focus_raises_no_finding",
+        "tests/tick/steps/test_focus_unclaimed.py::test_the_finding_goes_to_the_master_inbox",
+        "tests/tick/steps/test_focus_unclaimed.py::test_each_tick_stores_its_time_and_keeps_the_first_unclaimed_time",
+        "tests/tick/steps/test_focus_unclaimed.py::test_a_freeze_record_before_the_focus_does_not_stop_the_count",
+        "tests/tick/steps/test_focus_unclaimed.py::test_a_task_the_gate_holds_does_not_stop_the_count_of_the_next_one",
+        "tests/tick/steps/test_focus_unclaimed.py::test_a_task_below_three_ticks_does_not_stop_the_finding_of_the_next_one",
+        "tests/tick/steps/test_focus_unclaimed.py::test_no_stored_count_is_no_finding",
+        "tests/tick/steps/test_focus_unclaimed.py::test_the_doctor_fix_phase_comes_from_the_swarm_config"
+      ]
+    },
+    {
+      "id": "swarm-master-focus-read",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-focus-sanity-check",
+      "behaviour": "The master refocus block and the swarm master skill require the master to run agentihooks api get focus every loop and clear or fix each focus with nothing claimable; a worker refocus block carries no such line.",
+      "seam": "hooks.context.swarm_refocus._master_block FOCUS_READ and the swarm-master skill Focus and freeze section",
+      "tests": [
+        "tests/context/test_swarm_refocus.py::test_the_master_block_and_skill_require_the_focus_read_every_loop"
+      ]
+    },
+    {
       "id": "hub-admission-hive-local-held",
       "rules": ["hub-hive-local-refusal-terminates-offer"],
       "origin": "regression",
@@ -10635,6 +10868,18 @@
       "seam": "Proofs workflow concurrency group",
       "tests": [
         "tests/test_ci_hosted_lanes.py::test_every_proof_dispatch_runs_in_its_own_focused_proof_group_and_never_waits_on_a_lane"
+      ]
+    },
+    {
+      "id": "mutation-stats-shared-closure",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-mutation-stats-collect-budget",
+      "behaviour": "A mutation stats collection walks the import closure of each distinct measured dependency list once and computes each distinct discovery digest once, so test ids with equal dependency lists cost one closure walk when their cache records are saved and one when the next run checks them for reuse instead of one walk per test id, while test ids with different dependency lists keep their own closures.",
+      "seam": "scripts.ci_mutation.stats_cache.StatsInputs.for_test and scripts.ci_mutation.stats_cache.StatsInputs.discovery",
+      "tests": [
+        "tests/test_ci_mutation_stats_cache.py::test_test_ids_sharing_one_dependency_list_walk_its_closure_once_per_collection",
+        "tests/test_ci_mutation_stats_cache.py::test_distinct_dependency_lists_in_one_collection_keep_their_own_closures",
+        "tests/test_ci_mutation_stats_cache.py::test_the_discovery_digest_of_one_input_set_is_computed_once"
       ]
     }
   ],

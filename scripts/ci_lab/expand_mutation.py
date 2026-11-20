@@ -22,6 +22,7 @@ from mutmut.mutation.file_mutation import group_by_top_level_node
 from mutmut.mutation.trampoline_templates import mangle_function_name
 from mutmut.utils.format_utils import get_mutant_name
 
+from scripts.ci_lab import digests
 from scripts.ci_lab.units import Unit
 from scripts.ci_mutation.plan import MUTANT_SECONDS
 from scripts.ci_mutation.scope import module_name
@@ -82,7 +83,7 @@ def stats_units(root: Path, files: Sequence[str], options: Sequence[str] = ()) -
     for path in files:
         found = inputs.for_test(path, None)  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
         key = stored.identity(path, found, stored.scope(found), False, inputs.discovery(found))  # pyright: ignore[reportUnknownMemberType]
-        units.append(Unit("stats", key, (path,)))
+        units.append(Unit("stats", f"stats-v{digests.SCHEMAS['stats']}-{key}", (path,)))
     return tuple(units)
 
 
@@ -148,7 +149,14 @@ def function_units(
         text = wrapper.module.code_for_node(function.with_changes(leading_lines=()))
         key = digest([name, text, module, runner, dict(covering.get(name, {})), dict(unlisted)])
         parts = split_members(tuple(f"{name}__mutmut_{index}" for index in range(1, len(mutations) + 1)), timeout)
-        units.extend(Unit("mutant", key if len(parts) == 1 else digest([key, list(part)]), part) for part in parts)
+        units.extend(
+            Unit(
+                "mutant",
+                f"mutant-v{digests.SCHEMAS['mutant']}-{key if len(parts) == 1 else digest([key, list(part)])}",
+                part,
+            )
+            for part in parts
+        )
     return units
 
 

@@ -437,7 +437,7 @@ def admitted_task(store: RedisStore, ledger: FakeLedger, task_id: str, at: int) 
     """The launch payload hub admission hands the hive for ``task_id`` of swarm ``sw`` at ``at``."""
     row = ledger.rows[task_id]
     request = {"hive": readiness.ROOT, "task": task_id, "lane": row["lane"], "generation": readiness.generation(row)}
-    source = SimpleNamespace(snapshot=lambda name: seat_view(store, ledger, name))
+    source = SimpleNamespace(slugs=lambda: ["sw"], snapshot=lambda name: seat_view(store, ledger, name))
     admitted = admission.Admission(store, ledger, source, lambda: at).admit("sw", request)  # pyright: ignore[reportArgumentType]
     assert admitted and "task" in admitted, admitted
     return admitted["task"]
