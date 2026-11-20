@@ -58,7 +58,15 @@ jobs:
           cp -r "$RULES" "$copy/rules"
           : > "$copy/.semgrepignore"
           (cd "$copy" && semgrep --metrics off --test --config rules rules)
-          semgrep scan --error --strict --timeout 30 --metrics off --config "$RUNNER_TEMP/grader/$RULES" --config "$RULES" .
+          args=(--config "$RULES")
+          changed="$(git diff --name-only --no-renames --diff-filter=DMT "$(git -C "$RUNNER_TEMP/grader" rev-parse HEAD)" HEAD -- "$RULES")"
+          while IFS= read -r rule; do
+            case "$rule" in
+              *.test.yml | *.test.yaml) ;;
+              *.yml | *.yaml) args+=(--config "$RUNNER_TEMP/grader/$rule") ;;
+            esac
+          done <<< "$changed"
+          semgrep scan --error --strict --timeout 30 --metrics off "${args[@]}" .
 
       - name: Outage rules for tests hold on every test file
         env:
