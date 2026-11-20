@@ -1854,12 +1854,13 @@ the trailing `-` included:
 
 No workflow under `.github/workflows` names the plant prefix in its push filters. The CI lab image
 workflow builds on `diffcheck/ci-lab-image-*`, a separate prefix, and the workflows that ignore
-`diffcheck/**` skip a plant push. A workflow whose push trigger takes every branch but a few, such
-as `branch-lanes.yml`, still runs on it.
+`diffcheck/**` skip a plant push. A workflow whose push trigger takes every branch but a few still
+runs on a plant push its path filter admits: `branch-lanes.yml` runs when the push changes a file
+under `.github/workflows/`.
 
 #### Push a plant pair
 
-Nothing on dev creates plant branches yet, so push them with git. Cut both twins from one dev
+Push plant branches with git. Cut both twins from one dev
 commit and push each to its own branch under the prefix:
 
 ```bash
@@ -1889,13 +1890,15 @@ with a failed `lab-shadow/required` check run.
 | The pusher's login is on the runner trust list | `.github/workflows/trusted-actors.json` on the dev branch of `CI_LAB_REPOSITORY`, read when the scheduler starts | `untrusted <actor> head <head>`, and no grade |
 | The head shares history with dev, and the remote lists `refs/heads/dev` | The plant branch cut from a dev commit; the head's repository | `cannot resolve the dev merge base of plant head <head>: <error>`, and no grade |
 
-No variable turns plant intake on or off, and the prefix is the constant
+No variable is specific to plant intake: it is on whenever lab intake is, through
+`AGENTIHOOKS_CI_LAB_NOTICE_SECRET`, and the prefix is the constant
 `scripts.ci_lab.webhooks.PLANT_PREFIX`. A login added to the trust list reaches the scheduler only
 when the service restarts.
 
 #### Verify a plant grade
 
-Read each twin's grades from the scheduler, replacing `lab` with its service address:
+Read each twin's grades from the scheduler, replacing `lab` with its service address,
+`ci-lab-scheduler` inside the cluster:
 
 ```bash
 for branch in diffcheck/lab-plant-size-green diffcheck/lab-plant-size-red; do
@@ -1908,17 +1911,19 @@ git merge-base diffcheck/lab-plant-size-green origin/dev
 
 Both twins show `"class": "pull_request"`, and `base` and `grader` both equal the merge base the
 last command prints, the `fork` commit above. `lane` is the head itself, since a push delivery
-carries no branch. `conclusion` stays `null` until every unit is final.
+carries no branch. `conclusion` stays `null` until every unit is final and every check run is
+posted.
 [Grades of a commit](#grades-of-a-commit) describes every field.
 
 The scheduler log names each step of intake:
 
 ```bash
 kubectl -n ci-lab logs deploy/ci-lab-scheduler --since=15m \
-  | grep --line-buffered -E 'received <head>|untrusted .* head <head>|cannot resolve the dev merge base of plant head <head>'
+  | grep --line-buffered -E 'received |untrusted .* head |cannot resolve the dev merge base of plant head '
 ```
 
-`received <head> on <head>` means the head was admitted, based and held in its quiet window.
+`received <head> on <head>`, with the twin's sha twice, means the head was admitted, based and held
+in its quiet window.
 With a NATS credential that may read the lab heads stream, such as the hub's, the latest plant head
 the receiver recorded is:
 
@@ -1944,8 +1949,10 @@ scheduler.
   and opens no second grade.
 - A rerequested lab check run of a plant head arrives as a `check_run` head, whose base is the base
   of its first pull request. A plant head has no pull request, so that head carries an empty base,
-  and intake resolves the dev merge base only for `plant` heads. Push a new commit to grade a plant
-  head again.
+  and intake resolves the dev merge base only for `plant` heads. Expansion then has no base to read,
+  so the pass prints `cannot expand <head>: <error>` and posts a failed `lab-shadow/required` check
+  run, as for [a head that cannot expand](#a-head-that-cannot-expand). Push a new commit to grade a
+  plant head again.
 
 #### Plant push troubleshooting
 
@@ -1957,7 +1964,7 @@ scheduler.
 | `cannot resolve the dev merge base of plant head <head>: Command '['git', 'ls-remote', '--exit-code', '<repo>', 'refs/heads/dev']' returned non-zero exit status 2.` | The head's repository lists no `refs/heads/dev` | `git ls-remote --exit-code <repo> refs/heads/dev` |
 | `cannot resolve the dev merge base of plant head <head>: Command '['git', '-C', '<mirror>', 'fetch', ...]' returned non-zero exit status <code>.` | The scheduler's mirror could not fetch the head or the dev head from the repository, or from the lab remote when `AGENTIHOOKS_LAB_REMOTE` serves it | The scheduler's mirror store and its network to GitHub; `git ls-remote origin 'refs/heads/diffcheck/lab-plant-*'` lists the head when GitHub holds it |
 | `retiring <head>: no branch or pull request head ref of <repo> carries <head>` | The plant branch was deleted or moved before the quiet window ended | `git ls-remote origin 'refs/heads/diffcheck/lab-plant-*'`; push the head again |
-| The push answers `200` and the stream gains no `ci.lab.head.plant` | Lab intake is off, or the push deleted the branch | The troubleshooting table at the end of [Lab head intake](#lab-head-intake) |
+| The push answers `200` and the stream gains no `ci.lab.head.plant` | Lab intake is off, or the push deleted the branch | The `Troubleshooting` table that closes [Lab head intake](#lab-head-intake), before [Lab remote service](#lab-remote-service) |
 
 `tests/ci_lab/test_intake.py` and `tests/ci_lab/test_plant_intake.py` hold this behavior under the
 feature map entry `lab-plant-push-intake`. They cover a plant push with a zero and a real `before`,
