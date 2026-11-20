@@ -95,7 +95,30 @@ command holds that slot. Native Claude is the only refresher of the login.
 One live master holds one login: two masters never share a slot. Launch
 preparation takes the free stored login with the most room left (five hour and
 week windows from the router cache and its own sessions' quota snapshots), then
-checks it with `claude auth status --text`. A valid login ends the chain.
+checks it with `claude auth status --text` and a live probe. A valid login ends the chain.
+
+A taken login that fails the check, after one restore from its OpenBao record
+when no other master shares the slot, moves the launch to another stored slot
+before any browser authorization. Preparation marks the slot failed in
+`failed.json` in its slot folder (`$AGENTIHOOKS_HOME/master-login` or
+`$AGENTIHOOKS_HOME/master-login-N`), against the modification time of the
+slot's login file. It then takes the next free stored login, skipping every
+slot already tried, and checks it the same way. The first login that passes
+is used and the failed slot is released; each other slot that fails is
+released and marked too. When no other stored login is free or none passes,
+the launch keeps the first failed slot and the browser authorization below
+runs in it.
+
+A failed mark holds until the slot's login file is written again, for example
+by `agentihooks claude login --master --slot N` or by native Claude renewing
+the login. Until then every launch sorts marked slots after every unmarked
+one; only within each group do a week at 98% used or more, the login order and
+the room left decide. A marked slot is taken only when no unmarked stored login
+can be taken. The swarm tick marks every slot a front door master holds when it
+recycles that master on a Claude login limit (see
+[Master on a Claude login limit](../pillars/swarm.md#master-on-a-claude-login-limit)),
+so the relaunch takes another stored login even while the marked login still
+passes its check.
 
 Hive heartbeats advertise `master_login_enabled` separately from the stored
 `master_login` account. An enabled hive can accept private recovery with an
