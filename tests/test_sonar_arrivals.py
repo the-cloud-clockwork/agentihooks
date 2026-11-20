@@ -135,6 +135,33 @@ def test_the_wait_returns_the_shards_still_running_when_it_runs_out(tmp_path: Pa
     assert clock.moment == 3 * arrivals.INTERVAL
 
 
+class Queued:
+    """Says a shard job has not started until a set number of checks have passed."""
+
+    def __init__(self, false_times: int) -> None:
+        self.calls = 0
+        self.false_times = false_times
+
+    def started(self) -> bool | None:
+        self.calls += 1
+        return self.calls > self.false_times
+
+
+@pytest.mark.feature("sonar-wait-skips-queued-shard-time")
+def test_a_shard_still_queued_for_a_runner_does_not_spend_the_wait(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(arrivals, "JOB_POLL", arrivals.INTERVAL)
+    rounds = [{}, {}, {}, {}, {"coverage-3.12-1": "1"}]
+    service = Service(rounds)
+    clock = Clock()
+    jobs = Queued(false_times=3)
+    left = arrivals.arrive(service, 1, "full", 1, tmp_path / "shards", arrivals.INTERVAL, clock, jobs)
+    assert left == []
+    assert clock.pauses == [arrivals.INTERVAL] * 4
+    assert jobs.calls == 4
+
+
 def test_an_unanswered_listing_is_asked_again(tmp_path: Path) -> None:
     service = Service([None, {"coverage-3.12-1": "1"}])
     left, _ = _arrive(tmp_path, service, 1)
@@ -356,6 +383,64 @@ def test_an_artifact_the_service_does_not_sign_is_not_fetched(
 
 def test_an_unreachable_service_answers_no_listing() -> None:
     assert arrivals.Results("http://127.0.0.1:9/", _token("run-1", "job-2")).listed() is None
+
+
+@pytest.fixture
+def jobs_api() -> Iterator[tuple[str, list[dict[str, object]], list[tuple[str, str]]]]:
+    jobs: list[dict[str, object]] = []
+    calls: list[tuple[str, str]] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            calls.append((self.path, self.headers["Authorization"]))
+            data = json.dumps({"jobs": jobs}).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, format: str, *args: object) -> None:
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}/", jobs, calls
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_a_running_or_completed_shard_job_says_the_scope_has_started(
+    jobs_api: tuple[str, list[dict[str, object]], list[tuple[str, str]]],
+) -> None:
+    base, jobs, calls = jobs_api
+    jobs.extend([{"name": "unit (3.12, 1)", "status": "queued"}, {"name": "unit (3.12, 2)", "status": "in_progress"}])
+    assert arrivals.ActionsJobs(base, "o/r", "9", "1", "token-x", "unit (").started() is True
+    path, authorization = calls[0]
+    assert path == "/repos/o/r/actions/runs/9/attempts/1/jobs?per_page=100"
+    assert authorization == "Bearer token-x"
+
+
+def test_every_matching_shard_job_still_queued_says_the_scope_has_not_started(
+    jobs_api: tuple[str, list[dict[str, object]], list[tuple[str, str]]],
+) -> None:
+    base, jobs, _ = jobs_api
+    jobs.append({"name": "unit (3.12, 1)", "status": "queued"})
+    assert arrivals.ActionsJobs(base, "o/r", "9", "1", "token-x", "unit (").started() is False
+
+
+def test_no_matching_shard_job_name_reads_as_unknown(
+    jobs_api: tuple[str, list[dict[str, object]], list[tuple[str, str]]],
+) -> None:
+    base, jobs, _ = jobs_api
+    jobs.append({"name": "lint", "status": "completed"})
+    assert arrivals.ActionsJobs(base, "o/r", "9", "1", "token-x", "unit (").started() is None
+
+
+def test_an_unreachable_jobs_api_reads_as_unknown() -> None:
+    assert arrivals.ActionsJobs("http://127.0.0.1:9/", "o/r", "9", "1", "token-x", "unit (").started() is None
 
 
 def test_the_wait_without_a_runtime_token_fails_loudly(
