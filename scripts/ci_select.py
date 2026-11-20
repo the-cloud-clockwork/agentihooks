@@ -1,5 +1,6 @@
 import argparse
 import ast
+import itertools
 import json
 import math
 import os
@@ -70,8 +71,6 @@ class Record(TypedDict):
 
 
 class Change(NamedTuple):
-    """What the history shows about a pull request's change beyond the paths it touches."""
-
     reshaped: bool = False
     pyproject: bool = True
     jobs: set[str] | None = None
@@ -123,7 +122,7 @@ def pyproject_reaches_tests(root: Path, base: str, head: str) -> bool:
 
 def changed_jobs(root: Path, base: str, head: str) -> set[str] | None:
     """The Tests workflow jobs whose parsed definition differs between the merge base and the head, None when the
-    workflow differs outside its jobs or either side does not parse."""
+    parsed workflow differs outside its jobs or either side does not parse."""
     fork = subprocess.check_output(["git", "merge-base", base, head], cwd=root, text=True).strip()
     shown = [
         subprocess.run(["git", "show", f"{revision}:{WORKFLOW}"], cwd=root, capture_output=True).stdout
@@ -131,7 +130,8 @@ def changed_jobs(root: Path, base: str, head: str) -> set[str] | None:
     ]
     try:
         before, after = (cast(dict[Any, Any], yaml.safe_load(text)) for text in shown)
-        if {**before, "jobs": None} != {**after, "jobs": None}:
+        outside = [{key: value for key, value in side.items() if key != "jobs"} for side in (before, after)]
+        if outside[0] != outside[1]:
             return None
         return {
             name for name in {*before["jobs"], *after["jobs"]} if before["jobs"].get(name) != after["jobs"].get(name)
@@ -172,12 +172,10 @@ def markdown_tests(root: Path) -> set[str]:
 
 
 def constant(node: ast.AST | None) -> str | None:
-    """The text of a string constant node, None for any other node."""
     return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
 
 
 def takes_jobs(node: ast.AST) -> bool:
-    """Whether the node reads a mapping's jobs by their key: an index, or a method such as get or pop."""
     if isinstance(node, ast.Subscript):
         return constant(node.slice) == "jobs"
     return (
@@ -195,13 +193,16 @@ def job_key(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> str | None:
         return constant(parent.slice)
     if isinstance(parent, ast.Attribute) and isinstance(call := parents.get(parent), ast.Call) and call.func is parent:
         return constant(next(iter(call.args), None))
-    if isinstance(parent, ast.Compare) and parent.comparators == [node]:
+    if (
+        isinstance(parent, ast.Compare)
+        and parent.comparators == [node]
+        and isinstance(parent.ops[0], (ast.In, ast.NotIn))
+    ):
         return constant(parent.left)
     return None
 
 
 def enclosing(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
-    """The innermost function around a node."""
     chain = [node]
     for item in chain:
         if item in parents:
@@ -244,7 +245,6 @@ def read_jobs(nodes: list[ast.AST], parents: dict[ast.AST, ast.AST]) -> set[str]
 
 
 def bindings(tree: ast.Module) -> dict[str, list[ast.stmt]]:
-    """The module level statements binding each name: its definitions and the statements assigning it."""
     bound: dict[str, list[ast.stmt]] = {}
     for statement in tree.body:
         if isinstance(statement, DEFINITIONS):
@@ -261,10 +261,8 @@ def bindings(tree: ast.Module) -> dict[str, list[ast.stmt]]:
 
 
 def reached(definition: ast.stmt, bound: dict[str, list[ast.stmt]], uses: dict[ast.stmt, set[str]]) -> list[ast.stmt]:
-    """A top level definition and every module level statement it reaches through the names and fixture arguments it
-    uses."""
     found = [definition]
-    for statement in found:
+    for statement in itertools.islice(found, len(uses)):
         found.extend(item for name in uses[statement] for item in bound.get(name, []) if item not in found)
     return found
 
@@ -296,7 +294,6 @@ def definition_jobs(source: str) -> dict[str, set[str] | None]:
 
 
 def definition(test: str) -> tuple[str, str]:
-    """The file and top level definition of a recorded test node."""
     path, _, rest = test.partition("::")
     return path, rest.partition("::")[0].partition("[")[0]
 

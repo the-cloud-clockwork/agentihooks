@@ -516,10 +516,12 @@ def test_changed_jobs_names_the_jobs_whose_parsed_definition_changed(repo: Path,
         (JOBS_WORKFLOW, UNIT_EDIT.replace("pull_request: {}", "push: {}")),
         (None, UNIT_EDIT),
         (JOBS_WORKFLOW, UNIT_EDIT.replace("name: Tests", "name: [Tests")),
+        (JOBS_WORKFLOW, UNIT_EDIT.replace("jobs:\n", "concurrency: tests\njobs:\n")),
         (JOBS_WORKFLOW, JOBS_WORKFLOW.partition("jobs:")[0] + "jobs:\n  - lint\n"),
+        (JOBS_WORKFLOW, JOBS_WORKFLOW.partition("jobs:")[0] + "jobs:\n"),
         ("name: Tests\n", "name: Tests\n# reviewed\n"),
     ],
-    ids=["env", "trigger", "new-workflow", "unparsed", "jobs-list", "no-jobs"],
+    ids=["env", "trigger", "new-workflow", "unparsed", "added-key", "jobs-list", "null-jobs", "no-jobs"],
 )
 def test_changed_jobs_is_none_outside_the_jobs_or_without_two_parsed_workflows(
     repo: Path, before: str | None, after: str
@@ -562,6 +564,7 @@ def test_changed_jobs_compares_the_head_against_its_merge_base(repo: Path) -> No
         ("def test_a(name):\n    assert W['jobs'][name]\n", None),
         ("def test_a():\n    assert W['jobs'][0]\n", None),
         ("def test_a():\n    assert len(W['jobs'])\n", None),
+        ("def test_a():\n    assert 'docs' != W['jobs']\n", None),
         ("def test_a():\n    assert W\n", None),
         ("def test_a():\n    jobs = W['jobs']\n", None),
         (
@@ -588,6 +591,7 @@ def test_changed_jobs_compares_the_head_against_its_merge_base(repo: Path) -> No
         "variable-key",
         "integer-key",
         "passed-on",
+        "compared",
         "unindexed",
         "unread-name",
         "referenced-helper",
