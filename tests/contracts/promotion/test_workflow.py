@@ -14,6 +14,9 @@ from tests.test_ci_anton_runners import resolve
 ROOT = Path(__file__).resolve().parents[3]
 
 
+NON_GATING: dict[str, str] = {}
+
+
 def test_promotion_requires_all_push_checks_and_never_runs_for_a_red_grade():
     workflow = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())
     promote = workflow["jobs"]["promote"]
@@ -45,6 +48,35 @@ def _needed(jobs: dict[str, Any], name: str) -> set[str]:
     needs = jobs[name].get("needs", [])
     direct = {needs} if isinstance(needs, str) else set(needs)
     return direct.union(*(_needed(jobs, need) for need in direct))
+
+
+@pytest.mark.feature("promotion-dev-push-workflows-non-gating")
+def test_every_dev_push_workflow_outside_tests_sits_on_the_non_gating_list() -> None:
+    workflows = {path.name: yaml.safe_load(path.read_text()) for path in (ROOT / ".github/workflows").glob("*.y*ml")}
+    triggers = {name: spec.get("on", spec.get(True, {})) for name, spec in workflows.items()}
+    fired = {name for name, events in triggers.items() if "push" in events and _admits_dev(events["push"])}
+    for _ in workflows:
+        names = {workflows[name].get("name") for name in fired}
+        fired |= {
+            name
+            for name, events in triggers.items()
+            if "workflow_run" in events
+            and names & set(events["workflow_run"]["workflows"])
+            and _admits_dev(events["workflow_run"])
+        }
+    assert sorted(fired - {"test.yml"}) == sorted(NON_GATING), (
+        "a workflow that runs on a dev push outside the Tests run never gates promotion: "
+        "move its gate into test.yml or list it in NON_GATING with the reason it does not gate"
+    )
+
+
+def _admits_dev(trigger: dict[str, Any] | None) -> bool:
+    spec = trigger or {}
+    if "branches" in spec:
+        return any(Path("dev").match(pattern) for pattern in spec["branches"])
+    if "branches-ignore" in spec:
+        return not any(Path("dev").match(pattern) for pattern in spec["branches-ignore"])
+    return not {"tags", "tags-ignore"} & set(spec)
 
 
 def test_each_dev_push_runs_the_hierarchy_proof_before_promotion_and_never_on_pull_requests_or_the_queue():
