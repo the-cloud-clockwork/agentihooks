@@ -865,6 +865,7 @@
       "tests": [
         "tests/hive/test_prompt_transport.py::test_the_mirror_and_the_page_tails_read_a_task_from_the_hive_on_its_record",
         "tests/hive/test_prompt_transport.py::test_the_page_and_the_mirror_keep_a_task_after_its_hive_stops_publishing",
+        "tests/hive/test_prompt_transport.py::test_the_launch_pointer_names_the_launching_hive_with_no_expiry",
         "tests/hive/test_reports.py::test_the_work_folder_host_is_the_host_target_else_the_hive_on_the_record",
         "tests/hive/test_controller_launch.py::test_a_live_acknowledgement_records_the_hive_holding_the_task_work_folder",
         "tests/hive/test_controller_launch.py::test_a_failed_launch_leaves_the_task_work_folder_pointer_alone",

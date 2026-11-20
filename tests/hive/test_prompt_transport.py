@@ -726,6 +726,14 @@ def test_a_task_copy_outlives_the_hive_hosting_it(setup: SimpleNamespace, homes:
     assert json.loads(setup.redis.get(ledger_workspace.files_key("host"))) == {}
 
 
+@pytest.mark.feature("work-folder-readers-and-launch-pointers")
+def test_the_launch_pointer_names_the_launching_hive_with_no_expiry(setup: SimpleNamespace) -> None:
+    ledger_workspace.launched_on(setup.store, "fixture", "task", "hive-a")
+    pointer = setup.store.key("fixture", "work-folder", "task")
+    assert setup.redis.get(pointer) == "hive-a"
+    assert setup.redis.ttl(pointer) == -1
+
+
 @pytest.mark.feature("work-folder-follows-the-task-across-hives")
 def test_a_hive_holding_no_files_for_a_task_leaves_its_copy_alone(
     setup: SimpleNamespace, homes: SimpleNamespace
