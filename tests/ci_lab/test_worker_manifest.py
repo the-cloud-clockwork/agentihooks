@@ -1,6 +1,7 @@
 from collections.abc import Callable
 from pathlib import Path
 from threading import Thread
+from typing import cast
 
 import pytest
 
@@ -62,5 +63,5 @@ def test_a_leased_batch_carries_its_manifest_to_an_empty_worker_volume(
         finished = executors.tests(pod, suite, lease)
         assert finished.outcome == PASSED
         assert ran.calls[-1][0] == lease.unit.members
-        assert ran.calls[-1][-1].manifest == expected[lease.head]
+        assert cast("run_tests.Lab", ran.calls[-1][-1]).manifest == expected[lease.head]
         assert not suite.manifest.exists()
