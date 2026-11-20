@@ -74,7 +74,6 @@ from scripts.ci_runner_trust import ACTORS, validate_actors
 from scripts.events.bus import Consumer
 from scripts.github_app import GitAuthRefused
 
-
 __all__ = [
     "GRADES",
     "BusInbox",

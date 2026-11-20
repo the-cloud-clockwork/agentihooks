@@ -1,3 +1,4 @@
+import copy
 import json
 from collections.abc import Callable
 from pathlib import Path
@@ -18,7 +19,7 @@ from tests.ci_lab.test_worker import Signer
 
 
 @pytest.mark.feature("lab-worker-manifest")
-@pytest.mark.parametrize("legacy", ["fresh", "queued", "held"])
+@pytest.mark.parametrize("legacy", ["fresh", "queued", "held", "payload"])
 @pytest.mark.parametrize("unlisted", [False, True])
 def test_a_leased_batch_carries_its_manifest_to_an_empty_worker_volume(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, lab: Callable[..., Run], unlisted: bool, legacy: str
@@ -50,7 +51,7 @@ def test_a_leased_batch_carries_its_manifest_to_an_empty_worker_volume(
         monkeypatch.setattr(run.engine, "_admit", lambda _now: [])
     run.tick(1000)
     if legacy != "fresh":
-        restore_old_schema(run, manifests)
+        restore_old_schema(run, manifests, keep_jobs=legacy == "payload")
         run.tick(1001)
     routes = lease_api.ControlRoutes(run.lab.client, "", lambda: 0)
     server = lease_api.serve("127.0.0.1", 0, run.leases(), Signer("http://unused"), routes)
@@ -79,15 +80,20 @@ def test_a_leased_batch_carries_its_manifest_to_an_empty_worker_volume(
         assert not suite.manifest.exists()
 
 
-def restore_old_schema(run: Run, manifests: dict[str, dict[str, Any]]) -> None:
+def restore_old_schema(run: Run, manifests: dict[str, dict[str, Any]], keep_jobs: bool = False) -> None:
     for state in run.grades():
         key = scheduler.GRADES + state.run
         raw = json.loads(run.lab.client.get(key))
         for slot in raw["units"].values():
             slot.pop("manifest")
-            run.lab.client.hdel(queue._job(slot["job"]), "manifest")
+            if not keep_jobs:
+                run.lab.client.hdel(queue._job(slot["job"]), "manifest")
         run.lab.client.set(key, json.dumps(raw))
         path = f"{manifest_folder(scheduler._slug(state.repo))}{state.manifest}.json"
-        run.lab.objects.write_once(path, json.dumps(dep_manifest.pack(manifests[state.head])).encode())
+        manifest = copy.deepcopy(manifests[state.head])
+        if keep_jobs:
+            for record in manifest["tests"].values():
+                record["outside"] = []
+        run.lab.objects.write_once(path, json.dumps(dep_manifest.pack(manifest)).encode())
     old = run.engine
     run.engine = scheduler.Scheduler(run.lab.client, run.lab.objects, old.ports, old.settings)
