@@ -8291,6 +8291,17 @@
       ]
     },
     {
+      "id": "ci-metrics-partial-flush",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ci-metrics-partial-flush",
+      "behaviour": "A CI metrics run flushes its fresh outbox again while rows still wait, at most three flushes each with the outbox's own five second budget, so rows that a refused statement or a spent budget left behind reach the sink once and the run succeeds; rows still waiting after the third flush fail the run with its shipped and built counts.",
+      "seam": "scripts.ci_metrics.__main__.ship through scripts.ci_metrics.__main__.main with a sink that refuses a statement or outlasts one flush budget",
+      "tests": [
+        "tests/ci_metrics/test_main.py::test_a_run_ships_the_rows_a_partial_flush_left_waiting",
+        "tests/ci_metrics/test_main.py::test_a_run_that_cannot_ship_every_row_fails_after_three_flushes"
+      ]
+    },
+    {
       "id": "tick-step-profiler",
       "origin": "inventory",
       "behaviour": "Naming a step in AGENTIHOOKS_TICK_PROFILE_STEPS, comma separated, runs it under cProfile and emits one swarm_tick_step_profile line with its wall time, the running pass id when a pass is open, and its top functions by cumulative and by own time; an unnamed step or an unset env var never calls the profiler.",
