@@ -43,8 +43,9 @@ def observe(store: RedisStore, slug: str, doc: dict[str, Any], at: int) -> dict[
             if task["state"] == BLOCKED
             else claim_hold.urgent(task, rows, doc, graph, fix)
             or lab(task)
-            or full()
             or (not released(task) and RELEASE.format(**task))
+            or full()
+            or False
         )
         if task.get("merged_into"):
             continue

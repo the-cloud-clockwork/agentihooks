@@ -152,6 +152,21 @@ def test_the_hive_admission_hold_stands_only_while_every_live_hive_is_read_at_ze
     assert [finding.id for finding in urgent_hold.findings(store, SLUG)] == expected
 
 
+@pytest.mark.feature("swarm-urgent-hold-hive-admission")
+def test_a_release_wait_is_named_ahead_of_the_hive_admission_hold(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import release_wait, status
+    from scripts.swarm.health import urgent_hold
+
+    monkeypatch.setattr(status, "readable_hives", lambda found: ([FULL_CPU], {}))
+    monkeypatch.setattr(release_wait, "tags", lambda config: ["v1.2.3"])
+    found = doc([task("waiting", rank="urgent", after_release="v1.2.3"), task("ready", rank="urgent")])
+    held = urgent_hold.observe(store, SLUG, found, 0)
+    assert held["waiting"]["why"] == "it waits on a release newer than v1.2.3"
+    assert held["ready"]["why"] == "no hive has admission room: hive a cpu"
+
+
 @pytest.mark.feature("swarm-claim-dependencies")
 def test_stacking_on_a_live_dependency_is_claimable_but_parked_work_waits(store):
     from scripts.swarm.health import urgent_hold
