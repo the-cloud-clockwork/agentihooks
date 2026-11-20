@@ -1684,10 +1684,13 @@ both of these hold:
 | Signed notice on `/lab/head` | Every valid notice | `ci.lab.head.notice` | As the notice names them | As the notice names it |
 
 The receiver records each head the table names whoever its actor is, and every other GitHub
-event records no head. `scripts.ci_lab.intake.admit` keeps only heads whose actor is on the
-runner trust list (`.github/workflows/trusted-actors.json`) as grade requests, but no service
-calls it yet. A pull request head's actor is its author rather than the sender, so once that filter
-is wired in, a trusted user reopening an untrusted author's pull request yields no grade request.
+event records no head. The scheduler's intake passes each head to `scripts.ci_lab.intake.admit`,
+which keeps only heads whose actor is on the runner trust list
+(`.github/workflows/trusted-actors.json`) as grade requests. The scheduler reads that list from
+the dev branch of `CI_LAB_REPOSITORY` once, when the service starts, and prints
+`untrusted <actor> head <head>` for every head it refuses. A pull request head's actor is its
+author rather than the sender, so a trusted user reopening an untrusted author's pull request
+yields no grade request.
 
 A delivery the receiver cannot read answers `400`. A missing field that the pull request
 observation of a `pull_request` or `check_suite` delivery reads answers before anything is
@@ -1782,6 +1785,176 @@ as `lab_notice`, or `0` when the send failed. Without all three settings nothing
 | `AGENTIHOOKS_CI_LAB_NOTICE_URL` | The receiver's `/lab/head` address, such as `http://agentihooks-swarm-github-webhook.agentihooks-swarm.svc:8790/lab/head` |
 | `AGENTIHOOKS_CI_LAB_NOTICE_SECRET` | The lab notice secret the receiver verifies with |
 | `AGENTIHOOKS_CI_LAB_NOTICE_ACTOR` | The GitHub login the notice names. It must be on the trust list, or the scheduler records the head without grading it |
+
+### Grade a plant branch push
+
+A plant proof pushes two heads cut from one dev commit, its twins: one carries a change a gate
+should pass, the other a planted change the gate should fail. The twins sit on GitHub branches
+with no pull request. An ordinary push cannot grade them as a pull request would: a branch's first
+push has a `before` of 40 zeros and records no head, and a later push records a `push` head on its
+`before` that grades in the promotion class. A promotion grade reads the head's own workflow and
+runs every lab gate with test and mutation units, so it never shows what the pull request gates
+say about the change. A push to a branch under `refs/heads/diffcheck/lab-plant-` therefore takes
+its own path and grades in the pull request class on a trusted base.
+
+#### What happens to a plant push
+
+1. **Receiver.** `scripts.ci_lab.webhooks.head_events` reads a `push` delivery to a ref that starts
+   with `PLANT_PREFIX` as a plant head: subject `ci.lab.head.plant`, event `plant`, head `after`, an
+   empty base whatever `before` says, actor the delivery's sender, action `pushed`. The first push
+   of a new plant branch is recorded too, since its zero `before` is never read.
+2. **Trust.** The scheduler's intake admits the head only when its actor is on the runner trust
+   list. An untrusted plant head prints `untrusted <actor> head <head>` and the lab runs no git
+   command for it.
+3. **Base.** For an admitted plant head, `Scheduler._plant` asks `MirrorExpander.merge_base` for the
+   merge base of the head with dev. It lists `refs/heads/dev` of the head's repository with
+   `git ls-remote --exit-code`, fetches that dev head and the plant head into the scheduler's
+   mirror, and runs `git merge-base <head> <dev head>`. The result becomes the request's base
+   before the head is held in its lane or given a grade key. Both twins of one plant were cut from
+   one dev commit, so they get the same base however far dev has moved since.
+4. **Class.** `scripts.ci_lab.intake.TIER_EVENTS` maps `plant` to the pull request class. A plant
+   head the [control routes](#control-routes) marked hotfix grades in the hotfix class instead, on
+   the same base.
+5. **Grade.** The pull request class takes its base as the grader revision, so the grade key, the
+   static gate list and `lab.authoritative` all come from the dev commit the twins share, and a
+   twin cannot change the gates that grade it. [Which grades run static units](#which-grades-run-static-units)
+   lists the gates the class runs: `lint`, `type-gate` and `test-count` get units, `semgrep` is
+   framed as a gate without units, and the class expands no test or mutation units.
+6. **Check runs.** The scheduler posts the grade's check runs on the head commit on GitHub, as for
+   any head not pushed to a `refs/grade/*` ref. A gate the base's `delivery.yaml` lists under
+   `lab.authoritative` posts as `lab/<gate>`; every other gate and `required` post as
+   `lab-shadow/<gate>`. On dev that list is empty, so every check run of a plant grade is a
+   `lab-shadow/<gate>` run.
+
+Any other push is unchanged: it keeps its payload `before` as base, grades in the promotion
+class, and records nothing on a branch's first push.
+
+#### Which refs are plant branches
+
+A ref is a plant branch only when it starts with the whole of `refs/heads/diffcheck/lab-plant-`,
+the trailing `-` included:
+
+| Ref pushed | What the receiver records |
+|---|---|
+| `refs/heads/diffcheck/lab-plant-size-green` | A plant head, on every push including the first |
+| `refs/heads/diffcheck/lab-plant` | An ordinary push head, and nothing on its first push |
+| `refs/heads/diffcheck/ci-lab-size` | An ordinary push head, and nothing on its first push |
+| `refs/heads/feature/diffcheck/lab-plant-size` | An ordinary push head, and nothing on its first push |
+| `refs/tags/diffcheck/lab-plant-size-green` | Nothing, since a tag is not a branch |
+| A deleted `refs/heads/diffcheck/lab-plant-size-green` | Nothing |
+
+No workflow under `.github/workflows` names the plant prefix in its push filters. The CI lab image
+workflow builds on `diffcheck/ci-lab-image-*`, a separate prefix, and the workflows that ignore
+`diffcheck/**` skip a plant push. A workflow whose push trigger takes every branch but a few, such
+as `branch-lanes.yml`, still runs on it.
+
+#### Push a plant pair
+
+Nothing on dev creates plant branches yet, so push them with git. Cut both twins from one dev
+commit and push each to its own branch under the prefix:
+
+```bash
+git fetch origin dev
+fork="$(git rev-parse origin/dev)"
+
+git switch -c diffcheck/lab-plant-size-green "$fork"
+# commit the change the gate should pass
+git push origin HEAD:refs/heads/diffcheck/lab-plant-size-green
+
+git switch -c diffcheck/lab-plant-size-red "$fork"
+# commit the planted change the gate should fail
+git push origin HEAD:refs/heads/diffcheck/lab-plant-size-red
+```
+
+A push to a plant branch is a push to origin for every guard, as any other branch push is.
+Keep both branches until their grades close: a head no branch or pull request ref reaches when its
+quiet window ends is retired as [a head no node mirror can hold](#a-head-no-node-mirror-can-hold),
+with a failed `lab-shadow/required` check run.
+
+#### What a plant push needs
+
+| Need | Where it is set | When it is missing |
+|---|---|---|
+| The repository's webhook delivers `push` events to the receiver's `/github` | The repository's GitHub webhook settings, with `AGENTIHOOKS_GITHUB_WEBHOOK_SECRET` on the receiver | No delivery reaches the receiver and nothing is recorded |
+| Lab intake is on | `AGENTIHOOKS_CI_LAB_NOTICE_SECRET` on the receiver, as [Receiver environment](#receiver-environment) describes | The receiver answers the push `200` and records no head |
+| The pusher's login is on the runner trust list | `.github/workflows/trusted-actors.json` on the dev branch of `CI_LAB_REPOSITORY`, read when the scheduler starts | `untrusted <actor> head <head>`, and no grade |
+| The head shares history with dev, and the remote lists `refs/heads/dev` | The plant branch cut from a dev commit; the head's repository | `cannot resolve the dev merge base of plant head <head>: <error>`, and no grade |
+
+No variable turns plant intake on or off, and the prefix is the constant
+`scripts.ci_lab.webhooks.PLANT_PREFIX`. A login added to the trust list reaches the scheduler only
+when the service restarts.
+
+#### Verify a plant grade
+
+Read each twin's grades from the scheduler, replacing `lab` with its service address:
+
+```bash
+for branch in diffcheck/lab-plant-size-green diffcheck/lab-plant-size-red; do
+  sha="$(git rev-parse "$branch")"
+  curl -fsS "http://lab:8800/grades/$sha" \
+    | jq '.grades[] | {class, base, grader, lane, conclusion, checks}'
+done
+git merge-base diffcheck/lab-plant-size-green origin/dev
+```
+
+Both twins show `"class": "pull_request"`, and `base` and `grader` both equal the merge base the
+last command prints, the `fork` commit above. `lane` is the head itself, since a push delivery
+carries no branch. `conclusion` stays `null` until every unit is final.
+[Grades of a commit](#grades-of-a-commit) describes every field.
+
+The scheduler log names each step of intake:
+
+```bash
+kubectl -n ci-lab logs deploy/ci-lab-scheduler --since=15m \
+  | grep --line-buffered -E 'received <head>|untrusted .* head <head>|cannot resolve the dev merge base of plant head <head>'
+```
+
+`received <head> on <head>` means the head was admitted, based and held in its quiet window.
+With a NATS credential that may read the lab heads stream, such as the hub's, the latest plant head
+the receiver recorded is:
+
+```bash
+nats --server "$AGENTIHOOKS_BUS_URL" --creds <credential file> stream get AGENTIHOOKS-CI-LAB-HEADS --last-for ci.lab.head.plant
+```
+
+Its `data` holds `"event": "plant"` and an empty `base`; the base is resolved only in the
+scheduler.
+
+#### Plant push limits
+
+- A merge base failure is printed once and the head is dropped, never held. The bus message was
+  acknowledged when the scheduler read it, so the head grades only after a new push to the plant
+  branch.
+- Each plant head is its own lane, so a newer push to a plant branch supersedes nothing. An older
+  head whose grade already started runs to its end beside the newer one. An older head still in its
+  quiet window when the branch moves is retired at release, since no ref names it any more and dev
+  does not descend from it.
+- The same commit pushed again, to the same or another plant branch, is the same head event. Inside
+  the bus's two minute duplicate window the stream stores it once; after it the scheduler prints
+  `already graded <run>`, since the grade key of that head, base, class and grader already exists,
+  and opens no second grade.
+- A rerequested lab check run of a plant head arrives as a `check_run` head, whose base is the base
+  of its first pull request. A plant head has no pull request, so that head carries an empty base,
+  and intake resolves the dev merge base only for `plant` heads. Push a new commit to grade a plant
+  head again.
+
+#### Plant push troubleshooting
+
+| Symptom | Cause | Check |
+|---|---|---|
+| The plant push grades in the promotion class, or its first push records nothing | The ref is outside the prefix: a missing trailing `-`, a folder before `diffcheck`, or another `diffcheck/` name | Compare the pushed ref with [Which refs are plant branches](#which-refs-are-plant-branches) |
+| `untrusted <actor> head <head>` | The pusher's login is not on the trust list the scheduler loaded | `.github/workflows/trusted-actors.json` on dev; a login added since the scheduler started needs a restart |
+| `cannot resolve the dev merge base of plant head <head>: Command '['git', '-C', '<mirror>', 'merge-base', '<head>', '<dev head>']' returned non-zero exit status 1.` | The head shares no history with dev, such as a commit made with `git commit-tree` and no parent | `git merge-base <head> origin/dev` prints nothing and exits 1; cut the twins from a dev commit |
+| `cannot resolve the dev merge base of plant head <head>: Command '['git', 'ls-remote', '--exit-code', '<repo>', 'refs/heads/dev']' returned non-zero exit status 2.` | The head's repository lists no `refs/heads/dev` | `git ls-remote --exit-code <repo> refs/heads/dev` |
+| `cannot resolve the dev merge base of plant head <head>: Command '['git', '-C', '<mirror>', 'fetch', ...]' returned non-zero exit status <code>.` | The scheduler's mirror could not fetch the head or the dev head from the repository, or from the lab remote when `AGENTIHOOKS_LAB_REMOTE` serves it | The scheduler's mirror store and its network to GitHub; `git ls-remote origin 'refs/heads/diffcheck/lab-plant-*'` lists the head when GitHub holds it |
+| `retiring <head>: no branch or pull request head ref of <repo> carries <head>` | The plant branch was deleted or moved before the quiet window ended | `git ls-remote origin 'refs/heads/diffcheck/lab-plant-*'`; push the head again |
+| The push answers `200` and the stream gains no `ci.lab.head.plant` | Lab intake is off, or the push deleted the branch | The troubleshooting table at the end of [Lab head intake](#lab-head-intake) |
+
+`tests/ci_lab/test_intake.py` and `tests/ci_lab/test_plant_intake.py` hold this behavior under the
+feature map entry `lab-plant-push-intake`. They cover a plant push with a zero and a real `before`,
+the refs outside the prefix, an ordinary push that keeps its base and the promotion class, an
+untrusted plant push that resolves nothing, two twins and an unrelated head over a real git
+mirror, and a remote that lists no dev branch.
 
 ### Push a head to the lab remote
 
