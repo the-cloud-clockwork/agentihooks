@@ -49,6 +49,7 @@ from scripts.ci_lab import (
     lease_api,
     metrics,
     service,
+    venvs,
 )
 from scripts.ci_lab.capacity import Load
 from scripts.ci_lab.checks import Checks, Output, PostRefused
@@ -1252,7 +1253,9 @@ class MirrorExpander:
         head, base = self._files(mirror, request.head), self._files(mirror, request.base)
         workflow = self._git(mirror, "show", f"{grader}:{WORKFLOW.as_posix()}")
         registry = json.loads(self._git(mirror, "show", f"{grader}:{REGISTRY.as_posix()}"))
-        toolchain = replace(self.toolchain, lockfile=head.get("uv.lock", ""), pyproject=head.get("pyproject.toml", ""))
+        toolchain = replace(
+            self.toolchain, lockfile=head.get(venvs.LOCKFILE, ""), pyproject=head.get("pyproject.toml", "")
+        )
         gates: dict[str, list[Unit]] = {}
         for gate in discover(workflow, registry, self._workflows(mirror, grader)):
             if gate.missing:

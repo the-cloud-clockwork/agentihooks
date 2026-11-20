@@ -1095,9 +1095,9 @@ or from trees they already hold.
   `AGENTIHOOKS_LAB_REMOTE` nor `CI_LAB_REPOSITORY`, and the policy reaches neither GitHub nor the
   lab remote, so the executor of a head the node mirror does not hold yet raises at its fetch and
   leaves the unit's lease for the scheduler to reap.
-- A head whose `uv.lock` digest differs from the image's baked venv builds its venv with
-  `uv sync` under `env -i`, which drops `UV_CACHE_DIR`, and the build needs a package index this
-  policy does not reach. See [Head venv builds](#head-venv-builds).
+- A head whose `.github/test-requirements.lock` digest differs from the image's baked venv builds
+  its venv with `uv venv` and `uv pip install` under `env -i`, which drops `UV_CACHE_DIR`, and the
+  build needs a package index this policy does not reach. See [Head venv builds](#head-venv-builds).
 - Nothing writes `/work/manifest.json`, so the test executor raises `FileNotFoundError` when it
   reads its dependency manifest. The worker delivers nothing for the unit and the scheduler
   reaps the lease; the [retry policy](#retry-policy) requeues it
@@ -1131,7 +1131,7 @@ its done criteria name are not recorded:
 | The worker log repeats `ci-lab worker: lease call failed, retrying in <n>s` | The scheduler is not answering on 8800, or answers with a server error: it is rolling, restarting or down. The worker keeps running, retries after a backoff that doubles from 1 up to 10 seconds, and leases again on the first answer | `kubectl -n ci-lab get deploy ci-lab-scheduler` and `kubectl -n ci-lab logs deploy/ci-lab-scheduler --since 10m` |
 | The worker exits with an `HTTPError` 4xx raised from `Client.lease` | The scheduler answered the lease call with a client error, such as a 404 when `CI_LAB_SCHEDULER_URL` names a wrong path; a retry cannot change that answer, so the process ends with the traceback without draining its running units, which are left to finish or reap | Compare the pod's `CI_LAB_SCHEDULER_URL` with the contract table above |
 | A head's units are reaped undelivered and the worker log shows a failed `git fetch` | The node mirror lacks the head and the worker has no other source | The node cache's `fetched-at` stamp and warm log, see [Verify every node](ci-lab-node-cache.md#verify-every-node) |
-| A venv build fails with `uv sync for <tree> ended with code` | The build needs the package index, which the policy refuses | The kept build log the error names; see Limitations |
+| A venv build fails with `uv venv for <tree> ended with code` or `uv pip install for <tree> ended with code` | The build needs the package index, which the policy refuses | The kept build log the error names; see Limitations |
 | Uploads time out or are refused | The MinIO egress rule does not match the object store's pods | `minio.namespace`, `minio.pods` and `minio.port` against `kubectl get pods -n <namespace> --show-labels` |
 | A sandboxed unit fails at bubblewrap with `Operation not permitted` | The pod runs under a seccomp profile that refuses namespace calls, or the node kernel restricts user namespaces | The pod's `seccompProfile`, then the namespace probe in the [sandbox verify](#unit-sandbox) steps on the node |
 | A worker pod is evicted for ephemeral storage | `/work`, `/tmp` and the logs passed 20 GiB | `kubectl -n ci-lab get events --field-selector reason=Evicted` |
@@ -2287,7 +2287,7 @@ key; the builders are pure and read no file, clock or network.
 |---|---|---|
 | `toolchain` | `interpreter` | Python version the unit runs on |
 | `toolchain` | `tools` | Tool name to version, such as ruff, basedpyright, semgrep |
-| `toolchain` | `lockfile` | Blob id of `uv.lock` |
+| `toolchain` | `lockfile` | Blob id of `.github/test-requirements.lock` |
 | `toolchain` | `pyproject` | Blob id of `pyproject.toml`, which holds the tool and pytest configuration |
 | `toolchain` | `image` | Digest of the worker image |
 | `toolchain` | `environment` | The environment key: each variable the unit reads, with its value |
@@ -4134,16 +4134,18 @@ Limitations:
 ### Head venv builds
 
 `venvs.venv_for(lockfile_digest, tree, root, build)` returns the baked image venv when its
-marker holds the digest. Otherwise it builds `root/<digest>` once, under a lock per digest, by
-running uv in a `Sandbox` from `build` (`venvs.Build`: ports, whitelist and time limit). The
-executors pass `Pod.build`, the pod's ports, whitelist and unit time limit.
+marker holds the digest. The executors pass the sha256 of the head's tracked
+`.github/test-requirements.lock` (`venvs.LOCKFILE`), the file the image hashes into that marker;
+`uv.lock` is not tracked and is never read. Otherwise it builds `root/<digest>` once, under a lock
+per digest, by running uv in a `Sandbox` from `build` (`venvs.Build`: ports, whitelist and time
+limit). The executors pass `Pod.build`, the pod's ports, whitelist and unit time limit.
 
 | Part | Value |
 |---|---|
-| Command | the worker's `uv` with `sync --frozen --no-install-project --all-extras --python <worker python> --project <tree>` |
+| Commands | the worker's `uv` with `venv --clear --python <worker python> root/<digest>`, then `pip install --python root/<digest>/bin/python --constraint <tree>/.github/test-requirements.lock --excludes <tree>/.github/test-excludes.txt -r <tree>/pyproject.toml --extra dev --extra all` |
 | Runs from | the head tree, with network, under `env -i` and no bubblewrap |
-| Environment | `build.whitelist`, `PATH` (the whitelist's, else `/bin:/usr/bin`), `UV_PROJECT_ENVIRONMENT=root/<digest>` and the sandbox's private folders |
-| Run folder | under `root/builds`, removed after a build that ends with code 0 |
+| Environment | `build.whitelist`, `PATH` (the whitelist's, else `/bin:/usr/bin`) and the sandbox's private folders |
+| Run folder | one per command under `root/builds`, removed after the command ends with code 0 |
 
 uv and every build hook it starts get no other worker variable in their environment. A build
 that runs past the unit time limit or ends with a
