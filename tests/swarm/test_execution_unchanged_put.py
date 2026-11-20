@@ -208,6 +208,7 @@ def test_an_unchanged_put_with_a_bound_pod_uid_still_takes_the_locked_path(
         runtime_target={"pod_namespace": "ns", "pod_name": "pod", "pod_uid": "uid-1"},
     )
     current = store.start_execution("fixture", pod_agent)
+    fencing.migrate_records(store, "fixture", writers_upgraded=True)
     acquires, _ = _watched(monkeypatch)
 
     store.put_agent("fixture", current)
