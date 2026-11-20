@@ -7752,6 +7752,18 @@
       ]
     },
     {
+      "id": "codex-viewer-waits-for-an-admitted-launch",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-pane-attach-refused",
+      "behaviour": "A native Codex viewer started on a hive pane while its execution is admitted, reading starting with an execution id but no harness or transport yet, keeps waiting until the Codex supervisor publishes harness codex and the app server transport and then attaches to the connected thread, instead of refusing with no app server and dropping the pane to a shell; a running execution with no harness and a classified Codex execution without the app server transport still refuse.",
+      "seam": "scripts.codex_session.attach.recorded read through attach.wait_attachable",
+      "rules": ["codex-attach-before-classification"],
+      "tests": [
+        "tests/codex_session/test_attach.py::test_an_admitted_execution_waits_for_its_harness_and_then_attaches",
+        "tests/codex_session/test_attach.py::test_a_classified_or_running_execution_without_an_app_server_still_refuses"
+      ]
+    },
+    {
       "id": "master-primary-login-reserve-2pct",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-reserve-2pct",
