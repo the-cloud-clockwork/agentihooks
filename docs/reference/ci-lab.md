@@ -2655,6 +2655,28 @@ kubectl logs -n ci-lab deploy/ci-lab-scheduler | grep 'cannot expand'
 | `'steps'` or `'jobs'` | The called workflow has no `jobs`, or one of its jobs has neither `steps` nor `uses` |
 | A YAML parse error | A workflow file directly in `.github/workflows` at the grader revision does not parse, even one that no static job calls |
 
+#### A head no node mirror can hold
+
+Each CI node's cache mirrors only the repository's `refs/heads/*` and `refs/pull/*/head` refs, so a
+worker cannot fetch a commit no such ref reaches, such as the head of an ejected merge group whose
+`gh-readonly-queue` branch is gone. Before the scheduler expands a released head it asks
+`MirrorExpander.reachable`, which lists those refs with `git ls-remote` and accepts the head when a
+ref names it or when the dev branch head, fetched into the scheduler's mirror, descends from it. It
+never fetches the head itself, since GitHub may no longer serve it. Any non-zero exit of the
+ancestor check reads as not reachable, including the exit 128 git gives for a head the scheduler's
+mirror does not hold. A head that check refuses is retired with the action
+`retiring <head>: no branch or pull request head ref of <repo> carries <head>`: it gets no grade and
+no unit, so no worker leases one. A pull request head also gets one completed `lab-shadow/required`
+check run with conclusion `failure` and that summary; a hotfix, merge group, promotion or backfill
+head gets none. Such a pull request head is never the current head of a pull request, since GitHub
+keeps `refs/pull/<n>/head` on each pull request's last head, so the post marks a superseded commit
+and holds no merge. That post is tried once, like the cannot expand post: a refusal by the App
+token, GitHub or the network ends the same action with
+`; cannot post the failed required check on <head>: <error>`, is not retried, and the pass goes
+on. A head pushed to a grade ref skips the reachability check, since the lab remote serves it. A
+failed `git ls-remote` raises like any other failed git command, so the head takes the
+[cannot expand](#a-head-that-cannot-expand) path.
+
 #### The worker reads the same workflows
 
 The static executor finds its gate again on the worker. `scripts.ci_lab.executors.gate(grader_tree,
