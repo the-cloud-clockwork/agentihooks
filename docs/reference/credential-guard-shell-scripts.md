@@ -74,7 +74,8 @@ on a top level `Bash` command:
   and names such a variable with `$` anywhere in it; a name looks secret when
   it contains `PASSWORD`, `PASSWD`, `SECRET`, `TOKEN`, `API_KEY`, `APIKEY`,
   `CREDENTIAL`, `PRIVATE_KEY`, `ACCESS_KEY`, `SESSION_KEY` or `AUTH`, in any
-  case
+  case; a name that appears only as the operand of a set test does not count
+  (see [Set tests inside a script](#set-tests-inside-a-script))
 - awk reads of `ENVIRON` values, described below
 - reads of `/proc/<pid>/environ`
 - reads of dotenv, shell startup and credential store files
@@ -127,6 +128,39 @@ kubectl exec pod -- sh -c "awk '{print ENVIRON[\$1]}'"
 Each of these is refused with
 `BLOCKED: printing environment values (awk ENVIRON[...]).`
 
+## Set tests inside a script
+
+The set or unset test the refusal recommends passes inside a `-c` script, so
+an agent can check whether a pod or container holds a variable:
+
+```bash
+kubectl exec -n ns pod-0 -- sh -c 'test -n "${GITHUB_TOKEN:-}" && echo set || echo unset'
+kubectl exec pod-0 -- bash -c '[ -n "$GITHUB_TOKEN" ] && echo set || echo unset'
+kubectl exec pod-0 -- bash -c '[[ -n "${LEDGER_TOKEN-}" ]] && echo set || echo unset'
+docker exec box sh -c 'test -z "${API_KEY}" && echo unset || echo set'
+```
+
+A set test is `test`, `[` or `[[` with `-n` or `-z` and one double quoted
+operand: `"$VAR"`, `"${VAR}"`, `"${VAR-}"` or `"${VAR:-}"`. The guard
+ignores the variable in that operand when it looks for an `echo` or `printf`
+of a secret looking name. Every other use of the name still counts, so these
+are refused with `BLOCKED: printing $GITHUB_TOKEN to stdout.`:
+
+```bash
+kubectl exec pod-0 -- sh -c 'test -n "${GITHUB_TOKEN:-}" && echo "$GITHUB_TOKEN"'
+kubectl exec pod-0 -- sh -c 'test -n "${GITHUB_TOKEN:-}" && echo "$1"' _ "$GITHUB_TOKEN"
+kubectl exec pod-0 -- sh -c 'test -n "$GITHUB_TOKEN" -a "$GITHUB_TOKEN" -eq 0 && echo set'
+```
+
+The last one prints the value in the shell's `integer expression expected`
+error. An unquoted operand, another expansion such as `"${VAR:+x}"` or an
+escaped quote is not read as a set test, so the script is refused as before.
+Delivered by pull request
+[#12604](https://github.com/the-cloud-clockwork/agentihooks/pull/12604), with
+the regression tests `test_a_set_test_inside_a_shell_script_passes` and
+`test_a_shell_script_that_prints_a_tested_value_is_refused` and the feature map
+entry `credential-guard-passes-set-tests-in-scripts`.
+
 ## What still passes
 
 ```bash
@@ -159,6 +193,7 @@ shell, so its argument is not read as a shell script.
 | Which names does a pod's shell define? | the same `awk` listing as the pod's command: `kubectl exec -n ns pod -- awk '…'` |
 | How many variables are set? | `env \| wc -l` |
 | Is one variable set? | `test -n "${REDIS_URL:-}" && echo set \|\| echo unset` |
+| Is one variable set in a pod? | `kubectl exec -n ns pod -- sh -c 'test -n "${REDIS_URL:-}" && echo set \|\| echo unset'` |
 | How do I pass a value to a command? | reference it, as in `curl -H "Authorization: Bearer $API_TOKEN" …` |
 
 The name listing prints only names that are valid identifiers and counts the

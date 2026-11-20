@@ -89,6 +89,10 @@ SECRETISH_NAME = re.compile(
     r"(?i)(PASSWORD|PASSWD|SECRET|TOKEN|API_?KEY|APIKEY|CREDENTIAL"
     r"|PRIVATE_?KEY|ACCESS_?KEY|SESSION_?KEY|AUTH)"
 )
+SET_TEST = re.compile(
+    r"(?:^|(?<=[\s'\"(;&|]))(?:test|\[\[?)\s+-[nz]\s+"
+    r"\"\$(?:\{[A-Za-z_][A-Za-z0-9_]*(?::?-)?\}|[A-Za-z_][A-Za-z0-9_]*)\"(?:\s+\]\]?)?(?=[\s'\";&|)]|$)"
+)
 
 QUOTING = re.compile(r"[\"'\\]")
 PROC_DIR = re.compile(r"/proc\b")
@@ -495,15 +499,16 @@ def leaf_names_environ(leaf):
     return "$" in leaf or "`" in leaf or fnmatch.fnmatchcase("environ", leaf)
 
 
-def echo_secret_verdict(command):
+def echo_secret_verdict(command: str) -> str | None:
     if not re.search(r"\b(echo|printf)\b", command):
         return None
-    for name in re.findall(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)", command):
-        if SECRETISH_NAME.search(name):
-            return block(
-                "printing ${} to stdout".format(name),
-                KIND_ENVIRONMENT,
-            )
+    for part in SET_TEST.split(command):
+        for name in re.findall(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)", part):
+            if SECRETISH_NAME.search(name):
+                return block(
+                    "printing ${} to stdout".format(name),
+                    KIND_ENVIRONMENT,
+                )
     return None
 
 
