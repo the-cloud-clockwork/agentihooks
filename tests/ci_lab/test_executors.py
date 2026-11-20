@@ -891,9 +891,9 @@ def serve_main(
     bind = metrics.serve_registry
 
     def serve_registry(
-        host: str, port: int, registry: metrics.Registry, *observe: Callable[[], None]
+        host: str, port: int, registry: metrics.Registry, observe: Callable[[], None] | None = None
     ) -> ThreadingHTTPServer:
-        server = bind(host, 0, registry, *observe)
+        server = bind(host, 0, registry, observe)
         served.append((host, port, server))
         return server
 

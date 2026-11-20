@@ -222,15 +222,15 @@ def observe_unit(registry: Registry, priority: str, kind: str, slots: int, repor
 
 
 def observe_mirror(registry: Registry, stamp: Path, node: str, clock: Callable[[], float]) -> None:
-    """Set the node's mirror age from the node cache's fetched-at stamp of epoch seconds, +Inf while the stamp does
-    not read as one; a worker without a node name sets no sample."""
+    """Set the node's mirror age from the node cache's fetched-at stamp of whole epoch seconds, +Inf while the stamp
+    holds anything else; a worker without a node name sets no sample."""
     if not node:
         return
     try:
-        age = clock() - int(stamp.read_text())
+        text = stamp.read_text().strip()
     except (OSError, ValueError):
-        age = inf
-    registry.set(contract.NODE_MIRROR_AGE_SECONDS, age, {"node": node})
+        text = ""
+    registry.set(contract.NODE_MIRROR_AGE_SECONDS, clock() - int(text) if text.isdecimal() else inf, {"node": node})
 
 
 @dataclass(frozen=True)

@@ -483,7 +483,7 @@ def test_the_node_mirror_age_is_the_clock_less_the_node_cache_stamp(tmp_path: Pa
 
 
 @pytest.mark.feature("lab-worker-node-mirror-age")
-@pytest.mark.parametrize("text", [None, "", "never\n", "1.5\n"])
+@pytest.mark.parametrize("text", [None, "", "never\n", "1.5\n", "-5\n", "+1000000\n", "1_000_000\n"])
 def test_a_stamp_that_does_not_read_as_epoch_seconds_ages_the_node_mirror_to_infinity(
     tmp_path: Path, text: str | None
 ) -> None:
