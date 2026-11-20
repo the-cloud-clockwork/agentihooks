@@ -124,17 +124,18 @@ def test_a_worker_put_of_a_report_lands_through_the_upload_url_the_scheduler_sto
     assert bucket.bodies == {f"/{BUCKET}/lab/uploads/{JOB}/report.json": REPORT}
 
 
-@pytest.mark.feature("lab-result-upload-signing")
 def test_an_upload_url_the_scheduler_storage_signs_writes_only_the_object_it_names(
     bucket: Bucket, tmp_path: Path
 ) -> None:
     url = objects.Uploads(_storage(bucket)).upload_url(JOB, "report")
+    client = worker.Client("http://scheduler.lab.test")
 
     with pytest.raises(urllib.error.HTTPError) as refused:
-        worker.Client("http://scheduler.lab.test").put(url.replace("report.json", "log.txt"), _report(tmp_path))
+        client.put(url.replace("report.json", "log.txt"), _report(tmp_path))
+    client.put(url, _report(tmp_path))
 
     assert (refused.value.code, refused.value.read()) == (403, REFUSED)
-    assert bucket.bodies == {}
+    assert bucket.bodies == {f"/{BUCKET}/lab/uploads/{JOB}/report.json": REPORT}
 
 
 @pytest.mark.feature("lab-result-upload-signing")
