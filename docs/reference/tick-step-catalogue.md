@@ -114,5 +114,3 @@ How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step
 | outbox migration | wrapper relay | tick | 2 | 60 | none | none | none |
 | page relay | wrapper relay | tick | 2 | 60 | none | none | none |
 | tick view | wrapper view | tick | 3 | 60 | none | none | none |
-
-Page selection probe.
