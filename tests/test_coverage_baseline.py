@@ -1,13 +1,15 @@
+import codecs
 import json
 from pathlib import Path
 
 import pytest
 import yaml
 from coverage import CoverageData
+from coverage.exceptions import NotPython
 
 from tests import coverage_baseline as cache
 from tests import coverage_summary
-from tests.coverage_grade import measured_lines
+from tests.coverage_grade import measured_lines, statements_of
 
 Measured = tuple[Path, dict[str, str], list[Path]]
 
@@ -75,6 +77,119 @@ def test_continuation_lines_publish_as_their_statement(measured: Measured, capsy
     cache.record(root, shards, target)
     assert "hooks/example.py" not in capsys.readouterr().out
     assert cache.read(target)["executed"] == {"hooks/example.py": [1, 5]}
+
+
+def _refuse_parse(text: str, lines: list[int]) -> dict[int, int]:
+    raise AssertionError("the recorder parsed a module its shard statement summary describes")
+
+
+@pytest.mark.parametrize(
+    ("source", "ran", "published", "warned"),
+    [
+        ('value = max(\n    1,\n    2,\n)\nscript = """\nconst a = 1;\n"""\n', {1, 2, 3, 5, 6}, [1, 5], []),
+        (
+            "try:\n    import fcntl\nexcept ImportError:  # pragma: no cover - Windows\n    fcntl = None\nvalue = 1\n",
+            {1, 2, 5},
+            [1, 2, 5],
+            [],
+        ),
+        ('"""Module."""\nvalue = 1\n', {1, 2, 9}, [2], [1, 9]),
+    ],
+    ids=["continuation-lines", "excluded-lines-not-run", "unexcluded-module-drops-docstring-and-impossible-lines"],
+)
+def test_a_matching_statement_summary_maps_the_lines_without_parsing(
+    measured: Measured,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    source: str,
+    ran: set[int],
+    published: list[int],
+    warned: list[int],
+) -> None:
+    root, _, shards = measured
+    (root / "hooks/example.py").write_text(source)
+    coverage_summary.write_statements(root, 1, 1, shards[0].parent / coverage_summary.STATEMENTS)
+    _summarize(shards[0], {"hooks/example.py": ran})
+    monkeypatch.setattr(cache, "statements_of", _refuse_parse)
+    target = root / "baseline.json"
+    cache.record(root, shards, target)
+    assert [line for line in capsys.readouterr().out.splitlines() if line.startswith("::warning::")] == [
+        f"::warning::hooks/example.py:{line} is not executable in the current source; dropped from baseline"
+        for line in warned
+    ]
+    assert cache.read(target)["executed"] == {"hooks/example.py": published}
+
+
+@pytest.mark.parametrize(
+    ("summarized", "source", "ran", "published"),
+    [
+        (
+            "from typing import TYPE_CHECKING\n\nif TYPE_CHECKING:\n    import os\nvalue = 1\n",
+            "from typing import TYPE_CHECKING\n\nif TYPE_CHECKING:\n    import os\nvalue = 1\n",
+            {1, 3, 5},
+            [1, 3, 5],
+        ),
+        ("a = 1\nb = 2\nc = 3\n", "a = (\n    1,\n)\n", {1, 2, 3}, [1]),
+        (None, "value = 1\nvalue += 1\n", {1, 2}, [1, 2]),
+    ],
+    ids=["excluded-line-ran", "stale-digest", "missing-summary"],
+)
+def test_a_module_its_statement_summary_cannot_answer_is_parsed_as_today(
+    measured: Measured,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    summarized: str | None,
+    source: str,
+    ran: set[int],
+    published: list[int],
+) -> None:
+    root, _, shards = measured
+    module = root / "hooks/example.py"
+    if summarized is not None:
+        module.write_text(summarized)
+        coverage_summary.write_statements(root, 1, 1, shards[0].parent / coverage_summary.STATEMENTS)
+    module.write_text(source)
+    _summarize(shards[0], {"hooks/example.py": ran})
+    parsed: list[list[int]] = []
+
+    def parse(text: str, lines: list[int]) -> dict[int, int]:
+        parsed.append(lines)
+        return statements_of(text, lines)
+
+    monkeypatch.setattr(cache, "statements_of", parse)
+    target = root / "baseline.json"
+    cache.record(root, shards, target)
+    assert parsed == [sorted(ran)]
+    assert "hooks/example.py" not in capsys.readouterr().out
+    assert cache.read(target)["executed"] == {"hooks/example.py": published}
+
+
+def test_a_module_whose_text_differs_from_what_its_summary_parsed_fails_as_today(measured: Measured) -> None:
+    root, _, shards = measured
+    (root / "hooks/example.py").write_bytes(codecs.BOM_UTF8 + b"value = 1\n")
+    statements = shards[0].parent / coverage_summary.STATEMENTS
+    coverage_summary.write_statements(root, 1, 1, statements)
+    assert coverage_summary.statements([statements])["hooks/example.py"]["statements"] == [1]
+    _summarize(shards[0], {"hooks/example.py": {1}})
+    with pytest.raises(NotPython):
+        cache.record(root, shards, root / "baseline.json")
+
+
+def test_the_recorder_reads_the_statement_summary_each_shard_uploaded(
+    measured: Measured, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, _, _ = measured
+    (root / "scripts").mkdir()
+    (root / "scripts/other.py").write_text("other = [\n    1,\n]\n")
+    for part in (1, 2):
+        folder = root / "downloaded" / f"executed-lines-3.12-{part}"
+        _summarize(folder / "executed-lines.json", {"hooks/example.py": {part}, "scripts/other.py": {2}})
+        coverage_summary.write_statements(root, part, 2, folder / coverage_summary.STATEMENTS)
+    monkeypatch.setattr(cache, "statements_of", _refuse_parse)
+    target = root / "baseline.json"
+    argv = ["--head", str(root), "--shards", "2", "--head-summaries", str(root / "downloaded"), "--out", str(target)]
+    assert cache.main(argv) == 0
+    assert cache.read(target)["executed"] == {"hooks/example.py": [1, 2], "scripts/other.py": [1]}
 
 
 def test_record_computes_the_baseline_from_coverage(measured):

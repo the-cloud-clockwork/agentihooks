@@ -394,7 +394,7 @@ def test_the_status_line_names_the_promoted_engineer():
 
 
 @pytest.mark.parametrize("profile", ["", "custom-master"])
-def test_a_recycled_master_fills_its_empty_profile_and_keeps_saved_choices(store, profile):  # noqa: F811
+def test_a_recycled_master_fills_its_empty_profile_and_keeps_saved_choices(store: RedisStore, profile: str) -> None:  # noqa: F811
     launch = {"profile": profile, "harness": "claude", "model": "claude-opus-5-5", "effort": "high", "account": ""}
     store.put_handoff("sw", MASTER, "continue", MASTER_SEAT, {"reason": "recycle", "launch": launch})
     runtime = FakeRuntime()
@@ -405,5 +405,5 @@ def test_a_recycled_master_fills_its_empty_profile_and_keeps_saved_choices(store
     assert {key: saved[key] for key in ("harness", "model", "effort")} == {
         "harness": "claude",
         "model": "claude-opus-5-5",
-        "effort": "high",
+        "effort": "xhigh",
     }

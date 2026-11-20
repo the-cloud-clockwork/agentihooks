@@ -19,7 +19,7 @@ from scripts.gates import log as gate_log
 from scripts.gates import quiet as quiet_gate
 from scripts.inbox.seats import seat_address  # pyright: ignore[reportUnknownVariableType]
 from scripts.inbox.store import DuplicateItem, InboxStore
-from scripts.swarm import blockers, timing
+from scripts.swarm import blockers, tick_activity
 from scripts.swarm.health import early_ends, spawn_stall, stall_blockers, urgent_hold
 from scripts.swarm.health.findings import limits  # pyright: ignore[reportUnknownVariableType]
 
@@ -168,7 +168,7 @@ def _ask(store: Any, slug: str, mode: str, text: str, ref: str, at: int) -> str:
 
 def _save(store: Any, slug: str, asked: dict[str, int], early: dict[str, Any]) -> None:
     key = store.key(slug, KEY)
-    timing.keep()
+    tick_activity.renew_now()
     if asked or early:
         store.redis.set(key, json.dumps({"asked": asked, "early": early}))
     else:

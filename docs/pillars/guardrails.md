@@ -529,6 +529,21 @@ the refused forms, what still passes, configuration and troubleshooting.
 
 ---
 
+## Environment dumps in shell scripts and awk
+
+The credential guard reads the script a `sh`, `bash`, `zsh` or `dash` stage
+runs with `-c`, at the top level or as the command of a `kubectl`, `docker`,
+`podman`, `nerdctl` or `ssh` wrapper, and checks it like a command of its own.
+`kubectl exec pod -- sh -c 'env | cut -d= -f1'` is refused as an environment
+dump. An `awk`, `gawk`, `mawk` or `nawk` program that reads `ENVIRON[...]` is
+refused at the top level and inside a `-c` script; through a wrapper that runs
+it directly, only `awk` is read. The awk loop that prints only names passes. See
+[Environment dumps in shell scripts and awk](../reference/credential-guard-shell-scripts.md)
+for the refused and passing forms, the refusal, configuration, limits and
+troubleshooting.
+
+---
+
 ## Credential file names in commands
 
 The credential guard refuses a `Bash` command that reads a dotenv file, a shell

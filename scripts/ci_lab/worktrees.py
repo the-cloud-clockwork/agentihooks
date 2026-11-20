@@ -79,17 +79,19 @@ class Mirror:
         fetched."""
         if not self.store.exists():
             _git(self.store.parent, "init", "--quiet", "--bare", str(self.store))
-            (self.store / "objects/info/alternates").write_text(f"{self.node / 'objects'}\n")
+            if (self.node / "objects").is_dir():
+                (self.store / "objects/info/alternates").write_text(f"{self.node / 'objects'}\n")
         found = subprocess.run(["git", "-C", str(self.store), "cat-file", "-t", sha], capture_output=True, text=True)
         if found.stdout == "commit\n":
             return False
+        ref = f"{sha}:refs/lab/{sha}"
         try:
-            _git(self.store, "fetch", "--no-write-fetch-head", self.remote, sha)
+            _git(self.store, "fetch", "--quiet", "--no-write-fetch-head", self.remote, ref)
         except subprocess.CalledProcessError:
             origin = self.remote if self.repository is None else self.repository
             if self.lab is None or not checkout.serves(self.lab.url, origin):
                 raise
-            _git(self.store, "fetch", "--no-write-fetch-head", self.lab.url, sha, env=self.lab.environ())
+            _git(self.store, "fetch", "--quiet", "--no-write-fetch-head", self.lab.url, ref, env=self.lab.environ())
         return True
 
 
