@@ -26,6 +26,18 @@ class Prechecked(Put):
             timing.timed(self._put, slug, agent, managed)
 
 
+class RecordPrechecked(Put):
+    # ok: execution-put-without-unchanged-check
+    def put(self: Any, slug: str, agent: Any) -> None:
+        managed = self.managed(slug, agent.name)
+        if managed:
+            port = self.records(slug)
+            if not isinstance(port, self.WholeDocumentRecords) and self._unchanged(slug, agent, port):
+                return
+        with _writes(slug):
+            timing.timed(self._put, slug, agent, managed)
+
+
 class CheckedInside(Put):
     # ruleid: execution-put-without-unchanged-check
     def put(self: Any, slug: str, agent: Any) -> None:

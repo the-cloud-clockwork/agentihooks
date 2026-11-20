@@ -1,5 +1,6 @@
 import json
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -1049,7 +1050,14 @@ def test_cli_queue_applies_the_judged_intent_mode(monkeypatch, tmp_path, capsys,
     queued, events = [], []
     monkeypatch.setattr(intent.log, "append", lambda slug, row, home=None: events.append((slug, row, home)))
 
-    def operate(action, url, admit, journal, attempts):
+    def operate(
+        action: str,
+        url: str,
+        admit: Callable[[str], Any],
+        journal: Any,
+        attempts: int,
+        priority: Callable[[], Any],
+    ) -> dict[str, Any]:
         assert journal.url == URL
         admit("abc")
         queued.append(url)

@@ -914,6 +914,83 @@ def test_stripping_heredocs_keeps_the_rest_of_the_delimiter_line() -> None:
     assert strip_heredocs(command) == "cat <<HEREDOC > out; git push\nls"
 
 
+@pytest.mark.feature("credential-guard-heredoc-substitutions")
+@pytest.mark.parametrize("delimiter", ["EOF", "-EOF"])
+@pytest.mark.parametrize(
+    "body",
+    [
+        "$(cat .env)",
+        "`cat .env`",
+        "$(<.env)",
+        "'$(cat .env)'",
+        '"$(cat .env)"',
+        "before $(cat .env) after",
+        "$(printf safe) $(cat .env)",
+        "$(printf safe | cat .env)",
+        "\\\\$(cat .env)",
+    ],
+    ids=[
+        "dollar",
+        "backtick",
+        "redirect",
+        "single-body-quotes",
+        "double-body-quotes",
+        "prose",
+        "second",
+        "pipeline",
+        "escaped-backslash",
+    ],
+)
+def test_an_unquoted_heredoc_credential_substitution_is_refused(delimiter: str, body: str) -> None:
+    reason = decide(_bash(f"cat <<{delimiter}\n{body}\nEOF"))
+
+    assert reason is not None
+    assert reason == decide(_bash("cat .env"))
+
+
+@pytest.mark.feature("credential-guard-heredoc-substitutions")
+@pytest.mark.parametrize("delimiter", ["'EOF'", '"EOF"', "-'EOF'", '-"EOF"'])
+@pytest.mark.parametrize("body", ["$(cat .env)", "`cat .env`", "$(<.env)"])
+def test_a_quoted_heredoc_credential_substitution_stays_literal(delimiter: str, body: str) -> None:
+    assert decide(_bash(f"cat <<{delimiter}\n{body}\nEOF")) is None
+
+
+@pytest.mark.feature("credential-guard-heredoc-substitutions")
+@pytest.mark.parametrize(
+    "body",
+    ["cat .env", "$(printf safe)", "`printf safe`", "<(cat .env)", "\\$(cat .env)", "\\`cat .env\\`", "plain text"],
+    ids=[
+        "literal-command",
+        "safe-dollar",
+        "safe-backtick",
+        "literal-process",
+        "escaped-dollar",
+        "escaped-backticks",
+        "plain",
+    ],
+)
+def test_an_unquoted_heredoc_without_a_credential_substitution_passes(body: str) -> None:
+    assert decide(_bash(f"cat <<EOF\n{body}\nEOF")) is None
+
+
+@pytest.mark.feature("credential-guard-heredoc-substitutions")
+def test_a_heredoc_substitution_keeps_the_credential_tree_scan(tmp_path: Path) -> None:
+    (tmp_path / ".env").write_text("A=1\n")
+
+    verdict = evaluate(_bash("cat <<EOF\n$(grep -r needle .)\nEOF", cwd=str(tmp_path)), allow_rewrite=True)
+
+    assert verdict.block == block(f"searching a tree that holds {tmp_path}/./.env", KIND_RECURSIVE)
+    assert verdict.rewrite is None
+
+
+@pytest.mark.feature("credential-guard-heredoc-substitutions")
+def test_a_spelled_heredoc_token_hides_no_later_heredoc_body() -> None:
+    reason = decide(_bash('cat <<AHHEREDOC9 "\n" <<EOF\n$(cat .env)\nEOF'))
+
+    assert reason is not None
+    assert reason == decide(_bash("cat .env"))
+
+
 AWK_ENVIRON_VALUE_READS = [
     "awk 'BEGIN{for(k in ENVIRON) if(k ~ /^AGENTIHOOKS_(HIVE|SWARM)/) print k\"=\"ENVIRON[k]}'",
     "gawk 'BEGIN{print ENVIRON[\"DATABASE_URL\"]}'",
@@ -941,6 +1018,36 @@ def test_an_awk_read_of_an_environment_value_is_refused(command: str) -> None:
 @pytest.mark.feature("credential-guard-refuses-awk-environ-values")
 @pytest.mark.parametrize("command", AWK_ENVIRON_NAME_ONLY)
 def test_an_awk_listing_of_environment_names_passes(command: str) -> None:
+    assert decide(_bash(command)) is None
+
+
+POD_ENVIRONMENT_DUMPS = [
+    ("kubectl exec mypod -- printenv GITHUB_TOKEN", "printing the value of GITHUB_TOKEN"),
+    ("kubectl exec -n ns mypod -c app -- printenv API_KEY", "printing the value of API_KEY"),
+    ("kubectl exec mypod -- env", "dumping the whole environment (env)"),
+    ("kubectl exec -it mypod -- printenv", "dumping the whole environment (printenv)"),
+    ("sudo kubectl -n ns exec mypod -- env | sort", "dumping the whole environment (env)"),
+]
+
+POD_ENVIRONMENT_NAME_ONLY = [
+    "kubectl exec mypod -- " + ENV_NAMES_SAFE,
+    "kubectl exec mypod -- env | wc -l",
+    "kubectl exec mypod -- printenv HOME",
+    "kubectl exec mypod -- ls env",
+    "kubectl -n env exec mypod -- ls",
+    "kubectl create job probe --image=busybox -- env",
+]
+
+
+@pytest.mark.feature("credential-guard-refuses-pod-environment-dumps")
+@pytest.mark.parametrize(("command", "what"), POD_ENVIRONMENT_DUMPS)
+def test_a_pod_environment_dump_without_a_shell_is_refused(command: str, what: str) -> None:
+    assert decide(_bash(command)) == block(what, KIND_ENVIRONMENT)
+
+
+@pytest.mark.feature("credential-guard-refuses-pod-environment-dumps")
+@pytest.mark.parametrize("command", POD_ENVIRONMENT_NAME_ONLY)
+def test_a_pod_environment_name_listing_passes(command: str) -> None:
     assert decide(_bash(command)) is None
 
 

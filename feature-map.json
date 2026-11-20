@@ -118,6 +118,23 @@
       ]
     },
     {
+      "id": "credential-guard-heredoc-substitutions",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-credential-guard-heredoc-substitution",
+      "behaviour": "The credential guard judges executable dollar and backtick command substitutions in unquoted heredoc bodies like stages, refusing credential reads and preserving recursive tree scans. Quoted delimiters keep their bodies literal for ordinary consumers. Literal body commands, process substitution text, escaped substitution markers and safe substitutions pass. Existing shell consumer checks still apply.",
+      "seam": "hooks.context.credential_guard.decide and evaluate on Bash heredoc payloads",
+      "rules": [
+        "credential-guard-heredoc-substitution"
+      ],
+      "tests": [
+        "tests/test_credential_guard.py::test_an_unquoted_heredoc_credential_substitution_is_refused",
+        "tests/test_credential_guard.py::test_a_quoted_heredoc_credential_substitution_stays_literal",
+        "tests/test_credential_guard.py::test_an_unquoted_heredoc_without_a_credential_substitution_passes",
+        "tests/test_credential_guard.py::test_a_heredoc_substitution_keeps_the_credential_tree_scan",
+        "tests/test_credential_guard.py::test_a_spelled_heredoc_token_hides_no_later_heredoc_body"
+      ]
+    },
+    {
       "id": "credential-guard-reads-heredoc-commands",
       "origin": "regression",
       "ordered_at": "2026-11-19",
@@ -715,6 +732,17 @@
         "tests/hive/test_join_report_restart.py::test_the_epoch_names_the_boot_and_the_tick_process_one_started_at",
         "tests/hive/test_join_report_restart.py::test_an_unreadable_epoch_is_empty",
         "tests/hive/test_join_report_restart.py::test_the_local_epoch_reads_this_hosts_boot_id_and_process_one"
+      ]
+    },
+    {
+      "id": "hive-join-heartbeat-ends-departed-member-reports",
+      "rules": ["hive-restart-check-ignores-departed-members"],
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-roll-ghost-agents",
+      "behaviour": "After a pod replacement expires its old hive member, the replacement heartbeat ends the departed members running join reports without refreshing them; current and concurrent live members and reports with unknown ownership keep their heartbeats.",
+      "seam": "registry.join and join_report.heartbeat through join_report.listing and join_report.live",
+      "tests": [
+        "tests/hive/test_join_report_restart.py::test_a_replacement_member_ends_reports_of_the_departed_pod_after_its_live_window"
       ]
     },
     {
@@ -4506,6 +4534,20 @@
       ]
     },
     {
+      "id": "pooled-claimant-reply",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2807",
+      "behaviour": "A backend master answers a claimant item the master inbox pool gave it: msg reply skips the task owner fence only for an item still at the seat that claimed it from the pool when the replier acts for that seat, so the answer reaches the claimant and closes the item done. A new msg send from that master to a foreign task's claimant, or to the claimant it just answered, is still refused by the fence, and an item the pool gave another master stays fenced.",
+      "seam": "msg reply through scripts.inbox.cli._apply_reply, InboxStore.reached_through_pool and master_fence.check_send",
+      "tests": [
+        "tests/test_swarm_v2_task_owner.py::test_a_backend_master_replies_to_a_claimant_item_it_took_from_the_master_pool",
+        "tests/test_swarm_v2_task_owner.py::test_a_pooled_reply_leaves_a_new_message_to_a_foreign_task_claimant_fenced",
+        "tests/test_swarm_v2_task_owner.py::test_a_pooled_reply_grants_no_unsolicited_message_to_the_claimant_it_answered",
+        "tests/test_swarm_v2_task_owner.py::test_a_backend_master_cannot_answer_a_claimant_item_the_pool_gave_the_front_door",
+        "tests/test_swarm_v2_task_owner.py::test_a_replayed_pooled_reply_is_a_duplicate_and_never_a_fence_refusal"
+      ]
+    },
+    {
       "id": "swarm-launch-bounded-reads",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-bounded-reads-launch",
@@ -5170,6 +5212,35 @@
       ]
     },
     {
+      "id": "merge-priority-automatic-entry",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-merge-priority-doctrine",
+      "behaviour": "Focused or urgent tasks receive deferred priority when newly queued from the command or merge watcher, including recovery; testing entries stay in place, ordinary tasks keep FIFO order, existing entries and repositories without a queue receive no automatic move.",
+      "seam": "scripts.swarm.merge_queue.operate queue entry through cli.cmd_merge and ready initial and recovery queue paths",
+      "tests": [
+        "tests/swarm/test_queue_entry_priority.py::test_queue_entry_applies_focus_or_urgency_without_interrupting_tests",
+        "tests/swarm/test_queue_entry_priority.py::test_a_freeze_nearer_than_the_focus_keeps_the_queue_order",
+        "tests/swarm/test_queue_entry_priority.py::test_automatic_priority_tells_a_displaced_split_pull_owner_as_the_swarm",
+        "tests/swarm/test_queue_entry_priority.py::test_an_existing_queue_entry_does_not_repeat_automatic_priority",
+        "tests/swarm/test_queue_entry_priority.py::test_a_busy_priority_leaves_the_new_entry_queued_and_names_the_refusal",
+        "tests/swarm/test_queue_entry_priority.py::test_a_repository_without_a_queue_does_not_apply_automatic_priority",
+        "tests/swarm/test_queue_entry_priority.py::test_cli_queue_entry_supplies_automatic_priority",
+        "tests/swarm/test_queue_entry_priority.py::test_watcher_queue_entry_supplies_automatic_priority"
+      ],
+      "rules": ["merge-priority-missing-entry-callback"]
+    },
+    {
+      "id": "merge-priority-operator-lift",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-merge-priority-doctrine",
+      "behaviour": "An operator lift removes merge queue entries already under test and restores them behind the priority target in their original order; ordinary priority preserves those entries.",
+      "seam": "scripts.swarm.cli.cmd_merge through queue_priority.request and merge_queue.prioritize",
+      "tests": [
+        "tests/swarm/test_queue_priority.py::test_operator_lift_is_journaled"
+      ],
+      "rules": ["merge-priority-swallowed-lift"]
+    },
+    {
       "id": "merge-priority-moves-waiting-entries-at-once",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2604",
@@ -5750,6 +5821,18 @@
       "tests": [
         "tests/test_credential_guard.py::test_an_awk_read_of_an_environment_value_is_refused",
         "tests/test_credential_guard.py::test_an_awk_listing_of_environment_names_passes"
+      ]
+    },
+    {
+      "id": "credential-guard-refuses-pod-environment-dumps",
+      "origin": "regression",
+      "ordered_at": "2026-11-20",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-cred-guard-kubectl-printenv",
+      "behaviour": "The credential guard judges the words after -- of a kubectl exec as the command the pod runs, with no shell around it, so a printenv of a secret looking name and an env or a bare printenv that dumps the whole pod environment are refused with the environment alternative the same way as a local command, while the pod name only listing, a count of its lines, printenv of a name that does not look like a secret, an env word that is only an operand or a flag value, and a kubectl command that sets a container command after -- without exec pass.",
+      "seam": "hooks.context.credential_guard.env_dump_verdict, read by hooks.context.credential_guard.decide",
+      "tests": [
+        "tests/test_credential_guard.py::test_a_pod_environment_dump_without_a_shell_is_refused",
+        "tests/test_credential_guard.py::test_a_pod_environment_name_listing_passes"
       ]
     },
     {
@@ -7378,6 +7461,17 @@
       ]
     },
     {
+      "id": "kept-placing-steps-first-on-the-placement-worker",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-master-late",
+      "rules": ["kept-step-queues-behind-ready-sibling"],
+      "behaviour": "A sweep of the pass scheduler submits its ready kept steps before its other ready steps, so the kept critical steps master down and tick master, ready in the same sweep as quota notice, run first on the pass's one placement worker instead of queueing behind quota notice's whole body and starting twenty to ninety seconds late.",
+      "seam": "engine._eager submission order through engine._kept_first, pool.Pass.placer",
+      "tests": [
+        "tests/tick/test_placement_worker.py::test_a_kept_lock_taking_step_ready_beside_a_slower_one_ahead_of_it_runs_first_on_the_placement_worker"
+      ]
+    },
+    {
       "id": "tick-step-budget-from-start",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-step-abandon-before-run",
@@ -7646,6 +7740,17 @@
       "tests": [
         "tests/swarm/test_execution_archive.py::test_archive_prunes_intents_for_the_rows_it_archives",
         "tests/swarm/test_execution_archive.py::test_reconcile_archives_dead_rows"
+      ]
+    },
+    {
+      "id": "swarm-archive-prunes-stale-intents",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-archive-stale-intents",
+      "behaviour": "ExecutionRegistry.archive drops every controller-intents row whose execution is no longer current, including rows left by executions archived before intents were pruned, so every fenced registry write stops reading, decoding and copying that backlog; an intents row that never carried an execution_id matching its own key is never an execution admission and survives.",
+      "seam": "ExecutionRegistry.archive prunes intents whose execution left the executions section",
+      "tests": [
+        "tests/swarm/test_execution_archive.py::test_archive_prunes_intents_left_by_executions_archived_before_the_prune",
+        "tests/swarm/test_execution_archive.py::test_archive_keeps_an_intents_entry_that_is_not_an_execution_admission"
       ]
     },
     {
@@ -9837,6 +9942,18 @@
       ]
     },
     {
+      "id": "lab-result-upload-signing",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-worker-upload-forbidden",
+      "behaviour": "The CI lab scheduler's storage client presigns each worker result upload with SigV4 query auth over the host alone, so the worker's PUT of a unit's report, which carries the form Content-Type that urllib adds, is accepted and the report lands under lab/uploads/<job>/, while a URL changed to name another object is refused. A SigV2 URL signs the Content-Type, so the same PUT is refused with 403 SignatureDoesNotMatch, as MinIO refused 362 static unit results on 20 November.",
+      "seam": "scripts.ci_lab.scheduler.storage signing through scripts.ci_lab.objects.Uploads, put by scripts.ci_lab.worker.Client.put to a local bucket that checks presigned SigV2 and SigV4 signatures over the request it received; the client settings observed through scripts.ci_lab.scheduler.main",
+      "tests": [
+        "tests/ci_lab/test_result_upload.py::test_a_worker_put_of_a_report_lands_through_the_upload_url_the_scheduler_storage_signs",
+        "tests/ci_lab/test_result_upload.py::test_an_upload_url_the_scheduler_storage_signs_writes_only_the_object_it_names",
+        "tests/ci_lab/test_result_upload.py::test_the_bucket_refuses_a_sigv2_upload_url_for_the_content_type_urllib_adds_to_the_worker_put"
+      ]
+    },
+    {
       "id": "lab-worker-executors",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2533",
@@ -10915,6 +11032,16 @@
       ]
     },
     {
+      "id": "reused-coverage-scripts-module",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-coverage-step-drop-fallback",
+      "behaviour": "The unit job's Keep the reused tests' dev coverage step runs the grader checkout's scripts.reused_coverage alone. A grader checkout whose interpreter cannot import the tests package keeps the reused tests' dev coverage moved onto the head's lines, and a grader checkout that keeps the filter only under the tests package never runs that copy.",
+      "seam": "the Keep the reused tests' dev coverage step run text executed in a fake grader checkout",
+      "tests": [
+        "tests/test_reused_coverage.py::test_the_unit_shards_keep_reused_coverage_with_the_scripts_filter_alone_and_never_the_tests_package"
+      ]
+    },
+    {
       "id": "lab-remote-heads",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2645",
@@ -11306,6 +11433,60 @@
         "tests/swarm/test_execution_unchanged_put.py::test_a_document_layout_put_does_not_precheck_the_whole_document",
         "tests/swarm/test_execution_unchanged_put.py::test_a_lease_that_moves_during_the_check_takes_the_locked_path",
         "tests/swarm/test_execution_unchanged_put.py::test_an_ended_record_is_retained_unless_revival_is_explicit"
+      ]
+    },
+    {
+      "id": "guard-stripping-keeps-heredoc-delimiter-line",
+      "origin": "regression",
+      "ordered_at": "2026-11-20",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2721",
+      "behaviour": "The shared command stripping drops only the body of a terminated heredoc and keeps the rest of its delimiter line, for unquoted, single quoted and dash heredocs. The terminator is a whole line holding only the delimiter word, which may be indented and may close a command substitution; an unterminated opener hides nothing, and a << inside an arithmetic expansion or command, spaced or not and on one line or several, opens no heredoc. Branch guard therefore refuses a guarded command chained after the delimiter, on a line after an indented terminator, after an unterminated opener or after a shift operator the same way as at the top level, even when a later line starts with the shift operand; prod lockdown, which reads tree-sitter command nodes, keeps refusing a command chained after the delimiter; and a guarded command inside a terminated body, including one closed with its command substitution, stays data.",
+      "seam": "hooks.context._strip.strip_non_command_content, observed through hooks.context.branch_guard.check_branch_guard and hooks.context.prod_lockdown.check_prod_lockdown on Bash payloads",
+      "tests": [
+        "tests/context/test_strip_heredoc_delimiter_line.py::test_stripping_keeps_the_delimiter_line_and_drops_the_body",
+        "tests/context/test_strip_heredoc_delimiter_line.py::test_stripping_blanks_a_shift_inside_arithmetic",
+        "tests/context/test_strip_heredoc_delimiter_line.py::test_branch_guard_refuses_a_push_to_main_after_the_delimiter",
+        "tests/context/test_strip_heredoc_delimiter_line.py::test_prod_lockdown_refuses_a_release_run_after_the_delimiter",
+        "tests/context/test_strip_heredoc_delimiter_line.py::test_branch_guard_refuses_a_push_on_a_line_after_an_opener",
+        "tests/context/test_strip_heredoc_delimiter_line.py::test_a_guarded_command_inside_the_body_stays_data",
+        "tests/context/test_strip_heredoc_delimiter_line.py::test_a_body_closed_with_its_command_substitution_stays_data"
+      ]
+    },
+    {
+      "id": "swarm-tick-lock-renewal-journal",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2785",
+      "behaviour": "Each tick lock renewal the pass step hook tries, and each hook call that found another call holding the hook, journals one swarm_tick_lock_renewal line with the seconds it waited for the hook lock, the seconds it held it, the seconds the renewal's Redis calls took whether they succeeded or raised (null without a renewal), whether it was blocked and whether the renewal succeeded, and the pass id; a failed renewal still raises, and a free call inside the renewal interval, or after the pass revoked the hook, journals nothing.",
+      "seam": "The pass step hook scripts.swarm.tick_activity.Renewal and its journal function",
+      "tests": [
+        "tests/swarm/test_tick_lock_renewal_journal.py::test_a_renewal_journals_its_wait_hold_and_redis_seconds_under_its_pass",
+        "tests/swarm/test_tick_lock_renewal_journal.py::test_a_failed_renewal_journals_its_redis_seconds_and_still_raises",
+        "tests/swarm/test_tick_lock_renewal_journal.py::test_a_call_inside_the_interval_that_found_the_hook_free_journals_nothing",
+        "tests/swarm/test_tick_lock_renewal_journal.py::test_a_call_that_found_the_hook_held_journals_its_wait_even_without_a_renewal",
+        "tests/swarm/test_tick_lock_renewal_journal.py::test_a_revoked_hook_that_found_itself_free_journals_nothing"
+      ]
+    },
+    {
+      "id": "swarm-tick-ledger-call-journal",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2785",
+      "behaviour": "Inside a tick pass every request the in process ledger client makes journals one swarm_tick_ledger_call line naming the swarm, pass id, ledger, method, path without its query and outcome (ok, the refusal's HTTP status, or error) with its wall seconds, and a refused or failed request still raises; outside a pass a request journals nothing.",
+      "seam": "scripts.tick.adapters.database_ledger.client and its journaled transport",
+      "tests": [
+        "tests/tick/test_ledger_call_journal.py::test_a_read_inside_a_pass_journals_its_ledger_route_outcome_and_wall_seconds",
+        "tests/tick/test_ledger_call_journal.py::test_a_refused_write_inside_a_pass_journals_its_status_and_still_raises",
+        "tests/tick/test_ledger_call_journal.py::test_a_failure_other_than_a_refusal_inside_a_pass_journals_an_error",
+        "tests/tick/test_ledger_call_journal.py::test_a_request_outside_a_pass_journals_nothing"
+      ]
+    },
+    {
+      "id": "swarm-tick-joined-budget",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2785",
+      "behaviour": "The engine reads a step's budget once in the pass's own context and uses that value for the step deadline, the join and the step's timed record, so the step finished line logs the live budget the engine joined on, never the floor a worker thread's empty context reads.",
+      "seam": "scripts.tick.engine._run_once and the worker it starts",
+      "tests": [
+        "tests/tick/test_engine_joined_budget.py::test_the_step_finished_line_logs_the_live_budget_the_engine_joined_on"
       ]
     }
   ],

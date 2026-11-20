@@ -331,6 +331,7 @@ def test_a_document_layout_put_does_not_precheck_the_whole_document(
         pytest.fail("document layout must go directly to the locked path")
 
     monkeypatch.setattr(fencing.WholeDocumentRecords, "record", refused_read)
+    monkeypatch.setattr(execution.ExecutionRegistry, "_unchanged", refused_read)
     acquires, writes = _watched(monkeypatch)
 
     store.put_agent("fixture", current)
