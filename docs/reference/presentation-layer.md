@@ -381,8 +381,8 @@ print(f"{stats.total_calls} calls, {stats.total_tt:.3f} s")
 stats.sort_stats("cumulative").print_stats(r"writer_copy|fragments", 6)
 ```
 
-Two runs of each on one host gave, Before on the dev commit just before pull
-request 12050 merged and After on dev at `848f98e4d`:
+Two runs of each on one host gave, Before on dev at `157164982`, the parent of
+the merge commit of pull request 12050, and After on dev at `848f98e4d`:
 
 | Code | Calls | `detached` calls | `written`, s |
 |---|---|---|---|
@@ -464,7 +464,7 @@ The [ledger load gate](ledger-load-gate.md) stayed green
 | Operations CPU median stayed near 0.43 s | The server still runs code from before pull request 5136. Restart it on current code and read a fresh hour. |
 | Refresh CPU per cross pod write near 0.045 s on a large ledger | The pod still runs code from before pull request 8569, or every refresh is a whole rebuild. Check the release, then check that writers record their changed rows: an unrecorded generation bump forces a whole rebuild on every other pod ([writer floor](shared-ledger-database.md#the-writer-floor)). |
 | Wall p95 high while CPU median is low | The time is spent outside the request thread's CPU: read `lock_wait_seconds` and `other_wall_seconds` in the [request metrics](ledger-request-metrics.md#summary-view) before blaming the write path. |
-| A task write spends about a second of CPU on a ledger with tens of thousands of stamp records, and bursts of task writes wait ten seconds or more for the ledger's lock | The writing process runs code from before pull request 12050 and rebuilds every stamp record under the lock. Every writer runs the write in its own process ([Who writes and how](ledger-write-path.md#who-writes-and-how)), so check the release of every process that writes the ledger: the ledger API service, agents' ledger commands, the tick, the hub and the controller, on the workstation and on each hive. To check a checkout, run the [profile](#profile-one-rebuild) on it: about 82000 `detached` calls instead of about 6000 mean the old code |
+| A task write spends about a second of CPU on a ledger with tens of thousands of stamp records, and bursts of task writes wait ten seconds or more for the ledger's lock | The writing process runs code from before pull request 12050 and rebuilds every stamp record under the lock. Every writer runs the write in its own process ([Who writes and how](ledger-write-path.md#who-writes-and-how)), so check the release of every process that writes the ledger: the ledger API service, agents' ledger commands, the tick, the hub and the controller. Hive Pods run their own release; `agentihooks hive list` shows it, as the [write path troubleshooting](ledger-write-path.md#troubleshooting) describes. To check a checkout, run the [profile](#profile-one-rebuild) on it: about 82000 `detached` calls instead of about 6000 mean the old code |
 | One write takes much longer than a task write on the same ledger | It dropped or reordered stamp records, or inserted one ahead of the stored keys, so `replaced` returned `None` and the stamps rebuild walked every record. This is expected for such a write. A task write that only replaces records or adds them at the end takes the short stamps path, while the whole ledger passes listed under [Measured cost](#measured-cost) still run |
 | A stamp record changed in the writer's state but the database and the page keep the old one | Code edited the record in place. Assign a new record to its key instead: `stamps[key] = {**stamps[key], "rev": 2}` |
 
