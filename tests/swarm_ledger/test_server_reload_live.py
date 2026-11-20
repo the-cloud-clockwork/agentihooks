@@ -168,3 +168,35 @@ def test_a_malformed_answer_after_the_successor_is_named_fails_the_reload_test(
     with pytest.raises(AssertionError, match="BadStatusLine"):
         test_a_reload_hands_over_without_a_failed_or_slow_request(tmp_path, ledger_port)
     assert malformed_pids
+
+
+@pytest.mark.feature("reload-thread-exceptions-fail-tests")
+def test_an_unhandled_reload_thread_exception_fails_pytest(tmp_path: Path) -> None:
+    probe = tmp_path / "test_reload_thread_plant.py"
+    probe.write_text(
+        Path(__file__).read_text()
+        + """
+
+def test_planted_reload_thread_exception() -> None:
+    def read_pid() -> None:
+        raise RuntimeError("planted reload pid read failure")
+
+    worker = threading.Thread(target=read_pid)
+    worker.start()
+    worker.join()
+"""
+    )
+    config = tmp_path / "pytest.ini"
+    config.write_text("[pytest]\nmarkers =\n    wall_clock\n    feature(id)\n")
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-c", str(config), f"{probe}::test_planted_reload_thread_exception"],
+        cwd=tmp_path,
+        env={**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "PYTEST_ADDOPTS": "", "PYTEST_PLUGINS": ""},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    output = result.stdout + result.stderr
+    assert result.returncode == 1, output
+    assert "PytestUnhandledThreadExceptionWarning" in output
+    assert "planted reload pid read failure" in output
