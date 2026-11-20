@@ -1005,7 +1005,9 @@ domain `hook:<key>`, in its `reads`, as `urgent hold` and the other
 grades only `pass:<key>` declarations. Each site hook declares the domains it
 reads and writes for its site in `scripts.swarm.cli.WRAPPER_HOOK_KEYS` and
 `scripts.tick.sites.TICK_HOOK_KEYS`. A live site hook reads the box itself
-rather than a `DeclaredBox` view, so `UndeclaredRead` never names one.
+rather than a `DeclaredBox` view, so `UndeclaredRead` never names one; a
+separate runtime guard checks its reads, described under
+[Site hook reads](#site-hook-reads).
 
 To clear a refusal, declare the key the message names on the step it names:
 
@@ -1035,9 +1037,68 @@ of `running` through `tick` raises the `UndeclaredRead` for `verify` and
 | `test_recorded_passes_read_only_declared_values` in `tests/swarm/tick_scenarios/test_characterisation.py` | Every scenario through both entry points with each site hook reading a `DeclaredBox` named `hook <site>` over the domains its site declares: no hook read refused, and no hook storing a key its writes do not declare |
 | `tests/tick/test_pass_edges.py` | Every scenario replayed through both entry points with the reader in place, so a refused read in a held step fails that scenario's case with the `UndeclaredRead`; see [The pass edges test](#the-pass-edges-test) |
 
-The feature map entry `swarm-tick-declared-reads` links this behaviour to those
-tests. The refusal was delivered by
+The feature map entry `swarm-tick-declared-reads` links this behaviour to the
+first two rows; the pass edges tests belong to the entry
+`swarm-tick-pass-edges`. The refusal was delivered by
 [pull request 10541](https://github.com/the-cloud-clockwork/agentihooks/pull/10541).
+
+#### Site hook reads
+
+`scripts.tick.hook_reads` guards the pass box reads of the live site hooks.
+`TickSites.hooks` (`scripts.tick.sites`) and the wrapper's `hooks`
+(`scripts.swarm.cli`) build their hooks on every pass through
+`hook_reads.guarded`, with the box keys each site may read:
+
+| Map | Site | Keys its hook may read |
+| --- | --- | --- |
+| `scripts.tick.sites.TICK_HOOK_READS` | `agents` | `config`, `doc`, `rows` |
+| `scripts.tick.sites.TICK_HOOK_READS` | `tasks` | `config` |
+| `scripts.swarm.cli.WRAPPER_HOOK_READS` | `wrapper relay` | `judged` |
+| `scripts.swarm.cli.WRAPPER_HOOK_READS` | `wrapper view` | `agents` |
+
+A site missing from its map may read no key. That includes `wrapper phases`,
+whose hook stores the pass state under `doc` and then reads `doc` back to
+record the open fixer branches for the panic sweep, so every pass that reaches
+that read logs `site hook wrapper phases read pass box doc without declaring it`
+under `observe` and raises from the hook under `enforce`. These maps hold plain
+keys, not domains. While a guarded hook runs on its
+thread, `PassBox.__getitem__`, `PassBox.get` and `PassBox.__contains__` pass the
+key to `hook_reads.seen`; listing, counting and copying the box are not
+checked, and neither is a read made outside a hook, such as a step's read
+through its `DeclaredBox` view. A read of a key the site does not list is
+handled by the mode `AGENTIHOOKS_TICK_HOOK_READS` names in the environment of
+the process that runs the pass, read again each time a pass builds its hooks:
+
+| Mode | An undeclared read |
+| --- | --- |
+| `observe`, the default, also used for an unset or unknown value | Logs a warning on the `scripts.tick.hook_reads` logger and returns its answer |
+| `enforce` | Raises `scripts.tick.hook_reads.UndeclaredHookRead`, a `RuntimeError`, from the hook |
+| `off` | Not checked: `guarded` returns the hooks unwrapped |
+
+The value is stripped and lowercased, so `ENFORCE ` selects `enforce`. The
+warning and the exception carry the same text:
+
+```text
+site hook <site> read pass box <key> without declaring it
+```
+
+To clear it, add the key to that site's set in `TICK_HOOK_READS` or
+`WRAPPER_HOOK_READS`, and update
+`test_each_site_hook_declares_exactly_the_box_keys_it_reads`, which pins both
+maps. When the key is one a step or another hook stores, also add its domain to
+the site's reads in `TICK_HOOK_KEYS` or `WRAPPER_HOOK_KEYS`:
+`test_recorded_passes_read_only_declared_values` reads each hook through a
+`DeclaredBox` over those domains.
+
+`tests/tick/test_hook_reads.py` holds the observe warning for a tick site hook,
+the enforce exception for a wrapper site hook, the real tick `agents` and
+`tasks` hooks and wrapper `relay` and `view` hooks reading only their declared
+keys under `enforce`, both maps, `off` returning the hooks
+unwrapped, an unset or unknown value observing, reads outside a hook or after
+it ends going unchecked, and each of the three keyed reads reaching the guard.
+The feature map entry `swarm-tick-hook-reads` links them. The guard was
+delivered by
+[pull request 10555](https://github.com/the-cloud-clockwork/agentihooks/pull/10555).
 
 #### The pass edges test
 
@@ -1716,6 +1777,8 @@ The delivered proof and limitations are recorded in
 | `test_pass_edges` names `reads pass <key> without needing its writer [<writers>]` | No listed writer is on the reader's `needs` path; add one of them, or a step that needs it, to the reader's `needs` |
 | `test_pass_edges` names `writes pass <key> without declaring it` | The step stores that key in the pass box; add `pass_domain("<key>")` to its `writes` |
 | `UndeclaredRead: step <name> reads pass value <key> it does not declare` from a tick pass or a test | Step `<name>` read `<key>` through its reader or its box view with no `pass:<key>` or `hook:<key>` domain in its `reads` or `writes`; declare it as shown under [Undeclared pass reads](#undeclared-pass-reads). A `<name>` of `hook <site>` comes from `test_recorded_passes_read_only_declared_values`: add the domain to that site's reads in `WRAPPER_HOOK_KEYS` or `TICK_HOOK_KEYS` |
+| `site hook <site> read pass box <key> without declaring it` as a warning from the `scripts.tick.hook_reads` logger | The live hook of `<site>` read `<key>` outside its set in `TICK_HOOK_READS` or `WRAPPER_HOOK_READS`; the read still answered. Declare the key as shown under [Site hook reads](#site-hook-reads). The line naming `wrapper phases` and `doc` comes from the phases hook's own read of the pass state it stored, described in that section |
+| `UndeclaredHookRead: site hook <site> read pass box <key> without declaring it` | The same read with `AGENTIHOOKS_TICK_HOOK_READS=enforce`; declare the key as shown under [Site hook reads](#site-hook-reads) |
 | `<n> registered steps never ran: [<names>]` from the covering pass edges test | No scenario in `COVERING` runs the named steps; add a scenario that runs them to `COVERING`. See [The pass edges test](#the-pass-edges-test) |
 | A `test_pass_edges` case prints a thread dump at 45 seconds or its worker crashes at 60 seconds in CI | Each case replays one scenario, named in its id, and took at most 6.49 seconds when the split landed; that scenario's replay has slowed. A stack dump is one sample of where each thread was, not proof of a hang |
 | A critical step is recorded late with no error | It needs a slow lane step, so it was handed off and waited for that step while the critical deadline ran out. Drop the need or keep the needed step critical |
