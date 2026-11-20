@@ -249,7 +249,7 @@ def test_a_stale_controller_epoch_raises_the_same_way_on_both_paths(
     store: RedisStore, agent: AgentRecord, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     current = store.start_execution("fixture", agent)
-    token = lease.EPOCH.set(5)
+    token = lease.EPOCH.set(5)  # pyright: ignore[reportArgumentType]
     try:
         with pytest.raises(SwarmError, match=lease.STALE):
             store.put_agent("fixture", current)
