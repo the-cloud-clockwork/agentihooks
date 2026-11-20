@@ -4381,6 +4381,16 @@
       ]
     },
     {
+      "id": "hive-drain-order-one-life",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2792",
+      "behaviour": "A hive drain or release stop hand off order reaches only the agent life running on the hive it names; a successor in the same seat on another hive never reads it, and the order closes when that agent leaves its seat.",
+      "seam": "hive remove order addressing and inbox exit settle",
+      "tests": [
+        "tests/hive/test_remove.py::test_a_release_roll_order_reaches_only_the_agent_on_the_draining_hive_and_closes_when_it_leaves_its_seat"
+      ]
+    },
+    {
       "id": "reply-wait-reads-every-inbox-world",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2152",

@@ -14,6 +14,7 @@ from scripts.handoff import transfers
 from scripts.handoff.transfers import first_next
 from scripts.hive import auth, cli, create, create_github, create_render, join_report, machine, registry, remove
 from scripts.hive.placement import choose, place_master
+from scripts.inbox import exits
 from scripts.inbox.seats import SeatRegistry
 from scripts.inbox.store import InboxStore
 from scripts.swarm.store import AgentRecord
@@ -931,6 +932,48 @@ def test_a_release_roll_withdraws_every_unanswered_order_when_its_drain_ends_so_
         assert [(item.state, item.reason) for item in _orders(store, seat)] == [("cancelled", _withdrawn(member))]
         SeatRegistry(store.redis).occupy(seat, successor, 1)
         assert InboxStore(store.redis).open_mail(successor) == []
+
+
+class Relieved(Successor):
+    def __init__(self, store: Any, seat: str, successor: str) -> None:
+        super().__init__(store)
+        self.seat, self.successor = seat, successor
+        self.held: list[str] = []
+        self.read: list[str] = []
+
+    def sleep(self, seconds: float) -> None:
+        inbox = InboxStore(self.store.redis)
+        for agent in self.store.agents(SLUG):
+            if agent.seat == self.seat and agent.name != self.successor:
+                self.held = [item.text for item in inbox.open_mail(agent.name)]
+                exits.settle(inbox, agent.name, self.seat, "handed off")
+                self.store.put_agent(SLUG, replace(agent, state="finished"))
+        SeatRegistry(self.store.redis).occupy(self.seat, self.successor, 2)
+        successor = AgentRecord(self.successor, "ci", "t4", seat=self.seat, hive="hive-one", state="working")
+        self.store.put_agent(SLUG, successor)
+        self.read = [item.text for item in inbox.open_mail(self.successor)]
+        self.slept += 1
+        self.now += seconds
+
+
+@pytest.mark.feature("hive-drain-order-one-life")
+def test_a_release_roll_order_reaches_only_the_agent_on_the_draining_hive_and_closes_when_it_leaves_its_seat(
+    store: Any, tmp_path: Path
+) -> None:
+    member = _member(store)
+    seat = f"ci-4@{SLUG}"
+    store.put_agent(SLUG, AgentRecord("ci@4", "ci", "t4", seat=seat, hive=member, state="working"))
+    SeatRegistry(store.redis).occupy(seat, "ci@4", 1)
+    clock = Relieved(store, seat, "ci@5")
+
+    remove.settle(store, member, 3600, _host(clock, Run(), tmp_path))
+
+    assert clock.read == []
+    assert clock.held == [remove.ROLL.format(hive=member, slug=SLUG)]
+    assert [(item.state, item.reason) for item in _orders(store, "ci@4")] == [
+        ("done", "done: ci@4 handed off; its hive hand off order ended with it")
+    ]
+    assert _orders(store, seat) == []
 
 
 def test_a_release_roll_keeps_the_outcome_of_an_order_its_agent_answered(store, tmp_path):
