@@ -11,6 +11,7 @@ from scripts.ci_lab.outcomes import PASSED
 from tests.ci_lab import test_executors as support
 from tests.ci_lab.test_scheduler import BASE, HEAD_A, HEAD_B, TREE, Run
 from tests.ci_lab.test_scheduler import lab as lab
+from tests.ci_lab.test_worker import Signer
 
 
 @pytest.mark.feature("lab-worker-manifest")
@@ -41,7 +42,7 @@ def test_a_leased_batch_carries_its_manifest_to_an_empty_worker_volume(
         run.push(head, lane=head)
     run.tick(1000)
     routes = lease_api.ControlRoutes(run.lab.client, "", lambda: 0)
-    server = lease_api.serve("127.0.0.1", 0, run.leases(), run.lab.objects, routes)
+    server = lease_api.serve("127.0.0.1", 0, run.leases(), Signer("http://unused"), routes)
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
