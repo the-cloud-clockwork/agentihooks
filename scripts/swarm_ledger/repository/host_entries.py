@@ -52,9 +52,9 @@ def write(file: Path, generation: int, text: str) -> None:
     staged = file.with_name(file.name + uuid.uuid4().hex)
     try:
         file.parent.mkdir(parents=True, exist_ok=True)
-        with os.fdopen(os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w", encoding="utf-8") as stream:
-            stream.write(str(generation) + "\n")
-            stream.write(text)
+        with os.fdopen(os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as stream:
+            stream.write(str(generation).encode() + b"\n")
+            stream.write(text.encode())
         os.replace(staged, file)
     except OSError:
         with suppress(OSError):

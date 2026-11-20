@@ -189,7 +189,7 @@ def test_a_copy_is_adopted_only_by_its_own_database_and_ledger(tmp_path: Path) -
     copies.keep("ledger", Entry(3, json.dumps(STATE), STATE), True)
     adopted = copies.adopt("ledger", 3)
     assert adopted is not None
-    assert (adopted.generation, adopted.mutable()) == (3, STATE)
+    assert (adopted.generation, adopted.mutable(), json.loads(adopted.text)) == (3, STATE, STATE)
     assert host_entries.Copies(tmp_path, "postgresql://other/ledgers").adopt("ledger", 3) is None
     assert copies.adopt("other", 3) is None
 
