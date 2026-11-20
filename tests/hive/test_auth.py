@@ -214,7 +214,9 @@ def test_a_member_writes_its_own_inbox_and_readings_and_no_other_members(suffix,
         ("names:engineer@0001-0001", False),
     ],
 )
-def test_a_member_writes_the_keys_a_worker_uses_for_done_ready_park_wait_and_status(suffix: str, writable: bool) -> None:
+def test_a_member_writes_the_keys_a_worker_uses_for_done_ready_park_wait_and_status(
+    suffix: str, writable: bool
+) -> None:
     from fnmatch import fnmatchcase
 
     key = f"{ROOT}:{suffix}"
