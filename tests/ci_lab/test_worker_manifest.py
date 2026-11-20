@@ -12,6 +12,7 @@ from scripts.ci_lab import executors, expand_tests, lease_api, queue, run_tests,
 from scripts.ci_lab.digests import Toolchain
 from scripts.ci_lab.objects import manifest_folder
 from scripts.ci_lab.outcomes import PASSED
+from scripts.ci_lab.units import Unit
 from tests.ci_lab import test_executors as support
 from tests.ci_lab.test_scheduler import BASE, HEAD_A, HEAD_B, TREE, Run
 from tests.ci_lab.test_scheduler import lab as lab
@@ -41,7 +42,9 @@ def test_a_leased_batch_carries_its_manifest_to_an_empty_worker_volume(
             if unlisted
             else expand_tests.units(manifest, tree, {}, {}, toolchain)
         )
-        plans[head] = scheduler.Plan(TREE, BASE, {"unit": units}, manifest=head)
+        plans[head] = scheduler.Plan(
+            TREE, BASE, {"unit": units, "lint": (Unit("static", f"static-{name}", ("lint",)),)}, manifest=head
+        )
         expected[head] = {"tests": {} if unlisted else {test: record}}
         trees[head] = support.folder(tmp_path, name, {executors.venvs.LOCKFILE: "lock", path: tree[path].decode()})
     run = lab(plans)
@@ -59,17 +62,24 @@ def test_a_leased_batch_carries_its_manifest_to_an_empty_worker_volume(
     thread.start()
     try:
         client = worker.Client(f"http://127.0.0.1:{server.server_address[1]}")
-        leases = client.lease("worker", 2, frozenset(), 0)
+        leases = client.lease("worker", 4, frozenset(), 0)
     finally:
         server.shutdown()
         server.server_close()
         thread.join()
+    assert len(leases) == 4
     assert {lease.head for lease in leases} == {HEAD_A, HEAD_B}
     monkeypatch.setattr(executors.venvs, "venv_for", support.Recorder((tmp_path / "venv", False)))
     verdict = run_tests.Verdict(PASSED, False, (), {}, 1, tmp_path / "log", tmp_path / "coverage")
     ran = support.Recorder(verdict)
     monkeypatch.setattr(executors.run_tests, "run", ran)
     for lease in leases:
+        if lease.unit.kind == "static":
+            assert lease.unit.manifest == ""
+            job = run.engine.queue.job(lease.job)
+            assert job is not None
+            assert job.unit.manifest == ""
+            continue
         pod = support.pod_of(tmp_path / lease.head, support.FakeWorktrees(trees))
         suite = executors.Suite(pod.root / "manifest.json", pod.root / "flakes.jsonl")
         assert not suite.manifest.exists()
@@ -96,4 +106,8 @@ def restore_old_schema(run: Run, manifests: dict[str, dict[str, Any]], keep_jobs
                 record["outside"] = []
         run.lab.objects.write_once(path, json.dumps(dep_manifest.pack(manifest)).encode())
     old = run.engine
+    run.engine = scheduler.Scheduler(run.lab.client, run.lab.objects, old.ports, old.settings)
+    for state in run.grades():
+        path = f"{manifest_folder(scheduler._slug(state.repo))}{state.manifest}.json"
+        run.lab.objects.remove(path)
     run.engine = scheduler.Scheduler(run.lab.client, run.lab.objects, old.ports, old.settings)
