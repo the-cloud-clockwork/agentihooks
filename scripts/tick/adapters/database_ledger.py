@@ -4,6 +4,8 @@ path every swarm, agent and service client reads and writes a ledger through; th
 import io
 import json
 import logging
+import sys
+import time
 import urllib.error
 from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
@@ -13,6 +15,7 @@ from email.message import Message
 from typing import Any, cast
 from urllib.parse import urlsplit
 
+from scripts.swarm import timing
 from scripts.swarm_ledger.api import client as api_client
 from scripts.swarm_ledger.api import resources as api_resources
 from scripts.swarm_ledger.api import routes as api_routes
@@ -22,7 +25,7 @@ from scripts.swarm_ledger.api.errors import APIError
 from scripts.swarm_ledger.api.services import Services
 from scripts.swarm_ledger.api_service import Writes
 
-__all__ = ["acting", "client", "exchanged", "principal", "request", "upload"]
+__all__ = ["acting", "client", "exchanged", "journaled", "principal", "request", "upload"]
 
 ACTING: ContextVar[str | None] = ContextVar("ledger_acting", default=None)
 routes: Any = api_routes
@@ -150,7 +153,36 @@ def request(slug: str, path: str, payload: dict[str, Any] | None = None) -> dict
 
 def client(base: str, timeout: float) -> ResourceClient:
     """A ledger API client whose requests run the ledger server's route code in this process."""
-    return ResourceClient(base, {}, timeout, transport=request)
+    return ResourceClient(base, {}, timeout, transport=journaled)
+
+
+def journaled(slug: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Answer one ledger API request as ``request`` does; inside a tick pass, also journal one
+    ``swarm_tick_ledger_call`` line naming its ledger, method, path and outcome with its wall seconds."""
+    current = timing.PASS.get()
+    if current is None:
+        return request(slug, path, payload)
+    started = time.monotonic()
+    outcome = "error"
+    try:
+        reply = request(slug, path, payload)
+        outcome = "ok"
+        return reply
+    except urllib.error.HTTPError as exc:
+        outcome = str(exc.code)
+        raise
+    finally:
+        line = {
+            "event": "swarm_tick_ledger_call",
+            "slug": timing.SWARM.get(),
+            "pass_id": current["pass_id"],
+            "ledger": slug,
+            "method": "GET" if payload is None else "POST",
+            "path": urlsplit(path).path,
+            "outcome": outcome,
+            "wall_s": time.monotonic() - started,
+        }
+        print(json.dumps(line), file=sys.stderr, flush=True)
 
 
 def upload(slug: str, route: str, data: bytes, headers: Mapping[str, str]) -> dict[str, Any]:

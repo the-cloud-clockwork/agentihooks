@@ -108,9 +108,11 @@ def _run_once(step: Step, ctx: Context) -> StepRecord:
 
     A step still running at its budget is recorded late and left running in its daemon thread; its result is dropped.
     While that earlier run is alive, a new run of the same step for the same swarm is held: no thread starts and the
-    record reads held. Another swarm's run of that step is never held by it.
+    record reads held. Another swarm's run of that step is never held by it. The budget is read once, in the pass's
+    context, and the deadline, the join and the step's own record all use that one value.
     """
-    deadline = ctx.deadline.child(step.budget_s)
+    budget_s = step.budget_s
+    deadline = ctx.deadline.child(budget_s)
     clock = deadline.clock
     started = clock()
     outcome: list[Result | BaseException] = []
@@ -119,21 +121,23 @@ def _run_once(step: Step, ctx: Context) -> StepRecord:
     with _RUNNING_LOCK:
         earlier = _RUNNING.get(key)
         if earlier is not None and earlier.is_alive():
-            return StepRecord(step.name, 0.0, step.budget_s, held=True)
+            return StepRecord(step.name, 0.0, budget_s, held=True)
         tools = None if ctx.tools is None else ctx.tools.for_effects(step.effects)
         run = _Run()
         worker = Thread(
-            target=_record, args=(outcome, caller, step, Context(ctx.view, deadline, tools), run), daemon=True
+            target=_record,
+            args=(outcome, caller, step, Context(ctx.view, deadline, tools), run, budget_s),
+            daemon=True,
         )
         _RUNNING[key] = worker
         worker.start()
-    worker.join(step.budget_s)
+    worker.join(budget_s)
     if run.give_up():
         return _left(step, outcome, clock() - started)
     worker.join(END_GRACE_S)
     if not outcome:
         _lost_writes(step, CUT_EVENT)
-        return StepRecord(step.name, clock() - started, step.budget_s, cut=True)
+        return StepRecord(step.name, clock() - started, budget_s, cut=True)
     return _finished(step, outcome, clock() - started)
 
 
@@ -223,12 +227,15 @@ def _finished(step: Step, outcome: list[Result | BaseException], wall_s: float) 
     return StepRecord(step.name, wall_s, step.budget_s, result=found)
 
 
-def _record(outcome: list[Result | BaseException], caller: ContextCopy, step: Step, ctx: Context, run: _Run) -> None:
-    """Run ``step`` in the caller's copied context, recorded under its registered name, and append its result or the
-    error it raised; the run reads abandoned when ``run`` was given up at its budget before it ended."""
+def _record(
+    outcome: list[Result | BaseException], caller: ContextCopy, step: Step, ctx: Context, run: _Run, budget_s: float
+) -> None:
+    """Run ``step`` in the caller's copied context, recorded under its registered name with ``budget_s``, the budget
+    the pass joins it on, and append its result or the error it raised; the run reads abandoned when ``run`` was
+    given up at its budget before it ended."""
     try:
         outcome.append(
-            caller.run(timing.within, step.budget_s, step.run, ctx, lane=step.lane, name=step.name, on_end=run.end)
+            caller.run(timing.within, budget_s, step.run, ctx, lane=step.lane, name=step.name, on_end=run.end)
         )
     except BaseException as exc:
         outcome.append(exc)
