@@ -25,7 +25,7 @@ NON_GATING = {
     "hive-worker.yml": "proves the worker hive chart and image in kind and publishes the image",
     "swarm-image.yml": "builds and pushes the dev swarm image",
     "swarm-node-base.yml": "copies the locked worker base into the org registry",
-    "swarm-node-image.yml": "builds and qualifies the worker image and tags and publishes it only for a release",
+    "swarm-node-image.yml": "builds, qualifies and publishes the worker image and moves its dev tag; a release tags it",
 }
 
 
@@ -65,17 +65,21 @@ def _needed(jobs: dict[str, Any], name: str) -> set[str]:
 @pytest.mark.feature("promotion-dev-push-workflows-non-gating")
 def test_every_dev_push_workflow_outside_tests_sits_on_the_non_gating_list() -> None:
     workflows = {path.name: yaml.safe_load(path.read_text()) for path in (ROOT / ".github/workflows").glob("*.y*ml")}
-    triggers = {name: spec.get("on", spec.get(True, {})) for name, spec in workflows.items()}
-    fired = {name for name, events in triggers.items() if "push" in events and _admits_dev(events["push"])}
-    for _ in workflows:
-        names = {workflows[name].get("name") for name in fired}
-        fired |= {
-            name
-            for name, events in triggers.items()
+    names = {file: spec.get("name", f".github/workflows/{file}") for file, spec in workflows.items()}
+    triggers = {file: spec.get("on", spec.get(True, {})) for file, spec in workflows.items()}
+    fired = {file for file, events in triggers.items() if "push" in events and _admits_dev(events["push"])}
+    while (
+        chained := {
+            file
+            for file, events in triggers.items()
             if "workflow_run" in events
-            and names & set(events["workflow_run"]["workflows"])
             and _admits_dev(events["workflow_run"])
+            and {names[source] for source in fired} & set(events["workflow_run"]["workflows"])
         }
+        - fired
+    ):
+        fired |= chained
+    assert all(NON_GATING.values())
     assert sorted(fired - {"test.yml"}) == sorted(NON_GATING), (
         "a workflow that runs on a dev push outside the Tests run never gates promotion: "
         "move its gate into test.yml or list it in NON_GATING with the reason it does not gate"
@@ -85,7 +89,11 @@ def test_every_dev_push_workflow_outside_tests_sits_on_the_non_gating_list() -> 
 def _admits_dev(trigger: dict[str, Any] | None) -> bool:
     spec = trigger or {}
     if "branches" in spec:
-        return any(Path("dev").match(pattern) for pattern in spec["branches"])
+        admitted = False
+        for pattern in spec["branches"]:
+            if Path("dev").match(pattern.removeprefix("!")):
+                admitted = not pattern.startswith("!")
+        return admitted
     if "branches-ignore" in spec:
         return not any(Path("dev").match(pattern) for pattern in spec["branches-ignore"])
     return not {"tags", "tags-ignore"} & set(spec)
