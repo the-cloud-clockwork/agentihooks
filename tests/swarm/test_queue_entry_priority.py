@@ -12,11 +12,14 @@ _fixture = priority
 pytestmark = pytest.mark.unit
 
 
-def ledger_for(rank: str, targets: list[str]) -> SimpleNamespace:
+def ledger_for(rank: str, targets: list[str], frozen: tuple[str, ...] = ()) -> SimpleNamespace:
     task = {"id": "t9", "phase": "p", "rank": rank, "lane": "eng", "pr_url": URL, "state": "pr"}
     return SimpleNamespace(
         tasks_targeting=lambda slug, url: [task],
-        freezes=lambda slug: [{"verb": "focus", "target": target} for target in targets],
+        freezes=lambda slug: [
+            *({"verb": "focus", "target": target} for target in targets),
+            *({"verb": "freeze", "target": target} for target in frozen),
+        ],
         hierarchy=lambda slug: (
             [
                 {"node": "phases/p", "kind": "phase", "parent": "missions/m"},
@@ -56,6 +59,22 @@ def test_queue_entry_applies_focus_or_urgency_without_interrupting_tests(
     expected = ["P1", "P9", "P2", "P3"] if prioritized else ["P1", "P2", "P3", "P9"]
     assert [entry["pullRequest"]["id"] for entry in priority.queue.entries] == expected
     assert ("dequeue", 1) not in priority.queue.mutations
+
+
+@pytest.mark.feature("merge-priority-automatic-entry")
+@pytest.mark.parametrize(("focus", "frozen"), [("phases/p", "tasks/t9"), ("missions/m", "phases/p")])
+def test_a_freeze_nearer_than_the_focus_keeps_the_queue_order(
+    priority: SimpleNamespace, focus: str, frozen: str
+) -> None:
+    ledger = ledger_for("normal", [focus], (frozen,))
+    result = merge_queue.operate(
+        "queue",
+        URL,
+        run=priority.queue.run,
+        priority=lambda: queue_priority.automatic(priority.store, "sw", URL, ledger),
+    )
+    assert result["priority"] is None
+    assert [entry["pullRequest"]["id"] for entry in priority.queue.entries] == ["P1", "P2", "P3", "P9"]
 
 
 @pytest.mark.feature("merge-priority-automatic-entry")
