@@ -82,7 +82,7 @@ def test_an_unchanged_put_skips_the_write_lock_and_the_fenced_document_read(
 
     store.put_agent("fixture", current)
 
-    assert len(acquires) == (1 if layout == "document" else 0)
+    assert len(acquires) == (2 if layout == "document" else 0)
     assert len(writes) == (1 if layout == "document" else 0)
     assert len(reads) == (1 if layout == "document" else 0)
     assert store.execution("fixture", current.execution_id) == current
@@ -335,7 +335,7 @@ def test_a_document_layout_put_does_not_precheck_the_whole_document(
 
     store.put_agent("fixture", current)
 
-    assert acquires == [1]
+    assert acquires == [1, 1]
     assert writes == [1]
 
 
@@ -367,5 +367,28 @@ def test_a_lease_that_moves_during_the_check_takes_the_locked_path(
     finally:
         lease.EPOCH.reset(token)
 
-    assert acquires == [1]
+    assert acquires == [1, 1]
     assert calls == [fencing.BY_SEAT, "executions", fencing.BY_SEAT, "executions"]
+
+
+@pytest.mark.parametrize("revive", [False, True])
+@pytest.mark.feature("execution-put-unchanged-skips-lock")
+def test_an_ended_record_is_retained_unless_revival_is_explicit(
+    store: RedisStore, agent: AgentRecord, monkeypatch: pytest.MonkeyPatch, revive: bool
+) -> None:
+    current = store.start_execution("fixture", agent)
+    fencing.migrate_records(store, "fixture", writers_upgraded=True)
+    store.drop_agent("fixture", current.name, at=10)
+    dropped = store.execution("fixture", current.execution_id)
+    incoming = replace(current, pane_id="w9:p1", idle_ticks=2)
+    acquires, writes = _watched(monkeypatch)
+
+    if revive:
+        store.revive_agent("fixture", incoming)
+    else:
+        store.put_agent("fixture", incoming)
+
+    assert len(acquires) == int(revive)
+    assert len(writes) == int(revive)
+    assert store.execution("fixture", current.execution_id) == (incoming if revive else dropped)
+    assert [item.name for item in store.agents("fixture")] == ([incoming.name] if revive else [])

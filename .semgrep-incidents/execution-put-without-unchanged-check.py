@@ -1,10 +1,14 @@
-from typing import Any
+from typing import Any, Protocol
 
 from scripts.swarm import timing
 from scripts.swarm.execution import _writes
 
 
-class Unconditional:
+class Put(Protocol):
+    def put(self, slug: str, agent: Any) -> None: ...
+
+
+class Unconditional(Put):
     # ruleid: execution-put-without-unchanged-check
     def put(self: Any, slug: str, agent: Any) -> None:
         managed = self.managed(slug, agent.name)
@@ -12,7 +16,7 @@ class Unconditional:
             timing.timed(self._put, slug, agent, managed)
 
 
-class Prechecked:
+class Prechecked(Put):
     # ok: execution-put-without-unchanged-check
     def put(self: Any, slug: str, agent: Any) -> None:
         managed = self.managed(slug, agent.name)
@@ -22,7 +26,7 @@ class Prechecked:
             timing.timed(self._put, slug, agent, managed)
 
 
-class CheckedInside:
+class CheckedInside(Put):
     # ruleid: execution-put-without-unchanged-check
     def put(self: Any, slug: str, agent: Any) -> None:
         managed = self.managed(slug, agent.name)

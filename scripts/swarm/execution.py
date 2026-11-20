@@ -295,16 +295,49 @@ class ExecutionRegistry:
     def _update(self, slug: str, agent: AgentRecord) -> None:
         self.validate(slug, agent)
 
-        def change(doc: dict) -> tuple[AgentRecord, AgentRecord]:
+        def change(doc: dict[str, Any]) -> tuple[AgentRecord, AgentRecord]:
             current = occupants_of(doc).get(agent.seat)
             if not current or any(getattr(agent, field) != getattr(current, field) for field in IMMUTABLE):
                 self.conflict(slug, "stale or changed execution identity")
-            written, conflict = _resolve(current, agent)
-            if conflict:
-                self.conflict(slug, "runtime target identity is immutable after binding")
-            self.check_uid(slug, written, doc)
-            if written != current:
-                doc["executions"][written.execution_id] = asdict(written)
+            if current.state == "ended":
+                return current, current
+            written = self._land(slug, doc, current, agent)
+            return written, current
+
+        written, current = self._fenced(slug, change)
+        if written != current:
+            self._project(slug, (written.name,), written, current)
+
+    def _land(self, slug: str, doc: dict[str, Any], current: AgentRecord, written: AgentRecord) -> AgentRecord:
+        written, conflict = _resolve(current, written, revive=True)
+        if conflict:
+            self.conflict(slug, "runtime target identity is immutable after binding")
+        self.check_uid(slug, written, doc)
+        if written != current:
+            doc["executions"][written.execution_id] = asdict(written)
+        return written
+
+    def revive(self, slug: str, agent: AgentRecord) -> None:
+        """Land an explicit resume onto its own execution even when that execution is ``ended``, carrying the same
+        identity routing store.put_agent uses: a legacy agent with no execution identity still lands through the
+        plain projection write; a stale write has no path to this method, only the deliberate revival a seat's own
+        resume constructs."""
+        managed = _has_identity(agent) or self.managed(slug, agent.name)
+        with _writes(slug):
+            timing.timed(self._revive_dispatch, slug, agent, managed)
+
+    def _revive_dispatch(self, slug: str, agent: AgentRecord, managed: bool) -> None:
+        if managed or not self.store.project_legacy(slug, agent, lambda: self.named(slug, agent.name)):
+            self._revive(slug, agent)
+
+    def _revive(self, slug: str, agent: AgentRecord) -> None:
+        self.validate(slug, agent)
+
+        def change(doc: dict[str, Any]) -> tuple[AgentRecord, AgentRecord]:
+            current = occupants_of(doc).get(agent.seat)
+            if not current or any(getattr(agent, field) != getattr(current, field) for field in IMMUTABLE):
+                self.conflict(slug, "stale or changed execution identity")
+            written = self._land(slug, doc, current, agent)
             return written, current
 
         written, current = self._fenced(slug, change)
@@ -446,8 +479,11 @@ def _binding_conflict(previous: dict[str, Any], current: dict[str, Any]) -> bool
     return bool(reasons)
 
 
-def _resolve(current: AgentRecord, agent: AgentRecord) -> tuple[AgentRecord, bool]:
-    """The record _update would write for agent against current, and whether their binding now conflicts."""
+def _resolve(current: AgentRecord, agent: AgentRecord, *, revive: bool = False) -> tuple[AgentRecord, bool]:
+    """Resolve an execution write, preserving ended records unless revival is explicit."""
+    if current.state == "ended":
+        if not revive:
+            return current, False
     written = agent
     if current.state == "finished" and written.state != "ended":
         written = replace(written, state="finished")

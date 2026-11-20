@@ -155,7 +155,7 @@ def _resume(store: RedisStore, slug: str, runtime: Any, at: int, previous: Previ
             launched_at=at,
             idle_ticks=0,
         )
-        store.put_agent(slug, record)
+        store.revive_agent(slug, record)
     except Exception:
         runtime.retire(replace(agent, pane_id=placed.pane_id))
         store.seats.record_exit(agent.name, seat, "its resumed record was refused")
