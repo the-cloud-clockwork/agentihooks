@@ -259,7 +259,7 @@
       "id": "lab-scheduler-nats-grants",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2641",
-      "behaviour": "The protected NATS grant check reads the lab heads stream (scripts/events/nats.py LAB_STREAM) and the scheduler durable (scripts/ci_lab/scheduler.py DURABLE) from the last string literal assigned to each, without running either file, and fails unless the antoncore swarm-ci-lab-scheduler user names the consumer info, next message and acknowledgement subjects of that stream and durable and the _INBOX.> reply inbox, with no deny that overlaps one of them; other subjects on the user stay allowed, and a missing user or a name that is not a non-empty string literal fails closed.",
+      "behaviour": "The protected NATS grant check reads the lab heads stream (scripts/events/nats.py LAB_STREAM) and the scheduler durable (scripts/ci_lab/scheduler.py DURABLE) without running either file, requires every binding of each name to be a top level non-empty string literal assignment and grades the last one, and fails unless the antoncore swarm-ci-lab-scheduler user names the consumer info, next message and acknowledgement subjects of that stream and durable and the _INBOX.> reply inbox, with no deny that overlaps one of them; other subjects on the user stay allowed, and a missing user or a name bound any other way fails closed.",
       "seam": "scripts.ci_hive_nats_grants.main with lab_grants, source_name, overlaps and lab_problems",
       "tests": [
         "tests/test_ci_hive_nats_grants.py::test_the_lab_scheduler_grant_passes_beside_other_subjects_without_running_the_sources",

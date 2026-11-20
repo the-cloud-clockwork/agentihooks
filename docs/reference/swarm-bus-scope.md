@@ -407,11 +407,11 @@ users files and compares the grants agentihooks renders with the antoncore users
 | `controller_claims` | `swarm-controller` | Always compared; a missing user fails the check |
 
 It also holds the antoncore `swarm-ci-lab-scheduler` user to the names the lab scheduler binds. It reads `LAB_STREAM`
-from `scripts/events/nats.py` and `DURABLE` from `scripts/ci_lab/scheduler.py`, taking the last string literal
-assigned to each name without running either file, and requires the user to name
-`$JS.API.CONSUMER.INFO.<stream>.<durable>`, `$JS.API.CONSUMER.MSG.NEXT.<stream>.<durable>`,
+from `scripts/events/nats.py` and `DURABLE` from `scripts/ci_lab/scheduler.py` without running either file. Every
+binding of each name must be a top level non-empty string literal assignment, and the last one is graded.
+The user must name `$JS.API.CONSUMER.INFO.<stream>.<durable>`, `$JS.API.CONSUMER.MSG.NEXT.<stream>.<durable>`,
 `$JS.ACK.<stream>.<durable>.>` and `_INBOX.>`, with no deny that overlaps one of them. Other subjects on the user stay
-allowed. A missing user, or a name that is not a non-empty string literal, fails with
+allowed. A missing user, or a name bound any other way, fails with
 `::error::The swarm NATS grants cannot be read (...)`, so renaming the stream or the durable fails the check until
 antoncore grants the new name.
 
@@ -428,7 +428,7 @@ With the hive user retired the check prints:
 The antoncore swarm-hive user is retired, so hives connect only with minted member credentials.
 The controller NATS grants match antoncore: <n> publish and <m> subscribe subjects.
 The ledger NATS grants match antoncore: <n> publish and <m> subscribe subjects.
-The lab scheduler NATS grants are in antoncore: 3 publish and 1 subscribe subjects.
+The antoncore swarm-ci-lab-scheduler user grants the lab scheduler's 3 publish and 1 subscribe subjects.
 ```
 
 and exits 0. A subject granted on one side only prints one `::error::` line naming the side that grants it, for

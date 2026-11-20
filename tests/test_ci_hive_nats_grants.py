@@ -89,7 +89,7 @@ MATCH = [
     "The hive member NATS grants match antoncore: 2 publish and 1 subscribe subjects.",
     "The controller NATS grants match antoncore: 2 publish and 1 subscribe subjects.",
     "The ledger NATS grants match antoncore: 10 publish and 2 subscribe subjects.",
-    "The lab scheduler NATS grants are in antoncore: 3 publish and 1 subscribe subjects.",
+    "The antoncore swarm-ci-lab-scheduler user grants the lab scheduler's 3 publish and 1 subscribe subjects.",
 ]
 
 
@@ -591,14 +591,16 @@ def test_the_lab_scheduler_grant_passes_beside_other_subjects_without_running_th
 
 
 @pytest.mark.feature("lab-scheduler-nats-grants")
+@pytest.mark.parametrize("cover", [[], ["$JS.>"]], ids=["absent", "wildcard"])
 @pytest.mark.parametrize("lacked", range(3), ids=["info", "next", "ack"])
 def test_each_lab_consumer_subject_the_antoncore_user_lacks_is_red(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], lacked: int
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], lacked: int, cover: list[str]
 ) -> None:
     agentihooks, _ = _matching(tmp_path)
     publish = _lab_publish()
     subject = publish.pop(lacked)
-    antoncore = _lab_antoncore(tmp_path, {"publish": {"allow": publish}, "subscribe": {"allow": SUBSCRIBE}})
+    allow = [*publish, *cover]
+    antoncore = _lab_antoncore(tmp_path, {"publish": {"allow": allow}, "subscribe": {"allow": SUBSCRIBE}})
     assert _run(capsys, agentihooks, antoncore) == (1, [_unnamed("publish", subject)])
 
 
@@ -640,8 +642,36 @@ def test_a_missing_lab_scheduler_user_is_red(tmp_path: Path, capsys: pytest.Capt
 @pytest.mark.parametrize("source", list(LAB_SOURCES))
 @pytest.mark.parametrize(
     "body",
-    ["OTHER = 'x'\n", "{name} = 7\n", "{name} = ''\n", "{name} = 'x'\n{name} = 'x'.upper()\n", "{name}: str\n"],
-    ids=["absent", "number", "empty", "computed-last", "unassigned"],
+    [
+        "OTHER = 'x'\n",
+        "{name} = 7\n",
+        "{name} = ''\n",
+        "{name} = 'x'\n{name} = 'x'.upper()\n",
+        "{name} = 'x'.upper()\n{name} = 'x'\n",
+        "{name}: str\n",
+        "{name} = 'x'\nif True:\n    {name} = 'y'\n",
+        "{name} = 'x'\n{name} += 'y'\n",
+        "{name}, OTHER = 'x', 'y'\n",
+        "{name} = 'x'\n\n\ndef rename() -> None:\n    global {name}\n    {name} = 'y'\n",
+        "{name} = 'x'\nfrom os import sep as {name}\n",
+        "{name} = 'x'\n\n\nclass {name}:\n    pass\n",
+        "{name} = 'x'\ndel {name}\n",
+    ],
+    ids=[
+        "absent",
+        "number",
+        "empty",
+        "computed-last",
+        "computed-first",
+        "unassigned",
+        "branch",
+        "augmented",
+        "tuple",
+        "global",
+        "import",
+        "class",
+        "deleted",
+    ],
 )
 def test_a_lab_name_without_a_string_literal_fails_closed(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], source: str, body: str
@@ -649,7 +679,7 @@ def test_a_lab_name_without_a_string_literal_fails_closed(
     agentihooks, antoncore = _matching(tmp_path)
     name = LAB_SOURCES[source]
     (agentihooks / source).write_text(body.replace("{name}", name))
-    error = f"{source} does not set {name} to a non-empty string literal"
+    error = f"{source} must set {name} only by top level non-empty string literal assignments"
     assert _run(capsys, agentihooks, antoncore) == (
         1,
         [f"::error::The swarm NATS grants cannot be read (ValueError: {error})."],
@@ -762,6 +792,9 @@ def test_the_grant_check_reads_from_this_repository_the_names_the_scheduler_bind
         "subscribe": {"allow": SUBSCRIBE},
     }
     path.write_text(yaml.safe_dump({"users": users}))
-    status, lines = _run(capsys, ROOT, root)
-    assert status == 0
-    assert lines[-1] == MATCH[-1]
+    controller_line = (
+        f"The controller NATS grants match antoncore: {len(set(claims['pub']['allow']))} publish"
+        f" and {len(set(claims['sub']['allow']))} subscribe subjects."
+    )
+    retired = "The antoncore swarm-hive user is retired, so hives connect only with minted member credentials."
+    assert _run(capsys, ROOT, root) == (0, [retired, controller_line, *MATCH[2:]])

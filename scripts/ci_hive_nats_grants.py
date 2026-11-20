@@ -101,17 +101,30 @@ def _bound(node: ast.stmt) -> tuple[list[ast.expr], ast.expr | None]:
     return [], None
 
 
+def _rebinds(node: ast.AST, name: str) -> bool:
+    if isinstance(node, ast.Name):
+        return node.id == name and not isinstance(node.ctx, ast.Load)
+    if isinstance(node, ast.alias):
+        return name in (node.name, node.asname)
+    return isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) and node.name == name
+
+
 def source_name(agentihooks: str, source: str, name: str) -> str:
     tree = ast.parse((Path(agentihooks) / source).read_text(), source)
     values = [
         value
         for targets, value in map(_bound, tree.body)
-        if any(isinstance(target, ast.Name) and target.id == name for target in targets)
+        for target in targets
+        if isinstance(target, ast.Name) and target.id == name
     ]
-    value = values[-1] if values else None
-    if not (isinstance(value, ast.Constant) and isinstance(value.value, str) and value.value):
-        raise ValueError(f"{source} does not set {name} to a non-empty string literal")
-    return value.value
+    names = [
+        value.value
+        for value in values
+        if isinstance(value, ast.Constant) and isinstance(value.value, str) and value.value
+    ]
+    if not names or len(names) != len(values) or len(values) != sum(_rebinds(node, name) for node in ast.walk(tree)):
+        raise ValueError(f"{source} must set {name} only by top level non-empty string literal assignments")
+    return names[-1]
 
 
 def lab_grants(agentihooks: str) -> dict[str, dict[str, frozenset[str]]]:
@@ -203,7 +216,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         compared = [(*check, user_grants(args.antoncore, check[2])) for check in checks]
         lab = lab_grants(args.agentihooks)
-        granted = cast("dict[str, Any]", user_grants(args.antoncore, LAB_USER))  # pragma: no mutate
+        found = user_grants(args.antoncore, LAB_USER)
+        granted = cast("dict[str, Any]", found)  # pragma: no mutate
     except (
         OSError,
         KeyError,
@@ -218,25 +232,26 @@ def main(argv: list[str] | None = None) -> int:
     retired = [user for _, _, user, _, theirs in compared if theirs is None]
     if retired:
         print(f"The antoncore {HIVE_USER} user is retired, so hives connect only with minted member credentials.")
-    compared = [check for check in compared if check[2] not in retired]
-    lines = [
-        line
-        for _, credential, user, ours, theirs in compared
+    active = [
+        (label, credential, user, ours, theirs)
+        for label, credential, user, ours, theirs in compared
         if theirs is not None
-        for line in differences(ours, theirs, credential, user)
+    ]
+    lines = [
+        line for _, credential, user, ours, theirs in active for line in differences(ours, theirs, credential, user)
     ]
     lines.extend(lab_problems(lab, granted))
     for line in lines:
         print(f"::error::{line}")
     if lines:
         return 1
-    for label, _, _, ours, _ in compared:
+    for label, _, _, ours, _ in active:
         print(
             f"The {label} NATS grants match antoncore: {len(ours['publish']['allow'])} publish"
             f" and {len(ours['subscribe']['allow'])} subscribe subjects."
         )
     print(
-        f"The lab scheduler NATS grants are in antoncore: {len(lab['publish']['allow'])} publish"
+        f"The antoncore {LAB_USER} user grants the lab scheduler's {len(lab['publish']['allow'])} publish"
         f" and {len(lab['subscribe']['allow'])} subscribe subjects."
     )
     return 0
