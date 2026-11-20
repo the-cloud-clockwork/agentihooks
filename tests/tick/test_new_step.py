@@ -336,6 +336,15 @@ def test_a_new_feature_entry_leaves_every_line_of_the_real_map_unchanged(tree: P
     assert len(entries) == len(json.loads(before)["features"]) + 1
 
 
+@pytest.mark.feature("feature-map-stable-write")
+@pytest.mark.parametrize(
+    "document",
+    [
+        {"features": []},
+        {"features": [{"id": "tick-step-gadgets", "rules": ["gadget-rule"], "tests": ["previous"]}], "retired": []},
+        {"retired": [{"id": "old"}], "unmapped_rules": [], "features": [{"id": "tick-step-gadgets"}]},
+    ],
+)
 def test_the_scaffold_keeps_a_canonical_map_canonical(tree: Path, document: dict[str, Any]) -> None:
     map_path = tree / "feature-map.json"
     map_path.write_text(json.dumps(document, indent=2) + "\n")
