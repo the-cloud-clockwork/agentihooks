@@ -231,7 +231,9 @@ launch check, the idle limit or a stopping swarm), it sends that master an inbox
 waits up to `AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES` (default 5; 0 retires at once). A master that hands off is
 retired and its successor starts from the document; one that does not is retired at the deadline. A record field
 the tick never held (an empty harness, profile, model, effort or account) is not compared with the live process:
-`swarm status` flags it as a live binding finding, and it never retires the agent.
+`swarm status` flags it as a live binding finding, and it never retires the agent. A model or effort the live facts
+lack is flagged the same way; [Live binding findings](#live-binding-findings) lists every finding and where the tick
+reads each agent's facts.
 
 ### How the master queues a pull request
 
@@ -7543,6 +7545,96 @@ clearing the pin starts the age again.
 pin` finding for a pinned lane whose other harness has free seats while ready tasks wait. The finding names the lane,
 the pin and its age, the free seats and the waiting tasks. It reports only: the pin stays until someone sets the lane
 agent back to `auto`.
+
+### Live binding findings
+
+The tick's `verify` step compares each agent's live launch facts with the launch its record assigns: `harness`,
+`home`, `profile`, `model`, `effort` and `account`, plus `hooks`, which must be installed. It stores one report per
+agent in the `agentihooks:swarm:<slug>:live-bindings` hash, keyed by agent name, and replaces it on every pass that
+records the agent. `agentihooks swarm <id> status` raises `live binding` findings from the stored report of each
+seated agent, the newest agent of its task while it has not finished.
+
+#### The stored report
+
+| Field | What it holds |
+|---|---|
+| `agent` | The agent name. |
+| `at` | When the pass recorded the report, in milliseconds. |
+| `state` | `mismatched` when `differences` holds a field, otherwise `matching`. |
+| `differences` | Each field the live facts contradict, with its `expected` and `actual` value. A dead process records `process` (expected `true`, actual `false`); a closed pane records `pane`. |
+| `unknown` | The record fields the record never held (an empty harness, profile, model, effort or account) that the live facts report. Left out when the process is dead or the pane closed. |
+| `unobserved` | The assigned `model` and `effort` the live facts lack, each with its assigned value. Left out when the process is dead or the pane closed. |
+
+The same Codex app server worker, assigned `gpt-6.1-sol` at `xhigh`, recorded from three kinds of facts:
+
+```json
+{"agent": "engineer@ab12cd-0042", "at": 1795180000000, "state": "matching", "differences": {}, "unknown": [], "unobserved": {"model": "gpt-6.1-sol", "effort": "xhigh"}}
+{"agent": "engineer@ab12cd-0042", "at": 1795180000000, "state": "matching", "differences": {}, "unknown": [], "unobserved": {}}
+{"agent": "engineer@ab12cd-0042", "at": 1795180000000, "state": "mismatched", "differences": {"process": {"expected": true, "actual": false}}}
+```
+
+The first line comes from facts that hold only `{"process": null}`: the tick could not tell whether the app server is
+alive, so it compares nothing and marks model and effort unobserved. The second comes from facts read from the live
+server process. The third comes from `{"process": false}`, a server proven dead.
+
+#### The findings
+
+Each finding's id is `live-binding/<agent>/<field>`.
+
+| Finding | Evidence line | Raised when | Retires the agent |
+|---|---|---|---|
+| `<agent> differs in <field>` | `expected <value>; observed <value>` | `differences` holds the field | Yes: on the pass that records the difference, `verify` retires the agent with `retired <agent> after mismatched <fields>`. A live master first gets the handoff request described in [The master](#the-master). |
+| `<agent> has no recorded <field>` | `the record never held <field>, so it is not compared and never retires the agent` | `unknown` holds the field | No |
+| `<agent> has no observed <field>` | `expected <value>; observed none, so it is unknown and never retires the agent` | `unobserved` holds the field | No |
+
+#### Where the tick reads live facts
+
+The step asks the swarm runtime for the facts of every agent on a `local` runtime backend; an agent on any other
+backend gets no facts.
+
+| Agent | Facts come from | When there are no usable facts |
+|---|---|---|
+| Runs on another hive under a host target (`runtime_target.host_id` names a hive other than the one the tick runs on) | The `binding` of the agent's entry under `executions` in that hive's execution report, for the agent's generation. | No facts. |
+| Admitted by the hub to another hive, with no host target, and running over the Codex app server transport | The `binding` of the agent's entry under `admitted` in the execution report of the hive that admitted it, for the agent's generation. See [A hive worker whose pane is gone](hives.md#a-hive-worker-whose-pane-is-gone). | No facts when the hive publishes no report, the report has no entry for the execution, the entry belongs to another generation, the entry's `binding` is `null`, or the runtime has no hive report reader. |
+| Running over the Codex app server transport on the host the tick runs on, including one the hub admitted to that host | The app server's transport record for the agent's current execution and generation: a record whose server is proven dead is first settled as failed, which releases its endpoint and publishing claim; a live server is read from its server process. | `{"process": null}` when the transport record is missing, names another host, or lacks the server process id or start identity. `{"process": false}` when the server is proven dead or the record is already exited or failed. |
+| Any other local agent: a Claude session, a Codex terminal session, or a hub admitted worker that runs no app server | The agent session bound to the record on the host the tick runs on, read from its process. A session on a process other than the validated one adds `rebound`, and the tick rebinds the agent to the one pane that holds that process. | `{"process": false}` when the record holds a validated process id, no session is bound, and no hive lists the agent name. |
+
+An agent with no facts is handled by how it started. One the hub admitted, whose hive recorded its start on the
+swarm bus, is skipped for that pass and keeps its last stored report. Any other agent is recorded with
+`{"process": false}`, a `process` difference. The tick drops `rebound` from a binding a hive reports, so it never
+rebinds an agent from another hive's facts. Only a liveness check made on the host that runs an app server can
+prove it alive. The controller reads a hub admitted app server worker on another hive from that hive's report for
+this reason: its own check returns `null` there, which records model and effort as unobserved for a healthy worker.
+
+#### Inspect a live binding finding
+
+Substitute your swarm id, agent name, hive id and execution id:
+
+```bash
+agentihooks swarm <id> status --json \
+  | jq '.findings[] | select(.kind == "live binding") | {id, summary, evidence}'
+agentihooks swarm <id> status --json \
+  | jq '.agents[] | select(.name == "<agent>")
+        | {hive, execution_id, generation, transport, runtime_backend, runtime_target}'
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" HGET agentihooks:swarm:<slug>:live-bindings '<agent>' | jq .
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" GET agentihooks:hive:<hive>:executions \
+  | jq '.admitted["<execution-id>"]'
+```
+
+The finding for an unobserved model reads:
+
+```json
+{"id": "live-binding/engineer@ab12cd-0042/model", "summary": "engineer@ab12cd-0042 has no observed model", "evidence": ["expected gpt-6.1-sol; observed none, so it is unknown and never retires the agent"]}
+```
+
+#### Troubleshooting
+
+| Symptom | Cause | Check |
+|---|---|---|
+| A healthy Codex app server worker shows `has no observed model` and `has no observed effort`, and its report is `matching` with no differences | The facts were `{"process": null}`: the host that read them could not prove the app server alive. Before the admitted `binding` field shipped, the controller read every hub admitted app server worker on another hive this way. | Read the agent's `hive` and `runtime_target`. A hub admitted worker on another hive needs a controller and a hive that both run a release that carries the admitted `binding` field. A worker on the tick's own host needs a transport record that names that host and holds the server process id and start identity. |
+| The report's `at` stops moving while the worker keeps running | The tick gets no facts for a hub admitted worker and skips it, so the findings come from an older pass. | Read the hive's `executions` report. A missing key means the hive stopped beating (the report expires after 45 seconds); an `admitted` entry with another `generation`, or with `binding: null`, gives no facts. |
+| The hive's `admitted` entry holds `"binding": {"process": null}` | The hive itself could not prove the app server alive on its own host. | Read the execution's transport record on that hive: its host, server process id and start identity. |
+| `differs in process` for a worker the hive reports as `{"process": false}` | The hive proved the app server dead, or found its transport record already exited or failed. | The retire is expected: read the execution's transport record on that hive, which is `failed` or `exited`. |
 
 ### Spawn stall findings
 
