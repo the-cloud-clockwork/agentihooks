@@ -98,9 +98,11 @@ Never build a `ResourceClient` without `transport=`: the `ledger-client-in-proce
 ## Refusals and size warnings
 
 A write is refused only for a reason that belongs to one of its own operations, such as a focus target the ledger
-does not hold or an agent writing in another agent's name. The overview and phase description word counts are
-warnings about the whole document: every write recomputes them, none of them rejects an operation, and the swarm
-ledger client prints them apart from the refusal reason. Pull request 12385 delivered that split on 19 November 2026.
+does not hold or an agent writing in another agent's name. On an existing ledger the overview and phase description
+word counts are warnings about the whole document: every write recomputes them, none of them rejects an operation,
+and the swarm ledger client prints them apart from the refusal reason.
+[Pull request 12385](https://github.com/the-cloud-clockwork/agentihooks/pull/12385) delivered that split on
+19 November 2026.
 
 ### Where size warnings come from
 
@@ -118,6 +120,10 @@ and each new size line raises one `size` alert for the master.
 
 `ledger_core.size_warning(text)` matches exactly those two shapes. Both clients below use it to tell a warning from
 a refusal reason.
+
+Creating a ledger or a proof ledger is different. `new_ledger.check` reads the seed content before the ledger exists
+and refuses it with the same line shapes when the overview is over 200 words or a phase description over 100 words;
+there a size line is the refusal. Shorten the seed content and create the ledger again.
 
 ### What a refused write prints
 
