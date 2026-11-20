@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -83,9 +84,13 @@ def test_the_coverage_wait_outlasts_its_own_deadline_inside_the_sonar_budget() -
     spec.loader.exec_module(module)
     jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     steps, names = _sonar_steps()
-    minutes = steps[names.index("Take each shard's coverage as it lands")]["timeout-minutes"]
-    assert module.WAIT < minutes * 60
-    pull, push = minutes + 15, minutes + 30
+    expr = steps[names.index("Take each shard's coverage as it lands")]["timeout-minutes"]
+    matched = re.fullmatch(r"\$\{\{ github\.event_name == 'push' && (\d+) \|\| (\d+) \}\}", expr)
+    assert matched is not None
+    push_minutes, pull_minutes = (int(value) for value in matched.groups())
+    assert module.WAIT < pull_minutes * 60
+    assert module.WAIT < push_minutes * 60
+    pull, push = pull_minutes + 15, pull_minutes + 30
     assert jobs["sonar"]["timeout-minutes"] == (
         f"${{{{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && {push} || {pull} }}}}"
     )
