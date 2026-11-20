@@ -131,6 +131,10 @@ def _import_like_the_swarm_image(lock: Path, modules: list[str]) -> subprocess.C
 
 
 @pytest.mark.feature("lab-scheduler-swarm-image-imports")
+@pytest.mark.skipif(
+    "MUTANT_UNDER_TEST" in os.environ,
+    reason="the mutated copy of a swarm smoke module imports mutmut, which the swarm image lock refuses",
+)
 def test_the_swarm_smoke_modules_import_with_the_swarm_image_lock_alone() -> None:
     result = _import_like_the_swarm_image(SWARM_LOCK, SWARM_SMOKE)
     assert result.returncode == 0, result.stderr
