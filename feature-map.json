@@ -1,6 +1,18 @@
 {
   "features": [
     {
+      "id": "kind-terminal-snapshot-base",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2647",
+      "behaviour": "The kind terminal package stage shares one prefetch of the worker lock's Python patch tag with the swarm image. CI refuses tracked Dockerfile stages that use a Debian snapshot with a floating or unresolved base, resolving global argument defaults and inherited stages before grading them.",
+      "seam": "kind terminal package base and image prefetch",
+      "tests": [
+        "tests/test_kind_terminal_snapshot.py::test_terminal_packages_and_prefetch_use_the_locked_python",
+        "tests/test_kind_terminal_snapshot.py::test_snapshot_stage_guard_fixtures",
+        "tests/test_kind_terminal_snapshot.py::test_every_dockerfile_snapshot_stage_has_a_pinned_base"
+      ]
+    },
+    {
       "id": "swarm-progress-data",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-bundle-ledger-leftovers",
@@ -2179,6 +2191,29 @@
       "seam": "scripts.swarm.tick.tick with a LedgerClient time left write whose ledger call answers server refused 500",
       "tests": [
         "tests/swarm/test_tick_time_left.py::test_under_events_a_ledger_server_error_on_the_time_left_write_keeps_the_pass_reaping"
+      ]
+    },
+    {
+      "id": "ledger-cold-write",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-cold-write-full-load",
+      "behaviour": "A ledger write from a fresh process never loads every ledger row: a repository over the shared database adopts this host's copy of the ledger entry and refreshes it from the recorded row changes, falling back to the whole load only when the copy is missing, unreadable, newer than the database or past the kept changes, and rewrites the copy after a whole load or once the adopted copy is far enough behind; the ack revision comes from the metadata rows and a members, metadata or record thread read, the guard of a write, reads only that path's rows with the same data and revision as the whole read.",
+      "seam": "scripts.swarm_ledger.repository.host_entries.Copies and SQLiteLedgerRepository._entry, scripts.swarm_ledger.storage.build, scripts.swarm_ledger.api.routes.ledger_read and own_rows, scripts.swarm_ledger.ledger.cmd_ack",
+      "rules": [
+        "whole-ledger-read-for-revision"
+      ],
+      "tests": [
+        "tests/swarm_ledger/test_host_entries.py::test_a_fresh_repository_writes_from_the_host_entry_without_a_whole_load",
+        "tests/swarm_ledger/test_host_entries.py::test_a_host_entry_at_the_stored_generation_is_served_as_it_is",
+        "tests/swarm_ledger/test_host_entries.py::test_a_host_entry_newer_than_the_database_is_never_adopted",
+        "tests/swarm_ledger/test_host_entries.py::test_an_unreadable_host_entry_falls_back_to_the_whole_load",
+        "tests/swarm_ledger/test_host_entries.py::test_a_whole_load_writes_the_host_entry",
+        "tests/swarm_ledger/test_host_entries.py::test_the_host_entry_is_rewritten_only_once_the_adopted_copy_is_far_enough_behind",
+        "tests/swarm_ledger/test_host_entries.py::test_a_repository_over_the_shared_database_keeps_host_entries",
+        "tests/swarm_ledger/test_host_entries.py::test_a_warm_repository_rewrites_the_host_entry_once_it_refreshed_far_enough_past_it",
+        "tests/swarm_ledger/test_host_entries.py::test_a_purged_ledger_keeps_no_host_entry",
+        "tests/swarm_ledger/test_revision_reads.py::test_a_revision_read_of_a_non_record_path_reads_only_its_rows",
+        "tests/swarm_ledger/test_revision_reads.py::test_ack_reads_the_revision_from_the_metadata_rows_alone"
       ]
     },
     {
@@ -6663,6 +6698,18 @@
       ]
     },
     {
+      "id": "swarm-release-tag-moves-only-for-the-newest-published-release",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2694",
+      "behaviour": "A Swarm image release build pushes only its commit image, and a release job that runs after the build moves the swarm image release tag at move time onto that image unless a newer release has already published its swarm version image, then tags the version, so of two overlapping releases that both read themselves as newest at checkout the release tag ends on the newer whichever finishes last, and no publish step moves the release tag from its checkout time newest flag.",
+      "seam": "Swarm image workflow tags step and its release job that runs docker/swarm-node/release.sh",
+      "tests": [
+        "tests/contracts/promotion/test_release_images.py::test_the_swarm_release_build_pushes_only_its_commit_image",
+        "tests/contracts/promotion/test_release_images.py::test_the_swarm_release_tag_stays_on_the_newer_of_two_overlapping_releases_whichever_finishes_last",
+        "tests/contracts/promotion/test_release_images.py::test_the_release_job_moves_the_swarm_release_tag_and_the_publish_job_moves_none"
+      ]
+    },
+    {
       "id": "hive-retire-absence",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1772",
@@ -6764,6 +6811,19 @@
       "seam": "Frozen gate registry and the protected grader's frozen file check",
       "tests": [
         "tests/test_gate_protected.py::test_the_repository_registry_refuses_a_head_dropping_any_writer_lock_job"
+      ]
+    },
+    {
+      "id": "protected-grader-accepts-equivalence-scm-pin",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-protected-equivalence-install-pin",
+      "behaviour": "The protected grader admits the ledger equivalence prefix of dev with or without SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS set to the run number dev version on each of its pip install steps, so the install can skip the setuptools-scm git scan and heads branched before dev took the pin keep passing, and refuses any other pin value, any other env change, and the pin on another step or on the job.",
+      "seam": "gate_protected._equivalence_problems over the pinned and unpinned install forms of the dev prefix",
+      "tests": [
+        "tests/test_gate_protected_scm_pin.py::test_the_required_grader_accepts_a_tuned_equivalence_install_with_or_without_the_scm_pin",
+        "tests/test_gate_protected_scm_pin.py::test_the_required_grader_refuses_any_other_equivalence_pin",
+        "tests/test_gate_protected_scm_pin.py::test_a_small_equivalence_form_admits_the_install_with_or_without_the_exact_scm_pin",
+        "tests/test_gate_protected_scm_pin.py::test_the_scm_pin_form_sets_or_drops_the_pin_on_every_pip_install_step_of_a_copy"
       ]
     },
     {
@@ -7049,7 +7109,7 @@
       "behaviour": "The strict type gate checks its sorted sources in contiguous runs of at most a thousand files, one basedpyright process each, and refuses a measurement whose checker reached the memory line where basedpyright empties its type cache, so one commit counts the same type errors on every run.",
       "seam": "scripts.type_gate.measure through its basedpyright subprocess runs and the peak resident memory of its child processes",
       "tests": [
-        "tests/test_type_gate.py::test_measure_checks_at_most_a_thousand_sources_per_checker_process_and_sums_their_counts",
+        "tests/test_type_gate.py::test_measure_checks_at_most_a_hundred_sources_per_checker_process_and_sums_their_counts",
         "tests/test_type_gate.py::test_a_checker_peak_at_the_line_where_basedpyright_empties_its_type_cache_is_refused",
         "tests/test_type_gate.py::test_a_checker_peak_under_the_line_where_basedpyright_empties_its_type_cache_is_kept"
       ]
@@ -8334,6 +8394,17 @@
       ]
     },
     {
+      "id": "ci-metrics-partial-flush",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ci-metrics-partial-flush",
+      "behaviour": "A CI metrics run flushes its fresh outbox again while rows still wait, at most three flushes each with the outbox's own five second budget, so rows that a refused statement or a spent budget left behind reach the sink once and the run succeeds; rows still waiting after the third flush fail the run with its shipped and built counts.",
+      "seam": "scripts.ci_metrics.__main__.ship through scripts.ci_metrics.__main__.main with a sink that refuses a statement or outlasts one flush budget",
+      "tests": [
+        "tests/ci_metrics/test_main.py::test_a_run_ships_the_rows_a_partial_flush_left_waiting",
+        "tests/ci_metrics/test_main.py::test_a_run_that_cannot_ship_every_row_fails_after_three_flushes"
+      ]
+    },
+    {
       "id": "tick-step-profiler",
       "origin": "inventory",
       "behaviour": "Naming a step in AGENTIHOOKS_TICK_PROFILE_STEPS, comma separated, runs it under cProfile and emits one swarm_tick_step_profile line with its wall time, the running pass id when a pass is open, and its top functions by cumulative and by own time; an unnamed step or an unset env var never calls the profiler.",
@@ -9521,6 +9592,20 @@
         "tests/ci_lab/test_manifests.py::test_actions_marks_a_request_github_never_answered_or_answered_with_a_server_error_unanswered",
         "tests/ci_lab/test_scheduler.py::test_a_head_whose_manifest_fetch_times_out_waits_out_its_window_again_and_a_later_pass_grades_it",
         "tests/ci_lab/test_scheduler.py::test_a_head_whose_manifest_fetch_github_answers_with_a_server_error_waits_until_a_pass_finds_no_manifest"
+      ]
+    },
+    {
+      "id": "lab-token-mint-status",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2702",
+      "behaviour": "A GitHub App token mint refusal preserves the HTTP response status and its fixed message. The lab manifest reader treats mint server errors and unanswered mint requests as transient, keeps the head through the existing quiet window and grades it after recovery. Client refusals drop the head. The same waiting envelope survives repeated transient failures and no retry runs before the window ends.",
+      "seam": "scripts.github_app.GitHubAppAuth.get_token and scripts.ci_lab.manifests.Actions over mocked HTTP, then Scheduler.tick through MirrorExpander, StoredManifests and the real token mint",
+      "tests": [
+        "tests/test_github_app.py::test_rejected_exchange_preserves_the_http_status_without_changing_its_message",
+        "tests/test_github_app.py::test_a_refusal_without_an_http_status_keeps_its_message",
+        "tests/ci_lab/test_manifests.py::test_actions_classifies_the_real_token_mint_refusal_by_its_http_status",
+        "tests/ci_lab/test_manifests.py::test_actions_keeps_a_mint_scope_refusal_permanent",
+        "tests/ci_lab/test_scheduler.py::test_manifest_token_mint_failures_hold_only_transient_heads_and_grade_after_recovery"
       ]
     },
     {
@@ -11063,6 +11148,18 @@
         "tests/test_ci_semgrep.py::test_a_scan_finding_fails_the_new_test_waits_step",
         "tests/test_ci_semgrep.py::test_new_test_waits_fail_without_scanning_when_the_base_is_unknown",
         "tests/test_ci_semgrep.py::test_the_wait_bound_rule_reaches_the_tests_and_its_fixture_under_ten_seconds"
+      ]
+    },
+    {
+      "id": "type-gate-one-context",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-type-gate-cross-file-baseline",
+      "behaviour": "The strict type gate counts each source in its run of the head's every source layout, checked from the run's first source through its last graded one with four runs checked at once, so a pull request, prepush and a baseline refresh count a file the same type errors at one commit whichever other files they grade.",
+      "seam": "scripts.type_gate.measure through the source lists of its basedpyright runs",
+      "tests": [
+        "tests/test_type_gate.py::test_a_file_counts_the_same_errors_whichever_other_files_the_gate_checks",
+        "tests/test_type_gate.py::test_the_gate_checks_a_run_of_the_every_source_layout_through_its_last_graded_source",
+        "tests/test_type_gate.py::test_the_gate_checks_four_runs_at_once"
       ]
     }
   ],
