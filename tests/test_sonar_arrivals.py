@@ -78,7 +78,7 @@ def _arrive(
     tmp_path: Path, service: Service, shards: int, scope: str = "full", attempt: int = 1, seconds: float = 600
 ) -> tuple[list[int], Clock]:
     clock = Clock()
-    left = arrivals.arrive(service, shards, scope, attempt, tmp_path / "shards", seconds, clock)
+    left = arrivals.arrive(service, arrivals.Scope(shards, scope, attempt), tmp_path / "shards", seconds, clock)
     return left, clock
 
 
@@ -156,7 +156,7 @@ def test_a_shard_still_queued_for_a_runner_does_not_spend_the_wait(
     service = Service(rounds)
     clock = Clock()
     jobs = Queued(false_times=3)
-    left = arrivals.arrive(service, 1, "full", 1, tmp_path / "shards", arrivals.INTERVAL, clock, jobs)
+    left = arrivals.arrive(service, arrivals.Scope(1, "full", 1), tmp_path / "shards", arrivals.INTERVAL, clock, jobs)
     assert left == []
     assert clock.pauses == [arrivals.INTERVAL] * 4
     assert jobs.calls == 4
@@ -233,7 +233,7 @@ def _stub_flatten(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, blocked: bool
 
 
 def _arrive_in_real_time(tmp_path: Path, service: Service, shards: int) -> list[int]:
-    return arrivals.arrive(service, shards, "full", 1, tmp_path / "shards", 600, RealTime())
+    return arrivals.arrive(service, arrivals.Scope(shards, "full", 1), tmp_path / "shards", 600, RealTime())
 
 
 def test_databases_it_holds_are_flattened_beside_them_while_shards_run(

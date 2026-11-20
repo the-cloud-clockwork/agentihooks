@@ -26,6 +26,7 @@ import time
 import urllib.parse
 import urllib.request
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -257,11 +258,18 @@ def advance(flattening: Flattening | None, queue: list[Path]) -> Flattening | No
     return Flattening(queue.pop(0)) if queue else None
 
 
+@dataclass(frozen=True)
+class Scope:
+    """Which shards of this run attempt are being awaited."""
+
+    shards: int
+    scope: str
+    attempt: int
+
+
 def arrive(
     service: Service,
-    shards: int,
-    scope: str,
-    attempt: int,
+    run: Scope,
     out: Path,
     seconds: float,
     timer: Timer,
@@ -274,7 +282,7 @@ def arrive(
     running = True
     taken: set[str] = set()
     first: dict[str, str] | None = None
-    left = list(range(1, shards + 1))
+    left = list(range(1, run.shards + 1))
     queue = [path for path in sorted(out.glob(CARRIED)) if path.stat().st_size]
     flattening: Flattening | None = None
     while True:
@@ -282,12 +290,16 @@ def arrive(
         if listed is not None:
             first = listed if first is None else first
             for name in sorted(listed):
-                if name in taken or shard_of(name, scope, shards) is None or not service.fetch(name, out / name):
+                if (
+                    name in taken
+                    or shard_of(name, run.scope, run.shards) is None
+                    or not service.fetch(name, out / name)
+                ):
                     continue
                 taken.add(name)
                 queue.extend(databases(out / name))
                 print(f"{name} landed {timer.now() - budget_start:.0f} s into the wait", flush=True)
-            left = pending(listed, first, taken, scope, shards, attempt)
+            left = pending(listed, first, taken, run.scope, run.shards, run.attempt)
         if not left or timer.now() - budget_start >= seconds:
             break
         flattening = advance(flattening, queue)
@@ -313,7 +325,7 @@ def main() -> int:
         return 1
     shards = int(os.environ["SHARDS"])
     scope = os.environ["SCOPE"]
-    attempt = os.environ["GITHUB_RUN_ATTEMPT"]
+    attempt = int(os.environ["GITHUB_RUN_ATTEMPT"])
     service = Results(base, token)
     jobs_token = os.environ.get("GH_JOBS_TOKEN", "")
     repo = os.environ.get("GITHUB_REPOSITORY", "")
@@ -323,14 +335,14 @@ def main() -> int:
             os.environ.get("GITHUB_API_URL", "https://api.github.com") + "/",
             repo,
             run_id,
-            attempt,
+            str(attempt),
             jobs_token,
             "unit (" if scope != SELECTED else "unit-selected (",
         )
         if jobs_token and repo and run_id
         else None
     )
-    left = arrive(service, shards, scope, int(attempt), OUT, WAIT, Wall(), jobs)
+    left = arrive(service, Scope(shards, scope, attempt), OUT, WAIT, Wall(), jobs)
     if left:
         named = ", ".join(map(str, left))
         print(f"::warning::Shards {named} had not ended after {WAIT // 60} minutes; the merge names their coverage.")
