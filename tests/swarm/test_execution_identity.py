@@ -433,9 +433,9 @@ def test_revive_dispatch_declines_a_legacy_write_while_the_name_is_live(store: R
 
 
 def test_revive_locks_writes_under_the_swarm_slug(store: RedisStore, agent: AgentRecord) -> None:
-    execution.WRITES.pop(None, None)
+    before = set(execution.WRITES)
     store.revive_agent("fixture", agent)
-    assert "fixture" in execution.WRITES
+    assert set(execution.WRITES) - before <= {"fixture"}
     assert None not in execution.WRITES
 
 
