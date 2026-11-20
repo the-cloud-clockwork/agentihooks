@@ -899,7 +899,7 @@ def test_selection_keeps_whole_files_where_recorded_coverage_cannot_speak(tmp_pa
     manifest = _recorded_project(tmp_path, monkeypatch)
     edits = {
         "helper": ("tests/conftest.py", "X = 1\n"),
-        "dependency": ("uv.lock", "version = 1\n"),
+        "dependency": (".github/test-requirements.lock", "pytest==8.4.2\n"),
         "root module": ("setup.py", "X = 1\n"),
         "workflow": (".github/workflows/test.yml", "env:\n  FLAG: 1\n"),
         "edited test": ("tests/test_core.py", "\n# edited\n"),

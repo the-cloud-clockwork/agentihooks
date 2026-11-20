@@ -212,7 +212,14 @@ def test_a_flake_row_keeps_the_first_attempts_errors_and_counts_two_attempts(tmp
 
 def test_outside_leaves_out_listed_shared_skipped_and_missing_files(tmp_path: Path) -> None:
     skipped = (".git/HEAD", ".venv/x", ".playwright/x", "node_modules/x", ".pytest_cache/v")
-    shared = ("pyproject.toml", "uv.lock", ".test_durations", ".github/x.yml", *skipped, "pkg/m.pyc")
+    shared = (
+        "pyproject.toml",
+        ".github/test-requirements.lock",
+        ".test_durations",
+        ".github/x.yml",
+        *skipped,
+        "pkg/m.pyc",
+    )
     for path in ("data/a.txt", "data/b.txt", *shared):
         (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / path).write_text("")
@@ -233,10 +240,10 @@ def test_outside_leaves_out_listed_shared_skipped_and_missing_files(tmp_path: Pa
 
 @pytest.mark.feature("lab-scheduler-test-units")
 def test_outside_lists_every_unshared_file_a_test_module_the_manifest_lacks_opened(tmp_path: Path) -> None:
-    for path in ("data/a.txt", "data/b.txt", "uv.lock"):
+    for path in ("data/a.txt", "data/b.txt", ".github/test-requirements.lock"):
         (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / path).write_text("")
-    opened = {"data/a.txt", "data/b.txt", "uv.lock"}
+    opened = {"data/a.txt", "data/b.txt", ".github/test-requirements.lock"}
     manifest = _manifest({"t::one": ["data/a.txt"]})
 
     assert run_tests.outside(opened, ("t::one", "tests/test_new.py"), tmp_path, manifest) == ("data/b.txt",)
