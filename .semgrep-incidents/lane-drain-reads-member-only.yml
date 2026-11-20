@@ -1,0 +1,17 @@
+rules:
+  - id: lane-drain-reads-member-only
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The hive lane loop gates its spokes on this pod's member drain flag alone. A hive drained with hive set, which
+      writes only the hive record's draining flag, then keeps taking ready offers that the hub refuses as draining, and
+      the spoke terms the only offer copy before any other hive sees it. Read the hive record's draining flag as well.
+    paths:
+      include:
+        - /scripts/hive/lanes.py
+        - lane-drain-reads-member-only.py
+    patterns:
+      - pattern-inside: |
+          def draining(...):
+              ...
+      - pattern: registry.member_draining(...)

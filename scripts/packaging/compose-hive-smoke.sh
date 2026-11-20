@@ -12,7 +12,7 @@ export SWARM_REDIS_PASSWORD
 cleanup() {
   docker rm -f "$run-member" >/dev/null 2>&1 || true
   docker compose down --volumes >/dev/null 2>&1 || true
-  rm -r -- "$tls"
+  rm -r -- "$tls" || true
 }
 trap cleanup EXIT
 

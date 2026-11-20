@@ -903,8 +903,8 @@ A hive declares what it offers with `capabilities`, and a task names what it req
 
 ```bash
 agentihooks hive set desk capabilities=headed
-agentihooks ledger --slug <slug> --as <name> task add browse "Check the logged in page" --lane eng --needs headed
-agentihooks ledger --slug <slug> --as <name> task set browse needs=headed
+agentihooks api --slug <slug> --as <name> task add browse "Check the logged in page" --lane eng --needs headed
+agentihooks api --slug <slug> --as <name> task set browse needs=headed
 ```
 
 Placement keeps only the live hives whose capabilities cover every name in the task's `needs`. When none does, the
@@ -1389,6 +1389,7 @@ ram: 2000 of 10000 MB available, 80 percent used, at or above the 80 percent lin
 ram: pod 3900 of 19600 MB available, 81 percent used, at or above the 80 percent line
 ram: 2100 of 10000 MB available, 79 percent used, 850 MB per agent with 2 pending launches, fits 0 more under the 80 percent line
 cpu: 15.20 of 16 CPUs used, five minute load 28.70 on 16 CPUs with CPU used at or above the 40 percent swarm share, fits 0 more
+cpu: 15.20 of 16 CPUs used, five minute load 28.70 on 16 CPUs with pod load 6.80 at or above the 40 percent swarm share, fits 0 more
 max agents: 6 of 6 agents on the hive, fits 0 more
 missing telemetry: no memory reading
 ```
@@ -1669,7 +1670,8 @@ seats place as:
 
 `master-2` and `master-3` each reserve one of the four `ops` sessions, beside the worker already on that account.
 When the front door's own launch is refused because the native login's single reservation is still held, it moves to
-the next account with a free seat and never retries the refused login in that launch.
+the next account with a free seat and never retries the refused login in that launch; see [Retry after a full account
+reservation](#retry-after-a-full-account-reservation).
 
 Releases without pull request 11407 offer the native login to every master seat and rank it above the slots. There,
 each backend seat chooses the login the front door already holds, hive admission refuses it on every tick, and a
@@ -1691,6 +1693,95 @@ This rule covers placement on hives. A master the controller leaves to the works
 |---|---|---|
 | Every tick pass reports `master spawn failed in seat master-2@<id>: account reservation is full: account=claude:<login> sessions=1 cap=1 ...` in its actions, and `swarm status` shows one master while `masters-step` wants more | The controller runs a release from before the front door rule, so backend seats pick the native login the front door holds. | Roll the controller onto a release that carries pull request 11407. |
 | A backend seat waits with `no hive for master advertises a claude slot` while the front door runs | No live hive that takes `master` and lists the repo has a Claude subscription or api slot whose account has a free seat and is not closed. The native login does not count for a backend seat. | Give a UI hive an `AH_CC_TOKEN_<slug>` with quota left, then read `slots` and each `cap` in `agentihooks hive show <hive>`. |
+
+#### Retry after a full account reservation
+
+Before the controller sends a master's launch order to a hive, `HiveLaunch.send_order` reserves one session on the
+chosen account. The native login reserves with a cap of 1; a subscription or api slot uses the cap the hive reports
+for the account, or the account's own cap when the hive reports none. When the reservations already reach the cap, no
+order is sent. The new execution record is ended, its reason is written to the swarm's `launch-endings` hash, and the
+launch is refused with:
+
+```text
+account reservation is full: account=<harness>:<account> sessions=<count> cap=<cap> five_left=<pct> week_left=<pct>
+```
+
+`HiveLaunch._placed` then retries inside the same launch:
+
+1. It releases the hive room the refused try held and adds the account's `harness:account` key, such as
+   `claude:unrouted`, to the launch's refused set.
+2. It selects again with that set. Selection drops the refused accounts' quota rows, and `_master_selection` adds
+   each refused key to the closed accounts it passes to `placement.place_master`. A closed account is offered neither
+   as the native interactive login nor as a subscription or api slot.
+3. When placement finds another account, the launch orders it there. Another full reservation repeats from step 1
+   with one more refused account.
+4. When no account is left, selection returns a wait and the launch ends with the last `account reservation is full`
+   refusal. The tick's actions then read `master spawn failed in seat <seat>: account reservation is full: ...`;
+   see [Master scaling troubleshooting](swarm.md#master-scaling-troubleshooting).
+
+Each account is tried at most once per launch, so a launch makes no more tries than the master has candidate
+accounts, and every try adds one execution record to the seat. A forced start is not refused at reservation, and a
+[master claude ai login](../reference/account-login.md#master-claude-ai-login) launch takes no reservation, so neither
+retries. The same retry runs for a worker launch on a hive; only the master lane passes the refused set into
+`_master_selection`, and a worker lane drops the refused accounts' quota rows alone.
+
+With the `desk` hive above, suppose the front door relaunches while the previous lead's reservation on the native
+login has not yet been released:
+
+| Try | Refused set | Placement | Result |
+|---|---|---|---|
+| 1 | empty | `desk`, `unrouted`, `interactive` | `account reservation is full: account=claude:unrouted sessions=1 cap=1 five_left=None week_left=None`; the record ends |
+| 2 | `claude:unrouted` | `desk`, `ops`, `subscription` | The order is sent; the record is `launching` |
+
+Read the reasons of the ended tries from the endings hash, keyed by execution id:
+
+```bash
+redis-cli HGETALL agentihooks:swarm:<slug>:launch-endings
+```
+
+```json
+{"reason": "account reservation is full: account=claude:unrouted sessions=1 cap=1 five_left=None week_left=None", "generation": 41}
+```
+
+Releases without pull request 10731 left the refused set out of `_master_selection`. Dropping the quota row kept a
+full subscription slot off the next try, but `place_master` builds the native login candidate from the hive's
+`interactive` field, and releases before pull request 11407 offered it to every master seat, ranked ahead of that
+hive's slots within the same UI or headless tier. Each retry therefore chose the same login and got the same refusal.
+The loop ran until the pass heartbeat found the tick lock stale and raised `SwarmError` with `the tick lock is stale:
+pass heartbeat expected token ...`. The `master scale` step holds the host placement lock (`tick.PLACING`) while it
+launches, so every other step that takes the lock waited on it, the `spawn` step of those releases among them. In the
+evidence for pull request 10731, one `master-2` launch ran `_reselect` 78 times, the seat held 35,141 executions, its
+newest 400 all ended with the same `claude:unrouted` refusal, and 30 of 30 `master scale` passes in the tick history
+ended with that `SwarmError`. In three passes of the 10 November scale proof
+([#10553](https://github.com/the-cloud-clockwork/agentihooks/issues/10553)), `master scale` held the placement lock 37
+to 48 seconds while its failing launch used 27 to 35 seconds of CPU, and `spawn` ran past the 33 second budget it had
+then, which the issue records. That loop predates the [front door rule](#backend-master-seats), which now keeps
+backend seats off the native login; the retry rule covers the front door and any account whose reservation is full.
+
+Measured over the `tick:steps` stream (`own_cpu_s` of `master scale`) and the `spawn` records ended `abandoned`,
+before and after the fix:
+
+| Window | `master scale` runs | CPU seconds, sum | CPU seconds, max | Runs at 5 s or more | Abandoned `spawn` runs |
+|---|---|---|---|---|---|
+| Before | 24 | 392.7 | 45.0 | 11 | 1 |
+| After | 43 | 55.3 | 4.8 | 0 | 0 |
+
+The before window was read at 14:35 UTC and the after window runs from 15:20 to 16:46 UTC, on the day pull request
+10731 merged. Pull request 11141 later removed the `spawn` step. The after window also ran with `master-per` off from
+its start, so not every drop in the master scale runs comes from the retry fix alone.
+
+The cause was found with the [tick step profiler](../reference/tick-engine-steps.md#profile-a-step). The regression
+test `test_a_front_door_master_retry_leaves_a_full_native_login_for_a_subscription_slot` fails when a launch calls
+`_reselect` more than twice, or when its one retry does not end the native try with the full reservation reason
+and order the subscription slot, under the feature map entry `hive-master-refused-account-retry`. The Semgrep incident
+rule `master-retry-drops-refused-accounts` flags a `_master_selection` call inside `_select` that does not pass the
+refused accounts.
+
+| Symptom | Check | Fix |
+|---|---|---|
+| `master scale` runs tens of seconds of CPU every pass, the steps that take the placement lock run late (`spawn` is abandoned at its budget on releases that have it), and one master seat gains thousands of executions ended `account reservation is full` for the same login | `HGETALL agentihooks:swarm:<slug>:launch-endings`: the reasons name one account again and again. Then check that the controller's release carries pull request 10731 | Roll the controller onto a release that carries pull request 10731. |
+| A pass fails with `the tick lock is stale: pass heartbeat expected token ...` while `master scale` runs long | The `master scale` wall in `agentihooks swarm <slug> tick-report --passes 10` | The step outran the tick lock. With pull request 10731, profile the step as in [Profile a step](../reference/tick-engine-steps.md#profile-a-step) to find the cost. |
+| A master launch ends `account reservation is full` after more than one try | `agentihooks hive show <hive>`: `sessions` against each slot's `cap`, for every hive that takes `master` | Every candidate account was full. End a session on one of them, give the hive another `AH_CC_TOKEN_<slug>`, or, when `sessions` counts more than run on the account, wait for the hive's next beat to correct it. |
 
 ### Who writes placement
 
@@ -1792,6 +1883,168 @@ The hub creates the hive buckets; members are not allowed to create them:
 | `hive-slot-accounts` | Per hive, the harness and account pairs it has reported, so its beat renews every slot it holds. |
 
 A hive beats `hive-presence` every 15 seconds. A beat expires after 45 seconds.
+
+### Offer order
+
+On each readiness pass the hub reads one snapshot of every `events` swarm and offers each task a lane may claim to
+that lane's work queue. `scripts.swarm.readiness.offers` builds the list in one order for the whole swarm, and
+`readiness.publish` adds the offers to the lane queues in that order.
+
+A task is offered when all of these hold:
+
+- It names a lane.
+- It is not a workstation task, or it is pinned to no hive or to the root hive.
+- It is `open`, in scope and not merged into another task, and no claim hold keeps it: an open dependency, its
+  phase, a freeze or a focus elsewhere, or its post merge proof window (see
+  [How a freeze hold is named](swarm.md#how-a-freeze-hold-is-named)).
+- No running agent and no recorded claimant holds it.
+- The swarm is `running`, and no release wait, apply wait, fleet red hold or lab wait holds the task.
+
+The offers are sorted by three keys, in this order:
+
+1. **Focused first.** A task one focus record covers goes ahead of every task none covers. A record covers a task
+   when its target is a node in the task's ancestry, or a `lane:` or `kind:` selector whose value equals the task's
+   lane or kind; see [Focus ranks in offer order](../reference/tick-adapters.md#focus-ranks-in-offer-order) for the
+   full rules.
+2. **Ledger rank band.** `urgent`, then `high`, then `normal`, then `low`, read from the rank stored on the task row
+   by `scripts.swarm_ledger.ledger_rank.order`. A task with no rank counts as `normal`, except a documentation follow
+   up (profile `documentation` with `follow_up` set), which counts as `low`. `next` is stored as `urgent`.
+3. **Focus record position.** The position of the first focus record that covers the task; a task no record covers
+   takes the count of focus records.
+
+Ties keep the order of the task rows in the ledger export. The rank band decides before the focus position, so an
+`urgent` task inside a later focus goes out ahead of a `normal` task inside an earlier one.
+
+The sort applies to every task that passes the claim holds above. While a focus has open work, the tasks outside it are
+held and not offered, with two kinds of exception that are offered beside the focused tasks and go out after them,
+whatever their rank:
+
+- A task of a Doctor swarm's fix phase, which no focus holds.
+- A task that joins the focus only because a focused task depends on it, is parked on it, or sits in a phase the
+  focused task's phase waits on. It is offered, but no focus record covers it, so it has no focus position.
+
+With no focus record on the ledger, every offer is unfocused and goes out by rank band, in ledger order inside a
+band.
+
+#### Offer order example
+
+A ledger holds these rows in this order, with three focus records, `tasks/old` first, then `tasks/hot`, then
+`tasks/new`, and a Doctor fix phase `p1`:
+
+```text
+row   rank     covered by           focus position   offer position
+old   normal   focus tasks/old      0                2
+hot   urgent   focus tasks/hot      1                1
+new   normal   focus tasks/new      2                3
+fix   urgent   none, phase p1       3 (outside)      4
+```
+
+`hot` goes first on its band, `old` and `new` follow on focus position, and the urgent `fix` task goes out last
+because no focus covers it. Clear the three focus records and the order becomes `hot`, `fix`, `old`, `new`: two
+urgent tasks and then two normal ones, each pair in ledger order.
+
+#### Changing the offer order
+
+```bash
+# Put a phase first in the focus queue, or make it the whole queue
+agentihooks swarm <slug> focus phases/<phase id> --top
+agentihooks swarm <slug> focus phases/<phase id> --only
+
+# Raise one task's rank band (master, planner or operator)
+agentihooks api --slug <slug> --as <name> task set <task id> rank=urgent
+
+# Clear a focus or a freeze record
+agentihooks swarm <slug> unfreeze phases/<phase id>
+```
+
+Who may write each record is in [Freeze and focus](swarm.md#freeze-and-focus) and [Queue rank](swarm.md#queue-rank).
+A change reaches the next readiness pass, which reads the ledger again when its revision moved.
+
+#### Offer delivery order
+
+Each lane of a swarm has one JetStream work queue, and a spoke takes one offer at a time from it, oldest first. The
+sort orders only the offers one pass adds. Before it adds them, `publish` withdraws every queued offer the snapshot
+names as stale: the task is gone, claimed, no longer `open`, at another claim generation, moved to another lane, held,
+or kept back by a wait. It then adds each fresh offer whose id is not already queued. The offer id is
+`ready:<slug>:<task id>:<claim generation>`, with `:root` appended for a workstation task, so the rank and focus of a
+task are not part of it.
+
+The bus also drops a published offer whose id it saw within its dedupe window, two minutes by default
+(`dedupe_window_ms` of the bus config). An offer withdrawn and published again under the same id inside that window is
+not queued; a pass after the window queues it.
+
+Two things follow:
+
+- An offer queued on an earlier pass stays ahead of the offers a later pass adds. Raising the rank of a task, or
+  focusing it, does not move an offer already queued; the new order applies to offers published after the change.
+- An offer a spoke hands back waits out a delay before any spoke can take it again, so offers queued after it can go
+  out first: five seconds for one whose hive pin or needs the hive cannot meet, and `ack_wait_ms` for an unanswered,
+  held or busy one (see [Launch failure limits](#launch-failure-limits)).
+
+Each pass logs one line per swarm on the hub, with the count of claimable offers it built and the count it newly
+queued:
+
+```bash
+kubectl -n <namespace> logs deployment/agentihooks-swarm-hub | grep 'hub: readiness swarm=<slug>'
+# hub: readiness swarm=<slug> offers=6 placed=2
+```
+
+#### Offer order tests
+
+| Test | Holds |
+|---|---|
+| `tests/swarm/test_events_placement.py::test_focused_offers_go_out_by_rank_band_then_focus_record_order` | Inside the focus, rank band decides before focus position |
+| `tests/swarm/test_events_placement.py::test_a_focused_offer_goes_out_before_an_urgent_doctor_fix_outside_the_focus` | A focused `normal` offer goes out before an `urgent` Doctor fix task outside the focus |
+| `tests/swarm/test_events_placement.py::test_offers_without_a_focus_go_out_by_rank_band_keeping_ledger_order_inside_a_band` | With no focus, rank band first and ledger order inside a band |
+| `tests/swarm/test_focus_budget.py::test_the_focus_sort_puts_focused_tasks_ahead_of_an_unfocused_task_in_a_better_band` | `focus_budget.ordered` puts a focused task ahead of an unfocused one in a better band |
+
+All four carry the `swarm-focus` feature mark and are listed under that feature in `feature-map.json`. They run in CI
+with the rest of the suite.
+
+#### Offer order limitations
+
+- The dispatcher's claim key does not order offers. At `delegate` and `full` autonomy the capacity decision's ready
+  work and preemption sort by `scripts.swarm.dispatcher.claim_key`. That key puts the critical chain guard band
+  first. It keeps only these ranks as bands: an operator rank, an `urgent` rank, a `low` rank the swarm set on any
+  task, and a documentation follow up with no rank. It orders every other task by its place in the dispatcher's
+  queue. The dispatcher writes no rank to the ledger. Offers take the stored rank of every task as its band, a rank a
+  master or planner set included.
+- A task whose last launch failed keeps its place. The tick's launch order demotes it inside its band; offers do not.
+- None of the tie rules inside a rank band from [Queue rank](swarm.md#queue-rank) apply: no longer critical path, no S
+  task that unblocks another and no resumed work goes first. Focus record position breaks ties inside a band, then
+  ledger order.
+
+#### How the offer order reached the events engine
+
+The legacy tick spawn sorted its launch queue with `focus_budget.ordered`, and `readiness.offers` published offers
+in ledger row order. Pull request
+[#11136](https://github.com/the-cloud-clockwork/agentihooks/pull/11136) gave the offers the same sort while it mapped
+every feature whose tests reached the legacy spawn to tests that would survive its removal. That mapping was the file
+`tests/LEGACY_SPAWN_COVERAGE.json`, checked by `tests/swarm/test_legacy_spawn_coverage.py` under the feature
+`legacy-spawn-events-coverage`. It listed 23 features. The task had counted 31 from file imports; the pull request
+description explains that many of those test files import the place or observe step only for helpers that stay.
+16 entries named tests from the feature map that reach none of the spawn, 10 named clauses that retire with the spawn
+and 3 named an events engine gap; an entry could name more than one of these.
+
+Pull request [#11141](https://github.com/the-cloud-clockwork/agentihooks/pull/11141) removed the spawn, and the map
+and its detector with it. `legacy-spawn-events-coverage` is now a retired id in `feature-map.json`, and
+`swarm-events-only-launch` holds the events only engine. The gaps the map named stand as follows:
+
+| Gap named by the map | Now |
+|---|---|
+| The admission claim carried no handoff document text for a recovery successor | Closed by [#11139](https://github.com/the-cloud-clockwork/agentihooks/pull/11139): admission sets the handoff and its envelope on the claimed row and attaches the predecessor's transfer; see [Handoff continuity on admission](#handoff-continuity-on-admission) |
+| The admission claim resolved no continuation, so a reclaimed task did not continue from its recorded branch | Closed by [#11139](https://github.com/the-cloud-clockwork/agentihooks/pull/11139): admission resolves the continuation and stores the reclaim |
+| Ordering by the dispatcher's claim key over ledger rank, and the demotion of a task whose launch failed | Open, as listed under [Offer order limitations](#offer-order-limitations) |
+
+#### Offer order troubleshooting
+
+| Symptom | Check |
+|---|---|
+| An `urgent` task waits while `normal` tasks of the same lane start | Its offer is queued behind offers from earlier passes, or it was handed back. Read the hub `readiness` line: `placed=0` with `offers` above zero means every offer was already queued, or the bus dropped a repeat inside its dedupe window. |
+| A focused task starts after a task of a later focus record | The later task has a better rank band; the band decides before the focus position. |
+| A task on the critical chain does not start first at `delegate` or `full` autonomy | Offers ignore the chain guard band. Raise the task's rank, or focus it, before its next offer. |
+| A task outside the focus is offered while the focus has open work | It is a Doctor fix phase task, or a focused task waits on it. Read its `phase`, and the `depends_on` and `parked_on` of the focused tasks. |
+| No offer for a task that looks ready | A claim hold, a recorded claimant or a wait holds it, or the swarm is not `running`; [Freeze and focus](swarm.md#freeze-and-focus) and `agentihooks swarm <slug> status` name the holds. |
 
 ### When a launch fails
 
@@ -2084,6 +2337,126 @@ semgrep --test --config .semgrep-incidents/admission-claim-skips-continuity.yml 
 | An events successor reads `1. Handoff document: none was left for this task.` although its predecessor handed off | The hub runs a release from before pull request [#11139](https://github.com/the-cloud-clockwork/agentihooks/pull/11139), whose admission read no handoff, or no handoff text is stored for the task | Read the handoff key above. Roll the hub when the text is there. |
 | The hive's admit ask is answered `The transfer changed; retry the command` | Another writer changed the swarm's transfers while the admission attached | Nothing to fix: the admission released its claim, agent and ledger row, and the next ask for the offer admits again. |
 | A transfer names a successor that never launched | The admission is kept, because it finished late or the hive's launch is still running | The hive asks again and launches it. Otherwise `reopen` or the launch check free hands the transfer back; see [Handing the transfer back](#handing-the-transfer-back). |
+
+### Saved account on a hive launch
+
+A successor can carry a saved account. It is the `account` of the task's relaunch assignment (`launch_assignment`)
+or, when the task has none, the `account` in the `launch` block of the predecessor's handoff envelope. On a launch
+from a hive spoke the saved account is only a preference. The launch passes `--route <account>` only while the hub's
+account slot holds or takes a worker seat on that account for the launching execution. When the account has no free
+worker seat, the launch passes no `--route` and the agent's router picks the account the usual way (see
+[Launch routing](load-balancing.md#launch-routing)). A full account therefore never pins a successor. Every launch
+from a hive spoke does this unless it takes a route listed below, and no setting turns it off.
+
+The check runs in the swarm runtime's spawn, before any process starts. The spoke writes its own hive into every
+spawn task it launches (`account_slot_hive`), next to the execution the hub started for it. For such a task the
+runtime sends the hub one `take` on the hive's slot subject, with that execution, the harness and the saved account
+as `preferred` (see
+[Hub slot requests and the hive binding](../reference/swarm-bus-scope.md#hub-slot-requests-and-the-hive-binding)).
+The hub considers only the saved account:
+
+| What the hub finds for the saved account | Hub answer | The launch |
+|---|---|---|
+| The execution already holds one of its slots | The account | `--route <account>` |
+| A free worker seat | The account, after it adds a hold for the execution | `--route <account>`. The launched agent's own slot take for the same execution finds that hold, so the launch uses one seat, not two. |
+| No free worker seat: its worker holds plus the sessions no hold accounts for have reached the smallest cap any hive reports for it, or that cap is 0 | `null` | No `--route` |
+| The hive's sessions report lists no slot for that harness and account | `null` | No `--route` |
+| The request fails, for example on a timeout or with no responders | An error | Refused as `unavailable` with `Account slot admission failed`; see [When the hub cannot answer](#when-the-hub-cannot-answer) |
+
+A master's hold is not counted against the worker seats.
+
+#### Which launches check the saved account
+
+| Launch | Route it passes |
+|---|---|
+| A front door master or a launch on the interactive route | That route. The saved account is not checked. |
+| A quota repick: the runtime holds the swarm's quota account rows, or the hub admitted a relaunch whose handoff reason is `quota` | `--route` with the account the repick chose. No `take` is sent for the saved account. |
+| A task without `account_slot_hive`, such as a tick launch | `--route <saved account>` with no slot check, as before |
+| A hive spoke launch with a saved account | Decided by the table above |
+| A launch with no saved account | No `--route` |
+
+For a quota handoff the hub did not admit with an account, the runtime first replaces the saved account with the
+successor account it selects (see [Successor account selection](load-balancing.md#successor-account-selection)).
+That account then goes through the same check.
+
+With no `--route`, `agenti` picks a Claude account and the Codex router a Codex account by the rules in
+[Launch routing](load-balancing.md#launch-routing). Because the launch runs with `AGENTIHOOKS_SLOT_HIVE` set, it then
+takes a hive account slot on the account it picked, as every routed launch on a hive does (see
+[Hives in the account login reference](../reference/account-login.md#hives)).
+
+#### When the hub cannot answer
+
+Any failure of the slot request is raised as `Unavailable("Account slot admission failed")`, and the runtime refuses
+the spawn with status `unavailable` before it starts a process. The spoke then acts as for every `unavailable`
+answer (see [What the spoke does after a failure](#what-the-spoke-does-after-a-failure)). The claim goes back to
+`ready`, the launch slot is freed and the spoke sends `reopen` but no `failed`. The harness is therefore not steered,
+and no launch failure is recorded for the task. The hive logs:
+
+```text
+hive spoke for swarm <slug> lane eng poll failed (RuntimeError: spawn unavailable: Account slot admission failed)
+```
+
+#### Before the saved account check
+
+Before pull request [#11264](https://github.com/the-cloud-clockwork/agentihooks/pull/11264), a hive launch passed
+the saved account as `--route` whenever the saved launch named one. On 14 November one task's exit handoff saved the
+account reserved for the master, which was already at 6 of 6 sessions. Every successor launched with that route. The
+hive account slot refused it with `No account slot available` within seconds, and `init-agent` waited out its 270
+second profile canary deadline before the task passed to the next owner with the same saved account. The task used
+up seven owners in 40 minutes.
+
+#### Checking the saved account on a live swarm
+
+```bash
+# The launch the predecessor saved, and its account
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" GET agentihooks:swarm:<slug>:handoff-envelope:<task id> | jq '.launch'
+# {"profile": "engineer", "harness": "claude", "account": "<account>", ...}
+
+# The slots and caps of the hive that launched the successor
+agentihooks hive show <hive-id>
+
+# Launches refused because the hub did not answer the slot request: a worker hive pod, then a workstation or VM hive
+kubectl logs deployment/<release>-worker-hive -n <namespace> | grep 'spawn unavailable: Account slot admission failed'
+journalctl --user -u agentihooks-hive --since "1 hour ago" | grep 'spawn unavailable: Account slot admission failed'
+```
+
+The keys start with `AGENTIHOOKS_SWARM_KEY_PREFIX`, default `agentihooks`. A successor that runs on another account
+than the envelope names had no free worker seat on the saved account, or was placed by a quota repick.
+
+#### Saved account guards
+
+- Feature `hive-saved-account-slot-preference` in `feature-map.json`. Its tests in
+  `tests/swarm/test_runtime_account_slots.py` cover a saved account that routes only while its slot has a worker
+  seat, a quota repick that sends no `take` for the saved account, an admitted relaunch outside a quota handoff that
+  still needs a worker seat, and a slot request the hub cannot answer, which refuses the launch as `unavailable`
+  before any process starts. Its tests in `tests/hive/test_account_slots.py` cover the hub's answer from the
+  account's cap and sessions, a failed request raised as `Unavailable`, and the request going to the hub of the bound
+  swarm on the hive's own subject.
+- Semgrep incident rule `hive-saved-account-route-unchecked`, scoped to `scripts/swarm/`: inside a function named
+  `spawn`, a route built as `["--route", saved["account"]] if saved.get("account") else ...` is an error. The Semgrep
+  workflow runs every rule in `.semgrep-incidents/`. Run it by hand with:
+
+```bash
+semgrep scan --config .semgrep-incidents/hive-saved-account-route-unchecked.yml scripts/swarm/
+semgrep --test --config .semgrep-incidents/hive-saved-account-route-unchecked.yml \
+  .semgrep-incidents/hive-saved-account-route-unchecked.py
+```
+
+#### Saved account limitations
+
+- Only the saved account is checked before the launch. When the account the router then picks has no free hive slot
+  either, the launch still ends with `No account slot available`.
+- The spawn does not release the hold it took when the launch fails before the agent starts. The hold lapses after
+  45 seconds, or sooner once the hive's heartbeat reports the execution exited or dead.
+
+#### Saved account troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Each successor of one task ends within seconds with `No account slot available`, `init-agent` waits out the profile canary deadline each time, and the handoff envelope names the same account | The hive runs a release from before #11264, which routed the saved account with no slot check | Roll the hive to the hub's release. |
+| A successor runs on an account other than the one its predecessor saved | The saved account had no free worker seat, or a quota repick chose another account | Expected. Compare the account's sessions and cap in `agentihooks hive show <hive-id>`. |
+| The hive logs `spawn unavailable: Account slot admission failed` | The hub did not answer the slot request | Check that the hub runs and serves the swarm's account slots; see the slot request rows in [Hub slot requests and the hive binding](../reference/swarm-bus-scope.md#hub-slot-requests-and-the-hive-binding). The `reopen` offers the task again. |
+| A successor skipped its saved account and still ends with `No account slot available` | The account the router picked has no free hive slot either | Wait for a session on the account to end, or add another account to the hive; see [Account caps on every hive](#account-caps-on-every-hive). |
 
 ### When a hive is lost
 
@@ -2450,9 +2823,12 @@ mismatch and idle smoke tests.
 
 When the pane of a hub started agent dies before its work ends, its hive reopens the agent's own conversation in the
 same seat, under the same task claim. This is the dead resume the tick gives agents it launched itself (see
-[Outage holds and recovery](swarm.md#outage-holds-and-recovery)). The tick's reap step leaves hub admitted agents
-to the hub, so on the `events` engine the hub's `lifecycle` reactor decides the resume and sends the agent's hive a
-`resume` command order. When the resume cannot run, the agent is dropped and its task reopens for a fresh agent.
+[Outage holds and recovery](swarm.md#outage-holds-and-recovery)). The tick's reap step sends a hub admitted agent's
+hive an execution stop once the agent's work ends (see [Stopping an agent whose work
+ended](#stopping-an-agent-whose-work-ended)), and until then watches the agent only while the controller lists its
+pane as live. It never resumes a dead one, so on the `events` engine the hub's `lifecycle` reactor decides the resume
+and sends the agent's hive a `resume` command order. When the resume cannot run, the agent is dropped and its task
+reopens for a fresh agent.
 
 Before [pull request #11246](https://github.com/the-cloud-clockwork/agentihooks/pull/11246) the reactor had no
 resume. It dropped every dead hub started agent and reopened its task, so the next agent started without the dead
@@ -3422,7 +3798,7 @@ which expires after 45 seconds, so a hive that stopped beating has no report. Th
 | `names` | The agent names the hive's herdr lists. |
 | `process_namespace` | The hive's process namespace. Written only while the hive runs at least one execution. |
 | `pane_ids` | Every pane id herdr lists. Written only while the hive runs at least one execution; `null` when herdr refuses the pane listing or its answer cannot be read. |
-| `admitted` | One entry per execution the hub admitted to this hive that no host target names yet, keyed by execution id: its `generation` and the `pane` this hive's herdr reads for it. |
+| `admitted` | One entry per execution the hub admitted to this hive that no host target names yet, keyed by execution id: its `generation`, the `pane` this hive's herdr reads for it, and the live `binding` facts this hive reads for it (`null` when it reads none). |
 
 A worker the hub admitted carries no host target, so the controller has no herdr that can read its pane. The tick
 reads that worker's pane from the `admitted` entry of the hive that admitted it, and counts it idle or working from
@@ -3430,6 +3806,15 @@ that pane like any local worker; an entry for another generation, or none, reads
 hive the tick runs on is read from that hive's own herdr. Both the controller and the hive must run a release that
 carries this report field; until then the worker reads `unknown`, which counts as working and never reaches the idle
 retire.
+
+The live binding check reads such a worker's facts from the same entry's `binding` when the worker runs on a local
+backend over the Codex app server transport, never from the controller's own server check: an app server's liveness
+can only be proven on the host that runs it, so the controller's own check stores an unknown process fact and would record the
+worker's model and effort as unobserved. An entry for another generation, an entry without a binding, or no entry at
+all gives the worker no facts, and the tick skips it that pass as it does a hosted worker whose hive reports no
+binding. Any other hub admitted worker keeps the controller's own session read, and an app server worker admitted to
+the hive the tick runs on is read from that host. The hive reads each admitted binding the way it reads a hosted one,
+so it also settles a dead app server of an admitted execution as failed, which frees its account slot.
 
 A worker's execution record names its hive in its runtime target (`host_id`). The tick counts the worker gone,
 and retires it with `its hive pane is gone`, when the report is no older than the worker's launch and one of these
@@ -3721,7 +4106,7 @@ Otherwise the room is the smallest of these limits:
 
 | Limit | Rule |
 |---|---|
-| Host CPU | Whole agents at 0.5 CPU each under 80 percent of the CPUs, measured from CPU used when the reading carries it, else from the five minute load. With CPU used in the reading, a five minute load above 80 percent of the CPUs and CPU used at or above 40 percent of them gives room 0. |
+| Host CPU | Whole agents at 0.5 CPU each under 80 percent of the CPUs, measured from CPU used when the reading carries it, else from the five minute load. With CPU used in the reading, a five minute load above 80 percent of the CPUs and the hive's own CPU at or above 40 percent of them gives room 0; the hive's own CPU is its pod load when the reading carries one, else CPU used. |
 | Host memory | Whole agents at 850 MB each under 80 percent of total memory. |
 | Pod CPU and memory | The same rules on the cgroup limits, when the machine runs in a pod with limits set. |
 | Swarm share, CPU | 40 percent of the CPUs at 0.5 CPU per agent, less the local agents running: 12 agents on 16 CPUs. |
@@ -3736,8 +4121,11 @@ no ceiling to yield to, and both share limits always count.
 
 These two share limits apply only to local spawns on the workstation. The refusal
 `with CPU used at or above the 40 percent swarm share, fits 0 more` is a different check, part of the host CPU line
-every hive room reads: it refuses while the five minute load is above 80 percent of the CPUs and CPU used is at or
-above 40 percent of them, and the ceiling never removes it.
+every hive room reads: it refuses while the five minute load is above 80 percent of the CPUs and the hive's own CPU
+is at or above 40 percent of them, and the ceiling never removes it. A hive in a pod reads both the five minute load
+and CPU used for its whole node, which includes other pods, so when the reading carries the pod load the check counts
+it and the refusal reads `with pod load <n> at or above the 40 percent swarm share`. An empty hive on a node shared
+with other pods then gets the room of the CPU used line.
 
 The room found this way is then held under `local-max-agents` and the hive `max-agents`, as in the table above.
 
@@ -4909,7 +5297,7 @@ With `enabled: true` and at least one worker hive, the chart adds:
 | Bounded drain | The preStop drain waits `workers.rollout.drainSeconds` instead of `workers.drainSeconds`, and the grace period is that value plus 30 seconds. A value outside 0 to 1500 fails the render with `workers.rollout.drainSeconds must be between 0 and 1500`. |
 | Sync waves | Each worker hive Deployment of the release gets its own sync wave: wave 1 for the first worker hive, then one wave per further `workers.hives` entry, so ArgoCD rolls them in order inside one sync. |
 | RBAC | A ServiceAccount `<fullname>-rollout`, a Role in the Lease namespace that may create Leases and get and update the named one, and a Role that may get the release's worker hive Deployments. |
-| `release` stamp | A non empty value is written to the pod annotation `agentihooks.io/release`; changing it changes the pod template and rolls the hives through the Lease. |
+| `release` stamp | Written to the pod annotation `agentihooks.io/release`; changing it changes the pod template and rolls the hives through the Lease. When it is empty, a chart whose `appVersion` is a release version stamps that `appVersion` on each worker hive whose `workers.image.tag` is `release`, so every release chart rolls those hives once. |
 
 Each hook Job has 5500 seconds in total, its retries included, which holds the 5400 second acquire wait. The hook Jobs
 run the hive worker image at the chart's `appVersion` tag. A chart whose `appVersion` is neither a
@@ -4936,9 +5324,10 @@ workers:
     enabled: true
 ```
 
-ArgoCD syncs each release's chart, and a hive rolls only when that release changes its rendered pod template. Pod
-templates carry no chart version label, so a release that changes only the chart version rolls no hive
-([#10072](https://github.com/the-cloud-clockwork/agentihooks/pull/10072)). A rolled pod pulls the current `:release`
+ArgoCD syncs each release's chart. Pod templates carry no chart version label
+([#10072](https://github.com/the-cloud-clockwork/agentihooks/pull/10072)), but each leased worker hive on the `release`
+tag carries the release chart's `appVersion` as its `release` stamp, so every release changes it once and rolls the hive
+([#12360](https://github.com/the-cloud-clockwork/agentihooks/issues/12360)). A rolled pod pulls the current `:release`
 image. Each roll goes through the shared Lease `default/agentihooks-hive-rollout`, one hive at a time. The overlays
 set no `release` stamp and the Applications carry no image updater annotations, so no second writer changes the
 template after the chart moved; antoncore's `test_hive_release_roll` asserts both, and that a chart version bump

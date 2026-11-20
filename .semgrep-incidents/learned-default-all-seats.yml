@@ -1,0 +1,10 @@
+rules:
+  - id: learned-default-all-seats
+    languages: [python]
+    severity: ERROR
+    message: Learned reads must supply the caller seat and make an all seat listing explicit.
+    paths:
+      include:
+        - /scripts/swarm/cli.py
+        - learned-default-all-seats.py
+    pattern: _list_learned($STORE, $SLUG)

@@ -1,0 +1,6 @@
+{
+  "scripts/ci_branch_lanes.py:scripts.ci_branch_lanes.x_problems:199181bb18e885cbc92515c09413a3ff45ec735f939ea3ad9634cfa1c33d4d55": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: focused_proof_group never reads its name parameter. It keeps the shared (name, block, job, trusted) signature the DEDICATED_GROUPS harness calls for every admission, and its result depends only on block and trusted, so passing None for name cannot change any outcome."
+  }
+}

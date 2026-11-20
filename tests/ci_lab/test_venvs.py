@@ -15,6 +15,8 @@ from scripts.ci_lab import sandbox, venvs
 
 DIGEST = "a" * 64
 OTHER = "b" * 64
+LOCK = ".github/test-requirements.lock"
+EXCLUDES = ".github/test-excludes.txt"
 UV = """
 import json, os, pathlib, subprocess, sys, time
 config = json.loads(pathlib.Path(sys.argv[0]).with_name("uv.json").read_text())
@@ -27,9 +29,11 @@ for _ in range(200):
         break
     time.sleep(0.05)
 time.sleep(config["sleep"])
-pathlib.Path(os.environ["UV_PROJECT_ENVIRONMENT"]).mkdir(parents=True, exist_ok=True)
-print("uv answered", config["code"])
-sys.exit(config["code"])
+if sys.argv[1] == "venv":
+    pathlib.Path(sys.argv[-1]).mkdir(parents=True, exist_ok=True)
+code = config["code"] if config["step"] in ("", sys.argv[1]) else 0
+print("uv answered", code)
+sys.exit(code)
 """
 
 
@@ -38,9 +42,9 @@ class Uv:
     folder: Path
     record: Path
 
-    def answer(self, code: int = 0, sleep: float = 0.0, hold: Path | None = None) -> None:
+    def answer(self, code: int = 0, sleep: float = 0.0, hold: Path | None = None, step: str = "") -> None:
         config = {"record": str(self.record), "code": code, "sleep": sleep, "hold": "" if hold is None else str(hold)}
-        (self.folder / "uv.json").write_text(json.dumps(config))
+        (self.folder / "uv.json").write_text(json.dumps({**config, "step": step}))
 
     def seen(self) -> list[dict[str, Any]]:
         if not self.record.exists():
@@ -84,9 +88,13 @@ def _baked(tmp_path: Path, digest: str | None) -> Path:
     return baked
 
 
-def _sync(tree: Path) -> dict[str, object]:
-    argv = ["sync", "--frozen", "--no-install-project", "--all-extras", "--python", sys.executable, "--project"]
-    return {"argv": [*argv, str(tree)], "cwd": str(tree.resolve())}
+def _built(tree: Path, venv: Path) -> list[dict[str, object]]:
+    install = ["--constraint", str(tree / LOCK), "--excludes", str(tree / EXCLUDES), "-r", str(tree / "pyproject.toml")]
+    steps = (
+        ["venv", "--clear", "--python", sys.executable, str(venv)],
+        ["pip", "install", "--python", str(venv / "bin" / "python"), *install, "--extra", "dev", "--extra", "all"],
+    )
+    return [{"argv": argv, "cwd": str(tree.resolve())} for argv in steps]
 
 
 def _call(seen: dict[str, Any]) -> dict[str, object]:
@@ -111,7 +119,7 @@ def test_a_digest_the_baked_venv_lacks_builds_its_own_venv(tmp_path: Path, uv: U
     tree = _tree(tmp_path)
     built = venvs.venv_for(DIGEST, tree, tmp_path / "pod" / "venvs", _build(), _baked(tmp_path, baked_digest))
     assert built == (venv, True)
-    assert [_call(seen) for seen in uv.seen()] == [_sync(tree)]
+    assert [_call(seen) for seen in uv.seen()] == _built(tree, venv)
     assert (venv / "lockfile.sha256").read_text() == f"{DIGEST}\n"
 
 
@@ -121,14 +129,16 @@ def test_a_build_hook_sees_only_the_whitelist_and_the_sandbox_environment(
     tmp_path: Path, uv: Uv, whitelist: dict[str, str]
 ) -> None:
     root = tmp_path / "venvs"
-    venv, _ = venvs.venv_for(DIGEST, _tree(tmp_path), root, _build(whitelist), _baked(tmp_path, None))
-    (seen,) = uv.seen()
-    env = seen["env"]
-    directory = Path(env["HOME"]).parent
-    assert "CI_LAB_HOST_SECRET" not in env
-    own = {"PATH": whitelist.get("PATH", os.defpath), "UV_PROJECT_ENVIRONMENT": str(venv)}
-    assert env == sandbox.environment(directory, sandbox.PortRange(first=20000, last=20099), {**whitelist, **own})
-    assert directory.parent == root / "builds"
+    venvs.venv_for(DIGEST, _tree(tmp_path), root, _build(whitelist), _baked(tmp_path, None))
+    seen = uv.seen()
+    assert len(seen) == 2
+    for call in seen:
+        env = call["env"]
+        directory = Path(env["HOME"]).parent
+        assert "CI_LAB_HOST_SECRET" not in env
+        own = {"PATH": whitelist.get("PATH", os.defpath)}
+        assert env == sandbox.environment(directory, sandbox.PortRange(first=20000, last=20099), {**whitelist, **own})
+        assert directory.parent == root / "builds"
     assert list((root / "builds").iterdir()) == []
 
 
@@ -141,14 +151,14 @@ def test_a_built_venv_is_reused_for_its_digest_only(tmp_path: Path, uv: Uv) -> N
     assert first == again == tmp_path / "venvs" / DIGEST
     assert other == tmp_path / "venvs" / OTHER
     assert (built, rebuilt, fresh) == (True, False, True)
-    assert [_call(seen) for seen in uv.seen()] == [_sync(tree), _sync(other_tree)]
+    assert [_call(seen) for seen in uv.seen()] == [*_built(tree, first), *_built(other_tree, other)]
 
 
 @pytest.mark.feature("lab-venv-build-sandbox")
 def test_a_failed_build_leaves_no_marker_and_builds_again(tmp_path: Path, uv: Uv) -> None:
     baked, tree, root = _baked(tmp_path, None), _tree(tmp_path), tmp_path / "venvs"
     uv.answer(code=3)
-    message = f"^uv sync for {re.escape(str(tree))} ended with code 3; its log is {re.escape(str(root / 'builds'))}/"
+    message = f"^uv venv for {re.escape(str(tree))} ended with code 3; its log is {re.escape(str(root / 'builds'))}/"
     with pytest.raises(sandbox.CannotRun, match=message):
         venvs.venv_for(DIGEST, tree, root, _build(), baked)
     assert not (root / DIGEST / "lockfile.sha256").exists()
@@ -156,14 +166,30 @@ def test_a_failed_build_leaves_no_marker_and_builds_again(tmp_path: Path, uv: Uv
     assert (kept / "log.txt").read_text() == "uv answered 3\n"
     uv.answer()
     assert venvs.venv_for(DIGEST, tree, root, _build(), baked) == (root / DIGEST, True)
-    assert [_call(seen) for seen in uv.seen()] == [_sync(tree)] * 2
+    steps = _built(tree, root / DIGEST)
+    assert [_call(seen) for seen in uv.seen()] == [steps[0], *steps]
+
+
+@pytest.mark.feature("lab-venv-build-sandbox")
+def test_a_failed_install_names_its_step_and_keeps_only_its_log(tmp_path: Path, uv: Uv) -> None:
+    baked, tree, root = _baked(tmp_path, None), _tree(tmp_path), tmp_path / "venvs"
+    uv.answer(code=4, step="pip")
+    message = (
+        f"^uv pip install for {re.escape(str(tree))} ended with code 4; its log is {re.escape(str(root / 'builds'))}/"
+    )
+    with pytest.raises(sandbox.CannotRun, match=message):
+        venvs.venv_for(DIGEST, tree, root, _build(), baked)
+    assert not (root / DIGEST / "lockfile.sha256").exists()
+    (kept,) = (root / "builds").iterdir()
+    assert (kept / "log.txt").read_text() == "uv answered 4\n"
+    assert [_call(seen) for seen in uv.seen()] == _built(tree, root / DIGEST)
 
 
 @pytest.mark.feature("lab-venv-build-sandbox")
 def test_a_build_past_its_time_limit_is_cannot_run(tmp_path: Path, uv: Uv) -> None:
     tree, root = _tree(tmp_path), tmp_path / "venvs"
     uv.answer(sleep=5.0)
-    with pytest.raises(sandbox.CannotRun, match=f"^uv sync for {re.escape(str(tree))} ended with code None; "):
+    with pytest.raises(sandbox.CannotRun, match=f"^uv venv for {re.escape(str(tree))} ended with code None; "):
         venvs.venv_for(DIGEST, tree, root, _build(timeout=1.0), _baked(tmp_path, None))
     assert not (root / DIGEST / "lockfile.sha256").exists()
 
@@ -197,4 +223,4 @@ def test_a_second_caller_waits_for_the_running_build(tmp_path: Path, uv: Uv) -> 
     first.join(10)
     second.join(10)
     assert sorted(built) == [(tmp_path / "venvs" / DIGEST, False), (tmp_path / "venvs" / DIGEST, True)]
-    assert [_call(seen) for seen in uv.seen()] == [_sync(tree)]
+    assert [_call(seen) for seen in uv.seen()] == _built(tree, tmp_path / "venvs" / DIGEST)

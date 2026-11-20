@@ -36,7 +36,7 @@ def registered() -> str:
 
 
 def test_the_committed_catalogue_equals_the_registry() -> None:
-    assert (ROOT / catalogue.PAGE).read_text() == registered()
+    assert (ROOT / "docs/reference/tick-step-catalogue.md").read_text() == registered()
 
 
 def test_a_row_names_every_field_of_its_step() -> None:

@@ -11,7 +11,7 @@ from hooks.classifier import decision_log
 from scripts import agent_choice
 from scripts.gates import log as gate_log
 from scripts.hive import placement, placement_waits, registry
-from scripts.swarm import capacity, host_budget, metrics_outbox
+from scripts.swarm import capacity, host_budget, metrics_outbox, review_rounds
 from scripts.swarm.store import RedisStore
 from scripts.swarm.tick import SPAWN_HOLD
 
@@ -449,18 +449,19 @@ def read_review_events(slug: str, box: metrics_outbox.Outbox) -> LogBatch:
     return LogBatch(batch.source, batch.position, events)
 
 
-def read_review_rounds(slug: str, box: metrics_outbox.Outbox) -> LogBatch:
-    batch = _log_batch(gate_log.gates_dir(slug) / "reviews" / "rounds.jsonl", box)
-    events = [
+def read_review_rounds(doc: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
         {
             "kind": "review round",
-            "target": f"tasks/{source['task']}",
-            "at": source["at"],
-            "review_id": f"swarm:{source['task']}:{source['counter']}:{source['round']}",
+            "target": f"tasks/{task['id']}",
+            "at": at,
+            "review_id": f"swarm:{task['id']}:{name}:{spent}",
         }
-        for source in batch.rows
+        for task in doc.get("tasks", [])
+        for name, stamps in review_rounds.rounds(task).items()
+        for spent, stamp in enumerate(stamps, 1)
+        if (at := review_rounds.stamped_at(stamp)) is not None
     ]
-    return LogBatch(batch.source, batch.position, events)
 
 
 def read_classifier_calls(box: metrics_outbox.Outbox) -> LogBatch:
@@ -517,8 +518,8 @@ def record_pass(
     quota["reason"] = room or held_pins(store.config(slug).lanes, held, quota.get("reason"))
     quota.update(placement_counts(store.redis, live))
     reviews, classifiers = read_review_events(slug, box), read_classifier_calls(box)
-    rounds = read_review_rounds(slug, box)
-    review_doc = {**doc, "_meta": {"events": [*doc.get("_meta", {}).get("events", []), *reviews.rows, *rounds.rows]}}
+    rounds = read_review_rounds(doc)
+    review_doc = {**doc, "_meta": {"events": [*doc.get("_meta", {}).get("events", []), *reviews.rows, *rounds]}}
     batches = (
         (
             AGENTS,
@@ -541,5 +542,4 @@ def record_pass(
             _supersede_merges(box, recent)
         box.append(table, recent)
     _checkpoint(box, reviews)
-    _checkpoint(box, rounds)
     _checkpoint(box, classifiers)

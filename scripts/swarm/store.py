@@ -257,7 +257,8 @@ class RedisStore:
     def slugs(self):
         return sorted(self.redis.smembers(f"{PREFIX}:index"))
 
-    def create(self, config):
+    def refusal(self, config: SwarmConfig) -> str:
+        """Why create would refuse CONFIG, empty when it takes it; callers ask before they mark a ledger."""
         from scripts.swarm import model_catalog
 
         changes = {
@@ -268,9 +269,21 @@ class RedisStore:
         if changes and (
             refused := default_models.refusal(changes, model_catalog.catalog(os.environ, self.redis, time.time()))
         ):
-            raise SwarmError(refused)
+            return refused
+        if models := default_models.lane_models(config.lanes, {}):
+            if refused := default_models.lane_refusal(
+                models, model_catalog.catalog(os.environ, self.redis, time.time())
+            ):
+                return refused
         refused = effort_range.refusal((config.effort_min, config.effort_max), config.lanes) or scaling_refusal(config)
         if refused:
+            return refused
+        if self.redis.exists(self.key(config.slug, "config")):
+            return f"swarm {config.slug} already exists"
+        return ""
+
+    def create(self, config: SwarmConfig) -> None:
+        if refused := self.refusal(config):
             raise SwarmError(refused)
         if not self.redis.hsetnx(self.key(config.slug, "config"), "slug", config.slug):
             raise SwarmError(f"swarm {config.slug} already exists")
