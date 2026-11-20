@@ -2788,8 +2788,8 @@ the lab's GitHub App scopes to actions read (`manifests.Actions`, one per reposi
 never fetched again. A commit without such a run or artifact, an expired artifact, an archive
 GitHub answers is gone (410) and a manifest recorded for another commit fetch nothing; a refused
 or unanswered request or an archive without a readable `packed.json` raises `manifests.FetchRefused`.
-A request GitHub never answered, a token mint without an answer included, or answered with a server
-error raises its subclass `manifests.FetchUnanswered`, and the scheduler puts the head back in its
+A request GitHub never answered or answered with a server error, including token mint requests,
+raises its subclass `manifests.FetchUnanswered`, and the scheduler puts the head back in its
 lane with the quiet window restarted, so the first pass after that window fetches again; any other
 refusal drops the head with its reason. The service runs each fetch off the scheduler pass through
 `manifests.Background`, at most `WORKERS` (4) at once: while a fetch runs the call raises
