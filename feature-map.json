@@ -11182,6 +11182,17 @@
       "tests": [
         "tests/test_ci_dependency_audit.py::test_audit_excludes_the_platformdirs_release_that_refuses_the_runner_home"
       ]
+    },
+    {
+      "id": "lab-budget-docs",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2714",
+      "behaviour": "The CI lab reference states the day's core budget the way scripts.ci_lab.budget reads it: each shed threshold of the runtime configuration example is the share of the budget spent at which that class sheds together with every less urgent class, in the shed order backfill, promotion, queue, at the budget left the example prose names; the threshold rule and the CILabBudgetShedding alert both measure a shed fraction against the budget spent, never the budget left; a docs copy with the thresholds written as shares left, swapped between classes or read against the budget left fails the check.",
+      "seam": "The CI lab reference page's runtime configuration example, its threshold rule and the CILabBudgetShedding alert row, read against scripts.ci_lab.delivery.runtime, scripts.ci_lab.budget.policy and scripts.ci_lab.budget.assess",
+      "tests": [
+        "tests/ci_lab/test_budget_docs.py::test_the_published_lab_budget_docs_match_the_shed_thresholds_in_code",
+        "tests/ci_lab/test_budget_docs.py::test_a_docs_copy_with_the_thresholds_swapped_fails_the_check"
+      ]
     }
   ],
   "unmapped_rules": [
