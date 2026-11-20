@@ -17,6 +17,8 @@ import pytest
 import yaml
 from coverage import CoverageData
 
+from tests.test_sonar_arrivals import Clock, Service
+
 pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -48,6 +50,13 @@ def _sonar_steps() -> tuple[list[dict], list[str | None]]:
     return steps, [step.get("name") for step in steps]
 
 
+def _dev_push_or_other(value: str) -> tuple[int, int]:
+    prefix, suffix = "${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && ", " }}"
+    assert value.startswith(prefix) and value.endswith(suffix), value
+    push, other = value.removeprefix(prefix).removesuffix(suffix).split(" || ")
+    return int(push), int(other)
+
+
 def test_sonar_starts_beside_the_shards_and_takes_each_shards_coverage_as_it_lands() -> None:
     jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     assert not {"unit", "unit-selected"} & set(jobs["sonar"]["needs"])
@@ -63,6 +72,7 @@ def test_sonar_starts_beside_the_shards_and_takes_each_shards_coverage_as_it_lan
         "SHARDS": merge["env"]["SHARDS"],
         "SCOPE": merge["env"]["SCOPE"],
         "ARRIVALS": "${{ github.workspace }}/.github/coverage/arrivals.py",
+        "WAIT_MINUTES": "${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && 59 || 44 }}",
     }
     order = [
         "Install coverage",
@@ -76,19 +86,31 @@ def test_sonar_starts_beside_the_shards_and_takes_each_shards_coverage_as_it_lan
     assert not [pattern for pattern in patterns if "coverage-3.12" in pattern]
 
 
+@pytest.mark.feature("dev-push-sonar-waits-for-shards-that-queue-late")
 def test_the_coverage_wait_outlasts_its_own_deadline_inside_the_sonar_budget() -> None:
+    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    steps, names = _sonar_steps()
+    step = steps[names.index("Take each shard's coverage as it lands")]
+    waits = _dev_push_or_other(step["env"]["WAIT_MINUTES"])
+    minutes = _dev_push_or_other(step["timeout-minutes"])
+    assert waits == (59, 44)
+    assert waits[0] < minutes[0] and waits[1] < minutes[1]
+    assert _dev_push_or_other(jobs["sonar"]["timeout-minutes"]) == (minutes[0] + 15, minutes[1] + 15)
+
+
+@pytest.mark.feature("dev-push-sonar-waits-for-shards-that-queue-late")
+def test_a_dev_push_takes_a_shard_that_ends_54_minutes_into_the_wait(tmp_path: Path) -> None:
+    steps, names = _sonar_steps()
+    push, other = _dev_push_or_other(
+        steps[names.index("Take each shard's coverage as it lands")]["env"]["WAIT_MINUTES"]
+    )
     spec = importlib.util.spec_from_file_location("sonar_arrivals", ROOT / ".github/coverage/arrivals.py")
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
-    steps, names = _sonar_steps()
-    minutes = steps[names.index("Take each shard's coverage as it lands")]["timeout-minutes"]
-    assert module.WAIT < minutes * 60
-    pull, push = minutes + 15, minutes + 30
-    assert jobs["sonar"]["timeout-minutes"] == (
-        f"${{{{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && {push} || {pull} }}}}"
-    )
+    rounds: list[dict[str, str] | None] = [{}] * round(54.1 * 60 / module.INTERVAL) + [{"coverage-3.12-1": "1"}]
+    assert module.arrive(Service(rounds), 1, "full", 1, tmp_path / "push", push * 60, Clock()) == []
+    assert module.arrive(Service(rounds), 1, "full", 1, tmp_path / "other", other * 60, Clock()) == [1]
 
 
 def test_sonar_waits_for_the_shards_on_a_standard_runner_so_its_scan_keeps_its_cpu() -> None:

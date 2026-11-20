@@ -9273,6 +9273,18 @@
       ]
     },
     {
+      "id": "dev-push-sonar-waits-for-shards-that-queue-late",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/promo-44611530082-0",
+      "behaviour": "On a dev push the sonar job's coverage wait lasts 59 minutes inside a 60 minute step timeout and the 75 minute job, so a unit shard that queues for a runner behind pull request and queue work and lands 54 minutes after the wait started still has its coverage taken before the merge. Every other event keeps the 44 minute wait, the 45 minute step timeout and the 60 minute job, and both keep 15 minutes of the job after the wait step. The wait reads its length from WAIT_MINUTES and names that length when it gives up.",
+      "seam": "The WAIT_MINUTES env and timeout-minutes of the Take each shard's coverage as it lands step and the sonar job's timeout-minutes in the Tests workflow, and main in .github/coverage/arrivals.py",
+      "tests": [
+        "tests/test_sonar_coverage.py::test_the_coverage_wait_outlasts_its_own_deadline_inside_the_sonar_budget",
+        "tests/test_sonar_coverage.py::test_a_dev_push_takes_a_shard_that_ends_54_minutes_into_the_wait",
+        "tests/test_sonar_arrivals.py::test_the_wait_lasts_the_minutes_it_is_given"
+      ]
+    },
+    {
       "id": "test-summary-downloads-every-report-in-one-step",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-test-summary-single-download",

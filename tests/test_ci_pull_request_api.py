@@ -602,7 +602,11 @@ def test_sonar_takes_this_runs_coverage_through_the_runtime_token_as_the_shards_
         "SCOPE": "${{ needs.select.outputs.scope }}",
     }
     assert merge["env"] == shards
-    assert arrivals["env"] == {**shards, "ARRIVALS": "${{ github.workspace }}/.github/coverage/arrivals.py"}
+    assert arrivals["env"] == {
+        **shards,
+        "ARRIVALS": "${{ github.workspace }}/.github/coverage/arrivals.py",
+        "WAIT_MINUTES": "${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && 59 || 44 }}",
+    }
     assert 'bash .github/coverage/combine.sh --downloaded "$SHARDS" ||' in merge["run"]
     assert not API_CALL.search((ROOT / ".github/coverage/arrivals.py").read_text())
 

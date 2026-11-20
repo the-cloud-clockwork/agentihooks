@@ -146,7 +146,14 @@ rerun attempt counts only a flake report whose artifact changed since the
 wait's first listing. Coverage that an earlier attempt left counts at once. A
 shard that leaves neither coverage nor a flake report, such as one that lost
 its runner or ran past its job timeout, holds the wait to its deadline, and so
-does listed coverage that never downloads. The wait gives up after 44 minutes.
+does listed coverage that never downloads. The wait gives up after
+`WAIT_MINUTES`: 59 minutes on a dev push, inside a 60 minute step and the 75
+minute job, and 44 minutes on every other event, inside a 45 minute step and
+the 60 minute job, so both keep 15 minutes for the merge, the scan and the
+quality gate. Dev push shards queue for runners behind pull request and queue
+work: on 19 November the last shard of a dev push ended up to 54 minutes after
+sonar started, and three dev push runs lost a green shard's coverage to a 44
+minute wait.
 It never fails the job itself, so a shard still missing reaches `combine.sh`,
 which names it.
 
@@ -239,7 +246,7 @@ gh run download "$RUN_ID" \
 | Failure or symptom | Inspection |
 |---|---|
 | `Missing coverage for shard N` | Read `Take each shard's coverage as it lands` for the artifacts it logged as landed, and compare the expected count with them; an optional reused report does not replace the required primary database. |
-| `Shards N had not ended after 44 minutes` | The coverage wait gave up on shards that never uploaded coverage or a flake report, such as a shard that lost its runner or still waited for one. Read those shard jobs. A rerun of `sonar` alone takes any coverage they left at once and waits to the deadline again for a shard that left none. |
+| `Shards N had not ended after M minutes` | The coverage wait gave up after its `WAIT_MINUTES` on shards that never uploaded coverage or a flake report, such as a shard that lost its runner or still waited for one. Read those shard jobs. A rerun of `sonar` alone takes any coverage they left at once and waits to the deadline again for a shard that left none. |
 | Coverage merge fails or ends without a status | Read the log printed by the merge wait for flattening, combine, XML or LCOV errors. Keep the wait and all coverage inputs. |
 | Merge wait times out | Inspect the merge process and runner resource timings; the short background launch step does not measure merge completion. |
 | No browser or node coverage | Inspect the shard capture artifacts and the LCOV diagnostic; retain both input types required for that scope. |
