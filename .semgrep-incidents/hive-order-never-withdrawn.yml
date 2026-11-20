@@ -3,10 +3,10 @@ rules:
     languages: [python]
     severity: ERROR
     message: >-
-      A hive drain sends hand off orders with _order but never withdraws them with _withdraw when it stops waiting.
-      The orders go to each agent's seat, so they stay open after the drain ends and the seat's next occupant, on
-      another hive, reads an order that no longer applies and hands off for nothing. Call _withdraw with the same
-      inbox and ordered map once the drain loop ends.
+      A hive drain sends hand off orders with _order and its function never calls _withdraw with the same inbox and
+      ordered map. The orders go to each agent's seat, so they stay open after the drain ends and the seat's next
+      occupant, on another hive, reads an order that no longer applies and hands off for nothing. Call _withdraw with
+      that inbox and ordered map after the drain loop.
     patterns:
       - pattern-inside: |
           def $F(...):

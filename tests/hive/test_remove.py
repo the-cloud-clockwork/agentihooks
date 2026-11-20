@@ -914,6 +914,10 @@ def _withdrawn(member):
     return f"cancelled: {remove.WITHDRAWN.format(hive=member)}"
 
 
+def _removed(member: str) -> str:
+    return f"cancelled: hive {member} was removed, so its hand off order no longer applies"
+
+
 def test_a_release_roll_withdraws_every_unanswered_order_when_its_drain_ends_so_a_later_occupant_reads_none(
     store, tmp_path
 ):
@@ -964,11 +968,23 @@ def test_a_hive_remove_drain_withdraws_every_unanswered_order_when_it_ends_so_a_
 
     remove.drain(store, plan, _host(Successor(store), Run(), tmp_path))
 
-    removed = f"cancelled: hive {member} was removed, so its hand off order no longer applies"
     for seat, successor in ((SEAT, "engineer@2"), (f"ci-1@{SLUG}", "ci@2")):
-        assert [(item.state, item.reason) for item in _orders(store, seat)] == [("cancelled", removed)]
+        assert [(item.state, item.reason) for item in _orders(store, seat)] == [("cancelled", _removed(member))]
         SeatRegistry(store.redis).occupy(seat, successor, 1)
         assert InboxStore(store.redis).open_mail(successor) == []
+
+
+@pytest.mark.feature("hive-remove-drain-withdraws-orders")
+def test_a_hive_remove_drain_keeps_the_outcome_of_an_order_its_agent_answered(store: Any, tmp_path: Path) -> None:
+    member = _member(store)
+    _agent(store, member)
+    store.put_agent(SLUG, AgentRecord("ci@1", "ci", "t2", seat=f"ci-1@{SLUG}", hive=member, state="working"))
+    plan = remove.Plan(member, "anton-9", "p", wait_s=600)
+
+    remove.drain(store, plan, _host(Answering(store), Run(), tmp_path))
+
+    assert [(item.state, item.reason) for item in _orders(store, SEAT)] == [("done", "done: handed off")]
+    assert [(item.state, item.reason) for item in _orders(store, f"ci-1@{SLUG}")] == [("cancelled", _removed(member))]
 
 
 def test_a_stopping_hive_writes_a_recovery_handoff_for_each_agent_still_running_at_the_deadline(
