@@ -1,6 +1,18 @@
 {
   "features": [
     {
+      "id": "swarm-urgent-hold-hive-admission",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-urgent-hold-names-host-room",
+      "behaviour": "While every live hive the swarm reads has admission room zero, an urgent open task with no other hold records a reason naming each hive and its refusing limit, so no urgent unclaimable finding fires for it; when any live hive has room, a hive admission count is unreadable or no hive is live, the reason stays empty and the finding fires after ten minutes as before.",
+      "seam": "scripts.swarm.health.urgent_hold.observe over the hive admission rooms scripts.swarm.status.readable_hives reads, then urgent_hold.read and urgent_hold.findings",
+      "tests": [
+        "tests/swarm/test_urgent_hold.py::test_an_urgent_task_while_no_live_hive_has_admission_room_names_the_hive_and_raises_no_finding",
+        "tests/swarm/test_urgent_hold.py::test_the_hive_admission_hold_stands_only_while_every_live_hive_is_read_at_zero_room",
+        "tests/swarm/test_urgent_hold.py::test_a_release_wait_is_named_ahead_of_the_hive_admission_hold"
+      ]
+    },
+    {
       "id": "kind-terminal-snapshot-base",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2647",
