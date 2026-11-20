@@ -694,7 +694,7 @@ def test_feature_tests_and_charts_have_runner_classes() -> None:
     }
 
 
-def test_exactly_one_step_per_ratchet_grades_against_the_base():
+def test_exactly_one_step_per_ratchet_grades_against_the_base() -> None:
     ratchets = [
         (job, step)
         for job, body in _jobs().items()
@@ -702,7 +702,7 @@ def test_exactly_one_step_per_ratchet_grades_against_the_base():
         if "check --base FETCH_HEAD" in step.get("run", "") or "--baseline-commit" in step.get("run", "")
     ]
     assert [(job, step["name"]) for job, step in ratchets] == [
-        ("scan", "New test waits keep a bound of ten seconds or more"),
+        ("test-rules", "New test waits keep a bound of ten seconds or more"),
         ("scan", "Fail on findings new against the base"),
         ("charts", "Guard rules hold on their fixtures and at their computed floors"),
     ]
