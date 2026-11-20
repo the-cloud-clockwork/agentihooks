@@ -1,0 +1,21 @@
+rules:
+  - id: protected-grader-reads-head-leniently
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The protected grader reads a workflow with a yaml load function, or reads the head without ActionsLoader. PyYAML
+      keeps the last of two repeated keys and merges the << key, while GitHub Actions refuses a repeated key and reads
+      << as a plain key, so a head that repeated its jobs key showed the grader only the last copy of a workflow that
+      Actions refused. Read the head with load(root, args.head, ActionsLoader), which refuses both.
+    paths:
+      include:
+        - /scripts/gate_protected.py
+        - protected-grader-reads-head-leniently.py
+    pattern-either:
+      - pattern: yaml.safe_load(...)
+      - pattern: yaml.load(...)
+      - pattern: yaml.full_load(...)
+      - pattern: yaml.unsafe_load(...)
+      - patterns:
+          - pattern: load($ROOT, args.head, ...)
+          - pattern-not: load($ROOT, args.head, ActionsLoader)
