@@ -10995,7 +10995,9 @@
         "tests/codex_session/test_supervisor.py::test_adoption_refusal_records_the_replacement_execution_without_ending_it",
         "tests/codex_session/test_supervisor.py::test_adoption_refusal_keeps_a_missing_seat_in_the_launch_ending",
         "tests/codex_session/test_supervisor.py::test_adoption_refusal_rereads_the_state_after_an_atomic_bind_refusal",
-        "tests/codex_session/test_supervisor.py::test_adoption_refusal_names_an_atomic_bind_refusal_when_the_snapshot_matches"
+        "tests/codex_session/test_supervisor.py::test_adoption_refusal_names_an_atomic_bind_refusal_when_the_snapshot_matches",
+        "tests/hive/test_controller_launch.py::test_an_adoption_refusal_does_not_allow_replacing_a_live_hive_execution",
+        "tests/test_swarm_v2_launch.py::test_an_adoption_refusal_does_not_allow_a_tick_to_replace_a_live_execution"
       ],
       "rules": [
         "codex-adopt-refusal-fields"

@@ -1371,6 +1371,29 @@ def test_legacy_launch_ending_allows_replacement_before_projection_catches_up(se
     assert admitted.profile_decision == selected.profile.record()
 
 
+@pytest.mark.feature("codex-adopt-refusal-fields")
+def test_an_adoption_refusal_does_not_allow_replacing_a_live_hive_execution(setup: SimpleNamespace) -> None:
+    from scripts.codex_session import supervisor
+    from scripts.swarm.store import APP_SERVER_TRANSPORT, SwarmError
+
+    request = request_for(setup)
+    request = replace(request, config=replace(request.config, codex_inbox_transport=APP_SERVER_TRANSPORT))
+    selected = setup.launcher.select(setup.config, "eng", request.task)
+    selected = replace(selected, account=replace(selected.account, harness="codex"))
+    admitted = setup.launcher.admit(request, selected)
+    current = replace(admitted, state="working")
+    setup.store.put_agent("fixture", current)
+    spec = supervisor.Launch("fixture", current, ".", "fixture", {}, execution_id=current.execution_id)
+
+    with pytest.raises(supervisor.LaunchFailure):
+        supervisor.adopt(setup.store, spec, APP_SERVER_TRANSPORT, current.hive)
+
+    with pytest.raises(SwarmError, match="replacement does not match the current execution"):
+        setup.launcher.admit(request_for(setup), selected)
+
+    assert setup.store.execution("fixture", current.execution_id) == current
+
+
 def test_unavailable_placement_does_not_admit_or_reserve(setup):
     from scripts.swarm.profile_choice import ProfileDecision
     from scripts.swarm_v2.runtime.base import Outcome, Status
