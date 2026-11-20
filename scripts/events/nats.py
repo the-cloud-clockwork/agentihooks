@@ -36,6 +36,7 @@ from .nats_names import existing_consumer, existing_stream, queue_binding, root_
 from .resource_names import legacy_queue_stream, legacy_stream_name
 from .resource_names import queue_stream as resource_queue_stream
 from .scope import RoutedLog, queue_lane, require_owner
+from .serve_timing import ServeTiming
 from .subjects import PREFIX, consumer_name, inbox, stream_name
 from .subjects import subject as event_subject
 
@@ -610,6 +611,7 @@ class NatsBus:
         self._buckets: dict[str, NatsStateStore] = {}
         self._views: dict[str, Bus] = {}
         self._serving = ThreadPoolExecutor(SERVE_WORKERS)
+        self._serve_timing = ServeTiming(SERVE_WORKERS)
         try:
             self._nc = self._loop.run(_first_connect(url, config))
             self._js = self._nc.jetstream()
@@ -727,22 +729,23 @@ class NatsBus:
 
         def answer(msg: Msg, received_ns: int) -> None:
             waited = (time.monotonic_ns() - received_ns) // 1_000_000
-            if wait_ms is not None and waited >= wait_ms:
-                print(
-                    f"bus: dropped a request on {msg.subject!r} after it waited {waited} ms in the serve queue, "
-                    f"past its requester's {wait_ms} ms wait",
-                    file=sys.stderr,
-                )
-                return
-            token = SERVE_WAITED_MS.set(waited)
-            try:
-                reply = handler(msg.subject, msg.data)
-                nats_payload.validate(self._nc, msg.reply, reply)
-                self._loop.run(msg.respond(reply))
-            except Exception as error:
-                self._loop.run(_unreported(error))
-            finally:
-                SERVE_WAITED_MS.reset(token)
+            with self._serve_timing.request(msg.subject, waited):
+                if wait_ms is not None and waited >= wait_ms:
+                    print(
+                        f"bus: dropped a request on {msg.subject!r} after it waited {waited} ms in the serve queue, "
+                        f"past its requester's {wait_ms} ms wait",
+                        file=sys.stderr,
+                    )
+                    return
+                token = SERVE_WAITED_MS.set(waited)
+                try:
+                    reply = handler(msg.subject, msg.data)
+                    nats_payload.validate(self._nc, msg.reply, reply)
+                    self._loop.run(msg.respond(reply))
+                except Exception as error:
+                    self._loop.run(_unreported(error))
+                finally:
+                    SERVE_WAITED_MS.reset(token)
 
         async def respond(msg: Msg) -> None:
             self._serving.submit(answer, msg, time.monotonic_ns())

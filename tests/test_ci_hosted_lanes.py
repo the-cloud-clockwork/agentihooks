@@ -68,7 +68,7 @@ EXCLUDED = {
     "proofs.yml": "each proof dispatch runs in its own focused proof group and never waits behind a Tests dispatch",
     "publish-pypi.yml": "operator release path from main",
     "release.yml": "operator release path; a dry run tags and pushes nothing",
-    "swarm-image.yml": "a manual dispatch runs no job; its jobs are gated to a dev push",
+    "swarm-image.yml": "a manual dispatch runs no job; its jobs are gated to a dev push or a published release",
 }
 if (_WORKFLOWS / "access-audit.yml").exists():
     EXCLUDED["access-audit.yml"] = "dev push, weekly and manual, one short read only job, no pull request trigger"

@@ -1,0 +1,17 @@
+rules:
+  - id: github-app-mint-loses-status
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A refused GitHub App token response must retain its HTTP status so the lab can hold a head on a server error.
+    paths:
+      include:
+        - /scripts/github_app.py
+        - github-app-mint-loses-status.py
+    patterns:
+      - pattern-inside: |
+          if $RESPONSE.status_code != 201:
+              ...
+      - pattern-either:
+          - pattern: raise GitAuthRefused($MESSAGE)
+          - pattern: raise GitAuthRefused($MESSAGE, status_code=None)

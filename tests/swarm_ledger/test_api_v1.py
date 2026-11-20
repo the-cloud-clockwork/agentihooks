@@ -1419,10 +1419,11 @@ def test_upload_refusals_remain_json_and_do_not_mutate(live):
 
 @pytest.mark.parametrize("error", [OSError("Backend failure"), ValueError("Invalid stored task")])
 def test_storage_errors_have_a_stable_bounded_envelope(live, monkeypatch, caplog, error):
-    def unreadable(slug, **kwargs):
+    def unreadable(slug: str, *keys: str, **kwargs: object) -> None:
         raise error
 
     monkeypatch.setattr(server.repository, "current", unreadable)
+    monkeypatch.setattr(server.repository, "read", unreadable)
     assert request(live, "GET", "metadata") == (
         500,
         {

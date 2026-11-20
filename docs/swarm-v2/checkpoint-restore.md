@@ -9,7 +9,7 @@ kind; a restore never reports more continuity than it delivered.
 |---|---|---|
 | `native` | The harness reopens the same conversation from its own captured session files | The checkpoint carries a qualified native session, its session id matches the one the fenced attempt held, and the harness version on the replacement is supported |
 | `reconstructed` | A new conversation starts with the archived transcript as its opening context | A complete context only checkpoint, chosen by the master or operator |
-| `fresh` | A new conversation with no restored state | Chosen by the master or operator, or a superseded legacy spawn (see [Limitations](#limitations)) |
+| `fresh` | A new conversation with no restored state | Chosen by the master or operator, or a superseded legacy specification spawn: a Kubernetes spawn journal written before spec digests (see [Limitations](#limitations)) |
 
 Checkpoints themselves are described by the checkpoint schema in `docs/swarm-v2/schemas/checkpoint.json`; where
 checkpoint storage may live is in [Swarm v2 storage policy](storage-policy.md).
@@ -198,7 +198,12 @@ never delete them as caches during a rollback.
 
 - A spawn superseded as a legacy specification is replaced fresh without a choice while automation is on and not
   paused, because it never started and holds no conversation. With automation off or paused it waits like any other
-  failure. This is an approved exception to the rule that only the master or operator chooses fresh.
+  failure. This is an approved exception to the rule that only the master or operator chooses fresh. A legacy
+  specification spawn is a Kubernetes spawn operation journaled with no spec digest, which releases before pull
+  request [#2591](https://github.com/the-cloud-clockwork/agentihooks/pull/2591) wrote; it is unrelated to the tick
+  `spawn` step that pull request [#11141](https://github.com/the-cloud-clockwork/agentihooks/pull/11141) removed,
+  after which lane agents launch through hub admission (see
+  [Pulling work from the hub](../pillars/hives.md#pulling-work-from-the-hub)).
 - Transcript written after the archive watermark is lost and its length is unknown; the fence names it.
 - The live capture and restore proof on Anton is pending. The evidence record `evidence/SV2-CKP-05/result.json`
   is marked mocked and lists the fixture inputs: a valid checkpoint, a corrupt object, an unsupported harness

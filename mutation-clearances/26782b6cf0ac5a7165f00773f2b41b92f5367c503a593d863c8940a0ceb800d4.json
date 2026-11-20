@@ -1,0 +1,6 @@
+{
+  "scripts/collection_imports.py:scripts.collection_imports.x_loads_heavy:ca283897a2db8edcb305ae1eb3d66262fd0eb79af1aed04ddb9164ef7cd7710d": {
+    "reader": "standards_reader",
+    "reason": "Starts the parents range at zero. A zero split limit returns the name itself, which loads_heavy added to seen before building the parents, so that recursive call returns False with no side effect and the result is unchanged."
+  }
+}

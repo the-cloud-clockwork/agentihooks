@@ -1,0 +1,22 @@
+rules:
+  - id: status-without-harness-pin
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Swarm status gathers the health findings without harness_pin.findings, so a lane pinned to one harness while
+      the other harness has free quota seats and ready lane tasks wait is reported by nothing. Add
+      harness_pin.findings(store, slug, now) to the same findings sum.
+    paths:
+      include:
+        - /scripts/swarm/status.py
+        - status-without-harness-pin.py
+    patterns:
+      - pattern-inside: |
+          def $FN(...):
+              ...
+      - pattern: spawn_stall.findings(...)
+      - pattern-not-inside: |
+          def $FN(...):
+              ...
+              $FOUND = <... harness_pin.findings(...) ...>
+              ...

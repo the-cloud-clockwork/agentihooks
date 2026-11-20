@@ -800,6 +800,11 @@ Codex and the profile has no required Claude only plugin. With no eligible
 account, successor placement fails; it does not launch on a draining account.
 Under the deployed controller, hive placement applies the same rule to every
 launch: see [closed and draining accounts get no hive agent](hives.md#closed-and-draining-accounts-get-no-hive-agent).
+On a hive spoke launch the selected or saved account is only a preference: it
+routes the launch only while the hub's account slot has a worker seat on it for
+the launching execution, and otherwise the launch picks its account by
+[launch routing](#launch-routing); see
+[saved account on a hive launch](hives.md#saved-account-on-a-hive-launch).
 
 ### Worked example
 
