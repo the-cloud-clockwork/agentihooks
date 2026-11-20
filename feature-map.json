@@ -8028,7 +8028,7 @@
       "id": "stall-master-queue",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-stall-hotfix-route",
-      "behaviour": "While the spawn stall health finding is open, swarm merge queue accepts the master seat for a pull request whose task is urgent and admitted by the open focus (a focused task or a task the focus waits on), or any urgent task when no focus has open work, and records the stall route and task in the queue journal; without a stall, an urgent rank, an open task or the focus, the master is still refused, and the stall never opens a dequeue.",
+      "behaviour": "While the spawn stall health finding is open, swarm merge queue accepts the master seat for a pull request whose task is urgent and admitted by the open focus (a focused task or a task the focus waits on), or any urgent task when no focus has open work, and records the stall route and task in the queue journal; without an urgent rank, an open task or the focus, the master is still refused, and the stall never opens a dequeue.",
       "seam": "swarm merge queue through cli.cmd_merge and stall_queue.route",
       "tests": [
         "tests/swarm/test_merge_queue.py::test_a_planted_spawn_stall_lets_the_master_queue_a_focused_urgent_pull_request",
@@ -8036,6 +8036,19 @@
         "tests/swarm/test_merge_queue.py::test_the_master_still_cannot_queue_without_a_stall_or_a_focused_urgent_task",
         "tests/swarm/test_merge_queue.py::test_the_stall_route_never_opens_a_dequeue_for_the_master",
         "tests/swarm/test_merge_queue.py::test_a_phase_focus_admits_only_the_urgent_tasks_of_its_phase_to_the_stall_route"
+      ]
+    },
+    {
+      "id": "focused-urgent-master-queue",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-queue-focused-urgent",
+      "behaviour": "With no spawn stall finding open, swarm merge queue accepts the master seat for a pull request whose task is open, urgent and admitted by the open focus, or any urgent task when no focus has open work, on any head branch, and records the focused urgent route and task in the queue journal; the spawn stall and master freeze routes keep their names when they apply, a normal rank, a done task, a task outside the focus or a pull request no task names leaves the master refused, and the route never opens a dequeue.",
+      "seam": "swarm merge queue through cli.cmd_merge and master_queue.route against ledger.tasks_targeting and freeze.admitted",
+      "tests": [
+        "tests/swarm/test_merge_queue.py::test_the_master_queues_a_focused_urgent_pull_request_on_any_branch_with_no_spawn_stall",
+        "tests/swarm/test_merge_queue.py::test_with_no_focus_open_the_master_queues_any_urgent_pull_request_with_no_spawn_stall",
+        "tests/swarm/test_merge_queue.py::test_with_no_spawn_stall_the_master_is_refused_without_a_focused_urgent_task",
+        "tests/swarm/test_merge_queue.py::test_the_focused_urgent_route_never_opens_a_dequeue_for_the_master"
       ]
     },
     {
