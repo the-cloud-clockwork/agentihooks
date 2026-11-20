@@ -145,6 +145,9 @@ class Expander:
     def merge_base(self, repo: str, head: str) -> str:
         return self.plans[head].grader
 
+    def reachable(self, repo: str, head: str) -> bool:
+        return True
+
 
 @dataclass
 class Poster:
