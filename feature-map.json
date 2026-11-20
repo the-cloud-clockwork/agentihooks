@@ -7724,6 +7724,17 @@
       ]
     },
     {
+      "id": "docs-table-double-pipe",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-docs-double-pipe",
+      "behaviour": "No markdown page under docs carries a table row whose code span escapes a double pipe, because kramdown keeps the backslash inside a code span and the Pages build would print a backslash before each pipe. A double pipe in table code is written as an inline code element with pipe entities, which renders a plain double pipe in the Pages build and in GitHub's view.",
+      "seam": "every markdown page under docs, read by the docs table pipe check",
+      "tests": [
+        "tests/test_docs_table_pipes.py::test_the_check_flags_an_escaped_double_pipe_and_passes_the_entity_form",
+        "tests/test_docs_table_pipes.py::test_no_docs_table_code_span_escapes_a_double_pipe"
+      ]
+    },
+    {
       "id": "tick-knowledge-warm",
       "origin": "inventory",
       "behaviour": "The tick step knowledge warm starts, every minute on the slow lane through the host port, a detached job that embeds the new and changed items of the running swarm's stored ledger into its knowledge index; it reads no ledger in the pass, launches nothing while an earlier refresh of the same index holds its lock or when the semantic embedder is set, so an ask right after the job ran answers without refreshing.",
