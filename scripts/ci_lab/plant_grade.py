@@ -1,5 +1,6 @@
 import argparse
 import json
+import re
 import subprocess
 import sys
 import time
@@ -75,6 +76,11 @@ def _verdict(rows: list[Mapping[str, Any]], pair: plant_proofs.Pair, planted: bo
         and checks[pair.gate]["conclusion"] != "failure"
     ):
         raise ValueError(f"{pair.name} {'plant' if planted else 'twin'} grade has the wrong verdict: {failed}")
+    if planted:
+        diagnostic = pair.reason.partition(":")[0]
+        output = checks[pair.gate].get("output") or {}
+        if not re.search(rf"\b{re.escape(diagnostic)}\b", output.get("text") or ""):
+            raise ValueError(f"{pair.name} plant grade lacks the expected diagnostic: {diagnostic}")
     return str(required["html_url"])
 
 

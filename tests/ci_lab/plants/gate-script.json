@@ -1,6 +1,6 @@
 {
   "gate": "lint",
-  "reason": "new comment: the base grader refuses the head's invented directive",
+  "reason": "forbidden comment: the base grader refuses the head's invented directive",
   "edits": [
     {
       "path": "scripts/no_comments.py",

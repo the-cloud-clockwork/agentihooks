@@ -71,7 +71,7 @@ def test_a_pair_names_its_gate_reason_and_fixed_commit_metadata(repository: Path
         pair.reason
         == {
             "lint": "I001: import block is unsorted",
-            "gate-script": "new comment: the base grader refuses the head's invented directive",
+            "gate-script": "forbidden comment: the base grader refuses the head's invented directive",
         }[name]
     )
     for revision, subject in [(pair.green, f"CI lab {name} twin"), (pair.red, f"CI lab {name} plant")]:

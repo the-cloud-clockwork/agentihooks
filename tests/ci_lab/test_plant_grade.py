@@ -123,6 +123,13 @@ class Lab:
             "conclusion": conclusion,
             "external_id": run,
             "status": "completed",
+            "output": {
+                "text": (
+                    "sample.py:1:1: I001 Import block is un-sorted or un-formatted"
+                    if self.name == "lint"
+                    else "::error::sample.py:1: forbidden comment"
+                )
+            },
             "html_url": "https://github.com/acme/widgets/runs/" + name.rsplit("/", 1)[-1],
         }
 
@@ -142,15 +149,16 @@ class Lab:
         return plant_grade.Ports(self.fetch, self.sleep, self.clock, self.push)
 
 
+@pytest.mark.parametrize("name", ["lint", "gate-script"])
 @pytest.mark.feature("lab-static-plant-proofs")
-def test_two_pushes_grade_against_one_protected_base_and_ignore_other_grades(repository: Path) -> None:
-    lab = Lab(repository)
+def test_two_pushes_grade_against_one_protected_base_and_ignore_other_grades(repository: Path, name: str) -> None:
+    lab = Lab(repository, name)
     base = git(repository, "rev-parse", "HEAD")
-    result = plant_grade.prove(repository, "lint", base, REPOSITORY, lab.ports())
+    result = plant_grade.prove(repository, name, base, REPOSITORY, lab.ports())
     assert result == {
-        "plant": "lint",
+        "plant": name,
         "gate": "lint",
-        "reason": "I001",
+        "reason": "I001" if name == "lint" else "forbidden comment",
         "base": base,
         "green": "https://github.com/acme/widgets/runs/required",
         "red": "https://github.com/acme/widgets/runs/required",
@@ -260,10 +268,23 @@ def test_conflicting_gate_checks_cannot_hide_an_extra_failure(repository: Path) 
 
 
 @pytest.mark.parametrize("name", ["lint", "gate-script"])
-@pytest.mark.parametrize("diagnostic", [None, "", "F401 unused import", "ruff: command not found", "I0010"])
+@pytest.mark.parametrize(
+    "diagnostic,field",
+    [
+        (None, "text"),
+        ("", "text"),
+        ("F401 unused import", "text"),
+        ("ruff: command not found", "text"),
+        ("I0010", "text"),
+        ("I001", "summary"),
+        ("I001", "title"),
+        ("forbidden comment", "summary"),
+        ("forbidden comment", "title"),
+    ],
+)
 @pytest.mark.feature("lab-static-plant-proofs")
 def test_a_named_gate_failure_requires_the_observed_plant_diagnostic(
-    repository: Path, name: str, diagnostic: str | None
+    repository: Path, name: str, diagnostic: str | None, field: str
 ) -> None:
     lab = Lab(repository, name)
 
@@ -274,7 +295,8 @@ def test_a_named_gate_failure_requires_the_observed_plant_diagnostic(
                 if diagnostic is None:
                     row.pop("output", None)
                 else:
-                    row["output"] = {"title": "lint", "summary": diagnostic, "text": ""}
+                    row["output"] = {"title": "lint", "summary": "", "text": ""}
+                    row["output"][field] = diagnostic
         return result
 
     with pytest.raises(ValueError, match="diagnostic"):
