@@ -10839,7 +10839,7 @@
       "tests": [
         "tests/test_ci_semgrep.py::test_new_test_waits_scan_the_tests_against_the_merge_base_with_the_head_and_the_grader_rule",
         "tests/test_ci_semgrep.py::test_new_test_waits_grade_with_the_head_rule_on_a_base_without_it",
-        "tests/test_ci_semgrep.py::test_a_new_short_test_wait_fails_the_step",
+        "tests/test_ci_semgrep.py::test_a_scan_finding_fails_the_new_test_waits_step",
         "tests/test_ci_semgrep.py::test_new_test_waits_fail_without_scanning_when_the_base_is_unknown",
         "tests/test_ci_semgrep.py::test_the_wait_bound_rule_reaches_the_tests_and_its_fixture_under_ten_seconds"
       ]

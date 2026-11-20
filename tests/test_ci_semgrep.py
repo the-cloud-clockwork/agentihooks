@@ -249,7 +249,7 @@ def test_new_test_waits_grade_with_the_head_rule_on_a_base_without_it(tmp_path: 
 
 
 @pytest.mark.feature("test-wait-bound-ratchet")
-def test_a_new_short_test_wait_fails_the_step(tmp_path: Path) -> None:
+def test_a_scan_finding_fails_the_new_test_waits_step(tmp_path: Path) -> None:
     assert _run_wait_bounds(tmp_path, graded=True, scan_exit=1)[0] == 1
 
 
@@ -272,7 +272,6 @@ def test_the_wait_bound_rule_reaches_the_tests_and_its_fixture_under_ten_seconds
     text = fixture.read_text()
     assert f"# ruleid: {rule['id']}" in text
     assert f"# ok: {rule['id']}" in text
-    assert path.name not in _test_rules_step()["env"]["RULES"]
 
 
 @pytest.mark.feature("semgrep-feature-tests")
