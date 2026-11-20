@@ -2235,6 +2235,18 @@
       ]
     },
     {
+      "id": "ledger-refresh-batched-reads",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-refresh-batched-reads",
+      "behaviour": "Incremental ledger refresh reads reached children in one query per container regardless of changed sibling count, preserves stored order and refreshes the host copy within eight generations.",
+      "seam": "scripts.swarm_ledger.repository.refresh.patched and rebuilt, scripts.swarm_ledger.repository.host_entries.Copies",
+      "tests": [
+        "tests/swarm_ledger/test_sqlite_refresh.py::test_stale_object_refresh_reads_changed_siblings_in_one_query",
+        "tests/swarm_ledger/test_sqlite_refresh.py::test_stale_array_refresh_looks_up_changed_children_in_one_query",
+        "tests/swarm_ledger/test_host_entries.py::test_default_host_copy_catches_up_within_eight_generations"
+      ]
+    },
+    {
       "id": "ledger-export-cost",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1871-export-cost",

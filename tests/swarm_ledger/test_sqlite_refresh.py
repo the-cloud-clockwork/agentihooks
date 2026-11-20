@@ -189,6 +189,39 @@ def reread(repo: Any, old: dict[str, Any], reached: list[list[Any]]) -> dict[str
         return refresh.patched(connection, "ledger", refresh.encode(PROBE), old, paths)
 
 
+@pytest.mark.feature("ledger-refresh-batched-reads")
+@pytest.mark.parametrize("count", [1, 2500])
+def test_stale_object_refresh_reads_changed_siblings_in_one_query(tmp_path: Path, count: int) -> None:
+    stored = {f"key{index}": index for index in range(count)}
+    repo = probed(tmp_path, stored)
+    old = dict.fromkeys(stored, -1)
+    paths = {refresh.encode([*PROBE, key]) for key in stored}
+    queries: list[str] = []
+    with repo.connect() as connection:
+        connection.set_trace_callback(queries.append)
+        refreshed = refresh.patched(connection, "ledger", refresh.encode(PROBE), old, paths)
+    reads = [query for query in queries if query.startswith("SELECT")]
+    assert refreshed is not None
+    assert refreshed == stored
+    assert list(refreshed) == list(stored)
+    assert len(reads) == 1
+
+
+@pytest.mark.feature("ledger-refresh-batched-reads")
+@pytest.mark.parametrize("count", [1, 300])
+def test_stale_array_refresh_looks_up_changed_children_in_one_query(tmp_path: Path, count: int) -> None:
+    stored = [{"id": f"t{index}", "v": index} for index in range(count)]
+    repo = probed(tmp_path, {"list": stored})
+    old = [{"id": f"t{index}", "v": -1} for index in range(count)]
+    paths = {refresh.encode([*PROBE, "list", ["id", f"t{index}", 0], "v"]) for index in range(count)}
+    queries: list[str] = []
+    with repo.connect() as connection:
+        connection.set_trace_callback(queries.append)
+        rows = refresh.rebuilt(connection, "ledger", refresh.encode([*PROBE, "list"]), old, paths)
+    assert rows == stored
+    assert len([query for query in queries if " AND path" in query]) == 1
+
+
 def test_new_keys_stored_last_are_patched_in_their_stored_order(tmp_path: Path) -> None:
     stored = {"a": 1, "zeta": 2, "alpha": {"k": 1}}
     repo = probed(tmp_path, stored)

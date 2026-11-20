@@ -169,6 +169,22 @@ def test_the_host_entry_is_rewritten_only_once_the_adopted_copy_is_far_enough_be
     assert held(tmp_path, refreshed.generation).generation == (refreshed.generation if rewritten else start)
 
 
+@pytest.mark.feature("ledger-refresh-batched-reads")
+def test_default_host_copy_catches_up_within_eight_generations(tmp_path: Path) -> None:
+    first = kept(tmp_path)
+    first.create("ledger", CONTENT)
+    start = first.current("ledger").generation
+    writer = sqlite.SQLiteLedgerRepository(first.path)
+    for index in range(8):
+        writer.apply_ops("ledger", ops=[chat(index)])
+    fresh = kept(tmp_path).current("ledger")
+    copy = held(tmp_path, fresh.generation)
+    assert fresh.generation == start + 8
+    assert copy.generation == fresh.generation
+    assert copy.state == fresh.state
+    assert kept(tmp_path).current("ledger").generation == copy.generation
+
+
 def test_a_repository_without_host_copies_keeps_no_host_entry(tmp_path: Path, loads: list[str]) -> None:
     first = sqlite.SQLiteLedgerRepository(tmp_path / "ledgers" / sqlite.DATABASE)
     first.create("ledger", CONTENT)
