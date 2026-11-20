@@ -951,6 +951,8 @@ SET_TESTS_IN_SCRIPTS = [
     "kubectl exec pod-0 -- bash -c '[[ -n \"${LEDGER_TOKEN-}\" ]] && echo set || echo unset'",
     "kubectl exec pod-0 -- sh -c 'cd /app; test -n \"${GITHUB_TOKEN:-}\" && echo set || echo unset'",
     "cat /dev/null | kubectl exec -i pod-0 -- sh -c 'test -n \"${GITHUB_TOKEN:-}\" && echo set || echo unset'",
+    "kubectl exec pod-0 -- sh -c 'test -n \"${GITHUB_TOKEN:-}\" && echo set || echo unset'"
+    " | kubectl exec -i pod-1 -- sh -c 'test -n \"${GITHUB_TOKEN:-}\" && echo set || echo unset'",
     "docker exec box sh -c 'test -n \"${GITHUB_TOKEN:-}\" && echo set || echo unset'",
     "sh -c 'test -n \"${GITHUB_TOKEN:-}\" && echo set || echo unset'",
 ]
@@ -962,6 +964,7 @@ SCRIPTS_THAT_PRINT_THE_VALUE = [
     ("kubectl exec pod-0 -- sh -c 'printf %s test -n \"$GITHUB_TOKEN\"'", "GITHUB_TOKEN"),
     ("kubectl exec pod-0 -- sh -c 'echo [ -n \"$GITHUB_TOKEN\" ]'", "GITHUB_TOKEN"),
     ("kubectl exec pod-0 -- sh -c 'cd /app; echo x test -n \"$GITHUB_TOKEN\"'", "GITHUB_TOKEN"),
+    ("V=\"$GITHUB_TOKEN\" sh -c 'echo \"$V\"' | sh -c 'wc -c'", "GITHUB_TOKEN"),
     ("kubectl exec pod-0 -- sh -c 'echo 'x' test -n \"$GITHUB_TOKEN\"'", "GITHUB_TOKEN"),
     ('echo test -n "$GITHUB_TOKEN"', "GITHUB_TOKEN"),
     ('echo "x;test -n "$GITHUB_TOKEN"\'"', "GITHUB_TOKEN"),
