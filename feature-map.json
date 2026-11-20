@@ -4943,6 +4943,17 @@
       ]
     },
     {
+      "id": "split-starts-on-the-early-collection-upload",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-queue-first-shard-lead",
+      "behaviour": "The Tests split job passes its early collection guard at the first jobs API poll that shows the test-count job's Upload the early collection step concluded success, while the rest of that job still runs, so the unit shards no longer wait for the count job's tail steps. A test-count job that completes without success before that step succeeds still fails the guard before any artifact is read.",
+      "seam": "the split job's Require successful early collection step and the COLLECTION_STEP it names in test-count",
+      "tests": [
+        "tests/test_ci_workflow.py::test_split_starts_once_the_early_collection_upload_succeeds_while_the_count_job_runs",
+        "tests/test_ci_workflow.py::test_split_waits_on_the_count_step_that_uploads_the_collection_it_downloads"
+      ]
+    },
+    {
       "id": "trace-plan-per-repository-size",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t447",

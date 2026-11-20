@@ -1073,6 +1073,53 @@ def test_split_rejects_a_failed_collection_before_reading_any_artifact(tmp_path,
     assert (tmp_path / "calls").read_text() == "xx"
 
 
+@pytest.mark.feature("split-starts-on-the-early-collection-upload")
+@pytest.mark.parametrize("upload", ["success", "failure", "skipped", "null"])
+def test_split_starts_once_the_early_collection_upload_succeeds_while_the_count_job_runs(
+    tmp_path: Path, upload: str
+) -> None:
+    steps = _workflow()["jobs"]["split"]["steps"]
+    guard = next(step for step in steps if step.get("name") == "Require successful early collection")
+    binary = tmp_path / "bin"
+    binary.mkdir()
+    (binary / "gh").write_text(
+        '#!/usr/bin/env bash\nprintf x >> "$CALLS"\n'
+        'if [[ "$(wc -c < "$CALLS")" -lt 2 ]]; then echo "in_progress null $UPLOAD"; '
+        'else echo "completed failure $UPLOAD"; fi\n'
+    )
+    (binary / "sleep").write_text("#!/usr/bin/env bash\n")
+    for stub in binary.iterdir():
+        stub.chmod(0o755)
+    outcome = subprocess.run(
+        ["bash", "-e", "-c", guard["run"]],
+        env=dict(
+            os.environ,
+            PATH=f"{binary}:{os.environ['PATH']}",
+            CALLS=str(tmp_path / "calls"),
+            UPLOAD=upload,
+            GH_TOKEN="app",
+            COLLECTION_JOB="test-count (3.12)",
+            COLLECTION_STEP="Upload the early collection",
+        ),
+        capture_output=True,
+        text=True,
+    )
+    assert (outcome.returncode == 0) == (upload == "success")
+    assert (tmp_path / "calls").read_text() == ("x" if upload == "success" else "xx")
+
+
+@pytest.mark.feature("split-starts-on-the-early-collection-upload")
+def test_split_waits_on_the_count_step_that_uploads_the_collection_it_downloads() -> None:
+    jobs = _workflow()["jobs"]
+    steps = jobs["split"]["steps"]
+    guard = next(step for step in steps if step.get("name") == "Require successful early collection")
+    download = next(step for step in steps if step.get("name") == "Download the early collection")
+    upload = next(step for step in jobs["test-count"]["steps"] if step.get("name") == guard["env"]["COLLECTION_STEP"])
+    assert upload["uses"] == "./.github/actions/retry-upload"
+    assert upload["with"]["name"] == download["with"]["name"]
+    assert '\\"$COLLECTION_STEP\\"' in guard["run"]
+
+
 def _await_steps():
     return yaml.safe_load((_ROOT / ".github/actions/await-download/action.yml").read_text())["runs"]["steps"]
 
