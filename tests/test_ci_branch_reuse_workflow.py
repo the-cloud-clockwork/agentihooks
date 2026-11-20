@@ -476,6 +476,10 @@ def test_a_selected_leg_stops_waiting_for_the_collection_well_inside_its_timeout
     assert wait["timeout-minutes"] + run["timeout-minutes"] < _jobs()["unit-selected"]["timeout-minutes"]
 
 
+def test_a_selected_leg_stops_waiting_for_the_early_collection_after_one_minute() -> None:
+    assert _step("unit-selected", "Wait for the early collection")["timeout-minutes"] == 1
+
+
 @pytest.mark.parametrize("collection", ["failure", "cancelled", ""])
 def test_a_selected_leg_whose_collection_never_landed_runs_everything_ungraded(tmp_path, collection):
     assert _adopt(tmp_path, planner=True, outputs="reused=3\nbranch=4\n", collection=collection) == {}
