@@ -111,6 +111,36 @@ def test_a_ledger_write_restarts_the_count(hook):
     assert hook.marks.read(ME).outcome_at == 0
 
 
+@pytest.mark.feature("stop-gate-ledger-variable")
+@pytest.mark.parametrize(
+    "command",
+    [
+        f"AH=agentihooks; $AH api --slug {SLUG} --as {ME} comment phases/p1 done",
+        f'L="agentihooks api --slug {SLUG} --as {ME}"; $L comment phases/p1 done',
+        f'AH=agentihooks && "${{AH}}" ledger --slug {SLUG} --as {ME} comment phases/p1 done',
+    ],
+)
+def test_a_ledger_write_through_a_shell_variable_restarts_the_count(hook, command):
+    for _ in range(3):
+        hook()
+    hook(command)
+    assert hook.session["calls"] == 0
+
+
+@pytest.mark.feature("stop-gate-ledger-variable")
+def test_a_ledger_write_through_an_environment_variable_restarts_the_count(hook, monkeypatch):
+    monkeypatch.setenv("LEDGER_CLI", "agentihooks")
+    hook()
+    hook(f"$LEDGER_CLI api --slug {SLUG} --as {ME} comment phases/p1 done")
+    assert hook.session["calls"] == 0
+
+
+@pytest.mark.feature("stop-gate-ledger-variable")
+def test_a_variable_naming_another_program_still_counts(hook):
+    hook(f"AH=echo; $AH api --slug {SLUG} --as {ME} comment phases/p1 done")
+    assert hook.session["calls"] == 1
+
+
 def test_the_nudge_fires_once_per_window(hook, capsys):
     for _ in range(25):
         hook()
