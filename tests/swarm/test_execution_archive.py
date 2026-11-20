@@ -129,13 +129,16 @@ def test_archive_prunes_intents_for_the_rows_it_archives(store):
 
 
 @pytest.mark.feature("swarm-archive-prunes-stale-intents")
-def test_archive_prunes_intents_left_by_executions_archived_before_the_prune(store: RedisStore) -> None:
+@pytest.mark.parametrize("external", [False, True])
+def test_archive_prunes_intents_left_by_executions_archived_before_the_prune(store: RedisStore, external: bool) -> None:
     from scripts.swarm import lease
 
     held = lease.acquire(store, "fixture", "home")
     assert held is not None
     with lease.fencing(held.epoch):
         first, second, third, other = history(store)
+    if external:
+        fencing.migrate_archive(store, "fixture", writers_upgraded=True)
     assert store.execution_registry.archive("fixture") == 3
     backlog = {
         row.execution_id: {
@@ -154,21 +157,25 @@ def test_archive_prunes_intents_left_by_executions_archived_before_the_prune(sto
 
 
 @pytest.mark.feature("swarm-archive-prunes-stale-intents")
-def test_archive_keeps_an_intents_entry_that_is_not_an_execution_admission(store: RedisStore) -> None:
+@pytest.mark.parametrize("body", [{}, {"execution_id": "exe-elsewhere"}])
+def test_archive_keeps_an_intents_entry_that_is_not_an_execution_admission(
+    store: RedisStore, body: dict[str, str]
+) -> None:
     from scripts.swarm import lease
 
     held = lease.acquire(store, "fixture", "home")
     assert held is not None
     with lease.fencing(held.epoch):
         live = started(store, "eng-1@fixture")
+    entry = {**body, "epoch": held.epoch}
 
-    fencing.write(store, "fixture", lambda doc: doc["intents"].update(i={"epoch": held.epoch}))
+    fencing.write(store, "fixture", lambda doc: doc["intents"].update(i=entry))
     assert "i" in section(store, "intents")
 
     assert store.execution_registry.archive("fixture") == 0
 
     intents = section(store, "intents")
-    assert intents["i"] == {"epoch": held.epoch}
+    assert intents["i"] == entry
     assert live.execution_id in intents
 
 
