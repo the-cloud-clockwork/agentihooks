@@ -944,6 +944,13 @@ def test_review_rounds_ship_from_the_round_stamps_on_each_ledger_task():
 
 
 @pytest.mark.feature("review-round-metrics-from-ledger")
+def test_rounds_stamped_before_the_clock_prefix_add_no_metrics_round() -> None:
+    untimed = {"rounds-before-pr": ["1e7f7d41da5041738cef523005a431aa"], "rounds": ["a", "b"]}
+    assert metrics_swarm.read_review_rounds({"tasks": [{**TASK, "review_rounds": untimed}]}) == []
+    assert metrics_swarm.read_review_rounds({}) == []
+
+
+@pytest.mark.feature("review-round-metrics-from-ledger")
 def test_record_pass_counts_the_rounds_two_hives_spent_on_one_ledger_task(tmp_path, monkeypatch):
     import fakeredis
 
@@ -967,6 +974,29 @@ def test_record_pass_counts_the_rounds_two_hives_spent_on_one_ledger_task(tmp_pa
     try:
         for _ in range(2):
             metrics_swarm.record_pass(box, SLUG, NOW + 1_000, store, doc() | {"tasks": [ledger.rows["t"]]}, [], {})
+        rounds = [row for row in box.recent("delivery_events", NOW + 1_000) if row["kind"] == "review_round"]
+        assert [row["ts_ms"] for row in rounds] == [NOW, NOW + 500]
+    finally:
+        box.close()
+
+
+@pytest.mark.feature("review-round-metrics-from-ledger")
+def test_record_pass_ships_a_round_once_while_later_passes_read_its_stamp_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig(SLUG, ".", 0, 0))
+    monkeypatch.setattr(metrics_swarm.host_budget, "read_host", lambda: HostSample(2.0, 2, 512, 1))
+    monkeypatch.setattr(metrics_swarm.gate_log, "since", lambda *args, **kwargs: [])
+    monkeypatch.setattr(metrics_swarm, "read_classifier_calls", lambda box: metrics_swarm.LogBatch("", 0, []))
+    monkeypatch.setattr(metrics_swarm, "read_review_events", lambda slug, box: metrics_swarm.LogBatch("", 0, []))
+    box = Outbox(tmp_path / "outbox.db", Settings("http://sink", "", ""))
+    try:
+        for stamps in ([f"{NOW}-a"], [f"{NOW}-a", f"{NOW + 500}-b"], [f"{NOW}-a", f"{NOW + 500}-b"]):
+            task = {**TASK, "review_rounds": {"rounds": stamps}}
+            metrics_swarm.record_pass(box, SLUG, NOW + 1_000, store, doc() | {"tasks": [task]}, [], {})
         rounds = [row for row in box.recent("delivery_events", NOW + 1_000) if row["kind"] == "review_round"]
         assert [row["ts_ms"] for row in rounds] == [NOW, NOW + 500]
     finally:

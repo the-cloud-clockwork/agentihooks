@@ -83,7 +83,8 @@ def test_a_successor_on_a_fresh_home_spends_the_rounds_its_predecessor_left_on_t
 def test_a_round_is_written_on_the_ledger_task_by_the_agent_and_nothing_counts_on_this_machine(
     tmp_path, monkeypatch, stamps
 ):
-    monkeypatch.setattr(gate_log, "swarm_home", lambda: tmp_path)
+    home = tmp_path / "swarm-home"
+    monkeypatch.setattr(gate_log, "swarm_home", lambda: home)
     ledger = ReviewLedger({"t1": {"id": "t1", "review_rounds": {"rounds-before-pr": ["a"]}, "review_readers": ["x"]}})
     start(ledger)
     assert ledger.writes == [
@@ -95,7 +96,7 @@ def test_a_round_is_written_on_the_ledger_task_by_the_agent_and_nothing_counts_o
         }
     ]
     assert ledger.rows["t1"]["review_readers"] == ["x"]
-    assert list(tmp_path.iterdir()) == []
+    assert not home.exists()
 
 
 def test_each_round_carries_a_stamp_of_its_own():
