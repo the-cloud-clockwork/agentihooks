@@ -1851,8 +1851,8 @@ under `.github/workflows/`.
 
 #### Push a plant pair
 
-Push plant branches with git. Cut both twins from one dev
-commit and push each to its own branch under the prefix:
+Push plant branches with git. Cut both twins from one dev commit and push each to its own branch
+under the prefix:
 
 ```bash
 git fetch origin dev
@@ -1902,8 +1902,7 @@ git merge-base diffcheck/lab-plant-size-green origin/dev
 
 Both twins show `"class": "pull_request"`, and `base` and `grader` both equal the merge base the
 last command prints, the `fork` commit above. `lane` is the head itself, since a push delivery
-carries no branch. `conclusion` stays `null` until every unit is final and every check run is
-posted.
+carries no branch. `conclusion` stays `null` until every unit is final and every check run is posted.
 [Grades of a commit](#grades-of-a-commit) describes every field.
 
 The scheduler log names each step of intake:
@@ -1913,8 +1912,8 @@ kubectl -n ci-lab logs deploy/ci-lab-scheduler --since=15m \
   | grep --line-buffered -E 'received |untrusted .* head |cannot resolve the dev merge base of plant head '
 ```
 
-`received <head> on <head>`, with the twin's sha twice, means the head was admitted, based and held
-in its quiet window.
+`received <head> on <head>`, where both placeholders are the head sha, means the head was admitted,
+based and held in its quiet window.
 With a NATS credential that may read the lab heads stream, such as the hub's, the latest plant head
 the receiver recorded is:
 
@@ -1940,10 +1939,11 @@ scheduler.
   and opens no second grade.
 - A rerequested lab check run of a plant head arrives as a `check_run` head, whose base is the base
   of its first pull request. A plant head has no pull request, so that head carries an empty base,
-  and intake resolves the dev merge base only for `plant` heads. Expansion then has no base to read,
-  so the pass prints `cannot expand <head>: <error>` and posts a failed `lab-shadow/required` check
-  run, as for [a head that cannot expand](#a-head-that-cannot-expand). Push a new commit to grade a
-  plant head again.
+  and intake resolves the dev merge base only for `plant` heads. While a ref still names the head,
+  expansion has no base to read, so the pass prints `cannot expand <head>: <error>` and posts a
+  failed `lab-shadow/required` check run, as for [a head that cannot expand](#a-head-that-cannot-expand);
+  otherwise the pass prints `retiring <head>: ...` and posts the same failed check run. Push a new
+  commit to grade a plant head again.
 
 #### Plant push troubleshooting
 
@@ -1955,7 +1955,7 @@ scheduler.
 | `cannot resolve the dev merge base of plant head <head>: Command '['git', 'ls-remote', '--exit-code', '<repo>', 'refs/heads/dev']' returned non-zero exit status 2.` | The head's repository lists no `refs/heads/dev` | `git ls-remote --exit-code <repo> refs/heads/dev` |
 | `cannot resolve the dev merge base of plant head <head>: Command '['git', '-C', '<mirror>', 'fetch', ...]' returned non-zero exit status <code>.` | The scheduler's mirror could not fetch the head or the dev head from the repository, or from the lab remote when `AGENTIHOOKS_LAB_REMOTE` serves it | The scheduler's mirror store and its network to GitHub; `git ls-remote origin 'refs/heads/diffcheck/lab-plant-*'` lists the head when GitHub holds it |
 | `retiring <head>: no branch or pull request head ref of <repo> carries <head>` | The plant branch was deleted or moved before the quiet window ended | `git ls-remote origin 'refs/heads/diffcheck/lab-plant-*'`; push the head again |
-| The push answers `200` and the stream gains no `ci.lab.head.plant` | Lab intake is off, or the push deleted the branch | The `Troubleshooting` table that closes [Lab head intake](#lab-head-intake), before [Lab remote service](#lab-remote-service) |
+| The push answers `200` and the stream gains no `ci.lab.head.plant` | Lab intake is off, or the push deleted the branch | The `Troubleshooting` table that closes [Lab head intake](#lab-head-intake) |
 
 `tests/ci_lab/test_intake.py` and `tests/ci_lab/test_plant_intake.py` hold this behavior under the
 feature map entry `lab-plant-push-intake`. They cover a plant push with a zero and a real `before`,
