@@ -5595,6 +5595,24 @@
       ]
     },
     {
+      "id": "credential-guard-wrapper-option-values",
+      "origin": "regression",
+      "ordered_at": "2026-11-19",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-credential-guard-wrapper-options",
+      "behaviour": "The credential guard skips sudo and env option values before judging the wrapped command, so credential file reads directly or in shell scripts remain refused through nested wrappers.",
+      "seam": "hooks.context.credential_guard.decide on Bash payloads through verb_index",
+      "tests": [
+        "tests/test_credential_guard_wrapper_options.py::test_a_credential_read_after_wrapper_option_values_is_refused",
+        "tests/test_credential_guard_wrapper_options.py::test_wrapper_value_flags_preserve_the_credential_verdict",
+        "tests/test_credential_guard_wrapper_options.py::test_wrapper_option_values_do_not_become_commands_or_operands",
+        "tests/test_credential_guard_wrapper_options.py::test_wrapper_options_do_not_turn_safe_scripts_into_credential_reads",
+        "tests/test_credential_guard_wrapper_options.py::test_wrapper_parser_preserves_command_boundaries"
+      ],
+      "rules": [
+        "credential-guard-wrapper-option-values"
+      ]
+    },
+    {
       "id": "ledger-hives-panel",
       "origin": "inventory",
       "behaviour": "The hives panel shows each hive's requested columns and writes max agents, exclusion and flags as the operator, naming the reason for a refused write.",
@@ -11039,6 +11057,19 @@
         "tests/swarm/test_pull_views.py::test_a_fresh_tick_view_logs_that_redis_kept_the_merged_pull_request_and_github_read_the_open_one",
         "tests/swarm/test_pull_views.py::test_a_pull_request_read_that_is_no_tick_view_logs_no_counts",
         "tests/swarm/test_pull_views.py::test_a_tick_view_read_that_raises_leaves_later_reads_uncounted"
+      ]
+    },
+    {
+      "id": "tick-view-side-by-side-batches",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2621",
+      "behaviour": "A pull request views read of two or more batches of twenty has every batch document in flight at the same time, each read in the caller's context, then resolves the workflow gates batch by batch in batch order through the shared cache, so it makes the same GitHub calls as reading the batches one after another and a tick view of two batches waits for its slowest batch instead of their sum.",
+      "seam": "views in scripts.swarm.ledger_events over a source control port, with and without the swarm Redis as its cache",
+      "tests": [
+        "tests/swarm/test_pull_views.py::test_a_views_call_reads_its_batch_documents_at_the_same_time",
+        "tests/swarm/test_pull_views.py::test_batches_make_the_sequential_github_calls_for_their_workflow_trees",
+        "tests/swarm/test_pull_views.py::test_a_failed_batch_read_leaves_the_other_batch_read_once",
+        "tests/swarm/test_pull_views.py::test_each_views_batch_reads_in_the_callers_context"
       ]
     },
     {
