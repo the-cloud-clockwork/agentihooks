@@ -1021,7 +1021,7 @@ statistics cache entries. This happens automatically in the pull request
 | Recorded dev coverage | The planner reads a record before estimating changed files and passes the manifest into selection. Job lookup requests 100 jobs per page, reducing pagination on large dev runs | One planner invocation; a read failure can trigger the [coverage retry](#unreadable-coverage-record). More than 100 jobs still require another page |
 | Test import index | `mentions` caches Unicode-normalized tokens and relative import detection. `imported_names` caches parsed imports by test text and package. `select_tests` parses a file only when it names a reached module's last component or contains a relative import; its import walk visits statements | In-process reuse by content and package, including repeated selection for changed sources. Each selection still reads test text; unrelated files avoid AST parsing |
 | Test duration map | `stats_part_count` computes `file_seconds` once, then passes the same map to every candidate part count and worker bucket. `partition` splits the files using that map without rereading durations | One statistics part sizing calculation. A new plan reads its current duration input |
-| Statistics dependency fingerprints | `StatsInputs.for_test` retains a test file's dependency trace when multiple selectors name that file. `test_inputs` materializes each module's AST walk once while recording its dependencies | One `StatsInputs` instance, separately for measured and unmeasured dependencies. Recorded coverage and dynamically loaded inputs still participate in validation |
+| Statistics dependency fingerprints | `StatsInputs.for_test` retains a test file's dependency trace when multiple selectors name that file, and the import closure of each distinct measured dependency list; `StatsInputs.discovery` retains the digest of each distinct input set. Test ids with equal measured lists cost one closure walk when their records are saved and one when they are checked for reuse. `test_inputs` materializes each module's AST walk once while recording its dependencies | One `StatsInputs` instance, separately for measured and unmeasured dependencies. Recorded coverage and dynamically loaded inputs still participate in validation |
 
 These in-memory values reduce repeated planning work. The persisted statistics
 cache still validates its inputs before reusing collected results, as described
@@ -1133,7 +1133,7 @@ still install `.[dev,all]`.
 | Package | Specifier | Declared in `pyproject.toml` | Planner module that imports it at module level |
 |---|---|---|---|
 | `mutmut` | `==3.6.0` | `dev` extra | `scripts.ci_mutation.selection` |
-| `pytest` | `>=8.0` | `dev` extra | `scripts.ci_mutation.killers`, `tests.test_collection_imports` |
+| `pytest` | `>=8.0` | `dev` extra | `scripts.ci_mutation.killers`, `scripts.ci_mutation.selection` |
 | `pyyaml` | `>=6.0` | project dependencies | `scripts.dep_manifest` (imported as `yaml`) |
 | `tomlkit` | `>=0.12` | project dependencies | `scripts.ci_mutation.runner` |
 

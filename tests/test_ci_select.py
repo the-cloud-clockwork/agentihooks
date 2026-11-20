@@ -577,6 +577,13 @@ def test_a_tree_without_the_catalogue_page_test_never_selects_it(repo: Path) -> 
     assert decide(repo, ["scripts/tick/steps/report.py"]) == ("selected", [["tests/tick/test_report.py"]])
 
 
+@pytest.mark.feature("ci-select-tick-catalogue-page-edit")
+def test_a_hand_edited_catalogue_page_selects_its_page_test(repo: Path) -> None:
+    source = Path(__file__).with_name("test_docs_tick.py").read_text()
+    write(repo, {CATALOGUE_TEST: source})
+    assert decide(repo, ["docs/reference/tick-step-catalogue.md"]) == ("selected", [[CATALOGUE_TEST]])
+
+
 @pytest.mark.parametrize("name", ["hooks/new.py", "scripts/static/new.js"])
 def test_a_covered_source_no_test_reaches_runs_the_full_suite(repo, name):
     write(repo, {name: "x = 1\n"})

@@ -1574,11 +1574,12 @@ class HerdrRuntime:
         }
         return {**local, **managed}
 
-    def nudge(self, agent, text):
+    def nudge(self, agent: AgentRecord, text: str) -> str | None:
+        from scripts.hive import reports
         from scripts.hive.orders import Orders
         from scripts.swarm.delivery import marked
 
-        if host := self.remote(agent):
+        if host := self.remote(agent) or reports.admitted(agent):
             if self.hive is None or self.hive.read(host) is None:
                 return f"hive {host} is not reporting"
             Orders(self.hive.redis).command(host, _command("nudge", agent, text, uuid.uuid4().hex))

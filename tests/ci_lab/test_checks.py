@@ -224,6 +224,59 @@ def test_an_output_over_the_github_limit_lists_the_lines_that_end_exactly_at_it(
     assert rendered["summary"].endswith("Unit keys: 2 of 3 listed")
 
 
+@pytest.mark.feature("lab-static-check-log-tail")
+def test_a_unit_log_shows_fenced_under_its_unit_key_ahead_of_the_unit_keys() -> None:
+    rendered = checks.render(replace(OUTPUT, logs=((UNITS[0], "ruff failed\n"),)))
+    assert rendered["text"] == (
+        "Log tail of static `ruff-1f2e`:\n```\nruff failed\n\n```\n- static `ruff-1f2e`\n- tests `batch-9c0d`\n"
+    )
+    assert rendered["summary"] == checks.render(OUTPUT)["summary"]
+
+
+@pytest.mark.feature("lab-static-check-log-tail")
+def test_a_unit_log_keeps_its_last_4096_characters_in_a_fence_longer_than_its_backtick_runs() -> None:
+    log = "dropped head\n" + "y" * 5000 + "\n```text```\n"
+    rendered = checks.render(replace(OUTPUT, units=UNITS[:1], logs=((UNITS[0], log),)))
+    assert rendered["text"] == f"Log tail of static `ruff-1f2e`:\n````\n{log[-4096:]}\n````\n- static `ruff-1f2e`\n"
+
+
+@pytest.mark.feature("lab-static-check-log-tail")
+def test_unit_logs_that_fill_half_the_github_limit_exactly_all_show() -> None:
+    half, frame = 65535 // 2, len("Log tail of static `ruff-1f2e`:\n```\n\n```\n")
+    full = (half - frame) // (frame + 4096)
+    logs = (*((UNITS[0], "z" * 4096) for _ in range(full)), (UNITS[0], "w" * (half - full * (frame + 4096) - frame)))
+    rendered = checks.render(replace(OUTPUT, units=UNITS[:1], logs=logs))
+    shown = "".join(f"Log tail of static `ruff-1f2e`:\n```\n{log}\n```\n" for _, log in logs)
+    assert len(shown) == half
+    assert rendered["text"] == shown + "- static `ruff-1f2e`\n"
+
+
+@pytest.mark.feature("lab-static-check-log-tail")
+def test_unit_logs_past_half_the_github_limit_show_those_that_fit_and_a_note() -> None:
+    note = "Log tails of 9 failed units exceed half of GitHub's limit; the later ones are left out.\n"
+    half, frame = 65535 // 2, len("Log tail of static `ruff-1f2e`:\n```\n\n```\n")
+    full = (half - len(note) - frame) // (frame + 4096)
+    last = "w" * (half - len(note) - full * (frame + 4096) - frame)
+    logs = (*((UNITS[0], "z" * 4096) for _ in range(full)), (UNITS[0], last), (UNITS[0], "v" * 100))
+    rendered = checks.render(replace(OUTPUT, units=UNITS[:1], logs=logs))
+    shown = "".join(f"Log tail of static `ruff-1f2e`:\n```\n{log}\n```\n" for _, log in logs[:-1]) + note
+    assert len(logs) == 9
+    assert len(shown) == half
+    assert rendered["text"] == shown + "- static `ruff-1f2e`\n"
+
+
+@pytest.mark.feature("lab-static-check-log-tail")
+def test_unit_keys_after_a_unit_log_stop_at_the_github_limit_and_point_at_the_full_list() -> None:
+    units = tuple(Unit("tests", f"{index:064x}", ()) for index in range(2000))
+    rendered = checks.render(replace(OUTPUT, units=units, logs=((units[0], "q" * 4096),)))
+    block = f"Log tail of tests `{units[0].key}`:\n```\n{'q' * 4096}\n```\n"
+    tail = f"The full list of 2000 unit keys is at {OUTPUT.details}"
+    listed = (65535 - len(block) - len(tail)) // len(f"- tests `{units[0].key}`\n")
+    assert rendered["text"] == block + "".join(f"- tests `{unit.key}`\n" for unit in units[:listed]) + tail
+    assert len(rendered["text"]) <= 65535
+    assert rendered["summary"].endswith(f"Unit keys: {listed} of 2000 listed")
+
+
 def test_a_batch_posts_only_the_last_transition_of_each_check_run(monkeypatch: pytest.MonkeyPatch) -> None:
     created = [answer(201, {"id": run}) for run in (1, 2, 3)]
     poster, request, _ = lab(monkeypatch, *created, answer(200, {"id": 2}))

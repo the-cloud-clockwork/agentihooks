@@ -239,7 +239,7 @@ def resource(
     collection: bool = False,
     timeout: float = REQUEST_TIMEOUT,
     attempts: int = REMOTE_READ_ATTEMPTS,
-) -> dict | list:
+) -> dict[str, Any] | list[Any]:
     """One resource or collection of ledger slug, read again while the database answers a storage failure."""
 
     def read() -> Any:
@@ -432,8 +432,8 @@ def cmd_status(args):
     )
 
 
-def cmd_ack(args):
-    rev = args.rev if args.rev is not None else call(args.slug)["_meta"]["rev"]
+def cmd_ack(args: Any) -> None:
+    rev = args.rev if args.rev is not None else resource(args.slug, "metadata")["_meta"]["rev"]
     send(args, "ack", rev=rev)
     print(json.dumps({"acked": rev}))
 

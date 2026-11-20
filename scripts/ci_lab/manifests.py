@@ -20,7 +20,7 @@ from typing import Any, Protocol
 import requests
 
 from scripts.ci_lab.checks import Token
-from scripts.github_app import GitHubAppAuth
+from scripts.github_app import GitAuthRefused, GitHubAppAuth
 
 __all__ = [
     "ARTIFACT",
@@ -112,6 +112,11 @@ class Actions:
             )
         except requests.RequestException as error:
             raise FetchUnanswered(f"GET {path} failed: {error}") from error
+        except GitAuthRefused as error:
+            refused = (
+                FetchUnanswered if error.status_code is not None and error.status_code >= SERVER_ERROR else FetchRefused
+            )
+            raise refused(f"GET {path} token mint failed: {error}") from error
 
 
 def _read_packed(data: bytes, path: str) -> tuple[bytes, Any]:
