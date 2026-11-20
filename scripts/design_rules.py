@@ -345,14 +345,50 @@ def _edited(previous: Unit | None, unit: Unit) -> bool:
     return not isinstance(unit.node, ast.ClassDef) and ast.dump(previous.node) != ast.dump(unit.node)
 
 
+def _family(key: str) -> tuple[str, str]:
+    rel, _, path = key.partition("::")
+    scope, _, name = path.rpartition(".")
+    return f"{rel}::{scope}", name.partition("#")[0]
+
+
+def _siblings(found: dict[str, Unit]) -> dict[tuple[str, str], list[str]]:
+    groups: dict[tuple[str, str], list[str]] = {}
+    for key in found:
+        groups.setdefault(_family(key), []).append(key)
+    return groups
+
+
+def _counterparts(before: dict[str, Unit], after: dict[str, Unit]) -> dict[str, Unit]:
+    old = _siblings(before)
+    paired: dict[str, str] = {}
+    for (scope, name), keys in _siblings(after).items():
+        origin = scope if scope.endswith("::") else paired.get(scope)
+        if origin is None:
+            continue
+        remaining = old.get((origin, name), [])
+        unmatched: list[str] = []
+        for key in keys:
+            content = ast.dump(after[key].node)
+            match = next((base for base in remaining if ast.dump(before[base].node) == content), None)
+            if match is None:
+                unmatched.append(key)
+            else:
+                paired[key] = match
+                remaining.remove(match)
+        paired.update(zip(unmatched, remaining))
+    return {key: before[base] for key, base in paired.items()}
+
+
 def _file_errors(
     index: Index, rel: str, old: str | None, classes: list[tuple[str, str, ast.ClassDef]]
 ) -> tuple[int, list[str]]:
     syntax, module = index.load(rel)
     before = {} if old is None else units(ast.parse(old, filename=rel), rel)
+    after = units(syntax, rel)
+    paired = _counterparts(before, after)
     changed, errors = 0, []
-    for key, unit in units(syntax, rel).items():
-        previous = before.get(key)
+    for key, unit in after.items():
+        previous = paired.get(key)
         if _edited(previous, unit):
             changed += 1
             errors += violations(index, module.name, key, unit, previous)

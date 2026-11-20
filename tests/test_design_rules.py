@@ -155,6 +155,13 @@ def test_an_edited_namesake_is_graded_against_its_base_by_position(tmp_path: Pat
     assert _grade(tmp_path, {"scripts/job.py": base}, {"scripts/job.py": head}) == (1, [])
 
 
+@pytest.mark.feature("design-rules-duplicate-pairing")
+def test_a_new_function_with_a_nested_one_leaves_a_later_unchanged_function_ungraded(tmp_path: Path) -> None:
+    new = "def run(path: str) -> str:\n    def inner(x: int) -> int:\n        return x\n    return path\n"
+    head = {"scripts/job.py": new + "\n\n" + UNTYPED}
+    assert _grade(tmp_path, {"scripts/job.py": UNTYPED}, head) == (2, [])
+
+
 def test_private_and_nested_functions_are_graded_for_hints(tmp_path):
     source = (
         "def _load(path):\n    def inner(x):\n        return x\n    return inner(path)\n\n\n"
