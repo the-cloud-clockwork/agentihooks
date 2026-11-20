@@ -223,10 +223,10 @@ def published(store: Any, slug: str, ledger: dict[str, Any]) -> dict[str, dict[s
     lines held here, which the mirror keeps from that hive's task copy once the hive stops publishing them."""
     copies: dict[str, Any] = {}
 
-    def synced(host: str, task_id: str) -> dict[str, str]:
+    def synced(host: str, task_id: str) -> dict[str, str] | None:
         if host not in copies:
             copies[host] = json.loads(store.redis.get(synced_key(host)) or "{}")
-        return copies[host].get(slug, {}).get(task_id, {})
+        return copies[host].get(slug, {}).get(task_id)
 
     return {task_id: copy or tails(slug, task_id) for task_id, copy in _synced(store, slug, ledger, synced).items()}
 
@@ -249,7 +249,7 @@ def mirror(store: Any, slug: str, ledger: dict[str, Any]) -> None:
 
 
 def _synced(
-    store: Any, slug: str, ledger: dict[str, Any], read: "Callable[[str, str], dict[str, str]]"
+    store: Any, slug: str, ledger: dict[str, Any], read: "Callable[[str, str], dict[str, str] | None]"
 ) -> dict[str, Any]:
     """Each work folder task's copy, read from the hive that runs, or last ran, its execution; None for one run here."""
     ran = latest(store.agents(slug))
