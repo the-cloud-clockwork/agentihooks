@@ -505,8 +505,8 @@ def path_reads_environ(word):
     return any("$" in d for d in dirs) and fnmatch.fnmatchcase("environ", leaf)
 
 
-def leaf_names_environ(leaf):
-    return "$" in leaf or "`" in leaf or fnmatch.fnmatchcase("environ", leaf)
+def leaf_names_environ(leaf: str) -> bool:
+    return "$" in leaf or "`" in leaf or "}" in leaf or fnmatch.fnmatchcase("environ", leaf)
 
 
 def echo_secret_verdict(command: str) -> str | None:
