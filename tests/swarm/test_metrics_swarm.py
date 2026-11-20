@@ -928,47 +928,78 @@ def test_host_sample_counts_agents_on_headed_hives_wherever_the_sampler_runs(mon
     assert {"workstation_agents", "hive_agents"} <= {column for column, _ in metrics_swarm.HOST.columns}
 
 
-def test_swarm_review_rounds_ship_as_review_round_events(tmp_path, monkeypatch):
-    monkeypatch.setattr(metrics_swarm.gate_log, "gates_dir", lambda slug: tmp_path)
+@pytest.mark.feature("review-round-metrics-from-ledger")
+def test_review_rounds_ship_from_the_round_stamps_on_each_ledger_task() -> None:
+    rounds = {"rounds": [f"{NOW + 1}-a", "b", f"{NOW + 3}-c"], "rounds-other": [f"{NOW + 4}-d"]}
+    ledger_doc = {"tasks": [{**TASK, "review_rounds": rounds}, {"id": "u"}], "_meta": {"events": []}}
+    rows = metrics_swarm.read_review_rounds(ledger_doc)
+    assert [(row["kind"], row["target"], row["at"], row["review_id"]) for row in rows] == [
+        ("review round", "tasks/t", NOW + 1, "swarm:t:rounds:1"),
+        ("review round", "tasks/t", NOW + 3, "swarm:t:rounds:3"),
+        ("review round", "tasks/t", NOW + 4, "swarm:t:rounds-other:1"),
+    ]
+    delivery = metrics_swarm.delivery_rows(SLUG, doc(rows), [AGENT], {})
+    assert [row["kind"] for row in delivery] == ["review_round"] * 3
+    assert len({row["event_id"] for row in delivery}) == 3
+
+
+@pytest.mark.feature("review-round-metrics-from-ledger")
+def test_rounds_stamped_before_the_clock_prefix_add_no_metrics_round() -> None:
+    untimed = {"rounds-before-pr": ["1e7f7d41da5041738cef523005a431aa"], "rounds": ["a", "b"]}
+    assert metrics_swarm.read_review_rounds({"tasks": [{**TASK, "review_rounds": untimed}]}) == []
+    assert metrics_swarm.read_review_rounds({}) == []
+
+
+@pytest.mark.feature("review-round-metrics-from-ledger")
+def test_record_pass_counts_the_rounds_two_hives_spent_on_one_ledger_task(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import fakeredis
+
+    from scripts.gates import log as gate_log
+    from scripts.swarm import review_rounds
+    from tests.swarm.review_ledger import ReviewLedger
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig(SLUG, ".", 0, 0))
+    monkeypatch.setattr(metrics_swarm.host_budget, "read_host", lambda: HostSample(2.0, 2, 512, 1))
+    monkeypatch.setattr(metrics_swarm.gate_log, "since", lambda *args, **kwargs: [])
+    monkeypatch.setattr(metrics_swarm, "read_classifier_calls", lambda box: metrics_swarm.LogBatch("", 0, []))
+    monkeypatch.setattr(metrics_swarm, "read_review_events", lambda slug, box: metrics_swarm.LogBatch("", 0, []))
+    ledger = ReviewLedger({TASK["id"]: dict(TASK)}, slug=SLUG)
+    for hive, at in (("hive-a", NOW), ("hive-b", NOW + 500)):
+        monkeypatch.setattr(gate_log, "swarm_home", lambda hive=hive: tmp_path / hive)
+        monkeypatch.setattr(review_rounds, "time", SimpleNamespace(time=lambda at=at: at / 1000))
+        review_rounds.start(SLUG, TASK["id"], ledger, f"engineer@{hive}")
+    monkeypatch.setattr(gate_log, "swarm_home", lambda: tmp_path / "tick")
     box = Outbox(tmp_path / "outbox.db", Settings("http://sink", "", ""))
     try:
-        assert metrics_swarm.read_review_rounds(SLUG, box).rows == []
-        folder = tmp_path / "reviews"
-        folder.mkdir()
-        lines = [{"task": "t", "counter": "rounds", "round": round_, "at": NOW + round_} for round_ in (1, 2)]
-        (folder / "rounds.jsonl").write_text("".join(json.dumps(line) + "\n" for line in lines))
-        rows = metrics_swarm.read_review_rounds(SLUG, box).rows
-        assert [(row["kind"], row["target"], row["at"], row["review_id"]) for row in rows] == [
-            ("review round", "tasks/t", NOW + 1, "swarm:t:rounds:1"),
-            ("review round", "tasks/t", NOW + 2, "swarm:t:rounds:2"),
-        ]
-        delivery = metrics_swarm.delivery_rows(SLUG, doc(rows), [AGENT], {})
-        assert [row["kind"] for row in delivery] == ["review_round", "review_round"]
-        assert len({row["event_id"] for row in delivery}) == 2
+        for _ in range(2):
+            metrics_swarm.record_pass(box, SLUG, NOW + 1_000, store, doc() | {"tasks": [ledger.rows["t"]]}, [], {})
+        rounds = [row for row in box.recent("delivery_events", NOW + 1_000) if row["kind"] == "review_round"]
+        assert [row["ts_ms"] for row in rounds] == [NOW, NOW + 500]
     finally:
         box.close()
 
 
-def test_record_pass_ships_each_swarm_review_round_once(tmp_path, monkeypatch):
+@pytest.mark.feature("review-round-metrics-from-ledger")
+def test_record_pass_ships_a_round_once_while_later_passes_read_its_stamp_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import fakeredis
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig(SLUG, ".", 0, 0))
     monkeypatch.setattr(metrics_swarm.host_budget, "read_host", lambda: HostSample(2.0, 2, 512, 1))
     monkeypatch.setattr(metrics_swarm.gate_log, "since", lambda *args, **kwargs: [])
-    monkeypatch.setattr(metrics_swarm.gate_log, "gates_dir", lambda slug: tmp_path)
     monkeypatch.setattr(metrics_swarm, "read_classifier_calls", lambda box: metrics_swarm.LogBatch("", 0, []))
     monkeypatch.setattr(metrics_swarm, "read_review_events", lambda slug, box: metrics_swarm.LogBatch("", 0, []))
-    (tmp_path / "reviews").mkdir()
-    log = tmp_path / "reviews" / "rounds.jsonl"
-    log.write_text(json.dumps({"task": TASK["id"], "counter": "rounds", "round": 1, "at": NOW}) + "\n")
     box = Outbox(tmp_path / "outbox.db", Settings("http://sink", "", ""))
     try:
-        batch = metrics_swarm.read_review_rounds(SLUG, box)
-        assert batch.source.startswith(f"{log}:") and batch.position == log.stat().st_size
-        metrics_swarm.record_pass(box, SLUG, NOW + 1_000, store, doc(), [], {})
+        for stamps in ([f"{NOW}-a"], [f"{NOW}-a", f"{NOW + 500}-b"], [f"{NOW}-a", f"{NOW + 500}-b"]):
+            task = {**TASK, "review_rounds": {"rounds": stamps}}
+            metrics_swarm.record_pass(box, SLUG, NOW + 1_000, store, doc() | {"tasks": [task]}, [], {})
         rounds = [row for row in box.recent("delivery_events", NOW + 1_000) if row["kind"] == "review_round"]
-        assert [row["ts_ms"] for row in rounds] == [NOW]
-        assert metrics_swarm.read_review_rounds(SLUG, box).rows == []
+        assert [row["ts_ms"] for row in rounds] == [NOW, NOW + 500]
     finally:
         box.close()

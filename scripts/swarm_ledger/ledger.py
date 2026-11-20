@@ -432,8 +432,8 @@ def cmd_status(args):
     )
 
 
-def cmd_ack(args):
-    rev = args.rev if args.rev is not None else call(args.slug)["_meta"]["rev"]
+def cmd_ack(args: Any) -> None:
+    rev = args.rev if args.rev is not None else resource(args.slug, "metadata")["_meta"]["rev"]
     send(args, "ack", rev=rev)
     print(json.dumps({"acked": rev}))
 

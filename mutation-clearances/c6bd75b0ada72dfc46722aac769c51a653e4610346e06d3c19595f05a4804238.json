@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_hook.py:scripts.swarm_ledger.ledger_hook.x_expanded:5321e83a06df4ea9418e8d3d30d820caad33befea4f593a39665b75a577d8ab1": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: os.environ.get with the default omitted returns None, the same as the None default mutant, and re.sub drops a None replacement as it drops an empty string."
+  }
+}
