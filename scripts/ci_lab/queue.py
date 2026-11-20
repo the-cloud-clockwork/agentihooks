@@ -220,6 +220,20 @@ class Queue:
             leased_ms=int(record.get("leased_ms", 0)),
         )
 
+    def restore_manifests(self, proposed: Mapping[str, str]) -> dict[str, str]:
+        with self.client.pipeline(transaction=False) as reading:
+            for job in proposed:
+                reading.hmget(_job(job), "head", "manifest")
+            found = reading.execute()
+        restored: dict[str, str] = {}
+        with self.client.pipeline() as writing:
+            for (job, manifest), (head, existing) in zip(proposed.items(), found):
+                restored[job] = existing or manifest
+                if head is not None and not existing:
+                    writing.hset(_job(job), "manifest", manifest)
+            writing.execute()
+        return restored
+
     def slots(self, jobs: Sequence[str]) -> dict[str, tuple[int, int]]:
         """Return the slots and lease start of each job whose record still exists, read with HMGET in one pipeline that
         opens no transaction and builds no job; a job never leased starts at 0."""
