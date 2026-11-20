@@ -1180,7 +1180,12 @@ class StoredManifests:
             note = json.loads(self.objects.read(name))
             for test in note["tests"]:
                 if test in records:
-                    records[test]["outside"] = sorted({*records[test].get("outside", ()), *note["outside"]})
+                    record = records[test]
+                elif "::" not in test:
+                    record = manifest.setdefault("unlisted", {}).setdefault(test, {})
+                else:
+                    continue
+                record["outside"] = sorted({*record.get("outside", ()), *note["outside"]})
         return manifest
 
 

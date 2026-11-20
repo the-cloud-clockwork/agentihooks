@@ -2813,8 +2813,11 @@ sorted list, where `<digest>` is `digests.digest` of that note. A grade with no 
 no note. The object store is write once, so the packed `<commit>.json` manifests are never rewritten,
 and the same tests and list write one note per commit. A `StoredManifests` read that finds a stored
 manifest merges each note of that manifest's commit into the `outside` list of each test record the
-note names, sorted and without duplicates, and skips a test the manifest lacks; the next expansion
-keys those tests on the measured tree and the batch on the noted files' blob ids. A note written
+note names, sorted and without duplicates. A module-only member absent from the collected records
+keeps its note in the returned manifest's separate `unlisted` mapping; an unknown collected test id
+is skipped. The next expansion keys listed tests on the measured tree and their batch on the noted
+files' blob ids. An unlisted module's broad fingerprint includes its noted outside files, including
+their absence when removed. Notes for another module leave that fingerprint unchanged. A note written
 while grades keyed on an older commit's manifest never reaches a newer commit's records or keys. A
 manifest the read fetches has no note yet. Every read first removes, through `Objects.remove`, each
 note of the repository whose commit has no stored `<commit>.json`, which includes the notes at

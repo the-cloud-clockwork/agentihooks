@@ -155,7 +155,13 @@ def unlisted_units(
     member the module's path, keyed as a broad test over the tree with the pytest invocation and the toolchain."""
     listed = {test.partition("::")[0] for test in manifest["tests"]}
     files = sorted({path for path in paths if _test_module(path) and path in tree and path not in listed})
-    keys = fingerprints({"units": [], "tests": {path: {"files": []} for path in files}}, tree)
+    keys = fingerprints(
+        {
+            "units": [],
+            "tests": {path: {"files": manifest.get("unlisted", {}).get(path, {}).get("outside", [])} for path in files},
+        },
+        tree,
+    )
     return tuple(
         Unit(KIND, test_key(TestInputs({path: keys[path]}, {}, PYTEST_INVOCATION, toolchain)), (path,))
         for path in files
