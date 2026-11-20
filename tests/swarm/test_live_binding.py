@@ -1,4 +1,5 @@
 import json
+import socket
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -51,6 +52,16 @@ def mounted(tmp_path):
         f"CLAUDE_CONFIG_DIR={home}\0AGENTIHOOKS_PROFILE=engineer\0AH_CC_TOKEN_team=private-value\0".encode()
     )
     return agent, proc, home
+
+
+def _absent(hive: str) -> dict[str, object]:
+    """The process difference a tick on this host records for a pane agent placed on the hive and seen absent."""
+    return {
+        "expected": True,
+        "actual": False,
+        "observer": socket.gethostname(),
+        "owner": {"transport": "pane", "host": hive},
+    }
 
 
 def test_matching_process_facts_exclude_credential_values(mounted):
@@ -800,6 +811,49 @@ def test_mismatch_report_and_health_evidence_are_complete(ticking):
     assert found[0].measure == 1
 
 
+@pytest.mark.feature("live-binding-process-provenance")
+@pytest.mark.parametrize(
+    ("hive", "owned"), [("hive-a", "owned by pane on hive-a"), ("", "owned by pane on no recorded host")]
+)
+def test_a_pane_process_absence_names_this_observer_and_the_agents_hive(
+    ticking: tuple, monkeypatch: pytest.MonkeyPatch, hive: str, owned: str
+) -> None:
+    store, _, _ = ticking
+    monkeypatch.setattr("socket.gethostname", lambda: "controller")
+    agent = AgentRecord("engineer", "eng", "one", harness="claude", profile="engineer", hive=hive)
+    store.put_agent("sw", agent)
+    process = {
+        "expected": True,
+        "actual": False,
+        "observer": "controller",
+        "owner": {"transport": "pane", "host": hive},
+    }
+
+    assert live_binding.record(store, "sw", agent, {"process": False}, 123) == {"process": process}
+    assert json.loads(store.redis.hget(store.key("sw", "live-bindings"), "engineer")) == {
+        "agent": "engineer",
+        "at": 123,
+        "state": "mismatched",
+        "differences": {"process": process},
+    }
+    assert [finding.as_dict()["evidence"] for finding in live_binding.findings(store, "sw")] == [
+        ["expected True; observed False", "observed by controller", owned]
+    ]
+
+
+@pytest.mark.feature("live-binding-process-provenance")
+def test_a_process_mismatch_stored_before_provenance_still_renders_its_flag(ticking: tuple) -> None:
+    store, _, _ = ticking
+    store.put_agent("sw", AgentRecord("engineer", "eng", "one", harness="claude", profile="engineer"))
+    old = {"expected": True, "actual": False}
+    report = {"agent": "engineer", "at": 123, "state": "mismatched", "differences": {"process": old}}
+    store.redis.hset(store.key("sw", "live-bindings"), "engineer", json.dumps(report))
+
+    assert [finding.as_dict()["evidence"] for finding in live_binding.findings(store, "sw")] == [
+        ["expected True; observed False"]
+    ]
+
+
 def test_departed_agents_raise_no_finding_while_a_seated_mismatch_does(ticking):
     store, _, _ = ticking
     seated = AgentRecord("seated", "eng", "one", harness="claude", profile="engineer", started_at=2)
@@ -986,7 +1040,7 @@ def test_missing_process_retry_has_named_evidence_and_checks_other_agents(
     }
     tick("sw", store, ledger, runtime, 200)
     report = json.loads(store.redis.hget(store.key("sw", "live-bindings"), old.name))
-    assert report["differences"] == {"process": {"expected": True, "actual": False}}
+    assert report["differences"] == {"process": _absent(old.hive)}
     master = next(a for a in store.agents("sw") if a.lane == "master")
     assert json.loads(store.redis.hget(store.key("sw", "live-bindings"), master.name))["at"] == 200
     assert master.name in runtime.named
@@ -1501,7 +1555,7 @@ def test_retiring_unbound_master_without_a_live_process_is_checked(ticking):
     }
     tick("sw", store, ledger, runtime, 200)
     report = json.loads(store.redis.hget(store.key("sw", "live-bindings"), master.name))
-    assert report["differences"] == {"process": {"expected": True, "actual": False}}
+    assert report["differences"] == {"process": _absent(master.hive)}
 
 
 @pytest.mark.parametrize(("age", "kept"), [(0, True), (600_000, True), (600_001, False)])
@@ -1533,7 +1587,7 @@ def test_a_master_another_hive_reports_with_a_fresh_heartbeat_stays_live_when_it
         assert master.name not in runtime.killed
         assert report is None
     else:
-        assert json.loads(report)["differences"] == {"process": {"expected": True, "actual": False}}
+        assert json.loads(report)["differences"] == {"process": _absent("")}
 
 
 @pytest.mark.parametrize(

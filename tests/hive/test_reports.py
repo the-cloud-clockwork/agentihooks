@@ -260,6 +260,54 @@ def test_the_controller_reads_a_hub_admitted_codex_workers_binding_from_the_hive
     assert (stored["state"], stored["unobserved"]) == ("matching", {})
 
 
+@pytest.mark.feature("live-binding-process-provenance")
+@pytest.mark.parametrize("remote", [{"target": {}}], indirect=True)
+def test_a_hub_admitted_workers_process_absence_keeps_the_hive_host_that_observed_it(
+    remote: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive import daemon
+    from scripts.swarm import live_binding
+    from scripts.swarm import runtime as runtime_module
+    from scripts.swarm.pane import PaneObservation
+    from scripts.swarm.store import APP_SERVER_TRANSPORT, AgentRecord
+
+    codex = AgentRecord(
+        remote.store.next_name("fixture", "eng"),
+        "eng",
+        "codex",
+        seat="eng-2@fixture",
+        harness="codex",
+        profile="engineer",
+        account="account",
+        hive=HIVE,
+        transport=APP_SERVER_TRANSPORT,
+    )
+    agent = remote.store.start_execution("fixture", codex)
+    remote.store.put_agent("fixture", agent)
+    monkeypatch.setattr(runtime_module, "connect", lambda: remote.store)
+    herdr = Mock()
+    herdr.live_names.return_value = {agent.name}
+    herdr.observe.return_value = PaneObservation("working")
+    herdr.bindings.return_value = {agent.name: {"process": False}}
+    monkeypatch.setattr("socket.gethostname", lambda: "hive-host")
+    report = daemon.execution_report(remote.redis, HIVE, herdr)
+    remote.redis.set(remote.reports.key(HIVE), json.dumps(report), ex=45)
+    monkeypatch.setattr("socket.gethostname", lambda: "controller-host")
+
+    facts = remote.runtime.bindings([agent])
+    differences = live_binding.record(remote.store, "fixture", agent, facts[agent.name], 1)
+
+    assert report["admitted"][agent.execution_id]["binding"] == {"process": False, "observer": "hive-host"}
+    assert differences == {
+        "process": {
+            "expected": True,
+            "actual": False,
+            "observer": "hive-host",
+            "owner": {"transport": APP_SERVER_TRANSPORT, "host": HIVE},
+        }
+    }
+
+
 @pytest.mark.feature("live-binding-reads-hub-admitted-bindings-from-their-hive")
 @pytest.mark.parametrize(
     "case",

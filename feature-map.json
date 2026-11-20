@@ -1426,6 +1426,19 @@
       ]
     },
     {
+      "id": "live-binding-process-provenance",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2739",
+      "behaviour": "A live binding process mismatch keeps who saw the process absent and what owned it. The stored process difference carries the observer, the host the fact names or else the recording host, and the owner, the codex transport record's transport and host or else the agent record's transport and hive. A hive report binding with the process absent names the hive host that observed it. The process finding shows both, and a record stored before them still renders its flag alone.",
+      "seam": "scripts.swarm.live_binding.record and findings, and scripts.hive.daemon.execution_report through scripts.swarm.live_binding.observed",
+      "tests": [
+        "tests/swarm/test_managed_lifecycle.py::test_a_process_absence_another_hive_observed_keeps_that_hive_and_the_transport_owner",
+        "tests/swarm/test_live_binding.py::test_a_pane_process_absence_names_this_observer_and_the_agents_hive",
+        "tests/swarm/test_live_binding.py::test_a_process_mismatch_stored_before_provenance_still_renders_its_flag",
+        "tests/hive/test_reports.py::test_a_hub_admitted_workers_process_absence_keeps_the_hive_host_that_observed_it"
+      ]
+    },
+    {
       "id": "swarm-spawn-order-once-per-pass",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-spawn-order-budget",
