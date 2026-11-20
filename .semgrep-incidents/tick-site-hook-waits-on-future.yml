@@ -3,10 +3,10 @@ rules:
     languages: [python]
     severity: ERROR
     message: >-
-      A tick site hook runs inline on the thread that schedules every step of the pass, so a hook that waits on a
-      future, such as the pass view build through pass_view, submits and reaps no step until the wait ends; outbox
-      migration sat ready at four seconds and started at thirty nine behind the relay hook's view wait. Wait in a
-      tick step on its own step thread, as the view wait step does, and keep the hook to work that answers at once.
+      A tick site hook or shut check, a method of a class in the tick pass modules, runs inline on the thread that
+      schedules every step of the pass, so one that waits on a future, such as the pass view build through
+      pass_view, holds every ready step until the wait ends. Wait in a tick step on its own step thread, as the view
+      wait step does, and keep the hook to work that answers at once.
     paths:
       include:
         - /scripts/swarm/cli.py

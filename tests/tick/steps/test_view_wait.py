@@ -8,7 +8,7 @@ import pytest
 
 from scripts.swarm import cli, delivery
 from scripts.tick import registry
-from scripts.tick.steps import CallStep, host, pass_domains, view_wait
+from scripts.tick.steps import RAISED, CallStep, actions_of, host, pass_domains, view_wait
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_delivery import FakeHerdr
 
@@ -41,7 +41,7 @@ def test_view_wait() -> None:
         frozenset(),
         True,
     )
-    assert (found.reads, found.writes & pass_domains("view")) == (pass_domains("judged"), pass_domains("view"))
+    assert (found.reads, found.writes) == (pass_domains("judged"), pass_domains("view") | {actions_of("view wait")})
 
 
 @pytest.mark.feature("tick-view-wait-off-scheduler")
@@ -69,6 +69,23 @@ def test_the_view_wait_step_stores_no_view_when_the_intent_check_stored_none(mon
     box: dict[str, Any] = {}
     view_wait._view_wait(cli, _reader({host.JUDGING: {}, "box": box, "slug": "sw"}))
     assert (seen, box) == ([], {})
+
+
+@pytest.mark.feature("tick-view-wait-off-scheduler")
+def test_a_view_build_that_raised_is_held_in_the_pass_box_for_the_pass_end(monkeypatch: pytest.MonkeyPatch) -> None:
+    failure = TimeoutError("ledger read timed out")
+
+    def fail(slug: str, view: Any) -> Any:
+        raise failure
+
+    monkeypatch.setattr(host, "pass_view", fail)
+    found = {step.name: step for step in registry.steps()}["view wait"]
+    assert isinstance(found, CallStep)
+    box: dict[str, Any] = {}
+    judging: dict[str, Any] = {"judged": (Future[Any](), [])}
+    assert found.call(cli, _reader({host.JUDGING: judging, "box": box, "slug": "sw"})) == []
+    assert box == {RAISED: failure}
+    assert RAISED not in judging
 
 
 @pytest.mark.feature("tick-view-wait-off-scheduler")

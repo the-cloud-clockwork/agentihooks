@@ -3011,6 +3011,7 @@
         "tests/tick/steps/test_view_wait.py::test_view_wait",
         "tests/tick/steps/test_view_wait.py::test_the_view_wait_step_stores_the_view_pass_view_waited_for",
         "tests/tick/steps/test_view_wait.py::test_the_view_wait_step_stores_no_view_when_the_intent_check_stored_none",
+        "tests/tick/steps/test_view_wait.py::test_a_view_build_that_raised_is_held_in_the_pass_box_for_the_pass_end",
         "tests/tick/steps/test_pass_view.py::test_the_relay_hook_keeps_the_checked_actions_and_leaves_the_view_to_the_view_wait_step"
       ]
     },

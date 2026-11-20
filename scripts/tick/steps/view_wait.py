@@ -21,7 +21,7 @@ registry.register(
     CallStep(
         "view wait",
         "wrapper relay",
-        host.held(_view_wait, host.JUDGING),
+        host.held(_view_wait),
         needs=frozenset({"intent check"}),
         reads=pass_domains("judged"),
         writes=pass_domains("view"),
