@@ -9614,6 +9614,16 @@
       ]
     },
     {
+      "id": "lab-worker-crash-traceback",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-worker-unit-filenotfound",
+      "behaviour": "When a unit's executor raises, the CI lab worker prints the unit's crash line on stderr followed by the exception's full traceback, so a missing file crash names the path it could not open and the frame that opened it instead of an OSError repr with no file name.",
+      "seam": "scripts.ci_lab.worker Worker.free, reached through Worker.run_once and drain, observed on stderr against scripts.ci_lab.lease_api.serve",
+      "tests": [
+        "tests/ci_lab/test_worker.py::test_a_crash_logs_the_traceback_naming_the_missing_path"
+      ]
+    },
+    {
       "id": "lab-worker-executors",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2533",
