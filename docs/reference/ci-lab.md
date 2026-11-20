@@ -2369,7 +2369,10 @@ key; the builders are pure and read no file, clock or network.
    still quiet or held by a pause takes no place; a head put back for its manifest fetch takes one,
    since its expansion ran on the pass. The other heads wait for a later pass, so every pass reaches
    steps 5 to 8 however many heads wait.
-3. Expansion reads the grader's test workflow and input key registry and the head and base trees
+3. A head not pushed to a `refs/grade/*` ref must first be carried by a branch or pull request
+   head ref, the refs every node mirror fetches; one that is not is retired with no grade and no
+   unit, as [A head no node mirror can hold](#a-head-no-node-mirror-can-hold) describes.
+   Expansion reads the grader's test workflow and input key registry and the head and base trees
    from the git mirror with `git ls-tree` and `git show`, never a checkout, and keys one static
    unit per gate step, described in [Static units](#static-units). A merge group, promotion or
    backfill head also gets the `unit` job's test units, described in [Test units](#test-units),
@@ -2415,8 +2418,8 @@ key; the builders are pure and read no file, clock or network.
    a refusal GitHub answers (`PostRefused`) holds only that grade's posts, kept in the grade state
    as `hold`, so the other grades keep posting and a restarted scheduler keeps the hold. A grade
    whose units are all final closes only once every one of its check runs is posted. The failed
-   check of a head that cannot expand is outside these holds: it is tried once, since its dropped
-   head keeps no grade to retry from. The refusal text
+   check of a head that cannot expand, and of a retired pull request head, is outside these holds:
+   it is tried once, since the head keeps no grade to retry from. The refusal text
    `GitHub App cannot supply scoped contents write credentials` is the one message
    `GitHubAppAuth.get_token` raises for any refused token, so for the check runs token, which asks
    for checks write only, read the App installation's `permissions.checks` in the org
@@ -2680,6 +2683,67 @@ token, GitHub or the network ends the same action with
 on. A head pushed to a grade ref skips the reachability check, since the lab remote serves it. A
 failed `git ls-remote` raises like any other failed git command, so the head takes the
 [cannot expand](#a-head-that-cannot-expand) path.
+
+The check runs on the scheduler, because the workers have no way to recover such a head. A worker
+fetches a head its pod store lacks from its node mirror, and its `Mirror.fetch` falls back to the
+lab remote only when the worker holds `AGENTIHOOKS_LAB_REMOTE` and a `CI_LAB_REPOSITORY` that the
+lab URL names. The chart sets neither on the workers, and their network policy reaches neither
+GitHub nor the lab remote (see the [Worker Deployment](#worker-deployment) limitations). Before this
+check, such a head's units were leased and every lease failed at the worker's `git fetch` with exit
+code 128 until the scheduler reaped it. On 20 November one ejected merge group head of #11967 caused
+about 1775 worker crashes in ten minutes across three worker pods this way.
+
+What a retirement does depends on the head's class:
+
+| Head | Reachability check | When the check refuses it |
+|---|---|---|
+| Pushed to a `refs/grade/*` ref (`GRADE_REFS`), any class | Skipped | The head grades as usual |
+| Pull request class (`pull_request`, `Priority.PULL_REQUEST`) | Asked once, when its quiet window ends and the pass releases it | Retired, plus one failed `lab-shadow/required` check run |
+| Hotfix, queue (merge group), promotion or backfill class | Asked once, when the pass releases it | Retired, with no check run |
+
+The failed check run of a retired pull request head carries:
+
+| Field | Value |
+|---|---|
+| Name | `lab-shadow/required`, since a head with no plan has no authoritative gates |
+| Status and conclusion | `completed` and `failure` |
+| Title | `pull_request grade retired` |
+| Summary | `no branch or pull request head ref of <repo> carries <head>`, followed by `Run: uncarried-<ms>`, `Grader revision: unknown`, `Details: <repo>/commit/<head>` and `Unit keys: 0 of 0 listed` |
+| External id | `uncarried-<ms>`, the pass time in epoch milliseconds |
+| Details link | `<repo>/commit/<head>` |
+
+`<repo>` is the repository URL of the head event, such as `https://github.com/<owner>/<repo>`.
+
+A retirement also has these effects on the pass:
+
+- The retired head has already left `agentihooks-ci:waiting` and is not put back, so it holds no
+  grade, lane, held unit or lease. A later head event for the same commit, such as a push of it to a
+  new branch, is a new head and is asked again.
+- It takes one of the eight `STARTS_PER_PASS` places, since its check ran on the pass.
+- It supersedes nothing: the lane's earlier grade keeps its units and check runs, because the
+  supersede step runs only after the check passes.
+- The scheduler service prints the action on its own line, like every other action of the pass.
+
+Each check of a head no ref names costs one `git ls-remote` of both ref patterns. On GitHub it listed
+1909 branches and 6959 pull request heads in 0.65 seconds when #12550 was measured. A head that no
+ref names also costs a `git ls-remote` of dev and a fetch of the dev head into the scheduler's
+private store, the same fetch `MirrorExpander.merge_base` makes.
+
+For example, GitHub deletes the `gh-readonly-queue/dev/pr-<n>-<sha>` branch of a merge group entry
+it ejects. When that happens before the group's head is released, no branch names the head, no
+`refs/pull/<n>/head` ref names a merge group commit and dev never takes it, so the head is retired
+with no check run, since it is a queue class head. The scheduler log then reads:
+
+```text
+retiring 3f2c1d0e9b8a7f6e5d4c3b2a1f0e9d8c7b6a5f4e: no branch or pull request head ref of https://github.com/<owner>/<repo> carries 3f2c1d0e9b8a7f6e5d4c3b2a1f0e9d8c7b6a5f4e
+```
+
+`scripts.ci_lab.scheduler.Expander` is the scheduler's expansion port, `Ports.expander`. Since #12550
+it has three methods: `expand(request) -> Plan`, `merge_base(repo, head) -> str` and
+`reachable(repo, head) -> bool`. An expander written for a test or another repository must implement
+`reachable`. Returning `True` keeps every head, as the `Expander` fake in
+`tests/ci_lab/test_scheduler.py` does. Raising `subprocess.CalledProcessError` sends the head down
+the [cannot expand](#a-head-that-cannot-expand) path.
 
 #### The worker reads the same workflows
 
