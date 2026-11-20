@@ -79,15 +79,15 @@ def test_a_leased_batch_carries_its_manifest_to_an_empty_worker_volume(
             job = run.engine.queue.job(lease.job)
             assert job is not None
             assert job.unit.manifest == ""
-            continue
-        pod = support.pod_of(tmp_path / lease.head, support.FakeWorktrees(trees))
-        suite = executors.Suite(pod.root / "manifest.json", pod.root / "flakes.jsonl")
-        assert not suite.manifest.exists()
-        finished = executors.tests(pod, suite, lease)
-        assert finished.outcome == PASSED
-        assert ran.calls[-1][0] == lease.unit.members
-        assert cast("run_tests.Lab", ran.calls[-1][-1]).manifest == expected[lease.head]
-        assert not suite.manifest.exists()
+        else:
+            pod = support.pod_of(tmp_path / lease.head, support.FakeWorktrees(trees))
+            suite = executors.Suite(pod.root / "manifest.json", pod.root / "flakes.jsonl")
+            assert not suite.manifest.exists()
+            finished = executors.tests(pod, suite, lease)
+            assert finished.outcome == PASSED
+            assert ran.calls[-1][0] == lease.unit.members
+            assert cast("run_tests.Lab", ran.calls[-1][-1]).manifest == expected[lease.head]
+            assert not suite.manifest.exists()
 
 
 def restore_old_schema(run: Run, manifests: dict[str, dict[str, Any]], keep_jobs: bool = False) -> None:
