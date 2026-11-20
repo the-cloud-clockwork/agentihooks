@@ -7600,6 +7600,10 @@ of those agents and of every app server agent; an agent on a runtime backend oth
 | Running over the Codex app server transport on the host the tick runs on, including one the hub admitted to that host | The app server's transport record for the agent's current execution and generation: a record whose server is proven dead is first settled as failed, which releases its endpoint and publishing claim; a live server is read from its server process. | `{"process": null}` when the transport record is missing, belongs to another execution or generation, names another host, or lacks the server process id or start identity. `{"process": false}` when the server is proven dead or the record is already exited or failed. |
 | Any other local agent: a Claude session, a Codex terminal session, or a hub admitted worker that runs no app server | The agent session bound to the record on the host the tick runs on, read from its process. A session on a process other than the validated one adds `rebound`, and the tick rebinds the agent to the one pane whose conversation is the agent's, holding it while not exactly one pane is. | `{"process": false}` when the record holds a validated process id, no session is bound, and no other hive lists the agent name. |
 
+A hive's `binding` of `{"process": null}` or `{"process": false}` is used as the agent's facts like one read on the
+tick's host: `null` keeps the report `matching` with model and effort unobserved, so the worker is never retired for
+it, and `false` records a `process` difference.
+
 An agent with no facts is skipped for that pass and keeps its last stored report. The one exception is an agent in
 the `retiring` state whose start no hive recorded on the swarm bus: it is recorded with `{"process": false}`, a
 `process` difference. A local agent with no host target whose facts are `{"process": false}` and whose name herdr
@@ -7620,8 +7624,9 @@ agentihooks swarm <id> status --json \
 redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" HGET agentihooks:swarm:<slug>:live-bindings '<agent>' | jq .
 ```
 
-`agents[]` lists only live agents, so the second command prints nothing for an agent that has finished. For a hub
-admitted worker on another hive, read its `admitted` entry in that hive's execution report with the command in
+`agents[]` holds only the agents status counts as live, so the second command prints nothing for a local agent herdr
+no longer lists or for an agent on another hive that has ended. For a hub admitted worker on another hive, read its
+`admitted` entry in that hive's execution report with the command in
 [A hive worker whose pane is gone](hives.md#a-hive-worker-whose-pane-is-gone).
 
 The finding for an unobserved model reads:
@@ -7634,7 +7639,7 @@ The finding for an unobserved model reads:
 
 | Symptom | Cause | Check |
 |---|---|---|
-| A healthy Codex app server worker shows `has no observed model` and `has no observed effort`, and its report is `matching` with no differences | The facts were `{"process": null}`: the host that read them could not prove the app server alive. A controller on a release without the admitted `binding` read checks a hub admitted app server worker on another hive itself and always gets `null`. | Read the agent's `hive` and `runtime_target`. A hub admitted worker on another hive needs a controller and a hive that both run a release that carries the admitted `binding` field. A worker on the tick's own host needs a transport record that names that host and holds the server process id and start identity. |
+| A healthy Codex app server worker shows `has no observed model` and `has no observed effort`, and its report is `matching` with no differences | The facts were `{"process": null}`: the host that read them could not prove the app server alive. A controller on a release without the admitted `binding` read checks a hub admitted app server worker on another hive itself, and gets `null` whenever the transport record is neither exited nor failed. | Read the agent's `hive` and `runtime_target`. A hub admitted worker on another hive needs a controller and a hive that both run a release that carries the admitted `binding` field. A worker on the tick's own host needs a transport record that names that host and holds the server process id and start identity. |
 | The report's `at` stops moving while the worker keeps running | The tick gets no facts for a hub admitted worker and skips it, so the findings come from an older pass. | Read the hive's `executions` report. A missing key means the hive stopped beating (the report expires after 45 seconds); an `admitted` entry with another `generation`, or with `binding: null`, gives no facts. |
 | The hive's `admitted` entry holds `"binding": {"process": null}` | The hive itself could not prove the app server alive on its own host. | Read the execution's transport record on that hive: its host, server process id and start identity. |
 | `differs in process` for a worker the hive reports as `{"process": false}` | The hive proved the app server dead, or found its transport record already exited or failed. | The retire is expected: read the execution's transport record on that hive, which is `failed` or `exited`. |
