@@ -182,10 +182,11 @@ python -c 'from scripts.hive import stop_names; print(stop_names.stream("rig"), 
   member binds and creates none.
 - **The hive** reads with `scripts.hive.execution_stop.Stopper`, one per swarm. Each pass binds the same durable and
   fetches up to 10 stops. Until the hub has sent the hive's first stop the durable does not exist, and the reader
-  answers nothing until its next pass. Any other failure prints
+  answers nothing until its next pass. Any other read failure, and an exception raised while handling a stop, prints
   `hive execution stops for swarm <swarm> failed (<exception type>: <message>)` on the hive's stderr. A settled stop
-  is acknowledged; a failed reap is redelivered after 30 seconds, up to 100,000 deliveries, after which the stop is
-  dead lettered like an event.
+  is acknowledged. A stop whose reap failed prints
+  `hive execution stop for <agent> in swarm <swarm> could not reap it; retrying` and is redelivered after 30 seconds,
+  up to 100,000 deliveries, after which the stop is dead lettered like an event.
 
 `Bus.stops` is the event log for stops, beside `events` and `dead`:
 
@@ -259,9 +260,8 @@ an events log `publish` call.
   a new one. On a member hive run `agentihooks hive refresh`, then restart its hive service:
   `systemctl --user restart agentihooks-hive` on a workstation or VM, a pod roll on Kubernetes. The refresh rewrites
   the saved credential and `hive.env`, while a running hive service keeps the bus it opened when its lanes started.
-  The workstation root hive re-mints its stored
-  credential when `hive run` starts and finds its grant differs from a fresh mint; see
-  [Troubleshooting ended agents](../pillars/hives.md#troubleshooting-ended-agents).
+  The workstation root hive re-mints its stored credential when `hive run` starts and finds its grant differs from a
+  fresh mint; see [Troubleshooting ended agents](../pillars/hives.md#troubleshooting-ended-agents).
 - Stops still unacknowledged on the events stream when the hub moves to the stop stream are not carried over, and
   the stop stream starts empty. The tick's reap step sends a new stop for an agent that is still seated on a later
   pass.
@@ -525,5 +525,5 @@ missing hive user is accepted only in operator mode, where the values file has n
 | `scoped queue migration is incomplete` | The hub has not finished `migrate_queue` for that lane | Finish the migration on the hub, then restart the member |
 | The grant check fails with `the SWARM account has no swarm-hive user` | The antoncore values file still defines the `SWARM` account, so the check expects the shared user | Finish the antoncore operator mode change, which removes the `accounts` block, or restore the user |
 | The grant check fails with `the SWARM account has no swarm-controller user` | The controller user is missing from antoncore `users.yaml` | Restore `swarm-controller` there; only the hive user may be retired |
-| A hive logs `hive execution stops for swarm <swarm> failed (...)` naming a permissions violation on `$js.api.consumer.info.agentihooks-<hex>-stop.<consumer>` | The hive's credential was minted before the stop stream grants | On a member hive, `agentihooks hive refresh`, then restart its hive service; on the workstation root hive, restart the hive service; as in [Upgrading to the stop stream](#upgrading-to-the-stop-stream) |
+| A hive logs `hive execution stops for swarm <swarm> failed (...)` naming a permissions violation on `$js.api.consumer.info.agentihooks-<hex>-stop.<consumer>` | The hive's credential was minted before the stop stream grants | On a member hive, run `agentihooks hive refresh`, then restart its hive service; on the workstation root hive, restart the hive service. See [Upgrading to the stop stream](#upgrading-to-the-stop-stream) |
 | A hive logs a permissions violation on another hive's stop consumer, or on publishing or subscribing to `swarm.<swarm>.stop.>` | Code on that hive reads or writes stops outside its own consumer, which the grant forbids by design | Read stops only through `Stopper` on the hive's own durable; only the hub publishes stops |
