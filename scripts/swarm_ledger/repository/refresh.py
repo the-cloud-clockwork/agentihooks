@@ -15,6 +15,7 @@ CHANGES = (
 )
 ROOT = "[]"
 PATHS_KEPT = 5000
+CHUNK = 5000
 
 
 def record(connection: Connection, slug: str, generation: int, paths: list, kept: int) -> None:
@@ -126,15 +127,16 @@ def refreshed(connection: Connection, slug: str, state: dict, paths: set) -> dic
 
 
 def stored_rows(connection: Connection, slug: str, paths: set[str]) -> dict[str, tuple]:
-    """The position, kind and value stored at each of paths that is stored, read in one query."""
-    listed = list(paths)
-    marks = ",".join("?" * len(listed))
-    query = " UNION ALL ".join(
-        f"SELECT path, position, kind, value FROM {table} WHERE slug=? AND path IN ({marks})" for table in TABLES
-    )
-    found: dict[str, tuple] = {}
-    for path, *row in connection.execute(query, [value for _ in TABLES for value in (slug, *listed)]):
-        found.setdefault(path, tuple(row))
+    """The position, kind and value stored at each of paths that is stored, read in one query per CHUNK paths."""
+    listed, found = list(paths), {}
+    for start in range(0, len(listed), CHUNK):
+        chunk = listed[start : start + CHUNK]
+        marks = ",".join("?" * len(chunk))
+        query = " UNION ALL ".join(
+            f"SELECT path, position, kind, value FROM {table} WHERE slug=? AND path IN ({marks})" for table in TABLES
+        )
+        rows = connection.execute(query, [value for _ in TABLES for value in (slug, *chunk)])
+        found.update((path, (position, kind, value)) for path, position, kind, value in rows)
     return found
 
 

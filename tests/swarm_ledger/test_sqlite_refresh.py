@@ -190,8 +190,10 @@ def reread(repo: Any, old: dict[str, Any], reached: list[list[Any]]) -> dict[str
 
 
 @pytest.mark.feature("ledger-refresh-batched-reads")
-@pytest.mark.parametrize("count", [1, 2500])
-def test_stale_object_refresh_reads_changed_siblings_in_one_query(tmp_path: Path, count: int) -> None:
+@pytest.mark.parametrize(("count", "queries_read"), [(1, 1), (2500, 1), (5001, 2)])
+def test_stale_object_refresh_reads_changed_siblings_in_one_query(
+    tmp_path: Path, count: int, queries_read: int
+) -> None:
     stored = {f"key{index}": index for index in range(count)}
     repo = probed(tmp_path, stored)
     old = dict.fromkeys(stored, -1)
@@ -204,7 +206,7 @@ def test_stale_object_refresh_reads_changed_siblings_in_one_query(tmp_path: Path
     assert refreshed is not None
     assert refreshed == stored
     assert list(refreshed) == list(stored)
-    assert len(reads) == 1
+    assert len(reads) == queries_read
 
 
 @pytest.mark.feature("ledger-refresh-batched-reads")
