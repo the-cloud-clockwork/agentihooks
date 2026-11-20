@@ -71,6 +71,25 @@ def _image_third_party_imports(root: Path, entry_points: list[str]) -> set[str]:
     return third_party
 
 
+@pytest.mark.feature("swarm-image-lab-function-imports")
+@pytest.mark.parametrize("statement", ["import unlocked_lab_package", "from unlocked_lab_package.client import Client"])
+def test_swarm_image_lock_walk_finds_function_imports_in_lab_modules(tmp_path: Path, statement: str) -> None:
+    lab = tmp_path / "scripts" / "ci_lab"
+    lab.mkdir(parents=True)
+    (lab / "scheduler.py").write_text("from . import helper\n")
+    (lab / "helper.py").write_text(f"def run() -> None:\n    {statement}\n")
+    assert _image_third_party_imports(tmp_path, ["scripts.ci_lab.scheduler"]) == {"unlocked_lab_package"}
+
+
+@pytest.mark.feature("swarm-image-lab-function-imports")
+def test_swarm_image_lock_walk_keeps_other_function_imports_out_of_scope(tmp_path: Path) -> None:
+    lab = tmp_path / "scripts" / "ci_lab"
+    lab.mkdir(parents=True)
+    (lab / "scheduler.py").write_text("from scripts import optional\n")
+    (lab.parent / "optional.py").write_text("def run() -> None:\n    import unlocked_optional_package\n")
+    assert _image_third_party_imports(tmp_path, ["scripts.ci_lab.scheduler"]) == set()
+
+
 @pytest.mark.skipif("MUTANT_UNDER_TEST" in os.environ, reason="the mutated copy imports mutmut at module level")
 def test_swarm_image_lock_pins_every_distribution_its_entry_points_import() -> None:
     root = Path(__file__).parents[1]

@@ -10866,6 +10866,17 @@
       ]
     },
     {
+      "id": "swarm-image-lab-function-imports",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-image-lock-guard-function-imports",
+      "behaviour": "The swarm image lock guard discovers third party imports inside lab scheduler and lab module functions while preserving the module level inventory for other repository modules.",
+      "seam": "the image dependency import walk over a synthetic scheduler and a lab helper with an unlocked function import",
+      "tests": [
+        "tests/test_swarm_packaging.py::test_swarm_image_lock_walk_finds_function_imports_in_lab_modules",
+        "tests/test_swarm_packaging.py::test_swarm_image_lock_walk_keeps_other_function_imports_out_of_scope"
+      ]
+    },
+    {
       "id": "lab-wheel-imports",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2646",
