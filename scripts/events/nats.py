@@ -227,6 +227,21 @@ class NatsDelivery:
         self._loop.submit(_release(js, self._msg, subject, stream, self.attempt, delay_ms))
 
 
+def _undecodable(message: Msg) -> Envelope:
+    metadata = message.metadata
+    return Envelope(
+        id=f"{metadata.stream}:{metadata.sequence.stream}",
+        type="undecodable",
+        swarm="unknown",
+        entity="message",
+        key=message.subject,
+        version=0,
+        time=0,
+        author="events",
+        data={"subject": message.subject, "payload": base64.b64encode(message.data).decode("ascii")},
+    )
+
+
 class NatsConsumer:
     def __init__(
         self,
@@ -247,23 +262,28 @@ class NatsConsumer:
         self._credentials = credentials
 
     def fetch(self, batch: int, timeout_ms: int) -> list[NatsDelivery]:
-        return [NatsDelivery(self._loop, msg) for msg in self._loop.run(self._fetch(batch, timeout_ms))]
+        return self._loop.run(self._fetch(batch, timeout_ms))
 
-    async def _fetch(self, batch: int, timeout_ms: int) -> list:
+    async def _fetch(self, batch: int, timeout_ms: int) -> list[NatsDelivery]:
         try:
             messages = await self._subscription.fetch(batch, timeout=_seconds(max(timeout_ms, MIN_FETCH_MS)))
         except asyncio.TimeoutError:
             return []
         deliveries = []
         for msg in messages:
-            if _attempt(msg) > self._policy.max_deliver:
-                event = Envelope.decode(msg.data)
-                await _publish_dead(
-                    self._js, event, self._identity, self._policy.max_deliver, self._swarm, self._credentials
-                )
-                await msg.term()
+            try:
+                delivery = NatsDelivery(self._loop, msg)
+            except ValueError:
+                event = _undecodable(msg)
+                attempts = _attempt(msg)
             else:
-                deliveries.append(msg)
+                if delivery.attempt <= self._policy.max_deliver:
+                    deliveries.append(delivery)
+                    continue
+                event = delivery.event
+                attempts = self._policy.max_deliver
+            await _publish_dead(self._js, event, self._identity, attempts, self._swarm, self._credentials)
+            await msg.term()
         return deliveries
 
 

@@ -10241,6 +10241,18 @@
       ]
     },
     {
+      "id": "lab-head-undecodable-dead-letter",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-head-undecodable",
+      "behaviour": "An undecodable lab head is retained once in the dead stream with its exact raw bytes and stream sequence identity before its original delivery terminates. Valid heads in the batch keep processing. A failed dead letter publish leaves the original pending and a lost termination reuses the retained letter after deduplication expires.",
+      "seam": "scripts.events.nats NatsConsumer fetch and _fetch, _undecodable and _publish_dead; semgrep incident rule nats-consumer-unguarded-decode",
+      "tests": [
+        "tests/events/test_nats_undecodable.py::test_an_undecodable_head_is_dead_lettered_and_the_next_head_is_read",
+        "tests/events/test_nats_undecodable.py::test_an_undecodable_head_stays_pending_when_dead_letter_publication_fails",
+        "tests/events/test_nats_undecodable.py::test_an_undecodable_head_has_one_retained_letter_when_termination_is_lost"
+      ]
+    },
+    {
       "id": "lab-head-own-stream",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-head-own-stream",
