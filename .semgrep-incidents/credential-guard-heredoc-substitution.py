@@ -30,8 +30,8 @@ def skips_ordinary_bodies(segment: str, bodies: list[str]) -> Verdict:
 
 
 def reaches_ordinary_bodies(segment: str, bodies: list[str]) -> Verdict:
-    runs_script = any(runs_input_script(stage) for stage in segment.split("|"))
     # ok: credential-guard-heredoc-substitution
+    runs_script = any(runs_input_script(stage) for stage in segment.split("|"))
     for token in HEREDOC_TOKEN.finditer(segment):
         body = bodies[int(token.group(1))]
         v = body_verdict(body if runs_script else body.replace("\\$", ""))
