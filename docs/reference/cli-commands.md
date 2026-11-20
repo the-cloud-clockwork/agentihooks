@@ -456,6 +456,7 @@ agentihooks init-agent --handoff --dir "$PWD" --name repo-handoff --prompt-file 
 | `--handoff` | Quota handoff: any account but this one, no bare-Claude fallback, marks this session handed off once the new one is routed; exit 3 on failure |
 | `--profile <name>` | Render this role profile once, record its home in the launch report and mount that home in the launched session; see [Profile launch home](profile-launch-home.md) |
 | `--overlay <name>` | Overlay the profile wears; repeat for up to three |
+| `--inbox-channel` | Claude only: register the inbox channel in the session's Claude config, load it and answer its development channels warning in herdr. Every swarm Claude launch passes it; see [Claude config lock](#claude-config-lock) |
 | `--bundle-revision <commit>` | Render the profile only from this bundle commit. With a shared bundle linked the value has three parts, `<root commit>:<shared commit>:<user commit>` (`<root commit>:<shared commit>:` when no user bundle is linked); with only a user bundle linked it is `<root commit>:<user commit>`. The swarm records it at launch, with `-` as the shared field when the shared bundle has no commit to record (`<root commit>:-:<user commit>`). A value that omits the user bundle's commit, or has an empty shared field, is refused rather than rendering the mutable tree. A `-` field, and a host without the recorded shared bundle, warn and render without it; a two-part value recorded before the shared bundle was linked renders with the shared bundle's current commit, warns, and stamps that commit |
 
 Output is `key=value` lines: `status=started`, `route_status` (`routed`, `bare`,
@@ -470,7 +471,8 @@ exports the caller's `CLAUDE_CONFIG_DIR`, or unsets it when the caller has none,
 so a herdr pane's own environment cannot point Claude at another file.
 `trust=trusted|marked|untrusted` names the outcome;
 `AGENTIHOOKS_TRUST_LAUNCH_DIR=0` turns marking off. On `untrusted` the launch
-still goes ahead and stderr says the session waits for someone to answer.
+still goes ahead and stderr says the session waits for someone to answer. Marking
+takes the Claude config lock; see [Claude config lock](#claude-config-lock).
 
 Hosts: herdr when installed and not disabled (`state.json` `herdr.enabled`), else
 the native terminal. `--host herdr|native` or `AGENTIHOOKS_TERMINAL_HOST` overrides.
@@ -487,6 +489,80 @@ With `--profile`, the output adds `profile_validation=validated` and
 The launcher starts the session through `agentihooks select-profile NAME
 --home=<recorded home>`, so a pull of `dev` or another code root between
 prepare and launch does not change the home the session mounts.
+
+### Claude config lock
+
+Two launch steps write the session's Claude config file, the same
+`.claude.json` that folder trust reads (`$CLAUDE_CONFIG_DIR/.claude.json`, else
+`~/.claude.json`; for a `--profile` launch, the rendered profile home):
+
+| Step | When | What it writes |
+|---|---|---|
+| Folder trust marking | Every Claude launch into a folder Claude has not trusted | `hasTrustDialogAccepted` for the launch folder |
+| Inbox channel registration | `init-agent --inbox-channel`, and `select-profile` when the harness arguments carry `--dangerously-load-development-channels=server:inbox` | The `inbox` entry under `mcpServers`, rewritten only when it differs |
+
+Both take the lock Claude Code uses for that file: a directory named
+`.claude.json.lock` beside it, created with `mkdir` and removed when the step
+ends. Registration takes it even when the `inbox` entry is already current. A
+step holds it for one read and one write, so a lock older than the stale bound
+was left by a process killed while holding it. Both steps reclaim such a lock
+through the same helper, `claude_trust._reclaim`:
+
+| Age of the lock directory (now minus its modification time) | What the step does |
+|---|---|
+| 10 seconds or more (`claude_trust.STALE_LOCK_SECONDS`) | Removes the lock and takes it at once, with no wait. A lock another launch removed first counts as free |
+| Under 10 seconds | Leaves it to its holder and retries every 0.1 seconds |
+| Still held 3 seconds after the first try | Stops with `<config dir>/.claude.json.lock is held` and leaves `.claude.json` unchanged |
+
+A held lock affects each launch path differently:
+
+| Path | Output on a held lock | Launch |
+|---|---|---|
+| Folder trust | `trust=untrusted`, and stderr `agentihooks init-agent: Claude does not trust <dir> (<config dir>/.claude.json.lock is held); ...` | Goes ahead; the session waits at the trust question |
+| `init-agent --inbox-channel` | stderr `agentihooks init-agent: <config dir>/.claude.json.lock is held`, exit 2 | Refused before a terminal opens |
+| `select-profile` in the new pane | stderr `agentihooks select-profile: <config dir>/.claude.json.lock is held`, exit 2; the pending launch report fails with `profile selection failed: <config dir>/.claude.json.lock is held` | `init-agent` prints `profile_validation=failed` and the same reason, exit 3 |
+
+Registration runs before folder trust, so a launch with `--inbox-channel`
+stops at registration when the lock is held. Before
+[#11062](https://github.com/the-cloud-clockwork/agentihooks/pull/11062),
+registration had no reclaim: a launch killed while holding the lock left it in
+the cicd profile home on a hive for seventeen hours, and every ci launch there
+failed with `is held` until someone removed the directory.
+
+Check a config dir by hand:
+
+```bash
+# For a profile launch, use the "home" field of profile_binding from the launch output
+config_dir="${CLAUDE_CONFIG_DIR:-$HOME}"
+lock="$config_dir/.claude.json.lock"
+if [[ -d "$lock" ]]; then echo "held for $(( $(date +%s) - $(stat -c %Y "$lock") ))s"; else echo free; fi
+python3 -c 'import json, sys; print(sorted(json.load(open(sys.argv[1])).get("mcpServers", {})))' "$config_dir/.claude.json"
+```
+
+A lock held for 10 seconds or more is reclaimed by the next launch; the
+`mcpServers` list shows `inbox` once a registration has written it.
+
+| Symptom | Cause | Action |
+|---|---|---|
+| `... .claude.json.lock is held`, and the check shows the lock under 10 seconds old | A live process holds it: a Claude session or another launch on the same config dir | Retry the launch once the holder finishes; no step removes a lock inside the bound |
+| `... .claude.json.lock is held` on every launch, and the lock is older than 10 seconds | The host runs an agentihooks release from before #11062 | Upgrade agentihooks on that host. Until then, `rmdir "$lock"` removes the abandoned lock, as the reclaim would |
+| `... mcpServers is not a JSON object` | `.claude.json` holds a non-object `mcpServers` value | Fix or remove that key; registration does not overwrite it |
+
+Regression guards:
+
+| Guard | What it holds |
+|---|---|
+| Feature `inbox-channel-lock-reclaim`: `test_registration_reclaims_an_abandoned_native_config_lock` and `test_registration_leaves_a_lock_inside_the_stale_bound_to_its_holder` in `tests/inbox/test_channel_server.py` | Registration removes a lock past the bound without sleeping and writes `inbox`; a lock 5 seconds inside the bound is checked on every retry, left in place, and ends in `is held` with no config written |
+| Feature `claude-trust-lock-reclaim` in `tests/test_claude_trust.py` | The same reclaim for folder trust marking, including a lock exactly at the bound and one another launch removed first |
+| Semgrep incident rule `mkdir-lock-without-reclaim` in `.semgrep-incidents/` | Fails a `while True` loop that takes a lock with `mkdir`, breaks on success and handles `FileExistsError` without first calling a reclaim on that lock and continuing. A module-qualified call such as `claude_trust._reclaim(lock)` passes. The Semgrep workflow scans every pull request with the incident rules and runs their fixtures in `Outage rules fire on their planted faults and pass their clean cases` |
+
+Run the rule by hand:
+
+```bash
+semgrep scan --config .semgrep-incidents/mkdir-lock-without-reclaim.yml scripts/ hooks/
+semgrep --test --config .semgrep-incidents/mkdir-lock-without-reclaim.yml \
+  .semgrep-incidents/mkdir-lock-without-reclaim.py
+```
 
 ---
 
