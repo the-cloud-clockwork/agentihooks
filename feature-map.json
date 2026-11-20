@@ -6,9 +6,10 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2647",
       "behaviour": "The kind terminal package stage and its image prefetch use the Python patch version declared by the worker lock before downloading packages from its Debian snapshot.",
       "seam": "kind terminal package base and image prefetch",
-      "rules": ["snapshot-floating-base"],
       "tests": [
-        "tests/test_kind_terminal_snapshot.py::test_terminal_packages_and_prefetch_use_the_locked_python"
+        "tests/test_kind_terminal_snapshot.py::test_terminal_packages_and_prefetch_use_the_locked_python",
+        "tests/test_kind_terminal_snapshot.py::test_snapshot_stage_guard_fixtures",
+        "tests/test_kind_terminal_snapshot.py::test_every_dockerfile_snapshot_stage_has_a_pinned_base"
       ]
     },
     {
