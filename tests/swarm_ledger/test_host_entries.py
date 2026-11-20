@@ -185,6 +185,38 @@ def test_default_host_copy_catches_up_within_eight_generations(tmp_path: Path) -
     assert kept(tmp_path).current("ledger").generation == copy.generation
 
 
+def write_probe(repository: sqlite.SQLiteLedgerRepository, value: int, count: int) -> None:
+    """Store count probe keys under the ledger's meta object, each holding value, at the next revision."""
+    with repository.connect() as connection:
+        entry = repository._entry(connection, "ledger")
+    state = json.loads(entry.text)
+    state["_meta"]["probe"] = {f"key{index}": value for index in range(count)}
+    state["_meta"]["rev"] += 1
+    with repository.connect() as connection, connection:
+        repository._write(connection, "ledger", entry, state, [])
+
+
+def stale_lookups(tmp_path: Path, count: int) -> int:
+    """The point lookups a fresh repository makes refreshing its host copy after count keys of one object changed."""
+    writer = sqlite.SQLiteLedgerRepository(tmp_path / "ledgers" / sqlite.DATABASE)
+    writer.create("ledger", CONTENT)
+    write_probe(writer, 0, count)
+    kept(tmp_path).current("ledger")
+    write_probe(writer, 1, count)
+    cold = kept(tmp_path)
+    queries: list[str] = []
+    cold.trace = queries.append
+    assert cold.current("ledger").state["_meta"]["probe"] == {f"key{index}": 1 for index in range(count)}
+    return len([query for query in queries if " AND path" in query])
+
+
+@pytest.mark.feature("ledger-refresh-batched-reads")
+def test_a_cold_reader_of_a_stale_host_copy_looks_up_changed_keys_in_a_fixed_number_of_queries(
+    tmp_path: Path,
+) -> None:
+    assert stale_lookups(tmp_path / "few", 2) == stale_lookups(tmp_path / "many", 400)
+
+
 def test_a_repository_without_host_copies_keeps_no_host_entry(tmp_path: Path, loads: list[str]) -> None:
     first = sqlite.SQLiteLedgerRepository(tmp_path / "ledgers" / sqlite.DATABASE)
     first.create("ledger", CONTENT)

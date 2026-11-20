@@ -2243,7 +2243,8 @@
       "tests": [
         "tests/swarm_ledger/test_sqlite_refresh.py::test_stale_object_refresh_reads_changed_siblings_in_one_query",
         "tests/swarm_ledger/test_sqlite_refresh.py::test_stale_array_refresh_looks_up_changed_children_in_one_query",
-        "tests/swarm_ledger/test_host_entries.py::test_default_host_copy_catches_up_within_eight_generations"
+        "tests/swarm_ledger/test_host_entries.py::test_default_host_copy_catches_up_within_eight_generations",
+        "tests/swarm_ledger/test_host_entries.py::test_a_cold_reader_of_a_stale_host_copy_looks_up_changed_keys_in_a_fixed_number_of_queries"
       ]
     },
     {
