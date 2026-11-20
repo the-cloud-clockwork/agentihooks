@@ -271,6 +271,9 @@
   "C901": 25,
   "PLR0912": 27
  },
+ "tests/ci_lab/test_scheduler.py": {
+  "file-lines": 3077
+ },
  "tests/swarm/test_drain_watch.py::_drain_swarm": {
   "PLR0913": 9
  }
