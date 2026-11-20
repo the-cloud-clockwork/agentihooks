@@ -7624,10 +7624,11 @@
       "id": "swarm-archive-prunes-stale-intents",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-control-plane-cpu-weight",
-      "behaviour": "ExecutionRegistry.archive drops every controller-intents row whose execution is no longer current, including rows left by executions archived before intents were pruned, so every fenced registry write stops reading, decoding and copying that backlog.",
+      "behaviour": "ExecutionRegistry.archive drops every controller-intents row whose execution is no longer current, including rows left by executions archived before intents were pruned, so every fenced registry write stops reading, decoding and copying that backlog; an intents row that never carried an execution_id matching its own key is never an execution admission and survives.",
       "seam": "ExecutionRegistry.archive prunes intents whose execution left the executions section",
       "tests": [
-        "tests/swarm/test_execution_archive.py::test_archive_prunes_intents_left_by_executions_archived_before_the_prune"
+        "tests/swarm/test_execution_archive.py::test_archive_prunes_intents_left_by_executions_archived_before_the_prune",
+        "tests/swarm/test_execution_archive.py::test_archive_keeps_an_intents_entry_that_is_not_an_execution_admission"
       ]
     },
     {

@@ -133,7 +133,11 @@ class ExecutionRegistry:
             heads: dict[str, dict[str, Any]] = latest(rows.values(), "seat")
             old = [key for key, row in rows.items() if _stale(row, heads[row["seat"]], listed)]
             current = doc["executions"].keys() - set(old)
-            stale = [key for key in doc["intents"] if key not in current]
+            stale = [
+                key
+                for key, intent in doc["intents"].items()
+                if intent.get("execution_id") == key and key not in current
+            ]
             if not old and not stale and "archive_ref" in doc:
                 return 0
             fencing.hydrate_archive(self.store, doc)

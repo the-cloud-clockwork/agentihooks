@@ -153,6 +153,25 @@ def test_archive_prunes_intents_left_by_executions_archived_before_the_prune(sto
     assert set(section(store, "intents")) == {third.execution_id}
 
 
+@pytest.mark.feature("swarm-archive-prunes-stale-intents")
+def test_archive_keeps_an_intents_entry_that_is_not_an_execution_admission(store: RedisStore) -> None:
+    from scripts.swarm import lease
+
+    held = lease.acquire(store, "fixture", "home")
+    assert held is not None
+    with lease.fencing(held.epoch):
+        live = started(store, "eng-1@fixture")
+
+    fencing.write(store, "fixture", lambda doc: doc["intents"].update(i={"epoch": held.epoch}))
+    assert "i" in section(store, "intents")
+
+    assert store.execution_registry.archive("fixture") == 0
+
+    intents = section(store, "intents")
+    assert intents["i"] == {"epoch": held.epoch}
+    assert live.execution_id in intents
+
+
 @pytest.mark.parametrize("external", [False, True])
 def test_fenced_archive_and_rows_written_in_the_old_layout_reach_old_readers(store: RedisStore, external: bool) -> None:
     from scripts.swarm import lease
