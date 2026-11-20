@@ -34,7 +34,7 @@ def _import_names(source: str, pattern: re.Pattern[str] = _IMPORT) -> set[str]:
         else:
             module = match["module"]
             names.add(module)
-            members = match["members"].strip("() \t").replace("\n", " ").split(",")
+            members = match["members"].strip("() \t").split(",")
             names |= {f"{module}.{alias.split()[0]}" for alias in members if alias.strip()}
     return names
 
