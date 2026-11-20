@@ -657,7 +657,7 @@ def _worker_seats(config: SwarmConfig, observations: list[Account], agents: list
 
 
 def calculate(
-    config,
+    config: SwarmConfig,
     observations: list[Account],
     agents: list,
     demand: dict | None = None,
