@@ -11064,6 +11064,19 @@
         "tests/test_ci_semgrep.py::test_new_test_waits_fail_without_scanning_when_the_base_is_unknown",
         "tests/test_ci_semgrep.py::test_the_wait_bound_rule_reaches_the_tests_and_its_fixture_under_ten_seconds"
       ]
+    },
+    {
+      "id": "execution-put-unchanged-skips-lock",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2797",
+      "behaviour": "ExecutionRegistry.put reads the one execution record a managed agent's seat already occupies through the records port and, when the write would apply every transform _update applies (finished state retention, the read before ack launch binding carry, the binding and Pod UID checks) and still leave the record unchanged, returns without taking the swarm's write lock or running the fenced whole document read; a put that changes the record, cannot be read cheaply, is not managed, or would be refused still takes the locked fenced path unchanged.",
+      "seam": "scripts.swarm.execution.ExecutionRegistry.put over fencing.records and fencing.write",
+      "tests": [
+        "tests/swarm/test_execution_unchanged_put.py::test_an_unchanged_put_skips_the_write_lock_and_the_fenced_document_read",
+        "tests/swarm/test_execution_unchanged_put.py::test_a_changed_put_still_takes_the_locked_path",
+        "tests/swarm/test_execution_unchanged_put.py::test_an_unmanaged_legacy_put_still_takes_the_locked_path",
+        "tests/swarm/test_execution_unchanged_put.py::test_a_binding_or_uid_conflict_still_takes_the_locked_path"
+      ]
     }
   ],
   "unmapped_rules": [
