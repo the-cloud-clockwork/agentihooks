@@ -112,6 +112,7 @@ class Lab:
         if self.incomplete or self.pending_first and self.seen[head] == 1:
             rows[-2]["status"] = "in_progress"
         rows.append(self.check("lab-shadow/required/extra", "success", run))
+        rows.append(self.check("lab-shadow/reusable/required", "success", run))
         if self.unrelated:
             for row in rows:
                 row["external_id"] = "other-grade"
