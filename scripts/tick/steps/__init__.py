@@ -309,6 +309,7 @@ MODULES = (
     "scripts.tick.steps.territory",
     "scripts.tick.steps.workflows",
     "scripts.tick.steps.knowledge",
+    "scripts.tick.steps.view_wait",
 )
 
 for _module in MODULES:

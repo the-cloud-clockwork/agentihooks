@@ -3001,6 +3001,19 @@
       ]
     },
     {
+      "id": "tick-view-wait-off-scheduler",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2596",
+      "behaviour": "The wrapper relay site hook answers without waiting for the pass view build, so outbox migration and page relay start as soon as the intent check ends instead of after the build; the kept view wait step at the relay site waits for the build on its own step thread within the pass view bound and stores the view the tick view step takes, and stores none when the intent check stored no verdict.",
+      "seam": "the view wait step of scripts.tick.steps.view_wait and the wrapper relay hook scripts.swarm.cli._Wrapper._judged, observed through scripts.swarm.cli.run_tick",
+      "tests": [
+        "tests/tick/steps/test_view_wait.py::test_outbox_migration_starts_before_a_slow_view_build_ends",
+        "tests/tick/steps/test_view_wait.py::test_view_wait",
+        "tests/tick/steps/test_view_wait.py::test_the_view_wait_step_stores_the_view_pass_view_waited_for",
+        "tests/tick/steps/test_view_wait.py::test_the_view_wait_step_stores_no_view_when_the_intent_check_stored_none"
+      ]
+    },
+    {
       "id": "swarm-tick-cost-report",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-a1",
