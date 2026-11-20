@@ -3295,10 +3295,11 @@ kinds of execution have no host id: one the hub admitted, which has no host targ
 itself, whose target names only its process.
 
 When the controller publishes swarm status, each task with a work folder takes its lines from the hive that runs,
-or last ran, its latest execution. A task whose latest execution ran on the controller's own machine is read from
-the local folder. These lines are what the ledger page shows in the task's Contract and proof fold. The controller
-finds that hive from the host target alone. An execution with no host id in its target, such as a hub admission,
-counts as run on the controller's machine, so its lines are read from the controller's own folder.
+or last ran, its latest execution. The controller finds that hive from the host target. An execution with no host
+target, such as a hub admission, is read from the hive on its agent record (pull request
+[#12322](https://github.com/the-cloud-clockwork/agentihooks/pull/12322)). A task whose latest execution ran on the
+controller's own machine, or whose target names no host id, such as a session a hive started itself, is read from the
+local folder. These lines are what the ledger page shows in the task's Contract and proof fold.
 
 ### Work folder files on any host
 
@@ -3311,15 +3312,16 @@ leaves the task's own key as it was. The table below lists what travels.
 
 Two paths carry these files to a successor:
 
-- On each status publish the controller writes each task's copy, from the first key of the hive its latest execution's
-  host target names, into its own folder. A task whose latest execution has no host id, such as a hub admission, is
-  not mirrored. A launch the controller orders carries the controller's folder to the next hive, added files included,
-  and a file the hive already holds is replaced unless it already contains what was sent.
+- On each status publish the controller writes each task's copy into its own folder, from the first key of the hive
+  its lines come from: the hive the host target names, or for a hub admission the hive on its agent record. A task
+  whose latest execution ran on the controller's machine, or whose target names no host id, is not mirrored. A launch
+  the controller orders carries the controller's folder to the next hive, added files included, and a file the hive
+  already holds is replaced unless it already contains what was sent.
 - A successor the hub admits never reads the controller's folder. The hub seeds it from the task's own key on the hive
   that last launched the task, as [Work folder seeds on hub admission](#work-folder-seeds-on-hub-admission) describes.
 
-The first path carries the files of executions with a host target, and the second those of any predecessor whose hive
-synced its folder, hub admissions included.
+The first path carries the files of executions with a host target and of hub admissions while their hive still hosts
+the task. The second carries those of any predecessor whose hive synced its folder in the last day.
 
 What travels from a task folder:
 
