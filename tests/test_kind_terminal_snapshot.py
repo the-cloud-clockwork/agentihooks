@@ -11,29 +11,35 @@ def _snapshot_bases(source: str) -> list[str]:
     arguments: dict[str, str] = {}
     stages: dict[str, str] = {}
     failures: list[str] = []
+    heredocs: list[str] = []
     base = ""
     stage = ""
     count = 0
     for line in re.sub(r"\\\r?\n", " ", source).splitlines():
-        words = line.strip().split(maxsplit=1)
-        if len(words) != 2 or words[0].startswith("#"):
-            continue
-        instruction, value = words[0].upper(), words[1]
-        if instruction == "ARG" and not count:
-            name, _, default = value.partition("=")
-            arguments[name] = default.strip("\"'")
-        if instruction == "FROM":
-            fields = value.split()
-            reference = next(field for field in fields if not field.startswith("--"))
-            for _ in range(len(arguments) + 1):
+        if heredocs:
+            if line.strip() == heredocs[0]:
+                heredocs.pop(0)
+        else:
+            words = line.strip().split(maxsplit=1)
+            if len(words) != 2 or words[0].startswith("#"):
+                continue
+            instruction, value = words[0].upper(), words[1]
+            if instruction == "ARG" and not count:
+                name, _, default = value.partition("=")
+                arguments[name] = Template(default.strip("\"'")).safe_substitute(arguments)
+            if instruction == "FROM":
+                fields = value.split()
+                reference = next(field for field in fields if not field.startswith("--"))
                 reference = Template(reference).safe_substitute(arguments)
-            base = stages.get(reference.lower(), reference)
-            stage = fields[-1] if len(fields) >= 3 and fields[-2].upper() == "AS" else str(count)
-            stages[str(count)] = base
-            stages[stage.lower()] = base
-            count += 1
-        if count and instruction != "FROM" and re.search(r"snapshot\.debian\.org|debian_snapshot", value, re.I):
-            pinned = re.search(r"@sha256:[a-f0-9]{64}$|:\d+\.\d+\.\d+(?:[-+._a-z0-9]*)$", base, re.I)
+                base = stages.get(reference.lower(), reference)
+                stage = fields[-1] if len(fields) >= 3 and fields[-2].upper() == "AS" else str(count)
+                stages[str(count)] = base
+                stages[stage.lower()] = base
+                count += 1
+            if instruction in {"RUN", "COPY", "ADD"}:
+                heredocs = [match[1] for match in re.findall(r"<<-?\s*(['\"]?)(\w+)\1", value)]
+        if count and re.search(r"snapshot\.debian\.org|debian_snapshot", line, re.I):
+            pinned = re.search(r"@sha256:[a-f0-9]{64}$|:\d+\.\d+\.\d+[-+._a-z0-9]*$", base, re.I)
             if not pinned and stage not in failures:
                 failures.append(stage)
     return failures
@@ -74,4 +80,5 @@ def test_terminal_packages_and_prefetch_use_the_locked_python(source: str) -> No
     image = f"mirror.gcr.io/library/python:{lock['python']}-slim-bookworm"
     text = (root / "deploy/helm/agentihooks-swarm/ci" / source).read_text()
     assert image in text
+    assert text.count(image) == 1
     assert "python:3.12-slim-bookworm" not in text
