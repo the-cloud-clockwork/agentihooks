@@ -5738,6 +5738,19 @@
       ]
     },
     {
+      "id": "credential-guard-passes-set-tests-in-scripts",
+      "origin": "regression",
+      "ordered_at": "2026-11-20",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2766",
+      "behaviour": "The credential guard passes the set or unset test its own refusal recommends when that test is a whole part, split at &&, ||, ; or a new line, of a single quoted shell -c script, as the shell command itself, in any pipeline stage or as the command a kubectl or docker wrapper runs: test -n, test -z, [ -n ] or [[ -n ]] on a double quoted $VAR, ${VAR}, ${VAR-} or ${VAR:-} of a secret looking name, with echo or printf printing only fixed words. A test printed by echo or printf, a test with more operands, a script that echoes or printfs the value or gets it as an argument, a script that runs with xtrace on through an x shell flag, set -x or xtrace, and a set test of another form, unquoted, with another expansion or in a double quoted script, are still refused as printing the variable to stdout.",
+      "seam": "hooks.context.credential_guard.echo_secret_verdict and hooks.context.credential_guard.untested_pieces, read by hooks.context.credential_guard.decide",
+      "tests": [
+        "tests/test_credential_guard.py::test_a_set_test_inside_a_shell_script_passes",
+        "tests/test_credential_guard.py::test_a_shell_script_that_prints_the_value_is_refused",
+        "tests/test_credential_guard.py::test_a_set_test_of_another_form_is_refused"
+      ]
+    },
+    {
       "id": "swarm-outage-recovery-hub-admitted",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-outage-recovery",
