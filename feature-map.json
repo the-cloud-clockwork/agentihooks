@@ -10501,6 +10501,7 @@
         "tests/ci_lab/test_expand_mutation.py::test_a_test_requirements_lock_change_rekeys_every_stats_unit",
         "tests/ci_lab/test_expand_tests.py::test_lockfile_change_rekeys_every_test",
         "tests/ci_lab/test_expand_tests.py::test_lockfile_removal_rekeys_every_test",
+        "tests/test_ci_mutation_planned_selection.py::test_record_drift_treats_a_test_requirements_lock_change_as_global",
         "tests/test_ci_self_plant_detector.py::test_a_test_requirements_lock_change_still_plants"
       ]
     },
