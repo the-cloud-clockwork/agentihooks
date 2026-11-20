@@ -1549,6 +1549,7 @@ def test_a_module_a_clean_run_walk_visited_is_not_walked_again_for_a_later_test(
         return loads_heavy(root, name, seen)
 
     monkeypatch.setattr(collection_imports, "loads_heavy", counted)
+    monkeypatch.setattr(plan, "loads_heavy", counted)
     plan.validate_tests(tmp_path, ["tests/test_a.py::test_one", "tests/test_b.py::test_two"])
     assert walks.count("scripts.leaf") == 1
 
