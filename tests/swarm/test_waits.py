@@ -2103,6 +2103,22 @@ def test_required_green_logs_the_github_error_it_holds_on(
     )
 
 
+@pytest.mark.feature("branch-rule-empty-read")
+def test_required_green_names_an_empty_pull_request_read(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def view(url: str, run: Any) -> None:
+        return None
+
+    monkeypatch.setattr(merge_queue, "required_view", view)
+    assert REAL_REQUIRED_GREEN(URL, "first") is False
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == (
+        f"required checks of {URL} unread: empty pull request read; GitHub backoff or rate limiting may be active\n"
+    )
+
+
 def test_the_required_reading_of_an_older_commit_carries_no_head():
     from scripts.swarm.ledger_events import GATE, _required_pull_request
 
