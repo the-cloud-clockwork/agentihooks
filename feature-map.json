@@ -11235,6 +11235,42 @@
       "tests": [
         "tests/test_ci_dependency_audit.py::test_audit_excludes_the_platformdirs_release_that_refuses_the_runner_home"
       ]
+    },
+    {
+      "id": "swarm-tick-lock-renewal-journal",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2785",
+      "behaviour": "Each tick lock renewal the pass step hook makes, and each hook call that found another call holding the hook, journals one swarm_tick_lock_renewal line with the seconds it waited for the hook lock, the seconds it held it, the seconds the renewal's Redis calls took (null without a renewal), whether it was blocked and renewed, and the pass id; a free call inside the renewal interval, or after the pass revoked the hook, journals nothing.",
+      "seam": "The pass step hook scripts.swarm.tick_activity.Renewal and its journal function",
+      "tests": [
+        "tests/swarm/test_tick_lock_renewal_journal.py::test_a_renewal_journals_its_wait_hold_and_redis_seconds_under_its_pass",
+        "tests/swarm/test_tick_lock_renewal_journal.py::test_a_call_inside_the_interval_that_found_the_hook_free_journals_nothing",
+        "tests/swarm/test_tick_lock_renewal_journal.py::test_a_call_that_found_the_hook_held_journals_its_wait_even_without_a_renewal",
+        "tests/swarm/test_tick_lock_renewal_journal.py::test_a_revoked_hook_that_found_itself_free_journals_nothing"
+      ]
+    },
+    {
+      "id": "swarm-tick-ledger-call-journal",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2785",
+      "behaviour": "Inside a tick pass every request the in process ledger client makes journals one swarm_tick_ledger_call line naming the swarm, pass id, ledger, method, path without its query and outcome (ok, the refusal's HTTP status, or error) with its wall seconds, and a refused or failed request still raises; outside a pass a request journals nothing.",
+      "seam": "scripts.tick.adapters.database_ledger.client and its journaled transport",
+      "tests": [
+        "tests/tick/test_ledger_call_journal.py::test_a_read_inside_a_pass_journals_its_ledger_route_outcome_and_wall_seconds",
+        "tests/tick/test_ledger_call_journal.py::test_a_refused_write_inside_a_pass_journals_its_status_and_still_raises",
+        "tests/tick/test_ledger_call_journal.py::test_a_failure_other_than_a_refusal_inside_a_pass_journals_an_error",
+        "tests/tick/test_ledger_call_journal.py::test_a_request_outside_a_pass_journals_nothing"
+      ]
+    },
+    {
+      "id": "swarm-tick-joined-budget",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2785",
+      "behaviour": "The engine reads a step's budget once in the pass's own context and uses that value for the step deadline, the join and the step's timed record, so the step finished line logs the live budget the engine joined on, never the floor a worker thread's empty context reads.",
+      "seam": "scripts.tick.engine._run_once and the worker it starts",
+      "tests": [
+        "tests/tick/test_engine_joined_budget.py::test_the_step_finished_line_logs_the_live_budget_the_engine_joined_on"
+      ]
     }
   ],
   "unmapped_rules": [
