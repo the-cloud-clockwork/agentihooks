@@ -336,25 +336,28 @@ def test_a_new_feature_entry_leaves_every_line_of_the_real_map_unchanged(tree: P
     assert len(entries) == len(json.loads(before)["features"]) + 1
 
 
-@pytest.mark.feature("feature-map-stable-write")
-@pytest.mark.parametrize(
-    "document",
-    [
-        {"features": []},
-        {"features": [{"id": "tick-step-gadgets", "rules": ["gadget-rule"], "tests": ["previous"]}], "retired": []},
-        {"retired": [{"id": "old"}], "unmapped_rules": [], "features": [{"id": "tick-step-gadgets"}]},
-    ],
-)
 def test_the_scaffold_keeps_a_canonical_map_canonical(tree: Path, document: dict[str, Any]) -> None:
     map_path = tree / "feature-map.json"
     map_path.write_text(json.dumps(document, indent=2) + "\n")
     assert scaffold(tree, STEP) == 0
     text = map_path.read_text()
     assert text == json.dumps(json.loads(text), indent=2) + "\n"
-    assert {entry["id"] for entry in json.loads(text)["features"]} == {
+    assert [entry["id"] for entry in json.loads(text)["features"]] == [
         "tick-step-widgets",
         *(entry["id"] for entry in document["features"]),
-    }
+    ]
+
+
+@pytest.mark.feature("feature-map-stable-write")
+def test_a_compact_map_keeps_every_byte_outside_the_new_entry(tree: Path) -> None:
+    map_path = tree / "feature-map.json"
+    before = json.dumps({"features": [{"id": "tick-step-gadgets", "rules": ["gadget-rule"]}], "retired": []})
+    map_path.write_text(before)
+    assert scaffold(tree, STEP) == 0
+    after = map_path.read_text()
+    first = next(index for index, (was, now) in enumerate(zip(before, after)) if was != now)
+    assert after[first + len(after) - len(before) :] == before[first:]
+    assert [entry["id"] for entry in json.loads(after)["features"]] == ["tick-step-widgets", "tick-step-gadgets"]
 
 
 def test_the_command_names_itself_and_what_a_step_needs(tree: Path, capsys: pytest.CaptureFixture[str]) -> None:

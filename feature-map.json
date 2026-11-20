@@ -7106,11 +7106,12 @@
       "id": "feature-map-stable-write",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-feature-map-stable-write",
-      "behaviour": "The tick step scaffold adds a new feature map entry as a pure insertion and rewrites only the lines of an entry it extends, so every other line of the map stays byte for byte as it was, including inline arrays and raw non ASCII text that a whole file JSON dump reformats; a map in canonical layout stays canonical.",
+      "behaviour": "The tick step scaffold inserts a new feature map entry first in the features array and rewrites only the lines of an entry it extends, so every byte outside that entry stays as it was, including inline arrays, raw non ASCII text and a compact layout that a whole file JSON dump reformats; a map in canonical layout stays canonical.",
       "seam": "scripts.tick.new_step.scaffold writing the feature map through scripts.feature_map.with_entry",
       "tests": [
         "tests/tick/test_new_step.py::test_a_new_feature_entry_leaves_every_line_of_the_real_map_unchanged",
-        "tests/tick/test_new_step.py::test_the_scaffold_keeps_a_canonical_map_canonical"
+        "tests/tick/test_new_step.py::test_the_scaffold_keeps_a_canonical_map_canonical",
+        "tests/tick/test_new_step.py::test_a_compact_map_keeps_every_byte_outside_the_new_entry"
       ]
     },
     {
