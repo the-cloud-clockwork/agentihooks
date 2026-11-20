@@ -15,7 +15,7 @@ argument-hint: "<plan-file> --repo DIR [--template NAME]"
 
 The plan is accepted before this skill runs. This session names the swarm,
 creates it with its ledger and starts it, then hands the operator to the swarm's **master**: the
-agent the swarm keeps online to answer the operator, keep progress current through `agentihooks api`
+agent the swarm keeps online to answer the operator, keep the ledger current
 and steer the swarm. This session never claims a task and does not join the
 ledger as orchestrator; the master does.
 
@@ -47,7 +47,7 @@ It prints `valid: <name>`, or `invalid:` with the reason, the rule and two
 free suggestions from the plan title. Never pick a name without the operator.
 Done when the operator's chosen name checks valid.
 
-## 2. Define the swarm content
+## 2. Write the ledger content
 
 Write `content.json` under `~/scratchpad/<repo>/<task>/`
 (`agentihooks scratch new`, which prints the folder it built):
@@ -145,13 +145,13 @@ immediately before each task heading; the section ends at the next anchor or hea
 level. Publish it for the manual phases before adding their tasks:
 
 ```bash
-agentihooks api --slug <slug> --as <name> publish-plan <plan-file> --phase <phase-ids>
+agentihooks ledger --slug <slug> --as <name> publish-plan <plan-file> --phase <phase-ids>
 ```
 
 Then add each task with its anchor; the ledger computes its plan lines:
 
 ```bash
-agentihooks api --slug <slug> task add <id> "<title>" --lane eng|ci --phase <phase> --plan-slice <id> --description "<seam and done condition>" \
+agentihooks ledger --slug <slug> task add <id> "<title>" --lane eng|ci --phase <phase> --plan-slice <id> --description "<seam and done condition>" \
   [--depends-on <id>,<id>] [--territory <path or area>,<path or area>] \
   [--kind ci] [--kind ops|troubleshoot|tune|research --must "<true when done>" --check "<how>" --judge "<who>"]
 ```

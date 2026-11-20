@@ -15,8 +15,7 @@ TOOLS = {
 }
 
 
-def run(argv: list[str], prog: str = "ledger") -> object:
-    """Dispatch a ``ledger`` or ``api`` subcommand to its module, under the invoked program name."""
+def run(argv):
     from scripts.swarm_ledger import composition
 
     composition.wire()
@@ -26,7 +25,7 @@ def run(argv: list[str], prog: str = "ledger") -> object:
     module, prefix = TOOLS[argv[0]] if known else ("ledger", [])
     saved = sys.argv
     sys.argv = [
-        f"agentihooks {prog} {argv[0]}" if known else f"agentihooks {prog}",
+        f"agentihooks ledger {argv[0]}" if known else "agentihooks ledger",
         *prefix,
         *(argv[1:] if known else argv),
     ]

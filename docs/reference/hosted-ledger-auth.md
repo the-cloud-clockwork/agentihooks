@@ -202,7 +202,7 @@ curl -sS https://swarm.example.com/healthz \
 The health JSON names the ledger folder the server serves; on the hosted service that folder is `/data`. A read through the CLI as an agent proves the token:
 
 ```bash
-agentihooks api --slug my-ledger --as engineer@abc123-0001 alert list
+agentihooks ledger --slug my-ledger --as engineer@abc123-0001 alert list
 ```
 
 ### Limitations
@@ -226,7 +226,7 @@ agentihooks api --slug my-ledger --as engineer@abc123-0001 alert list
 
 ## Relayed operator words
 
-A master posts a decision the operator gave it in its own pane with `agentihooks api relay`. The ledger stores
+A master posts a decision the operator gave it in its own pane with `agentihooks ledger relay`. The ledger stores
 it as the operator's entry only when the quote is the operator's own words, recorded by the hooks. A hosted ledger
 server holds no record of what the operator typed on the workstation, so it reads those words from the shared swarm
 Redis, where the workstation hooks mirror them.
@@ -267,7 +267,7 @@ recorded is refused on both. The stored entry carries `by: operator`, `relayed_b
 `relayed_from: master pane` and `quote`, the matched span as the operator wrote it. A question takes the relay as an
 answer; any other item takes it as a comment.
 
-The `agentihooks api relay` command runs the same check on the master's machine before it sends, and stops with
+The `agentihooks ledger relay` command runs the same check on the master's machine before it sends, and stops with
 `relay refused: the quote is not in an operator prompt or answer any master or planner of this swarm recorded`
 when it fails there.
 

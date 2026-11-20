@@ -50,7 +50,7 @@ The mounted entry carries no settings of its own:
 The command is the detected workspace interpreter, or the interpreter running
 the render when none is found. To give an engineer, CI or planner seat the
 browser, run its task with the frontend profile
-(`agentihooks api --slug <slug> task set <id> profile=frontend`).
+(`agentihooks ledger --slug <slug> task set <id> profile=frontend`).
 
 ## Start on first call
 

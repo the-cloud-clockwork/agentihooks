@@ -101,7 +101,7 @@ def test_assist_waits_for_an_operator_approval_line_before_merging():
     assert (
         "Queue with agentihooks swarm sw merge queue <pr url> only after an OPERATOR line on the ledger approves it"
     ) in text
-    assert 'agentihooks api --slug sw --as sw-eng-1 comment tasks/t1 "<plain words: what the pull request' in text
+    assert 'agentihooks ledger --slug sw --as sw-eng-1 comment tasks/t1 "<plain words: what the pull request' in text
     assert "agentihooks swarm sw done --pr <pr url>" in text
     assert "Merge on green checks" not in text
 

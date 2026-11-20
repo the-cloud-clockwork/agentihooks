@@ -41,4 +41,4 @@ def test_the_subcommand_list_describes_codex_and_quota(monkeypatch, capsys):
 def test_the_subcommand_list_names_no_ledger_decline(monkeypatch, capsys):
     monkeypatch.setenv("COLUMNS", "300")
     lines = [line.split(None, 1) for line in _help(monkeypatch, capsys).splitlines()]
-    assert ["ledger", "Swarm ledger page: read only; agentihooks api is the write agent CLI"] in lines
+    assert ["ledger", "Swarm ledger: agent CLI, or new|serve|watch|chat <args>"] in lines
