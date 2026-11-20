@@ -2,7 +2,9 @@ import json
 import re
 import secrets
 import sqlite3
+import sys
 import threading
+import time
 import weakref
 from collections.abc import Callable
 from contextlib import contextmanager, nullcontext, suppress
@@ -11,7 +13,7 @@ from typing import Any
 
 from scripts.swarm_ledger import request_metrics
 
-from . import artifact_files, heap, hierarchy, live_rows, media_files, outbox, refresh, writer_copy
+from . import artifact_files, heap, hierarchy, host_entries, live_rows, media_files, outbox, refresh, writer_copy
 from .entry import Entry
 from .events import append_events, read_events, trim_events, write_events
 from .fragments import document
@@ -48,6 +50,10 @@ GENERATION_SHIFT = 20
 CHANGES_KEPT = 256
 VIEW_BUILD = threading.Lock()
 BEGIN_IMMEDIATE = "BEGIN IMMEDIATE"
+WAL = "PRAGMA journal_mode=WAL"
+LOCKED = "database is locked"
+BUSY_TIMEOUT_S = 30
+WAL_RETRY_S = 0.05
 STORED = "SELECT 1 FROM ledgers WHERE slug=?"
 GENERATION = "SELECT generation FROM ledgers WHERE slug=?"
 TOKEN = "SELECT token FROM ledgers WHERE slug=?"
@@ -401,10 +407,40 @@ def close_all(held: dict) -> None:
         closing()
 
 
+class WalSwitch:
+    """Turns one connection's file to WAL. Every store open runs turn; only a refused switch reaches wait, which runs
+    inside turn's except clause, raises any refusal other than database is locked at once and otherwise retries
+    within the busy timeout while another connection holds a new file's write lock, because SQLite refuses that lock
+    upgrade at once instead of calling the busy handler."""
+
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self.connection = connection
+
+    def turn(self) -> None:
+        try:
+            self.connection.execute(WAL)
+        except sqlite3.OperationalError:
+            self.wait()
+
+    def wait(self) -> None:
+        if LOCKED not in str(sys.exception()):
+            raise
+        deadline = time.monotonic() + BUSY_TIMEOUT_S
+        while True:
+            try:
+                self.connection.execute(WAL)
+                return
+            except sqlite3.OperationalError as error:
+                if LOCKED not in str(error) or time.monotonic() >= deadline:
+                    raise
+            time.sleep(WAL_RETRY_S)
+
+
 class SQLiteLedgerRepository:
     """The durable ledger record: one row per JSON value, written only where a mutation changed it."""
 
     adopts = True
+    copies: host_entries.Copies | None = None
 
     def __init__(self, path: Path | None = None, domain=None):
         self._path = None if path is None else Path(path)
@@ -479,7 +515,7 @@ class SQLiteLedgerRepository:
         with self._guard:
             if path in self._ready:
                 return
-            connection.execute("PRAGMA journal_mode=WAL")
+            WalSwitch(connection).turn()
             connection.executescript(SCHEMA)
             connection.executescript(hierarchy.SCHEMA)
             connection.executescript(ROWS_SCHEMA)
@@ -490,7 +526,7 @@ class SQLiteLedgerRepository:
     def _key(self, slug):
         return str(self.path), slug
 
-    def _entry(self, connection, slug: str) -> Entry:
+    def _entry(self, connection: sqlite3.Connection, slug: str) -> Entry:
         """The stored ledger; a reader whose snapshot predates a cached write gets that newer committed copy."""
         row = connection.execute(GENERATION, (slug,)).fetchone()
         if row is None:
@@ -504,6 +540,8 @@ class SQLiteLedgerRepository:
             cached = self._cache.get(self._key(slug))
             if cached is not None and cached.generation >= row[0]:
                 return cached
+            if cached is None and self.copies is not None:
+                cached = self.copies.adopt(slug, row[0])
             state, writer = self._refreshed(connection, slug, cached, row[0])
             whole = state is None
             if whole:
@@ -513,6 +551,8 @@ class SQLiteLedgerRepository:
             fragments = document(state, None if whole else cached.fragments)
             entry = Entry(row[0], None, fragments.value, fragments, writer)
             self._remember(slug, entry)
+            if self.copies is not None:
+                self.copies.keep(slug, entry, whole)
         if whole:
             heap.release()
         return entry
@@ -820,13 +860,15 @@ class SQLiteLedgerRepository:
     def list_summaries(self) -> list:
         return [{key: summary[key] for key in SUMMARY_KEYS} for summary in self.summaries()]
 
-    def purge(self, slug: str, connection) -> None:
+    def purge(self, slug: str, connection: sqlite3.Connection) -> None:
         if connection.execute(STORED, (slug,)).fetchone():
             before = self._entry(connection, slug).state
             outbox.write(connection, slug, before["_meta"]["rev"], before, {})
         for table in (*PER_LEDGER, artifact_files.TABLE, media_files.TABLE):
             connection.execute(f"DELETE FROM {table} WHERE slug=?", (slug,))
         self._cache.pop(self._key(slug), None)
+        if self.copies is not None:
+            self.copies.drop(slug)
 
     def registry(self, name: str, connection) -> dict:
         return {key: json.loads(value) for key, value in connection.execute(REGISTRY, (name,))}

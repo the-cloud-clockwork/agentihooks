@@ -1,0 +1,66 @@
+rules:
+  - id: test-wait-bound-under-ten-seconds
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A test waits on another thread, process or task with a bound under ten seconds. On 16 November the run wait
+      timer test gave the tick pass five seconds to reach its snapshot step; on a loaded unit shard it took 7.17
+      seconds and the test failed all three attempts. Give a wait that must succeed ten seconds or more. A wait that
+      must run out keeps its short bound when the test asserts the timeout: assert not, is None or is False on that
+      event, condition or lock wait, pytest.raises around any wait, or assert is_alive after a join.
+    paths:
+      include:
+        - /tests/
+        - test-wait-bound-under-ten-seconds.py
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern-either:
+                  - pattern: $WAITER.wait($BOUND)
+                  - pattern: $WAITER.wait(..., timeout=$BOUND)
+                  - pattern: $WAITER.wait_for($CONDITION, $BOUND)
+                  - pattern: $WAITER.wait_for(..., timeout=$BOUND)
+                  - pattern: $WAITER.acquire(True, $BOUND)
+                  - pattern: $WAITER.acquire(..., timeout=$BOUND)
+              - pattern-not-inside: asyncio.wait_for(...)
+              - pattern-not-inside: assert <... not $WAITER.$METHOD(..., $BOUND) ...>
+              - pattern-not-inside: assert <... not $WAITER.$METHOD(..., timeout=$BOUND) ...>
+              - pattern-not-inside: assert <... not $WAITER.$METHOD(..., $BOUND) ...>, $MESSAGE
+              - pattern-not-inside: assert <... not $WAITER.$METHOD(..., timeout=$BOUND) ...>, $MESSAGE
+              - pattern-not-inside: assert $WAITER.$METHOD(...) is None
+              - pattern-not-inside: assert $WAITER.$METHOD(...) is False
+              - pattern-not-inside: threading.Event().wait(...)
+              - pattern-not-inside: Event().wait(...)
+          - patterns:
+              - pattern-either:
+                  - pattern: $WAITER.join($BOUND)
+                  - pattern: $WAITER.join(timeout=$BOUND)
+              - pattern-not-inside: |
+                  $WAITER.join(...)
+                  ...
+                  assert $WAITER.is_alive()
+              - pattern-not-inside: |
+                  $WAITER.join(...)
+                  ...
+                  assert $WAITER.is_alive() and $REST
+              - pattern-not-inside: |
+                  $WAITER.join(...)
+                  ...
+                  $ALIVE = $WAITER.is_alive()
+          - pattern: wait($TASKS, timeout=$BOUND)
+          - pattern: asyncio.wait_for($AWAITABLE, $BOUND)
+          - pattern: asyncio.wait_for($AWAITABLE, timeout=$BOUND)
+          - pattern: $WAITER.result($BOUND)
+          - pattern: $WAITER.result(timeout=$BOUND)
+          - pattern: $WAITER.get(timeout=$BOUND)
+          - pattern: $WAITER.get(True, $BOUND)
+          - pattern: $WAITER.get(True, timeout=$BOUND)
+          - pattern: $WAITER.get(block=True, timeout=$BOUND)
+          - pattern: $WAITER.communicate(..., timeout=$BOUND)
+      - metavariable-comparison:
+          metavariable: $BOUND
+          comparison: $BOUND > 0 and $BOUND < 10
+      - pattern-not-inside: |
+          with pytest.raises(...):
+              ...
+      - focus-metavariable: $BOUND

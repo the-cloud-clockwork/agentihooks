@@ -416,3 +416,28 @@ def test_master_move_is_an_accepted_operator_control():
     from scripts.swarm_ledger.api import admin, schemas
 
     schemas.validate(admin.CONTROL, {"action": "master_move", "hive": "desk"})
+
+
+@pytest.mark.feature("autoscale-and-ledger-hives-name-each-refused-admission-count")
+def test_the_hives_listing_lists_every_hive_and_names_the_admission_count_the_redis_login_refuses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.hive import headroom
+    from scripts.swarm_ledger.api import hives
+    from tests.swarm.test_refused_admission_counts import REFUSED, _beat, _member_store
+
+    store = _member_store("near")
+    _beat(store, NOW_MS, "near", "far")
+    reading = {"measured_at": NOW_MS, "cpus": 8, "load5": 0.0, "available_mb": 64000, "total_mb": 64000}
+    for hive in ("near", "far"):
+        store.redis.set(headroom.key(hive), json.dumps(reading))
+    monkeypatch.setattr(hives, "time", SimpleNamespace(time=lambda: NOW_MS / 1000))
+    listed: Any = dispatch(request("GET"), store)
+    rows = {row["id"]: row for row in listed["data"]}
+    assert sorted(rows) == ["far", "near"]
+    assert (rows["near"]["admission_unreadable"], rows["far"]["admission_unreadable"]) == ("", REFUSED)
+    assert (rows["near"]["room"], rows["far"]["room"]) == (12, 12)
+    assert all(row["live"] for row in rows.values())
+    found: Any = dispatch(request("GET", "/api/v1/hives/far"), store)
+    one = found["data"]
+    assert (one["admission_unreadable"], one["room"]) == (REFUSED, 12)

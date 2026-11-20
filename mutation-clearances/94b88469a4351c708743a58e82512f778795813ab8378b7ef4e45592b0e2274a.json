@@ -1,0 +1,6 @@
+{
+  "scripts/collection_imports.py:scripts.collection_imports.x__module_level_imports:90fb9efe0f02920f74ed08414b09293e2d4566a1a67ff38a144a401fe680223e": {
+    "reader": "standards_reader",
+    "reason": "Extends the prefix range by one step. The extra slice runs past the last part and joins the full dotted name, which the previous step already added to the frozenset, so the returned set is unchanged."
+  }
+}

@@ -626,6 +626,23 @@ def test_a_change_with_fewer_mutants_than_the_limit_plans_no_more_shards_than_mu
     assert measured_plan([])["shards"] == 1
 
 
+@pytest.mark.feature("mutation-replan-names-untested-functions")
+def test_the_measured_plan_lists_each_function_no_test_calls_in_process_once_in_name_order() -> None:
+    from scripts.ci_mutation.measured import measured_plan
+
+    sample = [{"tests": {"scripts.sample.x_f": ["tests/test_sample.py::t"]}, "durations": {}}]
+    other = [{"tests": {"scripts.other.x_g": ["tests/test_other.py::t"]}, "durations": {}}]
+    names = [
+        "scripts.sample.x_z__mutmut_1",
+        "scripts.sample.x_f__mutmut_1",
+        "scripts.sample.x_a__mutmut_2",
+        "scripts.sample.x_a__mutmut_1",
+    ]
+    groups = [(names, sample), (["scripts.other.x_h__mutmut_1", "scripts.other.x_g__mutmut_1"], other)]
+    assert measured_plan(groups)["untested"] == ["scripts.other.x_h", "scripts.sample.x_a", "scripts.sample.x_z"]
+    assert measured_plan([(names[1:2], sample)])["untested"] == []
+
+
 def test_each_unit_runs_the_head_and_its_own_slice_and_only_on_its_shard(tmp_path, monkeypatch):
     from scripts.ci_mutation.mutant_shards import (
         shard_names,
@@ -827,6 +844,37 @@ def test_a_split_mutant_overruns_alone_only_when_one_of_its_units_outgrows_a_sha
     whole = budget_overrun({**planned, "unit_costs": {"scripts.sample.x__mutmut_1": [2701.0, 299.0]}}, 1080)
     assert whole.startswith("Mutant scripts.sample.x__mutmut_1 alone needs 2701 worker seconds on one shard")
     assert budget_overrun(planned, 1080).startswith("Mutant scripts.sample.x__mutmut_1 alone needs 3000")
+
+
+@pytest.mark.feature("mutation-replan-names-untested-functions")
+def test_a_refusal_names_the_functions_no_test_calls_in_process_with_their_mutants_and_worker_seconds() -> None:
+    from scripts.ci_mutation.measured import budget_overrun
+
+    planned = {
+        "costs": {
+            "scripts.sample.x__mutmut_1": 3000.0,
+            "scripts.sample.y__mutmut_1": 100.0,
+            "scripts.sample.y__mutmut_2": 50.4,
+            "scripts.sample.z__mutmut_1": 25.0,
+            "scripts.sample.w__mutmut_1": 5.0,
+        },
+        "estimated_worker_seconds": 3180.4,
+        "shard_worker_seconds": [2800.0, 380.4],
+        "workers": 3,
+        "untested": ["scripts.sample.y", "scripts.sample.z"],
+    }
+    named = (
+        " Functions no test calls in process hold 3 of the change's 5 mutants and 175 of its 3180 worker seconds:"
+        " scripts.sample.y, scripts.sample.z."
+    )
+    alone = budget_overrun(planned, 1080)
+    assert alone.startswith("Mutant scripts.sample.x__mutmut_1 alone needs 3000 worker seconds on one shard")
+    assert alone.endswith("shorten or split the tests that cover it." + named)
+    split = budget_overrun({**planned, "unit_costs": {"scripts.sample.x__mutmut_1": [2000.0, 1000.0]}}, 1080)
+    assert split.startswith("The slowest mutation shard needs 2800 worker seconds")
+    assert split.endswith("so split it into at least 2 pull requests." + named)
+    assert budget_overrun({**planned, "untested": []}, 1080).endswith("shorten or split the tests that cover it.")
+    assert budget_overrun({**planned, "shard_worker_seconds": [2700.0, 480.4]}, 1080) == ""
 
 
 @pytest.mark.feature("mutation-replan-all-killed-plan")
@@ -1495,13 +1543,9 @@ def test_planning_refuses_an_unmatched_module_before_publishing_statistics(tmp_p
     ],
 )
 def test_planning_checks_selected_test_collection_and_worker_contracts(
-    tmp_path, monkeypatch, imports, grouped, refused
-):
-    from tests import test_collection_imports as contracts
-
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, imports: str, grouped: bool, refused: bool
+) -> None:
     _project(tmp_path, {})
-    monkeypatch.setattr(contracts, "_ROOT", tmp_path)
-    monkeypatch.setattr(contracts, "_module_file", contracts._module_file.__wrapped__)
     group = 'pytestmark = pytest.mark.xdist_group("mcp-sdk")\n' if grouped else ""
     (tmp_path / "tests/test_sample.py").write_text("from scripts.sample import f\n" + group + imports)
     (tmp_path / "tests/test_unrelated.py").write_text("import mcp\n")
@@ -1521,11 +1565,7 @@ def test_planning_checks_selected_test_collection_and_worker_contracts(
         assert "stats_parts=" in output.read_text()
 
 
-def test_a_grouped_sdk_walk_leaves_no_module_marked_clean_for_a_later_test(tmp_path, monkeypatch):
-    from tests import test_collection_imports as contracts
-
-    monkeypatch.setattr(contracts, "_ROOT", tmp_path)
-    monkeypatch.setattr(contracts, "_module_file", contracts._module_file.__wrapped__)
+def test_a_grouped_sdk_walk_leaves_no_module_marked_clean_for_a_later_test(tmp_path: Path) -> None:
     (tmp_path / "scripts").mkdir()
     (tmp_path / "tests").mkdir()
     (tmp_path / "scripts/lazy.py").write_text("def load():\n    import mcp\n")
@@ -1537,11 +1577,11 @@ def test_a_grouped_sdk_walk_leaves_no_module_marked_clean_for_a_later_test(tmp_p
         plan.validate_tests(tmp_path, ["tests/test_a.py::test_one", "tests/test_b.py::test_two"])
 
 
-def test_a_module_a_clean_run_walk_visited_is_not_walked_again_for_a_later_test(tmp_path, monkeypatch):
-    from tests import test_collection_imports as contracts
+def test_a_module_a_clean_run_walk_visited_is_not_walked_again_for_a_later_test(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts import collection_imports
 
-    monkeypatch.setattr(contracts, "_ROOT", tmp_path)
-    monkeypatch.setattr(contracts, "_module_file", contracts._module_file.__wrapped__)
     (tmp_path / "scripts").mkdir()
     (tmp_path / "tests").mkdir()
     (tmp_path / "scripts/leaf.py").write_text("")
@@ -1549,25 +1589,22 @@ def test_a_module_a_clean_run_walk_visited_is_not_walked_again_for_a_later_test(
     (tmp_path / "tests/test_a.py").write_text("from scripts.clean import run\n")
     (tmp_path / "tests/test_b.py").write_text("from scripts.clean import run\n")
     walks = []
-    loads_heavy = contracts.loads_heavy
+    loads_heavy = collection_imports.loads_heavy
 
-    def counted(name, seen):
+    def counted(root: Path, name: str, seen: set[str]) -> bool:
         if name not in seen:
             walks.append(name)
-        return loads_heavy(name, seen)
+        return loads_heavy(root, name, seen)
 
-    monkeypatch.setattr(contracts, "loads_heavy", counted)
+    monkeypatch.setattr(collection_imports, "loads_heavy", counted)
+    monkeypatch.setattr(plan, "loads_heavy", counted)
     plan.validate_tests(tmp_path, ["tests/test_a.py::test_one", "tests/test_b.py::test_two"])
     assert walks.count("scripts.leaf") == 1
 
 
-def test_planning_follows_selected_test_package_imports(tmp_path, monkeypatch):
-    from tests import test_collection_imports as contracts
-
+def test_planning_follows_selected_test_package_imports(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _project(tmp_path, {})
     (tmp_path / "tests/__init__.py").write_text("import mcp\n")
-    monkeypatch.setattr(contracts, "_ROOT", tmp_path)
-    monkeypatch.setattr(contracts, "_module_file", contracts._module_file.__wrapped__)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("sys.argv", ["plan"])
     monkeypatch.setattr(plan, "own_bases", lambda *args: ["base"])

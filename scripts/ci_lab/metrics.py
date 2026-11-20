@@ -5,6 +5,7 @@ import json
 import threading
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
+from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from math import inf, isfinite, isnan
 from typing import Any, Protocol
@@ -24,6 +25,7 @@ __all__ = [
     "Metric",
     "Registry",
     "UnitRecord",
+    "expose",
     "grade_row",
     "observe_load",
     "observe_records",
@@ -31,6 +33,7 @@ __all__ = [
     "record",
     "respond",
     "serve",
+    "serve_registry",
     "unit_row",
 ]
 
@@ -323,11 +326,9 @@ def respond(snapshot: Callable[[], Load], registry: Registry, method: str, targe
     return 200, EXPOSITION, registry.render().encode()
 
 
-def serve(host: str, port: int, snapshot: Callable[[], Load], registry: Registry) -> ThreadingHTTPServer:
-    """Bind the capacity and metrics routes on host and port; the caller runs serve_forever."""
-
+def _bind(host: str, port: int, reply: Callable[[str, str], tuple[int, str, bytes]]) -> ThreadingHTTPServer:
     def answer(request: BaseHTTPRequestHandler) -> None:
-        status, content_type, data = respond(snapshot, registry, request.command, request.path)
+        status, content_type, data = reply(request.command, request.path)
         request.send_response(status)
         request.send_header("Content-Type", content_type)
         request.send_header("Content-Length", str(len(data)))
@@ -336,3 +337,22 @@ def serve(host: str, port: int, snapshot: Callable[[], Load], registry: Registry
 
     handler = type(BaseHTTPRequestHandler.__name__, (BaseHTTPRequestHandler,), {"do_GET": answer, "do_POST": answer})
     return ThreadingHTTPServer((host, port), handler)
+
+
+def serve(host: str, port: int, snapshot: Callable[[], Load], registry: Registry) -> ThreadingHTTPServer:
+    """Bind the capacity and metrics routes on host and port; the caller runs serve_forever."""
+    return _bind(host, port, partial(respond, snapshot, registry))
+
+
+def expose(registry: Registry, method: str, target: str) -> tuple[int, str, bytes]:
+    """Answer GET /metrics with the registry's exposition alone, observing no capacity snapshot."""
+    if urlsplit(target).path != "/metrics":
+        return 404, JSON, b'{"error": "not found"}'
+    if method != "GET":
+        return 405, JSON, b'{"error": "method not allowed"}'
+    return 200, EXPOSITION, registry.render().encode()
+
+
+def serve_registry(host: str, port: int, registry: Registry) -> ThreadingHTTPServer:
+    """Bind only the metrics route over registry on host and port; the caller runs serve_forever."""
+    return _bind(host, port, partial(expose, registry))

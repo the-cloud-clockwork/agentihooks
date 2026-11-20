@@ -1,0 +1,6 @@
+{
+  "scripts/hub/admission.py:scripts.hub.admission.x\u01c1Admission\u01c1_active:f95afcd7201f3e9e047a3356f8d29095efd00ab249de22e489c083499d04fdea": {
+    "reader": "standards_reader",
+    "reason": "typing.cast ignores its first argument and returns its second unchanged. Replacing Any with None preserves the store object, claimant invocation, comparison, boolean result and exceptions across repository implementations."
+  }
+}

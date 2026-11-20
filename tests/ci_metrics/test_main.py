@@ -77,6 +77,71 @@ def body(sent: dict[str, bytes], table: metrics_outbox.Table) -> list[dict[str, 
     return [json.loads(line) for line in sent[insert].decode().splitlines()]
 
 
+COST_IDS = [f"ci_cost-{index}" for index in range(14)]
+LEAD_IDS = [f"ci_lead_time-{index}" for index in range(6)]
+
+
+def table_rows(table: metrics_outbox.Table, count: int) -> list[dict[str, Any]]:
+    blank = {"String": "", "Int64": 0, "Float64": 0.0}
+    row = {column: blank[kind] for column, kind in (*metrics_outbox.BASE, *table.columns)}
+    start = round(SINCE.timestamp() * 1000)
+    return [
+        {**row, "event_id": f"{table.name}-{index}", "ledger": REPO, "ts_ms": start + index} for index in range(count)
+    ]
+
+
+class Sink:
+    def __init__(self, refuse: str, refusals: int, stall: float) -> None:
+        self.refuse = refuse
+        self.refusals = refusals
+        self.stall = stall
+        self.stalled = False
+        self.clock = 0.0
+        self.refused: list[str] = []
+        self.taken: list[tuple[str, bytes]] = []
+        self.flushes: list[int] = []
+
+    def monotonic(self) -> float:
+        return self.clock
+
+    def post(self, settings: metrics_outbox.Settings, query: str, body: bytes) -> bool:
+        assert settings == SETTINGS
+        if report.LEAD.name in query and query.startswith(self.refuse) and len(self.refused) < self.refusals:
+            self.refused.append(query)
+            return False
+        if query.startswith("INSERT") and not self.stalled:
+            self.clock += self.stall
+            self.stalled = True
+        self.taken.append((query, body))
+        return True
+
+    def event_ids(self) -> list[str]:
+        return [
+            json.loads(line)["event_id"]
+            for query, body in self.taken
+            if query.startswith("INSERT")
+            for line in body.decode().splitlines()
+        ]
+
+
+def flaky_sink(monkeypatch: pytest.MonkeyPatch, refuse: str, refusals: int, stall: float) -> Sink:
+    sink = Sink(refuse, refusals, stall)
+
+    class Counted(metrics_outbox.Outbox):
+        def flush(self, now_ms: int) -> int:
+            sent = super().flush(now_ms)
+            sink.flushes.append(sent)
+            return sent
+
+    built = {report.COST: table_rows(report.COST, 14), report.LEAD: table_rows(report.LEAD, 6)}
+    wired(monkeypatch, True)
+    monkeypatch.setattr(metrics_outbox, "post", sink.post)
+    monkeypatch.setattr(metrics_outbox, "time", sink)
+    monkeypatch.setattr(metrics_outbox, "Outbox", Counted)
+    monkeypatch.setattr(report, "rows", lambda *_: built)
+    return sink
+
+
 def test_a_run_refuses_without_the_metrics_sink_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(metrics_outbox.URL_ENV, raising=False)
     monkeypatch.delenv(metrics_outbox.USER_ENV, raising=False)
@@ -208,3 +273,31 @@ def test_the_temporary_outbox_takes_the_spool_file_name(monkeypatch: pytest.Monk
     monkeypatch.setattr(metrics_outbox, "Outbox", outbox)
     assert entry.main(ARGS) == 0
     assert paths == [metrics_outbox.spool_path().name]
+
+
+@pytest.mark.feature("ci-metrics-partial-flush")
+@pytest.mark.parametrize(
+    ("refuse", "refusals", "stall"),
+    [("CREATE", 1, 0.0), ("INSERT", 1, 0.0), ("", 0, 5.0)],
+    ids=["create-refused", "insert-refused", "deadline"],
+)
+def test_a_run_ships_the_rows_a_partial_flush_left_waiting(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], refuse: str, refusals: int, stall: float
+) -> None:
+    sink = flaky_sink(monkeypatch, refuse, refusals, stall)
+    assert entry.main(ARGS) == 0
+    printed = json.loads(capsys.readouterr().out.splitlines()[0])
+    assert (printed["rows"], printed["shipped"]) == (20, 20)
+    assert sink.flushes == [14, 6]
+    assert sorted(sink.event_ids()) == sorted(COST_IDS + LEAD_IDS)
+
+
+@pytest.mark.feature("ci-metrics-partial-flush")
+def test_a_run_that_cannot_ship_every_row_fails_after_three_flushes(monkeypatch: pytest.MonkeyPatch) -> None:
+    sink = flaky_sink(monkeypatch, "", 100, 0.0)
+    with pytest.raises(SystemExit) as failed:
+        entry.main(ARGS)
+    assert failed.value.code == "ci metrics failed: shipped 14 of 20 rows to the metrics sink"
+    assert sink.flushes == [14, 0, 0]
+    assert sink.refused == [report.LEAD.ddl()] * 3
+    assert sorted(sink.event_ids()) == sorted(COST_IDS)
