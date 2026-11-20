@@ -24,10 +24,12 @@ def _payload(command: str) -> dict:
 @pytest.mark.parametrize("body", TERMINATED)
 @pytest.mark.parametrize("opener", OPENERS)
 def test_stripping_keeps_the_delimiter_line_and_drops_the_body(opener: str, body: str) -> None:
-    stripped = strip_non_command_content(f"cat {opener} > out.txt && git status{body}")
+    assert strip_non_command_content(f"cat {opener} > out.txt && git status{body}") == "cat  > out.txt && git status"
 
-    assert "> out.txt && git status" in stripped
-    assert "body line" not in stripped
+
+@pytest.mark.feature("guard-stripping-keeps-heredoc-delimiter-line")
+def test_stripping_blanks_a_shift_inside_arithmetic() -> None:
+    assert strip_non_command_content("echo $(( 1 << x ))\nx") == "echo $(( 1    x ))\nx"
 
 
 @pytest.mark.feature("guard-stripping-keeps-heredoc-delimiter-line")
@@ -54,6 +56,7 @@ def test_prod_lockdown_refuses_a_release_run_after_the_delimiter(opener: str, bo
         "echo $((1 << 2))\ngit push origin main",
         "echo $((1<<git))\ngit push origin main\ngit status",
         "echo $((1 << x))\ngit push origin main\nx",
+        "echo $(( 1 << x ))\ngit push origin main\nx",
         "cat <<EOF > out.txt\ngit push origin main",
     ],
 )
