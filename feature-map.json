@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "swarm-progress-data",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-bundle-ledger-leftovers",
+      "behaviour": "Progress report consumers receive tasks, freezes, plans, phases, followups and alerts from the built-in swarm reader without owning storage access; failed reads propagate to the caller.",
+      "seam": "scripts.swarm.progress_data.read over the built-in resource reader",
+      "tests": [
+        "tests/swarm/test_progress_data.py::test_progress_data_preserves_every_collection",
+        "tests/swarm/test_progress_data.py::test_progress_data_propagates_read_failure"
+      ]
+    },
+    {
       "id": "lab-zero-base-push",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-zero-base-push",
@@ -139,6 +150,17 @@
         "tests/ci_lab/test_scheduler_release.py::test_each_pass_starts_eight_waiting_heads_in_class_order_and_admits_their_units_in_the_same_pass",
         "tests/ci_lab/test_scheduler_release.py::test_the_eight_heads_a_pass_starts_are_the_longest_waiting_and_quiet_or_paused_heads_take_no_place",
         "tests/ci_lab/test_scheduler_release.py::test_a_head_put_back_for_its_manifest_fetch_still_takes_one_of_the_eight_places"
+      ]
+    },
+    {
+      "id": "lab-scheduler-unexpanded-head",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2614",
+      "behaviour": "A head the CI lab scheduler cannot expand shows a lab status: when Scheduler.tick releases a held head and its expander raises a ValueError, KeyError, YAML error, schema validation error or failed git command, the scheduler drops the head as before and posts one completed required check run with conclusion failure on that head, named lab-shadow/required since a head with no plan has no authoritative gates, whose summary names the head, its base and the expansion error; a head pushed to a grade ref posts no check run, because GitHub does not hold that head.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis with a raising expander and a recording Poster behind scripts.ci_lab.scheduler.Ports.checks, read through the posts and the repositories the poster was asked for",
+      "tests": [
+        "tests/ci_lab/test_scheduler_unexpanded.py::test_a_head_that_cannot_expand_posts_a_failed_required_check_naming_its_reason",
+        "tests/ci_lab/test_scheduler_unexpanded.py::test_a_grade_ref_head_that_cannot_expand_posts_no_check_run"
       ]
     },
     {
@@ -535,6 +557,18 @@
       "seam": "ledger_server.serve, the hub projector import against server_handoff.announce",
       "tests": [
         "tests/swarm_ledger/test_server_compose.py::test_a_successor_that_cannot_import_the_hub_never_reports_ready"
+      ]
+    },
+    {
+      "id": "ledger-new-file-setup-waits-out-another-write-lock",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2567",
+      "behaviour": "A ledger store that turns a new file to WAL while another connection holds the file's write lock waits for that lock within the busy timeout instead of failing at once, so a reload successor that sets up a new ledger file beside another process still reports ready.",
+      "seam": "SQLiteLedgerRepository._set_up reached through summaries, the WAL switch against another connection's write lock",
+      "tests": [
+        "tests/swarm_ledger/test_sqlite.py::test_a_new_store_waits_out_another_connections_write_lock_before_it_turns_on_wal",
+        "tests/swarm_ledger/test_sqlite.py::test_a_write_lock_held_past_the_busy_timeout_still_fails_the_wal_switch",
+        "tests/swarm_ledger/test_sqlite.py::test_the_wal_switch_raises_an_error_other_than_a_held_lock_at_once"
       ]
     },
     {
@@ -1060,6 +1094,18 @@
         "tests/hive/test_reports.py::test_a_hub_admitted_worker_its_hive_reports_no_binding_for_gets_no_facts_from_this_host",
         "tests/hive/test_reports.py::test_a_hub_admitted_worker_without_an_app_server_keeps_the_controllers_session_read",
         "tests/hive/test_reports.py::test_an_app_server_worker_the_hub_admitted_to_this_hive_is_read_from_this_host"
+      ]
+    },
+    {
+      "id": "swarm-nudges-hub-admitted-workers-through-their-hive",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2569",
+      "behaviour": "A nudge for a worker the hub admitted to another hive, such as an outage resume prompt, goes to that hive as a nudge order and that hive types it into the worker's pane instead of the controller's own herdr; it is refused while that hive is not reporting, and a hive takes a nudge order only for an execution the controller sends there.",
+      "seam": "scripts.swarm.runtime.HerdrRuntime.nudge resolves the hive through scripts.hive.reports.admitted and sends the order through scripts.hive.orders.Orders.command; scripts.hive.orders.Consumer.command takes it when the host target names this hive, or the runtime target is empty and the record's hive does",
+      "tests": [
+        "tests/hive/test_reports.py::test_a_nudge_for_a_hub_admitted_worker_is_typed_into_its_pane_by_the_hive_that_runs_it",
+        "tests/hive/test_reports.py::test_a_nudge_for_a_hub_admitted_worker_whose_hive_is_lost_is_refused_without_the_controller_herdr",
+        "tests/hive/test_reports.py::test_a_hive_takes_a_nudge_order_exactly_when_the_controller_sends_it_there"
       ]
     },
     {
@@ -7023,6 +7069,20 @@
       ]
     },
     {
+      "id": "hive-admission-guard-own-cpu",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-empty-hive-admission",
+      "behaviour": "The host CPU line's five minute load guard refuses a hive only while the hive's own CPU, its pod load when the reading carries one and otherwise the node's CPU used, is at or above the swarm share, so an empty pod hive on a node whose other pods raise the load average and CPU used gets the used CPU line's room instead of none.",
+      "seam": "admission.room over a headroom reading with node used_cpus and the pod's pod_load",
+      "tests": [
+        "tests/hive/test_admission.py::test_an_empty_pod_hive_on_a_busy_node_gets_the_used_cpu_room",
+        "tests/hive/test_admission.py::test_the_load_average_guard_binds_on_a_pod_hive_once_its_own_load_reaches_the_swarm_share"
+      ],
+      "rules": [
+        "hive-guard-reads-node-cpu-used"
+      ]
+    },
+    {
       "id": "hive-member-reads-every-hive-pending-admission",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2555",
@@ -8467,7 +8527,7 @@
       "id": "root-keeps-slots-for-pinned-tasks",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-root-prefers-workstation-tasks",
-      "behaviour": "Under the events engine the root hive keeps one free slot for each claimable task of the asking swarm that only root takes and can place, a workstation task pinned to no other hive or a task pinned to root: the hub answers a root admission for work any hive can run with a held answer once root's live workers plus those waiting tasks reach its max agents, so the root lane spoke launches the pinned task on its next poll and the unpinned offer stays queued for another hive, while a pinned task and every other hive are admitted as before.",
+      "behaviour": "Under the events engine the root hive keeps one free slot for each claimable task of every events swarm that only root takes and can place, a workstation task pinned to no other hive or a task pinned to root: the hub answers a root admission for work any hive can run with a held answer once root's live workers plus those waiting tasks reach its max agents, so the root lane spoke launches the pinned task on its next poll and the unpinned offer stays queued for another hive, while a pinned task and every other hive are admitted as before.",
       "seam": "scripts.swarm.readiness root_only and root_waiting through scripts.hub.admission Admission.admit, Admission._reserved and Admission._full, observed at scripts.hive.lanes.run_once",
       "tests": [
         "tests/swarm/test_events_placement.py::test_root_only_names_the_tasks_only_the_root_hive_takes",
@@ -8475,6 +8535,8 @@
         "tests/swarm/test_events_placement.py::test_root_with_one_free_slot_holds_the_unpinned_task_for_another_hive_and_admits_the_workstation_task",
         "tests/swarm/test_events_placement.py::test_root_keeps_a_slot_only_for_a_workstation_task_it_can_place",
         "tests/swarm/test_events_placement.py::test_root_admits_unpinned_work_only_into_slots_beyond_the_waiting_workstation_tasks",
+        "tests/swarm/test_events_placement.py::test_root_keeps_a_slot_for_a_workstation_task_another_events_swarm_holds_waiting",
+        "tests/swarm/test_events_placement.py::test_root_keeps_one_slot_for_each_waiting_workstation_task_of_every_events_swarm",
         "tests/swarm/test_events_placement.py::test_root_with_one_free_slot_launches_the_workstation_task_on_the_poll_after_holding_the_unpinned_one"
       ]
     },
@@ -9128,6 +9190,16 @@
         "tests/ci_lab/test_expand_tests.py::test_unlisted_hashes_each_test_module_that_holds_no_manifest_test_with_its_conftests_and_imports",
         "tests/ci_lab/test_expand_tests.py::test_unlisted_keys_every_test_module_the_mutant_runner_runs",
         "tests/ci_lab/test_expand_mutation.py::test_an_unlisted_test_module_enters_the_key_of_every_function"
+      ]
+    },
+    {
+      "id": "lab-mutation-verdict-key-prefix",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-verdict-key-prefix",
+      "behaviour": "Generated stats units and whole or split mutant units carry their kind and current lab schema before the existing digest, so the verdict store accepts completed mutation work without raising a key format error during a scheduler pass.",
+      "seam": "scripts.ci_lab.expand_mutation.stats_units and mutant_units through scripts.ci_lab.store.Store.put and get",
+      "tests": [
+        "tests/ci_lab/test_expand_mutation.py::test_generated_mutation_unit_keys_can_be_stored"
       ]
     },
     {
@@ -10746,6 +10818,18 @@
         "tests/swarm/test_harness_pin.py::test_the_status_quota_lines_name_each_pinned_lane",
         "tests/swarm/test_harness_pin.py::test_findings_and_quota_lines_list_pinned_lanes_in_lane_name_order",
         "tests/swarm/test_harness_pin.py::test_swarm_status_lists_the_harness_pin_finding"
+      ]
+    },
+    {
+      "id": "mutation-stats-shared-closure",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-mutation-stats-collect-budget",
+      "behaviour": "A mutation stats collection walks the import closure of each distinct measured dependency list once and computes each distinct discovery digest once, so test ids with equal dependency lists cost one closure walk when their cache records are saved and one when the next run checks them for reuse instead of one walk per test id, while test ids with different dependency lists keep their own closures.",
+      "seam": "scripts.ci_mutation.stats_cache.StatsInputs.for_test and scripts.ci_mutation.stats_cache.StatsInputs.discovery",
+      "tests": [
+        "tests/test_ci_mutation_stats_cache.py::test_test_ids_sharing_one_dependency_list_walk_its_closure_once_per_collection",
+        "tests/test_ci_mutation_stats_cache.py::test_distinct_dependency_lists_in_one_collection_keep_their_own_closures",
+        "tests/test_ci_mutation_stats_cache.py::test_the_discovery_digest_of_one_input_set_is_computed_once"
       ]
     }
   ],
