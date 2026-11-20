@@ -4,7 +4,6 @@ import json
 from dataclasses import dataclass
 from types import MappingProxyType
 
-import fakeredis
 import pytest
 
 from scripts.swarm import timing
@@ -45,6 +44,8 @@ class LiveBudgetStep:
 
 @pytest.mark.feature("swarm-tick-joined-budget")
 def test_the_step_finished_line_logs_the_live_budget_the_engine_joined_on() -> None:
+    import fakeredis
+
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     token = budgets.LIVE.set(MappingProxyType({"live budget": LIVE_S}))
     try:

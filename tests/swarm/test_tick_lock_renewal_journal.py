@@ -6,7 +6,6 @@ from threading import Lock
 from types import SimpleNamespace
 from typing import cast
 
-import fakeredis
 import pytest
 
 from scripts.swarm import tick_activity, timing
@@ -44,9 +43,14 @@ def journaled(err: str) -> list[dict[str, object]]:
     return [line for line in lines if line.get("event") == "swarm_tick_lock_renewal"]
 
 
+def fake_store() -> RedisStore:
+    import fakeredis
+
+    return RedisStore(fakeredis.FakeRedis(decode_responses=True))
+
+
 def renewal(renewed: list[int], clock: list[int], lock: Lock) -> tick_activity.Renewal:
-    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    return tick_activity.Renewal(store, "sw", lambda: renewed.append(clock[0]), lambda: clock[0], lock=lock)
+    return tick_activity.Renewal(fake_store(), "sw", lambda: renewed.append(clock[0]), lambda: clock[0], lock=lock)
 
 
 def line(
@@ -90,8 +94,7 @@ def test_a_failed_renewal_journals_its_redis_seconds_and_still_raises(
     def lost() -> None:
         raise RuntimeError("stale owner")
 
-    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    hook = tick_activity.Renewal(store, "sw", lost, lambda: 1_000)
+    hook = tick_activity.Renewal(fake_store(), "sw", lost, lambda: 1_000)
     with pytest.raises(RuntimeError, match="stale owner"):
         hook()
     assert hook.renewed is None
