@@ -9831,13 +9831,31 @@
       "id": "events-ended-agent-stopped",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-root-finished-not-retired",
-      "behaviour": "When the agents reap step judges a hub admitted agent whose hive recorded its start and whose work ended, because the agent is finished or its task is done, blocked, handed off or released, it sends that hive the execution stop for the started execution with the reason ended in the same pass, whether or not its pane is live, and reports one action naming the agent. The tick neither retires the agent through its own runtime nor drops it: the hive spoke reaps the execution and reports its exit, and the hub lifecycle then removes the agent from the swarm, releases its launch slot and settles the spoke claim as exited. A pass inside the bus dedupe window sends no second stop and reports nothing; a stop the bus refused is reported and sent again on the next pass.",
+      "behaviour": "When the agents reap step judges a hub admitted agent whose hive recorded its start and whose work ended, because the agent is finished or its task is done, blocked, handed off or released, it sends that hive the execution stop for the started execution with the reason ended in the same pass, whether or not its pane is live, and reports one action naming the agent. While the spoke claim still holds that launch, the tick neither retires the agent through its own runtime nor drops it: the hive spoke reaps the execution and reports its exit, and the hub lifecycle then removes the agent from the swarm, releases its launch slot and settles the spoke claim as exited. A pass inside the bus dedupe window sends no second stop and reports nothing; a stop the bus refused is reported and sent again on the next pass.",
       "seam": "the agents reap step judging an ended hub admitted agent through reconciler.stop_admitted, then execution_stop.Stopper and the hub lifecycle on the hive exit",
       "tests": [
         "tests/swarm/test_events_claim_refunds.py::test_an_admitted_agent_whose_work_ended_gets_the_stop_from_its_hive_in_one_reap_pass",
         "tests/swarm/test_events_claim_refunds.py::test_a_reap_pass_inside_the_stop_dedupe_window_sends_no_second_stop",
         "tests/swarm/test_events_claim_refunds.py::test_an_ended_admitted_agent_whose_stop_the_bus_refused_is_stopped_on_the_next_pass",
         "tests/swarm/test_events_claim_refunds.py::test_a_finished_admitted_agent_leaves_its_seat_and_launch_slot_once_its_hive_honors_the_stop"
+      ]
+    },
+    {
+      "id": "events-ended-agent-dropped-once-settled",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2787",
+      "behaviour": "When the agents reap step judges a hub admitted agent whose work ended and the execution stop answers ended or unknown, it asks whether the hub lifecycle can still settle the exit. Once no hive recorded a start for the agent, or the spoke claim of the started execution is gone, holds another launch's revision or has left the launching, started and exiting states, the tick retires and drops the agent the way it retires an ended legacy agent, in one pass, freeing its seat and hive slot. While the claim still holds its launch, the agent is kept for the lifecycle, a start of another execution keeps it, and a bus that cannot be read keeps it and is said on stderr.",
+      "seam": "agents._reap through _reap_admitted and _stop_ended, reconciler.settled_admitted and execution_stop.settled, then tick._retire_ended",
+      "rules": ["admitted-ended-stop-keeps-settled-agent"],
+      "tests": [
+        "tests/swarm/test_events_claim_refunds.py::test_an_admitted_agent_on_a_done_task_whose_stop_answers_ended_leaves_its_seat_once_the_lifecycle_cannot_settle_it",
+        "tests/swarm/test_events_claim_refunds.py::test_an_ended_admitted_agent_is_retired_only_once_its_stop_answers_ended_or_unknown_and_its_claim_settled",
+        "tests/swarm/test_events_claim_refunds.py::test_the_settled_check_opens_no_bus_on_the_memory_backend",
+        "tests/swarm/test_events_claim_refunds.py::test_the_settled_check_keeps_the_agent_and_says_so_when_the_bus_cannot_be_read",
+        "tests/swarm/test_events_claim_refunds.py::test_the_settled_check_reads_the_start_its_hive_recorded_and_closes_the_bus",
+        "tests/hive/test_execution_stop.py::test_the_hub_lifecycle_can_settle_an_exit_only_while_the_claim_holds_its_launch",
+        "tests/hive/test_execution_stop.py::test_an_execution_whose_claim_is_gone_is_settled",
+        "tests/hive/test_execution_stop.py::test_a_claim_with_no_launch_revision_holds_the_launch_written_at_its_own_revision"
       ]
     },
     {

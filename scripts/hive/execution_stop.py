@@ -69,6 +69,12 @@ def ended(bus: Bus, event: Envelope) -> bool:
     return claim.get("state") != "started" or claim.get("claim_revision") != _fields(event)["claim_revision"]
 
 
+def settled(bus: Bus, event: Envelope) -> bool:
+    """True once the hub lifecycle can no longer settle the execution's exit: its claim is gone, holds another launch's
+    revision or left the launching, started and exiting states."""
+    raise NotImplementedError
+
+
 def request(event: Envelope, reason: str) -> Envelope:
     """The stop event for one started execution."""
     data = {"name": _fields(event)["name"], "hive": _fields(event)["hive"], "reason": reason}

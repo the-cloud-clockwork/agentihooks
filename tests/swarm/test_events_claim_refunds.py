@@ -540,6 +540,134 @@ def test_a_finished_admitted_agent_leaves_its_seat_and_launch_slot_once_its_hive
     assert json.loads(entry.value)["state"] == "exited"
 
 
+def settle_claim(bus: Bus, claim: dict[str, Any] | None) -> None:
+    """Leaves the spoke claim of the running execution as ``claim``, as the hub lifecycle, a later launch or a cleared
+    claim leave it; no claim at all when ``claim`` is None."""
+    if claim is not None:
+        bus.for_swarm(SLUG).state("spoke-work").create("claim", json.dumps(claim).encode())
+
+
+@pytest.mark.feature("events-ended-agent-dropped-once-settled")
+@pytest.mark.parametrize(
+    ("claim", "dropped"),
+    [
+        ({"state": "exited", "claim_revision": 1}, True),
+        ({"state": "started", "claim_revision": 2}, True),
+        (None, True),
+        ({"state": "exiting", "claim_revision": 1}, False),
+    ],
+    ids=["exited", "another launch", "gone", "exiting"],
+)
+def test_an_admitted_agent_on_a_done_task_whose_stop_answers_ended_leaves_its_seat_once_the_lifecycle_cannot_settle_it(
+    env: tuple[RedisStore, Any, Any],
+    bus: Bus,
+    seat: Callable[..., AgentRecord],
+    claim: dict[str, Any] | None,
+    dropped: bool,
+) -> None:
+    store, _, rt = env
+    agent, _ = launched(env, bus, seat)
+    settle_claim(bus, claim)
+    finish(env, agent, "task done")
+    rt.live.discard(agent.name)
+    assert reconciler.stop_admitted(SLUG, agent, "ended") == execution_stop.ENDED
+
+    actions = reap_pass(env, NOW + 1)
+
+    assert actions == ([f"retired {agent.name}"] if dropped else [])
+    assert [seated.name for seated in store.agents(SLUG)] == ([] if dropped else [agent.name])
+    assert sent_stops(bus, agent) == []
+
+
+@pytest.mark.feature("events-ended-agent-dropped-once-settled")
+@pytest.mark.parametrize(
+    ("outcome", "settled", "retired"),
+    [
+        (execution_stop.ENDED, True, True),
+        (execution_stop.UNKNOWN, True, True),
+        (execution_stop.ENDED, False, False),
+        (execution_stop.UNKNOWN, False, False),
+        (execution_stop.PENDING, True, False),
+    ],
+)
+def test_an_ended_admitted_agent_is_retired_only_once_its_stop_answers_ended_or_unknown_and_its_claim_settled(
+    monkeypatch: pytest.MonkeyPatch, outcome: str, settled: bool, retired: bool
+) -> None:
+    tick = agent_steps.tick
+    agent = AgentRecord(name="a1", lane="eng", task="t1", state="working")
+    asked: list[tuple[str, str]] = []
+    calls: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(tick, "_acknowledging", lambda *_args: False)
+    monkeypatch.setattr(tick, "_ended", lambda *_args: True)
+    monkeypatch.setattr(reconciler, "stop_admitted", lambda _slug, _agent, _reason: outcome)
+    monkeypatch.setattr(
+        reconciler, "settled_admitted", lambda slug, checked: asked.append((slug, checked.name)) or settled
+    )
+    monkeypatch.setattr(tick, "_retire_ended", lambda *args: calls.append(args) or [f"retired {args[5].name}"])
+    rows = {"t1": {"id": "t1", "done": True}}
+    judging = SimpleNamespace(
+        slug=SLUG, store="store", ledger="ledger", runtime="runtime", rows=rows, live=set(), now_ms=NOW
+    )
+
+    actions = agent_steps._reap_admitted(cast(Any, judging), agent)
+
+    assert actions == (["retired a1"] if retired else [])
+    assert asked == ([] if outcome == execution_stop.PENDING else [(SLUG, "a1")])
+    assert calls == ([(SLUG, "store", "ledger", "runtime", rows, agent, NOW)] if retired else [])
+
+
+@pytest.mark.feature("events-ended-agent-dropped-once-settled")
+def test_the_settled_check_opens_no_bus_on_the_memory_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    def unexpected(_config: Any) -> Any:
+        raise AssertionError("the memory bus records no start, so no bus is opened")
+
+    monkeypatch.setattr(reconciler.BusConfig, "from_environ", lambda: SimpleNamespace(backend="memory"))
+    monkeypatch.setattr(reconciler, "open_bus", unexpected)
+
+    assert reconciler.settled_admitted(SLUG, AgentRecord(name="a1", lane="eng", task="t1")) is False
+
+
+@pytest.mark.feature("events-ended-agent-dropped-once-settled")
+def test_the_settled_check_keeps_the_agent_and_says_so_when_the_bus_cannot_be_read(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def refused(_config: Any) -> Any:
+        raise ConnectionError("bus down")
+
+    monkeypatch.setattr(reconciler.BusConfig, "from_environ", lambda: SimpleNamespace(backend="nats"))
+    monkeypatch.setattr(reconciler, "open_bus", refused)
+
+    assert reconciler.settled_admitted(SLUG, AgentRecord(name="a1", lane="eng", task="t1")) is False
+    captured = capsys.readouterr()
+    assert (captured.out, captured.err) == (
+        "",
+        f"hub settled check for a1 in swarm {SLUG} failed (ConnectionError: bus down)\n",
+    )
+
+
+@pytest.mark.feature("events-ended-agent-dropped-once-settled")
+@pytest.mark.parametrize(
+    ("recorded", "lifecycle_done", "settled"),
+    [("none", False, True), ("another execution", True, False), ("own", False, False), ("own", True, True)],
+)
+def test_the_settled_check_reads_the_start_its_hive_recorded_and_closes_the_bus(
+    monkeypatch: pytest.MonkeyPatch, recorded: str, lifecycle_done: bool, settled: bool
+) -> None:
+    agent = AgentRecord(name="a1", lane="eng", task="t1", execution_id="exe-1", generation=2, hive="root")
+    opened = SimpleNamespace(closed=[])
+    opened.close = lambda: opened.closed.append(True)
+    start = None if recorded == "none" else SimpleNamespace(key="exe-1" if recorded == "own" else "exe-other")
+    asked: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(reconciler.BusConfig, "from_environ", lambda: SimpleNamespace(backend="nats"))
+    monkeypatch.setattr(reconciler, "open_bus", lambda _config: opened)
+    monkeypatch.setattr(reconciler.execution_stop, "started", lambda *args: asked.append(args) or start)
+    monkeypatch.setattr(reconciler.execution_stop, "settled", lambda given, event: given is opened and lifecycle_done)
+
+    assert reconciler.settled_admitted(SLUG, agent) is settled
+    assert asked == [(opened, SLUG, "a1", 2)]
+    assert opened.closed == [True]
+
+
 @pytest.mark.feature("events-retirement-stops-the-execution")
 @pytest.mark.parametrize("ending", ["mismatch", "idle"])
 def test_the_hive_exit_after_a_tick_retirement_releases_the_launch_slot_and_settles_the_claim(

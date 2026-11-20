@@ -81,6 +81,13 @@ def stop_admitted(slug: str, agent: AgentRecord, reason: str) -> str:
     return outcome
 
 
+def settled_admitted(slug: str, agent: AgentRecord) -> bool:
+    """True when the hub lifecycle can no longer settle the exit of ``agent``: no hive recorded its start, or the start
+    its hive recorded for its execution is ``execution_stop.settled``; false on the memory bus, for a start of another
+    execution and when the bus cannot be read, which is said on stderr."""
+    raise NotImplementedError
+
+
 def stop_dropped(store: Any, slug: str, agent: AgentRecord, reason: str) -> str:
     """Sends the execution stop for ``agent``, which the swarm dropped, through ``stop_admitted`` and answers it; a
     stop the bus refused waits in the swarm's pending stops for ``retry_stops`` unless the agent has no execution for
