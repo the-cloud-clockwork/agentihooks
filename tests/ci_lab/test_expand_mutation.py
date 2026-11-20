@@ -7,8 +7,10 @@ from mutmut.mutation.pragma_handling import PragmaParseError
 
 from scripts.ci_lab import expand_mutation
 from scripts.ci_lab.units import Unit
+from scripts.ci_mutation.plan import MUTANT_SECONDS
 from scripts.ci_mutation.selection import selected_mutant_names
 from scripts.ci_mutation.stats_cache import collect_cached_stats
+from scripts.ci_mutation.stats_dependencies import digest  # pyright: ignore[reportUnknownVariableType]
 
 SAMPLE = """import functools
 
@@ -163,6 +165,39 @@ def test_mutant_names_and_keys_are_stable_across_runs_and_checkouts(tmp_path: Pa
     assert first == again == other
     assert first
     assert len({unit.key for unit in first}) == len(first)
+
+
+@pytest.mark.feature("lab-mutant-unit-split")
+@pytest.mark.parametrize(
+    ("timeout", "sizes"),
+    [
+        (1.0, [1, 1, 1, 1, 1]),
+        (MUTANT_SECONDS + 1.0, [1, 1, 1, 1, 1]),
+        (2 * MUTANT_SECONDS + 1.0, [1, 2, 2]),
+        (3 * MUTANT_SECONDS - 1.0, [1, 2, 2]),
+        (3 * MUTANT_SECONDS, [2, 3]),
+    ],
+)
+def test_a_unit_priced_over_the_timeout_splits_into_the_fewest_parts_that_each_price_within_it(
+    tmp_path: Path, timeout: float, sizes: list[int]
+) -> None:
+    root = repository(tmp_path, MUTANT_FILES)
+    (whole,) = expand_mutation.mutant_units(root, {PATH: [12]}, {}, {})
+    parts = expand_mutation.mutant_units(root, {PATH: [12]}, {}, {}, timeout=timeout)
+    assert [len(unit.members) for unit in parts] == sizes
+    assert [member for unit in parts for member in unit.members] == list(whole.members)
+    assert [unit.kind for unit in parts] == ["mutant"] * len(parts)
+    assert len({unit.key for unit in parts} | {whole.key}) == len(parts) + 1
+    assert [unit.key for unit in parts] == [digest([whole.key, list(unit.members)]) for unit in parts]
+    assert parts == expand_mutation.mutant_units(root, {PATH: [12]}, {}, {}, timeout=timeout)
+
+
+@pytest.mark.feature("lab-mutant-unit-split")
+def test_a_unit_priced_at_the_timeout_keeps_its_members_and_key(tmp_path: Path) -> None:
+    root = repository(tmp_path, MUTANT_FILES)
+    whole = expand_mutation.mutant_units(root, EVERY_LINE, {}, {})
+    longest = max(len(unit.members) for unit in whole)
+    assert expand_mutation.mutant_units(root, EVERY_LINE, {}, {}, timeout=longest * MUTANT_SECONDS) == whole
 
 
 def test_the_same_function_in_another_module_gets_its_own_key(tmp_path: Path) -> None:

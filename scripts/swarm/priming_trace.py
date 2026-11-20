@@ -6,6 +6,7 @@ into its injection trace, so a correction can name the seat and note.
 
 import json
 from pathlib import Path
+from typing import Any
 
 from scripts.swarm.prompt import OLDER_RECAPS
 
@@ -18,7 +19,7 @@ def _row(layer, source, locator, text):
     return {"layer": layer, "source": source, "locator": locator, "text": text}
 
 
-def rows(slug: str, task: dict) -> list[dict]:
+def rows(slug: str, task: dict[str, Any]) -> list[dict[str, Any]]:
     seat = task.get("seat", "")
     found = [
         _row("culture", f"culture:{slug}#{number}", {"swarm": slug, "line": number}, line)
@@ -31,11 +32,15 @@ def rows(slug: str, task: dict) -> list[dict]:
         found.append(_row("recap", f"recap:{seat}#{number}", {"seat": seat, "recap": number}, recap["text"]))
     for number, note in enumerate(task.get("learned") or [], 1):
         if note["maturity"] != "data" and not note.get("withheld"):
-            found.append(_row("learned", f"learned:{seat}#{number}", {"seat": seat, "note": number}, note["text"]))
+            origin = note.get("seat", seat)
+            ordinal = note.get("number", number)
+            found.append(
+                _row("learned", f"learned:{origin}#{ordinal}", {"seat": origin, "note": ordinal}, note["text"])
+            )
     return found + list(task.get("withheld") or [])
 
 
-def withhold(slug: str, task: dict) -> dict:
+def withhold(slug: str, task: dict[str, Any]) -> dict[str, Any]:
     """The task with culture lines and learned notes under a confirmed correction taken out, and a row for each."""
     from hooks.context import quarantine
 
@@ -56,7 +61,9 @@ def withhold(slug: str, task: dict) -> dict:
         for number, line in enumerate((task.get("culture") or "").splitlines(keepends=True), 1)
     )
     learned = [
-        {**note, "withheld": True} if hit("learned", f"learned:{seat}#{number}", note["text"]) else note
+        {**note, "withheld": True}
+        if hit("learned", f"learned:{note.get('seat', seat)}#{note.get('number', number)}", note["text"])
+        else note
         for number, note in enumerate(task.get("learned") or [], 1)
     ]
     return {**task, "culture": culture, "learned": learned, "withheld": logged}

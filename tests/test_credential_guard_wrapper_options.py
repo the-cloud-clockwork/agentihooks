@@ -1,8 +1,26 @@
+import signal
+from collections.abc import Iterator
+from types import FrameType
+
 import pytest
 
-from hooks.context.credential_guard import decide
+from hooks.context.credential_guard import decide, verb_index
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.fixture(autouse=True)
+def _bound_wrapper_parsing() -> Iterator[None]:
+    def fail_on_loop(signum: int, frame: FrameType | None) -> None:
+        raise TimeoutError("wrapper command parsing did not finish")
+
+    previous_handler = signal.signal(signal.SIGALRM, fail_on_loop)
+    previous_timer = signal.setitimer(signal.ITIMER_REAL, 1)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, *previous_timer)
+        signal.signal(signal.SIGALRM, previous_handler)
 
 
 @pytest.mark.feature("credential-guard-wrapper-option-values")
@@ -19,6 +37,7 @@ pytestmark = pytest.mark.unit
         "env -C /srv cat .env",
         "env --chdir /srv bash -c 'cat .env'",
         "sudo -u root env -u UNUSED cat .env",
+        "sudo -u root bash -e .env ignored",
     ],
 )
 def test_a_credential_read_after_wrapper_option_values_is_refused(command: str) -> None:
@@ -100,6 +119,8 @@ def test_wrapper_value_flags_preserve_the_credential_verdict(prefix: str) -> Non
         "env --unset",
         "sudo --",
         "sudo -n --",
+        "sudo -- -u root cat .env",
+        "env -- -u UNUSED cat .env",
         "sudo --user",
         "env -iu",
         "printf sudo -u root cat .env",
@@ -125,3 +146,19 @@ def test_wrapper_option_values_do_not_become_commands_or_operands(command: str) 
 def test_wrapper_options_do_not_turn_safe_scripts_into_credential_reads(command: str) -> None:
     payload = {"tool_name": "Bash", "tool_input": {"command": command}}
     assert decide(payload) is None
+
+
+@pytest.mark.feature("credential-guard-wrapper-option-values")
+@pytest.mark.parametrize(
+    ("tokens", "expected"),
+    [
+        (["MODE=readonly"], 0),
+        (["MODE=readonly", "cat"], 1),
+        (["sudo", "--", "-u", "root", "cat"], 2),
+        (["env", "--", "-u", "UNUSED", "cat"], 2),
+        (["sudo", "-u"], 2),
+        (["env", "--unset"], 2),
+    ],
+)
+def test_wrapper_parser_preserves_command_boundaries(tokens: list[str], expected: int) -> None:
+    assert verb_index(tokens) == expected

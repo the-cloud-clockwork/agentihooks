@@ -38,6 +38,39 @@ def test_accepted_state_is_returned_unchanged(monkeypatch):
     assert ledger_client.LedgerClient().state("demo") is response
 
 
+@pytest.mark.feature("swarm-refusal-size-warnings")
+@pytest.mark.parametrize(
+    "reason",
+    ["freeze_set refused: target tasks/missing does not exist", None],
+    ids=["missing-target", "operation-fallback"],
+)
+def test_a_refused_focus_reports_size_warnings_separately(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], reason: str | None
+) -> None:
+    size = ["overview has 201 words, limit 200", "phase p113 description has 117 words, limit 100"]
+    warnings = [size[0], *([reason] if reason else []), size[1]]
+    response = {"rejected": ["focus"], "_meta": {"warnings": warnings}}
+    monkeypatch.setattr(ledger_client, "_ledger", lambda: SimpleNamespace(call=lambda slug, ops: response))
+    with pytest.raises(ledger_client.LedgerRefused) as caught:
+        ledger_client.LedgerClient().freeze("demo", "focus", "tasks/missing")
+    assert str(caught.value) == f"ledger demo refused: {reason or str(['focus'])}"
+    captured = capsys.readouterr()
+    assert captured.err.splitlines() == [f"ledger demo warning: {warning}" for warning in size]
+    assert captured.out == ""
+    assert response["_meta"]["warnings"] == warnings
+
+
+@pytest.mark.feature("swarm-refusal-size-warnings")
+def test_size_warnings_do_not_refuse_an_accepted_swarm_write(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    response = {"rejected": [], "_meta": {"warnings": ["phase p113 description has 117 words, limit 100"]}}
+    monkeypatch.setattr(ledger_client, "_ledger", lambda: SimpleNamespace(call=lambda slug, ops: response))
+    assert ledger_client.LedgerClient()._call("demo", [{"op": "freeze_set"}]) is response
+    captured = capsys.readouterr()
+    assert captured.err == captured.out == ""
+
+
 @pytest.mark.parametrize(
     ("exit_text", "refused"),
     [
