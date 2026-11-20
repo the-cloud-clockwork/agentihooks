@@ -7527,15 +7527,16 @@ agentihooks swarm <id> set reset-gate=deny
 A Claude front door master whose login reached its time limit answers every turn, cron prompt and inbox item with
 `Login reached its time limit · Please run /login` and runs nothing else. The prompt stall step recycles such a master
 in its seat on the next tick, so its relaunch takes another stored master login and the seat never waits on the
-operator. This check runs before the held on a prompt checks above and needs no operator item waiting.
+operator. This check runs before the checks in [Master held on a prompt](#master-held-on-a-prompt) and needs no
+operator item waiting.
 
 Every tick of a swarm that is not stopping or stopped recycles the live front door master when all of these hold:
 
 | Recycled only when | Reason |
 |---|---|
-| The master's pane is live and reads `idle` or `done`, with nothing typed in its input box | A master that is working or waiting on a prompt is still in a turn. A dead pane is left to the `master down` step. |
-| No operator prompt reached the master in the last `AGENTIHOOKS_INBOX_QUIET_S` seconds (default 180) | The operator at the pane, for example running `/login`, holds the recycle until the quiet window passes. |
-| Among the last 40 pane lines, the last reply above the input box reads exactly `Login reached its time limit · Please run /login` | An older error above a later reply, or the text quoted inside a longer line, does not match. Only Claude panes are read, so a Codex master never matches. |
+| The master's pane is live and reads `idle` or `done`, with nothing typed in its input box | A master that is working or waiting on a prompt is still in a turn, and text in the input box, such as the operator typing `/login`, holds the recycle. A dead pane is left to the `master down` step. |
+| No operator prompt reached the master in the last `AGENTIHOOKS_INBOX_QUIET_S` seconds (default 180) | An operator at the pane holds the recycle until the quiet window passes. |
+| Among the last 40 pane lines, the last reply above the input box, or the last reply when no input box shows, reads exactly `Login reached its time limit · Please run /login` | An older error above a later reply, or the text quoted inside a longer line, does not match. Only Claude panes are read, so a Codex master never matches. |
 | The swarm recycled no master on a login limit in the last 15 minutes | A relaunch that lands on a login that still fails gets 15 minutes before the next recycle. |
 
 The recycle then:
@@ -7548,7 +7549,8 @@ The recycle then:
    [Master claude ai login](../reference/account-login.md#master-claude-ai-login) for how a launch orders and moves
    between slots.
 4. Stores a recovery handoff in the master seat, records a transfer with reason `stalled` and marks the master
-   `finished`, as the held on a prompt recycle does. The respawn starts a fresh master in the seat from that handoff.
+   `finished`, the same recycle as in [Master held on a prompt](#master-held-on-a-prompt). The respawn starts a fresh
+   master in the seat from that handoff.
    Journal `recycled master <name> in its seat: showed a Claude login that reached its time limit`.
 
 The recovery handoff names the login limit in its Intent and marks Done, Stopped at and Decisions and promises as
