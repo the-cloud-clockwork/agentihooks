@@ -25,6 +25,7 @@ class Grant:
     expires_ms: int
     base: str = ""
     grader: str = ""
+    manifest: str = ""
 
 
 @dataclass

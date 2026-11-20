@@ -77,7 +77,6 @@ WORKER_DESCRIPTION = {
             "CI_LAB_GIT_MIRROR",
             "UV_CACHE_DIR",
             "CI_LAB_WORK_ROOT",
-            "CI_LAB_MANIFEST",
             "CI_LAB_FLAKES",
             "CI_LAB_MUTATION_CACHE",
             "CI_LAB_KILLERS",
@@ -105,7 +104,6 @@ ENVIRONMENT_NAMES = (
     "CI_LAB_GIT_MIRROR",
     "UV_CACHE_DIR",
     "CI_LAB_WORK_ROOT",
-    "CI_LAB_MANIFEST",
     "CI_LAB_FLAKES",
     "CI_LAB_MUTATION_CACHE",
     "CI_LAB_KILLERS",
@@ -149,7 +147,6 @@ def test_environment_names() -> None:
     assert contract.RUNTIME_CONFIG == "CI_LAB_RUNTIME_CONFIG"
     assert contract.LAB_URL == "CI_LAB_URL"
     assert contract.WORK_ROOT == "CI_LAB_WORK_ROOT"
-    assert contract.MANIFEST == "CI_LAB_MANIFEST"
     assert contract.FLAKES == "CI_LAB_FLAKES"
     assert contract.MUTATION_CACHE == "CI_LAB_MUTATION_CACHE"
     assert contract.KILLERS == "CI_LAB_KILLERS"

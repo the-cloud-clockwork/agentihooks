@@ -93,6 +93,9 @@ class Signer:
     def upload_url(self, job: str, name: str) -> str:
         return f"{self.url}/{job}/{name}"
 
+    def manifest_url(self, path: str) -> str:
+        return f"{self.url}/{path}"
+
 
 class Slow:
     def __init__(self) -> None:
@@ -709,6 +712,20 @@ def test_the_client_speaks_the_lease_api_and_reads_a_refused_token_as_none(
     assert error.value.code == 400
     assert client.complete(lease.job, lease.token, "passed") is True
     assert found(jobs, lease.job).outcome == "passed"
+
+
+@pytest.mark.feature("lab-worker-lease-manifest")
+def test_the_client_leases_the_manifest_a_grant_names_with_its_signed_url(
+    scheduler: str, jobs: queue.Queue, sink: Sink
+) -> None:
+    jobs.enqueue([UNIT_A], "h1", {}, "b1", "g1", "lab/manifests/o--r/c1.json")
+
+    [lease] = worker.Client(scheduler).lease("pod-1", 1, CAPABILITIES, 0)
+
+    assert (lease.manifest, lease.manifest_url) == (
+        "lab/manifests/o--r/c1.json",
+        f"{sink.url}/lab/manifests/o--r/c1.json",
+    )
 
 
 @pytest.mark.feature("lab-worker-pod-loop")

@@ -59,6 +59,16 @@ def test_enqueue_stores_the_base_and_grader_revision_each_job_reads(jobs: queue.
     assert (found(jobs, "h2:test:c").base, found(jobs, "h2:test:c").grader) == ("", "")
 
 
+@pytest.mark.feature("lab-worker-lease-manifest")
+def test_enqueue_stores_the_manifest_each_job_names_and_a_record_without_one_reads_none(jobs: queue.Queue) -> None:
+    manifest = "lab/manifests/o--r/c1.json"
+    jobs.enqueue([unit("a"), unit("b")], "h1", {}, "b1", "g1", manifest)
+    jobs.enqueue([unit("c")], "h2", {})
+    jobs.client.hdel(f"{queue.PREFIX}job:h1:test:b", "manifest")
+
+    assert [found(jobs, job).manifest for job in ("h1:test:a", "h1:test:b", "h2:test:c")] == [manifest, "", ""]
+
+
 def take(
     jobs: queue.Queue, job: str, worker: str = "w1", token: str = "tok", expires_ms: int = 100, leased_ms: int = 0
 ) -> bool:

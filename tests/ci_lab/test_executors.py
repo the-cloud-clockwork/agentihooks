@@ -17,7 +17,7 @@ from typing import Any, cast
 
 import pytest
 
-from scripts import ci_wiring
+from scripts import ci_wiring, dep_manifest
 from scripts.ci_lab import contract, executors, metrics, run_static, run_tests, static_gates, venvs, worker
 from scripts.ci_lab.outcomes import FAILED, PASSED
 from scripts.ci_lab.sandbox import CannotRun, Outcome, PortAllocator, PortRange
@@ -175,6 +175,36 @@ def report(finished: Finished, pod: executors.Pod) -> dict[str, Any]:
     assert finished.report.name == "report.json"
     assert finished.report.parent.parent == pod.runs
     return json.loads(finished.report.read_text())
+
+
+COMMIT = "c" * 40
+MANIFEST = f"lab/manifests/o--r/{COMMIT}.json"
+RECORDS = {"tests/a.py::t": {"files": ["scripts/a.py"]}, "tests/b.py::t": {"files": []}}
+KEPT = {"commit": COMMIT, "tests": RECORDS}
+
+
+def served(root: Path, commit: str) -> Path:
+    tests = {test: {"units": [0], "files": record["files"], "escapes": False} for test, record in RECORDS.items()}
+    manifest: dict[str, Any] = {
+        "version": 2,
+        "commit": commit,
+        "environment": "lab",
+        "units": ["scripts/a.py::f"],
+        "tests": tests,
+        "lines": {test: {"scripts/a.py": [1]} for test in tests},
+    }
+    path = root / "served" / f"{commit}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(dep_manifest.pack(manifest)))
+    return path
+
+
+def naming(members: tuple[str, ...], url: str, slots: int = 1) -> Lease:
+    return Lease("job", "tok", "h1", Unit("test", "k", members), slots, 1500, "b1", "g1", MANIFEST, url)
+
+
+def passing(root: Path) -> run_tests.Verdict:
+    return run_tests.Verdict(PASSED, False, (), {}, 1, root / "log.txt", root / "cov")
 
 
 @pytest.fixture
@@ -463,10 +493,7 @@ def test_tests_runs_the_batch_on_the_lockfile_venv_with_the_manifest_and_flake_l
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, venv: Recorder
 ) -> None:
     tree = folder(tmp_path, "head", {LOCK: "lock-h"})
-    manifest = {"tests": {"tests/a.py::t": {"files": ["scripts/a.py"]}}}
-    suite = executors.Suite(
-        folder(tmp_path, "in", {"manifest.json": json.dumps(manifest)}) / "manifest.json", tmp_path / "flakes.jsonl"
-    )
+    suite = executors.Suite(folder(tmp_path, "kept", {f"{COMMIT}.json": json.dumps(KEPT)}), tmp_path / "flakes.jsonl")
     verdict = run_tests.Verdict(
         PASSED, True, ("x.txt",), {"tests/a.py::t": 0.5}, 2, tmp_path / "log.txt", tmp_path / "cov"
     )
@@ -475,12 +502,12 @@ def test_tests_runs_the_batch_on_the_lockfile_venv_with_the_manifest_and_flake_l
     trees = FakeWorktrees({"h1": tree})
     pod = pod_of(tmp_path, trees)
 
-    finished = executors.tests(pod, suite, lease("test", "k", ("tests/a.py::t",), slots=3))
+    finished = executors.tests(pod, suite, naming(("tests/a.py::t",), (tmp_path / "gone.json").as_uri(), slots=3))
 
     assert venv.calls == [
         (hashlib.sha256(b"lock-h").hexdigest(), tree, pod.root / "venvs", venvs.Build(pod.ports, WHITELIST, 30.0))
     ]
-    lab = run_tests.Lab(pod.runs, pod.ports, WHITELIST, manifest, tmp_path / "flakes.jsonl", 30.0, False)
+    lab = run_tests.Lab(pod.runs, pod.ports, WHITELIST, KEPT, tmp_path / "flakes.jsonl", 30.0, False)
     assert ran.calls == [(("tests/a.py::t",), tree, tmp_path / "venv", 3, lab)]
     assert finished == Finished(PASSED, finished.report, tmp_path / "log.txt")
     assert report(finished, pod) == {
@@ -492,6 +519,57 @@ def test_tests_runs_the_batch_on_the_lockfile_venv_with_the_manifest_and_flake_l
         "caches": CACHED,
     }
     assert trees.calls == [("lease", "h1"), ("release", "h1")]
+
+
+@pytest.mark.feature("lab-worker-lease-manifest")
+def test_tests_runs_the_batch_with_the_manifest_its_lease_names_where_the_pod_holds_no_manifest_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, venv: Recorder
+) -> None:
+    tree = folder(tmp_path, "head", {LOCK: "lock-h"})
+    ran = Recorder(passing(tmp_path))
+    monkeypatch.setattr(executors.run_tests, "run", ran)
+    pod = pod_of(tmp_path, FakeWorktrees({"h1": tree}))
+    suite = executors.Suite(pod.root / "manifests", tmp_path / "flakes.jsonl")
+
+    executors.tests(pod, suite, naming(("tests/a.py::t",), served(tmp_path, COMMIT).as_uri()))
+
+    lab = run_tests.Lab(pod.runs, pod.ports, WHITELIST, KEPT, tmp_path / "flakes.jsonl", 30.0, False)
+    assert ran.calls == [(("tests/a.py::t",), tree, tmp_path / "venv", 1, lab)]
+
+
+@pytest.mark.feature("lab-worker-lease-manifest")
+def test_a_unit_naming_a_manifest_its_pod_fetched_before_runs_on_the_kept_copy_without_fetching_again(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, venv: Recorder
+) -> None:
+    trees = FakeWorktrees({"h1": folder(tmp_path, "head", {LOCK: "lock-h"})})
+    ran = Recorder(passing(tmp_path))
+    monkeypatch.setattr(executors.run_tests, "run", ran)
+    suite = executors.Suite(tmp_path / "kept", tmp_path / "flakes.jsonl")
+    source = served(tmp_path, COMMIT)
+
+    executors.tests(pod_of(tmp_path / "one", trees), suite, naming(("tests/a.py::t",), source.as_uri()))
+    source.unlink()
+    executors.tests(pod_of(tmp_path / "two", trees), suite, naming(("tests/b.py::t",), source.as_uri()))
+
+    assert [cast("run_tests.Lab", call[4]).manifest for call in ran.calls] == [KEPT, KEPT]
+    assert json.loads((tmp_path / "kept" / f"{COMMIT}.json").read_text()) == KEPT
+    assert sorted(path.name for path in (tmp_path / "kept").iterdir()) == [f"{COMMIT}.json"]
+
+
+@pytest.mark.feature("lab-worker-lease-manifest")
+def test_a_manifest_that_records_another_commit_than_its_lease_names_is_refused_by_name(
+    tmp_path: Path, venv: Recorder
+) -> None:
+    trees = FakeWorktrees({"h1": folder(tmp_path, "head", {LOCK: "lock-h"})})
+    suite = executors.Suite(tmp_path / "kept", tmp_path / "flakes.jsonl")
+    other = "e" * 40
+
+    with pytest.raises(executors.ManifestRefused) as refused:
+        executors.tests(pod_of(tmp_path, trees), suite, naming(("tests/a.py::t",), served(tmp_path, other).as_uri()))
+
+    assert str(refused.value) == f"{MANIFEST} records commit {other}"
+    assert not (tmp_path / "kept" / f"{COMMIT}.json").exists()
+    assert (trees.calls, venv.calls) == ([], [])
 
 
 @pytest.fixture
@@ -705,7 +783,7 @@ def test_the_tracked_listing_refuses_a_tree_git_cannot_read(tmp_path: Path) -> N
 @pytest.mark.feature("lab-worker-executors")
 def test_executors_name_the_adapter_of_every_unit_kind(tmp_path: Path) -> None:
     pod = pod_of(tmp_path, FakeWorktrees({}))
-    suite = executors.Suite(tmp_path / "manifest.json", tmp_path / "flakes.jsonl")
+    suite = executors.Suite(tmp_path / "manifests", tmp_path / "flakes.jsonl")
     graded = mutation_settings(tmp_path)
 
     found = executors.executors(pod, suite, graded)
@@ -728,7 +806,6 @@ def environ_of(tmp_path: Path) -> dict[str, str]:
         contract.SCHEDULER_URL: "http://scheduler:8800",
         contract.GIT_MIRROR: str(tmp_path / "node"),
         contract.WORK_ROOT: str(tmp_path / "work"),
-        contract.MANIFEST: str(tmp_path / "manifest.json"),
         contract.FLAKES: str(tmp_path / "flakes.jsonl"),
         contract.MUTATION_CACHE: str(tmp_path / "cache"),
         contract.KILLERS: str(tmp_path / "killers.json"),
@@ -747,7 +824,7 @@ def test_settings_read_the_worker_contract_environment(tmp_path: Path) -> None:
     assert (pod.root, pod.whitelist, pod.timeout, pod.clock) == (work, {"LANG": "C.UTF-8"}, 1800.0, time.monotonic)
     assert (work / "runs").is_dir() and (work / "venvs").is_dir()
     assert executors.settings(environ_of(tmp_path))[0].root == work
-    assert suite == executors.Suite(tmp_path / "manifest.json", tmp_path / "flakes.jsonl")
+    assert suite == executors.Suite(work / "manifests", tmp_path / "flakes.jsonl")
     assert graded == executors.Mutation(tmp_path / "cache", tmp_path / "killers.json", 90.5, 3)
     ranges: list[PortRange] = []
     with pytest.raises(CannotRun):

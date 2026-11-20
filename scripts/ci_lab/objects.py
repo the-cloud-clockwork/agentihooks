@@ -41,6 +41,8 @@ class Objects(Protocol):
 
     def upload_url(self, path: str, expires_s: int) -> str: ...
 
+    def download_url(self, path: str, expires_s: int) -> str: ...
+
 
 def unit_path(kind: str, key: str, name: str) -> str:
     """Return the path of a unit's report or log, lab/<kind>/<digest>/<file>, refusing a key of another kind."""
@@ -105,6 +107,10 @@ class LocalObjects:
         """Return the file URL a local worker writes the object to; a local file never expires."""
         return contain(self.root, path).as_uri()
 
+    def download_url(self, path: str, expires_s: int) -> str:
+        """Return the file URL a local worker reads the object from; a local file never expires."""
+        raise NotImplementedError(path)
+
 
 class S3Objects:
     """Objects in an S3 compatible bucket such as MinIO: conditional puts and presigned PUT URLs."""
@@ -136,6 +142,10 @@ class S3Objects:
         params = {"Bucket": self.bucket, "Key": self.prefix + path}
         return self.client.generate_presigned_url("put_object", Params=params, ExpiresIn=expires_s)
 
+    def download_url(self, path: str, expires_s: int) -> str:
+        """Return a presigned GET URL for the object."""
+        raise NotImplementedError(path)
+
 
 class Uploads:
     """The lease API upload signer: presigned PUT URLs for a leased job's report and log."""
@@ -147,3 +157,7 @@ class Uploads:
     def upload_url(self, job: str, name: str) -> str:
         """Return the URL a worker puts the job's report or log to."""
         return self.objects.upload_url(upload_path(job, name), self.expires_s)
+
+    def manifest_url(self, path: str) -> str:
+        """Return the URL a worker fetches the stored dependency manifest at the path from."""
+        raise NotImplementedError(path)

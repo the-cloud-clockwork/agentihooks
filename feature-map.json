@@ -9691,6 +9691,24 @@
       ]
     },
     {
+      "id": "lab-worker-lease-manifest",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2752",
+      "behaviour": "Every job a CI lab grade enqueues names the store path of the dependency manifest its test units are keyed on, lab/manifests/<owner>--<name>/<commit>.json, or none when the grade has no manifest. The lease reply carries that name with a presigned GET URL the lease API signer mints for it. The worker's test adapter fetches the manifest through that URL the first time its pod meets the commit, keeps each test's files in the pod's manifests folder and runs the batch with them, so a test unit needs no manifest file on the pod. A fetched manifest that records another commit than the one its lease names is refused by name; the adapter keeps nothing and leases no tree.",
+      "seam": "scripts.ci_lab.scheduler Scheduler admission, scripts.ci_lab.queue Queue.enqueue and job, scripts.ci_lab.leases Leases.lease, scripts.ci_lab.lease_api POST /lease, scripts.ci_lab.objects Uploads.manifest_url, scripts.ci_lab.worker Client.lease and scripts.ci_lab.executors tests and manifest",
+      "tests": [
+        "tests/ci_lab/test_queue.py::test_enqueue_stores_the_manifest_each_job_names_and_a_record_without_one_reads_none",
+        "tests/ci_lab/test_leases.py::test_a_grant_carries_the_manifest_its_job_names",
+        "tests/ci_lab/test_lease_api.py::test_lease_signs_a_get_url_for_the_manifest_its_job_names",
+        "tests/ci_lab/test_store.py::test_the_signer_mints_a_get_url_for_a_stored_manifest_and_names_a_local_manifest_file",
+        "tests/ci_lab/test_worker.py::test_the_client_leases_the_manifest_a_grant_names_with_its_signed_url",
+        "tests/ci_lab/test_scheduler_manifest.py::test_each_enqueued_job_names_the_manifest_its_grade_keyed_its_test_units_on",
+        "tests/ci_lab/test_executors.py::test_tests_runs_the_batch_with_the_manifest_its_lease_names_where_the_pod_holds_no_manifest_file",
+        "tests/ci_lab/test_executors.py::test_a_unit_naming_a_manifest_its_pod_fetched_before_runs_on_the_kept_copy_without_fetching_again",
+        "tests/ci_lab/test_executors.py::test_a_manifest_that_records_another_commit_than_its_lease_names_is_refused_by_name"
+      ]
+    },
+    {
       "id": "lab-worker-metrics",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-worker-metrics",

@@ -46,6 +46,9 @@ class Bucket:
         assert Bucket == BUCKET
         self.blobs.pop(Key, None)
 
+    def generate_presigned_url(self, ClientMethod: str, Params: dict[str, str], ExpiresIn: int) -> str:
+        return f"https://signed.test/{ClientMethod}/{Params['Bucket']}/{Params['Key']}?expires={ExpiresIn}"
+
 
 def key(kind: str, seed: str) -> str:
     return f"{kind}-v1-{digests.digest({'seed': seed})}"
@@ -336,3 +339,13 @@ def test_local_uploads_name_the_file_the_worker_writes(tmp_path: Path) -> None:
     url = objects.Uploads(objects.LocalObjects(tmp_path)).upload_url("h1:test:k", "report")
 
     assert url == (tmp_path.resolve() / "lab" / "uploads" / "h1:test:k" / "report.json").as_uri()
+
+
+@pytest.mark.feature("lab-worker-lease-manifest")
+def test_the_signer_mints_a_get_url_for_a_stored_manifest_and_names_a_local_manifest_file(tmp_path: Path) -> None:
+    path = "lab/manifests/o--r/c1.json"
+    signed = objects.Uploads(objects.S3Objects(Bucket(), BUCKET, "ci/"), expires_s=600).manifest_url(path)
+    local = objects.Uploads(objects.LocalObjects(tmp_path)).manifest_url(path)
+
+    assert signed == f"https://signed.test/get_object/{BUCKET}/ci/{path}?expires=600"
+    assert local == (tmp_path.resolve() / path).as_uri()

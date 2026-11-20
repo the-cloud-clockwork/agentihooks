@@ -43,6 +43,7 @@ __all__ = [
     "STATIC",
     "STATS",
     "TEST",
+    "ManifestRefused",
     "Mutation",
     "Pod",
     "Suite",
@@ -149,11 +150,16 @@ class Pod:
         return Build(self.ports, self.whitelist, self.timeout)
 
 
+class ManifestRefused(RuntimeError):
+    """The dependency manifest a test unit's lease URL served records another commit than the one the lease names."""
+
+
 @dataclass(frozen=True)
 class Suite:
-    """The test adapter's inputs beyond the lease: the dependency manifest file and the flake ledger."""
+    """The test adapter's inputs beyond the lease: the folder that keeps each dependency manifest a lease named, by its
+    commit, and the flake ledger."""
 
-    manifest: Path
+    manifests: Path
     flakes: Path
 
 
@@ -241,7 +247,7 @@ def tests(pod: Pod, suite: Suite, lease: Lease) -> Finished:
     ledger, on as many workers as its slots; the report counts the git and uv cache lookups it made."""
     with pod.trees.shared(lease.head) as ((tree,), fetched):
         venv, built = venvs.venv_for(lockfile_digest(tree), tree, pod.venvs, pod.build)
-        manifest = json.loads(suite.manifest.read_text())
+        manifest = json.loads(suite.manifests.read_text())
         lab = run_tests.Lab(pod.runs, pod.ports, pod.whitelist, manifest, suite.flakes, pod.timeout, False)
         started = pod.clock()
         verdict = run_tests.run(lease.unit.members, tree, venv, lease.slots, lab)
