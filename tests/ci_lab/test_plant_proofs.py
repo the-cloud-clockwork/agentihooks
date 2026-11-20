@@ -136,20 +136,29 @@ def test_ordered_edits_preserve_all_other_bytes_and_the_executable_mode(reposito
     assert not (repository / "None").exists()
 
 
-def test_git_failures_are_raised_and_every_git_process_has_a_deadline(repository: Path) -> None:
+def test_git_failures_are_raised_and_every_git_process_has_a_deadline(
+    repository: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     real_run = subprocess.run
+    directory = repository.parent / "alternate-index"
+    directory.mkdir()
+    monkeypatch.setenv("GIT_INDEX_FILE", str(directory / "index"))
 
     def bounded(arguments: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         assert kwargs["timeout"] == 60
         assert kwargs["check"] is True
+        if arguments[3] == "rev-parse" and arguments[-1].endswith("^{commit}"):
+            assert arguments[4] == "--verify"
         if index := kwargs.get("env", {}).get("GIT_INDEX_FILE"):
-            assert Path(index).parent.parent == repository / ".git"
+            if Path(index) != directory / "index":
+                assert Path(index).parent.parent == directory
         return real_run(arguments, **kwargs)
 
     with patch.object(plant_proofs.subprocess, "run", side_effect=bounded):
         plant_proofs.prepare(repository, "lint", "HEAD")
         with pytest.raises(subprocess.CalledProcessError):
             plant_proofs.prepare(repository, "lint", "missing-revision")
+    assert not (directory / "index").exists()
 
 
 @pytest.mark.feature("lab-static-plant-proofs")

@@ -111,7 +111,7 @@ class Lab:
         self.seen[head] = self.seen.get(head, 0) + 1
         if self.incomplete or self.pending_first and self.seen[head] == 1:
             rows[-2]["status"] = "in_progress"
-        rows.append(self.check("lab-shadow/reusable/required", "success", run))
+        rows.append(self.check("lab-shadow/required/extra", "success", run))
         if self.unrelated:
             for row in rows:
                 row["external_id"] = "other-grade"
@@ -183,18 +183,31 @@ def test_a_failed_push_cannot_be_used_as_a_proof(repository: Path) -> None:
 def test_a_wrong_red_gate_or_a_green_plant_is_refused(repository: Path, failure: str, required: str) -> None:
     lab = Lab(repository)
     lab.failure, lab.required = failure, required
-    with pytest.raises(ValueError, match="plant"):
+    with pytest.raises(ValueError, match=r"\bplant\b"):
         plant_grade.prove(repository, "lint", "HEAD", REPOSITORY, lab.ports())
 
 
+@pytest.mark.parametrize("timeout_s", [0.5, 2, 900])
 @pytest.mark.feature("lab-static-plant-proofs")
-def test_an_incomplete_grade_expires_without_pushing_the_plant(repository: Path) -> None:
+def test_an_incomplete_grade_expires_without_pushing_the_plant(repository: Path, timeout_s: float) -> None:
     lab = Lab(repository)
+    lab.now = 10
     lab.incomplete = True
-    with pytest.raises(TimeoutError, match="grade"):
-        plant_grade.prove(repository, "lint", "HEAD", REPOSITORY, lab.ports(), timeout_s=2)
+
+    def pending(path: str, remaining: float) -> Mapping[str, Any]:
+        assert remaining == timeout_s
+        rows = lab.fetch(path, remaining)
+        lab.now += timeout_s - 0.5
+        return rows
+
+    ports = plant_grade.Ports(pending, lab.sleep, lab.clock, lab.push)
+    with pytest.raises(TimeoutError, match=r"^grade .+ did not finish within .+ seconds$"):
+        if timeout_s == 900:
+            plant_grade.prove(repository, "lint", "HEAD", REPOSITORY, ports)
+        else:
+            plant_grade.prove(repository, "lint", "HEAD", REPOSITORY, ports, timeout_s=timeout_s)
     assert len(lab.heads) == 1
-    assert lab.now == 2
+    assert lab.now == 10 + timeout_s
 
 
 @pytest.mark.feature("lab-static-plant-proofs")
@@ -237,7 +250,7 @@ def test_two_required_checks_make_the_grade_ambiguous(repository: Path) -> None:
         )
         return {"check_runs": [*rows, {**required, "name": "lab/required"}]}
 
-    with pytest.raises(ValueError, match="ambiguous"):
+    with pytest.raises(ValueError, match=r"^grade grade-v1-[a-f0-9]+ has ambiguous required checks$"):
         plant_grade.prove(
             repository, "lint", "HEAD", REPOSITORY, plant_grade.Ports(duplicate, lab.sleep, lab.clock, lab.push)
         )
@@ -359,7 +372,7 @@ def test_an_excessive_history_is_refused_after_one_hundred_pages(repository: Pat
 @pytest.mark.feature("lab-static-plant-proofs")
 def test_a_nonpositive_grade_deadline_is_refused_before_pushing(repository: Path, timeout_s: float) -> None:
     lab = Lab(repository)
-    with pytest.raises(ValueError, match="positive"):
+    with pytest.raises(ValueError, match="^the grade timeout must be positive$"):
         plant_grade.prove(repository, "lint", "HEAD", REPOSITORY, lab.ports(), timeout_s=timeout_s)
     assert git(repository, "ls-remote", "--heads", "origin") == ""
 
@@ -387,11 +400,27 @@ def test_different_bases_use_independent_plant_branches(repository: Path) -> Non
 
 
 @pytest.mark.feature("lab-static-plant-proofs")
-def test_the_module_dispatch_exposes_the_plant_command(capsys: pytest.CaptureFixture[str]) -> None:
+def test_the_module_dispatch_exposes_the_plant_command(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     with pytest.raises(SystemExit) as result:
         entrypoint.main(["grade", "--help"], {})
     assert result.value.code == 0
-    assert "--plant" in capsys.readouterr().out
+    help_text = capsys.readouterr().out
+    assert help_text.split(" [-h]", 1)[0] == "usage: python -m scripts.ci_lab grade"
+    assert "--plant" in help_text
+    for arguments in (["grade"], ["grade", "--plant", "other"]):
+        with pytest.raises(SystemExit) as invalid:
+            entrypoint.main(arguments, {})
+        assert invalid.value.code == 2
+
+    def command(argv: list[str], environ: Mapping[str, str]) -> int:
+        assert argv == ["--plant", "lint"]
+        assert environ == {"GITHUB_STEP_SUMMARY": "summary.md"}
+        return 23
+
+    monkeypatch.setattr(plant_grade, "main", command)
+    assert entrypoint.main(["grade", "--plant", "lint"], {"GITHUB_STEP_SUMMARY": "summary.md"}) == 23
 
 
 @pytest.mark.parametrize("name", ["lint", "gate-script"])
@@ -438,15 +467,30 @@ def test_the_command_uses_real_transport_adapters_and_normalizes_the_remote(
 
     def transport(arguments: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         if arguments[3:] == ["remote", "get-url", "origin"]:
+            assert arguments[:3] == ["git", "-C", str(repository)]
             return subprocess.CompletedProcess(arguments, 0, "git@github.com:Acme/widgets.git\n", "")
         if Path(arguments[0]).name == "git":
+            if arguments[3] == "ls-tree":
+                assert len(arguments) == 8 and arguments[4] == "-z" and arguments[6] == "--"
+            if arguments[3:5] == ["cat-file", "blob"]:
+                assert kwargs == {"capture_output": True, "check": True, "timeout": 30}
             return real_run(arguments, **kwargs)
-        assert "api" in arguments
-        path = arguments[arguments.index("api") + 1]
+        assert arguments[:2] == ["gh", "api"]
+        path = arguments[2]
         if "/check-runs?" in path:
+            assert arguments == ["gh", "api", path]
+            assert kwargs == {"capture_output": True, "text": True, "check": True, "timeout": 30}
             return subprocess.CompletedProcess(arguments, 0, json.dumps(lab.fetch(path)), "")
         method = arguments[arguments.index("--method") + 1]
         body = json.loads(kwargs["input"]) if kwargs.get("input") is not None else None
+        assert arguments == ["gh", "api", path, "--method", method, *(["--input", "-"] if body is not None else [])]
+        assert kwargs == {
+            "input": json.dumps(body) if body is not None else None,
+            "capture_output": True,
+            "text": True,
+            "check": True,
+            "timeout": 30,
+        }
         result = api(method, path, body)
         if body and (path.endswith("/refs") or method == "PATCH"):
             branch = body["ref"] if method == "POST" else "refs/" + path.split("/git/refs/", 1)[1]
@@ -553,5 +597,107 @@ def test_a_command_for_another_host_is_refused_before_pushing(
     )
     answer = capsys.readouterr()
     assert answer.out == ""
-    assert "GitHub" in answer.err
+    assert answer.err == "a GitHub repository URL is required\n"
     assert git(repository, "ls-remote", "--heads", "origin") == ""
+
+
+@pytest.mark.parametrize(
+    "remote,canonical",
+    [
+        ("git@github.com:Acme/widgetX", "https://github.com/acme/widgetx"),
+        ("https://github.com/Acme/widgets.git/", REPOSITORY),
+    ],
+)
+@pytest.mark.feature("lab-static-plant-proofs")
+def test_the_command_defaults_and_remote_normalization(
+    repository: Path,
+    remote: str,
+    canonical: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.chdir(repository)
+    git(repository, "remote", "set-url", "origin", remote)
+
+    def proof(
+        root: Path,
+        name: str,
+        base: str,
+        normalized: str,
+        ports: plant_grade.Ports,
+        timeout_s: float,
+    ) -> dict[str, str]:
+        assert root == repository
+        assert name == "lint"
+        assert base == "origin/dev"
+        assert normalized == canonical
+        assert timeout_s == 900
+        return {"plant": name}
+
+    monkeypatch.setattr(plant_grade, "prove", proof)
+    assert plant_grade.main(["--plant", "lint"], {}) == 0
+    assert json.loads(capsys.readouterr().out) == {"plant": "lint"}
+
+
+@pytest.mark.parametrize("planted,missing,extra", [(False, True, False), (False, False, True), (True, False, True)])
+@pytest.mark.feature("lab-static-plant-proofs")
+def test_a_grade_requires_its_named_gate_and_no_other_failure(
+    repository: Path, planted: bool, missing: bool, extra: bool
+) -> None:
+    lab = Lab(repository)
+
+    def checks(path: str, timeout_s: float) -> Mapping[str, Any]:
+        result = lab.fetch(path, timeout_s)
+        head = path.split("/")[4]
+        red = git(repository, "show", f"{head}:sample.py") == "after"
+        if red == planted:
+            run = grade_key(GradeInputs(REPOSITORY, head, lab.base, "pull_request", lab.base))
+            if missing:
+                result["check_runs"][:] = [row for row in result["check_runs"] if row["name"] != "lab-shadow/lint"]
+            if extra:
+                result["check_runs"].append(lab.check("lab-shadow/type-gate", "failure", run))
+        return result
+
+    with pytest.raises(ValueError, match="wrong verdict"):
+        plant_grade.prove(
+            repository, "lint", "HEAD", REPOSITORY, plant_grade.Ports(checks, lab.sleep, lab.clock, lab.push)
+        )
+
+
+@pytest.mark.feature("lab-static-plant-proofs")
+def test_a_check_request_never_starts_at_its_deadline(repository: Path) -> None:
+    lab = Lab(repository)
+    lab.now = 10
+
+    def forbidden(path: str, timeout_s: float) -> Mapping[str, Any]:
+        raise AssertionError("an expired grade must not issue another request")
+
+    with pytest.raises(TimeoutError, match="^grade current expired while reading checks$"):
+        plant_grade._matching(
+            REPOSITORY, lab.base, "current", plant_grade.Ports(forbidden, lab.sleep, lab.clock, lab.push), 10
+        )
+
+
+@pytest.mark.feature("lab-static-plant-proofs")
+def test_proof_links_distinguish_the_twin_and_plant_and_accept_a_named_diagnostic(repository: Path) -> None:
+    catalog = repository / "tests/ci_lab/plants/lint.json"
+    definition = json.loads(catalog.read_text())
+    definition["reason"] = "I001: import block order"
+    catalog.write_text(json.dumps(definition))
+    git(repository, "add", str(catalog))
+    git(repository, "commit", "-qm", "Describe the diagnostic")
+    lab = Lab(repository)
+
+    def checks(path: str, timeout_s: float) -> Mapping[str, Any]:
+        result = lab.fetch(path, timeout_s)
+        head = path.split("/")[4]
+        for row in result["check_runs"]:
+            row["html_url"] += "/" + head
+        return result
+
+    result = plant_grade.prove(
+        repository, "lint", "HEAD", REPOSITORY, plant_grade.Ports(checks, lab.sleep, lab.clock, lab.push)
+    )
+    assert result["green"] == f"https://github.com/acme/widgets/runs/required/{lab.heads[0]}"
+    assert result["red"] == f"https://github.com/acme/widgets/runs/required/{lab.heads[1]}"
+    assert result["reason"] == "I001: import block order"

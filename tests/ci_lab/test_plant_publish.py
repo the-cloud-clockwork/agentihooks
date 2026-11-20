@@ -31,12 +31,20 @@ def root(tmp_path: Path) -> Path:
     git(root, "config", "user.email", "proof@example.invalid")
     (root / "sample.py").write_text("before = 'café'\n")
     (root / "sample.py").chmod(0o755)
+    (root / "--extra\tmode.py").write_text("before\n")
     (root / "untouched").write_bytes(b"unchanged\x00bytes\r\n")
     catalog = root / "tests/ci_lab/plants"
     catalog.mkdir(parents=True)
     (catalog / "lint.json").write_text(
         json.dumps(
-            {"gate": "lint", "reason": "I001", "edits": [{"path": "sample.py", "before": "before", "after": "after"}]}
+            {
+                "gate": "lint",
+                "reason": "I001",
+                "edits": [
+                    {"path": "sample.py", "before": "before", "after": "after"},
+                    {"path": "--extra\tmode.py", "before": "before", "after": "after"},
+                ],
+            }
         )
     )
     git(root, "add", ".")
@@ -105,7 +113,7 @@ class GitHub:
                 assert body["force"] is False
                 git(self.root, "merge-base", "--is-ancestor", branch, body["sha"])
             git(self.root, "update-ref", branch, body["sha"])
-            return {"object": {"sha": body["sha"]}}
+            return {"object": {"sha": "0" * 40 if self.corrupt == "refs" else body["sha"]}}
         return {"sha": "0" * 40 if resource == self.corrupt else sha}
 
 
@@ -113,6 +121,9 @@ class GitHub:
 def test_rest_publication_preserves_exact_trees_and_commit_identity(root: Path) -> None:
     pair = plant_proofs.prepare(root, "lint", "HEAD")
     api = GitHub(root)
+    (root / "unrelated.py").write_text("other = True\n")
+    git(root, "add", "unrelated.py")
+    git(root, "commit", "-qm", "Advance the checkout")
     original = git(root, "rev-parse", "HEAD")
     for head in (pair.green, pair.red):
         plant_publish.publish(root, pair, head, REPOSITORY, api)
@@ -142,7 +153,7 @@ def test_rest_reruns_never_rewind_a_completed_plant(root: Path) -> None:
     assert git(root, "rev-parse", f"{PLANT_PREFIX}lint-{pair.base}") == pair.red
 
 
-@pytest.mark.parametrize("resource", ["blobs", "trees", "commits"])
+@pytest.mark.parametrize("resource", ["blobs", "trees", "commits", "refs"])
 @pytest.mark.feature("lab-static-plant-proofs")
 def test_rest_rejects_an_unexpected_object_identity_before_moving_the_ref(root: Path, resource: str) -> None:
     pair = plant_proofs.prepare(root, "lint", "HEAD")
@@ -151,14 +162,15 @@ def test_rest_rejects_an_unexpected_object_identity_before_moving_the_ref(root: 
     api.corrupt = resource
     with pytest.raises(ValueError, match="identity"):
         plant_publish.publish(root, pair, pair.red, REPOSITORY, api)
-    assert git(root, "rev-parse", f"{PLANT_PREFIX}lint-{pair.base}") == pair.green
+    assert git(root, "rev-parse", f"{PLANT_PREFIX}lint-{pair.base}") == (pair.red if resource == "refs" else pair.green)
 
 
+@pytest.mark.parametrize("head", ["green", "red"])
 @pytest.mark.feature("lab-static-plant-proofs")
-def test_rest_rejects_a_divergent_ref_without_writing_objects(root: Path) -> None:
+def test_rest_rejects_a_divergent_ref_without_writing_objects(root: Path, head: str) -> None:
     pair = plant_proofs.prepare(root, "lint", "HEAD")
     api = GitHub(root)
     git(root, "update-ref", f"{PLANT_PREFIX}lint-{pair.base}", pair.base)
     with pytest.raises(ValueError, match="divergent"):
-        plant_publish.publish(root, pair, pair.green, REPOSITORY, api)
+        plant_publish.publish(root, pair, getattr(pair, head), REPOSITORY, api)
     assert len(api.calls) == 1 and api.calls[0][0] == "GET"
