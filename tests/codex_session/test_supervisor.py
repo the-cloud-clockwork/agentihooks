@@ -1182,19 +1182,31 @@ def test_a_hive_member_serves_the_execution_its_controller_admitted(store, serve
     assert len(server.commands) == 1
 
 
-@pytest.mark.parametrize("change", [{"transport": ""}, {"hive": "other-hive"}, {"harness": "claude"}])
+@pytest.mark.parametrize(
+    "case",
+    [
+        ({"transport": ""}, "transport: seat='', launch='app_server'"),
+        ({"hive": "other-hive"}, "hive: seat='other-hive', launch='m1'"),
+        ({"harness": "claude"}, "harness: seat='claude', launch='codex'"),
+    ],
+)
 def test_a_hive_member_refuses_an_execution_it_was_not_admitted_to_serve(
-    store, server, clock, root, tmp_path, monkeypatch, change
-):
+    store: RedisStore,
+    server: Server,
+    clock: Clock,
+    root: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    case: tuple[dict[str, str], str],
+) -> None:
     from scripts.swarm import commands
 
     monkeypatch.setattr(commands, "hive_id", lambda: "m1")
     spec = launch_spec(store, server, tmp_path)
+    change, details = case
     admitted = hive_admitted(store, spec, **change)
     failure = failed(store, server, clock, root, replace(spec, execution_id=admitted.execution_id), "execution")
-    assert str(failure) == (
-        f"execution {admitted.execution_id} is not this seat's launching Codex app-server execution on this hive"
-    )
+    assert str(failure) == supervisor.NOT_ADMITTED.format(admitted.execution_id) + ": " + details
     assert server.commands == []
 
 
@@ -1322,9 +1334,15 @@ def test_a_hive_member_refuses_a_hub_admitted_execution_that_left_starting_befor
     spec = launch_spec(store, server, tmp_path)
     admitted = hub_admitted(store, spec)
     store.execution_registry.set_launch(SLUG, admitted.execution_id, {"state": "finished"})
-    monkeypatch.setattr(store.execution_registry, "get", lambda slug, execution_id: admitted)
+    read_execution = store.execution_registry.get
+    snapshots = iter([admitted])
+    monkeypatch.setattr(
+        store.execution_registry, "get", lambda slug, execution_id: next(snapshots, read_execution(slug, execution_id))
+    )
     failure = failed(store, server, clock, root, replace(spec, execution_id=admitted.execution_id), "execution")
-    assert str(failure) == supervisor.NOT_ADMITTED.format(admitted.execution_id)
+    assert str(failure) == (
+        supervisor.NOT_ADMITTED.format(admitted.execution_id) + ": state: seat='finished', launch='starting'"
+    )
     [current] = store.executions(SLUG, SEAT)
     assert (current.execution_id, current.state, current.transport) == (admitted.execution_id, "finished", "")
     assert server.commands == []
@@ -1433,4 +1451,25 @@ def test_adoption_refusal_rereads_the_state_after_an_atomic_bind_refusal(
     assert ending == {"reason": str(failure), "generation": admitted.generation}
     current = store.execution(SLUG, admitted.execution_id)
     assert (current.state, current.harness, current.transport) == ("working", "", "")
+    assert server.commands == []
+
+
+@pytest.mark.feature("codex-adopt-refusal-fields")
+def test_adoption_refusal_names_an_atomic_bind_refusal_when_the_snapshot_matches(
+    store: RedisStore, server: Server, clock: Clock, root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import commands
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "m1")
+    spec = launch_spec(store, server, tmp_path)
+    admitted = hub_admitted(store, spec)
+    monkeypatch.setattr(store.execution_registry, "set_launch", lambda *args, **kwargs: False)
+    failure = failed(store, server, clock, root, replace(spec, execution_id=admitted.execution_id), "execution")
+    assert str(failure) == (
+        supervisor.NOT_ADMITTED.format(admitted.execution_id)
+        + ": atomic bind refused with no differing field in the refreshed snapshot"
+    )
+    ending = json.loads(store.redis.hget(store.key(SLUG, "launch-endings"), admitted.execution_id))
+    assert ending == {"reason": str(failure), "generation": admitted.generation}
+    assert store.execution(SLUG, admitted.execution_id) == admitted
     assert server.commands == []

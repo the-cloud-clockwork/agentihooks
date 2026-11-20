@@ -10998,7 +10998,8 @@
         "tests/codex_session/test_supervisor.py::test_adoption_refusal_names_changed_fields_and_keeps_the_launch_ending",
         "tests/codex_session/test_supervisor.py::test_adoption_refusal_records_the_replacement_execution_without_ending_it",
         "tests/codex_session/test_supervisor.py::test_adoption_refusal_keeps_a_missing_seat_in_the_launch_ending",
-        "tests/codex_session/test_supervisor.py::test_adoption_refusal_rereads_the_state_after_an_atomic_bind_refusal"
+        "tests/codex_session/test_supervisor.py::test_adoption_refusal_rereads_the_state_after_an_atomic_bind_refusal",
+        "tests/codex_session/test_supervisor.py::test_adoption_refusal_names_an_atomic_bind_refusal_when_the_snapshot_matches"
       ]
     }
   ],
