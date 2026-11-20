@@ -1328,3 +1328,64 @@ def test_a_hive_member_refuses_a_hub_admitted_execution_that_left_starting_befor
     [current] = store.executions(SLUG, SEAT)
     assert (current.execution_id, current.state, current.transport) == (admitted.execution_id, "finished", "")
     assert server.commands == []
+
+
+@pytest.mark.feature("codex-adopt-refusal-fields")
+@pytest.mark.parametrize(
+    "case",
+    [
+        ({"state": "working"}, ["state: seat='working', launch='launching'"]),
+        ({"harness": "claude"}, ["harness: seat='claude', launch='codex'"]),
+        ({"transport": ""}, ["transport: seat='', launch='codex-app-server'"]),
+        ({"hive": "other-hive"}, ["hive: seat='other-hive', launch='m1'"]),
+        (
+            {"state": "working", "harness": "claude", "transport": "", "hive": "other-hive"},
+            [
+                "state: seat='working', launch='launching'",
+                "harness: seat='claude', launch='codex'",
+                "transport: seat='', launch='codex-app-server'",
+                "hive: seat='other-hive', launch='m1'",
+            ],
+        ),
+    ],
+    ids=["state", "harness", "transport", "hive", "multiple"],
+)
+def test_adoption_refusal_names_changed_fields_and_keeps_the_launch_ending(
+    store: RedisStore,
+    server: Server,
+    clock: Clock,
+    root: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    case: tuple[dict[str, str], list[str]],
+) -> None:
+    from scripts.swarm import commands
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "m1")
+    fields, details = case
+    spec = launch_spec(store, server, tmp_path)
+    admitted = hive_admitted(store, spec, **fields)
+    failure = failed(store, server, clock, root, replace(spec, execution_id=admitted.execution_id), "execution")
+    assert str(failure) == supervisor.NOT_ADMITTED.format(admitted.execution_id) + ": " + "; ".join(details)
+    ending = json.loads(store.redis.hget(store.key(SLUG, "launch-endings"), admitted.execution_id))
+    assert ending == {"reason": str(failure), "generation": admitted.generation}
+    assert store.execution(SLUG, admitted.execution_id) == admitted
+    assert server.commands == []
+
+
+@pytest.mark.feature("codex-adopt-refusal-fields")
+def test_adoption_refusal_records_the_replacement_execution_without_ending_it(
+    store: RedisStore, server: Server, clock: Clock, root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import commands
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "m1")
+    spec = launch_spec(store, server, tmp_path)
+    admitted = hive_admitted(store, spec)
+    successor = store.start_execution(SLUG, replace(admitted, execution_id="", generation=0), admitted.execution_id)
+    failure = failed(store, server, clock, root, replace(spec, execution_id=admitted.execution_id), "execution")
+    assert f"execution_id: seat={successor.execution_id!r}, launch={admitted.execution_id!r}" in str(failure)
+    ending = json.loads(store.redis.hget(store.key(SLUG, "launch-endings"), admitted.execution_id))
+    assert ending == {"reason": str(failure), "generation": admitted.generation}
+    assert store.execution(SLUG, successor.execution_id) == successor
+    assert server.commands == []
