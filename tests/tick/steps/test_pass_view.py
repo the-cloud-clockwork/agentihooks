@@ -206,25 +206,25 @@ def test_the_wait_has_no_bound_outside_a_pass() -> None:
     assert host._view_wait_s() is None
 
 
-@pytest.mark.feature("swarm-tick-view-lane-fit")
-def test_the_relay_hook_takes_the_view_through_pass_view(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.feature("tick-view-wait-off-scheduler")
+def test_the_relay_hook_keeps_the_checked_actions_and_leaves_the_view_to_the_view_wait_step(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     seen: list[tuple[str, Any]] = []
-    fitted = object()
 
     def fit(slug: str, view: Any) -> Any:
         seen.append((slug, view))
-        return fitted
+        return view
 
     monkeypatch.setattr(host, "pass_view", fit)
-    building = _pending()
     wrapper = SimpleNamespace(
         ticks=SimpleNamespace(close=lambda: None),
-        judging={"judged": (building, ["checked"])},
+        judging={"judged": (_pending(), ["checked"])},
         box={},
         slug="sw",
         checked=[],
     )
     assert cli._Wrapper._judged(wrapper) is True  # pyright: ignore[reportArgumentType]
-    assert seen == [("sw", building)]
-    assert wrapper.box == {"view": fitted}
+    assert seen == []
+    assert wrapper.box == {}
     assert wrapper.checked == ["checked"]
