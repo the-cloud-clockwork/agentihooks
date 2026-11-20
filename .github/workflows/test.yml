@@ -2502,9 +2502,19 @@ jobs:
         if: steps.source.outputs.test_only != 'true'
         run: python -m pip install --constraint .github/test-requirements.lock "coverage>=7.4" PyYAML==6.0.3
 
-      - name: Mint the token that reads the pull request runs' coverage and this run's job states
+      - name: Mint the token that reads the pull request runs' coverage
         id: app-token
-        if: &jobs-token (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && needs.select.outputs.scope != 'none' && steps.source.outputs.test_only != 'true'
+        if: &branch-carry github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.select.outputs.scope != 'none' && steps.source.outputs.test_only != 'true'
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: read
+
+      - name: Mint the token that reads this run's job states
+        id: jobs-token
+        if: &jobs-token github.event_name == 'push' && needs.select.outputs.scope != 'none' && steps.source.outputs.test_only != 'true'
         uses: actions/create-github-app-token@v3.2.0
         with:
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
@@ -2516,7 +2526,7 @@ jobs:
         id: queue-watch
         if: *jobs-token
         env:
-          GH_APP_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_APP_TOKEN: ${{ steps.jobs-token.outputs.token }}
           PREFIX: ${{ needs.select.outputs.scope == 'selected' && 'unit-selected (' || 'unit (' }}
         run: |
           python .github/coverage/queue_watch.py "$PREFIX" > queue-watch.log 2>&1 &
@@ -2524,7 +2534,7 @@ jobs:
 
       - name: Download the pull request runs' test plan
         id: download-the-pull-request-runs-test-plan
-        if: &branch-carry github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.select.outputs.scope != 'none' && steps.source.outputs.test_only != 'true'
+        if: *branch-carry
         continue-on-error: true
         uses: actions/download-artifact@v8.0.2
         with: &sonar-download-the-pull-request-runs-test-plan
