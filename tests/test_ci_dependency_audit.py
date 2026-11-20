@@ -91,7 +91,8 @@ def test_a_failed_resolve_is_an_error_naming_the_tree_and_the_reason(tmp_path, m
     assert str(error.value) == f"resolving {tmp_path} failed: no solution"
 
 
-def test_audit_runs_the_pinned_pip_audit_on_the_resolved_pins_alone(tmp_path, monkeypatch):
+@pytest.mark.feature("ci-dependency-audit-platformdirs-pin")
+def test_audit_excludes_the_platformdirs_release_that_refuses_the_runner_home(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(audit.subprocess, "run", _run(calls, 1, _report()))
     assert audit.audit(tmp_path / "head.txt") == _report()
@@ -99,6 +100,8 @@ def test_audit_runs_the_pinned_pip_audit_on_the_resolved_pins_alone(tmp_path, mo
         (
             [
                 "uvx",
+                "--with",
+                "platformdirs!=4.14.8",
                 "pip-audit==2.10.1",
                 "-r",
                 str(tmp_path / "head.txt"),
@@ -255,6 +258,8 @@ def test_dependency_audit_is_a_lint_step_graded_by_the_base():
         '  echo "::error::The base carries no scripts/ci_dependency_audit.py, so nothing trusted can grade."\n'
         "  exit 1\n"
         "fi\n"
+        'echo "platformdirs!=4.14.8" > "$RUNNER_TEMP/pip-audit-constraints.txt"\n'
+        'export UV_CONSTRAINT="$RUNNER_TEMP/pip-audit-constraints.txt"\n'
         'cd "$RUNNER_TEMP/base"\n'
         'python -m scripts.ci_dependency_audit --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"\n'
     )
