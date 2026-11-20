@@ -1,5 +1,6 @@
 import hashlib
 import re
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -81,8 +82,8 @@ def test_a_successor_on_a_fresh_home_spends_the_rounds_its_predecessor_left_on_t
 
 @pytest.mark.feature("review-state-on-ledger")
 def test_a_round_is_written_on_the_ledger_task_by_the_agent_and_nothing_counts_on_this_machine(
-    tmp_path, monkeypatch, stamps
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stamps: list[str]
+) -> None:
     home = tmp_path / "swarm-home"
     monkeypatch.setattr(gate_log, "swarm_home", lambda: home)
     ledger = ReviewLedger({"t1": {"id": "t1", "review_rounds": {"rounds-before-pr": ["a"]}, "review_readers": ["x"]}})
@@ -301,6 +302,6 @@ def test_a_round_stamp_carries_the_wall_clock_in_milliseconds_ahead_of_its_uniqu
 
 
 @pytest.mark.feature("review-round-metrics-from-ledger")
-def test_a_stamp_carries_a_time_only_when_it_opens_with_digits_and_a_dash():
+def test_a_stamp_carries_a_time_only_when_it_opens_with_digits_and_a_dash() -> None:
     stamped = ("1800000000250-s1", "0-x", "12-", "a1b2", "12ab-c", "-c", "12", "", "²-x")
     assert [review_rounds.stamped_at(stamp) for stamp in stamped] == [1_800_000_000_250, 0, 12, *[None] * 6]
