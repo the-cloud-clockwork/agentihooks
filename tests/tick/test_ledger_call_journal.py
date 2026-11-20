@@ -1,4 +1,4 @@
-"""Each ledger request a tick pass makes through the in process ledger client journals its own wall time."""
+"""Each ledger request a tick pass makes through the in process ledger client's transport journals its wall time."""
 
 import io
 import json
@@ -53,7 +53,7 @@ def journaled(err: str) -> list[dict[str, object]]:
 
 def answered(monkeypatch: pytest.MonkeyPatch, error: BaseException | None = None) -> Answers:
     answers = Answers(error)
-    monkeypatch.setattr(database_ledger, "request", answers)
+    monkeypatch.setattr(database_ledger, "answered", answers)
     return answers
 
 

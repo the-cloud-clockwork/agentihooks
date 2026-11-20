@@ -25,7 +25,7 @@ from scripts.swarm_ledger.api.errors import APIError
 from scripts.swarm_ledger.api.services import Services
 from scripts.swarm_ledger.api_service import Writes
 
-__all__ = ["acting", "client", "exchanged", "journaled", "principal", "request", "upload"]
+__all__ = ["acting", "client", "exchanged", "principal", "request", "upload"]
 
 ACTING: ContextVar[str | None] = ContextVar("ledger_acting", default=None)
 routes: Any = api_routes
@@ -133,7 +133,7 @@ def answer(found: Services, exchange: Exchange, slug: str, path: str) -> tuple[i
     return settled(exchange, path, route)
 
 
-def request(slug: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+def answered(slug: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     """Answer one ledger API request in process, a refusal raised as the server's HTTP error."""
     encoded = b"" if payload is None else json.dumps(payload).encode()
     headers = Message()
@@ -151,21 +151,16 @@ def request(slug: str, path: str, payload: dict[str, Any] | None = None) -> dict
     return reply
 
 
-def client(base: str, timeout: float) -> ResourceClient:
-    """A ledger API client whose requests run the ledger server's route code in this process."""
-    return ResourceClient(base, {}, timeout, transport=journaled)
-
-
-def journaled(slug: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Answer one ledger API request as ``request`` does; inside a tick pass, also journal one
+def request(slug: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Answer one ledger API request in process as ``answered`` does; inside a tick pass, also journal one
     ``swarm_tick_ledger_call`` line naming its ledger, method, path and outcome with its wall seconds."""
     current = timing.PASS.get()
     if current is None:
-        return request(slug, path, payload)
+        return answered(slug, path, payload)
     started = time.monotonic()
     outcome = "error"
     try:
-        reply = request(slug, path, payload)
+        reply = answered(slug, path, payload)
         outcome = "ok"
         return reply
     except urllib.error.HTTPError as exc:
@@ -183,6 +178,11 @@ def journaled(slug: str, path: str, payload: dict[str, Any] | None = None) -> di
             "wall_s": time.monotonic() - started,
         }
         print(json.dumps(line), file=sys.stderr, flush=True)
+
+
+def client(base: str, timeout: float) -> ResourceClient:
+    """A ledger API client whose requests run the ledger server's route code in this process."""
+    return ResourceClient(base, {}, timeout, transport=request)
 
 
 def upload(slug: str, route: str, data: bytes, headers: Mapping[str, str]) -> dict[str, Any]:
