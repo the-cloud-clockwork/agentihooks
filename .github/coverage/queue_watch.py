@@ -1,10 +1,11 @@
 """Write whether this run's shard jobs have started, so the coverage wait can skip queued time.
 
 arrivals.py takes no GitHub token and makes no API call, so it cannot read job states itself. This
-runs beside it, with the App token the "Mint the token" step readies, and leaves its answer in
-STATE as plain text for arrivals.py to read with a file stat. A shard already completed never holds
-the answer back; among the rest, a job is queued when the API reports its status so, and the scope
-has started once none of them is.
+runs beside it, with the job's own GITHUB_TOKEN (good for the job's whole run, unlike a minted
+App installation token's one hour lifetime), and leaves its answer in STATE as plain text for
+arrivals.py to read with a file stat. A shard already completed never holds the answer back;
+among the rest, a job is queued when the API reports its status so, and the scope has started
+once none of them is.
 """
 
 import json
@@ -50,7 +51,7 @@ def started(api: str, repo: str, run_id: str, attempt: str, token: str, prefix: 
 
 def main() -> int:
     """Poll this run attempt's shard jobs and keep STATE current until the bound runs out."""
-    token = os.environ["GH_APP_TOKEN"]
+    token = os.environ["GH_TOKEN"]
     api = os.environ.get("GITHUB_API_URL", "https://api.github.com")
     repo = os.environ["GITHUB_REPOSITORY"]
     run_id = os.environ["GITHUB_RUN_ID"]

@@ -102,6 +102,24 @@ def test_the_coverage_wait_outlasts_its_own_deadline_inside_the_sonar_budget() -
     assert sonar_pull - pull_minutes >= 10
 
 
+def test_the_queue_watch_token_outlives_the_dev_push_wait() -> None:
+    spec = importlib.util.spec_from_file_location("queue_watch", ROOT / ".github/coverage/queue_watch.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    assert jobs["sonar"]["permissions"]["actions"] == "read"
+    steps, names = _sonar_steps()
+    watch = steps[names.index("Watch whether this run's shard jobs have started")]
+    assert watch["if"] == (
+        "github.event_name == 'push' && github.ref == 'refs/heads/dev' "
+        "&& needs.select.outputs.scope != 'none' && steps.source.outputs.test_only != 'true'"
+    )
+    assert watch["env"]["GH_TOKEN"] == "${{ github.token }}"
+    assert not any((step.get("id") or "") == "jobs-token" for step in steps)
+    assert module.BOUND < 6 * 60 * 60
+
+
 def test_sonar_waits_for_the_shards_on_a_standard_runner_so_its_scan_keeps_its_cpu() -> None:
     classes = json.loads((ROOT / ".github/runner-classes.json").read_text())
     assert classes["test.yml/sonar"] == "standard"

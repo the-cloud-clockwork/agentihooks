@@ -64,6 +64,7 @@ def jobs_api() -> Iterator[tuple[str, list[dict[str, object]], list[tuple[str, s
         server.server_close()
 
 
+@pytest.mark.feature("queue-watch-job-states")
 def test_a_running_or_completed_shard_job_says_the_scope_has_started(
     jobs_api: tuple[str, list[dict[str, object]], list[tuple[str, str]]],
 ) -> None:
@@ -112,6 +113,7 @@ def test_every_matching_shard_job_completed_reports_started(
     assert queue_watch.started(api, "o/r", "9", "1", "token-x", "unit (") is True
 
 
+@pytest.mark.feature("queue-watch-job-states")
 def test_a_selected_legs_job_name_is_matched_with_its_own_prefix(
     jobs_api: tuple[str, list[dict[str, object]], list[tuple[str, str]]],
 ) -> None:
@@ -120,6 +122,7 @@ def test_a_selected_legs_job_name_is_matched_with_its_own_prefix(
     assert queue_watch.started(api, "o/r", "9", "1", "token-x", "unit-selected (") is True
 
 
+@pytest.mark.feature("queue-watch-job-states")
 def test_no_matching_shard_job_name_reads_as_unknown(
     jobs_api: tuple[str, list[dict[str, object]], list[tuple[str, str]]],
 ) -> None:
@@ -128,15 +131,17 @@ def test_no_matching_shard_job_name_reads_as_unknown(
     assert queue_watch.started(api, "o/r", "9", "1", "token-x", "unit (") is None
 
 
+@pytest.mark.feature("queue-watch-job-states")
 def test_an_unreachable_jobs_api_reads_as_unknown() -> None:
     assert queue_watch.started("http://127.0.0.1:9", "o/r", "9", "1", "token-x", "unit (") is None
 
 
+@pytest.mark.feature("queue-watch-main-state-file")
 def test_main_keeps_the_state_file_current_until_its_bound_runs_out(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("GH_APP_TOKEN", "token-x")
+    monkeypatch.setenv("GH_TOKEN", "token-x")
     monkeypatch.setenv("GITHUB_REPOSITORY", "o/r")
     monkeypatch.setenv("GITHUB_RUN_ID", "9")
     monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
@@ -149,9 +154,10 @@ def test_main_keeps_the_state_file_current_until_its_bound_runs_out(
     assert (tmp_path / queue_watch.STATE).read_text() in {"queued", "started"}
 
 
+@pytest.mark.feature("queue-watch-main-state-file")
 def test_an_unread_poll_leaves_the_state_file_as_it_was(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("GH_APP_TOKEN", "token-x")
+    monkeypatch.setenv("GH_TOKEN", "token-x")
     monkeypatch.setenv("GITHUB_REPOSITORY", "o/r")
     monkeypatch.setenv("GITHUB_RUN_ID", "9")
     monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
