@@ -1,0 +1,14 @@
+rules:
+  - id: snapshot-floating-base
+    languages: [generic]
+    severity: ERROR
+    message: >-
+      A Debian snapshot needs a matching locked base image. Pin the base to the worker lock's Python patch tag
+      before installing snapshot packages; a floating base can already contain newer incompatible Debian packages.
+    paths:
+      include:
+        - '**/Dockerfile*'
+        - '**/*.Dockerfile'
+    pattern-either:
+      - pattern-regex: '(?im)^[ \t]*FROM[ \t]+(?:--platform=\S+[ \t]+)?(?!\S+@sha256:)(?!\S+:[0-9]+\.[0-9]+\.[0-9]+(?:[-+][^\s]*)?(?:[ \t]|$))[^\s$]+[^\n]*\n(?:(?![ \t]*FROM[ \t])[^\n]*\n)*?[^\n]*(?:snapshot\.debian\.org|debian_snapshot)\b'
+      - pattern-regex: '(?im)^[ \t]*ARG[ \t]+(?P<BASE>[A-Z_][A-Z_0-9]*)=(?!\S+@sha256:)(?!\S+:[0-9]+\.[0-9]+\.[0-9]+(?:[-+][^\s]*)?(?:[ \t]|$))[^\s$]+[^\n]*\n(?:[^\n]*\n)*?^[ \t]*FROM[ \t]+(?:--platform=\S+[ \t]+)?\$\{?(?P=BASE)\}?(?:[ \t][^\n]*)?\n(?:(?![ \t]*FROM[ \t])[^\n]*\n)*?[^\n]*(?:snapshot\.debian\.org|debian_snapshot)\b'
