@@ -379,8 +379,8 @@ def _test_env_key_step() -> dict:
     return step
 
 
-def test_unit_installs_extras_with_uv_and_no_uv_cache():
-    uv_index, uv = _unit_step_index(lambda s: s.get("uses", "").startswith("astral-sh/setup-uv"))
+def test_unit_installs_extras_with_uv_and_no_uv_cache() -> None:
+    uv_index, uv = _unit_step_index(lambda s: s.get("uses") == "./.github/actions/setup-uv")
     install_index, install = _unit_step_index(lambda s: s.get("name") == "Install dependencies")
     assert uv["with"]["enable-cache"] is False
     assert uv_index < install_index
@@ -434,11 +434,11 @@ def test_records_name_the_test_environment_when_a_self_hosted_runner_skips_its_r
     assert set(environments) == {"${{ steps.day.outputs.key }}"}
 
 
-def test_a_restored_venv_skips_uv_and_the_install():
+def test_a_restored_venv_skips_uv_and_the_install() -> None:
     _, cache = _unit_step_index(lambda s: s.get("id") == "venv")
     hit = f"steps.{cache['id']}.outputs.cache-hit != 'true'"
     for predicate in (
-        lambda s: s.get("uses", "").startswith("astral-sh/setup-uv"),
+        lambda s: s.get("uses") == "./.github/actions/setup-uv",
         lambda s: s.get("name") == "Install dependencies",
     ):
         _, step = _unit_step_index(predicate)
@@ -1290,8 +1290,8 @@ def test_a_stalled_unit_checkout_aborts_within_a_minute_and_retries_once_in_plac
     assert second["if"] == f"steps.{first['id']}.outcome == 'failure'"
 
 
-def test_unit_pins_an_exact_uv_version():
-    _, uv = _unit_step_index(lambda s: s.get("uses", "").startswith("astral-sh/setup-uv"))
+def test_unit_pins_an_exact_uv_version() -> None:
+    _, uv = _unit_step_index(lambda s: s.get("uses") == "./.github/actions/setup-uv")
     assert re.fullmatch(r"\d+\.\d+\.\d+", uv["with"]["version"])
 
 
