@@ -84,7 +84,7 @@ def test_an_unchanged_put_skips_the_write_lock_and_the_fenced_document_read(
 
     assert acquires == []
     assert writes == []
-    assert len(reads) == (3 if layout == "document" else 0)
+    assert len(reads) == (4 if layout == "document" else 0)
     assert store.execution("fixture", current.execution_id) == current
 
 
