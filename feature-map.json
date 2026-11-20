@@ -10988,8 +10988,8 @@
       "id": "sonar-wait-skips-queued-shard-time",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-sonar-wait-shard-queue",
-      "behaviour": "The sonar job's coverage wait only spends its bounded window while a run's remaining unit shard jobs are actually running; a shard job still queued for a runner, read through a minimally scoped actions:read token polled far less often than the artifact listing, does not count against the wait.",
-      "seam": ".github/coverage/arrivals.arrive reading shard job states through the Jobs protocol",
+      "behaviour": "The sonar job's coverage wait only spends its bounded window while a run's remaining unit shard jobs are actually running; a shard job still queued for a runner, read from a sibling watcher's on disk answer rather than any API call of arrivals.py's own, does not count against the wait.",
+      "seam": ".github/coverage/arrivals.arrive reading shard job states through the Jobs protocol, kept current on disk by queue_watch.py",
       "tests": [
         "tests/test_sonar_arrivals.py::test_a_shard_still_queued_for_a_runner_does_not_spend_the_wait"
       ]

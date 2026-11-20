@@ -23,6 +23,7 @@ LOCAL_ONLY = {
     ROOT / "scripts/ci_stats_seed.py": {"api"},
     ROOT / "tests/refresh_durations.py": {"_gh", "ci_run_ids", "ci_download"},
     ROOT / "scripts/swarm/prompt.py": {"issue_step", "manual_ship"},
+    ROOT / ".github/coverage/queue_watch.py": {"main"},
 }
 METADATA_ONLY = {
     ROOT / "scripts/ci_reuse.py": {"paged_reuse_job"},
@@ -163,6 +164,7 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         ".github/coverage/flatten.py",
         ".github/coverage/parallel_xml.py",
         ".github/coverage/proxy.py",
+        ".github/coverage/queue_watch.py",
         ".github/coverage/sonar-retry.sh",
         ".github/scripts/pypi-retry.sh",
         "deploy/helm/agentihooks-swarm/ci/kind-smoke.sh",

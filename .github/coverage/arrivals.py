@@ -8,10 +8,11 @@ shard ends when its coverage is taken, or when its flake report, uploaded after 
 listed with no coverage of it; a rerun counts only a flake report that changed since its first
 listing. While shards still run it flattens the databases it holds as flat-<name> beside them,
 which combine.sh takes as they are. A shard job still queued for a runner does not spend the
-wait: a minimally scoped actions:read token, polled far less often than the artifact listing,
-says whether any shard job has started, and only running time counts against the wait. It
-returns once every shard ended or the wait ran out, and leaves naming a shard without coverage
-to combine.sh.
+wait: this module takes no GitHub token and makes no API call of its own, so a sibling script,
+queue_watch.py, polls the run's job states separately with the App token the sonar job already
+mints, and leaves its answer in QUEUE_STATE on disk; only time with a fresh "started" answer
+counts against the wait, and a missing or stale answer counts it as before. It returns once
+every shard ended or the wait ran out, and leaves naming a shard without coverage to combine.sh.
 """
 
 import base64
@@ -35,6 +36,8 @@ INTERVAL = 3
 TIMEOUT = 30
 WAIT = 44 * 60
 JOB_POLL = 10 * INTERVAL
+QUEUE_STATE = Path(".sonar-shard-queue-state")
+STALE = 3 * JOB_POLL
 OUT = Path(".coverage-shards")
 FLATTEN = Path(__file__).with_name("flatten.py")
 FLAT = "flat-"
@@ -158,36 +161,23 @@ class Results:
         return True
 
 
-class ActionsJobs:
-    """This run attempt's job states, read with a token scoped only to actions:read."""
+class FileJobs:
+    """A shard queue state a sibling watcher writes to disk, since this module takes no GitHub token."""
 
-    def __init__(self, api: str, repo: str, run_id: str, attempt: str, token: str, prefix: str) -> None:
-        """Keep the Actions API address, the run this attempt belongs to and the shard job name prefix."""
-        self.api = api
-        self.repo = repo
-        self.run_id = run_id
-        self.attempt = attempt
-        self.token = token
-        self.prefix = prefix
+    def __init__(self, path: Path) -> None:
+        """Keep the path the watcher keeps current."""
+        self.path = path
 
     def started(self) -> bool | None:
-        """Say whether a shard job of this scope is running or done, or None when that could not be read."""
-        request = urllib.request.Request(
-            urllib.parse.urljoin(
-                self.api,
-                f"repos/{self.repo}/actions/runs/{self.run_id}/attempts/{self.attempt}/jobs?per_page=100",
-            ),
-            headers={"Authorization": f"Bearer {self.token}", "Accept": "application/vnd.github+json"},
-        )
+        """Say whether the watcher's last fresh answer was started, or None when it is missing or stale."""
         try:
-            with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
-                payload = json.loads(response.read() or b"{}")
-        except (OSError, ValueError):
+            stat = self.path.stat()
+        except OSError:
             return None
-        shards = [job for job in payload.get("jobs") or [] if str(job.get("name", "")).startswith(self.prefix)]
-        if not shards:
+        if time.time() - stat.st_mtime > STALE:
             return None
-        return any(job.get("status") in ("in_progress", "completed") for job in shards)
+        content = self.path.read_text().strip()
+        return True if content == "started" else False if content == "queued" else None
 
 
 def shard_of(name: str, scope: str, shards: int) -> int | None:
@@ -327,22 +317,7 @@ def main() -> int:
     scope = os.environ["SCOPE"]
     attempt = int(os.environ["GITHUB_RUN_ATTEMPT"])
     service = Results(base, token)
-    jobs_token = os.environ.get("GH_JOBS_TOKEN", "")
-    repo = os.environ.get("GITHUB_REPOSITORY", "")
-    run_id = os.environ.get("GITHUB_RUN_ID", "")
-    jobs = (
-        ActionsJobs(
-            os.environ.get("GITHUB_API_URL", "https://api.github.com") + "/",
-            repo,
-            run_id,
-            str(attempt),
-            jobs_token,
-            "unit (" if scope != SELECTED else "unit-selected (",
-        )
-        if jobs_token and repo and run_id
-        else None
-    )
-    left = arrive(service, Scope(shards, scope, attempt), OUT, WAIT, Wall(), jobs)
+    left = arrive(service, Scope(shards, scope, attempt), OUT, WAIT, Wall(), FileJobs(QUEUE_STATE))
     if left:
         named = ", ".join(map(str, left))
         print(f"::warning::Shards {named} had not ended after {WAIT // 60} minutes; the merge names their coverage.")
