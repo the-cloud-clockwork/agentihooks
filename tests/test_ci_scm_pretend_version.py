@@ -5,8 +5,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-from scripts.gate_protected import EQUIVALENCE
-
 pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[1]
 PIN = "SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS"
@@ -67,19 +65,6 @@ def _editable_installs() -> list[tuple[str, bool]]:
     return found
 
 
-def _frozen_by_protected_gate() -> set[str]:
-    """Return the editable install steps the protected gate grades from dev in the ledger equivalence prefix."""
-    file, job = EQUIVALENCE
-    steps = yaml.safe_load((ROOT / ".github/workflows" / file).read_text())["jobs"][job]["steps"]
-    graded = [index for index, step in enumerate(steps) if "$GRADER" in str(step.get("run"))]
-    prefix = steps[: graded[-1] + 1] if graded else []
-    return {
-        f".github/workflows/{file} {job}: {step.get('name', '')}"
-        for step in prefix
-        if _is_editable_install(step.get("run") or "")
-    }
-
-
 @pytest.mark.parametrize(
     ("run", "editable"),
     [
@@ -107,6 +92,5 @@ def test_editable_install_detection(run: str, editable: bool) -> None:
 def test_every_editable_install_pins_the_scm_pretend_version() -> None:
     installs = _editable_installs()
     assert installs
-    frozen = _frozen_by_protected_gate()
-    stray = sorted(where for where, pinned in installs if not pinned and where not in frozen)
+    stray = sorted(where for where, pinned in installs if not pinned)
     assert not stray, f"{len(stray)} of {len(installs)} editable installs run the SCM git scan: {stray}"
