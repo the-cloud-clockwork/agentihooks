@@ -127,7 +127,8 @@ def _import_like_the_swarm_image(lock: Path, modules: list[str]) -> subprocess.C
     lock leaves out, without the coverage hooks the test run hands its child processes."""
     env = {key: value for key, value in os.environ.items() if not key.startswith(("COV_CORE_", "COVERAGE_"))}
     command = [sys.executable, "-c", SWARM_IMAGE, str(lock), *modules]
-    return subprocess.run(command, cwd=ROOT, env=env, capture_output=True, text=True, check=False)
+    root = ROOT.parent if ROOT.name == "mutants" else ROOT
+    return subprocess.run(command, cwd=root, env=env, capture_output=True, text=True, check=False)
 
 
 @pytest.mark.feature("lab-scheduler-swarm-image-imports")
