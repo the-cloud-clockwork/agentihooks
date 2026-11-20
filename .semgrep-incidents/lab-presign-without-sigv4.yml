@@ -1,0 +1,20 @@
+rules:
+  - id: lab-presign-without-sigv4
+    languages: [python]
+    severity: ERROR
+    message: >-
+      An S3 client built without signature_version s3v4 presigns its URLs with SigV2, and SigV2 signs the request
+      Content-Type. On 20 November the lab scheduler's storage client set no signature version, urllib added the form
+      Content-Type to every worker result PUT, and MinIO answered 403 SignatureDoesNotMatch to 362 static units in 30
+      minutes, so no unit completed and no verdict was stored. Build every lab S3 client with
+      Config(signature_version="s3v4").
+    paths:
+      include:
+        - /scripts/ci_lab/
+        - lab-presign-without-sigv4.py
+    patterns:
+      - pattern-either:
+          - pattern: $FACTORY.client("s3", ...)
+          - pattern: $FACTORY.create_client("s3", ...)
+      - pattern-not: $FACTORY.$MAKE("s3", ..., config=Config(..., signature_version="s3v4", ...), ...)
+      - pattern-not: $FACTORY.$MAKE("s3", ..., config=botocore.config.Config(..., signature_version="s3v4", ...), ...)

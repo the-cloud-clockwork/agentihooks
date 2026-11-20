@@ -94,6 +94,7 @@ __all__ = [
     "listen",
     "main",
     "serve",
+    "storage",
     "summary",
 ]
 
@@ -1496,10 +1497,23 @@ def _sleep_ms(ms: int) -> None:
     time.sleep(ms / 1000)
 
 
+def storage(environ: Mapping[str, str]) -> S3Objects:
+    """Return the lab objects in the MinIO bucket the environment names, through the S3 client that also signs the
+    upload URLs workers put unit results to."""
+    import boto3  # pyright: ignore[reportMissingTypeStubs]
+
+    s3: Any = boto3.client(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        "s3",
+        endpoint_url=environ[MINIO_ENDPOINT],
+        aws_access_key_id=environ[MINIO_ACCESS_KEY],
+        aws_secret_access_key=environ[MINIO_SECRET_KEY],
+    )
+    return S3Objects(s3, environ[MINIO_BUCKET], "")
+
+
 def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     """Run the scheduler service from its mounted runtime config: the lease API, capacity and grades on the scheduler
     port, metrics on the metrics port and a pass every interval."""
-    import boto3  # pyright: ignore[reportMissingTypeStubs]
     import redis
 
     from scripts.ci_lab import relay
@@ -1512,13 +1526,7 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     arguments = parser.parse_args(argv)
     runtime = load_runtime(Path(environ[contract.RUNTIME_CONFIG]))
     client: Any = redis.Redis.from_url(environ[contract.REDIS_URL], decode_responses=True)  # pyright: ignore[reportUnknownMemberType]
-    s3: Any = boto3.client(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-        "s3",
-        endpoint_url=environ[MINIO_ENDPOINT],
-        aws_access_key_id=environ[MINIO_ACCESS_KEY],
-        aws_secret_access_key=environ[MINIO_SECRET_KEY],
-    )
-    objects = S3Objects(s3, environ[MINIO_BUCKET], "")
+    objects = storage(environ)
     heads = open_bus(replace(BusConfig.from_environ(environ), provision=False)).lab_heads
     spending = budget.Budget(client, _now_ms, budget.policy(runtime))
     scheduler = build(environ, client, objects, heads.consumer(DURABLE, SUBJECT), spending)

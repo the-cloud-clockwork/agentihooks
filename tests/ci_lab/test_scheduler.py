@@ -2698,8 +2698,18 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
     monkeypatch.setattr(relay, "build", builds)
     assert scheduler.main(["--interval", "0.5", "--passes", "3"], environ) == 7
     assert calls["redis"] == ("redis://lab", {"decode_responses": True})
-    options = {"endpoint_url": "endpoint", "aws_access_key_id": "access", "aws_secret_access_key": "secret"}
-    assert calls["s3"] == ("s3", options)
+    name, options = calls["s3"]
+    signing = options.pop("config")
+    assert (name, options) == (
+        "s3",
+        {
+            "endpoint_url": "endpoint",
+            "region_name": "us-east-1",
+            "aws_access_key_id": "access",
+            "aws_secret_access_key": "secret",
+        },
+    )
+    assert (signing.signature_version, signing.s3) == ("s3v4", {"addressing_style": "path"})
     built_from, redis_client, objects, consumer, built_spending = calls["build"]
     assert (built_from, redis_client, consumer) == (environ, client, "ci-lab-scheduler consumer")
     assert (objects.client, objects.bucket, objects.prefix) == ("s3 client", "bucket", "")
