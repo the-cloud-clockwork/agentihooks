@@ -13,7 +13,7 @@ from typing import Any
 
 from scripts.swarm_ledger import request_metrics
 
-from . import artifact_files, heap, hierarchy, live_rows, media_files, outbox, refresh, writer_copy
+from . import artifact_files, heap, hierarchy, host_entries, live_rows, media_files, outbox, refresh, writer_copy
 from .entry import Entry
 from .events import append_events, read_events, trim_events, write_events
 from .fragments import document
@@ -440,6 +440,7 @@ class SQLiteLedgerRepository:
     """The durable ledger record: one row per JSON value, written only where a mutation changed it."""
 
     adopts = True
+    copies: host_entries.Copies | None = None
 
     def __init__(self, path: Path | None = None, domain=None):
         self._path = None if path is None else Path(path)
@@ -525,7 +526,7 @@ class SQLiteLedgerRepository:
     def _key(self, slug):
         return str(self.path), slug
 
-    def _entry(self, connection, slug: str) -> Entry:
+    def _entry(self, connection: sqlite3.Connection, slug: str) -> Entry:
         """The stored ledger; a reader whose snapshot predates a cached write gets that newer committed copy."""
         row = connection.execute(GENERATION, (slug,)).fetchone()
         if row is None:
@@ -539,6 +540,8 @@ class SQLiteLedgerRepository:
             cached = self._cache.get(self._key(slug))
             if cached is not None and cached.generation >= row[0]:
                 return cached
+            if cached is None and self.copies is not None:
+                cached = self.copies.adopt(slug, row[0])
             state, writer = self._refreshed(connection, slug, cached, row[0])
             whole = state is None
             if whole:
@@ -548,6 +551,8 @@ class SQLiteLedgerRepository:
             fragments = document(state, None if whole else cached.fragments)
             entry = Entry(row[0], None, fragments.value, fragments, writer)
             self._remember(slug, entry)
+            if self.copies is not None:
+                self.copies.keep(slug, entry, whole)
         if whole:
             heap.release()
         return entry
@@ -855,13 +860,15 @@ class SQLiteLedgerRepository:
     def list_summaries(self) -> list:
         return [{key: summary[key] for key in SUMMARY_KEYS} for summary in self.summaries()]
 
-    def purge(self, slug: str, connection) -> None:
+    def purge(self, slug: str, connection: sqlite3.Connection) -> None:
         if connection.execute(STORED, (slug,)).fetchone():
             before = self._entry(connection, slug).state
             outbox.write(connection, slug, before["_meta"]["rev"], before, {})
         for table in (*PER_LEDGER, artifact_files.TABLE, media_files.TABLE):
             connection.execute(f"DELETE FROM {table} WHERE slug=?", (slug,))
         self._cache.pop(self._key(slug), None)
+        if self.copies is not None:
+            self.copies.drop(slug)
 
     def registry(self, name: str, connection) -> dict:
         return {key: json.loads(value) for key, value in connection.execute(REGISTRY, (name,))}

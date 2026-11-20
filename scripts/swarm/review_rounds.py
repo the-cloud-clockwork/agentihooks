@@ -2,13 +2,10 @@
 third round on a counter closes review and a fourth is refused."""
 
 import hashlib
-import json
 import time
 import uuid
-from pathlib import Path
 from typing import Any, Protocol
 
-from scripts.gates.log import gates_dir
 from scripts.swarm.store import SwarmError
 
 ROUNDS = 3
@@ -44,6 +41,12 @@ def counts(row: dict[str, Any]) -> dict[str, int]:
     return {name: len(stamps) for name, stamps in rounds(row).items()}
 
 
+def stamped_at(stamp: str) -> int | None:
+    """The wall clock milliseconds a round stamp opens with, or None for a stamp that carries no time."""
+    clock, dash, _ = stamp.partition("-")
+    return int(clock) if dash and clock.isascii() and clock.isdigit() else None
+
+
 def readers(row: dict[str, Any]) -> list[str]:
     """The reader sub-agents a ledger task row records as launched."""
     return list(row.get("review_readers") or [])
@@ -57,11 +60,11 @@ def held_row(slug: str, task: str, ledger: Ledger) -> dict[str, Any]:
     return row
 
 
-def start(slug: str, task: str, ledger: Ledger, by: str, home: Path | None = None) -> dict[str, str | int]:
+def start(slug: str, task: str, ledger: Ledger, by: str) -> dict[str, str | int]:
     """Spend one review round of the task on its ledger row, refusing a fourth on the same counter. The round adds a
-    stamp of its own under a guard on the rounds it read, so a round racing it lands first and this one counts after
-    it, at most five writes."""
-    stamp, row = uuid.uuid4().hex, held_row(slug, task, ledger)
+    stamp of its own, its wall clock milliseconds ahead of a unique part, under a guard on the rounds it read, so a
+    round racing it lands first and this one counts after it, at most five writes."""
+    stamp, row = f"{int(time.time() * 1000)}-{uuid.uuid4().hex}", held_row(slug, task, ledger)
     for _ in range(WRITES):
         name, held = counter(row.get("pr_url") or ""), rounds(row)
         spent = len(held.get(name, [])) + 1
@@ -71,11 +74,6 @@ def start(slug: str, task: str, ledger: Ledger, by: str, home: Path | None = Non
         ledger.update_task(slug, task, fields, by=by, if_match={"review_rounds": held})
         row = ledger.task(slug, task) or {}
         if stamp in rounds(row).get(name, []):
-            log = gates_dir(slug, home) / "reviews" / "rounds.jsonl"
-            log.parent.mkdir(parents=True, exist_ok=True)
-            with log.open("a") as stream:
-                line = {"task": task, "counter": name, "round": spent, "at": int(time.time() * 1000)}
-                stream.write(json.dumps(line) + "\n")
             return {"task": task, "round": spent, **({"notice": CLOSED} if spent == ROUNDS else {})}
     raise SwarmError(f"task {task} spent no review round: its review rounds changed under each of {WRITES} writes")
 

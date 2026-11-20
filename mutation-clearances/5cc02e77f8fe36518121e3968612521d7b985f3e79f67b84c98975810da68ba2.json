@@ -1,0 +1,6 @@
+{
+  "scripts/collection_imports.py:scripts.collection_imports.x__function_imports:17b44297e0cf53d7526171c2549b26c305f71623a58ce0eeddb75e20bb2d3ac7": {
+    "reader": "standards_reader",
+    "reason": "Changes the default for a missing function from an empty string to XXXX. Neither text holds an import or from import statement, so the import scan returns an empty set for both and the result is unchanged."
+  }
+}

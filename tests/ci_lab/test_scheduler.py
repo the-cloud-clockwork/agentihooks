@@ -19,7 +19,7 @@ import pytest
 import requests
 import yaml
 
-from scripts import ci_wiring, dep_manifest
+from scripts import ci_wiring, dep_manifest, github_app
 from scripts.ci_lab import __main__ as cli
 from scripts.ci_lab import (
     budget,
@@ -67,6 +67,7 @@ HEAD_B = "b" * 40
 BASE = "c" * 40
 TREE = "d" * 40
 OTHER_TREE = "e" * 40
+LOCK = ".github/test-requirements.lock"
 
 Post = tuple[str, str, str, str | None, Output, bool]
 
@@ -143,6 +144,9 @@ class Expander:
 
     def merge_base(self, repo: str, head: str) -> str:
         return self.plans[head].grader
+
+    def reachable(self, repo: str, head: str) -> bool:
+        return True
 
 
 @dataclass
@@ -1732,14 +1736,14 @@ def origin(tmp_path: Path) -> tuple[Path, str, str]:
             ".github/workflows/nested/deep.yml": "jobs: {}\n",
             ".github/workflows/empty.yml": "",
             "delivery.yaml": json.dumps(DELIVERY),
-            "uv.lock": "lock",
+            LOCK: "lock",
             "pyproject.toml": "[project]\n",
             "src/a.py": "a = 1\n",
             "srcx/b.py": "b = 1\n",
             "docs/c.md": "c\n",
         },
     )
-    head = _commit(repo, {"src/a.py": "a = 2\n", "uv.lock": "lock 2", "docs/tab\tname.md": "t\n"})
+    head = _commit(repo, {"src/a.py": "a = 2\n", LOCK: "lock 2", "docs/tab\tname.md": "t\n"})
     return repo, base, head
 
 
@@ -1780,7 +1784,7 @@ def test_the_mirror_expander_keys_static_gates_from_git_objects_without_a_checko
     request = GradeRequest(remote, head, base, Priority.PULL_REQUEST, ACTOR, False)
     found = expander.expand(request)
     assert [store.name for store in root.iterdir()] == [str(repo).removeprefix("/").replace("/", "--")]
-    chain = Toolchain("3.12", {}, _blob(repo, head, "uv.lock"), _blob(repo, head, "pyproject.toml"), "image", {})
+    chain = Toolchain("3.12", {}, _blob(repo, head, LOCK), _blob(repo, head, "pyproject.toml"), "image", {})
     paths = filter(None, _git(repo, "ls-tree", "-r", "-z", "--name-only", head).split("\0"))
     head_files = {path: _blob(repo, head, path) for path in paths}
     assert "docs/tab\tname.md" in head_files
@@ -1838,7 +1842,7 @@ def test_a_head_without_a_lockfile_or_pyproject_keys_its_units_with_neither(
     tmp_path: Path, origin: tuple[Path, str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo, base, _ = origin
-    bare = _drop(repo, "uv.lock", "pyproject.toml")
+    bare = _drop(repo, LOCK, "pyproject.toml")
     monkeypatch.setattr(
         scheduler, "discover", lambda workflow, registry, reusable: [_gate("format", "lint", ("src/",), ())]
     )
@@ -1878,7 +1882,7 @@ def test_the_mirror_expander_expands_the_real_tests_workflow_with_its_reusable_w
     workflows = ROOT / ".github" / "workflows"
     registry = ROOT / ".github" / "input-keys.json"
     tree = {f".github/workflows/{path.name}": path.read_text() for path in workflows.iterdir() if path.is_file()}
-    base = _commit(repo, {**tree, ".github/input-keys.json": registry.read_text(), "uv.lock": "lock"})
+    base = _commit(repo, {**tree, ".github/input-keys.json": registry.read_text(), LOCK: "lock"})
     head = _commit(repo, {"src/a.py": "a = 1\n"})
     node = tmp_path / "node"
     _git(tmp_path, "init", "-q", "--bare", str(node))
@@ -1975,7 +1979,7 @@ def _suite(tmp_path: Path, lab: dict[str, Any]) -> Suite:
             ".github/workflows/test.yml": "jobs: {}\n",
             ".github/input-keys.json": '{"gates": {}}',
             "delivery.yaml": json.dumps({"lab": lab}),
-            "uv.lock": "lock",
+            LOCK: "lock",
             "pyproject.toml": PINNED,
             ".test_durations": json.dumps(SUITE_DURATIONS),
             "scripts/alpha.py": ALPHA,
@@ -2001,7 +2005,7 @@ def _merged(repo: Path, branch: str, *changes: dict[str, str]) -> str:
 def _suite_units(suite: Suite, head: str, durations: dict[str, float]) -> tuple[Unit, ...]:
     paths = filter(None, _git(suite.repo, "ls-tree", "-r", "-z", "--name-only", head).split("\0"))
     blobs = {path: _blob(suite.repo, head, path) for path in paths}
-    chain = Toolchain("3.12", {}, blobs["uv.lock"], blobs["pyproject.toml"], "image", {})
+    chain = Toolchain("3.12", {}, blobs[LOCK], blobs["pyproject.toml"], "image", {})
     return expand_tests.units(SUITE_MANIFEST, _contents(suite, head), blobs, durations, chain)
 
 
@@ -2107,7 +2111,7 @@ def test_a_merge_group_entry_that_adds_a_test_file_the_manifest_lacks_runs_its_u
     every = _suite_units(suite, head, SUITE_DURATIONS)
     paths = filter(None, _git(suite.repo, "ls-tree", "-r", "-z", "--name-only", head).split("\0"))
     blobs = {path: _blob(suite.repo, head, path) for path in paths}
-    chain = Toolchain("3.12", {}, blobs["uv.lock"], blobs["pyproject.toml"], "image", {})
+    chain = Toolchain("3.12", {}, blobs[LOCK], blobs["pyproject.toml"], "image", {})
     added = expand_tests.unlisted_units(SUITE_MANIFEST, _contents(suite, head), [GAMMA], chain)
     assert [unit.members for unit in added] == [(GAMMA,)]
     expected = scheduler.frame(Priority.QUEUE, _tree(suite, head), suite.base, {"unit": (*every[picked], *added)})
@@ -2579,6 +2583,83 @@ def test_a_head_whose_manifest_fetch_times_out_waits_out_its_window_again_and_a_
     slug = str(suite.repo).removeprefix("/")
     assert run.lab.objects.read(f"{manifest_folder(slug)}{suite.base}.json") == packed
     assert get.call_count == 4
+
+
+@pytest.mark.feature("lab-token-mint-status")
+@pytest.mark.usefixtures("staticless")
+@pytest.mark.parametrize(("status", "held"), [(None, True), (403, False), (499, False), (500, True), (599, True)])
+def test_manifest_token_mint_failures_hold_only_transient_heads_and_grade_after_recovery(
+    lab: Callable[..., Run], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: int | None, held: bool
+) -> None:
+    suite = _suite(tmp_path, DELIVERY["lab"])
+    packed = packed_file(STORED_MANIFEST, suite.base)
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w") as written:
+        written.writestr("packed.json", packed)
+    get = Mock(
+        side_effect=[
+            Mock(status_code=200, json=Mock(return_value={"workflow_runs": [{"id": 1}]})),
+            Mock(status_code=200, json=Mock(return_value={"artifacts": [{"id": 2, "expired": False}]})),
+            Mock(status_code=200, content=archive.getvalue()),
+        ]
+    )
+    monkeypatch.setattr(requests, "get", get)
+    monkeypatch.setenv("GITHUB_APP_ID", "123")
+    monkeypatch.setenv("GITHUB_APP_INSTALLATION_ID", "456")
+    monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "fixture")
+    monkeypatch.setattr(github_app.jwt, "encode", Mock(return_value="signed"))
+    failed = requests.ReadTimeout("mint timed out") if status is None else Mock(status_code=status)
+    granted = Mock(
+        status_code=201,
+        json=Mock(
+            return_value={
+                "token": "fixture",
+                "expires_at": "2099-01-01T00:00:00Z",
+                "repositories": [{"full_name": "example/repo"}],
+                "permissions": {"actions": "read"},
+            }
+        ),
+    )
+    mint = Mock(side_effect=[failed, failed, granted])
+    monkeypatch.setattr(requests, "post", mint)
+    run = lab({}, quiet_ms=30_000)
+    token = github_app.GitHubAppAuth("github.com/example/repo", permissions={"actions": "read"})
+    stored = scheduler.StoredManifests(run.lab.objects, Fetcher(lambda repo: Actions(repo, token)))
+    node = tmp_path / "node"
+    _git(tmp_path, "init", "-q", "--bare", str(node))
+    toolchain = Toolchain("3.12", {}, "", "", "image", {})
+    expander = scheduler.MirrorExpander(node, tmp_path / "stores", toolchain, stored, Port().verdicts)
+    monkeypatch.setattr(run.lab.expander, "expand", expander.expand)
+    event = HeadEvent("push", suite.remote, suite.head, suite.base, ACTOR, "pushed")
+    run.lab.inbox.pending.append(scheduler.Head(event, "dev"))
+    assert run.tick(1000) == [f"received {suite.head} on dev"]
+    original = {name: json.loads(raw) for name, raw in run.lab.client.hgetall(scheduler.WAITING).items()}
+    runs = f"actions/workflows/test.yml/runs?event=push&branch=dev&head_sha={suite.base}"
+    failure = "failed: mint timed out" if status is None else f"token mint failed: {github_app.REFUSED}"
+    verb = "holding" if held else "cannot expand"
+    assert run.tick(31_000) == [f"{verb} {suite.head}: GET {runs} {failure}"]
+    get.assert_not_called()
+    assert mint.call_count == 1
+    assert run.grades() == []
+    if not held:
+        assert run.lab.client.hgetall(scheduler.WAITING) == {}
+        assert run.tick(61_000) == []
+        assert mint.call_count == 1
+    else:
+        for when in (31_000, 61_000):
+            waiting = {name: json.loads(raw) for name, raw in run.lab.client.hgetall(scheduler.WAITING).items()}
+            assert waiting == {name: {**value, "since": when} for name, value in original.items()}
+            assert run.tick(when + 29_999) == []
+            assert mint.call_count == (1 if when == 31_000 else 2)
+            if when == 31_000:
+                assert run.tick(61_000) == [f"holding {suite.head}: GET {runs} {failure}"]
+        assert run.tick(91_000)[0].startswith("grading ")
+        assert run.grade(suite.head).base == suite.base
+        assert run.lab.client.hgetall(scheduler.WAITING) == {}
+        slug = str(suite.repo).removeprefix("/")
+        assert run.lab.objects.read(f"{manifest_folder(slug)}{suite.base}.json") == packed
+        assert mint.call_count == 3
+        assert get.call_count == 3
 
 
 @pytest.mark.wall_clock
