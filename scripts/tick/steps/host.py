@@ -324,7 +324,7 @@ STEPS = (
         "wrapper view",
         held(_tick_view),
         frozenset({"view wait"}),
-        reads=hook_domains("doc"),
+        reads=hook_domains("doc") | pass_domains("view"),
         writes=pass_domains("view"),
         kept=True,
     ),
