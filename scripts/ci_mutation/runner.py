@@ -1,4 +1,5 @@
 import ast
+import contextlib
 import json
 import os
 import shutil
@@ -39,6 +40,9 @@ def run_process(command: list[str], cwd: Path, timeout: float, log: Path) -> int
             os.killpg(process.pid, signal.SIGKILL)
             process.wait()
             return None
+        finally:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
 
 
 def failing_tests(log: Path) -> list[str]:

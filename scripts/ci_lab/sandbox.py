@@ -1,4 +1,4 @@
-"""Per unit sandbox: private environment, port range, no network unless asked, process group killed on timeout.
+"""Per unit sandbox: private environment, port range, no network unless asked, process group killed at every exit.
 
 The private HOME, TMPDIR and XDG folders are environment variables; the host filesystem stays shared, except the
 read only trees, such as the grader and base trees, which bubblewrap binds read only.
@@ -125,7 +125,7 @@ class Sandbox:
         self.readonly = tuple(readonly)
 
     def run(self, argv: Sequence[str], timeout: float, net: bool = False) -> Outcome:
-        """Run argv in its own session; the code is None when timeout ended it and its process group was killed.
+        """Run argv in its own session and kill its process group when it exits; the code is None when timeout ended it.
 
         The run directory, the log's parent, keeps the private folders for the caller to remove.
         """
