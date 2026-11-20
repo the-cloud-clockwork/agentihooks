@@ -7141,7 +7141,9 @@
         "tests/test_design_rules.py::test_removing_the_first_of_two_namesakes_grades_nothing",
         "tests/test_design_rules.py::test_a_copy_of_an_unchanged_function_is_graded_as_new",
         "tests/test_design_rules.py::test_an_edited_namesake_is_graded_against_its_base_by_position",
-        "tests/test_design_rules.py::test_a_new_function_with_a_nested_one_leaves_a_later_unchanged_function_ungraded"
+        "tests/test_design_rules.py::test_a_new_function_with_a_nested_one_leaves_a_later_unchanged_function_ungraded",
+        "tests/test_design_rules.py::test_a_new_nested_namesake_leaves_the_unchanged_ones_inner_function_ungraded",
+        "tests/test_design_rules.py::test_a_file_path_holding_a_double_colon_still_pairs_its_namesakes"
       ]
     },
     {

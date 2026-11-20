@@ -162,6 +162,20 @@ def test_a_new_function_with_a_nested_one_leaves_a_later_unchanged_function_ungr
     assert _grade(tmp_path, {"scripts/job.py": UNTYPED}, head) == (2, [])
 
 
+@pytest.mark.feature("design-rules-duplicate-pairing")
+def test_a_new_nested_namesake_leaves_the_unchanged_ones_inner_function_ungraded(tmp_path: Path) -> None:
+    old = "    def inner(x):\n        def deep(y):\n            return y\n        return deep(x)\n"
+    base = "def load(path: str) -> str:\n" + old + "    return inner(path)\n"
+    head = base.replace(old, "    def inner(x: int) -> int:\n        return x\n" + old)
+    assert _grade(tmp_path, {"scripts/job.py": base}, {"scripts/job.py": head}) == (2, [])
+
+
+@pytest.mark.feature("design-rules-duplicate-pairing")
+def test_a_file_path_holding_a_double_colon_still_pairs_its_namesakes(tmp_path: Path) -> None:
+    head = {"scripts/odd::job.py": TYPED + "\n\n" + UNTYPED}
+    assert _grade(tmp_path, {"scripts/odd::job.py": UNTYPED}, head) == (1, [])
+
+
 def test_private_and_nested_functions_are_graded_for_hints(tmp_path):
     source = (
         "def _load(path):\n    def inner(x):\n        return x\n    return inner(path)\n\n\n"

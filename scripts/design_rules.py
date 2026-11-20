@@ -346,7 +346,7 @@ def _edited(previous: Unit | None, unit: Unit) -> bool:
 
 
 def _family(key: str) -> tuple[str, str]:
-    rel, _, path = key.partition("::")
+    rel, _, path = key.rpartition("::")
     scope, _, name = path.rpartition(".")
     return f"{rel}::{scope}", name.partition("#")[0]
 
