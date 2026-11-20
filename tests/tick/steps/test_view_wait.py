@@ -8,7 +8,7 @@ import pytest
 
 from scripts.swarm import cli, delivery
 from scripts.tick import registry
-from scripts.tick.steps import host, pass_domains, view_wait
+from scripts.tick.steps import CallStep, host, pass_domains, view_wait
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_delivery import FakeHerdr
 
@@ -33,6 +33,7 @@ def _reader(values: dict[str, Any]) -> Callable[[str], Any]:
 def test_view_wait() -> None:
     """The view wait step is a kept tick lane step at the relay site reading the intent verdict and writing the view."""
     found = {step.name: step for step in registry.steps()}["view wait"]
+    assert isinstance(found, CallStep)
     assert (found.group, found.lane, found.feature, found.effects, found.kept) == (
         "wrapper relay",
         "tick",
