@@ -8,7 +8,7 @@ on:
         type: choice
         required: true
         default: tests
-        options: [tests, mutation, mutation-deadlines, mutation-replay, semgrep, worker-image, swarm-image, brain-smoke, helm-kind, github-access, row-memory, operations-cpu, operations-receipts]
+        options: [checkout-probe, tests, mutation, mutation-deadlines, mutation-replay, semgrep, worker-image, swarm-image, brain-smoke, helm-kind, github-access, row-memory, operations-cpu, operations-receipts]
       base:
         description: Base revision for mutation or Semgrep scope
         required: true
@@ -373,3 +373,90 @@ jobs:
           path: test-results/*.png
           if-no-files-found: ignore
           retention-days: 7
+
+  checkout-probe:
+    if: inputs.proof == 'checkout-probe'
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - {config: all-refs, repeat: 1}
+          - {config: head-blobless, repeat: 1}
+          - {config: head-unshallow, repeat: 1}
+          - {config: head-treeless, repeat: 1}
+          - {config: all-refs, repeat: 2}
+          - {config: head-blobless, repeat: 2}
+          - {config: head-unshallow, repeat: 2}
+          - {config: head-treeless, repeat: 2}
+          - {config: all-refs, repeat: 3}
+          - {config: head-blobless, repeat: 3}
+          - {config: head-unshallow, repeat: 3}
+          - {config: head-treeless, repeat: 3}
+    steps:
+      - if: matrix.config == 'all-refs'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+
+      - if: matrix.config == 'head-blobless'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2147483647
+          filter: blob:none
+          ref: ${{ github.sha }}
+
+      - if: matrix.config == 'head-unshallow'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          filter: blob:none
+          ref: ${{ github.sha }}
+
+      - name: Deepen to the full head history
+        if: matrix.config == 'head-unshallow'
+        run: git fetch --no-tags --filter=blob:none --unshallow origin "$(git rev-parse HEAD)"
+
+      - if: matrix.config == 'head-treeless'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2147483647
+          filter: tree:0
+          ref: ${{ github.sha }}
+
+      - name: Verify the history change discovery reads
+        env:
+          CONFIG: ${{ matrix.config }}
+        run: |
+          set -euo pipefail
+          shallow="$(git rev-parse --is-shallow-repository)"
+          count="$(git rev-list --count HEAD)"
+          refs="$(git for-each-ref | wc -l)"
+          tags="$(git for-each-ref refs/tags | wc -l)"
+          root="$(git rev-list --max-parents=0 HEAD | head -1)"
+          echo "probe config=$CONFIG shallow=$shallow commits=$count refs=$refs tags=$tags root=$root"
+          git config --get-regexp '^remote\.origin\.' || true
+          git count-objects -vH
+          [[ "$shallow" == false ]]
+          [[ "$count" -gt 7000 ]]
+          [[ "$(git merge-base "$root" HEAD)" == "$root" ]]
+          if [[ "$CONFIG" != all-refs ]]; then [[ "$tags" -eq 0 ]]; fi
+
+      - name: Simulate the change discovery diff
+        run: |
+          set -euo pipefail
+          base="$(git rev-parse HEAD~30)"
+          git merge-base "$base" HEAD
+          git diff --no-renames --numstat "$base" HEAD -- 'hooks/*.py' 'scripts/*.py' 'tests/*.py' | wc -l
+          git diff --name-only -z "$base"...HEAD -- hooks/ scripts/ | tr '\0' '\n' | wc -l
+
+      - name: Simulate the helper revision fetch and archive
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin dev
+          mkdir -p "$RUNNER_TEMP/workflow"
+          git archive FETCH_HEAD .github/scripts .github/test-requirements.lock | tar -x -C "$RUNNER_TEMP/workflow"
+          git rev-list --count HEAD..FETCH_HEAD
