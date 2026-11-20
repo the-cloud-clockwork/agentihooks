@@ -458,7 +458,7 @@ def test_priority_accepts_complete_exact_head_proof(monkeypatch):
         ],
         endpoints,
     )
-    monkeypatch.setattr(merge_queue, "waiting_around", lambda *args: ([], []))
+    monkeypatch.setattr(merge_queue, "waiting_around", lambda *args, **kwargs: ([], []))
     assert merge_queue.prioritize(URL, run=run)["errors"] == []
     assert any(f"query={merge_queue.QUEUE}" in cmd and f"head={HEAD}" in cmd for cmd, _ in calls)
 
@@ -485,7 +485,7 @@ def test_priority_restores_a_completed_staged_prerequisite_on_its_original_head(
     monkeypatch.setattr(
         merge_queue,
         "waiting_around",
-        lambda *args: (
+        lambda *args, **kwargs: (
             [
                 {"id": "PR_two", "url": other, "headRefOid": HEAD},
             ],

@@ -195,9 +195,9 @@ def journaled(journal, action: str, url: str, head: str, call: Callable[[], dict
 def operate(
     action: str,
     url: str,
-    run=subprocess.run,
-    admit=None,
-    journal=None,
+    run: Callable[..., Any] = subprocess.run,
+    admit: Callable[[str], Any] | None = None,
+    journal: Any = None,
     attempts: int = 1,
     priority: Callable[[], Any] | None = None,
 ) -> dict:
