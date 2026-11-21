@@ -69,7 +69,7 @@ def _grade(client: Any, objects: Objects, key: str, kept: set[str], wanted: Want
         carried = [slot for slot in state["units"].values() if FIELD in slot]
         for slot in carried:
             _keep(objects, Unit(slot["kind"], slot["key"], (), slot.pop(FIELD)), kept, counts, "grade manifests moved")
-        commit = state.get("manifest", "")
+        commit = state.get("manifest")
         for slot in state["units"].values():
             if commit and slot["kind"] == expand_tests.KIND and slot.get("job") and not slot.get("outcome"):
                 wanted[(state["repo"], commit)][slot["key"]] = slot["members"]
@@ -111,7 +111,7 @@ def _slice(
 
 def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     """Compact the lab records of the Redis the environment names against its object store and print the counts."""
-    argparse.ArgumentParser(prog="python -m scripts.ci_lab compact", description=__doc__).parse_args(argv)
+    argparse.ArgumentParser(prog="python -m scripts.ci_lab compact").parse_args(argv)
     client: Any = redis.Redis.from_url(environ[contract.REDIS_URL], decode_responses=True)  # pyright: ignore[reportUnknownMemberType]
-    print(json.dumps(compact(client, storage(environ)), sort_keys=True), flush=True)
+    print(json.dumps(compact(client, storage(environ))))
     return 0

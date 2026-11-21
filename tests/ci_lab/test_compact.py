@@ -33,6 +33,20 @@ def parsed(found: dict[str, Any]) -> dict[str, Any]:
     return {name: json.loads(value) if name.startswith(scheduler.GRADES) else value for name, value in found.items()}
 
 
+class Counted(LocalObjects):
+    def __init__(self, root: Path) -> None:
+        super().__init__(root)
+        self.calls: list[tuple[str, str]] = []
+
+    def write_once(self, path: str, data: bytes) -> bool:
+        self.calls.append(("write", path))
+        return super().write_once(path, data)
+
+    def read(self, path: str) -> bytes:
+        self.calls.append(("read", path))
+        return super().read(path)
+
+
 @pytest.mark.feature("lab-manifest-compaction")
 def test_compaction_moves_each_manifest_redis_carries_to_its_unit_and_strips_it_everywhere(
     lab: Callable[..., Run],
@@ -42,8 +56,10 @@ def test_compaction_moves_each_manifest_redis_carries_to_its_unit_and_strips_it_
     legacy(run, unit, text)
     packed(run, manifest)
     expected = stripped(records(run.lab.client))
-    counts = compact.compact(run.lab.client, run.lab.objects)
+    objects = Counted(run.lab.objects.root)
+    counts = compact.compact(run.lab.client, objects)
     assert parsed(records(run.lab.client)) == expected
+    assert objects.calls == [("write", unit_path(unit.kind, unit.key, "manifest"))]
     assert run.lab.objects.read(unit_path(unit.kind, unit.key, "manifest")).decode() == text
     assert counts == Counter({"grade manifests moved": 1, "grades stripped": 1, "jobs stripped": 1})
     assert compact.compact(run.lab.client, run.lab.objects) == Counter()
@@ -81,6 +97,19 @@ def test_compaction_counts_the_batches_whose_grade_commit_has_no_packed_manifest
     legacy(run, unit, "", slots=False, jobs=False)
     assert compact.compact(run.lab.client, run.lab.objects) == Counter({"batches without a packed manifest": 1})
     assert unit_path(unit.kind, unit.key, "manifest") not in run.lab.objects.keys("lab/")
+
+
+@pytest.mark.feature("lab-manifest-compaction")
+def test_compaction_slices_nothing_for_a_grade_state_stored_before_it_kept_a_manifest_commit(
+    lab: Callable[..., Run],
+) -> None:
+    run, _, unit = started(lab)
+    legacy(run, unit, "", slots=False, jobs=False)
+    (grade,) = run.grades()
+    document = json.loads(run.lab.client.get(scheduler.GRADES + grade.run))
+    del document["manifest"]
+    run.lab.client.set(scheduler.GRADES + grade.run, json.dumps(document))
+    assert compact.compact(run.lab.client, run.lab.objects) == Counter()
 
 
 @pytest.mark.feature("lab-manifest-compaction")
@@ -148,3 +177,11 @@ def test_the_compact_command_compacts_the_lab_redis_its_environment_names(
     assert json.loads(capsys.readouterr().out) == {"job manifests moved": 1, "jobs stripped": 1}
     assert objects.read(unit_path("test", unit_key, "manifest")) == b'{"tests": {}}'
     assert client.hgetall(JOBS + "job") == {"kind": "test", "key": unit_key}
+
+
+@pytest.mark.feature("lab-manifest-compaction")
+def test_the_compact_command_help_names_its_invocation(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exited:
+        cli.main(["compact", "--help"], {})
+    assert exited.value.code == 0
+    assert capsys.readouterr().out.startswith("usage: python -m scripts.ci_lab compact")
