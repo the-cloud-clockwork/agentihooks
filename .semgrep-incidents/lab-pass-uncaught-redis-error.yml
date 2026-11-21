@@ -1,0 +1,24 @@
+rules:
+  - id: lab-pass-uncaught-redis-error
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A Redis error raised by one lab scheduler pass leaves serve and ends the scheduler process. On 21 November one
+      read timeout in the per slot job read of a pass ended the scheduler four times in ninety minutes, at 10:39,
+      11:16, 11:20 and 12:03 UTC, and every grade stopped while it restarted. Run each pass, the scheduler tick and the
+      relay tick, inside try with except RedisError, print the skipped pass and the error, and run the next pass on
+      schedule.
+    paths:
+      include:
+        - /scripts/ci_lab/scheduler.py
+        - lab-pass-uncaught-redis-error.py
+    patterns:
+      - pattern-inside: |
+          while $CONDITION:
+              ...
+      - pattern: $TICKER.tick(...)
+      - pattern-not-inside: |
+          try:
+              ...
+          except RedisError as $ERROR:
+              ...
