@@ -1910,7 +1910,23 @@ fifteen minute target.
 
 Browser jobs share the [verified Chromium cache](reference/browser-cache.md): restore is attempted on every ref when no verified baked browser is available, while only `dev` pushes save after a miss and successful installation. The guide covers workflow setup, GitHub cache scope, recovery and cache inventory checks.
 
-Hosted lane users share three lanes, the concurrency groups `hosted-lane-a`, `hosted-lane-b` and `hosted-lane-c`. A run picks its lane from the last digit of its run id: 0 to 2 is lane a, 3 to 5 lane b and 6 to 9 lane c. Each lane runs one run at a time and queues the rest (`queue: max`), so at most three such runs hold hosted runners at once. The lanes are used by every Mutation refinement proof run, by `workflow_dispatch` runs of the Tests, Swarm worker image and Test leaks workflows, by Worker hive pod runs other than a push to `dev`, and by the brain smoke, Helm chart in kind, CI templates, Swarm container smoke, Swarm worker image smoke and Ledger server load workflows when they run under their own name. Every `proofs.yml` dispatch, whatever its proof, stays off the lanes in its own `focused-proof-<run id>` group, so a short proof never waits behind a full Tests dispatch on its lane.
+Hosted lane users share three lanes, the concurrency groups `hosted-lane-a`, `hosted-lane-b` and `hosted-lane-c`. A run picks its lane from the last digit of its run id: 0 to 2 is lane a, 3 to 5 lane b and 6 to 9 lane c. Each lane runs one run at a time and queues the rest (`queue: max`), so at most three such runs hold hosted runners at once. The table lists each lane user and the runs of it that take a lane. A workflow that takes a lane when it runs under its own name gets its own per run group when another workflow calls it, because the call runs under the caller's name. Every `proofs.yml` dispatch, whatever its proof, stays off the lanes in its own `focused-proof-<run id>` group, so a short proof never waits behind a full Tests dispatch on its lane.
+
+| Lane user | Workflow file | Runs on a lane |
+|---|---|---|
+| brain-smoke | `brain-smoke.yml` | runs under its own name |
+| CI templates | `ci-templates.yml` | runs under its own name |
+| Helm chart in kind | `helm-kind.yml` | runs under its own name |
+| Ledger server load | `ledger-load.yml` | runs under its own name |
+| Mutation refinement proof | `mutation-refinement-proof.yml` | every run |
+| Startup stages | `startup-stages.yml` | `workflow_dispatch` runs |
+| Swarm container smoke | `swarm-smoke.yml` | runs under its own name |
+| Swarm worker image | `swarm-node-image.yml` | `workflow_dispatch` runs |
+| Swarm worker image smoke | `swarm-node-smoke.yml` | runs under its own name |
+| Test leaks | `test-leaks.yml` | `workflow_dispatch` runs |
+| Tests | `test.yml` | `workflow_dispatch` runs |
+| Worker hive pod | `hive-worker.yml` | every run except a push to `dev` |
+| Worker resources | `worker-resources.yml` | `workflow_dispatch` runs |
 
 Branch pushes of the Startup stages and Worker resources workflows stay off the lanes. Each push resolves to a per-branch group, `startup-stages-refs/heads/<branch>` or `worker-resources-refs/heads/<branch>`, with `queue: single`: a newer push to the same branch replaces the pending one, and the push never waits behind or blocks a proof dispatch. A `workflow_dispatch` of either workflow still queues on a lane. When another workflow calls either one, the call runs under the caller's name and gets its own `startup-stages-<run id>` or `worker-resources-<run id>` group with `queue: single`.
 
