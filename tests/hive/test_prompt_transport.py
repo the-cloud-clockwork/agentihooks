@@ -304,8 +304,8 @@ def test_controller_mirrors_the_execution_hives_work_folder(
     monkeypatch.setattr(setup.store, "agents", lambda slug: [agent])
     for remote in ("host", "target"):
         setup.redis.set(
-            ledger_workspace.files_key(remote),
-            json.dumps({"fixture": {"task": {"progress.md": f"{remote} progress\n", "proof.md": f"{remote} proof\n"}}}),
+            ledger_workspace.task_files_key(remote, "fixture", "task"),
+            json.dumps({"progress.md": f"{remote} progress\n", "proof.md": f"{remote} proof\n"}),
         )
     ledger = {"tasks": [{"id": "task", "workspace": TASK["workspace"]}]}
     with at(homes.controller), patch.object(commands, "hive_id", return_value="controller"):
@@ -480,12 +480,51 @@ def test_the_latest_execution_of_a_task_wins(setup):
 def test_seeds_carry_only_the_latest_text(homes):
     with at(homes.controller):
         folder = ledger_workspace.scaffold("fixture", TASK)
-        (folder / "progress.md").write_text("x" * ledger_workspace.SEED_CHARS + "last\n", encoding="utf-8")
-        (folder / "steering.md").write_text("# task\n" + "y" * ledger_workspace.SEED_CHARS, encoding="utf-8")
+        (folder / "progress.md").write_text("x" * ledger_workspace.LINE_BYTES + "last\n", encoding="utf-8")
+        (folder / "steering.md").write_text("# task\n" + "y" * ledger_workspace.LINE_BYTES, encoding="utf-8")
         sent = ledger_workspace.seeds("fixture", "task")
-    assert len(sent["progress.md"]) == ledger_workspace.SEED_CHARS
+    assert len(json.dumps(sent["progress.md"])) - 2 == ledger_workspace.LINE_BYTES
     assert sent["progress.md"].endswith("last\n")
-    assert sent["steering.md"] == "# task\n" + "y" * ledger_workspace.SEED_CHARS
+    assert sent["steering.md"] == "# task\n" + "y" * ledger_workspace.LINE_BYTES
+
+
+@pytest.mark.feature("work-folder-follows-the-task-across-hives")
+def test_progress_and_proof_longer_than_sixty_four_kilobytes_travel_whole(homes: SimpleNamespace) -> None:
+    progress = "first step\n" + "x" * 100_000 + "\nlast step\n"
+    proof = "first proof\n" + "y" * 80_000 + "\nlast proof\n"
+    with at(homes.controller):
+        folder = ledger_workspace.scaffold("fixture", TASK)
+        (folder / "progress.md").write_text(progress, encoding="utf-8")
+        (folder / "proof.md").write_text(proof, encoding="utf-8")
+        sent = ledger_workspace.seeds("fixture", "task")
+    assert (sent["progress.md"], sent["proof.md"]) == (progress, proof)
+
+
+@pytest.mark.feature("work-folder-follows-the-task-across-hives")
+def test_an_added_file_travels_only_while_every_carried_file_fits_the_seed_budget(homes: SimpleNamespace) -> None:
+    lines = ledger_workspace.LINE_BYTES
+    with at(homes.controller):
+        folder = ledger_workspace.scaffold("fixture", TASK)
+        (folder / "progress.md").write_text("p" * lines, encoding="utf-8")
+        (folder / "proof.md").write_text("q" * (ledger_workspace.SEED_BYTES - lines - 10), encoding="utf-8")
+        (folder / "a.log").write_text("a" * 11, encoding="utf-8")
+        (folder / "b.log").write_text("b" * 10, encoding="utf-8")
+        sent = ledger_workspace.seeds("fixture", "task")
+    assert sorted(sent) == ["b.log", "progress.md", "proof.md", "steering.md"]
+    carried = sum(len(json.dumps(text)) - 2 for name, text in sent.items() if name != "steering.md")
+    assert carried == 262144
+
+
+@pytest.mark.feature("work-folder-follows-the-task-across-hives")
+def test_the_seed_budget_counts_the_json_bytes_the_admit_reply_carries(homes: SimpleNamespace) -> None:
+    with at(homes.controller):
+        folder = ledger_workspace.scaffold("fixture", TASK)
+        (folder / "progress.md").write_text("p" * ledger_workspace.LINE_BYTES, encoding="utf-8")
+        (folder / "proof.md").write_text("é" * 30_000, encoding="utf-8")
+        (folder / "wide.log").write_text("é" * 20_000, encoding="utf-8")
+        sent = ledger_workspace.seeds("fixture", "task")
+    assert sent["proof.md"] == "é" * (ledger_workspace.LINE_BYTES // 6)
+    assert "wide.log" not in sent
 
 
 def test_work_folder_seeds_are_read_and_written_as_utf8(homes, monkeypatch):
@@ -631,6 +670,49 @@ def test_a_hive_syncs_the_work_folder_of_a_session_it_started_that_names_only_it
     assert json.loads(held) == {"progress.md": "started step\n"}
 
 
+@pytest.mark.feature("work-folder-readers-and-launch-pointers")
+@pytest.mark.parametrize("target", [{}, {"pid": 4242, "pid_start": 9001}], ids=["hub admitted", "hive started"])
+def test_the_mirror_and_the_page_tails_read_a_task_from_the_hive_on_its_record(
+    setup: SimpleNamespace, homes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, target: dict[str, int]
+) -> None:
+    from dataclasses import replace
+
+    agents = [replace(setup.agent, runtime_target=target)]
+    monkeypatch.setattr(setup.consumer.store, "agents", lambda slug: agents)
+    monkeypatch.setattr(setup.consumer.store, "slugs", lambda: ["fixture"])
+    monkeypatch.setattr(setup.store, "agents", lambda slug: agents)
+    with at(homes.hive):
+        ledger_workspace.materialize("fixture", "task", {"progress.md": "hive step\n", "proof.md": "hive proof\n"})
+        setup.consumer.sync_workspaces(45)
+    ledger = {"tasks": [{"id": "task", "workspace": TASK["workspace"]}]}
+    with at(homes.controller), patch.object(commands, "hive_id", return_value="controller"):
+        ledger_workspace.mirror(setup.store, "fixture", ledger)
+        tails = ledger_workspace.published(setup.store, "fixture", ledger)
+    folder = homes.controller / ".agentihooks" / "swarm" / "fixture" / "tasks" / "task"
+    assert (folder / "proof.md").read_text(encoding="utf-8") == "hive proof\n"
+    assert tails == {"task": {"latest_progress": "hive step", "latest_proof": "hive proof"}}
+
+
+@pytest.mark.feature("work-folder-readers-and-launch-pointers")
+def test_the_page_and_the_mirror_keep_a_task_after_its_hive_stops_publishing(
+    setup: SimpleNamespace, homes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(setup.consumer.store, "agents", lambda slug: [setup.agent])
+    monkeypatch.setattr(setup.consumer.store, "slugs", lambda: ["fixture"])
+    monkeypatch.setattr(setup.store, "agents", lambda slug: [setup.agent])
+    with at(homes.hive):
+        ledger_workspace.materialize("fixture", "task", {"progress.md": "hive step\n", "proof.md": "hive proof\n"})
+        setup.consumer.sync_workspaces(45)
+    setup.redis.delete(ledger_workspace.synced_key("host"), ledger_workspace.files_key("host"))
+    ledger = {"tasks": [{"id": "task", "workspace": TASK["workspace"]}]}
+    with at(homes.controller), patch.object(commands, "hive_id", return_value="controller"):
+        ledger_workspace.mirror(setup.store, "fixture", ledger)
+        tails = ledger_workspace.published(setup.store, "fixture", ledger)
+    folder = homes.controller / ".agentihooks" / "swarm" / "fixture" / "tasks" / "task"
+    assert (folder / "proof.md").read_text(encoding="utf-8") == "hive proof\n"
+    assert tails == {"task": {"latest_progress": "hive step", "latest_proof": "hive proof"}}
+
+
 @pytest.mark.feature("work-folder-follows-the-task-across-hives")
 def test_a_task_copy_outlives_the_hive_hosting_it(setup: SimpleNamespace, homes: SimpleNamespace) -> None:
     lines = {"progress.md": "hive step\n", "proof.md": "hive proof\n"}
@@ -640,8 +722,16 @@ def test_a_task_copy_outlives_the_hive_hosting_it(setup: SimpleNamespace, homes:
         ledger_workspace.sync(setup.redis, "host", [], 45)
     key = f"{ledger_workspace.files_key('host')}:fixture:task"
     assert json.loads(setup.redis.get(key)) == lines
-    assert 0 < setup.redis.ttl(key) <= ledger_workspace.FILES_SECONDS
+    assert setup.redis.ttl(key) == -1
     assert json.loads(setup.redis.get(ledger_workspace.files_key("host"))) == {}
+
+
+@pytest.mark.feature("work-folder-readers-and-launch-pointers")
+def test_the_launch_pointer_names_the_launching_hive_with_no_expiry(setup: SimpleNamespace) -> None:
+    ledger_workspace.launched_on(setup.store, "fixture", "task", "hive-a")
+    pointer = setup.store.key("fixture", "work-folder", "task")
+    assert setup.redis.get(pointer) == "hive-a"
+    assert setup.redis.ttl(pointer) == -1
 
 
 @pytest.mark.feature("work-folder-follows-the-task-across-hives")

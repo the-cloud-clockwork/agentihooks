@@ -3417,7 +3417,7 @@ jobs:
           changed=false
           base="$(git -C "$RUNNER_TEMP/base" rev-parse HEAD)"
           for path in scripts/ci_mutation tests/mutation_self_plant hooks/context/conditions.py scripts/ci_cpu_quota.py \
-            pyproject.toml pytest.ini setup.cfg tox.ini uv.lock .coveragerc; do
+            pyproject.toml pytest.ini setup.cfg tox.ini .github/test-requirements.lock .coveragerc; do
             if ! git diff --quiet "$base" HEAD -- "$path"; then
               echo "Changed: $path"
               changed=true
