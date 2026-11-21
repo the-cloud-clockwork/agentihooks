@@ -17,7 +17,6 @@ import re
 import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from functools import partial
 from itertools import accumulate
 from pathlib import Path
@@ -34,7 +33,6 @@ from scripts.github_app import GitHubAppAuth
 __all__ = [
     "AUTHORITATIVE",
     "CONCLUSIONS",
-    "DISPATCH",
     "DISPATCHED",
     "EVENT",
     "PERMISSIONS",
@@ -60,7 +58,6 @@ API = "https://api.github.com"
 AUTHORITATIVE = CHECK_PREFIX
 SHADOW = f"{CHECK_PREFIX}-shadow"
 PERMISSIONS = {"checks": "write"}
-DISPATCH = {"contents": "write"}
 EVENT = "lab-check"
 DISPATCHED = 0
 ACTIONS = "GITHUB_ACTIONS"
@@ -354,7 +351,7 @@ class Dispatches:
         clock: Callable[[], float] = time.time,
     ) -> None:
         self.repo = repo
-        self.auth: Token = auth if auth is not None else GitHubAppAuth(f"github.com/{repo}", permissions=DISPATCH)
+        self.auth: Token = auth if auth is not None else GitHubAppAuth(f"github.com/{repo}")
         self.sleep = sleep
         self.clock = clock
         self.runs: dict[Key, str] = {}
@@ -404,7 +401,7 @@ def main(environ: Mapping[str, str], now: Callable[[], float] = time.time) -> in
     """Post the check run of the lab-check repository dispatch that GitHub Actions names in its event file, with the
     token `token` picks, print what was done and return 0."""
     event = json.loads(Path(environ["GITHUB_EVENT_PATH"]).read_text())
-    head, check, body = dispatched(event["client_payload"], datetime.fromtimestamp(now(), UTC).strftime(STAMP))
+    head, check, body = dispatched(event["client_payload"], time.strftime(STAMP, time.gmtime(now())))
     repo = environ["GITHUB_REPOSITORY"]
     done, run = Checks(repo, token(repo, environ)).upsert(head, check, body)
     print(f"{done} {check} on {head} as check run {run}")

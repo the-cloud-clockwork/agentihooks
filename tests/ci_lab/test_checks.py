@@ -597,13 +597,18 @@ def test_a_shadow_move_without_a_conclusion_dispatches_its_own_name_and_no_concl
 
 
 @pytest.mark.feature("lab-check-dispatch")
-def test_a_seeded_dispatch_is_not_sent_again(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    ("shadow", "seeded", "other"), [(False, "lab/lint", "lab-shadow/lint"), (True, "lab-shadow/lint", "lab/lint")]
+)
+def test_a_seeded_dispatch_is_not_sent_again(
+    monkeypatch: pytest.MonkeyPatch, shadow: bool, seeded: str, other: str
+) -> None:
     poster, request, _ = dispatcher(monkeypatch)
-    poster.seed(HEAD, "lint", "run-7", checks.DISPATCHED, "completed", False)
-    assert poster.status((HEAD, "lab/lint", "run-7")) == "completed"
-    assert poster.status((HEAD, "lab-shadow/lint", "run-7")) is None
+    poster.seed(HEAD, "lint", "run-7", checks.DISPATCHED, "completed", shadow)
+    assert poster.status((HEAD, seeded, "run-7")) == "completed"
+    assert poster.status((HEAD, other, "run-7")) is None
     with pytest.raises(ValueError, match=FORWARD):
-        poster.post(HEAD, "lint", "completed", "success", OUTPUT, False)
+        poster.post(HEAD, "lint", "completed", "success", OUTPUT, shadow)
     request.assert_not_called()
 
 
@@ -680,11 +685,11 @@ def test_the_entry_posts_the_dispatched_check_run_with_the_workflow_token(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     runs: list[dict[str, Any]] = []
-    seen: list[str] = []
+    seen: list[tuple[str, str, str]] = []
     answering = recorded(runs)
 
     def request(method: str, url: str, **kwargs: Any) -> Mock:
-        seen.append(kwargs["headers"]["Authorization"])
+        seen.append((method, url, kwargs["headers"]["Authorization"]))
         return answering(method, url, **kwargs)
 
     monkeypatch.setattr(requests, "request", request)
@@ -694,4 +699,29 @@ def test_the_entry_posts_the_dispatched_check_run_with_the_workflow_token(
     assert checks.main(environ, lambda: 1795161900.0) == 0
     assert capsys.readouterr().out == f"advanced lab/lint on {HEAD} as check run 1\n"
     assert runs == [{"id": 1, "name": "lab/lint", "head_sha": HEAD, **BODY, "completed_at": "2026-11-20T08:05:00Z"}]
-    assert set(seen) == {"Bearer workflow-token"}
+    assert [(method, url) for method, url, _ in seen] == [
+        ("GET", LISTING),
+        ("POST", URL),
+        ("GET", LISTING),
+        ("PATCH", f"{URL}/1"),
+    ]
+    assert {bearer for *_, bearer in seen} == {"Bearer workflow-token"}
+
+
+@pytest.mark.feature("lab-check-actions-entry")
+def test_the_entry_outside_actions_posts_with_the_app_token_of_its_repository(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    runs: list[dict[str, Any]] = []
+    monkeypatch.setattr(requests, "request", recorded(runs))
+    minted: list[tuple[str, Mapping[str, str]]] = []
+
+    def app(project: str, *, permissions: Mapping[str, str]) -> Token:
+        minted.append((project, permissions))
+        return Token()
+
+    monkeypatch.setattr(checks, "GitHubAppAuth", app)
+    assert checks.main({**event(tmp_path, PAYLOAD), "GITHUB_ACTIONS": "false"}, lambda: 1795161600.0) == 0
+    assert capsys.readouterr().out == f"created lab/lint on {HEAD} as check run 1\n"
+    assert minted == [("github.com/example/repo", {"checks": "write"})]
+    assert runs == [{"id": 1, "name": "lab/lint", "head_sha": HEAD, **BODY}]

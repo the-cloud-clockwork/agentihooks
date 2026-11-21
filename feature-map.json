@@ -9809,12 +9809,13 @@
       "id": "lab-check-actions-entry",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2678",
-      "behaviour": "python -m scripts.ci_lab.checks reads the lab-check dispatch from the event file GitHub Actions names, refuses a head that is not a full sha, a name outside lab and lab-shadow check runs and a bad status or conclusion, stamps a completed run with its completed time, and upserts it with the workflow token under the head's external id.",
+      "behaviour": "python -m scripts.ci_lab.checks reads the lab-check dispatch from the event file GitHub Actions names, refuses a head that is not a full sha, a name outside lab and lab-shadow check runs and a bad status or conclusion, stamps a completed run with its completed time in UTC, and upserts it on the repository the environment names under the head's external id, with the workflow token inside Actions and the repository's App token with checks write elsewhere.",
       "seam": "scripts.ci_lab.checks.dispatched and scripts.ci_lab.checks.main over a written event file and mocked requests",
       "tests": [
         "tests/ci_lab/test_checks.py::test_a_dispatched_payload_becomes_the_check_run_body_of_its_head",
         "tests/ci_lab/test_checks.py::test_a_dispatch_payload_with_a_bad_head_name_status_or_conclusion_is_refused",
-        "tests/ci_lab/test_checks.py::test_the_entry_posts_the_dispatched_check_run_with_the_workflow_token"
+        "tests/ci_lab/test_checks.py::test_the_entry_posts_the_dispatched_check_run_with_the_workflow_token",
+        "tests/ci_lab/test_checks.py::test_the_entry_outside_actions_posts_with_the_app_token_of_its_repository"
       ]
     },
     {
