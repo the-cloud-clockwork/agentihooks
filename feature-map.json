@@ -3587,6 +3587,17 @@
       ]
     },
     {
+      "id": "launch-prompt-recon-steps",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-launch-prompt-recon-steps",
+      "behaviour": "The spawn prompt of a code task in the eng lane and of a ci task lists, before the issue, worktree and red test steps and in this order, the still valid scouter check, the recon plan written to recon.md in the task work folder with its six headings in order, and the traced plan written to plan.md and checked with trace-plan; research and planner prompts carry no such block.",
+      "seam": "The spawn prompt in scripts.swarm.prompt, its step dispatcher for code and ci work",
+      "tests": [
+        "tests/swarm/test_startup_prompts.py::test_code_and_ci_prompts_list_scouter_recon_and_traced_plan_before_issue_worktree_and_red_test",
+        "tests/swarm/test_startup_prompts.py::test_research_and_planner_prompts_carry_no_recon_block"
+      ]
+    },
+    {
       "id": "swarm-claim-lives",
       "origin": "inventory",
       "behaviour": "Every claim the tick makes spends one agent life; a fourth claim is refused and the task blocked for the master.",
