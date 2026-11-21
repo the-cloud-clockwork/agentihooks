@@ -3,9 +3,7 @@ from typing import cast
 
 from .fragments import Fragment, encoded
 from .rows import encode
-from .tracked import DICTS, LISTS, copied
-
-SCALARS = frozenset({str, int, float, bool, type(None)})
+from .tracked import DICTS, LISTS, SCALARS, copied
 
 
 def thawed(value: object) -> object:

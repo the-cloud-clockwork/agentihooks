@@ -11,7 +11,21 @@ from scripts.swarm_ledger.repository.fragments import Fragment, document, leaf
 
 Write = Callable[[Any], object]
 
+DICT_READS = {
+    "__class__", "__class_getitem__", "__contains__", "__delattr__", "__dir__", "__eq__", "__format__", "__ge__",
+    "__getattribute__", "__getitem__", "__getstate__", "__gt__", "__hash__", "__init_subclass__", "__iter__", "__le__",
+    "__len__", "__lt__", "__ne__", "__new__", "__or__", "__reduce__", "__reduce_ex__", "__repr__", "__reversed__",
+    "__ror__", "__setattr__", "__sizeof__", "__str__", "__subclasshook__", "copy", "fromkeys", "get", "items", "keys",
+    "values",
+}  # fmt: skip
+LIST_READS = {
+    "__add__", "__class__", "__class_getitem__", "__contains__", "__delattr__", "__dir__", "__eq__", "__format__",
+    "__ge__", "__getattribute__", "__getitem__", "__getstate__", "__gt__", "__hash__", "__init_subclass__", "__iter__",
+    "__le__", "__len__", "__lt__", "__mul__", "__ne__", "__new__", "__reduce__", "__reduce_ex__", "__repr__",
+    "__reversed__", "__rmul__", "__setattr__", "__sizeof__", "__str__", "__subclasshook__", "copy", "count", "index",
+}  # fmt: skip
 DICT_WRITES: list[Write] = [
+    lambda value: value.__init__({"added": 1}),
     lambda value: value.__setitem__("title", "renamed"),
     lambda value: value.__delitem__("title"),
     lambda value: value.clear(),
@@ -22,6 +36,7 @@ DICT_WRITES: list[Write] = [
     lambda value: value.__ior__({"added": 1}),
 ]
 LIST_WRITES: list[Write] = [
+    lambda value: value.__init__(["x"]),
     lambda value: value.__setitem__(0, "x"),
     lambda value: value.__setitem__(slice(0, 1), ["x"]),
     lambda value: value.__delitem__(0),
@@ -96,6 +111,12 @@ def test_every_list_write_method_inside_the_leaf_drops_its_fragment(write: Write
     deeper = writer(stored())
     write(deeper["owner"]["tags"])
     assert tracked.held(deeper) is None
+
+
+@pytest.mark.feature("ledger-write-partial-rebuild")
+def test_every_dict_and_list_method_a_tracked_leaf_inherits_is_a_read() -> None:
+    assert {name for name in dir(dict) if name not in vars(tracked.TrackedDict)} == DICT_READS
+    assert {name for name in dir(list) if name not in vars(tracked.TrackedList)} == LIST_READS
 
 
 @pytest.mark.feature("ledger-write-partial-rebuild")

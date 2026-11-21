@@ -72,9 +72,10 @@ def deep(self: Tracked, memo: dict[int, Any]) -> object:
     return items
 
 
-for _name in ("__setitem__", "__delitem__", "__ior__", "clear", "popitem", "update"):
+for _name in ("__init__", "__setitem__", "__delitem__", "__ior__", "clear", "popitem", "update"):
     setattr(TrackedDict, _name, marking(getattr(dict, _name)))
 for _name in (
+    "__init__",
     "__setitem__",
     "__delitem__",
     "__iadd__",
@@ -105,9 +106,15 @@ def held(value: object) -> "Fragment | None":
 def made(value: object, mark: Mark, root: bool = False) -> object:
     kind = type(value)
     if kind in LISTS:
-        container: Tracked = TrackedList(made(item, mark) for item in cast(list[object], value))
+        items = TrackedList.__new__(TrackedList)
+        super(TrackedList, items).extend(made(item, mark) for item in cast(list[object], value))
+        container: Tracked = items
     elif kind in DICTS and all(type(key) is str for key in cast(dict[object, object], value)):
-        container = TrackedDict((key, made(item, mark)) for key, item in cast(dict[str, object], value).items())
+        mapping = TrackedDict.__new__(TrackedDict)
+        super(TrackedDict, mapping).update(
+            (key, made(item, mark)) for key, item in cast(dict[str, object], value).items()
+        )
+        container = mapping
     elif kind in SCALARS:
         return value
     else:

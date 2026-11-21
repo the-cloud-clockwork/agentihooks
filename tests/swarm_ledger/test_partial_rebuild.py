@@ -38,9 +38,10 @@ def claim(writer: dict[str, Any]) -> None:
 def serialized(patch: pytest.MonkeyPatch, writer: dict[str, Any], previous: Fragment) -> tuple[int, Fragment, dict]:
     """The values one writer copy rebuild serializes, with the fragments and writer copy it returns."""
     dumped: list[object] = []
-    dumps = fragments.orjson.dumps
+    dumps, encode = fragments.orjson.dumps, fragments.encode
     with patch.context() as counting:
         counting.setattr(fragments.orjson, "dumps", lambda value: dumped.append(value) or dumps(value))
+        counting.setattr(fragments, "encode", lambda value: dumped.append(value) or encode(value))
         rebuilt, held = writer_copy.written(writer, previous)
     return len(dumped), rebuilt, held
 
@@ -77,9 +78,9 @@ def test_a_point_write_from_a_stored_entry_serializes_as_many_values_on_four_tho
 
 @pytest.mark.feature("ledger-write-partial-rebuild")
 def test_untouched_tasks_keep_their_stored_fragment_and_writer_object(monkeypatch: pytest.MonkeyPatch) -> None:
-    _, published, rebuilt, writer, held = warm(50, monkeypatch)
-    assert all(child(rebuilt, "tasks", n) is child(published, "tasks", n) for n in range(1, 51))
-    assert all(held["tasks"][n] is writer["tasks"][n] for n in range(1, 51))
+    _, published, rebuilt, writer, held = warm(2000, monkeypatch)
+    assert all(child(rebuilt, "tasks", n) is child(published, "tasks", n) for n in range(1, 2001))
+    assert all(held["tasks"][n] is writer["tasks"][n] for n in range(1, 2001))
     assert child(rebuilt, "tasks", 0) is not child(published, "tasks", 0)
     assert child(rebuilt, "_meta", "crew") is child(published, "_meta", "crew")
     assert held["_meta"]["crew"] is writer["_meta"]["crew"]

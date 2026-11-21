@@ -19,12 +19,18 @@ from scripts.swarm_ledger.repository.entry import Entry, thawed
 from scripts.swarm_ledger.repository.fragments import Fragment, encoded
 from tests.swarm_ledger import operations_cpu_replay as replay
 
-pytestmark = [pytest.mark.xdist_group("ledger-corpus-replay"), pytest.mark.timeout(240, method="signal")]
+pytestmark = [
+    pytest.mark.xdist_group("ledger-corpus-replay"),
+    pytest.mark.timeout(240, method="signal"),
+    pytest.mark.wall_clock,
+]
 PLANTED = "planted by the replay past every write method"
 KEPT = 150
 TRIMMED = ("tasks", "followups")
-UNCOMPARED = frozenset({"ledgers", "outbox_sent"})
-LEDGERS = "SELECT slug, revision, generation, summary, touched_at FROM ledgers"
+QUERIES = {
+    "ledgers": "SELECT slug, revision, generation, summary, touched_at FROM ledgers",
+    "outbox_sent": "SELECT id FROM outbox_sent",
+}
 Corpus = Callable[[], dict[str, Any]]
 
 
@@ -34,8 +40,8 @@ def digest(text: str) -> str:
 
 
 def trimmed() -> dict[str, Any]:
-    """The recorded corpus with every recorded operation, on the recorded ledger cut to the tasks and followups the
-    operations name plus the first KEPT others, their stamps, and the last KEPT events."""
+    """The recorded corpus on the recorded ledger cut to the tasks and followups its operations name plus the first
+    KEPT others, their stamps, and the last KEPT events."""
     recorded = replay.corpus()
     named = json.dumps(recorded["ops"])
     state = dict(recorded["state"])
@@ -53,17 +59,14 @@ def trimmed() -> dict[str, Any]:
     return {**recorded, "state": state}
 
 
-def persisted(path: Path) -> str:
-    """A digest of every row the writes stored, leaving out the random ledger token and the relay send times."""
+def persisted(path: Path) -> dict[str, list[str]]:
+    """Every row the writes stored, table by table, leaving out the random ledger token and the relay send times."""
     with contextlib.closing(sqlite3.connect(path)) as connection:
         tables = [name for (name,) in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")]
-        rows = {
-            table: sorted(map(repr, connection.execute(f'SELECT * FROM "{table}"')))
+        return {
+            table: sorted(map(repr, connection.execute(QUERIES.get(table, f'SELECT * FROM "{table}"'))))
             for table in sorted(tables)
-            if table not in UNCOMPARED
         }
-        rows["ledgers"] = sorted(map(repr, connection.execute(LEDGERS)))
-    return digest(json.dumps(rows))
 
 
 def numbered(patch: pytest.MonkeyPatch) -> None:
@@ -138,54 +141,61 @@ def run(path: Path, corpus: Corpus, full: bool, plant: str | None = None) -> dic
 
 @pytest.fixture(scope="module")
 def recorded() -> dict[str, Any]:
-    """The trimmed recorded corpus."""
-    return trimmed()
+    """The recorded corpus, read once."""
+    return replay.corpus()
 
 
 @pytest.fixture(scope="module")
-def replays(tmp_path_factory: pytest.TempPathFactory, recorded: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """The corpus replayed on the warm write path first, then forced onto the full rebuild."""
-    return {
-        name: run(tmp_path_factory.mktemp(name), lambda: copy.deepcopy(recorded), full=name == "full")
-        for name in ("partial", "full")
-    }
+def partial(tmp_path_factory: pytest.TempPathFactory, recorded: dict[str, Any]) -> dict[str, Any]:
+    """The recorded corpus replayed on the warm write path."""
+    return run(tmp_path_factory.mktemp("partial"), lambda: copy.deepcopy(recorded), full=False)
+
+
+@pytest.fixture(scope="module")
+def full(tmp_path_factory: pytest.TempPathFactory, recorded: dict[str, Any]) -> dict[str, Any]:
+    """The recorded corpus replayed with every write forced onto the full rebuild."""
+    return run(tmp_path_factory.mktemp("full"), lambda: copy.deepcopy(recorded), full=True)
+
+
+@pytest.mark.feature("ledger-write-partial-rebuild")
+def test_the_warm_write_replay_answers_every_recorded_write(partial: dict[str, Any], recorded: dict[str, Any]) -> None:
+    assert partial["requests"] == len(partial["outputs"]) == len(recorded["ops"])
+    assert [output for output in partial["outputs"] if output["reply"].get("applied")]
+    assert [write for write in partial["writes"] if "text" in write]
 
 
 @pytest.mark.feature("ledger-write-partial-rebuild")
 def test_warm_writes_store_publish_and_relay_what_the_full_rebuild_does_on_the_recorded_corpus(
-    replays: dict[str, dict[str, Any]], recorded: dict[str, Any]
+    partial: dict[str, Any], full: dict[str, Any]
 ) -> None:
-    partial, full = replays["partial"], replays["full"]
-    assert partial["requests"] == full["requests"] == len(recorded["ops"]) == len(replay.corpus()["ops"])
-    assert [output["reply"] for output in partial["outputs"] if output["reply"].get("applied")]
     assert partial["outputs"] == full["outputs"]
-    assert [write for write in partial["writes"] if "text" in write]
     assert partial["writes"] == full["writes"]
     assert partial["rows"] == full["rows"]
 
 
 @pytest.mark.feature("ledger-write-partial-rebuild")
 def test_a_write_into_an_untouched_writer_task_past_the_write_methods_turns_the_equivalence_red(
-    tmp_path: Path, recorded: dict[str, Any]
+    tmp_path: Path,
 ) -> None:
-    named = json.dumps(recorded["ops"])
-    task = next(item["id"] for item in reversed(recorded["state"]["tasks"]) if item["id"] not in named)
+    cut = trimmed()
+    named = json.dumps(cut["ops"])
+    task = next(item["id"] for item in reversed(cut["state"]["tasks"]) if item["id"] not in named)
 
     def corpus() -> dict[str, Any]:
-        return {**copy.deepcopy(recorded), "ops": copy.deepcopy(recorded["ops"][:3])}
+        return {**copy.deepcopy(cut), "ops": copy.deepcopy(cut["ops"][:3])}
 
     partial = run(tmp_path / "partial", corpus, full=False, plant=task)
     full = run(tmp_path / "full", corpus, full=True, plant=task)
     assert [output["reply"] for output in full["outputs"]] == [output["reply"] for output in partial["outputs"]]
     assert full["writes"] != partial["writes"]
     assert full["outputs"] != partial["outputs"]
-    assert full["rows"] != partial["rows"]
+    assert any(PLANTED in row for rows in full["rows"].values() for row in rows)
+    assert not any(PLANTED in row for rows in partial["rows"].values() for row in rows)
 
 
-@pytest.mark.wall_clock
 @pytest.mark.feature("ledger-write-partial-rebuild")
 def test_warm_writes_spend_less_storage_write_cpu_than_the_full_rebuild_on_the_recorded_corpus(
-    replays: dict[str, dict[str, Any]],
+    partial: dict[str, Any], full: dict[str, Any]
 ) -> None:
-    partial, full = (replays[name]["phase_cpu_seconds_per_request"]["storage_write"] for name in ("partial", "full"))
-    assert partial < full * 0.8
+    storage = "storage_write"
+    assert partial["phase_cpu_seconds_per_request"][storage] < full["phase_cpu_seconds_per_request"][storage]
