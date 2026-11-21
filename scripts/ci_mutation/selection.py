@@ -5,6 +5,7 @@ import json
 import multiprocessing
 import os
 import re
+import signal
 import sys
 import tempfile
 import traceback
@@ -26,6 +27,7 @@ from scripts.ci_mutation.report import mutation_lines
 from scripts.ci_mutation.scope import selects, test_file
 from scripts.ci_mutation.stats import split_key, write_part
 from scripts.ci_mutation.stats_dependencies import records_within
+from scripts.ci_mutation.timeouts import retry_timeouts
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -588,30 +590,38 @@ def run_unit(
         return 1
 
 
-def forked_children():
-    # Defined inside a function: a mutated copy trampolines top level methods,
-    # and mutmut reads os.environ in its forced fail.
+def forked_children(retry: Callable[[int, int], int | None] | None = None) -> ModuleType:
     class ForkedChildren(ModuleType):
-        # mutmut reaps with os.wait() and raises KeyError on a child a test left behind in its own process.
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__(os.__name__)
-            self.pids = set()
+            self.pids: set[int] = set()
+            self.retries: dict[int, int] = {}
 
-        def __getattr__(self, name):
+        def __getattr__(self, name: str) -> object:
             return getattr(os, name)
 
-        def fork(self):
+        def fork(self) -> int:
             pid = os.fork()
             if pid:
                 self.pids.add(pid)
             return pid
 
-        def wait(self):
+        def wait(self) -> tuple[int, int]:
             while True:
                 pid, status = os.wait()
+                if pid in self.retries:
+                    self.pids.discard(pid)
+                    return self.retries.pop(pid), status
                 if pid in self.pids:
                     self.pids.discard(pid)
-                    return pid, status
+                    replacement = retry(pid, status) if retry is not None else None
+                    if replacement is None:
+                        return pid, status
+                    self.retries[replacement] = pid
+
+        def stop_retries(self) -> None:
+            for pid in self.retries:
+                os.kill(pid, signal.SIGTERM)
 
     return ForkedChildren()
 
@@ -708,10 +718,11 @@ def run_selected(selection: Path, shard: tuple[int, int], mode: str = "", *stats
     runner.PytestRunner.execute_pytest = memory.wrap(runner.PytestRunner.execute_pytest)
     # mutmut 3.6.0 writes one copy of a whole function per selected mutant.
     runner.write_all_mutants_to_file = write_selected
-    runner.os = forked_children()
-    for name in [name for name in sys.modules if name == "scripts" or name.startswith("scripts.")]:
-        sys.modules.pop(name)
-    runner.cli(["run", "--max-children", str(worker_count(os.cpu_count()))])
+    with retry_timeouts(runner, memory, shard[0], run_tests, run_unit) as retry:
+        runner.os = forked_children(retry)
+        for name in [name for name in sys.modules if name == "scripts" or name.startswith("scripts.")]:
+            sys.modules.pop(name)
+        runner.cli(["run", "--max-children", str(worker_count(os.cpu_count()))])
 
 
 if __name__ == "__main__":

@@ -22,7 +22,7 @@ class ChildExit(BaseException):
 def engine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("CI", "true")
-    monkeypatch.delenv("MUTANT_UNDER_TEST", raising=False)
+    monkeypatch.setenv("MUTANT_UNDER_TEST", "")
     name = "scripts.sample.x_f__mutmut_1"
     tests = ["tests/test_sample.py::fast", "tests/test_sample.py::killer", "tests/test_sample.py::other"]
     state = SimpleNamespace(
@@ -195,3 +195,52 @@ def test_an_interrupt_stops_the_replacement_child(engine: Any) -> None:
     with pytest.raises(KeyboardInterrupt):
         engine.run()
     assert engine.signals == [(13, signal.SIGTERM)]
+
+
+@pytest.mark.feature("mutation-timeout-without-killer")
+@pytest.mark.parametrize(
+    "chosen,expected",
+    [
+        (["tests/test_sample.py::killer", "tests/test_sample.py::fast"], ["tests/test_sample.py::fast"]),
+        (["tests/test_sample.py::killer"], []),
+    ],
+    ids=["one_remaining_test", "no_remaining_tests"],
+)
+def test_the_retry_uses_the_original_unit_before_removing_the_killer(
+    engine: Any, tmp_path: Path, chosen: list[str], expected: list[str]
+) -> None:
+    split = {"head": [], "slices": [chosen, [test for test in engine.tests if test not in chosen]]}
+    (tmp_path / "shard-plan.json").write_text(
+        json.dumps({"assignments": {engine.name: [0, 1]}, "splits": {"scripts.sample.x_f": split}})
+    )
+    engine.forks = [12, 0]
+    with pytest.raises(ChildExit) as caught:
+        engine.run()
+    assert caught.value.args == (1 if expected else 33,)
+    assert engine.runs == ([(engine.name, expected)] if expected else [])
+
+
+@pytest.mark.feature("mutation-timeout-without-killer")
+def test_a_killer_in_another_unit_does_not_retry(engine: Any, tmp_path: Path) -> None:
+    split = {"head": [], "slices": [[engine.tests[0]], engine.tests[1:]]}
+    (tmp_path / "shard-plan.json").write_text(
+        json.dumps({"assignments": {engine.name: [0, 1]}, "splits": {"scripts.sample.x_f": split}})
+    )
+    engine.run()
+    assert engine.results == [(12, 24)]
+    assert engine.forks == [13]
+    assert engine.timers == []
+
+
+@pytest.mark.feature("mutation-timeout-without-killer")
+def test_a_retry_collection_error_kills_the_mutant(engine: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    def refuse(self: Any, *, mutant_name: str | None, tests: list[str]) -> int:
+        raise RuntimeError("mutant changed collection")
+
+    monkeypatch.setattr(engine.runner.PytestRunner, "run_tests", refuse)
+    engine.forks = [12, 0]
+    original = SourceFileMutationData.register_pid
+    with pytest.raises(ChildExit) as caught:
+        engine.run()
+    assert caught.value.args == (1,)
+    assert SourceFileMutationData.register_pid is original

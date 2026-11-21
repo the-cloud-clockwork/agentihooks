@@ -12,7 +12,10 @@
         "tests/test_ci_mutation_timeout_retry.py::test_a_second_timeout_stays_incomplete_without_another_retry",
         "tests/test_ci_mutation_timeout_retry.py::test_the_retry_child_excludes_the_original_killer_after_a_sibling_overwrites_it",
         "tests/test_ci_mutation_timeout_retry.py::test_the_retry_child_preserves_a_surviving_result",
-        "tests/test_ci_mutation_timeout_retry.py::test_an_interrupt_stops_the_replacement_child"
+        "tests/test_ci_mutation_timeout_retry.py::test_an_interrupt_stops_the_replacement_child",
+        "tests/test_ci_mutation_timeout_retry.py::test_the_retry_uses_the_original_unit_before_removing_the_killer",
+        "tests/test_ci_mutation_timeout_retry.py::test_a_killer_in_another_unit_does_not_retry",
+        "tests/test_ci_mutation_timeout_retry.py::test_a_retry_collection_error_kills_the_mutant"
       ]
     },
     {
