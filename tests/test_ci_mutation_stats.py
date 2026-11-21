@@ -87,6 +87,7 @@ def test_a_part_collected_for_another_commit_or_selection_is_stale(tmp_path):
     )
 
 
+@pytest.mark.feature("mutation-stats-per-node-dependencies")
 def test_measured_dependencies_include_collection_phases_and_preloaded_modules(tmp_path, monkeypatch):
     import sys
     from types import SimpleNamespace
@@ -132,6 +133,7 @@ def test_measured_dependencies_include_collection_phases_and_preloaded_modules(t
     assert measured_dependencies(coverage_file, work, root, ["tests/test_missing.py::test_missing"], tracked) == {}
 
 
+@pytest.mark.feature("mutation-stats-per-node-dependencies")
 def test_measured_dependencies_keep_only_the_test_modules_a_node_runs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -170,6 +172,7 @@ def test_measured_dependencies_keep_only_the_test_modules_a_node_runs(
     }
 
 
+@pytest.mark.feature("mutation-stats-per-node-dependencies")
 @pytest.mark.parametrize("inherited", ["before", None])
 def test_statistics_collect_runtime_dependencies_with_plugin_discovery_disabled(tmp_path, monkeypatch, inherited):
     import os
