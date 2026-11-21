@@ -387,7 +387,7 @@ The master or the operator moves a green critical pull request ahead of the wait
 agentihooks swarm <slug> merge priority https://github.com/<owner>/<repo>/pull/<number>
 ```
 
-The priority applies when the command runs, also while a merge group's Tests run is building. Without `--lift` it moves only the entries still waiting, so the groups already under test finish and no Tests run is cancelled; the pull request joins the next group. This is the deferred priority that the CI manifesto's queue priority rule makes the default. The swarm stores no priority for later and replays none. A pull request of an urgent or focused task gets the same priority by code when it enters the queue ([Automatic priority on queue entry](#automatic-priority-on-queue-entry)).
+The priority applies when the command runs, also while a merge group's Tests run is building. Without `--lift` it moves only the entries still waiting, so the groups already under test finish and no Tests run is cancelled; the pull request joins the next group. This deferred priority is the default. The swarm stores no priority for later and replays none. A pull request of an urgent or focused task gets the same priority by code when it enters the queue ([Automatic priority on queue entry](#automatic-priority-on-queue-entry)).
 
 The command:
 
@@ -432,7 +432,7 @@ The swarm reads the tasks that name the pull request and applies the priority wh
 
 Any other pull request keeps its first in, first out place.
 
-The move is the reorder above without `--lift`, so the groups under test keep running and the pull request joins the next group. It takes the same lock, runs the same refusals, moves the waiting entries ahead of the new entry behind it, marks the head hotfix in the CI lab, writes the `priority` journal record and sends the owner notices with the sender `swarm`. It never writes `priority-lift`.
+The move is the reorder above without `--lift`, so the groups under test keep running and the pull request joins the next group. It takes the same lock as step 2, runs the pull request refusals of step 3, moves the waiting entries ahead of the new entry behind it, marks the head hotfix in the CI lab, writes the `priority` journal record and sends the owner notices with the sender `swarm`. It never writes `priority-lift`.
 
 The pull request stays queued whatever the priority does. The `merge queue` output reports the outcome under `priority`:
 
