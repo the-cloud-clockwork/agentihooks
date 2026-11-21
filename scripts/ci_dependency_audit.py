@@ -6,6 +6,7 @@ from pathlib import Path
 
 PIP_AUDIT = "pip-audit==2.10.1"
 PYTHON = "3.12"
+STDERR_TAIL_LINES = 40
 
 Finding = tuple[str, str, str]
 
@@ -23,9 +24,25 @@ def resolve(root: Path, out: Path) -> Path:
     return out
 
 
-def audit(requirements: Path) -> str:
+def _stderr_tail(result: subprocess.CompletedProcess[str]) -> str:
+    return "\n".join(result.stderr.splitlines()[-STDERR_TAIL_LINES:])
+
+
+def _empty_report_diagnosis(result: subprocess.CompletedProcess[str]) -> str:
+    tail = _stderr_tail(result)
+    return f"exit {result.returncode}" + (f", stderr: {tail}" if tail else "")
+
+
+def _print_empty_report_diagnosis(result: subprocess.CompletedProcess[str]) -> None:
+    print(f"::warning::pip-audit exited {result.returncode}")
+    tail = _stderr_tail(result)
+    if tail:
+        print(tail)
+
+
+def audit(requirements: Path) -> subprocess.CompletedProcess[str]:
     cmd = ["uvx", PIP_AUDIT, "-r", str(requirements), "--no-deps", "--disable-pip", "--format", "json"]
-    return subprocess.run(cmd, capture_output=True, text=True).stdout
+    return subprocess.run(cmd, capture_output=True, text=True)
 
 
 def parse(report: str) -> tuple[set[Finding], set[str]]:
@@ -39,11 +56,16 @@ def parse(report: str) -> tuple[set[Finding], set[str]]:
 
 
 def audited(requirements: Path) -> tuple[set[Finding], set[str]]:
-    report = audit(requirements)
-    if not report.strip():
-        print(f"::warning::pip-audit produced an empty report; auditing {requirements.name} once more")
-        report = audit(requirements)
-    return parse(report)
+    result = audit(requirements)
+    if result.stdout.strip():
+        return parse(result.stdout)
+    print(f"::warning::pip-audit produced an empty report; auditing {requirements.name} once more")
+    _print_empty_report_diagnosis(result)
+    result = audit(requirements)
+    if not result.stdout.strip():
+        _print_empty_report_diagnosis(result)
+        raise AuditError(f"pip-audit produced no report: {_empty_report_diagnosis(result)}")
+    return parse(result.stdout)
 
 
 def new_findings(head: set[Finding], base: set[Finding]) -> list[Finding]:

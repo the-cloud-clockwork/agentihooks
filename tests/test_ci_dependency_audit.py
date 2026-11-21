@@ -94,7 +94,7 @@ def test_a_failed_resolve_is_an_error_naming_the_tree_and_the_reason(tmp_path, m
 def test_audit_runs_the_pinned_pip_audit_on_the_resolved_pins_alone(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(audit.subprocess, "run", _run(calls, 1, _report()))
-    assert audit.audit(tmp_path / "head.txt") == _report()
+    assert audit.audit(tmp_path / "head.txt").stdout == _report()
     assert calls == [
         (
             [
@@ -117,6 +117,10 @@ def test_a_report_error_names_the_cause():
         audit.parse("")
 
 
+def _process(stdout, returncode=0, stderr=""):
+    return subprocess.CompletedProcess([], returncode, stdout, stderr)
+
+
 def _stub(monkeypatch, reports):
     def resolve(root, out):
         assert isinstance(root, Path)
@@ -125,7 +129,7 @@ def _stub(monkeypatch, reports):
         return out
 
     monkeypatch.setattr(audit, "resolve", resolve)
-    monkeypatch.setattr(audit, "audit", lambda requirements: reports[requirements.name])
+    monkeypatch.setattr(audit, "audit", lambda requirements: _process(reports[requirements.name]))
 
 
 @pytest.mark.parametrize("argv", [["--head", "head"], ["--base", "base"]])
@@ -184,7 +188,7 @@ def _audits(monkeypatch, *reports):
 
     def run(requirements):
         calls.append(requirements)
-        return reports[len(calls) - 1]
+        return _process(reports[len(calls) - 1])
 
     monkeypatch.setattr(audit, "audit", run)
     return calls
@@ -194,7 +198,10 @@ def test_an_empty_report_is_audited_once_more_and_the_second_report_grades(monke
     calls = _audits(monkeypatch, "\n", _report(_dep("urllib3", "1.26.4", "PYSEC-1")))
     assert audit.audited(Path("head")) == ({("urllib3", "1.26.4", "PYSEC-1")}, set())
     assert calls == [Path("head"), Path("head")]
-    assert capsys.readouterr().out == "::warning::pip-audit produced an empty report; auditing head once more\n"
+    assert capsys.readouterr().out == (
+        "::warning::pip-audit produced an empty report; auditing head once more\n"
+        "::warning::pip-audit exited 0\n"
+    )
 
 
 def test_a_second_empty_report_is_an_error(monkeypatch):
@@ -202,6 +209,19 @@ def test_a_second_empty_report_is_an_error(monkeypatch):
     with pytest.raises(audit.AuditError, match=r"^pip-audit produced no report"):
         audit.audited(Path("head"))
     assert len(calls) == 2
+
+
+@pytest.mark.feature("pip-audit-empty-report-diagnostics")
+def test_a_persistently_empty_report_s_stderr_reaches_the_warning_and_the_error(tmp_path, monkeypatch, capsys):
+    stderr = "Traceback (most recent call last):\nOSError: Connection timed out\n"
+    monkeypatch.setattr(audit.subprocess, "run", _run([], 3, "", stderr))
+    with pytest.raises(audit.AuditError) as error:
+        audit.audited(tmp_path / "head.txt")
+    out = capsys.readouterr().out
+    assert "OSError: Connection timed out" in out
+    assert out.count("::warning::pip-audit exited 3") == 2
+    assert "OSError: Connection timed out" in str(error.value)
+    assert "exit 3" in str(error.value)
 
 
 def test_a_report_that_is_not_empty_grades_without_a_second_audit(monkeypatch, capsys):
@@ -221,7 +241,7 @@ def test_a_malformed_report_is_an_error_without_a_second_audit(monkeypatch):
 def test_main_grades_after_one_empty_report(monkeypatch, capsys):
     reports = {"head": ["", _report(_dep("idna", "3.7", "PYSEC-3"))], "base": [_report()]}
     monkeypatch.setattr(audit, "resolve", lambda root, out: out)
-    monkeypatch.setattr(audit, "audit", lambda requirements: reports[requirements.name].pop(0))
+    monkeypatch.setattr(audit, "audit", lambda requirements: _process(reports[requirements.name].pop(0)))
     assert audit.main(["--base", "base", "--head", "head"]) == 1
     assert "::error::idna 3.7 carries PYSEC-3" in capsys.readouterr().out
 
