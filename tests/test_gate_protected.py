@@ -292,13 +292,18 @@ def test_the_protected_grader_runs_only_from_the_base_on_pull_requests_into_dev(
     )
 
 
-def test_the_protected_grader_never_executes_the_head():
+def test_the_protected_grader_never_executes_the_head() -> None:
     steps = _protected_workflow()["jobs"]["grade"]["steps"]
     checkout = next(step for step in steps if step.get("uses", "").startswith("actions/checkout@"))
     assert checkout["with"]["ref"] == "${{ github.base_ref }}"
     assert checkout["with"]["persist-credentials"] is False
     runs = "\n".join(step.get("run", "") for step in steps)
-    assert "pip install" not in runs.replace('python -m pip install "pyyaml>=6.0"', "")
+    for command in (
+        'python -m pip install "pyyaml>=6.0"',
+        "python -m pip install --constraint .github/ci-tools/parser.lock PyYAML==6.0.3",
+    ):
+        runs = runs.replace(command, "")
+    assert "pip install" not in runs
     assert 'python -m scripts.gate_protected --head "$HEAD_SHA"' in runs
     assert "git checkout" not in runs and "git worktree" not in runs
 
