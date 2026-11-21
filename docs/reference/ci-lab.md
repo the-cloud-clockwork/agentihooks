@@ -2028,11 +2028,13 @@ annotation restarts the receiver. Every notice sender needs the same value.
 
 ### Verify
 
+{% raw %}
 ```bash
 kubectl -n agentihooks-swarm get pushsecret agentihooks-ci-lab-notice
 kubectl -n agentihooks-swarm get externalsecret agentihooks-swarm-github-webhook
 kubectl -n agentihooks-swarm get secret agentihooks-swarm-github-webhook --template='{{range $k,$v:=.data}}{{$k}} {{end}}'
 ```
+{% endraw %}
 
 The PushSecret reports `Synced`, the ExternalSecret reports ready, and the key listing names
 `AGENTIHOOKS_CI_LAB_NOTICE_SECRET`. It prints key names only, never values.
@@ -2206,6 +2208,7 @@ which the lab answers `401`.
 
 ### Verify
 
+{% raw %}
 ```bash
 kubectl -n ci-lab get statefulset ci-lab-remote
 kubectl -n ci-lab get pushsecret ci-lab-remote-token
@@ -2213,6 +2216,7 @@ kubectl -n ci-lab get externalsecret ci-lab-remote
 kubectl -n ci-lab get secret ci-lab-remote --template='{{range $k,$v:=.data}}{{$k}} {{end}}'
 kubectl -n ci-lab get service ci-lab-remote ci-lab-remote-lan
 ```
+{% endraw %}
 
 The StatefulSet shows `1/1` ready, the PushSecret `Synced`, the ExternalSecret ready, the key
 listing `CI_LAB_REMOTE_TOKEN` and the LAN Service its external address. The key listing prints key
