@@ -3331,6 +3331,9 @@
         "tests/test_secret_env.py::test_transfer_refuses_unsafe_targets_before_reading_the_cluster",
         "tests/test_secret_env.py::test_transfer_refuses_invalid_identifiers",
         "tests/test_secret_env.py::test_failed_retrieval_never_writes_or_exposes_values",
+        "tests/test_secret_env.py::test_transfer_appends_to_a_relative_file",
+        "tests/test_secret_env.py::test_transfer_uses_the_default_agentihooks_home",
+        "tests/test_secret_env.py::test_failed_replace_preserves_the_file_and_cleans_the_private_temporary",
         "tests/test_secret_env.py::test_usage_is_fixed_and_does_not_read_the_cluster"
       ]
     },
