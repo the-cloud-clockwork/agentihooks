@@ -2650,8 +2650,10 @@ workflow order. On dev it prints:
 
 #### A head that cannot expand
 
-The pass that releases a head from its lane catches a `ValueError`, `KeyError`,
-`yaml.YAMLError`, `jsonschema.ValidationError` or failed git command from expansion. It records
+The pass that releases a head from its lane catches a `ValueError`, `KeyError`, `SyntaxError`,
+`yaml.YAMLError`, `jsonschema.ValidationError` or failed git command from expansion. A promotion or
+backfill head raises the `SyntaxError` when a changed Python file under `hooks/` or `scripts/` does
+not parse, as mutation expansion compares that file with its base. It records
 the action `cannot expand <head>: <error>` and drops the head: the head has already left
 `agentihooks-ci:waiting` and is not put back, so it gets no grade. `Scheduler._refuse` then posts
 one completed `lab-shadow/required` check run with conclusion `failure` on the head, whose summary
@@ -3082,8 +3084,8 @@ dev = [
 source_paths = ["hooks/", "scripts/"]
 ```
 
-A `ValueError`, `KeyError`, failed git command, YAML error or schema validation error raised in
-expansion makes the scheduler print
+A `ValueError`, `KeyError`, `SyntaxError`, failed git command, YAML error or schema validation
+error raised in expansion makes the scheduler print
 `cannot expand <head>: <error>` and drop the head; nothing of it is graded, and the head gets a
 failed `lab-shadow/required` check run naming the error (see
 [A head that cannot expand](#a-head-that-cannot-expand)).
@@ -3270,6 +3272,7 @@ completes when every part is final and fails when any part fails.
 | `cannot expand <head>: <checkout>/pyproject.toml pins no mutmut version` | The head's `pyproject.toml` holds no quoted `mutmut==<version>` | Pin mutmut in the head's `pyproject.toml` |
 | `cannot expand <head>: no dependency manifest at or before <base>` | No manifest is stored or fetchable on the base's first parent chain | Read [Test units](#test-units) for how the lab fetches manifests |
 | `cannot expand <head>:` naming a failed `git worktree add` | The repository's store lacks the head commit, or `CI_LAB_MIRROR_STORE` is not writable | `git -C <store> cat-file -t <head>` and the folder's permissions |
+| `cannot expand <head>: <message> (<unknown>, line <n>)` | A changed Python file under `hooks/` or `scripts/` on a promotion or backfill head does not parse | `python -m py_compile <file>` on a checkout of the head names the line |
 | Every row of a failed mutant unit reads `no tests` | No test of the head reaches the changed function | Add a test that calls the function |
 | Rows read `survived` | A test runs the function but none fails against the mutant | Assert on the behaviour the mutant changes |
 | Rows read `suspicious` | A mutant's child crashed or was killed | Read the unit's log |
