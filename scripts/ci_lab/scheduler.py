@@ -91,10 +91,12 @@ __all__ = [
     "build",
     "fold",
     "frame",
+    "keep_manifests",
     "listen",
     "main",
     "serve",
     "storage",
+    "stored_manifest",
     "summary",
 ]
 
@@ -410,7 +412,6 @@ class Slot:
     outcome: str = ""
     started: bool = False
     held: bool = False
-    manifest: str = ""
 
 
 @dataclass
@@ -446,31 +447,14 @@ class State:
 
 
 def _parse(raw: str | bytes) -> State:
-    """Read a grade state document."""
+    """Read a grade state document, without the batch manifest a slot stored before manifests moved to the object
+    store."""
     data = json.loads(raw)
     data["flags"] = Flags(**data["flags"])
+    for slot in data["units"].values():
+        slot.pop("manifest", None)
     data["units"] = {ref: Slot(**slot) for ref, slot in data["units"].items()}
     return State(**data)
-
-
-def restore_manifests(queue: Queue, objects: Objects, states: Iterable[State]) -> None:
-    for state in states:
-        missing = [slot for slot in state.units.values() if slot.kind == "test" and not slot.manifest and slot.job]
-        if state.manifest and missing:
-            _restore_manifest(queue, objects, state, missing)
-
-
-def _restore_manifest(queue: Queue, objects: Objects, state: State, missing: list[Slot]) -> None:
-    path = f"{manifest_folder(_slug(state.repo))}{state.manifest}.json"
-    records = UNPACK(json.loads(objects.read(path)))["tests"]
-    proposed = {
-        slot.job: json.dumps({"tests": {test: records[test] for test in slot.members if test in records}})
-        for slot in missing
-    }
-    restored = queue.restore_manifests(proposed)
-    for slot in missing:
-        slot.manifest = restored[slot.job]
-    queue.client.set(GRADES + state.run, json.dumps(asdict(state)))
 
 
 def _evidence(state: State) -> evidence.GradeEvidence:
@@ -594,7 +578,6 @@ class Scheduler:
         self.shed: tuple[str, ...] = ()
         self.registry = metrics.Registry()
         self.held: defaultdict[str, int] = defaultdict(int)
-        restore_manifests(self.queue, self.objects, self._live())
 
     def tick(self, now_ms: int) -> list[str]:
         """Run one pass: intake, release quiet lanes, reap expired leases, enqueue the held units the budget admits,
@@ -848,6 +831,7 @@ class Scheduler:
                 state.units.update({ref: replace(source.units[ref]) for ref in source.gates[gate]})
                 continue
             state.gates[gate] = [self._place(state, unit, request.bypass_negative, carried, misses) for unit in units]
+        keep_manifests(self.objects, misses)
         self.save(state)
         self.client.sadd(LIVE, run)
         self.client.set(f"{LANES}{request.repo}|{lane}|{int(request.tier)}", run)
@@ -884,7 +868,7 @@ class Scheduler:
         ref = f"{unit.kind}:{unit.key}"
         if ref in state.units:
             return ref
-        slot = Slot(unit.kind, unit.key, list(unit.members), manifest=unit.manifest)
+        slot = Slot(unit.kind, unit.key, list(unit.members))
         verdict = self.store.get(unit.kind, unit.key, bypass_negative=bypass)
         lookup = contract.CACHE_MISSES_TOTAL if verdict is None else contract.CACHE_HITS_TOTAL
         self.registry.inc(lookup, 1.0, {"cache": caches.VERDICT})
@@ -928,7 +912,7 @@ class Scheduler:
             for slot in state.units.values():
                 if slot.held and budget.admits(CLASSES[state.tier], DEFAULT.slots, load.slots_free, waiting, self.shed):
                     slot.held = False
-                    admitted.append(Unit(slot.kind, slot.key, tuple(slot.members), slot.manifest))
+                    admitted.append(Unit(slot.kind, slot.key, tuple(slot.members)))
                     waiting += DEFAULT.slots
             if admitted:
                 self.queue.enqueue(admitted, state.head, {}, state.base, state.grader)
@@ -1206,14 +1190,20 @@ class StoredManifests:
 
     def _merged(self, manifest: dict[str, Any], folder: str, stored: frozenset[str]) -> dict[str, Any]:
         """Return the manifest with the files of each note of its commit added to the outside list of every test record
-        the note names."""
+        the note names, and of every test module the note names that no record holds to that module's list under
+        `expand_tests.UNLISTED`, present only when a note names such a module."""
         records: dict[str, dict[str, Any]] = manifest["tests"]
+        unlisted: dict[str, list[str]] = {}
         notes = f"{folder}{NOTES}{manifest['commit']}/"
         for name in sorted(path for path in stored if path.startswith(notes)):
             note = json.loads(self.objects.read(name))
             for test in note["tests"]:
                 if test in records:
                     records[test]["outside"] = sorted({*records[test].get("outside", ()), *note["outside"]})
+                elif "::" not in test:
+                    unlisted[test] = sorted({*unlisted.get(test, ()), *note["outside"]})
+        if unlisted:
+            manifest[expand_tests.UNLISTED] = unlisted
         return manifest
 
 
@@ -1223,6 +1213,27 @@ def note_outside(objects: Objects, repo: str, commit: str, tests: Sequence[str],
     record: dict[str, object] = {"tests": tests, "outside": sorted(outside)}
     path = f"{manifest_folder(_slug(repo))}{NOTES}{commit}/{digest(record)}.json"
     objects.write_once(path, json.dumps(record).encode())
+
+
+def keep_manifests(objects: Objects, units: Iterable[Unit]) -> int:
+    """Store the batch manifest of each unit that carries one under its unit key in the object store, once, so its
+    job's lease reads it there and no Redis record holds it; return how many this call wrote."""
+    return sum(
+        objects.write_once(unit_path(unit.kind, unit.key, "manifest"), unit.manifest.encode())
+        for unit in units
+        if unit.manifest
+    )
+
+
+def stored_manifest(objects: Objects, unit: Unit) -> str:
+    """Return the batch manifest a test unit's lease carries, read from its unit key's place in the object store;
+    empty for another kind of unit or a test unit with none stored."""
+    if unit.kind != expand_tests.KIND:
+        return ""
+    path = unit_path(unit.kind, unit.key, "manifest")
+    if path not in objects.keys(str(PurePosixPath(path).parent) + "/"):
+        return ""
+    return objects.read(path).decode()
 
 
 class MirrorExpander:
@@ -1578,7 +1589,8 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     relaying = relay.build(environ, scheduler, heads.consumer(relay.DURABLE, relay.SUBJECT))
     if environ.get(REINDEX_ON_START) == "true":
         print(f"reindexed {scheduler.store.reindex()} verdicts", flush=True)
-    leases = Leases(scheduler.queue, LEASE_TTL_MS, _now_ms, _sleep_ms, LEASE_POLL_MS, scheduler.ports.pods)
+    manifests = partial(stored_manifest, scheduler.objects)
+    leases = Leases(scheduler.queue, LEASE_TTL_MS, _now_ms, _sleep_ms, LEASE_POLL_MS, scheduler.ports.pods, manifests)
     routes = lease_api.ControlRoutes(client, environ.get(contract.CONTROL_TOKEN, ""), _now_ms)
     ports = (contract.SCHEDULER_PORT, contract.CONTROL_PORT, contract.METRICS_PORT)
     for server in listen(scheduler, leases, routes, spending, _now_ms, ports):

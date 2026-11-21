@@ -1,6 +1,16 @@
 {
   "features": [
     {
+      "id": "tick-waits-end-isolates-agent-failures",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-waits-end-per-agent-isolation",
+      "behaviour": "The waits end step logs and skips a raising agent wait, continues resolving and notifying other agents, preserves unresolved waits and records pass completion so healthy checked waits keep holding their agents.",
+      "seam": "scripts.tick.steps.report waits end through scripts.swarm.waits.end_pass and mark_ended",
+      "tests": [
+        "tests/tick/steps/test_waits_end.py::test_a_raising_wait_does_not_stop_other_agents_or_pass_completion"
+      ]
+    },
+    {
       "id": "credential-guard-refuses-brace-environ-leaves",
       "origin": "regression",
       "ordered_at": "2026-11-20",
@@ -15,10 +25,43 @@
       "id": "lab-worker-manifest",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2808",
-      "behaviour": "Each leased test batch carries the dependency records selected for its key through persisted scheduler state, the job queue and the lease API. Scheduler startup restores older queued and held records from their recorded manifest before serving leases. A worker with an empty work volume executes the batch using those records without a shared local manifest or another batch's records. Unlisted test modules carry an empty test record map.",
-      "seam": "expand_tests units through Scheduler, Queue, lease API, worker Client and test executor",
+      "behaviour": "Each leased test batch carries the dependency records selected for its key, which the scheduler stores once under the unit key in the object store when the batch is held for a job and reads back into the lease API reply. Records stored by an earlier release, queued, held or never recorded, reach their worker after the one off compaction. A worker with an empty work volume executes the batch using those records without a shared local manifest or another batch's records. Unlisted test modules carry an empty test record map.",
+      "seam": "expand_tests units through Scheduler, the object store, Leases, lease API, worker Client and test executor",
       "tests": [
         "tests/ci_lab/test_worker_manifest.py::test_a_leased_batch_carries_its_manifest_to_an_empty_worker_volume"
+      ]
+    },
+    {
+      "id": "lab-manifest-records-bounded",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-manifest-restore-redis-flood",
+      "behaviour": "No lab grade state or job hash in Redis carries a test batch manifest, so their size does not grow with a batch's dependency records; a grade state stored with slot manifests reads and saves without them, and scheduler startup reads and rewrites no stored grade or job.",
+      "seam": "Scheduler grade start, state parse and save, Scheduler construction, Queue enqueue, keep_manifests and stored_manifest",
+      "tests": [
+        "tests/ci_lab/test_manifest_records.py::test_a_started_grade_keeps_its_batch_manifest_out_of_redis_and_its_lease_carries_it",
+        "tests/ci_lab/test_manifest_records.py::test_a_scheduler_start_rewrites_no_stored_grade_or_job",
+        "tests/ci_lab/test_manifest_records.py::test_a_grade_state_stored_with_slot_manifests_reads_and_saves_without_them",
+        "tests/ci_lab/test_manifest_records.py::test_a_lease_reads_the_stored_manifest_of_a_test_unit_only"
+      ]
+    },
+    {
+      "id": "lab-manifest-compaction",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-manifest-restore-redis-flood",
+      "behaviour": "python -m scripts.ci_lab compact moves every test batch manifest a live grade state slot or a queued, leased or finished job hash carries to its unit's object store path and removes it from Redis, without SCAN, slices a missing one for an unfinished test slot from the packed manifest of its grade's commit, counts batches whose commit has none, keeps a grade state the scheduler wrote meanwhile and prints its counts.",
+      "seam": "scripts.ci_lab.compact over the lab Redis records and object store",
+      "tests": [
+        "tests/ci_lab/test_compact.py::test_compaction_moves_each_manifest_redis_carries_to_its_unit_and_strips_it_everywhere",
+        "tests/ci_lab/test_compact.py::test_compaction_counts_each_manifest_and_record_of_every_live_grade_and_pending_or_leased_job",
+        "tests/ci_lab/test_compact.py::test_compaction_moves_a_job_manifest_whose_grade_slot_carries_none",
+        "tests/ci_lab/test_compact.py::test_compaction_slices_the_manifest_an_unfinished_test_slot_lacks_from_its_grades_packed_manifest",
+        "tests/ci_lab/test_compact.py::test_compaction_slices_the_manifest_of_a_test_slot_stored_with_an_empty_one",
+        "tests/ci_lab/test_compact.py::test_compaction_counts_the_batches_whose_grade_commit_has_no_packed_manifest",
+        "tests/ci_lab/test_compact.py::test_compaction_slices_nothing_for_a_grade_state_stored_before_it_kept_a_manifest_commit",
+        "tests/ci_lab/test_compact.py::test_compaction_slices_no_manifest_for_a_finished_test_slot",
+        "tests/ci_lab/test_compact.py::test_compaction_keeps_a_grade_state_the_scheduler_wrote_meanwhile",
+        "tests/ci_lab/test_compact.py::test_the_compact_command_compacts_the_lab_redis_its_environment_names",
+        "tests/ci_lab/test_compact.py::test_the_compact_command_help_names_its_invocation"
       ]
     },
     {
@@ -5135,6 +5178,16 @@
       ]
     },
     {
+      "id": "lab-unlisted-module-outside-notes",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2706",
+      "behaviour": "Outside notes for a module-only test unit absent from the stored manifest are retained separately from collected test records, while a listed test named in the same note still takes the note into its record. The key of that module's next unit covers every noted outside file, including additions and removals, while notes of another module and unnoted outside files leave its key unchanged.",
+      "seam": "scripts.ci_lab.scheduler.StoredManifests loading stored notes followed by scripts.ci_lab.expand_tests.unlisted_units",
+      "tests": [
+        "tests/ci_lab/test_expand_tests.py::test_a_stored_note_rekeys_an_unlisted_module_only_on_its_outside_files"
+      ]
+    },
+    {
       "id": "lab-outside-notes-per-commit",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-outside-notes-per-commit",
@@ -5798,6 +5851,16 @@
       ],
       "rules": [
         "credential-guard-wrapper-option-values"
+      ]
+    },
+    {
+      "id": "merge-queue-grades-size-limits-on-the-combined-tree",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-size-gate-merged-result",
+      "behaviour": "The unit suite grades the checked out tree against its own size allowlist, so a merge group whose combined tree puts a file or function over a size limit without an allowance, or leaves the allowlist different from the measurement, fails before it reaches dev, even when each pull request kept the file under the limit on its own.",
+      "seam": "scripts.size_limits.measure and scripts.size_limits.grade, called by the unit suite on the merge group head",
+      "tests": [
+        "tests/test_size_limits.py::test_the_checked_out_tree_holds_the_size_limits"
       ]
     },
     {
@@ -8829,6 +8892,22 @@
       "seam": "scripts.ci_minutes.jobs_of through read_jobs",
       "tests": [
         "tests/test_ci_minutes.py::test_a_run_whose_full_job_page_fails_is_read_in_small_pages"
+      ]
+    },
+    {
+      "id": "ci-readers-collected-stage-budget",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2613",
+      "behaviour": "CI stage metrics and the ci overrun finding resolve each stage budget through the same collected lookup as CI gates, falling back to the stored budget when the collected step is skipped or absent. Unknown metric stages record zero and unknown evidence stages are omitted.",
+      "seam": "metrics_ci.rows, ci_budget.defects.defect and ci_budget.defects._stage_evidence over ci_budget.budget",
+      "rules": [
+        "ci-stage-budget-direct-table-read"
+      ],
+      "tests": [
+        "tests/swarm/test_metrics_ci.py::test_stage_metrics_resolve_the_collected_budget_and_stored_fallback",
+        "tests/test_ci_budget_defects.py::test_overrun_description_resolves_the_collected_budget_and_stored_fallback",
+        "tests/test_ci_budget_defects.py::test_overrun_evidence_resolves_the_collected_budget_and_stored_fallback",
+        "tests/swarm/test_metrics_ci.py::test_a_stage_without_a_budget_or_a_started_job_records_zero"
       ]
     },
     {
@@ -11972,18 +12051,18 @@
       ]
     },
     {
-      "id": "ci-readers-collected-stage-budget",
+      "id": "codex-error-variant-snapshot",
       "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t2613",
-      "behaviour": "CI stage metrics and the ci overrun finding resolve each stage budget through the same collected lookup as CI gates, falling back to the stored budget when the collected step is skipped or absent. Unknown metric stages record zero and unknown evidence stages are omitted.",
-      "seam": "metrics_ci.rows, ci_budget.defects.defect and ci_budget.defects._stage_evidence over ci_budget.budget",
-      "rules": [
-        "ci-stage-budget-direct-table-read"
-      ],
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2691",
+      "behaviour": "A checked in snapshot lists the CodexErrorInfo variant names the installed codex app server schema generates, regenerated by python -m scripts.codex_error_variants; a test fails when the account refusal classifier's unauthorized variant or any codexErrorInfo key a test fixture writes is missing from it, while the placeholder x stays an unlisted variant.",
+      "seam": "scripts.codex_error_variants main and variants; scripts.inbox.codex UNAUTHORIZED; codexErrorInfo literals in the test sources",
       "tests": [
-        "tests/swarm/test_metrics_ci.py::test_stage_metrics_resolve_the_collected_budget_and_stored_fallback",
-        "tests/test_ci_budget_defects.py::test_overrun_description_resolves_the_collected_budget_and_stored_fallback",
-        "tests/test_ci_budget_defects.py::test_overrun_evidence_resolves_the_collected_budget_and_stored_fallback"
+        "tests/inbox/test_codex_error_variants.py::test_the_account_refusal_variant_is_listed_by_the_app_server_schema",
+        "tests/inbox/test_codex_error_variants.py::test_every_variant_a_test_fixture_writes_is_listed_by_the_app_server_schema",
+        "tests/inbox/test_codex_error_variants.py::test_the_snapshot_holds_what_the_script_writes",
+        "tests/inbox/test_codex_error_variants.py::test_the_script_writes_the_sorted_variant_names_the_installed_codex_generates",
+        "tests/inbox/test_codex_error_variants.py::test_the_module_entry_point_exits_with_the_status_of_main",
+        "tests/inbox/test_codex_error_variants.py::test_the_script_writes_nothing_when_codex_fails_to_generate_the_schema"
       ]
     }
   ],

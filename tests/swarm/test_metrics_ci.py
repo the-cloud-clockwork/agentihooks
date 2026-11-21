@@ -142,7 +142,8 @@ def test_a_summary_message_survives_a_later_bare_line_for_the_same_test():
     assert row["message"] == "KeyError: 'k'"
 
 
-def test_a_stage_without_a_budget_or_a_started_job_records_zero():
+@pytest.mark.feature("ci-readers-collected-stage-budget")
+def test_a_stage_without_a_budget_or_a_started_job_records_zero() -> None:
     jobs = [
         {**_job(14, "custom", "00:40", "00:41", "01:00"), "started_at": None},
         _job(15, "custom (2)", "00:40", "02:00", "03:00", "skipped"),

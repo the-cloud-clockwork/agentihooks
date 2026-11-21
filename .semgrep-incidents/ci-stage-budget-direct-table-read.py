@@ -2,6 +2,9 @@ from typing import Any
 
 from scripts import ci_budget
 
+# ruleid: ci-stage-budget-direct-table-read
+from scripts.ci_budget import BUDGETS as BUDGETS
+
 
 def stored_metric(stage: str) -> int:
     # ruleid: ci-stage-budget-direct-table-read
