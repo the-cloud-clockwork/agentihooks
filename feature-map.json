@@ -2389,6 +2389,21 @@
       ]
     },
     {
+      "id": "ledger-write-meta-record-cost",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2670",
+      "behaviour": "A ledger write rebuilds the writer copy's members map and api operations ring only for the records it changed or replaced: unchanged records keep their stored fragments, the rebuilt fragments encode and export the same text as a fresh encoding of the written state, the writer copy shares no container with them, a map stored whole is encoded per record on its next write, and other metadata maps and non map values stay one leaf.",
+      "seam": "scripts.swarm_ledger.repository.writer_copy.written and detached, scripts.swarm_ledger.repository.fragments.meta_part and record",
+      "tests": [
+        "tests/swarm_ledger/test_writer_meta_records.py::test_a_write_that_changes_one_record_copies_as_much_on_four_thousand_records_as_on_two_thousand",
+        "tests/swarm_ledger/test_writer_meta_records.py::test_the_rebuilt_writer_copy_stores_what_a_fresh_encoding_of_the_written_state_stores",
+        "tests/swarm_ledger/test_writer_meta_records.py::test_unchanged_records_keep_the_stored_map_fragment",
+        "tests/swarm_ledger/test_writer_meta_records.py::test_records_after_a_map_stored_whole_are_all_encoded_per_record",
+        "tests/swarm_ledger/test_writer_meta_records.py::test_a_members_value_that_is_no_map_stays_one_leaf",
+        "tests/swarm_ledger/test_writer_meta_records.py::test_other_meta_maps_stay_one_leaf"
+      ]
+    },
+    {
       "id": "swarm-tick-slow-export",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2161",
