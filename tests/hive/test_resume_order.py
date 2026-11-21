@@ -266,7 +266,7 @@ def test_a_resume_order_process_that_cannot_start_is_answered_failed_by_the_comm
     monkeypatch.setattr(orders.subprocess, "Popen", Mock(side_effect=OSError(11, "Resource temporarily unavailable")))
     consumer = orders.Consumer(redis, HIVE, cast(Any, Mock()))
     assert consumer.poll_commands() == 2
-    failed = {"status": "failed", "target": {"host_id": HIVE}, "failure": "error: OSError"}
+    failed = {"status": "failed", "target": {"host_id": HIVE}, "failure": "error: BlockingIOError"}
     assert [_ack(redis, first), _ack(redis, second)] == [failed, failed]
     assert consumer.poll_commands() == 2
     assert redis.xlen(orders.Orders(redis).commands(HIVE)) == 0

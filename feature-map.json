@@ -3629,6 +3629,7 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2679",
       "behaviour": "A resume order whose process cannot start is answered failed by the hive command poll with the error type, so the hub hands the task to a fresh agent, the poll finishes its batch and the hive beat runs to its end with its join report heartbeat instead of ending the hive run loop.",
       "seam": "scripts.hive.orders.Consumer.poll_commands resume start and scripts.hive.daemon.beat",
+      "rules": ["hive-resume-start-unguarded"],
       "tests": [
         "tests/hive/test_resume_order.py::test_a_resume_order_process_that_cannot_start_is_answered_failed_by_the_command_poll",
         "tests/hive/test_daemon.py::test_a_beat_whose_resume_order_process_cannot_start_still_heartbeats_to_its_end"

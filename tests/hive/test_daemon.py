@@ -183,7 +183,7 @@ def test_a_beat_whose_resume_order_process_cannot_start_still_heartbeats_to_its_
     assert heartbeat.call_args.args[:2] == (redis, "machine")
     assert finished.call_args.args[:2] == (redis, "machine")
     receipt = orders.Orders(redis).command_receipt("machine", order.id)
-    assert json.loads(redis.hget(receipt, "ack"))["failure"] == "error: OSError"
+    assert json.loads(redis.hget(receipt, "ack"))["failure"] == "error: BlockingIOError"
 
 
 def test_cold_native_accounts_use_their_own_fresh_quota_before_the_first_launch(monkeypatch):
