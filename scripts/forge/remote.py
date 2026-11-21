@@ -27,7 +27,7 @@ def parse(url: str) -> Remote:
     host = authority.rpartition("@")[2].partition(":")[0].lower()
     path = path.strip("/").removesuffix(".git")
     if not host or "/" not in path:
-        raise ValueError(f"not a repository remote: {url}")
+        raise ValueError(f"not a repository remote: {host}/{path}")
     return Remote(host, path)
 
 

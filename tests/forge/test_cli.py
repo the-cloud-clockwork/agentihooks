@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import subprocess
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -8,7 +9,7 @@ import pytest
 
 from scripts import cli_delegates
 from scripts.forge import cli, remote
-from scripts.forge.model import ChangeRequest, Check
+from scripts.forge.model import ChangeRequest, Check, ForgeError
 
 pytestmark = pytest.mark.unit
 URL = "git@github.com:o/r.git"
@@ -79,6 +80,7 @@ class Picked:
         self.calls: list[tuple[remote.Remote, str | None, Mapping[str, str]]] = []
         self.reads: list[int] = []
         self.posts: list[tuple[int, str]] = []
+        self.failure: Exception | None = None
 
     def __call__(self, where: remote.Remote, kind: str | None, env: Mapping[str, str]) -> "Picked":
         self.calls.append((where, kind, env))
@@ -86,6 +88,8 @@ class Picked:
 
     def read(self, number: int) -> ChangeRequest:
         self.reads.append(number)
+        if self.failure:
+            raise self.failure
         return CHANGE
 
     def post(self, number: int, body: str) -> str:
@@ -171,3 +175,23 @@ def test_a_forge_failure_prints_its_reason_and_returns_one(picked: Picked, capsy
     assert cli.main(["read", "7", "--remote", "/local/repo"]) == 1
     assert capsys.readouterr() == ("", "forge: not a repository remote: /local/repo\n")
     assert picked.calls == []
+
+
+@pytest.mark.feature("forge-change-request-seam")
+@pytest.mark.parametrize("error", [ForgeError("gh failed: boom"), subprocess.TimeoutExpired(["gh"], 60)])
+def test_a_failing_forge_call_prints_its_reason_and_returns_one(
+    error: Exception, picked: Picked, capsys: pytest.CaptureFixture[str]
+) -> None:
+    picked.failure = error
+    assert cli.main(["read", "7", "--remote", URL]) == 1
+    assert capsys.readouterr() == ("", f"forge: {error}\n")
+
+
+@pytest.mark.feature("forge-change-request-seam")
+def test_a_missing_body_file_prints_its_reason_and_returns_one(
+    picked: Picked, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    missing = tmp_path / "absent.md"
+    assert cli.main(["post", "7", "--body-file", str(missing), "--remote", URL]) == 1
+    assert capsys.readouterr() == ("", f"forge: [Errno 2] No such file or directory: '{missing}'\n")
+    assert picked.posts == []

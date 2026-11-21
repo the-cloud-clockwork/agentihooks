@@ -5018,7 +5018,7 @@
         "tests/forge/test_gitlab.py::test_gitlab_posts_a_review_comment_as_a_merge_request_note",
         "tests/forge/test_gitlab.py::test_the_default_transport_sends_one_request_through_urlopen",
         "tests/forge/test_remote.py::test_a_remote_url_parses_into_host_and_repository_path",
-        "tests/forge/test_remote.py::test_a_url_without_host_and_owner_is_refused",
+        "tests/forge/test_remote.py::test_a_url_without_host_and_owner_is_refused_without_its_credentials",
         "tests/forge/test_remote.py::test_the_picker_names_the_forge_from_the_remote_host",
         "tests/forge/test_remote.py::test_a_host_that_names_no_forge_is_refused",
         "tests/forge/test_remote.py::test_the_picker_returns_github_for_a_github_remote",
@@ -5034,7 +5034,9 @@
         "tests/forge/test_cli.py::test_post_reads_the_body_file_and_prints_the_comment_url",
         "tests/forge/test_cli.py::test_post_reads_the_body_from_standard_input",
         "tests/forge/test_cli.py::test_the_origin_remote_of_the_current_checkout_is_the_default",
-        "tests/forge/test_cli.py::test_a_forge_failure_prints_its_reason_and_returns_one"
+        "tests/forge/test_cli.py::test_a_forge_failure_prints_its_reason_and_returns_one",
+        "tests/forge/test_cli.py::test_a_failing_forge_call_prints_its_reason_and_returns_one",
+        "tests/forge/test_cli.py::test_a_missing_body_file_prints_its_reason_and_returns_one"
       ]
     },
     {

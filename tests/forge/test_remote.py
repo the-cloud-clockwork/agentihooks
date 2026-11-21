@@ -29,9 +29,17 @@ def test_a_remote_url_parses_into_host_and_repository_path(url: str, host: str, 
 
 
 @pytest.mark.feature("forge-change-request-seam")
-@pytest.mark.parametrize("url", ["/home/user/repo", "https://github.com/repo", ""])
-def test_a_url_without_host_and_owner_is_refused(url: str) -> None:
-    with pytest.raises(ValueError, match=f"^not a repository remote: {re.escape(url)}$"):
+@pytest.mark.parametrize(
+    ("url", "named"),
+    [
+        ("/home/user/repo", "/home/user/repo"),
+        ("https://github.com/repo", "github.com/repo"),
+        ("", "/"),
+        ("https://oauth2:hidden@gitlab.com/group", "gitlab.com/group"),
+    ],
+)
+def test_a_url_without_host_and_owner_is_refused_without_its_credentials(url: str, named: str) -> None:
+    with pytest.raises(ValueError, match=f"^not a repository remote: {re.escape(named)}$"):
         remote.parse(url)
 
 

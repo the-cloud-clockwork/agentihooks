@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -36,7 +37,7 @@ def main(argv: list[str]) -> int:
             if args.action == "read"
             else forge.post(args.number, body_of(args.body_file))
         )
-    except (ForgeError, OSError, ValueError) as error:
+    except (ForgeError, OSError, ValueError, subprocess.TimeoutExpired) as error:
         print(f"forge: {error}", file=sys.stderr)
         return 1
     print(text)
