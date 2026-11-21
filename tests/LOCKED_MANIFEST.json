@@ -1013,7 +1013,7 @@
  "tests/test_credential_guard.py::test_a_credential_read_in_a_balanced_command_substitution_is_refused": {
   "assertions": 2,
   "calls": 4,
-  "cases": 18,
+  "cases": 20,
   "texts": [
    "41f1fcd984f7eef3",
    "c8255937adffc2e6"
@@ -1186,7 +1186,7 @@
  "tests/test_credential_guard.py::test_a_substitution_that_reads_no_credential_passes": {
   "assertions": 1,
   "calls": 2,
-  "cases": 8,
+  "cases": 9,
   "texts": [
    "a76f47343f702669"
   ]
@@ -1366,7 +1366,7 @@
   "calls": 3,
   "cases": 4,
   "texts": [
-   "4852504451381fc8"
+   "571f797b3313dd30"
   ]
  },
  "tests/test_credential_guard.py::test_substitutions_nested_to_the_limit_pass": {

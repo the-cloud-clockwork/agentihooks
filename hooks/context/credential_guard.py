@@ -275,12 +275,13 @@ def scan_step(stack: list[str], text: str, i: int) -> int:
 
 def paren_close(text: str, start: int) -> int | None:
     """Index of the parenthesis balancing the one opened just before start, quoted and escaped text skipped, or None."""
-    stack, skip_to = ["("], start
-    for i in range(start, len(text)):
-        if i >= skip_to:
-            skip_to = i + scan_step(stack, text, i)
-            if not stack:
-                return i
+    stack = ["("]
+    positions = iter(range(start, len(text)))
+    for i in positions:
+        for _ in range(scan_step(stack, text, i) - 1):
+            next(positions, None)
+        if not stack:
+            return i
     return None
 
 
@@ -1324,7 +1325,7 @@ def substitutions_verdict(
     """The first refusal among the substitution bodies in the text, each judged as a command; too deep a nest is refused."""
     bodies = substitutions(text, opener)
     if bodies and depth >= MAX_SUBSTITUTION_DEPTH:
-        return Verdict(block=block(f"command substitutions nested over {MAX_SUBSTITUTION_DEPTH} deep", KIND_CREDENTIAL))
+        return Verdict(block=block(f"command substitutions nested over {MAX_SUBSTITUTION_DEPTH} deep", KIND_DOTENV))
     for body in bodies:
         v = body_verdict(body, ctx, depth + 1)
         if v.block:
@@ -1334,7 +1335,7 @@ def substitutions_verdict(
 
 def body_verdict(body: str, ctx: Context, depth: int) -> Verdict:
     """A substitution body at a nesting depth judged as a command: its own substitutions first, then each segment."""
-    inner = Context(ctx.cwd, ctx.recursive, False)
+    inner = Context(ctx.cwd, ctx.recursive)
     v = substitutions_verdict(body, inner, depth=depth)
     if v.block:
         return v

@@ -12,7 +12,7 @@ import pytest
 from hooks.context.credential_guard import (
     ENV_NAMES_SAFE,
     GREP_EXCLUDES,
-    KIND_CREDENTIAL,
+    KIND_DOTENV,
     KIND_ENVIRONMENT,
     KIND_RECURSIVE,
     MAX_SUBSTITUTION_DEPTH,
@@ -1002,6 +1002,7 @@ SUBSTITUTIONS_THAT_READ_NO_CREDENTIAL = [
     "x=$(printf safe)$(date)",
     "`printf a`cat .env`b`",
     'echo "$(gh api rate_limit --jq ")")"',
+    "echo $(printf x \\",
 ]
 
 BALANCED_SUBSTITUTION_READS = [
@@ -1023,6 +1024,8 @@ BALANCED_SUBSTITUTION_READS = [
     'x=$(cat .env; echo ")")',
     "x=$(echo '' \")\"; cat .env)",
     "x=$(echo `case a in a) echo;; esac`; cat .env)",
+    "x=$(echo '\\' \")\"; cat .env)",
+    "x=$(echo $(echo a)) $(true; cat .env)",
 ]
 
 HEREDOC_SUBSTITUTIONS_THAT_READ_NO_CREDENTIAL = [
@@ -1117,7 +1120,7 @@ def test_substitutions_nested_to_the_limit_pass(opener: str, closer: str) -> Non
 def test_substitutions_nested_past_the_limit_are_refused(opener: str, closer: str, depth: int) -> None:
     reason = decide(_bash("echo " + opener * depth + "true" + closer * depth))
 
-    assert reason == block(f"command substitutions nested over {MAX_SUBSTITUTION_DEPTH} deep", KIND_CREDENTIAL)
+    assert reason == block(f"command substitutions nested over {MAX_SUBSTITUTION_DEPTH} deep", KIND_DOTENV)
 
 
 AWK_ENVIRON_VALUE_READS = [
