@@ -222,8 +222,11 @@ STAGE_DELIM = re.compile(r"(?<!\|)\|(?!\|)")
 SUBSTITUTION_OPEN = re.compile(r"\$\(|<\(|`")
 BODY_SUBSTITUTION_OPEN = re.compile(r"\\.|\$\(|`", re.S)
 BACKTICK = re.compile("`")
-QUOTE_MARKS = ("'", '"', "`")
+FIRST_CLOSE = re.compile(r"[^()]*\)")
 PAREN_OPENERS = ("$(", "<(")
+NESTED_OPENS = ("(", "'", '"', "`")
+CLOSERS = {"(": ")", "'": "'", '"': '"', "`": "`"}
+MAX_SUBSTITUTION_DEPTH = 8
 VERB_PREFIX = re.compile(
     r"^(\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*(?:sudo\s+(?:-\S+\s+)*|command\s+)?(?:\S*/)?(grep|egrep|fgrep|rg))(?=\s)"
 )
@@ -255,53 +258,44 @@ def split_outside_quotes(delim, text):
     return parts
 
 
-def quote_close(text: str, start: int) -> int | None:
-    """Index of the mark closing the quote, double quote or backtick span opened at start, or None when none does."""
-    mark, skip_to = text[start], start + 1
-    for i in range(start + 1, len(text)):
-        if i < skip_to:
-            continue
-        if text[i] == mark:
-            return i
-        if text[i] == "\\" and mark != "'":
-            skip_to = i + 2
-        elif mark == '"' and text.startswith("$(", i):
-            close = paren_close(text, i + 2)
-            if close is None:
-                return None
-            skip_to = close + 1
-    return None
+def scan_step(stack: list[str], text: str, i: int) -> int:
+    """Apply text[i] to the stack of open parentheses and quotes; the number of characters it consumes."""
+    ch, top = text[i], stack[-1]
+    if ch == "\\" and top != "'":
+        return 2
+    if ch == CLOSERS[top]:
+        stack.pop()
+    elif top == "(" and ch in NESTED_OPENS:
+        stack.append(ch)
+    elif top == '"' and text.startswith("$(", i):
+        stack.append("(")
+        return 2
+    return 1
 
 
 def paren_close(text: str, start: int) -> int | None:
     """Index of the parenthesis balancing the one opened just before start, quoted and escaped text skipped, or None."""
-    depth, skip_to = 1, start
+    stack, skip_to = ["("], start
     for i in range(start, len(text)):
-        if i < skip_to:
-            continue
-        ch = text[i]
-        if ch in QUOTE_MARKS:
-            close = quote_close(text, i)
-            if close is None:
-                return None
-            skip_to = close + 1
-        elif ch == "\\":
-            skip_to = i + 2
-        elif ch == "(":
-            depth += 1
-        elif ch == ")":
-            depth -= 1
-            if not depth:
+        if i >= skip_to:
+            skip_to = i + scan_step(stack, text, i)
+            if not stack:
                 return i
     return None
 
 
 def substitution_close(text: str, opened: re.Match[str]) -> int | None:
-    """Index closing the substitution an opener starts, its balanced parenthesis or next backtick; None for an escape."""
+    """Index closing the substitution an opener starts: its balanced parenthesis, else its first one, or next backtick."""
     if opened.group() == "`":
         close = BACKTICK.search(text, opened.end())
         return close.start() if close else None
-    return paren_close(text, opened.end()) if opened.group() in PAREN_OPENERS else None
+    if opened.group() not in PAREN_OPENERS:
+        return None
+    balanced = paren_close(text, opened.end())
+    if balanced is not None:
+        return balanced
+    first = FIRST_CLOSE.match(text, opened.end())
+    return first.end() - 1 if first else None
 
 
 def substitutions(text: str, opener: re.Pattern[str] = SUBSTITUTION_OPEN) -> list[str]:
@@ -1324,19 +1318,24 @@ def segment_verdict(segment: str, ctx: Context) -> Verdict:
     return Verdict(rewrite="".join(parts)) if changed else ALLOW
 
 
-def substitutions_verdict(text: str, ctx: Context, opener: re.Pattern[str] = SUBSTITUTION_OPEN) -> Verdict:
-    """The first refusal among the substitution bodies in the text, each judged as a command."""
-    for body in substitutions(text, opener):
-        v = body_verdict(body, ctx)
+def substitutions_verdict(
+    text: str, ctx: Context, opener: re.Pattern[str] = SUBSTITUTION_OPEN, depth: int = 0
+) -> Verdict:
+    """The first refusal among the substitution bodies in the text, each judged as a command; too deep a nest is refused."""
+    bodies = substitutions(text, opener)
+    if bodies and depth >= MAX_SUBSTITUTION_DEPTH:
+        return Verdict(block=block(f"command substitutions nested over {MAX_SUBSTITUTION_DEPTH} deep", KIND_CREDENTIAL))
+    for body in bodies:
+        v = body_verdict(body, ctx, depth + 1)
         if v.block:
             return v
     return ALLOW
 
 
-def body_verdict(body: str, ctx: Context) -> Verdict:
-    """A substitution body judged as a command: its own substitutions first, then each of its segments."""
+def body_verdict(body: str, ctx: Context, depth: int) -> Verdict:
+    """A substitution body at a nesting depth judged as a command: its own substitutions first, then each segment."""
     inner = Context(ctx.cwd, ctx.recursive, False)
-    v = substitutions_verdict(body, inner)
+    v = substitutions_verdict(body, inner, depth=depth)
     if v.block:
         return v
     for segment in split_outside_quotes(SEGMENT_DELIM, body)[::2]:

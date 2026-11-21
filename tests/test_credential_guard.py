@@ -12,8 +12,10 @@ import pytest
 from hooks.context.credential_guard import (
     ENV_NAMES_SAFE,
     GREP_EXCLUDES,
+    KIND_CREDENTIAL,
     KIND_ENVIRONMENT,
     KIND_RECURSIVE,
+    MAX_SUBSTITUTION_DEPTH,
     RG_EXCLUDES,
     block,
     decide,
@@ -1086,6 +1088,36 @@ def test_a_credential_read_in_a_balanced_heredoc_substitution_is_refused(delimit
 @pytest.mark.parametrize("body", BALANCED_HEREDOC_SUBSTITUTION_READS)
 def test_a_quoted_heredoc_balanced_substitution_stays_literal(delimiter: str, body: str) -> None:
     assert decide(_bash(f"cat <<{delimiter}\n{body}\nEOF")) is None
+
+
+UNBALANCED_SUBSTITUTION_READS = [
+    "echo $(cat .env ')",
+    "echo $(cat .env #')",
+    "x=$(cat '.env)",
+]
+
+
+@pytest.mark.feature("credential-guard-balanced-substitutions")
+@pytest.mark.parametrize("command", UNBALANCED_SUBSTITUTION_READS)
+def test_an_unbalanced_substitution_read_stays_refused(command: str) -> None:
+    assert decide(_bash(command)) is not None
+
+
+@pytest.mark.feature("credential-guard-balanced-substitutions")
+@pytest.mark.parametrize(("opener", "closer"), [("$(", ")"), ('"$(', ')"')])
+def test_substitutions_nested_to_the_limit_pass(opener: str, closer: str) -> None:
+    depth = MAX_SUBSTITUTION_DEPTH
+
+    assert decide(_bash("echo " + opener * depth + "true" + closer * depth)) is None
+
+
+@pytest.mark.feature("credential-guard-balanced-substitutions")
+@pytest.mark.parametrize(("opener", "closer"), [("$(", ")"), ('"$(', ')"')])
+@pytest.mark.parametrize("depth", [MAX_SUBSTITUTION_DEPTH + 1, 2000])
+def test_substitutions_nested_past_the_limit_are_refused(opener: str, closer: str, depth: int) -> None:
+    reason = decide(_bash("echo " + opener * depth + "true" + closer * depth))
+
+    assert reason == block(f"command substitutions nested over {MAX_SUBSTITUTION_DEPTH} deep", KIND_CREDENTIAL)
 
 
 AWK_ENVIRON_VALUE_READS = [

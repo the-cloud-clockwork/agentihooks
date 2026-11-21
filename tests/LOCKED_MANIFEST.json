@@ -1234,6 +1234,14 @@
    "c4b74481ca248577"
   ]
  },
+ "tests/test_credential_guard.py::test_an_unbalanced_substitution_read_stays_refused": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 3,
+  "texts": [
+   "fc7f089cafcb4076"
+  ]
+ },
  "tests/test_credential_guard.py::test_an_unquoted_heredoc_credential_substitution_is_refused": {
   "assertions": 2,
   "calls": 4,
@@ -1351,6 +1359,22 @@
   "cases": 1,
   "texts": [
    "7e3f6b952270e45d"
+  ]
+ },
+ "tests/test_credential_guard.py::test_substitutions_nested_past_the_limit_are_refused": {
+  "assertions": 1,
+  "calls": 3,
+  "cases": 4,
+  "texts": [
+   "4852504451381fc8"
+  ]
+ },
+ "tests/test_credential_guard.py::test_substitutions_nested_to_the_limit_pass": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 2,
+  "texts": [
+   "97f13ce19c8e7d12"
   ]
  },
  "tests/test_kubectl_mutation_guard.py::test_allowed_commands_are_not_blocked": {
