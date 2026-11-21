@@ -379,7 +379,7 @@ def test_effective_caps_are_exposed_in_status(monkeypatch):
     monkeypatch.setattr(status, "page_quota", lambda: {})
     assert status.status_report(store, "sw", {"tasks": []})["quota_capacity"] == {
         **decision,
-        "lanes": ["eng", "ci", "plan"],
+        "lanes": ["eng", "ci", "plan", "review"],
     }
     assert capacity.status_line(decision) == "quota capacity eng 0 ci 0 plan 0 because accounts are closed"
 

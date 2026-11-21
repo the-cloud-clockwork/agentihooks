@@ -225,7 +225,7 @@ IDLE_KILL_MS = 19 * elapsed.PASS_MS
 IDLE_NUDGE_TICKS = elapsed.passes(IDLE_NUDGE_MS)
 IDLE_KILL_TICKS = elapsed.passes(IDLE_KILL_MS)
 IDLE_TICKS = "idle-ticks"
-LANES = ("eng", "ci", "plan")
+LANES = ("eng", "ci", "plan", "review")
 ACTIVE = ("claimed", "pr")
 NUDGE = (
     "Swarm check: you are idle and your task is still open. If you are waiting on checks or a deploy, declare it "

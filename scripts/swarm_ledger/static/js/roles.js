@@ -1,7 +1,7 @@
 import { $, h } from "./dom.js";
 
-const LANE_ROLES = [["eng", ["eng"], ["engineer", "frontend", "qa", "documentation"]], ["ci", ["ci"], ["cicd"]], ["plan", ["plan"], ["planner"]], ["seats", ["dispatch", "master"], ["dispatcher", "master"]]];
-const LANE_PROFILES = { eng: "engineer", ci: "cicd", plan: "planner", dispatch: "dispatcher", master: "master" };
+const LANE_ROLES = [["eng", ["eng"], ["engineer", "frontend", "qa", "documentation"]], ["ci", ["ci"], ["cicd"]], ["plan", ["plan"], ["planner"]], ["review", ["review"], ["reviewer"]], ["seats", ["dispatch", "master"], ["dispatcher", "master"]]];
+const LANE_PROFILES = { eng: "engineer", ci: "cicd", plan: "planner", review: "reviewer", dispatch: "dispatcher", master: "master" };
 
 export function liveAgents(sw) {
   return (sw.agents || []).filter((a) => a.state !== "finished");
