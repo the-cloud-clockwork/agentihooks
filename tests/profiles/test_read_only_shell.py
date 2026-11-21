@@ -12,7 +12,6 @@ from profiles.package.roles._guards import no_code_edits
 ROLES = Path(__file__).resolve().parents[2] / "profiles" / "package" / "roles"
 SHELL_GUARD = "pre-bash-no_shell_writes.py"
 READ_ONLY = ("qa", "reviewer")
-FEATURE = "read-only-roles-refuse-shell-writes"
 SWARM = {"AGENTIHOOKS_SWARM": "test-swarm", "AGENTIHOOKS_SWARM_TASK": "task1"}
 
 
@@ -42,7 +41,7 @@ def _reason(home: Path, command: str, role: str = "reviewer") -> str:
     return no_code_edits.deny_reason(payload, role, home)
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("read-only-roles-refuse-shell-writes")
 @pytest.mark.parametrize("role", READ_ONLY)
 def test_a_read_only_seat_refuses_a_shell_redirect_into_the_repository(tmp_path: Path, role: str) -> None:
     refused = _shim(tmp_path, role, "echo patched > app.py")
@@ -51,7 +50,7 @@ def test_a_read_only_seat_refuses_a_shell_redirect_into_the_repository(tmp_path:
     assert f"{role} cannot write through the shell: the command writes app.py" in refused.stderr
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("read-only-roles-refuse-shell-writes")
 @pytest.mark.parametrize("role", READ_ONLY)
 def test_a_read_only_seat_refuses_a_git_commit(tmp_path: Path, role: str) -> None:
     refused = _shim(tmp_path, role, "git commit -am 'fix the review finding'")
@@ -60,7 +59,7 @@ def test_a_read_only_seat_refuses_a_git_commit(tmp_path: Path, role: str) -> Non
     assert f"{role} cannot write through the shell: the command runs git commit" in refused.stderr
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("read-only-roles-refuse-shell-writes")
 @pytest.mark.parametrize("role", READ_ONLY)
 def test_a_read_only_seat_keeps_shell_reads(tmp_path: Path, role: str) -> None:
     read = _shim(tmp_path, role, "git diff origin/dev...HEAD && cat README.md | grep -n '>' 2>/dev/null")
@@ -68,7 +67,7 @@ def test_a_read_only_seat_keeps_shell_reads(tmp_path: Path, role: str) -> None:
     assert (read.returncode, read.stderr) == (0, "")
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("read-only-roles-refuse-shell-writes")
 @pytest.mark.parametrize("role", READ_ONLY)
 def test_a_read_only_seat_writes_its_scratchpad_and_task_folder(tmp_path: Path, role: str) -> None:
     scratch = _shim(tmp_path, role, "echo note >> ~/scratchpad/review/notes.md")
@@ -77,14 +76,14 @@ def test_a_read_only_seat_writes_its_scratchpad_and_task_folder(tmp_path: Path, 
     assert (scratch.returncode, proof.returncode) == (0, 0)
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("read-only-roles-refuse-shell-writes")
 def test_only_the_read_only_roles_carry_the_shell_guard() -> None:
     carried = sorted(role.name for role in ROLES.iterdir() if (role / ".claude" / "conditions" / SHELL_GUARD).exists())
 
     assert carried == sorted(READ_ONLY)
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("read-only-roles-refuse-shell-writes")
 @pytest.mark.parametrize(
     ("command", "found"),
     [
@@ -124,7 +123,7 @@ def test_a_reviewer_refuses_each_shell_file_write(home: Path, command: str, foun
     )
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("read-only-roles-refuse-shell-writes")
 @pytest.mark.parametrize(
     ("command", "found"),
     [
@@ -163,7 +162,7 @@ def test_a_reviewer_refuses_git_writes_and_hidden_writes(home: Path, command: st
     assert f"the command {found}." in _reason(home, command)
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("read-only-roles-refuse-shell-writes")
 @pytest.mark.parametrize(
     "command",
     [
@@ -198,7 +197,7 @@ def test_a_reviewer_keeps_reads_and_writes_inside_its_own_folders(home: Path, co
     assert _reason(home, command) == ""
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("read-only-roles-refuse-shell-writes")
 def test_a_reviewer_appends_to_its_task_folder_with_a_heredoc(home: Path) -> None:
     command = f"cat >> {_task_folder(home)}/proof.md <<'EOF'\nline with > and it's quoted\nEOF"
 
@@ -206,7 +205,7 @@ def test_a_reviewer_appends_to_its_task_folder_with_a_heredoc(home: Path) -> Non
     assert _reason(home, command.replace("task1/proof.md", "task2/proof.md"))
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("read-only-roles-refuse-shell-writes")
 def test_edit_tool_payloads_keep_the_edit_path(home: Path) -> None:
     edit = {"tool_name": "Edit", "tool_input": {"file_path": str(home / "repo" / "app.py")}, "cwd": str(home)}
     scratch = {"tool_name": "Write", "tool_input": {"file_path": str(home / "scratchpad" / "n.md")}, "cwd": str(home)}
