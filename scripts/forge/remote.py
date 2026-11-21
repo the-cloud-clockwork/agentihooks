@@ -22,7 +22,7 @@ class Remote:
 def parse(url: str) -> Remote:
     scheme, sep, rest = url.strip().partition("://")
     if not sep:
-        rest = scheme.replace(":", "/", 1)
+        rest = scheme.replace(":", "/")
     authority, _, path = rest.partition("/")
     host = authority.rpartition("@")[2].partition(":")[0].lower()
     path = path.strip("/").removesuffix(".git")
@@ -42,7 +42,7 @@ def kind_of(host: str) -> str:
 def pick(where: Remote, kind: str | None, env: Mapping[str, str]) -> Forge:
     if (kind or kind_of(where.host)) == "github":
         return GitHubForge(f"{where.host}/{where.path}")
-    token = env.get(TOKEN_ENV, "")
+    token = env.get(TOKEN_ENV)
     if not token:
         raise ValueError(f"{TOKEN_ENV} is not set")
     return GitLabForge(where.host, where.path, token)

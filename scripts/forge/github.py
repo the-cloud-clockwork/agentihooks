@@ -5,7 +5,7 @@ import subprocess
 from collections.abc import Callable
 from typing import Any
 
-from scripts.forge.model import ChangedFile, ChangeRequest, Check, ForgeError
+from scripts.forge.model import ChangeRequest, Check, ForgeError
 
 GH_TIMEOUT_SEC = 60
 FIELDS = "number,url,title,body,headRefOid,files,statusCheckRollup"
@@ -40,7 +40,7 @@ class GitHubForge:
             body=raw["body"],
             head=raw["headRefOid"],
             diff=self._gh(["pr", "diff", str(number)]),
-            files=tuple(ChangedFile(item["path"], item["additions"], item["deletions"]) for item in raw["files"]),
+            files=tuple(item["path"] for item in raw["files"]),
             checks=tuple(check_of(item) for item in raw["statusCheckRollup"]),
         )
 

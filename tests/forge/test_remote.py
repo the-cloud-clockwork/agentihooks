@@ -21,6 +21,7 @@ pytestmark = pytest.mark.unit
         ("git@github.com:Org/repo.git", "github.com", "Org/repo"),
         ("ssh://git@gitlab.example.com:2222/group/sub/repo.git", "gitlab.example.com", "group/sub/repo"),
         ("https://oauth2:x@GitLab.com/group/repo/", "gitlab.com", "group/repo"),
+        ("https://github.com/Xavier/repoX/", "github.com", "Xavier/repoX"),
     ],
 )
 def test_a_remote_url_parses_into_host_and_repository_path(url: str, host: str, path: str) -> None:

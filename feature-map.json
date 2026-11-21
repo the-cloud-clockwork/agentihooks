@@ -5029,6 +5029,8 @@
         "tests/forge/test_remote.py::test_a_checkout_without_an_origin_remote_is_refused",
         "tests/forge/test_cli.py::test_the_cli_delegates_forge_to_this_module",
         "tests/forge/test_cli.py::test_read_prints_the_change_request_as_json",
+        "tests/forge/test_cli.py::test_the_forge_help_names_every_command_and_option",
+        "tests/forge/test_cli.py::test_a_missing_command_or_body_file_is_a_usage_error",
         "tests/forge/test_cli.py::test_post_reads_the_body_file_and_prints_the_comment_url",
         "tests/forge/test_cli.py::test_post_reads_the_body_from_standard_input",
         "tests/forge/test_cli.py::test_the_origin_remote_of_the_current_checkout_is_the_default",

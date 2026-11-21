@@ -1,7 +1,7 @@
 import pytest
 
 from scripts.forge import github
-from scripts.forge.model import ChangedFile, ChangeRequest, Check, ForgeError
+from scripts.forge.model import ChangeRequest, Check, ForgeError
 from tests.forge.fakes import Ran, fixture
 
 pytestmark = pytest.mark.unit
@@ -21,7 +21,7 @@ def test_github_reads_a_recorded_pull_request_into_a_change_request() -> None:
         body="Reviewer seats read the change through the forge.",
         head="eac251ba7f4ed988ecfa0232d1f91fb5cbe900e2",
         diff=diff,
-        files=(ChangedFile("scripts/example.py", 12, 3), ChangedFile("tests/test_example.py", 4, 0)),
+        files=("scripts/example.py", "tests/test_example.py"),
         checks=(Check("lint", "SUCCESS"), Check("unit", "IN_PROGRESS"), Check("sonar", "FAILURE")),
     )
     fields = "number,url,title,body,headRefOid,files,statusCheckRollup"
