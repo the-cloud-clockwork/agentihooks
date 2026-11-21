@@ -1,6 +1,7 @@
 import copy
 import json
 from collections.abc import Callable
+from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING, Any, cast
 
@@ -37,11 +38,9 @@ DICTS = frozenset({dict, TrackedDict})
 TRACKED = frozenset({TrackedDict, TrackedList})
 
 
+@dataclass(frozen=True, slots=True)
 class Writing:
-    __slots__ = ("method",)
-
-    def __init__(self, method: Callable[..., Any]) -> None:
-        self.method = method
+    method: Callable[..., Any]
 
     def __get__(self, instance: Tracked, owner: object) -> Callable[..., Any]:
         return partial(self._write, instance)
