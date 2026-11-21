@@ -7,6 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from hooks import hook_manager
+from hooks.context.approval_guard import refusal
 from hooks.hook_manager import BlockAction
 
 REFUSED = r"BLOCKED \[pull request approval\]"
@@ -35,6 +36,7 @@ def _bash(command: str, cwd: str = "") -> dict[str, object]:
         "gh pr review 12 --approve=true",
         "gh pr -R owner/repo review 12 --approve",
         "gh -R owner/repo pr review 12 --approve",
+        "gh pr --repo owner/repo review 12 --approve",
         "/usr/bin/gh pr review 12 --approve",
         "env GH_PROMPT_DISABLED=1 gh pr review 12 --approve",
         "bash -c 'gh pr review 12 --approve'",
@@ -53,6 +55,9 @@ def test_gh_pr_review_with_approve_is_refused(command: str) -> None:
         "gh api repos/o/r/pulls/12/reviews -f event=APPROVE",
         "gh api -X POST 'repos/{owner}/{repo}/pulls/12/reviews' -F event=approve -f body=ok",
         "gh api repos/o/r/pulls/12/reviews/99/events -f event=APPROVE",
+        "gh api --hostname github.com repos/o/r/pulls/12/reviews --field=event=APPROVE",
+        'echo "{\\"event\\":\\"APPROVE\\"}" | gh api repos/o/r/pulls/12/reviews --input -',
+        'echo \'{"event":"APPROVE"}\' | curl -X POST https://api.github.com/repos/o/r/pulls/12/reviews -d @-',
         'gh api repos/o/r/pulls/12/reviews --input - <<\'EOF\'\n{"event": "APPROVE", "body": "ok"}\nEOF',
         'echo \'{"event":"APPROVE"}\' | gh api repos/o/r/pulls/12/reviews --input -',
         'curl -X POST https://api.github.com/repos/o/r/pulls/12/reviews -d \'{"event":"APPROVE"}\'',
@@ -90,6 +95,8 @@ def test_a_rest_review_whose_input_file_approves_is_refused(tmp_path: Path, comm
         " {pullRequestId: $id, event: $e}) { clientMutationId } }' -f id=PR_1 -f e=APPROVE",
         'curl https://api.github.com/graphql -d \'{"query": "mutation { submitPullRequestReview(input:'
         " {pullRequestReviewId: 1, event: APPROVE}) { clientMutationId } }\"}'",
+        'curl https://api.github.com/graphql -d \'{"query": "mutation($e: PullRequestReviewEvent!) { addPullRequestReview('
+        'input: {pullRequestId: \\"PR_1\\", event: $e}) { clientMutationId } }", "variables": {"e": "APPROVE"}}\'',
     ],
 )
 def test_a_graphql_review_with_an_approve_event_is_refused(command: str) -> None:
@@ -133,6 +140,16 @@ def test_a_github_mcp_review_with_an_approve_event_is_refused(tool_name: str, to
         "gh api repos/o/r/pulls/12/reviews -f event=COMMENT -f body='I approve of the approach'",
         "gh api repos/o/r/pulls/12/reviews -f event=REQUEST_CHANGES -f body='approve after the fix'",
         "gh api repos/o/r/pulls/12/comments -f body='event=APPROVE'",
+        "gh pr review 12 --comment -b '-a fine'",
+        "gh api repos/o/r/pulls/12/comments -f event=APPROVE -f body=ok",
+        'gh api graphql -f query=\'mutation { addPullRequestReviewComment(input: {body: "event: APPROVE"})'
+        " { clientMutationId } }'",
+        "gh api repos/o/r/pulls/12/reviews -f event=COMMENT && echo 'event=APPROVE'",
+        "gh api repos/o/r/pulls/12/reviews -f event=COMMENT -f body='event: approve'",
+        "gh api repos/o/r/pulls/12/reviews -f body=APPROVE -f event=COMMENT",
+        "gh api repos/o/r/pulls/12/reviews -f event=COMMENT -f body='event=APPROVE'",
+        'gh api graphql -f query=\'mutation($b: String!) { addPullRequestReview(input: {pullRequestId: "PR_1",'
+        " event: COMMENT, body: $b}) { clientMutationId } }' -f b=APPROVE",
         "gh api repos/o/r/pulls/12/reviews --input missing.json",
         'gh api graphql -f query=\'mutation { addPullRequestReview(input: {pullRequestId: "PR_1", event: COMMENT,'
         ' body: "approve?"}) { clientMutationId } }\'',
@@ -150,8 +167,6 @@ def test_comments_change_requests_and_mentions_pass(command: str) -> None:
 
 @pytest.mark.feature("agent-sessions-cannot-approve-pull-requests")
 def test_an_unparseable_command_approves_nothing() -> None:
-    from hooks.context.approval_guard import refusal
-
     assert refusal(_bash("gh pr review 12 --approve 'unterminated")) is None
 
 
