@@ -1206,14 +1206,20 @@ class StoredManifests:
 
     def _merged(self, manifest: dict[str, Any], folder: str, stored: frozenset[str]) -> dict[str, Any]:
         """Return the manifest with the files of each note of its commit added to the outside list of every test record
-        the note names."""
+        the note names, and of every test module the note names that no record holds to that module's list under
+        `expand_tests.UNLISTED`, present only when a note names such a module."""
         records: dict[str, dict[str, Any]] = manifest["tests"]
+        unlisted: dict[str, list[str]] = {}
         notes = f"{folder}{NOTES}{manifest['commit']}/"
         for name in sorted(path for path in stored if path.startswith(notes)):
             note = json.loads(self.objects.read(name))
             for test in note["tests"]:
                 if test in records:
                     records[test]["outside"] = sorted({*records[test].get("outside", ()), *note["outside"]})
+                elif "::" not in test:
+                    unlisted[test] = sorted({*unlisted.get(test, ()), *note["outside"]})
+        if unlisted:
+            manifest[expand_tests.UNLISTED] = unlisted
         return manifest
 
 
