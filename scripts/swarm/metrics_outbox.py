@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from scripts.swarm import timing
+from scripts.swarm_ledger.repository.sqlite import WalSwitch
 
 URL_ENV = "AGENTIHOOKS_METRICS_URL"
 USER_ENV = "AGENTIHOOKS_METRICS_USER"
@@ -24,7 +25,6 @@ TIMEOUT_S = 3
 LOCK_TIMEOUT_S = 10
 USER_HEADER = "X-ClickHouse-User"
 KEY_HEADER = "X-ClickHouse-Key"
-WAL = "PRAGMA journal_mode=WAL"
 NAME = re.compile(r"[a-z][a-z0-9_]*")
 BASE = (
     ("event_id", "String"),
@@ -159,13 +159,18 @@ def post(sink, query, body):
 
 
 class Outbox:
-    def __init__(self, path, sink, send=None):
+    def __init__(
+        self,
+        path: Path | str,
+        sink: Settings | None,
+        send: Callable[[Settings | None, str, bytes], bool] | None = None,
+    ) -> None:
         self.path = Path(path)
         self.sink = sink
         self.send = send or post
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(self.path, timeout=LOCK_TIMEOUT_S)
-        self.db.execute(WAL)
+        WalSwitch(self.db).turn()
         with self.db:
             for statement in SPOOL:
                 self.db.execute(statement)

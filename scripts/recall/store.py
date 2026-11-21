@@ -9,6 +9,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
+from scripts.swarm_ledger.repository.sqlite import WalSwitch
+
 from .models import RecallRecord
 
 FIELDS = ("ledger_slug", "swarm_slug", "kind", "ref", "parent_ref", "author", "time", "title", "text", "chunk_index")
@@ -68,14 +70,14 @@ def content_hash(record: RecallRecord) -> str:
 
 
 class SQLiteRecallStore:
-    def __init__(self, path: Path | str, *, read_only: bool = False):
+    def __init__(self, path: Path | str, *, read_only: bool = False) -> None:
         self.path = Path(path)
         self.read_only = read_only
         if read_only:
             return
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as connection:
-            connection.execute("PRAGMA journal_mode=WAL")
+            WalSwitch(connection).turn()
             connection.executescript(SCHEMA)
 
     @contextmanager
