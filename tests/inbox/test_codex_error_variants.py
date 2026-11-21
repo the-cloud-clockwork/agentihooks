@@ -41,10 +41,12 @@ def is_info(node: ast.expr | None) -> bool:
 
 def assigned(target: ast.expr, value: ast.expr | None) -> list[ast.expr]:
     """What one assignment target writes under codexErrorInfo: the value, or the variant key its subscripts name."""
+    if value is None:
+        return []
     written = value
     while isinstance(target, ast.Subscript):
         if is_info(target.slice):
-            return [] if written is None else [written]
+            return [written]
         written, target = target.slice, target.value
     return []
 
