@@ -1016,6 +1016,11 @@ BALANCED_SUBSTITUTION_READS = [
     "x=$(printf safe)$(true; cat .env)",
     "x=`true; cat .env`",
     'diff <(echo ")"; cat .env) /dev/null',
+    'x=$(echo \\"")"; cat .env)',
+    'x=$(echo "a\\"" ")"; cat .env)',
+    'x=$(cat .env; echo ")")',
+    "x=$(echo '' \")\"; cat .env)",
+    "x=$(echo `case a in a) echo;; esac`; cat .env)",
 ]
 
 HEREDOC_SUBSTITUTIONS_THAT_READ_NO_CREDENTIAL = [

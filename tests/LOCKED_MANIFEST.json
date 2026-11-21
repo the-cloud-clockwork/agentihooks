@@ -1013,7 +1013,7 @@
  "tests/test_credential_guard.py::test_a_credential_read_in_a_balanced_command_substitution_is_refused": {
   "assertions": 2,
   "calls": 4,
-  "cases": 13,
+  "cases": 18,
   "texts": [
    "41f1fcd984f7eef3",
    "c8255937adffc2e6"
