@@ -4952,6 +4952,17 @@
       ]
     },
     {
+      "id": "hub-and-webhook-stop-cleanly-on-interrupt",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-webhook-sigint-clean-exit",
+      "behaviour": "The hub run command and the GitHub webhook receiver treat the interrupt signal the swarm image stops them with as a normal stop: an interrupt during a hub pass, or while the receiver serves, runs the command's cleanup (the hub releases its reactor leases and closes its lease keeper and bus, the receiver closes its server and then its bus), ends with exit code 0 and no traceback, and restores the signal handlers it replaced.",
+      "seam": "scripts.hub.runner.main and scripts.hub.github_webhooks.main run with their interrupt signal handlers",
+      "tests": [
+        "tests/hub/test_runner.py::test_sigint_during_a_pass_ends_the_hub_with_0_and_releases_its_leases",
+        "tests/hub/test_github_webhooks.py::test_sigint_while_serving_ends_the_receiver_with_0_after_closing_server_and_bus"
+      ]
+    },
+    {
       "id": "swarm-reopened-claim-loss",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2433",
