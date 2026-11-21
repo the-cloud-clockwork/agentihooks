@@ -12059,6 +12059,51 @@
         "tests/inbox/test_codex_error_variants.py::test_the_module_entry_point_exits_with_the_status_of_main",
         "tests/inbox/test_codex_error_variants.py::test_the_script_writes_nothing_when_codex_fails_to_generate_the_schema"
       ]
+    },
+    {
+      "id": "package-rules-fold-into-every-role-persona",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-recon-plan-before-edit",
+      "behaviour": "Every package rule file, not only a named few, folds exactly once into the rendered persona of every swarm role, so a rule added to the package rules folder reaches the master, engineer, ci, planner and qa seats without a copy in any overlay.",
+      "seam": "scripts.profiles.render.render_claude compiling profiles/package/rules into each role CLAUDE.md",
+      "tests": [
+        "tests/test_package_recon_rule.py::test_every_package_rule_folds_into_every_role_persona_once"
+      ]
+    },
+    {
+      "id": "engineer-and-ci-personas-keep-the-scouter-first-act",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-recon-plan-before-edit",
+      "behaviour": "The engineer and ci role personas keep the whole still valid scouter first act: launch the scouter, proceed when valid, and when outdated build nothing, message the master and block the task.",
+      "seam": "profiles/package/roles/engineer/CLAUDE.md and profiles/package/roles/cicd/CLAUDE.md",
+      "tests": [
+        "tests/test_package_recon_rule.py::test_engineer_and_ci_personas_keep_the_whole_scouter_first_act"
+      ]
+    },
+    {
+      "id": "swarm-engineer-skill-traces-a-plan-before-work",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-recon-plan-before-edit",
+      "behaviour": "The swarm engineer skill has a planner sub agent write plan.md and runs swarm trace plan in its Plan section, which comes before its Work section.",
+      "seam": "profiles/package/roles/engineer/.claude/skills/swarm-engineer/SKILL.md section order",
+      "tests": [
+        "tests/test_package_recon_rule.py::test_swarm_engineer_skill_traces_a_plan_before_its_work"
+      ]
+    },
+    {
+      "id": "recon-before-edit-rule",
+      "origin": "regression",
+      "ordered_at": "2026-11-21",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-recon-plan-before-edit",
+      "behaviour": "A package rule makes every agent that edits run a recon with scouter sub agents after the still valid scouter and before its first edit, and write recon.md in its task work folder with six headings in order; the engineer and ci personas point at it after the scouter, the documentation persona points at it, the swarm engineer and swarm ci skills carry a Recon section before their plan and work, the master and planner hold task specs to named areas and behaviours, and the master never queues or merges a pull request whose task work folder has no recon.md.",
+      "seam": "profiles/package/rules/recon-before-edit.md, the role personas and role rules, and the swarm engineer and swarm ci skills",
+      "tests": [
+        "tests/test_package_recon_rule.py::test_recon_rule_names_the_recon_file_and_its_six_headings_in_order",
+        "tests/test_package_recon_rule.py::test_engineer_and_ci_personas_point_at_the_recon_after_the_scouter",
+        "tests/test_package_recon_rule.py::test_documentation_persona_points_at_the_recon_rule",
+        "tests/test_package_recon_rule.py::test_master_and_planner_hold_task_specs_and_merges_to_the_recon",
+        "tests/test_package_recon_rule.py::test_role_skills_run_the_recon_before_the_first_edit"
+      ]
     }
   ],
   "unmapped_rules": [
