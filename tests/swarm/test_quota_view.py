@@ -138,7 +138,7 @@ def test_the_page_reads_each_account_routing_and_the_lane_order():
     assert quota_view.page({}) == {}
     assert quota_view.page(DECISION) == {
         **DECISION,
-        "lanes": ["eng", "ci", "plan"],
+        "lanes": ["eng", "ci", "plan", "review"],
         "accounts": [
             {**row("alpha", "CLOSED", 2, 40.0, 7.5), "routing": 7.5},
             {**row("beta", sessions=1), "routing": 60.0},
