@@ -3,6 +3,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 import redis
@@ -194,7 +195,7 @@ def program(tree):
 
 
 @pytest.fixture(scope="module")
-def published():
+def published_map() -> dict[str, Any]:
     import os
 
     root = os.environ.get("MUTATION_STATS_ROOT", str(redis_commands.ROOT))
@@ -207,7 +208,12 @@ def published():
         root,
     ]
     out = subprocess.run(command, cwd=redis_commands.ROOT, stdout=subprocess.PIPE, text=True, check=True).stdout
-    return json.loads(out)["consumers"]
+    return json.loads(out)
+
+
+@pytest.fixture(scope="module")
+def published(published_map: dict[str, Any]) -> dict[str, Any]:
+    return published_map["consumers"]
 
 
 def test_a_redis_py_method_maps_to_the_command_it_sends():
@@ -743,8 +749,11 @@ def test_scheduler_keys_follow_the_deployment_outside_any_hive(monkeypatch):
     assert os.environ["AGENTIHOOKS_HIVE_ID"] == "member"
 
 
-def test_the_map_lists_each_consumer_role_commands_senders_and_keys(monkeypatch, tree):
+def test_the_map_lists_each_consumer_role_commands_senders_and_keys(
+    monkeypatch: pytest.MonkeyPatch, tree: Path
+) -> None:
     monkeypatch.setattr(redis_commands, "CONSUMERS", {"app": redis_commands.Consumer("worker", ("scripts.app:later",))})
+    monkeypatch.setattr(redis_commands, "LAB", redis_commands.Lab("scripts.pkg.entry:main", "scripts.pkg"))
     assert redis_commands.consumer_map("distributed", tree) == {
         "deployment": "distributed",
         "consumers": {
@@ -761,7 +770,97 @@ def test_the_map_lists_each_consumer_role_commands_senders_and_keys(monkeypatch,
                 "stores": {},
             }
         },
+        "lab": {
+            "commands": {
+                "HLEN": ["scripts.pkg.sib:four"],
+                "HSET": ["scripts.pkg.rel:one"],
+                "SADD": ["scripts.pkg.sib:two"],
+                "SCARD": ["scripts.pkg.sib:three"],
+            }
+        },
     }
+
+
+LAB_PACKAGE = "SCRIPT = \"return redis.call('INCRBYFLOAT', KEYS[1], ARGV[1])\"\n"
+LAB_ENTRY = """
+import redis
+
+from scripts.lab import SCRIPT
+from scripts.lab.store import Store
+from scripts.tools import helper
+
+
+def main():
+    client = redis.Redis.from_url("redis://lab")
+    client.register_script(SCRIPT)
+    Store(client).put()
+    helper()
+"""
+LAB_STORE = """
+FINISH = "return redis.call('SMOVE', KEYS[1], KEYS[2], ARGV[1])"
+
+
+class Store:
+    def __init__(self, client):
+        self.client = client
+
+    def put(self):
+        self.client.set("k", "v")
+
+    def get(self, kind):
+        return self.client.sismember("disabled", kind)
+"""
+LAB_FILES = {
+    "scripts/__init__.py": "",
+    "scripts/lab/__init__.py": LAB_PACKAGE,
+    "scripts/lab/entry.py": LAB_ENTRY,
+    "scripts/lab/store.py": LAB_STORE,
+    "scripts/lab/report.py": "def rows(client):\n    return list(client.scan_iter())\n",
+    "scripts/tools.py": "import redis\n\n\ndef helper():\n    redis.Redis().keys()\n",
+}
+
+
+@pytest.fixture
+def lab_program(tmp_path: Path) -> code_reach.Program:
+    for name, text in LAB_FILES.items():
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(text)
+    return code_reach.Program(code_reach.parse(tmp_path))
+
+
+@pytest.mark.feature("redis-command-map-ci-lab-commands")
+def test_the_lab_commands_count_every_unit_of_each_reached_lab_module_and_nothing_outside_it(
+    lab_program: code_reach.Program,
+) -> None:
+    lab = redis_commands.Lab("scripts.lab.entry:main", "scripts.lab")
+    assert redis_commands.lab_commands(lab_program, lab) == {
+        "EVALSHA": ["scripts.lab.entry:main"],
+        "INCRBYFLOAT": ["scripts.lab:"],
+        "SCRIPT LOAD": ["scripts.lab.entry:main"],
+        "SET": ["scripts.lab.store:Store.put"],
+        "SISMEMBER": ["scripts.lab.store:Store.get"],
+        "SMOVE": ["scripts.lab.store:"],
+    }
+
+
+@pytest.mark.feature("redis-command-map-ci-lab-commands")
+def test_a_lab_entry_missing_from_the_code_is_refused(lab_program: code_reach.Program) -> None:
+    with pytest.raises(KeyError, match="scripts.lab.entry:gone"):
+        redis_commands.lab_commands(lab_program, redis_commands.Lab("scripts.lab.entry:gone", "scripts.lab"))
+
+
+@pytest.mark.feature("redis-command-map-ci-lab-commands")
+def test_the_published_lab_commands_hold_the_scheduler_client_calls_and_queue_script_commands(
+    published_map: dict[str, Any],
+) -> None:
+    commands = published_map["lab"]["commands"]
+    assert "scripts.ci_lab.queue:" in commands["SMOVE"]
+    assert "scripts.ci_lab.budget:Budget.charge" in commands["INCRBYFLOAT"]
+    assert "scripts.ci_lab.store:Store.get" in commands["SISMEMBER"]
+    readers = {"scripts.ci_lab.queue:Queue.restore_manifests", "scripts.ci_lab.queue:Queue.slots"}
+    assert readers <= set(commands["HMGET"])
+    assert not {"KEYS", "SCAN"} & set(commands)
+    assert all(unit.startswith(("scripts.ci_lab:", "scripts.ci_lab.")) for units in commands.values() for unit in units)
 
 
 STORE_COMMANDS = ["DEL", "GET", "HDEL", "HGET", "HMGET", "HSET", "INCRBY", "LRANGE", "LTRIM", "RPUSH", "SET", "WATCH"]
@@ -916,6 +1015,7 @@ def test_a_store_publishes_its_keys_and_protocol_commands_where_its_opener_is_re
             "unopened": redis_commands.Store("scripts.pkg.deep.leaf:main", lambda: opened),
         },
     )
+    monkeypatch.setattr(redis_commands, "LAB", redis_commands.Lab("scripts.pkg.entry:main", "scripts.pkg"))
     consumers = redis_commands.consumer_map("distributed", tree)["consumers"]
     sender = "scripts.events.redis_state:RedisStateStore."
     assert consumers["app"]["stores"] == {
