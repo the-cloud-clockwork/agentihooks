@@ -9930,6 +9930,16 @@
       ]
     },
     {
+      "id": "lab-scheduler-github-app-settings-on-start",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2685",
+      "behaviour": "The CI lab scheduler checks GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID and GITHUB_APP_PRIVATE_KEY before it builds any dependency client; when any is unset or empty it prints ci-lab scheduler refuses to start, naming each missing setting, to stderr and exits 1, instead of starting and dropping every head as cannot expand at its first manifest fetch or check post.",
+      "seam": "scripts.ci_lab.scheduler.main with the Redis, object store, bus, scheduler and relay builders stubbed to fail when called",
+      "tests": [
+        "tests/ci_lab/test_scheduler_start.py::test_main_refuses_to_start_naming_each_missing_github_app_setting"
+      ]
+    },
+    {
       "id": "lab-scheduler-check-run-restart",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2511",
