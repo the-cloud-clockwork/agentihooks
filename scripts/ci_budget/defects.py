@@ -6,12 +6,11 @@ The minute tick calls it; CI runners cannot reach the swarm, so the overrun is r
 from __future__ import annotations
 
 import json
-from typing import Any
 import os
 import subprocess
 import sys
 from collections.abc import Callable, Mapping
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from scripts import ci_budget
 from scripts.swarm import ci_speed, metrics_ci, metrics_outbox
