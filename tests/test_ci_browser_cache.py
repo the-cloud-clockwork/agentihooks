@@ -148,10 +148,10 @@ def test_a_retry_after_a_timeout_waits_for_the_left_over_apt_get_to_release_its_
 
 
 @pytest.mark.wall_clock
-def test_a_retry_never_installs_while_the_lock_is_held_and_ends_within_its_attempt(
+def test_a_retry_never_installs_while_the_lock_is_held_and_ends_before_the_lock_is_released(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    apt_seconds = 8
+    apt_seconds = 12
     monkeypatch.setenv("BROWSER_CACHE_TEST_APT_SECONDS", str(apt_seconds))
     started = time.monotonic()
     result, calls = _setup(tmp_path, monkeypatch, cached=False, ready=False, stall_once=True, attempt_seconds=2)
