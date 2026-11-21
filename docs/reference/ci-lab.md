@@ -4379,7 +4379,8 @@ marker holds the digest. The executors pass the sha256 of the head's tracked
 `.github/test-requirements.lock` (`venvs.LOCKFILE`), the file the image hashes into that marker;
 `uv.lock` is not tracked and is never read. Otherwise it builds `root/<digest>` once (`root` is
 `Pod.venvs`, `/work/venvs` on the worker Deployment), under a lock per digest, by running uv
-in a `Sandbox` from `build` (`venvs.Build`: ports, whitelist and time limit). The executors pass `Pod.build`, the pod's ports, whitelist and unit time limit.
+in a `Sandbox` from `build` (`venvs.Build`: ports, whitelist and time limit). The executors pass
+`Pod.build`, the pod's ports, whitelist and unit time limit.
 
 | Part | Value |
 |---|---|
