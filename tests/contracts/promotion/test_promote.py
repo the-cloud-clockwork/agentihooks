@@ -5,6 +5,8 @@ from pathlib import Path
 import pytest
 
 
+@pytest.mark.feature("promotion-current-job-not-completed")
+@pytest.mark.feature("promotion-changing-grade-poll-diagnostics")
 @pytest.mark.feature("promotion-red-graded-job-fails-at-once")
 def test_promotion_api_contracts() -> None:
     result = subprocess.run(
