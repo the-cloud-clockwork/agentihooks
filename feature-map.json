@@ -1,6 +1,16 @@
 {
   "features": [
     {
+      "id": "tick-waits-end-isolates-agent-failures",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-waits-end-per-agent-isolation",
+      "behaviour": "The waits end step logs and skips a raising agent wait, continues resolving and notifying other agents, preserves unresolved waits and records pass completion so healthy checked waits keep holding their agents.",
+      "seam": "scripts.tick.steps.report waits end through scripts.swarm.waits.end_pass and mark_ended",
+      "tests": [
+        "tests/tick/steps/test_waits_end.py::test_a_raising_wait_does_not_stop_other_agents_or_pass_completion"
+      ]
+    },
+    {
       "id": "credential-guard-refuses-brace-environ-leaves",
       "origin": "regression",
       "ordered_at": "2026-11-20",
