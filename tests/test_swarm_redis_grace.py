@@ -134,13 +134,18 @@ def api_disabled_liveness_command() -> list[str]:
 
 
 def probe_status(command: list[str], monkeypatch: pytest.MonkeyPatch) -> int:
-    """Run a chart probe command in this process and answer the exit status the kubelet exec would read."""
+    """Run a chart probe command in this process and answer the exit status the kubelet exec would read.
+
+    An uncaught exception of a ``python -c`` program exits 1 with its last traceback line on stderr, as the
+    interpreter does, so a test can tell a lapsed lease from a crash.
+    """
     if command[:2] == ["python", "-c"]:
         try:
             exec(command[2], {})
         except SystemExit as stop:
             return int(stop.code or 0)
-        except Exception:
+        except Exception as error:
+            print(f"{type(error).__name__}: {error}", file=sys.stderr)
             return 1
         return 0
     monkeypatch.setattr(sys, "argv", command)
@@ -169,7 +174,7 @@ def test_api_disabled_liveness_command_stays_live_while_redis_refuses_inside_the
 
 @pytest.mark.feature("controller-liveness-rides-out-redis-outage")
 def test_api_disabled_liveness_command_fails_on_a_lapsed_lease_once_redis_answers(
-    home: Path, monkeypatch: pytest.MonkeyPatch
+    home: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     import fakeredis
 
@@ -181,6 +186,8 @@ def test_api_disabled_liveness_command_fails_on_a_lapsed_lease_once_redis_answer
         monkeypatch.delenv(name, raising=False)
 
     assert probe_status(api_disabled_liveness_command(), monkeypatch) == 1
+    out, err = capsys.readouterr()
+    assert "no live controller lease for ['fixture']" in out + err
 
 
 def test_ready_still_fails_while_redis_refuses(home, capsys):
