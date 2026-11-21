@@ -1,5 +1,7 @@
 """The plan lane cap stays at one or more while plan work is open, and a start or a scale up restores a stored zero."""
 
+import json
+from functools import partial
 from typing import Any
 
 import pytest
@@ -8,11 +10,12 @@ from scripts.swarm import capacity, dispatcher
 from scripts.swarm.store import AUTO_SCALING, MANUAL_SCALING, AgentRecord, RedisStore, SwarmConfig
 from tests.swarm.test_capacity import account
 from tests.swarm.test_cli import env, run
+from tests.swarm.test_dispatcher import SLUG, Ledger, doc, home, shipped, store, task
 from tests.swarm.test_tick import FakeRuntime
 
 pytestmark = pytest.mark.unit
 
-_fixture = env
+_fixtures = env, home, shipped, store
 NOW = 1_800_000_000_000
 PLAN_READY = {"eng": 0, "ci": 0, "plan": 1}
 NO_ROOM = {"room": 0, "reason": "", "limit": 0, "held": False, "granted_at": NOW}
@@ -131,6 +134,44 @@ def test_the_lane_caps_keep_a_stored_plan_cap_above_one() -> None:
     assert dispatcher.lane_caps(config, ledger(("plan", "open")))["plan"] == 3
 
 
+def focused_plan() -> dict[str, Any]:
+    """Two open plan tasks, each unblocking one engineer task, with the second plan task focused ahead of the first."""
+    tasks = [task("p1", phase="", lane="plan"), task("p2", phase="", lane="plan")]
+    tasks += [task("q1", phase="", depends_on=["p1"]), task("q2", phase="", depends_on=["p2"])]
+    focus = [{"verb": "focus", "target": "tasks/p2"}, {"verb": "focus", "target": "tasks/p1"}]
+    return doc(tasks, phases=[], freezes=focus)
+
+
+@pytest.mark.feature("swarm-plan-cap-floor")
+def test_the_claim_key_keeps_the_focus_order_of_plan_work_under_a_stored_zero_cap(store: RedisStore) -> None:
+    config = store.update(SLUG, autonomy="delegate", max_plan=0, focus_weight=100)
+    found = focused_plan()
+    key = dispatcher.claim_key(config, found)
+    assert key is not None
+    known = {row["id"]: row for row in found["tasks"]}
+    assert key(known["p2"]) < key(known["p1"])
+
+
+@pytest.mark.feature("swarm-plan-cap-floor")
+def test_the_rank_pass_heads_the_focused_plan_task_under_a_stored_zero_cap(
+    store: RedisStore, home: Any, shipped: Any
+) -> None:
+    config = store.update(SLUG, autonomy="delegate", max_plan=0, focus_weight=100)
+    store.redis.set(store.key(SLUG, "quota-capacity"), json.dumps({"effective": {"eng": 0, "ci": 0, "plan": 1}}))
+    ledger = Ledger()
+    dispatcher.apply_ranking(SLUG, store, dispatcher.rank_decision(SLUG, config, store, ledger, focused_plan(), NOW))
+    assert [comment[0] for comment in ledger.comments] == ["p2"]
+
+
+@pytest.mark.feature("swarm-plan-cap-floor")
+def test_the_rank_proposals_keep_the_focus_order_of_plan_work_under_a_stored_zero_cap(
+    store: RedisStore, home: Any
+) -> None:
+    config = store.update(SLUG, autonomy="assist", max_plan=0, focus_weight=100)
+    decided = dispatcher.rank_decision(SLUG, config, store, Ledger(), focused_plan(), NOW)
+    assert [step.args[4]["id"] for step in decided.steps if isinstance(step, partial)][:2] == ["p2", "p1"]
+
+
 Env = tuple[RedisStore, Any, FakeRuntime]
 
 
@@ -157,7 +198,7 @@ def test_start_restores_a_stored_zero_plan_cap_to_its_default(env: Env, stored: 
 )
 def test_a_scale_up_restores_a_stored_zero_plan_cap(env: Env, pairs: list[str], plan: int) -> None:
     store, _, _ = env
-    run("sw", "create", "--repo", "/repo", "--max-eng-agents", "2", "--max-ci-agents", "1", "--max-plan-agents", "0")
+    run("sw", "create", "--repo", "/repo", "--max-eng-agents", "2", "--max-ci-agents", "0", "--max-plan-agents", "0")
     assert run("sw", "set", *pairs) == 0
     assert store.config("sw").max_plan == plan
 

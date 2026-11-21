@@ -141,15 +141,18 @@ def queue(doc: dict, fix: str, caps: dict | None = None, weight: int = 50) -> li
 
 
 def lane_caps(config: SwarmConfig, doc: dict[str, Any] | None = None) -> dict[str, int]:
-    return {"eng": config.max_eng, "ci": config.max_ci, "plan": config.max_plan}
+    """The stored lane caps, the plan cap at least one while the ledger holds an open plan lane task."""
+    tasks = (doc or {}).get("tasks", [])
+    planning = any(task.get("lane") == "plan" and task.get("state") == "open" for task in tasks)
+    return {"eng": config.max_eng, "ci": config.max_ci, "plan": max(config.max_plan, int(planning))}
 
 
-def claim_key(config, doc):
+def claim_key(config: SwarmConfig, doc: dict[str, Any]) -> Callable[[dict[str, Any]], tuple[int, int]] | None:
     if config.autonomy not in APPLIES:
         return None
     fix = freeze.fix_phase(config)
     fixed, guard = _banded(doc), guarded(doc, fix)
-    lined = queue(doc, fix, lane_caps(config), config.focus_weight)
+    lined = queue(doc, fix, lane_caps(config, doc), config.focus_weight)
     position = {task_id: index for index, task_id in enumerate(lined)}
     return lambda task: (_band(task, fixed, guard), position.get(task["id"], len(lined)))
 
@@ -195,7 +198,7 @@ def rank_decision(slug: str, config: Any, store: Any, ledger: Any, doc: dict[str
     claimable = timing.timed(_claimable, known, doc, graph, fix, deferred, (released, applied))
     scores, fixed = timing.timed(leverage, doc), _fixed(doc)
     if config.autonomy not in APPLIES:
-        lined_order = timing.timed(ordered, doc, named, scores, lane_caps(config), config.focus_weight)
+        lined_order = timing.timed(ordered, doc, named, scores, lane_caps(config, doc), config.focus_weight)
         lined = [t for t in lined_order if t in claimable and scores[t]]
         top = [t for t in lined if t not in fixed or known[t].get("rank") in WINDOW][:TOP]
         raises = [
@@ -206,7 +209,7 @@ def rank_decision(slug: str, config: Any, store: Any, ledger: Any, doc: dict[str
             now_ms, head, [partial(timing.timed, _propose, slug, ledger, mail, *row) for row in raises], None
         )
     before, banded = timing.timed(_saved_heads, head), _banded(doc)
-    lined_queue = timing.timed(queue, doc, fix, lane_caps(config), config.focus_weight)
+    lined_queue = timing.timed(queue, doc, fix, lane_caps(config, doc), config.focus_weight)
     leading = [t for t in lined_queue if t in claimable and (scores[t] or t in banded)]
     heads = timing.timed(_heads, store, slug, config, leading, known, before)
     landed = {

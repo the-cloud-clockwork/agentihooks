@@ -4221,6 +4221,9 @@
         "tests/swarm/test_plan_cap_floor.py::test_the_lane_caps_keep_one_planner_while_a_plan_task_is_open",
         "tests/swarm/test_plan_cap_floor.py::test_the_lane_caps_keep_a_stored_zero_without_open_plan_work",
         "tests/swarm/test_plan_cap_floor.py::test_the_lane_caps_keep_a_stored_plan_cap_above_one",
+        "tests/swarm/test_plan_cap_floor.py::test_the_claim_key_keeps_the_focus_order_of_plan_work_under_a_stored_zero_cap",
+        "tests/swarm/test_plan_cap_floor.py::test_the_rank_pass_heads_the_focused_plan_task_under_a_stored_zero_cap",
+        "tests/swarm/test_plan_cap_floor.py::test_the_rank_proposals_keep_the_focus_order_of_plan_work_under_a_stored_zero_cap",
         "tests/swarm/test_plan_cap_floor.py::test_start_restores_a_stored_zero_plan_cap_to_its_default",
         "tests/swarm/test_plan_cap_floor.py::test_a_scale_up_restores_a_stored_zero_plan_cap",
         "tests/swarm/test_plan_cap_floor.py::test_a_scale_up_keeps_a_stored_plan_cap_above_zero"
