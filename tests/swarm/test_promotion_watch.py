@@ -948,6 +948,35 @@ def test_a_fixer_filed_before_causes_were_kept_still_holds_its_job(store):
     assert ledger.added == [] and ledger.raised == [] and master_items(store) == []
 
 
+def covering(state: str, job: str = "swarm-image / smoke") -> Ledger:
+    return Ledger([{"id": "smoke-fix", "title": "Fix the swarm image smoke", "state": state, "covers_job": job}])
+
+
+@pytest.mark.feature("promotion-covering-task-holds-cause")
+@pytest.mark.parametrize("state", ["open", "claimed", "blocked", "pr"])
+def test_a_task_that_covers_the_failed_job_holds_its_cause_without_a_promotion_task(
+    store: RedisStore, state: str
+) -> None:
+    ledger = covering(state)
+    assert refresh(store, ledger, smoke_run("Build the image", ["layer failed"])) == []
+    assert ledger.added == [] and ledger.raised == [] and master_items(store) == [] and filed(store) == {}
+
+
+@pytest.mark.feature("promotion-covering-task-holds-cause")
+def test_a_done_task_that_covered_the_failed_job_no_longer_holds_its_cause(store: RedisStore) -> None:
+    ledger = covering("done")
+    refresh(store, ledger, smoke_run("Build the image", ["layer failed"]))
+    assert [fields["task"] for _, fields, _ in ledger.added] == ["promo-900-0"]
+
+
+@pytest.mark.feature("promotion-covering-task-holds-cause")
+def test_a_task_covering_one_job_still_lets_the_other_failed_jobs_file(store: RedisStore) -> None:
+    ledger = covering("open", "helm-kind")
+    refresh(store, ledger, gh([RED], JOBS))
+    assert [fields["task"] for _, fields, _ in ledger.added] == ["promo-900-1"]
+    assert filed(store) == {"promo-900-1": "unit (3.11, 1): "}
+
+
 def test_a_long_cause_is_cut_so_the_alert_fits_the_ledger_and_keeps_the_run_link(store):
     ledger = Ledger()
     refresh(store, ledger, smoke_run("Build the image", ["x" * 5000]))
