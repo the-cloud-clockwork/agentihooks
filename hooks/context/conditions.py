@@ -922,11 +922,6 @@ def _staged_command(command: str, cwd: str | None) -> bool:
     return any("conditions" in p.resolve().parts for p in paths) and _staged(paths)
 
 
-def _publish_call(command: str) -> tuple[str, list[str]] | None:
-    """The slug and file names of one lone swarm publish call, or None for any other command."""
-    return None
-
-
 def _read_only_shell(command: str, cwd: str | None = None) -> bool:
     stripped = _HARMLESS_REDIRECT.sub("", command)
     targets = _REDIRECT.findall(stripped)

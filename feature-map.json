@@ -624,8 +624,7 @@
         "tests/hooks/test_conditions_publish.py::test_publish_without_condition_paths_does_not_read_task_state",
         "tests/hooks/test_conditions_publish.py::test_publish_outside_the_repository_uses_the_swarm_repository",
         "tests/hooks/test_conditions_publish.py::test_publish_for_another_session_keeps_the_guard_closed",
-        "tests/hooks/test_conditions_publish.py::test_publish_without_a_session_folder_keeps_the_guard_closed",
-        "tests/hooks/test_conditions_publish.py::test_publish_call_reads_the_slug_and_file_names"
+        "tests/hooks/test_conditions_publish.py::test_publish_without_a_session_folder_keeps_the_guard_closed"
       ]
     },
     {
