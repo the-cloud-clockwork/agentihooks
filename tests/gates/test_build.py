@@ -354,6 +354,7 @@ class TestDevMerge:
             text=True,
         ).stdout.strip()
         (merged.repo / ".git/objects" / tree[:2] / tree[2:]).unlink()
+        git(merged.repo, "merge-base", "--is-ancestor", "MERGE_HEAD", "origin/dev")
         denied = merged.decide(tool="Bash", command="git commit --no-edit")
         assert not denied.allowed
         assert denied.reason.startswith(
