@@ -3718,7 +3718,8 @@
       "behaviour": "Once the master answers a stall alert, the stall watch sends no new alert for that stall while it lasts: a pass whose alert would carry the answered alert's ref, with the same task, case, stall start and action, sends nothing, while a stall that grows into a new one, such as a new push moving its start, alerts again.",
       "seam": "scripts.swarm.stall_watch.stall_pass alerting on a held pull request after its earlier alert was closed",
       "tests": [
-        "tests/swarm/test_stall_watch.py::test_an_answered_stall_alert_is_not_sent_again_until_the_stall_grows"
+        "tests/swarm/test_stall_watch.py::test_an_answered_stall_alert_is_not_sent_again_until_the_stall_grows",
+        "tests/swarm/test_stall_watch.py::test_an_answered_stall_is_forgotten_once_its_task_leaves_review"
       ]
     },
     {

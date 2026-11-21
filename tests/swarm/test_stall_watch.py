@@ -920,8 +920,7 @@ def test_the_same_stall_answered_once_is_not_shown_again() -> None:
     inbox.close(first.id, LEAD, "done", "handled")
     swarm.tick(START + 11 * MINUTE)
     assert seen.claim(inbox, LEAD) == []
-    [repeat] = [item for item in swarm.inbox() if item.id != first.id]
-    assert (repeat.ref, repeat.state, repeat.reason) == (first.ref, "done", f"done: {seen.SEEN_ON_LEDGER}")
+    assert [item.id for item in swarm.inbox()] == [first.id]
 
 
 @pytest.mark.feature("swarm-stall-watch-answered-alert-not-resent")
@@ -939,6 +938,22 @@ def test_an_answered_stall_alert_is_not_sent_again_until_the_stall_grows() -> No
     swarm.tick(START + 30 * MINUTE)
     refs = [item.ref for item in swarm.inbox() if item.id != first.id]
     assert refs == [f"sw:stall:t1:green:{START + 20 * MINUTE}:alert"]
+
+
+@pytest.mark.feature("swarm-stall-watch-answered-alert-not-resent")
+def test_an_answered_stall_is_forgotten_once_its_task_leaves_review() -> None:
+    """The answered alert a held task keeps is dropped on the first pass that no longer holds the task."""
+    swarm = Swarm(GREEN)
+    swarm.store.update(SLUG, gates={})
+    answered = swarm.store.key(SLUG, stall_watch.ANSWERED)
+    swarm.tick(START)
+    swarm.tick(START + 10 * MINUTE)
+    InboxStore(swarm.store.redis).close(swarm.inbox()[0].id, LEAD, "done", "handled")
+    swarm.tick(START + 11 * MINUTE)
+    assert swarm.store.redis.hkeys(answered) == ["t1"]
+    swarm.ledger.rows["t1"]["state"] = "done"
+    swarm.tick(START + 12 * MINUTE)
+    assert swarm.store.redis.hkeys(answered) == []
 
 
 def test_an_open_unclaimed_alert_is_not_repeated_when_the_task_waits_again():
