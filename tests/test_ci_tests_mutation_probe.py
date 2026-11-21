@@ -86,8 +86,32 @@ def test_tests_mutation_joins_plan_with_the_planning_install_and_replan_checks_o
     for name in ("mutation-refine", "mutation-replan"):
         assert install(name) == install("mutation-plan")
         assert "-e" not in install(name)["run"].split()
-    assert jobs["mutation-refine"]["steps"][0]["with"]["fetch-depth"] == 0
     assert jobs["mutation-replan"]["steps"][0]["with"] == {
         "fetch-depth": 1,
         "ref": "${{ github.event.pull_request.head.sha }}",
     }
+
+
+def test_mutation_refine_checks_out_only_the_head_history_without_file_contents() -> None:
+    steps = _jobs()["mutation-refine"]["steps"]
+    checkouts = [step for step in steps if step.get("uses", "").startswith("actions/checkout")]
+    assert checkouts
+    for checkout in checkouts:
+        assert checkout["with"] == {
+            "fetch-depth": 2147483647,
+            "filter": "blob:none",
+            "ref": "${{ github.event.pull_request.head.sha }}",
+        }
+
+
+def test_a_stalled_mutation_refine_checkout_aborts_within_a_minute_and_retries_once_in_place() -> None:
+    steps = _jobs()["mutation-refine"]["steps"]
+    first, second = [step for step in steps if step.get("uses", "").startswith("actions/checkout")]
+    assert steps.index(first) == 0 and steps.index(second) == 1
+    for checkout in (first, second):
+        assert checkout["uses"] == "actions/checkout@v4"
+        assert checkout["env"] == {"GIT_HTTP_LOW_SPEED_LIMIT": "1000", "GIT_HTTP_LOW_SPEED_TIME": "60"}
+    assert first["continue-on-error"] is True
+    assert "if" not in first
+    assert "continue-on-error" not in second
+    assert second["if"] == f"steps.{first['id']}.outcome == 'failure'"
