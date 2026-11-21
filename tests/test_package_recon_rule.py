@@ -101,7 +101,7 @@ def test_master_and_planner_hold_task_specs_and_merges_to_the_recon() -> None:
     planner = _text(ROLES / "planner" / ".claude" / "rules" / "planner-role.md")
 
     assert SPEC_AREAS in master and SPEC_AREAS in planner
-    assert "never queue or merge a pull request whose task work folder has no `recon.md`" in master
+    assert "never queue or merge a pull request whose task work folder has no recon.md" in master
 
 
 @pytest.mark.feature("recon-before-edit-rule")
