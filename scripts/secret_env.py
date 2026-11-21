@@ -70,7 +70,7 @@ def _existing_lines(target: Path) -> list[str]:
             raise ValueError
         value = match.group(1).strip()
         if value.startswith(("'", '"')):
-            if not re.fullmatch(r"""(?:'[^']*'|"[^"\\]*")[ \t]*(?:#.*)?""", value):
+            if not re.fullmatch(r"""(?:'[^']*'|"[^"\\$`]*")[ \t]*(?:#.*)?""", value):
                 raise ValueError
         elif any(character in value.partition("#")[0] for character in "'\"\\`$()"):
             raise ValueError

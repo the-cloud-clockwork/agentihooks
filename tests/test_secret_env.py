@@ -183,7 +183,7 @@ def test_failed_retrieval_never_writes_or_exposes_values(
 def test_transfer_appends_to_a_relative_file(value: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
     target = tmp_path / "private.env"
-    target.write_text("# preserved\n\nOTHER='café'\n", encoding="utf-8")
+    target.write_text("# preserved\n\nOTHER='café'\nALSO=\"keep\"\n", encoding="utf-8")
 
     def text_encoding(encoding: str | None, _stacklevel: int = 2) -> str:
         return "latin-1" if encoding is None else encoding
@@ -191,7 +191,10 @@ def test_transfer_appends_to_a_relative_file(value: str, tmp_path: Path, monkeyp
     monkeypatch.setattr(io, "text_encoding", text_encoding)
     _cluster(monkeypatch, value)
     assert secret_env.main(_args(Path("private.env"))) == 0
-    assert target.read_text(encoding="utf-8") == f"# preserved\n\nOTHER='café'\nSERVICE_TOKEN={shlex.quote(value)}\n"
+    assert (
+        target.read_text(encoding="utf-8")
+        == f"# preserved\n\nOTHER='café'\nALSO=\"keep\"\nSERVICE_TOKEN={shlex.quote(value)}\n"
+    )
     assert stat.S_IMODE(target.stat().st_mode) == 0o600
 
 
@@ -282,9 +285,18 @@ def test_unrepresentable_values_are_refused_without_changes(
         'OTHER=first\\\n"open\nSERVICE_TOKEN=inside\nlast"\nSERVICE_TOKEN=old\n',
         "not-an-assignment\nSERVICE_TOKEN=old\n",
         "OTHER=$(echo\nSERVICE_TOKEN=inside\nSERVICE_TOKEN=old)\n",
+        'OTHER="$(printf "\nSERVICE_TOKEN=inside\nSERVICE_TOKEN=")"\nSERVICE_TOKEN=old\n',
         "OTHER=" + chr(96) + "echo\nSERVICE_TOKEN=inside\nSERVICE_TOKEN=old" + chr(96) + "\n",
     ],
-    ids=["escaped-quote", "unquoted-quote", "continuation", "unsupported-line", "command-substitution", "backticks"],
+    ids=[
+        "escaped-quote",
+        "unquoted-quote",
+        "continuation",
+        "unsupported-line",
+        "command-substitution",
+        "quoted-substitution",
+        "backticks",
+    ],
 )
 @pytest.mark.feature("cluster-secret-private-env")
 def test_ambiguous_existing_content_is_refused_without_changes(
