@@ -895,6 +895,29 @@ def test_configuration_collector_fixture_and_binary_resource_changes_recollect_s
     assert calls == [files, files]
 
 
+@pytest.mark.feature("tracked-test-lock-cache-keys")
+def test_a_test_requirements_lock_change_recollects_stats(tmp_path: Path) -> None:
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    files = ["tests/test_sample.py"]
+    lock = ".github/test-requirements.lock"
+    _repository(root, {files[0]: "def test_sample():\n    pass\n", lock: "pytest==8.4.2\n"})
+    calls: list[list[str]] = []
+
+    def collect(chosen: list[str]) -> list[dict[str, object]]:
+        calls.append(chosen)
+        return [{"status": 0, "tests": {}, "durations": {}, "cpu": 1}]
+
+    cache = tmp_path / "cache"
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    assert calls == [files]
+    (root / lock).write_text("pytest==8.4.3\n")
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    assert calls == [files, files]
+
+
 def test_each_stored_file_keeps_only_its_own_tests_from_every_bucket(tmp_path, capsys):
     import json
 

@@ -978,8 +978,8 @@
       "id": "work-folder-follows-the-task-across-hives",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-work-folder-sync-across-hives",
-      "behaviour": "A task's progress and proof lines follow it to a successor on any hive: each hive syncs the work folder of every worker execution it runs, named by its host target, else by the hive on its record, so hub admissions and sessions the hive started itself are included, and keeps one copy per task under its own key for the files TTL after it stops hosting the task; the hub records the hive of each launched execution and seeds a successor from that hive's task copy, else from the hive of the task's previous agent, so after a hive roll and the predecessor's retirement the successor's folder on another hive holds every line synced before its admission, which is every line written up to one hive beat earlier.",
-      "seam": "Consumer.sync_workspaces, ledger_workspace.sync and task_files_key, Admission.launched and Admission._seeds",
+      "behaviour": "A task's progress and proof lines follow it to a successor on any hive: each hive syncs the work folder of every worker execution it runs, named by its host target, else by the hive on its record, so hub admissions and sessions the hive started itself are included, and keeps one copy per task under its own key with no expiry; the hub records the hive of each launched execution and seeds a successor from that hive's task copy, else from the hive of the task's previous agent, so a successor admitted any time later, after a hive roll and the predecessor's retirement, holds every line synced before its admission, which is every line written up to one hive beat earlier; progress and proof travel whole up to 128 KiB of JSON each and the files a task copy carries stay within 256 KiB of JSON together, so the hub admit reply stays under the NATS payload limit.",
+      "seam": "Consumer.sync_workspaces, ledger_workspace.sync, task_files_key and contents, Admission.launched and Admission._seeds",
       "semgrep_rule": "feature-work-folder-follows-the-task",
       "tests": [
         "tests/hive/test_prompt_transport.py::test_a_hive_syncs_the_work_folder_of_an_agent_the_hub_admitted_to_it",
@@ -990,7 +990,28 @@
         "tests/hub/test_admission.py::test_the_seeds_follow_the_hive_that_last_launched_the_task_after_its_agent_retired",
         "tests/hub/test_admission.py::test_the_hive_that_last_launched_the_task_wins_over_an_earlier_agents_hive",
         "tests/hub/test_admission.py::test_the_seeds_fall_back_to_the_previous_agents_hive_when_the_launch_hive_holds_no_copy",
-        "tests/hub/test_admission.py::test_a_successor_on_another_hive_after_a_roll_receives_every_line"
+        "tests/hub/test_admission.py::test_a_successor_on_another_hive_after_a_roll_receives_every_line",
+        "tests/hive/test_prompt_transport.py::test_progress_and_proof_longer_than_sixty_four_kilobytes_travel_whole",
+        "tests/hive/test_prompt_transport.py::test_an_added_file_travels_only_while_every_carried_file_fits_the_seed_budget",
+        "tests/hive/test_prompt_transport.py::test_the_seed_budget_counts_the_json_bytes_the_admit_reply_carries"
+      ]
+    },
+    {
+      "id": "work-folder-readers-and-launch-pointers",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-work-folder-record-gaps",
+      "behaviour": "The controller mirror and the ledger page read a task from the hive that publishes its work folder, named by its host target, else by the hive on its record, so hub admitted and hive started tasks are read too: the mirror copies that hive's kept task copy and the page shows that hive's synced lines, else the mirrored ones once the hive stops publishing; a controller order the hive acknowledges live and a Codex session a hive starts itself record the launching hive under the task's work folder pointer, as a hub launch does, so their successors are seeded from that hive's copy, and a failed launch records nothing.",
+      "seam": "reports.workspace_host, ledger_workspace._synced, mirror, published and launched_on, HiveLaunch.complete, supervisor.admit and codex.admit_legacy",
+      "semgrep_rule": "feature-work-folder-readers-and-launch-pointers",
+      "tests": [
+        "tests/hive/test_prompt_transport.py::test_the_mirror_and_the_page_tails_read_a_task_from_the_hive_on_its_record",
+        "tests/hive/test_prompt_transport.py::test_the_page_and_the_mirror_keep_a_task_after_its_hive_stops_publishing",
+        "tests/hive/test_prompt_transport.py::test_the_launch_pointer_names_the_launching_hive_with_no_expiry",
+        "tests/hive/test_reports.py::test_the_work_folder_host_is_the_host_target_else_the_hive_on_the_record",
+        "tests/hive/test_controller_launch.py::test_a_live_acknowledgement_records_the_hive_holding_the_task_work_folder",
+        "tests/hive/test_controller_launch.py::test_a_failed_launch_leaves_the_task_work_folder_pointer_alone",
+        "tests/codex_session/test_supervisor.py::test_a_session_that_starts_its_own_execution_records_its_hive_as_the_task_work_folder",
+        "tests/swarm/test_codex_transport_boundaries.py::test_a_legacy_codex_session_a_hive_starts_records_that_hive_as_its_task_work_folder"
       ]
     },
     {
@@ -11045,6 +11066,21 @@
       "seam": "scripts.ci_lab.executors lockfile_digest and static, scripts.ci_lab.venvs LOCKFILE, EXCLUDES and venv_for, scripts.ci_lab.scheduler MirrorExpander.expand",
       "tests": [
         "tests/ci_lab/test_executors.py::test_a_head_without_a_uv_lock_builds_its_venv_from_the_tracked_test_lock_and_runs_its_unit"
+      ]
+    },
+    {
+      "id": "tracked-test-lock-cache-keys",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-cache-keys-tracked-lock",
+      "behaviour": "The tracked .github/test-requirements.lock, never the untracked uv.lock, is the dependency lock every cache key and trigger reads: the mutation stats cache hashes it among its configuration sources, so a lock change recollects a test file's stats and gives every lab stats unit a new key; the test dependency manifest counts it as a global file, so a lock change or removal rekeys every lab test fingerprint and keeps whole files in planned mutation test selection; and the lint job's self plant runs the mutation gate's plant when it changes.",
+      "seam": "scripts.ci_mutation.stats_cache CONFIGURATION with collect_cached_stats, scripts.ci_lab.expand_mutation stats_units, scripts.dep_manifest GLOBAL_FILES with scripts.ci_lab.expand_tests fingerprints and scripts.ci_mutation.plan record_drift, the self-plant step of the lint job in .github/workflows/test.yml",
+      "tests": [
+        "tests/test_ci_mutation_stats_cache.py::test_a_test_requirements_lock_change_recollects_stats",
+        "tests/ci_lab/test_expand_mutation.py::test_a_test_requirements_lock_change_rekeys_every_stats_unit",
+        "tests/ci_lab/test_expand_tests.py::test_lockfile_change_rekeys_every_test",
+        "tests/ci_lab/test_expand_tests.py::test_lockfile_removal_rekeys_every_test",
+        "tests/test_ci_mutation_planned_selection.py::test_record_drift_treats_a_test_requirements_lock_change_as_global",
+        "tests/test_ci_self_plant_detector.py::test_a_test_requirements_lock_change_still_plants"
       ]
     },
     {
