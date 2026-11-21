@@ -1494,19 +1494,24 @@ def listen(
     routes: lease_api.ControlRoutes,
     spending: budget.Budget,
     clock: Callable[[], int],
-    ports: tuple[int, int],
-) -> tuple[ThreadingHTTPServer, ThreadingHTTPServer]:
-    """Bind the scheduler port's lease API, control, capacity and grades routes and the metrics port, both over one
-    load whose budget fraction and shed classes come from the day's spending, the metrics port with the counters the
-    scheduler's passes keep; the caller runs each serve_forever."""
+    ports: tuple[int, int, int],
+) -> tuple[ThreadingHTTPServer, ThreadingHTTPServer, ThreadingHTTPServer]:
+    """Bind the scheduler port's lease API, capacity and grades routes, the control port's control routes and the
+    metrics port, the scheduler and metrics ports over one load whose budget fraction and shed classes come from the
+    day's spending, the metrics port with the counters the scheduler's passes keep; the caller runs each
+    serve_forever."""
 
     def snapshot() -> Load:
         return budget.observe(scheduler.load(clock()), spending.status())
 
-    api, exposition = ports
-    lease = partial(lease_api.answer, leases, Uploads(scheduler.objects), routes)
+    api, steering, exposition = ports
+    lease = partial(lease_api.answer, leases, Uploads(scheduler.objects))
     port = service.Routes(lease, snapshot, scheduler.grades_of)
-    return service.serve("", api, port), metrics.serve("", exposition, snapshot, scheduler.registry)
+    return (
+        service.serve("", api, port),
+        lease_api.serve_control("", steering, routes),
+        metrics.serve("", exposition, snapshot, scheduler.registry),
+    )
 
 
 def _now_ms() -> int:
@@ -1538,7 +1543,7 @@ def storage(environ: Mapping[str, str]) -> S3Objects:
 
 def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     """Run the scheduler service from its mounted runtime config: the lease API, capacity and grades on the scheduler
-    port, metrics on the metrics port and a pass every interval."""
+    port, the control routes on the control port, metrics on the metrics port and a pass every interval."""
     import redis
 
     from scripts.ci_lab import relay
@@ -1560,7 +1565,7 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
         print(f"reindexed {scheduler.store.reindex()} verdicts", flush=True)
     leases = Leases(scheduler.queue, LEASE_TTL_MS, _now_ms, _sleep_ms, LEASE_POLL_MS, scheduler.ports.pods)
     routes = lease_api.ControlRoutes(client, environ.get(contract.CONTROL_TOKEN, ""), _now_ms)
-    ports = (contract.SCHEDULER_PORT, contract.METRICS_PORT)
+    ports = (contract.SCHEDULER_PORT, contract.CONTROL_PORT, contract.METRICS_PORT)
     for server in listen(scheduler, leases, routes, spending, _now_ms, ports):
         Thread(target=server.serve_forever, daemon=True).start()
     return serve(scheduler, relaying, arguments.interval, arguments.passes, time.time, time.sleep)
