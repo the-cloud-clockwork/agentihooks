@@ -204,6 +204,7 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "scripts/ci_release.sh",
         "scripts/ci_semgrep_floors.py",
         "scripts/ci_stats_seed.py",
+        "scripts/ci_unit_copy.py",
         "scripts/ci_unit_rerun.py",
         "scripts/ci_wiring.py",
         "scripts/feature_map.py",
@@ -610,7 +611,7 @@ def test_sonar_takes_this_runs_coverage_through_the_runtime_token_as_the_shards_
     assert not API_CALL.search((ROOT / ".github/coverage/arrivals.py").read_text())
 
 
-def test_every_reader_of_the_unit_shard_count_matches_the_matrix():
+def test_every_reader_of_the_unit_shard_count_matches_the_matrix() -> None:
     jobs = _jobs()
     shards = jobs["unit"]["strategy"]["matrix"]["shard"]
     count = len(shards)
@@ -620,7 +621,7 @@ def test_every_reader_of_the_unit_shard_count_matches_the_matrix():
         run["env"]["SHARD"]
         == f"${{{{ matrix.shard }}}}/${{{{ matrix.python-version == '3.12' && {count} || {count} }}}}"
     )
-    floor = jobs["unit"]["strategy"]["matrix"]["exclude"]
+    floor = [entry for entry in jobs["unit"]["strategy"]["matrix"]["exclude"] if "shard" in entry]
     assert [entry["shard"] for entry in floor] == shards[12:]
     assert ci_test_plan.UNIT_JOBS == {f"unit (3.12, {shard})" for shard in shards}
     assert ci_test_plan.COVERAGE == {f"coverage-3.12-{shard}" for shard in shards}
