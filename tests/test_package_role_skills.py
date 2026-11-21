@@ -14,7 +14,13 @@ from tests.test_profile_render import world as render_world
 
 world = render_world
 ROLES = Path(__file__).resolve().parents[1] / "profiles" / "package" / "roles"
-ROLE_SKILLS = {"master": "swarm-master", "engineer": "swarm-engineer", "cicd": "swarm-ci", "planner": "swarm-planner"}
+ROLE_SKILLS = {
+    "master": "swarm-master",
+    "engineer": "swarm-engineer",
+    "cicd": "swarm-ci",
+    "planner": "swarm-planner",
+    "reviewer": "swarm-reviewer",
+}
 COMMON = (
     "agentihooks api --slug <slug> --as <name> join",
     "agentihooks ledger watch <slug> --as <name>",
@@ -39,6 +45,7 @@ LOOP = {
     "engineer": (*WORKER, "agentihooks swarm <slug> issue <url>", "agentihooks swarm <slug> pr <url>", "--pr <url>"),
     "cicd": (*WORKER, "agentihooks swarm <slug> pr <url>", "--pr <url>", "--command", "--output"),
     "planner": (*WORKER, "publish-plan", "--slice <ids>", "--must", "--check", "--judge"),
+    "reviewer": (*WORKER, "agentihooks msg send <author>", "--finding <url>"),
 }
 PARSERS = {"swarm": lambda argv: swarm_parser().parse_args(argv), "msg": lambda argv: msg_parser().parse_args(argv)}
 PARSERS["ledger"] = PARSERS["api"] = lambda argv: ledger_parser().parse_args(argv)
