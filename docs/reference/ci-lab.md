@@ -201,7 +201,7 @@ per-node verification; a Ready cache pod alone does not prove either cache is wa
 | `CI_LAB_SLOTS` | no | yes | Number of units the worker runs at once |
 | `CI_LAB_GIT_MIRROR` | yes | yes | Path of the shared git mirror the worker cuts worktrees from and the scheduler borrows objects from |
 | `CI_LAB_WORK_ROOT` | no | yes | Folder of the worker's private git store, its trees, venvs and unit runs and reports |
-| `CI_LAB_MANIFEST` | no | yes | Path of the dependency manifest JSON a test unit's batch is checked against |
+| `CI_LAB_MANIFEST` | no | yes | Legacy manifest path accepted by worker settings; test batches carry their selected dependency records in the lease and do not read this file |
 | `CI_LAB_FLAKES` | no | yes | Path of the flake ledger a test unit appends to when its retry passes |
 | `CI_LAB_MUTATION_CACHE` | no | yes | Folder of the mutation stats cache, keyed by tree content |
 | `CI_LAB_KILLERS` | no | yes | Path of the kill memory that orders a mutant's tests, its remembered killer first |
@@ -2803,6 +2803,11 @@ than that is answered only from the store. A head that needs test units and find
 `no dependency manifest at or before <base>` and is dropped with that reason, so a merge group
 never folds green on an empty unit job.
 
+Before serving leases, scheduler startup restores missing batch records in older live grade slots
+and queued jobs from the packed manifest at the grade's recorded manifest commit. Existing job
+records are kept, and held slots receive their records before admission. A missing manifest object
+fails startup. This upgrade runs under the scheduler Deployment's single replica and Recreate strategy.
+
 A batch verdict lists the files the batch opened outside its tests' manifest records. The expander
 puts the `commit` of the manifest it keyed a head's test units on in the plan's `manifest`, and the
 grade's state keeps it; a pull request or hotfix grade keys no test units and keeps none. When the
@@ -3265,7 +3270,7 @@ scheduler enqueues a grade's misses with the grade's base and its plan's grader 
 | Kind | Trees | Executor inputs |
 |---|---|---|
 | `static` | head, base and grader, read only, shared by the pod's units | the gate the unit names from the grader tree's workflow, input registry and reusable workflows (see [The worker reads the same workflows](#the-worker-reads-the-same-workflows)), the venv of the head's `uv.lock` digest and the lease fields and secrets its steps read (see [What a gate's steps read](#what-a-gates-steps-read)) |
-| `test` | head, read only | the batch, the venv of the head's `uv.lock` digest, `CI_LAB_MANIFEST`, `CI_LAB_FLAKES` and one pytest worker per slot |
+| `test` | head, read only | the batch and its selected manifest records carried through stored grade state, the queued job and lease, the venv of the head's lockfile digest, `CI_LAB_FLAKES` and one pytest worker per slot |
 | `stats` | a private copy of the head with every file under the `[tool.mutmut]` source paths behind its trampolines | the tree as root and `CI_LAB_MUTATION_CACHE` |
 | `mutant` | the same private trampolined copy | `CI_LAB_KILLERS`, `CI_LAB_MUTATION_BUDGET`, `CI_LAB_MUTATION_CAP` and the tests that the stats records of every test module in the tree show reaching the mutant's function, with their seconds |
 
