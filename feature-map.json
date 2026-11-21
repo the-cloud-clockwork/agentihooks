@@ -11789,6 +11789,7 @@
         "tests/inbox/test_codex_error_variants.py::test_every_variant_a_test_fixture_writes_is_listed_by_the_app_server_schema",
         "tests/inbox/test_codex_error_variants.py::test_the_snapshot_holds_what_the_script_writes",
         "tests/inbox/test_codex_error_variants.py::test_the_script_writes_the_sorted_variant_names_the_installed_codex_generates",
+        "tests/inbox/test_codex_error_variants.py::test_the_module_entry_point_exits_with_the_status_of_main",
         "tests/inbox/test_codex_error_variants.py::test_the_script_writes_nothing_when_codex_fails_to_generate_the_schema"
       ]
     }
