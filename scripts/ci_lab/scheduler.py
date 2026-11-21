@@ -151,6 +151,7 @@ MIRROR_STORE = "CI_LAB_MIRROR_STORE"
 IMAGE = "CI_LAB_IMAGE"
 REPOSITORY = "CI_LAB_REPOSITORY"
 REINDEX_ON_START = "CI_LAB_REINDEX_ON_START"
+GITHUB_APP_SETTINGS = ("GITHUB_APP_ID", "GITHUB_APP_INSTALLATION_ID", "GITHUB_APP_PRIVATE_KEY")
 MANIFEST_DEPTH = 10
 
 Needs = Mapping[str, Mapping[str, Any]]
@@ -1564,6 +1565,10 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     parser.add_argument("--interval", type=float, default=INTERVAL_S)
     parser.add_argument("--passes", type=int, default=0)
     arguments = parser.parse_args(argv)
+    missing = [name for name in GITHUB_APP_SETTINGS if not environ.get(name)]
+    if missing:
+        print(f"ci-lab scheduler refuses to start: {', '.join(missing)} not set", file=sys.stderr)
+        return 1
     runtime = load_runtime(Path(environ[contract.RUNTIME_CONFIG]))
     client: Any = redis.Redis.from_url(environ[contract.REDIS_URL], decode_responses=True)  # pyright: ignore[reportUnknownMemberType]
     objects = storage(environ)
