@@ -607,9 +607,9 @@ def test_a_dispatch_of_a_large_grade_lists_the_unit_keys_within_half_the_check_r
     body = request.call_args.kwargs["json"]
     sent = body["client_payload"]["output"]
     assert checks.DISPATCH_TEXT == 32767
-    assert sent == checks.render(large, checks.DISPATCH_TEXT)
-    assert len(sent["text"]) <= checks.DISPATCH_TEXT
-    assert "Unit keys: 1486 of 3000 listed" in sent["summary"]
+    assert sent == checks.render(large, checks.DISPATCH_BUDGET)
+    assert len(json.dumps(sent["text"])) - 2 <= checks.DISPATCH_TEXT
+    assert "Unit keys: 1421 of 3000 listed" in sent["summary"]
     assert len(json.dumps(body)) < DISPATCH_BODY
     whole = {**body, "client_payload": {**body["client_payload"], "output": checks.render(large)}}
     assert len(json.dumps(whole)) >= DISPATCH_BODY

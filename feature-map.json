@@ -9797,7 +9797,7 @@
       "id": "lab-check-dispatch",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2678",
-      "behaviour": "Where the lab's App lacks checks write, the Dispatches poster sends each check run move once as a lab-check repository dispatch with a token holding contents write, carrying the head sha, check run name, status, conclusion, details link and the output rendered within half of GitHub's check run text limit so the dispatch body stays under GitHub's 64 KB dispatch limit, refuses a move that is not forward or was seeded, waits out rate limits like the CI budget, and raises PostRefused on any answer but 204.",
+      "behaviour": "Where the lab's App lacks checks write, the Dispatches poster sends each check run move once as a lab-check repository dispatch with a token holding contents write, carrying the head sha, check run name, status, conclusion, details link and the output rendered within half of GitHub's check run text limit counted in JSON encoded characters, its log tails within half of that, so the dispatch body stays under GitHub's 64 KB dispatch limit whatever characters the logs hold, refuses a move that is not forward or was seeded, waits out rate limits like the CI budget, and raises PostRefused on any answer but 204.",
       "seam": "scripts.ci_lab.checks.Dispatches.post and seed on mocked requests",
       "tests": [
         "tests/ci_lab/test_checks.py::test_a_dispatch_carries_the_check_run_move_once_with_the_contents_write_token",

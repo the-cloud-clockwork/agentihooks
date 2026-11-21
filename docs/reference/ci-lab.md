@@ -1824,9 +1824,11 @@ accepted.
 
 The relay sends each check run as a `lab-check` repository dispatch with an App token holding
 contents write, because the lab's App holds no checks write. The dispatch carries the head sha, the
-check run name, its status, conclusion, details link and output. The output lists the unit keys within
-half of GitHub's check run text limit, because GitHub refuses a dispatch body of 64 KB or more and
-a full limit listing of a large grade passes it. The `Lab check` workflow
+check run name, its status, conclusion, details link and output. The output takes at most half of
+GitHub's check run text limit, counted as the characters it takes in the JSON body with its escapes,
+and its failed unit log tails at most half of that, because GitHub refuses a dispatch body of 64 KB
+or more and a full limit listing of a large grade, or log tails full of escaped characters, passes
+it. The `Lab check` workflow
 (`.github/workflows/lab-check.yml`) runs on that dispatch with `checks: write` and `contents: read`
 and runs `python -m scripts.ci_lab.checks`. That entry reads the dispatch from the event file,
 refuses a head that is not a full sha, a name outside `lab/` and `lab-shadow/` and a bad status or

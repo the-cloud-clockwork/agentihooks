@@ -32,8 +32,10 @@ from scripts.github_app import GitHubAppAuth
 
 __all__ = [
     "AUTHORITATIVE",
+    "CHECK_RUN_BUDGET",
     "CONCLUSIONS",
     "DISPATCHED",
+    "DISPATCH_BUDGET",
     "DISPATCH_TEXT",
     "EVENT",
     "PERMISSIONS",
@@ -41,6 +43,7 @@ __all__ = [
     "STATUSES",
     "TEXT_LIMIT",
     "Bearer",
+    "Budget",
     "Checks",
     "Dispatches",
     "Output",
@@ -130,6 +133,25 @@ class Bearer:
         return self.value
 
 
+@dataclass(frozen=True)
+class Budget:
+    """The text a check run output may take: all of it, the share the failed units' log tails may take, and how a part
+    of it is measured."""
+
+    text: int
+    logs: int
+    size: Callable[[str], int]
+
+
+def _encoded(text: str) -> int:
+    """Return the characters text takes inside a JSON request body, escapes included, as requests sends it."""
+    return len(json.dumps(text)) - 2
+
+
+CHECK_RUN_BUDGET = Budget(TEXT_LIMIT, LOGS_LIMIT, len)
+DISPATCH_BUDGET = Budget(DISPATCH_TEXT, DISPATCH_TEXT // 2, _encoded)
+
+
 def token(repo: str, environ: Mapping[str, str]) -> Token:
     """Return the workflow token inside GitHub Actions, else the App token of the repository with checks write."""
     if environ.get(ACTIONS) == "true" and environ.get(WORKFLOW_TOKEN):
@@ -147,11 +169,12 @@ def name(gate: str, shadow: bool) -> str:
     return f"{SHADOW if shadow else AUTHORITATIVE}/{gate}"
 
 
-def render(output: Output, limit: int = TEXT_LIMIT) -> dict[str, str]:
+def render(output: Output, budget: Budget = CHECK_RUN_BUDGET) -> dict[str, str]:
     """Return the check run output: the run id, grader revision and details link, the log tail of each failed unit
-    and every unit key that fits beside them in limit characters of text, GitHub's check run limit by default."""
-    logs = _logs(output)
-    text, listed = _listing(output, limit - len(logs))
+    within the budget's log share and every unit key that fits beside them in its text, each part measured as the
+    budget measures it; GitHub's check run limit in characters by default."""
+    logs = _logs(output, budget)
+    text, listed = _listing(output, budget.text - budget.size(logs), budget.size)
     facts = [
         f"Run: {output.run}",
         f"Grader revision: {output.grader}",
@@ -161,12 +184,12 @@ def render(output: Output, limit: int = TEXT_LIMIT) -> dict[str, str]:
     return {"title": output.title, "summary": "\n".join([output.summary, "", *facts]), "text": logs + text}
 
 
-def _logs(output: Output) -> str:
-    """Return a block per unit log holding its last LOG_TAIL characters, within LOGS_LIMIT so the unit key listing
-    keeps the rest of GitHub's limit; past it, the blocks that fit and a note that the later ones are left out."""
+def _logs(output: Output, budget: Budget) -> str:
+    """Return a block per unit log holding its last LOG_TAIL characters, within the budget's log share so the unit key
+    listing keeps the rest of its text; past it, the blocks that fit and a note that the later ones are left out."""
     blocks = [_block(unit, log[-LOG_TAIL:]) for unit, log in output.logs]
     note = f"Log tails of {len(blocks)} failed units exceed half of GitHub's limit; the later ones are left out.\n"
-    return _fitting(blocks, LOGS_LIMIT, note)[0]
+    return _fitting(blocks, budget.logs, note, budget.size)[0]
 
 
 def _block(unit: Unit, tail: str) -> str:
@@ -175,18 +198,18 @@ def _block(unit: Unit, tail: str) -> str:
     return f"Log tail of {unit.kind} `{unit.key}`:\n{fence}\n{tail}\n{fence}\n"
 
 
-def _listing(output: Output, limit: int) -> tuple[str, int]:
+def _listing(output: Output, limit: int, size: Callable[[str], int]) -> tuple[str, int]:
     """Return a line per unit key and the count listed; past the limit, the lines that fit and a pointer."""
     lines = [f"- {unit.kind} `{unit.key}`\n" for unit in output.units]
-    return _fitting(lines, limit, f"The full list of {len(lines)} unit keys is at {output.details}")
+    return _fitting(lines, limit, f"The full list of {len(lines)} unit keys is at {output.details}", size)
 
 
-def _fitting(parts: list[str], limit: int, note: str) -> tuple[str, int]:
-    """Return every part and their count when all fit in the limit; past it, the leading parts that fit beside the
-    note, then the note, and their count."""
-    if sum(map(len, parts)) <= limit:
+def _fitting(parts: list[str], limit: int, note: str, size: Callable[[str], int]) -> tuple[str, int]:
+    """Return every part and their count when all fit in the limit as size measures them; past it, the leading parts
+    that fit beside the note, then the note, and their count."""
+    if sum(map(size, parts)) <= limit:
         return "".join(parts), len(parts)
-    fits = sum(1 for size in accumulate(map(len, parts)) if size + len(note) <= limit)
+    fits = sum(1 for total in accumulate(map(size, parts)) if total + size(note) <= limit)
     return "".join(parts[:fits]) + note, fits
 
 
@@ -377,7 +400,7 @@ class Dispatches:
             "name": key[1],
             "status": status,
             "details_url": output.details,
-            "output": render(output, DISPATCH_TEXT),
+            "output": render(output, DISPATCH_BUDGET),
         }
         if conclusion is not None:
             payload["conclusion"] = conclusion
