@@ -10843,8 +10843,7 @@
       "behaviour": "The lab worker test upload sink listens with room for forty concurrent connections before accepting report and log uploads.",
       "seam": "tests.ci_lab.test_worker Sink server activation",
       "tests": [
-        "tests/ci_lab/test_worker.py::test_the_sink_listens_with_room_for_forty_uploads",
-        "tests/ci_lab/worker_stats_probe.py::test_forty_uploads_collect_mutation_stats"
+        "tests/ci_lab/test_worker.py::test_the_sink_listens_with_room_for_forty_uploads"
       ]
     },
     {
