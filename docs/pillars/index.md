@@ -24,6 +24,8 @@ For publication retries, see [publishing unchanged files](swarm.md#publishing-un
 
 For publication during a swarm panic, see [publishing under panic mode](swarm.md#publishing-under-panic-mode): the registered fix and git config rule publish shares with the panic push guard, the refusal and what it leaves behind, publishing a fix and troubleshooting.
 
+For publication through the CI lab, see [publishing through the lab](swarm.md#publishing-through-the-lab): `--via lab` and `--direct`, the grade before origin, the wait limits, the result's `lab_grade` field, each refusal and a repeat on an unchanged head.
+
 For resumed work, see [publishing after a successor prepares a branch](swarm.md#publishing-after-a-successor-prepares-a-branch): branch selection, restacking, repository configuration and publication retries. See [recording a published upstream branch](swarm.md#recording-a-published-upstream-branch) for successor tracking setup, task metadata and pull request head checks.
 
 For an existing pull request, see [continuing with one push](swarm.md#continue-an-existing-pull-request-with-one-push): retained branch selection, Stop behavior and lease failures.

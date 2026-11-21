@@ -576,6 +576,16 @@ def _swarm_tick_leaves_user_units_alone(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _seat_crons_stay_off_the_host_scheduler(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Swarm start, stop and master joins touch no scheduler in tests; tests/swarm/test_seat_crons.py turns the seat
+    crons back on over a fake scheduler."""
+    from scripts.swarm import seat_crons
+
+    for hook in ("on_start", "on_stop", "on_join"):
+        monkeypatch.setattr(seat_crons, hook, lambda *args: None)
+
+
+@pytest.fixture(autouse=True)
 def _switch_interval_restored():
     before = sys.getswitchinterval()
     yield

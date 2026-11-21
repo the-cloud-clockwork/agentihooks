@@ -42,6 +42,10 @@ class Bucket:
         assert Bucket == BUCKET
         return {"Contents": [{"Key": name} for name in self.blobs if name.startswith(Prefix)], "IsTruncated": False}
 
+    def delete_object(self, Bucket: str, Key: str) -> None:
+        assert Bucket == BUCKET
+        self.blobs.pop(Key, None)
+
 
 def key(kind: str, seed: str) -> str:
     return f"{kind}-v1-{digests.digest({'seed': seed})}"
@@ -281,6 +285,18 @@ def test_s3_objects_live_under_the_bucket_prefix() -> None:
     assert bucket.blobs == {"ci/lab/a/log.txt": b"one"}
     assert remote.read("lab/a/log.txt") == b"one"
     assert remote.keys("lab/") == ["lab/a/log.txt"]
+
+
+@pytest.mark.feature("lab-outside-notes-per-commit")
+def test_objects_remove_one_path_and_take_a_missing_one_as_gone(blobs: objects.Objects) -> None:
+    blobs.write_once("lab/a/report.json", b"one")
+    blobs.write_once("lab/b/report.json", b"two")
+
+    blobs.remove("lab/a/report.json")
+    blobs.remove("lab/a/report.json")
+
+    assert blobs.keys("lab/") == ["lab/b/report.json"]
+    assert blobs.read("lab/b/report.json") == b"two"
 
 
 def s3_client() -> Any:

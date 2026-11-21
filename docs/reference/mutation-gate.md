@@ -1021,7 +1021,7 @@ statistics cache entries. This happens automatically in the pull request
 | Recorded dev coverage | The planner reads a record before estimating changed files and passes the manifest into selection. Job lookup requests 100 jobs per page, reducing pagination on large dev runs | One planner invocation; a read failure can trigger the [coverage retry](#unreadable-coverage-record). More than 100 jobs still require another page |
 | Test import index | `mentions` caches Unicode-normalized tokens and relative import detection. `imported_names` caches parsed imports by test text and package. `select_tests` parses a file only when it names a reached module's last component or contains a relative import; its import walk visits statements | In-process reuse by content and package, including repeated selection for changed sources. Each selection still reads test text; unrelated files avoid AST parsing |
 | Test duration map | `stats_part_count` computes `file_seconds` once, then passes the same map to every candidate part count and worker bucket. `partition` splits the files using that map without rereading durations | One statistics part sizing calculation. A new plan reads its current duration input |
-| Statistics dependency fingerprints | `StatsInputs.for_test` retains a test file's dependency trace when multiple selectors name that file. `test_inputs` materializes each module's AST walk once while recording its dependencies | One `StatsInputs` instance, separately for measured and unmeasured dependencies. Recorded coverage and dynamically loaded inputs still participate in validation |
+| Statistics dependency fingerprints | `StatsInputs.for_test` retains a test file's dependency trace when multiple selectors name that file, and the import closure of each distinct measured dependency list; `StatsInputs.discovery` retains the digest of each distinct input set. Test ids with equal measured lists cost one closure walk when their records are saved and one when they are checked for reuse. `test_inputs` materializes each module's AST walk once while recording its dependencies | One `StatsInputs` instance, separately for measured and unmeasured dependencies. Recorded coverage and dynamically loaded inputs still participate in validation |
 
 These in-memory values reduce repeated planning work. The persisted statistics
 cache still validates its inputs before reusing collected results, as described
@@ -1133,7 +1133,7 @@ still install `.[dev,all]`.
 | Package | Specifier | Declared in `pyproject.toml` | Planner module that imports it at module level |
 |---|---|---|---|
 | `mutmut` | `==3.6.0` | `dev` extra | `scripts.ci_mutation.selection` |
-| `pytest` | `>=8.0` | `dev` extra | `scripts.ci_mutation.killers`, `tests.test_collection_imports` |
+| `pytest` | `>=8.0` | `dev` extra | `scripts.ci_mutation.killers`, `scripts.ci_mutation.selection` |
 | `pyyaml` | `>=6.0` | project dependencies | `scripts.dep_manifest` (imported as `yaml`) |
 | `tomlkit` | `>=0.12` | project dependencies | `scripts.ci_mutation.runner` |
 
@@ -1342,7 +1342,7 @@ mutmut stops a mutant at its first failing test, and a shard runs the test that 
 
 For example, a function traced by tests of 2, 8 and 30 seconds costs 55.6 worker seconds per mutant without a killer. Once the 2 second test has killed one of its mutants, each mutant costs 8.1. Durations follow the same rules as split planning: the maximum observed duration, at least 5.6 seconds or the largest observed duration when a test has none. Shard sizing, the shard target and limit, and the 1080 second shard budget are unchanged; a lower estimate places more mutants on fewer shards.
 
-The `mutation-stats` parts also keep each test file's statistics in one merged `mutation-test-stats-v2-<os>-` cache per run, which every part restores, so an unchanged test file is not traced again even when it moves to another part. A single part saves the cache itself; with more parts each uploads only the entries it wrote, and the first `mutation-shard` job restores the previous merged cache, lays the parts over it and saves it. An entry is reused when the gate code, configuration, runner options, installed packages (the project itself by its release, since its build number changes with every commit), the test file and everything it imports or names as a file are unchanged (except `.test_durations`, which CI rewrites from dev on every run and which only orders and splits tests), together with the changed lines of each source among them. A file that reaches a dynamic import whose target is not a literal is also checked against every repository module its statistics bucket loaded and what those import or name; a collection that recorded no modules falls back to every Python module in the repository. Each part prints `Mutation stats cache: reused N test files; collect M` in its **Collect one stats part for every mutation shard** step. When a lookup misses, a second line, `Mutation stats cache: misses {...}; changed inputs [...]`, counts each miss reason and names the five inputs that changed most often. The [dev stats seed](#dev-stats-seed) adds the merged pull requests' entries to the dev cache that a new pull request's first run restores.
+The `mutation-stats` parts also keep each test file's statistics in one merged `mutation-test-stats-v2-<os>-` cache per run, which every part restores, so an unchanged test file is not traced again even when it moves to another part. A single part saves the cache itself; with more parts each uploads only the entries it wrote, and the first `mutation-shard` job restores the previous merged cache, lays the parts over it and saves it. An entry is reused when the gate code, configuration, runner options, the sha256 of `.github/test-requirements.lock` and the `.github/test-excludes.txt` list every test install reads, the test file and everything it imports or names as a file are unchanged (except `.test_durations`, which CI rewrites from dev on every run and which only orders and splits tests), together with the changed lines of each source among them. A file that reaches a dynamic import whose target is not a literal is also checked against every repository module its statistics bucket loaded and what those import or name; a collection that recorded no modules falls back to every Python module in the repository. Each part prints `Mutation stats cache: reused N test files; collect M` in its **Collect one stats part for every mutation shard** step. When a lookup misses, a second line, `Mutation stats cache: misses {...}; changed inputs [...]`, counts each miss reason and names the five inputs that changed most often. The [dev stats seed](#dev-stats-seed) adds the merged pull requests' entries to the dev cache that a new pull request's first run restores.
 
 The pull request Tests run carries killing tests between its runs. A kill is recorded per function as the failing test's node id, in a file named by a digest of the function name. The run keeps them per ref in an actions cache:
 
@@ -1495,34 +1495,42 @@ A pull request run saves its `mutation-test-stats-v2-<os>-` cache on the pull re
 |---|---|---|
 | `BUDGET` | 300 seconds | One deadline for the whole harvest, set when the seed starts |
 | `TIMEOUT` | 120 seconds | Each `gh api` call times out at the smaller of this and the time left before the deadline |
-| `RETRY_DELAYS` | 5, 10 and 20 seconds | Waits between downloads of one artifact |
+| `RETRY_DELAYS` | 5, 10 and 20 seconds | Waits between calls of one failed gh request |
 | `DEPTH` | 50 | Commit subjects read per push |
 
 The job's own `timeout-minutes` is 10. These are module constants in `scripts.ci_stats_seed`; no workflow input, flag or environment variable changes them.
 
 A `gh api` call that times out, or that would start after the deadline, raises a timeout. The seed then stops that pull request, never retries it, keeps any files it already copied from it and names it in the summary: `skipped [N] on a GitHub timeout or past the budget, never retried`.
 
-### Download retry
+### Retry
 
-`download` fetches each artifact with `gh api repos/{owner}/{repo}/actions/artifacts/<id>/zip`. When gh exits non-zero, it waits and downloads the same artifact again, at most four downloads:
+`retried` makes every gh call of the harvest: the pull request read, the Tests run listing, each artifact listing page and each download, `gh api repos/{owner}/{repo}/actions/artifacts/<id>/zip`. When gh exits non-zero, it prints the call and gh's error, waits and makes the same call again, at most four calls:
 
-| Download | Wait before it |
+| Call | Wait before it |
 |---|---|
 | 1 | none |
 | 2 | 5 seconds |
 | 3 | 10 seconds |
 | 4 | 20 seconds |
 
-Each wait is cut short at the deadline, `min(wait, max(0, deadline - now))`. The first download that succeeds is used and its files are copied as usual; a retry prints nothing and only lengthens the step. When the deadline passes during the waits, the next download raises a timeout at once, so the pull request is skipped as above and the job does not fail.
+Each wait is cut short at the deadline, `min(wait, max(0, deadline - now))`. The first call that succeeds is used and the harvest goes on as usual. Each call that is made again first prints a line like this one:
 
-These are never retried:
+```text
+Mutation stats seed: actions/runs/44582121638/artifacts?per_page=100&page=1 failed, asking again in 5 s: gh: Bad Gateway (HTTP 502)
+```
 
-- A download that times out. The pull request is skipped.
-- The pull request read, the Tests run listing and the artifact listing. A timeout skips the pull request; any other gh failure fails the step at once, except a 404 on the pull request read.
+When the deadline passes during the waits, the failed call prints its line with `asking again in 0 s` and the next call raises a timeout at once, so the pull request is skipped as above and the job does not fail.
+
+These are made once:
+
+- A call that times out. The pull request is skipped.
+- A call answered HTTP 404. A pull request read skips that number, a download fails as below and a listing fails the step.
+
+When the fourth call of a listing fails too, the seed raises gh's `CalledProcessError` from that call, and the lines printed before it name each gh error.
 
 ### When every download fails
 
-When the fourth download fails too, the seed raises an error naming the artifact, its id and gh's last standard error with trailing whitespace removed:
+When the fourth download fails too, or any download is answered HTTP 404, the seed raises an error naming the artifact, its id and gh's last standard error with trailing whitespace removed:
 
 ```text
 RuntimeError: Mutation stats seed: every download of mutation-test-stats-cache-1 (6) failed: gh: Bad Gateway (HTTP 502)
@@ -1567,12 +1575,13 @@ gh api repos/the-cloud-clockwork/agentihooks/actions/artifacts/ARTIFACT_ID \
 
 | Symptom | Meaning and action |
 |---|---|
-| `RuntimeError: Mutation stats seed: every download of <name> (<id>) failed: <message>` | Four downloads of that artifact failed. Read gh's message and check the artifact with the command above. The release is not held, and the next dev push reads the same merges again; rerun the failed job only when the dev cache must carry them sooner. |
-| A `CalledProcessError` traceback from `pulls/N`, `actions/workflows/test.yml/runs` or `actions/runs/<id>/artifacts` | A listing call failed; listing calls are not retried. Rerun the failed job or let the next dev push read the merges again. |
+| `RuntimeError: Mutation stats seed: every download of <name> (<id>) failed: <message>` | Four downloads of that artifact failed, or one was answered HTTP 404. Read gh's message and check the artifact with the command above. The release is not held, and the next dev push reads the same merges again; rerun the failed job only when the dev cache must carry them sooner. |
+| A `CalledProcessError` traceback from `pulls/N`, `actions/workflows/test.yml/runs` or `actions/runs/<id>/artifacts` | Four calls of that listing failed, or a run or artifact listing was answered HTTP 404. The `failed, asking again` lines above it name gh's errors. Let the next dev push read the merges again. |
+| `Mutation stats seed: <path> failed, asking again in <seconds> s: <message>` | That gh call failed and is made again after the wait; nothing is wrong unless its fourth call fails too. |
 | `skipped [N, ...] on a GitHub timeout or past the budget, never retried` | A gh call reached its 120 second timeout or the 300 second budget ran out. Those pull requests' records are not on dev, so the first pull request run that needs them traces those test files again. |
 | `0 files from pull requests [...]` | The merged pull requests had no unexpired stats artifact on their head's Tests runs, or every file was already taken from a newer pull request. |
 | `#N is not a readable pull request` | The subject number is not a pull request the token can read; the seed skips it. |
-| The seed step runs longer than usual with no error | Downloads were retried and one succeeded; each artifact adds at most 35 seconds of waits. |
+| The seed step runs longer than usual with no error | Calls were made again and one succeeded; each failed request adds at most 35 seconds of waits, and each wait printed a `failed, asking again` line. |
 
 ### Seed retry delivery evidence
 
@@ -1584,7 +1593,16 @@ The [red run 44149719513](https://github.com/the-cloud-clockwork/agentihooks/act
 |---|---|
 | `test_harvest_downloads_a_failed_artifact_again_after_a_wait` | One failed download is followed by a second, after a wait of 5 seconds, 2 seconds when only 2 remain before the deadline, or none past it; the records are copied |
 | `test_harvest_fails_naming_the_artifact_once_every_download_failed` | Four failed downloads after waits of 5, 10 and 20 seconds raise the error above, chained from the last gh failure, and pointers from an artifact already copied stay taken |
-| `test_harvest_retries_neither_a_timed_out_download_nor_a_failed_listing` | A download timeout and a failed pull request, run or artifact listing call each happen once, with no wait |
+| `test_harvest_downloads_a_timed_out_or_missing_artifact_once` | A download that times out, or is answered HTTP 404, happens once with no wait; the 404 raises the error above |
+
+[Pull request 12494](https://github.com/the-cloud-clockwork/agentihooks/pull/12494) gave the listing calls the same retry. In the [dev push run 44592721366](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/44592721366) that led to it, one gh exit 1 on the artifact listing of Tests run 44582121638 failed the step with the same unprinted `CalledProcessError`. That listing answered HTTP 200 with its 48 artifacts afterwards. The [red run 44603794716](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/44603794716) on the tests only head failed 7 cases: the three listings of each of the first two tests below, and the HTTP 404 download above. The feature map entry `ci-stats-seed-listing-retry` lists these tests in `tests/test_ci_stats_seed.py`:
+
+| Test | What it proves |
+|---|---|
+| `test_harvest_asks_again_for_a_listing_call_that_failed` | A pull request read, run listing or artifact listing page that fails once is made again after 5 seconds with the same deadline; the failure is printed and the records are copied |
+| `test_harvest_raises_the_last_failure_once_every_call_of_a_listing_failed` | Four failed calls of one listing, after waits of 5, 10 and 20 seconds, raise the fourth gh failure |
+| `test_harvest_asks_once_for_a_listing_that_timed_out_or_was_not_found` | A listing call that times out, and a run or artifact listing answered HTTP 404, happen once with no wait |
+| `test_harvest_skips_a_number_that_is_not_a_pull_request` | A pull request read answered HTTP 404 happens once with no wait and skips that number |
 
 ## Graded lines
 

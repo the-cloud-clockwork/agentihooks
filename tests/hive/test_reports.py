@@ -13,6 +13,14 @@ HIVE = "remote"
 PANE = "w1:p1"
 CONVERSATION = "8c1f5a7e-3b9d-4c2e-9f61-0d4b2a7c5e13"
 BINDING = {"profile": "engineer", "harness": "claude", "account": "account", "hooks": True}
+CODEX_BINDING = {
+    "harness": "codex",
+    "profile": "engineer",
+    "model": "gpt-6.1-sol",
+    "effort": "xhigh",
+    "account": "account",
+    "hooks": True,
+}
 
 
 def _herdr(args):
@@ -96,6 +104,18 @@ def test_remote_host_is_another_hive_than_this_one(remote):
     assert remote.reports.host(replace(remote.agent, runtime_backend="kubernetes")) == ""
 
 
+@pytest.mark.feature("work-folder-readers-and-launch-pointers")
+def test_the_work_folder_host_is_the_host_target_else_the_hive_on_the_record(remote: SimpleNamespace) -> None:
+    named = remote.reports.workspace_host
+    assert named(replace(remote.agent, hive="elsewhere")) == HIVE
+    assert named(replace(remote.agent, runtime_target={})) == HIVE
+    assert named(replace(remote.agent, runtime_target={"pid": 12, "pid_start": 34})) == HIVE
+    assert named(replace(remote.agent, runtime_target={}, hive="controller")) == ""
+    assert named(replace(remote.agent, runtime_target={"host_id": "controller"}, hive="elsewhere")) == ""
+    assert named(replace(remote.agent, runtime_target={}, hive="")) == ""
+    assert named(replace(remote.agent, runtime_backend="kubernetes")) == HIVE
+
+
 def test_a_remote_claude_worker_is_seen_live_from_its_hive_report(remote):
     _publish(remote, typed="half a line", provider_error="overloaded", provider_error_id="529")
     runtime, agent = remote.runtime, remote.agent
@@ -141,6 +161,7 @@ def test_the_controller_reads_a_hub_admitted_workers_pane_from_the_hive_that_run
     herdr = Mock()
     herdr.live_names.return_value = {remote.agent.name}
     herdr.observe.return_value = PaneObservation("done")
+    herdr.bindings.return_value = {}
     report = daemon.execution_report(remote.redis, HIVE, herdr)
     remote.redis.set(remote.reports.key(HIVE), json.dumps(report), ex=45)
 
@@ -204,6 +225,129 @@ def test_a_hub_admitted_worker_on_this_hive_is_read_from_its_own_herdr(
     remote.runtime.herdr = herdr
 
     assert remote.runtime.observe(agent).state == "working"
+
+
+@pytest.mark.feature("live-binding-reads-hub-admitted-bindings-from-their-hive")
+@pytest.mark.parametrize("remote", [{"target": {}}], indirect=True)
+def test_the_controller_reads_a_hub_admitted_codex_workers_binding_from_the_hive_that_runs_it(
+    remote: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive import daemon
+    from scripts.swarm import live_binding
+    from scripts.swarm import runtime as runtime_module
+    from scripts.swarm.pane import PaneObservation
+    from scripts.swarm.store import APP_SERVER_TRANSPORT, AgentRecord
+
+    codex = AgentRecord(
+        remote.store.next_name("fixture", "eng"),
+        "eng",
+        "codex",
+        seat="eng-2@fixture",
+        harness="codex",
+        profile="engineer",
+        model="gpt-6.1-sol",
+        effort="xhigh",
+        account="account",
+        hive=HIVE,
+        transport=APP_SERVER_TRANSPORT,
+    )
+    agent = remote.store.start_execution("fixture", codex)
+    remote.store.put_agent("fixture", agent)
+    monkeypatch.setattr(runtime_module, "connect", lambda: remote.store)
+    herdr = Mock()
+    herdr.live_names.return_value = {agent.name}
+    herdr.observe.return_value = PaneObservation("working")
+    binding = {**CODEX_BINDING, "home": live_binding.assignment(agent)["home"]}
+    herdr.bindings.return_value = {agent.name: {**binding, "rebound": 99}}
+    report = daemon.execution_report(remote.redis, HIVE, herdr)
+    remote.redis.set(remote.reports.key(HIVE), json.dumps(report), ex=45)
+
+    assert report["admitted"][agent.execution_id].get("binding") == {**binding, "rebound": 99}
+    assert sorted(found.name for found in herdr.bindings.call_args.args[0]) == sorted([remote.agent.name, agent.name])
+    assert live_binding.managed(agent)
+    facts = remote.runtime.bindings([agent])
+    assert facts == {agent.name: binding}
+    live_binding.record(remote.store, "fixture", agent, facts[agent.name], 1)
+    stored = json.loads(remote.redis.hget(remote.store.key("fixture", "live-bindings"), agent.name))
+    assert (stored["state"], stored["unobserved"]) == ("matching", {})
+
+
+@pytest.mark.feature("live-binding-reads-hub-admitted-bindings-from-their-hive")
+@pytest.mark.parametrize(
+    "case",
+    ["no report", "no admitted map", "another execution", "another generation", "no binding", "no hive reader"],
+)
+@pytest.mark.parametrize("remote", [{"target": {}}], indirect=True)
+def test_a_hub_admitted_worker_its_hive_reports_no_binding_for_gets_no_facts_from_this_host(
+    remote: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, case: str
+) -> None:
+    from scripts.swarm import runtime as runtime_module
+    from scripts.swarm.store import APP_SERVER_TRANSPORT
+
+    def local() -> None:
+        """Refuse the controller's own store, which only its local managed path reads."""
+        raise AssertionError("the controller read a hub admitted worker's server from its own host")
+
+    agent = replace(remote.agent, harness="codex", transport=APP_SERVER_TRANSPORT)
+    monkeypatch.setattr(runtime_module, "connect", local)
+    entry = {"generation": agent.generation, "pane": {"state": "working"}, "binding": CODEX_BINDING}
+    unbound = {"generation": agent.generation, "pane": {"state": "working"}}
+    published = {
+        "no report": None,
+        "no admitted map": {},
+        "another execution": {"admitted": {"exe-other": entry}},
+        "another generation": {"admitted": {agent.execution_id: {**entry, "generation": agent.generation - 1}}},
+        "no binding": {"admitted": {agent.execution_id: unbound}},
+        "no hive reader": {"admitted": {agent.execution_id: entry}},
+    }[case]
+    if published is not None:
+        report = {"names": [agent.name], "executions": {}, **published}
+        remote.redis.set(remote.reports.key(HIVE), json.dumps(report), ex=45)
+    if case == "no hive reader":
+        remote.runtime.hive = None
+
+    assert remote.runtime.bindings([agent]) == {}
+
+
+@pytest.mark.feature("live-binding-reads-hub-admitted-bindings-from-their-hive")
+@pytest.mark.parametrize("remote", [{"target": {}}], indirect=True)
+def test_a_hub_admitted_worker_without_an_app_server_keeps_the_controllers_session_read(
+    remote: SimpleNamespace,
+) -> None:
+    agent = remote.agent
+    entry = {"generation": agent.generation, "pane": {"state": "working"}, "binding": BINDING}
+    report = {"names": [], "executions": {}, "admitted": {agent.execution_id: entry}}
+    remote.redis.set(remote.reports.key(HIVE), json.dumps(report), ex=45)
+
+    assert remote.runtime.bindings([agent]) == {agent.name: {"process": False}}
+
+
+@pytest.mark.feature("live-binding-reads-hub-admitted-bindings-from-their-hive")
+@pytest.mark.parametrize("remote", [{"target": {}}], indirect=True)
+def test_an_app_server_worker_the_hub_admitted_to_this_hive_is_read_from_this_host(
+    remote: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import runtime as runtime_module
+    from scripts.swarm.store import APP_SERVER_TRANSPORT, AgentRecord
+
+    connected = Mock(return_value=remote.store)
+    monkeypatch.setattr(runtime_module, "connect", connected)
+    codex = AgentRecord(
+        remote.store.next_name("fixture", "eng"),
+        "eng",
+        "codex",
+        seat="eng-2@fixture",
+        harness="codex",
+        hive="controller",
+        transport=APP_SERVER_TRANSPORT,
+    )
+    agent = remote.store.start_execution("fixture", codex)
+    entry = {"generation": agent.generation, "pane": {"state": "working"}, "binding": CODEX_BINDING}
+    report = {"names": [agent.name], "executions": {}, "admitted": {agent.execution_id: entry}}
+    remote.redis.set(remote.reports.key("controller"), json.dumps(report), ex=45)
+
+    assert remote.runtime.bindings([agent]) == {agent.name: {"process": None}}
+    assert connected.called
 
 
 def test_the_tick_records_a_remote_conversation_when_the_local_listing_fails(remote):
@@ -922,6 +1066,82 @@ def test_a_nudge_to_a_lost_hive_is_refused(remote):
 
     assert "remote" in remote.runtime.nudge(remote.agent, "check your task")
     assert remote.redis.xrange(Orders(remote.redis).commands(HIVE)) == []
+
+
+@pytest.mark.feature("swarm-nudges-hub-admitted-workers-through-their-hive")
+@pytest.mark.parametrize("remote", [{"target": {}}], indirect=True)
+def test_a_nudge_for_a_hub_admitted_worker_is_typed_into_its_pane_by_the_hive_that_runs_it(
+    remote: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive.orders import Consumer
+    from scripts.swarm.delivery import marked
+    from scripts.swarm.runtime import HerdrRuntime
+    from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
+
+    agent = remote.agent
+    entry = {"generation": agent.generation, "pane": {"state": "idle"}}
+    report = {"names": [agent.name], "executions": {}, "admitted": {agent.execution_id: entry}}
+    remote.redis.set(remote.reports.key(HIVE), json.dumps(report), ex=45)
+
+    assert remote.runtime.nudge(agent, "check your task") is None
+    typed: list[list[str]] = []
+    monkeypatch.setenv("SWARM_HIVE_ID", HIVE)
+    hive = LocalHerdrRuntime(HerdrRuntime(herdr=lambda args: typed.append(args) or {}))
+    assert Consumer(remote.redis, HIVE, hive).poll_commands() == 1
+    assert typed == [["agent", "prompt", PANE, marked("check your task")]]
+
+
+@pytest.mark.feature("swarm-nudges-hub-admitted-workers-through-their-hive")
+@pytest.mark.parametrize("remote", [{"target": {}}], indirect=True)
+def test_a_nudge_for_a_hub_admitted_worker_whose_hive_is_lost_is_refused_without_the_controller_herdr(
+    remote: SimpleNamespace,
+) -> None:
+    from scripts.hive.orders import Orders
+
+    remote.runtime.herdr = Mock(return_value={})
+    assert remote.runtime.nudge(remote.agent, "check your task") == f"hive {HIVE} is not reporting"
+    assert remote.redis.xrange(Orders(remote.redis).commands(HIVE)) == []
+    remote.runtime.herdr.assert_not_called()
+
+
+@pytest.mark.feature("swarm-nudges-hub-admitted-workers-through-their-hive")
+@pytest.mark.parametrize(
+    ("record_hive", "target", "accepted"),
+    [
+        (HIVE, {}, True),
+        ("other", {}, False),
+        (HIVE, {"host_id": HIVE}, True),
+        ("other", {"host_id": HIVE}, True),
+        (HIVE, {"host_id": "other"}, False),
+        (HIVE, {"pid": 12, "pid_start": 34}, False),
+    ],
+)
+def test_a_hive_takes_a_nudge_order_exactly_when_the_controller_sends_it_there(
+    remote: SimpleNamespace, record_hive: str, target: dict[str, str | int], accepted: bool
+) -> None:
+    from scripts.hive.orders import FOREIGN, Consumer
+    from scripts.swarm.runtime import _command
+    from scripts.swarm.store import AgentRecord
+    from scripts.swarm_v2.runtime.base import LOCAL, Outcome, Status
+
+    agent = remote.store.start_execution(
+        "fixture",
+        AgentRecord(
+            remote.store.next_name("fixture", "eng"),
+            "eng",
+            "other",
+            pane_id=PANE,
+            seat="eng-2@fixture",
+            hive=record_hive,
+            runtime_target=target,
+        ),
+    )
+    assert ((remote.reports.host(agent) or remote.reports.admitted(agent)) == HIVE) is accepted
+    runtime = Mock()
+    runtime.command.return_value = Outcome("command", Status.OK, LOCAL)
+    ack = Consumer(remote.redis, HIVE, runtime).command(_command("nudge", agent, "check your task"))
+    assert (ack != FOREIGN) is accepted
+    assert runtime.command.called is accepted
 
 
 def test_pane_naming_and_stray_reaping_are_hive_orders(remote):
@@ -1707,6 +1927,7 @@ def test_a_member_of_a_hive_that_restarted_without_it_ends_and_leaves_the_lane_c
     herdr = Mock()
     herdr.live_names.return_value = {agent.name} if listed else set()
     herdr.observe.return_value = PaneObservation("unknown")
+    herdr.bindings.return_value = {}
     report = daemon.execution_report(remote.redis, HIVE, herdr)
     assert report["executions"] == {}
     remote.redis.set(remote.reports.key(HIVE), json.dumps(report), ex=45)

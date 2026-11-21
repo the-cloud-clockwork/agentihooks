@@ -1,8 +1,10 @@
 """The effort range a swarm holds every lane agent's launch effort inside; both harnesses' levels share one rank."""
 
+from typing import Any
+
 EFFORTS = {"claude": ("low", "medium", "high", "xhigh", "max"), "codex": ("low", "medium", "high", "xhigh")}
 DEFAULT = ("medium", "xhigh")
-MASTER_FLOOR = "high"
+MASTER_FLOOR = "xhigh"
 VARIABLE = "AGENTIHOOKS_SWARM_EFFORT_RANGE"
 
 
@@ -32,8 +34,8 @@ def of(config):
     return getattr(config, "effort_min", DEFAULT[0]), getattr(config, "effort_max", DEFAULT[1])
 
 
-def bounds(config, lane):
-    """The range a lane launches inside: the swarm range, lifted for a master so it never starts below high."""
+def bounds(config: Any, lane: str) -> tuple[str, ...]:
+    """The swarm range, lifted for masters so they never start below xhigh."""
     found = of(config)
     if lane != "master":
         return found

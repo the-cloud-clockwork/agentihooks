@@ -129,3 +129,25 @@ def test_interpolate_replaces_each_embedded_expression_with_its_text() -> None:
 @pytest.mark.feature("lab-static-step-env")
 def test_a_condition_holds_when_its_expression_is_truthy(condition: str, held: bool) -> None:
     assert expressions.holds(condition, CONTEXT) is held
+
+
+@pytest.mark.parametrize(
+    ("condition", "texts", "names"),
+    [
+        ("", (), set()),
+        ("${{ !cancelled() && steps.pick.outputs.browser == 'true' }}", (), {"steps.pick.outputs.browser"}),
+        ("steps.venv.outputs.cache-hit != 'true'", (), {"steps.venv.outputs.cache-hit"}),
+        ("${{ always() || (true && null) }}", ("plain, text: here", "a ${{ false }} b"), set()),
+        (
+            "",
+            ("swarm-${{ github.run_id }}-${{ github.run_attempt }}", "${{ github.head_ref || github.ref_name }}"),
+            {"github.run_id", "github.run_attempt", "github.head_ref", "github.ref_name"},
+        ),
+        ("${{ contains(github.ref, 'dev') }}", ("${{ secrets.KEY }}",), {"contains", "github.ref", "secrets.KEY"}),
+    ],
+)
+@pytest.mark.feature("lab-static-step-env")
+def test_reads_names_every_context_name_an_if_condition_and_the_expressions_in_its_values_read(
+    condition: str, texts: tuple[str, ...], names: set[str]
+) -> None:
+    assert expressions.reads(condition, texts) == names

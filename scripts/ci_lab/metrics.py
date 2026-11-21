@@ -5,8 +5,10 @@ import json
 import threading
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
+from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from math import inf, isfinite, isnan
+from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
@@ -24,13 +26,16 @@ __all__ = [
     "Metric",
     "Registry",
     "UnitRecord",
+    "expose",
     "grade_row",
     "observe_load",
-    "observe_records",
+    "observe_mirror",
+    "observe_rate",
     "observe_unit",
     "record",
     "respond",
     "serve",
+    "serve_registry",
     "unit_row",
 ]
 
@@ -38,6 +43,8 @@ LEDGER = "ci-lab"
 JSON = "application/json"
 EXPOSITION = "text/plain; version=0.0.4; charset=utf-8"
 ROUTES = ("/capacity", "/metrics")
+FETCHED_AT = "fetched-at"
+RATE_REMAINING = "x-ratelimit-remaining"
 
 
 @dataclass(frozen=True)
@@ -171,6 +178,11 @@ class Registry:
         with self.lock:
             self.values[name][key] = self.values[name].get(key, 0.0) + float(value)
 
+    def clear(self, name: str) -> None:
+        """Drop every sample of a metric, so the exposition holds none for it until the next write."""
+        with self.lock:
+            self.values[name].clear()
+
     def render(self) -> str:
         """Prometheus text exposition: HELP and TYPE for every contract metric, samples only once observed."""
         lines: list[str] = []
@@ -213,6 +225,25 @@ def observe_unit(registry: Registry, priority: str, kind: str, slots: int, repor
     for cache, (hits, misses) in caches.read(report).items():
         registry.inc(contract.CACHE_HITS_TOTAL, hits, {"cache": cache})
         registry.inc(contract.CACHE_MISSES_TOTAL, misses, {"cache": cache})
+
+
+def observe_mirror(registry: Registry, mirror: Path, now_ms: int) -> None:
+    """Set the mirror age to the seconds since the epoch second the node mirror's fetched-at stamp holds, never
+    below zero, and drop the sample while the stamp is missing or holds no whole number."""
+    try:
+        fetched = int((mirror / FETCHED_AT).read_text())
+    except (OSError, ValueError):
+        registry.clear(contract.MIRROR_AGE_SECONDS)
+        return
+    registry.set(contract.MIRROR_AGE_SECONDS, max(0.0, now_ms / 1000 - fetched))
+
+
+def observe_rate(registry: Registry, headers: Mapping[str, str]) -> None:
+    """Set the GitHub calls left in the rate window from an answer's x-ratelimit-remaining header when it holds a
+    whole number."""
+    remaining = headers.get(RATE_REMAINING)
+    if remaining is not None and remaining.isdecimal():
+        registry.set(contract.GITHUB_RATE_REMAINING, int(remaining))
 
 
 @dataclass(frozen=True)
@@ -299,16 +330,6 @@ def record(sink: Sink, units: Iterable[UnitRecord], grades: Iterable[GradeRecord
         sink.append(GRADES, grade_rows)
 
 
-def observe_records(registry: Registry, units: Iterable[UnitRecord], grades: Iterable[GradeRecord]) -> None:
-    """Set unit durations and count verdict cache use and graded heads from collected records."""
-    for unit in units:
-        registry.set("ci_lab_unit_duration_seconds", unit.seconds, {"kind": unit.kind})
-        cache = "ci_lab_cache_hits_total" if unit.cached else "ci_lab_cache_misses_total"
-        registry.inc(cache, 1.0, {"cache": "verdict"})
-    for grade in grades:
-        registry.inc("ci_lab_heads_graded_total", 1.0, {"class": grade.priority, "conclusion": grade.conclusion})
-
-
 def respond(snapshot: Callable[[], Load], registry: Registry, method: str, target: str) -> tuple[int, str, bytes]:
     """Answer GET /capacity with the capacity document and GET /metrics with the exposition."""
     path = urlsplit(target).path
@@ -323,11 +344,9 @@ def respond(snapshot: Callable[[], Load], registry: Registry, method: str, targe
     return 200, EXPOSITION, registry.render().encode()
 
 
-def serve(host: str, port: int, snapshot: Callable[[], Load], registry: Registry) -> ThreadingHTTPServer:
-    """Bind the capacity and metrics routes on host and port; the caller runs serve_forever."""
-
+def _bind(host: str, port: int, reply: Callable[[str, str], tuple[int, str, bytes]]) -> ThreadingHTTPServer:
     def answer(request: BaseHTTPRequestHandler) -> None:
-        status, content_type, data = respond(snapshot, registry, request.command, request.path)
+        status, content_type, data = reply(request.command, request.path)
         request.send_response(status)
         request.send_header("Content-Type", content_type)
         request.send_header("Content-Length", str(len(data)))
@@ -336,3 +355,22 @@ def serve(host: str, port: int, snapshot: Callable[[], Load], registry: Registry
 
     handler = type(BaseHTTPRequestHandler.__name__, (BaseHTTPRequestHandler,), {"do_GET": answer, "do_POST": answer})
     return ThreadingHTTPServer((host, port), handler)
+
+
+def serve(host: str, port: int, snapshot: Callable[[], Load], registry: Registry) -> ThreadingHTTPServer:
+    """Bind the capacity and metrics routes on host and port; the caller runs serve_forever."""
+    return _bind(host, port, partial(respond, snapshot, registry))
+
+
+def expose(registry: Registry, method: str, target: str) -> tuple[int, str, bytes]:
+    """Answer GET /metrics with the registry's exposition alone, observing no capacity snapshot."""
+    if urlsplit(target).path != "/metrics":
+        return 404, JSON, b'{"error": "not found"}'
+    if method != "GET":
+        return 405, JSON, b'{"error": "method not allowed"}'
+    return 200, EXPOSITION, registry.render().encode()
+
+
+def serve_registry(host: str, port: int, registry: Registry) -> ThreadingHTTPServer:
+    """Bind only the metrics route over registry on host and port; the caller runs serve_forever."""
+    return _bind(host, port, partial(expose, registry))

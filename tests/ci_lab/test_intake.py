@@ -18,6 +18,7 @@ REPO = "https://github.com/acme/widgets"
 ROOT = Path(__file__).resolve().parents[2]
 HEAD = "a" * 40
 BASE = "b" * 40
+PLANT_REF = "refs/heads/diffcheck/lab-plant-size-green"
 
 
 def push(ref: str = "refs/heads/dev", deleted: bool = False) -> dict[str, Any]:
@@ -72,7 +73,43 @@ def test_a_push_to_a_branch_is_a_head_event() -> None:
     assert webhooks.head_events("push", push()) == [head("push", "nestorcolt", "pushed")]
 
 
-@pytest.mark.parametrize("payload", [push(deleted=True), push(ref="refs/tags/v1.2.3")])
+@pytest.mark.feature("lab-plant-push-intake")
+@pytest.mark.parametrize("before", ["0" * 40, BASE])
+def test_a_push_to_a_plant_branch_names_a_plant_head_with_no_base_whatever_its_before(before: str) -> None:
+    (event,) = webhooks.head_events("push", {**push(ref=PLANT_REF), "before": before})
+    assert event == HeadEvent("plant", REPO, HEAD, "", "nestorcolt", "pushed")
+    assert webhooks.envelope(event).type == "ci.lab.head.plant"
+
+
+@pytest.mark.feature("lab-plant-push-intake")
+@pytest.mark.parametrize(
+    "ref",
+    [
+        "refs/heads/diffcheck/lab-plant",
+        "refs/heads/diffcheck/ci-lab-size",
+        "refs/heads/feature/diffcheck/lab-plant-size",
+    ],
+)
+def test_a_push_to_a_branch_outside_the_plant_prefix_stays_an_ordinary_push(ref: str) -> None:
+    assert webhooks.head_events("push", push(ref=ref)) == [head("push", "nestorcolt", "pushed")]
+
+
+@pytest.mark.feature("lab-zero-base-push")
+def test_a_new_branch_push_with_a_zero_before_names_no_head() -> None:
+    payload = push(ref="refs/heads/new-branch")
+    payload["before"] = "0" * 40
+    assert webhooks.head_events("push", payload) == []
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        push(deleted=True),
+        push(ref="refs/tags/v1.2.3"),
+        push(ref=PLANT_REF, deleted=True),
+        push(ref="refs/tags/diffcheck/lab-plant-size-green"),
+    ],
+)
 def test_a_branch_delete_or_a_tag_push_names_no_head(payload: dict[str, Any]) -> None:
     assert webhooks.head_events("push", payload) == []
 
@@ -224,6 +261,14 @@ def test_a_grade_request_carries_the_head_its_tier_and_whether_it_bypasses_a_neg
 ) -> None:
     assert intake.request_from(event) == GradeRequest(
         repo=REPO, head=HEAD, base=BASE, tier=tier, actor=event.actor, bypass_negative=bypass
+    )
+
+
+@pytest.mark.feature("lab-plant-push-intake")
+def test_a_plant_head_asks_for_a_pull_request_grade_before_its_base_is_resolved() -> None:
+    request = intake.request_from(head("plant", "nestorcolt", "pushed", base=""))
+    assert request == GradeRequest(
+        repo=REPO, head=HEAD, base="", tier=Priority.PULL_REQUEST, actor="nestorcolt", bypass_negative=False
     )
 
 

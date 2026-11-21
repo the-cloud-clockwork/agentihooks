@@ -7,7 +7,7 @@ KEYS = {"claude-model": "claude_model", "codex-model": "codex_model"}
 UNFIXED = ("", "auto")
 
 
-def model(config, harness: str) -> str:
+def model(config: Any, harness: str) -> str:
     return getattr(config, FIELDS[harness], DEFAULTS[harness])
 
 

@@ -93,19 +93,13 @@ plan state, culture) on the first prompt, after compaction, when it changes and 
 
 ## Event driven engine
 
-Each swarm runs one of two engines, chosen by its `engine` setting:
-
-| Engine | Who starts lane agents |
-|---|---|
-| `legacy` (default) | The minute tick spawns, reaps and acknowledges agents itself. |
-| `events` | The hub offers ready tasks on the NATS JetStream bus and hives pull them. |
+Every swarm runs the `events` engine: the hub offers ready tasks on the NATS JetStream bus and hives pull them.
+The `engine` setting takes only `events`, its default; any other value is refused, and every stored swarm reads as
+`events`.
 
 ```bash
 agentihooks swarm <slug> set engine=events
-agentihooks swarm <slug> set engine=legacy   # switch back
 ```
-
-Swarms created before the setting existed read as `legacy`. Any other value is refused.
 
 ### The life of a task
 
@@ -159,7 +153,7 @@ hive the execution stop with the retirement reason (see
 [Retiring a hub admitted agent](hives.md#retiring-a-hub-admitted-agent)). The tick still
 runs master failover and recovery, the orphan pass that reopens a claimed task whose claimant has no agent record
 and no claim, pane evidence, exits, verification, the dispatcher, master
-scaling and the promotion and release watches for both engines. Master agents are reaped by the tick under either engine.
+scaling and the promotion and release watches. Master agents are reaped by the tick.
 
 The hub offers eng, ci and plan tasks, and the spoke code is the same for every lane. With
 `AGENTIHOOKS_DEPLOYMENT=distributed`, a workstation runs the master lane spoke and the eng, ci and plan spokes with
@@ -1281,6 +1275,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> status [--json]` | Config, task counts, when the last automatic snapshot was taken (`snapshots  last automatic snapshot 2026-10-05 13:15 UTC  every 30 min  kept 4`), one row per agent with its [transport capabilities](#transport-capabilities), and the health findings. An agent's model and effort are what its running session last reported (the Claude status line, a Codex hook) once that differs from the launch, with model source `session`, so a manual `/model` or `/effort` switch shows on the next tick. It also prints the host room (`host room 3: <reason>`, or `host room None: <reason>` when capacity is unavailable; see [Local host room](#local-host-room) and [Deployed host capacity](#deployed-host-capacity)) and, when the last spawn pass stopped at that room, the hold (`holding spawns: host memory room 3, 3 spawned since it was granted: <reason>`). The host room gates every spawn in manual and auto scaling after the quota seat check; master seats pass it, as they pass workstation admission, though each master launch still counts against the room. Spawns from every swarm on the host count against the room from thirty seconds before it was granted, since a new agent takes that long to show in a reading; a room held between the load watermarks keeps its first grant time, so spawns made under it keep counting. An unknown host lets spawns pass and keeps the last known room for the next reading. An operator's own master start and restore relaunches after a reboot are not gated. |
 | `agentihooks swarm <id> autoscale [--fixture <file>] [--json]` | Read only: the autoscale decision (lane ceilings, pending raise, host room and reason) and the local slots, the smaller of `local-max-agents` and this machine's hive `max-agents` (`local_slots` in `--json`), for the live swarm, or for a fixture of accounts and host readings. It never refreshes quota or writes the stored decision; `applied` is false when the swarm runs manual scaling. `swarm create` stores `scaling=auto` and prints it, caps given at create included, so a new swarm's lane ceilings follow free quota seats, host room and ready work; a master keeps it on and reads this preview with `agentihooks balance` before stating capacity. In deployed mode it reads the Kubernetes worker namespace or reports why host room is off; see [Deployed host capacity](#deployed-host-capacity). |
 | `agentihooks swarm <id> names [--json]` | The swarm code, its herdr space and every agent name the swarm gave, each with its type, number, session id and spawn and retire times. |
+| `agentihooks swarm <id> tasks` | Read only: one JSON document, `{"tasks": [...], "freezes": [...]}`, with every task row of the swarm and every freeze and focus record, as the swarm's ledger reads them. A tool outside agentihooks reads tasks and freezes through this command and names only the swarm. An unreachable ledger exits 1 with the reason on stderr and prints nothing on stdout. |
 | `agentihooks swarm <id> merge-path [--hours N] [--json] [--post ITEM]` | The merge path into dev of the swarm's repository over the last N hours (default 24): merges an hour, Tests runs per merge by event, cancelled head runs, reruns, enqueues, queue removals by cause, head failure rate, failed queue runs, queue cycle, standard jobs per queue run, open ready pull requests and lead time. A window GitHub cannot list in full is refused, never undercounted. `--post` writes the plain line as a ledger comment on ITEM. |
 | `agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N max-plan-agents=N` | Change the caps; `swarm <id> max-eng-agents=N` also works. |
 | `agentihooks swarm <id> set masters=N` | The master seat count: `master@<id>` is the lead and answers the operator, `master-2@<id>` and up each own phases assigned by code. The tick launches a master in every empty seat after the lead. |
@@ -1292,7 +1287,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> set autonomy=LEVEL` | Set how far agents go without the operator: `manual` engineers open a draft pull request and stop for the operator; `assist` engineers open a pull request and merge only after an operator approval line on the ledger; `delegate` (default) engineers queue on green checks with `agentihooks swarm <slug> merge queue <url>`; `full` is delegate, and the master also turns follow ups into tasks without asking. Agents spawned next get it in their prompt and as `AGENTIHOOKS_SWARM_AUTONOMY`; the ledger page swarm panel shows it. |
 | `agentihooks swarm <id> set master-agent=claude\|codex` | Master affinity, the master lane's `agent`. The ledger page's Capacity dropdown writes the same field through Apply. When the value differs from the live master's harness, one durable inbox order reaches the master seat: hand off with Handoff v2 and stop. The tick ends the old process before it starts the successor in the same seat on the chosen harness, with the original profile and the frontier model of that harness. An unchanged value orders nothing. A failed successor launch shows on `swarm status` and the page, keeps the handoff and the seat inbox, and retries each tick. Templates, snapshots and restore carry the value. |
 | `agentihooks swarm <id> set effort-min=E effort-max=E` | The effort range every lane agent starts inside, default `medium` to `xhigh`. The classifier's pick, a lane or template effort, a resume and the `init-agent` launch of a swarm lane are each clamped into it; Claude levels are `low`, `medium`, `high`, `xhigh` and `max`, and Codex levels map by rank, so Codex runs `max` as `xhigh`. Setting a lane effort outside the range is refused with the range named. The swarm panel caps row edits both ends. |
-| `agentihooks swarm <id> set claude-model=M codex-model=M` | The swarm's model for each harness, default `opus` and `gpt-6.1-sol`. An eng, ci or plan lane agent with no model of its own (`auto` or empty) launches on it, and so does a lane model of the other harness, such as `opus` on a Codex agent ([Lane models on the other harness](../reference/classifier.md#lane-models-on-the-other-harness)). A model the harness catalog does not list is refused. |
+| `agentihooks swarm <id> set claude-model=M codex-model=M` | The swarm's model for each harness, default `opus` and `gpt-6.1-sol`. An eng, ci or plan lane agent with no model of its own (`auto` or empty) launches on it, and so does a lane model of the other harness, such as `opus` on a Codex agent ([Lane models on the other harness](../reference/classifier.md#lane-models-on-the-other-harness)). A master launch, from `master up` or from the tick, launches on it at frontier effort through the same master model choice, also when its handoff or saved launch names no model. A model the harness catalog does not list is refused. |
 | `agentihooks swarm <id> set <gate>-gate=deny\|log only\|skip` | Operator or master only, for every gate: `identity`, `watch`, `subagents`, `reruns`, `intent`, `build`, `claim-stop`, `push-stop`, `one-push`, `brain`, `claims`, `trace-plan`, `talk`, `stall`, `nightwatch`, `reset`. The `brain` gate (`python -m scripts.gates brain`) is registered in the gate entry point but no role condition runs it yet, so it judges no agent session until one is added. Given an Edit, Write, MultiEdit, NotebookEdit or Serena edit call of a session bound to a swarm task, it checks the consultation receipt the last delivered task context pack left: it must name purpose `task`, this task, the task's current spec revision (title, description, plan slice, plan lines and phase) and claim generation, the session's brain, an unexpired time (`AGENTIHOOKS_BRAIN_RECEIPT_TTL`, default 14400 seconds) and a delivered or empty result; a brain outage is not consultation. It never queries the brain: the next brain refresh redelivers the pack once the receipt no longer passes. The receipt is an unsigned record in the session's hook state, so the gate guides an agent and is no security boundary against one that controls its own files; server side authority still protects shared mutations. It defaults to `log only`; `deny` is the required mode. The mode lives in the swarm config; the ledger page's Gates controls beside Capacity write the same field, and `swarm status` reports every gate's current mode as `gate_modes`. Inside a swarm the ledger server, the tick, `swarm trace-plan` and the gate entry point read only the config, so an agent's `AGENTIHOOKS_GATE_<NAME>` is ignored there; it picks the mode only outside a swarm or when the swarm config cannot be read. `deny` refuses the call and logs the denial, `log only` lets the call through and logs the would-be denial, `skip` does not run the check; for `trace-plan`, `deny` refuses no call: it logs each failed plan and the second distinct one blocks the task, and `skip` still runs the trace and saves its verdict, with no failure row and no block. The old names `enforce`, `observe` and `off` remain aliases. Quote a mode containing spaces, for example `"watch-gate=log only"`. |
 | `agentihooks swarm <id> set stall-gate=deny\|log only\|skip` | Operator or master only. New swarm enforcements that stop, reopen or block agents start in `log only` mode, with their own switch in the swarm config. Check their logged actions against reality before selecting `deny` to enforce. The stall watchdog defaults to `log only`: it records each would-be task reopen and live agent stop in the swarm gate log, preserving the agent, claim and task state. `deny` enables those mutations; `skip` suppresses them without logging attempts. Watchdog alerts and escalation remain active in every mode. `swarm status` reports `stall` with the other gate modes. Cases, limits, the release wait and troubleshooting: [Stall watchdog](#stall-watchdog). |
 | `agentihooks swarm <id> set nightwatch-gate=deny\|log only\|skip` | Operator or master only. The night watch runs every tick after placement and needs no master: it holds the front door master seat, the spawn path and the dev merge queue against a limit. A running swarm, not asleep, whose front door seat holds no live working master for ten minutes raises an `empty master seat` finding; ready work with no agent launched for thirty minutes raises a `held spawn` finding naming the hold, `sleep`, `host room`, `cap`, `quota`, `tick` for a hold the tick recorded itself, or `no named hold`, with its evidence; no merge into dev for an hour while the queue holds entries, or the last three merge group runs failing in a row, measured whether or not the queue holds entries, raises a `merge stall` or `merge failures` finding. A stopped swarm skips the tick, so the watch rests with it. The seat and merge checks rest while the swarm is not running or sleeps; the spawn check keeps watching a sleeping swarm and names `sleep` as the hold, because a sleeping swarm spawns nothing for ready work. A pass more than five minutes after the last one closes its alerts and starts every episode over, and a merge observation that fails leaves the merge episode and its alert as they were. The findings show in every mode. It defaults to `deny`, so a swarm whose gates name no night watch mode acts: it respawns the front door master at most three times an hour, ten minutes apart, counted the same way in `log only`, past a spent startup retry, and raises one ledger alert per episode, source `seat`, `spawn` or `merge`, closed when the condition clears; an episode logged before the switch to `deny` raises its alert on the next pass, and a second merge finding in the same episode replaces the merge alert; a merge alert also emails the operator at `AGENTIHOOKS_OPERATOR_EMAIL`, else the swarm repository's git user email, through the SMTP settings. `log only` records each would-be action in the swarm gate log instead, and `skip` runs the checks for their findings only, with no gate log row, action or alert. |
@@ -1351,7 +1346,7 @@ Each tick with an active window records elapsed and remaining minutes in the swa
 | `window-gate` | Gate log | Claims | Agents in flight |
 |---|---|---|---|
 | `log only` (default) | one `observe` row naming the agents it would ask | continue | not asked |
-| `deny` | one `deny` row | the legacy spawn loop and the hub admission of the event engine start no new claim until `swarm set` changes the window | each gets an inbox item to push, write a Handoff v2, run `swarm <id> handoff` and stop |
+| `deny` | one `deny` row | hub admission starts no new claim until `swarm set` changes the window (see [Pulling work from the hub](hives.md#pulling-work-from-the-hub)); the tick spawn loop that also held claims here was removed by pull request [#11141](https://github.com/the-cloud-clockwork/agentihooks/pull/11141) | each gets an inbox item to push, write a Handoff v2, run `swarm <id> handoff` and stop |
 | `skip` | none | continue | not asked |
 
 In every mode the cutoff publishes a final handoff as a Handoff v2 body: window bounds and gate mode under Intent, task counts by state under Done, each agent in flight with its task under Stopped at, the next step, and each in flight task under Read first. It goes to the watchdog inbox address (`AGENTIHOOKS_WATCHDOG_ADDRESS`, default `master-watchdog`) as written. The ledger gets a notice that fits the notifications window's 280 characters: the cutoff, gate mode, where the full handoff went, task counts by state, each agent in flight with its task (their count when the names do not fit) and the next step. A failed publish is retried on the next tick; the watchdog item is sent once, while the ledger notice can repeat when recording the publish fails after it. A new start or length is a new window: its alert and cutoff run again.
@@ -1412,7 +1407,7 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 | `agentihooks swarm <id> pr URL` | Record the task's pull request, its head branch and that branch's repository (`branch_repo`); the task moves to `pr`. It refuses, with no ledger write, a pull request whose body closes an issue (`Closes`, `Fixes` or `Resolves #n`) that neither the task nor a group member records as its issue or names in its description as `#n` or the issue URL, because the swarm closes every issue the body names once the pull request merges. Drop the closing keyword from the body, or record the task's own issue with `swarm issue` first. A `--prerequisite` pull request that leaves the recorded pull request in place is not checked. `agentihooks api task set ID pr_url=URL` is a raw field edit that reads nothing from GitHub, so it records a pull request without this check. |
 | `agentihooks swarm <id> merge queue\|dequeue\|state URL` | Queue a pull request into `dev` on the merge queue at its current head, take it out of the queue, or report its state, head and queue entry as JSON. `queue` reads the required checks of the pull request's own repository from its `dev` branch rules and protection and refuses unless every one passed on the current head (`required checks on the current pull request head must pass before queueing`); it then enqueues that exact head with `expectedHeadOid`. It never compares the branch with `dev`, merges `dev` into it or updates it, whatever changed on `dev` since the checks ran: the merge group runs the unit suite on the head merged with the newest `dev` ([Delivery tiers](../reference/delivery-tiers.md#entering-the-merge-queue)). A repository with no merge queue on `dev`, such as antoncore, gets a squash merge instead, only for a ready pull request with a review decision of none or approved: the command waits up to ten minutes, polling every fifteen seconds, for the required checks to pass, read from the check rollup where the token can read it and otherwise from the pull request merge state (`CLEAN`, `HAS_HOOKS` or `UNSTABLE`), because the hive GitHub App token cannot read check results on a private repository. It then squash merges the observed head through the same token and reports the `merge_commit`; a merge refused with `Resource not accessible by integration` names the pull requests write permission the GitHub App token needs. The direct squash merge appends no queue journal record. The tick's merge pass checks once and never waits, and its checks wait still reads the check rollup. A pull request already in the queue returns its state without another check or enqueue. The pull request can live in any repository the caller's `gh` reaches, such as agentibrain-kernel, and joins that repository's own queue ([Pull requests in other repositories](../reference/delivery-tiers.md#pull-requests-in-other-repositories)). It goes through `gh api graphql` and `gh api`, so any `gh` with `gh api` works; queue and dequeue run for a swarm worker on a pull request its task names (final, split half, `--stage` or `--prerequisite`) or on one no task names whose head is one of the worker's own worktree branches (`<agent>` or `<agent>-N`), read from GitHub only in that case; another task's pull request is refused, and refuse a pull request into any other base. The master seat may `queue` only through a route in [How the master queues a pull request](#how-the-master-queues-a-pull-request), and `dequeue` refuses it. Each queue and dequeue appends a record with the queue before and after to the [queue journal](../reference/delivery-tiers.md#the-queue-journal). A pull request whose body declares a staged pair is refused until its proof is complete on the exact heads ([Staged compatibility before admission](#staged-compatibility-before-admission)). |
 | `agentihooks swarm <id> prepare` | Set `--repositories /absolute/repo,/absolute/other` when adding a task, or `task set <task> repositories=/absolute/repo`. Use that explicit `repositories` list of local repository paths; without it, report that the swarm repository is the default. Prose repository names do not select repositories. Create or reuse one worktree per repository from its own `dev`, with a recorded continuation branch scoped to that repository. Return each worktree and branch. |
-| `agentihooks swarm <id> publish --message TEXT -- FILE...` | Use the repository of the current task worktree; from a primary checkout, resolve the sole task repository or require a worktree selection when several are declared. Stage only explicit repository relative files, commit, run that repository’s `scripts.ci_prepush` gate, then push and retain its branch separately from other task repositories. When no listed file changed and the selected remote branch already matches `HEAD`, it skips the commit, gate and push; see [publishing unchanged files](#publishing-unchanged-files). Otherwise the result names the gate. A repository without that module uses the named [AgentiHooks touched Python fallback](#fallback-gate-for-repositories-without-their-own): lint and format on changed lines, size and complexity on touched functions and changed files, in changed Python files since its own `origin/dev` merge base, without agentihooks baseline files or local tests. Unrelated tracked changes are refused before staging; unrelated untracked files are preserved. A failed stage stops publication and names the next command. Repeat the command after fixing a failure; an already committed head is graded again without an empty commit. Protected branches and tasks owned by another agent are refused. While a panic holds the swarm, a due push is refused before the gate unless the branch it writes is a registered fix of the worktree's repository; see [publishing under panic mode](#publishing-under-panic-mode). Tests run only in CI. |
+| `agentihooks swarm <id> publish [--via lab [--direct]] --message TEXT -- FILE...` | Use the repository of the current task worktree; from a primary checkout, resolve the sole task repository or require a worktree selection when several are declared. Stage only explicit repository relative files, commit, run that repository’s `scripts.ci_prepush` gate, then push and retain its branch separately from other task repositories. When no listed file changed and the selected remote branch already matches `HEAD`, it skips the commit, gate and push; see [publishing unchanged files](#publishing-unchanged-files). Otherwise the result names the gate. A repository without that module uses the named [AgentiHooks touched Python fallback](#fallback-gate-for-repositories-without-their-own): lint and format on changed lines, size and complexity on touched functions and changed files, in changed Python files since its own `origin/dev` merge base, without agentihooks baseline files or local tests. Unrelated tracked changes are refused before staging; unrelated untracked files are preserved. A failed stage stops publication and names the next command. Repeat the command after fixing a failure; an already committed head is graded again without an empty commit. Protected branches and tasks owned by another agent are refused. While a panic holds the swarm, a due push is refused before the gate unless the branch it writes is a registered fix of the worktree's repository; see [publishing under panic mode](#publishing-under-panic-mode). `--via lab` grades the committed head on the CI lab's `refs/grade/<task>` before origin and pushes origin only on a green grade; `--direct` pushes origin as soon as the lab accepted the head; see [publishing through the lab](#publishing-through-the-lab). Tests run only in CI. |
 | `agentihooks swarm <id> branch` | Record the published branch and its repository (`branch_repo`, the origin remote without credentials). When the local branch tracks `origin/<task branch>`, retain that recorded task branch even when the local name differs; otherwise use the local branch. The selected branch must exist on origin. See [recording a published upstream branch](#recording-a-published-upstream-branch). |
 | `agentihooks swarm <id> resolve attempt\|critic\|escalate\|status ITEM` | The blocker protocol on a ledger item, each step recorded and counted on the item by code: two attempts (`--tried`, `--command`, `--output`), then `critic`, which launches a read only headless critic with only the item, the autonomy and the recorded attempts, then one attempt applying its resolution, then `escalate` (`--reason`, `--evidence`), which lands the priority and one comment listing every attempt, the critic resolution and the blocker reason. If critic routing refuses because no Claude account has a free session under its quota band, code records the capacity refusal and proceeds directly to escalation; other critic failures keep the critic requirement. At delegate or full autonomy the ledger refuses a priority, a flagged follow up or a new question from an agent until the item's record has escalated; manual and assist keep the old path. Prints the next step. |
 | `agentihooks swarm <id> review` | Start a review round on the task. The third round answers that review is closed: any finding still open gets one ruling from the other reader, then the merge proceeds. A fourth is refused with that text. Rounds spent before the task records a pull request, on its first pull request and on each later one, count on separate counters ([Review round counters](#review-round-counters)). |
@@ -2322,6 +2317,92 @@ The tests mapped to feature `panic-publish-holds` in `feature-map.json` cover
 the refused publish that pushes nothing, the check of the pushed branch from
 another checkout branch, the routing config refusal and the unreachable store.
 
+### Publishing through the lab
+
+`--via lab` grades the committed head on the CI lab before origin sees it, so the task branch on
+GitHub moves only after a green lab grade. `--direct` keeps the lab push but does not wait for its
+grade.
+
+```bash
+agentihooks swarm <id> publish --via lab --message "Fix the stale tick" -- scripts/swarm/tick.py
+agentihooks swarm <id> publish --via lab --direct --message "Fix the stale tick" -- scripts/swarm/tick.py
+```
+
+The publish needs `AGENTIHOOKS_LAB_REMOTE` naming the lab remote of the worktree's repository, and
+`AGENTIHOOKS_LAB_REMOTE_TOKEN` in the same environment for the push to authenticate.
+[Workspaces that carry the lab remote](../reference/ci-lab.md#workspaces-that-carry-the-lab-remote)
+describes both and the repository name rule. The commit, the panic check, the prepush gate and the
+merge queue check run first, as for any publish. Then publish:
+
+1. Gives the worktree's repository the `lab` remote, or points it at the current URL, and refuses
+   when the URL names another repository or is unset.
+2. Runs `git -c push.negotiate=true push -o branch=<branch> lab HEAD:refs/grade/<task>`, where
+   `<branch>` is the [delivery branch](#publishing-after-a-successor-prepares-a-branch) and `<task>`
+   the agent's task. Push negotiation makes git find the commits it shares with the lab first, so a
+   worktree behind the lab's history sends only the objects the lab lacks. Git's output is copied
+   to standard error, so the publish log shows the lab's `remote: lab grade: <url>` line before any
+   push to origin. A failed push, or one whose output
+   names no grade url, refuses.
+3. Without `--direct`, reads the grade url at once and then every 15 seconds, each read with a 10
+   second timeout, until the newest grade it lists has a conclusion. The wait gives up after 1800
+   seconds. Only `success` lets publish continue.
+4. Pushes `HEAD` to `origin` and sends the [lab head notice](../reference/ci-lab.md#send-a-head-notice)
+   as any publish does.
+
+With `--direct`, step 3 is skipped: origin is pushed as soon as the lab accepted the head and named
+its grade url. The lab still grades the head, and the relay acts on that grade as for any pushed
+`refs/grade/*` head.
+
+A publish log through the lab, with the result's lab field:
+
+```text
+remote: lab grade: <CI_LAB_URL>/grades/<sha>
+To http://<lab host>/agentihooks.git
+ * [new reference]   HEAD -> refs/grade/<task>
+```
+
+```json
+{
+  "lab_grade": "<CI_LAB_URL>/grades/<sha>"
+}
+```
+
+The result carries `branch`, `gate` and `head` as usual, and `lab_grade`, the url publish waited on
+or, with `--direct`, the url the lab named. When nothing new is due, the
+[unchanged result](#publishing-unchanged-files) pushes neither the lab nor origin.
+
+Every refusal exits 1 with `swarm: ` and the reason, and leaves origin untouched:
+
+| Situation | Reason printed |
+|---|---|
+| `--direct` without `--via lab` | `publish --direct goes with --via lab`. Nothing is committed |
+| `AGENTIHOOKS_LAB_REMOTE` unset, or naming another repository | `publish --via lab needs AGENTIHOOKS_LAB_REMOTE naming the lab remote of this repository` |
+| The lab push fails, or names no grade url | `the lab push named no grade url; origin was not pushed: <git output>` |
+| A grade read fails: unreachable, not JSON, or no `grades` field | `the lab grade <url> could not be read, so origin was not pushed: <error>`. A single failed read refuses; there is no retry |
+| No conclusion within 1800 seconds | `the lab grade <url> has not concluded after 1800 s; origin was not pushed` |
+| The newest grade concludes other than `success` | `the lab grade <url> concluded <conclusion>; origin was not pushed` |
+
+Every refusal after the commit keeps the commit in the worktree, and one after the lab push keeps
+the head on the lab's `refs/grade/<task>` ref. A red grade relays nothing, so the branch on GitHub
+stays where it was. Fix the cause, then run the `Next:` command the refusal prints: it repeats
+`--message`, the same `--via lab` and `--direct` flags and the files, so the retry takes the same
+lab route.
+
+The lab grades a head when the push moves its grade ref. A head the lab already holds on
+`refs/grade/<task>` moves nothing: git answers `Everything up-to-date`, the lab prints no grade url,
+and publish refuses with `the lab push named no grade url`. After a refusal that left the head on
+the lab, such as a wait that ran out or an unreadable grade, read the url from the log until it
+concludes, then either publish the same head without `--via lab` or commit the next change and
+publish it through the lab.
+
+A plain `git push` to `lab` meets the same guards as a push to origin; see
+[Guards on a lab push](../reference/ci-lab.md#guards-on-a-lab-push).
+
+Delivered in [pull request 11983](https://github.com/the-cloud-clockwork/agentihooks/pull/11983).
+The tests mapped to feature `lab-remote-in-workspaces` in `feature-map.json` cover the grade before
+origin on green, origin left alone on red, `--direct`, the missing remote, a push with no grade
+url, the wait running out, an unreadable grade and the refused `--direct` alone.
+
 ### Fallback gate for repositories without their own
 
 When publication requires a push, `publish` runs the repository's own gate
@@ -2579,7 +2660,10 @@ A `git push` from a task session is refused when all of these hold:
    GitHub URL is treated like the pull request's repository.
 3. The push writes the task's recorded branch. Each refspec's destination
    counts; no refspec, or `HEAD`, means the current branch. A task with no
-   recorded branch skips this test.
+   recorded branch skips this test. A push to the `lab` remote writes the
+   branches its `-o branch=<name>` push options name, which the lab relays to
+   GitHub on a green grade; a lab push without one writes no branch and always
+   passes. See [Guards on a lab push](../reference/ci-lab.md#guards-on-a-lab-push).
 4. The pull request is open and nothing is red: no required check failed, and
    the required gate job did not end skipped with nothing left running.
 5. The pull request waits in the merge queue, or its checks are running. Checks
@@ -4528,8 +4612,10 @@ merge queue`. A new claimant does not require a replacement pull request.
 The ready merge pass handles red checks without waiting for the watchdog's
 red limit. Its checks stage uses [the same head and resolution rules as a checks wait](#when-a-checks-wait-ends).
 Unavailable GitHub reads and unresolved checks hold the ready record for a
-later tick. Closure without merge, conflicts and queue exits can also need
-repair; green queue exits can be retried automatically. See [ready merge pass
+later tick, and each hold writes a
+[merge pass hold line](#merge-pass-hold-lines). Closure without merge,
+conflicts and queue exits can also need repair; green queue exits can be
+retried automatically. See [ready merge pass
 queue exits](#ready-merge-pass-queue-exits) for those outcomes.
 
 The [stall watchdog](#stall-watchdog) also inspects pull requests on claimed
@@ -4568,6 +4654,7 @@ hold the unmergeable case. Outage time is excluded.
 | Observation | Check and action |
 |---|---|
 | Released task shows `MERGE` while checks run | Expected. Read the current head's required checks; an unresolved result holds the merge pass. |
+| Released task stays `MERGE` after its checks turn green | Read the task's [merge pass hold lines](#merge-pass-hold-lines) in the tick process log; each names why the pass did not queue it. |
 | Red checks, but no successor yet | Read the task comment, current claimant and swarm capacity. The merge pass waits for an existing owner to end and preserves a changed claim. |
 | Task reopens with `FIX` | Read the handoff and failure reason, prepare the continuation and repair the existing pull request. |
 | Watchdog alerts without reopening | Inspect `stall-gate`; `log only` is the default and `skip` also preserves the task. Alerts remain active. |
@@ -4724,6 +4811,134 @@ From the merge of pull request 5049 to 23 October, the ledgers hold six `its unm
 | A task reopened with `stayed unmergeable after leaving the merge queue` | Five attempts were spent across its episodes. Read the pull request's queue state with `agentihooks swarm <id> merge state <url>`; when it is mergeable and green, queue it with `agentihooks swarm <id> merge queue <url>`. |
 | A `requeue` alert names a queue error | Read the alert text and the matching journal record's `errors`; the pass retries at the next due time until the attempt count runs out. |
 | A dequeue left no journal record | The record write failed on that machine; the tick process printed `merge queue record not written: <error>` on stderr. |
+
+#### Merge pass hold lines
+
+Each time the merge pass leaves a task as it is for one tick, it writes one line to stderr naming the swarm, the task, its pull request and the reason:
+
+```text
+<swarm>: merge pass holds task <task id> <pull request url>: <reason>
+```
+
+For example:
+
+```text
+example: merge pass holds task t31 https://github.com/o/r/pull/812: its required checks have not all finished
+```
+
+A hold line changes nothing. The task stays as it was, and the next tick judges it again, so a wait that lasts several ticks writes the same line once per tick. The merge pass runs as the tick step `merge pass` every 60 seconds (see the [tick step catalogue](../reference/tick-step-catalogue.md)). Nothing reads the line back; it is there so an operator or an agent can see why a released pull request has not moved.
+
+The reasons, in the order of the pass stages that write them: the pull request read, a merged split task, a dependency wait, an unmergeable pull request, a `recover` wait, a checks wait, a merge wait, and the release a reopen or proof release performs:
+
+| Reason | Written when | What to do |
+|---|---|---|
+| `GitHub did not answer a read of its pull request` | The tick's read of the pull request returned nothing. A checks wait also writes it when its fresh read returned nothing or carried no head, which happens when the newest commit in the reading is not the head. The unmergeable and `recover` paths write it when their fresh read fails. | Nothing when it clears on a later tick. On every tick, check that the tick process reaches GitHub and holds a working token; see [Signed GitHub calls in the merge pass](#signed-github-calls-in-the-merge-pass). |
+| `the done gate refuses its split pull requests` | The pull request merged, but the task is split and the done gate refuses to close it. | See [Ready handoffs for split tasks](#ready-handoffs-for-split-tasks). |
+| `it waits on its dependency <target>` | The engineer had a declared wait on another task or pull request when it ran `swarm ready`. The ready record keeps that wait, and the pass holds until the task ends or the pull request is no longer open. | Follow the named task or pull request. |
+| `its owner was told to restack it: <cause>` | GitHub marks the pull request unmergeable while an agent of the task is still running. That agent gets the restack inbox item. | The owner restacks and publishes. |
+| `its merge problem cleared on a fresh read` | The tick's snapshot read the pull request as unmergeable, and the fresh read shows no cause. | Nothing. The next tick judges the pull request as mergeable. |
+| `it queues again after its backoff` | A `recover` wait whose `retry_at` has not come yet. | Expected. Read `retry_at` and `recoveries` in the ready record, as [Unmergeable entries](#unmergeable-entries) shows. |
+| `its head moved, so its checks are read again on the new head` | The head differs from the one the checks wait recorded, after a push or between the pass's two reads. The pass records the new head and holds for that tick. | Expected once per push. Only the new head's checks count from then on. |
+| `its required checks have not all finished` | A checks wait: a required check on the head is still queued, pending, expected or running. | Expected while checks run. Read `gh pr checks <url>`. |
+| `its <gate> never passed` | The checks resolved and no check failed, but the gate, for example `Gate — Required`, did not pass. A gate that ended skipped holds this way. | Read the gate job's run and rerun it when it was skipped or cancelled. |
+| `GitHub does not read every required check green on its head` | Both reads resolved green, but the [branch rule confirmation](#when-a-checks-wait-ends) did not confirm the head. A check the base branch rules require has not reported or passed; the confirmation's own read of the pull request named another head after a push, carried no head because its newest commit was not the head, or returned nothing during a GitHub read backoff or on an answer it could not parse; or a GitHub call of the confirmation failed. The empty read and the failed call each write a line first, the `unread` lines below. | With an `unread` line before it that names an error, fix that error. One that names an empty read clears once the GitHub backoff or rate limit ends on a later tick. Without one, check whether the head moved with `gh api repos/<owner>/<repo>/pulls/<number> --jq .head.sha`; a new head is judged on the next tick. A backoff clears on a later tick. When the hold stays, compare the required checks with `gh pr checks <url>` as [Troubleshooting a checks wait](#troubleshooting-a-checks-wait) shows. |
+| `it waits in the merge queue` | The pass queued the pull request and the merge wait has no outcome yet. The pull request is still in the queue; or its second read, made when it reads outside the queue, returned nothing; or that read shows checks not all resolved; or the pass queued it less than five minutes ago and has never seen it inside the queue. See [Ready merge pass queue exits](#ready-merge-pass-queue-exits). | Expected while queued. Read `agentihooks swarm <id> merge state <url>`; when it shows the pull request outside the queue on several ticks, check that the tick process reaches GitHub. |
+| `a live agent still owns it` | The pass was going to reopen the task or release it to its proof, but an agent of the task is still running. | The reopen or release waits for that agent to end. When the refused reopen is the 20 minute green and unqueued reopen described below, the pass carries on with the same tick and can still queue the pull request. Read the task's claimant and its agents. |
+| `the ledger or its ready record changed before the swarm could release it` | The pass's guarded release changed nothing. The ledger task no longer matched what the pass read, for example after a new claim, or the ready record changed under it. | Read the task on the ledger. A new claimant owns the work from then on. |
+
+Not all of these lines come from released tasks. The pass also reads every task in `pr` state that has a pull request for an unmergeable state. A task that never ran `swarm ready` can therefore write the restack, cleared, unread, owner and release lines too.
+
+When a GitHub call of the branch rule confirmation fails, `waits.required_green` writes the GitHub error on stderr before it returns not green:
+
+```text
+required checks of <pull request url> unread: <error>
+```
+
+When the confirmation's read of the pull request returns nothing, during a GitHub read backoff or rate limit or on an answer it could not parse, it writes this line before it returns not green:
+
+```text
+required checks of <pull request url> unread: empty pull request read; GitHub backoff or rate limiting may be active
+```
+
+Each line comes from every caller of the confirmation, including `wait --on checks`. Before pull request [11992](https://github.com/the-cloud-clockwork/agentihooks/pull/11992), the confirmation swallowed this error and the merge pass returned no line, so a held task left no trace.
+
+A released pull request that stays green, resolved, out of draft and out of the queue while the pass cannot queue it does not wait forever. After 20 minutes, not counting outage time, the task reopens with the action line `task <id> reopened, <url> stayed green and unqueued for <minutes> minutes while the merge pass could not queue it`. While an agent of the task is still running, the reopen is refused with `a live agent still owns it`, and the pass carries on with the same tick: when the checks wait then ends green, the pass still queues the pull request that tick. The hold lines written before it show why the pass could not queue it.
+
+In the swarm controller, the hold lines and the pass's action lines go to the same container log. Action lines go to stdout as `<swarm>: <action>`, for example `example: queued https://github.com/o/r/pull/812 for task t31`. The controller deployment's first container is `jump`, so name the `controller` container when reading its log:
+
+```bash
+kubectl -n agentihooks-swarm logs deploy/agentihooks-swarm-controller -c controller --since=1h \
+  | grep -E 'merge pass holds|required checks of|: queued https'
+```
+
+To count the holds of the last day for each task and reason:
+
+```bash
+kubectl -n agentihooks-swarm logs deploy/agentihooks-swarm-controller -c controller --since=24h \
+  | grep ' merge pass holds task ' \
+  | sed -E 's/^.*: merge pass holds task ([^ ]+) [^ ]+: /\1\t/' \
+  | sort | uniq -c | sort -rn
+```
+
+When more than one controller pod is running, `deploy/` picks one of them. Read each pod by name from `kubectl -n agentihooks-swarm get pods` when the line you expect is missing. A tick run by the `agentihooks-swarm.service` user unit writes the same lines to its journal; read them with `TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-1h" --until now`.
+
+| Symptom | Check and action |
+|---|---|
+| A released green pull request is never queued, and each tick writes `GitHub does not read every required check green on its head` after `required checks of <url> unread: To get started with GitHub CLI, please run:  gh auth login` | The merge queue's gh calls ran without the signed token. See [Signed GitHub calls in the merge pass](#signed-github-calls-in-the-merge-pass). |
+| The same reason with no `unread` line before it | The head moved between the reads, or a check the base branch rules require has not reported or passed on the head. Read the head with `gh api repos/<owner>/<repo>/pulls/<number> --jq .head.sha`, then compare the rules with `gh pr checks <url>`. |
+| The same reason after `required checks of <url> unread: empty pull request read; GitHub backoff or rate limiting may be active` | The confirmation's read of the pull request returned nothing while GitHub reads were backing off or rate limited, or on an answer it could not parse. A backoff clears on a later tick; when the line outlasts it, check that the tick process reaches GitHub. |
+| A released task stops writing hold lines and is never queued | Look for `task <id> left the merge pass` in the log. The pass writes it and clears `awaiting` when the task's state is no longer `pr`, or its ready record is missing or names an agent other than the claimant, and the pass no longer holds the task. Read the task's `state`, `awaiting` and claimant on the ledger. |
+| `a live agent still owns it` on every tick | An agent of the task is still running. Read the task's claimant and its agents; the pass reopens or releases the task once that agent ends. |
+| A task reopened with `stayed green and unqueued for <minutes> minutes` | Read the hold lines of the ticks before the reopen for the reason the pass could not queue it, then queue the head with `agentihooks swarm <id> merge queue <url>` once that reason is fixed. |
+
+`tests/swarm/test_ready.py` pins a line for every reason: `test_a_released_checks_wait_logs_why_it_holds`, `test_a_checks_wait_names_the_hold_of_its_fresh_read_over_a_green_snapshot`, `test_a_green_head_github_does_not_read_green_logs_its_hold`, `test_a_moved_head_logs_that_its_checks_are_read_again`, `test_an_unread_pull_request_logs_its_hold`, `test_a_queued_pull_request_logs_that_it_waits_in_the_queue`, `test_a_dependency_wait_logs_its_target`, `test_a_recovery_wait_logs_why_it_holds`, `test_an_unmergeable_pull_request_with_a_working_owner_logs_the_restack`, `test_an_unmergeable_pull_request_without_an_owner_logs_why_it_holds`, `test_a_red_pull_request_a_live_agent_owns_logs_its_hold`, `test_a_red_pull_request_whose_ready_record_moved_logs_its_hold`, `test_a_red_pull_request_whose_reopen_the_ledger_refuses_logs_its_hold` and `test_a_merged_split_pull_request_the_done_gate_refuses_logs_its_hold`. `tests/swarm/test_waits.py::test_required_green_logs_the_github_error_it_holds_on` pins the `unread` line. The feature map entry `merge-pass-hold-reasons` lists them all.
+
+#### Signed GitHub calls in the merge pass
+
+The merge pass reads required checks and queues pull requests through the merge queue client in `scripts.swarm.merge_queue`. That client hands its GraphQL and REST calls to the GitHub adapter in `scripts.swarm.github_reads`. Whether a call is signed depends on the process:
+
+| Process environment | How gh runs |
+|---|---|
+| `HIVE_GITHUB_AUTH_MODE=app` and `GITHUB_APP_PRIVATE_KEY` set, as in the swarm controller | The adapter signs the call in the process. It mints an installation token, switches the command to the gh client at `/usr/bin/gh`, and passes the token in the call's `env` option as `GH_TOKEN`. When the process cannot mint a token, or a read finds the token's remaining budget below the shared read reserve (`AGENTIHOOKS_GITHUB_READ_RESERVE`), the call keeps the plain `gh` command and its options, and goes to the gh wrapper. |
+| Anything else, such as a workstation | The call keeps its plain `gh` command and the machine's own gh login. |
+
+`merge_queue._port` builds the gh runner the adapter calls. It forwards the caller's `env` option to the runner whenever the adapter sets one, so a signed call runs gh with the token.
+
+Before pull request [11992](https://github.com/the-cloud-clockwork/agentihooks/pull/11992), the runner forwarded only the timeout. In the controller, every merge queue read and queue call then ran the bare gh client with no token and failed with `gh auth login`. The branch rule confirmation swallowed that error, the checks wait never ended green, and the merge pass saved the ready record and wrote nothing, every tick. On 18 November three pull requests released through `swarm ready` while their checks ran sat green and unqueued until a master queued them by hand. A replay of the same code on a workstation queued each at once: a workstation holds no App key, so its calls kept plain gh and its login. A read-only probe in the controller's environment, against pull request 11927, showed the failure and the fix side by side:
+
+```text
+A required_view raised SwarmError To get started with GitHub CLI, please run:  gh auth login
+A runner saw [('/usr/bin/gh', False)]
+B _signed command /usr/bin/gh env passed: True
+C required_view with env forwarded ok c05815b3c4 resolved True red False
+```
+
+Three guards keep it fixed:
+
+| Guard | What it holds |
+|---|---|
+| `tests/swarm/test_merge_queue.py::test_a_merge_queue_call_in_a_process_holding_the_app_key_runs_gh_with_its_signed_token` | Two cases, `graph` and `rest`. With the App key environment set, the runner is called with `/usr/bin/gh` and the signed `env`, next to the text output and the 20 second timeout. |
+| Feature map entry `merge-queue-signed-token` | Origin `regression`. Its seam is `merge_queue._port` through `merge_queue.graphql` and `merge_queue.rest`, and it names the test above and the Semgrep rule below. |
+| Semgrep incident rule `gh-runner-drops-signed-env` in `.semgrep-incidents/` | Refuses a gh runner, defined as `def <name>(argv, **options)` under `scripts/` or `hooks/`, that calls the caller's runner with a `timeout` but neither `env=` nor a spread of options. Its fixture `.semgrep-incidents/gh-runner-drops-signed-env.py` holds one refused runner and two accepted forms. |
+
+The accepted form forwards `env` only when the adapter set it:
+
+```python
+signed = {"env": options["env"]} if "env" in options else {}
+done = run(argv, capture_output=True, text=True, timeout=round(options["timeout"]), **signed)
+```
+
+The Semgrep workflow's step `Outage rules fire on their planted faults and pass their clean cases` runs `semgrep --test` over the incident rules and their fixtures. The new tests failed first on the tests only commit `31ced793a1`, in Tests run [44279662914](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/44279662914). The fix merged as `1aa8d666aa`. Release 2.17.1041, which the controller ran on 19 November, carries it, and that day the log of a controller pod running it held the hold line `rig-grade-swarm: merge pass holds task doc-b139f26a200d33df https://github.com/the-cloud-clockwork/agentihooks/pull/12223: it waits in the merge queue`.
+
+To check that a running controller carries the fix, read its image tag and look for the rule file in that release's tree:
+
+```bash
+kubectl -n agentihooks-swarm get deploy agentihooks-swarm-controller \
+  -o jsonpath='{range .spec.template.spec.containers[*]}{.name} {.image}{"\n"}{end}'
+gh api "repos/the-cloud-clockwork/agentihooks/contents/.semgrep-incidents/gh-runner-drops-signed-env.yml?ref=v<version>" --jq .path
+```
+
+A path in the answer means the release carries the fix. A 404 means the controller runs an older release; roll it forward.
 
 ### When a checks wait ends
 
@@ -5865,7 +6080,7 @@ EnvironmentFile=-%h/.agentihooks/.env
 ExecStart="<installed python>" -m scripts.scheduler.service supervise
 Restart=always
 RestartSec=5
-RestartPreventExitStatus=2
+RestartPreventExitStatus=2 4
 KillMode=process
 
 [Install]
@@ -5874,9 +6089,18 @@ WantedBy=default.target
 
 - `ExecStart` names the Python interpreter of the installed agentihooks.
 - `Restart=always` brings a supervisor that exits or is recycled back after five seconds.
-- `RestartPreventExitStatus=2`: a supervisor that finds the machine lock held prints
+- `RestartPreventExitStatus=2 4`: a supervisor that finds the machine lock held prints
   `scheduler supervisor is already running` and exits 2, and systemd does not restart it in a loop. The next
   `ensure_running` call starts the unit again.
+- Exit 4 means the state store refused the scheduler's credential: a refused login (redis `AuthenticationError`) or
+  an ACL denial (`NoPermissionError`). The runner prints
+  `scheduler stops: the state store refused its credential (<error>: <text>)` and exits 4 on that pass, in any swarm.
+  Its supervisor prints `the scheduler supervisor <pid> stops: its state store refused its credential`, starts no
+  new runner and exits 4, and systemd leaves it stopped. A timeout or a dropped connection still gets a new pass
+  every second. The next `ensure_running` call starts the unit again.
+- Exit 3 means a proof swarm's runner stopped because its state store did not answer for 300 seconds. Its supervisor
+  prints `the scheduler supervisor <pid> stops: its state store did not answer`, starts no new runner and exits 3.
+  Exit 3 is not in `RestartPreventExitStatus`, so systemd restarts the supervisor as it does after any other exit.
 - `AGENTIHOOKS_SCHEDULER_UNIT=1` tells the supervisor that systemd started it. Only the unit sets it; never set it by
   hand.
 - [Workstation tick retirement](#workstation-tick-retirement) keeps this unit: a workstation whose swarms are all
@@ -5943,6 +6167,7 @@ the new seam tests failing. Green: Proofs run
 | Symptom | Cause | Fix |
 |---|---|---|
 | The tick stops when `agentihooks-swarm-waits.service` or `agentihooks-hive.service` restarts | The supervisor runs as a child in that unit's group: the scheduler unit is missing or was never started | Run `agentihooks swarm tick` once from the installed agentihooks, or wait for the next host tick; `timer.reconcile` writes and enables the unit |
+| `agentihooks-scheduler.service` is inactive with exit status 4 and `scheduler.log` names a refused credential | The scheduler's Redis user was removed, its password changed or its ACL denies a scheduler command | Fix the credential or ACL behind the scheduler's Redis URL in `~/.agentihooks/.env`, then run `systemctl --user start agentihooks-scheduler.service` |
 | `agentihooks-scheduler.service` is inactive with exit status 2 | Another supervisor held the machine lock past the 30 second take over | The next wait pass starts the unit again; when it repeats, list supervisors with the `ps` check in [A supervisor started off the installed code exits with its starter](#a-supervisor-started-off-the-installed-code-exits-with-its-starter) |
 | The unit is active but `scheduler.log` keeps getting new supervisors | The runtime folder has no mark, so callers spawn children: the unit's supervisor resolves another folder | Keep the Redis settings in `~/.agentihooks/.env`, which the unit loads, rather than only in a shell profile |
 
@@ -7317,6 +7542,19 @@ at one, and a full pass clears it. Once the count reaches `AGENTIHOOKS_HEALTH_EA
 <id> status` shows one `early end` finding that names the value and the count. The finding is information only and
 stops nothing.
 
+### Harness pin findings
+
+A lane whose `agent` is `claude` or `codex` gets seats from that harness only, however many free seats the other
+harness has. Each capacity pass stores every pinned lane with its quota decision: the pin, the time a pass first saw
+it, the other harness's free quota seats, and the ready lane tasks the pass placed nowhere while the lane sat below its
+ceiling. The swarm config keeps no time for a pin, so its age counts from the first pass that saw it; changing or
+clearing the pin starts the age again.
+
+`agentihooks swarm <id> status` shows one quota line per pinned lane under quota capacity, and raises one `harness
+pin` finding for a pinned lane whose other harness has free seats while ready tasks wait. The finding names the lane,
+the pin and its age, the free seats and the waiting tasks. It reports only: the pin stays until someone sets the lane
+agent back to `auto`.
+
 ### Spawn stall findings
 
 A `spawn stall` health finding means the swarm could have launched an agent for ten minutes and launched none. The
@@ -8123,7 +8361,8 @@ The tick orders claimable tasks highest rank first. Within a rank, a task with a
 the longest chain of open tasks waiting on it. One exception: an S task that unblocks another open task (one whose
 other dependencies are all done), or is the last task of its phase not yet done, goes ahead of the rest of its rank.
 Phase order is never used, and ledger order breaks the remaining ties. Capacity placement reads the same order. The
-tick then applies the usual
+hub's offers on the `events` engine sort by focus, then rank band, then focus record position, with neither the
+critical path rule nor the S task rule above; see [Offer order](hives.md#offer-order). The tick then applies the usual
 rules: lane, phase, open dependencies and live claims still decide whether a task is claimable, so an
 urgent task never skips a dependency that is not done and never takes a task another agent holds. A `tune` task never stacks on a `code` or `ci` dependency that is claimed or in pull request: it waits until that dependency is done. In a Doctor swarm it also waits until the dependency carries `applied_at`, which the Doctor's `pull-dev` intervention records on each merged fix an open tune task measures, or `ledger task set <id> applied_at=<UTC time>` records by hand; the dispatcher's queue head reads the same rule. A territory
 another agent holds moves a task back within its rank without blocking it (see
@@ -8134,7 +8373,8 @@ pass, so a change applies on the next tick.
 At `delegate` and `full` autonomy the dispatcher guards the critical chain: when a task on the longest open
 dependency chain among the work no freeze or focus holds merges, its claimable successor takes the next free seat in its lane ahead of every rank, resumed
 work and territory order, in the tick that reads the merge. The dispatcher then comments on that task with the
-seconds from the merge to the claim and logs a `chain-guard` row.
+seconds from the merge to the claim and logs a `chain-guard` row. The hub's offers do not apply this guard; see
+[Offer order limitations](hives.md#offer-order-limitations).
 
 Set it with `agentihooks api task add ... --rank R` or `task set ID rank=R`, or from the select on each task row
 of the ledger page, which lists open tasks in claim order. The master, a planner and the operator may set it; an
@@ -8152,7 +8392,7 @@ Every open task is in one of three states. **Focused** tasks form an ordered que
 
 - **Freeze** holds the target and everything under it, unless a focus on a node nearer the task covers it. Freezing a focused target ends its focus.
 - **Focus** appends the target to the focus queue; `--top` puts it first and `--bottom` appends it. Focusing a target already in the queue with `--top` or `--bottom` moves it to that end; without either it keeps its place. `--only` drops every other focus, so the target and everything under it are the whole queue. A focus unfreezes its target and every node under it.
-- A task's place in the focus queue is the position of the first focus record that covers it, by node address in its ancestry or by a `lane:` or `kind:` selector; a task no focus covers comes after every focused one. The tick reads these ranks from one lookup per pass (see [Focus ranks in spawn order](../reference/tick-adapters.md#focus-ranks-in-spawn-order)).
+- A task's place in the focus queue is the position of the first focus record that covers it, by node address in its ancestry or by a `lane:` or `kind:` selector; a task no focus covers comes after every focused one. The hub reads these places on each readiness pass and offers focused tasks first, by rank band and then by place (see [Offer order](hives.md#offer-order) and [Focus ranks in offer order](../reference/tick-adapters.md#focus-ranks-in-offer-order)).
 - While any focused task is open, claimed, blocked or in a pull request, every task outside the focus waits, whatever its rank: `urgent` orders tasks within their state and never passes the focus queue. The tasks a focused task depends on or is parked on, and the open tasks of every phase its phase waits on, join the focus, so the queue never waits on held work. A focus whose tasks are all done, frozen or waiting on frozen work holds nothing.
 - A Doctor swarm's fix phase is exempt from focus, its own and the one on the ledger it watches.
 
@@ -8175,6 +8415,40 @@ marks the swarm drained and posts a ledger notice. It names how many open tasks 
 example `The swarm has no task it may start: 3 open tasks are held by the focus on phase Documentation agents`, and
 says only `The swarm has no task left to start` when none is held. The ledger page's time left leaves held tasks out
 and says so: `with 3 frozen tasks holding 90m of work left out`.
+
+### Focus sanity check
+
+A focus on done or out of scope work, or on tasks that all wait on open dependencies, starts nothing. Three checks
+make that visible.
+
+- **Focus and unfreeze answer with verdicts.** After its write, `swarm focus` and `swarm unfreeze` print on standard
+  error the claim gate verdict on every task under the target that is not done: `claimable`, or the reason the tick
+  may not claim it (`the freeze on phase Docs holds it`, `it waits on task t2`, `its phase Build is waiting on an
+  earlier phase`, `a focus elsewhere holds it`, `it is claimed by engineer@...`, `it is in a pull request`, `it is
+  out of scope`). The head line counts the claimable, open and done tasks, and reads `NOTHING CLAIMABLE` when none
+  is claimable. Standard output keeps its one JSON line. The ledger refuses a focus, freeze or unfreeze whose target
+  is no plan node, no `lane:` or `kind:` selector and, for unfreeze, no record:
+
+  ```
+  {"focus": "phases/p116", "by": "operator"}
+  focus phases/p116: NOTHING CLAIMABLE, no agent will start work from it; 7 open, 33 done
+    cut-flip-static-gates  ci  it waits on tasks cut-plant-proofs, t2516
+    t-gate-authority-fast-job  ci  it waits on task cut-flip-static-gates
+  ```
+
+- **One focus read.** `agentihooks api --slug <id> get focus` (ledger API `GET /api/v1/ledgers/<id>/focus`) lists
+  every focus record with `target`, `by`, `at`, `reason`, `claimable`, `done` (the ids of done tasks under it),
+  `tasks` (every other task under it with its `lane`, `state` and `verdict`) and `unclaimed_minutes`: the minutes
+  since the focus while a task under it is open and none is claimed or in a pull request, otherwise null.
+  `GET .../focus/<target>` answers one target in the same shape, or `404 resource_missing` when the target does not
+  exist. The swarm's Doctor fix phase is read from the swarm store; without one the read uses no fix phase.
+- **Focus unclaimed finding.** Each tick the `focus unclaimed` step counts, for every task under a focus record
+  whose verdict is `claimable`, the consecutive ticks it stays so; any other verdict drops the count. Past three
+  ticks a `focus unclaimed` health finding names the task and the focus, and the findings pass sends it to the
+  master inbox for a verdict.
+
+The master reads the focus read every loop; the master refocus block and the swarm master skill carry that
+obligation.
 
 ### How a freeze hold is named
 

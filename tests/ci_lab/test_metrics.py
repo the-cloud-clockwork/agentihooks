@@ -327,18 +327,6 @@ def test_record_spools_units_then_grades_and_skips_empty_tables() -> None:
     assert empty.appended == []
 
 
-def test_observe_records_counts_cache_use_durations_and_graded_heads() -> None:
-    registry = metrics.Registry()
-    missed = replace(unit(), cached=False, kind="mutation", seconds=40.0)
-    metrics.observe_records(registry, [unit(), unit(key="k2"), missed], [grade(), grade()])
-    text = registry.render()
-    assert 'ci_lab_cache_hits_total{cache="verdict"} 2.0' in text
-    assert 'ci_lab_cache_misses_total{cache="verdict"} 1.0' in text
-    assert 'ci_lab_unit_duration_seconds{kind="tests"} 12.0' in text
-    assert 'ci_lab_unit_duration_seconds{kind="mutation"} 40.0' in text
-    assert 'ci_lab_heads_graded_total{class="queue",conclusion="failure"} 2.0' in text
-
-
 def test_record_ships_through_the_real_outbox(tmp_path: Path) -> None:
     sent: list[tuple[str, bytes]] = []
     sink = metrics_outbox.Settings("http://clickhouse.invalid:8123", "", "")
@@ -430,6 +418,41 @@ def test_served_routes_reach_a_scraper_over_http() -> None:
             urllib.request.urlopen(urllib.request.Request(f"{base}/metrics", data=b"", method="POST"), timeout=5)
         assert posted.value.code == 405
         assert json.loads(posted.value.read()) == {"error": "method not allowed"}
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.feature("lab-worker-metrics")
+def test_a_registry_server_answers_only_the_metrics_route_over_http() -> None:
+    registry = metrics.Registry()
+    registry.inc(contract.UNITS_LOST_TOTAL)
+    server = metrics.serve_registry("127.0.0.1", 0, registry)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        with urllib.request.urlopen(f"{base}/metrics?scrape=1", timeout=5) as reply:
+            body = reply.read()
+            headers = dict(reply.headers.items())
+            assert (reply.status, headers["Content-Type"], headers["Content-Length"]) == (
+                200,
+                "text/plain; version=0.0.4; charset=utf-8",
+                str(len(body)),
+            )
+            assert body.decode() == registry.render()
+            assert "ci_lab_units_lost_total 1.0\n" in body.decode()
+        for path in ("/capacity", "/missing"):
+            with pytest.raises(urllib.error.HTTPError) as refused:
+                urllib.request.urlopen(f"{base}{path}", timeout=5)
+            assert (refused.value.code, refused.value.headers["Content-Type"], refused.value.read()) == (
+                404,
+                "application/json",
+                b'{"error": "not found"}',
+            )
+        with pytest.raises(urllib.error.HTTPError) as posted:
+            urllib.request.urlopen(urllib.request.Request(f"{base}/metrics", data=b"", method="POST"), timeout=5)
+        assert (posted.value.code, posted.value.read()) == (405, b'{"error": "method not allowed"}')
     finally:
         server.shutdown()
         server.server_close()

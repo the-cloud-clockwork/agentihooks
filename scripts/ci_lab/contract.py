@@ -17,11 +17,13 @@ from typing import NamedTuple
 from scripts.ci_lab.remote import checkout
 
 SCHEDULER_PORT = 8800
+CONTROL_PORT = 8801
 METRICS_PORT = 9108
 SELF_TEST = "--self-test"
 
 BUS_PREFIX = "AGENTIHOOKS_BUS"
 MINIO_PREFIX = "CI_LAB_MINIO_"
+SECRET_PREFIX = "CI_LAB_SECRET_"
 GITHUB_APP_PREFIX = "GITHUB_APP_"
 REDIS_URL = "CI_LAB_REDIS_URL"
 RUNTIME_CONFIG = "CI_LAB_RUNTIME_CONFIG"
@@ -101,7 +103,7 @@ class Service(NamedTuple):
 
 SCHEDULER = Service(
     name="scheduler",
-    ports=(SCHEDULER_PORT, METRICS_PORT),
+    ports=(SCHEDULER_PORT, CONTROL_PORT, METRICS_PORT),
     prefixes=(BUS_PREFIX, MINIO_PREFIX, GITHUB_APP_PREFIX),
     names=(REDIS_URL, RUNTIME_CONFIG, LAB_URL),
     metrics=METRICS,
@@ -109,7 +111,7 @@ SCHEDULER = Service(
 WORKER = Service(
     name="worker",
     ports=(METRICS_PORT,),
-    prefixes=(BUS_PREFIX, MINIO_PREFIX),
+    prefixes=(BUS_PREFIX, MINIO_PREFIX, SECRET_PREFIX),
     names=(
         SCHEDULER_URL,
         SLOTS,

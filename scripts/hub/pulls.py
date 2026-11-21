@@ -43,6 +43,7 @@ class Observation:
     queued: bool | None = None
     checks_head: str | None = None
     suites: dict = field(default_factory=dict)
+    culprit: dict[str, object] | None = None
 
 
 def key(url: str) -> str:
@@ -100,7 +101,8 @@ def _changes(snapshot: dict, seen: Observation) -> list[tuple[str, dict]]:
     if snapshot["state"] in TERMINAL:
         snapshot["queued"] = False
     elif seen.queued is not None and seen.queued != snapshot["queued"]:
-        found.append(("merge.queued" if seen.queued else "merge.dequeued", {}))
+        named = {} if seen.culprit is None else {"culprit": seen.culprit}
+        found.append(("merge.queued" if seen.queued else "merge.dequeued", named))
         snapshot["queued"] = seen.queued
     if seen.checks_head is not None and seen.checks_head == snapshot["head"]:
         found += _suites(snapshot, seen.suites)

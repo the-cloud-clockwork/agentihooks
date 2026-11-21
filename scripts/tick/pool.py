@@ -137,15 +137,15 @@ class Pass:
                 self.gone.add(name)
             self.handed[name].set()
 
-    def ended(self, names: Iterable[str], timeout: float) -> bool:
-        """Return whether every handed off step in ``names`` ended within ``timeout`` seconds and none was dropped."""
+    def ended(self, names: Iterable[str], timeout: float, required: Iterable[str] | None = None) -> bool:
+        """Wait for every named step, rejecting loss only among required dependencies when supplied."""
         with self.guard:
             events = [self.handed[name] for name in set(names)]
         until = monotonic() + timeout
         if not all(event.wait(until - monotonic()) for event in events):
             return False
         with self.guard:
-            return not self.gone.intersection(names)
+            return not self.gone.intersection(names if required is None else required)
 
     def detach(self, work: Callable[[], object]) -> None:
         """Start ``work`` under the caller's copied context on a daemon thread the pass joins when it ends."""

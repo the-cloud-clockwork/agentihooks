@@ -15,6 +15,7 @@ OBLIGATIONS = (
     "configure the swarm, the ledger and the operator's environment with him through the agentihooks commands "
     "and tools, handle operator inbox items, keep progress current through agentihooks api and judge it; "
     "never edit code or config files in a repository, commit, merge or claim a task.\n"
+    "Every loop run agentihooks api --slug <slug> get focus; clear or fix each focus with nothing claimable.\n"
 )
 
 LEDGER = {
@@ -270,7 +271,7 @@ def test_master_block_carries_current_intent_phases_priorities_and_obligations()
     assert OBLIGATIONS in block
     assert f"Plan: {'x' * 299}…\n" in block
     assert f"\nPriorities: {'z' * 299}…\n" in block
-    assert block.endswith(f"Active phases: Active: {'y' * 162}…")
+    assert block.endswith(f"Active phases: Active: {'y' * 58}…")
     assert "=== SWARM REFOCUS: " + "t" * 299 + "… ===" in block
     ledger["title"] = "Continuity"
     ledger["overview"] = "Preserve current mission"
@@ -291,6 +292,17 @@ def test_master_sparse_ledger_keeps_obligations_without_invented_intent(ledger):
     assert refocus.build_block(ledger, "master", 1500) == (
         "=== SWARM REFOCUS:  ===\n" + OBLIGATIONS + f"Plan: \nPriorities: \nActive phases: {phases}"
     )
+
+
+@pytest.mark.feature("swarm-master-focus-read")
+def test_the_master_block_and_skill_require_the_focus_read_every_loop() -> None:
+    from pathlib import Path
+
+    read = "agentihooks api --slug <slug> get focus"
+    assert read in refocus.build_block({"title": "T"}, "master", 1500).partition("\nPlan: ")[0]
+    assert read not in refocus.build_block(LEDGER, "i1", 1500)
+    skill = Path(refocus.__file__).parents[2] / "profiles/package/roles/master/.claude/skills/swarm-master/SKILL.md"
+    assert f"Every loop, read every focus: `{read}`" in skill.read_text().replace("\n  ", " ")
 
 
 def test_the_ledger_read_names_intent_and_the_focus_of_the_seat(tmp_path):

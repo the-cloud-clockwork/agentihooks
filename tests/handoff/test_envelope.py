@@ -135,11 +135,13 @@ def test_a_master_envelope_records_its_launch_effort_inside_the_swarm_range(stor
 @pytest.mark.parametrize(
     ("bounds", "saved"), [(("low", "medium"), "max"), (("low", "medium"), "low"), (("medium", "xhigh"), "medium")]
 )
-def test_a_master_envelope_never_records_a_launch_effort_below_high(store, bounds, saved):
+def test_a_master_envelope_never_records_a_launch_effort_below_xhigh(
+    store: RedisStore, bounds: tuple[str, str], saved: str
+) -> None:
     store.update("sw", effort_min=bounds[0], effort_max=bounds[1])
     master = AgentRecord("master@a1b2c3-0001", "master", "master", harness="claude", effort=saved)
     envelope = build(store, "sw", master, "recycle", [], 0, run=lambda argv, **_: _done(code=1))
-    assert envelope["launch"]["effort"] == "high"
+    assert envelope["launch"]["effort"] == "xhigh"
 
 
 @pytest.mark.parametrize(("harness", "effort"), [("copilot", "max"), ("claude", "")])

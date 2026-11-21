@@ -4,8 +4,9 @@ grade held with its failed units, and the GitHub adapters' scoped tokens."""
 import base64
 import json
 import subprocess
-from collections.abc import Mapping
-from dataclasses import replace
+from collections.abc import Callable, Mapping
+from dataclasses import asdict, replace
+from functools import partial
 from io import StringIO
 from pathlib import Path
 from typing import Any, cast
@@ -17,12 +18,12 @@ import requests
 from scripts import github_app
 from scripts.ci_lab import relay
 from scripts.ci_lab import scheduler as scheduler_module
-from scripts.ci_lab.checks import Output, name
+from scripts.ci_lab.checks import API, Checks, Output, name
 from scripts.ci_lab.evidence import head_prefix
 from scripts.ci_lab.objects import LocalObjects
 from scripts.ci_lab.outcomes import FAILED, PASSED
 from scripts.ci_lab.remote import post_receive
-from scripts.ci_lab.scheduler import Flags, Scheduler, Slot, State
+from scripts.ci_lab.scheduler import Flags, Scheduler, Settings, Slot, State
 from scripts.ci_lab.units import Unit
 from scripts.ci_lab.worktrees import Lab, Mirror
 from scripts.events.bus import Consumer
@@ -87,6 +88,7 @@ class Calls:
         self.log: list[tuple[Any, ...]] = []
         self.outputs: list[Output] = []
         self.posted: dict[tuple[str, str, str], str] = {}
+        self.saved: list[dict[str, int]] = []
 
     def pusher(self, repo: str) -> "Calls":
         """Return the pusher of a repository."""
@@ -107,6 +109,10 @@ class Calls:
         """Keep the push."""
         self.log.append(("push", sha, branch))
 
+    def seed(self, head: str, gate: str, run: str, run_id: int, status: str, shadow: bool) -> None:
+        """Keep the seeded check run's status as posted."""
+        self.posted[(head, name(gate, shadow), run)] = status
+
     def status(self, key: tuple[str, str, str]) -> str | None:
         """Return the last status posted for a check run, or None before its first post."""
         return self.posted.get(key)
@@ -123,9 +129,13 @@ class Calls:
         self.log.append(("open", branch, title, body))
         return f"opened {PULL}"
 
+    def save(self, state: State) -> None:
+        """Keep the check run ids the saved state holds."""
+        self.saved.append(dict(state.runs))
+
     def ports(self) -> relay.Ports:
         """Return the relay ports over this recorder."""
-        return relay.Ports(self.pusher, self.checks, self.pulls)
+        return relay.Ports(self.pusher, self.checks, self.pulls, self.save)
 
 
 class Refusing(Calls):
@@ -225,6 +235,21 @@ def test_a_green_grade_pushes_then_posts_every_check_run_completed_then_opens_th
         f"posted lab/required success on {HEAD}",
         f"opened {PULL}",
     ]
+    assert calls.saved == [
+        {"lab/lint": 1},
+        {"lab/lint": 1, "lab/unit": 2},
+        {"lab/lint": 1, "lab/unit": 2, "lab/required": 3},
+    ]
+
+
+@pytest.mark.feature("lab-relay-check-run-restart")
+def test_a_relayed_grade_holding_the_scheduler_s_own_check_run_ids_still_posts_every_lab_check_run() -> None:
+    calls = Calls()
+    state = grade("success")
+    state.runs = {"lint": 41, "unit": 42, "required": 43}
+    relay.relay(state, BRANCH, calls.ports(), LAB)
+    assert [call[2] for call in calls.log if call[0] == "post"] == ["lint", "unit", "required"]
+    assert state.runs == {"lint": 41, "unit": 42, "required": 43, "lab/lint": 1, "lab/unit": 2, "lab/required": 3}
 
 
 def test_relayed_check_runs_carry_the_grade_run_its_units_and_the_lab_grade_page() -> None:
@@ -246,13 +271,26 @@ def test_relayed_check_runs_carry_the_grade_run_its_units_and_the_lab_grade_page
     assert required.summary == f"2 units of required on {HEAD} against {BASE}, relayed from the lab grade"
 
 
+@pytest.mark.feature("lab-skipped-authoritative-gates")
+def test_a_relayed_grade_posts_each_authoritative_gate_it_ran_no_unit_of_as_skipped() -> None:
+    calls = Calls()
+    state = grade("success")
+    state.posted["unit-selected"] = ["completed", "skipped"]
+    actions = relay.relay(state, BRANCH, calls.ports(), LAB)
+    posts = [call for call in calls.log if call[0] == "post"]
+    skipped = calls.outputs[posts.index(("post", HEAD, "unit-selected", "completed", "skipped", False))]
+    assert f"posted lab/unit-selected skipped on {HEAD}" in actions
+    assert skipped.units == ()
+    assert skipped.summary == f"0 units of unit-selected on {HEAD} against {BASE}, relayed from the lab grade"
+
+
 def test_a_relayed_green_grade_updates_the_open_pull_request_head_with_its_check_runs_in_the_same_grade(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = Calls()
     request = Mock(return_value=answer(200, [{"html_url": PULL, "number": 9}]))
     monkeypatch.setattr(requests, "request", request)
-    ports = relay.Ports(calls.pusher, calls.checks, lambda slug: relay.PullRequests(slug, Token()))
+    ports = relay.Ports(calls.pusher, calls.checks, lambda slug: relay.PullRequests(slug, Token()), calls.save)
     actions = relay.relay(grade("success"), BRANCH, ports, LAB)
     assert [call for call in calls.log if call[0] in ("push", "post")] == [
         ("push", HEAD, BRANCH),
@@ -451,6 +489,63 @@ def test_a_retried_relay_posts_each_check_run_once_then_opens_the_pull_request()
     assert client.hgetall(relay.PENDING) == {}
 
 
+CHECK_RUNS = f"{API}/repos/{SLUG}/check-runs"
+
+
+def github(sent: list[tuple[str, str]]) -> Callable[..., Mock]:
+    """Answer check run requests as GitHub does: a create gets the next id, an update keeps the id its url names."""
+
+    def request(method: str, url: str, **_: Any) -> Mock:
+        sent.append((method, url))
+        created = [verb for verb, _url in sent].count("POST")
+        run = created if method == "POST" else int(url.rsplit("/", 1)[1])
+        return answer(201 if method == "POST" else 200, {"id": run})
+
+    return request
+
+
+def started(environ: Mapping[str, str], lab: Scheduler, calls: Calls) -> relay.Relay:
+    """Return the relay a scheduler start builds, its pushes and pull requests going to the recorder."""
+    consumer = cast(Consumer, open_bus(BusConfig()).lab_heads.consumer(relay.DURABLE, relay.SUBJECT))
+    engine = relay.build(environ, lab, consumer)
+    engine.ports = replace(engine.ports, pusher=calls.pusher, pulls=calls.pulls)
+    return engine
+
+
+@pytest.mark.feature("lab-relay-check-run-restart")
+def test_a_restarted_relay_posts_no_second_completed_check_run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    sent: list[tuple[str, str]] = []
+    monkeypatch.setattr(requests, "request", github(sent))
+    monkeypatch.setattr(relay, "Checks", partial(Checks, auth=Token()))
+    client, calls = fake_redis(), Flaky()
+    lab = Scheduler(
+        client, LocalObjects(tmp_path / "objects"), cast(scheduler_module.Ports, Mock()), Settings(frozenset())
+    )
+    state = grade("success")
+    client.set(scheduler_module.GRADES + state.run, json.dumps(asdict(state)))
+    lab.objects.write_once(f"{head_prefix(HEAD)}{state.run}", b"")
+    client.hset(relay.PENDING, f"{HEAD} {BRANCH}", json.dumps(asdict(relay.Pending(REPO, HEAD, REF, BRANCH))))
+    environ = {
+        relay.contract.GIT_MIRROR: str(tmp_path / "node"),
+        relay.MIRROR_STORE: str(tmp_path / "stores"),
+        post_receive.LAB_URL: LAB,
+    }
+    assert started(environ, lab, calls).tick() == [f"retry {HEAD} for {BRANCH}: connection reset"]
+    again = started(environ, lab, calls)
+    actions = again.tick()
+    assert sent == [("POST", CHECK_RUNS)] * 3
+    assert actions == [f"pushed {HEAD} to {BRANCH}", f"opened {PULL}"]
+    stored = lab.grade(state.run)
+    assert stored is not None
+    assert stored.runs == {"lab/lint": 1, "lab/unit": 2, "lab/required": 3}
+    assert cast(Checks, again.ports.checks(SLUG)).runs == {
+        (HEAD, "lab/lint", "run-7"): (1, "completed"),
+        (HEAD, "lab/unit", "run-7"): (2, "completed"),
+        (HEAD, "lab/required", "run-7"): (3, "completed"),
+    }
+    assert client.hgetall(relay.PENDING) == {}
+
+
 def test_a_failing_git_call_keeps_its_head_pending_and_the_next_head_still_relays() -> None:
     client, calls = fake_redis(), Failing()
     first, second = relay.Pending(REPO, HEAD, REF, BRANCH), relay.Pending(REPO, OTHER, "refs/grade/t2", "engineer-2")
@@ -461,6 +556,109 @@ def test_a_failing_git_call_keeps_its_head_pending_and_the_next_head_still_relay
     assert actions[3] == f"pushed {OTHER} to engineer-2"
     assert relay.Pending(**json.loads(client.hget(relay.PENDING, f"{HEAD} {BRANCH}"))) == first
     assert client.hget(relay.PENDING, f"{OTHER} engineer-2") is None
+
+
+GADGETS = "https://github.com/acme/gadgets"
+REFUSAL = "GitHub App cannot supply scoped contents write and workflows write credentials: GitHub answered 422"
+REFUSALS = {
+    "push": REFUSAL,
+    "post": "GitHub App cannot supply scoped checks write credentials: GitHub answered 422",
+    "open": "GitHub App cannot supply scoped pull_requests write credentials: GitHub answered 422",
+}
+
+
+class Unminted(Calls):
+    """Fake relay ports whose App refuses the token of one relay call, the push by default, for the widgets
+    repository while refusing is set."""
+
+    def __init__(self, call: str = "push") -> None:
+        super().__init__()
+        self.call = call
+        self.repo = ""
+        self.refusing = True
+
+    def pusher(self, repo: str) -> "Calls":
+        """Return the pusher of a repository and remember the repository."""
+        self.repo = repo
+        return super().pusher(repo)
+
+    def refuse(self, call: str) -> None:
+        """Refuse the widgets repository's token for the call while refusing is set and the call is the refused one."""
+        if self.refusing and call == self.call and self.repo == REPO:
+            raise github_app.GitAuthRefused(REFUSALS[call], status_code=422)
+
+    def push(self, sha: str, branch: str) -> None:
+        """Refuse the push token or keep the push."""
+        self.refuse("push")
+        super().push(sha, branch)
+
+    def post(self, head: str, gate: str, status: str, conclusion: str | None, output: Output, shadow: bool) -> int:
+        """Refuse the check runs token or keep the post."""
+        self.refuse("post")
+        return super().post(head, gate, status, conclusion, output, shadow)
+
+    def open(self, branch: str, title: str, body: str) -> str:
+        """Refuse the pull requests token or keep the pull request call."""
+        self.refuse("open")
+        return super().open(branch, title, body)
+
+
+@pytest.mark.feature("lab-relay-app-refusal")
+def test_a_relay_whose_app_token_is_refused_stays_pending_and_another_repository_still_relays() -> None:
+    client, calls = fake_redis(), Unminted()
+    first = relay.Pending(REPO, HEAD, REF, BRANCH)
+    second = relay.Pending(GADGETS, OTHER, "refs/grade/t2", "engineer-2")
+    found = {HEAD: [grade("success")], OTHER: [replace(grade("success"), repo=GADGETS, head=OTHER)]}
+    engine = relay.Relay(client, Notices([first, second]), found.__getitem__, calls.ports(), LAB)
+    actions = engine.tick()
+    assert actions[2:4] == [f"held {HEAD} for {BRANCH} for a later pass: {REFUSAL}", f"pushed {OTHER} to engineer-2"]
+    assert actions[-1] == f"opened {PULL}"
+    assert relay.Pending(**json.loads(client.hget(relay.PENDING, f"{HEAD} {BRANCH}"))) == first
+    assert client.hget(relay.PENDING, f"{OTHER} engineer-2") is None
+
+
+@pytest.mark.feature("lab-relay-app-refusal")
+def test_a_refused_repository_relays_nothing_until_the_post_hold_ends_while_another_repository_relays() -> None:
+    client, calls = fake_redis(), Unminted()
+    start = 1000.0
+    clock = Mock(return_value=start)
+    first = relay.Pending(REPO, HEAD, REF, BRANCH)
+    second = relay.Pending(GADGETS, OTHER, "refs/grade/t2", "engineer-2")
+    found = {HEAD: [grade("success")], OTHER: [replace(grade("success"), repo=GADGETS, head=OTHER)]}
+    ports = replace(calls.ports(), clock=clock)
+    engine = relay.Relay(client, Notices([first], [second]), found.__getitem__, ports, LAB)
+    assert engine.tick() == [f"pending {HEAD} for {BRANCH}", f"held {HEAD} for {BRANCH} for a later pass: {REFUSAL}"]
+    calls.refusing = False
+    calls.log.clear()
+    clock.return_value = start + scheduler_module.POST_HOLD_MS / 1000 - 0.001
+    assert engine.tick()[:2] == [f"pending {OTHER} for engineer-2", f"pushed {OTHER} to engineer-2"]
+    assert ("pusher", REPO) not in calls.log
+    assert relay.Pending(**json.loads(client.hget(relay.PENDING, f"{HEAD} {BRANCH}"))) == first
+    clock.return_value = start + scheduler_module.POST_HOLD_MS / 1000
+    actions = engine.tick()
+    assert actions[0] == f"pushed {HEAD} to {BRANCH}"
+    assert actions[-1] == f"opened {PULL}"
+    assert client.hgetall(relay.PENDING) == {}
+
+
+@pytest.mark.feature("lab-relay-app-refusal")
+@pytest.mark.parametrize("call", ["post", "open"])
+def test_a_token_refused_after_the_push_relays_again_after_the_hold_posting_each_check_run_once(call: str) -> None:
+    client, calls = fake_redis(), Unminted(call)
+    start = 1000.0
+    clock = Mock(return_value=start)
+    found = {HEAD: [grade("success")]}
+    ports = replace(calls.ports(), clock=clock)
+    engine = relay.Relay(client, Notices([relay.Pending(REPO, HEAD, REF, BRANCH)]), found.__getitem__, ports, LAB)
+    held = f"held {HEAD} for {BRANCH} for a later pass: {REFUSALS[call]}"
+    assert engine.tick() == [f"pending {HEAD} for {BRANCH}", held]
+    calls.refusing = False
+    clock.return_value = start + scheduler_module.POST_HOLD_MS / 1000
+    actions = engine.tick()
+    assert (actions[0], actions[-1]) == (f"pushed {HEAD} to {BRANCH}", f"opened {PULL}")
+    assert [entry[2] for entry in calls.log if entry[0] == "post"] == ["lint", "unit", "required"]
+    assert calls.log.count(("push", HEAD, BRANCH)) == 2
+    assert client.hgetall(relay.PENDING) == {}
 
 
 def test_bus_notices_keep_trusted_grade_ref_heads_with_a_branch_and_acknowledge_every_envelope() -> None:
@@ -667,6 +865,7 @@ def test_build_wires_the_relay_to_the_scheduler_grades_the_mirror_and_the_lab_ur
     assert (tmp_path / "deep" / "stores").is_dir()
     assert cast(relay.PullRequests, engine.ports.pulls(SLUG)).slug == SLUG
     assert cast(relay.Checks, engine.ports.checks(SLUG)).repo == SLUG
+    assert cast(relay.Checks, engine.ports.checks(SLUG)).registry is scheduler.registry
     assert engine.ports.checks(SLUG) is engine.ports.checks(SLUG)
     assert cast(relay.Checks, engine.ports.checks("acme/other")).repo == "acme/other"
     assert engine.grades(HEAD) == []

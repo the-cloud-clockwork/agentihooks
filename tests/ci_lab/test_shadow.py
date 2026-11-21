@@ -63,7 +63,7 @@ CHECK_RUNS = {
     "semgrep / scan": "semgrep/scan",
     "type-gate (3.12)": "type-gate",
     "docs": "unmapped",
-    "test-count (3.12)": "unmapped",
+    "test-count (3.12)": "test-count",
     "lint": "lint",
     "feature-suite": "unmapped",
     "tick-pattern-tree": "unmapped",

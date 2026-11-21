@@ -1,0 +1,28 @@
+rules:
+  - id: waits-end-without-agent-isolation
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Each wait record must be isolated inside the agents loop. A raising record otherwise prevents later waits
+      and the completed pass timestamp. Catch and log the individual record failure before continuing.
+    paths:
+      include:
+        - /scripts/swarm/waits.py
+        - /scripts/swarm/pr_wait.py
+        - waits-end-without-agent-isolation.py
+    patterns:
+      - pattern-inside: |
+          def $PASS(...):
+              ...
+      - metavariable-regex:
+          metavariable: $PASS
+          regex: ^(end_pass|enforce_pass)(_|$)
+      - pattern: |
+          for $AGENT in $STORE.agents($SLUG):
+              ...
+      - pattern-not: |
+          for $AGENT in $STORE.agents($SLUG):
+              try:
+                  ...
+              except Exception as $ERROR:
+                  ...

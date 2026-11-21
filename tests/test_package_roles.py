@@ -10,10 +10,10 @@ from tests.test_profile_render import world as render_world
 
 world = render_world
 ROLES = Path(__file__).resolve().parents[1] / "profiles" / "package" / "roles"
-ALL_ROLES = ("master", "engineer", "cicd", "planner", "qa")
-GUARDED = ("master", "planner", "qa")
+ALL_ROLES = ("master", "engineer", "cicd", "planner", "qa", "reviewer")
+GUARDED = ("master", "planner", "qa", "reviewer")
 GUARDS = {"pre-edit+write+notebookedit-no_code_edits.py", "pre-mcp__serena-no_serena_writes.py"}
-GATED = ("engineer", "cicd", "qa")
+GATED = ("engineer", "cicd", "qa", "reviewer")
 GATES = {
     "pre-agent+task+sendmessage-subagent_budget.py",
     "pre-any-quiet_claim.sh",
@@ -113,7 +113,7 @@ def test_no_code_edits_guard_allows_only_the_scratchpad(tmp_path, role):
     assert f"{role} cannot edit" in denied.stderr
 
 
-@pytest.mark.parametrize(("role", "code"), [("master", 0), ("planner", 0), ("qa", 2)])
+@pytest.mark.parametrize(("role", "code"), [("master", 0), ("planner", 0), ("qa", 2), ("reviewer", 2)])
 def test_plans_folder_is_open_to_master_and_planner_only(tmp_path, role, code):
     edit = "pre-edit+write+notebookedit-no_code_edits.py"
     plan = tmp_path / "config" / "plans" / "p.md"

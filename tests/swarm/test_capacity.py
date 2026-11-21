@@ -596,8 +596,9 @@ def test_profile_and_saved_handoff_harnesses_are_reserved_before_automatic_work(
         "plan": [],
     }
     observed = [account(sessions=2), account("cx", sessions=2, harness="codex")]
-    decision = capacity.calculate(config, observed, [], {"eng": 1, "ci": 1, "plan": 0}, requirements)
     runtime._quota_accounts = observed
+    narrowed = runtime._quota_preferring(requirements)
+    decision = capacity.calculate(config, observed, [], {"eng": 1, "ci": 1, "plan": 0}, narrowed)
     runtime._quota_allocations = decision["allocation"]
     assert runtime._quota_choice("claude", "required", True, "eng") == ("claude", "required")
     assert runtime._quota_choice("claude", "priority", False, "ci")[0] == "codex"
@@ -1356,18 +1357,18 @@ def test_one_free_seat_goes_to_engineering_before_other_empty_lanes():
 
 
 def test_tied_free_seats_break_ties_alphabetically_by_harness():
-    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
+    config = SwarmConfig("sw", "/repo", max_eng=0, max_ci=0, max_plan=1)
     decision = capacity.calculate(config, [account(sessions=2), account("cx", sessions=2, harness="codex")], [])
     assert decision["placements"] == {
-        "eng": [{"index": 0, "harness": "claude", "account": "a"}],
+        "eng": [],
         "ci": [],
-        "plan": [],
+        "plan": [{"index": 0, "harness": "claude", "account": "a"}],
     }
 
 
 def test_reservations_ignore_fixed_work_beyond_the_configured_lane_cap():
     config = SwarmConfig("sw", "/repo", max_eng=2, max_ci=0, max_plan=0)
-    live = [AgentRecord("live", "eng", "active")]
+    live = [AgentRecord("live", "eng", "active", harness="codex")]
     requirements = {"eng": [("claude", "codex"), ("claude",)], "ci": [], "plan": []}
     seen = [account(sessions=2), account("cx", sessions=2, harness="codex")]
     decision = capacity.calculate(config, seen, live, {"eng": 2, "ci": 0, "plan": 0}, requirements)
@@ -1593,6 +1594,7 @@ def test_allocation_skips_a_harness_whose_only_room_is_on_accounts_the_handoff_c
         seats,
         {"eng": [("claude", "codex")], "ci": [("claude",)], "plan": []},
         {"eng": {0: {("claude", "a")}}},
+        shared={"claude": 0, "codex": 0},
     )
     assert placements == {"eng": [{"index": 0, "harness": "claude", "account": "a"}], "ci": [], "plan": []}
 
@@ -2254,7 +2256,7 @@ def test_the_live_autoscale_command_names_hive_admission_as_the_binding_limit(ca
         {"id": "anton", "room": 0, "limit": "cpu: load high", "refusal": "cpu: load high"},
         {"id": "workstation", "room": 0, "limit": "max agents: 6 of 6", "refusal": "max agents: 6 of 6"},
     ]
-    monkeypatch.setattr(launch, "live_hives", lambda found: hives if found is store else [])
+    monkeypatch.setattr(launch, "live_hives", lambda found, reservations=None: hives if found is store else [])
     assert capacity.quota_seats(inputs.observations, {}) == 10
     assert capacity.quota_seats(inputs.observations, {("codex", "cx"): "week"}) == 6
     unknown = SwarmConfig("new", "", max_eng=0, max_ci=0)
@@ -2284,7 +2286,7 @@ def test_the_live_autoscale_command_names_quota_seats_or_host_room_when_hives_ha
     monkeypatch.setattr(cli, "connect", lambda: store)
     monkeypatch.setattr(cli, "LedgerClient", lambda: None)
     hives = [{"id": "anton", "room": 20, "limit": "ram: fits 20 more", "refusal": ""}]
-    monkeypatch.setattr(launch, "live_hives", lambda found: hives if found is store else [])
+    monkeypatch.setattr(launch, "live_hives", lambda found, reservations=None: hives if found is store else [])
     roomy = {**_readings(), "host": {"load1": 0, "cpus": 8, "available_mb": 64000, "agents": 0}}
     monkeypatch.setattr(capacity, "live_inputs", lambda slug, found, ledger, environ, now: inputs)
     inputs = capacity.fixture_inputs(roomy)
@@ -2294,6 +2296,7 @@ def test_the_live_autoscale_command_names_quota_seats_or_host_room_when_hives_ha
     cli.main(["new", "autoscale", "--json"])
     shown = json.loads(capsys.readouterr().out)
     assert (shown["host"]["room"], shown["binding"]) == (0, "binding limit host room, room 0")
+    assert "admission_unreadable" not in shown
 
 
 def test_status_hive_admission_names_the_refusing_hive_limit_while_quota_and_host_room_are_free(monkeypatch):

@@ -58,7 +58,7 @@ NAMED_CONSTANTS = {
 
 SCHEDULER_DESCRIPTION = {
     "service": "scheduler",
-    "ports": [8800, 9108],
+    "ports": [8800, 8801, 9108],
     "environment": {
         "prefixes": ["AGENTIHOOKS_BUS", "CI_LAB_MINIO_", "GITHUB_APP_"],
         "names": ["CI_LAB_REDIS_URL", "CI_LAB_RUNTIME_CONFIG", "CI_LAB_URL"],
@@ -70,7 +70,7 @@ WORKER_DESCRIPTION = {
     "service": "worker",
     "ports": [9108],
     "environment": {
-        "prefixes": ["AGENTIHOOKS_BUS", "CI_LAB_MINIO_"],
+        "prefixes": ["AGENTIHOOKS_BUS", "CI_LAB_MINIO_", "CI_LAB_SECRET_"],
         "names": [
             "CI_LAB_SCHEDULER_URL",
             "CI_LAB_SLOTS",
@@ -95,6 +95,7 @@ WORKER_DESCRIPTION = {
 ENVIRONMENT_NAMES = (
     "AGENTIHOOKS_BUS",
     "CI_LAB_MINIO_",
+    "CI_LAB_SECRET_",
     "GITHUB_APP_",
     "CI_LAB_REDIS_URL",
     "CI_LAB_RUNTIME_CONFIG",
@@ -123,6 +124,7 @@ def test_delegates_route_to_the_two_services() -> None:
 
 def test_ports_are_fixed() -> None:
     assert contract.SCHEDULER_PORT == 8800
+    assert contract.CONTROL_PORT == 8801
     assert contract.METRICS_PORT == 9108
 
 
@@ -138,6 +140,7 @@ def test_metric_constants_are_importable_by_name(constant: str, name: str) -> No
 def test_environment_names() -> None:
     assert contract.BUS_PREFIX == "AGENTIHOOKS_BUS"
     assert contract.MINIO_PREFIX == "CI_LAB_MINIO_"
+    assert contract.SECRET_PREFIX == "CI_LAB_SECRET_"
     assert contract.GITHUB_APP_PREFIX == "GITHUB_APP_"
     assert contract.REDIS_URL == "CI_LAB_REDIS_URL"
     assert contract.SCHEDULER_URL == "CI_LAB_SCHEDULER_URL"
@@ -330,7 +333,7 @@ def test_doc_lists_the_contract() -> None:
         assert f"`{name}`" in text, name
     for name in ENVIRONMENT_NAMES:
         assert f"`{name}" in text, name
-    for port in ("8800", "9108"):
+    for port in ("8800", "8801", "9108"):
         assert f"`{port}`" in text, port
     for command in ("agentihooks ci-lab-scheduler --self-test", "agentihooks ci-lab-worker --self-test"):
         assert command in text, command

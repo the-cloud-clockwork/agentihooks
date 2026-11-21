@@ -1,5 +1,5 @@
-"""The scheduler port: the lease API workers call and its control routes, GET /capacity from a load snapshot and
-GET /grades/<sha> with every grade of one commit."""
+"""The scheduler port: the lease API workers call, GET /capacity from a load snapshot and GET /grades/<sha> with every
+grade of one commit."""
 
 import re
 from collections.abc import Callable, Mapping, Sequence
@@ -20,8 +20,7 @@ SHA = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 
 @dataclass(frozen=True)
 class Routes:
-    """What the scheduler port answers from: the lease API with its control routes, the load snapshot and the grades
-    of a commit."""
+    """What the scheduler port answers from: the lease API, the load snapshot and the grades of a commit."""
 
     lease: lease_api.Answer
     snapshot: Callable[[], Load]

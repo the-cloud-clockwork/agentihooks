@@ -6,7 +6,8 @@ read only. A test unit runs its batch on the venv of the head's lockfile digest 
 flake ledger. A stats or mutant unit runs the mutation runner in the sandbox from a private tree of the head whose
 mutated sources sit behind trampolines, with the pod's stats cache, kill memory, unit budget and lane cap; a mutant
 unit's tests are the ones the stats records of that tree show reaching its function. `agentihooks ci-lab-worker` builds
-the pod from the worker contract environment and runs the worker until SIGTERM.
+the pod from the worker contract environment and runs the worker until SIGTERM, serving its metrics registry on the
+contract metrics port.
 """
 
 import argparse
@@ -29,10 +30,10 @@ from types import FrameType
 from typing import Any
 
 from scripts import ci_cpu_quota, ci_wiring
-from scripts.ci_lab import caches, contract, run_mutation, run_static, run_tests, venvs, worker, worktrees
+from scripts.ci_lab import caches, contract, metrics, run_mutation, run_static, run_tests, venvs, worker, worktrees
 from scripts.ci_lab.outcomes import FAILED, PASSED
 from scripts.ci_lab.sandbox import PortAllocator, Sandbox
-from scripts.ci_lab.static_gates import REGISTRY, WORKFLOW, StaticGate, discover
+from scripts.ci_lab.static_gates import REGISTRY, SECRETS, WORKFLOW, StaticGate, discover
 from scripts.ci_lab.venvs import Build
 from scripts.ci_lab.worker import Executor, Finished, Lease
 from scripts.ci_lab.worktrees import Mirror, Worktrees
@@ -63,9 +64,9 @@ TEST = "test"
 STATS = run_mutation.STATS
 MUTANT = "mutant"
 KILLED = "killed"
-LOCKFILE = "uv.lock"
 PYPROJECT = "pyproject.toml"
 INPUTS_BASE = "inputs.base"
+MASK = b"***"
 MUTANT_SUFFIX = "__mutmut_"
 TEST_FOLDER = "tests/"
 TEST_PREFIX = "test_"
@@ -76,7 +77,7 @@ TREES = 8
 FIRST_PORT = 20_000
 LAST_PORT = 29_999
 PORT_WIDTH = 10
-UNIT_TIMEOUT_S = 1_800.0
+UNIT_TIMEOUT_S = worker.UNIT_TIMEOUT_SECONDS
 
 
 @dataclass
@@ -122,7 +123,7 @@ class Trees:
 @dataclass(frozen=True)
 class Pod:
     """What every adapter reads: the trees, the folder units run, report and keep venvs in, the sandbox ports and
-    whitelist, the unit time limit and the clock that times a unit."""
+    whitelist, the unit time limit, the clock that times a unit and the secrets static steps read, by name."""
 
     trees: Trees
     root: Path
@@ -130,6 +131,7 @@ class Pod:
     whitelist: Mapping[str, str]
     timeout: float
     clock: Callable[[], float] = time.monotonic
+    secrets: Mapping[str, str] = field(default_factory=dict[str, str])
 
     @property
     def runs(self) -> Path:
@@ -168,7 +170,7 @@ class Mutation:
 
 def lockfile_digest(tree: Path) -> str:
     """Return the sha256 of the tree's lockfile, the key of its venv."""
-    return hashlib.sha256((tree / LOCKFILE).read_bytes()).hexdigest()
+    return hashlib.sha256((tree / venvs.LOCKFILE).read_bytes()).hexdigest()
 
 
 def _report(pod: Pod, record: Mapping[str, Any]) -> Path:
@@ -186,18 +188,48 @@ def gate(grader_tree: Path, name: str) -> StaticGate:
     return found[name]
 
 
+def _context(lease: Lease, found: StaticGate, secrets: Mapping[str, str]) -> dict[str, str]:
+    """The context a static unit's steps read: the head, base and job of the lease as their GitHub fields, the pull
+    request event name, attempt and run number 1, and each secret the gate reads by its name, empty when the pod holds
+    no secret of that name."""
+    named = {name: secrets.get(name.removeprefix(SECRETS), "") for name in found.reads if name.startswith(SECRETS)}
+    return {
+        INPUTS_BASE: lease.base,
+        "github.sha": lease.head,
+        "github.event.pull_request.head.sha": lease.head,
+        "github.event.pull_request.base.sha": lease.base,
+        "github.event_name": "pull_request",
+        "github.run_id": lease.job,
+        "github.run_attempt": "1",
+        "github.run_number": "1",
+        **named,
+    }
+
+
+def _masked(text: bytes, secrets: Sequence[str]) -> bytes:
+    """The text with each secret value replaced by ***, the longest first."""
+    for value in sorted(secrets, key=len, reverse=True):
+        text = text.replace(value.encode(), MASK)
+    return text
+
+
 def static(pod: Pod, lease: Lease) -> Finished:
-    """Run the static gate the lease names over its head, with its base and grader trees and its base revision as
-    inputs.base, on the venv of the head's lockfile; the report counts the git and uv cache lookups it made."""
+    """Run the static gate the lease names over its head, with its base and grader trees and the context of its lease
+    fields and the secrets its steps read, on the venv of the head's lockfile; the report counts the git and uv cache
+    lookups it made, and each secret value the steps printed reads *** in the log and the summary, as Actions masks
+    it."""
     with pod.trees.shared(lease.head, lease.base, lease.grader) as ((head, base, grader), fetched):
         found = gate(grader, lease.unit.members[0])
         venv, built = venvs.venv_for(lockfile_digest(head), head, pod.venvs, pod.build)
-        context = {INPUTS_BASE: lease.base}
+        context = _context(lease, found, pod.secrets)
         options = run_static.Settings(pod.runs, venv, pod.ports, pod.whitelist, pod.timeout, context)
         started = pod.clock()
         result = run_static.run(found, head, base, grader, options)
         seconds = pod.clock() - started
-    summary = result.report.read_text()
+    secrets = [value for name, value in context.items() if name.startswith(SECRETS) and value]
+    if secrets:
+        result.log.write_bytes(_masked(result.log.read_bytes(), secrets))
+    summary = _masked(result.report.read_bytes(), secrets).decode()
     record = {"gate": result.gate, "code": result.code, "skipped": result.skipped, "summary": summary}
     lookups = caches.report(fetched, [built])
     report = _report(pod, {**record, "seconds": seconds, caches.KEY: lookups})
@@ -209,7 +241,7 @@ def tests(pod: Pod, suite: Suite, lease: Lease) -> Finished:
     ledger, on as many workers as its slots; the report counts the git and uv cache lookups it made."""
     with pod.trees.shared(lease.head) as ((tree,), fetched):
         venv, built = venvs.venv_for(lockfile_digest(tree), tree, pod.venvs, pod.build)
-        manifest = json.loads(suite.manifest.read_text())
+        manifest = json.loads(lease.unit.manifest)
         lab = run_tests.Lab(pod.runs, pod.ports, pod.whitelist, manifest, suite.flakes, pod.timeout, False)
         started = pod.clock()
         verdict = run_tests.run(lease.unit.members, tree, venv, lease.slots, lab)
@@ -305,7 +337,9 @@ def settings(environ: Mapping[str, str]) -> tuple[Pod, Suite, Mutation]:
     mirror = Mirror(node, root / "store", str(node), worktrees.lab(allowed), allowed.get(contract.REPOSITORY, ""))
     trees = Trees(Worktrees(mirror, root / "trees", TREES))
     ports = PortAllocator(FIRST_PORT, LAST_PORT, PORT_WIDTH)
-    pod = Pod(trees, root, ports, WHITELIST, UNIT_TIMEOUT_S)
+    prefix = contract.SECRET_PREFIX
+    secrets = {name.removeprefix(prefix): value for name, value in allowed.items() if name.startswith(prefix)}
+    pod = Pod(trees, root, ports, WHITELIST, UNIT_TIMEOUT_S, secrets=secrets)
     for folder in (pod.runs, pod.venvs):
         folder.mkdir(parents=True, exist_ok=True)
     suite = Suite(Path(allowed[contract.MANIFEST]), Path(allowed[contract.FLAKES]))
@@ -314,7 +348,8 @@ def settings(environ: Mapping[str, str]) -> tuple[Pod, Suite, Mutation]:
 
 
 def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
-    """Run the worker over the adapters until SIGTERM stops it, then let its running units drain."""
+    """Run the worker over the adapters until SIGTERM stops it, then let its running units drain; the contract metrics
+    port serves the worker's registry until the drain ends."""
     argparse.ArgumentParser(prog="agentihooks ci-lab-worker").parse_args(argv)
     pod, suite, graded = settings(environ)
     cpus = os.cpu_count() or 1
@@ -327,5 +362,10 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
         service.stop()
 
     signal.signal(signal.SIGTERM, stop)
-    service.run()
+    with metrics.serve_registry("", contract.METRICS_PORT, metrics.Registry()) as exposition:
+        threading.Thread(target=exposition.serve_forever).start()
+        try:
+            service.run()
+        finally:
+            exposition.shutdown()
     return 0

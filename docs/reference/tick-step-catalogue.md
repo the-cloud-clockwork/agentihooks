@@ -59,6 +59,7 @@ How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step
 | lost runner | placement notices | slow | 2 | 60 | drained resume | none | none |
 | quota notice | placement notices | tick | 2 | 60 | drained resume | none | none |
 | time left | placement notices | slow | 2 | 60 | drained resume | none | none |
+| autoscaler alert | reopen passes | slow | 2 | 60 | drained resume | none | swarm-autoscaler-scale-up-alert |
 | dev red reopen | reopen passes | tick | 2 | 60 | drained resume | none | none |
 | fleet red notice | reopen passes | slow | 30 | 60 | drained resume | none | none |
 | prerequisite reopen | reopen passes | tick | 2 | 60 | dev red reopen | none | none |
@@ -99,6 +100,7 @@ How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step
 | metrics record | wrapper metrics | slow | 29 | 600 | health findings | none | none |
 | snapshot job | wrapper metrics | tick | 2 | 60 | none | none | none |
 | dependency audit | wrapper phases | tick | 2 | 60 | none | none | swarm-ordering-dependency-audit |
+| focus unclaimed | wrapper phases | tick | 2 | 60 | none | coordination | swarm-focus-unclaimed-finding |
 | planning after phase | wrapper phases | tick | 12 | 60 | planning and phase pass | none | none |
 | planning and phase pass | wrapper phases | tick | 12 | 60 | none | none | none |
 | urgent hold | wrapper phases | tick | 2 | 60 | none | none | none |
@@ -112,4 +114,5 @@ How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step
 | refresh job | wrapper refresh | tick | 2 | 600 | none | none | none |
 | outbox migration | wrapper relay | tick | 2 | 60 | none | none | none |
 | page relay | wrapper relay | tick | 2 | 60 | none | none | none |
-| tick view | wrapper view | tick | 3 | 60 | none | none | none |
+| view wait | wrapper relay | tick | 60 | 60 | intent check | none | tick-view-wait-off-scheduler |
+| tick view | wrapper view | tick | 3 | 60 | view wait | none | none |

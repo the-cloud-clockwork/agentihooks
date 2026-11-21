@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -13,10 +14,11 @@ _SELECTORS = [
     ("coverage-ratchet", "Find the run that published the base baseline"),
     ("select", "Find the dev push run of the dispatched base"),
 ]
+_LookupResult = tuple[subprocess.CompletedProcess[str], str, str]
 
 
 @pytest.fixture
-def lookup(tmp_path):
+def lookup(tmp_path: Path) -> Callable[..., _LookupResult]:
     tools = tmp_path / "bin"
     tools.mkdir()
     gh = tools / "gh"
@@ -34,7 +36,11 @@ def lookup(tmp_path):
         "    body = {'status': data['queue_ancestry'] if path.endswith('...head') else data['ancestry']}\n"
         "elif '/commits/' in path: body = {'sha': 'base', 'commit': {'tree': {'sha': 'tree'}}, 'parents': [{'sha': 'base'}]}\n"
         "elif path.endswith('/jobs'): body = {'jobs': data['jobs']}\n"
-        "elif path.endswith('/artifacts'): body = {'artifacts': [{'name': name, 'expired': False} for name in data['artifacts']]}\n"
+        "elif path.endswith('/artifacts'):\n"
+        "    names = [name for name in data['artifacts'] if 'name' not in query or name == query['name'][0]]\n"
+        "    size = min(int(query.get('per_page', ['30'])[0]), 100)\n"
+        "    start = (int(query.get('page', ['1'])[0]) - 1) * size\n"
+        "    body = {'total_count': len(names), 'artifacts': [{'name': name, 'expired': False} for name in names[start:start + size]]}\n"
         "elif path.endswith('/runs'):\n"
         "    run = data['run']\n"
         "    keep = all(run.get(key) == value[0] for key, value in query.items() if key in ('head_sha', 'status', 'event'))\n"
@@ -51,7 +57,14 @@ def lookup(tmp_path):
     )
     gh.chmod(0o755)
 
-    def run(selector, event="push", fault=None, queue_ancestry="diverged"):
+    def run(
+        selector: tuple[str, str],
+        event: str = "push",
+        fault: str | None = None,
+        queue_ancestry: str = "diverged",
+        crowd: int = 0,
+        conclusion: str = "failure",
+    ) -> _LookupResult:
         publisher, measure, publish = (
             ("coverage-baseline", "Compute the coverage baseline", "Publish the passed dev coverage baseline")
             if event == "push"
@@ -82,12 +95,12 @@ def lookup(tmp_path):
                 "head_sha": "base",
                 "head_branch": "dev" if event == "push" else "gh-readonly-queue/dev/pr-1-base",
                 "status": "completed",
-                "conclusion": "failure",
+                "conclusion": conclusion,
             },
             "ancestry": "ahead",
             "queue_ancestry": queue_ancestry,
             "jobs": jobs,
-            "artifacts": ["coverage-baseline", "durations-merged"],
+            "artifacts": [*(f"filler-{number}" for number in range(crowd)), "coverage-baseline", "durations-merged"],
         }
         changes = {
             "unit": (jobs[0], "conclusion", "failure"),
@@ -169,6 +182,20 @@ def test_lookup_accepts_measured_publication_when_its_ratchet_failed(lookup, sel
 @pytest.mark.parametrize("selector", _SELECTORS)
 def test_lookup_accepts_the_twenty_shard_plan_of_a_dev_push_run(lookup, selector):
     result, output, _ = lookup(selector, fault="twenty-shards")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "id=222\n" in output
+
+
+@pytest.mark.feature("artifact-lookups-past-the-first-page")
+@pytest.mark.parametrize(
+    "selector",
+    [("select", "Find the latest passed dev push run"), *_SELECTORS],
+    ids=["merge-group", "coverage-ratchet", "dispatch"],
+)
+def test_lookup_finds_the_artifacts_past_the_first_page_of_a_crowded_run(
+    lookup: Callable[..., _LookupResult], selector: tuple[str, str]
+) -> None:
+    result, output, _ = lookup(selector, crowd=104, conclusion="success")
     assert result.returncode == 0, result.stdout + result.stderr
     assert "id=222\n" in output
 

@@ -1125,8 +1125,15 @@ def test_dedicated_chart_group_without_a_trusted_jobs_mapping_does_not_crash() -
 DEDICATED_GROUPS = {
     "dedicated_chart_group": ("chart-release.yml", ("package", "kind", "publish"), "chart-release", True),
     "flake_history_group": ("test.yml", ("flake-budget",), "flake-history", False),
+    "focused_proof_group": (
+        "proofs.yml",
+        tuple(yaml.safe_load((ROOT / lanes.WORKFLOWS / "proofs.yml").read_text())["jobs"]),
+        "${{ format('focused-proof-{0}', github.run_id) }}",
+        True,
+    ),
     "hive_release_group": ("swarm-node-image.yml", ("hive",), "hive-worker-release", False),
 }
+JOB_BOUND_GROUPS = sorted(set(DEDICATED_GROUPS) - {"focused_proof_group"})
 LANE_RULE_EXCEPTIONS = {
     "job unchanged since the merge base": (frozenset(), False),
     "dev push group": (frozenset({"dev_push_group"}), True),
@@ -1189,9 +1196,12 @@ def _literal_group_holders() -> set[str]:
         if isinstance(target, ast.Name)
     }
     return {
-        function.name
+        function.name.removeprefix("x_").removesuffix("__mutmut_orig")
+        if function.name.endswith("__mutmut_orig")
+        else function.name
         for function in module.body
         if isinstance(function, ast.FunctionDef)
+        and ("__mutmut_" not in function.name or function.name.endswith("__mutmut_orig"))
         and any(
             isinstance(key, ast.Constant)
             and key.value == "group"
@@ -1234,7 +1244,7 @@ def test_every_literal_concurrency_group_in_the_grader_sits_in_a_dedicated_admis
     assert _literal_group_holders() == set(DEDICATED_GROUPS)
 
 
-@pytest.mark.parametrize("admission", sorted(DEDICATED_GROUPS))
+@pytest.mark.parametrize("admission", JOB_BOUND_GROUPS)
 def test_every_dedicated_group_admission_refuses_a_job_edited_outside_its_concurrency_block(admission: str) -> None:
     trusted, head, block = _dedicated_fixture(admission)
     admit = getattr(lanes, admission)
@@ -1277,11 +1287,64 @@ def test_every_dedicated_group_admission_refuses_another_job_block_or_workflow(a
         {**block, "extra": True},
     ]
     cases = {
-        "another job": admit("other-job", block, job, copied),
         "another workflow": admit(name, block, job, {**trusted, "name": "Other workflow"}),
         **{f"block {wrong}": admit(name, wrong, job, trusted) for wrong in blocks},
     }
+    if admission in JOB_BOUND_GROUPS:
+        cases["another job"] = admit("other-job", block, job, copied)
     assert [case for case, admitted in cases.items() if admitted] == []
+
+
+def test_the_focused_proof_group_takes_any_job_of_the_dispatched_proofs_workflow() -> None:
+    trusted, head, block = _dedicated_fixture("focused_proof_group")
+    edits = {
+        f"{name}: {edit}": job
+        for name in DEDICATED_GROUPS["focused_proof_group"][1]
+        for edit, job in _outside_edits(head["jobs"][name]).items()
+    }
+    assert edits
+    assert [edit for edit, job in edits.items() if not lanes.focused_proof_group("lab", block, job, trusted)] == []
+
+
+@pytest.mark.parametrize("own", [False, True])
+def test_a_new_proofs_job_and_dispatch_option_keep_the_focused_group_and_a_job_off_it_is_refused(own: bool) -> None:
+    import copy
+
+    trusted = _workflow_file("proofs.yml")
+    head: dict[Any, Any] = copy.deepcopy(trusted)
+    head[True]["workflow_dispatch"]["inputs"]["proof"]["options"].append("lab")
+    lab: dict[str, Any] = {"if": "inputs.proof == 'lab'", "runs-on": "ubuntu-latest", "steps": [{"run": "echo lab"}]}
+    if own:
+        lab["concurrency"] = trusted["concurrency"]
+    head["jobs"]["lab"] = lab
+    assert lanes.problems(head, trusted) == []
+    assert lanes.grade(yaml.safe_dump(head), yaml.safe_dump(trusted), yaml.safe_dump(trusted)) == []
+    head["jobs"]["off"] = {**lab, "concurrency": {**trusted["concurrency"], "group": "off-${{ github.run_id }}"}}
+    assert lanes.problems(head, trusted) == ["job off has no shared hosted lane concurrency group"]
+
+
+@pytest.mark.parametrize("change", ["push", "pull_request", "spelling", "name", "untrusted", "base"])
+def test_a_proofs_head_that_runs_off_a_dispatch_or_leaves_the_proofs_workflow_keeps_no_focused_group(
+    change: str,
+) -> None:
+    import copy
+
+    trusted: dict[Any, Any] = copy.deepcopy(_workflow_file("proofs.yml"))
+    head: dict[Any, Any] = copy.deepcopy(trusted)
+    head["jobs"]["lab"] = {"runs-on": "ubuntu-latest"}
+    baseline: dict[Any, Any] | None = trusted
+    if change in ("push", "pull_request"):
+        head[True][change] = None
+    elif change == "spelling":
+        head["on"] = head.pop(True)
+        head[True] = {"push": None}
+    elif change == "name":
+        head["name"] = "Proofs copy"
+    elif change == "untrusted":
+        baseline = None
+    else:
+        trusted[True]["push"] = None
+    assert "job lab has no shared hosted lane concurrency group" in lanes.problems(head, baseline)
 
 
 @pytest.mark.parametrize(
