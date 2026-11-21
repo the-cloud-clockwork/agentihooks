@@ -44,6 +44,10 @@ DOC: dict[str, Any] = {
     "phases": [{"id": "p1", "title": "Login phase", "description": "Login mission"}],
     "tasks": [TARGET, ENHANCEMENT, PHASE_PLAN],
 }
+HEAD = (
+    "This plan task enhances task t-login, too thin or vague for an engineer to claim: the thin check failed it on "
+    "the rules this task's description lists. steering.md holds its title, phase, territory and description."
+)
 STEPS = (
     "enhances task t-login",
     f"agentihooks api --slug demo --as {PLANNER} get tasks/t-login",
@@ -83,6 +87,8 @@ def test_enhancement_prompt_names_target_failed_rules_and_every_step() -> None:
 
     missing = [line for line in (*RULES, *STEPS) if line not in text]
     assert missing == []
+    assert HEAD in text.splitlines()
+    assert "1. Read steering.md: the target task's record and the project and mission intent." in text.splitlines()
     assert "Slice only phase" not in text
     assert "--plan-slice <slice name>" not in text
 
@@ -107,3 +113,12 @@ def test_enhancement_steering_names_a_target_missing_from_the_ledger() -> None:
     text = ledger_workspace.steering(ENHANCEMENT, {**DOC, "tasks": [ENHANCEMENT, PHASE_PLAN]})
 
     assert "- Task: t-login is not in the ledger: block this task." in text
+
+
+@pytest.mark.feature("planner-enhancement-prompt")
+def test_enhancement_steering_leaves_unset_target_fields_blank() -> None:
+    bare = {"id": "t-login", "phase": "p1"}
+    text = ledger_workspace.steering(ENHANCEMENT, {**DOC, "tasks": [bare, ENHANCEMENT]})
+
+    block = ["Enhancement target", "- Task: t-login: ", "- Phase: p1", "- Territory: none", "- Description: ", ""]
+    assert "\n".join(block) in text

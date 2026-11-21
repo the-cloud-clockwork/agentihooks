@@ -3618,7 +3618,8 @@
         "tests/swarm/test_enhance_prompt.py::test_phase_plan_steering_carries_no_enhancement_block",
         "tests/swarm/test_enhance_prompt.py::test_enhancement_prompt_names_target_failed_rules_and_every_step",
         "tests/swarm/test_enhance_prompt.py::test_enhancement_steering_pastes_target_title_description_territory_and_phase",
-        "tests/swarm/test_enhance_prompt.py::test_enhancement_steering_names_a_target_missing_from_the_ledger"
+        "tests/swarm/test_enhance_prompt.py::test_enhancement_steering_names_a_target_missing_from_the_ledger",
+        "tests/swarm/test_enhance_prompt.py::test_enhancement_steering_leaves_unset_target_fields_blank"
       ]
     },
     {
