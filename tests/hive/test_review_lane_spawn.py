@@ -92,6 +92,12 @@ def test_the_hive_controller_places_the_lane_on_a_hive(lane: str, profile: str) 
 
 @pytest.mark.parametrize("lane", ["eng", "review"])
 @pytest.mark.feature("review-lane-spawn")
+def test_a_kubernetes_proof_keeps_the_lane_off_hives(lane: str) -> None:
+    assert not _hive_lane(lane, {}, True)
+
+
+@pytest.mark.parametrize("lane", ["eng", "review"])
+@pytest.mark.feature("review-lane-spawn")
 def test_the_kubernetes_backend_places_the_lane(lane: str) -> None:
     assert Placement("kubernetes").backend_for(lane, {"id": "t1"}) == "kubernetes"
 
