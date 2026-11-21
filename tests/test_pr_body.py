@@ -98,6 +98,22 @@ def test_inline_comment_examples_preserve_visible_sections(api: ModuleType, deli
 
 
 @pytest.mark.feature("pull-request-recon-context")
+@pytest.mark.parametrize(
+    "example",
+    ["> ## Assumptions\n> Keep this quoted example.", "- ## Assumptions\n\n  Keep this list example."],
+    ids=["quote", "list"],
+)
+def test_nested_heading_examples_are_preserved(api: ModuleType, example: str) -> None:
+    assert api.missing_sections(example + "\n\n" + body_without("Assumptions")) == ["Assumptions"]
+    original = f"## Summary\n\n{example}\n\n## Checklist\n\n- [x] Reviewed.\n"
+    filled = api.fill(recon_text(), original)
+    assert example in filled
+    assert "## Summary\n" in filled
+    assert "- [x] Reviewed." in filled
+    assert api.missing_sections(filled) == []
+
+
+@pytest.mark.feature("pull-request-recon-context")
 def test_fill_extracts_recon_and_preserves_body(api: ModuleType) -> None:
     original = (
         "## Summary\n\nKeep this evidence.\n\n## Assumptions\n\n<!-- fill -->\n\n## Checklist\n\n- [x] Reviewed.\n"

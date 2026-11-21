@@ -32,7 +32,7 @@ def _headings(text: str) -> list[tuple[int, str, int, int]]:
     return [
         (int(token.tag[1:]), tokens[index + 1].content.strip().casefold(), offsets[token.map[0]], offsets[token.map[1]])
         for index, token in enumerate(tokens)
-        if token.type == "heading_open" and token.map is not None
+        if token.type == "heading_open" and token.level == 0 and token.map is not None
     ]
 
 

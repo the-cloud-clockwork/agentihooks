@@ -19,6 +19,7 @@
         "tests/test_pr_body.py::test_unclosed_comments_do_not_supply_sections",
         "tests/test_pr_body.py::test_fenced_comment_openers_preserve_visible_sections",
         "tests/test_pr_body.py::test_inline_comment_examples_preserve_visible_sections",
+        "tests/test_pr_body.py::test_nested_heading_examples_are_preserved",
         "tests/test_pr_body.py::test_fill_extracts_recon_and_preserves_body",
         "tests/test_pr_body.py::test_fill_refuses_missing_recon_details",
         "tests/test_pr_body.py::test_check_event_names_every_missing_section",
