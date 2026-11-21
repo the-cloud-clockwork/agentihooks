@@ -7329,7 +7329,8 @@
         "tests/gates/test_recon.py::test_the_build_gate_entry_judges_recon_first_and_stops_at_its_deny",
         "tests/gates/test_recon.py::test_the_build_gate_still_judges_the_same_call_after_recon_passes",
         "tests/gates/test_recon.py::test_recon_at_log_only_logs_the_would_be_deny_and_lets_the_build_gate_decide",
-        "tests/gates/test_recon.py::test_the_recon_gate_runs_alone_by_name_and_unknown_or_missing_names_exit_one"
+        "tests/gates/test_recon.py::test_the_recon_gate_runs_alone_by_name_and_unknown_or_missing_names_exit_one",
+        "tests/gates/test_build_executor.py::test_the_build_condition_judges_the_recon_plan_first_through_the_real_hook"
       ]
     },
     {
