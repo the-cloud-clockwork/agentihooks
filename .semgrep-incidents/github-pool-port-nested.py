@@ -19,6 +19,12 @@ def nested_port_with_caller(source: GitHubSourceControl, query: str) -> Any:
         return source.graph(query, {}, deadline=Deadline.after(20))
 
 
+def nested_download(source: GitHubSourceControl, path: str) -> bytes:
+    with pool.limit("github"):
+        # ruleid: github-pool-port-nested
+        return source.download(path, deadline=Deadline.after(20))
+
+
 def nested_read(args: list[str]) -> subprocess.CompletedProcess[Any]:
     with github_reads.calling("merge-queue"), pool.limit("github"):
         # ruleid: github-pool-port-nested

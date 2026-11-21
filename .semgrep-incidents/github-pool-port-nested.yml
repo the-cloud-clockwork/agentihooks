@@ -16,4 +16,5 @@ rules:
                   ...
       - pattern-either:
           - pattern: $PORT.graph(...)
+          - pattern: $PORT.download(...)
           - pattern: github_reads.rest(...)

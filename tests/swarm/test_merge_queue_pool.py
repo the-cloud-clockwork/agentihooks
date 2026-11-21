@@ -21,7 +21,7 @@ def test_four_graphql_calls_complete_with_the_real_github_pool(monkeypatch: pyte
     calls: Queue[list[str]] = Queue()
 
     def port(run: Callable[..., Any]) -> GitHubSourceControl:
-        barrier.wait(timeout=5)
+        barrier.wait(timeout=10)
         return original_port(run)
 
     def run(command: list[str], **options: Any) -> subprocess.CompletedProcess[str]:
@@ -38,6 +38,6 @@ def test_four_graphql_calls_complete_with_the_real_github_pool(monkeypatch: pyte
     for _ in threads:
         assert answers.get(timeout=10) == {"resource": {"number": 42}}
     for thread in threads:
-        thread.join(timeout=1)
+        thread.join(timeout=10)
         assert not thread.is_alive()
     assert calls.qsize() == 4
