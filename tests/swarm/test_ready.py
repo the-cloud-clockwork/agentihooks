@@ -403,7 +403,7 @@ def test_repeated_ticks_never_respawn_a_released_task_waiting_on_its_pull_reques
     monkeypatch.setattr(stall_watch, "ntfy", lambda *args: "")
     attempts = []
 
-    def queue(action, url, journal=None):
+    def queue(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
         attempts.append(url)
         if pull.queued:
             return {}
@@ -601,7 +601,7 @@ def merging(monkeypatch):
     monkeypatch.setattr(stack, "shell", shell)
     _port(monkeypatch, shell.port)
 
-    def queue(action, url, journal=None):
+    def queue(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
         queued.append((action, url))
         queue.journals.append(journal)
         return {"url": url, "queued": True, **getattr(queue, "extra", {})}
@@ -701,8 +701,8 @@ def test_the_merge_pass_squash_merges_without_a_queue_or_tests_workflow(merging,
             data = {"resource": pull}
         return subprocess.CompletedProcess(command, 0, json.dumps({"data": data}))
 
-    def queue(action, url, journal=None):
-        return merge_queue.operate(action, url, github, journal=journal)
+    def queue(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
+        return merge_queue.operate(action, url, github, journal=journal, priority=priority)
 
     merging.run(queuer=queue)
     assert merged_heads == [f"head={HEAD}"]
@@ -711,7 +711,7 @@ def test_the_merge_pass_squash_merges_without_a_queue_or_tests_workflow(merging,
     assert ready.record(merging.store, "sw", "t1") is None
 
 
-def refused(action, url, journal=None):
+def refused(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
     raise SwarmError("GraphQL: Pull request is not mergeable")
 
 
@@ -754,7 +754,7 @@ def test_a_pull_request_the_queue_keeps_refusing_reopens_the_task(merging):
 def test_an_unknown_merge_error_reopens_the_task_with_its_reason(merging, error):
     merging.pulls[URL] = GREEN
 
-    def failed(action, url, journal=None):
+    def failed(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
         raise SwarmError(error)
 
     assert merging.run(queuer=failed) == [
@@ -782,7 +782,7 @@ def test_an_unknown_merge_error_reopens_the_task_with_its_reason(merging, error)
 def test_an_outage_or_a_hold_while_queueing_never_counts_toward_the_reopen(merging, error):
     merging.pulls[URL] = GREEN
 
-    def down(action, url, journal=None):
+    def down(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
         raise SwarmError(error)
 
     for _ in range(6):
@@ -791,7 +791,7 @@ def test_an_outage_or_a_hold_while_queueing_never_counts_toward_the_reopen(mergi
     assert merging.rows["t1"]["state"] == "pr"
 
 
-def timed_out(action: str, url: str, journal: Any = None) -> dict[str, Any]:
+def timed_out(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
     raise SwarmError("GitHub API: timed out")
 
 
@@ -864,7 +864,7 @@ def test_outage_time_never_counts_toward_a_released_pull_request_green_hold(
 def test_a_pull_request_into_another_base_counts_as_a_refusal(merging):
     merging.pulls[URL] = GREEN
 
-    def elsewhere(action, url, journal=None):
+    def elsewhere(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
         raise SwarmError("swarm merge queue operations require a pull request into dev")
 
     merging.run(queuer=elsewhere)
@@ -1454,7 +1454,7 @@ def test_an_enqueue_github_refuses_reopens_the_task_awaiting_fix(merging):
     merging.pulls[URL] = GREEN
     error = "GitHub refused to enqueue the pull request"
 
-    def refused_enqueue(action, url, journal=None):
+    def refused_enqueue(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
         raise SwarmError(error)
 
     assert merging.run(queuer=refused_enqueue) == [
@@ -1581,7 +1581,7 @@ def test_a_requeue_the_queue_refuses_records_no_requeue_comment(merging):
     left_queue_green(merging)
     merging.exits.failures = []
 
-    def refuse(action, url, journal=None):
+    def refuse(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
         raise SwarmError("timed out")
 
     for minute in range(ready.QUEUE_TRIES + 1):
@@ -1609,7 +1609,7 @@ def test_an_unmergeable_entry_reopens_with_its_cause_within_one_tick(merging, qu
         }
     )
 
-    def dequeue(action, url, journal=None):
+    def dequeue(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
         assert (action, url) == ("dequeue", URL)
         merging.queued.append((action, url))
         return {"queued": False}
@@ -1790,7 +1790,7 @@ def test_a_failed_requeue_raises_a_ledger_alert(merging):
     dequeued_transient(merging)
     merging.pulls[URL] = GREEN
 
-    def refuse(action, url, journal=None):
+    def refuse(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
         merging.queued.append((action, url))
         raise SwarmError("timed out")
 
@@ -1987,7 +1987,7 @@ def test_a_stale_conflict_watch_cannot_clear_a_new_claim_generation(merging, suc
         {"state": "OPEN", "mergeable": "CONFLICTING", "mergeQueueEntry": {"id": "entry", "state": "UNMERGEABLE"}}
     )
 
-    def replace_owner(action, url, journal=None):
+    def replace_owner(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
         merging.rows["t1"] = {**merging.rows["t1"], "claimed_by": successor, "claim_generation": 2}
         merging.store.release("sw", "t1", AGENT)
         merging.store.claim("sw", "t1", successor, 60_000)
@@ -2051,7 +2051,7 @@ def test_a_changed_pull_binding_survives_the_stale_conflict_watch(merging, field
         {"state": "OPEN", "mergeable": "CONFLICTING", "mergeQueueEntry": {"id": "entry", "state": "UNMERGEABLE"}}
     )
 
-    def changed(action, url, journal=None):
+    def changed(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
         merging.rows["t1"] = {**merging.rows["t1"], field: value}
         return {"queued": False}
 
@@ -2089,7 +2089,7 @@ def test_an_owner_registered_during_dequeue_keeps_its_claim(merging):
         {"state": "OPEN", "mergeable": "CONFLICTING", "mergeQueueEntry": {"id": "entry", "state": "UNMERGEABLE"}}
     )
 
-    def registered(action, url, journal=None):
+    def registered(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
         merging.store.put_agent("sw", AgentRecord(AGENT, "eng", "t1"))
         return {"queued": False}
 
@@ -2181,7 +2181,7 @@ def test_a_dequeue_that_does_not_finish_keeps_the_task_for_the_next_tick(merging
     queued_at_now(merging)
     merging.pulls[URL] = pull_request({"state": "OPEN", "mergeQueueEntry": {"id": "entry", "state": "UNMERGEABLE"}})
 
-    def dequeue(action, url, journal=None):
+    def dequeue(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
         assert (action, url) == ("dequeue", URL)
         if failure != "still queued":
             raise SwarmError(failure)

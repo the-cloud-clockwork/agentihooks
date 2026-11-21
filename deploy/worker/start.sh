@@ -183,6 +183,7 @@ member="$(python3 -c 'import hooks.config; from scripts.swarm.commands import hi
 set_args=(ui=no ephemeral=yes draining=no "excluded=${HIVE_EXCLUDED-master}" "master-swarms=${HIVE_MASTER_SWARMS-}" \
   "prefer=${HIVE_PREFER-}")
 [[ -n "${HIVE_CAPABILITIES+set}" ]] && set_args+=("capabilities=${HIVE_CAPABILITIES}")
+[[ -n "${HIVE_PINNED:-}" ]] && set_args+=("pinned=${HIVE_PINNED}")
 [[ -n "${HIVE_NAME:-}" ]] && set_args+=("name=${HIVE_NAME}")
 agentihooks hive set --keep --reason "the worker started" "$member" "${set_args[@]}"
 agentihooks hive set --reason "the chart sets the agent cap" "$member" "max-agents=${HIVE_MAX_AGENTS:-auto}"

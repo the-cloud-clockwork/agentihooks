@@ -1,0 +1,15 @@
+rules:
+  - id: inbox-wake-host-only-target
+    languages: [python]
+    severity: ERROR
+    message: >-
+      An inbox wake reads its hive from reports.host alone. A hub admitted worker has no runtime target, so
+      reports.host is empty and the wake reads and types into the local herdr instead of ordering the hive that
+      admitted it. Use reports.host($A) or reports.admitted($A), as HerdrRuntime.nudge does.
+    paths:
+      include:
+        - /scripts/inbox/
+        - inbox-wake-host-only-target.py
+    patterns:
+      - pattern: reports.host($A)
+      - pattern-not-inside: reports.host($A) or reports.admitted($A)

@@ -10,7 +10,7 @@ from typing import Protocol
 from .entry import Entry
 from .fragments import document  # pyright: ignore[reportUnknownVariableType]
 
-BEHIND = 64
+BEHIND = 8
 
 
 class Kept(Protocol):

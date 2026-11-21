@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/pr_wait.py:scripts.swarm.pr_wait.x_holds_lab:6e065be4b0af6eb5e70b60fc84c6d53a8aa4db0ea97efabd5f803d0f1acd0227": {
+    "reader": "standards_reader",
+    "reason": "Changes only the default of on.get(\"target\", ...), reached only when a lab wait lacks a target. For any non-empty head, guaranteed by the earlier if not head guard, both \"\".endswith(\"/grades/<head>\") and \"XXXX\".endswith(\"/grades/<head>\") are False because the suffix is at least 8 characters, so the and chain returns False for every input and no return value changes."
+  }
+}

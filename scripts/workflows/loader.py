@@ -28,14 +28,15 @@ def layer_dirs(state: dict, cwd: str | Path | None) -> list[tuple[str, Path]]:
     shared = profile_chain.shared_bundle_path(state)
     layers = [("package", PACKAGE_WORKFLOWS)]
     if bundle is not None:
-        layers.append(("bundle", bundle / WORKFLOWS))
+        layers.append(("bundle", profile_chain.layer_root(bundle) / WORKFLOWS))
     if shared is not None:
-        layers.append(("shared-bundle", shared / WORKFLOWS))
+        layers.append(("shared-bundle", profile_chain.layer_root(shared) / WORKFLOWS))
     if user is not None:
-        layers.append(("user-bundle", user / WORKFLOWS))
+        layers.append(("user-bundle", profile_chain.layer_root(user) / WORKFLOWS))
     chain = profile_chain.profile_dirs(
         bundle, profile_chain.active_profile(state), profile_chain.linked_profiles(state), user, shared
     )
+    chain = profile_chain.unlayered(chain, (bundle, shared, user))
     layers.extend((f"profile:{name}", directory / WORKFLOWS) for name, directory in chain)
     root = repo_root(cwd)
     if root is not None:
