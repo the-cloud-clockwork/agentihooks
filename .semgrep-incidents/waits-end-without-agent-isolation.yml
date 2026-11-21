@@ -16,7 +16,7 @@ rules:
               ...
       - metavariable-regex:
           metavariable: $PASS
-          regex: ^(end_pass|enforce_pass)$
+          regex: ^(end_pass|enforce_pass)(_|$)
       - pattern: |
           for $AGENT in $STORE.agents($SLUG):
               ...
