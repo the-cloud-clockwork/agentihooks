@@ -223,6 +223,65 @@ def test_a_slow_run_sample_keeps_only_stages_strictly_over_a_budget_and_the_run_
     assert _found(store)["links"] == [{"label": "Slow run 8", "url": run_url}]
 
 
+@pytest.mark.feature("ci-readers-collected-stage-budget")
+@pytest.mark.parametrize(
+    ("conclusion", "expected"),
+    [
+        ("success", "5 minutes 30 seconds"),
+        ("failure", "5 minutes 30 seconds"),
+        ("skipped", "1 minutes"),
+        (None, "1 minutes"),
+    ],
+)
+def test_overrun_description_resolves_the_collected_budget_and_stored_fallback(
+    conclusion: str | None, expected: str
+) -> None:
+    job = _job("mutation-plan", "00:00", "03:00")
+    if conclusion is not None:
+        job["steps"] = [
+            {"name": "Take the local actions from the workflow revision for the stats", "conclusion": conclusion}
+        ]
+    jobs = [job, _job("Gate — Required", "16:00", "17:00")]
+    text = defects.defect(_run(8, "00:00", "17:00"), jobs)
+    assert text == (
+        "A pull request Tests run took 17 minutes from push to Gate Required, over the 15 minute budget."
+        f" Its slowest stage mutation-plan took 3 minutes against {expected}."
+    )
+
+
+@pytest.mark.feature("ci-readers-collected-stage-budget")
+@pytest.mark.parametrize(
+    ("conclusion", "completed", "expected"),
+    [
+        ("success", "03:00", {}),
+        ("failure", "03:00", {}),
+        ("success", "05:30", {}),
+        ("success", "05:31", {"mutation-plan": 331}),
+        ("skipped", "01:00", {}),
+        ("skipped", "01:01", {"mutation-plan": 61}),
+        ("skipped", "03:00", {"mutation-plan": 180}),
+        (None, "03:00", {"mutation-plan": 180}),
+    ],
+)
+def test_overrun_evidence_resolves_the_collected_budget_and_stored_fallback(
+    swarm: tuple[SimpleNamespace, SimpleNamespace], conclusion: str | None, completed: str, expected: dict[str, int]
+) -> None:
+    store, _ = swarm
+    job = _job("mutation-plan", "00:00", completed, 8)
+    if conclusion is not None:
+        job["steps"] = [
+            {"name": "Take the local actions from the workflow revision for the stats", "conclusion": conclusion}
+        ]
+    jobs = [job, _job("unbudgeted", "00:00", "16:00", 8), _job("Gate — Required", "16:00", "17:00", 8)]
+    evidence, links = defects._stage_evidence(store.redis, "sw", _run(8, "00:00", "17:00"), jobs, NOW_MS)
+    sample = json.loads(store.redis.hget(defects.key("sw", "stages"), "8"))
+    assert sample["stages"] == expected
+    assert evidence == tuple(
+        f"mutation-plan: 1 run over budget; worst {defects._spoken(spent)}." for spent in expected.values()
+    )
+    assert links == ({"label": "Slow run 8", "url": URL.format(8)},)
+
+
 def test_github_is_read_from_the_repository_over_the_window(swarm, listing):
     store, config = swarm
     calls = []
