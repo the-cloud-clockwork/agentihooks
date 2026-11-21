@@ -1142,6 +1142,17 @@
       ]
     },
     {
+      "id": "swarm-snapshot-batched-read",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-snapshot-batched-reads",
+      "behaviour": "A swarm snapshot export reads its keys in Redis scripts of at most DUMP_BATCH keys, packing whole groups in order and running a larger group alone, with each inbox address, its items and its shared set checks in one group, so no script reads the whole key space and holds Redis past its busy limit, and the batched export equals a single script read.",
+      "seam": "scripts.swarm.store.RedisStore.export through _dump and _batches",
+      "tests": [
+        "tests/swarm/test_snapshot.py::test_an_export_over_more_keys_than_one_batch_reads_them_in_bounded_scripts_that_keep_each_address_whole",
+        "tests/swarm/test_snapshot.py::test_dump_packs_groups_in_order_and_runs_a_group_larger_than_a_batch_alone"
+      ]
+    },
+    {
       "id": "ci-select-markdown-glob-tests",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2484",
