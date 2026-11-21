@@ -633,7 +633,7 @@ them:
 | `ci_lab_core_seconds_total`, `ci_lab_heads_graded_total` | Core minutes per merged pull request | The stat reads No data |
 | `ci_lab_cache_hits_total`, `ci_lab_cache_misses_total` | `CILabCacheMissRatioHigh`, Cache hit ratio | `Scheduler._place` counts the `verdict` cache and `metrics.observe_unit` counts the `git` and `uv` lookups a unit report carries, so the alert and panel wait only on a running scheduler |
 | `ci_lab_verdict_mismatch_total` | `CILabVerdictMismatch`, Shadow mismatches per gate | `shadow.Shadow` counts it in a registry of its own and has no live caller, so the alert cannot fire |
-| `ci_lab_unit_duration_seconds`, `ci_lab_mirror_age_seconds`, `ci_lab_github_rate_remaining` | No alert or panel | Nothing, since no alert or panel reads them. `metrics.observe_records` sets the unit duration when a caller runs it; no code sets the other two |
+| `ci_lab_unit_duration_seconds`, `ci_lab_mirror_age_seconds`, `ci_lab_github_rate_remaining` | No alert or panel | Nothing, since no alert or panel reads them. `metrics.observe_unit` sets the unit duration for each finished attempt whose report carries `seconds`; no code sets the other two |
 
 `Scheduler._reap` counts `ci_lab_units_redelivered_total` and `ci_lab_units_lost_total` on the
 registry the metrics port serves, one for each expired lease it requeues or marks lost. No alert or
@@ -2310,11 +2310,9 @@ key; the builders are pure and read no file, clock or network.
 | `stats` | `scope` | Source to changed lines, for the sources the test file reaches |
 | `stats` | `measured` | Whether the inputs come from measured coverage |
 | `stats` | `discovery` | Digest of the discovery inputs |
-| `stats` | `sources` | Path to sha256 of each configuration file, `.github/test-requirements.lock` among them, and each `scripts/ci_mutation/` file |
+| `stats` | `sources` | Path to sha256 of each configuration file, `.github/test-requirements.lock` and `.github/test-excludes.txt` among them, and each `scripts/ci_mutation/` file |
 | `stats` | `options` | The pytest options, in order |
-| `stats` | `interpreter` | `sys.version` |
-| `stats` | `platform` | `sys.platform` |
-| `stats` | `versions` | Distribution name to version |
+| `stats` | `lockfile` | sha256 of the head's `.github/test-requirements.lock`, or null without one |
 | `mutant` | `module` | Path of the module that holds the function |
 | `mutant` | `function` | Name of the changed function |
 | `mutant` | `definition` | Digest of the function's whole definition text, from `scripts.dep_manifest.unit_hashes` |
@@ -2338,6 +2336,10 @@ key; the builders are pure and read no file, clock or network.
   bytes, the one exception to blob ids, because the stats cache identity hashes them that way.
   Its lockfile and pyproject inputs are the `.github/test-requirements.lock` and `pyproject.toml`
   entries of `sources`.
+  Its runtime is the `lockfile` input, never the interpreter or installed packages of the process
+  computing it, so the scheduler keys a stats unit exactly as the worker's stats cache stores it
+  for the same head. Every CI install and the baked lab worker venv install from that file, with
+  `.github/test-excludes.txt` as their excludes list, which `sources` keys.
 - A change to `.github/test-requirements.lock` or `pyproject.toml` rekeys every unit kind. A grade
   is keyed by its head, which names both files.
 - The lab runs pytest itself, so no workflow file under `.github/` changes a test verdict. The
