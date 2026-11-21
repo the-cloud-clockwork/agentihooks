@@ -10331,6 +10331,16 @@
       ]
     },
     {
+      "id": "lab-unparsable-head-dropped",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-expand-syntax-error",
+      "behaviour": "A promotion or backfill head whose changed measured Python file does not parse is dropped from the lab scheduler pass with cannot expand, the head and the syntax error, like any other expansion failure, and the pass goes on to start the next held head. Before the guard the syntax error that mutation expansion raises while it compares the file against its base left Scheduler.tick and the serve loop, ended the scheduler process and lost the rest of that pass, with the head already taken off the waiting hash and no check posted.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis with a scripts.ci_lab.scheduler.MirrorExpander on a git origin fixture whose promotion head breaks a measured Python file",
+      "tests": [
+        "tests/ci_lab/test_scheduler_unexpanded.py::test_a_promotion_head_whose_changed_python_does_not_parse_is_dropped_and_the_pass_starts_the_next_head"
+      ]
+    },
+    {
       "id": "lab-mutant-unit-unlisted-tests",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2658",
