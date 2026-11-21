@@ -50,8 +50,3 @@ def guarded(scheduler: Any, relaying: Any, passes: int, clock: Clock, sleep: Sle
         done += 1
         sleep(1.0)
     return 0
-
-
-def one_pass(scheduler: Any, clock: Clock) -> list[str]:
-    # ok: lab-pass-uncaught-redis-error
-    return scheduler.tick(int(clock() * 1000))
