@@ -11778,6 +11778,23 @@
       ]
     },
     {
+      "id": "swarm-successor-keeps-predecessor-tracked",
+      "origin": "regression",
+      "ordered_at": "2026-11-20",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-swarm-tracks-session-until-killed",
+      "behaviour": "Starting a successor execution on a seat keeps a finished predecessor listed with its placement, while the tick session models step and the master front door count pass over a finished agent whose seat lists a newer execution, and the tick reap then ends that predecessor's process through the runtime and drops it with a history row and a retired name, so a handed off session never leaves tracking while it runs.",
+      "seam": "scripts.swarm.execution.ExecutionRegistry start and archive, observed through RedisStore.agents and the tick reap judge scripts.tick.steps.agents._reap_agent",
+      "rules": ["successor-start-drops-live-predecessor"],
+      "tests": [
+        "tests/swarm/test_successor_keeps_predecessor_tracked.py::test_a_successor_start_keeps_its_finished_predecessor_listed",
+        "tests/swarm/test_successor_keeps_predecessor_tracked.py::test_archiving_keeps_the_placement_of_a_listed_predecessor",
+        "tests/swarm/test_successor_keeps_predecessor_tracked.py::test_the_reap_ends_a_handed_off_predecessor_and_drops_it_with_history",
+        "tests/swarm/test_successor_keeps_predecessor_tracked.py::test_the_session_models_step_passes_over_a_listed_finished_predecessor",
+        "tests/swarm/test_successor_keeps_predecessor_tracked.py::test_a_listed_finished_predecessor_is_no_front_door",
+        "tests/swarm/test_successor_keeps_predecessor_tracked.py::test_only_a_finished_agent_with_a_newer_listed_execution_on_its_seat_is_superseded"
+      ]
+    },
+    {
       "id": "swarm-tick-lock-renewal-journal",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2785",
