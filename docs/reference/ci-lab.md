@@ -158,9 +158,11 @@ curl -fsS http://lab:9108/metrics \
   | grep --line-buffered -E '^ci_lab_(slots_total|slots_busy|queue_wait_seconds|budget_fraction|class_shed)'
 ```
 
-`/capacity` returns the [capacity document](#capacity-document). Each capacity request and
-metrics scrape builds a fresh load from queue, lease, live grade, recent worker offer and
-daily budget state; separate requests can observe different instants. Without recent worker
+`/capacity` returns the [capacity document](#capacity-document). Each capacity request on 8800
+builds a fresh load from queue, lease, live grade, recent worker offer and daily budget state;
+separate requests can observe different instants. The metrics port answers from the last load
+it built and rebuilds it in the background every 15 seconds; `ci_lab_load_age_seconds` gives the
+age of the load a scrape read. Without recent worker
 offers and leased jobs, a running scheduler can report zero total slots. Offers expire after
 60 seconds, and unit estimates remain fixed at 60 seconds per slot.
 
@@ -288,6 +290,7 @@ and the GitHub calls left, on one `scripts.ci_lab.metrics.Registry` the `Schedul
 | `ci_lab_heads_graded_total` | Each grade a pass closes, by class and conclusion |
 | `ci_lab_units_redelivered_total`, `ci_lab_units_lost_total` | Each expired lease a pass requeues or marks lost |
 | `ci_lab_mirror_age_seconds` | `metrics.observe_mirror` at each GET of `/metrics` or `/capacity` on 9108: the seconds since the epoch second in the `fetched-at` stamp under `CI_LAB_GIT_MIRROR`, never below zero; no sample while the stamp is missing or holds no whole number. The node cache writes that stamp; the scheduler's own fetch writes none |
+| `ci_lab_load_age_seconds` | `metrics.observe_age` at each GET of `/metrics` or `/capacity` on 9108: the seconds since the build of the load snapshot the port serves started, never below zero |
 | `ci_lab_github_rate_remaining` | `metrics.observe_rate` on every check runs answer the scheduler's and the relay's `Checks` posters get, retries and refusals included: its `x-ratelimit-remaining` header when that holds a whole number; an answer without one keeps the last value |
 
 A worker unit's report carries `caches` from `scripts.ci_lab.caches.report`: per revision it
@@ -315,9 +318,13 @@ snapshot sets the queue, slot and `ci_lab_queue_wait_seconds` gauges through
 `scripts.ci_lab.metrics.observe_load`. The swarm tick reads the document to decide the
 [lab behind claim hold](swarm-thresholds.md#lab-behind-claim-hold).
 
-The scheduler service builds the snapshot on every request with
-`scripts.ci_lab.scheduler.Scheduler.load` and serves `/capacity` on port 8800 and `/metrics` on
-9108 from it, through `scripts.ci_lab.scheduler.listen`:
+The scheduler service builds the snapshot with `scripts.ci_lab.scheduler.Scheduler.load` and
+serves it through `scripts.ci_lab.scheduler.listen`. Port 8800 builds one for each `/capacity`
+request. The metrics port 9108 serves `/metrics` and `/capacity` from the last snapshot a
+`scripts.ci_lab.metrics.Latest` holds: the first request builds it and requests that meet that
+build wait for it, then the port's serve loop starts one background build at a time once the last
+build started `scheduler.REFRESH_MS` (15 seconds) ago. A failed build keeps the last snapshot, and
+the next build starts 15 seconds after the failed one started:
 
 | Field | Built from |
 |---|---|
@@ -620,12 +627,14 @@ the `HELP` and `TYPE` lines and no sample: a worker scrape target reads up witho
 scheduler's series, which already count every unit from its report. `scripts.ci_lab.scheduler.listen`
 serves the `Scheduler`'s own `metrics.Registry` on the metrics port, so one exposition carries the
 gauges each scrape sets and the counters the scheduler's passes keep. Every `GET /metrics` sets
-these from the scheduler's load snapshot through `metrics.observe_load`:
+these from the last load snapshot the metrics port built, through `metrics.observe_load`, and the
+snapshot's age through `metrics.observe_age`:
 
 - `ci_lab_units_queued`, `ci_lab_units_running`, `ci_lab_class_shed` and
   `ci_lab_queue_wait_seconds`, once for each of the five classes
 - `ci_lab_slots_total`, `ci_lab_slots_busy`, `ci_lab_slots_wanted` and `ci_lab_budget_fraction`
 - `ci_lab_workers_ready` and `ci_lab_units_overdue`
+- `ci_lab_load_age_seconds`
 
 These gauges hold a sample from the first scrape of a running scheduler. Every other series has
 none until the scheduler first sets or counts it: the registry writes only the `HELP` and `TYPE`
@@ -644,6 +653,7 @@ lines of a metric with no sample, so Prometheus stores no series for it until th
 | `ci_lab_units_redelivered_total`, `ci_lab_units_lost_total` | No alert or panel; the [Worker loss drill](#worker-loss-drill) reads them | `Scheduler._reap`, one for each expired lease it requeues or marks lost |
 | `ci_lab_verdict_mismatch_total` | `CILabVerdictMismatch`, Shadow mismatches per gate | No service. `shadow.Shadow` counts it on the registry its caller passes, and no service builds a `Shadow`, so the alert cannot fire and the panel stays empty |
 | `ci_lab_mirror_age_seconds` | No alert or panel | `metrics.observe_mirror`, on every scheduler scrape, from its local mirror's `fetched-at` stamp. A missing or invalid stamp removes the sample |
+| `ci_lab_load_age_seconds` | No alert or panel | `metrics.observe_age`, on every scheduler scrape: the seconds since the build of the load snapshot the scrape served started. It stays near 15 seconds while background builds succeed; a value that keeps growing means they fail or outlast the interval |
 | `ci_lab_github_rate_remaining` | No alert or panel | `metrics.observe_rate`, called by `Checks._request` with each check runs response. A valid `x-ratelimit-remaining` header sets the sample; a missing or invalid header leaves the previous sample unchanged |
 
 The kube-state-metrics series need the lab chart's objects in the `ci-lab` namespace: the
@@ -730,8 +740,8 @@ docker run --rm -v "$work:/w" -w /w --entrypoint promtool prom/prometheus:v3.4.1
 The test file names `ci-lab.rules.yml`, so the rule groups are written there first. promtool
 prints `SUCCESS` for the file, or `FAILED:` with each case that missed and the alerts it got.
 
-List the series every scrape of the scheduler's metrics port sets, with no service, from an
-agentihooks checkout:
+List the series `metrics.observe_load` sets on every scrape of the scheduler's metrics port, with
+no service, from an agentihooks checkout:
 
 ```bash
 python -c 'from scripts.ci_lab import metrics; from scripts.ci_lab.capacity import Load; r = metrics.Registry(); metrics.observe_load(r, Load(pending={"pull_request": (120.0,)}, running={"queue": 1}, slots_total=4, slots_busy=1, frees_in=(60.0,))); print(sorted({line.split("{")[0].split(" ")[0] for line in r.render().splitlines() if not line.startswith("#")}))'

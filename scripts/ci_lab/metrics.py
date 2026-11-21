@@ -244,6 +244,7 @@ def observe_mirror(registry: Registry, mirror: Path, now_ms: int) -> None:
 def observe_age(registry: Registry, built_ms: int, now_ms: int) -> None:
     """Set the load age to the seconds since the build of the load snapshot the metrics port serves started, never
     below zero."""
+    registry.set(contract.LOAD_AGE_SECONDS, max(0.0, (now_ms - built_ms) / 1000))
 
 
 def observe_rate(registry: Registry, headers: Mapping[str, str]) -> None:
@@ -355,12 +356,32 @@ class Latest:
 
     def read(self) -> tuple[Load, int]:
         """The last finished load snapshot and the clock reading its build started at, building the first one."""
-        started = self.clock()
-        return self.build(started), started
+        built = self.built
+        if built is not None:
+            return built
+        with self.building:
+            return self.built or self._rebuild()
 
     def refresh(self) -> None:
         """Start one background build once a build has started, the last one started at least ``refresh_ms`` ago and
         none runs."""
+        started = self.started_ms
+        if started is None or self.clock() - started < self.refresh_ms or not self.building.acquire(blocking=False):
+            return
+        threading.Thread(target=self._background, name="ci-lab-load-refresh", daemon=True).start()
+
+    def _rebuild(self) -> tuple[Load, int]:
+        started = self.clock()
+        self.started_ms = started
+        built = self.build(started), started
+        self.built = built
+        return built
+
+    def _background(self) -> None:
+        try:
+            self._rebuild()
+        finally:
+            self.building.release()
 
 
 def respond(snapshot: Callable[[], Load], registry: Registry, method: str, target: str) -> tuple[int, str, bytes]:
@@ -381,6 +402,20 @@ def _idle() -> None:
     """Run nothing between requests."""
 
 
+class _Port(ThreadingHTTPServer):
+    """A threading HTTP server whose serve loop runs its actions after every request and every poll."""
+
+    def __init__(
+        self, address: tuple[str, int], handler: Callable[..., BaseHTTPRequestHandler], actions: Callable[[], None]
+    ) -> None:
+        super().__init__(address, handler)
+        self.actions = actions
+
+    def service_actions(self) -> None:
+        """Run the actions between requests."""
+        self.actions()
+
+
 def _bind(
     host: str, port: int, reply: Callable[[str, str], tuple[int, str, bytes]], actions: Callable[[], None] = _idle
 ) -> ThreadingHTTPServer:
@@ -393,7 +428,7 @@ def _bind(
         request.wfile.write(data)
 
     handler = type(BaseHTTPRequestHandler.__name__, (BaseHTTPRequestHandler,), {"do_GET": answer, "do_POST": answer})
-    return ThreadingHTTPServer((host, port), handler)
+    return _Port((host, port), handler, actions)
 
 
 def serve(
