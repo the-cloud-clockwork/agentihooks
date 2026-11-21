@@ -1797,8 +1797,8 @@ as `lab_notice`, or `0` when the send failed. Without all three settings nothing
 
 ### Grade a plant branch push
 
-A plant proof pushes two heads cut from one dev commit, its twins: one carries a change a gate
-should pass, the other a planted change the gate should fail. The twins sit on GitHub branches
+A plant proof pushes two heads that grow from one dev commit, its twins: one the gate should
+pass, the other carrying a planted change the gate should fail. The twins sit on GitHub branches
 with no pull request. An ordinary push cannot grade them as a pull request would: a branch's first
 push has a `before` of 40 zeros and records no head, and a later push records a `push` head on its
 `before` that grades in the promotion class. A promotion grade reads the head's own workflow and
@@ -1819,7 +1819,7 @@ its own path and grades in the pull request class on a trusted base.
    merge base of the head with dev. It lists `refs/heads/dev` of the head's repository with
    `git ls-remote --exit-code`, fetches that dev head and the plant head into the scheduler's
    mirror, and runs `git merge-base <head> <dev head>`. The result becomes the request's base
-   before the head is held in its lane or given a grade key. Both twins of one plant were cut from
+   before the head is held in its lane or given a grade key. Both twins of one plant grow from
    one dev commit, so they get the same base however far dev has moved since.
 4. **Class.** `scripts.ci_lab.intake.TIER_EVENTS` maps `plant` to the pull request class. A plant
    head the [control routes](#control-routes) marked hotfix grades in the hotfix class instead, on
@@ -1828,7 +1828,9 @@ its own path and grades in the pull request class on a trusted base.
    static gate list and `lab.authoritative` all come from the dev commit the twins share, and a
    twin cannot change the gates that grade it. [Which grades run static units](#which-grades-run-static-units)
    lists the gates the class runs: `lint`, `type-gate` and `test-count` get units, `semgrep` is
-   framed as a gate without units, and the class expands no test or mutation units.
+   framed as a gate without units, and the class expands no test or mutation units. A gate the
+   base's `tests/ci_lab/static_gate_exclusions.json` lists gets no unit, and its calling job keeps
+   Actions authority, as [Static plant proofs](#static-plant-proofs) describes.
 6. **Check runs.** The scheduler posts the grade's check runs on the head commit on GitHub, as for
    any head not pushed to a `refs/grade/*` ref. A gate the base's `delivery.yaml` lists under
    `lab.authoritative` posts as `lab/<gate>`; every other gate and `required` post as
@@ -1860,8 +1862,14 @@ under `.github/workflows/`.
 
 #### Push a plant pair
 
-Push plant branches with git. Cut both twins from one dev commit and push each to its own branch
-under the prefix:
+`python -m scripts.ci_lab grade --plant <plant>`, described under
+[Static plant proofs](#static-plant-proofs), pushes a plant pair and reads both grades. It writes
+one branch, `refs/heads/diffcheck/lab-plant-<plant>-<base sha>`, through the GitHub REST API with
+`gh`: first the twin, a commit with the base's own tree whose parent is the base, then, once the
+twin's grade passes, the planted child of the twin as a fast forward of the same branch.
+
+To grade heads of your own, push them with git. Cut both twins from one dev commit and push each
+to its own branch under the prefix:
 
 ```bash
 git fetch origin dev
@@ -1878,8 +1886,9 @@ git push origin HEAD:refs/heads/diffcheck/lab-plant-size-red
 
 A push to a plant branch is a push to origin for every guard, as any other branch push is.
 Keep both branches until their grades close: a head no branch or pull request ref reaches when its
-quiet window ends is retired as [a head no node mirror can hold](#a-head-no-node-mirror-can-hold),
-with a failed `lab-shadow/required` check run.
+quiet window ends is retired as [a head no node mirror can hold](#a-head-no-node-mirror-can-hold).
+A plant head in the pull request class also gets a failed `lab-shadow/required` check run; one the
+control routes marked hotfix gets only the `retiring` line.
 
 #### What a plant push needs
 
