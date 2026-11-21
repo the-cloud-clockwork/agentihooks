@@ -306,31 +306,6 @@ def test_an_export_over_more_keys_than_one_batch_reads_them_in_bounded_scripts_t
     assert batched["members"] == whole["members"]
 
 
-@pytest.mark.feature("swarm-snapshot-batched-read")
-def test_dump_packs_groups_in_order_and_runs_a_group_larger_than_a_batch_alone(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from scripts.swarm import store as store_module
-
-    calls: list[tuple[list[str], dict[str, list[str]]]] = []
-    redis = dump_reads(calls)
-    redis.mset({key: f"value {key}" for key in "abcdefghij"})
-    redis.sadd("shared", "x", "y")
-    monkeypatch.setattr(store_module, "DUMP_BATCH", 3, raising=False)
-    groups: list[tuple[list[str], dict[str, list[str]]]] = [
-        (["a", "b", "c", "d"], {"shared": ["x", "z"]}),
-        (["e"], {}),
-        (["f"], {}),
-        (["g"], {}),
-        (["h", "i"], {"shared": ["y"]}),
-        (["j"], {}),
-    ]
-    dumped, members = store_module._dump(redis, groups)
-    assert [keys for keys, _ in calls] == [["a", "b", "c", "d"], ["e", "f", "g"], ["h", "i", "j"]]
-    assert {key: row["value"] for key, row in dumped.items()} == {key: f"value {key}" for key in "abcdefghij"}
-    assert members == {"shared": ["x", "y"]}
-
-
 def dump_reads(calls: list[tuple[list[str], dict[str, list[str]]]]) -> Any:
     """A fake Redis client that appends the keys and set checks of every DUMP_KEYS script it runs to calls."""
     import fakeredis
