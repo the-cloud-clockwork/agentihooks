@@ -8,9 +8,7 @@ def stage(root: Path, source: Path, destination: Path) -> None:
     if not source.is_dir():
         return
     workspaces = sorted(
-        marker.parent
-        for marker in source.rglob("changed-lines.json")
-        if (marker.parent / "pyproject.toml").is_file()
+        marker.parent for marker in source.rglob("changed-lines.json") if (marker.parent / "pyproject.toml").is_file()
     )
 
     def ignore(directory: str, names: list[str]) -> set[str]:
