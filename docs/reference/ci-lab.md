@@ -2459,7 +2459,9 @@ HTTP call fails is named `retry <head> for <branch>: <error>` and stays pending 
 A relay whose push, check runs or pull requests token the App refuses is named
 `held <head> for <branch> for a later pass: <refusal>`, stays pending and holds every pending head
 of its repository for `POST_HOLD_MS`; the heads of other repositories still relay in the same
-tick, and the first tick after the hold relays the held heads again.
+tick, and the first tick after the hold relays the held heads again. The hold lives in the relay's
+memory, as the scheduler's repository post hold does, so a restarted service tries the held heads
+on its first tick.
 
 A grade's state is one JSON document at `agentihooks-ci:grade:<run>`, where `<run>` is the grade
 key of the repository, head, base, class and grader revision. Live grades sit in
