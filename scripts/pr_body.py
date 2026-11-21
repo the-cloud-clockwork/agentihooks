@@ -18,32 +18,59 @@ SECTIONS = (
 )
 
 
-def _visible(text: str) -> str:
-    return re.sub(
-        r"<!--.*?-->",
-        lambda match: "".join("\n" if char == "\n" else " " for char in match.group()),
-        text,
-        flags=re.DOTALL,
-    )
+def _blank(text: str) -> str:
+    return "".join("\n" if char == "\n" else " " for char in text)
 
 
-def _headings(text: str) -> list[tuple[int, str, int, int]]:
-    found: list[tuple[int, str, int, int]] = []
-    offset = 0
+def _mask_line(line: str, comment: bool) -> tuple[str, bool]:
+    pieces: list[str] = []
+    cursor = 0
+    for marker in re.finditer(r"<!--|-->", line):
+        if comment and marker.group() == "-->":
+            pieces.append(_blank(line[cursor : marker.end()]))
+            cursor = marker.end()
+            comment = False
+        elif not comment and marker.group() == "<!--":
+            pieces.append(line[cursor : marker.start()])
+            cursor = marker.start()
+            comment = True
+    tail = _blank(line[cursor:]) if comment else line[cursor:]
+    return "".join(pieces) + tail, comment
+
+
+def _lines(text: str) -> list[tuple[str, bool]]:
+    lines: list[tuple[str, bool]] = []
     fence = ""
-    for line in _visible(text).splitlines(keepends=True):
-        marker = re.match(r" {0,3}(`{3,}|~{3,})(.*)", line.rstrip("\r\n"))
+    comment = False
+    for line in text.splitlines(keepends=True):
+        marker = None if comment else re.match(r" {0,3}(`{3,}|~{3,})(.*)", line.rstrip("\r\n"))
         if marker:
             run, suffix = marker.groups()
             if not fence:
                 fence = run
             elif run[0] == fence[0] and len(run) >= len(fence) and not suffix.strip():
                 fence = ""
-        elif not fence:
-            heading = re.match(r" {0,3}(#{1,6})[ \t]+(.+)", line.rstrip("\r\n"))
-            if heading:
-                depth, name = heading.groups()
-                found.append((len(depth), name.rstrip("#").strip(), offset, offset + len(line)))
+            lines.append((line, True))
+        elif fence:
+            lines.append((line, True))
+        else:
+            visible, comment = _mask_line(line, comment)
+            lines.append((visible, False))
+    return lines
+
+
+def _visible(text: str) -> str:
+    return "".join(line for line, _ in _lines(text))
+
+
+def _headings(text: str) -> list[tuple[int, str, int, int]]:
+    found: list[tuple[int, str, int, int]] = []
+    offset = 0
+    for line, fenced in _lines(text):
+        heading = None if fenced else re.match(r" {0,3}(#{1,6})[ \t]+(.+)", line.rstrip("\r\n"))
+        if heading:
+            depth, name = heading.groups()
+            found.append((len(depth), name.rstrip("#").strip(), offset, offset + len(line)))
         offset += len(line)
     return found
 

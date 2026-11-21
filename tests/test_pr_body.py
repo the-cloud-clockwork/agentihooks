@@ -73,6 +73,19 @@ def test_fenced_and_commented_headings_do_not_supply_sections(api: ModuleType) -
 
 
 @pytest.mark.feature("pull-request-recon-context")
+def test_unclosed_comments_do_not_supply_sections(api: ModuleType) -> None:
+    assert api.missing_sections("<!--\n" + body_without()) == list(SECTIONS)
+    assert api.missing_sections(body_without().replace("## ", "<!-- explanation -->\n## ")) == []
+
+
+@pytest.mark.feature("pull-request-recon-context")
+@pytest.mark.parametrize("fence", ["```", "~~~~"], ids=["backtick", "tilde"])
+def test_fenced_comment_openers_preserve_visible_sections(api: ModuleType, fence: str) -> None:
+    text = f"## Assumptions\n\n{fence}html\n<!-- literal example\n{fence}\n\n" + body_without("Assumptions")
+    assert api.missing_sections(text) == []
+
+
+@pytest.mark.feature("pull-request-recon-context")
 def test_fill_extracts_recon_and_preserves_body(api: ModuleType) -> None:
     original = (
         "## Summary\n\nKeep this evidence.\n\n## Assumptions\n\n<!-- fill -->\n\n## Checklist\n\n- [x] Reviewed.\n"
