@@ -4695,3 +4695,32 @@ job:
 | A pull request changed sandbox code and no `writer-lock / lab-sandbox` check ran | The changed path is not one of `LAB_SANDBOX_INPUTS`, which match whole, or the Tests workflow skipped its `writer-lock` job | The `Select lab sandbox inputs` step log in the `writer-lock / inputs` job; or dispatch `Writer lock` on the branch as in [Run it by hand](#run-it-by-hand) |
 | The protected grader refuses the pull request with `The head changes the frozen gate file .github/workflows/writer-lock.yml ...` | The head changes the workflow to a blob the base registry does not accept | Announce the blob first, as in [Change the job](#change-the-job) |
 | `writer-lock.yml/lab-sandbox: runs-on must be ubuntu-latest for a hosted job` | The job's `runs-on` was routed to a self hosted runner label | Restore `runs-on: ubuntu-latest`; the self hosted runners have no bubblewrap, so every real case would skip |
+
+## Static plant proofs
+
+Run `python -m scripts.ci_lab grade --plant lint` from a repository checkout to prove
+an import sorting fault. Use `--plant gate-script` to prove that a head cannot teach its
+own comment grader to accept a new directive. Test and mutation plants are separate proofs.
+
+The command creates an unchanged twin and its planted child from `origin/dev`, with fixed
+commit identity and dates. It preserves the checkout, HEAD and normal index. `--base`
+selects another protected revision; `--repository` overrides the GitHub URL inferred from
+`origin`; `--timeout` bounds each grade wait in seconds, with a default of 900.
+
+Both commits use a branch under `diffcheck/lab-plant-`, derived from the plant and base.
+The twin is pushed and must pass before the plant is pushed. A rerun on the same base
+reuses those commits; another base gets a separate branch. No plant pull request is opened.
+
+The authenticated push receiver must recognize that prefix, resolve both heads against
+trusted `dev` and grade them in the pull request class with their merge base as grader.
+Proofs runners hold no lab notice secret and make no request to the receiver. An ordinary
+promotion grade cannot satisfy this proof: its grade identity and grader differ.
+
+Only checks carrying the exact grade key are read. The twin's required check must pass;
+the plant's required check must fail with `lint` as its only failing static gate. Failed
+pushes, expired or incomplete grades and other failing gates fail the command. The failing
+gate must carry its expected diagnostic in the trusted check output text: Ruff `I001` or
+`forbidden comment`. A check title or summary cannot satisfy that requirement.
+
+Success prints a JSON row. When `GITHUB_STEP_SUMMARY` is set, the command also appends a row
+with green and red GitHub check links, which remain usable outside the cluster.

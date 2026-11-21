@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/plant_proofs.py:scripts.ci_lab.plant_proofs.x_prepare:26907ea6e8c5802a1b32f5ccf4aef7f5ad0a11f2805af64c16c18bdb3efd4236": {
+    "reader": "Standards",
+    "reason": "INDEX names the same private temporary index consistently through GIT_INDEX_FILE for read-tree, update-index and write-tree. Its spelling changes neither repository index nor generated objects."
+  }
+}
