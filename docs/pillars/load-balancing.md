@@ -103,7 +103,7 @@ response header carries the fable window.
    keeps its earlier harness, a profile with its own harness order and the plan
    lane keep their own choice. A lane pinned to one harness raises a
    `harness pin` finding in swarm status while the other harness has free
-   seats and ready lane tasks wait; see
+   seats and ready lane tasks wait below the lane cap; see
    [Harness pin findings](swarm.md#harness-pin-findings).
 
 When no account has a free place a swarm or hive slot launch fails. A launch

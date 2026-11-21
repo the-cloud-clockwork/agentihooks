@@ -7551,17 +7551,17 @@ stops nothing.
 A lane whose `agent` is `claude` or `codex` gets seats from that harness only, however many free seats the other
 harness has. Each capacity pass stores every pinned lane with its quota decision: the pin, the time a pass first saw
 it, the other harness's free quota seats, and the ready lane tasks the pass placed nowhere while the lane sat below its
-ceiling. The swarm config keeps no time for a pin, so its age counts from the first pass that saw it; changing or
-clearing the pin starts the age again.
+ceiling. The swarm config keeps no time for a pin, so its age counts from the first pass that saw it. Moving the pin
+to the other harness starts the age again; clearing it does too once a capacity pass runs while the lane is unpinned,
+so a clear and a new pin between two passes keep the old age.
 
 `agentihooks swarm <id> status` shows one quota line per pinned lane under quota capacity, and raises one `harness
 pin` finding for a pinned lane whose other harness has free seats while ready tasks wait. The finding names the lane,
 the pin and its age, the free seats and the waiting tasks. It reports only: the pin stays until someone sets the lane
 agent back to `auto`.
 
-A pin left in place after its reason has passed keeps work off the other harness without any error. In November a
-lane pin to Claude, left from a mitigation on the twelfth, kept the swarm from launching any Codex agent for six days
-and nothing reported it; this finding makes such a pin show in status.
+A pin left in place after its reason has passed keeps work off the other harness without any error; this finding
+makes such a pin show in status.
 
 #### How a lane gets pinned
 
@@ -7603,15 +7603,16 @@ Swarm status raises one `harness pin` finding per lane while all three condition
 | At least one ready lane task waits | `pins.<lane>.waiting` |
 
 There is no age threshold and no setting: the finding raises as soon as one stored decision meets all three. It
-clears once a capacity pass stores a decision where any condition fails, for example when the lane goes back to `auto`, the other
-harness fills up, the pinned harness places the waiting tasks or the lane reaches its cap. Its measure is the number
-of waiting tasks.
+clears once a capacity pass stores a decision where any condition fails, for example when the lane goes back to
+`auto`, the other harness fills up, the pinned harness places the waiting tasks or the lane reaches its cap. Its
+measure is the number of waiting tasks.
 
 #### What status shows
 
 The quota pin line prints after the scaling line and before the host and account lines, one per pinned lane in lane
 name order. It prints for every pin, also when no finding raises; with no waiting task it ends at `0 ready tasks
-wait`. A swarm whose eng lane has run on Claude for six days, with Claude full and Codex free, shows:
+wait`. A swarm whose eng lane has run on Claude for six days, with every Claude account open but at its session cap
+and Codex free, shows:
 
 ```text
 quota capacity eng 2 of 3, ci 0 of 1, plan 0 of 1, changed 12 minutes ago, because ci and plan have no more ready tasks; accounts have quota; Claude has 0 free seats and Codex has 6 free seats
@@ -7634,9 +7635,9 @@ finding  harness pin  eng: Lane eng is pinned to Claude, first seen 6d04h ago, w
 ```
 
 The age is written as minutes under an hour (`5m`), hours and minutes under a day (`2h05m`), and days and hours
-after that (`6d04h`). The summary names the harnesses `Claude` and `Codex`; the quota line and the first evidence
-line print the lane field value, `claude` or `codex`. The subject is a lane, not an agent or task, so the last outcome
-and rows lines carry nothing.
+after that (`6d04h`). The summary names the harnesses `Claude` and `Codex`; the quota line prints the lane field
+value, `claude` or `codex`, and the first evidence line prints both. The subject is a lane, not an agent or task, so
+the last outcome and rows lines print their placeholders, `none recorded` and `none in the ledger events`.
 
 #### Delivery and verdicts
 
@@ -7647,10 +7648,11 @@ New health finding on swarm <id>: Lane eng is pinned to Claude, first seen 6d04h
 ```
 
 It sends that item once per finding id and verdict, and remembers the send for 30 days, so a pin that clears and
-comes back on the same lane within those 30 days, before any verdict, sends no second item. A verdict hides the finding from status and
-from the inbox for `AGENTIHOOKS_HEALTH_COOLDOWN_MINUTES` (60); after that it comes back, with the earlier verdict on
-its `id` line, only when more tasks wait than when it was judged. The verdict is stored under `harness-pin/<lane>`,
-so it also covers a later pin on the same lane.
+comes back on the same lane within those 30 days, before any verdict, sends no second item. A verdict hides the
+finding from status and from the inbox for `AGENTIHOOKS_HEALTH_COOLDOWN_MINUTES` (60); after that it comes back, with
+the earlier verdict on its `id` line, only when more tasks wait than when it was judged. The verdict is stored under
+`harness-pin/<lane>`, so it also covers a later pin on the same lane. Only a registered master or the operator may
+give a verdict.
 
 #### Investigate and clear a pin
 
