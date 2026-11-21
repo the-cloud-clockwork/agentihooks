@@ -83,7 +83,7 @@ def expiry(days: int, now: datetime) -> str:
 def backend_ids(token: str) -> dict[str, str]:
     """Return the run and job backend ids the runtime token is scoped to."""
     payload = token.split(".")[1]
-    claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+    claims = json.loads(base64.urlsafe_b64decode(payload + "=="))
     scope = next(item for item in claims["scp"].split() if item.startswith("Actions.Results:"))
     _, run, job = scope.split(":")
     return {"workflow_run_backend_id": run, "workflow_job_run_backend_id": job}
@@ -146,15 +146,14 @@ class Results:
 
 def retried(results: Results, name: str, folder: Path, days: int, pause: Callable[[float], None]) -> None:
     """Upload one artifact, retrying in place up to the attempt limit."""
-    for attempt in range(1, ATTEMPTS + 1):
+    for attempt in range(1, ATTEMPTS):
         try:
             results.upload(name, folder, days)
             return
         except FAILURES as error:
-            if attempt == ATTEMPTS:
-                raise
             print(f"::warning title=Retried upload::Attempt {attempt} to upload {name} failed: {error}; retrying.")
             pause(WAIT)
+    results.upload(name, folder, days)
 
 
 def upload(out: Path, results: Results, pause: Callable[[float], None] = time.sleep) -> None:

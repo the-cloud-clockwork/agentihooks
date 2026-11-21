@@ -12,6 +12,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -150,6 +151,15 @@ def test_the_backend_ids_come_from_the_runtime_token_scope() -> None:
     assert ci_unit_copy.backend_ids(_token()) == IDS
 
 
+@pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
+@pytest.mark.parametrize(("read", "residue"), [("xy", 2), ("xyz", 3)], ids=["two-pads", "one-pad"])
+def test_the_backend_ids_come_from_a_token_whose_payload_needs_padding(read: str, residue: int) -> None:
+    claims = json.dumps({"scp": f"Actions.GenericRead:{read} Actions.Results:run-1:job-2"}).encode()
+    payload = base64.urlsafe_b64encode(claims).decode().rstrip("=")
+    assert len(payload) % 4 == residue
+    assert ci_unit_copy.backend_ids(f"h.{payload}.s") == IDS
+
+
 class _Answer:
     def __init__(self, body: bytes) -> None:
         self.body = body
@@ -190,6 +200,35 @@ def test_a_service_call_posts_this_jobs_request_and_reads_the_answer(monkeypatch
     assert timeout == 120
 
 
+def _requested(monkeypatch: pytest.MonkeyPatch, answer: bytes) -> list[tuple[str, dict[str, str], str]]:
+    made: list[tuple[str, dict[str, str], str]] = []
+    real = urllib.request.Request
+
+    def request(url: str, data: bytes, headers: dict[str, str], method: str) -> urllib.request.Request:
+        made.append((url, headers, method))
+        return real(url, data=data, headers=headers, method=method)
+
+    def urlopen(sent: urllib.request.Request, timeout: float) -> _Answer:
+        return _Answer(answer)
+
+    monkeypatch.setattr(ci_unit_copy.urllib.request, "Request", request)
+    monkeypatch.setattr(ci_unit_copy.urllib.request, "urlopen", urlopen)
+    return made
+
+
+@pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
+def test_a_service_call_hands_its_exact_headers_and_method_to_the_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    made = _requested(monkeypatch, b"{}")
+    ci_unit_copy.Results("https://results.example/", _token()).call("ListArtifacts", {})
+    assert made == [
+        (
+            "https://results.example/twirp/github.actions.results.api.v1.ArtifactService/ListArtifacts",
+            {"Content-Type": "application/json", "Authorization": f"Bearer {_token()}"},
+            "POST",
+        )
+    ]
+
+
 @pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
 def test_an_empty_service_answer_reads_as_an_empty_object(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ci_unit_copy.urllib.request, "urlopen", lambda request, timeout: _Answer(b""))
@@ -217,6 +256,30 @@ def test_a_created_artifact_answers_its_upload_address(monkeypatch: pytest.Monke
     results = ci_unit_copy.Results("https://results.example/", _token())
     assert results.create("durations-3.12-1", 14) == "https://blob/a"
     assert calls == [("CreateArtifact", {"name": "durations-3.12-1", "version": 4, "expires_at": "in 14 days"})]
+
+
+@pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
+def test_an_artifact_expiry_counts_from_the_clock_in_utc(monkeypatch: pytest.MonkeyPatch) -> None:
+    zones: list[object] = []
+
+    def now(zone: object) -> datetime:
+        zones.append(zone)
+        return datetime(2026, 11, 21, 12, tzinfo=UTC)
+
+    def expiry(days: int, at: datetime) -> str:
+        return f"{days} days from {at.isoformat()}"
+
+    monkeypatch.setattr(ci_unit_copy, "datetime", SimpleNamespace(now=now))
+    monkeypatch.setattr(ci_unit_copy, "expiry", expiry)
+    calls = _scripted(monkeypatch, [{"ok": True, "signed_upload_url": "https://blob/a"}])
+    ci_unit_copy.Results("https://results.example/", _token()).create("coverage-3.12-1", 7)
+    assert zones == [UTC]
+    assert calls == [
+        (
+            "CreateArtifact",
+            {"name": "coverage-3.12-1", "version": 4, "expires_at": "7 days from 2026-11-21T12:00:00+00:00"},
+        )
+    ]
 
 
 @pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
@@ -295,6 +358,17 @@ def test_an_upload_replaces_the_name_puts_the_zip_and_finalizes_it_with_its_dige
 
 
 @pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
+def test_a_blob_put_hands_its_exact_headers_and_method_to_the_request(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    made = _requested(monkeypatch, b"")
+    _uploaded(monkeypatch, tmp_path, [{}, {"ok": True}])
+    assert made == [
+        ("https://blob/flakes-3.12-4?days=14", {"x-ms-blob-type": "BlockBlob", "Content-Type": "zip"}, "PUT")
+    ]
+
+
+@pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
 def test_an_upload_of_a_free_name_deletes_nothing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     calls, _, _ = _uploaded(monkeypatch, tmp_path, [{}, {"ok": True}])
     assert [method for method, _ in calls] == ["ListArtifacts", "FinalizeArtifact"]
@@ -307,24 +381,25 @@ def test_an_upload_the_service_did_not_finalize_raises(monkeypatch: pytest.Monke
 
 
 @pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
+@pytest.mark.parametrize("failures", [0, 1, 2], ids=["first", "second", "last"])
 def test_an_upload_is_retried_in_place_until_it_lands(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], failures: int
 ) -> None:
     attempts, pauses = [], []
 
     def upload(self: ci_unit_copy.Results, name: str, folder: Path, days: int) -> None:
         attempts.append((name, folder, days))
-        if len(attempts) < 3:
+        if len(attempts) <= failures:
             raise OSError("reset")
 
     monkeypatch.setattr(ci_unit_copy.Results, "upload", upload)
     results = ci_unit_copy.Results("https://results.example/", _token())
     ci_unit_copy.retried(results, "durations-3.12-1", Path("legs"), 14, pauses.append)
-    assert attempts == [("durations-3.12-1", Path("legs"), 14)] * 3
-    assert pauses == [10, 10]
-    assert capsys.readouterr().out == (
-        "::warning title=Retried upload::Attempt 1 to upload durations-3.12-1 failed: reset; retrying.\n"
-        "::warning title=Retried upload::Attempt 2 to upload durations-3.12-1 failed: reset; retrying.\n"
+    assert attempts == [("durations-3.12-1", Path("legs"), 14)] * (failures + 1)
+    assert pauses == [10] * failures
+    assert capsys.readouterr().out == "".join(
+        f"::warning title=Retried upload::Attempt {attempt} to upload durations-3.12-1 failed: reset; retrying.\n"
+        for attempt in range(1, failures + 1)
     )
 
 
@@ -362,6 +437,7 @@ def test_every_leg_uploads_its_artifacts_in_the_unit_job_order_with_their_retent
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     sent: list[tuple[str, Path, int, object]] = []
+    receivers: list[ci_unit_copy.Results] = []
     guard = threading.Lock()
 
     def retried(
@@ -369,6 +445,7 @@ def test_every_leg_uploads_its_artifacts_in_the_unit_job_order_with_their_retent
     ) -> None:
         with guard:
             sent.append((name, folder, days, pause))
+            receivers.append(results)
 
     sizes = []
     pool = ci_unit_copy.ThreadPoolExecutor
@@ -380,9 +457,11 @@ def test_every_leg_uploads_its_artifacts_in_the_unit_job_order_with_their_retent
     monkeypatch.setattr(ci_unit_copy, "retried", retried)
     monkeypatch.setattr(ci_unit_copy, "ThreadPoolExecutor", sized)
     pauses: list[float] = []
-    ci_unit_copy.upload(tmp_path, ci_unit_copy.Results("https://results.example/", _token()), pauses.append)
+    results = ci_unit_copy.Results("https://results.example/", _token())
+    ci_unit_copy.upload(tmp_path, results, pauses.append)
     assert sizes == [8]
     assert len(sent) == 80
+    assert receivers == [results] * 80
     assert {entry[3] for entry in sent} == {pauses.append}
     for leg in range(1, 21):
         assert [entry[:3] for entry in sent if entry[0].endswith(f"-3.12-{leg}")] == [
