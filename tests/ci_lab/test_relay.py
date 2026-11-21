@@ -560,13 +560,20 @@ def test_a_failing_git_call_keeps_its_head_pending_and_the_next_head_still_relay
 
 GADGETS = "https://github.com/acme/gadgets"
 REFUSAL = "GitHub App cannot supply scoped contents write and workflows write credentials: GitHub answered 422"
+REFUSALS = {
+    "push": REFUSAL,
+    "post": "GitHub App cannot supply scoped checks write credentials: GitHub answered 422",
+    "open": "GitHub App cannot supply scoped pull_requests write credentials: GitHub answered 422",
+}
 
 
 class Unminted(Calls):
-    """Fake relay ports whose App refuses the push token of the widgets repository while refusing is set."""
+    """Fake relay ports whose App refuses the token of one relay call, the push by default, for the widgets
+    repository while refusing is set."""
 
-    def __init__(self) -> None:
+    def __init__(self, call: str = "push") -> None:
         super().__init__()
+        self.call = call
         self.repo = ""
         self.refusing = True
 
@@ -575,11 +582,25 @@ class Unminted(Calls):
         self.repo = repo
         return super().pusher(repo)
 
+    def refuse(self, call: str) -> None:
+        """Refuse the widgets repository's token for the call while refusing is set and the call is the refused one."""
+        if self.refusing and call == self.call and self.repo == REPO:
+            raise github_app.GitAuthRefused(REFUSALS[call], status_code=422)
+
     def push(self, sha: str, branch: str) -> None:
-        """Refuse the widgets repository's push token while refusing is set and keep every other push."""
-        if self.refusing and self.repo == REPO:
-            raise github_app.GitAuthRefused(REFUSAL, status_code=422)
+        """Refuse the push token or keep the push."""
+        self.refuse("push")
         super().push(sha, branch)
+
+    def post(self, head: str, gate: str, status: str, conclusion: str | None, output: Output, shadow: bool) -> int:
+        """Refuse the check runs token or keep the post."""
+        self.refuse("post")
+        return super().post(head, gate, status, conclusion, output, shadow)
+
+    def open(self, branch: str, title: str, body: str) -> str:
+        """Refuse the pull requests token or keep the pull request call."""
+        self.refuse("open")
+        return super().open(branch, title, body)
 
 
 @pytest.mark.feature("lab-relay-app-refusal")
@@ -620,39 +641,23 @@ def test_a_refused_repository_relays_nothing_until_the_post_hold_ends_while_anot
     assert client.hgetall(relay.PENDING) == {}
 
 
-PULLS_REFUSAL = "GitHub App cannot supply scoped pull_requests write credentials: GitHub answered 403"
-
-
-class Unopened(Calls):
-    """Fake relay ports whose App refuses the pull requests token while refusing is set."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.refusing = True
-
-    def open(self, branch: str, title: str, body: str) -> str:
-        """Refuse the pull requests token while refusing is set, else keep the call."""
-        if self.refusing:
-            raise github_app.GitAuthRefused(PULLS_REFUSAL, status_code=403)
-        return super().open(branch, title, body)
-
-
 @pytest.mark.feature("lab-relay-app-refusal")
-def test_a_pull_request_token_refused_after_the_push_relays_again_after_the_hold_with_no_second_check_run() -> None:
-    client, calls = fake_redis(), Unopened()
+@pytest.mark.parametrize("call", ["post", "open"])
+def test_a_token_refused_after_the_push_relays_again_after_the_hold_posting_each_check_run_once(call: str) -> None:
+    client, calls = fake_redis(), Unminted(call)
     start = 1000.0
     clock = Mock(return_value=start)
     found = {HEAD: [grade("success")]}
     ports = replace(calls.ports(), clock=clock)
     engine = relay.Relay(client, Notices([relay.Pending(REPO, HEAD, REF, BRANCH)]), found.__getitem__, ports, LAB)
-    held = f"held {HEAD} for {BRANCH} for a later pass: {PULLS_REFUSAL}"
+    held = f"held {HEAD} for {BRANCH} for a later pass: {REFUSALS[call]}"
     assert engine.tick() == [f"pending {HEAD} for {BRANCH}", held]
-    posts = [call for call in calls.log if call[0] == "post"]
-    assert len(posts) == 3
     calls.refusing = False
     clock.return_value = start + scheduler_module.POST_HOLD_MS / 1000
-    assert engine.tick() == [f"pushed {HEAD} to {BRANCH}", f"opened {PULL}"]
-    assert [call for call in calls.log if call[0] == "post"] == posts
+    actions = engine.tick()
+    assert (actions[0], actions[-1]) == (f"pushed {HEAD} to {BRANCH}", f"opened {PULL}")
+    assert [entry[2] for entry in calls.log if entry[0] == "post"] == ["lint", "unit", "required"]
+    assert calls.log.count(("push", HEAD, BRANCH)) == 2
     assert client.hgetall(relay.PENDING) == {}
 
 
