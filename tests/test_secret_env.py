@@ -1,4 +1,5 @@
 import base64
+import io
 import shlex
 import stat
 import subprocess
@@ -7,6 +8,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from hooks import config
 from hooks.context import credential_guard
 from scripts import secret_env
 from scripts.cli_delegates import delegated_cli
@@ -50,11 +52,14 @@ def test_transfer_creates_a_private_file_without_output(
 ) -> None:
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
     target = tmp_path / "private.env"
-    value = "synthetic 'value' $literal " + chr(96) + "literal" + chr(96)
+    value = 'synthetic "value" $literal ' + chr(96) + "literal" + chr(96)
     run = _cluster(monkeypatch, value)
 
     assert secret_env.main(_args(target)) == 0
     assert target.read_text() == f"SERVICE_TOKEN={shlex.quote(value)}\n"
+    monkeypatch.delenv("SERVICE_TOKEN", raising=False)
+    assert config._parse_env_file(target) == set()
+    assert secret_env.os.environ["SERVICE_TOKEN"] == value
     assert stat.S_IMODE(target.stat().st_mode) == 0o600
     run.assert_called_once_with(
         [
@@ -172,10 +177,15 @@ def test_failed_retrieval_never_writes_or_exposes_values(
 def test_transfer_appends_to_a_relative_file(value: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
     target = tmp_path / "private.env"
-    target.write_text("OTHER=keep\n")
+    target.write_text("OTHER=café\n", encoding="utf-8")
+
+    def text_encoding(encoding: str | None, _stacklevel: int = 2) -> str:
+        return "latin-1" if encoding is None else encoding
+
+    monkeypatch.setattr(io, "text_encoding", text_encoding)
     _cluster(monkeypatch, value)
     assert secret_env.main(_args(Path("private.env"))) == 0
-    assert target.read_text(encoding="utf-8") == f"OTHER=keep\nSERVICE_TOKEN={shlex.quote(value)}\n"
+    assert target.read_text(encoding="utf-8") == f"OTHER=café\nSERVICE_TOKEN={shlex.quote(value)}\n"
     assert stat.S_IMODE(target.stat().st_mode) == 0o600
 
 
@@ -200,6 +210,55 @@ def test_failed_replace_preserves_the_file_and_cleans_the_private_temporary(
     assert secret_env.main(_args(target)) == 1
     assert target.read_text() == "OTHER=keep\n"
     assert sorted(path.name for path in tmp_path.iterdir()) == ["private.env"]
+    assert capsys.readouterr() == ("", "Secret transfer failed.\n")
+
+
+@pytest.mark.parametrize("quote", ["'", '"'])
+def test_existing_multiline_values_are_refused_without_changes(
+    quote: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    target = tmp_path / "private.env"
+    original = f"OTHER={quote}first\nSERVICE_TOKEN=inside\nlast{quote}\nSERVICE_TOKEN=old\n"
+    target.write_text(original)
+    _cluster(monkeypatch, "replacement")
+    assert secret_env.main(_args(target)) == 1
+    assert target.read_text() == original
+    assert capsys.readouterr() == ("", "Secret transfer failed.\n")
+
+
+def test_apostrophes_round_trip_through_the_host_loader(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    monkeypatch.delenv("SERVICE_TOKEN", raising=False)
+    target = tmp_path / "private.env"
+    _cluster(monkeypatch, "synthetic 'value'")
+    assert secret_env.main(_args(target)) == 0
+    assert target.read_text() == "SERVICE_TOKEN=\"synthetic 'value'\"\n"
+    assert config._parse_env_file(target) == set()
+    assert secret_env.os.environ["SERVICE_TOKEN"] == "synthetic 'value'"
+    assert capsys.readouterr() == ("", "")
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "synthetic 'value' $literal",
+        """synthetic 'value' "literal" """,
+        "synthetic 'value' \\",
+        "synthetic 'value' " + chr(96),
+    ],
+)
+def test_unrepresentable_values_are_refused_without_changes(
+    value: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    target = tmp_path / "private.env"
+    target.write_text("OTHER=keep\n")
+    _cluster(monkeypatch, value)
+    assert secret_env.main(_args(target)) == 1
+    assert target.read_text() == "OTHER=keep\n"
     assert capsys.readouterr() == ("", "Secret transfer failed.\n")
 
 

@@ -51,13 +51,25 @@ def _read_value(namespace: str, secret: str, key: str) -> str:
     return value
 
 
+def _quote(value: str) -> str:
+    if "'" not in value:
+        return shlex.quote(value)
+    if not any(character in value for character in '"$`\\'):
+        return f'"{value}"'
+    raise ValueError
+
+
 def _write_variable(target: Path, variable: str, value: str) -> None:
-    lines = target.read_text(encoding="utf-8").splitlines() if target.exists() else []
+    original = target.read_text(encoding="utf-8") if target.exists() else ""
+    for match in re.finditer(r"(?m)^[ \t]*(?:export[ \t]+)?[A-Za-z_][A-Za-z0-9_]*[ \t]*=[ \t]*(['\"])(.*)$", original):
+        if match.group(1) not in match.group(2):
+            raise ValueError
+    lines = original.splitlines()
     pattern = re.compile(rf"^\s*(?:export\s+)?{variable}\s*=")
     matches = [index for index, line in enumerate(lines) if pattern.match(line)]
     position = matches[0] if matches else len(lines)
     kept = [line for index, line in enumerate(lines) if index not in matches]
-    kept.insert(position, f"{variable}={shlex.quote(value)}")
+    kept.insert(position, f"{variable}={_quote(value)}")
     descriptor, name = tempfile.mkstemp(dir=target.parent)
     temporary = Path(name)
     try:
