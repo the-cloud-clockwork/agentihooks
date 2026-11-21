@@ -12441,10 +12441,24 @@
     {
       "id": "swarm-review-trigger",
       "origin": "inventory",
-      "behaviour": "The tick step review pass runs in group wrapper phases on the tick lane every 60 seconds.",
-      "seam": "scripts.tick.steps.review._review_pass registered as tick step review pass",
+      "behaviour": "The tick step review pass queues one review lane task per pull request, merge queue group and release a running swarm with a review cap sees, keyed by the change so a repeat adds nothing; the hub webhook publishes merge group and release events to every swarm tracking a pull request in that repository.",
+      "seam": "scripts.tick.steps.review.review_pass, scripts.hub.github_webhooks.repository_events and scripts.hub.pulls.Pulls.announce",
       "tests": [
-        "tests/tick/steps/test_review_pass.py::test_review_pass"
+        "tests/tick/steps/test_review_pass.py::test_review_pass",
+        "tests/tick/steps/test_review_queue.py::test_one_pull_opened_event_queues_exactly_one_review_task_and_a_repeat_queues_none",
+        "tests/tick/steps/test_review_queue.py::test_a_merge_group_and_a_release_each_queue_one_review_task",
+        "tests/tick/steps/test_review_queue.py::test_review_task_ids_are_keyed_by_the_change_alone",
+        "tests/tick/steps/test_review_queue.py::test_events_from_before_the_replay_window_queue_nothing",
+        "tests/tick/steps/test_review_queue.py::test_a_ledger_refusal_is_skipped_and_never_fails_the_pass",
+        "tests/tick/steps/test_review_queue.py::test_the_step_is_inert_without_a_review_lane_or_a_running_swarm",
+        "tests/tick/steps/test_review_queue.py::test_the_step_runs_the_pass_on_the_swarm_bus",
+        "tests/tick/steps/test_review_queue.py::test_the_step_opens_no_bus_on_the_memory_backend",
+        "tests/hub/test_pulls.py::test_tracking_a_pull_request_records_its_swarms_for_the_repository",
+        "tests/hub/test_pulls.py::test_a_repository_event_reaches_each_tracking_swarm_with_one_id_per_change",
+        "tests/hub/test_pulls.py::test_a_repository_event_for_an_untracked_repository_publishes_nothing",
+        "tests/hub/test_github_webhooks.py::test_repository_events_from_recorded_payloads",
+        "tests/hub/test_github_webhooks.py::test_a_merge_group_and_a_release_reach_each_swarm_tracking_the_repository",
+        "tests/hub/test_github_webhooks.py::test_a_failed_repository_publish_answers_503_after_the_lab_head_is_published"
       ]
     }
   ],

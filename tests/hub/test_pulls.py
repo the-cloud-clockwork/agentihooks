@@ -639,3 +639,38 @@ def test_pulls_default_to_github_fetch_and_wall_clock(monkeypatch):
     hub.poll()
     assert len(calls) == 1
     assert json.loads(bus.state(pulls.BUCKET).get(pulls.POLLED).value) > 0
+
+
+REPO = "https://github.com/acme/widgets"
+
+
+@pytest.mark.feature("swarm-review-trigger")
+def test_tracking_a_pull_request_records_its_swarms_for_the_repository():
+    bus, hub, _ = setup()
+    hub.track("crew", URL)
+    hub.track("other", OTHER)
+    hub.track("crew", OTHER)
+    entry = bus.state(pulls.BUCKET).get(pulls.repository_key(REPO.upper()))
+    assert json.loads(entry.value) == ["crew", "other"]
+
+
+@pytest.mark.feature("swarm-review-trigger")
+def test_a_repository_event_reaches_each_tracking_swarm_with_one_id_per_change():
+    bus, hub, consumer = setup()
+    hub.track("crew", URL)
+    hub.track("other", OTHER)
+    hub.announce(REPO, "merge_group.requested", "a1", {"head": "a1"})
+    hub.announce(REPO, "merge_group.requested", "a1", {"head": "a1"})
+    events = drain(consumer)
+    assert {(e.swarm, e.type, e.key, e.data["repository"], e.data["head"]) for e in events} == {
+        ("crew", "merge_group.requested", "a1", REPO, "a1"),
+        ("other", "merge_group.requested", "a1", REPO, "a1"),
+    }
+    assert len({(e.swarm, e.id) for e in events}) == len({e.id for e in events}) == 2
+
+
+@pytest.mark.feature("swarm-review-trigger")
+def test_a_repository_event_for_an_untracked_repository_publishes_nothing():
+    _, hub, consumer = setup()
+    hub.announce(REPO, "release.published", "v1", {"tag": "v1"})
+    assert drain(consumer) == []
