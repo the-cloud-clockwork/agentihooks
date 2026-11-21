@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import os
 import shlex
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from itertools import takewhile
 from pathlib import Path, PurePosixPath
 from typing import NamedTuple
 
-from hooks.context.credential_guard import strip_heredocs
+from hooks.context.credential_guard import HEREDOC, strip_heredocs
 
 SHELLS = frozenset({"bash", "sh", "zsh", "dash"})
 WRAPPERS: dict[str, frozenset[str]] = {
@@ -17,15 +16,33 @@ WRAPPERS: dict[str, frozenset[str]] = {
     "env": frozenset({"-u"}),
     "nice": frozenset({"-n"}),
     "timeout": frozenset({"-s", "-k", "--signal", "--kill-after"}),
+    "flock": frozenset({"-w", "-E", "--timeout", "--conflict-exit-code"}),
+    "stdbuf": frozenset({"-i", "-o", "-e"}),
+    "ionice": frozenset({"-c", "-n", "-p"}),
     "command": frozenset(),
     "nohup": frozenset(),
     "exec": frozenset(),
     "time": frozenset(),
+    "setsid": frozenset(),
+    "builtin": frozenset(),
 }
+POSITIONAL_WRAPPERS = frozenset({"timeout", "flock"})
+ENV_OPTIONS = frozenset({"-C", "--chdir", "-S", "--split-string"})
 KEYWORDS = frozenset({"if", "then", "else", "elif", "do", "while", "until", "!", "{"})
+FOLDER_CHANGES = frozenset({"cd", "pushd", "popd"})
 COPIES = frozenset({"cp", "ln", "install", "rsync"})
-WRITERS = COPIES | frozenset({"mv", "rm", "rmdir", "touch", "mkdir", "chmod", "chown", "truncate", "tee", "unlink"})
+WRITERS = frozenset({"mv", "rm", "rmdir", "touch", "mkdir", "chmod", "chown", "truncate", "tee", "unlink"})
 IN_PLACE = frozenset({"sed", "perl"})
+PACKERS = frozenset({"gzip", "gunzip", "bzip2", "bunzip2", "xz", "unxz", "zstd", "unzstd"})
+PACKER_STREAMS = frozenset({"--stdout", "--to-stdout", "--list", "--test"})
+TARGET_OPTIONS = frozenset({"-t", "--target-directory"})
+OUTPUT_OPTIONS = frozenset({"-o", "--output"})
+REMOTE_NAMES = frozenset({"-O", "--remote-name", "--remote-name-all"})
+WGET_OUTPUTS = frozenset({"-O", "--output-document"})
+FIND_WRITES = frozenset({"-fprint", "-fprint0", "-fls", "-fprintf"})
+TAR_MODES = frozenset({"--extract", "--get", "--create", "--append", "--update", "--delete", "--concatenate"})
+TAR_WRITES = frozenset("xcruA")
+UNZIP_READS = frozenset({"-l", "-t", "-p", "-v", "-Z", "-z"})
 GIT_READS = frozenset(
     {
         "status",
@@ -54,7 +71,19 @@ GIT_READS = frozenset(
         "help",
     }
 )
-GH_WRITES = frozenset({("pr", "checkout"), ("repo", "clone")})
+GIT_LISTINGS: dict[str, frozenset[str]] = {
+    "branch": frozenset({"--show-current", "-a", "-r", "-v", "-vv", "-l", "--list", "--all", "--remotes"}),
+    "tag": frozenset({"-l", "--list"}),
+    "remote": frozenset({"-v", "get-url", "show"}),
+    "config": frozenset({"--get", "--get-all", "--get-regexp", "--list", "-l"}),
+    "stash": frozenset({"list", "show"}),
+    "worktree": frozenset({"list"}),
+    "reflog": frozenset({"show"}),
+    "submodule": frozenset({"status"}),
+}
+BARE_LISTINGS = frozenset({"branch", "tag", "remote", "reflog", "submodule"})
+GH_WRITES = frozenset({("pr", "checkout"), ("pr", "co"), ("repo", "clone")})
+GH_VALUES = frozenset({"-R", "--repo", "--hostname"})
 EXECS = frozenset({"-exec", "-execdir", "-ok", "-okdir"})
 XARGS_VALUES = frozenset({"-I", "-n", "-P", "-d", "-L", "-s", "-E", "-a"})
 DEVICES = frozenset({"/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty"})
@@ -67,6 +96,8 @@ class Simple(NamedTuple):
     words: list[str]
     targets: list[str]
     scripts: list[str]
+    depth: int
+    isolated: bool
 
 
 def _quote_end(command: str, start: int) -> int:
@@ -79,6 +110,9 @@ def _quote_end(command: str, start: int) -> int:
 def _paren_end(command: str, start: int) -> int:
     depth, index = 0, start
     while index < len(command):
+        if command[index] in "'\"":
+            index = _quote_end(command, index)
+            continue
         depth += {"(": 1, ")": -1}.get(command[index], 0)
         index += 1
         if depth == 0:
@@ -149,6 +183,13 @@ def _substitutions(word: str) -> list[str]:
     return found
 
 
+def _heredoc_scripts(command: str) -> list[str]:
+    """The commands an unquoted heredoc body runs through substitution."""
+    return [
+        script for body in HEREDOC.finditer(command) if not body.group(1) for script in _substitutions(body.group(4))
+    ]
+
+
 def _unquoted(word: str) -> str:
     try:
         parts = shlex.split(word)
@@ -161,15 +202,27 @@ def _fd(word: str) -> bool:
     return word == "-" or word.rstrip("-").isdigit()
 
 
+def _piped(run: str) -> bool:
+    return "|" in run.replace("||", "").replace(">|", "")
+
+
+def _backgrounded(run: str) -> bool:
+    bare = run.replace("&&", "")
+    return "&" in bare.replace(">&", "").replace("&>", "").replace("<&", "")
+
+
 def _simple_commands(command: str) -> list[Simple]:
-    """Each simple command of *command*: its words, the files its redirects write and the scripts it substitutes."""
-    commands = [Simple([], [], [])]
-    pending = ""
+    """Each simple command of *command*: its words, redirect targets, substituted scripts, subshell depth and isolation."""
+    commands = [Simple([], [], [], 0, False)]
+    pending, depth = "", 0
     for operator, text in _tokens(strip_heredocs(command.replace("\\\n", " "))):
         if operator:
             ends, pending = _operator(text)
+            if _piped(text) or _backgrounded(text):
+                commands[-1] = commands[-1]._replace(isolated=True)
+            depth = max(0, depth + text.count("(") - text.count(")"))
             if ends:
-                commands.append(Simple([], [], []))
+                commands.append(Simple([], [], [], depth, _piped(text)))
             continue
         commands[-1].scripts.extend(_substitutions(text))
         word = _unquoted(text)
@@ -187,6 +240,7 @@ def _assignment(word: str) -> bool:
 
 
 def _unwrapped(words: list[str]) -> list[str]:
+    """*words* from the program that wrappers, keywords and assignments run; env changing its folder or command stays."""
     rest = list(words)
     while rest and (rest[0] in KEYWORDS or _assignment(rest[0])):
         rest.pop(0)
@@ -195,22 +249,63 @@ def _unwrapped(words: list[str]) -> list[str]:
         return rest
     rest.pop(0)
     while rest and rest[0].startswith("-"):
-        if rest.pop(0) in WRAPPERS[wrapper] and rest:
+        flag = rest.pop(0)
+        if wrapper == "env" and flag.partition("=")[0] in ENV_OPTIONS:
+            return ["env", flag, *rest]
+        if flag in WRAPPERS[wrapper] and rest:
             rest.pop(0)
-    if wrapper == "timeout" and rest:
+    if wrapper in POSITIONAL_WRAPPERS and rest:
         rest.pop(0)
     return _unwrapped(rest)
 
 
-def _resolved(value: str, cwd: Path) -> Path:
-    path = Path(os.path.expandvars(value)).expanduser()
-    return (path if path.is_absolute() else cwd / path).resolve()
+def _dynamic(value: str) -> bool:
+    """Whether the shell expands *value* at run time: a variable, a substitution or a glob that can match a parent."""
+    globbed = any(part[:1] == "." and any(char in part for char in "*?[") for part in value.split("/"))
+    return "$" in value or "`" in value or globbed
 
 
-def _within(value: str, cwd: Path, roots: list[Path]) -> bool:
+def _located(value: str, base: Path | None) -> Path | None:
+    """The absolute path *value* names from *base*, or None when only run time knows it."""
+    if value == UNKNOWN or _dynamic(value):
+        return None
+    try:
+        path = Path(value).expanduser()
+        if path.is_absolute():
+            return path.resolve()
+        return None if base is None else (base / path).resolve()
+    except (ValueError, RuntimeError, OSError):
+        return None
+
+
+def _within(value: str, base: Path | None, roots: list[Path]) -> bool:
     if value in DEVICES:
         return True
-    return value != UNKNOWN and any(_resolved(value, cwd).is_relative_to(root) for root in roots)
+    target = _located(value, base)
+    return target is not None and any(target.is_relative_to(root) for root in roots)
+
+
+def _moved(words: list[str], base: Path | None) -> Path | None:
+    """The folder a cd, pushd or popd moves to, or None when only run time knows it."""
+    targets = [word for word in words[1:] if not word.startswith("-") or word == "-"]
+    if words[0] == "popd" or any(target == "-" or target.startswith("+") for target in targets):
+        return None
+    if not targets:
+        return None if words[0] == "pushd" else _located("~", base)
+    return _located(targets[0], base)
+
+
+def _option_values(words: list[str], names: frozenset[str]) -> list[str]:
+    """The values *words* gives the options *names*, written as a separate word or after an equals sign."""
+    values: list[str] = []
+    rest = iter(words[1:])
+    for word in rest:
+        name, equals, value = word.partition("=")
+        if equals and name in names:
+            values.append(value)
+        elif word in names:
+            values.append(next(rest, ""))
+    return values
 
 
 def _in_place(word: str) -> bool:
@@ -237,51 +332,127 @@ def _edited_files(words: list[str]) -> list[str]:
     return files if scripted else files[1:]
 
 
+def _short_flags(word: str) -> str:
+    return word[1:] if word[:1] == "-" and word[1:2] != "-" else ""
+
+
+def _plain_targets(words: list[str], operands: list[str]) -> list[str]:
+    return operands
+
+
 def _copy_targets(words: list[str], operands: list[str]) -> list[str]:
-    """A copy writes the folder its target option names, else its last operand."""
-    named: list[str] = []
-    rest = iter(words[1:])
-    for word in rest:
-        if word in ("-t", "--target-directory"):
-            named.append(next(rest, ""))
-        elif word.startswith("--target-directory="):
-            named.append(word.partition("=")[2])
-    return named or operands[-1:]
+    return _option_values(words, TARGET_OPTIONS) or operands[-1:]
 
 
-def _named_targets(words: list[str]) -> list[str]:
-    head = PurePosixPath(words[0]).name if words else ""
-    operands = [word for word in words[1:] if not word.startswith("-")]
-    if head == "dd":
-        return [word[3:] for word in words[1:] if word.startswith("of=")]
-    if head == "patch":
-        return [UNKNOWN]
-    if head in COPIES:
-        return _copy_targets(words, operands)
-    if head in IN_PLACE and any(_in_place(word) for word in words[1:]):
-        return _edited_files(words)
-    return operands if head in WRITERS else []
+def _edit_targets(words: list[str], operands: list[str]) -> list[str]:
+    return _edited_files(words) if any(_in_place(word) for word in words[1:]) else []
+
+
+def _dd_targets(words: list[str], operands: list[str]) -> list[str]:
+    return [word[3:] for word in words[1:] if word.startswith("of=")]
+
+
+def _patch_targets(words: list[str], operands: list[str]) -> list[str]:
+    return [] if "--dry-run" in words else [UNKNOWN]
+
+
+def _sort_targets(words: list[str], operands: list[str]) -> list[str]:
+    return _option_values(words, OUTPUT_OPTIONS)
+
+
+def _uniq_targets(words: list[str], operands: list[str]) -> list[str]:
+    return operands[1:2]
+
+
+def _curl_targets(words: list[str], operands: list[str]) -> list[str]:
+    named = [value for value in _option_values(words, OUTPUT_OPTIONS) if value != "-"]
+    return named + ([UNKNOWN] if REMOTE_NAMES & set(words) else [])
+
+
+def _wget_targets(words: list[str], operands: list[str]) -> list[str]:
+    named = _option_values(words, WGET_OUTPUTS)
+    if named == ["-"] or any(word.endswith("O-") or word == "--spider" for word in words):
+        return []
+    return named or [UNKNOWN]
+
+
+def _find_targets(words: list[str], operands: list[str]) -> list[str]:
+    return _option_values(words, FIND_WRITES)
+
+
+def _packer_targets(words: list[str], operands: list[str]) -> list[str]:
+    streams = any(word in PACKER_STREAMS or set(_short_flags(word)) & set("clt") for word in words[1:])
+    return [] if streams else operands
+
+
+def _tar_targets(words: list[str], operands: list[str]) -> list[str]:
+    bare = words[1] if len(words) > 1 and words[1][:1] != "-" else ""
+    clusters = [_short_flags(word) for word in words[1:]] + [bare]
+    writes = any(set(cluster) & TAR_WRITES for cluster in clusters) or bool(TAR_MODES & set(words))
+    return [UNKNOWN] if writes else []
+
+
+def _unzip_targets(words: list[str], operands: list[str]) -> list[str]:
+    return [] if UNZIP_READS & set(words) else [UNKNOWN]
+
+
+TOOLS: dict[str, Callable[[list[str], list[str]], list[str]]] = {
+    **dict.fromkeys(WRITERS, _plain_targets),
+    **dict.fromkeys(COPIES, _copy_targets),
+    **dict.fromkeys(IN_PLACE, _edit_targets),
+    **dict.fromkeys(PACKERS, _packer_targets),
+    "dd": _dd_targets,
+    "patch": _patch_targets,
+    "sort": _sort_targets,
+    "uniq": _uniq_targets,
+    "curl": _curl_targets,
+    "wget": _wget_targets,
+    "find": _find_targets,
+    "tar": _tar_targets,
+    "unzip": _unzip_targets,
+}
 
 
 def _write_targets(words: list[str]) -> list[str]:
-    return [UNKNOWN if "{}" in value else value for value in _named_targets(words)]
+    head = PurePosixPath(words[0]).name if words else ""
+    tool = TOOLS.get(head)
+    if tool is None:
+        return []
+    named = tool(words, [word for word in words[1:] if not word.startswith("-")])
+    return [UNKNOWN if "{}" in value else value for value in named]
 
 
 def _head_reason(words: list[str]) -> str:
-    named = bool(words) and ("$" in words[0] or "`" in words[0])
-    return f"runs a command named by {words[0]}" if named else ""
+    head = words[0] if words else ""
+    if head == "env":
+        return f"runs env {words[1]}, which hides the folder or the command it runs"
+    named = any(char in head for char in "$`*?") or ("[" in head and head not in ("[", "[["))
+    return f"runs a command named by {head}" if named else ""
 
 
 def _gh_reason(args: list[str]) -> str:
     plain: list[str] = []
     rest = iter(args)
     for word in rest:
-        if word in ("-R", "--repo"):
+        if word in GH_VALUES:
             next(rest, "")
-        elif not word.startswith("--repo="):
+        elif word.partition("=")[0] not in GH_VALUES:
             plain.append(word)
     pair = (*plain[:2],)
     return f"runs gh {' '.join(pair)}" if pair in GH_WRITES else ""
+
+
+def _git_read(subcommand: str, args: list[str]) -> bool:
+    if subcommand in GIT_READS:
+        return True
+    listing = GIT_LISTINGS.get(subcommand)
+    if listing is None:
+        return False
+    if not args:
+        return subcommand in BARE_LISTINGS
+    if subcommand == "branch":
+        return all(arg in listing for arg in args)
+    return args[0] in listing
 
 
 def _git_reason(words: list[str]) -> str:
@@ -300,7 +471,7 @@ def _git_reason(words: list[str]) -> str:
         if word == "-C":
             next(rest, "")
         elif not word.startswith("-"):
-            return "" if word in GIT_READS else f"runs git {word}"
+            return "" if _git_read(word, list(rest)) else f"runs git {word}"
     return ""
 
 
@@ -334,7 +505,7 @@ def _nested(words: list[str]) -> list[str]:
     return []
 
 
-def _first(scripts: list[str], cwd: Path, roots: list[Path]) -> str:
+def _first(scripts: list[str], cwd: Path | None, roots: list[Path]) -> str:
     for script in scripts:
         found = write_reason(script, cwd, roots)
         if found:
@@ -342,7 +513,7 @@ def _first(scripts: list[str], cwd: Path, roots: list[Path]) -> str:
     return ""
 
 
-def _nested_reason(words: list[str], cwd: Path, roots: list[Path]) -> str:
+def _nested_reason(words: list[str], cwd: Path | None, roots: list[Path]) -> str:
     head = PurePosixPath(words[0]).name if words else ""
     if head == "find" and "-delete" in words:
         return "deletes files with find -delete"
@@ -351,20 +522,27 @@ def _nested_reason(words: list[str], cwd: Path, roots: list[Path]) -> str:
     return _first(_nested(words), cwd, roots)
 
 
-def write_reason(command: str, cwd: Path, roots: list[Path]) -> str:
+def _command_reason(simple: Simple, words: list[str], base: Path | None, roots: list[Path]) -> str:
+    outside = [value for value in simple.targets + _write_targets(words) if not _within(value, base, roots)]
+    return (
+        (f"writes {outside[-1]}" if outside else "")
+        or _head_reason(words)
+        or _git_reason(words)
+        or _nested_reason(words, base, roots)
+        or _first(simple.scripts, base, roots)
+    )
+
+
+def write_reason(command: str, cwd: Path | None, roots: list[Path]) -> str:
     """What *command* writes outside *roots* or which repository write it runs, as a phrase, or empty."""
+    bases: list[Path | None] = [cwd]
     for simple in _simple_commands(command):
+        del bases[simple.depth + 1 :]
+        bases += [bases[-1]] * (simple.depth + 1 - len(bases))
         words = _unwrapped(simple.words)
-        if words[:1] == ["cd"]:
-            cwd = _resolved(words[1] if len(words) > 1 else "~", cwd)
-        outside = [value for value in simple.targets + _write_targets(words) if not _within(value, cwd, roots)]
-        found = (
-            (f"writes {outside[-1]}" if outside else "")
-            or _head_reason(words)
-            or _git_reason(words)
-            or _nested_reason(words, cwd, roots)
-            or _first(simple.scripts, cwd, roots)
-        )
+        if words[:1] and words[0] in FOLDER_CHANGES and not simple.isolated:
+            bases[-1] = _moved(words, bases[-1])
+        found = _command_reason(simple, words, bases[-1], roots)
         if found:
             return found
-    return ""
+    return _first(_heredoc_scripts(command), cwd, roots)
