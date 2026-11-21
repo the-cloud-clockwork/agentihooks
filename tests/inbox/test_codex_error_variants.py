@@ -39,14 +39,26 @@ def is_info(node: ast.expr | None) -> bool:
     return isinstance(node, ast.Constant) and node.value == INFO
 
 
+def assigned(target: ast.expr, value: ast.expr | None) -> list[ast.expr]:
+    """What one assignment target writes under codexErrorInfo: the value, or the variant key its subscripts name."""
+    written = value
+    while isinstance(target, ast.Subscript):
+        if is_info(target.slice):
+            return [] if written is None else [written]
+        written, target = target.slice, target.value
+    return []
+
+
 def values(node: ast.AST) -> list[ast.expr]:
-    """The values one node writes under codexErrorInfo: a dict entry, a subscript assignment or a keyword argument."""
+    """The values one node writes under codexErrorInfo: a dict entry, a keyword argument or an assignment."""
     if isinstance(node, ast.Dict):
         return [value for key, value in zip(node.keys, node.values) if is_info(key)]
-    if isinstance(node, ast.Assign) and any(isinstance(t, ast.Subscript) and is_info(t.slice) for t in node.targets):
-        return [node.value]
     if isinstance(node, ast.keyword) and node.arg == INFO:
         return [node.value]
+    if isinstance(node, ast.Assign):
+        return [written for target in node.targets for written in assigned(target, node.value)]
+    if isinstance(node, (ast.AugAssign, ast.AnnAssign)):
+        return assigned(node.target, node.value)
     return []
 
 
