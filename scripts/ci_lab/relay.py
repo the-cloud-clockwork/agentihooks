@@ -340,7 +340,7 @@ def build(environ: Mapping[str, str], scheduler: Scheduler, consumer: Consumer) 
 
     def checks(slug: str) -> CheckRuns:
         if slug not in posters:
-            posters[slug] = Checks(slug)
+            posters[slug] = Checks(slug, registry=scheduler.registry)
         return posters[slug]
 
     ports = Ports(pusher, checks, PullRequests, scheduler.save)
