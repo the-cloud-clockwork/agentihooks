@@ -858,7 +858,7 @@ The worker count:
 
 | `elasticity.enabled` | Replicas |
 |---|---|
-| `true`, the shipped value | The Deployment carries no `replicas`. The `ci-lab-worker` KEDA ScaledObject sizes it from `max_over_time(sum(ci_lab_slots_wanted)[2m:15s])` at a target of `worker.slots` per worker, between `elasticity.floorWorkers` (3) and `workersPerNode × nodeMax` (3 × 7 = 21), and holds `floorWorkers` after `elasticity.fallbackFailures` (3) failed reads of that query |
+| `true`, the shipped value | The Deployment carries no `replicas`. The `ci-lab-worker` KEDA ScaledObject sizes it from `max_over_time(sum(ci_lab_slots_wanted)[2m:15s])` at a target of `worker.slots` per worker, between `elasticity.floorWorkers` (1) and `workersPerNode × nodeMax` (3 × 7 = 21), and holds `floorWorkers` after `elasticity.fallbackFailures` (3) failed reads of that query |
 | `false` | `worker.replicas` (3), one node of workers |
 
 `elasticity.nodeMax` (7) is the CI pool maximum of the OCI cluster autoscaler, the middle field
@@ -973,7 +973,7 @@ console port and another LAN service were refused.
 | `worker.mutation.cap` | `1` | `CI_LAB_MUTATION_CAP` |
 | `worker.resources` | 5 CPU, `8Gi` and `20Gi` ephemeral, requests equal to limits | Container resources, copied as written |
 | `elasticity.enabled` | `true` | Renders the ScaledObject and drops `replicas` from the Deployment |
-| `elasticity.floorWorkers` | `3` | ScaledObject minimum and fallback replicas |
+| `elasticity.floorWorkers` | `1` | ScaledObject minimum and fallback replicas |
 | `elasticity.workersPerNode` | `3` | Workers per CI node: a factor of the ScaledObject maximum and its scale up step |
 | `elasticity.nodeMax` | `7` | CI pool node maximum: the other factor of the ScaledObject maximum |
 | `elasticity.pollingInterval` | `15` | Seconds between the ScaledObject's trigger reads |
@@ -1051,9 +1051,10 @@ List the workers and their nodes:
 kubectl -n ci-lab get pods -l app.kubernetes.io/component=worker -o wide
 ```
 
-The binpack score sends each worker to the fullest CI node it fits, so at the floor of three
-workers with one CI node that has room, expect all three on the same `NODE`. The chart does not
-force it: a worker scheduled while that node was full goes elsewhere. Read the node's requests:
+The binpack score sends each worker to the fullest CI node it fits. The floor,
+`elasticity.floorWorkers`, is one worker. With three workers and one CI node that has room, expect
+all three on the same `NODE`. The chart does not force it: a worker scheduled while that node was
+full goes elsewhere. Read the node's requests:
 
 ```bash
 node=$(kubectl -n ci-lab get pods -l app.kubernetes.io/component=worker \
@@ -1583,7 +1584,7 @@ the autoscaler adds. `kubectl uncordon <node>` makes the node schedulable again.
 ### Lower the worker floor
 
 The KEDA ScaledObject `ci-lab-worker` sizes the worker Deployment as [Packing](#packing) describes,
-and [Configuration](#configuration) lists every `elasticity` value. `elasticity.floorWorkers`, 3 by
+and [Configuration](#configuration) lists every `elasticity` value. `elasticity.floorWorkers`, 1 by
 default, is both its `minReplicaCount` and the `fallback` replicas it holds after
 `elasticity.fallbackFailures` failed trigger reads. The trigger sets `ignoreNullValues` to
 `"false"`, so a missing `ci_lab_slots_wanted` series counts as a failed read.
