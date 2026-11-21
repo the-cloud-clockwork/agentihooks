@@ -507,7 +507,7 @@ def test_an_alias_recipient_journal_is_exported_under_its_canonical_name(store: 
     assert journal <= set(inbox.keys_at([eng])[0])
     with patch.object(InboxStore, "keys_at", autospec=True, side_effect=InboxStore.keys_at) as listed:
         exported = store.export("sw")
-    assert {"sw-eng-old", eng} <= set(listed.call_args.args[1])
+    assert {"sw-eng-old", eng} <= {address for call in listed.call_args_list for address in call.args[1]}
     assert journal <= set(exported["keys"])
     snapshot.take(store, "sw", 99, run=_no_git)
     store.redis.flushall()
