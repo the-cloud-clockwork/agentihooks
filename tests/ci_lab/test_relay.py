@@ -620,6 +620,42 @@ def test_a_refused_repository_relays_nothing_until_the_post_hold_ends_while_anot
     assert client.hgetall(relay.PENDING) == {}
 
 
+PULLS_REFUSAL = "GitHub App cannot supply scoped pull_requests write credentials: GitHub answered 403"
+
+
+class Unopened(Calls):
+    """Fake relay ports whose App refuses the pull requests token while refusing is set."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.refusing = True
+
+    def open(self, branch: str, title: str, body: str) -> str:
+        """Refuse the pull requests token while refusing is set, else keep the call."""
+        if self.refusing:
+            raise github_app.GitAuthRefused(PULLS_REFUSAL, status_code=403)
+        return super().open(branch, title, body)
+
+
+@pytest.mark.feature("lab-relay-app-refusal")
+def test_a_pull_request_token_refused_after_the_push_relays_again_after_the_hold_with_no_second_check_run() -> None:
+    client, calls = fake_redis(), Unopened()
+    start = 1000.0
+    clock = Mock(return_value=start)
+    found = {HEAD: [grade("success")]}
+    ports = replace(calls.ports(), clock=clock)
+    engine = relay.Relay(client, Notices([relay.Pending(REPO, HEAD, REF, BRANCH)]), found.__getitem__, ports, LAB)
+    held = f"held {HEAD} for {BRANCH} for a later pass: {PULLS_REFUSAL}"
+    assert engine.tick() == [f"pending {HEAD} for {BRANCH}", held]
+    posts = [call for call in calls.log if call[0] == "post"]
+    assert len(posts) == 3
+    calls.refusing = False
+    clock.return_value = start + scheduler_module.POST_HOLD_MS / 1000
+    assert engine.tick() == [f"pushed {HEAD} to {BRANCH}", f"opened {PULL}"]
+    assert [call for call in calls.log if call[0] == "post"] == posts
+    assert client.hgetall(relay.PENDING) == {}
+
+
 def test_bus_notices_keep_trusted_grade_ref_heads_with_a_branch_and_acknowledge_every_envelope() -> None:
     bus = open_bus(BusConfig())
     consumer = bus.lab_heads.consumer(relay.DURABLE, relay.SUBJECT)

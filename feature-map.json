@@ -9826,6 +9826,7 @@
       "tests": [
         "tests/ci_lab/test_relay.py::test_a_relay_whose_app_token_is_refused_stays_pending_and_another_repository_still_relays",
         "tests/ci_lab/test_relay.py::test_a_refused_repository_relays_nothing_until_the_post_hold_ends_while_another_repository_relays",
+        "tests/ci_lab/test_relay.py::test_a_pull_request_token_refused_after_the_push_relays_again_after_the_hold_with_no_second_check_run",
         "tests/test_github_app.py::test_a_refused_checks_token_names_checks_write_and_the_answer_status",
         "tests/test_github_app.py::test_a_refused_push_token_names_contents_write_and_workflows_write"
       ]
