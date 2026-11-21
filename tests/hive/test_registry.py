@@ -74,6 +74,13 @@ def test_a_member_updates_its_settings_without_writing_the_controller_index(redi
     assert not redis.exists(registry.INDEX)
 
 
+@pytest.mark.feature("hub-admission-pinned-hive")
+@pytest.mark.parametrize("pinned", ["yes", "no"])
+def test_hive_set_records_whether_the_hive_is_pinned(redis: object, pinned: str) -> None:
+    assert registry.update(redis, "box", [f"pinned={pinned}"]) == {**DEFAULT, "pinned": pinned}
+    assert registry.show(redis, "box") == {**DEFAULT, "pinned": pinned}
+
+
 def test_hive_set_refused_the_index_write_still_settles_the_record(redis, monkeypatch):
     from redis.exceptions import NoPermissionError
 
@@ -316,14 +323,15 @@ def test_a_record_written_by_another_writer_shows_with_defaults(redis):
         ([], "hive set needs at least one setting"),
         (
             ["colour=red"],
-            "unknown setting 'colour=red'; settings are name, ui, ephemeral, draining, excluded, master-swarms, prefer, max-agents, capabilities",
+            "unknown setting 'colour=red'; settings are name, ui, ephemeral, draining, pinned, excluded, master-swarms, prefer, max-agents, capabilities",
         ),
         (
             ["ui"],
-            "unknown setting 'ui'; settings are name, ui, ephemeral, draining, excluded, master-swarms, prefer, max-agents, capabilities",
+            "unknown setting 'ui'; settings are name, ui, ephemeral, draining, pinned, excluded, master-swarms, prefer, max-agents, capabilities",
         ),
         (["ui=maybe"], "ui must be yes or no, not 'maybe'"),
         (["ephemeral=true"], "ephemeral must be yes or no, not 'true'"),
+        (["pinned=true"], "pinned must be yes or no, not 'true'"),
         (["name="], "name must not be empty"),
         (["excluded=eng,a:b"], "excluded takes lane roles or profiles, not 'a:b'"),
         (["max-agents="], "max-agents must be a whole number, not ''"),

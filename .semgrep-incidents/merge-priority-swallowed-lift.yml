@@ -1,0 +1,17 @@
+rules:
+  - id: merge-priority-swallowed-lift
+    languages: [python]
+    severity: ERROR
+    message: Pass the operator lift to apply so testing entries can be removed and restored behind the priority target.
+    paths:
+      include:
+        - /scripts/swarm/queue_priority.py
+        - merge-priority-swallowed-lift.py
+    patterns:
+      - pattern-inside: |
+          def $REQUEST(...):
+              ...
+      - metavariable-regex:
+          metavariable: $REQUEST
+          regex: ^request($|_)
+      - pattern: apply($STORE, $SLUG, $URL, $SENDER, $TASKS, $JOURNAL)

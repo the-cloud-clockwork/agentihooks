@@ -162,8 +162,8 @@
   "C901": 13
  },
  "scripts/install.py::_collect_all_managed_mcp_servers": {
-  "C901": 16,
-  "PLR0912": 15
+  "C901": 15,
+  "PLR0912": 14
  },
  "scripts/install.py::_connector_inspect": {
   "C901": 18,
@@ -197,8 +197,8 @@
   "PLR0912": 25
  },
  "scripts/install.py::_reseed_managed_mcp_sources": {
-  "C901": 18,
-  "PLR0912": 17
+  "C901": 17,
+  "PLR0912": 16
  },
  "scripts/install.py::cmd_init_unified": {
   "C901": 25,

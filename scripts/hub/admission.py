@@ -207,10 +207,13 @@ class Admission:
         return admitted
 
     def _outdated(self, hive: str) -> str:
-        """The member release below the hub release it is refused for; empty when either release is unreported."""
+        """The member release below the hub release it is refused for; empty when either release is unreported or the
+        hive's own chart pinned it to its release."""
         from scripts.hive import registry
 
         record: Any = registry.show(self.store.redis, hive) or {}  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType, reportUnknownArgumentType]
+        if record.get("pinned") == "yes":
+            return ""
         member, hub = str(record.get("version")), updater.installed_version()
         reported, floor = release_key(member), release_key(hub)
         return f"release {member} below hub release {hub}" if reported and floor and reported < floor else ""

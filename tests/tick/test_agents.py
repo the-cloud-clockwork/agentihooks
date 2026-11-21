@@ -111,6 +111,30 @@ def test_the_agents_group_runs_its_calls_with_the_pass_state(monkeypatch: pytest
     ]
 
 
+@pytest.mark.feature("registry-update-skips-ended-execution")
+def test_a_hub_admitted_agent_dropped_while_the_reap_holds_its_pass_start_copy_is_not_relisted() -> None:
+    import fakeredis
+
+    from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+    from tests.swarm.test_tick import FakeRuntime, tasks
+
+    live_store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    live_store.create(SwarmConfig("sw", "/repo", max_eng=2, max_ci=1))
+    agent = live_store.start_execution(
+        "sw", AgentRecord(live_store.next_name("sw", "eng"), "eng", "t1", seat="eng-1@sw", started_at=1)
+    )
+    runtime = FakeRuntime()
+    runtime.live.add(agent.name)
+    live_store.drop_agent("sw", agent.name, at=10)
+    dropped = live_store.execution("sw", agent.execution_id)
+    judging = agent_steps._Reaping(
+        "sw", live_store, tasks(("t1", "eng")), runtime, {"t1": {}}, runtime.live_names(), 100
+    )
+    agent_steps._reap_admitted(judging, agent)
+    assert live_store.execution("sw", agent.execution_id) == dropped
+    assert agent.name not in {a.name for a in live_store.agents("sw")}
+
+
 def test_the_orphans_step_runs_outside_the_events_engine(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = _fakes(monkeypatch)
     step = engine.group_steps("tasks")[0]

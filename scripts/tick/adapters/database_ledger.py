@@ -4,6 +4,8 @@ path every swarm, agent and service client reads and writes a ledger through; th
 import io
 import json
 import logging
+import sys
+import time
 import urllib.error
 from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
@@ -13,6 +15,7 @@ from email.message import Message
 from typing import Any, cast
 from urllib.parse import urlsplit
 
+from scripts.swarm import timing
 from scripts.swarm_ledger.api import client as api_client
 from scripts.swarm_ledger.api import resources as api_resources
 from scripts.swarm_ledger.api import routes as api_routes
@@ -130,7 +133,7 @@ def answer(found: Services, exchange: Exchange, slug: str, path: str) -> tuple[i
     return settled(exchange, path, route)
 
 
-def request(slug: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+def answered(slug: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     """Answer one ledger API request in process, a refusal raised as the server's HTTP error."""
     encoded = b"" if payload is None else json.dumps(payload).encode()
     headers = Message()
@@ -146,6 +149,35 @@ def request(slug: str, path: str, payload: dict[str, Any] | None = None) -> dict
         raise urllib.error.HTTPError(url, status, "ledger refused", headers, io.BytesIO(body))
     reply: dict[str, Any] = json.loads(body)
     return reply
+
+
+def request(slug: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Answer one ledger API request in process as ``answered`` does; inside a tick pass, also journal one
+    ``swarm_tick_ledger_call`` line naming its ledger, method, path and outcome with its wall seconds."""
+    current = timing.PASS.get()
+    if current is None:
+        return answered(slug, path, payload)
+    started = time.monotonic()
+    outcome = "error"
+    try:
+        reply = answered(slug, path, payload)
+        outcome = "ok"
+        return reply
+    except urllib.error.HTTPError as exc:
+        outcome = str(exc.code)
+        raise
+    finally:
+        line = {
+            "event": "swarm_tick_ledger_call",
+            "slug": timing.SWARM.get(),
+            "pass_id": current["pass_id"],
+            "ledger": slug,
+            "method": "GET" if payload is None else "POST",
+            "path": urlsplit(path).path,
+            "outcome": outcome,
+            "wall_s": time.monotonic() - started,
+        }
+        print(json.dumps(line), file=sys.stderr)
 
 
 def client(base: str, timeout: float) -> ResourceClient:
