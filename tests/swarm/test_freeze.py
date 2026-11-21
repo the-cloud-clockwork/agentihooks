@@ -142,6 +142,8 @@ def test_a_focus_still_holds_the_work_beside_the_plan_work_it_admits() -> None:
     assert held(phaseless, record("tasks/t6", "focus"), tasks=[{"id": "t6", "lane": "eng", "state": "open"}])
     frozen = doc(focus, record("tasks/plan-p1"), tasks=[focused, plan])
     assert freeze.admitted(frozen, hierarchy.project(frozen)[0]) == {"t2"}
+    stuck = doc(focus, record("tasks/t9"), tasks=[focused, plan, ELSEWHERE])
+    assert freeze.admitted(stuck, hierarchy.project(stuck)[0]) == {"t2"}
 
 
 def test_a_cycle_in_the_parent_links_ends_the_walk():
