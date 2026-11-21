@@ -200,6 +200,8 @@ def _run(hub: HubRunner, once: bool) -> int:
             "failed" in outcomes for outcomes in passes.values()
         ):
             _idle(outage)
+        else:
+            outage.ended()
 
 
 def _issued_credential(holder: str) -> tuple["Redis", str] | None:
