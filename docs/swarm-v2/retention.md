@@ -9,9 +9,10 @@ A completed worker's Pod stays protected until the controller has both its outco
 watermark covering its final transcript end. Publishing a checkpoint alone does not clear that guard. The worker
 must report the durably archived end to the controller on its lease heartbeat.
 
-During a clean drain, `Supervisor.drain` waits for the exporter's final checkpoint. If checkpoint storage is
-configured, it validates the checkpoint and its artifacts in that store within the checkpoint time budget, then
-passes the exporter's integer `transcript_end` to `Renewer.acknowledge`.
+During a clean drain, `Supervisor.drain` waits for the exporter's final checkpoint. If the worker's environment
+sets `AGENTIHOOKS_CHECKPOINT_ROOT`, or sets `AGENTIHOOKS_CHECKPOINT_REMOTE=true` because its launch specification
+carries `checkpoint_remote`, it validates the checkpoint and its artifacts in that store within the checkpoint time
+budget, then passes the exporter's integer `transcript_end` to `Renewer.acknowledge`.
 
 The renewer keeps the largest acknowledged end as `archived`; it starts at zero. A larger end makes a heartbeat due
 immediately, and that heartbeat and every later one carry `archive_watermark`. Repeating the same end, or reporting a
@@ -31,25 +32,19 @@ no separate enable flag.
 
 | Setting | Where | Effect |
 |---|---|---|
-| `checkpoint_remote: true` | Worker launch specification | Uses the controller's scoped checkpoint upload route; the worker sets `AGENTIHOOKS_CHECKPOINT_REMOTE=true` for itself |
-| `AGENTIHOOKS_CHECKPOINT_BUCKET` | Controller environment | Stores and validates remote checkpoints in the configured object storage bucket; takes precedence over a local root |
+| `checkpoint_remote: true` | Worker launch specification, written by the controller | Uses the controller's scoped checkpoint upload route; the worker sets `AGENTIHOOKS_CHECKPOINT_REMOTE=true` for itself |
+| `AGENTIHOOKS_CHECKPOINT_BUCKET` | Controller environment | Stores remote checkpoints in the configured object storage bucket and makes the deployed controller write `checkpoint_remote: true` into each Pod's launch specification; takes precedence over a local root |
 | `AGENTIHOOKS_CHECKPOINT_ROOT` | Controller or worker environment | Configures an absolute checkpoint store directory; a worker with this setting also validates its final checkpoint before acknowledging the transcript end |
-| `Budgets.checkpoint` | Supervisor launch integration | Seconds available for the final checkpoint, validation and acknowledgement; defaults to `10` and is recorded as `checkpoint_seconds` in the supervisor launch record |
+| `Budgets.checkpoint` | Supervisor launch integration | Seconds available for the final checkpoint, validation and acknowledgement; the class default is `10`, Pod launches from the deployed controller use `40`, and the value is recorded as `checkpoint_seconds` in the supervisor launch record |
 
-For a controller using object storage, set its bucket and use the remote option in the worker's existing launch
-specification:
+For a controller using object storage, set its bucket:
 
 ```bash
 export AGENTIHOOKS_CHECKPOINT_BUCKET=example-checkpoints
 ```
 
-```json
-{
-  "checkpoint_remote": true
-}
-```
-
-The JSON is a launch specification fragment; retain the worker's identity, grant and other required launch fields.
+The deployed controller then writes `"checkpoint_remote": true` into each Pod's launch specification, and the worker
+sets `AGENTIHOOKS_CHECKPOINT_REMOTE=true` for itself at start; do not add the key to a launch specification by hand.
 Storage credentials stay in the controller's configured environment. For a filesystem backed integration, configure
 an absolute store root in the process that reads or writes it:
 
@@ -62,10 +57,10 @@ An integration constructing the supervisor launch can allow more time with its e
 ```python
 from scripts.swarm_v2.supervision import Budgets
 
-budgets = Budgets(checkpoint=30)
+budgets = Budgets(checkpoint=60)
 ```
 
-Pass that object as the launch's `budgets` argument. This allows thirty seconds shared by the final checkpoint,
+Pass that object as the launch's `budgets` argument. This allows sixty seconds shared by the final checkpoint,
 validation and acknowledgement. It does not extend an expired lease. See [checkpoint configuration](checkpoint-restore.md#configuration)
 and [storage policy](storage-policy.md) for the checkpoint store and restore requirements.
 
@@ -91,9 +86,9 @@ checkpoint object. The corpus collection policy below governs stored objects sep
 | `waiting_outcome` | The final attempt has no outcome reference. Inspect completion reporting first; an archive acknowledgement does not supply the outcome |
 | `waiting_archive` after a checkpoint appears | Compare the accepted heartbeat watermark with the final attempt's `transcript_end`; confirm the checkpoint validated in the configured store and the acknowledgement reached the controller |
 | Worker log has `lease: renewal_failed` | The heartbeat or credential request failed; `call`, `status` and `retry_seconds` identify the request and pause. Check controller reachability before the shared checkpoint budget expires |
-| Worker log has `lease: lost` | `reason` names a refusal, lease expiry or generation change. The worker stops renewing; do not treat a local checkpoint as a delivered archive acknowledgement |
+| Worker log has `lease: lost` | `reason` names a refusal, lease expiry, generation change or renewal crash (`renewal_crashed_<exception>`). The worker stops renewing; do not treat a local checkpoint as a delivered archive acknowledgement |
 | Final checkpoint is complete but the guard still waits | Checkpoint completion and heartbeat acceptance are separate. Validation can succeed while acknowledgement runs out of budget or loses its lease |
-| No portable checkpoint store or failed validation | Drain does not acknowledge the transcript end through this path. Configure the store or correct validation before expecting archive progress |
+| Worker has neither `AGENTIHOOKS_CHECKPOINT_ROOT` nor `AGENTIHOOKS_CHECKPOINT_REMOTE=true`, or validation failed | Drain does not acknowledge the transcript end through this path. Set the controller's bucket so Pod launches carry `checkpoint_remote`, or give the worker an absolute checkpoint root, and correct validation before expecting archive progress |
 | Worker has no controller lease | `Unleased.acknowledge` returns true without sending a heartbeat. That local success does not advance any controller watermark |
 | Guard clears but runtime objects remain | Inspect the cleanup result and its authority or suspension state; clearing archive retention establishes eligibility, not proof of deletion |
 
