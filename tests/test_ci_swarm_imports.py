@@ -1,10 +1,12 @@
-import importlib
 from pathlib import Path
 
 import pytest
+import yaml
 
-ci_swarm_imports = importlib.import_module("scripts.ci_swarm_imports")
+from scripts import ci_swarm_imports
+
 pytestmark = pytest.mark.unit
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def source_tree(tmp_path: Path, source: str, lock: str = "packaging==26.3\n") -> Path:
@@ -23,36 +25,75 @@ def source_tree(tmp_path: Path, source: str, lock: str = "packaging==26.3\n") ->
 @pytest.mark.feature("swarm-image-import-pins")
 def test_unpinned_module_import_turns_the_check_red(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root = source_tree(tmp_path, "import packaging\nimport unpinned_dependency\n")
+    (root / "scripts" / "probe.py").write_text("from unpinned_dependency.module import value\n")
     assert ci_swarm_imports.main(["--root", str(root)]) == 1
-    output = capsys.readouterr().out
-    assert "packaging" in output
-    assert "unpinned_dependency" in output
-    assert "hooks/probe.py:2" in output
-    assert "UNPINNED" in output
+    assert capsys.readouterr().out.splitlines() == [
+        "PINNED packaging (packaging): hooks/probe.py:1",
+        "UNPINNED unpinned_dependency (unpinned-dependency): hooks/probe.py:2, scripts/probe.py:1",
+        "2 third party imports; 1 unpinned",
+    ]
 
 
-def test_pinned_imports_include_aliases_and_dotted_names(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+@pytest.mark.feature("swarm-image-import-pins")
+def test_pinned_imports_include_aliases_and_dotted_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     root = source_tree(
         tmp_path,
-        "import jwt, yaml\nfrom packaging.version import Version\nimport tree_sitter_bash\nfrom dotenv import load_dotenv\nfrom opentelemetry import trace\n",
-        "PyJWT==2.15.1\nPyYAML==6.0.3\npackaging==26.3 \\\n    --hash=sha256:abc\ntree-sitter-bash==0.25.1\npython-dotenv==1.2.4\nopentelemetry-api==1.42.0\n",
+        "import jwt, yaml.loader\nfrom packaging.version import Version\nimport tree_sitter_bash\nfrom dotenv import load_dotenv\nfrom opentelemetry import trace\n",
+        "PyJWT==2.15.1\nPyYAML==6.0.3\npackaging==26.3 \\\n    --hash=sha256:abc\ntree_sitter_bash==0.25.1\npython-dotenv==1.2.4\nopentelemetry-api==1.42.0\n",
     )
-    assert ci_swarm_imports.main(["--root", str(root)]) == 0
-    output = capsys.readouterr().out
-    for module in ("jwt", "yaml", "packaging", "tree_sitter_bash", "dotenv", "opentelemetry"):
-        assert module in output
-    assert "UNPINNED" not in output
+    monkeypatch.chdir(root)
+    assert ci_swarm_imports.main([]) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        "PINNED dotenv (python-dotenv): hooks/probe.py:4",
+        "PINNED jwt (pyjwt): hooks/probe.py:1",
+        "PINNED opentelemetry (opentelemetry-api): hooks/probe.py:5",
+        "PINNED packaging (packaging): hooks/probe.py:2",
+        "PINNED tree_sitter_bash (tree-sitter-bash): hooks/probe.py:3",
+        "PINNED yaml (pyyaml): hooks/probe.py:1",
+        "6 third party imports; 0 unpinned",
+    ]
 
 
 def test_stdlib_relative_local_and_deferred_imports_are_excluded(tmp_path: Path) -> None:
     root = source_tree(
         tmp_path,
-        "import os\nfrom pathlib import Path\nfrom . import sibling\nimport scripts\nimport sibling\nimport ancestor\ndef deferred():\n    import deferred_dependency\n",
+        "import os\nfrom pathlib import Path\nfrom . import sibling\nfrom .relative_only import value\nimport scripts\nimport ancestor\ndef deferred():\n    import deferred_dependency\n",
         "",
     )
-    (root / "hooks" / "sibling.py").write_text("")
     (root / "ancestor.py").write_text("")
     assert ci_swarm_imports.check(root) == ({}, set())
+
+
+def test_a_module_beside_or_above_the_importer_in_a_nested_folder_is_local(tmp_path: Path) -> None:
+    root = source_tree(tmp_path, "")
+    ledger = root / "scripts" / "ledger"
+    (ledger / "repository").mkdir(parents=True)
+    (ledger / "repository" / "mutation.py").write_text("import ledger_core\nimport ledger_bin\nimport neighbour\n")
+    (ledger / "repository" / "neighbour.py").write_text("")
+    (ledger / "ledger_core.py").write_text("")
+    (ledger / "ledger_bin").mkdir()
+    (ledger / "ledger_bin" / "__init__.py").write_text("")
+    assert ci_swarm_imports.check(root) == ({}, set())
+
+
+def test_a_top_level_package_folder_or_one_above_the_root_does_not_hide_a_dependency(tmp_path: Path) -> None:
+    root = source_tree(tmp_path, "import sibling\n", "")
+    (root / "hooks" / "sibling.py").write_text("")
+    (root / "hooks" / "mcp").mkdir()
+    (root / "hooks" / "mcp" / "__init__.py").write_text("")
+    (root / "hooks" / "router").mkdir()
+    (root / "hooks" / "router" / "server.py").write_text("from mcp.types import Tool\nimport packaging\n")
+    (tmp_path / "packaging.py").write_text("")
+    assert ci_swarm_imports.check(root) == (
+        {
+            "mcp": ["hooks/router/server.py:1"],
+            "packaging": ["hooks/router/server.py:2"],
+            "sibling": ["hooks/probe.py:1"],
+        },
+        {"mcp", "packaging", "sibling"},
+    )
 
 
 def test_an_unrelated_repository_directory_does_not_hide_a_dependency(tmp_path: Path) -> None:
@@ -89,8 +130,16 @@ def test_missing_source_or_lock_fails_closed(tmp_path: Path) -> None:
         ci_swarm_imports.check(root / "missing")
 
 
-def test_current_repository_imports_are_all_pinned() -> None:
-    root = Path(__file__).resolve().parents[1]
-    imported, missing = ci_swarm_imports.check(root)
-    assert "packaging" in imported
-    assert missing == set(), missing
+def test_a_source_that_does_not_parse_names_its_file(tmp_path: Path) -> None:
+    root = source_tree(tmp_path, "import (\n")
+    with pytest.raises(SyntaxError) as raised:
+        ci_swarm_imports.check(root)
+    assert raised.value.filename == str(root / "hooks" / "probe.py")
+
+
+@pytest.mark.feature("swarm-image-import-pins")
+def test_the_required_lint_job_runs_the_check_on_pull_requests() -> None:
+    jobs = yaml.safe_load((ROOT / ".github" / "workflows" / "test.yml").read_text())["jobs"]
+    runs = [step.get("run", "") for step in jobs["lint"]["steps"]]
+    assert any('python -m scripts.ci_swarm_imports --root "$GITHUB_WORKSPACE"' in run for run in runs)
+    assert "lint" in jobs["gate-required"]["needs"]

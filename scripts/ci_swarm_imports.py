@@ -18,9 +18,11 @@ def distribution(module: str) -> str:
 
 
 def local_module(root: Path, path: Path, module: str) -> bool:
+    """Bare imports resolve at the root or in a nested folder on the path, never beside the installed top level packages."""
     return any(
         (folder / f"{module}.py").is_file() or (folder / module / "__init__.py").is_file()
-        for folder in (root, path.parent)
+        for folder in (path.parent, *path.parent.parents)
+        if folder.is_relative_to(root) and folder.parent != root
     )
 
 

@@ -96,11 +96,12 @@
       "id": "swarm-image-import-pins",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2586",
-      "behaviour": "The required pull request lint job walks all Python modules under scripts and hooks, reports every direct module level third party import and rejects imports without an exact distribution pin in the swarm image lock. Standard library, repository and deferred imports are excluded.",
-      "seam": "scripts.ci_swarm_imports.check and main over source trees and the swarm requirements lock",
+      "behaviour": "The required pull request lint job walks all Python modules under scripts and hooks, reports every direct module level third party import and rejects imports without an exact distribution pin in the swarm image lock. Standard library imports, relative imports, deferred imports and modules found at the repository root or in a nested folder at or above the importing file are excluded; a module beside the top level hooks or scripts packages or outside the repository never hides a dependency.",
+      "seam": "scripts.ci_swarm_imports.check and main over source trees and the swarm requirements lock, run by the lint job of the Tests workflow",
       "tests": [
         "tests/test_ci_swarm_imports.py::test_unpinned_module_import_turns_the_check_red",
-        "tests/test_ci_swarm_imports.py::test_current_repository_imports_are_all_pinned"
+        "tests/test_ci_swarm_imports.py::test_pinned_imports_include_aliases_and_dotted_names",
+        "tests/test_ci_swarm_imports.py::test_the_required_lint_job_runs_the_check_on_pull_requests"
       ]
     },
     {
