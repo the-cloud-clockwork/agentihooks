@@ -9,8 +9,6 @@ from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Any, cast
 
-import yaml
-
 BUILT_IN_PROFILES = Path(__file__).resolve().parents[2] / "profiles"
 PACKAGE_ROLES = BUILT_IN_PROFILES / "package" / "roles"
 PACKAGE_PREFIX = "package:"
@@ -73,6 +71,8 @@ def bundle_roots(state: dict[str, Any], layer: bool = False) -> list[tuple[str, 
 
 
 def layer_root(root: Path) -> Path:
+    import yaml
+
     manifest = root / BUNDLE_MANIFEST
     loaded: object = yaml.safe_load(manifest.read_text()) if manifest.is_file() else None
     data: dict[str, object] = cast("dict[str, object]", loaded) if isinstance(loaded, dict) else {}
@@ -142,12 +142,16 @@ def linked_profiles(state: dict) -> dict[str, Path]:
 
 
 def parents(path: Path) -> list[str]:
+    import yaml
+
     manifest = path / "profile.yml"
     data = yaml.safe_load(manifest.read_text()) or {} if manifest.is_file() else {}
     return data.get("extends", [])
 
 
 def _manifest(path: Path) -> dict:
+    import yaml
+
     manifest = path / "profile.yml"
     return yaml.safe_load(manifest.read_text()) or {} if manifest.is_file() else {}
 
@@ -158,12 +162,16 @@ def manifestos(path: Path) -> dict:
 
 
 def overlays(path: Path) -> list[str]:
+    import yaml
+
     manifest = path / "profile.yml"
     data = yaml.safe_load(manifest.read_text()) or {} if manifest.is_file() else {}
     return data.get("allowedOverlays", [])
 
 
 def wears(path: Path) -> list[str]:
+    import yaml
+
     manifest = path / "profile.yml"
     data = yaml.safe_load(manifest.read_text()) or {} if manifest.is_file() else {}
     if data.get("kind") != "overlay":
@@ -179,6 +187,8 @@ def hive_capabilities(environ: Mapping[str, str]) -> set[str]:
 
 
 def require_capabilities(profile_dirs: list[tuple[str, Path]], available: set[str]) -> None:
+    import yaml
+
     for name, path in profile_dirs:
         manifest = path / "profile.yml"
         data = yaml.safe_load(manifest.read_text()) or {} if manifest.is_file() else {}
