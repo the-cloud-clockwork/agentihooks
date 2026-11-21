@@ -33,6 +33,15 @@ CONSUMERS = {
     "hooks": Consumer("worker", ("hooks.hook_manager:main",)),
     "nats trust": Consumer("nats-trust", ("scripts.hive.nats_trust:bootstrap",), scheduler=False),
 }
+
+
+@dataclass(frozen=True)
+class Lab:
+    entry: str
+    package: str
+
+
+LAB = Lab("scripts.ci_lab.contract:scheduler", "scripts.ci_lab")
 STATE_STORE = "scripts.events.redis_state:RedisStateStore."
 PROTOCOL = "scripts.events.bus:StateStore."
 KEYLESS = frozenset({"MULTI", "EXEC"})
@@ -79,6 +88,11 @@ def store_keys(store: Store) -> list[str]:
     with mock.patch.object(hive_state, "on_redis", lambda: True):
         opened = store.open()
     return [opened._current, opened._revision, f"{opened._history}probe", opened._projected, opened._published]
+
+
+def lab_commands(program: Program, lab: Lab) -> dict[str, list[str]]:
+    """Each Redis command the ci lab scheduler code sends, with the units that send it."""
+    return {}
 
 
 def consumer_map(deployment: str, root: Path = ROOT) -> dict:
