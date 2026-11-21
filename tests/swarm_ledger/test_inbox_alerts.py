@@ -102,8 +102,8 @@ def test_a_setup_alert_carries_its_item_and_closes_by_it():
 
 
 INBOX_REFUSED = (
-    "alert_raise takes by, a source among ('promotion', 'release', 'seat', 'spawn', 'merge', 'inbox', 'setup'), "
-    "a text of up to 2000 characters and, for inbox and setup, an item"
+    "alert_raise takes by, a source among ('promotion', 'release', 'seat', 'spawn', 'merge', 'inbox', 'setup', "
+    "'autoscaler'), a text of up to 2000 characters and, for inbox and setup, an item"
 )
 CLOSE_REFUSED = "alert_close takes target, an alert id, and an optional by, or an inbox item instead of target"
 
