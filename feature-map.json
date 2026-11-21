@@ -352,6 +352,19 @@
       ]
     },
     {
+      "id": "lab-scheduler-serve-survives-redis-errors",
+      "rules": ["lab-pass-uncaught-redis-error"],
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-scheduler-redis-timeout-exit",
+      "behaviour": "A Redis error raised by one CI lab scheduler pass, in the scheduler tick or the relay tick, ends only that pass: serve prints one flushed line naming the skipped pass and the error, counts the pass, sleeps the interval and runs the next pass on schedule. Any other error still ends serve. One Redis read timeout no longer ends the scheduler process, as it did on 21 November.",
+      "seam": "scripts.ci_lab.scheduler.serve over fakeredis through the lab fixture with an injected clock and sleep, a scheduler tick or relay tick that raises a redis TimeoutError or ConnectionError on the first pass, and a tick that raises a ValueError",
+      "tests": [
+        "tests/ci_lab/test_scheduler_serve.py::test_serve_skips_a_pass_whose_tick_raises_a_redis_error_and_runs_the_next_on_schedule",
+        "tests/ci_lab/test_scheduler_serve.py::test_serve_skips_a_pass_whose_relay_tick_raises_a_redis_error_and_runs_the_next_on_schedule",
+        "tests/ci_lab/test_scheduler_serve.py::test_serve_ends_on_an_error_that_is_not_a_redis_error"
+      ]
+    },
+    {
       "id": "doctor-lab-health",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/swarm-doctor-lab-detector",
