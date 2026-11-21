@@ -1,0 +1,58 @@
+{
+  "lint/refuse-marker-key-vector-drift-from-kernel-dev": {
+    "needs": ["checkout"],
+    "reason": "reads the agentibrain kernel dev checkout an earlier step clones into .marker-kernel"
+  },
+  "lint/refuse-changelog-fragments-named-off-the-branch-or-opening-without-a-section-heading": {
+    "needs": ["step env"],
+    "reason": "its BRANCH env reads github.head_ref and github.ref_name, which the lab context does not supply"
+  },
+  "lint/fail-on-known-vulnerabilities-new-against-the-base": {
+    "needs": ["network"],
+    "reason": "runs pip-audit through uvx against the online vulnerability database"
+  },
+  "lint/run-every-swarm-ledger-dashboard-query-against-this-head-s-metrics-tables": {
+    "needs": ["checkout", "docker", "network", "earlier step"],
+    "reason": "requires the antoncore checkout, the installed dashboard checker and a running ClickHouse container; its checkout producer needs network access"
+  },
+  "lint/hold-the-hive-member-nats-grants-equal-to-the-antoncore-hive-user": {
+    "needs": ["checkout", "network"],
+    "reason": "reads the antoncore checkout in .antoncore and pip installs cryptography"
+  },
+  "lint/hold-the-mutation-planner-s-batch-runner-ceiling-equal-to-the-antoncore-batch-runner-chart": {
+    "needs": ["checkout"],
+    "reason": "reads the antoncore checkout in .antoncore"
+  },
+  "lint/artifact-sanity-checks": {
+    "needs": ["step env", "earlier step"],
+    "reason": "its artifact selector reads github.base_ref, github.event.before and github.event.merge_group.base_sha, which the lease does not supply; the gate also needs the browser installed by earlier setup"
+  },
+  "lint/prove-the-mutation-gate-kills-with-the-real-test-and-fails-with-a-weakened-one": {
+    "needs": ["earlier step"],
+    "reason": "its self-plant producer compares the head inputs with the base; the identical dev twin has no changed input, so the gate is skipped instead of proving an executed green result"
+  },
+  "type-gate/install-dependencies": {
+    "needs": ["earlier step", "network"],
+    "reason": "a setup step that grades nothing; its Python and cache actions are skipped by the static runner and the dependency fallback needs PyPI access"
+  },
+  "semgrep/scan/fail-on-findings-new-against-the-base": {
+    "needs": ["network"],
+    "reason": "its baseline producer supplies BASE, but its CONFIGS name Semgrep registry rule packs fetched online"
+  },
+  "semgrep/charts/guard-rules-hold-on-their-fixtures-and-at-their-computed-floors": {
+    "needs": ["network"],
+    "reason": "fetches the base branch from origin before it grades"
+  },
+  "test-count/install-dependencies": {
+    "needs": ["earlier step", "network"],
+    "reason": "its Python and cache actions are skipped by the static runner and the dependency fallback needs PyPI access"
+  },
+  "test-count/fetch-the-base-suite-count-recorded-on-dev": {
+    "needs": ["secret", "network", "earlier step"],
+    "reason": "its app token action is skipped by the static runner, leaving no successful action outcome or token for downloading the suite count artifact from GitHub"
+  },
+  "test-count/record-the-head-count-for-the-next-queue-group": {
+    "needs": ["earlier step"],
+    "reason": "skipped because the supplied event is pull_request and this step requires merge_group; it also reads a suite count collected earlier in that job"
+  }
+}

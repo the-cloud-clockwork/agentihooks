@@ -12,6 +12,7 @@ from scripts.swarm_ledger import plan_read
 STATE_DIR = AGENTIHOOKS_HOME / "swarm-refocus"
 DEFAULT_EVERY = 40
 DEFAULT_MAX_CHARS = 1500
+FOCUS_READ = "Every loop run agentihooks api --slug <slug> get focus; clear or fix each focus with nothing claimable."
 
 
 def build_block(ledger, task_id, cap):
@@ -46,6 +47,7 @@ def _master_block(ledger: dict, cap: int) -> str:
         "configure the swarm, the ledger and the operator's environment with him through the agentihooks commands "
         "and tools, handle operator inbox items, keep progress current through agentihooks api and judge it; "
         "never edit code or config files in a repository, commit, merge or claim a task.\n"
+        f"{FOCUS_READ}\n"
         f"Plan: {_clip(ledger.get('overview', ''), share)}\n"
         f"Priorities: {_clip(priorities, share)}\n"
         f"Active phases: {_clip(phases, share * 2)}",

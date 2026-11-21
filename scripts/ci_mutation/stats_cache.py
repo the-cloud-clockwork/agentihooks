@@ -4,11 +4,8 @@ import functools
 import hashlib
 import json
 import subprocess
-import sys
-import tomllib
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from importlib import metadata
 from pathlib import Path
 
 from scripts.ci_mutation.scope import imported_names, module_name, selected_name, selects, test_file
@@ -17,7 +14,9 @@ SCHEMA = 4
 CONTEXT_FIELDS = ("schema", "sources", "options", "runtime")
 KEY_FIELDS = ("path", "tests")
 DYNAMIC_IMPORTS = ("import_module", "__import__", "spec_from_file_location", "module_from_spec")
-CONFIGURATION = {"pyproject.toml", "pytest.ini", "setup.cfg", "tox.ini", "uv.lock", ".coveragerc"}
+LOCKFILE = ".github/test-requirements.lock"
+EXCLUDES = ".github/test-excludes.txt"
+CONFIGURATION = {"pyproject.toml", "pytest.ini", "setup.cfg", "tox.ini", LOCKFILE, ".coveragerc", EXCLUDES}
 # CI rewrites the durations from dev each run; they only order and split tests, and records keep their own durations.
 UNKEYED = {".test_durations"}
 TRACKED = ("git", "ls-files", "-z")
@@ -182,16 +181,10 @@ def current_input(root: Path, changes: dict, digests: dict[str, str | None], nam
     return [digests[name], changes.get(name)]
 
 
-def distribution_versions(root: Path) -> dict[str, str]:
-    config = root / "pyproject.toml"
-    own = tomllib.loads(config.read_text()).get("project", {}).get("name") if config.is_file() else None
-    # The project's own dev and local version segments change with every commit; its files already key the stats.
-    return {
-        distribution.metadata["Name"]: distribution.version.partition("+")[0].partition(".dev")[0]
-        if distribution.metadata["Name"] == own
-        else distribution.version
-        for distribution in metadata.distributions()
-    }
+def runtime_digest(root: Path) -> str | None:
+    """Return the sha256 of root's dependency lockfile, the runtime a stats record is keyed on, or None without one."""
+    lockfile = root / LOCKFILE
+    return hashlib.sha256(lockfile.read_bytes()).hexdigest() if lockfile.is_file() else None
 
 
 def loaded_inputs(
@@ -221,6 +214,8 @@ class StatsInputs:
     records: dict = field(default_factory=lambda: {True: {}, False: {}})
     traced: dict = field(default_factory=dict)
     discovered: dict[str, set[str]] = field(default_factory=dict)
+    closures: dict[frozenset[str], dict[str, str]] = field(default_factory=dict)
+    digests: dict[frozenset[str], str] = field(default_factory=dict)
 
     def for_test(self, path: str, covered: list[str] | None, fresh: list[dict] | None = None) -> dict:
         measured = covered is not None
@@ -238,11 +233,12 @@ class StatsInputs:
             )
             inputs.update({name: value[0] for name, value in loaded.items()})
         if covered:
-            inputs.update(
-                test_inputs(
+            key = frozenset(covered)
+            if key not in self.closures:
+                self.closures[key] = test_inputs(
                     self.root, covered, self.modules, self.records[measured], self.resources, False, self.discovered
                 )
-            )
+            inputs.update(self.closures[key])
         if not any(not name.startswith("tests/") for name in inputs) and (
             changed := sorted(self.changes.keys() & self.resources)
         ):
@@ -255,6 +251,9 @@ class StatsInputs:
         return self.for_test(path, list(inputs) if measured else None) == inputs and self.discovery(inputs) == discovery
 
     def discovery(self, inputs: dict) -> str:
+        key = frozenset(inputs)
+        if key in self.digests:
+            return self.digests[key]
         paths = set()
         for source in inputs:
             if Path(source).suffix != ".py":
@@ -264,7 +263,9 @@ class StatsInputs:
                 names = set(imported_names(text, Path(source).parent.parts))
                 self.discovered[source] = discovery_inputs(list(ast.walk(ast.parse(text))), names, self.resources)
             paths.update(self.discovered[source])
-        return hashlib.sha256(encode(sorted(paths)).encode()).hexdigest()
+        digest = hashlib.sha256(encode(sorted(paths)).encode()).hexdigest()
+        self.digests[key] = digest
+        return digest
 
 
 def per_test_stats(
@@ -344,8 +345,7 @@ def collect_cached_stats(
         for path in tracked
         if path and (path in CONFIGURATION or path.startswith("scripts/ci_mutation/")) and (root / path).is_file()
     }
-    versions = distribution_versions(root)
-    context = dict(zip(CONTEXT_FIELDS, (SCHEMA, sources, options, [sys.version, sys.platform, versions])))
+    context = dict(zip(CONTEXT_FIELDS, (SCHEMA, sources, options, runtime_digest(root))))
     context["inventory"] = sorted(filter(None, tracked))
     modules = {module_name(Path(path)): path for path in tracked if Path(path).suffix == ".py"}
     folder.mkdir(parents=True, exist_ok=True)

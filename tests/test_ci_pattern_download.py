@@ -1,14 +1,18 @@
 import base64
 import contextlib
 import hashlib
+import http.client
 import importlib.util
 import io
 import json
 import os
+import socket
+import struct
 import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 import zipfile
 from collections.abc import Callable, Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -114,7 +118,7 @@ class Handler(BaseHTTPRequestHandler):
         kind, body = self.service.answer_for(name), _archive(name)
         if kind == "busy":
             self.answer(503, b"<Error><Code>ServerBusy</Code></Error>")
-            if self.rfile.read() == b"":
+            if self.client_closed():
                 self.service.closed_by_client.set()
         elif kind == "torn":
             self.answer(200, body[: len(body) // 2])
@@ -128,6 +132,12 @@ class Handler(BaseHTTPRequestHandler):
             self.answer(200, body)
         if kind != "ok":
             self.close_connection = True
+
+    def client_closed(self) -> bool:
+        try:
+            return self.rfile.read() == b""
+        except ConnectionResetError:
+            return True
 
     def partial(self, body: bytes, kind: str) -> None:
         if kind == "late" and self.service.released.wait(1):
@@ -192,6 +202,21 @@ def test_a_kept_alive_error_answer_is_closed_before_the_retry_and_every_part_mer
     assert _files(tmp_path / "stats") == ["collected-mutation-stats-0", "collected-mutation-stats-1"]
     assert sorted(service.fetched) == ["mutation-stats-0", "mutation-stats-1", "mutation-stats-1"]
     assert pauses == [fetch.PAUSE]
+
+
+@pytest.mark.feature("shared-mutation-stats-download-ends-with-its-download")
+def test_a_client_that_resets_its_kept_alive_error_answer_has_closed_it(serve: Serve) -> None:
+    service = Service([("mutation-stats-0", 1)], {"mutation-stats-0": ["busy"]})
+    port = urllib.parse.urlsplit(serve(service)).port
+    assert port is not None
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    connection.request("GET", "/blob/mutation-stats-0")
+    answer = connection.getresponse()
+    assert (answer.status, answer.read()) == (503, b"<Error><Code>ServerBusy</Code></Error>")
+    assert connection.sock is not None
+    connection.sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+    connection.close()
+    assert service.closed_by_client.wait(5)
 
 
 def test_only_the_newest_artifact_of_each_matching_name_is_signed_for_its_uploader(

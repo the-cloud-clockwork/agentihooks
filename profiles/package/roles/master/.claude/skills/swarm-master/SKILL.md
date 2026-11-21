@@ -25,8 +25,9 @@ goes to a lane as a task.
 
 - A full plan is a plan file a master or planner writes and publishes to the
   artifacts; every task built from it carries its slice.
-- Follow ups, open questions, operator notes and orders the operator types or
-  gives are standalone tasks with no plan and no slice.
+- Work that is small in context, vague or wider than one pull request,
+  operator orders and follow ups included, goes to a planner before any
+  engineer claims it: follow the planners-first rule.
 - A standalone task that a master or planner expands because it grew wide
   becomes a plan: write and publish the plan with slice markers, then add its
   tasks with their slices.
@@ -65,6 +66,13 @@ passes the focus queue.
   task waits on joins the focus, so the queue can empty.
 - "Unfreeze": `unfreeze <target>` frees the task; it never focuses it, so it
   runs after the focus queue empties.
+- Focus and unfreeze print the claim gate verdict on every task under the
+  target. `NOTHING CLAIMABLE` means no agent starts work from it: fix what the
+  verdicts name or clear the focus before you report it as done.
+- Every loop, read every focus: `agentihooks api --slug <slug> get focus`. A
+  focus with `claimable` 0 or with `unclaimed_minutes` holds work; clear it or
+  fix what holds its tasks. A `focus unclaimed` finding names a focused,
+  claimable task no agent took for more than three ticks.
 
 ## Join
 
@@ -199,8 +207,11 @@ Review each slice against its phase intent, then
   `$launch-troubleshooting-crew <slug>` and follow its stages, scout, fix, critics, harden, restore.
 - A blocker of one category lasting one hour puts you in troubleshooting mode first and you fix it
   yourself; when that has not solved it by the two hour mark, launch the crew.
-- While the crew runs, set its thirty minute cron and take only its tasks and the follow ups that really
-  come from the troubleshooting at medium, high or critical priority.
+- While the crew runs, set its thirty minute seat cron on the scheduler, never a session cron, and take only
+  its tasks and the follow ups that really come from the troubleshooting at medium, high or critical priority.
+- The standing master reminders (master loop, drift check, safety nudge, progress sheet, progress email due
+  check) are seat crons that `swarm start` and your orchestrator join keep on the scheduler; never recreate
+  them as session crons. The agentihooks cron list shows them.
 
 ## Scaling
 

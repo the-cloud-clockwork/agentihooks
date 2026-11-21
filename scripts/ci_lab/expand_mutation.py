@@ -11,7 +11,6 @@ import hashlib
 import math
 import re
 import subprocess
-import sys
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -22,6 +21,7 @@ from mutmut.mutation.file_mutation import group_by_top_level_node
 from mutmut.mutation.trampoline_templates import mangle_function_name
 from mutmut.utils.format_utils import get_mutant_name
 
+from scripts.ci_lab import digests
 from scripts.ci_lab.units import Unit
 from scripts.ci_mutation.plan import MUTANT_SECONDS
 from scripts.ci_mutation.scope import module_name
@@ -33,7 +33,7 @@ from scripts.ci_mutation.stats_cache import (
     TRACKED,
     UNKEYED,
     StatsInputs,
-    distribution_versions,
+    runtime_digest,
 )
 from scripts.ci_mutation.stats_dependencies import StoredStats, digest  # pyright: ignore[reportUnknownVariableType]
 
@@ -74,7 +74,7 @@ def stats_units(root: Path, files: Sequence[str], options: Sequence[str] = ()) -
     paths = tracked(root)
     present = [path for path in paths if (root / path).is_file()]
     sources = {path: file_digest(root / path) for path in present if path in CONFIGURATION or path.startswith(RUNNER)}
-    runtime = [sys.version, sys.platform, distribution_versions(root)]
+    runtime = runtime_digest(root)
     stored = StoredStats(root, root, dict(zip(CONTEXT_FIELDS, (SCHEMA, sources, options, runtime))), {})
     modules = {module_name(Path(path)): path for path in paths if Path(path).suffix == ".py"}
     inputs = StatsInputs(root, modules, resources_of([path for path in present if path not in UNKEYED]), {})
@@ -82,7 +82,7 @@ def stats_units(root: Path, files: Sequence[str], options: Sequence[str] = ()) -
     for path in files:
         found = inputs.for_test(path, None)  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
         key = stored.identity(path, found, stored.scope(found), False, inputs.discovery(found))  # pyright: ignore[reportUnknownMemberType]
-        units.append(Unit("stats", key, (path,)))
+        units.append(Unit("stats", f"stats-v{digests.SCHEMAS['stats']}-{key}", (path,)))
     return tuple(units)
 
 
@@ -148,7 +148,14 @@ def function_units(
         text = wrapper.module.code_for_node(function.with_changes(leading_lines=()))
         key = digest([name, text, module, runner, dict(covering.get(name, {})), dict(unlisted)])
         parts = split_members(tuple(f"{name}__mutmut_{index}" for index in range(1, len(mutations) + 1)), timeout)
-        units.extend(Unit("mutant", key if len(parts) == 1 else digest([key, list(part)]), part) for part in parts)
+        units.extend(
+            Unit(
+                "mutant",
+                f"mutant-v{digests.SCHEMAS['mutant']}-{key if len(parts) == 1 else digest([key, list(part)])}",
+                part,
+            )
+            for part in parts
+        )
     return units
 
 

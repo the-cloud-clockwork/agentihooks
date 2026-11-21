@@ -3,9 +3,10 @@ import os
 import sqlite3
 from pathlib import Path
 
-from scripts.swarm_ledger.repository import LedgerRepository, postgres, sqlite
+from scripts.swarm_ledger.repository import LedgerRepository, host_entries, postgres, sqlite
 
 DATABASE = sqlite.DATABASE
+WalSwitch = sqlite.WalSwitch
 Error = sqlite3.Error
 Missing = sqlite.Missing
 
@@ -55,7 +56,9 @@ def read_slugs(directory) -> list:
 def build(path: Path | None = None, domain: object | None = None) -> LedgerRepository:
     address = shared()
     if path is None and address:
-        return postgres.PostgresLedgerRepository(address, domain)
+        return postgres.PostgresLedgerRepository(
+            address, domain, host_entries.Copies(host_entries.folder(os.environ), address)
+        )
     return sqlite.SQLiteLedgerRepository(path, domain)
 
 

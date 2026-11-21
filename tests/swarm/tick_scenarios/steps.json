@@ -1,6 +1,12 @@
 {
  "scenarios": {
+  "autoscaler alert": [
+   "running"
+  ],
   "doc items map": [
+   "running"
+  ],
+  "focus unclaimed": [
    "running"
   ],
   "hive sweep": [
@@ -28,6 +34,9 @@
    "running"
   ],
   "tick master": [
+   "running"
+  ],
+  "view wait": [
    "running"
   ],
   "workflow runner": [

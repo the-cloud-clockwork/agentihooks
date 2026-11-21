@@ -7,8 +7,9 @@ import subprocess
 import sys
 import time
 import urllib.request
+from collections.abc import Callable
 from contextlib import redirect_stderr
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -40,10 +41,11 @@ LAB_READ_TIMEOUT_S = 10
 
 @dataclass(frozen=True)
 class LabRoute:
-    """A publish through the lab: the task whose grade ref it pushes, and whether origin follows without the grade."""
+    """A publish through the lab, with an optional recorder for each accepted grade push."""
 
     task: str
     direct: bool
+    pushed: Callable[[str, str], None] | None = field(default=None, compare=False)
 
 
 def route_flags(lab: LabRoute | None) -> list[str]:
@@ -82,7 +84,10 @@ def lab_push(root: Path, task: str, branch: str) -> str:
     return the grade url it names."""
     if not checkout.carry(checkout.at(root), os.environ):
         raise SwarmError(f"publish --via {LAB} needs {checkout.URL_ENV} naming the lab remote of this repository")
-    done = git_https.run(["git", "push", "-o", f"branch={branch}", LAB, f"HEAD:{GRADE_REFS}{task}"], cwd=root)
+    done = git_https.run(
+        ["git", "-c", "push.negotiate=true", "push", "-o", f"branch={branch}", LAB, f"HEAD:{GRADE_REFS}{task}"],
+        cwd=root,
+    )
     sys.stderr.write(done.stderr)
     found = GRADE_URL.search(done.stderr)
     if done.returncode or not found:
@@ -90,9 +95,11 @@ def lab_push(root: Path, task: str, branch: str) -> str:
     return found[1]
 
 
-def through_lab(root: Path, route: LabRoute, fields: dict[str, str]) -> None:
+def through_lab(root: Path, route: LabRoute, fields: dict[str, str], head: str) -> None:
     """Grade HEAD on the lab before origin: push it there and, unless the route is direct, wait for a green grade."""
     url = fields["lab_grade"] = lab_push(root, route.task, fields["branch"])
+    if route.pushed is not None:
+        route.pushed(head, url)
     verdict = GREEN if route.direct else lab_conclusion(url)
     if verdict != GREEN:
         raise SwarmError(f"the lab grade {url} concluded {verdict}; origin was not pushed")
@@ -321,7 +328,7 @@ def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> d
             root = None if retired else existing(repository, scoped, agent)
             if root is None:
                 command = ["bash", str(stack.WT_SCRIPT), "new", "--repo", str(repository)]
-                if scoped.get("branch"):
+                if scoped.get("branch") and (scoped.get("pr_url") or remote_head(repository, scoped["branch"])):
                     command.extend(["--from", f"origin/{scoped['branch']}"])
                 output = execute(command, repository)
                 root = Path(output.splitlines()[-1])
@@ -520,7 +527,7 @@ def grade_and_push(
     ref = f"refs/heads/{fields['branch']}"
     publish_queue.require_unqueued(git(root, "remote", "get-url", "--push", "origin"), fields["branch"])
     if route is not None:
-        through_lab(root, route, fields)
+        through_lab(root, route, fields, head)
     git(root, "push", "-u", "origin", f"HEAD:{ref}")
     notify_lab(root, fields, head)
 

@@ -34,6 +34,7 @@ from contextvars import Token, copy_context
 from dataclasses import asdict, dataclass, replace
 from dataclasses import field as dataclass_field
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -104,6 +105,7 @@ from scripts.swarm import (
     remote_control,
     review_rounds,
     run_window,
+    seat_crons,
     snapshot,
     stack,
     stages,
@@ -120,7 +122,7 @@ from scripts.swarm import (
 from scripts.swarm import ledger_client as ledger_client
 from scripts.swarm import refresh_job as refresh_job
 from scripts.swarm import snapshot_job as snapshot_job
-from scripts.swarm.health import activity, report
+from scripts.swarm.health import activity, focus_check, report
 from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import FreezeWords, LedgerClient, LedgerGone, LedgerRefused
 from scripts.swarm.pull_head import PULL_SECONDS as PULL_SECONDS
@@ -236,7 +238,7 @@ WRAPPER_HOOK_KEYS: dict[str, tuple[frozenset[Domain], frozenset[Domain]]] = {
     "wrapper commands": (pass_domains("stop"), NONE),
     "wrapper phases": (pass_domains("stop"), hook_domains("doc")),
     "wrapper intent": (pass_domains("stop"), hook_domains("doc", "config")),
-    "wrapper relay": (pass_domains("judged"), hook_domains("view")),
+    "wrapper relay": (pass_domains("judged"), NONE),
     "wrapper view": (pass_domains("agents", "stop"), hook_domains("agents", "doc", "config", "rows")),
     "wrapper metrics": (NONE, hook_domains("count")),
 }
@@ -537,13 +539,12 @@ class _Wrapper:
         return True
 
     def _judged(self) -> bool:
-        """End the tick's scan and keep the intent check's view and checked actions when it stored them; an intent
-        check that raised or overran its budget stored neither and leaves the pass going, and only the pass end raises
-        what it held."""
+        """End the tick's scan and keep the intent check's checked actions when it stored them, leaving its view to
+        the view wait step; an intent check that raised or overran its budget stored neither and leaves the pass
+        going, and only the pass end raises what it held."""
         self.ticks.close()
         if "judged" in self.judging:
-            view, self.checked = self.judging["judged"]
-            self.box["view"] = host_steps.pass_view(self.slug, view)
+            _, self.checked = self.judging["judged"]
         return True
 
     def _reread(self) -> bool:
@@ -1032,12 +1033,13 @@ def _state(store, args, state):
     print(json.dumps({"swarm": args.slug, "state": store.config(args.slug).state}))
 
 
-def cmd_start(store, args):
+def cmd_start(store: RedisStore, args: argparse.Namespace) -> None:
     shape = plan_shape.report(LedgerClient().tasks(args.slug), store.config(args.slug).max_eng)
     print(shape["summary"], flush=True)
     if shape["warning"]:
         print(f"warning: {shape['warning']}", file=sys.stderr, flush=True)
     _state(store, args, "running")
+    seat_crons.on_start(store, args.slug)
     print(ledger_link.page_line(args.slug))
 
 
@@ -1056,12 +1058,14 @@ def cmd_proof_control(store, args):
     print(json.dumps(result))
 
 
-def cmd_stop(store, args):
+def cmd_stop(store: RedisStore, args: argparse.Namespace) -> None:
     _snapshot(store, args.slug)
     if not args.now:
         _state(store, args, "stopping")
+        seat_crons.on_stop(args.slug)
         return
     config, left = stop_now(store, args.slug, routed(herdr=HerdrRuntime()), LedgerClient())
+    seat_crons.on_stop(args.slug)
     print(json.dumps({"swarm": args.slug, "state": config.state, "still_running": left}))
 
 
@@ -1106,7 +1110,7 @@ def _retire_each(store, slug, runtime, agents):
     return left
 
 
-def cmd_close(store, args):
+def cmd_close(store: RedisStore, args: argparse.Namespace) -> None:
     store.config(args.slug)
     runtime = routed(herdr=HerdrRuntime())
     live = runtime.live_names()
@@ -1120,6 +1124,7 @@ def cmd_close(store, args):
     ledger.summarize(args.slug, args.note, by)
     path = snapshot.take(store, args.slug, now_ms())
     store.update(args.slug, state="stopping")
+    seat_crons.on_stop(args.slug)
     agents = store.agents(args.slug)
     left = _retire_each(store, args.slug, runtime, [a for a in agents if a.lane != MASTER])
     for row in ledger.tasks(args.slug):
@@ -1657,7 +1662,7 @@ def cmd_cover(store, args):
     print(json.dumps(stage_cover.cover(store, args.slug, doc, request, now_ms())))
 
 
-cmd_focus = cmd_unfreeze = cmd_freeze
+cmd_focus = cmd_unfreeze = focus_check.checked(cmd_freeze, lambda: LedgerClient())
 
 
 def autoscale_lines(config, decision):
@@ -1999,7 +2004,7 @@ def origin_repo(run=subprocess.run):
 def publication_command(store: RedisStore, args: argparse.Namespace) -> dict:
     import syslog
 
-    from scripts.swarm import publish
+    from scripts.swarm import pr_wait, publish
 
     agent = _worker(store, args)
     repo = _local_repo(store, args.slug)
@@ -2011,7 +2016,8 @@ def publication_command(store: RedisStore, args: argparse.Namespace) -> dict:
             return publish.prepare(args.slug, agent, repo, ledger)
         if args.direct and args.via != publish.LAB:
             raise SwarmError("publish --direct goes with --via lab")
-        lab = publish.LabRoute(agent.task, args.direct) if args.via == publish.LAB else None
+        pushed = partial(pr_wait.lab_pushed, store.redis, args.slug, agent) if args.via == publish.LAB else None
+        lab = publish.LabRoute(agent.task, args.direct, pushed) if args.via == publish.LAB else None
         return publish.publish(args.slug, agent, repo, ledger, args.message, args.files, lab)
     except SwarmError as exc:
         branch = exc.branch if isinstance(exc, publish.PublicationRefusal) else publish.refusal_branch(Path(repo), task)
@@ -2174,6 +2180,7 @@ def cmd_merge(store: Any, args: argparse.Namespace) -> None:
                 ),
                 journal=queue_record.Journal(args.url, context=stalled or (agent and {"task": agent.task})),
                 attempts=merge_queue.ATTEMPTS,
+                priority=lambda: queue_priority.automatic(store, args.slug, args.url, LedgerClient()),
             )
         else:
             result = merge_queue.operate(args.action, args.url, journal=queue_record.Journal(args.url))

@@ -104,6 +104,18 @@ def test_remote_host_is_another_hive_than_this_one(remote):
     assert remote.reports.host(replace(remote.agent, runtime_backend="kubernetes")) == ""
 
 
+@pytest.mark.feature("work-folder-readers-and-launch-pointers")
+def test_the_work_folder_host_is_the_host_target_else_the_hive_on_the_record(remote: SimpleNamespace) -> None:
+    named = remote.reports.workspace_host
+    assert named(replace(remote.agent, hive="elsewhere")) == HIVE
+    assert named(replace(remote.agent, runtime_target={})) == HIVE
+    assert named(replace(remote.agent, runtime_target={"pid": 12, "pid_start": 34})) == HIVE
+    assert named(replace(remote.agent, runtime_target={}, hive="controller")) == ""
+    assert named(replace(remote.agent, runtime_target={"host_id": "controller"}, hive="elsewhere")) == ""
+    assert named(replace(remote.agent, runtime_target={}, hive="")) == ""
+    assert named(replace(remote.agent, runtime_backend="kubernetes")) == HIVE
+
+
 def test_a_remote_claude_worker_is_seen_live_from_its_hive_report(remote):
     _publish(remote, typed="half a line", provider_error="overloaded", provider_error_id="529")
     runtime, agent = remote.runtime, remote.agent
@@ -1054,6 +1066,82 @@ def test_a_nudge_to_a_lost_hive_is_refused(remote):
 
     assert "remote" in remote.runtime.nudge(remote.agent, "check your task")
     assert remote.redis.xrange(Orders(remote.redis).commands(HIVE)) == []
+
+
+@pytest.mark.feature("swarm-nudges-hub-admitted-workers-through-their-hive")
+@pytest.mark.parametrize("remote", [{"target": {}}], indirect=True)
+def test_a_nudge_for_a_hub_admitted_worker_is_typed_into_its_pane_by_the_hive_that_runs_it(
+    remote: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive.orders import Consumer
+    from scripts.swarm.delivery import marked
+    from scripts.swarm.runtime import HerdrRuntime
+    from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
+
+    agent = remote.agent
+    entry = {"generation": agent.generation, "pane": {"state": "idle"}}
+    report = {"names": [agent.name], "executions": {}, "admitted": {agent.execution_id: entry}}
+    remote.redis.set(remote.reports.key(HIVE), json.dumps(report), ex=45)
+
+    assert remote.runtime.nudge(agent, "check your task") is None
+    typed: list[list[str]] = []
+    monkeypatch.setenv("SWARM_HIVE_ID", HIVE)
+    hive = LocalHerdrRuntime(HerdrRuntime(herdr=lambda args: typed.append(args) or {}))
+    assert Consumer(remote.redis, HIVE, hive).poll_commands() == 1
+    assert typed == [["agent", "prompt", PANE, marked("check your task")]]
+
+
+@pytest.mark.feature("swarm-nudges-hub-admitted-workers-through-their-hive")
+@pytest.mark.parametrize("remote", [{"target": {}}], indirect=True)
+def test_a_nudge_for_a_hub_admitted_worker_whose_hive_is_lost_is_refused_without_the_controller_herdr(
+    remote: SimpleNamespace,
+) -> None:
+    from scripts.hive.orders import Orders
+
+    remote.runtime.herdr = Mock(return_value={})
+    assert remote.runtime.nudge(remote.agent, "check your task") == f"hive {HIVE} is not reporting"
+    assert remote.redis.xrange(Orders(remote.redis).commands(HIVE)) == []
+    remote.runtime.herdr.assert_not_called()
+
+
+@pytest.mark.feature("swarm-nudges-hub-admitted-workers-through-their-hive")
+@pytest.mark.parametrize(
+    ("record_hive", "target", "accepted"),
+    [
+        (HIVE, {}, True),
+        ("other", {}, False),
+        (HIVE, {"host_id": HIVE}, True),
+        ("other", {"host_id": HIVE}, True),
+        (HIVE, {"host_id": "other"}, False),
+        (HIVE, {"pid": 12, "pid_start": 34}, False),
+    ],
+)
+def test_a_hive_takes_a_nudge_order_exactly_when_the_controller_sends_it_there(
+    remote: SimpleNamespace, record_hive: str, target: dict[str, str | int], accepted: bool
+) -> None:
+    from scripts.hive.orders import FOREIGN, Consumer
+    from scripts.swarm.runtime import _command
+    from scripts.swarm.store import AgentRecord
+    from scripts.swarm_v2.runtime.base import LOCAL, Outcome, Status
+
+    agent = remote.store.start_execution(
+        "fixture",
+        AgentRecord(
+            remote.store.next_name("fixture", "eng"),
+            "eng",
+            "other",
+            pane_id=PANE,
+            seat="eng-2@fixture",
+            hive=record_hive,
+            runtime_target=target,
+        ),
+    )
+    assert ((remote.reports.host(agent) or remote.reports.admitted(agent)) == HIVE) is accepted
+    runtime = Mock()
+    runtime.command.return_value = Outcome("command", Status.OK, LOCAL)
+    ack = Consumer(remote.redis, HIVE, runtime).command(_command("nudge", agent, "check your task"))
+    assert (ack != FOREIGN) is accepted
+    assert runtime.command.called is accepted
 
 
 def test_pane_naming_and_stray_reaping_are_hive_orders(remote):

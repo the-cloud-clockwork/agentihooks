@@ -4,6 +4,7 @@ import json
 import os
 import signal
 import subprocess
+import sys
 import threading
 import time
 import urllib.request
@@ -40,6 +41,15 @@ jobs:
 REGISTRY = {"lint/lint-check": {"paths": ["scripts"], "tools": ["ruff"]}}
 OPTIONS = ["-q", "-p", "no:cacheprovider"]
 WHITELIST = {"LANG": "C"}
+LOCK = ".github/test-requirements.lock"
+EXCLUDES = ".github/test-excludes.txt"
+FAKE_UV = """#!{python}
+import json, pathlib, sys
+with open({record!r}, "a") as record:
+    record.write(json.dumps(sys.argv[1:]) + "\\n")
+if sys.argv[1] == "venv":
+    pathlib.Path(sys.argv[-1]).mkdir(parents=True, exist_ok=True)
+"""
 GIT = ("git", "-c", "user.name=lab", "-c", "user.email=lab@example.invalid")
 
 
@@ -176,12 +186,12 @@ def venv(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Recorder:
 
 @pytest.fixture
 def static_trees(tmp_path: Path) -> FakeWorktrees:
-    head = folder(tmp_path, "head", {"uv.lock": "lock-h"})
-    base = folder(tmp_path, "base", {"uv.lock": "lock-b"})
+    head = folder(tmp_path, "head", {LOCK: "lock-h"})
+    base = folder(tmp_path, "base", {LOCK: "lock-b"})
     grader = folder(
         tmp_path,
         "grader",
-        {".github/workflows/test.yml": WORKFLOW, ".github/input-keys.json": json.dumps(REGISTRY), "uv.lock": "lock-g"},
+        {".github/workflows/test.yml": WORKFLOW, ".github/input-keys.json": json.dumps(REGISTRY), LOCK: "lock-g"},
     )
     return FakeWorktrees({"h1": head, "b1": base, "g1": grader})
 
@@ -226,6 +236,40 @@ def test_static_runs_the_gate_the_grader_tree_names_over_the_head_with_its_base_
         ("release", "b1"),
         ("release", "g1"),
     ]
+
+
+@pytest.mark.feature("lab-venv-tracked-test-lock")
+def test_a_head_without_a_uv_lock_builds_its_venv_from_the_tracked_test_lock_and_runs_its_unit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    gates = {found.name: found for found in static_gates.discover(WORKFLOW, REGISTRY)}
+    name = sorted(gates)[1]
+    head = folder(tmp_path, "head", {LOCK: "lock-h", EXCLUDES: "excluded\n", "pyproject.toml": "[project]\n"})
+    base = folder(tmp_path, "base", {})
+    grader = folder(
+        tmp_path, "grader", {".github/workflows/test.yml": WORKFLOW, ".github/input-keys.json": json.dumps(REGISTRY)}
+    )
+    record = tmp_path / "uv.jsonl"
+    uv = folder(tmp_path, "bin", {"uv": FAKE_UV.format(python=sys.executable, record=str(record))}) / "uv"
+    uv.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{uv.parent}{os.pathsep}{os.environ['PATH']}")
+    summary = folder(tmp_path, "run", {"summary.md": "ok\n"}) / "summary.md"
+    ran = Recorder(run_static.Result(name, 0, tmp_path / "log.txt", summary))
+    monkeypatch.setattr(executors.run_static, "run", ran)
+    pod = pod_of(tmp_path, FakeWorktrees({"h1": head, "b1": base, "g1": grader}))
+
+    finished = executors.static(pod, lease("static", "k", (name,)))
+
+    venv = pod.venvs / hashlib.sha256(b"lock-h").hexdigest()
+    install = ["--constraint", str(head / LOCK), "--excludes", str(head / EXCLUDES), "-r", str(head / "pyproject.toml")]
+    assert not (head / "uv.lock").exists()
+    assert [json.loads(line) for line in record.read_text().splitlines()] == [
+        ["venv", "--clear", "--python", sys.executable, str(venv)],
+        ["pip", "install", "--python", str(venv / "bin" / "python"), *install, "--extra", "dev", "--extra", "all"],
+    ]
+    settings = run_static.Settings(pod.runs, venv, pod.ports, WHITELIST, 30.0, LEASE_CONTEXT)
+    assert ran.calls == [(gates[name], head, base, grader, settings)]
+    assert finished.outcome == PASSED
 
 
 @pytest.mark.feature("lab-worker-executors")
@@ -308,7 +352,7 @@ def _graded_on_a_clean_tree(
         return gates[name]
 
     monkeypatch.setattr(executors, "gate", found)
-    head = folder(tmp_path, "head", {"uv.lock": "lock\n"})
+    head = folder(tmp_path, "head", {LOCK: "lock\n"})
     subprocess.run([*GIT, "init", "-q", str(head)], check=True)
     subprocess.run([*GIT, "-C", str(head), "add", "."], check=True)
     subprocess.run([*GIT, "-C", str(head), "commit", "-q", "-m", "tree"], check=True)
@@ -382,7 +426,7 @@ def test_static_gives_a_step_each_secret_it_reads_by_name_and_writes_no_value_to
 
     monkeypatch.setattr(executors, "gate", found)
     monkeypatch.setattr(executors.run_static, "run", spied)
-    head = folder(tmp_path, "head", {"uv.lock": "lock\n"})
+    head = folder(tmp_path, "head", {LOCK: "lock\n"})
     trees = FakeWorktrees({"h1": head, "b1": folder(tmp_path, "base", {}), "g1": folder(tmp_path, "grader", {})})
     secrets = {"KEYWORDS": "s3cr3t-alpha,s3cr3t-beta", "BETA": "s3cr3t-beta", "UNREAD": "s3cr3t-gamma"}
     pod = live_pod(tmp_path, trees, secrets)
@@ -418,7 +462,7 @@ def test_gate_returns_a_gate_of_a_reusable_workflow_the_real_tests_workflow_call
 def test_tests_runs_the_batch_on_the_lockfile_venv_with_the_manifest_and_flake_ledger(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, venv: Recorder
 ) -> None:
-    tree = folder(tmp_path, "head", {"uv.lock": "lock-h"})
+    tree = folder(tmp_path, "head", {LOCK: "lock-h"})
     manifest = {"tests": {"tests/a.py::t": {"files": ["scripts/a.py"]}}}
     suite = executors.Suite(
         folder(tmp_path, "in", {"manifest.json": json.dumps(manifest)}) / "manifest.json", tmp_path / "flakes.jsonl"
@@ -431,7 +475,11 @@ def test_tests_runs_the_batch_on_the_lockfile_venv_with_the_manifest_and_flake_l
     trees = FakeWorktrees({"h1": tree})
     pod = pod_of(tmp_path, trees)
 
-    finished = executors.tests(pod, suite, lease("test", "k", ("tests/a.py::t",), slots=3))
+    finished = executors.tests(
+        pod,
+        suite,
+        Lease("job", "tok", "h1", Unit("test", "k", ("tests/a.py::t",), json.dumps(manifest)), 3, 1500, "b1", "g1"),
+    )
 
     assert venv.calls == [
         (hashlib.sha256(b"lock-h").hexdigest(), tree, pod.root / "venvs", venvs.Build(pod.ports, WHITELIST, 30.0))
@@ -459,7 +507,7 @@ def mutation_tree(tmp_path: Path) -> Path:
             "pyproject.toml": '[tool.mutmut]\nsource_paths = ["scripts/", "hooks/pkg"]\n',
             "hooks/pkg/gamma.py": "",
             "hooks/pkgold/delta.py": "",
-            "uv.lock": "lock-m",
+            LOCK: "lock-m",
             "scripts/alpha.py": "def first():\n    return 1\n",
             "scripts/pkg/__init__.py": "",
             "scripts/notes.txt": "",

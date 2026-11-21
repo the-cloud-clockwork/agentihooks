@@ -1,0 +1,25 @@
+rules:
+  - id: lab-mutation-unit-key-prefix
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Bare mutation digests fail the verdict store key parser and escape the scheduler pass.
+      Prefix emitted unit keys with their kind and current digests.SCHEMAS value.
+    paths:
+      include:
+        - /scripts/ci_lab/
+        - lab-mutation-unit-key-prefix.py
+    pattern-either:
+      - patterns:
+          - pattern-inside: |
+              $KEY = digest(...)
+              ...
+          - pattern: Unit("mutant", $KEY, ...)
+      - patterns:
+          - pattern-inside: |
+              $KEY = $CACHE.identity(...)
+              ...
+          - pattern: Unit("stats", $KEY, ...)
+      - pattern: Unit("mutant", $KEY if ... else digest(...), ...)
+      - pattern: Unit("mutant", digest(...), ...)
+      - pattern: Unit("stats", $CACHE.identity(...), ...)

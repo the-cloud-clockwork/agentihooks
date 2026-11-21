@@ -1,0 +1,23 @@
+rules:
+  - id: hub-release-floor-without-pin
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The hub release floor refuses a hive on an older release without first reading the pinned mark on its registry
+      record. From 13 November the floor refused any hive below the hub release, so a hive pinned to one release, as the
+      operator's 29 October order wants, was refused minutes after each release; on 20 November both Anton hives followed
+      every release and each release drained both and ended every remote claim. Return no refusal when the record reads
+      pinned yes, before the release comparison.
+    patterns:
+      - pattern-inside: |
+          class Admission:
+              ...
+      - pattern: |
+          def _outdated(self, ...):
+              ...
+      - pattern-not: |
+          def _outdated(self, ...):
+              ...
+              if <... $RECORD.get("pinned") ...>:
+                  ...
+              ...

@@ -1073,6 +1073,62 @@ def test_split_rejects_a_failed_collection_before_reading_any_artifact(tmp_path,
     assert (tmp_path / "calls").read_text() == "xx"
 
 
+@pytest.mark.feature("split-starts-on-the-early-collection-upload")
+@pytest.mark.parametrize("status", ["in_progress", "completed"])
+@pytest.mark.parametrize("upload", ["success", "failure", "skipped", None])
+def test_split_starts_once_the_early_collection_upload_succeeds_while_the_count_job_runs(
+    tmp_path: Path, status: str, upload: str | None
+) -> None:
+    steps = _workflow()["jobs"]["split"]["steps"]
+    guard = next(step for step in steps if step.get("name") == "Require successful early collection")
+    named = guard["env"]["COLLECTION_STEP"]
+    held = {"name": "Hold the base revision's test count", "conclusion": "success"}
+    decoy = {"name": "select", "status": "completed", "conclusion": "success", "steps": [{**held, "name": named}]}
+    first = (status, None) if status == "in_progress" else (status, "failure")
+    for poll, (state, conclusion) in enumerate([first, ("completed", "failure")], start=1):
+        count = {"name": "test-count (3.12)", "status": state, "conclusion": conclusion}
+        count["steps"] = [held, {"name": named, "conclusion": upload}]
+        (tmp_path / f"{poll}.json").write_text(json.dumps({"jobs": [decoy, count]}))
+    binary = tmp_path / "bin"
+    binary.mkdir()
+    (binary / "gh").write_text(
+        '#!/usr/bin/env bash\nprintf x >> "$CALLS"\nwhile [[ "$1" != --jq ]]; do shift; done\n'
+        'jq -r "$2" "$PAGES/$(wc -c < "$CALLS").json"\n'
+    )
+    (binary / "sleep").write_text("#!/usr/bin/env bash\n")
+    for stub in binary.iterdir():
+        stub.chmod(0o755)
+    outcome = subprocess.run(
+        ["bash", "-e", "-c", guard["run"]],
+        env=dict(
+            os.environ,
+            PATH=f"{binary}:{os.environ['PATH']}",
+            CALLS=str(tmp_path / "calls"),
+            PAGES=str(tmp_path),
+            GH_TOKEN="app",
+            COLLECTION_JOB="test-count (3.12)",
+            COLLECTION_STEP=named,
+        ),
+        capture_output=True,
+        text=True,
+    )
+    early = status == "in_progress" and upload == "success"
+    assert (outcome.returncode == 0) == early
+    assert (tmp_path / "calls").read_text() == ("xx" if status == "in_progress" and not early else "x")
+
+
+@pytest.mark.feature("split-starts-on-the-early-collection-upload")
+def test_split_waits_on_the_count_step_that_uploads_the_collection_it_downloads() -> None:
+    jobs = _workflow()["jobs"]
+    steps = jobs["split"]["steps"]
+    guard = next(step for step in steps if step.get("name") == "Require successful early collection")
+    download = next(step for step in steps if step.get("name") == "Download the early collection")
+    upload = next(step for step in jobs["test-count"]["steps"] if step.get("name") == guard["env"]["COLLECTION_STEP"])
+    assert upload["uses"] == "./.github/actions/retry-upload"
+    assert upload["with"]["name"] == download["with"]["name"]
+    assert '\\"$COLLECTION_STEP\\"' in guard["run"]
+
+
 def _await_steps():
     return yaml.safe_load((_ROOT / ".github/actions/await-download/action.yml").read_text())["runs"]["steps"]
 
@@ -1276,18 +1332,28 @@ def test_unit_shards_check_out_full_history_without_old_file_contents():
         assert checkout["with"].get("ref") in (None, "${{ github.sha }}")
 
 
-def test_a_stalled_unit_checkout_aborts_within_a_minute_and_retries_once_in_place():
-    steps = _workflow()["jobs"]["unit"]["steps"]
-    first, second = [s for s in steps if s.get("uses", "").startswith("actions/checkout")]
-    assert steps.index(first) == 0 and steps.index(second) == 1
-    for checkout in (first, second):
-        assert checkout["uses"] == "actions/checkout@v4"
-        assert checkout["env"] == {"GIT_HTTP_LOW_SPEED_LIMIT": "1000", "GIT_HTTP_LOW_SPEED_TIME": "60"}
-        assert checkout["with"] == {"ref": "${{ github.sha }}", "fetch-depth": 0, "filter": "blob:none"}
-    assert first["continue-on-error"] is True
-    assert "if" not in first
-    assert "continue-on-error" not in second
-    assert second["if"] == f"steps.{first['id']}.outcome == 'failure'"
+@pytest.mark.feature("partial-clone-checkout-stall-bound")
+def test_a_stalled_partial_clone_checkout_aborts_within_a_minute_and_retries_once_in_place() -> None:
+    jobs = _workflow()["jobs"]
+    checkouts = {
+        name: [s for s in job.get("steps", []) if s.get("uses", "").startswith("actions/checkout")]
+        for name, job in jobs.items()
+    }
+    partial = {name: found for name, found in checkouts.items() if any("filter" in s.get("with", {}) for s in found)}
+    assert {"unit", "mutation-refine"} <= set(partial)
+    for name, found in partial.items():
+        assert len(found) == 2, name
+        first, second = found
+        steps = jobs[name]["steps"]
+        assert steps.index(first) == 0 and steps.index(second) == 1
+        for checkout in (first, second):
+            assert checkout["uses"] == "actions/checkout@v4"
+            assert checkout["env"] == {"GIT_HTTP_LOW_SPEED_LIMIT": "1000", "GIT_HTTP_LOW_SPEED_TIME": "60"}
+            assert checkout["with"] == first["with"]
+        assert first["continue-on-error"] is True
+        assert "if" not in first
+        assert "continue-on-error" not in second
+        assert second["if"] == f"steps.{first['id']}.outcome == 'failure'"
 
 
 def test_unit_pins_an_exact_uv_version():
