@@ -226,33 +226,36 @@ def end_pass(
     ended = timing.timed(pr_wait.enforce_pass, store, slug, rows, github, now_ms)
     verdicts = Verdicts(slug, intent.NAME)
     for agent in store.agents(slug):
-        held = idle.wait(store.redis, slug, agent.name)
-        if agent.state == "finished" or not (held and held.get("on")):
-            continue
-        previous = json.dumps(held)
-        with timing.acting(agent.name):
-            outcome = timing.timed(
-                resolution, held["on"], rows, inbox, github, reread, now_ms - held["at"] < FRESH_MS, verdicts
-            )
-            outcome = (
-                ""
-                if outcome
-                and agent.task in rows
-                and timing.timed(dependency, held["on"], rows[agent.task], rows, reread)
-                else outcome
-            )
-            if (outcome or json.dumps(held) != previous) and not timing.timed(
-                _save_wait, store.redis, slug, agent.name, previous, held, outcome, now_ms
-            ):
+        try:
+            held = idle.wait(store.redis, slug, agent.name)
+            if agent.state == "finished" or not (held and held.get("on")):
                 continue
-            if not outcome:
-                continue
-            text = (
-                f"Your wait on {outcome} has ended.{_pick_up(agent.task)} agentihooks swarm {slug} done, block, "
-                "or wait on the next thing."
-            )
-            timing.timed(inbox.send, SENDER, agent.seat or agent.name, text)
-        ended.append(f"ended the wait of {agent.name}: {outcome}")
+            previous = json.dumps(held)
+            with timing.acting(agent.name):
+                outcome = timing.timed(
+                    resolution, held["on"], rows, inbox, github, reread, now_ms - held["at"] < FRESH_MS, verdicts
+                )
+                outcome = (
+                    ""
+                    if outcome
+                    and agent.task in rows
+                    and timing.timed(dependency, held["on"], rows[agent.task], rows, reread)
+                    else outcome
+                )
+                if (outcome or json.dumps(held) != previous) and not timing.timed(
+                    _save_wait, store.redis, slug, agent.name, previous, held, outcome, now_ms
+                ):
+                    continue
+                if not outcome:
+                    continue
+                text = (
+                    f"Your wait on {outcome} has ended.{_pick_up(agent.task)} agentihooks swarm {slug} done, block, "
+                    "or wait on the next thing."
+                )
+                timing.timed(inbox.send, SENDER, agent.seat or agent.name, text)
+            ended.append(f"ended the wait of {agent.name}: {outcome}")
+        except Exception as exc:
+            print(f"wait of {agent.name} failed: {exc}", file=sys.stderr)
     mark_ended(store, slug, now_ms)
     return ended
 
