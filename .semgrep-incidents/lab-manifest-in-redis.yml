@@ -13,6 +13,6 @@ rules:
         - lab-manifest-in-redis.py
     pattern-either:
       - pattern: |
-          {..., "manifest": $UNIT.manifest, ...}
+          {..., "manifest": $VALUE, ...}
       - pattern: Slot(..., manifest=$VALUE, ...)
       - pattern: $CLIENT.hset($KEY, "manifest", ...)
