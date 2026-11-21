@@ -45,7 +45,7 @@ def sync(redis, hive, hosted, ttl):
     redis.set(files_key(hive), json.dumps(files), ex=FILES_SECONDS)
 
 
-# ok: feature-work-folder-follows-the-task
+# ruleid: feature-work-folder-follows-the-task
 def sync(redis, hive, hosted, ttl):
     copy, files = {}, {}
     for slug, task_id in hosted:

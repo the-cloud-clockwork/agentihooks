@@ -262,6 +262,7 @@ def test_base_roles_are_the_package_roles():
         "master",
         "planner",
         "qa",
+        "reviewer",
     ]
 
 
@@ -352,9 +353,12 @@ def test_scaffold_refuses_a_missing_argument(capsys, argv, error):
 @pytest.mark.parametrize(
     ("argv", "line"),
     [
-        (["--help"], "bundle Manage the linked bundle (new, link, unlink, list, pull)"),
+        (["--help"], "bundle Manage the linked bundle (new, link, unlink, list, pull, layer)"),
         (["--help"], "overlay Overlay profiles in the linked bundle: new NAME --wears ROLES | check NAME"),
-        (["bundle", "--help"], "{new,link,unlink,list,pull} new <path> | link <path> | unlink | list | pull"),
+        (
+            ["bundle", "--help"],
+            "{new,link,unlink,list,pull,layer} new <path> | link <path> | unlink | list | pull | layer",
+        ),
     ],
 )
 def test_install_help_lists_the_scaffold_commands(monkeypatch, capsys, argv, line):

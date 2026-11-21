@@ -46,6 +46,7 @@ jobs:
       - name: Install dependencies
         env:
           UV_CONSTRAINT: head/.github/test-constraints.txt
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
         run: uv pip install --system --excludes head/.github/test-excludes.txt -e './head[dev,all]'
       - name: Plant a dropped checkbox update and a dropped chat recipient in copies of head
         run: bash "$GRADER/tests/swarm_ledger/equivalence.sh" plant

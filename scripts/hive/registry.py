@@ -136,6 +136,7 @@ SETTINGS = {
     "ui": ("ui", _flag),
     "ephemeral": ("ephemeral", _flag),
     "draining": ("draining", _flag),
+    "pinned": ("pinned", _flag),
     "excluded": ("excluded", _excluded),
     "master-swarms": ("master_swarms", _master_swarms),
     "prefer": ("prefer", _prefer),

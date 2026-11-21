@@ -12,13 +12,15 @@ from scripts.routing.slots import API, INTERACTIVE, SUBSCRIPTION, account_key
 from scripts.swarm import autoscale, freeze, host_budget, master_pin
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm.ledger_client import pass_state
-from scripts.swarm.store import AUTO_SCALING, RedisStore, SwarmConfig
+from scripts.swarm.store import AUTO_SCALING, AgentRecord, RedisStore, SwarmConfig
 
 if TYPE_CHECKING:
     from scripts.routing.reservation import Reservation
 
 LANES = ("eng", "ci", "plan")
 LABELS = {"claude": "Claude", "codex": "Codex"}
+CODEX_SHARE = 0.3
+SHARED_LANES = ("eng", "ci")
 
 
 @dataclass(frozen=True)
@@ -398,8 +400,30 @@ def _reserved(limits: dict, effective: dict, options: dict, cursors: dict) -> di
     return result
 
 
+def _shared(agents: Iterable[AgentRecord]) -> dict[str, int]:
+    """The live eng and ci agents of each harness, the base the Codex share counts from."""
+    return {
+        harness: sum(a.lane in SHARED_LANES and a.state != "finished" and a.harness == harness for a in agents)
+        for harness in ("claude", "codex")
+    }
+
+
+def _share(lane: str, free: list[str], eligible: list[str], shared: dict[str, int]) -> list[str]:
+    """Codex alone for an eng or ci slot while Codex holds under its share and has an unreserved seat, else the free
+    harnesses, or every eligible one when pinned work reserves them all."""
+    short = shared["codex"] < CODEX_SHARE * (shared["claude"] + shared["codex"] + 1)
+    return ["codex"] if lane in SHARED_LANES and "codex" in free and short else free or eligible
+
+
 def _allocate(
-    config, effective: dict, limits: dict, open_seats: list, requirements: dict | None, accounts: dict | None = None
+    config: SwarmConfig | None,
+    effective: dict,
+    limits: dict,
+    open_seats: list,
+    requirements: dict | None,
+    accounts: dict | None = None,
+    *,
+    shared: dict[str, int],
 ) -> tuple:
     allocation = {lane: {"claude": 0, "codex": 0} for lane in LANES}
     placements = {lane: [] for lane in LANES}
@@ -424,11 +448,13 @@ def _allocate(
         cursors[lane] = index
         reserved = _reserved(limits, effective, options, cursors)
         eligible = [h for h in options[lane][index] if room(lane, index, h)]
-        spare = [h for h in eligible if remaining[h] > reserved[h]] or eligible
+        spare = _share(lane, [h for h in eligible if remaining[h] > reserved[h]], eligible, shared)
         seat = pick(held.values(), lambda s: s.harness in spare and usable(lane, index, s))
         held[(seat.harness, seat.account)] = replace(seat, sessions=seat.sessions + 1)
         allocation[lane][seat.harness] += 1
         placements[lane].append({"index": index, "harness": seat.harness, "account": seat.account})
+        if lane in SHARED_LANES:
+            shared[seat.harness] += 1
         cursors[lane] += 1
         effective[lane] += 1
 
@@ -631,7 +657,7 @@ def _worker_seats(config: SwarmConfig, observations: list[Account], agents: list
 
 
 def calculate(
-    config,
+    config: SwarmConfig,
     observations: list[Account],
     agents: list,
     demand: dict | None = None,
@@ -650,7 +676,13 @@ def calculate(
     open_rows = _open(observations, warned)
     placeable = _placeable(open_rows)
     allocation, placements = _allocate(
-        config, effective, limits, _worker_seats(config, observations, agents, warned), requirements, accounts
+        config,
+        effective,
+        limits,
+        _worker_seats(config, observations, agents, warned),
+        requirements,
+        accounts,
+        shared=_shared(agents),
     )
     restricted = sorted({row.state.lower() for row in observations if row.state != "OPEN" and row.kind != API})
     idle = [lane for lane in LANES if effective[lane] == limits[lane] < configured[lane]]

@@ -78,6 +78,18 @@ def test_each_stage_carries_its_wall_time_budget_and_longest_pickup():
     assert stages["unit"]["event_id"] == "ci-stage:7:2:unit"
 
 
+@pytest.mark.feature("ci-readers-collected-stage-budget")
+@pytest.mark.parametrize(("conclusion", "expected"), [("success", 330), ("failure", 330), ("skipped", 60), (None, 60)])
+def test_stage_metrics_resolve_the_collected_budget_and_stored_fallback(conclusion: str | None, expected: int) -> None:
+    job = _job(20, "mutation-plan", "00:00", "00:00", "03:00")
+    if conclusion is not None:
+        job["steps"] = [
+            {"name": "Take the local actions from the workflow revision for the stats", "conclusion": conclusion}
+        ]
+    rows = metrics_ci.rows("sw", RUN, [job], {})[metrics_ci.STAGES]
+    assert [(row["stage"], row["seconds"], row["budget"]) for row in rows] == [("mutation-plan", 180.0, expected)]
+
+
 def test_failed_tests_are_rows_with_their_message_and_signature_once_each():
     failures = metrics_ci.rows("sw", RUN, JOBS, {11: LOG})[metrics_ci.FAILURES]
     found = {(row["test_id"], row["message"], row["job"]) for row in failures}
@@ -130,7 +142,8 @@ def test_a_summary_message_survives_a_later_bare_line_for_the_same_test():
     assert row["message"] == "KeyError: 'k'"
 
 
-def test_a_stage_without_a_budget_or_a_started_job_records_zero():
+@pytest.mark.feature("ci-readers-collected-stage-budget")
+def test_a_stage_without_a_budget_or_a_started_job_records_zero() -> None:
     jobs = [
         {**_job(14, "custom", "00:40", "00:41", "01:00"), "started_at": None},
         _job(15, "custom (2)", "00:40", "02:00", "03:00", "skipped"),

@@ -24,7 +24,7 @@ import sys
 import tempfile
 import time
 from collections import Counter, defaultdict
-from collections.abc import Callable, Generator, Mapping, Sequence
+from collections.abc import Callable, Generator, Iterable, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field, fields, replace
 from functools import partial
@@ -50,6 +50,7 @@ from scripts.ci_lab import (
     lease_api,
     metrics,
     service,
+    static_exclusions,
 )
 from scripts.ci_lab.capacity import Load
 from scripts.ci_lab.checks import Checks, Output, PostRefused
@@ -57,7 +58,7 @@ from scripts.ci_lab.delivery import CLASSES, DELIVERY, DELIVERY_SCHEMA, load_run
 from scripts.ci_lab.digests import LOCKFILE, GradeInputs, StaticInputs, Toolchain, digest, grade_key, static_key
 from scripts.ci_lab.intake import GradeRequest, admit
 from scripts.ci_lab.leases import Leases, release
-from scripts.ci_lab.manifests import Background, Fetcher, FetchPending, FetchUnanswered
+from scripts.ci_lab.manifests import Background, Fetcher, FetchPending, FetchRefused, FetchUnanswered
 from scripts.ci_lab.objects import Objects, S3Objects, Uploads, manifest_folder, unit_path, upload_path
 from scripts.ci_lab.outcomes import CANNOT_RUN, DROPPED, FAILED, LOSSES, PASSED
 from scripts.ci_lab.pods import Pods, unmanaged, worker_pods
@@ -91,9 +92,12 @@ __all__ = [
     "build",
     "fold",
     "frame",
+    "keep_manifests",
     "listen",
     "main",
     "serve",
+    "storage",
+    "stored_manifest",
     "summary",
 ]
 
@@ -135,6 +139,7 @@ BATCH = 50
 FETCH_MS = 100
 QUIET_MS = 30_000
 STARTS_PER_PASS = 8
+UNANSWERED_FETCHES = 10
 POST_HOLD_MS = 60_000
 INTERVAL_S = 2.0
 LEASE_TTL_MS = 120_000
@@ -149,6 +154,7 @@ MIRROR_STORE = "CI_LAB_MIRROR_STORE"
 IMAGE = "CI_LAB_IMAGE"
 REPOSITORY = "CI_LAB_REPOSITORY"
 REINDEX_ON_START = "CI_LAB_REINDEX_ON_START"
+GITHUB_APP_SETTINGS = ("GITHUB_APP_ID", "GITHUB_APP_INSTALLATION_ID", "GITHUB_APP_PRIVATE_KEY")
 MANIFEST_DEPTH = 10
 
 Needs = Mapping[str, Mapping[str, Any]]
@@ -442,9 +448,12 @@ class State:
 
 
 def _parse(raw: str | bytes) -> State:
-    """Read a grade state document."""
+    """Read a grade state document, without the batch manifest a slot stored before manifests moved to the object
+    store."""
     data = json.loads(raw)
     data["flags"] = Flags(**data["flags"])
+    for slot in data["units"].values():
+        slot.pop("manifest", None)
     data["units"] = {ref: Slot(**slot) for ref, slot in data["units"].items()}
     return State(**data)
 
@@ -707,8 +716,9 @@ class Scheduler:
         the most urgent class first and the longest waiting first within a class. A head still quiet or paused takes no
         place, and the rest wait for a later pass, so every pass reaches admission. A head whose manifest fetch still
         runs off the pass keeps its place and window for the next pass; one whose fetch GitHub never answered or
-        answered with a server error waits out the window again; any other expansion failure drops it and posts its
-        failed required check run. Each of these takes a place, since its expansion ran on the pass."""
+        answered with a server error waits out the window again, until the `UNANSWERED_FETCHES`th such fetch in a row,
+        counted in its waiting entry; that fetch and any other expansion failure drop the head and post its failed
+        required check run. Each of these takes a place, since its expansion ran on the pass."""
         actions: list[str] = []
         pauses = control.paused(self.client)
         started = 0
@@ -729,8 +739,16 @@ class Scheduler:
                 self.client.hset(WAITING, name, raw)
                 actions.append(f"holding {request.head}: {error}")
             except FetchUnanswered as error:
-                self.client.hset(WAITING, name, json.dumps({**held, "since": now_ms}))
-                actions.append(f"holding {request.head}: {error}")
+                fetches = held.get("unanswered", 0) + 1
+                if fetches < UNANSWERED_FETCHES:
+                    self.client.hset(WAITING, name, json.dumps({**held, "since": now_ms, "unanswered": fetches}))
+                    actions.append(f"holding {request.head}: {error}")
+                else:
+                    refusal = FetchRefused(
+                        f"{fetches} manifest fetches in a row got no answer or a server error, the last: {error}"
+                    )
+                    actions.append(f"cannot expand {request.head}: {refusal}")
+                    actions.extend(self._refuse(request, ref, refusal, now_ms))
             except (
                 subprocess.CalledProcessError,
                 ValueError,
@@ -814,6 +832,7 @@ class Scheduler:
                 state.units.update({ref: replace(source.units[ref]) for ref in source.gates[gate]})
                 continue
             state.gates[gate] = [self._place(state, unit, request.bypass_negative, carried, misses) for unit in units]
+        keep_manifests(self.objects, misses)
         self.save(state)
         self.client.sadd(LIVE, run)
         self.client.set(f"{LANES}{request.repo}|{lane}|{int(request.tier)}", run)
@@ -1172,14 +1191,20 @@ class StoredManifests:
 
     def _merged(self, manifest: dict[str, Any], folder: str, stored: frozenset[str]) -> dict[str, Any]:
         """Return the manifest with the files of each note of its commit added to the outside list of every test record
-        the note names."""
+        the note names, and of every test module the note names that no record holds to that module's list under
+        `expand_tests.UNLISTED`, present only when a note names such a module."""
         records: dict[str, dict[str, Any]] = manifest["tests"]
+        unlisted: dict[str, list[str]] = {}
         notes = f"{folder}{NOTES}{manifest['commit']}/"
         for name in sorted(path for path in stored if path.startswith(notes)):
             note = json.loads(self.objects.read(name))
             for test in note["tests"]:
                 if test in records:
                     records[test]["outside"] = sorted({*records[test].get("outside", ()), *note["outside"]})
+                elif "::" not in test:
+                    unlisted[test] = sorted({*unlisted.get(test, ()), *note["outside"]})
+        if unlisted:
+            manifest[expand_tests.UNLISTED] = unlisted
         return manifest
 
 
@@ -1189,6 +1214,27 @@ def note_outside(objects: Objects, repo: str, commit: str, tests: Sequence[str],
     record: dict[str, object] = {"tests": tests, "outside": sorted(outside)}
     path = f"{manifest_folder(_slug(repo))}{NOTES}{commit}/{digest(record)}.json"
     objects.write_once(path, json.dumps(record).encode())
+
+
+def keep_manifests(objects: Objects, units: Iterable[Unit]) -> int:
+    """Store the batch manifest of each unit that carries one under its unit key in the object store, once, so its
+    job's lease reads it there and no Redis record holds it; return how many this call wrote."""
+    return sum(
+        objects.write_once(unit_path(unit.kind, unit.key, "manifest"), unit.manifest.encode())
+        for unit in units
+        if unit.manifest
+    )
+
+
+def stored_manifest(objects: Objects, unit: Unit) -> str:
+    """Return the batch manifest a test unit's lease carries, read from its unit key's place in the object store;
+    empty for another kind of unit or a test unit with none stored."""
+    if unit.kind != expand_tests.KIND:
+        return ""
+    path = unit_path(unit.kind, unit.key, "manifest")
+    if path not in objects.keys(str(PurePosixPath(path).parent) + "/"):
+        return ""
+    return objects.read(path).decode()
 
 
 class MirrorExpander:
@@ -1286,14 +1332,18 @@ class MirrorExpander:
         """Return the retry policy of the lab block of delivery.yaml on the repository's dev branch."""
         return policy(_lab_block(self._on_dev(repo, DELIVERY)))
 
+    def _exclusions(self, mirror: Mirror, grader: str, files: Mapping[str, str]) -> dict[str, str]:
+        if static_exclusions.PATH not in files:
+            return {}
+        return static_exclusions.read(self._git(mirror, "show", f"{grader}:{static_exclusions.PATH}"))
+
     def expand(self, request: GradeRequest) -> Plan:
-        """Return one unit per static gate the grader's workflow runs whose context names the lab supplies, so a gate
-        that reads a field the lease lacks keeps its verdict with Actions, keyed by the files it reads at head and base,
-        the unit job's test units of a merge group, promotion or backfill head and the mutation stats and mutant units
-        of a promotion or backfill head, framed by the request's tier with the authoritative gates of the grader's
-        delivery.yaml for a hotfix or pull request head, with the dev commit of the manifest its test units are keyed
-        on and, for a hotfix, pull request or merge group head, the gates that delivery.yaml lists as authoritative for
-        its class."""
+        """Return one unit per supported static gate outside the protected exclusion catalog, with Actions retaining
+        authority for jobs with exclusions, keyed by the files each gate reads at head and base, the unit job's test
+        units of a merge group, promotion or backfill head and the mutation stats and mutant units of a promotion or
+        backfill head, framed by the request's tier with the authoritative gates of the grader's delivery.yaml for a
+        hotfix or pull request head, with the dev commit of the manifest its test units are keyed on.
+        """
         mirror = self._mirror(request.repo)
         grader = request.head if request.tier >= Priority.PROMOTION else request.base
         for sha in dict.fromkeys((request.head, request.base, grader)):
@@ -1301,10 +1351,11 @@ class MirrorExpander:
         head, base = self._files(mirror, request.head), self._files(mirror, request.base)
         workflow = self._git(mirror, "show", f"{grader}:{WORKFLOW.as_posix()}")
         registry = json.loads(self._git(mirror, "show", f"{grader}:{REGISTRY.as_posix()}"))
+        excluded = self._exclusions(mirror, grader, head if grader == request.head else base)
         toolchain = replace(self.toolchain, lockfile=head.get(LOCKFILE, ""), pyproject=head.get("pyproject.toml", ""))
         gates: dict[str, list[Unit]] = {}
         for gate in discover(workflow, registry, self._workflows(mirror, grader)):
-            if gate.missing:
+            if gate.missing or gate.name in excluded:
                 continue
             inputs = StaticInputs(
                 gate.name, _within(head, gate.paths), _within(base, gate.base_paths), grader, toolchain
@@ -1323,6 +1374,7 @@ class MirrorExpander:
         listed = frozenset[str]()
         if request.tier < Priority.PROMOTION:
             listed = authoritative_gates(_lab_block(self._git(mirror, "show", f"{grader}:{DELIVERY}")), request.tier)
+            listed = frozenset(static_exclusions.authority(listed, excluded))
         tree = self._git(mirror, "rev-parse", f"{request.head}^{{tree}}").strip()
         plan = frame(request.tier, tree, grader, {job: tuple(units) for job, units in gates.items()}, sorted(listed))
         return replace(plan, manifest=commit)
@@ -1435,13 +1487,14 @@ def build(
 
     def poster(repo: str) -> Poster:
         if repo not in checks:
-            checks[repo] = Checks(repo)
+            checks[repo] = Checks(repo, registry=scheduler.registry)
         return checks[repo]
 
     ports = Ports(BusInbox(consumer), expander, poster, control.Priorities(client, _now_ms), worker_pods(environ))
     repository = environ[REPOSITORY]
     settings = Settings(expander.trusted(repository), retries=expander.retries(repository))
-    return Scheduler(client, objects, ports, settings, spending)
+    scheduler = Scheduler(client, objects, ports, settings, spending)
+    return scheduler
 
 
 def serve(
@@ -1471,19 +1524,30 @@ def listen(
     routes: lease_api.ControlRoutes,
     spending: budget.Budget,
     clock: Callable[[], int],
-    ports: tuple[int, int],
-) -> tuple[ThreadingHTTPServer, ThreadingHTTPServer]:
-    """Bind the scheduler port's lease API, control, capacity and grades routes and the metrics port, both over one
-    load whose budget fraction and shed classes come from the day's spending, the metrics port with the counters the
-    scheduler's passes keep; the caller runs each serve_forever."""
+    ports: tuple[int, int, int],
+    mirror: Path | None = None,
+) -> tuple[ThreadingHTTPServer, ThreadingHTTPServer, ThreadingHTTPServer]:
+    """Bind the scheduler port's lease API, capacity and grades routes, the control port's control routes and the
+    metrics port, the scheduler and metrics ports over one load whose budget fraction and shed classes come from the
+    day's spending, the metrics port with the counters the scheduler's passes keep and the age of the node mirror at
+    each scrape when one is given; the caller runs each serve_forever."""
 
     def snapshot() -> Load:
         return budget.observe(scheduler.load(clock()), spending.status())
 
-    api, exposition = ports
-    lease = partial(lease_api.answer, leases, Uploads(scheduler.objects), routes)
+    def scrape() -> Load:
+        if mirror is not None:
+            metrics.observe_mirror(scheduler.registry, mirror, clock())
+        return snapshot()
+
+    api, steering, exposition = ports
+    lease = partial(lease_api.answer, leases, Uploads(scheduler.objects))
     port = service.Routes(lease, snapshot, scheduler.grades_of)
-    return service.serve("", api, port), metrics.serve("", exposition, snapshot, scheduler.registry)
+    return (
+        service.serve("", api, port),
+        lease_api.serve_control("", steering, routes),
+        metrics.serve("", exposition, scrape, scheduler.registry),
+    )
 
 
 def _now_ms() -> int:
@@ -1496,10 +1560,26 @@ def _sleep_ms(ms: int) -> None:
     time.sleep(ms / 1000)
 
 
+def storage(environ: Mapping[str, str]) -> S3Objects:
+    """Return the lab objects in the MinIO bucket the environment names, through an S3 client that signs worker
+    upload URLs with SigV4 over the host alone, so a worker PUT may carry any Content-Type."""
+    import boto3  # pyright: ignore[reportMissingTypeStubs]
+    from botocore.config import Config  # pyright: ignore[reportMissingTypeStubs]
+
+    s3: Any = boto3.client(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        "s3",
+        endpoint_url=environ[MINIO_ENDPOINT],
+        region_name="us-east-1",
+        config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
+        aws_access_key_id=environ[MINIO_ACCESS_KEY],
+        aws_secret_access_key=environ[MINIO_SECRET_KEY],
+    )
+    return S3Objects(s3, environ[MINIO_BUCKET], "")
+
+
 def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     """Run the scheduler service from its mounted runtime config: the lease API, capacity and grades on the scheduler
-    port, metrics on the metrics port and a pass every interval."""
-    import boto3  # pyright: ignore[reportMissingTypeStubs]
+    port, the control routes on the control port, metrics on the metrics port and a pass every interval."""
     import redis
 
     from scripts.ci_lab import relay
@@ -1510,24 +1590,23 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     parser.add_argument("--interval", type=float, default=INTERVAL_S)
     parser.add_argument("--passes", type=int, default=0)
     arguments = parser.parse_args(argv)
+    missing = [name for name in GITHUB_APP_SETTINGS if not environ.get(name)]
+    if missing:
+        print(f"ci-lab scheduler refuses to start: {', '.join(missing)} not set", file=sys.stderr)
+        return 1
     runtime = load_runtime(Path(environ[contract.RUNTIME_CONFIG]))
     client: Any = redis.Redis.from_url(environ[contract.REDIS_URL], decode_responses=True)  # pyright: ignore[reportUnknownMemberType]
-    s3: Any = boto3.client(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-        "s3",
-        endpoint_url=environ[MINIO_ENDPOINT],
-        aws_access_key_id=environ[MINIO_ACCESS_KEY],
-        aws_secret_access_key=environ[MINIO_SECRET_KEY],
-    )
-    objects = S3Objects(s3, environ[MINIO_BUCKET], "")
+    objects = storage(environ)
     heads = open_bus(replace(BusConfig.from_environ(environ), provision=False)).lab_heads
     spending = budget.Budget(client, _now_ms, budget.policy(runtime))
     scheduler = build(environ, client, objects, heads.consumer(DURABLE, SUBJECT), spending)
     relaying = relay.build(environ, scheduler, heads.consumer(relay.DURABLE, relay.SUBJECT))
     if environ.get(REINDEX_ON_START) == "true":
         print(f"reindexed {scheduler.store.reindex()} verdicts", flush=True)
-    leases = Leases(scheduler.queue, LEASE_TTL_MS, _now_ms, _sleep_ms, LEASE_POLL_MS, scheduler.ports.pods)
+    manifests = partial(stored_manifest, scheduler.objects)
+    leases = Leases(scheduler.queue, LEASE_TTL_MS, _now_ms, _sleep_ms, LEASE_POLL_MS, scheduler.ports.pods, manifests)
     routes = lease_api.ControlRoutes(client, environ.get(contract.CONTROL_TOKEN, ""), _now_ms)
-    ports = (contract.SCHEDULER_PORT, contract.METRICS_PORT)
-    for server in listen(scheduler, leases, routes, spending, _now_ms, ports):
+    ports = (contract.SCHEDULER_PORT, contract.CONTROL_PORT, contract.METRICS_PORT)
+    for server in listen(scheduler, leases, routes, spending, _now_ms, ports, Path(environ[contract.GIT_MIRROR])):
         Thread(target=server.serve_forever, daemon=True).start()
     return serve(scheduler, relaying, arguments.interval, arguments.passes, time.time, time.sleep)
