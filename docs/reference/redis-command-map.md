@@ -90,6 +90,30 @@ A real machine writes the same keys with its own machine name in place of
 patterns. For the `controller` user, `~agentihooks:*` covers them and
 `~agentihooks:swarm:*` does not.
 
+### The ci lab section
+
+The `lab` section lists the commands the ci lab scheduler can send as the
+`ci-lab` Redis user. Its entry point is `scripts.ci_lab.contract:scheduler`,
+which the `agentihooks ci-lab-scheduler` command runs. Commands are found the
+same way as for consumers, with one difference: every unit of each
+`scripts.ci_lab` module the entry point reaches counts, not only the reached
+units. The reach skips method names that dictionaries also have, so it would
+miss `Store.get` and its `SISMEMBER`. The nine queue scripts in
+`scripts.ci_lab.queue` are module constants sent through `register_script`,
+so each `redis.call` in them is listed with the sender `scripts.ci_lab.queue:`.
+
+The section leaves out two kinds of module:
+
+- reached modules outside `scripts.ci_lab`, which never hold the lab's client.
+  Name matching there reports dictionary calls as commands, such as `KEYS`
+  from `StatsInputs.for_test`;
+- lab modules the scheduler never imports, such as `scripts.ci_lab.shadow`,
+  whose `shadow report --since` command takes its own `--redis` URL.
+
+The section has no role and no keys. The `ci-lab` user belongs to the ci-lab
+chart, not to `redis.roles`. `LAB` in `scripts.swarm.redis_commands` names the
+entry point and the package.
+
 ## Usage
 
 Print the map for the deployment Anton runs:
@@ -120,7 +144,13 @@ The output is one JSON document:
    "role": "controller"
   }
  },
- "deployment": "distributed"
+ "deployment": "distributed",
+ "lab": {
+  "commands": {
+   "INCRBYFLOAT": ["scripts.ci_lab.budget:Budget.charge"],
+   "SMOVE": ["scripts.ci_lab.queue:"]
+  }
+ }
 }
 ```
 
@@ -139,6 +169,9 @@ jq -r '.consumers.controller.commands.INCRBY[]' redis-commands.json
 
 # Command count per consumer
 jq -r '.consumers | to_entries[] | "\(.key) \(.value.role) \(.value.commands | length)"' redis-commands.json
+
+# Commands the ci lab scheduler sends
+jq -r '.lab.commands | keys[]' redis-commands.json
 ```
 
 On `dev` at the time of writing, the command count per consumer was
@@ -190,6 +223,13 @@ The planted cases show that the check can fail. `INCRBY` is the grant behind
 the 12 October crash loop. `BLPOP` and the scheduler entries key are the two
 missing grants fixed by antoncore pull request 954. agentihooks pull request
 4832 keeps the hosted controller's scheduler keys under `agentihooks:`.
+
+`test_lab_grants.py` checks the `ci-lab` user line against `lab.commands`.
+Every listed command must be granted, and removing any one command's grant
+from the line must be refused. The check replaced a hand kept
+`lab_commands.json` after the scheduler crash looped on 21 November, first on
+`SMOVE` and then on `INCRBYFLOAT`, because a new command in the lab code
+reached deploy without the list changing.
 
 ### Refusal lines
 
@@ -320,6 +360,7 @@ with its role and entry points. A new role also needs a matching
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | `<consumer> issues <COMMAND> but Redis user <user> does not grant it` | The user in `users.acl.template` lacks the command, or denies it with `-command` | Add `+<command>` to that user's line in antoncore, or remove the code path from that consumer in agentihooks |
+| `ci-lab does not grant <COMMAND>, sent by <units>` | The ci lab code sends a command the `ci-lab` line in `users.acl.template` lacks | Add `+<command>` to the `ci-lab` line in antoncore, or remove the call from the lab code |
 | `<consumer> writes its <label> key <key> outside the keys of Redis user <user>` | No `~pattern` on the user matches the scheduler key | Widen the user's key pattern, or keep the scheduler key under the user's prefix |
 | `test_the_map_was_published_for_the_deployment_anton_runs` fails | The overlay's deployment changed, or a consumer role has no `redis.roles` entry | Pass the overlay's deployment, or add the role |
 | Step fails with `N skipped` | `SWARM_REDIS_COMMANDS` was unset or the map step did not run | Read the `Publish the Redis commands each agentihooks consumer issues` step log |
