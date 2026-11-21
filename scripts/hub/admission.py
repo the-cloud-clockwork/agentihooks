@@ -181,7 +181,8 @@ class Admission:
     def _kept(self, slug: str, request: dict[str, Any], offer: str) -> dict[str, Any] | None:
         """The asking hive's kept admission while its agent is listed or its unlaunched execution still holds the claim,
         and a held answer while that hive's own admission of the offer is still claiming."""
-        if cast(Any, self.store).redis.get(claiming_key(offer)) == request["hive"]:
+        claiming: object = self.store.redis.get(claiming_key(offer))  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        if claiming == request["hive"]:
             return {hive_admission.HELD: hive_admission.ADMITTING}
         admitted = self._held(offer)
         if admitted and admitted["hive"] == request["hive"] and self._active(slug, admitted):
@@ -275,13 +276,13 @@ class Admission:
         or raises while the mark still names that hive."""
         from scripts.swarm import tick
 
-        key, redis = claiming_key(offer), cast(Any, self.store).redis
-        redis.set(key, hive, px=tick.LEASE_MS)
+        key = claiming_key(offer)
+        self.store.redis.set(key, hive, px=tick.LEASE_MS)  # pyright: ignore[reportUnknownMemberType]
         try:
             yield
         finally:
-            if redis.get(key) == hive:
-                redis.delete(key)
+            if self.store.redis.get(key) == hive:  # pyright: ignore[reportUnknownMemberType]
+                self.store.redis.delete(key)  # pyright: ignore[reportUnknownMemberType]
 
     def _admitting(self, hive: str, offer: str) -> bool:
         """True while the hive's admission key is held by an admission of this same offer."""
