@@ -10380,6 +10380,7 @@
         "tests/events/test_nats_undecodable.py::test_an_undecodable_head_is_dead_lettered_and_the_next_head_is_read",
         "tests/events/test_nats_dead_parts.py::test_full_size_dead_letters_recover_without_the_source_and_hide_parts",
         "tests/events/test_nats_dead_parts.py::test_the_part_type_is_an_ordinary_event_outside_the_dead_stream",
+        "tests/events/test_nats_dead_parts.py::test_ordinary_dead_letter_data_is_not_a_payload_manifest",
         "tests/events/test_nats_undecodable.py::test_an_undecodable_head_stays_pending_when_dead_letter_publication_fails",
         "tests/events/test_nats_undecodable.py::test_an_undecodable_head_has_one_retained_letter_when_termination_is_lost"
       ]

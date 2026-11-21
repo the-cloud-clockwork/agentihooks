@@ -73,3 +73,19 @@ def test_the_part_type_is_an_ordinary_event_outside_the_dead_stream(tmp_path: Pa
             assert consumer.fetch(1, 100) == []
         finally:
             bus.close()
+
+
+@pytest.mark.feature("lab-head-undecodable-dead-letter")
+def test_ordinary_dead_letter_data_is_not_a_payload_manifest(tmp_path: Path) -> None:
+    good = HeadEvent("push", "https://github.com/o/r", "a" * 40, "b" * 40, "dev", "pushed")
+    event = replace(envelope(good), data={"payload_parts": ["invoice-item"]})
+    with nats_server.running(tmp_path / "jetstream") as url:
+        bus = nats.open_bus(BusConfig(url=url))
+        try:
+            bus._loop.run(nats._publish_dead(bus._js, event, "ordinary", 1))
+            letters = bus.dead.consumer("opaque-data-proof", "dead.>").fetch(1, 100)
+            assert len(letters) == 1
+            assert letters[0].event.data["event"] == event.to_dict()
+            letters[0].ack()
+        finally:
+            bus.close()

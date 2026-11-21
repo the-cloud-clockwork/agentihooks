@@ -276,7 +276,7 @@ class NatsConsumer:
                 messages = await self._subscription.fetch(batch, timeout=max(deadline - loop.time(), 0.001))
             except asyncio.TimeoutError:
                 return []
-            deliveries = []
+            deliveries = list[NatsDelivery]()
             parts = 0
             for msg in messages:
                 try:
@@ -328,8 +328,8 @@ async def _publish_dead(
     if event.type == "undecodable" and len(letter.encode()) > limit:
         template = replace(letter, id=f"{letter.id}-00000000", type="dead_payload_chunk", data={"payload": ""})
         size = limit - len(template.encode())
-        payload = event.data["payload"]
-        parts = []
+        payload = cast(str, event.data["payload"])
+        parts = list[str]()
         for index, start in enumerate(range(0, len(payload), size)):
             part = replace(template, id=f"{letter.id}-{index:08x}", data={"payload": payload[start : start + size]})
             await _publish_letter(js, part, stream, f"{target.rsplit('.', 1)[0]}.{part.id}")
@@ -349,30 +349,30 @@ async def _publish_letter(js: JetStreamContext, letter: Envelope, stream: str, t
             headers={MSG_ID: letter.id, "Nats-Expected-Last-Subject-Sequence": "0"},
         )
     except APIError:
-        stored = Envelope.decode((await js.get_last_msg(stream, target)).data)
+        stored = Envelope.decode((await js.get_last_msg(stream, target)).data or b"")
         if stored.id != letter.id or letter.type == "dead_payload_chunk" and stored.data != letter.data:
             raise
 
 
 async def _hydrate_dead(js: JetStreamContext, message: Msg, letter: Envelope) -> Envelope:
-    original = letter.data.get("event")
+    original = cast(dict[str, Any] | None, cast(dict[str, Any], letter.data).get("event"))
     if letter.type != "dead_lettered" or not isinstance(original, dict):
         return letter
-    data = original.get("data")
+    data = cast(dict[str, Any] | None, original.get("data"))
     if not isinstance(data, dict) or "payload_parts" not in data:
         return letter
-    payload = []
+    payload = list[str]()
     prefix = message.subject.rsplit(".", 1)[0]
-    for identity in data["payload_parts"]:
+    for identity in cast(list[str], data["payload_parts"]):
         try:
             stored = await js.get_last_msg(message.metadata.stream, f"{prefix}.{identity}")
         except NotFoundError:
             target = f"{prefix}.{hashlib.sha256(identity.encode()).hexdigest()}"
             stored = await js.get_last_msg(message.metadata.stream, target)
-        part = Envelope.decode(stored.data)
+        part = Envelope.decode(stored.data or b"")
         if part.id != identity or part.type != "dead_payload_chunk":
             raise ValueError("dead letter payload part differs")
-        payload.append(part.data["payload"])
+        payload.append(cast(str, part.data["payload"]))
     restored = {key: value for key, value in data.items() if key != "payload_parts"}
     restored["payload"] = "".join(payload)
     return replace(letter, data={**letter.data, "event": {**original, "data": restored}})
