@@ -678,6 +678,63 @@ def test_coverage_ratchet_grades_against_the_base_its_baseline_was_restored_for(
     assert f"commit={commits[graded]}\n" in output.read_text()
 
 
+@pytest.mark.parametrize("job", ["coverage-ratchet", "coverage-baseline"])
+def test_coverage_jobs_check_out_full_history_without_old_file_contents(job: str) -> None:
+    steps = _workflow()["jobs"][job]["steps"]
+    first, second = (step for step in steps if str(step.get("uses", "")).startswith("actions/checkout@"))
+    assert steps.index(first) == 0 and steps.index(second) == 1
+    for checkout in (first, second):
+        assert checkout["uses"] == "actions/checkout@v4"
+        assert checkout["env"] == {"GIT_HTTP_LOW_SPEED_LIMIT": "1000", "GIT_HTTP_LOW_SPEED_TIME": "60"}
+        assert checkout["with"] == {"ref": "${{ github.sha }}", "fetch-depth": 0, "filter": "blob:none"}
+    assert first["continue-on-error"] is True and "if" not in first
+    assert second["if"] == f"steps.{first['id']}.outcome == 'failure'" and "continue-on-error" not in second
+
+
+@pytest.mark.parametrize(
+    ("job", "names"),
+    [
+        (
+            "coverage-ratchet",
+            ("Resolve the measured base tree", "Grade from the newest dev baseline when the base run published none"),
+        ),
+        ("coverage-baseline", ("Resolve baseline trees",)),
+    ],
+)
+def test_coverage_jobs_resolve_trees_and_ancestry_without_a_fetch_after_checkout(
+    tmp_path: Path, job: str, names: tuple[str, ...]
+) -> None:
+    origin, clone, home, output = (tmp_path / name for name in ("origin", "clone", "home", "output"))
+    origin.mkdir()
+    _git(origin, "init", "-q")
+    _git(origin, "config", "uploadpack.allowFilter", "true")
+    _git(origin, "config", "uploadpack.allowAnySHA1InWant", "true")
+    parent = _commit(origin, {"hooks/a.py": "a = 1\n"})
+    head = _commit(origin, {"hooks/a.py": "a = 2\n"})
+    trees = {commit: _git(origin, "rev-parse", f"{commit}^{{tree}}") for commit in (parent, head)}
+    steps = _workflow()["jobs"][job]["steps"]
+    checkout = next(step for step in steps if str(step.get("uses", "")).startswith("actions/checkout@"))
+    clone_args = ["clone", "-q", "--no-checkout", f"--filter={checkout['with']['filter']}", origin.as_uri()]
+    subprocess.run(["git", *clone_args, str(clone)], check=True)
+    _git(clone, "checkout", "-q", "--detach", head)
+    origin.rename(tmp_path / "unreachable")
+    old = subprocess.run(["git", "-C", str(clone), "cat-file", "-e", f"{parent}:hooks/a.py"], capture_output=True)
+    assert old.returncode != 0
+    (home / "coverage-baseline").mkdir(parents=True)
+    (home / "coverage-baseline" / "baseline.json").write_text(json.dumps({"commit": parent}))
+    output.write_text("")
+    env = dict(os.environ, HOME=str(home), GITHUB_OUTPUT=str(output), PUSH_BEFORE=parent, PREVIOUS=parent)
+    env.update(QUEUE_BASE="", DISPATCHED_BASE="")
+    for step in steps:
+        if step.get("name") in names:
+            subprocess.run(["bash", "-e", "-o", "pipefail", "-c", step["run"]], cwd=clone, env=env, check=True)
+    expected = {
+        "coverage-ratchet": f"commit={parent}\ntree={trees[parent]}\ncommit={parent}\n",
+        "coverage-baseline": f"tree={trees[head]}\nprevious={trees[parent]}\n",
+    }
+    assert output.read_text() == expected[job]
+
+
 @pytest.mark.parametrize(
     ("dispatched", "ref", "restored"),
     [("head", "feature", "parent"), ("other", "feature", "other"), ("origin/dev", "dev", "parent")],
