@@ -18,7 +18,7 @@ CONTRACT_LABELS = (("must", "Must be true"), ("check", "Checked by"), ("judge", 
 TAILS = (("latest_progress", "progress.md"), ("latest_proof", "proof.md"))
 TAIL_LINES = 3
 TAIL_BYTES = 4096
-SEEDS = ("steering.md", "progress.md", "proof.md")
+SEEDS = ("steering.md", "progress.md", "proof.md", "recon.md")
 SEED_CHARS = 65536
 LINE_BYTES = 131072
 SEED_BYTES = 2 * LINE_BYTES
@@ -110,9 +110,9 @@ def seeds(slug, task_id):
 
 
 def contents(slug: str, task_id: str) -> dict[str, str]:
-    """Progress and proof keep their latest LINE_BYTES of JSON; another plain text file of up to SEED_CHARS bytes travels
-    whole while its JSON fits what is left of SEED_BYTES, so the hub admit reply carrying the copy stays under the NATS
-    payload limit."""
+    """Progress, proof and the recon plan keep their latest LINE_BYTES of JSON; another plain text file of up to
+    SEED_CHARS bytes travels whole while its JSON fits what is left of SEED_BYTES, so the hub admit reply carrying the
+    copy stays under the NATS payload limit."""
     found: dict[str, str] = {}
     added, left = 0, SEED_BYTES
     for file in _files(folder(slug, task_id)):
