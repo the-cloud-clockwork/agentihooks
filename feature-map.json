@@ -733,6 +733,18 @@
       ]
     },
     {
+      "id": "controller-liveness-rides-out-redis-outage",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-liveness-redis-grace",
+      "behaviour": "With the control API disabled, the controller liveness probe runs the controller live command, so a Redis outage inside the controller Redis grace window keeps the probe live and the kubelet restarts no replica, standby or leading, while a lapsed controller lease still fails it. Without the control API port setting the live probe checks only the leases and skips the health endpoint it cannot reach.",
+      "seam": "The API disabled livenessProbe exec of the swarm chart controller template, and controller_probes.live without AGENTIHOOKS_CONTROL_API_PORT",
+      "tests": [
+        "tests/test_swarm_redis_grace.py::test_api_disabled_liveness_command_stays_live_while_redis_refuses_inside_the_grace_window",
+        "tests/test_swarm_controller_probes.py::test_live_without_the_control_api_passes_on_held_leases_with_no_endpoint_check",
+        "tests/test_swarm_controller_probes.py::test_live_without_the_control_api_still_fails_on_a_lapsed_lease"
+      ]
+    },
+    {
       "id": "compose-ledger-start-pulls-image",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2576",
@@ -7673,7 +7685,7 @@
       "tests": [
         "tests/test_swarm_chart_controller_probes.py::test_controller_api_probes_use_kubelet_http",
         "tests/test_swarm_chart_controller_probes.py::test_controller_reserves_its_measured_cpu",
-        "tests/test_swarm_chart_controller_probes.py::test_api_disabled_controller_keeps_its_lease_probe",
+        "tests/test_swarm_chart_controller_probes.py::test_api_disabled_liveness_runs_the_controller_live_command",
         "tests/test_swarm_chart_controller_probes.py::test_kind_checks_the_rendered_http_probes",
         "tests/test_swarm_v2_readiness.py::test_readiness_is_open_and_reports_redis_without_deep_diagnostics",
         "tests/test_swarm_v2_readiness.py::test_readiness_redis_uses_bounded_sockets_without_retries",
