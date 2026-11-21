@@ -62,14 +62,27 @@ def steering(task: dict[str, Any], doc: dict[str, Any] | None = None) -> str:
     if rows:
         lines += ["Proof contract", *rows, ""]
     if task.get("enhances") and doc is not None:
-        from scripts.swarm.prompt import target_lines
-
         lines += target_lines(task, doc["tasks"])
     if task.get("kind") == "plan" and doc is not None:
         from scripts.swarm_ledger.plan_evidence import evidence
 
         lines.append(evidence(task, doc))
     return "\n".join(lines)
+
+
+def target_lines(task: dict[str, Any], tasks: list[dict[str, Any]]) -> list[str]:
+    """Return the steering block of an enhancement plan task: its target's id, title, phase, territory, description."""
+    row = next((row for row in tasks if row.get("id") == task["enhances"]), dict[str, Any]())
+    if not row:
+        return ["Enhancement target", f"- Task: {task['enhances']} is not in the ledger: block this task.", ""]
+    return [
+        "Enhancement target",
+        f"- Task: {task['enhances']}: {row.get('title', '')}",
+        f"- Phase: {row.get('phase', '')}",
+        f"- Territory: {', '.join(row.get('territory') or []) or 'none'}",
+        f"- Description: {row.get('description', '')}",
+        "",
+    ]
 
 
 def rewrite(task: dict) -> None:
