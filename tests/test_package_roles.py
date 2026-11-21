@@ -27,6 +27,8 @@ GATES = {
     "stop-push_stop.py",
 }
 PROMPTS = "pre-bash.rm+bash.rmdir+bash.bash+bash.sh+bash.zsh+bash.eval-prompt_guard.py"
+SHELL_GUARDED = ("qa", "reviewer")
+SHELL_GUARD = "pre-bash-no_shell_writes.py"
 
 
 @pytest.mark.parametrize("role", ALL_ROLES)
@@ -78,6 +80,7 @@ def test_guard_conditions_load_for_master_planner_and_qa_only(world, monkeypatch
 
     loaded = [e["file"] for e in entries if e["source"] == f"profile:{role}"]
     expected = (GUARDS if role in GUARDED else set()) | (GATES if role in GATED else set()) | {PROMPTS}
+    expected |= {SHELL_GUARD} if role in SHELL_GUARDED else set()
     assert sorted(loaded) == sorted(expected)
     assert invalid == []
 
