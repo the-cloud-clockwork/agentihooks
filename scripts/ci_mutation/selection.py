@@ -7,6 +7,7 @@ import os
 import re
 import sys
 import tempfile
+import time
 import traceback
 from collections import Counter
 from pathlib import Path
@@ -521,13 +522,20 @@ def load_or_collect_stats(runner, test_runner, paths: list[str], mode: str, stat
     workers = worker_count(len(os.sched_getaffinity(0)))
     try:
         if mode == "collect":
+            from scripts.ci_mutation.stats_cache import lap, process_age
+
+            clock = lap(f"before stats {process_age():.1f}s, then mutation data", time.monotonic())
             output, key, index, total = Path(stats[0]), stats[1], int(stats[2]), int(stats[3])
             files = config.pytest_add_cli_args_test_selection
             if total > 1:
                 files = collect_test_ids(test_runner, files)
+            clock = lap("collect test ids", clock)
             split = split_files(Path.cwd(), files, total)
+            clock = lap("split", clock)
             results = collect_file_stats(runner, test_runner, split[index], workers, Path.cwd())
+            clock = lap("cached stats", clock)
             write_part(output, key, (index, total), results, split_key(split))
+            lap("write part", clock)
             raise SystemExit(0)
         shards = stats_shards(Path.cwd(), config.pytest_add_cli_args_test_selection, workers)
         collect_parallel_stats(runner, test_runner, shards, Path.cwd())

@@ -1,10 +1,16 @@
 import ast
+import contextlib
+import cProfile
 import fnmatch
 import functools
 import hashlib
+import io
 import json
+import os
+import pstats
 import subprocess
-from collections.abc import Callable
+import time
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -21,6 +27,38 @@ CONFIGURATION = {"pyproject.toml", "pytest.ini", "setup.cfg", "tox.ini", LOCKFIL
 UNKEYED = {".test_durations"}
 TRACKED = ("git", "ls-files", "-z")
 report = functools.partial(print, flush=True)
+
+
+def lap(name: str, start: float) -> float:
+    now = time.monotonic()
+    report(f"Mutation stats cache: timing {name} {now - start:.1f}s")
+    return now
+
+
+def process_age() -> float:
+    fields = Path("/proc/self/stat").read_text().rpartition(")")[2].split()
+    return float(Path("/proc/uptime").read_text().split()[0]) - int(fields[19]) / os.sysconf("SC_CLK_TCK")
+
+
+@contextlib.contextmanager
+def profiled(enabled: bool) -> Iterator[None]:
+    profiler = cProfile.Profile()
+    if enabled:
+        profiler.enable()
+    try:
+        yield
+    finally:
+        profiler.disable()
+        if enabled:
+            stream = io.StringIO()
+            stats = pstats.Stats(profiler, stream=stream)
+            stats.sort_stats("tottime").print_stats(40)
+            stats.sort_stats("cumulative").print_stats(40)
+            for line in stream.getvalue().splitlines():
+                if line.strip():
+                    report(f"Mutation stats cache: profile {line}")
+
+
 encode = functools.partial(json.dumps, sort_keys=True)
 
 
@@ -346,6 +384,7 @@ def collect_cached_stats(
 ) -> list[dict]:
     from scripts.ci_mutation.stats_dependencies import StoredStats, cap
 
+    clock = time.monotonic()
     tracked = subprocess.check_output(TRACKED, cwd=root, text=True).split("\0")
     sources = {
         path: hashlib.sha256((root / path).read_bytes()).hexdigest()
@@ -366,12 +405,15 @@ def collect_cached_stats(
                 resources.setdefault(str(parent) + "/", set()).add(path)
     inputs = StatsInputs(root, modules, resources, changes)
     stored = StoredStats(root, folder, context, changes)
+    clock = lap("inventory", clock)
     stored.prune()
+    clock = lap("prune", clock)
     compatible = {
         path: record
         for path in files
         if (record := stored.load(path, functools.partial(inputs.matches, path))) is not None
     }
+    clock = lap("load", clock)
     reused = list(compatible.values())
     missing = [path for path in files if path not in compatible]
     report(f"Mutation stats cache: reused {len(reused)} test files; collect {len(missing)}")
@@ -380,14 +422,18 @@ def collect_cached_stats(
     fresh = collect(missing) if missing else []
     if any(result["status"] != 0 for result in fresh):
         raise SystemExit(1)
-    functions = {function for result in fresh for function in result["tests"]}
-    sliced = fresh_by_path(missing, fresh)
-    for path in missing:
-        result, covered = per_test_stats(path, sliced[path], len(missing), functions)
-        if result is not None:
-            dependencies = inputs.for_test(path, covered, fresh)
-            stored.save(path, result, dependencies, covered is not None, inputs.discovery(dependencies))
+    clock = lap(f"collect {len(missing)} entries", clock)
+    with profiled(os.environ.get("PART") == "0"):
+        functions = {function for result in fresh for function in result["tests"]}
+        sliced = fresh_by_path(missing, fresh)
+        for path in missing:
+            result, covered = per_test_stats(path, sliced[path], len(missing), functions)
+            if result is not None:
+                dependencies = inputs.for_test(path, covered, fresh)
+                stored.save(path, result, dependencies, covered is not None, inputs.discovery(dependencies))
+    clock = lap(f"records {len(missing)}", clock)
     cap(folder)
+    lap("cap", clock)
     return reused + [
         {name: value for name, value in result.items() if name not in ("files", "modules")} for result in fresh
     ]
