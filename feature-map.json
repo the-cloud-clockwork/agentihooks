@@ -4449,15 +4449,36 @@
       "id": "swarm-thin-hold",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-thin-check",
-      "behaviour": "An eng or ci task the thin check marked as needing enhancement is held from its lane claim with a reason naming its enhancement plan task, while a sliced, planned, skipped or unchecked task and a plan lane task stay claimable and an earlier hold still names itself first.",
+      "behaviour": "An eng or ci task the thin check marked as needing enhancement is held from its lane claim with a reason naming its enhancement plan task until its enhancement is marked planned, even after it gains a plan slice, while a planned, skipped or unchecked task, a sliced task never marked, and a plan lane task stay claimable and an earlier hold still names itself first.",
       "seam": "scripts.swarm.claim_hold thin reason in hold, holds and urgent, read by scripts.swarm.readiness.claimable",
       "tests": [
         "tests/swarm/test_thin_hold.py::test_a_sliced_planned_skipped_or_unchecked_task_stays_claimable",
         "tests/swarm/test_thin_hold.py::test_a_plan_lane_task_needing_enhancement_stays_claimable_by_planners",
+        "tests/swarm/test_thin_hold.py::test_a_sliced_task_still_needing_enhancement_stays_held_until_marked_planned",
         "tests/swarm/test_thin_hold.py::test_an_eng_or_ci_task_needing_enhancement_is_held_from_its_lane_claim",
         "tests/swarm/test_thin_hold.py::test_a_task_without_a_lane_reads_as_eng_for_the_thin_hold",
         "tests/swarm/test_thin_hold.py::test_the_thin_hold_names_the_enhancement_task_of_its_own_target",
         "tests/swarm/test_thin_hold.py::test_an_earlier_hold_still_names_itself_before_the_thin_hold"
+      ]
+    },
+    {
+      "id": "swarm-thin-task-check",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-thin-check",
+      "behaviour": "The thin task check names each rule a task misses (under 40 words, no done when sentence, no territory, a code or ci task naming no seam) and spares a sliced, plan kind, planned or skipped task; the enhancement section grader names a missing seam under the Seams heading, each missing recon heading, each missing pull request body section and a missing done when sentence.",
+      "seam": "scripts.swarm.thin_task.thin and scripts.swarm.thin_task.section_complete",
+      "tests": [
+        "tests/swarm/test_thin_task.py::test_a_full_task_is_not_thin",
+        "tests/swarm/test_thin_task.py::test_a_description_under_forty_words_is_named_and_forty_pass",
+        "tests/swarm/test_thin_task.py::test_a_description_without_a_done_when_sentence_is_named",
+        "tests/swarm/test_thin_task.py::test_a_task_without_territory_is_named",
+        "tests/swarm/test_thin_task.py::test_code_and_ci_work_without_a_named_seam_is_named",
+        "tests/swarm/test_thin_task.py::test_a_sliced_plan_planned_or_skipped_task_is_never_thin",
+        "tests/swarm/test_thin_task.py::test_a_complete_section_passes",
+        "tests/swarm/test_thin_task.py::test_a_section_without_a_named_seam_is_named",
+        "tests/swarm/test_thin_task.py::test_each_missing_recon_heading_is_named",
+        "tests/swarm/test_thin_task.py::test_each_missing_pull_request_body_section_is_named",
+        "tests/swarm/test_thin_task.py::test_a_section_without_a_done_when_sentence_is_named"
       ]
     },
     {

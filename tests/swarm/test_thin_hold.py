@@ -62,6 +62,15 @@ def test_a_plan_lane_task_needing_enhancement_stays_claimable_by_planners() -> N
 
 
 @pytest.mark.feature("swarm-thin-hold")
+def test_a_sliced_task_still_needing_enhancement_stays_held_until_marked_planned() -> None:
+    found = doc(task("a", enhancement="needed", plan_slice="thin-check"))
+    assert reasons(found, "a") == (HELD, True, HELD)
+    assert readiness.claimable(found["tasks"][0], "eng", view(found)) is False
+    planned = doc(task("a", enhancement="planned", plan_slice="thin-check"))
+    assert readiness.claimable(planned["tasks"][0], "eng", view(planned)) is True
+
+
+@pytest.mark.feature("swarm-thin-hold")
 @pytest.mark.parametrize("lane", ["eng", "ci"])
 def test_an_eng_or_ci_task_needing_enhancement_is_held_from_its_lane_claim(lane: str) -> None:
     found = doc(task("a", lane=lane, enhancement="needed"), task("b", lane=lane))

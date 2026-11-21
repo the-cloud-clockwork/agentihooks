@@ -7,6 +7,8 @@ from typing import Any
 from scripts.swarm.slice_check import CODE_KINDS, done_when, short
 from scripts.swarm_ledger import ledger_kinds
 
+__all__ = ["ENHANCE", "THIN_WORDS", "exempt", "section_complete", "thin"]
+
 THIN_WORDS = 40
 ENHANCE = "enhance-{}"
 EXEMPT = ("planned", "skipped")
@@ -30,10 +32,14 @@ BODY = ("Summary", "Seams", "Tests", "Proof")
 
 
 def thin(task: dict[str, Any]) -> list[str]:
-    """Every rule the task fails, one plain-words line each; none for a sliced, plan, planned or skipped task."""
-    kind: str = ledger_kinds.kind(task)  # pyright: ignore[reportUnknownMemberType]
-    if task.get("plan_slice") or kind == "plan" or task.get("enhancement") in EXEMPT:
+    """Every rule the task fails, one plain-words line each; none for an exempt task.
+
+    A code or ci task names a seam with the word seam or seams, a backticked name, a call shape, a dotted or snake
+    case name, an endpoint path or an agentihooks or python -m command.
+    """
+    if exempt(task):
         return []
+    kind: str = ledger_kinds.kind(task)  # pyright: ignore[reportUnknownMemberType]
     tid, description = task["id"], task.get("description") or ""
     problems: list[str] = []
     if short(description, THIN_WORDS):
@@ -47,16 +53,26 @@ def thin(task: dict[str, Any]) -> list[str]:
     return problems
 
 
+def exempt(task: dict[str, Any]) -> bool:
+    """Whether the task is never thin: it carries a plan slice, is plan kind work, or its enhancement is planned or
+    skipped."""
+    kind: str = ledger_kinds.kind(task)  # pyright: ignore[reportUnknownMemberType]
+    return bool(task.get("plan_slice")) or kind == "plan" or task.get("enhancement") in EXEMPT
+
+
 def section_complete(text: str) -> list[str]:
-    """Every part an enhancement plan section misses: a named seam, each recon heading, each pull request body
-    section and a done when sentence."""
-    problems = [] if NAMED.search(text) else ["The section names no seam."]
-    problems += [f"The section has no {name} heading." for name in RECON if not _heading(text, name)]
-    problems += [f"The section has no {name} pull request body section." for name in BODY if not _heading(text, name)]
+    """Every part an enhancement plan section misses: a seam named under its Seams heading, each recon heading, each
+    pull request body section and a done when sentence."""
+    problems = [] if NAMED.search(_section(text, "Seams") or "") else ["The section names no seam."]
+    problems += [f"The section has no {name} heading." for name in RECON if _section(text, name) is None]
+    problems += [
+        f"The section has no {name} pull request body section." for name in BODY if _section(text, name) is None
+    ]
     if not done_when(text):
         problems.append("The section has no done when sentence.")
     return problems
 
 
-def _heading(text: str, name: str) -> bool:
-    return re.search(rf"^#{{1,6}}[ \t]+{re.escape(name)}[ \t]*$", text, re.I | re.M) is not None
+def _section(text: str, name: str) -> str | None:
+    found = re.search(rf"^#{{1,6}}[ \t]+{re.escape(name)}[ \t]*$(.*?)(?=^#|\Z)", text, re.I | re.M | re.S)
+    return found.group(1) if found and found.group(1).strip() else None
