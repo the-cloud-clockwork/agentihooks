@@ -128,6 +128,8 @@ if (WORKFLOWS / "actions-storage.yml").exists():
     MOVED[("actions-storage.yml", "prune")] = LIGHT
 if (WORKFLOWS / "ci-minutes.yml").exists():
     MOVED[("ci-minutes.yml", "measure")] = LIGHT
+if (WORKFLOWS / "lab-check.yml").exists():
+    MOVED[("lab-check.yml", "post")] = LIGHT
 
 # These exchange a GitHub OIDC token, which the Anton runners have timed out fetching.
 if (WORKFLOWS / "hive-join.yml").exists():

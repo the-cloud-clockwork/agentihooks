@@ -18,7 +18,7 @@ import requests
 from scripts import github_app
 from scripts.ci_lab import relay
 from scripts.ci_lab import scheduler as scheduler_module
-from scripts.ci_lab.checks import API, Checks, Output, name
+from scripts.ci_lab.checks import API, DISPATCHED, Dispatches, Output, name
 from scripts.ci_lab.evidence import head_prefix
 from scripts.ci_lab.objects import LocalObjects
 from scripts.ci_lab.outcomes import FAILED, PASSED
@@ -489,17 +489,15 @@ def test_a_retried_relay_posts_each_check_run_once_then_opens_the_pull_request()
     assert client.hgetall(relay.PENDING) == {}
 
 
-CHECK_RUNS = f"{API}/repos/{SLUG}/check-runs"
+DISPATCHES = f"{API}/repos/{SLUG}/dispatches"
 
 
 def github(sent: list[tuple[str, str]]) -> Callable[..., Mock]:
-    """Answer check run requests as GitHub does: a create gets the next id, an update keeps the id its url names."""
+    """Answer repository dispatch requests as GitHub does, accepted with no content."""
 
     def request(method: str, url: str, **_: Any) -> Mock:
         sent.append((method, url))
-        created = [verb for verb, _url in sent].count("POST")
-        run = created if method == "POST" else int(url.rsplit("/", 1)[1])
-        return answer(201 if method == "POST" else 200, {"id": run})
+        return answer(204)
 
     return request
 
@@ -516,7 +514,7 @@ def started(environ: Mapping[str, str], lab: Scheduler, calls: Calls) -> relay.R
 def test_a_restarted_relay_posts_no_second_completed_check_run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     sent: list[tuple[str, str]] = []
     monkeypatch.setattr(requests, "request", github(sent))
-    monkeypatch.setattr(relay, "Checks", partial(Checks, auth=Token()))
+    monkeypatch.setattr(relay, "Dispatches", partial(Dispatches, auth=Token()))
     client, calls = fake_redis(), Flaky()
     lab = Scheduler(
         client, LocalObjects(tmp_path / "objects"), cast(scheduler_module.Ports, Mock()), Settings(frozenset())
@@ -533,15 +531,15 @@ def test_a_restarted_relay_posts_no_second_completed_check_run(monkeypatch: pyte
     assert started(environ, lab, calls).tick() == [f"retry {HEAD} for {BRANCH}: connection reset"]
     again = started(environ, lab, calls)
     actions = again.tick()
-    assert sent == [("POST", CHECK_RUNS)] * 3
+    assert sent == [("POST", DISPATCHES)] * 3
     assert actions == [f"pushed {HEAD} to {BRANCH}", f"opened {PULL}"]
     stored = lab.grade(state.run)
     assert stored is not None
-    assert stored.runs == {"lab/lint": 1, "lab/unit": 2, "lab/required": 3}
-    assert cast(Checks, again.ports.checks(SLUG)).runs == {
-        (HEAD, "lab/lint", "run-7"): (1, "completed"),
-        (HEAD, "lab/unit", "run-7"): (2, "completed"),
-        (HEAD, "lab/required", "run-7"): (3, "completed"),
+    assert stored.runs == {"lab/lint": DISPATCHED, "lab/unit": DISPATCHED, "lab/required": DISPATCHED}
+    assert cast(Dispatches, again.ports.checks(SLUG)).runs == {
+        (HEAD, "lab/lint", "run-7"): "completed",
+        (HEAD, "lab/unit", "run-7"): "completed",
+        (HEAD, "lab/required", "run-7"): "completed",
     }
     assert client.hgetall(relay.PENDING) == {}
 
@@ -864,10 +862,12 @@ def test_build_wires_the_relay_to_the_scheduler_grades_the_mirror_and_the_lab_ur
     assert pusher.mirror == Mirror(tmp_path / "node", tmp_path / "deep" / "stores" / "acme--widgets", REPO)
     assert (tmp_path / "deep" / "stores").is_dir()
     assert cast(relay.PullRequests, engine.ports.pulls(SLUG)).slug == SLUG
-    assert cast(relay.Checks, engine.ports.checks(SLUG)).repo == SLUG
-    assert cast(relay.Checks, engine.ports.checks(SLUG)).registry is scheduler.registry
+    assert cast(relay.Dispatches, engine.ports.checks(SLUG)).repo == SLUG
+    assert cast(relay.Dispatches, engine.ports.checks(SLUG)).registry is scheduler.registry
     assert engine.ports.checks(SLUG) is engine.ports.checks(SLUG)
-    assert cast(relay.Checks, engine.ports.checks("acme/other")).repo == "acme/other"
+    assert cast(relay.Dispatches, engine.ports.checks("acme/other")).repo == "acme/other"
+    dispatch_token = cast(github_app.GitHubAppAuth, cast(relay.Dispatches, engine.ports.checks(SLUG)).auth)
+    assert dispatch_token.permissions == {"contents": "write"}
     assert engine.grades(HEAD) == []
     again = relay.build({**environ, post_receive.LAB_URL: "http://lab.example/X/"}, scheduler, consumer)
     assert again.lab == "http://lab.example/X"
