@@ -210,7 +210,7 @@ Review each slice against its phase intent, then
   its tasks and the follow ups that really come from the troubleshooting at medium, high or critical priority.
 - The standing master reminders (master loop, drift check, safety nudge, progress sheet, progress email due
   check) are seat crons that `swarm start` and your orchestrator join keep on the scheduler; never recreate
-  them as session crons. `agentihooks cron list` shows them.
+  them as session crons. The agentihooks cron list shows them.
 
 ## Scaling
 

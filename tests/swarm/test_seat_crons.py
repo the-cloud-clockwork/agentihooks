@@ -35,7 +35,26 @@ EMAIL = "13,43 * * * *"
 NUDGE = "17 * * * *"
 CREW = "9,39 * * * *"
 ALWAYS = sorted([LOOP, DRIFT, NUDGE])
+HOOKS = {name: getattr(seat_crons, name) for name in ("on_start", "on_stop", "on_join")}
 env, run = test_cli.env, test_cli.run
+
+
+@pytest.fixture(autouse=True)
+def fake_scheduler(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The real seat cron hooks, over one fake scheduler and swarm store per test in place of this host's."""
+    import fakeredis
+
+    from scripts.events.redis_state import RedisStateStore
+    from scripts.scheduler.core import Scheduler
+    from scripts.swarm.store import RedisStore
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    for name, hook in HOOKS.items():
+        monkeypatch.setattr(seat_crons, name, hook)
+    monkeypatch.setattr(
+        seat_crons, "scheduler", lambda: Scheduler(RedisStateStore(redis, "scheduler"), machine="proof")
+    )
+    monkeypatch.setattr(seat_crons, "swarms", lambda: RedisStore(redis))
 
 
 def aimed(seat: str = SEAT) -> list[dict[str, Any]]:
