@@ -2820,7 +2820,8 @@ or finished job hash still carries to its object store path and removes it from 
 records through the live grade set and the queue's state sets, so the lab's Redis user, which may not
 SCAN, runs it. An unfinished test slot whose batch has no stored manifest gets the batch's slice of the
 packed manifest at its grade's commit. A grade the scheduler writes while the command runs stays as
-the scheduler wrote it. The command prints its counts as
+the scheduler wrote it, manifests included, so run the command again while `grades written meanwhile`
+reads above zero. The command prints its counts as
 JSON: `grade manifests moved`, `job manifests moved`, `grades stripped`, `jobs stripped`,
 `batches sliced`, `batches without a packed manifest` and `grades written meanwhile`.
 

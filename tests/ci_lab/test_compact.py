@@ -154,6 +154,17 @@ def test_compaction_slices_the_manifest_an_unfinished_test_slot_lacks_from_its_g
 
 
 @pytest.mark.feature("lab-manifest-compaction")
+def test_compaction_slices_the_manifest_of_a_test_slot_stored_with_an_empty_one(lab: Callable[..., Run]) -> None:
+    run, manifest, unit = started(lab)
+    legacy(run, unit, "", jobs=False)
+    packed(run, manifest)
+    counts = compact.compact(run.lab.client, run.lab.objects)
+    assert counts == Counter({"grades stripped": 1, "batches sliced": 1})
+    stored = json.loads(run.lab.objects.read(unit_path(unit.kind, unit.key, "manifest")))
+    assert stored == {"tests": {TEST: manifest["tests"][TEST]}}
+
+
+@pytest.mark.feature("lab-manifest-compaction")
 def test_compaction_counts_the_batches_whose_grade_commit_has_no_packed_manifest(lab: Callable[..., Run]) -> None:
     _, first = batches(1)
     _, second = batches(2)
