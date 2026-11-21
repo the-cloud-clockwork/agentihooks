@@ -9622,7 +9622,8 @@
         "tests/swarm/test_readiness.py::test_a_later_urgent_offer_is_taken_before_older_normal_offers_queued_past_the_dedupe_window",
         "tests/swarm/test_readiness.py::test_a_queued_task_that_turned_urgent_is_taken_before_the_older_normal_offer_ahead_of_it",
         "tests/swarm/test_readiness.py::test_a_normal_offer_younger_than_the_dedupe_window_keeps_its_place_ahead_of_a_later_urgent_offer",
-        "tests/swarm/test_readiness.py::test_a_hive_that_cannot_place_the_urgent_offer_still_takes_the_older_normal_offer"
+        "tests/swarm/test_readiness.py::test_a_hive_that_cannot_place_the_urgent_offer_still_takes_the_older_normal_offer",
+        "tests/swarm/test_readiness.py::test_an_urgent_offer_in_another_lane_leaves_the_older_normal_offers_in_place"
       ]
     },
     {

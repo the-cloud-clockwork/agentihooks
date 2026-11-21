@@ -245,6 +245,15 @@ def test_a_hive_that_cannot_place_the_urgent_offer_still_takes_the_older_normal_
     assert delivery is not None and delivery.event.key == "n1"
 
 
+@pytest.mark.feature("ready-urgent-offer-precedes-older-normal-offers")
+def test_an_urgent_offer_in_another_lane_leaves_the_older_normal_offers_in_place(bus: Bus, clock: Clock) -> None:
+    readiness.publish(bus, snapshot(doc([task("n1")])), NOW)
+    clock.now += BusConfig().dedupe_window_ms
+    view = snapshot(doc([task("n1"), task("u", lane="ci", rank="urgent")]))
+    assert readiness.publish(bus, view, clock.now) == ["ready:sw:u:0"]
+    assert queued(bus, "eng", view) == ["n1"]
+
+
 def test_publish_uses_the_given_queue_policy(bus):
     policy = QueuePolicy(max_deliver=2)
     readiness.publish(bus, snapshot(doc([task("a")])), NOW, policy)
