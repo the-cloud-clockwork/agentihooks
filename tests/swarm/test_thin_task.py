@@ -119,6 +119,7 @@ def test_a_task_without_a_kind_reads_as_code() -> None:
         "Seams are listed.",
         "The seam is listed.",
         "It changes `hold` only.",
+        "It changes `README.md` only.",
         "It changes hold(task) only.",
         "It changes claim_hold only.",
         "It changes readiness.ready only.",
@@ -234,6 +235,11 @@ def test_a_section_without_a_done_when_sentence_is_named() -> None:
 
 def test_a_heading_named_inside_a_line_does_not_count() -> None:
     text = SECTION.replace("## Protection plan\n", "The Protection plan is tests first.\n")
+    assert section_complete(text) == ["The section has no Protection plan heading."]
+
+
+def test_a_heading_with_nothing_under_it_counts_as_missing() -> None:
+    text = SECTION.replace("## Protection plan\nTests first.\n", "## Protection plan\n")
     assert section_complete(text) == ["The section has no Protection plan heading."]
 
 

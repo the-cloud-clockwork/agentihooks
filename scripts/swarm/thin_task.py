@@ -75,4 +75,4 @@ def section_complete(text: str) -> list[str]:
 
 def _section(text: str, name: str) -> str | None:
     found = re.search(rf"^#{{1,6}}[ \t]+{re.escape(name)}[ \t]*$(.*?)(?=^#|\Z)", text, re.I | re.M | re.S)
-    return None if found is None else found.group(1)
+    return found.group(1) if found and found.group(1).strip() else None
