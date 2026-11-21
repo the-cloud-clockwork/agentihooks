@@ -4553,6 +4553,17 @@
       ]
     },
     {
+      "id": "inbox-wake-admitted-hive",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2710",
+      "behaviour": "An idle hub admitted legacy Codex pane with a pending item is woken by a nudge command order to the hive that admitted it, from the tick wake pass and from the waker, and nothing is typed into the local herdr.",
+      "seam": "The wake target choice in scripts.inbox.wake",
+      "tests": [
+        "tests/inbox/test_member_mail.py::test_the_wake_pass_orders_the_admitting_hive_to_wake_a_hub_admitted_legacy_codex_pane",
+        "tests/inbox/test_member_mail.py::test_the_waker_orders_the_admitting_hive_to_wake_a_hub_admitted_legacy_codex_pane"
+      ]
+    },
+    {
       "id": "inbox-escalation",
       "origin": "inventory",
       "behaviour": "An unread item is retried three times, then goes to the master seat, then to the operator one window later; an item for the master goes straight to the operator and an unread notice for information is never escalated.",
