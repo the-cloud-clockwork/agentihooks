@@ -5117,7 +5117,7 @@
       "id": "lab-unlisted-module-outside-notes",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2706",
-      "behaviour": "Outside notes for a module-only test unit absent from the stored manifest are retained separately from collected test records. Its following unit key covers every noted outside file, including additions and removals, while notes of another module and unnoted outside files leave its key unchanged.",
+      "behaviour": "Outside notes for a module-only test unit absent from the stored manifest are retained separately from collected test records, while a listed test named in the same note still takes the note into its record. The key of that module's next unit covers every noted outside file, including additions and removals, while notes of another module and unnoted outside files leave its key unchanged.",
       "seam": "scripts.ci_lab.scheduler.StoredManifests loading stored notes followed by scripts.ci_lab.expand_tests.unlisted_units",
       "tests": [
         "tests/ci_lab/test_expand_tests.py::test_a_stored_note_rekeys_an_unlisted_module_only_on_its_outside_files"

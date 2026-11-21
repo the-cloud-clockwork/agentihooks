@@ -422,14 +422,15 @@ def test_a_stored_note_rekeys_an_unlisted_module_only_on_its_outside_files(
     objects = LocalObjects(tmp_path / "objects")
     packed = dep_manifest.pack(copy.deepcopy(MANIFEST))
     objects.write_once(f"{manifest_folder('example/project')}base.json", json.dumps(packed).encode())
-    scheduler.note_outside(objects, repo, "base", (NEW,), ["docs/guide.md"])
+    scheduler.note_outside(objects, repo, "base", (NEW, FIRST), ["docs/guide.md"])
     scheduler.note_outside(
         objects, repo, "base", (NEW,), ["assets/reference.json", "assets/later.txt", "docs/guide.md"]
     )
     scheduler.note_outside(objects, repo, "base", ("tests/test_unrelated.py",), ["assets/other.json"])
     manifest = scheduler.StoredManifests(objects)(repo, ["base"])
     assert manifest is not None
-    assert manifest["tests"] == MANIFEST["tests"]
+    first = {**MANIFEST["tests"][FIRST], "outside": ["docs/guide.md"]}
+    assert manifest["tests"] == {**MANIFEST["tests"], FIRST: first}
     tree = {name: text.encode() for name, text in FILES.items()}
     tree.update(
         {
