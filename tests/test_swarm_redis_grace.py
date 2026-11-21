@@ -1,12 +1,16 @@
 """Tests for the Redis grace window that keeps the controller alive through a short Redis restart."""
 
+import sys
+import textwrap
 import time
 from pathlib import Path
 from types import ModuleType
 from typing import cast
 
 import pytest
+import yaml
 
+from scripts import install
 from scripts.swarm import controller, controller_probes, lease, redis_grace
 from scripts.swarm.store import RedisStore, SwarmError, Unreachable
 
@@ -118,6 +122,30 @@ def test_a_live_probe_that_reaches_redis_clears_the_outage(home, monkeypatch):
 
     assert controller.main(["live"]) == 0
     assert not marker.exists()
+
+
+def api_disabled_liveness_command() -> list[str]:
+    """Exec command of the chart's controller liveness probe when the control API is disabled."""
+    chart = Path(__file__).resolve().parents[1] / "deploy/helm/agentihooks-swarm/templates/controller.yaml"
+    probe = chart.read_text().split("- name: controller\n", 1)[1].split("          livenessProbe:\n", 1)[1]
+    branch = probe.split("            {{- else }}\n", 1)[1].split("            {{- end }}", 1)[0]
+    return yaml.safe_load(textwrap.dedent(branch))["exec"]["command"]
+
+
+@pytest.mark.feature("controller-liveness-rides-out-redis-outage")
+def test_api_disabled_liveness_command_stays_live_while_redis_refuses_inside_the_grace_window(
+    home: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    command = api_disabled_liveness_command()
+    assert command == ["agentihooks", "controller", "live"]
+    monkeypatch.delenv(controller_probes.PORT_ENV, raising=False)
+    monkeypatch.setattr(sys, "argv", command)
+
+    for _ in range(2):
+        with pytest.raises(SystemExit) as probe:
+            install.main()
+        assert probe.value.code == 0
+    assert "live inside the 120s Redis grace window" in capsys.readouterr().out
 
 
 def test_ready_still_fails_while_redis_refuses(home, capsys):

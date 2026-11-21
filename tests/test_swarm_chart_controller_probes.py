@@ -37,7 +37,10 @@ def test_controller_reserves_its_measured_cpu() -> None:
 def test_api_disabled_controller_keeps_its_lease_probe() -> None:
     template = (CHART / "templates/controller.yaml").read_text()
 
-    assert "stale = [slug for slug in held if not lease.current(store, slug)]" in template
+    assert (
+        "            exec:\n              command:\n                - agentihooks\n                - controller\n"
+        "                - live\n"
+    ) in template
 
 
 @pytest.mark.feature("controller-busy-node-probes")
