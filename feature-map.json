@@ -9821,12 +9821,13 @@
       "id": "lab-check-workflow",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2678",
-      "behaviour": "The Lab check workflow runs only on the lab-check repository dispatch, grants checks write and contents read to its one post job, queues every run of one head sha behind the last without cancelling any, and runs the check poster entry with the workflow token.",
-      "seam": ".github/workflows/lab-check.yml parsed as YAML",
+      "behaviour": "The Lab check workflow runs only on the lab-check repository dispatch, grants checks write and contents read to its one post job, queues every run of one head sha behind the last without cancelling any, holds its post job on the shared hosted lane so the branch lane gate passes it, and runs the check poster entry with the workflow token.",
+      "seam": ".github/workflows/lab-check.yml parsed as YAML and graded by scripts.ci_branch_lanes.grade",
       "tests": [
         "tests/test_ci_lab_check.py::test_the_lab_check_workflow_runs_only_on_the_lab_check_dispatch",
         "tests/test_ci_lab_check.py::test_the_post_job_alone_holds_checks_write_beside_contents_read",
         "tests/test_ci_lab_check.py::test_runs_for_one_head_queue_behind_each_other_and_none_is_cancelled",
+        "tests/test_ci_lab_check.py::test_the_post_job_waits_on_the_shared_hosted_lane_and_the_branch_lane_gate_passes_it",
         "tests/test_ci_lab_check.py::test_the_post_step_runs_the_poster_entry_with_the_workflow_token"
       ]
     },

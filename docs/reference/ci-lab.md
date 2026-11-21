@@ -1833,7 +1833,8 @@ conclusion, and posts with the workflow token. `Checks` takes `GITHUB_TOKEN` whe
 the head's check runs of that name and advances the one whose external id is `lab:<sha>`, else
 creates it, stamping a completed run with its completed time. Every dispatch and every rerun for one
 head and name therefore leaves one check run, and the workflow's concurrency group per head sha
-queues runs of that head behind each other without cancelling any. GitHub runs a repository
+queues runs of that head behind each other without cancelling any. Its post job also waits on the
+shared hosted lane group, as the branch lane gate requires of every new workflow job. GitHub runs a repository
 dispatch workflow only from the default branch, so a change to the workflow or the entry takes
 effect once promotion carries it to `main`.
 

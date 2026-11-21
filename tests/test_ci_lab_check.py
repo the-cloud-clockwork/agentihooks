@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 import yaml
 
+from scripts import ci_branch_lanes
 from scripts.ci_lab import checks
 
 pytestmark = pytest.mark.unit
@@ -39,6 +40,16 @@ def test_runs_for_one_head_queue_behind_each_other_and_none_is_cancelled() -> No
         "queue": "max",
         "cancel-in-progress": False,
     }
+
+
+@pytest.mark.feature("lab-check-workflow")
+def test_the_post_job_waits_on_the_shared_hosted_lane_and_the_branch_lane_gate_passes_it() -> None:
+    assert workflow()["jobs"]["post"]["concurrency"] == {
+        "group": ci_branch_lanes.GROUP,
+        "queue": "max",
+        "cancel-in-progress": False,
+    }
+    assert ci_branch_lanes.grade((ROOT / ".github/workflows/lab-check.yml").read_text()) == []
 
 
 @pytest.mark.feature("lab-check-workflow")
