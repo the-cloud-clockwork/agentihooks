@@ -1,6 +1,10 @@
+import ast
+import inspect
 from pathlib import Path
 
 import yaml
+
+from scripts.hive import spoke
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = "scripts/packaging/compose-recovery-drill.sh"
@@ -8,6 +12,13 @@ SCRIPT = "scripts/packaging/compose-recovery-drill.sh"
 
 def drill():
     return (ROOT / SCRIPT).read_text()
+
+
+def stand_in(script: str) -> dict[str, list[str]]:
+    """Each method of the stand in task client in the script's first embedded Python, with its parameter names."""
+    source = script.split("<<'PY'\n", 1)[1].split("\nPY\n", 1)[0]
+    client = next(node for node in ast.parse(source).body if isinstance(node, ast.ClassDef) and node.name == "Tasks")
+    return {node.name: [arg.arg for arg in node.args.args] for node in client.body if isinstance(node, ast.FunctionDef)}
 
 
 def test_the_swarm_image_job_runs_the_recovery_drill_on_the_built_image():
@@ -58,3 +69,11 @@ def test_the_recovery_drill_runs_each_hub_pass_inside_its_state_read_with_a_shor
     assert 'runner.main(["run", "--once"])' in script
     assert "timeout_ms=FETCH_MS" in script
     assert 'found="$(drill pass)"' in script
+
+
+def test_the_recovery_drill_stand_in_takes_the_launch_report_of_every_launch() -> None:
+    script = drill()
+    assert stand_in(script)["launched"] == list(inspect.signature(spoke.Tasks.launched).parameters)
+    final_settle = script.index('"t1": {"ledger": "done", "claim": null, "launches": 1,')
+    gate = script.index("if [[ $unreported != '[]' ]]; then")
+    assert final_settle < gate < script.index("printf 'Recovery drill passed")
