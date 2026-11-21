@@ -9398,6 +9398,17 @@
       ]
     },
     {
+      "id": "ledger-server-follow-wakes-on-its-own-interval",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-follow-loop-latency",
+      "behaviour": "The ledger server's shared follow loop ends each wait at its own quarter second interval even when the scheduler fires timers once a second, so a write another process stores reaches the publisher within the follow interval plus a small margin.",
+      "seam": "scripts.swarm_ledger.ledger_server.follow_shared and scheduled_wait over scripts.scheduler.process_timer.wait",
+      "tests": [
+        "tests/swarm_ledger/test_follow_delivery.py::test_the_shared_follow_waits_at_most_its_own_interval",
+        "tests/swarm_ledger/test_follow_delivery.py::test_a_write_another_process_stores_reaches_the_publisher_within_the_follow_interval"
+      ]
+    },
+    {
       "id": "redis-command-map-caller-argument-typing",
       "origin": "inventory",
       "behaviour": "The Redis command map types an unannotated function, method, staticmethod or constructor parameter as a Redis client when a caller inside the program passes it one, by position or keyword, keeping that typing local to the callee so the same parameter name is not treated as a client everywhere, and a getattr call naming its method with a literal string maps to the Redis command it sends; the receiver fixpoint pass stops once a pass changes nothing.",
