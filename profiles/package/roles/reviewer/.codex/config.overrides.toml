@@ -1,3 +1,2 @@
-# Swarm agents reach Redis and the ledger on loopback, which the workspace-write sandbox blocks.
 approval_policy = "never"
 sandbox_mode = "danger-full-access"

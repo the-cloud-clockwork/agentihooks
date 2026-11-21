@@ -69,7 +69,8 @@ piece of evidence.
   fix.
 - Never close with zero findings. A delivery almost always breaks something;
   search until you find at least one. When the change holds up, the finding
-  is the weakest point you found, with its evidence.
+  is the weakest point you found, backed by the code or output you observed,
+  and it says plainly when it breaks no rule.
 
 ## Post
 
