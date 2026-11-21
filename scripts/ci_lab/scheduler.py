@@ -1506,13 +1506,19 @@ def serve(
     sleep: Callable[[float], None],
 ) -> int:
     """Run passes every interval, forever when passes is zero, ticking the relay after each pass and printing each
-    action of both; return 0."""
+    action of both; a Redis error ends only its pass, which prints one line naming the pass and the error, and the next
+    pass runs on schedule; return 0."""
+    from redis import RedisError
+
     done = 0
     while passes == 0 or done < passes:
-        for action in scheduler.tick(int(clock() * 1000)):
-            print(action, flush=True)
-        for action in relaying.tick():
-            print(action, flush=True)
+        try:
+            for action in scheduler.tick(int(clock() * 1000)):
+                print(action, flush=True)
+            for action in relaying.tick():
+                print(action, flush=True)
+        except RedisError as error:
+            print(f"pass {done + 1} skipped on {type(error).__name__}: {error}", flush=True)
         done += 1
         sleep(interval_s)
     return 0
