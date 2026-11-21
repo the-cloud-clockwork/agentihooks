@@ -203,6 +203,7 @@ SETTABLE = {
     "master-move-grace": "master_move_grace",
     "local-max-agents": "local_max_agents",
     "focus-weight": "focus_weight",
+    "review-share": "review_share",
 }
 LANE_KEYS = {f"{lane}-{key}": (lane, key) for lane in templates.LANES for key in templates.LANE_FIELDS}
 EFFORT_KEYS = {"effort-min": "effort_min", "effort-max": "effort_max"}
@@ -1441,6 +1442,7 @@ def cmd_set(store, args):
                 "masters_step": config.masters_step,
                 "compact_limit": config.compact_limit,
                 "focus_weight": config.focus_weight,
+                "review_share": config.review_share,
                 "autonomy": config.autonomy,
                 "snapshot_minutes": config.snapshot_minutes,
                 "effort_min": config.effort_min,
