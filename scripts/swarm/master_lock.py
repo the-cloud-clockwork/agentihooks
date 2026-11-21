@@ -3,8 +3,9 @@ reads who holds the master seats and keeps it through the launch, so two starter
 a master; a starter that dies mid launch frees it when the lease ends."""
 
 import uuid
-from collections.abc import Generator
-from contextlib import contextmanager
+from collections.abc import Callable, Generator
+from contextlib import AbstractContextManager, contextmanager
+from functools import partial
 from typing import Any
 
 KEY = "master-launch-lock"
@@ -18,19 +19,39 @@ def key(store: Any, slug: str) -> str:
     return store.key(slug, KEY)
 
 
-@contextmanager
-def held(store: Any, slug: str, starter: str) -> Generator[str]:
+def held(store: Any, slug: str, starter: str) -> AbstractContextManager[str]:
     """Hold swarm ``slug``'s master launch lock for ``starter`` while the block runs. Yields an empty string when it
     took the lock, else the refusal naming the starter that holds it; releases only the lock this call took."""
-    token = f"{starter} {uuid.uuid4().hex}"
-    if not store.redis.set(key(store, slug), token, nx=True, px=LEASE_MS):
-        found = store.redis.get(key(store, slug))
-        yield HELD.format(slug=slug, holder=found.rpartition(" ")[0] if found else EXPIRED)
+    return holding(partial(take, store, slug, starter), partial(release, store, slug))
+
+
+@contextmanager
+def holding(take_lock: Callable[[], tuple[str, str]], release_lock: Callable[[str], None]) -> Generator[str]:
+    """Hold the master launch lock ``take_lock`` takes while the block runs. Yields the refusal naming its holder,
+    empty when it took the lock, and hands only the token it took to ``release_lock``."""
+    token, refused = take_lock()
+    if refused:
+        yield refused
         return
     try:
         yield ""
     finally:
-        _release(store, key(store, slug), token)
+        release_lock(token)
+
+
+def take(store: Any, slug: str, starter: str) -> tuple[str, str]:
+    """Take swarm ``slug``'s master launch lock for ``starter``: its token and no refusal, else no token and the
+    refusal naming the starter that holds it."""
+    token = f"{starter} {uuid.uuid4().hex}"
+    if store.redis.set(key(store, slug), token, nx=True, px=LEASE_MS):
+        return token, ""
+    found = store.redis.get(key(store, slug))
+    return "", HELD.format(slug=slug, holder=found.rpartition(" ")[0] if found else EXPIRED)
+
+
+def release(store: Any, slug: str, token: str) -> None:
+    """Release swarm ``slug``'s master launch lock only while it still holds ``token``."""
+    _release(store, key(store, slug), token)
 
 
 def _release(store: Any, name: str, token: str) -> None:

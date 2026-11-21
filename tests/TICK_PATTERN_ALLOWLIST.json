@@ -170,10 +170,7 @@
   "step seat alarm: no effects",
   "step seat alarm: no feature",
   "step seat alarm: no lane",
-  "step seat alarm: no writes",
-  "step tick master: no effects",
-  "step tick master: no lane",
-  "step tick master: no writes"
+  "step seat alarm: no writes"
  ],
  "scripts/tick/steps/observe.py": [
   "step automated cleanup: no effects",

@@ -7,6 +7,7 @@ from dataclasses import dataclass, fields
 from typing import TYPE_CHECKING, Any, cast
 
 from scripts.swarm import lease as leases
+from scripts.swarm import master_lock
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.contracts import STORE_READS, UndeclaredEffect
 
@@ -63,6 +64,16 @@ class StoreCoordination:
 
         deadline.live()
         controller.release_tick_lock(self.store, self.slug, token, caller)
+
+    def take_master_lock(self, starter: str, *, deadline: Deadline) -> tuple[str, str]:
+        """Take the swarm's master launch lock for ``starter``: its token, else the refusal naming the holder."""
+        deadline.live()
+        return master_lock.take(self.store, self.slug, starter)
+
+    def release_master_lock(self, token: str, *, deadline: Deadline) -> None:
+        """Release the swarm's master launch lock only while ``token`` still holds it."""
+        deadline.live()
+        master_lock.release(self.store, self.slug, token)
 
     def configure(self, settings: "SwarmConfig", *, deadline: Deadline) -> "SwarmConfig":
         """Store the settings that differ from the swarm's current config."""

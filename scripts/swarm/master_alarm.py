@@ -2,6 +2,8 @@
 one notice to keep working without the master. A master that binds ends the outage."""
 
 import json
+from collections.abc import Callable
+from typing import Any
 
 from scripts.doctor.priming import TEMPLATE
 from scripts.inbox.seats import seat_address
@@ -37,12 +39,13 @@ def failed(store, slug, text, at) -> None:
     _save(store, slug, {**read(store, slug), "error": text, "at": at})
 
 
-def clear(store, slug) -> list[str]:
+def clear(store: Any, slug: str, send: Callable[[str, str, bool], object]) -> list[str]:
+    """End the outage alarm and tell each told agent and the Doctor master the master is back, as fyi through
+    ``send``."""
     state = drop(store, slug)
     told = [*state.get("told", []), *([seat_address(state["doctor"], MASTER)] if state.get("doctor") else [])]
-    inbox = InboxStore(store.redis)
     for address in told:
-        inbox.send(SENDER, address, BACK.format(slug=slug), fyi=True)
+        send(address, BACK.format(slug=slug), True)
     return [f"told {address} the master is back" for address in told]
 
 
