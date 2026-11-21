@@ -9,7 +9,7 @@ import subprocess
 import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, NamedTuple, NotRequired, TypedDict, cast
+from typing import Any, NamedTuple, NotRequired, TypedDict, TypeGuard, cast
 
 import yaml
 
@@ -58,6 +58,7 @@ TICK_STEPS = "scripts/tick/steps/"
 WORKFLOW = ".github/workflows/test.yml"
 DEFINITIONS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
 FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef)
+COPIES = ("copy", "deepcopy", "dict")
 # Stored test seconds per leg up to the leg limit; a larger selection shares the legs and each runs longer.
 LEG_SECONDS = 180.0
 UNKNOWN_SECONDS = 10.0
@@ -238,17 +239,90 @@ def holders(node: ast.AST, parents: dict[ast.AST, ast.AST], nodes: list[ast.AST]
     return []
 
 
+def stores(name: str, area: list[ast.AST]) -> list[ast.Name]:
+    return [item for item in area if isinstance(item, ast.Name) and item.id == name and isinstance(item.ctx, ast.Store)]
+
+
+def assignment(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> ast.Assign | None:
+    """The assignment a stored name belongs to, through the tuples and lists it is unpacked from."""
+    parent = parents.get(node)
+    while isinstance(parent, ast.Tuple | ast.List):
+        parent = parents.get(parent)
+    return parent if isinstance(parent, ast.Assign) else None
+
+
+def built(
+    value: ast.AST,
+    parents: dict[ast.AST, ast.AST],
+    area: list[ast.AST],
+    functions: dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
+    seen: frozenset[ast.AST],
+) -> bool:
+    """Whether a value is a mapping the module builds itself: a dict display or comprehension, a tuple or copy of
+    them, a name bound only to one, or a call of a module function whose every return is one."""
+    if isinstance(value, (ast.Dict, ast.DictComp)):
+        return True
+    if isinstance(value, ast.Tuple):
+        return all(built(item, parents, area, functions, seen) for item in value.elts)
+    if isinstance(value, ast.Name):
+        bound = stores(value.id, area)
+        return bool(bound) and all(
+            (assigned := assignment(item, parents)) is not None
+            and assigned not in seen
+            and built(assigned.value, parents, area, functions, seen | {assigned})
+            for item in bound
+        )
+    if not isinstance(value, ast.Call):
+        return False
+    func = value.func
+    callee = func.attr if isinstance(func, ast.Attribute) else func.id if isinstance(func, ast.Name) else ""
+    if callee in COPIES and len(value.args) == 1:
+        return built(value.args[0], parents, area, functions, seen)
+    if not isinstance(func, ast.Name) or callee not in functions or functions[callee] in seen:
+        return False
+    inside = list(ast.walk(functions[callee]))
+    returns = [item.value for item in inside if isinstance(item, ast.Return)]
+    return bool(returns) and all(
+        item is not None and built(item, parents, inside, functions, seen | {functions[callee]}) for item in returns
+    )
+
+
+def taken_from(node: ast.AST, parents: dict[ast.AST, ast.AST], nodes: list[ast.AST]) -> list[ast.AST]:
+    """The uses of the document a jobs mapping is taken from: every read of its name where the name is bound, or every
+    call of the function returning it; empty for a mapping the module builds itself and for any other document."""
+    base = node.value if isinstance(node, ast.Subscript) else cast(ast.Attribute, cast(ast.Call, node).func).value
+    functions = {item.name: item for item in nodes if isinstance(item, FUNCTIONS) and item not in parents}
+    if isinstance(base, ast.Call):
+        if built(base, parents, nodes, functions, frozenset()):
+            return []
+        return [call for call in nodes if isinstance(call, ast.Call) and ast.dump(call.func) == ast.dump(base.func)]
+    if not isinstance(base, ast.Name):
+        return []
+    scope = enclosing(base, parents)
+    local: list[ast.AST] = [] if scope is None else list(ast.walk(scope))
+    arguments = {item.arg for item in local if isinstance(item, ast.arg)}
+    area = local if base.id in arguments or stores(base.id, local) else nodes
+    if base.id not in arguments and built(base, parents, area, functions, frozenset()):
+        return []
+    return [
+        read for read in area if isinstance(read, ast.Name) and read.id == base.id and isinstance(read.ctx, ast.Load)
+    ]
+
+
 def read_jobs(nodes: list[ast.AST], parents: dict[ast.AST, ast.AST]) -> set[str] | None:
-    """The jobs the nodes index by constant name, following every name and function result holding a loaded YAML
-    document or a jobs mapping; None when they use a document other than by a constant key, take a jobs mapping any
-    other way or index no job, so they read every job."""
-    documents = [node for node in nodes if loads(node)]
+    """The jobs the nodes index by constant name, following every name and function result holding a document or a
+    jobs mapping. A document is a call of a yaml module load function or what a jobs mapping is taken from, with every
+    other read of its name and call of its function. None when they use a document other than by a constant key, take
+    a jobs mapping any other way or index no job, so they read every job."""
+    pending = [node for node in nodes if takes_jobs(node)]
+    documents = list(
+        dict.fromkeys([*filter(loads, nodes), *(use for node in pending for use in taken_from(node, parents, nodes))])
+    )
     for node in itertools.islice(documents, len(nodes)):
         if job_key(node, parents) is None:
             if not (held := holders(node, parents, nodes)):
                 return None
             documents.extend(item for item in held if item not in documents)
-    pending = [node for node in nodes if takes_jobs(node)]
     jobs: set[str] = set()
     for node in itertools.islice(pending, len(nodes)):
         if (job := job_key(node, parents)) is not None:
@@ -283,8 +357,13 @@ def reached(definition: ast.stmt, bound: dict[str, list[ast.stmt]], uses: dict[a
     return found
 
 
+def is_test_definition(node: ast.AST) -> TypeGuard[ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef]:
+    return isinstance(node, DEFINITIONS) and node.name.startswith("Test" if isinstance(node, ast.ClassDef) else "test")
+
+
 def definition_jobs(source: str) -> dict[str, set[str] | None]:
-    """The Tests workflow jobs each top level test definition reads by constant name, None for one reading every job."""
+    """The Tests workflow jobs each top level test definition reads by constant name, None for one reading every job
+    and for a test definition nested in another top level statement."""
     tree = ast.parse(source)
     walked: dict[ast.stmt, list[ast.AST]] = {}
     parents: dict[ast.AST, ast.AST] = {}
@@ -301,11 +380,17 @@ def definition_jobs(source: str) -> dict[str, set[str] | None]:
         for statement, nodes in walked.items()
     }
     bound = bindings(tree)
-    return {
+    nested: dict[str, set[str] | None] = {
+        node.name: None
+        for statement in tree.body
+        if not isinstance(statement, DEFINITIONS)
+        for node in walked[statement]
+        if is_test_definition(node)
+    }
+    return nested | {
         statement.name: read_jobs([node for item in reached(statement, bound, uses) for node in walked[item]], parents)
         for statement in tree.body
-        if isinstance(statement, DEFINITIONS)
-        and statement.name.startswith("Test" if isinstance(statement, ast.ClassDef) else "test")
+        if is_test_definition(statement)
     }
 
 

@@ -613,6 +613,26 @@ def test_changed_jobs_compares_the_head_against_its_merge_base(repo: Path) -> No
             None,
         ),
         ("def test_a():\n    assert W['jobs']['lint'] and W.items()\n", None),
+        (
+            "def test_a():\n    doc = load_workflow()\n    assert doc['jobs']['lint'] and normalize({'test.yml': doc})\n",
+            None,
+        ),
+        ("def test_a():\n    doc = load_workflow()\n    assert doc['jobs']['lint'] and doc['on']\n", {"lint"}),
+        ("def test_a():\n    assert load_workflow()['jobs']['lint'] and normalize(load_workflow())\n", None),
+        ("def test_a(workflow):\n    assert workflow.get('jobs')['lint'] and normalize(workflow)\n", None),
+        ("def test_a():\n    doc = safe_load(TEXT)\n    assert doc['jobs']['lint'] and normalize(doc)\n", None),
+        (
+            "def test_a():\n    doc = {'jobs': {'lint': {}}}\n    assert doc['jobs']['lint'] and normalize(doc)\n",
+            {"lint"},
+        ),
+        (
+            "def workflow():\n    return {'jobs': {}}\n\n\n"
+            "def pair():\n    base, head = workflow(), workflow()\n    return base, head\n\n\n"
+            "def test_a():\n    base, head = pair()\n    head = copy.deepcopy(base)\n"
+            "    assert head['jobs']['lint'] and grade(base, head)\n",
+            {"lint"},
+        ),
+        ("def test_a():\n    assert [doc['jobs']['lint'] for doc in yaml.safe_load_all(TEXT)]\n", None),
     ],
     ids=[
         "index",
@@ -640,6 +660,14 @@ def test_changed_jobs_compares_the_head_against_its_merge_base(repo: Path) -> No
         "returned-document",
         "returned-document-handed-on",
         "document-items",
+        "helper-document-handed-on",
+        "helper-document-indexed",
+        "called-document-handed-on",
+        "fixture-document-handed-on",
+        "aliased-load-handed-on",
+        "built-document-handed-on",
+        "built-copy-handed-on",
+        "loaded-all",
     ],
 )
 def test_definition_jobs_reads_the_jobs_a_test_indexes_by_name(body: str, read: set[str] | None) -> None:
@@ -652,9 +680,10 @@ def test_definition_jobs_covers_only_test_functions_and_classes() -> None:
         "def helper():\n    return W['jobs']['unit']\n\n\n"
         "class TestBox:\n    def test_a(self):\n        assert W['jobs']['lint']\n\n\n"
         "class Box:\n    pass\n\n\n"
-        "async def test_b():\n    assert W['jobs']['docs']\n"
+        "async def test_b():\n    assert W['jobs']['docs']\n\n\n"
+        "if W:\n\n    def test_c():\n        assert W['jobs']['unit']\n"
     )
-    assert ci_select.definition_jobs(source) == {"TestBox": {"lint"}, "test_b": {"docs"}}
+    assert ci_select.definition_jobs(source) == {"TestBox": {"lint"}, "test_b": {"docs"}, "test_c": None}
 
 
 @pytest.mark.feature("ci-select-workflow-job-readers")
