@@ -67,4 +67,4 @@ def test_main_refuses_to_start_naming_each_missing_github_app_setting(
 
     assert scheduler.main([], environ) == 1
 
-    assert capsys.readouterr().err == f"ci-lab scheduler refuses to start: {missing} is not set\n"
+    assert capsys.readouterr().err == f"ci-lab scheduler refuses to start: {missing} not set\n"

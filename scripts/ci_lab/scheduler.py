@@ -1557,7 +1557,7 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     arguments = parser.parse_args(argv)
     missing = [name for name in GITHUB_APP_SETTINGS if not environ.get(name)]
     if missing:
-        print(f"ci-lab scheduler refuses to start: {', '.join(missing)} is not set", file=sys.stderr)
+        print(f"ci-lab scheduler refuses to start: {', '.join(missing)} not set", file=sys.stderr)
         return 1
     runtime = load_runtime(Path(environ[contract.RUNTIME_CONFIG]))
     client: Any = redis.Redis.from_url(environ[contract.REDIS_URL], decode_responses=True)  # pyright: ignore[reportUnknownMemberType]
