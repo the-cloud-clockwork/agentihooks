@@ -1368,7 +1368,7 @@ A template is a JSON file: a `name`, a `compact_limit`, optional `links`, an opt
 | `cap` | The lane cap the swarm is created with. |
 | `agent` | `claude`, `codex` or `auto`; `claude` and `codex` always spawn that harness; `auto` takes the harness of the account the session rotation picks: the eligible account with the fewest live sessions under its five hour band. Codex is one more account in the rotation, judged on its week alone with the top band. |
 | `model`, `effort` | Passed to init-agent for the lane's agents. An `auto` effort on an eng or ci lane takes the model pick inside the task's size and rank band (see the classifier reference); elsewhere `auto` keeps init-agent's default, `medium`. A model of the other harness, such as `opus` on a Codex agent, launches on the swarm's model for the agent's harness with the lane's effort ([Lane models on the other harness](../reference/classifier.md#lane-models-on-the-other-harness)). The master lane ignores both: a master always launches on the frontier model at high effort for its harness, opus or gpt-6.1-sol. |
-| `kind` | The kind written to a task of this lane that has none when the tick claims it; `auto` writes nothing. |
+| `kind` | The kind the hub admission writes to a task of this lane that has none when it claims the task ([What the claim sets](hives.md#what-the-claim-sets)); `auto` writes nothing. |
 
 `links` is a list of `{"from", "to", "kind"}`. `from` and `to` name a seat (`eng-1`) or a lane (`eng`,
 `ci`); `kind` is `delegates-to` or `can-observe`. A swarm created from the template keeps them. When it
