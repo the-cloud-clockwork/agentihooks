@@ -4198,10 +4198,32 @@
     {
       "id": "swarm-manual-caps",
       "origin": "inventory",
-      "behaviour": "Manual lane caps hold against lane demand.",
+      "behaviour": "Manual lane caps hold against lane demand, except a zero planner cap, which counts as one while plan work is ready.",
       "seam": "agentihooks swarm set max-eng-agents and max-ci-agents",
       "tests": [
         "tests/swarm/test_lane_caps_owner.py::test_manual_caps_hold_against_lane_demand"
+      ]
+    },
+    {
+      "id": "swarm-plan-cap-floor",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-plan-cap-floor",
+      "behaviour": "While plan work is ready the quota decision keeps one planner seat under a stored zero planner cap, in manual scaling and in auto scaling with the room full, taking the seat from the larger engineer or CI ceiling; the dispatcher lane caps keep one planner while a plan lane task is open; swarm start and a set that scales engineers or CI up restore a stored zero planner cap to its default, and a zero typed in the same set holds.",
+      "seam": "scripts.swarm.capacity.autoscaled, scripts.swarm.dispatcher.lane_caps, agentihooks swarm start and agentihooks swarm set",
+      "tests": [
+        "tests/swarm/test_plan_cap_floor.py::test_a_ready_plan_task_gets_a_planner_seat_under_a_stored_zero_manual_cap",
+        "tests/swarm/test_plan_cap_floor.py::test_a_stored_zero_manual_cap_holds_while_no_plan_work_is_ready",
+        "tests/swarm/test_plan_cap_floor.py::test_a_stored_manual_plan_cap_above_zero_is_kept",
+        "tests/swarm/test_plan_cap_floor.py::test_a_ready_plan_task_gets_a_planner_seat_when_live_agents_fill_the_room",
+        "tests/swarm/test_plan_cap_floor.py::test_the_plan_seat_comes_from_the_larger_lane_ceiling",
+        "tests/swarm/test_plan_cap_floor.py::test_the_ceilings_are_unchanged_without_ready_plan_work",
+        "tests/swarm/test_plan_cap_floor.py::test_a_plan_ceiling_already_granted_is_unchanged",
+        "tests/swarm/test_plan_cap_floor.py::test_the_lane_caps_keep_one_planner_while_a_plan_task_is_open",
+        "tests/swarm/test_plan_cap_floor.py::test_the_lane_caps_keep_a_stored_zero_without_open_plan_work",
+        "tests/swarm/test_plan_cap_floor.py::test_the_lane_caps_keep_a_stored_plan_cap_above_one",
+        "tests/swarm/test_plan_cap_floor.py::test_start_restores_a_stored_zero_plan_cap_to_its_default",
+        "tests/swarm/test_plan_cap_floor.py::test_a_scale_up_restores_a_stored_zero_plan_cap",
+        "tests/swarm/test_plan_cap_floor.py::test_a_scale_up_keeps_a_stored_plan_cap_above_zero"
       ]
     },
     {

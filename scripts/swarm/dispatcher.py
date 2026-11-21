@@ -37,7 +37,7 @@ from scripts.swarm import (
     timing,
 )
 from scripts.swarm.ledger_events import Mail
-from scripts.swarm.store import SwarmError
+from scripts.swarm.store import SwarmConfig, SwarmError
 from scripts.swarm_ledger import ledger_rank
 from scripts.swarm_ledger.repository import hierarchy
 
@@ -140,7 +140,7 @@ def queue(doc: dict, fix: str, caps: dict | None = None, weight: int = 50) -> li
     return sorted(lined, key=lambda task_id: _band(known[task_id], fixed, guard))
 
 
-def lane_caps(config) -> dict[str, int]:
+def lane_caps(config: SwarmConfig, doc: dict[str, Any] | None = None) -> dict[str, int]:
     return {"eng": config.max_eng, "ci": config.max_ci, "plan": config.max_plan}
 
 
