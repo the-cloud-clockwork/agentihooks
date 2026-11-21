@@ -104,7 +104,7 @@ def calculate(
             f"; raise held at tick {pending['ticks']} of 3" if waits else "; raise held by the two seat per tick limit"
         )
     if held is not None and demand.get(REVIEW):
-        reason += f"; review share holds {held.seats} seats for {demand[REVIEW]} waiting review tasks"
+        reason += f"; review share holds at least {held.seats} seats for {demand[REVIEW]} waiting review tasks"
     decision: Decision = {
         "ceilings": ceilings,
         "pending_raise": pending,

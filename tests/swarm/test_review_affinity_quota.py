@@ -10,7 +10,7 @@ from tests.swarm.test_capacity import account
 from tests.swarm.test_cli import env as env
 from tests.swarm.test_cli import run
 
-pytestmark = [pytest.mark.unit, pytest.mark.feature("swarm-review-affinity-quota")]
+pytestmark = pytest.mark.unit
 
 SLUG = "sw"
 CODEX_MODEL = default_models.DEFAULTS["codex"]
@@ -85,11 +85,13 @@ def store() -> RedisStore:
     return found
 
 
+@pytest.mark.feature("swarm-review-affinity-quota")
 def test_ceilings_without_a_review_share_are_the_old_ceilings() -> None:
     decision = autoscale.calculate(OLD_LIVE, {"claude": 3, "codex": 2}, 10, OLD_DEMAND, OLD_PREVIOUS, now_ms=0)
     assert decision == OLD_DECISION
 
 
+@pytest.mark.feature("swarm-review-affinity-quota")
 def test_a_review_share_without_review_work_leaves_the_old_ceilings() -> None:
     decision = autoscale.calculate(
         {**OLD_LIVE, "review": 0},
@@ -103,17 +105,20 @@ def test_a_review_share_without_review_work_leaves_the_old_ceilings() -> None:
     assert decision == OLD_DECISION
 
 
+@pytest.mark.feature("swarm-review-affinity-quota")
 def test_waiting_review_tasks_hold_the_review_share_before_the_other_lanes() -> None:
     demand = {"plan": 0, "ci": 0, "eng": 10, "review": 5}
     assert _shared(demand, 30)["ceilings"] == {"plan": 0, "ci": 0, "eng": 7, "review": 3}
     assert _shared(demand, 0)["ceilings"] == {"plan": 0, "ci": 0, "eng": 9, "review": 1}
 
 
+@pytest.mark.feature("swarm-review-affinity-quota")
 def test_no_waiting_review_task_releases_the_share_to_the_other_lanes() -> None:
     decision = _shared({"plan": 0, "ci": 0, "eng": 10, "review": 0}, 30)
     assert decision["ceilings"] == {"plan": 0, "ci": 0, "eng": 10}
 
 
+@pytest.mark.feature("swarm-review-affinity-quota")
 def test_live_reviewers_keep_their_seats_with_no_review_task_waiting() -> None:
     decision = autoscale.calculate(
         {"plan": 0, "ci": 0, "eng": 8, "review": 2},
@@ -125,13 +130,38 @@ def test_live_reviewers_keep_their_seats_with_no_review_task_waiting() -> None:
         review=autoscale.Review(20, CODEX_ONLY),
     )
     assert decision["ceilings"] == {"plan": 0, "ci": 0, "eng": 8, "review": 2}
+    without = autoscale.calculate(
+        {"plan": 0, "ci": 0, "eng": 8},
+        {"claude": 0, "codex": 4},
+        0,
+        {"plan": 0, "ci": 0, "eng": 10},
+        _previous({"plan": 0, "ci": 0, "eng": 8}),
+        now_ms=0,
+    )
+    assert without["ceilings"] == {"plan": 0, "ci": 0, "eng": 8}
 
 
+@pytest.mark.feature("swarm-review-affinity-quota")
+def test_spare_seats_past_the_share_go_to_waiting_review_tasks() -> None:
+    decision = autoscale.calculate(
+        {"plan": 0, "ci": 0, "eng": 2, "review": 0},
+        {"claude": 0, "codex": 10},
+        None,
+        {"plan": 0, "ci": 0, "eng": 0, "review": 5},
+        _previous({"plan": 0, "ci": 0, "eng": 12}),
+        now_ms=0,
+        review=autoscale.Review(20, CODEX_ONLY),
+    )
+    assert decision["ceilings"] == {"plan": 0, "ci": 0, "eng": 2, "review": 5}
+
+
+@pytest.mark.feature("swarm-review-affinity-quota")
 def test_a_codex_only_review_lane_holds_no_claude_seat() -> None:
     assert _codex_full(CODEX_ONLY)["ceilings"] == {"plan": 0, "ci": 0, "eng": 10, "review": 0}
     assert _codex_full(BOTH)["ceilings"] == {"plan": 0, "ci": 0, "eng": 5, "review": 5}
 
 
+@pytest.mark.feature("swarm-review-affinity-quota")
 def test_the_share_never_holds_more_seats_than_review_tasks_wait() -> None:
     decision = autoscale.calculate(
         {"plan": 0, "ci": 0, "eng": 4, "review": 0},
@@ -145,14 +175,16 @@ def test_the_share_never_holds_more_seats_than_review_tasks_wait() -> None:
     assert decision["ceilings"] == {"plan": 0, "ci": 0, "eng": 9, "review": 1}
 
 
+@pytest.mark.feature("swarm-review-affinity-quota")
 def test_the_reason_names_the_held_review_share() -> None:
     reason = _shared({"plan": 0, "ci": 0, "eng": 10, "review": 5}, 30)["reason"]
     assert reason == (
         "Quota seats 4 (claude 0, codex 4); host room 2; ceiling 10 of 10; "
-        "review share holds 3 seats for 5 waiting review tasks."
+        "review share holds at least 3 seats for 5 waiting review tasks."
     )
 
 
+@pytest.mark.feature("swarm-review-affinity-quota")
 def test_autoscaled_without_review_work_keeps_the_old_ceilings_and_the_review_cap() -> None:
     config = SwarmConfig(SLUG, "/repo", max_eng=1, max_ci=0, max_plan=5, max_review=2, lanes={"review": REVIEWER})
     scaled, decision = _autoscaled(config, {"eng": 4, "ci": 1, "plan": 0})
@@ -160,6 +192,7 @@ def test_autoscaled_without_review_work_keeps_the_old_ceilings_and_the_review_ca
     assert (scaled.max_eng, scaled.max_ci, scaled.max_plan, scaled.max_review) == (3, 2, 0, 2)
 
 
+@pytest.mark.feature("swarm-review-affinity-quota")
 def test_autoscaled_holds_the_review_share_and_sizes_the_review_cap() -> None:
     config = SwarmConfig(SLUG, "/repo", max_eng=1, max_ci=0, max_plan=5, lanes={"review": REVIEWER}, review_share=30)
     scaled, decision = _autoscaled(config, {"eng": 4, "ci": 1, "plan": 0, "review": 3})
@@ -167,6 +200,7 @@ def test_autoscaled_holds_the_review_share_and_sizes_the_review_cap() -> None:
     assert (scaled.max_eng, scaled.max_ci, scaled.max_plan, scaled.max_review) == (2, 2, 0, 2)
 
 
+@pytest.mark.feature("swarm-review-affinity-quota")
 def test_a_codex_only_review_lane_is_placed_only_on_codex_while_claude_has_room() -> None:
     decision = _pinned_review(codex_sessions=0)
     assert decision["allocation"]["review"] == {"claude": 0, "codex": 2}
@@ -174,6 +208,7 @@ def test_a_codex_only_review_lane_is_placed_only_on_codex_while_claude_has_room(
     assert decision["placeable"]["claude"] == 3
 
 
+@pytest.mark.feature("swarm-review-affinity-quota")
 def test_a_codex_only_review_lane_waits_while_codex_is_full() -> None:
     decision = _pinned_review(codex_sessions=3)
     assert decision["allocation"]["review"] == {"claude": 0, "codex": 0}
@@ -181,12 +216,29 @@ def test_a_codex_only_review_lane_waits_while_codex_is_full() -> None:
     assert decision["placeable"]["claude"] == 3
 
 
+@pytest.mark.feature("swarm-review-affinity-quota")
+def test_a_pinned_review_lane_leaves_the_old_engineering_and_ci_placement() -> None:
+    lanes = {"ci": {"agent": "claude"}, "review": REVIEWER}
+    config = SwarmConfig(SLUG, "/repo", max_eng=2, max_ci=2, max_plan=0, max_review=2, lanes=lanes)
+    accounts = [account(sessions=1), account("cx", sessions=1, harness="codex")]
+    decision = capacity.calculate(config, accounts, [], {"eng": 2, "ci": 2, "plan": 0, "review": 0})
+    assert decision["allocation"] == {
+        "eng": {"claude": 0, "codex": 2},
+        "ci": {"claude": 2, "codex": 0},
+        "plan": {"claude": 0, "codex": 0},
+        "review": {"claude": 0, "codex": 0},
+    }
+    assert [slot["account"] for slot in decision["placements"]["ci"]] == ["a", "a"]
+
+
+@pytest.mark.feature("swarm-review-affinity-quota")
 def test_the_review_lane_launches_with_its_codex_model_and_xhigh_effort() -> None:
     config = SwarmConfig(SLUG, "/repo", 0, 0, lanes={"review": REVIEWER})
     picked = runtime._lane_default("review", "codex", REVIEWER, config)
     assert picked == model_pick.ModelPick(CODEX_MODEL, "xhigh")
 
 
+@pytest.mark.feature("swarm-review-affinity-quota")
 def test_a_stuck_codex_never_moves_the_review_lane_pin(store: RedisStore) -> None:
     stage = bottleneck_remedy.Stage("launch_failure", 0.5, 0.25, 1, "task hours", CODEX_ONLY)
     moved = bottleneck_remedy._move(SLUG, store.config(SLUG), store, stage)
@@ -194,6 +246,7 @@ def test_a_stuck_codex_never_moves_the_review_lane_pin(store: RedisStore) -> Non
     assert store.config(SLUG).lanes["review"]["agent"] == "codex"
 
 
+@pytest.mark.feature("swarm-review-affinity-quota")
 def test_the_review_share_defaults_to_twenty_and_loads_for_existing_swarms(store: RedisStore) -> None:
     assert SwarmConfig(SLUG, "/repo", 0, 0).review_share == 20
     store.redis.hdel(store.key(SLUG, "config"), "review_share")
@@ -203,11 +256,13 @@ def test_the_review_share_defaults_to_twenty_and_loads_for_existing_swarms(store
 
 
 @pytest.mark.parametrize("share", [-1, 101])
+@pytest.mark.feature("swarm-review-affinity-quota")
 def test_a_review_share_outside_zero_to_one_hundred_is_refused(share: int) -> None:
     with pytest.raises(SwarmError, match="^review share must be a whole number from 0 to 100$"):
         SwarmConfig(SLUG, "/repo", 0, 0, review_share=share)
 
 
+@pytest.mark.feature("swarm-review-affinity-quota")
 def test_swarm_set_takes_the_review_share(env: tuple, capsys: pytest.CaptureFixture[str]) -> None:
     saved, _, _ = env
     run(SLUG, "create", "--repo", "/repo")
