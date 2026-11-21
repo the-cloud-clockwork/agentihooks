@@ -6007,6 +6007,20 @@
       ]
     },
     {
+      "id": "planners-first-rule",
+      "origin": "regression",
+      "ordered_at": "2026-11-21",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-planners-first-rule",
+      "behaviour": "A package rule sends work that is small in context, vague or wider than one pull request to a planner before any engineer or ci agent claims it: the master opens a phase with automatic planning, keeps the plan lane cap above zero, focuses the plan task and never hand writes the spec; the planner writes the whole plan with slice markers; only a small self explanatory change stays standalone; the plan publishing roles and skills point at the rule and no package file makes operator orders or follow ups standalone tasks; the swarm planner skill plans one thin task as well as a phase.",
+      "seam": "profiles/package/rules/planners-first.md, the Plans versus standalone tasks sections of the master and planner roles and skills and the take-master and init-swarm skills, and the swarm planner skill",
+      "tests": [
+        "tests/test_package_planners_first_rule.py::test_rule_sends_thin_vague_or_wide_work_to_a_planner_first",
+        "tests/test_package_planners_first_rule.py::test_plan_publishers_point_at_the_rule_instead_of_the_standalone_line",
+        "tests/test_package_planners_first_rule.py::test_no_package_file_keeps_the_standalone_line",
+        "tests/test_package_planners_first_rule.py::test_planner_skill_plans_one_thin_task_as_well_as_a_phase"
+      ]
+    },
+    {
       "id": "ledger-freeze-controls",
       "origin": "inventory",
       "behaviour": "Every plan, phase, slice and task row carries a freeze button that sends the freeze and disables its rows, and unfreeze sends the clear and restores them.",

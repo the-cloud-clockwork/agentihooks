@@ -69,13 +69,11 @@ def test_planner_guidance_nests_task_headings_with_slice_anchors():
         ROLES.parent / "skills" / "take-master" / "SKILL.md",
     ],
 )
-def test_plan_publishers_distinguish_full_plans_from_standalone_tasks(guidance):
+def test_plan_publishers_distinguish_full_plans_from_standalone_tasks(guidance: Path) -> None:
     text = " ".join(guidance.read_text().split())
     rules = (
         "A full plan is a plan file a master or planner writes and publishes "
         "to the artifacts; every task built from it carries its slice.",
-        "Follow ups, open questions, operator notes and orders the operator "
-        "types or gives are standalone tasks with no plan and no slice.",
         "A standalone task that a master or planner expands because it grew "
         "wide becomes a plan: write and publish the plan with slice markers, "
         "then add its tasks with their slices.",
