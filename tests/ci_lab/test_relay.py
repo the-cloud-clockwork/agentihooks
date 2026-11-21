@@ -563,11 +563,12 @@ REFUSAL = "GitHub App cannot supply scoped contents write and workflows write cr
 
 
 class Unminted(Calls):
-    """Fake relay ports whose App refuses the push token of the widgets repository."""
+    """Fake relay ports whose App refuses the push token of the widgets repository while refusing is set."""
 
     def __init__(self) -> None:
         super().__init__()
         self.repo = ""
+        self.refusing = True
 
     def pusher(self, repo: str) -> "Calls":
         """Return the pusher of a repository and remember the repository."""
@@ -575,8 +576,8 @@ class Unminted(Calls):
         return super().pusher(repo)
 
     def push(self, sha: str, branch: str) -> None:
-        """Refuse the widgets repository's push token and keep every other push."""
-        if self.repo == REPO:
+        """Refuse the widgets repository's push token while refusing is set and keep every other push."""
+        if self.refusing and self.repo == REPO:
             raise github_app.GitAuthRefused(REFUSAL, status_code=422)
         super().push(sha, branch)
 
@@ -593,6 +594,30 @@ def test_a_relay_whose_app_token_is_refused_stays_pending_and_another_repository
     assert actions[-1] == f"opened {PULL}"
     assert relay.Pending(**json.loads(client.hget(relay.PENDING, f"{HEAD} {BRANCH}"))) == first
     assert client.hget(relay.PENDING, f"{OTHER} engineer-2") is None
+
+
+@pytest.mark.feature("lab-relay-app-refusal")
+def test_a_refused_repository_relays_nothing_until_the_post_hold_ends_while_another_repository_relays() -> None:
+    client, calls = fake_redis(), Unminted()
+    start = 1000.0
+    clock = Mock(return_value=start)
+    first = relay.Pending(REPO, HEAD, REF, BRANCH)
+    second = relay.Pending(GADGETS, OTHER, "refs/grade/t2", "engineer-2")
+    found = {HEAD: [grade("success")], OTHER: [replace(grade("success"), repo=GADGETS, head=OTHER)]}
+    ports = replace(calls.ports(), clock=clock)
+    engine = relay.Relay(client, Notices([first], [second]), found.__getitem__, ports, LAB)
+    assert engine.tick() == [f"pending {HEAD} for {BRANCH}", f"held {HEAD} for {BRANCH} for a later pass: {REFUSAL}"]
+    calls.refusing = False
+    calls.log.clear()
+    clock.return_value = start + scheduler_module.POST_HOLD_MS / 1000 - 0.001
+    assert engine.tick()[:2] == [f"pending {OTHER} for engineer-2", f"pushed {OTHER} to engineer-2"]
+    assert ("pusher", REPO) not in calls.log
+    assert relay.Pending(**json.loads(client.hget(relay.PENDING, f"{HEAD} {BRANCH}"))) == first
+    clock.return_value = start + scheduler_module.POST_HOLD_MS / 1000
+    actions = engine.tick()
+    assert actions[0] == f"pushed {HEAD} to {BRANCH}"
+    assert actions[-1] == f"opened {PULL}"
+    assert client.hgetall(relay.PENDING) == {}
 
 
 def test_bus_notices_keep_trusted_grade_ref_heads_with_a_branch_and_acknowledge_every_envelope() -> None:

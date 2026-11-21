@@ -9,6 +9,8 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 
 from scripts.swarm_v2.worker import git_auth
 
+OUTSIDE = "GitHub answered 201 with a token outside that scope"
+
 
 @pytest.fixture
 def app(monkeypatch):
@@ -63,19 +65,21 @@ def test_app_mints_only_the_permitted_repository_and_refreshes_five_minutes_earl
 
 
 @pytest.mark.parametrize(
-    "result",
+    ("result", "answer"),
     [
-        Mock(status_code=403),
-        response(permissions={"contents": "read"}),
-        response(repositories=[{"full_name": "other/private"}]),
-        response(repositories=[]),
+        (Mock(status_code=403), "GitHub answered 403"),
+        (response(permissions={"contents": "read"}), OUTSIDE),
+        (response(repositories=[{"full_name": "other/private"}]), OUTSIDE),
+        (response(repositories=[]), OUTSIDE),
     ],
 )
-def test_app_refuses_unavailable_write_permission_or_another_repository(app, monkeypatch, result):
+def test_app_refuses_unavailable_write_permission_or_another_repository(
+    app: rsa.RSAPrivateKey, monkeypatch: pytest.MonkeyPatch, result: Mock, answer: str
+) -> None:
     monkeypatch.setattr(git_auth.requests, "post", Mock(return_value=result))
     with pytest.raises(git_auth.GitAuthRefused) as refused:
         git_auth.GitHubAppAuth("github.com/example/private").get_token()
-    assert str(refused.value) == "GitHub App cannot supply scoped contents write credentials"
+    assert str(refused.value) == f"GitHub App cannot supply scoped contents write credentials: {answer}"
 
 
 def test_worker_sets_askpass_by_reference_and_disables_stored_helpers(app, monkeypatch):

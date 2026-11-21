@@ -183,7 +183,8 @@ def test_manifest_token_mint_failures_hold_only_transient_heads_and_grade_after_
     assert run.tick(1000) == [f"received {suite.head} on dev"]
     original = {name: json.loads(raw) for name, raw in run.lab.client.hgetall(scheduler.WAITING).items()}
     runs = f"actions/workflows/test.yml/runs?event=push&branch=dev&head_sha={suite.base}"
-    failure = "failed: mint timed out" if status is None else f"token mint failed: {github_app.REFUSED}"
+    refusal = f"GitHub App cannot supply scoped actions read credentials: GitHub answered {status}"
+    failure = "failed: mint timed out" if status is None else f"token mint failed: {refusal}"
     verb = "holding" if held else "cannot expand"
     assert run.tick(31_000) == [f"{verb} {suite.head}: GET {runs} {failure}"]
     get.assert_not_called()
