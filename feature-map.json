@@ -1040,6 +1040,16 @@
       ]
     },
     {
+      "id": "recon-plan-always-travels-with-the-work-folder",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-recon-file-sync-seed",
+      "behaviour": "A task's recon plan, recon.md, travels with its work folder copy: hive sync carries it as a seed beside progress and proof, ahead of every other added file and even when progress and proof fill the seed budget, keeping its latest 128 KiB of JSON, which holds 500 lines of about 260 characters whole, while any other added file over 64 KiB stays behind, so the hub admit reply and the controller mirror hold the recon an agent wrote before its first code edit.",
+      "seam": "ledger_workspace.SEEDS, contents and sync, task_files_key",
+      "tests": [
+        "tests/hive/test_prompt_transport.py::test_a_recon_plan_of_five_hundred_long_lines_syncs_whole_while_another_file_that_size_stays_behind"
+      ]
+    },
+    {
       "id": "work-folder-readers-and-launch-pointers",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-work-folder-record-gaps",
@@ -11757,16 +11767,44 @@
       ]
     },
     {
+      "id": "lab-static-execution-exclusions",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-gates-live-proof",
+      "behaviour": "Static execution exclusions come only from the protected grader catalog, preserve each declared reason, reject malformed policy and retain Actions authority for a job the lab grades only partly. Older protected revisions without a catalog retain their previous plan.",
+      "seam": "scripts.ci_lab.static_exclusions.read and scripts.ci_lab.scheduler.MirrorExpander.expand over protected git objects, with scripts.ci_lab.delivery and scripts.ci_lab_verdict.authority consuming the same protected policy",
+      "tests": [
+        "tests/ci_lab/test_static_exclusions.py::test_the_policy_preserves_each_declared_reason",
+        "tests/ci_lab/test_static_exclusions.py::test_invalid_exclusion_records_are_refused",
+        "tests/ci_lab/test_static_exclusions.py::test_only_the_protected_catalog_can_exclude_units",
+        "tests/ci_lab/test_static_exclusions.py::test_a_missing_protected_catalog_preserves_units_and_ignores_the_head_catalog",
+        "tests/ci_lab/test_static_exclusions.py::test_invalid_protected_policy_refuses_expansion",
+        "tests/ci_lab/test_static_exclusions.py::test_a_partially_graded_job_keeps_its_actions_authority",
+        "tests/ci_lab/test_static_exclusions.py::test_reusable_step_exclusions_remove_the_calling_jobs_authority",
+        "tests/ci_lab/test_static_exclusions.py::test_integrated_grades_use_the_integrated_head_policy",
+        "tests/ci_lab/test_static_exclusions.py::test_actions_and_scheduler_share_the_protected_authority_policy",
+        "tests/ci_lab/test_static_exclusions.py::test_actions_refuses_malformed_protected_exclusions",
+        "tests/ci_lab/test_static_exclusions.py::test_lab_off_keeps_actions_ownership_even_with_invalid_policy"
+      ]
+    },
+    {
       "id": "lab-static-plant-proofs",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/cut-plant-proofs",
       "behaviour": "Deterministic static plant twins preserve the checkout and index, push to the dedicated proof prefix without a lab secret or receiver request, and report only the protected pull request grade when the twin is green and its planted static gate alone is red with the observed named diagnostic.",
       "seam": "scripts.ci_lab.plant_proofs.prepare over git objects and scripts.ci_lab.plant_grade.prove through GitHub pushes and exact grade check runs",
       "tests": [
+        "tests/ci_lab/test_static_plants.py::test_every_discovered_static_gate_has_one_plant_or_one_exclusion",
+        "tests/ci_lab/test_static_plants.py::test_a_gate_plant_is_named_after_its_gate",
+        "tests/ci_lab/test_static_plants.py::test_a_gate_plant_edits_this_tree_once_per_edit",
+        "tests/ci_lab/test_static_plants.py::test_a_planted_gate_reads_only_the_lab_context",
+        "tests/ci_lab/test_static_plants.py::test_an_exclusion_names_what_the_lab_lacks",
         "tests/ci_lab/test_plant_proofs.py::test_a_plant_has_reproducible_commits_and_preserves_the_checkout",
         "tests/ci_lab/test_plant_proofs.py::test_the_lint_fixture_turns_only_import_sorting_red",
         "tests/ci_lab/test_plant_proofs.py::test_the_base_comment_grader_refuses_the_heads_invented_directive",
         "tests/ci_lab/test_plant_grade.py::test_two_pushes_grade_against_one_protected_base_and_ignore_other_grades",
+        "tests/ci_lab/test_plant_grade.py::test_the_command_accepts_a_discovered_catalog_plant",
+        "tests/ci_lab/test_plant_grade.py::test_a_step_plant_uses_its_job_check_and_requires_its_diagnostic",
+        "tests/ci_lab/test_plant_grade.py::test_a_plant_proof_reports_the_green_and_red_grade_run_ids",
         "tests/ci_lab/test_plant_grade.py::test_a_failed_push_cannot_be_used_as_a_proof",
         "tests/ci_lab/test_plant_grade.py::test_a_wrong_red_gate_or_a_green_plant_is_refused",
         "tests/ci_lab/test_plant_grade.py::test_an_incomplete_grade_expires_without_pushing_the_plant",
