@@ -16,7 +16,7 @@ HELPER = '!f() { if test "$1" = get; then printf "username=lab\\npassword=%s\\n"
 GIT_TIMEOUT_S = 60
 RELAYED = re.compile(r"(?:^| )(?:-o ?|--push-option[ =])branch=(\S+)")
 SCHEME = re.compile(r"^[a-z][a-z0-9+.-]*://")
-SCP = re.compile(r"^[^/:]+:")
+SCP = re.compile(r"^[^/:]+:(.*)")
 
 Git = Callable[..., "subprocess.CompletedProcess[str]"]
 
@@ -44,8 +44,8 @@ def owner(url: str) -> str:
         if scheme.group() == "file://":
             return ""
         path = address[scheme.end() :].partition("/")[2]
-    elif SCP.match(address):
-        path = address.partition(":")[2]
+    elif scp := SCP.match(address):
+        path = scp[1]
     else:
         return ""
     segments = [segment for segment in path.split("/") if segment]
