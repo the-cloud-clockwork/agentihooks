@@ -5,9 +5,10 @@ import json
 from collections.abc import Iterable, Mapping
 from typing import Any, NamedTuple, TypeGuard
 from urllib.error import HTTPError
+from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
-from scripts.ci_lab.contract import CONTROL_TOKEN
+from scripts.ci_lab.contract import CONTROL_PORT, CONTROL_TOKEN
 
 TOKEN = CONTROL_TOKEN
 TIMEOUT_S = 3
@@ -23,21 +24,23 @@ class LabError(Exception):
 
 
 class Lab(NamedTuple):
-    """The lab's address and the bearer token its control routes take."""
+    """The lab's control port address and the bearer token its control routes take."""
 
     url: str
     token: str
 
 
 def lab(url: str, environ: Mapping[str, str]) -> Lab:
-    """Return the swarm's lab at ``url`` with this host's token; refuse a swarm without a lab url or a host without a
-    token."""
+    """Return the swarm's lab control routes on the control port of the host at ``url``, with this host's token;
+    refuse a swarm without a lab url or a host without a token."""
     if not url:
         raise LabError("the swarm has no lab url")
     token = environ.get(TOKEN) or ""
     if not token:
         raise LabError(f"{TOKEN} is not set on this host")
-    return Lab(url, token)
+    parts = urlsplit(url)
+    host = parts.netloc.rsplit(":", 1)[0] if parts.port is not None else parts.netloc
+    return Lab(urlunsplit((parts.scheme, f"{host}:{CONTROL_PORT}", "", "", "")), token)
 
 
 def _is_map(value: object) -> TypeGuard[dict[str, Any]]:

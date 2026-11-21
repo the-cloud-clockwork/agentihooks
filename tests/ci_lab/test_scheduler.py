@@ -10,7 +10,7 @@ import urllib.request
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 from unittest.mock import Mock
 
 import jsonschema
@@ -1168,10 +1168,10 @@ def test_listen_serves_leases_capacity_grades_and_metrics_from_one_budgeted_load
     spending = budget.Budget(run.lab.client, lambda: 0, budget.Policy(100.0, {"backfill": 0.5}))
     spending.charge(1, 3600.0)
     routes = lease_api.ControlRoutes(run.lab.client, "tok", lambda: 1000)
-    servers = scheduler.listen(run.engine, run.leases(), routes, spending, lambda: 1000, (0, 0))
+    servers = scheduler.listen(run.engine, run.leases(), routes, spending, lambda: 1000, (0, 0, 0))
     for server in servers:
         threading.Thread(target=server.serve_forever, daemon=True).start()
-    api, exposition = (f"http://127.0.0.1:{server.server_address[1]}" for server in servers)
+    api, control, exposition = (f"http://127.0.0.1:{server.server_address[1]}" for server in servers)
     try:
         capacity = json.loads(_read(f"{api}/capacity"))
         assert capacity["classes"]["promotion"]["pending"] == 1
@@ -1185,7 +1185,7 @@ def test_listen_serves_leases_capacity_grades_and_metrics_from_one_budgeted_load
         job, token = leased[0]["job"], leased[0]["token"]
         signed = json.loads(_read(f"{api}/upload-url?job={job}&token={token}&name=report"))
         assert signed == {"url": run.lab.objects.upload_url(upload_path(job, "report"), 0)}
-        resume = urllib.request.Request(f"{api}/resume", data=b"", headers={"Authorization": "Bearer tok"})
+        resume = urllib.request.Request(f"{control}/resume", data=b"", headers={"Authorization": "Bearer tok"})
         with urllib.request.urlopen(resume, timeout=5) as reply:
             assert json.loads(reply.read()) == {"resumed": []}
         text = _read(f"{exposition}/metrics").decode()
@@ -1212,7 +1212,7 @@ def test_listen_serves_the_control_routes_only_on_the_control_port(lab: Callable
     run = lab({HEAD_A: plan({"lint": (unit(1),)})})
     spending = budget.Budget(run.lab.client, lambda: 0, budget.Policy(100.0, {}))
     routes = lease_api.ControlRoutes(run.lab.client, "tok", lambda: 1000)
-    servers = scheduler.listen(run.engine, run.leases(), routes, spending, lambda: 1000, cast(Any, (0, 0, 0)))
+    servers = scheduler.listen(run.engine, run.leases(), routes, spending, lambda: 1000, (0, 0, 0))
     for server in servers:
         threading.Thread(target=server.serve_forever, daemon=True).start()
     api, control, _ = (f"http://127.0.0.1:{server.server_address[1]}" for server in servers)
@@ -1231,11 +1231,11 @@ def test_listen_serves_the_control_routes_only_on_the_control_port(lab: Callable
 def scrape(run: Run, now: int) -> str:
     spending = budget.Budget(run.lab.client, lambda: now, budget.Policy(100.0, {}))
     routes = lease_api.ControlRoutes(run.lab.client, "tok", lambda: now)
-    servers = scheduler.listen(run.engine, run.leases(), routes, spending, lambda: now, (0, 0))
+    servers = scheduler.listen(run.engine, run.leases(), routes, spending, lambda: now, (0, 0, 0))
     for server in servers:
         threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
-        return _read(f"http://127.0.0.1:{servers[1].server_address[1]}/metrics").decode()
+        return _read(f"http://127.0.0.1:{servers[2].server_address[1]}/metrics").decode()
     finally:
         for server in servers:
             server.shutdown()
@@ -2664,10 +2664,10 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
         routes: lease_api.ControlRoutes,
         spending: Any,
         clock: Any,
-        ports: tuple[int, int],
+        ports: tuple[int, int, int],
     ) -> list[Server]:
         calls["listen"] = (found, leases, routes, spending, clock, ports)
-        return [Server(), Server()]
+        return [Server(), Server(), Server()]
 
     class Thread:
         def __init__(self, target: Callable[[], None], daemon: bool) -> None:
@@ -2758,8 +2758,8 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
     assert spending.client is client and spending.clock() == 1_000_250
     assert spending.policy == budget.Policy(600, {"backfill": 0.5})
     assert built_spending is spending and found.spending is spending
-    assert ports == (8800, 9108)
-    assert calls["thread"] is True and calls["served"] == 2
+    assert ports == (8800, 8801, 9108)
+    assert calls["thread"] is True and calls["served"] == 3
     found, relaying, interval, passes, clock, sleep = calls["serve"]
     assert found is relayed and relaying == "relay"
     assert (found.queue.client, interval, passes, clock, sleep) == (client, 0.5, 3, Clock.time, Clock.sleep)

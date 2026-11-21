@@ -138,10 +138,10 @@ grading passes with a half second sleep, then exit:
 agentihooks ci-lab-scheduler --interval 0.5 --passes 3
 ```
 
-`--passes 0` also runs indefinitely. A finite run starts both listeners, consumes heads, grades
+`--passes 0` also runs indefinitely. A finite run starts all three listeners, consumes heads, grades
 work and ticks the relay just like the service; use `--self-test` for an offline check. Each
 pass prints its scheduler and relay actions to standard output. The CLI has no host or port
-options: it binds all interfaces on 8800 and 9108. The chart or container network controls
+options: it binds all interfaces on 8800, 8801 and 9108. The chart or container network controls
 which clients can reach them.
 
 ### Verify the running service
@@ -222,14 +222,17 @@ environment refuses to start. It exits 1 and names each variable it found. Only 
 
 | Port | Service | Serves |
 |---|---|---|
-| `8800` | scheduler | The lease API workers call, the [control routes](#control-routes) a swarm calls, [`/capacity`](#capacity-document) and [`/grades/<sha>`](#grades-of-a-commit) |
+| `8800` | scheduler | The lease API workers call, [`/capacity`](#capacity-document) and [`/grades/<sha>`](#grades-of-a-commit); the control paths answer 404 here |
+| `8801` | scheduler | The [control routes](#control-routes) a swarm calls, and nothing else |
 | `9108` | scheduler and worker | Prometheus metrics at `/metrics` |
 
 ## Control routes
 
-The scheduler port serves three routes a swarm calls with `Authorization: Bearer <token>`, the token being the
-scheduler's `CI_LAB_CONTROL_TOKEN`. Any other token, or a scheduler without one, answers 401 and changes nothing. A
-head is a pull request head commit or its head branch. The state lives in the lab Redis.
+The control port, `8801`, serves three routes a swarm calls with `Authorization: Bearer <token>`, the token being the
+scheduler's `CI_LAB_CONTROL_TOKEN`. Any other token, or a scheduler without one, answers 401 and changes nothing; any
+other path answers 404. The lease port does not serve them, so a network policy can open the control port to hive
+pods while the lease port stays closed. A head is a pull request head commit or its head branch. The state lives in
+the lab Redis.
 
 | Route | Body | Effect |
 |---|---|---|
@@ -240,9 +243,9 @@ head is a pull request head commit or its head branch. The state lives in the la
 `agentihooks swarm <slug> panic on --fix <url>` marks the fix branches and the recorded fixer branches hotfix and
 pauses `pull_request` except them, printing `lab paused pull request grading except <heads>`; `panic off`, and the
 release of an automatic panic, resume the lab only when that swarm's panic paused it. `agentihooks swarm <slug> merge priority <url>` marks
-the pull request head hotfix and records the lab's reply under `lab` in the queue journal. The swarm reads the lab
-address set with `agentihooks swarm <slug> set lab-url=<address>` and the token from `CI_LAB_CONTROL_TOKEN` on its
-host.
+the pull request head hotfix and records the lab's reply under `lab` in the queue journal. The swarm sends these
+orders to port `8801` on the host of the lab address set with `agentihooks swarm <slug> set lab-url=<address>`, with
+the token from `CI_LAB_CONTROL_TOKEN` on its host.
 
 ## Metrics
 
