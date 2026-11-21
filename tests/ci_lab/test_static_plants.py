@@ -7,7 +7,7 @@ import pytest
 from scripts import ci_wiring
 from scripts.ci_lab.static_gates import REGISTRY, STATIC_JOBS, WORKFLOW, StaticGate, discover
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.feature("lab-static-plant-proofs")]
 ROOT = Path(__file__).resolve().parents[2]
 PLANTS = ROOT / "tests" / "ci_lab" / "plants"
 EXCLUSIONS = ROOT / "tests" / "ci_lab" / "static_gate_exclusions.json"
