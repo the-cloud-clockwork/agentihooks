@@ -33,7 +33,8 @@ def test_an_undecodable_head_is_dead_lettered_and_the_next_head_is_read(payload:
                 payload = b"\xff" + random.Random(0).randbytes(bus._nc.max_payload - 1)
             consumer = bus.lab_heads.consumer(scheduler.DURABLE, scheduler.SUBJECT)
             inbox = scheduler.BusInbox(cast(scheduler.Consumer, consumer), batch=2, timeout_ms=100)
-            published = bus._loop.run(bus._js.publish("ci.lab.head.push", payload, stream=nats.LAB_STREAM))
+            published = bus._loop.run(bus._js.publish("ci.lab.head.push", payload))
+            assert published.stream == nats.LAB_STREAM
             bus.lab_heads.publish("ci.lab.head.push", envelope(good))
             errors = []
             heads = []

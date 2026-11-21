@@ -356,7 +356,7 @@ async def _publish_letter(js: JetStreamContext, letter: Envelope, stream: str, t
 
 async def _hydrate_dead(js: JetStreamContext, message: Msg, letter: Envelope) -> Envelope:
     original = cast(dict[str, Any] | None, cast(dict[str, Any], letter.data).get("event"))
-    if letter.type != "dead_lettered" or not isinstance(original, dict):
+    if letter.type != "dead_lettered" or not isinstance(original, dict) or original.get("type") != "undecodable":
         return letter
     data = cast(dict[str, Any] | None, original.get("data"))
     if not isinstance(data, dict) or "payload_parts" not in data:
