@@ -1878,7 +1878,7 @@ The hub creates the hive buckets; members are not allowed to create them:
 | `spoke-pending` | The launch slot a spoke reserves before it starts an agent. |
 | `hive-presence` | Each hive's heartbeat. |
 | `hive-executions` | What each hive reports about its running executions. |
-| `execution-starts` | Every `execution.started`. The tick and the reconciler use it to tell hub launched agents from tick launched ones. |
+| `execution-starts` | Every `execution.started`. The tick and the reconciler use it to tell hub launched agents from tick launched ones. A spoke writes `null` here before it spawns, so a launch it never acknowledged reads `null`; see [Verify a two replica hub](../reference/deployment-modes.md#verify-a-two-replica-hub) to read each agent's record. |
 | `inbox` | Message send records and delivery claims for each swarm seat inbox. |
 | `account-slots` | Per harness and account, the executions holding one of its sessions and each hive's cap for it. A spoke reserves a slot here before launching, so hives sharing an account stay under its cap. |
 | `hive-slot-accounts` | Per hive, the harness and account pairs it has reported, so its beat renews every slot it holds. |
