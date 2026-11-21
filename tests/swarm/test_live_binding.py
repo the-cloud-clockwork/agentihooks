@@ -820,7 +820,7 @@ def test_a_pane_process_absence_names_this_observer_and_the_agents_hive(
 ) -> None:
     store, _, _ = ticking
     monkeypatch.setattr("socket.gethostname", lambda: "controller")
-    agent = AgentRecord("engineer", "eng", "one", harness="claude", profile="engineer", hive=hive)
+    agent = AgentRecord("engineer", "eng", "one", seat="eng-1@sw", harness="claude", profile="engineer", hive=hive)
     store.put_agent("sw", agent)
     process = {
         "expected": True,
