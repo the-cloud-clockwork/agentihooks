@@ -106,6 +106,10 @@ def test_enhancement_steering_pastes_target_title_description_territory_and_phas
     text = ledger_workspace.steering(ENHANCEMENT, DOC)
 
     block = [
+        "# enhance-t-login: Plan the login task",
+        "",
+        ENHANCEMENT["description"],
+        "",
         "Enhancement target",
         "- Task: t-login: Login page keeps the session",
         "- Phase: p1",
