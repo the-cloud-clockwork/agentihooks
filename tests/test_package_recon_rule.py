@@ -44,7 +44,9 @@ def test_every_package_rule_folds_into_every_role_persona_once(world: dict[str, 
     from scripts.profiles import render
 
     world["install"]._save_state({})
-    persona = (render.render_claude(role) / "CLAUDE.md").read_text()
+    out = render.render_claude(role)
+    assert out is not None
+    persona = (out / "CLAUDE.md").read_text()
 
     rules = sorted(path for path in (PACKAGE / "rules").glob("*.md") if path.name != "README.md")
     assert rules
