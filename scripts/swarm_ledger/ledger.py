@@ -838,6 +838,7 @@ def _task_add_fields(args: argparse.Namespace) -> dict[str, Any]:
         ("plan_url", args.plan),
         ("not_duplicate", args.not_duplicate),
         ("plan_slice", args.plan_slice),
+        ("covers_job", args.covers_job),
     )
     lists.update((key, value) for key, value in options if value)
     if args.kind == "workflow":
@@ -1118,6 +1119,9 @@ def build_parser():
     task.add_argument("--difficulty", choices=ledger_tasks.DIFFICULTIES, help="task size: S, M or L")
     task.add_argument(
         "--not-duplicate", default="", help="why the task differs from the one it resembles; skips the duplicate check"
+    )
+    task.add_argument(
+        "--covers-job", default="", help="the failed dev job this task fixes; the promotion watch files no task for it"
     )
     task.add_argument("--quote", help="task set rank=...: the operator's words, so the rank stays his")
     publish = sub.add_parser("publish-plan")

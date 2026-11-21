@@ -19,6 +19,7 @@ def test_a_task_added_or_set_with_covers_job_keeps_the_job(slug: str) -> None:
     assert next(t for t in state["tasks"] if t["id"] == "c1")["covers_job"] == "lint"
 
 
+@pytest.mark.feature("promotion-covering-task-holds-cause")
 def test_covers_job_must_be_a_string() -> None:
     task = {"op": "task_add", "id": "t", "by": "eng", "task": "c", "title": "Work", "lane": "eng"}
     update = {"op": "task_update", "id": "u", "by": "eng", "item": "tasks/c", "fields": {"covers_job": ["lint"]}}

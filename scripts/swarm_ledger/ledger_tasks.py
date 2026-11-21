@@ -61,6 +61,7 @@ UPDATABLE = (
     "recovery",
     "review_rounds",
     "review_readers",
+    "covers_job",
 )
 BOOL_FIELDS = ("artifact", "follow_up", "workstation")
 HARNESSES = ("", "claude", "codex")
@@ -155,6 +156,8 @@ def check(op):
             raise ValueError("phase, description, workspace and slice must be strings")
         if "not_duplicate" in op and not (isinstance(op["not_duplicate"], str) and op["not_duplicate"].strip()):
             raise ValueError("not_duplicate must say in plain words why the task differs from the one it resembles")
+        if not isinstance(op.get("covers_job", ""), str):
+            raise ValueError("covers_job must be a string naming the failed dev job the task covers")
         check_lists(op)
         check_bools(op)
         check_profile(op)
@@ -481,6 +484,7 @@ def _add(doc, op, ctx):
         "workstation",
         "requires_harness",
         "needs",
+        "covers_job",
         *ledger_kinds.WORKFLOW_FIELDS,
     ):
         if key in op:
