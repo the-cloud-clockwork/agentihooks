@@ -34,6 +34,7 @@ from contextvars import Token, copy_context
 from dataclasses import asdict, dataclass, replace
 from dataclasses import field as dataclass_field
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -1994,7 +1995,7 @@ def origin_repo(run=subprocess.run):
 def publication_command(store: RedisStore, args: argparse.Namespace) -> dict:
     import syslog
 
-    from scripts.swarm import publish
+    from scripts.swarm import pr_wait, publish
 
     agent = _worker(store, args)
     repo = _local_repo(store, args.slug)
@@ -2006,7 +2007,8 @@ def publication_command(store: RedisStore, args: argparse.Namespace) -> dict:
             return publish.prepare(args.slug, agent, repo, ledger)
         if args.direct and args.via != publish.LAB:
             raise SwarmError("publish --direct goes with --via lab")
-        lab = publish.LabRoute(agent.task, args.direct) if args.via == publish.LAB else None
+        pushed = partial(pr_wait.lab_pushed, store.redis, args.slug, agent) if args.via == publish.LAB else None
+        lab = publish.LabRoute(agent.task, args.direct, pushed) if args.via == publish.LAB else None
         return publish.publish(args.slug, agent, repo, ledger, args.message, args.files, lab)
     except SwarmError as exc:
         branch = exc.branch if isinstance(exc, publish.PublicationRefusal) else publish.refusal_branch(Path(repo), task)

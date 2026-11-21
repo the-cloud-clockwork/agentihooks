@@ -3838,14 +3838,17 @@
     {
       "id": "swarm-push-wait",
       "origin": "inventory",
-      "behaviour": "A push by a task agent gets a checked wait on its pull request from the tick, and an agent that never declared a wait is woken on merge. A push of one commit to a lab grade ref with no pull request gets a wait on the lab grade of its head once the swarm's lab holds one, and that agent is woken when the grade closes.",
+      "behaviour": "A push by a task agent gets a checked wait on its pull request from the tick, and an agent that never declared a wait is woken on merge. A push of one commit to a lab grade ref with no pull request gets a wait on the lab grade of its head once the swarm's lab holds one, and that agent is woken when the grade closes. A swarm publish through the lab records its accepted head and declares the checked lab wait before grade polling; the outer publish hook preserves the precise record. The tick keeps that active grade wait ahead of checks on an existing pull request until the grade wait ends.",
       "seam": "The pull request wait hook and tick pass",
       "tests": [
         "tests/swarm/test_pr_wait.py::test_the_tick_sets_a_checked_wait_on_the_pushed_task_pull_request",
         "tests/swarm/test_pr_wait.py::test_an_agent_that_never_runs_swarm_wait_is_woken_on_merge",
         "tests/swarm/test_pr_wait.py::test_the_hook_marks_a_grade_push_with_its_head",
         "tests/swarm/test_pr_wait.py::test_the_tick_sets_a_lab_wait_on_the_grade_of_a_grade_push",
-        "tests/swarm/test_pr_wait.py::test_an_agent_that_pushes_to_the_lab_is_woken_when_its_grade_closes"
+        "tests/swarm/test_pr_wait.py::test_an_agent_that_pushes_to_the_lab_is_woken_when_its_grade_closes",
+        "tests/swarm/test_publish.py::test_lab_publication_records_its_head_and_wait_before_polling",
+        "tests/swarm/test_pr_wait.py::test_outer_publish_preserves_a_precise_head_only_without_a_push_destination",
+        "tests/swarm/test_pr_wait.py::test_only_the_live_lab_wait_for_the_pushed_head_precedes_existing_pr_checks"
       ]
     },
     {
