@@ -15,6 +15,7 @@ from unittest.mock import Mock
 import pytest
 
 if TYPE_CHECKING:
+    from scripts.events.bus import StateStore
     from scripts.scheduler.core import Scheduler
 
 pytestmark = pytest.mark.unit
@@ -1296,8 +1297,10 @@ def test_a_supervisor_that_stopped_on_silence_or_cleanly_is_started_again_on_the
 ) -> None:
     from scripts.scheduler import service
 
+    (tmp_path / service.REFUSAL).touch()
     probe = Mock(side_effect=AssertionError("a scheduler that was not refused got a probe"))
     spawn = _stopped_supervisor(monkeypatch, tmp_path, code, probe)
+    assert not (tmp_path / service.REFUSAL).exists()
     assert service.ensure_running({"AGENTIHOOKS_SWARM_REDIS_URL": "redis://swarm.invalid:6379/3"}) is True
     assert spawn.call_count == 2
     assert spawn.call_args.args == (service._command("supervise"),)
@@ -1363,6 +1366,22 @@ def test_a_probe_that_fails_times_out_or_cannot_start_keeps_a_refused_scheduler_
     assert service.ensure_running({"AGENTIHOOKS_SWARM_REDIS_URL": "redis://swarm.invalid:6379/3"}) is False
     assert spawn.call_count == 1
     assert (tmp_path / service.REFUSAL).is_file()
+
+
+@pytest.mark.feature("scheduler-refused-restart-skip")
+def test_the_probe_returns_the_refused_code_when_the_bus_refuses_its_authorization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nats import errors
+
+    from scripts.scheduler import service
+    from scripts.scheduler.core import Scheduler
+
+    def get(key: str) -> None:
+        raise errors.AuthorizationError()
+
+    monkeypatch.setenv("AGENTIHOOKS_STATE_BACKEND", "bus")
+    assert service.probe(Scheduler(cast("StateStore", SimpleNamespace(get=get)))) == service.REFUSED
 
 
 def test_a_takeover_whose_old_supervisor_will_not_drain_says_so(monkeypatch, tmp_path, capsys):

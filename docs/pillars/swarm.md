@@ -6101,6 +6101,7 @@ WantedBy=default.target
   call, the 15 s `swarm waits` pass included, first runs `python -m scripts.scheduler.service probe` with its own
   environment, which reads the scheduler entries past the ping and exits 4 when that read is refused. A refused,
   timed out or failed probe starts nothing; the first accepted probe removes the file and starts the unit again.
+  A supervisor that starts, a hand start included, removes the file as well.
 - Exit 3 means a proof swarm's runner stopped because its state store did not answer for 300 seconds. Its supervisor
   prints `the scheduler supervisor <pid> stops: its state store did not answer`, starts no new runner and exits 3.
   Exit 3 is not in `RestartPreventExitStatus`, so systemd restarts the supervisor as it does after any other exit.

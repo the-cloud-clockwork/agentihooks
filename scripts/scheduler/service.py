@@ -154,6 +154,7 @@ def supervise(stop: Event | None = None) -> int:
     _take_over()
     with machine_lock("supervisor"):
         _identify(loaded)
+        (runtime_dir() / REFUSAL).unlink(missing_ok=True)
         while not stopped.is_set():
             child = subprocess.Popen(_command("run"), cwd=Path(__file__).resolve().parents[2])
             while child.poll() is None:
