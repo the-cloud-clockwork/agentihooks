@@ -134,8 +134,10 @@ three to four times slower. `Take each shard's coverage as it lands` runs
 `.github/coverage/arrivals.py` from `actions/github-script` with
 `github-token: none`. Every 3 seconds it lists the run's artifacts through the
 results service, the same service `download-artifact` uses for the current run,
-with the job's runtime token. It holds no GitHub token, so it spends no REST
-quota. It downloads each shard's coverage artifact into
+with the job's runtime token. The script holds no GitHub token, so its listing
+spends no REST quota. On a push to `dev` a separate watcher reads job states
+with an App token, as [Queued shards and the wait budget](#queued-shards-and-the-wait-budget)
+describes. It downloads each shard's coverage artifact into
 `.coverage-shards/<artifact name>` when the artifact is listed. While shards
 still run, it flattens each database it holds into `flat-<name>` beside it.
 
@@ -146,9 +148,11 @@ rerun attempt counts only a flake report whose artifact changed since the
 wait's first listing. Coverage that an earlier attempt left counts at once. A
 shard that leaves neither coverage nor a flake report, such as one that lost
 its runner or ran past its job timeout, holds the wait to its deadline, and so
-does listed coverage that never downloads. The wait gives up after 44 minutes.
-It never fails the job itself, so a shard still missing reaches `combine.sh`,
-which names it.
+does listed coverage that never downloads. The wait gives up once 44 minutes
+of its budget are spent. On a push to `dev`, time while every unfinished shard
+job still waits for a runner is not spent; on every other run each minute
+counts. The wait never fails the job itself, so a shard still missing reaches
+`combine.sh`, which names it.
 
 `combine.sh` moves each `flat-<report>` it finds into its combine input and
 flattens only the reports that have no flat copy. After the last shard lands,
@@ -162,6 +166,74 @@ manifest build also runs in the background, starts before the cache restores,
 and is checked after the scan. Moving it off the scan's prerequisite path does
 not make its success optional. Both waits have five minute timeouts.
 
+### Queued shards and the wait budget
+
+On a push to `dev` the twenty unit shards can wait for a runner longer than
+they run. Before [pull request #12636](https://github.com/the-cloud-clockwork/agentihooks/pull/12636)
+the coverage wait counted that queue time like run time, so shards that queued
+for most of 44 minutes ended `sonar` red with no analysis, and the head could
+not promote. On dev push run 44688839519 the wait gave up after 44 minutes and
+1 second, while shard 15 landed 62 minutes and 6 seconds after the wait began.
+
+Three steps around `Take each shard's coverage as it lands` keep queue time
+out of the budget. They run only on a push to `dev` whose scope is not `none`
+and whose source is not test only; the wait step itself runs on every run with
+that scope and source:
+
+| Step | What it does |
+|---|---|
+| `Mint the token that reads this run's job states` | Mints a GitHub App token, step id `jobs-token`, with `actions: read` on this repository. The job's own `permissions` stay `contents: read`. |
+| `Watch whether this run's shard jobs have started` | Starts `.github/coverage/queue_watch.py` in the background with the job name prefix `unit (`, sends its output to `queue-watch.log` and records its process id. |
+| `Take each shard's coverage as it lands` | Runs `arrivals.py`, which reads the watcher's answer from a file. |
+| `Stop the queue watch` | Kills the watcher after the wait, whatever the wait's outcome. |
+
+Every 30 seconds the watcher reads this run attempt's jobs from
+`/repos/<owner>/<repo>/actions/runs/<run>/attempts/<attempt>/jobs?per_page=100`
+and keeps the jobs whose name starts with the prefix. It sets aside each shard
+job whose status is `completed`. If any remaining shard job has a status other
+than `queued`, or none remain, it writes `started` to
+`.sonar-shard-queue-state` in the checkout. If every remaining one is `queued`,
+it writes `queued`. A failed read, or a page with no matching job name, writes
+nothing, and the file keeps its last answer. The watcher stops after 55
+minutes, inside the one hour life of the App token, because every read past
+that life fails authorization. It reads one page of up to 100 jobs; a dev push
+run lists 87, and shard jobs past the first page would not be seen.
+
+`arrivals.py` holds no token and makes no API call for this. It rereads the
+state file every 30 seconds. While its last read was a fresh `queued`, the 3
+second pauses between artifact listings are added back to the budget, so that
+time is not spent. Every other answer spends the time as before:
+
+| State file | Spends the 44 minute budget |
+|---|---|
+| `queued`, written within the last 90 seconds | No |
+| `started`, written within the last 90 seconds | Yes |
+| Last written more than 90 seconds ago | Yes |
+| Missing, unreadable or holding anything else | Yes |
+
+The wait therefore counts wall time whenever the watcher has no fresh answer:
+before the shard jobs appear in the run, while the jobs API fails, when the
+watch steps did not run, and from about 56 minutes after the watcher started.
+The budget pauses only while every unfinished shard job is queued. Once one
+shard job runs, the wait counts again, even while other shards still queue.
+
+Two wall clock limits still bound a dev push. The step's own timeout is 75
+minutes from the step's start, whatever the budget says, and the `sonar` job's
+timeout is 90 minutes. A wait can therefore leave out at most 31 minutes of
+queue time before the step timeout ends it ahead of the budget. The step has
+`continue-on-error`, so after either end `Stop the queue watch` runs and
+`combine.sh` names each shard still missing.
+
+Every run other than a push to `dev` starts no watcher. Its state file is
+missing, so its wait counts wall time: 44 minutes inside a 45 minute step
+timeout and a 60 minute job timeout. The workflow passes the prefix
+`unit-selected (` for a selected scope, but `unit-selected` shards run only on
+pull requests, where no watcher runs.
+
+The watcher costs one jobs API read every 30 seconds from its start until
+`Stop the queue watch` kills it, at most 110 reads, against the App
+installation's rate limit.
+
 ### Workflow configuration
 
 This behavior is automatic in Tests; it introduces no user setting or secret.
@@ -172,6 +244,11 @@ The workflow supplies the merge inputs:
 | `SHARDS` | Full scope uses 20; selected scope uses the selection job's shard count. Every numbered primary shard database must be present and nonempty. |
 | `SCOPE` | `selected` passes `--selected` to the JavaScript LCOV builder and lets the coverage wait take `branch-coverage-3.12-<leg>-<attempt>`. Scope `none` skips the coverage wait and the merge; only `full` builds the dependency manifest. |
 | Download layout | `.coverage-shards/coverage-3.12-<shard>/.coverage`; each shard's optional `reused-coverage/.coverage` is included when nonempty. A `flat-<name>` beside a database is its flat copy from the coverage wait. |
+| Wait budget | `WAIT` in `arrivals.py`: 44 minutes of spent time. `INTERVAL` is the 3 second pause between artifact listings, `JOB_POLL` the 30 second reread of the queue state and `STALE` its 90 second freshness limit. |
+| Wait step timeout | `Take each shard's coverage as it lands`: 75 minutes on a push to `dev`, 45 minutes on every other run. |
+| Job timeout | `sonar`: 90 minutes on a push to `dev`, 60 minutes on every other run. |
+| Queue state file | `.sonar-shard-queue-state`, `QUEUE_STATE` in `arrivals.py` and `STATE` in `queue_watch.py`, holding `queued` or `started`. |
+| Queue watcher | `queue_watch.py` polls every 30 seconds (`INTERVAL`) for at most 55 minutes (`BOUND`), with a 30 second request timeout (`TIMEOUT`). Its prefix is `unit (`, or `unit-selected (` for a selected scope. |
 | Coverage configuration | `.github/coverage/coverage.ini` enables branch coverage and relative filenames and includes `hooks/*` and `scripts/*` in reports. |
 | Scanner report settings | `sonar.python.coverage.reportPaths=coverage.xml` and `sonar.javascript.lcov.reportPaths=lcov.info`. |
 | Scan inputs | `sonar.exclusions` lists `coverage.xml`, `lcov.info`, `sonar-scope.txt` and `.coverage-shards/**`, the files this job writes into the checkout that `.gitignore` does not already drop, so the scan and its secret detection grade repository files only. Sonar still reads both reports from their report paths on disk. |
@@ -196,6 +273,14 @@ host. Supply the actual shard count for that run; the original delivery measured
 twelve shards. Change shard counts, report configuration and scan settings
 through the reviewed workflow and configuration sources together. There is no
 flag to flatten less data or disable a sensor for speed.
+
+Change the wait budget, the timeouts and the watcher settings together. The
+watcher's bound must stay under the App token's one hour life, and the step
+timeout must stay under the job timeout with room for the merge and the scan.
+`tests/test_ci_sonar_workflow.py` pins the job timeout,
+`tests/test_sonar_coverage.py` keeps the watcher's bound under an hour, and
+`tests/test_sonar_arrivals.py` and `tests/test_queue_watch.py` cover the queue
+state answers.
 
 ### Inspect coverage and startup timing
 
@@ -223,6 +308,30 @@ whole job duration are separate measurements. A skipped scan supplies no first
 sensor sample. Exclude superseded analyses from the successful cohort even when
 they reached a sensor before the quality gate reported supersession.
 
+To see how long each unit shard queued, read the run attempt's jobs. A job's
+`created_at` to `started_at` is its queue time, and `started_at` to
+`completed_at` its run time:
+
+```bash
+RUN_ID=44943101327
+gh api "repos/the-cloud-clockwork/agentihooks/actions/runs/$RUN_ID/attempts/1/jobs?per_page=100" \
+  --jq '.jobs[] | select(.name | startswith("unit (")) | [.name, .created_at, .started_at, .completed_at] | @tsv'
+```
+
+The same listing holds the `sonar` job's steps with their start and end
+times, which show whether `Mint the token that reads this run's job states` and
+`Watch whether this run's shard jobs have started` ran. The watcher writes
+nothing to the step log; its errors go to `queue-watch.log` on the runner,
+which no step uploads.
+
+Each `<artifact> landed N s into the wait` line of `Take each shard's coverage
+as it lands` counts spent budget seconds. On a push to `dev` it leaves out the
+paused queue time, so N can be smaller than the time since the step started.
+The `had not ended after 44 minutes` warning also counts budget minutes. On
+run 44943101327 the step started at 20:13:20 UTC and shard 8 landed at
+20:15:56, which its line logged as 75 s into the wait instead of 156: about
+81 seconds of queue time were not spent.
+
 `Wait for the coverage merge` prints the background merge log and coverage
 table. `Wait for the test dependency manifest` prints its separate build log.
 The `sonar-report` artifact retains the XML, LCOV and scanner task receipt for
@@ -239,7 +348,9 @@ gh run download "$RUN_ID" \
 | Failure or symptom | Inspection |
 |---|---|
 | `Missing coverage for shard N` | Read `Take each shard's coverage as it lands` for the artifacts it logged as landed, and compare the expected count with them; an optional reused report does not replace the required primary database. |
-| `Shards N had not ended after 44 minutes` | The coverage wait gave up on shards that never uploaded coverage or a flake report, such as a shard that lost its runner or still waited for one. Read those shard jobs. A rerun of `sonar` alone takes any coverage they left at once and waits to the deadline again for a shard that left none. |
+| `Shards N had not ended after 44 minutes` | The coverage wait spent its 44 minute budget on shards that never uploaded coverage or a flake report, such as a shard that lost its runner. On a pull request it counts the time a shard waited for a runner too. On a push to `dev` that time is left out only while every unfinished shard job is queued. Read those shard jobs' queue and run times. A rerun of `sonar` alone takes any coverage they left at once and waits to the deadline again for a shard that left none. |
+| Dev push wait spent time while its shards queued | The watcher had no fresh answer. Check that `Mint the token that reads this run's job states` and `Watch whether this run's shard jobs have started` ran, whether the shard jobs existed yet by their `created_at`, and whether the queue outlasted the watcher's 55 minutes. A missing or stale state file spends the time by design. |
+| `Take each shard's coverage as it lands` ends at 75 minutes on a dev push | The step timeout ended the wait before its budget ran out, which takes more than 31 minutes of skipped queue time. The job goes on and `combine.sh` names each shard still missing. Read those shard jobs' `created_at` and `started_at`. |
 | Coverage merge fails or ends without a status | Read the log printed by the merge wait for flattening, combine, XML or LCOV errors. Keep the wait and all coverage inputs. |
 | Merge wait times out | Inspect the merge process and runner resource timings; the short background launch step does not measure merge completion. |
 | No browser or node coverage | Inspect the shard capture artifacts and the LCOV diagnostic; retain both input types required for that scope. |
@@ -276,3 +387,16 @@ started the manifest before the cache restores; its first recorded dev run
 The [source issue](https://github.com/the-cloud-clockwork/agentihooks/issues/4145)
 summarizes both changes. These historical measurements establish the delivered
 improvement; current shard counts and runner load can produce different times.
+
+[Pull request #12636](https://github.com/the-cloud-clockwork/agentihooks/pull/12636)
+made the coverage wait skip queued shard time on pushes to `dev`. Dev push
+[run 44688839519](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/44688839519),
+on the earlier code, showed the fault: its wait gave up after 44 minutes and
+1 second while shard 15 landed 62 minutes and 6 seconds after the wait began.
+[Run 44694005666](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/44694005666)
+turned every new wait test red on the code before the change. On dev push
+[run 44943101327](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/44943101327)
+all four steps ran: the twenty shard jobs were created at 20:13:33 UTC and
+started between 20:14:59 and 20:17:13, the last shard landed at 20:18:51 as
+249 s into the wait against 331 s of wall time, and the wait ended with all 20
+shards.
