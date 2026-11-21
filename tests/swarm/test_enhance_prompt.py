@@ -9,6 +9,7 @@ from scripts.swarm import prompt
 from scripts.swarm_ledger import ledger_workspace
 
 GOLDEN = Path(__file__).with_name("phase_plan_prompt.golden")
+ENHANCEMENT_GOLDEN = Path(__file__).with_name("enhancement_prompt.golden")
 PLANNER = "planner@abcdef-0001"
 PHASE_PLAN: dict[str, Any] = {
     "id": "plan-one",
@@ -94,6 +95,13 @@ def test_enhancement_prompt_names_target_failed_rules_and_every_step() -> None:
 
 
 @pytest.mark.feature("planner-enhancement-prompt")
+def test_enhancement_prompt_matches_its_golden_byte_for_byte() -> None:
+    text = prompt.build("demo", "/repo", "plan", PLANNER, ENHANCEMENT)
+
+    assert text == ENHANCEMENT_GOLDEN.read_text(encoding="utf-8")
+
+
+@pytest.mark.feature("planner-enhancement-prompt")
 def test_enhancement_steering_pastes_target_title_description_territory_and_phase() -> None:
     text = ledger_workspace.steering(ENHANCEMENT, DOC)
 
@@ -103,6 +111,8 @@ def test_enhancement_steering_pastes_target_title_description_territory_and_phas
         "- Phase: p1",
         "- Territory: scripts/auth, tests/auth",
         "- Description: Fix login.",
+        "",
+        "Plan evidence",
     ]
     assert "\n".join(block) in text
     assert text.index("Enhancement target") < text.index("Project intent")
@@ -112,13 +122,14 @@ def test_enhancement_steering_pastes_target_title_description_territory_and_phas
 def test_enhancement_steering_names_a_target_missing_from_the_ledger() -> None:
     text = ledger_workspace.steering(ENHANCEMENT, {**DOC, "tasks": [ENHANCEMENT, PHASE_PLAN]})
 
-    assert "- Task: t-login is not in the ledger: block this task." in text
+    block = ["Enhancement target", "- Task: t-login is not in the ledger: block this task.", "", "Plan evidence"]
+    assert "\n".join(block) in text
 
 
 @pytest.mark.feature("planner-enhancement-prompt")
 def test_enhancement_steering_leaves_unset_target_fields_blank() -> None:
-    bare = {"id": "t-login", "phase": "p1"}
+    bare = {"id": "t-login"}
     text = ledger_workspace.steering(ENHANCEMENT, {**DOC, "tasks": [bare, ENHANCEMENT]})
 
-    block = ["Enhancement target", "- Task: t-login: ", "- Phase: p1", "- Territory: none", "- Description: ", ""]
+    block = ["Enhancement target", "- Task: t-login: ", "- Phase: ", "- Territory: none", "- Description: ", ""]
     assert "\n".join(block) in text

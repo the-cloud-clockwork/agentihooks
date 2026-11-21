@@ -72,9 +72,10 @@ def steering(task: dict[str, Any], doc: dict[str, Any] | None = None) -> str:
 
 def target_lines(task: dict[str, Any], tasks: list[dict[str, Any]]) -> list[str]:
     """Return the steering block of an enhancement plan task: its target's id, title, phase, territory, description."""
-    row = next((row for row in tasks if row.get("id") == task["enhances"]), dict[str, Any]())
-    if not row:
+    rows = {row.get("id"): row for row in tasks}
+    if task["enhances"] not in rows:
         return ["Enhancement target", f"- Task: {task['enhances']} is not in the ledger: block this task.", ""]
+    row = rows[task["enhances"]]
     return [
         "Enhancement target",
         f"- Task: {task['enhances']}: {row.get('title', '')}",
