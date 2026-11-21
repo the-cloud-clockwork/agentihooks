@@ -130,7 +130,9 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-zero-base-push",
       "behaviour": "A GitHub new branch push with an all zero before object id emits no lab head, so it never holds a promotion grade or fetches an invalid base. Ordinary branch pushes with real bases still emit heads; pull request events and signed head notices still grade new branch heads independently.",
       "seam": "scripts.ci_lab.webhooks.head_events at push intake",
-      "rules": ["lab-push-zero-base-unchecked"],
+      "rules": [
+        "lab-push-zero-base-unchecked"
+      ],
       "tests": [
         "tests/ci_lab/test_intake.py::test_a_new_branch_push_with_a_zero_before_names_no_head"
       ]
@@ -281,7 +283,9 @@
     },
     {
       "id": "lab-scheduler-release-bound",
-      "rules": ["lab-release-starts-every-waiting-head"],
+      "rules": [
+        "lab-release-starts-every-waiting-head"
+      ],
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2761",
       "behaviour": "One CI lab scheduler pass starts at most eight waiting heads: the most urgent class first (hotfix, pull request, queue, promotion, backfill) and the longest waiting first within a class. A head still in its quiet window or held by a pause takes no place among the eight; a head put back for its manifest fetch takes one, since its expansion ran on the pass. The other heads keep waiting for a later pass, so the same pass still admits the started heads' held units to the queue however many heads wait.",
@@ -323,7 +327,9 @@
     },
     {
       "id": "lab-scheduler-post-refusal",
-      "rules": ["lab-check-post-uncaught-refusal"],
+      "rules": [
+        "lab-check-post-uncaught-refusal"
+      ],
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-check-post-auth-crash",
       "behaviour": "A CI lab scheduler pass whose check run post is refused, by the GitHub App token, by GitHub or by the network, keeps running: it records the refusal as a pass action and keeps grading, and the first pass after a one minute hold posts the check run again. A refused App token or network failure holds the posts of every grade of that repository and of no other repository; a refusal GitHub answers holds only that grade's posts, kept in the grade state so a restarted scheduler keeps the hold, while the other grades keep posting. A grade whose units are all final stays live until every one of its check runs is posted, so a refused completed post closes the grade on the later pass that posts it, and a check run already posted completed is never posted twice. The failed required check of a head that cannot expand is tried once outside the holds, and its refusal is recorded and never retried, since the dropped head keeps no grade.",
@@ -834,7 +840,9 @@
     },
     {
       "id": "hive-join-heartbeat-ends-departed-member-reports",
-      "rules": ["hive-restart-check-ignores-departed-members"],
+      "rules": [
+        "hive-restart-check-ignores-departed-members"
+      ],
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-roll-ghost-agents",
       "behaviour": "After a pod replacement expires its old hive member, the replacement heartbeat ends the departed members running join reports without refreshing them; current and concurrent live members and reports with unknown ownership keep their heartbeats.",
@@ -894,7 +902,9 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-saved-account-pin",
       "behaviour": "A hive spoke launch keeps the account saved in a task's exit handoff or relaunch assignment only while the hub account slot holds or takes a worker seat on it for the launching execution; when the slot refuses, the launch passes no account route and the normal account choice runs, so a successor is never pinned to a full account that refuses every launch with no account slot available.",
       "seam": "HerdrRuntime.spawn for a task with an account slot hive and a saved account, through account_slots.room",
-      "rules": ["hive-saved-account-route-unchecked"],
+      "rules": [
+        "hive-saved-account-route-unchecked"
+      ],
       "tests": [
         "tests/swarm/test_runtime_account_slots.py::test_a_saved_handoff_account_routes_a_hive_launch_only_while_its_account_slot_has_a_worker_seat",
         "tests/swarm/test_runtime_account_slots.py::test_a_quota_repick_routes_its_own_account_without_taking_a_slot_for_the_saved_one",
@@ -911,7 +921,9 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-slot-serve-concurrent",
       "behaviour": "A hub pod answers every account slot request on its own task, so a hive heartbeat that reaches a pod while a slow lane admission holds its handler is answered at once instead of waiting behind the admission past the hive's ten second request timeout.",
       "seam": "NatsBus.serve for the hub slots.serve subscription on slots.*.* in queue group hub-slots",
-      "rules": ["nats-serve-awaits-handler"],
+      "rules": [
+        "nats-serve-awaits-handler"
+      ],
       "tests": [
         "tests/events/test_scoped_nats.py::test_a_slow_admission_does_not_delay_a_heartbeat_answer_on_the_same_hub"
       ]
@@ -3335,7 +3347,9 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-intent-check-held-to-pass-end",
       "behaviour": "An intent check that raises in a tick pass holds its exception for the pass end: the wrapper relay hook answers without raising and leaves the verdict view and checked actions it never got unset, so the tick view step builds the view itself as it does after an intent check that overran its budget, every step that never needed the verdict still runs in that pass, at the relay site and after it, and the pass still ends failed on the intent failure.",
       "seam": "the wrapper relay hook scripts.swarm.cli._Wrapper._judged and the end of scripts.swarm.cli.run_tick, with the intent check step of scripts.tick.steps.host",
-      "rules": ["tick-site-hook-raises-held-step"],
+      "rules": [
+        "tick-site-hook-raises-held-step"
+      ],
       "tests": [
         "tests/tick/test_intent_failure.py::test_a_raising_intent_check_still_runs_the_steps_that_never_needed_it",
         "tests/tick/test_intent_failure.py::test_the_relay_hook_leaves_a_raised_intent_check_to_the_pass_end"
@@ -3372,7 +3386,9 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2596",
       "behaviour": "The wrapper relay site hook answers without waiting for the pass view build, so outbox migration and page relay start as soon as the intent check ends instead of after the build; the kept view wait step at the relay site waits for the build on its own step thread within the pass view bound and stores the view the tick view step takes, and stores none when the intent check stored no verdict.",
       "seam": "the view wait step of scripts.tick.steps.view_wait and the wrapper relay hook scripts.swarm.cli._Wrapper._judged, observed through scripts.swarm.cli.run_tick",
-      "rules": ["tick-site-hook-waits-on-future"],
+      "rules": [
+        "tick-site-hook-waits-on-future"
+      ],
       "tests": [
         "tests/tick/steps/test_view_wait.py::test_outbox_migration_starts_before_a_slow_view_build_ends",
         "tests/tick/steps/test_view_wait.py::test_view_wait",
@@ -3808,7 +3824,9 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2679",
       "behaviour": "A resume order whose process cannot start is answered failed by the hive command poll with the error type, so the hub hands the task to a fresh agent, the poll finishes its batch and the hive beat runs to its end with its join report heartbeat instead of ending the hive run loop.",
       "seam": "scripts.hive.orders.Consumer.poll_commands resume start and scripts.hive.daemon.beat",
-      "rules": ["hive-resume-start-unguarded"],
+      "rules": [
+        "hive-resume-start-unguarded"
+      ],
       "tests": [
         "tests/hive/test_resume_order.py::test_a_resume_order_process_that_cannot_start_is_answered_failed_by_the_command_poll",
         "tests/hive/test_daemon.py::test_a_beat_whose_resume_order_process_cannot_start_still_heartbeats_to_its_end"
@@ -5505,7 +5523,9 @@
         "tests/swarm/test_queue_entry_priority.py::test_cli_queue_entry_supplies_automatic_priority",
         "tests/swarm/test_queue_entry_priority.py::test_watcher_queue_entry_supplies_automatic_priority"
       ],
-      "rules": ["merge-priority-missing-entry-callback"]
+      "rules": [
+        "merge-priority-missing-entry-callback"
+      ]
     },
     {
       "id": "merge-priority-operator-lift",
@@ -5516,7 +5536,9 @@
       "tests": [
         "tests/swarm/test_queue_priority.py::test_operator_lift_is_journaled"
       ],
-      "rules": ["merge-priority-swallowed-lift"]
+      "rules": [
+        "merge-priority-swallowed-lift"
+      ]
     },
     {
       "id": "merge-priority-moves-waiting-entries-at-once",
@@ -7704,7 +7726,9 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/crew-1116073743-fix-1",
       "behaviour": "The controller's master selection refuses a Claude login only at the master floor, its week at or under the primary login reserve or its five hour window at or under the hard five hour handoff, or for a closure the worker drain floor does not explain; a login the fleet capacity rows close at the worker drain floor alone still takes the front door master on its hive master login, a missing claude slot wait names each hosting hive master login at the master floor in whole percent, a master seat two and up is checked against its own seat, and a front door master is warned to hand off only at its master floor.",
       "seam": "HiveLaunch master selection closed set over the fleet AccountRoute capacity rows",
-      "rules": ["master-closed-at-worker-drain-floor"],
+      "rules": [
+        "master-closed-at-worker-drain-floor"
+      ],
       "tests": [
         "tests/hive/test_master_fallback_launch.py::test_the_front_door_master_places_on_its_master_login_closed_only_by_the_worker_drain_floor",
         "tests/hive/test_master_fallback_launch.py::test_the_front_door_master_is_refused_at_the_master_floor_with_that_reason",
@@ -7723,7 +7747,9 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-dead-offer-generation",
       "behaviour": "An offer that dead letters while the hub holds no admission for it advances its open, unclaimed task's claim generation by one, and a delivery that meets a dead claim marker asks the hub for that advance before it is terminated, so the task's next offer carries a fresh claim key and is placed on a later pass instead of being terminated forever.",
       "seam": "Spoke._finish_dead and Spoke._ended through LaneTasks.dead_lettered against Admission.reopen and the ledger task_update claim generation advance",
-      "rules": ["dead-letter-reopen-keeps-generation"],
+      "rules": [
+        "dead-letter-reopen-keeps-generation"
+      ],
       "tests": [
         "tests/swarm/test_events_placement.py::test_a_task_whose_offer_dead_lettered_at_its_current_generation_is_placed_on_a_later_pass",
         "tests/hub/test_admission.py::test_a_dead_lettered_reopen_with_no_admission_held_advances_the_claim_generation",
@@ -7736,7 +7762,9 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-pinned-offers-not-placed",
       "behaviour": "A delivery that meets a withdrawn spoke claim at its task's current claim generation claims the key and asks the hub to admit it again, as a ready claim would, so a task the hub refused once while it stayed open at that generation is placed as soon as the hub admits it; a refusal writes the claim withdrawn again and terms the delivery, with no claim generation advance.",
       "seam": "Spoke._apply routing a withdrawn claim through Spoke._spawn and LaneTasks.request against Admission.admit, observed through lanes.run_once on the root hive",
-      "rules": ["withdrawn-claim-ends-unasked"],
+      "rules": [
+        "withdrawn-claim-ends-unasked"
+      ],
       "tests": [
         "tests/swarm/test_events_placement.py::test_a_workstation_task_whose_claim_was_withdrawn_at_its_current_generation_is_placed_on_the_root_hive",
         "tests/hive/test_spoke.py::test_an_offer_meeting_a_withdrawn_claim_asks_the_hub_again_and_launches_once_admitted",
@@ -7749,7 +7777,9 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-forced-master-slot-reservation",
       "behaviour": "A forced front door master's hive launch order goes out on a token slot the hive caps at zero or whose seats are all held, and its acknowledgement writes the slot's live row so the master counts against the account; an unforced master on that slot is still refused as account reservation is full.",
       "seam": "HiveLaunch.send_order against LaunchSlots.reserve_reading and LaunchSlots.acknowledge",
-      "rules": ["forced-master-slot-reservation-refused"],
+      "rules": [
+        "forced-master-slot-reservation-refused"
+      ],
       "tests": [
         "tests/hive/test_master_fallback_launch.py::test_a_forced_front_door_master_passes_a_refused_launch_slot_reservation",
         "tests/hive/test_master_fallback_launch.py::test_an_unforced_front_door_master_is_still_refused_at_a_full_launch_slot_reservation"
@@ -7865,7 +7895,9 @@
       "id": "placement-lock-steps-on-one-placement-worker",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2522",
-      "rules": ["tick-step-takes-placement-lock-in-its-call"],
+      "rules": [
+        "tick-step-takes-placement-lock-in-its-call"
+      ],
       "behaviour": "The eight tick steps that place agents (quota notice, codex hook order, rank pass, master down, tick master, master scale, seat alarm, dispatch seat) declare the host placement lock; the step runs its call holding tick.PLACING and the engine runs it on the pass's one placement worker, so lock taking steps run one at a time and a step waiting for the lock never holds one of the pass's shared step workers while an ordinary ready step waits for one.",
       "seam": "CallStep and WriteStep placing declaration and run, pool.Pass.executor and its placement worker, engine._eager submission",
       "tests": [
@@ -7882,7 +7914,9 @@
       "id": "kept-placing-steps-first-on-the-placement-worker",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-master-late",
-      "rules": ["kept-step-queues-behind-ready-sibling"],
+      "rules": [
+        "kept-step-queues-behind-ready-sibling"
+      ],
       "behaviour": "A sweep of the pass scheduler submits its ready kept steps before its other ready steps, so the kept critical steps master down and tick master, ready in the same sweep as quota notice, run first on the pass's one placement worker instead of queueing behind quota notice's whole body and starting twenty to ninety seconds late.",
       "seam": "engine._eager submission order through engine._kept_first, pool.Pass.placer",
       "tests": [
@@ -8240,7 +8274,9 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-pane-attach-refused",
       "behaviour": "A native Codex viewer started on a hive pane while its execution is admitted, reading starting with an execution id but no harness or transport yet, keeps waiting until the Codex supervisor publishes harness codex and the app server transport and then attaches to the connected thread, instead of refusing with no app server and dropping the pane to a shell; a running execution with no harness and a classified Codex execution without the app server transport still refuse.",
       "seam": "scripts.codex_session.attach.recorded read through attach.wait_attachable",
-      "rules": ["codex-attach-before-classification"],
+      "rules": [
+        "codex-attach-before-classification"
+      ],
       "tests": [
         "tests/codex_session/test_attach.py::test_an_admitted_execution_waits_for_its_harness_and_then_attaches",
         "tests/codex_session/test_attach.py::test_a_classified_or_running_execution_without_an_app_server_still_refuses"
@@ -8559,7 +8595,7 @@
       "id": "launch-hotfix-promotion",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-stall-hotfix-route",
-      "behaviour": "A dev push of a pull request labelled launch hotfix when it entered the merge queue, whose own Gate — Required passed on its head promotes once the unit suite passes, even when unrelated promotion checks are red, and the red run still files its fixer tasks; an unlabelled pull request, a pull request whose own grade did not pass or a red unit suite never takes the route.",
+      "behaviour": "A dev push of a pull request labelled launch hotfix when it entered the merge queue, whose own Gate \u2014 Required passed on its head promotes once the unit suite passes, even when unrelated promotion checks are red, and the red run still files its fixer tasks; an unlabelled pull request, a pull request whose own grade did not pass or a red unit suite never takes the route.",
       "seam": "the Tests workflow launch-hotfix job through scripts.ci_launch_hotfix, the promote job condition, and promotion_watch.refresh",
       "tests": [
         "tests/contracts/promotion/test_workflow.py::test_a_launch_hotfix_promotes_past_a_red_promotion_dependency_in_hotfix_mode",
@@ -10248,7 +10284,9 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-head-fetch-error-cap",
       "behaviour": "The CI lab scheduler caps how long a held head waits on a manifest fetch GitHub never answers or answers with a server error: it counts those fetches in a row in the head's waiting entry, holds the head again after each of the first nine, and on the tenth drops the head and posts one completed required check run with conclusion failure, named lab-shadow/required, whose summary names the head, its base, the ten unanswered fetches and the last error, as for any other expansion failure. A fetch still running and the same head arriving again keep the count; a new head of the lane and a started grade clear it.",
       "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis with an expander that raises an unanswered or pending fetch on the passes a test scripts and expands on any later pass, and a recording Poster behind scripts.ci_lab.scheduler.Ports.checks, read through the actions, the posts and the waiting hash",
-      "rules": ["lab-unanswered-fetch-holds-forever"],
+      "rules": [
+        "lab-unanswered-fetch-holds-forever"
+      ],
       "tests": [
         "tests/ci_lab/test_scheduler_unexpanded.py::test_a_held_head_whose_manifest_fetch_gets_ten_server_errors_in_a_row_posts_a_failed_check_naming_them",
         "tests/ci_lab/test_scheduler_unexpanded.py::test_a_held_heads_unanswered_fetches_count_in_a_row_until_a_new_head_or_a_start_clears_them"
@@ -10729,7 +10767,9 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2787",
       "behaviour": "When the agents reap step judges a hub admitted agent whose work ended and the execution stop answers ended or unknown, it asks whether the hub lifecycle can still settle the exit. Once no hive recorded a start for the agent, or the spoke claim of the started execution is gone, holds another launch's revision or has left the launching, started and exiting states, the tick retires and drops the agent the way it retires an ended legacy agent, in one pass, freeing its seat, and once the store took the drop it returns the agent's hive slot as the lifecycle would. While the claim still holds its launch, the agent is kept for the lifecycle, a start of another execution keeps it, and a bus that cannot be read keeps it and is said on stderr.",
       "seam": "agents._reap through _reap_admitted and _stop_ended, reconciler.settled_admitted and execution_stop.settled, then tick._retire_ended",
-      "rules": ["admitted-ended-stop-keeps-settled-agent"],
+      "rules": [
+        "admitted-ended-stop-keeps-settled-agent"
+      ],
       "tests": [
         "tests/swarm/test_events_claim_refunds.py::test_an_admitted_agent_on_a_done_task_whose_stop_answers_ended_leaves_its_seat_once_the_lifecycle_cannot_settle_it",
         "tests/swarm/test_events_claim_refunds.py::test_an_ended_admitted_agent_is_retired_only_once_its_stop_answers_ended_or_unknown_and_its_claim_settled",
@@ -10763,7 +10803,9 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-free-stop-guards",
       "behaviour": "When the agents reap step frees a legacy launched agent, one whose hive recorded no start, for a revoked account, repeated content refusals or a stuck provider error, the agent is retired and dropped as before and no execution stop is sent to any hive.",
       "seam": "_free_revoked, _free_refused and _free_stuck on an agent the hub reconciler counts as legacy",
-      "rules": ["tick-free-skips-execution-stop"],
+      "rules": [
+        "tick-free-skips-execution-stop"
+      ],
       "tests": [
         "tests/swarm/test_events_claim_refunds.py::test_a_freed_legacy_agent_sends_no_stop_and_is_still_retired"
       ]
@@ -11387,7 +11429,9 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2537",
       "behaviour": "A Claude only lane model on a Codex launch resolves to the configured Codex model, or the Codex launch default when none is configured, before an explicit effort returns or an automatic effort picks; Claude and compatible Codex choices retain their model and effort.",
       "seam": "model_pick.pick for Codex and Claude lanes with an explicit or automatic effort",
-      "rules": ["lane-model-before-harness"],
+      "rules": [
+        "lane-model-before-harness"
+      ],
       "tests": [
         "tests/swarm/test_model_pick.py::test_lane_model_matches_harness_before_explicit_effort_returns",
         "tests/swarm/test_model_pick.py::test_a_claude_lane_model_with_no_configured_codex_model_takes_the_codex_launch_model",
@@ -11413,7 +11457,9 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-step-failure-isolated",
       "behaviour": "A tick step that raises holds its exception for the pass to end on and shuts only the steps that need it, directly or through another, while every other step of the pass runs; an inbox exits sweep that raises in every pass still lets reap retire finished agents and the master step spawn the front door successor, and the pass still ends failed on the first exception a step raised.",
       "seam": "scripts.tick.steps.hold and fell, the held step wrappers of the observe, masters, tasks and host steps, and scripts.tick.sites.TickSites.shut, replayed through scripts.swarm.tick.tick and scripts.swarm.cli.run_tick",
-      "rules": ["tick-held-exception-shuts-every-step"],
+      "rules": [
+        "tick-held-exception-shuts-every-step"
+      ],
       "tests": [
         "tests/tick/test_step_failure.py::test_a_raising_exits_sweep_still_runs_reap_and_the_master_step",
         "tests/tick/test_step_failure.py::test_a_fenced_pass_with_a_raising_exits_sweep_runs_reap_and_the_master_step_and_ends_failed",
@@ -11430,7 +11476,9 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-nats-replicas-spread-nodes",
       "behaviour": "A provisioning bus creates every JetStream stream and key value bucket at the replica count of AGENTIHOOKS_BUS_REPLICAS, default one, and raises each existing stream holding fewer replicas in place with its messages, buckets outside the state limits included; a bus at a lower count keeps a stream's higher count, and any other configuration difference still fails the create.",
       "seam": "scripts.events.config.BusConfig.replicas, scripts.events.nats_replicas.create and raise_all, observed through scripts.events.nats.open_bus with scoped views, queues and state buckets on a three server JetStream cluster",
-      "rules": ["bus-stream-created-without-replicas"],
+      "rules": [
+        "bus-stream-created-without-replicas"
+      ],
       "tests": [
         "tests/events/test_nats_replicas.py::test_a_replicated_bus_creates_every_stream_and_bucket_at_its_replica_count",
         "tests/events/test_nats_replicas.py::test_existing_single_replica_streams_and_buckets_are_raised_in_place_keeping_their_messages",
@@ -11445,7 +11493,9 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-steps-abandoned",
       "behaviour": "While fleet panic is on, the CI cancel sweep of each tick pass reads a merged fix pull request once, keeps its state under the fleet panic keys until panic releases and spares that fix's runs from the kept state, and reads every open fix pull request on every sweep; a kept row whose fields no longer match the change state is read again, and a sweep run without the swarm store, as the panic button runs it, reads every fix.",
       "seam": "scripts.swarm.panic.fix_state, read by scripts.swarm.panic.cancel_runs with the swarm store scripts.swarm.panic.tick_pass passes, and cleared by scripts.swarm.panic.release",
-      "rules": ["panic-sweep-rereads-merged-fixes"],
+      "rules": [
+        "panic-sweep-rereads-merged-fixes"
+      ],
       "tests": [
         "tests/swarm/test_panic.py::test_tick_pass_reads_a_merged_fix_once_and_an_open_fix_every_sweep",
         "tests/swarm/test_panic.py::test_cancel_runs_without_a_store_reads_every_fix_every_sweep",
@@ -11861,7 +11911,9 @@
     },
     {
       "id": "hub-admission-hive-local-held",
-      "rules": ["hub-hive-local-refusal-terminates-offer"],
+      "rules": [
+        "hub-hive-local-refusal-terminates-offer"
+      ],
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2740",
       "behaviour": "An events admission refused for the asking hive being draining, on an old release, off the root for a workstation task, outside a task hive pin or missing required capabilities answers held so another eligible hive can receive the same offer; task refusals remain terminal.",
@@ -12084,7 +12136,9 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-swarm-tracks-session-until-killed",
       "behaviour": "Starting a successor execution on a seat keeps a finished predecessor listed with its placement, while the tick session models step and the master front door count pass over a finished agent whose seat lists a newer execution, and the tick reap then ends that predecessor's process through the runtime and drops it with a history row and a retired name, so a handed off session never leaves tracking while it runs.",
       "seam": "scripts.swarm.execution.ExecutionRegistry start and archive, observed through RedisStore.agents and the tick reap judge scripts.tick.steps.agents._reap_agent",
-      "rules": ["successor-start-drops-live-predecessor"],
+      "rules": [
+        "successor-start-drops-live-predecessor"
+      ],
       "tests": [
         "tests/swarm/test_successor_keeps_predecessor_tracked.py::test_a_successor_start_keeps_its_finished_predecessor_listed",
         "tests/swarm/test_successor_keeps_predecessor_tracked.py::test_archiving_keeps_the_placement_of_a_listed_predecessor",
@@ -12227,6 +12281,15 @@
         "tests/swarm/test_review_lane.py::test_the_ledger_stores_a_review_lane_review_task",
         "tests/swarm/test_review_lane.py::test_the_review_lane_accepts_only_review_tasks",
         "tests/swarm/test_review_lane.py::test_the_task_command_takes_the_review_lane"
+      ]
+    },
+    {
+      "id": "swarm-review-trigger",
+      "origin": "inventory",
+      "behaviour": "The tick step review pass runs in group wrapper phases on the tick lane every 60 seconds.",
+      "seam": "scripts.tick.steps.review._review_pass registered as tick step review pass",
+      "tests": [
+        "tests/tick/steps/test_review_pass.py::test_review_pass"
       ]
     }
   ],
