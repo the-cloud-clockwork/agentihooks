@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from scripts.swarm import master_launch, seat_heads, session_model, tick
+from scripts.swarm import execution, master_launch, seat_heads, session_model, tick
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.tick.steps import agents
@@ -89,7 +89,7 @@ def test_a_successor_start_keeps_its_finished_predecessor_listed(store: RedisSto
 def test_archiving_keeps_the_placement_of_a_listed_predecessor(store: RedisStore) -> None:
     finished, _ = _handed_off(store, hive="h1", runtime_target={"host_id": "h1"})
 
-    store.execution_registry.archive(SLUG)
+    execution.ExecutionRegistry(store).archive(SLUG)
     listed = {agent.name: agent for agent in store.agents(SLUG)}
 
     assert listed[finished.name].execution_id == finished.execution_id
