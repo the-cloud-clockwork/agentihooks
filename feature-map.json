@@ -1731,6 +1731,20 @@
       ]
     },
     {
+      "id": "live-binding-process-provenance",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2739",
+      "behaviour": "A live binding process mismatch keeps who saw the process absent and what owned it. The stored process difference carries the observer, the host the fact names or else the recording host, and the owner, the codex transport record's transport and host or else the agent record's transport and hive. A hive report binding with the process absent names the hive host that observed it. The process finding shows both, and a record stored before them still renders its flag alone.",
+      "seam": "scripts.swarm.live_binding.record and findings, and scripts.hive.daemon.execution_report through scripts.swarm.live_binding.observed",
+      "tests": [
+        "tests/swarm/test_managed_lifecycle.py::test_a_process_absence_another_hive_observed_keeps_that_hive_and_the_transport_owner",
+        "tests/swarm/test_live_binding.py::test_a_pane_process_absence_names_this_observer_and_the_agents_hive",
+        "tests/swarm/test_live_binding.py::test_a_process_mismatch_stored_before_provenance_still_renders_its_flag",
+        "tests/swarm/test_live_binding.py::test_only_a_fact_with_the_process_absent_names_its_observer",
+        "tests/hive/test_reports.py::test_a_hub_admitted_workers_process_absence_keeps_the_hive_host_that_observed_it"
+      ]
+    },
+    {
       "id": "swarm-spawn-order-once-per-pass",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-spawn-order-budget",
@@ -6527,6 +6541,18 @@
       ]
     },
     {
+      "id": "credential-guard-proc-environ-path-shape",
+      "origin": "regression",
+      "ordered_at": "2026-11-20",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2759",
+      "behaviour": "The credential guard refuses a Bash word as a process environment read only when a segment matching proc is followed by a pid then the leaf, or a pid, task and tid then the leaf, or by a pid and a later cwd, root or fd link, or by a segment that can expand to another depth, so a shell case pattern holding a GitHub address with star globs and a listing such as src star tests star pass while every real proc environ read, a proc mount below another folder and a globbed proc segment stay refused.",
+      "seam": "hooks.context.credential_guard.path_reads_environ, read by hooks.context.credential_guard.decide",
+      "tests": [
+        "tests/test_credential_guard.py::test_a_glob_shaped_unlike_a_proc_environ_path_passes",
+        "tests/test_credential_guard.py::test_a_proc_environ_path_shape_is_refused"
+      ]
+    },
+    {
       "id": "swarm-outage-recovery-hub-admitted",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-outage-recovery",
@@ -6723,7 +6749,7 @@
       "origin": "regression",
       "ordered_at": "2026-11-07",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-fix-push",
-      "behaviour": "While fleet panic is on, a push, rerun or dispatch from a session whose branch is the head branch of a registered fix pull request goes through, and the same command from any other branch stays frozen.",
+      "behaviour": "While fleet panic is on, a push or dispatch from a session whose branch is the head branch of a registered fix pull request goes through, and so does its rerun of a run on that branch; the same command from any other branch stays frozen.",
       "seam": "The PreToolUse panic freeze in the blocker window hook",
       "tests": [
         "tests/swarm/test_panic.py::test_panic_spares_a_push_from_the_head_branch_of_a_registered_fix",
@@ -6799,6 +6825,18 @@
       ]
     },
     {
+      "id": "panic-sweep-spares-release-runs",
+      "origin": "regression",
+      "ordered_at": "2026-11-21",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-sweep-spares-chart-release",
+      "behaviour": "The panic cancel sweep, from the panic button and from the tick pass, leaves the release workflow runs on main running: the Helm chart release workflow run, the PyPI publish and Release dispatches and a push run on main such as Pages. It still cancels the runs on the panicking swarm's agent branches and the workflow run event runs whose title names one of those branches.",
+      "seam": "swarm panic on and the tick pass panic sweep",
+      "tests": [
+        "tests/swarm/test_panic_scope.py::test_the_panic_button_leaves_release_runs_on_main_running",
+        "tests/swarm/test_panic_scope.py::test_the_tick_sweep_leaves_release_runs_on_main_running"
+      ]
+    },
+    {
       "id": "panic-fix-branch-first-push",
       "origin": "regression",
       "ordered_at": "2026-11-16",
@@ -6838,7 +6876,7 @@
       "origin": "regression",
       "ordered_at": "2026-11-16",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-fix-registration-hardening",
-      "behaviour": "While fleet panic is on, a session on a registered fix branch keeps a rerun in its own repository, a dispatch only when its ref names that branch, and a push only when it pushes to origin, every refspec writes a registered fix branch and no git config may route it elsewhere; git -C moves the checkout the branch is read in. A push to any other ref, remote or set of refs, a push git config may route to another remote or ref (a push refspec, push url or mirror on origin, a url pushInsteadOf rewrite of the push url, push tag following, a push or tracking remote other than origin, or a push default other than simple or current), a dispatch without a ref or on another ref, a gh command aimed at another repository, a git global option other than -C, a command that sets a git repository or config environment variable, and a push or dispatch behind git or gh global options or a redirection stay frozen.",
+      "behaviour": "While fleet panic is on, a session on a registered fix branch keeps a rerun of a run on that branch in its own repository, a dispatch only when its ref names that branch, and a push only when it pushes to origin, every refspec writes a registered fix branch and no git config may route it elsewhere; git -C moves the checkout the branch is read in. A push to any other ref, remote or set of refs, a push git config may route to another remote or ref (a push refspec, push url or mirror on origin, a url pushInsteadOf rewrite of the push url, push tag following, a push or tracking remote other than origin, or a push default other than simple or current), a dispatch without a ref or on another ref, a gh command aimed at another repository, a git global option other than -C, a command that sets a git repository or config environment variable, and a push or dispatch behind git or gh global options or a redirection stay frozen.",
       "seam": "The PreToolUse panic freeze in the blocker window hook: the frozen command parse and the fix branch spare",
       "rules": [
         "panic-spare-ignores-command-target"
@@ -6889,7 +6927,7 @@
       "origin": "regression",
       "ordered_at": "2026-11-18",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-spare-upstream-fix-branch",
-      "behaviour": "While panic holds a swarm, a successor seat whose worktree branch has its own name keeps the fix work it inherited: a push whose every refspec writes a registered fix branch of the checkout's origin repository and a dispatch on one are spared whatever branch is checked out, and a rerun is spared in a checkout whose checked out branch or whose upstream on origin is a registered fix branch. A push with no refspec or of HEAD writes the checked out branch's own name and stays frozen unless that branch is a fix, as do a push or dispatch naming any other ref and a rerun from a branch that tracks a fix on another remote.",
+      "behaviour": "While panic holds a swarm, a successor seat whose worktree branch has its own name keeps the fix work it inherited: a push whose every refspec writes a registered fix branch of the checkout's origin repository and a dispatch on one are spared whatever branch is checked out, and a rerun of a run or job whose head branch is the checked out branch or its upstream on origin is spared when that branch is a registered fix branch. A push with no refspec or of HEAD writes the checked out branch's own name and stays frozen unless that branch is a fix, as do a push or dispatch naming any other ref and a rerun from a branch that tracks a fix on another remote.",
       "seam": "The PreToolUse panic freeze in the blocker window hook: blocker_window.pretool for a session bound to the panicking swarm",
       "tests": [
         "tests/swarm/test_panic.py::test_a_successor_branch_tracking_a_registered_fix_keeps_its_fix_pushes_dispatches_and_reruns",
@@ -6897,6 +6935,42 @@
         "tests/swarm/test_panic.py::test_a_rerun_from_a_branch_tracking_a_fix_on_another_remote_stays_frozen",
         "tests/swarm/test_panic.py::test_a_branch_tracks_only_a_branch_on_origin",
         "tests/swarm/test_panic.py::test_a_rerun_without_a_directory_or_a_fix_reads_no_git"
+      ]
+    },
+    {
+      "id": "panic-rerun-reads-run-branch",
+      "origin": "regression",
+      "ordered_at": "2026-11-18",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2572",
+      "behaviour": "While panic holds a swarm, a rerun from a session bound to it is spared only when the head branch of the one run or job it names, read from the checkout's origin repository, is the checked out branch or the branch it tracks on origin and a registered fix of that repository. A rerun of a dev run or of any other branch's run, of a run that cannot be read, or naming no single run or job stays frozen.",
+      "seam": "The PreToolUse panic freeze in the blocker window hook: blocker_window.pretool for a session bound to the panicking swarm, with the run read through the panic source control port",
+      "tests": [
+        "tests/swarm/test_panic.py::test_a_fix_branch_session_rerunning_a_dev_run_stays_frozen",
+        "tests/swarm/test_panic.py::test_a_fix_branch_session_keeps_a_rerun_of_one_run_or_job_on_its_branch",
+        "tests/swarm/test_panic.py::test_a_rerun_reads_its_run_from_the_repository_origin_names",
+        "tests/swarm/test_panic.py::test_a_rerun_naming_no_single_run_or_job_stays_frozen_and_reads_no_run",
+        "tests/swarm/test_panic.py::test_a_fix_branch_session_rerunning_another_fix_branch_run_stays_frozen",
+        "tests/swarm/test_panic.py::test_a_successor_rerun_is_spared_only_for_a_run_on_the_fix_branch_it_tracks",
+        "tests/swarm/test_panic.py::test_a_rerun_from_a_branch_no_fix_registers_reads_no_run",
+        "tests/swarm/test_panic.py::test_a_rerun_of_a_run_that_cannot_be_read_stays_frozen",
+        "tests/swarm/test_panic.py::test_a_run_read_returns_its_head_branch_through_its_repository_port",
+        "tests/swarm/test_panic.py::test_a_run_read_that_fails_refuses_with_its_path_and_reason"
+      ]
+    },
+    {
+      "id": "panic-drop-one-fix",
+      "origin": "regression",
+      "ordered_at": "2026-11-18",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2572",
+      "behaviour": "The master or the operator removes one registered fix from a swarm's panic with agentihooks swarm SLUG panic drop --fix URL: the panic keeps its start, reason, mode and other fixes and tells the lab the remaining fix heads, and no run is cancelled. Any other seat, no fix or more than one, a fix the panic does not hold and a swarm no panic holds are refused and leave the panic as it was.",
+      "seam": "cmd_panic through the swarm command parser, read back with panic.state",
+      "tests": [
+        "tests/swarm/test_panic.py::test_the_master_drops_one_panic_fix_and_keeps_the_panic_and_its_other_fixes",
+        "tests/swarm/test_panic.py::test_panic_drop_refuses_a_seat_that_is_neither_the_master_nor_the_operator",
+        "tests/swarm/test_panic.py::test_panic_drop_takes_exactly_one_fix",
+        "tests/swarm/test_panic.py::test_panic_drop_refuses_a_fix_the_panic_does_not_hold",
+        "tests/swarm/test_panic.py::test_panic_drop_refuses_while_no_panic_holds_the_swarm",
+        "tests/swarm/test_panic_lab.py::test_the_operator_drops_a_panic_fix_and_the_lab_grades_only_the_fixes_left_first"
       ]
     },
     {
@@ -8955,6 +9029,16 @@
       "seam": "EXEMPT and settled in .github/scripts/promote.cjs against the promotion-ready needs of .github/workflows/test.yml",
       "tests": [
         "tests/contracts/promotion/test_workflow.py::test_every_graded_job_gates_promotion_or_sits_on_the_promote_script_exempt_list"
+      ]
+    },
+    {
+      "id": "promotion-dev-push-workflows-non-gating",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2690",
+      "behaviour": "Every workflow that runs on a dev push outside the Tests run, through a push trigger whose branch filters admit dev or a workflow_run chained after such a workflow, is named with its reason on the explicit non gating list, because promotion grades only the jobs of the Tests run and a gate placed in any other workflow would never hold the release.",
+      "seam": "the on triggers of every workflow under .github/workflows against NON_GATING in tests/contracts/promotion/test_workflow.py",
+      "tests": [
+        "tests/contracts/promotion/test_workflow.py::test_every_dev_push_workflow_outside_tests_sits_on_the_non_gating_list"
       ]
     },
     {
@@ -11723,6 +11807,16 @@
       ]
     },
     {
+      "id": "lab-head-before-pull-observation",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2768",
+      "behaviour": "A signed pull request webhook publishes its lab head before observing the pull, so an observation failure keeps the lab delivery and returns HTTP 503 for retry.",
+      "seam": "scripts.hub.github_webhooks Ingress.receive with a failing pull observer and the dedicated lab stream",
+      "tests": [
+        "tests/hub/test_github_webhooks_publication.py::test_a_failed_pull_observation_still_publishes_the_lab_head"
+      ]
+    },
+    {
       "id": "lab-head-durable-consumer",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2515",
@@ -12610,6 +12704,18 @@
         "tests/test_package_recon_rule.py::test_documentation_persona_points_at_the_recon_rule",
         "tests/test_package_recon_rule.py::test_master_and_planner_hold_task_specs_and_merges_to_the_recon",
         "tests/test_package_recon_rule.py::test_role_skills_run_the_recon_before_the_first_edit"
+      ]
+    },
+    {
+      "id": "swarm-urgent-hold-hive-admission",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-urgent-hold-names-host-room",
+      "behaviour": "While every live hive the swarm reads has admission room zero, an urgent open task with no other hold records a reason naming each hive and its refusing limit, so no urgent unclaimable finding fires for it; when any live hive has room, a hive admission count is unreadable or no hive is live, the reason stays empty and the finding fires after ten minutes as before.",
+      "seam": "scripts.swarm.health.urgent_hold.observe over the hive admission rooms scripts.swarm.status.readable_hives reads, then urgent_hold.read and urgent_hold.findings",
+      "tests": [
+        "tests/swarm/test_urgent_hold.py::test_an_urgent_task_while_no_live_hive_has_admission_room_names_the_hive_and_raises_no_finding",
+        "tests/swarm/test_urgent_hold.py::test_the_hive_admission_hold_stands_only_while_every_live_hive_is_read_at_zero_room",
+        "tests/swarm/test_urgent_hold.py::test_a_release_wait_is_named_ahead_of_the_hive_admission_hold"
       ]
     }
   ],

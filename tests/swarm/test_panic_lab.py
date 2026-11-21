@@ -137,6 +137,23 @@ def test_panic_on_without_a_fix_pauses_every_pull_request_grade(
     ]
 
 
+@pytest.mark.feature("panic-drop-one-fix")
+def test_the_operator_drops_a_panic_fix_and_the_lab_grades_only_the_fixes_left_first(
+    store: RedisStore,
+    lab: list[tuple[str, str, dict[str, Any]]],
+    heads: list[str],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    panic.engage(store, SLUG, "pressed", False, [PULL, BRANCH], 0)
+    out = _press(store, capsys, "drop", "--fix", BRANCH)
+    assert out == {"panic": "on", "fixes": [PULL], "lab": "lab paused pull request grading except pr-branch"}
+    assert lab == [
+        ("/priority", "Bearer tok", {"heads": ["pr-branch"], "class": "hotfix"}),
+        ("/pause", "Bearer tok", {"class": "pull_request", "except": ["pr-branch"]}),
+    ]
+    assert panic.state(store, SLUG) == panic.Panic(0, "pressed", False, (PULL,))
+
+
 @pytest.mark.feature("panic-reaches-lab")
 def test_panic_on_with_no_lab_url_is_an_action_line_that_reads_no_fix(
     monkeypatch: pytest.MonkeyPatch,
