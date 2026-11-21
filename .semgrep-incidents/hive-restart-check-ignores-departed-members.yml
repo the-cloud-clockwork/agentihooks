@@ -1,0 +1,10 @@
+rules:
+  - id: hive-restart-check-ignores-departed-members
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A local epoch check alone keeps reports owned by deleted pod members alive.
+      Also end reports whose recorded owner disappeared from the populated hive member roster.
+    pattern: |
+      if $CURRENT and $REPORT.get("member") == $MEMBER and ($REPORT.get("epoch") or $CURRENT) != $CURRENT:
+          ...

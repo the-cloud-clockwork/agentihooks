@@ -238,11 +238,14 @@ def end_gone(redis: "Redis", hive: str, reports: list[dict], at: int) -> list[di
 
 
 def end_restarted(redis: "Redis", hive: str, reports: list[dict], at: int) -> list[dict]:
-    """End the reports this member wrote in an earlier epoch, whose agents died with its restart, and keep the rest."""
+    """End reports of departed members or earlier epochs of this member, and keep the rest."""
     member, current = registry.member_name(), local_epoch()
+    members = (registry.show(redis, hive) or {}).get("members", {})
     kept = []
     for report in reports:
-        if current and report.get("member") == member and (report.get("epoch") or current) != current:
+        if (current and report.get("member") == member and (report.get("epoch") or current) != current) or (
+            members and report.get("member") and report["member"] not in members
+        ):
             end(redis, hive, report["execution_id"], report["session_id"], RESTARTED, "ended", at)
         else:
             kept.append(report)

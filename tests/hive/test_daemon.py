@@ -164,6 +164,28 @@ def test_hive_heartbeat_keeps_beating_when_the_account_slot_publish_fails(redis,
     assert "account slot heartbeat failed" in capsys.readouterr().err
 
 
+@pytest.mark.feature("hive-resume-start-failure")
+def test_a_beat_whose_resume_order_process_cannot_start_still_heartbeats_to_its_end(
+    redis: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive import join_report, orders
+
+    order = orders.CommandOrder("resume:x:1:1", "resume", "rig", "engineer", "x", 1, "continue", 5, "pane")
+    orders.Orders(redis).command("machine", order)
+    report = {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
+    heartbeat, finished = Mock(), Mock()
+    monkeypatch.setattr(daemon, "observe", lambda **kwargs: report)
+    monkeypatch.setattr(daemon, "execution_report", lambda *args: {"executions": {}, "names": []})
+    monkeypatch.setattr(orders.subprocess, "Popen", Mock(side_effect=OSError(11, "Resource temporarily unavailable")))
+    monkeypatch.setattr(join_report, "heartbeat", heartbeat)
+    monkeypatch.setattr(registry, "finished", finished)
+    daemon.beat(redis, "machine")
+    assert heartbeat.call_args.args[:2] == (redis, "machine")
+    assert finished.call_args.args[:2] == (redis, "machine")
+    receipt = orders.Orders(redis).command_receipt("machine", order.id)
+    assert json.loads(redis.hget(receipt, "ack"))["failure"] == "error: BlockingIOError"
+
+
 def test_cold_native_accounts_use_their_own_fresh_quota_before_the_first_launch(monkeypatch):
     from hooks.context import quota_usage
     from scripts.routing import master_account

@@ -68,13 +68,14 @@ runs:
         PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
       run: |
         install_and_verify() {
+          while pgrep -f apt-get > /dev/null; do sleep 1; done
           python -m playwright install --with-deps chromium &&
             timeout 30s bash "$GITHUB_ACTION_PATH/verify.sh"
         }
         export -f install_and_verify
         for attempt in 1 2; do
           timeout --kill-after=10s "${ATTEMPT_SECONDS}s" bash -c install_and_verify && exit 0
-          [[ "$attempt" == 2 ]] || echo "::warning title=Retried browser install::Chromium install attempt $attempt failed or exceeded ${ATTEMPT_SECONDS}s; retrying once."
+          [[ "$attempt" == 2 ]] || echo "::warning title=Retried browser install::Chromium install attempt $attempt failed or exceeded ${ATTEMPT_SECONDS}s; retrying once after any running apt-get exits."
         done
         exit 1
     - name: Save Chromium from dev

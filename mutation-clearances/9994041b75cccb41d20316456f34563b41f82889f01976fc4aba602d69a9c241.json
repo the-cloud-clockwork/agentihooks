@@ -1,0 +1,6 @@
+{
+  "scripts/events/nats.py:scripts.events.nats.x__publish_letter:2b2c7bdf11aceec0dc783bc55477b021719302c9e50b3c0b51f16abfedea704a": {
+    "reader": "standards-reader",
+    "reason": "Equivalent for the bus contract: absent or empty stored data selects this fallback. Both empty bytes and XXXX raise JSONDecodeError before accepting a retained envelope. Successful decoding and settlement are unchanged; JSON error document text is not a transport contract."
+  }
+}
