@@ -1,0 +1,13 @@
+rules:
+  - id: plant-check-name-truncated
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A plant grade check name is cut at its last slash, so lab/required/extra and lab/reusable/required read as
+      required and an extra or reusable check can stand in for the required one. Take the complete suffix after the
+      first slash: name.split("/", 1)[1] or name.partition("/")[2].
+    paths:
+      include:
+        - /scripts/ci_lab/plant_grade.py
+        - plant-check-name-truncated.py
+    pattern: $NAME.rsplit("/", ...)
