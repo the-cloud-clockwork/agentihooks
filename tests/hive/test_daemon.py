@@ -2193,6 +2193,7 @@ def test_beat_publishes_what_this_hive_sees_of_its_own_executions(redis, monkeyp
     monkeypatch.setattr(process, "local_namespace", lambda: "hive-namespace")
     monkeypatch.setattr(process, "started_ms", lambda: 100000)
     monkeypatch.setattr(daemon.time, "time", lambda: 123)
+    monkeypatch.setattr("socket.gethostname", lambda: "machine-host")
     herdr.observe.return_value = PaneObservation("idle", typed="half")
     herdr.reported.return_value = True
     consumer = Mock(runtime=Mock(herdr=herdr))
@@ -2220,7 +2221,7 @@ def test_beat_publishes_what_this_hive_sees_of_its_own_executions(redis, monkeyp
                 "name": here.name,
                 "generation": here.generation,
                 "reported": True,
-                "binding": {"process": False},
+                "binding": {"process": False, "observer": "machine-host"},
                 "pane": {
                     "state": "idle",
                     "prompt_title": "",
