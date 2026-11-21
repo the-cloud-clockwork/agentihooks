@@ -29,7 +29,7 @@ def settle(inbox, name, seat, exit_text, worlds=None):
         worlds.run(world, lambda w: _settle_world(w, name, seat, exit_text))
 
 
-def _settle_world(inbox, name, seat, exit_text):
+def _settle_world(inbox: "InboxStore", name: str, seat: str, exit_text: str) -> None:
     from scripts.inbox.store import CLOSED
     from scripts.swarm.naming import NameRegistry
 
@@ -72,7 +72,7 @@ def _settle_taken_seat_mail(inbox: "InboxStore", name: str, exit_text: str, goes
             _settle_taken(inbox, item, held, name, exit_text, goes_on)
 
 
-def _settle_taken(inbox: "InboxStore", item, held: str, name: str, exit_text: str, goes_on: bool) -> None:
+def _settle_taken(inbox: "InboxStore", item: "Item", held: str, name: str, exit_text: str, goes_on: bool) -> None:
     """Seat mail a gone life took: back to pending for the seat's next occupant when the work goes on, else closed."""
     if goes_on and not _task_continues(inbox, item, held):
         exit_text = f"left its seat and task {item.task}"
