@@ -1330,7 +1330,6 @@ class MirrorExpander:
         workflow = self._git(mirror, "show", f"{grader}:{WORKFLOW.as_posix()}")
         registry = json.loads(self._git(mirror, "show", f"{grader}:{REGISTRY.as_posix()}"))
         excluded = self._exclusions(mirror, grader, head if grader == request.head else base)
-        excluded_jobs = {name.partition("/")[0] for name in excluded}
         toolchain = replace(self.toolchain, lockfile=head.get(LOCKFILE, ""), pyproject=head.get("pyproject.toml", ""))
         gates: dict[str, list[Unit]] = {}
         for gate in discover(workflow, registry, self._workflows(mirror, grader)):
@@ -1353,7 +1352,7 @@ class MirrorExpander:
         listed = frozenset[str]()
         if request.tier < Priority.PROMOTION:
             listed = authoritative_gates(_lab_block(self._git(mirror, "show", f"{grader}:{DELIVERY}")), request.tier)
-            listed = listed.difference(excluded_jobs)
+            listed = frozenset(static_exclusions.authority(listed, excluded))
         tree = self._git(mirror, "rev-parse", f"{request.head}^{{tree}}").strip()
         plan = frame(request.tier, tree, grader, {job: tuple(units) for job, units in gates.items()}, sorted(listed))
         return replace(plan, manifest=commit)

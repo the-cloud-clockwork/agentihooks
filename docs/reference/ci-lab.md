@@ -4719,7 +4719,8 @@ alias for the threshold pin plant; its full gate identity is unchanged.
 Static execution reads `tests/ci_lab/static_gate_exclusions.json` from the protected
 grader revision. Pull requests and hotfixes use their base; promotion and backfill
 use the integrated head. Only exact gate name matches are excluded. Each affected
-calling job keeps Actions authority. A missing catalog preserves existing plans,
+calling job keeps Actions authority. The protected Actions readers apply the same
+calling job filter for pull requests and merge groups. A missing catalog preserves existing plans,
 and malformed policy refuses expansion. The protected catalog records the reason
 for each exclusion.
 

@@ -1,4 +1,5 @@
 import json
+from collections.abc import Iterable, Mapping
 from typing import TypeGuard
 
 PATH = "tests/ci_lab/static_gate_exclusions.json"
@@ -31,3 +32,8 @@ def read(raw: str) -> dict[str, str]:
             raise ValueError(GATE_ERROR)
         found[name] = _reason(record)
     return found
+
+
+def authority(gates: Iterable[str], excluded: Mapping[str, str]) -> tuple[str, ...]:
+    jobs = {name.partition("/")[0] for name in excluded}
+    return tuple(gate for gate in gates if gate not in jobs)
