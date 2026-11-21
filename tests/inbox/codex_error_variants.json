@@ -1,0 +1,22 @@
+[
+  "activeTurnNotSteerable",
+  "badRequest",
+  "contextWindowExceeded",
+  "cyberPolicy",
+  "flexUnavailable",
+  "httpConnectionFailed",
+  "internalServerError",
+  "misalignmentPolicyViolation",
+  "other",
+  "rateLimitExceeded",
+  "responseStreamConnectionFailed",
+  "responseStreamDisconnected",
+  "responseTooManyFailedAttempts",
+  "sandboxError",
+  "serverOverloaded",
+  "sessionBudgetExceeded",
+  "threadRollbackFailed",
+  "tooManyDenials",
+  "unauthorized",
+  "usageLimitExceeded"
+]
