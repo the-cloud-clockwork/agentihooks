@@ -14,8 +14,8 @@
   "PLR0912": 15
  },
  "hooks/context/credential_guard.py::stage_verdict": {
-  "C901": 29,
-  "PLR0912": 29
+  "C901": 27,
+  "PLR0912": 26
  },
  "hooks/context/enforcement.py::add_enforcement": {
   "PLR0913": 8
