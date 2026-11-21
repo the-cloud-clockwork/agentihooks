@@ -152,6 +152,7 @@ class SwarmConfig:
     tick_mode: str = SEQUENTIAL_TICK
     control_url: str = ""
     lab_url: str = ""
+    max_review: int = 0
 
     def __post_init__(self) -> None:
         if self.tick_mode not in TICK_MODES:
@@ -339,6 +340,7 @@ class RedisStore:
             raw.get("tick_mode") or SEQUENTIAL_TICK,
             raw.get("control_url", ""),
             raw.get("lab_url", ""),
+            int(raw.get("max_review", 0)),
         )
 
     def update(self, slug: str, **changes: Any) -> SwarmConfig:

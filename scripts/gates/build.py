@@ -20,7 +20,7 @@ from scripts.swarm_ledger import ledger_workspace
 if TYPE_CHECKING:
     from scripts.gates.verdicts import Verdicts
 
-LANES = frozenset({"eng", "ci"})
+LANES = frozenset({"eng", "ci", "review"})
 EDIT_TOOLS = {"Edit": "file_path", "Write": "file_path", "MultiEdit": "file_path", "NotebookEdit": "notebook_path"}
 SERENA = "mcp__serena__"
 SERENA_EDITS = frozenset(

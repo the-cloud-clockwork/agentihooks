@@ -1633,7 +1633,7 @@ def test_a_task_the_watched_focus_keeps_from_claims_is_not_ready_and_the_count_m
     assert ledger.read.count("watched") == 1
     capacity.apply(SLUG, store.config(SLUG), store, ledger, runtime, 1_000)
     counted = {lane: len(ready_tasks(lane)) for lane in capacity.LANES}
-    assert runtime.demand == [counted] == [{"eng": 1, "ci": 0, "plan": 0}]
+    assert runtime.demand == [counted] == [{"eng": 1, "ci": 0, "plan": 0, "review": 0}]
 
 
 def test_a_task_a_fresh_placement_refusal_holds_is_ready_again_once_the_refusal_expires() -> None:

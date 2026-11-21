@@ -281,3 +281,13 @@ def test_progress_writes_the_ledger_and_progress_lines_records_an_outcome_and_cl
     assert rig.flags.read(ME) is None
     gate.report(rig.store, ledger, SLUG, agent, gate.Status("reviewing", "both readers close"), NOW, rig.home)
     assert len((ledger_workspace.folder(SLUG, "t1") / "progress.md").read_text().splitlines()) == 2
+
+
+@pytest.mark.feature("reviewer-worker-gates")
+@pytest.mark.parametrize("lane", ["eng", "ci", "review"])
+def test_worker_lanes_raise_the_quiet_claim_flag(rig: Any, lane: str) -> None:
+    agent = rig.store.agents(SLUG)[0]
+    rig.store.put_agent(SLUG, AgentRecord(**{**agent.__dict__, "lane": lane}))
+    assert rig.minutes() == {ME: 40}
+    rig.run()
+    assert rig.flags.read(ME) is not None
