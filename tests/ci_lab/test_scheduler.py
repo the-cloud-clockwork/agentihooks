@@ -33,6 +33,7 @@ from scripts.ci_lab import (
     interaction,
     lease_api,
     manifests,
+    metrics,
     queue,
     relay,
     scheduler,
@@ -1231,10 +1232,10 @@ def test_listen_serves_the_control_routes_only_on_the_control_port(lab: Callable
             server.server_close()
 
 
-def scrape(run: Run, now: int) -> str:
+def scrape(run: Run, now: int, mirror: Path | None = None) -> str:
     spending = budget.Budget(run.lab.client, lambda: now, budget.Policy(100.0, {}))
     routes = lease_api.ControlRoutes(run.lab.client, "tok", lambda: now)
-    servers = scheduler.listen(run.engine, run.leases(), routes, spending, lambda: now, (0, 0, 0))
+    servers = scheduler.listen(run.engine, run.leases(), routes, spending, lambda: now, (0, 0, 0), mirror)
     for server in servers:
         threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
@@ -2541,6 +2542,7 @@ def test_the_hotfix_port_reads_the_heads_the_control_routes_marked() -> None:
 @dataclass
 class FakeChecks:
     repo: str
+    registry: metrics.Registry | None = None
 
 
 @pytest.mark.feature("lab-worker-deletion-cost")
@@ -2590,8 +2592,8 @@ def test_build_wires_the_service_ports_from_the_environment(tmp_path: Path, monk
     bare = scheduler.build(imageless, client, objects, consumer, spending).ports.expander
     assert isinstance(bare, scheduler.MirrorExpander) and bare.toolchain.image == ""
     first = built.ports.checks(SLUG)
-    assert first == FakeChecks(SLUG) and built.ports.checks(SLUG) is first
-    assert built.ports.checks("other/repo") == FakeChecks("other/repo")
+    assert first == FakeChecks(SLUG, built.registry) and built.ports.checks(SLUG) is first
+    assert built.ports.checks("other/repo") == FakeChecks("other/repo", built.registry)
     hotfixes = built.ports.hotfixes
     assert isinstance(hotfixes, control.Priorities)
     assert (hotfixes.client, hotfixes.clock) == (client, scheduler._now_ms)
@@ -2668,8 +2670,9 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
         spending: Any,
         clock: Any,
         ports: tuple[int, int, int],
+        mirror: Path,
     ) -> list[Server]:
-        calls["listen"] = (found, leases, routes, spending, clock, ports)
+        calls["listen"] = (found, leases, routes, spending, clock, ports, mirror)
         return [Server(), Server(), Server()]
 
     class Thread:
@@ -2715,6 +2718,7 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
         scheduler.MINIO_SECRET_KEY: "secret",
         scheduler.MINIO_BUCKET: "bucket",
         scheduler.contract.CONTROL_TOKEN: "tok",
+        scheduler.contract.GIT_MIRROR: str(tmp_path / "node"),
     } | APP_SETTINGS
     monkeypatch.setattr(redis.Redis, "from_url", from_url)
     monkeypatch.setattr(boto3, "client", s3)
@@ -2750,7 +2754,8 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
     assert calls["consumers"] == [("ci-lab-scheduler", "ci.lab.head.>"), ("ci-lab-relay", "ci.lab.head.notice")]
     relayed_from, relayed, relay_consumer = builds.builds[0]
     assert (relayed_from, relayed.queue.client, relay_consumer) == (environ, client, "ci-lab-relay consumer")
-    found, leases, routes, spending, clock, ports = calls["listen"]
+    found, leases, routes, spending, clock, ports, mirror = calls["listen"]
+    assert mirror == tmp_path / "node"
     assert found.queue.client is client and leases.queue is found.queue
     assert leases.pods is found.ports.pods
     assert isinstance(leases.manifests, partial)
@@ -2863,6 +2868,7 @@ def test_main_rebuilds_the_verdict_index_before_serving_only_when_reindex_on_sta
         scheduler.MINIO_ACCESS_KEY: "access",
         scheduler.MINIO_SECRET_KEY: "secret",
         scheduler.MINIO_BUCKET: "bucket",
+        scheduler.contract.GIT_MIRROR: str(tmp_path / "node"),
         **APP_SETTINGS,
     } | setting
     stdout = Stdout()
