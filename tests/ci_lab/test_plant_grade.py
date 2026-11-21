@@ -163,6 +163,8 @@ def test_two_pushes_grade_against_one_protected_base_and_ignore_other_grades(rep
         "base": base,
         "green": "https://github.com/acme/widgets/runs/required",
         "red": "https://github.com/acme/widgets/runs/required",
+        "green_run": grade_key(GradeInputs(REPOSITORY, lab.heads[0], base, "pull_request", base)),
+        "red_run": grade_key(GradeInputs(REPOSITORY, lab.heads[1], base, "pull_request", base)),
     }
     assert len(lab.heads) == 2
     assert git(repository, "show", f"{lab.heads[0]}:sample.py") == "before"

@@ -4710,6 +4710,12 @@ Run `python -m scripts.ci_lab grade --plant lint` from a repository checkout to 
 an import sorting fault. Use `--plant gate-script` to prove that a head cannot teach its
 own comment grader to accept a new directive. Test and mutation plants are separate proofs.
 
+The command also accepts every JSON plant name in the catalog, including dotted names such as
+`lint.lint-check`. A plant keeps its full discovered step in `gate`; grading reads that step's job
+check and requires its named diagnostic. The JSON result and summary row include `green_run` and
+`red_run`, the exact grade identifiers for the two check links. `lint.threshold-pins` is the shorter
+alias for the threshold pin plant; its full gate identity is unchanged.
+
 The command creates an unchanged twin and its planted child from `origin/dev`, with fixed
 commit identity and dates. It preserves the checkout, HEAD and normal index. `--base`
 selects another protected revision; `--repository` overrides the GitHub URL inferred from
