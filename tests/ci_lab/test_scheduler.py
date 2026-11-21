@@ -10,7 +10,7 @@ import urllib.request
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from unittest.mock import Mock
 
 import jsonschema
@@ -1212,7 +1212,7 @@ def test_listen_serves_the_control_routes_only_on_the_control_port(lab: Callable
     run = lab({HEAD_A: plan({"lint": (unit(1),)})})
     spending = budget.Budget(run.lab.client, lambda: 0, budget.Policy(100.0, {}))
     routes = lease_api.ControlRoutes(run.lab.client, "tok", lambda: 1000)
-    servers = scheduler.listen(run.engine, run.leases(), routes, spending, lambda: 1000, (0, 0, 0))
+    servers = scheduler.listen(run.engine, run.leases(), routes, spending, lambda: 1000, cast(Any, (0, 0, 0)))
     for server in servers:
         threading.Thread(target=server.serve_forever, daemon=True).start()
     api, control, _ = (f"http://127.0.0.1:{server.server_address[1]}" for server in servers)
