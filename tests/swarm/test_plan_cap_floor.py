@@ -28,11 +28,11 @@ def scaled(
     demand: dict[str, int] | None,
     host: dict[str, Any] | None = NO_ROOM,
     scaling: str = AUTO_SCALING,
-    **caps: int,
+    caps: tuple[int, int, int] = (0, 0, 0),
 ) -> tuple[SwarmConfig, dict[str, Any] | None, dict[str, int]]:
-    """Autoscale a swarm with the given stored caps, then count the placements the quota decision makes per lane."""
-    stored = {"max_eng": 0, "max_ci": 0, "max_plan": 0, **caps}
-    config = SwarmConfig("sw", "/repo", scaling=scaling, **stored)
+    """Autoscale a swarm with the stored eng, ci and plan caps, then count the placements the quota decision makes."""
+    eng, ci, plan = caps
+    config = SwarmConfig("sw", "/repo", max_eng=eng, max_ci=ci, max_plan=plan, scaling=scaling)
     inputs = capacity.ScaleInputs([account(cap=12, sessions=len(agents))], agents, demand, lambda: None, {}, now_ms=NOW)
     config, decision = capacity.autoscaled(config, inputs, host)
     placed = capacity.calculate(config, inputs.observations, agents, demand)
@@ -41,7 +41,7 @@ def scaled(
 
 @pytest.mark.feature("swarm-plan-cap-floor")
 def test_a_ready_plan_task_gets_a_planner_seat_under_a_stored_zero_manual_cap() -> None:
-    config, decision, placed = scaled([], PLAN_READY, scaling=MANUAL_SCALING, max_eng=2, max_ci=1)
+    config, decision, placed = scaled([], PLAN_READY, scaling=MANUAL_SCALING, caps=(2, 1, 0))
     assert (config.max_eng, config.max_ci, config.max_plan) == (2, 1, 1)
     assert decision is None
     assert placed["plan"] == 1
@@ -50,20 +50,20 @@ def test_a_ready_plan_task_gets_a_planner_seat_under_a_stored_zero_manual_cap() 
 @pytest.mark.feature("swarm-plan-cap-floor")
 @pytest.mark.parametrize("demand", [{"eng": 3, "ci": 0, "plan": 0}, None], ids=["no plan work", "no demand"])
 def test_a_stored_zero_manual_cap_holds_while_no_plan_work_is_ready(demand: dict[str, int] | None) -> None:
-    config, _, placed = scaled([], demand, scaling=MANUAL_SCALING, max_eng=2, max_ci=1)
+    config, _, placed = scaled([], demand, scaling=MANUAL_SCALING, caps=(2, 1, 0))
     assert config.max_plan == 0
     assert placed["plan"] == 0
 
 
 @pytest.mark.feature("swarm-plan-cap-floor")
 def test_a_stored_manual_plan_cap_above_zero_is_kept() -> None:
-    config, _, _ = scaled([], PLAN_READY, scaling=MANUAL_SCALING, max_eng=2, max_plan=3)
+    config, _, _ = scaled([], PLAN_READY, scaling=MANUAL_SCALING, caps=(2, 0, 3))
     assert config.max_plan == 3
 
 
 @pytest.mark.feature("swarm-plan-cap-floor")
 def test_a_ready_plan_task_gets_a_planner_seat_when_live_agents_fill_the_room() -> None:
-    config, decision, placed = scaled(live(eng=6), PLAN_READY, max_eng=6)
+    config, decision, placed = scaled(live(eng=6), PLAN_READY, caps=(6, 0, 0))
     assert decision is not None
     assert decision["ceilings"] == {"plan": 1, "ci": 0, "eng": 5}
     assert config.max_plan == 1
@@ -74,23 +74,23 @@ def test_a_ready_plan_task_gets_a_planner_seat_when_live_agents_fill_the_room() 
 @pytest.mark.parametrize(
     ("agents", "caps", "ceilings"),
     [
-        ({"eng": 2, "ci": 4}, {"max_eng": 2, "max_ci": 4}, {"plan": 1, "ci": 3, "eng": 2}),
-        ({"eng": 3, "ci": 3}, {"max_eng": 3, "max_ci": 3}, {"plan": 1, "ci": 3, "eng": 2}),
-        ({}, {}, {"plan": 1, "ci": 0, "eng": 0}),
+        ({"eng": 2, "ci": 4}, (2, 4, 0), {"plan": 1, "ci": 3, "eng": 2}),
+        ({"eng": 3, "ci": 3}, (3, 3, 0), {"plan": 1, "ci": 3, "eng": 2}),
+        ({}, (0, 0, 0), {"plan": 1, "ci": 0, "eng": 0}),
     ],
     ids=["ci gives the seat", "a tie takes it from eng", "nothing to take"],
 )
 def test_the_plan_seat_comes_from_the_larger_lane_ceiling(
-    agents: dict[str, int], caps: dict[str, int], ceilings: dict[str, int]
+    agents: dict[str, int], caps: tuple[int, int, int], ceilings: dict[str, int]
 ) -> None:
-    _, decision, _ = scaled(live(**agents), PLAN_READY, **caps)
+    _, decision, _ = scaled(live(**agents), PLAN_READY, caps=caps)
     assert decision is not None
     assert decision["ceilings"] == ceilings
 
 
 @pytest.mark.feature("swarm-plan-cap-floor")
 def test_the_ceilings_are_unchanged_without_ready_plan_work() -> None:
-    _, decision, placed = scaled(live(eng=6), {"eng": 0, "ci": 0, "plan": 0}, max_eng=6)
+    _, decision, placed = scaled(live(eng=6), {"eng": 0, "ci": 0, "plan": 0}, caps=(6, 0, 0))
     assert decision is not None
     assert decision["ceilings"] == {"plan": 0, "ci": 0, "eng": 6}
     assert placed["plan"] == 0
