@@ -441,7 +441,7 @@ def test_capacity_reader_receives_demand_clock_and_previous_state_without_refres
         assert config.slug == "sw"
         assert [agent.name for agent in agents] == ["boss"]
         assert now == 10_000
-        assert demand == {"eng": 1, "ci": 1, "plan": 0}
+        assert demand == {"eng": 1, "ci": 1, "plan": 0, "review": 0}
         assert requirements is None
         assert refresh is False
         return {"placements": {"eng": [{"harness": "claude", "account": "acct"}]}}
