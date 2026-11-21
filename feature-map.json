@@ -1043,7 +1043,7 @@
       "id": "recon-plan-always-travels-with-the-work-folder",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-recon-file-sync-seed",
-      "behaviour": "A task's recon plan, recon.md, travels with its work folder copy whatever its size up to its 500 line cap: hive sync carries it as a seed beside progress and proof, ahead of every other added file and even when progress and proof fill the seed budget, keeping its latest 128 KiB of JSON, while any other added file over 64 KiB stays behind, so the hub admit reply and the controller mirror hold the recon an agent wrote before its first code edit.",
+      "behaviour": "A task's recon plan, recon.md, travels with its work folder copy whatever its size: hive sync carries it as a seed beside progress and proof, ahead of every other added file and even when progress and proof fill the seed budget, keeping its latest 128 KiB of JSON, while any other added file over 64 KiB stays behind, so the hub admit reply and the controller mirror hold the recon an agent wrote before its first code edit.",
       "seam": "ledger_workspace.SEEDS, contents and sync, task_files_key",
       "tests": [
         "tests/hive/test_prompt_transport.py::test_a_recon_plan_of_five_hundred_long_lines_syncs_whole_while_another_file_that_size_stays_behind"

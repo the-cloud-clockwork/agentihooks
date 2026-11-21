@@ -3256,7 +3256,7 @@ profile decision it holds:
 |---|---|
 | `hive_opening` | The full opening prompt, built on the controller where the ledger is, for the Claude harness. |
 | `hive_opening_digest` | The sha256 hex digest of `hive_opening`. |
-| `hive_seeds` | The task's work folder files: `steering.md` whole, and the last 65,536 characters of `progress.md`, `proof.md` and `recon.md`. Empty when the task has no work folder. |
+| `hive_seeds` | The task's work folder files: `steering.md` whole, and the last 131,072 bytes of JSON of `progress.md`, `proof.md` and `recon.md`. Empty when the task has no work folder. |
 
 The opening names the work folder as `~/.agentihooks/swarm/<slug>/tasks/<task id>`, so the same text is correct
 below whichever home the hive runs the agent in.
@@ -3310,7 +3310,7 @@ What travels from a task folder:
 | File | Travels | Limit |
 |---|---|---|
 | `steering.md` | Only from the controller to the hive, at launch | Whole file |
-| `progress.md`, `proof.md`, `recon.md` | Both ways | The last 65,536 characters |
+| `progress.md`, `proof.md`, `recon.md` | Both ways | The last 131,072 bytes of their JSON text each, which holds a recon plan of 500 lines of about 260 ASCII characters whole |
 | Any other file directly in the folder, such as `plan.md`, `measure.sh`, `handoff.md` or `mutation-fix.patch` | Both ways | 32 files, taken in name order; a file over 65,536 bytes is skipped and does not count toward the 32 |
 | Subfolders and the files in them, symbolic links, names that do not start with an ASCII letter or digit, such as hidden names starting with `.`, names whose later characters are not Unicode word characters, `.` or `-`, names over 128 characters, files that are not UTF-8 text | Never | Not carried |
 
