@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "wt-lab-remote-owner",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-wt-lab-remote-owner",
+      "behaviour": "wt.sh new and tmp give the primary checkout the lab remote and its token helper only when AGENTIHOOKS_LAB_REMOTE names the origin's repository and, when the lab URL names an owner in the path of a scheme URL or an scp address, the origin's owner too, ignoring case and transport. A lab URL for the same repository name under another owner gets neither the remote nor the helper; an ownerless lab mirror, a local path and a file URL keep the name match.",
+      "seam": "wt.sh new, observed through git remote -v and the credential.<lab url>.helper config of a checkout whose origin names an owner",
+      "tests": [
+        "tests/test_worktree_skill.py::TestLabRemote::test_new_adds_no_lab_remote_for_the_same_repository_under_another_owner",
+        "tests/test_worktree_skill.py::TestLabRemote::test_new_gives_the_lab_remote_to_the_same_owner_and_to_an_ownerless_mirror"
+      ]
+    },
+    {
       "id": "lab-worker-manifest",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2808",
