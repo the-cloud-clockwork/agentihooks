@@ -752,7 +752,7 @@ def test_a_refused_recorded_opening_is_recovered_when_the_pump_starts(rig: Rig, 
         (
             {
                 "status": "failed",
-                "error": {"message": "401", "codexErrorInfo": {"responseStreamFailed": {"httpStatusCode": 401}}},
+                "error": {"message": "401", "codexErrorInfo": {"responseStreamDisconnected": {"httpStatusCode": 401}}},
             },
             "401",
         ),
