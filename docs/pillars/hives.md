@@ -2558,8 +2558,11 @@ step; the hub reconciler and the lost hive rules above cover it.
 
 #### The stop and what the tick reports
 
-The stop is an `execution.stop` event published on the swarm's subject ending in `execution.stop.<hive>`, which
-only that hive reads. Its id is `stop:<started event id>`, and its data names the agent, the hive and the reason.
+The stop is an `execution.stop` event published on the swarm's stop stream, on the subject ending in
+`execution.stop.<hive>`, which only that hive reads: a member credential may fetch and acknowledge its own hive's
+stop consumer and no other, and only the hub publishes stops.
+[Execution stops](../reference/swarm-bus-scope.md#execution-stops) lists the stream, the consumer names and the
+grants. The stop's id is `stop:<started event id>`, and its data names the agent, the hive and the reason.
 The first stop sent for a hive creates that hive's durable stop consumer; until then the hive's stop reader finds
 nothing and tries again on its next pass.
 
@@ -2638,7 +2641,7 @@ whose work ended.
 |---|---|---|
 | Finished agents keep their seats and fill a hive's max agents | The controller log for `hub execution stop for <agent>` | No line while finished hub admitted agents are seated: the controller predates pull request #11464; roll it onto a release that carries it. |
 | The controller logs `sent` for the agent after each dedupe window, and the agent stays seated | The hive's log for `hive execution stop` | No line at all: the hive is not reading its stops, because its service predates the stop reader or is not running; restart it as in [Upgrade](#upgrade). The hive logs nothing for a stop it honors, so a quiet log alone proves nothing. `could not reap it; retrying`: the hive's runtime cannot find or reap the session; check herdr on that hive. |
-| The hive logs `hive execution stops for swarm <slug> failed (<error>)` | The error type and message it prints | Fix the cause the error names. A NATS permission error means the hive's bus credential lacks the stop grants: on the workstation root hive, restart the hive service: `hive run` compares the stored root credential's publish and subscribe grant with a fresh mint at start and re-mints it when they differ, logging `hive re-minted the root bus credential in <path>`; a `hive kept the stored root bus credential (<reason>)` line names why it could not, and `agentihooks hive root-bus` mints it by hand. On a member hive, run `agentihooks hive refresh`. |
+| The hive logs `hive execution stops for swarm <slug> failed (<error>)` | The error type and message it prints | Fix the cause the error names. A NATS permission error means the hive's bus credential lacks the stop grants: on the workstation root hive, restart the hive service: `hive run` compares the stored root credential's publish and subscribe grant with a fresh mint at start and re-mints it when they differ, logging `hive re-minted the root bus credential in <path>`; a `hive kept the stored root bus credential (<reason>)` line names why it could not, and `agentihooks hive root-bus` mints it by hand. On a member hive, run `agentihooks hive refresh`, then restart its hive service, which keeps the bus it opened at start. |
 | The tick prints `could not send the stop for <agent>, retrying next tick: failed (<error>)` | The error, NATS from the controller and the controller's bus credentials | Fix the bus; the next pass sends the stop again. |
 
 ### Retiring a hub admitted agent
