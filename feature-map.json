@@ -1,6 +1,28 @@
 {
   "features": [
     {
+      "id": "pull-request-recon-context",
+      "origin": "operator",
+      "ordered_at": "2026-11-21",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-rv-pr-body",
+      "behaviour": "Pull request bodies supply nine authored recon sections; missing or empty sections are named and the engineer fills them from recon while preserving existing authoring content.",
+      "seam": "scripts.pr_body missing_sections, fill and main; the protected pull request workflow and packaged engineer authoring step",
+      "tests": [
+        "tests/test_pr_body_authoring.py::test_existing_template_authoring_sections_remain",
+        "tests/test_pr_body_authoring.py::test_engineer_preserves_first_push_and_ci_requirements",
+        "tests/test_pr_body_authoring.py::test_engineer_fills_body_from_recon",
+        "tests/test_pr_body_authoring.py::test_protected_body_check_runs_on_body_edits",
+        "tests/test_pr_body.py::test_complete_body_passes",
+        "tests/test_pr_body.py::test_each_missing_section_is_named",
+        "tests/test_pr_body.py::test_empty_sections_are_named",
+        "tests/test_pr_body.py::test_fenced_and_commented_headings_do_not_supply_sections",
+        "tests/test_pr_body.py::test_fill_extracts_recon_and_preserves_body",
+        "tests/test_pr_body.py::test_fill_refuses_missing_recon_details",
+        "tests/test_pr_body.py::test_check_event_names_every_missing_section",
+        "tests/test_pr_body.py::test_fill_command_uses_recon_fixture"
+      ]
+    },
+    {
       "id": "tick-waits-end-isolates-agent-failures",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-waits-end-per-agent-isolation",
