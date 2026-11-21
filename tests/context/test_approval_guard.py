@@ -168,6 +168,8 @@ def test_a_github_mcp_review_with_an_approve_event_is_refused(tool_name: str, to
         "gh api repos/o/r/pulls/12/reviews/99/comments -f body='event=APPROVE'",
         "gh api repos/o/r/pulls/12/reviews -F event=@missing.txt",
         "echo COMMENT | gh api repos/o/r/pulls/12/reviews -F event=@-",
+        'echo \'{"event": "APPROVE"}\' && gh api repos/o/r/pulls/12/reviews -f event=COMMENT',
+        'gh pr comment 12 --body \'The guard refuses {"event": "APPROVE"} on pulls/12/reviews\'',
         'gh api graphql -f query=\'mutation($b: String!) { addPullRequestReview(input: {pullRequestId: "PR_1",'
         " event: COMMENT, body: $b}) { clientMutationId } }' -f b=APPROVE",
         "gh api repos/o/r/pulls/12/reviews --input missing.json",
