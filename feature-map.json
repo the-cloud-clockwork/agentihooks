@@ -11153,6 +11153,18 @@
       ]
     },
     {
+      "id": "lab-mutation-protected-runner",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-mutation-grader-runner",
+      "behaviour": "A lab stats or mutant unit is graded by the grader revision's copy of the mutation runner, started in the sandbox from the grader tree bound read only over the worker's private trampolined tree of the head: a head runner that forges kills, fails or answers other stats changes neither the unit's verdict nor its report, and a failing grader runner fails the unit.",
+      "seam": "scripts.ci_lab.executors mutation and _run over a lease's head and grader trees, through the real Sandbox and a runner subprocess",
+      "tests": [
+        "tests/ci_lab/test_executors.py::test_mutation_answers_the_verdict_and_rows_of_the_runner_process_it_starts",
+        "tests/ci_lab/test_executors.py::test_the_grader_trees_runner_decides_a_mutant_unit_whatever_the_head_runner_answers",
+        "tests/ci_lab/test_executors.py::test_the_grader_trees_runner_answers_a_stats_unit_whatever_the_head_runner_answers"
+      ]
+    },
+    {
       "id": "test-seat-through-admission",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-leo-seat-helper",

@@ -51,6 +51,22 @@ if sys.argv[1] == "venv":
     pathlib.Path(sys.argv[-1]).mkdir(parents=True, exist_ok=True)
 """
 GIT = ("git", "-c", "user.name=lab", "-c", "user.email=lab@example.invalid")
+RUNNER = """import json
+import sys
+from pathlib import Path
+
+answers = json.loads(Path(__file__).with_name("answers.json").read_text())
+kind = json.loads(Path(sys.argv[1]).read_text())["kind"]
+Path(sys.argv[2]).write_text(json.dumps(answers[kind]))
+sys.exit(answers["code"])
+"""
+MUTANTS = ("scripts.alpha.x_first__mutmut_1", "scripts.alpha.x_first__mutmut_2")
+REACHING = {
+    "status": 0,
+    "tests": {"scripts.alpha.x_first": ["tests/test_alpha.py::test_a"]},
+    "durations": {"tests/test_alpha.py::test_a": 0.5},
+    "cpu": 0.0,
+}
 
 
 CACHED = {"git": {"hits": 1, "misses": 0}, "uv": {"hits": 1, "misses": 0}}
@@ -536,6 +552,24 @@ def mutation_settings(tmp_path: Path) -> executors.Mutation:
     return executors.Mutation(tmp_path / "cache", tmp_path / "killers.json", 60.0, 4)
 
 
+def answering(tree: Path, code: int, status: str) -> Path:
+    rows = [{"name": mutant, "status": status, "seconds": 0.0} for mutant in MUTANTS]
+    answers = {
+        "code": code,
+        "stats": {"stats": [REACHING], "runner": tree.name},
+        "mutant": {"collection_seconds": 0.0, "rows": rows, "runner": tree.name},
+    }
+    files = {"scripts/__init__.py": "", "scripts/ci_lab/__init__.py": "", "scripts/ci_lab/run_mutation.py": RUNNER}
+    return folder(tree.parent, tree.name, {**files, "scripts/ci_lab/answers.json": json.dumps(answers)})
+
+
+def python_in(venv: Path) -> None:
+    python = venv / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
+    python.chmod(0o755)
+
+
 @pytest.mark.feature("lab-worker-executors")
 def test_mutation_runs_a_stats_unit_with_its_tree_as_root_and_the_stats_cache(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, venv: Recorder, mutation_tree: Path, trampolines: Recorder
@@ -681,6 +715,71 @@ def test_mutation_drops_its_private_tree_when_the_runner_raises(
         )
 
     assert trees.calls == [("own", "h1"), ("drop", mutation_tree)]
+
+
+@pytest.mark.feature("lab-mutation-protected-runner")
+@pytest.mark.parametrize(
+    ("code", "status", "verdict"), [(0, "killed", PASSED), (0, "survived", FAILED), (3, "killed", FAILED)]
+)
+@pytest.mark.usefixtures("bwrap", "trampolines", "venv")
+def test_mutation_answers_the_verdict_and_rows_of_the_runner_process_it_starts(
+    tmp_path: Path, mutation_tree: Path, code: int, status: str, verdict: str
+) -> None:
+    python_in(tmp_path / "venv")
+    head, grader = answering(mutation_tree, code, status), answering(tmp_path / "grader", code, status)
+    pod = pod_of(tmp_path, FakeWorktrees({"h1": head, "g1": grader}))
+
+    finished = executors.mutation(pod, mutation_settings(tmp_path), lease("mutant", "m1", MUTANTS))
+
+    rows = [{"name": mutant, "status": status, "seconds": 0.0} for mutant in MUTANTS]
+    assert finished.outcome == verdict
+    assert report(finished, pod).get("rows") == (None if code else rows)
+
+
+@pytest.mark.feature("lab-mutation-protected-runner")
+@pytest.mark.parametrize(
+    ("grader", "head", "verdict"),
+    [
+        ((0, "survived"), (0, "killed"), FAILED),
+        ((0, "killed"), (3, "survived"), PASSED),
+        ((3, "killed"), (0, "killed"), FAILED),
+    ],
+)
+@pytest.mark.usefixtures("bwrap", "trampolines", "venv")
+def test_the_grader_trees_runner_decides_a_mutant_unit_whatever_the_head_runner_answers(
+    tmp_path: Path, mutation_tree: Path, grader: tuple[int, str], head: tuple[int, str], verdict: str
+) -> None:
+    python_in(tmp_path / "venv")
+    trees = FakeWorktrees({"h1": answering(mutation_tree, *head), "g1": answering(tmp_path / "grader", *grader)})
+    pod = pod_of(tmp_path, trees)
+
+    finished = executors.mutation(pod, mutation_settings(tmp_path), lease("mutant", "m1", MUTANTS))
+
+    code, status = grader
+    rows = [{"name": mutant, "status": status, "seconds": 0.0} for mutant in MUTANTS]
+    graded = {} if code else {"collection_seconds": 0.0, "rows": rows, "runner": "grader"}
+    lookups = {"git": {"hits": 2, "misses": 0}, "uv": {"hits": 1, "misses": 0}}
+    assert finished.outcome == verdict
+    assert report(finished, pod) == {**graded, "seconds": 2.5, "caches": lookups}
+    assert trees.calls == [("lease", "g1"), ("own", "h1"), ("drop", mutation_tree), ("release", "g1")]
+
+
+@pytest.mark.feature("lab-mutation-protected-runner")
+@pytest.mark.usefixtures("bwrap", "trampolines", "venv")
+def test_the_grader_trees_runner_answers_a_stats_unit_whatever_the_head_runner_answers(
+    tmp_path: Path, mutation_tree: Path
+) -> None:
+    python_in(tmp_path / "venv")
+    trees = FakeWorktrees(
+        {"h1": answering(mutation_tree, 3, "killed"), "g1": answering(tmp_path / "grader", 0, "killed")}
+    )
+    pod = pod_of(tmp_path, trees)
+
+    finished = executors.mutation(pod, mutation_settings(tmp_path), lease("stats", "k1", ("tests/test_alpha.py",)))
+
+    lookups = {"git": {"hits": 2, "misses": 0}, "uv": {"hits": 1, "misses": 0}}
+    assert finished.outcome == PASSED
+    assert report(finished, pod) == {"stats": [REACHING], "runner": "grader", "seconds": 2.5, "caches": lookups}
 
 
 @pytest.mark.feature("lab-worker-executors")
