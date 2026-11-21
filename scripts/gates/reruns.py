@@ -8,9 +8,10 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from scripts.gates import log
-from scripts.gates.base import Decision
+from scripts.gates.base import Call, Decision, Who
 from scripts.gates.budget import Budget
 from scripts.gates.identity import program_index, simple_commands
+from scripts.gates.verdicts import Verdicts
 
 PASSED = frozenset({"success", "skipped", "neutral"})
 VALUE_FLAGS = {"-j": "job", "--job": "job", "-R": "repo", "--repo": "repo"}
@@ -98,7 +99,7 @@ class RerunBudget:
     def matches(self, call):
         return call.tool == "Bash" and "gh" in call.command and "rerun" in call.command
 
-    def decide(self, call, who, state):
+    def decide(self, call: Call, who: Who, state: Verdicts) -> Decision:
         if not who.pinned:
             return Decision()
         for target in targets(call.command):
@@ -106,7 +107,7 @@ class RerunBudget:
             if not found or exempt(found):
                 continue
             head = found[0]["head_sha"]
-            allowed, spent = Budget(state.slug, self.name, state.home).spend(head, "reruns", self.cap)
+            allowed, spent = Budget(state.slug, self.name, state.home).spend(head, "reruns", self.cap, call.tool_use_id)
             if not allowed:
                 return Decision.deny(refusal(who.swarm, head, self.cap))
             reason = f"CI reruns {spent} of {self.cap} on head {head[:12]}"
@@ -116,3 +117,6 @@ class RerunBudget:
 
 def released(payload: dict[str, Any], home: Path | None = None) -> None:
     """Give back the CI reruns counted for a call the PreToolUse hook denied, since a denied call never runs."""
+    call = Call.from_payload(payload)
+    if RerunBudget().matches(call):
+        Budget(Who.from_env().swarm, RerunBudget.name, home).refund(call.tool_use_id)
