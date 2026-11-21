@@ -991,6 +991,98 @@ def test_a_spelled_heredoc_token_hides_no_later_heredoc_body() -> None:
     assert reason == decide(_bash("cat .env"))
 
 
+SUBSTITUTIONS_THAT_READ_NO_CREDENTIAL = [
+    'x=$(echo ")"; date)',
+    "echo \"$(printf ')' && date)\"",
+    "x=$( (cd /; echo ')') ; date)",
+    "echo $((1 + (2 * 3)))",
+    'echo "$(" ; date',
+    "x=$(printf safe)$(date)",
+    "`printf a`cat .env`b`",
+    'echo "$(gh api rate_limit --jq ")")"',
+]
+
+BALANCED_SUBSTITUTION_READS = [
+    'x=$(echo ")"; cat .env)',
+    'x=$(echo ")" | cat .env)',
+    "echo \"$(printf ')' && cat .env)\"",
+    'x=$(cat "a)" .env)',
+    "x=$(true; cat .env)",
+    "x=$(echo \\); cat .env)",
+    'x=$(echo "\\")"; cat .env)',
+    "x=$(echo '\\'; cat .env)",
+    'x=$(echo "$(echo ")")"; cat .env)',
+    "x=$( (cd /; echo ')') ; cat .env)",
+    "x=$(printf safe)$(true; cat .env)",
+    "x=`true; cat .env`",
+    'diff <(echo ")"; cat .env) /dev/null',
+]
+
+HEREDOC_SUBSTITUTIONS_THAT_READ_NO_CREDENTIAL = [
+    '$(printf ")"; date)',
+    '\\$(printf ")"; cat .env)',
+    "<(printf ')'; cat .env)",
+    "`printf a`cat .env`b`",
+]
+
+BALANCED_HEREDOC_SUBSTITUTION_READS = [
+    '$(printf ")"; cat .env)',
+    '$(cat "a)" .env)',
+    "$(printf ')' | cat .env)",
+    "$(true; cat .env)",
+    "`true; cat .env`",
+    '$(echo "$(echo ")")"; cat .env)',
+    "\\\\$(printf ')'; cat .env)",
+]
+
+
+@pytest.mark.feature("credential-guard-balanced-substitutions")
+@pytest.mark.parametrize("command", SUBSTITUTIONS_THAT_READ_NO_CREDENTIAL)
+def test_a_substitution_that_reads_no_credential_passes(command: str) -> None:
+    assert decide(_bash(command)) is None
+
+
+@pytest.mark.feature("credential-guard-balanced-substitutions")
+@pytest.mark.parametrize("command", BALANCED_SUBSTITUTION_READS)
+def test_a_credential_read_in_a_balanced_command_substitution_is_refused(command: str) -> None:
+    reason = decide(_bash(command))
+
+    assert reason is not None
+    assert reason == decide(_bash("cat .env"))
+
+
+@pytest.mark.feature("credential-guard-balanced-substitutions")
+def test_a_token_print_in_a_balanced_command_substitution_is_refused() -> None:
+    reason = decide(_bash('echo "$(echo ")"; gh auth token)"'))
+
+    assert reason is not None
+    assert reason == decide(_bash("gh auth token"))
+
+
+@pytest.mark.feature("credential-guard-balanced-substitutions")
+@pytest.mark.parametrize("delimiter", ["EOF", "-EOF"])
+@pytest.mark.parametrize("body", HEREDOC_SUBSTITUTIONS_THAT_READ_NO_CREDENTIAL)
+def test_an_unquoted_heredoc_substitution_that_reads_no_credential_passes(delimiter: str, body: str) -> None:
+    assert decide(_bash(f"cat <<{delimiter}\n{body}\nEOF")) is None
+
+
+@pytest.mark.feature("credential-guard-balanced-substitutions")
+@pytest.mark.parametrize("delimiter", ["EOF", "-EOF"])
+@pytest.mark.parametrize("body", BALANCED_HEREDOC_SUBSTITUTION_READS)
+def test_a_credential_read_in_a_balanced_heredoc_substitution_is_refused(delimiter: str, body: str) -> None:
+    reason = decide(_bash(f"cat <<{delimiter}\n{body}\nEOF"))
+
+    assert reason is not None
+    assert reason == decide(_bash("cat .env"))
+
+
+@pytest.mark.feature("credential-guard-balanced-substitutions")
+@pytest.mark.parametrize("delimiter", ["'EOF'", '"EOF"'])
+@pytest.mark.parametrize("body", BALANCED_HEREDOC_SUBSTITUTION_READS)
+def test_a_quoted_heredoc_balanced_substitution_stays_literal(delimiter: str, body: str) -> None:
+    assert decide(_bash(f"cat <<{delimiter}\n{body}\nEOF")) is None
+
+
 AWK_ENVIRON_VALUE_READS = [
     "awk 'BEGIN{for(k in ENVIRON) if(k ~ /^AGENTIHOOKS_(HIVE|SWARM)/) print k\"=\"ENVIRON[k]}'",
     "gawk 'BEGIN{print ENVIRON[\"DATABASE_URL\"]}'",

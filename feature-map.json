@@ -293,6 +293,22 @@
       ]
     },
     {
+      "id": "credential-guard-balanced-substitutions",
+      "origin": "regression",
+      "ordered_at": "2026-11-21",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-cred-guard-balanced-substitution",
+      "behaviour": "The credential guard reads each dollar and process command substitution to its balanced closing parenthesis, skipping quoted, escaped and nested parentheses, and each backtick span to its close, then judges the body as a command split on its own separators. A dotenv read or a token print inside such a substitution is refused at the top level of a Bash command and in an unquoted heredoc body, even when the body holds a quoted parenthesis or a semicolon. Safe substitutions, arithmetic, an unbalanced opener, quoted heredoc bodies and escaped markers pass.",
+      "seam": "hooks.context.credential_guard.decide on Bash payloads with command substitutions and heredoc bodies",
+      "tests": [
+        "tests/test_credential_guard.py::test_a_substitution_that_reads_no_credential_passes",
+        "tests/test_credential_guard.py::test_a_credential_read_in_a_balanced_command_substitution_is_refused",
+        "tests/test_credential_guard.py::test_a_token_print_in_a_balanced_command_substitution_is_refused",
+        "tests/test_credential_guard.py::test_an_unquoted_heredoc_substitution_that_reads_no_credential_passes",
+        "tests/test_credential_guard.py::test_a_credential_read_in_a_balanced_heredoc_substitution_is_refused",
+        "tests/test_credential_guard.py::test_a_quoted_heredoc_balanced_substitution_stays_literal"
+      ]
+    },
+    {
       "id": "credential-guard-reads-heredoc-commands",
       "origin": "regression",
       "ordered_at": "2026-11-19",
