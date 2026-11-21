@@ -309,7 +309,7 @@ def _moved(words: list[str], base: Path | None) -> Path | None:
     if words[0] == "popd" or any(target == "-" or target.startswith("+") for target in targets):
         return None
     if not targets:
-        return None if words[0] == "pushd" else _located("~", base)
+        return None if words[0] == "pushd" else _located("~", None)
     return _located(targets[0], base)
 
 

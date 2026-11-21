@@ -273,6 +273,12 @@ def test_only_the_read_only_roles_carry_the_shell_guard() -> None:
         ("ls >&1X", "1X"),
         ("sort --output=app=1.py x", "app=1.py"),
         ("sed --expression=s/a/b/ -i app.py", "app.py"),
+        ("rm > /dev/null app.py", "app.py"),
+        ("echo $(echo 'a')>app.py", "app.py"),
+        ("echo `rm app.py", "app.py"),
+        ("A=b=c rm app.py", "app.py"),
+        ("dd of=app.py if=~/scratchpad/a", "app.py"),
+        ("tar x", UNKNOWN),
     ],
 )
 def test_a_reviewer_refuses_each_shell_file_write(home: Path, command: str, target: str) -> None:
@@ -342,6 +348,8 @@ def test_a_reviewer_refuses_each_shell_file_write(home: Path, command: str, targ
         ("git reflog expire --all", "runs git reflog"),
         ("git submodule update", "runs git submodule"),
         ("git worktree", "runs git worktree"),
+        ("gh --repo=o=r pr checkout 12", "runs gh pr checkout"),
+        ("echo 'git push' | bash -s", "feeds a script to bash on its input"),
     ],
 )
 def test_a_reviewer_refuses_git_writes_and_hidden_writes(home: Path, command: str, found: str) -> None:
@@ -443,6 +451,10 @@ def test_a_reviewer_refuses_git_writes_and_hidden_writes(home: Path, command: st
         "git ls-files | xargs -I",
         "gh pr view -R",
         "git -C",
+        "cat < rm app.py",
+        "rm ~/scratchpad/.X",
+        "Xvfb :1",
+        "bash -x 'touch app.py'",
     ],
 )
 def test_a_reviewer_keeps_reads_and_writes_inside_its_own_folders(home: Path, command: str) -> None:
@@ -468,12 +480,13 @@ def test_a_bare_cd_moves_to_the_home_folder(tmp_path: Path, monkeypatch: pytest.
 
 
 @pytest.mark.feature("read-only-roles-refuse-shell-writes")
-def test_a_bare_pushd_or_popd_leaves_the_folder_unknown(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_folder_stack_move_leaves_the_folder_unknown(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     elsewhere, roots = tmp_path / "elsewhere", [(tmp_path / "home").resolve()]
 
     assert read_only_shell.write_reason("pushd && touch notes.md", elsewhere, roots) == "writes notes.md"
     assert read_only_shell.write_reason("popd && touch notes.md", elsewhere, roots) == "writes notes.md"
+    assert read_only_shell.write_reason("cd - && touch notes.md", elsewhere, roots) == "writes notes.md"
 
 
 @pytest.mark.feature("read-only-roles-refuse-shell-writes")
@@ -481,6 +494,8 @@ def test_a_nested_script_judges_relative_paths_from_the_shell_folder(home: Path)
     scratch = home / "scratchpad"
 
     assert _found(home, "bash -c 'touch notes.md'", scratch) == ""
+    assert _found(home, "echo $(touch notes.md)", scratch) == ""
+    assert _found(home, "cat <<EOF\n$(touch notes.md)\nEOF", scratch) == ""
     assert _found(home, "bash -c 'touch notes.md'") == "writes notes.md"
 
 
