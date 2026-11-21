@@ -11358,7 +11358,7 @@
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-gates-live-proof",
       "behaviour": "Static execution exclusions come only from the protected grader catalog, preserve each declared reason, reject malformed policy and retain Actions authority for a job the lab grades only partly. Older protected revisions without a catalog retain their previous plan.",
-      "seam": "scripts.ci_lab.static_exclusions.read and scripts.ci_lab.scheduler.MirrorExpander.expand over protected git objects",
+      "seam": "scripts.ci_lab.static_exclusions.read and scripts.ci_lab.scheduler.MirrorExpander.expand over protected git objects, with scripts.ci_lab.delivery and scripts.ci_lab_verdict.authority consuming the same protected policy",
       "tests": [
         "tests/ci_lab/test_static_exclusions.py::test_the_policy_preserves_each_declared_reason",
         "tests/ci_lab/test_static_exclusions.py::test_invalid_exclusion_records_are_refused",
@@ -11366,7 +11366,11 @@
         "tests/ci_lab/test_static_exclusions.py::test_a_missing_protected_catalog_preserves_units_and_ignores_the_head_catalog",
         "tests/ci_lab/test_static_exclusions.py::test_invalid_protected_policy_refuses_expansion",
         "tests/ci_lab/test_static_exclusions.py::test_a_partially_graded_job_keeps_its_actions_authority",
-        "tests/ci_lab/test_static_exclusions.py::test_integrated_grades_use_the_integrated_head_policy"
+        "tests/ci_lab/test_static_exclusions.py::test_reusable_step_exclusions_remove_the_calling_jobs_authority",
+        "tests/ci_lab/test_static_exclusions.py::test_integrated_grades_use_the_integrated_head_policy",
+        "tests/ci_lab/test_static_exclusions.py::test_actions_and_scheduler_share_the_protected_authority_policy",
+        "tests/ci_lab/test_static_exclusions.py::test_actions_refuses_malformed_protected_exclusions",
+        "tests/ci_lab/test_static_exclusions.py::test_lab_off_keeps_actions_ownership_even_with_invalid_policy"
       ]
     },
     {

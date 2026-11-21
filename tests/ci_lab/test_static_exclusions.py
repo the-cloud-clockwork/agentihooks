@@ -139,6 +139,16 @@ def test_a_partially_graded_job_keeps_its_actions_authority(
     assert plan.authoritative == frozenset({"type-gate"})
 
 
+@pytest.mark.feature("lab-static-execution-exclusions")
+def test_reusable_step_exclusions_remove_the_calling_jobs_authority(
+    expand: Callable[[str | None, str | None, Priority, tuple[str, ...]], tuple[Any, str, str]],
+) -> None:
+    policy = json.dumps({"semgrep/charts/helm": {"reason": "docker"}})
+    plan, _, _ = expand(policy, None, Priority.PULL_REQUEST, ("lint", "semgrep", "type-gate"))
+    assert members(plan) == {NETWORK, OFFLINE, TYPES}
+    assert plan.authoritative == frozenset({"lint", "type-gate"})
+
+
 @pytest.mark.parametrize("tier", [Priority.PROMOTION, Priority.BACKFILL])
 @pytest.mark.feature("lab-static-execution-exclusions")
 def test_integrated_grades_use_the_integrated_head_policy(
@@ -148,3 +158,85 @@ def test_integrated_grades_use_the_integrated_head_policy(
     plan, _, head = expand(POLICY, policy, tier, ())
     assert members(plan) == {NETWORK, TYPES}
     assert plan.grader == head
+
+
+@pytest.fixture
+def authority_tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[[str | None], Path]:
+    from tests.ci_lab.test_delivery import block, tree
+
+    def build(policy: str | None) -> Path:
+        configured = ["lint", "semgrep", "unit"]
+        grader = tree(
+            tmp_path / "grader",
+            block(authoritative=configured, queue={"authoritative": configured}),
+        )
+        (grader / ".github/workflows/test.yml").write_text(json.dumps({"jobs": {job: {} for job in configured}}))
+        catalog = grader / static_exclusions.PATH
+        catalog.parent.mkdir(parents=True)
+        if policy is not None:
+            catalog.write_text(policy)
+        head = tmp_path / "head"
+        (head / static_exclusions.PATH).parent.mkdir(parents=True)
+        (head / static_exclusions.PATH).write_text(json.dumps({"unit/step": {"reason": "head only"}}))
+        monkeypatch.chdir(head)
+        return grader
+
+    return build
+
+
+@pytest.mark.feature("lab-static-execution-exclusions")
+@pytest.mark.parametrize(
+    ("policy", "expected"),
+    [
+        (None, ["lint", "semgrep", "unit"]),
+        ("{}", ["lint", "semgrep", "unit"]),
+        (json.dumps({"linting/step": {"reason": "different job"}}), ["lint", "semgrep", "unit"]),
+        (
+            json.dumps(
+                {
+                    "lint/network": {"reason": "network"},
+                    "semgrep/charts/helm": {"reason": "docker"},
+                }
+            ),
+            ["unit"],
+        ),
+    ],
+)
+def test_actions_and_scheduler_share_the_protected_authority_policy(
+    authority_tree: Callable[[str | None], Path], policy: str | None, expected: list[str]
+) -> None:
+    from scripts import ci_lab_verdict
+    from scripts.ci_lab import delivery
+
+    grader = authority_tree(policy)
+    assert delivery.authoritative(grader) == tuple(expected)
+    assert delivery.cutover(grader, {}) == expected
+    assert delivery.queue_cutover(grader, {}) == expected
+    for event in ("pull_request", "merge_group"):
+        output = ci_lab_verdict.authority(grader, event, {})
+        assert json.loads(output["authoritative"]) == {job: True for job in expected}
+
+
+@pytest.mark.feature("lab-static-execution-exclusions")
+@pytest.mark.parametrize("event", ["pull_request", "merge_group"])
+def test_actions_refuses_malformed_protected_exclusions(
+    authority_tree: Callable[[str | None], Path], event: str
+) -> None:
+    from scripts import ci_lab_verdict
+
+    grader = authority_tree('{"lint/network": {}}')
+    with pytest.raises(ValueError, match="reason"):
+        ci_lab_verdict.authority(grader, event, {})
+
+
+@pytest.mark.feature("lab-static-execution-exclusions")
+@pytest.mark.parametrize("event", ["pull_request", "merge_group"])
+def test_lab_off_keeps_actions_ownership_even_with_invalid_policy(
+    authority_tree: Callable[[str | None], Path], event: str
+) -> None:
+    from scripts import ci_lab_verdict
+    from scripts.ci_lab import delivery
+
+    grader = authority_tree("invalid")
+    output = ci_lab_verdict.authority(grader, event, {delivery.LAB_OFF: "true"})
+    assert json.loads(output["authoritative"]) == {}
