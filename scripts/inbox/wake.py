@@ -332,7 +332,7 @@ def _status(herdr, agent):
 def _pane_state(redis, slug, herdr, agent, now_ms, quiet):
     """A ready pane counts as in use while the operator prompted it inside the quiet window or its input line holds text.
     A remote pane is read from its hook heartbeat; the local herdr cannot see it."""
-    remote = reports.host(agent)
+    remote = reports.host(agent) or reports.admitted(agent)
     state = _beat_state(redis, slug, agent, now_ms) if remote else _status(herdr, agent)
     if state not in READY:
         return state
@@ -359,7 +359,7 @@ def _wake(redis, slug, herdr, agent, prompted):
     if agent.name in prompted:
         return True
     try:
-        if host := reports.host(agent):
+        if host := reports.host(agent) or reports.admitted(agent):
             if reports.Reports(redis).read(host) is None:
                 return False
             _hive_wake(redis, host, slug, agent)
