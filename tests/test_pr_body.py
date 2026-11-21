@@ -1,9 +1,10 @@
-import importlib
 import json
 from pathlib import Path
 from types import ModuleType
 
 import pytest
+
+from scripts import pr_body
 
 pytestmark = pytest.mark.unit
 
@@ -22,7 +23,7 @@ SECTIONS = (
 
 @pytest.fixture
 def api() -> ModuleType:
-    return importlib.import_module("scripts.pr_body")
+    return pr_body
 
 
 def body_without(omitted: str = "") -> str:
@@ -116,3 +117,43 @@ def test_fill_command_uses_recon_fixture(api: ModuleType, tmp_path: Path, capsys
     assert capsys.readouterr().out == body.read_text()
     assert api.missing_sections(body.read_text()) == []
     assert "Original evidence." in body.read_text()
+
+
+@pytest.mark.feature("pull-request-recon-context")
+def test_invalid_recon_is_refused(api: ModuleType) -> None:
+    with pytest.raises(ValueError, match="Invalid recon"):
+        api.fill("## What will be built\n\nIncomplete recon.")
+
+
+@pytest.mark.feature("pull-request-recon-context")
+def test_body_file_check_and_new_body_fill(api: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    recon = tmp_path / "recon.md"
+    body = tmp_path / "body.md"
+    recon.write_text(recon_text())
+    assert api.main(["fill", "--recon", str(recon), "--body", str(body)]) == 0
+    assert capsys.readouterr().out == body.read_text()
+    assert api.main(["check", "--body", str(body)]) == 0
+    assert capsys.readouterr().out == "Pull request body sections passed.\n"
+
+
+@pytest.mark.feature("pull-request-recon-context")
+@pytest.mark.parametrize(
+    "payload",
+    ["{", "{}", '{"pull_request": {"body": 42}}', '{"pull_request": []}'],
+    ids=["malformed", "missing-body", "wrong-type", "wrong-container"],
+)
+def test_bad_event_fails_closed(
+    api: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str], payload: str
+) -> None:
+    event = tmp_path / "event.json"
+    event.write_text(payload)
+    assert api.main(["check", "--event", str(event)]) == 1
+    assert capsys.readouterr().out.startswith("Pull request body error: ")
+
+
+@pytest.mark.feature("pull-request-recon-context")
+def test_null_body_names_all_sections(api: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    event = tmp_path / "event.json"
+    event.write_text('{"pull_request": {"body": null}}')
+    assert api.main(["check", "--event", str(event)]) == 1
+    assert capsys.readouterr().out.splitlines() == [f"Missing or empty section: {name}" for name in SECTIONS]

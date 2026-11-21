@@ -5,7 +5,7 @@ name: Gate Protected
 on:
   pull_request_target:
     branches: [dev]
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, edited]
 
 concurrency:
   group: gate-protected-${{ github.event.pull_request.number }}
@@ -52,6 +52,10 @@ jobs:
         env:
           PR: ${{ github.event.pull_request.number }}
         run: git fetch --no-tags origin "refs/pull/$PR/head"
+
+      - name: Grade the pull request body with protected code
+        id: body
+        run: python -m scripts.pr_body check --event "$GITHUB_EVENT_PATH"
 
       - name: Grade the head with the protected gate logic
         id: grade
