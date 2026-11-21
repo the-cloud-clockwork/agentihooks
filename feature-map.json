@@ -6725,6 +6725,18 @@
       ]
     },
     {
+      "id": "panic-sweep-spares-release-runs",
+      "origin": "regression",
+      "ordered_at": "2026-11-21",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-sweep-spares-chart-release",
+      "behaviour": "The panic cancel sweep, from the panic button and from the tick pass, leaves the release workflow runs on main running: the Helm chart release workflow run, the PyPI publish and Release dispatches and the Pages push. It still cancels the runs on the panicking swarm's agent branches and the workflow run event runs on main whose title names one of those branches, so a panic never drops a chart version that a hive installs from the registry.",
+      "seam": "swarm panic on and the tick pass panic sweep",
+      "tests": [
+        "tests/swarm/test_panic_scope.py::test_the_panic_button_leaves_release_runs_on_main_running",
+        "tests/swarm/test_panic_scope.py::test_the_tick_sweep_leaves_release_runs_on_main_running"
+      ]
+    },
+    {
       "id": "panic-fix-branch-first-push",
       "origin": "regression",
       "ordered_at": "2026-11-16",
