@@ -5024,6 +5024,43 @@
       ]
     },
     {
+      "id": "forge-change-request-seam",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-rv-forge",
+      "behaviour": "A reviewer reads a GitHub pull request or GitLab merge request as one change request (title, body, head, diff, changed files, check states) and posts a review comment on it, with the forge picked from the repository remote host, through agentihooks forge read and post.",
+      "seam": "scripts.forge.github.GitHubForge and scripts.forge.gitlab.GitLabForge read and post through an injected runner or transport; scripts.forge.remote.pick chooses one by host; scripts.forge.cli.main is the delegated forge command",
+      "tests": [
+        "tests/forge/test_github.py::test_github_reads_a_recorded_pull_request_into_a_change_request",
+        "tests/forge/test_github.py::test_github_posts_a_review_comment_with_the_body_on_standard_input",
+        "tests/forge/test_github.py::test_a_failed_gh_call_raises_with_its_error_text",
+        "tests/forge/test_gitlab.py::test_gitlab_reads_a_recorded_merge_request_into_a_change_request",
+        "tests/forge/test_gitlab.py::test_gitlab_reads_every_diffs_page_until_a_short_page",
+        "tests/forge/test_gitlab.py::test_a_merge_request_without_pipeline_or_description_reads_empty",
+        "tests/forge/test_gitlab.py::test_gitlab_posts_a_review_comment_as_a_merge_request_note",
+        "tests/forge/test_gitlab.py::test_the_default_transport_sends_one_request_through_urlopen",
+        "tests/forge/test_remote.py::test_a_remote_url_parses_into_host_and_repository_path",
+        "tests/forge/test_remote.py::test_a_url_without_host_and_owner_is_refused_without_its_credentials",
+        "tests/forge/test_remote.py::test_the_picker_names_the_forge_from_the_remote_host",
+        "tests/forge/test_remote.py::test_a_host_that_names_no_forge_is_refused",
+        "tests/forge/test_remote.py::test_the_picker_returns_github_for_a_github_remote",
+        "tests/forge/test_remote.py::test_the_picker_returns_gitlab_with_the_token_from_the_environment",
+        "tests/forge/test_remote.py::test_an_explicit_kind_overrides_the_remote_host",
+        "tests/forge/test_remote.py::test_gitlab_without_a_token_is_refused",
+        "tests/forge/test_remote.py::test_the_origin_remote_is_read_from_git",
+        "tests/forge/test_remote.py::test_a_checkout_without_an_origin_remote_is_refused",
+        "tests/forge/test_cli.py::test_the_cli_delegates_forge_to_this_module",
+        "tests/forge/test_cli.py::test_read_prints_the_change_request_as_json",
+        "tests/forge/test_cli.py::test_the_forge_help_names_every_command_and_option",
+        "tests/forge/test_cli.py::test_a_missing_command_or_body_file_is_a_usage_error",
+        "tests/forge/test_cli.py::test_post_reads_the_body_file_and_prints_the_comment_url",
+        "tests/forge/test_cli.py::test_post_reads_the_body_from_standard_input",
+        "tests/forge/test_cli.py::test_the_origin_remote_of_the_current_checkout_is_the_default",
+        "tests/forge/test_cli.py::test_a_forge_failure_prints_its_reason_and_returns_one",
+        "tests/forge/test_cli.py::test_a_failing_forge_call_prints_its_reason_and_returns_one",
+        "tests/forge/test_cli.py::test_a_missing_body_file_prints_its_reason_and_returns_one"
+      ]
+    },
+    {
       "id": "ledger-event-relay",
       "origin": "inventory",
       "behaviour": "The ledger event relay publishes each unsent outbox row once on its subject in revision order with only its catalogued fields, a crash between publish and mark never duplicates an event, and a row the bus refuses as too large never holds back the rows after it.",
@@ -6025,6 +6062,20 @@
       "tests": [
         "tests/swarm_ledger/test_quota_capacity_panel.py::test_each_quota_row_shows_the_balance_state_and_routing_left_even_when_the_tick_decided_otherwise",
         "tests/swarm_ledger/test_quota_capacity_panel.py::test_an_unknown_routing_reading_shows_a_dash"
+      ]
+    },
+    {
+      "id": "planners-first-rule",
+      "origin": "regression",
+      "ordered_at": "2026-11-21",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-planners-first-rule",
+      "behaviour": "A package rule sends work that is small in context, vague or wider than one pull request to a planner before any engineer or ci agent claims it: the master opens a phase with automatic planning, keeps the plan lane cap above zero, focuses the plan task and never hand writes the spec; the planner writes the whole plan with slice markers; only a small self explanatory change stays standalone; the plan publishing roles and skills point at the rule and no package file makes operator orders or follow ups standalone tasks; the swarm planner skill plans one thin task as well as a phase.",
+      "seam": "profiles/package/rules/planners-first.md, the Plans versus standalone tasks sections of the master and planner roles and skills and the take-master and init-swarm skills, and the swarm planner skill",
+      "tests": [
+        "tests/test_package_planners_first_rule.py::test_rule_sends_thin_vague_or_wide_work_to_a_planner_first",
+        "tests/test_package_planners_first_rule.py::test_plan_publishers_point_at_the_rule_instead_of_the_standalone_line",
+        "tests/test_package_planners_first_rule.py::test_no_package_file_keeps_the_standalone_line",
+        "tests/test_package_planners_first_rule.py::test_planner_skill_plans_one_thin_task_as_well_as_a_phase"
       ]
     },
     {
