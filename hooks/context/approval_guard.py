@@ -25,8 +25,7 @@ _FIELD = re.compile(r"(?i)^(?:--(?:raw-)?field=|-f)?event=(.*)$")
 _BODY = re.compile(r"""(?i)\\?["']event\\?["']\s*:\s*\\?["']approve\\?["']""")
 _INLINE = re.compile(r"(?i)\bevent\s*:\s*approve\b")
 _VARIABLE = re.compile(r"\bevent\s*:\s*\$(\w+)")
-_FILE = re.compile(r"^(?:--input=(.+)|(?:[^=@]*=)?@(.+))")
-_STDIN = frozenset({"-", "@-"})
+_FILE = re.compile(r"^(?:--input=(.+)|(?:[^=@]*=|-[A-Za-z])?@(.+))")
 
 
 def _subcommand(words: list[str]) -> list[str]:
@@ -57,7 +56,8 @@ def _events(words: list[str], cwd: str) -> list[str]:
 def _text(words: list[str], command: str, cwd: str) -> str:
     """Return the text one call sends: its own words, the files it reads, and the whole command line when it reads
     its body from stdin, which a heredoc or an earlier pipeline stage supplies."""
-    stdin = [command] if _STDIN.intersection(words) else []
+    reads_stdin = any(word == "-" or word.endswith(("=-", "@-")) for word in words)
+    stdin = [command] if reads_stdin else []
     return "\n".join([*words, *_files(words, cwd), *stdin])
 
 
@@ -118,7 +118,7 @@ def refusal(payload: dict[str, Any]) -> str | None:
     tool_name = str(payload.get("tool_name"))
     tool_input: dict[str, Any] = payload.get("tool_input") or {}
     if tool_name == "Bash":
-        approves = _bash_approves(str(tool_input.get("command")), str(payload.get("cwd")))
+        approves = _bash_approves(str(tool_input.get("command")), str(payload.get("cwd") or ""))
     else:
         approves = "github" in tool_name.lower() and str(tool_input.get("event")).upper() == "APPROVE"
     return REFUSAL if approves else None

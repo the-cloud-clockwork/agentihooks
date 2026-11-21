@@ -68,6 +68,8 @@ def test_gh_pr_review_with_approve_is_refused(command: str) -> None:
         "gh api --hostname github.com repos/o/r/pulls/12/reviews --field=event=APPROVE",
         'echo "{\\"event\\":\\"APPROVE\\"}" | gh api repos/o/r/pulls/12/reviews --input -',
         'echo \'{"event":"APPROVE"}\' | curl -X POST https://api.github.com/repos/o/r/pulls/12/reviews -d @-',
+        'echo \'{"event":"APPROVE"}\' | gh api repos/o/r/pulls/12/reviews --input=-',
+        'echo \'{"event":"APPROVE"}\' | curl https://api.github.com/repos/o/r/pulls/12/reviews --data-binary=@-',
         'gh api repos/o/r/pulls/12/reviews --input - <<\'EOF\'\n{"event": "APPROVE", "body": "ok"}\nEOF',
         'echo \'{"event":"APPROVE"}\' | gh api repos/o/r/pulls/12/reviews --input -',
         'curl -X POST https://api.github.com/repos/o/r/pulls/12/reviews -d \'{"event":"APPROVE"}\'',
@@ -86,6 +88,7 @@ def test_a_rest_review_with_an_approve_event_is_refused(command: str) -> None:
         "gh api repos/o/r/pulls/12/reviews --input=review.json",
         "curl -X POST https://api.github.com/repos/o/r/pulls/12/reviews -d @review.json",
         "gh api repos/o/r/pulls/12/reviews -F event=@event.txt",
+        "curl -X POST https://api.github.com/repos/o/r/pulls/12/reviews -d@review.json",
     ],
 )
 def test_a_rest_review_whose_input_file_approves_is_refused(tmp_path: Path, command: str) -> None:
@@ -178,6 +181,17 @@ def test_a_github_mcp_review_with_an_approve_event_is_refused(tool_name: str, to
 )
 def test_comments_change_requests_and_mentions_pass(command: str) -> None:
     hook_manager._check_shell_guards(_bash(command))
+
+
+@pytest.mark.feature("agent-sessions-cannot-approve-pull-requests")
+def test_an_input_file_resolves_against_the_working_directory_when_the_call_names_no_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "review.json").write_text('{"event": "APPROVE"}')
+    monkeypatch.chdir(tmp_path)
+    command = {"command": "gh api repos/o/r/pulls/12/reviews --input review.json"}
+    with pytest.raises(BlockAction, match=REFUSED):
+        hook_manager._check_shell_guards({"tool_name": "Bash", "tool_input": command})
 
 
 @pytest.mark.feature("agent-sessions-cannot-approve-pull-requests")
