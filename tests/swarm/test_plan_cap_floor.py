@@ -6,8 +6,9 @@ from typing import Any
 
 import pytest
 
-from scripts.swarm import capacity, dispatcher
+from scripts.swarm import capacity, dispatcher, freeze
 from scripts.swarm.store import AUTO_SCALING, MANUAL_SCALING, AgentRecord, RedisStore, SwarmConfig
+from scripts.swarm_ledger.repository import hierarchy
 from tests.swarm.test_capacity import account
 from tests.swarm.test_cli import env, run
 from tests.swarm.test_dispatcher import SLUG, Ledger, doc, home, shipped, store, task
@@ -104,6 +105,21 @@ def test_a_plan_ceiling_already_granted_is_unchanged() -> None:
     _, decision, _ = scaled([], {"eng": 3, "ci": 0, "plan": 1}, host=None)
     assert decision is not None
     assert decision["ceilings"] == {"plan": 1, "ci": 0, "eng": 1}
+
+
+@pytest.mark.feature("swarm-plan-cap-floor")
+@pytest.mark.parametrize("scaling", [AUTO_SCALING, MANUAL_SCALING])
+def test_a_frozen_plan_task_gets_no_planner_seat_under_a_stored_zero_cap(scaling: str) -> None:
+    found = {**ledger(("plan", "open"), ("eng", "open")), "freezes": [{"verb": "freeze", "target": "tasks/t0"}]}
+    graph = hierarchy.project(found)[0]
+    plans = [row for row in found["tasks"] if row["lane"] == "plan"]
+    assert all(freeze.held(row, found, graph, "") for row in plans)
+    demand = {"eng": 0, "ci": 0, "plan": sum(not freeze.held(row, found, graph, "") for row in plans)}
+    config, decision, placed = scaled(live(eng=1), demand, scaling=scaling, caps=(1, 0, 0))
+    assert config.max_plan == 0
+    assert decision is None or decision["ceilings"]["plan"] == 0
+    assert placed["plan"] == 0
+    assert dispatcher.lane_caps(config, found)["plan"] == 1
 
 
 def ledger(*tasks: tuple[str, str]) -> dict[str, Any]:

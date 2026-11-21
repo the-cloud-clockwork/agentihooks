@@ -4218,6 +4218,7 @@
         "tests/swarm/test_plan_cap_floor.py::test_the_plan_seat_comes_from_the_larger_lane_ceiling",
         "tests/swarm/test_plan_cap_floor.py::test_the_ceilings_are_unchanged_without_ready_plan_work",
         "tests/swarm/test_plan_cap_floor.py::test_a_plan_ceiling_already_granted_is_unchanged",
+        "tests/swarm/test_plan_cap_floor.py::test_a_frozen_plan_task_gets_no_planner_seat_under_a_stored_zero_cap",
         "tests/swarm/test_plan_cap_floor.py::test_the_lane_caps_keep_one_planner_while_a_plan_task_is_open",
         "tests/swarm/test_plan_cap_floor.py::test_the_lane_caps_keep_a_stored_zero_without_open_plan_work",
         "tests/swarm/test_plan_cap_floor.py::test_the_lane_caps_keep_a_stored_plan_cap_above_one",
