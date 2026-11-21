@@ -320,3 +320,17 @@ def test_compare_runs_both_windows_together_and_fails_when_either_side_fails(tmp
     upload = next(step for step in compare["steps"] if step.get("uses") == "./.github/actions/retry-upload")
     assert upload["with"]["name"] == "compare-pair-${{ matrix.pair }}"
     assert upload["if"] == "always()"
+
+
+@pytest.mark.parametrize(("workflow", "job"), [("hierarchy-cpu.yml", "load"), ("ledger-load.yml", "compare")])
+def test_each_pair_upload_keeps_the_logs_of_both_ledger_servers_of_each_side(workflow: str, job: str) -> None:
+    steps = yaml.safe_load((ROOT / ".github/workflows" / workflow).read_text())["jobs"][job]["steps"]
+    [upload] = [step for step in steps if step.get("uses", "").endswith(".github/actions/retry-upload")]
+    paths = upload["with"]["path"].split()
+    kept = {
+        (side, log)
+        for side in paired.SIDES
+        for log in ("server.log", "server-read.log")
+        if any(Path(f"load-evidence/{side}/{log}").match(path) for path in paths)
+    }
+    assert kept == {(side, log) for side in paired.SIDES for log in ("server.log", "server-read.log")}

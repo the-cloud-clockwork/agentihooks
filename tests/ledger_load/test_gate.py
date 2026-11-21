@@ -308,7 +308,7 @@ def test_a_run_writes_through_the_api_service_or_else_reads_and_writes_one_ledge
 ) -> None:
     started: list[tuple[int, list[str] | None]] = []
     stopped: list[SimpleNamespace] = []
-    loaded: list[tuple[int, int, int]] = []
+    loaded: list[tuple[int, int, list[int]]] = []
     ports = iter([8101, 8102])
     results = {
         "writes": [0.1] * 9 + [0.7],
@@ -323,8 +323,8 @@ def test_a_run_writes_through_the_api_service_or_else_reads_and_writes_one_ledge
         started.append((port, argv))
         return SimpleNamespace(pid=len(started))
 
-    def load(write_port: int, read_port: int, token: str, pid: int, seconds: float) -> dict:
-        loaded.append((write_port, read_port, pid))
+    def load(write_port: int, read_port: int, token: str, pids: list[int], seconds: float) -> dict:
+        loaded.append((write_port, read_port, pids))
         return results
 
     if not has_api_service:
@@ -342,11 +342,29 @@ def test_a_run_writes_through_the_api_service_or_else_reads_and_writes_one_ledge
         writes = started[0][1]
         assert writes is not None and writes[-2:] == ["scripts.swarm_ledger.api_service", "--serve"]
         assert started[1] == (8102, None)
-        assert loaded == [(8101, 8102, 1)]
+        assert loaded == [(8101, 8102, [1, 2])]
     else:
         assert started == [(8101, None)]
-        assert loaded == [(8101, 8101, 1)]
+        assert loaded == [(8101, 8101, [1])]
     assert [server.pid for server in stopped] == list(range(len(started), 0, -1))
+
+
+def test_the_sampler_sums_the_cpu_threads_and_rss_of_every_ledger_server_process(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = iter([0.0, 1.0, 2.0])
+    slept: list[float] = []
+    monkeypatch.setattr(ledger_load, "time", SimpleNamespace(monotonic=lambda: next(clock), sleep=slept.append))
+    monkeypatch.setattr(ledger_load, "cpu_seconds", {1: 2.0, 2: 3.5}.__getitem__)
+    monkeypatch.setattr(ledger_load, "server_resources", {1: (4, 80_000), 2: (6, 90_000)}.__getitem__)
+    results: dict[str, list[object]] = {"cpu": [], "resources": [], "errors": []}
+    ledger_load.sample_cpu([1, 2], 2.0, results)
+    assert results == {
+        "cpu": [(0.0, 5.5), (1.0, 5.5), (2.0, 5.5)],
+        "resources": [(0.0, 10, 170_000), (1.0, 10, 170_000), (2.0, 10, 170_000)],
+        "errors": [],
+    }
+    assert slept == [1, 1]
 
 
 def test_a_base_without_the_api_service_times_its_sweeps_and_expiry_by_the_ledger_server(
@@ -669,7 +687,7 @@ def test_a_refused_write_preflight_fails_the_gate_before_the_timed_window(monkey
     monkeypatch.setattr(ledger_load.authority, "agent_token", lambda token, slug, name: "agent")
     began = time.monotonic()
     with pytest.raises(SystemExit, match=r"HTTP 400 Bad Request.*the thread is not on this ledger"):
-        ledger_load.load(0, 0, "token", os.getpid(), 15.0)
+        ledger_load.load(0, 0, "token", [os.getpid()], 15.0)
     assert time.monotonic() - began < 5
     assert sent == ["join"] * ledger_load.CLIENTS + ["add"]
 
@@ -679,7 +697,7 @@ def test_a_passing_write_preflight_keeps_the_timed_window(monkeypatch):
     monkeypatch.setattr(ledger_load, "Front", preflight_client(sent))
     monkeypatch.setattr(ledger_load.authority, "agent_token", lambda token, slug, name: "agent")
     monkeypatch.setattr(ledger_load, "watcher", lambda base, credentials, deadline, results: None)
-    results = ledger_load.load(0, 0, "token", os.getpid(), 1.5 * ledger_load.write_every() / ledger_load.CLIENTS)
+    results = ledger_load.load(0, 0, "token", [os.getpid()], 1.5 * ledger_load.write_every() / ledger_load.CLIENTS)
     assert sent == ["join"] * ledger_load.CLIENTS + ["add"] * 3
     assert len(results["writes"]) == 2
     assert results["errors"] == []
