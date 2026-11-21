@@ -605,6 +605,24 @@
       ]
     },
     {
+      "id": "conditions-publish-task-worktree",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-conditions-guard-publish-worktree",
+      "behaviour": "The conditions guard resolves swarm publish filenames in the publisher selected task worktree, preferring the session worktree over the recorded branch. Live condition layers and dev checkouts remain protected. Other commands and adjacent shell writes keep their existing path resolution, and missing task context keeps the guard closed.",
+      "seam": "conditions.write_guard through publish.publishing_root",
+      "tests": [
+        "tests/hooks/test_conditions_publish.py::test_publish_resolves_relative_conditions_in_the_recorded_worktree",
+        "tests/hooks/test_conditions_publish.py::test_publish_uses_the_session_worktree_before_the_recorded_worktree",
+        "tests/hooks/test_conditions_publish.py::test_publish_keeps_live_and_dev_condition_paths_refused",
+        "tests/hooks/test_conditions_publish.py::test_publish_keeps_a_live_layer_inside_the_selected_worktree_refused",
+        "tests/hooks/test_conditions_publish.py::test_other_commands_keep_session_directory_resolution",
+        "tests/hooks/test_conditions_publish.py::test_publish_text_inside_another_command_keeps_current_resolution",
+        "tests/hooks/test_conditions_publish.py::test_publish_does_not_exempt_an_adjacent_condition_write",
+        "tests/hooks/test_conditions_publish.py::test_publish_lookup_failure_keeps_the_guard_closed",
+        "tests/hooks/test_conditions_publish.py::test_publish_without_condition_paths_does_not_read_task_state"
+      ]
+    },
+    {
       "id": "hive-service-start-ensures-serena-router",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-serena-before-launch",
