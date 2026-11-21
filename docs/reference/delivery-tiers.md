@@ -62,7 +62,7 @@ records, a ledger view of 6 thousand tasks and 30 live Kubernetes executions
 holding claimed tasks. It then runs three scheduled passes of the tick
 command against it. The ledger view is served from memory, so the gate
 measures the tick's cost of using the view, not the ledger server's read. Every step on the spawn chain (the steps `SPAWN_NEEDS`
-names, then `spawn`) and the `tick view` must end ok within its
+names) and the `tick view` must end ok within its
 `budgets.FLOORS` floor on every pass it runs. A step that is cut off,
 abandoned, does not end ok or never runs fails the gate. Unit fixtures hold a
 few rows, so they cannot catch a step whose cost grows with stored data.
@@ -74,7 +74,9 @@ On `diffcheck/tick-scale-plant` it first applies the planted fault in
 execution archive and rewrites every record it loaded. This planted fault must
 turn the gate red. In the reference proof run it drove `reap` to 25 seconds
 against its 22 second floor. On `diffcheck/tick-scale-profile` the gate profiles
-`track outages`, `reap`, `spawn` and `tick view` with cProfile. The profiled
+`track outages`, `reap`, `master scale` and `tick view` with cProfile. The
+`master scale` step launches agents into empty master seats. A workflow contract
+checks that every profiled name is registered and includes that launcher. The profiled
 walls are evidence only. The action takes the same choices as its `plant`
 and `profile` inputs.
 
@@ -1588,7 +1590,7 @@ Of the 36 own job failures, 15 failed in `Run tests` and 11 in `Install dependen
 
 The queue timelines, a separate count from the run table above, recorded 20 removals with reason `failed_checks`; 19 of them were queued again at an unchanged head. Pull request 5129 entered at head `527d01a7` and was queued again six times with no new commit. Eight merge group runs at that head failed the same code owner test after those requeues: runs [39396055512](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39396055512), [39404264587](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39404264587), [39408630475](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39408630475), [39412887866](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39412887866), [39413818395](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39413818395), [39427751037](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39427751037), [39436310682](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39436310682) and [39448639696](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39448639696). These re-failures cost 809 runner minutes, and the 10 rebuilds they caused behind them another 216.
 
-The cause was in the swarm's queue exit judgment. `queue-fail-fast` cancels its own run on the first failed job, so a failing entry's run ends `cancelled`, never `failure`. The merge pass counted a `cancelled` run as clean, read the exit as having no failure of its own and queued the same head again.
+The cause was in the swarm's queue exit judgment. `queue-fail-fast` cancels its own run on the first failed job, so a failing entry's run usually ends `cancelled`, and it can also end `failure`. In the [post merge testing](../research/post-merge-testing.md) window 4 merge group runs ended `failure`. In three of them, runs [42404741735](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/42404741735), [42403236647](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/42403236647) and [42396908025](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/42396908025), a unit shard failed while `Gate — Required`, by then the queue verifier, passed and skipped `Cancel a rejected queue run`. The merge pass counted a `cancelled` run as clean, read the exit as having no failure of its own and queued the same head again.
 
 ### Fixes it led to
 

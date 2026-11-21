@@ -8,6 +8,7 @@ command). Unbound sessions exit at once. Every error fails open.
 
 import json
 import os
+import re
 import shlex
 import socket
 import subprocess
@@ -25,6 +26,8 @@ SESSIONS = LEDGER_DIR / ".sessions"
 GATE_READS = ("_meta.members", "_meta.events", "tasks", "phases", "followups", "policy")
 SHOWN = 5
 CLI = "agentihooks api"
+VARIABLE = re.compile(r"\$(?:\{(\w+)\}|(\w+))")
+ASSIGNMENT = re.compile(r"([A-Za-z_]\w*)=(.*)", re.DOTALL)
 
 
 def log(message):
@@ -148,11 +151,33 @@ def emit(event, text):
     print(json.dumps({"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}}))
 
 
-def touched(command):
+def expanded(command: str) -> str:
+    """The command with each $NAME or ${NAME} put in from the command's own assignments or the environment."""
+    assigned: dict[str, str] = {}
+
+    def value(found: re.Match[str]) -> str:
+        name = found[1] or found[2]
+        return assigned.get(name, os.environ.get(name, ""))
+
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    setattr(lexer, "whitespace_split", True)
+    try:
+        words = list(lexer)
+    except ValueError:
+        words = []
+    for word in words:
+        if found := ASSIGNMENT.fullmatch(word):
+            assigned[found[1]] = VARIABLE.sub(value, found[2])
+    return VARIABLE.sub(value, command)
+
+
+def touched(command: str | None) -> bool:
     import ledger_gate
 
-    tokens = tokens_of(command)
-    return is_ledger_cli(tokens) and any(t in ledger_gate.WRITE_COMMANDS for t in tokens)
+    return any(
+        is_ledger_cli(tokens) and any(t in ledger_gate.WRITE_COMMANDS for t in tokens)
+        for tokens in (tokens_of(command), tokens_of(expanded(command or "")))
+    )
 
 
 def restart(session):
@@ -241,7 +266,7 @@ def on_prompt(payload, session, state, sfile):
         emit("UserPromptSubmit", context_text(session, owed))
 
 
-def stop_reasons(session, state):
+def stop_reasons(session: dict[str, Any], state: dict[str, Any]) -> tuple[list[str], int, dict[str, Any]]:
     import ledger_gate
 
     pol = ledger_gate.policy(state)
@@ -250,7 +275,7 @@ def stop_reasons(session, state):
     if owed:
         reasons.append(f"{len(owed)} operator event(s) are unhandled")
     if session["calls"] >= pol["stop_after_calls"] and not wait_seen(session) and not outcome_seen(session):
-        reasons.append(f"{session['calls']} tool calls since you last recorded progress in the ledger")
+        reasons.append(f"{session['calls']} tool calls since you last recorded progress through the swarm API")
     return reasons, len(owed), pol
 
 

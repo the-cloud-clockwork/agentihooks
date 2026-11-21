@@ -214,6 +214,18 @@ class Queue:
             leased_ms=int(record.get("leased_ms", 0)),
         )
 
+    def slots(self, jobs: Sequence[str]) -> dict[str, tuple[int, int]]:
+        """Return the slots and lease start of each job whose record still exists, read with HMGET in one pipeline that
+        opens no transaction and builds no job; a job never leased starts at 0."""
+        pipe = self.client.pipeline(transaction=False)
+        for job in jobs:
+            pipe.hmget(_job(job), "slots", "leased_ms")
+        return {
+            job: (int(slots), int(leased or 0))
+            for job, (slots, leased) in zip(jobs, pipe.execute())
+            if slots is not None
+        }
+
     def token(self, job: str) -> str:
         return str(self.client.hget(_job(job), "token") or "")
 

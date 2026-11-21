@@ -95,6 +95,13 @@ response header carries the fable window.
    5% or less of its five hour window left, or with no upcoming week reset, sorts
    after every account that has one. Remaining ties go by harness, then account
    name.
+6. In a swarm, a new eng or ci agent that may run on either harness goes to
+   Codex while Codex holds under thirty percent of the live and already placed
+   eng and ci agents and an open Codex account has a free seat. Without a free
+   Codex seat, or when pinned Codex work reserves every free one, it goes to
+   Claude. A lane or task harness pin, a Claude only profile, a relaunch that
+   keeps its earlier harness, a profile with its own harness order and the plan
+   lane keep their own choice.
 
 When no account has a free place a swarm or hive slot launch fails. A launch
 outside both, such as the operator's own `agenti`, then takes the open account
@@ -800,6 +807,11 @@ Codex and the profile has no required Claude only plugin. With no eligible
 account, successor placement fails; it does not launch on a draining account.
 Under the deployed controller, hive placement applies the same rule to every
 launch: see [closed and draining accounts get no hive agent](hives.md#closed-and-draining-accounts-get-no-hive-agent).
+On a hive spoke launch the selected or saved account is only a preference: it
+routes the launch only while the hub's account slot has a worker seat on it for
+the launching execution, and otherwise the launch picks its account by
+[launch routing](#launch-routing); see
+[saved account on a hive launch](hives.md#saved-account-on-a-hive-launch).
 
 ### Worked example
 

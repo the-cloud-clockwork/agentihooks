@@ -118,6 +118,52 @@ def test_scoped_memory_without_matching_notes_is_empty(env: tuple[Any, Any, Any]
 
 
 @pytest.mark.feature("swarm-learned-scope")
+def test_scoped_memory_reads_learned_lists_without_listing_agent_pointers(
+    env: tuple[Any, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.inbox.seats import SeatMemory, SeatRegistry
+
+    store, _, _ = env
+    store.memory.learn("eng-1@sw", "previous occupant", "own note", 1, "note")
+    store.memory.learn("ci-1@sw", "previous occupant", "shared canon", 1, "canon")
+    store.memory.learn("eng-1@sw-doctor", "previous occupant", "doctor canon", 1, "canon")
+    store.memory.learn("x:eng-1@sw", "previous occupant", "colon canon", 1, "canon")
+
+    def refused(self: SeatRegistry, slug: str) -> list[tuple[str, str]]:
+        raise AssertionError(f"learned notes listed every agent seat of {slug}")
+
+    monkeypatch.setattr(SeatRegistry, "agent_seats", refused)
+    rows = SeatMemory(store.redis).scoped("sw", "eng-1@sw")
+    assert [(row["seat"], row["number"], row["text"]) for row in rows] == [
+        ("ci-1@sw", 1, "shared canon"),
+        ("eng-1@sw", 1, "own note"),
+    ]
+
+
+@pytest.mark.feature("swarm-learned-scope")
+def test_scoped_memory_asks_redis_only_for_the_swarm_learned_keys(
+    env: tuple[Any, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.inbox.seats import PREFIX, SCAN_PAGE, SeatMemory
+
+    store, _, _ = env
+    store.memory.learn("eng-1@sw", "previous occupant", "own note", 1, "note")
+    scans: list[dict[str, object]] = []
+    scan = store.redis.scan_iter
+
+    def recorded(**options: Any) -> Any:
+        scans.append(options)
+        return scan(**options)
+
+    monkeypatch.setattr(store.redis, "scan_iter", recorded)
+    rows = SeatMemory(store.redis).scoped("sw", "eng-1@sw")
+    assert [row["text"] for row in rows] == ["own note"]
+    assert scans == [{"match": f"{PREFIX}:*@sw:learned", "count": SCAN_PAGE}]
+
+
+@pytest.mark.feature("swarm-learned-scope")
 def test_learned_help_explains_the_explicit_full_listing(capsys: pytest.CaptureFixture[str]) -> None:
     from scripts.swarm.cli import build_parser
 

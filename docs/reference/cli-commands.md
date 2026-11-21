@@ -1337,9 +1337,10 @@ agentihooks bundle <action> [path] [--rebase] [--shared | --user]
 |------------|-------------|
 | `link <path>` | Link a bundle directory. Stores the path in `state.json`. |
 | `unlink` | Unlink the current bundle. |
-| `list` | Show the linked bundle path, linked date, and available profiles. |
+| `list` | Show the linked bundle path, linked date, layer directory, and available profiles. |
 | `pull` | Run `git pull` on the linked bundle directory. |
 | `pull --rebase` | Run `git pull --rebase` on the linked bundle directory. |
+| `layer` | Print the directory the linked bundle ships its content from: the `layer` its `bundle.yml` names, else the bundle root ([Bundle manifest](../bundles.md#bundle-manifest)). |
 
 ### Slots
 
@@ -1349,7 +1350,7 @@ agentihooks bundle <action> [path] [--rebase] [--shared | --user]
 | `--shared` | shared bundle, between the root and the user bundle | `shared_bundle` | `AGENTIHOOKS_SHARED_BUNDLE_PATH` |
 | `--user` | personal user bundle, after the shared bundle | `user_bundle` | `AGENTIHOOKS_USER_BUNDLE_PATH` |
 
-`--shared` and `--user` are mutually exclusive, and one directory fills one slot. Each flag applies to `link`, `unlink`, `list` and `pull`. Unlinking the shared bundle removes the links it generated and keeps every bundle file. `init --force` keeps all three links. Content is later-wins in the order root, shared, user; profile names are first-wins in the same order.
+`--shared` and `--user` are mutually exclusive, and one directory fills one slot. Each flag applies to `link`, `unlink`, `list`, `pull` and `layer`. Unlinking the shared bundle removes the links it generated and keeps every bundle file. `init --force` keeps all three links. Content is later-wins in the order root, shared, user; profile names are first-wins in the same order.
 
 ### Examples
 

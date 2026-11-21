@@ -42,7 +42,8 @@ def rig():
 
     ledger.update_task = update_task
     source = SimpleNamespace(
-        snapshot=lambda slug: snapshot(found, claimed=[t for t in rows if store.claimant(slug, t)])
+        slugs=lambda: [SLUG],
+        snapshot=lambda slug: snapshot(found, claimed=[t for t in rows if store.claimant(slug, t)]),
     )
     admitter = admission.Admission(store, ledger, source, clock=lambda: 7_000)
     yield SimpleNamespace(store=store, ledger=ledger, rows=rows, admitter=admitter, found=found)

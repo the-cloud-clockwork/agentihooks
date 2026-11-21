@@ -166,8 +166,8 @@ spec:
     {{- if gt $replicas 1 }}
     type: RollingUpdate
     rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 0
+      maxSurge: 0
+      maxUnavailable: 1
     {{- else }}
     type: Recreate
     {{- end }}

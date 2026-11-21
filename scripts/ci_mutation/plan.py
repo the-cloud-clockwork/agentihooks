@@ -24,6 +24,7 @@ from scripts.ci_mutation.browser import needs_browser
 from scripts.ci_mutation.scope import discover_changes, graded_green, module_facts, own_bases, select_tests, test_file
 from scripts.ci_mutation.selection import file_seconds, mutation_counts, partition, stats_shards
 from scripts.ci_test_plan import find_record
+from scripts.collection_imports import SDK_GROUP, loads_heavy, loads_sdk_when_run
 from scripts.dep_manifest import (
     GLOBAL_FILES,
     MEASURED,
@@ -634,17 +635,15 @@ def stats_part_count(root: Path, tests: list[str], target: float, limit: int) ->
 
 
 def validate_tests(root: Path, tests: list[str]) -> None:
-    from tests.test_collection_imports import SDK_GROUP, loads_heavy, loads_sdk_when_run
-
     # A module a clean walk visited cannot reach the SDK, so later walks may skip it.
     clean = set()
     for test in sorted({test_file(entry) for entry in tests}):
         path = root / test
-        if loads_heavy(test.removesuffix(".py").replace("/", "."), clean):
+        if loads_heavy(root, test.removesuffix(".py").replace("/", "."), clean):
             raise SystemExit(f"{test}: loads the MCP SDK while collecting")
         source = scope.held_text(path)
         walked = set(clean)
-        if not loads_sdk_when_run(source, walked):
+        if not loads_sdk_when_run(root, source, walked):
             clean = walked
         elif SDK_GROUP not in source:
             raise SystemExit(f"{test}: loads the MCP SDK without the mcp-sdk worker group")

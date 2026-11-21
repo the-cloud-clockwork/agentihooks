@@ -304,6 +304,30 @@ def test_a_crash_stops_the_heartbeat_and_the_lease_reaps(
     assert lab.reap(clock.now) == [("h1:test:a", "pending")]
 
 
+@pytest.mark.feature("lab-worker-crash-traceback")
+def test_a_crash_logs_the_traceback_naming_the_missing_path(
+    scheduler: str, jobs: queue.Queue, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    jobs.enqueue([UNIT_A], "h1", {})
+    missing = tmp_path / "tree" / "uv.lock"
+
+    def crash(lease: worker.Lease) -> worker.Finished:
+        missing.read_bytes()
+        return finished(tmp_path, lease)
+
+    crashing = pod(scheduler, {"test": crash})
+
+    crashing.run_once()
+
+    assert crashing.drain() == []
+    line = "ci-lab worker: unit h1:test:a crashed: FileNotFoundError(2, 'No such file or directory')\n"
+    _, crashed, trace = capsys.readouterr().err.partition(line)
+    assert crashed == line
+    assert trace.startswith("Traceback (most recent call last):\n")
+    assert ", in crash\n" in trace
+    assert trace.endswith(f"FileNotFoundError: [Errno 2] No such file or directory: {str(missing)!r}\n")
+
+
 @pytest.mark.feature("lab-worker-pod-loop")
 def test_a_refused_heartbeat_ends_the_units_heartbeats_and_its_delivery(
     scheduler: str,
