@@ -492,3 +492,9 @@ def test_size_refuses_a_dev_without_its_grader(tmp_path):
     result = subprocess.run(["bash", "-e", "-c", grade["run"]], env=env, capture_output=True, text=True)
     assert result.returncode == 1
     assert "dev carries no scripts/size_limits.py, so nothing trusted can grade." in result.stdout
+
+
+@pytest.mark.feature("merge-queue-grades-size-limits-on-the-combined-tree")
+def test_the_checked_out_tree_holds_the_size_limits() -> None:
+    recorded = size_limits.load(_ROOT)
+    assert size_limits.grade(recorded or {}, size_limits.measure(_ROOT), recorded) == []

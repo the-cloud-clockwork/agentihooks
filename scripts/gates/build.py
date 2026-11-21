@@ -106,13 +106,22 @@ def _commit_in(rest, directory):
             return
 
 
-def _git_names(directory, everything):
-    out = subprocess.run(
-        ["git", "-C", str(directory), "diff", "--name-only", "-z", "HEAD" if everything else "--cached"],
-        capture_output=True,
-        text=True,
-    )
-    return [name for name in out.stdout.split("\0") if name] if out.returncode == 0 else []
+def _git_names(directory: Path, everything: bool) -> list[str]:
+    """Files a commit in directory records, less those whose content equals a merge head origin/dev holds."""
+    names = _diff_names(directory, "HEAD" if everything else "--cached") or []
+    if _git(directory, "merge-base", "--is-ancestor", "MERGE_HEAD", "origin/dev").returncode == 0:
+        beside_dev = _diff_names(directory, *([] if everything else ["--cached"]), "MERGE_HEAD")
+        names = [name for name in names if beside_dev is None or name in beside_dev]
+    return names
+
+
+def _diff_names(directory: Path, *against: str) -> list[str] | None:
+    out = _git(directory, "diff", "--name-only", "-z", *against)
+    return [name for name in out.stdout.split("\0") if name] if out.returncode == 0 else None
+
+
+def _git(directory: Path, *words: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(["git", "-C", str(directory), *words], capture_output=True, text=True)
 
 
 def _patch_targets(call, key):

@@ -86,8 +86,32 @@ def test_tests_mutation_joins_plan_with_the_planning_install_and_replan_checks_o
     for name in ("mutation-refine", "mutation-replan"):
         assert install(name) == install("mutation-plan")
         assert "-e" not in install(name)["run"].split()
-    assert jobs["mutation-refine"]["steps"][0]["with"]["fetch-depth"] == 0
     assert jobs["mutation-replan"]["steps"][0]["with"] == {
         "fetch-depth": 1,
         "ref": "${{ github.event.pull_request.head.sha }}",
     }
+
+
+@pytest.mark.feature("mutation-refine-fetches-only-the-head-history")
+def test_mutation_refine_checks_out_only_the_head_history_without_file_contents() -> None:
+    steps = _jobs()["mutation-refine"]["steps"]
+    checkouts = [step for step in steps if step.get("uses", "").startswith("actions/checkout")]
+    assert checkouts
+    for checkout in checkouts:
+        assert checkout["with"] == {
+            "fetch-depth": 2147483647,
+            "filter": "blob:none",
+            "ref": "${{ github.event.pull_request.head.sha }}",
+        }
+
+
+@pytest.mark.feature("mutation-refine-fetches-only-the-head-history")
+def test_every_mutation_refine_fetch_negotiates_from_the_head() -> None:
+    fetches = [
+        line.split()
+        for step in _jobs()["mutation-refine"]["steps"]
+        for line in step.get("run", "").splitlines()
+        if {"git", "fetch"} <= set(line.split())
+    ]
+    assert fetches
+    assert all("--negotiation-tip=HEAD" in words for words in fetches)

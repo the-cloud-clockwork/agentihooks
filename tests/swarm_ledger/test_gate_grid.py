@@ -11,6 +11,7 @@ ORDER = [
     "subagents",
     "reruns",
     "intent",
+    "recon",
     "build",
     "claim-stop",
     "push-stop",
