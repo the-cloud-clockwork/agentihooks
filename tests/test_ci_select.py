@@ -412,6 +412,393 @@ def test_workflow_and_runner_changes_select_routing_contracts(repo, changed):
     assert set().union(*map(set, legs)) == contracts
 
 
+JOBS_WORKFLOW = """\
+name: Tests
+on:
+  pull_request: {}
+env:
+  LEVEL: "1"
+jobs:
+  lint:
+    runs-on: anton
+    steps: &checks
+      - run: ruff check
+  docs:
+    runs-on: anton
+    steps: *checks
+  unit:
+    runs-on: anton
+    steps:
+      - run: pytest
+"""
+UNIT_EDIT = JOBS_WORKFLOW.replace("run: pytest", "run: pytest -x")
+CHECKS_EDIT = JOBS_WORKFLOW.replace("run: ruff check", "run: ruff check .")
+LOADED = "W = yaml.safe_load(open('.github/workflows/test.yml'))\n\n\n"
+NAMED = """\
+WORKFLOW = '.github/workflows/test.yml'
+W = {}
+
+
+def test_lint():
+    assert W['jobs']['lint']
+
+
+def test_docs():
+    assert W['jobs']['docs']
+
+
+def test_every():
+    assert all(W['jobs'].values())
+"""
+UNNAMED = """\
+JOBS = load()['jobs']
+
+
+def test_opened():
+    pass
+
+
+def test_outside():
+    pass
+
+
+def test_unread():
+    pass
+
+
+def test_docs():
+    assert JOBS['docs']
+"""
+READERS = {
+    "tests/test_named.py": NAMED,
+    "tests/test_unnamed.py": UNNAMED,
+    "tests/test_basename.py": "SPECS = {'test.yml': {}}\n\n\ndef test_unit():\n    assert SPECS['test.yml']['jobs']['unit']\n",
+}
+RECORD = {
+    "units": [],
+    "tests": {
+        "tests/test_named.py::test_lint": {"units": [], "files": [ci_select.WORKFLOW]},
+        "tests/test_unnamed.py::test_opened[first]": {"units": [], "files": [ci_select.WORKFLOW]},
+        "tests/test_unnamed.py::test_outside": {"units": [], "files": [], "outside": [ci_select.WORKFLOW]},
+        "tests/test_unnamed.py::test_unread": {"units": [], "files": ["README.md"]},
+        "tests/test_gone.py::test_gone": {"units": [], "files": [ci_select.WORKFLOW]},
+    },
+}
+LINT_READERS = ["tests/test_named.py::test_every", "tests/test_named.py::test_lint"]
+UNNAMED_LINT_READERS = [
+    "tests/test_unnamed.py::test_opened",
+    "tests/test_unnamed.py::test_outside",
+    "tests/test_unnamed.py::test_unread",
+]
+PAIR = "def test_a():\n    pass\n\n\ndef test_b():\n    pass\n"
+INVENTORY = """\
+import yaml
+
+
+def test_inventory():
+    workflow = yaml.safe_load(open('.github/workflows/test.yml'))
+    workflow['jobs']['unit']['needs'] = []
+    assert normalize({'test.yml': workflow})
+"""
+
+
+def commit_workflow(repo: Path, text: str, message: str) -> None:
+    write(repo, {ci_select.WORKFLOW: text})
+    git(repo, "add", ci_select.WORKFLOW)
+    git(repo, "commit", "-m", message)
+
+
+@pytest.mark.feature("ci-select-workflow-job-readers")
+@pytest.mark.parametrize(
+    ("edited", "jobs"),
+    [
+        (UNIT_EDIT, {"unit"}),
+        (CHECKS_EDIT, {"lint", "docs"}),
+        (JOBS_WORKFLOW.replace("  unit:\n", "  smoke:\n    runs-on: anton\n  unit:\n"), {"smoke"}),
+        (JOBS_WORKFLOW.replace("  docs:\n    runs-on: anton\n    steps: *checks\n", ""), {"docs"}),
+        (JOBS_WORKFLOW.replace("name: Tests\n", "# reviewed\nname: Tests\n"), set()),
+    ],
+    ids=["one-job", "anchor", "added-job", "removed-job", "comment"],
+)
+def test_changed_jobs_names_the_jobs_whose_parsed_definition_changed(repo: Path, edited: str, jobs: set[str]) -> None:
+    commit_workflow(repo, JOBS_WORKFLOW, "workflow")
+    commit_workflow(repo, edited, "edit")
+    assert ci_select.changed_jobs(repo, "HEAD~1", "HEAD") == jobs
+
+
+@pytest.mark.feature("ci-select-workflow-job-readers")
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        (JOBS_WORKFLOW, UNIT_EDIT.replace('LEVEL: "1"', 'LEVEL: "2"')),
+        (JOBS_WORKFLOW, UNIT_EDIT.replace("pull_request: {}", "push: {}")),
+        (None, UNIT_EDIT),
+        (JOBS_WORKFLOW, UNIT_EDIT.replace("name: Tests", "name: [Tests")),
+        (JOBS_WORKFLOW, UNIT_EDIT.replace("jobs:\n", "concurrency: tests\njobs:\n")),
+        (JOBS_WORKFLOW, JOBS_WORKFLOW.partition("jobs:")[0] + "jobs:\n  - lint\n"),
+        (JOBS_WORKFLOW, JOBS_WORKFLOW.partition("jobs:")[0] + "jobs:\n"),
+        ("name: Tests\n", "name: Tests\n# reviewed\n"),
+    ],
+    ids=["env", "trigger", "new-workflow", "unparsed", "added-key", "jobs-list", "null-jobs", "no-jobs"],
+)
+def test_changed_jobs_is_none_outside_the_jobs_or_without_two_parsed_workflows(
+    repo: Path, before: str | None, after: str
+) -> None:
+    if before is not None:
+        commit_workflow(repo, before, "workflow")
+    commit_workflow(repo, after, "edit")
+    assert ci_select.changed_jobs(repo, "HEAD~1", "HEAD") is None
+
+
+@pytest.mark.feature("ci-select-workflow-job-readers")
+def test_changed_jobs_compares_the_head_against_its_merge_base(repo: Path) -> None:
+    commit_workflow(repo, JOBS_WORKFLOW, "workflow")
+    git(repo, "switch", "-c", "change")
+    commit_workflow(repo, UNIT_EDIT, "unit")
+    git(repo, "switch", "dev")
+    commit_workflow(repo, CHECKS_EDIT, "checks on dev")
+    git(repo, "switch", "change")
+    assert ci_select.changed_jobs(repo, "dev", "HEAD") == {"unit"}
+
+
+@pytest.mark.feature("ci-select-workflow-job-readers")
+@pytest.mark.parametrize(
+    ("body", "read"),
+    [
+        ("def test_a():\n    assert W['jobs']['lint']\n", {"lint"}),
+        ("def test_a():\n    assert W.get('jobs')['lint'] and W['jobs'].get('docs')\n", {"lint", "docs"}),
+        ("def test_a():\n    assert 'lint' in W['jobs'] and W['jobs'].pop('unit')\n", {"lint", "unit"}),
+        ("def test_a():\n    jobs = W['jobs']\n    assert jobs['lint']\n", {"lint"}),
+        ("def jobs():\n    return W['jobs']\n\n\ndef test_a():\n    assert jobs()['lint']\n", {"lint"}),
+        ("JOBS = W['jobs']\n\n\ndef test_a():\n    assert JOBS['docs']\n", {"docs"}),
+        ("def test_a():\n    print('jobs')\n    assert W['jobs']['lint']\n", {"lint"}),
+        (
+            "def lint():\n    jobs = W['jobs']\n    return jobs['lint']\n\n\n"
+            "def other():\n    jobs = []\n    return sorted(jobs)\n\n\n"
+            "def test_a():\n    assert lint() and other()\n",
+            {"lint"},
+        ),
+        ("def test_a():\n    assert all(W['jobs'].values())\n", None),
+        ("def test_a(name):\n    assert W['jobs'][name]\n", None),
+        ("def test_a():\n    assert W['jobs'][0]\n", None),
+        ("def test_a():\n    assert len(W['jobs'])\n", None),
+        ("def test_a():\n    assert 'docs' != W['jobs']\n", None),
+        ("def test_a():\n    assert W\n", None),
+        ("def test_a():\n    jobs = W['jobs']\n", None),
+        (
+            "def jobs():\n    return W['jobs']\n\n\ndef test_a():\n    assert list(map(jobs, [1])) and jobs()['lint']\n",
+            None,
+        ),
+        ("def every():\n    return dict(W['jobs'].items())\n\n\ndef test_a():\n    assert every()['lint']\n", None),
+        (
+            "@pytest.fixture\ndef jobs():\n    return W['jobs']\n\n\n"
+            "def test_a(jobs):\n    assert jobs.get('lint') and W['jobs']['docs']\n",
+            None,
+        ),
+        ("def test_a():\n    assert W['jobs']['lint'] and normalize({'test.yml': W})\n", None),
+        (
+            "def test_a():\n    workflow = yaml.safe_load(TEXT)\n    jobs = workflow['jobs']\n"
+            "    assert jobs['lint'] and normalize({'test.yml': workflow})\n",
+            None,
+        ),
+        ("def test_a():\n    assert W['on'] and 'env' in W and W.get('jobs')['lint']\n", {"lint"}),
+        ("def test_a():\n    W['jobs']['lint']['needs'] = []\n    assert yaml.safe_dump(W)\n", None),
+        (
+            "def workflow():\n    return yaml.safe_load(TEXT)\n\n\ndef test_a():\n    assert workflow()['jobs']['docs']\n",
+            {"docs"},
+        ),
+        (
+            "def workflow():\n    return yaml.safe_load(TEXT)\n\n\n"
+            "def test_a():\n    assert workflow()['jobs']['docs'] and normalize(workflow())\n",
+            None,
+        ),
+        ("def test_a():\n    assert W['jobs']['lint'] and W.items()\n", None),
+        (
+            "def test_a():\n    doc = load_workflow()\n    assert doc['jobs']['lint'] and normalize({'test.yml': doc})\n",
+            None,
+        ),
+        ("def test_a():\n    doc = load_workflow()\n    assert doc['jobs']['lint'] and doc['on']\n", {"lint"}),
+        ("def test_a():\n    assert load_workflow()['jobs']['lint'] and normalize(load_workflow())\n", None),
+        ("def test_a(workflow):\n    assert workflow.get('jobs')['lint'] and normalize(workflow)\n", None),
+        ("def test_a():\n    doc = safe_load(TEXT)\n    assert doc['jobs']['lint'] and normalize(doc)\n", None),
+        (
+            "def test_a():\n    doc = {'jobs': {'lint': {}}}\n    assert doc['jobs']['lint'] and normalize(doc)\n",
+            {"lint"},
+        ),
+        (
+            "def workflow():\n    return {'jobs': {}}\n\n\n"
+            "def pair():\n    base, head = workflow(), workflow()\n    return base, head\n\n\n"
+            "def test_a():\n    base, head = pair()\n    head = copy.deepcopy(base)\n"
+            "    assert head['jobs']['lint'] and grade(base, head)\n",
+            {"lint"},
+        ),
+        ("def test_a():\n    assert [doc['jobs']['lint'] for doc in yaml.safe_load_all(TEXT)]\n", None),
+    ],
+    ids=[
+        "index",
+        "get",
+        "membership-and-pop",
+        "assigned",
+        "returned",
+        "module-constant",
+        "other-call",
+        "own-scope",
+        "iterated",
+        "variable-key",
+        "integer-key",
+        "passed-on",
+        "compared",
+        "unindexed",
+        "unread-name",
+        "referenced-helper",
+        "returned-after-iteration",
+        "fixture",
+        "document-handed-on",
+        "loaded-document-handed-on",
+        "document-other-keys",
+        "document-dumped",
+        "returned-document",
+        "returned-document-handed-on",
+        "document-items",
+        "helper-document-handed-on",
+        "helper-document-indexed",
+        "called-document-handed-on",
+        "fixture-document-handed-on",
+        "aliased-load-handed-on",
+        "built-document-handed-on",
+        "built-copy-handed-on",
+        "loaded-all",
+    ],
+)
+def test_definition_jobs_reads_the_jobs_a_test_indexes_by_name(body: str, read: set[str] | None) -> None:
+    assert ci_select.definition_jobs(LOADED + body) == {"test_a": read}
+
+
+@pytest.mark.feature("ci-select-workflow-job-readers")
+def test_definition_jobs_covers_only_test_functions_and_classes() -> None:
+    source = LOADED + (
+        "def helper():\n    return W['jobs']['unit']\n\n\n"
+        "class TestBox:\n    def test_a(self):\n        assert W['jobs']['lint']\n\n\n"
+        "class Box:\n    pass\n\n\n"
+        "async def test_b():\n    assert W['jobs']['docs']\n\n\n"
+        "if W:\n\n    def test_c():\n        assert W['jobs']['unit']\n"
+    )
+    assert ci_select.definition_jobs(source) == {"TestBox": {"lint"}, "test_b": {"docs"}, "test_c": None}
+
+
+@pytest.mark.feature("ci-select-workflow-job-readers")
+def test_workflow_tests_offers_the_job_readers_of_each_named_or_recorded_file(repo: Path) -> None:
+    write(repo, READERS)
+    assert ci_select.workflow_tests(repo, {"lint"}, RECORD) == {*LINT_READERS, *UNNAMED_LINT_READERS}
+
+
+@pytest.mark.feature("ci-select-workflow-job-readers")
+def test_workflow_tests_without_a_record_offers_each_definition_of_a_file_naming_the_workflow(repo: Path) -> None:
+    write(repo, READERS)
+    assert ci_select.workflow_tests(repo, {"unit"}, None) == {
+        "tests/test_basename.py::test_unit",
+        "tests/test_named.py::test_every",
+    }
+
+
+@pytest.mark.feature("ci-select-workflow-job-readers")
+def test_a_one_job_edit_selects_that_jobs_readers_and_the_every_job_readers(repo: Path) -> None:
+    write(repo, READERS)
+    assert ci_select.decide(repo, [ci_select.WORKFLOW], {}, 3, ci_select.Change(jobs={"lint"})) == (
+        "selected",
+        [LINT_READERS],
+    )
+
+
+@pytest.mark.feature("ci-select-workflow-job-readers")
+def test_an_edit_outside_the_jobs_selects_every_workflow_test(repo: Path) -> None:
+    write(repo, READERS)
+    assert decide(repo, [ci_select.WORKFLOW]) == ("selected", [["tests/test_basename.py", "tests/test_named.py"]])
+
+
+@pytest.mark.feature("ci-select-workflow-job-readers")
+def test_a_recorded_workflow_reader_file_offers_each_definition_that_reads_a_changed_job(repo: Path) -> None:
+    write(repo, READERS)
+    assert ci_select.decide(repo, [ci_select.WORKFLOW], {}, 3, ci_select.Change(jobs={"lint"}), RECORD) == (
+        "selected",
+        [[*LINT_READERS, *UNNAMED_LINT_READERS]],
+    )
+
+
+@pytest.mark.feature("ci-select-workflow-job-readers")
+def test_a_document_handed_on_beside_a_job_index_selects_its_reader_for_any_job_edit(repo: Path) -> None:
+    write(repo, {"tests/test_inventory.py": INVENTORY})
+    assert ci_select.decide(repo, [ci_select.WORKFLOW], {}, 3, ci_select.Change(jobs={"lint"})) == (
+        "selected",
+        [["tests/test_inventory.py"]],
+    )
+
+
+@pytest.mark.feature("ci-select-workflow-job-readers")
+def test_a_job_edit_beside_another_change_keeps_the_tests_naming_that_change(repo: Path) -> None:
+    write(repo, {**READERS, "tests/test_lonely.py": "PATH = 'scripts/lonely.py'\n"})
+    scope, legs = ci_select.decide(
+        repo, [ci_select.WORKFLOW, "scripts/lonely.py"], {}, 3, ci_select.Change(jobs={"lint"})
+    )
+    assert scope == "selected"
+    assert sorted(entry for leg in legs for entry in leg) == ["tests/test_lonely.py", *LINT_READERS]
+
+
+@pytest.mark.feature("ci-select-workflow-job-readers")
+def test_a_selected_definition_in_a_fakeredis_module_selects_the_suite_speed_check(repo: Path) -> None:
+    write(repo, {**READERS, "tests/test_named.py": "import fakeredis\n" + NAMED, ci_select.SUITE_SPEED: "import os\n"})
+    assert ci_select.decide(repo, [ci_select.WORKFLOW], {}, 3, ci_select.Change(jobs={"docs"})) == (
+        "selected",
+        [["tests/test_named.py::test_docs", "tests/test_named.py::test_every", ci_select.SUITE_SPEED]],
+    )
+
+
+@pytest.mark.feature("ci-select-workflow-job-readers")
+def test_selected_definitions_of_a_splittable_file_run_apart_and_count_their_seconds(tmp_path: Path) -> None:
+    write(tmp_path, {"tests/test_pair.py": PAIR})
+    durations = {"tests/test_pair.py::test_a": 200.0, "tests/test_pair.py::test_b": 200.0}
+    legs = ci_select.legs_for(tmp_path, {"tests/test_pair.py::test_a", "tests/test_pair.py::test_b"}, durations, 4)
+    assert sorted(legs) == [["tests/test_pair.py::test_a"], ["tests/test_pair.py::test_b"]]
+
+
+@pytest.mark.feature("ci-select-workflow-job-readers")
+@pytest.mark.parametrize(
+    ("tests", "legs"),
+    [
+        ({"tests/test_pair.py::test_a"}, [["tests/test_pair.py::test_a"]]),
+        ({"tests/test_single.py::test_a"}, [["tests/test_single.py"]]),
+        ({"tests/test_pair.py", "tests/test_pair.py::test_a"}, [["tests/test_pair.py"]]),
+        ({"tests/test_pair.py::test_gone"}, [["tests/test_pair.py"]]),
+        ({"tests/routing/test_codex_api.py::test_a"}, [["tests/routing/test_codex_api.py"]]),
+    ],
+    ids=["part-of-a-splittable-file", "unsplittable-file", "whole-file-wins", "unknown-definition", "first-shard-file"],
+)
+def test_a_definition_runs_alone_only_when_its_file_runs_its_definitions_apart(
+    tmp_path: Path, tests: set[str], legs: list[list[str]]
+) -> None:
+    write(
+        tmp_path,
+        {
+            "tests/test_pair.py": PAIR,
+            "tests/test_single.py": "def test_a():\n    pass\n",
+            "tests/routing/test_codex_api.py": PAIR,
+        },
+    )
+    assert ci_select.legs_for(tmp_path, tests, {}, 3) == legs
+
+
+@pytest.mark.feature("ci-select-workflow-job-readers")
+def test_main_selects_the_readers_of_the_jobs_a_pull_request_changed(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    write(repo, READERS)
+    commit_workflow(repo, JOBS_WORKFLOW, "workflow")
+    commit_workflow(repo, UNIT_EDIT, "unit")
+    assert run_main(repo, monkeypatch, tmp_path, "pull_request") == (
+        "scope=selected\nlegs=[1]\ncount=1\nfiles_1=tests/test_basename.py tests/test_named.py::test_every\n"
+    )
+
+
 @pytest.mark.parametrize("changed", [*locked_tests.LOCKED, locked_tests.MANIFEST.as_posix()])
 def test_locked_test_and_manifest_changes_select_the_manifest_agreement_test(repo, changed):
     write(repo, {"tests/test_locked_tests.py": "import os\n", changed: "VALUE = 1\n"})
@@ -939,14 +1326,14 @@ def test_a_reshape_check_on_an_unknown_revision_fails(tree):
 
 
 def test_a_reshaped_tree_selects_the_whole_tree_checks(tree):
-    assert ci_select.decide(tree, ["hooks/sample.py"], {}, 3, tree_reshaped=True) == (
+    assert ci_select.decide(tree, ["hooks/sample.py"], {}, 3, ci_select.Change(reshaped=True)) == (
         "selected",
         [sorted(["tests/test_sample.py", *TREE_CHECK_FILES])],
     )
 
 
 def test_a_reshaped_doc_selects_the_whole_tree_checks(tree):
-    assert ci_select.decide(tree, ["docs/unnamed.md"], {}, 3, tree_reshaped=True) == (
+    assert ci_select.decide(tree, ["docs/unnamed.md"], {}, 3, ci_select.Change(reshaped=True)) == (
         "selected",
         [sorted(TREE_CHECK_FILES)],
     )
