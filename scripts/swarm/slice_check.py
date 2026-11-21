@@ -61,6 +61,11 @@ def check(phase, doc, limits):
     return problems + _cycle(mine) + _unlined(phase, doc)
 
 
+def task_problems(task: dict[str, Any], doc: dict[str, Any], limits: Limits) -> list[str]:
+    """The slice check's single task rules for one task, graded in the task's own phase."""
+    return _task(task, {"id": task.get("phase")}, doc, limits)
+
+
 def _count(ids, limits):
     if not ids:
         return ["The slice holds no task."]

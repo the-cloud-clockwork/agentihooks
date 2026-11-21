@@ -72,6 +72,7 @@ from scripts.swarm import (
     dispatch_seat,
     doc_report,
     done_gate,
+    enhance_review,
     failed_panes,
     git_https,
     hive_release,
@@ -2223,8 +2224,10 @@ def cmd_done(store: RedisStore, args: argparse.Namespace) -> None:
     if refused:
         raise SwarmError(refused)
     _feature_gate(store, args.slug, agent, proven, pull)
+    closing = enhance_review.close(args.slug, row, store.config(args.slug).autonomy)
     fields = {**done_gate.DONE, **({"pr_url": args.pr} if args.pr else {}), **({"proof": proof} if proof else {})}
     closed = ledger.update_task(args.slug, agent.task, fields, by=agent.name)
+    enhance_review.settle(ledger, InboxStore(store.redis), args.slug, agent.name, closing)
     _close_members(ledger, args.slug, agent, row, {**fields, "pr_url": args.pr or row.get("pr_url")})
     waits.settle_notices(InboxStore(store.redis), agent, "done")
     _retire(store, args.slug, agent, "finished its task and exited")
@@ -2443,9 +2446,9 @@ def cmd_progress(store, args):
     print(json.dumps({"agent": agent.name, "task": agent.task, "progress": line}))
 
 
-def cmd_plan(store, args):
+def cmd_plan(store: RedisStore, args: argparse.Namespace) -> None:
     agent, autonomy = _me(store, args), store.config(args.slug).autonomy
-    decision = plan_review.Decision(args.action, args.note, args.override)
+    decision = plan_review.Decision(args.action, args.note, args.override, args.task)
     result = plan_review.decide(LedgerClient(), args.slug, agent, autonomy, args.phase, decision)
     print(json.dumps(result))
 
@@ -2840,7 +2843,8 @@ def build_parser() -> argparse.ArgumentParser:
     plan = sub.add_parser("plan").add_subparsers(dest="action", required=True)
     for action in plan_review.DECISIONS:
         decision = plan.add_parser(action)
-        decision.add_argument("phase")
+        decision.add_argument("phase", nargs="?", default="")
+        decision.add_argument("--task", default="")
         decision.add_argument("--note", required=action == "send-back")
         if action == "approve":
             decision.add_argument("--override", default="")
