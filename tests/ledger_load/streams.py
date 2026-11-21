@@ -2,6 +2,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -25,6 +26,7 @@ FOLLOW_PASS_S = PASS_S + FOLLOW_S + POLL_S + PUBLISH_MARGIN_S
 DELIVERY_MARGIN_S = 0.25
 DELIVERY_BOUND_S = FOLLOW_S + DELIVERY_MARGIN_S
 DELIVERY_POLL_S = 0.05
+WRITE_ID = re.compile(r"stream-load-(\d+)")
 
 
 def _wait_listening(process: subprocess.Popen, port: int) -> None:
@@ -78,6 +80,13 @@ def serving(
             gate.stop_server(write_process)
 
 
+def arrived(arrivals: dict[int, float], data: object) -> None:
+    """Stamp the first arrival of each stream load write a patch carries, however many writes one patch folds."""
+    now = time.monotonic()
+    for found in WRITE_ID.findall(json.dumps(data)):
+        arrivals.setdefault(int(found), now)
+
+
 def consume(base: str, token: str, ready: threading.Event, stop: threading.Event, result: dict) -> None:
     request = urllib.request.Request(
         f"{base}/api/v1/ledgers/{gate.SLUG}/events",
@@ -92,7 +101,7 @@ def consume(base: str, token: str, ready: threading.Event, stop: threading.Event
                 elif name == "ledger":
                     result["patches"] += 1
                     result["patch_bytes"] += len(json.dumps(data).encode("utf-8"))
-                    result["arrivals"].append(time.monotonic())
+                    arrived(result["arrivals"], data)
                 if stop.is_set():
                     return
     except (OSError, ValueError) as exc:
@@ -107,7 +116,7 @@ def measure(source: Path, folder: Path, doc: dict, streams: int) -> dict:
     token = gate.store(folder, doc)
     write_port, read_port = gate.free_port(), gate.free_port()
     write_base, read_base = f"http://127.0.0.1:{write_port}", f"http://127.0.0.1:{read_port}"
-    consumers = [{"snapshots": 0, "patches": 0, "patch_bytes": 0, "errors": [], "arrivals": []} for _ in range(streams)]
+    consumers = [{"snapshots": 0, "patches": 0, "patch_bytes": 0, "errors": [], "arrivals": {}} for _ in range(streams)]
     ready = [threading.Event() for _ in consumers]
     stop = threading.Event()
     threads = [
@@ -155,11 +164,11 @@ def measure(source: Path, folder: Path, doc: dict, streams: int) -> dict:
             cpu = gate.cpu_seconds(write_server.pid) - initial_cpu
             deadline = time.monotonic() + gate.TIMEOUT_S
             while time.monotonic() < deadline and any(
-                result["patches"] < len(writes) and not result["errors"] for result in consumers
+                len(result["arrivals"]) < len(writes) and not result["errors"] for result in consumers
             ):
                 time.sleep(DELIVERY_POLL_S)
             delivered = time.monotonic() - began
-            if any(result["patches"] != len(writes) or result["errors"] for result in consumers):
+            if any(len(result["arrivals"]) != len(writes) or result["errors"] for result in consumers):
                 raise RuntimeError(
                     f"streams did not receive every write {gate.TIMEOUT_S:g} s after the window, last write at"
                     f" {last_write:.2f} s, waited to {delivered:.2f} s: {consumers}"
@@ -169,11 +178,7 @@ def measure(source: Path, folder: Path, doc: dict, streams: int) -> dict:
                     f"streams received the last write {delivered - last_write:.2f} s after it, last write at"
                     f" {last_write:.2f} s, delivered at {delivered:.2f} s, past one follow pass of {FOLLOW_PASS_S:g} s"
                 )
-            delays = [
-                arrival - stored
-                for result in consumers
-                for arrival, stored in zip(result.pop("arrivals"), written, strict=True)
-            ]
+            delays = [at - written[n] for result in consumers for n, at in result.pop("arrivals").items()]
             return {
                 "streams": streams,
                 "writes": len(writes),

@@ -3,7 +3,6 @@ import json
 import subprocess
 import sys
 import threading
-import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -77,14 +76,14 @@ class Lagging:
 
     def mutate(self, slug: str, ops: list[dict[str, Any]]) -> dict[str, Any]:
         for result in self.results:
-            timer = threading.Timer(LAG_S, self.publish, args=(result,))
+            timer = threading.Timer(LAG_S, self.publish, args=(result, ops))
             timer.daemon = True
             timer.start()
         return {"data": {"rejected": []}}
 
-    def publish(self, result: dict[str, Any]) -> None:
+    def publish(self, result: dict[str, Any], ops: list[dict[str, Any]]) -> None:
         result["patches"] += 1
-        result["arrivals"].append(time.monotonic())
+        streams.arrived(result["arrivals"], {"patch": ops})
 
 
 @contextmanager
@@ -112,6 +111,19 @@ def test_the_delivery_check_waits_for_a_patch_published_after_the_measurement_wi
     assert result["delivered_s"] - result["last_write_s"] < streams.FOLLOW_PASS_S
     assert LAG_S / 2 < result["delivery_p95_s"] <= result["delivery_max_s"] < 2 * LAG_S
     assert all("arrivals" not in consumer for consumer in result["consumers"])
+
+
+def test_a_patch_folding_two_writes_delivers_both_and_keeps_each_first_arrival() -> None:
+    arrivals: dict[int, float] = {}
+    streams.arrived(
+        arrivals, {"patch": {"o": {"comments": {"add": [{"id": "stream-load-0"}, {"id": "stream-load-1"}]}}}}
+    )
+    first = dict(arrivals)
+    streams.arrived(
+        arrivals, {"patch": {"ids": ["stream-load-join", "stream-load-0", "stream-load-1", "stream-load-2"]}}
+    )
+    assert sorted(arrivals) == [0, 1, 2]
+    assert arrivals[0] == arrivals[1] == first[0] == first[1] <= arrivals[2]
 
 
 def test_the_follow_pass_bound_follows_the_scheduler_pass_period() -> None:
