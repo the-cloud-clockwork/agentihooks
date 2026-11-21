@@ -152,6 +152,7 @@ class SwarmConfig:
     tick_mode: str = SEQUENTIAL_TICK
     control_url: str = ""
     lab_url: str = ""
+    max_review: int = 0
 
     def __post_init__(self) -> None:
         if self.tick_mode not in TICK_MODES:

@@ -1,0 +1,4 @@
+[
+  {"old_path": "scripts/example.py", "new_path": "scripts/example.py", "a_mode": "100644", "b_mode": "100644", "new_file": false, "renamed_file": false, "deleted_file": false, "generated_file": false, "diff": "@@ -1,2 +1,3 @@\n import os\n-old = 1\n+new = 1\n+more = 2\n"},
+  {"old_path": "tests/test_example.py", "new_path": "tests/test_example.py", "a_mode": "0", "b_mode": "100644", "new_file": true, "renamed_file": false, "deleted_file": false, "generated_file": false, "diff": "@@ -0,0 +1,2 @@\n+def test_example():\n+    assert True\n"}
+]

@@ -1,0 +1,14 @@
+rules:
+  - id: merge-queue-admit-skips-review
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The swarm merge queue admission must pass the observed head through the review gate, so a head without an
+      independent review whose findings its author read is logged, or refused when the review gate is enforced.
+    paths:
+      include:
+        - /scripts/swarm/cli.py
+        - merge-queue-admit-skips-review.py
+    patterns:
+      - pattern: $QUEUE.operate(..., admit=$ADMIT, ...)
+      - pattern-not: $QUEUE.operate(..., admit=<... review_gate.admit(...) ...>, ...)

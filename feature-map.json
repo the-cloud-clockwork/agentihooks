@@ -5024,6 +5024,39 @@
       ]
     },
     {
+      "id": "forge-change-request-seam",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-rv-forge",
+      "behaviour": "A reviewer reads a GitHub pull request or GitLab merge request as one change request (title, body, head, diff, changed files, check states) and posts a review comment on it, with the forge picked from the repository remote host, through agentihooks forge read and post.",
+      "seam": "scripts.forge.github.GitHubForge and scripts.forge.gitlab.GitLabForge read and post through an injected runner or transport; scripts.forge.remote.pick chooses one by host; scripts.forge.cli.main is the delegated forge command",
+      "tests": [
+        "tests/forge/test_github.py::test_github_reads_a_recorded_pull_request_into_a_change_request",
+        "tests/forge/test_github.py::test_github_posts_a_review_comment_with_the_body_on_standard_input",
+        "tests/forge/test_github.py::test_a_failed_gh_call_raises_with_its_error_text",
+        "tests/forge/test_gitlab.py::test_gitlab_reads_a_recorded_merge_request_into_a_change_request",
+        "tests/forge/test_gitlab.py::test_gitlab_reads_every_diffs_page_until_a_short_page",
+        "tests/forge/test_gitlab.py::test_a_merge_request_without_pipeline_or_description_reads_empty",
+        "tests/forge/test_gitlab.py::test_gitlab_posts_a_review_comment_as_a_merge_request_note",
+        "tests/forge/test_gitlab.py::test_the_default_transport_sends_one_request_through_urlopen",
+        "tests/forge/test_remote.py::test_a_remote_url_parses_into_host_and_repository_path",
+        "tests/forge/test_remote.py::test_a_url_without_host_and_owner_is_refused",
+        "tests/forge/test_remote.py::test_the_picker_names_the_forge_from_the_remote_host",
+        "tests/forge/test_remote.py::test_a_host_that_names_no_forge_is_refused",
+        "tests/forge/test_remote.py::test_the_picker_returns_github_for_a_github_remote",
+        "tests/forge/test_remote.py::test_the_picker_returns_gitlab_with_the_token_from_the_environment",
+        "tests/forge/test_remote.py::test_an_explicit_kind_overrides_the_remote_host",
+        "tests/forge/test_remote.py::test_gitlab_without_a_token_is_refused",
+        "tests/forge/test_remote.py::test_the_origin_remote_is_read_from_git",
+        "tests/forge/test_remote.py::test_a_checkout_without_an_origin_remote_is_refused",
+        "tests/forge/test_cli.py::test_the_cli_delegates_forge_to_this_module",
+        "tests/forge/test_cli.py::test_read_prints_the_change_request_as_json",
+        "tests/forge/test_cli.py::test_post_reads_the_body_file_and_prints_the_comment_url",
+        "tests/forge/test_cli.py::test_post_reads_the_body_from_standard_input",
+        "tests/forge/test_cli.py::test_the_origin_remote_of_the_current_checkout_is_the_default",
+        "tests/forge/test_cli.py::test_a_forge_failure_prints_its_reason_and_returns_one"
+      ]
+    },
+    {
       "id": "ledger-event-relay",
       "origin": "inventory",
       "behaviour": "The ledger event relay publishes each unsent outbox row once on its subject in revision order with only its catalogued fields, a crash between publish and mark never duplicates an event, and a row the bus refuses as too large never holds back the rows after it.",
@@ -5527,6 +5560,42 @@
         "tests/swarm/test_queue_entry_priority.py::test_watcher_queue_entry_supplies_automatic_priority"
       ],
       "rules": ["merge-priority-missing-entry-callback"]
+    },
+    {
+      "id": "review-findings-queue-gate",
+      "origin": "operator",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-rv-findings-gate",
+      "behaviour": "A reviewer posts its findings on a change request head through the forge seam and the review record stores each one with its comment; a review task is refused at swarm done while it posted no finding; the author marks findings read or answered; swarm merge queue logs, or when the review gate is enforced refuses, a head without a review from another agent whose findings the author read.",
+      "seam": "scripts.review.record post, mark and done_refusal through scripts.review.cli and scripts.swarm.cli.cmd_done; scripts.review.gate.admit in the scripts.swarm.cli.cmd_merge queue admission with the review enforcement gate",
+      "tests": [
+        "tests/review/test_record.py::test_a_post_stores_each_finding_with_its_forge_comment_on_the_reported_head",
+        "tests/review/test_record.py::test_a_post_without_a_finding_is_refused_and_posts_nothing",
+        "tests/review/test_record.py::test_a_second_post_on_the_same_head_appends_numbered_findings",
+        "tests/review/test_record.py::test_a_record_expires_thirty_days_after_its_last_write",
+        "tests/review/test_record.py::test_a_change_request_url_without_a_number_is_refused",
+        "tests/review/test_record.py::test_the_author_marks_findings_read_or_answered_on_the_current_head",
+        "tests/review/test_record.py::test_marking_an_unknown_finding_or_a_head_without_review_is_refused",
+        "tests/review/test_record.py::test_a_reviewer_cannot_mark_its_own_findings_read",
+        "tests/review/test_record.py::test_review_done_with_no_findings_is_refused",
+        "tests/review/test_record.py::test_review_done_with_one_finding_passes",
+        "tests/review/test_record.py::test_other_task_kinds_never_read_review_records",
+        "tests/review/test_queue_gate.py::test_the_review_gate_defaults_to_log_only_and_takes_an_enforce_switch",
+        "tests/review/test_queue_gate.py::test_an_unread_review_logs_a_would_be_refusal_and_queues",
+        "tests/review/test_queue_gate.py::test_an_enforced_gate_refuses_an_unread_review",
+        "tests/review/test_queue_gate.py::test_a_review_the_author_read_queues_with_no_gate_row",
+        "tests/review/test_queue_gate.py::test_a_review_posted_by_the_author_or_its_task_is_not_independent",
+        "tests/review/test_queue_gate.py::test_a_head_without_a_review_logs_a_would_be_refusal_and_queues",
+        "tests/review/test_queue_gate.py::test_a_skipped_review_gate_neither_logs_nor_refuses",
+        "tests/review/test_queue_protection.py::test_a_default_swarm_queues_a_head_nobody_reviewed",
+        "tests/review/test_cli.py::test_the_command_line_delegates_review_to_this_module",
+        "tests/review/test_cli.py::test_post_records_the_calling_reviewer_and_prints_the_record",
+        "tests/review/test_cli.py::test_read_marks_the_findings_answered_by_the_calling_author",
+        "tests/review/test_cli.py::test_a_refusal_prints_its_reason_and_returns_one",
+        "tests/review/test_cli.py::test_a_session_outside_the_swarm_is_refused"
+      ],
+      "rules": [
+        "merge-queue-admit-skips-review"
+      ]
     },
     {
       "id": "merge-priority-operator-lift",
@@ -12322,6 +12391,34 @@
         "tests/test_package_recon_rule.py::test_documentation_persona_points_at_the_recon_rule",
         "tests/test_package_recon_rule.py::test_master_and_planner_hold_task_specs_and_merges_to_the_recon",
         "tests/test_package_recon_rule.py::test_role_skills_run_the_recon_before_the_first_edit"
+      ]
+    },
+    {
+      "id": "swarm-review-lane",
+      "origin": "regression",
+      "ordered_at": "2026-11-21",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-rv-lane-core",
+      "behaviour": "The swarm has a review lane worked by reviewer agents: reviewer names parse to the review lane and review seats are numbered like worker seats; every template carries a review lane with cap 1, the reviewer profile and the review kind; the swarm config stores a review cap that defaults to none for existing swarms, capacity reads it and autoscale leaves it as configured; the ledger stores a review lane task only with the review kind and the review kind only on the review lane; the tick lists an open review task as claimable and a drained swarm resumes for one, while the existing lanes keep their caps and listings.",
+      "seam": "naming types, swarm templates, the swarm config review cap, capacity lanes and caps, the tick lane list, and ledger task add lane validation and choices",
+      "tests": [
+        "tests/swarm/test_review_lane.py::test_reviewer_names_round_trip_to_the_review_lane",
+        "tests/swarm/test_review_lane.py::test_review_seats_are_numbered_like_worker_seats",
+        "tests/swarm/test_review_lane.py::test_a_template_carries_the_review_lane_with_its_cap_profile_and_kind",
+        "tests/swarm/test_review_lane.py::test_a_template_from_a_swarm_config_keeps_each_worker_cap",
+        "tests/swarm/test_review_lane.py::test_a_template_from_a_swarm_config_carries_the_review_cap",
+        "tests/swarm/test_review_lane.py::test_existing_swarm_configs_have_no_review_seat",
+        "tests/swarm/test_review_lane.py::test_a_stored_swarm_config_keeps_its_review_cap",
+        "tests/swarm/test_review_lane.py::test_capacity_reads_each_worker_lane_cap_from_its_config_field",
+        "tests/swarm/test_review_lane.py::test_capacity_reads_the_review_cap_from_the_swarm_config",
+        "tests/swarm/test_review_lane.py::test_autoscale_sizes_only_the_engineering_ci_and_plan_lanes",
+        "tests/swarm/test_review_lane.py::test_autoscale_keeps_the_configured_review_cap",
+        "tests/swarm/test_review_lane.py::test_ready_work_lists_each_task_only_on_its_own_lane",
+        "tests/swarm/test_review_lane.py::test_ready_work_lists_an_open_review_task_on_the_review_lane",
+        "tests/swarm/test_review_lane.py::test_a_drained_swarm_runs_again_for_a_new_review_task",
+        "tests/swarm/test_review_lane.py::test_the_ledger_refuses_a_lane_outside_the_swarm_lanes",
+        "tests/swarm/test_review_lane.py::test_the_ledger_stores_a_review_lane_review_task",
+        "tests/swarm/test_review_lane.py::test_the_review_lane_accepts_only_review_tasks",
+        "tests/swarm/test_review_lane.py::test_the_task_command_takes_the_review_lane"
       ]
     }
   ],
