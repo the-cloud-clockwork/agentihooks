@@ -1332,6 +1332,7 @@ def test_unit_shards_check_out_full_history_without_old_file_contents():
         assert checkout["with"].get("ref") in (None, "${{ github.sha }}")
 
 
+@pytest.mark.feature("partial-clone-checkout-stall-bound")
 def test_a_stalled_partial_clone_checkout_aborts_within_a_minute_and_retries_once_in_place() -> None:
     jobs = _workflow()["jobs"]
     checkouts = {

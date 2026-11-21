@@ -92,6 +92,7 @@ def test_tests_mutation_joins_plan_with_the_planning_install_and_replan_checks_o
     }
 
 
+@pytest.mark.feature("mutation-refine-fetches-only-the-head-history")
 def test_mutation_refine_checks_out_only_the_head_history_without_file_contents() -> None:
     steps = _jobs()["mutation-refine"]["steps"]
     checkouts = [step for step in steps if step.get("uses", "").startswith("actions/checkout")]
@@ -104,6 +105,7 @@ def test_mutation_refine_checks_out_only_the_head_history_without_file_contents(
         }
 
 
+@pytest.mark.feature("mutation-refine-fetches-only-the-head-history")
 def test_every_mutation_refine_fetch_negotiates_from_the_head() -> None:
     fetches = [
         line.split()
