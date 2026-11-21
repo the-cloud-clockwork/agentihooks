@@ -184,7 +184,7 @@ what is stored:
 
 ```bash
 P="${AGENTIHOOKS_SWARM_KEY_PREFIX:-agentihooks}:swarm"
-URL="$AGENTIHOOKS_SWARM_REDIS_URL"
+URL="${AGENTIHOOKS_SWARM_REDIS_URL:-redis://127.0.0.1:6379/0}"
 SLUG=proj-a-doctor
 redis-cli -u "$URL" HMGET "$P:$SLUG:config" engine repo_origin template repo
 redis-cli -u "$URL" HLEN "$P:$SLUG:launch-jobs"
@@ -192,8 +192,8 @@ redis-cli -u "$URL" HVALS "$P:$SLUG:launches"
 redis-cli -u "$URL" SMEMBERS "$P:index"
 ```
 
-On a hive outside local mode, use `AGENTIHOOKS_HIVE_REDIS_URL` when it is set. A migrated swarm answers `events` and a
-non-empty origin. Never write these keys by hand.
+The block reads the swarm URL. On a hive outside local mode, set `URL` to `$AGENTIHOOKS_HIVE_REDIS_URL` when it is
+set, as the command does. A migrated swarm answers `events` and a non-empty origin. Never write these keys by hand.
 
 ## Limitations
 
