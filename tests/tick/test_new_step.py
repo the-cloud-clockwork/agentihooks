@@ -417,20 +417,19 @@ def test_scaffold_adds_to_the_real_map_without_changing_any_existing_line(tree: 
     path.write_bytes(original)
     assert scaffold(tree, STEP) == 0
     changed = path.read_bytes()
-    mapped = json.loads(changed)
-    added, *kept = mapped["features"]
+    changes = difflib.SequenceMatcher(None, original.splitlines(keepends=True), changed.splitlines(keepends=True))
+    assert [tag for tag, *_ in changes.get_opcodes() if tag != "equal"] == ["insert"]
+    added, *kept = json.loads(changed)["features"]
     assert added["id"] == "tick-step-widgets"
     assert added["tests"] == ["tests/tick/steps/test_probe_widgets.py::test_probe_widgets"]
     assert kept == json.loads(original)["features"]
-    changes = difflib.SequenceMatcher(None, original.splitlines(keepends=True), changed.splitlines(keepends=True))
-    assert [tag for tag, *_ in changes.get_opcodes() if tag != "equal"] == ["insert"]
 
 
 @pytest.mark.feature("feature-map-stable-write")
 @pytest.mark.parametrize(
     "original",
     [
-        r'{"metadata": {"features": ["decoy"]}, "features": [{ "id":"kept", "behaviour":"Gate — Required", "nested":{"text":"}] \\" features", "values":[1,2]} }], "tail":[3,4]}',
+        r'{"metadata": {"features": ["decoy"]}, "features": [{ "id":"kept", "behaviour":"Gate — Required", "nested":{"text":"}] \" features", "values":[1,2]} }], "tail":[3,4]}',
         '{\n\t"features" : [\n\t\t{"id":"kept", "behaviour":"Gate — Required", "tests":[]}\n\t],\n\t"tail": [1,2]\n}\n',
         '{\r\n  "features": [\r\n    {"id":"kept","tests":[]}\r\n  ],\r\n  "tail": "unchanged"\r\n}\r\n',
     ],
@@ -441,18 +440,13 @@ def test_scaffold_inserts_one_entry_and_keeps_all_surrounding_bytes(tree: Path, 
     path.write_bytes(original.encode())
     assert scaffold(tree, STEP) == 0
     changed = path.read_bytes().decode()
-    mapped = json.loads(changed)
-    added, *kept = mapped["features"]
+    old_entry = original.index('{"id":"kept"') if '{"id":"kept"' in original else original.index('{ "id":"kept"')
+    assert changed.startswith(original[:old_entry])
+    assert changed.endswith(original[old_entry:])
+    added, *kept = json.loads(changed)["features"]
     assert added["id"] == "tick-step-widgets"
     assert kept == json.loads(original)["features"]
-    assert json.loads(original)["tail"] == mapped["tail"]
-    old_entry = (
-        original[original.index('{"id":"kept"') :]
-        if '{"id":"kept"' in original
-        else original[original.index('{ "id":"kept"') :]
-    )
-    assert changed.endswith(old_entry)
-    assert changed[: changed.index('"features"')] == original[: original.index('"features"')]
+    assert json.loads(original)["tail"] == json.loads(changed)["tail"]
 
 
 @pytest.mark.feature("feature-map-stable-write")
