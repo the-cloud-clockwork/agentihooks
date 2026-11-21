@@ -47,6 +47,7 @@ def rig(monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNamespace]:
     bus.close()
 
 
+@pytest.mark.feature("swarm-launch-acknowledgements")
 def test_launches_parser_dispatches_the_public_command() -> None:
     from scripts.swarm import cli, launch_starts
 
@@ -56,6 +57,7 @@ def test_launches_parser_dispatches_the_public_command() -> None:
     assert args.slug == "rig"
 
 
+@pytest.mark.feature("swarm-launch-acknowledgements")
 def test_launches_print_acknowledged_and_missing_starts(
     rig: SimpleNamespace, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -74,6 +76,7 @@ def test_launches_print_acknowledged_and_missing_starts(
     rig.closed.assert_called_once_with()
 
 
+@pytest.mark.feature("swarm-launch-acknowledgements")
 def test_launches_print_reconstructed_acknowledgement_time(
     rig: SimpleNamespace, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -90,6 +93,7 @@ def test_launches_print_reconstructed_acknowledgement_time(
     assert json.loads(capsys.readouterr().out) == [{"agent": "engineer", "hive": "hive", "launched_at": 950_000}]
 
 
+@pytest.mark.feature("swarm-launch-acknowledgements")
 @pytest.mark.parametrize("value", [None, b"null"])
 def test_launches_print_missing_acknowledgement(
     rig: SimpleNamespace, capsys: pytest.CaptureFixture[str], value: bytes | None
@@ -108,6 +112,7 @@ def test_launches_print_missing_acknowledgement(
     assert json.loads(capsys.readouterr().out) == [{"agent": "engineer", "hive": None, "launched_at": None}]
 
 
+@pytest.mark.feature("swarm-launch-acknowledgements")
 @pytest.mark.parametrize(
     "changes",
     [
@@ -137,6 +142,7 @@ def test_launches_reject_mismatched_acknowledgements(
     assert json.loads(capsys.readouterr().out) == [{"agent": "engineer", "hive": None, "launched_at": None}]
 
 
+@pytest.mark.feature("swarm-launch-acknowledgements")
 def test_launches_close_the_bus_on_read_failure(rig: SimpleNamespace, capsys: pytest.CaptureFixture[str]) -> None:
     from scripts.swarm import launch_starts
 
@@ -149,6 +155,7 @@ def test_launches_close_the_bus_on_read_failure(rig: SimpleNamespace, capsys: py
     rig.closed.assert_called_once_with()
 
 
+@pytest.mark.feature("swarm-launch-acknowledgements")
 def test_launches_print_an_empty_agent_list(rig: SimpleNamespace, capsys: pytest.CaptureFixture[str]) -> None:
     from scripts.swarm import launch_starts
 
