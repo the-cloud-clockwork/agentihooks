@@ -1363,6 +1363,7 @@ def test_a_probe_that_fails_times_out_or_cannot_start_keeps_a_refused_scheduler_
     from scripts.scheduler import service
 
     spawn = _stopped_supervisor(monkeypatch, tmp_path, 4, Mock(side_effect=[outcome]))
+    monkeypatch.setattr(service, "runtime_dir", lambda environ=None: tmp_path if environ else tmp_path / "unread")
     assert service.ensure_running({"AGENTIHOOKS_SWARM_REDIS_URL": "redis://swarm.invalid:6379/3"}) is False
     assert spawn.call_count == 1
     assert (tmp_path / service.REFUSAL).is_file()
@@ -1377,11 +1378,16 @@ def test_the_probe_returns_the_refused_code_when_the_bus_refuses_its_authorizati
     from scripts.scheduler import service
     from scripts.scheduler.core import Scheduler
 
+    keys: list[str] = []
+
     def get(key: str) -> None:
+        keys.append(key)
         raise errors.AuthorizationError()
 
     monkeypatch.setenv("AGENTIHOOKS_STATE_BACKEND", "bus")
-    assert service.probe(Scheduler(cast("StateStore", SimpleNamespace(get=get)))) == service.REFUSED
+    scheduler = Scheduler(cast("StateStore", SimpleNamespace(get=get)))
+    assert service.probe(scheduler) == service.REFUSED
+    assert keys == [scheduler.name("entries")]
 
 
 def test_a_takeover_whose_old_supervisor_will_not_drain_says_so(monkeypatch, tmp_path, capsys):
