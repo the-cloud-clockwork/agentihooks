@@ -500,7 +500,7 @@ lock when its write ends, so neither writes while a Claude session holds the fil
 
 | Writer | Takes the lock when | Lock still held after 3 seconds |
 |---|---|---|
-| Folder trust marking | A Claude launch goes into a folder the config does not trust yet and `AGENTIHOOKS_TRUST_LAUNCH_DIR` is not `0` | `trust=untrusted`; stderr prints `agentihooks init-agent: Claude does not trust <dir> (<config>.lock is held); the session will wait at Claude's folder trust question until someone answers it in its pane`, and the launch goes ahead |
+| Folder trust marking | A Claude launch goes into a folder the config does not trust yet and marking is on (`AGENTIHOOKS_TRUST_LAUNCH_DIR` is not `0`, `false`, `no` or `off`) | `trust=untrusted`; stderr prints `agentihooks init-agent: Claude does not trust <dir> (<config>.lock is held); the session will wait at Claude's folder trust question until someone answers it in its pane`, and the launch goes ahead |
 | Inbox channel registration | `init-agent --inbox-channel`, and `select-profile` when the Claude arguments carry `--dangerously-load-development-channels=server:inbox` | The launch fails with exit 2: `agentihooks init-agent: <config>.lock is held`, or `agentihooks select-profile: <config>.lock is held`, which also fails a pending launch report |
 
 Registration takes the lock on every such launch and rewrites the file only when
@@ -508,26 +508,25 @@ the stored `inbox` entry under `mcpServers` differs from the current one.
 
 Both writers treat a lock the same way. A lock directory whose modification time
 is `claude_trust.STALE_LOCK_SECONDS` (10 seconds) old or older is abandoned, the
-stale bound Claude Code's lockfile uses: the writer removes it through
+stale bound of Claude Code's lockfile: the writer removes it through
 `claude_trust._reclaim` and takes the lock at once, with no wait. A younger lock
 belongs to a live holder: the writer checks it again every 0.1 seconds, takes it
 as soon as it is gone or reaches the bound, and gives up after 3 seconds. Reclaim
-removes only an empty directory, the shape Claude Code's lock has.
+removes the directory with `rmdir`, so it removes only an empty one.
 
 A rendered profile home is the Claude config home of every launch of that profile
-on the host, so one abandoned lock there reaches all of them. A launch killed
-while it holds the lock leaves the empty directory behind. Before registration
-reclaimed it, registration waited on that directory as on a live lock, and every
-later Claude launch of the profile failed with `is held`: one abandoned lock in a
-ci profile home refused every ci launch on its hive.
+on the host. A launch killed while it holds the lock leaves the empty directory
+behind; reclaim lets the next launch remove it, where a plain wait would fail
+every later Claude launch of the profile with `is held`.
 
 #### Check a lock
 
-The lock of the config this shell's launches use, and how long it has been held:
+The lock of the config this shell's launches use, and its age in seconds since
+its modification time, which is what the stale bound reads:
 
 ```bash
 lock="${CLAUDE_CONFIG_DIR:-${CLAUDE_CODE_HOME_DIR:-$HOME}}/.claude.json.lock"
-test -d "$lock" && echo "held $(( $(date +%s) - $(stat -c %Y "$lock") ))s" || echo free
+test -d "$lock" && echo "age $(( $(date +%s) - $(stat -c %Y "$lock") ))s" || echo free
 ```
 
 Every lock in the rendered profile homes on this host:
@@ -536,23 +535,34 @@ Every lock in the rendered profile homes on this host:
 find ~/.agentihooks/profiles/.homes -name .claude.json.lock -type d -printf '%TY-%Tm-%Td %TH:%TM %p\n'
 ```
 
-A lock held 10 seconds or more needs no action: the next launch that writes the
-config removes it.
+An empty lock 10 seconds old or older needs no action: the next launch that
+writes the config removes it.
 
-#### Troubleshooting
+#### Claude config lock troubleshooting
 
 - **`<config>.lock is held`.** The lock stayed younger than 10 seconds for the
-  whole 3 second wait: a Claude session was writing its config, or another launch
-  was registering at the same moment. Launch again. A lock that never ages past
-  10 seconds is live, because its holder keeps renewing it; let that Claude
-  session finish and never delete the lock by hand.
-- **`[Errno 39] Directory not empty: '<lock>'`** (Linux). The lock directory has
-  files inside. Reclaim does not remove it, so registration fails with this error
-  and trust marking reports `untrusted` with it. Inspect the directory, then
-  remove it by hand.
+  whole 3 second wait: another writer held it, such as a Claude session writing
+  its config or another launch registering at the same moment. Launch again. A
+  lock that keeps reading younger than 10 seconds has a live holder; let it
+  finish and leave the lock in place. A lock directory with files inside also
+  reads as held until it is 10 seconds old.
+- **`[Errno 39] Directory not empty: '<lock>'`** (Linux). The lock is 10 seconds
+  old or older and has files inside, so `rmdir` refuses it: registration fails
+  with this error and trust marking reports `untrusted` with it. Look inside,
+  confirm no Claude session runs on that config home, then remove it:
+
+  ```bash
+  ls -la "$lock"
+  pgrep -a claude
+  rm -r "$lock"
+  ```
+
 - **`trust=untrusted` with `is held` and a launch that went ahead.** Only trust
   marking timed out; answer the trust question in the session's pane, or launch
   again once the lock is free.
+- **`trust=untrusted` with `AGENTIHOOKS_TRUST_LAUNCH_DIR is off`.** Marking is
+  turned off by `AGENTIHOOKS_TRUST_LAUNCH_DIR` set to `0`, `false`, `no` or `off`
+  in any case, so the launch never takes the lock for trust.
 
 #### Tests and guards
 
@@ -563,9 +573,10 @@ config removes it.
   `tests/inbox/test_channel_server.py::test_registration_leaves_a_lock_inside_the_stale_bound_to_its_holder`
   keeps a lock 5 seconds inside the bound, checks it through
   `claude_trust._reclaim` on every try and fails with `<lock> is held`.
-- Feature `claude-trust-lock-reclaim` covers the same reclaim in folder trust
-  marking in `tests/test_claude_trust.py`, including a lock exactly at the bound,
-  which is reclaimed.
+- Feature `claude-trust-lock-reclaim` guards folder trust marking in
+  `tests/test_claude_trust.py`: an abandoned lock from a killed launch is
+  reclaimed and the folder marked, a live holder still blocks the mark, and the
+  reclaim helper itself reclaims a lock exactly at the bound.
 - Semgrep incident rule `mkdir-lock-without-reclaim`: a `while True` loop that
   takes a lock with `mkdir` and retries on `FileExistsError` without first calling
   a reclaim helper and continuing is an error. The Semgrep workflow runs every
