@@ -10916,6 +10916,17 @@
       ]
     },
     {
+      "id": "execution-launch-decision-survives-stale-put",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-live-binding-unrecorded-profile",
+      "behaviour": "A whole agent record put built from a copy read before the hub wrote the launch decision keeps the harness, profile, account, model, effort, overlays and profile decision the execution already holds wherever the copy carries them empty, while the copy's own non empty fields such as a session model still land, so the live binding check never reports an unrecorded profile or account for a launched agent; a put from a copy that already holds the profile decision still lands a field it blanks, such as the account a reboot drops.",
+      "seam": "ExecutionRegistry.put and update through _resolve after ExecutionRegistry.set_launch, read by live_binding.unknown",
+      "tests": [
+        "tests/swarm/test_execution_archive.py::test_a_put_from_a_copy_read_after_the_launch_decision_still_lands_a_blanked_field",
+        "tests/swarm/test_execution_archive.py::test_a_put_from_a_copy_read_before_the_launch_decision_keeps_the_decision"
+      ]
+    },
+    {
       "id": "events-started-working",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-started-working",

@@ -450,6 +450,46 @@ def test_set_launch_changes_nothing_for_a_run_that_is_not_a_listed_seat_head(sto
     assert store.redis.hgetall(store.key("fixture", "agents")) == live
 
 
+PLACED = {"overlays": ["brain"], "profile_decision": {"profile": "engineer", "validation": {"home": "/homes/codex"}}}
+
+
+@pytest.mark.feature("execution-launch-decision-survives-stale-put")
+def test_a_put_from_a_copy_read_after_the_launch_decision_still_lands_a_blanked_field(store):
+    current = started(store, "eng-1@fixture")
+    store.execution_registry.set_launch("fixture", current.execution_id, {**DECISION, **PLACED})
+    [fresh] = store.agents("fixture")
+
+    store.put_agent("fixture", replace(fresh, account=""))
+
+    record = store.execution("fixture", current.execution_id)
+    assert record.account == ""
+    assert (record.harness, record.profile, record.profile_decision) == (
+        "codex",
+        "engineer",
+        PLACED["profile_decision"],
+    )
+
+
+@pytest.mark.feature("execution-launch-decision-survives-stale-put")
+def test_a_put_from_a_copy_read_before_the_launch_decision_keeps_the_decision(store):
+    from scripts.swarm import live_binding
+
+    current = started(store, "eng-1@fixture")
+    [stale] = store.agents("fixture")
+    store.execution_registry.set_launch("fixture", current.execution_id, {**DECISION, **PLACED})
+
+    store.put_agent("fixture", replace(stale, model="gpt-5.1", model_source="session"))
+
+    record = store.execution("fixture", current.execution_id)
+    [agent] = store.agents("fixture")
+    kept = {**DECISION, **PLACED, "model": "gpt-5.1"}
+    assert {field: getattr(record, field) for field in kept} == kept
+    assert {field: getattr(agent, field) for field in kept} == kept
+    assert record.model_source == "session"
+    observed = {"harness": "codex", "profile": "engineer", "account": "work"}
+    assert not {"profile", "account"} & set(live_binding.unknown(agent, observed))
+
+
 def test_archive_keeps_every_row_of_a_live_name_and_seat_head_ties(store):
     agent = AgentRecord(store.next_name("fixture", "eng"), "eng", "task", seat="eng-3@fixture")
     one = store.start_execution("fixture", agent)
