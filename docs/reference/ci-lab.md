@@ -271,6 +271,7 @@ the token from `CI_LAB_CONTROL_TOKEN` on its host.
 | `ci_lab_workers_ready` | | `WORKERS_READY` |
 | `ci_lab_github_rate_remaining` | | `GITHUB_RATE_REMAINING` |
 | `ci_lab_verdict_mismatch_total` | `gate` | `VERDICT_MISMATCH_TOTAL` |
+| `ci_lab_load_age_seconds` | | `LOAD_AGE_SECONDS` |
 
 The scheduler sets every metric its queue, lease and worker state answers, the node mirror's age
 and the GitHub calls left, on one `scripts.ci_lab.metrics.Registry` the `Scheduler` builds and
