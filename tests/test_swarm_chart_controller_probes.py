@@ -34,13 +34,14 @@ def test_controller_reserves_its_measured_cpu() -> None:
 
 
 @pytest.mark.feature("controller-busy-node-probes")
-def test_api_disabled_controller_keeps_its_lease_probe() -> None:
-    template = (CHART / "templates/controller.yaml").read_text()
+def test_api_disabled_liveness_runs_the_controller_live_command() -> None:
+    template = (CHART / "templates/controller.yaml").read_text().split("- name: controller\n", 1)[1]
+    probe = template.split("          livenessProbe:\n", 1)[1].split("            {{- toYaml", 1)[0]
 
-    assert (
+    assert probe.split("            {{- else }}\n", 1)[1] == (
         "            exec:\n              command:\n                - agentihooks\n                - controller\n"
-        "                - live\n"
-    ) in template
+        "                - live\n            {{- end }}\n"
+    )
 
 
 @pytest.mark.feature("controller-busy-node-probes")
