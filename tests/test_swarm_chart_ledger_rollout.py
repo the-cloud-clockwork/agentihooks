@@ -10,11 +10,11 @@ SMOKE = ROOT / "deploy" / "helm" / "agentihooks-swarm" / "ci" / "kind-smoke.sh"
 CHART = ROOT / "deploy" / "helm" / "agentihooks-swarm"
 
 
-def test_the_kind_proof_checks_the_ledger_rollout_before_any_cluster_starts():
+def test_the_kind_proof_checks_the_ledger_rollout_before_cluster_configuration() -> None:
     script = SMOKE.read_text()
 
     assert 'python3 tests/chart_ledger_rollout.py "$chart"' in script
-    assert script.index("python3 tests/chart_ledger_rollout.py") < script.index("kind create cluster")
+    assert script.index("python3 tests/chart_ledger_rollout.py") < script.index('wait "$cluster_setup"\n')
     assert "ledger.replicas must be 1" not in script
 
 

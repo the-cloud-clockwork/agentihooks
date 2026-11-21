@@ -14,6 +14,56 @@ def _at(text: str) -> int:
     return SCRIPT.index(text)
 
 
+@pytest.mark.feature("kind-proof-parallel-preparation")
+def test_chart_validation_still_finishes_before_cluster_configuration() -> None:
+    configured = _at('wait "$cluster_setup"\nkubectl apply')
+    validators = (
+        "chart_examples",
+        "chart_github_auth",
+        "chart_hive_home",
+        "chart_hive_rollout",
+        "chart_hive_only",
+        "chart_hub",
+        "chart_ledger_rollout",
+        "chart_api",
+        "chart_controller_rollout",
+        "chart_scheduler_state",
+        "chart_nats",
+        "chart_scratch_swarms",
+        "chart_hive_capabilities",
+        "chart_hive_pinned",
+    )
+    previous = _at("sha256sum -c deploy/helm/agentihooks-swarm-deps.sha256")
+    for validator in validators:
+        command = f"python3 tests/{validator}.py"
+        assert SCRIPT.count(command) == 1
+        assert previous < _at(command) < configured
+        previous = _at(command)
+
+
+@pytest.mark.feature("kind-proof-parallel-preparation")
+def test_kind_preparation_keeps_background_failures_and_cleanup() -> None:
+    start = _at("finish() {")
+    finish = SCRIPT[start : SCRIPT.index("\n}\n", start)]
+    assert finish.index("status=$?") < finish.index('wait "$build" || true')
+    assert finish.index('wait "$build" || true') < finish.index("kind delete cluster")
+    assert finish.index('wait "$cluster_setup" || true') < finish.index("kind delete cluster")
+    assert finish.index("kind delete cluster") < finish.index('exit "$status"')
+    assert 'wait "$cluster_setup"\nkubectl apply' in SCRIPT
+    assert 'wait "$build"\n(\n' in SCRIPT
+    assert _at("trap finish EXIT\n") < _at('helm lint --strict "$chart"')
+
+
+@pytest.mark.feature("kind-proof-parallel-preparation")
+def test_fixture_build_and_cluster_setup_start_before_chart_validation() -> None:
+    prerequisite = _at("sha256sum -c deploy/helm/agentihooks-swarm-deps.sha256")
+    build = _at("build=$!\n")
+    cluster = _at("cluster_setup=$!\n")
+    protected = _at("trap finish EXIT\n")
+    validation = _at("python3 tests/chart_examples.py")
+    assert prerequisite < build < cluster < protected < validation
+
+
 def test_chart_install_waits_only_for_the_images_it_runs():
     job = _at('wait "$build"\n(\n')
     started = _at("terminal=$!\n")

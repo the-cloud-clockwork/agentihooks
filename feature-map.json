@@ -1287,7 +1287,7 @@
         "tests/swarm/test_controller_replica.py::test_a_shared_controller_credential_needs_no_keeping",
         "tests/swarm_ledger/test_controller_credential.py::test_two_replica_controller_credentials_stay_valid_side_by_side",
         "tests/swarm_ledger/test_controller_credential.py::test_the_hive_controller_command_issues_a_replica_credential_for_a_holder",
-        "tests/test_swarm_chart_controller_rollout.py::test_the_kind_proof_checks_the_controller_rollout_before_any_cluster_starts",
+        "tests/test_swarm_chart_controller_rollout.py::test_the_kind_proof_checks_the_controller_rollout_before_cluster_configuration",
         "tests/test_swarm_chart_controller_rollout.py::test_the_chart_defaults_to_one_controller_and_rolls_more_out_with_one_always_ready",
         "tests/swarm_ledger/test_controller_credential.py::test_the_hive_controller_command_names_no_holder_unless_given_one"
       ]
@@ -12686,6 +12686,18 @@
         "tests/swarm/test_urgent_hold.py::test_an_urgent_task_while_no_live_hive_has_admission_room_names_the_hive_and_raises_no_finding",
         "tests/swarm/test_urgent_hold.py::test_the_hive_admission_hold_stands_only_while_every_live_hive_is_read_at_zero_room",
         "tests/swarm/test_urgent_hold.py::test_a_release_wait_is_named_ahead_of_the_hive_admission_hold"
+      ]
+    },
+    {
+      "id": "kind-proof-parallel-preparation",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-kind-proof-parallel",
+      "behaviour": "The kind proof starts its fixture image build and cluster setup before chart validation, preserves every validator before cluster configuration, and retains background failure and cleanup handling.",
+      "seam": "Kind proof background build and cluster setup, chart validators and EXIT cleanup",
+      "tests": [
+        "tests/test_kind_proof_build_path.py::test_chart_validation_still_finishes_before_cluster_configuration",
+        "tests/test_kind_proof_build_path.py::test_kind_preparation_keeps_background_failures_and_cleanup",
+        "tests/test_kind_proof_build_path.py::test_fixture_build_and_cluster_setup_start_before_chart_validation"
       ]
     }
   ],

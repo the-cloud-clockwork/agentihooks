@@ -11,11 +11,11 @@ SMOKE = CHART / "ci" / "kind-smoke.sh"
 
 
 @pytest.mark.feature("controller-standby-replica")
-def test_the_kind_proof_checks_the_controller_rollout_before_any_cluster_starts() -> None:
+def test_the_kind_proof_checks_the_controller_rollout_before_cluster_configuration() -> None:
     script = SMOKE.read_text()
 
     assert 'python3 tests/chart_controller_rollout.py "$chart"' in script
-    assert script.index("python3 tests/chart_controller_rollout.py") < script.index("kind create cluster")
+    assert script.index("python3 tests/chart_controller_rollout.py") < script.index('wait "$cluster_setup"\n')
 
 
 @pytest.mark.feature("controller-standby-replica")
