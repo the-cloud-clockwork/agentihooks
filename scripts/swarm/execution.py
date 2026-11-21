@@ -24,6 +24,7 @@ LAUNCH_BINDING = (
     "launch_timings",
     "overlays",
 )
+LAUNCH_DECISION = ("harness", "profile", "account", "model", "effort", "overlays", "profile_decision")
 WRITES: dict[str, threading.RLock] = {}
 
 
@@ -487,7 +488,9 @@ def _binding_conflict(previous: dict[str, Any], current: dict[str, Any]) -> bool
 
 
 def _resolve(current: AgentRecord, agent: AgentRecord, *, revive: bool = False) -> tuple[AgentRecord, bool]:
-    """Resolve an execution write, preserving ended records unless revival is explicit."""
+    """Resolve an execution write, preserving ended records unless revival is explicit, and keeping the launch
+    decision the execution holds wherever a write lacking both its profile and its profile decision, a copy read
+    before that decision landed, carries it empty."""
     if current.state == "ended":
         if not revive:
             return current, False
@@ -496,6 +499,10 @@ def _resolve(current: AgentRecord, agent: AgentRecord, *, revive: bool = False) 
         written = replace(written, state="finished")
     if _read_before_ack(written.runtime_target, current.runtime_target):
         written = replace(written, **{field: getattr(current, field) for field in LAUNCH_BINDING})
+    if current.profile_decision and not (written.profile_decision or written.profile):
+        written = replace(
+            written, **{field: getattr(current, field) for field in LAUNCH_DECISION if not getattr(written, field)}
+        )
     conflict = _binding_conflict(
         cast(dict[str, Any], current.runtime_target), cast(dict[str, Any], written.runtime_target)
     )

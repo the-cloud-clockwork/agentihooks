@@ -577,7 +577,7 @@ def _refresh_root_bus() -> None:
 
     try:
         path = root_bus.refresh(registry.home(), _signer, ROOT)
-    except auth.HiveError as exc:
+    except (auth.HiveError, OSError) as exc:
         print(f"hive kept the stored root bus credential ({exc})", file=sys.stderr)
         return
     if path is not None:

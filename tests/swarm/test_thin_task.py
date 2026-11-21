@@ -157,9 +157,8 @@ def test_every_failed_rule_is_named_at_once() -> None:
     ]
 
 
-def test_a_task_without_a_description_is_thin() -> None:
-    bare = {k: v for k, v in task().items() if k != "description"}
-    assert thin(bare) == [
+def test_a_task_with_an_empty_description_is_thin() -> None:
+    assert thin(task(description="")) == [
         "Task a has a description under 40 words.",
         "Task a has no done when sentence.",
         "Task a is code work that names no seam.",

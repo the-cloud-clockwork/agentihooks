@@ -50,6 +50,7 @@ from scripts.ci_lab import (
     lease_api,
     metrics,
     service,
+    static_exclusions,
 )
 from scripts.ci_lab.capacity import Load
 from scripts.ci_lab.checks import Checks, Output, PostRefused
@@ -752,6 +753,7 @@ class Scheduler:
                 subprocess.CalledProcessError,
                 ValueError,
                 KeyError,
+                SyntaxError,
                 yaml.YAMLError,
                 jsonschema.ValidationError,
             ) as error:
@@ -1331,14 +1333,18 @@ class MirrorExpander:
         """Return the retry policy of the lab block of delivery.yaml on the repository's dev branch."""
         return policy(_lab_block(self._on_dev(repo, DELIVERY)))
 
+    def _exclusions(self, mirror: Mirror, grader: str, files: Mapping[str, str]) -> dict[str, str]:
+        if static_exclusions.PATH not in files:
+            return {}
+        return static_exclusions.read(self._git(mirror, "show", f"{grader}:{static_exclusions.PATH}"))
+
     def expand(self, request: GradeRequest) -> Plan:
-        """Return one unit per static gate the grader's workflow runs whose context names the lab supplies, so a gate
-        that reads a field the lease lacks keeps its verdict with Actions, keyed by the files it reads at head and base,
-        the unit job's test units of a merge group, promotion or backfill head and the mutation stats and mutant units
-        of a promotion or backfill head, framed by the request's tier with the authoritative gates of the grader's
-        delivery.yaml for a hotfix or pull request head, with the dev commit of the manifest its test units are keyed
-        on and, for a hotfix, pull request or merge group head, the gates that delivery.yaml lists as authoritative for
-        its class."""
+        """Return one unit per supported static gate outside the protected exclusion catalog, with Actions retaining
+        authority for jobs with exclusions, keyed by the files each gate reads at head and base, the unit job's test
+        units of a merge group, promotion or backfill head and the mutation stats and mutant units of a promotion or
+        backfill head, framed by the request's tier with the authoritative gates of the grader's delivery.yaml for a
+        hotfix or pull request head, with the dev commit of the manifest its test units are keyed on.
+        """
         mirror = self._mirror(request.repo)
         grader = request.head if request.tier >= Priority.PROMOTION else request.base
         for sha in dict.fromkeys((request.head, request.base, grader)):
@@ -1346,10 +1352,11 @@ class MirrorExpander:
         head, base = self._files(mirror, request.head), self._files(mirror, request.base)
         workflow = self._git(mirror, "show", f"{grader}:{WORKFLOW.as_posix()}")
         registry = json.loads(self._git(mirror, "show", f"{grader}:{REGISTRY.as_posix()}"))
+        excluded = self._exclusions(mirror, grader, head if grader == request.head else base)
         toolchain = replace(self.toolchain, lockfile=head.get(LOCKFILE, ""), pyproject=head.get("pyproject.toml", ""))
         gates: dict[str, list[Unit]] = {}
         for gate in discover(workflow, registry, self._workflows(mirror, grader)):
-            if gate.missing:
+            if gate.missing or gate.name in excluded:
                 continue
             inputs = StaticInputs(
                 gate.name, _within(head, gate.paths), _within(base, gate.base_paths), grader, toolchain
@@ -1368,6 +1375,7 @@ class MirrorExpander:
         listed = frozenset[str]()
         if request.tier < Priority.PROMOTION:
             listed = authoritative_gates(_lab_block(self._git(mirror, "show", f"{grader}:{DELIVERY}")), request.tier)
+            listed = frozenset(static_exclusions.authority(listed, excluded))
         tree = self._git(mirror, "rev-parse", f"{request.head}^{{tree}}").strip()
         plan = frame(request.tier, tree, grader, {job: tuple(units) for job, units in gates.items()}, sorted(listed))
         return replace(plan, manifest=commit)
@@ -1499,13 +1507,19 @@ def serve(
     sleep: Callable[[float], None],
 ) -> int:
     """Run passes every interval, forever when passes is zero, ticking the relay after each pass and printing each
-    action of both; return 0."""
+    action of both; a Redis error ends only its pass, which prints one line naming the pass and the error, and the next
+    pass runs on schedule; return 0."""
+    from redis import RedisError
+
     done = 0
     while passes == 0 or done < passes:
-        for action in scheduler.tick(int(clock() * 1000)):
-            print(action, flush=True)
-        for action in relaying.tick():
-            print(action, flush=True)
+        try:
+            for action in scheduler.tick(int(clock() * 1000)):
+                print(action, flush=True)
+            for action in relaying.tick():
+                print(action, flush=True)
+        except RedisError as error:
+            print(f"pass {done + 1} skipped on {type(error).__name__}: {error}", flush=True)
         done += 1
         sleep(interval_s)
     return 0
