@@ -92,6 +92,11 @@ def test_a_promotion_head_whose_changed_python_does_not_parse_is_dropped_and_the
         state.inbox.pending.append(scheduler.Head(event, lane, ""))
     actions = run.tick(1000)
     assert f"cannot expand {broken}: {unparsable.value}" in actions
+    reason = f"cannot expand {broken} against {suite.base}: {unparsable.value}"
+    commit = f"{suite.remote}/commit/{broken}"
+    output = Output("promotion grade cannot expand", reason, (), "unexpanded-1000", "unknown", commit)
+    refusals = [post for post in state.poster.posts if post[0] == broken]
+    assert refusals == [(broken, scheduler.REQUIRED, "completed", "failure", output, True)]
     assert state.client.hgetall(scheduler.WAITING) == {}
     assert [grade.head for grade in run.grades()] == [suite.head]
 
