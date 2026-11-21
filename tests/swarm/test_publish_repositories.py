@@ -195,7 +195,9 @@ def test_cli_refusal_names_the_secondary_repositorys_branch(
     if not mapped:
         p.task.pop("repository_branches")
         p.task["branch"] = recorded_branch
-    if command == "publish":
+    if command == "prepare":
+        stack.WT_SCRIPT.write_text("#!/usr/bin/env bash\nset -euo pipefail\nexit 1\n")
+    else:
         root = p.bundle.parent / "bundle-worktree"
         git(p.bundle, "worktree", "add", "-b", checkout_branch, str(root))
         monkeypatch.chdir(root)
