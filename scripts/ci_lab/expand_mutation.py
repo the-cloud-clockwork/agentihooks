@@ -11,7 +11,6 @@ import hashlib
 import math
 import re
 import subprocess
-import sys
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -34,7 +33,7 @@ from scripts.ci_mutation.stats_cache import (
     TRACKED,
     UNKEYED,
     StatsInputs,
-    distribution_versions,
+    runtime_digest,
 )
 from scripts.ci_mutation.stats_dependencies import StoredStats, digest  # pyright: ignore[reportUnknownVariableType]
 
@@ -75,7 +74,7 @@ def stats_units(root: Path, files: Sequence[str], options: Sequence[str] = ()) -
     paths = tracked(root)
     present = [path for path in paths if (root / path).is_file()]
     sources = {path: file_digest(root / path) for path in present if path in CONFIGURATION or path.startswith(RUNNER)}
-    runtime = [sys.version, sys.platform, distribution_versions(root)]
+    runtime = runtime_digest(root)
     stored = StoredStats(root, root, dict(zip(CONTEXT_FIELDS, (SCHEMA, sources, options, runtime))), {})
     modules = {module_name(Path(path)): path for path in paths if Path(path).suffix == ".py"}
     inputs = StatsInputs(root, modules, resources_of([path for path in present if path not in UNKEYED]), {})

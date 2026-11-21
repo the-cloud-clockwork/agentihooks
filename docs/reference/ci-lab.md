@@ -2310,11 +2310,9 @@ key; the builders are pure and read no file, clock or network.
 | `stats` | `scope` | Source to changed lines, for the sources the test file reaches |
 | `stats` | `measured` | Whether the inputs come from measured coverage |
 | `stats` | `discovery` | Digest of the discovery inputs |
-| `stats` | `sources` | Path to sha256 of each configuration file, `uv.lock` among them, and each `scripts/ci_mutation/` file |
+| `stats` | `sources` | Path to sha256 of each configuration file, `uv.lock` and `.github/test-excludes.txt` among them, and each `scripts/ci_mutation/` file |
 | `stats` | `options` | The pytest options, in order |
-| `stats` | `interpreter` | `sys.version` |
-| `stats` | `platform` | `sys.platform` |
-| `stats` | `versions` | Distribution name to version |
+| `stats` | `lockfile` | sha256 of the head's `.github/test-requirements.lock`, or null without one |
 | `mutant` | `module` | Path of the module that holds the function |
 | `mutant` | `function` | Name of the changed function |
 | `mutant` | `definition` | Digest of the function's whole definition text, from `scripts.dep_manifest.unit_hashes` |
@@ -2337,6 +2335,10 @@ key; the builders are pure and read no file, clock or network.
   the lab reuses the stats the cache already holds. Its file inputs are sha256 digests of the file
   bytes, the one exception to blob ids, because the stats cache identity hashes them that way.
   Its lockfile and pyproject inputs are the `uv.lock` and `pyproject.toml` entries of `sources`.
+  Its runtime is the `lockfile` input, never the interpreter or installed packages of the process
+  computing it, so the scheduler keys a stats unit exactly as the worker's stats cache stores it
+  for the same head. Every CI install and the baked lab worker venv install from that file, with
+  `.github/test-excludes.txt` as their excludes list, which `sources` keys.
 - A change to `uv.lock` or `pyproject.toml` rekeys every unit kind. A grade is keyed by its head,
   which names both files.
 - The lab runs pytest itself, so no workflow file under `.github/` changes a test verdict. The
