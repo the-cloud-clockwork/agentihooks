@@ -1,0 +1,10 @@
+rules:
+  - id: codex-adopt-refusal-fields
+    languages: [python]
+    severity: ERROR
+    message: Keep the differing field names and both compared values in the adoption refusal and launch ending.
+    paths:
+      include:
+        - /scripts/codex_session/supervisor.py
+        - codex-adopt-refusal-fields.py
+    pattern: raise LaunchFailure("execution", NOT_ADMITTED.format($EXECUTION))

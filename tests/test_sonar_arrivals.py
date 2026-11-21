@@ -2,6 +2,7 @@ import base64
 import importlib.util
 import io
 import json
+import os
 import threading
 import time
 import zipfile
@@ -78,7 +79,7 @@ def _arrive(
     tmp_path: Path, service: Service, shards: int, scope: str = "full", attempt: int = 1, seconds: float = 600
 ) -> tuple[list[int], Clock]:
     clock = Clock()
-    left = arrivals.arrive(service, shards, scope, attempt, tmp_path / "shards", seconds, clock)
+    left = arrivals.arrive(service, arrivals.Scope(shards, scope, attempt), tmp_path / "shards", seconds, clock)
     return left, clock
 
 
@@ -133,6 +134,33 @@ def test_the_wait_returns_the_shards_still_running_when_it_runs_out(tmp_path: Pa
     left, clock = _arrive(tmp_path, service, 3, seconds=2.5 * arrivals.INTERVAL)
     assert left == [1, 3]
     assert clock.moment == 3 * arrivals.INTERVAL
+
+
+class Queued:
+    """Says a shard job has not started until a set number of checks have passed."""
+
+    def __init__(self, false_times: int) -> None:
+        self.calls = 0
+        self.false_times = false_times
+
+    def started(self) -> bool | None:
+        self.calls += 1
+        return self.calls > self.false_times
+
+
+@pytest.mark.feature("sonar-wait-skips-queued-shard-time")
+def test_a_shard_still_queued_for_a_runner_does_not_spend_the_wait(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(arrivals, "JOB_POLL", arrivals.INTERVAL)
+    rounds = [{}, {}, {}, {}, {"coverage-3.12-1": "1"}]
+    service = Service(rounds)
+    clock = Clock()
+    jobs = Queued(false_times=3)
+    left = arrivals.arrive(service, arrivals.Scope(1, "full", 1), tmp_path / "shards", arrivals.INTERVAL, clock, jobs)
+    assert left == []
+    assert clock.pauses == [arrivals.INTERVAL] * 4
+    assert jobs.calls == 4
 
 
 def test_an_unanswered_listing_is_asked_again(tmp_path: Path) -> None:
@@ -206,7 +234,7 @@ def _stub_flatten(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, blocked: bool
 
 
 def _arrive_in_real_time(tmp_path: Path, service: Service, shards: int) -> list[int]:
-    return arrivals.arrive(service, shards, "full", 1, tmp_path / "shards", 600, RealTime())
+    return arrivals.arrive(service, arrivals.Scope(shards, "full", 1), tmp_path / "shards", 600, RealTime())
 
 
 def test_databases_it_holds_are_flattened_beside_them_while_shards_run(
@@ -356,6 +384,41 @@ def test_an_artifact_the_service_does_not_sign_is_not_fetched(
 
 def test_an_unreachable_service_answers_no_listing() -> None:
     assert arrivals.Results("http://127.0.0.1:9/", _token("run-1", "job-2")).listed() is None
+
+
+@pytest.mark.feature("queue-watch-job-states")
+def test_a_missing_queue_state_file_reads_as_unknown(tmp_path: Path) -> None:
+    assert arrivals.FileJobs(tmp_path / "state").started() is None
+
+
+@pytest.mark.feature("queue-watch-job-states")
+def test_a_fresh_started_state_reads_as_started(tmp_path: Path) -> None:
+    path = tmp_path / "state"
+    path.write_text("started")
+    assert arrivals.FileJobs(path).started() is True
+
+
+@pytest.mark.feature("queue-watch-job-states")
+def test_a_fresh_queued_state_reads_as_not_started(tmp_path: Path) -> None:
+    path = tmp_path / "state"
+    path.write_text("queued")
+    assert arrivals.FileJobs(path).started() is False
+
+
+@pytest.mark.feature("queue-watch-job-states")
+def test_a_stale_queue_state_file_reads_as_unknown(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = tmp_path / "state"
+    path.write_text("queued")
+    old = time.time() - arrivals.STALE - 1
+    os.utime(path, (old, old))
+    assert arrivals.FileJobs(path).started() is None
+
+
+@pytest.mark.feature("queue-watch-job-states")
+def test_an_unrecognised_queue_state_reads_as_unknown(tmp_path: Path) -> None:
+    path = tmp_path / "state"
+    path.write_text("garbled")
+    assert arrivals.FileJobs(path).started() is None
 
 
 def test_the_wait_without_a_runtime_token_fails_loudly(

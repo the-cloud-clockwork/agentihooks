@@ -58,7 +58,7 @@ NAMED_CONSTANTS = {
 
 SCHEDULER_DESCRIPTION = {
     "service": "scheduler",
-    "ports": [8800, 9108],
+    "ports": [8800, 8801, 9108],
     "environment": {
         "prefixes": ["AGENTIHOOKS_BUS", "CI_LAB_MINIO_", "GITHUB_APP_"],
         "names": ["CI_LAB_REDIS_URL", "CI_LAB_RUNTIME_CONFIG", "CI_LAB_URL"],
@@ -124,6 +124,7 @@ def test_delegates_route_to_the_two_services() -> None:
 
 def test_ports_are_fixed() -> None:
     assert contract.SCHEDULER_PORT == 8800
+    assert contract.CONTROL_PORT == 8801
     assert contract.METRICS_PORT == 9108
 
 
@@ -332,7 +333,7 @@ def test_doc_lists_the_contract() -> None:
         assert f"`{name}`" in text, name
     for name in ENVIRONMENT_NAMES:
         assert f"`{name}" in text, name
-    for port in ("8800", "9108"):
+    for port in ("8800", "8801", "9108"):
         assert f"`{port}`" in text, port
     for command in ("agentihooks ci-lab-scheduler --self-test", "agentihooks ci-lab-worker --self-test"):
         assert command in text, command

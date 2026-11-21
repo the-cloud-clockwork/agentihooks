@@ -36,7 +36,9 @@ def refresh(last: float, now: float, environ: Mapping[str, str]) -> float:
 
 
 def _manifest(bundle: Path) -> bytes:
+    from hooks.context.profile_chain import layer_root
+
     try:
-        return (bundle / "deps.json").read_bytes()
+        return (layer_root(bundle) / "deps.json").read_bytes()
     except OSError:
         return b""

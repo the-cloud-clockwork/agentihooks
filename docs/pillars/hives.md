@@ -872,8 +872,9 @@ Set them with `agentihooks hive set <id> key=value ...`, or on the ledger page's
 | Setting | Values | Default | Meaning |
 |---|---|---|---|
 | `name` | text | the hive id | Display name. A hive with `ui=yes`, where the masters run, is always named `swarm-master`. |
-| `ui` | `yes`, `no` | `no` | The machine has a screen and a person at it. |
+| `ui` | `yes`, `no` | `no` | The machine has a screen and a person at it. Agents on a `ui=yes` hive are also graded on kubectl and a global git identity; see [Headed hive checks](#headed-hive-checks-kubectl-and-git-identity). |
 | `ephemeral` | `yes`, `no` | `no` | The machine can disappear, such as a pod. Placement prefers lasting hives on a tie. |
+| `pinned` | `yes`, `no` | `no` | The hive stays on one release. The hub release floor skips it, so the hub keeps admitting it after the hub moves to a newer release. A worker hive's chart sets it from `workers.pinned` on every start. |
 | `excluded` | comma list of lane roles or profiles, such as `master,frontend,qa` | `master` on `ui=no`, none on `ui=yes` | Work the hive never takes. An empty value excludes nothing. |
 | `master-swarms` | comma list of swarm slugs | none | Swarms whose masters the hive takes although it excludes `master`. Every other swarm still sees masters excluded. |
 | `prefer` | comma list of `role:rank` | none | Rank 1 is chosen first for that role; unranked hives come after ranked ones. |
@@ -2203,7 +2204,7 @@ semgrep --test --config .semgrep-incidents/hub-admission-late-answer-releases-cl
 | Symptom | Cause | Fix |
 |---|---|---|
 | An eng, ci or plan task stays `claimed` by an agent no hive lists, its hive logged `poll failed`, and the tick retires the agent with `its hive no longer lists it` six minutes or more after the launch | The hive runs a release from before #11051, whose spoke gave back only its own claim | Roll the hive to the hub's release. Until it rolls, drain it with `agentihooks hive set <hive> draining=yes --keep`. |
-| The hub logs `refused: release <member> below hub release <hub>` for every admit of one hive | The hive runs an older release than the hub, and the hub refuses it so an old spoke cannot strand a claim | Roll that hive. |
+| The hub logs `refused: release <member> below hub release <hub>` for every admit of one hive | The hive runs an older release than the hub, and the hub refuses it so an old spoke cannot strand a claim | Roll that hive, or, for a hive meant to stay on one release, set `workers.pinned: true` in its chart so its record reads `pinned=yes`. |
 | A task's claim generation climbs by two on each attempt and no agent runs | Each admission's launch fails, and its `reopen` returns the task; both changes of claimant raise the generation | Read the hive's `poll failed` lines and the task's `launch-failures` entry, and fix the launch cause. After `max_deliver` failed deliveries of one offer, the offer dead letters. |
 | The hive logs `poll failed (Unanswered: ...)` and the task stays claimed by an agent that has not launched | The hub finished the admission after the hive stopped waiting and kept it | Nothing to undo: the hive's next poll asks again and launches that admission. Find what slowed the hub in its `late:` lines. |
 | A task launches again on the harness that just failed | The runtime answered `unavailable`, which sends no `failed`, or its refusal named no harness | Expected: only a refusal that names its harness steers the next admission. |
@@ -2557,8 +2558,11 @@ step; the hub reconciler and the lost hive rules above cover it.
 
 #### The stop and what the tick reports
 
-The stop is an `execution.stop` event published on the swarm's subject ending in `execution.stop.<hive>`, which
-only that hive reads. Its id is `stop:<started event id>`, and its data names the agent, the hive and the reason.
+The stop is an `execution.stop` event published on the swarm's stop stream, on the subject ending in
+`execution.stop.<hive>`, which only that hive reads: a member credential may fetch and acknowledge its own hive's
+stop consumer and no other, and only the hub publishes stops.
+[Execution stops](../reference/swarm-bus-scope.md#execution-stops) lists the stream, the consumer names and the
+grants. The stop's id is `stop:<started event id>`, and its data names the agent, the hive and the reason.
 The first stop sent for a hive creates that hive's durable stop consumer; until then the hive's stop reader finds
 nothing and tries again on its next pass.
 
@@ -2637,7 +2641,7 @@ whose work ended.
 |---|---|---|
 | Finished agents keep their seats and fill a hive's max agents | The controller log for `hub execution stop for <agent>` | No line while finished hub admitted agents are seated: the controller predates pull request #11464; roll it onto a release that carries it. |
 | The controller logs `sent` for the agent after each dedupe window, and the agent stays seated | The hive's log for `hive execution stop` | No line at all: the hive is not reading its stops, because its service predates the stop reader or is not running; restart it as in [Upgrade](#upgrade). The hive logs nothing for a stop it honors, so a quiet log alone proves nothing. `could not reap it; retrying`: the hive's runtime cannot find or reap the session; check herdr on that hive. |
-| The hive logs `hive execution stops for swarm <slug> failed (<error>)` | The error type and message it prints | Fix the cause the error names. A NATS permission error means the hive's bus credential lacks the stop grants: on the workstation root hive, restart the hive service: `hive run` compares the stored root credential's publish and subscribe grant with a fresh mint at start and re-mints it when they differ, logging `hive re-minted the root bus credential in <path>`; a `hive kept the stored root bus credential (<reason>)` line names why it could not, and `agentihooks hive root-bus` mints it by hand. On a member hive, run `agentihooks hive refresh`. |
+| The hive logs `hive execution stops for swarm <slug> failed (<error>)` | The error type and message it prints | Fix the cause the error names. A NATS permission error means the hive's bus credential lacks the stop grants: on the workstation root hive, restart the hive service: `hive run` compares the stored root credential's publish and subscribe grant with a fresh mint at start and re-mints it when they differ, logging `hive re-minted the root bus credential in <path>`; a `hive kept the stored root bus credential (<reason>)` line names why it could not, and `agentihooks hive root-bus` mints it by hand. On a member hive, run `agentihooks hive refresh`, then restart its hive service, which keeps the bus it opened at start. |
 | The tick prints `could not send the stop for <agent>, retrying next tick: failed (<error>)` | The error, NATS from the controller and the controller's bus credentials | Fix the bus; the next pass sends the stop again. |
 
 ### Retiring a hub admitted agent
@@ -3703,7 +3707,9 @@ An agent on a hive is graded by its session join report instead of process obser
 and the `late` check do not run for it. Every check the join report names is required except `brain`, which is
 report only: a hive without the brain connector reports the `hive_brain` miss and keeps its agent running. Join
 report grading for hive agents arrived after this change, in
-[pull request #5481](https://github.com/the-cloud-clockwork/agentihooks/pull/5481).
+[pull request #5481](https://github.com/the-cloud-clockwork/agentihooks/pull/5481). A headed hive's join report
+also names `kubectl` and `git_identity`; see
+[Headed hive checks](#headed-hive-checks-kubectl-and-git-identity).
 
 Check a fresh hive launch:
 
@@ -3731,6 +3737,211 @@ was wrong.
 |---|---|---|
 | A hive engineer fails `overlay` and is retired soon after start | The hive runs a release older than pull request #5319, so its acknowledgement carries no `host_overlays`. | Upgrade the hive to a release carrying the change and roll its pod. |
 | A hive agent's execution record shows `launched_at` 0 | The same older release. | The same upgrade. |
+
+### Headed hive checks: kubectl and git identity
+
+A headed hive is a hive whose registry record carries `ui=yes`. Placement ranks headed hives first for masters, `qa`
+and `frontend`; a master falls back to a headless hive, while `qa` and `frontend` wait for a headed one (see
+[Placement by role](#placement-by-role)). Every hive is meant to run agents with the workstation's configuration,
+and `agentihooks hive compare` reports where one differs (see
+[Comparing hive configuration](#comparing-hive-configuration)). An agent on a headed hive is also graded on two
+tools the workstation always has: a `kubectl` that reaches the cluster and a global git identity for its commits.
+
+When an agent's session starts, the join hook reads the hive's registry record and writes `headed` into the join
+report's `context`: `true` when `ui` is `yes`, `false` otherwise. A headed report runs two more checks:
+
+| Check | Command it runs as the agent's user | Passes when |
+|---|---|---|
+| `kubectl` | `kubectl get nodes --request-timeout=10s -o name` | The command exits 0 and prints at least one node. |
+| `git_identity` | `git config --global user.name`, then `git config --global user.email` | Both commands exit 0 and print a value that is not blank. |
+
+Each command has a 20 second timeout. A binary missing from `PATH`, a timeout and a nonzero exit all count as a
+miss. The join report records no reason for these two checks, so a miss reads `kubectl (required)` with no error
+text after it.
+
+On a headed hive both checks are required, like every other join check except `brain`:
+
+| Hive | `kubectl` and `git_identity` | Grade with both passing | Grade when either one misses |
+|---|---|---|---|
+| `ui=yes` | Run and required | `complete`, or `partial` when only `brain` misses | `failed` |
+| `ui=no`, or no registry record | Not run and not graded | Unchanged | Not applicable |
+
+The launch check reads the misses as `hive_kubectl` and `hive_git_identity`. Neither is report only, so the agent
+fails its launch check and is handled as an enforced miss, as described in
+[Launch check on a hive](#launch-check-on-a-hive). The tick's check keeps an agent that its idle heartbeat shows
+working at the deadline and records the miss as held, so a working agent keeps running with the miss.
+
+In this section's examples the `hive list`, `hive join` and `hive compare` lines separate their fields with tabs,
+shown aligned here.
+
+```bash
+agentihooks hive list
+# <id>  name=swarm-master  live  ui=yes  workers=1 of 6  ...
+#   engineer@<code>-<n>  failed  misses=kubectl (required), git_identity (required)  heartbeat=<ms>
+
+agentihooks swarm <slug> status
+# hive join  engineer@<code>-<n>  failed  misses=kubectl (required), git_identity (required)  heartbeat=<ms>
+# launch  engineer@<code>-<n>  failed  60412ms
+#   hive_kubectl  enforced  expected available; observed missing
+#   hive_git_identity  enforced  expected available; observed missing
+```
+
+#### Providing the tools on a headed hive
+
+A headed hive needs three things, the same as the workstation:
+
+1. **kubectl.** The linked bundle declares `kubectl` in its `deps.json`, so `agentihooks deps ensure` installs it
+   on every hive that links the bundle. The bundle entry accepts kubectl 1.33.12 or newer. To install, it downloads
+   the 1.33.12 release binary for Linux amd64 or arm64, checks it against the SHA256 pinned in the entry and writes
+   `~/.local/bin/kubectl`. The install fails when `~/.local/bin` is not on `PATH`.
+2. **A read only cluster config.** kubectl reads `~/.kube/config` for the hive's user, or the file `KUBECONFIG`
+   names. Build it from a read only service account token held in the deployment's secret store, write it with
+   mode `600`, and never commit it. The `view` ClusterRole does not cover nodes, so the account also needs
+   `get` and `list` on nodes for the check to pass.
+3. **A global git identity.** Set `user.name` and `user.email` in the hive user's global git config from the
+   hive's bootstrap, keeping an identity already set. Worker hive pods do this in their start script with the name
+   `agentihooks hive` and the email `agentihooks-hive@users.noreply.github.com`.
+
+A read only account the check accepts, applied to the cluster by the deployment's GitOps repository:
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hive-reader
+  namespace: <swarm namespace>
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: hive-reader-token
+  namespace: <swarm namespace>
+  annotations:
+    kubernetes.io/service-account.name: hive-reader
+type: kubernetes.io/service-account-token
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hive-reader-view
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view
+subjects:
+- kind: ServiceAccount
+  name: hive-reader
+  namespace: <swarm namespace>
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: hive-reader-cluster
+rules:
+- apiGroups: [""]
+  resources: [nodes]
+  verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hive-reader-cluster
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hive-reader-cluster
+subjects:
+- kind: ServiceAccount
+  name: hive-reader
+  namespace: <swarm namespace>
+```
+
+The cluster config the hive's provisioning writes from that token and the cluster CA, both read from the secret
+store at write time:
+
+```yaml
+apiVersion: v1
+kind: Config
+clusters:
+- name: swarm
+  cluster:
+    server: https://<cluster API address>:6443
+    certificate-authority-data: <base64 CA from the secret store>
+users:
+- name: hive-reader
+  user:
+    token: <token from the secret store>
+contexts:
+- name: hive-reader
+  context:
+    cluster: swarm
+    user: hive-reader
+current-context: hive-reader
+```
+
+The git identity lines a bootstrap runs, which keep an identity already set:
+
+```bash
+git config --global user.name >/dev/null || git config --global user.name "agentihooks hive"
+git config --global user.email >/dev/null || git config --global user.email agentihooks-hive@users.noreply.github.com
+```
+
+#### Checking a headed hive
+
+```bash
+# From any joined machine: mark the hive headed, then read it back
+agentihooks hive set <id> ui=yes
+agentihooks hive show <id>                       # "ui": "yes"
+
+# On the hive, as the user its agents run as
+agentihooks deps check                           # exit 0: nothing missing, kubectl included
+kubectl get nodes --request-timeout=10s -o name  # one node/<name> line per node
+kubectl auth can-i list nodes                    # yes
+git config --global user.name                    # a name
+git config --global user.email                   # an email
+
+# From the workstation: kubectl is installed on the hive like on the workstation
+agentihooks hive compare
+# <id>  differs  ...
+#   deps missing kubectl                         # only while the hive lacks it
+
+# The checks each running agent on the hive recorded at join
+P=${AGENTIHOOKS_SWARM_KEY_PREFIX:-agentihooks}
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" HVALS "$P:hive:<id>:join-reports" \
+  | jq -c 'select(.status == "running" and .context.headed) | {agent, grade, kubectl: .checks.kubectl, git_identity: .checks.git_identity}'
+```
+
+A healthy headed hive lists its agents as `complete misses=none` in `agentihooks hive list`.
+
+#### Limitations
+
+- The two checks run once, when the session joins. The heartbeat refresh probes again only the Redis, transcript,
+  profile, settings, pane, start time and `brain` checks, and the ledger retry probes only `ledger_join` and
+  `ledger_write`, so a running agent keeps its `kubectl` or `git_identity` miss after the hive is fixed. The next
+  session on the hive runs both checks again.
+- The `kubectl` check proves that the config reaches the cluster and can list nodes. It does not prove any other
+  permission an agent's task needs.
+- A hive's `ui` setting is read when the session joins. Changing it with `agentihooks hive set <id> ui=...` grades
+  only the sessions that start afterwards.
+
+#### Troubleshooting
+
+| Symptom | Check | Fix |
+|---|---|---|
+| `kubectl (required)` on a headed hive, and `command -v kubectl` prints nothing on the hive | `agentihooks deps check` on the hive | Run `agentihooks deps ensure`, and put `~/.local/bin` on the hive user's `PATH` when the install says kubectl is not on it. |
+| `kubectl (required)`, kubectl installed, and `kubectl get nodes` says the connection to the server was refused or names `localhost:8080` | `ls -l ~/.kube/config` on the hive | The hive has no cluster config. Deliver it as in [Providing the tools on a headed hive](#providing-the-tools-on-a-headed-hive). |
+| `kubectl (required)`, and `kubectl get nodes` prints `Forbidden` | `kubectl auth can-i list nodes` on the hive | Bind the account to a ClusterRole with `get` and `list` on nodes, as in the example. |
+| `kubectl (required)`, and `kubectl get nodes` answers `Unable to connect to the server` with a timeout | The route from the hive to the cluster API address in the config | Open the route, or point the config at an address the hive reaches. |
+| `git_identity (required)` | `git config --global user.name` and `git config --global user.email` on the hive | Set both in the hive's bootstrap, as in the example. |
+| A headless hive's agents show no `kubectl` or `git_identity` | `agentihooks hive show <id>` reads `"ui": "no"` | Expected: only headed hives run the two checks. |
+| A `ui=yes` hive's join reports carry no `kubectl` or `git_identity` check | The hive's agentihooks version | The hive runs a release from before pull request #10581. Upgrade it and restart its hive service. |
+
+Before [pull request #10581](https://github.com/the-cloud-clockwork/agentihooks/pull/10581) a headed hive was
+graded like a headless one. [Issue #10577](https://github.com/the-cloud-clockwork/agentihooks/issues/10577) records
+the case: the automation VM hive ran with `ui=yes` and took workstation tasks, but a read only probe as its user
+found no kubectl on `PATH`, no `~/.kube` and no global git `user.name` or `user.email`, and its agents' join reports
+checked neither.
 
 ### A worker that finishes before the tick collects its acknowledgement
 
@@ -4247,7 +4458,8 @@ The `agentihooks-swarm` chart runs worker pods from the hive worker image. Each 
 5. Sets itself `ui=no ephemeral=yes draining=no excluded=<workers.excluded> master-swarms=<workers.masterSwarms>
    prefer=<workers.prefer>`, by default `excluded=master master-swarms= prefer=`, keeping a stored excluded list, ui and ephemeral.
    `workers.prefer` takes `role:rank` pairs, such as `eng:1,ci:1,plan:1`: placement gives a role's agents to the
-   lowest ranked hive while admission leaves it room. A second `hive set` then writes `max-agents=<workers.maxAgents>`
+   lowest ranked hive while admission leaves it room. The same `hive set` writes `pinned=<yes|no>` from `workers.pinned`;
+   a pod from a chart without that setting writes no pin. A second `hive set` then writes `max-agents=<workers.maxAgents>`
    without `--keep`, or `max-agents=auto` when the chart sets none, so every start replaces a stored or hand-set cap with
    the chart value.
 6. Runs `agentihooks hive run`.
@@ -5440,7 +5652,7 @@ Only the operator can edit. An agent's credential gets
 
 The button sends the swarm control `master_move` with the hive id. The server runs
 `agentihooks swarm <slug> master move --to <hive>`, so the move behaves as described in
-[Headless fallback](#headless-fallback) and in the [swarm commands](swarm.md): the live master hands off and its
+[Workstation fallback](#workstation-fallback) and in the [swarm commands](swarm.md): the live master hands off and its
 successor starts on that hive.
 
 The button is off when:

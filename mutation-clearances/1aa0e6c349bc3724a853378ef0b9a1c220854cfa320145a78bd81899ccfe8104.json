@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/ready.py:scripts.swarm.ready.x__priority:cb3429b3445d1b8d1a00dff5a85dd15bca75aae8d1da8d29dc7451e499a0e7d7": {
+    "reader": "standards_reader",
+    "reason": "cast(None, run.store) changes no runtime output because typing.cast returns its second argument unchanged; ready.py imports cast from typing and nothing shadows it."
+  }
+}
