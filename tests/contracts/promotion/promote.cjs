@@ -2,8 +2,10 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const promote = require('../../../.github/scripts/promote.cjs');
 
-const servedPage = (items, { page = 1, per_page = 30 }) => {
-  const size = Math.min(per_page, 100);
+const pageSize = per_page => Math.min(per_page ?? 30, 100);
+
+const servedPage = (items, { page = 1, per_page }) => {
+  const size = pageSize(per_page);
   return items.slice((page - 1) * size, page * size);
 };
 
@@ -39,10 +41,10 @@ function fixture(options = {}) {
   const github = { rest: {
     actions: {
       getWorkflowRun: async () => ({ data: { workflow_id: 10, run_number: context.runId, created_at: '2026-10-28T01:00:00Z' } }),
-      listWorkflowRuns: async () => ({ data: { workflow_runs: [] } }),
+      listWorkflowRuns: async args => ({ data: { workflow_runs: servedPage([], args) } }),
       listJobsForWorkflowRun: async args => ({ data: { jobs: servedPage(jobs, args) } }),
     },
-    checks: { listForRef: async () => ({ data: { check_runs: checks.slice(0, 100) } }) },
+    checks: { listForRef: async args => ({ data: { check_runs: servedPage(checks, args) } }) },
     git: {
       getRef: async ({ ref }) => {
         if (ref === 'heads/dev') return { data: { object: { sha: ++reads === 1 ? options.dev || 'graded' : options.moved || 'graded' } } };
@@ -82,18 +84,16 @@ function fixture(options = {}) {
   } };
   github.paginate = async (method, args, map) => {
     pages.push(args);
-    if (method === github.rest.actions.listWorkflowRuns) return [];
-    if (method === github.rest.checks.listForRef) return checks;
-    if (method !== github.rest.actions.listJobsForWorkflowRun && method !== github.rest.repos.listCommitStatusesForRef) {
-      throw new Error('Unexpected paginated endpoint');
-    }
+    const lists = [github.rest.actions.listWorkflowRuns, github.rest.actions.listJobsForWorkflowRun, github.rest.checks.listForRef,
+      github.rest.repos.listCommitStatusesForRef];
+    if (!lists.includes(method)) throw new Error('Unexpected paginated endpoint');
     let items = [];
     let done = false;
     for (let page = 1; !done; page++) {
       const response = await method({ ...args, page });
       const data = Array.isArray(response.data) ? response.data : Object.values(response.data).find(Array.isArray);
       items = items.concat(map ? map({ ...response, data }, () => { done = true; }) : data);
-      done ||= data.length < Math.min(args.per_page ?? 30, 100);
+      done ||= data.length < pageSize(args.per_page);
     }
     return items;
   };
