@@ -192,7 +192,7 @@ def _paths(name: str) -> list[Path]:
     paths = [profile_chain.BUILT_IN_PROFILES / "package" / "classifiers" / f"{name}.yaml"]
     paths.extend(
         root / ".claude" / "classifiers" / f"{name}.yaml"
-        for _kind, root in profile_chain.bundle_roots(profile_chain.read_state())
+        for _kind, root in profile_chain.bundle_roots(profile_chain.read_state(), True)
     )
     paths.append(AGENTIHOOKS_HOME / "classifiers" / f"{name}.yaml")
     return paths

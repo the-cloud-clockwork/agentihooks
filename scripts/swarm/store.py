@@ -642,6 +642,9 @@ class RedisStore:
     def put_agent(self, slug, agent):
         self.execution_registry.put(slug, agent)
 
+    def revive_agent(self, slug: str, agent: "AgentRecord") -> None:
+        self.execution_registry.revive(slug, agent)
+
     def agents(self, slug):
         return self.execution_registry.agents(slug)
 

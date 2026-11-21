@@ -1,3 +1,4 @@
+import re
 from functools import cache
 from itertools import product
 from pathlib import Path
@@ -323,3 +324,13 @@ def test_only_the_dev_push_worker_image_build_stays_uncapped_because_it_publishe
 def test_lane_titles_match_the_workflow_names():
     for name, (title, _) in DIRECT.items():
         assert _workflow(name)["name"] == title, name
+
+
+def _guide_lane_users() -> set[str]:
+    section = (_ROOT / "docs/ci-timing.md").read_text().split("\n## Proof dispatch lanes\n", 1)[1].split("\n## ", 1)[0]
+    table = section.split("| Lane user | Workflow file | Runs on a lane |\n|---|---|---|\n", 1)[1].split("\n\n", 1)[0]
+    return {":".join(re.findall(r"`([^`]+)`", row.split(" | ")[1])) for row in table.splitlines()}
+
+
+def test_the_ci_timing_guide_lists_every_pinned_lane_user() -> None:
+    assert _guide_lane_users() == LANE_USERS

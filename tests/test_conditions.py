@@ -223,6 +223,16 @@ class TestIndexCache:
         _write(gamma, "pre-bash-gamma.sh", "echo")
         assert "pre-bash-gamma.sh" in [e["file"] for e in conditions.matching("pre", "Bash", {})]
 
+    @pytest.mark.feature("bundle-layer-manifest")
+    def test_a_bundle_layer_change_invalidates(self, layers):
+        bundle, _, _ = layers
+        self._prime(layers)
+        shipped = bundle / "ship" / ".claude" / "conditions"
+        shipped.mkdir(parents=True)
+        _write(shipped, "pre-bash-shipped.sh", "echo")
+        (bundle / "bundle.yml").write_text("layer: ship\n")
+        assert [e["file"] for e in conditions.matching("pre", "Bash", {})] == ["pre-bash-shipped.sh"]
+
     def test_fresh_mtimes_are_not_cached(self, layers):
         _write(layers[1], "pre-bash-one.sh", "echo")
         conditions.load_index()
