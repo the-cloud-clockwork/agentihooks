@@ -17,10 +17,10 @@ pytestmark = pytest.mark.unit
 @pytest.mark.feature("lab-head-undecodable-dead-letter")
 @pytest.mark.parametrize(
     "payload",
-    [b"{", b"\xff", b"[]", b"{}", b"[" * 10000 + b"]" * 10000],
-    ids=["json", "utf8", "array", "fields", "depth"],
+    [b"{", b"\xff", b"[]", b"{}", b"[" * 10000 + b"]" * 10000, None],
+    ids=["json", "utf8", "array", "fields", "depth", "limit"],
 )
-def test_an_undecodable_head_is_dead_lettered_and_the_next_head_is_read(payload: bytes, tmp_path: Path) -> None:
+def test_an_undecodable_head_is_dead_lettered_and_the_next_head_is_read(payload: bytes | None, tmp_path: Path) -> None:
     policy = QueuePolicy(max_deliver=1, ack_wait_ms=20)
     good = HeadEvent("push", "https://github.com/o/r", "a" * 40, "b" * 40, "dev", "pushed")
     with nats_server.running(tmp_path / "jetstream") as url:
@@ -28,6 +28,8 @@ def test_an_undecodable_head_is_dead_lettered_and_the_next_head_is_read(payload:
         try:
             consumer = bus.lab_heads.consumer(scheduler.DURABLE, scheduler.SUBJECT)
             inbox = scheduler.BusInbox(cast(scheduler.Consumer, consumer), batch=2, timeout_ms=100)
+            if payload is None:
+                payload = b"\xff" * (bus._nc.max_payload * 9 // 10)
             published = bus._loop.run(bus._js.publish("ci.lab.head.push", payload, stream=nats.LAB_STREAM))
             bus.lab_heads.publish("ci.lab.head.push", envelope(good))
             errors = []
@@ -35,7 +37,7 @@ def test_an_undecodable_head_is_dead_lettered_and_the_next_head_is_read(payload:
             for _ in range(3):
                 try:
                     heads.extend(inbox.heads())
-                except (ValueError, RecursionError) as error:
+                except (ValueError, RecursionError, nats.nats_payload.PayloadTooLarge) as error:
                     errors.append(type(error).__name__)
                     time.sleep(0.04)
             info = bus._loop.run(bus._js.consumer_info(nats.LAB_STREAM, nats.consumer_name(scheduler.DURABLE)))
