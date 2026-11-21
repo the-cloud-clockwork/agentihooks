@@ -924,6 +924,23 @@ def test_the_same_stall_answered_once_is_not_shown_again() -> None:
     assert (repeat.ref, repeat.state, repeat.reason) == (first.ref, "done", f"done: {seen.SEEN_ON_LEDGER}")
 
 
+@pytest.mark.feature("swarm-stall-watch-answered-alert-not-resent")
+def test_an_answered_stall_alert_is_not_sent_again_until_the_stall_grows() -> None:
+    """After the master answers a stall alert the watch sends nothing while that stall lasts, and alerts on a new one."""
+    swarm = Swarm(GREEN)
+    swarm.store.update(SLUG, gates={})
+    swarm.tick(START)
+    swarm.tick(START + 10 * MINUTE)
+    [first] = swarm.inbox()
+    InboxStore(swarm.store.redis).close(first.id, LEAD, "done", "handled")
+    assert [swarm.tick(START + minutes * MINUTE) for minutes in (11, 12, 25)] == [[], [], []]
+    assert [item.id for item in swarm.inbox()] == [first.id]
+    swarm.pulls[URL] = replace(GREEN, pushed_at=START + 20 * MINUTE)
+    swarm.tick(START + 30 * MINUTE)
+    refs = [item.ref for item in swarm.inbox() if item.id != first.id]
+    assert refs == [f"sw:stall:t1:green:{START + 20 * MINUTE}:alert"]
+
+
 def test_an_open_unclaimed_alert_is_not_repeated_when_the_task_waits_again():
     swarm = Swarm(RUNNING)
     _full_lane(swarm)
