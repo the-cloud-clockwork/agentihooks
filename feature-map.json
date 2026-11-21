@@ -12651,6 +12651,18 @@
       ]
     },
     {
+      "id": "swarm-close-retires-superseded-predecessor",
+      "origin": "regression",
+      "ordered_at": "2026-11-21",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-close-retire-identity-conflict",
+      "behaviour": "Swarm close finishes for a swarm holding a finished predecessor and its listed successor on one seat when the runtime refuses to retire the predecessor: the predecessor stays dropped with its name retired and is reported still running instead of being put back into an identity conflict, so claimed tasks reopen, the ledger is marked closed and the swarm state is written, while an agent with no successor whose retire is refused is still put back.",
+      "seam": "scripts.swarm.cli close through cli.main, observed through RedisStore.put_agent, RedisStore.agents, the names registry, the ledger close calls and the printed still running list",
+      "tests": [
+        "tests/swarm/test_close.py::test_close_completes_when_retire_refuses_a_finished_predecessor_whose_successor_is_listed",
+        "tests/swarm/test_close.py::test_close_still_puts_back_an_agent_with_no_successor_whose_retire_is_refused"
+      ]
+    },
+    {
       "id": "swarm-tick-lock-renewal-journal",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2785",
