@@ -247,11 +247,12 @@ location / {
 ```
 
 - `proxy_set_header Host $http_host` forwards the `Host` the client sent, port included. Both services compare it
-  exactly with lists whose entries carry a port ([Host check](#host-check)); nginx's `$host` drops the port, so no
-  request would pass.
-- `proxy_pass` names a variable, so nginx resolves `swarm` and `api` per request. The `resolver` line sends those
-  lookups to Docker's embedded DNS server and keeps each answer one second, so a recreated container with a new
-  address is reached within a second. Without it every request answers `502` and the front logs
+  exactly with their allowed values ([Host check](#host-check)). For a client using a non-default port, nginx's
+  `$host` drops that port and fails to match the corresponding `host:port` entry.
+- `proxy_pass` names a variable, so nginx resolves `swarm` and `api` at request time. The `resolver` line sends those
+  lookups to Docker's embedded DNS server and caches each answer for one second. Requests after cache expiry resolve
+  the name again, allowing nginx to discover a recreated container's new address without restarting the front.
+  Cache validity does not set a recovery deadline. Without the resolver every request answers `502` and the front logs
   `no resolver defined to resolve swarm`.
 
 The packaged stack, `scripts/swarm/stack/deploy/compose/ledger-front.conf`, is the same file byte for byte, and the

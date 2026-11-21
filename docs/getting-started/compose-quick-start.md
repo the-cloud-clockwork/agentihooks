@@ -117,8 +117,8 @@ server {
 | Line | What it does |
 |---|---|
 | `set $upstream ...` and the `if` block | `GET` and `HEAD` go to the read only ledger server `swarm`, every other method to the ledger API service `api` on port 8766. `SWARM_LEDGER_SCHEME` (default `http`) is the scheme the `swarm` service serves |
-| `proxy_set_header Host $http_host;` | Each request reaches `swarm` or `api` with the `Host` header the client sent, port included. nginx's `$host` would drop the port, and no entry in the host lists below would match |
-| `resolver 127.0.0.11 valid=1s;` | `proxy_pass` names a variable, so nginx looks up `swarm` and `api` on every request through Docker's embedded DNS server and keeps each answer for one second. A `swarm` or `api` container that Compose recreates with a new address is reached within a second, and `front` needs no restart. Without a resolver every request answers `502` |
+| `proxy_set_header Host $http_host;` | Each request reaches `swarm` or `api` with the `Host` header the client sent, port included. For a client using a non-default port, nginx's `$host` would drop that port and fail to match the corresponding `host:port` entry |
+| `resolver 127.0.0.11 valid=1s;` | `proxy_pass` names a variable, so nginx resolves `swarm` and `api` at request time through Docker's embedded DNS server and caches each answer for one second. Requests after the cached answer expires resolve the name again, allowing nginx to discover a recreated container's new address without restarting `front`. Cache validity does not set a recovery deadline. Without a resolver every request answers `502` |
 
 ### Host names the services answer
 

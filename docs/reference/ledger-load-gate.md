@@ -241,10 +241,10 @@ the front image and failed after 11 seconds with `No such image` for
 With the stack up, the scenario reads `/healthz`, the home page and its static
 assets, `/api/v1/ledgers`, `/logo.png` and `/favicon.ico` through the front on
 `SWARM_PORT` (default 12765), writes `PUT /api/v1/layout`, recreates the `swarm`
-container and reads the layout again. Because the port differs from 8765 and the
-container comes back with a new address, a pass also proves that the front
-forwards the client `Host` with its port and resolves `swarm` per request
-([Ledger write path](ledger-write-path.md#compose-stack)).
+container and reads the layout again. The non-default port exercises forwarding
+of the client `Host` with its port. The layout read checks persistence after
+recreation; the scenario does not compare the container's IP addresses. See
+[Ledger write path](ledger-write-path.md#compose-stack) for the front's DNS configuration.
 
 Two tests guard the pulls in CI:
 `tests/test_swarm_smoke_pull.py::test_smoke_selects_runtime_manifests_and_keeps_missing_images_red`
