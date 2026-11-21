@@ -1136,9 +1136,9 @@ def test_a_substitution_after_a_cd_scans_the_tree_the_cd_entered(tmp_path: Path)
 
 
 @pytest.mark.feature("credential-guard-stage-substitutions")
-@pytest.mark.parametrize("command", ["echo $(<<<.env)", "echo $(<<.env)"])
-def test_a_here_string_or_heredoc_word_in_a_substitution_passes(command: str) -> None:
-    assert decide(_bash(command)) is None
+@pytest.mark.parametrize("command", ["echo $(<a cat .env)", "echo $(< a cat .env)", "echo $(<<<a cat .env)"])
+def test_a_read_after_a_leading_input_redirection_in_a_substitution_is_refused(command: str) -> None:
+    assert decide(_bash(command)) is not None
 
 
 AWK_ENVIRON_VALUE_READS = [
