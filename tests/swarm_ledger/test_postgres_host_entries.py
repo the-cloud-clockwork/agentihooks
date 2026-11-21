@@ -1,8 +1,8 @@
 import sqlite3
 import threading
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock
 
@@ -11,6 +11,12 @@ import pytest
 from scripts.swarm_ledger.repository import host_entries, postgres, sqlite
 
 STATE = {"title": "copy", "tasks": [], "_meta": {"rev": 1, "events": []}}
+
+
+@dataclass(frozen=True)
+class Copy:
+    generation: int
+    text: str
 
 
 @pytest.fixture
@@ -70,7 +76,9 @@ def test_a_slow_host_copy_observes_a_committed_postgres_transaction(
         observer.join(10)
     assert not observer.is_alive()
     assert observed == [(0, 1)]
-    assert host_entries.read(host_entries.path(repository.copies.held, ("database", "copy")), 100)[1].state == STATE
+    stored = host_entries.read(host_entries.path(repository.copies.held, ("database", "copy")), 100)
+    assert stored is not None
+    assert stored[1].state == STATE
 
 
 @pytest.mark.feature("ledger-copy-after-commit")
@@ -131,7 +139,9 @@ def test_a_purge_drops_the_copy_after_its_queued_save(
 @pytest.mark.feature("ledger-copy-after-commit")
 def test_a_deferred_older_copy_never_replaces_a_newer_generation(tmp_path: Path) -> None:
     copies = host_entries.Copies(tmp_path / "entries", "database")
-    copies.keep("copy", SimpleNamespace(generation=200, text='{"new":true}'), True)
-    copies.keep("copy", SimpleNamespace(generation=100, text='{"old":true}'), True)
+    copies.keep("copy", Copy(generation=200, text='{"new":true}'), True)
+    copies.keep("copy", Copy(generation=100, text='{"old":true}'), True)
     assert copies.generations == {"copy": 200}
-    assert host_entries.read(host_entries.path(copies.held, ("database", "copy")), 200)[1].state == {"new": True}
+    stored = host_entries.read(host_entries.path(copies.held, ("database", "copy")), 200)
+    assert stored is not None
+    assert stored[1].state == {"new": True}
