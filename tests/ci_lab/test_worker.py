@@ -71,6 +71,10 @@ class Calls(worker.Client):
         return super().complete(job, token, outcome)
 
 
+class SinkServer(ThreadingHTTPServer):
+    request_queue_size = 40
+
+
 class Sink:
     def __init__(self) -> None:
         self.bodies: dict[str, bytes] = {}
@@ -82,7 +86,7 @@ class Sink:
             request.end_headers()
 
         handler = type("SinkHandler", (BaseHTTPRequestHandler,), {"do_PUT": put})
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        self.server = SinkServer(("127.0.0.1", 0), handler)
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
 
 
