@@ -113,4 +113,5 @@ How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step
 | refresh job | wrapper refresh | tick | 2 | 600 | none | none | none |
 | outbox migration | wrapper relay | tick | 2 | 60 | none | none | none |
 | page relay | wrapper relay | tick | 2 | 60 | none | none | none |
-| tick view | wrapper view | tick | 3 | 60 | none | none | none |
+| view wait | wrapper relay | tick | 60 | 60 | intent check | none | tick-view-wait-off-scheduler |
+| tick view | wrapper view | tick | 3 | 60 | view wait | none | none |
