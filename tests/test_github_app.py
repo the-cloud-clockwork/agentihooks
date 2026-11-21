@@ -205,3 +205,13 @@ def test_permission_tokens_without_the_requested_grant_are_refused(
     with pytest.raises(module.GitAuthRefused) as refused:
         module.GitHubAppAuth(permissions={"checks": "write"}).get_token()
     assert str(refused.value) == module.REFUSED
+
+
+@pytest.mark.feature("lab-relay-app-refusal")
+def test_a_refused_checks_token_names_checks_write_and_the_answer_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    module, _, _, post = app(monkeypatch)
+    post.return_value.status_code = 422
+    with pytest.raises(module.GitAuthRefused) as refused:
+        module.GitHubAppAuth("github.com/example/private", permissions={"checks": "write"}).get_token()
+    assert refused.value.status_code == 422
+    assert str(refused.value) == "GitHub App cannot supply scoped checks write credentials: GitHub answered 422"

@@ -9818,6 +9818,17 @@
       ]
     },
     {
+      "id": "lab-relay-app-refusal",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-relay-app-refusal",
+      "behaviour": "The CI lab relay survives a GitHub App token refusal: when the App refuses the push, check runs or pull requests token of a pending grade ref head, the relay tick records the head held for a later pass with the refusal, keeps the head pending, holds that repository's relays for the scheduler's post hold and still relays the pending heads of other repositories in the same tick, so the scheduler process keeps running. The refusal names the permissions the token asked for and GitHub's answer status, so a refused checks write token never reads as a contents problem.",
+      "seam": "scripts.ci_lab.relay.Relay.tick over recording ports whose push raises scripts.github_app.GitAuthRefused, and scripts.github_app.GitHubAppAuth.get_token over mocked HTTP",
+      "tests": [
+        "tests/ci_lab/test_relay.py::test_a_relay_whose_app_token_is_refused_stays_pending_and_another_repository_still_relays",
+        "tests/test_github_app.py::test_a_refused_checks_token_names_checks_write_and_the_answer_status"
+      ]
+    },
+    {
       "id": "lab-manifest-fetch-off-pass",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2703",

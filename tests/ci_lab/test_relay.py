@@ -558,6 +558,43 @@ def test_a_failing_git_call_keeps_its_head_pending_and_the_next_head_still_relay
     assert client.hget(relay.PENDING, f"{OTHER} engineer-2") is None
 
 
+GADGETS = "https://github.com/acme/gadgets"
+REFUSAL = "GitHub App cannot supply scoped contents write and workflows write credentials: GitHub answered 422"
+
+
+class Unminted(Calls):
+    """Fake relay ports whose App refuses the push token of the widgets repository."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.repo = ""
+
+    def pusher(self, repo: str) -> "Calls":
+        """Return the pusher of a repository and remember the repository."""
+        self.repo = repo
+        return super().pusher(repo)
+
+    def push(self, sha: str, branch: str) -> None:
+        """Refuse the widgets repository's push token and keep every other push."""
+        if self.repo == REPO:
+            raise github_app.GitAuthRefused(REFUSAL, status_code=422)
+        super().push(sha, branch)
+
+
+@pytest.mark.feature("lab-relay-app-refusal")
+def test_a_relay_whose_app_token_is_refused_stays_pending_and_another_repository_still_relays() -> None:
+    client, calls = fake_redis(), Unminted()
+    first = relay.Pending(REPO, HEAD, REF, BRANCH)
+    second = relay.Pending(GADGETS, OTHER, "refs/grade/t2", "engineer-2")
+    found = {HEAD: [grade("success")], OTHER: [replace(grade("success"), repo=GADGETS, head=OTHER)]}
+    engine = relay.Relay(client, Notices([first, second]), found.__getitem__, calls.ports(), LAB)
+    actions = engine.tick()
+    assert actions[2:4] == [f"held {HEAD} for {BRANCH} for a later pass: {REFUSAL}", f"pushed {OTHER} to engineer-2"]
+    assert actions[-1] == f"opened {PULL}"
+    assert relay.Pending(**json.loads(client.hget(relay.PENDING, f"{HEAD} {BRANCH}"))) == first
+    assert client.hget(relay.PENDING, f"{OTHER} engineer-2") is None
+
+
 def test_bus_notices_keep_trusted_grade_ref_heads_with_a_branch_and_acknowledge_every_envelope() -> None:
     bus = open_bus(BusConfig())
     consumer = bus.lab_heads.consumer(relay.DURABLE, relay.SUBJECT)
