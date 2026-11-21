@@ -1163,15 +1163,9 @@ def rewrite_stage(stage_text, verb):
 
 def stage_verdict(stage_text: str, ctx: Context) -> Verdict:
     for body in substitutions(stage_text):
-        inner = body.strip()
-        if inner.startswith("<"):
-            tok, kind = first_sensitive([inner[1:].strip()])
-            if kind:
-                return read_block(tok, kind)
-        else:
-            v = segment_verdict(inner, Context(ctx.cwd, ctx.recursive, False))
-            if v.block:
-                return v
+        v = segment_verdict(body, Context(ctx.cwd, ctx.recursive))
+        if v.block:
+            return v
 
     toks = tokens_of(stage_text)
     if not toks:
