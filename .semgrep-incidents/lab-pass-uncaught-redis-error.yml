@@ -5,9 +5,9 @@ rules:
     message: >-
       A Redis error raised by one lab scheduler pass leaves serve and ends the scheduler process. On 21 November the
       scheduler container restarted five times between 10:39 and 12:03 UTC, and both tracebacks captured, at 11:24 and
-      12:03 UTC, were one read timeout in the per slot job read of a pass; no grade advanced while it restarted. Run
-      each pass, the scheduler tick and the relay tick, inside try with except RedisError, print the skipped pass and
-      the error, and run the next pass on schedule.
+      12:03 UTC, were one read timeout in the per slot job read of a pass. Run each pass, the scheduler tick and the
+      relay tick, inside try with except RedisError, print the skipped pass and the error, and run the next pass on
+      schedule.
     paths:
       include:
         - /scripts/ci_lab/scheduler.py
