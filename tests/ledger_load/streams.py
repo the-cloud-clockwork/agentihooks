@@ -135,6 +135,7 @@ def measure(source: Path, folder: Path, doc: dict, streams: int) -> dict:
                 if not event.wait(gate.SERVER_WAIT_S) or result["snapshots"] != 1:
                     raise RuntimeError(f"stream did not receive its snapshot: {result}")
             began, initial_cpu = time.monotonic(), gate.cpu_seconds(write_server.pid)
+            initial_read_cpu = gate.cpu_seconds(read_server.pid)
             for n in range(SECONDS * WRITES_PER_SECOND):
                 time.sleep(max(0, began + n / WRITES_PER_SECOND - time.monotonic()))
                 sent = time.monotonic()
@@ -159,6 +160,7 @@ def measure(source: Path, folder: Path, doc: dict, streams: int) -> dict:
             time.sleep(max(0, began + SECONDS - time.monotonic()))
             elapsed = time.monotonic() - began
             cpu = gate.cpu_seconds(write_server.pid) - initial_cpu
+            read_cpu = gate.cpu_seconds(read_server.pid) - initial_read_cpu
             deadline = time.monotonic() + gate.TIMEOUT_S
             while time.monotonic() < deadline and any(
                 math.inf in delivery_delays(result["arrivals"], written) and not result["errors"]
@@ -178,19 +180,22 @@ def measure(source: Path, folder: Path, doc: dict, streams: int) -> dict:
                     f"streams received the last write {delivered - last_write:.2f} s after it, last write at"
                     f" {last_write:.2f} s, delivered at {delivered:.2f} s, past one follow pass of {FOLLOW_PASS_S:g} s"
                 )
-            delays = [delay for result in consumers for delay in delivery_delays(result.pop("arrivals"), written)]
+            delays = [delay for result in consumers for delay in delivery_delays(list(result["arrivals"]), written)]
             return {
                 "streams": streams,
                 "writes": len(writes),
                 "seconds": elapsed,
                 "cpu_seconds": cpu,
                 "cpu_cores": cpu / elapsed,
+                "read_cpu_cores": read_cpu / elapsed,
                 "write_p95_s": gate.p95(writes),
                 "last_write_s": last_write,
                 "delivered_s": delivered,
                 "delivery_p95_s": gate.p95(delays),
                 "delivery_max_s": max(delays),
-                "consumers": consumers,
+                "consumers": [
+                    {key: value for key, value in result.items() if key != "arrivals"} for result in consumers
+                ],
             }
         finally:
             stop.set()

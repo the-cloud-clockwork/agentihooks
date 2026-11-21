@@ -72,11 +72,12 @@ def test_a_write_another_process_stores_reaches_the_publisher_within_the_follow_
     reader.current("ledger")
     reader.drain(5)
     stopping, finished = threading.Event(), threading.Event()
+    scheduled_wait = server.scheduled_wait
 
-    def watched() -> list[str]:
+    def paced(interval: float, timeout: float | None = None) -> None:
         if stopping.is_set():
             raise SystemExit
-        return ["ledger"]
+        scheduled_wait(interval, timeout=timeout)
 
     def scheduler_passes() -> None:
         for _ in range(SCHEDULER_PASSES):
@@ -85,7 +86,8 @@ def test_a_write_another_process_stores_reaches_the_publisher_within_the_follow_
             Scheduler(state).run_due()
 
     monkeypatch.setattr(server, "repository", reader)
-    monkeypatch.setattr(server, "HUB", SimpleNamespace(watched=watched))
+    monkeypatch.setattr(server, "HUB", SimpleNamespace(watched=lambda: ["ledger"]))
+    monkeypatch.setattr(server, "scheduled_wait", paced)
     follow = threading.Thread(target=server.follow_shared, daemon=True)
     passes = threading.Thread(target=scheduler_passes, daemon=True)
     passes.start()
