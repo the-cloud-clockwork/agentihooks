@@ -189,7 +189,7 @@ def test_the_progress_email_cron_follows_its_enabled_state(env: Env) -> None:
 
 
 @pytest.mark.feature("master-seat-durable-crons")
-@pytest.mark.parametrize("text", ["not json", json.dumps({"enabled": "yes"})])
+@pytest.mark.parametrize("text", ["not json", "[]", "null", json.dumps({"enabled": "yes"})])
 def test_an_unreadable_or_unset_email_state_wants_no_email_cron(env: Env, text: str) -> None:
     created()
     state = Path.home() / ".swarm-progress-notification-email" / "repo" / "state.json"
@@ -207,8 +207,10 @@ def test_stop_and_close_leave_no_seat_cron(
     closable(env, monkeypatch, tmp_path)
     by_hand(NUDGE)
     by_hand(CREW)
+    other = by_hand(CREW, "master@other")
     assert run(SLUG, *argv) == 0
-    assert schedules() == [CREW]
+    assert schedules() == []
+    assert ids("master@other") == [other]
 
 
 @pytest.mark.feature("master-seat-durable-crons")
@@ -248,11 +250,15 @@ def test_ensure_holds_the_seat_crons_lock(env: Env, monkeypatch: pytest.MonkeyPa
 
 
 @pytest.mark.feature("master-seat-durable-crons")
+@pytest.mark.parametrize(
+    "error",
+    [OSError, Busy, commands.CommandError, SwarmError],
+)
 def test_an_unreachable_scheduler_warns_and_start_and_stop_go_on(
-    env: Env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    env: Env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], error: type[Exception]
 ) -> None:
     def down() -> Any:
-        raise OSError("scheduler down")
+        raise error("scheduler down")
 
     created()
     monkeypatch.setattr(seat_crons, "scheduler", down)

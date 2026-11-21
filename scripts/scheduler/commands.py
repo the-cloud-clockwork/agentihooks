@@ -4,7 +4,6 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from scripts.scheduler.core import Entry, Scheduler
@@ -96,7 +95,7 @@ def moment(text: str) -> float:
     return parsed.timestamp()
 
 
-def describe(record: dict[str, Any]) -> dict[str, Any]:
+def describe(record: dict) -> dict:
     view = {key: record[key] for key in ("id", "kind", "state", "owner", "payload", "due")}
     view["targets"] = [{k: v for k, v in slot.items() if k not in ("id", "signal")} for slot in record["slots"]]
     if record["kind"] == "cron":
@@ -173,7 +172,7 @@ def add_cron(
     expression: str,
     timezone: str = "UTC",
     now: float | None = None,
-) -> dict[str, Any]:
+) -> dict:
     now = time.time() if now is None else now
     _reachable(scheduler, slot)
     try:
@@ -185,7 +184,7 @@ def add_cron(
     return _arm(entry, slot, now)
 
 
-def entries(scheduler: Scheduler, kind: str) -> list[dict[str, Any]]:
+def entries(scheduler: Scheduler, kind: str) -> list[dict]:
     return sorted(
         (describe(record) for record in scheduler.records() if record["kind"] == kind and record["state"] in OPEN),
         key=lambda view: view["due"],
@@ -210,7 +209,7 @@ def _open(scheduler: Scheduler, kind: str, entry_id: str) -> Entry:
     return entry
 
 
-def cancel(scheduler: Scheduler, kind: str, entry_id: str) -> dict[str, Any]:
+def cancel(scheduler: Scheduler, kind: str, entry_id: str) -> dict:
     entry = _open(scheduler, kind, entry_id)
     entry.cancel()
     return describe(entry.record)

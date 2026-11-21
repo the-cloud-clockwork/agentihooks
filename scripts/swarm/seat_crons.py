@@ -54,7 +54,7 @@ def _sheet(place: Place) -> bool:
 def _email(place: Place) -> bool:
     try:
         return json.loads(place.email.read_text()).get("enabled") is True
-    except (OSError, ValueError):
+    except (OSError, ValueError, AttributeError):
         return False
 
 
@@ -117,12 +117,13 @@ def swarms() -> RedisStore:
 def aimed(on: Scheduler, seat: str) -> list[dict[str, Any]]:
     """The open crons aimed at the seat's inbox, the soonest due first."""
     target = {"kind": "inbox", "address": seat}
-    return [view for view in commands.entries(on, "cron") if target in view["targets"]]
+    views: list[dict[str, Any]] = commands.entries(on, "cron")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    return [view for view in views if target in view["targets"]]
 
 
 def _drop(on: Scheduler, views: list[dict[str, Any]]) -> None:
     for view in views:
-        commands.cancel(on, "cron", view["id"])
+        commands.cancel(on, "cron", view["id"])  # pyright: ignore[reportUnknownMemberType]
 
 
 def ensure(on: Scheduler, config: SwarmConfig, home: Path) -> None:
@@ -143,15 +144,15 @@ def ensure(on: Scheduler, config: SwarmConfig, home: Path) -> None:
                 slug=where.slug, folder=where.sheet.parent, sheet=where.sheet, email=where.email.parent
             )
             if not found:
-                commands.add_cron(on, OWNER, InboxSlot(seat), text, expression=cron.expression)
+                slot = InboxSlot(seat)
+                commands.add_cron(on, OWNER, slot, text, expression=cron.expression)  # pyright: ignore[reportUnknownMemberType]
 
 
 def cancel(on: Scheduler, slug: str) -> None:
-    """Cancel every live cron aimed at the swarm's front door seat on a listed schedule, hand made ones included."""
-    listed = {cron.expression for cron in CRONS}
+    """Cancel every live cron aimed at the swarm's front door seat, the listed ones and any other a master added, so a
+    stopped swarm keeps no seat cron."""
     with held(on.state, on.name(LOCK), WAIT_S):
-        gone = [view for view in aimed(on, front_door.seat(slug)) if view["expression"] in listed]
-        _drop(on, gone)
+        _drop(on, aimed(on, front_door.seat(slug)))
 
 
 def _guarded(slug: str, done: str, step: Callable[[], object]) -> None:
