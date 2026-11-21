@@ -101,7 +101,10 @@ response header carries the fable window.
    Codex seat, or when pinned Codex work reserves every free one, it goes to
    Claude. A lane or task harness pin, a Claude only profile, a relaunch that
    keeps its earlier harness, a profile with its own harness order and the plan
-   lane keep their own choice.
+   lane keep their own choice. A lane pinned to one harness raises a
+   `harness pin` finding in swarm status while the other harness has free
+   seats and ready lane tasks wait; see
+   [Harness pin findings](swarm.md#harness-pin-findings).
 
 When no account has a free place a swarm or hive slot launch fails. A launch
 outside both, such as the operator's own `agenti`, then takes the open account

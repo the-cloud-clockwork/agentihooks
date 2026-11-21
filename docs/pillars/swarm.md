@@ -7559,6 +7559,128 @@ pin` finding for a pinned lane whose other harness has free seats while ready ta
 the pin and its age, the free seats and the waiting tasks. It reports only: the pin stays until someone sets the lane
 agent back to `auto`.
 
+A pin left in place after its reason has passed keeps work off the other harness without any error. In November a
+lane pin to Claude, left from a mitigation on the twelfth, kept the swarm from launching any Codex agent for six days
+and nothing reported it; this finding makes such a pin show in status.
+
+#### How a lane gets pinned
+
+The capacity pass checks the `eng`, `ci` and `plan` lanes. A lane is pinned when its `agent` field is `claude` or
+`codex`; `auto`, the default, and an unset field offer both harnesses. The `master` lane is never checked. A lane
+agent is set in three ways:
+
+| Source | Effect |
+|---|---|
+| `agentihooks swarm <id> set <lane>-agent=claude`, `=codex` or `=auto` | Pins the lane, moves the pin to the other harness, or clears it. Any other value is refused with `lane <lane> agent must be one of ('auto', 'claude', 'codex')`. |
+| A template's lane `agent` at `swarm create` | The swarm starts pinned. Of the built-in templates, `codex-ci` pins eng to Claude and ci to Codex, and `codex-only` and `claude-only` pin every lane; see [Templates](#templates). |
+| The bottleneck remedy | Moves an `eng` or `ci` lane that is already pinned to the stuck harness onto the other harness; it never pins an `auto` lane. The move restarts the pin age. See [Spawn holds in the stage report](#spawn-holds-in-the-stage-report). |
+
+A task's `requires_harness` field is not a lane pin. It decides the harness for that task alone and creates no pin
+entry and no finding.
+
+#### What each capacity pass stores
+
+The tick's `quota notice` step runs the capacity pass and writes the quota capacity decision to the swarm's
+`quota-capacity` key. For each pinned lane the decision holds one entry under `pins`; `agentihooks swarm <id> status
+--json` shows it as `quota_capacity.pins.<lane>`. With no pinned lane the decision has no `pins` key.
+
+| Field | Value |
+|---|---|
+| `agent` | The pinned harness, `claude` or `codex`. |
+| `since` | The time in milliseconds when a capacity pass first saw this pin. A pass keeps it while the lane stays pinned to the same harness, and sets it to the pass time when the pin is new or names the other harness. A lane that goes back to `auto` drops its entry, so a later pin starts a new age. |
+| `other` | The harness the pin leaves out. |
+| `free` | The other harness's free quota seats: each account's session cap minus its live sessions, never below zero, summed over the accounts that are not API key accounts and carry no quota handoff warning. It is counted before the pass places anything, and it is the same number as `free quota seats` on the scaling line. |
+| `waiting` | The ids of the ready lane tasks this pass placed on no seat. Tasks skipped for a fresh placement refusal never count. The list is empty unless the lane's agents, plus those this pass placed, stay below the lane cap (`max-eng-agents`, `max-ci-agents` or `max-plan-agents`): ready tasks behind a full lane wait on the cap, not on the pin. |
+
+#### When the finding raises and clears
+
+Swarm status raises one `harness pin` finding per lane while all three conditions hold on the stored decision:
+
+| Condition | Read from |
+|---|---|
+| The lane has a pin entry | `pins.<lane>` |
+| The other harness has at least one free quota seat | `pins.<lane>.free` |
+| At least one ready lane task waits | `pins.<lane>.waiting` |
+
+There is no age threshold and no setting: the finding raises as soon as one stored decision meets all three. It
+clears once a capacity pass stores a decision where any condition fails, for example when the lane goes back to `auto`, the other
+harness fills up, the pinned harness places the waiting tasks or the lane reaches its cap. Its measure is the number
+of waiting tasks.
+
+#### What status shows
+
+The quota pin line prints after the scaling line and before the host and account lines, one per pinned lane in lane
+name order. It prints for every pin, also when no finding raises; with no waiting task it ends at `0 ready tasks
+wait`. A swarm whose eng lane has run on Claude for six days, with Claude full and Codex free, shows:
+
+```text
+quota capacity eng 2 of 3, ci 0 of 1, plan 0 of 1, changed 12 minutes ago, because ci and plan have no more ready tasks; accounts have quota; Claude has 0 free seats and Codex has 6 free seats
+scaling manual, live of ceiling eng 2 of 3, ci 0 of 1, plan 0 of 1, free quota seats claude 0 and codex 6
+lane eng pinned to claude, first seen 6d04h ago: codex has 6 free quota seats and 2 ready tasks wait: t12, t15
+```
+
+The findings block of the same status shows:
+
+```text
+finding  harness pin  eng: Lane eng is pinned to Claude, first seen 6d04h ago, while Codex has 6 free quota seats and 2 ready tasks wait
+  - The eng lane agent is claude, so capacity offers its tasks only Claude seats
+  - Codex free quota seats: 6
+  - Ready eng tasks waiting: t12, t15
+  - Pin first seen by the capacity pass 6d04h ago
+  threshold a free seat on the other harness
+  id harness-pin/eng
+  last outcome none recorded
+  rows none in the ledger events
+```
+
+The age is written as minutes under an hour (`5m`), hours and minutes under a day (`2h05m`), and days and hours
+after that (`6d04h`). The summary names the harnesses `Claude` and `Codex`; the quota line and the first evidence
+line print the lane field value, `claude` or `codex`. The subject is a lane, not an agent or task, so the last outcome
+and rows lines carry nothing.
+
+#### Delivery and verdicts
+
+The tick's findings pass sends one inbox item from `swarm` to the swarm's lead master:
+
+```text
+New health finding on swarm <id>: Lane eng is pinned to Claude, first seen 6d04h ago, while Codex has 6 free quota seats and 2 ready tasks wait (harness pin). Give it a verdict: agentihooks swarm <id> verdict harness-pin/eng false-positive|early-real|established|insufficient-evidence|resolved --note "<why>"
+```
+
+It sends that item once per finding id and verdict, and remembers the send for 30 days, so a pin that clears and
+comes back on the same lane within those 30 days, before any verdict, sends no second item. A verdict hides the finding from status and
+from the inbox for `AGENTIHOOKS_HEALTH_COOLDOWN_MINUTES` (60); after that it comes back, with the earlier verdict on
+its `id` line, only when more tasks wait than when it was judged. The verdict is stored under `harness-pin/<lane>`,
+so it also covers a later pin on the same lane.
+
+#### Investigate and clear a pin
+
+```bash
+agentihooks swarm <id> status
+agentihooks swarm <id> status --json
+```
+
+1. Read the quota pin line and the `free quota seats` part of the scaling line. Free seats on the other harness and
+   waiting tasks mean the pin keeps work off seats that could take it.
+2. In the JSON, compare `config.lanes.<lane>.agent` with `quota_capacity.pins.<lane>`. The `since` time shows how
+   long the capacity pass has seen the pin.
+3. Clear a pin that no longer has a reason:
+
+   ```bash
+   agentihooks swarm <id> set eng-agent=auto
+   ```
+
+   The next capacity pass stores no entry for the lane, and the quota line and the finding go away. To move the pin
+   instead, set the lane to the other harness; its age starts again.
+4. Keep a pin that is deliberate, such as a `codex-only` swarm or a profile that needs one harness, and record why:
+
+   ```bash
+   agentihooks swarm <id> verdict harness-pin/eng established --note "eng stays on Codex for the profile proof"
+   ```
+
+The age counts from the first capacity pass that saw the pin, so a pin set while the tick was stopped, or before the
+release that added this finding, reads younger than it is. `free` counts quota seats only; a free seat there does not
+mean a host has room to launch the agent.
+
 ### Spawn stall findings
 
 A `spawn stall` health finding means the swarm could have launched an agent for ten minutes and launched none. The
