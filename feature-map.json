@@ -6511,6 +6511,18 @@
       ]
     },
     {
+      "id": "credential-guard-proc-environ-path-shape",
+      "origin": "regression",
+      "ordered_at": "2026-11-20",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2759",
+      "behaviour": "The credential guard refuses a Bash word as a process environment read only when a segment matching proc is followed by a pid then the leaf, or a pid, task and tid then the leaf, or by a pid and a later cwd, root or fd link, or by a segment that can expand to another depth, so a shell case pattern holding a GitHub address with star globs and a listing such as src star tests star pass while every real proc environ read, a proc mount below another folder and a globbed proc segment stay refused.",
+      "seam": "hooks.context.credential_guard.path_reads_environ, read by hooks.context.credential_guard.decide",
+      "tests": [
+        "tests/test_credential_guard.py::test_a_glob_shaped_unlike_a_proc_environ_path_passes",
+        "tests/test_credential_guard.py::test_a_proc_environ_path_shape_is_refused"
+      ]
+    },
+    {
       "id": "swarm-outage-recovery-hub-admitted",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-outage-recovery",
@@ -8987,6 +8999,16 @@
       "seam": "EXEMPT and settled in .github/scripts/promote.cjs against the promotion-ready needs of .github/workflows/test.yml",
       "tests": [
         "tests/contracts/promotion/test_workflow.py::test_every_graded_job_gates_promotion_or_sits_on_the_promote_script_exempt_list"
+      ]
+    },
+    {
+      "id": "promotion-dev-push-workflows-non-gating",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2690",
+      "behaviour": "Every workflow that runs on a dev push outside the Tests run, through a push trigger whose branch filters admit dev or a workflow_run chained after such a workflow, is named with its reason on the explicit non gating list, because promotion grades only the jobs of the Tests run and a gate placed in any other workflow would never hold the release.",
+      "seam": "the on triggers of every workflow under .github/workflows against NON_GATING in tests/contracts/promotion/test_workflow.py",
+      "tests": [
+        "tests/contracts/promotion/test_workflow.py::test_every_dev_push_workflow_outside_tests_sits_on_the_non_gating_list"
       ]
     },
     {
@@ -11752,6 +11774,16 @@
         "tests/events/test_nats_lab_stream.py::test_the_lab_head_stream_takes_the_bus_dedupe_window",
         "tests/events/test_nats_lab_stream.py::test_the_memory_bus_keeps_lab_heads_on_their_own_log_with_its_dead_letters",
         "tests/hub/test_github_webhooks.py::test_main_wires_the_lab_intake_only_when_its_notice_secret_is_set"
+      ]
+    },
+    {
+      "id": "lab-head-before-pull-observation",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2768",
+      "behaviour": "A signed pull request webhook publishes its lab head before observing the pull, so an observation failure keeps the lab delivery and returns HTTP 503 for retry.",
+      "seam": "scripts.hub.github_webhooks Ingress.receive with a failing pull observer and the dedicated lab stream",
+      "tests": [
+        "tests/hub/test_github_webhooks_publication.py::test_a_failed_pull_observation_still_publishes_the_lab_head"
       ]
     },
     {

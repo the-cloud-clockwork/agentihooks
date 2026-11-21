@@ -110,10 +110,10 @@ class Ingress:
 
     def _record(self, seen: list[Observation], heads: list[Envelope]) -> int:
         try:
-            for observed in seen:
-                self._pulls.observe(observed)
             if self._lab is not None:
                 self._lab.publish(heads)
+            for observed in seen:
+                self._pulls.observe(observed)
         except Exception:
             print("hub: GitHub webhook could not record the event", file=sys.stderr)
             traceback.print_exc()
