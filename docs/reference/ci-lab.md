@@ -2421,11 +2421,12 @@ key; the builders are pure and read no file, clock or network.
    as `hold`, so the other grades keep posting and a restarted scheduler keeps the hold. A grade
    whose units are all final closes only once every one of its check runs is posted. The failed
    check of a head that cannot expand is outside these holds: it is tried once, since its dropped
-   head keeps no grade to retry from. The refusal text
-   `GitHub App cannot supply scoped contents write credentials` is the one message
-   `GitHubAppAuth.get_token` raises for any refused token, so for the check runs token, which asks
-   for checks write only, read the App installation's `permissions.checks` in the org
-   installations listing.
+   head keeps no grade to retry from. `GitHubAppAuth.get_token` names the permissions a refused
+   token asked for and GitHub's answer, such as
+   `GitHub App cannot supply scoped checks write credentials: GitHub answered 422` for the check
+   runs token, or `GitHub answered 201 with a token outside that scope` when the minted token lacks
+   a requested permission or repository; for a refused check runs token, read the App
+   installation's `permissions.checks` in the org installations listing.
 
 Expansion frames a head by its class (`scripts.ci_lab.scheduler.frame`): a pull request or hotfix grade
 keeps the lab gates the pull request rules require and names every other required job as a gate without
@@ -2458,7 +2459,14 @@ draft pull request. The relay keeps the id of each check run it creates on the g
 the check run's name as GitHub answers and seeds its poster with those ids before it posts, so a
 relay retried after the service restarts, such as one whose pull request call failed after its
 posts, creates no second completed check run. The ids the scheduler keeps under gate names for its
-own posts, such as shadow check runs of the same grade, never seed the relay.
+own posts, such as shadow check runs of the same grade, never seed the relay. A relay whose git or
+HTTP call fails is named `retry <head> for <branch>: <error>` and stays pending for the next tick.
+A relay whose push, check runs or pull requests token the App refuses is named
+`held <head> for <branch> for a later pass: <refusal>`, stays pending and holds every pending head
+of its repository for `POST_HOLD_MS`; the heads of other repositories still relay in the same
+tick, and the first tick after the hold relays the held heads again. The hold lives in the relay's
+memory, as the scheduler's repository post hold does, so a restarted service tries the held heads
+on its first tick.
 
 A grade's state is one JSON document at `agentihooks-ci:grade:<run>`, where `<run>` is the grade
 key of the repository, head, base, class and grader revision. Live grades sit in

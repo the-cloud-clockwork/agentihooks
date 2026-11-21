@@ -265,7 +265,10 @@ def test_actions_classifies_the_real_token_mint_refusal_by_its_http_status(
     with pytest.raises(refusal) as refused:
         Actions("example/repo").archive(zipped(9))
     assert type(refused.value) is refusal
-    assert str(refused.value) == f"GET actions/artifacts/9/zip token mint failed: {github_app.REFUSED}"
+    assert str(refused.value) == (
+        "GET actions/artifacts/9/zip token mint failed: GitHub App cannot supply scoped actions read credentials: "
+        f"GitHub answered {status}"
+    )
     assert isinstance(refused.value.__cause__, github_app.GitAuthRefused)
     assert refused.value.__cause__.status_code == status
     get.assert_not_called()
@@ -287,7 +290,10 @@ def test_actions_keeps_a_mint_scope_refusal_permanent(monkeypatch: pytest.Monkey
     with pytest.raises(FetchRefused) as refused:
         Actions("example/repo").json(COMMIT_RUNS_PATH)
     assert type(refused.value) is FetchRefused
-    assert str(refused.value) == f"GET {COMMIT_RUNS_PATH} token mint failed: {github_app.REFUSED}"
+    assert str(refused.value) == (
+        f"GET {COMMIT_RUNS_PATH} token mint failed: GitHub App cannot supply scoped actions read credentials: "
+        "GitHub answered 201 with a token outside that scope"
+    )
     assert isinstance(refused.value.__cause__, github_app.GitAuthRefused)
     assert refused.value.__cause__.status_code is None
     get.assert_not_called()
