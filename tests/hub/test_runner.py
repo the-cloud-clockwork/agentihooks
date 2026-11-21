@@ -12,6 +12,7 @@ from scripts.events.bus import StateEntry
 from scripts.events.config import BusConfig, QueuePolicy
 from scripts.events.envelope import Envelope
 from scripts.hub import lease, registry, runner
+from scripts.swarm import redis_grace
 
 pytestmark = pytest.mark.unit
 
@@ -517,6 +518,93 @@ def test_the_hub_loop_idles_only_after_a_pass_with_every_reactor_on_standby(monk
     with pytest.raises(Stop):
         runner.main(["run"])
     assert slept == [runner.IDLE_S]
+
+
+def _busy() -> Exception:
+    import redis
+
+    return redis.exceptions.ResponseError("BUSY Redis is busy running a script. You can only call SCRIPT KILL")
+
+
+def _refused() -> Exception:
+    import redis
+
+    return redis.exceptions.ConnectionError("Error 111 connecting to redis:6379. Connection refused.")
+
+
+@pytest.mark.feature("hub-idle-wait-rides-out-redis-outage")
+@pytest.mark.parametrize("refusal", [_busy, _refused], ids=["busy", "connection"])
+def test_the_hub_waits_out_a_redis_refusal_of_its_idle_wait_on_the_local_clock(monkeypatch, capsys, refusal):
+    passes = iter([{"page": ["standby"]}, {"page": ["standby"]}])
+    ran = []
+
+    def run_once(self):
+        try:
+            outcome = next(passes)
+        except StopIteration:
+            raise Stop from None
+        ran.append(outcome)
+        return outcome
+
+    def refused_wait(seconds):
+        raise refusal()
+
+    slept = []
+    monkeypatch.delenv(redis_grace.GRACE_ENV, raising=False)
+    monkeypatch.setattr(runner.HubRunner, "run_once", run_once)
+    monkeypatch.setattr(runner, "scheduled_wait", refused_wait)
+    monkeypatch.setattr(runner, "sleep", slept.append, raising=False)
+    monkeypatch.setattr(runner, "open_bus", lambda config: memory.open_bus(BusConfig()))
+    with pytest.raises(Stop):
+        runner.main(["run"])
+    assert len(ran) == 2
+    assert slept == [runner.IDLE_S, runner.IDLE_S]
+    assert "Redis grace window" in capsys.readouterr().err
+
+
+@pytest.mark.feature("hub-idle-wait-rides-out-redis-outage")
+def test_a_redis_refusal_of_the_idle_wait_past_the_grace_window_still_ends_the_hub(monkeypatch):
+    import redis
+
+    def run_once(self):
+        return {"page": ["standby"]}
+
+    def busy_wait(seconds):
+        raise _busy()
+
+    slept = []
+    monkeypatch.setenv(redis_grace.GRACE_ENV, "0")
+    monkeypatch.setattr(runner.HubRunner, "run_once", run_once)
+    monkeypatch.setattr(runner, "scheduled_wait", busy_wait)
+    monkeypatch.setattr(runner, "sleep", slept.append, raising=False)
+    monkeypatch.setattr(runner, "open_bus", lambda config: memory.open_bus(BusConfig()))
+    with pytest.raises(redis.exceptions.ResponseError):
+        runner.main(["run"])
+    assert slept == []
+
+
+@pytest.mark.feature("hub-idle-wait-rides-out-redis-outage")
+def test_an_answered_idle_wait_ends_the_redis_outage_so_a_later_refusal_opens_a_new_window(monkeypatch):
+    now = [0.0]
+    answers = iter([_busy(), None, _busy()])
+
+    def wait(seconds):
+        answer = next(answers)
+        if answer is not None:
+            raise answer
+
+    slept = []
+    monkeypatch.setattr(runner, "scheduled_wait", wait)
+    monkeypatch.setattr(runner, "sleep", slept.append, raising=False)
+    outage = redis_grace.Outage(10.0, clock=lambda: now[0])
+    runner._idle(outage)
+    now[0] = 8.0
+    runner._idle(outage)
+    assert outage.since is None
+    now[0] = 16.0
+    runner._idle(outage)
+    assert outage.since == 16.0
+    assert slept == [runner.IDLE_S, runner.IDLE_S]
 
 
 @pytest.fixture
