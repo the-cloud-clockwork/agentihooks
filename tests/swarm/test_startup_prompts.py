@@ -562,11 +562,20 @@ RECON_HEADINGS = (
     "Protection plan",
 )
 
-
-def _first(lines: list[str], marker: str) -> int:
-    found = [index for index, line in enumerate(lines) if marker in line]
-    assert found, marker
-    return found[0]
+RECON_BLOCK = (
+    "Before your first edit, in this order:",
+    "- Still valid scouter: launch the scouter sub agent to check, with evidence, that the task and the "
+    "architecture it assumes still hold on current dev. Outdated or not feasible: build nothing, send its finding "
+    'to the master by inbox and block the task with agentihooks swarm sw block "<evidence>".',
+    "- Recon plan: launch scouter sub agents of more than one kind and, from their results, write recon.md in your "
+    "task work folder: at most 500 lines, six non empty headings in this order: What will be built, Code areas "
+    "touched, What might break, Regression tests, Resources needed, Protection plan. The regression tests and "
+    "feature map entries it adds for touched behaviour land in your pull request, written against the current code "
+    "before you modify it. A successor reads the recon.md its predecessor left.",
+    "- Traced plan: a planner sub agent writes plan.md in your task work folder, one piece per line "
+    "(- what | area, area | why); with no sub agent tool, write it yourself. Then run agentihooks swarm sw "
+    "trace-plan: the build gate refuses every edit and commit before a passing verdict.",
+)
 
 
 @pytest.mark.feature("launch-prompt-recon-steps")
@@ -575,20 +584,12 @@ def test_code_and_ci_prompts_list_scouter_recon_and_traced_plan_before_issue_wor
     lane: str, kind: str
 ) -> None:
     lines = _steps({"kind": kind}, lane)
-    order = [
-        _first(lines, "Before your first edit, in this order:"),
-        _first(lines, "Still valid scouter: launch the scouter sub agent"),
-        _first(lines, "recon.md"),
-        _first(lines, "trace-plan"),
-        lines.index(_step(lines, 1)),
-        lines.index(_step(lines, 2)),
-        lines.index(_step(lines, 3)),
-    ]
-    assert order == sorted(set(order))
-    recon = lines[_first(lines, "recon.md")]
-    places = [recon.index(heading) for heading in RECON_HEADINGS]
+    start = lines.index(RECON_BLOCK[0])
+    assert lines[start : start + len(RECON_BLOCK)] == list(RECON_BLOCK)
+    steps = [lines.index(_step(lines, number)) for number in (1, 2, 3)]
+    assert start + len(RECON_BLOCK) <= steps[0] < steps[1] < steps[2]
+    places = [lines[start + 2].index(heading) for heading in RECON_HEADINGS]
     assert places == sorted(places)
-    assert "plan.md" in lines[_first(lines, "trace-plan")]
     assert "worktree" in _step(lines, 2) and "Red" in _step(lines, 3)
 
 
@@ -596,5 +597,5 @@ def test_code_and_ci_prompts_list_scouter_recon_and_traced_plan_before_issue_wor
 @pytest.mark.parametrize(("lane", "kind"), [("eng", "research"), ("plan", "plan")])
 def test_research_and_planner_prompts_carry_no_recon_block(lane: str, kind: str) -> None:
     text = "\n".join(_steps({"kind": kind}, lane))
-    assert "Before your first edit" not in text
+    assert RECON_BLOCK[0] not in text
     assert "recon.md" not in text and "trace-plan" not in text
