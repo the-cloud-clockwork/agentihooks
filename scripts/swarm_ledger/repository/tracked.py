@@ -47,13 +47,13 @@ def marking(method: Callable[..., Any]) -> Callable[..., Any]:
 def setdefault(self: TrackedDict, key: str, default: Any = None) -> Any:
     if key not in self:
         self.mark.fragment = None
-    return cast(Any, dict).setdefault(self, key, default)
+    return super(TrackedDict, self).setdefault(key, default)
 
 
 def pop(self: TrackedDict, key: str, *default: Any) -> Any:
     if key in self:
         self.mark.fragment = None
-    return cast(Any, dict).pop(self, key, *default)
+    return super(TrackedDict, self).pop(key, *default)
 
 
 def shallow(self: Tracked) -> object:
