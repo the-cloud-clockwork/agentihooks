@@ -4,9 +4,8 @@ import pytest
 
 from tests.hub.test_github_webhooks import deliver, drain, lab_pull_request, lab_setup
 
-pytestmark = pytest.mark.feature("lab-head-before-pull-observation")
 
-
+@pytest.mark.feature("lab-head-before-pull-observation")
 def test_a_failed_pull_observation_still_publishes_the_lab_head(monkeypatch: pytest.MonkeyPatch) -> None:
     ingress, swarm, lab = lab_setup()
     observe = Mock(side_effect=ConnectionError("pull observation failed"))
