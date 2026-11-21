@@ -9746,6 +9746,17 @@
       ]
     },
     {
+      "id": "lab-stats-unit-key-head-lockfile",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2657",
+      "behaviour": "A lab stats unit key takes its runtime from the head's dependency lockfile, the sha256 of .github/test-requirements.lock, never from the interpreter or installed packages of the process computing it, so the scheduler keys a stats unit exactly as the worker's stats cache stores it for the same head, and a change to that lockfile or to the install excludes list .github/test-excludes.txt rekeys every stats unit.",
+      "seam": "scripts.ci_lab.expand_mutation.stats_units against scripts.ci_mutation.stats_cache.collect_cached_stats over a fixture repository",
+      "tests": [
+        "tests/ci_lab/test_expand_mutation.py::test_a_scheduler_on_another_interpreter_and_package_set_keys_the_stats_the_worker_stores",
+        "tests/ci_lab/test_expand_mutation.py::test_a_change_to_the_head_lockfile_or_install_excludes_rekeys_every_stats_unit"
+      ]
+    },
+    {
       "id": "lab-mutant-unit-split",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-mutant-unit-split",
