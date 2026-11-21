@@ -296,10 +296,16 @@ def covered(store):
     idle.declare_wait(store.redis, "sw", OTHER, 10_000_000, "", 1, on={"kind": "merge", "target": URL})
 
 
+def lab_held(store: RedisStore) -> None:
+    pr_wait.mark(store.redis, "sw", OTHER, 100, "", "refs/grade/t2", SHA)
+    idle.declare_wait(store.redis, "sw", OTHER, 10_000_000, "accepted lab push", 1, on={"kind": "lab", "target": GRADE})
+
+
 SKIPS = {
     "finished": (lambda store: mark(store, OTHER), "finished", URL),
     "unread": (lambda store: mark(store, OTHER), "working", "https://github.com/o/r/pull/9"),
     "covered": (covered, "working", URL),
+    "lab": (lab_held, "working", URL),
 }
 
 
