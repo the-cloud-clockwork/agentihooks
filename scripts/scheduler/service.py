@@ -23,6 +23,7 @@ DRAIN_S = 30
 UNREACHABLE_S = 300
 UNREACHABLE = 3
 REFUSED = 4
+REFUSAL = "refused"
 STOPS = {UNREACHABLE: "its state store did not answer", REFUSED: "its state store refused its credential"}
 PASS_S = 1
 STARTER = "AGENTIHOOKS_SCHEDULER_STARTER"

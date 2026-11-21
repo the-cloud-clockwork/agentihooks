@@ -5,6 +5,7 @@ import os
 import signal
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from threading import Event
 from types import ModuleType, SimpleNamespace
@@ -1263,6 +1264,106 @@ def test_the_supervisor_entrypoint_exits_with_the_code_its_supervisor_stopped_on
 
     monkeypatch.setattr(service, "supervise", lambda stop: code)
     assert service.main(["supervise"]) == code
+
+
+def _stopped_supervisor(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, code: int, run: Callable[..., object]) -> Mock:
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    monkeypatch.setattr(service, "revision", lambda root: "loaded")
+    monkeypatch.setattr(service, "installed", lambda: True)
+    runner = Mock(pid=101, returncode=code)
+    runner.poll.return_value = code
+    spawn = Mock(side_effect=[runner, None, None, None])
+    monkeypatch.setattr(
+        service,
+        "subprocess",
+        SimpleNamespace(Popen=spawn, DEVNULL=subprocess.DEVNULL, run=run, SubprocessError=subprocess.SubprocessError),
+    )
+    stop = Mock(spec=Event)
+    stop.is_set.return_value = False
+    stop.wait.return_value = code == 0
+    assert service.supervise(stop) == code
+    return spawn
+
+
+@pytest.mark.feature("scheduler-refused-restart-skip")
+@pytest.mark.parametrize("code", [3, 0])
+def test_a_supervisor_that_stopped_on_silence_or_cleanly_is_started_again_on_the_next_pass(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, code: int
+) -> None:
+    from scripts.scheduler import service
+
+    probe = Mock(side_effect=AssertionError("a scheduler that was not refused got a probe"))
+    spawn = _stopped_supervisor(monkeypatch, tmp_path, code, probe)
+    assert service.ensure_running({"AGENTIHOOKS_SWARM_REDIS_URL": "redis://swarm.invalid:6379/3"}) is True
+    assert spawn.call_count == 2
+    assert spawn.call_args.args == (service._command("supervise"),)
+
+
+@pytest.mark.feature("scheduler-refused-restart-skip")
+def test_the_wait_pass_starts_no_scheduler_after_a_refused_exit_while_its_ping_answers_and_its_reads_are_refused(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from redis import exceptions
+
+    from scripts.scheduler import service
+    from scripts.swarm import store
+
+    acl = {"refused": True}
+    commands: list[str] = []
+
+    def command(name: str, answer: object) -> Callable[..., object]:
+        def call(*_args: object) -> object:
+            commands.append(name)
+            if acl["refused"] and name != "ping":
+                raise exceptions.NoPermissionError(f"this user has no permissions to run the '{name}' command")
+            return answer
+
+        return call
+
+    client = SimpleNamespace(
+        ping=command("ping", True),
+        hstrlen=command("hstrlen", 0),
+        hget=command("hget", None),
+        hscan_iter=command("hscan_iter", ()),
+    )
+    monkeypatch.setattr(store, "_pooled_client", lambda factory, url, pid: client)
+    probes: list[tuple[list[str], dict[str, object]]] = []
+
+    def probe(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        probes.append((argv, kwargs))
+        return subprocess.CompletedProcess(argv, service.main(argv[3:]))
+
+    spawn = _stopped_supervisor(monkeypatch, tmp_path, 4, probe)
+    environ = {"AGENTIHOOKS_SWARM_REDIS_URL": "redis://swarm.invalid:6379/3"}
+    assert [service.ensure_running(environ) for _ in range(3)] == [False, False, False]
+    assert spawn.call_count == 1
+    assert commands == ["ping", "hstrlen"] * 3
+    assert (tmp_path / service.REFUSAL).is_file()
+    acl["refused"] = False
+    assert service.ensure_running(environ) is True
+    assert spawn.call_count == 2
+    assert spawn.call_args.args == (service._command("supervise"),)
+    assert not (tmp_path / service.REFUSAL).exists()
+    assert service.ensure_running(environ) is True
+    called = {"cwd": service.ROOT, "env": environ, "stdin": subprocess.DEVNULL, "capture_output": True, "timeout": 30}
+    assert probes == [(service._command("probe"), called)] * 4
+
+
+@pytest.mark.feature("scheduler-refused-restart-skip")
+@pytest.mark.parametrize(
+    "failure", [subprocess.TimeoutExpired(["probe"], 30), OSError("no interpreter")], ids=["timeout", "unstarted"]
+)
+def test_a_probe_that_times_out_or_cannot_start_keeps_a_refused_scheduler_stopped(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, failure: Exception
+) -> None:
+    from scripts.scheduler import service
+
+    spawn = _stopped_supervisor(monkeypatch, tmp_path, 4, Mock(side_effect=failure))
+    assert service.ensure_running({"AGENTIHOOKS_SWARM_REDIS_URL": "redis://swarm.invalid:6379/3"}) is False
+    assert spawn.call_count == 1
+    assert (tmp_path / service.REFUSAL).is_file()
 
 
 def test_a_takeover_whose_old_supervisor_will_not_drain_says_so(monkeypatch, tmp_path, capsys):
