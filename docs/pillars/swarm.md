@@ -7522,6 +7522,81 @@ grep '"gate": "reset"' ~/.agentihooks/swarm/<id>/gates/log.jsonl
 agentihooks swarm <id> set reset-gate=deny
 ```
 
+### Master on a Claude login limit
+
+A Claude front door master whose login reached its time limit answers every turn, cron prompt and inbox item with
+`Login reached its time limit · Please run /login` and runs nothing else. The prompt stall step recycles such a master
+in its seat on the next tick, so its relaunch takes another stored master login and the seat never waits on the
+operator. This check runs before the checks in [Master held on a prompt](#master-held-on-a-prompt) and needs no
+operator item waiting.
+
+Every tick of a swarm that is not stopping or stopped recycles the live front door master when all of these hold:
+
+| Recycled only when | Reason |
+|---|---|
+| The master's pane is live and reads `idle` or `done`, with nothing typed in its input box | A master that is working or waiting on a prompt is still in a turn, and text in the input box, such as the operator typing `/login`, holds the recycle. A dead pane is left to the `master down` step. |
+| No operator prompt reached the master in the last `AGENTIHOOKS_INBOX_QUIET_S` seconds (default 180) | An operator at the pane holds the recycle until the quiet window passes. |
+| Among the last 40 pane lines, the last reply above the input box, or the last reply when no input box shows, reads exactly `Login reached its time limit · Please run /login` | An older error above a later reply, or the text quoted inside a longer line, does not match. Only Claude panes are read, so a Codex master never matches. |
+| The swarm recycled no master on a login limit in the last 15 minutes | A relaunch that lands on a login that still fails gets 15 minutes before the next recycle. |
+
+The recycle then:
+
+1. Closes a pending master retire ask as `the swarm recycled the master on a Claude login limit`.
+2. Logs a `reset` gate row with tool `recycle` and reason `showed a Claude login that reached its time limit`: an
+   `observe` row in `log only`, a `deny` row in `deny` and no row in `skip`. The gate mode never holds this recycle.
+3. Marks failed every stored master login slot the master holds, so its relaunch takes another stored login first,
+   even when the marked login still passes its check. See
+   [Master claude ai login](../reference/account-login.md#master-claude-ai-login) for how a launch orders and moves
+   between slots.
+4. Stores a recovery handoff in the master seat, records a transfer with reason `stalled` and marks the master
+   `finished`, the same recycle as in [Master held on a prompt](#master-held-on-a-prompt). The respawn starts a fresh
+   master in the seat from that handoff.
+   Journal `recycled master <name> in its seat: showed a Claude login that reached its time limit`.
+
+The recovery handoff names the login limit in its Intent and marks Done, Stopped at and Decisions and promises as
+`unknown`, because the master could not run a turn. Its Next tells the successor to answer the open items in the
+master inbox first, then re-read the ledger, and its Read first lists `inbox:master`. The operator items stay open on
+the seat, so the fresh master receives them.
+
+A recycle that follows an earlier login recycle by less than a day, when no stored login is spare, raises one ledger
+alert with source `master-login`:
+
+```text
+The master hit the Claude login limit again and no stored master login is left that passes its check; log in one master login slot again so the master can run.
+```
+
+A login is spare when a local slot stores it and it has not failed its check since it was last written. The alert is
+raised at most once a day per swarm, with the journal line `raised the master login alert: <text>`, and the tick
+never closes it. Log a failed slot in again to give the next relaunch a working login:
+
+```bash
+# Slots, their accounts and the masters holding them
+agentihooks claude login --master --list
+
+# Slots marked failed since their login was last written
+ls "$AGENTIHOOKS_HOME"/master-login*/failed.json
+
+# Log slot <n> in again; the new login clears its failed mark
+agentihooks claude login --master --slot <n>
+```
+
+#### Check a login limit recycle
+
+```bash
+# Login limit recycles and alerts from the tick journal
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-1 day" --until now --no-pager \
+  | grep -E "Claude login that reached its time limit|master login alert"
+
+# Gate rows the recycles logged
+grep '"gate": "reset"' ~/.agentihooks/swarm/<id>/gates/log.jsonl | grep "time limit"
+```
+
+| Symptom | Cause and check |
+|---|---|
+| A master shows the login limit and is not recycled | Its pane reads `working` or `waiting`, text sits in its input box, an operator prompt reached it within `AGENTIHOOKS_INBOX_QUIET_S`, a later reply sits below the error, or a login recycle ran in the last 15 minutes. |
+| The successor shows the login limit again | No unmarked stored login was free, so the launch took a marked slot whose check still passed, or every other stored login failed its check and the launch kept the failed slot for browser authorization. Read `--list` and log a slot in again. |
+| The `master-login` alert is open | Two login recycles less than a day apart with no spare stored login. Log one slot in again; the alert stays until it is closed on the ledger. |
+
 ### Early end findings
 
 A tick pass ends early when a step reads a pass value that no step stored, usually because the step that writes it
