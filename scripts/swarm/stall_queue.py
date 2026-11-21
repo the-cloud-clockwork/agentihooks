@@ -15,12 +15,8 @@ def focused(doc: dict[str, Any], task_id: str) -> bool:
     return admitted is None or task_id in admitted
 
 
-def route(store: Any, slug: str, url: str, ledger: Any) -> dict[str, str] | None:
-    """The queue journal context naming the stall route and its task when the master may queue ``url``, else None."""
-    from scripts.swarm.health import spawn_stall
-
-    if not spawn_stall.findings(store, slug):  # pyright: ignore[reportUnknownMemberType]
-        return None
+def focused_urgent(slug: str, url: str, ledger: Any) -> str | None:
+    """The first open, urgent task naming ``url`` that sits inside the open focus, else None."""
     rows: list[dict[str, Any]] = ledger.tasks_targeting(slug, url)
     urgent = [row for row in rows if row.get("rank") == "urgent" and row.get("state") != "done"]
     if not urgent:
@@ -28,5 +24,14 @@ def route(store: Any, slug: str, url: str, ledger: Any) -> dict[str, str] | None
     from scripts.swarm.ledger_client import pass_state
 
     doc = pass_state(ledger, slug)
-    task = next((row for row in urgent if focused(doc, row["id"])), None)
-    return {"route": ROUTE, "task": task["id"]} if task else None
+    return next((row["id"] for row in urgent if focused(doc, row["id"])), None)
+
+
+def route(store: Any, slug: str, url: str, ledger: Any) -> dict[str, str] | None:
+    """The queue journal context naming the stall route and its task when the master may queue ``url``, else None."""
+    from scripts.swarm.health import spawn_stall
+
+    if not spawn_stall.findings(store, slug):  # pyright: ignore[reportUnknownMemberType]
+        return None
+    task = focused_urgent(slug, url, ledger)
+    return {"route": ROUTE, "task": task} if task else None
