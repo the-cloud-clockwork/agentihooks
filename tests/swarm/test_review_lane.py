@@ -4,13 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from scripts.swarm import capacity, naming, templates
+from scripts.swarm import capacity, naming, quota_view, templates
 from scripts.swarm import tick as swarm_tick
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm_ledger import ledger_core as core
 from scripts.swarm_ledger import ledger_tasks, new_ledger
 from scripts.tick.steps import tasks as task_steps
-from tests.swarm.test_capacity import _readings
+from tests.swarm.test_capacity import _readings, account
 from tests.swarm.test_tick import FakeLedger
 from tests.swarm_ledger import legacy_page
 from tests.swarm_ledger.test_plan_kind import add
@@ -194,3 +194,42 @@ def test_the_task_command_takes_the_review_lane() -> None:
     argv = ["--slug", "demo", "--as", "planner", "task", "add", "review", "Review", "--lane", "review"]
     args = ledger.build_parser().parse_args([*argv, "--kind", "review"])
     assert (args.lane, args.kind) == ("review", "review")
+
+
+@pytest.mark.feature("swarm-review-lane")
+def test_capacity_places_a_reviewer_only_for_review_demand() -> None:
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0, max_review=2)
+    rows = [account(cap=6)]
+    idle = capacity.calculate(config, rows, [], {"eng": 1, "ci": 0, "plan": 0})
+    assert (len(idle["placements"]["eng"]), idle["placements"]["review"]) == (1, [])
+    asked = capacity.calculate(config, rows, [], {"eng": 0, "ci": 0, "plan": 0, "review": 1})
+    assert [place["index"] for place in asked["placements"]["review"]] == [0]
+    narrowed = capacity.calculate(
+        config, rows, [], {"eng": 1, "ci": 0, "plan": 0, "review": 1}, {"eng": [("claude",)], "ci": [], "plan": []}
+    )
+    assert (len(narrowed["placements"]["eng"]), narrowed["placements"]["review"]) == (1, [])
+
+
+@pytest.mark.feature("swarm-review-lane")
+def test_quota_status_reads_a_decision_stored_before_the_review_lane() -> None:
+    decision = {
+        "configured": {"eng": 4, "ci": 1, "plan": 1},
+        "effective": {"eng": 2, "ci": 1, "plan": 0},
+        "reason": "accounts are closed",
+        "accounts": [],
+        "at": 1_000_000,
+    }
+    head, scaling = quota_view.lines(decision, 1_000_000, {"eng": 2, "ci": 1, "plan": 0, "review": 0}, "manual")
+    assert head == "quota capacity eng 2 of 4, ci 1 of 1, plan 0 of 1, changed just now, because accounts are closed"
+    assert scaling == "scaling manual, live of ceiling eng 2 of 4, ci 1 of 1, plan 0 of 1"
+
+
+@pytest.mark.feature("swarm-review-lane")
+def test_quota_status_shows_the_configured_review_cap_beside_the_autoscaled_ceilings() -> None:
+    decision = {
+        "configured": {"eng": 4, "ci": 1, "plan": 1, "review": 2},
+        "autoscale": {"ceilings": {"eng": 6, "ci": 2, "plan": 1}, "reason": "Quota seats 3."},
+    }
+    assert quota_view.scaling_line(decision, {"eng": 2, "ci": 1, "plan": 0}, "auto") == (
+        "scaling auto, live of ceiling eng 2 of 6, ci 1 of 2, plan 0 of 1, review 0 of 2, because Quota seats 3"
+    )
