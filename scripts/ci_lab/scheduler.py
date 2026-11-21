@@ -84,6 +84,7 @@ __all__ = [
     "Plan",
     "Ports",
     "READY_MS",
+    "REFRESH_MS",
     "Scheduler",
     "Settings",
     "StoredManifests",
@@ -146,6 +147,7 @@ LEASE_TTL_MS = 120_000
 LEASE_POLL_MS = 500
 UNIT_ESTIMATE_S = 60.0
 READY_MS = 2 * lease_api.MAX_WAIT_MS
+REFRESH_MS = 15_000
 MINIO_ENDPOINT = f"{contract.MINIO_PREFIX}ENDPOINT"
 MINIO_BUCKET = f"{contract.MINIO_PREFIX}BUCKET"
 MINIO_ACCESS_KEY = f"{contract.MINIO_PREFIX}ACCESS_KEY"
@@ -1532,21 +1534,25 @@ def listen(
     day's spending, the metrics port with the counters the scheduler's passes keep and the age of the node mirror at
     each scrape when one is given; the caller runs each serve_forever."""
 
-    def snapshot() -> Load:
-        return budget.observe(scheduler.load(clock()), spending.status())
+    def snapshot(now_ms: int) -> Load:
+        return budget.observe(scheduler.load(now_ms), spending.status())
+
+    latest = metrics.Latest(snapshot, clock, REFRESH_MS)
 
     def scrape() -> Load:
         if mirror is not None:
             metrics.observe_mirror(scheduler.registry, mirror, clock())
-        return snapshot()
+        load, built_ms = latest.read()
+        metrics.observe_age(scheduler.registry, built_ms, clock())
+        return load
 
     api, steering, exposition = ports
     lease = partial(lease_api.answer, leases, Uploads(scheduler.objects))
-    port = service.Routes(lease, snapshot, scheduler.grades_of)
+    port = service.Routes(lease, lambda: snapshot(clock()), scheduler.grades_of)
     return (
         service.serve("", api, port),
         lease_api.serve_control("", steering, routes),
-        metrics.serve("", exposition, scrape, scheduler.registry),
+        metrics.serve("", exposition, scrape, scheduler.registry, latest.refresh),
     )
 
 

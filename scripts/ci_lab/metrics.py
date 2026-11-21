@@ -23,11 +23,13 @@ __all__ = [
     "LEDGER",
     "UNITS",
     "GradeRecord",
+    "Latest",
     "Metric",
     "Registry",
     "UnitRecord",
     "expose",
     "grade_row",
+    "observe_age",
     "observe_load",
     "observe_mirror",
     "observe_rate",
@@ -78,6 +80,7 @@ HELP = {
     contract.WORKERS_READY: "Workers holding a live heartbeat.",
     contract.GITHUB_RATE_REMAINING: "GitHub API calls left in the window.",
     contract.VERDICT_MISMATCH_TOTAL: "Shadow verdicts that differ from Actions.",
+    contract.LOAD_AGE_SECONDS: "Age of the load snapshot the metrics port serves.",
 }
 COUNTERS = frozenset(
     {
@@ -238,6 +241,11 @@ def observe_mirror(registry: Registry, mirror: Path, now_ms: int) -> None:
     registry.set(contract.MIRROR_AGE_SECONDS, max(0.0, now_ms / 1000 - fetched))
 
 
+def observe_age(registry: Registry, built_ms: int, now_ms: int) -> None:
+    """Set the load age to the seconds since the build of the load snapshot the metrics port serves started, never
+    below zero."""
+
+
 def observe_rate(registry: Registry, headers: Mapping[str, str]) -> None:
     """Set the GitHub calls left in the rate window from an answer's x-ratelimit-remaining header when it holds a
     whole number."""
@@ -330,6 +338,31 @@ def record(sink: Sink, units: Iterable[UnitRecord], grades: Iterable[GradeRecord
         sink.append(GRADES, grade_rows)
 
 
+class Latest:
+    """The load snapshot the metrics port serves, with the clock reading its build started at. The first read builds
+    it and reads that meet that build wait for it; every later read answers at once with the last finished build.
+    ``refresh``, which the metrics port's serve loop runs between requests, starts one background build once the last
+    build started at least ``refresh_ms`` ago and none runs, so a failed build keeps the last snapshot and the next
+    starts an interval after it."""
+
+    def __init__(self, build: Callable[[int], Load], clock: Callable[[], int], refresh_ms: int) -> None:
+        self.build = build
+        self.clock = clock
+        self.refresh_ms = refresh_ms
+        self.building = threading.Lock()
+        self.started_ms: int | None = None
+        self.built: tuple[Load, int] | None = None
+
+    def read(self) -> tuple[Load, int]:
+        """The last finished load snapshot and the clock reading its build started at, building the first one."""
+        started = self.clock()
+        return self.build(started), started
+
+    def refresh(self) -> None:
+        """Start one background build once a build has started, the last one started at least ``refresh_ms`` ago and
+        none runs."""
+
+
 def respond(snapshot: Callable[[], Load], registry: Registry, method: str, target: str) -> tuple[int, str, bytes]:
     """Answer GET /capacity with the capacity document and GET /metrics with the exposition."""
     path = urlsplit(target).path
@@ -344,7 +377,13 @@ def respond(snapshot: Callable[[], Load], registry: Registry, method: str, targe
     return 200, EXPOSITION, registry.render().encode()
 
 
-def _bind(host: str, port: int, reply: Callable[[str, str], tuple[int, str, bytes]]) -> ThreadingHTTPServer:
+def _idle() -> None:
+    """Run nothing between requests."""
+
+
+def _bind(
+    host: str, port: int, reply: Callable[[str, str], tuple[int, str, bytes]], actions: Callable[[], None] = _idle
+) -> ThreadingHTTPServer:
     def answer(request: BaseHTTPRequestHandler) -> None:
         status, content_type, data = reply(request.command, request.path)
         request.send_response(status)
@@ -357,9 +396,12 @@ def _bind(host: str, port: int, reply: Callable[[str, str], tuple[int, str, byte
     return ThreadingHTTPServer((host, port), handler)
 
 
-def serve(host: str, port: int, snapshot: Callable[[], Load], registry: Registry) -> ThreadingHTTPServer:
-    """Bind the capacity and metrics routes on host and port; the caller runs serve_forever."""
-    return _bind(host, port, partial(respond, snapshot, registry))
+def serve(
+    host: str, port: int, snapshot: Callable[[], Load], registry: Registry, actions: Callable[[], None] = _idle
+) -> ThreadingHTTPServer:
+    """Bind the capacity and metrics routes on host and port, running actions between requests; the caller runs
+    serve_forever."""
+    return _bind(host, port, partial(respond, snapshot, registry), actions)
 
 
 def expose(registry: Registry, method: str, target: str) -> tuple[int, str, bytes]:
