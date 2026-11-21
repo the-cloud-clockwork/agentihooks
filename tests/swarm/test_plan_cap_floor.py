@@ -191,10 +191,20 @@ def test_start_restores_a_stored_zero_plan_cap_to_its_default(env: Env, stored: 
         (["max-eng-agents=4"], 1),
         (["max-ci-agents=3"], 1),
         (["max-eng-agents=4", "max-plan-agents=0"], 0),
+        (["max-eng-agents=4", "max-plan-agents=2"], 2),
         (["max-eng-agents=1"], 0),
+        (["max-eng-agents=2"], 0),
         (["compact-limit=500"], 0),
     ],
-    ids=["engineers up", "ci up", "plan named zero", "engineers down", "no cap change"],
+    ids=[
+        "engineers up",
+        "ci up",
+        "plan named zero",
+        "plan named two",
+        "engineers down",
+        "engineers same",
+        "no cap change",
+    ],
 )
 def test_a_scale_up_restores_a_stored_zero_plan_cap(env: Env, pairs: list[str], plan: int) -> None:
     store, _, _ = env
