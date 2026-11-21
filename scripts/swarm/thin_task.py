@@ -40,7 +40,7 @@ def thin(task: dict[str, Any]) -> list[str]:
     if exempt(task):
         return []
     kind: str = ledger_kinds.kind(task)  # pyright: ignore[reportUnknownMemberType]
-    tid, description = task["id"], task.get("description") or ""
+    tid, description = task["id"], task["description"]
     problems: list[str] = []
     if short(description, THIN_WORDS):
         problems.append(f"Task {tid} has a description under {THIN_WORDS} words.")
@@ -63,11 +63,11 @@ def exempt(task: dict[str, Any]) -> bool:
 def section_complete(text: str) -> list[str]:
     """Every part an enhancement plan section misses: a seam named under its Seams heading, each recon heading, each
     pull request body section and a done when sentence."""
-    problems = [] if NAMED.search(_section(text, "Seams") or "") else ["The section names no seam."]
-    problems += [f"The section has no {name} heading." for name in RECON if _section(text, name) is None]
-    problems += [
-        f"The section has no {name} pull request body section." for name in BODY if _section(text, name) is None
-    ]
+    found = {name: _section(text, name) for name in (*RECON, *BODY)}
+    seams = found["Seams"]
+    problems = ["The section names no seam."] if seams is None or not NAMED.search(seams) else []
+    problems += [f"The section has no {name} heading." for name in RECON if found[name] is None]
+    problems += [f"The section has no {name} pull request body section." for name in BODY if found[name] is None]
     if not done_when(text):
         problems.append("The section has no done when sentence.")
     return problems
