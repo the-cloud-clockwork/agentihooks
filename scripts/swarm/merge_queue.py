@@ -1,7 +1,7 @@
 import json
 import subprocess
 import time
-from collections.abc import Callable, Collection
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -307,7 +307,6 @@ def prioritize(
     url: str,
     run: Callable[..., Any] = subprocess.run,
     journal: Any = None,
-    ahead: Collection[str] = (),
     displaced: Any = None,
     lab: Callable[[str], dict[str, Any]] | None = None,
     lift: bool = False,
@@ -326,7 +325,7 @@ def prioritize(
     staged_compatibility.require(url, raw["headRefOid"], raw.get("body") or "", run)
     require_green(url, raw["headRefOid"], run)
     displacing, behind = waiting_around(url, raw["id"], run, lift=lift)
-    waiting = [pull for pull in [*displacing, *behind] if pull["url"] not in ahead]
+    waiting = [*displacing, *behind]
     before = journal.groups() if journal is not None else None
     errors = []
     steps = []
