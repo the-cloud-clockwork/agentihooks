@@ -7,7 +7,7 @@
       "behaviour": "Reviewer seats keep their review lane in status and ledger roles, receive worker activity and health accounting, contribute to Doctor rates, and have zero and populated task metrics and swarm owned event queues.",
       "seam": "Swarm status talk and text rows, ledger metric rows, health ceremony, Doctor ceremony and monitoring, event queue scope and ledger role rendering",
       "tests": [
-        "tests/swarm/test_cli.py::test_status_text_prints_a_published_reviewer_lane",
+        "tests/swarm/test_review_lane_status_cli.py::test_status_text_prints_a_published_reviewer_lane",
         "tests/swarm/test_review_lane_reporting.py::test_status_counts_reviewer_talk_after_an_outcome",
         "tests/swarm/test_review_lane_reporting.py::test_ledger_metrics_include_zero_and_populated_review_counts",
         "tests/swarm/test_review_lane_reporting.py::test_health_uses_reviewer_worker_budget_and_names_its_findings",
