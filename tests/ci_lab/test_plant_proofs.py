@@ -35,7 +35,10 @@ def repository(tmp_path: Path) -> Path:
         for edit in json.loads(fixture.read_text())["edits"]:
             target = root / edit["path"]
             target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(SOURCE / edit["path"], target)
+            content = subprocess.run(
+                ["git", "-C", str(SOURCE), "show", f"HEAD:{edit['path']}"], check=True, capture_output=True
+            ).stdout
+            target.write_bytes(content)
     git(root, "add", ".")
     git(root, "commit", "-qm", "Seed plant inputs")
     return root

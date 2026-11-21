@@ -1,0 +1,6 @@
+{
+  "scripts/events/nats.py:scripts.events.nats.x__publish_dead:639447ba479d87c88f08718fabbb266a208ccc18cdd314ecc274d9f1d1c800f2": {
+    "reader": "standards-reader",
+    "reason": "Equivalent: payload and PAYLOAD have identical ASCII JSON key lengths, preserving the template encoded length and computed part size. Each published part replaces the entire template data with the original payload key before encoding; the changed placeholder is never published."
+  }
+}
