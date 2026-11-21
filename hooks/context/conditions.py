@@ -992,8 +992,10 @@ def _publish_root(slug: str, cwd: str | None) -> Path | None:
     """
     if not cwd or os.environ.get("AGENTIHOOKS_SWARM") != slug:
         return None
-    from scripts.swarm import publish
-
+    try:
+        from scripts.swarm import publish
+    except ImportError:
+        return None
     return publish.session_root(slug, Path(cwd))
 
 

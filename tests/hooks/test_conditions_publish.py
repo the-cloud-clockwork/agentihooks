@@ -1,10 +1,12 @@
 import shlex
 import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
 
+import scripts.swarm
 from hooks.context import conditions
 from scripts.swarm import naming, publish
 
@@ -141,6 +143,16 @@ def test_an_unexpected_publisher_failure_keeps_todays_resolution(
     checkouts: dict[str, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(publish, "publishing_root", Mock(side_effect=ImportError("unexpected")))
+    assert _guard(_wrapped(FILE), checkouts["primary"]) == conditions.GATE_MESSAGE
+    assert _guard(_wrapped(FILE), checkouts["current"]) is None
+
+
+@pytest.mark.feature("conditions-publish-task-worktree")
+def test_a_publisher_that_cannot_load_keeps_todays_resolution(
+    checkouts: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delattr(scripts.swarm, "publish")
+    monkeypatch.setitem(sys.modules, "scripts.swarm.publish", None)
     assert _guard(_wrapped(FILE), checkouts["primary"]) == conditions.GATE_MESSAGE
     assert _guard(_wrapped(FILE), checkouts["current"]) is None
 
