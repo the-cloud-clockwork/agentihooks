@@ -4,10 +4,39 @@
       "id": "lab-worker-manifest",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2808",
-      "behaviour": "Each leased test batch carries the dependency records selected for its key through persisted scheduler state, the job queue and the lease API. Scheduler startup restores older queued and held records from their recorded manifest before serving leases. A worker with an empty work volume executes the batch using those records without a shared local manifest or another batch's records. Unlisted test modules carry an empty test record map.",
-      "seam": "expand_tests units through Scheduler, Queue, lease API, worker Client and test executor",
+      "behaviour": "Each leased test batch carries the dependency records selected for its key, which the scheduler stores once under the unit key in the object store when the batch is held for a job and reads back into the lease API reply. Records stored by an earlier release, queued, held or never recorded, reach their worker after the one off compaction. A worker with an empty work volume executes the batch using those records without a shared local manifest or another batch's records. Unlisted test modules carry an empty test record map.",
+      "seam": "expand_tests units through Scheduler, the object store, Leases, lease API, worker Client and test executor",
       "tests": [
         "tests/ci_lab/test_worker_manifest.py::test_a_leased_batch_carries_its_manifest_to_an_empty_worker_volume"
+      ]
+    },
+    {
+      "id": "lab-manifest-records-bounded",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-manifest-restore-redis-flood",
+      "behaviour": "No lab grade state or job hash in Redis carries a test batch manifest, so their size does not grow with a batch's dependency records; a grade state stored with slot manifests reads and saves without them, and scheduler startup reads and rewrites no stored grade or job.",
+      "seam": "Scheduler grade start, state parse and save, Scheduler construction, Queue enqueue, keep_manifests and stored_manifest",
+      "tests": [
+        "tests/ci_lab/test_manifest_records.py::test_a_started_grade_keeps_its_batch_manifest_out_of_redis_and_its_lease_carries_it",
+        "tests/ci_lab/test_manifest_records.py::test_a_scheduler_start_rewrites_no_stored_grade_or_job",
+        "tests/ci_lab/test_manifest_records.py::test_a_grade_state_stored_with_slot_manifests_reads_and_saves_without_them",
+        "tests/ci_lab/test_manifest_records.py::test_a_lease_reads_the_stored_manifest_of_a_test_unit_only"
+      ]
+    },
+    {
+      "id": "lab-manifest-compaction",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-manifest-restore-redis-flood",
+      "behaviour": "python -m scripts.ci_lab compact moves every test batch manifest a live grade state slot or a queued, leased or finished job hash carries to its unit's object store path and removes it from Redis, without SCAN, slices a missing one for an unfinished test slot from the packed manifest of its grade's commit, counts batches whose commit has none, keeps a grade state the scheduler wrote meanwhile and prints its counts.",
+      "seam": "scripts.ci_lab.compact over the lab Redis records and object store",
+      "tests": [
+        "tests/ci_lab/test_compact.py::test_compaction_moves_each_manifest_redis_carries_to_its_unit_and_strips_it_everywhere",
+        "tests/ci_lab/test_compact.py::test_compaction_moves_a_job_manifest_whose_grade_slot_carries_none",
+        "tests/ci_lab/test_compact.py::test_compaction_slices_the_manifest_an_unfinished_test_slot_lacks_from_its_grades_packed_manifest",
+        "tests/ci_lab/test_compact.py::test_compaction_counts_the_batches_whose_grade_commit_has_no_packed_manifest",
+        "tests/ci_lab/test_compact.py::test_compaction_slices_no_manifest_for_a_finished_test_slot",
+        "tests/ci_lab/test_compact.py::test_compaction_keeps_a_grade_state_the_scheduler_wrote_meanwhile",
+        "tests/ci_lab/test_compact.py::test_the_compact_command_compacts_the_lab_redis_its_environment_names"
       ]
     },
     {

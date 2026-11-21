@@ -1,16 +1,17 @@
 import copy
 import json
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 from scripts import dep_manifest
-from scripts.ci_lab import expand_tests, queue, scheduler
+from scripts.ci_lab import expand_tests, leases, queue, scheduler
 from scripts.ci_lab.digests import Toolchain
-from scripts.ci_lab.objects import manifest_folder, unit_path
+from scripts.ci_lab.objects import ROOT, LocalObjects, manifest_folder, unit_path
 from scripts.ci_lab.units import Unit
-from tests.ci_lab.test_scheduler import BASE, HEAD_A, SLUG, TREE, Run
+from tests.ci_lab.test_scheduler import BASE, HEAD_A, SLUG, TREE, Run, key
 from tests.ci_lab.test_scheduler import lab as lab
 
 FILES = tuple(f"scripts/module_{index}.py" for index in range(400))
@@ -108,3 +109,16 @@ def test_a_grade_state_stored_with_slot_manifests_reads_and_saves_without_them(l
     assert state is not None
     run.engine.save(state)
     assert FILES[-1] not in run.lab.client.get(name)
+
+
+@pytest.mark.feature("lab-manifest-records-bounded")
+def test_a_lease_reads_the_stored_manifest_of_a_test_unit_only(tmp_path: Path) -> None:
+    objects = LocalObjects(tmp_path)
+    test = Unit("test", key("test", 1), ("tests/test_a.py::test_a",), '{"tests": {}}')
+    static = Unit("static", key("static", 2), ("lint",), "static text")
+    bare = Unit("test", key("test", 3), ("tests/test_b.py::test_b",))
+    assert scheduler.keep_manifests(objects, [test, static, bare]) == 2
+    assert scheduler.keep_manifests(objects, [test]) == 0
+    assert objects.keys(ROOT) == sorted(unit_path(unit.kind, unit.key, "manifest") for unit in (test, static))
+    assert [scheduler.stored_manifest(objects, unit) for unit in (test, static, bare)] == ['{"tests": {}}', "", ""]
+    assert leases.unstored(test) == ""

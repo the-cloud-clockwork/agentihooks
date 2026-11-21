@@ -1,0 +1,18 @@
+rules:
+  - id: lab-manifest-in-redis
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A lab test batch manifest lives in the object store under its unit key and reaches the worker through its lease.
+      A Redis job hash or grade state slot never carries one: copied into every record and restored over every live
+      grade at startup, manifests grew the swarm Redis from about 4 GiB to 25 GiB and took the swarm down.
+    paths:
+      include:
+        - /scripts/ci_lab/queue.py
+        - /scripts/ci_lab/scheduler.py
+        - lab-manifest-in-redis.py
+    pattern-either:
+      - pattern: |
+          {..., "manifest": $UNIT.manifest, ...}
+      - pattern: Slot(..., manifest=$VALUE, ...)
+      - pattern: $CLIENT.hset($KEY, "manifest", ...)

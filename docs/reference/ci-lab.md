@@ -2806,10 +2806,23 @@ than that is answered only from the store. A head that needs test units and find
 `no dependency manifest at or before <base>` and is dropped with that reason, so a merge group
 never folds green on an empty unit job.
 
-Before serving leases, scheduler startup restores missing batch records in older live grade slots
-and queued jobs from the packed manifest at the grade's recorded manifest commit. Existing job
-records are kept, and held slots receive their records before admission. A missing manifest object
-fails startup. This upgrade runs under the scheduler Deployment's single replica and Recreate strategy.
+A test batch's manifest, the dependency records of its tests, lives in the object store at
+`lab/test/<digest>/manifest.json` beside its verdict, written once when a grade start holds the batch
+for a job. Neither the grade state nor the job hash in Redis carries it, so neither grows with a
+batch's records, and the lease path reads it from there into the lease reply. Scheduler startup
+reads and rewrites no stored grade or job.
+
+Release 2.17.1095 copied each manifest into every grade slot and job hash and restored missing ones
+at startup over every live grade, which took the swarm Redis from about 4 GiB to 25 GiB.
+`python -m scripts.ci_lab compact`, run once with the scheduler environment before the scheduler
+starts on a release without that copy, moves every manifest a live grade's slot or a queued, leased
+or finished job hash still carries to its object store path and removes it from Redis. It finds those
+records through the live grade set and the queue's state sets, so the lab's Redis user, which may not
+SCAN, runs it. An unfinished test slot whose batch has no stored manifest gets the batch's slice of the
+packed manifest at its grade's commit. A grade the scheduler writes while the command runs stays as
+the scheduler wrote it. The command prints its counts as
+JSON: `grade manifests moved`, `job manifests moved`, `grades stripped`, `jobs stripped`,
+`batches sliced`, `batches without a packed manifest` and `grades written meanwhile`.
 
 A batch verdict lists the files the batch opened outside its tests' manifest records. The expander
 puts the `commit` of the manifest it keyed a head's test units on in the plan's `manifest`, and the
@@ -3273,7 +3286,7 @@ scheduler enqueues a grade's misses with the grade's base and its plan's grader 
 | Kind | Trees | Executor inputs |
 |---|---|---|
 | `static` | head, base and grader, read only, shared by the pod's units | the gate the unit names from the grader tree's workflow, input registry and reusable workflows (see [The worker reads the same workflows](#the-worker-reads-the-same-workflows)), the venv of the head's `uv.lock` digest and the lease fields and secrets its steps read (see [What a gate's steps read](#what-a-gates-steps-read)) |
-| `test` | head, read only | the batch and its selected manifest records carried through stored grade state, the queued job and lease, the venv of the head's lockfile digest, `CI_LAB_FLAKES` and one pytest worker per slot |
+| `test` | head, read only | the batch and its selected manifest records, read from the object store into its lease, the venv of the head's lockfile digest, `CI_LAB_FLAKES` and one pytest worker per slot |
 | `stats` | a private copy of the head with every file under the `[tool.mutmut]` source paths behind its trampolines | the tree as root and `CI_LAB_MUTATION_CACHE` |
 | `mutant` | the same private trampolined copy | `CI_LAB_KILLERS`, `CI_LAB_MUTATION_BUDGET`, `CI_LAB_MUTATION_CAP` and the tests that the stats records of every test module in the tree show reaching the mutant's function, with their seconds |
 
