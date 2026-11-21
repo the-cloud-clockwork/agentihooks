@@ -425,7 +425,7 @@ jobs:
       - name: Read what the checkout holds
         run: |
           set -euo pipefail
-          echo "checkout config=$CONFIG shallow=$(git rev-parse --is-shallow-repository) commits=$(git rev-list --count HEAD) refs=$(git for-each-ref | wc -l) tags=$(git for-each-ref refs/tags | wc -l) behind=$(git rev-list --count HEAD..$REVISION 2>/dev/null || echo absent)"
+          echo "checkout config=$CONFIG shallow=$(git rev-parse --is-shallow-repository) commits=$(git rev-list --count HEAD) refs=$(git for-each-ref | wc -l) tags=$(git for-each-ref refs/tags | wc -l)"
           git count-objects -v | tr '\n' ' '
           echo
 
@@ -434,11 +434,12 @@ jobs:
           set -euo pipefail
           echo "before fetch: $(git count-objects -v | tr '\n' ' ')"
           if [[ "$CONFIG" == after-tip ]]; then
-            git fetch --no-tags --negotiation-tip=HEAD origin "$REVISION"
+            GIT_TRACE_PACKET="$RUNNER_TEMP/packet.trace" git fetch --no-tags --negotiation-tip=HEAD origin "$REVISION"
           else
-            git fetch --no-tags origin "$REVISION"
+            GIT_TRACE_PACKET="$RUNNER_TEMP/packet.trace" git fetch --no-tags origin "$REVISION"
           fi
           echo "after fetch: $(git count-objects -v | tr '\n' ' ')"
+          echo "haves sent=$(grep -c 'fetch> have ' "$RUNNER_TEMP/packet.trace" || true) wants=$(grep -c 'fetch> want ' "$RUNNER_TEMP/packet.trace" || true)"
           mkdir -p "$RUNNER_TEMP/workflow"
           git archive "$REVISION" .github/scripts .github/test-requirements.lock | tar -x -C "$RUNNER_TEMP/workflow"
           echo "after archive: $(git count-objects -v | tr '\n' ' ')"
