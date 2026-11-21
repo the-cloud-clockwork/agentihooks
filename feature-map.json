@@ -3,6 +3,7 @@
     {
       "id": "pull-request-recon-context",
       "origin": "operator",
+      "operator_words": "Must put in every merge request or pull request description, as we already talked: what might break; dependencies; everything that we already check in. Put it exactly there: assumptions; what could break; what could not; features will disconnect; resource of reviewer of these; on reviewer things. Fix it: why the fixes; why the feature is.",
       "ordered_at": "2026-11-21",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-rv-pr-body",
       "behaviour": "Pull request bodies supply nine authored recon sections; missing or empty sections are named and the engineer fills them from recon while preserving existing authoring content.",
