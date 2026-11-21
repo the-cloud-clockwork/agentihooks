@@ -1,4 +1,5 @@
 import json
+import os
 import shutil
 import statistics
 import subprocess
@@ -39,6 +40,14 @@ def exit_with(code: int) -> None:
 def clock(*readings: float) -> Callable[[], float]:
     values = iter(readings)
     return lambda: next(values)
+
+
+def sessions_in(trees: list[Path]) -> Callable[[Path, Callable[[], Any]], Any]:
+    def under_test(tree: Path, session: Callable[[], Any]) -> Any:
+        trees.append(tree)
+        return session()
+
+    return under_test
 
 
 def fake_items(session: SimpleNamespace, failures: list[int], calls: list[tuple[str, str | None]]) -> list[Any]:
@@ -263,7 +272,7 @@ def test_a_failed_collection_forks_nothing_and_leaves_the_session_to_pytest(monk
 def test_a_unit_without_covering_tests_grades_no_tests_without_collecting(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(run_mutation, "pytest", SimpleNamespace(main=lambda *args, **kwargs: pytest.fail("collected")))
     unit = Unit("mutant", "key", ("m1", "m2"))
-    rows, collection = run_mutation.mutants(unit, {}, KillMemory(Path("unused")), OPTIONS, 60.0, 4)
+    rows, collection = run_mutation.mutants(unit, {}, KillMemory(Path("unused")), OPTIONS, 60.0, 4, Path("tree"))
     assert rows == [Row("m1", "no tests", 0.0), Row("m2", "no tests", 0.0)]
     assert collection == 0.0
 
@@ -275,6 +284,7 @@ def test_a_unit_collects_its_fastest_tests_first_once_in_one_pytest_session(
     monkeypatch.setenv(run_mutation.SWITCH, run_mutation.environ.get(run_mutation.SWITCH, ""))
     memory = KillMemory(tmp_path / "killers")
     sessions: list[tuple[list[str], list[Any], str]] = []
+    trees: list[Path] = []
 
     def main(args: list[str], plugins: list[Any]) -> int:
         sessions.append((args, plugins, run_mutation.environ[run_mutation.SWITCH]))
@@ -284,14 +294,18 @@ def test_a_unit_collects_its_fastest_tests_first_once_in_one_pytest_session(
         return status
 
     monkeypatch.setattr(run_mutation, "pytest", SimpleNamespace(main=main))
+    monkeypatch.setattr(run_mutation, "under_test", sessions_in(trees))
     unit = Unit("mutant", "key", ("m1", "m2", "m3"))
     tests = {"tests/test_a.py::a_slow_one": 30.0, "tests/test_a.py::b_fast_one": 10.0}
     if status:
         with pytest.raises(SystemExit) as stopped:
-            run_mutation.mutants(unit, tests, memory, OPTIONS, 60.0, 4)
+            run_mutation.mutants(unit, tests, memory, OPTIONS, 60.0, 4, tmp_path)
         assert stopped.value.code == status
+        assert trees == [tmp_path]
         return
-    assert run_mutation.mutants(unit, tests, memory, OPTIONS, 60.0, 4) == ([Row("m1", "killed", 0.5)], 2.0)
+    graded = run_mutation.mutants(unit, tests, memory, OPTIONS, 60.0, 4, tmp_path)
+    assert graded == ([Row("m1", "killed", 0.5)], 2.0)
+    assert trees == [tmp_path]
     [(args, plugins, switch)] = sessions
     loop = plugins[0].pytest_runtestloop.__self__
     assert args == [*OPTIONS, "tests/test_a.py::b_fast_one", "tests/test_a.py::a_slow_one"]
@@ -321,9 +335,12 @@ def test_stats_collection_traces_one_session_and_returns_one_result(monkeypatch:
         run_mutation.HITS.clear()
         return 1
 
+    trees: list[Path] = []
     monkeypatch.setattr(run_mutation, "pytest", SimpleNamespace(main=main))
-    [result] = run_mutation.collect(OPTIONS, ["tests/test_a.py"])
+    monkeypatch.setattr(run_mutation, "under_test", sessions_in(trees))
+    [result] = run_mutation.collect(Path("tree"), OPTIONS, ["tests/test_a.py"])
     assert switches == ["stats"]
+    assert trees == [Path("tree")]
     assert result == {
         "status": 1,
         "tests": {
@@ -346,9 +363,9 @@ def test_stats_read_the_content_keyed_cache_and_collect_its_misses_here(monkeypa
         return [{"reused": True}, *collect(["tests/test_a.py"])]
 
     monkeypatch.setattr(run_mutation, "collect_cached_stats", cached)
-    records = run_mutation.stats(Path("root"), Path("cache"), ("tests/test_a.py",), tuple(OPTIONS))
+    records = run_mutation.stats(Path("root"), Path("cache"), ("tests/test_a.py",), tuple(OPTIONS), Path("tree"))
     assert records == [{"reused": True}, {"status": 0}]
-    assert collected == [(tuple(OPTIONS), ["tests/test_a.py"])]
+    assert collected == [(Path("tree"), tuple(OPTIONS), ["tests/test_a.py"])]
 
 
 def test_a_stats_request_returns_its_records(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -361,12 +378,15 @@ def test_a_stats_request_returns_its_records(monkeypatch: pytest.MonkeyPatch) ->
         "options": OPTIONS,
         "root": "r",
         "cache": "c",
+        "tree": "t",
     }
     assert run_mutation.run(request) == {"stats": [{"status": 0}]}
-    assert calls == [(Path("r"), Path("c"), ("tests/test_a.py",), OPTIONS)]
+    assert calls == [(Path("r"), Path("c"), ("tests/test_a.py",), OPTIONS, Path("t"))]
 
 
-def test_a_mutant_request_returns_its_rows_and_collection_seconds(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_mutant_request_returns_its_rows_and_collection_seconds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     calls: list[tuple[Any, ...]] = []
 
     def graded(*args: Any) -> tuple[list[Row], float]:
@@ -374,6 +394,7 @@ def test_a_mutant_request_returns_its_rows_and_collection_seconds(monkeypatch: p
         return [Row("m1", "killed", 0.5)], 2.0
 
     monkeypatch.setattr(run_mutation, "mutants", graded)
+    monkeypatch.chdir(tmp_path)
     request = {
         "kind": "mutant",
         "key": "k",
@@ -386,9 +407,10 @@ def test_a_mutant_request_returns_its_rows_and_collection_seconds(monkeypatch: p
     }
     result = run_mutation.run(request)
     assert result == {"collection_seconds": 2.0, "rows": [{"name": "m1", "status": "killed", "seconds": 0.5}]}
-    [(unit, tests, memory, options, budget, cap)] = calls
+    [(unit, tests, memory, options, budget, cap, tree)] = calls
     assert (unit, tests, options, budget, cap) == (Unit("mutant", "k", ("m1",)), {"t": 1.0}, OPTIONS, 60.0, 4)
     assert memory.folder == Path("killers")
+    assert tree == tmp_path
 
 
 def test_main_installs_the_light_main_and_writes_the_result(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -399,6 +421,40 @@ def test_main_installs_the_light_main_and_writes_the_result(tmp_path: Path, monk
     assert run_mutation.main([str(tmp_path / "request.json"), str(tmp_path / "result.json")]) == 0
     assert installed == [sys.modules]
     assert json.loads((tmp_path / "result.json").read_text()) == {"echo": {"kind": "stats"}}
+
+
+@pytest.mark.feature("lab-mutation-protected-runner")
+@pytest.mark.parametrize("raises", [False, True])
+def test_a_session_runs_in_its_tree_with_its_package_then_hands_the_runner_back_its_own(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, raises: bool
+) -> None:
+    head = tmp_path / "head"
+    head.mkdir()
+    (tmp_path / "grader").mkdir()
+    monkeypatch.chdir(tmp_path / "grader")
+    start = os.getcwd()
+    own = {name: ModuleType(name) for name in ("scripts", "scripts.ci_lab.run_mutation")}
+    others = {"scriptsx": ModuleType("scriptsx"), "pytest": pytest}
+    modules: dict[str, ModuleType] = {**own, **others}
+    path = [start, "site"]
+    seen: list[tuple[str, list[str], list[str]]] = []
+
+    def session() -> int:
+        seen.append((os.getcwd(), sorted(modules), list(path)))
+        modules.update({name: ModuleType(name) for name in ("scripts", "scripts.alpha")})
+        path.insert(0, "inserted")
+        if raises:
+            raise RuntimeError("session")
+        return 7
+
+    if raises:
+        with pytest.raises(RuntimeError, match="^session$"):
+            run_mutation.under_test(head, session, modules, path)
+    else:
+        assert run_mutation.under_test(head, session, modules, path) == 7
+    assert seen == [(str(head), ["pytest", "scriptsx"], [str(head), "site"])]
+    assert modules == {**own, **others}
+    assert (os.getcwd(), path) == (start, [start, "site"])
 
 
 def corpus(path: Path, mode: str) -> Path:
@@ -425,7 +481,9 @@ def lab(tree: Path, request: dict[str, Any]) -> dict[str, Any]:
     return json.loads((tree / "result.json").read_text())
 
 
-def graded_by_lab(work: Path, tree: Path, names: list[str], tests: dict[str, float]) -> dict[str, Any]:
+def graded_by_lab(
+    work: Path, tree: Path, names: list[str], tests: dict[str, float], under: Path | None = None
+) -> dict[str, Any]:
     request = {
         "kind": "mutant",
         "key": "lab",
@@ -435,6 +493,7 @@ def graded_by_lab(work: Path, tree: Path, names: list[str], tests: dict[str, flo
         "killers": str(work / "killers"),
         "budget": 60.0,
         "cap": 2,
+        **({"tree": str(under)} if under else {}),
     }
     started = time.monotonic()
     graded = lab(tree, request)
@@ -468,6 +527,8 @@ def corpus_run(request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPath
         }
         records = lab(tree, stats_request)["stats"]
         tests = {test: record["durations"][test] for record in records for test in record["tests"].get(FUNCTION, [])}
+        protected = {**stats_request, "tree": str(tree), "cache": str(work / "grader-cache")}
+        reached = lab(root, protected)["stats"]
         return {
             "mode": mode,
             "reference": statuses(reference["graded"][0]["rows"]),
@@ -475,6 +536,8 @@ def corpus_run(request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPath
             "tests": tests,
             "graded": graded_by_lab(work, tree, names, tests),
             "untrampolined": graded_by_lab(work, root, names, tests),
+            "grader_tests": sorted({test for record in reached for test in record["tests"].get(FUNCTION, [])}),
+            "from_grader": graded_by_lab(work, root, names, tests, tree),
         }
 
 
@@ -499,6 +562,14 @@ def test_a_runner_that_grades_a_killable_mutant_survived_fails_the_equivalence(c
     assert set(statuses(planted["rows"]).values()) == {"survived"}
     with pytest.raises(AssertionError):
         assert_equivalent(corpus_run, planted)
+
+
+@pytest.mark.feature("lab-mutation-protected-runner")
+def test_a_runner_started_from_another_tree_grades_the_tree_it_names_as_the_selection_gate_does(
+    corpus_run: dict[str, Any],
+) -> None:
+    assert corpus_run["grader_tests"] == sorted(corpus_run["tests"])
+    assert_equivalent(corpus_run, corpus_run["from_grader"])
 
 
 @pytest.mark.wall_clock

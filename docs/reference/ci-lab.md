@@ -3124,7 +3124,7 @@ refuses a key of that form with `ValueError: not a <kind> unit key: <key>`, so t
 
 #### How a worker runs them
 
-Both kinds run through `scripts.ci_lab.executors.mutation` in the private trampolined copy,
+Both kinds run through `scripts.ci_lab.executors.mutation`, with the grader tree's copy of the runner grading the private trampolined copy,
 as [Worker executors](#worker-executors) describes:
 
 | Kind | Runner requests | Passes when |
@@ -3319,11 +3319,13 @@ scheduler enqueues a grade's misses with the grade's base and its plan's grader 
 |---|---|---|
 | `static` | head, base and grader, read only, shared by the pod's units | the gate the unit names from the grader tree's workflow, input registry and reusable workflows (see [The worker reads the same workflows](#the-worker-reads-the-same-workflows)), the venv of the head's `.github/test-requirements.lock` digest and the lease fields and secrets its steps read (see [What a gate's steps read](#what-a-gates-steps-read)) |
 | `test` | head, read only | the batch and its selected manifest records, read from the object store into its lease, the venv of the head's lockfile digest, `CI_LAB_FLAKES` and one pytest worker per slot |
-| `stats` | a private copy of the head with every file under the `[tool.mutmut]` source paths behind its trampolines | the tree as root, `CI_LAB_MUTATION_CACHE` and the venv of the copy's `.github/test-requirements.lock` digest |
-| `mutant` | the same private trampolined copy | the same venv, `CI_LAB_KILLERS`, `CI_LAB_MUTATION_BUDGET`, `CI_LAB_MUTATION_CAP` and the tests that the stats records of every test module in the tree show reaching the mutant's function, with their seconds |
+| `stats` | a private copy of the head with every file under the `[tool.mutmut]` source paths behind its trampolines, and the grader, read only, shared by the pod's units | the tree as root, `CI_LAB_MUTATION_CACHE` and the venv of the copy's `.github/test-requirements.lock` digest |
+| `mutant` | the same private trampolined copy and read only grader | the same venv, `CI_LAB_KILLERS`, `CI_LAB_MUTATION_BUDGET`, `CI_LAB_MUTATION_CAP` and the tests that the stats records of every test module in the tree show reaching the mutant's function, with their seconds |
 
 The mutation runner runs in the sandbox as `python -m scripts.ci_lab.run_mutation REQUEST OUTPUT`
-from the private tree. A mutant unit passes only when every mutant is killed; a runner that exits
+from the grader tree, so the grader revision's copy of the runner grades the unit and a head change
+to the runner changes no verdict. Each request names the private copy as its `tree`; every pytest
+session the runner starts runs there and imports that copy's `scripts` package. A mutant unit passes only when every mutant is killed; a runner that exits
 non zero fails its unit. The scheduler splits a function whose mutants price over the 30 minute
 unit time limit into several mutant units, as
 [Mutant units over the sandbox timeout](#mutant-units-over-the-sandbox-timeout) describes. Each adapter uploads a JSON report with the unit's `seconds` (and `flaky`
@@ -4347,6 +4349,7 @@ verdict.
 |---|---|---|---|
 | `run_static.run(gate, head_tree, base_tree, grader_tree, settings)` | The head tree | The grader tree and the base tree | Never |
 | `run_tests.run(batch, tree, venv, slots, lab)` | The tree the batch runs from | None | `lab.net` |
+| `python -m scripts.ci_lab.run_mutation REQUEST OUTPUT` | The grader tree; its pytest sessions run in the request's `tree` | The grader tree | Never |
 
 `run_static.run` prepares the step the way the workflow runs it:
 

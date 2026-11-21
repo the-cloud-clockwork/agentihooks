@@ -70,6 +70,7 @@ REACHING = {
 
 
 CACHED = {"git": {"hits": 1, "misses": 0}, "uv": {"hits": 1, "misses": 0}}
+CACHED_WITH_GRADER = {"git": {"hits": 2, "misses": 0}, "uv": {"hits": 1, "misses": 0}}
 ROOT = Path(__file__).resolve().parents[2]
 LEASE_CONTEXT = {
     "inputs.base": "b1",
@@ -144,8 +145,10 @@ class Box:
         self.requests: list[dict[str, Any]] = []
         self.runs: list[tuple[list[str], float]] = []
 
-    def __call__(self, root: Path, cwd: Path, ports: PortAllocator, whitelist: dict[str, str]) -> "Box":
-        self.made.append((root, cwd, ports, whitelist))
+    def __call__(
+        self, root: Path, cwd: Path, ports: PortAllocator, whitelist: dict[str, str], readonly: tuple[Path, ...] = ()
+    ) -> "Box":
+        self.made.append((root, cwd, ports, whitelist, readonly))
         return self
 
     def run(self, argv: list[str], timeout: float) -> Outcome:
@@ -570,14 +573,14 @@ def python_in(venv: Path) -> None:
     python.chmod(0o755)
 
 
-@pytest.mark.feature("lab-worker-executors")
 def test_mutation_runs_a_stats_unit_with_its_tree_as_root_and_the_stats_cache(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, venv: Recorder, mutation_tree: Path, trampolines: Recorder
 ) -> None:
     stats = {"stats": [{"status": 0, "tests": {}, "durations": {}, "cpu": 1.0}]}
     box = Box([(0, stats)], tmp_path)
     monkeypatch.setattr(executors, "Sandbox", box)
-    trees = FakeWorktrees({"h1": mutation_tree}, fetched=frozenset({"h1"}))
+    grader = tmp_path / "grader"
+    trees = FakeWorktrees({"h1": mutation_tree, "g1": grader}, fetched=frozenset({"h1"}))
     pod = pod_of(tmp_path, trees)
 
     finished = executors.mutation(pod, mutation_settings(tmp_path), lease("stats", "k1", ("tests/test_alpha.py",)))
@@ -600,6 +603,7 @@ def test_mutation_runs_a_stats_unit_with_its_tree_as_root_and_the_stats_cache(
             "kind": "stats",
             "key": "k1",
             "options": OPTIONS,
+            "tree": str(mutation_tree),
             "root": str(mutation_tree),
             "cache": str(tmp_path / "cache"),
             "members": ["tests/test_alpha.py"],
@@ -613,14 +617,14 @@ def test_mutation_runs_a_stats_unit_with_its_tree_as_root_and_the_stats_cache(
         pod.runs,
     )
     assert timeout == 30.0
-    assert box.made == [(pod.runs, mutation_tree, pod.ports, WHITELIST)]
+    assert box.made == [(pod.runs, grader, pod.ports, WHITELIST, (grader,))]
     assert finished == Finished(PASSED, finished.report, tmp_path / "log1.txt")
     assert report(finished, pod) == {
         **stats,
         "seconds": 2.5,
-        "caches": {"git": {"hits": 0, "misses": 1}, "uv": {"hits": 1, "misses": 0}},
+        "caches": {"git": {"hits": 1, "misses": 1}, "uv": {"hits": 1, "misses": 0}},
     }
-    assert trees.calls == [("own", "h1"), ("drop", mutation_tree)]
+    assert trees.calls == [("lease", "g1"), ("own", "h1"), ("drop", mutation_tree), ("release", "g1")]
 
 
 @pytest.mark.feature("lab-worker-executors")
@@ -637,7 +641,8 @@ def test_mutation_grades_a_mutant_unit_with_the_tests_its_trees_stats_show_reach
     }
     box = Box([(0, stats), (0, graded)], tmp_path)
     monkeypatch.setattr(executors, "Sandbox", box)
-    pod = pod_of(tmp_path, FakeWorktrees({"h1": mutation_tree}))
+    grader = tmp_path / "grader"
+    pod = pod_of(tmp_path, FakeWorktrees({"h1": mutation_tree, "g1": grader}))
 
     finished = executors.mutation(pod, mutation_settings(tmp_path), lease("mutant", "m1", members))
 
@@ -646,6 +651,7 @@ def test_mutation_grades_a_mutant_unit_with_the_tests_its_trees_stats_show_reach
             "kind": "stats",
             "key": "m1",
             "options": OPTIONS,
+            "tree": str(mutation_tree),
             "root": str(mutation_tree),
             "cache": str(tmp_path / "cache"),
             "members": ["tests/test_alpha.py", "tests/unit/test_beta.py"],
@@ -654,6 +660,7 @@ def test_mutation_grades_a_mutant_unit_with_the_tests_its_trees_stats_show_reach
             "kind": "mutant",
             "key": "m1",
             "options": OPTIONS,
+            "tree": str(mutation_tree),
             "members": list(members),
             "killers": str(tmp_path / "killers.json"),
             "tests": {"tests/test_alpha.py::test_a": 0.5},
@@ -661,9 +668,9 @@ def test_mutation_grades_a_mutant_unit_with_the_tests_its_trees_stats_show_reach
             "cap": 4,
         },
     ]
-    assert box.made == [(pod.runs, mutation_tree, pod.ports, WHITELIST)] * 2
+    assert box.made == [(pod.runs, grader, pod.ports, WHITELIST, (grader,))] * 2
     assert finished == Finished(PASSED, finished.report, tmp_path / "log2.txt")
-    assert report(finished, pod) == {**graded, "seconds": 2.5, "caches": CACHED}
+    assert report(finished, pod) == {**graded, "seconds": 2.5, "caches": CACHED_WITH_GRADER}
 
 
 @pytest.mark.feature("lab-worker-executors")
@@ -689,7 +696,7 @@ def test_mutation_fails_a_mutant_unit_whose_runner_fails_or_whose_mutant_lives(
     results = [result for _, result in scripted]
     box = Box(list(scripted), tmp_path)
     monkeypatch.setattr(executors, "Sandbox", box)
-    trees = FakeWorktrees({"h1": mutation_tree})
+    trees = FakeWorktrees({"h1": mutation_tree, "g1": tmp_path / "grader"})
     pod = pod_of(tmp_path, trees)
 
     finished = executors.mutation(
@@ -698,8 +705,8 @@ def test_mutation_fails_a_mutant_unit_whose_runner_fails_or_whose_mutant_lives(
 
     assert finished == Finished(FAILED, finished.report, tmp_path / log)
     assert len(box.runs) == runs
-    assert report(finished, pod) == {**(results[-1] or {}), "seconds": 2.5, "caches": CACHED}
-    assert trees.calls == [("own", "h1"), ("drop", mutation_tree)]
+    assert report(finished, pod) == {**(results[-1] or {}), "seconds": 2.5, "caches": CACHED_WITH_GRADER}
+    assert trees.calls == [("lease", "g1"), ("own", "h1"), ("drop", mutation_tree), ("release", "g1")]
 
 
 @pytest.mark.feature("lab-worker-executors")
@@ -707,14 +714,14 @@ def test_mutation_drops_its_private_tree_when_the_runner_raises(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, venv: Recorder, mutation_tree: Path, trampolines: Recorder
 ) -> None:
     monkeypatch.setattr(executors, "Sandbox", Recorder(CannotRun("no bwrap")))
-    trees = FakeWorktrees({"h1": mutation_tree})
+    trees = FakeWorktrees({"h1": mutation_tree, "g1": tmp_path / "grader"})
 
     with pytest.raises(CannotRun, match="^no bwrap$"):
         executors.mutation(
             pod_of(tmp_path, trees), mutation_settings(tmp_path), lease("stats", "k", ("tests/test_alpha.py",))
         )
 
-    assert trees.calls == [("own", "h1"), ("drop", mutation_tree)]
+    assert trees.calls == [("lease", "g1"), ("own", "h1"), ("drop", mutation_tree), ("release", "g1")]
 
 
 @pytest.mark.feature("lab-mutation-protected-runner")
@@ -758,9 +765,8 @@ def test_the_grader_trees_runner_decides_a_mutant_unit_whatever_the_head_runner_
     code, status = grader
     rows = [{"name": mutant, "status": status, "seconds": 0.0} for mutant in MUTANTS]
     graded = {} if code else {"collection_seconds": 0.0, "rows": rows, "runner": "grader"}
-    lookups = {"git": {"hits": 2, "misses": 0}, "uv": {"hits": 1, "misses": 0}}
     assert finished.outcome == verdict
-    assert report(finished, pod) == {**graded, "seconds": 2.5, "caches": lookups}
+    assert report(finished, pod) == {**graded, "seconds": 2.5, "caches": CACHED_WITH_GRADER}
     assert trees.calls == [("lease", "g1"), ("own", "h1"), ("drop", mutation_tree), ("release", "g1")]
 
 
@@ -777,9 +783,13 @@ def test_the_grader_trees_runner_answers_a_stats_unit_whatever_the_head_runner_a
 
     finished = executors.mutation(pod, mutation_settings(tmp_path), lease("stats", "k1", ("tests/test_alpha.py",)))
 
-    lookups = {"git": {"hits": 2, "misses": 0}, "uv": {"hits": 1, "misses": 0}}
     assert finished.outcome == PASSED
-    assert report(finished, pod) == {"stats": [REACHING], "runner": "grader", "seconds": 2.5, "caches": lookups}
+    assert report(finished, pod) == {
+        "stats": [REACHING],
+        "runner": "grader",
+        "seconds": 2.5,
+        "caches": CACHED_WITH_GRADER,
+    }
 
 
 @pytest.mark.feature("lab-worker-executors")
