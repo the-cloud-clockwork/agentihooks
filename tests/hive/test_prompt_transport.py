@@ -542,7 +542,7 @@ def test_a_recon_plan_of_five_hundred_long_lines_syncs_whole_while_another_file_
         (folder / "recon.md").write_text(recon, encoding="utf-8")
         (folder / "notes.md").write_text(recon, encoding="utf-8")
         ledger_workspace.sync(redis, "host", [("fixture", "task")], 45)
-    held = json.loads(redis.get(ledger_workspace.task_files_key("host", "fixture", "task")))
+    held = json.loads(redis.get(ledger_workspace.task_files_key("host", "fixture", "task")) or "{}")
     assert len(recon.splitlines()) == 500
     assert len(recon.encode()) > ledger_workspace.SEED_CHARS
     assert held.get("recon.md") == recon
