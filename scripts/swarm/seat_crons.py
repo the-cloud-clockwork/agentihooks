@@ -21,9 +21,9 @@ def scheduler() -> Scheduler:
 
 def swarms() -> RedisStore:
     """The swarm store a ledger join reads the swarm and its master seats from."""
-    from scripts.swarm.store import connect
+    from scripts.swarm import store
 
-    return connect()
+    return store.connect()  # pyright: ignore[reportUnknownMemberType]
 
 
 def ensure(on: Scheduler, config: SwarmConfig, home: Path) -> list[dict[str, Any]]:
