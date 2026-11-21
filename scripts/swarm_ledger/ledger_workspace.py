@@ -61,6 +61,10 @@ def steering(task: dict, doc: dict | None = None) -> str:
     rows = [f"- {label}: {contract[key]}" for key, label in CONTRACT_LABELS if contract.get(key)]
     if rows:
         lines += ["Proof contract", *rows, ""]
+    if task.get("enhances") and doc is not None:
+        from scripts.swarm.prompt import target_lines
+
+        lines += target_lines(task, doc["tasks"])
     if task.get("kind") == "plan" and doc is not None:
         from scripts.swarm_ledger.plan_evidence import evidence
 
