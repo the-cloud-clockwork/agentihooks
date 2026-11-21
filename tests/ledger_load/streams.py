@@ -92,6 +92,7 @@ def consume(base: str, token: str, ready: threading.Event, stop: threading.Event
                 elif name == "ledger":
                     result["patches"] += 1
                     result["patch_bytes"] += len(json.dumps(data).encode("utf-8"))
+                    result["arrivals"].append(time.monotonic())
                 if stop.is_set():
                     return
     except (OSError, ValueError) as exc:
@@ -106,14 +107,14 @@ def measure(source: Path, folder: Path, doc: dict, streams: int) -> dict:
     token = gate.store(folder, doc)
     write_port, read_port = gate.free_port(), gate.free_port()
     write_base, read_base = f"http://127.0.0.1:{write_port}", f"http://127.0.0.1:{read_port}"
-    consumers = [{"snapshots": 0, "patches": 0, "patch_bytes": 0, "errors": []} for _ in range(streams)]
+    consumers = [{"snapshots": 0, "patches": 0, "patch_bytes": 0, "errors": [], "arrivals": []} for _ in range(streams)]
     ready = [threading.Event() for _ in consumers]
     stop = threading.Event()
     threads = [
         threading.Thread(target=consume, args=(read_base, token, event, stop, result), daemon=True)
         for event, result in zip(ready, consumers, strict=True)
     ]
-    writes = []
+    writes, written = [], []
     with serving(source, folder, write_port, read_port) as (write_server, read_server):
         credentials = {
             "X-Ledger-Token": gate.authority.agent_token(token, gate.SLUG, "ci@ab0000-0000"),
@@ -145,7 +146,9 @@ def measure(source: Path, folder: Path, doc: dict, streams: int) -> dict:
                 )
                 if (reply.get("data") or reply).get("rejected"):
                     raise RuntimeError(f"write {n} was rejected")
-                writes.append(time.monotonic() - sent)
+                returned = time.monotonic()
+                writes.append(returned - sent)
+                written.append(returned)
             last_write = time.monotonic() - began
             time.sleep(max(0, began + SECONDS - time.monotonic()))
             elapsed = time.monotonic() - began
@@ -166,6 +169,11 @@ def measure(source: Path, folder: Path, doc: dict, streams: int) -> dict:
                     f"streams received the last write {delivered - last_write:.2f} s after it, last write at"
                     f" {last_write:.2f} s, delivered at {delivered:.2f} s, past one follow pass of {FOLLOW_PASS_S:g} s"
                 )
+            delays = [
+                arrival - stored
+                for result in consumers
+                for arrival, stored in zip(result.pop("arrivals"), written, strict=True)
+            ]
             return {
                 "streams": streams,
                 "writes": len(writes),
@@ -175,6 +183,8 @@ def measure(source: Path, folder: Path, doc: dict, streams: int) -> dict:
                 "write_p95_s": gate.p95(writes),
                 "last_write_s": last_write,
                 "delivered_s": delivered,
+                "delivery_p95_s": gate.p95(delays),
+                "delivery_max_s": max(delays),
                 "consumers": consumers,
             }
         finally:
@@ -207,7 +217,7 @@ def main(argv: list[str] | None = None) -> int:
     args.folder.mkdir(parents=True, exist_ok=True)
     result = compare(args.base.resolve(), args.head.resolve(), args.folder)
     (args.folder / "streams.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
-    return int(any(case["after"]["cpu_cores"] >= case["before"]["cpu_cores"] for case in result["cases"]))
+    return int(any(case["after"]["delivery_max_s"] > DELIVERY_BOUND_S for case in result["cases"]))
 
 
 if __name__ == "__main__":

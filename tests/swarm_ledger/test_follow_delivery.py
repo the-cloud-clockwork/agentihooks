@@ -6,7 +6,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-import fakeredis
 import pytest
 
 from scripts.events.redis_state import RedisStateStore
@@ -55,6 +54,8 @@ def test_the_shared_follow_waits_at_most_its_own_interval(monkeypatch: pytest.Mo
 def test_a_write_another_process_stores_reaches_the_publisher_within_the_follow_interval(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    import fakeredis
+
     state = RedisStateStore(fakeredis.FakeRedis(decode_responses=True), "scheduler")
     monkeypatch.setattr(process_timer, "Scheduler", lambda _state=None: Scheduler(state))
     monkeypatch.setattr(service, "ensure_running", lambda *args, **kwargs: None)
