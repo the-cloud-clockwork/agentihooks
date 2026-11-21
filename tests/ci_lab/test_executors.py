@@ -885,18 +885,19 @@ def test_main_runs_the_worker_over_the_adapters_until_sigterm_stops_it(
     )
 
 
-@pytest.mark.feature("lab-worker-metrics")
-def test_main_serves_the_worker_metrics_on_the_contract_port_until_the_worker_drains(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def serve_main(
+    monkeypatch: pytest.MonkeyPatch, environ: Mapping[str, str]
+) -> tuple[str, int, ThreadingHTTPServer, list[tuple[int, str, str]], list[bool]]:
     served: list[tuple[str, int, ThreadingHTTPServer]] = []
     scraped: list[tuple[int, str, str]] = []
     stopped: list[bool] = []
     handlers: dict[int, Callable[[int, object], None]] = {}
     bind = metrics.serve_registry
 
-    def serve_registry(host: str, port: int, registry: metrics.Registry) -> ThreadingHTTPServer:
-        server = bind(host, 0, registry)
+    def serve_registry(
+        host: str, port: int, registry: metrics.Registry, *observe: Callable[[], None]
+    ) -> ThreadingHTTPServer:
+        server = bind(host, 0, registry, *observe)
         served.append((host, port, server))
         return server
 
@@ -922,12 +923,35 @@ def test_main_serves_the_worker_metrics_on_the_contract_port_until_the_worker_dr
     monkeypatch.setattr(executors.worker, "build", lambda *args: Service())
     monkeypatch.setattr(executors.signal, "signal", lambda number, handler: handlers.__setitem__(number, handler))
 
-    assert executors.main([], environ_of(tmp_path)) == 0
+    assert executors.main([], environ) == 0
 
     [(host, port, server)] = served
-    assert (host, port, stopped) == ("", contract.METRICS_PORT, [True])
-    assert scraped == [(200, metrics.EXPOSITION, metrics.Registry().render())]
-    assert server.socket.fileno() == -1
     for thread in set(threading.enumerate()) - before:
         thread.join(timeout=5)
         assert not thread.is_alive()
+    return host, port, server, scraped, stopped
+
+
+@pytest.mark.feature("lab-worker-metrics")
+def test_main_serves_the_worker_metrics_on_the_contract_port_until_the_worker_drains(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    host, port, server, scraped, stopped = serve_main(monkeypatch, environ_of(tmp_path))
+
+    assert (host, port, stopped) == ("", contract.METRICS_PORT, [True])
+    assert scraped == [(200, metrics.EXPOSITION, metrics.Registry().render())]
+    assert server.socket.fileno() == -1
+
+
+@pytest.mark.feature("lab-worker-node-mirror-age")
+def test_main_exports_the_age_of_its_node_cache_mirror_under_its_node_name(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / "node").mkdir()
+    (tmp_path / "node" / "fetched-at").write_text("1000000\n")
+    monkeypatch.setattr(executors, "time", SimpleNamespace(time=lambda: 1000030.0))
+
+    _, _, _, [(status, _, body)], _ = serve_main(monkeypatch, {**environ_of(tmp_path), "CI_LAB_NODE_NAME": "ci-node-1"})
+
+    assert status == 200
+    assert 'ci_lab_node_mirror_age_seconds{node="ci-node-1"} 30.0\n' in body

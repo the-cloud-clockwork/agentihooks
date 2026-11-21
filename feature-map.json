@@ -1,6 +1,16 @@
 {
   "features": [
     {
+      "id": "lab-worker-node-mirror-age",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2750",
+      "behaviour": "agentihooks ci-lab-worker answers each GET /metrics scrape with ci_lab_node_mirror_age_seconds labelled with its node name from CI_LAB_NODE_NAME: the scrape time less the epoch seconds in the node cache's fetched-at stamp under CI_LAB_GIT_MIRROR, +Inf while the stamp is missing or does not read as whole epoch seconds, and no sample when the pod has no node name.",
+      "seam": "scripts.ci_lab.executors main, scripts.ci_lab.metrics observe_mirror, expose and serve_registry, and scripts.ci_lab.contract NODE_MIRROR_AGE_SECONDS, NODE_NAME and MIRROR_STAMP",
+      "tests": [
+        "tests/ci_lab/test_executors.py::test_main_exports_the_age_of_its_node_cache_mirror_under_its_node_name"
+      ]
+    },
+    {
       "id": "lab-worker-manifest",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2808",
