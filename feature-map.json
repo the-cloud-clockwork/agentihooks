@@ -5277,6 +5277,27 @@
       ]
     },
     {
+      "id": "mutation-refine-fetches-only-the-head-history",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-mutation-refine-shallow-fetch",
+      "behaviour": "The Tests mutation refine join checks out only the pull request head's own history, without file contents and without tags, and its fetch of the workflow revision names the head as the negotiation tip, so neither step downloads every branch, every tag or the whole history again.",
+      "seam": "the mutation-refine job's checkout steps and the git fetch in its Take the helper scripts from the workflow revision step",
+      "tests": [
+        "tests/test_ci_tests_mutation_probe.py::test_mutation_refine_checks_out_only_the_head_history_without_file_contents",
+        "tests/test_ci_tests_mutation_probe.py::test_every_mutation_refine_fetch_negotiates_from_the_head"
+      ]
+    },
+    {
+      "id": "partial-clone-checkout-stall-bound",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-mutation-refine-shallow-fetch",
+      "behaviour": "Every partial clone checkout in the Tests workflow aborts a stalled lazy blob download within a minute through the git low speed limit and retries the checkout once in place with the same inputs.",
+      "seam": "the first two steps of every Tests job whose actions/checkout step sets a filter",
+      "tests": [
+        "tests/test_ci_workflow.py::test_a_stalled_partial_clone_checkout_aborts_within_a_minute_and_retries_once_in_place"
+      ]
+    },
+    {
       "id": "trace-plan-per-repository-size",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t447",

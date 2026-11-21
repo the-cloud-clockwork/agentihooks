@@ -1332,18 +1332,28 @@ def test_unit_shards_check_out_full_history_without_old_file_contents():
         assert checkout["with"].get("ref") in (None, "${{ github.sha }}")
 
 
-def test_a_stalled_unit_checkout_aborts_within_a_minute_and_retries_once_in_place():
-    steps = _workflow()["jobs"]["unit"]["steps"]
-    first, second = [s for s in steps if s.get("uses", "").startswith("actions/checkout")]
-    assert steps.index(first) == 0 and steps.index(second) == 1
-    for checkout in (first, second):
-        assert checkout["uses"] == "actions/checkout@v4"
-        assert checkout["env"] == {"GIT_HTTP_LOW_SPEED_LIMIT": "1000", "GIT_HTTP_LOW_SPEED_TIME": "60"}
-        assert checkout["with"] == {"ref": "${{ github.sha }}", "fetch-depth": 0, "filter": "blob:none"}
-    assert first["continue-on-error"] is True
-    assert "if" not in first
-    assert "continue-on-error" not in second
-    assert second["if"] == f"steps.{first['id']}.outcome == 'failure'"
+@pytest.mark.feature("partial-clone-checkout-stall-bound")
+def test_a_stalled_partial_clone_checkout_aborts_within_a_minute_and_retries_once_in_place() -> None:
+    jobs = _workflow()["jobs"]
+    checkouts = {
+        name: [s for s in job.get("steps", []) if s.get("uses", "").startswith("actions/checkout")]
+        for name, job in jobs.items()
+    }
+    partial = {name: found for name, found in checkouts.items() if any("filter" in s.get("with", {}) for s in found)}
+    assert {"unit", "mutation-refine"} <= set(partial)
+    for name, found in partial.items():
+        assert len(found) == 2, name
+        first, second = found
+        steps = jobs[name]["steps"]
+        assert steps.index(first) == 0 and steps.index(second) == 1
+        for checkout in (first, second):
+            assert checkout["uses"] == "actions/checkout@v4"
+            assert checkout["env"] == {"GIT_HTTP_LOW_SPEED_LIMIT": "1000", "GIT_HTTP_LOW_SPEED_TIME": "60"}
+            assert checkout["with"] == first["with"]
+        assert first["continue-on-error"] is True
+        assert "if" not in first
+        assert "continue-on-error" not in second
+        assert second["if"] == f"steps.{first['id']}.outcome == 'failure'"
 
 
 def test_unit_pins_an_exact_uv_version():
