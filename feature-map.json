@@ -4952,6 +4952,17 @@
       ]
     },
     {
+      "id": "hub-and-webhook-stop-cleanly-on-interrupt",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-webhook-sigint-clean-exit",
+      "behaviour": "The hub run command and the GitHub webhook receiver treat the interrupt signal the swarm image stops them with as a normal stop: an interrupt during a hub pass, or while the receiver serves, runs the command's cleanup (the hub releases its reactor leases and closes its lease keeper and bus, the receiver closes its server and then its bus), ends with exit code 0 and no traceback, and restores the signal handlers it replaced.",
+      "seam": "scripts.hub.runner.main and scripts.hub.github_webhooks.main run with their interrupt signal handlers",
+      "tests": [
+        "tests/hub/test_runner.py::test_sigint_during_a_pass_ends_the_hub_with_0_and_releases_its_leases",
+        "tests/hub/test_github_webhooks.py::test_sigint_while_serving_ends_the_receiver_with_0_after_closing_server_and_bus"
+      ]
+    },
+    {
       "id": "swarm-reopened-claim-loss",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2433",
@@ -10939,6 +10950,17 @@
       ]
     },
     {
+      "id": "lab-worker-sink-backlog",
+      "origin": "regression",
+      "ordered_at": "2026-11-21",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-sink-backlog",
+      "behaviour": "The lab worker test upload sink listens with room for forty concurrent connections before accepting report and log uploads.",
+      "seam": "tests.ci_lab.test_worker Sink server activation",
+      "tests": [
+        "tests/ci_lab/test_worker.py::test_the_sink_listens_with_room_for_forty_uploads"
+      ]
+    },
+    {
       "id": "lab-worker-pod-loop",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/lab-worker",
@@ -11074,6 +11096,18 @@
         "tests/swarm/test_execution_archive.py::test_set_launch_writes_the_decision_onto_the_live_head_and_its_projection",
         "tests/swarm/test_execution_archive.py::test_set_launch_never_shows_an_agent_dropped_during_the_write",
         "tests/swarm/test_execution_archive.py::test_set_launch_changes_nothing_for_a_run_that_is_not_a_listed_seat_head"
+      ]
+    },
+    {
+      "id": "execution-launch-decision-survives-stale-put",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-live-binding-unrecorded-profile",
+      "behaviour": "A whole agent record write built from a copy read before the hub wrote the launch decision, which carries neither the profile nor the profile decision the execution holds, keeps the harness, profile, account, model, effort, overlays and profile decision wherever the copy carries them empty, while the copy's own non empty fields such as a session model still land, so the live binding check never reports an unrecorded profile or account for a launched agent; a put from a copy that already holds the decision still lands a field it blanks, such as the account a reboot drops, and a write that keeps the profile, such as the controller recording a hive acknowledgement without a decision, still clears the profile decision.",
+      "seam": "ExecutionRegistry.put and update through _resolve after ExecutionRegistry.set_launch, read by live_binding.unknown",
+      "tests": [
+        "tests/swarm/test_execution_archive.py::test_a_put_from_a_copy_read_after_the_launch_decision_still_lands_a_blanked_field",
+        "tests/swarm/test_execution_archive.py::test_a_put_from_a_copy_read_before_the_launch_decision_keeps_the_decision",
+        "tests/swarm/test_execution_archive.py::test_a_registry_update_that_clears_the_profile_decision_still_clears_it"
       ]
     },
     {
