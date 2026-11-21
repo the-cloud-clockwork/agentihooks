@@ -1074,17 +1074,19 @@ def test_split_rejects_a_failed_collection_before_reading_any_artifact(tmp_path,
 
 
 @pytest.mark.feature("split-starts-on-the-early-collection-upload")
+@pytest.mark.parametrize("status", ["in_progress", "completed"])
 @pytest.mark.parametrize("upload", ["success", "failure", "skipped", None])
 def test_split_starts_once_the_early_collection_upload_succeeds_while_the_count_job_runs(
-    tmp_path: Path, upload: str | None
+    tmp_path: Path, status: str, upload: str | None
 ) -> None:
     steps = _workflow()["jobs"]["split"]["steps"]
     guard = next(step for step in steps if step.get("name") == "Require successful early collection")
     named = guard["env"]["COLLECTION_STEP"]
     held = {"name": "Hold the base revision's test count", "conclusion": "success"}
     decoy = {"name": "select", "status": "completed", "conclusion": "success", "steps": [{**held, "name": named}]}
-    for poll, (status, conclusion) in enumerate([("in_progress", None), ("completed", "failure")], start=1):
-        count = {"name": "test-count (3.12)", "status": status, "conclusion": conclusion}
+    first = (status, None) if status == "in_progress" else (status, "failure")
+    for poll, (state, conclusion) in enumerate([first, ("completed", "failure")], start=1):
+        count = {"name": "test-count (3.12)", "status": state, "conclusion": conclusion}
         count["steps"] = [held, {"name": named, "conclusion": upload}]
         (tmp_path / f"{poll}.json").write_text(json.dumps({"jobs": [decoy, count]}))
     binary = tmp_path / "bin"
@@ -1110,8 +1112,9 @@ def test_split_starts_once_the_early_collection_upload_succeeds_while_the_count_
         capture_output=True,
         text=True,
     )
-    assert (outcome.returncode == 0) == (upload == "success")
-    assert (tmp_path / "calls").read_text() == ("x" if upload == "success" else "xx")
+    early = status == "in_progress" and upload == "success"
+    assert (outcome.returncode == 0) == early
+    assert (tmp_path / "calls").read_text() == ("xx" if status == "in_progress" and not early else "x")
 
 
 @pytest.mark.feature("split-starts-on-the-early-collection-upload")
