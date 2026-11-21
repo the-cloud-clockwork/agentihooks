@@ -6010,7 +6010,8 @@
         "tests/gates/test_build.py::TestDevMerge::test_a_dev_merge_commit_passes_when_only_dev_content_lies_outside_the_plan",
         "tests/gates/test_build.py::TestDevMerge::test_an_off_plan_edit_staged_inside_a_dev_merge_is_refused_alone",
         "tests/gates/test_build.py::TestDevMerge::test_an_unstaged_off_plan_edit_inside_a_dev_merge_counts_only_for_commit_all",
-        "tests/gates/test_build.py::TestDevMerge::test_a_merge_of_a_commit_dev_does_not_hold_is_judged_whole"
+        "tests/gates/test_build.py::TestDevMerge::test_a_merge_of_a_commit_dev_does_not_hold_is_judged_whole",
+        "tests/gates/test_build.py::TestDevMerge::test_a_failed_diff_against_the_dev_merge_head_judges_every_file"
       ]
     },
     {

@@ -344,6 +344,22 @@ class TestDevMerge:
             "build gate: outside your traced plan: .github/workflows/test.yml, power/generator/diesel.py. "
         )
 
+    @pytest.mark.feature("build-gate-dev-merge-content")
+    def test_a_failed_diff_against_the_dev_merge_head_judges_every_file(self, staged: Any) -> None:
+        merged = merge_dev(staged)
+        tree = subprocess.run(
+            ["git", "-C", str(merged.repo), "rev-parse", "MERGE_HEAD^{tree}"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        (merged.repo / ".git/objects" / tree[:2] / tree[2:]).unlink()
+        denied = merged.decide(tool="Bash", command="git commit --no-edit")
+        assert not denied.allowed
+        assert denied.reason.startswith(
+            "build gate: outside your traced plan: .github/workflows/test.yml, power/generator/diesel.py. "
+        )
+
 
 CHARTS = "- bake the runner chart | antoncore/k8s/charts | the runners need it\n"
 
