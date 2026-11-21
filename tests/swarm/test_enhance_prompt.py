@@ -46,7 +46,7 @@ DOC: dict[str, Any] = {
 }
 STEPS = (
     "enhances task t-login",
-    "get tasks/t-login",
+    f"agentihooks api --slug demo --as {PLANNER} get tasks/t-login",
     "scouter sub agents",
     "Edit no code.",
     "<!-- slice: <anchor> -->",

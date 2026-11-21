@@ -770,7 +770,7 @@ def enhance_steps(me: str, led: str, phase: str, target: str) -> list[str]:
 
 def target_lines(task: dict[str, Any], tasks: list[dict[str, Any]]) -> list[str]:
     """Return the steering block of an enhancement plan task: its target's id, title, phase, territory, description."""
-    row: dict[str, Any] = next((row for row in tasks if row.get("id") == task["enhances"]), {})
+    row = next((row for row in tasks if row.get("id") == task["enhances"]), dict[str, Any]())
     if not row:
         return ["Enhancement target", f"- Task: {task['enhances']} is not in the ledger: block this task.", ""]
     return [
