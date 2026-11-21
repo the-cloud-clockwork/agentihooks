@@ -535,7 +535,7 @@ def test_a_stop_on_pending_checks_turns_a_live_bare_wait_into_the_checks_wait(ri
 
 
 @pytest.mark.feature("claim-stop-keeps-merge-wait")
-def test_a_stop_on_pending_checks_keeps_a_live_merge_wait_on_the_queued_pull_request(rig):
+def test_a_stop_on_pending_checks_keeps_a_live_merge_wait_on_the_queued_pull_request(rig: Any) -> None:
     rig.task.update(state="pr", pr_url=URL)
     rig.pulls[URL] = PullRequest("OPEN", None, 1, False, False, queued=True)
     on = {"kind": "merge", "target": URL}
