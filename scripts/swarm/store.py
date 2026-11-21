@@ -83,6 +83,7 @@ DEFAULT_SWAP_FLOOR_MB = 4096
 DEFAULT_MASTERS_STEP = 12
 DEFAULT_MASTER_MOVE_GRACE = 300
 DEFAULT_LOCAL_MAX_AGENTS = 15
+DEFAULT_REVIEW_SHARE = 20
 EVENTS_ENGINE = "events"
 MAX_LOAD = 10.0
 CODEX_TRANSPORTS = ("legacy", "app_server")
@@ -153,12 +154,15 @@ class SwarmConfig:
     control_url: str = ""
     lab_url: str = ""
     max_review: int = 0
+    review_share: int = DEFAULT_REVIEW_SHARE
 
     def __post_init__(self) -> None:
         if self.tick_mode not in TICK_MODES:
             raise SwarmError(f"tick mode must be one of {', '.join(TICK_MODES)}")
         if type(self.focus_weight) is not int or not 0 <= self.focus_weight <= 100:
             raise SwarmError("focus weight must be a whole number from 0 to 100")
+        if type(self.review_share) is not int or not 0 <= self.review_share <= 100:
+            raise SwarmError("review share must be a whole number from 0 to 100")
         if self.placement_mode not in PLACEMENT_MODES:
             raise SwarmError(f"placement mode must be one of {', '.join(PLACEMENT_MODES)}")
         if type(self.placement_nodes) is not int or self.placement_nodes < 0:
@@ -341,6 +345,7 @@ class RedisStore:
             raw.get("control_url", ""),
             raw.get("lab_url", ""),
             int(raw.get("max_review", 0)),
+            int(raw.get("review_share", DEFAULT_REVIEW_SHARE)),
         )
 
     def update(self, slug: str, **changes: Any) -> SwarmConfig:

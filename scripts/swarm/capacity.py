@@ -465,7 +465,7 @@ def _configured(config: SwarmConfig) -> dict[str, int]:
 
 
 def _scaled(counts: dict[str, int]) -> dict[str, int]:
-    """The counts of the lanes autoscale sizes; the review lane keeps its configured cap."""
+    """The counts of the eng, ci and plan lanes, the ceilings autoscale starts from before its first decision."""
     return {lane: counts.get(lane, 0) for lane in SCALED_LANES}
 
 
@@ -551,13 +551,20 @@ def autoscaled(
         "ceilings": stored.get("ceilings") or _scaled(_configured(config)),
         "pending_raise": stored.get("pending_raise") or {"target": None, "ticks": 0},
     }
-    demand = _scaled(inputs.demand or {})
+    demand = {lane: (inputs.demand or {}).get(lane, 0) for lane in LANES}
     free = _placeable(_open(inputs.observations, inputs.warned))
     decision = autoscale.calculate(
-        _scaled(_busy(inputs.agents)), free, unspent(host, inputs.spent), demand, previous, now_ms=inputs.now_ms
+        _busy(inputs.agents),
+        free,
+        unspent(host, inputs.spent),
+        demand,
+        previous,
+        now_ms=inputs.now_ms,
+        review=autoscale.Review(config.review_share, _harnesses(config, autoscale.REVIEW)),
     )
     caps = decision["ceilings"]
-    scaled = replace(config, max_eng=caps["eng"], max_ci=caps["ci"], max_plan=caps["plan"])
+    reviewers = caps.get(autoscale.REVIEW, config.max_review)
+    scaled = replace(config, max_eng=caps["eng"], max_ci=caps["ci"], max_plan=caps["plan"], max_review=reviewers)
     return scaled, {**decision, "host": host}
 
 
