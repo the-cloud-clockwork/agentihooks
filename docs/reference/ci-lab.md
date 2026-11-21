@@ -1142,6 +1142,10 @@ its done criteria name are not recorded:
 | The worker exits with an `HTTPError` 4xx raised from `Client.lease` | The scheduler answered the lease call with a client error, such as a 404 when `CI_LAB_SCHEDULER_URL` names a wrong path; a retry cannot change that answer, so the process ends with the traceback without draining its running units, which are left to finish or reap | Compare the pod's `CI_LAB_SCHEDULER_URL` with the contract table above |
 | A head's units are reaped undelivered and the worker log shows a failed `git fetch` | The node mirror lacks the head and the worker has no other source | The node cache's `fetched-at` stamp and warm log, see [Verify every node](ci-lab-node-cache.md#verify-every-node) |
 | A venv build fails with `uv venv for <tree> ended with code` or `uv pip install for <tree> ended with code` | The build needs the package index, which the policy refuses | The kept build log the error names; see Limitations |
+| The worker log reads `ci-lab worker: unit <job> crashed: FileNotFoundError(2, 'No such file or directory')` and the traceback's last line names `<tree>/.github/test-requirements.lock` | The head does not track the test requirements lock, so `executors.lockfile_digest` cannot key the unit's venv. The unit never reports, its lease expires, and the [retry policy](#retry-policy) requeues it once and marks it lost on the second expiry | `git ls-tree <head> .github/test-requirements.lock` prints nothing; see [Which venv a unit gets](#which-venv-a-unit-gets) |
+| The same crash, with the traceback naming `<tree>/uv.lock` | The worker runs an image older than pull request 12536, which hashed the untracked `uv.lock`; every unit crashes this way | `kubectl -n ci-lab get deploy ci-lab-worker -o jsonpath='{.spec.template.spec.containers[0].image}'`, then roll the workers onto a release that carries the fix |
+| `ci_lab_cache_misses_total{cache="uv"}` rises once per pod for each lock digest the worker image did not bake | Those heads' `.github/test-requirements.lock` differs from the lock the image baked, so each pod builds `/work/venvs/<digest>` once for it; a pod whose baked marker matches a head's lock records no uv miss for it | Compare the two digests as in [Verify the venv keying](#verify-the-venv-keying); an image built from a commit with the same lock runs those units on the baked venv |
+| A venv build fails with `uv venv for <tree> ended with code None` or `uv pip install for <tree> ended with code None` | The step ran past the unit time limit, `Pod.timeout`, 1800 seconds, and the sandbox killed it | The kept build log the error names; no marker is written, so the next unit with that digest builds again |
 | Uploads time out or are refused | The MinIO egress rule does not match the object store's pods | `minio.namespace`, `minio.pods` and `minio.port` against `kubectl get pods -n <namespace> --show-labels` |
 | A sandboxed unit fails at bubblewrap with `Operation not permitted` | The pod runs under a seccomp profile that refuses namespace calls, or the node kernel restricts user namespaces | The pod's `seccompProfile`, then the namespace probe in the [sandbox verify](#unit-sandbox) steps on the node |
 | A worker pod is evicted for ephemeral storage | `/work`, `/tmp` and the logs passed 20 GiB | `kubectl -n ci-lab get events --field-selector reason=Evicted` |
@@ -3315,8 +3319,8 @@ scheduler enqueues a grade's misses with the grade's base and its plan's grader 
 |---|---|---|
 | `static` | head, base and grader, read only, shared by the pod's units | the gate the unit names from the grader tree's workflow, input registry and reusable workflows (see [The worker reads the same workflows](#the-worker-reads-the-same-workflows)), the venv of the head's `.github/test-requirements.lock` digest and the lease fields and secrets its steps read (see [What a gate's steps read](#what-a-gates-steps-read)) |
 | `test` | head, read only | the batch and its selected manifest records, read from the object store into its lease, the venv of the head's lockfile digest, `CI_LAB_FLAKES` and one pytest worker per slot |
-| `stats` | a private copy of the head with every file under the `[tool.mutmut]` source paths behind its trampolines | the tree as root and `CI_LAB_MUTATION_CACHE` |
-| `mutant` | the same private trampolined copy | `CI_LAB_KILLERS`, `CI_LAB_MUTATION_BUDGET`, `CI_LAB_MUTATION_CAP` and the tests that the stats records of every test module in the tree show reaching the mutant's function, with their seconds |
+| `stats` | a private copy of the head with every file under the `[tool.mutmut]` source paths behind its trampolines | the tree as root, `CI_LAB_MUTATION_CACHE` and the venv of the copy's `.github/test-requirements.lock` digest |
+| `mutant` | the same private trampolined copy | the same venv, `CI_LAB_KILLERS`, `CI_LAB_MUTATION_BUDGET`, `CI_LAB_MUTATION_CAP` and the tests that the stats records of every test module in the tree show reaching the mutant's function, with their seconds |
 
 The mutation runner runs in the sandbox as `python -m scripts.ci_lab.run_mutation REQUEST OUTPUT`
 from the private tree. A mutant unit passes only when every mutant is killed; a runner that exits
@@ -4373,9 +4377,10 @@ Limitations:
 `venvs.venv_for(lockfile_digest, tree, root, build)` returns the baked image venv when its
 marker holds the digest. The executors pass the sha256 of the head's tracked
 `.github/test-requirements.lock` (`venvs.LOCKFILE`), the file the image hashes into that marker;
-`uv.lock` is not tracked and is never read. Otherwise it builds `root/<digest>` once, under a lock
-per digest, by running uv in a `Sandbox` from `build` (`venvs.Build`: ports, whitelist and time
-limit). The executors pass `Pod.build`, the pod's ports, whitelist and unit time limit.
+`uv.lock` is not tracked and is never read. Otherwise it builds `root/<digest>` once (`root` is
+`Pod.venvs`, `/work/venvs` on the worker Deployment), under a lock per digest, by running uv
+in a `Sandbox` from `build` (`venvs.Build`: ports, whitelist and time limit). The executors pass
+`Pod.build`, the pod's ports, whitelist and unit time limit.
 
 | Part | Value |
 |---|---|
@@ -4391,6 +4396,85 @@ builds again. A worker without `uv` on its `PATH` raises
 `uv is not installed, so a venv cannot be built`. The build is isolated by environment only:
 it runs as the worker's user with no PID namespace, so it can still read and write the host
 filesystem, `/proc` included.
+
+#### Which venv a unit gets
+
+Every unit kind selects its venv the same way before it runs: the `static` and `tests` executors
+from the shared head tree, and `mutation`, for both `stats` and `mutant` units, from its private
+trampolined copy of the head. Each calls
+`venvs.venv_for(lockfile_digest(tree), tree, pod.venvs, pod.build)`, where
+`executors.lockfile_digest(tree)` is the sha256 of the bytes of
+`<tree>/.github/test-requirements.lock`:
+
+| Case | Venv the unit runs on | uv cache lookup in the unit's report |
+|---|---|---|
+| The digest equals the text of `/opt/agentihooks-venv/lockfile.sha256` | The baked image venv `/opt/agentihooks-venv`, used as it is, without taking the build lock | hit |
+| An earlier unit on this pod built the digest | `<CI_LAB_WORK_ROOT>/venvs/<digest>`, whose `lockfile.sha256` holds the digest | hit |
+| Neither | `<CI_LAB_WORK_ROOT>/venvs/<digest>`, built by the two commands above, then marked with the digest | miss |
+| The head has no `.github/test-requirements.lock` | None: `lockfile_digest` raises `FileNotFoundError` and the unit crashes before it runs | none, no report |
+
+`<CI_LAB_WORK_ROOT>` is `/work` on the worker Deployment, so a pod keeps its built venvs at
+`/work/venvs/<digest>`, the build lock of each digest at `/work/venvs/<digest>.lock` and the run
+folders of builds in progress or kept after a failure under `/work/venvs/builds`. Units on the
+same pod that need the same digest wait on that lock, and only the first one builds. `/work` is an
+`emptyDir`: built venvs count against the pod's 20 GiB `ephemeral-storage` limit, nothing removes
+the venv of a digest no head uses any more, and a new pod starts with none of them. The
+[uv cache](ci-lab-node-cache.md) under `/cache/uv` is read only to the worker, and the build's
+`env -i` drops `UV_CACHE_DIR`, so a build does not read it.
+
+The image writes the marker when it bakes the venv. `docker/ci-lab/Dockerfile` installs the
+project with `--constraint .github/test-requirements.lock --excludes .github/test-excludes.txt`
+into `/opt/agentihooks-venv`, then runs
+`sha256sum .github/test-requirements.lock | cut -d ' ' -f 1 > /opt/agentihooks-venv/lockfile.sha256`.
+The `CI lab image` workflow runs `docker/ci-lab/smoke.sh <image> <digest>` with the sha256 of the
+lock it built from, and the smoke fails when the baked marker holds any other digest. A push to
+`dev` that changes `.github/test-requirements.lock` or `.github/test-excludes.txt` runs that
+workflow and publishes the `dev` tag, which the chart's `worker.image.tag` names with
+`imagePullPolicy: Always`, so worker pods created after it carry a venv baked from the new lock.
+A head whose lock matches the commit the image was built from therefore runs on the baked venv,
+and any other lock costs one build per pod.
+
+A change to `.github/test-requirements.lock` gives the head's units a new venv: the worker
+computes a new digest and builds that venv on each pod that leases one of them. It also rekeys
+the head's static, test and stats units. The scheduler keys the `toolchain.lockfile` input of
+static and test units on the git blob id of the same file in `MirrorExpander.expand`, and the
+`runtime` of stats units on the sha256 of its bytes through `stats_cache.runtime_digest`, so no
+verdict stored under the old lock answers them. Mutant unit keys, built in `expand_mutation`,
+take neither input. A head without the lock is still expanded, with an empty `lockfile` input and
+a null stats `runtime`, and its units then crash on the worker as the last row above shows.
+
+#### Verify the venv keying
+
+From a checkout, print the digest a head's units select their venv by:
+
+```bash
+head=origin/dev
+git show "$head:.github/test-requirements.lock" | sha256sum | cut -d ' ' -f 1
+```
+
+Read the digest the running worker image baked, and the venvs that pod built:
+
+```bash
+pod=$(kubectl -n ci-lab get pods -l app.kubernetes.io/component=worker \
+  -o jsonpath='{.items[0].metadata.name}')
+kubectl -n ci-lab exec "$pod" -- cat /opt/agentihooks-venv/lockfile.sha256
+kubectl -n ci-lab exec "$pod" -- sh -c 'ls /work/venvs; cat /work/venvs/*/lockfile.sha256'
+```
+
+When the first command and the baked marker print the same digest, the head's units run on the
+baked venv and `/work/venvs` gains no folder for it. Otherwise the first unit of that head on the
+pod builds `/work/venvs/<digest>`, and its marker prints the digest once the build ends.
+`executors.settings` creates `/work/venvs` when the worker starts, so on a pod that has built no
+venv `ls` prints nothing and `cat` fails with `No such file or directory` on the unmatched
+pattern. The uv lookups reach the scheduler's counters, read as in
+[Verify the running service](#verify-the-running-service):
+
+```bash
+curl -fsS http://lab:9108/metrics | grep -E '^ci_lab_cache_(hits|misses)_total\{cache="uv"\}'
+```
+
+Misses rise once per pod and lock while a new lock is first leased, and hits rise for every other
+unit.
 
 ### Use it
 
