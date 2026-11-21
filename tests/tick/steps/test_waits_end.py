@@ -182,4 +182,7 @@ def test_a_raising_wait_does_not_stop_other_agents_or_pass_completion(
     assert "Your wait on task done, now done has ended." in notices[0].text
     assert inbox.inbox(bad) == []
     assert inbox.inbox(pending) == []
-    assert f"wait of {bad} failed: broken wait record" in capsys.readouterr().err
+    errors = capsys.readouterr().err
+    assert f"wait of {bad} failed: broken wait record" in errors
+    if failure == "push":
+        assert f"push wait of {bad} failed: broken wait record" in errors
