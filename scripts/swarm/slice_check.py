@@ -2,6 +2,7 @@
 
 import re
 from dataclasses import dataclass
+from typing import Any
 
 from scripts.swarm.store import SwarmError
 from scripts.swarm_ledger import ledger_kinds, plan_shape
@@ -35,6 +36,16 @@ def plan_task(phase, doc):
     return next(t for t in doc["tasks"] if t.get("phase") == phase["id"] and ledger_kinds.kind(t) == "plan")
 
 
+def short(text: str, words: int = MIN_WORDS) -> bool:
+    """Whether ``text`` holds fewer than ``words`` words."""
+    return len(text.split()) < words
+
+
+def done_when(text: str) -> bool:
+    """Whether ``text`` carries a done when sentence."""
+    return DONE_WHEN_RE.search(text) is not None
+
+
 def check(phase, doc, limits):
     known = {t["id"]: t for t in doc["tasks"]}
     ids = slice_ids(plan_task(phase, doc))
@@ -58,12 +69,12 @@ def _count(ids, limits):
     return []
 
 
-def _task(task, phase, doc, limits):
+def _task(task: dict[str, Any], phase: dict[str, Any], doc: dict[str, Any], limits: Limits) -> list[str]:
     tid, kind, description = task["id"], ledger_kinds.kind(task), task.get("description", "")
     problems = []
-    if len(description.split()) < MIN_WORDS:
+    if short(description):
         problems.append(f"Task {tid} has a description under {MIN_WORDS} words.")
-    elif not DONE_WHEN_RE.search(description):
+    elif not done_when(description):
         problems.append(f"Task {tid} has no done when sentence.")
     contract = task.get("contract") or {}
     if kind not in CODE_KINDS and not all(contract.get(key) for key in ledger_kinds.CONTRACT_KEYS):
