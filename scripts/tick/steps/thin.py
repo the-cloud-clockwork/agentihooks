@@ -1,16 +1,107 @@
-"""The thin steps of the tick."""
+"""The thin task pass: queue one planner enhancement task for each open engineer or ci task whose text is too thin
+to build from, mark the task as needing enhancement under a guard and tell the master once."""
 
 from collections.abc import Callable
+from itertools import takewhile
 from typing import Any
 
+from scripts.swarm import thin_task
+from scripts.swarm.ledger_client import LedgerRefused
+from scripts.swarm_ledger import ledger_comments
 from scripts.tick import registry
+from scripts.tick.deadline import Deadline
+from scripts.tick.ports.tools import Tools
 from scripts.tick.step import Lane
-from scripts.tick.steps import CallStep
+from scripts.tick.steps import CallStep, hook_domains
+
+Get = Callable[[str], Any]
+SENDER = "swarm"
+LANES = ("eng", "ci")
+NEEDED = {"enhancement": "needed"}
+UNCHECKED = {"enhancement": ""}
+TITLE = "Plan a thin task before an engineer claims it"
+DISTINCT = "Each thin task gets its own enhancement plan task, keyed by the task it enhances."
 
 
-def _thin_task_pass(tick: Any, get: Callable[[str], Any]) -> list[str]:
-    """Return the actions of the thin task pass step, given the tick module and a reader of the pass state."""
-    return []
+def _thin_task_pass(tick: Any, get: Get) -> list[str]:
+    """Queue an enhancement plan task for each thin open engineer or ci task with an empty enhancement field until
+    the step deadline is spent, then tell the master about every task this pass queued."""
+    tools: Tools = get("tools")
+    deadline: Deadline = get("deadline")
+    tasks: list[dict[str, Any]] = get("doc")["tasks"]
+    ids = {task["id"] for task in tasks}
+    lines: list[str] = []
+    queued: list[str] = []
+    for task in takewhile(lambda _: not deadline.expired, filter(_unchecked, tasks)):
+        if problems := thin_task.thin(task):
+            line, marked = _enhance(tools, deadline, task, problems, ids)
+            lines.append(line)
+            queued += [task["id"]] if marked else []
+    if queued:
+        get("inbox").send(SENDER, f"master@{get('slug')}", _told(queued), fyi=True)
+    return lines
+
+
+def _unchecked(task: dict[str, Any]) -> bool:
+    """Return whether ``task`` is an open engineer or ci task, a missing lane reading as engineer, that no thin check
+    has marked."""
+    return task.get("state") == "open" and task.get("lane", "eng") in LANES and not task.get("enhancement")
+
+
+def _enhance(
+    tools: Tools, deadline: Deadline, task: dict[str, Any], problems: list[str], ids: set[str]
+) -> tuple[str, bool]:
+    """Add the enhancement task of the thin ``task`` unless ``ids`` holds it, then mark the task as needing
+    enhancement only while its field is empty; return the action line and whether this pass marked it."""
+    tid, enhancement = task["id"], thin_task.ENHANCE.format(task["id"])
+    try:
+        if enhancement not in ids:
+            tools.ledger.mutate([_addition(task, problems)], deadline=deadline)
+        held = tools.ledger.update_task(tid, NEEDED, if_match=UNCHECKED, deadline=deadline)
+    except LedgerRefused as exc:
+        return f"refused the enhancement of {tid}: {exc}", False
+    if held.get("enhancement") != NEEDED["enhancement"]:
+        return f"left {tid}: another writer marked its enhancement first", False
+    return f"queued {enhancement} for thin task {tid}", True
+
+
+def _addition(task: dict[str, Any], problems: list[str]) -> dict[str, object]:
+    """Return the task add operation of the plan lane task that enhances ``task``, in its phase when it has one."""
+    named = f"Plan the thin task {task['title']}"
+    operation: dict[str, object] = {
+        "op": "task_add",
+        "by": SENDER,
+        "task": thin_task.ENHANCE.format(task["id"]),
+        "title": TITLE if ledger_comments.problems(named, "item") else named,
+        "lane": "plan",
+        "kind": "plan",
+        "description": _brief(task, problems),
+        "enhances": task["id"],
+        "not_duplicate": DISTINCT,
+    }
+    return operation | ({"phase": task["phase"]} if task.get("phase") else {})
+
+
+def _brief(task: dict[str, Any], problems: list[str]) -> str:
+    """Return the enhancement task description: the rules ``task`` fails and its current description."""
+    return " ".join(
+        [
+            f"Write a full plan section for task {task['id']} before an engineer claims it.",
+            "It fails these rules:",
+            *problems,
+            "Its current description:",
+            task.get("description") or "none.",
+        ]
+    )
+
+
+def _told(queued: list[str]) -> str:
+    """Return the master notice naming each enhancement task this pass queued."""
+    names = ", ".join(thin_task.ENHANCE.format(tid) for tid in queued)
+    return (
+        f"For your information: the thin task check queued {names} for a planner; "
+        "each enhanced task is held from engineer and ci claims until its plan closes."
+    )
 
 
 registry.register(
@@ -19,7 +110,7 @@ registry.register(
         "wrapper phases",
         _thin_task_pass,
         needs=frozenset(),
-        reads=frozenset(),
+        reads=hook_domains("doc"),
         writes=frozenset(),
         lane=Lane("tick"),
         effects=frozenset({"inbox", "ledger"}),

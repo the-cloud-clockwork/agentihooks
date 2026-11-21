@@ -98,6 +98,13 @@ def _guards(found: Pass) -> list[tuple[object, ...]]:
     return [args for name, args in found.calls() if name == "update_task"]
 
 
+def _notice(names: str) -> str:
+    return (
+        f"For your information: the thin task check queued {names} for a planner; "
+        "each enhanced task is held from engineer and ci claims until its plan closes."
+    )
+
+
 @pytest.mark.feature("tick-thin-task-pass")
 def test_thin_task_pass() -> None:
     """The thin task pass step registers in group wrapper phases on the tick lane every 120 seconds, reading the
@@ -129,14 +136,15 @@ def test_a_thin_open_task_gets_one_enhancement_task_on_the_first_pass_and_none_o
         "phase": "p1",
         "enhances": "t1",
     }
-    assert all(rule in added["description"] for rule in [*thin_task.thin(THIN), THIN["description"]])
-    assert added["not_duplicate"]
+    assert added["description"] == (
+        "Write a full plan section for task t1 before an engineer claims it. It fails these rules: "
+        f"{' '.join(thin_task.thin(THIN))} Its current description: Fix the claim."
+    )
+    assert added["not_duplicate"] == "Each thin task gets its own enhancement plan task, keyed by the task it enhances."
     assert _guards(first) == [("t1", NEEDED, (), UNCHECKED)]
     assert [name for name, _ in first.calls()] == ["mutate", "update_task"]
     assert first.lines == ["queued enhance-t1 for thin task t1"]
-    [(sender, address, text, fyi)] = first.inbox.sent
-    assert (sender, address, fyi) == ("swarm", f"master@{SLUG}", True)
-    assert "enhance-t1" in text
+    assert first.inbox.sent == [("swarm", f"master@{SLUG}", _notice("enhance-t1"), True)]
     enhancement = {"id": "enhance-t1", "state": "open", "lane": "plan", "kind": "plan", "enhances": "t1"}
     second = _run([{**THIN, **NEEDED}, enhancement])
     assert (second.lines, second.calls(), second.inbox.sent) == ([], [], [])
@@ -195,8 +203,7 @@ def test_a_refused_write_is_reported_and_the_pass_goes_on_to_the_next_task() -> 
     found = _run([THIN, {**THIN, "id": "t2"}], ledger)
     assert found.lines == ["refused the enhancement of t1: task_add refused", "queued enhance-t2 for thin task t2"]
     assert _guards(found) == [("t2", NEEDED, (), UNCHECKED)]
-    [(_, _, text, _)] = found.inbox.sent
-    assert "enhance-t2" in text and "enhance-t1" not in text
+    assert found.inbox.sent == [("swarm", f"master@{SLUG}", _notice("enhance-t2"), True)]
 
 
 @pytest.mark.feature("tick-thin-task-pass")
@@ -205,6 +212,23 @@ def test_a_title_the_ledger_would_refuse_falls_back_to_a_plain_title() -> None:
     found = _run([{**THIN, "title": "word " * 41}])
     [added] = _added(found)
     assert added["title"] == "Plan a thin task before an engineer claims it"
+
+
+@pytest.mark.feature("tick-thin-task-pass")
+def test_two_thin_tasks_are_both_queued_and_named_in_one_master_notice() -> None:
+    """Two thin tasks queued in one pass reach the master as a single notice naming both enhancement tasks."""
+    found = _run([THIN, {**THIN, "id": "t2"}])
+    assert found.lines == ["queued enhance-t1 for thin task t1", "queued enhance-t2 for thin task t2"]
+    assert found.inbox.sent == [("swarm", f"master@{SLUG}", _notice("enhance-t1, enhance-t2"), True)]
+
+
+@pytest.mark.feature("tick-thin-task-pass")
+def test_a_thin_task_with_no_phase_or_description_gets_an_enhancement_task_with_neither() -> None:
+    """A thin task with no phase gets an enhancement task with no phase, whose description says it had none."""
+    task = {key: value for key, value in THIN.items() if key not in ("phase", "description")}
+    [added] = _added(_run([task]))
+    assert "phase" not in added
+    assert added["description"].endswith("Its current description: none.")
 
 
 @pytest.mark.feature("tick-thin-task-pass")

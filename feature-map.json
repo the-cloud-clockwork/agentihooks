@@ -3573,6 +3573,8 @@
         "tests/tick/steps/test_thin_task_pass.py::test_a_task_marked_elsewhere_first_is_left_and_the_master_is_not_told",
         "tests/tick/steps/test_thin_task_pass.py::test_a_refused_write_is_reported_and_the_pass_goes_on_to_the_next_task",
         "tests/tick/steps/test_thin_task_pass.py::test_a_title_the_ledger_would_refuse_falls_back_to_a_plain_title",
+        "tests/tick/steps/test_thin_task_pass.py::test_two_thin_tasks_are_both_queued_and_named_in_one_master_notice",
+        "tests/tick/steps/test_thin_task_pass.py::test_a_thin_task_with_no_phase_or_description_gets_an_enhancement_task_with_neither",
         "tests/tick/steps/test_thin_task_pass.py::test_a_spent_deadline_takes_no_task"
       ]
     },
