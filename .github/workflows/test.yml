@@ -1316,13 +1316,15 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           COLLECTION_JOB: test-count (${{ matrix.python-version }})
+          COLLECTION_STEP: Upload the early collection
         run: |
           while :; do
             state="$(python -m scripts.ci_budget.rate_limit --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?filter=latest&per_page=100" \
-              --jq ".jobs[] | select(.name == \"$COLLECTION_JOB\") | \"\(.status) \(.conclusion)\"")" || state=""
+              --jq ".jobs[] | select(.name == \"$COLLECTION_JOB\") | \"\(.status) \(.conclusion) \([.steps[]? | select(.name == \"$COLLECTION_STEP\") | .conclusion][0])\"")" || state=""
             case "$state" in
-              "completed success") exit 0 ;;
+              "completed success"*) exit 0 ;;
               completed*) echo '::error::The early collection did not succeed.'; exit 1 ;;
+              *" success") exit 0 ;;
             esac
             sleep 15
           done
@@ -3415,7 +3417,7 @@ jobs:
           changed=false
           base="$(git -C "$RUNNER_TEMP/base" rev-parse HEAD)"
           for path in scripts/ci_mutation tests/mutation_self_plant hooks/context/conditions.py scripts/ci_cpu_quota.py \
-            pyproject.toml pytest.ini setup.cfg tox.ini uv.lock .coveragerc; do
+            pyproject.toml pytest.ini setup.cfg tox.ini .github/test-requirements.lock .coveragerc; do
             if ! git diff --quiet "$base" HEAD -- "$path"; then
               echo "Changed: $path"
               changed=true

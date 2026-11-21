@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from importlib import import_module
 from typing import Any, cast
 
-from scripts.swarm import waits
+from scripts.swarm import seat_heads, waits
 from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.tick import registry
 from scripts.tick.adapters.calls import LedgerCalls, RuntimeCalls
@@ -604,9 +604,10 @@ def _conversations(slug: str, store: Any, runtime: Any) -> None:
 
 
 def _session_models(slug: Any, store: Any) -> Any:
-    for agent in store.agents(slug):
+    listed = store.agents(slug)
+    for agent in listed:
         reported = tick.session_model.apply(agent, tick.session_model.get(store.redis, slug, agent.name))
-        if reported != agent:
+        if reported != agent and not seat_heads.superseded(agent, listed):
             store.put_agent(slug, reported)
 
 

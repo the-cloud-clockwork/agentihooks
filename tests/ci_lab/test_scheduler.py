@@ -68,6 +68,7 @@ BASE = "c" * 40
 TREE = "d" * 40
 OTHER_TREE = "e" * 40
 LOCK = ".github/test-requirements.lock"
+APP_SETTINGS = {"GITHUB_APP_ID": "1", "GITHUB_APP_INSTALLATION_ID": "2", "GITHUB_APP_PRIVATE_KEY": "fixture"}
 
 Post = tuple[str, str, str, str | None, Output, bool]
 
@@ -2714,7 +2715,7 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
         scheduler.MINIO_SECRET_KEY: "secret",
         scheduler.MINIO_BUCKET: "bucket",
         scheduler.contract.CONTROL_TOKEN: "tok",
-    }
+    } | APP_SETTINGS
     monkeypatch.setattr(redis.Redis, "from_url", from_url)
     monkeypatch.setattr(boto3, "client", s3)
     provisioning = config.BusConfig(backend="nats", url="nats://lab")
@@ -2862,6 +2863,7 @@ def test_main_rebuilds_the_verdict_index_before_serving_only_when_reindex_on_sta
         scheduler.MINIO_ACCESS_KEY: "access",
         scheduler.MINIO_SECRET_KEY: "secret",
         scheduler.MINIO_BUCKET: "bucket",
+        **APP_SETTINGS,
     } | setting
     stdout = Stdout()
     monkeypatch.setattr(redis.Redis, "from_url", from_url)

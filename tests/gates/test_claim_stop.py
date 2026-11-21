@@ -534,6 +534,25 @@ def test_a_stop_on_pending_checks_turns_a_live_bare_wait_into_the_checks_wait(ri
     assert idle.wait(rig.store.redis, SLUG, ME)["on"] == {"kind": "checks", "target": URL}
 
 
+@pytest.mark.feature("claim-stop-keeps-merge-wait")
+def test_a_stop_on_pending_checks_keeps_a_live_merge_wait_on_the_queued_pull_request(rig: Any) -> None:
+    rig.task.update(state="pr", pr_url=URL)
+    rig.pulls[URL] = PullRequest("OPEN", None, 1, False, False, queued=True)
+    on = {"kind": "merge", "target": URL}
+    until = rig.clock[0] + 60 * 60_000
+    idle.declare_wait(rig.store.redis, SLUG, ME, until, f"merge of {URL}", rig.clock[0] - 1, on=on)
+    rig.clock[0] += 1_000
+    assert rig.stop().allowed
+    held = idle.wait(rig.store.redis, SLUG, ME)
+    assert held is not None
+    assert (held["on"], held["reason"], held["until"]) == (on, f"merge of {URL}", until)
+    rig.pulls[URL] = PullRequest("OPEN", None, 1, False, True, queued=True)
+    rig.clock[0] += 1_000
+    assert rig.stop().allowed
+    held = idle.wait(rig.store.redis, SLUG, ME)
+    assert held is not None and held["on"] == on
+
+
 def test_a_live_checks_wait_on_another_pull_request_reads_that_pull_request(rig, tmp_path):
     other = "https://github.com/o/r/pull/8"
     rig.task.update(state="pr", pr_url=URL)

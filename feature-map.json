@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "credential-guard-refuses-brace-environ-leaves",
+      "origin": "regression",
+      "ordered_at": "2026-11-20",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-credential-guard-last-word-brace",
+      "behaviour": "The credential guard refuses a Bash command whose process environment path under proc carries a brace expansion in its last segment, either a whole group in that segment or a group opened in an earlier segment that closes there, and a brace word read from a proc working directory, the same way as the literal environ name.",
+      "seam": "hooks.context.credential_guard.leaf_names_environ, read by hooks.context.credential_guard.decide",
+      "tests": [
+        "tests/test_credential_guard.py::test_a_brace_in_the_last_segment_of_a_proc_environ_path_is_refused"
+      ]
+    },
+    {
       "id": "lab-worker-manifest",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2808",
@@ -618,6 +629,19 @@
       "seam": "runner.main, after slots.serve and exits.serve",
       "tests": [
         "tests/hub/test_runner.py::test_the_hub_marks_itself_serving_only_after_its_slots_and_exits_responders_subscribe"
+      ]
+    },
+    {
+      "id": "hub-idle-wait-rides-out-redis-outage",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-busy-reply-retry",
+      "behaviour": "When Redis refuses the hub's idle scheduler wait, with a busy reply or a connection error, the hub waits out its idle period on the local clock and runs its next pass. Only a refusal that outlasts the Redis grace window ends the hub, and a wait Redis answers or a pass that handles work without failing ends the outage so a later refusal opens a new window.",
+      "seam": "runner._run idle wait through runner._idle",
+      "tests": [
+        "tests/hub/test_runner.py::test_the_hub_waits_out_a_redis_refusal_of_its_idle_wait_on_the_local_clock",
+        "tests/hub/test_runner.py::test_a_redis_refusal_of_the_idle_wait_past_the_grace_window_still_ends_the_hub",
+        "tests/hub/test_runner.py::test_an_answered_idle_wait_ends_the_redis_outage_so_a_later_refusal_opens_a_new_window",
+        "tests/hub/test_runner.py::test_a_pass_that_handles_work_ends_the_redis_outage_so_a_later_refusal_opens_a_new_window"
       ]
     },
     {
@@ -2169,6 +2193,30 @@
       ]
     },
     {
+      "id": "master-seat-durable-crons",
+      "origin": "regression",
+      "ordered_at": "2026-11-20",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-seat-durable-crons",
+      "behaviour": "Swarm start and the front door master's orchestrator join keep one code owned list of standing master seat crons on the host agentihooks scheduler, aimed at the front door seat inbox so they outlive every master recycle: the master loop, the drift check and the safety nudge always, the progress sheet while its master seat script exists and the progress email due check while its state is enabled. A rerun adds nothing, a live cron already aimed at the seat on a listed schedule is adopted and its duplicates cancelled, a backend master's join adds none, a stopping or stopped swarm keeps none, swarm stop, stop now and close cancel every cron aimed at the front door seat, and a scheduler or store this host cannot reach leaves a warning without failing the command.",
+      "seam": "agentihooks swarm <slug> start|stop|close and agentihooks api join --role orchestrator, observed through the open crons agentihooks cron list shows aimed at master@<slug>",
+      "tests": [
+        "tests/swarm/test_seat_crons.py::test_start_puts_the_standing_seat_crons_on_the_scheduler",
+        "tests/swarm/test_seat_crons.py::test_a_second_start_keeps_the_same_seat_crons",
+        "tests/swarm/test_seat_crons.py::test_the_front_door_master_join_ensures_one_set",
+        "tests/swarm/test_seat_crons.py::test_only_the_front_door_master_join_puts_seat_crons",
+        "tests/swarm/test_seat_crons.py::test_hand_made_seat_crons_are_adopted_and_their_duplicates_cancelled",
+        "tests/swarm/test_seat_crons.py::test_the_progress_sheet_cron_follows_the_master_seat_script",
+        "tests/swarm/test_seat_crons.py::test_the_progress_email_cron_follows_its_enabled_state",
+        "tests/swarm/test_seat_crons.py::test_an_unreadable_or_unset_email_state_wants_no_email_cron",
+        "tests/swarm/test_seat_crons.py::test_stop_and_close_leave_no_seat_cron",
+        "tests/swarm/test_seat_crons.py::test_a_close_handed_to_the_live_master_keeps_the_seat_crons",
+        "tests/swarm/test_seat_crons.py::test_a_join_on_an_ended_swarm_cancels_the_seat_crons",
+        "tests/swarm/test_seat_crons.py::test_ensure_holds_the_seat_crons_lock",
+        "tests/swarm/test_seat_crons.py::test_an_unreachable_scheduler_warns_and_start_and_stop_go_on",
+        "tests/swarm/test_seat_crons.py::test_an_unreachable_swarm_store_warns_and_the_join_goes_on"
+      ]
+    },
+    {
       "id": "master-launch-swarm-model",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2711",
@@ -2321,6 +2369,19 @@
         "tests/swarm_ledger/test_host_entries.py::test_a_purged_ledger_keeps_no_host_entry",
         "tests/swarm_ledger/test_revision_reads.py::test_a_revision_read_of_a_non_record_path_reads_only_its_rows",
         "tests/swarm_ledger/test_revision_reads.py::test_ack_reads_the_revision_from_the_metadata_rows_alone"
+      ]
+    },
+    {
+      "id": "ledger-refresh-batched-reads",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-refresh-batched-reads",
+      "behaviour": "Incremental ledger refresh reads reached children in one query per container regardless of changed sibling count, preserves stored order and refreshes the host copy within eight generations.",
+      "seam": "scripts.swarm_ledger.repository.refresh.patched and rebuilt, scripts.swarm_ledger.repository.host_entries.Copies",
+      "tests": [
+        "tests/swarm_ledger/test_sqlite_refresh.py::test_stale_object_refresh_reads_changed_siblings_in_one_query",
+        "tests/swarm_ledger/test_sqlite_refresh.py::test_stale_array_refresh_looks_up_changed_children_in_one_query",
+        "tests/swarm_ledger/test_host_entries.py::test_default_host_copy_catches_up_within_eight_generations",
+        "tests/swarm_ledger/test_host_entries.py::test_a_cold_reader_of_a_stale_host_copy_looks_up_changed_keys_in_a_fixed_number_of_queries"
       ]
     },
     {
@@ -3696,6 +3757,18 @@
       ]
     },
     {
+      "id": "hive-resume-start-failure",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2679",
+      "behaviour": "A resume order whose process cannot start is answered failed by the hive command poll with the error type, so the hub hands the task to a fresh agent, the poll finishes its batch and the hive beat runs to its end with its join report heartbeat instead of ending the hive run loop.",
+      "seam": "scripts.hive.orders.Consumer.poll_commands resume start and scripts.hive.daemon.beat",
+      "rules": ["hive-resume-start-unguarded"],
+      "tests": [
+        "tests/hive/test_resume_order.py::test_a_resume_order_process_that_cannot_start_is_answered_failed_by_the_command_poll",
+        "tests/hive/test_daemon.py::test_a_beat_whose_resume_order_process_cannot_start_still_heartbeats_to_its_end"
+      ]
+    },
+    {
       "id": "swarm-dead-resume-cap",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-dead-resume-attempt-cap",
@@ -3823,14 +3896,17 @@
     {
       "id": "swarm-push-wait",
       "origin": "inventory",
-      "behaviour": "A push by a task agent gets a checked wait on its pull request from the tick, and an agent that never declared a wait is woken on merge. A push of one commit to a lab grade ref with no pull request gets a wait on the lab grade of its head once the swarm's lab holds one, and that agent is woken when the grade closes.",
+      "behaviour": "A push by a task agent gets a checked wait on its pull request from the tick, and an agent that never declared a wait is woken on merge. A push of one commit to a lab grade ref with no pull request gets a wait on the lab grade of its head once the swarm's lab holds one, and that agent is woken when the grade closes. A swarm publish through the lab records its accepted head and declares the checked lab wait before grade polling; the outer publish hook preserves the precise record. The tick keeps that active grade wait ahead of checks on an existing pull request until the grade wait ends.",
       "seam": "The pull request wait hook and tick pass",
       "tests": [
         "tests/swarm/test_pr_wait.py::test_the_tick_sets_a_checked_wait_on_the_pushed_task_pull_request",
         "tests/swarm/test_pr_wait.py::test_an_agent_that_never_runs_swarm_wait_is_woken_on_merge",
         "tests/swarm/test_pr_wait.py::test_the_hook_marks_a_grade_push_with_its_head",
         "tests/swarm/test_pr_wait.py::test_the_tick_sets_a_lab_wait_on_the_grade_of_a_grade_push",
-        "tests/swarm/test_pr_wait.py::test_an_agent_that_pushes_to_the_lab_is_woken_when_its_grade_closes"
+        "tests/swarm/test_pr_wait.py::test_an_agent_that_pushes_to_the_lab_is_woken_when_its_grade_closes",
+        "tests/swarm/test_publish.py::test_lab_publication_records_its_head_and_wait_before_polling",
+        "tests/swarm/test_pr_wait.py::test_outer_publish_preserves_a_precise_head_only_without_a_push_destination",
+        "tests/swarm/test_pr_wait.py::test_only_the_live_lab_wait_for_the_pushed_head_precedes_existing_pr_checks"
       ]
     },
     {
@@ -3970,6 +4046,16 @@
       "tests": [
         "tests/swarm/test_health.py::test_over_monitoring_names_the_agent_and_its_counts",
         "tests/swarm/test_health.py::test_the_master_gets_a_looser_over_monitoring_limit_than_other_agents"
+      ]
+    },
+    {
+      "id": "claim-stop-keeps-merge-wait",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-claim-stop-keeps-merge-wait",
+      "behaviour": "A worker's stop keeps its live merge wait on its own queued pull request while any check is still pending, instead of replacing it with a checks wait the tick ends on green, so the stop passes while the pull request sits in the merge queue.",
+      "seam": "ClaimStop.decide in scripts.gates.claim_stop",
+      "tests": [
+        "tests/gates/test_claim_stop.py::test_a_stop_on_pending_checks_keeps_a_live_merge_wait_on_the_queued_pull_request"
       ]
     },
     {
@@ -5136,6 +5222,17 @@
       "tests": [
         "tests/test_ci_tests_start.py::test_the_grade_job_waits_for_a_tests_run_github_creates_late",
         "tests/test_ci_tests_start.py::test_the_grade_job_reports_a_tests_run_never_created_inside_its_timeout"
+      ]
+    },
+    {
+      "id": "split-starts-on-the-early-collection-upload",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-queue-first-shard-lead",
+      "behaviour": "The Tests split job passes its early collection guard at the first jobs API poll that shows the test-count job still running with its Upload the early collection step concluded success, so the unit shards no longer wait for the count job's tail steps. A test-count job the guard sees completed keeps the old verdict: it passes only on success, and any other completion fails the guard before any artifact is read, even after its upload step succeeded.",
+      "seam": "the split job's Require successful early collection step and the COLLECTION_STEP it names in test-count",
+      "tests": [
+        "tests/test_ci_workflow.py::test_split_starts_once_the_early_collection_upload_succeeds_while_the_count_job_runs",
+        "tests/test_ci_workflow.py::test_split_waits_on_the_count_step_that_uploads_the_collection_it_downloads"
       ]
     },
     {
@@ -6610,6 +6707,17 @@
       ]
     },
     {
+      "id": "controller-survives-ledger-storage-failure",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-pass-db-error",
+      "behaviour": "When a controller pass raises sqlite3.Error from the in process ledger repository, such as the sqlite3.DatabaseError connection already closed that a Postgres session ended at its idle in transaction limit raises, the run loop logs it, journals the pass with outcome ledger_storage, waits one tick as backoff and starts the next pass without exiting the process; a single pass run reports it as exit code 1.",
+      "seam": "scripts.swarm.controller.main run loop",
+      "tests": [
+        "tests/swarm/test_controller_ledger_timeout.py::test_controller_run_backs_off_after_a_ledger_storage_failure_and_runs_the_next_pass",
+        "tests/swarm/test_controller_ledger_timeout.py::test_controller_run_once_reports_a_ledger_storage_failure_as_a_failed_pass"
+      ]
+    },
+    {
       "id": "controller-pass-end-line",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-pass-end-log",
@@ -7996,6 +8104,18 @@
       ]
     },
     {
+      "id": "codex-viewer-waits-for-an-admitted-launch",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-pane-attach-refused",
+      "behaviour": "A native Codex viewer started on a hive pane while its execution is admitted, reading starting with an execution id but no harness or transport yet, keeps waiting until the Codex supervisor publishes harness codex and the app server transport and then attaches to the connected thread, instead of refusing with no app server and dropping the pane to a shell; a running execution with no harness and a classified Codex execution without the app server transport still refuse.",
+      "seam": "scripts.codex_session.attach.recorded read through attach.wait_attachable",
+      "rules": ["codex-attach-before-classification"],
+      "tests": [
+        "tests/codex_session/test_attach.py::test_an_admitted_execution_waits_for_its_harness_and_then_attaches",
+        "tests/codex_session/test_attach.py::test_a_classified_or_running_execution_without_an_app_server_still_refuses"
+      ]
+    },
+    {
       "id": "master-primary-login-reserve-2pct",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-reserve-2pct",
@@ -8247,7 +8367,7 @@
       "id": "stall-master-queue",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-stall-hotfix-route",
-      "behaviour": "While the spawn stall health finding is open, swarm merge queue accepts the master seat for a pull request whose task is urgent and admitted by the open focus (a focused task or a task the focus waits on), or any urgent task when no focus has open work, and records the stall route and task in the queue journal; without a stall, an urgent rank, an open task or the focus, the master is still refused, and the stall never opens a dequeue.",
+      "behaviour": "While the spawn stall health finding is open, swarm merge queue accepts the master seat for a pull request whose task is urgent and admitted by the open focus (a focused task or a task the focus waits on), or any urgent task when no focus has open work, and records the stall route and task in the queue journal; without an urgent rank, an open task or the focus, the master is still refused, and the stall never opens a dequeue.",
       "seam": "swarm merge queue through cli.cmd_merge and stall_queue.route",
       "tests": [
         "tests/swarm/test_merge_queue.py::test_a_planted_spawn_stall_lets_the_master_queue_a_focused_urgent_pull_request",
@@ -8255,6 +8375,25 @@
         "tests/swarm/test_merge_queue.py::test_the_master_still_cannot_queue_without_a_stall_or_a_focused_urgent_task",
         "tests/swarm/test_merge_queue.py::test_the_stall_route_never_opens_a_dequeue_for_the_master",
         "tests/swarm/test_merge_queue.py::test_a_phase_focus_admits_only_the_urgent_tasks_of_its_phase_to_the_stall_route"
+      ]
+    },
+    {
+      "id": "focused-urgent-master-queue",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-queue-focused-urgent",
+      "behaviour": "With no spawn stall finding open, swarm merge queue accepts the master seat for a pull request whose task is open, urgent and admitted by the open focus, or any urgent task when no focus has open work, on any head branch, and records the focused urgent route and task in the queue journal; the spawn stall and master freeze routes keep their names when they apply, a normal rank, a done task, a task outside the focus or a pull request no task names leaves the master refused, and the route never opens a dequeue.",
+      "seam": "swarm merge queue through cli.cmd_merge and master_queue.route against ledger.tasks_targeting and freeze.admitted",
+      "tests": [
+        "tests/swarm/test_merge_queue.py::test_the_master_queues_a_focused_urgent_pull_request_on_any_branch_with_no_spawn_stall",
+        "tests/swarm/test_merge_queue.py::test_with_no_focus_open_the_master_queues_any_urgent_pull_request_with_no_spawn_stall",
+        "tests/swarm/test_merge_queue.py::test_with_no_spawn_stall_the_master_is_refused_without_a_focused_urgent_task",
+        "tests/swarm/test_merge_queue.py::test_the_focused_urgent_route_never_opens_a_dequeue_for_the_master",
+        "tests/swarm/test_focused_urgent.py::test_an_open_urgent_task_inside_the_focus_is_the_task_of_its_pull_request",
+        "tests/swarm/test_focused_urgent.py::test_the_first_urgent_task_inside_the_focus_wins_over_an_earlier_one_outside_it",
+        "tests/swarm/test_focused_urgent.py::test_a_pull_request_without_an_open_focused_urgent_task_has_no_task",
+        "tests/swarm/test_focused_urgent.py::test_with_no_focus_open_any_urgent_task_is_the_task_of_its_pull_request",
+        "tests/swarm/test_focused_urgent.py::test_the_ledger_state_is_read_only_when_an_urgent_task_names_the_pull_request",
+        "tests/swarm/test_focused_urgent.py::test_focused_admits_a_task_inside_the_open_focus_or_any_task_with_no_focus_open"
       ]
     },
     {
@@ -8309,6 +8448,24 @@
         "tests/test_ci_launch_hotfix.py::test_the_grade_help_describes_the_route",
         "tests/test_ci_launch_hotfix.py::test_only_the_launch_hotfix_label_decides_the_queue_entry",
         "tests/test_ci_launch_hotfix.py::test_a_pull_without_labels_reads_as_unlabelled"
+      ]
+    },
+    {
+      "id": "promotion-covering-task-holds-cause",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-promo-watch-master-fixer-held",
+      "behaviour": "A task that carries covers_job, the failed dev job it fixes, holds that job's cause in the promotion watch red pass while it is not done, whoever filed it, so a red dev push run on that job files no promotion task, raises no alert and sends the master nothing; a done covering task holds nothing, other failed jobs still file, and the promotion task jobs hash keeps holding causes as before. The ledger keeps covers_job as a string through task add, task set and the task add operation schema.",
+      "seam": "promotion_watch.refresh on a red dev push run, through _held_causes; ledger_tasks task_add and task_update; the task add operation schema; the ledger task add and task set commands",
+      "tests": [
+        "tests/swarm/test_promotion_watch.py::test_a_task_that_covers_the_failed_job_holds_its_cause_without_a_promotion_task",
+        "tests/swarm/test_promotion_watch.py::test_a_done_task_that_covered_the_failed_job_no_longer_holds_its_cause",
+        "tests/swarm/test_promotion_watch.py::test_a_task_covering_one_job_still_lets_the_other_failed_jobs_file",
+        "tests/swarm/test_promotion_watch.py::test_a_task_in_a_former_owner_ledger_that_covers_the_failed_job_holds_its_cause",
+        "tests/swarm_ledger/test_covers_job_field.py::test_a_task_added_or_set_with_covers_job_keeps_the_job",
+        "tests/swarm_ledger/test_covers_job_field.py::test_covers_job_must_be_a_string",
+        "tests/swarm_ledger/test_covers_job_field.py::test_the_task_add_operation_schema_accepts_covers_job",
+        "tests/swarm_ledger/test_covers_job_field.py::test_task_add_and_set_mark_the_job_a_task_covers",
+        "tests/swarm_ledger/test_covers_job_field.py::test_task_help_says_the_covers_job_value_must_match_the_alert"
       ]
     },
     {
@@ -9715,6 +9872,17 @@
       ]
     },
     {
+      "id": "lab-stats-unit-key-head-lockfile",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2657",
+      "behaviour": "A lab stats unit key takes its runtime from the head's dependency lockfile, the sha256 of .github/test-requirements.lock, never from the interpreter or installed packages of the process computing it, so the scheduler keys a stats unit exactly as the worker's stats cache stores it for the same head, and a change to that lockfile or to the install excludes list .github/test-excludes.txt rekeys every stats unit.",
+      "seam": "scripts.ci_lab.expand_mutation.stats_units against scripts.ci_mutation.stats_cache.collect_cached_stats over a fixture repository",
+      "tests": [
+        "tests/ci_lab/test_expand_mutation.py::test_a_scheduler_on_another_interpreter_and_package_set_keys_the_stats_the_worker_stores",
+        "tests/ci_lab/test_expand_mutation.py::test_a_change_to_the_head_lockfile_or_install_excludes_rekeys_every_stats_unit"
+      ]
+    },
+    {
       "id": "lab-mutant-unit-split",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-mutant-unit-split",
@@ -9819,6 +9987,16 @@
       ]
     },
     {
+      "id": "lab-scheduler-github-app-settings-on-start",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2685",
+      "behaviour": "The CI lab scheduler checks GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID and GITHUB_APP_PRIVATE_KEY before it builds any dependency client; when any is unset or empty it prints ci-lab scheduler refuses to start, naming each missing setting, to stderr and exits 1, instead of starting and dropping every head as cannot expand at its first manifest fetch or check post.",
+      "seam": "scripts.ci_lab.scheduler.main with the Redis, object store, bus, scheduler and relay builders stubbed to fail when called",
+      "tests": [
+        "tests/ci_lab/test_scheduler_start.py::test_main_refuses_to_start_naming_each_missing_github_app_setting"
+      ]
+    },
+    {
       "id": "lab-scheduler-check-run-restart",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2511",
@@ -9907,17 +10085,43 @@
       ]
     },
     {
+      "id": "lab-manifest-fetch-hold-cap",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-head-fetch-error-cap",
+      "behaviour": "The CI lab scheduler caps how long a held head waits on a manifest fetch GitHub never answers or answers with a server error: it counts those fetches in a row in the head's waiting entry, holds the head again after each of the first nine, and on the tenth drops the head and posts one completed required check run with conclusion failure, named lab-shadow/required, whose summary names the head, its base, the ten unanswered fetches and the last error, as for any other expansion failure. A fetch still running and the same head arriving again keep the count; a new head of the lane and a started grade clear it.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis with an expander that raises an unanswered or pending fetch on the passes a test scripts and expands on any later pass, and a recording Poster behind scripts.ci_lab.scheduler.Ports.checks, read through the actions, the posts and the waiting hash",
+      "rules": ["lab-unanswered-fetch-holds-forever"],
+      "tests": [
+        "tests/ci_lab/test_scheduler_unexpanded.py::test_a_held_head_whose_manifest_fetch_gets_ten_server_errors_in_a_row_posts_a_failed_check_naming_them",
+        "tests/ci_lab/test_scheduler_unexpanded.py::test_a_held_heads_unanswered_fetches_count_in_a_row_until_a_new_head_or_a_start_clears_them"
+      ]
+    },
+    {
       "id": "lab-token-mint-status",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2702",
-      "behaviour": "A GitHub App token mint refusal preserves the HTTP response status and its fixed message. The lab manifest reader treats mint server errors and unanswered mint requests as transient, keeps the head through the existing quiet window and grades it after recovery. Client refusals drop the head. The same waiting envelope survives repeated transient failures and no retry runs before the window ends.",
+      "behaviour": "A GitHub App token mint refusal preserves the HTTP response status and names it in its message. The lab manifest reader treats mint server errors and unanswered mint requests as transient, keeps the head through the existing quiet window and grades it after recovery. Client refusals drop the head. The same waiting envelope survives repeated transient failures and no retry runs before the window ends.",
       "seam": "scripts.github_app.GitHubAppAuth.get_token and scripts.ci_lab.manifests.Actions over mocked HTTP, then Scheduler.tick through MirrorExpander, StoredManifests and the real token mint",
       "tests": [
-        "tests/test_github_app.py::test_rejected_exchange_preserves_the_http_status_without_changing_its_message",
+        "tests/test_github_app.py::test_rejected_exchange_preserves_the_http_status_and_names_it_in_its_message",
         "tests/test_github_app.py::test_a_refusal_without_an_http_status_keeps_its_message",
         "tests/ci_lab/test_manifests.py::test_actions_classifies_the_real_token_mint_refusal_by_its_http_status",
         "tests/ci_lab/test_manifests.py::test_actions_keeps_a_mint_scope_refusal_permanent",
         "tests/ci_lab/test_scheduler_manifest_fetch.py::test_manifest_token_mint_failures_hold_only_transient_heads_and_grade_after_recovery"
+      ]
+    },
+    {
+      "id": "lab-relay-app-refusal",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-relay-app-refusal",
+      "behaviour": "The CI lab relay survives a GitHub App token refusal: when the App refuses the push, check runs or pull requests token of a pending grade ref head, the relay tick records the head held for a later pass with the refusal, keeps the head pending, holds that repository's relays for the scheduler's post hold, relays them on the first tick after it ends and still relays the pending heads of other repositories in the same tick, so the scheduler process keeps running. The refusal names the permissions the token asked for and GitHub's answer status, so a refused checks write token never reads as a contents problem.",
+      "seam": "scripts.ci_lab.relay.Relay.tick over recording ports whose push raises scripts.github_app.GitAuthRefused, and scripts.github_app.GitHubAppAuth.get_token over mocked HTTP",
+      "tests": [
+        "tests/ci_lab/test_relay.py::test_a_relay_whose_app_token_is_refused_stays_pending_and_another_repository_still_relays",
+        "tests/ci_lab/test_relay.py::test_a_refused_repository_relays_nothing_until_the_post_hold_ends_while_another_repository_relays",
+        "tests/ci_lab/test_relay.py::test_a_token_refused_after_the_push_relays_again_after_the_hold_posting_each_check_run_once",
+        "tests/test_github_app.py::test_a_refused_checks_token_names_checks_write_and_the_answer_status",
+        "tests/test_github_app.py::test_a_refused_push_token_names_contents_write_and_workflows_write"
       ]
     },
     {
@@ -10877,6 +11081,21 @@
       ]
     },
     {
+      "id": "tracked-test-lock-cache-keys",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-cache-keys-tracked-lock",
+      "behaviour": "The tracked .github/test-requirements.lock, never the untracked uv.lock, is the dependency lock every cache key and trigger reads: the mutation stats cache hashes it among its configuration sources, so a lock change recollects a test file's stats and gives every lab stats unit a new key; the test dependency manifest counts it as a global file, so a lock change or removal rekeys every lab test fingerprint and keeps whole files in planned mutation test selection; and the lint job's self plant runs the mutation gate's plant when it changes.",
+      "seam": "scripts.ci_mutation.stats_cache CONFIGURATION with collect_cached_stats, scripts.ci_lab.expand_mutation stats_units, scripts.dep_manifest GLOBAL_FILES with scripts.ci_lab.expand_tests fingerprints and scripts.ci_mutation.plan record_drift, the self-plant step of the lint job in .github/workflows/test.yml",
+      "tests": [
+        "tests/test_ci_mutation_stats_cache.py::test_a_test_requirements_lock_change_recollects_stats",
+        "tests/ci_lab/test_expand_mutation.py::test_a_test_requirements_lock_change_rekeys_every_stats_unit",
+        "tests/ci_lab/test_expand_tests.py::test_lockfile_change_rekeys_every_test",
+        "tests/ci_lab/test_expand_tests.py::test_lockfile_removal_rekeys_every_test",
+        "tests/test_ci_mutation_planned_selection.py::test_record_drift_treats_a_test_requirements_lock_change_as_global",
+        "tests/test_ci_self_plant_detector.py::test_a_test_requirements_lock_change_still_plants"
+      ]
+    },
+    {
       "id": "lab-sandbox-bwrap-pull-request-tier",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-sandbox-bwrap-ci",
@@ -11701,6 +11920,23 @@
       ]
     },
     {
+      "id": "swarm-successor-keeps-predecessor-tracked",
+      "origin": "regression",
+      "ordered_at": "2026-11-20",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-swarm-tracks-session-until-killed",
+      "behaviour": "Starting a successor execution on a seat keeps a finished predecessor listed with its placement, while the tick session models step and the master front door count pass over a finished agent whose seat lists a newer execution, and the tick reap then ends that predecessor's process through the runtime and drops it with a history row and a retired name, so a handed off session never leaves tracking while it runs.",
+      "seam": "scripts.swarm.execution.ExecutionRegistry start and archive, observed through RedisStore.agents and the tick reap judge scripts.tick.steps.agents._reap_agent",
+      "rules": ["successor-start-drops-live-predecessor"],
+      "tests": [
+        "tests/swarm/test_successor_keeps_predecessor_tracked.py::test_a_successor_start_keeps_its_finished_predecessor_listed",
+        "tests/swarm/test_successor_keeps_predecessor_tracked.py::test_archiving_keeps_the_placement_of_a_listed_predecessor",
+        "tests/swarm/test_successor_keeps_predecessor_tracked.py::test_the_reap_ends_a_handed_off_predecessor_and_drops_it_with_history",
+        "tests/swarm/test_successor_keeps_predecessor_tracked.py::test_the_session_models_step_passes_over_a_listed_finished_predecessor",
+        "tests/swarm/test_successor_keeps_predecessor_tracked.py::test_a_listed_finished_predecessor_is_no_front_door",
+        "tests/swarm/test_successor_keeps_predecessor_tracked.py::test_only_a_finished_agent_with_a_newer_listed_execution_on_its_seat_is_superseded"
+      ]
+    },
+    {
       "id": "swarm-tick-lock-renewal-journal",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2785",
@@ -11735,6 +11971,16 @@
       "seam": "scripts.tick.engine._run_once and the worker it starts",
       "tests": [
         "tests/tick/test_engine_joined_budget.py::test_the_step_finished_line_logs_the_live_budget_the_engine_joined_on"
+      ]
+    },
+    {
+      "id": "prepare-unpushed-branch-fresh-cut",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-prepare-missing-branch-fresh-cut",
+      "behaviour": "Swarm prepare continues from the branch the task records when origin holds it or the task records a pull request; when an earlier life recorded a branch it never pushed and no pull request, prepare cuts the task worktree fresh from dev and records the new branch instead of failing to fetch the missing one.",
+      "seam": "scripts.swarm.publish.prepare and the worktree command it runs",
+      "tests": [
+        "tests/swarm/test_publish.py::test_prepare_cuts_fresh_dev_when_the_recorded_branch_was_never_pushed"
       ]
     }
   ],
