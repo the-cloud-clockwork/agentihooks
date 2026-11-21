@@ -590,7 +590,7 @@ def run_unit(
         return 1
 
 
-def forked_children(retry: Callable[[int, int], int | None] | None = None) -> ModuleType:
+def forked_children(retry: Callable[[int, int], int | None] = lambda pid, status: None) -> ModuleType:
     class ForkedChildren(ModuleType):
         def __init__(self) -> None:
             super().__init__(os.__name__)
@@ -614,7 +614,7 @@ def forked_children(retry: Callable[[int, int], int | None] | None = None) -> Mo
                     return self.retries.pop(pid), status
                 if pid in self.pids:
                     self.pids.discard(pid)
-                    replacement = retry(pid, status) if retry is not None else None
+                    replacement = retry(pid, status)
                     if replacement is None:
                         return pid, status
                     self.retries[replacement] = pid
