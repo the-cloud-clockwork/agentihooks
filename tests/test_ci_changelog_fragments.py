@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from scripts.ci_changelog_fragments import SECTIONS, expected_name, heading_problems, main, section
+from scripts.ci_changelog_fragments import SECTIONS, expected_name, grade, heading_problems, main, section
 
 ROOT = Path(__file__).resolve().parents[1]
 RED_FIXTURE = ROOT / "tests/fixtures/ci_changelog_fragments/red.md"
@@ -49,6 +49,7 @@ def test_the_branch_names_the_fragment_with_every_slash_as_a_dash() -> None:
     assert expected_name("team/eng/1") == "changelog.d/team-eng-1.md"
 
 
+@pytest.mark.feature("ci-changelog-required-branch-fragment")
 def test_fragments_named_off_the_branch_or_opening_without_a_heading_are_red(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
