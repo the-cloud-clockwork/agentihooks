@@ -347,6 +347,7 @@ def test_a_batch_refuses_a_move_back_from_a_status_already_posted(monkeypatch: p
         (answer(403, text=LIMITED, headers={"x-ratelimit-reset": "99999"}), 900),
     ],
 )
+@pytest.mark.feature("lab-check-run-rate-limits")
 def test_a_rate_limited_post_waits_like_the_ci_budget_then_posts(
     monkeypatch: pytest.MonkeyPatch, limited: Mock, wait: float
 ) -> None:
@@ -365,6 +366,7 @@ def test_a_rate_limited_post_waits_like_the_ci_budget_then_posts(
         answer(404),
     ],
 )
+@pytest.mark.feature("lab-check-run-rate-limits")
 def test_a_refusal_outside_a_rate_limit_raises_without_waiting(monkeypatch: pytest.MonkeyPatch, refused: Mock) -> None:
     poster, _, sleep = lab(monkeypatch, refused)
     with pytest.raises(PostRefused) as error:
@@ -373,6 +375,7 @@ def test_a_refusal_outside_a_rate_limit_raises_without_waiting(monkeypatch: pyte
     sleep.assert_not_called()
 
 
+@pytest.mark.feature("lab-check-run-rate-limits")
 def test_the_backoff_stops_after_four_waits(monkeypatch: pytest.MonkeyPatch) -> None:
     limited = answer(403, text=SECONDARY)
     poster, request, sleep = lab(monkeypatch, *[limited] * 5)
@@ -386,6 +389,7 @@ def test_the_backoff_stops_after_four_waits(monkeypatch: pytest.MonkeyPatch) -> 
     assert request.call_args_list[-1].kwargs["json"]["name"] == "lab/lint"
 
 
+@pytest.mark.feature("lab-check-run-rate-limits")
 def test_the_backoff_waits_out_the_last_second_of_its_budget(monkeypatch: pytest.MonkeyPatch) -> None:
     almost = answer(403, text=LIMITED, headers={"x-ratelimit-reset": "1898.5"})
     poster, request, sleep = lab(monkeypatch, almost, almost, answer(201, {"id": 7}))
@@ -394,6 +398,7 @@ def test_the_backoff_waits_out_the_last_second_of_its_budget(monkeypatch: pytest
     assert request.call_count == 3
 
 
+@pytest.mark.feature("lab-check-run-rate-limits")
 def test_the_backoff_never_waits_past_fifteen_minutes_for_one_request(monkeypatch: pytest.MonkeyPatch) -> None:
     soon = answer(403, text=LIMITED, headers={"x-ratelimit-reset": "1700"})
     late = answer(403, text=LIMITED, headers={"x-ratelimit-reset": "99999"})
