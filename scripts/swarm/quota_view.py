@@ -55,7 +55,9 @@ def live(agents: list) -> dict[str, int]:
 def scaling_line(decision: dict, counts: dict[str, int], scaling: str) -> str:
     scaled = decision.get("autoscale") if scaling == AUTO_SCALING else None
     ceilings = {**decision["configured"], **scaled["ceilings"]} if scaled else decision["configured"]
-    lanes = ", ".join(f"{lane} {counts[lane]} of {ceilings[lane]}" for lane in capacity.LANES if lane in ceilings)
+    lanes = ", ".join(
+        f"{lane} {counts.get(lane, 0)} of {ceilings[lane]}" for lane in capacity.LANES if lane in ceilings
+    )
     seats = decision.get("placeable")
     line = f"scaling {scaling}, live of ceiling {lanes}"
     if seats:
