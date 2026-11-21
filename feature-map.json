@@ -9883,6 +9883,17 @@
       ]
     },
     {
+      "id": "lab-scheduler-mirror-age-and-github-rate",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2683",
+      "behaviour": "The lab scheduler's GET /metrics on 9108 reports ci_lab_mirror_age_seconds as the seconds since the epoch second in the node mirror's fetched-at stamp, read at each scrape with the scheduler's millisecond clock and never below zero, and holds no sample while the stamp is missing or holds no whole number; it reports ci_lab_github_rate_remaining as the x-ratelimit-remaining header of the latest check runs answer that carries a number, rate limited and refused answers included, from the posters the scheduler and the relay build over the scheduler's registry.",
+      "seam": "scripts.ci_lab.scheduler.listen with the node mirror path main passes, read through GET /metrics over fakeredis; scripts.ci_lab.checks.Checks over a stubbed requests.request with the scheduler's registry; scripts.ci_lab.scheduler.build and scripts.ci_lab.relay.build poster wiring",
+      "tests": [
+        "tests/ci_lab/test_scheduler_gauges.py::test_the_exposition_reports_the_node_mirror_age_from_its_fetched_at_stamp",
+        "tests/ci_lab/test_scheduler_gauges.py::test_the_exposition_reports_the_github_calls_left_from_each_check_runs_answer"
+      ]
+    },
+    {
       "id": "lab-scheduler-metrics",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2642",
