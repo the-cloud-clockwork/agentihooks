@@ -12,8 +12,10 @@ import pytest
 from hooks.context.credential_guard import (
     ENV_NAMES_SAFE,
     GREP_EXCLUDES,
+    KIND_DOTENV,
     KIND_ENVIRONMENT,
     KIND_RECURSIVE,
+    MAX_SUBSTITUTION_DEPTH,
     RG_EXCLUDES,
     block,
     decide,
@@ -989,6 +991,136 @@ def test_a_spelled_heredoc_token_hides_no_later_heredoc_body() -> None:
 
     assert reason is not None
     assert reason == decide(_bash("cat .env"))
+
+
+SUBSTITUTIONS_THAT_READ_NO_CREDENTIAL = [
+    'x=$(echo ")"; date)',
+    "echo \"$(printf ')' && date)\"",
+    "x=$( (cd /; echo ')') ; date)",
+    "echo $((1 + (2 * 3)))",
+    'echo "$(" ; date',
+    "x=$(printf safe)$(date)",
+    "`printf a`cat .env`b`",
+    'echo "$(gh api rate_limit --jq ")")"',
+    "echo $(printf x \\",
+]
+
+BALANCED_SUBSTITUTION_READS = [
+    'x=$(echo ")"; cat .env)',
+    'x=$(echo ")" | cat .env)',
+    "echo \"$(printf ')' && cat .env)\"",
+    'x=$(cat "a)" .env)',
+    "x=$(true; cat .env)",
+    "x=$(echo \\); cat .env)",
+    'x=$(echo "\\")"; cat .env)',
+    "x=$(echo '\\'; cat .env)",
+    'x=$(echo "$(echo ")")"; cat .env)',
+    "x=$( (cd /; echo ')') ; cat .env)",
+    "x=$(printf safe)$(true; cat .env)",
+    "x=`true; cat .env`",
+    'diff <(echo ")"; cat .env) /dev/null',
+    'x=$(echo \\"")"; cat .env)',
+    'x=$(echo "a\\"" ")"; cat .env)',
+    'x=$(cat .env; echo ")")',
+    "x=$(echo '' \")\"; cat .env)",
+    "x=$(echo `case a in a) echo;; esac`; cat .env)",
+    "x=$(echo '\\' \")\"; cat .env)",
+    "x=$(echo $(echo a)) $(true; cat .env)",
+]
+
+HEREDOC_SUBSTITUTIONS_THAT_READ_NO_CREDENTIAL = [
+    '$(printf ")"; date)',
+    '\\$(printf ")"; cat .env)',
+    "<(printf ')'; cat .env)",
+    "`printf a`cat .env`b`",
+]
+
+BALANCED_HEREDOC_SUBSTITUTION_READS = [
+    '$(printf ")"; cat .env)',
+    '$(cat "a)" .env)',
+    "$(printf ')' | cat .env)",
+    "$(true; cat .env)",
+    "`true; cat .env`",
+    '$(echo "$(echo ")")"; cat .env)',
+    "\\\\$(printf ')'; cat .env)",
+]
+
+
+@pytest.mark.feature("credential-guard-balanced-substitutions")
+@pytest.mark.parametrize("command", SUBSTITUTIONS_THAT_READ_NO_CREDENTIAL)
+def test_a_substitution_that_reads_no_credential_passes(command: str) -> None:
+    assert decide(_bash(command)) is None
+
+
+@pytest.mark.feature("credential-guard-balanced-substitutions")
+@pytest.mark.parametrize("command", BALANCED_SUBSTITUTION_READS)
+def test_a_credential_read_in_a_balanced_command_substitution_is_refused(command: str) -> None:
+    reason = decide(_bash(command))
+
+    assert reason is not None
+    assert reason == decide(_bash("cat .env"))
+
+
+@pytest.mark.feature("credential-guard-balanced-substitutions")
+def test_a_token_print_in_a_balanced_command_substitution_is_refused() -> None:
+    reason = decide(_bash('echo "$(echo ")"; gh auth token)"'))
+
+    assert reason is not None
+    assert reason == decide(_bash("gh auth token"))
+
+
+@pytest.mark.feature("credential-guard-balanced-substitutions")
+@pytest.mark.parametrize("delimiter", ["EOF", "-EOF"])
+@pytest.mark.parametrize("body", HEREDOC_SUBSTITUTIONS_THAT_READ_NO_CREDENTIAL)
+def test_an_unquoted_heredoc_substitution_that_reads_no_credential_passes(delimiter: str, body: str) -> None:
+    assert decide(_bash(f"cat <<{delimiter}\n{body}\nEOF")) is None
+
+
+@pytest.mark.feature("credential-guard-balanced-substitutions")
+@pytest.mark.parametrize("delimiter", ["EOF", "-EOF"])
+@pytest.mark.parametrize("body", BALANCED_HEREDOC_SUBSTITUTION_READS)
+def test_a_credential_read_in_a_balanced_heredoc_substitution_is_refused(delimiter: str, body: str) -> None:
+    reason = decide(_bash(f"cat <<{delimiter}\n{body}\nEOF"))
+
+    assert reason is not None
+    assert reason == decide(_bash("cat .env"))
+
+
+@pytest.mark.feature("credential-guard-balanced-substitutions")
+@pytest.mark.parametrize("delimiter", ["'EOF'", '"EOF"'])
+@pytest.mark.parametrize("body", BALANCED_HEREDOC_SUBSTITUTION_READS)
+def test_a_quoted_heredoc_balanced_substitution_stays_literal(delimiter: str, body: str) -> None:
+    assert decide(_bash(f"cat <<{delimiter}\n{body}\nEOF")) is None
+
+
+UNBALANCED_SUBSTITUTION_READS = [
+    "echo $(cat .env ')",
+    "echo $(cat .env #')",
+    "x=$(cat '.env)",
+]
+
+
+@pytest.mark.feature("credential-guard-balanced-substitutions")
+@pytest.mark.parametrize("command", UNBALANCED_SUBSTITUTION_READS)
+def test_an_unbalanced_substitution_read_stays_refused(command: str) -> None:
+    assert decide(_bash(command)) is not None
+
+
+@pytest.mark.feature("credential-guard-balanced-substitutions")
+@pytest.mark.parametrize(("opener", "closer"), [("$(", ")"), ('"$(', ')"')])
+def test_substitutions_nested_to_the_limit_pass(opener: str, closer: str) -> None:
+    depth = MAX_SUBSTITUTION_DEPTH
+
+    assert decide(_bash("echo " + opener * depth + "true" + closer * depth)) is None
+
+
+@pytest.mark.feature("credential-guard-balanced-substitutions")
+@pytest.mark.parametrize(("opener", "closer"), [("$(", ")"), ('"$(', ')"')])
+@pytest.mark.parametrize("depth", [MAX_SUBSTITUTION_DEPTH + 1, 2000])
+def test_substitutions_nested_past_the_limit_are_refused(opener: str, closer: str, depth: int) -> None:
+    reason = decide(_bash("echo " + opener * depth + "true" + closer * depth))
+
+    assert reason == block(f"command substitutions nested over {MAX_SUBSTITUTION_DEPTH} deep", KIND_DOTENV)
 
 
 AWK_ENVIRON_VALUE_READS = [
