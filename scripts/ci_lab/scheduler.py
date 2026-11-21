@@ -57,7 +57,7 @@ from scripts.ci_lab.delivery import CLASSES, DELIVERY, DELIVERY_SCHEMA, load_run
 from scripts.ci_lab.digests import LOCKFILE, GradeInputs, StaticInputs, Toolchain, digest, grade_key, static_key
 from scripts.ci_lab.intake import GradeRequest, admit
 from scripts.ci_lab.leases import Leases, release
-from scripts.ci_lab.manifests import Background, Fetcher, FetchPending, FetchUnanswered
+from scripts.ci_lab.manifests import Background, Fetcher, FetchPending, FetchRefused, FetchUnanswered
 from scripts.ci_lab.objects import Objects, S3Objects, Uploads, manifest_folder, unit_path, upload_path
 from scripts.ci_lab.outcomes import CANNOT_RUN, DROPPED, FAILED, LOSSES, PASSED
 from scripts.ci_lab.pods import Pods, unmanaged, worker_pods
@@ -737,7 +737,7 @@ class Scheduler:
                     self.client.hset(WAITING, name, json.dumps({**held, "since": now_ms, "unanswered": fetches}))
                     actions.append(f"holding {request.head}: {error}")
                 else:
-                    refusal = FetchUnanswered(
+                    refusal = FetchRefused(
                         f"{fetches} manifest fetches in a row got no answer or a server error, the last: {error}"
                     )
                     actions.append(f"cannot expand {request.head}: {refusal}")
