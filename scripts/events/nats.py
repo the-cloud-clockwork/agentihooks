@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import datetime
+import hashlib
 import logging
 import sys
 import threading
@@ -265,26 +266,41 @@ class NatsConsumer:
         return self._loop.run(self._fetch(batch, timeout_ms))
 
     async def _fetch(self, batch: int, timeout_ms: int) -> list[NatsDelivery]:
-        try:
-            messages = await self._subscription.fetch(batch, timeout=_seconds(max(timeout_ms, MIN_FETCH_MS)))
-        except asyncio.TimeoutError:
-            return []
-        deliveries = []
-        for msg in messages:
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + _seconds(max(timeout_ms, MIN_FETCH_MS))
+        dead_streams = {DEAD_STREAM, "AGENTIHOOKS_DEAD"}
+        if self._swarm is not None:
+            dead_streams.update((stream_name(self._swarm, "DEAD"), legacy_stream_name(self._swarm, "DEAD")))
+        while loop.time() < deadline:
             try:
-                delivery = NatsDelivery(self._loop, msg)
-            except (ValueError, RecursionError):
-                event = _undecodable(msg)
-                attempts = _attempt(msg)
-            else:
-                if delivery.attempt <= self._policy.max_deliver:
-                    deliveries.append(delivery)
-                    continue
-                event = delivery.event
-                attempts = self._policy.max_deliver
-            await _publish_dead(self._js, event, self._identity, attempts, self._swarm, self._credentials)
-            await msg.term()
-        return deliveries
+                messages = await self._subscription.fetch(batch, timeout=max(deadline - loop.time(), 0.001))
+            except asyncio.TimeoutError:
+                return []
+            deliveries = []
+            parts = 0
+            for msg in messages:
+                try:
+                    delivery = NatsDelivery(self._loop, msg)
+                    if msg.metadata.stream in dead_streams:
+                        if delivery.event.type == "dead_payload_chunk":
+                            await msg.term()
+                            parts += 1
+                            continue
+                        delivery.event = await _hydrate_dead(self._js, msg, delivery.event)
+                except (ValueError, RecursionError):
+                    event = _undecodable(msg)
+                    attempts = _attempt(msg)
+                else:
+                    if delivery.attempt <= self._policy.max_deliver:
+                        deliveries.append(delivery)
+                        continue
+                    event = delivery.event
+                    attempts = self._policy.max_deliver
+                await _publish_dead(self._js, event, self._identity, attempts, self._swarm, self._credentials)
+                await msg.term()
+            if deliveries or not parts:
+                return deliveries
+        return []
 
 
 async def _publish(js, subject: str, stream: str, event: Envelope) -> bool:
@@ -308,6 +324,22 @@ async def _publish_dead(
     legacy = legacy_stream_name(swarm, "DEAD") if swarm is not None else "AGENTIHOOKS_DEAD"
     stream = await root_stream(js, desired, legacy, credentials)
     target = event_subject(swarm, "dead", letter.id) if swarm is not None else f"dead.{event.swarm}.{letter.id}"
+    limit = js._nc.max_payload - nats_payload.KV_HEADER_BUDGET
+    if event.type == "undecodable" and len(letter.encode()) > limit:
+        template = replace(letter, id=f"{letter.id}-00000000", type="dead_payload_chunk", data={"payload": ""})
+        size = limit - len(template.encode())
+        payload = event.data["payload"]
+        parts = []
+        for index, start in enumerate(range(0, len(payload), size)):
+            part = replace(template, id=f"{letter.id}-{index:08x}", data={"payload": payload[start : start + size]})
+            await _publish_letter(js, part, stream, f"{target.rsplit('.', 1)[0]}.{part.id}")
+            parts.append(part.id)
+        original = replace(event, data={"subject": event.data["subject"], "payload_parts": parts})
+        letter = replace(letter, data={**letter.data, "event": original.to_dict()})
+    await _publish_letter(js, letter, stream, target)
+
+
+async def _publish_letter(js: JetStreamContext, letter: Envelope, stream: str, target: str) -> None:
     try:
         await nats_payload.publish(
             js,
@@ -317,9 +349,33 @@ async def _publish_dead(
             headers={MSG_ID: letter.id, "Nats-Expected-Last-Subject-Sequence": "0"},
         )
     except APIError:
-        stored = await js.get_last_msg(stream, target)
-        if Envelope.decode(stored.data).id != letter.id:
+        stored = Envelope.decode((await js.get_last_msg(stream, target)).data)
+        if stored.id != letter.id or letter.type == "dead_payload_chunk" and stored.data != letter.data:
             raise
+
+
+async def _hydrate_dead(js: JetStreamContext, message: Msg, letter: Envelope) -> Envelope:
+    original = letter.data.get("event")
+    if letter.type != "dead_lettered" or not isinstance(original, dict):
+        return letter
+    data = original.get("data")
+    if not isinstance(data, dict) or "payload_parts" not in data:
+        return letter
+    payload = []
+    prefix = message.subject.rsplit(".", 1)[0]
+    for identity in data["payload_parts"]:
+        try:
+            stored = await js.get_last_msg(message.metadata.stream, f"{prefix}.{identity}")
+        except NotFoundError:
+            target = f"{prefix}.{hashlib.sha256(identity.encode()).hexdigest()}"
+            stored = await js.get_last_msg(message.metadata.stream, target)
+        part = Envelope.decode(stored.data)
+        if part.id != identity or part.type != "dead_payload_chunk":
+            raise ValueError("dead letter payload part differs")
+        payload.append(part.data["payload"])
+    restored = {key: value for key, value in data.items() if key != "payload_parts"}
+    restored["payload"] = "".join(payload)
+    return replace(letter, data={**letter.data, "event": {**original, "data": restored}})
 
 
 class NatsEventLog:
