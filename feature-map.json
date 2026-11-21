@@ -1682,6 +1682,7 @@
         "tests/swarm/test_managed_lifecycle.py::test_a_process_absence_another_hive_observed_keeps_that_hive_and_the_transport_owner",
         "tests/swarm/test_live_binding.py::test_a_pane_process_absence_names_this_observer_and_the_agents_hive",
         "tests/swarm/test_live_binding.py::test_a_process_mismatch_stored_before_provenance_still_renders_its_flag",
+        "tests/swarm/test_live_binding.py::test_only_a_fact_with_the_process_absent_names_its_observer",
         "tests/hive/test_reports.py::test_a_hub_admitted_workers_process_absence_keeps_the_hive_host_that_observed_it"
       ]
     },

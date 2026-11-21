@@ -820,8 +820,10 @@ def test_a_pane_process_absence_names_this_observer_and_the_agents_hive(
 ) -> None:
     store, _, _ = ticking
     monkeypatch.setattr("socket.gethostname", lambda: "controller")
-    agent = AgentRecord("engineer", "eng", "one", seat="eng-1@sw", harness="claude", profile="engineer", hive=hive)
-    store.put_agent("sw", agent)
+    seated = AgentRecord(
+        store.next_name("sw", "eng"), "eng", "one", seat="eng-1@sw", harness="claude", profile="engineer", hive=hive
+    )
+    agent = store.start_execution("sw", seated)
     process = {
         "expected": True,
         "actual": False,
@@ -830,8 +832,8 @@ def test_a_pane_process_absence_names_this_observer_and_the_agents_hive(
     }
 
     assert live_binding.record(store, "sw", agent, {"process": False}, 123) == {"process": process}
-    assert json.loads(store.redis.hget(store.key("sw", "live-bindings"), "engineer")) == {
-        "agent": "engineer",
+    assert json.loads(store.redis.hget(store.key("sw", "live-bindings"), agent.name)) == {
+        "agent": agent.name,
         "at": 123,
         "state": "mismatched",
         "differences": {"process": process},
@@ -852,6 +854,18 @@ def test_a_process_mismatch_stored_before_provenance_still_renders_its_flag(tick
     assert [finding.as_dict()["evidence"] for finding in live_binding.findings(store, "sw")] == [
         ["expected True; observed False"]
     ]
+
+
+@pytest.mark.feature("live-binding-process-provenance")
+def test_only_a_fact_with_the_process_absent_names_its_observer(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("socket.gethostname", lambda: "hive-host")
+    facts = {"absent": {"process": False}, "live": {"process": True}, "unread": {}}
+
+    assert live_binding.observed(facts) == {
+        "absent": {"process": False, "observer": "hive-host"},
+        "live": {"process": True},
+        "unread": {},
+    }
 
 
 def test_departed_agents_raise_no_finding_while_a_seated_mismatch_does(ticking):
