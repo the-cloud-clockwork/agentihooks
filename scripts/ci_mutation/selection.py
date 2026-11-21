@@ -5,7 +5,6 @@ import json
 import multiprocessing
 import os
 import re
-import signal
 import sys
 import tempfile
 import traceback
@@ -590,7 +589,7 @@ def run_unit(
         return 1
 
 
-def forked_children(retry: Callable[[int, int], int | None] = lambda pid, status: None) -> ModuleType:
+def forked_children(retry: Callable[[int, int], int | None] | None = None) -> ModuleType:
     class ForkedChildren(ModuleType):
         def __init__(self) -> None:
             super().__init__(os.__name__)
@@ -614,18 +613,14 @@ def forked_children(retry: Callable[[int, int], int | None] = lambda pid, status
                     return self.retries.pop(pid), status
                 if pid in self.pids:
                     self.pids.discard(pid)
-                    replacement = retry(pid, status)
+                    replacement = retry(pid, status) if retry is not None else None
                     if replacement is None:
                         return pid, status
                     self.retries[replacement] = pid
 
         def kill(self, pid: int, sig: int) -> None:
-            target = next((child for child, original in self.retries.items() if original == pid), pid)
-            os.kill(target, sig)
-
-        def stop_retries(self) -> None:
-            for pid in self.retries:
-                os.kill(pid, signal.SIGTERM)
+            targets = dict(zip(self.retries.values(), self.retries, strict=True))
+            os.kill(targets.get(pid, pid), sig)
 
     return ForkedChildren()
 

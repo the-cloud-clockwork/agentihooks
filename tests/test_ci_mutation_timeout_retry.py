@@ -136,6 +136,8 @@ def test_a_hanging_killer_gets_one_retry_and_a_complete_result(engine: Any, stat
     engine.exits[0] = (12, status)
     engine.run()
     assert engine.results == [(12, 1)]
+    assert engine.runner.os.pids == set()
+    assert engine.runner.os.retries == {}
     assert engine.data.exit_code_by_key == {engine.name: 1}
     assert engine.data.key_by_pid == {}
     assert engine.forks == []

@@ -62,4 +62,5 @@ def retry_timeouts(
     finally:
         SourceFileMutationData.register_pid = register_pid
         SourceFileMutationData.stop_children = stop_children
-        engine.os.stop_retries()
+        for pid in engine.os.retries:
+            engine.os.kill(pid, signal.SIGTERM)
