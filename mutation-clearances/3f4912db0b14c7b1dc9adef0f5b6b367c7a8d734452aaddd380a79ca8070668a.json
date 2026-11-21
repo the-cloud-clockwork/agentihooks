@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/plant_grade.py:scripts.ci_lab.plant_grade.x_main:ec8396d27efbb033bedc7bedf23c2d6cc688626aba792246347305927db41d9b": {
+    "reader": "Standards",
+    "reason": "Changing the replacement URL's scheme and host case cannot change the result: urlsplit normalizes its scheme and hostname, and the reconstructed canonical URL is lowercased."
+  }
+}

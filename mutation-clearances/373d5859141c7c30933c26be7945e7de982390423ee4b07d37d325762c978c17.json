@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/plant_publish.py:scripts.ci_lab.plant_publish.x__commit:837226661459cc67f6f0c4c3652cb5fde84c3f13b5630e488f14dd9d978b638b": {
+    "reader": "Standards",
+    "reason": "The publisher consumes prepare's fixed single-line twin and plant messages. With exactly one double-newline separator, rsplit and split select the identical complete message."
+  }
+}
