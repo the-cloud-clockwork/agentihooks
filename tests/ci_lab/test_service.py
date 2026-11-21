@@ -31,12 +31,11 @@ def jobs() -> queue.Queue:
 @pytest.fixture
 def routes(jobs: queue.Queue) -> service.Routes:
     lab = leases.Leases(jobs, ttl_ms=500, clock=lambda: 1000, sleep=lambda ms: None, poll_ms=50)
-    control = lease_api.ControlRoutes(jobs.client, "tok", lambda: 1000)
 
     def grades(head: str) -> list[dict[str, Any]]:
         return [{"run": f"run-of-{head}"}] if head == HEAD else []
 
-    return service.Routes(partial(lease_api.answer, lab, Signer(), control), lambda: LOAD, grades)
+    return service.Routes(partial(lease_api.answer, lab, Signer()), lambda: LOAD, grades)
 
 
 @pytest.mark.feature("lab-scheduler-service")
@@ -72,8 +71,8 @@ def test_the_scheduler_port_keeps_every_lease_route(routes: service.Routes, jobs
     assert routes.respond("POST", "/capacity", b"", None) == (404, {"error": "not found"})
     assert routes.respond("POST", f"/grades/{HEAD}", b"", None) == (404, {"error": "not found"})
     assert routes.respond("GET", "/missing", b"", None) == (404, {"error": "not found"})
-    assert routes.respond("POST", "/resume", b"", None) == (401, {"error": "control token refused"})
-    assert routes.respond("POST", "/resume", b"", "Bearer tok") == (200, {"resumed": []})
+    assert routes.respond("POST", "/resume", b"", None) == (404, {"error": "not found"})
+    assert routes.respond("POST", "/resume", b"", "Bearer tok") == (404, {"error": "not found"})
 
 
 @pytest.mark.feature("lab-scheduler-service")
