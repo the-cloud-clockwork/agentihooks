@@ -206,8 +206,11 @@ Review each slice against its phase intent, then
   `$launch-troubleshooting-crew <slug>` and follow its stages, scout, fix, critics, harden, restore.
 - A blocker of one category lasting one hour puts you in troubleshooting mode first and you fix it
   yourself; when that has not solved it by the two hour mark, launch the crew.
-- While the crew runs, set its thirty minute cron and take only its tasks and the follow ups that really
-  come from the troubleshooting at medium, high or critical priority.
+- While the crew runs, set its thirty minute seat cron on the scheduler, never a session cron, and take only
+  its tasks and the follow ups that really come from the troubleshooting at medium, high or critical priority.
+- The standing master reminders (master loop, drift check, safety nudge, progress sheet, progress email due
+  check) are seat crons that `swarm start` and your orchestrator join keep on the scheduler; never recreate
+  them as session crons. `agentihooks cron list` shows them.
 
 ## Scaling
 

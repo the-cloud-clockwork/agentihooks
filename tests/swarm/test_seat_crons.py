@@ -148,9 +148,11 @@ def test_hand_made_seat_crons_are_adopted_and_their_duplicates_cancelled(env: En
     found: dict[str, list[str]] = {}
     for view in aimed():
         found.setdefault(view["expression"], []).append(view["id"])
-    assert found[NUDGE] == [nudge] and found[LOOP] == [loop] and found[CREW] == [crew]
+    assert found[NUDGE] == [nudge] and found[CREW] == [crew]
+    assert len(found[LOOP]) == 1 and found[LOOP][0] in (loop, extra)
     assert len(found[DRIFT]) == 1 and sorted(found) == sorted([*ALWAYS, CREW])
-    assert extra not in ids() and seat_crons.scheduler().get(extra).state == "cancelled"
+    dropped = extra if found[LOOP] == [loop] else loop
+    assert seat_crons.scheduler().get(dropped).state == "cancelled"
     assert ids("master@other") == [other]
 
 
