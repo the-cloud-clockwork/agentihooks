@@ -44,9 +44,9 @@ class Writing:
         self.method = method
 
     def __get__(self, instance: Tracked, owner: object) -> Callable[..., Any]:
-        return partial(self.write, instance)
+        return partial(self._write, instance)
 
-    def write(self, instance: Tracked, *args: Any, **kwargs: Any) -> Any:
+    def _write(self, instance: Tracked, *args: Any, **kwargs: Any) -> Any:
         instance.mark.fragment = None
         return self.method(instance, *args, **kwargs)
 
