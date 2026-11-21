@@ -160,13 +160,15 @@ def test_a_deep_copy_keeps_the_containers_a_writer_copy_shares() -> None:
     value = writer(stored())
     value["again"] = value["comments"]
     value["owners"] = [value["owner"], value["owner"]]
+    value["comments"].extend([value["owner"], value["owner"]])
     doc = {"first": value, "second": value}
     deep = copy.deepcopy(doc)
     assert deep == doc
     assert deep["first"] is deep["second"]
     assert deep["first"]["again"] is deep["first"]["comments"]
     assert deep["first"]["owners"][0] is deep["first"]["owners"][1] is deep["first"]["owner"]
-    assert type(deep["first"]["owners"]) is list
+    assert deep["first"]["comments"][2] is deep["first"]["comments"][3] is deep["first"]["owner"]
+    assert type(deep["first"]["owners"]) is list and type(deep["first"]["comments"]) is list
 
 
 @pytest.mark.feature("ledger-write-partial-rebuild")
