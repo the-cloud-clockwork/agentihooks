@@ -6590,7 +6590,7 @@
       "id": "controller-survives-ledger-storage-failure",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-pass-db-error",
-      "behaviour": "When a controller pass raises sqlite3.Error from the in process ledger repository, such as the sqlite3.DatabaseError connection already closed that a Postgres session ended at its idle in transaction limit raises, the run loop logs it, journals the pass with outcome ledger_storage, waits one tick as backoff and starts the next pass on a fresh pooled connection without exiting the process; a single pass run reports it as exit code 1.",
+      "behaviour": "When a controller pass raises sqlite3.Error from the in process ledger repository, such as the sqlite3.DatabaseError connection already closed that a Postgres session ended at its idle in transaction limit raises, the run loop logs it, journals the pass with outcome ledger_storage, waits one tick as backoff and starts the next pass without exiting the process; a single pass run reports it as exit code 1.",
       "seam": "scripts.swarm.controller.main run loop",
       "tests": [
         "tests/swarm/test_controller_ledger_timeout.py::test_controller_run_backs_off_after_a_ledger_storage_failure_and_runs_the_next_pass",
