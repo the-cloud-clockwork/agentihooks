@@ -1,4 +1,5 @@
-"""The lab object layout, lab/<kind>/<digest>/{report.json,log.txt} and lab/grades/<run>/, on local or S3 storage."""
+"""The lab object layout, lab/<kind>/<digest>/{report.json,log.txt,manifest.json} and lab/grades/<run>/, on local or S3
+storage."""
 
 import os
 import re
@@ -24,7 +25,7 @@ __all__ = [
 ]
 
 ROOT = "lab/"
-FILES = {"report": "report.json", "log": "log.txt"}
+FILES = {"report": "report.json", "log": "log.txt", "manifest": "manifest.json"}
 UPLOAD_SECONDS = 900
 KEY = re.compile(r"(?P<kind>[a-z]+)-v[0-9]+-(?P<digest>[0-9a-f]{64})")
 REPORT = re.compile(ROOT + r"[a-z]+/[0-9a-f]{64}/report\.json")
