@@ -599,6 +599,19 @@
       ]
     },
     {
+      "id": "hub-idle-wait-rides-out-redis-outage",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-busy-reply-retry",
+      "behaviour": "When Redis refuses the hub's idle scheduler wait, with a busy reply or a connection error, the hub waits out its idle period on the local clock and runs its next pass. Only a refusal that outlasts the Redis grace window ends the hub, and a wait Redis answers or a pass that handles work without failing ends the outage so a later refusal opens a new window.",
+      "seam": "runner._run idle wait through runner._idle",
+      "tests": [
+        "tests/hub/test_runner.py::test_the_hub_waits_out_a_redis_refusal_of_its_idle_wait_on_the_local_clock",
+        "tests/hub/test_runner.py::test_a_redis_refusal_of_the_idle_wait_past_the_grace_window_still_ends_the_hub",
+        "tests/hub/test_runner.py::test_an_answered_idle_wait_ends_the_redis_outage_so_a_later_refusal_opens_a_new_window",
+        "tests/hub/test_runner.py::test_a_pass_that_handles_work_ends_the_redis_outage_so_a_later_refusal_opens_a_new_window"
+      ]
+    },
+    {
       "id": "hub-ready-only-when-serving",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2600",
