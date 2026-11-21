@@ -5,6 +5,7 @@ import logging
 import subprocess
 import sys
 import threading
+import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -1191,6 +1192,36 @@ def test_listen_serves_leases_capacity_grades_and_metrics_from_one_budgeted_load
         assert 'ci_lab_units_running{class="promotion"} 1.0' in text
         assert 'ci_lab_class_shed{class="backfill"} 1.0' in text
         assert "ci_lab_slots_busy 1.0" in text
+    finally:
+        for server in servers:
+            server.shutdown()
+            server.server_close()
+
+
+def _status(url: str, authorization: str | None) -> int:
+    headers = {} if authorization is None else {"Authorization": authorization}
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, data=b"{}", headers=headers), timeout=5) as reply:
+            return reply.status
+    except urllib.error.HTTPError as error:
+        return error.code
+
+
+@pytest.mark.feature("lab-control-routes")
+def test_listen_serves_the_control_routes_only_on_the_control_port(lab: Callable[..., Run]) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)})})
+    spending = budget.Budget(run.lab.client, lambda: 0, budget.Policy(100.0, {}))
+    routes = lease_api.ControlRoutes(run.lab.client, "tok", lambda: 1000)
+    servers = scheduler.listen(run.engine, run.leases(), routes, spending, lambda: 1000, (0, 0, 0))
+    for server in servers:
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+    api, control, _ = (f"http://127.0.0.1:{server.server_address[1]}" for server in servers)
+    try:
+        assert [_status(f"{api}{path}", "Bearer tok") for path in ("/priority", "/pause", "/resume")] == [404] * 3
+        assert _status(f"{control}/resume", None) == 401
+        assert _status(f"{control}/resume", "Bearer other") == 401
+        assert _status(f"{control}/resume", "Bearer tok") == 200
+        assert _status(f"{control}/lease", "Bearer tok") == 404
     finally:
         for server in servers:
             server.shutdown()

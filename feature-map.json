@@ -9895,6 +9895,7 @@
         "tests/ci_lab/test_lease_api.py::test_pause_holds_a_class_with_its_exceptions_until_resume",
         "tests/ci_lab/test_lease_api.py::test_pause_refuses_an_unknown_class_or_exception_list",
         "tests/ci_lab/test_lease_api.py::test_server_answers_a_control_route_only_with_the_bearer_token",
+        "tests/ci_lab/test_scheduler.py::test_listen_serves_the_control_routes_only_on_the_control_port",
         "tests/ci_lab/test_scheduler.py::test_a_head_marked_hotfix_by_its_commit_grades_in_the_hotfix_class",
         "tests/ci_lab/test_scheduler.py::test_a_paused_class_holds_its_heads_but_the_excepted_ones_until_resume",
         "tests/ci_lab/test_scheduler.py::test_a_pause_of_another_class_leaves_pull_request_grading_alone",
