@@ -8,7 +8,7 @@ on:
         type: choice
         required: true
         default: tests
-        options: [tests, mutation, mutation-deadlines, mutation-replay, semgrep, worker-image, swarm-image, brain-smoke, helm-kind, github-access, row-memory, operations-cpu, operations-receipts]
+        options: [checkout-probe, tests, mutation, mutation-deadlines, mutation-replay, semgrep, worker-image, swarm-image, brain-smoke, helm-kind, github-access, row-memory, operations-cpu, operations-receipts]
       base:
         description: Base revision for mutation or Semgrep scope
         required: true
@@ -373,3 +373,90 @@ jobs:
           path: test-results/*.png
           if-no-files-found: ignore
           retention-days: 7
+
+  checkout-probe:
+    if: inputs.proof == 'checkout-probe'
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - {config: before, repeat: 1}
+          - {config: after, repeat: 1}
+          - {config: after-tip, repeat: 1}
+          - {config: before, repeat: 2}
+          - {config: after, repeat: 2}
+          - {config: after-tip, repeat: 2}
+          - {config: before, repeat: 3}
+          - {config: after, repeat: 3}
+          - {config: after-tip, repeat: 3}
+    env:
+      CONFIG: ${{ matrix.config }}
+      REVISION: 47c55fe097164de44f17d9bf01b60d25feb538bb
+    steps:
+      - name: Check out every branch and tag with full contents
+        if: matrix.config == 'before'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+
+      - name: Check out the head history without file contents
+        if: matrix.config != 'before'
+        id: checkout
+        continue-on-error: true
+        uses: actions/checkout@v4
+        env: &probe-low-speed
+          GIT_HTTP_LOW_SPEED_LIMIT: "1000"
+          GIT_HTTP_LOW_SPEED_TIME: "60"
+        with: &probe-checkout
+          fetch-depth: 2147483647
+          filter: blob:none
+          ref: ${{ github.sha }}
+
+      - name: Check out the head history without file contents, attempt 2
+        if: matrix.config != 'before' && steps.checkout.outcome == 'failure'
+        uses: actions/checkout@v4
+        env: *probe-low-speed
+        with: *probe-checkout
+
+      - name: Read what the checkout holds
+        run: |
+          set -euo pipefail
+          echo "checkout config=$CONFIG shallow=$(git rev-parse --is-shallow-repository) commits=$(git rev-list --count HEAD) refs=$(git for-each-ref | wc -l) tags=$(git for-each-ref refs/tags | wc -l) behind=$(git rev-list --count HEAD..$REVISION 2>/dev/null || echo absent)"
+          git count-objects -v | tr '\n' ' '
+          echo
+
+      - name: Take the helper scripts from the workflow revision
+        run: |
+          set -euo pipefail
+          echo "before fetch: $(git count-objects -v | tr '\n' ' ')"
+          if [[ "$CONFIG" == after-tip ]]; then
+            git fetch --no-tags --negotiation-tip=HEAD origin "$REVISION"
+          else
+            git fetch --no-tags origin "$REVISION"
+          fi
+          echo "after fetch: $(git count-objects -v | tr '\n' ' ')"
+          mkdir -p "$RUNNER_TEMP/workflow"
+          git archive "$REVISION" .github/scripts .github/test-requirements.lock | tar -x -C "$RUNNER_TEMP/workflow"
+          echo "after archive: $(git count-objects -v | tr '\n' ' ')"
+          echo "behind=$(git rev-list --count HEAD..$REVISION)"
+
+      - name: Take the upload and download actions from the workflow revision
+        run: |
+          set -euo pipefail
+          mkdir -p .workflow-revision
+          git archive "$REVISION" .github/actions/retry-upload .github/actions/pattern-download | tar -x -C .workflow-revision
+          echo "after actions archive: $(git count-objects -v | tr '\n' ' ')"
+
+      - name: Simulate the change discovery diffs over thirty commits
+        run: |
+          set -euo pipefail
+          base="$(git rev-parse HEAD~30)"
+          git diff --no-renames --numstat "$base" HEAD -- 'hooks/*.py' 'scripts/*.py' 'tests/*.py' | wc -l
+          echo "after numstat: $(git count-objects -v | tr '\n' ' ')"
+          git diff --name-only -z "$base"...HEAD -- hooks/ scripts/ | tr '\0' '\n' | wc -l
+          git diff -U0 "$base"...HEAD -- hooks/ scripts/ | wc -l
+          echo "after diffs: $(git count-objects -v | tr '\n' ' ')"
