@@ -7344,6 +7344,58 @@
       ]
     },
     {
+      "id": "recon-gate",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-recon-plan-gate",
+      "behaviour": "A pinned eng or ci agent's code edit or commit on a swarm task, on the build gate's tool calls and paths, passes the recon gate only when recon.md in the task work folder holds the six headings What will be built, Code areas touched, What might break, Regression tests, Resources needed and Protection plan in that order, each with a non blank line, in at most 500 lines, hash lines inside a fenced block counting as content; a refusal names the recon.md path and the missing, out of order or empty heading or the line count; an edit inside the work folder, the scratchpad or outside git passes; a pass logs one count row per recon.md text; the gate ships at log only, and the build gate's entry judges recon first on the same payload, stopping at a recon deny and otherwise judging build.",
+      "seam": "scripts.gates.recon.ReconGate.decide and problem through scripts.gates.entry.main with BEFORE mapping build to recon",
+      "tests": [
+        "tests/gates/test_recon.py::test_it_is_a_gate_named_recon_that_ships_log_only_and_judges_the_build_gates_calls",
+        "tests/gates/test_recon.py::test_a_missing_recon_plan_refuses_the_first_code_edit_naming_the_file_and_the_headings",
+        "tests/gates/test_recon.py::test_a_valid_recon_plan_lets_the_edit_through_and_logs_one_pass_per_text",
+        "tests/gates/test_recon.py::test_each_missing_heading_is_named_in_the_refusal",
+        "tests/gates/test_recon.py::test_an_empty_heading_is_named_in_the_refusal",
+        "tests/gates/test_recon.py::test_headings_out_of_order_or_repeated_are_refused",
+        "tests/gates/test_recon.py::test_more_than_five_hundred_lines_is_refused_and_five_hundred_pass",
+        "tests/gates/test_recon.py::test_deeper_headings_and_stripped_heading_lines_count_as_the_plan",
+        "tests/gates/test_recon.py::test_hash_lines_inside_a_fenced_block_are_content_not_headings",
+        "tests/gates/test_recon.py::test_an_edit_inside_the_work_folder_the_scratchpad_or_outside_git_always_passes",
+        "tests/gates/test_recon.py::test_only_pinned_eng_and_ci_agents_on_a_task_are_judged",
+        "tests/gates/test_recon.py::test_sections_valid_and_named_read_the_plan_from_the_work_folder",
+        "tests/gates/test_recon.py::test_the_build_gate_entry_judges_recon_first_and_stops_at_its_deny",
+        "tests/gates/test_recon.py::test_the_build_gate_still_judges_the_same_call_after_recon_passes",
+        "tests/gates/test_recon.py::test_recon_at_log_only_logs_the_would_be_deny_and_lets_the_build_gate_decide",
+        "tests/gates/test_recon.py::test_the_recon_gate_runs_alone_by_name_and_unknown_or_missing_names_exit_one",
+        "tests/gates/test_build_executor.py::test_the_build_condition_judges_the_recon_plan_first_through_the_real_hook"
+      ]
+    },
+    {
+      "id": "trace-plan-recon-protection",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-recon-plan-gate",
+      "behaviour": "The trace plan keeps, whatever the classifier answers, a piece whose every area is under tests, feature-map.json or feature-map.d and is a whole path named, or a folder holding a path named, in the lines under Code areas touched or Regression tests of the task's recon.md; the ruling also reaches the classifier rule parameters and asks no scope coverage question; a change of that recon text retraces an unchanged plan once and an appended piece retraces the whole plan.",
+      "seam": "scripts.swarm.trace_plan.trace and run with the named text from scripts.gates.recon.named",
+      "tests": [
+        "tests/swarm/test_trace_plan.py::test_a_protection_piece_the_recon_plan_names_is_kept_whatever_the_classifier_says",
+        "tests/swarm/test_trace_plan.py::test_without_a_recon_plan_naming_it_the_protection_piece_is_judged_by_the_classifier",
+        "tests/swarm/test_trace_plan.py::test_the_protection_ruling_reaches_the_classifier_rule_and_asks_no_coverage",
+        "tests/swarm/test_trace_plan.py::test_a_piece_appended_after_the_recon_plan_changed_retraces_every_piece",
+        "tests/swarm/test_trace_plan.py::test_a_piece_appended_under_the_same_recon_plan_is_traced_alone",
+        "tests/swarm/test_trace_plan.py::test_a_changed_recon_plan_retraces_an_unchanged_plan_once_and_keeps_its_protection_piece"
+      ]
+    },
+    {
+      "id": "subagent-recon-scouters",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-recon-plan-gate",
+      "behaviour": "Up to eight scouter launches on a swarm task pass the sub agent budget uncounted, each with a count row naming it, while the task's recon.md is not yet a valid recon plan; any other launch, every continuation and a scouter launch after the recon plan is valid count as before, so a task with a spent recon still launches its review readers.",
+      "seam": "scripts.gates.subagents.SubagentBudget.decide with scripts.gates.recon.valid",
+      "tests": [
+        "tests/gates/test_subagents.py::test_recon_scouters_before_a_valid_recon_plan_leave_the_review_readers_their_budget",
+        "tests/gates/test_subagents.py::test_only_scouter_launches_before_a_valid_recon_plan_go_uncounted"
+      ]
+    },
+    {
       "id": "gate-admin-recovery-payload",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-gate-never-deadlock",
