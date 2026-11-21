@@ -60,6 +60,7 @@ class Claims:
             self.store.claims(event.swarm, task),
         )
         if lives:
+            self.store.record_spawn(event.swarm, data.get("harness", ""), name, data.get("launched_at") or event.time)
             self.store.clear_failed_harness(event.swarm, task)
             store: Any = self.store
             if store.claimant(event.swarm, task) == name:

@@ -35,6 +35,8 @@ RETIRED_PARTS = (
     "unbound-since",
 )
 HISTORY_KEPT = 2000
+SPAWN_WINDOW_MS = 3_600_000
+SPAWNS_KEPT = 1000
 RETIRE_ROW = """
 if (redis.call('HGET', KEYS[1], ARGV[1]) or '') ~= ARGV[2] then return 0 end
 if ARGV[3] ~= '' then
@@ -639,8 +641,10 @@ class RedisStore:
 
         return reports.Reports(self.redis).read(hive)
 
-    def put_agent(self, slug, agent):
+    def put_agent(self, slug: str, agent: AgentRecord) -> None:
         self.execution_registry.put(slug, agent)
+        if agent.harness and agent.launched_at:
+            self.record_spawn(slug, agent.harness, agent.name, agent.launched_at)
 
     def agents(self, slug):
         return self.execution_registry.agents(slug)
@@ -742,8 +746,22 @@ class RedisStore:
         }
         return json.dumps({**row, **placement, "ended_at": ended, "reason": reason})
 
-    def spawns(self, slug):
-        return {harness: int(count) for harness, count in self.redis.hgetall(self.key(slug, "spawns")).items()}
+    def spawns(self, slug: str) -> dict[str, int]:
+        """Spawns per harness launched in the last hour."""
+        since = int(time.time() * 1000) - SPAWN_WINDOW_MS
+        counts: dict[str, int] = {}
+        for member in self.redis.zrangebyscore(self.key(slug, "spawn-times"), since, "+inf"):
+            harness = member.partition(":")[0]
+            counts[harness] = counts.get(harness, 0) + 1
+        return counts
+
+    def record_spawn(self, slug: str, harness: str, name: str, launched_at: int) -> None:
+        """Records one placed spawn of the harness at its launch time; an agent name already recorded keeps its first."""
+        key = self.key(slug, "spawn-times")
+        with self.redis.pipeline() as pipe:
+            pipe.zadd(key, {f"{harness or 'unknown'}:{name}": launched_at}, nx=True)
+            pipe.zremrangebyrank(key, 0, -SPAWNS_KEPT - 1)
+            pipe.execute()
 
     def refund_held_claim(self, slug: str, task: str, agent: str, generation: int) -> bool:
         from redis.exceptions import WatchError

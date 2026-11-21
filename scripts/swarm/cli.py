@@ -133,6 +133,7 @@ from scripts.swarm.status import (
     live_agents,
     readable_hives,
     section_lines,
+    spawns_line,
     status_report,
     task_counts,
     transport,
@@ -1580,6 +1581,7 @@ def cmd_status(store: Any, args: Any) -> None:
         + "  ".join(f"{name}={modes.label(mode)}" for name, mode in catalog.current(config.gates).items())
     )
     print("tasks  " + "  ".join(f"{k} {v}" for k, v in counts.items()))
+    print(spawns_line(store.spawns(args.slug)))
     print(plan_shape.report(tasks, config.max_eng)["summary"])
     for phase_id, state, held in phase_state.report(doc):
         print(f"phase {phase_id}  {state}" + (f"  holds {', '.join(held)}" if held else ""))

@@ -89,6 +89,12 @@ def task_counts(tasks):
     return {s: sum(1 for t in tasks if t.get("state") == s) for s in ("open", "claimed", "blocked", "pr", "done")}
 
 
+def spawns_line(spawns: dict[str, int]) -> str:
+    """The text status line counting the spawns placed per harness in the last hour."""
+    counted = "  ".join(f"{harness} {count}" for harness, count in sorted(spawns.items()))
+    return f"spawns last hour  {counted or 'none'}"
+
+
 def section_lines(name: str, read: Callable[[], list[str]]) -> list[str]:
     """A status section's lines, or one line naming the section when the Redis role may not read its keys."""
     from redis.exceptions import NoPermissionError

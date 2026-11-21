@@ -1,13 +1,15 @@
 """Seeds the swarm store rows the removed legacy tick launch wrote, for tests that read them through live code."""
 
 import json
+import time
+import uuid
 
 from scripts.swarm.store import AgentRecord, RedisStore
 
 
 def count_spawn(store: RedisStore, slug: str, harness: str) -> None:
-    """Counts one launch of the harness in the swarm's spawn tally."""
-    store.redis.hincrby(store.key(slug, "spawns"), harness or "unknown", 1)
+    """Counts one launch of the harness, placed now, in the swarm's spawn tally."""
+    store.record_spawn(slug, harness, f"seeded-{uuid.uuid4().hex}", int(time.time() * 1000))
 
 
 def count_claim(store: RedisStore, slug: str, task: str) -> int:
