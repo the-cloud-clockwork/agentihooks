@@ -44,10 +44,11 @@ def _unit_path() -> Path:
 
 
 def bundle_context() -> Path | None:
+    from hooks.context.profile_chain import layer_root
     from scripts.install import _get_bundle_path
 
     bundle = _get_bundle_path()
-    path = bundle / "serena" / "contexts" / "claude-code-worktrees.yml" if bundle else None
+    path = layer_root(bundle) / "serena" / "contexts" / "claude-code-worktrees.yml" if bundle else None
     return path if path and path.is_file() else None
 
 

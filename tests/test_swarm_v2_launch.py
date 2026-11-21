@@ -743,6 +743,26 @@ def test_a_tick_never_replaces_a_seat_whose_execution_is_still_live(world):
     assert str(conflict.value) == "replacement does not match the current execution"
 
 
+@pytest.mark.feature("codex-adopt-refusal-fields")
+def test_an_adoption_refusal_does_not_allow_a_tick_to_replace_a_live_execution(world: World) -> None:
+    from scripts.codex_session import supervisor
+    from scripts.swarm.store import APP_SERVER_TRANSPORT
+
+    assert world.tick(FIRST).ok
+    admitted = world.store.execution_occupants(SLUG)[FIRST]
+    current = replace(admitted, state="working")
+    world.store.put_agent(SLUG, current)
+    spec = supervisor.Launch(SLUG, current, ".", "fixture", {}, execution_id=current.execution_id)
+
+    with pytest.raises(supervisor.LaunchFailure):
+        supervisor.adopt(world.store, spec, APP_SERVER_TRANSPORT, current.hive)
+
+    with pytest.raises(SwarmError, match="replacement does not match the current execution"):
+        world.tick(FIRST)
+
+    assert world.store.execution(SLUG, current.execution_id) == current
+
+
 @pytest.mark.parametrize("state", ["finished", "ended"])
 def test_a_tick_replaces_a_seat_whose_execution_finished_without_an_ending(world, state):
     assert world.tick(FIRST).ok

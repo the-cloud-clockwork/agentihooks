@@ -1049,6 +1049,36 @@ def test_a_bundle_request_renders_the_bundle_chain_global_layer_and_channels(fix
     assert "# Fixture global rule" in {row["text"] for row in sources if row["layer"] == "rule"}
 
 
+@pytest.mark.feature("bundle-layer-manifest")
+def test_a_bundle_naming_a_layer_renders_the_worker_home_from_it_once(fixture, tmp_path):
+    templates, volume = fixture
+    bundle = tmp_path / "bundle"
+    shutil.copytree(WORKER_BUNDLE, bundle)
+    frontend = bundle / "bundle" / "profiles" / "frontend"
+    (bundle / "bundle" / "bundle.yml").write_text("layer: profiles/frontend\n")
+    (frontend / ".claude" / "CLAUDE.md").write_text("# Frontend layer doctrine\n")
+    stop = [{"hooks": [{"type": "command", "command": "echo frontend-layer"}]}]
+    (frontend / ".claude" / "settings.overrides.json").write_text(
+        json.dumps({"env": {"FIXTURE_FRONTEND": "1"}, "hooks": {"Stop": stop}})
+    )
+    req = request(
+        templates, volume, profiles={"claude": "frontend"}, accounts={"claude": ACCOUNTS["claude"]}, bundle=bundle
+    )
+
+    record = worker_home.bootstrap(req)
+
+    home = volume / "attempt-1" / record["homes"]["claude"] / ".claude"
+    text = (home / "CLAUDE.md").read_text()
+    assert text.count("Frontend layer doctrine") == 1
+    assert text.count("Fixture bundle frontend persona") == 1
+    assert "Fixture bundle global persona" not in text
+    assert not (home / "rules" / "fixture-global-rule.md").exists()
+    settings = json.loads((home / "settings.json").read_text())
+    assert settings["env"]["FIXTURE_FRONTEND"] == "1"
+    assert "FIXTURE_BUNDLE_GLOBAL" not in settings["env"]
+    assert hook_commands(settings).count("echo frontend-layer") == 1
+
+
 def test_the_request_document_names_the_delivered_bundle(fixture):
     templates, volume = fixture
 

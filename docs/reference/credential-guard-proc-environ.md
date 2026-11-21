@@ -31,6 +31,7 @@ these forms:
 | A list of files fed to another command | `ls /proc/*/environ \| xargs cat`, `xargs -0 -n1 -a /proc/1/environ echo` |
 | A variable or substitution for the process id or the file name | `cat /proc/$PID/environ`, `f=environ; cat /proc/1/$f`, `cat /proc/1/$(printf envi)ron`, `` cat /proc/1/`printf envi`ron `` |
 | A glob for the file name | `cat /proc/1/envi*`, `cat /proc/1/envir?n`, `cat /proc/1/env[i]ron`, `cat /proc/1/*` |
+| A brace expansion that reaches the file name | `cat /proc/1/env{iron,}`, `cat /proc/self/envi{ron,x}`, `cat /proc/{1/envi,}ron`, `cd /proc/1 && cat env{iron,}` |
 | A glob or variable for the `proc` folder | `cat /p*c/1/environ`, `cat /pr?c/self/environ`, `cat /pr[o]c/1/environ`, `P=/pro; cat ${P}c/1/environ` |
 | Quoting or escapes inside the name | `cat /proc/1/env''iron`, `cat /proc/1/env\iron` |
 | A read after changing into a process folder | `cd /proc/1 && cat environ`, `cd /proc/1; cat *`, `pushd /proc/self && cat env*`, `cd -- /proc/1 && cat e*`, `cd /p*/1 && cat e*` |
@@ -116,6 +117,12 @@ the transcript are a hard floor.
   `ls /proc && grep environ notes.txt` and `cat /proc/1/environ.bak` are both
   refused. Split the command so the part that names `/proc` runs on its own.
   The attribute `os.environ` does not count, because a dot precedes it.
+- **A brace word under a process folder is refused.** A last path part that
+  holds a closing brace below a `proc` folder, or any such word when the
+  command runs from or changes into a folder under `/proc`, counts as a
+  possible environment file name, because bash expands the group before the
+  command runs. `ls /proc/1/{status,stat}` is refused; name each file on its
+  own.
 - **A heredoc body is refused.** The check reads the whole command text,
   heredoc bodies included, before any other parsing. A script that only quotes
   the path in a heredoc is refused too; write it to a file with the editor tool

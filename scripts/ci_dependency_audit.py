@@ -5,6 +5,7 @@ import tempfile
 from pathlib import Path
 
 PIP_AUDIT = "pip-audit==2.10.1"
+PLATFORMDIRS_PIN = "platformdirs!=4.14.8"
 PYTHON = "3.12"
 
 Finding = tuple[str, str, str]
@@ -24,7 +25,18 @@ def resolve(root: Path, out: Path) -> Path:
 
 
 def audit(requirements: Path) -> str:
-    cmd = ["uvx", PIP_AUDIT, "-r", str(requirements), "--no-deps", "--disable-pip", "--format", "json"]
+    cmd = [
+        "uvx",
+        "--with",
+        PLATFORMDIRS_PIN,
+        PIP_AUDIT,
+        "-r",
+        str(requirements),
+        "--no-deps",
+        "--disable-pip",
+        "--format",
+        "json",
+    ]
     return subprocess.run(cmd, capture_output=True, text=True).stdout
 
 

@@ -56,6 +56,7 @@ UPDATABLE = (
     "workstation",
     "requires_harness",
     "needs",
+    "covers_job",
     "doc_items",
     "watchdog",
     "recovery",
@@ -137,7 +138,7 @@ def check_lane(task: dict) -> None:
         raise ValueError("plan tasks must use the plan lane, and the plan lane accepts only plan tasks")
 
 
-def check(op):
+def check(op: dict[str, Any]) -> None:
     by = op.get("by")
     if not isinstance(by, str) or not AUTHOR_RE.match(by) or by == "operator":
         raise ValueError("task ops need `by`, an agent name other than operator")
@@ -155,6 +156,8 @@ def check(op):
             raise ValueError("phase, description, workspace and slice must be strings")
         if "not_duplicate" in op and not (isinstance(op["not_duplicate"], str) and op["not_duplicate"].strip()):
             raise ValueError("not_duplicate must say in plain words why the task differs from the one it resembles")
+        if not isinstance(op.get("covers_job", ""), str):
+            raise ValueError("covers_job must be a string naming the failed dev job the task covers")
         check_lists(op)
         check_bools(op)
         check_profile(op)
@@ -428,7 +431,7 @@ def check_task(task):
         raise ValueError(f"tasks/{task.get('id')} is done without its proof: {', '.join(ledger_kinds.unmet(task))}")
 
 
-def _add(doc, op, ctx):
+def _add(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
     op = ledger_plans.with_slice(doc, ledger_plans.with_plan_slice(doc, op))
     tasks = doc.setdefault("tasks", [])
     if taken := next((t for t in tasks if t["id"] == op["task"]), None):
@@ -481,6 +484,7 @@ def _add(doc, op, ctx):
         "workstation",
         "requires_harness",
         "needs",
+        "covers_job",
         *ledger_kinds.WORKFLOW_FIELDS,
     ):
         if key in op:

@@ -1,3 +1,6 @@
+import json
+import sys
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from threading import Lock
@@ -15,6 +18,24 @@ def keep(store: RedisStore, slug: str, renew: Callable[[], None], clock: Callabl
 
 def read(store: RedisStore, slug: str) -> int:
     return int(store.redis.get(store.key(slug, "last-tick-activity")) or 0)
+
+
+def journal(slug: str, blocked: bool, renewed: bool, wait_s: float, wall_s: float, redis_s: float | None) -> None:
+    """Journal one ``swarm_tick_lock_renewal`` line: whether another call held the hook and whether the renewal
+    succeeded, the seconds the call waited for the hook lock and held it, and the seconds its renewal's Redis calls
+    took, failed or not, or null when it tried none."""
+    current = timing.PASS.get()
+    line = {
+        "event": "swarm_tick_lock_renewal",
+        "slug": slug,
+        "pass_id": None if current is None else current["pass_id"],
+        "blocked": blocked,
+        "renewed": renewed,
+        "wait_s": wait_s,
+        "wall_s": wall_s,
+        "redis_s": redis_s,
+    }
+    print(json.dumps(line), file=sys.stderr)
 
 
 @dataclass
@@ -41,16 +62,30 @@ class Renewal:
 
     def _keep(self, interval_ms: int) -> None:
         """Check for a stop and renew the tick lock unless its last renewal is under ``interval_ms`` old or the pass
-        already revoked the hook; a failed renewal leaves the next call to renew again."""
+        already revoked the hook; a failed renewal leaves the next call to renew again. A call that tried a renewal,
+        or that found another call holding the hook, journals one ``swarm_tick_lock_renewal`` line."""
+        asked = time.monotonic()
+        blocked = self.lock.locked()
         with self.lock:
-            if self.revoked:
-                return
-            tick_stop.check()
-            at = self.clock()
-            if self.renewed is not None and 0 <= at - self.renewed < interval_ms:
-                return
-            keep(self.store, self.slug, self.renew, self.clock)
-            self.renewed = at
+            held = time.monotonic()
+            started: float | None = None
+            renewed = False
+            try:
+                if self.revoked:
+                    return
+                tick_stop.check()
+                at = self.clock()
+                if self.renewed is not None and 0 <= at - self.renewed < interval_ms:
+                    return
+                started = time.monotonic()
+                keep(self.store, self.slug, self.renew, self.clock)
+                self.renewed = at
+                renewed = True
+            finally:
+                ended = time.monotonic()
+                if blocked or started is not None:
+                    redis_s = None if started is None else ended - started
+                    journal(self.slug, blocked, renewed, held - asked, ended - held, redis_s)
 
     def revoke(self) -> None:
         """Stop every later call, from the pass or any worker holding a copy of the hook, from renewing."""

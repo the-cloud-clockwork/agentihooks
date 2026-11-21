@@ -76,7 +76,6 @@ def test_the_real_hook_bodies_read_only_their_declared_keys_in_enforce_mode(monk
     assert wrapper.checked == ["checked"]
     assert dict(wrapper.box) == {
         "agents": ["a"],
-        "view": "view",
         "doc": doc,
         "config": "config of sw",
         "rows": {"t1": {"id": "t1"}},

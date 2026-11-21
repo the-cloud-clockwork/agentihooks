@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_hook.py:scripts.swarm_ledger.ledger_hook.x_expanded:463a7dda94b28b4d00165ccf968073be06df6395cf4c7f8c7bf4abd956270f29": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: inside value an unset variable yields None rather than an empty string, and CPython re.sub drops a None replacement exactly as it drops an empty string; re.sub over 'a$Xb c' with a callback returning None gives 'a c'."
+  }
+}

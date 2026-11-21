@@ -320,7 +320,13 @@ STEPS = (
     CallStep("outbox migration", "wrapper relay", held(_outbox_migration)),
     CallStep("page relay", "wrapper relay", held(_page_relay), writes=pass_domains("agents")),
     CallStep(
-        "tick view", "wrapper view", held(_tick_view), reads=hook_domains("doc"), writes=pass_domains("view"), kept=True
+        "tick view",
+        "wrapper view",
+        held(_tick_view),
+        frozenset({"view wait"}),
+        reads=hook_domains("doc") | pass_domains("view"),
+        writes=pass_domains("view"),
+        kept=True,
     ),
 )
 

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/refresh.py:scripts.swarm_ledger.repository.refresh.x_stored_rows:a27918530277c1eea98f76e593110c7b6197d4ad84193a03b5e3440ae1a9639a": {
+    "reader": "standards_reader",
+    "reason": "UNION and ALL are case-insensitive keywords in both SQLite and PostgreSQL, so the case change alters only the statement text, not its rows, their values or their order. Each path lives in one table, so the result dict is the same whatever order the parts arrive in."
+  }
+}
