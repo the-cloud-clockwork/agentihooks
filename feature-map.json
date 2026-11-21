@@ -42,7 +42,7 @@
       "id": "scheduler-refused-restart-skip",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-wait-pass-skips-refused-scheduler",
-      "behaviour": "A scheduler supervisor that stopped because its state store refused its credential leaves a refusal file, and every later start, the fifteen second swarm wait pass included, starts nothing while a probe read of the scheduler document with the caller's environment is refused, times out or cannot start, even when the store answers a ping; the first accepted probe removes the file and the start goes ahead. A supervisor that stopped on silence or cleanly is started again on the next pass with no probe.",
+      "behaviour": "A scheduler supervisor that stopped because its state store refused its credential leaves a refusal file, and every later start, the fifteen second swarm wait pass included, starts nothing while a probe read of the scheduler entries with the caller's environment is refused, times out or cannot start, even when the store answers a ping; the first accepted probe removes the file and the start goes ahead. A supervisor that stopped on silence or cleanly is started again on the next pass with no probe.",
       "seam": "scripts.scheduler.service.supervise, ensure_running and main probe mode, reached by scripts.swarm.timer.guard and supervise",
       "tests": [
         "tests/scheduler/test_service.py::test_a_supervisor_that_stopped_on_silence_or_cleanly_is_started_again_on_the_next_pass",

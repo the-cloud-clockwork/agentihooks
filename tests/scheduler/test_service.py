@@ -1322,12 +1322,7 @@ def test_the_wait_pass_starts_no_scheduler_after_a_refused_exit_while_its_ping_a
 
         return call
 
-    client = SimpleNamespace(
-        ping=command("ping", True),
-        hstrlen=command("hstrlen", 0),
-        hget=command("hget", None),
-        hscan_iter=command("hscan_iter", ()),
-    )
+    client = SimpleNamespace(ping=command("ping", True), hget=command("hget", None))
     monkeypatch.setattr(store, "_pooled_client", lambda factory, url, pid: client)
     probes: list[tuple[list[str], dict[str, object]]] = []
 
@@ -1339,7 +1334,7 @@ def test_the_wait_pass_starts_no_scheduler_after_a_refused_exit_while_its_ping_a
     environ = {"AGENTIHOOKS_SWARM_REDIS_URL": "redis://swarm.invalid:6379/3"}
     assert [service.ensure_running(environ) for _ in range(3)] == [False, False, False]
     assert spawn.call_count == 1
-    assert commands == ["ping", "hstrlen"] * 3
+    assert commands == ["ping", "hget"] * 3
     assert (tmp_path / service.REFUSAL).is_file()
     acl["refused"] = False
     assert service.ensure_running(environ) is True

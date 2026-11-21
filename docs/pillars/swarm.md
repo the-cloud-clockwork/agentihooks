@@ -6099,7 +6099,7 @@ WantedBy=default.target
   new runner, leaves a `refused` file in its runtime folder and exits 4, and systemd leaves it stopped. A timeout or a
   dropped connection still gets a new pass every second. While the `refused` file stands, every `ensure_running`
   call, the 15 s `swarm waits` pass included, first runs `python -m scripts.scheduler.service probe` with its own
-  environment, which reads the scheduler document past the ping and exits 4 when that read is refused. A refused,
+  environment, which reads the scheduler entries past the ping and exits 4 when that read is refused. A refused,
   timed out or failed probe starts nothing; the first accepted probe removes the file and starts the unit again.
 - Exit 3 means a proof swarm's runner stopped because its state store did not answer for 300 seconds. Its supervisor
   prints `the scheduler supervisor <pid> stops: its state store did not answer`, starts no new runner and exits 3.
@@ -6170,7 +6170,7 @@ the new seam tests failing. Green: Proofs run
 | Symptom | Cause | Fix |
 |---|---|---|
 | The tick stops when `agentihooks-swarm-waits.service` or `agentihooks-hive.service` restarts | The supervisor runs as a child in that unit's group: the scheduler unit is missing or was never started | Run `agentihooks swarm tick` once from the installed agentihooks, or wait for the next host tick; `timer.reconcile` writes and enables the unit |
-| `agentihooks-scheduler.service` is inactive with exit status 4 and `scheduler.log` names a refused credential | The scheduler's Redis user was removed, its password changed or its ACL denies a scheduler command | Fix the credential or ACL behind the scheduler's Redis URL in `~/.agentihooks/.env`; the next `swarm waits` pass probes the scheduler document, removes the `refused` file in the scheduler runtime folder and starts the unit |
+| `agentihooks-scheduler.service` is inactive with exit status 4 and `scheduler.log` names a refused credential | The scheduler's Redis user was removed, its password changed or its ACL denies a scheduler command | Fix the credential or ACL behind the scheduler's Redis URL in `~/.agentihooks/.env`; the next `swarm waits` pass probes the scheduler entries, removes the `refused` file in the scheduler runtime folder and starts the unit |
 | `agentihooks-scheduler.service` is inactive with exit status 2 | Another supervisor held the machine lock past the 30 second take over | The next wait pass starts the unit again; when it repeats, list supervisors with the `ps` check in [A supervisor started off the installed code exits with its starter](#a-supervisor-started-off-the-installed-code-exits-with-its-starter) |
 | The unit is active but `scheduler.log` keeps getting new supervisors | The runtime folder has no mark, so callers spawn children: the unit's supervisor resolves another folder | Keep the Redis settings in `~/.agentihooks/.env`, which the unit loads, rather than only in a shell profile |
 

@@ -310,11 +310,11 @@ def _accepted(refusal: Path, active: Mapping[str, str]) -> bool:
 
 
 def probe(scheduler: Scheduler) -> int:
-    """Read the scheduler document once through the runner's own store: REFUSED when it refuses the credential."""
+    """Read the scheduler entries once through the runner's own store: REFUSED when it refuses the credential."""
     from scripts.events import state
 
     try:
-        scheduler.document()
+        scheduler.state.get(scheduler.name("entries"))
     except state.refused():
         return REFUSED
     return 0
