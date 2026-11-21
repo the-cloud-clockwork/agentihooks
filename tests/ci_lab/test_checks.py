@@ -12,7 +12,7 @@ import pytest
 import requests
 
 from scripts import github_app
-from scripts.ci_lab import checks
+from scripts.ci_lab import checks, contract, metrics
 from scripts.ci_lab.checks import Checks, Dispatches, Output, PostRefused, Transition
 from scripts.ci_lab.units import Unit
 
@@ -667,6 +667,28 @@ def test_a_rate_limited_dispatch_waits_like_the_ci_budget_then_sends(monkeypatch
     assert poster.post(HEAD, "lint", "completed", "success", OUTPUT, False) == checks.DISPATCHED
     sleep.assert_called_once_with(121.0)
     assert request.call_count == 2
+
+
+@pytest.mark.feature("lab-scheduler-mirror-age-and-github-rate")
+def test_a_dispatch_poster_with_a_registry_sets_the_github_calls_left_from_each_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry = metrics.Registry()
+    left = registry.values[contract.GITHUB_RATE_REMAINING]
+    limited = answer(403, text=LIMITED, headers={"x-ratelimit-remaining": "0", "x-ratelimit-reset": "1120"})
+    accepted = answer(204, headers={"x-ratelimit-remaining": "4998"})
+    refused = answer(422, headers={"x-ratelimit-remaining": "4997"})
+    monkeypatch.setattr(requests, "request", Mock(side_effect=[limited, accepted, refused]))
+    waited: list[float] = []
+    poster = Dispatches(
+        "example/repo", Token(), sleep=lambda _: waited.extend(left.values()), clock=lambda: 1000.0, registry=registry
+    )
+    assert poster.post(HEAD, "lint", "completed", "success", OUTPUT, False) == checks.DISPATCHED
+    assert waited == [0.0]
+    assert list(left.values()) == [4998.0]
+    with pytest.raises(PostRefused):
+        poster.post(HEAD, "unit", "completed", "success", OUTPUT, False)
+    assert list(left.values()) == [4997.0]
 
 
 @pytest.mark.feature("lab-check-dispatch")

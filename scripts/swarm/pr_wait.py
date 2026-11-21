@@ -8,6 +8,7 @@ so no agent relies on running swarm wait.
 """
 
 import re
+import sys
 import time
 from collections.abc import Callable
 from typing import Any
@@ -156,23 +157,28 @@ def enforce_pass(
     lab = grade or (lambda head: lab_grade(store.config(slug).lab_url, head))
     actions: list[str] = []
     for agent in store.agents(slug):
-        pushed = read(store.redis, slug, agent.name)
-        if agent.state == "finished" or not pushed or agent.task not in rows:
-            continue
-        held = idle.wait(store.redis, slug, agent.name) or {}
-        if holds_lab(held, pushed.get("pushed_head"), now_ms):
-            continue
-        lookup = either(forge, lab, pushed.get("pushed_head") or "")
-        url = pull_of(store.redis, slug, agent.name, pushed, rows[agent.task], now_ms, lookup)
-        pull = github(url) if url and waits.PULL_URL.fullmatch(url) else None
-        if pull is None and not (url and lab_wait.GRADE_URL.fullmatch(url)):
-            continue
-        clear(store.redis, slug, agent.name)
-        on = held.get("on") or {}
-        closed = pull is not None and pull.state != "OPEN"
-        if closed or (on.get("kind") in COVERS and on.get("target") == url and held["until"] > now_ms):
-            continue
-        on = waits.on("lab", url) if pull is None else pull_wait(pull, url)
-        idle.declare_wait(store.redis, slug, agent.name, now_ms + waits.CHECKED_MINUTES * 60_000, REASON, now_ms, on)
-        actions.append(f"set the wait of {agent.name} on {on['kind']} of {url} from its push")
+        try:
+            pushed = read(store.redis, slug, agent.name)
+            if agent.state == "finished" or not pushed or agent.task not in rows:
+                continue
+            held = idle.wait(store.redis, slug, agent.name) or {}
+            if holds_lab(held, pushed.get("pushed_head"), now_ms):
+                continue
+            lookup = either(forge, lab, pushed.get("pushed_head") or "")
+            url = pull_of(store.redis, slug, agent.name, pushed, rows[agent.task], now_ms, lookup)
+            pull = github(url) if url and waits.PULL_URL.fullmatch(url) else None
+            if pull is None and not (url and lab_wait.GRADE_URL.fullmatch(url)):
+                continue
+            clear(store.redis, slug, agent.name)
+            on = held.get("on") or {}
+            closed = pull is not None and pull.state != "OPEN"
+            if closed or (on.get("kind") in COVERS and on.get("target") == url and held["until"] > now_ms):
+                continue
+            on = waits.on("lab", url) if pull is None else pull_wait(pull, url)
+            idle.declare_wait(
+                store.redis, slug, agent.name, now_ms + waits.CHECKED_MINUTES * 60_000, REASON, now_ms, on
+            )
+            actions.append(f"set the wait of {agent.name} on {on['kind']} of {url} from its push")
+        except Exception as exc:
+            print(f"push wait of {agent.name} failed: {exc}", file=sys.stderr)
     return actions
