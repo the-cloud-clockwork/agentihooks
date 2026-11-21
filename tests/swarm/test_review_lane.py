@@ -141,6 +141,21 @@ def test_autoscale_keeps_the_configured_review_cap() -> None:
 
 
 @pytest.mark.feature("swarm-review-lane")
+def test_autoscale_reads_no_demand_as_zero_demand_on_every_scaled_lane() -> None:
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0, scaling="auto", max_review=2)
+    inputs = capacity.fixture_inputs({**_readings(), "previous": {}})
+    zero = capacity.ScaleInputs(inputs.observations, inputs.agents, {"eng": 0, "ci": 0, "plan": 0}, lambda: None, {})
+    none = capacity.ScaleInputs(inputs.observations, inputs.agents, None, lambda: None, {})
+    asked = capacity.ScaleInputs(inputs.observations, inputs.agents, {"eng": 1, "ci": 1, "plan": 1}, lambda: None, {})
+    _, idle = capacity.autoscaled(config, zero)
+    _, unset = capacity.autoscaled(config, none)
+    _, wanted = capacity.autoscaled(config, asked)
+    assert idle is not None and unset is not None and wanted is not None
+    assert unset["ceilings"] == idle["ceilings"]
+    assert wanted["ceilings"] != idle["ceilings"]
+
+
+@pytest.mark.feature("swarm-review-lane")
 def test_ready_work_lists_each_task_only_on_its_own_lane(store: RedisStore) -> None:
     assert _ready(store, [{"id": "e1"}, {"id": "c1", "lane": "ci"}]) == {"eng": ["e1"], "ci": ["c1"]}
 
