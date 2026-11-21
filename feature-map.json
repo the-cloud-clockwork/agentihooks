@@ -5771,6 +5771,36 @@
       ]
     },
     {
+      "id": "swarm-autoscaler-scale-up-alert",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2789",
+      "behaviour": "Each slow lane tick pass reads the cluster autoscaler status ConfigMap that AGENTIHOOKS_AUTOSCALER_STATUS names and keeps a count of failed scale ups in a row per node group in the swarm Redis: a Backoff scale up record whose transition time and error message were not counted before adds one, and a rise in the group's ready nodes resets it. A newly counted second failure, a timed out scale up or a rise in launched instances past the join budget raises one autoscaler ledger alert to the masters, naming the node group, its size, the count, the last failure and the ready nodes against the target, while no autoscaler alert is open; evidence an open autoscaler alert holds back stays on its group and raises on the first pass with no open alert unless the group recovered first; the alert closes once every group is out of backoff, has no instance past the join budget and had its count reset by a ready rise. An unset setting reads nothing and a failed read changes nothing.",
+      "seam": "scripts.swarm.autoscaler_watch.alert_pass run by the autoscaler alert tick step of scripts.tick.steps.tasks, and the autoscaler source of scripts.swarm_ledger.ledger_alerts",
+      "tests": [
+        "tests/swarm/test_autoscaler_watch.py::test_two_failed_scale_ups_in_a_row_raise_one_alert_naming_the_group_reason_and_count",
+        "tests/swarm/test_autoscaler_watch.py::test_one_failed_scale_up_raises_nothing_however_often_it_is_read",
+        "tests/swarm/test_autoscaler_watch.py::test_a_new_failure_message_under_the_kept_transition_time_counts_as_the_next_failure",
+        "tests/swarm/test_autoscaler_watch.py::test_a_timed_out_scale_up_raises_on_its_own",
+        "tests/swarm/test_autoscaler_watch.py::test_launched_instances_past_the_join_budget_raise_on_their_own_each_time_they_rise",
+        "tests/swarm/test_autoscaler_watch.py::test_a_rise_in_ready_nodes_resets_the_count_and_a_drop_does_not",
+        "tests/swarm/test_autoscaler_watch.py::test_groups_failing_in_the_same_read_share_one_alert",
+        "tests/swarm/test_autoscaler_watch.py::test_an_open_autoscaler_alert_holds_a_second_raise_and_other_alerts_do_not",
+        "tests/swarm/test_autoscaler_watch.py::test_evidence_an_open_alert_held_back_raises_once_no_autoscaler_alert_is_open",
+        "tests/swarm/test_autoscaler_watch.py::test_held_evidence_of_a_group_that_recovered_raises_nothing",
+        "tests/swarm/test_autoscaler_watch.py::test_recovery_closes_the_open_autoscaler_alert_once_every_group_recovered",
+        "tests/swarm/test_autoscaler_watch.py::test_a_group_in_backoff_or_with_a_count_no_ready_rise_reset_holds_the_close",
+        "tests/swarm/test_autoscaler_watch.py::test_an_unset_setting_reads_no_status_and_keeps_no_count",
+        "tests/swarm/test_autoscaler_watch.py::test_a_failed_status_read_names_why_and_keeps_the_count",
+        "tests/swarm/test_autoscaler_watch.py::test_the_count_survives_a_failed_read_and_raises_on_the_next_failure",
+        "tests/swarm/test_autoscaler_watch.py::test_each_node_group_record_lives_under_the_swarm_autoscaler_watch_key",
+        "tests/swarm/test_autoscaler_watch.py::test_the_status_is_read_from_the_named_config_map_with_the_pod_environment",
+        "tests/swarm/test_autoscaler_watch.py::test_a_raise_text_is_cut_to_the_length_the_ledger_takes",
+        "tests/tick/steps/test_autoscaler_alert.py::test_autoscaler_alert",
+        "tests/tick/steps/test_autoscaler_alert.py::test_the_tick_hands_the_autoscaler_watch_its_slug_store_ledger_and_state",
+        "tests/swarm_ledger/test_ledger_alerts.py::test_a_raised_autoscaler_alert_opens_one_alert_for_the_master"
+      ]
+    },
+    {
       "id": "queue-sweep-keeps-merged-group-runs",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-merge-group-cancellations",
