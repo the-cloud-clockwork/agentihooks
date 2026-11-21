@@ -223,6 +223,7 @@ def publish(bus: Bus, view: Snapshot, now_ms: int, policy: QueuePolicy = QueuePo
     one that waits past the dedupe window stays a single copy, unless it waits ``behind`` an urgent or focused offer,
     when it is withdrawn and offered again after it."""
     events = offers(view, now_ms)
+    offered = {event.id for event in events}
     lanes = dict.fromkeys([*LANES, *(event.data["lane"] for event in events)])
     queues = {lane: bus.queue(queue_name(view.slug, lane), policy) for lane in lanes}
     queued: set[str] = set()
@@ -230,7 +231,7 @@ def publish(bus: Bus, view: Snapshot, now_ms: int, policy: QueuePolicy = QueuePo
         kept = _sweep(queue, view)
         ids = {event.id for event in kept}
         fresh = [event for event in events if event.data["lane"] == lane and event.id not in ids]
-        if moving := behind(kept, fresh, view, now_ms):
+        if moving := behind(kept, fresh, view, now_ms) & offered:
             queue.withdraw(lambda event: event.id in moving)
         queued |= ids - moving
     placed = []
@@ -260,12 +261,10 @@ def behind(kept: list[Envelope], fresh: list[Envelope], view: Snapshot, now_ms: 
     offering one again behind it is never dropped by the bus dedupe and moves it at most once per window."""
     from scripts.swarm import preempt
 
-    def preferred(event: Envelope) -> bool:
-        return preempt.preferred(view.rows[event.key], view.doc, view.graph)
-
-    last = max((index for index, event in enumerate([*kept, *fresh]) if preferred(event)), default=0)
+    flags = [preempt.preferred(view.rows[event.key], view.doc, view.graph) for event in [*kept, *fresh]]
+    last = max((index for index, flag in enumerate(flags) if flag), default=0)
     window = BusConfig().dedupe_window_ms
-    return {event.id for event in kept[:last] if not preferred(event) and now_ms - event.time >= window}
+    return {event.id for event, flag in zip(kept[:last], flags) if not flag and now_ms - event.time >= window}
 
 
 def stale(event: Envelope, view: Snapshot) -> bool:
