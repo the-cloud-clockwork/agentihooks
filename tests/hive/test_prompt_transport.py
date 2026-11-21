@@ -527,6 +527,28 @@ def test_the_seed_budget_counts_the_json_bytes_the_admit_reply_carries(homes: Si
     assert "wide.log" not in sent
 
 
+@pytest.mark.feature("recon-plan-always-travels-with-the-work-folder")
+def test_a_recon_plan_of_five_hundred_long_lines_syncs_whole_while_another_file_that_size_stays_behind(
+    homes: SimpleNamespace,
+) -> None:
+    import fakeredis
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    recon = "# What will be built\n" + ("r" * 259 + "\n") * 499
+    with at(homes.controller):
+        folder = ledger_workspace.scaffold("fixture", TASK)
+        (folder / "progress.md").write_text("p" * ledger_workspace.LINE_BYTES, encoding="utf-8")
+        (folder / "proof.md").write_text("q" * ledger_workspace.LINE_BYTES, encoding="utf-8")
+        (folder / "recon.md").write_text(recon, encoding="utf-8")
+        (folder / "notes.md").write_text(recon, encoding="utf-8")
+        ledger_workspace.sync(redis, "host", [("fixture", "task")], 45)
+    held = json.loads(redis.get(ledger_workspace.task_files_key("host", "fixture", "task")))
+    assert len(recon.splitlines()) == 500
+    assert len(recon.encode()) > ledger_workspace.SEED_CHARS
+    assert held.get("recon.md") == recon
+    assert "notes.md" not in held
+
+
 def test_work_folder_seeds_are_read_and_written_as_utf8(homes, monkeypatch):
     import codecs
 
