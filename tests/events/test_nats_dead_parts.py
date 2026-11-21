@@ -5,6 +5,7 @@ import time
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock
 
 import pytest
@@ -103,7 +104,13 @@ def test_plain_deliveries_keep_their_fetch_budget_without_stream_metadata(timeou
     subscription = SimpleNamespace(fetch=AsyncMock(return_value=[message]))
     loop = nats._Loop()
     try:
-        consumer = nats.NatsConsumer(loop, subscription, SimpleNamespace(), QueuePolicy(), "plain")
+        consumer = nats.NatsConsumer(
+            loop,
+            cast(nats.JetStreamContext.PullSubscription, subscription),
+            cast(nats.JetStreamContext, SimpleNamespace()),
+            QueuePolicy(),
+            "plain",
+        )
         assert [delivery.event for delivery in consumer.fetch(1, timeout_ms)] == [event]
         subscription.fetch.assert_awaited_once_with(1, timeout=seconds)
     finally:
