@@ -91,6 +91,15 @@ def test_a_grant_carries_the_base_and_grader_revision_of_its_job(jobs: queue.Que
     assert grant == leases.Grant("h1:test:a", grant.token, "h1", unit("a"), 1, 1500, "b1", "g1")
 
 
+@pytest.mark.feature("lab-lease-event-branch")
+def test_a_grant_carries_the_event_and_head_branch_of_its_job(jobs: queue.Queue, lab: leases.Leases) -> None:
+    jobs.enqueue([unit("a")], "h1", {}, "b1", "g1", "merge_group", "fix-x")
+
+    [grant] = lab.lease("w1", 1, frozenset(), 0)
+
+    assert (grant.event, grant.head_branch) == ("merge_group", "fix-x")
+
+
 @pytest.mark.feature("lab-scheduler-metrics")
 def test_a_grant_records_the_millisecond_its_lease_started(jobs: queue.Queue, lab: leases.Leases, clock: Clock) -> None:
     jobs.enqueue([unit("a")], "h1", {})

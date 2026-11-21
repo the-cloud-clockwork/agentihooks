@@ -147,6 +147,17 @@ def test_a_step_past_its_time_limit_is_red_with_no_code(tmp_path: Path, settings
     assert result.report.read_text() == ""
 
 
+@pytest.mark.feature("lab-lease-event-branch")
+@pytest.mark.parametrize(("step", "timeout", "code"), [("exit 1\n", 120.0, 1), ("sleep 30\n", 0.5, None)])
+def test_a_tolerated_step_that_fails_or_runs_out_of_time_stays_green_as_continue_on_error_keeps_its_job(
+    tmp_path: Path, settings: run_static.Settings, step: str, timeout: float, code: int | None
+) -> None:
+    tolerated = dataclasses.replace(_step(step), tolerated=True)
+    result = run_static.run(tolerated, *_folders(tmp_path), dataclasses.replace(settings, timeout=timeout))
+    assert result.code == code
+    assert result.green
+
+
 def test_the_step_runs_inside_bubblewrap_without_network(tmp_path: Path, settings: run_static.Settings) -> None:
     assert run_static.run(_step("true\n"), *_folders(tmp_path), settings).green
     assert "--unshare-net" in (tmp_path / "bwrap.args").read_text().splitlines()
