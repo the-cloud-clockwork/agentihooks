@@ -17,7 +17,8 @@ from scripts.swarm.store import AUTO_SCALING, AgentRecord, RedisStore, SwarmConf
 if TYPE_CHECKING:
     from scripts.routing.reservation import Reservation
 
-LANES = ("eng", "ci", "plan")
+LANES = ("eng", "ci", "plan", "review")
+SCALED_LANES = ("eng", "ci", "plan")
 LABELS = {"claude": "Claude", "codex": "Codex"}
 CODEX_SHARE = 0.3
 SHARED_LANES = ("eng", "ci")
@@ -459,8 +460,13 @@ def _allocate(
         effective[lane] += 1
 
 
-def _configured(config) -> dict:
-    return dict(zip(LANES, (config.max_eng, config.max_ci, config.max_plan), strict=True))
+def _configured(config: SwarmConfig) -> dict[str, int]:
+    return dict(zip(LANES, (config.max_eng, config.max_ci, config.max_plan, config.max_review), strict=True))
+
+
+def _scaled(counts: dict[str, int]) -> dict[str, int]:
+    """The counts of the lanes autoscale sizes; the review lane keeps its configured cap."""
+    return {lane: counts.get(lane, 0) for lane in SCALED_LANES}
 
 
 def _busy(agents: list) -> dict:
@@ -542,13 +548,13 @@ def autoscaled(
     host = host or granted(host_room(config, inputs), inputs.previous, inputs.now_ms)
     stored = inputs.previous.get("autoscale") or {}
     previous = {
-        "ceilings": stored.get("ceilings") or _configured(config),
+        "ceilings": stored.get("ceilings") or _scaled(_configured(config)),
         "pending_raise": stored.get("pending_raise") or {"target": None, "ticks": 0},
     }
-    demand = inputs.demand or dict.fromkeys(LANES, 0)
+    demand = _scaled(inputs.demand or {})
     free = _placeable(_open(inputs.observations, inputs.warned))
     decision = autoscale.calculate(
-        _busy(inputs.agents), free, unspent(host, inputs.spent), demand, previous, now_ms=inputs.now_ms
+        _scaled(_busy(inputs.agents)), free, unspent(host, inputs.spent), demand, previous, now_ms=inputs.now_ms
     )
     caps = decision["ceilings"]
     scaled = replace(config, max_eng=caps["eng"], max_ci=caps["ci"], max_plan=caps["plan"])
@@ -708,7 +714,7 @@ def read(store: Any, slug: str) -> dict[str, Any]:
 
 
 def caps(decision: dict, config: SwarmConfig) -> dict[str, int]:
-    return decision.get("effective", {"eng": config.max_eng, "ci": config.max_ci, "plan": config.max_plan})
+    return decision.get("effective", _configured(config))
 
 
 def status_line(decision: dict) -> str:

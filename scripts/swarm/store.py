@@ -340,6 +340,7 @@ class RedisStore:
             raw.get("tick_mode") or SEQUENTIAL_TICK,
             raw.get("control_url", ""),
             raw.get("lab_url", ""),
+            int(raw.get("max_review", 0)),
         )
 
     def update(self, slug: str, **changes: Any) -> SwarmConfig:

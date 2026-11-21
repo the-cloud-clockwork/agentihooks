@@ -54,8 +54,8 @@ def live(agents: list) -> dict[str, int]:
 
 def scaling_line(decision: dict, counts: dict[str, int], scaling: str) -> str:
     scaled = decision.get("autoscale") if scaling == AUTO_SCALING else None
-    ceilings = scaled["ceilings"] if scaled else decision["configured"]
-    lanes = ", ".join(f"{lane} {counts[lane]} of {ceilings[lane]}" for lane in capacity.LANES)
+    ceilings = {**decision["configured"], **scaled["ceilings"]} if scaled else decision["configured"]
+    lanes = ", ".join(f"{lane} {counts[lane]} of {ceilings[lane]}" for lane in capacity.LANES if lane in ceilings)
     seats = decision.get("placeable")
     line = f"scaling {scaling}, live of ceiling {lanes}"
     if seats:
@@ -67,7 +67,9 @@ def lines(decision: dict[str, Any], now_ms: int, counts: dict[str, int], scaling
     if not decision:
         return [capacity.status_line(decision)]
     caps = ", ".join(
-        f"{lane} {decision['effective'][lane]} of {decision['configured'][lane]}" for lane in capacity.LANES
+        f"{lane} {decision['effective'][lane]} of {decision['configured'][lane]}"
+        for lane in capacity.LANES
+        if lane in decision["effective"]
     )
     head = f"quota capacity {caps}, {_changed(decision['at'], now_ms)}, because {decision['reason']}"
     host = [host_line(decision["host"])] if "host" in decision else []
