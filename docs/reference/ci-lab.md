@@ -2310,11 +2310,9 @@ key; the builders are pure and read no file, clock or network.
 | `stats` | `scope` | Source to changed lines, for the sources the test file reaches |
 | `stats` | `measured` | Whether the inputs come from measured coverage |
 | `stats` | `discovery` | Digest of the discovery inputs |
-| `stats` | `sources` | Path to sha256 of each configuration file, `uv.lock` among them, and each `scripts/ci_mutation/` file |
+| `stats` | `sources` | Path to sha256 of each configuration file, `uv.lock` and `.github/test-excludes.txt` among them, and each `scripts/ci_mutation/` file |
 | `stats` | `options` | The pytest options, in order |
-| `stats` | `interpreter` | `sys.version` |
-| `stats` | `platform` | `sys.platform` |
-| `stats` | `versions` | Distribution name to version |
+| `stats` | `lockfile` | sha256 of the head's `.github/test-requirements.lock`, or null without one |
 | `mutant` | `module` | Path of the module that holds the function |
 | `mutant` | `function` | Name of the changed function |
 | `mutant` | `definition` | Digest of the function's whole definition text, from `scripts.dep_manifest.unit_hashes` |
@@ -2337,6 +2335,10 @@ key; the builders are pure and read no file, clock or network.
   the lab reuses the stats the cache already holds. Its file inputs are sha256 digests of the file
   bytes, the one exception to blob ids, because the stats cache identity hashes them that way.
   Its lockfile and pyproject inputs are the `uv.lock` and `pyproject.toml` entries of `sources`.
+  Its runtime is the `lockfile` input, never the interpreter or installed packages of the process
+  computing it, so the scheduler keys a stats unit exactly as the worker's stats cache stores it
+  for the same head. Every CI install and the baked lab worker venv install from that file, with
+  `.github/test-excludes.txt` as their excludes list, which `sources` keys.
 - A change to `uv.lock` or `pyproject.toml` rekeys every unit kind. A grade is keyed by its head,
   which names both files.
 - The lab runs pytest itself, so no workflow file under `.github/` changes a test verdict. The
@@ -2419,11 +2421,12 @@ key; the builders are pure and read no file, clock or network.
    as `hold`, so the other grades keep posting and a restarted scheduler keeps the hold. A grade
    whose units are all final closes only once every one of its check runs is posted. The failed
    check of a head that cannot expand is outside these holds: it is tried once, since its dropped
-   head keeps no grade to retry from. The refusal text
-   `GitHub App cannot supply scoped contents write credentials` is the one message
-   `GitHubAppAuth.get_token` raises for any refused token, so for the check runs token, which asks
-   for checks write only, read the App installation's `permissions.checks` in the org
-   installations listing.
+   head keeps no grade to retry from. `GitHubAppAuth.get_token` names the permissions a refused
+   token asked for and GitHub's answer, such as
+   `GitHub App cannot supply scoped checks write credentials: GitHub answered 422` for the check
+   runs token, or `GitHub answered 201 with a token outside that scope` when the minted token lacks
+   a requested permission or repository; for a refused check runs token, read the App
+   installation's `permissions.checks` in the org installations listing.
 
 Expansion frames a head by its class (`scripts.ci_lab.scheduler.frame`): a pull request or hotfix grade
 keeps the lab gates the pull request rules require and names every other required job as a gate without
@@ -2456,7 +2459,14 @@ draft pull request. The relay keeps the id of each check run it creates on the g
 the check run's name as GitHub answers and seeds its poster with those ids before it posts, so a
 relay retried after the service restarts, such as one whose pull request call failed after its
 posts, creates no second completed check run. The ids the scheduler keeps under gate names for its
-own posts, such as shadow check runs of the same grade, never seed the relay.
+own posts, such as shadow check runs of the same grade, never seed the relay. A relay whose git or
+HTTP call fails is named `retry <head> for <branch>: <error>` and stays pending for the next tick.
+A relay whose push, check runs or pull requests token the App refuses is named
+`held <head> for <branch> for a later pass: <refusal>`, stays pending and holds every pending head
+of its repository for `POST_HOLD_MS`; the heads of other repositories still relay in the same
+tick, and the first tick after the hold relays the held heads again. The hold lives in the relay's
+memory, as the scheduler's repository post hold does, so a restarted service tries the held heads
+on its first tick.
 
 A grade's state is one JSON document at `agentihooks-ci:grade:<run>`, where `<run>` is the grade
 key of the repository, head, base, class and grader revision. Live grades sit in
@@ -2646,7 +2656,8 @@ check that the App token, GitHub or the network refuses is recorded as
 keeps no grade, and the pass goes on. A head pushed to a grade ref gets no check run, since
 GitHub does not hold that head. A manifest fetch that raises `FetchPending` or
 `FetchUnanswered` holds the head again instead, as
-`holding <head>: <error>`; [Test units](#test-units) describes both. The scheduler service prints
+`holding <head>: <error>`, until the tenth `FetchUnanswered` in a row drops the head with this
+check run; [Test units](#test-units) describes both. The scheduler service prints
 each action on its own line:
 
 ```bash
@@ -2793,8 +2804,12 @@ GitHub answers is gone (410) and a manifest recorded for another commit fetch no
 or unanswered request or an archive without a readable `packed.json` raises `manifests.FetchRefused`.
 A request GitHub never answered or answered with a server error, including token mint requests,
 raises its subclass `manifests.FetchUnanswered`, and the scheduler puts the head back in its
-lane with the quiet window restarted, so the first pass after that window fetches again; any other
-refusal drops the head with its reason. The service runs each fetch off the scheduler pass through
+lane with the quiet window restarted, so the first pass after that window fetches again. The
+head's waiting entry counts these fetches in a row, and the `UNANSWERED_FETCHES`th (10) drops the
+head as `cannot expand <head>: 10 manifest fetches in a row got no answer or a server error, the
+last: <error>` and posts its failed `lab-shadow/required` check run naming them, so a head GitHub
+keeps failing ends with a lab status. Any other refusal drops the head with its reason. The service
+runs each fetch off the scheduler pass through
 `manifests.Background`, at most `WORKERS` (4) at once: while a fetch runs the call raises
 `manifests.FetchPending`, and the scheduler puts the head back in its lane with its quiet window
 unchanged, so the next pass reads the finished fetch and a manifest request GitHub never answers

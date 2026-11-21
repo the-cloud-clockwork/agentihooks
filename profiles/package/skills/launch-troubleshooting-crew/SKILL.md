@@ -47,8 +47,9 @@ script quotes his standing order for this skill.
    focus without deleting anything, records the order verbatim as a canon seat note and asks every agent
    working on another task to hand off at its next stop, so its task waits for the restore. While any crew
    task is not done, the swarm's focus claim gate holds every other open task back from a claim. Then set
-   the printed `cron` with CronCreate (recurring, every thirty minutes, the printed prompt verbatim). Done
-   when the scout tasks are focused and the cron is set.
+   the printed `cron` as a seat cron on the agentihooks scheduler, never a session cron, so it outlives a
+   master recycle: `agentihooks cron add --expr "<cron>" --tz UTC --seat master@SLUG "<prompt>"` with the
+   printed prompt verbatim. Done when the scout tasks are focused and `agentihooks cron list` shows the cron.
 
 3. **Judge the proofs.** Read each scout task's proof as it closes. A claim counts only when its evidence
    confirms it; a hypothesis is never a cause. While causes remain unproven, run `scout` again with new hypotheses: it adds
@@ -70,7 +71,7 @@ script quotes his standing order for this skill.
 
 7. **Restore.** Run `crew.py restore SLUG`. It unfocuses the crew tasks, focuses the earlier targets in their
    order, skipping any that are done or gone, puts the eng lane back and names the agents the launch
-   stopped. Delete the cron. Done when the swarm
+   stopped. Remove the seat cron with `agentihooks cron remove <id>`. Done when the swarm
    status shows the earlier focus again.
 
 Only follow ups that really come from the troubleshooting, at medium, high or critical priority, join the
