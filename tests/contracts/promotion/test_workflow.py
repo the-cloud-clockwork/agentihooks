@@ -73,9 +73,9 @@ def test_every_dev_push_workflow_outside_tests_sits_on_the_non_gating_list() -> 
         chained := {
             file
             for file, events in triggers.items()
-            if "workflow_run" in events
-            and _runs_on(events["workflow_run"], "dev")
-            and {names[source] for source in fired} & set(events["workflow_run"]["workflows"])
+            if (run := events.get("workflow_run"))
+            and _runs_on(run, "dev")
+            and {names[source] for source in fired} & set(run["workflows"])
         }
         - fired
     ):
