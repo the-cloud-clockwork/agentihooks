@@ -208,7 +208,7 @@ class ExecutionRegistry:
         current = _record(cast(dict[str, Any], row.value))
         if any(getattr(agent, field) != getattr(current, field) for field in IMMUTABLE):
             return False
-        written, conflict = _resolve(current, agent)
+        written, conflict = _resolve(current, agent, keep_decision=True)
         if conflict or cast(dict[str, Any], written.runtime_target).get("pod_uid"):
             return False
         checked_head = port.record(slug, fencing.BY_SEAT, agent.seat)
@@ -225,7 +225,7 @@ class ExecutionRegistry:
 
     def _put(self, slug: str, agent: AgentRecord, managed: bool) -> None:
         if managed or not self.store.project_legacy(slug, agent, lambda: self.named(slug, agent.name)):
-            self.update(slug, agent)
+            self.update(slug, agent, keep_decision=True)
 
     def get(self, slug: str, execution_id: str) -> AgentRecord:
         port = fencing.records(self.store, slug)
@@ -296,11 +296,11 @@ class ExecutionRegistry:
         ):
             self.conflict(slug, "Pod UID already belongs to another execution")
 
-    def update(self, slug: str, agent: AgentRecord) -> None:
+    def update(self, slug: str, agent: AgentRecord, keep_decision: bool = False) -> None:
         with _writes(slug):
-            timing.timed(self._update, slug, agent)
+            timing.timed(self._update, slug, agent, keep_decision)
 
-    def _update(self, slug: str, agent: AgentRecord) -> None:
+    def _update(self, slug: str, agent: AgentRecord, keep_decision: bool = False) -> None:
         self.validate(slug, agent)
 
         def change(doc: dict[str, Any]) -> tuple[AgentRecord, AgentRecord]:
@@ -309,15 +309,17 @@ class ExecutionRegistry:
                 self.conflict(slug, "stale or changed execution identity")
             if current.state == "ended":
                 return current, current
-            written = self._land(slug, doc, current, agent)
+            written = self._land(slug, doc, current, agent, keep_decision)
             return written, current
 
         written, current = self._fenced(slug, change)
         if written != current:
             self._project(slug, (written.name,), written, current)
 
-    def _land(self, slug: str, doc: dict[str, Any], current: AgentRecord, written: AgentRecord) -> AgentRecord:
-        written, conflict = _resolve(current, written, revive=True)
+    def _land(
+        self, slug: str, doc: dict[str, Any], current: AgentRecord, written: AgentRecord, keep_decision: bool = False
+    ) -> AgentRecord:
+        written, conflict = _resolve(current, written, revive=True, keep_decision=keep_decision)
         if conflict:
             self.conflict(slug, "runtime target identity is immutable after binding")
         self.check_uid(slug, written, doc)
@@ -487,9 +489,11 @@ def _binding_conflict(previous: dict[str, Any], current: dict[str, Any]) -> bool
     return bool(reasons)
 
 
-def _resolve(current: AgentRecord, agent: AgentRecord, *, revive: bool = False) -> tuple[AgentRecord, bool]:
-    """Resolve an execution write, preserving ended records unless revival is explicit, and keeping the launch
-    decision the execution holds wherever a write read before that decision landed carries it empty."""
+def _resolve(
+    current: AgentRecord, agent: AgentRecord, *, revive: bool = False, keep_decision: bool = False
+) -> tuple[AgentRecord, bool]:
+    """Resolve an execution write, preserving ended records unless revival is explicit; with ``keep_decision`` (a
+    put of a record copy), a copy read before the launch decision landed keeps the decision fields it carries empty."""
     if current.state == "ended":
         if not revive:
             return current, False
@@ -498,7 +502,7 @@ def _resolve(current: AgentRecord, agent: AgentRecord, *, revive: bool = False) 
         written = replace(written, state="finished")
     if _read_before_ack(written.runtime_target, current.runtime_target):
         written = replace(written, **{field: getattr(current, field) for field in LAUNCH_BINDING})
-    if current.profile_decision and not written.profile_decision:
+    if keep_decision and current.profile_decision and not written.profile_decision:
         written = replace(
             written, **{field: getattr(current, field) for field in LAUNCH_DECISION if not getattr(written, field)}
         )
