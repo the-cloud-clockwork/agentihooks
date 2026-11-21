@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 
 from scripts.swarm import slice_check
+from scripts.swarm.thin_task import section_complete, thin
 
 pytestmark = pytest.mark.unit
 
@@ -13,9 +14,8 @@ FULL = (
     "enhances it, and cover every rule and every exemption with a unit test that plants exactly one fault each. "
     "The seam is the thin function. Done when the pull request is merged with CI green."
 )
-SECTION = """### Thin task check
-
-Seams: `thin_task.thin(task)` and `thin_task.section_complete(text)`.
+NAMED_SEAMS = "`thin_task.thin(task)` and `thin_task.section_complete(text)`."
+SECTION = f"""### Thin task check
 
 ## What will be built
 The check.
@@ -33,7 +33,7 @@ Tests first.
 ## Summary
 One check.
 ## Seams
-The two functions.
+{NAMED_SEAMS}
 ## Tests
 Unit tests.
 ## Proof
@@ -52,18 +52,6 @@ RECON = (
 BODY = ("Summary", "Seams", "Tests", "Proof")
 
 
-def thin(task: dict[str, Any]) -> list[str]:
-    from scripts.swarm import thin_task
-
-    return thin_task.thin(task)
-
-
-def section(text: str) -> list[str]:
-    from scripts.swarm import thin_task
-
-    return thin_task.section_complete(text)
-
-
 def task(**fields: Any) -> dict[str, Any]:
     return {
         "id": "a",
@@ -76,10 +64,12 @@ def task(**fields: Any) -> dict[str, Any]:
     }
 
 
+@pytest.mark.feature("swarm-thin-task-check")
 def test_a_full_task_is_not_thin() -> None:
     assert thin(task()) == []
 
 
+@pytest.mark.feature("swarm-thin-task-check")
 def test_a_description_under_forty_words_is_named_and_forty_pass() -> None:
     forty = " ".join(["word"] * 35) + " seam done when it merges"
     assert len(forty.split()) == 40
@@ -88,11 +78,13 @@ def test_a_description_under_forty_words_is_named_and_forty_pass() -> None:
     assert thin(task(description=shorter)) == ["Task a has a description under 40 words."]
 
 
+@pytest.mark.feature("swarm-thin-task-check")
 def test_a_description_without_a_done_when_sentence_is_named() -> None:
     plain = FULL.replace("Done when", "Finished after")
     assert thin(task(description=plain)) == ["Task a has no done when sentence."]
 
 
+@pytest.mark.feature("swarm-thin-task-check")
 @pytest.mark.parametrize("territory", [[], None])
 def test_a_task_without_territory_is_named(territory: list[str] | None) -> None:
     assert thin(task(territory=territory)) == ["Task a names no territory."]
@@ -103,6 +95,7 @@ def test_a_task_without_a_territory_field_is_named() -> None:
     assert thin(bare) == ["Task a names no territory."]
 
 
+@pytest.mark.feature("swarm-thin-task-check")
 @pytest.mark.parametrize("kind", ["code", "ci"])
 def test_code_and_ci_work_without_a_named_seam_is_named(kind: str) -> None:
     unnamed = FULL.replace("The seam is the thin function. ", "")
@@ -172,6 +165,7 @@ def test_a_task_without_a_description_is_thin() -> None:
     ]
 
 
+@pytest.mark.feature("swarm-thin-task-check")
 @pytest.mark.parametrize(
     "fields",
     [
@@ -194,44 +188,62 @@ def test_an_unchecked_or_needed_task_is_still_graded(mark: str) -> None:
     ]
 
 
+@pytest.mark.feature("swarm-thin-task-check")
 def test_a_complete_section_passes() -> None:
-    assert section(SECTION) == []
+    assert section_complete(SECTION) == []
 
 
+@pytest.mark.feature("swarm-thin-task-check")
 def test_a_section_without_a_named_seam_is_named() -> None:
-    text = SECTION.replace("Seams: `thin_task.thin(task)` and `thin_task.section_complete(text)`.", "Seams: none.")
-    assert section(text) == ["The section names no seam."]
+    text = SECTION.replace(NAMED_SEAMS, "The two functions.")
+    assert section_complete(text) == ["The section names no seam."]
 
 
+def test_a_seam_named_outside_the_seams_heading_does_not_count() -> None:
+    text = SECTION.replace(NAMED_SEAMS, "The two functions.").replace("The module.", NAMED_SEAMS)
+    assert section_complete(text) == ["The section names no seam."]
+
+
+@pytest.mark.feature("swarm-thin-task-check")
 @pytest.mark.parametrize("heading", RECON)
 def test_each_missing_recon_heading_is_named(heading: str) -> None:
     text = SECTION.replace(f"## {heading}\n", "")
-    assert section(text) == [f"The section has no {heading} heading."]
+    assert section_complete(text) == [f"The section has no {heading} heading."]
 
 
-@pytest.mark.parametrize("name", BODY)
+@pytest.mark.feature("swarm-thin-task-check")
+@pytest.mark.parametrize("name", [name for name in BODY if name != "Seams"])
 def test_each_missing_pull_request_body_section_is_named(name: str) -> None:
     text = SECTION.replace(f"## {name}\n", "")
-    assert section(text) == [f"The section has no {name} pull request body section."]
+    assert section_complete(text) == [f"The section has no {name} pull request body section."]
 
 
+def test_a_missing_seams_heading_leaves_no_named_seam_either() -> None:
+    text = SECTION.replace("## Seams\n", "")
+    assert section_complete(text) == [
+        "The section names no seam.",
+        "The section has no Seams pull request body section.",
+    ]
+
+
+@pytest.mark.feature("swarm-thin-task-check")
 def test_a_section_without_a_done_when_sentence_is_named() -> None:
     text = SECTION.replace("Done when the pull request is merged.", "Finished.")
-    assert section(text) == ["The section has no done when sentence."]
+    assert section_complete(text) == ["The section has no done when sentence."]
 
 
 def test_a_heading_named_inside_a_line_does_not_count() -> None:
     text = SECTION.replace("## Protection plan\n", "The Protection plan is tests first.\n")
-    assert section(text) == ["The section has no Protection plan heading."]
+    assert section_complete(text) == ["The section has no Protection plan heading."]
 
 
 def test_headings_match_at_any_level_and_any_case() -> None:
     text = SECTION.replace("## Summary", "#### summary").replace("## What might break", "# WHAT MIGHT BREAK")
-    assert section(text) == []
+    assert section_complete(text) == []
 
 
 def test_an_empty_section_names_every_part() -> None:
-    assert section("") == [
+    assert section_complete("") == [
         "The section names no seam.",
         *(f"The section has no {heading} heading." for heading in RECON),
         *(f"The section has no {name} pull request body section." for name in BODY),
