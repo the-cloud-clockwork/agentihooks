@@ -543,18 +543,21 @@ writes the config removes it.
 - **`<config>.lock is held`.** The lock stayed younger than 10 seconds for the
   whole 3 second wait: another writer held it, such as a Claude session writing
   its config or another launch registering at the same moment. Launch again. A
-  lock that keeps reading younger than 10 seconds has a live holder; let it
-  finish and leave the lock in place. A lock directory with files inside also
-  reads as held until it is 10 seconds old.
+  lock whose age resets between checks is being taken again or refreshed by a
+  writer; leave it in place. A lock directory with files inside also reads as
+  held until it is 10 seconds old.
 - **`[Errno 39] Directory not empty: '<lock>'`** (Linux). The lock is 10 seconds
   old or older and has files inside, so `rmdir` refuses it: registration fails
   with this error and trust marking reports `untrusted` with it. Look inside,
-  confirm no Claude session runs on that config home, then remove it:
+  check by hand that none of the Claude processes `pgrep` lists runs with that
+  config home as its `CLAUDE_CONFIG_DIR`, then remove the lock if it is still
+  10 seconds old or older:
 
   ```bash
+  lock="${CLAUDE_CONFIG_DIR:-${CLAUDE_CODE_HOME_DIR:-$HOME}}/.claude.json.lock"
   ls -la "$lock"
   pgrep -a claude
-  rm -r "$lock"
+  [[ $(( $(date +%s) - $(stat -c %Y "$lock") )) -ge 10 ]] && rm -r "$lock"
   ```
 
 - **`trust=untrusted` with `is held` and a launch that went ahead.** Only trust
