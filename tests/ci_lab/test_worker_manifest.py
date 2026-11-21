@@ -56,8 +56,7 @@ def test_a_leased_batch_carries_its_manifest_to_an_empty_worker_volume(
     if legacy != "fresh":
         restore_old_schema(run, manifests, keep_jobs=legacy == "payload")
         run.tick(1001)
-    routes = lease_api.ControlRoutes(run.lab.client, "", lambda: 0)
-    server = lease_api.serve("127.0.0.1", 0, run.leases(), Signer("http://unused"), routes)
+    server = lease_api.serve("127.0.0.1", 0, run.leases(), Signer("http://unused"))
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
