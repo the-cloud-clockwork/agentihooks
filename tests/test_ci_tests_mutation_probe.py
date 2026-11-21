@@ -106,10 +106,10 @@ def test_mutation_refine_checks_out_only_the_head_history_without_file_contents(
 
 def test_every_mutation_refine_fetch_negotiates_from_the_head() -> None:
     fetches = [
-        line.strip()
+        line.split()
         for step in _jobs()["mutation-refine"]["steps"]
         for line in step.get("run", "").splitlines()
-        if line.strip().startswith("git fetch")
+        if {"git", "fetch"} <= set(line.split())
     ]
     assert fetches
-    assert all("--negotiation-tip=HEAD" in line.split() for line in fetches)
+    assert all("--negotiation-tip=HEAD" in words for words in fetches)

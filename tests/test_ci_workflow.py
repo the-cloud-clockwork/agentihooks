@@ -1340,7 +1340,9 @@ def test_a_stalled_partial_clone_checkout_aborts_within_a_minute_and_retries_onc
     }
     partial = {name: found for name, found in checkouts.items() if any("filter" in s.get("with", {}) for s in found)}
     assert {"unit", "mutation-refine"} <= set(partial)
-    for name, (first, second) in partial.items():
+    for name, found in partial.items():
+        assert len(found) == 2, name
+        first, second = found
         steps = jobs[name]["steps"]
         assert steps.index(first) == 0 and steps.index(second) == 1
         for checkout in (first, second):
