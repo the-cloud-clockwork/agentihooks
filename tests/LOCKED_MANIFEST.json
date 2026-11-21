@@ -1128,10 +1128,10 @@
  },
  "tests/test_credential_guard.py::test_a_read_after_a_leading_input_redirection_in_a_substitution_is_refused": {
   "assertions": 1,
-  "calls": 2,
+  "calls": 3,
   "cases": 3,
   "texts": [
-   "fc7f089cafcb4076"
+   "81399c0b796a08b7"
   ]
  },
  "tests/test_credential_guard.py::test_a_rewrite_after_a_heredoc_delimiter_keeps_the_heredoc": {

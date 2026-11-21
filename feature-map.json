@@ -369,7 +369,7 @@
       "origin": "regression",
       "ordered_at": "2026-11-21",
       "ledger_item": "ledger:rig-grade-swarm/tasks/promo-44944557560-0",
-      "behaviour": "The credential guard judges each command substitution of a stage again as a command in the directory an earlier cd of the same command entered, so a recursive search inside a substitution of a tree that holds a credential file is refused there even when the starting directory holds none. A substitution that opens with an input redirection or a here string before its command, such as one that runs cat on a dotenv file with its input taken from another file, is refused.",
+      "behaviour": "The credential guard judges each command substitution of a stage again as a command in the directory an earlier cd of the same command entered, so a recursive search inside a substitution of a tree that holds a credential file is refused there even when the starting directory holds none. A command substitution whose body opens with an input redirection or a here string is refused when the text after it ends in a credential file name, so a reader that follows the redirection, such as cat on a dotenv file, stays refused.",
       "seam": "hooks.context.credential_guard.evaluate and decide on Bash payloads whose stages hold command substitutions",
       "tests": [
         "tests/test_credential_guard.py::test_a_substitution_after_a_cd_scans_the_tree_the_cd_entered",
