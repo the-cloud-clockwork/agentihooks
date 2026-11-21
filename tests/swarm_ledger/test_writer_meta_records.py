@@ -95,6 +95,7 @@ def test_the_rebuilt_writer_copy_stores_what_a_fresh_encoding_of_the_written_sta
     assert held["_meta"][key] is not mapped(records)
     assert held["_meta"][key]["r1"] is not mapped(records)["r1"]
     assert held["_meta"][key]["r1"]["claims"] is not mapped(records)["r1"]["claims"]
+    assert all(held["_meta"][key][name] is not mapped(records)[name] for name in mapped(kept))
 
 
 @pytest.mark.feature("ledger-write-meta-record-cost")
