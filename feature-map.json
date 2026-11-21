@@ -11669,6 +11669,16 @@
       ]
     },
     {
+      "id": "lab-head-before-pull-observation",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2768",
+      "behaviour": "A signed pull request webhook publishes its lab head before observing the pull, so an observation failure keeps the lab delivery and returns HTTP 503 for retry.",
+      "seam": "scripts.hub.github_webhooks Ingress.receive with a failing pull observer and the dedicated lab stream",
+      "tests": [
+        "tests/hub/test_github_webhooks_publication.py::test_a_failed_pull_observation_still_publishes_the_lab_head"
+      ]
+    },
+    {
       "id": "lab-head-durable-consumer",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2515",
