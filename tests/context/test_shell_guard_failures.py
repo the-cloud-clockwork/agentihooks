@@ -1,3 +1,5 @@
+import io
+import sys
 from typing import Any
 from unittest.mock import Mock
 
@@ -17,6 +19,16 @@ GUARDS = (
 )
 
 
+class FlushedStream(io.StringIO):
+    def __init__(self) -> None:
+        super().__init__()
+        self.flushed: list[str] = []
+
+    def flush(self) -> None:
+        self.flushed.append(self.getvalue())
+        super().flush()
+
+
 @pytest.fixture
 def pipeline(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     for flag in (
@@ -34,11 +46,13 @@ def pipeline(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 @pytest.mark.feature("shell-guard-failures-are-isolated")
 @pytest.mark.parametrize("failed_guard", range(len(GUARDS)))
 def test_pretool_runs_every_shell_guard_and_names_only_the_crashed_guard(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], pipeline: dict[str, Any], failed_guard: int
+    monkeypatch: pytest.MonkeyPatch, pipeline: dict[str, Any], failed_guard: int
 ) -> None:
     calls: list[str] = []
     logged = Mock()
+    stream = FlushedStream()
     monkeypatch.setattr(hook_manager, "log", logged)
+    monkeypatch.setattr(sys, "stderr", stream)
 
     def record(received: dict[str, Any], name: str) -> None:
         assert received is pipeline
@@ -54,7 +68,7 @@ def test_pretool_runs_every_shell_guard_and_names_only_the_crashed_guard(
     assert calls == ["branch_guard", "commit_on_main", "master_coding", "venv_guard"]
     name = GUARDS[failed_guard][2]
     logged.assert_any_call(f"{name} check failed", {"error": "offline"})
-    assert capsys.readouterr().err == f"WARNING: {name} check failed (offline) — guard bypassed\n"
+    assert stream.flushed == [f"WARNING: {name} check failed (offline) — guard bypassed\n"]
 
 
 @pytest.mark.feature("shell-guard-failures-are-isolated")
