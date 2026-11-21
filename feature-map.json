@@ -2466,6 +2466,21 @@
       ]
     },
     {
+      "id": "ledger-write-meta-record-cost",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2670",
+      "behaviour": "A ledger write rebuilds the writer copy's members map and api operations ring only for the records it changed or replaced: unchanged records keep their stored fragments, the rebuilt fragments encode and export the same text as a fresh encoding of the written state, the writer copy shares no container with them, a map stored whole is encoded per record on its next write, and other metadata maps and non map values stay one leaf.",
+      "seam": "scripts.swarm_ledger.repository.writer_copy.written and detached, scripts.swarm_ledger.repository.fragments.meta_part and record",
+      "tests": [
+        "tests/swarm_ledger/test_writer_meta_records.py::test_a_write_that_changes_one_record_copies_as_much_on_four_thousand_records_as_on_two_thousand",
+        "tests/swarm_ledger/test_writer_meta_records.py::test_the_rebuilt_writer_copy_stores_what_a_fresh_encoding_of_the_written_state_stores",
+        "tests/swarm_ledger/test_writer_meta_records.py::test_unchanged_records_keep_the_stored_map_fragment",
+        "tests/swarm_ledger/test_writer_meta_records.py::test_records_after_a_map_stored_whole_are_all_encoded_per_record",
+        "tests/swarm_ledger/test_writer_meta_records.py::test_a_members_value_that_is_no_map_stays_one_leaf",
+        "tests/swarm_ledger/test_writer_meta_records.py::test_other_meta_maps_stay_one_leaf"
+      ]
+    },
+    {
       "id": "swarm-tick-slow-export",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2161",
@@ -5277,6 +5292,27 @@
       ]
     },
     {
+      "id": "mutation-refine-fetches-only-the-head-history",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-mutation-refine-shallow-fetch",
+      "behaviour": "The Tests mutation refine join checks out only the pull request head's own history, without file contents and without tags, and its fetch of the workflow revision names the head as the negotiation tip, so neither step downloads every branch, every tag or the whole history again.",
+      "seam": "the mutation-refine job's checkout steps and the git fetch in its Take the helper scripts from the workflow revision step",
+      "tests": [
+        "tests/test_ci_tests_mutation_probe.py::test_mutation_refine_checks_out_only_the_head_history_without_file_contents",
+        "tests/test_ci_tests_mutation_probe.py::test_every_mutation_refine_fetch_negotiates_from_the_head"
+      ]
+    },
+    {
+      "id": "partial-clone-checkout-stall-bound",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-mutation-refine-shallow-fetch",
+      "behaviour": "Every partial clone checkout in the Tests workflow aborts a stalled lazy blob download within a minute through the git low speed limit and retries the checkout once in place with the same inputs.",
+      "seam": "the first two steps of every Tests job whose actions/checkout step sets a filter",
+      "tests": [
+        "tests/test_ci_workflow.py::test_a_stalled_partial_clone_checkout_aborts_within_a_minute_and_retries_once_in_place"
+      ]
+    },
+    {
       "id": "trace-plan-per-repository-size",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t447",
@@ -5747,6 +5783,36 @@
       "tests": [
         "tests/swarm_ledger/test_ledger_alerts.py::test_a_backend_master_claims_and_closes_the_sync_alert_its_refused_write_raised",
         "tests/swarm_ledger/test_ledger_alerts.py::test_a_refused_alert_claim_or_close_carries_the_server_reason"
+      ]
+    },
+    {
+      "id": "swarm-autoscaler-scale-up-alert",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2789",
+      "behaviour": "Each slow lane tick pass reads the cluster autoscaler status ConfigMap that AGENTIHOOKS_AUTOSCALER_STATUS names and keeps a count of failed scale ups in a row per node group in the swarm Redis: a Backoff scale up record whose transition time and error message were not counted before adds one, and a rise in the group's ready nodes resets it. A newly counted second failure, a timed out scale up or a rise in launched instances past the join budget raises one autoscaler ledger alert to the masters, naming the node group, its size, the count, the last failure and the ready nodes against the target, while no autoscaler alert is open; evidence an open autoscaler alert holds back stays on its group and raises on the first pass with no open alert unless the group recovered first; the alert closes once every group is out of backoff, has no instance past the join budget and had its count reset by a ready rise. An unset setting reads nothing and a failed read changes nothing.",
+      "seam": "scripts.swarm.autoscaler_watch.alert_pass run by the autoscaler alert tick step of scripts.tick.steps.tasks, and the autoscaler source of scripts.swarm_ledger.ledger_alerts",
+      "tests": [
+        "tests/swarm/test_autoscaler_watch.py::test_two_failed_scale_ups_in_a_row_raise_one_alert_naming_the_group_reason_and_count",
+        "tests/swarm/test_autoscaler_watch.py::test_one_failed_scale_up_raises_nothing_however_often_it_is_read",
+        "tests/swarm/test_autoscaler_watch.py::test_a_new_failure_message_under_the_kept_transition_time_counts_as_the_next_failure",
+        "tests/swarm/test_autoscaler_watch.py::test_a_timed_out_scale_up_raises_on_its_own",
+        "tests/swarm/test_autoscaler_watch.py::test_launched_instances_past_the_join_budget_raise_on_their_own_each_time_they_rise",
+        "tests/swarm/test_autoscaler_watch.py::test_a_rise_in_ready_nodes_resets_the_count_and_a_drop_does_not",
+        "tests/swarm/test_autoscaler_watch.py::test_groups_failing_in_the_same_read_share_one_alert",
+        "tests/swarm/test_autoscaler_watch.py::test_an_open_autoscaler_alert_holds_a_second_raise_and_other_alerts_do_not",
+        "tests/swarm/test_autoscaler_watch.py::test_evidence_an_open_alert_held_back_raises_once_no_autoscaler_alert_is_open",
+        "tests/swarm/test_autoscaler_watch.py::test_held_evidence_of_a_group_that_recovered_raises_nothing",
+        "tests/swarm/test_autoscaler_watch.py::test_recovery_closes_the_open_autoscaler_alert_once_every_group_recovered",
+        "tests/swarm/test_autoscaler_watch.py::test_a_group_in_backoff_or_with_a_count_no_ready_rise_reset_holds_the_close",
+        "tests/swarm/test_autoscaler_watch.py::test_an_unset_setting_reads_no_status_and_keeps_no_count",
+        "tests/swarm/test_autoscaler_watch.py::test_a_failed_status_read_names_why_and_keeps_the_count",
+        "tests/swarm/test_autoscaler_watch.py::test_the_count_survives_a_failed_read_and_raises_on_the_next_failure",
+        "tests/swarm/test_autoscaler_watch.py::test_each_node_group_record_lives_under_the_swarm_autoscaler_watch_key",
+        "tests/swarm/test_autoscaler_watch.py::test_the_status_is_read_from_the_named_config_map_with_the_pod_environment",
+        "tests/swarm/test_autoscaler_watch.py::test_a_raise_text_is_cut_to_the_length_the_ledger_takes",
+        "tests/tick/steps/test_autoscaler_alert.py::test_autoscaler_alert",
+        "tests/tick/steps/test_autoscaler_alert.py::test_the_tick_hands_the_autoscaler_watch_its_slug_store_ledger_and_state",
+        "tests/swarm_ledger/test_ledger_alerts.py::test_a_raised_autoscaler_alert_opens_one_alert_for_the_master"
       ]
     },
     {
@@ -8944,6 +9010,22 @@
       ]
     },
     {
+      "id": "ci-readers-collected-stage-budget",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2613",
+      "behaviour": "CI stage metrics and the ci overrun finding resolve each stage budget through the same collected lookup as CI gates, falling back to the stored budget when the collected step is skipped or absent. Unknown metric stages record zero and unknown evidence stages are omitted.",
+      "seam": "metrics_ci.rows, ci_budget.defects.defect and ci_budget.defects._stage_evidence over ci_budget.budget",
+      "rules": [
+        "ci-stage-budget-direct-table-read"
+      ],
+      "tests": [
+        "tests/swarm/test_metrics_ci.py::test_stage_metrics_resolve_the_collected_budget_and_stored_fallback",
+        "tests/test_ci_budget_defects.py::test_overrun_description_resolves_the_collected_budget_and_stored_fallback",
+        "tests/test_ci_budget_defects.py::test_overrun_evidence_resolves_the_collected_budget_and_stored_fallback",
+        "tests/swarm/test_metrics_ci.py::test_a_stage_without_a_budget_or_a_started_job_records_zero"
+      ]
+    },
+    {
       "id": "workstation-agent-count-by-headed-hive",
       "origin": "inventory",
       "behaviour": "Host metrics count an agent as a workstation agent when it runs on a hive marked headed, ui=yes, rather than the sampler's own hive id, and fall back to the sampler's own hive when no hive is headed.",
@@ -10037,6 +10119,17 @@
         "tests/ci_lab/test_queue.py::test_leased_lists_each_leased_job_and_offers_keep_each_workers_latest_free_slots",
         "tests/ci_lab/test_leases.py::test_a_lease_poll_offers_the_workers_free_slots_while_it_waits_and_what_its_grants_leave",
         "tests/test_swarm_packaging.py::test_the_swarm_image_carries_the_locked_git_the_lab_mirror_expander_runs"
+      ]
+    },
+    {
+      "id": "lab-scheduler-mirror-age-and-github-rate",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2683",
+      "behaviour": "The lab scheduler's GET /metrics on 9108 reports ci_lab_mirror_age_seconds as the seconds since the epoch second in the node mirror's fetched-at stamp, read at each scrape with the scheduler's millisecond clock and never below zero, and holds no sample while the stamp is missing or holds no whole number; it reports ci_lab_github_rate_remaining as the x-ratelimit-remaining header of the latest check runs answer that carries a number, rate limited and refused answers included, from the posters the scheduler and the relay build over the scheduler's registry.",
+      "seam": "scripts.ci_lab.scheduler.listen with the node mirror path main passes, read through GET /metrics over fakeredis; scripts.ci_lab.checks.Checks over a stubbed requests.request with the scheduler's registry; scripts.ci_lab.scheduler.build and scripts.ci_lab.relay.build poster wiring",
+      "tests": [
+        "tests/ci_lab/test_scheduler_gauges.py::test_the_exposition_reports_the_node_mirror_age_from_its_fetched_at_stamp",
+        "tests/ci_lab/test_scheduler_gauges.py::test_the_exposition_reports_the_github_calls_left_from_each_check_runs_answer"
       ]
     },
     {

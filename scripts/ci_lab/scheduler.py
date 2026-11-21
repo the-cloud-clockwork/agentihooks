@@ -1480,13 +1480,14 @@ def build(
 
     def poster(repo: str) -> Poster:
         if repo not in checks:
-            checks[repo] = Checks(repo)
+            checks[repo] = Checks(repo, registry=scheduler.registry)
         return checks[repo]
 
     ports = Ports(BusInbox(consumer), expander, poster, control.Priorities(client, _now_ms), worker_pods(environ))
     repository = environ[REPOSITORY]
     settings = Settings(expander.trusted(repository), retries=expander.retries(repository))
-    return Scheduler(client, objects, ports, settings, spending)
+    scheduler = Scheduler(client, objects, ports, settings, spending)
+    return scheduler
 
 
 def serve(
@@ -1517,14 +1518,20 @@ def listen(
     spending: budget.Budget,
     clock: Callable[[], int],
     ports: tuple[int, int, int],
+    mirror: Path | None = None,
 ) -> tuple[ThreadingHTTPServer, ThreadingHTTPServer, ThreadingHTTPServer]:
     """Bind the scheduler port's lease API, capacity and grades routes, the control port's control routes and the
     metrics port, the scheduler and metrics ports over one load whose budget fraction and shed classes come from the
-    day's spending, the metrics port with the counters the scheduler's passes keep; the caller runs each
-    serve_forever."""
+    day's spending, the metrics port with the counters the scheduler's passes keep and the age of the node mirror at
+    each scrape when one is given; the caller runs each serve_forever."""
 
     def snapshot() -> Load:
         return budget.observe(scheduler.load(clock()), spending.status())
+
+    def scrape() -> Load:
+        if mirror is not None:
+            metrics.observe_mirror(scheduler.registry, mirror, clock())
+        return snapshot()
 
     api, steering, exposition = ports
     lease = partial(lease_api.answer, leases, Uploads(scheduler.objects))
@@ -1532,7 +1539,7 @@ def listen(
     return (
         service.serve("", api, port),
         lease_api.serve_control("", steering, routes),
-        metrics.serve("", exposition, snapshot, scheduler.registry),
+        metrics.serve("", exposition, scrape, scheduler.registry),
     )
 
 
@@ -1593,6 +1600,6 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     leases = Leases(scheduler.queue, LEASE_TTL_MS, _now_ms, _sleep_ms, LEASE_POLL_MS, scheduler.ports.pods, manifests)
     routes = lease_api.ControlRoutes(client, environ.get(contract.CONTROL_TOKEN, ""), _now_ms)
     ports = (contract.SCHEDULER_PORT, contract.CONTROL_PORT, contract.METRICS_PORT)
-    for server in listen(scheduler, leases, routes, spending, _now_ms, ports):
+    for server in listen(scheduler, leases, routes, spending, _now_ms, ports, Path(environ[contract.GIT_MIRROR])):
         Thread(target=server.serve_forever, daemon=True).start()
     return serve(scheduler, relaying, arguments.interval, arguments.passes, time.time, time.sleep)
