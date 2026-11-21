@@ -1441,6 +1441,7 @@ PROC_ENVIRON_SHAPES = [
     "cat /proc/*/environ",
     "cat /proc/1/task/1/environ",
     "cat /proc/self/task/*/environ",
+    "cat /p*/1/task/1/env*",
     "cat /p*/thread-self/env*",
     "cat /proc/self/fd/../environ",
     "cat /proc/1/./environ",
@@ -1470,6 +1471,7 @@ GLOBS_SHAPED_UNLIKE_PROC_ENVIRON = [
     "ls tests/*/fixtures/*",
     "grep -rn TODO */src/e*",
     "ls docs/*/guide/*",
+    "ls build/*/7/lib/3/*",
 ]
 
 

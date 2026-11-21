@@ -1022,7 +1022,7 @@
  "tests/test_credential_guard.py::test_a_glob_shaped_unlike_a_proc_environ_path_passes": {
   "assertions": 1,
   "calls": 2,
-  "cases": 6,
+  "cases": 7,
   "texts": [
    "a76f47343f702669"
   ]
@@ -1087,7 +1087,7 @@
  "tests/test_credential_guard.py::test_a_proc_environ_path_shape_is_refused": {
   "assertions": 1,
   "calls": 3,
-  "cases": 25,
+  "cases": 26,
   "texts": [
    "1190c020f6602f17"
   ]
