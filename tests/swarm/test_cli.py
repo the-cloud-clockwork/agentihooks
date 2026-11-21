@@ -1699,6 +1699,20 @@ def test_status_text_shows_each_agent_model_and_effort_or_unknown(env, capsys):
     assert "unknown" in lines["engineer@a1b2c3-0002"]
 
 
+@pytest.mark.feature("swarm-review-lane-reporting")
+def test_status_text_prints_a_published_reviewer_lane(env: tuple[Any, ...], capsys: pytest.CaptureFixture[str]) -> None:
+    store, _, runtime = env
+    run("sw", "create", "--repo", "/repo")
+    name = "reviewer@a1b2c3-0001"
+    store.put_agent("sw", AgentRecord(name, "review", "r1", profile="reviewer", harness="codex"))
+    runtime.live.add(name)
+    run("sw", "status")
+    rows = [line.split("\t") for line in capsys.readouterr().out.splitlines() if line.startswith(name + "\t")]
+    assert len(rows) == 1
+    assert "review" in rows[0]
+    assert "reviewer" in rows[0]
+
+
 def test_status_text_names_the_promoted_engineer(env, capsys):
     store, _, _ = env
     run("sw", "create", "--repo", "/repo")
