@@ -36,7 +36,6 @@ from urllib.parse import urlsplit
 
 import jsonschema
 import yaml
-from redis import RedisError
 
 from hooks.secrets import redact
 from scripts import ci_select, dep_manifest
@@ -1509,6 +1508,8 @@ def serve(
     """Run passes every interval, forever when passes is zero, ticking the relay after each pass and printing each
     action of both; a Redis error ends only its pass, which prints one line naming the pass and the error, and the next
     pass runs on schedule; return 0."""
+    from redis import RedisError
+
     done = 0
     while passes == 0 or done < passes:
         try:
