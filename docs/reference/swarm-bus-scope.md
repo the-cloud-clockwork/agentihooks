@@ -6,13 +6,13 @@ nav_order: 50
 
 # Swarm scoped bus credentials
 
-A hive member's NATS credential reaches the event, work queue, dead letter and state resources of the swarms it
-belongs to, and in each of them the execution stop consumer of its own hive, and nothing of any other swarm or hive.
-Every subject a scoped member publishes or reads sits under `swarm.<swarm>.`, except its account slot request
-subject `slots.<swarm>.<hive>`; see
-[Hub slot requests and the hive binding](#hub-slot-requests-and-the-hive-binding). The JetStream API subjects that cannot carry that prefix are granted only for stream and consumer
-names that carry the swarm id. A member credential of one swarm is refused by the NATS server on another swarm's
-queue, dead letter, state and stream subjects, even when those resources exist.
+A hive member's NATS credential reaches the event, work queue, dead letter and state resources of the swarms it belongs
+to, and in each of them the execution stop consumer of its own hive, and nothing of any other swarm or hive. Every
+subject a scoped member publishes or reads sits under `swarm.<swarm>.`, except its account slot request subject
+`slots.<swarm>.<hive>`; see [Hub slot requests and the hive binding](#hub-slot-requests-and-the-hive-binding). The
+JetStream API subjects that cannot carry that prefix are granted only for stream and consumer names that carry the swarm
+id. A member credential of one swarm is refused by the NATS server on another swarm's queue, dead letter, state and
+stream subjects, even when those resources exist.
 
 ## When a credential is scoped
 
@@ -249,8 +249,9 @@ so a hive log prints the subject as `$js.api...` and `agentihooks-<hex>-stop`.
 
 The feature map entry `hive-own-stop-consumer` lists the regression tests, which run these refusals and a member's
 own fetch and acknowledgement against a live NATS server. The Semgrep incident rule `stop-on-events-log` fails code
-under `scripts/` that passes a stop subject or a stop durable to an events log `consumer` call, or a stop subject to
-an events log `publish` call.
+under `scripts/` that passes a `stop_subject(...)` subject, or a durable built by any call named `durable(...)` or by
+`stop_names.durable(...)`, to an events log `consumer` call, or a `stop_subject(...)` subject to an events log
+`publish` call.
 
 ### Upgrading to the stop stream
 
