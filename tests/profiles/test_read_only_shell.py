@@ -259,6 +259,20 @@ def test_only_the_read_only_roles_carry_the_shell_guard() -> None:
         ("git ls-files | xargs -s 100 rm", UNKNOWN),
         ("git ls-files | xargs -E eof rm", UNKNOWN),
         ("xargs -a list rm", UNKNOWN),
+        ("git ls-files | xargs -0 rm", UNKNOWN),
+        ("echo '' > app.py", "app.py"),
+        ('echo "\\"" > app.py', "app.py"),
+        ("echo 'x\\' > app.py", "app.py"),
+        ("echo 'x'>app.py", "app.py"),
+        ("echo $(true)>app.py", "app.py"),
+        ("echo \\x$(rm app.py)", "app.py"),
+        ("echo x\\y>app.py", "app.py"),
+        ("rm $(echo a; echo b)", "$(echo a; echo b)"),
+        ("diff <(rm app.py) x", "app.py"),
+        ("ls | cd ~/scratchpad; touch notes.md", "notes.md"),
+        ("ls >&1X", "1X"),
+        ("sort --output=app=1.py x", "app=1.py"),
+        ("sed --expression=s/a/b/ -i app.py", "app.py"),
     ],
 )
 def test_a_reviewer_refuses_each_shell_file_write(home: Path, command: str, target: str) -> None:
@@ -407,6 +421,28 @@ def test_a_reviewer_refuses_git_writes_and_hidden_writes(home: Path, command: st
         "bash scripts/check.sh",
         'echo "unterminated',
         "",
+        "'a > b'",
+        "echo $(true)$HOME",
+        'echo "\\$(rm app.py)"',
+        "echo x\\>y",
+        "rm ~/scratchpad/x 2>/dev/null",
+        "rm ~/scratchpad/x 0</dev/null",
+        "ls 2>&1-",
+        "cd ../scratchpad && touch notes.md",
+        "sed -i --expression s/a/b/ --expression s/c/d/ ~/scratchpad/n.md",
+        "sed -i --file a.sed --file b.sed ~/scratchpad/n.md",
+        "sed -i -e s/a/b/ -e s/c/d/ ~/scratchpad/n.md",
+        "sed -i -ne s/a/b/ -ne s/c/d/ ~/scratchpad/n.md",
+        "sed -i -e",
+        "tar",
+        "tar --exclude=x a.tar",
+        "uniq a ~/scratchpad/out extra",
+        "cp app.py b.py ~/scratchpad/d/",
+        "bash check.sh 'rm app.py'",
+        "sudo -u",
+        "git ls-files | xargs -I",
+        "gh pr view -R",
+        "git -C",
     ],
 )
 def test_a_reviewer_keeps_reads_and_writes_inside_its_own_folders(home: Path, command: str) -> None:
@@ -429,6 +465,23 @@ def test_a_bare_cd_moves_to_the_home_folder(tmp_path: Path, monkeypatch: pytest.
 
     assert read_only_shell.write_reason("cd && touch notes.md", elsewhere, roots) == ""
     assert read_only_shell.write_reason("touch notes.md", elsewhere, roots) == "writes notes.md"
+
+
+@pytest.mark.feature("read-only-roles-refuse-shell-writes")
+def test_a_bare_pushd_or_popd_leaves_the_folder_unknown(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    elsewhere, roots = tmp_path / "elsewhere", [(tmp_path / "home").resolve()]
+
+    assert read_only_shell.write_reason("pushd && touch notes.md", elsewhere, roots) == "writes notes.md"
+    assert read_only_shell.write_reason("popd && touch notes.md", elsewhere, roots) == "writes notes.md"
+
+
+@pytest.mark.feature("read-only-roles-refuse-shell-writes")
+def test_a_nested_script_judges_relative_paths_from_the_shell_folder(home: Path) -> None:
+    scratch = home / "scratchpad"
+
+    assert _found(home, "bash -c 'touch notes.md'", scratch) == ""
+    assert _found(home, "bash -c 'touch notes.md'") == "writes notes.md"
 
 
 @pytest.mark.feature("read-only-roles-refuse-shell-writes")

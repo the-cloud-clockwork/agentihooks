@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import shlex
 from collections.abc import Callable, Iterator
-from itertools import takewhile
+from itertools import dropwhile, islice, takewhile
 from pathlib import Path, PurePosixPath
 from typing import NamedTuple
 
@@ -88,7 +88,12 @@ EXECS = frozenset({"-exec", "-execdir", "-ok", "-okdir"})
 XARGS_VALUES = frozenset({"-I", "-n", "-P", "-d", "-L", "-s", "-E", "-a"})
 DEVICES = frozenset({"/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty"})
 SEPARATORS = frozenset(";|()\n")
-OPERATORS = SEPARATORS | frozenset("&<>")
+OPERATOR_CHARS = ";|()\n&<>"
+OPERATORS = frozenset(OPERATOR_CHARS)
+QUOTES = "'\""
+TICKED = "'\"`"
+DEPTHS = {"(": 1, ")": -1}
+PLACEHOLDER = "{}"
 UNKNOWN = "files named only at run time"
 
 
@@ -101,53 +106,60 @@ class Simple(NamedTuple):
 
 
 def _quote_end(command: str, start: int) -> int:
-    quote, index = command[start], start + 1
-    while index < len(command) and command[index] != quote:
-        index += 2 if quote == '"' and command[index] == "\\" else 1
-    return index + 1
+    """The index just past the quote closing the one at *start*, or past the end of *command* when none does."""
+    quote, escaped = command[start], False
+    for index in range(start + 1, len(command)):
+        if command[index] == quote and not escaped:
+            return index + 1
+        escaped = quote == '"' and command[index] == "\\" and not escaped
+    return len(command) + 1
 
 
 def _paren_end(command: str, start: int) -> int:
-    depth, index = 0, start
-    while index < len(command):
-        if command[index] in "'\"":
-            index = _quote_end(command, index)
+    """The index just past the parenthesis closing the one at *start*, or the end of *command*."""
+    depth, resume = 0, start
+    for index in range(start, len(command)):
+        if index < resume:
             continue
-        depth += {"(": 1, ")": -1}.get(command[index], 0)
-        index += 1
+        if command[index] in QUOTES:
+            resume = _quote_end(command, index)
+            continue
+        depth += DEPTHS.get(command[index], 0)
         if depth == 0:
-            break
-    return index
+            return index + 1
+    return len(command)
 
 
 def _word_end(command: str, start: int) -> int:
-    index = start
-    while index < len(command) and command[index] not in OPERATORS and not command[index].isspace():
+    """The index where the unquoted word starting at *start* ends."""
+    resume = 0
+    for index in range(start, len(command)):
+        if index < resume:
+            continue
+        if command[index] in OPERATORS or command[index].isspace():
+            return index
         if command.startswith("$(", index):
-            index = _paren_end(command, index + 1)
-        elif command[index] in "'\"`":
-            index = _quote_end(command, index)
+            resume = _paren_end(command, index + 1)
+        elif command[index] in TICKED:
+            resume = _quote_end(command, index)
         else:
-            index += 2 if command[index] == "\\" else 1
-    return min(index, len(command))
+            resume = index + (2 if command[index] == "\\" else 1)
+    return len(command)
 
 
 def _tokens(command: str) -> Iterator[tuple[bool, str]]:
     """The unquoted operator runs (True) and the words (False) of *command*, file descriptor numbers dropped."""
-    index = 0
-    while index < len(command):
+    resume = 0
+    for index in range(len(command)):
+        if index < resume or command[index].isspace():
+            continue
         if command[index] in OPERATORS:
-            end = index
-            while end < len(command) and command[end] in OPERATORS:
-                end += 1
-            yield True, command[index:end]
-        elif command[index].isspace():
-            end = index + 1
-        else:
-            end = _word_end(command, index)
-            if not (command[index:end].isdigit() and command[end : end + 1] in ("<", ">")):
-                yield False, command[index:end]
-        index = end
+            resume = len(command) - len(command[index + 1 :].lstrip(OPERATOR_CHARS))
+            yield True, command[index:resume]
+            continue
+        resume = _word_end(command, index)
+        if not (command[index:resume].isdigit() and command[resume : resume + 1] in ("<", ">")):
+            yield False, command[index:resume]
 
 
 def _operator(run: str) -> tuple[bool, str]:
@@ -164,22 +176,22 @@ def _operator(run: str) -> tuple[bool, str]:
 def _substitutions(word: str) -> list[str]:
     """The commands *word* runs through $(...) or backticks, outside single quotes."""
     found: list[str] = []
-    quoted, index = False, 0
-    while index < len(word):
+    quoted, resume = False, 0
+    for index in range(len(word)):
+        if index < resume:
+            continue
         if word[index] == '"':
-            quoted, index = not quoted, index + 1
+            quoted = not quoted
         elif word[index] == "'" and not quoted:
-            index = _quote_end(word, index)
+            resume = _quote_end(word, index)
         elif word.startswith("$(", index):
-            end = _paren_end(word, index + 1)
-            found.append(word[index + 2 : end - 1])
-            index = end
+            resume = _paren_end(word, index + 1)
+            found.append(word[index + 2 : resume - 1])
         elif word[index] == "`":
-            end = _quote_end(word, index)
-            found.append(word[index + 1 : end - 1])
-            index = end
-        else:
-            index += 2 if word[index] == "\\" else 1
+            resume = _quote_end(word, index)
+            found.append(word[index + 1 : resume - 1])
+        elif word[index] == "\\":
+            resume = index + 2
     return found
 
 
@@ -239,24 +251,30 @@ def _assignment(word: str) -> bool:
     return bool(equals) and name.isidentifier()
 
 
+def _prefix(word: str) -> bool:
+    return word in KEYWORDS or _assignment(word)
+
+
+def _name(words: list[str]) -> str:
+    return PurePosixPath(*words[:1]).name
+
+
 def _unwrapped(words: list[str]) -> list[str]:
     """*words* from the program that wrappers, keywords and assignments run; env changing its folder or command stays."""
-    rest = list(words)
-    while rest and (rest[0] in KEYWORDS or _assignment(rest[0])):
-        rest.pop(0)
-    wrapper = PurePosixPath(rest[0]).name if rest else ""
+    rest = list(dropwhile(_prefix, words))
+    wrapper = _name(rest)
     if wrapper not in WRAPPERS:
         return rest
-    rest.pop(0)
-    while rest and rest[0].startswith("-"):
-        flag = rest.pop(0)
+    args = iter(rest[1:])
+    for flag in args:
+        if not flag.startswith("-"):
+            command = [flag, *args]
+            return _unwrapped(command[1:] if wrapper in POSITIONAL_WRAPPERS else command)
         if wrapper == "env" and flag.partition("=")[0] in ENV_OPTIONS:
-            return ["env", flag, *rest]
-        if flag in WRAPPERS[wrapper] and rest:
-            rest.pop(0)
-    if wrapper in POSITIONAL_WRAPPERS and rest:
-        rest.pop(0)
-    return _unwrapped(rest)
+            return ["env", flag, *args]
+        if flag in WRAPPERS[wrapper]:
+            next(args, "")
+    return []
 
 
 def _dynamic(value: str) -> bool:
@@ -304,7 +322,7 @@ def _option_values(words: list[str], names: frozenset[str]) -> list[str]:
         if equals and name in names:
             values.append(value)
         elif word in names:
-            values.append(next(rest, ""))
+            values.extend(islice(rest, 1))
     return values
 
 
@@ -414,16 +432,16 @@ TOOLS: dict[str, Callable[[list[str], list[str]], list[str]]] = {
 
 
 def _write_targets(words: list[str]) -> list[str]:
-    head = PurePosixPath(words[0]).name if words else ""
+    head = _name(words)
     tool = TOOLS.get(head)
     if tool is None:
         return []
     named = tool(words, [word for word in words[1:] if not word.startswith("-")])
-    return [UNKNOWN if "{}" in value else value for value in named]
+    return [UNKNOWN if PLACEHOLDER in value else value for value in named]
 
 
 def _head_reason(words: list[str]) -> str:
-    head = words[0] if words else ""
+    head = "".join(words[:1])
     if head == "env":
         return f"runs env {words[1]}, which hides the folder or the command it runs"
     named = any(char in head for char in "$`*?") or ("[" in head and head not in ("[", "[["))
@@ -457,7 +475,7 @@ def _git_read(subcommand: str, args: list[str]) -> bool:
 
 def _git_reason(words: list[str]) -> str:
     """Which git or gh write *words* runs, or empty for a git read and every other command."""
-    head = PurePosixPath(words[0]).name if words else ""
+    head = _name(words)
     if head == "gh":
         return _gh_reason(words[1:])
     if head != "git":
@@ -476,11 +494,13 @@ def _git_reason(words: list[str]) -> str:
 
 
 def _xargs_command(words: list[str]) -> list[str]:
-    rest = list(words)
-    while rest and rest[0].startswith("-"):
-        if rest.pop(0) in XARGS_VALUES and rest:
-            rest.pop(0)
-    return rest
+    args = iter(words)
+    for word in args:
+        if not word.startswith("-"):
+            return [word, *args]
+        if word in XARGS_VALUES:
+            next(args, "")
+    return []
 
 
 def _not_end(word: str) -> bool:
@@ -493,7 +513,7 @@ def _script_option(flag: str) -> bool:
 
 def _nested(words: list[str]) -> list[str]:
     """The command lines *words* hands on: a shell's -c script, eval's words, find -exec and xargs commands."""
-    head = PurePosixPath(words[0]).name if words else ""
+    head = _name(words)
     if head in SHELLS:
         return [script for flag, script in zip(words[1:], words[2:]) if _script_option(flag)]
     if head == "eval":
@@ -501,7 +521,7 @@ def _nested(words: list[str]) -> list[str]:
     if head == "find":
         return [shlex.join(takewhile(_not_end, words[i + 1 :])) for i, word in enumerate(words) if word in EXECS]
     if head == "xargs":
-        return [shlex.join([*_xargs_command(words[1:]), "{}"])]
+        return [shlex.join([*_xargs_command(words[1:]), PLACEHOLDER])]
     return []
 
 
@@ -514,7 +534,7 @@ def _first(scripts: list[str], cwd: Path | None, roots: list[Path]) -> str:
 
 
 def _nested_reason(words: list[str], cwd: Path | None, roots: list[Path]) -> str:
-    head = PurePosixPath(words[0]).name if words else ""
+    head = _name(words)
     if head == "find" and "-delete" in words:
         return "deletes files with find -delete"
     if head in SHELLS and all(word.startswith("-") for word in words[1:]):
