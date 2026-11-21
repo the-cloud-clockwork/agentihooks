@@ -267,13 +267,14 @@ class NatsConsumer:
 
     async def _fetch(self, batch: int, timeout_ms: int) -> list[NatsDelivery]:
         loop = asyncio.get_running_loop()
-        deadline = loop.time() + _seconds(max(timeout_ms, MIN_FETCH_MS))
+        timeout = _seconds(max(timeout_ms, MIN_FETCH_MS))
+        deadline = loop.time() + timeout
         dead_streams = {DEAD_STREAM, "AGENTIHOOKS_DEAD"}
         if self._swarm is not None:
             dead_streams.update((stream_name(self._swarm, "DEAD"), legacy_stream_name(self._swarm, "DEAD")))
         while loop.time() < deadline:
             try:
-                messages = await self._subscription.fetch(batch, timeout=max(deadline - loop.time(), 0.001))
+                messages = await self._subscription.fetch(batch, timeout=timeout)
             except asyncio.TimeoutError:
                 return []
             deliveries = list[NatsDelivery]()
@@ -281,7 +282,10 @@ class NatsConsumer:
             for msg in messages:
                 try:
                     delivery = NatsDelivery(self._loop, msg)
-                    if msg.metadata.stream in dead_streams:
+                    if (
+                        delivery.event.type in {"dead_payload_chunk", "dead_lettered"}
+                        and msg.metadata.stream in dead_streams
+                    ):
                         if delivery.event.type == "dead_payload_chunk":
                             await msg.term()
                             parts += 1
@@ -300,6 +304,7 @@ class NatsConsumer:
                 await msg.term()
             if deliveries or not parts:
                 return deliveries
+            timeout = max(deadline - loop.time(), 0.001)
         return []
 
 
