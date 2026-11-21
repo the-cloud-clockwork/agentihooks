@@ -8556,6 +8556,18 @@
       ]
     },
     {
+      "id": "redis-command-map-ci-lab-commands",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2776",
+      "behaviour": "The Redis command map publishes a lab section listing every Redis command the ci lab scheduler code can send, redis-py client calls and redis.call commands in Lua scripts alike, with the units that send each. Every unit of each scripts.ci_lab module the scheduler entry point reaches counts, while a reached module outside the lab package and a lab module the scheduler never loads do not, and a lab entry missing from the code is refused, so antoncore checks the ci-lab Redis user line against the code instead of a hand kept list.",
+      "seam": "scripts.swarm.redis_commands.lab_commands and consumer_map over scripts.swarm.code_reach.Program",
+      "tests": [
+        "tests/swarm/test_redis_commands.py::test_the_lab_commands_count_every_unit_of_each_reached_lab_module_and_nothing_outside_it",
+        "tests/swarm/test_redis_commands.py::test_a_lab_entry_missing_from_the_code_is_refused",
+        "tests/swarm/test_redis_commands.py::test_the_published_lab_commands_hold_the_scheduler_client_calls_and_queue_script_commands"
+      ]
+    },
+    {
       "id": "remote-control-phone-access-wording",
       "origin": "inventory",
       "behaviour": "The Remote Control status line and master card say phone access available or unavailable alongside the state and detail for every reason, flag, fallback auth, gateway, subscription token fallback, or a live login, both in the swarm CLI text and the ledger front end's agent row tooltip and label.",
