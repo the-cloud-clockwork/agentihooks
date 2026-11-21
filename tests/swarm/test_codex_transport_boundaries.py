@@ -1,11 +1,12 @@
 from dataclasses import replace
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
 from scripts.swarm import seat_spawn, tick
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
-from scripts.swarm.tick import Placed, SpawnError
+from scripts.swarm.tick import Placed, Runtime, SpawnError
 from scripts.swarm_v2.runtime import codex
 from scripts.swarm_v2.runtime.base import LOCAL, Outcome, Status
 from scripts.swarm_v2.runtime.routed import RoutedRuntime
@@ -74,6 +75,18 @@ def test_local_codex_legacy_admission_records_the_root_hive(storage, monkeypatch
     admitted = codex.admit_legacy(storage, "sw", legacy_agent(storage), SimpleNamespace(retire=lambda _: None))
     assert admitted.hive == "workstation-root"
     assert storage.execution_occupants("sw")[admitted.seat].hive == "workstation-root"
+
+
+@pytest.mark.feature("work-folder-readers-and-launch-pointers")
+def test_a_legacy_codex_session_a_hive_starts_records_that_hive_as_its_task_work_folder(
+    storage: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import commands
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "hive-a")
+    runtime = cast(Runtime, SimpleNamespace(retire=lambda _: None))
+    admitted = codex.admit_legacy(storage, "sw", legacy_agent(storage), runtime)
+    assert storage.redis.get(storage.key("sw", "work-folder", admitted.task)) == "hive-a"
 
 
 def test_reopening_a_managed_viewer_records_its_new_pane_on_the_execution(storage, monkeypatch):

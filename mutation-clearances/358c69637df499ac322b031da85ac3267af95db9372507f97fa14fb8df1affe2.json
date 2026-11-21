@@ -1,6 +1,0 @@
-{
-  "scripts/ci_lab/queue.py:scripts.ci_lab.queue.x\u01c1Queue\u01c1restore_manifests:3b4eac532616831adc9a16b31e5b03c09ae7030fc21b86b91b5339ee0113e130": {
-    "reader": "standards-reader",
-    "reason": "Equivalent under redis-py 8.1.0: Pipeline stores transaction directly and execute selects its implementation by truthiness. False and None both select _execute_pipeline. This function buffers only HMGET, without WATCH or explicit_transaction, so requests, ordered results and restored payloads are unchanged. Reassess if the driver changes this dispatch."
-  }
-}

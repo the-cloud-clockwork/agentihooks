@@ -66,19 +66,20 @@ def _verdict(rows: list[Mapping[str, Any]], pair: plant_proofs.Pair, planted: bo
     if len(checks) != len(rows):
         raise ValueError(f"{pair.name} grade has ambiguous gate checks")
     required = checks.pop("required")
+    gate = pair.gate.rpartition("/")[0] or pair.gate
     expected = "failure" if planted else "success"
     failed = {gate for gate, check in checks.items() if check["conclusion"] != "success"}
     if (
         required["conclusion"] != expected
-        or pair.gate not in checks
-        or failed != ({pair.gate} if planted else set())
+        or gate not in checks
+        or failed != ({gate} if planted else set())
         or planted
-        and checks[pair.gate]["conclusion"] != "failure"
+        and checks[gate]["conclusion"] != "failure"
     ):
         raise ValueError(f"{pair.name} {'plant' if planted else 'twin'} grade has the wrong verdict: {failed}")
     if planted:
         diagnostic = pair.reason.partition(":")[0]
-        output = checks[pair.gate].get("output") or {"text": ""}
+        output: Mapping[str, Any] = checks[gate].get("output") or {}
         if not re.search(rf"\b{re.escape(diagnostic)}\b", output.get("text") or ""):
             raise ValueError(f"{pair.name} plant grade lacks the expected diagnostic: {diagnostic}")
     return str(required["html_url"])
@@ -96,10 +97,12 @@ def prove(
         raise ValueError("the grade timeout must be positive")
     pair = plant_proofs.prepare(root, name, base)
     links: list[str] = []
+    runs: list[str] = []
     for head, planted in ((pair.green, False), (pair.red, True)):
         ports.push(root, pair, head, repository)
         rows = _read(repository, head, pair.base, ports, timeout_s)
         links.append(_verdict(rows, pair, planted))
+        runs.append(str(rows[0]["external_id"]))
     return {
         "plant": pair.name,
         "gate": pair.gate,
@@ -107,12 +110,18 @@ def prove(
         "base": pair.base,
         "green": links[0],
         "red": links[1],
+        "green_run": runs[0],
+        "red_run": runs[1],
     }
 
 
 def main(argv: Sequence[str], environ: Mapping[str, str], ports: Ports | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m scripts.ci_lab grade")
-    parser.add_argument("--plant", choices=("lint", "gate-script"), required=True)
+    parser.add_argument(
+        "--plant",
+        choices=sorted(path.stem for path in (Path.cwd() / plant_proofs.CATALOG).glob("*.json")),
+        required=True,
+    )
     parser.add_argument("--base", default="origin/dev")
     parser.add_argument("--repository")
     parser.add_argument("--timeout", type=float, default=900)
@@ -140,7 +149,8 @@ def main(argv: Sequence[str], environ: Mapping[str, str], ports: Ports | None = 
             with Path(summary).open("a") as output:
                 output.write(
                     f"| {row['plant']} | {row['gate']} | {row['reason']} | "
-                    f"[green]({row['green']}) | [red]({row['red']}) |\n"
+                    f"[green]({row['green']}) ({row['green_run']}) | "
+                    f"[red]({row['red']}) ({row['red_run']}) |\n"
                 )
         print(json.dumps(row))
         return 0

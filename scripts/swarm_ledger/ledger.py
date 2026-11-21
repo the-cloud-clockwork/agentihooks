@@ -377,8 +377,10 @@ def cmd_join(args: Any) -> None:
     send(args, "join", role=args.role)
     if args.role == "orchestrator":
         from scripts.swarm_ledger.adapters.safety_nudge import record_master
+        from scripts.swarm_ledger.adapters.seat_crons import ensure_master
 
         record_master(os.environ)
+        ensure_master(args.slug, args.name)
     print(json.dumps({"joined": args.name, "slug": args.slug, "role": args.role}))
 
 

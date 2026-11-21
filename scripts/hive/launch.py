@@ -18,6 +18,7 @@ from scripts.routing.slots import account_key
 from scripts.swarm import capacity, launch_endings, lease, profile_choice
 from scripts.swarm.store import ROUND_ROBIN, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import ACK_LATER, Placed
+from scripts.swarm_ledger import ledger_workspace
 from scripts.swarm_v2 import front_door
 from scripts.swarm_v2.kubernetes import approved
 from scripts.swarm_v2.runtime.base import Capability, Outcome, SpawnRequest, Status
@@ -930,6 +931,7 @@ class HiveLaunch:
             self.end(agent, LATE)
             self.store.redis.hdel(self.store.key(self.slug, ORDERS), order.task)
             return Outcome("spawn", Status.REFUSED, HIVE, detail=LATE)
+        ledger_workspace.launched_on(self.store, self.slug, order.task, order.hive)
         placed = Placed(
             agent.pane_id,
             agent.harness,

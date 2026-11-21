@@ -153,6 +153,7 @@ FLOORS: dict[str, Timing] = {
     "lab capacity": Timing(_LEDGER_READ_S, CRITICAL_S),
     "focus unclaimed": Timing(LIGHT_S, CRITICAL_S),
     "view wait": Timing(CRITICAL_S, CRITICAL_S),
+    "autoscaler alert": Timing(LIGHT_S, CRITICAL_S),
 }
 
 

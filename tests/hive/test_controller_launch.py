@@ -1084,6 +1084,26 @@ def test_a_live_acknowledgement_releases_its_admission_reservation(setup: Simple
     assert setup.store.redis.zrange(admission.key(order.hive), 0, -1) == []
 
 
+@pytest.mark.feature("work-folder-readers-and-launch-pointers")
+def test_a_live_acknowledgement_records_the_hive_holding_the_task_work_folder(setup: SimpleNamespace) -> None:
+    _, order, ack = live_order(setup)
+    pointer = setup.store.key("fixture", "work-folder", order.task)
+    assert setup.store.redis.get(pointer) is None
+    assert setup.launcher.complete(order, ack).ok
+    assert setup.store.redis.get(pointer) == order.hive == "remote"
+
+
+@pytest.mark.feature("work-folder-readers-and-launch-pointers")
+def test_a_failed_launch_leaves_the_task_work_folder_pointer_alone(setup: SimpleNamespace) -> None:
+    from scripts.hive.orders import Ack
+
+    request = request_for(setup)
+    order = order_for(setup, request, setup.launcher.select(setup.config, "eng", request.task))
+    setup.launcher.orders.finish("remote", "0-0", order, Ack("failed", {}, "prompt"))
+    assert not setup.launcher.wait(order).ok
+    assert setup.store.redis.get(setup.store.key("fixture", "work-folder", order.task)) is None
+
+
 @pytest.mark.parametrize(
     "bad", ["target", "pane", "host", "generation", "state", "missing occupant", "replaced occupant"]
 )

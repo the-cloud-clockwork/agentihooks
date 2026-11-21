@@ -1,0 +1,11 @@
+{
+  "gate": "semgrep/charts/a-chart-version-bump-leaves-every-pod-template-unchanged",
+  "reason": "A pod template carries the chart version: the controller pod template carries the chart version",
+  "edits": [
+    {
+      "path": "deploy/helm/agentihooks-swarm/templates/controller.yaml",
+      "before": "      labels:\n        {{- include \"swarm.podLabels\" . | nindent 8 }}\n        app.kubernetes.io/component: controller\n",
+      "after": "      labels:\n        {{- include \"swarm.podLabels\" . | nindent 8 }}\n        app.kubernetes.io/component: controller\n        chart-version: {{ .Chart.Version | quote }}\n"
+    }
+  ]
+}
