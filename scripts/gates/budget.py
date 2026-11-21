@@ -27,7 +27,7 @@ class Budget:
         except OSError:
             return 0
 
-    def spend(self, subject, counter, cap):
+    def spend(self, subject: str, counter: str, cap: int, call: str = "") -> tuple[bool, int]:
         """Count one more spend unless the cap is reached; returns (allowed, spent) under a file lock."""
         path = self.path(subject, counter)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -41,3 +41,6 @@ class Budget:
             held.truncate()
             held.write(str(spent + 1))
             return True, spent + 1
+
+    def refund(self, call: str) -> None:
+        """Give back once each spend listed under call, never below zero."""
