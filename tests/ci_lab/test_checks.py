@@ -616,6 +616,23 @@ def test_a_dispatch_of_a_large_grade_lists_the_unit_keys_within_half_the_check_r
 
 
 @pytest.mark.feature("lab-check-dispatch")
+@pytest.mark.parametrize("character", ["x", "\x1b", "✓", "\U0001f600", '"'])
+def test_escaped_log_tails_leave_half_the_dispatch_text_to_the_unit_keys_and_keep_the_body_under_64_kb(
+    monkeypatch: pytest.MonkeyPatch, character: str
+) -> None:
+    units = tuple(Unit("tests", f"batch-{index:05d}", ()) for index in range(3000))
+    failing = replace(OUTPUT, units=units, logs=tuple((unit, character * 5000) for unit in units[:20]))
+    poster, request, _ = dispatcher(monkeypatch, answer(204))
+    poster.post(HEAD, "lint", "completed", "failure", failing, False)
+    body = request.call_args.kwargs["json"]
+    text = body["client_payload"]["output"]["text"]
+    listing = text.index("- tests `batch-00000`\n")
+    assert len(json.dumps(text[:listing])) - 2 <= checks.DISPATCH_TEXT // 2
+    assert len(json.dumps(text)) - 2 <= checks.DISPATCH_TEXT
+    assert len(json.dumps(body)) < DISPATCH_BODY
+
+
+@pytest.mark.feature("lab-check-dispatch")
 @pytest.mark.parametrize(
     ("shadow", "seeded", "other"), [(False, "lab/lint", "lab-shadow/lint"), (True, "lab-shadow/lint", "lab/lint")]
 )

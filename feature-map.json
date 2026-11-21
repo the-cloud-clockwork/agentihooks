@@ -9803,6 +9803,7 @@
         "tests/ci_lab/test_checks.py::test_a_dispatch_carries_the_check_run_move_once_with_the_contents_write_token",
         "tests/ci_lab/test_checks.py::test_a_shadow_move_without_a_conclusion_dispatches_its_own_name_and_no_conclusion",
         "tests/ci_lab/test_checks.py::test_a_dispatch_of_a_large_grade_lists_the_unit_keys_within_half_the_check_run_text_limit",
+        "tests/ci_lab/test_checks.py::test_escaped_log_tails_leave_half_the_dispatch_text_to_the_unit_keys_and_keep_the_body_under_64_kb",
         "tests/ci_lab/test_checks.py::test_a_seeded_dispatch_is_not_sent_again",
         "tests/ci_lab/test_checks.py::test_a_dispatch_github_does_not_accept_raises_and_records_no_status",
         "tests/ci_lab/test_checks.py::test_a_rate_limited_dispatch_waits_like_the_ci_budget_then_sends",
