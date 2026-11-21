@@ -2656,7 +2656,8 @@
         "tests/swarm_ledger/test_postgres_host_entries.py::test_a_purge_drops_the_copy_after_its_queued_save",
         "tests/swarm_ledger/test_postgres_host_entries.py::test_a_deferred_older_copy_never_replaces_a_newer_generation",
         "tests/swarm_ledger/test_postgres_host_entries.py::test_a_successful_commit_runs_each_pending_host_copy_once",
-        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_rolled_back_purge_keeps_its_committed_host_copy"
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_rolled_back_purge_keeps_its_committed_host_copy",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_adoption_cannot_lower_a_newer_deferred_copy_generation"
       ]
     },
     {

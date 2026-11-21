@@ -176,3 +176,28 @@ def test_a_rolled_back_purge_keeps_its_committed_host_copy(
     stored = host_entries.read(host_entries.path(repository.copies.held, ("database", "copy")), 100)
     assert stored is not None
     assert stored[1].state == {"saved": True}
+
+
+@pytest.mark.feature("ledger-copy-after-commit")
+def test_adoption_cannot_lower_a_newer_deferred_copy_generation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    copies = host_entries.Copies(tmp_path / "entries", "database")
+    copies.keep("copy", Copy(100, '{"old":true}'), True)
+    read = host_entries.read
+
+    def read_then_save(file: Path, generation: int) -> tuple[int, sqlite.Entry] | None:
+        held = read(file, generation)
+        copies.keep("copy", Copy(200, '{"new":true}'), True)
+        return held
+
+    monkeypatch.setattr(host_entries, "read", read_then_save)
+    adopted = copies.adopt("copy", 200)
+    assert adopted is not None
+    assert adopted.generation == 100
+    copies.keep("copy", Copy(150, '{"intermediate":true}'), True)
+    stored = read(host_entries.path(copies.held, ("database", "copy")), 200)
+    assert stored is not None
+    assert stored[0] == 200
+    assert stored[1].state == {"new": True}
+    assert copies.generations == {"copy": 200}
