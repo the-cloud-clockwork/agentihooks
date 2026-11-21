@@ -20,6 +20,25 @@
       ]
     },
     {
+      "id": "scheduler-credential-refusal-stop",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-scheduler-stops-on-revoked-credential",
+      "behaviour": "A scheduler runner whose state store refuses its credential, a refused login or an ACL denial, prints one named stderr line and exits with code 4 on that pass, in any swarm; its supervisor starts no new runner and exits 4 itself, and the scheduler user unit does not restart a supervisor that exits 4. A timeout, a dropped connection or any other store error still gets a new pass.",
+      "seam": "scripts.scheduler.service.run, main and supervise, with scripts.events.state.refused and scripts.swarm.timer.units",
+      "rules": [
+        "scheduler-credential-refusal-retried"
+      ],
+      "tests": [
+        "tests/scheduler/test_service.py::test_a_refused_credential_stops_the_runner_on_its_first_pass",
+        "tests/scheduler/test_service.py::test_a_store_that_times_out_drops_or_answers_an_error_still_gets_a_new_pass",
+        "tests/scheduler/test_service.py::test_only_a_refused_login_or_acl_counts_as_a_refused_credential",
+        "tests/scheduler/test_service.py::test_the_runner_entrypoint_exits_with_the_refused_code_when_its_credential_is_refused",
+        "tests/scheduler/test_service.py::test_a_supervisor_ends_without_a_new_runner_once_its_runner_was_refused",
+        "tests/scheduler/test_service.py::test_the_supervisor_entrypoint_exits_with_the_code_its_supervisor_stopped_on",
+        "tests/swarm/test_timer_install.py::test_the_scheduler_is_its_own_restarting_user_service_apart_from_the_units_that_start_it"
+      ]
+    },
+    {
       "id": "swarm-focus-plan-work",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-plan-focus",
@@ -231,6 +250,29 @@
       "tests": [
         "tests/swarm/test_ledger_refusals.py::test_a_refused_focus_reports_size_warnings_separately",
         "tests/swarm/test_ledger_refusals.py::test_size_warnings_do_not_refuse_an_accepted_swarm_write"
+      ]
+    },
+    {
+      "id": "agent-sessions-cannot-approve-pull-requests",
+      "origin": "regression",
+      "ordered_at": "2026-11-20",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2725",
+      "behaviour": "An agent session never approves a pull request, because the test count floor takes a code owner approval of the head as the operator's review and agent sessions hold the operator's GitHub login. The shell guards refuse gh pr review with its approve flag, long or short, through a wrapper, a bash -c string, xargs, find -exec or after a cd; a gh api or curl call on a pull request reviews endpoint, creating a review or submitting a pending one, whose fields, inline, heredoc or piped body, read through --input -, --input=- or @-, or input file, glued to a short option or not, carry an APPROVE event, judged on that call's own fields, body and files, an event field read from a file included; and a gh api graphql or curl GraphQL call running addPullRequestReview or submitPullRequestReview with an APPROVE event, inline, through the variable its event names or from a query file. A command too deeply nested for the shell guards to parse is refused when its text names both a review and an approval. A GitHub MCP tool whose event input is APPROVE in any case is refused. Approvals sent from a script file, another language's runtime or an endpoint held in a shell variable are outside what the shell guard reads. Comments and change requests pass on every path, as do review threads, read only queries, other MCP tools and text that only mentions these words, such as a commit message or a pull request body.",
+      "seam": "hooks.context.approval_guard.refusal and hooks.context.approval_guard.check_approval, called by hooks.hook_manager._check_shell_guards for every tool",
+      "rules": [
+        "agent-approves-pull-request"
+      ],
+      "tests": [
+        "tests/context/test_approval_guard.py::test_gh_pr_review_with_approve_is_refused",
+        "tests/context/test_approval_guard.py::test_a_rest_review_with_an_approve_event_is_refused",
+        "tests/context/test_approval_guard.py::test_a_rest_review_whose_input_file_approves_is_refused",
+        "tests/context/test_approval_guard.py::test_a_graphql_review_with_an_approve_event_is_refused",
+        "tests/context/test_approval_guard.py::test_a_graphql_review_whose_query_file_approves_is_refused",
+        "tests/context/test_approval_guard.py::test_a_github_mcp_review_with_an_approve_event_is_refused",
+        "tests/context/test_approval_guard.py::test_comments_change_requests_and_mentions_pass",
+        "tests/context/test_approval_guard.py::test_github_mcp_comments_and_other_tools_pass",
+        "tests/context/test_approval_guard.py::test_a_command_too_deep_to_parse_is_refused_when_it_names_an_approval",
+        "tests/context/test_approval_guard.py::test_an_input_file_resolves_against_the_working_directory_when_the_call_names_no_cwd"
       ]
     },
     {
