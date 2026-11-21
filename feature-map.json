@@ -8936,6 +8936,19 @@
       ]
     },
     {
+      "id": "reviewer-role-renders-read-only-for-claude-and-codex",
+      "origin": "regression",
+      "ordered_at": "2026-11-21",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-rv-role",
+      "behaviour": "The reviewer package role renders for Claude and Codex with its persona and its swarm-reviewer skill, keeps the full autonomy Codex posture, refuses code edits and Serena writes in a reviewer session, and its persona holds the operator's strict review rule: review independently of check results, read the change request body, the diff, the feature map and the code the change reaches, never close a review with zero findings and never edit.",
+      "seam": "scripts.profiles.render render_claude and render_codex for the reviewer role, and the reviewer no code edits and no Serena writes condition shims",
+      "tests": [
+        "tests/profiles/test_reviewer_role.py::test_reviewer_renders_for_claude_and_codex_with_its_skill",
+        "tests/profiles/test_reviewer_role.py::test_a_reviewer_session_refuses_code_edits_and_serena_writes",
+        "tests/profiles/test_reviewer_role.py::test_reviewer_persona_holds_the_strict_independent_review_rule"
+      ]
+    },
+    {
       "id": "scratch-ledger-folder-skips-shared-database",
       "origin": "inventory",
       "behaviour": "A ledger folder under ~/scratchpad ignores an inherited shared database URL and writes only to its own sqlite file unless AGENTIHOOKS_SCRATCH_SHARED_DATABASE is set to 1; a ledger folder outside the scratchpad, including one that resolves outside it through .. or a tilde home, keeps the shared database.",
