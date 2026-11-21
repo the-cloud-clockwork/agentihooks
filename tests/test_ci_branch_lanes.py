@@ -1103,6 +1103,62 @@ def test_only_the_trusted_swarm_worker_image_hive_job_may_queue_on_the_hive_rele
         assert any(problem.startswith(f"job {name} ") for problem in found)
 
 
+@pytest.mark.feature("gate-status-dedicated-lane-admission")
+@pytest.mark.parametrize(
+    "change",
+    [None, "steps", "permissions", "other-job", "missing-report", "untrusted", "name", "events", "trusted-events"],
+)
+def test_only_the_trusted_gate_status_report_may_leave_the_shared_lane(change: str | None) -> None:
+    import copy
+
+    baseline = yaml.safe_load((ROOT / lanes.WORKFLOWS / "gate-required.yml").read_text())
+    baseline["concurrency"] = {**LANED}
+    updated = copy.deepcopy(baseline)
+    updated["concurrency"] = {
+        "group": "${{ format('gate-required-status-{0}', github.event.workflow_run.head_sha) }}",
+        "queue": "max",
+        "cancel-in-progress": False,
+    }
+    if change == "steps":
+        updated["jobs"]["report"]["steps"] = updated["jobs"]["report"]["steps"][:1]
+    elif change == "permissions":
+        updated["jobs"]["report"]["permissions"]["contents"] = "write"
+    elif change == "other-job":
+        updated["jobs"]["other"] = updated["jobs"].pop("report")
+    elif change == "missing-report":
+        baseline["jobs"].pop("report")
+    elif change == "untrusted":
+        baseline = None
+    elif change == "name":
+        baseline["name"] = updated["name"] = "Other status"
+    elif change == "events":
+        updated[True] = {"workflow_dispatch": None}
+    elif change == "trusted-events":
+        baseline[True] = updated[True] = {"workflow_dispatch": None}
+    found = lanes.problems(updated, baseline)
+    assert bool(found) == (change is not None)
+
+
+@pytest.mark.feature("gate-status-dedicated-lane-admission")
+@pytest.mark.parametrize(
+    "field,value",
+    [("group", "gate-required-status"), ("queue", "single"), ("cancel-in-progress", True), ("extra", True)],
+)
+def test_the_gate_status_group_keeps_its_exact_head_queue_and_cancellation_contract(field: str, value: object) -> None:
+    import copy
+
+    baseline = yaml.safe_load((ROOT / lanes.WORKFLOWS / "gate-required.yml").read_text())
+    baseline["concurrency"] = {**LANED}
+    updated = copy.deepcopy(baseline)
+    updated["concurrency"] = {
+        "group": "${{ format('gate-required-status-{0}', github.event.workflow_run.head_sha) }}",
+        "queue": "max",
+        "cancel-in-progress": False,
+        field: value,
+    }
+    assert lanes.problems(updated, baseline)
+
+
 def test_a_tests_workflow_whose_trusted_baseline_has_no_jobs_mapping_is_still_graded() -> None:
     baseline = _workflow()
     baseline["name"] = "Tests"

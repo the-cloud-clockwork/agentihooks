@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "gate-status-dedicated-lane-admission",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2724",
+      "behaviour": "The protected branch workflow grader admits the existing Gate Required status report on a group keyed by the completed Tests head, with queue max and no cancellation, only when its trusted report job and Tests completion trigger are preserved. Other jobs, workflow names, triggers, permissions and concurrency contracts remain refused.",
+      "seam": "ci_branch_lanes.problems over the trusted Gate Required status workflow and a dedicated status concurrency block",
+      "tests": [
+        "tests/test_ci_branch_lanes.py::test_only_the_trusted_gate_status_report_may_leave_the_shared_lane",
+        "tests/test_ci_branch_lanes.py::test_the_gate_status_group_keeps_its_exact_head_queue_and_cancellation_contract"
+      ]
+    },
+    {
       "id": "kind-terminal-snapshot-base",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2647",
