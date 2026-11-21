@@ -1701,6 +1701,8 @@
         "tests/hive/test_root_bus.py::test_hive_run_re_mints_a_stale_root_credential_before_the_lane_spokes_read_its_env",
         "tests/hive/test_root_bus.py::test_hive_run_re_mints_a_root_credential_whose_subscribe_grant_alone_differs",
         "tests/hive/test_root_bus.py::test_hive_run_re_mints_a_root_credential_that_does_not_decode",
+        "tests/hive/test_root_bus.py::test_hive_run_re_mints_a_root_credential_that_cannot_be_read",
+        "tests/hive/test_root_bus.py::test_hive_run_keeps_the_stored_root_credential_when_it_can_be_neither_read_nor_rewritten",
         "tests/hive/test_root_bus.py::test_hive_run_keeps_the_stored_root_credential_when_the_signer_cannot_mint",
         "tests/hive/test_root_bus.py::test_hive_run_keeps_a_root_credential_whose_grant_matches_a_fresh_mint",
         "tests/hive/test_root_bus.py::test_hive_run_reads_no_signer_without_a_stored_root_credential",
