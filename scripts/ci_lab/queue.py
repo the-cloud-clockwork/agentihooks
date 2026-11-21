@@ -76,6 +76,7 @@ FINISH = """
 if ARGV[2] == '' or redis.call('HGET', KEYS[1], 'token') ~= ARGV[2] then return 0 end
 if redis.call('ZREM', KEYS[2], ARGV[1]) == 0 then return 0 end
 redis.call('HSET', KEYS[1], 'state', 'done', 'outcome', ARGV[3], 'token', '')
+redis.call('HINCRBYFLOAT', KEYS[1], 'finished', 1)
 redis.call('SADD', KEYS[3], ARGV[1])
 redis.call('SMOVE', KEYS[4], KEYS[5], ARGV[1])
 return 1
