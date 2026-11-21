@@ -5826,6 +5826,43 @@
       ]
     },
     {
+      "id": "bundle-layer-manifest",
+      "origin": "inventory",
+      "behaviour": "A bundle root's committed bundle.yml names the directory it ships from with layer; an absent file or key keeps the root. Every reader of bundle content (rules, skills, agents, commands, settings and MCP for each harness, shared doctrine, manifestos, deps.json, enforcements, conditions, workflows, lifecycle roots, classifiers and the Serena context) reads the layer, while profiles are still found under the root. A named layer never falls back to the root CLAUDE.md, a layer outside the bundle is refused with a warning and the root ships, a chain profile that is the layer adds only its persona so every hook group, doctrine row and persona lands once, the condition index rebuilds when a bundle.yml changes, and agentihooks bundle layer prints the resolved directory.",
+      "seam": "hooks.context.profile_chain.layer_root, unlayered and doctrine read through scripts.install.install_global for claude, codex and copilot, scripts.profiles.render, scripts.swarm_v2.worker_home.materialize, hooks.context.conditions.load_index and layer_dirs, hooks.context.enforcement.load_all_enforcements, scripts.workflows.loader.layer_dirs, hooks.lifecycle.config.load_roots and scripts.profiles.bundles.cmd_bundle",
+      "tests": [
+        "tests/test_bundle_layer.py::test_a_bundle_without_a_named_layer_ships_from_its_root",
+        "tests/test_bundle_layer.py::test_a_named_layer_resolves_to_its_directory_inside_the_bundle",
+        "tests/test_bundle_layer.py::test_a_layer_outside_the_bundle_is_refused_and_the_root_ships",
+        "tests/test_bundle_layer.py::test_a_named_layer_keeps_the_root_claude_md_out_of_the_shared_doctrine",
+        "tests/test_bundle_layer.py::test_a_named_layer_ships_rules_skills_agents_and_commands_and_the_root_dot_claude_stays_behind",
+        "tests/test_bundle_layer.py::test_a_named_layer_ships_settings_mcp_and_doctrine_and_no_root_development_file",
+        "tests/test_bundle_layer.py::test_compiled_personas_take_the_layer_doctrine_and_rules_and_never_the_root_ones",
+        "tests/test_bundle_layer.py::test_codex_applies_the_layer_config_and_not_the_root_one",
+        "tests/test_bundle_layer.py::test_a_chain_profile_that_is_the_layer_adds_only_its_persona_and_each_hook_once",
+        "tests/test_bundle_layer.py::test_a_chain_profile_that_is_the_layer_compiles_its_doctrine_and_persona_once",
+        "tests/test_bundle_layer.py::test_doctrine_rows_name_the_layer_doctrine_once_and_the_layer_persona_once",
+        "tests/test_bundle_layer.py::test_profile_renders_read_features_settings_and_mcp_from_the_layer_once",
+        "tests/test_bundle_layer.py::test_manifestos_and_dependencies_come_from_the_layer",
+        "tests/test_bundle_layer.py::test_runtime_conditions_enforcements_workflows_and_lifecycle_read_the_layer_once",
+        "tests/test_bundle_layer.py::test_links_into_a_profile_layer_are_managed_and_reaped_when_their_source_goes",
+        "tests/test_bundle_layer.py::test_bundle_help_names_the_layer_action_and_it_prints_the_resolved_layer",
+        "tests/test_conditions.py::TestIndexCache::test_a_bundle_layer_change_invalidates",
+        "tests/test_worker_home.py::test_a_bundle_naming_a_layer_renders_the_worker_home_from_it_once"
+      ]
+    },
+    {
+      "id": "config-import-without-yaml",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/ci-outage-config-yaml-import",
+      "behaviour": "Importing hooks.config never requires pyyaml at module import time: its module level CI_MANIFESTO_PATHS computation reaches hooks.context.profile_chain.layer_root, whose yaml.safe_load call imports yaml inside the function body, so a caller without pyyaml installed, such as the merge queue early collection step, can still import hooks.config and every module that imports it.",
+      "seam": "hooks.config._resolve_manifesto_paths through hooks.context.profile_chain.layer_root, parents, _manifest, overlays, wears and require_capabilities, each importing yaml locally instead of at module scope",
+      "tests": [
+        "tests/test_config_import_no_yaml.py::test_hooks_config_imports_without_pyyaml_installed",
+        "tests/test_shard_check.py::test_shard_check_installs_pyyaml_before_the_import_chain_that_needs_it"
+      ]
+    },
+    {
       "id": "credential-guard-describe-flag-words",
       "origin": "regression",
       "ordered_at": "2026-11-18",
