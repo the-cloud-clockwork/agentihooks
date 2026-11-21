@@ -107,9 +107,7 @@ def test_the_origin_remote_of_the_current_checkout_is_the_default(
 
 
 @pytest.mark.feature(FEATURE)
-def test_a_forge_failure_prints_its_reason_and_returns_one(
-    picked: Picked, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_a_forge_failure_prints_its_reason_and_returns_one(picked: Picked, capsys: pytest.CaptureFixture[str]) -> None:
     assert cli.main(["read", "7", "--remote", "/local/repo"]) == 1
     assert capsys.readouterr() == ("", "forge: not a repository remote: /local/repo\n")
     assert picked.calls == []

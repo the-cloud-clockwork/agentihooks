@@ -37,7 +37,12 @@ def test_a_url_without_host_and_owner_is_refused(url: str) -> None:
 @pytest.mark.feature(FEATURE)
 @pytest.mark.parametrize(
     ("host", "kind"),
-    [("github.com", "github"), ("gitlab.com", "gitlab"), ("gitlab.example.org", "gitlab"), ("code.gitlab.corp", "gitlab")],
+    [
+        ("github.com", "github"),
+        ("gitlab.com", "gitlab"),
+        ("gitlab.example.org", "gitlab"),
+        ("code.gitlab.corp", "gitlab"),
+    ],
 )
 def test_the_picker_names_the_forge_from_the_remote_host(host: str, kind: str) -> None:
     assert remote.kind_of(host) == kind
@@ -91,7 +96,10 @@ def test_the_origin_remote_is_read_from_git() -> None:
     ran = Ran((0, "git@github.com:Org/repo.git\n"))
     assert remote.origin("/work/repo", ran) == "git@github.com:Org/repo.git"
     assert ran.calls == [
-        (["git", "-C", "/work/repo", "remote", "get-url", "origin"], {"capture_output": True, "text": True, "timeout": 30})
+        (
+            ["git", "-C", "/work/repo", "remote", "get-url", "origin"],
+            {"capture_output": True, "text": True, "timeout": 30},
+        )
     ]
 
 
