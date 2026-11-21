@@ -663,17 +663,23 @@ def _resolve_manifesto_paths(
     if explicit:
         path = Path(explicit).expanduser()
         return [str(path)] if path.is_file() else []
+    from hooks.context.profile_chain import layer_root
+
     manifests_dir = os.getenv("MANIFESTOS_DIR")
     root = bundle_root or os.getenv("AGENTIHOOKS_BUNDLE_ROOT")
     directory = (
         Path(manifests_dir).expanduser()
         if manifests_dir
-        else Path(root).expanduser() / "manifestos"
+        else layer_root(Path(root).expanduser()) / "manifestos"
         if root
         else Path.home() / "dev" / "tcc-ecosystem" / "agentihooks-bundle" / "manifestos"
     )
-    user_directory = Path(user_root).expanduser() / "manifestos" if user_root and not manifests_dir else None
-    shared_directory = Path(shared_root).expanduser() / "manifestos" if shared_root and not manifests_dir else None
+    user_directory = (
+        layer_root(Path(user_root).expanduser()) / "manifestos" if user_root and not manifests_dir else None
+    )
+    shared_directory = (
+        layer_root(Path(shared_root).expanduser()) / "manifestos" if shared_root and not manifests_dir else None
+    )
     skip = _manifesto_skip_names()
     layers = [layer for layer in (directory, shared_directory, user_directory) if layer and layer.is_dir()]
     if layers:

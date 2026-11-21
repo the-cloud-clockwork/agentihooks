@@ -1,0 +1,12 @@
+rules:
+  - id: lab-worker-local-manifest
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Fresh lab worker volumes have no configured manifest file. Test executors must use the dependency records
+      carried by the leased batch that were selected when its key was built.
+    paths:
+      include:
+        - /scripts/ci_lab/executors.py
+        - lab-worker-local-manifest.py
+    pattern: json.loads($SUITE.manifest.read_text(...))

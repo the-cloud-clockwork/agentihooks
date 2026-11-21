@@ -596,8 +596,9 @@ def test_profile_and_saved_handoff_harnesses_are_reserved_before_automatic_work(
         "plan": [],
     }
     observed = [account(sessions=2), account("cx", sessions=2, harness="codex")]
-    decision = capacity.calculate(config, observed, [], {"eng": 1, "ci": 1, "plan": 0}, requirements)
     runtime._quota_accounts = observed
+    narrowed = runtime._quota_preferring(requirements)
+    decision = capacity.calculate(config, observed, [], {"eng": 1, "ci": 1, "plan": 0}, narrowed)
     runtime._quota_allocations = decision["allocation"]
     assert runtime._quota_choice("claude", "required", True, "eng") == ("claude", "required")
     assert runtime._quota_choice("claude", "priority", False, "ci")[0] == "codex"
@@ -1356,18 +1357,18 @@ def test_one_free_seat_goes_to_engineering_before_other_empty_lanes():
 
 
 def test_tied_free_seats_break_ties_alphabetically_by_harness():
-    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
+    config = SwarmConfig("sw", "/repo", max_eng=0, max_ci=0, max_plan=1)
     decision = capacity.calculate(config, [account(sessions=2), account("cx", sessions=2, harness="codex")], [])
     assert decision["placements"] == {
-        "eng": [{"index": 0, "harness": "claude", "account": "a"}],
+        "eng": [],
         "ci": [],
-        "plan": [],
+        "plan": [{"index": 0, "harness": "claude", "account": "a"}],
     }
 
 
 def test_reservations_ignore_fixed_work_beyond_the_configured_lane_cap():
     config = SwarmConfig("sw", "/repo", max_eng=2, max_ci=0, max_plan=0)
-    live = [AgentRecord("live", "eng", "active")]
+    live = [AgentRecord("live", "eng", "active", harness="codex")]
     requirements = {"eng": [("claude", "codex"), ("claude",)], "ci": [], "plan": []}
     seen = [account(sessions=2), account("cx", sessions=2, harness="codex")]
     decision = capacity.calculate(config, seen, live, {"eng": 2, "ci": 0, "plan": 0}, requirements)
@@ -1593,6 +1594,7 @@ def test_allocation_skips_a_harness_whose_only_room_is_on_accounts_the_handoff_c
         seats,
         {"eng": [("claude", "codex")], "ci": [("claude",)], "plan": []},
         {"eng": {0: {("claude", "a")}}},
+        shared={"claude": 0, "codex": 0},
     )
     assert placements == {"eng": [{"index": 0, "harness": "claude", "account": "a"}], "ci": [], "plan": []}
 

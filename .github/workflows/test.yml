@@ -2322,6 +2322,9 @@ jobs:
 
       - *python
 
+      - name: Install PyYAML
+        run: python -m pip install --constraint .github/test-requirements.lock PyYAML==6.0.3
+
       - name: Download collected tests
         uses: ./.github/actions/retry-download
         with:

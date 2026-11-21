@@ -138,10 +138,10 @@ grading passes with a half second sleep, then exit:
 agentihooks ci-lab-scheduler --interval 0.5 --passes 3
 ```
 
-`--passes 0` also runs indefinitely. A finite run starts both listeners, consumes heads, grades
+`--passes 0` also runs indefinitely. A finite run starts all three listeners, consumes heads, grades
 work and ticks the relay just like the service; use `--self-test` for an offline check. Each
 pass prints its scheduler and relay actions to standard output. The CLI has no host or port
-options: it binds all interfaces on 8800 and 9108. The chart or container network controls
+options: it binds all interfaces on 8800, 8801 and 9108. The chart or container network controls
 which clients can reach them.
 
 ### Verify the running service
@@ -201,7 +201,7 @@ per-node verification; a Ready cache pod alone does not prove either cache is wa
 | `CI_LAB_SLOTS` | no | yes | Number of units the worker runs at once |
 | `CI_LAB_GIT_MIRROR` | yes | yes | Path of the shared git mirror the worker cuts worktrees from and the scheduler borrows objects from |
 | `CI_LAB_WORK_ROOT` | no | yes | Folder of the worker's private git store, its trees, venvs and unit runs and reports |
-| `CI_LAB_MANIFEST` | no | yes | Path of the dependency manifest JSON a test unit's batch is checked against |
+| `CI_LAB_MANIFEST` | no | yes | Legacy manifest path accepted by worker settings; test batches carry their selected dependency records in the lease and do not read this file |
 | `CI_LAB_FLAKES` | no | yes | Path of the flake ledger a test unit appends to when its retry passes |
 | `CI_LAB_MUTATION_CACHE` | no | yes | Folder of the mutation stats cache, keyed by tree content |
 | `CI_LAB_KILLERS` | no | yes | Path of the kill memory that orders a mutant's tests, its remembered killer first |
@@ -222,14 +222,17 @@ environment refuses to start. It exits 1 and names each variable it found. Only 
 
 | Port | Service | Serves |
 |---|---|---|
-| `8800` | scheduler | The lease API workers call, the [control routes](#control-routes) a swarm calls, [`/capacity`](#capacity-document) and [`/grades/<sha>`](#grades-of-a-commit) |
+| `8800` | scheduler | The lease API workers call, [`/capacity`](#capacity-document) and [`/grades/<sha>`](#grades-of-a-commit); the control paths answer 404 here |
+| `8801` | scheduler | The [control routes](#control-routes) a swarm calls, and nothing else |
 | `9108` | scheduler and worker | Prometheus metrics at `/metrics` |
 
 ## Control routes
 
-The scheduler port serves three routes a swarm calls with `Authorization: Bearer <token>`, the token being the
-scheduler's `CI_LAB_CONTROL_TOKEN`. Any other token, or a scheduler without one, answers 401 and changes nothing. A
-head is a pull request head commit or its head branch. The state lives in the lab Redis.
+The control port, `8801`, serves three routes a swarm calls with `Authorization: Bearer <token>`, the token being the
+scheduler's `CI_LAB_CONTROL_TOKEN`. Any other token, or a scheduler without one, answers 401 and changes nothing; any
+other path answers 404. The lease port does not serve them, so a network policy can open the control port to hive
+pods while the lease port stays closed. A head is a pull request head commit or its head branch. The state lives in
+the lab Redis.
 
 | Route | Body | Effect |
 |---|---|---|
@@ -240,9 +243,9 @@ head is a pull request head commit or its head branch. The state lives in the la
 `agentihooks swarm <slug> panic on --fix <url>` marks the fix branches and the recorded fixer branches hotfix and
 pauses `pull_request` except them, printing `lab paused pull request grading except <heads>`; `panic off`, and the
 release of an automatic panic, resume the lab only when that swarm's panic paused it. `agentihooks swarm <slug> merge priority <url>` marks
-the pull request head hotfix and records the lab's reply under `lab` in the queue journal. The swarm reads the lab
-address set with `agentihooks swarm <slug> set lab-url=<address>` and the token from `CI_LAB_CONTROL_TOKEN` on its
-host.
+the pull request head hotfix and records the lab's reply under `lab` in the queue journal. The swarm sends these
+orders to port `8801` on the host of the lab address set with `agentihooks swarm <slug> set lab-url=<address>`, with
+the token from `CI_LAB_CONTROL_TOKEN` on its host.
 
 ## Metrics
 
@@ -2803,6 +2806,11 @@ than that is answered only from the store. A head that needs test units and find
 `no dependency manifest at or before <base>` and is dropped with that reason, so a merge group
 never folds green on an empty unit job.
 
+Before serving leases, scheduler startup restores missing batch records in older live grade slots
+and queued jobs from the packed manifest at the grade's recorded manifest commit. Existing job
+records are kept, and held slots receive their records before admission. A missing manifest object
+fails startup. This upgrade runs under the scheduler Deployment's single replica and Recreate strategy.
+
 A batch verdict lists the files the batch opened outside its tests' manifest records. The expander
 puts the `commit` of the manifest it keyed a head's test units on in the plan's `manifest`, and the
 grade's state keeps it; a pull request or hotfix grade keys no test units and keeps none. When the
@@ -3265,7 +3273,7 @@ scheduler enqueues a grade's misses with the grade's base and its plan's grader 
 | Kind | Trees | Executor inputs |
 |---|---|---|
 | `static` | head, base and grader, read only, shared by the pod's units | the gate the unit names from the grader tree's workflow, input registry and reusable workflows (see [The worker reads the same workflows](#the-worker-reads-the-same-workflows)), the venv of the head's `uv.lock` digest and the lease fields and secrets its steps read (see [What a gate's steps read](#what-a-gates-steps-read)) |
-| `test` | head, read only | the batch, the venv of the head's `uv.lock` digest, `CI_LAB_MANIFEST`, `CI_LAB_FLAKES` and one pytest worker per slot |
+| `test` | head, read only | the batch and its selected manifest records carried through stored grade state, the queued job and lease, the venv of the head's lockfile digest, `CI_LAB_FLAKES` and one pytest worker per slot |
 | `stats` | a private copy of the head with every file under the `[tool.mutmut]` source paths behind its trampolines | the tree as root and `CI_LAB_MUTATION_CACHE` |
 | `mutant` | the same private trampolined copy | `CI_LAB_KILLERS`, `CI_LAB_MUTATION_BUDGET`, `CI_LAB_MUTATION_CAP` and the tests that the stats records of every test module in the tree show reaching the mutant's function, with their seconds |
 
@@ -4227,8 +4235,9 @@ not these rows. See [CI lab shadow acceptance report](lab-shadow.md).
   variables. A private variable replaces a whitelisted variable of the same name.
 - A port range from its `PortAllocator`, given back when the run ends.
 - No network unless the caller passes `net=True`.
-- Its own session. A timeout sends `SIGKILL` to the whole process group, and the outcome's code is
-  `None`.
+- Its own session. When the unit exits, cleanly, with a failure or at its timeout, the sandbox sends
+  `SIGKILL` to the whole process group, so no child it left behind outlives the run. A timeout's
+  outcome code is `None`.
 
 | Variable | Value |
 |---|---|
@@ -4694,3 +4703,32 @@ job:
 | A pull request changed sandbox code and no `writer-lock / lab-sandbox` check ran | The changed path is not one of `LAB_SANDBOX_INPUTS`, which match whole, or the Tests workflow skipped its `writer-lock` job | The `Select lab sandbox inputs` step log in the `writer-lock / inputs` job; or dispatch `Writer lock` on the branch as in [Run it by hand](#run-it-by-hand) |
 | The protected grader refuses the pull request with `The head changes the frozen gate file .github/workflows/writer-lock.yml ...` | The head changes the workflow to a blob the base registry does not accept | Announce the blob first, as in [Change the job](#change-the-job) |
 | `writer-lock.yml/lab-sandbox: runs-on must be ubuntu-latest for a hosted job` | The job's `runs-on` was routed to a self hosted runner label | Restore `runs-on: ubuntu-latest`; the self hosted runners have no bubblewrap, so every real case would skip |
+
+## Static plant proofs
+
+Run `python -m scripts.ci_lab grade --plant lint` from a repository checkout to prove
+an import sorting fault. Use `--plant gate-script` to prove that a head cannot teach its
+own comment grader to accept a new directive. Test and mutation plants are separate proofs.
+
+The command creates an unchanged twin and its planted child from `origin/dev`, with fixed
+commit identity and dates. It preserves the checkout, HEAD and normal index. `--base`
+selects another protected revision; `--repository` overrides the GitHub URL inferred from
+`origin`; `--timeout` bounds each grade wait in seconds, with a default of 900.
+
+Both commits use a branch under `diffcheck/lab-plant-`, derived from the plant and base.
+The twin is pushed and must pass before the plant is pushed. A rerun on the same base
+reuses those commits; another base gets a separate branch. No plant pull request is opened.
+
+The authenticated push receiver must recognize that prefix, resolve both heads against
+trusted `dev` and grade them in the pull request class with their merge base as grader.
+Proofs runners hold no lab notice secret and make no request to the receiver. An ordinary
+promotion grade cannot satisfy this proof: its grade identity and grader differ.
+
+Only checks carrying the exact grade key are read. The twin's required check must pass;
+the plant's required check must fail with `lint` as its only failing static gate. Failed
+pushes, expired or incomplete grades and other failing gates fail the command. The failing
+gate must carry its expected diagnostic in the trusted check output text: Ruff `I001` or
+`forbidden comment`. A check title or summary cannot satisfy that requirement.
+
+Success prints a JSON row. When `GITHUB_STEP_SUMMARY` is set, the command also appends a row
+with green and red GitHub check links, which remain usable outside the cluster.

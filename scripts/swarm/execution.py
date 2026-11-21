@@ -182,8 +182,44 @@ class ExecutionRegistry:
 
     def put(self, slug: str, agent: AgentRecord) -> None:
         managed = _has_identity(agent) or self.managed(slug, agent.name)
+        if managed:
+            port = fencing.records(self.store, slug)
+            if not isinstance(port, fencing.WholeDocumentRecords) and self._unchanged(slug, agent, port):
+                return
         with _writes(slug):
             timing.timed(self._put, slug, agent, managed)
+
+    def _unchanged(self, slug: str, agent: AgentRecord, port: fencing.Records) -> bool:
+        if _invalid(slug, agent):
+            return False
+        from scripts.swarm import lease
+        from scripts.swarm.store import SwarmError
+
+        if (held := lease.EPOCH.get()) is not None and lease.stale(self.store, slug, held):
+            raise SwarmError(lease.STALE)
+        head = port.record(slug, fencing.BY_SEAT, agent.seat)
+        if head is None or head.value != agent.execution_id:
+            return False
+        row = port.record(slug, "executions", agent.execution_id)
+        if row is None:
+            return False
+        current = _record(cast(dict[str, Any], row.value))
+        if any(getattr(agent, field) != getattr(current, field) for field in IMMUTABLE):
+            return False
+        written, conflict = _resolve(current, agent)
+        if conflict or cast(dict[str, Any], written.runtime_target).get("pod_uid"):
+            return False
+        checked_head = port.record(slug, fencing.BY_SEAT, agent.seat)
+        checked_row = port.record(slug, "executions", agent.execution_id)
+        if (
+            checked_head is None
+            or checked_head.revision != head.revision
+            or checked_row is None
+            or checked_row.revision != row.revision
+            or (held is not None and lease.stale(self.store, slug, held))
+        ):
+            return False
+        return written == current
 
     def _put(self, slug: str, agent: AgentRecord, managed: bool) -> None:
         if managed or not self.store.project_legacy(slug, agent, lambda: self.named(slug, agent.name)):
@@ -279,11 +315,9 @@ class ExecutionRegistry:
             self._project(slug, (written.name,), written, current)
 
     def _land(self, slug: str, doc: dict[str, Any], current: AgentRecord, written: AgentRecord) -> AgentRecord:
-        if current.state == "finished" and written.state != "ended":
-            written = replace(written, state="finished")
-        if _read_before_ack(written.runtime_target, current.runtime_target):
-            written = replace(written, **{field: getattr(current, field) for field in LAUNCH_BINDING})
-        _check_binding(current.runtime_target, written.runtime_target, lambda message: self.conflict(slug, message))
+        written, conflict = _resolve(current, written, revive=True)
+        if conflict:
+            self.conflict(slug, "runtime target identity is immutable after binding")
         self.check_uid(slug, written, doc)
         if written != current:
             doc["executions"][written.execution_id] = asdict(written)
@@ -422,6 +456,18 @@ def _validate_target(backend, target, refuse):
             refuse("runtime target identity must be a string")
 
 
+def _invalid(slug: str, agent: AgentRecord) -> bool:
+    if agent.runtime_backend not in ("local", "kubernetes"):
+        return True
+    if not is_seat(agent.seat) or not agent.seat.endswith(f"@{slug}"):
+        return True
+    if not isinstance(agent.runtime_target, dict):
+        return True
+    reasons: list[str] = []
+    _validate_target(agent.runtime_backend, cast(dict[str, Any], agent.runtime_target), reasons.append)
+    return bool(reasons)
+
+
 def _check_binding(previous, current, refuse):
     if set(previous) == {"host_id"} and set(current) == {"host_id", "process_namespace", "pid", "pid_start"}:
         if previous["host_id"] == current["host_id"]:
@@ -431,6 +477,28 @@ def _check_binding(previous, current, refuse):
             continue
         if previous.get(field) != current.get(field):
             refuse("runtime target identity is immutable after binding")
+
+
+def _binding_conflict(previous: dict[str, Any], current: dict[str, Any]) -> bool:
+    reasons: list[str] = []
+    _check_binding(previous, current, reasons.append)
+    return bool(reasons)
+
+
+def _resolve(current: AgentRecord, agent: AgentRecord, *, revive: bool = False) -> tuple[AgentRecord, bool]:
+    """Resolve an execution write, preserving ended records unless revival is explicit."""
+    if current.state == "ended":
+        if not revive:
+            return current, False
+    written = agent
+    if current.state == "finished" and written.state != "ended":
+        written = replace(written, state="finished")
+    if _read_before_ack(written.runtime_target, current.runtime_target):
+        written = replace(written, **{field: getattr(current, field) for field in LAUNCH_BINDING})
+    conflict = _binding_conflict(
+        cast(dict[str, Any], current.runtime_target), cast(dict[str, Any], written.runtime_target)
+    )
+    return written, conflict
 
 
 def _read_before_ack(written, stored):
