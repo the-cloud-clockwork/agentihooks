@@ -6,6 +6,7 @@ from collections.abc import Callable, Iterator
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -505,6 +506,51 @@ def test_prepare_stacks_on_the_recorded_branch_and_publish_pushes_its_current_br
     assert task["repository_branches"] == {str(repository): "engineer-test"}
     assert git(repository, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
     assert git(repository, "ls-remote", "origin", "refs/heads/predecessor").split()[0] != head
+
+
+@pytest.mark.feature("prepare-unpushed-branch-fresh-cut")
+@pytest.mark.parametrize("hint", ["", "handoff_envelope", "reclaim"])
+def test_prepare_cuts_fresh_dev_when_the_recorded_branch_was_never_pushed(
+    repository: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, hint: str
+) -> None:
+    from scripts.swarm import publish, stack
+
+    fresh = git(repository, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "New dev")
+    git(repository, "push", "origin", f"{fresh}:refs/heads/dev")
+    worktree = tmp_path / "worktrees" / "repo" / "engineer-test"
+    script = tmp_path / "wt.sh"
+    script.write_text(
+        "#!/usr/bin/env bash\nset -euo pipefail\n"
+        'git -C "$3" fetch origin dev >&2\n'
+        "base=origin/dev\n"
+        'if [[ "${4:-}" == --from ]]; then git -C "$3" fetch origin "${5#origin/}" >&2; base="$5"; fi\n'
+        'git -C "$3" worktree add --no-track -b engineer-test "$PUBLISH_PREPARED" "$base" >&2\n'
+        'printf "%s\\n" "$PUBLISH_PREPARED"\n'
+    )
+    monkeypatch.setattr(stack, "WT_SCRIPT", script)
+    monkeypatch.setenv("PUBLISH_PREPARED", str(worktree))
+    task = {
+        "id": "t1",
+        "claimed_by": "engineer@test",
+        "state": "claimed",
+        "branch": "never-pushed",
+        "repository_branches": {str(repository): "never-pushed"},
+    }
+    if hint:
+        task[hint] = {"continue_from": "origin/never-pushed"}
+    ledger: Any = SimpleNamespace(
+        task=_by_id(task), tasks=_no_collection, update_task=lambda slug, task_id, fields, by: task.update(fields)
+    )
+    agent = AgentRecord("engineer@test", "ci", "t1")
+
+    result = publish.prepare("swarm", agent, str(repository), ledger)
+
+    assert result["worktree"] == str(worktree)
+    assert git(worktree, "rev-parse", "HEAD") == fresh
+    assert result["branch"] == task["branch"] == "engineer-test"
+    assert task["repository_branches"] == {str(repository): "engineer-test"}
+    upstream = subprocess.run(["git", "-C", str(worktree), "rev-parse", "@{upstream}"], capture_output=True)
+    assert upstream.returncode != 0
 
 
 @pytest.mark.parametrize(
