@@ -49,7 +49,7 @@ def _area(entry):
 
 
 def within(path: str, areas: list[str], repo: str) -> bool:
-    """True when path, inside repository repo, falls under an area written plain or with repo as its first part."""
+    """True when path, inside repository repo, falls under an area written plain or as repo/area or repo:area."""
     forms = [form for area in map(_area, areas) if area for form in _forms(area, repo)]
     return any(path == form or path.startswith(form + "/") for form in forms)
 

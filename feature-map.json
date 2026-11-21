@@ -7442,7 +7442,8 @@
         "tests/gates/test_build.py::TestRepositoryNamedAreas::test_an_area_in_the_repository_colon_form_allows_an_edit_inside_it",
         "tests/gates/test_build.py::TestRepositoryNamedAreas::test_a_territory_in_the_repository_colon_form_widens_it",
         "tests/gates/test_build.py::TestRepositoryNamedAreas::test_within_strips_the_edited_repository_colon_name",
-        "tests/gates/test_build.py::TestRepositoryNamedAreas::test_within_keeps_colon_areas_of_other_repositories_apart"
+        "tests/gates/test_build.py::TestRepositoryNamedAreas::test_within_keeps_colon_areas_of_other_repositories_apart",
+        "tests/gates/test_build.py::TestRepositoryNamedAreas::test_a_colon_area_matches_in_the_repository_trace_plan_names"
       ]
     },
     {

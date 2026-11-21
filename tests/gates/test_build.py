@@ -363,6 +363,7 @@ class TestDevMerge:
 
 
 CHARTS = "- bake the runner chart | antoncore/k8s/charts | the runners need it\n"
+COLON_CHARTS = "- bake the runner chart | antoncore:k8s/charts | the runners need it\n"
 
 
 @pytest.fixture
@@ -428,7 +429,7 @@ class TestRepositoryNamedAreas:
 
     @pytest.mark.feature("build-gate-repository-named-areas")
     def test_an_area_in_the_repository_colon_form_allows_an_edit_inside_it(self, antoncore: Any) -> None:
-        antoncore.plan("- bake the runner chart | antoncore:k8s/charts | the runners need it\n", kept=(True,))
+        antoncore.plan(COLON_CHARTS, kept=(True,))
         assert antoncore.decide(file_path=str(antoncore.antoncore / "k8s/charts/runners/smoke.sh")).allowed
         assert not antoncore.decide(file_path=str(antoncore.antoncore / "k8s/other/smoke.sh")).allowed
         assert not edit(antoncore, "k8s/charts/runners/smoke.sh").allowed
@@ -451,6 +452,13 @@ class TestRepositoryNamedAreas:
         assert not within("k8s/charts/x", ["antoncore:k8s/charts"], "anton")
         assert not within("k8s/charts/x", ["antoncore-bundle:k8s/charts"], "antoncore")
         assert not within("k8s/charts/x", ["antoncore:k8s/charts"], "")
+
+    @pytest.mark.feature("build-gate-repository-named-areas")
+    def test_a_colon_area_matches_in_the_repository_trace_plan_names(self) -> None:
+        pieces = trace_plan.parse(COLON_CHARTS, TASK)
+        assert trace_plan.repositories(pieces) == ["antoncore"]
+        assert within("k8s/charts/x", list(pieces[0].areas), "antoncore")
+        assert not within("k8s/charts/x", list(pieces[0].areas), "other")
 
 
 class TestTerritory:
