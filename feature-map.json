@@ -954,11 +954,12 @@
       "id": "grader-gates-fail-closed-on-stale-base",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-gates-drop-head-fallback",
-      "behaviour": "The marker vector step and the two chart steps run only the protected grader's copy of their script with the head as root, so a pull request whose base predates root support fails closed and a head copy edited to pass never decides the verdict.",
-      "seam": "The lint marker vector step and the Semgrep chart step run text, executed over a stale grader tree and a planted head copy that exits 0",
+      "behaviour": "The marker vector step, the for loop word list step and the two chart steps run only the protected grader's copy of their script with the head as root, so a pull request whose base predates root support or lacks the gate fails closed and a head copy edited to pass never decides the verdict.",
+      "seam": "The lint marker vector and for loop word list step run texts and the Semgrep chart step run text, executed over a stale grader tree and a planted head copy that exits 0",
       "tests": [
         "tests/test_ci_grader_gates.py::test_a_stale_base_fails_the_marker_check_closed_and_a_planted_head_copy_never_runs",
-        "tests/test_ci_grader_gates.py::test_a_stale_base_fails_a_chart_check_closed_and_a_planted_head_copy_never_runs"
+        "tests/test_ci_grader_gates.py::test_a_stale_base_fails_a_chart_check_closed_and_a_planted_head_copy_never_runs",
+        "tests/test_ci_grader_gates.py::test_a_stale_base_fails_the_for_loop_check_closed_and_a_planted_head_copy_never_runs"
       ]
     },
     {
@@ -7836,7 +7837,7 @@
       "id": "lint-gates-grade-from-grader",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-gates-from-grader-tree",
-      "behaviour": "The lint job's ruff, wiring and marker vector steps and the Semgrep code scans and chart checks grade the head with the protected grader's module and config, the head only as data, so a head that edits a gate's module or config to pass its own copy stays red.",
+      "behaviour": "The lint job's ruff, wiring, marker vector and for loop word list steps and the Semgrep code scans and chart checks grade the head with the protected grader's module and config, the head only as data, so a head that edits a gate's module or config to pass its own copy stays red.",
       "seam": "The lint and Semgrep workflow step run text, executed over a planted head with the repository as grader",
       "tests": [
         "tests/test_ci_grader_gates.py::test_a_head_config_that_drops_a_rule_stays_red_under_the_grader_config",
@@ -7850,7 +7851,8 @@
         "tests/test_ci_grader_gates.py::test_a_chart_check_grades_the_tree_its_root_names",
         "tests/test_ci_grader_gates.py::test_a_head_chart_check_that_passes_itself_stays_red_under_the_grader_copy",
         "tests/test_ci_grader_gates.py::test_each_semgrep_job_checks_out_the_caller_base_as_the_grader",
-        "tests/test_ci_grader_gates.py::test_the_semgrep_scan_grades_the_code_with_the_grader_rules_and_the_head_rules"
+        "tests/test_ci_grader_gates.py::test_the_semgrep_scan_grades_the_code_with_the_grader_rules_and_the_head_rules",
+        "tests/test_ci_grader_gates.py::test_a_head_for_loop_check_that_passes_itself_stays_red_under_the_grader_copy"
       ]
     },
     {
