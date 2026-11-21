@@ -81,8 +81,9 @@ feature, and Notes for the reviewer. Use observed recon findings; state an
 explicit absence where a section does not apply.
 
 Prepare the summary and evidence in a body file in the task work folder. Run
-`python -m scripts.pr_body fill --recon RECON --body BODY`, then
-`python -m scripts.pr_body check --body BODY`. Use that file with
+`agentihooks-pr-body fill --recon RECON --body BODY`, then
+`agentihooks-pr-body check --body BODY`. The installed command uses the
+AgentiHooks interpreter independently of the target repository. Use that file with
 `gh pr create --body-file BODY` at the first draft creation and with body updates.
 The filler retains unrelated body sections. When recon changes, fill and check
 the existing file again. Done when all nine sections contain recon details and

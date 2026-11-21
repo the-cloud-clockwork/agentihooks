@@ -32,7 +32,8 @@ def test_engineer_preserves_first_push_and_ci_requirements() -> None:
 @pytest.mark.feature("pull-request-recon-context")
 def test_engineer_fills_body_from_recon() -> None:
     text = SKILL.read_text()
-    assert "python -m scripts.pr_body fill" in text
+    assert "agentihooks-pr-body fill" in text
+    assert "agentihooks-pr-body check" in text
     assert "--recon" in text
     assert "--body" in text
     assert "level three" in text

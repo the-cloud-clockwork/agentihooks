@@ -22,6 +22,7 @@
         "tests/test_pr_body.py::test_fill_refuses_missing_recon_details",
         "tests/test_pr_body.py::test_check_event_names_every_missing_section",
         "tests/test_pr_body.py::test_fill_command_uses_recon_fixture",
+        "tests/test_pr_body.py::test_installed_command_ignores_a_foreign_scripts_package",
         "tests/test_pr_body.py::test_invalid_recon_is_refused",
         "tests/test_pr_body.py::test_body_file_check_and_new_body_fill",
         "tests/test_pr_body.py::test_bad_event_fails_closed",

@@ -1,7 +1,7 @@
 [
   {
     "query": "Create the first draft pull request for this task. The task recon is complete.",
-    "expected_behavior": "Prepares the nine named level three review details within the six recon sections, runs scripts.pr_body fill with the recon and body files, checks the body, and uses that body file at the first draft pull request creation."
+    "expected_behavior": "Prepares the nine named level three review details within the six recon sections, runs agentihooks-pr-body fill with the recon and body files, checks the body, and uses that body file at the first draft pull request creation."
   },
   {
     "query": "The pull request body checker says Resources is missing from the recon details.",

@@ -1,4 +1,7 @@
 import json
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 from types import ModuleType
 
@@ -130,6 +133,36 @@ def test_fill_command_uses_recon_fixture(api: ModuleType, tmp_path: Path, capsys
     assert capsys.readouterr().out == body.read_text()
     assert api.missing_sections(body.read_text()) == []
     assert "Original evidence." in body.read_text()
+
+
+@pytest.mark.feature("pull-request-recon-context")
+def test_installed_command_ignores_a_foreign_scripts_package(tmp_path: Path) -> None:
+    foreign = tmp_path / "foreign"
+    package = foreign / "scripts"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text('raise RuntimeError("foreign scripts imported")\n')
+    body = tmp_path / "body.md"
+    body.write_text(body_without())
+    shadowed = subprocess.run(
+        [sys.executable, "-m", "scripts.pr_body", "check", "--body", str(body)],
+        cwd=foreign,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert shadowed.returncode != 0
+    assert "foreign scripts imported" in shadowed.stderr
+    command = shutil.which("agentihooks-pr-body")
+    assert command is not None
+    checked = subprocess.run(
+        [command, "check", "--body", str(body)],
+        cwd=foreign,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert checked.returncode == 0, checked.stderr
+    assert checked.stdout == "Pull request body sections passed.\n"
 
 
 @pytest.mark.feature("pull-request-recon-context")

@@ -109,6 +109,7 @@ dev = [
 [project.scripts]
 agentihooks = "scripts.install:main"
 agentihooks-skill-eval = "scripts.skill_eval:main"
+agentihooks-pr-body = "scripts.pr_body:main"
 
 [build-system]
 requires = ["setuptools>=80", "setuptools-scm>=9.2"]
