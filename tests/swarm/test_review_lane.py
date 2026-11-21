@@ -59,7 +59,9 @@ def _scaled(config: SwarmConfig) -> tuple[SwarmConfig, dict]:
 def test_reviewer_names_round_trip_to_the_review_lane() -> None:
     name = naming.build("reviewer", "abcdef", 1)
     assert name == "reviewer@abcdef-0001"
-    assert naming.parse(name).lane == "review"
+    parsed = naming.parse(name)
+    assert parsed is not None
+    assert parsed.lane == "review"
     assert naming.lane_of(name) == "review"
 
 
