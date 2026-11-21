@@ -7,7 +7,6 @@ from pathlib import Path
 from types import ModuleType
 from typing import cast
 
-import fakeredis
 import pytest
 import yaml
 
@@ -172,6 +171,8 @@ def test_api_disabled_liveness_command_stays_live_while_redis_refuses_inside_the
 def test_api_disabled_liveness_command_fails_on_a_lapsed_lease_once_redis_answers(
     home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    import fakeredis
+
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("fixture", "agentihooks", 2, 0))
     monkeypatch.setattr("scripts.swarm.store.connect", lambda: store)
