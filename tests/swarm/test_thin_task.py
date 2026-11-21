@@ -12,9 +12,11 @@ pytestmark = pytest.mark.unit
 FULL = (
     "Add the thin task check module with one message per failed rule, held from engineer claims until a planner "
     "enhances it, and cover every rule and every exemption with a unit test that plants exactly one fault each. "
-    "The seam is the thin function. Done when the pull request is merged with CI green."
+    "Tests assert thin(task) returns each failed rule. Done when the pull request is merged with CI green."
 )
-NAMED_SEAMS = "`thin_task.thin(task)` and `thin_task.section_complete(text)`."
+NAMED_SEAMS = (
+    "Tests assert `thin_task.thin(task)` returns reasons and `thin_task.section_complete(text)` returns omissions."
+)
 SECTION = f"""### Thin task check
 
 ## What will be built
@@ -71,7 +73,7 @@ def test_a_full_task_is_not_thin() -> None:
 
 @pytest.mark.feature("swarm-thin-task-check")
 def test_a_description_under_forty_words_is_named_and_forty_pass() -> None:
-    forty = " ".join(["word"] * 35) + " seam done when it merges"
+    forty = " ".join(["word"] * 31) + " Tests assert thin(task) returns reasons. Done when it merges"
     assert len(forty.split()) == 40
     assert thin(task(description=forty)) == []
     shorter = " ".join(forty.split()[1:])
@@ -98,39 +100,38 @@ def test_a_task_without_a_territory_field_is_named() -> None:
 @pytest.mark.feature("swarm-thin-task-check")
 @pytest.mark.parametrize("kind", ["code", "ci"])
 def test_code_and_ci_work_without_a_named_seam_is_named(kind: str) -> None:
-    unnamed = FULL.replace("The seam is the thin function. ", "")
+    unnamed = FULL.replace("Tests assert thin(task) returns each failed rule. ", "")
     assert thin(task(kind=kind, description=unnamed)) == [f"Task a is {kind} work that names no seam."]
 
 
 def test_work_beyond_code_needs_no_seam() -> None:
-    unnamed = FULL.replace("The seam is the thin function. ", "")
+    unnamed = FULL.replace("Tests assert thin(task) returns each failed rule. ", "")
     assert thin(task(kind="ops", description=unnamed)) == []
 
 
 def test_a_task_without_a_kind_reads_as_code() -> None:
-    unnamed = FULL.replace("The seam is the thin function. ", "")
+    unnamed = FULL.replace("Tests assert thin(task) returns each failed rule. ", "")
     bare = {k: v for k, v in task(description=unnamed).items() if k != "kind"}
     assert thin(bare) == ["Task a is code work that names no seam."]
 
 
+@pytest.mark.feature("swarm-thin-task-check")
 @pytest.mark.parametrize(
     "named",
     [
-        "Seams are listed.",
-        "The seam is listed.",
-        "It changes `hold` only.",
-        "It changes `README.md` only.",
-        "It changes hold(task) only.",
-        "It changes claim_hold only.",
-        "It changes readiness.ready only.",
-        "It serves /api/tasks/one only.",
-        "It runs agentihooks swarm only.",
-        "It runs python -m pytest only.",
+        "Tests assert hold(task) returns a reason.",
+        "Tests observe claim_hold returns a reason.",
+        "Tests observe readiness.ready returns false.",
+        "Tests assert /api/tasks/one returns status 404.",
+        "Tests assert agentihooks swarm exits with status zero.",
+        "Tests assert python -m pytest exits with status zero.",
+        "Tests assert `README.md` contains the usage instructions.",
     ],
 )
 def test_each_seam_shape_names_a_seam(named: str) -> None:
-    unnamed = FULL.replace("The seam is the thin function.", named)
-    assert thin(task(description=unnamed)) == []
+    text = FULL.replace("Tests assert thin(task) returns each failed rule.", named)
+    assert thin(task(description=text)) == []
+    assert section_complete(SECTION.replace(NAMED_SEAMS, named)) == []
 
 
 @pytest.mark.parametrize(
@@ -144,8 +145,50 @@ def test_each_seam_shape_names_a_seam(named: str) -> None:
     ],
 )
 def test_plain_words_name_no_seam(unnamed: str) -> None:
-    text = FULL.replace("The seam is the thin function.", unnamed)
+    text = FULL.replace("Tests assert thin(task) returns each failed rule.", unnamed)
     assert thin(task(description=text)) == ["Task a is code work that names no seam."]
+
+
+@pytest.mark.feature("swarm-thin-task-check")
+@pytest.mark.parametrize(
+    "seam",
+    [
+        "Seams are listed.",
+        "The seam is listed.",
+        "It changes `hold` only.",
+        "It changes `some quoted prose` only.",
+        "It changes hold(task) only.",
+        "It changes `README.md` only.",
+        "Tests observe rejected tasks.",
+        "Tests assert `some quoted prose` returns reasons.",
+        "It changes hold(task). Tests observe rejected tasks.",
+        "- It changes hold(task).\n- Tests observe rejected tasks.",
+        "Tests assert hold(task).",
+        "Tests assert hold(task) returns.",
+    ],
+)
+@pytest.mark.parametrize("kind", ["code", "ci"])
+def test_a_thin_seam_needs_a_boundary_and_observation(seam: str, kind: str) -> None:
+    text = FULL.replace("Tests assert thin(task) returns each failed rule.", seam)
+    assert thin(task(kind=kind, description=text)) == [f"Task a is {kind} work that names no seam."]
+
+
+@pytest.mark.feature("swarm-thin-task-check")
+@pytest.mark.parametrize(
+    "seam",
+    [
+        "The seam is listed.",
+        "It changes `some quoted prose` only.",
+        "It changes hold(task) only.",
+        "Tests observe rejected tasks.",
+        "Tests assert `some quoted prose` returns reasons.",
+        "It changes hold(task). Tests observe rejected tasks.",
+        "- It changes hold(task).\n- Tests observe rejected tasks.",
+        "Tests assert hold(task) returns.",
+    ],
+)
+def test_a_section_seam_needs_a_boundary_and_observation(seam: str) -> None:
+    assert section_complete(SECTION.replace(NAMED_SEAMS, seam)) == ["The section names no seam."]
 
 
 def test_every_failed_rule_is_named_at_once() -> None:
