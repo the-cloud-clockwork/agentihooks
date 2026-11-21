@@ -3901,6 +3901,16 @@
       ]
     },
     {
+      "id": "claim-stop-keeps-merge-wait",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-claim-stop-keeps-merge-wait",
+      "behaviour": "A worker's stop keeps its live merge wait on its own queued pull request while any check is still pending, instead of replacing it with a checks wait the tick ends on green, so the stop passes while the pull request sits in the merge queue.",
+      "seam": "ClaimStop.decide in scripts.gates.claim_stop",
+      "tests": [
+        "tests/gates/test_claim_stop.py::test_a_stop_on_pending_checks_keeps_a_live_merge_wait_on_the_queued_pull_request"
+      ]
+    },
+    {
       "id": "reopen-moves-merged-pull-request-to-history",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t485",
