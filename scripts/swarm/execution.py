@@ -55,13 +55,6 @@ def occupants_of(doc: dict) -> dict[str, AgentRecord]:
     return {seat: _record(heads[seat]) for seat in sorted(heads)}
 
 
-def superseded(agent: AgentRecord, listed: Iterable[AgentRecord]) -> bool:
-    """Whether ``agent`` finished and a newer execution on its seat is listed beside it."""
-    return agent.state == "finished" and any(
-        other.seat == agent.seat and other.generation > agent.generation for other in listed
-    )
-
-
 def latest(rows: Iterable[dict], by: str) -> dict:
     found: dict = {}
     for row in rows:

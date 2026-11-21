@@ -14,11 +14,11 @@ from scripts.swarm import (
     affinity,
     capacity,
     effort_range,
-    execution,
     launch_check,
     master_lock,
     master_start,
     model_pick,
+    seat_heads,
     seat_spawn,
     take_master,
 )
@@ -234,7 +234,7 @@ def _new(store: RedisStore, slug: str, runtime: Any, at: int, forced: bool) -> L
 def _front_doors(store: RedisStore, slug: str, live: set[str]) -> list[AgentRecord]:
     listed = store.agents(slug)
     return [
-        a for a in listed if master_seats.is_lead(slug, a) and a.name in live and not execution.superseded(a, listed)
+        a for a in listed if master_seats.is_lead(slug, a) and a.name in live and not seat_heads.superseded(a, listed)
     ]
 
 

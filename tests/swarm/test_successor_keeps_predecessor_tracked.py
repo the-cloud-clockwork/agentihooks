@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from scripts.swarm import execution, master_launch, session_model, tick
+from scripts.swarm import master_launch, seat_heads, session_model, tick
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.tick.steps import agents
@@ -145,7 +145,7 @@ def test_only_a_finished_agent_with_a_newer_listed_execution_on_its_seat_is_supe
     finished, successor = _handed_off(store)
     listed = store.agents(SLUG)
 
-    assert [execution.superseded(agent, listed) for agent in (finished, successor)] == [True, False]
-    assert execution.superseded(finished, [finished]) is False
-    assert execution.superseded(replace(finished, state="working"), listed) is False
-    assert execution.superseded(replace(finished, seat=f"{MASTER}-2@{SLUG}"), listed) is False
+    assert [seat_heads.superseded(agent, listed) for agent in (finished, successor)] == [True, False]
+    assert seat_heads.superseded(finished, [finished]) is False
+    assert seat_heads.superseded(replace(finished, state="working"), listed) is False
+    assert seat_heads.superseded(replace(finished, seat=f"{MASTER}-2@{SLUG}"), listed) is False
