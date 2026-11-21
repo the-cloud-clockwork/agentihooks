@@ -9,7 +9,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-from scripts.swarm_ledger.repository.sqlite import WalSwitch
+from scripts.swarm_ledger.storage import WalSwitch
 
 from .models import RecallRecord
 

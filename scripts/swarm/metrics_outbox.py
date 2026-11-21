@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from scripts.swarm import timing
-from scripts.swarm_ledger.repository.sqlite import WalSwitch
+from scripts.swarm_ledger.storage import WalSwitch
 
 URL_ENV = "AGENTIHOOKS_METRICS_URL"
 USER_ENV = "AGENTIHOOKS_METRICS_USER"
