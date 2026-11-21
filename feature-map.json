@@ -1,6 +1,18 @@
 {
   "features": [
     {
+      "id": "swarm-focus-plan-work",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-plan-focus",
+      "behaviour": "Under an exclusive focus the claim gate admits a plan lane task whose phase holds open focused work or whose enhances target is admitted, while every other unfocused task, the plan task's own dependencies and a phaseless plan task stay held.",
+      "seam": "scripts.swarm.freeze.claim_gate through scripts.swarm.freeze.admitted",
+      "tests": [
+        "tests/swarm/test_freeze.py::test_a_plan_task_of_a_phase_holding_focused_work_passes_the_focus",
+        "tests/swarm/test_freeze.py::test_an_enhancement_task_passes_the_focus_when_its_target_is_admitted",
+        "tests/swarm/test_freeze.py::test_a_focus_still_holds_the_work_beside_the_plan_work_it_admits"
+      ]
+    },
+    {
       "id": "tick-waits-end-isolates-agent-failures",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-waits-end-per-agent-isolation",
