@@ -1,6 +1,25 @@
 {
   "features": [
     {
+      "id": "mutation-timeout-without-killer",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-mutant-timeout-retry-without-killer",
+      "behaviour": "A timed out mutant retries once with its selected unit tests minus its captured recorded killer. The replacement reports through the original mutant, and a repeated timeout stays incomplete.",
+      "seam": "scripts.ci_mutation.selection.run_selected and forked_children",
+      "tests": [
+        "tests/test_ci_mutation_timeout_retry.py::test_a_hanging_killer_gets_one_retry_and_a_complete_result",
+        "tests/test_ci_mutation_timeout_retry.py::test_only_a_timeout_with_a_killer_in_the_selection_retries",
+        "tests/test_ci_mutation_timeout_retry.py::test_a_second_timeout_stays_incomplete_without_another_retry",
+        "tests/test_ci_mutation_timeout_retry.py::test_the_retry_child_excludes_the_original_killer_after_a_sibling_overwrites_it",
+        "tests/test_ci_mutation_timeout_retry.py::test_the_retry_child_preserves_a_surviving_result",
+        "tests/test_ci_mutation_timeout_retry.py::test_an_interrupt_stops_the_replacement_child",
+        "tests/test_ci_mutation_timeout_retry.py::test_the_retry_uses_the_original_unit_before_removing_the_killer",
+        "tests/test_ci_mutation_timeout_retry.py::test_a_killer_in_another_unit_does_not_retry",
+        "tests/test_ci_mutation_timeout_retry.py::test_a_retry_collection_error_kills_the_mutant",
+        "tests/test_ci_mutation_timeout_retry.py::test_engine_cleanup_stops_the_replacement_and_other_original_children"
+      ]
+    },
+    {
       "id": "swarm-focus-plan-work",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-plan-focus",
