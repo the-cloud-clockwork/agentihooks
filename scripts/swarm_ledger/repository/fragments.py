@@ -8,6 +8,8 @@ import orjson
 
 from .rows import encode
 
+RECORD_MAPS = frozenset({"members", "api_operations"})
+
 
 @dataclass(frozen=True, slots=True)
 class Fragment:
@@ -111,11 +113,18 @@ def stamps(value: dict[Any, Any], previous: Fragment | None) -> Fragment:
     return Fragment(values, parts) if fresh else previous
 
 
+def record(key: str, value: object, previous: Fragment | None) -> Fragment:
+    """One record of a metadata map a write changes a record at a time, encoded alone so the write copies only it."""
+    return leaf(value, previous)
+
+
 def meta_part(key: str, value: object, previous: Fragment | None) -> Fragment:
     if key == "events" and isinstance(value, list):
         return sequence(value, previous)
     if key == "stamps" and isinstance(value, dict):
         return stamps(cast(dict[str, object], value), previous)
+    if key in RECORD_MAPS and isinstance(value, dict):
+        return mapping(cast(dict[str, object], value), previous, record)
     return leaf(value, previous)
 
 
