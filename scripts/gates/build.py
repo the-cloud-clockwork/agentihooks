@@ -55,8 +55,8 @@ def within(path: str, areas: list[str], repo: str) -> bool:
 
 
 def _forms(area: str, repo: str) -> tuple[str, ...]:
-    """The area as written, and the area inside repo when its first part names repo."""
-    return (area, area.removeprefix(f"{repo}/")) if repo else (area,)
+    """The area as written, and the area inside repo when it opens with repo and a slash or a colon."""
+    return (area, area.removeprefix(f"{repo}/"), _area(area.removeprefix(f"{repo}:"))) if repo else (area,)
 
 
 def git_root(path):
