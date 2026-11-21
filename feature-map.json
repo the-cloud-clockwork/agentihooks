@@ -1,26 +1,6 @@
 {
   "features": [
     {
-      "id": "read-only-roles-refuse-shell-writes",
-      "origin": "regression",
-      "ordered_at": "2026-11-21",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t-rv-readonly-shell-guard",
-      "behaviour": "A qa or reviewer session refuses a shell command that redirects output or tees into a file, runs a file write command or an in place edit on a path, or runs a git subcommand outside the read set or gh pr checkout, outside its scratchpad and its own swarm task folder, also when the command hides inside a shell -c script, eval, find -exec, xargs or a script fed to a shell on its input; shell reads, writes to /dev/null and writes into its own folders still pass, and only the qa and reviewer roles carry the shell guard.",
-      "seam": "profiles.package.roles._guards.no_code_edits.deny_reason for Bash payloads, run by the qa and reviewer pre-bash-no_shell_writes condition shims",
-      "tests": [
-        "tests/profiles/test_read_only_shell.py::test_a_read_only_seat_refuses_a_shell_redirect_into_the_repository",
-        "tests/profiles/test_read_only_shell.py::test_a_read_only_seat_refuses_a_git_commit",
-        "tests/profiles/test_read_only_shell.py::test_a_read_only_seat_keeps_shell_reads",
-        "tests/profiles/test_read_only_shell.py::test_a_read_only_seat_writes_its_scratchpad_and_task_folder",
-        "tests/profiles/test_read_only_shell.py::test_only_the_read_only_roles_carry_the_shell_guard",
-        "tests/profiles/test_read_only_shell.py::test_a_reviewer_refuses_each_shell_file_write",
-        "tests/profiles/test_read_only_shell.py::test_a_reviewer_refuses_git_writes_and_hidden_writes",
-        "tests/profiles/test_read_only_shell.py::test_a_reviewer_keeps_reads_and_writes_inside_its_own_folders",
-        "tests/profiles/test_read_only_shell.py::test_a_reviewer_appends_to_its_task_folder_with_a_heredoc",
-        "tests/profiles/test_read_only_shell.py::test_edit_tool_payloads_keep_the_edit_path"
-      ]
-    },
-    {
       "id": "tick-waits-end-isolates-agent-failures",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-waits-end-per-agent-isolation",
@@ -8953,6 +8933,28 @@
       "seam": "tests/test_skill_frontmatter.py ROLES against the package roles folder and test_tick_pattern_rule_folds_into_every_role_persona",
       "tests": [
         "tests/test_skill_frontmatter.py::test_role_list_covers_every_package_role_folder"
+      ]
+    },
+    {
+      "id": "read-only-roles-refuse-shell-writes",
+      "origin": "regression",
+      "ordered_at": "2026-11-21",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-rv-readonly-shell-guard",
+      "behaviour": "A qa or reviewer session refuses a shell command that redirects output or tees into a file, or runs a file write command or an in place edit on a path, outside its scratchpad and its own swarm task folder; it also refuses git subcommands outside the read set, git -c and --output, gh pr checkout and gh repo clone anywhere, commands named by a variable, and writes hidden in a shell -c script, eval, command substitution, find -exec, find -delete, xargs or a script fed to a shell on its input; shell reads, writes to /dev/null and writes into its own folders still pass, and only the qa and reviewer roles carry the shell guard.",
+      "seam": "hooks.context.read_only_shell.write_reason, called by profiles.package.roles._guards.no_code_edits.deny_reason for Bash payloads, run by the qa and reviewer pre-bash-no_shell_writes condition shims",
+      "tests": [
+        "tests/profiles/test_read_only_shell.py::test_a_read_only_seat_refuses_a_shell_redirect_into_the_repository",
+        "tests/profiles/test_read_only_shell.py::test_a_read_only_seat_refuses_a_git_commit",
+        "tests/profiles/test_read_only_shell.py::test_a_read_only_seat_keeps_shell_reads",
+        "tests/profiles/test_read_only_shell.py::test_a_read_only_seat_writes_its_scratchpad_and_task_folder",
+        "tests/profiles/test_read_only_shell.py::test_only_the_read_only_roles_carry_the_shell_guard",
+        "tests/profiles/test_read_only_shell.py::test_a_reviewer_refuses_each_shell_file_write",
+        "tests/profiles/test_read_only_shell.py::test_a_reviewer_refuses_git_writes_and_hidden_writes",
+        "tests/profiles/test_read_only_shell.py::test_a_reviewer_keeps_reads_and_writes_inside_its_own_folders",
+        "tests/profiles/test_read_only_shell.py::test_a_placeholder_never_counts_as_a_seat_folder",
+        "tests/profiles/test_read_only_shell.py::test_a_bare_cd_moves_to_the_home_folder",
+        "tests/profiles/test_read_only_shell.py::test_a_reviewer_appends_to_its_task_folder_with_a_heredoc",
+        "tests/profiles/test_read_only_shell.py::test_edit_tool_payloads_keep_the_edit_path"
       ]
     },
     {
