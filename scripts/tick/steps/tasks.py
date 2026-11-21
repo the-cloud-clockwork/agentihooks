@@ -5,6 +5,7 @@ from functools import partial
 from typing import Any, Unpack, cast
 
 from scripts.swarm import (
+    autoscaler_watch,
     dev_red,
     dispatcher,
     fleet_red,
@@ -567,14 +568,15 @@ for _step in STEPS:
 
 def _autoscaler_alert(tick: Any, get: Callable[[str], Any]) -> list[str]:
     """Return the actions of the autoscaler alert step, given the tick module and a reader of the pass state."""
-    return []
+    keys = ("slug", "store", "ledger", "doc")
+    return tick.skip_refused(autoscaler_watch.alert_pass, *map(get, keys))
 
 
 registry.register(
     CallStep(
         "autoscaler alert",
         "reopen passes",
-        _autoscaler_alert,
+        held(_autoscaler_alert),
         needs=RESUMED,
         reads=DOC,
         writes=frozenset(),
