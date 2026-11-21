@@ -12217,6 +12217,34 @@
         "tests/test_package_recon_rule.py::test_master_and_planner_hold_task_specs_and_merges_to_the_recon",
         "tests/test_package_recon_rule.py::test_role_skills_run_the_recon_before_the_first_edit"
       ]
+    },
+    {
+      "id": "swarm-review-lane",
+      "origin": "regression",
+      "ordered_at": "2026-11-21",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-rv-lane-core",
+      "behaviour": "The swarm has a review lane worked by reviewer agents: reviewer names parse to the review lane and review seats are numbered like worker seats; every template carries a review lane with cap 1, the reviewer profile and the review kind; the swarm config stores a review cap that defaults to none for existing swarms, capacity reads it and autoscale leaves it as configured; the ledger stores a review lane task only with the review kind and the review kind only on the review lane; the tick lists an open review task as claimable and a drained swarm resumes for one, while the existing lanes keep their caps and listings.",
+      "seam": "naming types, swarm templates, the swarm config review cap, capacity lanes and caps, the tick lane list, and ledger task add lane validation and choices",
+      "tests": [
+        "tests/swarm/test_review_lane.py::test_reviewer_names_round_trip_to_the_review_lane",
+        "tests/swarm/test_review_lane.py::test_review_seats_are_numbered_like_worker_seats",
+        "tests/swarm/test_review_lane.py::test_a_template_carries_the_review_lane_with_its_cap_profile_and_kind",
+        "tests/swarm/test_review_lane.py::test_a_template_from_a_swarm_config_keeps_each_worker_cap",
+        "tests/swarm/test_review_lane.py::test_a_template_from_a_swarm_config_carries_the_review_cap",
+        "tests/swarm/test_review_lane.py::test_existing_swarm_configs_have_no_review_seat",
+        "tests/swarm/test_review_lane.py::test_a_stored_swarm_config_keeps_its_review_cap",
+        "tests/swarm/test_review_lane.py::test_capacity_reads_each_worker_lane_cap_from_its_config_field",
+        "tests/swarm/test_review_lane.py::test_capacity_reads_the_review_cap_from_the_swarm_config",
+        "tests/swarm/test_review_lane.py::test_autoscale_sizes_only_the_engineering_ci_and_plan_lanes",
+        "tests/swarm/test_review_lane.py::test_autoscale_keeps_the_configured_review_cap",
+        "tests/swarm/test_review_lane.py::test_ready_work_lists_each_task_only_on_its_own_lane",
+        "tests/swarm/test_review_lane.py::test_ready_work_lists_an_open_review_task_on_the_review_lane",
+        "tests/swarm/test_review_lane.py::test_a_drained_swarm_runs_again_for_a_new_review_task",
+        "tests/swarm/test_review_lane.py::test_the_ledger_refuses_a_lane_outside_the_swarm_lanes",
+        "tests/swarm/test_review_lane.py::test_the_ledger_stores_a_review_lane_review_task",
+        "tests/swarm/test_review_lane.py::test_the_review_lane_accepts_only_review_tasks",
+        "tests/swarm/test_review_lane.py::test_the_task_command_takes_the_review_lane"
+      ]
     }
   ],
   "unmapped_rules": [
