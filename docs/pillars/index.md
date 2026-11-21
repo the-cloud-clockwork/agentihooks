@@ -44,6 +44,8 @@ See [Doctor measurement task readiness](swarm.md#doctor-measurement-task-readine
 
 See [worker execution lease through a controller rollout](swarm.md#worker-execution-lease-through-a-controller-rollout) for the lease and grant timing that keeps an Anton worker alive through a release, and why a worker exits 70.
 
+See [controller replicas through a Redis outage](swarm.md#controller-replicas-through-a-redis-outage) for how a standby stands by through the outage while the leader fences itself and exits 75, the Redis grace window at container start, its configuration, log lines and troubleshooting.
+
 See [one push per pull request](swarm.md#one-push-per-pull-request) for when a worker may open a pull request, when a push is refused while checks run, gate modes and troubleshooting.
 
 See [plan tracing for promotion fixer tasks](swarm.md#plan-tracing-for-promotion-fixer-tasks) for usage, gate modes and the limits on run numbers in ledger prose, and [plan refusals in the gate log](swarm.md#plan-refusals-in-the-gate-log) for the row each refused plan writes and how Doctor rates counts it.
