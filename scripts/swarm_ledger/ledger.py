@@ -958,7 +958,7 @@ def cmd_url(args):
     print(ledger_link.page_line(args.slug))
 
 
-def build_parser():
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--slug")
     parser.add_argument("--as", dest="name")
@@ -1121,7 +1121,10 @@ def build_parser():
         "--not-duplicate", default="", help="why the task differs from the one it resembles; skips the duplicate check"
     )
     task.add_argument(
-        "--covers-job", default="", help="the failed dev job this task fixes; the promotion watch files no task for it"
+        "--covers-job",
+        default="",
+        help="the failed dev job or unit test this task fixes, exactly as the promotion alert names it; "
+        "the promotion watch files no task for it while this task is open",
     )
     task.add_argument("--quote", help="task set rank=...: the operator's words, so the rank stays his")
     publish = sub.add_parser("publish-plan")

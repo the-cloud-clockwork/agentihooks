@@ -977,6 +977,18 @@ def test_a_task_covering_one_job_still_lets_the_other_failed_jobs_file(store: Re
     assert filed(store) == {"promo-900-1": "unit (3.11, 1): "}
 
 
+@pytest.mark.feature("promotion-covering-task-holds-cause")
+def test_a_task_in_a_former_owner_ledger_that_covers_the_failed_job_holds_its_cause(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    former = covering("claimed")
+    ledger: Any = Ledger()
+    ledger.state = lambda slug: former.doc()
+    monkeypatch.setattr(promotion_watch.promotion_owner, "history", lambda repo, redis: {SLUG, "former"})
+    assert refresh(store, ledger, smoke_run("Build the image", ["layer failed"])) == []
+    assert ledger.added == [] and ledger.raised == []
+
+
 def test_a_long_cause_is_cut_so_the_alert_fits_the_ledger_and_keeps_the_run_link(store):
     ledger = Ledger()
     refresh(store, ledger, smoke_run("Build the image", ["x" * 5000]))

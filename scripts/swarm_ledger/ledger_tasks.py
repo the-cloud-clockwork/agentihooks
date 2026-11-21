@@ -56,12 +56,12 @@ UPDATABLE = (
     "workstation",
     "requires_harness",
     "needs",
+    "covers_job",
     "doc_items",
     "watchdog",
     "recovery",
     "review_rounds",
     "review_readers",
-    "covers_job",
 )
 BOOL_FIELDS = ("artifact", "follow_up", "workstation")
 HARNESSES = ("", "claude", "codex")
@@ -138,7 +138,7 @@ def check_lane(task: dict) -> None:
         raise ValueError("plan tasks must use the plan lane, and the plan lane accepts only plan tasks")
 
 
-def check(op):
+def check(op: dict[str, Any]) -> None:
     by = op.get("by")
     if not isinstance(by, str) or not AUTHOR_RE.match(by) or by == "operator":
         raise ValueError("task ops need `by`, an agent name other than operator")
@@ -431,7 +431,7 @@ def check_task(task):
         raise ValueError(f"tasks/{task.get('id')} is done without its proof: {', '.join(ledger_kinds.unmet(task))}")
 
 
-def _add(doc, op, ctx):
+def _add(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
     op = ledger_plans.with_slice(doc, ledger_plans.with_plan_slice(doc, op))
     tasks = doc.setdefault("tasks", [])
     if taken := next((t for t in tasks if t["id"] == op["task"]), None):

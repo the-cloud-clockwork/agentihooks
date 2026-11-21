@@ -25,7 +25,7 @@ def test_covers_job_must_be_a_string() -> None:
     update = {"op": "task_update", "id": "u", "by": "eng", "item": "tasks/c", "fields": {"covers_job": ["lint"]}}
     with pytest.raises(ValueError, match="^covers_job must be a string"):
         ledger_tasks.check({**task, "covers_job": ["lint"]})
-    with pytest.raises(ValueError, match="covers_job"):
+    with pytest.raises(ValueError, match="^task_update may set only .*, as strings"):
         ledger_tasks.check(update)
 
 
