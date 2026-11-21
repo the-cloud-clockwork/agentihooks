@@ -128,7 +128,8 @@ def refreshed(connection: Connection, slug: str, state: dict, paths: set) -> dic
 
 def stored_rows(connection: Connection, slug: str, paths: set[str]) -> dict[str, tuple]:
     """The position, kind and value stored at each of paths that is stored, read in one query per CHUNK paths."""
-    listed, found = list(paths), {}
+    listed = list(paths)
+    found: dict[str, tuple] = {}
     for start in range(0, len(listed), CHUNK):
         chunk = listed[start : start + CHUNK]
         marks = ",".join("?" * len(chunk))
