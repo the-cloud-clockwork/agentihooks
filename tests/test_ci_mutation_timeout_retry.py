@@ -9,10 +9,10 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from mutmut.mutation.data import SourceFileMutationData
 
 from scripts.ci_mutation import selection
 from scripts.ci_mutation.report import evaluate
+from scripts.ci_mutation.timeouts import SourceFileMutationData
 
 
 class ChildExit(BaseException):
