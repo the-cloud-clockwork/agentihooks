@@ -1038,6 +1038,9 @@ def cmd_start(store: RedisStore, args: argparse.Namespace) -> None:
     print(shape["summary"], flush=True)
     if shape["warning"]:
         print(f"warning: {shape['warning']}", file=sys.stderr, flush=True)
+    from scripts.swarm import capacity
+
+    store.update(args.slug, **capacity.restored_plan(store.config(args.slug)))
     _state(store, args, "running")
     seat_crons.on_start(store, args.slug)
     print(ledger_link.page_line(args.slug))
@@ -1378,7 +1381,7 @@ def _manual_count_step(counts):
     return {"masters_step": 0} if counts else {}
 
 
-def cmd_set(store, args):
+def cmd_set(store: RedisStore, args: argparse.Namespace) -> None:
     changes, lanes = {}, {key: dict(value) for key, value in store.config(args.slug).lanes.items()}
     counts, pairs = _split_master_pairs(args.pairs, "masters", masters.count_of)
     changes.update(_manual_count_step(counts))
@@ -1424,8 +1427,11 @@ def cmd_set(store, args):
                 f"or {', '.join(LANE_KEYS)}=<value>, engine=events, tick-mode=sequential|parallel"
             )
         changes[SETTABLE[key]] = int(value)
+    from scripts.swarm import capacity
+
     changes = _engine_origin(store.config(args.slug), changes)
-    config = store.update(args.slug, **{**changes, **_pinned(changes)})
+    restored = capacity.restored_plan(store.config(args.slug), changes)
+    config = store.update(args.slug, **{**changes, **_pinned(changes), **restored})
     _store_master_counts(store, args.slug, counts, hives)
     _store_master_rules(store, args.slug, rules)
     asked = any(pair.startswith("master-agent=") for pair in args.pairs)
