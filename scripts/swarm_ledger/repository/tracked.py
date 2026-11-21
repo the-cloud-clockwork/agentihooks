@@ -1,6 +1,7 @@
 import copy
 import json
 from collections.abc import Callable
+from functools import partial
 from typing import TYPE_CHECKING, Any, cast
 
 from .rows import encode
@@ -36,12 +37,18 @@ DICTS = frozenset({dict, TrackedDict})
 TRACKED = frozenset({TrackedDict, TrackedList})
 
 
-def marking(method: Callable[..., Any]) -> Callable[..., Any]:
-    def written(self: Tracked, *args: Any, **kwargs: Any) -> Any:
-        self.mark.fragment = None
-        return method(self, *args, **kwargs)
+class Writing:
+    __slots__ = ("method",)
 
-    return written
+    def __init__(self, method: Callable[..., Any]) -> None:
+        self.method = method
+
+    def __get__(self, instance: Tracked, owner: object) -> Callable[..., Any]:
+        return partial(self.write, instance)
+
+    def write(self, instance: Tracked, *args: Any, **kwargs: Any) -> Any:
+        instance.mark.fragment = None
+        return self.method(instance, *args, **kwargs)
 
 
 def setdefault(self: TrackedDict, key: str, default: Any = None) -> Any:
@@ -62,18 +69,12 @@ def shallow(self: Tracked) -> object:
 
 def deep(self: Tracked, memo: dict[int, Any]) -> object:
     if isinstance(self, dict):
-        mapping: dict[str, Any] = {}
-        memo[id(self)] = mapping
-        mapping.update((copy.deepcopy(key, memo), copy.deepcopy(item, memo)) for key, item in self.items())
-        return mapping
-    items: list[Any] = []
-    memo[id(self)] = items
-    items.extend(copy.deepcopy(item, memo) for item in self)
-    return items
+        return {key: copy.deepcopy(item, memo) for key, item in self.items()}
+    return [copy.deepcopy(item, memo) for item in self]
 
 
 for _name in ("__init__", "__setitem__", "__delitem__", "__ior__", "clear", "popitem", "update"):
-    setattr(TrackedDict, _name, marking(getattr(dict, _name)))
+    setattr(TrackedDict, _name, Writing(getattr(dict, _name)))
 for _name in (
     "__init__",
     "__setitem__",
@@ -89,7 +90,7 @@ for _name in (
     "sort",
     "reverse",
 ):
-    setattr(TrackedList, _name, marking(getattr(list, _name)))
+    setattr(TrackedList, _name, Writing(getattr(list, _name)))
 for _kind in (TrackedDict, TrackedList):
     setattr(_kind, "__copy__", shallow)
     setattr(_kind, "__deepcopy__", deep)
