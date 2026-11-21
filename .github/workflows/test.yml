@@ -4835,7 +4835,7 @@ jobs:
 
       - name: Take the helper scripts from the workflow revision
         run: |
-          git fetch --no-tags origin "$GITHUB_SHA"
+          git fetch --no-tags --negotiation-tip=HEAD origin "$GITHUB_SHA"
           mkdir -p "$RUNNER_TEMP/workflow"
           git archive "$GITHUB_SHA" .github/scripts .github/test-requirements.lock | tar -x -C "$RUNNER_TEMP/workflow"
 
