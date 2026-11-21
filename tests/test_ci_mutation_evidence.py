@@ -61,6 +61,7 @@ def _inputs(tmp_path: Path, nested: bool = True) -> tuple[Path, Path, Path, list
             _write(work / "mutants" / name / "discard", "disposable\n")
         _write(work / "compiled.pyc", "disposable\n")
     _write(source / "report.json", "aggregate diagnostics\n")
+    _write(source / "pyproject.toml", "aggregate configuration\n")
     return root, source, tmp_path / "evidence", sorted(workspaces)
 
 

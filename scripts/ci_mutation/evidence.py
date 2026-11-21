@@ -38,11 +38,11 @@ def stage(root: Path, source: Path, destination: Path) -> None:
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("root", type=Path)
-    parser.add_argument("source", type=Path)
-    parser.add_argument("destination", type=Path)
+    parser.add_argument("root")
+    parser.add_argument("source")
+    parser.add_argument("destination")
     args = parser.parse_args(argv)
-    stage(args.root, args.source, args.destination)
+    stage(Path(args.root), Path(args.source), Path(args.destination))
 
 
 if __name__ == "__main__":
