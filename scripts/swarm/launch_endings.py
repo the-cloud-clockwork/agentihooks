@@ -1,8 +1,10 @@
 import json
-
-from redis import Redis
+from typing import TYPE_CHECKING
 
 from scripts.swarm.store import RedisStore
+
+if TYPE_CHECKING:
+    from redis import Redis
 
 ENDINGS = "launch-endings"
 RECORD_REFUSAL = """
@@ -13,7 +15,7 @@ return redis.call('HSET', KEYS[1], ARGV[1], cjson.encode(ending))
 """
 
 
-def _client(store: RedisStore) -> Redis:
+def _client(store: RedisStore) -> "Redis":
     return store.redis  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
 
 
