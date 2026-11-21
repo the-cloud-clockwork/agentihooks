@@ -34,6 +34,7 @@ def _bash(command: str, cwd: str = "") -> dict[str, object]:
         "gh pr review 12 -ab ok",
         "gh pr review 12 --approve=true",
         "gh pr -R owner/repo review 12 --approve",
+        "gh -R owner/repo pr review 12 --approve",
         "/usr/bin/gh pr review 12 --approve",
         "env GH_PROMPT_DISABLED=1 gh pr review 12 --approve",
         "bash -c 'gh pr review 12 --approve'",
@@ -63,11 +64,18 @@ def test_a_rest_review_with_an_approve_event_is_refused(command: str) -> None:
 
 
 @pytest.mark.feature("agent-sessions-cannot-approve-pull-requests")
-@pytest.mark.parametrize("option", ["--input review.json", "--input=review.json"])
-def test_a_rest_review_whose_input_file_approves_is_refused(tmp_path: Path, option: str) -> None:
+@pytest.mark.parametrize(
+    "command",
+    [
+        "gh api repos/o/r/pulls/12/reviews --input review.json",
+        "gh api repos/o/r/pulls/12/reviews --input=review.json",
+        "curl -X POST https://api.github.com/repos/o/r/pulls/12/reviews -d @review.json",
+    ],
+)
+def test_a_rest_review_whose_input_file_approves_is_refused(tmp_path: Path, command: str) -> None:
     (tmp_path / "review.json").write_text('{"event": "APPROVE", "body": "ok"}')
     with pytest.raises(BlockAction, match=REFUSED):
-        hook_manager._check_shell_guards(_bash(f"gh api repos/o/r/pulls/12/reviews {option}", str(tmp_path)))
+        hook_manager._check_shell_guards(_bash(command, str(tmp_path)))
 
 
 @pytest.mark.feature("agent-sessions-cannot-approve-pull-requests")
@@ -134,11 +142,17 @@ def test_a_github_mcp_review_with_an_approve_event_is_refused(tool_name: str, to
         " -f event=APPROVE",
         "git commit -m 'Refuse gh pr review --approve and addPullRequestReview with event: APPROVE'",
         "gh pr create --base dev --title 'Refuse approvals' --body 'gh api repos/o/r/pulls/1/reviews -f event=APPROVE'",
-        "gh pr review 12 --approve 'unterminated",
     ],
 )
 def test_comments_change_requests_and_mentions_pass(command: str) -> None:
     hook_manager._check_shell_guards(_bash(command))
+
+
+@pytest.mark.feature("agent-sessions-cannot-approve-pull-requests")
+def test_an_unparseable_command_approves_nothing() -> None:
+    from hooks.context.approval_guard import refusal
+
+    assert refusal(_bash("gh pr review 12 --approve 'unterminated")) is None
 
 
 @pytest.mark.feature("agent-sessions-cannot-approve-pull-requests")
