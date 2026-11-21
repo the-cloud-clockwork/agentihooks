@@ -131,17 +131,19 @@ def _admit(doc: dict[str, Any], graph: dict[str, Any]) -> frozenset[str] | None:
     seen: set[str] = set()
     for task_id in queue:
         _reach(task_id, rows, cold, waits_on, seen)
-    seen |= _planning(tasks, {rows[task_id].get("phase") for task_id in queue} - {None}, seen)
+    seen |= _planning(tasks, {rows[task_id].get("phase") for task_id in queue} - {None}, seen, cold)
     return frozenset(seen) if seen else None
 
 
-def _planning(tasks: list[dict[str, Any]], phases: set[Any], seen: set[str]) -> set[str]:
-    """The plan lane tasks focused work waits on: a phase's planning while it holds open focused work, and the
-    enhancement of an admitted task."""
+def _planning(tasks: list[dict[str, Any]], phases: set[Any], seen: set[str], cold: set[str]) -> set[str]:
+    """The plan lane tasks focused work waits on, short of frozen work: a phase's planning while it holds open
+    focused work, and the enhancement of an admitted task."""
     return {
         task["id"]
         for task in tasks
-        if task.get("lane") == "plan" and (task.get("phase") in phases or task.get("enhances") in seen)
+        if task.get("lane") == "plan"
+        and task["id"] not in cold
+        and (task.get("phase") in phases or task.get("enhances") in seen)
     }
 
 
