@@ -413,6 +413,7 @@ def test_automatic_lanes_preserve_seats_required_by_fixed_lanes():
         "eng": {"claude": 0, "codex": 2},
         "ci": {"claude": 2, "codex": 0},
         "plan": {"claude": 0, "codex": 0},
+        "review": {"claude": 0, "codex": 0},
     }
 
 
@@ -776,6 +777,7 @@ def test_runtime_capacity_uses_the_current_environment_and_saves_the_allocation(
         "eng": {"claude": 1, "codex": 0},
         "ci": {"claude": 0, "codex": 0},
         "plan": {"claude": 0, "codex": 0},
+        "review": {"claude": 0, "codex": 0},
     }
     assert rt.has_capacity(config)
     rt._quota_accounts = [account(cap=0)]
@@ -1591,8 +1593,8 @@ def test_allocation_skips_a_harness_whose_only_room_is_on_accounts_the_handoff_c
     seats = [session_bands.Seat("claude", "a", 1, 0), session_bands.Seat("codex", "x", 5, 0)]
     allocation, placements = capacity._allocate(
         None,
-        {"eng": 0, "ci": 0, "plan": 0},
-        {"eng": 1, "ci": 1, "plan": 0},
+        {"eng": 0, "ci": 0, "plan": 0, "review": 0},
+        {"eng": 1, "ci": 1, "plan": 0, "review": 0},
         seats,
         {"eng": [("claude", "codex")], "ci": [("claude",)], "plan": []},
         {"eng": {0: {("claude", "a")}}},
