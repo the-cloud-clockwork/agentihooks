@@ -1,6 +1,22 @@
 {
   "features": [
     {
+      "id": "mutation-stats-failure-upload-set",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-mutation-stats-failure-upload-trim",
+      "behaviour": "Failed mutation statistics uploads retain one source workspace copy and every part diagnostic, excluding repeated source copies and disposable caches without changing producer workspaces or successful statistics and shard uploads.",
+      "seam": "scripts.ci_mutation.evidence.stage and main with both statistics failure uploads",
+      "tests": [
+        "tests/test_ci_mutation_evidence.py::test_failed_statistics_upload_contains_one_trimmed_workspace",
+        "tests/test_ci_mutation_evidence.py::test_staging_preserves_every_parts_diagnostics_and_the_producer_workspace",
+        "tests/test_ci_mutation_evidence.py::test_failure_before_workspace_setup_keeps_available_diagnostics",
+        "tests/test_ci_mutation_evidence.py::test_failure_before_output_exists_does_not_create_evidence",
+        "tests/test_ci_mutation_evidence.py::test_command_line_uses_the_statistics_failure_upload_selection",
+        "tests/test_ci_mutation_evidence.py::test_both_statistics_failure_uploads_use_the_trimmed_evidence_set",
+        "tests/test_ci_mutation_evidence.py::test_successful_statistics_and_shard_evidence_keep_their_existing_upload_sets"
+      ]
+    },
+    {
       "id": "mutation-timeout-without-killer",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-mutant-timeout-retry-without-killer",
