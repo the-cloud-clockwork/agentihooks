@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/queue.py:scripts.ci_lab.queue.x\u01c1Queue\u01c1restore_manifests:620a39f90a63afcaf801e684dc1844ca80afeb7844eb689859cb7a69b34e4631": {
+    "reader": "standards-reader",
+    "reason": "Functionally equivalent for the verified startup restoration contract: the deployed scheduler has one replica with Recreate strategy, and restoration precedes HTTP serving and ticking. The batch contains only HMGET reads; MULTI/EXEC groups those same reads without changing restored records while queue state is stable. This ruling excludes overlapping queue writers or a changed driver or ACL contract. It does not assert identical wire commands, operation metrics or startup cost."
+  }
+}
