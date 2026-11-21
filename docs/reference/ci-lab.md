@@ -4378,8 +4378,8 @@ Limitations:
 marker holds the digest. The executors pass the sha256 of the head's tracked
 `.github/test-requirements.lock` (`venvs.LOCKFILE`), the file the image hashes into that marker;
 `uv.lock` is not tracked and is never read. Otherwise it builds `root/<digest>` once (`root` is
-`Pod.venvs`, `/work/venvs` on the worker Deployment), under a lock per digest, by running uv in a `Sandbox` from `build` (`venvs.Build`: ports, whitelist and time
-limit). The executors pass `Pod.build`, the pod's ports, whitelist and unit time limit.
+`Pod.venvs`, `/work/venvs` on the worker Deployment), under a lock per digest, by running uv
+in a `Sandbox` from `build` (`venvs.Build`: ports, whitelist and time limit). The executors pass `Pod.build`, the pod's ports, whitelist and unit time limit.
 
 | Part | Value |
 |---|---|
@@ -4433,11 +4433,13 @@ workflow and publishes the `dev` tag, which the chart's `worker.image.tag` names
 A head whose lock matches the commit the image was built from therefore runs on the baked venv,
 and any other lock costs one build per pod.
 
-A change to `.github/test-requirements.lock` changes every key of the head's units. The worker
-computes a new digest and builds a new venv on each pod that leases one of them. The scheduler
-keys the `toolchain.lockfile` input of static, test and mutant units on the git blob id of the
-same file in `MirrorExpander.expand`, and the `runtime` of stats units on the sha256 of its bytes
-through `stats_cache.runtime_digest`, so no verdict stored under the old lock answers them. A head
+A change to `.github/test-requirements.lock` gives the head's units a new venv: the worker
+computes a new digest and builds that venv on each pod that leases one of them. It also rekeys
+the head's static, test and stats units. The scheduler keys the `toolchain.lockfile` input of
+static and test units on the git blob id of the same file in `MirrorExpander.expand`, and the
+`runtime` of stats units on the sha256 of its bytes through `stats_cache.runtime_digest`, so no
+verdict stored under the old lock answers them. Mutant unit keys, built in
+`expand_mutation`, take neither input. A head
 without the lock is still expanded, with an empty `lockfile` input and a null stats `runtime`, and
 its units then crash on the worker as the last row above shows.
 
