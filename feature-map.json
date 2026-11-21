@@ -6001,6 +6001,19 @@
       ]
     },
     {
+      "id": "build-gate-dev-merge-content",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-build-gate-skip-dev-merge-files",
+      "behaviour": "During an unfinished merge whose merge head origin/dev already holds, the build gate judges a git commit only on the files whose staged content, or working tree content for git commit -a, differs from that merge head, so a restack merge that brings only dev content passes while an edit outside the traced plan inside the merge is still refused and a merge of a commit dev does not hold is judged whole.",
+      "seam": "scripts.gates.build._git_names through BuildGate.decide on a Bash git commit",
+      "tests": [
+        "tests/gates/test_build.py::TestDevMerge::test_a_dev_merge_commit_passes_when_only_dev_content_lies_outside_the_plan",
+        "tests/gates/test_build.py::TestDevMerge::test_an_off_plan_edit_staged_inside_a_dev_merge_is_refused_alone",
+        "tests/gates/test_build.py::TestDevMerge::test_an_unstaged_off_plan_edit_inside_a_dev_merge_counts_only_for_commit_all",
+        "tests/gates/test_build.py::TestDevMerge::test_a_merge_of_a_commit_dev_does_not_hold_is_judged_whole"
+      ]
+    },
+    {
       "id": "swarm-tick-live-rows",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-live-rows-only",
