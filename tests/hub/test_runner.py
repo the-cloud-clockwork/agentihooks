@@ -583,6 +583,7 @@ def test_a_redis_refusal_of_the_idle_wait_past_the_grace_window_still_ends_the_h
     assert slept == []
 
 
+@pytest.mark.feature("hub-idle-wait-rides-out-redis-outage")
 def test_an_answered_idle_wait_ends_the_redis_outage_so_a_later_refusal_opens_a_new_window(monkeypatch):
     now = [0.0]
     moments = iter([0.0, 8.0, 16.0])
