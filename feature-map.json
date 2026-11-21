@@ -11970,6 +11970,21 @@
       "tests": [
         "tests/swarm/test_publish.py::test_prepare_cuts_fresh_dev_when_the_recorded_branch_was_never_pushed"
       ]
+    },
+    {
+      "id": "ci-readers-collected-stage-budget",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2613",
+      "behaviour": "CI stage metrics and the ci overrun finding resolve each stage budget through the same collected lookup as CI gates, falling back to the stored budget when the collected step is skipped or absent. Unknown metric stages record zero and unknown evidence stages are omitted.",
+      "seam": "metrics_ci.rows, ci_budget.defects.defect and ci_budget.defects._stage_evidence over ci_budget.budget",
+      "rules": [
+        "ci-stage-budget-direct-table-read"
+      ],
+      "tests": [
+        "tests/swarm/test_metrics_ci.py::test_stage_metrics_resolve_the_collected_budget_and_stored_fallback",
+        "tests/test_ci_budget_defects.py::test_overrun_description_resolves_the_collected_budget_and_stored_fallback",
+        "tests/test_ci_budget_defects.py::test_overrun_evidence_resolves_the_collected_budget_and_stored_fallback"
+      ]
     }
   ],
   "unmapped_rules": [
@@ -12074,18 +12089,6 @@
       "id": "swarm-tick-spawn",
       "reason": "The legacy tick launch engine is removed; every swarm launches through hub events only, covered by swarm-events-only-launch.",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-legacy-events-only"
-    },
-    {
-      "id": "ci-readers-collected-stage-budget",
-      "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t2613",
-      "behaviour": "CI stage metrics and the ci overrun finding resolve each stage budget through the same collected lookup as CI gates, falling back to the stored budget when the collected step is skipped or absent. Unknown metric stages record zero and unknown evidence stages are omitted.",
-      "seam": "metrics_ci.rows, ci_budget.defects.defect and ci_budget.defects._stage_evidence over ci_budget.budget",
-      "tests": [
-        "tests/swarm/test_metrics_ci.py::test_stage_metrics_resolve_the_collected_budget_and_stored_fallback",
-        "tests/test_ci_budget_defects.py::test_overrun_description_resolves_the_collected_budget_and_stored_fallback",
-        "tests/test_ci_budget_defects.py::test_overrun_evidence_resolves_the_collected_budget_and_stored_fallback"
-      ]
     }
   ]
 }
