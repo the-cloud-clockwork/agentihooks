@@ -281,8 +281,10 @@ def test_unrepresentable_values_are_refused_without_changes(
         'OTHER=prefix"open\nSERVICE_TOKEN=inside\nlast"\nSERVICE_TOKEN=old\n',
         'OTHER=first\\\n"open\nSERVICE_TOKEN=inside\nlast"\nSERVICE_TOKEN=old\n',
         "not-an-assignment\nSERVICE_TOKEN=old\n",
+        "OTHER=$(echo\nSERVICE_TOKEN=inside\nSERVICE_TOKEN=old)\n",
+        "OTHER=" + chr(96) + "echo\nSERVICE_TOKEN=inside\nSERVICE_TOKEN=old" + chr(96) + "\n",
     ],
-    ids=["escaped-quote", "unquoted-quote", "continuation", "unsupported-line"],
+    ids=["escaped-quote", "unquoted-quote", "continuation", "unsupported-line", "command-substitution", "backticks"],
 )
 @pytest.mark.feature("cluster-secret-private-env")
 def test_ambiguous_existing_content_is_refused_without_changes(

@@ -72,7 +72,7 @@ def _existing_lines(target: Path) -> list[str]:
         if value.startswith(("'", '"')):
             if not re.fullmatch(r"""(?:'[^']*'|"[^"\\]*")[ \t]*(?:#.*)?""", value):
                 raise ValueError
-        elif any(character in value for character in "'\"\\"):
+        elif any(character in value.partition("#")[0] for character in "'\"\\`$()"):
             raise ValueError
     return lines
 
