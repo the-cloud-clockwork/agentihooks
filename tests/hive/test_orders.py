@@ -838,6 +838,16 @@ def test_launch_keeps_lane_settings_and_selected_assignment(
     }
 
 
+@pytest.mark.feature("review-lane-spawn")
+def test_a_hive_order_launches_a_review_seat_with_the_reviewer_profile(setup: SimpleNamespace) -> None:
+    agent = replace(setup.agent, lane="review", profile="reviewer")
+    setup.store.execution_registry.update("fixture", agent)
+    setup.consumer.apply(replace(setup.order, lane="review", profile="reviewer"))
+    request = setup.runtime.spawn.call_args.args[0]
+    assert (request.lane, request.config.lanes["review"]["role"]) == ("review", "reviewer")
+    assert request.task["launch_assignment"]["profile"] == "reviewer"
+
+
 @pytest.mark.feature("launch-model-suits-harness")
 @pytest.mark.parametrize(
     ("harness", "lane_model", "field"),
