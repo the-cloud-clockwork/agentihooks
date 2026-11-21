@@ -7,7 +7,7 @@ import pytest
 from scripts import ci_wiring
 from scripts.ci_lab.static_gates import REGISTRY, STATIC_JOBS, WORKFLOW, StaticGate, discover
 
-pytestmark = [pytest.mark.unit, pytest.mark.feature("lab-static-plant-proofs")]
+pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[2]
 PLANTS = ROOT / "tests" / "ci_lab" / "plants"
 EXCLUSIONS = ROOT / "tests" / "ci_lab" / "static_gate_exclusions.json"
@@ -34,6 +34,7 @@ def supplied(gate: StaticGate) -> bool:
     return not gate.missing
 
 
+@pytest.mark.feature("lab-static-plant-proofs")
 def test_every_discovered_static_gate_has_one_plant_or_one_exclusion() -> None:
     planted = [spec["gate"] for spec in plants().values()]
     assert len(planted) == len(set(planted))
@@ -41,6 +42,7 @@ def test_every_discovered_static_gate_has_one_plant_or_one_exclusion() -> None:
     assert sorted({*planted, *exclusions()}) == sorted(gates())
 
 
+@pytest.mark.feature("lab-static-plant-proofs")
 def test_a_gate_plant_is_named_after_its_gate() -> None:
     expected = {name: name.replace(".", "/") for name in plants()}
     expected["lint.threshold-pins"] = "lint/pin-thresholds-floors-and-allowlists-against-the-base"
@@ -48,6 +50,7 @@ def test_a_gate_plant_is_named_after_its_gate() -> None:
 
 
 @pytest.mark.parametrize("name", sorted(plants()))
+@pytest.mark.feature("lab-static-plant-proofs")
 def test_a_gate_plant_edits_this_tree_once_per_edit(name: str) -> None:
     spec = plants()[name]
     assert spec["reason"]
@@ -57,11 +60,13 @@ def test_a_gate_plant_edits_this_tree_once_per_edit(name: str) -> None:
         assert edit["after"] != edit["before"]
 
 
+@pytest.mark.feature("lab-static-plant-proofs")
 def test_a_planted_gate_reads_only_the_lab_context() -> None:
     found = gates()
     assert [spec["gate"] for spec in plants().values() if not supplied(found[spec["gate"]])] == []
 
 
+@pytest.mark.feature("lab-static-plant-proofs")
 def test_an_exclusion_names_what_the_lab_lacks() -> None:
     for entry in exclusions().values():
         assert entry["reason"]

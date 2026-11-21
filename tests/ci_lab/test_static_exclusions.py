@@ -11,7 +11,7 @@ import pytest
 from scripts.ci_lab import static_exclusions
 from scripts.ci_lab.units import Priority
 
-pytestmark = [pytest.mark.unit, pytest.mark.feature("lab-static-execution-exclusions")]
+pytestmark = pytest.mark.unit
 
 NETWORK = "lint/network"
 OFFLINE = "lint/offline"
@@ -75,28 +75,36 @@ def members(plan: Any) -> set[str]:
     return {name for units in plan.gates.values() for unit in units for name in unit.members}
 
 
+@pytest.mark.feature("lab-static-execution-exclusions")
 def test_the_policy_preserves_each_declared_reason() -> None:
     assert static_exclusions.read(POLICY) == {NETWORK: REASON}
+    records = json.loads(POLICY)
+    records[OFFLINE] = {"reason": "browser is unavailable"}
+    assert static_exclusions.read(json.dumps(records)) == {NETWORK: REASON, OFFLINE: "browser is unavailable"}
 
 
 @pytest.mark.parametrize(
-    "raw",
+    "raw,diagnostic",
     [
-        "[",
-        "[]",
-        json.dumps({NETWORK: []}),
-        json.dumps({NETWORK: {}}),
-        json.dumps({NETWORK: {"reason": ""}}),
-        json.dumps({NETWORK: {"reason": 7}}),
-        json.dumps({"": {"reason": REASON}}),
+        ("[", "Expecting value"),
+        ("[]", "catalog"),
+        (json.dumps({NETWORK: []}), "record"),
+        (json.dumps({NETWORK: {}}), "reason"),
+        (json.dumps({NETWORK: {"reason": ""}}), "reason"),
+        (json.dumps({NETWORK: {"reason": "  "}}), "reason"),
+        (json.dumps({NETWORK: {"reason": 7}}), "reason"),
+        (json.dumps({"": {"reason": REASON}}), "gate"),
+        (json.dumps({"  ": {"reason": REASON}}), "gate"),
     ],
 )
-def test_invalid_exclusion_records_are_refused(raw: str) -> None:
-    with pytest.raises(ValueError):
+@pytest.mark.feature("lab-static-execution-exclusions")
+def test_invalid_exclusion_records_are_refused(raw: str, diagnostic: str) -> None:
+    with pytest.raises(ValueError, match=diagnostic):
         static_exclusions.read(raw)
 
 
 @pytest.mark.parametrize("tier", [Priority.HOTFIX, Priority.PULL_REQUEST])
+@pytest.mark.feature("lab-static-execution-exclusions")
 def test_only_the_protected_catalog_can_exclude_units(
     expand: Callable[[str | None, str | None, Priority, tuple[str, ...]], tuple[Any, str, str]], tier: Priority
 ) -> None:
@@ -105,20 +113,24 @@ def test_only_the_protected_catalog_can_exclude_units(
     assert plan.grader == base
 
 
+@pytest.mark.feature("lab-static-execution-exclusions")
 def test_a_missing_protected_catalog_preserves_units_and_ignores_the_head_catalog(
     expand: Callable[[str | None, str | None, Priority, tuple[str, ...]], tuple[Any, str, str]],
 ) -> None:
-    plan, _, _ = expand(None, POLICY, Priority.PULL_REQUEST, ())
+    plan, _, _ = expand(None, POLICY, Priority.PULL_REQUEST, ("lint", "type-gate"))
     assert members(plan) == {NETWORK, OFFLINE, TYPES}
+    assert plan.authoritative == frozenset({"lint", "type-gate"})
 
 
+@pytest.mark.feature("lab-static-execution-exclusions")
 def test_invalid_protected_policy_refuses_expansion(
     expand: Callable[[str | None, str | None, Priority, tuple[str, ...]], tuple[Any, str, str]],
 ) -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="reason"):
         expand(json.dumps({NETWORK: {}}), None, Priority.PULL_REQUEST, ())
 
 
+@pytest.mark.feature("lab-static-execution-exclusions")
 def test_a_partially_graded_job_keeps_its_actions_authority(
     expand: Callable[[str | None, str | None, Priority, tuple[str, ...]], tuple[Any, str, str]],
 ) -> None:
@@ -128,6 +140,7 @@ def test_a_partially_graded_job_keeps_its_actions_authority(
 
 
 @pytest.mark.parametrize("tier", [Priority.PROMOTION, Priority.BACKFILL])
+@pytest.mark.feature("lab-static-execution-exclusions")
 def test_integrated_grades_use_the_integrated_head_policy(
     expand: Callable[[str | None, str | None, Priority, tuple[str, ...]], tuple[Any, str, str]], tier: Priority
 ) -> None:

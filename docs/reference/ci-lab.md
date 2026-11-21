@@ -4716,6 +4716,13 @@ check and requires its named diagnostic. The JSON result and summary row include
 `red_run`, the exact grade identifiers for the two check links. `lint.threshold-pins` is the shorter
 alias for the threshold pin plant; its full gate identity is unchanged.
 
+Static execution reads `tests/ci_lab/static_gate_exclusions.json` from the protected
+grader revision. Pull requests and hotfixes use their base; promotion and backfill
+use the integrated head. Only exact gate name matches are excluded. Each affected
+calling job keeps Actions authority. A missing catalog preserves existing plans,
+and malformed policy refuses expansion. The protected catalog records the reason
+for each exclusion.
+
 The command creates an unchanged twin and its planted child from `origin/dev`, with fixed
 commit identity and dates. It preserves the checkout, HEAD and normal index. `--base`
 selects another protected revision; `--repository` overrides the GitHub URL inferred from
