@@ -7756,6 +7756,18 @@
       ]
     },
     {
+      "id": "feature-map-stable-write",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-feature-map-stable-write",
+      "behaviour": "The tick scaffold inserts a new feature as a pure text insertion and updates an existing feature only within its own entry, preserving every untouched entry and root metadata byte, including compact layout, Unicode and line endings.",
+      "seam": "scripts.tick.new_step.scaffold feature map output",
+      "tests": [
+        "tests/tick/test_new_step.py::test_scaffold_adds_to_the_real_map_without_changing_any_existing_line",
+        "tests/tick/test_new_step.py::test_scaffold_inserts_one_entry_and_keeps_all_surrounding_bytes",
+        "tests/tick/test_new_step.py::test_scaffold_updates_only_the_selected_entry"
+      ]
+    },
+    {
       "id": "independent-ci-records",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2436",
