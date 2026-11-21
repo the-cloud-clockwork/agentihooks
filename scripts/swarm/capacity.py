@@ -428,7 +428,11 @@ def _allocate(
 ) -> tuple:
     allocation = {lane: {"claude": 0, "codex": 0} for lane in LANES}
     placements = {lane: [] for lane in LANES}
-    options = requirements or {lane: [_harnesses(config, lane)] * limits[lane] for lane in LANES}
+    options = (
+        {lane: requirements.get(lane, []) for lane in LANES}
+        if requirements
+        else {lane: [_harnesses(config, lane)] * limits[lane] for lane in LANES}
+    )
     cursors = dict.fromkeys(LANES, 0)
     held = {(seat.harness, seat.account): seat for seat in open_seats}
 
@@ -675,7 +679,7 @@ def calculate(
     busy = _busy(agents)
     effective = {lane: min(configured[lane], busy[lane]) for lane in LANES}
     limits = {
-        lane: min(configured[lane], busy[lane] + demand[lane]) if demand is not None else configured[lane]
+        lane: min(configured[lane], busy[lane] + demand.get(lane, 0)) if demand is not None else configured[lane]
         for lane in LANES
     }
     warned = warned or {}
