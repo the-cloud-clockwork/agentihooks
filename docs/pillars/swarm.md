@@ -6080,7 +6080,7 @@ EnvironmentFile=-%h/.agentihooks/.env
 ExecStart="<installed python>" -m scripts.scheduler.service supervise
 Restart=always
 RestartSec=5
-RestartPreventExitStatus=2
+RestartPreventExitStatus=2 4
 KillMode=process
 
 [Install]
@@ -6089,9 +6089,18 @@ WantedBy=default.target
 
 - `ExecStart` names the Python interpreter of the installed agentihooks.
 - `Restart=always` brings a supervisor that exits or is recycled back after five seconds.
-- `RestartPreventExitStatus=2`: a supervisor that finds the machine lock held prints
+- `RestartPreventExitStatus=2 4`: a supervisor that finds the machine lock held prints
   `scheduler supervisor is already running` and exits 2, and systemd does not restart it in a loop. The next
   `ensure_running` call starts the unit again.
+- Exit 4 means the state store refused the scheduler's credential: a refused login (redis `AuthenticationError`) or
+  an ACL denial (`NoPermissionError`). The runner prints
+  `scheduler stops: the state store refused its credential (<error>: <text>)` and exits 4 on that pass, in any swarm.
+  Its supervisor prints `the scheduler supervisor <pid> stops: its state store refused its credential`, starts no
+  new runner and exits 4, and systemd leaves it stopped. A timeout or a dropped connection still gets a new pass
+  every second. The next `ensure_running` call starts the unit again.
+- Exit 3 means a proof swarm's runner stopped because its state store did not answer for 300 seconds. Its supervisor
+  prints `the scheduler supervisor <pid> stops: its state store did not answer`, starts no new runner and exits 3.
+  Exit 3 is not in `RestartPreventExitStatus`, so systemd restarts the supervisor as it does after any other exit.
 - `AGENTIHOOKS_SCHEDULER_UNIT=1` tells the supervisor that systemd started it. Only the unit sets it; never set it by
   hand.
 - [Workstation tick retirement](#workstation-tick-retirement) keeps this unit: a workstation whose swarms are all
@@ -6158,6 +6167,7 @@ the new seam tests failing. Green: Proofs run
 | Symptom | Cause | Fix |
 |---|---|---|
 | The tick stops when `agentihooks-swarm-waits.service` or `agentihooks-hive.service` restarts | The supervisor runs as a child in that unit's group: the scheduler unit is missing or was never started | Run `agentihooks swarm tick` once from the installed agentihooks, or wait for the next host tick; `timer.reconcile` writes and enables the unit |
+| `agentihooks-scheduler.service` is inactive with exit status 4 and `scheduler.log` names a refused credential | The scheduler's Redis user was removed, its password changed or its ACL denies a scheduler command | Fix the credential or ACL behind the scheduler's Redis URL in `~/.agentihooks/.env`, then run `systemctl --user start agentihooks-scheduler.service` |
 | `agentihooks-scheduler.service` is inactive with exit status 2 | Another supervisor held the machine lock past the 30 second take over | The next wait pass starts the unit again; when it repeats, list supervisors with the `ps` check in [A supervisor started off the installed code exits with its starter](#a-supervisor-started-off-the-installed-code-exits-with-its-starter) |
 | The unit is active but `scheduler.log` keeps getting new supervisors | The runtime folder has no mark, so callers spawn children: the unit's supervisor resolves another folder | Keep the Redis settings in `~/.agentihooks/.env`, which the unit loads, rather than only in a shell profile |
 
