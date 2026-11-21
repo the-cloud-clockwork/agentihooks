@@ -129,10 +129,21 @@ def test_fill_extracts_recon_and_preserves_body(api: ModuleType) -> None:
 
 
 @pytest.mark.feature("pull-request-recon-context")
-def test_fill_refuses_missing_recon_details(api: ModuleType) -> None:
-    recon = recon_text().replace("### Resources\n\nRecon evidence for Resources.", "Production data unchanged.")
-    with pytest.raises(ValueError, match="Resources"):
+@pytest.mark.parametrize(
+    ("missing", "message"),
+    [
+        (("Resources",), "Recon review details missing or empty: Resources"),
+        (("Dependencies", "Resources"), "Recon review details missing or empty: Dependencies, Resources"),
+    ],
+    ids=["single", "multiple"],
+)
+def test_fill_refuses_missing_recon_details(api: ModuleType, missing: tuple[str, ...], message: str) -> None:
+    recon = recon_text()
+    for name in missing:
+        recon = recon.replace(f"### {name}\n\nRecon evidence for {name}.", "Production data unchanged.")
+    with pytest.raises(ValueError) as raised:
         api.fill(recon)
+    assert str(raised.value) == message
 
 
 @pytest.mark.feature("pull-request-recon-context")
@@ -203,6 +214,8 @@ def test_body_file_check_and_new_body_fill(api: ModuleType, tmp_path: Path, caps
     recon.write_text(recon_text())
     assert api.main(["fill", "--recon", str(recon), "--body", str(body)]) == 0
     assert capsys.readouterr().out == body.read_text()
+    assert body.read_text().startswith("## Assumptions\n")
+    assert api.fill(recon_text()) == body.read_text()
     assert api.main(["check", "--body", str(body)]) == 0
     assert capsys.readouterr().out == "Pull request body sections passed.\n"
 
@@ -220,6 +233,74 @@ def test_bad_event_fails_closed(
     event.write_text(payload)
     assert api.main(["check", "--event", str(event)]) == 1
     assert capsys.readouterr().out.startswith("Pull request body error: ")
+
+
+@pytest.mark.feature("pull-request-recon-context")
+@pytest.mark.parametrize(
+    "arguments",
+    [[], ["check"], ["fill", "--recon", "recon.md"], ["fill", "--body", "body.md"]],
+    ids=["command", "source", "body", "recon"],
+)
+def test_missing_cli_inputs_report_usage(
+    api: ModuleType, arguments: list[str], capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as raised:
+        api.main(arguments)
+    assert raised.value.code == 2
+    assert "required" in capsys.readouterr().err
+
+
+@pytest.mark.feature("pull-request-recon-context")
+def test_wrong_body_type_names_the_contract(
+    api: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    event = tmp_path / "event.json"
+    event.write_text('{"pull_request": {"body": 42}}')
+    assert api.main(["check", "--event", str(event)]) == 1
+    assert capsys.readouterr().out == "Pull request body error: pull_request.body must be a string or null\n"
+
+
+@pytest.mark.feature("pull-request-recon-context")
+def test_text_files_are_utf8_under_a_non_utf8_default(
+    api: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    event = tmp_path / "event.json"
+    recon = tmp_path / "recon.md"
+    body = tmp_path / "body.md"
+    control = tmp_path / "control.md"
+    event.write_text(
+        json.dumps({"pull_request": {"body": body_without() + "\nRévision."}}, ensure_ascii=False), encoding="utf-8"
+    )
+    recon.write_text(recon_text().replace("Recon evidence", "Révision evidence"), encoding="utf-8")
+    body.write_text("## Summary\n\nRésumé.\n", encoding="utf-8")
+    read_text = Path.read_text
+    write_text = Path.write_text
+    controlled = {event, recon, body, control}
+
+    def read_in_locale(path: Path, encoding: str | None = None, errors: str | None = None) -> str:
+        selected = "ascii" if path in controlled and encoding is None else encoding
+        return read_text(path, encoding=selected, errors=errors)
+
+    def write_in_locale(
+        path: Path, data: str, encoding: str | None = None, errors: str | None = None, newline: str | None = None
+    ) -> int:
+        selected = "ascii" if path in controlled and encoding is None else encoding
+        return write_text(path, data, encoding=selected, errors=errors, newline=newline)
+
+    monkeypatch.setattr(Path, "read_text", read_in_locale)
+    monkeypatch.setattr(Path, "write_text", write_in_locale)
+    with pytest.raises(UnicodeDecodeError):
+        recon.read_text()
+    with pytest.raises(UnicodeEncodeError):
+        control.write_text("Résumé")
+    assert api.main(["check", "--event", str(event)]) == 0
+    assert capsys.readouterr().out == "Pull request body sections passed.\n"
+    assert api.main(["fill", "--recon", str(recon), "--body", str(body)]) == 0
+    rendered = capsys.readouterr().out
+    assert "Résumé" in rendered and "Révision evidence" in rendered
+    assert body.read_text(encoding="utf-8") == rendered
+    assert api.main(["check", "--body", str(body)]) == 0
+    assert capsys.readouterr().out == "Pull request body sections passed.\n"
 
 
 @pytest.mark.feature("pull-request-recon-context")

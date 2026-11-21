@@ -28,6 +28,9 @@
         "tests/test_pr_body.py::test_invalid_recon_is_refused",
         "tests/test_pr_body.py::test_body_file_check_and_new_body_fill",
         "tests/test_pr_body.py::test_bad_event_fails_closed",
+        "tests/test_pr_body.py::test_missing_cli_inputs_report_usage",
+        "tests/test_pr_body.py::test_wrong_body_type_names_the_contract",
+        "tests/test_pr_body.py::test_text_files_are_utf8_under_a_non_utf8_default",
         "tests/test_pr_body.py::test_null_body_names_all_sections"
       ]
     },
