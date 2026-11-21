@@ -1,4 +1,5 @@
 import base64
+import random
 import time
 from pathlib import Path
 from typing import cast
@@ -17,8 +18,8 @@ pytestmark = pytest.mark.unit
 @pytest.mark.feature("lab-head-undecodable-dead-letter")
 @pytest.mark.parametrize(
     "payload",
-    [b"{", b"\xff", b"[]", b"{}", b"[" * 10000 + b"]" * 10000, b""],
-    ids=["json", "utf8", "array", "fields", "depth", "near-limit"],
+    [b"{", b"\xff", b"[]", b"{}", b"[" * 10000 + b"]" * 10000, b"", b"full-limit"],
+    ids=["json", "utf8", "array", "fields", "depth", "near-limit", "full-limit"],
 )
 def test_an_undecodable_head_is_dead_lettered_and_the_next_head_is_read(payload: bytes, tmp_path: Path) -> None:
     policy = QueuePolicy(max_deliver=1, ack_wait_ms=20)
@@ -28,6 +29,8 @@ def test_an_undecodable_head_is_dead_lettered_and_the_next_head_is_read(payload:
         try:
             if not payload:
                 payload = b"\xff" * (bus._nc.max_payload * 9 // 10)
+            elif payload == b"full-limit":
+                payload = b"\xff" + random.Random(0).randbytes(bus._nc.max_payload - 1)
             consumer = bus.lab_heads.consumer(scheduler.DURABLE, scheduler.SUBJECT)
             inbox = scheduler.BusInbox(cast(scheduler.Consumer, consumer), batch=2, timeout_ms=100)
             published = bus._loop.run(bus._js.publish("ci.lab.head.push", payload, stream=nats.LAB_STREAM))
@@ -41,6 +44,7 @@ def test_an_undecodable_head_is_dead_lettered_and_the_next_head_is_read(payload:
                     errors.append(type(error).__name__)
                     time.sleep(0.04)
             info = bus._loop.run(bus._js.consumer_info(nats.LAB_STREAM, nats.consumer_name(scheduler.DURABLE)))
+            bus._loop.run(bus._js.purge_stream(nats.LAB_STREAM))
             reader = bus.dead.consumer("malformed-proof", "dead.>")
             letters = reader.fetch(3, 100)
             print(
