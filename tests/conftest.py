@@ -576,6 +576,31 @@ def _swarm_tick_leaves_user_units_alone(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _seat_crons_stay_off_the_host_scheduler(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Swarm start, stop and master joins keep their seat crons on one fake scheduler per test, never the host one."""
+    from scripts.swarm import seat_crons
+    from scripts.swarm.store import RedisStore
+
+    shared: list[Any] = []
+
+    def redis() -> Any:
+        import fakeredis
+
+        if not shared:
+            shared.append(fakeredis.FakeRedis(decode_responses=True))
+        return shared[0]
+
+    def scheduler() -> Any:
+        from scripts.events.redis_state import RedisStateStore
+        from scripts.scheduler.core import Scheduler
+
+        return Scheduler(RedisStateStore(redis(), "scheduler"), machine="proof")
+
+    monkeypatch.setattr(seat_crons, "scheduler", scheduler)
+    monkeypatch.setattr(seat_crons, "swarms", lambda: RedisStore(redis()))
+
+
+@pytest.fixture(autouse=True)
 def _switch_interval_restored():
     before = sys.getswitchinterval()
     yield
