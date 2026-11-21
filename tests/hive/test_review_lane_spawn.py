@@ -5,11 +5,12 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock
 
+import fakeredis
 import pytest
 
 from scripts.events import scope, subjects
 from scripts.hive import lanes, launch, nats_grant
-from scripts.swarm import naming, readiness, seat_spawn
+from scripts.swarm import model_pick, naming, profile_choice, readiness, seat_spawn
 from scripts.swarm import runtime as swarm_runtime
 from scripts.swarm.controller import _hive_lane
 from scripts.swarm.store import RedisStore, SwarmConfig
@@ -105,8 +106,6 @@ def test_a_hive_runs_a_review_spoke_on_the_review_ready_queue(capsys: pytest.Cap
 
 
 def _spawned_profile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lane: str) -> tuple[str, list[tuple]]:
-    from scripts.swarm import model_pick, profile_choice
-
     seen: dict[str, list[str]] = {}
     picks: list[tuple] = []
     real = model_pick.pick
@@ -146,8 +145,6 @@ def test_a_workstation_review_spawn_launches_the_reviewer_profile_through_the_mo
 
 @pytest.mark.feature("review-lane-spawn")
 def test_seat_spawn_places_a_review_seat() -> None:
-    import fakeredis
-
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", "/repo", max_eng=0, max_ci=0))
     runtime = FakeRuntime()
