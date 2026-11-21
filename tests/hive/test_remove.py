@@ -282,7 +282,7 @@ def test_remove_runs_every_step_in_order_and_deletes_the_hive_everywhere(store, 
         f"manifests: opened pull request {PR} deleting {', '.join(OWNED)}; it merges once its checks pass",
         "openbao: deleted OpenBao secret/k8s/agentihooks-hive-anton-9",
     ]
-    assert [item.text for item in _orders(store, SEAT)] == [remove.ORDER.format(hive=member, slug=SLUG)]
+    assert [item.text for item in _orders(store, "engineer@1")] == [remove.ORDER.format(hive=member, slug=SLUG)]
     assert not auth.member(store.redis, member)
     assert f"hive-{member}" not in store.redis.acl_users()
     assert member not in store.redis.smembers(registry.INDEX)
@@ -333,7 +333,7 @@ def test_a_rerun_after_a_completed_remove_writes_nothing_and_succeeds(store, tmp
     ]
     assert _written(store, tmp_path) == before
     assert [argv for argv, _ in run.calls[calls:]] == READS
-    assert len(_orders(store, SEAT)) == 1
+    assert len(_orders(store, "engineer@1")) == 1
 
 
 def test_a_rerun_by_name_after_a_remove_that_failed_midway_finishes_on_the_real_name(store, tmp_path):
@@ -568,7 +568,7 @@ def test_a_dry_run_prints_every_step_first_and_writes_nothing(store, tmp_path):
     assert "draining" not in registry.show(store.redis, member)
     assert [argv for argv, _ in run.calls] == READS
     assert bao.opener.requests == []
-    assert _orders(store, SEAT) == []
+    assert _orders(store, "engineer@1") == []
 
 
 @pytest.mark.feature("hive-remove-stops-host-services")
@@ -803,7 +803,7 @@ def test_a_stopping_hive_orders_its_agents_to_hand_off_once_and_ends_when_they_a
     assert settled == f"hive {member} drained: every agent handed off, 1 ordered to hand off"
     assert (clock.now, clock.slept) == (2 * remove.POLL_S, 2)
     assert registry.show(store.redis, member)["draining"] == "yes"
-    orders = _orders(store, SEAT)
+    orders = _orders(store, "engineer@1")
     assert [(item.sender, item.text) for item in orders] == [
         (remove.SENDER, remove.ROLL.format(hive=member, slug=SLUG))
     ]
@@ -820,7 +820,7 @@ def test_a_stopping_hive_with_no_agents_orders_nothing(store, tmp_path):
 
     assert settled == f"hive {member} drained: every agent handed off, 0 ordered to hand off"
     assert clock.slept == 0
-    assert _orders(store, SEAT) == []
+    assert _orders(store, "engineer@1") == []
 
 
 def _remote(store: Any, member: str, name: str, seat: str, report: dict | None, launched_at: int = 0) -> None:
@@ -856,8 +856,8 @@ def test_a_release_roll_orders_no_seat_whose_agent_ended_or_never_reported_past_
 
     assert settled == f"hive {member} drained: every agent handed off, 0 ordered to hand off"
     assert clock.slept == 0
-    assert _orders(store, f"ci-2@{SLUG}") == []
-    assert _orders(store, f"ci-3@{SLUG}") == []
+    assert _orders(store, "ci@2") == []
+    assert _orders(store, "ci@3") == []
 
 
 @pytest.mark.feature("hive-release-drain-live-agents")
@@ -872,8 +872,8 @@ def test_a_release_roll_still_orders_a_reporting_agent_and_one_launched_under_a_
     settled = remove.settle(store, member, 3600, _host(Clock(store, member, 1), Run(), tmp_path))
 
     assert settled == f"hive {member} drained: every agent handed off, 3 ordered to hand off"
-    for seat in (f"ci-2@{SLUG}", f"ci-3@{SLUG}", f"ci-4@{SLUG}"):
-        assert [item.text for item in _orders(store, seat)] == [remove.ROLL.format(hive=member, slug=SLUG)]
+    for name in ("ci@2", "ci@3", "ci@4"):
+        assert [item.text for item in _orders(store, name)] == [remove.ROLL.format(hive=member, slug=SLUG)]
 
 
 class Successor:
@@ -884,7 +884,7 @@ class Successor:
         self.slept += 1
         self.now += seconds
         for agent in self.store.agents(SLUG):
-            if _orders(self.store, agent.seat):
+            if _orders(self.store, agent.name):
                 self.store.put_agent(SLUG, replace(agent, state="finished"))
 
     def __call__(self):
@@ -906,8 +906,8 @@ def test_a_release_roll_ends_its_drain_one_poll_after_its_agents_obey_the_order_
 
 class Answering(Successor):
     def sleep(self, seconds):
-        for item in _orders(self.store, SEAT):
-            InboxStore(self.store.redis).close(item.id, SEAT, "done", "handed off")
+        for item in _orders(self.store, "engineer@1"):
+            InboxStore(self.store.redis).close(item.id, "engineer@1", "done", "handed off")
         super().sleep(seconds)
 
 
@@ -928,8 +928,8 @@ def test_a_release_roll_withdraws_every_unanswered_order_when_its_drain_ends_so_
 
     remove.settle(store, member, 3600, _host(Successor(store), Run(), tmp_path))
 
-    for seat, successor in ((SEAT, "engineer@2"), (f"ci-1@{SLUG}", "ci@2")):
-        assert [(item.state, item.reason) for item in _orders(store, seat)] == [("cancelled", _withdrawn(member))]
+    for name, seat, successor in (("engineer@1", SEAT, "engineer@2"), ("ci@1", f"ci-1@{SLUG}", "ci@2")):
+        assert [(item.state, item.reason) for item in _orders(store, name)] == [("cancelled", _withdrawn(member))]
         SeatRegistry(store.redis).occupy(seat, successor, 1)
         assert InboxStore(store.redis).open_mail(successor) == []
 
@@ -983,8 +983,8 @@ def test_a_release_roll_keeps_the_outcome_of_an_order_its_agent_answered(store, 
 
     remove.settle(store, member, 3600, _host(Answering(store), Run(), tmp_path))
 
-    assert [(item.state, item.reason) for item in _orders(store, SEAT)] == [("done", "done: handed off")]
-    assert [(item.state, item.reason) for item in _orders(store, f"ci-1@{SLUG}")] == [("cancelled", _withdrawn(member))]
+    assert [(item.state, item.reason) for item in _orders(store, "engineer@1")] == [("done", "done: handed off")]
+    assert [(item.state, item.reason) for item in _orders(store, "ci@1")] == [("cancelled", _withdrawn(member))]
 
 
 def test_a_release_roll_that_writes_recovery_handoffs_withdraws_its_orders_too(store, tmp_path, monkeypatch):
@@ -997,7 +997,7 @@ def test_a_release_roll_that_writes_recovery_handoffs_withdraws_its_orders_too(s
     settled = remove.settle(store, member, 30, _host(Clock(store, member, 99), Run(), tmp_path))
 
     assert settled.startswith(f"hive {member} stops after 30 seconds; engineer@1 did not hand off")
-    assert [(item.state, item.reason) for item in _orders(store, SEAT)] == [("cancelled", _withdrawn(member))]
+    assert [(item.state, item.reason) for item in _orders(store, "engineer@1")] == [("cancelled", _withdrawn(member))]
 
 
 @pytest.mark.feature("hive-remove-drain-withdraws-orders")
@@ -1011,8 +1011,8 @@ def test_a_hive_remove_drain_withdraws_every_unanswered_order_when_it_ends_so_a_
 
     remove.drain(store, plan, _host(Successor(store), Run(), tmp_path))
 
-    for seat, successor in ((SEAT, "engineer@2"), (f"ci-1@{SLUG}", "ci@2")):
-        assert [(item.state, item.reason) for item in _orders(store, seat)] == [("cancelled", _removed(member))]
+    for name, seat, successor in (("engineer@1", SEAT, "engineer@2"), ("ci@1", f"ci-1@{SLUG}", "ci@2")):
+        assert [(item.state, item.reason) for item in _orders(store, name)] == [("cancelled", _removed(member))]
         SeatRegistry(store.redis).occupy(seat, successor, 1)
         assert InboxStore(store.redis).open_mail(successor) == []
 
@@ -1026,8 +1026,8 @@ def test_a_hive_remove_drain_keeps_the_outcome_of_an_order_its_agent_answered(st
 
     remove.drain(store, plan, _host(Answering(store), Run(), tmp_path))
 
-    assert [(item.state, item.reason) for item in _orders(store, SEAT)] == [("done", "done: handed off")]
-    assert [(item.state, item.reason) for item in _orders(store, f"ci-1@{SLUG}")] == [("cancelled", _removed(member))]
+    assert [(item.state, item.reason) for item in _orders(store, "engineer@1")] == [("done", "done: handed off")]
+    assert [(item.state, item.reason) for item in _orders(store, "ci@1")] == [("cancelled", _removed(member))]
 
 
 def test_a_stopping_hive_writes_a_recovery_handoff_for_each_agent_still_running_at_the_deadline(
@@ -1053,7 +1053,7 @@ def test_a_stopping_hive_writes_a_recovery_handoff_for_each_agent_still_running_
         "so each got a recovery handoff and its task reopens once the swarm retires it"
     )
     assert (clock.now, clock.slept) == (30, 2)
-    assert [len(_orders(store, seat)) for seat in (SEAT, f"eng-2@{SLUG}")] == [1, 1]
+    assert [len(_orders(store, name)) for name in ("engineer@1", "engineer@2")] == [1, 1]
     for name, task, seat in (("engineer@1", "t1", SEAT), ("engineer@2", "t2", f"eng-2@{SLUG}")):
         text = remove.RECOVERY.format(name=name, task=task, hive=member, wait=30, folder=folder(SLUG, task), pushed="")
         assert store.handoffs[(SLUG, task)] == (text, seat)
@@ -1083,7 +1083,7 @@ def test_a_release_roll_orders_each_agent_to_commit_and_push_before_it_hands_off
 
     remove.settle(store, member, 3600, _host(Clock(store, member, 1), Run(), tmp_path))
 
-    (order,) = _orders(store, SEAT)
+    (order,) = _orders(store, "engineer@1")
     assert "commit and push your branch so no work is lost with the pod" in order.text
     assert order.text.index("commit and push") < order.text.index("hand off with the handoff skill")
 

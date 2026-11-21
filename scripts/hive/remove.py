@@ -29,7 +29,7 @@ from scripts.hive.purge import recorded as _recorded
 if TYPE_CHECKING:
     from redis import Redis
 
-    from scripts.inbox.store import InboxStore
+    from scripts.inbox.store import InboxStore, Item
     from scripts.swarm.store import AgentRecord, RedisStore
 
 POLL_S = 15
@@ -44,6 +44,9 @@ ROLL = (
     "and push your branch so no work is lost with the pod, then hand off with the handoff skill even while you wait on checks, a merge or a reply, naming that wait under Next: "
     "run agentihooks swarm {slug} handoff <doc> --reason operator and stop. The runtime starts your successor on "
     "another hive."
+)
+ORDERS = tuple(
+    re.compile(re.escape(text).replace(r"\{hive\}", ".+").replace(r"\{slug\}", ".+")) for text in (ORDER, ROLL)
 )
 WITHDRAWN = "hive {hive} stopped draining for its release, so its hand off order no longer applies"
 REMOVED = "hive {hive} was removed, so its hand off order no longer applies"
@@ -240,8 +243,12 @@ def _order(
 ) -> None:
     for slug, agent in remaining:
         if (slug, agent.name) not in ordered:
-            sent = inbox.send(SENDER, agent.seat or agent.name, text.format(hive=hive, slug=slug))
+            sent = inbox.send(SENDER, agent.name, text.format(hive=hive, slug=slug))
             ordered[(slug, agent.name)] = sent.id
+
+
+def is_order(item: "Item") -> bool:
+    return item.sender == SENDER and any(pattern.fullmatch(item.text) for pattern in ORDERS)
 
 
 def settle(store: "RedisStore", hive: str, wait_s: int, host: Host, member: str = "") -> str:

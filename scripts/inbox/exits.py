@@ -106,8 +106,11 @@ def _task_continues(inbox: "InboxStore", item, seat: str) -> bool:
 def _life_notice_end(item, name: str, exit_text: str) -> str:
     """The close reason of a notice meant only for the life that left; '' for any other item."""
     from scripts.gates import push_stop
+    from scripts.hive import remove
     from scripts.swarm import quota_notice
 
+    if remove.is_order(item):
+        return f"{name} {exit_text}; its hive hand off order ended with it"
     if push_stop.is_notice(item):
         return push_stop.left(name, exit_text)
     if quota_notice.is_notice(item):
