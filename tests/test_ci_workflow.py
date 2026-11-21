@@ -1074,18 +1074,24 @@ def test_split_rejects_a_failed_collection_before_reading_any_artifact(tmp_path,
 
 
 @pytest.mark.feature("split-starts-on-the-early-collection-upload")
-@pytest.mark.parametrize("upload", ["success", "failure", "skipped", "null"])
+@pytest.mark.parametrize("upload", ["success", "failure", "skipped", None])
 def test_split_starts_once_the_early_collection_upload_succeeds_while_the_count_job_runs(
-    tmp_path: Path, upload: str
+    tmp_path: Path, upload: str | None
 ) -> None:
     steps = _workflow()["jobs"]["split"]["steps"]
     guard = next(step for step in steps if step.get("name") == "Require successful early collection")
+    named = guard["env"]["COLLECTION_STEP"]
+    held = {"name": "Hold the base revision's test count", "conclusion": "success"}
+    decoy = {"name": "select", "status": "completed", "conclusion": "success", "steps": [{**held, "name": named}]}
+    for poll, (status, conclusion) in enumerate([("in_progress", None), ("completed", "failure")], start=1):
+        count = {"name": "test-count (3.12)", "status": status, "conclusion": conclusion}
+        count["steps"] = [held, {"name": named, "conclusion": upload}]
+        (tmp_path / f"{poll}.json").write_text(json.dumps({"jobs": [decoy, count]}))
     binary = tmp_path / "bin"
     binary.mkdir()
     (binary / "gh").write_text(
-        '#!/usr/bin/env bash\nprintf x >> "$CALLS"\n'
-        'if [[ "$(wc -c < "$CALLS")" -lt 2 ]]; then echo "in_progress null $UPLOAD"; '
-        'else echo "completed failure $UPLOAD"; fi\n'
+        '#!/usr/bin/env bash\nprintf x >> "$CALLS"\nwhile [[ "$1" != --jq ]]; do shift; done\n'
+        'jq -r "$2" "$PAGES/$(wc -c < "$CALLS").json"\n'
     )
     (binary / "sleep").write_text("#!/usr/bin/env bash\n")
     for stub in binary.iterdir():
@@ -1096,10 +1102,10 @@ def test_split_starts_once_the_early_collection_upload_succeeds_while_the_count_
             os.environ,
             PATH=f"{binary}:{os.environ['PATH']}",
             CALLS=str(tmp_path / "calls"),
-            UPLOAD=upload,
+            PAGES=str(tmp_path),
             GH_TOKEN="app",
             COLLECTION_JOB="test-count (3.12)",
-            COLLECTION_STEP="Upload the early collection",
+            COLLECTION_STEP=named,
         ),
         capture_output=True,
         text=True,
