@@ -9,6 +9,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from functools import partial
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
@@ -225,7 +226,8 @@ class Run:
         return self.engine.tick(at)
 
     def leases(self, ttl_ms: int = 1000) -> Leases:
-        return Leases(self.engine.queue, ttl_ms, lambda: self.lab.now, lambda _: None, 1, self.lab.kube)
+        manifests = partial(scheduler.stored_manifest, self.lab.objects)
+        return Leases(self.engine.queue, ttl_ms, lambda: self.lab.now, lambda _: None, 1, self.lab.kube, manifests)
 
     def lease(self, slots: int = 1, ttl_ms: int = 1000) -> list[Grant]:
         return self.leases(ttl_ms).lease("worker", slots, frozenset(), 0)
@@ -2751,6 +2753,8 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
     found, leases, routes, spending, clock, ports = calls["listen"]
     assert found.queue.client is client and leases.queue is found.queue
     assert leases.pods is found.ports.pods
+    assert isinstance(leases.manifests, partial)
+    assert (leases.manifests.func, leases.manifests.args) == (scheduler.stored_manifest, (found.objects,))
     assert routes == lease_api.ControlRoutes(client, "tok", scheduler._now_ms)
     assert (leases.ttl_ms, leases.poll_ms) == (scheduler.LEASE_TTL_MS, scheduler.LEASE_POLL_MS)
     assert leases.clock() == 1_000_250 and clock() == 1_000_250
