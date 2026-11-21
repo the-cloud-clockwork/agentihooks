@@ -30,7 +30,7 @@ LOCKS_FILE = Path("/proc/locks")
 CGROUP_ROOT = Path("/sys/fs/cgroup")
 
 
-def units(binary):
+def units(binary: str) -> dict[str, str]:
     waker = (
         "[Unit]\nDescription=agentihooks inbox waker for Codex panes\n\n"
         "[Service]\nType=simple\nEnvironment=PYTHONUNBUFFERED=1\n"
