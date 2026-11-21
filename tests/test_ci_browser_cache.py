@@ -1,6 +1,7 @@
 import os
 import re
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -146,13 +147,30 @@ def test_a_retry_after_a_timeout_waits_for_the_left_over_apt_get_to_release_its_
     assert calls == ["mirror", "install", "released", "install", "launch"]
 
 
+@pytest.mark.wall_clock
 def test_a_retry_never_installs_while_the_lock_is_held_and_ends_within_its_attempt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("BROWSER_CACHE_TEST_APT_SECONDS", "8")
+    apt_seconds = 8
+    monkeypatch.setenv("BROWSER_CACHE_TEST_APT_SECONDS", str(apt_seconds))
+    started = time.monotonic()
     result, calls = _setup(tmp_path, monkeypatch, cached=False, ready=False, stall_once=True, attempt_seconds=2)
     assert result.returncode != 0
     assert calls == ["mirror", "install"]
+    assert result.stdout.count("::warning title=Retried browser install::") == 1
+    assert time.monotonic() - started < apt_seconds
+
+
+def test_the_runner_pgrep_matches_apt_get_inside_a_command_line_argument() -> None:
+    holder = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)", "apt-get update&& apt-get install -y libnss3"]
+    )
+    try:
+        found = subprocess.run(["pgrep", "-f", "apt-get"], capture_output=True, text=True)
+    finally:
+        holder.kill()
+        holder.wait()
+    assert str(holder.pid) in found.stdout.split()
 
 
 def test_a_stalled_installed_browser_launch_is_retried_green(tmp_path, monkeypatch):
