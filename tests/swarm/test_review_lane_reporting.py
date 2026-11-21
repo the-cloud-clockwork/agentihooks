@@ -3,7 +3,7 @@ from typing import Any
 import pytest
 
 from scripts.gates.progress import Progress
-from scripts.swarm import metrics_ledger, naming, status
+from scripts.swarm import metrics_ledger, status
 from scripts.swarm.health import findings as health
 from scripts.swarm.store import RedisStore
 
@@ -11,6 +11,7 @@ pytestmark = pytest.mark.feature("swarm-review-lane-reporting")
 REVIEWER = "reviewer@abcdef-0001"
 
 
+@pytest.mark.feature("swarm-review-lane-reporting")
 def test_status_counts_reviewer_talk_after_an_outcome() -> None:
     import fakeredis
 
@@ -22,6 +23,7 @@ def test_status_counts_reviewer_talk_after_an_outcome() -> None:
 
 
 @pytest.mark.parametrize("populated", [False, True])
+@pytest.mark.feature("swarm-review-lane-reporting")
 def test_ledger_metrics_include_zero_and_populated_review_counts(populated: bool) -> None:
     path = {"plan": "", "phase": "", "slice": "", "task": "tasks/r", "lane": "review"}
     nodes = [{"node": "tasks/r", "kind": "task", "state": "open"}] if populated else []
@@ -32,13 +34,8 @@ def test_ledger_metrics_include_zero_and_populated_review_counts(populated: bool
     assert next(row["value"] for row in rows if row["lane"] == "" and row["state"] == "open") == float(populated)
 
 
-def test_health_uses_reviewer_worker_budget_and_names_its_findings(monkeypatch: pytest.MonkeyPatch) -> None:
-    real_lane = naming.lane_of
-
-    def lane(name: str) -> str:
-        return "review" if name == REVIEWER else real_lane(name)
-
-    monkeypatch.setattr(naming, "lane_of", lane)
+@pytest.mark.feature("swarm-review-lane-reporting")
+def test_health_uses_reviewer_worker_budget_and_names_its_findings() -> None:
     events: list[dict[str, Any]] = [{"kind": "comment edited", "target": "phases/p", "by": REVIEWER} for _ in range(25)]
     found = health.ceremony(events, {}, health.limits({}))
     assert len(found) == 1

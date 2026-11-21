@@ -9,6 +9,7 @@ __all__ = ["env"]
 pytestmark = pytest.mark.feature("swarm-review-lane-reporting")
 
 
+@pytest.mark.feature("swarm-review-lane-reporting")
 def test_status_text_prints_a_published_reviewer_lane(env: tuple[Any, ...], capsys: pytest.CaptureFixture[str]) -> None:
     store, _, runtime = env
     run("sw", "create", "--repo", "/repo")

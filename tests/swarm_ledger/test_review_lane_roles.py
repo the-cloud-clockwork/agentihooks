@@ -8,6 +8,7 @@ __all__ = ["browser", "tab"]
 pytestmark = pytest.mark.feature("swarm-review-lane-reporting")
 
 
+@pytest.mark.feature("swarm-review-lane-reporting")
 def test_page_lists_the_review_lane_and_counts_only_live_reviewers(tab: Page) -> None:
     agents = [
         {"name": "reviewer@abcdef-0001", "lane": "review", "profile": "reviewer"},

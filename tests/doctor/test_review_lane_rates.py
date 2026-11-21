@@ -1,19 +1,13 @@
 import pytest
 
 from scripts.doctor import rates
-from scripts.swarm import naming
 
 pytestmark = pytest.mark.feature("swarm-review-lane-reporting")
 REVIEWER = "reviewer@abcdef-0001"
 
 
-def test_doctor_counts_reviewer_talk_and_monitoring(monkeypatch: pytest.MonkeyPatch) -> None:
-    real_lane = naming.lane_of
-
-    def lane(name: str) -> str:
-        return "review" if name == REVIEWER else real_lane(name)
-
-    monkeypatch.setattr(naming, "lane_of", lane)
+@pytest.mark.feature("swarm-review-lane-reporting")
+def test_doctor_counts_reviewer_talk_and_monitoring() -> None:
     records = rates.Records(
         events=[{"kind": "comment added", "target": "phases/p", "by": REVIEWER, "at": 110}],
         tasks={},
