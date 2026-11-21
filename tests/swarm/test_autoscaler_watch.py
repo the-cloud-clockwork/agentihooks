@@ -215,10 +215,12 @@ def test_evidence_an_open_alert_held_back_raises_once_no_autoscaler_alert_is_ope
     api: Callable[..., Api], store: RedisStore
 ) -> None:
     timed_out = failed(code="timeout", message=TIMED_OUT, name=OTHER, ready=2)
-    api(status(group(), timed_out), status(group(), timed_out), status(group(), timed_out))
+    api(*[status(group(), timed_out)] * 4)
     ledger = Ledger()
     assert autoscaler_watch.alert_pass("sw", store, ledger, {"alerts": [OPEN]}) == []
-    assert passes(store, ledger, 2) == [[f"raised the autoscaler alert for {OTHER}"], []]
+    assert autoscaler_watch.alert_pass("sw", store, ledger, {"alerts": [{**OPEN, "state": "claimed"}]}) == []
+    closed = {"alerts": [{**OPEN, "state": "done"}]}
+    assert passes(store, ledger, 2, closed) == [[f"raised the autoscaler alert for {OTHER}"], []]
     assert ledger.raised == [("sw", "autoscaler", alert(1, f"timeout: {TIMED_OUT}", name=OTHER, ready=2))]
 
 
