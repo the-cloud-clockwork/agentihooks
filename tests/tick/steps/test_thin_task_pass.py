@@ -225,7 +225,7 @@ def test_two_thin_tasks_are_both_queued_and_named_in_one_master_notice() -> None
 @pytest.mark.feature("tick-thin-task-pass")
 def test_a_thin_task_with_no_phase_or_description_gets_an_enhancement_task_with_neither() -> None:
     """A thin task with no phase gets an enhancement task with no phase, whose description says it had none."""
-    task = {key: value for key, value in THIN.items() if key not in ("phase", "description")}
+    task = {key: value for key, value in THIN.items() if key != "phase"} | {"description": ""}
     [added] = _added(_run([task]))
     assert "phase" not in added
     assert added["description"].endswith("Its current description: none.")
