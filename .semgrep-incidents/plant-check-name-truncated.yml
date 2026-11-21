@@ -10,4 +10,6 @@ rules:
       include:
         - /scripts/ci_lab/plant_grade.py
         - plant-check-name-truncated.py
-    pattern: $NAME.rsplit("/", ...)
+    pattern-either:
+      - pattern: $NAME.rsplit("/", ...)
+      - pattern: $NAME.split("/")[$INDEX]
