@@ -4,7 +4,7 @@ focused urgent route for the pull request of any open, urgent task inside the fo
 
 from typing import Any
 
-from scripts.swarm import pull_head, stall_queue
+from scripts.swarm import focused_urgent, pull_head, stall_queue
 from scripts.swarm.store import MASTER
 
 ROUTE = "master freeze"
@@ -35,7 +35,7 @@ def frozen(slug: str, url: str, ledger: Any) -> dict[str, str] | None:
 def urgent(slug: str, url: str, ledger: Any) -> dict[str, str] | None:
     """The queue journal context naming the focused urgent route and its task when ``url`` serves an open, urgent task
     inside the open focus, on any head branch, else None."""
-    task = stall_queue.focused_urgent(slug, url, ledger)
+    task = focused_urgent.task(slug, url, ledger)
     return {"route": URGENT, "task": task} if task else None
 
 
