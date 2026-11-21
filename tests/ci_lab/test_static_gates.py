@@ -536,12 +536,13 @@ def test_a_gate_misses_every_name_outside_the_lease_fields_its_secrets_and_its_e
         "github.event.pull_request.head.sha",
         "github.event.pull_request.base.sha",
         "github.event_name",
+        "github.head_ref",
+        "github.ref_name",
         "github.run_id",
         "github.run_attempt",
         "github.run_number",
     }
     assert gate.missing == (
-        "github.head_ref",
         "matrix.python-version",
         "needs.reuse.outputs.grader",
         "secretsX.Y",
@@ -556,10 +557,6 @@ def test_the_real_workflow_marks_each_gate_reading_an_event_field_the_lease_lack
     workflow = (ROOT / static_gates.WORKFLOW).read_text()
     gates = static_gates.discover(workflow, registry, ci_wiring.load(ROOT))
     assert {gate.name: gate.missing for gate in gates if gate.missing} == {
-        "lint/refuse-changelog-fragments-named-off-the-branch-or-opening-without-a-section-heading": (
-            "github.head_ref",
-            "github.ref_name",
-        ),
         "lint/artifact-sanity-checks": (
             "github.base_ref",
             "github.event.before",
@@ -733,6 +730,34 @@ def test_every_lab_gradable_gate_that_reads_the_event_name_is_one_whose_verdict_
         "lint/prove-the-mutation-gate-kills-with-the-real-test-and-fails-with-a-weakened-one",
         "test-count/fetch-the-base-suite-count-recorded-on-dev",
         "test-count/record-the-head-count-for-the-next-queue-group",
+    ]
+
+
+TOLERATED = r"""
+on: pull_request
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Record a count
+        continue-on-error: true
+        run: python -m scripts.record_count
+      - name: Hold a count
+        continue-on-error: false
+        run: python -m scripts.hold_count
+      - name: Check a count
+        run: python -m scripts.check_count
+"""
+
+
+@pytest.mark.feature("lab-lease-event-branch")
+def test_a_continue_on_error_gate_step_is_tolerated_and_the_real_workflow_tolerates_only_the_queue_record() -> None:
+    assert [gate.tolerated for gate in static_gates.discover(TOLERATED)] == [True, False, False]
+    registry = json.loads((ROOT / static_gates.REGISTRY).read_text())
+    workflow = (ROOT / static_gates.WORKFLOW).read_text()
+    gates = static_gates.discover(workflow, registry, ci_wiring.load(ROOT))
+    assert [gate.name for gate in gates if gate.tolerated] == [
+        "test-count/record-the-head-count-for-the-next-queue-group"
     ]
 
 

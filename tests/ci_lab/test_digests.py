@@ -34,12 +34,13 @@ RECORDS = {
     "toolchain": digests.Toolchain,
 }
 GOLDEN = {
-    "static": "static-v1-4b187fa1f86aed0defbd09ab7e347535ff7dc1ebe68ce7632699bb2dcae59ffb",
+    "static": "static-v1-c725d7baf379cd79e7bcee6198be8be7acb5c9a1ae4d19fd08a141c56ee0da84",
     "test": "test-v1-28f019682121264e77614e24d678af401a7a77368780a802738e2ec4ce4c0b77",
     "stats": "stats-v4-b5891dcd6fdfc93028d0114781ea86eb2059790bd2a4d1ecfbe764046ed2255d",
     "mutant": "mutant-v1-d7fa3cbcb90e677e8e1844e25015e79435052a2a335515e5f8f4a4cb5519509b",
     "grade": "grade-v1-3239f51cc667199b67c460ae7e6c8ad5b90dc61f64ca223571b6211149514455",
 }
+CONTENT_KEY = "static-v1-4b187fa1f86aed0defbd09ab7e347535ff7dc1ebe68ce7632699bb2dcae59ffb"
 
 
 def toolchain() -> digests.Toolchain:
@@ -64,6 +65,7 @@ def cases() -> dict[str, tuple[Callable[[Any], str], Any]]:
                 base={"scripts/app.py": BLOBS["scripts/app.py"]},
                 grader="2" * 64,
                 toolchain=chain,
+                event={"github.head_ref": "fix-x"},
             ),
         ),
         "test": (
@@ -189,6 +191,12 @@ def test_flipping_any_single_input_gives_a_new_key(kind: str) -> None:
 def test_golden_keys_for_the_fixture_tree(kind: str) -> None:
     build, inputs = cases()[kind]
     assert build(inputs) == GOLDEN[kind]
+
+
+@pytest.mark.feature("lab-lease-event-branch")
+def test_a_static_gate_that_reads_no_event_name_keeps_its_content_key() -> None:
+    build, inputs = cases()["static"]
+    assert build(replace(inputs, event={})) == CONTENT_KEY
 
 
 @pytest.mark.parametrize("name", ("uv.lock", "pyproject.toml"))

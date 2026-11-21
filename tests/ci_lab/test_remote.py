@@ -73,6 +73,7 @@ def test_a_grade_ref_push_publishes_a_lab_head_with_its_ref_and_branch_and_print
         "base": PARENT,
         "actor": ACTOR,
         "action": "pushed",
+        "head_branch": "engineer-1",
         "ref": "refs/grade/t1",
         "branch": "engineer-1",
     }
@@ -86,7 +87,11 @@ def test_the_base_push_option_wins_over_the_first_parent() -> None:
 
 def test_a_push_without_options_grades_against_the_first_parent_with_no_branch() -> None:
     entries, _ = receive([f"{ZERO} {HEAD} refs/grade/t1"], ENVIRON)
-    assert (entries[0][1].data["base"], entries[0][1].data["branch"]) == (PARENT, "")
+    assert (entries[0][1].data["base"], entries[0][1].data["branch"], entries[0][1].data["head_branch"]) == (
+        PARENT,
+        "",
+        "",
+    )
 
 
 @pytest.mark.parametrize("lab", [LAB, "http://lab.example/X"])

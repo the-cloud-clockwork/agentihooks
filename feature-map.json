@@ -1,6 +1,29 @@
 {
   "features": [
     {
+      "id": "lab-lease-event-branch",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2753",
+      "behaviour": "The CI lab records the head branch of a pull request class head at intake (a pull request delivery, a rerequested check run, a plant, a signed notice that names its branch, a lab remote push and reconcile) and keeps it on the grade request and the grade state. The job record, the lease grant, the lease API reply and the worker lease carry it with the event name of the grade's class: pull_request for hotfix and pull request grades, merge_group for merge group grades and push for promotion and backfill grades. The static executor reads github.event_name from the lease, github.head_ref as the lease's head branch and github.ref_name as empty, so the changelog fragment gate grades on the lab for a pull request head with a branch and is not planned for a grade without one. A static verdict key carries the event names its gate reads only when the gate reads one, so every other gate keeps its content key. A gate step with continue-on-error passes its unit whatever its exit code, so the merge group record step never turns the grade red.",
+      "seam": "scripts.ci_lab.webhooks head_events and notice_event, scripts.ci_lab.intake request_from and reconcile, scripts.ci_lab.head_notice send, scripts.ci_lab.scheduler BusInbox.heads, Scheduler._start and _admit and MirrorExpander.expand, scripts.ci_lab.queue Queue.enqueue and job, scripts.ci_lab.leases Leases.lease, scripts.ci_lab.lease_api, scripts.ci_lab.worker Client.lease, scripts.ci_lab.executors static, scripts.ci_lab.static_gates discover and event_fields, scripts.ci_lab.run_static run and Result.green, and scripts.ci_lab.digests static_key",
+      "tests": [
+        "tests/ci_lab/test_digests.py::test_a_static_gate_that_reads_no_event_name_keeps_its_content_key",
+        "tests/ci_lab/test_static_gates.py::test_a_continue_on_error_gate_step_is_tolerated_and_the_real_workflow_tolerates_only_the_queue_record",
+        "tests/ci_lab/test_run_static.py::test_a_tolerated_step_that_fails_or_runs_out_of_time_stays_green_as_continue_on_error_keeps_its_job",
+        "tests/ci_lab/test_executors.py::test_the_changelog_fragment_gate_grades_on_the_lab_with_the_head_branch_its_lease_carries",
+        "tests/ci_lab/test_executors.py::test_the_queue_record_step_runs_only_on_a_merge_group_lease_and_its_failure_keeps_the_unit_green",
+        "tests/ci_lab/test_intake.py::test_a_head_notice_naming_its_branch_records_it_as_the_head_branch",
+        "tests/ci_lab/test_intake.py::test_a_grade_request_keeps_the_head_branch_its_head_event_recorded",
+        "tests/ci_lab/test_queue.py::test_enqueue_stores_the_event_and_head_branch_each_job_grades_under",
+        "tests/ci_lab/test_leases.py::test_a_grant_carries_the_event_and_head_branch_of_its_job",
+        "tests/ci_lab/test_scheduler.py::test_the_mirror_expander_keys_only_the_gates_that_read_an_event_name_with_its_value",
+        "tests/ci_lab/test_scheduler.py::test_the_mirror_expander_plans_the_changelog_fragment_gate_for_a_pull_request_head_with_its_branch",
+        "tests/ci_lab/test_scheduler.py::test_a_grant_carries_the_event_of_its_grade_class_and_the_pull_request_head_branch",
+        "tests/ci_lab/test_scheduler.py::test_a_request_held_before_the_head_branch_field_grades_with_no_head_branch",
+        "tests/ci_lab/test_scheduler.py::test_the_bus_inbox_reads_the_head_branch_and_a_head_published_before_it_with_none"
+      ]
+    },
+    {
       "id": "lab-worker-manifest",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2808",
@@ -10899,7 +10922,7 @@
       "id": "lab-static-test-count-units",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-units-missing",
-      "behaviour": "The CI lab grades the Tests workflow's test-count job with static units: the static executor supplies runner.temp as the unit's run folder, github.event_name as pull_request and each matrix value the gate's job holds at one value, so the four test-count gate steps discover with nothing missing; static gate discovery names the docs and writer-lock jobs CI only with the reason the lab sandbox cannot run them, names CI only each job of a static job's reusable workflow that calls another reusable workflow instead of raising on it, and the discovery command prints those jobs with their reasons under --ci-only.",
+      "behaviour": "The CI lab grades the Tests workflow's test-count job with static units: the static executor supplies runner.temp as the unit's run folder, github.event_name from the lease and each matrix value the gate's job holds at one value, so the four test-count gate steps discover with nothing missing; static gate discovery names the docs and writer-lock jobs CI only with the reason the lab sandbox cannot run them, names CI only each job of a static job's reusable workflow that calls another reusable workflow instead of raising on it, and the discovery command prints those jobs with their reasons under --ci-only.",
       "seam": "scripts.ci_lab.static_gates discover, ci_only and main with the StaticGate matrix and missing, scripts.ci_lab.run_static run with its run folder and the gate's matrix in the context, and scripts.ci_lab.executors static with the event name in the lease context",
       "tests": [
         "tests/ci_lab/test_static_gates.py::test_a_gate_misses_no_run_folder_event_name_or_matrix_value_its_job_holds_at_one_value",

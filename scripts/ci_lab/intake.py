@@ -24,7 +24,8 @@ TIER_EVENTS = {"check_run": PULL_REQUEST, NOTICE: PULL_REQUEST, PLANT: PULL_REQU
 
 @dataclass(frozen=True)
 class GradeRequest:
-    """One head of one repository the lab is asked to grade against its base, in a tier, for an actor."""
+    """One head of one repository the lab is asked to grade against its base, in a tier, for an actor, with the head
+    branch its head event recorded."""
 
     repo: str
     head: str
@@ -32,6 +33,7 @@ class GradeRequest:
     tier: Priority
     actor: str
     bypass_negative: bool
+    head_branch: str = ""
 
 
 def request_from(event: HeadEvent) -> GradeRequest:

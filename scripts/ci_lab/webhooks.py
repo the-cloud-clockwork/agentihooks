@@ -31,7 +31,8 @@ NO_NOTICE_SECRET = f"{NOTICE_SECRET_ENV} must be set to verify lab head notices"
 
 @dataclass(frozen=True)
 class HeadEvent:
-    """One head the lab may grade: the event and action that named it, its repository, head and base, and the actor."""
+    """One head the lab may grade: the event and action that named it, its repository, head and base, the actor, and
+    the head branch of a pull request class head, empty for any other head."""
 
     event: str
     repo: str
@@ -39,6 +40,7 @@ class HeadEvent:
     base: str
     actor: str
     action: str
+    head_branch: str = ""
 
 
 def _push(payload: Mapping[str, Any]) -> list[HeadEvent]:

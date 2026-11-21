@@ -25,6 +25,8 @@ class Grant:
     expires_ms: int
     base: str = ""
     grader: str = ""
+    event: str = ""
+    head_branch: str = ""
 
 
 @dataclass

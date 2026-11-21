@@ -59,6 +59,16 @@ def test_enqueue_stores_the_base_and_grader_revision_each_job_reads(jobs: queue.
     assert (found(jobs, "h2:test:c").base, found(jobs, "h2:test:c").grader) == ("", "")
 
 
+@pytest.mark.feature("lab-lease-event-branch")
+def test_enqueue_stores_the_event_and_head_branch_each_job_grades_under(jobs: queue.Queue) -> None:
+    jobs.enqueue([unit("a")], "h1", {}, "b1", "g1", "pull_request", "fix-x")
+    jobs.enqueue([unit("c")], "h2", {})
+    jobs.client.hdel(f"{queue.PREFIX}job:h2:test:c", "event", "head_branch")
+
+    assert (found(jobs, "h1:test:a").event, found(jobs, "h1:test:a").head_branch) == ("pull_request", "fix-x")
+    assert (found(jobs, "h2:test:c").event, found(jobs, "h2:test:c").head_branch) == ("", "")
+
+
 def take(
     jobs: queue.Queue, job: str, worker: str = "w1", token: str = "tok", expires_ms: int = 100, leased_ms: int = 0
 ) -> bool:

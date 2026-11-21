@@ -35,6 +35,8 @@ class Job:
     base: str = ""
     grader: str = ""
     leased_ms: int = 0
+    event: str = ""
+    head_branch: str = ""
 
 
 ENQUEUE = """
@@ -156,6 +158,8 @@ class Queue:
         requirements: Mapping[str, Requirement],
         base: str = "",
         grader: str = "",
+        event: str = "",
+        head_branch: str = "",
     ) -> list[str]:
         """Add each unit of the head as a pending job, with the base and grader revision its grade reads, unless that
         job is already known."""

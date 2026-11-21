@@ -61,8 +61,8 @@ REDIS = "REDIS"
 
 @dataclass(frozen=True)
 class Lease:
-    """One leased unit: its job, the lease token, the head it grades, the unit, its slots, the lease expiry and the base
-    and grader revision its grade reads."""
+    """One leased unit: its job, the lease token, the head it grades, the unit, its slots, the lease expiry, the base
+    and grader revision its grade reads, and the event name and head branch its grade runs under."""
 
     job: str
     token: str
@@ -72,6 +72,8 @@ class Lease:
     expires_ms: int
     base: str = ""
     grader: str = ""
+    event: str = ""
+    head_branch: str = ""
 
 
 @dataclass(frozen=True)
