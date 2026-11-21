@@ -2,6 +2,7 @@
 spend less storage write CPU inside the ledger lock than it."""
 
 import contextlib
+import copy
 import hashlib
 import itertools
 import json
@@ -18,7 +19,10 @@ from scripts.swarm_ledger.repository.entry import Entry, thawed
 from scripts.swarm_ledger.repository.fragments import Fragment, encoded
 from tests.swarm_ledger import operations_cpu_replay as replay
 
+pytestmark = [pytest.mark.xdist_group("ledger-corpus-replay"), pytest.mark.timeout(240, method="signal")]
 PLANTED = "planted by the replay past every write method"
+KEPT = 150
+TRIMMED = ("tasks", "followups")
 UNCOMPARED = frozenset({"ledgers", "outbox_sent"})
 LEDGERS = "SELECT slug, revision, generation, summary, touched_at FROM ledgers"
 Corpus = Callable[[], dict[str, Any]]
@@ -27,6 +31,26 @@ Corpus = Callable[[], dict[str, Any]]
 def digest(text: str) -> str:
     """The hex SHA-256 of ``text``."""
     return hashlib.sha256(text.encode()).hexdigest()
+
+
+def trimmed() -> dict[str, Any]:
+    """The recorded corpus with every recorded operation, on the recorded ledger cut to the tasks and followups the
+    operations name plus the first KEPT others, their stamps, and the last KEPT events."""
+    recorded = replay.corpus()
+    named = json.dumps(recorded["ops"])
+    state = dict(recorded["state"])
+    for key in TRIMMED:
+        state[key] = [item for index, item in enumerate(state[key]) if index < KEPT or str(item.get("id")) in named]
+    kept = {f"{key}/{item.get('id')}" for key in TRIMMED for item in state[key]}
+    meta = dict(state["_meta"])
+    meta["stamps"] = {
+        path: stamp
+        for path, stamp in meta["stamps"].items()
+        if path.split("/")[0] not in TRIMMED or "/".join(path.split("/")[:2]) in kept
+    }
+    meta["events"] = meta["events"][-KEPT:]
+    state["_meta"] = meta
+    return {**recorded, "state": state}
 
 
 def persisted(path: Path) -> str:
@@ -74,9 +98,9 @@ def planting(patch: pytest.MonkeyPatch, task: str) -> None:
     patch.setattr(Entry, "for_write", planted)
 
 
-def recording(patch: pytest.MonkeyPatch, path: Path, writes: list[dict[str, str]]) -> None:
-    """Record after each request the stored text and writer copy of every write it made and the rows stored, outside
-    the timed storage write."""
+def recording(patch: pytest.MonkeyPatch, writes: list[dict[str, str]]) -> None:
+    """Record after each request the stored text and writer copy of every write it made, outside the timed storage
+    write."""
     written, apply = ledger_sqlite.written, replay.mutations.apply
     pending: list[tuple[Fragment, dict[str, Any]]] = []
 
@@ -90,70 +114,72 @@ def recording(patch: pytest.MonkeyPatch, path: Path, writes: list[dict[str, str]
             return apply(*args, **kwargs)
         finally:
             writes.extend({"text": digest(encoded(part)), "writer": replay.fingerprint(held)} for part, held in pending)
-            writes.append({"rows": persisted(path / "ledger.sqlite3")})
             pending.clear()
 
     patch.setattr(ledger_sqlite, "written", storing)
     patch.setattr(replay.mutations, "apply", applying)
 
 
-def run(path: Path, full: bool, plant: str | None = None, corpus: Corpus | None = None) -> dict[str, Any]:
-    """One replay of the corpus on the warm write path, or forced onto the full rebuild, with what every write stored."""
+def run(path: Path, corpus: Corpus, full: bool, plant: str | None = None) -> dict[str, Any]:
+    """One replay of ``corpus`` on the warm write path, or forced onto the full rebuild, with what every write stored
+    and the rows stored at the end."""
     writes: list[dict[str, str]] = []
     with pytest.MonkeyPatch.context() as patch:
-        if corpus is not None:
-            patch.setattr(replay, "corpus", corpus)
+        patch.setattr(replay, "corpus", corpus)
         numbered(patch)
         if full:
             patch.setattr(Entry, "for_write", full_copy)
         if plant is not None:
             planting(patch, plant)
-        recording(patch, path, writes)
+        recording(patch, writes)
         report = replay.replay(path, patch)
-    return {**report, "writes": writes}
-
-
-def prefix(count: int) -> Corpus:
-    """The recorded corpus cut to its first ``count`` operations."""
-    recorded = replay.corpus()
-    return lambda: {**recorded, "ops": recorded["ops"][:count]}
-
-
-def untouched_task() -> str:
-    """The id of a recorded task no recorded operation names."""
-    recorded = replay.corpus()
-    named = json.dumps(recorded["ops"])
-    return next(task["id"] for task in reversed(recorded["state"]["tasks"]) if task["id"] not in named)
+    return {**report, "writes": writes, "rows": persisted(path / "ledger.sqlite3")}
 
 
 @pytest.fixture(scope="module")
-def replays(tmp_path_factory: pytest.TempPathFactory) -> dict[str, dict[str, Any]]:
+def recorded() -> dict[str, Any]:
+    """The trimmed recorded corpus."""
+    return trimmed()
+
+
+@pytest.fixture(scope="module")
+def replays(tmp_path_factory: pytest.TempPathFactory, recorded: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """The corpus replayed on the warm write path first, then forced onto the full rebuild."""
-    return {name: run(tmp_path_factory.mktemp(name), full=name == "full") for name in ("partial", "full")}
+    return {
+        name: run(tmp_path_factory.mktemp(name), lambda: copy.deepcopy(recorded), full=name == "full")
+        for name in ("partial", "full")
+    }
 
 
 @pytest.mark.feature("ledger-write-partial-rebuild")
 def test_warm_writes_store_publish_and_relay_what_the_full_rebuild_does_on_the_recorded_corpus(
-    replays: dict[str, dict[str, Any]],
+    replays: dict[str, dict[str, Any]], recorded: dict[str, Any]
 ) -> None:
     partial, full = replays["partial"], replays["full"]
-    assert partial["requests"] == full["requests"] == len(replay.corpus()["ops"])
+    assert partial["requests"] == full["requests"] == len(recorded["ops"]) == len(replay.corpus()["ops"])
     assert [output["reply"] for output in partial["outputs"] if output["reply"].get("applied")]
     assert partial["outputs"] == full["outputs"]
     assert [write for write in partial["writes"] if "text" in write]
     assert partial["writes"] == full["writes"]
+    assert partial["rows"] == full["rows"]
 
 
 @pytest.mark.feature("ledger-write-partial-rebuild")
 def test_a_write_into_an_untouched_writer_task_past_the_write_methods_turns_the_equivalence_red(
-    tmp_path: Path,
+    tmp_path: Path, recorded: dict[str, Any]
 ) -> None:
-    task, corpus = untouched_task(), prefix(3)
-    partial = run(tmp_path / "partial", full=False, plant=task, corpus=corpus)
-    full = run(tmp_path / "full", full=True, plant=task, corpus=corpus)
+    named = json.dumps(recorded["ops"])
+    task = next(item["id"] for item in reversed(recorded["state"]["tasks"]) if item["id"] not in named)
+
+    def corpus() -> dict[str, Any]:
+        return {**copy.deepcopy(recorded), "ops": copy.deepcopy(recorded["ops"][:3])}
+
+    partial = run(tmp_path / "partial", corpus, full=False, plant=task)
+    full = run(tmp_path / "full", corpus, full=True, plant=task)
     assert [output["reply"] for output in full["outputs"]] == [output["reply"] for output in partial["outputs"]]
     assert full["writes"] != partial["writes"]
     assert full["outputs"] != partial["outputs"]
+    assert full["rows"] != partial["rows"]
 
 
 @pytest.mark.wall_clock

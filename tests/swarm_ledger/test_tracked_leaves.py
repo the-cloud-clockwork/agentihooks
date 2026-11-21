@@ -40,7 +40,7 @@ LIST_WRITES: list[Write] = [
 
 def stored() -> Fragment:
     """A stored task leaf with a nested comment list and a nested mapping."""
-    return leaf({"title": "kept", "comments": ["b", "a"], "owner": {"name": "eng", "tags": ["b", "a"]}})
+    return leaf({"title": "kept", "due": None, "comments": ["b", "a"], "owner": {"title": "lead", "tags": ["b", "a"]}})
 
 
 def writer(fragment: Fragment) -> dict[str, Any]:
@@ -66,7 +66,7 @@ def test_reads_leave_a_bound_copy_holding_its_fragment() -> None:
     fragment = stored()
     value = writer(fragment)
     assert value.get("title") == value["title"] == "kept"
-    assert list(value.items()) and list(value) and "title" in value and len(value) == 3
+    assert list(value.items()) and list(value) and "title" in value and len(value) == 4
     assert value.copy() == value and value["comments"].copy() == ["b", "a"]
     assert value["comments"][0:1] == ["b"] and value["comments"].index("a") == 1
     assert value.setdefault("title", "other") == "kept"
@@ -132,6 +132,48 @@ def test_copies_of_a_tracked_leaf_are_plain() -> None:
     deep["owner"]["tags"].append("c")
     assert tracked.held(value) is not None
     assert type(copy.copy(value["comments"])) is list and type(value["comments"][:]) is list
+
+
+@pytest.mark.feature("ledger-write-partial-rebuild")
+def test_a_deep_copy_keeps_the_containers_a_writer_copy_shares() -> None:
+    value = writer(stored())
+    value["again"] = value["comments"]
+    value["owners"] = [value["owner"], value["owner"]]
+    doc = {"first": value, "second": value}
+    deep = copy.deepcopy(doc)
+    assert deep == doc
+    assert deep["first"] is deep["second"]
+    assert deep["first"]["again"] is deep["first"]["comments"]
+    assert deep["first"]["owners"][0] is deep["first"]["owners"][1] is deep["first"]["owner"]
+    assert type(deep["first"]["owners"]) is list
+
+
+@pytest.mark.feature("ledger-write-partial-rebuild")
+def test_write_methods_return_what_the_plain_methods_return() -> None:
+    value = writer(stored())
+    value["comments"] += ["c"]
+    assert value["comments"] == ["b", "a", "c"]
+    assert value["comments"].pop() == "c"
+    assert value.pop("title") == "kept"
+    assert value.setdefault("title", "new") == "new"
+    assert value.popitem() == ("title", "new")
+    tags = value["owner"]["tags"]
+    tags *= 2
+    assert value["owner"]["tags"] == ["b", "a", "b", "a"]
+    owner = value["owner"]
+    owner |= {"seat": "eng-1"}
+    assert value["owner"]["seat"] == "eng-1"
+
+
+@pytest.mark.feature("ledger-write-partial-rebuild")
+def test_a_leaf_that_no_json_round_trip_keeps_is_bound_after_one() -> None:
+    fragment = leaf({1: ["a"], "two": ("b", "c")})
+    value = tracked.bound(fragment)
+    assert value == {"1": ["a"], "two": ["b", "c"]}
+    assert type(value) is tracked.TrackedDict
+    assert tracked.held(value) is fragment
+    cast(dict[str, Any], value)["two"].append("d")
+    assert tracked.held(value) is None
 
 
 @pytest.mark.feature("ledger-write-partial-rebuild")

@@ -86,6 +86,41 @@ def test_untouched_tasks_keep_their_stored_fragment_and_writer_object(monkeypatc
 
 
 @pytest.mark.feature("ledger-write-partial-rebuild")
+def test_a_write_that_removes_the_first_task_keeps_every_later_task_fragment_and_writer_object(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    published, writer = writer_copy.written(ledger(20), None)
+    later = writer["tasks"][1:]
+    writer["tasks"].pop(0)
+    count, rebuilt, held = serialized(monkeypatch, writer, published)
+    assert count == 0
+    assert all(child(rebuilt, "tasks", n) is child(published, "tasks", n + 1) for n in range(20))
+    assert all(task is kept for task, kept in zip(held["tasks"], later, strict=True))
+    expected = ledger(20)
+    del expected["tasks"][0]
+    assert rebuilt.value == held == expected
+    assert encoded(rebuilt) == encoded(document(expected))
+
+
+@pytest.mark.feature("ledger-write-partial-rebuild")
+def test_a_write_copy_built_from_stored_fragments_shares_only_stamp_records_with_the_stored_state() -> None:
+    state = ledger(3)
+    state["_meta"]["stamps"] = {"tasks/t1/state": {"at": 1, "rev": 1, "by": "eng"}}
+    published = document(state)
+    stored = cast(dict[str, Any], published.value)
+    writer = Entry(1, None, stored, published).for_write()
+    assert writer == stored
+    assert writer["_meta"]["stamps"] is not stored["_meta"]["stamps"]
+    assert writer["_meta"]["stamps"]["tasks/t1/state"] is stored["_meta"]["stamps"]["tasks/t1/state"]
+    assert writer["tasks"] is not stored["tasks"]
+    assert all(task is not kept for task, kept in zip(writer["tasks"], stored["tasks"], strict=True))
+    assert writer["_meta"]["crew"] is not stored["_meta"]["crew"]
+    assert writer["tasks"][1]["comments"] is not stored["tasks"][1]["comments"]
+    writer["tasks"][1]["comments"].append({"text": "writer only"})
+    assert stored["tasks"][1]["comments"] == [{"text": "note 1"}]
+
+
+@pytest.mark.feature("ledger-write-partial-rebuild")
 def test_a_warm_point_write_stores_what_a_fresh_encoding_of_the_written_state_stores(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
