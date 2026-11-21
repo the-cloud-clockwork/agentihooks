@@ -1,4 +1,5 @@
-from collections.abc import Callable, Iterator
+import signal
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from typing import Any
 
@@ -15,13 +16,18 @@ def retry_timeouts(
     index: int,
     run_tests: Callable[..., int],
     run_unit: Callable[..., int],
-) -> Iterator[Callable[[int, int], int | None]]:
+) -> Generator[Callable[[int, int], int | None]]:
     register_pid = SourceFileMutationData.register_pid
+    stop_children = SourceFileMutationData.stop_children
     records: dict[int, tuple[str, str | None]] = {}
 
-    def remember(data: SourceFileMutationData, *, pid: int, key: str) -> None:
+    def remember(self: SourceFileMutationData, *, pid: int, key: str) -> None:
         records[pid] = (key, memory.killer(key))
-        register_pid(data, pid=pid, key=key)
+        register_pid(self, pid=pid, key=key)
+
+    def stop(self: SourceFileMutationData) -> None:
+        for pid in self.key_by_pid:
+            engine.os.kill(pid, signal.SIGTERM)
 
     def retry(pid: int, status: int) -> int | None:
         name, killer = records.pop(pid)
@@ -36,19 +42,24 @@ def retry_timeouts(
         if killer not in chosen:
             return None
         chosen = [test for test in chosen if test != killer]
+        config = engine.Config.get()
+        timeout = sum(engine.mutmut.duration_by_test[test] for test in tests) + config.timeout_constant
+        timeout *= config.timeout_multiplier
         replacement = engine.os.fork()
         if replacement == 0:
             engine.os.environ["MUTANT_UNDER_TEST"] = name
+            limit = engine.ceil(timeout * 2 + engine.process_time())
+            engine.resource.setrlimit(engine.resource.RLIMIT_CPU, (limit, limit + 1))
             result = run_unit(run_tests, engine.PytestRunner(), name, tests, chosen, memory, engine) if chosen else 33
             engine.os._exit(result)
-        config = engine.Config.get()
-        timeout = sum(engine.mutmut.duration_by_test[test] for test in tests) + config.timeout_constant
-        engine.register_timeout(pid=replacement, timeout_s=timeout * config.timeout_multiplier)
+        engine.register_timeout(pid=replacement, timeout_s=timeout)
         return replacement
 
     SourceFileMutationData.register_pid = remember
+    SourceFileMutationData.stop_children = stop
     try:
         yield retry
     finally:
         SourceFileMutationData.register_pid = register_pid
+        SourceFileMutationData.stop_children = stop_children
         engine.os.stop_retries()

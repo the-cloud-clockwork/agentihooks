@@ -619,6 +619,10 @@ def forked_children(retry: Callable[[int, int], int | None] | None = None) -> Mo
                         return pid, status
                     self.retries[replacement] = pid
 
+        def kill(self, pid: int, sig: int) -> None:
+            target = next((child for child, original in self.retries.items() if original == pid), pid)
+            os.kill(target, sig)
+
         def stop_retries(self) -> None:
             for pid in self.retries:
                 os.kill(pid, signal.SIGTERM)

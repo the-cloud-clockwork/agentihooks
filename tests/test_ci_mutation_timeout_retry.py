@@ -1,5 +1,6 @@
 import hashlib
 import json
+import math
 import os
 import signal
 import sys
@@ -21,18 +22,18 @@ class ChildExit(BaseException):
 @pytest.fixture
 def engine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("CI", "true")
-    monkeypatch.setenv("MUTANT_UNDER_TEST", "")
     name = "scripts.sample.x_f__mutmut_1"
     tests = ["tests/test_sample.py::fast", "tests/test_sample.py::killer", "tests/test_sample.py::other"]
     state = SimpleNamespace(
         name=name,
+        environ={"CI": "true"},
         tests=tests,
         killer=tests[1],
         forks=[12, 13],
         exits=[(12, 24 << 8), (13, 1 << 8)],
         runs=[],
         timers=[],
+        limits=[],
         signals=[],
         results=[],
         overwrite=None,
@@ -53,7 +54,7 @@ def engine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
 
     class PytestRunner:
         def execute_pytest(self, params: list[str], **kwargs: Any) -> int:
-            state.runs.append((os.environ.get("MUTANT_UNDER_TEST"), params))
+            state.runs.append((state.environ.get("MUTANT_UNDER_TEST"), params))
             return state.exit_code
 
         def run_tests(self, *, mutant_name: str | None, tests: list[str]) -> int:
@@ -87,12 +88,17 @@ def engine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
         },
         Config=SimpleNamespace(get=lambda: SimpleNamespace(timeout_constant=1.5, timeout_multiplier=3.0)),
         register_timeout=lambda **kwargs: state.timers.append(kwargs),
+        ceil=math.ceil,
+        process_time=lambda: 2.5,
+        resource=SimpleNamespace(
+            RLIMIT_CPU=7, setrlimit=lambda resource, limits: state.limits.append((resource, limits))
+        ),
         BadTestExecutionCommandsException=RuntimeError,
         cli=cli,
     )
     real_os = SimpleNamespace(
         __name__="os",
-        environ=os.environ,
+        environ=state.environ,
         fork=fork,
         wait=wait,
         waitstatus_to_exitcode=os.waitstatus_to_exitcode,
@@ -177,6 +183,7 @@ def test_the_retry_child_excludes_the_original_killer_after_a_sibling_overwrites
         engine.run()
     assert caught.value.args == (1,)
     assert engine.runs == [(engine.name, [engine.tests[0], engine.tests[2]])]
+    assert engine.limits == [(7, (60, 61))]
 
 
 @pytest.mark.feature("mutation-timeout-without-killer")
@@ -187,6 +194,7 @@ def test_the_retry_child_preserves_a_surviving_result(engine: Any) -> None:
         engine.run()
     assert caught.value.args == (0,)
     assert engine.runs == [(engine.name, [engine.tests[0], engine.tests[2]])]
+    assert engine.limits == [(7, (60, 61))]
 
 
 @pytest.mark.feature("mutation-timeout-without-killer")
@@ -244,3 +252,28 @@ def test_a_retry_collection_error_kills_the_mutant(engine: Any, monkeypatch: pyt
         engine.run()
     assert caught.value.args == (1,)
     assert SourceFileMutationData.register_pid is original
+
+
+@pytest.mark.feature("mutation-timeout-without-killer")
+def test_engine_cleanup_stops_the_replacement_and_other_original_children(engine: Any) -> None:
+    engine.forks = [12, 14, 13]
+    engine.exits = [(12, 24 << 8)]
+    engine.interrupt = True
+    original_stop = SourceFileMutationData.stop_children
+
+    def cli(args: list[str]) -> None:
+        for key in [engine.name, engine.name.replace("__mutmut_1", "__mutmut_2")]:
+            pid = engine.runner.os.fork()
+            engine.data.register_pid(pid=pid, key=key)
+        try:
+            engine.runner.os.wait()
+        except KeyboardInterrupt:
+            engine.data.stop_children()
+            raise
+
+    engine.runner.cli = cli
+    with pytest.raises(KeyboardInterrupt):
+        engine.run()
+    assert engine.signals[:2] == [(13, signal.SIGTERM), (14, signal.SIGTERM)]
+    assert set(engine.signals) == {(13, signal.SIGTERM), (14, signal.SIGTERM)}
+    assert SourceFileMutationData.stop_children is original_stop
