@@ -3697,6 +3697,22 @@
       ]
     },
     {
+      "id": "planner-enhancement-prompt",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-enhance-prompt",
+      "behaviour": "A plan lane task that enhances a thin task gets its own spawn prompt naming the target, the rules the thin check failed and the steps to scout it, write one anchored plan section with seams, the six recon headings, the pull request body sections and a Done when sentence, publish it into the target's phase, set the target's plan slice and description and close with swarm done, and its steering pastes the target's title, phase, territory and description, or tells the planner to block when the target is missing from the ledger; a phase plan prompt stays byte identical to its recorded golden and its steering carries no target block.",
+      "seam": "The spawn prompt in scripts.swarm.prompt through its task step builder, and the steering text in scripts.swarm_ledger.ledger_workspace",
+      "tests": [
+        "tests/swarm/test_enhance_prompt.py::test_phase_plan_prompt_matches_its_golden_byte_for_byte",
+        "tests/swarm/test_enhance_prompt.py::test_phase_plan_steering_carries_no_enhancement_block",
+        "tests/swarm/test_enhance_prompt.py::test_enhancement_prompt_names_target_failed_rules_and_every_step",
+        "tests/swarm/test_enhance_prompt.py::test_enhancement_prompt_matches_its_golden_byte_for_byte",
+        "tests/swarm/test_enhance_prompt.py::test_enhancement_steering_pastes_target_title_description_territory_and_phase",
+        "tests/swarm/test_enhance_prompt.py::test_enhancement_steering_names_a_target_missing_from_the_ledger",
+        "tests/swarm/test_enhance_prompt.py::test_enhancement_steering_leaves_unset_target_fields_blank"
+      ]
+    },
+    {
       "id": "swarm-claim-lives",
       "origin": "inventory",
       "behaviour": "Every claim the tick makes spends one agent life; a fourth claim is refused and the task blocked for the master.",
