@@ -37,12 +37,12 @@ def group(
         "    status: Healthy\n"
         "    nodeCounts:\n"
         "      registered:\n"
-        f"        total: {ready}\n"
+        f"        total: {ready + 1}\n"
         f"        ready: {ready}\n"
-        "        notStarted: 0\n"
+        "        notStarted: 1\n"
         f"      longUnregistered: {late}\n"
         "      unregistered: 0\n"
-        "    cloudProviderTarget: 7\n"
+        "    cloudProviderTarget: 6\n"
         "    minSize: 0\n"
         "    maxSize: 7\n"
         '    lastProbeTime: "2026-11-21T06:00:00Z"\n'
@@ -65,7 +65,7 @@ def status(*groups: str) -> str:
 def alert(count: int, reason: str, name: str = POOL, ready: int = 5, late: int = 0) -> str:
     return (
         f"Cluster autoscaler node group {name} (min 0, max 7 nodes) has {count} failed scale ups in a row, "
-        f"last failure: {reason}. {ready} of 7 target nodes are ready and {late} launched instances are past the "
+        f"last failure: {reason}. {ready} of 6 target nodes are ready and {late} launched instances are past the "
         "join budget."
     )
 
@@ -211,6 +211,27 @@ def test_an_open_autoscaler_alert_holds_a_second_raise_and_other_alerts_do_not(
 
 
 @pytest.mark.feature("swarm-autoscaler-scale-up-alert")
+def test_evidence_an_open_alert_held_back_raises_once_no_autoscaler_alert_is_open(
+    api: Callable[..., Api], store: RedisStore
+) -> None:
+    timed_out = failed(code="timeout", message=TIMED_OUT, name=OTHER, ready=2)
+    api(status(group(), timed_out), status(group(), timed_out), status(group(), timed_out))
+    ledger = Ledger()
+    assert autoscaler_watch.alert_pass("sw", store, ledger, {"alerts": [OPEN]}) == []
+    assert passes(store, ledger, 2) == [[f"raised the autoscaler alert for {OTHER}"], []]
+    assert ledger.raised == [("sw", "autoscaler", alert(1, f"timeout: {TIMED_OUT}", name=OTHER, ready=2))]
+
+
+@pytest.mark.feature("swarm-autoscaler-scale-up-alert")
+def test_held_evidence_of_a_group_that_recovered_raises_nothing(api: Callable[..., Api], store: RedisStore) -> None:
+    api(status(failed(code="timeout", message=TIMED_OUT, ready=5)), status(group(status="InProgress", ready=6)))
+    ledger = Ledger()
+    assert autoscaler_watch.alert_pass("sw", store, ledger, {"alerts": [OPEN]}) == []
+    assert autoscaler_watch.alert_pass("sw", store, ledger, {}) == []
+    assert ledger.raised == []
+
+
+@pytest.mark.feature("swarm-autoscaler-scale-up-alert")
 def test_recovery_closes_the_open_autoscaler_alert_once_every_group_recovered(
     api: Callable[..., Api], store: RedisStore
 ) -> None:
@@ -285,6 +306,16 @@ def test_the_count_survives_a_failed_read_and_raises_on_the_next_failure(
     ledger = Ledger()
     assert passes(store, ledger, 3)[2] == [RAISED]
     assert ledger.raised == [("sw", "autoscaler", alert(2, f"{REFUSED}: launch refused"))]
+
+
+@pytest.mark.feature("swarm-autoscaler-scale-up-alert")
+def test_each_node_group_record_lives_under_the_swarm_autoscaler_watch_key(
+    api: Callable[..., Api], store: RedisStore
+) -> None:
+    api(status(failed(since=EARLY)))
+    assert autoscaler_watch.alert_pass("sw", store, Ledger(), {}) == []
+    record = json.loads(store.redis.get(store.key("sw", "autoscaler-watch")))[POOL]
+    assert (record["count"], record["pair"], record["held"]) == (1, [EARLY, "launch refused"], False)
 
 
 @pytest.mark.feature("swarm-autoscaler-scale-up-alert")

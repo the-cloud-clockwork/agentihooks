@@ -15,7 +15,7 @@ RECOVERED = "every node group recovered"
 KEY = "autoscaler-watch"
 TIMEOUT = "timeout"
 FAILURES = (OSError, KeyError, TypeError, ValueError, yaml.YAMLError)
-FRESH: dict[str, Any] = {"count": 0, "pair": None, "ready": 0, "late": 0, "reason": "none"}
+FRESH: dict[str, Any] = {"count": 0, "pair": None, "ready": 0, "late": 0, "reason": "none", "held": False}
 ALERT = (
     "Cluster autoscaler node group {name} (min {low}, max {high} nodes) has {count} failed scale ups in a row, last "
     "failure: {reason}. {ready} of {target} target nodes are ready and {late} launched instances are past the join "
@@ -72,11 +72,9 @@ def counted(found: dict[str, Any], prior: dict[str, Any]) -> tuple[dict[str, Any
     return record, record["count"] >= 2 or failure[2] == TIMEOUT or found["late"] > prior["late"]
 
 
-def settle(slug: str, ledger: Any, doc: dict[str, Any], raised: dict[str, str], recovered: bool) -> list[str]:
-    """Raise one autoscaler alert for the groups with new evidence while none is open, or close the open one once
-    every group recovered, and return what was done."""
-    alerts: list[dict[str, Any]] = doc.get("alerts") or []
-    live = [a["id"] for a in alerts if a.get("source") == AUTOSCALER and a.get("state") != "done"]
+def settle(slug: str, ledger: Any, live: list[str], raised: dict[str, str], recovered: bool) -> list[str]:
+    """Raise one autoscaler alert for the groups with new or held evidence while none is open, or close the open ones
+    once every group recovered, and return what was done."""
     if raised and not live:
         ledger.raise_alert(slug, AUTOSCALER, " ".join(raised.values())[:MAX_OUTCOME])
         return [f"raised the autoscaler alert for {', '.join(raised)}"]
@@ -89,14 +87,17 @@ def settle(slug: str, ledger: Any, doc: dict[str, Any], raised: dict[str, str], 
 
 def alert_pass(slug: str, store: Any, ledger: Any, doc: dict[str, Any]) -> list[str]:
     """Return the actions of one autoscaler watch pass: count each node group's failed scale ups in a row in the
-    swarm Redis, raise the autoscaler alert on new evidence and close it once every group recovered. An unset setting
-    reads nothing and a failed read changes nothing."""
+    swarm Redis, raise the autoscaler alert on new evidence and close it once every group recovered. Evidence an open
+    autoscaler alert holds back stays on its group until a pass with no open alert raises it or the group recovers. An
+    unset setting reads nothing and a failed read changes nothing."""
     value = os.environ.get(SETTING)
     if not value:
         return []
     groups, why = node_groups(value)
     if why:
         return [f"read no autoscaler status from {value}: {why}"]
+    alerts: list[dict[str, Any]] = doc.get("alerts") or []
+    live = [a["id"] for a in alerts if a.get("source") == AUTOSCALER and a.get("state") != "done"]
     key = store.key(slug, KEY)
     prior = json.loads(store.redis.get(key) or "{}")
     records: dict[str, dict[str, Any]] = {}
@@ -104,10 +105,13 @@ def alert_pass(slug: str, store: Any, ledger: Any, doc: dict[str, Any]) -> list[
     recovered = True
     for found in groups:
         record, new = counted(found, prior.get(found["name"], FRESH))
+        healthy = not found["failure"] and found["late"] == 0 and record["count"] == 0
+        pending = new or (record["held"] and not healthy)
+        record["held"] = pending and bool(live)
         records[found["name"]] = record
-        if new:
+        if pending:
             raised[found["name"]] = ALERT.format(**found, count=record["count"], reason=record["reason"])
-        recovered = recovered and not found["failure"] and found["late"] == 0 and record["count"] == 0
-    actions = settle(slug, ledger, doc, raised, recovered)
+        recovered = recovered and healthy
+    actions = settle(slug, ledger, live, raised, recovered)
     store.redis.set(key, json.dumps(records))
     return actions
