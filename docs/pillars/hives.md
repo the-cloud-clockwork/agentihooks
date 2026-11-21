@@ -3172,7 +3172,7 @@ The feature map entry `events-outage-hold-hub-agents` lists the regression tests
 With `AGENTIHOOKS_DEPLOYMENT=distributed`, `agentihooks swarm spoke` runs the master lane spoke on the workstation,
 and `agentihooks hive run`, the worker hive image's last start step, runs beside its telemetry loop an eng, ci and
 plan spoke for every swarm on the `events` engine, leaving out the lanes in `HIVE_EXCLUDED`. The workstation spoke
-runs the same lane spokes for every lane. Legacy engine swarms get no lane spoke. Each new spoke logs
+runs the same lane spokes for every lane. Each new spoke logs
 `hive spoke for swarm <slug> lane <lane> takes swarm.<slug>.ready.<lane>`, and a stopped set of lane spokes logs
 why and starts again after 30 seconds. Spokes take work from the bus and bind to the hub's streams instead of
 creating them. Outside distributed mode `agentihooks swarm spoke` refuses, because the workstation then runs the

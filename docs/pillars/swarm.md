@@ -93,19 +93,21 @@ plan state, culture) on the first prompt, after compaction, when it changes and 
 
 ## Event driven engine
 
-Each swarm runs one of two engines, chosen by its `engine` setting:
-
-| Engine | Who starts lane agents |
-|---|---|
-| `legacy` (default) | The minute tick spawns, reaps and acknowledges agents itself. |
-| `events` | The hub offers ready tasks on the NATS JetStream bus and hives pull them. |
+Every swarm runs on the `events` engine: the hub offers ready tasks on the NATS JetStream bus and hives pull them.
+The tick launches no lane agent. `events` is the only value of the `engine` setting:
 
 ```bash
 agentihooks swarm <slug> set engine=events
-agentihooks swarm <slug> set engine=legacy   # switch back
 ```
 
-Swarms created before the setting existed read as `legacy`. Any other value is refused.
+- `swarm create` stores `events` and the repository origin of the `--repo` checkout.
+- Setting `engine=events` on a swarm without a stored origin reads the origin from its checkout. Without one it is
+  refused with `events engine requires a checkout with a Git origin or a stored repository origin`.
+- Any other value, `legacy` included, is refused with `engine must be events`. There is no rollback to the removed
+  legacy engine.
+- A config stored before events became the only engine loads as `events`, whatever its stored `engine` field says.
+  Move its stored fields and fill its origin with the
+  [stored engine migration](../reference/engine-migration.md).
 
 ### The life of a task
 
@@ -8051,6 +8053,10 @@ agentihooks doctor <slug> stop [--quote WORDS]
 - `start` takes the watched ledger as `<slug>`. It sets up the Doctor ledger `<slug>-doctor`, creates the Doctor swarm
   when none exists, links both ledgers, pairs the two masters as inbox peers and starts the Doctor, or reopens it when it
   was closed.
+- `--repo DIR` is the checkout a new Doctor swarm runs from; without it, the agentihooks checkout when it is a Git
+  checkout, else the linked bundle folder. A new Doctor stores the `events` engine and the repository origin of the
+  swarm it watches, else the origin of its own checkout. A later `start` leaves both as they are; see
+  [Doctor start](../reference/engine-migration.md#doctor-start) and the migration that moves an older Doctor.
 - `--max-eng-agents N` and `--max-ci-agents N` set the Doctor's engineer and CI lane caps. They apply to a new
   Doctor and to one already running, and are stored as pinned caps, the same as
   `agentihooks swarm <id> set max-eng-agents=N`. A `start` without them leaves a running Doctor's caps as they are.
