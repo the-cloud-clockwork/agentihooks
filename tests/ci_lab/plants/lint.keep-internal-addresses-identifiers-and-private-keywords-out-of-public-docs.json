@@ -1,0 +1,11 @@
+{
+  "gate": "lint/keep-internal-addresses-identifiers-and-private-keywords-out-of-public-docs",
+  "reason": "private-ipv4",
+  "edits": [
+    {
+      "path": "README.md",
+      "before": "# AgentiHooks\n",
+      "after": "# AgentiHooks\n\n192.168.1.10\n"
+    }
+  ]
+}
