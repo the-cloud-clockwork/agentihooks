@@ -72,8 +72,9 @@ def test_lab_names_the_control_port_of_the_lab_host_and_the_token_from_the_envir
         ("", ENVIRON, "the swarm has no lab url"),
         (URL, {}, "CI_LAB_CONTROL_TOKEN is not set on this host"),
         (URL, {lab_control.TOKEN: ""}, "CI_LAB_CONTROL_TOKEN is not set on this host"),
+        ("http://lab:port", ENVIRON, "the swarm lab url http://lab:port names no valid port"),
     ],
-    ids=["no-url", "no-token", "empty-token"],
+    ids=["no-url", "no-token", "empty-token", "bad-port"],
 )
 def test_lab_refuses_a_swarm_without_a_lab_or_a_host_without_a_token(
     url: str, environ: dict[str, str], why: str

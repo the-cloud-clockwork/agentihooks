@@ -32,14 +32,18 @@ class Lab(NamedTuple):
 
 def lab(url: str, environ: Mapping[str, str]) -> Lab:
     """Return the swarm's lab control routes on the control port of the host at ``url``, with this host's token;
-    refuse a swarm without a lab url or a host without a token."""
+    refuse a swarm without a lab url, a lab url naming no valid port or a host without a token."""
     if not url:
         raise LabError("the swarm has no lab url")
     token = environ.get(TOKEN) or ""
     if not token:
         raise LabError(f"{TOKEN} is not set on this host")
     parts = urlsplit(url)
-    host = parts.netloc.rsplit(":", 1)[0] if parts.port is not None else parts.netloc
+    try:
+        port = parts.port
+    except ValueError as error:
+        raise LabError(f"the swarm lab url {url} names no valid port") from error
+    host = parts.netloc.rsplit(":", 1)[0] if port is not None else parts.netloc
     return Lab(urlunsplit((parts.scheme, f"{host}:{CONTROL_PORT}", "", "", "")), token)
 
 
