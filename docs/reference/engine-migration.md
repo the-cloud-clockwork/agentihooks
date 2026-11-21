@@ -35,8 +35,8 @@ From an agentihooks checkout, with the Python environment the swarm uses:
 python -m scripts.swarm.engine_migration
 ```
 
-The command takes no arguments. `--help` prints the usage line, and any other argument exits with status 2. It prints
-one JSON object that maps each stored swarm id, in sorted order, to its outcome:
+The command takes no arguments. `--help` prints its help and exits 0, and any other argument exits with status 2.
+It prints one JSON object that maps each stored swarm id, in sorted order, to its outcome:
 
 ```json
 {"proj-a": "migrated: github.com/example-org/proj-a", "proj-a-doctor": "migrated: github.com/example-org/proj-a: dropped 7 stuck launches", "proj-b": "unchanged", "proj-c": "skipped: live legacy agents"}
@@ -60,7 +60,8 @@ The command connects through `scripts.swarm.store.connect`, so it reads the same
 | `redis://127.0.0.1:6379/0` | The default when neither URL applies; the database number is part of the URL |
 | `AGENTIHOOKS_SWARM_KEY_PREFIX` | The key root, `agentihooks` by default; swarm keys start with `<root>:swarm:` |
 
-The env files under `~/.agentihooks/` are loaded before the URL is chosen, so a value set there applies. Keep a URL
+The env files under `~/.agentihooks/` are loaded before the URL is chosen. A value set there applies unless the
+variable is already in the process environment, which wins. Keep a URL
 that carries a password in one of those files, never on the command line. The client connects with a 3 second
 timeout and pings Redis before the first read. To migrate another store, point the setting at it for one run:
 
@@ -89,7 +90,11 @@ The command checks each swarm in this order and stops at the first match:
 - An update that `RedisStore.update` refuses, such as one with an invalid stored scaling value, reports
   `skipped: <refusal>`. The config is written before any row is deleted, so a refused swarm keeps every row.
 - A migrated config is written through `RedisStore.update`, which rewrites every field of the config hash from the
-  loaded config. Only `engine` and `repo_origin` change value.
+  loaded config. The command sets `engine` and `repo_origin`; a field absent or empty in the hash is written with the
+  default the loader fills in.
+- Only swarm errors are reported per swarm. Any other failure while a swarm is read or written, such as a Redis error,
+  a malformed stored field or a launch row that is not JSON, stops the run with a traceback and prints no JSON. Swarms
+  handled before it keep their changes, and a rerun is safe.
 
 ## Repository origin
 
@@ -117,7 +122,9 @@ to the shared Git folder. It drops the scheme, the user name, a trailing `.git` 
 | `https://github.com/example-org/proj-a` | `github.com/example-org/proj-a` |
 | `ssh://git@git.example.com/team/tool.git` | `git.example.com/team/tool` |
 
-A missing folder, a folder without Git config or a checkout without an `origin` remote gives no origin.
+A missing folder, a folder without Git config or a checkout without an `origin` remote gives no origin. A port in
+the URL is read as part of the path: `https://git.example.com:8443/team/tool.git` gives
+`git.example.com/8443/team/tool`, and that value is stored.
 
 ### Worked example
 
@@ -158,15 +165,17 @@ reports plain `unchanged` after that.
 ## Doctor start
 
 ```bash
-agentihooks doctor <id> start [--repo DIR] [--max-eng-agents N] [--max-ci-agents N] [--quote TEXT]
+agentihooks doctor <id> start [--repo DIR] [--max-eng-agents N] [--max-ci-agents N] [--quote WORDS]
 ```
 
 The first start of a Doctor creates the swarm `<id>-doctor` with template `doctor`. Its `repo` is `--repo`, else the
 agentihooks checkout when it is a Git checkout, else the linked bundle folder. `swarm create` stores `engine: events`
 and that checkout's origin. Start then sets the Doctor's origin to the watched swarm's origin when the watched swarm is
-stored and has one, else to the Doctor's own. When neither exists, the config stays as created.
+stored and has one, else to the Doctor's own. When neither exists, the Doctor stays on `events` with an empty
+`repo_origin`, and the migration later reports it `skipped: no repository origin`.
 
-A later start of an existing Doctor does not change its engine or origin. To move an older Doctor, run the migration.
+A later start of an existing Doctor changes neither its engine nor its origin, and ignores `--repo`. To move an older
+Doctor, run the migration.
 
 ```bash
 agentihooks doctor proj-a start
@@ -202,6 +211,8 @@ set, as the command does. A migrated swarm answers `events` and a non-empty orig
 - A stored non-`events` swarm with agents stays skipped until its agents end; run the command again then.
 - No command sets an origin by hand. A swarm whose checkout has no `origin` remote, and whose watched swarm has none
   when it is a Doctor, stays skipped.
+- A remote URL with a port stores the port as a path segment (see [Origin of a checkout](#origin-of-a-checkout)).
+- A failure other than a swarm error stops the whole run (see [Outcomes](#outcomes)).
 - It writes only the config hash and the launch rows named above. Ledger data, bus streams and fencing state are
   untouched.
 

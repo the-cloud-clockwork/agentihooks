@@ -8055,8 +8055,9 @@ agentihooks doctor <slug> stop [--quote WORDS]
   was closed.
 - `--repo DIR` is the checkout a new Doctor swarm runs from; without it, the agentihooks checkout when it is a Git
   checkout, else the linked bundle folder. A new Doctor stores the `events` engine and the repository origin of the
-  swarm it watches, else the origin of its own checkout. A later `start` leaves both as they are; see
-  [Doctor start](../reference/engine-migration.md#doctor-start) and the migration that moves an older Doctor.
+  swarm it watches, else the origin of its own checkout. A later `start` leaves both as they are and ignores
+  `--repo`; see [Doctor start](../reference/engine-migration.md#doctor-start) and the migration that moves an older
+  Doctor.
 - `--max-eng-agents N` and `--max-ci-agents N` set the Doctor's engineer and CI lane caps. They apply to a new
   Doctor and to one already running, and are stored as pinned caps, the same as
   `agentihooks swarm <id> set max-eng-agents=N`. A `start` without them leaves a running Doctor's caps as they are.
