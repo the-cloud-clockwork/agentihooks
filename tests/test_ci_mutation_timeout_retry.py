@@ -58,6 +58,7 @@ def engine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
             return state.exit_code
 
         def run_tests(self, *, mutant_name: str | None, tests: list[str]) -> int:
+            assert mutant_name == state.environ.get("MUTANT_UNDER_TEST")
             return self.execute_pytest(tests)
 
     def cli(args: list[str]) -> None:
@@ -134,7 +135,13 @@ def engine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
 @pytest.mark.parametrize("status", [24 << 8, signal.SIGXCPU, 36 << 8, 152 << 8, 255 << 8])
 def test_a_hanging_killer_gets_one_retry_and_a_complete_result(engine: Any, status: int) -> None:
     engine.exits[0] = (12, status)
+    register_pid = SourceFileMutationData.register_pid
+    stop_children = SourceFileMutationData.stop_children
+    assert callable(register_pid)
+    assert callable(stop_children)
     engine.run()
+    assert SourceFileMutationData.register_pid is register_pid
+    assert SourceFileMutationData.stop_children is stop_children
     assert engine.results == [(12, 1)]
     assert engine.runner.os.pids == set()
     assert engine.runner.os.retries == {}
@@ -192,10 +199,12 @@ def test_the_retry_child_excludes_the_original_killer_after_a_sibling_overwrites
 def test_the_retry_child_preserves_a_surviving_result(engine: Any) -> None:
     engine.forks = [12, 0]
     engine.exit_code = 0
+    engine.runner.mutmut.duration_by_test[engine.tests[0]] = 2.0
+    engine.runner.mutmut.duration_by_test[engine.tests[2]] = 1.0
     with pytest.raises(ChildExit) as caught:
         engine.run()
     assert caught.value.args == (0,)
-    assert engine.runs == [(engine.name, [engine.tests[0], engine.tests[2]])]
+    assert engine.runs == [(engine.name, [engine.tests[2], engine.tests[0]])]
     assert engine.limits == [(7, (60, 61))]
 
 
