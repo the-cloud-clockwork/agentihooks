@@ -27,6 +27,8 @@ _DIAGNOSTICS = (
     ".coverage",
     ".stats/records.json",
     "unknown-trace/result.txt",
+    "hooks/generated.log",
+    "mutants/hooks/generated.log",
     "mutants/pyproject.toml",
     "mutants/mutmut-stats.json",
     "mutants/.coverage.stats",
@@ -96,6 +98,7 @@ def test_failure_before_workspace_setup_keeps_available_diagnostics(tmp_path: Pa
     source = tmp_path / "stats"
     _write(source / "run.log", "setup failed\n")
     _write(source / ".state/failed", "failure\n")
+    _write(source / "partial/changed-lines.json", "{}\n")
     destination = tmp_path / "evidence"
 
     stage(tmp_path / "checkout", source, destination)
