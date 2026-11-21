@@ -1,6 +1,6 @@
 {
   "gate": "lint/refuse-a-command-substitution-as-a-for-loop-word-list",
-  "reason": "a command substitution as a for loop word list",
+  "reason": "a for loop word list holds a command substitution: a command substitution as a for loop word list",
   "edits": [
     {
       "path": ".github/scripts/lock-test-deps.sh",

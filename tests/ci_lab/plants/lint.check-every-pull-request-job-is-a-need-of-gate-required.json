@@ -1,6 +1,6 @@
 {
   "gate": "lint/check-every-pull-request-job-is-a-need-of-gate-required",
-  "reason": "Gate Required drops the docs need, so the early queue gate no longer preserves the reviewed graded inventory",
+  "reason": "runs on pull requests but is not a need of Gate: Gate Required drops the docs need, so the early queue gate no longer preserves the reviewed graded inventory",
   "edits": [
     {
       "path": ".github/workflows/test.yml",

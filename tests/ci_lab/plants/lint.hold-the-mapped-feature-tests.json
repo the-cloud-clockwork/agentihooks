@@ -1,6 +1,6 @@
 {
   "gate": "lint/hold-the-mapped-feature-tests",
-  "reason": "a mapped behaviour test lost its matching feature marker",
+  "reason": "behaviour test requires matching feature marker: a mapped behaviour test lost its matching feature marker",
   "edits": [
     {
       "path": "tests/test_ci_pypi_retry.py",

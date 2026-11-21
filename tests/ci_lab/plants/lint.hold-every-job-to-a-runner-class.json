@@ -1,6 +1,6 @@
 {
   "gate": "lint/hold-every-job-to-a-runner-class",
-  "reason": "the table class no longer matches the job's runner",
+  "reason": "runs-on must be ubuntu-latest or the routed light runner: the table class no longer matches the job's runner",
   "edits": [
     {
       "path": ".github/runner-classes.json",

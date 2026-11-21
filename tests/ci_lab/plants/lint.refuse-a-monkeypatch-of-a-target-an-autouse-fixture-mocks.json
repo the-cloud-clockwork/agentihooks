@@ -1,6 +1,6 @@
 {
   "gate": "lint/refuse-a-monkeypatch-of-a-target-an-autouse-fixture-mocks",
-  "reason": "a monkeypatch of the target the autouse fixture mocks",
+  "reason": "which autouse fixture: a monkeypatch of the target the autouse fixture mocks",
   "edits": [
     {
       "path": "tests/test_claude_md_sanity.py",

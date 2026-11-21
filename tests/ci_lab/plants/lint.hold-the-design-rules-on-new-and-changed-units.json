@@ -1,6 +1,6 @@
 {
   "gate": "lint/hold-the-design-rules-on-new-and-changed-units",
-  "reason": "a changed function without its return annotation",
+  "reason": "lacks type hints on return: a changed function without its return annotation",
   "edits": [
     {
       "path": "scripts/ci_lab/run_static.py",

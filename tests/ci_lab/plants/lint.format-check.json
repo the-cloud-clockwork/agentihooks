@@ -1,6 +1,6 @@
 {
   "gate": "lint/format-check",
-  "reason": "ruff format would reformat the assignment",
+  "reason": "Would reformat: ruff format would reformat the assignment",
   "edits": [
     {
       "path": "scripts/ci_lab/run_static.py",

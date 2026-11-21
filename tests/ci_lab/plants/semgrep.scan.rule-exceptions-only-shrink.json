@@ -1,6 +1,6 @@
 {
   "gate": "semgrep/scan/rule-exceptions-only-shrink",
-  "reason": "a rule exception list grew",
+  "reason": "exceptions grew: a rule exception list grew",
   "edits": [
     {
       "path": ".semgrep/source-control-allowlist.json",

@@ -1,6 +1,6 @@
 {
   "gate": "lint/hold-the-size-and-complexity-limits",
-  "reason": "a function past seven parameters",
+  "reason": "PLR0913: a function past seven parameters",
   "edits": [
     {
       "path": "scripts/ci_lab/run_static.py",

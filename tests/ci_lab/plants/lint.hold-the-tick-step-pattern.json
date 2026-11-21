@@ -1,6 +1,6 @@
 {
   "gate": "lint/hold-the-tick-step-pattern",
-  "reason": "a new top level function in the tick module",
+  "reason": "adds def planted: a new top level function in the tick module",
   "edits": [
     {
       "path": "scripts/swarm/tick.py",

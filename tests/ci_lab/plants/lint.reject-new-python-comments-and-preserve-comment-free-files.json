@@ -1,6 +1,6 @@
 {
   "gate": "lint/reject-new-python-comments-and-preserve-comment-free-files",
-  "reason": "a new comment on a changed line",
+  "reason": "forbidden comment: a new comment on a changed line",
   "edits": [
     {
       "path": "scripts/ci_lab/run_static.py",

@@ -1,6 +1,6 @@
 {
   "gate": "lint/hold-the-locked-guard-tests",
-  "reason": "a locked guard test lost an assertion",
+  "reason": "changes or drops an assertion the base locks: a locked guard test lost an assertion",
   "edits": [
     {
       "path": "tests/test_secrets.py",

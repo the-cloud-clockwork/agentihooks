@@ -1,6 +1,6 @@
 {
   "gate": "semgrep/charts/a-chart-version-bump-leaves-every-pod-template-unchanged",
-  "reason": "the controller pod template carries the chart version",
+  "reason": "A pod template carries the chart version: the controller pod template carries the chart version",
   "edits": [
     {
       "path": "deploy/helm/agentihooks-swarm/templates/controller.yaml",

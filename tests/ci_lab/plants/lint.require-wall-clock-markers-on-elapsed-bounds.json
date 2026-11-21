@@ -1,6 +1,6 @@
 {
   "gate": "lint/require-wall-clock-markers-on-elapsed-bounds",
-  "reason": "an elapsed bound without its wall clock marker",
+  "reason": "requires pytest.mark.wall_clock: an elapsed bound without its wall clock marker",
   "edits": [
     {
       "path": "tests/test_deps_preflight.py",

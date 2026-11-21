@@ -1,6 +1,6 @@
 {
   "gate": "lint/hold-dead-code-in-hooks-and-scripts",
-  "reason": "a new function nothing calls",
+  "reason": "unused names: a new function nothing calls",
   "edits": [
     {
       "path": "scripts/ci_lab/run_static.py",

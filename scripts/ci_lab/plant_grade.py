@@ -66,7 +66,7 @@ def _verdict(rows: list[Mapping[str, Any]], pair: plant_proofs.Pair, planted: bo
     if len(checks) != len(rows):
         raise ValueError(f"{pair.name} grade has ambiguous gate checks")
     required = checks.pop("required")
-    gate = pair.gate.rsplit("/", 1)[0]
+    gate = pair.gate.rpartition("/")[0] or pair.gate
     expected = "failure" if planted else "success"
     failed = {gate for gate, check in checks.items() if check["conclusion"] != "success"}
     if (
@@ -79,7 +79,7 @@ def _verdict(rows: list[Mapping[str, Any]], pair: plant_proofs.Pair, planted: bo
         raise ValueError(f"{pair.name} {'plant' if planted else 'twin'} grade has the wrong verdict: {failed}")
     if planted:
         diagnostic = pair.reason.partition(":")[0]
-        output = checks[gate].get("output") or {"text": ""}
+        output = checks[gate].get("output") or {}
         if not re.search(rf"\b{re.escape(diagnostic)}\b", output.get("text") or ""):
             raise ValueError(f"{pair.name} plant grade lacks the expected diagnostic: {diagnostic}")
     return str(required["html_url"])

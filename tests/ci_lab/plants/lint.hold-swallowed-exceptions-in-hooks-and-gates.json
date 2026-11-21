@@ -1,6 +1,6 @@
 {
   "gate": "lint/hold-swallowed-exceptions-in-hooks-and-gates",
-  "reason": "a new except clause in hooks that only passes",
+  "reason": "S110: a new except clause in hooks that only passes",
   "edits": [
     {
       "path": "hooks/context/_strip.py",

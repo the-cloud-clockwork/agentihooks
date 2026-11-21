@@ -1,6 +1,6 @@
 {
   "gate": "semgrep/charts/charts-render-no-cronjob-outside-the-scheduler",
-  "reason": "the swarm chart renders a CronJob",
+  "reason": "A CronJob schedules work outside the agentihooks scheduler: the swarm chart renders a CronJob",
   "edits": [
     {
       "path": "deploy/helm/agentihooks-swarm/templates/auth.yaml",

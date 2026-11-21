@@ -1,6 +1,6 @@
 {
   "gate": "lint/pin-thresholds-floors-and-allowlists-against-the-base",
-  "reason": "the function length limit was raised",
+  "reason": "thresholds never loosen against the base: the function length limit was raised",
   "edits": [
     {
       "path": "scripts/size_limits.py",

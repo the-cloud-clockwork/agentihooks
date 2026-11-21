@@ -1,6 +1,6 @@
 {
   "gate": "lint/hold-ledger-write-doctrine-out-of-skills-rules-docs-and-prompts",
-  "reason": "new doc prose that calls a ledger write command",
+  "reason": "teaches a ledger write: new doc prose that calls a ledger write command",
   "edits": [
     {
       "path": "docs/reference/delivery-tiers.md",
