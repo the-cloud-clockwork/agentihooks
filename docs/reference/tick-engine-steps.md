@@ -1053,14 +1053,13 @@ first two rows; the pass edges tests belong to the entry
 | --- | --- | --- |
 | `scripts.tick.sites.TICK_HOOK_READS` | `agents` | `config`, `doc`, `rows` |
 | `scripts.tick.sites.TICK_HOOK_READS` | `tasks` | `config` |
+| `scripts.swarm.cli.WRAPPER_HOOK_READS` | `wrapper phases` | `doc` |
 | `scripts.swarm.cli.WRAPPER_HOOK_READS` | `wrapper relay` | `judged` |
 | `scripts.swarm.cli.WRAPPER_HOOK_READS` | `wrapper view` | `agents` |
 
-A site missing from its map may read no key. That includes `wrapper phases`,
-whose hook stores the pass state under `doc` and then reads `doc` back to
-record the open fixer branches for the panic sweep, so every pass that reaches
-that read logs `site hook wrapper phases read pass box doc without declaring it`
-under `observe` and raises from the hook under `enforce`. These maps hold plain
+A site missing from its map may read no key. The `wrapper phases` hook stores
+the pass state under `doc` and reads `doc` back to record the open fixer
+branches for the panic sweep, so its set holds `doc`. These maps hold plain
 keys, not domains. While a guarded hook runs on its
 thread, `PassBox.__getitem__`, `PassBox.get` and `PassBox.__contains__` pass the
 key to `hook_reads.seen`; listing, counting and copying the box are not
@@ -1093,7 +1092,8 @@ the site's reads in `TICK_HOOK_KEYS` or `WRAPPER_HOOK_KEYS`:
 `tests/tick/test_hook_reads.py` holds the observe warning for a tick site hook,
 the enforce exception for a wrapper site hook, the real tick `agents` and
 `tasks` hooks and wrapper `relay` and `view` hooks reading only their declared
-keys under `enforce`, both maps, `off` returning the hooks
+keys under `enforce`, the wrapper `phases` hook reading back the pass state it
+stores under `enforce`, both maps, `off` returning the hooks
 unwrapped, an unset or unknown value observing, reads outside a hook or after
 it ends going unchecked, and each of the three keyed reads reaching the guard.
 The feature map entry `swarm-tick-hook-reads` links them. The guard was
@@ -1777,7 +1777,7 @@ The delivered proof and limitations are recorded in
 | `test_pass_edges` names `reads pass <key> without needing its writer [<writers>]` | No listed writer is on the reader's `needs` path; add one of them, or a step that needs it, to the reader's `needs` |
 | `test_pass_edges` names `writes pass <key> without declaring it` | The step stores that key in the pass box; add `pass_domain("<key>")` to its `writes` |
 | `UndeclaredRead: step <name> reads pass value <key> it does not declare` from a tick pass or a test | Step `<name>` read `<key>` through its reader or its box view with no `pass:<key>` or `hook:<key>` domain in its `reads` or `writes`; declare it as shown under [Undeclared pass reads](#undeclared-pass-reads). A `<name>` of `hook <site>` comes from `test_recorded_passes_read_only_declared_values`: add the domain to that site's reads in `WRAPPER_HOOK_KEYS` or `TICK_HOOK_KEYS` |
-| `site hook <site> read pass box <key> without declaring it` as a warning from the `scripts.tick.hook_reads` logger | The live hook of `<site>` read `<key>` outside its set in `TICK_HOOK_READS` or `WRAPPER_HOOK_READS`; the read still answered. Declare the key as shown under [Site hook reads](#site-hook-reads). The line naming `wrapper phases` and `doc` comes from the phases hook's own read of the pass state it stored, described in that section |
+| `site hook <site> read pass box <key> without declaring it` as a warning from the `scripts.tick.hook_reads` logger | The live hook of `<site>` read `<key>` outside its set in `TICK_HOOK_READS` or `WRAPPER_HOOK_READS`; the read still answered. Declare the key as shown under [Site hook reads](#site-hook-reads) |
 | `UndeclaredHookRead: site hook <site> read pass box <key> without declaring it` | The same read with `AGENTIHOOKS_TICK_HOOK_READS=enforce`; declare the key as shown under [Site hook reads](#site-hook-reads) |
 | `<n> registered steps never ran: [<names>]` from the covering pass edges test | No scenario in `COVERING` runs the named steps; add a scenario that runs them to `COVERING`. See [The pass edges test](#the-pass-edges-test) |
 | A `test_pass_edges` case prints a thread dump at 45 seconds or its worker crashes at 60 seconds in CI | Each case replays one scenario, named in its id, and took at most 6.49 seconds when the split landed; that scenario's replay has slowed. A stack dump is one sample of where each thread was, not proof of a hang |
