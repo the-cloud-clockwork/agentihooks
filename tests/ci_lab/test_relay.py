@@ -865,6 +865,7 @@ def test_build_wires_the_relay_to_the_scheduler_grades_the_mirror_and_the_lab_ur
     assert (tmp_path / "deep" / "stores").is_dir()
     assert cast(relay.PullRequests, engine.ports.pulls(SLUG)).slug == SLUG
     assert cast(relay.Checks, engine.ports.checks(SLUG)).repo == SLUG
+    assert cast(relay.Checks, engine.ports.checks(SLUG)).registry is scheduler.registry
     assert engine.ports.checks(SLUG) is engine.ports.checks(SLUG)
     assert cast(relay.Checks, engine.ports.checks("acme/other")).repo == "acme/other"
     assert engine.grades(HEAD) == []
