@@ -64,7 +64,6 @@ TEST = "test"
 STATS = run_mutation.STATS
 MUTANT = "mutant"
 KILLED = "killed"
-LOCKFILE = "uv.lock"
 PYPROJECT = "pyproject.toml"
 INPUTS_BASE = "inputs.base"
 MASK = b"***"
@@ -171,7 +170,7 @@ class Mutation:
 
 def lockfile_digest(tree: Path) -> str:
     """Return the sha256 of the tree's lockfile, the key of its venv."""
-    return hashlib.sha256((tree / LOCKFILE).read_bytes()).hexdigest()
+    return hashlib.sha256((tree / venvs.LOCKFILE).read_bytes()).hexdigest()
 
 
 def _report(pod: Pod, record: Mapping[str, Any]) -> Path:
@@ -242,7 +241,7 @@ def tests(pod: Pod, suite: Suite, lease: Lease) -> Finished:
     ledger, on as many workers as its slots; the report counts the git and uv cache lookups it made."""
     with pod.trees.shared(lease.head) as ((tree,), fetched):
         venv, built = venvs.venv_for(lockfile_digest(tree), tree, pod.venvs, pod.build)
-        manifest = json.loads(suite.manifest.read_text())
+        manifest = json.loads(lease.unit.manifest)
         lab = run_tests.Lab(pod.runs, pod.ports, pod.whitelist, manifest, suite.flakes, pod.timeout, False)
         started = pod.clock()
         verdict = run_tests.run(lease.unit.members, tree, venv, lease.slots, lab)

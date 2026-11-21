@@ -151,6 +151,8 @@ FLOORS: dict[str, Timing] = {
     "knowledge warm": Timing(LIGHT_S, CRITICAL_S),
     "progress heads": Timing(LIGHT_S, CRITICAL_S),
     "lab capacity": Timing(_LEDGER_READ_S, CRITICAL_S),
+    "focus unclaimed": Timing(LIGHT_S, CRITICAL_S),
+    "view wait": Timing(CRITICAL_S, CRITICAL_S),
 }
 
 

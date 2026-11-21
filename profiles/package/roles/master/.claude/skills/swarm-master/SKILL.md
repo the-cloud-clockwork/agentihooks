@@ -65,6 +65,13 @@ passes the focus queue.
   task waits on joins the focus, so the queue can empty.
 - "Unfreeze": `unfreeze <target>` frees the task; it never focuses it, so it
   runs after the focus queue empties.
+- Focus and unfreeze print the claim gate verdict on every task under the
+  target. `NOTHING CLAIMABLE` means no agent starts work from it: fix what the
+  verdicts name or clear the focus before you report it as done.
+- Every loop, read every focus: `agentihooks api --slug <slug> get focus`. A
+  focus with `claimable` 0 or with `unclaimed_minutes` holds work; clear it or
+  fix what holds its tasks. A `focus unclaimed` finding names a focused,
+  claimable task no agent took for more than three ticks.
 
 ## Join
 

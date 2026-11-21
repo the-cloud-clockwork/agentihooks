@@ -1,0 +1,6 @@
+{
+  "hooks/context/credential_guard.py:hooks.context.credential_guard.x_verb_index:a4acc0ff172970d4460bce6bfec64d5e080ee4400cadbc4484c17adc5ab18976": {
+    "reader": "standards-reader",
+    "reason": "Changing the option-value bound from less than to less than or equal differs only when the index already equals the token count. The mutant advances to one beyond the end; both loop guards then fail and both paths return len(tokens). No indexing, helper call or other observable operation occurs between that increment and the identical return."
+  }
+}

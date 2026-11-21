@@ -82,7 +82,10 @@ def lab_push(root: Path, task: str, branch: str) -> str:
     return the grade url it names."""
     if not checkout.carry(checkout.at(root), os.environ):
         raise SwarmError(f"publish --via {LAB} needs {checkout.URL_ENV} naming the lab remote of this repository")
-    done = git_https.run(["git", "push", "-o", f"branch={branch}", LAB, f"HEAD:{GRADE_REFS}{task}"], cwd=root)
+    done = git_https.run(
+        ["git", "-c", "push.negotiate=true", "push", "-o", f"branch={branch}", LAB, f"HEAD:{GRADE_REFS}{task}"],
+        cwd=root,
+    )
     sys.stderr.write(done.stderr)
     found = GRADE_URL.search(done.stderr)
     if done.returncode or not found:
@@ -321,7 +324,7 @@ def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> d
             root = None if retired else existing(repository, scoped, agent)
             if root is None:
                 command = ["bash", str(stack.WT_SCRIPT), "new", "--repo", str(repository)]
-                if scoped.get("branch"):
+                if scoped.get("branch") and (scoped.get("pr_url") or remote_head(repository, scoped["branch"])):
                     command.extend(["--from", f"origin/{scoped['branch']}"])
                 output = execute(command, repository)
                 root = Path(output.splitlines()[-1])

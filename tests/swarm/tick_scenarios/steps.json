@@ -3,6 +3,9 @@
   "doc items map": [
    "running"
   ],
+  "focus unclaimed": [
+   "running"
+  ],
   "hive sweep": [
    "running"
   ],
@@ -28,6 +31,9 @@
    "running"
   ],
   "tick master": [
+   "running"
+  ],
+  "view wait": [
    "running"
   ],
   "workflow runner": [

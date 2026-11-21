@@ -1,0 +1,28 @@
+rules:
+  - id: tick-site-hook-waits-on-future
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A tick site hook or shut check, a method of a class in the tick pass modules, runs inline on the thread that
+      schedules every step of the pass, so one that waits on a future, such as the pass view build through
+      pass_view, holds every ready step until the wait ends. Wait in a tick step on its own step thread, as the view
+      wait step does, and keep the hook to work that answers at once.
+    paths:
+      include:
+        - /scripts/swarm/cli.py
+        - /scripts/tick/sites.py
+        - tick-site-hook-waits-on-future.py
+    patterns:
+      - pattern-either:
+          - pattern-inside: |
+              class $CLASS:
+                  ...
+          - pattern-inside: |
+              class $CLASS(...):
+                  ...
+      - pattern-either:
+          - pattern: $MODULE.pass_view(...)
+          - pattern: pass_view(...)
+          - pattern: $FUTURE.result(...)
+          - pattern: concurrent.futures.wait(...)
+          - pattern: wait(...)

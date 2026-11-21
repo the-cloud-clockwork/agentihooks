@@ -162,7 +162,9 @@ async def test_runner_keeps_dispatching_after_a_pass_without_the_dispatch_lock(
     assert capsys.readouterr().err == "scheduler pass ended: the lock moved\n"
 
 
-def test_supervisor_restarts_an_exited_runner_without_machine_timers(monkeypatch, tmp_path):
+def test_supervisor_restarts_an_exited_runner_without_machine_timers(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     from scripts.scheduler import service
 
     monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
@@ -176,7 +178,7 @@ def test_supervisor_restarts_an_exited_runner_without_machine_timers(monkeypatch
     stop.is_set.return_value = False
     monkeypatch.setattr(service, "Event", Mock(side_effect=AssertionError("supplied stop was ignored")))
     stop.wait.side_effect = [False, True]
-    service.supervise(stop)
+    assert service.supervise(stop) == 0
     assert spawn.call_count == 2
     assert [call.args[0] for call in spawn.call_args_list] == [
         [sys.executable, "-m", "scripts.scheduler.service", "run"],
@@ -187,7 +189,7 @@ def test_supervisor_restarts_an_exited_runner_without_machine_timers(monkeypatch
     assert all(not child.terminate.called for child in children)
 
 
-def test_supervisor_terminates_its_active_child_on_shutdown(monkeypatch, tmp_path):
+def test_supervisor_terminates_its_active_child_on_shutdown(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from scripts.scheduler import service
 
     monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
@@ -199,10 +201,24 @@ def test_supervisor_terminates_its_active_child_on_shutdown(monkeypatch, tmp_pat
     stop.is_set.return_value = False
     monkeypatch.setattr(service, "Event", Mock(side_effect=AssertionError("supplied stop was ignored")))
     stop.wait.return_value = True
-    service.supervise(stop)
+    assert service.supervise(stop) == 0
     child.terminate.assert_called_once_with()
     child.wait.assert_called_once_with()
     stop.wait.assert_called_once_with(1)
+
+
+def test_a_supervisor_stopped_before_starting_returns_success(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    monkeypatch.setattr(service, "revision", lambda root: "loaded")
+    spawn = Mock()
+    monkeypatch.setattr(service, "subprocess", SimpleNamespace(Popen=spawn))
+    stop = Event()
+    stop.set()
+
+    assert service.supervise(stop) == 0
+    spawn.assert_not_called()
 
 
 @pytest.mark.feature("scheduler-runner-reload-on-revision")

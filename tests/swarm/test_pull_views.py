@@ -1,5 +1,7 @@
+import contextvars
 import json
 import subprocess
+import threading
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
@@ -41,12 +43,13 @@ def test_distinct_pull_requests_share_a_bounded_graphql_request():
 
     def run(command, **kwargs):
         calls.append((command, kwargs))
-        count = 20 if len(calls) == 1 else 1
+        count = command[-1].count("resource(url:")
         return SimpleNamespace(
             returncode=0, stdout=json.dumps({"data": {f"p{i}": resource(f"h{i}") for i in range(count)}})
         )
 
     found = views(urls + urls, run)
+    calls.sort(key=lambda call: -call[0][-1].count("resource(url:"))
     assert len(calls) == 2
     assert len(found) == 21
     assert found[urls[1]].head == "h1"
@@ -886,3 +889,113 @@ def test_an_empty_read_never_asks_the_shared_cache_for_no_keys() -> None:
     refusing = SimpleNamespace(mget=lambda keys: pytest.fail("an empty read asked the shared cache for no keys"))
 
     assert views([], lambda *a, **k: pytest.fail("empty request"), refusing) == {}
+
+
+def batch_reply(command: list[str], **kwargs: Any) -> SimpleNamespace:
+    """Answer a batch document with an open pull request for each of its resources."""
+    count = command[-1].count("resource(url:")
+    return SimpleNamespace(
+        returncode=0, stdout=json.dumps({"data": {f"p{i}": resource(f"h{i}") for i in range(count)}})
+    )
+
+
+@pytest.mark.feature("tick-view-side-by-side-batches")
+def test_a_views_call_reads_its_batch_documents_at_the_same_time() -> None:
+    urls = [f"https://github.com/o/r/pull/{n}" for n in range(45)]
+    meeting = threading.Barrier(3, timeout=5)
+    queries: list[str] = []
+
+    def run(command: list[str], **kwargs: Any) -> SimpleNamespace:
+        queries.append(command[-1])
+        meeting.wait()
+        return batch_reply(command)
+
+    found = views(urls, run)
+
+    assert sorted(query.count("resource(url:") for query in queries) == [5, 20, 20]
+    assert all(found[url] is not None for url in urls)
+    assert found[urls[44]].head == "h4"
+
+
+def gated_pull(head: str, tree: str) -> dict[str, Any]:
+    """Return an open pull request whose head commit holds workflow tree ``tree`` and passed the gate."""
+    pr = resource(head)
+    commit = pr["commits"]["nodes"][0]["commit"]
+    commit["file"] = {"object": {"id": tree}}
+    commit["statusCheckRollup"] = {"contexts": {"nodes": [{"name": GATE, "conclusion": "SUCCESS"}], "pageInfo": {}}}
+    return pr
+
+
+@pytest.mark.feature("tick-view-side-by-side-batches")
+@pytest.mark.parametrize(
+    ("shared", "cached", "tree_reads"), [(True, True, 1), (True, False, 2), (False, True, 2), (False, False, 2)]
+)
+def test_batches_make_the_sequential_github_calls_for_their_workflow_trees(
+    shared: bool, cached: bool, tree_reads: int, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import fakeredis
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    urls = [f"https://github.com/o/r/pull/{n}" for n in range(25)]
+    cache = fakeredis.FakeRedis(decode_responses=True) if cached else None
+    queries: list[str] = []
+
+    def run(command: list[str], **kwargs: Any) -> SimpleNamespace:
+        query = command[-1]
+        queries.append(query)
+        if "nodes(ids:" in query:
+            trees = [tree for tree in ("tree1", "tree2") if f'"{tree}"' in query]
+            answer: dict[str, Any] = {
+                "nodes": [
+                    {"id": tree, "entries": [{"object": {"text": f"  gate:\n    name: {GATE}"}}]} for tree in trees
+                ]
+            }
+        else:
+            tree = "tree1" if shared or json.dumps(urls[0]) in query else "tree2"
+            answer = {f"p{i}": gated_pull(f"h{i}", tree) for i in range(query.count("resource(url:"))}
+        return SimpleNamespace(returncode=0, stdout=json.dumps({"data": answer}))
+
+    found = views(urls, run, cache)
+
+    assert len(queries) == 2 + tree_reads
+    assert sum("nodes(ids:" in query for query in queries) == tree_reads
+    assert all(found[url] is not None and found[url].gate_passed for url in urls)
+
+
+@pytest.mark.feature("tick-view-side-by-side-batches")
+def test_a_failed_batch_read_leaves_the_other_batch_read_once() -> None:
+    urls = [f"https://github.com/o/r/pull/{n}" for n in range(25)]
+    queries: list[str] = []
+
+    def run(command: list[str], **kwargs: Any) -> SimpleNamespace:
+        queries.append(command[-1])
+        if json.dumps(urls[0]) in command[-1]:
+            return SimpleNamespace(returncode=1, stdout="", stderr="")
+        return batch_reply(command)
+
+    found = views(urls, run)
+
+    assert len(queries) == 2
+    assert [found[url] for url in urls[:20]] == [None] * 20
+    assert all(found[url] is not None for url in urls[20:])
+
+
+READER: contextvars.ContextVar[str] = contextvars.ContextVar("reader", default="none")
+
+
+@pytest.mark.feature("tick-view-side-by-side-batches")
+def test_each_views_batch_reads_in_the_callers_context() -> None:
+    urls = [f"https://github.com/o/r/pull/{n}" for n in range(25)]
+    readers: list[str] = []
+
+    def run(command: list[str], **kwargs: Any) -> SimpleNamespace:
+        readers.append(READER.get())
+        return batch_reply(command)
+
+    token = READER.set("tick")
+    try:
+        views(urls, run)
+    finally:
+        READER.reset(token)
+
+    assert readers == ["tick", "tick"]

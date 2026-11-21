@@ -1553,6 +1553,139 @@ def test_a_measured_record_parses_each_closure_source_once(tmp_path: Path, monke
     assert calls == [["tests/test_measured.py"]]
 
 
+def _walked_lists(walked: list[str | list[str]]) -> list[list[str]]:
+    return [path for path in walked if isinstance(path, list)]
+
+
+@pytest.mark.feature("mutation-stats-shared-closure")
+def test_test_ids_sharing_one_dependency_list_walk_its_closure_once_per_collection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.ci_mutation import stats_cache
+
+    root = tmp_path / "repo"
+    dependencies = ["scripts/covered_0.py", "scripts/covered_1.py", "tests/test_shared.py"]
+    count = 20
+    _repository(
+        root,
+        {
+            "scripts/covered_0.py": "value = 1\n",
+            "scripts/covered_1.py": "value = 1\n",
+            "tests/test_shared.py": "".join(f"def test_{index:02d}():\n    pass\n" for index in range(count)),
+        },
+    )
+    entries = [f"tests/test_shared.py::test_{index:02d}" for index in range(count)]
+    walked: list[str | list[str]] = []
+    walk = stats_cache.test_inputs
+
+    def traced(
+        root: Path,
+        path: str | list[str],
+        modules: dict[str, str],
+        records: dict[str, tuple[str, set[str], list[ast.AST]]],
+        resources: dict[str, set[str]],
+        dynamic_imports: bool = True,
+        discovered: dict[str, set[str]] | None = None,
+    ) -> dict[str, str]:
+        walked.append(path)
+        return walk(root, path, modules, records, resources, dynamic_imports, discovered)
+
+    monkeypatch.setattr(stats_cache, "test_inputs", traced)
+    calls: list[list[str]] = []
+
+    def collect(chosen: list[str]) -> list[dict[str, object]]:
+        calls.append(chosen)
+        return [
+            {
+                "status": 0,
+                "tests": {},
+                "durations": dict.fromkeys(chosen, 1),
+                "cpu": 1,
+                "dependencies": {entry: list(dependencies) for entry in chosen},
+            }
+        ]
+
+    cache = tmp_path / "cache"
+    stats_cache.collect_cached_stats(root, cache, {}, entries, [], collect)
+    assert _walked_lists(walked) == [dependencies]
+    walked.clear()
+    stats_cache.collect_cached_stats(root, cache, {}, entries, [], collect)
+    assert calls == [entries]
+    assert _walked_lists(walked) == [dependencies]
+
+
+@pytest.mark.feature("mutation-stats-shared-closure")
+def test_distinct_dependency_lists_in_one_collection_keep_their_own_closures(tmp_path: Path) -> None:
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    _repository(
+        root,
+        {
+            "scripts/first.py": "value = 1\n",
+            "scripts/second.py": "value = 1\n",
+            "tests/test_first.py": "def test_first():\n    pass\n",
+            "tests/test_second.py": "def test_second():\n    pass\n",
+        },
+    )
+    first, second = "tests/test_first.py::test_first", "tests/test_second.py::test_second"
+    calls: list[list[str]] = []
+
+    def collect(chosen: list[str]) -> list[dict[str, object]]:
+        calls.append(chosen)
+        covered = {
+            first: ["scripts/first.py", "tests/test_first.py"],
+            second: ["scripts/second.py", "tests/test_second.py"],
+        }
+        return [
+            {
+                "status": 0,
+                "tests": {},
+                "durations": dict.fromkeys(chosen, 1),
+                "cpu": 1,
+                "dependencies": {entry: covered[entry] for entry in chosen},
+            }
+        ]
+
+    cache = tmp_path / "cache"
+    collect_cached_stats(root, cache, {}, [first, second], [], collect)
+    (root / "scripts/second.py").write_text("value = 2\n")
+    collect_cached_stats(root, cache, {}, [first, second], [], collect)
+    (root / "scripts/first.py").write_text("value = 2\n")
+    collect_cached_stats(root, cache, {}, [first, second], [], collect)
+    assert calls == [[first, second], [second], [first]]
+
+
+@pytest.mark.feature("mutation-stats-shared-closure")
+def test_the_discovery_digest_of_one_input_set_is_computed_once(tmp_path: Path) -> None:
+    from scripts.ci_mutation.stats_cache import StatsInputs
+
+    root = tmp_path / "repo"
+    _repository(
+        root,
+        {
+            "scripts/scan.py": "from pathlib import Path\n\n\ndef names():\n    return sorted(Path('data').glob('*.json'))\n",
+            "scripts/plain.py": "value = 1\n",
+            "data/a.json": "{}\n",
+        },
+    )
+    reads: Counter[str] = Counter()
+
+    class Counted(dict[str, set[str]]):
+        def __getitem__(self, key: str) -> set[str]:
+            reads[key] += 1
+            return super().__getitem__(key)
+
+    resources = {"data/": {"data/a.json"}, "data/a.json": {"data/a.json"}, "a.json": {"data/a.json"}}
+    inputs = StatsInputs(root, {}, resources, {}, discovered=Counted())
+    shared = {"scripts/scan.py": "same", "scripts/plain.py": "same"}
+    digest = inputs.discovery(shared)
+    assert inputs.discovery(dict(reversed(shared.items()))) == digest
+    assert reads == {"scripts/scan.py": 1, "scripts/plain.py": 1}
+    assert inputs.discovery({"scripts/plain.py": "same"}) != digest
+    assert reads == {"scripts/scan.py": 1, "scripts/plain.py": 2}
+
+
 def test_selected_test_ids_read_the_collected_stats_once_not_once_per_id(tmp_path):
     from scripts.ci_mutation.stats_cache import collect_cached_stats
 

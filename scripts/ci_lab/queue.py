@@ -169,6 +169,7 @@ class Queue:
                 "kind": unit.kind,
                 "key": unit.key,
                 "members": json.dumps(unit.members),
+                "manifest": unit.manifest,
                 "slots": need.slots,
                 "capabilities": json.dumps(sorted(need.capabilities)),
                 "state": "pending",
@@ -201,7 +202,12 @@ class Queue:
         return Job(
             id=job,
             head=record["head"],
-            unit=Unit(kind=record["kind"], key=record["key"], members=tuple(json.loads(record["members"]))),
+            unit=Unit(
+                kind=record["kind"],
+                key=record["key"],
+                members=tuple(json.loads(record["members"])),
+                manifest=record.get("manifest", ""),
+            ),
             requirement=Requirement(
                 slots=int(record["slots"]), capabilities=frozenset(json.loads(record["capabilities"]))
             ),
@@ -213,6 +219,32 @@ class Queue:
             grader=record["grader"],
             leased_ms=int(record.get("leased_ms", 0)),
         )
+
+    def restore_manifests(self, proposed: Mapping[str, str]) -> dict[str, str]:
+        with self.client.pipeline(transaction=False) as reading:
+            for job in proposed:
+                reading.hmget(_job(job), "head", "manifest")
+            found = reading.execute()
+        restored: dict[str, str] = {}
+        with self.client.pipeline() as writing:
+            for (job, manifest), (head, existing) in zip(proposed.items(), found):
+                restored[job] = existing or manifest
+                if head is not None and not existing:
+                    writing.hset(_job(job), "manifest", manifest)
+            writing.execute()
+        return restored
+
+    def slots(self, jobs: Sequence[str]) -> dict[str, tuple[int, int]]:
+        """Return the slots and lease start of each job whose record still exists, read with HMGET in one pipeline that
+        opens no transaction and builds no job; a job never leased starts at 0."""
+        pipe = self.client.pipeline(transaction=False)
+        for job in jobs:
+            pipe.hmget(_job(job), "slots", "leased_ms")
+        return {
+            job: (int(slots), int(leased or 0))
+            for job, (slots, leased) in zip(jobs, pipe.execute())
+            if slots is not None
+        }
 
     def token(self, job: str) -> str:
         return str(self.client.hget(_job(job), "token") or "")
