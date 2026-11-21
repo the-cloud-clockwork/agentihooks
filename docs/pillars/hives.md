@@ -878,7 +878,7 @@ Set them with `agentihooks hive set <id> key=value ...`, or on the ledger page's
 | `excluded` | comma list of lane roles or profiles, such as `master,frontend,qa` | `master` on `ui=no`, none on `ui=yes` | Work the hive never takes. An empty value excludes nothing. |
 | `master-swarms` | comma list of swarm slugs | none | Swarms whose masters the hive takes although it excludes `master`. Every other swarm still sees masters excluded. |
 | `prefer` | comma list of `role:rank` | none | Rank 1 is chosen first for that role; unranked hives come after ranked ones. |
-| `max-agents` | whole number, 0 or more, or `auto` | `auto` | A cap on the hive's agent ceiling. With no cap the ceiling is computed each tick from the hive's own heartbeat reading: the agents it runs plus the room the workstation host room rule gives its free memory less swap in use and its one minute load. A cap holds the ceiling lower; `0` scales the hive fully down, so the tick places no new agent there; `auto` clears it. Placement admits no hive past the ceiling, and the headroom admission still applies beside it. With no cap and no fresh reading the ceiling reads `unknown`. Masters do not count against it. A stored value is kept. |
+| `max-agents` | whole number, 0 or more, or `auto` | `auto` | A cap on the hive's agent ceiling. With no cap the ceiling is computed each tick from the hive's own heartbeat reading: the agents it runs plus the room the workstation host room rule gives its free memory less swap in use and its one minute load. A cap holds the ceiling lower; `0` scales the hive fully down, so the tick places no new agent there; `auto` clears it. Placement admits no hive past the ceiling, and the headroom admission still applies beside it. With no cap and no fresh reading the ceiling reads `unknown`. Masters do not count against it. A stored value is kept. On an `events` swarm the hub also holds every eng, ci and plan admission for a hive whose live worker executions reach the stored cap; see [Hive max agents on admission](#hive-max-agents-on-admission). |
 | `capabilities` | comma list of names, such as `headed` | none | What the machine offers beyond the defaults. A task with `needs` runs only on a hive that declares every capability it needs. |
 
 Every hive takes every agent type (master, eng, ci, plan, dispatch and any profile) unless the agent's lane role
@@ -2047,6 +2047,197 @@ and its detector with it. `legacy-spawn-events-coverage` is now a retired id in 
 | A task outside the focus is offered while the focus has open work | It is a Doctor fix phase task, or a focused task waits on it. Read its `phase`, and the `depends_on` and `parked_on` of the focused tasks. |
 | No offer for a task that looks ready | A claim hold, a recorded claimant or a wait holds it, or the swarm is not `running`; [Freeze and focus](swarm.md#freeze-and-focus) and `agentihooks swarm <slug> status` name the holds. |
 
+### Hive max agents on admission
+
+The hub enforces each hive's `max-agents` cap (see [Settings](#settings)) when it answers `admit` for an eng, ci or
+plan offer on an `events` swarm. It counts the hive's live worker executions across every swarm and, once the count
+reaches the cap, answers held instead of claiming the task. The spoke puts the offer back on the lane queue, so a hive
+below its cap takes it. Every new eng, ci and plan admission on an `events` swarm is checked against the hive's
+stored cap; `max-agents=auto` clears the cap, and with it the check, for that hive.
+
+Before pull request [#11125](https://github.com/the-cloud-clockwork/agentihooks/pull/11125) the hub's `admit` checked
+only the release, claims, lives and placement, and the spoke checked only its host room, so no hive's cap held on
+the `events` engine.
+
+#### When the hub holds
+
+`Admission.admit` runs the cap check last, after the release, kept admission, stopped claims, withdrawal, placement
+and lives checks have all let the offer through:
+
+1. On the root hive, it works out the slots kept for tasks only the root hive takes (see
+   [How the hub counts](#how-the-hub-counts)).
+2. It takes the hive's admission turn (see [The admission turn](#the-admission-turn)).
+3. When the asking hive already holds a live admission for this offer, it returns that admission unchanged. A live
+   admission another hive holds was refused earlier, with `already admitted to hive <hive>`.
+4. It counts the hive's live executions. When the count, with the kept root slots, reaches the cap, it logs one line
+   and answers `{"held": "<reason>"}`.
+5. Otherwise it claims the task, starts the execution, occupies the seat and marks the ledger row, all inside the
+   turn, then gives the turn back.
+
+A held answer writes nothing beyond taking and deleting the hive's turn key: no claim, no execution, no seat, no
+ledger write and no kept admission. The task stays `open` at the same claim generation. The hub logs:
+
+```text
+hub: events admission swarm=<slug> task=<task id> hive=<hive> refused: <reason>
+```
+
+The cap check and its turn give these reasons. Earlier checks in `admit` log their own refusals on the same line,
+such as `already admitted to hive <hive>` or `claims are stopped`.
+
+| Reason | Meaning |
+|---|---|
+| `<live> of <cap> agents on the hive` | The hive's live worker executions reach its cap. |
+| `<live> of <cap> agents on the hive with <n> kept for tasks only the root hive takes` | The root hive's live executions plus the slots it keeps for waiting tasks only the root hive takes reach its cap. |
+| `another admission for the hive is in progress` | Another admission held the hive's turn past the wait. |
+| `the hive's own admission of the offer is in progress` | An earlier ask from the same hive for the same offer still holds the turn. |
+
+#### How the hub counts
+
+`Admission._full` reads the hive record's stored `max_agents` on every admission, so a `hive set` applies to the next
+`admit` with no restart. It counts the executions in the hub's execution registry, for every swarm in its store, not
+only the asking swarm:
+
+| Execution | Counted |
+|---|---|
+| On the asking hive, lane eng, ci, plan or any other worker lane, in any state other than `ended` or `finished` | Yes, including a `starting` execution that has not launched yet |
+| With no hive recorded, when the asking hive is the root hive (`root`) | Yes. No other hive counts these. |
+| In lane `master` | No |
+| `ended` or `finished` | No |
+| On another hive | No |
+
+| Stored `max-agents` | Hub admission |
+|---|---|
+| `auto`, no cap stored | Never held for the count. The ceiling tick placement computes from the heartbeat reading is not used here; the spoke's own host room check still applies. |
+| `0` | Every admission held: `<live> of 0 agents on the hive`. |
+| A whole number `N` | Held once the live count, plus any kept root slots, is `N` or more. |
+
+The root hive also keeps slots for work only it can run. When the asking hive is `root` and the task could run on any
+hive, `Admission._reserved` counts one slot for each claimable task, in every `events` swarm, that only the root hive
+takes and can place: a task pinned to `root`, or a workstation task pinned to no hive. Those slots are added to the
+live count, and the reason names them. A task that only the root hive takes keeps no slot against itself, so it is
+admitted while the live count alone is below the cap.
+
+`agentihooks hive list` reads its `workers=` column from the agents each hive reports, while the hub counts the
+execution registry. Right after an admission the hub counts a `starting` execution the hive has not reported yet, so
+`workers=` can read lower than the hub's count for a short time.
+
+#### The admission turn
+
+Two hub serve threads, or two hub pods on one Redis, can answer `admit` for the same hive at once. Each counts under
+the hive's admission turn, a Redis key every pod shares, so only one of them claims the hive's last slot:
+
+| Property | Value |
+|---|---|
+| Key | `agentihooks:hive:<hive>:admitting`, the hive registry key with `:admitting`; `AGENTIHOOKS_SWARM_KEY_PREFIX` replaces `agentihooks` when set |
+| Value | `<offer key> <random token>`, the offer being admitted and a token only its holder knows |
+| Taken with | `SET` with `NX` and a 30,000 ms expiry (`TURN_MS`) |
+| Wait | 40 tries (`TURN_TRIES`), 0.05 seconds apart (`TURN_WAIT_S`), about two seconds |
+| Given back | When the count and claim end, deleted only while it still holds the holder's token |
+| Left by a crashed pod | Expires 30 seconds after it was taken |
+
+Each hive has its own turn, so admissions for different hives never wait on each other. When the wait runs out:
+
+| The turn is held by | Hub answer | The spoke |
+|---|---|---|
+| Another admission for the hive | Held with `another admission for the hive is in progress` | Treats it as any held answer, below |
+| The same hive's admission of the same offer, as when an ask is retried while the first is still running | Held with `the hive's own admission of the offer is in progress` | Raises `Unanswered`, keeps its claim `asked` and its launch slot, and asks `admit` again on the next poll, as for an unanswered ask |
+
+The same offer answer can also come from the withdrawal check: once the first admission claims the task, the
+readiness view reads the offer as withdrawn, and a repeat ask from the hive that admitted it is held this way while
+that admission still keeps the turn, then gets the kept admission.
+
+#### What the spoke does with a held answer
+
+`LaneTasks.request` raises `admission.Held` with the hub's reason, and the spoke acts on the held row of
+[What the spoke does after a failure](#what-the-spoke-does-after-a-failure); its poll returns `held`. A held answer
+to the ask a poll's recovery repeats for an `asked` claim sets the claim to `ready` and frees the slot without a
+nack, because that offer's delivery was already nacked. The spoke sends no `reopen`, because the hub kept no
+admission, and logs no `poll failed` line: the hub's `refused` line is the only record of a held offer. When the offer
+comes back, the first spoke to take it asks `admit` again, whichever hive it runs on.
+
+#### Setting the cap
+
+```bash
+# Cap the hive at four worker agents across every swarm
+agentihooks hive set pod-a max-agents=4
+agentihooks hive show pod-a | jq .max_agents        # 4
+
+# Take no new lane agents on the hive; running agents keep working
+agentihooks hive set pod-a max-agents=0
+
+# Remove the cap: hub admission no longer holds the hive for its count
+agentihooks hive set pod-a max-agents=auto
+agentihooks hive show pod-a | jq .max_agents        # null
+```
+
+`max-agents` takes a whole number or `auto`. An empty value is refused with
+`max-agents must be a whole number, not ''`. The cap holds only new admissions: lowering it below the hive's live
+count stops no running agent.
+
+#### Checking the cap on a live swarm
+
+```bash
+# Held admissions and their reasons on the hub
+kubectl -n <namespace> logs deployment/agentihooks-swarm-hub | grep 'agents on the hive'
+# hub: events admission swarm=<slug> task=<task id> hive=pod-a refused: 4 of 4 agents on the hive
+
+# Busy turns on the hub
+kubectl -n <namespace> logs deployment/agentihooks-swarm-hub | grep 'admission .* is in progress'
+
+# The hive's stored cap
+agentihooks hive show pod-a | jq .max_agents
+
+# Who holds the hive's admission turn, and its milliseconds left; GET prints nothing and PTTL prints -2 when nobody admits for it
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" GET agentihooks:hive:pod-a:admitting
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" PTTL agentihooks:hive:pod-a:admitting
+
+# The agents each hive reports, beside its cap
+agentihooks hive list
+```
+
+The cap works when a hive at its cap logs `refused: <cap> of <cap> agents on the hive` for each offer it asks for,
+no execution for those tasks appears on it, and another hive below its cap launches them.
+
+#### Hive cap limits
+
+- The hub holds only new lane admissions. A master spoke admits nothing on the hub, and masters never count.
+- The count covers every swarm on the hub's store, so one swarm's agents can hold another swarm's offers on a shared
+  hive.
+- A held answer does not reset the offer's delivery count. An offer every hive holds through its `max_deliver` (5)
+  deliveries is dead lettered by the NATS consumer on its sixth fetch, before any spoke sees it and without asking the
+  hub, so the task stays `open` and unclaimed at the same claim generation.
+- The turn values are constants in the hub code. A change to any of them is a code change.
+
+#### Hive cap guards
+
+- Feature `hub-admission-hive-max-agents` in `feature-map.json`. Its tests in `tests/hub/test_admission.py` cover a
+  hive at its cap and at a cap of `0` held with no claim, execution or ledger write; a hive below its cap or with no
+  cap admitted; workers that name no hive counted only for the root hive; two hub pods on one store that never admit
+  past the cap; and the turn key's expiry and per hive scope. `tests/hive/test_lanes.py` covers a held answer raising
+  `Held` with nothing launched, and `tests/hive/test_spoke.py` covers a held offer that stays queued and a hive below
+  its cap that takes it.
+- The Semgrep incident rule `admission-skips-hive-max-agents`, scoped to `scripts/hub/`: a `self._claim(...)` call
+  in an `admit` method with no earlier `if` that names `self._full(...)` is an error. Run it by hand with:
+
+```bash
+semgrep scan --config .semgrep-incidents/admission-skips-hive-max-agents.yml scripts/hub/
+semgrep --test --config .semgrep-incidents/admission-skips-hive-max-agents.yml \
+  .semgrep-incidents/admission-skips-hive-max-agents.py
+```
+
+#### Hive cap troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| A hive's spokes poll but launch no eng, ci or plan agent, and the hub logs `refused: <n> of <n> agents on the hive` | The hive's live worker executions, across every swarm, reach its `max-agents` | Expected. Wait for agents to finish, raise the cap with `agentihooks hive set <hive> max-agents=<n>`, or set `auto` to remove it. |
+| The hub holds a hive whose `hive list` `workers=` is below the cap | The hub counts executions of every swarm, including `starting` ones no hive report lists yet | Read the `refused` reason for the hub's count. A `starting` execution counts until it ends or finishes. |
+| The root hive is held with `with <n> kept for tasks only the root hive takes` while its live count is below the cap | Waiting tasks that only the root hive takes keep root slots from work any hive can run | Expected: those tasks take the slots. Raise the root hive's cap to run both. |
+| The root hive counts agents that name no hive | Workers with no hive recorded count for the root hive only | Expected; no other hive counts them. |
+| The hub keeps logging `refused: another admission for the hive is in progress` | Another admission for the hive held the turn for more than about two seconds, or a crashed pod left the key | Read `PTTL` on the turn key; a left key expires within 30 seconds. Find what slowed the admission in the hub's `late:` lines. |
+| The hive logs `poll failed (Unanswered: the hive's own admission of the offer is in progress)` | The hive's earlier ask for the same offer still holds the turn | Nothing to undo: the next poll asks again and launches that admission. |
+| A hive set to `max-agents=0` still runs agents | The cap holds only new admissions | Expected; running agents finish their work. |
+| `agentihooks hive set <hive> max-agents=` fails with `must be a whole number` | An empty value is not a cap | Use `max-agents=auto` to remove the cap. |
+
 ### When a launch fails
 
 An admission claims the task, starts its execution, occupies a seat and marks the ledger row `claimed` before the
@@ -2071,7 +2262,7 @@ The spoke reads its claim in `spoke-work` after the failure and acts on it. Whil
 | Outcome of the offer | Spoke claim after it | What the spoke asks the hub | The delivery |
 |---|---|---|---|
 | The `admit` ask gets no answer inside the 10,000 millisecond request wait | `asked`, owned by this hive; the launch slot in `spoke-pending` stays reserved | Nothing on this poll. The next poll asks `admit` again and receives the admission the hub kept | Nacked for `ack_wait_ms` |
-| The hub answers held: the hive is at its max agents, or another admission for the hive held its turn past the wait (`another admission for the hive is in progress`) | `ready`; the launch slot is freed | Nothing: the hub wrote no admission | Nacked for `ack_wait_ms`, so another hive may take it |
+| The hub answers held: the hive is at its max agents, or another admission for the hive held its turn past the wait (`another admission for the hive is in progress`); see [Hive max agents on admission](#hive-max-agents-on-admission) | `ready`; the launch slot is freed | Nothing: the hub wrote no admission | Nacked for `ack_wait_ms`, so another hive may take it |
 | The hub answers the `admit` ask with an error | `ready`; the launch slot is freed | `reopen` | Nacked for the backoff step |
 | The hive cannot start its Serena router after the hub admitted the offer | `ready`; the launch slot is freed | `reopen` | Nacked for the backoff step |
 | The runtime refuses the launch with `refused`, `ambiguous` or `unsupported` | `ready`; the launch slot is freed | `failed` with the harness and the runtime's detail, then `reopen` | Nacked for the backoff step |
