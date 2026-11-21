@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import threading
 import uuid
 from collections.abc import Mapping
 from contextlib import suppress
@@ -68,6 +69,7 @@ class Copies:
         self.held = held
         self.database = database
         self.generations: dict[str, int] = {}
+        self._writes = threading.Lock()
 
     def adopt(self, slug: str, generation: int) -> Entry | None:
         """The copy of the ledger when it is no newer than generation."""
@@ -79,9 +81,13 @@ class Copies:
 
     def keep(self, slug: str, entry: Kept, whole: bool) -> None:
         """Store entry as the copy after a whole load, or once the copy is BEHIND generations old."""
-        if whole or entry.generation - self.generations.get(slug, entry.generation) >= BEHIND:
-            write(path(self.held, (self.database, slug)), entry.generation, entry.text)
-            self.generations[slug] = entry.generation
+        with self._writes:
+            previous = self.generations.get(slug, entry.generation)
+            if entry.generation < previous:
+                return
+            if whole or entry.generation - previous >= BEHIND:
+                write(path(self.held, (self.database, slug)), entry.generation, entry.text)
+                self.generations[slug] = entry.generation
 
     def drop(self, slug: str) -> None:
         path(self.held, (self.database, slug)).unlink(missing_ok=True)

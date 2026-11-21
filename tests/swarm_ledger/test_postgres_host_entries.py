@@ -145,3 +145,34 @@ def test_a_deferred_older_copy_never_replaces_a_newer_generation(tmp_path: Path)
     stored = host_entries.read(host_entries.path(copies.held, ("database", "copy")), 200)
     assert stored is not None
     assert stored[1].state == {"new": True}
+
+
+@pytest.mark.feature("ledger-copy-after-commit")
+def test_a_successful_commit_runs_each_pending_host_copy_once(
+    connected: tuple[Any, Any, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository, connection, _ = connected
+    saved = Mock(wraps=repository.copies.keep)
+    monkeypatch.setattr(repository.copies, "keep", saved)
+    with connection:
+        connection.execute(sqlite.BEGIN)
+        repository._entry(connection, "copy")
+    connection.commit()
+    assert saved.call_count == 1
+
+
+@pytest.mark.feature("ledger-copy-after-commit")
+def test_a_rolled_back_purge_keeps_its_committed_host_copy(
+    connected: tuple[Any, Any, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository, connection, _ = connected
+    repository.copies.keep("copy", Copy(100, '{"saved":true}'), True)
+    monkeypatch.setattr(repository.copies, "adopt", lambda slug, generation: None)
+    monkeypatch.setattr(sqlite.outbox, "write", lambda *args: None)
+    with pytest.raises(RuntimeError, match="rollback"), connection:
+        connection.execute(sqlite.BEGIN_IMMEDIATE)
+        repository.purge("copy", connection)
+        raise RuntimeError("rollback")
+    stored = host_entries.read(host_entries.path(repository.copies.held, ("database", "copy")), 100)
+    assert stored is not None
+    assert stored[1].state == {"saved": True}
