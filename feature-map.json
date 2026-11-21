@@ -7345,6 +7345,7 @@
         "tests/swarm/test_trace_plan.py::test_without_a_recon_plan_naming_it_the_protection_piece_is_judged_by_the_classifier",
         "tests/swarm/test_trace_plan.py::test_the_protection_ruling_reaches_the_classifier_rule_and_asks_no_coverage",
         "tests/swarm/test_trace_plan.py::test_a_piece_appended_after_the_recon_plan_changed_retraces_every_piece",
+        "tests/swarm/test_trace_plan.py::test_a_piece_appended_under_the_same_recon_plan_is_traced_alone",
         "tests/swarm/test_trace_plan.py::test_a_changed_recon_plan_retraces_an_unchanged_plan_once_and_keeps_its_protection_piece"
       ]
     },

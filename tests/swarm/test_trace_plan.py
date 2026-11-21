@@ -512,6 +512,7 @@ def test_required_changelog_fragment_is_kept_without_scope_comment(ask, areas, k
 NAMED = (
     "- scripts/receipt.py, feature-map.json\n- tests/receipt/test_replay.py: the replay guard\n"
     "see feature-map.d/receipt.json.\ntests/../scripts/receipt.py\n`tests/quoted/test_x.py`\nold/tests/gates/test_build.py\n"
+    "tests/data/ABX\n"
 )
 
 
@@ -525,6 +526,7 @@ NAMED = (
         (("feature-map.d/receipt.json",), True),
         (("antoncore:tests/receipt/test_replay.py",), True),
         (("tests/quoted/test_x.py",), True),
+        (("tests/data/ABX",), True),
         (("tests/receipt/test_other.py",), False),
         (("tests/receipt/test_replay",), False),
         (("tests/rec",), False),
@@ -561,7 +563,7 @@ def test_without_a_recon_plan_naming_it_the_protection_piece_is_judged_by_the_cl
 def test_the_protection_ruling_reaches_the_classifier_rule_and_asks_no_coverage():
     fresh = [piece("Register the guard tests", "tests/receipt/test_replay.py")]
     ruled = trace_plan._params(fresh, 0, False, ["c-1"], NAMED)
-    judged = trace_plan._params(fresh, 0, False, ["c-1"])
+    judged = trace_plan._params(fresh, 0, False, ["c-1"], "")
     assert (ruled["pieces"][0]["ruling"], ruled["covers"]) == (True, [])
     assert (judged["pieces"][0]["ruling"], len(judged["covers"])) == (False, 1)
 
@@ -575,6 +577,17 @@ def test_a_piece_appended_after_the_recon_plan_changed_retraces_every_piece(ask)
     [(_, questions, _)] = fake.calls
     assert list(questions) == ["piece_0", "piece_1", "piece_2", "size"]
     assert [row["kept"] for row in later["pieces"]] == [True, True, True]
+
+
+@pytest.mark.feature("trace-plan-recon-protection")
+def test_a_piece_appended_under_the_same_recon_plan_is_traced_alone(ask):
+    ask(0.95, 0.0)
+    passed = trace_plan.trace([piece("a"), piece("b", "tests/x.py")], INTENT, None, named="tests/x.py")
+    fake = ask(0.95, score=None, start=2)
+    later = trace_plan.trace([piece("a"), piece("b", "tests/x.py"), piece("c")], INTENT, passed, named="tests/x.py")
+    [(_, questions, _)] = fake.calls
+    assert list(questions) == ["piece_2"]
+    assert later["pieces"][:2] == passed["pieces"] and later["recon"] == passed["recon"]
 
 
 @pytest.mark.parametrize(("p_yes", "kept"), [(0.3, True), (0.29, False), (0.0, False), (1.0, True)])

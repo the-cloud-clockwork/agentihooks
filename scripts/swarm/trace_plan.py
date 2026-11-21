@@ -150,15 +150,13 @@ def _covering(answers, covers, slot, covered):
     )
 
 
-def _row(
-    piece: Piece, probability: float | None, off_intent: float | None, authorized: str | None = None, named: str = ""
-) -> dict:
+def _row(piece: Piece, probability: float | None, off_intent: float | None, authorized: str | None, named: str) -> dict:
     kept = _kept(_ruling(piece.areas, named) or authorized is not None, probability, off_intent)
     row = {"what": piece.what, "areas": list(piece.areas), "why": piece.why, "probability": probability, "kept": kept}
     return row | ({"repo": piece.repo} if piece.repo else {}) | ({"authorized": authorized} if authorized else {})
 
 
-def _ruling(areas: tuple[str, ...], named: str = "") -> bool:
+def _ruling(areas: tuple[str, ...], named: str) -> bool:
     """True when code keeps the piece whatever the classifier says: clearances, one changelog fragment, or regression
     test and feature map areas the task's recon plan names."""
     return (
@@ -196,7 +194,7 @@ def _row_key(row):
     return Piece(row["what"], tuple(row["areas"]), row["why"]).key
 
 
-def _known(previous: dict, pieces: list[Piece], ids: list[str], state: dict, recon: str = "") -> list[dict]:
+def _known(previous: dict, pieces: list[Piece], ids: list[str], state: dict, recon: str) -> list[dict]:
     rows = previous.get("pieces") or []
     if previous.get("verdict") != PASS or len(rows) >= len(pieces) or previous.get("authorizations", []) != ids:
         return []
@@ -211,7 +209,7 @@ def _known(previous: dict, pieces: list[Piece], ids: list[str], state: dict, rec
     return list(rows)
 
 
-def _params(fresh: list[Piece], start: int, sized: bool, ids: list[str], named: str = "") -> dict:
+def _params(fresh: list[Piece], start: int, sized: bool, ids: list[str], named: str) -> dict:
     return {
         "pieces": [
             {"slot": start + i, "number": start + i + 1, "what": piece.what, "ruling": _ruling(piece.areas, named)}
@@ -320,7 +318,7 @@ def trace(pieces: list[Piece], state: dict, previous: dict | None, now_ms: int |
     try:
         output = runner.run(PURPOSE, {**state, "pieces": wire}, params, decider=decide)
     except ClassifierError:
-        rows = known + [_row(piece, None, None) for piece in fresh]
+        rows = known + [_row(piece, None, None, None, named) for piece in fresh]
         return _record(UNCHECKED, rows, previous.get("size") if known else None, [NO_ANSWER], "", False, base)
     result, off_intent = output.raw, output.thresholds["off_intent"]
     rows = known + [
