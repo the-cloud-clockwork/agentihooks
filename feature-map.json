@@ -11743,6 +11743,18 @@
       ]
     },
     {
+      "id": "hosted-lane-users-pinned",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2678",
+      "behaviour": "Every workflow or job that holds a shared hosted lane is a pinned lane user listed in the CI timing guide, every lane run queues and is never cancelled, and any other group that queues every run, such as the Lab check group per head sha, is a named serial group with its reason.",
+      "seam": "concurrency blocks of the workflows under .github/workflows, resolved for each trigger, and the lane user table of the CI timing guide",
+      "tests": [
+        "tests/test_ci_hosted_lanes.py::test_every_non_required_trigger_is_on_a_lane_or_excluded_with_a_reason",
+        "tests/test_ci_hosted_lanes.py::test_a_run_on_a_lane_queues_and_is_never_cancelled",
+        "tests/test_ci_hosted_lanes.py::test_the_ci_timing_guide_lists_every_pinned_lane_user"
+      ]
+    },
+    {
       "id": "swarm-harness-pin-guard",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-harness-pin-guard",
