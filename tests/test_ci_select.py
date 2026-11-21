@@ -449,39 +449,57 @@ def test_docs():
 
 def test_every():
     assert all(W['jobs'].values())
+"""
+UNNAMED = """\
+JOBS = load()['jobs']
 
 
-def test_cleared():
-    assert W['jobs']['lint']
+def test_opened():
+    pass
 
 
-def test_escaping():
-    assert W['jobs']['lint']
+def test_outside():
+    pass
+
+
+def test_unread():
+    pass
+
+
+def test_docs():
+    assert JOBS['docs']
 """
 READERS = {
     "tests/test_named.py": NAMED,
-    "tests/test_unnamed.py": "def test_opened():\n    pass\n\n\ndef test_outside():\n    pass\n\n\ndef test_unread():\n    pass\n",
+    "tests/test_unnamed.py": UNNAMED,
     "tests/test_basename.py": "SPECS = {'test.yml': {}}\n\n\ndef test_unit():\n    assert SPECS['test.yml']['jobs']['unit']\n",
 }
 RECORD = {
     "units": [],
     "tests": {
         "tests/test_named.py::test_lint": {"units": [], "files": [ci_select.WORKFLOW]},
-        "tests/test_named.py::test_cleared": {"units": [], "files": ["README.md"]},
-        "tests/test_named.py::test_escaping": {"units": [], "files": ["README.md"], "escapes": True},
         "tests/test_unnamed.py::test_opened[first]": {"units": [], "files": [ci_select.WORKFLOW]},
         "tests/test_unnamed.py::test_outside": {"units": [], "files": [], "outside": [ci_select.WORKFLOW]},
         "tests/test_unnamed.py::test_unread": {"units": [], "files": ["README.md"]},
         "tests/test_gone.py::test_gone": {"units": [], "files": [ci_select.WORKFLOW]},
     },
 }
-LINT_READERS = [
-    "tests/test_named.py::test_cleared",
-    "tests/test_named.py::test_escaping",
-    "tests/test_named.py::test_every",
-    "tests/test_named.py::test_lint",
+LINT_READERS = ["tests/test_named.py::test_every", "tests/test_named.py::test_lint"]
+UNNAMED_LINT_READERS = [
+    "tests/test_unnamed.py::test_opened",
+    "tests/test_unnamed.py::test_outside",
+    "tests/test_unnamed.py::test_unread",
 ]
 PAIR = "def test_a():\n    pass\n\n\ndef test_b():\n    pass\n"
+INVENTORY = """\
+import yaml
+
+
+def test_inventory():
+    workflow = yaml.safe_load(open('.github/workflows/test.yml'))
+    workflow['jobs']['unit']['needs'] = []
+    assert normalize({'test.yml': workflow})
+"""
 
 
 def commit_workflow(repo: Path, text: str, message: str) -> None:
@@ -577,6 +595,24 @@ def test_changed_jobs_compares_the_head_against_its_merge_base(repo: Path) -> No
             "def test_a(jobs):\n    assert jobs.get('lint') and W['jobs']['docs']\n",
             None,
         ),
+        ("def test_a():\n    assert W['jobs']['lint'] and normalize({'test.yml': W})\n", None),
+        (
+            "def test_a():\n    workflow = yaml.safe_load(TEXT)\n    jobs = workflow['jobs']\n"
+            "    assert jobs['lint'] and normalize({'test.yml': workflow})\n",
+            None,
+        ),
+        ("def test_a():\n    assert W['on'] and 'env' in W and W.get('jobs')['lint']\n", {"lint"}),
+        ("def test_a():\n    W['jobs']['lint']['needs'] = []\n    assert yaml.safe_dump(W)\n", None),
+        (
+            "def workflow():\n    return yaml.safe_load(TEXT)\n\n\ndef test_a():\n    assert workflow()['jobs']['docs']\n",
+            {"docs"},
+        ),
+        (
+            "def workflow():\n    return yaml.safe_load(TEXT)\n\n\n"
+            "def test_a():\n    assert workflow()['jobs']['docs'] and normalize(workflow())\n",
+            None,
+        ),
+        ("def test_a():\n    assert W['jobs']['lint'] and W.items()\n", None),
     ],
     ids=[
         "index",
@@ -597,6 +633,13 @@ def test_changed_jobs_compares_the_head_against_its_merge_base(repo: Path) -> No
         "referenced-helper",
         "returned-after-iteration",
         "fixture",
+        "document-handed-on",
+        "loaded-document-handed-on",
+        "document-other-keys",
+        "document-dumped",
+        "returned-document",
+        "returned-document-handed-on",
+        "document-items",
     ],
 )
 def test_definition_jobs_reads_the_jobs_a_test_indexes_by_name(body: str, read: set[str] | None) -> None:
@@ -615,15 +658,9 @@ def test_definition_jobs_covers_only_test_functions_and_classes() -> None:
 
 
 @pytest.mark.feature("ci-select-workflow-job-readers")
-def test_workflow_tests_offers_the_definitions_the_record_does_not_clear(repo: Path) -> None:
+def test_workflow_tests_offers_the_job_readers_of_each_named_or_recorded_file(repo: Path) -> None:
     write(repo, READERS)
-    assert ci_select.workflow_tests(repo, {"lint"}, RECORD) == {
-        "tests/test_named.py::test_escaping",
-        "tests/test_named.py::test_every",
-        "tests/test_named.py::test_lint",
-        "tests/test_unnamed.py::test_opened",
-        "tests/test_unnamed.py::test_outside",
-    }
+    assert ci_select.workflow_tests(repo, {"lint"}, RECORD) == {*LINT_READERS, *UNNAMED_LINT_READERS}
 
 
 @pytest.mark.feature("ci-select-workflow-job-readers")
@@ -651,19 +688,20 @@ def test_an_edit_outside_the_jobs_selects_every_workflow_test(repo: Path) -> Non
 
 
 @pytest.mark.feature("ci-select-workflow-job-readers")
-def test_a_recorded_workflow_reader_adds_its_reading_definitions_not_its_file(repo: Path) -> None:
+def test_a_recorded_workflow_reader_file_offers_each_definition_that_reads_a_changed_job(repo: Path) -> None:
     write(repo, READERS)
     assert ci_select.decide(repo, [ci_select.WORKFLOW], {}, 3, ci_select.Change(jobs={"lint"}), RECORD) == (
         "selected",
-        [
-            [
-                "tests/test_named.py::test_escaping",
-                "tests/test_named.py::test_every",
-                "tests/test_named.py::test_lint",
-                "tests/test_unnamed.py::test_opened",
-                "tests/test_unnamed.py::test_outside",
-            ]
-        ],
+        [[*LINT_READERS, *UNNAMED_LINT_READERS]],
+    )
+
+
+@pytest.mark.feature("ci-select-workflow-job-readers")
+def test_a_document_handed_on_beside_a_job_index_selects_its_reader_for_any_job_edit(repo: Path) -> None:
+    write(repo, {"tests/test_inventory.py": INVENTORY})
+    assert ci_select.decide(repo, [ci_select.WORKFLOW], {}, 3, ci_select.Change(jobs={"lint"})) == (
+        "selected",
+        [["tests/test_inventory.py"]],
     )
 
 

@@ -67,7 +67,6 @@ class Record(TypedDict):
     units: list[int]
     files: NotRequired[list[str]]
     outside: NotRequired[list[str]]
-    escapes: NotRequired[bool]
 
 
 class Change(NamedTuple):
@@ -175,6 +174,16 @@ def constant(node: ast.AST | None) -> str | None:
     return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
 
 
+def loads(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "yaml"
+        and "load" in node.func.attr
+    )
+
+
 def takes_jobs(node: ast.AST) -> bool:
     if isinstance(node, ast.Subscript):
         return constant(node.slice) == "jobs"
@@ -230,11 +239,18 @@ def holders(node: ast.AST, parents: dict[ast.AST, ast.AST], nodes: list[ast.AST]
 
 
 def read_jobs(nodes: list[ast.AST], parents: dict[ast.AST, ast.AST]) -> set[str] | None:
-    """The jobs the nodes index by constant name, following every name and function result holding a jobs mapping;
-    None when they take one any other way or index none, so they read every job."""
+    """The jobs the nodes index by constant name, following every name and function result holding a loaded YAML
+    document or a jobs mapping; None when they use a document other than by a constant key, take a jobs mapping any
+    other way or index no job, so they read every job."""
+    documents = [node for node in nodes if loads(node)]
+    for node in itertools.islice(documents, len(nodes)):
+        if job_key(node, parents) is None:
+            if not (held := holders(node, parents, nodes)):
+                return None
+            documents.extend(item for item in held if item not in documents)
     pending = [node for node in nodes if takes_jobs(node)]
     jobs: set[str] = set()
-    for node in pending:
+    for node in itertools.islice(pending, len(nodes)):
         if (job := job_key(node, parents)) is not None:
             jobs.add(job)
         elif held := holders(node, parents, nodes):
@@ -293,31 +309,20 @@ def definition_jobs(source: str) -> dict[str, set[str] | None]:
     }
 
 
-def definition(test: str) -> tuple[str, str]:
-    path, _, rest = test.partition("::")
-    return path, rest.partition("::")[0].partition("[")[0]
-
-
 def workflow_tests(root: Path, jobs: set[str], manifest: dict[str, Any] | None) -> set[str]:
-    """The top level test definitions, as file::name, that read a changed Tests workflow job or every job. A test file
-    naming the workflow offers each definition its dev record does not clear by recording it without opening the
-    workflow or starting a process the record cannot follow; another file offers the definitions its record shows
-    opening the workflow."""
+    """The top level test definitions, as file::name, that read a changed Tests workflow job or every job, in each test
+    file that names the workflow or that the dev record shows opening it."""
     records = cast(dict[str, Record], manifest["tests"]) if manifest is not None else {}
     opened = {
-        definition(test)
+        test_file(test)
         for test, found in records.items()
         if WORKFLOW in [*found.get("files", []), *found.get("outside", [])]
     }
-    escaped = {definition(test) for test, found in records.items() if found.get("escapes")}
-    cleared = {definition(test) for test in records} - opened - escaped
-    named = naming_tests(root, {WORKFLOW, Path(WORKFLOW).name})
     tests: set[str] = set()
-    for path in sorted(named | {path for path, _ in opened}):
+    for path in sorted(naming_tests(root, {WORKFLOW, Path(WORKFLOW).name}) | opened):
         if (root / path).is_file():
             for name, read in definition_jobs((root / path).read_text()).items():
-                offered = (path, name) not in cleared if path in named else (path, name) in opened
-                if offered and (read is None or read & jobs):
+                if read is None or read & jobs:
                     tests.add(f"{path}::{name}")
     return tests
 
