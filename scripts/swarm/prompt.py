@@ -49,6 +49,20 @@ RESTACK = (
     " Then run {me} restack in it: it rebases the parked work onto dev. On a conflict it lists the files: resolve "
     "them, run git rebase --continue, then run {me} restack again."
 )
+RECON_FIRST = (
+    "Before your first edit, in this order:",
+    "- Still valid scouter: launch the scouter sub agent to check, with evidence, that the task and the "
+    "architecture it assumes still hold on current dev. Outdated or not feasible: build nothing, send its finding "
+    'to the master by inbox and block the task with {me} block "<evidence>".',
+    "- Recon plan: launch scouter sub agents of more than one kind and, from their results, write recon.md in your "
+    "task work folder: at most 500 lines, six non empty headings in this order: What will be built, Code areas "
+    "touched, What might break, Regression tests, Resources needed, Protection plan. The regression tests and "
+    "feature map entries it adds for touched behaviour land in your pull request, written against the current code "
+    "before you modify it. A successor reads the recon.md its predecessor left.",
+    "- Traced plan: a planner sub agent writes plan.md in your task work folder, one piece per line "
+    "(- what | area, area | why); with no sub agent tool, write it yourself. Then run {me} "
+    "trace-plan: the build gate refuses every edit and commit before a passing verdict.",
+)
 CONTRACT_LABELS = (("must", "Must be true"), ("check", "Checked by"), ("judge", "Judged by"))
 OLDER_RECAPS = 3
 CARRIED = "hive_opening"
@@ -625,6 +639,11 @@ def task_steps(task: dict[str, Any], me: str, led: str, name: str, phase: str, a
         return resumed_steps(steps, naming.plain(name), task["branch"])
     if kind not in STACKED_KINDS:
         return continued(steps, name, task)
+    return [*(line.format(me=me) for line in RECON_FIRST), *stacked_kind_steps(task, steps, me, led, name)]
+
+
+def stacked_kind_steps(task: dict[str, Any], steps: list[str], me: str, led: str, name: str) -> list[str]:
+    """Return a code or ci task's numbered steps for a fresh, parked, stacked or continued claim."""
     if task.get("parked_on") and _verdict(task).get("continue_from") == "fresh":
         return [f"Start your worktree fresh from dev: {_verdict(task)['fresh_reason']}.", *steps]
     if task.get("parked_on") and task.get("branch") and task.get("stacked_base"):
