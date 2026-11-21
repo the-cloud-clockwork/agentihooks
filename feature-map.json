@@ -8048,7 +8048,13 @@
         "tests/swarm/test_merge_queue.py::test_the_master_queues_a_focused_urgent_pull_request_on_any_branch_with_no_spawn_stall",
         "tests/swarm/test_merge_queue.py::test_with_no_focus_open_the_master_queues_any_urgent_pull_request_with_no_spawn_stall",
         "tests/swarm/test_merge_queue.py::test_with_no_spawn_stall_the_master_is_refused_without_a_focused_urgent_task",
-        "tests/swarm/test_merge_queue.py::test_the_focused_urgent_route_never_opens_a_dequeue_for_the_master"
+        "tests/swarm/test_merge_queue.py::test_the_focused_urgent_route_never_opens_a_dequeue_for_the_master",
+        "tests/swarm/test_focused_urgent.py::test_an_open_urgent_task_inside_the_focus_is_the_task_of_its_pull_request",
+        "tests/swarm/test_focused_urgent.py::test_the_first_urgent_task_inside_the_focus_wins_over_an_earlier_one_outside_it",
+        "tests/swarm/test_focused_urgent.py::test_a_pull_request_without_an_open_focused_urgent_task_has_no_task",
+        "tests/swarm/test_focused_urgent.py::test_with_no_focus_open_any_urgent_task_is_the_task_of_its_pull_request",
+        "tests/swarm/test_focused_urgent.py::test_the_ledger_state_is_read_only_when_an_urgent_task_names_the_pull_request",
+        "tests/swarm/test_focused_urgent.py::test_focused_admits_a_task_inside_the_open_focus_or_any_task_with_no_focus_open"
       ]
     },
     {
