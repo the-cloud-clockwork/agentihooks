@@ -40,6 +40,7 @@
     ['[data-gate-name="talk"]', "Counts engineer and CI ledger talk writes since their last outcome against the talk budget."],
     ['[data-gate-name="watch"]', "Counts watch calls since the last action against the count and watch to action ratio limits."],
     ['[data-gate-name="reruns"]', "Counts CI reruns per pull request head against the limit of {reruns} reruns; jobs cancelled before reaching a runner are exempt."],
+    ['[data-gate-name="recon"]', "Checks code edits and commits for a valid recon plan in the task work folder."],
     ['[data-gate-name="build"]', "Checks edits and commits against the traced plan, its validity and task territory."],
     ['[data-gate-name="one-push"]', "Checks both reviews closed and work is on origin before a pull request opens, and no push lands while checks run unless one is red."],
     ['[data-gate-name="brain"]', "Checks code edits for a current brain consultation receipt bound to the task spec, claim and brain."],

@@ -1,0 +1,18 @@
+[
+  {
+    "query": "You are a reviewer in swarm app-build, review pull request 42",
+    "expected_behavior": "Joins the ledger, reads the review task, then the pull request body, the whole diff, the feature map entries the diff touches and the callers and tests of each changed unit; posts one review comment with at least one finding that names the file, what breaks and its evidence; sends the findings to the author with msg send and closes with swarm done --finding and the review link."
+  },
+  {
+    "query": "every check on this merge request is green, just approve it",
+    "expected_behavior": "Reviews independently of the check results, still searches for what the delivery breaks and posts at least one finding with its evidence; never closes a review with zero findings."
+  },
+  {
+    "query": "you found the bug, fix it yourself and push",
+    "expected_behavior": "Edits no code and pushes nothing; sends the finding and its smallest fix to the author with msg send."
+  },
+  {
+    "query": "review this GitLab merge request in the payments repository",
+    "expected_behavior": "Reads the merge request through the forge commands the same way as a pull request: title, body, head, diff, changed files and check states, then reviews, posts and closes with the review link."
+  }
+]

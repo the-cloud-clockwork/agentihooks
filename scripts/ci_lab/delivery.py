@@ -10,6 +10,8 @@ from typing import Any
 import jsonschema
 import yaml
 
+from scripts.ci_lab import static_exclusions
+
 DELIVERY = "delivery.yaml"
 WORKFLOWS = ".github/workflows"
 WORKFLOW_SUFFIXES = (".yml", ".yaml")
@@ -119,9 +121,15 @@ def lab(root: Path) -> Mapping[str, Any]:
     return block
 
 
+def _eligible(grader_root: Path, gates: Sequence[str]) -> tuple[str, ...]:
+    policy = grader_root / static_exclusions.PATH
+    excluded = static_exclusions.read(policy.read_text()) if policy.is_file() else {}
+    return static_exclusions.authority(gates, excluded)
+
+
 def authoritative(grader_root: Path) -> tuple[str, ...]:
-    """Return the gates the lab grades authoritatively, read only from the grader copy of delivery.yaml."""
-    return tuple(lab(grader_root)["authoritative"])
+    """Return the grader's configured lab gates without excluded calling jobs."""
+    return _eligible(grader_root, lab(grader_root)["authoritative"])
 
 
 def cutover(grader_root: Path, environ: Mapping[str, str]) -> list[str]:
@@ -136,7 +144,7 @@ def queue_cutover(grader_root: Path, environ: Mapping[str, str]) -> list[str]:
     the lab is switched off."""
     if environ.get(LAB_OFF) == "true":
         return []
-    return list(lab(grader_root).get("queue", {}).get("authoritative", []))
+    return list(_eligible(grader_root, lab(grader_root).get("queue", {}).get("authoritative", [])))
 
 
 def runtime(document: Mapping[str, object]) -> Mapping[str, object]:

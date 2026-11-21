@@ -82,7 +82,7 @@ def test_live_counts_every_unfinished_agent_by_lane():
             self.lane, self.state = lane, state
 
     agents = [Agent("eng"), Agent("eng"), Agent("eng", "finished"), Agent("ci"), Agent("master")]
-    assert quota_view.live(agents) == {"eng": 2, "ci": 1, "plan": 0}
+    assert quota_view.live(agents) == {"eng": 2, "ci": 1, "plan": 0, "review": 0}
 
 
 def test_codex_routing_left_is_its_week_left():

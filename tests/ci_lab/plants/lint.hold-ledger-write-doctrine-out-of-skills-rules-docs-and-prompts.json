@@ -1,0 +1,11 @@
+{
+  "gate": "lint/hold-ledger-write-doctrine-out-of-skills-rules-docs-and-prompts",
+  "reason": "teaches a ledger write: new doc prose that calls a ledger write command",
+  "edits": [
+    {
+      "path": "docs/reference/delivery-tiers.md",
+      "before": "# Delivery tiers\n",
+      "after": "# Delivery tiers\n\nRun agentihooks ledger --slug demo comment tasks/t1 done when it lands.\n"
+    }
+  ]
+}
