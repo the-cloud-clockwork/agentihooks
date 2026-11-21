@@ -201,6 +201,50 @@ def test_an_unfrozen_task_is_offered_again_once_the_dedupe_window_from_its_first
     assert queued(bus, "eng", snapshot(found)) == ["a"]
 
 
+@pytest.mark.feature("ready-urgent-offer-precedes-older-normal-offers")
+def test_a_later_urgent_offer_is_taken_before_older_normal_offers_queued_past_the_dedupe_window(
+    bus: Bus, clock: Clock
+) -> None:
+    readiness.publish(bus, snapshot(doc([task("n1"), task("n2")])), NOW)
+    clock.now += BusConfig().dedupe_window_ms
+    view = snapshot(doc([task("n1"), task("n2"), task("u", rank="urgent")]))
+    readiness.publish(bus, view, clock.now)
+    assert queued(bus, "eng", view) == ["u", "n1", "n2"]
+
+
+@pytest.mark.feature("ready-urgent-offer-precedes-older-normal-offers")
+def test_a_queued_task_that_turned_urgent_is_taken_before_the_older_normal_offer_ahead_of_it(
+    bus: Bus, clock: Clock
+) -> None:
+    readiness.publish(bus, snapshot(doc([task("n1"), task("u")])), NOW)
+    clock.now += BusConfig().dedupe_window_ms
+    view = snapshot(doc([task("n1"), task("u", rank="urgent")]))
+    assert readiness.publish(bus, view, clock.now) == ["ready:sw:n1:0"]
+    assert queued(bus, "eng", view) == ["u", "n1"]
+
+
+@pytest.mark.feature("ready-urgent-offer-precedes-older-normal-offers")
+def test_a_normal_offer_younger_than_the_dedupe_window_keeps_its_place_ahead_of_a_later_urgent_offer(
+    bus: Bus, clock: Clock
+) -> None:
+    readiness.publish(bus, snapshot(doc([task("n1")])), NOW)
+    clock.now += BusConfig().dedupe_window_ms - 1
+    view = snapshot(doc([task("n1"), task("u", rank="urgent")]))
+    assert readiness.publish(bus, view, clock.now) == ["ready:sw:u:0"]
+    assert queued(bus, "eng", view) == ["n1", "u"]
+
+
+@pytest.mark.feature("ready-urgent-offer-precedes-older-normal-offers")
+def test_a_hive_that_cannot_place_the_urgent_offer_still_takes_the_older_normal_offer(bus: Bus, clock: Clock) -> None:
+    readiness.publish(bus, snapshot(doc([task("n1")])), NOW)
+    clock.now += BusConfig().dedupe_window_ms
+    view = snapshot(doc([task("n1"), task("u", rank="urgent", hive="other")]))
+    readiness.publish(bus, view, clock.now)
+    queue = bus.queue(readiness.queue_name(SLUG, "eng"), QueuePolicy())
+    delivery = readiness.take(queue, view, 0, lambda event: readiness.placeable(event.data, "mine", lambda: []))
+    assert delivery is not None and delivery.event.key == "n1"
+
+
 def test_publish_uses_the_given_queue_policy(bus):
     policy = QueuePolicy(max_deliver=2)
     readiness.publish(bus, snapshot(doc([task("a")])), NOW, policy)

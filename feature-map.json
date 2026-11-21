@@ -9613,6 +9613,19 @@
       ]
     },
     {
+      "id": "ready-urgent-offer-precedes-older-normal-offers",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-urgent-offer-order",
+      "behaviour": "The hub readiness pass moves every waiting offer of a task that is neither urgent nor focused, queued ahead of an urgent or focused offer in its lane and at least one dedupe window old, behind that offer, so a seat freed by preemption goes to the urgent work; an offer younger than the window keeps its place, and a hive that cannot place the urgent offer still takes the normal one.",
+      "seam": "scripts.swarm.readiness.publish through WorkQueue.withdraw and WorkQueue.offer on the memory work queue, read back through readiness.take",
+      "tests": [
+        "tests/swarm/test_readiness.py::test_a_later_urgent_offer_is_taken_before_older_normal_offers_queued_past_the_dedupe_window",
+        "tests/swarm/test_readiness.py::test_a_queued_task_that_turned_urgent_is_taken_before_the_older_normal_offer_ahead_of_it",
+        "tests/swarm/test_readiness.py::test_a_normal_offer_younger_than_the_dedupe_window_keeps_its_place_ahead_of_a_later_urgent_offer",
+        "tests/swarm/test_readiness.py::test_a_hive_that_cannot_place_the_urgent_offer_still_takes_the_older_normal_offer"
+      ]
+    },
+    {
       "id": "hive-own-exit-subject",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-exited-own-subject",
