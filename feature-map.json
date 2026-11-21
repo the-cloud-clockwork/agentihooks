@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "credential-guard-refuses-brace-environ-leaves",
+      "origin": "regression",
+      "ordered_at": "2026-11-20",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-credential-guard-last-word-brace",
+      "behaviour": "The credential guard refuses a Bash command whose process environment path under proc carries a brace expansion in its last segment, either a whole group in that segment or a group opened in an earlier segment that closes there, and a brace word read from a proc working directory, the same way as the literal environ name.",
+      "seam": "hooks.context.credential_guard.leaf_names_environ, read by hooks.context.credential_guard.decide",
+      "tests": [
+        "tests/test_credential_guard.py::test_a_brace_in_the_last_segment_of_a_proc_environ_path_is_refused"
+      ]
+    },
+    {
       "id": "lab-worker-manifest",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2808",
@@ -7970,6 +7981,18 @@
         "tests/codex_session/test_attach.py::test_main_ends_the_default_viewer_once_its_server_exits",
         "tests/codex_session/test_attach.py::test_a_viewer_whose_seat_moved_on_is_stopped",
         "tests/codex_session/test_attach.py::test_a_connected_record_whose_server_process_died_stops_the_viewer"
+      ]
+    },
+    {
+      "id": "codex-viewer-waits-for-an-admitted-launch",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-pane-attach-refused",
+      "behaviour": "A native Codex viewer started on a hive pane while its execution is admitted, reading starting with an execution id but no harness or transport yet, keeps waiting until the Codex supervisor publishes harness codex and the app server transport and then attaches to the connected thread, instead of refusing with no app server and dropping the pane to a shell; a running execution with no harness and a classified Codex execution without the app server transport still refuse.",
+      "seam": "scripts.codex_session.attach.recorded read through attach.wait_attachable",
+      "rules": ["codex-attach-before-classification"],
+      "tests": [
+        "tests/codex_session/test_attach.py::test_an_admitted_execution_waits_for_its_harness_and_then_attaches",
+        "tests/codex_session/test_attach.py::test_a_classified_or_running_execution_without_an_app_server_still_refuses"
       ]
     },
     {
