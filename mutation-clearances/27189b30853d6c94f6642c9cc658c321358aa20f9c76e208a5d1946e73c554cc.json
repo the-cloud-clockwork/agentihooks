@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/plant_publish.py:scripts.ci_lab.plant_publish.x__tree:adcc29d428882138045d73f6455f5270fc0f0f1cd817cf3ee11c102e31e20582": {
+    "reader": "Standards",
+    "reason": "Dropping -z changes only the record terminator and path quoting of ls-tree output; _tree parses element zero of split on the tab, the mode, type and object header, which is identical with or without -z for its single path."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/plant_publish.py:scripts.ci_lab.plant_publish.x__commit:1cf540f6e66525fe07ba9828cb4d6132622e379e745627b2f5bdde9394125d5b": {
+    "reader": "Standards",
+    "reason": "prepare creates each published commit with one fixed message line, and validates names against a grammar excluding newlines. There is exactly one double-newline separator, so unlimited split preserves the whole message."
+  }
+}

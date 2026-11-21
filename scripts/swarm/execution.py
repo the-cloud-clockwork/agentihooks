@@ -77,10 +77,10 @@ def _archivable(row: dict) -> bool:
     )
 
 
-def _stale(row: dict[str, Any], head: dict[str, Any], listed: set[str]) -> bool:
+def _stale(row: dict[str, Any], head: dict[str, Any], newest: dict[str, Any], listed: set[str]) -> bool:
     current = row["generation"] >= head["generation"] and row["name"] in listed
     if row.get("state") in TERMINAL_STATES:
-        return not current
+        return not current and not (row["name"] in listed and newest is row)
     return row["generation"] < head["generation"] and row["name"] not in listed
 
 
@@ -131,13 +131,21 @@ class ExecutionRegistry:
         def move(doc: dict[str, Any]) -> Any:
             rows = {key: row for key, row in doc["executions"].items() if _archivable(row)}
             heads: dict[str, dict[str, Any]] = latest(rows.values(), "seat")
-            old = [key for key, row in rows.items() if _stale(row, heads[row["seat"]], listed)]
-            if not old and "archive_ref" in doc:
+            named: dict[str, dict[str, Any]] = latest(rows.values(), "name")
+            old = [key for key, row in rows.items() if _stale(row, heads[row["seat"]], named[row["name"]], listed)]
+            current = doc["executions"].keys() - set(old)
+            stale = [
+                key
+                for key, intent in doc["intents"].items()
+                if intent.get("execution_id") == key and key not in current
+            ]
+            if not old and not stale and "archive_ref" in doc:
                 return 0
             fencing.hydrate_archive(self.store, doc)
             for key in old:
                 doc["archive"][key] = doc["executions"].pop(key)
-                doc["intents"].pop(key, None)
+            for key in stale:
+                doc["intents"].pop(key)
             for row in doc["archive"].values():
                 row.get("profile_decision", {}).get("validation", {}).pop("source_blobs", None)
             return len(old)
@@ -175,8 +183,44 @@ class ExecutionRegistry:
 
     def put(self, slug: str, agent: AgentRecord) -> None:
         managed = _has_identity(agent) or self.managed(slug, agent.name)
+        if managed:
+            port = fencing.records(self.store, slug)
+            if not isinstance(port, fencing.WholeDocumentRecords) and self._unchanged(slug, agent, port):
+                return
         with _writes(slug):
             timing.timed(self._put, slug, agent, managed)
+
+    def _unchanged(self, slug: str, agent: AgentRecord, port: fencing.Records) -> bool:
+        if _invalid(slug, agent):
+            return False
+        from scripts.swarm import lease
+        from scripts.swarm.store import SwarmError
+
+        if (held := lease.EPOCH.get()) is not None and lease.stale(self.store, slug, held):
+            raise SwarmError(lease.STALE)
+        head = port.record(slug, fencing.BY_SEAT, agent.seat)
+        if head is None or head.value != agent.execution_id:
+            return False
+        row = port.record(slug, "executions", agent.execution_id)
+        if row is None:
+            return False
+        current = _record(cast(dict[str, Any], row.value))
+        if any(getattr(agent, field) != getattr(current, field) for field in IMMUTABLE):
+            return False
+        written, conflict = _resolve(current, agent)
+        if conflict or cast(dict[str, Any], written.runtime_target).get("pod_uid"):
+            return False
+        checked_head = port.record(slug, fencing.BY_SEAT, agent.seat)
+        checked_row = port.record(slug, "executions", agent.execution_id)
+        if (
+            checked_head is None
+            or checked_head.revision != head.revision
+            or checked_row is None
+            or checked_row.revision != row.revision
+            or (held is not None and lease.stale(self.store, slug, held))
+        ):
+            return False
+        return written == current
 
     def _put(self, slug: str, agent: AgentRecord, managed: bool) -> None:
         if managed or not self.store.project_legacy(slug, agent, lambda: self.named(slug, agent.name)):
@@ -237,7 +281,7 @@ class ExecutionRegistry:
             return current, previous
 
         current, previous = self._fenced(slug, admit, history=True)
-        removed = previous.name if previous and previous.name != current.name else ""
+        removed = previous.name if previous and previous.state != "finished" and previous.name != current.name else ""
         self._project(slug, (current.name, *((previous.name,) if previous else ())), current, removed=removed)
         return current
 
@@ -258,19 +302,49 @@ class ExecutionRegistry:
     def _update(self, slug: str, agent: AgentRecord) -> None:
         self.validate(slug, agent)
 
-        def change(doc: dict) -> tuple[AgentRecord, AgentRecord]:
+        def change(doc: dict[str, Any]) -> tuple[AgentRecord, AgentRecord]:
             current = occupants_of(doc).get(agent.seat)
             if not current or any(getattr(agent, field) != getattr(current, field) for field in IMMUTABLE):
                 self.conflict(slug, "stale or changed execution identity")
-            written = agent
-            if current.state == "finished" and written.state != "ended":
-                written = replace(written, state="finished")
-            if _read_before_ack(written.runtime_target, current.runtime_target):
-                written = replace(written, **{field: getattr(current, field) for field in LAUNCH_BINDING})
-            _check_binding(current.runtime_target, written.runtime_target, lambda message: self.conflict(slug, message))
-            self.check_uid(slug, written, doc)
-            if written != current:
-                doc["executions"][written.execution_id] = asdict(written)
+            if current.state == "ended":
+                return current, current
+            written = self._land(slug, doc, current, agent)
+            return written, current
+
+        written, current = self._fenced(slug, change)
+        if written != current:
+            self._project(slug, (written.name,), written, current)
+
+    def _land(self, slug: str, doc: dict[str, Any], current: AgentRecord, written: AgentRecord) -> AgentRecord:
+        written, conflict = _resolve(current, written, revive=True)
+        if conflict:
+            self.conflict(slug, "runtime target identity is immutable after binding")
+        self.check_uid(slug, written, doc)
+        if written != current:
+            doc["executions"][written.execution_id] = asdict(written)
+        return written
+
+    def revive(self, slug: str, agent: AgentRecord) -> None:
+        """Land an explicit resume onto its own execution even when that execution is ``ended``, carrying the same
+        identity routing store.put_agent uses: a legacy agent with no execution identity still lands through the
+        plain projection write; a stale write has no path to this method, only the deliberate revival a seat's own
+        resume constructs."""
+        managed = _has_identity(agent) or self.managed(slug, agent.name)
+        with _writes(slug):
+            timing.timed(self._revive_dispatch, slug, agent, managed)
+
+    def _revive_dispatch(self, slug: str, agent: AgentRecord, managed: bool) -> None:
+        if managed or not self.store.project_legacy(slug, agent, lambda: self.named(slug, agent.name)):
+            self._revive(slug, agent)
+
+    def _revive(self, slug: str, agent: AgentRecord) -> None:
+        self.validate(slug, agent)
+
+        def change(doc: dict[str, Any]) -> tuple[AgentRecord, AgentRecord]:
+            current = occupants_of(doc).get(agent.seat)
+            if not current or any(getattr(agent, field) != getattr(current, field) for field in IMMUTABLE):
+                self.conflict(slug, "stale or changed execution identity")
+            written = self._land(slug, doc, current, agent)
             return written, current
 
         written, current = self._fenced(slug, change)
@@ -383,6 +457,18 @@ def _validate_target(backend, target, refuse):
             refuse("runtime target identity must be a string")
 
 
+def _invalid(slug: str, agent: AgentRecord) -> bool:
+    if agent.runtime_backend not in ("local", "kubernetes"):
+        return True
+    if not is_seat(agent.seat) or not agent.seat.endswith(f"@{slug}"):
+        return True
+    if not isinstance(agent.runtime_target, dict):
+        return True
+    reasons: list[str] = []
+    _validate_target(agent.runtime_backend, cast(dict[str, Any], agent.runtime_target), reasons.append)
+    return bool(reasons)
+
+
 def _check_binding(previous, current, refuse):
     if set(previous) == {"host_id"} and set(current) == {"host_id", "process_namespace", "pid", "pid_start"}:
         if previous["host_id"] == current["host_id"]:
@@ -392,6 +478,28 @@ def _check_binding(previous, current, refuse):
             continue
         if previous.get(field) != current.get(field):
             refuse("runtime target identity is immutable after binding")
+
+
+def _binding_conflict(previous: dict[str, Any], current: dict[str, Any]) -> bool:
+    reasons: list[str] = []
+    _check_binding(previous, current, reasons.append)
+    return bool(reasons)
+
+
+def _resolve(current: AgentRecord, agent: AgentRecord, *, revive: bool = False) -> tuple[AgentRecord, bool]:
+    """Resolve an execution write, preserving ended records unless revival is explicit."""
+    if current.state == "ended":
+        if not revive:
+            return current, False
+    written = agent
+    if current.state == "finished" and written.state != "ended":
+        written = replace(written, state="finished")
+    if _read_before_ack(written.runtime_target, current.runtime_target):
+        written = replace(written, **{field: getattr(current, field) for field in LAUNCH_BINDING})
+    conflict = _binding_conflict(
+        cast(dict[str, Any], current.runtime_target), cast(dict[str, Any], written.runtime_target)
+    )
+    return written, conflict
 
 
 def _read_before_ack(written, stored):

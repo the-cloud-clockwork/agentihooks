@@ -1614,6 +1614,38 @@ def test_the_hub_admits_a_launch_for_a_hive_with_no_registry_record(
     assert capsys.readouterr().err == ""
 
 
+@pytest.mark.feature("hub-admission-pinned-hive")
+def test_the_hub_admits_a_launch_for_a_pinned_hive_on_an_older_release(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.hive import registry
+
+    _released(rig, monkeypatch, "2.17.825", "2.17.843")
+    registry.beat(rig.store.redis, "hive-a", {"pinned": "yes"})
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted is not None
+    assert admitted["hive"] == "hive-a"
+    assert capsys.readouterr().err == ""
+
+
+@pytest.mark.feature("hub-admission-pinned-hive")
+@pytest.mark.parametrize("pinned", ["no", "", "true"])
+def test_the_hub_refuses_a_hive_not_marked_pinned_yes_on_an_older_release(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], pinned: str
+) -> None:
+    from scripts.hive import registry
+
+    _released(rig, monkeypatch, "2.17.825", "2.17.843")
+    registry.beat(rig.store.redis, "hive-a", {"pinned": pinned})
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted == {"held": "release 2.17.825 below hub release 2.17.843"}
+    assert rig.store.claimant(SLUG, "t1") is None
+
+
 @pytest.mark.feature("hub-admission-carries-ledger-intent")
 def test_an_admitted_engineer_classifies_its_profile_on_the_hive_without_a_ledger_read(
     rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch

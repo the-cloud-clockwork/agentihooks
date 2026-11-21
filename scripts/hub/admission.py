@@ -22,6 +22,7 @@ from scripts.swarm import readiness, run_window, successor_fill
 from scripts.swarm.execution import TERMINAL_STATES
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError, connect
+from scripts.swarm_ledger.ledger_workspace import WORK_FOLDER
 
 ADMITTED = "spoke-admission"
 # Long enough for every redelivery of one offer; a reopen raises the claim generation, so a new offer has a new key.
@@ -29,7 +30,6 @@ ADMITTED_MS = 24 * 60 * 60 * 1000
 ANSWER_MS = account_slots.REQUEST_TIMEOUT_MS - 2_000
 TURN_MS, TURN_TRIES, TURN_WAIT_S = 30_000, 40, 0.05  # pragma: no mutate
 BUSY = "another admission for the hive is in progress"
-WORK_FOLDER = "work-folder"
 
 
 def release_key(text: str) -> Version | None:
@@ -207,10 +207,13 @@ class Admission:
         return admitted
 
     def _outdated(self, hive: str) -> str:
-        """The member release below the hub release it is refused for; empty when either release is unreported."""
+        """The member release below the hub release it is refused for; empty when either release is unreported or the
+        hive's own chart pinned it to its release."""
         from scripts.hive import registry
 
         record: Any = registry.show(self.store.redis, hive) or {}  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType, reportUnknownArgumentType]
+        if record.get("pinned") == "yes":
+            return ""
         member, hub = str(record.get("version")), updater.installed_version()
         reported, floor = release_key(member), release_key(hub)
         return f"release {member} below hub release {hub}" if reported and floor and reported < floor else ""

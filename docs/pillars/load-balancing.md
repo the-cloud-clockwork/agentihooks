@@ -95,6 +95,13 @@ response header carries the fable window.
    5% or less of its five hour window left, or with no upcoming week reset, sorts
    after every account that has one. Remaining ties go by harness, then account
    name.
+6. In a swarm, a new eng or ci agent that may run on either harness goes to
+   Codex while Codex holds under thirty percent of the live and already placed
+   eng and ci agents and an open Codex account has a free seat. Without a free
+   Codex seat, or when pinned Codex work reserves every free one, it goes to
+   Claude. A lane or task harness pin, a Claude only profile, a relaunch that
+   keeps its earlier harness, a profile with its own harness order and the plan
+   lane keep their own choice.
 
 When no account has a free place a swarm or hive slot launch fails. A launch
 outside both, such as the operator's own `agenti`, then takes the open account

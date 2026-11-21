@@ -36,6 +36,7 @@ python3 tests/chart_scheduler_state.py "$chart"
 python3 tests/chart_nats.py "$chart"
 python3 tests/chart_scratch_swarms.py "$chart"
 python3 tests/chart_hive_capabilities.py "$chart"
+python3 tests/chart_hive_pinned.py "$chart"
 
 finish() {
   status=$?

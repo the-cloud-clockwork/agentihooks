@@ -32,7 +32,7 @@ _RUNNERS = {".sh": ["bash"], ".bash": ["bash"], ".py": [sys.executable]}
 FILTER_SUFFIX = ".filter.yaml"
 JUDGE, LEDGER_WRITE, INBOX_SEND = "judge", "ledger_write", "inbox_send"
 SYNTHETIC_TOOLS = (JUDGE, LEDGER_WRITE, INBOX_SEND)
-_INDEX_VERSION = 2
+_INDEX_VERSION = 3
 _FRESH_NS = 2_000_000_000
 _CODE_ROOT = Path(__file__).resolve().parents[2]
 _UNSET = object()
@@ -109,12 +109,13 @@ def layer_dirs(state: dict, cwd: str | Path | None = None) -> tuple[list[tuple[s
     linked = profile_chain.linked_profiles(state)
     layers: list[tuple[str, Path]] = [("package", profile_chain.BUILT_IN_PROFILES / "package" / "conditions")]
     if bundle is not None:
-        layers.append(("bundle", bundle / ".claude" / "conditions"))
+        layers.append(("bundle", profile_chain.layer_root(bundle) / ".claude" / "conditions"))
     if shared is not None:
-        layers.append(("shared-bundle", shared / ".claude" / "conditions"))
+        layers.append(("shared-bundle", profile_chain.layer_root(shared) / ".claude" / "conditions"))
     if user is not None:
-        layers.append(("user-bundle", user / ".claude" / "conditions"))
-    for name, profile_dir in profile_chain.profile_dirs(bundle, profile_csv, linked, user, shared):
+        layers.append(("user-bundle", profile_chain.layer_root(user) / ".claude" / "conditions"))
+    chain = profile_chain.profile_dirs(bundle, profile_csv, linked, user, shared)
+    for name, profile_dir in profile_chain.unlayered(chain, (bundle, shared, user)):
         layers.append((f"profile:{name}", profile_dir / ".claude" / "conditions"))
     layers.append(("runtime", runtime_dir()))
     root = repo_root(cwd)
@@ -254,7 +255,7 @@ def _fresh(sig: list[int], now_ns: int) -> bool:
 
 
 def load_index(cwd: str | Path | None = None) -> dict:
-    """The condition index, rebuilt only when state.json or a condition dir changed."""
+    """The condition index, rebuilt only when state.json, a condition dir or a bundle.yml changed."""
     cache = _cache_path(repo_root(cwd))
     state_sig = _sig(profile_chain.state_path())
     try:
@@ -286,7 +287,8 @@ def _rebuild(cache: Path, state_sig: list[int], cwd: str | Path | None = None) -
     layers, probed = layer_dirs(state, cwd)
     entries, _invalid = scan_layers(_trusted_layers(layers, state)[0])
     index = build_index(entries)
-    dirs = [[str(d), _sig(d)] for _, d in layers]
+    manifests = [root / profile_chain.BUNDLE_MANIFEST for _, root in profile_chain.bundle_roots(state)]
+    dirs = [(str(d), _sig(d)) for d in [*(d for _, d in layers), *manifests]]
     now_ns = time.time_ns()
     if parsed and not _fresh(state_sig, now_ns) and not any(_fresh(sig, now_ns) for _, sig in dirs):
         record = {
@@ -1061,17 +1063,21 @@ def target_dir(scope: str, profile: str = "", cwd: str | Path | None = None) -> 
     state = profile_chain.read_state()
     if scope == "global":
         bundle = profile_chain.bundle_path(state)
-        return ("bundle", bundle / ".claude" / "conditions") if bundle else ("runtime", runtime_dir())
+        return (
+            ("bundle", profile_chain.layer_root(bundle) / ".claude" / "conditions")
+            if bundle
+            else ("runtime", runtime_dir())
+        )
     if scope == "user":
         user = profile_chain.user_bundle_path(state)
         if user is None:
             raise ConditionError("scope 'user' needs a linked user bundle")
-        return "user-bundle", user / ".claude" / "conditions"
+        return "user-bundle", profile_chain.layer_root(user) / ".claude" / "conditions"
     if scope == "shared":
         shared = profile_chain.shared_bundle_path(state)
         if shared is None:
             raise ConditionError("scope 'shared' needs a linked shared bundle")
-        return "shared-bundle", shared / ".claude" / "conditions"
+        return "shared-bundle", profile_chain.layer_root(shared) / ".claude" / "conditions"
     if scope == "profile":
         chain = profile_chain.profile_dirs(
             profile_chain.bundle_path(state),

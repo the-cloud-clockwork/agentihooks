@@ -93,19 +93,13 @@ plan state, culture) on the first prompt, after compaction, when it changes and 
 
 ## Event driven engine
 
-Each swarm runs one of two engines, chosen by its `engine` setting:
-
-| Engine | Who starts lane agents |
-|---|---|
-| `legacy` (default) | The minute tick spawns, reaps and acknowledges agents itself. |
-| `events` | The hub offers ready tasks on the NATS JetStream bus and hives pull them. |
+Every swarm runs the `events` engine: the hub offers ready tasks on the NATS JetStream bus and hives pull them.
+The `engine` setting takes only `events`, its default; any other value is refused, and every stored swarm reads as
+`events`.
 
 ```bash
 agentihooks swarm <slug> set engine=events
-agentihooks swarm <slug> set engine=legacy   # switch back
 ```
-
-Swarms created before the setting existed read as `legacy`. Any other value is refused.
 
 ### The life of a task
 
@@ -159,7 +153,7 @@ hive the execution stop with the retirement reason (see
 [Retiring a hub admitted agent](hives.md#retiring-a-hub-admitted-agent)). The tick still
 runs master failover and recovery, the orphan pass that reopens a claimed task whose claimant has no agent record
 and no claim, pane evidence, exits, verification, the dispatcher, master
-scaling and the promotion and release watches for both engines. Master agents are reaped by the tick under either engine.
+scaling and the promotion and release watches. Master agents are reaped by the tick.
 
 The hub offers eng, ci and plan tasks, and the spoke code is the same for every lane. With
 `AGENTIHOOKS_DEPLOYMENT=distributed`, a workstation runs the master lane spoke and the eng, ci and plan spokes with
@@ -4847,7 +4841,7 @@ The reasons, in the order of the pass stages that write them: the pull request r
 | `its head moved, so its checks are read again on the new head` | The head differs from the one the checks wait recorded, after a push or between the pass's two reads. The pass records the new head and holds for that tick. | Expected once per push. Only the new head's checks count from then on. |
 | `its required checks have not all finished` | A checks wait: a required check on the head is still queued, pending, expected or running. | Expected while checks run. Read `gh pr checks <url>`. |
 | `its <gate> never passed` | The checks resolved and no check failed, but the gate, for example `Gate — Required`, did not pass. A gate that ended skipped holds this way. | Read the gate job's run and rerun it when it was skipped or cancelled. |
-| `GitHub does not read every required check green on its head` | Both reads resolved green, but the [branch rule confirmation](#when-a-checks-wait-ends) did not confirm the head. A check the base branch rules require has not reported or passed; the confirmation's own read of the pull request named another head after a push, carried no head because its newest commit was not the head, or returned nothing during a GitHub read backoff or on an answer it could not parse; or a GitHub call of the confirmation failed. Only the failed call writes a line first, the `unread` line below. | With an `unread` line before it, fix the error that line names. Without one, check whether the head moved with `gh api repos/<owner>/<repo>/pulls/<number> --jq .head.sha`; a new head is judged on the next tick. A backoff clears on a later tick. When the hold stays, compare the required checks with `gh pr checks <url>` as [Troubleshooting a checks wait](#troubleshooting-a-checks-wait) shows. |
+| `GitHub does not read every required check green on its head` | Both reads resolved green, but the [branch rule confirmation](#when-a-checks-wait-ends) did not confirm the head. A check the base branch rules require has not reported or passed; the confirmation's own read of the pull request named another head after a push, carried no head because its newest commit was not the head, or returned nothing during a GitHub read backoff or on an answer it could not parse; or a GitHub call of the confirmation failed. The empty read and the failed call each write a line first, the `unread` lines below. | With an `unread` line before it that names an error, fix that error. One that names an empty read clears once the GitHub backoff or rate limit ends on a later tick. Without one, check whether the head moved with `gh api repos/<owner>/<repo>/pulls/<number> --jq .head.sha`; a new head is judged on the next tick. A backoff clears on a later tick. When the hold stays, compare the required checks with `gh pr checks <url>` as [Troubleshooting a checks wait](#troubleshooting-a-checks-wait) shows. |
 | `it waits in the merge queue` | The pass queued the pull request and the merge wait has no outcome yet. The pull request is still in the queue; or its second read, made when it reads outside the queue, returned nothing; or that read shows checks not all resolved; or the pass queued it less than five minutes ago and has never seen it inside the queue. See [Ready merge pass queue exits](#ready-merge-pass-queue-exits). | Expected while queued. Read `agentihooks swarm <id> merge state <url>`; when it shows the pull request outside the queue on several ticks, check that the tick process reaches GitHub. |
 | `a live agent still owns it` | The pass was going to reopen the task or release it to its proof, but an agent of the task is still running. | The reopen or release waits for that agent to end. When the refused reopen is the 20 minute green and unqueued reopen described below, the pass carries on with the same tick and can still queue the pull request. Read the task's claimant and its agents. |
 | `the ledger or its ready record changed before the swarm could release it` | The pass's guarded release changed nothing. The ledger task no longer matched what the pass read, for example after a new claim, or the ready record changed under it. | Read the task on the ledger. A new claimant owns the work from then on. |
@@ -4860,7 +4854,13 @@ When a GitHub call of the branch rule confirmation fails, `waits.required_green`
 required checks of <pull request url> unread: <error>
 ```
 
-That line comes from every caller of the confirmation, including `wait --on checks`. Before pull request [11992](https://github.com/the-cloud-clockwork/agentihooks/pull/11992), the confirmation swallowed this error and the merge pass returned no line, so a held task left no trace.
+When the confirmation's read of the pull request returns nothing, during a GitHub read backoff or rate limit or on an answer it could not parse, it writes this line before it returns not green:
+
+```text
+required checks of <pull request url> unread: empty pull request read; GitHub backoff or rate limiting may be active
+```
+
+Each line comes from every caller of the confirmation, including `wait --on checks`. Before pull request [11992](https://github.com/the-cloud-clockwork/agentihooks/pull/11992), the confirmation swallowed this error and the merge pass returned no line, so a held task left no trace.
 
 A released pull request that stays green, resolved, out of draft and out of the queue while the pass cannot queue it does not wait forever. After 20 minutes, not counting outage time, the task reopens with the action line `task <id> reopened, <url> stayed green and unqueued for <minutes> minutes while the merge pass could not queue it`. While an agent of the task is still running, the reopen is refused with `a live agent still owns it`, and the pass carries on with the same tick: when the checks wait then ends green, the pass still queues the pull request that tick. The hold lines written before it show why the pass could not queue it.
 
@@ -4885,7 +4885,8 @@ When more than one controller pod is running, `deploy/` picks one of them. Read 
 | Symptom | Check and action |
 |---|---|
 | A released green pull request is never queued, and each tick writes `GitHub does not read every required check green on its head` after `required checks of <url> unread: To get started with GitHub CLI, please run:  gh auth login` | The merge queue's gh calls ran without the signed token. See [Signed GitHub calls in the merge pass](#signed-github-calls-in-the-merge-pass). |
-| The same reason with no `unread` line before it | The head moved between the reads, GitHub reads were backing off, or a check the base branch rules require has not reported or passed on the head. Read the head with `gh api repos/<owner>/<repo>/pulls/<number> --jq .head.sha`. When the hold outlasts a backoff, compare the rules with `gh pr checks <url>`. |
+| The same reason with no `unread` line before it | The head moved between the reads, or a check the base branch rules require has not reported or passed on the head. Read the head with `gh api repos/<owner>/<repo>/pulls/<number> --jq .head.sha`, then compare the rules with `gh pr checks <url>`. |
+| The same reason after `required checks of <url> unread: empty pull request read; GitHub backoff or rate limiting may be active` | The confirmation's read of the pull request returned nothing while GitHub reads were backing off or rate limited, or on an answer it could not parse. A backoff clears on a later tick; when the line outlasts it, check that the tick process reaches GitHub. |
 | A released task stops writing hold lines and is never queued | Look for `task <id> left the merge pass` in the log. The pass writes it and clears `awaiting` when the task's state is no longer `pr`, or its ready record is missing or names an agent other than the claimant, and the pass no longer holds the task. Read the task's `state`, `awaiting` and claimant on the ledger. |
 | `a live agent still owns it` on every tick | An agent of the task is still running. Read the task's claimant and its agents; the pass reopens or releases the task once that agent ends. |
 | A task reopened with `stayed green and unqueued for <minutes> minutes` | Read the hold lines of the ticks before the reopen for the reason the pass could not queue it, then queue the head with `agentihooks swarm <id> merge queue <url>` once that reason is fixed. |

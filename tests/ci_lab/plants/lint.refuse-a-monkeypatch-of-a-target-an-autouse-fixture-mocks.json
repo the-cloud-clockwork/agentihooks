@@ -1,0 +1,11 @@
+{
+  "gate": "lint/refuse-a-monkeypatch-of-a-target-an-autouse-fixture-mocks",
+  "reason": "which autouse fixture: a monkeypatch of the target the autouse fixture mocks",
+  "edits": [
+    {
+      "path": "tests/test_claude_md_sanity.py",
+      "before": "\n\nclass TestClaudeMdSanity:\n",
+      "after": "\n\ndef test_planted(monkeypatch: pytest.MonkeyPatch) -> None:\n    \"\"\"Patch the target the autouse fixture mocks.\"\"\"\n    monkeypatch.setattr(\"hooks.context.claude_md_sanity.get_redis\", lambda: None)\n\n\nclass TestClaudeMdSanity:\n"
+    }
+  ]
+}

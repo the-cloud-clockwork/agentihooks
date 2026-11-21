@@ -161,3 +161,40 @@ def test_the_local_epoch_reads_this_hosts_boot_id_and_process_one(
     monkeypatch.setattr(process, "BOOT_ID", root / "boot_id")
     monkeypatch.setattr(process, "PROC", root)
     assert join_report.local_epoch() == "boot-a/98765"
+
+
+@pytest.mark.feature("hive-join-heartbeat-ends-departed-member-reports")
+@pytest.mark.parametrize("recorded_epoch", ["boot/1", ""])
+def test_a_replacement_member_ends_reports_of_the_departed_pod_after_its_live_window(
+    store: "RedisStore", monkeypatch: pytest.MonkeyPatch, recorded_epoch: str
+) -> None:
+    from scripts.hive import join_report, registry
+
+    monkeypatch.setattr(registry, "member_name", lambda: "replacement-pod")
+    monkeypatch.setattr(join_report, "local_epoch", lambda: "boot/2")
+    monkeypatch.setattr(join_report, "cheap_checks", lambda *args: {})
+    departed, other, current, unknown = (_running(store, f"eng-{seat}") for seat in range(1, 5))
+    _reported(store, departed, {"member": "deleted-pod", "epoch": recorded_epoch})
+    _reported(store, other, {"member": "other-pod", "epoch": "other/1"})
+    _reported(store, current, {"member": "replacement-pod", "epoch": "boot/2"})
+    _reported(store, unknown, {"epoch": "boot/1"})
+    at = 1000 + max(registry.LIVE_MS, join_report.HEARTBEAT_MS) + 1
+    registry.beat(store.redis, "worker", {})
+    registry.join(store.redis, "worker", "deleted-pod", 1000)
+    registry.join(store.redis, "worker", "other-pod", at)
+    registry.join(store.redis, "worker", "replacement-pod", at)
+
+    join_report.heartbeat(store.redis, "worker", at)
+
+    after = _after(store)
+    assert {key: after[departed.name].get(key) for key in ("ended_at", *RESTARTED)} == {"ended_at": at, **RESTARTED}
+    assert after[departed.name]["heartbeat_at"] == 1000
+    for agent in (other, current, unknown):
+        assert after[agent.name]["status"] == "running"
+        assert after[agent.name]["heartbeat_at"] == at
+        assert "ended_at" not in after[agent.name]
+    assert {report["agent"] for report in join_report.live(store.redis, "worker")} == {
+        other.name,
+        current.name,
+        unknown.name,
+    }

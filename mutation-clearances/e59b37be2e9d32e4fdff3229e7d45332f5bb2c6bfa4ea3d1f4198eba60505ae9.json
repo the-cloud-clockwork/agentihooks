@@ -1,0 +1,6 @@
+{
+  "scripts/events/nats.py:scripts.events.nats.x__hydrate_dead:62f9173b91e06074c0b46389cf78896fedaf9c00bf6d7c9ec21c83d8d17f4973": {
+    "reader": "standards-reader",
+    "reason": "Equivalent: typing.cast returns its second argument unchanged without runtime validation. Replacing only its type argument with None changes no payload, lookup, publication or settlement."
+  }
+}

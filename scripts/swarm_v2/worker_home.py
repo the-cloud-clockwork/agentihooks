@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, cast
 from urllib.parse import urlsplit
 
+from hooks.context import profile_chain
 from hooks.context.profile_chain import BUNDLE_PROFILES
 from scripts.swarm import brain_binding
 from scripts.swarm_v2 import filesystem
@@ -264,7 +265,8 @@ def materialize(attempt: Path, target: str) -> None:
     if name not in names:
         raise BootstrapError(f"profile did not resolve in the execution scope: {name}")
     _write(attempt / f"{CHAIN}-{target}.json", _json(names))
-    roots = ([bundle] if bundle is not None else []) + [path for _, path in dirs]
+    content = profile_chain.unlayered(dirs, [bundle])
+    roots = ([profile_chain.layer_root(bundle)] if bundle is not None else []) + [path for _, path in content]
     adapter = get_adapter(target)
     native = _settings(target, bundle, dirs)
     endpoints = {**request["endpoints"], broadcast_bridge.GRANT_FILE: str(broadcast_bridge.grant_path(attempt))}

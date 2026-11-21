@@ -1,0 +1,19 @@
+rules:
+  - id: kept-step-queues-behind-ready-sibling
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A sweep of the pass scheduler that submits its ready steps in site order puts a kept placing step on the pass's
+      one placement worker behind every placing sibling that became ready with it, so master down and tick master
+      waited for the whole quota notice body and started twenty to ninety seconds late. Build the ready list with
+      _kept_first so the kept steps are submitted first.
+    paths:
+      include:
+        - /scripts/tick/
+        - kept-step-queues-behind-ready-sibling.py
+    patterns:
+      - pattern: |
+          $READY = [$STEP for $STEP in $PENDING if ...]
+      - metavariable-regex:
+          metavariable: $READY
+          regex: ^ready$
