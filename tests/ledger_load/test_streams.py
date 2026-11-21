@@ -3,6 +3,7 @@ import json
 import subprocess
 import sys
 import threading
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -33,13 +34,16 @@ def test_both_stream_counts_use_identical_full_size_input_and_server_workloads(m
     assert result["ledger_bytes"] == len(json.dumps(doc, sort_keys=True).encode())
 
 
-@pytest.mark.parametrize("after, verdict", [(0.2, 0), (0.5, 1), (0.8, 1)])
-def test_cpu_gate_rejects_unchanged_or_increased_cpu_and_keeps_both_measurements(monkeypatch, tmp_path, after, verdict):
+@pytest.mark.parametrize("over, verdict", [(-0.01, 0), (0.01, 1)])
+def test_the_verdict_fails_a_head_that_delivers_past_the_follow_interval_and_keeps_both_measurements(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, over: float, verdict: int
+) -> None:
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    bound = streams.DELIVERY_BOUND_S
     result = {
         "cases": [
-            {"before": {"cpu_cores": 0.5}, "after": {"cpu_cores": 0.2}},
-            {"before": {"cpu_cores": 0.5}, "after": {"cpu_cores": after}},
+            {"before": {"delivery_max_s": bound + 1}, "after": {"delivery_max_s": bound / 2}},
+            {"before": {"delivery_max_s": bound / 2}, "after": {"delivery_max_s": bound + over}},
         ]
     }
     monkeypatch.setattr(streams, "compare", lambda *args: result)
@@ -80,6 +84,7 @@ class Lagging:
 
     def publish(self, result: dict[str, Any]) -> None:
         result["patches"] += 1
+        result["arrivals"].append(time.monotonic())
 
 
 @contextmanager
@@ -105,6 +110,8 @@ def test_the_delivery_check_waits_for_a_patch_published_after_the_measurement_wi
     assert [consumer["patches"] for consumer in result["consumers"]] == [result["writes"]] == [2]
     assert result["last_write_s"] < streams.SECONDS < result["delivered_s"] < streams.SECONDS + LAG_S
     assert result["delivered_s"] - result["last_write_s"] < streams.FOLLOW_PASS_S
+    assert LAG_S / 2 < result["delivery_p95_s"] <= result["delivery_max_s"] < 2 * LAG_S
+    assert all("arrivals" not in consumer for consumer in result["consumers"])
 
 
 def test_the_follow_pass_bound_follows_the_scheduler_pass_period() -> None:
