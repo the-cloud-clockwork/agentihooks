@@ -551,3 +551,50 @@ def test_a_parked_task_opens_with_exact_finish_steps():
         "conflict it lists the files: resolve them, run git rebase --continue, then run agentihooks swarm sw "
         "restack again.",
     ]
+
+
+RECON_HEADINGS = (
+    "What will be built",
+    "Code areas touched",
+    "What might break",
+    "Regression tests",
+    "Resources needed",
+    "Protection plan",
+)
+
+
+def _first(lines: list[str], marker: str) -> int:
+    found = [index for index, line in enumerate(lines) if marker in line]
+    assert found, marker
+    return found[0]
+
+
+@pytest.mark.feature("launch-prompt-recon-steps")
+@pytest.mark.parametrize(("lane", "kind"), [("eng", "code"), ("ci", "ci")])
+def test_code_and_ci_prompts_list_scouter_recon_and_traced_plan_before_issue_worktree_and_red_test(
+    lane: str, kind: str
+) -> None:
+    lines = _steps({"kind": kind}, lane)
+    order = [
+        _first(lines, "Before your first edit, in this order:"),
+        _first(lines, "Still valid scouter: launch the scouter sub agent"),
+        _first(lines, "recon.md"),
+        _first(lines, "trace-plan"),
+        lines.index(_step(lines, 1)),
+        lines.index(_step(lines, 2)),
+        lines.index(_step(lines, 3)),
+    ]
+    assert order == sorted(set(order))
+    recon = lines[_first(lines, "recon.md")]
+    places = [recon.index(heading) for heading in RECON_HEADINGS]
+    assert places == sorted(places)
+    assert "plan.md" in lines[_first(lines, "trace-plan")]
+    assert "worktree" in _step(lines, 2) and "Red" in _step(lines, 3)
+
+
+@pytest.mark.feature("launch-prompt-recon-steps")
+@pytest.mark.parametrize(("lane", "kind"), [("eng", "research"), ("plan", "plan")])
+def test_research_and_planner_prompts_carry_no_recon_block(lane: str, kind: str) -> None:
+    text = "\n".join(_steps({"kind": kind}, lane))
+    assert "Before your first edit" not in text
+    assert "recon.md" not in text and "trace-plan" not in text
