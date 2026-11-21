@@ -198,8 +198,8 @@ def test_load_runtime_reads_the_mounted_file(tmp_path: Path) -> None:
     assert delivery.load_runtime(path) == RUNTIME
 
 
-def test_repository_file_has_an_empty_authoritative_list() -> None:
-    assert delivery.authoritative(ROOT) == ()
+def test_repository_file_makes_lint_type_gate_and_test_count_authoritative() -> None:
+    assert delivery.authoritative(ROOT) == ("lint", "type-gate", "test-count")
     assert delivery.queue_cutover(ROOT, {}) == []
     assert delivery.lab(ROOT)["check_prefix"] == "lab"
 
