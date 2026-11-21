@@ -3,6 +3,8 @@ import json
 import re
 from pathlib import Path
 
+from markdown_it import MarkdownIt
+
 from scripts.gates.recon import problem
 
 SECTIONS = (
@@ -18,61 +20,20 @@ SECTIONS = (
 )
 
 
-def _blank(text: str) -> str:
-    return "".join("\n" if char == "\n" else " " for char in text)
-
-
-def _mask_line(line: str, comment: bool) -> tuple[str, bool]:
-    pieces: list[str] = []
-    cursor = 0
-    for marker in re.finditer(r"<!--|-->", line):
-        if comment and marker.group() == "-->":
-            pieces.append(_blank(line[cursor : marker.end()]))
-            cursor = marker.end()
-            comment = False
-        elif not comment and marker.group() == "<!--":
-            pieces.append(line[cursor : marker.start()])
-            cursor = marker.start()
-            comment = True
-    tail = _blank(line[cursor:]) if comment else line[cursor:]
-    return "".join(pieces) + tail, comment
-
-
-def _lines(text: str) -> list[tuple[str, bool]]:
-    lines: list[tuple[str, bool]] = []
-    fence = ""
-    comment = False
-    for line in text.splitlines(keepends=True):
-        marker = None if comment else re.match(r" {0,3}(`{3,}|~{3,})(.*)", line.rstrip("\r\n"))
-        if marker:
-            run, suffix = marker.groups()
-            if not fence:
-                fence = run
-            elif run[0] == fence[0] and len(run) >= len(fence) and not suffix.strip():
-                fence = ""
-            lines.append((line, True))
-        elif fence:
-            lines.append((line, True))
-        else:
-            visible, comment = _mask_line(line, comment)
-            lines.append((visible, False))
-    return lines
-
-
 def _visible(text: str) -> str:
-    return "".join(line for line, _ in _lines(text))
+    return re.sub(r"<!--.*?(?:-->|\Z)", "", text, flags=re.DOTALL)
 
 
 def _headings(text: str) -> list[tuple[int, str, int, int]]:
-    found: list[tuple[int, str, int, int]] = []
-    offset = 0
-    for line, fenced in _lines(text):
-        heading = None if fenced else re.match(r" {0,3}(#{1,6})[ \t]+(.+)", line.rstrip("\r\n"))
-        if heading:
-            depth, name = heading.groups()
-            found.append((len(depth), name.rstrip("#").strip(), offset, offset + len(line)))
-        offset += len(line)
-    return found
+    offsets = [0]
+    for line in text.splitlines(keepends=True):
+        offsets.append(offsets[-1] + len(line))
+    tokens = MarkdownIt("commonmark").parse(text)
+    return [
+        (int(token.tag[1:]), tokens[index + 1].content.strip().casefold(), offsets[token.map[0]], offsets[token.map[1]])
+        for index, token in enumerate(tokens)
+        if token.type == "heading_open" and token.map is not None
+    ]
 
 
 def _blocks(text: str, level: int) -> list[tuple[str, int, int, str]]:

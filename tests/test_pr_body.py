@@ -89,6 +89,15 @@ def test_fenced_comment_openers_preserve_visible_sections(api: ModuleType, fence
 
 
 @pytest.mark.feature("pull-request-recon-context")
+@pytest.mark.parametrize(
+    ("delimiter", "example"), [("`", "<!--"), ("``", "<!-- ` literal")], ids=["single", "multiple"]
+)
+def test_inline_comment_examples_preserve_visible_sections(api: ModuleType, delimiter: str, example: str) -> None:
+    text = f"## Assumptions\n\n{delimiter}{example}{delimiter} is literal code.\n\n" + body_without("Assumptions")
+    assert api.missing_sections(text) == []
+
+
+@pytest.mark.feature("pull-request-recon-context")
 def test_fill_extracts_recon_and_preserves_body(api: ModuleType) -> None:
     original = (
         "## Summary\n\nKeep this evidence.\n\n## Assumptions\n\n<!-- fill -->\n\n## Checklist\n\n- [x] Reviewed.\n"

@@ -33,6 +33,7 @@ dependencies = [
     "httpx>=0.27.0",
     "playwright>=1.44.0",
     "pyyaml>=6.0",
+    "markdown-it-py>=4.0",
     # Codex-target config.toml writer: round-trip parsing preserves operator
     # hand-edits outside the managed key set (scripts/targets/codex_target.py).
     "tomlkit>=0.12",
