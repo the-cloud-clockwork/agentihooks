@@ -765,7 +765,7 @@ _REDIRECT = re.compile(rf">>?\|?\s*({_WORD})")
 _PATH_TOKEN = re.compile(_WORD)
 _UNQUOTE = re.compile(r"""\\(.)|["']""")
 _CD_TARGET = re.compile(rf"(?:^|[;&|(\n])\s*(?:cd|pushd)\s+({_WORD})")
-_PUBLISH_SYNTAX = re.compile(r"[;&|<>`$(){}*?\[\]\n]")
+_PUBLISH_SYNTAX = re.compile(r"[;&|<>`$(){}*?\[\]~\n]")
 _PUBLISH_WRAPPER = ["-m", "scripts.github_app_cli", "exec"]
 _PUBLISH_VALUES = frozenset({"--message", "-m", "--via"})
 _PYTHON = re.compile(r"python[\d.]*")
@@ -954,7 +954,7 @@ def _publish_call(command: str) -> tuple[str, list[str]] | None:
         return None
     if words and _PYTHON.fullmatch(Path(words[0]).name) and words[1:4] == _PUBLISH_WRAPPER:
         words = words[5:] if words[4:5] == ["--"] else words[4:]
-    if not words or Path(words[0]).name != "agentihooks":
+    if words[:1] != ["agentihooks"]:
         return None
     return _publish_operands(words[1:])
 
@@ -1002,7 +1002,16 @@ def _publish_root(slug: str, cwd: str | None) -> Path | None:
         )
         task = publish.task_row(slug, agent, publish.LedgerClient())
         return publish.publishing_root(environ.get(REPO_VARIABLE) or cwd, task, agent, Path(cwd))[0]
-    except (KeyError, publish.SwarmError, OSError, subprocess.SubprocessError, ValueError, RuntimeError):
+    except (
+        LookupError,
+        TypeError,
+        AttributeError,
+        publish.SwarmError,
+        OSError,
+        subprocess.SubprocessError,
+        ValueError,
+        RuntimeError,
+    ):
         return None
 
 

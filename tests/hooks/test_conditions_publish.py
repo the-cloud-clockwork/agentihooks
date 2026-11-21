@@ -101,6 +101,12 @@ def test_publish_outside_the_repository_uses_the_swarm_repository(checkouts: dic
 
 
 @pytest.mark.feature("conditions-publish-task-worktree")
+def test_publish_checks_every_named_file_in_the_task_worktree(checkouts: dict[str, Path]) -> None:
+    assert _guard(_wrapped(FILE, "README.md"), checkouts["primary"]) is None
+    assert _guard(_wrapped(FILE, str(checkouts["live"] / FILE)), checkouts["primary"]) == conditions.GATE_MESSAGE
+
+
+@pytest.mark.feature("conditions-publish-task-worktree")
 def test_publish_uses_the_session_worktree_before_the_recorded_worktree(
     checkouts: dict[str, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -131,11 +137,17 @@ def test_publish_lookup_failure_keeps_the_guard_closed(
 
 
 @pytest.mark.feature("conditions-publish-task-worktree")
-@pytest.mark.parametrize(("variable", "value"), [("AGENTIHOOKS_SWARM", "other-swarm"), ("AGENTIHOOKS_AGENT_NAME", "")])
+@pytest.mark.parametrize(
+    ("variable", "value"),
+    [("AGENTIHOOKS_SWARM", "other-swarm"), ("AGENTIHOOKS_AGENT_NAME", ""), ("AGENTIHOOKS_SWARM_LANE", None)],
+)
 def test_publish_for_another_session_keeps_the_guard_closed(
-    checkouts: dict[str, Path], monkeypatch: pytest.MonkeyPatch, variable: str, value: str
+    checkouts: dict[str, Path], monkeypatch: pytest.MonkeyPatch, variable: str, value: str | None
 ) -> None:
-    monkeypatch.setenv(variable, value)
+    if value is None:
+        monkeypatch.delenv(variable)
+    else:
+        monkeypatch.setenv(variable, value)
     assert _guard(_wrapped(FILE), checkouts["primary"]) == conditions.GATE_MESSAGE
 
 
@@ -192,7 +204,14 @@ def test_publish_without_condition_paths_does_not_read_task_state(
         ("agentihooks swarm --as=n s publish --message=m --via lab --direct a", ("s", ["a"])),
         ("agentihooks swarm s publish --via=lab -m 'm n' a", ("s", ["a"])),
         ("/usr/bin/python3 -m scripts.github_app_cli exec agentihooks swarm s publish -m m a", ("s", ["a"])),
-        ("python -m scripts.github_app_cli exec -- /opt/bin/agentihooks swarm s publish -m m a", ("s", ["a"])),
+        ("python -m scripts.github_app_cli exec -- agentihooks swarm s publish -m m a", ("s", ["a"])),
+        ("python -m scripts.github_app_cli exec -- /tmp/x/agentihooks swarm s publish -m m a", None),
+        ("./agentihooks swarm s publish -m m a", None),
+        ("python-evil -m scripts.github_app_cli exec agentihooks swarm s publish -m m a", None),
+        ("agentihooks swarm s publish -m m -- ~/x", None),
+        ("agentihooks swarm s publish -m m a > b", None),
+        ("agentihooks swarm s publish -m `id` a", None),
+        ("agentihooks swarm s publish -m m {a,b}", None),
         ("agentihooks swarm s prepare", None),
         ("agentihooks swarm s publish -x a", None),
         ("agentihooks swarm s publish -mm a", None),
