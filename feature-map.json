@@ -12231,7 +12231,7 @@
     },
     {
       "id": "swarm-review-affinity-quota",
-      "origin": "operator",
+      "origin": "regression",
       "ordered_at": "2026-11-21",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-rv-affinity-quota",
       "behaviour": "A review lane pinned to Codex with a named model and xhigh effort is placed only on Codex, waits while Codex is full even when Claude has free seats, launches with that model and effort, and the bottleneck remedy never moves its pin. Under auto scaling, while review tasks wait, the review ceiling is held before the other lanes at one seat above the live reviewers or the review share percent of the total when larger, never past the waiting tasks or the free seats of the lane's harnesses, and capacity writes the review cap from it; with no review task waiting the share is released and the review ceiling keeps only live reviewers. The review share is a swarm setting from 0 to 100, default 20, set with swarm set review-share. Without review work the ceilings and the configured review cap are exactly the old ones.",
