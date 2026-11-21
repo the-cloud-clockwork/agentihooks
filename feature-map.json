@@ -628,7 +628,8 @@
         "tests/hooks/test_conditions_publish.py::test_publish_call_reads_the_slug_and_file_names",
         "tests/hooks/test_conditions_publish.py::test_publish_checks_every_named_file_in_the_task_worktree",
         "tests/hooks/test_conditions_publish.py::test_an_unexpected_publisher_failure_keeps_todays_resolution",
-        "tests/hooks/test_conditions_publish.py::test_a_publisher_that_cannot_load_keeps_todays_resolution"
+        "tests/hooks/test_conditions_publish.py::test_a_publisher_that_cannot_load_keeps_todays_resolution",
+        "tests/hooks/test_conditions_publish.py::test_publish_without_the_swarm_repository_setting_uses_the_session_folder"
       ]
     },
     {

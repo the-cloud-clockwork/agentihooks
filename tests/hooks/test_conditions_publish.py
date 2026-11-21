@@ -51,7 +51,11 @@ def checkouts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path
         path.write_text("true\n")
     task = {"id": agent.task, "claimed_by": agent.name, "state": "claimed", "branch": "recorded"}
     ledger = Mock()
-    ledger.task.return_value = task
+
+    def lookup(slug: str, task_id: str) -> dict[str, str] | None:
+        return task if (slug, task_id) == (SLUG, agent.task) else None
+
+    ledger.task.side_effect = lookup
     monkeypatch.setattr(publish, "LedgerClient", Mock(return_value=ledger))
     monkeypatch.setattr(conditions, "_live_dirs", lambda: [live / ".claude" / "conditions"])
     monkeypatch.setattr(conditions, "is_armed", lambda session_id: False)
@@ -106,6 +110,14 @@ def test_publish_outside_the_repository_uses_the_swarm_repository(checkouts: dic
 def test_publish_checks_every_named_file_in_the_task_worktree(checkouts: dict[str, Path]) -> None:
     assert _guard(_wrapped(FILE, "README.md"), checkouts["primary"]) is None
     assert _guard(_wrapped(FILE, str(checkouts["live"] / FILE)), checkouts["primary"]) == conditions.GATE_MESSAGE
+
+
+@pytest.mark.feature("conditions-publish-task-worktree")
+def test_publish_without_the_swarm_repository_setting_uses_the_session_folder(
+    checkouts: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("AGENTIHOOKS_SWARM_REPO")
+    assert _guard(_wrapped(FILE), checkouts["primary"]) is None
 
 
 @pytest.mark.feature("conditions-publish-task-worktree")
@@ -222,6 +234,7 @@ def test_publish_without_condition_paths_does_not_read_task_state(
     [
         ("agentihooks swarm s publish --message m -- a --b", ("s", ["a", "--b"])),
         ("agentihooks swarm --as n s publish -m m a b", ("s", ["a", "b"])),
+        ("agentihooks swarm s publish a -m", ("s", ["a"])),
         ("agentihooks swarm --as=n s publish --message=m --via lab --direct a", ("s", ["a"])),
         ("agentihooks swarm s publish --via=lab -m 'm n' a", ("s", ["a"])),
         ("/usr/bin/python3 -m scripts.github_app_cli exec agentihooks swarm s publish -m m a", ("s", ["a"])),
