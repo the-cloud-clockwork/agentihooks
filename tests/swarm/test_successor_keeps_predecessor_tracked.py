@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from scripts.swarm import tick
+from scripts.swarm import master_launch, session_model, tick
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.tick.steps import agents
@@ -116,3 +116,25 @@ def test_the_reap_ends_a_handed_off_predecessor_and_drops_it_with_history(store:
     history = [json.loads(row) for row in store.redis.lrange(store.key(SLUG, "history"), 0, -1)]
     assert [row["name"] for row in history] == [finished.name]
     assert store.names.entry(finished.name)["retired_at"]
+
+
+@pytest.mark.feature("swarm-successor-keeps-predecessor-tracked")
+def test_the_session_models_step_passes_over_a_listed_finished_predecessor(store: RedisStore) -> None:
+    finished, successor = _handed_off(store)
+    for agent in (finished, successor):
+        session_model.put(store.redis, SLUG, agent.name, "claude-opus-5-5", "xhigh", NOW)
+
+    agents._session_models(SLUG, store)
+
+    listed = {agent.name: agent for agent in store.agents(SLUG)}
+    assert listed[finished.name].model == finished.model
+    assert listed[successor.name].model == "claude-opus-5-5"
+
+
+@pytest.mark.feature("swarm-successor-keeps-predecessor-tracked")
+def test_a_listed_finished_predecessor_is_no_front_door(store: RedisStore) -> None:
+    finished, successor = _handed_off(store)
+
+    front = master_launch._front_doors(store, SLUG, {finished.name, successor.name})
+
+    assert [agent.name for agent in front] == [successor.name]

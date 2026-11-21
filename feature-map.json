@@ -11393,7 +11393,9 @@
       "tests": [
         "tests/swarm/test_successor_keeps_predecessor_tracked.py::test_a_successor_start_keeps_its_finished_predecessor_listed",
         "tests/swarm/test_successor_keeps_predecessor_tracked.py::test_archiving_keeps_the_placement_of_a_listed_predecessor",
-        "tests/swarm/test_successor_keeps_predecessor_tracked.py::test_the_reap_ends_a_handed_off_predecessor_and_drops_it_with_history"
+        "tests/swarm/test_successor_keeps_predecessor_tracked.py::test_the_reap_ends_a_handed_off_predecessor_and_drops_it_with_history",
+        "tests/swarm/test_successor_keeps_predecessor_tracked.py::test_the_session_models_step_passes_over_a_listed_finished_predecessor",
+        "tests/swarm/test_successor_keeps_predecessor_tracked.py::test_a_listed_finished_predecessor_is_no_front_door"
       ]
     },
     {
