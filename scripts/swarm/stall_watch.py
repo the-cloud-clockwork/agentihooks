@@ -33,6 +33,7 @@ NTFY_USER, NTFY_PASS = "NTFY_USER", "NTFY_PASS"
 ANTON_ALERTS = "https://ntfy.homeofanton.com/anton-alerts"
 TITLE, AUTHORIZATION, TIMEOUT_S = "Title", "Authorization", 10
 QUEUED, SEEN, ALERTS, ALERTED_KEY = "stall-queued", "stall-seen", "stall-alerts", "stall-alerted"
+ANSWERED = "stall-answered"
 LANES = ("eng", "ci")
 FINISHED, STOPPED, DONE, UNCLAIMED = "finished", "stopped", "done", "unclaimed"
 ENV = {
@@ -113,7 +114,7 @@ def _key(watch, name):
     return watch.store.key(watch.slug, name)
 
 
-def stall_pass(watch, doc):
+def stall_pass(watch: Watch, doc: dict[str, Any]) -> list[str]:
     limit = limits(watch.environ)
     mail = Mail(InboxStore(watch.store.redis), watch.store, watch.slug, doc)
     rows = {t["id"]: t for t in doc.get("tasks") or []}
@@ -122,6 +123,9 @@ def stall_pass(watch, doc):
     gone = watch.store.redis.smembers(_key(watch, QUEUED)) - {task["id"] for task in held}
     if gone:
         watch.store.redis.srem(_key(watch, QUEUED), *gone)
+    ended = set(watch.store.redis.hkeys(_key(watch, ANSWERED))) - {task["id"] for task in held}
+    if ended:
+        watch.store.redis.hdel(_key(watch, ANSWERED), *ended)
     for task in held:
         if _waiting(watch, task, rows):
             continue
@@ -297,8 +301,11 @@ def _alert(
     watch: Watch, mail: Mail, task: dict[str, Any], case: str, since: int, action: str, limit: Limits
 ) -> list[str]:
     tid, wait, inbox = task["id"], 2 * getattr(limit, case), mail.inbox
-    earlier = _earlier(inbox, watch.store.redis.hget(_key(watch, ALERTS), tid))
-    if earlier and action == ALERTED:
+    raw = watch.store.redis.hget(_key(watch, ALERTS), tid)
+    earlier = _earlier(inbox, raw)
+    ref = f"{watch.slug}:stall:{tid}:{case}:{since}:{ACTION_REFS[action]}"
+    last = json.loads(raw or watch.store.redis.hget(_key(watch, ANSWERED), tid) or "{}")
+    if action == ALERTED and (earlier or last.get("ref") == ref):
         return []
     minutes = _minutes(watch, since)
     row = {
@@ -310,6 +317,7 @@ def _alert(
         "action": action,
         "limit": getattr(limit, case),
         "at": watch.now_ms,
+        "ref": ref,
     }
     if case == UNCLAIMED:
         row["lane"] = task.get("lane", "")
@@ -317,7 +325,6 @@ def _alert(
     text = ALERT.format(
         slug=watch.slug, title=task.get("title") or "no title", wait=wait, **{**row, "case": CASES[case]}
     )
-    ref = f"{watch.slug}:stall:{tid}:{case}:{since}:{ACTION_REFS[action]}"
     sent = cast(Item, inbox.send(SENDER, address, text, ref=ref))
     row["item"] = sent.id
     watch.store.redis.hset(_key(watch, ALERTS), tid, json.dumps(row))
@@ -394,7 +401,7 @@ def _unclaimed_moot(watch, rows, row, task, decision):
     return ""
 
 
-def _escalate(watch, rows):
+def _escalate(watch: Watch, rows: dict[str, Any]) -> list[str]:
     inbox, key, actions = InboxStore(watch.store.redis), _key(watch, ALERTS), []
     decision = capacity.read(watch.store, watch.slug)
     for tid, raw in watch.store.redis.hgetall(key).items():
@@ -406,6 +413,8 @@ def _escalate(watch, rows):
             inbox.settle(row["item"], SENDER, DONE, moot)
         if moot or not is_open:
             watch.store.redis.hdel(key, tid)
+            if row["case"] != UNCLAIMED:
+                watch.store.redis.hset(_key(watch, ANSWERED), tid, raw)
             continue
         if row.get("escalated") or _minutes(watch, row["at"]) < 2 * row["limit"]:
             continue
