@@ -9987,6 +9987,18 @@
       ]
     },
     {
+      "id": "lab-manifest-fetch-hold-cap",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-head-fetch-error-cap",
+      "behaviour": "The CI lab scheduler caps how long a held head waits on a manifest fetch GitHub never answers or answers with a server error: it counts those fetches in a row in the head's waiting entry, holds the head again after each of the first nine, and on the tenth drops the head and posts one completed required check run with conclusion failure, named lab-shadow/required, whose summary names the head, its base, the ten unanswered fetches and the last error, as for any other expansion failure. A fetch still running and the same head arriving again keep the count; a new head of the lane and a started grade clear it.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis with an expander that raises an unanswered or pending fetch on the passes a test scripts and expands on any later pass, and a recording Poster behind scripts.ci_lab.scheduler.Ports.checks, read through the actions, the posts and the waiting hash",
+      "rules": ["lab-unanswered-fetch-holds-forever"],
+      "tests": [
+        "tests/ci_lab/test_scheduler_unexpanded.py::test_a_held_head_whose_manifest_fetch_gets_ten_server_errors_in_a_row_posts_a_failed_check_naming_them",
+        "tests/ci_lab/test_scheduler_unexpanded.py::test_a_held_heads_unanswered_fetches_count_in_a_row_until_a_new_head_or_a_start_clears_them"
+      ]
+    },
+    {
       "id": "lab-token-mint-status",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2702",
