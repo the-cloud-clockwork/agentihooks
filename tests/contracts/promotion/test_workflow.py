@@ -10,11 +10,24 @@ import yaml
 from scripts import ci_budget
 from tests.contracts.ci_tiers.test_workflow import enabled
 from tests.test_ci_anton_runners import resolve
+from tests.test_ci_proof_branch_pushes import _events, _runs_on
 
 ROOT = Path(__file__).resolve().parents[3]
 
 
-NON_GATING: dict[str, str] = {}
+NON_GATING: dict[str, str] = {
+    "access-audit.yml": "audits collaborators and installed apps and notifies the operator; it grades no revision",
+    "chart-release.yml": "follows each worker image run and packages and publishes a chart only after a release",
+    "ci-lab-image.yml": "builds, smokes and publishes the CI lab image",
+    "count-record.yml": "records the dev suite test count that later pull request bases read",
+    "coverage-stability.yml": "compares the measured lines of the newest dev commit's finished runs",
+    "gate-required.yml": "follows every Tests run and reports Gate Required only for pull request runs",
+    "github-access-audit.yml": "reads back the effective GitHub access controls",
+    "hive-worker.yml": "proves the worker hive chart and image in kind and publishes the image",
+    "swarm-image.yml": "builds and pushes the dev swarm image",
+    "swarm-node-base.yml": "copies the locked worker base into the org registry",
+    "swarm-node-image.yml": "builds, qualifies and publishes the worker image and moves its dev tag; a release tags it",
+}
 
 
 def test_promotion_requires_all_push_checks_and_never_runs_for_a_red_grade():
@@ -53,30 +66,25 @@ def _needed(jobs: dict[str, Any], name: str) -> set[str]:
 @pytest.mark.feature("promotion-dev-push-workflows-non-gating")
 def test_every_dev_push_workflow_outside_tests_sits_on_the_non_gating_list() -> None:
     workflows = {path.name: yaml.safe_load(path.read_text()) for path in (ROOT / ".github/workflows").glob("*.y*ml")}
-    triggers = {name: spec.get("on", spec.get(True, {})) for name, spec in workflows.items()}
-    fired = {name for name, events in triggers.items() if "push" in events and _admits_dev(events["push"])}
-    for _ in workflows:
-        names = {workflows[name].get("name") for name in fired}
-        fired |= {
-            name
-            for name, events in triggers.items()
+    names = {file: spec.get("name", f".github/workflows/{file}") for file, spec in workflows.items()}
+    triggers = {file: _events(spec) for file, spec in workflows.items()}
+    fired = {file for file, events in triggers.items() if "push" in events and _runs_on(events["push"] or {}, "dev")}
+    while (
+        chained := {
+            file
+            for file, events in triggers.items()
             if "workflow_run" in events
-            and names & set(events["workflow_run"]["workflows"])
-            and _admits_dev(events["workflow_run"])
+            and _runs_on(events["workflow_run"], "dev")
+            and {names[source] for source in fired} & set(events["workflow_run"]["workflows"])
         }
+        - fired
+    ):
+        fired |= chained
+    assert all(NON_GATING.values())
     assert sorted(fired - {"test.yml"}) == sorted(NON_GATING), (
         "a workflow that runs on a dev push outside the Tests run never gates promotion: "
         "move its gate into test.yml or list it in NON_GATING with the reason it does not gate"
     )
-
-
-def _admits_dev(trigger: dict[str, Any] | None) -> bool:
-    spec = trigger or {}
-    if "branches" in spec:
-        return any(Path("dev").match(pattern) for pattern in spec["branches"])
-    if "branches-ignore" in spec:
-        return not any(Path("dev").match(pattern) for pattern in spec["branches-ignore"])
-    return not {"tags", "tags-ignore"} & set(spec)
 
 
 def test_each_dev_push_runs_the_hierarchy_proof_before_promotion_and_never_on_pull_requests_or_the_queue():
