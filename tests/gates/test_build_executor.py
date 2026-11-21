@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.gates.recon import HEADINGS
+from scripts.gates.recon import HEADINGS, refusal
 from scripts.swarm import trace_plan
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -122,9 +122,11 @@ def test_the_build_condition_judges_the_recon_plan_first_through_the_real_hook(h
     recon = {"AGENTIHOOKS_GATE_RECON": "enforce"}
     denied = hook("doghouse/light/lamp.py", extra=recon)
     assert denied.returncode == 2, denied.stdout + denied.stderr
-    assert "recon gate: " in denied.stderr and "no recon plan yet" in denied.stderr
-    assert [(r["gate"], r["kind"]) for r in hook.rows()] == [("recon", "deny")]
     folder = tmp_path / ".agentihooks" / "swarm" / SLUG / "tasks" / TASK
+    assert f"] {refusal(folder / 'recon.md', 'no recon plan yet')}" in denied.stderr
+    assert [(r["gate"], r["kind"], r["reason"]) for r in hook.rows()] == [
+        ("recon", "deny", refusal(folder / "recon.md", "no recon plan yet"))
+    ]
     (folder / "recon.md").write_text("".join(f"{heading}\nx\n" for heading in HEADINGS))
     assert hook("doghouse/light/lamp.py", extra=recon).returncode == 0
     denied = hook("power/generator/diesel.py", extra=recon)

@@ -509,7 +509,10 @@ def test_required_changelog_fragment_is_kept_without_scope_comment(ask, areas, k
     assert record["verdict"] == ("pass" if kept else "fail")
 
 
-NAMED = "scripts/receipt.py\nfeature-map.json\ntests/receipt/test_replay.py\nfeature-map.d/receipt.json\ntests/../scripts/receipt.py"
+NAMED = (
+    "- scripts/receipt.py, feature-map.json\n- tests/receipt/test_replay.py: the replay guard\n"
+    "see feature-map.d/receipt.json.\ntests/../scripts/receipt.py\n`tests/quoted/test_x.py`\nold/tests/gates/test_build.py\n"
+)
 
 
 @pytest.mark.feature("trace-plan-recon-protection")
@@ -521,7 +524,11 @@ NAMED = "scripts/receipt.py\nfeature-map.json\ntests/receipt/test_replay.py\nfea
         (("tests/receipt",), True),
         (("feature-map.d/receipt.json",), True),
         (("antoncore:tests/receipt/test_replay.py",), True),
+        (("tests/quoted/test_x.py",), True),
         (("tests/receipt/test_other.py",), False),
+        (("tests/receipt/test_replay",), False),
+        (("tests/rec",), False),
+        (("tests/gates/test_build.py",), False),
         (("feature-map.json", "scripts/receipt.py"), False),
         (("scripts/receipt.py",), False),
         (("tests/../scripts/receipt.py",), False),

@@ -1,4 +1,5 @@
-"""The sub-agent budget: every sub-agent launch and continuation in a swarm task is counted, whatever its name."""
+"""The sub-agent budget: every sub-agent launch and continuation in a swarm task is counted, whatever its name, except
+up to RECON_CAP scouter launches made while the task's recon plan is not yet valid, which keep their own count."""
 
 import sys
 from typing import TYPE_CHECKING
@@ -15,6 +16,8 @@ LAUNCH_TOOLS = frozenset({"Agent", "Task"})
 CONTINUE_TOOLS = frozenset({"SendMessage"})
 READERS = ("standards-reader", "spec-reader")
 SCOUTER = "scouter"
+RECON_SCOUTS = "recon-scouters"
+RECON_CAP = 8
 
 
 def refusal(slug, task, counter, cap):
@@ -37,20 +40,19 @@ class SubagentBudget:
     def decide(self, call: Call, who: Who, state: "Verdicts") -> Decision:
         if not (who.pinned and who.task):
             return Decision()
+        budget = Budget(state.slug, self.name, state.home)
         kind = call.tool_input.get("subagent_type")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-        if (
-            call.tool in LAUNCH_TOOLS
-            and kind == SCOUTER
-            and not recon.valid(ledger_workspace.folder(who.swarm, who.task))
-        ):
-            reason = f"recon scouter launch for task {who.task}, not counted before its recon plan is valid"
-            row = log.Row.of(self.name, "count", who, call.tool, reason)  # pyright: ignore[reportUnknownMemberType]
-            log.append(state.slug, row, state.home)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-            return Decision()
+        scouting = call.tool in LAUNCH_TOOLS and kind == SCOUTER
+        if scouting and not recon.valid(ledger_workspace.folder(who.swarm, who.task)):
+            free, used = budget.spend(who.task, RECON_SCOUTS, RECON_CAP)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+            if free:
+                reason = f"recon scouter {used} of {RECON_CAP} for task {who.task}, not counted before its recon plan is valid"
+                row = log.Row.of(self.name, "count", who, call.tool, reason)  # pyright: ignore[reportUnknownMemberType]
+                log.append(state.slug, row, state.home)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+                return Decision()
         counter, cap = (
             ("launches", self.launches) if call.tool in LAUNCH_TOOLS else ("continuations", self.continuations)
         )
-        budget = Budget(state.slug, self.name, state.home)
         allowed, spent = budget.spend(who.task, counter, cap)
         named = {call.tool_input.get("name"), call.tool_input.get("subagent_type")}
         readers = [reader for reader in READERS if reader in named] if call.tool in LAUNCH_TOOLS else []

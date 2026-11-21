@@ -32,13 +32,16 @@ HEADINGS = (
 )
 NAMING = (HEADINGS[1], HEADINGS[3])
 SECTION = re.compile(r"^#{1,2}\s")
+FENCE = "```"
 
 
 def sections(text: str) -> list[tuple[str, list[str]]]:
-    """Each level one or two heading of text, stripped, with its lines up to the next such heading."""
+    """Each level one or two heading of text outside a fenced block, stripped, with its lines up to the next one."""
     found: list[tuple[str, list[str]]] = []
+    fenced = False
     for line in text.splitlines():
-        if SECTION.match(line):
+        fenced ^= line.lstrip().startswith(FENCE)
+        if not fenced and SECTION.match(line):
             found.append((line.strip(), []))
         elif found:
             found[-1][1].append(line)

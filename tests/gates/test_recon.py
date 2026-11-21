@@ -159,6 +159,17 @@ def test_deeper_headings_and_stripped_heading_lines_count_as_the_plan():
 
 
 @pytest.mark.feature("recon-gate")
+def test_hash_lines_inside_a_fenced_block_are_content_not_headings():
+    sample = "```bash\n# a shell comment\n## not a heading\n```\n"
+    text = VALID.replace(f"{HEADINGS[1]}\na line of content\n", f"{HEADINGS[1]}\n{sample}")
+    assert problem(text) == ""
+    assert sections(text)[1] == (HEADINGS[1], sample.splitlines())
+    assert problem(VALID.replace(f"{HEADINGS[1]}\na line of content\n", f"{HEADINGS[1]}\n# a shell comment\n")) == (
+        'the heading "## Code areas touched" has no content'
+    )
+
+
+@pytest.mark.feature("recon-gate")
 def test_an_edit_inside_the_work_folder_the_scratchpad_or_outside_git_always_passes(world: World):
     assert world.decide(file_path=str(Path.home() / "loose" / "notes.md")).allowed
     (Path.home() / ".git").mkdir()

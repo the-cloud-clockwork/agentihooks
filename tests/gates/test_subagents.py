@@ -108,9 +108,6 @@ def test_a_session_outside_a_swarm_task_is_never_counted(tmp_path):
     assert rows(tmp_path) == []
 
 
-FREE = "recon scouter launch for task t1, not counted before its recon plan is valid"
-
-
 def write_recon() -> None:
     folder = ledger_workspace.folder("demo", "t1")
     folder.mkdir(parents=True, exist_ok=True)
@@ -125,16 +122,22 @@ def test_recon_scouters_before_a_valid_recon_plan_leave_the_review_readers_their
     monkeypatch.setattr("scripts.gates.subagents.record_on_ledger", lambda who, readers: recorded.extend(readers))
     gate = SubagentBudget()
     assert all(gate.decide(launch("scouter"), ME, state(tmp_path)).allowed for _ in range(9))
-    assert Budget("demo", "subagents", tmp_path).spent("t1", "launches") == 0
+    assert Budget("demo", "subagents", tmp_path).spent("t1", "launches") == 1
     assert [(r["gate"], r["kind"], r["tool"], r["reason"]) for r in rows(tmp_path)] == [
-        ("subagents", "count", "Agent", FREE)
-    ] * 9
+        (
+            "subagents",
+            "count",
+            "Agent",
+            f"recon scouter {n} of 8 for task t1, not counted before its recon plan is valid",
+        )
+        for n in range(1, 9)
+    ] + [("subagents", "count", "Agent", "sub-agent launches 1 of 8 for task t1")]
     write_recon()
     readers = [gate.decide(launch(reader), ME, state(tmp_path)) for reader in ("standards-reader", "spec-reader")]
     assert [d.allowed for d in readers] == [True, True]
     assert recorded == ["standards-reader", "spec-reader"]
     assert gate.decide(launch("scouter"), ME, state(tmp_path)).allowed
-    assert rows(tmp_path)[-1]["reason"] == "sub-agent launches 3 of 8 for task t1"
+    assert rows(tmp_path)[-1]["reason"] == "sub-agent launches 4 of 8 for task t1"
 
 
 @pytest.mark.feature("subagent-recon-scouters")

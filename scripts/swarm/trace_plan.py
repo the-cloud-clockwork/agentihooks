@@ -38,6 +38,7 @@ CLEARANCE = PurePosixPath("mutation-cleared.txt")
 CLEARANCE_FOLDER = PurePosixPath("mutation-clearances")
 FEATURE_MAP = PurePosixPath("feature-map.json")
 REGISTRIES = (("tests",), ("feature-map.d",))
+NAME = re.compile(r"[^\s`'\"(),;]+")
 REPO_AREA = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*):.")
 OWN_REPO = "the task's own repository"
 
@@ -168,11 +169,19 @@ def _ruling(areas: tuple[str, ...], named: str = "") -> bool:
 
 
 def _registered(area: str, named: str) -> bool:
-    """True when area is a regression test or feature map area and named, the recon plan's area text, names it."""
-    repo = _repository(area)
-    path = PurePosixPath(area[len(repo) + 1 :] if repo else area)
+    """True when area is a regression test or feature map area that a whole path in named, the recon plan's area
+    text, names or sits under."""
+    shown = _plain(area)
+    path = PurePosixPath(shown)
     registry = path == FEATURE_MAP or path.parts[:1] in REGISTRIES
-    return registry and ".." not in path.parts and path.as_posix() in named
+    names = {_plain(word.rstrip(".:")) for word in NAME.findall(named)}
+    return registry and ".." not in path.parts and any(name == shown or name.startswith(f"{shown}/") for name in names)
+
+
+def _plain(text: str) -> str:
+    """text as a path inside its repository, without a leading repository name or ./"""
+    repo = _repository(text)
+    return PurePosixPath(text[len(repo) + 1 :] if repo else text).as_posix()
 
 
 def _digest(named: str) -> str:
