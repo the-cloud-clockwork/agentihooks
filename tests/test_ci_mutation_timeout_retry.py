@@ -63,8 +63,7 @@ def engine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
         pid = runner.os.fork()
         data.register_pid(pid=pid, key=name)
         assert data.key_by_pid == {12: name}
-        if state.overwrite:
-            record.write_text(state.overwrite)
+        record.write_text(state.overwrite or state.killer or "")
         pid, status = runner.os.wait()
         state.results.append((pid, os.waitstatus_to_exitcode(status)))
         data.register_result(pid=pid, exit_code=state.results[-1][1])
