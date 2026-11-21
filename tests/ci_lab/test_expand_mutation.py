@@ -276,6 +276,18 @@ def test_only_the_mutmut_pin_and_runner_tree_enter_the_key(
     assert [after[function] != before[function] for function in before] == [changed] * len(before)
 
 
+@pytest.mark.feature("tracked-test-lock-cache-keys")
+def test_a_test_requirements_lock_change_rekeys_every_stats_unit(tmp_path: Path) -> None:
+    lock = ".github/test-requirements.lock"
+    root = repository(tmp_path, {**STATS_FILES, lock: "pytest==8.4.2\n"})
+    files = ["tests/test_a.py", "tests/test_b.py"]
+    before = expand_mutation.stats_units(root, files)
+    edit(root, lock, "pytest==8.4.2", "pytest==8.4.3")
+    after = expand_mutation.stats_units(root, files)
+    assert [unit.members for unit in after] == [unit.members for unit in before]
+    assert {unit.key for unit in after}.isdisjoint(unit.key for unit in before)
+
+
 @pytest.mark.parametrize("line", ['dev = ["mutmut==3.6.0"]', "dev = ['mutmut == 3.6.0']"])
 def test_the_mutmut_pin_is_read_from_pyproject(tmp_path: Path, line: str) -> None:
     (tmp_path / "pyproject.toml").write_text(f"[project.optional-dependencies]\n{line}\n")

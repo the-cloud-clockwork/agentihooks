@@ -11048,6 +11048,21 @@
       ]
     },
     {
+      "id": "tracked-test-lock-cache-keys",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-cache-keys-tracked-lock",
+      "behaviour": "The tracked .github/test-requirements.lock, never the untracked uv.lock, is the dependency lock every cache key and trigger reads: the mutation stats cache hashes it among its configuration sources, so a lock change recollects a test file's stats and gives every lab stats unit a new key; the test dependency manifest counts it as a global file, so a lock change or removal rekeys every lab test fingerprint and keeps whole files in planned mutation test selection; and the lint job's self plant runs the mutation gate's plant when it changes.",
+      "seam": "scripts.ci_mutation.stats_cache CONFIGURATION with collect_cached_stats, scripts.ci_lab.expand_mutation stats_units, scripts.dep_manifest GLOBAL_FILES with scripts.ci_lab.expand_tests fingerprints and scripts.ci_mutation.plan record_drift, the self-plant step of the lint job in .github/workflows/test.yml",
+      "tests": [
+        "tests/test_ci_mutation_stats_cache.py::test_a_test_requirements_lock_change_recollects_stats",
+        "tests/ci_lab/test_expand_mutation.py::test_a_test_requirements_lock_change_rekeys_every_stats_unit",
+        "tests/ci_lab/test_expand_tests.py::test_lockfile_change_rekeys_every_test",
+        "tests/ci_lab/test_expand_tests.py::test_lockfile_removal_rekeys_every_test",
+        "tests/test_ci_mutation_planned_selection.py::test_record_drift_treats_a_test_requirements_lock_change_as_global",
+        "tests/test_ci_self_plant_detector.py::test_a_test_requirements_lock_change_still_plants"
+      ]
+    },
+    {
       "id": "lab-sandbox-bwrap-pull-request-tier",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-sandbox-bwrap-ci",

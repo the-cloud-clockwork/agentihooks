@@ -426,7 +426,7 @@ For a `merge_group` head, the lab scheduler calls `scripts.ci_lab.interaction.de
 | `overlap` | two entries change a common Python module; a shared file that is no module, such as `feature-map.json`, does not count | each entry's changes |
 | `cache` | more than half the manifest's test units have no cached verdict | the store lookups for the group head |
 
-When no clause holds, the result is the union of `scripts.dep_manifest.invalidated` over the entries. An entry that changes a global input of the manifest, such as `uv.lock`, invalidates every unit, so the set is then the whole manifest. `tests/ci_lab/test_interaction.py` holds the property cases for each clause and its boundary.
+When no clause holds, the result is the union of `scripts.dep_manifest.invalidated` over the entries. An entry that changes a global input of the manifest, such as `.github/test-requirements.lock`, invalidates every unit, so the set is then the whole manifest. `tests/ci_lab/test_interaction.py` holds the property cases for each clause and its boundary.
 
 ### How the scheduler derives each entry's changes
 

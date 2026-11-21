@@ -2310,7 +2310,7 @@ key; the builders are pure and read no file, clock or network.
 | `stats` | `scope` | Source to changed lines, for the sources the test file reaches |
 | `stats` | `measured` | Whether the inputs come from measured coverage |
 | `stats` | `discovery` | Digest of the discovery inputs |
-| `stats` | `sources` | Path to sha256 of each configuration file, `uv.lock` and `.github/test-excludes.txt` among them, and each `scripts/ci_mutation/` file |
+| `stats` | `sources` | Path to sha256 of each configuration file, `.github/test-requirements.lock` and `.github/test-excludes.txt` among them, and each `scripts/ci_mutation/` file |
 | `stats` | `options` | The pytest options, in order |
 | `stats` | `lockfile` | sha256 of the head's `.github/test-requirements.lock`, or null without one |
 | `mutant` | `module` | Path of the module that holds the function |
@@ -2334,13 +2334,14 @@ key; the builders are pure and read no file, clock or network.
   (default JSON separators), so its digest equals `StoredStats.identity` for the same inputs and
   the lab reuses the stats the cache already holds. Its file inputs are sha256 digests of the file
   bytes, the one exception to blob ids, because the stats cache identity hashes them that way.
-  Its lockfile and pyproject inputs are the `uv.lock` and `pyproject.toml` entries of `sources`.
+  Its lockfile and pyproject inputs are the `.github/test-requirements.lock` and `pyproject.toml`
+  entries of `sources`.
   Its runtime is the `lockfile` input, never the interpreter or installed packages of the process
   computing it, so the scheduler keys a stats unit exactly as the worker's stats cache stores it
   for the same head. Every CI install and the baked lab worker venv install from that file, with
   `.github/test-excludes.txt` as their excludes list, which `sources` keys.
-- A change to `uv.lock` or `pyproject.toml` rekeys every unit kind. A grade is keyed by its head,
-  which names both files.
+- A change to `.github/test-requirements.lock` or `pyproject.toml` rekeys every unit kind. A grade
+  is keyed by its head, which names both files.
 - The lab runs pytest itself, so no workflow file under `.github/` changes a test verdict. The
   pytest invocation, which a workflow used to define, is the test input instead. This replaces the
   manifest's `.github/` prefix invalidation, as the lab's test expansion design specifies; the
@@ -2982,9 +2983,9 @@ of `feature-map.json`.
 |---|---|---|
 | A merge group, promotion or backfill head gets no grade and the log reads `cannot expand <head>: no dependency manifest at or before <base>` | No commit on the base's first parent chain has a manifest stored, and none of its newest 10 commits has a fetchable `dep-manifest-packed` artifact from a dev push run of the Tests workflow | `gh run list --workflow test.yml --branch dev --event push --limit 10` lists those runs; an artifact older than 7 days has expired |
 | `cannot expand <head>: 0 is less than the minimum of 1`, or another `jsonschema` message | The grader revision's `delivery.yaml` breaks its schema | [Configure the entry limit](#configure-the-entry-limit); run `delivery.lab` in a checkout of `<base>` |
-| A merge group runs every batch | A clause of `interaction.full_reason` holds, or the entries' changes invalidate every test | Run the [clause check](#check-which-clause-a-merge-group-took). When it prints `None`, either the `cache` clause held, which the script does not evaluate, or an entry changes a global input `dep_manifest.global_input` names, such as `pyproject.toml`, `uv.lock`, `.test_durations` or a `.py` file outside `hooks/`, `scripts/` and `tests/`, or a `tests/` module whose name does not start with `test_`; `git diff --name-only <base> <head>` names the files. The `cache` clause holds when more than half the manifest's tests sit in batches whose key has no stored verdict, as on a new or emptied store |
+| A merge group runs every batch | A clause of `interaction.full_reason` holds, or the entries' changes invalidate every test | Run the [clause check](#check-which-clause-a-merge-group-took). When it prints `None`, either the `cache` clause held, which the script does not evaluate, or an entry changes a global input `dep_manifest.global_input` names, such as `pyproject.toml`, `.github/test-requirements.lock`, `.test_durations` or a `.py` file outside `hooks/`, `scripts/` and `tests/`, or a `tests/` module whose name does not start with `test_`; `git diff --name-only <base> <head>` names the files. The `cache` clause holds when more than half the manifest's tests sit in batches whose key has no stored verdict, as on a new or emptied store |
 | A merge group's `unit` job holds no test units and passes | No entry changes a file a manifest test reads, as in a group of documentation changes, and no entry adds a test module the manifest does not list | `git diff --name-only <base> <head>`; the result is expected |
-| A merge group runs tests no entry touches | A batch runs whole when it holds one invalidated test, and an entry that changes a global input of the manifest, such as `uv.lock`, invalidates every test | The batch's members in the unit, and each entry's changes |
+| A merge group runs tests no entry touches | A batch runs whole when it holds one invalidated test, and an entry that changes a global input of the manifest, such as `.github/test-requirements.lock`, invalidates every test | The batch's members in the unit, and each entry's changes |
 | The log repeats `holding <head>: <error>` | A manifest fetch is still running or GitHub did not answer it | The manifest paragraph above describes both holds |
 
 ### Mutation units
@@ -3287,7 +3288,7 @@ scheduler enqueues a grade's misses with the grade's base and its plan's grader 
 
 | Kind | Trees | Executor inputs |
 |---|---|---|
-| `static` | head, base and grader, read only, shared by the pod's units | the gate the unit names from the grader tree's workflow, input registry and reusable workflows (see [The worker reads the same workflows](#the-worker-reads-the-same-workflows)), the venv of the head's `uv.lock` digest and the lease fields and secrets its steps read (see [What a gate's steps read](#what-a-gates-steps-read)) |
+| `static` | head, base and grader, read only, shared by the pod's units | the gate the unit names from the grader tree's workflow, input registry and reusable workflows (see [The worker reads the same workflows](#the-worker-reads-the-same-workflows)), the venv of the head's `.github/test-requirements.lock` digest and the lease fields and secrets its steps read (see [What a gate's steps read](#what-a-gates-steps-read)) |
 | `test` | head, read only | the batch and its selected manifest records carried through stored grade state, the queued job and lease, the venv of the head's lockfile digest, `CI_LAB_FLAKES` and one pytest worker per slot |
 | `stats` | a private copy of the head with every file under the `[tool.mutmut]` source paths behind its trampolines | the tree as root and `CI_LAB_MUTATION_CACHE` |
 | `mutant` | the same private trampolined copy | `CI_LAB_KILLERS`, `CI_LAB_MUTATION_BUDGET`, `CI_LAB_MUTATION_CAP` and the tests that the stats records of every test module in the tree show reaching the mutant's function, with their seconds |

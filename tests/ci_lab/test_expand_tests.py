@@ -14,7 +14,7 @@ from scripts.ci_lab.units import Unit
 ALPHA = "def first():\n    return 1\n\n\ndef second():\n    return 2\n"
 FILES = {
     "pyproject.toml": "[project]\nname = 'fixture'\n",
-    "uv.lock": "version = 1\n",
+    ".github/test-requirements.lock": "version = 1\n",
     "scripts/alpha.py": ALPHA,
     "scripts/data.json": "{}\n",
     "hooks/beta.py": "def run():\n    return 3\n",
@@ -100,13 +100,15 @@ def test_function_body_change_rekeys_only_its_covering_tests(repository: Path) -
     assert rekeyed == {"tests/test_alpha.py::test_first", "tests/test_beta.py::test_spawn"}
 
 
-@pytest.mark.parametrize("path", ["uv.lock", "pyproject.toml"])
+@pytest.mark.feature("tracked-test-lock-cache-keys")
+@pytest.mark.parametrize("path", [".github/test-requirements.lock", "pyproject.toml"])
 def test_lockfile_change_rekeys_every_test(repository: Path, path: str) -> None:
     assert _plant(repository, path, b"changed\n") == EVERY_TEST
 
 
+@pytest.mark.feature("tracked-test-lock-cache-keys")
 def test_lockfile_removal_rekeys_every_test(repository: Path) -> None:
-    assert _plant(repository, "uv.lock", None) == EVERY_TEST
+    assert _plant(repository, ".github/test-requirements.lock", None) == EVERY_TEST
 
 
 @pytest.mark.parametrize(
@@ -133,7 +135,7 @@ def test_lockfile_removal_rekeys_every_test(repository: Path) -> None:
         ("docs/notes.md", "notes\n", set()),
         ("tool.py", "TOOL = 2\n", EVERY_TEST),
         (".github/helper.py", "HELPER = 1\n", EVERY_TEST),
-        ("uv.lock", "version = 2\n", EVERY_TEST),
+        (".github/test-requirements.lock", "version = 2\n", EVERY_TEST),
     ],
 )
 def test_rekeyed_tests_match_the_manifest_invalidation(
@@ -214,8 +216,8 @@ def test_fingerprints_are_golden() -> None:
         },
     }
     assert expand_tests.fingerprints(manifest, tree) == {
-        "tests/test_alpha.py::test_first": "50453d70f855a2c09ef48a172dee6f277fb53e9d727059b5eb3ff0ebfca4ea01",
-        "tests/test_alpha.py::test_second": "9107747a4089126a323cbfc2a542aa9a339ad2254648c5c96fa651fb32e1a19f",
+        "tests/test_alpha.py::test_first": "ed5f3ba8a40286607a29357d071cc0a880c91abd882b321d70b64b723311c74f",
+        "tests/test_alpha.py::test_second": "f0b37256e2d223dbdeb48a0dc09112641b9ceeebe91963ffcc955a652f3131ee",
     }
 
 
@@ -234,7 +236,13 @@ def test_unlisted_hashes_each_test_module_that_holds_no_manifest_test_with_its_c
         "tests/other/conftest.py": b"",
     }
     tree = {path: text.encode() for path, text in FILES.items()} | added | others
-    outside = ("pyproject.toml", "uv.lock", "docs/guide.md", "tool.py", ".github/workflows/test.yml")
+    outside = (
+        "pyproject.toml",
+        ".github/test-requirements.lock",
+        "docs/guide.md",
+        "tool.py",
+        ".github/workflows/test.yml",
+    )
     assert expand_tests.unlisted_test_hashes(MANIFEST, tree) == {
         path: hashlib.sha256(text).hexdigest() for path, text in tree.items() if path not in outside
     }

@@ -16,7 +16,7 @@ KEY_FIELDS = ("path", "tests")
 DYNAMIC_IMPORTS = ("import_module", "__import__", "spec_from_file_location", "module_from_spec")
 LOCKFILE = ".github/test-requirements.lock"
 EXCLUDES = ".github/test-excludes.txt"
-CONFIGURATION = {"pyproject.toml", "pytest.ini", "setup.cfg", "tox.ini", "uv.lock", ".coveragerc", EXCLUDES}
+CONFIGURATION = {"pyproject.toml", "pytest.ini", "setup.cfg", "tox.ini", LOCKFILE, ".coveragerc", EXCLUDES}
 # CI rewrites the durations from dev each run; they only order and split tests, and records keep their own durations.
 UNKEYED = {".test_durations"}
 TRACKED = ("git", "ls-files", "-z")
