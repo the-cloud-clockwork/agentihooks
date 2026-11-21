@@ -2468,9 +2468,8 @@ these hold:
 - this hub has watched presence for a full 45 seconds with no gap longer than one beat;
 - its swarm's config engine is `events`, and this hub has seen it on `events` for a full 45 seconds.
 
-Only spokes beat presence, and they poll only swarms on the `events` engine, so a swarm switched to `legacy` keeps
-its running executions however long its hives stay silent. After a switch back to `events` its spokes beat again
-before the 45 seconds pass. When the hub cannot read the swarm store, it keeps the swarms it last read and prints
+Every stored swarm loads as `events`, so the 45 second wait holds back judgment only for a swarm this hub has not yet
+read for that long, such as a new one. When the hub cannot read the swarm store, it keeps the swarms it last read and prints
 `hub: hive loss kept its last events swarms; the store read failed (<error>)`.
 
 The hub then publishes `execution.exited` with reason `hive-lost` for each of that hive's executions that are still
@@ -3172,7 +3171,7 @@ The feature map entry `events-outage-hold-hub-agents` lists the regression tests
 With `AGENTIHOOKS_DEPLOYMENT=distributed`, `agentihooks swarm spoke` runs the master lane spoke on the workstation,
 and `agentihooks hive run`, the worker hive image's last start step, runs beside its telemetry loop an eng, ci and
 plan spoke for every swarm on the `events` engine, leaving out the lanes in `HIVE_EXCLUDED`. The workstation spoke
-runs the same lane spokes for every lane. Legacy engine swarms get no lane spoke. Each new spoke logs
+runs the same lane spokes for every lane. Each new spoke logs
 `hive spoke for swarm <slug> lane <lane> takes swarm.<slug>.ready.<lane>`, and a stopped set of lane spokes logs
 why and starts again after 30 seconds. Spokes take work from the bus and bind to the hub's streams instead of
 creating them. Outside distributed mode `agentihooks swarm spoke` refuses, because the workstation then runs the

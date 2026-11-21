@@ -44,14 +44,14 @@ The event driven design has three parts:
 - a NATS server with JetStream;
 - hives that pull offered work (see [Pulling work from the hub](../pillars/hives.md#pulling-work-from-the-hub)).
 
-Each swarm picks its engine with its `engine` setting, `legacy` or `events`; see
+Every swarm runs on the `events` engine, the only value of its `engine` setting; see
 [Event driven engine](../pillars/swarm.md#event-driven-engine).
 
 | Mode | Engine | Bus | Hub |
 |---|---|---|---|
-| `local` | `legacy`; `events` only with a hub on the same bus | `memory` unless the bus settings name NATS | None runs by default. The hub's `readiness` reactor offers nothing on the `memory` bus, so an `events` swarm needs a hub on a NATS bus. |
-| `compose` | `legacy`; `events` only with a hub on the same bus | The stack's `nats` service: `AGENTIHOOKS_BUS=nats` at `nats://nats:4222`, changed only through the stack settings `SWARM_BUS` and `SWARM_BUS_URL`; the `controller` and `hive` services take their mode only from `SWARM_DEPLOYMENT`, and the base stack services their scheduler state backend only from `SWARM_SCHEDULER_STATE_BACKEND` | No hub service. The Compose task smoke runs `agentihooks hub run --once` in the `swarm` service to settle a task end to end. |
-| `distributed` | `events` through the hub; a `legacy` swarm is ticked by the chart's controller, never by the workstation | NATS with JetStream from the `agentihooks-swarm` chart (`nats.enabled`, JetStream on) | The chart's `<release>-hub` Deployment, with `hub.enabled: true` and 2 replicas by default. It runs `agentihooks hub run`, scheduled only on nodes without the `anton.io/capacity-type` label. Each pod turns ready only once it has subscribed to slot requests (see [Hub readiness and rollouts](#hub-readiness-and-rollouts)). |
+| `local` | `events`, which launches agents only with a hub on the same bus | `memory` unless the bus settings name NATS | None runs by default. The hub's `readiness` reactor offers nothing on the `memory` bus, so an `events` swarm needs a hub on a NATS bus. |
+| `compose` | `events`, which launches agents only with a hub on the same bus | The stack's `nats` service: `AGENTIHOOKS_BUS=nats` at `nats://nats:4222`, changed only through the stack settings `SWARM_BUS` and `SWARM_BUS_URL`; the `controller` and `hive` services take their mode only from `SWARM_DEPLOYMENT`, and the base stack services their scheduler state backend only from `SWARM_SCHEDULER_STATE_BACKEND` | No hub service. The Compose task smoke runs `agentihooks hub run --once` in the `swarm` service to settle a task end to end. |
+| `distributed` | `events` through the hub | NATS with JetStream from the `agentihooks-swarm` chart (`nats.enabled`, JetStream on) | The chart's `<release>-hub` Deployment, with `hub.enabled: true` and 2 replicas by default. It runs `agentihooks hub run`, scheduled only on nodes without the `anton.io/capacity-type` label. Each pod turns ready only once it has subscribed to slot requests (see [Hub readiness and rollouts](#hub-readiness-and-rollouts)). |
 
 ### Hub reactors
 
@@ -71,7 +71,7 @@ With a remote ledger, `agentihooks hub run` first issues the replica its own ser
 | `lifecycle` | `swarm.*.execution.exited` | Orders the hive of an agent whose pane died to reopen its own conversation in its seat, up to three times, before it drops the agent (see [Resuming a dead agent the hub started](../pillars/hives.md#resuming-a-dead-agent-the-hub-started)). Refunds a started life on a park, quota handoff or operator preemption, releases the slot and claim, and settles the task. An exit a hive reports after an execution stop carries reason `stopped` and the stop's `stop_reason`, such as `ended` for an agent whose work ended (see [Stopping an agent whose work ended](../pillars/hives.md#stopping-an-agent-whose-work-ended)). |
 | `reconciler` | A five minute poll; it also subscribes to `swarm.*.reconcile.requested`, which nothing publishes yet | Rebuilds missing starts and ends executions that are gone. |
 | `readiness` | A poll; it also subscribes to `swarm.*.readiness.requested`, which nothing publishes yet | Offers the claimable tasks of every `events` swarm to the lane work queues. |
-| `preemption` | A one minute poll; it also subscribes to `swarm.*.preemption.requested`, which nothing publishes yet | Asks the lowest ranked holder of a full lane to hand off when an urgent or focused task of a running `events` swarm still waits one poll later, as the legacy tick does. |
+| `preemption` | A one minute poll; it also subscribes to `swarm.*.preemption.requested`, which nothing publishes yet | Asks the lowest ranked holder of a full lane to hand off when an urgent or focused task of a running `events` swarm still waits one poll later, as the removed legacy tick did. |
 | `pulls` | `swarm.*.task.*` and a poll | Publishes pull request, merge queue and check events, also fed by `agentihooks github-webhook`. |
 | `launch-checks` | A ten second poll; it also subscribes to `swarm.*.launch-checks.requested`, which nothing publishes yet | Judges the launch check of each worker the hub admitted, from the launch time its execution started write records. A worker whose hive reports no launch fails 300 seconds after admission. A failed worker is stopped on its hive, and its task relaunches once. |
 
