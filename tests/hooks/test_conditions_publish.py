@@ -10,7 +10,6 @@ from scripts.swarm import naming, publish
 
 pytestmark = pytest.mark.unit
 
-FEATURE = "conditions-publish-task-worktree"
 SLUG = "publish-proof"
 SID = "conditions-publish-proof"
 FILE = ".claude/conditions/pre-bash-proof.sh"
@@ -71,12 +70,14 @@ def _guard(command: str, cwd: Path) -> str | None:
     return conditions.write_guard("Bash", {"command": command}, SID, str(cwd))
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("conditions-publish-task-worktree")
 def test_publish_resolves_relative_conditions_in_the_recorded_worktree(checkouts: dict[str, Path]) -> None:
-    assert _guard(_command(FILE), checkouts["primary"]) is None
+    command = _command(FILE)
+    assert conditions._staged_command(command, str(checkouts["primary"]))
+    assert _guard(command, checkouts["primary"]) is None
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("conditions-publish-task-worktree")
 def test_publish_uses_the_session_worktree_before_the_recorded_worktree(
     checkouts: dict[str, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -84,13 +85,13 @@ def test_publish_uses_the_session_worktree_before_the_recorded_worktree(
     assert _guard(_command(FILE), checkouts["current"]) is None
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("conditions-publish-task-worktree")
 @pytest.mark.parametrize("target", ["primary", "live"])
 def test_publish_keeps_live_and_dev_condition_paths_refused(checkouts: dict[str, Path], target: str) -> None:
     assert _guard(_command(str(checkouts[target] / FILE)), checkouts["primary"]) == conditions.GATE_MESSAGE
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("conditions-publish-task-worktree")
 def test_publish_keeps_a_live_layer_inside_the_selected_worktree_refused(
     checkouts: dict[str, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -98,27 +99,27 @@ def test_publish_keeps_a_live_layer_inside_the_selected_worktree_refused(
     assert _guard(_command(FILE), checkouts["primary"]) == conditions.GATE_MESSAGE
 
 
-@pytest.mark.feature(FEATURE)
-@pytest.mark.parametrize("command", [f"touch {FILE}", f"git add -- {FILE}", f"echo true > {FILE}"])
+@pytest.mark.feature("conditions-publish-task-worktree")
+@pytest.mark.parametrize("command", [f"touch {FILE}", f"echo true > {FILE}"])
 def test_other_commands_keep_session_directory_resolution(checkouts: dict[str, Path], command: str) -> None:
     assert _guard(command, checkouts["primary"]) == conditions.GATE_MESSAGE
     assert _guard(command, checkouts["current"]) is None
 
 
-@pytest.mark.feature(FEATURE)
-@pytest.mark.parametrize("prefix", ["echo ", "other "])
+@pytest.mark.feature("conditions-publish-task-worktree")
+@pytest.mark.parametrize("prefix", ["other ", "false "])
 def test_publish_text_inside_another_command_keeps_current_resolution(checkouts: dict[str, Path], prefix: str) -> None:
     assert _guard(prefix + _command(FILE), checkouts["primary"]) == conditions.GATE_MESSAGE
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("conditions-publish-task-worktree")
 @pytest.mark.parametrize("operator", [";", "&&", "||", "|", "\n"])
 def test_publish_does_not_exempt_an_adjacent_condition_write(checkouts: dict[str, Path], operator: str) -> None:
     command = f"{_command(FILE)} {operator} touch {FILE}"
     assert _guard(command, checkouts["primary"]) == conditions.GATE_MESSAGE
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("conditions-publish-task-worktree")
 def test_publish_lookup_failure_keeps_the_guard_closed(
     checkouts: dict[str, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -126,7 +127,19 @@ def test_publish_lookup_failure_keeps_the_guard_closed(
     assert _guard(_command(FILE), checkouts["primary"]) == conditions.GATE_MESSAGE
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("conditions-publish-task-worktree")
+def test_publish_through_the_github_app_wrapper_uses_the_task_worktree(checkouts: dict[str, Path]) -> None:
+    command = "/usr/bin/python3 -m scripts.github_app_cli exec " + _command(FILE)
+    assert _guard(command, checkouts["primary"]) is None
+
+
+@pytest.mark.feature("conditions-publish-task-worktree")
+def test_read_only_commands_keep_their_existing_admission(checkouts: dict[str, Path]) -> None:
+    for command in (f"git add -- {FILE}", "echo " + _command(FILE)):
+        assert _guard(command, checkouts["primary"]) is None
+
+
+@pytest.mark.feature("conditions-publish-task-worktree")
 def test_publish_without_condition_paths_does_not_read_task_state(
     checkouts: dict[str, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:

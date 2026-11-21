@@ -619,6 +619,8 @@
         "tests/hooks/test_conditions_publish.py::test_publish_text_inside_another_command_keeps_current_resolution",
         "tests/hooks/test_conditions_publish.py::test_publish_does_not_exempt_an_adjacent_condition_write",
         "tests/hooks/test_conditions_publish.py::test_publish_lookup_failure_keeps_the_guard_closed",
+        "tests/hooks/test_conditions_publish.py::test_publish_through_the_github_app_wrapper_uses_the_task_worktree",
+        "tests/hooks/test_conditions_publish.py::test_read_only_commands_keep_their_existing_admission",
         "tests/hooks/test_conditions_publish.py::test_publish_without_condition_paths_does_not_read_task_state"
       ]
     },
