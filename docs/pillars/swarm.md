@@ -822,7 +822,9 @@ skill. Only a Claude front door takes the claude ai login and Remote Control. A 
 Each task has one routing owner. A task in a phase uses that phase's owning master seat. A task without a phase
 uses the front door: `master@<id>`, or the lowest numbered live master when the lead seat is empty. If a phase's
 owner is absent, routing falls back to the front door. Claiming an inbox item from the master pool does not make
-that master the task's owner. Every master can still read the ledger and inspect tasks owned by another master.
+that master the task's owner; it lets that master answer the item itself ([Answering a pooled claimant
+item](#answering-a-pooled-claimant-item)). Every master can still read the ledger and inspect tasks owned by another
+master.
 
 Ownership is assigned automatically from the phase owners and live seats described in [Several master
 seats](#several-master-seats). There is no separate task owner setting. Changing the master count can rebalance
@@ -835,7 +837,7 @@ allows any live master seat to make covered ledger writes on another owner's ite
 | Operation by a master | Ownership check |
 |---|---|
 | `ledger task set`, a task comment, a task answer or a relay onto a task | The owner passes. Another live master also passes; its cross owner write is recorded. A master that is neither the owner nor a live seat is refused with the owner named. Other command permissions still apply. |
-| `swarm say` to a task claimant, or `msg send` / `msg reply` to that claimant | With at least two live masters, only the task owner passes. This checks the recipient's claimed task regardless of the message text. |
+| `swarm say` to a task claimant, or `msg send` / `msg reply` to that claimant | With at least two live masters, only the task owner passes. This checks the recipient's claimed task regardless of the message text. One exception: a `msg reply` to a claimant item the master pool gave the replying master's seat passes for that master ([Answering a pooled claimant item](#answering-a-pooled-claimant-item)). |
 | Ledger reads | Open to every master. |
 
 Accepted cross owner ledger writes keep routing with the owner. The ledger retains the latest 20 records per item
@@ -843,8 +845,9 @@ in `_meta.master_cross_writes`, each with `owner`, `seat`, `by` and `rev`. Decis
 channel identify the writer and end with `for <owner>` when it differs from the owner.
 
 For a standalone task, a backend master can therefore read it and make a covered ledger write while live, but
-cannot send instructions directly to its claimant. For a task in that backend master's own phase, both its ledger
-rulings and claimant messages pass. Use the masters channel to ask the owner to deliver instructions:
+cannot send new instructions directly to its claimant. It can answer a question that claimant sent to the master
+seat when the pool gave that item to the backend master. For a task in that backend master's own phase, both its
+ledger rulings and claimant messages pass. Use the masters channel to ask the owner to deliver instructions:
 
 ```bash
 # Run from a master session; read phase ownership and coordinate with the named owner.
@@ -866,7 +869,54 @@ tasks/t42 belongs to master@my-swarm, so master-2@my-swarm cannot message its cl
 The message check skips recipients with no claimed task and senders outside the master lane. With fewer than two
 live masters it returns without reading the ledger. A live master of a mutually linked Doctor swarm may also
 message a live watched master seat for coordination; that exception does not permit instructions to an engineer
-claiming another master's task.
+claiming another master's task. `msg reply` skips the check for a claimant item the pool gave the replying master,
+as the next section describes.
+
+##### Answering a pooled claimant item
+
+While two or more masters are live, a claimant's question to `master@<id>` enters the [master inbox
+pool](#master-inbox-pool), and the pool can give it to a backend master that does not own the claimant's task. That
+master answers the item with `msg reply`, and the fence lets the answer through. Task ownership does not change, and
+new messages to the claimant stay owner only.
+
+`msg reply <id>` skips the task owner check only while both conditions hold:
+
+- The item still sits at the seat that claimed it from the pool. When the pool hands an item over, the inbox records
+  the claiming seat as the item's pool holder and writes `claimed from the master pool by <seat>` on its history. The
+  check passes while that holder is the item's current address.
+- The replier acts for that seat: it is the seat's address or the seat's registered occupant. A successor that took
+  the seat in a handoff answers an item its predecessor claimed; the predecessor no longer can.
+
+The reply still has to pass the inbox's own checks: the claimant's address must be known to the inbox, and the
+replier must act for the item's address. The answer goes to the claimant with the item as its reference, and the
+item closes `done`.
+
+| Case | Result |
+|---|---|
+| `msg reply` to a claimant item the pool gave this master's seat | Passes. The answer reaches the claimant and closes the item. |
+| `msg reply` to a claimant item the pool gave another master | Refused by the fence with the owner named, as for any nonowner message. |
+| `msg reply` to a claimant item sent straight to a numbered seat, such as `msg send master-2@<id>` | Fenced: the item never passed through the pool, so only the task owner answers it. |
+| `msg reply` after the item went back to the pool, was redelivered to another master or was redirected | Fenced. The move clears the pool holder. A master that claims the item from the pool again can answer it. |
+| `msg send` to the claimant just answered, or to any other master's task claimant | Refused by the fence, even right after a pooled reply. An answer grants no later message. |
+| `swarm say` to a claimant | Refused by the fence, as before. |
+| A replay of the same reply, as the outbox makes for a reply queued while Redis was unreachable | Refused as a duplicate, `message <id> was already answered with message <answer id>`, and the claimant gets no second answer. It is not a fence refusal and does not count in `master_write_refusals_total`. |
+
+Items from `operator` never enter the pool, and only the front door answers them: another master's `msg reply` to
+an operator item sends the answer and the item to the front door.
+
+```bash
+# In the master-2@my-swarm session, which took the item from the pool.
+# The JSON shows "address": "master-2@my-swarm" and a history entry
+# "claimed from the master pool by master-2@my-swarm".
+agentihooks msg read <item id>
+
+# Answer the claimant directly; the task owner does not have to relay it.
+agentihooks msg reply <item id> "Yes, cut over once the validation run is green."
+# {"id": "<answer id>", "to": "<claimant address>", "closed": "<item id>"}
+
+# A further instruction is a new message and stays with the task owner.
+agentihooks swarm my-swarm masters-channel say "Answered the cutover question for t42; please send its engineer the rollback plan."
+```
 
 ##### Follow ups on a task
 
@@ -935,9 +985,10 @@ with `ledger` or `inbox` as the target and the exception as its reason. A refusa
 | Symptom | Action |
 |---|---|
 | A backend master cannot message a standalone task's engineer. | Ask the front door owner named in the refusal through `masters-channel say`. |
-| A master took the inbox item but its message is refused. | Pool delivery and task ownership are separate. Read the current phase owners and ask the task owner to deliver the instruction. |
-| Another live master successfully comments on an owned task. | This is the later live master write policy. The ledger records cross owner writes; claimant messages remain owner checked. |
-| A message passes despite an unexpected owner. | Check the sender's fence setting, the live master count, the recipient's claimed task and `fail-open` gate log rows. A linked Doctor master message to a watched master is also allowed. |
+| A master's `msg reply` to a claimant item it took from the pool is refused with `cannot message its claimant`. | The item no longer sits at the replier's seat. Run `msg read <id>`: its `address` must be the replier's seat and its history must end its pool moves with `claimed from the master pool by <that seat>`. A return to the pool, a redelivery to another master or a redirect clears the pool holder; ask the task owner named in the refusal. |
+| A master answered a pooled claimant item, but its next `msg send` to that claimant is refused. | Pool delivery and task ownership are separate: the pooled reply covers that answer only. Read the current phase owners and ask the task owner to deliver the instruction. |
+| Another live master successfully comments on an owned task. | This is the later live master write policy. The ledger records cross owner writes; claimant messages remain owner checked, apart from a master's reply to a claimant item the pool gave it. |
+| A message passes despite an unexpected owner. | Check the sender's fence setting, the live master count, the recipient's claimed task and `fail-open` gate log rows. A linked Doctor master message to a watched master is also allowed, and so is a `msg reply` to a claimant item the pool gave the sender. |
 
 #### Follow ups an agent adds on its task
 
@@ -1112,6 +1163,12 @@ master other than the front door seat is refused with `message <id> belongs to m
 door seat, `msg read` and every state change other than a close are refused with `message <id> waits in the master
 pool for the next master`. Closing it (`msg close <id> cancel`) takes it out of the pool. An item redirected to another address
 leaves the pool and stays where it was sent.
+
+The seat recorded as an item's holder may answer it: a `msg reply` from the master acting for that seat, or from
+its successor after a handoff, passes the task owner fence for a claimant's item, so the backend master that took a
+claimant's question answers it without a relay ([Answering a pooled claimant
+item](#answering-a-pooled-claimant-item)). A return to the pool or a redirect clears the holder, and the fence
+applies again until a master claims the item from the pool once more.
 
 Operator facing items never enter the pool. Page chat, every operator write on the ledger page (comments, replies,
 answers, notes, checks) and every relayed decision are sent as `operator` and reach the front door master: the lead,
