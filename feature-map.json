@@ -415,6 +415,17 @@
       ]
     },
     {
+      "id": "lab-scheduler-job-reads",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-scheduler-pipelined-slot-reads",
+      "behaviour": "A scheduler pass reads open slot jobs in ordered nontransactional Redis pipelines of at most 500 hashes within each grade, preserving collected, held, empty, missing and leased slot behavior and the exact Job values returned by serial reads.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick and scripts.ci_lab.queue.Queue over fakeredis, observing slot outcomes and Redis pipeline commands",
+      "tests": [
+        "tests/ci_lab/test_scheduler_job_reads.py::test_a_pass_preserves_collected_missing_empty_and_started_slots",
+        "tests/ci_lab/test_scheduler_job_reads.py::test_a_pass_reads_only_open_jobs_in_nontransactional_batches_of_at_most_500"
+      ]
+    },
+    {
       "id": "lab-scheduler-load-reads",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-scheduler-load-slots-only",
