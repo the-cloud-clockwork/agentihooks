@@ -1,6 +1,23 @@
 {
   "features": [
     {
+      "id": "scheduler-credential-refusal-stop",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-scheduler-stops-on-revoked-credential",
+      "behaviour": "A scheduler runner whose state store refuses its credential, a refused login or an ACL denial, prints one named stderr line and exits with code 4 on that pass, in any swarm; its supervisor starts no new runner and exits 4 itself, and the scheduler user unit does not restart a supervisor that exits 4. A timeout, a dropped connection or any other store error still gets a new pass.",
+      "seam": "scripts.scheduler.service.run, main and supervise, with scripts.events.state.refused and scripts.swarm.timer.units",
+      "rules": ["scheduler-credential-refusal-retried"],
+      "tests": [
+        "tests/scheduler/test_service.py::test_a_refused_credential_stops_the_runner_on_its_first_pass",
+        "tests/scheduler/test_service.py::test_a_store_that_times_out_drops_or_answers_an_error_still_gets_a_new_pass",
+        "tests/scheduler/test_service.py::test_only_a_refused_login_or_acl_counts_as_a_refused_credential",
+        "tests/scheduler/test_service.py::test_the_runner_entrypoint_exits_with_the_refused_code_when_its_credential_is_refused",
+        "tests/scheduler/test_service.py::test_a_supervisor_ends_without_a_new_runner_once_its_runner_was_refused",
+        "tests/scheduler/test_service.py::test_the_supervisor_entrypoint_exits_with_the_code_its_supervisor_stopped_on",
+        "tests/swarm/test_timer_install.py::test_the_scheduler_is_its_own_restarting_user_service_apart_from_the_units_that_start_it"
+      ]
+    },
+    {
       "id": "credential-guard-refuses-brace-environ-leaves",
       "origin": "regression",
       "ordered_at": "2026-11-20",
